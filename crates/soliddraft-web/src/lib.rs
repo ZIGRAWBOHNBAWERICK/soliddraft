@@ -46,9 +46,13 @@ impl log::Log for FeedbackLogger {
     fn flush(&self) {}
 }
 
-/// Starts the app when the page loads the module.
+/// Starts the app when the page loads the module. The kernel worker loads the same
+/// module and has no window; it only answers `kernel_worker_run`.
 #[wasm_bindgen(start)]
 pub fn start() {
+    if web_sys::window().is_none() {
+        return;
+    }
     let _ = log::set_logger(&FeedbackLogger);
     log::set_max_level(log::LevelFilter::Info);
     std::panic::set_hook(Box::new(|info| {
@@ -81,10 +85,19 @@ pub fn start() {
             show_status(&format!("SolidDraft could not start its command journal: {error}"));
             return;
         }
+        let mut options = eframe::WebOptions::default();
+        if software_webgpu().await
+            && let eframe::egui_wgpu::WgpuSetup::CreateNew(setup) = &mut options.wgpu_options.wgpu_setup
+        {
+            // A software WebGPU adapter refuses buffers the viewport maps at creation, and
+            // the app stops. The same machine draws through WebGL.
+            log::info!("WebGPU runs in software here; drawing with WebGL");
+            setup.instance_descriptor.backends = eframe::wgpu::Backends::GL;
+        }
         let started = eframe::WebRunner::new()
             .start(
                 canvas,
-                eframe::WebOptions::default(),
+                options,
                 Box::new(move |cc| {
                     let doc = if demo { soliddraft_app::demo_document() } else { soliddraft_app::new_document() };
                     let automation = Automation { connect_assistant: true, preset, theme, ..Default::default() };
@@ -103,6 +116,29 @@ pub fn start() {
             Err(e) => show_status(&format!("SolidDraft could not start: {e:?}")),
         }
     });
+}
+
+/// True when the browser's WebGPU adapter is a software one, such as SwiftShader on a
+/// machine without a usable GPU.
+async fn software_webgpu() -> bool {
+    let get = |object: &JsValue, key: &str| js_sys::Reflect::get(object, &key.into()).unwrap_or(JsValue::UNDEFINED);
+    let gpu = get(&js_sys::global().unchecked_into::<web_sys::Window>().navigator().into(), "gpu");
+    let Ok(request) = get(&gpu, "requestAdapter").dyn_into::<js_sys::Function>() else {
+        return false;
+    };
+    let Ok(promise) = request.call0(&gpu).and_then(|promise| promise.dyn_into::<js_sys::Promise>()) else {
+        return false;
+    };
+    let Ok(adapter) = wasm_bindgen_futures::JsFuture::from(promise).await else {
+        return false;
+    };
+    if adapter.is_null() || adapter.is_undefined() {
+        return false;
+    }
+    let info = get(&adapter, "info");
+    get(&adapter, "isFallbackAdapter").is_truthy()
+        || get(&info, "isFallbackAdapter").is_truthy()
+        || get(&info, "architecture").as_string().is_some_and(|architecture| architecture == "swiftshader")
 }
 
 fn status() -> Option<web_sys::Element> {

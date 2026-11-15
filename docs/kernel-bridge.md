@@ -1,6 +1,6 @@
 # The Catallax application entry
 
-SolidDraft runs only on Catallax. `soliddraft-kernel-catallax` implements `soliddraft-kernel-api::Kernel` through Catallax's `catallax-app` entry. The application, CLI and tests use that implementation. Desktop and browser builds compile it in process with Rust. There is no C++ bridge, separate WebAssembly kernel or server fallback. Desktop edit construction and exact proof run on separate application workers; the browser currently runs both on its interface thread.
+SolidDraft runs only on Catallax. `soliddraft-kernel-catallax` implements `soliddraft-kernel-api::Kernel` through Catallax's `catallax-app` entry. The application, CLI and tests use that implementation. Desktop and browser builds compile it in process with Rust. There is no C++ bridge, separate WebAssembly kernel or server fallback. Desktop edit construction and exact proof run on separate application workers; the browser currently runs both on its interface thread. The browser's [kernel worker](web.md) runs Mass props on a second instance of the module.
 
 The adapter pins its Catallax revision in `Cargo.toml` and `CATALLAX_REVISION`. No Catallax source is copied here. See [the remaining gaps](needs-catallax.md) and [the roadmap](../ROADMAP.md).
 
@@ -10,7 +10,7 @@ Profiles are deferred definitions rather than sheet geometry. Recipe replay repo
 
 Extrudes, cuts, booleans and rational-frame revolves use Catallax stage 1. Holes, patterns, mirrors, fillets and chamfers between planes and cylinders, and extrusions up to the next boundary or a planar face use Catallax stage 3 operations; drafts of planar faces and pull-parallel cylinders use the stage 4 operation. `soliddraft-recipe/1` cannot spell these, so the adapter stores them as native Catallax steps and names their faces and edges by Catallax origins. A refused construction remains an error with Catallax's stable refusal code. Shell accepts convex planar trays with separated through bores. Closed oblique plane/cylinder fillets support measurement and STEP export for whole bands. Unfinished ribbon commands are disabled and show Coming soon. Existing saved features rebuild with an error and pass the preceding body through unchanged.
 
-Native Mass props requests run on a worker with a 200 million work allowance. An explicit mass-request allowance governs the query instead of the diagnostic default. Measurement keeps `Accuracy::default()`. At Catallax `f335a6c`, the radius-5 rim cut by `z = 8 - 0.75x` gave these local dev-profile measurements on a shared machine:
+Mass props requests run off the interface thread with a 200 million work allowance: on a desktop worker thread, and in the browser's kernel worker, which rebuilds the part from its saved bytes first. An explicit mass-request allowance governs the query instead of the diagnostic default. Measurement keeps `Accuracy::default()`. At Catallax `f335a6c`, the radius-5 rim cut by `z = 8 - 0.75x` gave these local dev-profile measurements on a shared machine:
 
 | Fillet radius, mm | Work units | Query time, seconds |
 |---|---:|---:|

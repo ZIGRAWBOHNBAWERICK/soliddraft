@@ -514,7 +514,7 @@ class BrowserStartup(unittest.TestCase):
                 result = subprocess.run(['bash', '-e', '-c', script], env=env, capture_output=True, text=True)
                 self.assertEqual(result.returncode, expected, result.stderr)
                 self.assertEqual((root / 'calls').read_text().splitlines(), calls)
-        for name in ('browser-journal.js', 'browser-recovery-storage.js'):
+        for name in ('browser-journal.js', 'browser-kernel-worker.js', 'browser-recovery-storage.js'):
             self.assertEqual(text.count(f'chrome-devtools-axi run < ci/{name}'), 1)
 
 

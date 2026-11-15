@@ -2,7 +2,11 @@
 
 The application and Catallax compile into one `wasm32-unknown-unknown` module. The browser runs the same egui interface and wgpu viewport as the desktop app. There is no second kernel module or server kernel fallback. Catallax's current operation limits apply on both platforms.
 
+The page has one thread, so long kernel work moves to a kernel worker: a Web Worker that runs the same module, already compiled, with its own memory and its own Catallax kernel. A job sends the part's saved bytes; the worker rebuilds them, reusing its builds from the previous job, and answers with plain data. Mass properties run there. The interface accepts an answer only for the document revision that asked, and a newer job of the same kind replaces one that has not started. A worker that fails answers with its reason; the part on screen stays as it was and the next job starts a new worker. Other kernel work still runs on the interface thread.
+
 A small Rust server serves the web build and relays assistant requests. The assistant's API key stays on the server. Tools execute in the browser against the part there. Files open by upload and save by download; the server stores no parts.
+
+The viewport draws through WebGPU where the browser offers a hardware adapter. A software WebGPU adapter, such as SwiftShader on a machine without a usable GPU, refuses buffers the viewport maps at creation, so the page draws through WebGL there.
 
 Preferences are kept in the browser, in the site's localStorage under `soliddraft-settings`, as the same JSON the desktop app writes to `settings.json`. That storage belongs to one browser profile: the server has no route that receives settings, so two visitors, two browsers or a private window never see each other's choices. When the browser blocks or fills site storage, a change still applies until the page is reloaded or closed, and Preferences says so.
 
@@ -18,6 +22,7 @@ Feedback is saved privately in our Cloudflare inbox and GitHub issue tracker; op
 | `soliddraft-web` | The WebAssembly entry point and `index.html`, built with trunk. `?demo` opens the sample part instead of the start page. |
 | `soliddraft-app/src/web.rs` | Assistant relay client, upload and download. |
 | `soliddraft-app/src/documents_browser.rs` | Recovery copies and the recent list in the browser's IndexedDB. |
+| `soliddraft-app/src/kernel_worker.rs` | The kernel worker: its jobs, the page's client and the worker's half. |
 | `soliddraft-assistant/src/relay.rs` | Provider-neutral stream events, followed by the response or error. |
 | `soliddraft-server` | Static files and the assistant relay. |
 | `deploy/web/` | Docker image, compose configuration and release deployment timer. |

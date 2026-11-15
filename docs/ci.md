@@ -58,6 +58,29 @@ origin in an isolated `chrome-devtools-axi` session, then run
 session's origin storage when seeding each case; never use a profile with user
 documents.
 
+`ci/browser-kernel-worker.js` runs the same way, in its own browser session, on the
+sample part opened at `/?demo`. Its Chrome offers SwiftShader's WebGPU, as a browser
+with no usable GPU does. That adapter refuses a buffer the viewport maps at creation, so
+the page draws through WebGL when its WebGPU adapter is a software one; before that,
+the check's Extrude step stopped the page.
+Each measurement asks for mass properties from the Inspect strip and ends when the
+Details panel draws the kernel worker's volume, read through the module's read-only
+`shown_details` export. No task on the page's thread may run 250 ms or more meanwhile.
+The plate must draw 108000 mm³. The check then makes the worker fail by starting it again
+on a module that is not the application, checks that the page keeps running, and requires
+a new worker to measure the plate and flange. It asks for the whole part and replaces it
+with a new part before the answer arrives. Two new parts then each get a 60 x 40 x 20 mm
+block, whose kernels give them the same body id: the first block draws 48000 mm³ once
+measured, and neither block shows a volume before its own measurement. Its clicks go to
+fixed points of a 1400 x 813 page, which the web job sets before opening it; a narrower
+page folds the menu bar into one Menu button, so the check refuses any other size.
+Software rendering can make one frame take longer than any fixed pause, so the check
+waits on what the page drew. `shown_details` is empty once a frame draws no Details
+panel: the check clicks a feature tree row only after the options panel, which covers
+the rows, has closed, and confirms the row by the feature name Details draws. Each
+kernel job the page sends, and the worker's receipt, start and reply, go to a trace the
+check sets up; a missing answer prints it.
+
 `ci/browser-preferences.mjs` runs the same application as two visitors, each in a
 browser context with its own storage. It starts Chrome itself and sends keys and clicks
 through the DevTools protocol, because the canvas takes only trusted input. Visitor A
@@ -121,6 +144,7 @@ The running selector and its map are the candidate policy; `--head` names the tr
 | Path | Jobs beyond lint | Reader |
 |---|---|---|
 | `ci/browser-journal.js` | `web` | Browser journal check in the web job |
+| `ci/browser-kernel-worker.js` | `web` | Browser kernel worker check in the web job |
 | `ci/browser-preferences.mjs` | `web` | Browser preferences check in the web job |
 | `ci/check-consumers.json` | all | The selector; it controls its own obligations |
 | `ci/check-gate.py` | all | Merge gate, and the gate tests in lint; it controls mandatory checks |

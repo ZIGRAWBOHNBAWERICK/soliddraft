@@ -134,6 +134,13 @@ paths = ["crates/soliddraft-app/src/journal_browser.rs"]
 module = ["journal_browser"]
 
 [[areas]]
+name = "app.kernel_worker"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/kernel_worker.rs"]
+module = ["kernel_worker"]
+
+[[areas]]
 name = "app.lib"
 owner = "core"
 crate = "soliddraft-app"

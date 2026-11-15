@@ -1010,6 +1010,8 @@ fn selection(ui: &mut egui::Ui, state: &mut AppState) {
         return;
     };
     let Some(info) = state.doc.describe(sel) else { return };
+    #[cfg(target_arch = "wasm32")]
+    crate::web::show_details(&info);
     let feature = info.feature.and_then(|id| state.doc.feature(id)).cloned();
     let feature = feature.as_ref();
     let icon = match (sel, feature.map(|f| &f.kind)) {
@@ -1255,7 +1257,7 @@ fn material_panel(ui: &mut egui::Ui, state: &mut AppState) {
             }
             if state.doc.proof_state().current_proved_display()
                 && let Some(body) = state.doc.display_body()
-                && let Some(properties) = state.doc.kernel().cached_mass_properties(body)
+                && let Some(properties) = crate::measure::mass::cached(&state.doc, body)
             {
                 ui.label(format!("Volume: {:.3} mm³", properties.volume));
                 match soliddraft_materials::mass::of_body(&properties, state.doc.material()) {

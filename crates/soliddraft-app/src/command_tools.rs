@@ -2301,7 +2301,7 @@ fn cached_body_mass(doc: &Document) -> Option<soliddraft_kernel_api::MassPropert
     if !doc.proof_state().current_proved_model() {
         return None;
     }
-    doc.kernel().cached_mass_properties(doc.model().body()?)
+    crate::measure::mass::cached(doc, doc.model().body()?)
 }
 
 /// An independent proposal copy sharing the part's immutable bodies and meshes. It makes

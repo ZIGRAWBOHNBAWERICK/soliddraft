@@ -68,7 +68,8 @@ a new worker to measure the plate and flange. It asks for the whole part and rep
 with a new part before the answer arrives. Two new parts then each get a 60 x 40 x 20 mm
 block, whose kernels give them the same body id: the first block draws 48000 mm³ once
 measured, and neither block shows a volume before its own measurement. Its clicks go to
-fixed points of a 1400 x 813 page.
+fixed points of a 1400 x 813 page, which the web job sets before opening it; a narrower
+page folds the menu bar into one Menu button, so the check refuses any other size.
 
 `ci/browser-preferences.mjs` runs the same application as two visitors, each in a
 browser context with its own storage. It starts Chrome itself and sends keys and clicks

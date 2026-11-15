@@ -13,14 +13,18 @@
 //
 // The clicks go to fixed points of a 1400 x 813 page: the strip's Part and Inspect
 // buttons, the feature tree's rows, Mass props, Details, Close options, File > New part
-// and Extrude's Rectangle button. New part is clicked, not typed: Chrome on Linux keeps
-// Ctrl+N for a new window.
+// and Extrude's Rectangle button. A narrower page folds the menu bar into one Menu
+// button, so the check refuses any other size. New part is clicked, not typed: Chrome
+// on Linux keeps Ctrl+N for a new window. Each step waits for the open part's feature
+// count, which the page reports in its own feedback events, rather than a fixed time.
 function check(value, message) { if (!value) throw new Error(message); }
 const PART = [19, 132], INSPECT = [19, 241], MASS = [220, 112], DETAILS = [317, 52], CLOSE = [347, 92];
 const RECTANGLE = [630, 52], FILE = [122, 15], NEW_PART = [138, 42];
 const ROW = { first: 203, second: 229, third: 255 };
 
 check(await page.eval(() => location.search === '?demo'), 'Open the application at /?demo first');
+const size = await page.eval(() => [innerWidth, innerHeight]);
+check(size[0] === 1400 && size[1] === 813, `The page is ${size.join(' x ')}; set a 1400 x 813 viewport first`);
 await page.wait('#status.hidden', 60000);
 await page.eval(() => {
   window.sdClick = (x, y) => {
@@ -46,6 +50,12 @@ await page.eval(() => {
       });
     }
   };
+  // The open document's feature count, from the page's own feedback events.
+  window.featureCount = null;
+  document.addEventListener('soliddraft-feedback', event => {
+    const detail = JSON.parse(event.detail);
+    if (detail.type === 'document') window.featureCount = detail.count;
+  });
   window.longTasks = [];
   new PerformanceObserver(list => {
     for (const entry of list.getEntries()) window.longTasks.push(Math.round(entry.duration));
@@ -61,6 +71,15 @@ async function answered(count, what) {
     await page.wait(100);
   }
   throw new Error(`No kernel worker answer for ${what}`);
+}
+async function features(count, what) {
+  let now = null;
+  for (let i = 0; i < 300; i++) {
+    now = await page.eval(() => window.featureCount);
+    if (now === count) return;
+    await page.wait(100);
+  }
+  throw new Error(`${what}: the open part has ${now} features, not ${count}`);
 }
 async function details() {
   const shown = await page.eval(() => window.wasmBindings.shown_details());
@@ -124,6 +143,7 @@ await click(FILE);
 await page.wait(300);
 await click(NEW_PART);
 const replaced = await page.eval(() => performance.now());
+await features(0, 'New part');
 const late = await answered(4, 'the replaced part');
 check(late.at > replaced, 'The whole part\'s answer came before the new part replaced it');
 
@@ -132,11 +152,18 @@ check(late.at > replaced, 'The whole part\'s answer came before the new part rep
 async function block(what) {
   await click(PART);
   await page.wait(500);
+  // E opens Extrude while the pointer is over the viewport, as browser-documents.mjs does.
+  await page.eval(() => {
+    const at = { clientX: 900, clientY: 450, bubbles: true, pointerId: 1, pointerType: 'mouse', isPrimary: true };
+    document.getElementById('soliddraft').dispatchEvent(new PointerEvent('pointermove', at));
+    return true;
+  });
   await page.press('e');
   await page.wait(1500);
   await click(RECTANGLE);
   await page.press('Enter');
-  await page.wait(3000);
+  await features(1, `${what}: Extrude`);
+  await page.wait(1000);
   await click(INSPECT);
   await page.wait(500);
   await click([380, ROW.first]);
@@ -155,6 +182,7 @@ check(first === 48000, `The 60 x 40 x 20 mm block measured ${first} mm³`);
 await click(FILE);
 await page.wait(300);
 await click(NEW_PART);
+await features(0, 'New part');
 await page.wait(1500);
 await block('A second new part with the same body ids');
 console.log('Kernel worker check passed');

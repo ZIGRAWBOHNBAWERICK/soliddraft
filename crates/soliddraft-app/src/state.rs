@@ -35,6 +35,8 @@ pub enum AppAction {
     SketchValues(crate::sketch_values::Action),
     Undo,
     Redo,
+    /// Returns a part still building to its last accepted revision.
+    CancelBuild,
     /// Starts a sketch on the selected plane or face, or asks for one.
     StartSketch,
     StartSketchOn(SketchPlane),

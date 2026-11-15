@@ -239,6 +239,16 @@ impl SolidDraftApp {
                 crate::assembly::apply(&mut self.state, &mut self.dock, crate::assembly::AssemblyAction::FromPart);
             }
             AppAction::Assembly(a) => crate::assembly::apply(&mut self.state, &mut self.dock, a),
+            AppAction::CancelBuild => {
+                if let Some(drag) = self.state.drag_preview.take() {
+                    drag.cancel(&mut self.state.doc);
+                }
+                match self.state.doc.cancel_build() {
+                    Ok(()) => self.state.note("Cancelled the change still building", NoteKind::Info),
+                    Err(e) => self.state.note(e, NoteKind::Error),
+                }
+                self.sync_sketch_session();
+            }
             AppAction::Undo => {
                 if let Some(s) = self.state.sketch.as_mut()
                     && let Some(drag) = s.trim_drag.as_mut()

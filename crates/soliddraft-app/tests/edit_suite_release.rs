@@ -492,6 +492,58 @@ fn start_page_actions_fit_at_1280_and_in_a_narrow_window() {
     }
 }
 
+/// Cancel returns a part still building to its last accepted revision: an edit still
+/// building is undone, and an undo still building is redone. The browser offers it while
+/// its kernel worker builds.
+#[test]
+fn cancel_returns_a_part_still_building_to_its_last_accepted_revision() {
+    let kernel = Arc::new(gated::Gated::default());
+    let mut doc = Document::new("Cancel a build", kernel.clone());
+    let id = doc
+        .apply(Command::AddExtrude {
+            params: ExtrudeParams { depth: 25.0, ..Default::default() },
+            via_assistant: false,
+        })
+        .unwrap()
+        .unwrap();
+    let accepted = doc.model().geometry_hash();
+    let depth = doc.undo_depth();
+    let edit = |doc: &mut Document, value: f64| {
+        doc.apply_interactive(Command::EditExtrude {
+            id,
+            params: ExtrudeParams { depth: value, ..Default::default() },
+        })
+        .unwrap();
+    };
+
+    let release = Release(kernel.clone());
+    kernel.rules.lock().unwrap().hold = Some(30.0);
+    edit(&mut doc, 30.0);
+    assert!(doc.proof_pending());
+    doc.cancel_build().unwrap();
+    drop(release);
+    settle(&mut doc);
+    assert_eq!(doc.model().geometry_hash(), accepted, "the edit still building is undone");
+    assert_eq!(doc.undo_depth(), depth);
+    assert!(doc.proof_state().current_proved_model());
+
+    edit(&mut doc, 30.0);
+    settle(&mut doc);
+    let edited = doc.model().geometry_hash();
+    let release = Release(kernel.clone());
+    kernel.rules.lock().unwrap().hold = Some(25.0);
+    doc.undo_interactive().unwrap();
+    assert!(doc.proof_pending());
+    doc.cancel_build().unwrap();
+    drop(release);
+    settle(&mut doc);
+    assert_eq!(doc.model().geometry_hash(), edited, "the undo still building is redone");
+    assert_eq!(doc.undo_depth(), depth + 1);
+    assert!(doc.proof_state().current_proved_model());
+    doc.cancel_build().unwrap();
+    assert_eq!(doc.model().geometry_hash(), edited, "nothing building, nothing cancelled");
+}
+
 struct Release(Arc<gated::Gated>);
 impl Drop for Release {
     fn drop(&mut self) {

@@ -1546,6 +1546,8 @@ pub struct PreviewArrow {
 struct ProvedRevision {
     revision: u64,
     request: Option<u64>,
+    /// The undo depth this revision was accepted at, for [`Document::cancel_build`].
+    depth: usize,
     model: Arc<model::Document>,
 }
 
@@ -1730,6 +1732,7 @@ impl Document {
             last_proved: self.last_proved.as_ref().map(|proved| ProvedRevision {
                 revision: proved.revision,
                 request: proved.request,
+                depth: proved.depth,
                 model: proved.model.clone(),
             }),
             worker: None,
@@ -1950,13 +1953,33 @@ impl Document {
         {
             proved.revision = self.revision;
             proved.request = self.edit_request;
+            proved.depth = self.model.undo_depth();
             return;
         }
         self.last_proved = Some(ProvedRevision {
             revision: self.revision,
             request: self.edit_request,
+            depth: self.model.undo_depth(),
             model: Arc::new(self.model.fork()),
         });
+    }
+
+    /// Returns a part still building to its last accepted revision, undoing an edit or
+    /// redo still building, or redoing an undo still building. Does nothing when no
+    /// build is owed.
+    pub fn cancel_build(&mut self) -> Result<(), String> {
+        if !self.proof_pending() {
+            return Ok(());
+        }
+        let target =
+            self.last_proved.as_ref().map(|proved| proved.depth).ok_or("There is no earlier part to return to")?;
+        while self.model.undo_depth() > target {
+            self.undo_interactive()?;
+        }
+        while self.model.undo_depth() < target {
+            self.redo_interactive()?;
+        }
+        Ok(())
     }
 
     /// Definitions are saved immediately, but only a current exact result may export.

@@ -890,11 +890,11 @@ fn converted_recipe(input: &Value, op: OpKind) -> KernelResult<catallax_app::sol
     Ok(converted)
 }
 
-/// Builds a legacy recipe, returning the body and the legacy step names' Catallax step ids.
 /// A build: its exact result, the step ids of the caller's tags, its recipe key for a
 /// hand-over, and the topology another kernel computed when the build was offered.
 type BuildAnswer = (AppBody, BTreeMap<String, catallax_recipe::StepId>, String, Option<Arc<handover::HandedTopology>>);
 
+/// Builds a legacy recipe, returning the body and the legacy step names' Catallax step ids.
 fn build(
     input: &Value,
     op: OpKind,
@@ -912,8 +912,9 @@ fn build(
     // An offer whose bytes cannot be read is passed over; the build is evaluated instead.
     if let Some(offer) = offered.get(&key)
         && let Ok(built) = offer.built()
+        && let Some(app) = AppBody::adopted(built, &converted.recipe)
     {
-        return Ok((AppBody::adopted(built), converted.steps, key, offer.topology.clone()));
+        return Ok((app, converted.steps, key, offer.topology.clone()));
     }
     // Earlier bodies remain immutable for undo, branches and concurrent queries.
     // Clone only the selected checkpoint, after releasing the body arena lock.

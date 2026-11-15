@@ -195,6 +195,72 @@ pub(crate) fn write(built: &Built) -> KernelResult<Vec<u8>> {
         .map_err(|refusal| KernelError::InvalidInput(format!("{}: {}", refusal.code, refusal.detail)))
 }
 
+/// `names` with every step id in `renames` replaced, including the ids Catallax derives
+/// from a step's id, such as a pattern copy's `<step>_copy1`. `None` if a renamed name
+/// does not read back.
+pub(crate) fn renamed_names(names: Names, renames: &BTreeMap<String, String>) -> Option<Names> {
+    if renames.is_empty() {
+        return Some(names);
+    }
+    fn renamed<T: Serialize + serde::de::DeserializeOwned>(value: &T, renames: &BTreeMap<String, String>) -> Option<T> {
+        let mut json = serde_json::to_value(value).ok()?;
+        rename_steps(&mut json, renames);
+        serde_json::from_value(json).ok()
+    }
+    fn optional<T: Serialize + serde::de::DeserializeOwned>(
+        name: &Option<T>,
+        renames: &BTreeMap<String, String>,
+    ) -> Option<Option<T>> {
+        match name {
+            Some(name) => renamed(name, renames).map(Some),
+            None => Some(None),
+        }
+    }
+    Some(Names {
+        faces: names
+            .faces
+            .iter()
+            .map(|(face, origins)| Some((*face, renamed(origins, renames)?)))
+            .collect::<Option<_>>()?,
+        edges: names.edges.iter().map(|(edge, name)| Some((*edge, optional(name, renames)?))).collect::<Option<_>>()?,
+        vertices: names
+            .vertices
+            .iter()
+            .map(|(vertex, name)| Some((*vertex, optional(name, renames)?)))
+            .collect::<Option<_>>()?,
+    })
+}
+
+fn rename_steps(value: &mut Value, renames: &BTreeMap<String, String>) {
+    match value {
+        Value::String(text) => {
+            if let Some(to) = renamed_step(text, renames) {
+                *text = to;
+            }
+        }
+        Value::Array(values) => values.iter_mut().for_each(|value| rename_steps(value, renames)),
+        Value::Object(fields) => {
+            let renamed: serde_json::Map<String, Value> = std::mem::take(fields)
+                .into_iter()
+                .map(|(key, mut value)| {
+                    rename_steps(&mut value, renames);
+                    (renamed_step(&key, renames).unwrap_or(key), value)
+                })
+                .collect();
+            *fields = renamed;
+        }
+        _ => {}
+    }
+}
+
+/// `text` as a step id in `renames`, or such an id followed by `_` and a suffix.
+fn renamed_step(text: &str, renames: &BTreeMap<String, String>) -> Option<String> {
+    if let Some(to) = renames.get(text) {
+        return Some(to.clone());
+    }
+    text.match_indices('_').find_map(|(at, _)| Some(format!("{}{}", renames.get(&text[..at])?, &text[at..])))
+}
+
 /// The picking names of a handed-over build's result, as Catallax names a build's own.
 pub(crate) fn names(built: &Built) -> Names {
     let (model, body) = (&built.model, built.result);
@@ -206,5 +272,23 @@ pub(crate) fn names(built: &Built) -> Names {
             .into_iter()
             .map(|vertex| (vertex, model.vertex_name(body, vertex)))
             .collect(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_step_id_and_the_ids_derived_from_it_are_renamed() {
+        let renames = BTreeMap::from([("op_183".to_owned(), "op_198".to_owned())]);
+        assert_eq!(renamed_step("op_183", &renames).as_deref(), Some("op_198"));
+        assert_eq!(renamed_step("op_183_copy1", &renames).as_deref(), Some("op_198_copy1"));
+        assert_eq!(renamed_step("op_18", &renames), None);
+        assert_eq!(renamed_step("op_1834", &renames), None);
+        assert_eq!(renamed_step("l0s1", &renames), None);
+        let mut value = serde_json::json!({"op_183": ["op_183_scan_a", {"step": "op_183"}], "role": "End"});
+        rename_steps(&mut value, &renames);
+        assert_eq!(value, serde_json::json!({"op_198": ["op_198_scan_a", {"step": "op_198"}], "role": "End"}));
     }
 }

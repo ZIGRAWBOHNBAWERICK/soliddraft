@@ -284,3 +284,20 @@ pub fn upload(extensions: &[&str]) {
 pub fn take_upload() -> Option<(String, Vec<u8>)> {
     UPLOAD.with(|u| u.borrow_mut().take())
 }
+
+thread_local! {
+    static SHOWN_DETAILS: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
+}
+
+/// Notes the rows the Details panel is drawing, for [`shown_details`].
+pub(crate) fn show_details(info: &crate::document::EntityInfo) {
+    let shown = serde_json::json!({ "title": info.title, "rows": info.details }).to_string();
+    SHOWN_DETAILS.with_borrow_mut(|details| *details = shown);
+}
+
+/// The title and rows the Details panel drew last, as JSON. The canvas has no text a
+/// browser check can read, so checks read the drawn rows here. Read only.
+#[wasm_bindgen]
+pub fn shown_details() -> String {
+    SHOWN_DETAILS.with_borrow(|details| details.clone())
+}

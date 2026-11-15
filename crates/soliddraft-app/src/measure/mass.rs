@@ -2,49 +2,44 @@
 //! thread on the desktop, and in the kernel worker in the browser.
 
 use crate::document::{Document, FeatureId};
-use soliddraft_kernel_api::{BodyId, Kernel, MassProperties};
+use soliddraft_document::DocumentId;
+use soliddraft_kernel_api::{BodyId, MassProperties};
+use std::cell::RefCell;
+use std::collections::VecDeque;
 use std::sync::mpsc;
 
-/// Properties already computed for `body`. Inspection reads them; it never starts one.
-pub(crate) fn cached(kernel: &dyn Kernel, body: BodyId) -> Option<MassProperties> {
-    kernel.cached_mass_properties(body).or_else(|| browser::cached(body))
+/// Properties already computed for `body` of `doc`. Inspection reads them; it never
+/// starts a measurement.
+pub(crate) fn cached(doc: &Document, body: BodyId) -> Option<MassProperties> {
+    doc.kernel().cached_mass_properties(body).or_else(|| measured(doc.instance(), body))
 }
 
-/// The browser's kernel worker measures its own rebuild of the part, so its answers are
-/// kept here by the page's body. A body never changes, so an answer never goes stale.
-#[cfg(target_arch = "wasm32")]
-mod browser {
-    use soliddraft_kernel_api::{BodyId, MassProperties};
-    use std::cell::RefCell;
-    use std::collections::VecDeque;
+/// Enough for every feature row of a long tree and a few earlier revisions.
+const KEPT: usize = 256;
 
-    /// Enough for every feature row of a long tree and a few earlier revisions.
-    const KEPT: usize = 256;
-
-    thread_local! {
-        static MEASURED: RefCell<VecDeque<(BodyId, MassProperties)>> = const { RefCell::new(VecDeque::new()) };
-    }
-
-    pub(super) fn cached(body: BodyId) -> Option<MassProperties> {
-        MEASURED.with_borrow(|measured| measured.iter().find(|(b, _)| *b == body).map(|(_, p)| *p))
-    }
-
-    pub(super) fn keep(body: BodyId, properties: MassProperties) {
-        MEASURED.with_borrow_mut(|measured| {
-            measured.retain(|(b, _)| *b != body);
-            if measured.len() == KEPT {
-                measured.pop_front();
-            }
-            measured.push_back((body, properties));
-        });
-    }
+thread_local! {
+    /// Answers the kernel does not keep itself: the browser's kernel worker measures its
+    /// own rebuild of the part. Each document has its own kernel, whose body ids another
+    /// document's kernel reuses, so an answer is kept under the document instance, a
+    /// fresh id for every open part, as well as the body. A body never changes, so an
+    /// answer never goes stale.
+    static MEASURED: RefCell<VecDeque<(DocumentId, BodyId, MassProperties)>> = const { RefCell::new(VecDeque::new()) };
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-mod browser {
-    pub(super) fn cached(_: soliddraft_kernel_api::BodyId) -> Option<soliddraft_kernel_api::MassProperties> {
-        None
-    }
+fn measured(document: DocumentId, body: BodyId) -> Option<MassProperties> {
+    MEASURED.with_borrow(|measured| {
+        measured.iter().find(|(d, b, _)| (*d, *b) == (document, body)).map(|(_, _, properties)| *properties)
+    })
+}
+
+fn keep(document: DocumentId, body: BodyId, properties: MassProperties) {
+    MEASURED.with_borrow_mut(|measured| {
+        measured.retain(|(d, b, _)| (*d, *b) != (document, body));
+        if measured.len() == KEPT {
+            measured.pop_front();
+        }
+        measured.push_back((document, body, properties));
+    });
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -52,7 +47,9 @@ use super::MASS_WORK_LIMIT;
 
 #[derive(Clone, Copy, PartialEq)]
 struct Request {
-    document: soliddraft_document::DocumentId,
+    /// The open document, not the part's saved id: two opens of one file have different
+    /// kernels.
+    document: DocumentId,
     revision: u64,
     feature: FeatureId,
     body: BodyId,
@@ -61,7 +58,7 @@ struct Request {
 impl Request {
     fn of(doc: &Document, feature: FeatureId) -> Option<Self> {
         doc.proof_state().current_proved_display().then_some(())?;
-        Some(Self { document: doc.model().id(), revision: doc.revision(), feature, body: doc.feature(feature)?.body? })
+        Some(Self { document: doc.instance(), revision: doc.revision(), feature, body: doc.feature(feature)?.body? })
     }
 
     fn current(self, doc: &Document) -> bool {
@@ -69,9 +66,12 @@ impl Request {
     }
 }
 
+/// Properties for the cache to keep, or `None` when the kernel keeps them itself.
+type Measured = Result<Option<MassProperties>, String>;
+
 struct Pending {
     request: Request,
-    answer: mpsc::Receiver<Result<(), String>>,
+    answer: mpsc::Receiver<Measured>,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -130,7 +130,7 @@ impl State {
     pub(crate) fn request(&mut self, doc: &Document, feature: FeatureId, ctx: &egui::Context) -> Result<(), String> {
         let request = Request::of(doc, feature).ok_or("Select a solid feature with measurable properties")?;
         self.failure = None;
-        if cached(doc.kernel().as_ref(), request.body).is_some() {
+        if cached(doc, request.body).is_some() {
             self.pending = None;
             #[cfg(not(target_arch = "wasm32"))]
             if let Some(worker) = &self.worker {
@@ -159,7 +159,7 @@ impl State {
                 let result = if work.exhausted {
                     Err(format!("mass_properties: numbers.operation-budget: {} work units exhausted", work.limit))
                 } else {
-                    result.map(|_| ()).map_err(|e| e.to_string())
+                    result.map(|_| None).map_err(|e| e.to_string())
                 };
                 let _ = sender.send(result);
                 ctx.request_repaint();
@@ -179,10 +179,10 @@ impl State {
             };
             let (sender, answer) = mpsc::channel();
             crate::kernel_worker::submit(part, &job, ctx, move |result| {
-                let result = result.and_then(|value| {
-                    serde_json::from_value::<MassProperties>(value).map_err(|error| error.to_string())
-                });
-                let _ = sender.send(result.map(|properties| browser::keep(request.body, properties)));
+                // Kept only once `poll` finds the request still current.
+                let _ = sender.send(result.and_then(|value| {
+                    serde_json::from_value::<MassProperties>(value).map(Some).map_err(|error| error.to_string())
+                }));
             })?;
             self.pending = Some(Pending { request, answer });
             Ok(())
@@ -208,11 +208,21 @@ impl State {
         };
         let request = pending.request;
         self.pending = None;
-        if request.current(doc) {
-            self.failure = result.err().map(|error| (request, error));
-            return self.failure.as_ref().map(|(_, error)| error.clone());
+        if !request.current(doc) {
+            return None;
         }
-        None
+        match result {
+            Ok(properties) => {
+                if let Some(properties) = properties {
+                    keep(request.document, request.body, properties);
+                }
+                None
+            }
+            Err(error) => {
+                self.failure = Some((request, error.clone()));
+                Some(error)
+            }
+        }
     }
 
     /// Pending or refused properties for this feature, without querying geometry.
@@ -289,6 +299,50 @@ mod tests {
         drop(finished);
         drop(worker);
         assert!(answers.recv_timeout(Duration::from_secs(5)).is_err());
+    }
+
+    fn properties(volume: f64) -> MassProperties {
+        MassProperties { volume, area: 1.0, centroid: soliddraft_kernel_api::Vec3::new(0.0, 0.0, 0.0), inertia: None }
+    }
+
+    #[test]
+    fn a_kept_answer_belongs_to_one_open_part_even_when_another_reuses_its_body_id() {
+        let mut first = Document::new("First", crate::kernel());
+        let mut second = Document::new("Second", crate::kernel());
+        let a = first
+            .apply(Command::AddExtrude { params: ExtrudeParams::default(), via_assistant: false })
+            .unwrap()
+            .unwrap();
+        let b = second
+            .apply(Command::AddExtrude { params: ExtrudeParams::default(), via_assistant: false })
+            .unwrap()
+            .unwrap();
+        let body = Request::of(&first, a).unwrap().body;
+        assert_eq!(Request::of(&second, b).unwrap().body, body, "each part's kernel numbers bodies alike");
+        keep(first.instance(), body, properties(108_000.0));
+        assert_eq!(measured(first.instance(), body), Some(properties(108_000.0)));
+        assert_eq!(measured(second.instance(), body), None);
+    }
+
+    #[test]
+    fn an_answer_is_kept_only_while_its_request_is_current() {
+        let mut doc = Document::new("Body", crate::kernel());
+        let feature =
+            doc.apply(Command::AddExtrude { params: ExtrudeParams::default(), via_assistant: false }).unwrap().unwrap();
+        let request = Request::of(&doc, feature).unwrap();
+        let (sender, answer) = mpsc::channel();
+        let mut state = State { pending: Some(Pending { request, answer }), ..Default::default() };
+        sender.send(Ok(Some(properties(1.0)))).unwrap();
+        assert!(state.poll(&doc).is_none());
+        assert_eq!(measured(doc.instance(), request.body), Some(properties(1.0)));
+
+        // A late answer: the part changed after the request, and its body did not.
+        let (sender, answer) = mpsc::channel();
+        state.pending = Some(Pending { request, answer });
+        doc.apply(Command::Rename { id: feature, name: "Renamed".into() }).unwrap();
+        sender.send(Ok(Some(properties(2.0)))).unwrap();
+        assert!(state.poll(&doc).is_none());
+        assert_eq!(measured(doc.instance(), request.body), Some(properties(1.0)), "a late answer is not kept");
     }
 
     #[test]

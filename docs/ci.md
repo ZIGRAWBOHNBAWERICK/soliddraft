@@ -58,13 +58,17 @@ origin in an isolated `chrome-devtools-axi` session, then run
 session's origin storage when seeding each case; never use a profile with user
 documents.
 
-`ci/browser-kernel-worker.js` runs the same way on the sample part. It asks for mass
-properties from the Inspect strip and requires the kernel worker's answer, with no task
-on the page's thread longer than 250 ms meanwhile. It then makes the worker fail by
-starting it again on a module that is not the application, which it reports and closes
-on as it does after a trap, checks that the page keeps running, and requires the next
-request to start a new worker that measures the plate alone. Its
-clicks go to fixed points of a 1400 x 813 page.
+`ci/browser-kernel-worker.js` runs the same way on the sample part, opened at `/?demo`.
+Each measurement asks for mass properties from the Inspect strip and ends when the
+Details panel draws the kernel worker's volume, read through the module's read-only
+`shown_details` export. No task on the page's thread may run 250 ms or more meanwhile.
+The plate must draw 108000 mm³. The check then makes the worker fail by starting it again
+on a module that is not the application, checks that the page keeps running, and requires
+a new worker to measure the plate and flange. It asks for the whole part and replaces it
+with a new part before the answer arrives. Two new parts then each get a 60 x 40 x 20 mm
+block, whose kernels give them the same body id: the first block draws 48000 mm³ once
+measured, and neither block shows a volume before its own measurement. Its clicks go to
+fixed points of a 1400 x 813 page.
 
 `ci/browser-preferences.mjs` runs the same application as two visitors, each in a
 browser context with its own storage. It starts Chrome itself and sends keys and clicks

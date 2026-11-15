@@ -146,11 +146,7 @@ fn require_repair_format(source: ImportFormat, format: &str) -> KernelResult<()>
 pub(super) fn replace_file(request: &FileReplacementRequest<'_>) -> KernelResult<FileReplacement> {
     use catallax_features::import_replace::{FileReplacementOutcome, StepFileReplacement, replace_step_file};
     use catallax_import::correspondence::{EntityKind, UnresolvedReason};
-    for (bytes, sha256) in [(request.old_source, request.old_sha256), (request.new_source, request.new_sha256)] {
-        if catallax_import::sha256_hex(bytes) != sha256 {
-            return Err(KernelError::InvalidInput("the imported file does not match its sha256".into()));
-        }
-    }
+    // Catallax checks each file against its digest, charged to the allowance.
     if request.source_solids.is_empty() {
         return Err(KernelError::InvalidInput("No import reads this file.".into()));
     }

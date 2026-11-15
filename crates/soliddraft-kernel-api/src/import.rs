@@ -334,7 +334,7 @@ pub struct FileReplacementRequest<'a> {
 }
 
 /// What one import of the old file becomes.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
 pub struct ReplacedImport {
     /// The new file's solid with the same complete faces, when the import selects one.
     pub source_solid: Option<String>,

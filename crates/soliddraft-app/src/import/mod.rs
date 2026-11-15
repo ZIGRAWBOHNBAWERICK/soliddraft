@@ -216,8 +216,21 @@ impl Preview {
         ))
         .expect("import previews serialize");
         if self.replacement.is_some() || self.feature.format != ImportFormat::Step {
+            // A replacement is bound to the part it was reviewed against: its document and
+            // revision, and for a whole file the imports it matched and how they matched. A
+            // review rebuilt after any change gives another token.
+            let target = self.replacement.map(|_| (&self.document, self.revision));
+            let file = self.file.as_ref().map(|swap| {
+                let imports: Vec<_> = swap
+                    .imports
+                    .iter()
+                    .map(|(id, import)| (id, &import.sha256, &import.source_solid, &import.decisions))
+                    .collect();
+                (imports, &swap.replaced)
+            });
             return sha256_hex(
-                &serde_json::to_vec(&(&self.feature.format, self.replacement, &reviewed)).expect("review serializes"),
+                &serde_json::to_vec(&(&self.feature.format, self.replacement, &reviewed, target, file))
+                    .expect("review serializes"),
             );
         }
         sha256_hex(&reviewed)
@@ -243,6 +256,11 @@ fn match_file(doc: &Document, old: &ImportStepFeature, new: &ImportStepFeature) 
             _ => None,
         })
         .collect();
+    // The transaction matches the files without repair answers, so imports whose old file
+    // needed them cannot be matched faithfully yet.
+    if imports.iter().any(|(_, import)| !import.decisions.is_empty()) {
+        return Err("This file's imports carry repair answers, which a whole-file replacement cannot carry yet. Nothing was changed.".into());
+    }
     let solids: Vec<Option<String>> = imports.iter().map(|(_, import)| import.source_solid.clone()).collect();
     let request = FileReplacementRequest {
         old_source: &old.source,
@@ -271,6 +289,12 @@ fn commit_file(doc: &mut Document, swap: &FileSwap, reviewed: &ImportStepFeature
     use crate::document::{app_id, model_id};
     use std::collections::HashMap;
     let stale = || "the part changed during the preview; review the replacement again".to_owned();
+    if !reviewed.decisions.is_empty() {
+        return Err(
+            "The new file needs repair answers, which a whole-file replacement cannot carry yet. Nothing was changed."
+                .into(),
+        );
+    }
     for (id, matched) in &swap.imports {
         match doc.feature(*id).map(|feature| &feature.kind) {
             Some(FeatureKind::ImportStep(now)) if now == matched => {}
@@ -344,8 +368,12 @@ fn commit_file(doc: &mut Document, swap: &FileSwap, reviewed: &ImportStepFeature
     let command = Command::ReplaceImportFile(edits);
     let mut trial = doc.scratch();
     trial.apply(command.clone())?;
-    if let Some(failed) = trial.features.iter().find(|f| f.status != crate::document::FeatureStatus::Ok) {
-        return Err(format!("{} does not build with the new file. Nothing was changed.", failed.name));
+    // Only a feature that built before and does not now is the replacement's doing;
+    // suppressed, rolled-back or already broken features keep their state.
+    let built = |feature: &crate::document::Feature| feature.status == crate::document::FeatureStatus::Ok;
+    if let Some(broken) = trial.features.iter().find(|after| !built(after) && doc.feature(after.id).is_some_and(built))
+    {
+        return Err(format!("{} does not build with the new file. Nothing was changed.", broken.name));
     }
     doc.reuse_builds_from(trial.model());
     doc.apply(command)?;

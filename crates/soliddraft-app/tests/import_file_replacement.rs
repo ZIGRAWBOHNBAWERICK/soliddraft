@@ -188,3 +188,73 @@ fn a_file_with_changed_geometry_changes_nothing() {
     assert_eq!((doc.revision(), doc.undo_depth()), (revision, depth));
     all_built(&doc);
 }
+
+/// A file on disk for the MCP import tools, which read sources by path.
+fn written(name: &str, bytes: &[u8]) -> String {
+    let dir = std::env::temp_dir().join(format!("soliddraft-file-replacement-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join(name);
+    std::fs::write(&path, bytes).unwrap();
+    path.to_str().unwrap().to_owned()
+}
+
+#[test]
+fn an_mcp_replacement_token_is_bound_to_the_part_it_was_reviewed_against() {
+    let mut doc = imported();
+    let first = doc.features[0].name.clone();
+    let fillet = doc.features.last().unwrap().id;
+    let path = written("renumbered.step", &renumbered(STEP));
+    let preview = |doc: &mut Document| {
+        call(doc, "preview_import", json!({"path":path, "feature":first})).unwrap()["token"]
+            .as_str()
+            .unwrap()
+            .to_owned()
+    };
+    let replace = |doc: &mut Document, token: &str| {
+        call(doc, "replace_import", json!({"path":path, "feature":first, "preview_token":token}))
+    };
+
+    // A rename after the review: the token no longer matches the part.
+    let token = preview(&mut doc);
+    doc.apply(Command::Rename { id: fillet, name: "Renamed after review".into() }).unwrap();
+    let before = doc.model().to_bytes().unwrap();
+    let error = replace(&mut doc, &token).unwrap_err();
+    assert!(error.contains("changed since review"), "{error}");
+    assert_eq!(doc.model().to_bytes().unwrap(), before);
+
+    // Another import of the same file after the review: the matched imports changed.
+    let token = preview(&mut doc);
+    let again = Preview::from_bytes(&doc, "blocks.step", STEP.to_vec()).unwrap();
+    commit(&mut doc, &again, &Review::default()).unwrap();
+    assert_eq!(sources(&doc).len(), 4);
+    let before = doc.model().to_bytes().unwrap();
+    let error = replace(&mut doc, &token).unwrap_err();
+    assert!(error.contains("changed since review"), "{error}");
+    assert_eq!(doc.model().to_bytes().unwrap(), before);
+
+    // Reviewed again, all four imports move to the new file.
+    let token = preview(&mut doc);
+    replace(&mut doc, &token).unwrap();
+    all_built(&doc);
+    let new_sha = sha256_hex(&renumbered(STEP));
+    assert!(sources(&doc).iter().all(|(sha, _)| *sha == new_sha), "{:?}", sources(&doc));
+}
+
+#[test]
+fn a_suppressed_feature_keeps_its_state_through_a_replacement() {
+    let mut doc = imported();
+    let first = doc.features[0].id;
+    let fillet = doc.features.last().unwrap().id;
+    doc.apply(Command::Suppress { id: fillet, suppressed: true }).unwrap();
+    assert_eq!(doc.feature(fillet).unwrap().status, FeatureStatus::Inactive);
+    let new = renumbered(STEP);
+    let preview = Preview::from_bytes(&doc, "renumbered.step", new.clone()).unwrap().replacing(&doc, first).unwrap();
+    commit(&mut doc, &preview, &Review::default()).unwrap();
+    assert_eq!(doc.feature(fillet).unwrap().status, FeatureStatus::Inactive, "suppression is kept");
+    let new_sha = sha256_hex(&new);
+    assert!(
+        fillet_faces(&doc).iter().any(|face| face.generator == Generator::Imported { sha256: new_sha.clone().into() })
+    );
+    doc.apply(Command::Suppress { id: fillet, suppressed: false }).unwrap();
+    all_built(&doc);
+}

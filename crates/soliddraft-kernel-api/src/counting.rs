@@ -126,6 +126,10 @@ impl Kernel for Counting {
         self.inner.offer_builds(bytes)
     }
 
+    fn read_offers(&self, at_most: usize) -> KernelResult<usize> {
+        self.inner.read_offers(at_most)
+    }
+
     fn import_source(
         &self,
         format: crate::ImportFormat,

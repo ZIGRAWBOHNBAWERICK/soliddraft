@@ -65,6 +65,20 @@ pub struct SolidDraftApp {
     /// its picture is cut from.
     #[cfg(target_arch = "wasm32")]
     pub(super) web_thumbnail: Option<String>,
+    /// A part the browser's kernel worker is building before the page opens it.
+    #[cfg(target_arch = "wasm32")]
+    opening: Option<Opening>,
+}
+
+/// A part file waiting for the kernel worker's builds. When they have been offered to
+/// the page's kernel, the page opens the file without evaluating it again.
+#[cfg(target_arch = "wasm32")]
+struct Opening {
+    name: String,
+    bytes: Vec<u8>,
+    answer: std::sync::mpsc::Receiver<Result<(), String>>,
+    /// The worker has answered; its builds are being read.
+    answered: bool,
 }
 
 /// Marks the screenshot a browser save asks for.
@@ -145,6 +159,8 @@ impl SolidDraftApp {
             preferences: None,
             #[cfg(target_arch = "wasm32")]
             web_thumbnail: None,
+            #[cfg(target_arch = "wasm32")]
+            opening: None,
         }
     }
 
@@ -192,6 +208,8 @@ impl SolidDraftApp {
                 format!("{name}: assemblies open from their folder, with their parts, in the desktop app"),
                 NoteKind::Error,
             ),
+            #[cfg(target_arch = "wasm32")]
+            _ if self.opening.is_none() => self.open_in_worker(name, bytes),
             _ => {
                 let opened =
                     file::open_bytes(name, bytes, self.state.doc.kernel().clone(), Some(self.state.doc.model()));
@@ -202,6 +220,59 @@ impl SolidDraftApp {
                 self.opened(opened);
             }
         }
+    }
+
+    /// Sends a part file to the browser's kernel worker to build. The page opens it once
+    /// the worker's builds have been offered to the page's kernel; see [`Self::poll_opening`].
+    #[cfg(target_arch = "wasm32")]
+    fn open_in_worker(&mut self, name: &str, bytes: &[u8]) {
+        let (sender, answer) = std::sync::mpsc::channel();
+        let job = crate::kernel_worker::Job::Build { edit: None, level: Default::default() };
+        let kernel = self.state.doc.kernel().clone();
+        let ctx = crate::web::context().unwrap_or_default();
+        match crate::kernel_worker::submit(bytes.to_vec(), &job, kernel, &ctx, move |result| {
+            let _ = sender.send(result.map(|_| ()));
+        }) {
+            Ok(_) => {
+                self.opening = Some(Opening { name: name.to_owned(), bytes: bytes.to_vec(), answer, answered: false })
+            }
+            // Without a worker the page opens the file itself.
+            Err(_) => self.open_here(name, bytes),
+        }
+    }
+
+    /// Opens the part the kernel worker built, on the builds it handed over. A worker that
+    /// failed leaves the page to open the file itself.
+    #[cfg(target_arch = "wasm32")]
+    fn poll_opening(&mut self) {
+        let Some(opening) = &mut self.opening else { return };
+        // An answer, or a worker that stopped without one: either way the page opens the
+        // file next, taking whatever builds were offered.
+        if !opening.answered {
+            if let Err(std::sync::mpsc::TryRecvError::Empty) = opening.answer.try_recv() {
+                return;
+            }
+            opening.answered = true;
+        }
+        // The offered builds are read one a frame, so no frame holds the page for all of them.
+        if self.state.doc.kernel().read_offers(1).unwrap_or(0) > 0 {
+            if let Some(ctx) = crate::web::context() {
+                ctx.request_repaint();
+            }
+            return;
+        }
+        let opening = self.opening.take().expect("a part is opening");
+        self.open_here(&opening.name, &opening.bytes);
+    }
+
+    /// Opens a part file on the page's kernel, taking any builds offered to it.
+    #[cfg(target_arch = "wasm32")]
+    fn open_here(&mut self, name: &str, bytes: &[u8]) {
+        let opened = file::open_bytes(name, bytes, self.state.doc.kernel().clone(), Some(self.state.doc.model()));
+        if opened.is_ok() {
+            crate::documents_browser::remember(name, soliddraft_document::DocKind::Part, bytes);
+        }
+        self.opened_from(opened, Some(bytes));
     }
 
     /// A PNG of the part as the viewport would first show it, for its file. `None` when
@@ -276,6 +347,12 @@ impl SolidDraftApp {
 
     /// Shows a part that was just opened, or why it could not be.
     pub(super) fn opened(&mut self, opened: Result<Document, String>) {
+        self.opened_from(opened, None);
+    }
+
+    /// Shows a part that was just opened from `saved`, when the caller still has the
+    /// bytes, so its revision is remembered without saving the part again.
+    pub(super) fn opened_from(&mut self, opened: Result<Document, String>, saved: Option<&[u8]>) {
         match opened {
             Ok(doc) => {
                 self.close_editor();
@@ -284,7 +361,10 @@ impl SolidDraftApp {
                 let n = doc.features.len();
                 self.state.scan = Default::default();
                 self.state.doc = doc;
-                self.state.remember_revision();
+                match saved {
+                    Some(saved) => self.state.remember_opened_revision(saved),
+                    None => self.state.remember_revision(),
+                }
                 self.state.viewport.camera.fit_framed(crate::scan::document_bounds(&self.state.doc));
                 self.state.recent = file::recent();
                 let problems = self.state.doc.error_count() + self.state.doc.repair_count();
@@ -461,7 +541,8 @@ impl SolidDraftApp {
     /// last accepted revision.
     #[cfg(target_arch = "wasm32")]
     fn building(&mut self, ctx: &egui::Context) {
-        let pending = self.state.doc.proof_pending();
+        let opening = self.opening.as_ref().map(|opening| opening.name.clone());
+        let pending = self.state.doc.proof_pending() || opening.is_some();
         let mut cancel = None;
         if pending {
             egui::Area::new(egui::Id::new("browser-build"))
@@ -471,10 +552,16 @@ impl SolidDraftApp {
                     egui::Frame::popup(ui.style()).show(ui, |ui| {
                         ui.horizontal(|ui| {
                             ui.spinner();
-                            ui.label("Building the part");
+                            ui.label(match &opening {
+                                Some(name) => format!("Opening {name}"),
+                                None => "Building the part".to_owned(),
+                            });
                             let button = ui.button("Cancel");
                             if button.clicked() {
-                                self.state.push(AppAction::CancelBuild);
+                                // Cancelling an open keeps the part on screen.
+                                if self.opening.take().is_none() {
+                                    self.state.push(AppAction::CancelBuild);
+                                }
                             }
                             cancel = Some(button.rect.center());
                         });
@@ -592,6 +679,8 @@ impl eframe::App for SolidDraftApp {
         if let Some((name, bytes)) = crate::platform::take_upload() {
             self.open_bytes(&name, &bytes);
         }
+        #[cfg(target_arch = "wasm32")]
+        self.poll_opening();
 
         if let Some(e) = self.state.editor.as_mut() {
             e.refresh(&self.state.doc);

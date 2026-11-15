@@ -1187,6 +1187,17 @@ impl Kernel for CatallaxKernel {
         Ok(count)
     }
 
+    fn read_offers(&self, at_most: usize) -> KernelResult<usize> {
+        // Read outside the lock; offers share their read result, so the build that takes
+        // one later finds it read.
+        let unread: Vec<handover::Offer> =
+            self.state()?.offered.values().filter(|offer| !offer.is_read()).cloned().collect();
+        for offer in unread.iter().take(at_most) {
+            let _ = offer.built();
+        }
+        Ok(unread.len().saturating_sub(at_most))
+    }
+
     fn source_solids(&self, format: ImportFormat, source: &[u8]) -> KernelResult<Vec<String>> {
         self.observe("source_solids", || import::source_solids(format, source))
     }

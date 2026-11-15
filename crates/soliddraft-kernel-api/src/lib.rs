@@ -1424,6 +1424,14 @@ pub trait Kernel: Send + Sync {
         Err(KernelError::Unsupported("build hand-over".into()))
     }
 
+    /// Reads at most `at_most` offered builds that no build has taken yet, so a caller can
+    /// spread the reading over several frames before the builds that take them. Returns
+    /// how many offers are still unread.
+    fn read_offers(&self, at_most: usize) -> KernelResult<usize> {
+        let _ = at_most;
+        Ok(0)
+    }
+
     /// Builds or replays the explicitly selected source format and its repair decisions.
     fn import_source(
         &self,

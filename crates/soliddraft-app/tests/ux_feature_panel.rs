@@ -233,6 +233,47 @@ fn cut_shell_draft_and_pattern_forms_expose_their_fields() {
     });
 }
 
+/// An OK that only changes a dimension is refused as any other: a radius the part
+/// cannot take keeps the form open, and the fillet keeps the radius it had.
+#[test]
+fn a_refused_radius_keeps_the_fillet_form_open() {
+    let mut case = Case::new("feature-panel/fillet-radius-refused");
+    let mut app = launch(ribbon::plate(), STANDARD);
+    case.run(&mut app, |case, app| {
+        open(app, AppAction::StartFillet);
+        let (long, short) = near_edges(app);
+        ribbon::click_world(app, long);
+        ribbon::click_world(app, short);
+        settle(app);
+        ribbon::type_field(app, "Radius value", "5");
+        settle(app);
+        pointer_to_chrome(app);
+        open(app, AppAction::CommitEditor);
+        rebuilt(app);
+        let fillet = app.state().state.doc.features.last().expect("the fillet is in the tree").id;
+        let before = ux_tools::facts(app);
+
+        open(app, AppAction::EditFeature(fillet));
+        ribbon::type_field(app, "Radius value", "35");
+        settle(app);
+        pointer_to_chrome(app);
+        open(app, AppAction::CommitEditor);
+        rebuilt(app);
+        assert!(
+            matches!(app.state().state.editor.as_ref().map(|e| &e.params), Some(EditorParams::Fillet(_))),
+            "a refused radius keeps its form open"
+        );
+        case.frame(app, "fillet-radius-refused");
+        // The open form shows the part rolled back to before the fillet. Cancel brings the
+        // fillet back as it was.
+        open(app, AppAction::CancelEditor);
+        rebuilt(app);
+        let status = app.state().state.doc.feature(fillet).unwrap().status.clone();
+        assert_eq!(status, soliddraft_app::document::FeatureStatus::Ok, "the fillet keeps its radius");
+        assert_eq!(ux_tools::facts(app), before, "the part is as it was");
+    });
+}
+
 #[test]
 fn fillet_preview_tints_new_faces_and_names_the_radius() {
     let mut case = Case::new("feature-panel/fillet");

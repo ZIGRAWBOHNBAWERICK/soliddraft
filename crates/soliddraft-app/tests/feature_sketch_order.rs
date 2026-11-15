@@ -432,6 +432,19 @@ fn an_early_sketch_opens_on_the_part_as_it_was_with_its_sheet_on_the_face() {
         assert!((world.x - 100.0).abs() < 1.0 && (world.y - 50.0).abs() < 1.0, "the sheet is centred at {world:?}");
         case.frame(app, "1-early-sketch-on-the-part-as-it-was");
 
+        // The roll-back is only the sketch's view of the part. A save or a recovery copy
+        // made while the sketch is open keeps the part whole.
+        let model = app.state().state.doc.model();
+        let saved = model.to_bytes().unwrap();
+        let (_, recovered) = model.snapshot().encode().unwrap();
+        for (copy, bytes) in [("saved", saved), ("recovered", recovered)] {
+            let kernel = std::sync::Arc::new(soliddraft_kernel_catallax::CatallaxKernel::new());
+            let reopened = soliddraft_app::file::open_bytes("early.dwprt", &bytes, kernel, None).unwrap();
+            assert_eq!(reopened.rollback, None, "the {copy} part keeps no roll-back");
+            let volume = reopened.kernel().mass_properties(reopened.display_body().unwrap()).unwrap().volume;
+            assert!((volume - cut).abs() < 1e-3, "the {copy} part has its cut: {volume} against {cut}");
+        }
+
         app.state_mut().state.push(AppAction::ExitSketch);
         settle(app);
         let state = &app.state().state;

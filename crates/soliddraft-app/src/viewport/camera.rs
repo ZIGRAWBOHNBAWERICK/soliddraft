@@ -496,6 +496,36 @@ mod tests {
         }
     }
 
+    /// In perspective a corner near the eye looks bigger than one at the part's middle. A
+    /// part as deep as it is tall, fitted in a short viewport, keeps all eight corners
+    /// inside the clear band.
+    #[test]
+    fn a_fit_keeps_the_near_corners_of_a_deep_part_inside_the_band() {
+        let framing = Framing { top: 8.0, bottom: 84.0, height: 200.0 };
+        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(900.0, framing.height));
+        let (lo, hi) = (Vec3::new(-100.0, -10.0, -100.0), Vec3::new(100.0, 10.0, 100.0));
+        let mut c = Camera::default();
+        assert!(!c.orthographic);
+        c.look_along(Vec3::X);
+        while c.tick(1.0 / 60.0) {}
+        c.set_framing(framing);
+        c.fit_framed(Some((lo, hi)));
+        while c.tick(1.0 / 60.0) {}
+        for i in 0..8 {
+            let corner = Vec3::new(
+                if i & 1 == 0 { lo.x } else { hi.x },
+                if i & 2 == 0 { lo.y } else { hi.y },
+                if i & 4 == 0 { lo.z } else { hi.z },
+            );
+            let at = c.project(corner, rect).unwrap();
+            assert!(
+                at.y >= framing.top && at.y <= framing.height - framing.bottom,
+                "{corner} lands at {} outside the clear band",
+                at.y
+            );
+        }
+    }
+
     /// The app fits the part before its first frame, when the viewport's bands are not
     /// known yet: the framing that arrives during the move still applies, and a later
     /// fit of the same part has nowhere to go.

@@ -243,3 +243,48 @@ fn a_sketch_dimension_of_the_body_edits_in_its_sketch() {
     assert_eq!(session.feature, sketch_id);
     assert_eq!(session.dim_edit.as_ref().map(|e| e.constraint), Some(constraint));
 }
+
+/// A feature's own dimensions leave out a sketch that only happens to be shown: the
+/// double-clicked plate keeps its three, with an unrelated sketch drawn beside it.
+#[test]
+fn a_shown_sketch_stays_out_of_another_features_dimensions() {
+    if !gpu_available() {
+        eprintln!("no GPU adapter; skipping");
+        return;
+    }
+    let _case = ui::case("body-feature-dimensions-shown-sketch");
+    let mut doc = soliddraft_app::demo_document();
+    let sketch_id = doc
+        .apply(Command::AddSketch { plane: SketchPlane::Reference { plane: PlaneKind::Top, offset: 0.0 } })
+        .unwrap()
+        .unwrap();
+    let mut sketch = Sketch::new();
+    sketch.rectangle(P2::new(-150.0, 0.0), 40.0, 30.0).unwrap();
+    soliddraft_sketch::solve::solve(&mut sketch, None, false);
+    doc.apply(Command::EditSketch { id: sketch_id, sketch }).unwrap();
+    doc.selection = None;
+    let mut harness = harness(doc);
+    harness.state_mut().state.show_tree(false);
+    harness.run_steps(5);
+    soliddraft_app::tree_visibility::toggle(
+        &mut harness.state_mut().state,
+        soliddraft_app::document::ViewItem::Feature(sketch_id),
+    );
+    harness.key_press(Key::Z);
+    harness.run_steps(30);
+    assert!(
+        soliddraft_app::tree_visibility::visible(&harness.state().state).sketches.contains(&sketch_id),
+        "the free sketch is shown"
+    );
+
+    let state = &harness.state().state;
+    let plate_top = state.viewport.camera.project(glam::Vec3::new(40.0, -30.0, 10.0), state.viewport.rect).unwrap();
+    double_click(&mut harness, plate_top);
+    let Some(Selection::Feature(plate)) = harness.state().state.doc.selection else {
+        panic!("the double-click selects a feature, not {:?}", harness.state().state.doc.selection)
+    };
+    save(&mut harness, "plate-dimensions-beside-a-shown-sketch");
+    let dims = shown(&harness);
+    assert!(dims.iter().all(|(t, _)| *t == DimensionTarget::Feature(plate)), "only the plate's: {dims:?}");
+    assert_eq!(dims.len(), 3, "{dims:?}");
+}

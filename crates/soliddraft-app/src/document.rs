@@ -5279,6 +5279,78 @@ mod tests {
         assert!(d.features.is_empty());
     }
 
+    /// A drafted extrusion in a second body keeps its draft when edited: the same feature,
+    /// in the same body, right below it. An extrusion there that gains the option gets its
+    /// draft right below it too.
+    #[test]
+    fn a_drafted_extrusion_in_a_second_body_keeps_its_draft_when_edited() {
+        let mut d = doc();
+        d.apply(Command::AddExtrude { params: ExtrudeParams::default(), via_assistant: false }).unwrap();
+        d.new_body();
+        let params = ExtrudeParams { draft: Some(ExtrudeDraft::default()), ..ExtrudeParams::default() };
+        let id = d.apply_form(Command::AddExtrude { params, via_assistant: false }).unwrap().unwrap();
+        let body = d.feature(id).unwrap().body_key;
+        assert_ne!(body, 0, "the extrusion is in the second body");
+        let draft = d.linked_draft(id).expect("the extrusion has its draft");
+        assert_eq!(d.feature(draft).unwrap().body_key, body);
+
+        let FeatureKind::Extrude(mut edit) = d.feature(id).unwrap().kind.clone() else { panic!() };
+        edit.depth = 30.0;
+        d.apply_form(Command::EditExtrude { id, params: edit.clone() }).unwrap();
+        assert_eq!(d.linked_draft(id), Some(draft), "the draft keeps its identity");
+        assert_eq!(d.feature(draft).unwrap().body_key, body, "the draft stays in the extrusion's body");
+        assert_eq!(d.index_of(draft), d.index_of(id).map(|i| i + 1));
+        assert!(d.features.iter().all(|f| f.status == FeatureStatus::Ok), "{:?}", d.features);
+
+        // An undrafted extrusion followed by another feature of its body gains the option.
+        edit.draft = None;
+        d.apply_form(Command::EditExtrude { id, params: edit.clone() }).unwrap();
+        assert_eq!(d.linked_draft(id), None);
+        let later = ExtrudeParams { depth: 5.0, ..ExtrudeParams::default() };
+        d.apply_form(Command::AddExtrude { params: later, via_assistant: false }).unwrap();
+        edit.draft = Some(ExtrudeDraft::default());
+        d.apply_form(Command::EditExtrude { id, params: edit }).unwrap();
+        let draft = d.linked_draft(id).expect("the option adds a draft");
+        assert_eq!(d.feature(draft).unwrap().body_key, body);
+        assert_eq!(d.index_of(draft), d.index_of(id).map(|i| i + 1), "the draft goes right below the extrusion");
+    }
+
+    /// A form's feature whose reference does not resolve is refused, as a failed one is:
+    /// the form keeps it, and the tree gains no row that needs repair.
+    #[test]
+    fn a_form_whose_feature_needs_repair_is_refused() {
+        let mut d = doc();
+        let params = ExtrudeParams { draft: Some(ExtrudeDraft::default()), ..ExtrudeParams::default() };
+        let id = d.apply_form(Command::AddExtrude { params, via_assistant: false }).unwrap().unwrap();
+        let draft = d.linked_draft(id).unwrap();
+        let FeatureKind::Draft(mut kind) = d.feature(draft).unwrap().kind.clone() else { panic!() };
+        kind.of = None;
+        kind.faces[0].ordinal = 9;
+        let count = d.features.len();
+        let refused = d.apply_form(Command::AddFeature(FeatureKind::Draft(kind)));
+        assert!(refused.is_err(), "{refused:?}: {:?}", d.features);
+        assert_eq!(d.features.len(), count, "the tree gains nothing");
+        assert!(d.features.iter().all(|f| f.status == FeatureStatus::Ok));
+    }
+
+    /// A refused form leaves the history as it was, redo included.
+    #[test]
+    fn a_refused_form_keeps_what_redo_would_repeat() {
+        let mut d = doc();
+        let id =
+            d.apply(Command::AddExtrude { params: ExtrudeParams::default(), via_assistant: false }).unwrap().unwrap();
+        d.apply(Command::EditExtrude { id, params: ExtrudeParams { depth: 35.0, ..Default::default() } }).unwrap();
+        d.undo().unwrap();
+        assert_eq!(d.redo_depth(), 1);
+        let zero = ExtrudeParams { depth: 0.0, ..Default::default() };
+        assert!(d.apply_form(Command::AddExtrude { params: zero, via_assistant: false }).is_err());
+        assert_eq!(d.features.len(), 1);
+        assert_eq!(d.redo_depth(), 1, "the refusal keeps the redo step");
+        d.redo().unwrap();
+        let FeatureKind::Extrude(p) = &d.features[0].kind else { panic!() };
+        assert_eq!(p.depth, 35.0);
+    }
+
     #[test]
     fn extrude_appears_in_tree_with_named_faces() {
         let mut d = doc();

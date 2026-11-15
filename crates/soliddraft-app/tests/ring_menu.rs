@@ -121,6 +121,37 @@ fn face_ring_opens_alone_with_working_commands_and_body_visibility_uses_the_exis
     });
 }
 
+/// The ring is chosen by Shift as it was at the click. When the frames of the click draw
+/// nothing yet, as on a slow renderer, the menu waits for the id buffer under the pointer,
+/// and Shift let go in that wait still opens the ring.
+#[test]
+fn shift_at_the_click_opens_the_ring_after_the_pick_is_read_back() {
+    let case = ribbon::case("ring-shift-at-click");
+    edit_suite(&case);
+    let mut app = ribbon::app(ribbon::plate());
+    case.run(&mut app, |app| {
+        let at = world(app, Vec3::new(0.0, 0.0, 20.0));
+        render_steps::await_pick(app, at + vec2(0.0, 120.0));
+        app.event(egui::Event::PointerMoved(at));
+        app.event(egui::Event::ModifiersChanged(Modifiers::SHIFT));
+        for pressed in [true, false] {
+            app.event(egui::Event::PointerButton {
+                pos: at,
+                button: PointerButton::Secondary,
+                pressed,
+                modifiers: Modifiers::SHIFT,
+            });
+            app.step();
+        }
+        assert!(!egui::Popup::is_any_open(&app.ctx), "the menu waits for the id buffer under the click");
+        app.event(egui::Event::ModifiersChanged(Modifiers::NONE));
+        render_steps::rendered(app, |app| app.run_steps(4));
+        assert!(app.query_all_by_label("Quick commands").next().is_some(), "Shift at the click opens the ring");
+        assert!(!column(app, "Face"), "the ring opens without the columns");
+        case.frame(app, "open");
+    });
+}
+
 #[test]
 fn empty_ring_and_columns_clamp_at_viewport_corners_in_regular_and_compact_windows() {
     let case = ribbon::case("ring-corners");

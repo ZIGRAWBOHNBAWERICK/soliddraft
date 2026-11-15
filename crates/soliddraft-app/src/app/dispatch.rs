@@ -26,12 +26,13 @@ impl SolidDraftApp {
     pub(super) fn close_editor(&mut self) -> Option<FeatureEditor> {
         let e = self.state.editor.take()?;
         if e.target.is_some() {
-            if self.state.doc.rollback != e.saved_rollback {
+            if self.state.sketch.as_ref().is_none_or(|s| s.restore_rollback.is_none()) {
+                // The bar goes back where the user left it, a drag in the editor included.
+                self.state.doc.end_rollback_view();
+            } else if self.state.doc.rollback != e.saved_rollback {
+                // Inside an early sketch's view the bar goes back to that view.
                 self.state.doc.rollback = e.saved_rollback;
                 let _ = self.state.doc.rebuild();
-            }
-            if self.state.sketch.as_ref().is_none_or(|s| s.restore_rollback.is_none()) {
-                self.state.doc.release_rollback();
             }
         }
         Some(e)
@@ -58,10 +59,11 @@ impl SolidDraftApp {
     /// Puts back the rollback an early sketch's session set when it opened.
     fn restore_rollback(&mut self, session: &SketchSession) {
         if let Some(rollback) = session.restore_rollback {
-            self.state.doc.rollback = rollback.filter(|r| *r < self.state.doc.features.len());
-            let _ = self.state.doc.rebuild();
             if self.state.editor.as_ref().is_none_or(|e| e.target.is_none()) {
-                self.state.doc.release_rollback();
+                self.state.doc.end_rollback_view();
+            } else {
+                self.state.doc.rollback = rollback.filter(|r| *r < self.state.doc.features.len());
+                let _ = self.state.doc.rebuild();
             }
         }
     }

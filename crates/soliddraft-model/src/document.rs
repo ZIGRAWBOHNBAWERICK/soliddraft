@@ -122,6 +122,9 @@ pub struct Document {
     pub(crate) cache: BuildCache,
     pub(crate) undo: Vec<UndoEntry>,
     pub(crate) redo: Vec<UndoEntry>,
+    /// The redo stack the last command that found one cleared, with the undo depth just
+    /// before that command, so [`Self::withdraw`] can put it back.
+    pub(crate) cleared_redo: Option<(usize, Vec<UndoEntry>)>,
     pub(crate) log: Vec<String>,
     /// The solver's verdict on the last sketch a command solved.
     pub(crate) last_solve: Option<SolveStatus>,
@@ -164,6 +167,7 @@ impl Document {
             cache: BuildCache::default(),
             undo: Vec::new(),
             redo: Vec::new(),
+            cleared_redo: None,
             log: Vec::new(),
             last_solve: None,
             journal: Some(Default::default()),
@@ -721,6 +725,11 @@ impl Document {
             self.held_rollback = None;
             Ok::<_, String>(())
         });
+    }
+
+    /// The rollback bar held for files while a view moves it, if one is held.
+    pub fn held_rollback(&self) -> Option<Option<FeatureId>> {
+        self.held_rollback
     }
 
     /// The rollback bar a file records: the held one while a view moves the bar.

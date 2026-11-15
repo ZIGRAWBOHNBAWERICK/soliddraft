@@ -110,6 +110,7 @@ impl Document {
             cache: self.cache.clone(),
             undo: Vec::new(),
             redo: Vec::new(),
+            cleared_redo: None,
             log: Vec::new(),
             last_solve: None,
             journal: None,

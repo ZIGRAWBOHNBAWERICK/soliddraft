@@ -413,8 +413,11 @@ impl Document {
         journal.finish((|| {
             let applied = self.apply(command)?;
             self.log.push(applied.label.clone());
+            let depth = self.undo.len();
             self.undo.push(UndoEntry { label: applied.label.clone(), undo: applied.inverse, redo: applied.redo });
-            self.redo.clear();
+            if !self.redo.is_empty() {
+                self.cleared_redo = Some((depth, std::mem::take(&mut self.redo)));
+            }
             Ok(Executed { created: applied.created, label: applied.label })
         })())
     }
@@ -466,6 +469,7 @@ impl Document {
                 self.undo.push(entry);
                 return Err(e);
             }
+            self.cleared_redo = None;
             self.log.push(format!("undo {}", entry.label));
             let label = entry.label.clone();
             self.redo.push(entry);
@@ -492,6 +496,7 @@ impl Document {
                 self.redo.push(entry);
                 return Err(e);
             }
+            self.cleared_redo = None;
             self.log.push(format!("redo {}", entry.label));
             let label = entry.label.clone();
             self.undo.push(entry);
@@ -520,6 +525,7 @@ impl Document {
             if self.undo.len() <= depth {
                 return Ok::<_, String>(());
             }
+            self.cleared_redo = None;
             let entries = self.undo.split_off(depth);
             let undo = Command::Batch {
                 label: label.clone(),
@@ -535,15 +541,38 @@ impl Document {
     /// them, leaving nothing to redo: for a group of commands that failed partway.
     pub fn abandon(&mut self, depth: usize) -> Result<(), CommandError> {
         let journal = self.journal_command(|| serde_json::json!({"op":"abandon", "depth":depth}));
+        journal.finish({
+            self.cleared_redo = None;
+            self.revert_to(depth)
+        })
+    }
+
+    /// Reverts the commands recorded since the undo stack was `depth` deep, as
+    /// [`Self::abandon`] does, and puts back the redo stack the first of them cleared:
+    /// for a command refused after it ran, which leaves the history as it found it.
+    pub fn withdraw(&mut self, depth: usize) -> Result<(), CommandError> {
+        let journal = self.journal_command(|| serde_json::json!({"op":"withdraw", "depth":depth}));
         journal.finish((|| {
-            while self.undo.len() > depth {
-                let entry = self.undo.pop().expect("the stack is deeper than depth");
-                self.apply(entry.undo)?;
-                self.log.push(format!("abandon {}", entry.label));
+            let cleared = self.cleared_redo.take();
+            self.revert_to(depth)?;
+            if let Some((at, redo)) = cleared
+                && at == depth
+                && self.redo.is_empty()
+            {
+                self.redo = redo;
             }
-            self.rebuild();
             Ok(())
         })())
+    }
+
+    fn revert_to(&mut self, depth: usize) -> Result<(), CommandError> {
+        while self.undo.len() > depth {
+            let entry = self.undo.pop().expect("the stack is deeper than depth");
+            self.apply(entry.undo)?;
+            self.log.push(format!("abandon {}", entry.label));
+        }
+        self.rebuild();
+        Ok(())
     }
 
     /// Adds a line to the command log, such as who asked for the commands that follow.
@@ -1295,6 +1324,9 @@ impl Document {
             "rollback" => {
                 self.set_rollback(serde_json::from_value(parse("before")?).map_err(|e| e.to_string())?);
                 Ok(())
+            }
+            "withdraw" => {
+                self.withdraw(input["depth"].as_u64().ok_or("missing depth")? as usize).map_err(|e| e.to_string())
             }
             "hold_rollback" => {
                 self.hold_rollback();

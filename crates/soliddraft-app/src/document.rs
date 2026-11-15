@@ -2518,7 +2518,9 @@ impl Document {
     /// `depth` cannot be displayed either. With nothing drawn to return to, the part at
     /// `depth` may not display, and `retained` stays on screen at its own revision.
     fn withdraw(&mut self, depth: usize, drawn: Option<usize>, retained: Option<(Shown, u64)>) -> Result<(), String> {
-        self.abandon(depth)?;
+        // The history goes back as the command found it, with what redo held then.
+        self.model.withdraw(depth).map_err(|e| e.to_string())?;
+        self.after_change();
         match drawn {
             Some(drawn) if drawn < depth && self.display_failure.is_some() => self.abandon(drawn),
             Some(_) => Ok(()),
@@ -3021,6 +3023,15 @@ impl Document {
     /// Ends the hold once the view has put the bar back.
     pub fn release_rollback(&mut self) {
         self.model.release_rollback();
+    }
+
+    /// Ends a view's hold and puts the rollback bar back where the user left it: where
+    /// it stood when the view opened, or where the user moved it while the view was open.
+    pub fn end_rollback_view(&mut self) {
+        let Some(held) = self.model.held_rollback() else { return };
+        self.rollback = held.and_then(|id| self.index_of(app_id(id)));
+        self.model.release_rollback();
+        let _ = self.rebuild();
     }
 
     /// Pushes the display rollback to the model and rebuilds what it changed.

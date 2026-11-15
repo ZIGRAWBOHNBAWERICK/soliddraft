@@ -92,7 +92,7 @@ The `iges-export` application scenario builds the bracket through MCP, exports `
 
 STEP import accepts single-body analytic solids, including spheres, tori and general cone angles, and spline files the kernel can certify. Binary-noise cleanup and planar source cleanup keep their measured bounds in the saved import record. Unsupported geometry gets a plain message and leaves the part unchanged.
 
-File > Import STEP reads a source file and shows its repair preview. Accept applies automatic repairs within the kernel's cap without saving an acceptance answer. A seam above that cap, or one where the nearest feature is unknown, asks for an allowed movement of at least the measured gap and the name of who approved it, and Accept stays off until both are given. Decline keeps the source with a declined answer and an unbuilt import in the tree, and the solid stays open until the gap is resolved. Cancel leaves the part unchanged. Closing the preview also cancels it. STEP and IGES files with several solids create a separate body and import feature for each source solid, in one undo step. Each feature keeps the original bytes, their hash, the shared repair record and its source entity selector. Reordering features cannot swap their source solids. Replacing a selected import with changed source bytes is refused; import the changed file as new bodies instead.
+File > Import STEP reads a source file and shows its repair preview. Accept applies automatic repairs within the kernel's cap without saving an acceptance answer. A seam above that cap, or one where the nearest feature is unknown, asks for an allowed movement of at least the measured gap and the name of who approved it, and Accept stays off until both are given. Decline keeps the source with a declined answer and an unbuilt import in the tree, and the solid stays open until the gap is resolved. Cancel leaves the part unchanged. Closing the preview also cancels it. STEP and IGES files with several solids create a separate body and import feature for each source solid, in one undo step. Each feature keeps the original bytes, their hash, the shared repair record and its source entity selector. Reordering features cannot swap their source solids. Changed source bytes for a selected STEP import replace the whole file when every solid and every referenced face has a verified partner; see [Replace an imported file](#replace-an-imported-file). A file with an unmatched solid or referenced face, and changed IGES source bytes for a selected solid, are refused; import the changed file as new bodies instead.
 
 The part file keeps the original source bytes, their SHA-256, repair decisions and the import record. An approved repair is saved under its question as `accept:<tolerance-mm>:<approver>`. Reopening checks the digest and verifies the saved record against the source before rebuilding the body. Repairs never overwrite the source file. A built import can be exported through the checked STEP route above.
 
@@ -126,8 +126,9 @@ step. A file whose numbers alone changed therefore keeps every reference. If a s
 or a referenced face has no verified partner, because its geometry changed or occurs
 twice, the replacement is refused and nothing changes. The match is made when the
 replacement is previewed; if the part changes before Accept, Accept refuses and the
-replacement must be previewed again. Repair answers given for the old file are not
-carried to the new one.
+replacement must be previewed again. The match carries no repair answers yet, so a
+file whose imports were answered, or a new file whose review answers a repair question,
+is refused and nothing changes.
 
 MCP clients preview with `feature` naming the import, then call `replace_import`
 with the same `feature`, `path`, `format`, preview token and reviewed answers.

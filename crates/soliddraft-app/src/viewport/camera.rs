@@ -299,24 +299,29 @@ impl Camera {
         let mut target = center;
         if height > 0.0 && clear > height * 0.3 {
             let up = Vec3::new(-pitch.sin() * yaw.cos(), -pitch.sin() * yaw.sin(), pitch.cos()).normalize_or_zero();
-            // How far the part reaches up and down the screen from its middle. The fit
-            // above holds the part's whole sphere; it zooms out further only when that
-            // reach would not fit the clear band, as with a tall sketch.
-            let reach = match bounds {
-                Some((lo, hi)) => (0..8)
-                    .map(|i| {
-                        let corner = Vec3::new(
-                            if i & 1 == 0 { lo.x } else { hi.x },
-                            if i & 2 == 0 { lo.y } else { hi.y },
-                            if i & 4 == 0 { lo.z } else { hi.z },
-                        );
-                        (corner - center).dot(up).abs()
-                    })
-                    .fold(0.0, f32::max),
-                None => radius,
-            };
+            let back = Vec3::new(pitch.cos() * yaw.cos(), pitch.cos() * yaw.sin(), pitch.sin());
             let tan = (self.fov_y / 2.0).tan();
-            distance = distance.max(reach * 1.1 * height / clear / tan);
+            // The clear band in the view's tangent units: its middle, above the viewport's,
+            // and its half height, with a tenth to spare.
+            let middle = tan * (bottom - top) / height;
+            let half = tan * clear / height / 1.1;
+            // The target moves so the part's middle lands on the band's. A corner `rise` above
+            // that middle and `toward` the eye then projects inside the band once the eye is
+            // at least toward + |rise + middle * toward| / half away. The fit above holds the
+            // part's whole sphere; it zooms out further only when a corner needs it, as with
+            // a tall sketch, or a near corner of a deep part in perspective.
+            if let Some((lo, hi)) = bounds {
+                for i in 0..8 {
+                    let corner = Vec3::new(
+                        if i & 1 == 0 { lo.x } else { hi.x },
+                        if i & 2 == 0 { lo.y } else { hi.y },
+                        if i & 4 == 0 { lo.z } else { hi.z },
+                    );
+                    let rise = (corner - center).dot(up);
+                    let toward = if self.orthographic { 0.0 } else { (corner - center).dot(back) };
+                    distance = distance.max(toward + (rise + middle * toward).abs() / half);
+                }
+            }
             let mm_per_point = 2.0 * distance * tan / height;
             // The band's centre is (top - bottom) / 2 points below the viewport's.
             target += up * (top - bottom) / 2.0 * mm_per_point;

@@ -25,9 +25,14 @@ impl SolidDraftApp {
     /// Closes the open editor, restoring the display the editor rolled back.
     pub(super) fn close_editor(&mut self) -> Option<FeatureEditor> {
         let e = self.state.editor.take()?;
-        if e.target.is_some() && self.state.doc.rollback != e.saved_rollback {
-            self.state.doc.rollback = e.saved_rollback;
-            let _ = self.state.doc.rebuild();
+        if e.target.is_some() {
+            if self.state.doc.rollback != e.saved_rollback {
+                self.state.doc.rollback = e.saved_rollback;
+                let _ = self.state.doc.rebuild();
+            }
+            if self.state.sketch.as_ref().is_none_or(|s| s.restore_rollback.is_none()) {
+                self.state.doc.release_rollback();
+            }
         }
         Some(e)
     }
@@ -41,6 +46,8 @@ impl SolidDraftApp {
             && let Some(i) = self.state.doc.index_of(id)
             && self.state.doc.rollback.is_none_or(|r| r > i)
         {
+            // Saving while the editor is open keeps the bar where the user left it.
+            self.state.doc.hold_rollback();
             self.state.doc.rollback = Some(i);
             let _ = self.state.doc.rebuild();
         }
@@ -53,6 +60,9 @@ impl SolidDraftApp {
         if let Some(rollback) = session.restore_rollback {
             self.state.doc.rollback = rollback.filter(|r| *r < self.state.doc.features.len());
             let _ = self.state.doc.rebuild();
+            if self.state.editor.as_ref().is_none_or(|e| e.target.is_none()) {
+                self.state.doc.release_rollback();
+            }
         }
     }
 
@@ -133,6 +143,8 @@ impl SolidDraftApp {
             && self.state.doc.rollback.is_none_or(|r| r > index + 1)
         {
             session.restore_rollback = Some(self.state.doc.rollback);
+            // Saving while the sketch is open keeps the bar where the user left it.
+            self.state.doc.hold_rollback();
             self.state.doc.rollback = Some(index + 1);
             let _ = self.state.doc.rebuild();
         }
@@ -786,11 +798,8 @@ impl SolidDraftApp {
                     }
                     (None, EditorParams::Repair { .. }) => return,
                 };
-                // A dimension edit keeps the proof path the drag and the typed value use.
-                if self.state.doc.edits_scalar(&cmd) {
-                    self.apply(ctx, AppAction::Command(cmd));
-                    return;
-                }
+                // Every OK builds before the form closes, a dimension edit too, so a refused
+                // one keeps its form, and the part and its history stay as they were.
                 if let Some(drag) = self.state.drag_preview.take() {
                     drag.cancel(&mut self.state.doc);
                 }

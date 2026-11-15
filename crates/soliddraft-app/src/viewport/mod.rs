@@ -80,6 +80,8 @@ pub struct ViewportEvents {
     pub secondary_clicked: Option<Option<Picked>>,
     /// Where a secondary click resolved, including one that waited for a readback.
     pub context_position: Option<Pos2>,
+    /// Whether Shift was held at that secondary click, which asks for the ring.
+    pub context_ring: bool,
     /// With a click on no model: the reference it found.
     pub clicked_reference: Option<Reference>,
     /// A primary click on a curve of a shown sketch outside sketch editing.
@@ -162,6 +164,8 @@ impl<'a> RoundingOverlay<'a> {
 #[derive(Clone, Copy)]
 struct ContextPick {
     at: Pos2,
+    /// Shift as it was at the click: the readback can land after it is let go.
+    ring: bool,
     rect: Rect,
     view: PickView,
     revision: Option<render::PickRevision>,
@@ -392,7 +396,8 @@ impl ViewportState {
             && response.secondary_clicked()
             && let Some(at) = response.interact_pointer_pos()
         {
-            self.context_pick = Some(ContextPick { at, rect, view: pick_view, revision: pick_revision });
+            let ring = ui.input(|i| i.modifiers.shift);
+            self.context_pick = Some(ContextPick { at, ring, rect, view: pick_view, revision: pick_revision });
         }
         self.context_pick = self
             .context_pick
@@ -459,6 +464,7 @@ impl ViewportState {
             if planes::sample_is_current(&sample, pick.revision, pick.view, px) {
                 events.secondary_clicked = Some(decode_pick(&sample, px[0], px[1], pick_filter));
                 events.context_position = Some(pick.at);
+                events.context_ring = pick.ring;
                 self.context_pick = None;
             }
             ui.ctx().request_repaint_after(std::time::Duration::from_millis(16));
@@ -466,6 +472,7 @@ impl ViewportState {
         if menu_ready {
             if sketching && response.secondary_clicked() {
                 events.context_position = response.interact_pointer_pos();
+                events.context_ring = ui.input(|i| i.modifiers.shift);
             }
             events.context_response = Some(response.clone());
         }

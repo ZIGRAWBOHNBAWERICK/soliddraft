@@ -100,6 +100,9 @@ pub struct Document {
     pub(crate) datum_names: BTreeMap<DatumPlane, String>,
     /// The first feature below the rollback bar.
     pub(crate) rollback: Option<FeatureId>,
+    /// The rollback bar as the user left it, held while a view such as an editor shows
+    /// the part rolled back further. Files and recovery copies record this one.
+    pub(crate) held_rollback: Option<Option<FeatureId>>,
     pub(crate) next_id: u32,
     pub(crate) next_body: u32,
     /// The material, the appearances and the copies of both the part holds.
@@ -149,6 +152,7 @@ impl Document {
             table_edits: 0,
             datum_names: BTreeMap::new(),
             rollback: None,
+            held_rollback: None,
             next_id: 1,
             next_body: 1,
             materials: PartMaterials::default(),
@@ -695,6 +699,33 @@ impl Document {
             self.rebuild();
             Ok(())
         })());
+    }
+
+    /// Holds the rollback bar where it stands for files and recovery copies while a view
+    /// moves it with [`Self::set_rollback`], as an editor does to show the part as it was
+    /// before a feature. A second hold keeps the first bar.
+    pub fn hold_rollback(&mut self) {
+        let journal = self.journal_command(|| serde_json::json!({"op":"hold_rollback"}));
+        let _ = journal.finish({
+            if self.held_rollback.is_none() {
+                self.held_rollback = Some(self.rollback);
+            }
+            Ok::<_, String>(())
+        });
+    }
+
+    /// Ends a hold: files record the rollback bar where it stands again.
+    pub fn release_rollback(&mut self) {
+        let journal = self.journal_command(|| serde_json::json!({"op":"release_rollback"}));
+        let _ = journal.finish({
+            self.held_rollback = None;
+            Ok::<_, String>(())
+        });
+    }
+
+    /// The rollback bar a file records: the held one while a view moves the bar.
+    pub(crate) fn saved_rollback(&self) -> Option<FeatureId> {
+        self.held_rollback.unwrap_or(self.rollback)
     }
 
     /// The name of a face for people, such as "Boss-Extrude1 · End cap".

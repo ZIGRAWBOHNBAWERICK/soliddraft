@@ -21,7 +21,10 @@ fn block(width: f64, depth: f64) -> FeatureKind {
 }
 
 fn add(doc: &mut Document, body: u32, kind: FeatureKind) -> FeatureId {
-    doc.execute(Command::AddFeatureInBody { body, kind, via_assistant: false }).unwrap().created.unwrap()
+    doc.execute(Command::AddFeatureInBody { body, kind, via_assistant: false, position: None })
+        .unwrap()
+        .created
+        .unwrap()
 }
 
 fn volume(doc: &Document, key: u32) -> f64 {
@@ -141,6 +144,7 @@ fn deferred_deletion_and_combination_keep_the_previous_body_membership_until_reb
         body: 0,
         kind: FeatureKind::Combine { operation: BooleanOp::Union, tool: 1 },
         via_assistant: false,
+        position: None,
     })
     .unwrap();
     assert_eq!(doc.live_bodies(), before);

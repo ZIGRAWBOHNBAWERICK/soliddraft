@@ -243,7 +243,14 @@ impl TabViewer for Panels<'_> {
                     if relations {
                         crate::context_menu::close(response);
                     } else {
-                        crate::context_menu::show_at(st, response, target, selection, events.context_position);
+                        crate::context_menu::show_at(
+                            st,
+                            response,
+                            target,
+                            selection,
+                            events.context_position,
+                            events.context_ring,
+                        );
                     }
                     if let Some(session) = st.sketch.as_mut()
                         && let Some(action) = crate::sketcher::relations::show(ui, session, response.layer_id)

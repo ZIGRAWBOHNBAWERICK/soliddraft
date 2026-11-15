@@ -2654,9 +2654,26 @@ impl Document {
             let retained = if deferred || drawn.is_some() { None } else { self.retained_display() };
             let commands = self.to_model(command)?;
             let batch = model::Command::Batch { label, commands };
+            let edited = form.flatten();
+            // A form's feature, and a fillet or chamfer, is built in a fork first. A refused
+            // one then leaves the part and its history as they were, redo included.
+            let staged = if !deferred && (rounding || form.is_some()) {
+                let mut fork = self.model.fork();
+                let done = fork.execute(batch.clone()).map_err(|error| error.to_string())?;
+                let made = done.created.into_iter().chain(edited.map(model_id));
+                if let Some(why) = form_features(&fork, made).into_iter().find_map(|id| refusal(&fork, id)) {
+                    return Err(why);
+                }
+                Some(fork)
+            } else {
+                None
+            };
             let done = self.model.execute_deferred(batch).map_err(|error| error.to_string())?;
             if !deferred && self.model.geometry_hash() != self.geometry {
-                self.model.rebuild();
+                // The fork built exactly these definitions; anything else builds again.
+                if staged.is_none_or(|fork| self.model.rebuild_reusing(&fork).is_err()) {
+                    self.model.rebuild();
+                }
             }
             self.touch();
             if deferred {
@@ -2670,7 +2687,6 @@ impl Document {
                 self.active_body = feature.body_key;
             }
             // A form's feature fails when it or its Draft option does.
-            let edited = form.flatten();
             let refused =
                 created.into_iter().chain(edited).chain(edited.and_then(|id| self.linked_draft(id))).find_map(|id| {
                     match self.feature(id).map(|f| f.status.clone()) {
@@ -2721,24 +2737,8 @@ impl Document {
             commands.append(&mut base);
             return Ok(commands);
         }
-        if let Some(owner) = target
-            && let Some(existing) = self.linked_draft(owner)
-            && let Some(model::Command::EditFeature { kind, .. }) = linked.first()
-        {
-            // Rebuilding the extrusion under its old draft could fail on the old faces, so
-            // the old draft goes and the new one follows the extrusion.
-            let mut commands = vec![model::Command::DeleteFeature { id: model_id(existing) }];
-            commands.append(&mut base);
-            let owner = model_id(owner);
-            let after = self.model.features().iter().position(|f| f.id == owner).map(|i| i + 1);
-            commands.push(model::Command::AddFeature {
-                kind: kind.clone(),
-                name: None,
-                position: after,
-                via_assistant: false,
-            });
-            return Ok(commands);
-        }
+        // An edited draft keeps its identity, body and place: the batch builds once, after
+        // both edits, so the old faces are never built under the new extrusion.
         base.extend(linked);
         Ok(base)
     }
@@ -2756,7 +2756,12 @@ impl Document {
             };
             let body = sketch.and_then(|id| self.model.feature(id)).map_or(self.active_body, |f| f.body);
             if body != 0 {
-                model::Command::AddFeatureInBody { body, kind, via_assistant: via_assistant || self.assistant_mark }
+                model::Command::AddFeatureInBody {
+                    body,
+                    kind,
+                    via_assistant: via_assistant || self.assistant_mark,
+                    position: None,
+                }
             } else {
                 model::Command::AddFeature {
                     kind,
@@ -2844,6 +2849,7 @@ impl Document {
                         body: if index == 0 { first } else { next + (index as u32 - 1) },
                         kind: model::FeatureKind::ImportStep(import),
                         via_assistant: self.assistant_mark,
+                        position: None,
                     })
                     .collect()
             }
@@ -3004,6 +3010,17 @@ impl Document {
                 vec![model::Command::EditFeature { id: model_id(id), kind }]
             }
         })
+    }
+
+    /// Holds the rollback bar as the user left it for saving and recovery copies, while a
+    /// view such as an editor rolls the part back further.
+    pub fn hold_rollback(&mut self) {
+        self.model.hold_rollback();
+    }
+
+    /// Ends the hold once the view has put the bar back.
+    pub fn release_rollback(&mut self) {
+        self.model.release_rollback();
     }
 
     /// Pushes the display rollback to the model and rebuilds what it changed.
@@ -3273,17 +3290,17 @@ impl Document {
             reverse: extrude.reverse,
             of: Some(owner),
         });
+        // A new extrusion's draft follows it; an edited one's goes right below it, in its body.
+        let position = target.and(fork.features().iter().position(|f| f.id == owner).map(|i| i + 1));
         Ok(vec![match existing {
             Some(id) => model::Command::EditFeature { id: model_id(id), kind },
-            None if feature.body != 0 => {
-                model::Command::AddFeatureInBody { body: feature.body, kind, via_assistant: self.assistant_mark }
-            }
-            None => {
-                let after = fork.features().iter().position(|f| f.id == owner).map(|i| i + 1);
-                // A new extrusion's draft follows it; an edited one's goes right below it.
-                let position = target.and(after);
-                model::Command::AddFeature { kind, name: None, position, via_assistant: self.assistant_mark }
-            }
+            None if feature.body != 0 => model::Command::AddFeatureInBody {
+                body: feature.body,
+                kind,
+                via_assistant: self.assistant_mark,
+                position,
+            },
+            None => model::Command::AddFeature { kind, name: None, position, via_assistant: self.assistant_mark },
         }])
     }
 
@@ -4912,6 +4929,43 @@ pub fn hole_head_text(head: &soliddraft_kernel_api::HoleHead) -> String {
 }
 
 /// The panels' state for a feature after a rebuild.
+/// The features a form's OK makes or edits, `ids`, with the draft that is the Draft option
+/// of one and the extrusion whose Draft option another is.
+fn form_features(model: &model::Document, ids: impl Iterator<Item = model::FeatureId>) -> Vec<model::FeatureId> {
+    let mut found: Vec<model::FeatureId> = Vec::new();
+    for id in ids {
+        let owner = match model.feature(id).map(|f| &f.kind) {
+            Some(model::FeatureKind::Draft(d)) => d.of,
+            _ => None,
+        };
+        let drafts = model
+            .features()
+            .iter()
+            .filter(|f| matches!(&f.kind, model::FeatureKind::Draft(d) if d.of == Some(id)))
+            .map(|f| f.id);
+        for id in std::iter::once(id).chain(owner).chain(drafts) {
+            if !found.contains(&id) {
+                found.push(id);
+            }
+        }
+    }
+    found
+}
+
+/// Why feature `id` did not build in `model`: it failed, a reference of it needs repair,
+/// or an input of it does.
+fn refusal(model: &model::Document, id: model::FeatureId) -> Option<String> {
+    let name = |id: model::FeatureId| model.feature(id).map_or_else(|| id.to_string(), |f| f.name.clone());
+    match model.status(id)? {
+        model::FeatureStatus::Failed(message) => Some(message.clone()),
+        model::FeatureStatus::RepairNeeded(repairs) => {
+            Some(repairs.first().map_or_else(|| format!("{} needs repair", name(id)), |repair| repair.message.clone()))
+        }
+        model::FeatureStatus::Blocked(input) => Some(format!("{} needs repair first", name(*input))),
+        _ => None,
+    }
+}
+
 fn view_status(
     kind: &model::FeatureKind,
     status: model::FeatureStatus,

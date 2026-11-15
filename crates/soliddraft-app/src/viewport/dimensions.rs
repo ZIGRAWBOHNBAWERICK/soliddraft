@@ -170,11 +170,12 @@ pub fn paint(
             });
         }
     };
-    // Reserve authored labels across every visible sketch before placing any defaults.
+    // Reserve authored labels across every visible sketch before placing any defaults. One
+    // feature's set leaves out a sketch that is only shown and is not its own.
     let sketches = built.iter().filter_map(|f| {
         let FeatureKind::Sketch(s) = &f.kind else { return None };
         let plane = f.plane?;
-        (visible_sketches.contains(&f.id)
+        ((visible_sketches.contains(&f.id) && (only.is_none() || in_body(f)))
             || (body && in_body(f) && built.iter().any(|c| c.kind.sketch() == Some(f.id))))
         .then_some((*f, plane, &s.sketch))
     });

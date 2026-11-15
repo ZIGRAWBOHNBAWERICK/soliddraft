@@ -379,7 +379,8 @@ struct OpenMenu {
 
 pub fn show(state: &mut AppState, response: &egui::Response, target: Target, selection: Option<Selection>) {
     let at = response.secondary_clicked().then(|| response.interact_pointer_pos()).flatten();
-    show_at(state, response, target, selection, at);
+    let ring = response.ctx.input(|input| input.modifiers.shift);
+    show_at(state, response, target, selection, at, ring);
 }
 
 /// Closes the menu `response` opened, if it is open.
@@ -388,19 +389,21 @@ pub fn close(response: &egui::Response) {
     egui::Popup::close_id(&response.ctx, response.id.with("context_menu"));
 }
 
+/// Opens the menu at `at`, where a secondary click resolved, or keeps an open one showing.
+/// `ring` is whether Shift was held at that click.
 pub fn show_at(
     state: &mut AppState,
     response: &egui::Response,
     target: Target,
     selection: Option<Selection>,
     at: Option<egui::Pos2>,
+    ring: bool,
 ) {
     let key = response.id.with("context_target");
     let popup_id = response.id.with("context_menu");
     let opening = at.is_some();
     let document = state.doc.model().id();
     let sketch = state.sketch.as_ref().map(|s| s.feature);
-    let ring = response.ctx.input(|input| input.modifiers.shift);
     let menu = at
         .map(|at| OpenMenu { target, selection, at, document, sketch, ring })
         .or_else(|| response.ctx.data(|data| data.get_temp::<OpenMenu>(key)));

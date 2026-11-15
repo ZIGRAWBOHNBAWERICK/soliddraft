@@ -212,7 +212,7 @@ impl Document {
             configurations: self.configurations.clone(),
             properties: self.properties.clone(),
             datum_names: self.datum_names.clone(),
-            rollback: self.rollback,
+            rollback: self.saved_rollback(),
             next_feature: self.next_id,
             next_body: self.next_body,
             material: self.materials.material.clone(),

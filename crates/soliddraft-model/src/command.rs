@@ -39,7 +39,8 @@ pub enum Command {
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         via_assistant: bool,
     },
-    /// Adds a feature to a named body, creating that body if it is empty.
+    /// Adds a feature to a named body, creating that body if it is empty. Without a
+    /// position it goes at the rollback bar, or at the end.
     AddFeatureInBody {
         /// Stable body identity.
         body: u32,
@@ -48,6 +49,9 @@ pub enum Command {
         via_assistant: bool,
         /// Feature definition.
         kind: FeatureKind,
+        /// Tree position.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        position: Option<usize>,
     },
     /// Puts back a feature with a known id, as redo of an add and undo of a delete do.
     InsertFeature {
@@ -959,10 +963,10 @@ impl Document {
                     label,
                 })
             }
-            Command::AddFeatureInBody { body, kind, via_assistant } => {
+            Command::AddFeatureInBody { body, kind, via_assistant, position } => {
                 Self::check_kind(&kind)?;
                 self.check_inputs(&kind)?;
-                let position = self.active_count();
+                let position = position.unwrap_or_else(|| self.active_count());
                 let feature = Feature {
                     body,
                     id: FeatureId(self.next_id),
@@ -1063,6 +1067,9 @@ impl Document {
                 let feature = self.features.remove(i);
                 let label = format!("delete {}", feature.name);
                 let mut inverse = Command::InsertFeature { feature, position: i };
+                if self.held_rollback == Some(Some(id)) {
+                    self.held_rollback = Some(self.features.get(i).map(|f| f.id));
+                }
                 if self.rollback == Some(id) {
                     // The bar stays where it was: above the feature that followed.
                     self.rollback = self.features.get(i).map(|f| f.id);
@@ -1116,6 +1123,10 @@ impl Document {
                 let (a, b) =
                     (self.active_count(), before.and_then(|id| self.index_of(id)).unwrap_or(self.features.len()));
                 self.rollback = before;
+                if self.held_rollback.is_some() {
+                    // Rolled for good during a view: the file records the new bar.
+                    self.held_rollback = Some(before);
+                }
                 self.touch(a.min(b));
                 let label = match before.and_then(|id| self.feature(id)) {
                     Some(f) => format!("roll back to before {}", f.name),
@@ -1283,6 +1294,14 @@ impl Document {
             "redo" => self.redo().map(|_| ()).map_err(|e| e.to_string()),
             "rollback" => {
                 self.set_rollback(serde_json::from_value(parse("before")?).map_err(|e| e.to_string())?);
+                Ok(())
+            }
+            "hold_rollback" => {
+                self.hold_rollback();
+                Ok(())
+            }
+            "release_rollback" => {
+                self.release_rollback();
                 Ok(())
             }
             "settings" => self.set_settings(serde_json::from_value(parse("settings")?).map_err(|e| e.to_string())?),

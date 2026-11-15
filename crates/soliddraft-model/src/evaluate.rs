@@ -98,6 +98,7 @@ impl Document {
             table_edits: self.table_edits,
             datum_names: self.datum_names.clone(),
             rollback: self.rollback,
+            held_rollback: self.held_rollback,
             next_id: self.next_id,
             next_body: self.next_body,
             materials: self.materials.clone(),

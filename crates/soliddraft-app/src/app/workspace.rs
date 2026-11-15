@@ -576,6 +576,8 @@ impl eframe::App for SolidDraftApp {
             .and_then(|sel| self.state.doc.describe(sel));
         self.state.hover_point = self.state.viewport.hover_point;
 
+        #[cfg(target_arch = "wasm32")]
+        crate::web::begin_frame();
         self.edit_suite_frame(root);
         self.dialogs(ctx);
         crate::preferences::window(ctx, &mut self.preferences, &mut self.state);

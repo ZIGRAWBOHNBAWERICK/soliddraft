@@ -74,6 +74,12 @@ block, whose kernels give them the same body id: the first block draws 48000 mmÂ
 measured, and neither block shows a volume before its own measurement. Its clicks go to
 fixed points of a 1400 x 813 page, which the web job sets before opening it; a narrower
 page folds the menu bar into one Menu button, so the check refuses any other size.
+Software rendering can make one frame take longer than any fixed pause, so the check
+waits on what the page drew. `shown_details` is empty once a frame draws no Details
+panel: the check clicks a feature tree row only after the options panel, which covers
+the rows, has closed, and confirms the row by the feature name Details draws. Each
+kernel job the page sends, and the worker's receipt, start and reply, go to a trace the
+check sets up; a missing answer prints it.
 
 `ci/browser-preferences.mjs` runs the same application as two visitors, each in a
 browser context with its own storage. It starts Chrome itself and sends keys and clicks

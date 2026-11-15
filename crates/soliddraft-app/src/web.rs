@@ -289,14 +289,20 @@ thread_local! {
     static SHOWN_DETAILS: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
 }
 
+/// Starts a frame with no Details panel drawn, until [`show_details`] notes one.
+pub(crate) fn begin_frame() {
+    SHOWN_DETAILS.with_borrow_mut(String::clear);
+}
+
 /// Notes the rows the Details panel is drawing, for [`shown_details`].
 pub(crate) fn show_details(info: &crate::document::EntityInfo) {
     let shown = serde_json::json!({ "title": info.title, "rows": info.details }).to_string();
     SHOWN_DETAILS.with_borrow_mut(|details| *details = shown);
 }
 
-/// The title and rows the Details panel drew last, as JSON. The canvas has no text a
-/// browser check can read, so checks read the drawn rows here. Read only.
+/// The title and rows of the Details panel in the last frame drawn, as JSON, or an empty
+/// string when that frame drew no Details panel. The canvas has no text a browser check
+/// can read, so checks read the drawn rows here. Read only.
 #[wasm_bindgen]
 pub fn shown_details() -> String {
     SHOWN_DETAILS.with_borrow(|details| details.clone())

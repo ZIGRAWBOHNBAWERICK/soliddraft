@@ -16,7 +16,11 @@
 // and Extrude's Rectangle button. A narrower page folds the menu bar into one Menu
 // button, so the check refuses any other size. New part is clicked, not typed: Chrome
 // on Linux keeps Ctrl+N for a new window. Each step waits for the open part's feature
-// count, which the page reports in its own feedback events, rather than a fixed time.
+// count, which the page reports in its own feedback events, or for what the last frame
+// drew, rather than a fixed time. The options panel covers the feature tree's rows, so
+// a row is clicked only once a frame has drawn the panel closed, and its selection is
+// confirmed by the title Details draws for it. With software rendering a frame can take
+// longer than any fixed pause.
 function check(value, message) { if (!value) throw new Error(message); }
 const PART = [19, 132], INSPECT = [19, 241], MASS = [220, 112], DETAILS = [317, 52], CLOSE = [347, 92];
 const RECTANGLE = [630, 52], FILE = [122, 15], NEW_PART = [138, 42];
@@ -87,9 +91,46 @@ async function features(count, what) {
   }
   throw new Error(`${what}: the open part has ${now} features, not ${count}`);
 }
+// The Details panel the last frame drew, or null when it drew none.
+async function shown() {
+  const drawn = await page.eval(() => window.wasmBindings.shown_details());
+  return drawn ? JSON.parse(drawn) : null;
+}
 async function details() {
-  const shown = await page.eval(() => window.wasmBindings.shown_details());
-  return shown ? Object.fromEntries(JSON.parse(shown).rows) : {};
+  const drawn = await shown();
+  return drawn ? Object.fromEntries(drawn.rows) : {};
+}
+// Closes the options panel and waits for a frame drawn without it.
+async function close(what) {
+  await click(CLOSE);
+  for (let i = 0; i < 100; i++) {
+    if (!(await shown())) return;
+    await page.wait(100);
+  }
+  throw new Error(`${what}: the options panel did not close`);
+}
+// Selects a feature tree row while the options panel is closed, and waits until Details
+// draws the feature `title` for it.
+async function select(row, title, what) {
+  await click([380, row]);
+  await page.wait(300);
+  await click(DETAILS);
+  let drawn = null;
+  for (let i = 0; i < 100; i++) {
+    drawn = await shown();
+    if (drawn && drawn.title === title) return close(what);
+    await page.wait(100);
+  }
+  throw new Error(`${what}: Details shows ${JSON.stringify(drawn && drawn.title)}, not ${title}`);
+}
+// Waits until the page has sent its `count`th kernel job.
+async function sent(count, what) {
+  for (let i = 0; i < 100; i++) {
+    if (await page.eval(() => window.sdKernelTrace.filter(step => step.stage === 'enqueued').length) >= count) return;
+    await page.wait(50);
+  }
+  const trace = await page.eval(() => window.sdKernelTrace);
+  throw new Error(`${what}: Mass props sent no kernel job. Trace: ${JSON.stringify(trace)}`);
 }
 async function volumeShown(volume, what) {
   const wanted = `${Math.round(volume)} mm³`;
@@ -102,12 +143,11 @@ async function volumeShown(volume, what) {
   throw new Error(`${what}: Details shows ${JSON.stringify(rows.Volume)}, not ${wanted}`);
 }
 
-// One timing window: select the row, ask for mass properties and wait until Details
+// One timing window: ask for the selected row's mass properties and wait until Details
 // draws the answer. Nothing on the page's thread may run 250 ms or more meanwhile.
-async function measure(row, count, what) {
+async function measure(row, title, count, what) {
+  await select(row, title, what);
   await page.eval(() => { window.longTasks = []; return true; });
-  await click([380, row]);
-  await page.wait(300);
   await click(MASS);
   const answer = await answered(count, what);
   check('answer' in answer, `${what} failed in the worker: ${JSON.stringify(answer)}`);
@@ -118,13 +158,13 @@ async function measure(row, count, what) {
   const longest = await page.eval(() => Math.max(0, ...window.longTasks));
   console.log(`${what}: volume ${result.ok.volume} mm³ drawn; longest page task ${longest} ms`);
   check(longest < 250, `${what} blocked the page for ${longest} ms`);
-  await click(CLOSE);
+  await close(what);
   return result.ok.volume;
 }
 
 await click(INSPECT);
 await page.wait(500);
-const plate = await measure(ROW.first, 1, 'The sample part\'s plate');
+const plate = await measure(ROW.first, 'Boss-Extrude1', 1, 'The sample part\'s plate');
 check(plate === 108000, `The 120 x 90 x 10 mm plate measured ${plate} mm³`);
 check(await page.eval(() => window.kernelWorkers.length) === 1, 'Mass properties did not start one kernel worker');
 
@@ -137,14 +177,14 @@ await page.eval(() => {
 const fatal = await answered(2, 'the failed worker');
 check('fatal' in fatal, `The worker did not report its failure: ${JSON.stringify(fatal)}`);
 check(await page.eval(() => document.getElementById('status').classList.contains('hidden')), 'The page stopped with its worker');
-const flanged = await measure(ROW.second, 3, 'The plate and flange, after the worker stopped');
+const flanged = await measure(ROW.second, 'Boss-Extrude2', 3, 'The plate and flange, after the worker stopped');
 check(await page.eval(() => window.kernelWorkers.length) === 2, 'The next request did not start a new kernel worker');
 check(flanged > plate, `The plate and flange (${flanged}) are not larger than the plate (${plate})`);
 
 // Ask for the whole part, then replace it with a new part before the answer comes.
-await click([380, ROW.third]);
-await page.wait(300);
+await select(ROW.third, 'Boss-Extrude3', 'The whole part');
 await click(MASS);
+await sent(3, 'The whole part');
 await click(FILE);
 await page.wait(300);
 await click(NEW_PART);
@@ -182,11 +222,11 @@ async function block(what) {
   const rows = await details();
   check(rows['Profile'] === 'Rectangle 60 × 40 on Top plane', `${what} is not the block: ${JSON.stringify(rows)}`);
   check(!('Volume' in rows), `${what} shows a volume it never measured: ${rows.Volume}`);
-  await click(CLOSE);
+  await close(what);
 }
 
 await block('The part that replaced the sample');
-const first = await measure(ROW.first, 5, 'The first new part\'s block');
+const first = await measure(ROW.first, 'Boss-Extrude1', 5, 'The first new part\'s block');
 check(first === 48000, `The 60 x 40 x 20 mm block measured ${first} mm³`);
 await click(FILE);
 await page.wait(300);

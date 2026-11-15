@@ -33,7 +33,7 @@ if len(sys.argv) > 1 and sys.argv[1] == "export":
     data = bytearray(84)
     struct.pack_into("<d", data, 68, 0.1)
     path.write_bytes(data)
-    limit = int(sys.argv[sys.argv.index("--max-work") + 1]) if "--max-work" in sys.argv else 20_000_000
+    limit = int(sys.argv[sys.argv.index("--max-work") + 1]) if "--max-work" in sys.argv else 100_000_000
     print(json.dumps({"report": {"kind": "field_mesh", "deviation_bound_mm": 0.1, "work": 1,
                                "sha256": hashlib.sha256(path.read_bytes()).hexdigest()},
                       "request_work": {"used": 1, "limit": limit, "exhausted": False}}))

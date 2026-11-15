@@ -164,9 +164,9 @@
         },
         {
           "format": "stl",
-          "max_work": 20000001,
+          "max_work": 100000001,
           "sentinel": "existing export sentinel\n",
-          "refused": "20M application limit"
+          "refused": "above the application limit"
         },
         {
           "format": "stl",

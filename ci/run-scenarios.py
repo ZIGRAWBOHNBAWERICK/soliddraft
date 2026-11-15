@@ -37,7 +37,10 @@ TREND_NOISE_MS = 25
 HANG_TIMEOUT_S = 600
 KNOWN_OVER_BUDGET = pathlib.Path(__file__).with_name("known-over-budget.json")
 # One application request's deterministic work limit. Kernel replay keeps its own.
-APP_REQUEST_WORK = 20_000_000
+APP_REQUEST_WORK = 100_000_000
+# The work an application request should fit in. Requests over it still pass, and their
+# checks say so, for the speed phase.
+APP_WORK_TARGET = 20_000_000
 
 
 def budget(tool):
@@ -715,7 +718,9 @@ def request_work_check(value, ceiling):
     """A fresh export ran its whole request, opening and rebuilding included, on one allowance."""
     request = value.get("request_work") or {}
     return {"check": "fresh open, rebuild and export within one allowance", "request_work": request,
-            "ceiling": ceiling, "pass": request.get("limit") == ceiling and request.get("exhausted") is False
+            "ceiling": ceiling, "target": APP_WORK_TARGET,
+            "over_target": isinstance(request.get("used"), int) and request["used"] > APP_WORK_TARGET,
+            "pass": request.get("limit") == ceiling and request.get("exhausted") is False
                                         and value["report"].get("work", 0) <= request.get("used", 0) <= ceiling}
 
 

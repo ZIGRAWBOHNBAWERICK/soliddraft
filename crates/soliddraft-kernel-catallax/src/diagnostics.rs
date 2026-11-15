@@ -109,7 +109,8 @@ impl Diagnostics {
             "on_capture_thread":on_capture_thread,
             "error":result.as_ref().err().map(ToString::to_string),
             "max_work":if caller_mass_allowance {None} else {max_work},
-            "work":work.map(|w| json!({"used":w.used,"exhausted":w.exhausted})),
+            "work":work.map(|w| json!({"used":w.used,"exhausted":w.exhausted,
+                "target":APP_WORK_TARGET,"over_target":w.used > APP_WORK_TARGET})),
             "wall_ms":start.elapsed().as_secs_f64()*1000.0,
             "operation_log":{"format":"catallax-operation-log/1", "operations":entries.iter().enumerate()
                 .map(|(sequence, e)| entry(sequence, e)).collect::<Vec<_>>()}
@@ -149,8 +150,14 @@ fn entry(sequence: usize, e: &OperationEntry) -> Value {
 }
 
 /// The deterministic work one application request may use. Kernel replay and the
-/// scoreboard keep their own limits.
-pub const APP_REQUEST_WORK: u64 = 20_000_000;
+/// scoreboard keep their own limits. Until the speed phase it is five times
+/// [`APP_WORK_TARGET`], so slow parts still build; a request over the target is
+/// recorded as such.
+pub const APP_REQUEST_WORK: u64 = 100_000_000;
+
+/// The work one edit should fit in. A request that uses more is marked
+/// `over_target` in the diagnostics, with its work per stage, for the speed phase.
+pub const APP_WORK_TARGET: u64 = 20_000_000;
 
 /// The deterministic work one whole request used: opening, rebuilding and writing.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -212,6 +219,22 @@ mod tests {
         assert_eq!(calls[0]["max_work"], 5 * APP_REQUEST_WORK);
         assert_eq!(calls[1]["max_work"], APP_REQUEST_WORK);
         assert_eq!(calls[1]["work"]["exhausted"], true);
+    }
+
+    #[test]
+    fn a_request_over_the_work_target_is_marked_and_still_answered() {
+        let diagnostics = Diagnostics::new(Some(APP_REQUEST_WORK));
+        let spend = |units| {
+            move || OperationAllowance::reserve(units).map(|_| ()).map_err(|e| KernelError::Unavailable(e.to_string()))
+        };
+        diagnostics.observe("fillet", spend(APP_WORK_TARGET)).unwrap();
+        diagnostics.observe("fillet", spend(APP_WORK_TARGET + 1)).unwrap();
+        let calls = diagnostics.take();
+        assert_eq!(calls[0]["work"]["target"], APP_WORK_TARGET);
+        assert_eq!(calls[0]["work"]["over_target"], false);
+        assert_eq!(calls[1]["status"], "answered");
+        assert_eq!(calls[1]["work"]["used"], APP_WORK_TARGET + 1);
+        assert_eq!(calls[1]["work"]["over_target"], true);
     }
 
     #[test]

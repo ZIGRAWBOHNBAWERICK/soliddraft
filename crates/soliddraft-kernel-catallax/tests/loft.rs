@@ -150,9 +150,9 @@ fn spline_loft_edge_fillet_keeps_its_proof_and_refuses_a_trimmed_neighbour_plain
 
 #[test]
 fn three_section_smooth_display_fits_the_application_allowance() {
-    use soliddraft_kernel_catallax::{APP_REQUEST_WORK, with_request_allowance};
+    use soliddraft_kernel_catallax::{APP_WORK_TARGET, with_request_allowance};
 
-    assert_eq!(APP_REQUEST_WORK, 20_000_000);
+    assert_eq!(APP_WORK_TARGET, 20_000_000);
     let k = CatallaxKernel::with_operation_log();
     let profiles: Vec<_> = [(2.0, 0.0), (4.0, 3.0), (2.0, 6.0)]
         .into_iter()
@@ -167,7 +167,7 @@ fn three_section_smooth_display_fits_the_application_allowance() {
         })
         .collect();
     let params = TessellationParams { chord_height: 0.01, ..Default::default() };
-    let (answer, work) = with_request_allowance(APP_REQUEST_WORK, || -> KernelResult<_> {
+    let (answer, work) = with_request_allowance(APP_WORK_TARGET, || -> KernelResult<_> {
         let body = k.loft(&OpTag::new("smooth"), &profiles, LoftShape::Smooth)?;
         let mesh = k.rendering(body.body, &params)?;
         Ok((body, mesh))
@@ -211,7 +211,7 @@ fn three_section_smooth_display_fits_the_application_allowance() {
         assert!(view.is_err() && work.exhausted, "named screen geometry cannot satisfy independent view controls");
     }
     // Background mass has its own application request allowance.
-    let (mass, mass_work) = with_request_allowance(APP_REQUEST_WORK, || k.mass_properties(body.body));
+    let (mass, mass_work) = with_request_allowance(APP_WORK_TARGET, || k.mass_properties(body.body));
     eprintln!("three-section Smooth mass: {mass_work:?}; refusal: {:?}", mass.as_ref().err());
     assert!(!mass_work.exhausted, "{mass_work:?}; {:?}", mass.as_ref().err());
     let mass = mass.unwrap();

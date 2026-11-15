@@ -6,7 +6,7 @@ use soliddraft_app::app_tools::AppTools;
 use soliddraft_app::state::AppState;
 use soliddraft_assistant::Caller;
 use soliddraft_assistant::tools::{ToolOutput, call_checked};
-use soliddraft_kernel_catallax::{APP_REQUEST_WORK, with_request_allowance};
+use soliddraft_kernel_catallax::{APP_WORK_TARGET, with_request_allowance};
 
 static CONFIG: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
@@ -59,7 +59,7 @@ fn a_refused_export_leaves_its_destination_alone() {
 #[test]
 fn smooth_rendering_cannot_satisfy_an_independent_certified_export() {
     let _config = CONFIG.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    assert_eq!(APP_REQUEST_WORK, 20_000_000);
+    assert_eq!(APP_WORK_TARGET, 20_000_000);
     let dir = std::env::temp_dir().join(format!("soliddraft-smooth-export-{}", soliddraft_document::DocumentId::new()));
     std::fs::create_dir_all(&dir).unwrap();
     soliddraft_app::file::set_config_dir(Some(dir.join("config")));
@@ -82,7 +82,7 @@ fn smooth_rendering_cannot_satisfy_an_independent_certified_export() {
     assert!(refused.is_error && work.exhausted, "{}; {work:?}", refused.content);
     assert!(refused.content.contains("numbers.operation-budget"), "{}", refused.content);
     assert_eq!(std::fs::read(&path).unwrap(), sentinel);
-    let (refused, work) = with_request_allowance(APP_REQUEST_WORK, || call(&mut state, "export_stl", arguments));
+    let (refused, work) = with_request_allowance(APP_WORK_TARGET, || call(&mut state, "export_stl", arguments));
     eprintln!("three-section Smooth certified export: {work:?}; {}", refused.content);
     assert!(refused.is_error && work.exhausted, "{}; {work:?}", refused.content);
     assert!(refused.content.contains("numbers.operation-budget"), "{}", refused.content);

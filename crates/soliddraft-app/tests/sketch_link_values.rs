@@ -232,3 +232,70 @@ fn named_configuration_links_and_unlinks_use_local_overrides() {
     doc.apply(Command::ActivateConfiguration { name: "Default".into() }).unwrap();
     assert_eq!(values(&doc, id, ids), [10.0, 14.0]);
 }
+
+/// The sketch with dimension `constraint` deleted, as Delete in the sketcher leaves it.
+fn without(doc: &Document, id: FeatureId, constraint: u32) -> Sketch {
+    let mut sketch = doc.feature(id).unwrap().sketch().unwrap().sketch.clone();
+    sketch.remove_constraint(constraint);
+    sketch
+}
+
+#[test]
+fn deleting_a_linked_dimension_takes_its_link_in_one_undo_step() {
+    let (mut doc, id, ids) = fixture();
+    doc.apply(link(id, ids.to_vec(), "Span", None)).unwrap();
+    let linked = doc.model().part_json();
+    let depth = doc.model().undo_depth();
+    doc.apply(Command::EditSketch { id, sketch: without(&doc, id, ids[1]) }).unwrap();
+    assert_eq!(doc.model().undo_depth(), depth + 1);
+    let links = soliddraft_app::sketch_values::links(doc.model(), id);
+    assert_eq!(links.keys().copied().collect::<Vec<_>>(), vec![ids[0]], "the other dimension keeps Span");
+    let deleted = doc.model().part_json();
+    doc.undo().unwrap();
+    assert_eq!(doc.model().part_json(), linked, "undo restores the dimension and its link");
+    doc.redo().unwrap();
+    assert_eq!(doc.model().part_json(), deleted);
+    // Span still drives the dimension left.
+    doc.apply(Command::SetValue { name: "Span".into(), expression: "16 mm".into() }).unwrap();
+    let sketch = &doc.feature(id).unwrap().sketch().unwrap().sketch;
+    assert_eq!(sketch.constraint(ids[0]).unwrap().value(), Some(16.0));
+}
+
+#[test]
+fn a_dimension_another_value_reads_is_kept_with_the_reason() {
+    let (mut doc, id, ids) = fixture();
+    let table = doc.model().values_table();
+    let name = table
+        .groups
+        .iter()
+        .flat_map(|g| &g.rows)
+        .find(|r| matches!(r.input, Some(soliddraft_model::values::Input::Dimension { constraint, .. }) if constraint == ids[1]))
+        .unwrap()
+        .name
+        .clone();
+    doc.apply(Command::SetValue { name: "Twice".into(), expression: format!("2 * {name}") }).unwrap();
+    let before = (doc.model().part_json(), doc.model().undo_depth());
+    let error = doc.apply(Command::EditSketch { id, sketch: without(&doc, id, ids[1]) }).unwrap_err();
+    assert!(error.contains(&format!("Twice reads {name}")), "{error}");
+    assert_eq!((doc.model().part_json(), doc.model().undo_depth()), before);
+}
+
+#[test]
+fn deleting_a_dimension_a_configuration_links_drops_that_override() {
+    let (mut doc, id, ids) = fixture();
+    doc.apply(Command::AddConfiguration { name: "Thin".into() }).unwrap();
+    doc.apply(Command::ActivateConfiguration { name: "Thin".into() }).unwrap();
+    doc.apply(link(id, ids.to_vec(), "Span", None)).unwrap();
+    let linked = doc.model().part_json();
+    let depth = doc.model().undo_depth();
+    doc.apply(Command::EditSketch { id, sketch: without(&doc, id, ids[1]) }).unwrap();
+    assert!(doc.feature(id).unwrap().sketch().unwrap().sketch.constraint(ids[1]).is_none());
+    for name in ["Default", "Thin"] {
+        doc.apply(Command::ActivateConfiguration { name: name.into() }).unwrap();
+        assert!(doc.feature(id).unwrap().sketch().unwrap().sketch.constraint(ids[1]).is_none(), "{name}");
+    }
+    while doc.model().undo_depth() > depth {
+        doc.undo().unwrap();
+    }
+    assert_eq!(doc.model().part_json(), linked, "undo brings back the dimension and its override");
+}

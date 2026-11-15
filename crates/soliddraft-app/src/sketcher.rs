@@ -136,11 +136,33 @@ fn hit_test(frame: &Frame<'_>, sketch: &Sketch, pos: Pos2, glyphs: &[(Constraint
     best.map(|(_, id)| SketchSel::Entity(id))
 }
 
+/// What a click at `pos` selects. A dimension's value pill is drawn over the geometry,
+/// so the label under the pointer comes first, as what the user sees on top.
+fn pick(
+    frame: &Frame<'_>,
+    sketch: &Sketch,
+    pos: Pos2,
+    glyphs: &[(ConstraintId, Rect)],
+    labels: &[(ConstraintId, Rect)],
+) -> Option<SketchSel> {
+    label_at(labels, pos).map(SketchSel::Constraint).or_else(|| hit_test(frame, sketch, pos, glyphs))
+}
+
+/// The dimension whose label is under `pos`; the last drawn is on top.
+fn label_at(labels: &[(ConstraintId, Rect)], pos: Pos2) -> Option<ConstraintId> {
+    labels.iter().rev().find(|(_, r)| r.contains(pos)).map(|(id, _)| *id)
+}
+
+/// The dimension labels on screen, when the sketch shows its dimensions.
+fn shown_labels(ui: &egui::Ui, frame: &Frame<'_>, s: &SketchSession) -> Vec<(ConstraintId, Rect)> {
+    if s.show_dimensions { label_rects(frame, &s.sketch, ui) } else { Vec::new() }
+}
+
 /// Picks the right-click target without drawing or committing a tool preview.
-pub fn context_pick(s: &SketchSession, camera: &Camera, rect: Rect, pos: Pos2) -> Option<SketchSel> {
+pub fn context_pick(ui: &egui::Ui, s: &SketchSession, camera: &Camera, rect: Rect, pos: Pos2) -> Option<SketchSel> {
     let frame = Frame { plane: s.plane, camera, rect };
     let glyphs = if s.show_relations { glyph_rects(&frame, &s.sketch) } else { Vec::new() };
-    hit_test(&frame, &s.sketch, pos, &glyphs)
+    pick(&frame, &s.sketch, pos, &glyphs, &shown_labels(ui, &frame, s))
 }
 
 /// The curve under the pointer, ignoring points and relation glyphs.
@@ -260,13 +282,7 @@ pub fn run(
             s.hover = hit_curve(&frame, &s.sketch, pos, ignore_guide_targets(s)).map(SketchSel::Entity);
             s.preview = curve_preview(s, &frame, pos);
         } else if s.selection_box.is_none() {
-            s.hover = hit_test(&frame, &s.sketch, pos, &glyphs);
-            if s.hover.is_none()
-                && s.show_dimensions
-                && let Some((id, _)) = label_rects(&frame, &s.sketch, ui).into_iter().find(|(_, r)| r.contains(pos))
-            {
-                s.hover = Some(SketchSel::Constraint(id));
-            }
+            s.hover = pick(&frame, &s.sketch, pos, &glyphs, &shown_labels(ui, &frame, s));
         }
     }
     if s.tool.selects() && s.tool != Tool::Select {
@@ -737,7 +753,7 @@ fn stretch_box(ui: &egui::Ui, s: &mut SketchSession, frame: &Frame<'_>, pos: Pos
     if s.selection_box.is_none() {
         return;
     }
-    let labels = if s.show_dimensions { label_rects(frame, &s.sketch, ui) } else { Vec::new() };
+    let labels = shown_labels(ui, frame, s);
     if let Some(b) = s.selection_box.as_mut() {
         b.end = pos;
         b.picks = select_box::targets(frame, &s.sketch, &labels, b.rect(), b.kind());
@@ -760,20 +776,18 @@ fn select_input(
     if resp.drag_started_by(egui::PointerButton::Primary)
         && let Some(pos) = ui.input(|i| i.pointer.press_origin())
     {
-        let labels = if s.show_dimensions { label_rects(frame, &s.sketch, ui) } else { Vec::new() };
-        let hit = hit_test(frame, &s.sketch, pos, &[]);
-        let label = labels.into_iter().find(|(_, r)| r.contains(pos)).map(|(id, _)| id);
+        // The label on top moves before the geometry under it, as a click selects it.
+        let hit = pick(frame, &s.sketch, pos, &[], &shown_labels(ui, frame, s));
         // A drag from empty space draws a selection box instead of moving anything.
-        s.selection_box = (hit.is_none() && label.is_none())
-            .then(|| select_box::SelectionBox::new(pos, select_box::Combine::of(modifiers)));
-        s.drag = match (hit, label) {
-            (Some(SketchSel::Point(p)), _) if p.entity != crate::sketch::ORIGIN => {
+        s.selection_box = hit.is_none().then(|| select_box::SelectionBox::new(pos, select_box::Combine::of(modifiers)));
+        s.drag = match hit {
+            Some(SketchSel::Point(p)) if p.entity != crate::sketch::ORIGIN => {
                 Some(SketchDrag::Point { point: p, moved: false })
             }
-            (Some(SketchSel::Entity(e)), _) => {
+            Some(SketchSel::Entity(e)) => {
                 frame.plane_at(pos).map(|last| SketchDrag::Entity { entity: e, last, moved: false })
             }
-            (_, Some(c)) => {
+            Some(SketchSel::Constraint(c)) => {
                 let label = s.sketch.constraint(c).and_then(|c| c.label()).unwrap_or(P2::ZERO);
                 let at = frame.plane_at(pos).unwrap_or(label);
                 Some(SketchDrag::Label { constraint: c, offset: label.sub(at) })
@@ -1783,7 +1797,8 @@ fn paint_dimensions(painter: &egui::Painter, frame: &Frame<'_>, s: &SketchSessio
     for c in s.sketch.constraints.iter().filter(|c| c.is_dimension()) {
         let sel = s.selection.contains(&SketchSel::Constraint(c.id));
         let hover = s.hover == Some(SketchSel::Constraint(c.id));
-        let bad = conflicting.contains(&c.id);
+        // Broken: the solver could not hold it, or it names geometry that is gone.
+        let bad = conflicting.contains(&c.id) || c.is_dangling(&s.sketch);
         let color = if bad {
             theme::error()
         } else if sel {
@@ -1798,18 +1813,20 @@ fn paint_dimensions(painter: &egui::Painter, frame: &Frame<'_>, s: &SketchSessio
             theme::selection_bg()
         } else if hover {
             theme::hover()
+        } else if bad {
+            theme::error_soft()
         } else {
             theme::hud_bg()
         };
         let ink = if bad { theme::error() } else { theme::ink() };
-        value_pill(
-            painter,
-            lp,
-            dim_text(c, &s.sketch),
-            ink,
-            bg,
-            Stroke::new(1.0, if sel { theme::accent() } else { theme::line() }),
-        );
+        let edge = if sel {
+            theme::accent()
+        } else if bad {
+            theme::error()
+        } else {
+            theme::line()
+        };
+        value_pill(painter, lp, dim_text(c, &s.sketch), ink, bg, Stroke::new(1.0, edge));
     }
 }
 
@@ -1961,6 +1978,9 @@ fn paint_dimension_lines(
 pub fn value_pill(painter: &egui::Painter, at: Pos2, text: String, ink: Color32, bg: Color32, stroke: Stroke) -> Rect {
     let galley = painter.layout_no_wrap(text, theme::font_medium(11.5), ink);
     let r = Rect::from_center_size(at, galley.size() + vec2(12.0, 6.0));
+    // The selection, hover and error tints are see-through: on a light sheet alone they
+    // let the curve under the label show and wash out its text.
+    painter.rect_filled(r, CornerRadius::same(4), theme::hud_bg());
     painter.rect(r, CornerRadius::same(4), bg, stroke, StrokeKind::Inside);
     painter.galley(r.center() - galley.size() / 2.0, galley, ink);
     r
@@ -2426,6 +2446,13 @@ fn paint_status(ui: &mut egui::Ui, s: &mut SketchSession, rect: Rect) {
             (theme::error(), format!("Over defined · {} conflicting", conflicting.len()))
         }
         SolveStatus::Failed(_) => (theme::error(), "Solver failed".to_owned()),
+    };
+    // A relation on geometry that is gone holds nothing, so the solver cannot report it.
+    let dangling = s.sketch.constraints.iter().filter(|c| c.is_dangling(&s.sketch)).count();
+    let (status_color, status) = if dangling > 0 {
+        (theme::error(), format!("{status} · {dangling} dangling"))
+    } else {
+        (status_color, status)
     };
     let hint = match (s.tool, s.pending.len()) {
         (Tool::Text, _) => "Sketch text: edit the content and font, then click the baseline origin",

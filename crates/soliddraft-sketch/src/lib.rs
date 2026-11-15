@@ -839,6 +839,12 @@ impl Constraint {
         v
     }
 
+    /// Whether the constraint names an entity or a point the sketch no longer has.
+    pub fn is_dangling(&self, sketch: &Sketch) -> bool {
+        self.entities().iter().any(|id| sketch.entity(*id).is_none())
+            || self.points().iter().any(|p| sketch.point(*p).is_none())
+    }
+
     /// The points the constraint touches directly.
     pub fn points(&self) -> Vec<PointRef> {
         match self.kind {
@@ -1136,5 +1142,24 @@ mod model_tests {
         s.remove_entity(b);
         assert_eq!(s.constraints.len(), 1);
         assert_eq!(s.coincident_group(PointRef::new(a, 1)).len(), 1);
+    }
+
+    #[test]
+    fn a_constraint_on_missing_geometry_is_dangling() {
+        let mut s = Sketch::new();
+        let line = s.add(EntityKind::Line { a: P2::ZERO, b: P2::new(5.0, 0.0) }, false);
+        let distance = |b| ConstraintKind::Distance {
+            a: PointRef::new(line, 0),
+            b,
+            kind: DistanceKind::Aligned,
+            value: 5.0,
+            label: P2::new(2.0, 2.0),
+        };
+        let sound = s.constrain(distance(PointRef::new(line, 1)));
+        let gone = s.constrain(distance(PointRef::new(99, 0)));
+        let no_such_point = s.constrain(distance(PointRef::new(line, 2)));
+        let dangling = |id| s.constraint(id).unwrap().is_dangling(&s);
+        assert!(!dangling(sound));
+        assert!(dangling(gone) && dangling(no_such_point));
     }
 }

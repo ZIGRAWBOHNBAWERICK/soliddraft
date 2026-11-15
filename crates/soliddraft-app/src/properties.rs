@@ -866,10 +866,7 @@ fn sketch_panel(ui: &mut egui::Ui, state: &mut AppState) {
                 _ => Default::default(),
             };
             let conflicting = |id| conflicts.contains(&id);
-            let dangling = |c: &crate::sketch::Constraint| {
-                c.entities().iter().any(|id| !by_id.contains_key(id))
-                    || c.points().iter().any(|p| by_id.get(&p.entity).and_then(|e| e.point(p.index)).is_none())
-            };
+            let dangling = |c: &crate::sketch::Constraint| c.is_dangling(&s.sketch);
             let rels: Vec<_> = s
                 .sketch
                 .constraints

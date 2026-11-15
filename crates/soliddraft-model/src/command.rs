@@ -748,6 +748,28 @@ impl Document {
         Ok(())
     }
 
+    /// The values and configurations once sketch `feature`'s removed driving dimensions
+    /// let go of their drives and names, or `None` when nothing referred to them.
+    fn forget_dimensions(
+        &self,
+        feature: FeatureId,
+        features: &[Feature],
+    ) -> Result<Option<(crate::values::Values, crate::configs::Configurations)>, CommandError> {
+        if !matches!(features.iter().find(|f| f.id == feature).map(|f| &f.kind), Some(FeatureKind::Sketch(_))) {
+            return Ok(None);
+        }
+        let mut values = self.values.clone();
+        let lost = values.forget_dimensions(feature, features).map_err(CommandError::Invalid)?;
+        if lost.is_empty() {
+            return Ok(None);
+        }
+        let names: Vec<String> = lost.into_iter().filter_map(|(_, name)| name).collect();
+        let mut configurations = self.configurations.clone();
+        configurations.forget_names(&names).map_err(CommandError::Invalid)?;
+        configurations.validate(&mut values, features).map_err(CommandError::Invalid)?;
+        Ok(Some((values, configurations)))
+    }
+
     fn apply_values(&mut self, command: Command) -> Result<Applied, CommandError> {
         let old = Command::RestoreValues { state: self.values.clone(), features: self.features.clone() };
         let mut state = self.values.clone();
@@ -864,12 +886,27 @@ impl Document {
             return Err(CommandError::Invalid("a feature cannot change into or out of a terminal field".into()));
         }
         Self::check_order(&next)?;
-        self.check_drivers(&next)?;
+        let forgot = self.forget_dimensions(id, &next)?;
+        let before = (self.values.clone(), self.configurations.clone());
+        if let Some((values, configurations)) = forgot.clone() {
+            (self.values, self.configurations) = (values, configurations);
+        }
+        if let Err(error) = self.check_drivers(&next) {
+            (self.values, self.configurations) = before;
+            return Err(error);
+        }
         let label = format!("edit {}", next[i].name);
+        // Letting go of a value's drive is undone with the values; a configured part's
+        // undo restores them with its configurations.
+        let inverse = if forgot.is_some() && self.configurations.is_empty() {
+            Command::RestoreValues { state: before.0, features: self.features.clone() }
+        } else {
+            Command::RestoreFeatureKind { id, kind: old }
+        };
         self.features = next;
         self.touch(i);
         Ok(Applied {
-            inverse: Command::RestoreFeatureKind { id, kind: old },
+            inverse,
             redo: if restoring { Command::RestoreFeatureKind { id, kind } } else { Command::EditFeature { id, kind } },
             created: None,
             label,

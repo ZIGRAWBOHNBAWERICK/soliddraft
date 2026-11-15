@@ -53,8 +53,19 @@ pub struct Host {
 }
 
 impl Host {
+    /// A host keeps every build its kernel makes, for [`Host::take_hand_over`]. A kernel
+    /// without hand-over still answers jobs; its answers just carry no builds.
     pub fn new(kernel: Arc<dyn Kernel>) -> Self {
+        let _ = kernel.keep_builds();
         Self { kernel, part: None }
+    }
+
+    /// The builds made since the last call, as bytes the page's kernel can be offered,
+    /// so it rebuilds the same part without evaluating it again. Keeps keeping builds.
+    pub fn take_hand_over(&mut self) -> Result<Vec<u8>, String> {
+        let bytes = self.kernel.hand_over().map_err(|error| error.to_string())?;
+        self.kernel.keep_builds().map_err(|error| error.to_string())?;
+        Ok(bytes)
     }
 
     /// Runs `job` against the part saved as `part` and answers with plain data.
@@ -128,6 +139,7 @@ mod browser {
     use std::cell::RefCell;
     use std::collections::HashMap;
     use std::rc::Rc;
+    use std::sync::Arc;
     use wasm_bindgen::JsCast;
     use wasm_bindgen::prelude::*;
 
@@ -140,17 +152,27 @@ mod browser {
         static HOST: RefCell<Option<Host>> = const { RefCell::new(None) };
     }
 
+    /// Who waits for a job: its answer's handler, the context to repaint, and the kernel
+    /// of the part that asked, which is offered the builds the worker made for the job.
+    type Waiting = (Answered, egui::Context, Arc<dyn soliddraft_kernel_api::Kernel>);
+
     #[derive(Default)]
     struct Shared {
-        waiting: HashMap<u64, (Answered, egui::Context)>,
+        waiting: HashMap<u64, Waiting>,
         /// The last panic the worker reported, the reason for the trap that follows it.
         panic: Option<String>,
         stopped: bool,
     }
 
     impl Shared {
-        fn answer(&mut self, id: u64, result: Result<serde_json::Value, String>) {
-            if let Some((answered, ctx)) = self.waiting.remove(&id) {
+        fn answer(&mut self, id: u64, result: Result<serde_json::Value, String>, hand_over: &[u8]) {
+            if let Some((answered, ctx, kernel)) = self.waiting.remove(&id) {
+                // The builds come first, so a rebuild the answer starts takes them.
+                if !hand_over.is_empty()
+                    && let Err(error) = kernel.offer_builds(hand_over)
+                {
+                    log::warn!("the page could not take the kernel worker's builds: {error}");
+                }
                 answered(result);
                 ctx.request_repaint();
             }
@@ -158,7 +180,7 @@ mod browser {
 
         fn stop(&mut self, reason: &str) {
             self.stopped = true;
-            for (_, (answered, ctx)) in self.waiting.drain() {
+            for (_, (answered, ctx, _)) in self.waiting.drain() {
                 answered(Err(format!("The kernel worker stopped: {reason}. Try again.")));
                 ctx.request_repaint();
             }
@@ -231,10 +253,11 @@ mod browser {
             // The interface already asked again; nobody waits for this answer.
             shared.waiting.remove(&id);
         } else if let Some(answer) = get(data, "answer").as_string() {
-            shared.answer(id, decode(&answer));
+            let hand_over = get(data, "hand_over").dyn_into::<js_sys::Uint8Array>().map(|bytes| bytes.to_vec());
+            shared.answer(id, decode(&answer), &hand_over.unwrap_or_default());
         } else if let Some(fatal) = get(data, "fatal").as_string() {
             let reason = shared.panic.take().unwrap_or(fatal);
-            shared.answer(id, Err(format!("The kernel worker stopped: {reason}. Try again.")));
+            shared.answer(id, Err(format!("The kernel worker stopped: {reason}. Try again.")), &[]);
             shared.stop(&reason);
         }
     }
@@ -249,10 +272,12 @@ mod browser {
     }
 
     /// Sends `job` and the part's saved bytes to the kernel worker. `answered` runs on the
-    /// interface thread with the answer, and `ctx` repaints then.
+    /// interface thread with the answer, and `ctx` repaints then. The builds the worker made
+    /// for the job are offered to `kernel`, the part's own, just before.
     pub fn submit(
         part: Vec<u8>,
         job: &Job,
+        kernel: Arc<dyn soliddraft_kernel_api::Kernel>,
         ctx: &egui::Context,
         answered: impl FnOnce(Result<serde_json::Value, String>) + 'static,
     ) -> Result<u64, String> {
@@ -277,7 +302,7 @@ mod browser {
                 .worker
                 .post_message_with_transfer(&message, &js_sys::Array::of1(&bytes.buffer()))
                 .map_err(|error| format!("The kernel worker did not take the job: {error:?}"))?;
-            client.shared.borrow_mut().waiting.insert(id, (Box::new(answered), ctx.clone()));
+            client.shared.borrow_mut().waiting.insert(id, (Box::new(answered), ctx.clone(), kernel));
             Ok(id)
         })
     }
@@ -301,6 +326,13 @@ mod browser {
             set(&entry, "at", &js_sys::Date::now().into());
             list.push(&entry);
         }
+    }
+
+    /// The builds the worker's kernel made for the job just answered, as bytes the page's
+    /// kernel can be offered. Empty when there is no host yet or nothing was built.
+    #[wasm_bindgen]
+    pub fn kernel_worker_hand_over() -> Vec<u8> {
+        HOST.with_borrow_mut(|host| host.as_mut().and_then(|host| host.take_hand_over().ok())).unwrap_or_default()
     }
 
     /// The worker's entry: runs one job on this worker's kernel and answers as JSON.
@@ -426,6 +458,34 @@ mod tests {
         let too_deep = crate::drag::ScalarDraft { value: -5.0, ..edit };
         let refused = host.run(&part, &Job::Build { edit: Some(too_deep), level: Default::default() });
         assert!(refused.is_err() || !refused.as_ref().unwrap()["failure"].is_null(), "{refused:?}");
+    }
+
+    #[test]
+    fn the_page_rebuilds_an_edited_part_from_the_workers_hand_over_without_evaluating_it() {
+        let doc = demo();
+        let base = doc.features[0].id;
+        let (_, part) = doc.model().snapshot().encode().unwrap();
+        let edit = crate::drag::ScalarDraft {
+            feature: model::FeatureId(u32::try_from(base).unwrap()),
+            dimension: crate::drag::Dimension::Depth,
+            value: 12.0,
+        };
+        let worker = Arc::new(soliddraft_kernel_catallax::CatallaxKernel::new());
+        let mut host = Host::new(worker.clone());
+        let answer = host.run(&part, &Job::Build { edit: Some(edit), level: Default::default() }).unwrap();
+        assert_eq!(answer["failure"], serde_json::Value::Null, "{answer}");
+        let bytes = host.take_hand_over().unwrap();
+
+        // The page applies the same edit to its own definitions and rebuilds from the offer.
+        let page = Arc::new(soliddraft_kernel_catallax::CatallaxKernel::new());
+        assert!(page.offer_builds(&bytes).unwrap() > 0);
+        let mut edited = model::Document::from_bytes(&part, page.clone()).unwrap();
+        let command = crate::document::scalar_draft_command(&edited, edit).unwrap();
+        edited.execute_deferred(command).unwrap();
+        edited.rebuild();
+        assert!(edited.features().iter().all(|feature| edited.status(feature.id).is_some_and(|s| s.is_ok())));
+        assert_eq!(page.fresh_builds(), 0, "the part and its edit were both taken from the worker");
+        assert!(page.mass_properties(edited.body().unwrap()).unwrap().volume > 0.0);
     }
 
     #[test]

@@ -69,7 +69,18 @@ function drain() {
     return;
   }
   trace(job, 'worker replied');
-  self.postMessage({ id: job.id, answer });
+  // The builds made for this job travel with its answer, for the page's own kernel.
+  let hand_over = null;
+  try {
+    hand_over = glue.kernel_worker_hand_over();
+  } catch (error) {
+    hand_over = null;
+  }
+  if (hand_over && hand_over.length) {
+    self.postMessage({ id: job.id, answer, hand_over }, [hand_over.buffer]);
+  } else {
+    self.postMessage({ id: job.id, answer });
+  }
   draining = false;
   schedule();
 }

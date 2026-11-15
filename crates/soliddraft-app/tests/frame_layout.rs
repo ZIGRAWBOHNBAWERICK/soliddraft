@@ -507,3 +507,39 @@ fn view_insert_options_and_fit_after_the_walkover() {
         case.frame(app, "fit-above-the-bar");
     });
 }
+
+/// A feature tree row takes a click as the browser delivers it, one frame for the press
+/// and one for the release with no pointer move. The options bar draws the Details
+/// button for the new selection in the next frame, and that button then takes one click
+/// delivered the same way. The browser checks wait for that frame before clicking
+/// Details: a click sent before it lands where Details is not drawn yet.
+#[test]
+fn a_tree_row_and_then_details_take_clicks_in_the_frames_they_are_drawn() {
+    let mut app = ribbon::app(ribbon::plate());
+    app.run_steps(6);
+    let feature =
+        app.state().state.doc.features.iter().find(|f| f.kind.noun() == "extrude").expect("the plate").clone();
+    let click_in_one_frame = |app: &mut ribbon::App, at: egui::Pos2| {
+        for pressed in [true, false] {
+            app.event(egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: Modifiers::NONE,
+            });
+            app.step();
+        }
+    };
+    let row = app.get_all_by_label(&feature.name).next().expect("the plate's tree row").rect().center();
+    click_in_one_frame(&mut app, row);
+    assert_eq!(
+        app.state().state.doc.selection,
+        Some(soliddraft_app::document::Selection::Feature(feature.id)),
+        "the row's click selects its feature"
+    );
+    // The browser checks prompt this frame with a pointer move before they click Details.
+    app.step();
+    let details = app.get_by_label("Details").rect().center();
+    click_in_one_frame(&mut app, details);
+    assert!(app.state().state.options_details, "Details opens the sheet");
+}

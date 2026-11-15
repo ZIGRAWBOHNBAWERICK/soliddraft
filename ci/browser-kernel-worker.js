@@ -22,7 +22,7 @@
 // confirmed by the title Details draws for it. With software rendering a frame can take
 // longer than any fixed pause.
 function check(value, message) { if (!value) throw new Error(message); }
-const PART = [19, 132], INSPECT = [19, 241], MASS = [220, 112], DETAILS = [317, 52], CLOSE = [347, 92];
+const PART = [19, 132], INSPECT = [19, 241], MASS = [220, 112], CLOSE = [347, 92];
 const RECTANGLE = [630, 52], FILE = [122, 15], NEW_PART = [138, 42];
 const ROW = { first: 203, second: 229, third: 255 };
 
@@ -109,12 +109,34 @@ async function close(what) {
   }
   throw new Error(`${what}: the options panel did not close`);
 }
+// A frame without a click: the pointer moves over the viewport. The page draws a frame
+// for each input, and a changed selection shows Details only in a later frame.
+const nudge = () => page.eval(() => {
+  document.getElementById('soliddraft').dispatchEvent(new PointerEvent('pointermove',
+    { clientX: 900, clientY: 450, bubbles: true, pointerId: 1, pointerType: 'mouse', isPrimary: true }));
+  return true;
+});
+// Waits for a frame whose options bar shows `title` selected and draws Details, logs
+// both, and clicks Details once where that frame drew it. A click sent before then lands
+// where Details is not drawn yet.
+async function openDetails(title, what) {
+  let drawn = null;
+  for (let i = 0; i < 100; i++) {
+    await nudge();
+    const options = await page.eval(() => window.wasmBindings.shown_options());
+    drawn = options ? JSON.parse(options) : null;
+    if (drawn && drawn.selected === title && drawn.details) break;
+    await page.wait(100);
+  }
+  console.log(`${what}: options bar shows ${JSON.stringify(drawn)}`);
+  check(drawn && drawn.selected === title && drawn.details, `${what}: ${title} is not selected with Details drawn`);
+  await click([Math.round(drawn.details.x), Math.round(drawn.details.y)]);
+}
 // Selects a feature tree row while the options panel is closed, and waits until Details
 // draws the feature `title` for it.
 async function select(row, title, what) {
   await click([380, row]);
-  await page.wait(300);
-  await click(DETAILS);
+  await openDetails(title, what);
   let drawn = null;
   for (let i = 0; i < 100; i++) {
     drawn = await shown();
@@ -153,7 +175,7 @@ async function measure(row, title, count, what) {
   check('answer' in answer, `${what} failed in the worker: ${JSON.stringify(answer)}`);
   const result = JSON.parse(answer.answer);
   check(result.ok && result.ok.volume > 0, `${what} answered no properties: ${answer.answer}`);
-  await click(DETAILS);
+  await openDetails(title, what);
   await volumeShown(result.ok.volume, what);
   const longest = await page.eval(() => Math.max(0, ...window.longTasks));
   console.log(`${what}: volume ${result.ok.volume} mm³ drawn; longest page task ${longest} ms`);
@@ -216,9 +238,8 @@ async function block(what) {
   await click(INSPECT);
   await page.wait(500);
   await click([380, ROW.first]);
-  await page.wait(300);
-  await click(DETAILS);
-  await page.wait(500);
+  await openDetails('Boss-Extrude1', what);
+  for (let i = 0; i < 100 && (await shown())?.title !== 'Boss-Extrude1'; i++) await page.wait(100);
   const rows = await details();
   check(rows['Profile'] === 'Rectangle 60 × 40 on Top plane', `${what} is not the block: ${JSON.stringify(rows)}`);
   check(!('Volume' in rows), `${what} shows a volume it never measured: ${rows.Volume}`);

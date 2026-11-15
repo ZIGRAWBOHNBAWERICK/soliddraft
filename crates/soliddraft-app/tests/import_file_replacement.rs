@@ -34,6 +34,11 @@ fn renumbered(source: &[u8]) -> Vec<u8> {
 
 /// The same file with every point moved 1 mm along x.
 fn moved(source: &[u8]) -> Vec<u8> {
+    moved_by(source, 1.0)
+}
+
+/// The same file with every point moved `dx` mm along x.
+fn moved_by(source: &[u8], dx: f64) -> Vec<u8> {
     let text = String::from_utf8(source.to_vec()).unwrap();
     let mut out = String::new();
     let mut rest = text.as_str();
@@ -42,7 +47,7 @@ fn moved(source: &[u8]) -> Vec<u8> {
         let end = start + rest[start..].find(',').unwrap();
         let x: f64 = rest[start..end].parse().unwrap();
         out.push_str(&rest[..start]);
-        out.push_str(&format!("{:?}", x + 1.0));
+        out.push_str(&format!("{:?}", x + dx));
         rest = &rest[end..];
     }
     out.push_str(rest);
@@ -278,4 +283,59 @@ fn imports_with_repair_answers_refuse_a_file_replacement_and_change_nothing() {
     assert_eq!(sources(&doc), old_sources);
     assert_eq!(fillet_faces(&doc), old_faces);
     assert_eq!(doc.undo_depth(), depth);
+}
+
+const SEAM: &[u8] = include_bytes!("../../../ci/fixtures/import/block-seam-4um.step");
+
+/// Two copies of the seamed block in one file, the second 100 mm along x.
+fn two_seamed_blocks() -> Vec<u8> {
+    let text = String::from_utf8(SEAM.to_vec()).unwrap();
+    let start = text.find("DATA;\n").unwrap() + "DATA;\n".len();
+    let end = text.find("#179=").unwrap();
+    let solid = &text[start..end];
+    let mut copy = String::new();
+    let mut chars = solid.chars().peekable();
+    while let Some(c) = chars.next() {
+        copy.push(c);
+        if c == '#' {
+            let mut digits = String::new();
+            while chars.peek().is_some_and(char::is_ascii_digit) {
+                digits.push(chars.next().unwrap());
+            }
+            copy.push_str(&(digits.parse::<u64>().unwrap() + 1000).to_string());
+        }
+    }
+    let copy = String::from_utf8(moved_by(copy.as_bytes(), 100.0)).unwrap();
+    let mut out = format!("{}{}{}", &text[..end], copy, &text[end..]);
+    out = out.replacen(
+        "ADVANCED_BREP_SHAPE_REPRESENTATION('',(#178,",
+        "ADVANCED_BREP_SHAPE_REPRESENTATION('',(#178,#1178,",
+        1,
+    );
+    out.into_bytes()
+}
+
+/// The new file's review answers a repair question, which a whole-file replacement cannot
+/// carry yet: Accept refuses and changes nothing. Both seams of the two-block file are
+/// repaired automatically, so declining one is an answer the review can give.
+#[test]
+fn a_reviewed_new_file_with_repair_answers_refuses_and_changes_nothing() {
+    let file = two_seamed_blocks();
+    let mut doc = Document::new("Seamed blocks", soliddraft_app::kernel());
+    let preview = Preview::from_bytes(&doc, "seams.step", file.clone()).unwrap();
+    commit(&mut doc, &preview, &Review::default()).unwrap();
+    assert_eq!(sources(&doc).len(), 2);
+    all_built(&doc);
+    let first = doc.features[0].id;
+    let saved = doc.model().to_bytes().unwrap();
+    let (old_sources, depth, revision) = (sources(&doc), doc.undo_depth(), doc.revision());
+    let preview =
+        Preview::from_bytes(&doc, "renumbered.step", renumbered(&file)).unwrap().replacing(&doc, first).unwrap();
+    let review = Review { decline: vec!["g0".into()], accept: Vec::new() };
+    let error = commit(&mut doc, &preview, &review).unwrap_err();
+    assert!(error.contains("repair answers") && error.contains("Nothing was changed"), "{error}");
+    assert_eq!(doc.model().to_bytes().unwrap(), saved);
+    assert_eq!(sources(&doc), old_sources);
+    assert_eq!((doc.undo_depth(), doc.revision()), (depth, revision));
+    all_built(&doc);
 }

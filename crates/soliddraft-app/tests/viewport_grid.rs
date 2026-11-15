@@ -14,6 +14,15 @@ use soliddraft_app::sketch::{Entity, EntityKind};
 use soliddraft_app::viewport::look::Preset;
 use support::*;
 
+// These cases measure the viewport at full width, so their launches close the side area.
+fn launch(doc: soliddraft_app::document::Document) -> App {
+    full_width(support::launch(doc))
+}
+
+fn launch_for_frames(doc: soliddraft_app::document::Document, size: egui::Vec2, pixels_per_point: f32) -> App {
+    full_width(support::launch_for_frames(doc, size, pixels_per_point))
+}
+
 const SIZE: egui::Vec2 = vec2(1440.0, 900.0);
 
 /// Up and across, which takes a view facing any of the planes here off its normal. From

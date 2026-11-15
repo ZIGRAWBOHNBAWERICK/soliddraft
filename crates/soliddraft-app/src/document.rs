@@ -1336,6 +1336,8 @@ pub(crate) struct ConstructionView {
 
 #[derive(Clone, Debug)]
 pub(crate) enum CandidateDisplay {
+    // The browser shows its kernel worker's proved part and has no early construction display.
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     Construction(Arc<ConstructionView>),
     Proved(Arc<ReadyDisplay>),
 }
@@ -4923,6 +4925,8 @@ pub(crate) fn ready_display(
     Ok(Some(display))
 }
 
+// The browser shows its kernel worker's proved part and has no early construction display.
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 pub(crate) fn construction_view(
     display: soliddraft_kernel_api::ConstructionMesh,
     model: &model::Document,

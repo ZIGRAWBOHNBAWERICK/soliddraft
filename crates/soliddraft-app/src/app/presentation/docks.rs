@@ -195,12 +195,30 @@ impl TabViewer for Panels<'_> {
                         events.secondary_clicked.flatten().and_then(|p| crate::viewport::pick::selection(&st.doc, p));
                     st.doc.target_selection(picked);
                     let selection = pick_filter.selection(picked);
+                    // A right-click on a relation glyph lists the relations on its geometry
+                    // in place of the command ring.
+                    let mut relations = false;
                     let target = if let Some(session) = st.sketch.as_mut() {
                         if let Some(pos) = events.context_position {
                             let picked =
                                 crate::sketcher::context_pick(ui, session, &st.viewport.camera, st.viewport.rect, pos);
                             if !picked.is_some_and(|p| session.selection.contains(&p)) {
                                 session.selection = picked.into_iter().collect();
+                            }
+                            let glyph = match picked {
+                                Some(crate::state::SketchSel::Constraint(id))
+                                    if session.sketch.constraint(id).is_some_and(|c| !c.is_dimension()) =>
+                                {
+                                    Some(id)
+                                }
+                                _ => None,
+                            };
+                            match glyph {
+                                Some(id) => {
+                                    crate::sketcher::relations::open(ui.ctx(), session, pos, id);
+                                    relations = true;
+                                }
+                                None => crate::sketcher::relations::close(ui.ctx(), session),
                             }
                         }
                         if session.selection.is_empty() {
@@ -211,7 +229,16 @@ impl TabViewer for Panels<'_> {
                     } else {
                         crate::context_menu::Target::of(selection)
                     };
-                    crate::context_menu::show_at(st, response, target, selection, events.context_position);
+                    if relations {
+                        crate::context_menu::close(response);
+                    } else {
+                        crate::context_menu::show_at(st, response, target, selection, events.context_position);
+                    }
+                    if let Some(session) = st.sketch.as_mut()
+                        && let Some(action) = crate::sketcher::relations::show(ui, session, response.layer_id)
+                    {
+                        st.push(action);
+                    }
                 }
                 let (dt, ppp) = ui.input(|i| (i.stable_dt.min(0.1), i.pixels_per_point));
                 if st.doc.update_display(&st.viewport.projection(ppp), dt) {

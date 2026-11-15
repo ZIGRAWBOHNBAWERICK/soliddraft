@@ -898,6 +898,8 @@ pub struct SketchSession {
     pub quick_snap: Option<SnapFilter>,
     /// Whether the ribbon's relation list is open.
     pub relations_open: bool,
+    /// The list of relations a right-click on a relation glyph opened.
+    pub relations_menu: Option<crate::sketcher::relations::RelationsMenu>,
     /// Pending shared-value form; saved truth stays in the part's values.
     pub link_values: Option<crate::sketch_values::LinkValues>,
     /// Shows relation glyphs without changing the constraints or dimensions.
@@ -993,6 +995,7 @@ impl SketchSession {
             auto_relations: true,
             quick_snap: None,
             relations_open: false,
+            relations_menu: None,
             link_values: None,
             show_relations: true,
             show_regions: true,

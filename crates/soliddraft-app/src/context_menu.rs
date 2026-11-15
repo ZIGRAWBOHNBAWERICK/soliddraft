@@ -367,6 +367,12 @@ pub fn show(state: &mut AppState, response: &egui::Response, target: Target, sel
     show_at(state, response, target, selection, at);
 }
 
+/// Closes the menu `response` opened, if it is open.
+pub fn close(response: &egui::Response) {
+    response.ctx.data_mut(|data| data.remove::<OpenMenu>(response.id.with("context_target")));
+    egui::Popup::close_id(&response.ctx, response.id.with("context_menu"));
+}
+
 pub fn show_at(
     state: &mut AppState,
     response: &egui::Response,

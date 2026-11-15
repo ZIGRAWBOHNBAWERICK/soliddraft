@@ -24,6 +24,9 @@ struct RowItem {
     /// Where the row's block starts in the feature list: its absorbed sketch, which may
     /// come well before the feature, or the feature itself.
     first: usize,
+    /// The row's feature and the sketch it absorbs; a nested sketch row carries the same
+    /// pair. A drop on its own pair moves nothing.
+    pair: (FeatureId, Option<FeatureId>),
     indent: u8,
     chevron: Option<bool>,
     icon: Icon,
@@ -223,6 +226,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
                 id: f.id,
                 index: i,
                 first,
+                pair: (f.id, child.map(|c| c.id)),
                 indent: 0,
                 chevron: child.map(|_| state.expanded.contains(&f.id)),
                 icon,
@@ -240,6 +244,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
                     id: c.id,
                     index: i,
                     first,
+                    pair: (f.id, Some(c.id)),
                     indent: 1,
                     chevron: None,
                     icon: Icon::Sketch,
@@ -272,8 +277,9 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
         let pointer_released = ui.input(|i| i.pointer.primary_released());
         let pointer_pos = ui.input(|i| i.pointer.interact_pos());
         let dragging = state.drag_feature;
-        // The block, first and last index, of the row the dragged feature was dropped on.
-        let mut drop_target: Option<(usize, usize)> = None;
+        // The row the dragged feature was dropped on: where its block starts, where its
+        // feature is, and that feature's pair.
+        let mut drop_target: Option<(usize, usize, (FeatureId, Option<FeatureId>))> = None;
         let mut bar_target: Option<usize> = None;
         let mut rename_commit: Option<(FeatureId, String)> = None;
         let mut rename_cancel = false;
@@ -387,7 +393,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
                 resp.scroll_to_me(None);
             }
             if dragging.is_some_and(|d| d != item.id) && resp.hovered() && pointer_released {
-                drop_target = Some((item.first, item.index));
+                drop_target = Some((item.first, item.index, item.pair));
             }
             // A nested sketch drags too: it may move away from its feature, as far up as
             // its own inputs allow.
@@ -460,12 +466,14 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
             if pointer_released {
                 state.drag_feature = None;
                 // Dropped on a row, the feature takes that row's place: above the row's block
-                // when it came from below, below it when it came from above. The command
-                // keeps every sketch ahead of its consumer and refuses an order that breaks
-                // an input.
-                if let Some((first, last)) = drop_target
+                // when it came from below the row's feature, below the feature otherwise. A
+                // drop on its own feature or sketch moves nothing; the command judges every
+                // other order, keeping each sketch ahead of its consumer and refusing one
+                // that breaks an input.
+                if let Some((first, last, (feature, sketch))) = drop_target
+                    && d != feature
+                    && Some(d) != sketch
                     && let Some(from) = state.doc.features.iter().position(|f| f.id == d)
-                    && !(first..=last).contains(&from)
                 {
                     let index = if from > last { first } else { last };
                     actions.push(AppAction::Command(Command::Reorder { id: d, index }));

@@ -340,6 +340,45 @@ fn a_nested_sketch_drags_out_of_its_feature_to_a_legal_place() {
 }
 
 #[test]
+fn a_sketch_between_a_feature_and_its_sketch_drops_below_the_feature() {
+    let case = ribbon::case("tree-interleaved-drag");
+    let mut doc = ribbon::sketch();
+    let profile = doc.features[0].id;
+    let loose = doc
+        .apply(Command::AddSketch { plane: SketchPlane::Reference { plane: PlaneKind::Front, offset: 0.0 } })
+        .unwrap()
+        .unwrap();
+    let extrude = doc
+        .apply(Command::AddExtrude {
+            params: ExtrudeParams { sketch: Some(profile), ..Default::default() },
+            via_assistant: false,
+        })
+        .unwrap()
+        .unwrap();
+    let order = |app: &App| app.state().state.doc.features.iter().map(|f| f.id).collect::<Vec<_>>();
+    let mut app = ribbon::app(doc);
+    case.run(&mut app, |app| {
+        assert_eq!(order(app), [profile, loose, extrude]);
+        let name = |app: &App, id| app.state().state.doc.feature(id).unwrap().name.clone();
+        let (loose_name, extrude_name) = (name(app, loose), name(app, extrude));
+        let (from, to) = (row(app, &loose_name), row(app, &extrude_name));
+        assert!(from.bottom() <= to.top() + 1.0, "the loose sketch's row comes before the extrude's");
+        // The loose sketch sits inside the extrude's block in the feature list, yet nothing
+        // ties it there: dropped on the extrude, it moves below it.
+        drag(app, from.center(), to.center());
+        assert_eq!(order(app), [profile, extrude, loose]);
+        case.frame(app, "moved");
+        // A sketch dropped on its own feature's row stays where it is.
+        let to = row(app, &extrude_name);
+        ribbon::click_at(app, pos2(to.left() + 10.0, to.center().y));
+        app.run_steps(4);
+        let nested = row(app, &name(app, profile));
+        drag(app, nested.center(), row(app, &extrude_name).center());
+        assert_eq!(order(app), [profile, extrude, loose], "a drop on its own feature changes nothing");
+    });
+}
+
+#[test]
 fn rows_carry_the_proof_mark_with_its_reason() {
     let case = ribbon::case("tree-proof");
     let mut app = ribbon::app(ribbon::plate());

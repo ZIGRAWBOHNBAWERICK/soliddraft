@@ -168,6 +168,13 @@ impl AppBody {
         exact.model.body(exact.result).kind == catallax_topology::BodyKind::Empty
     }
 
+    /// Whether the body is open faces enclosing no volume, as Catallax builds a surface
+    /// model a STEP file holds, rather than a closed solid.
+    pub(crate) fn is_surface(&self) -> bool {
+        let exact = self.checkpoint.built();
+        exact.model.body(exact.result).kind == catallax_topology::BodyKind::Surface
+    }
+
     /// The body's recipe in this kernel's step ids.
     pub(crate) fn recipe(&self) -> &Recipe {
         self.recipe.as_deref().unwrap_or_else(|| self.checkpoint.built().recipe())

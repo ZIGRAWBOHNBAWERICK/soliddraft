@@ -2030,6 +2030,11 @@ impl Kernel for CatallaxKernel {
                 return Err(KernelError::Unsupported("a field's moments need an explicit field mass request".into()));
             }
             let solid = self.solid(body)?;
+            if solid.app.is_surface() {
+                return Err(KernelError::Unsupported(
+                    "A surface body encloses no volume, so it has no mass properties.".into(),
+                ));
+            }
             solid
                 .mass
                 .get_or_init(|| {
@@ -2083,8 +2088,8 @@ impl Kernel for CatallaxKernel {
             let faults = built.model.check(built.result);
             Ok(Validation {
                 valid: faults.is_empty(),
-                kind: BodyKind::Solid,
-                manifold_solid: faults.is_empty(),
+                kind: if solid.app.is_surface() { BodyKind::Sheet } else { BodyKind::Solid },
+                manifold_solid: faults.is_empty() && !solid.app.is_surface(),
                 issues: faults.iter().map(|f| format!("{f:?}")).collect(),
             })
         })

@@ -2743,7 +2743,10 @@ pub fn find_entity(doc: &Document, name: &str) -> Option<Selection> {
     if let Some(f) = doc.features.iter().find(|f| f.name == name) {
         return Some(Selection::Feature(f.id));
     }
-    if name.eq_ignore_ascii_case(crate::document::BODY_NAME) {
+    if [crate::document::BODY_NAME, crate::document::SURFACE_BODY_NAME]
+        .iter()
+        .any(|body| name.eq_ignore_ascii_case(body))
+    {
         return doc.display_body().map(|_| Selection::Body);
     }
     if let Some(face) = face_by_name(doc, name) {

@@ -978,6 +978,11 @@ pub struct SketchSession {
     pub relations_open: bool,
     /// The list of relations a right-click on a relation glyph opened.
     pub relations_menu: Option<crate::sketcher::relations::RelationsMenu>,
+    /// Where the last entity was added to the selection while Ctrl (Cmd on macOS) is
+    /// still held. Releasing the key opens the pair menu there.
+    pub pair_pick: Option<egui::Pos2>,
+    /// The strip of relations that opened when Ctrl was released after a pick.
+    pub pair_menu: Option<crate::sketcher::pair_menu::PairMenu>,
     /// Pending shared-value form; saved truth stays in the part's values.
     pub link_values: Option<crate::sketch_values::LinkValues>,
     /// Shows relation glyphs without changing the constraints or dimensions.
@@ -1075,6 +1080,8 @@ impl SketchSession {
             quick_snap: None,
             relations_open: false,
             relations_menu: None,
+            pair_pick: None,
+            pair_menu: None,
             link_values: None,
             show_relations: true,
             show_regions: true,
@@ -1101,6 +1108,10 @@ impl SketchSession {
     }
 
     pub fn set_tool(&mut self, tool: Tool) {
+        // Two picks made before Smart Dimension starts are its first two picks.
+        let dimension_pair =
+            (tool == Tool::Dimension).then(|| crate::sketcher::dimension_pair(&self.sketch, &self.selection)).flatten();
+        self.pair_pick = None;
         self.modify.offset_group = None;
         if tool == Tool::Select {
             self.dynamic_mirror = None;
@@ -1136,6 +1147,11 @@ impl SketchSession {
         }
         if tool.bounded_trim() {
             self.selection = self.trim_bounds.iter().copied().map(SketchSel::Entity).collect();
+        }
+        if let Some((first, second)) = dimension_pair {
+            self.dim_first = Some(first);
+            self.dim_second = Some(second);
+            self.say("Click to place the dimension");
         }
     }
 

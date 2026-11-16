@@ -1,6 +1,7 @@
 //! Edit Suite right-click targets, their shared commands, and the menu's registry adapter.
 //! A right-click opens the command columns; Shift and a right-click open the ring.
-//! Commands that do not work yet are left out of both.
+//! Commands that do not work yet are left out of both. With two or more sketch entities
+//! selected, the columns open with the relations the whole selection can take.
 
 use crate::commands::{self, Context};
 use crate::document::{Document, Selection};
@@ -16,6 +17,8 @@ pub enum Target {
     Empty,
     SketchLine,
     EmptySketch,
+    /// Two or more sketch entities: the menu is for the whole selection.
+    SketchSelection,
 }
 
 impl Target {
@@ -107,6 +110,11 @@ const LINE: Group = Group {
     label: "Line",
     commands: &["smart_dimension", "sketch_vertical", "sketch_horizontal", "sketch_fix", "construction", "delete"],
 };
+const SELECTION: Group = Group {
+    target: Target::SketchSelection,
+    label: "Selection",
+    commands: &["smart_dimension", "construction", "delete"],
+};
 const SKETCH: Group = Group {
     target: Target::EmptySketch,
     label: "Sketch",
@@ -119,7 +127,7 @@ const SKETCH_TOOLS: Group = Group {
 };
 
 /// One command model for every click target, shared by the shortcuts and columns.
-pub static MENUS: [(Target, MenuSpec); 7] = [
+pub static MENUS: [(Target, MenuSpec); 8] = [
     (
         Target::Face,
         MenuSpec {
@@ -217,6 +225,22 @@ pub static MENUS: [(Target, MenuSpec); 7] = [
         },
     ),
     (
+        Target::SketchSelection,
+        MenuSpec {
+            groups: &[SELECTION, SKETCH],
+            quick: [
+                q(Target::SketchSelection, "smart_dimension", "Smart Dimension"),
+                q(Target::SketchSelection, "construction", ""),
+                q(Target::SketchSelection, "sketch_trim", ""),
+                q(Target::EmptySketch, "exit_sketch", "Close sketch"),
+                q(Target::SketchSelection, "delete", ""),
+                q(Target::EmptySketch, "normal_to", ""),
+                q(Target::EmptySketch, "zoom_fit", "Zoom to fit"),
+                q(Target::EmptySketch, "sketch_dimensions", ""),
+            ],
+        },
+    ),
+    (
         Target::EmptySketch,
         MenuSpec {
             groups: &[SKETCH_TOOLS, SKETCH, SCENE],
@@ -281,8 +305,54 @@ fn sketch_caption(state: &AppState) -> String {
     format!("{name}{id}")
 }
 
+/// The selection as the Selection column names it: "2 lines", or "3 entities".
+fn selection_caption(state: &AppState) -> String {
+    use crate::state::SketchSel;
+    let Some(sketch) = state.sketch.as_ref() else { return String::new() };
+    let picks: Vec<_> = sketch.selection.iter().filter(|pick| !matches!(pick, SketchSel::Constraint(_))).collect();
+    let lines = picks
+        .iter()
+        .all(|pick| matches!(pick, SketchSel::Entity(id) if sketch.sketch.entity(*id).is_some_and(|e| e.is_line())));
+    format!("{} {}", picks.len(), if lines { "lines" } else { "entities" })
+}
+
+/// The relations the whole sketch selection can take, from the same offer list as the
+/// ribbon's Relations button. A relation the selection has already is shown disabled.
+fn relations_column(state: &AppState) -> Option<ring_menu::Column> {
+    use crate::state::SketchSel;
+    let session = state.sketch.as_ref()?;
+    let sketch = &session.sketch;
+    let subtitle = session
+        .selection
+        .iter()
+        .filter_map(|pick| match pick {
+            SketchSel::Entity(id) => Some(crate::sketcher::relations::entity_name(sketch, *id)),
+            SketchSel::Point(point) => Some(crate::sketcher::relations::point_name(sketch, *point)),
+            SketchSel::Constraint(_) => None,
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    let items = crate::sketcher::applicable_relation_sets(sketch, &session.selection)
+        .into_iter()
+        .map(|(name, kinds)| {
+            let applied = kinds.iter().all(|kind| sketch.constraints.iter().any(|c| c.kind == *kind));
+            ring_menu::Item {
+                act: ring_menu::Act::Relation(kinds),
+                label: name.to_owned(),
+                enabled: !applied,
+                selected: false,
+                selection: None,
+                shortcut: String::new(),
+                tip: if applied { format!("{name} is already applied") } else { format!("Add {name} to {subtitle}") },
+            }
+        })
+        .collect::<Vec<_>>();
+    (!items.is_empty()).then_some(ring_menu::Column { label: "Relations", subtitle, items })
+}
+
 fn caption(state: &AppState, target: Target, selection: Option<Selection>) -> String {
     match target {
+        Target::SketchSelection => selection_caption(state),
         Target::Empty => "Empty space".into(),
         Target::Body => crate::document::BODY_NAME.into(),
         Target::SketchLine => sketch_caption(state),
@@ -315,7 +385,7 @@ fn item(
         short.to_owned()
     };
     ring_menu::Item {
-        command,
+        act: ring_menu::Act::Command(command),
         label,
         enabled: command.available(Context::of(state)) && command.is_enabled(state),
         selected: (command.active)(state),
@@ -339,9 +409,10 @@ fn snapshot(state: &mut AppState, target: Target, clicked: Option<Selection>, ri
         .filter(|(_, q)| working(q.command))
         .map(|(slot, q)| (slot, item(state, q.command, q.target, clicked, q.label)))
         .collect();
-    let columns = groups(target)
-        .iter()
-        .filter_map(|group| {
+    let relations = (target == Target::SketchSelection).then(|| relations_column(state)).flatten();
+    let columns = relations
+        .into_iter()
+        .chain(groups(target).iter().filter_map(|group| {
             state.doc.selection = selection_for(&state.doc, group.target, clicked);
             let subtitle = if group.target == Target::Empty {
                 String::new()
@@ -360,7 +431,7 @@ fn snapshot(state: &mut AppState, target: Target, clicked: Option<Selection>, ri
                 .collect::<Vec<_>>();
             let items = ids.into_iter().map(|id| item(state, id, group.target, clicked, "")).collect::<Vec<_>>();
             (!items.is_empty()).then_some(ring_menu::Column { label: group.label, subtitle, items })
-        })
+        }))
         .collect();
     state.doc.selection = original;
     ring_menu::Menu { title, quick, columns, ring }
@@ -444,7 +515,10 @@ pub fn show_at(
         if !state.in_sketch() {
             state.doc.selection = choice.selection;
         }
-        state.run_command(choice.command);
+        match choice.act {
+            ring_menu::Act::Command(command) => state.run_command(command),
+            ring_menu::Act::Relation(kinds) => state.push(crate::state::AppAction::SketchRelationSet(kinds)),
+        }
     }
 }
 
@@ -463,7 +537,7 @@ mod tests {
                 assert!(!quick.contains(&q.command), "repeated ring command {}", q.command);
                 quick.push(q.command);
                 let command = commands::get(q.command).expect("registered ring command");
-                if matches!(target, Target::SketchLine | Target::EmptySketch) {
+                if matches!(target, Target::SketchLine | Target::EmptySketch | Target::SketchSelection) {
                     assert!(command.available(Context { sketch: true, ..Context::default() }));
                     assert!(!matches!(q.command, "extrude" | "cut" | "edit_feature" | "delete_feature"));
                 }
@@ -472,14 +546,14 @@ mod tests {
             for group in menu.groups {
                 for id in group.commands {
                     let command = commands::get(id).unwrap_or_else(|| panic!("unknown context command {id}"));
-                    if matches!(target, Target::SketchLine | Target::EmptySketch) {
+                    if matches!(target, Target::SketchLine | Target::EmptySketch | Target::SketchSelection) {
                         assert!(command.available(Context { sketch: true, ..Context::default() }), "{id}");
                         assert!(!matches!(*id, "extrude" | "cut" | "revolve" | "sweep"));
                     }
                 }
             }
         }
-        assert_eq!(seen.len(), 7);
+        assert_eq!(seen.len(), 8);
         assert_eq!(groups(Target::Face).iter().map(|g| g.label).collect::<Vec<_>>(), ["Face", "Feature", "Body"]);
         assert_eq!(groups(Target::Edge).iter().map(|g| g.label).collect::<Vec<_>>(), ["Edge", "Feature", "Body"]);
     }

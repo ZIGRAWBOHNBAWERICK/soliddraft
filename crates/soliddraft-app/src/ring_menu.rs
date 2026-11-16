@@ -4,6 +4,7 @@
 
 use crate::commands::CommandSpec;
 use crate::document::Selection;
+use crate::sketch::ConstraintKind;
 use crate::{icons, theme};
 use egui::{Align2, Color32, CornerRadius, Id, Pos2, Rect, Sense, Stroke, StrokeKind, Vec2, pos2, vec2};
 
@@ -12,7 +13,7 @@ pub(crate) const INK: Color32 = Color32::from_rgb(0xe6, 0xe8, 0xec);
 pub(crate) const MUTED: Color32 = Color32::from_rgb(0x9d, 0xa2, 0xab);
 pub(crate) const LINE: Color32 = Color32::from_rgb(0x4a, 0x4e, 0x55);
 pub(crate) const AMBER: Color32 = Color32::from_rgb(0xf5, 0xa5, 0x24);
-const AMBER_INK: Color32 = Color32::from_rgb(0x23, 0x16, 0x00);
+pub(crate) const AMBER_INK: Color32 = Color32::from_rgb(0x23, 0x16, 0x00);
 pub(crate) const DANGER: Color32 = Color32::from_rgb(0xe0, 0x3a, 0x2e);
 pub(crate) const DANGER_INK: Color32 = Color32::from_rgb(0xff, 0x9d, 0x94);
 const ROW: f32 = 26.0;
@@ -23,8 +24,25 @@ const PILL_HEIGHT: f32 = 28.0;
 const POSITIONS: [(f32, f32); 8] =
     [(0.0, -1.0), (0.72, -0.7), (1.0, 0.0), (0.72, 0.7), (0.0, 1.0), (-0.72, 0.7), (-1.0, 0.0), (-0.72, -0.7)];
 
+/// What a menu row does when it is chosen.
+#[derive(Clone, Debug)]
+pub(crate) enum Act {
+    Command(&'static CommandSpec),
+    /// Adds a sketch relation set as one undo step; the row shows its first relation's glyph.
+    Relation(Vec<ConstraintKind>),
+}
+
+impl Act {
+    fn id(&self) -> &str {
+        match self {
+            Act::Command(command) => command.id,
+            Act::Relation(_) => "",
+        }
+    }
+}
+
 pub(crate) struct Item {
-    pub command: &'static CommandSpec,
+    pub act: Act,
     pub label: String,
     pub enabled: bool,
     pub selected: bool,
@@ -49,9 +67,9 @@ pub(crate) struct Menu {
     pub ring: bool,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Debug)]
 pub(crate) struct Choice {
-    pub command: &'static CommandSpec,
+    pub act: Act,
     pub selection: Option<Selection>,
 }
 
@@ -153,12 +171,12 @@ fn panel(painter: &egui::Painter, rect: Rect, radius: u8, blur: u8, offset: i8) 
 }
 
 fn danger(item: &Item) -> bool {
-    matches!(item.command.id, "delete" | "delete_feature" | "exit_sketch")
+    matches!(item.act.id(), "delete" | "delete_feature" | "exit_sketch")
 }
 
-fn icon(item: &Item) -> icons::Icon {
+fn icon(command: &CommandSpec) -> icons::Icon {
     use icons::Icon;
-    match item.command.id {
+    match command.id {
         "sketch" | "edit_sketch" => Icon::Sketch,
         "smart_dimension" | "show_dimensions" => Icon::SmartDim,
         "normal_to" => Icon::OnPlane,
@@ -185,7 +203,7 @@ fn icon(item: &Item) -> icons::Icon {
         "mass_properties" => Icon::Mass,
         "material" => Icon::Material,
         "appearance" => Icon::Display,
-        _ => item.command.icon,
+        _ => command.icon,
     }
 }
 
@@ -219,7 +237,15 @@ fn button(ui: &mut egui::Ui, item: &Item, rect: Rect, id: Id, pill: bool) -> boo
         ink = ink.gamma_multiply(0.55);
     }
     let left = rect.left() + 8.0;
-    icons::paint(painter, icon(item), Rect::from_center_size(pos2(left + 7.5, rect.center().y), vec2(15.0, 15.0)), ink);
+    let glyph = Rect::from_center_size(pos2(left + 7.5, rect.center().y), vec2(15.0, 15.0));
+    match &item.act {
+        Act::Command(command) => icons::paint(painter, icon(command), glyph, ink),
+        Act::Relation(kinds) => {
+            let look =
+                if highlighted { crate::sketcher::GlyphLook::Selected } else { crate::sketcher::GlyphLook::Plain };
+            crate::sketcher::paint_glyph(painter, &kinds[0], glyph, look);
+        }
+    }
     let suffix = if pill { "" } else { &item.shortcut };
     let suffix_width = text_width(ui.ctx(), suffix, 10.5);
     if !suffix.is_empty() {
@@ -287,9 +313,9 @@ fn show_ring(ui: &mut egui::Ui, menu: &Menu, layout: &Layout, offset: Vec2, open
         ui.set_min_size(ring.size());
         for (slot, item) in &menu.quick {
             let rect = layout.pills[*slot].translate(offset);
-            let id = ui.id().with(("quick", *slot, item.command.id));
+            let id = ui.id().with(("quick", *slot, item.act.id(), &item.label));
             if button(ui, item, rect, id, true) {
-                choice = Some(Choice { command: item.command, selection: item.selection });
+                choice = Some(Choice { act: item.act.clone(), selection: item.selection });
             }
             if focus && item.enabled {
                 ui.ctx().memory_mut(|memory| memory.request_focus(id));
@@ -336,9 +362,9 @@ fn show_columns(ui: &mut egui::Ui, menu: &Menu, layout: &Layout, offset: Vec2, o
                         ui.spacing_mut().item_spacing.y = 0.0;
                         for (row, item) in column.items.iter().enumerate() {
                             let (row_rect, _) = ui.allocate_exact_size(vec2(body.width(), ROW), Sense::hover());
-                            let id = ui.id().with(("command", row, item.command.id));
+                            let id = ui.id().with(("command", row, item.act.id(), &item.label));
                             if button(ui, item, row_rect, id, false) {
-                                choice = Some(Choice { command: item.command, selection: item.selection });
+                                choice = Some(Choice { act: item.act.clone(), selection: item.selection });
                             }
                             if focus && item.enabled {
                                 ui.ctx().memory_mut(|memory| memory.request_focus(id));

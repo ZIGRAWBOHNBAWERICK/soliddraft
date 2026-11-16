@@ -79,6 +79,15 @@ struct Opening {
     answer: std::sync::mpsc::Receiver<Result<(), String>>,
     /// The worker has answered; its builds are being read.
     answered: bool,
+    /// Cleared when the open is dropped, so a cancelled open's builds are not offered.
+    live: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+#[cfg(target_arch = "wasm32")]
+impl Drop for Opening {
+    fn drop(&mut self) {
+        self.live.store(false, std::sync::atomic::Ordering::Release);
+    }
 }
 
 /// Marks the screenshot a browser save asks for.
@@ -230,11 +239,15 @@ impl SolidDraftApp {
         let job = crate::kernel_worker::Job::Build { edit: None, level: Default::default() };
         let kernel = self.state.doc.kernel().clone();
         let ctx = crate::web::context().unwrap_or_default();
-        match crate::kernel_worker::submit(bytes.to_vec(), &job, kernel, &ctx, move |result| {
+        let live = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let wanted = live.clone();
+        let still = move || wanted.load(std::sync::atomic::Ordering::Acquire);
+        match crate::kernel_worker::submit(bytes.to_vec(), &job, kernel, &ctx, still, move |result| {
             let _ = sender.send(result.map(|_| ()));
         }) {
             Ok(_) => {
-                self.opening = Some(Opening { name: name.to_owned(), bytes: bytes.to_vec(), answer, answered: false })
+                self.opening =
+                    Some(Opening { name: name.to_owned(), bytes: bytes.to_vec(), answer, answered: false, live })
             }
             // Without a worker the page opens the file itself.
             Err(_) => self.open_here(name, bytes),

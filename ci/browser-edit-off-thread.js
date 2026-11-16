@@ -8,7 +8,9 @@
 // returns the part to its last accepted state, and nothing on the page's thread may run
 // 250 ms or more meanwhile. The check reads the build state through the read-only
 // `shown_build` export, which also places the Cancel button, and Details through
-// `shown_details`, since the canvas has no text.
+// `shown_details`, since the canvas has no text. A cancelled edit's answer still comes
+// from the worker; the page drops the builds it carries, as its kernel trace records,
+// so the next edit builds from its own.
 function check(value, message) { if (!value) throw new Error(message); }
 const DETAILS = [317, 52], CLOSE = [347, 92], BASE = [380, 203], DEPTH = [515, 268];
 const LONG = 250;
@@ -41,6 +43,8 @@ await page.eval(() => {
       input.dispatchEvent(new Event('change'));
     });
   };
+  // Each kernel job's steps on the page, which the page records once this exists.
+  window.sdKernelTrace = [];
   window.featureCount = null;
   document.addEventListener('soliddraft-feedback', event => {
     const detail = JSON.parse(event.detail);
@@ -127,11 +131,24 @@ await window_('Redo', async () => {
 });
 
 await window_('Cancelling a depth edit', async () => {
+  const before = await page.eval(() => window.sdKernelTrace.length);
   await typeDepth(14);
   const state = await until(building, state => state && state.pending && state.cancel, 'The edit showed no Cancel', 100);
   await click([state.cancel.x, state.cancel.y]);
   await idle('The cancelled edit');
   await depthShown(12, 'The cancelled edit');
+  // The worker answers the cancelled edit later; the page drops the builds it carries.
+  const dropped = () => page.eval(`window.sdKernelTrace.slice(${before}).some(step => step.stage === 'page dropped builds')`);
+  await until(dropped, Boolean, 'The cancelled edit\'s answer never came, or its builds were offered');
+  await idle('After the cancelled edit\'s answer');
+  await depthShown(12, 'After the cancelled edit\'s answer');
+});
+
+await window_('Changing the base depth to 16 mm after the cancel', async () => {
+  await typeDepth(16);
+  await until(building, state => state && state.pending, 'The edit after the cancel drew no busy state', 50);
+  await idle('The edit after the cancel');
+  await depthShown(16, 'The edit after the cancel');
 });
 
 await click(CLOSE);

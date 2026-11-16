@@ -169,9 +169,14 @@ mod browser {
         static HOST: RefCell<Option<Host>> = const { RefCell::new(None) };
     }
 
-    /// Who waits for a job: its answer's handler, the context to repaint, and the kernel
-    /// of the part that asked, which is offered the builds the worker made for the job.
-    type Waiting = (Answered, egui::Context, Arc<dyn soliddraft_kernel_api::Kernel>);
+    /// Whether the page still wants a job's builds: a cancelled or replaced job's answer
+    /// still arrives, and its builds must not reach the kernel a later job reads.
+    type Live = Box<dyn Fn() -> bool>;
+
+    /// Who waits for a job: its answer's handler, the context to repaint, the kernel of
+    /// the part that asked, which is offered the builds the worker made for the job, and
+    /// whether that job is still wanted.
+    type Waiting = (Answered, egui::Context, Arc<dyn soliddraft_kernel_api::Kernel>, Live);
 
     #[derive(Default)]
     struct Shared {
@@ -182,8 +187,13 @@ mod browser {
     }
 
     impl Shared {
+        /// Whether job `id`'s builds are still wanted, before they are copied off the message.
+        fn live(&self, id: u64) -> bool {
+            self.waiting.get(&id).is_some_and(|(_, _, _, live)| live())
+        }
+
         fn answer(&mut self, id: u64, result: Result<serde_json::Value, String>, hand_over: &[u8]) {
-            if let Some((answered, ctx, kernel)) = self.waiting.remove(&id) {
+            if let Some((answered, ctx, kernel, _)) = self.waiting.remove(&id) {
                 // The builds come first, so a rebuild the answer starts takes them.
                 if !hand_over.is_empty()
                     && let Err(error) = kernel.offer_builds(hand_over)
@@ -197,7 +207,7 @@ mod browser {
 
         fn stop(&mut self, reason: &str) {
             self.stopped = true;
-            for (_, (answered, ctx, _)) in self.waiting.drain() {
+            for (_, (answered, ctx, _, _)) in self.waiting.drain() {
                 answered(Err(format!("The kernel worker stopped: {reason}. Try again.")));
                 ctx.request_repaint();
             }
@@ -270,8 +280,14 @@ mod browser {
             // The interface already asked again; nobody waits for this answer.
             shared.waiting.remove(&id);
         } else if let Some(answer) = get(data, "answer").as_string() {
-            let hand_over = get(data, "hand_over").dyn_into::<js_sys::Uint8Array>().map(|bytes| bytes.to_vec());
-            shared.answer(id, decode(&answer), &hand_over.unwrap_or_default());
+            // A job no longer wanted has its builds dropped unread, not offered.
+            let hand_over = if shared.live(id) {
+                get(data, "hand_over").dyn_into::<js_sys::Uint8Array>().map(|bytes| bytes.to_vec()).unwrap_or_default()
+            } else {
+                trace("page dropped builds", id, String::new());
+                Vec::new()
+            };
+            shared.answer(id, decode(&answer), &hand_over);
         } else if let Some(fatal) = get(data, "fatal").as_string() {
             let reason = shared.panic.take().unwrap_or(fatal);
             shared.answer(id, Err(format!("The kernel worker stopped: {reason}. Try again.")), &[]);
@@ -296,6 +312,7 @@ mod browser {
         job: &Job,
         kernel: Arc<dyn soliddraft_kernel_api::Kernel>,
         ctx: &egui::Context,
+        live: impl Fn() -> bool + 'static,
         answered: impl FnOnce(Result<serde_json::Value, String>) + 'static,
     ) -> Result<u64, String> {
         CLIENT.with_borrow_mut(|client| {
@@ -319,7 +336,7 @@ mod browser {
                 .worker
                 .post_message_with_transfer(&message, &js_sys::Array::of1(&bytes.buffer()))
                 .map_err(|error| format!("The kernel worker did not take the job: {error:?}"))?;
-            client.shared.borrow_mut().waiting.insert(id, (Box::new(answered), ctx.clone(), kernel));
+            client.shared.borrow_mut().waiting.insert(id, (Box::new(answered), ctx.clone(), kernel, Box::new(live)));
             Ok(id)
         })
     }

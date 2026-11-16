@@ -866,7 +866,9 @@ impl Worker {
             let kernel = job.source.kernel().clone();
             let ctx = self.answered.repaint.clone().unwrap_or_default();
             let built = self.built.clone();
-            crate::kernel_worker::submit(part, &build, kernel, &ctx, move |result| {
+            let (newest, protected) = (self.newest.clone(), self.protected.clone());
+            let live = move || wanted(request, &newest, &protected);
+            crate::kernel_worker::submit(part, &build, kernel, &ctx, live, move |result| {
                 let _ = built.send((request, result.map(|_| ())));
             })?;
             self.waiting.insert(request, Queued { request, job });

@@ -109,6 +109,28 @@ class DiskBudget(unittest.TestCase):
                 subprocess.run([sys.executable, helper, 'stop'], env=env, capture_output=True,
                                text=True, timeout=50)
 
+    def test_stop_warns_on_a_measurement_error_and_fails_only_on_a_full_disk(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            report, control, summary = root / 'blade-disk.json', root / 'control.json', root / 'summary'
+            control.write_text(json.dumps({'pid': os.getpid(), 'token': 'unrelated-process-token'}))
+            sampled = {'stopped': True, 'samples': 3, 'peak_bytes': 2**30, 'peak_writable_layer_bytes': 0,
+                       'min_free_bytes': 2**34}
+            refused = dict(sampled, error='cannot measure own container: Docker HTTP 500')
+            report.write_text(json.dumps(refused))
+            with mock.patch.dict(os.environ, {'GITHUB_STEP_SUMMARY': str(summary)}), \
+                    mock.patch('builtins.print') as printed:
+                disk.stop(report, control)
+            self.assertIn('::warning::', printed.call_args_list[0].args[0])
+            self.assertIn('Sampled peak:', summary.read_text())
+            full = dict(sampled, error='[Errno 28] No space left on device')
+            report.write_text(json.dumps(full))
+            with self.assertRaisesRegex(RuntimeError, 'No space left'):
+                disk.stop(report, control)
+            report.write_text(json.dumps(dict(sampled, min_free_bytes=0)))
+            with self.assertRaisesRegex(RuntimeError, 'measurement failed'):
+                disk.stop(report, control)
+
     def test_sampling_tolerates_deleted_temporary_files_but_not_access_errors(self):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)

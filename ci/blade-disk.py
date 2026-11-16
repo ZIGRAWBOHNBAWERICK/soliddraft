@@ -110,6 +110,12 @@ def start(report, control):
     raise RuntimeError('Blade disk monitor did not produce its first sample')
 
 
+def disk_full(state):
+    """Whether a measurement stopped because the disk filled, rather than failed to read."""
+    error = state.get('error', '')
+    return 'No space left on device' in error or '[Errno 28]' in error or state.get('min_free_bytes', 1) <= 0
+
+
 def stop(report, control):
     if not control.exists():
         return
@@ -122,9 +128,13 @@ def stop(report, control):
             break
         time.sleep(0.1)
     state = json.loads(report.read_text()) if report.exists() else {}
-    if state.get('error') or not state.get('stopped'):
+    if not state.get('stopped') or disk_full(state):
         raise RuntimeError(f'Blade disk measurement failed: {state}')
-    if not state.get('reported'):
+    # A sample the monitor could not read, such as Docker refusing to size the job's own
+    # container, says nothing about the build: the job's output is still released.
+    if state.get('error'):
+        print(f'::warning::Blade disk measurement incomplete: {state["error"]}')
+    if not state.get('reported') and state.get('samples'):
         peak = state['peak_bytes'] / 2**30
         layer = state['peak_writable_layer_bytes'] / 2**30
         free = state['min_free_bytes'] / 2**30

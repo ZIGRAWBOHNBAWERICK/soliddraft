@@ -214,18 +214,17 @@ impl HandedIdentity {
     }
 }
 
+/// Catallax face, edge and vertex handles.
+type Handles = (Vec<CatFace>, Vec<CatEdge>, Vec<CatVertex>);
+
 /// Catallax handles for entity handle indices. Catallax makes a handle only while it
 /// reads its transfer format, so the indices pass through that format as a small
 /// record of their own, with each arena declared unbounded.
-fn mint(
-    faces: &[u32],
-    edges: &[u32],
-    vertices: &[u32],
-) -> Result<(Vec<CatFace>, Vec<CatEdge>, Vec<CatVertex>), catallax_numbers::Refusal> {
+fn mint(faces: &[u32], edges: &[u32], vertices: &[u32]) -> Result<Handles, catallax_numbers::Refusal> {
     use catallax_numbers::transfer::{Codec, Reader, Writer};
     struct Indices {
         lists: [Vec<u32>; 3],
-        handles: Option<(Vec<CatFace>, Vec<CatEdge>, Vec<CatVertex>)>,
+        handles: Option<Handles>,
     }
     fn handles<T: 'static>(
         reader: &mut Reader<'_>,

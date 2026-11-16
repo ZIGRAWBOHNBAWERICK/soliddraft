@@ -65,7 +65,7 @@ struct State {
     /// that continues an imported body, even when the import itself is reused.
     files: BTreeMap<String, Arc<[u8]>>,
     /// Builds this kernel made since [`Kernel::keep_builds`], by recipe key, as bytes.
-    kept: Option<Vec<(String, Vec<u8>, Option<handover::HandedIdentity>)>>,
+    kept: Option<Vec<Kept>>,
     /// Every body stored while keeping builds, so a hand-over finds the topology of one
     /// a later feature released.
     kept_solids: Vec<Arc<Solid>>,
@@ -86,6 +86,10 @@ struct State {
     /// How many offered builds were read from their bytes.
     offer_reads: Arc<std::sync::atomic::AtomicU64>,
 }
+
+/// A build kept for a hand-over: its recipe key, its bytes, and what adopting it unread
+/// needs, once the body it built is stored.
+type Kept = (String, Vec<u8>, Option<handover::HandedIdentity>);
 
 struct Stored {
     steps: BTreeMap<u64, Value>,

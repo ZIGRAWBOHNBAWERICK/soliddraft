@@ -84,6 +84,13 @@ selection and the Details button drawn, logs both, and clicks Details once where
 drawn. Each kernel job the page sends, and the worker's receipt, start and reply, go to
 a trace the check sets up; a missing answer prints it.
 
+`ci/browser-edit-off-thread.js` runs the same way on `site/parts/bracket.dwprt`, which
+the step copies into the page's `fixtures` folder. It opens the bracket through the kernel
+worker, changes its depth, undoes, redoes, cancels an edit and edits again. No task on the
+page's thread may reach 250 ms during an edit, Undo or Redo. Opening and Cancel are logged
+without a bound, since software rendering's pick readback still holds the page up to 0.8 s
+there.
+
 `ci/browser-part-check.js` runs the same way on the sample part, in its own session and
 on its own origin. It clicks Inspect > Check, which builds each solid step again in the
 boundary model and the distance field on the page's thread, and waits until the Part
@@ -159,7 +166,7 @@ The running selector and its map are the candidate policy; `--head` names the tr
 |---|---|---|
 | `ci/browser-journal.js` | `web` | Browser journal check in the web job |
 | `ci/browser-kernel-worker.js` | `web` | Browser kernel worker check in the web job |
-| `ci/browser-edit-off-thread.js` | `web` | Browser edits built off the page's thread; not in the web job yet |
+| `ci/browser-edit-off-thread.js` | `web` | Browser bracket edits built off the page's thread, bounded at 250 ms a task |
 | `ci/browser-part-check.js` | `web` | Browser Inspect > Check in the web job |
 | `ci/browser-preferences.mjs` | `web` | Browser preferences check in the web job |
 | `ci/check-consumers.json` | all | The selector; it controls its own obligations |

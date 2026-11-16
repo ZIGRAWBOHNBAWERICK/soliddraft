@@ -841,6 +841,29 @@ jobs:
           chrome-devtools-axi emulate --viewport 1400x813x1
           chrome-devtools-axi open 'http://127.0.0.1:8770/?demo'
           chrome-devtools-axi run < ci/browser-part-check.js
+      - name: Build bracket edits off the page's thread in Chromium
+        env:
+          CHROME_DEVTOOLS_AXI_SESSION: edit-off-thread
+          CHROME_DEVTOOLS_AXI_EXECUTABLE_PATH: /usr/bin/google-chrome
+          # The same software renderer as the kernel worker check.
+          CHROME_DEVTOOLS_AXI_CHROME_ARGS: --no-sandbox --enable-unsafe-webgpu --enable-unsafe-swiftshader --use-angle=swiftshader
+        run: |
+          export PATH="$RUNNER_TEMP/browser-tools/node_modules/.bin:$PATH"
+          export CHROME_DEVTOOLS_AXI_MCP_PATH="$RUNNER_TEMP/browser-tools/node_modules/chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js"
+          # The page opens the bracket from its own origin, as an upload.
+          mkdir -p target/web-dist/fixtures
+          cp site/parts/bracket.dwprt target/web-dist/fixtures/
+          python3 -m http.server 8771 --bind 127.0.0.1 --directory target/web-dist > "$RUNNER_TEMP/edit-off-thread-server.log" 2>&1 &
+          server=$!
+          trap 'chrome-devtools-axi stop; kill "$server"' EXIT
+          if ! chrome-devtools-axi open about:blank; then
+            chrome-devtools-axi stop || true
+            chrome-devtools-axi open about:blank
+          fi
+          # Its clicks go to fixed points of a 1400 x 813 page.
+          chrome-devtools-axi emulate --viewport 1400x813x1
+          chrome-devtools-axi open 'http://127.0.0.1:8771/'
+          chrome-devtools-axi run < ci/browser-edit-off-thread.js
       - name: Keep preferences per browser in Chromium
         env:
           # WebGL: a headless screenshot cannot read a WebGPU canvas.

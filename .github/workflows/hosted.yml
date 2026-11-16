@@ -841,7 +841,7 @@ jobs:
           chrome-devtools-axi emulate --viewport 1400x813x1
           chrome-devtools-axi open 'http://127.0.0.1:8770/?demo'
           chrome-devtools-axi run < ci/browser-part-check.js
-      - name: Build bracket edits off the page's thread in Chromium
+      - name: Detect page-thread regressions in bracket edits in Chromium
         env:
           CHROME_DEVTOOLS_AXI_SESSION: edit-off-thread
           CHROME_DEVTOOLS_AXI_EXECUTABLE_PATH: /usr/bin/google-chrome

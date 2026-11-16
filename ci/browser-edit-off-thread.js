@@ -5,11 +5,13 @@
 // Building a part in the browser runs in the kernel worker, not on the page's thread:
 // opening the bracket, changing a dimension, Undo and Redo once each held the page for
 // 2.7 to 7 s in headless Chrome. The page shows that it is building, with a Cancel that
-// returns the part to its last accepted state. The 250 ms target for a page task is
-// measured on a Mac with an Apple M3; a CI runner is slower and varies from run to run,
-// so the check times a fixed loop on the page's thread first and bounds the depth edit,
-// Undo, Redo and the edit after a cancel at 250 ms scaled by how much slower that loop
-// ran than on the M3. Every step logs its absolute time. Opening the bracket and Cancel
+// returns the part to its last accepted state. In CI this is regression detection, not
+// the 250 ms target: that target is measured separately on a Mac's real GPU. A CI runner
+// is slower and varies from run to run, so the check times a fixed loop on the page's
+// thread first and flags a regression when the depth edit, Undo, Redo or the edit after
+// a cancel runs longer than 250 ms scaled by how much slower that loop ran than on the
+// Apple M3. A CPU loop does not calibrate GPU readback waits, so the scaled bound says
+// nothing about the target. Every step logs its absolute time. Opening the bracket and Cancel
 // are logged without a bound: under software rendering, as in CI, the viewport's pick
 // readback after the part changes under the pointer still takes up to 0.8 s there. The
 // check reads the build state through the read-only
@@ -102,13 +104,13 @@ const baseline = await page.eval(() => {
   return times.sort((a, b) => a - b)[2];
 });
 const bound = LONG * baseline / REFERENCE_MS;
-console.log(`Calibration loop ${baseline.toFixed(1)} ms (${REFERENCE_MS} ms on the M3): bound ${Math.round(bound)} ms`);
+console.log(`Calibration loop ${baseline.toFixed(1)} ms (${REFERENCE_MS} ms on the M3): regression bound ${Math.round(bound)} ms`);
 async function window_(what, act, bounded = true) {
   await page.eval(() => { window.longTasks = []; return true; });
   await act();
   const longest = await page.eval(() => Math.max(0, ...window.longTasks));
-  console.log(`${what}: longest page task ${longest} ms${bounded ? ` (bound ${Math.round(bound)} ms)` : ' (logged, not bounded)'}`);
-  check(!bounded || longest < bound, `${what} blocked the page for ${longest} ms, over ${Math.round(bound)} ms`);
+  console.log(`${what}: longest page task ${longest} ms${bounded ? ` (regression bound ${Math.round(bound)} ms)` : ' (logged, not bounded)'}`);
+  check(!bounded || longest < bound, `Regression: ${what} blocked the page for ${longest} ms, over ${Math.round(bound)} ms`);
 }
 async function depthShown(depth, what) {
   await until(async () => (await shown('shown_details')) || {}, drawn => drawn.title === 'Boss-Extrude1'

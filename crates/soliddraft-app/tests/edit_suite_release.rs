@@ -544,6 +544,59 @@ fn cancel_returns_a_part_still_building_to_its_last_accepted_revision() {
     assert_eq!(doc.model().geometry_hash(), edited, "nothing building, nothing cancelled");
 }
 
+/// Cancel returns to the accepted revision itself, not to its undo depth: an undo still
+/// building followed by a new edit before it settles leaves the stack as deep as the
+/// accepted revision with other geometry. The builds still running for the undo and the
+/// edit are not accepted after the cancel.
+#[test]
+fn cancel_after_an_undo_and_a_new_edit_restores_the_accepted_geometry() {
+    let kernel = Arc::new(gated::Gated::default());
+    let mut doc = Document::new("Cancel a branch", kernel.clone());
+    let id = doc
+        .apply(Command::AddExtrude {
+            params: ExtrudeParams { depth: 25.0, ..Default::default() },
+            via_assistant: false,
+        })
+        .unwrap()
+        .unwrap();
+    let edit = |doc: &mut Document, value: f64| {
+        doc.apply_interactive(Command::EditExtrude {
+            id,
+            params: ExtrudeParams { depth: value, ..Default::default() },
+        })
+        .unwrap();
+    };
+    edit(&mut doc, 30.0);
+    settle(&mut doc);
+    let accepted = doc.model().geometry_hash();
+    let depth = doc.undo_depth();
+
+    let release = Release(kernel.clone());
+    kernel.rules.lock().unwrap().hold = Some(25.0);
+    doc.undo_interactive().unwrap();
+    edit(&mut doc, 35.0);
+    let branch = doc.model().geometry_hash();
+    assert_eq!(doc.undo_depth(), depth, "the branch is as deep as the accepted revision");
+    assert!(doc.proof_pending());
+    doc.cancel_build().unwrap();
+    assert_eq!(doc.model().geometry_hash(), accepted, "the accepted 30 mm comes back");
+    drop(release);
+    settle(&mut doc);
+    assert_eq!(doc.model().geometry_hash(), accepted, "a stale build is not accepted after the cancel");
+    assert!(doc.proof_state().current_proved_model());
+    assert!(!doc.proof_pending());
+
+    // The return is one undo entry: Undo takes it back to the branch.
+    let release = Release(kernel.clone());
+    kernel.rules.lock().unwrap().hold = Some(35.0);
+    doc.undo_interactive().unwrap();
+    assert_eq!(doc.model().geometry_hash(), branch);
+    assert_eq!(doc.undo_depth(), depth);
+    drop(release);
+    settle(&mut doc);
+    assert_eq!(doc.model().geometry_hash(), branch);
+}
+
 struct Release(Arc<gated::Gated>);
 impl Drop for Release {
     fn drop(&mut self) {

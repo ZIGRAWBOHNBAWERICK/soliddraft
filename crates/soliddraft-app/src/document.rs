@@ -1966,22 +1966,94 @@ impl Document {
         });
     }
 
-    /// Returns a part still building to its last accepted revision, undoing an edit or
-    /// redo still building, or redoing an undo still building. Does nothing when no
-    /// build is owed.
+    /// Returns a part still building to its last accepted revision, and drops the
+    /// builds still running for it. Undo or redo returns when the history passes back
+    /// through that revision: an edit or redo still building is undone, an undo still
+    /// building is redone. An undo followed by a new edit leaves no such path, so the
+    /// features that differ are set back to their accepted definitions as one step,
+    /// which Undo takes back. Refuses, changing nothing, when neither restores the
+    /// accepted geometry. Does nothing when no build is owed.
     pub fn cancel_build(&mut self) -> Result<(), String> {
         if !self.proof_pending() {
             return Ok(());
         }
-        let target =
-            self.last_proved.as_ref().map(|proved| proved.depth).ok_or("There is no earlier part to return to")?;
-        while self.model.undo_depth() > target {
-            self.undo_interactive()?;
+        let accepted = self.last_proved.as_ref().ok_or("There is no earlier part to return to")?;
+        let (depth, model) = (accepted.depth, accepted.model.clone());
+        let wanted = model.geometry_hash();
+        if self.walk_history(depth, &wanted)? || self.restore_definitions(&model, &wanted)? {
+            self.after_history_change();
+            return Ok(());
         }
-        while self.model.undo_depth() < target {
-            self.redo_interactive()?;
+        Err("The part cannot return to its last accepted state. Let the build finish, then undo.".into())
+    }
+
+    /// Undoes or redoes, without building, to `depth`. Keeps the result when the part
+    /// then has geometry `wanted`; otherwise walks back and reports false.
+    fn walk_history(&mut self, depth: usize, wanted: &ContentHash) -> Result<bool, String> {
+        let start = self.model.undo_depth();
+        let step = |model: &mut model::Document, back: bool| {
+            if back { model.undo_deferred() } else { model.redo_deferred() }.map(|_| ()).map_err(|e| e.to_string())
+        };
+        let back = depth < start;
+        let mut moved = 0;
+        while self.model.undo_depth() != depth {
+            if step(&mut self.model, back).is_err() {
+                break;
+            }
+            moved += 1;
         }
-        Ok(())
+        if self.model.undo_depth() == depth && self.model.geometry_hash() == *wanted {
+            return Ok(true);
+        }
+        for _ in 0..moved {
+            step(&mut self.model, !back)?;
+        }
+        Ok(false)
+    }
+
+    /// Sets each feature whose definition differs from `accepted` back to it, as one
+    /// undo entry. Keeps it when the part then has geometry `wanted`; otherwise takes it
+    /// back and reports false, as when features were added or removed since.
+    fn restore_definitions(&mut self, accepted: &model::Document, wanted: &ContentHash) -> Result<bool, String> {
+        let ids = |doc: &model::Document| doc.features().iter().map(|feature| feature.id).collect::<Vec<_>>();
+        if ids(accepted) != ids(&self.model) {
+            return Ok(false);
+        }
+        let commands: Vec<model::Command> = accepted
+            .features()
+            .iter()
+            .zip(self.model.features())
+            .filter(|(then, now)| then.kind != now.kind)
+            .map(|(then, _)| model::Command::EditFeature { id: then.id, kind: then.kind.clone() })
+            .collect();
+        if commands.is_empty() {
+            return Ok(false);
+        }
+        let depth = self.model.undo_depth();
+        let label = "Return to the last accepted part".to_owned();
+        if self.model.execute_deferred(model::Command::Batch { label, commands }).is_err() {
+            return Ok(false);
+        }
+        if self.model.geometry_hash() == *wanted {
+            return Ok(true);
+        }
+        self.model.withdraw(depth).map_err(|error| error.to_string())?;
+        Ok(false)
+    }
+
+    /// Settles the part after undo, redo or a restore changed it without building: a
+    /// return to the accepted geometry takes the accepted result and drops the pending
+    /// build, anything else is built.
+    fn after_history_change(&mut self) {
+        self.touch();
+        if self.model.geometry_hash() == self.geometry {
+            self.after_metadata_change();
+            return;
+        }
+        self.after_deferred_change();
+        if let Err(message) = self.schedule_proof() {
+            self.fail_proof(message);
+        }
     }
 
     /// Definitions are saved immediately, but only a current exact result may export.

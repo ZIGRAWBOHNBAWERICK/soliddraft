@@ -16,14 +16,44 @@ pub(crate) enum Exact {
     Checkpoint(EvaluationCheckpoint),
     /// Built by another kernel and handed over. A later feature rebuilds its prefix.
     Adopted(Arc<Built>),
+    /// Built by another kernel and handed over, read from its bytes only when exact
+    /// geometry is first needed. A later feature rebuilds its prefix.
+    Offered(Box<Unread>),
+}
+
+/// A handed-over build not read yet, and the recipe to evaluate should its bytes not read.
+#[derive(Clone, Debug)]
+pub(crate) struct Unread {
+    offer: crate::handover::Offer,
+    recipe: Arc<Recipe>,
+    evaluated: Arc<std::sync::OnceLock<EvaluationCheckpoint>>,
 }
 
 impl Exact {
-    /// The exact body, its intermediate bodies and its recipe.
+    /// The exact body, its intermediate bodies and its recipe. An offered build is read
+    /// here the first time; bytes that do not read are replaced by evaluating the recipe.
     pub(crate) fn built(&self) -> &Built {
         match self {
             Exact::Checkpoint(checkpoint) => checkpoint.built(),
             Exact::Adopted(built) => built,
+            Exact::Offered(unread) => match unread.offer.read() {
+                Ok(built) => built,
+                Err(_) => unread
+                    .evaluated
+                    .get_or_init(|| {
+                        catallax_features::evaluate_incremental(&unread.recipe, None, &mut Decider::default())
+                            .expect("the handing kernel built this recipe")
+                    })
+                    .built(),
+            },
+        }
+    }
+
+    /// Whether the exact body is in memory, rather than in bytes not read yet.
+    pub(crate) fn is_read(&self) -> bool {
+        match self {
+            Exact::Offered(unread) => unread.offer.is_read(),
+            _ => true,
         }
     }
 
@@ -31,7 +61,7 @@ impl Exact {
     pub(crate) fn continuation(&self) -> Option<EvaluationCheckpoint> {
         match self {
             Exact::Checkpoint(checkpoint) => Some(checkpoint.clone()),
-            Exact::Adopted(_) => None,
+            Exact::Adopted(_) | Exact::Offered(_) => None,
         }
     }
 }
@@ -76,6 +106,58 @@ impl AppBody {
             .collect();
         let names = crate::handover::renamed_names(crate::handover::names(&built), &renames)?;
         Some(AppBody { checkpoint: Exact::Adopted(built), names, recipe: Some(Arc::new(ours.clone())) })
+    }
+
+    /// A build another kernel made and handed over for `ours`, adopted without reading
+    /// its bytes: its names come with the hand-over, renamed as [`AppBody::adopted`] does.
+    /// `None` if the hand-over carries no names or they do not line up with `ours`.
+    pub(crate) fn offered(offer: crate::handover::Offer, ours: &Recipe) -> Option<Self> {
+        let identity = offer.identity.clone()?;
+        let theirs = &identity.steps;
+        if theirs.len() != ours.steps.len() {
+            return None;
+        }
+        let renames: BTreeMap<String, String> = theirs
+            .iter()
+            .zip(&ours.steps)
+            .filter(|(theirs, ours)| theirs.as_str() != ours.id.as_str())
+            .map(|(theirs, ours)| (theirs.clone(), ours.id.as_str().to_owned()))
+            .collect();
+        let names = identity.names(&renames)?;
+        let recipe = Arc::new(ours.clone());
+        let unread = Unread { offer, recipe: recipe.clone(), evaluated: Arc::default() };
+        Some(AppBody { checkpoint: Exact::Offered(Box::new(unread)), names, recipe: Some(recipe) })
+    }
+
+    /// What came with an offered build for adopting it unread.
+    pub(crate) fn handed_identity(&self) -> Option<&Arc<crate::handover::HandedIdentity>> {
+        match &self.checkpoint {
+            Exact::Offered(unread) => unread.offer.identity.as_ref(),
+            _ => None,
+        }
+    }
+
+    /// What came with an offered build, while its bytes are still unread: facts an edit
+    /// asks for are answered from it instead of reading them.
+    pub(crate) fn unread(&self) -> Option<&crate::handover::HandedIdentity> {
+        if self.checkpoint.is_read() { None } else { self.handed_identity().map(|identity| identity.as_ref()) }
+    }
+
+    /// The size of an offered build's unread bytes.
+    pub(crate) fn unread_bytes(&self) -> Option<usize> {
+        match &self.checkpoint {
+            Exact::Offered(unread) if !unread.offer.is_read() => Some(unread.offer.len()),
+            _ => None,
+        }
+    }
+
+    /// Whether the body is empty, from its names while its bytes are unread.
+    pub(crate) fn is_empty(&self) -> bool {
+        if !self.checkpoint.is_read() {
+            return self.names.faces.is_empty();
+        }
+        let exact = self.checkpoint.built();
+        exact.model.body(exact.result).kind == catallax_topology::BodyKind::Empty
     }
 
     /// The body's recipe in this kernel's step ids.

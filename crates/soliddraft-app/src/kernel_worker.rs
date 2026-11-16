@@ -553,6 +553,9 @@ mod tests {
             assert_eq!(edited.generated_faces(feature.id), fresh.generated_faces(feature.id), "{}", feature.name);
         }
         assert_eq!(page.fresh_builds(), 0, "every build was taken from the worker");
+        // The page shows the edited part without reading any handed-over body.
+        crate::document::ready_display(&edited, soliddraft_tessellation::Level::Standard).unwrap();
+        assert_eq!(page.bodies_read(), 0, "the edit and its display read no exact body");
     }
 
     #[test]

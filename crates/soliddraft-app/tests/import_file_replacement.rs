@@ -455,11 +455,11 @@ fn an_identical_file_keeps_every_reference() {
     }
 }
 
-/// The new file drops the hole. The sides keep their definitions, so the fillet and the
-/// boss on the -x side hold. The cylinder is gone and the top and bottom lost their hole,
-/// so the chamfer and the bottom sketch are named in the review, and after Accept they
-/// need repair while the rest builds. One Undo puts everything back; save and reopen keep
-/// the new file with its names.
+/// The new file drops the hole. The sides keep their definitions; the top and bottom lost
+/// their hole loop and follow by shape. The cylinder has no partner, so the chamfer on its
+/// rim is named in the review, and after Accept it needs repair while the rest builds,
+/// the bottom sketch included. One Undo puts everything back; save and reopen keep the
+/// new file with its names.
 #[test]
 fn a_deleted_face_names_the_references_it_breaks_and_keeps_the_rest() {
     let mut doc = holed_block();
@@ -475,25 +475,15 @@ fn a_deleted_face_names_the_references_it_breaks_and_keeps_the_rest() {
 
     let lost = replace(&mut doc, block_step(20.0, None));
     let owners: Vec<&str> = lost.iter().map(|line| line.split(':').next().unwrap()).collect();
-    assert!(owners.contains(&"Sketch2") && owners.contains(&"Chamfer1"), "{lost:?}");
-    assert!(
-        lost.iter().all(|line| line.contains(": Import1 · Face ") || line.starts_with("Boss-Extrude2")),
-        "{lost:?}"
-    );
-    for kept in ["Fillet1", "Sketch1", "Boss-Extrude1"] {
-        assert!(!owners.contains(&kept), "{kept} keeps its faces: {lost:?}");
-    }
-    assert_eq!(owners.iter().filter(|owner| **owner == "Chamfer1").count(), 2, "the rim's two faces: {lost:?}");
+    assert_eq!(owners, ["Chamfer1"], "only the rim lost a face: {lost:?}");
+    assert!(lost[0].contains(": Import1 · Face ") && lost[0].ends_with("has no matching face in the new file"));
     assert_eq!(listed, owners, "MCP preview_import reports the same items");
 
     let state = |doc: &Document, name: &str| doc.features.iter().find(|f| f.name == name).unwrap().status.clone();
-    for name in ["Import1", "Fillet1", "Sketch1", "Boss-Extrude1"] {
+    for name in ["Import1", "Fillet1", "Sketch1", "Boss-Extrude1", "Sketch2", "Boss-Extrude2"] {
         assert_eq!(state(&doc, name), FeatureStatus::Ok, "{name}");
     }
-    for name in ["Sketch2", "Chamfer1"] {
-        assert!(matches!(state(&doc, name), FeatureStatus::NeedsRepair(_)), "{name}: {:?}", state(&doc, name));
-    }
-    assert_ne!(state(&doc, "Boss-Extrude2"), FeatureStatus::Ok);
+    assert!(matches!(state(&doc, "Chamfer1"), FeatureStatus::NeedsRepair(_)), "{:?}", state(&doc, "Chamfer1"));
     // The import's faces read as distinct labels, inherited and new alike.
     let import = soliddraft_model::FeatureId(doc.features[0].id as u32);
     let mut labels: Vec<String> = doc
@@ -506,10 +496,9 @@ fn a_deleted_face_names_the_references_it_breaks_and_keeps_the_rest() {
     labels.sort();
     labels.dedup();
     assert_eq!(labels.len(), count, "{labels:?}");
-    assert!(count >= 6, "{labels:?}");
+    assert_eq!(count, 6, "{labels:?}");
     // Nothing is rewritten or dropped: every stored reference is as it was.
     assert_eq!(doc.model().stored_face_refs(), refs);
-    assert_eq!(doc.features.len(), before.len());
     assert_eq!(doc.undo_depth(), depth + 1);
 
     doc.undo().unwrap();
@@ -526,27 +515,46 @@ fn a_deleted_face_names_the_references_it_breaks_and_keeps_the_rest() {
     assert_eq!(sources(&reopened)[0].0, sha256_hex(&block_step(20.0, None)));
 }
 
-/// The new file's block is 25 mm tall instead of 20. Catallax matches faces by their
-/// complete definitions only, so the moved top face, the four sides that grew and the
-/// longer hole have no partner; only the bottom keeps its name. References to the bottom
-/// follow; the rest are named for repair rather than followed. Following a moved face
-/// needs a correspondence for changed geometry in Catallax.
+/// The hole moves 5 mm along x. The top, bottom and cylinder change, and Catallax pairs
+/// none of them exactly; they follow by shape, so the chamfer, the bottom sketch and
+/// everything else build on the new file with their references unchanged.
 #[test]
-fn a_moved_face_is_named_for_repair_until_catallax_can_match_it() {
+fn a_moved_face_takes_its_references_with_it() {
     let mut doc = holed_block();
+    let refs = doc.model().stored_face_refs();
+    let lost = replace(&mut doc, block_step(20.0, Some([5.0, 0.0])));
+    assert!(lost.is_empty(), "{lost:?}");
+    all_built(&doc);
+    assert_eq!(doc.model().stored_face_refs(), refs);
+    // The chamfer now bevels the moved rim: its outer edge rings the new hole centre.
+    let body = doc.model().live_bodies()[0].1;
+    let topology = doc.kernel().topology(body).unwrap();
+    let rim = |e: &soliddraft_kernel_api::EdgeInfo| {
+        let m = e.midpoint;
+        (m.z - 20.0).abs() < 1e-6 && ((((m.x - 5.0).powi(2) + m.y * m.y).sqrt()) - 5.0).abs() < 1e-6
+    };
+    assert!(topology.edges.iter().any(rim), "a chamfered rim around the moved hole");
+}
+
+/// The block grows from 20 to 25 mm. The top moves, the sides grow and the hole lengthens;
+/// only the bottom keeps its exact definition. The rest follow by shape, so the fillet,
+/// the side boss and the chamfer build on the taller block with their references unchanged.
+#[test]
+fn a_resized_face_takes_its_references_with_it() {
+    let mut doc = holed_block();
+    let refs = doc.model().stored_face_refs();
     let lost = replace(&mut doc, block_step(25.0, Some([0.0, 0.0])));
-    let owners: Vec<&str> = lost.iter().map(|line| line.split(':').next().unwrap()).collect();
-    for name in ["Fillet1", "Sketch1", "Chamfer1"] {
-        assert!(owners.contains(&name), "{name}: {lost:?}");
-    }
-    assert!(!owners.contains(&"Sketch2"), "the bottom kept its definition: {lost:?}");
-    let state = |name: &str| doc.features.iter().find(|f| f.name == name).unwrap().status.clone();
-    for name in ["Import1", "Sketch2", "Boss-Extrude2"] {
-        assert_eq!(state(name), FeatureStatus::Ok, "{name}");
-    }
-    for name in ["Fillet1", "Sketch1", "Chamfer1"] {
-        assert!(matches!(state(name), FeatureStatus::NeedsRepair(_)), "{name}: {:?}", state(name));
-    }
+    assert!(lost.is_empty(), "{lost:?}");
+    all_built(&doc);
+    assert_eq!(doc.model().stored_face_refs(), refs);
+    // The fillet now rounds the taller corner, 25 mm long.
+    let body = doc.model().live_bodies()[0].1;
+    let topology = doc.kernel().topology(body).unwrap();
+    let corner = |f: &&soliddraft_kernel_api::FaceInfo| {
+        f.surface == soliddraft_kernel_api::SurfaceKind::Cylinder && f.centroid.x > 18.0 && f.centroid.y > 13.0
+    };
+    let fillet = topology.faces.iter().find(corner).expect("the fillet face");
+    assert!((fillet.centroid.z - 12.5).abs() < 1e-6, "{:?}", fillet.centroid);
 }
 
 /// A drawing's dimension between two vertical side edges of an imported block still finds

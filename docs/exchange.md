@@ -121,18 +121,23 @@ and in other documents. A file whose entity numbers alone changed therefore keep
 reference. New faces get numbers after every face the import has had, so no new face
 takes a number an old reference names.
 
-A reference to a face without a verified partner is not redirected. The review lists
+A face that moved or changed size has no exact partner, and neither has any face whose
+boundary touches it. Those faces follow by shape instead: a face of the new file with the
+same surface type, a planar face facing the same way within 1 degree, every neighbour
+already paired still a neighbour, and its centroid within a quarter of the old body's
+diagonal. A face follows only when one such face is left, or the nearest is less than
+half as far as the next, and never when two old faces want the same new face. Pairs
+found this way constrain the next round, until no more are found.
+
+A reference to a face with no partner either way is not redirected. The review lists
 each one by name, with the feature, appearance or measurement that holds it, before
 Accept, and so does `preview_import` under `needs_repair`. After Accept those features
-ask for repair, and everything else keeps building. Only faces whose complete definition
-is unchanged have partners: a face that moved or was resized, and every face whose
-boundary touches it, has none, so references to them are listed for repair rather than
-followed.
+ask for repair, and everything else keeps building.
 
 All imports of the old file move to the new file together, as one undo step. A STEP
 file whose bodies select solids of one source file is replaced only when every solid has
-a verified partner, which needs all of its faces unchanged; otherwise the replacement is
-refused and nothing changes. The match is made when the replacement is previewed; if the
+a verified partner, which Catallax gives only when all of its faces are unchanged;
+otherwise the replacement is refused and nothing changes. The match is made when the replacement is previewed; if the
 part changes before Accept, Accept refuses and the replacement must be previewed again.
 
 The match carries no repair answers yet. For an import of a single solid, a file that

@@ -335,38 +335,67 @@ fn match_file(doc: &Document, old: &ImportStepFeature, new: &ImportStepFeature) 
         }
     };
     type Name = (soliddraft_model::FeatureId, soliddraft_model::Generator, u32);
-    let mut unmatched: HashSet<Name> = HashSet::new();
-    let mut edits = Vec::new();
+    // Each import's current face names by face key, its exact pairs from Catallax, and the
+    // first number free for a new face: past every face this import has had, so none
+    // takes the number of a face a reference still names.
+    let mut names: Vec<BTreeMap<String, InheritedName>> = Vec::new();
+    let mut pairs: Vec<BTreeMap<String, String>> = Vec::new();
+    let mut firsts: Vec<u32> = Vec::new();
     for ((id, matched), replaced) in imports.iter().zip(&replaced) {
-        let feature = model_id(*id);
-        let faces = doc.model().generated_faces(feature);
+        let faces = doc.model().generated_faces(model_id(*id));
         if faces.is_empty() {
             let name = doc.feature(*id).map_or("An import of this file", |f| f.name.as_str());
             return Err(format!("{name} is not built, so its faces cannot be matched. Nothing was changed."));
         }
-        let mut face_names = BTreeMap::new();
-        // New faces are numbered past every face this import has had, so none takes the
-        // number of a face a reference still names.
-        let mut new_ordinals_from = matched.new_ordinals_from;
+        let mut first = matched.new_ordinals_from;
+        let mut current = BTreeMap::new();
         for face in faces {
-            new_ordinals_from = new_ordinals_from.max(face.ordinal + 1);
-            let FaceRole::Imported { key } = &face.origin.role else { continue };
-            match replaced.faces.get(key) {
-                Some(new_key) => {
-                    let name = InheritedName { generator: face.generator.clone(), ordinal: face.ordinal };
-                    face_names.insert(new_key.clone(), name);
-                }
-                None => {
-                    unmatched.insert((feature, face.generator.clone(), face.ordinal));
-                }
+            first = first.max(face.ordinal + 1);
+            if let FaceRole::Imported { key } = &face.origin.role {
+                current.insert(key.clone(), InheritedName { generator: face.generator.clone(), ordinal: face.ordinal });
             }
         }
-        let mut import = new.clone();
-        import.source_solid = replaced.source_solid.clone();
-        import.source_bound_names = true;
-        import.face_names = face_names;
-        import.new_ordinals_from = new_ordinals_from;
-        edits.push((*id, soliddraft_model::FeatureKind::ImportStep(import)));
+        pairs.push(replaced.faces.iter().filter(|(old, _)| current.contains_key(*old)).map(clone_pair).collect());
+        names.push(current);
+        firsts.push(first);
+    }
+    let edits_for = |pairs: &[BTreeMap<String, String>]| -> Vec<(FeatureId, soliddraft_model::FeatureKind)> {
+        imports
+            .iter()
+            .zip(&replaced)
+            .enumerate()
+            .map(|(index, ((id, _), replaced))| {
+                let mut import = new.clone();
+                import.source_solid = replaced.source_solid.clone();
+                import.source_bound_names = true;
+                import.face_names =
+                    pairs[index].iter().map(|(old, new)| (new.clone(), names[index][old].clone())).collect();
+                import.new_ordinals_from = firsts[index];
+                (*id, soliddraft_model::FeatureKind::ImportStep(import))
+            })
+            .collect()
+    };
+    // Faces Catallax could not pair exactly, because they moved or changed size, follow by
+    // shape: the new file's faces are read from a trial build with the exact names.
+    let mut trial = doc.scratch();
+    trial.apply(Command::ReplaceImportFile(edits_for(&pairs)))?;
+    for (index, (id, _)) in imports.iter().enumerate() {
+        let body = |doc: &Document| doc.feature(*id).and_then(|f| f.body);
+        let (Some(before), Some(after)) = (body(doc), body(&trial)) else { continue };
+        let (Ok(before), Ok(after)) = (doc.kernel().topology(before), trial.kernel().topology(after)) else {
+            continue;
+        };
+        let followed = follow(&shapes(&before), &shapes(&after), &pairs[index]);
+        pairs[index].extend(followed);
+    }
+    let edits = edits_for(&pairs);
+    let mut unmatched: HashSet<Name> = HashSet::new();
+    for (index, (id, _)) in imports.iter().enumerate() {
+        for (key, name) in &names[index] {
+            if !pairs[index].contains_key(key) {
+                unmatched.insert((model_id(*id), name.generator.clone(), name.ordinal));
+            }
+        }
     }
     let mut lost: Vec<Lost> = Vec::new();
     for (owner, face) in doc.model().stored_face_refs() {
@@ -411,6 +440,132 @@ fn match_file(doc: &Document, old: &ImportStepFeature, new: &ImportStepFeature) 
         lost.push(Lost { owner: after.name.clone(), what });
     }
     Ok(FileSwap { imports, replaced, edits, lost })
+}
+
+fn clone_pair((old, new): (&String, &String)) -> (String, String) {
+    (old.clone(), new.clone())
+}
+
+/// What the shape matching reads of one imported face, by its key in the source file.
+struct Shape {
+    surface: soliddraft_kernel_api::SurfaceKind,
+    area: f64,
+    centroid: soliddraft_kernel_api::Vec3,
+    normal: Option<soliddraft_kernel_api::Vec3>,
+    neighbours: std::collections::BTreeSet<String>,
+    bbox: soliddraft_kernel_api::Aabb,
+}
+
+/// The imported faces of a body by source key. Pieces of one source face are taken
+/// together.
+fn shapes(topology: &soliddraft_kernel_api::Topology) -> BTreeMap<String, Shape> {
+    let key = |face: soliddraft_kernel_api::FaceId| {
+        topology.face(face)?.origins.iter().find_map(|origin| match &origin.role {
+            FaceRole::Imported { key } => Some(key.clone()),
+            _ => None,
+        })
+    };
+    let mut out: BTreeMap<String, Shape> = BTreeMap::new();
+    for face in &topology.faces {
+        let Some(k) = key(face.id) else { continue };
+        let shape = out.entry(k).or_insert_with(|| Shape {
+            surface: face.surface,
+            area: 0.0,
+            centroid: soliddraft_kernel_api::Vec3::ZERO,
+            normal: face.normal,
+            neighbours: Default::default(),
+            bbox: face.bbox,
+        });
+        let area = shape.area + face.area;
+        if area > 0.0 {
+            shape.centroid = (shape.centroid * shape.area + face.centroid * face.area) * (1.0 / area);
+        }
+        shape.area = area;
+        shape.bbox = joined(shape.bbox, face.bbox);
+    }
+    for edge in &topology.edges {
+        if let [a, b] = edge.faces[..]
+            && let (Some(a), Some(b)) = (key(a), key(b))
+            && a != b
+        {
+            out.get_mut(&a).map(|shape| shape.neighbours.insert(b.clone()));
+            out.get_mut(&b).map(|shape| shape.neighbours.insert(a));
+        }
+    }
+    out
+}
+
+fn joined(a: soliddraft_kernel_api::Aabb, b: soliddraft_kernel_api::Aabb) -> soliddraft_kernel_api::Aabb {
+    use soliddraft_kernel_api::Vec3;
+    soliddraft_kernel_api::Aabb {
+        min: Vec3::new(a.min.x.min(b.min.x), a.min.y.min(b.min.y), a.min.z.min(b.min.z)),
+        max: Vec3::new(a.max.x.max(b.max.x), a.max.y.max(b.max.y), a.max.z.max(b.max.z)),
+    }
+}
+
+/// How far a face may move and still follow: a quarter of the old body's diagonal.
+const FOLLOW_REACH: f64 = 0.25;
+/// How far a planar face may turn and still follow, in degrees.
+const FOLLOW_TURN_DEGREES: f64 = 1.0;
+
+/// Pairs old faces the exact match left over with new faces of the same shape: the same
+/// surface type, a planar face facing the same way within [`FOLLOW_TURN_DEGREES`], every
+/// already paired neighbour still a neighbour, and the centroid within [`FOLLOW_REACH`]
+/// of the old body's diagonal. A face follows only when one candidate is left, or the
+/// nearest is less than half as far as the next; two old faces wanting one new face
+/// follow neither. Pairs made in one round constrain the next, until none is added.
+fn follow(
+    old: &BTreeMap<String, Shape>,
+    new: &BTreeMap<String, Shape>,
+    exact: &BTreeMap<String, String>,
+) -> BTreeMap<String, String> {
+    let Some(bbox) = old.values().map(|shape| shape.bbox).reduce(joined) else {
+        return BTreeMap::new();
+    };
+    let reach = bbox.diagonal() * FOLLOW_REACH;
+    let turn = FOLLOW_TURN_DEGREES.to_radians().cos();
+    let mut pairs = exact.clone();
+    loop {
+        let taken: std::collections::BTreeSet<&String> = pairs.values().collect();
+        let mut proposals: BTreeMap<&String, &String> = BTreeMap::new();
+        for (key, face) in old.iter().filter(|(key, _)| !pairs.contains_key(*key)) {
+            let mut fits: Vec<(f64, &String)> = new
+                .iter()
+                .filter(|(candidate, shape)| {
+                    !taken.contains(candidate)
+                        && shape.surface == face.surface
+                        && match (face.normal, shape.normal) {
+                            (Some(a), Some(b)) => a.dot(b) >= turn,
+                            (None, None) => true,
+                            _ => false,
+                        }
+                        && face.neighbours.iter().filter_map(|n| pairs.get(n)).all(|n| shape.neighbours.contains(n))
+                })
+                .map(|(candidate, shape)| (face.centroid.distance(shape.centroid), candidate))
+                .filter(|(distance, _)| *distance <= reach)
+                .collect();
+            fits.sort_by(|a, b| a.0.total_cmp(&b.0));
+            let unique = match fits.as_slice() {
+                [only] => Some(only.1),
+                [best, next, ..] if best.0 * 2.0 < next.0 => Some(best.1),
+                _ => None,
+            };
+            if let Some(candidate) = unique {
+                proposals.insert(key, candidate);
+            }
+        }
+        let wanted = |target: &String| proposals.values().filter(|other| **other == target).count();
+        let accepted: Vec<(String, String)> = proposals
+            .iter()
+            .filter(|(_, target)| wanted(target) == 1)
+            .map(|(key, target)| ((*key).clone(), (*target).clone()))
+            .collect();
+        if accepted.is_empty() {
+            break;
+        }
+        pairs.extend(accepted);
+    }
+    pairs.into_iter().filter(|(key, _)| !exact.contains_key(key)).collect()
 }
 
 /// Moves every import of the old file to the reviewed new file, its matched faces keeping

@@ -275,27 +275,11 @@ fn unsnapped_flange(via_reference_plane: bool, kernel: Arc<dyn Kernel>) -> solid
     soliddraft_model::Document::from_part_json(&source.to_string(), kernel).unwrap()
 }
 
-/// The refusal Catallax's preview mesher returns for the built flange, recorded in the
-/// preview's operation span. Catallax task cx-preview-mesher-split-boundary.
-const SPLIT_BOUNDARY: (&str, &str) = ("mesh.precision-or-budget", "a boundary constraint was split or overlapped");
-
-/// Builds the unsnapped flange and shows it the way the viewport asks first, through the
-/// early preview. The flange's union must build: it needs about 55M work units, so under
-/// the former 20M default it ran out of work and only the plate was shown. Catallax's
-/// mesher refuses an early preview of the flanged body with [`SPLIT_BOUNDARY`], and the
-/// screen shows the certified mesh and edges instead, which must not be empty.
-fn shows_the_certified_flange(via_reference_plane: bool) {
-    let catallax = Arc::new(soliddraft_kernel_catallax::CatallaxKernel::with_operation_log());
-    let part = unsnapped_flange(via_reference_plane, catallax.clone());
-    for feature in part.features() {
-        assert_eq!(part.status(feature.id), Some(&soliddraft_model::FeatureStatus::Ok), "{}", feature.name);
-    }
-    let (kernel, body) = (part.kernel(), part.body().unwrap());
-    let params = soliddraft_kernel_api::TessellationParams { chord_height: 0.1, ..Default::default() };
-    catallax.take_diagnostics().unwrap();
-    let shown = kernel.preview(body, &params).unwrap();
+/// The early preview's refusals, recorded in the operation spans of the `preview` calls
+/// since the diagnostics were last taken.
+fn preview_refusals(catallax: &soliddraft_kernel_catallax::CatallaxKernel) -> Vec<(String, String)> {
     let calls = catallax.take_diagnostics().unwrap();
-    let refusals: Vec<_> = calls["calls"]
+    calls["calls"]
         .as_array()
         .unwrap()
         .iter()
@@ -305,29 +289,39 @@ fn shows_the_certified_flange(via_reference_plane: bool) {
             let refusal = operation.get("refusal")?.as_object()?;
             Some((refusal["code"].as_str()?.to_owned(), refusal["detail"].as_str()?.to_owned()))
         })
-        .collect();
-    assert_eq!(
-        refusals,
-        [(SPLIT_BOUNDARY.0.to_owned(), SPLIT_BOUNDARY.1.to_owned())],
-        "the preview fell back for another reason"
-    );
-    assert!(!shown.unproved, "a refused preview must show the certified mesh");
+        .collect()
+}
+
+/// Builds the unsnapped flange and shows it the way the viewport asks first, through the
+/// early preview. The flange's union must build: it needs about 55M work units, so under
+/// the former 20M default it ran out of work and only the plate was shown. Catallax's
+/// mesher refused an early preview of the flanged body ("a boundary constraint was split
+/// or overlapped") until Catallax PR 650; it now samples one, with edges.
+fn shows_the_early_flange(via_reference_plane: bool) {
+    let catallax = Arc::new(soliddraft_kernel_catallax::CatallaxKernel::with_operation_log());
+    let part = unsnapped_flange(via_reference_plane, catallax.clone());
+    for feature in part.features() {
+        assert_eq!(part.status(feature.id), Some(&soliddraft_model::FeatureStatus::Ok), "{}", feature.name);
+    }
+    let (kernel, body) = (part.kernel(), part.body().unwrap());
+    let params = soliddraft_kernel_api::TessellationParams { chord_height: 0.1, ..Default::default() };
+    catallax.take_diagnostics().unwrap();
+    let shown = kernel.preview(body, &params).unwrap();
+    assert_eq!(preview_refusals(&catallax), [], "the early preview was refused");
+    assert!(shown.unproved, "the flange shows its early preview");
     assert!(!shown.indices.is_empty());
-    assert_eq!(shown, kernel.tessellate(body, &params).unwrap());
-    let edges = kernel.preview_edges(body, &params).unwrap();
-    assert!(!edges.is_empty());
-    assert_eq!(edges, kernel.tessellate_edges(body, &params).unwrap());
+    assert!(!kernel.preview_edges(body, &params).unwrap().is_empty());
 }
 
 #[test]
-fn an_exact_face_attachment_shows_the_certified_flange_when_its_preview_is_refused() {
-    shows_the_certified_flange(false);
+fn an_exact_face_attachment_shows_the_early_flange() {
+    shows_the_early_flange(false);
 }
 
 #[test]
-fn a_refused_preview_shows_the_certified_mesh() {
+fn a_reference_plane_flange_shows_its_early_preview() {
     // A separate reference plane still uses the rounded sketch frame.
-    shows_the_certified_flange(true);
+    shows_the_early_flange(true);
 }
 
 #[test]

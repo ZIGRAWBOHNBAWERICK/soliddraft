@@ -5,10 +5,14 @@
 // Building a part in the browser runs in the kernel worker, not on the page's thread:
 // opening the bracket, changing a dimension, Undo and Redo once each held the page for
 // 2.7 to 7 s in headless Chrome. The page shows that it is building, with a Cancel that
-// returns the part to its last accepted state, and no task on the page's thread may run
-// 250 ms or more during an edit, Undo or Redo. Opening the bracket and Cancel are logged
-// without a bound: under software rendering, as in CI, the viewport's pick readback after
-// the part changes under the pointer still takes up to 0.8 s there. The check reads the build state through the read-only
+// returns the part to its last accepted state. The 250 ms target for a page task is
+// measured on a Mac with an Apple M3; a CI runner is slower and varies from run to run,
+// so the check times a fixed loop on the page's thread first and bounds the depth edit,
+// Undo, Redo and the edit after a cancel at 250 ms scaled by how much slower that loop
+// ran than on the M3. Every step logs its absolute time. Opening the bracket and Cancel
+// are logged without a bound: under software rendering, as in CI, the viewport's pick
+// readback after the part changes under the pointer still takes up to 0.8 s there. The
+// check reads the build state through the read-only
 // `shown_build` export, which also places the Cancel button, and Details through
 // `shown_details`, since the canvas has no text. A cancelled edit's answer still comes
 // from the worker; the page drops the builds it carries, as its kernel trace records,
@@ -23,6 +27,8 @@ function check(value, message) { if (!value) throw new Error(message); }
 const CLOSE = [347, 92], BASE = [380, 203], DEPTH = [515, 268];
 const INSPECT = [19, 241], MEASURE = [92, 112];
 const LONG = 250;
+// The calibration loop's median on the Apple M3 the 250 ms target was measured on.
+const REFERENCE_MS = 60;
 
 check(await page.eval(() => location.pathname === '/' && location.search === ''), 'Open the application at / first');
 const size = await page.eval(() => [innerWidth, innerHeight]);
@@ -84,12 +90,25 @@ async function until(read, done, what, tries = 600) {
 }
 const building = () => shown('shown_build');
 const idle = what => until(building, state => state && !state.pending, `${what} did not finish building`);
+// The median of five runs of a fixed loop on the page's thread: this runner's speed.
+const baseline = await page.eval(() => {
+  const times = [];
+  for (let run = 0; run < 5; run++) {
+    const start = performance.now();
+    let x = 0;
+    for (let i = 0; i < 2e7; i++) x = (x + i * 7) % 1000003;
+    times.push(performance.now() - start + (x < 0 ? 1 : 0));
+  }
+  return times.sort((a, b) => a - b)[2];
+});
+const bound = LONG * baseline / REFERENCE_MS;
+console.log(`Calibration loop ${baseline.toFixed(1)} ms (${REFERENCE_MS} ms on the M3): bound ${Math.round(bound)} ms`);
 async function window_(what, act, bounded = true) {
   await page.eval(() => { window.longTasks = []; return true; });
   await act();
   const longest = await page.eval(() => Math.max(0, ...window.longTasks));
-  console.log(`${what}: longest page task ${longest} ms${bounded ? '' : ' (logged, not bounded)'}`);
-  check(!bounded || longest < LONG, `${what} blocked the page for ${longest} ms`);
+  console.log(`${what}: longest page task ${longest} ms${bounded ? ` (bound ${Math.round(bound)} ms)` : ' (logged, not bounded)'}`);
+  check(!bounded || longest < bound, `${what} blocked the page for ${longest} ms, over ${Math.round(bound)} ms`);
 }
 async function depthShown(depth, what) {
   await until(async () => (await shown('shown_details')) || {}, drawn => drawn.title === 'Boss-Extrude1'

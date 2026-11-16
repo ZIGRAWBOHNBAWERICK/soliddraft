@@ -86,8 +86,10 @@ a trace the check sets up; a missing answer prints it.
 
 `ci/browser-edit-off-thread.js` runs the same way on `site/parts/bracket.dwprt`, which
 the step copies into the page's `fixtures` folder. It opens the bracket through the kernel
-worker, changes its depth, undoes, redoes, cancels an edit and edits again. No task on the
-page's thread may reach 250 ms during an edit, Undo or Redo. Opening and Cancel are logged
+worker, changes its depth, undoes, redoes, cancels an edit and edits again. The 250 ms
+target for a page task was measured on an Apple M3, so the check first times a fixed loop
+on the page's thread and bounds the edits, Undo and Redo at 250 ms scaled by how much
+slower the runner ran it. Every step logs its absolute time. Opening and Cancel are logged
 without a bound, since software rendering's pick readback still holds the page up to 0.8 s
 there.
 
@@ -166,7 +168,7 @@ The running selector and its map are the candidate policy; `--head` names the tr
 |---|---|---|
 | `ci/browser-journal.js` | `web` | Browser journal check in the web job |
 | `ci/browser-kernel-worker.js` | `web` | Browser kernel worker check in the web job |
-| `ci/browser-edit-off-thread.js` | `web` | Browser bracket edits built off the page's thread, bounded at 250 ms a task |
+| `ci/browser-edit-off-thread.js` | `web` | Browser bracket edits built off the page's thread, bounded at 250 ms a task scaled to the runner |
 | `ci/browser-part-check.js` | `web` | Browser Inspect > Check in the web job |
 | `ci/browser-preferences.mjs` | `web` | Browser preferences check in the web job |
 | `ci/check-consumers.json` | all | The selector; it controls its own obligations |

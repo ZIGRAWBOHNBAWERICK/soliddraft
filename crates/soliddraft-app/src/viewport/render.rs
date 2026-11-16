@@ -456,6 +456,9 @@ impl<T: PartialEq> PickCache<T> {
 
 /// What the id buffer under the cursor shows in a part: the cursor, the pick revision,
 /// the view, the bodies drawn, the preview drawn in their place and the display choices.
+/// The origin planes and the grid are not drawn into it: a plane is hit on the CPU
+/// where the sample shows no body. Their frames also carry the hovered plane's
+/// highlight, which a pick sets, so keying on them read every pick over a plane twice.
 #[derive(PartialEq)]
 struct PickInputs {
     cursor: [u32; 2],
@@ -464,8 +467,6 @@ struct PickInputs {
     meshes: (u64, Vec<BodyId>),
     preview: Option<(usize, bool)>,
     display: DisplayMode,
-    planes: Option<PlaneFrame>,
-    grid: Option<GridFrame>,
 }
 
 impl PickInputs {
@@ -477,8 +478,6 @@ impl PickInputs {
             meshes: (input.meshes.0, input.meshes.1.iter().map(|(id, _)| *id).collect()),
             preview: input.preview.as_ref().map(|mesh| (Arc::as_ptr(mesh) as usize, input.preview_pickable)),
             display: input.display,
-            planes: input.planes,
-            grid: input.grid,
         }
     }
 }

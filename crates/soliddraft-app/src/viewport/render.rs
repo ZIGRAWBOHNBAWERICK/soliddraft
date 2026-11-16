@@ -420,6 +420,40 @@ const DEPTH_COMPARE: wgpu::CompareFunction = wgpu::CompareFunction::GreaterEqual
 pub const PICK_ROW_TEXELS: u32 = 64;
 pub const PICK_ROWS: u32 = 32;
 
+/// The inputs of the last pick read back and of the one in flight. A pick counts as read
+/// only once its sample is published, so one whose readback fails is read again.
+struct PickCache<T> {
+    read: Option<T>,
+    in_flight: Option<T>,
+}
+
+impl<T> Default for PickCache<T> {
+    fn default() -> Self {
+        PickCache { read: None, in_flight: None }
+    }
+}
+
+impl<T: PartialEq> PickCache<T> {
+    /// Whether a pick of `inputs` must be read: none with these inputs was published yet.
+    fn wants(&self, inputs: &T) -> bool {
+        self.read.as_ref() != Some(inputs)
+    }
+
+    fn issued(&mut self, inputs: T) {
+        self.in_flight = Some(inputs);
+    }
+
+    fn published(&mut self) {
+        if let Some(inputs) = self.in_flight.take() {
+            self.read = Some(inputs);
+        }
+    }
+
+    fn failed(&mut self) {
+        self.in_flight = None;
+    }
+}
+
 /// What the id buffer under the cursor shows in a part: the cursor, the pick revision,
 /// the view, the bodies drawn, the preview drawn in their place and the display choices.
 #[derive(PartialEq)]
@@ -508,10 +542,10 @@ pub struct ViewportRenderer {
     preview: Option<(usize, GpuBody)>,
     pick_buffer: wgpu::Buffer,
     readback: Arc<Mutex<Readback>>,
-    /// What the last pick copy read back. On WebGL reading a pick waits for the frame on
+    /// What the last pick read back showed. On WebGL reading a pick waits for the frame on
     /// the GPU, which software rendering takes most of a second to draw, so the pick under
     /// a resting pointer is read again only when something it shows can have changed.
-    last_pick: Option<PickInputs>,
+    picks: PickCache<PickInputs>,
     display: DisplayMode,
     frame: u64,
     assembly: AssemblyRenderer,
@@ -966,7 +1000,7 @@ impl ViewportRenderer {
             preview: None,
             pick_buffer,
             readback: Arc::new(Mutex::new(Readback::default())),
-            last_pick: None,
+            picks: PickCache::default(),
             display: DisplayMode::default(),
             frame: 0,
             assembly: AssemblyRenderer::new(device, COLOR_FORMAT, DEPTH_FORMAT, MSAA, ID_FORMAT),
@@ -1305,6 +1339,10 @@ impl ViewportRenderer {
             let mut rb = self.readback.lock().unwrap();
             rb.ready = false;
             rb.pending = false;
+            self.picks.published();
+        } else if !pending {
+            // A readback whose map failed published nothing, so its pick is read again.
+            self.picks.failed();
         }
         let pick_bodies = || {
             let preview = self.preview.as_ref().filter(|_| input.preview_pickable).map(|(_, body)| body);
@@ -1513,10 +1551,13 @@ impl ViewportRenderer {
         // Only WebGL waits for the readback: there a pick is read again when one of its
         // inputs changes. An assembly's scene has no version here, so its pick is read
         // every frame.
-        let changed =
-            !cfg!(target_arch = "wasm32") || input.assembly.is_some() || inputs.is_none() || inputs != self.last_pick;
+        let changed = !cfg!(target_arch = "wasm32")
+            || input.assembly.is_some()
+            || inputs.as_ref().is_none_or(|inputs| self.picks.wants(inputs));
         if let (Some(cursor), false, true) = (input.cursor_px, pending || ready, changed) {
-            self.last_pick = inputs;
+            if let Some(inputs) = inputs {
+                self.picks.issued(inputs);
+            }
             let w = PICK_ROW_TEXELS.min(size[0]);
             let h = PICK_ROWS.min(size[1]);
             let x = cursor[0].saturating_sub(w / 2).min(size[0] - w);
@@ -1614,6 +1655,21 @@ mod tests {
     fn project(m: Mat4, p: Vec3) -> Vec3 {
         let c = m * Vec4::new(p.x, p.y, p.z, 1.0);
         c.truncate() / c.w
+    }
+
+    /// A pick whose readback fails is read again with unchanged inputs; one published
+    /// is not, until an input changes.
+    #[test]
+    fn a_failed_pick_readback_is_retried_and_a_published_one_is_kept() {
+        let mut picks = PickCache::default();
+        assert!(picks.wants(&1));
+        picks.issued(1);
+        picks.failed();
+        assert!(picks.wants(&1), "a failed readback is read again");
+        picks.issued(1);
+        picks.published();
+        assert!(!picks.wants(&1), "a published pick with unchanged inputs is kept");
+        assert!(picks.wants(&2));
     }
 
     #[test]

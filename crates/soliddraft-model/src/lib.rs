@@ -46,9 +46,9 @@ pub use document::{BuiltSketch, Document, FaceLabel, FeatureStatus, feature_of_t
 pub use evaluate::{plane_on_face, shell_refusal};
 pub use feature::{
     BlendFeature, BuiltinShape, DatumPlane, DraftFeature, EndCondition, ExtrudeFeature, ExtrudeOp, Feature, FeatureId,
-    FeatureKind, GyroidFeature, HoleFeature, ImportStepFeature, LatticeFeature, LoftFeature, LoftProfile,
-    MirrorFeature, OffsetFeature, PatternFeature, PatternSpec, PlaneRef, ProfileSource, RevolveFeature, ScanFeature,
-    ShellFeature, ShellOpenings, SketchFeature, SketchPlane, SweepFeature, ThickenFeature, sha256_hex,
+    FeatureKind, GyroidFeature, HoleFeature, ImportStepFeature, InheritedName, LatticeFeature, LoftFeature,
+    LoftProfile, MirrorFeature, OffsetFeature, PatternFeature, PatternSpec, PlaneRef, ProfileSource, RevolveFeature,
+    ScanFeature, ShellFeature, ShellOpenings, SketchFeature, SketchPlane, SweepFeature, ThickenFeature, sha256_hex,
 };
 pub use file::FileError;
 pub use materials::{
@@ -57,7 +57,7 @@ pub use materials::{
 };
 pub use reference::{
     Candidate, EdgeFingerprint, EdgeRef, FaceFingerprint, FaceRef, Generator, NamedFace, NamingError, ReferenceSlot,
-    RepairNeeded, RepairReason, VertexRef, rewrite_face_refs,
+    RepairNeeded, RepairReason, VertexRef, face_refs,
 };
 pub use value_expr::{Expression, ValueTable};
 

@@ -33,8 +33,11 @@ fn imported() -> (Document, u64) {
     (doc, id)
 }
 
+/// A changed file with the same faces keeps the import's identity and every reference.
+/// A file whose review answers a repair question cannot be matched yet, so it replaces
+/// the source with the old references marked for repair, as one undo step.
 #[test]
-fn replaced_source_keeps_identity_and_marks_old_edge_and_face_references_for_repair() {
+fn replaced_source_keeps_identity_and_matching_references_and_marks_the_rest_for_repair() {
     let (mut doc, id) = imported();
     call(&mut doc, "fillet", json!({"edges":["Import1 · Edge 10"],"radius":2})).unwrap();
     call(
@@ -48,29 +51,52 @@ fn replaced_source_keeps_identity_and_marks_old_edge_and_face_references_for_rep
     assert_eq!(commit(&mut doc, &same, &Review::default()).unwrap(), id);
     assert!(doc.features.iter().all(|f| f.status == FeatureStatus::Ok));
     assert!(doc.revision() > revision);
+
+    // The same faces in changed bytes: the fillet and the sketch keep their faces.
     let mut changed = BLOCK.to_vec();
     changed.push(b'\n');
     let preview = Preview::from_bytes(&doc, "new.step", changed.clone()).unwrap().replacing(&doc, id).unwrap();
+    assert!(preview.lost().is_empty(), "{:?}", preview.lost());
     let untouched = doc.model().to_bytes().unwrap();
     assert_eq!(commit(&mut doc, &preview, &Review::default()).unwrap(), id);
     assert_eq!(doc.features.len(), 3);
     assert_eq!(doc.features[0].name, "Import1");
-    assert_eq!(doc.features[0].status, FeatureStatus::Ok);
-    assert!(matches!(doc.features[1].status, FeatureStatus::NeedsRepair(_)));
-    assert!(matches!(doc.features[2].status, FeatureStatus::NeedsRepair(_)));
+    assert!(doc.features.iter().all(|f| f.status == FeatureStatus::Ok));
     let FeatureKind::ImportStep(source) = &doc.features[0].kind else { panic!("import") };
     assert_eq!(source.source, changed);
     assert!(source.decisions.is_empty());
     let saved = doc.model().to_bytes().unwrap();
     let reopened =
         soliddraft_app::file::open_bytes("replacement.dwprt", &saved, soliddraft_app::kernel(), None).unwrap();
+    assert!(reopened.features.iter().all(|f| f.status == FeatureStatus::Ok));
+    doc.undo().unwrap();
+    assert_eq!(doc.model().to_bytes().unwrap(), untouched);
+    doc.redo().unwrap();
+    assert!(doc.features.iter().all(|f| f.status == FeatureStatus::Ok));
+
+    // A wider seam needs an approved repair, which a match cannot carry yet.
+    let wide = include_bytes!("../../../ci/fixtures/import/block-seam-20um.step");
+    let preview = Preview::from_bytes(&doc, "wide.step", wide.to_vec()).unwrap().replacing(&doc, id).unwrap();
+    assert!(preview.summary()["unmatched"].is_string(), "{}", preview.summary());
+    let before = doc.model().to_bytes().unwrap();
+    let approved = soliddraft_app::import::Approved {
+        id: "g0".into(),
+        tolerance_mm: "0.03".into(),
+        approver: "Release reviewer".into(),
+    };
+    let review = Review { decline: Vec::new(), accept: vec![approved] };
+    assert_eq!(commit(&mut doc, &preview, &review).unwrap(), id);
+    assert_eq!(doc.features[0].status, FeatureStatus::Ok);
+    assert!(matches!(doc.features[1].status, FeatureStatus::NeedsRepair(_)));
+    assert!(matches!(doc.features[2].status, FeatureStatus::NeedsRepair(_)));
+    let saved = doc.model().to_bytes().unwrap();
+    let reopened =
+        soliddraft_app::file::open_bytes("replacement.dwprt", &saved, soliddraft_app::kernel(), None).unwrap();
     assert!(matches!(reopened.features[1].status, FeatureStatus::NeedsRepair(_)));
     assert!(matches!(reopened.features[2].status, FeatureStatus::NeedsRepair(_)));
     doc.undo().unwrap();
-    assert_eq!(doc.model().to_bytes().unwrap(), untouched);
+    assert_eq!(doc.model().to_bytes().unwrap(), before);
     assert!(doc.features.iter().all(|f| f.status == FeatureStatus::Ok));
-    doc.redo().unwrap();
-    assert!(matches!(doc.features[1].status, FeatureStatus::NeedsRepair(_)));
 }
 
 #[test]

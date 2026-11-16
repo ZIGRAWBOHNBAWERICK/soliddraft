@@ -70,9 +70,10 @@ pub enum Generator {
     },
     /// Any other face a feature made.
     Other,
-    /// A face from one immutable imported source. A replacement needs new references.
+    /// A face from one immutable imported source. A face of a replacement file that is
+    /// the verified partner of an earlier face keeps that face's name.
     Imported {
-        /// Hash of the source that generated this face.
+        /// Hash of the source that first named this face.
         sha256: Box<str>,
     },
     /// An inset wall of a shell, ranked by its source face name.
@@ -711,34 +712,30 @@ pub(crate) fn origin_label(face: FaceId, view: &View, names: &NameMap) -> Option
     origin_name(face, view, names).ok().map(|r| (r.feature, r.generator, r.ordinal))
 }
 
-/// Rewrites every face reference in a feature's definition through `rewrite`: plane,
-/// limit and draft faces, both faces of each edge reference and the faces of each vertex
-/// reference. It works on the definition's saved form, so a feature kind added later is
-/// covered without a list here to keep up to date.
-pub fn rewrite_face_refs(
-    kind: &crate::FeatureKind,
-    mut rewrite: impl FnMut(&mut FaceRef),
-) -> Result<crate::FeatureKind, String> {
-    fn walk(value: &mut serde_json::Value, rewrite: &mut dyn FnMut(&mut FaceRef)) -> Result<(), String> {
+/// Every face reference in a saved value, in order: plane, limit and draft faces, both
+/// faces of each edge reference and the faces of each vertex reference. It reads the
+/// value's saved form, so a feature kind added later is covered without a list here to
+/// keep up to date.
+pub fn face_refs(value: &impl serde::Serialize) -> Vec<FaceRef> {
+    fn walk(value: &serde_json::Value, out: &mut Vec<FaceRef>) {
         match value {
             serde_json::Value::Object(object) => {
                 let shaped = ["feature", "generator", "fingerprint"].iter().all(|key| object.contains_key(*key));
-                if shaped
-                    && let Ok(mut face) = serde_json::from_value::<FaceRef>(serde_json::Value::Object(object.clone()))
-                {
-                    rewrite(&mut face);
-                    *value = serde_json::to_value(face).map_err(|error| error.to_string())?;
-                    return Ok(());
+                if shaped && let Ok(face) = serde_json::from_value::<FaceRef>(value.clone()) {
+                    out.push(face);
+                    return;
                 }
-                object.values_mut().try_for_each(|item| walk(item, rewrite))
+                object.values().for_each(|item| walk(item, out));
             }
-            serde_json::Value::Array(items) => items.iter_mut().try_for_each(|item| walk(item, rewrite)),
-            _ => Ok(()),
+            serde_json::Value::Array(items) => items.iter().for_each(|item| walk(item, out)),
+            _ => {}
         }
     }
-    let mut value = serde_json::to_value(kind).map_err(|error| error.to_string())?;
-    walk(&mut value, &mut rewrite)?;
-    serde_json::from_value(value).map_err(|error| error.to_string())
+    let mut out = Vec::new();
+    if let Ok(value) = serde_json::to_value(value) {
+        walk(&value, &mut out);
+    }
+    out
 }
 
 #[cfg(test)]
@@ -747,7 +744,7 @@ mod tests {
     use soliddraft_kernel_api::{Aabb, FaceRole, OpTag};
 
     #[test]
-    fn every_face_reference_in_a_definition_is_rewritten_and_nothing_else() {
+    fn every_face_reference_in_a_definition_is_found() {
         let imported = |ordinal| FaceRef {
             feature: FeatureId(1),
             generator: Generator::Imported { sha256: "old".into() },
@@ -772,21 +769,7 @@ mod tests {
             size: 1.0,
             other_distance: None,
         });
-        let rewritten = rewrite_face_refs(&kind, |face| {
-            if face.feature == FeatureId(1) {
-                face.generator = Generator::Imported { sha256: "new".into() };
-                face.ordinal += 10;
-            }
-        })
-        .unwrap();
-        let crate::FeatureKind::Fillet(blend) = rewritten else { panic!("still a fillet") };
-        assert_eq!(blend.size, 1.0);
-        assert_eq!(blend.edges[0].faces[0].ordinal, 12);
-        assert_eq!(blend.edges[0].faces[0].generator, Generator::Imported { sha256: "new".into() });
-        assert_eq!(blend.edges[0].faces[1], other);
-        assert_eq!(blend.edges[1].faces[0], other);
-        assert_eq!(blend.edges[1].faces[1].ordinal, 17);
-        assert_eq!(blend.edges[1].faces[1].label, "Import1 · Face 3", "labels are kept for repair prompts");
+        assert_eq!(face_refs(&kind), vec![imported(2), other.clone(), other, imported(7)]);
     }
 
     fn origin(tag: &str, role: FaceRole) -> Origin {

@@ -3,14 +3,14 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use soliddraft_assistant::tools::schema::{array, object, optional, string};
 use soliddraft_kernel_api::{
     Approval, Disposition, FaceRole, FileReplacement, FileReplacementRequest, ImportFormat, ImportOptions, KernelError,
     Proposal, ProposalSet, RepairChange, RepairRecord, ReplacedImport,
 };
-use soliddraft_model::{ImportStepFeature, sha256_hex};
+use soliddraft_model::{ImportStepFeature, InheritedName, sha256_hex};
 
 use crate::document::{Command, Document, FeatureId, FeatureKind};
 use crate::state::{AppState, NoteKind};
@@ -85,13 +85,32 @@ pub struct Review {
     pub accept: Vec<Approved>,
 }
 
-/// A changed file matched to every import of the file it replaces.
+/// A changed STEP file matched to every import of the file it replaces.
 #[derive(Clone, Debug)]
 struct FileSwap {
     /// The imports that read the old file, in tree order, as they were when matched.
     imports: Vec<(FeatureId, ImportStepFeature)>,
     /// What each of them becomes, in the same order.
     replaced: Vec<ReplacedImport>,
+    /// The edit moving each import to the new file, with the names its matched faces keep.
+    edits: Vec<(FeatureId, soliddraft_model::FeatureKind)>,
+    /// What the replacement leaves needing repair, by what holds it.
+    lost: Vec<Lost>,
+}
+
+/// Something a file replacement leaves needing repair.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct Lost {
+    /// What holds it: a feature's name, an appearance or a tracked measurement's name.
+    pub owner: String,
+    /// What it lost, in words.
+    pub what: String,
+}
+
+impl std::fmt::Display for Lost {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}: {}", self.owner, self.what)
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -99,6 +118,9 @@ pub struct Preview {
     feature: ImportStepFeature,
     replacement: Option<FeatureId>,
     file: Option<FileSwap>,
+    /// Why a changed single-solid file could not be matched to the old one, so its
+    /// references will need repair.
+    unmatched: Option<String>,
     proposals: ProposalSet,
     revision: u64,
     document: soliddraft_document::DocumentId,
@@ -176,6 +198,7 @@ impl Preview {
             feature,
             replacement: None,
             file: None,
+            unmatched: None,
             proposals,
             revision: doc.revision(),
             document: doc.model().id(),
@@ -189,19 +212,29 @@ impl Preview {
         let Some(FeatureKind::ImportStep(old)) = doc.feature(id).map(|f| &f.kind) else {
             return Err("Choose an imported feature to replace.".into());
         };
-        if old.source_solid.is_some() {
-            if old.sha256 != self.feature.sha256 || old.format != self.feature.format {
-                if old.format != ImportFormat::Step || self.feature.format != ImportFormat::Step {
-                    return Err("This body selects a solid from the original file. Import a changed file as new bodies instead of replacing it.".into());
+        let changed = old.sha256 != self.feature.sha256 || old.format != self.feature.format;
+        if changed && old.format == ImportFormat::Step && self.feature.format == ImportFormat::Step {
+            match match_file(doc, old, &self.feature) {
+                Ok(swap) => {
+                    self.file = Some(swap);
+                    self.replacement = Some(id);
+                    return Ok(self);
                 }
-                self.file = Some(match_file(doc, old, &self.feature)?);
-                self.replacement = Some(id);
-                return Ok(self);
+                Err(error) if old.source_solid.is_some() => return Err(error),
+                // A single-solid import still takes the file, its references left for repair.
+                Err(error) => self.unmatched = Some(error.trim_end_matches(" Nothing was changed.").to_owned()),
+            }
+        }
+        if old.source_solid.is_some() {
+            if changed {
+                return Err("This body selects a solid from the original file. Import a changed file as new bodies instead of replacing it.".into());
             }
             self.feature.source_solid = old.source_solid.clone();
         }
-        if old.sha256 == self.feature.sha256 && old.format == self.feature.format {
+        if !changed {
             self.feature.source_bound_names = old.source_bound_names;
+            self.feature.face_names = old.face_names.clone();
+            self.feature.new_ordinals_from = old.new_ordinals_from;
         }
         self.replacement = Some(id);
         Ok(self)
@@ -236,16 +269,35 @@ impl Preview {
         sha256_hex(&reviewed)
     }
 
+    /// What accepting this whole-file replacement leaves needing repair: each stored
+    /// reference to a face the new file has no verified partner for, and each feature
+    /// that stops building. Empty for anything else.
+    pub fn lost(&self) -> &[Lost] {
+        self.file.as_ref().map_or(&[], |swap| swap.lost.as_slice())
+    }
+
     pub fn summary(&self) -> Value {
-        json!({"source_name": self.feature.source_name, "source_sha256": self.feature.sha256,
-               "proposals": self.proposals.proposals, "replacement": self.replacement, "token": self.token()})
+        let mut summary = json!({"source_name": self.feature.source_name, "source_sha256": self.feature.sha256,
+               "proposals": self.proposals.proposals, "replacement": self.replacement, "token": self.token()});
+        if self.file.is_some() {
+            summary["needs_repair"] = json!(self.lost());
+        }
+        if let Some(reason) = &self.unmatched {
+            summary["unmatched"] = json!(reason);
+        }
+        summary
     }
 }
 
 /// Matches a changed STEP file to every import of the file it replaces, by complete face
-/// definitions. A solid of the old file without one verified partner refuses the
-/// replacement, so the part never changes.
+/// definitions. Each face of the new file with a verified partner keeps that partner's
+/// name, so every reference to it holds, in this part and in drawings and assemblies of
+/// it. References to a face without a partner are listed by name and left for repair.
+/// A selected solid without one verified partner refuses the replacement, so the part
+/// never changes.
 fn match_file(doc: &Document, old: &ImportStepFeature, new: &ImportStepFeature) -> Result<FileSwap, String> {
+    use crate::document::{FeatureStatus, model_id};
+    use std::collections::HashSet;
     let imports: Vec<(FeatureId, ImportStepFeature)> = doc
         .features
         .iter()
@@ -270,24 +322,318 @@ fn match_file(doc: &Document, old: &ImportStepFeature, new: &ImportStepFeature) 
         new_name: &new.source_name,
         source_solids: &solids,
     };
-    match doc.kernel().replace_import_file(&request).map_err(plain)? {
-        FileReplacement::Verified { imports: replaced, .. } if replaced.len() == imports.len() => {
-            Ok(FileSwap { imports, replaced })
+    let replaced = match doc.kernel().replace_import_file(&request).map_err(plain)? {
+        FileReplacement::Verified { imports: replaced, .. } if replaced.len() == imports.len() => replaced,
+        FileReplacement::Verified { .. } => {
+            return Err("The new file was matched to a different set of imports.".into());
         }
-        FileReplacement::Verified { .. } => Err("The new file was matched to a different set of imports.".into()),
-        FileReplacement::Unresolved { reasons } => Err(format!(
-            "The new file cannot replace this one without choosing its solids again. {} Nothing was changed.",
-            reasons.join(" ")
-        )),
+        FileReplacement::Unresolved { reasons } => {
+            return Err(format!(
+                "The new file cannot replace this one without choosing its solids again. {} Nothing was changed.",
+                reasons.join(" ")
+            ));
+        }
+    };
+    type Name = (soliddraft_model::FeatureId, soliddraft_model::Generator, u32);
+    // Each import's current face names by face key, its exact pairs from Catallax, and the
+    // first number free for a new face: past every face this import has had, so none
+    // takes the number of a face a reference still names.
+    let mut names: Vec<BTreeMap<String, InheritedName>> = Vec::new();
+    let mut pairs: Vec<BTreeMap<String, String>> = Vec::new();
+    let mut firsts: Vec<u32> = Vec::new();
+    for ((id, matched), replaced) in imports.iter().zip(&replaced) {
+        let faces = doc.model().generated_faces(model_id(*id));
+        if faces.is_empty() {
+            let name = doc.feature(*id).map_or("An import of this file", |f| f.name.as_str());
+            return Err(format!("{name} is not built, so its faces cannot be matched. Nothing was changed."));
+        }
+        let mut first = matched.new_ordinals_from;
+        let mut current = BTreeMap::new();
+        for face in faces {
+            first = first.max(face.ordinal + 1);
+            if let FaceRole::Imported { key } = &face.origin.role {
+                current.insert(key.clone(), InheritedName { generator: face.generator.clone(), ordinal: face.ordinal });
+            }
+        }
+        pairs.push(replaced.faces.iter().filter(|(old, _)| current.contains_key(*old)).map(clone_pair).collect());
+        names.push(current);
+        firsts.push(first);
+    }
+    let edits_for = |pairs: &[BTreeMap<String, String>]| -> Vec<(FeatureId, soliddraft_model::FeatureKind)> {
+        imports
+            .iter()
+            .zip(&replaced)
+            .enumerate()
+            .map(|(index, ((id, _), replaced))| {
+                let mut import = new.clone();
+                import.source_solid = replaced.source_solid.clone();
+                import.source_bound_names = true;
+                import.face_names =
+                    pairs[index].iter().map(|(old, new)| (new.clone(), names[index][old].clone())).collect();
+                import.new_ordinals_from = firsts[index];
+                (*id, soliddraft_model::FeatureKind::ImportStep(import))
+            })
+            .collect()
+    };
+    // Faces Catallax could not pair exactly, because they moved or changed size, follow by
+    // shape: the new file's faces are read from a trial build with the exact names.
+    let mut trial = doc.scratch();
+    trial.apply(Command::ReplaceImportFile(edits_for(&pairs)))?;
+    for (index, (id, _)) in imports.iter().enumerate() {
+        let body = |doc: &Document| doc.feature(*id).and_then(|f| f.body);
+        let (Some(before), Some(after)) = (body(doc), body(&trial)) else { continue };
+        let before = shapes(doc.kernel().as_ref(), before);
+        let followed = follow(&before, &shapes(trial.kernel().as_ref(), after), &pairs[index]);
+        pairs[index].extend(followed);
+    }
+    let edits = edits_for(&pairs);
+    let mut unmatched: HashSet<Name> = HashSet::new();
+    for (index, (id, _)) in imports.iter().enumerate() {
+        for (key, name) in &names[index] {
+            if !pairs[index].contains_key(key) {
+                unmatched.insert((model_id(*id), name.generator.clone(), name.ordinal));
+            }
+        }
+    }
+    let mut lost: Vec<Lost> = Vec::new();
+    for (owner, face) in doc.model().stored_face_refs() {
+        if unmatched.contains(&(face.feature, face.generator.clone(), face.ordinal)) {
+            // Named as the part names it now: a reference's own label may be older, and an
+            // edge reference keeps none for its faces.
+            let label = doc
+                .model()
+                .name_label(face.feature, face.generator.clone(), face.ordinal)
+                .map_or_else(|| face.label.clone(), |label| label.text);
+            let item = Lost { owner, what: format!("{label} has no matching face in the new file") };
+            if !lost.contains(&item) {
+                lost.push(item);
+            }
+        }
+    }
+    let mut trial = doc.scratch();
+    trial.apply(Command::ReplaceImportFile(edits.clone()))?;
+    for (id, _) in &imports {
+        let mut seen = HashSet::new();
+        if !trial.model().generated_faces(model_id(*id)).iter().all(|face| seen.insert((&face.generator, face.ordinal)))
+        {
+            return Err("The new file's faces cannot all be given distinct names. Nothing was changed.".into());
+        }
+    }
+    // A feature that built before and does not now is also listed, unless its lost
+    // references already are; suppressed, rolled-back or already broken features keep
+    // their state and are not.
+    let built = |feature: &crate::document::Feature| feature.status == FeatureStatus::Ok;
+    for after in trial.features.iter().filter(|after| !built(after) && doc.feature(after.id).is_some_and(built)) {
+        if lost.iter().any(|item| item.owner == after.name) {
+            continue;
+        }
+        let what = match &after.status {
+            FeatureStatus::Error(message) => format!("does not build with the new file: {message}"),
+            FeatureStatus::NeedsRepair(items) => {
+                let labels: Vec<&str> = items.iter().map(|item| item.label.as_str()).collect();
+                format!("needs repair: {}", labels.join(", "))
+            }
+            _ => "does not build with the new file".into(),
+        };
+        lost.push(Lost { owner: after.name.clone(), what });
+    }
+    Ok(FileSwap { imports, replaced, edits, lost })
+}
+
+fn clone_pair((old, new): (&String, &String)) -> (String, String) {
+    (old.clone(), new.clone())
+}
+
+/// A cylinder's or sphere's radius, and whether its material side looks away from the
+/// axis or centre.
+type Size = (f64, Option<bool>);
+
+/// What the shape matching reads of one imported face, by its key in the source file.
+struct Shape {
+    surface: soliddraft_kernel_api::SurfaceKind,
+    area: f64,
+    centroid: soliddraft_kernel_api::Vec3,
+    /// A planar face's outward normal, or a cylinder's axis direction up to sign.
+    direction: Option<soliddraft_kernel_api::Vec3>,
+    /// A cylinder's or sphere's radius and whether its material side looks away from the
+    /// axis or centre, read from the kernel's definition.
+    size: Option<Size>,
+    neighbours: std::collections::BTreeSet<String>,
+    bbox: soliddraft_kernel_api::Aabb,
+}
+
+/// The middle of an enclosure, in millimetres.
+fn middle(bounds: &soliddraft_kernel_api::SupportBounds) -> Option<f64> {
+    let value = |r: &soliddraft_kernel_api::ExactRational| {
+        Some(r.numerator.parse::<f64>().ok()? / r.denominator.parse::<f64>().ok()?)
+    };
+    Some((value(&bounds.lo)? + value(&bounds.hi)?) / 2.0)
+}
+
+/// A curved face's axis direction and size, from the kernel's definition.
+fn support(
+    kernel: &dyn soliddraft_kernel_api::Kernel,
+    body: soliddraft_kernel_api::BodyId,
+    face: soliddraft_kernel_api::FaceId,
+) -> Option<(Option<soliddraft_kernel_api::Vec3>, Size)> {
+    use soliddraft_kernel_api::{EnclosedSupport, SupportEntity, Vec3};
+    match kernel.entity_support_enclosed(body, SupportEntity::Face(face)).ok()? {
+        EnclosedSupport::Axis { direction, radius_squared: Some(squared), outward, .. } => {
+            let [x, y, z] = [middle(&direction[0])?, middle(&direction[1])?, middle(&direction[2])?];
+            Some((Vec3::new(x, y, z).normalized(), (middle(&squared)?.sqrt(), outward)))
+        }
+        EnclosedSupport::Point { radius_squared: Some(squared), outward, .. } => {
+            Some((None, (middle(&squared)?.sqrt(), outward)))
+        }
+        _ => None,
     }
 }
 
-/// Moves every import of the old file to the reviewed new file and every reference into
-/// them to the new file's faces, as one undo step. A reference to a face without a
-/// verified partner refuses the whole replacement.
+/// The imported faces of a body by source key that can follow by shape: planes, and
+/// cylinders and spheres whose radius the kernel reads. Pieces of one source face are
+/// taken together.
+fn shapes(kernel: &dyn soliddraft_kernel_api::Kernel, body: soliddraft_kernel_api::BodyId) -> BTreeMap<String, Shape> {
+    use soliddraft_kernel_api::SurfaceKind;
+    let Ok(topology) = kernel.topology(body) else { return BTreeMap::new() };
+    let key = |face: soliddraft_kernel_api::FaceId| {
+        topology.face(face)?.origins.iter().find_map(|origin| match &origin.role {
+            FaceRole::Imported { key } => Some(key.clone()),
+            _ => None,
+        })
+    };
+    let mut out: BTreeMap<String, Shape> = BTreeMap::new();
+    for face in &topology.faces {
+        let Some(k) = key(face.id) else { continue };
+        if !out.contains_key(&k) {
+            let (direction, size) = match face.surface {
+                SurfaceKind::Plane => (face.normal, None),
+                SurfaceKind::Cylinder | SurfaceKind::Sphere => match support(kernel, body, face.id) {
+                    Some((direction, size)) => (direction, Some(size)),
+                    None => continue,
+                },
+                _ => continue,
+            };
+            let shape = Shape {
+                surface: face.surface,
+                area: 0.0,
+                centroid: soliddraft_kernel_api::Vec3::ZERO,
+                direction,
+                size,
+                neighbours: Default::default(),
+                bbox: face.bbox,
+            };
+            out.insert(k.clone(), shape);
+        }
+        let shape = out.get_mut(&k).expect("inserted");
+        let area = shape.area + face.area;
+        if area > 0.0 {
+            shape.centroid = (shape.centroid * shape.area + face.centroid * face.area) * (1.0 / area);
+        }
+        shape.area = area;
+        shape.bbox = joined(shape.bbox, face.bbox);
+    }
+    for edge in &topology.edges {
+        if let [a, b] = edge.faces[..]
+            && let (Some(a), Some(b)) = (key(a), key(b))
+            && a != b
+        {
+            out.get_mut(&a).map(|shape| shape.neighbours.insert(b.clone()));
+            out.get_mut(&b).map(|shape| shape.neighbours.insert(a));
+        }
+    }
+    out
+}
+
+fn joined(a: soliddraft_kernel_api::Aabb, b: soliddraft_kernel_api::Aabb) -> soliddraft_kernel_api::Aabb {
+    use soliddraft_kernel_api::Vec3;
+    soliddraft_kernel_api::Aabb {
+        min: Vec3::new(a.min.x.min(b.min.x), a.min.y.min(b.min.y), a.min.z.min(b.min.z)),
+        max: Vec3::new(a.max.x.max(b.max.x), a.max.y.max(b.max.y), a.max.z.max(b.max.z)),
+    }
+}
+
+/// How far a face may move and still follow: a quarter of the old body's diagonal.
+const FOLLOW_REACH: f64 = 0.25;
+/// How far a face may turn and still follow, in degrees.
+const FOLLOW_TURN_DEGREES: f64 = 1.0;
+/// How much a radius may differ and still follow, as a share of it.
+const FOLLOW_RADIUS_SHARE: f64 = 1e-6;
+
+/// True when `new` could be `old` moved: the same surface type; a plane facing the same
+/// way, or a cylinder's axis parallel, within [`FOLLOW_TURN_DEGREES`]; the same radius
+/// and material side; and the centroid within `reach`.
+fn same_shape(old: &Shape, new: &Shape, reach: f64) -> bool {
+    let turn = FOLLOW_TURN_DEGREES.to_radians().cos();
+    let facing = match (old.direction, new.direction) {
+        (Some(a), Some(b)) if old.surface == soliddraft_kernel_api::SurfaceKind::Plane => a.dot(b) >= turn,
+        (Some(a), Some(b)) => a.dot(b).abs() >= turn,
+        (None, None) => true,
+        _ => false,
+    };
+    let sized = match (old.size, new.size) {
+        (Some((a, side_a)), Some((b, side_b))) => side_a == side_b && (a - b).abs() <= a.abs() * FOLLOW_RADIUS_SHARE,
+        (None, None) => true,
+        _ => false,
+    };
+    old.surface == new.surface && facing && sized && old.centroid.distance(new.centroid) <= reach
+}
+
+/// The one candidate, or the nearest when it is less than half as far as the next.
+fn clear_nearest(mut fits: Vec<(f64, &String)>) -> Option<&String> {
+    fits.sort_by(|a, b| a.0.total_cmp(&b.0));
+    match fits.as_slice() {
+        [only] => Some(only.1),
+        [best, next, ..] if best.0 * 2.0 < next.0 => Some(best.1),
+        _ => None,
+    }
+}
+
+/// Pairs old faces the exact match left over with new faces of the same shape (see
+/// [`same_shape`]) whose already paired neighbours are still neighbours. A pair is made
+/// only when each face is the other's clear nearest among every face eligible for it,
+/// so two holes that could swap stay unpaired and their references go to repair. Pairs
+/// made in one round constrain the next, until none is added.
+fn follow(
+    old: &BTreeMap<String, Shape>,
+    new: &BTreeMap<String, Shape>,
+    exact: &BTreeMap<String, String>,
+) -> BTreeMap<String, String> {
+    let Some(bbox) = old.values().map(|shape| shape.bbox).reduce(joined) else {
+        return BTreeMap::new();
+    };
+    let reach = bbox.diagonal() * FOLLOW_REACH;
+    let mut pairs = exact.clone();
+    loop {
+        let taken: std::collections::BTreeSet<&String> = pairs.values().collect();
+        let open_old: Vec<(&String, &Shape)> = old.iter().filter(|(key, _)| !pairs.contains_key(*key)).collect();
+        let open_new: Vec<(&String, &Shape)> = new.iter().filter(|(key, _)| !taken.contains(key)).collect();
+        let eligible = |(_, a): &(&String, &Shape), (_, b): &(&String, &Shape)| {
+            same_shape(a, b, reach)
+                && a.neighbours.iter().filter_map(|n| pairs.get(n)).all(|n| b.neighbours.contains(n))
+        };
+        let mut accepted = Vec::new();
+        for o in &open_old {
+            let forward =
+                open_new.iter().filter(|n| eligible(o, n)).map(|n| (o.1.centroid.distance(n.1.centroid), n.0));
+            let Some(target) = clear_nearest(forward.collect()) else { continue };
+            let n = open_new.iter().find(|n| n.0 == target).expect("a candidate");
+            let reverse =
+                open_old.iter().filter(|p| eligible(p, n)).map(|p| (p.1.centroid.distance(n.1.centroid), p.0));
+            if clear_nearest(reverse.collect()) == Some(o.0) {
+                accepted.push((o.0.clone(), target.clone()));
+            }
+        }
+        if accepted.is_empty() {
+            break;
+        }
+        pairs.extend(accepted);
+    }
+    pairs.into_iter().filter(|(key, _)| !exact.contains_key(key)).collect()
+}
+
+/// Moves every import of the old file to the reviewed new file, its matched faces keeping
+/// their names, as one undo step. References listed as lost are left for repair.
 fn commit_file(doc: &mut Document, swap: &FileSwap, reviewed: &ImportStepFeature) -> Result<FeatureId, String> {
-    use crate::document::{app_id, model_id};
-    use std::collections::HashMap;
     let stale = || "the part changed during the preview; review the replacement again".to_owned();
     if !reviewed.decisions.is_empty() {
         return Err(
@@ -301,82 +647,7 @@ fn commit_file(doc: &mut Document, swap: &FileSwap, reviewed: &ImportStepFeature
             _ => return Err(stale()),
         }
     }
-    let mut edits: Vec<(FeatureId, soliddraft_model::FeatureKind)> = swap
-        .imports
-        .iter()
-        .zip(&swap.replaced)
-        .map(|((id, _), replaced)| {
-            let mut import = reviewed.clone();
-            import.source_solid = replaced.source_solid.clone();
-            import.source_bound_names = true;
-            (*id, soliddraft_model::FeatureKind::ImportStep(import))
-        })
-        .collect();
-    let mut imports_only = doc.scratch();
-    imports_only.apply(Command::ReplaceImportFile(edits.clone()))?;
-    type Name = (soliddraft_model::FeatureId, soliddraft_model::Generator, u32);
-    let mut moves: HashMap<Name, (soliddraft_model::Generator, u32)> = HashMap::new();
-    for ((id, _), replaced) in swap.imports.iter().zip(&swap.replaced) {
-        let feature = model_id(*id);
-        let new_faces: HashMap<&str, &soliddraft_model::NamedFace> = imports_only
-            .model()
-            .generated_faces(feature)
-            .iter()
-            .filter_map(|face| match &face.origin.role {
-                FaceRole::Imported { key } => Some((key.as_str(), face)),
-                _ => None,
-            })
-            .collect();
-        for old in doc.model().generated_faces(feature) {
-            let FaceRole::Imported { key } = &old.origin.role else { continue };
-            if let Some(new) = replaced.faces.get(key).and_then(|key| new_faces.get(key.as_str())) {
-                moves.insert((feature, old.generator.clone(), old.ordinal), (new.generator.clone(), new.ordinal));
-            }
-        }
-    }
-    let imported: Vec<soliddraft_model::FeatureId> = swap.imports.iter().map(|(id, _)| model_id(*id)).collect();
-    let mut unmatched = Vec::new();
-    for feature in doc.model().features() {
-        if imported.contains(&feature.id) {
-            continue;
-        }
-        let mut moved = false;
-        let kind = soliddraft_model::rewrite_face_refs(&feature.kind, |face| {
-            if !imported.contains(&face.feature) {
-                return;
-            }
-            match moves.get(&(face.feature, face.generator.clone(), face.ordinal)) {
-                Some((generator, ordinal)) => {
-                    face.generator = generator.clone();
-                    face.ordinal = *ordinal;
-                    moved = true;
-                }
-                None => unmatched.push(if face.label.is_empty() { feature.name.clone() } else { face.label.clone() }),
-            }
-        })?;
-        if moved {
-            edits.push((app_id(feature.id), kind));
-        }
-    }
-    if !unmatched.is_empty() {
-        unmatched.dedup();
-        return Err(format!(
-            "The new file has no face verified to match {}. Nothing was changed.",
-            unmatched.join(", ")
-        ));
-    }
-    let command = Command::ReplaceImportFile(edits);
-    let mut trial = doc.scratch();
-    trial.apply(command.clone())?;
-    // Only a feature that built before and does not now is the replacement's doing;
-    // suppressed, rolled-back or already broken features keep their state.
-    let built = |feature: &crate::document::Feature| feature.status == crate::document::FeatureStatus::Ok;
-    if let Some(broken) = trial.features.iter().find(|after| !built(after) && doc.feature(after.id).is_some_and(built))
-    {
-        return Err(format!("{} does not build with the new file. Nothing was changed.", broken.name));
-    }
-    doc.reuse_builds_from(trial.model());
-    doc.apply(command)?;
+    doc.apply(Command::ReplaceImportFile(swap.edits.clone()))?;
     Ok(swap.imports[0].0)
 }
 
@@ -417,7 +688,12 @@ pub fn commit(doc: &mut Document, preview: &Preview, review: &Review) -> Result<
         return Err("this repair needs an explicit tolerance approval before it can be imported".into());
     }
     if let Some(swap) = &preview.file {
-        return commit_file(doc, swap, &feature);
+        // Answers cannot go through a match yet. A single-solid import takes the answered
+        // file as a plain replacement instead, its references left for repair.
+        let single = swap.imports.iter().all(|(_, import)| import.source_solid.is_none());
+        if feature.decisions.is_empty() || !single {
+            return commit_file(doc, swap, &feature);
+        }
     }
     let command = match preview.replacement {
         Some(id) => Command::EditFeature { id, kind: FeatureKind::ImportStep(feature) },
@@ -587,7 +863,18 @@ pub fn window(ctx: &egui::Context, state: &mut AppState) {
         if format == ImportFormat::Mesh {
             ui.label("STL and OBJ coordinates are read in millimetres. The mesh must form one closed solid, up to 200,000 triangles.");
         }
-        if preview.replacement.is_some() {
+        if let Some(swap) = &preview.file {
+            ui.label("Accept keeps the names of faces that match the old file, so references to them follow. You can undo the replacement.");
+            if !swap.lost.is_empty() {
+                ui.label("These will need repair:");
+                for item in &swap.lost {
+                    ui.label(item.to_string());
+                }
+            }
+        } else if preview.replacement.is_some() {
+            if let Some(reason) = &preview.unmatched {
+                ui.label(format!("The new file's faces were not matched to the old file's. {reason}"));
+            }
             ui.label("References to a changed file will need repair. You can undo the replacement.");
         }
         let Preview { proposals, allowed, approver, .. } = &mut preview;
@@ -636,6 +923,14 @@ pub fn window(ctx: &egui::Context, state: &mut AppState) {
             Ok(_) => state.note(
                 if decline {
                     "Import saved with declined repairs; the solid stays open".into()
+                } else if !preview.lost().is_empty() {
+                    let count = preview.lost().len();
+                    format!(
+                        "Replaced imported file. {count} {} repair.",
+                        if count == 1 { "item needs" } else { "items need" }
+                    )
+                } else if preview.file.is_some() {
+                    "Replaced imported file. Every reference follows.".into()
                 } else if preview.replacement.is_some() {
                     "Replaced imported file. Check any references marked for repair.".into()
                 } else {

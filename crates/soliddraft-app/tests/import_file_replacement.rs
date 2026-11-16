@@ -1,7 +1,9 @@
-//! Replacing a two-solid STEP import with a copy whose entity numbers alone changed,
-//! through Catallax's verified file transaction: both imported bodies and a fillet on one
-//! of them move to the new file together, as one undo step, and only while the part is as
-//! it was when the replacement was matched. A file with changed geometry changes nothing.
+//! Replacing an imported STEP file through Catallax's verified file transaction. Each face
+//! of the new file with a verified partner keeps that face's name, so references to it
+//! hold in the part and in its drawings, as one undo step, and only while the part is as
+//! it was when the replacement was matched. A reference to a face without a partner is
+//! named in the review and left for repair; nothing else is lost. A two-solid file whose
+//! solids changed cannot be matched and changes nothing.
 
 use serde_json::{Value, json};
 use soliddraft_app::{
@@ -150,8 +152,7 @@ fn a_renumbered_file_replaces_both_solids_and_moves_their_references_as_one_step
     assert!(new_sources.iter().all(|(_, solid)| solid.is_some()));
     assert_ne!(new_sources, old_sources);
     let new_faces = fillet_faces(&doc);
-    assert!(new_faces.iter().any(|face| face.generator == Generator::Imported { sha256: new_sha.clone().into() }));
-    assert!(!new_faces.iter().any(|face| face.generator == Generator::Imported { sha256: old_sha.clone().into() }));
+    assert_eq!(new_faces, old_faces, "the new file's faces keep the names the fillet uses");
     assert_eq!(doc.feature(fillet).unwrap().name, "Kept edit");
     for (old, new) in old_volumes.iter().zip(volumes(&doc)) {
         assert!((old - new).abs() < 1e-6, "{old} became {new}");
@@ -175,8 +176,10 @@ fn a_renumbered_file_replaces_both_solids_and_moves_their_references_as_one_step
     assert_eq!(fillet_faces(&reopened), new_faces);
 }
 
+/// A two-solid file whose every point moved: Catallax verifies a selected solid only when
+/// all its faces have partners, so neither solid can be chosen and nothing changes.
 #[test]
-fn a_file_with_changed_geometry_changes_nothing() {
+fn a_two_solid_file_with_changed_geometry_changes_nothing() {
     let mut doc = imported();
     let first = doc.features[0].id;
     let saved = doc.model().to_bytes().unwrap();
@@ -252,14 +255,14 @@ fn a_suppressed_feature_keeps_its_state_through_a_replacement() {
     let fillet = doc.features.last().unwrap().id;
     doc.apply(Command::Suppress { id: fillet, suppressed: true }).unwrap();
     assert_eq!(doc.feature(fillet).unwrap().status, FeatureStatus::Inactive);
+    let faces = fillet_faces(&doc);
     let new = renumbered(STEP);
     let preview = Preview::from_bytes(&doc, "renumbered.step", new.clone()).unwrap().replacing(&doc, first).unwrap();
     commit(&mut doc, &preview, &Review::default()).unwrap();
     assert_eq!(doc.feature(fillet).unwrap().status, FeatureStatus::Inactive, "suppression is kept");
     let new_sha = sha256_hex(&new);
-    assert!(
-        fillet_faces(&doc).iter().any(|face| face.generator == Generator::Imported { sha256: new_sha.clone().into() })
-    );
+    assert!(sources(&doc).iter().all(|(sha, _)| *sha == new_sha));
+    assert_eq!(fillet_faces(&doc), faces, "the suppressed fillet's references are kept");
     doc.apply(Command::Suppress { id: fillet, suppressed: false }).unwrap();
     all_built(&doc);
 }
@@ -338,4 +341,328 @@ fn a_reviewed_new_file_with_repair_answers_refuses_and_changes_nothing() {
     assert_eq!(sources(&doc), old_sources);
     assert_eq!((doc.undo_depth(), doc.revision()), (depth, revision));
     all_built(&doc);
+}
+
+/// A 40 x 30 mm block from z = 0 to `height`, centred on the origin, with an 8 mm hole
+/// straight through it at `hole` when given, written as STEP by the kernel.
+fn block_step(height: f64, hole: Option<[f64; 2]>) -> Vec<u8> {
+    holes_step(height, &hole.map(|at| vec![(at, 8.0)]).unwrap_or_default())
+}
+
+/// The 40 x 30 mm block `height` mm tall with a hole of each diameter straight through it
+/// at each point.
+fn holes_step(height: f64, holes: &[([f64; 2], f64)]) -> Vec<u8> {
+    let mut doc = Document::new("Source block", soliddraft_app::kernel());
+    let rectangle = json!({"shape":"rectangle","center":[0,0,0],"width":40,"height":30});
+    call(&mut doc, "sketch", json!({"plane":"top","shapes":[rectangle]})).unwrap();
+    call(&mut doc, "extrude", json!({"sketch":"Sketch1","depth":height,"flip":false})).unwrap();
+    if !holes.is_empty() {
+        let circles: Vec<Value> = holes
+            .iter()
+            .map(|([x, y], diameter)| json!({"shape":"circle","center":[x,y,height],"diameter":diameter}))
+            .collect();
+        call(&mut doc, "sketch", json!({"plane":"Boss-Extrude1 · End cap","shapes":circles})).unwrap();
+        call(&mut doc, "cut", json!({"sketch":"Sketch2","through_all":true,"depth":1,"flip":false})).unwrap();
+    }
+    all_built(&doc);
+    let body = doc.model().live_bodies()[0].1;
+    let options = soliddraft_kernel_api::StepOptions { product_name: "block".into(), ..Default::default() };
+    doc.kernel().export_step(body, &options).unwrap().text.into_bytes()
+}
+
+/// The imported face whose centroid passes `at`, as the tools name it.
+fn face_named(doc: &Document, at: impl Fn(Point) -> bool) -> String {
+    let face = doc.faces.iter().find(|face| at(Point::of(face.centroid))).expect("a face there");
+    format!("{} · {}", doc.feature(face.feature).unwrap().name, face.label)
+}
+
+/// The imported edge whose midpoint passes `at`, as the tools name it.
+fn edge_named(doc: &Document, at: impl Fn(Point) -> bool) -> String {
+    let edge = doc.edges.iter().find(|edge| at(Point::of(edge.midpoint))).expect("an edge there");
+    format!("{} · {}", doc.feature(edge.feature).unwrap().name, edge.label)
+}
+
+/// A display point, in millimetres.
+struct Point {
+    x: f64,
+    y: f64,
+    z: f64,
+}
+
+impl Point {
+    fn of<P: Into<[f32; 3]>>(p: P) -> Self {
+        let [x, y, z] = p.into();
+        Point { x: x.into(), y: y.into(), z: z.into() }
+    }
+}
+
+/// Display points are single precision.
+fn near(a: f64, b: f64) -> bool {
+    (a - b).abs() < 1e-3
+}
+
+/// The 20 mm block with its hole at the origin, imported, and built on:
+/// - Fillet1 rounds the vertical edge between the +x and +y sides;
+/// - Boss-Extrude1 stands on a circle sketched on the -x side;
+/// - Boss-Extrude2 stands on a circle sketched on the bottom;
+/// - Chamfer1 bevels the hole's top edge.
+fn holed_block() -> Document {
+    let mut doc = Document::new("Holed block", soliddraft_app::kernel());
+    let preview = Preview::from_bytes(&doc, "block.step", block_step(20.0, Some([0.0, 0.0]))).unwrap();
+    commit(&mut doc, &preview, &Review::default()).unwrap();
+    assert_eq!(sources(&doc).len(), 1);
+    let corner = edge_named(&doc, |m| near(m.x, 20.0) && near(m.y, 15.0));
+    call(&mut doc, "fillet", json!({"edges":[corner],"radius":2})).unwrap();
+    let side = face_named(&doc, |c| near(c.x, -20.0));
+    let boss = json!({"shape":"circle","center":[-20,0,10],"diameter":6});
+    call(&mut doc, "sketch", json!({"plane":side,"shapes":[boss]})).unwrap();
+    call(&mut doc, "extrude", json!({"sketch":"Sketch1","depth":5,"flip":false})).unwrap();
+    let bottom = face_named(&doc, |c| near(c.z, 0.0));
+    let foot = json!({"shape":"circle","center":[12,8,0],"diameter":4});
+    call(&mut doc, "sketch", json!({"plane":bottom,"shapes":[foot]})).unwrap();
+    call(&mut doc, "extrude", json!({"sketch":"Sketch2","depth":3,"flip":false})).unwrap();
+    let rim = edge_named(&doc, |m| near(m.z, 20.0) && near((m.x * m.x + m.y * m.y).sqrt(), 4.0));
+    call(&mut doc, "chamfer", json!({"edges":[rim],"distance":1})).unwrap();
+    all_built(&doc);
+    doc
+}
+
+/// Each feature's name and whether it built.
+fn built(doc: &Document) -> Vec<(String, bool)> {
+    doc.features.iter().map(|f| (f.name.clone(), f.status == FeatureStatus::Ok)).collect()
+}
+
+/// Replaces the part's one import with `bytes` through the review, returning what the
+/// review said would need repair.
+fn replace(doc: &mut Document, bytes: Vec<u8>) -> Vec<String> {
+    let import = doc.features[0].id;
+    let preview = Preview::from_bytes(doc, "new.step", bytes).unwrap().replacing(doc, import).unwrap();
+    let lost = preview.lost().iter().map(ToString::to_string).collect();
+    commit(doc, &preview, &Review::default()).unwrap();
+    lost
+}
+
+/// The same file, byte for byte, and the same file renumbered both keep every reference of
+/// a single-solid import: each feature builds, to the same volume, from the same names.
+#[test]
+fn an_identical_file_keeps_every_reference() {
+    let source = block_step(20.0, Some([0.0, 0.0]));
+    for (case, bytes) in [("identical", source.clone()), ("renumbered", renumbered(&source))] {
+        let mut doc = holed_block();
+        let refs = doc.model().stored_face_refs();
+        let volume = volumes(&doc);
+        let depth = doc.undo_depth();
+        let lost = replace(&mut doc, bytes.clone());
+        assert!(lost.is_empty(), "{case}: {lost:?}");
+        all_built(&doc);
+        assert_eq!(doc.model().stored_face_refs(), refs, "{case}");
+        for (old, new) in volume.iter().zip(volumes(&doc)) {
+            assert!((old - new).abs() < 1e-6, "{case}: {old} became {new}");
+        }
+        assert_eq!(sources(&doc)[0].0, sha256_hex(&bytes), "{case}");
+        assert_eq!(doc.undo_depth(), depth + 1, "{case}");
+    }
+}
+
+/// The new file drops the hole. The sides keep their definitions; the top and bottom lost
+/// their hole loop and follow by shape. The cylinder has no partner, so the chamfer on its
+/// rim is named in the review, and after Accept it needs repair while the rest builds,
+/// the bottom sketch included. One Undo puts everything back; save and reopen keep the
+/// new file with its names.
+#[test]
+fn a_deleted_face_names_the_references_it_breaks_and_keeps_the_rest() {
+    let mut doc = holed_block();
+    let refs = doc.model().stored_face_refs();
+    let before = built(&doc);
+    let depth = doc.undo_depth();
+
+    // The MCP preview lists the same report as the dialog.
+    let path = written("solid-block.step", &block_step(20.0, None));
+    let reviewed = call(&mut doc, "preview_import", json!({"path":path, "feature":"Import1"})).unwrap();
+    let listed: Vec<&str> =
+        reviewed["needs_repair"].as_array().unwrap().iter().map(|item| item["owner"].as_str().unwrap()).collect();
+
+    let lost = replace(&mut doc, block_step(20.0, None));
+    let owners: Vec<&str> = lost.iter().map(|line| line.split(':').next().unwrap()).collect();
+    assert_eq!(owners, ["Chamfer1"], "only the rim lost a face: {lost:?}");
+    assert!(lost[0].contains(": Import1 · Face ") && lost[0].ends_with("has no matching face in the new file"));
+    assert_eq!(listed, owners, "MCP preview_import reports the same items");
+
+    let state = |doc: &Document, name: &str| doc.features.iter().find(|f| f.name == name).unwrap().status.clone();
+    for name in ["Import1", "Fillet1", "Sketch1", "Boss-Extrude1", "Sketch2", "Boss-Extrude2"] {
+        assert_eq!(state(&doc, name), FeatureStatus::Ok, "{name}");
+    }
+    assert!(matches!(state(&doc, "Chamfer1"), FeatureStatus::NeedsRepair(_)), "{:?}", state(&doc, "Chamfer1"));
+    // The import's faces read as distinct labels, inherited and new alike.
+    let import = soliddraft_model::FeatureId(doc.features[0].id as u32);
+    let mut labels: Vec<String> = doc
+        .model()
+        .generated_faces(import)
+        .iter()
+        .map(|face| doc.model().name_label(import, face.generator.clone(), face.ordinal).unwrap().text)
+        .collect();
+    let count = labels.len();
+    labels.sort();
+    labels.dedup();
+    assert_eq!(labels.len(), count, "{labels:?}");
+    assert_eq!(count, 6, "{labels:?}");
+    // Nothing is rewritten or dropped: every stored reference is as it was.
+    assert_eq!(doc.model().stored_face_refs(), refs);
+    assert_eq!(doc.undo_depth(), depth + 1);
+
+    doc.undo().unwrap();
+    assert_eq!(built(&doc), before);
+    assert_eq!(sources(&doc)[0].0, sha256_hex(&block_step(20.0, Some([0.0, 0.0]))));
+    doc.redo().unwrap();
+    let after = built(&doc);
+    assert_ne!(after, before);
+
+    let saved = doc.model().to_bytes().unwrap();
+    let reopened = soliddraft_app::file::open_bytes("replaced.dwprt", &saved, soliddraft_app::kernel(), None).unwrap();
+    assert_eq!(built(&reopened), after);
+    assert_eq!(reopened.model().stored_face_refs(), refs);
+    assert_eq!(sources(&reopened)[0].0, sha256_hex(&block_step(20.0, None)));
+}
+
+/// The hole moves 5 mm along x. The top, bottom and cylinder change, and Catallax pairs
+/// none of them exactly; they follow by shape, so the chamfer, the bottom sketch and
+/// everything else build on the new file with their references unchanged.
+#[test]
+fn a_moved_face_takes_its_references_with_it() {
+    let mut doc = holed_block();
+    let refs = doc.model().stored_face_refs();
+    let lost = replace(&mut doc, block_step(20.0, Some([5.0, 0.0])));
+    assert!(lost.is_empty(), "{lost:?}");
+    all_built(&doc);
+    assert_eq!(doc.model().stored_face_refs(), refs);
+    // The chamfer now bevels the moved rim: its outer edge rings the new hole centre.
+    let body = doc.model().live_bodies()[0].1;
+    let topology = doc.kernel().topology(body).unwrap();
+    let rim = |e: &soliddraft_kernel_api::EdgeInfo| {
+        let m = e.midpoint;
+        (m.z - 20.0).abs() < 1e-6 && ((((m.x - 5.0).powi(2) + m.y * m.y).sqrt()) - 5.0).abs() < 1e-6
+    };
+    assert!(topology.edges.iter().any(rim), "a chamfered rim around the moved hole");
+}
+
+/// The block grows from 20 to 25 mm. The top moves, the sides grow and the hole lengthens;
+/// only the bottom keeps its exact definition. The rest follow by shape, so the fillet,
+/// the side boss and the chamfer build on the taller block with their references unchanged.
+#[test]
+fn a_resized_face_takes_its_references_with_it() {
+    let mut doc = holed_block();
+    let refs = doc.model().stored_face_refs();
+    let lost = replace(&mut doc, block_step(25.0, Some([0.0, 0.0])));
+    assert!(lost.is_empty(), "{lost:?}");
+    all_built(&doc);
+    assert_eq!(doc.model().stored_face_refs(), refs);
+    // The fillet now rounds the taller corner, 25 mm long.
+    let body = doc.model().live_bodies()[0].1;
+    let topology = doc.kernel().topology(body).unwrap();
+    let corner = |f: &&soliddraft_kernel_api::FaceInfo| {
+        f.surface == soliddraft_kernel_api::SurfaceKind::Cylinder && f.centroid.x > 18.0 && f.centroid.y > 13.0
+    };
+    let fillet = topology.faces.iter().find(corner).expect("the fillet face");
+    assert!((fillet.centroid.z - 12.5).abs() < 1e-6, "{:?}", fillet.centroid);
+}
+
+/// Two holes of different sizes move past each other: the 2 mm one from x = -10 to x = 1,
+/// the 4 mm one from x = -2 to x = -5. By position alone the small hole is nearest the
+/// big hole's new place, and the big hole is as near one place as the other. Radius keeps
+/// each hole's identity, so the chamfer on the small hole's rim follows it to x = 1.
+#[test]
+fn two_holes_that_move_past_each_other_keep_their_identities() {
+    let old = [([-10.0, 0.0], 2.0), ([-2.0, 0.0], 4.0)];
+    let new = [([1.0, 0.0], 2.0), ([-5.0, 0.0], 4.0)];
+    let mut doc = Document::new("Two holes", soliddraft_app::kernel());
+    let preview = Preview::from_bytes(&doc, "holes.step", holes_step(20.0, &old)).unwrap();
+    commit(&mut doc, &preview, &Review::default()).unwrap();
+    let rim = edge_named(&doc, |m| near(m.z, 20.0) && near(((m.x + 10.0).powi(2) + m.y * m.y).sqrt(), 1.0));
+    call(&mut doc, "chamfer", json!({"edges":[rim],"distance":0.5})).unwrap();
+    all_built(&doc);
+    let refs = doc.model().stored_face_refs();
+
+    let lost = replace(&mut doc, holes_step(20.0, &new));
+    assert!(lost.is_empty(), "{lost:?}");
+    all_built(&doc);
+    assert_eq!(doc.model().stored_face_refs(), refs);
+    let body = doc.model().live_bodies()[0].1;
+    let topology = doc.kernel().topology(body).unwrap();
+    let ring = |cx: f64, r: f64| {
+        topology.edges.iter().any(|e| {
+            let m = e.midpoint;
+            (m.z - 20.0).abs() < 1e-6 && ((((m.x - cx).powi(2) + m.y * m.y).sqrt()) - r).abs() < 1e-6
+        })
+    };
+    assert!(ring(1.0, 1.5), "the chamfer rings the small hole at x = 1");
+    assert!(!ring(-5.0, 2.5), "the big hole at x = -5 has no chamfer");
+}
+
+/// A drawing's dimension between two vertical side edges of an imported block still finds
+/// both edges after the file is replaced by one without the hole, and reads the same 40.
+#[test]
+fn a_drawing_dimension_survives_a_file_replacement() {
+    use soliddraft_app::drawing::{DrawingDoc, part::PartContext};
+    use soliddraft_drawing::{
+        Annotation, AnnotationKind, AnnotationState, Command as DrawingCommand, DimValue, Dimension, DimensionKind,
+        LinearOrientation, PartIndex, Scale, ViewId, annotate,
+    };
+    use soliddraft_kernel_api::{Point2, Vec3};
+
+    let mut doc = Document::new("Drawn block", soliddraft_app::kernel());
+    let preview = Preview::from_bytes(&doc, "block.step", block_step(20.0, Some([0.0, 0.0]))).unwrap();
+    commit(&mut doc, &preview, &Review::default()).unwrap();
+    let ctx = PartContext::new(&doc).unwrap();
+    let part = ctx.certified_part();
+    let template = soliddraft_drawing::Template::by_id("iso-a3").unwrap();
+    let new = soliddraft_drawing::NewDrawing {
+        views: soliddraft_drawing::default_views(&template),
+        template,
+        model: soliddraft_drawing::DocRef::new(
+            soliddraft_drawing::DocumentId::new(),
+            soliddraft_drawing::DocKind::Part,
+            "part.dwprt",
+            ctx.digest.clone(),
+        ),
+        meta: Default::default(),
+        hidden: soliddraft_drawing::HiddenLines::Visible,
+        model_items: false,
+        centre_marks: false,
+        scale: Some(Scale::FULL),
+    };
+    let made = soliddraft_drawing::make_drawing(&part, &new).unwrap();
+    let mut drawing = DrawingDoc::new(made.drawing);
+    for (id, projected) in &made.projections {
+        drawing.remember(*id, projected);
+    }
+    let front = ViewId(1);
+    let index = PartIndex::build(&part).unwrap();
+    let anchors: Vec<_> = [Vec3::new(-20.0, -15.0, 10.0), Vec3::new(20.0, -15.0, 10.0)]
+        .map(|at| annotate::anchor_near(&index, &drawing.transforms[&front], at).unwrap())
+        .to_vec();
+    assert!(anchors.iter().all(|anchor| anchor.entity.model.is_some()), "anchors carry the part's names");
+    let annotation = Annotation {
+        id: drawing.drawing.next_annotation_id(),
+        view: front,
+        body: AnnotationKind::Dimension(Dimension::measured(
+            DimensionKind::Linear { orientation: LinearOrientation::Horizontal },
+            40.0,
+            0,
+        )),
+        anchors,
+        placement: Point2::new(0.0, 30.0),
+        style: Default::default(),
+        state: AnnotationState::Ok,
+    };
+    let id = annotation.id;
+    drawing.apply(DrawingCommand::AddDimension { annotation }, None).unwrap();
+
+    assert!(replace(&mut doc, block_step(20.0, None)).is_empty(), "the drawing is not part of the part");
+    let ctx = PartContext::new(&doc).unwrap();
+    let report = soliddraft_drawing::update_from_model(&mut drawing.drawing, &ctx.certified_part()).unwrap();
+    assert!(report.dangling.is_empty(), "{:?}", report.dangling);
+    let annotation = drawing.drawing.annotation(id).unwrap();
+    assert_eq!(annotation.state, AnnotationState::Ok);
+    let AnnotationKind::Dimension(dimension) = &annotation.body else { panic!("a dimension") };
+    assert_eq!(dimension.value, DimValue::Measured { value: 40.0 });
 }

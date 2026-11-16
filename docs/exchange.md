@@ -92,7 +92,7 @@ The `iges-export` application scenario builds the bracket through MCP, exports `
 
 STEP import accepts single-body analytic solids, including spheres, tori and general cone angles, and spline files the kernel can certify. Binary-noise cleanup and planar source cleanup keep their measured bounds in the saved import record. Unsupported geometry gets a plain message and leaves the part unchanged.
 
-File > Import STEP reads a source file and shows its repair preview. Accept applies automatic repairs within the kernel's cap without saving an acceptance answer. A seam above that cap, or one where the nearest feature is unknown, asks for an allowed movement of at least the measured gap and the name of who approved it, and Accept stays off until both are given. Decline keeps the source with a declined answer and an unbuilt import in the tree, and the solid stays open until the gap is resolved. Cancel leaves the part unchanged. Closing the preview also cancels it. STEP and IGES files with several solids create a separate body and import feature for each source solid, in one undo step. Each feature keeps the original bytes, their hash, the shared repair record and its source entity selector. Reordering features cannot swap their source solids. Changed source bytes for a selected STEP import replace the whole file when every solid and every referenced face has a verified partner; see [Replace an imported file](#replace-an-imported-file). A file with an unmatched solid or referenced face, and changed IGES source bytes for a selected solid, are refused; import the changed file as new bodies instead.
+File > Import STEP reads a source file and shows its repair preview. Accept applies automatic repairs within the kernel's cap without saving an acceptance answer. A seam above that cap, or one where the nearest feature is unknown, asks for an allowed movement of at least the measured gap and the name of who approved it, and Accept stays off until both are given. Decline keeps the source with a declined answer and an unbuilt import in the tree, and the solid stays open until the gap is resolved. Cancel leaves the part unchanged. Closing the preview also cancels it. STEP and IGES files with several solids create a separate body and import feature for each source solid, in one undo step. Each feature keeps the original bytes, their hash, the shared repair record and its source entity selector. Reordering features cannot swap their source solids. Changed source bytes for a selected STEP import replace the whole file when every solid has a verified partner; see [Replace an imported file](#replace-an-imported-file). A file with an unmatched solid, and changed IGES source bytes for a selected solid, are refused; import the changed file as new bodies instead.
 
 The part file keeps the original source bytes, their SHA-256, repair decisions and the import record. An approved repair is saved under its question as `accept:<tolerance-mm>:<approver>`. Reopening checks the digest and verifies the saved record against the source before rebuilding the body. Repairs never overwrite the source file. A built import can be exported through the checked STEP route above.
 
@@ -112,23 +112,44 @@ dialog. Cancel or a refused replacement leaves the part unchanged. Acceptance
 keeps the feature's identity and name, replaces its saved source and repair answers,
 and rebuilds later features. Undo restores the previous source and references.
 
-An unchanged source keeps its references. Changed source bytes give the import new
-reference names, so existing face and edge references ask for repair. A source
-entity number or face order cannot silently redirect an old reference. Exports
-remain unavailable while a feature needs repair.
+An unchanged source keeps its references. A changed STEP file is matched to the old
+one by Catallax, by complete face definitions, never by entity numbers or order. Each
+face of the new file with exactly one verified partner keeps that face's name, so every
+reference to it follows: sketches on it, features that cut, fillet or chamfer its edges,
+appearances, tracked measurements, mates and drawing views and dimensions, in this part
+and in other documents. A file whose entity numbers alone changed therefore keeps every
+reference. New faces get numbers after every face the import has had, so no new face
+takes a number an old reference names.
 
-A STEP file whose bodies select solids of one source file is replaced as a whole file.
-Catallax matches the new file to the old one by complete face definitions, never by
-entity numbers or order. When every solid and every referenced face has exactly one
-verified partner, all imports of the old file move to the new file together, and
-every face and edge reference into them moves to the matching new face, as one undo
-step. A file whose numbers alone changed therefore keeps every reference. If a solid
-or a referenced face has no verified partner, because its geometry changed or occurs
-twice, the replacement is refused and nothing changes. The match is made when the
-replacement is previewed; if the part changes before Accept, Accept refuses and the
-replacement must be previewed again. The match carries no repair answers yet, so a
-file whose imports were answered, or a new file whose review answers a repair question,
-is refused and nothing changes.
+A face that moved or changed size has no exact partner, and neither has any face whose
+boundary touches it. Planes, and cylinders and spheres whose radius the kernel reads,
+follow by shape instead. A candidate face of the new file has the same surface type; a
+plane faces the same way, or a cylinder's axis lies parallel, within 1 degree; a
+cylinder or sphere has the same radius and material side; every neighbour already paired
+is still a neighbour; and its centroid lies within a quarter of the old body's diagonal.
+A pair is made only when each face is the other's clear nearest among all faces eligible
+for it: the only one, or less than half as far as the next. Two holes that could swap
+places therefore stay unpaired, and their references are listed for repair. Pairs found
+this way constrain the next round, until no more are found. Other surfaces follow only
+by an exact match.
+
+A reference to a face with no partner either way is not redirected. The review lists
+each one by name, with the feature, appearance or measurement that holds it, before
+Accept, and so does `preview_import` under `needs_repair`. After Accept those features
+ask for repair, and everything else keeps building.
+
+All imports of the old file move to the new file together, as one undo step. A STEP
+file whose bodies select solids of one source file is replaced only when every solid has
+a verified partner, which Catallax gives only when all of its faces are unchanged;
+otherwise the replacement is refused and nothing changes. The match is made when the replacement is previewed; if the
+part changes before Accept, Accept refuses and the replacement must be previewed again.
+
+The match carries no repair answers yet. For an import of a single solid, a file that
+cannot be matched, whose old import was answered or whose review answers a repair
+question still replaces the source, and the review says why: changed source bytes then
+give the import new reference names, so existing face and edge references ask for
+repair. For imports that select solids of one file, the replacement is refused and
+nothing changes. Exports remain unavailable while a feature needs repair.
 
 MCP clients preview with `feature` naming the import, then call `replace_import`
 with the same `feature`, `path`, `format`, preview token and reviewed answers.

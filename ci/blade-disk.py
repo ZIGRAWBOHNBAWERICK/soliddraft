@@ -79,12 +79,12 @@ def monitor(report, token):
             save(report, state)
             time.sleep(INTERVAL)
     except Exception as error:
-        state['error'] = str(error)
+        record(state, error)
     finally:
         try:
             sample(state, *roots)
         except Exception as error:
-            state['error'] = str(error)
+            record(state, error)
         state['stopped'] = True
         save(report, state)
 
@@ -110,10 +110,22 @@ def start(report, control):
     raise RuntimeError('Blade disk monitor did not produce its first sample')
 
 
+def full(error):
+    """Whether an error says the disk filled, rather than that a sample could not be read."""
+    return 'No space left on device' in error or '[Errno 28]' in error
+
+
+def record(state, error):
+    """Notes a sample's error. A full disk, once seen, stays noted: a later error that only
+    failed to read a sample does not hide it."""
+    state['error'] = str(error)
+    if full(state['error']):
+        state['disk_full'] = True
+
+
 def disk_full(state):
-    """Whether a measurement stopped because the disk filled, rather than failed to read."""
-    error = state.get('error', '')
-    return 'No space left on device' in error or '[Errno 28]' in error or state.get('min_free_bytes', 1) <= 0
+    """Whether the measurement saw the disk fill at any point."""
+    return state.get('disk_full', False) or full(state.get('error', '')) or state.get('min_free_bytes', 1) <= 0
 
 
 def stop(report, control):

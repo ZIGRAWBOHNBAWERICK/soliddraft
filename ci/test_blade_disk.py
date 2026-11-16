@@ -131,6 +131,19 @@ class DiskBudget(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, 'measurement failed'):
                 disk.stop(report, control)
 
+    def test_a_full_disk_stays_noted_after_a_later_unreadable_sample(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            report, control = root / 'blade-disk.json', root / 'control.json'
+            control.write_text(json.dumps({'pid': os.getpid(), 'token': 'unrelated-process-token'}))
+            state = {'samples': 3, 'peak_bytes': 2**30, 'peak_writable_layer_bytes': 0, 'min_free_bytes': 2**34}
+            disk.record(state, OSError(28, 'No space left on device'))
+            disk.record(state, RuntimeError('cannot measure own container: Docker HTTP 500'))
+            self.assertIn('Docker HTTP 500', state['error'])
+            report.write_text(json.dumps(dict(state, stopped=True)))
+            with self.assertRaisesRegex(RuntimeError, 'measurement failed'):
+                disk.stop(report, control)
+
     def test_sampling_tolerates_deleted_temporary_files_but_not_access_errors(self):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)

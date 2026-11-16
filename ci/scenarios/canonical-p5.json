@@ -185,7 +185,8 @@
       ],
       "exports": [
         {
-          "format": "step"
+          "format": "step",
+          "raw_valid": true
         },
         {
           "format": "stl",
@@ -230,7 +231,8 @@
       "label": "edited",
       "exports": [
         {
-          "format": "step"
+          "format": "step",
+          "raw_valid": true
         },
         {
           "format": "stl",
@@ -287,7 +289,8 @@
       "same_geometry_as_step": 6,
       "exports": [
         {
-          "format": "step"
+          "format": "step",
+          "raw_valid": true
         },
         {
           "format": "stl",

@@ -171,6 +171,10 @@ impl AppBody {
     /// Whether the body is open faces enclosing no volume, as Catallax builds a surface
     /// model a STEP file holds, rather than a closed solid.
     pub(crate) fn is_surface(&self) -> bool {
+        // A body adopted unread brought its kind with it.
+        if let Some(handed) = self.unread() {
+            return handed.surface;
+        }
         let exact = self.checkpoint.built();
         exact.model.body(exact.result).kind == catallax_topology::BodyKind::Surface
     }

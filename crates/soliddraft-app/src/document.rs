@@ -3647,7 +3647,7 @@ impl Document {
     /// Whether body `key` is open faces that enclose no volume.
     pub fn body_is_surface(&self, key: u32) -> bool {
         let Some((_, body)) = self.model.live_bodies().into_iter().find(|(k, _)| *k == key) else { return false };
-        self.model.kernel().topology(body).is_ok_and(|t| t.kind == soliddraft_kernel_api::BodyKind::Sheet)
+        self.model.kernel().body_kind(body).is_ok_and(|kind| kind == soliddraft_kernel_api::BodyKind::Sheet)
     }
 
     /// Selects a solid and uses it for subsequent features.

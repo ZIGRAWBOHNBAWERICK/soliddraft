@@ -166,6 +166,9 @@ pub(crate) struct HandedIdentity {
     pub record: HistoryRecord,
     /// Whether any face is a B-spline surface.
     pub splines: bool,
+    /// Whether the body is open faces rather than a closed solid.
+    #[serde(default)]
+    pub surface: bool,
     /// The planar faces whose plane has a rational normal and origin.
     pub planes: Vec<HandedPlane>,
 }

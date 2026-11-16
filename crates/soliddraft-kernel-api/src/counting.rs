@@ -134,6 +134,10 @@ impl Kernel for Counting {
         self.inner.read_offers(at_most)
     }
 
+    fn body_kind(&self, body: BodyId) -> KernelResult<crate::BodyKind> {
+        self.inner.body_kind(body)
+    }
+
     fn exact_unread(&self, body: BodyId) -> KernelResult<bool> {
         self.inner.exact_unread(body)
     }

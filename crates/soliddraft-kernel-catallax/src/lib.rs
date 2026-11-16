@@ -779,6 +779,7 @@ fn handed_identity(solid: &Solid, record: &HistoryRecord) -> Option<handover::Ha
             .collect::<Option<_>>()?,
         record,
         splines: solid.has_splines(),
+        surface: solid.app.is_surface(),
         planes: native::planes(&solid.app),
     })
 }
@@ -1334,6 +1335,13 @@ impl Kernel for CatallaxKernel {
             }
         }
         Ok(count)
+    }
+
+    fn body_kind(&self, body: BodyId) -> KernelResult<BodyKind> {
+        if self.field(body)?.is_some() {
+            return Ok(BodyKind::Solid);
+        }
+        Ok(if self.solid(body)?.app.is_surface() { BodyKind::Sheet } else { BodyKind::Solid })
     }
 
     fn exact_unread(&self, body: BodyId) -> KernelResult<bool> {

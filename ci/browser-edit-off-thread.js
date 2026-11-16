@@ -11,8 +11,15 @@
 // `shown_details`, since the canvas has no text. A cancelled edit's answer still comes
 // from the worker; the page drops the builds it carries, as its kernel trace records,
 // so the next edit builds from its own.
+//
+// Each edit also logs the time from Enter until no build is owed, when the edited part
+// is usable. Last, Measure, the first command after the edits that needs exact geometry,
+// logs the time until it ran and its longest page task. It has no bound, so deferring
+// work from the edits cannot hide it, but a page task of 250 ms or more must come
+// behind the busy state the page draws while it reads the part.
 function check(value, message) { if (!value) throw new Error(message); }
-const DETAILS = [317, 52], CLOSE = [347, 92], BASE = [380, 203], DEPTH = [515, 268];
+const CLOSE = [347, 92], BASE = [380, 203], DEPTH = [515, 268];
+const INSPECT = [19, 241], MEASURE = [92, 112];
 const LONG = 250;
 
 check(await page.eval(() => location.pathname === '/' && location.search === ''), 'Open the application at / first');
@@ -92,6 +99,12 @@ async function typeDepth(depth) {
   await page.press('Control+a');
   await page.type(String(depth));
   await page.press('Enter');
+  return page.eval(() => performance.now());
+}
+const now = () => page.eval(() => performance.now());
+async function usable(what, entered) {
+  await idle(what);
+  console.log(`${what}: usable ${Math.round((await now()) - entered)} ms after Enter`);
 }
 
 await window_('Opening the bracket', async () => {
@@ -101,18 +114,28 @@ await window_('Opening the bracket', async () => {
   await idle('The opened bracket');
 });
 
+// The options bar draws Details for a new selection only in a later frame, so the
+// pointer moves until a frame shows both, and Details is clicked where it was drawn.
 await click(BASE);
-await page.wait(300);
-await click(DETAILS);
+const nudge = () => page.eval(() => {
+  document.getElementById('soliddraft').dispatchEvent(new PointerEvent('pointermove',
+    { clientX: 900, clientY: 450, bubbles: true, pointerId: 1, pointerType: 'mouse', isPrimary: true }));
+  return true;
+});
+const options = await until(async () => {
+  await nudge();
+  return shown('shown_options');
+}, drawn => drawn && drawn.selected === 'Boss-Extrude1' && drawn.details, 'Boss-Extrude1 is not selected with Details drawn');
+await click([Math.round(options.details.x), Math.round(options.details.y)]);
 await depthShown(10, 'The opened bracket');
 
 let sawBusy = false;
 await window_('Changing the base depth to 12 mm', async () => {
-  await typeDepth(12);
+  const entered = await typeDepth(12);
   // The opened part already reports a finished build, so wait for the edit's own.
   const state = await until(building, state => state && state.pending, 'The edit drew no busy state', 50);
   sawBusy = Boolean(state.cancel);
-  await idle('The depth edit');
+  await usable('The depth edit', entered);
   await depthShown(12, 'The depth edit');
 });
 check(sawBusy, 'The page showed no busy state with a Cancel while the edit built');
@@ -135,6 +158,14 @@ await window_('Cancelling a depth edit', async () => {
   await typeDepth(14);
   const state = await until(building, state => state && state.pending && state.cancel, 'The edit showed no Cancel', 100);
   await click([state.cancel.x, state.cancel.y]);
+  // Cancel is drawn over the viewport, where the pointer would have the viewport pick
+  // under it every frame: a GPU readback that software rendering takes most of a
+  // second to answer. The pointer moves to the side panel, as a user's would.
+  await page.eval(() => {
+    document.getElementById('soliddraft').dispatchEvent(new PointerEvent('pointermove',
+      { clientX: 150, clientY: 450, bubbles: true, pointerId: 1, pointerType: 'mouse', isPrimary: true }));
+    return true;
+  });
   await idle('The cancelled edit');
   await depthShown(12, 'The cancelled edit');
   // The worker answers the cancelled edit later; the page drops the builds it carries.
@@ -145,11 +176,36 @@ await window_('Cancelling a depth edit', async () => {
 });
 
 await window_('Changing the base depth to 16 mm after the cancel', async () => {
-  await typeDepth(16);
+  const entered = await typeDepth(16);
   await until(building, state => state && state.pending, 'The edit after the cancel drew no busy state', 50);
-  await idle('The edit after the cancel');
+  await usable('The edit after the cancel', entered);
   await depthShown(16, 'The edit after the cancel');
 });
 
 await click(CLOSE);
+await click(INSPECT);
+await page.wait(500);
+// The busy state may last one frame before the read, so the page notes it each frame.
+await page.eval(() => {
+  window.longTasks = [];
+  window.sawReading = false;
+  window.watching = true;
+  const watch = () => {
+    const drawn = JSON.parse(window.wasmBindings.shown_build() || 'null');
+    if (drawn && drawn.reading) window.sawReading = true;
+    if (window.watching) requestAnimationFrame(watch);
+  };
+  requestAnimationFrame(watch);
+  return true;
+});
+const asked = await now();
+await click(MEASURE);
+// A few frames for the page to take the click and hold Measure while it reads.
+await page.wait(300);
+await until(building, state => state && !state.pending && !state.reading, 'Measure did not run');
+await page.wait(500);
+const sawReading = await page.eval(() => { window.watching = false; return window.sawReading; });
+const longest = await page.eval(() => Math.max(0, ...window.longTasks));
+console.log(`The first exact action, Measure: ran ${Math.round((await now()) - asked)} ms after the click; longest page task ${longest} ms; busy state ${sawReading ? 'drawn' : 'not drawn'}`);
+check(longest < LONG || sawReading, `Measure blocked the page for ${longest} ms with no busy state`);
 console.log('Edit off the page thread check passed');

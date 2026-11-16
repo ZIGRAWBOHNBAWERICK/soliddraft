@@ -126,12 +126,20 @@ impl Kernel for Counting {
         self.inner.hand_over()
     }
 
-    fn offer_builds(&self, bytes: &[u8]) -> KernelResult<usize> {
-        self.inner.offer_builds(bytes)
+    fn offer_builds(&self, source: u64, bytes: &[u8]) -> KernelResult<usize> {
+        self.inner.offer_builds(source, bytes)
     }
 
     fn read_offers(&self, at_most: usize) -> KernelResult<usize> {
         self.inner.read_offers(at_most)
+    }
+
+    fn exact_unread(&self, body: BodyId) -> KernelResult<bool> {
+        self.inner.exact_unread(body)
+    }
+
+    fn read_exact(&self, body: BodyId) -> KernelResult<()> {
+        self.inner.read_exact(body)
     }
 
     fn import_source(

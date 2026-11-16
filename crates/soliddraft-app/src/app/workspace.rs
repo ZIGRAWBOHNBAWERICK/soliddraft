@@ -68,6 +68,19 @@ pub struct SolidDraftApp {
     /// A part the browser's kernel worker is building before the page opens it.
     #[cfg(target_arch = "wasm32")]
     opening: Option<Opening>,
+    /// Actions waiting while the page reads the exact geometry they need.
+    #[cfg(target_arch = "wasm32")]
+    pub(super) reading: Option<Reading>,
+}
+
+/// Actions held until the part's bodies adopted from the kernel worker are read. An edit
+/// adopts them without their exact geometry; a command that needs it waits here, behind
+/// a busy state drawn before the first body is read.
+#[cfg(target_arch = "wasm32")]
+pub(super) struct Reading {
+    pub held: Vec<AppAction>,
+    /// A frame has drawn the busy state.
+    pub drawn: bool,
 }
 
 /// A part file waiting for the kernel worker's builds. When they have been offered to
@@ -170,6 +183,8 @@ impl SolidDraftApp {
             web_thumbnail: None,
             #[cfg(target_arch = "wasm32")]
             opening: None,
+            #[cfg(target_arch = "wasm32")]
+            reading: None,
         }
     }
 
@@ -549,13 +564,44 @@ impl SolidDraftApp {
         }
     }
 
+    /// The first body of the part adopted without its exact geometry, if any.
+    #[cfg(target_arch = "wasm32")]
+    pub(super) fn unread_body(&self) -> Option<soliddraft_kernel_api::BodyId> {
+        let model = self.state.doc.model();
+        let kernel = model.kernel();
+        model.live_bodies().into_iter().map(|(_, body)| body).find(|body| kernel.exact_unread(*body).unwrap_or(false))
+    }
+
+    /// Reads one unread body a frame once the busy state has been drawn, then lets the
+    /// held actions run.
+    #[cfg(target_arch = "wasm32")]
+    fn poll_reading(&mut self, ctx: &egui::Context) {
+        let Some(reading) = &self.reading else { return };
+        if !reading.drawn {
+            return;
+        }
+        if let Some(body) = self.unread_body() {
+            if let Err(error) = self.state.doc.model().kernel().read_exact(body) {
+                log::warn!("the page could not read a body's exact geometry: {error}");
+            }
+            ctx.request_repaint();
+            return;
+        }
+        for action in self.reading.take().map(|reading| reading.held).unwrap_or_default() {
+            self.state.push(action);
+        }
+        ctx.request_repaint();
+    }
+
     /// The browser builds the part away from the page's thread. While a build is owed the
     /// page says so above the status bar and offers Cancel, which returns the part to its
-    /// last accepted revision.
+    /// last accepted revision. While the page reads exact geometry a command needs, it says
+    /// that instead, and Cancel drops the command.
     #[cfg(target_arch = "wasm32")]
     fn building(&mut self, ctx: &egui::Context) {
         let opening = self.opening.as_ref().map(|opening| opening.name.clone());
-        let pending = self.state.doc.proof_pending() || opening.is_some();
+        let reading = self.reading.is_some();
+        let pending = self.state.doc.proof_pending() || opening.is_some() || reading;
         let mut cancel = None;
         if pending {
             egui::Area::new(egui::Id::new("browser-build"))
@@ -567,12 +613,14 @@ impl SolidDraftApp {
                             ui.spinner();
                             ui.label(match &opening {
                                 Some(name) => format!("Opening {name}"),
+                                None if reading => "Reading the part".to_owned(),
                                 None => "Building the part".to_owned(),
                             });
                             let button = ui.button("Cancel");
                             if button.clicked() {
-                                // Cancelling an open keeps the part on screen.
-                                if self.opening.take().is_none() {
+                                // Cancelling an open keeps the part on screen; cancelling a
+                                // read drops the actions waiting for it.
+                                if self.opening.take().is_none() && self.reading.take().is_none() {
                                     self.state.push(AppAction::CancelBuild);
                                 }
                             }
@@ -581,8 +629,12 @@ impl SolidDraftApp {
                     });
                 });
         }
+        if let Some(reading) = &mut self.reading {
+            reading.drawn = true;
+            ctx.request_repaint();
+        }
         let cancel = cancel.map(|centre| serde_json::json!({ "x": centre.x, "y": centre.y }));
-        crate::web::show_build(serde_json::json!({ "pending": pending, "cancel": cancel }));
+        crate::web::show_build(serde_json::json!({ "pending": pending, "cancel": cancel, "reading": reading }));
     }
 
     fn edit_suite_frame(&mut self, root: &mut egui::Ui) {
@@ -694,6 +746,8 @@ impl eframe::App for SolidDraftApp {
         }
         #[cfg(target_arch = "wasm32")]
         self.poll_opening();
+        #[cfg(target_arch = "wasm32")]
+        self.poll_reading(ctx);
 
         if let Some(e) = self.state.editor.as_mut() {
             e.refresh(&self.state.doc);

@@ -1426,9 +1426,11 @@ pub trait Kernel: Send + Sync {
 
     /// Offers builds another kernel handed over: a later build of the same definition
     /// takes the offered body, with its names and evidence, instead of evaluating it.
+    /// `source` names the kernel instance that handed them over, since each numbers its
+    /// entities from its own start: ids are matched only between builds of one source.
     /// Returns how many builds were offered.
-    fn offer_builds(&self, bytes: &[u8]) -> KernelResult<usize> {
-        let _ = bytes;
+    fn offer_builds(&self, source: u64, bytes: &[u8]) -> KernelResult<usize> {
+        let _ = (source, bytes);
         Err(KernelError::Unsupported("build hand-over".into()))
     }
 
@@ -1438,6 +1440,20 @@ pub trait Kernel: Send + Sync {
     fn read_offers(&self, at_most: usize) -> KernelResult<usize> {
         let _ = at_most;
         Ok(0)
+    }
+
+    /// Whether `body` was adopted from another kernel without reading its exact geometry,
+    /// which the next query that needs it reads first. A caller that can show it is busy
+    /// reads it with [`Kernel::read_exact`] before such a query.
+    fn exact_unread(&self, body: BodyId) -> KernelResult<bool> {
+        let _ = body;
+        Ok(false)
+    }
+
+    /// Reads the exact geometry of a body adopted without it; nothing for any other body.
+    fn read_exact(&self, body: BodyId) -> KernelResult<()> {
+        let _ = body;
+        Ok(())
     }
 
     /// Builds or replays the explicitly selected source format and its repair decisions.

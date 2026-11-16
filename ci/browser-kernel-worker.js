@@ -207,15 +207,29 @@ const flanged = await measure(ROW.second, 'Boss-Extrude2', 3, 'The plate and fla
 check(await page.eval(() => window.kernelWorkers.length) === 2, 'The next request did not start a new kernel worker');
 check(flanged > plate, `The plate and flange (${flanged}) are not larger than the plate (${plate})`);
 
+// File > New part, and the time of the click that replaced the part. On a slow frame the
+// menu can still be undrawn when New part is clicked, so the click is lost; then the
+// menu is closed and both are clicked again.
+async function newPart(what) {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    await click(FILE);
+    await page.wait(300 + 700 * attempt);
+    await click(NEW_PART);
+    const clicked = await page.eval(() => performance.now());
+    for (let i = 0; i < 100; i++) {
+      if (await page.eval(() => window.featureCount) === 0) return clicked;
+      await page.wait(100);
+    }
+    await page.press('Escape');
+  }
+  throw new Error(`${what}: File > New part opened no new part in three tries`);
+}
+
 // Ask for the whole part, then replace it with a new part before the answer comes.
 await select(ROW.third, 'Boss-Extrude3', 'The whole part');
 await click(MASS);
 await sent(3, 'The whole part');
-await click(FILE);
-await page.wait(300);
-await click(NEW_PART);
-const replaced = await page.eval(() => performance.now());
-await features(0, 'New part');
+const replaced = await newPart('New part');
 const late = await answered(4, 'the replaced part');
 check(late.at > replaced, 'The whole part\'s answer came before the new part replaced it');
 
@@ -253,10 +267,7 @@ async function block(what) {
 await block('The part that replaced the sample');
 const first = await measure(ROW.first, 'Boss-Extrude1', 5, 'The first new part\'s block');
 check(first === 48000, `The 60 x 40 x 20 mm block measured ${first} mm³`);
-await click(FILE);
-await page.wait(300);
-await click(NEW_PART);
-await features(0, 'New part');
+await newPart('A second new part');
 await page.wait(1500);
 await block('A second new part with the same body ids');
 console.log('Kernel worker check passed');

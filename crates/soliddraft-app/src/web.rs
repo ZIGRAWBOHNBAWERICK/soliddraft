@@ -363,9 +363,10 @@ pub(crate) fn show_build(shown: serde_json::Value) {
     SHOWN_BUILD.with_borrow_mut(|build| *build = shown.to_string());
 }
 
-/// Whether the last frame drawn owed a build, and the centre of the Cancel button it drew,
-/// as JSON: `{"pending": bool, "cancel": {"x", "y"} or null}`. Read only, for browser
-/// checks.
+/// Whether the last frame drawn owed a build, the centre of the Cancel button it drew, and
+/// whether it was reading exact geometry a command waits for, as JSON:
+/// `{"pending": bool, "cancel": {"x", "y"} or null, "reading": bool}`. Read only, for
+/// browser checks.
 #[wasm_bindgen]
 pub fn shown_build() -> String {
     SHOWN_BUILD.with_borrow(|build| build.clone())

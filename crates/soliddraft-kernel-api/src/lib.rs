@@ -1426,9 +1426,11 @@ pub trait Kernel: Send + Sync {
 
     /// Offers builds another kernel handed over: a later build of the same definition
     /// takes the offered body, with its names and evidence, instead of evaluating it.
+    /// `source` names the kernel instance that handed them over, since each numbers its
+    /// entities from its own start: ids are matched only between builds of one source.
     /// Returns how many builds were offered.
-    fn offer_builds(&self, bytes: &[u8]) -> KernelResult<usize> {
-        let _ = bytes;
+    fn offer_builds(&self, source: u64, bytes: &[u8]) -> KernelResult<usize> {
+        let _ = (source, bytes);
         Err(KernelError::Unsupported("build hand-over".into()))
     }
 

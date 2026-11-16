@@ -82,7 +82,7 @@ struct State {
     fresh_previews: u64,
     /// The interface id this kernel gave each entity another kernel's id named, for
     /// builds adopted unread.
-    handed_ids: BTreeMap<u64, u64>,
+    handed_ids: BTreeMap<(u64, u64), u64>,
     /// How many offered builds were read from their bytes.
     offer_reads: Arc<std::sync::atomic::AtomicU64>,
 }
@@ -104,6 +104,8 @@ struct Solid {
     key: String,
     /// Early display meshes another kernel sampled for this build, by display key.
     handed_previews: handover::Previews,
+    /// The kernel instance that handed this build over, if one did.
+    source: Option<u64>,
     ids: convert::Ids,
     display: MeshCache<catallax_mesh::Mesh>,
     print: MeshCache<PrintMesh>,
@@ -566,18 +568,37 @@ impl CatallaxKernel {
             return Err(KernelError::Unsupported(NOTHING_LEFT.into()));
         }
         let parent_ids = parents.iter().map(|p| &p.ids).collect::<Vec<_>>();
-        let (ids, record) = if let Some(identity) = app.handed_identity().cloned() {
+        let source = app.handed_source();
+        // The handing kernel's lineage holds only where every parent came from the same
+        // kernel instance; a parent built here or handed over by an earlier one has ids it
+        // never saw, so the exact keys decide instead.
+        let lineage = source.filter(|source| parents.iter().all(|parent| parent.source == Some(*source)));
+        let identity = app.handed_identity().cloned();
+        let (ids, record) = if let (Some(identity), Some(source)) = (&identity, lineage) {
             // A body adopted unread takes the handing kernel's ids and record.
             let (faces, edges, vertices) = identity.worker_ids();
             let state = &mut *state;
             let mut handed =
-                convert::Handed { faces, edges, vertices, seen: &mut state.handed_ids, next: &mut state.next };
+                convert::Handed { faces, edges, vertices, source, seen: &mut state.handed_ids, next: &mut state.next };
             let ids = convert::Ids::handed(&app, &parent_ids, &tags, &mut handed, selected_edges);
-            let record = ids.handed_record(&identity.record, &state.handed_ids, seq, tag, &result);
+            let record = ids.handed_record(&identity.record, &state.handed_ids, source, seq, tag, &result);
             (ids, record)
         } else {
             let ids = convert::Ids::new(&app, &parent_ids, &tags, &mut state.next, selected_edges);
             let record = ids.record(seq, tag, op, &result, &parent_ids);
+            // Later builds of the same source find these ids through the ones it handed.
+            if let (Some(identity), Some(source)) = (&identity, source) {
+                let (faces, edges, vertices) = identity.worker_ids();
+                let (ours_f, ours_e, ours_v) = ids.by_index();
+                let pairs = faces
+                    .iter()
+                    .filter_map(|(index, theirs)| Some((*theirs, ours_f.get(index)?.raw())))
+                    .chain(edges.iter().filter_map(|(index, theirs)| Some((*theirs, ours_e.get(index)?.raw()))))
+                    .chain(vertices.iter().filter_map(|(index, theirs)| Some((*theirs, ours_v.get(index)?.raw()))));
+                for (theirs, ours) in pairs.collect::<Vec<_>>() {
+                    state.handed_ids.insert((source, theirs), ours);
+                }
+            }
             (ids, record)
         };
         history.insert(seq, record.clone());
@@ -595,6 +616,7 @@ impl CatallaxKernel {
             handed_previews = handed.renamed_previews(&faces, &edges).unwrap_or_default();
         }
         let solid = Arc::new(Solid {
+            source: app.handed_source(),
             app,
             key,
             handed_previews,
@@ -1292,7 +1314,7 @@ impl Kernel for CatallaxKernel {
         handover::encode(&handed)
     }
 
-    fn offer_builds(&self, bytes: &[u8]) -> KernelResult<usize> {
+    fn offer_builds(&self, source: u64, bytes: &[u8]) -> KernelResult<usize> {
         let received = handover::decode(bytes)?;
         let count = received.len();
         let mut state = self.state()?;
@@ -1300,6 +1322,7 @@ impl Kernel for CatallaxKernel {
             match received {
                 handover::Received::Build(mut offer) => {
                     offer.reads = state.offer_reads.clone();
+                    offer.source = source;
                     state.offered.insert(key, offer);
                 }
                 // A topology for a build offered before: the body built from it next takes it.

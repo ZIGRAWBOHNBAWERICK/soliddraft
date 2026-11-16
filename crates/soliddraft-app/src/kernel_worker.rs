@@ -166,6 +166,9 @@ mod browser {
     thread_local! {
         static CLIENT: RefCell<Option<Client>> = const { RefCell::new(None) };
         static NEXT: std::cell::Cell<u64> = const { std::cell::Cell::new(1) };
+        /// Each worker the page starts, numbered: a restarted worker numbers its entities
+        /// from the start again, so the page's kernel keeps each worker's ids apart.
+        static SESSIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(1) };
         static HOST: RefCell<Option<Host>> = const { RefCell::new(None) };
     }
 
@@ -180,6 +183,8 @@ mod browser {
 
     #[derive(Default)]
     struct Shared {
+        /// Which worker the page started this is, for [`soliddraft_kernel_api::Kernel::offer_builds`].
+        session: u64,
         waiting: HashMap<u64, Waiting>,
         /// The last panic the worker reported, the reason for the trap that follows it.
         panic: Option<String>,
@@ -196,7 +201,7 @@ mod browser {
             if let Some((answered, ctx, kernel, _)) = self.waiting.remove(&id) {
                 // The builds come first, so a rebuild the answer starts takes them.
                 if !hand_over.is_empty()
-                    && let Err(error) = kernel.offer_builds(hand_over)
+                    && let Err(error) = kernel.offer_builds(self.session, hand_over)
                 {
                     log::warn!("the page could not take the kernel worker's builds: {error}");
                 }
@@ -236,7 +241,8 @@ mod browser {
             options.set_name("soliddraft-kernel");
             let worker = web_sys::Worker::new_with_options(&script, &options)
                 .map_err(|error| format!("The kernel worker could not start: {error:?}"))?;
-            let shared = Rc::new(RefCell::new(Shared::default()));
+            let session = SESSIONS.with(|sessions| sessions.replace(sessions.get() + 1));
+            let shared = Rc::new(RefCell::new(Shared { session, ..Shared::default() }));
             let on_message = shared.clone();
             let message = Closure::<dyn FnMut(web_sys::MessageEvent)>::new(move |event: web_sys::MessageEvent| {
                 received(&mut on_message.borrow_mut(), &event.data());
@@ -512,7 +518,7 @@ mod tests {
 
         // The page applies the same edit to its own definitions and rebuilds from the offer.
         let page = Arc::new(soliddraft_kernel_catallax::CatallaxKernel::new());
-        assert!(page.offer_builds(&bytes).unwrap() > 0);
+        assert!(page.offer_builds(1, &bytes).unwrap() > 0);
         let mut edited = model::Document::from_bytes(&part, page.clone()).unwrap();
         let command = crate::document::scalar_draft_command(&edited, edit).unwrap();
         edited.execute_deferred(command).unwrap();
@@ -532,14 +538,14 @@ mod tests {
         let page = Arc::new(soliddraft_kernel_catallax::CatallaxKernel::new());
         let mut host = Host::new(worker.clone());
         host.run(&part, &Job::Build { edit: None, level: Default::default() }).unwrap();
-        page.offer_builds(&host.take_hand_over().unwrap()).unwrap();
+        page.offer_builds(1, &host.take_hand_over().unwrap()).unwrap();
         let opened = model::Document::from_bytes(&part, page.clone()).unwrap();
         assert_eq!(page.fresh_builds(), 0);
         let base = opened.features().iter().find(|f| matches!(f.kind, model::FeatureKind::Extrude(_))).unwrap().id;
         let (_, saved) = opened.snapshot().encode().unwrap();
         let edit = crate::drag::ScalarDraft { feature: base, dimension: crate::drag::Dimension::Depth, value: 12.0 };
         host.run(&saved, &Job::Build { edit: Some(edit), level: Default::default() }).unwrap();
-        page.offer_builds(&host.take_hand_over().unwrap()).unwrap();
+        page.offer_builds(1, &host.take_hand_over().unwrap()).unwrap();
         let mut edited = opened.fork();
         edited.execute_deferred(crate::document::scalar_draft_command(&edited, edit).unwrap()).unwrap();
         edited.reuse_builds_from(&opened);
@@ -556,6 +562,35 @@ mod tests {
         // The page shows the edited part without reading any handed-over body.
         crate::document::ready_display(&edited, soliddraft_tessellation::Level::Standard).unwrap();
         assert_eq!(page.bodies_read(), 0, "the edit and its display read no exact body");
+    }
+
+    /// A restarted worker numbers its entities from the start again. The builds a second
+    /// worker hands over take new page ids, never the ids of entities a first worker's
+    /// builds took on the same page kernel.
+    #[test]
+    fn a_second_workers_builds_take_none_of_the_firsts_ids() {
+        let page = Arc::new(soliddraft_kernel_catallax::CatallaxKernel::new());
+        let build = Job::Build { edit: None, level: Default::default() };
+        let bracket = include_bytes!("../../../site/parts/bracket.dwprt").to_vec();
+        let mut first = Host::new(Arc::new(soliddraft_kernel_catallax::CatallaxKernel::new()));
+        first.run(&bracket, &build).unwrap();
+        page.offer_builds(1, &first.take_hand_over().unwrap()).unwrap();
+        let opened = model::Document::from_bytes(&bracket, page.clone()).unwrap();
+        let tray = include_bytes!("../../../site/parts/tray.dwprt").to_vec();
+        let mut second = Host::new(Arc::new(soliddraft_kernel_catallax::CatallaxKernel::new()));
+        second.run(&tray, &build).unwrap();
+        page.offer_builds(2, &second.take_hand_over().unwrap()).unwrap();
+        let other = model::Document::from_bytes(&tray, page.clone()).unwrap();
+        assert_eq!(page.fresh_builds(), 0, "both parts were taken from their workers");
+        let ids = |doc: &model::Document| {
+            let (_, body) = doc.live_bodies().last().copied().unwrap();
+            let topology = page.topology(body).unwrap();
+            let faces = topology.faces.iter().map(|face| face.id.raw());
+            faces.chain(topology.edges.iter().map(|edge| edge.id.raw())).collect::<std::collections::BTreeSet<_>>()
+        };
+        let (bracket, tray) = (ids(&opened), ids(&other));
+        let shared: Vec<_> = bracket.intersection(&tray).take(5).collect();
+        assert!(shared.is_empty(), "the tray took ids of the bracket: {shared:?}");
     }
 
     #[test]

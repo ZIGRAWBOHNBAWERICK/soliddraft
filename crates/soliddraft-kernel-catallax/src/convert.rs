@@ -89,18 +89,20 @@ pub(super) struct Handed<'a> {
     pub faces: BTreeMap<u32, u64>,
     pub edges: BTreeMap<u32, u64>,
     pub vertices: BTreeMap<u32, u64>,
-    pub seen: &'a mut BTreeMap<u64, u64>,
+    /// The kernel instance that handed the body over; its ids mean nothing elsewhere.
+    pub source: u64,
+    pub seen: &'a mut BTreeMap<(u64, u64), u64>,
     pub next: &'a mut u64,
 }
 
 impl Handed<'_> {
     fn id(&mut self, theirs: Option<u64>) -> u64 {
-        if let Some(ours) = theirs.and_then(|theirs| self.seen.get(&theirs)) {
+        if let Some(ours) = theirs.and_then(|theirs| self.seen.get(&(self.source, theirs))) {
             return *ours;
         }
         *self.next += 1;
         if let Some(theirs) = theirs {
-            self.seen.insert(theirs, *self.next);
+            self.seen.insert((self.source, theirs), *self.next);
         }
         *self.next
     }
@@ -312,18 +314,21 @@ impl Ids {
     pub fn handed_record(
         &self,
         theirs: &HistoryRecord,
-        seen: &BTreeMap<u64, u64>,
+        seen: &BTreeMap<(u64, u64), u64>,
+        source: u64,
         seq: u64,
         tag: &OpTag,
         step: &str,
     ) -> HistoryRecord {
         fn mapped<I: Copy>(
             changes: &EntityChanges<I>,
-            seen: &BTreeMap<u64, u64>,
+            seen: &BTreeMap<(u64, u64), u64>,
+            source: u64,
             raw: impl Fn(I) -> u64,
             wrap: impl Fn(u64) -> I,
         ) -> EntityChanges<I> {
-            let ids = |list: &[I]| list.iter().filter_map(|id| seen.get(&raw(*id)).map(|ours| wrap(*ours))).collect();
+            let ours = |id: I| seen.get(&(source, raw(id))).map(|ours| wrap(*ours));
+            let ids = |list: &[I]| list.iter().filter_map(|id| ours(*id)).collect();
             EntityChanges {
                 created: ids(&changes.created),
                 modified: ids(&changes.modified),
@@ -331,15 +336,13 @@ impl Ids {
                 split: changes
                     .split
                     .iter()
-                    .filter_map(|split| {
-                        Some(Split { from: wrap(*seen.get(&raw(split.from))?), into: ids(&split.into) })
-                    })
+                    .filter_map(|split| Some(Split { from: ours(split.from)?, into: ids(&split.into) }))
                     .collect(),
             }
         }
-        let faces = mapped(&theirs.faces, seen, FaceId::raw, FaceId::from_raw);
-        let edges = mapped(&theirs.edges, seen, EdgeId::raw, EdgeId::from_raw);
-        let vertices = mapped(&theirs.vertices, seen, VertexId::raw, VertexId::from_raw);
+        let faces = mapped(&theirs.faces, seen, source, FaceId::raw, FaceId::from_raw);
+        let edges = mapped(&theirs.edges, seen, source, EdgeId::raw, EdgeId::from_raw);
+        let vertices = mapped(&theirs.vertices, seen, source, VertexId::raw, VertexId::from_raw);
         let face_roles = self.face_roles(&faces.created, tag, theirs.op, step);
         HistoryRecord { seq, tag: tag.clone(), op: theirs.op, faces, edges, vertices, face_roles }
     }

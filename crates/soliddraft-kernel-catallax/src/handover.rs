@@ -284,6 +284,8 @@ pub(crate) struct Offer {
     pub identity: Option<Arc<HandedIdentity>>,
     /// Counts the reads of the receiving kernel's offers.
     pub reads: Arc<std::sync::atomic::AtomicU64>,
+    /// The kernel instance that handed the build over, whose ids its identity carries.
+    pub source: u64,
 }
 
 impl std::fmt::Debug for Offer {
@@ -364,6 +366,7 @@ pub(crate) fn decode(bytes: &[u8]) -> KernelResult<Vec<(String, Received)>> {
                 topology: topology.map(Arc::new),
                 identity: identity.map(Arc::new),
                 reads: Arc::default(),
+                source: 0,
             })
         };
         builds.push((key, received));

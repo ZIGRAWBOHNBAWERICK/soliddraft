@@ -614,7 +614,7 @@ impl SolidDraftApp {
                     Some(Selection::Face(f)) => self.state.doc.any_face_ref(f).into_iter().collect(),
                     _ => Vec::new(),
                 };
-                self.open_editor(None, EditorParams::Draft(DraftParams { faces, ..Default::default() }));
+                self.open_editor(None, EditorParams::Draft(Box::new(DraftParams { faces, ..Default::default() })));
                 self.state.doc.selection = None;
             }
             AppAction::StartRepair(id) => {
@@ -662,13 +662,7 @@ impl SolidDraftApp {
                     FeatureKind::Shell(s) => EditorParams::Shell(s.clone()),
                     FeatureKind::Offset(s) => EditorParams::Offset(s.clone()),
                     FeatureKind::Thicken(s) => EditorParams::Thicken(s.clone()),
-                    FeatureKind::Draft(d) => EditorParams::Draft(DraftParams {
-                        faces: d.faces.clone(),
-                        neutral: d.neutral.clone(),
-                        angle: d.angle,
-                        reverse: d.reverse,
-                        picking_neutral: false,
-                    }),
+                    FeatureKind::Draft(d) => EditorParams::Draft(Box::new(DraftParams::of(d))),
                     // An import has no editor; its repair questions have their own dialog.
                     FeatureKind::ImportStep(_) => return,
                     FeatureKind::Scan(_) => {
@@ -1005,6 +999,31 @@ impl SolidDraftApp {
                                 }
                             }
                             return;
+                        }
+                        (EditorParams::Draft(d), Some(Selection::Face(f))) if d.picking_pull => {
+                            match self.state.doc.face_ref(f) {
+                                Some(face) => {
+                                    d.pull = Some(soliddraft_model::PullRef::Face { face });
+                                    d.picking_pull = false;
+                                }
+                                None => e.error = Some("Pull along a planar face's normal, an edge or an axis".into()),
+                            }
+                            return;
+                        }
+                        // A draft takes no edges or axes otherwise, so either sets the pull.
+                        (EditorParams::Draft(d), Some(Selection::Edge(edge))) => {
+                            match self.state.doc.edge_ref(edge) {
+                                Some(edge) => {
+                                    d.pull = Some(soliddraft_model::PullRef::Edge { edge });
+                                    d.picking_pull = false;
+                                }
+                                None => e.error = Some("This edge cannot be referenced".into()),
+                            }
+                            return;
+                        }
+                        (EditorParams::Draft(d), Some(Selection::Reference(Reference::Axis(axis)))) => {
+                            d.pull = Some(soliddraft_model::PullRef::Axis { axis: axis.to_model() });
+                            d.picking_pull = false;
                         }
                         (EditorParams::Draft(d), Some(Selection::Face(f))) => {
                             if d.picking_neutral {

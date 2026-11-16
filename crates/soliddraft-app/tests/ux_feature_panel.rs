@@ -233,6 +233,72 @@ fn cut_shell_draft_and_pattern_forms_expose_their_fields() {
     });
 }
 
+fn draft_form(app: &mut App) -> &mut soliddraft_app::document::DraftParams {
+    match app.state_mut().state.editor.as_mut().map(|e| &mut e.params) {
+        Some(EditorParams::Draft(d)) => d,
+        other => panic!("the draft form is open: {other:?}"),
+    }
+}
+
+/// A draft pulls along its neutral plane's normal until a click names another
+/// direction: an edge, an origin axis, or, with the pick box ticked, a planar face.
+/// Face clicks keep adding faces to draft otherwise.
+#[test]
+fn draft_pull_follows_a_clicked_edge_axis_or_face() {
+    use soliddraft_app::document::{AxisKind, FeatureKind, FeatureStatus, Reference};
+    use soliddraft_model::{DatumAxis, PullRef};
+    let mut case = Case::new("feature-panel/draft-pull");
+    let mut app = launch(ribbon::plate(), STANDARD);
+    case.run(&mut app, |case, app| {
+        open(app, AppAction::StartDraft);
+        ribbon::click_world(app, Vec3::new(30.0, 0.0, TOP / 2.0));
+        settle(app);
+        pointer_to_chrome(app);
+        assert_eq!(draft_form(app).faces.len(), 1, "the click picked the side face");
+        assert_eq!(draft_form(app).pull, None);
+        assert!(shows(app, "Neutral plane normal"), "the pull starts at the neutral plane's normal");
+        case.frame(app, "draft-pull-default");
+
+        // The upright edge at the plate's corner, x = 30 and y = 20.
+        let doc = app.state().state.doc.model();
+        let topology = doc.kernel().topology(doc.body().unwrap()).unwrap();
+        let upright = topology
+            .edges
+            .iter()
+            .find(|e| (e.midpoint.x - 30.0).abs() < 1e-6 && (e.midpoint.y - 20.0).abs() < 1e-6)
+            .expect("the plate has its corner edge")
+            .id;
+        open(app, AppAction::Select(Some(Selection::Edge(upright))));
+        assert!(matches!(draft_form(app).pull, Some(PullRef::Edge { .. })), "an edge click sets the pull");
+        assert_eq!(draft_form(app).faces.len(), 1, "an edge is not a face to draft");
+
+        open(app, AppAction::Select(Some(Selection::Reference(Reference::Axis(AxisKind::Z)))));
+        assert_eq!(draft_form(app).pull, Some(PullRef::Axis { axis: DatumAxis::Z }), "an axis click sets the pull");
+        assert!(shows(app, "Z axis"), "the form names the pull");
+        case.frame(app, "draft-pull-axis");
+
+        // With the pick box ticked, the top face's normal becomes the pull instead of a
+        // second face to draft.
+        draft_form(app).picking_pull = true;
+        ribbon::click_world(app, Vec3::new(-20.0, -10.0, TOP));
+        settle(app);
+        pointer_to_chrome(app);
+        let form = draft_form(app);
+        assert!(matches!(form.pull, Some(PullRef::Face { .. })), "a face click sets the pull: {:?}", form.pull);
+        assert!(!form.picking_pull, "one face click ends the pick");
+        assert_eq!(form.faces.len(), 1, "the top face is not drafted");
+
+        open(app, AppAction::CommitEditor);
+        rebuilt(app);
+        let doc = &app.state().state.doc;
+        let draft = doc.features.iter().find(|f| f.kind.noun() == "draft").expect("the draft is in the tree");
+        let FeatureKind::Draft(saved) = &draft.kind else { panic!() };
+        assert!(matches!(saved.pull, Some(PullRef::Face { .. })), "the draft keeps its pull: {:?}", saved.pull);
+        assert_eq!(draft.status, FeatureStatus::Ok, "the top face's normal pulls as the Top plane's does");
+        case.frame(app, "draft-pull-built");
+    });
+}
+
 /// An OK that only changes a dimension is refused as any other: a radius the part
 /// cannot take keeps the form open, and the fillet keeps the radius it had.
 #[test]

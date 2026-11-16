@@ -14,24 +14,13 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
+pub use crate::feature::DatumAxis;
 use crate::feature::{DatumPlane, FeatureId};
 
 /// The entry a part keeps its view choices in.
 pub const ENTRY: &str = "view.json";
 /// The format tag of the view choices this version writes.
 pub const FORMAT: &str = "soliddraft-view/1";
-
-/// The three origin axes. Every part has them, so only a view choice ever names one.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum DatumAxis {
-    /// The X axis.
-    X,
-    /// The Y axis.
-    Y,
-    /// The Z axis.
-    Z,
-}
 
 /// Something the user can show or hide.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]

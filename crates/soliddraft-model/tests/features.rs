@@ -7,9 +7,9 @@ use soliddraft_kernel_api::{FaceId, HoleDepth, HoleHead, HoleTip, Vec3};
 use soliddraft_kernel_catallax::CatallaxKernel;
 use soliddraft_model::sketch::{P2, Sketch, solve::solve};
 use soliddraft_model::{
-    Command, DatumPlane, Document, DraftFeature, EndCondition, ExtrudeFeature, ExtrudeOp, FeatureId, FeatureKind,
-    FeatureStatus, HoleFeature, MirrorFeature, PatternFeature, PatternSpec, PlaneRef, ProfileSource, SketchFeature,
-    SketchPlane,
+    Command, DatumAxis, DatumPlane, Document, DraftFeature, EndCondition, ExtrudeFeature, ExtrudeOp, FeatureId,
+    FeatureKind, FeatureStatus, HoleFeature, MirrorFeature, PatternFeature, PatternSpec, PlaneRef, ProfileSource,
+    PullRef, SketchFeature, SketchPlane,
 };
 
 fn doc() -> Document {
@@ -190,6 +190,7 @@ fn drafts_build_edit_and_keep_later_references() {
         FeatureKind::Draft(DraftFeature {
             faces: vec![side],
             neutral: PlaneRef::Datum { datum: DatumPlane::Top, offset: 0.0 },
+            pull: None,
             angle: 3.0,
             reverse: false,
             of: None,
@@ -204,6 +205,93 @@ fn drafts_build_edit_and_keep_later_references() {
     edit(&mut d, draft, FeatureKind::Draft(f));
     all_ok(&d);
     assert_eq!(d.status(boss), Some(&FeatureStatus::Ok));
+}
+
+/// A hollow axial draft saved by SolidDraft 0.5.0, before a draft had its own pull
+/// direction, and the semantic hash that version wrote in the file's manifest.
+const DRAFT_BEFORE_PULL: &str = include_str!("fixtures/hollow-axial-draft-0.5.0.json");
+const DRAFT_BEFORE_PULL_HASH: &str = "blake3:f456c2b9278023606073caa616594eb11ea488a71ea4c75c89a05276b63f9183";
+
+#[test]
+fn drafts_saved_before_the_pull_choice_open_build_and_save_unchanged() {
+    let d = Document::from_part_json(DRAFT_BEFORE_PULL, Arc::new(CatallaxKernel::new())).unwrap();
+    all_ok(&d);
+    let Some(FeatureKind::Draft(draft)) =
+        d.features().iter().map(|f| &f.kind).find(|k| matches!(k, FeatureKind::Draft(_)))
+    else {
+        panic!("the fixture has a draft")
+    };
+    assert_eq!(draft.pull, None, "an old draft pulls along its neutral plane's normal");
+    assert!(!d.part_json().contains("\"pull\""), "saving an old draft writes no pull");
+    assert_eq!(d.semantic_hash().as_str(), DRAFT_BEFORE_PULL_HASH, "saving an old draft keeps its revision");
+    // The saved angle is -45 degrees about z = 1: the 96 pi mm3 ring keeps its volume and
+    // its centroid rises from 1 to 7/6 mm, as 0.5.0 built it.
+    let mass = d.kernel().mass_properties(d.body().unwrap()).unwrap();
+    assert!((mass.volume - 96.0 * std::f64::consts::PI).abs() < 1e-6, "volume {}", mass.volume);
+    assert!((mass.centroid.z - 7.0 / 6.0).abs() < 1e-6, "centroid {:?}", mass.centroid);
+}
+
+#[test]
+fn a_draft_pulls_along_its_neutral_normal_unless_it_names_an_axis_edge_or_face() {
+    let mut d = doc();
+    block(&mut d, 40.0, 30.0, 0.0, 20.0);
+    let t = d.kernel().topology(d.body().unwrap()).unwrap();
+    let side = t.faces.iter().find(|f| f.normal.is_some_and(|n| n.dot(Vec3::X) > 1.0 - 1e-9)).unwrap().id;
+    let side = d.face_ref(side).unwrap();
+    let top_face = d.face_ref(face_facing(&d, Vec3::Z, 20.0)).unwrap();
+    let upright = t
+        .edges
+        .iter()
+        .find(|e| (e.midpoint.z - 10.0).abs() < 1e-6 && e.midpoint.x > 19.0)
+        .map(|e| d.edge_ref(e.id).unwrap())
+        .unwrap();
+    let base = DraftFeature {
+        faces: vec![side],
+        neutral: PlaneRef::Datum { datum: DatumPlane::Top, offset: 0.0 },
+        pull: None,
+        angle: 3.0,
+        reverse: false,
+        of: None,
+    };
+    let draft = add(&mut d, FeatureKind::Draft(base.clone()));
+    all_ok(&d);
+    let along = volume(&d);
+    edit(&mut d, draft, FeatureKind::Draft(DraftFeature { reverse: true, ..base.clone() }));
+    all_ok(&d);
+    let against = volume(&d);
+    assert!((along - against).abs() > 1.0, "reversing the pull changes the part: {along} and {against}");
+    let chosen = |pull: PullRef, reverse: bool| DraftFeature { pull: Some(pull), reverse, ..base.clone() };
+    for (pull, expected) in
+        [(PullRef::Axis { axis: DatumAxis::Z }, along), (PullRef::Face { face: top_face.clone() }, along)]
+    {
+        edit(&mut d, draft, FeatureKind::Draft(chosen(pull.clone(), false)));
+        all_ok(&d);
+        assert!((volume(&d) - expected).abs() < 1e-9, "{pull:?} pulls along +z");
+        edit(&mut d, draft, FeatureKind::Draft(chosen(pull.clone(), true)));
+        all_ok(&d);
+        assert!((volume(&d) - against).abs() < 1e-9, "{pull:?} reversed pulls along -z");
+    }
+    // An upright edge points up or down; reversing it gives the other.
+    let edge = PullRef::Edge { edge: upright };
+    edit(&mut d, draft, FeatureKind::Draft(chosen(edge.clone(), false)));
+    all_ok(&d);
+    let one = volume(&d);
+    edit(&mut d, draft, FeatureKind::Draft(chosen(edge.clone(), true)));
+    all_ok(&d);
+    let other = volume(&d);
+    let pair = |a: f64, b: f64| (a - along).abs() < 1e-9 && (b - against).abs() < 1e-9;
+    assert!(pair(one, other) || pair(other, one), "the edge pulls along z: {one} and {other}");
+    // Undo takes the choice back and redo restores it.
+    d.undo().unwrap();
+    assert_eq!(kind(&d, draft), FeatureKind::Draft(chosen(edge.clone(), false)));
+    assert!((volume(&d) - one).abs() < 1e-9);
+    d.redo().unwrap();
+    assert_eq!(kind(&d, draft), FeatureKind::Draft(chosen(edge.clone(), true)));
+    // The chosen direction survives a save and reopen.
+    let reopened = Document::from_part_json(&d.part_json(), Arc::new(CatallaxKernel::new())).unwrap();
+    all_ok(&reopened);
+    assert_eq!(reopened.feature(draft).unwrap().kind, FeatureKind::Draft(chosen(edge, true)));
+    assert!((volume(&reopened) - other).abs() < 1e-9);
 }
 
 #[test]

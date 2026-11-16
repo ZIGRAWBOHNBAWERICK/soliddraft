@@ -1,0 +1,437 @@
+{
+  "format": "soliddraft-scenario/1",
+  "name": "draft-oblique-pull",
+  "max_work": 20000000,
+  "steps": [
+    {
+      "tool": "sketch",
+      "arguments": {
+        "plane": "top",
+        "shapes": [
+          {
+            "shape": "circle",
+            "center": [
+              0,
+              0,
+              0
+            ],
+            "diameter": 16
+          },
+          {
+            "shape": "circle",
+            "center": [
+              0,
+              0,
+              0
+            ],
+            "diameter": 8
+          }
+        ]
+      }
+    },
+    {
+      "tool": "extrude",
+      "arguments": {
+        "sketch": "Sketch1",
+        "depth": 4,
+        "flip": false
+      },
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 603.1857894892403,
+          "tolerance": 1e-05
+        }
+      ]
+    },
+    {
+      "tool": "sketch_geometry",
+      "arguments": {
+        "plane": "front",
+        "offset": 30,
+        "operations": [
+          {
+            "tool": "add",
+            "construction": false,
+            "kind": {
+              "type": "line",
+              "a": {
+                "u": -30,
+                "v": 6.75
+              },
+              "b": {
+                "u": 30,
+                "v": -0.75
+              }
+            }
+          },
+          {
+            "tool": "add",
+            "construction": false,
+            "kind": {
+              "type": "line",
+              "a": {
+                "u": 30,
+                "v": -0.75
+              },
+              "b": {
+                "u": 30,
+                "v": 40
+              }
+            }
+          },
+          {
+            "tool": "add",
+            "construction": false,
+            "kind": {
+              "type": "line",
+              "a": {
+                "u": 30,
+                "v": 40
+              },
+              "b": {
+                "u": -30,
+                "v": 40
+              }
+            }
+          },
+          {
+            "tool": "add",
+            "construction": false,
+            "kind": {
+              "type": "line",
+              "a": {
+                "u": -30,
+                "v": 40
+              },
+              "b": {
+                "u": -30,
+                "v": 6.75
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "tool": "cut",
+      "arguments": {
+        "sketch": "Sketch2",
+        "through_all": true,
+        "depth": 60,
+        "flip": false
+      }
+    },
+    {
+      "tool": "reference_plane",
+      "arguments": {
+        "plane": "Cut-Extrude1 \u00b7 Side of line 1",
+        "offset": -1.9845557534273355
+      }
+    },
+    {
+      "tool": "sketch",
+      "arguments": {
+        "plane": "top",
+        "offset": 2,
+        "shapes": [
+          {
+            "shape": "rectangle",
+            "center": [
+              0,
+              0,
+              2
+            ],
+            "width": 40,
+            "height": 40
+          }
+        ]
+      }
+    },
+    {
+      "tool": "cut",
+      "arguments": {
+        "sketch": "Sketch3",
+        "through_all": true,
+        "depth": 10,
+        "flip": true
+      },
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 301.59289474462014,
+          "tolerance": 1e-05
+        }
+      ]
+    },
+    {
+      "tool": "draft",
+      "arguments": {
+        "faces": [
+          "Boss-Extrude1 \u00b7 Wall of circle 1",
+          "Boss-Extrude1 \u00b7 Wall of circle 2"
+        ],
+        "neutral": "Plane1",
+        "pull": "z",
+        "angle": 45,
+        "reverse": false
+      },
+      "label": "built",
+      "checks": [
+        {
+          "pointer": "/summary/body/bounding_box/min/0",
+          "approx": -10.0,
+          "tolerance": 0.01
+        },
+        {
+          "pointer": "/summary/body/bounding_box/max/0",
+          "approx": 8.0,
+          "tolerance": 0.01
+        },
+        {
+          "pointer": "/summary/body/bounding_box/max/2",
+          "approx": 2.0,
+          "tolerance": 0.01
+        },
+        {
+          "pointer": "/summary/body/faces",
+          "equals": 4
+        }
+      ]
+    },
+    {
+      "tool": "feature",
+      "arguments": {
+        "name": "Draft1"
+      },
+      "checks": [
+        {
+          "pointer": "/result/pull",
+          "equals": "Z axis"
+        },
+        {
+          "pointer": "/result/angle",
+          "equals": 45.0
+        },
+        {
+          "pointer": "/result/reverse",
+          "equals": false
+        }
+      ]
+    },
+    {
+      "tool": "edit_draft",
+      "arguments": {
+        "feature": "Draft1",
+        "angle": -45
+      },
+      "label": "edited",
+      "checks": [
+        {
+          "pointer": "/summary/body/bounding_box/min/0",
+          "approx": -8.0,
+          "tolerance": 0.01
+        },
+        {
+          "pointer": "/summary/body/bounding_box/max/0",
+          "approx": 10.0,
+          "tolerance": 0.01
+        },
+        {
+          "pointer": "/summary/body/bounding_box/max/2",
+          "approx": 2.0,
+          "tolerance": 0.01
+        },
+        {
+          "pointer": "/summary/body/faces",
+          "equals": 4
+        }
+      ]
+    },
+    {
+      "tool": "undo",
+      "arguments": {},
+      "label": "undo",
+      "same_geometry_as_step": 8,
+      "checks": [
+        {
+          "pointer": "/summary/body/bounding_box/min/0",
+          "approx": -10.0,
+          "tolerance": 0.01
+        },
+        {
+          "pointer": "/summary/body/bounding_box/max/0",
+          "approx": 8.0,
+          "tolerance": 0.01
+        },
+        {
+          "pointer": "/summary/body/bounding_box/max/2",
+          "approx": 2.0,
+          "tolerance": 0.01
+        },
+        {
+          "pointer": "/summary/body/faces",
+          "equals": 4
+        }
+      ]
+    },
+    {
+      "tool": "redo",
+      "arguments": {},
+      "label": "redo",
+      "same_geometry_as_step": 10,
+      "checks": [
+        {
+          "pointer": "/summary/body/bounding_box/min/0",
+          "approx": -8.0,
+          "tolerance": 0.01
+        },
+        {
+          "pointer": "/summary/body/bounding_box/max/0",
+          "approx": 10.0,
+          "tolerance": 0.01
+        },
+        {
+          "pointer": "/summary/body/bounding_box/max/2",
+          "approx": 2.0,
+          "tolerance": 0.01
+        },
+        {
+          "pointer": "/summary/body/faces",
+          "equals": 4
+        }
+      ]
+    },
+    {
+      "tool": "edit_draft",
+      "arguments": {
+        "feature": "Draft1",
+        "angle": -45,
+        "pull": "Boss-Extrude1 \u00b7 Start cap",
+        "reverse": true
+      },
+      "label": "pulled from a face",
+      "checks": [
+        {
+          "pointer": "/summary/body/bounding_box/min/0",
+          "approx": -8.0,
+          "tolerance": 0.01
+        },
+        {
+          "pointer": "/summary/body/bounding_box/max/0",
+          "approx": 10.0,
+          "tolerance": 0.01
+        },
+        {
+          "pointer": "/summary/body/bounding_box/max/2",
+          "approx": 2.0,
+          "tolerance": 0.01
+        },
+        {
+          "pointer": "/summary/body/faces",
+          "equals": 4
+        }
+      ]
+    },
+    {
+      "tool": "feature",
+      "arguments": {
+        "name": "Draft1"
+      },
+      "checks": [
+        {
+          "pointer": "/result/pull",
+          "equals": "Boss-Extrude1 \u00b7 Start cap"
+        },
+        {
+          "pointer": "/result/angle",
+          "equals": -45.0
+        },
+        {
+          "pointer": "/result/reverse",
+          "equals": true
+        }
+      ]
+    },
+    {
+      "tool": "save",
+      "arguments": {
+        "path": "{bundle}/draft-oblique-pull.dwprt"
+      }
+    },
+    {
+      "tool": "open",
+      "arguments": {
+        "path": "{bundle}/draft-oblique-pull.dwprt"
+      },
+      "label": "reopened",
+      "fresh_process": true,
+      "same_geometry_as_step": 13,
+      "checks": [
+        {
+          "pointer": "/summary/body/bounding_box/min/0",
+          "approx": -8.0,
+          "tolerance": 0.01
+        },
+        {
+          "pointer": "/summary/body/bounding_box/max/0",
+          "approx": 10.0,
+          "tolerance": 0.01
+        },
+        {
+          "pointer": "/summary/body/bounding_box/max/2",
+          "approx": 2.0,
+          "tolerance": 0.01
+        },
+        {
+          "pointer": "/summary/body/faces",
+          "equals": 4
+        }
+      ],
+      "exports": [
+        {
+          "format": "step",
+          "max_work": 20000000,
+          "raw_valid": true
+        }
+      ]
+    },
+    {
+      "tool": "feature",
+      "arguments": {
+        "name": "Draft1"
+      },
+      "checks": [
+        {
+          "pointer": "/result/pull",
+          "equals": "Boss-Extrude1 \u00b7 Start cap"
+        },
+        {
+          "pointer": "/result/angle",
+          "equals": -45.0
+        },
+        {
+          "pointer": "/result/reverse",
+          "equals": true
+        }
+      ]
+    },
+    {
+      "tool": "edit_draft",
+      "arguments": {
+        "feature": "Draft1",
+        "angle": -45,
+        "pull": "Boss-Extrude1 \u00b7 Wall of circle 1"
+      },
+      "label": "refused",
+      "refused": "is not planar",
+      "same_geometry_as_step": 16
+    },
+    {
+      "tool": "export_step",
+      "arguments": {
+        "path": "{bundle}/live.step"
+      }
+    }
+  ]
+}

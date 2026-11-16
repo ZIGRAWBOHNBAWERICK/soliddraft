@@ -14,7 +14,8 @@ use soliddraft_assistant::{Caller, ToolHost, ToolOutput, ToolSpec};
 use soliddraft_kernel_api::counting::{Counting, Work};
 use soliddraft_kernel_catallax::CatallaxKernel;
 use soliddraft_model::{
-    Document, EndCondition, FaceRef, FeatureKind, FeatureStatus, PlaneRef, ReferenceSlot, SketchPlane, feature_of_tag,
+    Document, EndCondition, FaceRef, FeatureKind, FeatureStatus, PlaneRef, PullRef, ReferenceSlot, SketchPlane,
+    feature_of_tag,
 };
 
 pub(crate) struct Evidence<'a> {
@@ -334,6 +335,15 @@ fn references(doc: &soliddraft_model::Document) -> Value {
                 .enumerate()
                 .map(|(i, face)| (ReferenceSlot::Face { index: i as u32 }, origin(face), vec![face]))
                 .chain(plane(&d.neutral))
+                .chain(d.pull.as_ref().and_then(|pull| match pull {
+                    PullRef::Face { face } => Some((ReferenceSlot::Pull, origin(face), vec![face])),
+                    PullRef::Edge { edge } => Some((
+                        ReferenceSlot::Pull,
+                        format!("{} | {}", origin(&edge.faces[0]), origin(&edge.faces[1])),
+                        edge.faces.iter().collect(),
+                    )),
+                    PullRef::Axis { .. } => None,
+                }))
                 .collect(),
             FeatureKind::Combine { .. }
             | FeatureKind::Offset(_)

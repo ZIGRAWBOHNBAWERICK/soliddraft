@@ -278,6 +278,8 @@ pub enum ReferenceSlot {
     Plane,
     /// The face an extrusion goes up to.
     Limit,
+    /// The edge or face a draft reads its pull direction from.
+    Pull,
 }
 
 impl fmt::Display for ReferenceSlot {
@@ -288,6 +290,7 @@ impl fmt::Display for ReferenceSlot {
             ReferenceSlot::Face { index } => write!(f, "face {}", index + 1),
             ReferenceSlot::Plane => f.write_str("plane"),
             ReferenceSlot::Limit => f.write_str("end face"),
+            ReferenceSlot::Pull => f.write_str("pull direction"),
         }
     }
 }

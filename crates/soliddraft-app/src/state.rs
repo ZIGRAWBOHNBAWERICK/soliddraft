@@ -334,7 +334,7 @@ pub enum EditorParams {
     Pattern(soliddraft_model::PatternFeature),
     Mirror(soliddraft_model::MirrorFeature),
     ReferencePlane(soliddraft_model::SketchPlane),
-    Draft(DraftParams),
+    Draft(Box<DraftParams>),
     Shell(soliddraft_model::ShellFeature),
     Offset(soliddraft_model::OffsetFeature),
     Thicken(soliddraft_model::ThickenFeature),

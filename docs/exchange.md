@@ -122,12 +122,16 @@ reference. New faces get numbers after every face the import has had, so no new 
 takes a number an old reference names.
 
 A face that moved or changed size has no exact partner, and neither has any face whose
-boundary touches it. Those faces follow by shape instead: a face of the new file with the
-same surface type, a planar face facing the same way within 1 degree, every neighbour
-already paired still a neighbour, and its centroid within a quarter of the old body's
-diagonal. A face follows only when one such face is left, or the nearest is less than
-half as far as the next, and never when two old faces want the same new face. Pairs
-found this way constrain the next round, until no more are found.
+boundary touches it. Planes, and cylinders and spheres whose radius the kernel reads,
+follow by shape instead. A candidate face of the new file has the same surface type; a
+plane faces the same way, or a cylinder's axis lies parallel, within 1 degree; a
+cylinder or sphere has the same radius and material side; every neighbour already paired
+is still a neighbour; and its centroid lies within a quarter of the old body's diagonal.
+A pair is made only when each face is the other's clear nearest among all faces eligible
+for it: the only one, or less than half as far as the next. Two holes that could swap
+places therefore stay unpaired, and their references are listed for repair. Pairs found
+this way constrain the next round, until no more are found. Other surfaces follow only
+by an exact match.
 
 A reference to a face with no partner either way is not redirected. The review lists
 each one by name, with the feature, appearance or measurement that holds it, before

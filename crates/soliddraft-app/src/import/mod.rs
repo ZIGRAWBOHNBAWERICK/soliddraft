@@ -382,10 +382,8 @@ fn match_file(doc: &Document, old: &ImportStepFeature, new: &ImportStepFeature) 
     for (index, (id, _)) in imports.iter().enumerate() {
         let body = |doc: &Document| doc.feature(*id).and_then(|f| f.body);
         let (Some(before), Some(after)) = (body(doc), body(&trial)) else { continue };
-        let (Ok(before), Ok(after)) = (doc.kernel().topology(before), trial.kernel().topology(after)) else {
-            continue;
-        };
-        let followed = follow(&shapes(&before), &shapes(&after), &pairs[index]);
+        let before = shapes(doc.kernel().as_ref(), before);
+        let followed = follow(&before, &shapes(trial.kernel().as_ref(), after), &pairs[index]);
         pairs[index].extend(followed);
     }
     let edits = edits_for(&pairs);
@@ -446,19 +444,57 @@ fn clone_pair((old, new): (&String, &String)) -> (String, String) {
     (old.clone(), new.clone())
 }
 
+/// A cylinder's or sphere's radius, and whether its material side looks away from the
+/// axis or centre.
+type Size = (f64, Option<bool>);
+
 /// What the shape matching reads of one imported face, by its key in the source file.
 struct Shape {
     surface: soliddraft_kernel_api::SurfaceKind,
     area: f64,
     centroid: soliddraft_kernel_api::Vec3,
-    normal: Option<soliddraft_kernel_api::Vec3>,
+    /// A planar face's outward normal, or a cylinder's axis direction up to sign.
+    direction: Option<soliddraft_kernel_api::Vec3>,
+    /// A cylinder's or sphere's radius and whether its material side looks away from the
+    /// axis or centre, read from the kernel's definition.
+    size: Option<Size>,
     neighbours: std::collections::BTreeSet<String>,
     bbox: soliddraft_kernel_api::Aabb,
 }
 
-/// The imported faces of a body by source key. Pieces of one source face are taken
-/// together.
-fn shapes(topology: &soliddraft_kernel_api::Topology) -> BTreeMap<String, Shape> {
+/// The middle of an enclosure, in millimetres.
+fn middle(bounds: &soliddraft_kernel_api::SupportBounds) -> Option<f64> {
+    let value = |r: &soliddraft_kernel_api::ExactRational| {
+        Some(r.numerator.parse::<f64>().ok()? / r.denominator.parse::<f64>().ok()?)
+    };
+    Some((value(&bounds.lo)? + value(&bounds.hi)?) / 2.0)
+}
+
+/// A curved face's axis direction and size, from the kernel's definition.
+fn support(
+    kernel: &dyn soliddraft_kernel_api::Kernel,
+    body: soliddraft_kernel_api::BodyId,
+    face: soliddraft_kernel_api::FaceId,
+) -> Option<(Option<soliddraft_kernel_api::Vec3>, Size)> {
+    use soliddraft_kernel_api::{EnclosedSupport, SupportEntity, Vec3};
+    match kernel.entity_support_enclosed(body, SupportEntity::Face(face)).ok()? {
+        EnclosedSupport::Axis { direction, radius_squared: Some(squared), outward, .. } => {
+            let [x, y, z] = [middle(&direction[0])?, middle(&direction[1])?, middle(&direction[2])?];
+            Some((Vec3::new(x, y, z).normalized(), (middle(&squared)?.sqrt(), outward)))
+        }
+        EnclosedSupport::Point { radius_squared: Some(squared), outward, .. } => {
+            Some((None, (middle(&squared)?.sqrt(), outward)))
+        }
+        _ => None,
+    }
+}
+
+/// The imported faces of a body by source key that can follow by shape: planes, and
+/// cylinders and spheres whose radius the kernel reads. Pieces of one source face are
+/// taken together.
+fn shapes(kernel: &dyn soliddraft_kernel_api::Kernel, body: soliddraft_kernel_api::BodyId) -> BTreeMap<String, Shape> {
+    use soliddraft_kernel_api::SurfaceKind;
+    let Ok(topology) = kernel.topology(body) else { return BTreeMap::new() };
     let key = |face: soliddraft_kernel_api::FaceId| {
         topology.face(face)?.origins.iter().find_map(|origin| match &origin.role {
             FaceRole::Imported { key } => Some(key.clone()),
@@ -468,14 +504,27 @@ fn shapes(topology: &soliddraft_kernel_api::Topology) -> BTreeMap<String, Shape>
     let mut out: BTreeMap<String, Shape> = BTreeMap::new();
     for face in &topology.faces {
         let Some(k) = key(face.id) else { continue };
-        let shape = out.entry(k).or_insert_with(|| Shape {
-            surface: face.surface,
-            area: 0.0,
-            centroid: soliddraft_kernel_api::Vec3::ZERO,
-            normal: face.normal,
-            neighbours: Default::default(),
-            bbox: face.bbox,
-        });
+        if !out.contains_key(&k) {
+            let (direction, size) = match face.surface {
+                SurfaceKind::Plane => (face.normal, None),
+                SurfaceKind::Cylinder | SurfaceKind::Sphere => match support(kernel, body, face.id) {
+                    Some((direction, size)) => (direction, Some(size)),
+                    None => continue,
+                },
+                _ => continue,
+            };
+            let shape = Shape {
+                surface: face.surface,
+                area: 0.0,
+                centroid: soliddraft_kernel_api::Vec3::ZERO,
+                direction,
+                size,
+                neighbours: Default::default(),
+                bbox: face.bbox,
+            };
+            out.insert(k.clone(), shape);
+        }
+        let shape = out.get_mut(&k).expect("inserted");
         let area = shape.area + face.area;
         if area > 0.0 {
             shape.centroid = (shape.centroid * shape.area + face.centroid * face.area) * (1.0 / area);
@@ -505,15 +554,45 @@ fn joined(a: soliddraft_kernel_api::Aabb, b: soliddraft_kernel_api::Aabb) -> sol
 
 /// How far a face may move and still follow: a quarter of the old body's diagonal.
 const FOLLOW_REACH: f64 = 0.25;
-/// How far a planar face may turn and still follow, in degrees.
+/// How far a face may turn and still follow, in degrees.
 const FOLLOW_TURN_DEGREES: f64 = 1.0;
+/// How much a radius may differ and still follow, as a share of it.
+const FOLLOW_RADIUS_SHARE: f64 = 1e-6;
 
-/// Pairs old faces the exact match left over with new faces of the same shape: the same
-/// surface type, a planar face facing the same way within [`FOLLOW_TURN_DEGREES`], every
-/// already paired neighbour still a neighbour, and the centroid within [`FOLLOW_REACH`]
-/// of the old body's diagonal. A face follows only when one candidate is left, or the
-/// nearest is less than half as far as the next; two old faces wanting one new face
-/// follow neither. Pairs made in one round constrain the next, until none is added.
+/// True when `new` could be `old` moved: the same surface type; a plane facing the same
+/// way, or a cylinder's axis parallel, within [`FOLLOW_TURN_DEGREES`]; the same radius
+/// and material side; and the centroid within `reach`.
+fn same_shape(old: &Shape, new: &Shape, reach: f64) -> bool {
+    let turn = FOLLOW_TURN_DEGREES.to_radians().cos();
+    let facing = match (old.direction, new.direction) {
+        (Some(a), Some(b)) if old.surface == soliddraft_kernel_api::SurfaceKind::Plane => a.dot(b) >= turn,
+        (Some(a), Some(b)) => a.dot(b).abs() >= turn,
+        (None, None) => true,
+        _ => false,
+    };
+    let sized = match (old.size, new.size) {
+        (Some((a, side_a)), Some((b, side_b))) => side_a == side_b && (a - b).abs() <= a.abs() * FOLLOW_RADIUS_SHARE,
+        (None, None) => true,
+        _ => false,
+    };
+    old.surface == new.surface && facing && sized && old.centroid.distance(new.centroid) <= reach
+}
+
+/// The one candidate, or the nearest when it is less than half as far as the next.
+fn clear_nearest(mut fits: Vec<(f64, &String)>) -> Option<&String> {
+    fits.sort_by(|a, b| a.0.total_cmp(&b.0));
+    match fits.as_slice() {
+        [only] => Some(only.1),
+        [best, next, ..] if best.0 * 2.0 < next.0 => Some(best.1),
+        _ => None,
+    }
+}
+
+/// Pairs old faces the exact match left over with new faces of the same shape (see
+/// [`same_shape`]) whose already paired neighbours are still neighbours. A pair is made
+/// only when each face is the other's clear nearest among every face eligible for it,
+/// so two holes that could swap stay unpaired and their references go to repair. Pairs
+/// made in one round constrain the next, until none is added.
 fn follow(
     old: &BTreeMap<String, Shape>,
     new: &BTreeMap<String, Shape>,
@@ -523,43 +602,27 @@ fn follow(
         return BTreeMap::new();
     };
     let reach = bbox.diagonal() * FOLLOW_REACH;
-    let turn = FOLLOW_TURN_DEGREES.to_radians().cos();
     let mut pairs = exact.clone();
     loop {
         let taken: std::collections::BTreeSet<&String> = pairs.values().collect();
-        let mut proposals: BTreeMap<&String, &String> = BTreeMap::new();
-        for (key, face) in old.iter().filter(|(key, _)| !pairs.contains_key(*key)) {
-            let mut fits: Vec<(f64, &String)> = new
-                .iter()
-                .filter(|(candidate, shape)| {
-                    !taken.contains(candidate)
-                        && shape.surface == face.surface
-                        && match (face.normal, shape.normal) {
-                            (Some(a), Some(b)) => a.dot(b) >= turn,
-                            (None, None) => true,
-                            _ => false,
-                        }
-                        && face.neighbours.iter().filter_map(|n| pairs.get(n)).all(|n| shape.neighbours.contains(n))
-                })
-                .map(|(candidate, shape)| (face.centroid.distance(shape.centroid), candidate))
-                .filter(|(distance, _)| *distance <= reach)
-                .collect();
-            fits.sort_by(|a, b| a.0.total_cmp(&b.0));
-            let unique = match fits.as_slice() {
-                [only] => Some(only.1),
-                [best, next, ..] if best.0 * 2.0 < next.0 => Some(best.1),
-                _ => None,
-            };
-            if let Some(candidate) = unique {
-                proposals.insert(key, candidate);
+        let open_old: Vec<(&String, &Shape)> = old.iter().filter(|(key, _)| !pairs.contains_key(*key)).collect();
+        let open_new: Vec<(&String, &Shape)> = new.iter().filter(|(key, _)| !taken.contains(key)).collect();
+        let eligible = |(_, a): &(&String, &Shape), (_, b): &(&String, &Shape)| {
+            same_shape(a, b, reach)
+                && a.neighbours.iter().filter_map(|n| pairs.get(n)).all(|n| b.neighbours.contains(n))
+        };
+        let mut accepted = Vec::new();
+        for o in &open_old {
+            let forward =
+                open_new.iter().filter(|n| eligible(o, n)).map(|n| (o.1.centroid.distance(n.1.centroid), n.0));
+            let Some(target) = clear_nearest(forward.collect()) else { continue };
+            let n = open_new.iter().find(|n| n.0 == target).expect("a candidate");
+            let reverse =
+                open_old.iter().filter(|p| eligible(p, n)).map(|p| (p.1.centroid.distance(n.1.centroid), p.0));
+            if clear_nearest(reverse.collect()) == Some(o.0) {
+                accepted.push((o.0.clone(), target.clone()));
             }
         }
-        let wanted = |target: &String| proposals.values().filter(|other| **other == target).count();
-        let accepted: Vec<(String, String)> = proposals
-            .iter()
-            .filter(|(_, target)| wanted(target) == 1)
-            .map(|(key, target)| ((*key).clone(), (*target).clone()))
-            .collect();
         if accepted.is_empty() {
             break;
         }

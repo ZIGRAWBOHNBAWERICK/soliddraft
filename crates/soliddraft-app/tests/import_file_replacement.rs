@@ -346,13 +346,22 @@ fn a_reviewed_new_file_with_repair_answers_refuses_and_changes_nothing() {
 /// A 40 x 30 mm block from z = 0 to `height`, centred on the origin, with an 8 mm hole
 /// straight through it at `hole` when given, written as STEP by the kernel.
 fn block_step(height: f64, hole: Option<[f64; 2]>) -> Vec<u8> {
+    holes_step(height, &hole.map(|at| vec![(at, 8.0)]).unwrap_or_default())
+}
+
+/// The 40 x 30 mm block `height` mm tall with a hole of each diameter straight through it
+/// at each point.
+fn holes_step(height: f64, holes: &[([f64; 2], f64)]) -> Vec<u8> {
     let mut doc = Document::new("Source block", soliddraft_app::kernel());
     let rectangle = json!({"shape":"rectangle","center":[0,0,0],"width":40,"height":30});
     call(&mut doc, "sketch", json!({"plane":"top","shapes":[rectangle]})).unwrap();
     call(&mut doc, "extrude", json!({"sketch":"Sketch1","depth":height,"flip":false})).unwrap();
-    if let Some([x, y]) = hole {
-        let circle = json!({"shape":"circle","center":[x,y,height],"diameter":8});
-        call(&mut doc, "sketch", json!({"plane":"Boss-Extrude1 · End cap","shapes":[circle]})).unwrap();
+    if !holes.is_empty() {
+        let circles: Vec<Value> = holes
+            .iter()
+            .map(|([x, y], diameter)| json!({"shape":"circle","center":[x,y,height],"diameter":diameter}))
+            .collect();
+        call(&mut doc, "sketch", json!({"plane":"Boss-Extrude1 · End cap","shapes":circles})).unwrap();
         call(&mut doc, "cut", json!({"sketch":"Sketch2","through_all":true,"depth":1,"flip":false})).unwrap();
     }
     all_built(&doc);
@@ -555,6 +564,38 @@ fn a_resized_face_takes_its_references_with_it() {
     };
     let fillet = topology.faces.iter().find(corner).expect("the fillet face");
     assert!((fillet.centroid.z - 12.5).abs() < 1e-6, "{:?}", fillet.centroid);
+}
+
+/// Two holes of different sizes move past each other: the 2 mm one from x = -10 to x = 1,
+/// the 4 mm one from x = -2 to x = -5. By position alone the small hole is nearest the
+/// big hole's new place, and the big hole is as near one place as the other. Radius keeps
+/// each hole's identity, so the chamfer on the small hole's rim follows it to x = 1.
+#[test]
+fn two_holes_that_move_past_each_other_keep_their_identities() {
+    let old = [([-10.0, 0.0], 2.0), ([-2.0, 0.0], 4.0)];
+    let new = [([1.0, 0.0], 2.0), ([-5.0, 0.0], 4.0)];
+    let mut doc = Document::new("Two holes", soliddraft_app::kernel());
+    let preview = Preview::from_bytes(&doc, "holes.step", holes_step(20.0, &old)).unwrap();
+    commit(&mut doc, &preview, &Review::default()).unwrap();
+    let rim = edge_named(&doc, |m| near(m.z, 20.0) && near(((m.x + 10.0).powi(2) + m.y * m.y).sqrt(), 1.0));
+    call(&mut doc, "chamfer", json!({"edges":[rim],"distance":0.5})).unwrap();
+    all_built(&doc);
+    let refs = doc.model().stored_face_refs();
+
+    let lost = replace(&mut doc, holes_step(20.0, &new));
+    assert!(lost.is_empty(), "{lost:?}");
+    all_built(&doc);
+    assert_eq!(doc.model().stored_face_refs(), refs);
+    let body = doc.model().live_bodies()[0].1;
+    let topology = doc.kernel().topology(body).unwrap();
+    let ring = |cx: f64, r: f64| {
+        topology.edges.iter().any(|e| {
+            let m = e.midpoint;
+            (m.z - 20.0).abs() < 1e-6 && ((((m.x - cx).powi(2) + m.y * m.y).sqrt()) - r).abs() < 1e-6
+        })
+    };
+    assert!(ring(1.0, 1.5), "the chamfer rings the small hole at x = 1");
+    assert!(!ring(-5.0, 2.5), "the big hole at x = -5 has no chamfer");
 }
 
 /// A drawing's dimension between two vertical side edges of an imported block still finds

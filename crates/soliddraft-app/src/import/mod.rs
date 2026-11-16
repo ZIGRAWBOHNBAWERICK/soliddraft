@@ -3,14 +3,14 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use soliddraft_assistant::tools::schema::{array, object, optional, string};
 use soliddraft_kernel_api::{
     Approval, Disposition, FaceRole, FileReplacement, FileReplacementRequest, ImportFormat, ImportOptions, KernelError,
     Proposal, ProposalSet, RepairChange, RepairRecord, ReplacedImport,
 };
-use soliddraft_model::{ImportStepFeature, sha256_hex};
+use soliddraft_model::{ImportStepFeature, InheritedName, sha256_hex};
 
 use crate::document::{Command, Document, FeatureId, FeatureKind};
 use crate::state::{AppState, NoteKind};
@@ -85,13 +85,32 @@ pub struct Review {
     pub accept: Vec<Approved>,
 }
 
-/// A changed file matched to every import of the file it replaces.
+/// A changed STEP file matched to every import of the file it replaces.
 #[derive(Clone, Debug)]
 struct FileSwap {
     /// The imports that read the old file, in tree order, as they were when matched.
     imports: Vec<(FeatureId, ImportStepFeature)>,
     /// What each of them becomes, in the same order.
     replaced: Vec<ReplacedImport>,
+    /// The edit moving each import to the new file, with the names its matched faces keep.
+    edits: Vec<(FeatureId, soliddraft_model::FeatureKind)>,
+    /// What the replacement leaves needing repair, by what holds it.
+    lost: Vec<Lost>,
+}
+
+/// Something a file replacement leaves needing repair.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct Lost {
+    /// What holds it: a feature's name, an appearance or a tracked measurement's name.
+    pub owner: String,
+    /// What it lost, in words.
+    pub what: String,
+}
+
+impl std::fmt::Display for Lost {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}: {}", self.owner, self.what)
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -99,6 +118,9 @@ pub struct Preview {
     feature: ImportStepFeature,
     replacement: Option<FeatureId>,
     file: Option<FileSwap>,
+    /// Why a changed single-solid file could not be matched to the old one, so its
+    /// references will need repair.
+    unmatched: Option<String>,
     proposals: ProposalSet,
     revision: u64,
     document: soliddraft_document::DocumentId,
@@ -176,6 +198,7 @@ impl Preview {
             feature,
             replacement: None,
             file: None,
+            unmatched: None,
             proposals,
             revision: doc.revision(),
             document: doc.model().id(),
@@ -189,19 +212,29 @@ impl Preview {
         let Some(FeatureKind::ImportStep(old)) = doc.feature(id).map(|f| &f.kind) else {
             return Err("Choose an imported feature to replace.".into());
         };
-        if old.source_solid.is_some() {
-            if old.sha256 != self.feature.sha256 || old.format != self.feature.format {
-                if old.format != ImportFormat::Step || self.feature.format != ImportFormat::Step {
-                    return Err("This body selects a solid from the original file. Import a changed file as new bodies instead of replacing it.".into());
+        let changed = old.sha256 != self.feature.sha256 || old.format != self.feature.format;
+        if changed && old.format == ImportFormat::Step && self.feature.format == ImportFormat::Step {
+            match match_file(doc, old, &self.feature) {
+                Ok(swap) => {
+                    self.file = Some(swap);
+                    self.replacement = Some(id);
+                    return Ok(self);
                 }
-                self.file = Some(match_file(doc, old, &self.feature)?);
-                self.replacement = Some(id);
-                return Ok(self);
+                Err(error) if old.source_solid.is_some() => return Err(error),
+                // A single-solid import still takes the file, its references left for repair.
+                Err(error) => self.unmatched = Some(error.trim_end_matches(" Nothing was changed.").to_owned()),
+            }
+        }
+        if old.source_solid.is_some() {
+            if changed {
+                return Err("This body selects a solid from the original file. Import a changed file as new bodies instead of replacing it.".into());
             }
             self.feature.source_solid = old.source_solid.clone();
         }
-        if old.sha256 == self.feature.sha256 && old.format == self.feature.format {
+        if !changed {
             self.feature.source_bound_names = old.source_bound_names;
+            self.feature.face_names = old.face_names.clone();
+            self.feature.new_ordinals_from = old.new_ordinals_from;
         }
         self.replacement = Some(id);
         Ok(self)
@@ -236,16 +269,35 @@ impl Preview {
         sha256_hex(&reviewed)
     }
 
+    /// What accepting this whole-file replacement leaves needing repair: each stored
+    /// reference to a face the new file has no verified partner for, and each feature
+    /// that stops building. Empty for anything else.
+    pub fn lost(&self) -> &[Lost] {
+        self.file.as_ref().map_or(&[], |swap| swap.lost.as_slice())
+    }
+
     pub fn summary(&self) -> Value {
-        json!({"source_name": self.feature.source_name, "source_sha256": self.feature.sha256,
-               "proposals": self.proposals.proposals, "replacement": self.replacement, "token": self.token()})
+        let mut summary = json!({"source_name": self.feature.source_name, "source_sha256": self.feature.sha256,
+               "proposals": self.proposals.proposals, "replacement": self.replacement, "token": self.token()});
+        if self.file.is_some() {
+            summary["needs_repair"] = json!(self.lost());
+        }
+        if let Some(reason) = &self.unmatched {
+            summary["unmatched"] = json!(reason);
+        }
+        summary
     }
 }
 
 /// Matches a changed STEP file to every import of the file it replaces, by complete face
-/// definitions. A solid of the old file without one verified partner refuses the
-/// replacement, so the part never changes.
+/// definitions. Each face of the new file with a verified partner keeps that partner's
+/// name, so every reference to it holds, in this part and in drawings and assemblies of
+/// it. References to a face without a partner are listed by name and left for repair.
+/// A selected solid without one verified partner refuses the replacement, so the part
+/// never changes.
 fn match_file(doc: &Document, old: &ImportStepFeature, new: &ImportStepFeature) -> Result<FileSwap, String> {
+    use crate::document::{FeatureStatus, model_id};
+    use std::collections::HashSet;
     let imports: Vec<(FeatureId, ImportStepFeature)> = doc
         .features
         .iter()
@@ -270,24 +322,100 @@ fn match_file(doc: &Document, old: &ImportStepFeature, new: &ImportStepFeature) 
         new_name: &new.source_name,
         source_solids: &solids,
     };
-    match doc.kernel().replace_import_file(&request).map_err(plain)? {
-        FileReplacement::Verified { imports: replaced, .. } if replaced.len() == imports.len() => {
-            Ok(FileSwap { imports, replaced })
+    let replaced = match doc.kernel().replace_import_file(&request).map_err(plain)? {
+        FileReplacement::Verified { imports: replaced, .. } if replaced.len() == imports.len() => replaced,
+        FileReplacement::Verified { .. } => {
+            return Err("The new file was matched to a different set of imports.".into());
         }
-        FileReplacement::Verified { .. } => Err("The new file was matched to a different set of imports.".into()),
-        FileReplacement::Unresolved { reasons } => Err(format!(
-            "The new file cannot replace this one without choosing its solids again. {} Nothing was changed.",
-            reasons.join(" ")
-        )),
+        FileReplacement::Unresolved { reasons } => {
+            return Err(format!(
+                "The new file cannot replace this one without choosing its solids again. {} Nothing was changed.",
+                reasons.join(" ")
+            ));
+        }
+    };
+    type Name = (soliddraft_model::FeatureId, soliddraft_model::Generator, u32);
+    let mut unmatched: HashSet<Name> = HashSet::new();
+    let mut edits = Vec::new();
+    for ((id, matched), replaced) in imports.iter().zip(&replaced) {
+        let feature = model_id(*id);
+        let faces = doc.model().generated_faces(feature);
+        if faces.is_empty() {
+            let name = doc.feature(*id).map_or("An import of this file", |f| f.name.as_str());
+            return Err(format!("{name} is not built, so its faces cannot be matched. Nothing was changed."));
+        }
+        let mut face_names = BTreeMap::new();
+        // New faces are numbered past every face this import has had, so none takes the
+        // number of a face a reference still names.
+        let mut new_ordinals_from = matched.new_ordinals_from;
+        for face in faces {
+            new_ordinals_from = new_ordinals_from.max(face.ordinal + 1);
+            let FaceRole::Imported { key } = &face.origin.role else { continue };
+            match replaced.faces.get(key) {
+                Some(new_key) => {
+                    let name = InheritedName { generator: face.generator.clone(), ordinal: face.ordinal };
+                    face_names.insert(new_key.clone(), name);
+                }
+                None => {
+                    unmatched.insert((feature, face.generator.clone(), face.ordinal));
+                }
+            }
+        }
+        let mut import = new.clone();
+        import.source_solid = replaced.source_solid.clone();
+        import.source_bound_names = true;
+        import.face_names = face_names;
+        import.new_ordinals_from = new_ordinals_from;
+        edits.push((*id, soliddraft_model::FeatureKind::ImportStep(import)));
     }
+    let mut lost: Vec<Lost> = Vec::new();
+    for (owner, face) in doc.model().stored_face_refs() {
+        if unmatched.contains(&(face.feature, face.generator.clone(), face.ordinal)) {
+            // Named as the part names it now: a reference's own label may be older, and an
+            // edge reference keeps none for its faces.
+            let label = doc
+                .model()
+                .name_label(face.feature, face.generator.clone(), face.ordinal)
+                .map_or_else(|| face.label.clone(), |label| label.text);
+            let item = Lost { owner, what: format!("{label} has no matching face in the new file") };
+            if !lost.contains(&item) {
+                lost.push(item);
+            }
+        }
+    }
+    let mut trial = doc.scratch();
+    trial.apply(Command::ReplaceImportFile(edits.clone()))?;
+    for (id, _) in &imports {
+        let mut seen = HashSet::new();
+        if !trial.model().generated_faces(model_id(*id)).iter().all(|face| seen.insert((&face.generator, face.ordinal)))
+        {
+            return Err("The new file's faces cannot all be given distinct names. Nothing was changed.".into());
+        }
+    }
+    // A feature that built before and does not now is also listed, unless its lost
+    // references already are; suppressed, rolled-back or already broken features keep
+    // their state and are not.
+    let built = |feature: &crate::document::Feature| feature.status == FeatureStatus::Ok;
+    for after in trial.features.iter().filter(|after| !built(after) && doc.feature(after.id).is_some_and(built)) {
+        if lost.iter().any(|item| item.owner == after.name) {
+            continue;
+        }
+        let what = match &after.status {
+            FeatureStatus::Error(message) => format!("does not build with the new file: {message}"),
+            FeatureStatus::NeedsRepair(items) => {
+                let labels: Vec<&str> = items.iter().map(|item| item.label.as_str()).collect();
+                format!("needs repair: {}", labels.join(", "))
+            }
+            _ => "does not build with the new file".into(),
+        };
+        lost.push(Lost { owner: after.name.clone(), what });
+    }
+    Ok(FileSwap { imports, replaced, edits, lost })
 }
 
-/// Moves every import of the old file to the reviewed new file and every reference into
-/// them to the new file's faces, as one undo step. A reference to a face without a
-/// verified partner refuses the whole replacement.
+/// Moves every import of the old file to the reviewed new file, its matched faces keeping
+/// their names, as one undo step. References listed as lost are left for repair.
 fn commit_file(doc: &mut Document, swap: &FileSwap, reviewed: &ImportStepFeature) -> Result<FeatureId, String> {
-    use crate::document::{app_id, model_id};
-    use std::collections::HashMap;
     let stale = || "the part changed during the preview; review the replacement again".to_owned();
     if !reviewed.decisions.is_empty() {
         return Err(
@@ -301,82 +429,7 @@ fn commit_file(doc: &mut Document, swap: &FileSwap, reviewed: &ImportStepFeature
             _ => return Err(stale()),
         }
     }
-    let mut edits: Vec<(FeatureId, soliddraft_model::FeatureKind)> = swap
-        .imports
-        .iter()
-        .zip(&swap.replaced)
-        .map(|((id, _), replaced)| {
-            let mut import = reviewed.clone();
-            import.source_solid = replaced.source_solid.clone();
-            import.source_bound_names = true;
-            (*id, soliddraft_model::FeatureKind::ImportStep(import))
-        })
-        .collect();
-    let mut imports_only = doc.scratch();
-    imports_only.apply(Command::ReplaceImportFile(edits.clone()))?;
-    type Name = (soliddraft_model::FeatureId, soliddraft_model::Generator, u32);
-    let mut moves: HashMap<Name, (soliddraft_model::Generator, u32)> = HashMap::new();
-    for ((id, _), replaced) in swap.imports.iter().zip(&swap.replaced) {
-        let feature = model_id(*id);
-        let new_faces: HashMap<&str, &soliddraft_model::NamedFace> = imports_only
-            .model()
-            .generated_faces(feature)
-            .iter()
-            .filter_map(|face| match &face.origin.role {
-                FaceRole::Imported { key } => Some((key.as_str(), face)),
-                _ => None,
-            })
-            .collect();
-        for old in doc.model().generated_faces(feature) {
-            let FaceRole::Imported { key } = &old.origin.role else { continue };
-            if let Some(new) = replaced.faces.get(key).and_then(|key| new_faces.get(key.as_str())) {
-                moves.insert((feature, old.generator.clone(), old.ordinal), (new.generator.clone(), new.ordinal));
-            }
-        }
-    }
-    let imported: Vec<soliddraft_model::FeatureId> = swap.imports.iter().map(|(id, _)| model_id(*id)).collect();
-    let mut unmatched = Vec::new();
-    for feature in doc.model().features() {
-        if imported.contains(&feature.id) {
-            continue;
-        }
-        let mut moved = false;
-        let kind = soliddraft_model::rewrite_face_refs(&feature.kind, |face| {
-            if !imported.contains(&face.feature) {
-                return;
-            }
-            match moves.get(&(face.feature, face.generator.clone(), face.ordinal)) {
-                Some((generator, ordinal)) => {
-                    face.generator = generator.clone();
-                    face.ordinal = *ordinal;
-                    moved = true;
-                }
-                None => unmatched.push(if face.label.is_empty() { feature.name.clone() } else { face.label.clone() }),
-            }
-        })?;
-        if moved {
-            edits.push((app_id(feature.id), kind));
-        }
-    }
-    if !unmatched.is_empty() {
-        unmatched.dedup();
-        return Err(format!(
-            "The new file has no face verified to match {}. Nothing was changed.",
-            unmatched.join(", ")
-        ));
-    }
-    let command = Command::ReplaceImportFile(edits);
-    let mut trial = doc.scratch();
-    trial.apply(command.clone())?;
-    // Only a feature that built before and does not now is the replacement's doing;
-    // suppressed, rolled-back or already broken features keep their state.
-    let built = |feature: &crate::document::Feature| feature.status == crate::document::FeatureStatus::Ok;
-    if let Some(broken) = trial.features.iter().find(|after| !built(after) && doc.feature(after.id).is_some_and(built))
-    {
-        return Err(format!("{} does not build with the new file. Nothing was changed.", broken.name));
-    }
-    doc.reuse_builds_from(trial.model());
-    doc.apply(command)?;
+    doc.apply(Command::ReplaceImportFile(swap.edits.clone()))?;
     Ok(swap.imports[0].0)
 }
 
@@ -417,7 +470,12 @@ pub fn commit(doc: &mut Document, preview: &Preview, review: &Review) -> Result<
         return Err("this repair needs an explicit tolerance approval before it can be imported".into());
     }
     if let Some(swap) = &preview.file {
-        return commit_file(doc, swap, &feature);
+        // Answers cannot go through a match yet. A single-solid import takes the answered
+        // file as a plain replacement instead, its references left for repair.
+        let single = swap.imports.iter().all(|(_, import)| import.source_solid.is_none());
+        if feature.decisions.is_empty() || !single {
+            return commit_file(doc, swap, &feature);
+        }
     }
     let command = match preview.replacement {
         Some(id) => Command::EditFeature { id, kind: FeatureKind::ImportStep(feature) },
@@ -587,7 +645,18 @@ pub fn window(ctx: &egui::Context, state: &mut AppState) {
         if format == ImportFormat::Mesh {
             ui.label("STL and OBJ coordinates are read in millimetres. The mesh must form one closed solid, up to 200,000 triangles.");
         }
-        if preview.replacement.is_some() {
+        if let Some(swap) = &preview.file {
+            ui.label("Accept keeps the names of faces that match the old file, so references to them follow. You can undo the replacement.");
+            if !swap.lost.is_empty() {
+                ui.label("These will need repair:");
+                for item in &swap.lost {
+                    ui.label(item.to_string());
+                }
+            }
+        } else if preview.replacement.is_some() {
+            if let Some(reason) = &preview.unmatched {
+                ui.label(format!("The new file's faces were not matched to the old file's. {reason}"));
+            }
             ui.label("References to a changed file will need repair. You can undo the replacement.");
         }
         let Preview { proposals, allowed, approver, .. } = &mut preview;
@@ -636,6 +705,14 @@ pub fn window(ctx: &egui::Context, state: &mut AppState) {
             Ok(_) => state.note(
                 if decline {
                     "Import saved with declined repairs; the solid stays open".into()
+                } else if !preview.lost().is_empty() {
+                    let count = preview.lost().len();
+                    format!(
+                        "Replaced imported file. {count} {} repair.",
+                        if count == 1 { "item needs" } else { "items need" }
+                    )
+                } else if preview.file.is_some() {
+                    "Replaced imported file. Every reference follows.".into()
                 } else if preview.replacement.is_some() {
                     "Replaced imported file. Check any references marked for repair.".into()
                 } else {

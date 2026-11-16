@@ -8,7 +8,7 @@ use sha2::{Digest, Sha256};
 use soliddraft_kernel_api::{Decision, Grade, HoleDepth, HoleHead, HoleTip, Plane, Vec3, question_index};
 use soliddraft_sketch::{P2, Sketch};
 
-use crate::reference::{EdgeRef, FaceRef};
+use crate::reference::{EdgeRef, FaceRef, Generator};
 
 /// Id of a feature. It never changes and is never reused within a document.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -781,6 +781,31 @@ pub struct ImportStepFeature {
     /// The saved import result, verified against the source when reopening.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub record: Option<soliddraft_kernel_api::RepairRecord>,
+    /// Names this file's faces keep from the file it replaced, by face key in this file.
+    /// A face listed here is the verified partner of a face of the earlier file and is
+    /// known by that face's name, so every reference to it, in this part or in another
+    /// document, still finds it. Faces not listed are named from this file.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub face_names: BTreeMap<String, InheritedName>,
+    /// The first ordinal for a face of this file without an inherited name. The others
+    /// follow in the order of their entity names. A replacement sets it past every
+    /// ordinal the earlier files used, so no new face takes an earlier face's number.
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub new_ordinals_from: u32,
+}
+
+fn is_zero_u32(v: &u32) -> bool {
+    *v == 0
+}
+
+/// A face name carried over from the file an import replaced.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct InheritedName {
+    /// The earlier face's generator: the hash of the file that first named it, or
+    /// [`Generator::Other`] for an import saved before names were bound to a file.
+    pub generator: Generator,
+    /// The earlier face's ordinal.
+    pub ordinal: u32,
 }
 
 impl ImportStepFeature {
@@ -795,6 +820,8 @@ impl ImportStepFeature {
             source,
             decisions: BTreeMap::new(),
             record: None,
+            face_names: BTreeMap::new(),
+            new_ordinals_from: 0,
         }
     }
 

@@ -582,6 +582,26 @@ impl Document {
         Ok(r)
     }
 
+    /// Every face reference the part stores, with what holds it: a feature's name, an
+    /// appearance, or a tracked measurement's name. Edge and vertex references are
+    /// listed by their faces.
+    pub fn stored_face_refs(&self) -> Vec<(String, FaceRef)> {
+        let held = |owner: &str, faces: Vec<FaceRef>| {
+            faces.into_iter().map(|face| (owner.to_owned(), face)).collect::<Vec<_>>()
+        };
+        let mut out = Vec::new();
+        for feature in &self.features {
+            out.extend(held(&feature.name, reference::face_refs(&feature.kind)));
+        }
+        for appearance in &self.materials.appearances {
+            out.extend(held("Appearance", reference::face_refs(appearance)));
+        }
+        for row in &self.values.tracked {
+            out.extend(held(&row.name, reference::face_refs(&row.source)));
+        }
+        out
+    }
+
     /// A persistent name for a planar face of the part to sketch on. Unlike
     /// [`face_ref`](Self::face_ref) it accepts a piece of a split face, since every piece
     /// of the face's origin lies in the same plane.
@@ -771,6 +791,12 @@ impl Document {
 
     fn label_in(&self, face: FaceId, t: &Topology) -> Option<FaceLabel> {
         let (feature, generator, ordinal) = reference::origin_label(face, &View { topology: t }, &self.name_map())?;
+        self.name_label(feature, generator, ordinal)
+    }
+
+    /// The name of a face for people from its persistent name, whether or not the face
+    /// is in a body now: "Import1 · Face 3".
+    pub fn name_label(&self, feature: FeatureId, generator: Generator, ordinal: u32) -> Option<FaceLabel> {
         let f = self.feature(feature)?;
         let what = match &generator {
             Generator::Side { entity, path } => {
@@ -787,7 +813,12 @@ impl Document {
             }
             _ => generator.to_string(),
         };
-        let count = self.generated_faces(feature).iter().filter(|n| n.generator == generator).count();
+        // An import's faces are numbered together, whichever file first named them.
+        let group = |g: &Generator| match g {
+            Generator::Imported { .. } | Generator::Other => Generator::Other,
+            g => g.clone(),
+        };
+        let count = self.generated_faces(feature).iter().filter(|n| group(&n.generator) == group(&generator)).count();
         let suffix = if count > 1 { format!(" {}", ordinal + 1) } else { String::new() };
         let part = format!("{what}{suffix}");
         Some(FaceLabel { feature, generator, ordinal, text: format!("{} · {part}", f.name), part })

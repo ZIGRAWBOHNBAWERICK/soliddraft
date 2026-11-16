@@ -1471,7 +1471,9 @@ fn number(mut faces: Vec<(Origin, Generator, usize)>) -> Vec<NamedFace> {
 
 /// The faces of an imported body, ranked by their entity names in the source file:
 /// `#17` before `#40` before `#102`. The saved source never changes, so neither do the
-/// ranks, and the faces read "Face 1", "Face 2" and so on.
+/// ranks, and the faces read "Face 1", "Face 2" and so on. A face the import inherited a
+/// name for, from the file it replaced, keeps that name instead, and the others are
+/// numbered from the import's first new ordinal.
 fn imported_names(record: &HistoryRecord, import: &ImportStepFeature) -> Vec<NamedFace> {
     let mut faces: Vec<(u64, &str, &FaceRole)> = record
         .face_roles
@@ -1486,17 +1488,29 @@ fn imported_names(record: &HistoryRecord, import: &ImportStepFeature) -> Vec<Nam
         .collect();
     faces.sort();
     faces.dedup();
+    let mut next = import.new_ordinals_from;
     faces
         .into_iter()
-        .enumerate()
-        .map(|(ordinal, (_, _, role))| NamedFace {
-            origin: Origin { tag: record.tag.clone(), role: role.clone() },
-            generator: if import.source_bound_names {
-                Generator::Imported { sha256: import.sha256.clone().into_boxed_str() }
-            } else {
-                Generator::Other
-            },
-            ordinal: ordinal as u32,
+        .map(|(_, key, role)| {
+            let origin = Origin { tag: record.tag.clone(), role: role.clone() };
+            match import.face_names.get(key) {
+                Some(inherited) => {
+                    NamedFace { origin, generator: inherited.generator.clone(), ordinal: inherited.ordinal }
+                }
+                None => {
+                    let ordinal = next;
+                    next += 1;
+                    NamedFace {
+                        origin,
+                        generator: if import.source_bound_names {
+                            Generator::Imported { sha256: import.sha256.clone().into_boxed_str() }
+                        } else {
+                            Generator::Other
+                        },
+                        ordinal,
+                    }
+                }
+            }
         })
         .collect()
 }

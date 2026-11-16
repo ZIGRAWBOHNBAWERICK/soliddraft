@@ -118,6 +118,22 @@ impl Kernel for Counting {
         self.inner.replace_import_file(request)
     }
 
+    fn keep_builds(&self) -> KernelResult<()> {
+        self.inner.keep_builds()
+    }
+
+    fn hand_over(&self) -> KernelResult<Vec<u8>> {
+        self.inner.hand_over()
+    }
+
+    fn offer_builds(&self, bytes: &[u8]) -> KernelResult<usize> {
+        self.inner.offer_builds(bytes)
+    }
+
+    fn read_offers(&self, at_most: usize) -> KernelResult<usize> {
+        self.inner.read_offers(at_most)
+    }
+
     fn import_source(
         &self,
         format: crate::ImportFormat,

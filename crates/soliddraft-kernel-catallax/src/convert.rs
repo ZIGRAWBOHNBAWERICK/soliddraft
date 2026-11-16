@@ -2,7 +2,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use catallax_app::EvaluatedApplicationBody;
+use crate::AppBody;
 use catallax_recipe::{Origin, Role};
 use catallax_shapes::{CurveKind as CatCurve, Surface, SurfaceKind as CatSurface};
 use catallax_topology::Sense;
@@ -48,8 +48,19 @@ fn assign<I: Copy + Ord, K>(
 }
 
 impl Ids {
+    /// Each interface id by its Catallax handle's index, which a hand-over keeps.
+    pub fn by_index(
+        &self,
+    ) -> (BTreeMap<u32, FaceId>, BTreeMap<u32, EdgeId>, BTreeMap<u32, soliddraft_kernel_api::VertexId>) {
+        (
+            self.faces.iter().map(|(cat, id)| (cat.index(), *id)).collect(),
+            self.edges.iter().map(|(cat, id)| (cat.index(), *id)).collect(),
+            self.vertices.iter().map(|(cat, id)| (cat.index(), *id)).collect(),
+        )
+    }
+
     pub fn new(
-        app: &EvaluatedApplicationBody,
+        app: &AppBody,
         parents: &[&Ids],
         tags: &BTreeMap<String, OpTag>,
         next: &mut u64,
@@ -489,12 +500,7 @@ fn proven_box(b: &catallax_measure::BoundingBox) -> Aabb {
 /// rebuild or a display never waits for a measurement. With it, they are Catallax's
 /// proven measures, for an explicit measurement request. Edge boxes are the edge's
 /// display polyline grown by its chord error either way, so they enclose the edge.
-pub(super) fn topology(
-    app: &EvaluatedApplicationBody,
-    ids: &Ids,
-    mesh: &catallax_mesh::Mesh,
-    proven: bool,
-) -> KernelResult<Topology> {
+pub(super) fn topology(app: &AppBody, ids: &Ids, mesh: &catallax_mesh::Mesh, proven: bool) -> KernelResult<Topology> {
     topology_view(
         app,
         ids,
@@ -514,7 +520,7 @@ pub(super) fn topology(
 }
 
 pub(super) fn rendering_topology(
-    app: &EvaluatedApplicationBody,
+    app: &AppBody,
     ids: &Ids,
     mesh: &catallax_mesh::DisplayMesh,
 ) -> KernelResult<Topology> {
@@ -542,12 +548,7 @@ struct TopologyMesh<'a> {
     chord: f64,
 }
 
-fn topology_view(
-    app: &EvaluatedApplicationBody,
-    ids: &Ids,
-    mesh: TopologyMesh<'_>,
-    proven: bool,
-) -> KernelResult<Topology> {
+fn topology_view(app: &AppBody, ids: &Ids, mesh: TopologyMesh<'_>, proven: bool) -> KernelResult<Topology> {
     let model = &app.checkpoint.built().model;
     let chord = mesh.chord;
     let accuracy = catallax_measure::Accuracy::default();
@@ -707,7 +708,7 @@ fn topology_view(
 }
 
 /// The exact facts of [`topology`]'s faces, read from the model with no mesh.
-pub(super) fn face_carriers(app: &EvaluatedApplicationBody, ids: &Ids) -> KernelResult<Vec<FaceCarrier>> {
+pub(super) fn face_carriers(app: &AppBody, ids: &Ids) -> KernelResult<Vec<FaceCarrier>> {
     let built = app.checkpoint.built();
     let model = &built.model;
     let carrier = |cat: CatFace| {

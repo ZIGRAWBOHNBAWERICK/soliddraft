@@ -208,12 +208,20 @@ impl State {
                 feature: soliddraft_model::FeatureId(u32::try_from(feature).map_err(|_| "No such feature")?),
             };
             let (sender, answer) = mpsc::channel();
-            let id = crate::kernel_worker::submit(part, &job, ctx, move |result| {
-                // Kept only once `poll` finds the request still current.
-                let _ = sender.send(result.and_then(|value| {
-                    serde_json::from_value::<MassProperties>(value).map(Some).map_err(|error| error.to_string())
-                }));
-            })?;
+            // Its builds are the measured part's, wanted whether or not the answer is shown.
+            let id = crate::kernel_worker::submit(
+                part,
+                &job,
+                doc.kernel().clone(),
+                ctx,
+                || true,
+                move |result| {
+                    // Kept only once `poll` finds the request still current.
+                    let _ = sender.send(result.and_then(|value| {
+                        serde_json::from_value::<MassProperties>(value).map(Some).map_err(|error| error.to_string())
+                    }));
+                },
+            )?;
             let pending = Pending { request, answer, id };
             pending.trace("enqueued", doc);
             self.pending = Some(pending);

@@ -1,12 +1,12 @@
 //! IGES 5.3 export through Catallax's strict exact-surface writer.
 
+use crate::AppBody;
 use crate::{numerical, query_error};
-use catallax_app::EvaluatedApplicationBody;
 use catallax_iges::IgesError;
 use catallax_numbers::{Answer, Rational, Refusal};
 use soliddraft_kernel_api::{IgesExport, IgesOptions, IgesReport, KernelError, KernelResult};
 
-pub(super) fn export(app: &EvaluatedApplicationBody, options: &IgesOptions) -> KernelResult<IgesExport> {
+pub(super) fn export(app: &AppBody, options: &IgesOptions) -> KernelResult<IgesExport> {
     if !options.tolerance.is_finite() || options.tolerance < 0.0 {
         return Err(KernelError::InvalidInput("the IGES tolerance must be finite and nonnegative".into()));
     }

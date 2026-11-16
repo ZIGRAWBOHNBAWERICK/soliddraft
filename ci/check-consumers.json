@@ -33,6 +33,9 @@
     "ci/browser-documents.mjs": [
       "web"
     ],
+    "ci/browser-edit-off-thread.js": [
+      "web"
+    ],
     "ci/browser-journal.js": [
       "web"
     ],

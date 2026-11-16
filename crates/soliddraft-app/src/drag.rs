@@ -34,7 +34,8 @@ use std::sync::{
 };
 
 /// A feature dimension a drag can change.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Dimension {
     /// A boss's depth, or a blind cut's.
     Depth,
@@ -481,8 +482,8 @@ pub(crate) struct PreparedBuild {
     pub candidate: Option<CandidateDisplay>,
 }
 
-#[derive(Clone, Copy)]
-pub(crate) struct ScalarDraft {
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct ScalarDraft {
     pub feature: model::FeatureId,
     pub dimension: Dimension,
     pub value: f64,
@@ -497,6 +498,8 @@ pub(crate) struct Job {
 }
 
 pub(crate) enum AnswerKind {
+    // The browser shows its kernel worker's proved part and has no early construction display.
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     Construction(Result<CandidateDisplay, String>),
     Proved(Result<ProvedBuild, String>),
 }
@@ -519,6 +522,8 @@ struct ProofTask {
 }
 
 /// An early display of one request, built beside that request's exact proof.
+// The browser shows its kernel worker's proved part and has no early construction display.
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 struct ConstructionTask {
     request: u64,
     baseline: Arc<model::Document>,
@@ -569,6 +574,8 @@ fn prepare(queued: Queued) -> Result<(ProofTask, Option<ConstructionTask>), Answ
     Ok((ProofTask { request, model, level, allowance }, construction))
 }
 
+// The browser shows its kernel worker's proved part and has no early construction display.
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 fn construct(task: ConstructionTask, answered: &Answered) -> Result<(), ()> {
     let ConstructionTask { request, baseline, edits, params, model } = task;
     let Some(body) = baseline.body() else {
@@ -583,6 +590,22 @@ fn construct(task: ConstructionTask, answered: &Answered) -> Result<(), ()> {
         .and_then(|display| construction_view(display, &model))
         .map(|view| CandidateDisplay::Construction(Arc::new(view)));
     answered.send(Answer { request, kind: AnswerKind::Construction(candidate) })
+}
+
+/// Applies `edit` to `source`, then rebuilds, proves and meshes it on the calling thread,
+/// through the same steps as the desktop's proof worker. The browser's kernel worker runs
+/// it, so the page's thread never does.
+pub(crate) fn prove_now(
+    source: Arc<model::Document>,
+    edit: Option<ScalarDraft>,
+    level: soliddraft_tessellation::Level,
+) -> Result<ProvedBuild, String> {
+    let job = Job { source, edit, baseline: None, params: TessellationParams::default(), level };
+    let (task, _) = prepare(Queued { request: 1, job }).map_err(|answer| match answer.kind {
+        AnswerKind::Proved(Err(error)) => error,
+        _ => "The edit could not be prepared.".into(),
+    })?;
+    Ok(prove(task, &AtomicU64::new(1), &AtomicU64::new(0), None))
 }
 
 /// A feature that shapes the body did not build. A sketch that did not build blocks
@@ -634,6 +657,8 @@ fn wanted(request: u64, newest: &AtomicU64, protected: &AtomicU64) -> bool {
     newest.load(Ordering::Acquire) == request || protected.load(Ordering::Acquire) == request
 }
 
+// The browser schedules no proof here: its kernel worker takes each request.
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 fn next_work<T>(pending: &mut Vec<T>, newest: u64, protected: u64, key: impl Fn(&T) -> u64) -> Option<T> {
     pending.retain(|work| {
         let request = key(work);
@@ -645,6 +670,8 @@ fn next_work<T>(pending: &mut Vec<T>, newest: u64, protected: u64, key: impl Fn(
 
 /// The oldest wanted work. Early displays keep request order, so a committed
 /// request's display is ready before a newer transient request replaces it.
+// The browser shows its kernel worker's proved part and has no early construction display.
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 fn oldest_work<T>(pending: &mut Vec<T>, newest: u64, protected: u64, key: impl Fn(&T) -> u64) -> Option<T> {
     pending.retain(|work| {
         let request = key(work);
@@ -665,12 +692,17 @@ pub(crate) struct Worker {
     jobs: mpsc::Sender<Queued>,
     #[cfg(target_arch = "wasm32")]
     answered: Answered,
+    /// Requests the browser's kernel worker is building, by request number.
     #[cfg(target_arch = "wasm32")]
-    queued: Vec<Queued>,
+    waiting: std::collections::HashMap<u64, Queued>,
     #[cfg(target_arch = "wasm32")]
-    proof: Vec<ProofTask>,
+    built: mpsc::Sender<(u64, Result<(), String>)>,
+    /// The kernel worker's answers: its builds were offered to the part's kernel first.
     #[cfg(target_arch = "wasm32")]
-    construction: Vec<ConstructionTask>,
+    built_answers: mpsc::Receiver<(u64, Result<(), String>)>,
+    /// Answered requests whose offered builds are still being read, a few a frame.
+    #[cfg(target_arch = "wasm32")]
+    reading: Vec<Queued>,
     #[cfg(target_arch = "wasm32")]
     previous: Option<Arc<model::Document>>,
 }
@@ -788,17 +820,21 @@ impl Worker {
             Ok(Self { answers, newest, protected, request: 0, jobs })
         }
         #[cfg(target_arch = "wasm32")]
-        Ok(Self {
-            answers,
-            newest,
-            protected,
-            request: 0,
-            answered,
-            queued: Vec::new(),
-            proof: Vec::new(),
-            construction: Vec::new(),
-            previous: None,
-        })
+        {
+            let (built, built_answers) = mpsc::channel();
+            Ok(Self {
+                answers,
+                newest,
+                protected,
+                request: 0,
+                answered,
+                waiting: std::collections::HashMap::new(),
+                built,
+                built_answers,
+                reading: Vec::new(),
+                previous: None,
+            })
+        }
     }
 
     pub(crate) fn protect(&mut self, request: Option<u64>) {
@@ -821,53 +857,77 @@ impl Worker {
         {
             self.jobs.send(Queued { request, job }).map_err(|_| "the edit proof worker stopped".into())
         }
+        // The browser builds in its kernel worker; the page proves from the builds it hands
+        // over, without evaluating geometry on the interface thread.
         #[cfg(target_arch = "wasm32")]
         {
-            self.queued.push(Queued { request, job });
+            let (_, part) = job.source.snapshot().encode().map_err(|error| error.to_string())?;
+            let build = crate::kernel_worker::Job::Build { edit: job.edit, level: job.level };
+            let kernel = job.source.kernel().clone();
+            let ctx = self.answered.repaint.clone().unwrap_or_default();
+            let built = self.built.clone();
+            let (newest, protected) = (self.newest.clone(), self.protected.clone());
+            let live = move || wanted(request, &newest, &protected);
+            crate::kernel_worker::submit(part, &build, kernel, &ctx, live, move |result| {
+                let _ = built.send((request, result.map(|_| ())));
+            })?;
+            self.waiting.insert(request, Queued { request, job });
             Ok(())
+        }
+    }
+
+    /// Proves an answered request on the page's kernel, from the builds and topologies the
+    /// kernel worker handed over, and sends its answer.
+    #[cfg(target_arch = "wasm32")]
+    fn prove_answered(&mut self, queued: Queued) {
+        let request = queued.request;
+        match prepare(queued) {
+            Ok((proof, _)) => {
+                let built = prove(proof, &self.newest, &self.protected, self.previous.as_deref());
+                if built.failure.is_none() && !built.model.is_dirty() {
+                    self.previous = Some(built.model.clone());
+                }
+                let _ = self.answered.send(Answer { request, kind: AnswerKind::Proved(Ok(built)) });
+            }
+            Err(answer) => {
+                let _ = self.answered.send(answer);
+            }
         }
     }
 
     pub(crate) fn answers(&mut self) -> Vec<Answer> {
         #[cfg(target_arch = "wasm32")]
         {
-            if let Some(queued) = next_work(
-                &mut self.queued,
-                self.newest.load(Ordering::Acquire),
-                self.protected.load(Ordering::Acquire),
-                |job| job.request,
-            ) {
-                match prepare(queued) {
-                    Ok((proof, construction)) => {
-                        self.proof.push(proof);
-                        self.construction.extend(construction);
-                    }
-                    Err(answer) => {
-                        let _ = self.answered.send(answer);
-                    }
+            let done: Vec<_> = self.built_answers.try_iter().collect();
+            for (request, result) in done {
+                let Some(queued) = self.waiting.remove(&request) else { continue };
+                if !wanted(request, &self.newest, &self.protected) {
+                    continue;
                 }
-            } else if let Some(task) = oldest_work(
-                &mut self.construction,
-                self.newest.load(Ordering::Acquire),
-                self.protected.load(Ordering::Acquire),
-                |task| task.request,
-            ) {
-                let _ = construct(task, &self.answered);
-            } else if let Some(task) = next_work(
-                &mut self.proof,
-                self.newest.load(Ordering::Acquire),
-                self.protected.load(Ordering::Acquire),
-                |task| task.request,
-            ) {
-                let request = task.request;
-                let result = prove(task, &self.newest, &self.protected, self.previous.as_deref());
-                if result.failure.is_none() && !result.model.is_dirty() {
-                    self.previous = Some(result.model.clone());
+                if let Err(error) = result {
+                    let _ = self.answered.send(Answer { request, kind: AnswerKind::Proved(Err(error)) });
+                    continue;
                 }
-                if wanted(request, &self.newest, &self.protected) {
-                    let _ = self.answered.send(Answer { request, kind: AnswerKind::Proved(Ok(result)) });
-                }
+                self.reading.push(queued);
             }
+            // The offered builds are read one a frame; the proof waits until none is unread,
+            // so no frame holds the page for all of them.
+            let unread = self.reading.first().map(|queued| queued.job.source.kernel().read_offers(1).unwrap_or(0));
+            if unread == Some(0) {
+                for queued in std::mem::take(&mut self.reading) {
+                    let request = queued.request;
+                    if wanted(request, &self.newest, &self.protected) {
+                        self.prove_answered(queued);
+                    }
+                }
+            } else if unread.is_some()
+                && let Some(ctx) = &self.answered.repaint
+            {
+                ctx.request_repaint();
+            }
+            // A request replaced before its answer came is not waited for.
+            let (newest, protected) = (self.newest.clone(), self.protected.clone());
+            self.waiting.retain(|request, _| wanted(*request, &newest, &protected));
         }
         self.answers.try_iter().collect()
     }

@@ -32,16 +32,20 @@ use std::collections::{BTreeMap, VecDeque};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 
 use catallax_app::{Error, EvaluatedApplicationBody};
+
+mod evaluated;
+mod handover;
 use catallax_mesh::{MeshOptions, PreviewMesh, PreviewOptions, preview_mesh_body};
 use catallax_numbers::{Decider, Rational};
 use catallax_recipe::StepId;
+pub(crate) use evaluated::{AppBody, Exact};
 use serde_json::{Value, json};
 use soliddraft_kernel_api::*;
 
 pub use diagnostics::{APP_REQUEST_WORK, APP_WORK_TARGET, RequestWork, with_request_allowance};
 
 /// The pinned Catallax application entry revision.
-pub const CATALLAX_REVISION: &str = "83ed62a9e4e47890fd2f5cc9d69fcfbf15737c07";
+pub const CATALLAX_REVISION: &str = "56be782ba461216bf931384748a1f8c204317c72";
 
 /// An in-process Catallax backend. There is no global kernel state or kernel thread.
 #[derive(Default)]
@@ -60,6 +64,19 @@ struct State {
     /// Imported STEP sources by SHA-256. Catallax reads them again for every build
     /// that continues an imported body, even when the import itself is reused.
     files: BTreeMap<String, Arc<[u8]>>,
+    /// Builds this kernel made since [`Kernel::keep_builds`], by recipe key, as bytes.
+    kept: Option<Vec<(String, Vec<u8>)>>,
+    /// Builds another kernel handed over, by recipe key; a build of the same
+    /// definition takes one instead of evaluating it.
+    offered: BTreeMap<String, handover::Offer>,
+    /// Bodies Catallax evaluated here rather than took from an offer.
+    fresh: u64,
+    /// Topologies computed here rather than taken from an offer.
+    fresh_topologies: u64,
+    /// Recipe keys whose topology has been handed over already.
+    sent_topologies: std::collections::BTreeSet<String>,
+    /// Early display requests answered by sampling here rather than from an offer.
+    fresh_previews: u64,
 }
 
 struct Stored {
@@ -70,7 +87,11 @@ struct Stored {
 }
 
 struct Solid {
-    app: EvaluatedApplicationBody,
+    app: AppBody,
+    /// The recipe key of this build, for a hand-over of its topology.
+    key: String,
+    /// Early display meshes another kernel sampled for this build, by display key.
+    handed_previews: handover::Previews,
     ids: convert::Ids,
     display: MeshCache<catallax_mesh::Mesh>,
     print: MeshCache<PrintMesh>,
@@ -80,6 +101,22 @@ struct Solid {
     topology: OnceLock<KernelResult<Topology>>,
     measured: OnceLock<KernelResult<Topology>>,
     mass: OnceLock<KernelResult<MassProperties>>,
+}
+
+/// A display key as text, which a hand-over carries between kernels.
+fn preview_key(key: &DisplayKey) -> String {
+    format!("{key:?}")
+}
+
+/// The edges of an early display mesh, named in this kernel's ids.
+fn preview_edges(mesh: &PreviewMesh, ids: &convert::Ids) -> Vec<EdgePolyline> {
+    mesh.edges
+        .iter()
+        .map(|edge| EdgePolyline {
+            edge: ids.edges[&edge.edge],
+            points: edge.vertices.iter().map(|v| mesh.positions[*v].into()).collect(),
+        })
+        .collect()
 }
 
 /// Every display control of a mesh request.
@@ -105,6 +142,12 @@ struct CachedMesh<T> {
 impl<T> MeshCache<T> {
     fn new() -> Self {
         Self(Mutex::new(VecDeque::new()))
+    }
+
+    /// The values computed so far, with their keys.
+    fn computed(&self) -> Vec<(DisplayKey, Arc<T>)> {
+        let entries: Vec<_> = self.0.lock().map(|cached| cached.iter().cloned().collect()).unwrap_or_default();
+        entries.into_iter().filter_map(|entry| Some((entry.key.clone(), entry.value.lock().ok()?.clone()?))).collect()
     }
 
     fn get(&self, key: DisplayKey, make: impl FnOnce() -> KernelResult<T>) -> KernelResult<Arc<T>> {
@@ -345,6 +388,23 @@ impl CatallaxKernel {
         Self::default()
     }
 
+    /// How many feature bodies Catallax has evaluated in this kernel, not counting builds
+    /// taken from an offered hand-over.
+    pub fn fresh_builds(&self) -> u64 {
+        self.state().map(|state| state.fresh).unwrap_or_default()
+    }
+
+    /// How many body topologies this kernel computed, not counting ones taken from an
+    /// offered hand-over.
+    pub fn fresh_topologies(&self) -> u64 {
+        self.state().map(|state| state.fresh_topologies).unwrap_or_default()
+    }
+
+    /// How many early display requests this kernel answered without a handed-over mesh.
+    pub fn fresh_previews(&self) -> u64 {
+        self.state().map(|state| state.fresh_previews).unwrap_or_default()
+    }
+
     /// Enables synchronous per-call evidence and deterministic work accounting.
     pub fn with_diagnostics(max_work: u64) -> Self {
         Self::capture(Some(max_work))
@@ -450,7 +510,7 @@ impl CatallaxKernel {
         {
             return Err(refusal);
         }
-        let Evaluated { app, names, steps, mut history, parents, seq, result } = evaluated;
+        let Evaluated { app, key, handed, names, steps, mut history, parents, seq, result } = evaluated;
         // Catallax names faces by recipe step; the interface uses the caller's tag.
         let mut tags: BTreeMap<String, OpTag> = names
             .into_iter()
@@ -496,6 +556,17 @@ impl CatallaxKernel {
         history.insert(seq, record.clone());
         let body = BodyId::from_raw(state.id());
         let display = MeshCache::new();
+        let topology = OnceLock::new();
+        let mut handed_previews = handover::Previews::new();
+        // A handed-over topology and early display are renamed into this kernel's ids, so
+        // neither is computed again.
+        if let Some(handed) = handed {
+            let (faces, edges, vertices) = ids.by_index();
+            if let Some(renamed) = handed.renamed(&faces, &edges, &vertices) {
+                let _ = topology.set(Ok(renamed));
+            }
+            handed_previews = handed.renamed_previews(&faces, &edges).unwrap_or_default();
+        }
         state.bodies.insert(
             body,
             Stored {
@@ -504,12 +575,14 @@ impl CatallaxKernel {
                 history: history.into_values().collect(),
                 solid: Some(Arc::new(Solid {
                     app,
+                    key,
+                    handed_previews,
                     ids,
                     display,
                     print: MeshCache::new(),
                     previews: MeshCache::new(),
                     rendering: MeshCache::new(),
-                    topology: OnceLock::new(),
+                    topology,
                     measured: OnceLock::new(),
                     mass: OnceLock::new(),
                 })),
@@ -564,16 +637,37 @@ impl CatallaxKernel {
         let input = json!({"format":"soliddraft-recipe/1", "name":"SolidDraft", "steps": steps.values().collect::<Vec<_>>(), "result": result});
         let sources = state.sources(&steps)?;
         let capture = state.capture;
+        let offered = state.offered.clone();
+        let keeping = state.kept.is_some();
         drop(state);
         let mut questions = Vec::new();
         let files = sources.iter().map(|(sha, bytes)| (sha.clone(), &bytes[..])).collect();
-        let built =
-            build(&input, op, prefix.as_ref().map(|solid| &solid.app), &files, capture.then_some(&mut questions));
+        let built = build(
+            &input,
+            op,
+            prefix.as_ref().map(|solid| &solid.app),
+            &files,
+            capture.then_some(&mut questions),
+            &offered,
+        );
+        // A build made here is kept for hand-over outside the lock; an offered one is not.
+        let kept = match &built {
+            Ok((app, _, key, _)) if keeping && matches!(app.checkpoint, Exact::Checkpoint(_)) => {
+                Some((key.clone(), handover::write(app.checkpoint.built())?))
+            }
+            _ => None,
+        };
         let mut state = self.state()?;
         // A refused build keeps its question too.
         state.questions.extend(questions);
-        let (app, names) = built?;
-        Ok((state, Evaluated { app, names, steps, history, parents, seq, result }))
+        if let (Some(kept), Some(list)) = (kept, state.kept.as_mut()) {
+            list.push(kept);
+        }
+        if matches!(&built, Ok((app, _, _, _)) if matches!(app.checkpoint, Exact::Checkpoint(_))) {
+            state.fresh += 1;
+        }
+        let (app, names, key, handed) = built?;
+        Ok((state, Evaluated { app, key, handed, names, steps, history, parents, seq, result }))
     }
 
     /// Stores a Catallax-native step that reads the solid `base` and builds the chain.
@@ -615,7 +709,10 @@ fn terminal_field(body: BodyId) -> KernelError {
 
 /// The operation's result, before it becomes a stored body.
 struct Evaluated {
-    app: EvaluatedApplicationBody,
+    app: AppBody,
+    key: String,
+    /// The topology another kernel computed for an offered build.
+    handed: Option<Arc<handover::HandedTopology>>,
     names: BTreeMap<String, catallax_recipe::StepId>,
     steps: BTreeMap<u64, Value>,
     history: BTreeMap<u64, HistoryRecord>,
@@ -631,7 +728,7 @@ const NOTHING_LEFT: &str = "this would leave nothing of the part";
 /// and keeps the request in `requested_radius`. SolidDraft never builds a radius other
 /// than the one the feature records, so it refuses as Catallax did before, naming the
 /// largest radius that fits. A radius that consumes a face exactly still builds.
-fn stopped_short(app: &EvaluatedApplicationBody, step: &str) -> Option<KernelError> {
+fn stopped_short(app: &AppBody, step: &str) -> Option<KernelError> {
     let built = app.checkpoint.built();
     let limit = built
         .fillets
@@ -654,7 +751,7 @@ fn stopped_short(app: &EvaluatedApplicationBody, step: &str) -> Option<KernelErr
     })
 }
 
-fn is_empty(app: &EvaluatedApplicationBody) -> bool {
+fn is_empty(app: &AppBody) -> bool {
     let exact = app.checkpoint.built();
     exact.model.body(exact.result).kind == catallax_topology::BodyKind::Empty
 }
@@ -828,22 +925,36 @@ fn converted_recipe(input: &Value, op: OpKind) -> KernelResult<catallax_app::sol
     Ok(converted)
 }
 
+/// A build: its exact result, the step ids of the caller's tags, its recipe key for a
+/// hand-over, and the topology another kernel computed when the build was offered.
+type BuildAnswer = (AppBody, BTreeMap<String, catallax_recipe::StepId>, String, Option<Arc<handover::HandedTopology>>);
+
 /// Builds a legacy recipe, returning the body and the legacy step names' Catallax step ids.
 fn build(
     input: &Value,
     op: OpKind,
-    prefix: Option<&EvaluatedApplicationBody>,
+    prefix: Option<&AppBody>,
     files: &catallax_features::ImportFiles<'_>,
     questions: Option<&mut Vec<Value>>,
-) -> KernelResult<(EvaluatedApplicationBody, BTreeMap<String, catallax_recipe::StepId>)> {
+    offered: &BTreeMap<String, handover::Offer>,
+) -> KernelResult<BuildAnswer> {
     let converted = converted_recipe(input, op)?;
     if let Some(questions) = questions {
         let problem = serde_json::to_value(&converted.recipe).expect("Catallax recipes serialize");
         questions.push(json!({"format":"catallax-question/1", "source":"recipe", "problem":problem}));
     }
+    let key = handover::key(&converted.recipe);
+    // An offer whose bytes cannot be read is passed over; the build is evaluated instead.
+    if let Some(offer) = offered.get(&key)
+        && let Ok(built) = offer.built()
+        && let Some(app) = AppBody::adopted(built, &converted.recipe)
+    {
+        return Ok((app, converted.steps, key, offer.topology.clone()));
+    }
     // Earlier bodies remain immutable for undo, branches and concurrent queries.
     // Clone only the selected checkpoint, after releasing the body arena lock.
-    let prefix = prefix.map(|app| app.checkpoint.clone());
+    // A handed-over body has no continuation; its prefix is rebuilt from the recipe.
+    let prefix = prefix.and_then(|app| app.checkpoint.continuation());
     let app = if files.is_empty() {
         catallax_app::build_incremental_without_display(&converted.recipe, prefix, &mut Decider::default())
     } else {
@@ -860,7 +971,7 @@ fn build(
             build_error(op, e)
         }
     })?;
-    Ok((app, converted.steps))
+    Ok((app.into(), converted.steps, key, None))
 }
 
 /// [`catallax_app::build_incremental_without_display`] for a recipe that reads STEP
@@ -1044,6 +1155,102 @@ impl Kernel for CatallaxKernel {
 
     fn replace_import_file(&self, request: &FileReplacementRequest<'_>) -> KernelResult<FileReplacement> {
         import::replace_file(request)
+    }
+
+    fn keep_builds(&self) -> KernelResult<()> {
+        self.state()?.kept.get_or_insert_with(Vec::new);
+        Ok(())
+    }
+
+    fn hand_over(&self) -> KernelResult<Vec<u8>> {
+        let mut state = self.state()?;
+        let kept = state.kept.take().unwrap_or_default();
+        // Topologies computed here and not handed over yet, by recipe key: a kept build's,
+        // or one of a build handed over before its topology was computed.
+        let mut topologies: BTreeMap<String, handover::HandedTopology> = BTreeMap::new();
+        for solid in state.bodies.values().filter_map(|stored| stored.solid.as_deref()) {
+            let Some(Ok(topology)) = solid.topology.get() else { continue };
+            if solid.key.is_empty() || state.sent_topologies.contains(&solid.key) || topologies.contains_key(&solid.key)
+            {
+                continue;
+            }
+            let (faces, edges, vertices) = solid.ids.by_index();
+            let pairs = |ids: Vec<(u32, u64)>| ids.into_iter().map(|(index, raw)| (raw, index)).collect();
+            // The early display meshes sampled so far travel with the topology.
+            let previews = solid
+                .previews
+                .computed()
+                .into_iter()
+                .filter_map(|(key, preview)| {
+                    let mesh = preview.as_ref().as_ref()?;
+                    Some(handover::HandedPreview {
+                        key: preview_key(&key),
+                        mesh: convert::preview(mesh, &solid.ids),
+                        edges: preview_edges(mesh, &solid.ids),
+                    })
+                })
+                .collect();
+            topologies.insert(
+                solid.key.clone(),
+                handover::HandedTopology {
+                    previews,
+                    topology: topology.clone(),
+                    faces: pairs(faces.into_iter().map(|(index, id)| (index, id.raw())).collect()),
+                    edges: pairs(edges.into_iter().map(|(index, id)| (index, id.raw())).collect()),
+                    vertices: pairs(vertices.into_iter().map(|(index, id)| (index, id.raw())).collect()),
+                },
+            );
+        }
+        let mut handed: Vec<handover::Handed> = kept
+            .into_iter()
+            .map(|(key, body)| {
+                let topology = topologies.remove(&key);
+                handover::Handed { key, body: Some(body), topology }
+            })
+            .collect();
+        handed.extend(topologies.into_iter().map(|(key, topology)| handover::Handed {
+            key,
+            body: None,
+            topology: Some(topology),
+        }));
+        for entry in &handed {
+            if entry.topology.is_some() {
+                state.sent_topologies.insert(entry.key.clone());
+            }
+        }
+        drop(state);
+        handover::encode(&handed)
+    }
+
+    fn offer_builds(&self, bytes: &[u8]) -> KernelResult<usize> {
+        let received = handover::decode(bytes)?;
+        let count = received.len();
+        let mut state = self.state()?;
+        for (key, received) in received {
+            match received {
+                handover::Received::Build(offer) => {
+                    state.offered.insert(key, offer);
+                }
+                // A topology for a build offered before: the body built from it next takes it.
+                handover::Received::Topology(topology) => {
+                    if let Some(offer) = state.offered.get_mut(&key) {
+                        offer.topology = Some(topology);
+                    }
+                }
+            }
+        }
+        Ok(count)
+    }
+
+    fn read_offers(&self, at_most: usize) -> KernelResult<usize> {
+        // Read outside the lock; offers share their read result, so the build that takes
+        // one later finds it read.
+        let unread: Vec<handover::Offer> =
+            self.state()?.offered.values().filter(|offer| !offer.is_read()).cloned().collect();
+        for offer in unread.iter().take(at_most) {
+            let _ = offer.built();
+        }
+        Ok(unread.len().saturating_sub(at_most))
     }
 
     fn source_solids(&self, format: ImportFormat, source: &[u8]) -> KernelResult<Vec<String>> {
@@ -1665,8 +1872,13 @@ impl Kernel for CatallaxKernel {
                 return Ok(field.preview());
             }
             let solid = self.solid(body)?;
+            let options = options(params)?;
+            if let Some((mesh, _)) = solid.handed_previews.get(&preview_key(&display_key(&options))) {
+                return Ok(mesh.clone());
+            }
+            self.state()?.fresh_previews += 1;
             // Where Catallax cannot sample a preview, the screen shows the certified mesh.
-            let preview = solid.preview(&options(params)?, "preview")?;
+            let preview = solid.preview(&options, "preview")?;
             let Some(mesh) = preview.as_ref() else {
                 return self.tessellate(body, params);
             };
@@ -1686,18 +1898,15 @@ impl Kernel for CatallaxKernel {
                 return Ok(vec![]);
             }
             let solid = self.solid(body)?;
-            let preview = solid.preview(&options(params)?, "preview_edges")?;
+            let options = options(params)?;
+            if let Some((_, edges)) = solid.handed_previews.get(&preview_key(&display_key(&options))) {
+                return Ok(edges.clone());
+            }
+            let preview = solid.preview(&options, "preview_edges")?;
             let Some(mesh) = preview.as_ref() else {
                 return self.tessellate_edges(body, params);
             };
-            Ok(mesh
-                .edges
-                .iter()
-                .map(|edge| EdgePolyline {
-                    edge: solid.ids.edges[&edge.edge],
-                    points: edge.vertices.iter().map(|v| mesh.positions[*v].into()).collect(),
-                })
-                .collect())
+            Ok(preview_edges(mesh, &solid.ids))
         })
     }
 
@@ -1777,6 +1986,7 @@ impl Kernel for CatallaxKernel {
             if let Some(value) = solid.topology.get() {
                 return value.clone();
             }
+            self.state()?.fresh_topologies += 1;
             if solid.has_splines() {
                 let answer = solid.rendering()?;
                 let mesh = match answer.as_ref() {
@@ -2044,7 +2254,8 @@ mod tests {
             let cut = kernel.boolean(&OpTag::new("cut"), BooleanOp::Subtract, base, tool).unwrap().body;
             let evidence = kernel.take_diagnostics().unwrap();
             let recipe = kernel.body_recipe(cut).unwrap();
-            let (replayed, steps) = build(&recipe, OpKind::Subtract, None, &Default::default(), None).unwrap();
+            let (replayed, steps, _, _) =
+                build(&recipe, OpKind::Subtract, None, &Default::default(), None, &Default::default()).unwrap();
             let operations = evidence["calls"][0]["operation_log"]["operations"].as_array().unwrap();
             let result = steps[recipe["result"].as_str().unwrap()].as_str();
             assert!(operations.iter().any(|op| op["id"] == result), "{evidence}");
@@ -2092,7 +2303,8 @@ mod tests {
                 assert!(!operations.iter().any(|op| &op["id"] == id), "rebuilt read-only target {id}: {evidence}");
             }
             let recipe = kernel.body_recipe(swept.body).unwrap();
-            let (fresh, _) = build(&recipe, OpKind::ExtrudeTo, None, &Default::default(), None).unwrap();
+            let (fresh, _, _, _) =
+                build(&recipe, OpKind::ExtrudeTo, None, &Default::default(), None, &Default::default()).unwrap();
             assert_eq!(kernel.solid(swept.body).unwrap().app.names, fresh.names);
             assert_eq!(
                 kernel.export_step(swept.body, &StepOptions::default()).unwrap(),

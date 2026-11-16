@@ -49,8 +49,12 @@ await page.eval(() => {
     constructor(...args) {
       super(...args);
       window.kernelWorkers.push(this);
+      // An answer's handed-over builds are kept as their size: copied as JSON, a
+      // megabyte of bytes becomes an object of a million keys.
       this.addEventListener('message', event => {
-        window.kernelAnswers.push({ ...JSON.parse(JSON.stringify(event.data)), at: performance.now() });
+        const { hand_over, ...message } = event.data;
+        const size = hand_over ? { hand_over: hand_over.byteLength } : {};
+        window.kernelAnswers.push({ ...JSON.parse(JSON.stringify(message)), ...size, at: performance.now() });
       });
     }
   };

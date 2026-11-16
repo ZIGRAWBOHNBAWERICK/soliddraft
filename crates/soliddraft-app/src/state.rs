@@ -35,6 +35,8 @@ pub enum AppAction {
     SketchValues(crate::sketch_values::Action),
     Undo,
     Redo,
+    /// Returns a part still building to its last accepted revision.
+    CancelBuild,
     /// Starts a sketch on the selected plane or face, or asks for one.
     StartSketch,
     StartSketchOn(SketchPlane),
@@ -1524,6 +1526,13 @@ impl AppState {
         if let Ok(bytes) = model.to_bytes() {
             self.revisions.record(model.id(), &model.semantic_hash(), &bytes);
         }
+    }
+
+    /// Remembers the open part's revision as `saved`, the bytes it was just opened from,
+    /// instead of saving the part again to get them.
+    pub fn remember_opened_revision(&self, saved: &[u8]) {
+        let model = self.doc.model();
+        self.revisions.record(model.id(), &model.semantic_hash(), saved);
     }
 
     /// Saves new navigation settings and uses them. They are the user's, not the

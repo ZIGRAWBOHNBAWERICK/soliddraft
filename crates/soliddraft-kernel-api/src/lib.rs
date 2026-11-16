@@ -1413,6 +1413,33 @@ pub trait Kernel: Send + Sync {
         Err(KernelError::Unsupported("import file replacement".into()))
     }
 
+    /// Keeps every body this kernel builds from now on, for [`Kernel::hand_over`].
+    fn keep_builds(&self) -> KernelResult<()> {
+        Err(KernelError::Unsupported("build hand-over".into()))
+    }
+
+    /// The builds kept since [`Kernel::keep_builds`], as bytes another kernel instance
+    /// of the same version can be offered, and stops keeping them.
+    fn hand_over(&self) -> KernelResult<Vec<u8>> {
+        Err(KernelError::Unsupported("build hand-over".into()))
+    }
+
+    /// Offers builds another kernel handed over: a later build of the same definition
+    /// takes the offered body, with its names and evidence, instead of evaluating it.
+    /// Returns how many builds were offered.
+    fn offer_builds(&self, bytes: &[u8]) -> KernelResult<usize> {
+        let _ = bytes;
+        Err(KernelError::Unsupported("build hand-over".into()))
+    }
+
+    /// Reads at most `at_most` offered builds that no build has taken yet, so a caller can
+    /// spread the reading over several frames before the builds that take them. Returns
+    /// how many offers are still unread.
+    fn read_offers(&self, at_most: usize) -> KernelResult<usize> {
+        let _ = at_most;
+        Ok(0)
+    }
+
     /// Builds or replays the explicitly selected source format and its repair decisions.
     fn import_source(
         &self,

@@ -1,6 +1,7 @@
 //! STEP AP242 export through Catallax's exporter, with its proven deviation report.
 
-use catallax_app::{EvaluatedApplicationBody, certify_built};
+use crate::AppBody;
+use catallax_app::certify_built;
 use catallax_features::Built;
 use catallax_numbers::{Decider, Rational, Refusal};
 use catallax_shapes::{SplineSupport, Surface};
@@ -12,7 +13,7 @@ use crate::{numerical, query_error};
 /// against the represented body, rounded up to a decimal and to the next `f64`, never down.
 /// A fitted carrier's own fit to its exact definition is reported beside it. A body
 /// with a ring band is written only under its certificate, so a ring without one is refused.
-pub(super) fn export(app: &EvaluatedApplicationBody, options: &StepOptions) -> KernelResult<StepExport> {
+pub(super) fn export(app: &AppBody, options: &StepOptions) -> KernelResult<StepExport> {
     if !options.tolerance.is_finite() || options.tolerance <= 0.0 {
         return Err(KernelError::InvalidInput(format!(
             "the STEP tolerance is {} mm; it must be more than zero",

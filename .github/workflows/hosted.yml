@@ -863,7 +863,20 @@ jobs:
           # Its clicks go to fixed points of a 1400 x 813 page.
           chrome-devtools-axi emulate --viewport 1400x813x1
           chrome-devtools-axi open 'http://127.0.0.1:8771/'
-          chrome-devtools-axi run < ci/browser-edit-off-thread.js
+          # A performance trace of the whole check, so a long page task can be attributed.
+          trace="$RUNNER_TEMP/edit-off-thread-trace.json.gz"
+          chrome-devtools-axi perf-start --no-reload --no-auto-stop --file "$trace"
+          status=0
+          chrome-devtools-axi run < ci/browser-edit-off-thread.js || status=$?
+          chrome-devtools-axi perf-stop --file "$trace" || true
+          exit "$status"
+      - name: Publish the browser edit check's performance trace
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: edit-off-thread-trace
+          path: ${{ runner.temp }}/edit-off-thread-trace.json.gz
+          if-no-files-found: warn
       - name: Keep preferences per browser in Chromium
         env:
           # WebGL: a headless screenshot cannot read a WebGPU canvas.

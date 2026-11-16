@@ -106,8 +106,10 @@ const baseline = await page.eval(() => {
 const bound = LONG * baseline / REFERENCE_MS;
 console.log(`Calibration loop ${baseline.toFixed(1)} ms (${REFERENCE_MS} ms on the M3): regression bound ${Math.round(bound)} ms`);
 async function window_(what, act, bounded = true) {
-  await page.eval(() => { window.longTasks = []; return true; });
+  // Marks in the page's performance trace, so CI's trace shows each step's span.
+  await page.eval(`(() => { window.longTasks = []; performance.mark(${JSON.stringify(what + ': start')}); return true; })()`);
   await act();
+  await page.eval(`(() => { performance.mark(${JSON.stringify(what + ': end')}); return true; })()`);
   const longest = await page.eval(() => Math.max(0, ...window.longTasks));
   console.log(`${what}: longest page task ${longest} ms${bounded ? ` (regression bound ${Math.round(bound)} ms)` : ' (logged, not bounded)'}`);
   check(!bounded || longest < bound, `Regression: ${what} blocked the page for ${longest} ms, over ${Math.round(bound)} ms`);

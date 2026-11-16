@@ -45,7 +45,7 @@ use soliddraft_kernel_api::*;
 pub use diagnostics::{APP_REQUEST_WORK, APP_WORK_TARGET, RequestWork, with_request_allowance};
 
 /// The pinned Catallax application entry revision.
-pub const CATALLAX_REVISION: &str = "8bf3999acd2ebd708a3d664e2daa41362f77da5f";
+pub const CATALLAX_REVISION: &str = "2c60dce949568b46b23b9cc96c6c760e329bb303";
 
 /// An in-process Catallax backend. There is no global kernel state or kernel thread.
 #[derive(Default)]

@@ -65,7 +65,10 @@ struct State {
     /// that continues an imported body, even when the import itself is reused.
     files: BTreeMap<String, Arc<[u8]>>,
     /// Builds this kernel made since [`Kernel::keep_builds`], by recipe key, as bytes.
-    kept: Option<Vec<(String, Vec<u8>)>>,
+    kept: Option<Vec<Kept>>,
+    /// Every body stored while keeping builds, so a hand-over finds the topology of one
+    /// a later feature released.
+    kept_solids: Vec<Arc<Solid>>,
     /// Builds another kernel handed over, by recipe key; a build of the same
     /// definition takes one instead of evaluating it.
     offered: BTreeMap<String, handover::Offer>,
@@ -77,7 +80,16 @@ struct State {
     sent_topologies: std::collections::BTreeSet<String>,
     /// Early display requests answered by sampling here rather than from an offer.
     fresh_previews: u64,
+    /// The interface id this kernel gave each entity another kernel's id named, for
+    /// builds adopted unread.
+    handed_ids: BTreeMap<u64, u64>,
+    /// How many offered builds were read from their bytes.
+    offer_reads: Arc<std::sync::atomic::AtomicU64>,
 }
+
+/// A build kept for a hand-over: its recipe key, its bytes, and what adopting it unread
+/// needs, once the body it built is stored.
+type Kept = (String, Vec<u8>, Option<handover::HandedIdentity>);
 
 struct Stored {
     steps: BTreeMap<u64, Value>,
@@ -195,6 +207,9 @@ impl<T> MeshCache<T> {
 
 impl Solid {
     fn has_splines(&self) -> bool {
+        if let Some(handed) = self.app.unread() {
+            return handed.splines;
+        }
         let built = self.app.checkpoint.built();
         built.model.faces_of_body(built.result).iter().any(|face| {
             matches!(built.model.geom().surface(built.model.face(*face).surface), catallax_shapes::Surface::BSpline(_))
@@ -400,6 +415,11 @@ impl CatallaxKernel {
         self.state().map(|state| state.fresh_topologies).unwrap_or_default()
     }
 
+    /// How many offered builds this kernel read from their bytes.
+    pub fn bodies_read(&self) -> u64 {
+        self.state().map(|state| state.offer_reads.load(std::sync::atomic::Ordering::Relaxed)).unwrap_or_default()
+    }
+
     /// How many early display requests this kernel answered without a handed-over mesh.
     pub fn fresh_previews(&self) -> u64 {
         self.state().map(|state| state.fresh_previews).unwrap_or_default()
@@ -545,14 +565,21 @@ impl CatallaxKernel {
             }
             return Err(KernelError::Unsupported(NOTHING_LEFT.into()));
         }
-        let ids = convert::Ids::new(
-            &app,
-            &parents.iter().map(|p| &p.ids).collect::<Vec<_>>(),
-            &tags,
-            &mut state.next,
-            selected_edges,
-        );
-        let record = ids.record(seq, tag, op, &result, &parents.iter().map(|p| &p.ids).collect::<Vec<_>>());
+        let parent_ids = parents.iter().map(|p| &p.ids).collect::<Vec<_>>();
+        let (ids, record) = if let Some(identity) = app.handed_identity().cloned() {
+            // A body adopted unread takes the handing kernel's ids and record.
+            let (faces, edges, vertices) = identity.worker_ids();
+            let state = &mut *state;
+            let mut handed =
+                convert::Handed { faces, edges, vertices, seen: &mut state.handed_ids, next: &mut state.next };
+            let ids = convert::Ids::handed(&app, &parent_ids, &tags, &mut handed, selected_edges);
+            let record = ids.handed_record(&identity.record, &state.handed_ids, seq, tag, &result);
+            (ids, record)
+        } else {
+            let ids = convert::Ids::new(&app, &parent_ids, &tags, &mut state.next, selected_edges);
+            let record = ids.record(seq, tag, op, &result, &parent_ids);
+            (ids, record)
+        };
         history.insert(seq, record.clone());
         let body = BodyId::from_raw(state.id());
         let display = MeshCache::new();
@@ -567,27 +594,32 @@ impl CatallaxKernel {
             }
             handed_previews = handed.renamed_previews(&faces, &edges).unwrap_or_default();
         }
-        state.bodies.insert(
-            body,
-            Stored {
-                steps,
-                result,
-                history: history.into_values().collect(),
-                solid: Some(Arc::new(Solid {
-                    app,
-                    key,
-                    handed_previews,
-                    ids,
-                    display,
-                    print: MeshCache::new(),
-                    previews: MeshCache::new(),
-                    rendering: MeshCache::new(),
-                    topology,
-                    measured: OnceLock::new(),
-                    mass: OnceLock::new(),
-                })),
-            },
-        );
+        let solid = Arc::new(Solid {
+            app,
+            key,
+            handed_previews,
+            ids,
+            display,
+            print: MeshCache::new(),
+            previews: MeshCache::new(),
+            rendering: MeshCache::new(),
+            topology,
+            measured: OnceLock::new(),
+            mass: OnceLock::new(),
+        });
+        // A build kept for a hand-over takes what adopting it unread needs, while the
+        // body that made it is at hand: later features may release it.
+        if let Some(kept) = state.kept.as_mut()
+            && let Some(entry) = kept.iter_mut().find(|(key, _, identity)| *key == solid.key && identity.is_none())
+        {
+            entry.2 = handed_identity(&solid, &record);
+        }
+        if state.kept.is_some() {
+            state.kept_solids.push(solid.clone());
+        }
+        state
+            .bodies
+            .insert(body, Stored { steps, result, history: history.into_values().collect(), solid: Some(solid) });
         Ok(OpResult { body, record })
     }
 
@@ -660,8 +692,8 @@ impl CatallaxKernel {
         let mut state = self.state()?;
         // A refused build keeps its question too.
         state.questions.extend(questions);
-        if let (Some(kept), Some(list)) = (kept, state.kept.as_mut()) {
-            list.push(kept);
+        if let (Some((key, bytes)), Some(list)) = (kept, state.kept.as_mut()) {
+            list.push((key, bytes, None));
         }
         if matches!(&built, Ok((app, _, _, _)) if matches!(app.checkpoint, Exact::Checkpoint(_))) {
             state.fresh += 1;
@@ -698,6 +730,35 @@ impl CatallaxKernel {
     fn solid(&self, body: BodyId) -> KernelResult<Arc<Solid>> {
         self.state()?.solid(body)
     }
+}
+
+/// What another kernel needs to adopt `solid` without reading its bytes: its names and
+/// ids by Catallax handle index, the record of the operation that made it and the facts
+/// an edit asks for. `None` if an entity has no id.
+fn handed_identity(solid: &Solid, record: &HistoryRecord) -> Option<handover::HandedIdentity> {
+    let record = record.clone();
+    let names = &solid.app.names;
+    Some(handover::HandedIdentity {
+        steps: solid.app.recipe().steps.iter().map(|step| step.id.as_str().to_owned()).collect(),
+        faces: names
+            .faces
+            .iter()
+            .map(|(cat, origins)| Some((cat.index(), solid.ids.faces.get(cat)?.raw(), origins.clone())))
+            .collect::<Option<_>>()?,
+        edges: names
+            .edges
+            .iter()
+            .map(|(cat, name)| Some((cat.index(), solid.ids.edges.get(cat)?.raw(), name.clone())))
+            .collect::<Option<_>>()?,
+        vertices: names
+            .vertices
+            .iter()
+            .map(|(cat, name)| Some((cat.index(), solid.ids.vertices.get(cat)?.raw(), name.clone())))
+            .collect::<Option<_>>()?,
+        record,
+        splines: solid.has_splines(),
+        planes: native::planes(&solid.app),
+    })
 }
 
 /// A terminal field is last: no CAD step or B-rep query reads it.
@@ -752,8 +813,7 @@ fn stopped_short(app: &AppBody, step: &str) -> Option<KernelError> {
 }
 
 fn is_empty(app: &AppBody) -> bool {
-    let exact = app.checkpoint.built();
-    exact.model.body(exact.result).kind == catallax_topology::BodyKind::Empty
+    app.is_empty()
 }
 
 fn gap(what: &str) -> KernelError {
@@ -944,12 +1004,19 @@ fn build(
         questions.push(json!({"format":"catallax-question/1", "source":"recipe", "problem":problem}));
     }
     let key = handover::key(&converted.recipe);
-    // An offer whose bytes cannot be read is passed over; the build is evaluated instead.
-    if let Some(offer) = offered.get(&key)
-        && let Ok(built) = offer.built()
-        && let Some(app) = AppBody::adopted(built, &converted.recipe)
-    {
-        return Ok((app, converted.steps, key, offer.topology.clone()));
+    if let Some(offer) = offered.get(&key) {
+        // A build that reads no files is adopted unread when its names came with it.
+        if files.is_empty()
+            && let Some(app) = AppBody::offered(offer.clone(), &converted.recipe)
+        {
+            return Ok((app, converted.steps, key, offer.topology.clone()));
+        }
+        // An offer whose bytes cannot be read is passed over; the build is evaluated instead.
+        if let Ok(built) = offer.built()
+            && let Some(app) = AppBody::adopted(built, &converted.recipe)
+        {
+            return Ok((app, converted.steps, key, offer.topology.clone()));
+        }
     }
     // Earlier bodies remain immutable for undo, branches and concurrent queries.
     // Clone only the selected checkpoint, after releasing the body arena lock.
@@ -1168,7 +1235,9 @@ impl Kernel for CatallaxKernel {
         // Topologies computed here and not handed over yet, by recipe key: a kept build's,
         // or one of a build handed over before its topology was computed.
         let mut topologies: BTreeMap<String, handover::HandedTopology> = BTreeMap::new();
-        for solid in state.bodies.values().filter_map(|stored| stored.solid.as_deref()) {
+        let kept_solids = std::mem::take(&mut state.kept_solids);
+        let solids = state.bodies.values().filter_map(|stored| stored.solid.as_deref());
+        for solid in solids.chain(kept_solids.iter().map(|solid| solid.as_ref())) {
             let Some(Ok(topology)) = solid.topology.get() else { continue };
             if solid.key.is_empty() || state.sent_topologies.contains(&solid.key) || topologies.contains_key(&solid.key)
             {
@@ -1203,15 +1272,16 @@ impl Kernel for CatallaxKernel {
         }
         let mut handed: Vec<handover::Handed> = kept
             .into_iter()
-            .map(|(key, body)| {
+            .map(|(key, body, identity)| {
                 let topology = topologies.remove(&key);
-                handover::Handed { key, body: Some(body), topology }
+                handover::Handed { key, body: Some(body), topology, identity }
             })
             .collect();
         handed.extend(topologies.into_iter().map(|(key, topology)| handover::Handed {
             key,
             body: None,
             topology: Some(topology),
+            identity: None,
         }));
         for entry in &handed {
             if entry.topology.is_some() {
@@ -1228,7 +1298,8 @@ impl Kernel for CatallaxKernel {
         let mut state = self.state()?;
         for (key, received) in received {
             match received {
-                handover::Received::Build(offer) => {
+                handover::Received::Build(mut offer) => {
+                    offer.reads = state.offer_reads.clone();
                     state.offered.insert(key, offer);
                 }
                 // A topology for a build offered before: the body built from it next takes it.
@@ -1242,11 +1313,31 @@ impl Kernel for CatallaxKernel {
         Ok(count)
     }
 
+    fn exact_unread(&self, body: BodyId) -> KernelResult<bool> {
+        let state = self.state()?;
+        Ok(state.get(body)?.solid.as_ref().is_some_and(|solid| !solid.app.checkpoint.is_read()))
+    }
+
+    fn read_exact(&self, body: BodyId) -> KernelResult<()> {
+        let solid = self.state()?.get(body)?.solid.clone();
+        // Read outside the lock, so other queries are not held for it.
+        if let Some(solid) = solid {
+            let _ = solid.app.checkpoint.built();
+        }
+        Ok(())
+    }
+
     fn read_offers(&self, at_most: usize) -> KernelResult<usize> {
         // Read outside the lock; offers share their read result, so the build that takes
-        // one later finds it read.
-        let unread: Vec<handover::Offer> =
-            self.state()?.offered.values().filter(|offer| !offer.is_read()).cloned().collect();
+        // one later finds it read. An offer that came with its names is adopted unread,
+        // so it is read only when exact geometry is asked of it.
+        let unread: Vec<handover::Offer> = self
+            .state()?
+            .offered
+            .values()
+            .filter(|offer| !offer.is_read() && offer.identity.is_none())
+            .cloned()
+            .collect();
         for offer in unread.iter().take(at_most) {
             let _ = offer.built();
         }
@@ -2091,8 +2182,13 @@ impl Kernel for CatallaxKernel {
         let history: usize = stored.history.iter().map(|r| 256 + r.face_roles.len() * 32).sum();
         let mut bytes = recipe + history;
         if let Some(solid) = &stored.solid {
-            let brep = solid.app.checkpoint.built().bodies.len().max(1)
-                * (solid.ids.faces.len() * FACE + solid.ids.edges.len() * EDGE);
+            let brep = match solid.app.unread_bytes() {
+                Some(unread) => unread,
+                None => {
+                    solid.app.checkpoint.built().bodies.len().max(1)
+                        * (solid.ids.faces.len() * FACE + solid.ids.edges.len() * EDGE)
+                }
+            };
             bytes += brep;
             solid.display.each(|mesh| bytes += mesh_bytes(mesh));
             solid.print.each(|output| {

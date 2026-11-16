@@ -176,6 +176,29 @@ fn unit(v: &Exact) -> Option<Exact> {
     (!length.is_zero()).then(|| times(v, &(Rational::one() / length)))
 }
 
+/// Each planar face of a body whose plane has a rational normal and origin, for a
+/// hand-over: a kernel that adopts the body unread places holes on these faces.
+pub(super) fn planes(app: &crate::AppBody) -> Vec<crate::handover::HandedPlane> {
+    let model = &app.checkpoint.built().model;
+    app.names
+        .faces
+        .keys()
+        .filter_map(|id| {
+            let native = model.face(*id);
+            let catallax_shapes::Surface::Plane(plane) = model.geom().surface(native.surface) else { return None };
+            let text = |x: &catallax_numbers::Real, y: &catallax_numbers::Real, z: &catallax_numbers::Real| {
+                Some([x.as_rational()?.to_string(), y.as_rational()?.to_string(), z.as_rational()?.to_string()])
+            };
+            Some(crate::handover::HandedPlane {
+                face: id.index(),
+                normal: text(&plane.normal.x, &plane.normal.y, &plane.normal.z)?,
+                origin: text(&plane.origin.x, &plane.origin.y, &plane.origin.z)?,
+                same_sense: native.sense == catallax_topology::Sense::Same,
+            })
+        })
+        .collect()
+}
+
 /// A planar face's sketch frame in exact numbers, as `FacePoint` defines it. A face whose
 /// unit normal or X axis is irrational has none.
 struct FaceFrame {
@@ -188,6 +211,16 @@ struct FaceFrame {
 impl FaceFrame {
     fn of(solid: &Solid, body: BodyId, face: FaceId) -> KernelResult<Option<Self>> {
         let id = solid.cat_face(face, body)?;
+        // A body adopted unread brought its planes with it.
+        if let Some(handed) = solid.app.unread() {
+            let Some(plane) = handed.planes.iter().find(|plane| plane.face == id.index()) else { return Ok(None) };
+            let exact = |values: &[String; 3]| -> Option<Exact> {
+                let [x, y, z] = values.each_ref().map(|value| value.parse::<Rational>().ok());
+                Some([x?, y?, z?])
+            };
+            let (Some(normal), Some(origin)) = (exact(&plane.normal), exact(&plane.origin)) else { return Ok(None) };
+            return Ok(Self::on(&normal, &origin, plane.same_sense));
+        }
         let model = &solid.app.checkpoint.built().model;
         let native = model.face(id);
         let catallax_shapes::Surface::Plane(plane) = model.geom().surface(native.surface) else { return Ok(None) };

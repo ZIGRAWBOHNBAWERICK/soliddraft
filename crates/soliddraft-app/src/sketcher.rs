@@ -26,6 +26,7 @@ use std::ops::{Add, Sub};
 
 mod circular;
 mod ellipse;
+pub mod pair_menu;
 mod rectangle;
 pub mod relations;
 pub mod select_box;
@@ -440,7 +441,20 @@ pub fn run(
     paint_snaps(&painter, &frame, s, hover_pos, snapped);
     dim_editor(ui, s, &frame, &mut actions);
     paint_status(ui, s, rect);
+    // Letting go of Ctrl after adding to the selection offers the relations for it.
+    if !primary(ui)
+        && let Some(at) = s.pair_pick.take()
+    {
+        pair_menu::open(ui.ctx(), s, at);
+    }
+    actions.extend(pair_menu::show(ui, s, resp.layer_id));
     actions
+}
+
+/// Whether the platform's selection key is held: Command on macOS, Ctrl elsewhere.
+fn primary(ui: &egui::Ui) -> bool {
+    let mac = ui.ctx().os() == egui::os::OperatingSystem::Mac;
+    ui.input(|i| crate::navigation::selection_primary(i.modifiers, mac))
 }
 
 /// Sets the value that follows the pointer until its placement is complete.
@@ -884,13 +898,17 @@ fn select_input(
         return;
     }
     if clicked {
+        let primary = primary(ui);
         match s.hover {
             Some(h) => {
-                if modifiers.ctrl || modifiers.shift {
+                if modifiers.ctrl || modifiers.shift || primary {
                     if let Some(i) = s.selection.iter().position(|x| *x == h) {
                         s.selection.remove(i);
                     } else {
                         s.selection.push(h);
+                        if primary && !matches!(h, SketchSel::Constraint(_)) {
+                            s.pair_pick = resp.interact_pointer_pos().or(resp.hover_pos());
+                        }
                     }
                 } else {
                     s.selection = vec![h];
@@ -1269,6 +1287,24 @@ fn dimension_click(s: &mut SketchSession, frame: &Frame<'_>, pos: Pos2, actions:
                 s.say("Those two cannot be dimensioned together");
             }
         }
+    }
+}
+
+/// Two picks Smart Dimension can take as its first and second, in the order that
+/// dimensions them: two lines (an angle, or a distance when parallel), a point and a
+/// line, or two points.
+pub(crate) fn dimension_pair(sketch: &Sketch, selection: &[SketchSel]) -> Option<(SketchSel, SketchSel)> {
+    let [a, b] = selection else { return None };
+    [(*a, *b), (*b, *a)].into_iter().find(|(first, second)| {
+        !is_curve_sel(sketch, *first) && dimension_kind(sketch, *first, Some(*second), P2::ZERO).is_some()
+    })
+}
+
+/// What Smart Dimension places for `pair`, in a word: "angle" or "distance".
+pub(crate) fn dimension_word(sketch: &Sketch, (first, second): (SketchSel, SketchSel)) -> &'static str {
+    match dimension_kind(sketch, first, Some(second), P2::ZERO) {
+        Some(ConstraintKind::Angle { .. }) => "angle",
+        _ => "distance",
     }
 }
 

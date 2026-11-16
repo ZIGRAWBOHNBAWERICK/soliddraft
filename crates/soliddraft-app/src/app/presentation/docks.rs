@@ -232,8 +232,16 @@ impl TabViewer for Panels<'_> {
                                 None => crate::sketcher::relations::close(ui.ctx(), session),
                             }
                         }
+                        let picks = session
+                            .selection
+                            .iter()
+                            .filter(|pick| !matches!(pick, crate::state::SketchSel::Constraint(_)))
+                            .count();
                         if session.selection.is_empty() {
                             crate::context_menu::Target::EmptySketch
+                        } else if picks >= 2 {
+                            // Two or more entities: the menu is for the whole selection.
+                            crate::context_menu::Target::SketchSelection
                         } else {
                             crate::context_menu::Target::SketchLine
                         }

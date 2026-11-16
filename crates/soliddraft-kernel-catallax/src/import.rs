@@ -73,6 +73,13 @@ pub(super) fn source_solids(format: ImportFormat, source: &[u8]) -> KernelResult
     if format == ImportFormat::Mesh {
         return Err(KernelError::InvalidInput("Mesh solids do not have source entity selectors.".into()));
     }
+    // A STEP file's surface models are source bodies too: each builds as a surface body,
+    // keyed by its entity like a solid, so a file of several is imported body by body.
+    if format == ImportFormat::Step {
+        let file = catallax_import::read_step(source).map_err(|error| refusal(format, error))?;
+        let solids = file.solids.into_iter().map(|solid| solid.name);
+        return Ok(solids.chain(file.surface_models.into_iter().map(|model| model.name)).collect());
+    }
     source_format(format).solid_entities(source).map_err(|error| refusal(format, error))
 }
 

@@ -420,6 +420,35 @@ const DEPTH_COMPARE: wgpu::CompareFunction = wgpu::CompareFunction::GreaterEqual
 pub const PICK_ROW_TEXELS: u32 = 64;
 pub const PICK_ROWS: u32 = 32;
 
+/// What the id buffer under the cursor shows in a part: the cursor, the pick revision,
+/// the view, the bodies drawn, the preview drawn in their place and the display choices.
+#[derive(PartialEq)]
+struct PickInputs {
+    cursor: [u32; 2],
+    revision: Option<PickRevision>,
+    view: PickView,
+    meshes: (u64, Vec<BodyId>),
+    preview: Option<(usize, bool)>,
+    display: DisplayMode,
+    planes: Option<PlaneFrame>,
+    grid: Option<GridFrame>,
+}
+
+impl PickInputs {
+    fn of(input: &FrameInput, cursor: [u32; 2]) -> Self {
+        PickInputs {
+            cursor,
+            revision: input.pick_revision,
+            view: input.pick_view(),
+            meshes: (input.meshes.0, input.meshes.1.iter().map(|(id, _)| *id).collect()),
+            preview: input.preview.as_ref().map(|mesh| (Arc::as_ptr(mesh) as usize, input.preview_pickable)),
+            display: input.display,
+            planes: input.planes,
+            grid: input.grid,
+        }
+    }
+}
+
 #[derive(Default)]
 struct Readback {
     /// A copy has been submitted and its map callback has not fired yet.
@@ -479,6 +508,10 @@ pub struct ViewportRenderer {
     preview: Option<(usize, GpuBody)>,
     pick_buffer: wgpu::Buffer,
     readback: Arc<Mutex<Readback>>,
+    /// What the last pick copy read back. On WebGL reading a pick waits for the frame on
+    /// the GPU, which software rendering takes most of a second to draw, so the pick under
+    /// a resting pointer is read again only when something it shows can have changed.
+    last_pick: Option<PickInputs>,
     display: DisplayMode,
     frame: u64,
     assembly: AssemblyRenderer,
@@ -933,6 +966,7 @@ impl ViewportRenderer {
             preview: None,
             pick_buffer,
             readback: Arc::new(Mutex::new(Readback::default())),
+            last_pick: None,
             display: DisplayMode::default(),
             frame: 0,
             assembly: AssemblyRenderer::new(device, COLOR_FORMAT, DEPTH_FORMAT, MSAA, ID_FORMAT),
@@ -1475,7 +1509,14 @@ impl ViewportRenderer {
         }
 
         let mut issued = None;
-        if let (Some(cursor), false) = (input.cursor_px, pending || ready) {
+        let inputs = input.cursor_px.map(|cursor| PickInputs::of(input, cursor));
+        // Only WebGL waits for the readback: there a pick is read again when one of its
+        // inputs changes. An assembly's scene has no version here, so its pick is read
+        // every frame.
+        let changed =
+            !cfg!(target_arch = "wasm32") || input.assembly.is_some() || inputs.is_none() || inputs != self.last_pick;
+        if let (Some(cursor), false, true) = (input.cursor_px, pending || ready, changed) {
+            self.last_pick = inputs;
             let w = PICK_ROW_TEXELS.min(size[0]);
             let h = PICK_ROWS.min(size[1]);
             let x = cursor[0].saturating_sub(w / 2).min(size[0] - w);

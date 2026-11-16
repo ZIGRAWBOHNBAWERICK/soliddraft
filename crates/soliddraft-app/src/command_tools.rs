@@ -472,9 +472,13 @@ pub enum Line {
         faces: Vec<String>,
         /// `top`, `front`, `right`, a reusable plane name, or a planar face's name.
         neutral: String,
+        /// `x`, `y`, `z`, an edge's name or a planar face's name; none pulls along the
+        /// neutral plane's normal.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pull: Option<String>,
         /// Draft angle, degrees.
         angle: f64,
-        /// Pull against the neutral plane's normal.
+        /// Pull against the chosen direction.
         reverse: bool,
     },
     /// Rounds edges.
@@ -567,12 +571,19 @@ pub enum Line {
         /// Positive wall thickness, mm.
         thickness: f64,
     },
-    /// Changes a draft's angle.
+    /// Changes a draft's angle, and optionally its pull direction.
     EditDraft {
         /// The feature's name.
         feature: String,
         /// New angle, degrees.
         angle: f64,
+        /// New pull direction, as `draft` takes it, or `neutral` for the neutral plane's
+        /// normal; none keeps it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pull: Option<String>,
+        /// Pull against the chosen direction; none keeps it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reverse: Option<bool>,
     },
     /// Suppresses or restores a feature.
     Suppress {
@@ -994,8 +1005,15 @@ pub fn draft_params() -> Vec<(&'static str, Value)> {
             "neutral",
             string("The neutral plane: `top`, `front`, `right`, a reusable plane name, or a planar face's name"),
         ),
+        (
+            "pull",
+            optional(string(
+                "The pull direction: `x`, `y` or `z` for an origin axis, a straight or circular edge's name, or a \
+                 planar face's name for its normal; leave out to pull along the neutral plane's normal",
+            )),
+        ),
         ("angle", number("Draft angle, degrees, between -90 and 90")),
-        ("reverse", boolean("true pulls against the neutral plane's normal")),
+        ("reverse", boolean("true pulls against the pull direction")),
     ]
 }
 
@@ -1026,7 +1044,17 @@ pub fn edit_mirror_params() -> Vec<(&'static str, Value)> {
 
 /// The `edit_draft` verb's parameters.
 pub fn edit_draft_params() -> Vec<(&'static str, Value)> {
-    vec![feature_param(), ("angle", number("Draft angle, degrees"))]
+    vec![
+        feature_param(),
+        ("angle", number("Draft angle, degrees")),
+        (
+            "pull",
+            optional(string(
+                "New pull direction as `draft` takes it, or `neutral` for the neutral plane's normal; leave out to keep it",
+            )),
+        ),
+        ("reverse", optional(boolean("true pulls against the pull direction; leave out to keep it"))),
+    ]
 }
 
 /// The `fillet` verb's parameters.
@@ -1313,6 +1341,30 @@ fn plane_ref(doc: &Document, plane: &str) -> Result<PlaneRef, String> {
         },
         SketchPlane::Face { face } | SketchPlane::FaceOffset { face, .. } => PlaneRef::Face { face },
     })
+}
+
+/// A draft's pull direction by name: an origin axis, an edge, or a planar face. `neutral`
+/// is the neutral plane's normal, which a draft stores as no direction.
+fn pull_ref(doc: &Document, name: &str) -> Result<Option<soliddraft_model::PullRef>, String> {
+    let key = name.trim().to_ascii_lowercase();
+    let axis = match key.trim_end_matches(" axis") {
+        "neutral" => return Ok(None),
+        "x" => Some(soliddraft_model::DatumAxis::X),
+        "y" => Some(soliddraft_model::DatumAxis::Y),
+        "z" => Some(soliddraft_model::DatumAxis::Z),
+        _ => None,
+    };
+    if let Some(axis) = axis {
+        return Ok(Some(soliddraft_model::PullRef::Axis { axis }));
+    }
+    if edge_by_name(doc, name).is_some() {
+        return Ok(Some(soliddraft_model::PullRef::Edge { edge: edge_ref(doc, name)? }));
+    }
+    let face = face_by_name(doc, name).ok_or_else(|| {
+        format!("`{name}` is not `x`, `y`, `z`, an edge or a planar face; `feature` lists edges and faces by name")
+    })?;
+    let face = doc.face_ref(face).ok_or_else(|| format!("`{name}` is not planar, so it has no single normal"))?;
+    Ok(Some(soliddraft_model::PullRef::Face { face }))
 }
 
 /// The end of an extrude or cut line.
@@ -1866,10 +1918,11 @@ impl Line {
                 };
                 run.apply(doc, Command::AddFeature(FeatureKind::Shell(shell)))?;
             }
-            Line::Draft { faces, neutral, angle, reverse } => {
+            Line::Draft { faces, neutral, pull, angle, reverse } => {
                 let draft = soliddraft_model::DraftFeature {
                     faces: faces.iter().map(|f| face_ref_by_name(doc, f)).collect::<Result<Vec<_>, _>>()?,
                     neutral: plane_ref(doc, neutral)?,
+                    pull: pull.as_deref().map(|p| pull_ref(doc, p)).transpose()?.flatten(),
                     angle: *angle,
                     reverse: *reverse,
                     of: None,
@@ -1961,12 +2014,18 @@ impl Line {
                 shell.thickness = positive("wall thickness", *thickness)?;
                 run.apply(doc, Command::EditFeature { id, kind: FeatureKind::Shell(shell) })?;
             }
-            Line::EditDraft { feature, angle } => {
+            Line::EditDraft { feature, angle, pull, reverse } => {
                 let id = feature_by_name(doc, feature)?;
                 let Some(FeatureKind::Draft(mut d)) = doc.feature(id).map(|f| f.kind.clone()) else {
                     return Err(format!("{feature} is not a draft"));
                 };
                 d.angle = *angle;
+                if let Some(pull) = pull {
+                    d.pull = pull_ref(doc, pull)?;
+                }
+                if let Some(reverse) = reverse {
+                    d.reverse = *reverse;
+                }
                 run.apply(doc, Command::EditFeature { id, kind: FeatureKind::Draft(d) })?;
             }
             Line::EditFillet { feature, radius } => {
@@ -2226,9 +2285,15 @@ impl Line {
             Line::EditShell { feature, thickness } => {
                 (format!("Edit {feature}"), format!("{} mm wall", fmt_mm(*thickness)))
             }
-            Line::Draft { faces, neutral, angle, .. } => {
-                ("Draft".into(), format!("{}° on {} about {neutral}", fmt_mm(*angle), faces.join(", ")))
-            }
+            Line::Draft { faces, neutral, pull, angle, .. } => (
+                "Draft".into(),
+                format!(
+                    "{}° on {} about {neutral}{}",
+                    fmt_mm(*angle),
+                    faces.join(", "),
+                    pull.as_ref().map_or(String::new(), |p| format!(", pulled along {p}"))
+                ),
+            ),
             Line::EditHole { feature, diameter, depth, countersink } => (
                 format!("Edit {feature}"),
                 format!(
@@ -2247,7 +2312,14 @@ impl Line {
             Line::EditMirror { feature, keep_original } => {
                 (format!("Edit {feature}"), if *keep_original { "keep the original" } else { "reflection only" }.into())
             }
-            Line::EditDraft { feature, angle } => (format!("Edit {feature}"), format!("{}°", fmt_mm(*angle))),
+            Line::EditDraft { feature, angle, pull, .. } => (
+                format!("Edit {feature}"),
+                format!(
+                    "{}°{}",
+                    fmt_mm(*angle),
+                    pull.as_ref().map_or(String::new(), |p| format!(", pulled along {p}"))
+                ),
+            ),
             Line::Fillet { edges, radius } => {
                 ("Fillet".into(), format!("R{} on {}", fmt_mm(*radius), edges.join(", ")))
             }
@@ -2918,7 +2990,9 @@ fn params_json(doc: &Document, kind: &FeatureKind) -> Value {
         }),
         FeatureKind::Draft(d) => json!({
             "type": "draft", "faces": d.faces.iter().map(|f| f.label.clone()).collect::<Vec<_>>(),
-            "neutral": plane_ref_label(&d.neutral), "angle": d.angle, "reverse": d.reverse,
+            "neutral": plane_ref_label(&d.neutral),
+            "pull": d.pull.as_ref().map_or_else(|| "neutral plane normal".into(), soliddraft_model::PullRef::label),
+            "angle": d.angle, "reverse": d.reverse,
         }),
         FeatureKind::Lattice(l) => json!({
             "type": "lattice", "cell": l.cell, "cell_size_mm": l.cell_size_mm, "radius_mm": l.radius_mm,

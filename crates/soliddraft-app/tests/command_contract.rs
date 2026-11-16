@@ -615,6 +615,37 @@ fn before_feature_pattern_source(id: &str, current: &mut Value) {
     }
 }
 
+/// Draft gained an optional pull direction, and Edit draft optional pull and reverse.
+/// Tool calls and recipes without them keep their meaning: pull along the neutral
+/// plane's normal, and keep the saved choice on an edit.
+fn before_draft_pull(id: &str, current: &mut Value) {
+    fn remove_optional(schema: &mut Value, field: &str, kind: &str) {
+        let removed = schema["properties"].as_object_mut().unwrap().remove(field);
+        assert_eq!(removed, Some(json!({"type": kind})), "{field} is one optional {kind}");
+        assert!(!schema["required"].as_array().unwrap().contains(&json!(field)), "{field} stays optional");
+    }
+    fn remove(op: &str, schema: &mut Value) {
+        remove_optional(schema, "pull", "string");
+        if op == "edit_draft" {
+            remove_optional(schema, "reverse", "boolean");
+        }
+    }
+    match id {
+        "draft" | "edit_draft" => remove(id, &mut current["tool"]["input"]),
+        "propose" => {
+            let variants = current
+                .pointer_mut("/tool/input/properties/commands/items/anyOf")
+                .and_then(Value::as_array_mut)
+                .expect("proposal variants");
+            for op in ["draft", "edit_draft"] {
+                let schema = variants.iter_mut().find(|v| v["properties"]["op"]["const"] == op).expect(op);
+                remove(op, schema);
+            }
+        }
+        _ => {}
+    }
+}
+
 fn before_loft_verbs(id: &str, current: &mut Value) {
     if id != "propose" {
         return;
@@ -838,6 +869,7 @@ fn command_ids_shortcuts_agent_schemas_and_availability_stay_compatible() {
         before_ridealong_inputs(id, &mut current);
         before_distance_verbs(id, &mut current);
         before_feature_pattern_source(id, &mut current);
+        before_draft_pull(id, &mut current);
         before_print_accuracy(id, &mut current);
         if id == "check" {
             assert_eq!(current["agents"], "app", "Check opens its own report");

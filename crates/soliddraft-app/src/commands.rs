@@ -2050,8 +2050,8 @@ fn registry() -> Vec<CommandSpec> {
             .hint(|s| after_field(s).or_else(|| (!has_body(s)).then(|| "Draft needs a body".into())))
             .agents(
                 Agents::Verb,
-                "The pull direction is the neutral plane's normal, or its reverse. Catallax drafts planar faces and \
-                 cylinders parallel to the pull.",
+                "The pull direction is the neutral plane's normal unless `pull` names an axis, edge or planar face; \
+                 `reverse` flips it. Catallax drafts planar faces and cylinders parallel to the pull.",
                 tools::draft_params,
             )
             .undo(Undo::Step),
@@ -2734,7 +2734,7 @@ fn registry() -> Vec<CommandSpec> {
         cmd("edit_shell", "Edit shell", Icon::Shell, "Change a shell's wall thickness")
             .agents(Agents::Verb, "The openings are retained; everything after it rebuilds.", tools::edit_shell_params)
             .undo(Undo::Step),
-        cmd("edit_draft", "Edit draft", Icon::Draft, "Change a draft's angle").agents(
+        cmd("edit_draft", "Edit draft", Icon::Draft, "Change a draft's angle or pull direction").agents(
             Agents::Verb,
             "Everything after it rebuilds.",
             tools::edit_draft_params,

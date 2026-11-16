@@ -60,6 +60,7 @@ pub enum Key {
     Thickness,
     DraftFaces,
     NeutralPlane,
+    PullDirection,
     Reverse,
     /// An extrusion's or cut's Draft option: on or off, its angle, and outward.
     TaperOn,
@@ -251,6 +252,7 @@ pub fn spec(
             vec![
                 field(DraftFaces, "Faces", "Picks", 190.0),
                 field(NeutralPlane, "Neutral plane", "Neutral plane", 240.0),
+                field(PullDirection, "Pull", "Pull", 220.0),
                 field(Angle, "Angle", "Size", 150.0),
                 field(Reverse, "", "Size", 120.0),
             ],
@@ -968,7 +970,32 @@ fn render(
             ui.menu_button(crate::document::plane_ref_label(&p.neutral), |ui| {
                 ui.set_min_width(260.0);
                 properties::plane_combo(ui, "draft_neutral", &mut p.neutral, &context.planes);
-                ui.checkbox(&mut p.picking_neutral, "Next face click sets the neutral plane");
+                if ui.checkbox(&mut p.picking_neutral, "Next face click sets the neutral plane").changed() {
+                    p.picking_pull = false;
+                }
+            });
+        }
+        (EditorParams::Draft(p), Key::PullDirection) => {
+            let label = p.pull.as_ref().map_or_else(|| "Neutral plane normal".into(), |r| r.label());
+            ui.menu_button(label, |ui| {
+                ui.set_min_width(260.0);
+                if ui.selectable_label(p.pull.is_none(), "Neutral plane normal").clicked() {
+                    p.pull = None;
+                    p.picking_pull = false;
+                }
+                for axis in
+                    [soliddraft_model::DatumAxis::X, soliddraft_model::DatumAxis::Y, soliddraft_model::DatumAxis::Z]
+                {
+                    let chosen = p.pull == Some(soliddraft_model::PullRef::Axis { axis });
+                    if ui.selectable_label(chosen, axis.label()).clicked() {
+                        p.pull = Some(soliddraft_model::PullRef::Axis { axis });
+                        p.picking_pull = false;
+                    }
+                }
+                if ui.checkbox(&mut p.picking_pull, "Next face click sets the pull direction").changed() {
+                    p.picking_neutral = false;
+                }
+                ui.weak("Or click an edge or an origin axis");
             });
         }
         (EditorParams::Draft(p), Key::Angle) => number(

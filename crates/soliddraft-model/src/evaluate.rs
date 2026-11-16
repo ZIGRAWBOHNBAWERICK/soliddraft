@@ -6,13 +6,13 @@ use std::sync::Arc;
 use soliddraft_kernel_api::{
     BodyId, BooleanOp, CurveKind, Draft, EdgeId, Extrude, ExtrudeLimit, FaceId, FacePoint, FaceRole, FaceSupport,
     Gyroid, HistoryRecord, Hole, HolePlacement, ImportOptions, ImportStepRequest, ImportStepResult, KernelError,
-    KernelResult, Lattice, Mirror, OpResult, OpTag, Origin, PatternLayout, Plane, SurfaceKind, Vec3,
+    KernelResult, Lattice, Mirror, OpResult, OpTag, Origin, PatternLayout, Plane, SurfaceKind, Vec3, drawing::Curve3,
 };
 
 use crate::feature::{
     BlendFeature, DraftFeature, EndCondition, ExtrudeFeature, ExtrudeOp, Feature, FeatureId, FeatureKind,
     GyroidFeature, HoleFeature, ImportStepFeature, LatticeFeature, MirrorFeature, PatternFeature, PatternSpec,
-    PlaneRef, ProfileSource, RevolveFeature, SketchFeature, SketchPlane,
+    PlaneRef, ProfileSource, PullRef, RevolveFeature, SketchFeature, SketchPlane,
 };
 use crate::rebuild::BuildCache;
 use crate::reference::{self, Generator, NamedFace, ReferenceSlot, RepairNeeded, RepairReason, View};
@@ -1011,6 +1011,40 @@ impl Document {
         }
     }
 
+    /// Resolves a draft's pull direction: an origin axis, a straight edge's direction or
+    /// a circular edge's axis, or a planar face's outward normal.
+    pub fn pull_of(&self, r: &PullRef, body: BodyId) -> Result<Vec3, Box<RepairNeeded>> {
+        let mismatch = |detail: &str| {
+            Box::new(RepairNeeded {
+                slot: ReferenceSlot::Pull,
+                reason: RepairReason::Mismatch { detail: detail.into() },
+                message: detail.into(),
+                candidates: vec![],
+            })
+        };
+        match r {
+            PullRef::Axis { axis } => Ok(axis.direction()),
+            PullRef::Edge { edge } => {
+                let id = self
+                    .resolve_edge(edge, body)
+                    .map_err(|r| Box::new(RepairNeeded { slot: ReferenceSlot::Pull, ..r }))?;
+                match self.kernel.edge_curve(body, id) {
+                    Ok(Curve3::Line { a, b }) => (b - a).normalized().ok_or_else(|| mismatch("the edge has no length")),
+                    Ok(Curve3::Arc { normal, .. } | Curve3::Circle { normal, .. }) => Ok(normal),
+                    Ok(_) => Err(mismatch("the edge is neither straight nor circular")),
+                    Err(e) => Err(Box::new(kernel_repair(ReferenceSlot::Pull, e))),
+                }
+            }
+            PullRef::Face { face } => {
+                let id = self
+                    .resolve_face(face, body)
+                    .map_err(|r| Box::new(RepairNeeded { slot: ReferenceSlot::Pull, ..r }))?;
+                let info = self.kernel.topology(body).ok().and_then(|t| t.face(id).cloned());
+                info.and_then(|f| f.normal).ok_or_else(|| mismatch("the face is not planar"))
+            }
+        }
+    }
+
     /// The result of an operation that makes a new body from the part's body, with
     /// the faces it made named.
     fn finish(
@@ -1436,10 +1470,19 @@ impl Document {
                 None
             }
         };
-        let Some(neutral) = neutral.filter(|_| repairs.is_empty()) else {
-            return Built::pass(FeatureStatus::RepairNeeded(repairs), current);
+        let chosen = match d.pull.as_ref().map(|r| self.pull_of(r, body)).transpose() {
+            Ok(direction) => Some(direction),
+            Err(r) => {
+                repairs.push(*r);
+                None
+            }
         };
-        let pull = if d.reverse { -neutral.normal } else { neutral.normal };
+        let (neutral, chosen) = match (neutral, chosen) {
+            (Some(neutral), Some(chosen)) if repairs.is_empty() => (neutral, chosen),
+            _ => return Built::pass(FeatureStatus::RepairNeeded(repairs), current),
+        };
+        let pull = chosen.unwrap_or(neutral.normal);
+        let pull = if d.reverse { -pull } else { pull };
         let params = Draft { pull, neutral_origin: neutral.origin, neutral_normal: neutral.normal, angle_deg: d.angle };
         let result = self.kernel.draft(&OpTag::new(format!("{}.draft", f.id)), body, &faces, &params);
         self.finish(result, current, |_| Vec::new())

@@ -107,8 +107,7 @@ impl PlaneKind {
     }
 }
 
-/// The three origin axes. They are fixed, so no part file stores them and every part
-/// has them.
+/// The three origin axes. They are fixed and every part has them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AxisKind {
     X,
@@ -136,7 +135,7 @@ impl AxisKind {
         }
     }
 
-    fn to_model(self) -> model::view::DatumAxis {
+    pub(crate) fn to_model(self) -> model::view::DatumAxis {
         match self {
             AxisKind::X => model::view::DatumAxis::X,
             AxisKind::Y => model::view::DatumAxis::Y,
@@ -424,10 +423,14 @@ impl HoleParams {
 pub struct DraftParams {
     pub faces: Vec<FaceRef>,
     pub neutral: model::PlaneRef,
+    /// None pulls along the neutral plane's normal.
+    pub pull: Option<model::PullRef>,
     pub angle: f64,
     pub reverse: bool,
     /// The next face click sets the neutral plane instead of adding a face.
     pub picking_neutral: bool,
+    /// The next face click sets the pull direction instead of adding a face.
+    pub picking_pull: bool,
 }
 
 impl Default for DraftParams {
@@ -435,9 +438,11 @@ impl Default for DraftParams {
         DraftParams {
             faces: Vec::new(),
             neutral: model::PlaneRef::Datum { datum: model::DatumPlane::Top, offset: 0.0 },
+            pull: None,
             angle: 3.0,
             reverse: false,
             picking_neutral: false,
+            picking_pull: false,
         }
     }
 }
@@ -447,9 +452,23 @@ impl DraftParams {
         model::DraftFeature {
             faces: self.faces.clone(),
             neutral: self.neutral.clone(),
+            pull: self.pull.clone(),
             angle: self.angle,
             reverse: self.reverse,
             of: None,
+        }
+    }
+
+    /// The editor for a saved draft.
+    pub fn of(d: &model::DraftFeature) -> Self {
+        DraftParams {
+            faces: d.faces.clone(),
+            neutral: d.neutral.clone(),
+            pull: d.pull.clone(),
+            angle: d.angle,
+            reverse: d.reverse,
+            picking_neutral: false,
+            picking_pull: false,
         }
     }
 }
@@ -3113,6 +3132,12 @@ impl Document {
                     (model::FeatureKind::Draft(d), EntityRef::Face(face)) if index == d.faces.len() => {
                         d.neutral = model::PlaneRef::Face { face };
                     }
+                    (model::FeatureKind::Draft(d), EntityRef::Face(face)) if index == d.faces.len() + 1 => {
+                        d.pull = Some(model::PullRef::Face { face });
+                    }
+                    (model::FeatureKind::Draft(d), EntityRef::Edge(edge)) if index == d.faces.len() + 1 => {
+                        d.pull = Some(model::PullRef::Edge { edge });
+                    }
                     (model::FeatureKind::Extrude(e), EntityRef::Face(face)) if index == 0 => {
                         e.end = model::EndCondition::UpToFace { face };
                     }
@@ -3406,6 +3431,7 @@ impl Document {
         let kind = model::FeatureKind::Draft(model::DraftFeature {
             faces,
             neutral,
+            pull: None,
             angle,
             reverse: extrude.reverse,
             of: Some(owner),
@@ -4211,7 +4237,11 @@ impl Document {
             if d.of.is_none()
                 && let Ok(plane) = fork.plane_of(&d.neutral, body)
             {
-                guides = draft_guides(guides, &plane, &topology, d.reverse);
+                let pull = match &d.pull {
+                    Some(r) => fork.pull_of(r, body).unwrap_or(plane.normal),
+                    None => plane.normal,
+                };
+                guides = draft_guides(guides, &plane, &topology, if d.reverse { -pull } else { pull });
             }
         }
         let mesh = preview_mesh_marked(fork.kernel().as_ref(), body, &self.tess_params, &made)?;
@@ -5141,6 +5171,13 @@ fn view_status(
                         (model::ReferenceSlot::Plane, model::FeatureKind::Draft(d)) => {
                             (d.faces.len(), RefKind::Face, plane_ref_label(&d.neutral))
                         }
+                        (model::ReferenceSlot::Pull, model::FeatureKind::Draft(d)) => {
+                            let kind = match d.pull {
+                                Some(model::PullRef::Edge { .. }) => RefKind::Edge,
+                                _ => RefKind::Face,
+                            };
+                            (d.faces.len() + 1, kind, d.pull.as_ref().map(model::PullRef::label).unwrap_or_default())
+                        }
                         (model::ReferenceSlot::Plane, model::FeatureKind::Hole(h)) => {
                             (0, RefKind::Face, h.face.label.clone())
                         }
@@ -5176,7 +5213,8 @@ fn view_status(
                         (
                             model::ReferenceSlot::SketchPlane
                             | model::ReferenceSlot::Plane
-                            | model::ReferenceSlot::Limit,
+                            | model::ReferenceSlot::Limit
+                            | model::ReferenceSlot::Pull,
                             _,
                         ) => (0, RefKind::Face, String::new()),
                         (model::ReferenceSlot::Face { index }, _) => (index as usize, RefKind::Face, String::new()),
@@ -5232,7 +5270,7 @@ fn draft_guides(
     mut guides: PreviewGuides,
     plane: &soliddraft_kernel_api::Plane,
     topology: &soliddraft_kernel_api::Topology,
-    reverse: bool,
+    pull: soliddraft_kernel_api::Vec3,
 ) -> PreviewGuides {
     let v = |p: soliddraft_kernel_api::Vec3| Vec3::new(p.x as f32, p.y as f32, p.z as f32);
     let (origin, normal, u) =
@@ -5256,7 +5294,7 @@ fn draft_guides(
     let at = |a: f32, b: f32| origin + u * a + w * b;
     guides.outline = vec![at(lo[0], lo[1]), at(hi[0], lo[1]), at(hi[0], hi[1]), at(lo[0], hi[1])];
     let centre = at((lo[0] + hi[0]) / 2.0, (lo[1] + hi[1]) / 2.0);
-    let pull = if reverse { -normal } else { normal };
+    let pull = v(pull).normalize_or_zero();
     let length = reach.max(margin * 2.0);
     guides.arrow = Some(PreviewArrow { from: centre, to: centre + pull * length, text: "Pull".into(), drags: false });
     guides

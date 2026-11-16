@@ -1,0 +1,194 @@
+{
+  "format": "soliddraft-part/2",
+  "name": "Part1",
+  "units": "mm",
+  "features": [
+    {
+      "id": 1,
+      "name": "Sketch1",
+      "kind": {
+        "type": "sketch",
+        "plane": {
+          "on": "datum",
+          "datum": "top"
+        },
+        "sketch": {
+          "entities": [
+            {
+              "id": 0,
+              "kind": {
+                "type": "point",
+                "p": {
+                  "u": 0.0,
+                  "v": 0.0
+                }
+              },
+              "construction": true
+            },
+            {
+              "id": 1,
+              "kind": {
+                "type": "circle",
+                "center": {
+                  "u": 0.0,
+                  "v": 0.0
+                },
+                "radius": 8.0
+              },
+              "construction": false
+            },
+            {
+              "id": 2,
+              "kind": {
+                "type": "circle",
+                "center": {
+                  "u": 0.0,
+                  "v": 0.0
+                },
+                "radius": 4.0
+              },
+              "construction": false
+            }
+          ],
+          "constraints": [
+            {
+              "id": 1,
+              "kind": {
+                "type": "fix",
+                "point": {
+                  "entity": 1,
+                  "index": 0
+                },
+                "at": {
+                  "u": 0.0,
+                  "v": 0.0
+                }
+              }
+            },
+            {
+              "id": 2,
+              "kind": {
+                "type": "radius",
+                "entity": 1,
+                "value": 16.0,
+                "diameter": true,
+                "label": {
+                  "u": 8.485281374238571,
+                  "v": 8.48528137423857
+                }
+              }
+            },
+            {
+              "id": 3,
+              "kind": {
+                "type": "fix",
+                "point": {
+                  "entity": 2,
+                  "index": 0
+                },
+                "at": {
+                  "u": 0.0,
+                  "v": 0.0
+                }
+              }
+            },
+            {
+              "id": 4,
+              "kind": {
+                "type": "radius",
+                "entity": 2,
+                "value": 8.0,
+                "diameter": true,
+                "label": {
+                  "u": 4.242640687119286,
+                  "v": 4.242640687119285
+                }
+              }
+            }
+          ],
+          "next_entity": 3,
+          "next_constraint": 5
+        }
+      },
+      "via_assistant": true
+    },
+    {
+      "id": 2,
+      "name": "Boss-Extrude1",
+      "kind": {
+        "type": "extrude",
+        "profile": {
+          "from": "sketch",
+          "feature": 1
+        },
+        "operation": "boss",
+        "end": {
+          "type": "blind",
+          "depth": 2.0
+        }
+      },
+      "via_assistant": true
+    },
+    {
+      "id": 3,
+      "name": "Plane1",
+      "kind": {
+        "type": "reference_plane",
+        "on": "datum",
+        "datum": "top",
+        "offset": 1.0
+      },
+      "via_assistant": true
+    },
+    {
+      "id": 4,
+      "name": "Draft1",
+      "kind": {
+        "type": "draft",
+        "faces": [
+          {
+            "feature": 2,
+            "generator": {
+              "kind": "side",
+              "entity": 1
+            },
+            "fingerprint": {
+              "surface": "cylinder",
+              "centroid": [
+                1.2148211013512063e-16,
+                6.56106930618971e-16,
+                1.0
+              ],
+              "area": 100.53096491487338
+            },
+            "label": "Boss-Extrude1 · Wall of circle 1"
+          },
+          {
+            "feature": 2,
+            "generator": {
+              "kind": "side",
+              "entity": 2
+            },
+            "fingerprint": {
+              "surface": "cylinder",
+              "centroid": [
+                1.2148310830363618e-16,
+                6.400641268747831e-16,
+                1.0000000000000007
+              ],
+              "area": 50.26548245743669
+            },
+            "label": "Boss-Extrude1 · Wall of circle 2"
+          }
+        ],
+        "neutral": {
+          "on": "feature",
+          "feature": 3
+        },
+        "angle": -45.0
+      },
+      "via_assistant": true
+    }
+  ],
+  "next_feature": 5
+}

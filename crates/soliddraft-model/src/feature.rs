@@ -198,6 +198,7 @@ impl FeatureKind {
             FeatureKind::Draft(d) => {
                 out.extend(d.faces.iter().map(|f| f.feature));
                 out.extend(d.neutral.dependencies());
+                out.extend(d.pull.iter().flat_map(PullRef::dependencies));
             }
         }
         out.sort();
@@ -358,6 +359,38 @@ impl DatumPlane {
             DatumPlane::Top => "Top plane",
             DatumPlane::Front => "Front plane",
             DatumPlane::Right => "Right plane",
+        }
+    }
+}
+
+/// The three origin axes. Every part has them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DatumAxis {
+    /// The X axis.
+    X,
+    /// The Y axis.
+    Y,
+    /// The Z axis.
+    Z,
+}
+
+impl DatumAxis {
+    /// The axis's unit direction.
+    pub fn direction(self) -> Vec3 {
+        match self {
+            DatumAxis::X => Vec3::X,
+            DatumAxis::Y => Vec3::Y,
+            DatumAxis::Z => Vec3::Z,
+        }
+    }
+
+    /// Name for people.
+    pub fn label(self) -> &'static str {
+        match self {
+            DatumAxis::X => "X axis",
+            DatumAxis::Y => "Y axis",
+            DatumAxis::Z => "Z axis",
         }
     }
 }
@@ -577,17 +610,64 @@ pub struct MirrorFeature {
 pub struct DraftFeature {
     /// The faces to tilt.
     pub faces: Vec<FaceRef>,
-    /// Where the drafted faces keep their place. The pull direction is its normal.
+    /// Where the drafted faces keep their place.
     pub neutral: PlaneRef,
+    /// The direction the part leaves its mould in. None pulls along the neutral plane's
+    /// normal, as drafts saved before this choice existed do.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pull: Option<PullRef>,
     /// Draft angle in degrees, in (-90, 90).
     pub angle: f64,
-    /// Pull against the neutral plane's normal instead of along it.
+    /// Pull against the chosen direction instead of along it.
     #[serde(default, skip_serializing_if = "is_false")]
     pub reverse: bool,
     /// The extrusion or cut whose Draft option this draft is. The interface shows the
     /// two as one feature, and edits, suppresses and deletes them together.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub of: Option<FeatureId>,
+}
+
+/// Where a draft reads its pull direction from.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "from", rename_all = "snake_case")]
+pub enum PullRef {
+    /// An origin axis.
+    Axis {
+        /// Which axis.
+        axis: DatumAxis,
+    },
+    /// A straight edge's direction, or a circular edge's axis.
+    Edge {
+        /// The edge.
+        edge: EdgeRef,
+    },
+    /// A planar face's outward normal.
+    Face {
+        /// The face.
+        face: FaceRef,
+    },
+}
+
+impl PullRef {
+    /// Features that define this direction.
+    pub fn dependencies(&self) -> Vec<FeatureId> {
+        match self {
+            Self::Axis { .. } => Vec::new(),
+            Self::Edge { edge } => edge.faces.iter().map(|f| f.feature).collect(),
+            Self::Face { face } => vec![face.feature],
+        }
+    }
+
+    /// Name for people.
+    pub fn label(&self) -> String {
+        match self {
+            Self::Axis { axis } => axis.label().into(),
+            Self::Edge { edge } if !edge.label.is_empty() => edge.label.clone(),
+            Self::Edge { .. } => "Edge".into(),
+            Self::Face { face } if !face.label.is_empty() => face.label.clone(),
+            Self::Face { .. } => "Face".into(),
+        }
+    }
 }
 
 /// Which faces a shell opens. Saved as a list: `[]` opens nothing, a list of references

@@ -13,13 +13,20 @@ use std::sync::Arc;
 use catallax_app::Names;
 use catallax_features::Built;
 use catallax_numbers::Decider;
+use catallax_recipe::{EdgeName, Origin, VertexName};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-use soliddraft_kernel_api::{EdgeId, EdgePolyline, FaceId, KernelError, KernelResult, Mesh, Topology, VertexId};
+use soliddraft_kernel_api::{
+    EdgeId, EdgePolyline, FaceId, HistoryRecord, KernelError, KernelResult, Mesh, Topology, VertexId,
+};
+
+type CatFace = catallax_topology::FaceId;
+type CatEdge = catallax_topology::EdgeId;
+type CatVertex = catallax_topology::VertexId;
 
 /// The first bytes of a hand-over, then its version.
-const MAGIC: &[u8; 16] = b"soliddraft-hand1";
+const MAGIC: &[u8; 16] = b"soliddraft-hand2";
 
 /// The key of a Catallax recipe that does not depend on the kernel that wrote it.
 pub(crate) fn key(recipe: &catallax_recipe::Recipe) -> String {
@@ -144,13 +151,119 @@ impl HandedTopology {
     }
 }
 
-/// One build handed over: its recipe key, its Catallax bytes and, when the handing
-/// kernel computed it, its topology. A build handed over earlier sends its topology
-/// alone once the handing kernel computes it, with no bytes.
+/// What a kernel needs to adopt a build without reading its bytes, so that an edit
+/// reads no exact geometry the user did not ask for.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub(crate) struct HandedIdentity {
+    /// The handed recipe's step ids, in order.
+    pub steps: Vec<String>,
+    /// Each face's Catallax handle index, the handing kernel's interface id for it and
+    /// its Catallax origins, in the handing kernel's step ids.
+    pub faces: Vec<(u32, u64, Vec<Origin>)>,
+    pub edges: Vec<(u32, u64, Option<EdgeName>)>,
+    pub vertices: Vec<(u32, u64, Option<VertexName>)>,
+    /// The handing kernel's history record of the operation, in its interface ids.
+    pub record: HistoryRecord,
+    /// Whether any face is a B-spline surface.
+    pub splines: bool,
+    /// The planar faces whose plane has a rational normal and origin.
+    pub planes: Vec<HandedPlane>,
+}
+
+/// A planar face's exact plane, as rational numbers in text.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub(crate) struct HandedPlane {
+    pub face: u32,
+    pub normal: [String; 3],
+    pub origin: [String; 3],
+    /// Whether the face's sense agrees with the plane's normal.
+    pub same_sense: bool,
+}
+
+impl HandedIdentity {
+    /// The build's Catallax names, renamed from the handing kernel's step ids as
+    /// [`renamed_names`] does. `None` if a handle or a renamed name cannot be made.
+    pub(crate) fn names(&self, renames: &BTreeMap<String, String>) -> Option<Names> {
+        fn index_of<T>(list: &[(u32, u64, T)]) -> Vec<u32> {
+            list.iter().map(|(index, _, _)| *index).collect()
+        }
+        let (faces, edges, vertices) =
+            mint(&index_of(&self.faces), &index_of(&self.edges), &index_of(&self.vertices)).ok()?;
+        let names = Names {
+            faces: faces
+                .into_iter()
+                .zip(&self.faces)
+                .map(|(handle, (_, _, origins))| (handle, origins.clone()))
+                .collect(),
+            edges: edges.into_iter().zip(&self.edges).map(|(handle, (_, _, name))| (handle, name.clone())).collect(),
+            vertices: vertices
+                .into_iter()
+                .zip(&self.vertices)
+                .map(|(handle, (_, _, name))| (handle, name.clone()))
+                .collect(),
+        };
+        renamed_names(names, renames)
+    }
+
+    /// The handing kernel's interface id for each handle index, faces, edges and vertices.
+    pub(crate) fn worker_ids(&self) -> (BTreeMap<u32, u64>, BTreeMap<u32, u64>, BTreeMap<u32, u64>) {
+        fn ids<T>(list: &[(u32, u64, T)]) -> BTreeMap<u32, u64> {
+            list.iter().map(|(index, id, _)| (*index, *id)).collect()
+        }
+        (ids(&self.faces), ids(&self.edges), ids(&self.vertices))
+    }
+}
+
+/// Catallax handles for entity handle indices. Catallax makes a handle only while it
+/// reads its transfer format, so the indices pass through that format as a small
+/// record of their own, with each arena declared unbounded.
+fn mint(
+    faces: &[u32],
+    edges: &[u32],
+    vertices: &[u32],
+) -> Result<(Vec<CatFace>, Vec<CatEdge>, Vec<CatVertex>), catallax_numbers::Refusal> {
+    use catallax_numbers::transfer::{Codec, Reader, Writer};
+    struct Indices {
+        lists: [Vec<u32>; 3],
+        handles: Option<(Vec<CatFace>, Vec<CatEdge>, Vec<CatVertex>)>,
+    }
+    fn handles<T: 'static>(
+        reader: &mut Reader<'_>,
+    ) -> Result<Vec<catallax_shapes::Handle<T>>, catallax_numbers::Refusal> {
+        reader.arena::<T>(usize::MAX)?;
+        (0..reader.count()?).map(|_| catallax_shapes::Handle::<T>::read(reader)).collect()
+    }
+    impl Codec for Indices {
+        fn write(&self, writer: &mut Writer) -> Result<(), catallax_numbers::Refusal> {
+            for list in &self.lists {
+                list.len().write(writer)?;
+                for index in list {
+                    index.write(writer)?;
+                }
+            }
+            Ok(())
+        }
+        fn read(reader: &mut Reader<'_>) -> Result<Self, catallax_numbers::Refusal> {
+            let faces = handles::<catallax_topology::Face>(reader)?;
+            let edges = handles::<catallax_topology::Edge>(reader)?;
+            let vertices = handles::<catallax_topology::Vertex>(reader)?;
+            Ok(Indices { lists: Default::default(), handles: Some((faces, edges, vertices)) })
+        }
+    }
+    let indices = Indices { lists: [faces.to_vec(), edges.to_vec(), vertices.to_vec()], handles: None };
+    let bytes = catallax_numbers::transfer::encode(&indices, &mut Decider::default())?;
+    let read: Indices = catallax_numbers::transfer::decode(&bytes, &mut Decider::default())?;
+    Ok(read.handles.expect("a read record holds handles"))
+}
+
+/// One build handed over: its recipe key, its Catallax bytes, what adopting it unread
+/// needs and, when the handing kernel computed it, its topology. A build handed over
+/// earlier sends its topology alone once the handing kernel computes it, with no bytes.
 pub(crate) struct Handed {
     pub key: String,
     pub body: Option<Vec<u8>>,
     pub topology: Option<HandedTopology>,
+    pub identity: Option<HandedIdentity>,
 }
 
 /// What another kernel handed over for one recipe key.
@@ -168,6 +281,16 @@ pub(crate) struct Offer {
     bytes: Arc<[u8]>,
     built: Arc<std::sync::OnceLock<Result<Arc<Built>, String>>>,
     pub topology: Option<Arc<HandedTopology>>,
+    /// What adopting the build without reading its bytes needs, when it was handed.
+    pub identity: Option<Arc<HandedIdentity>>,
+    /// Counts the reads of the receiving kernel's offers.
+    pub reads: Arc<std::sync::atomic::AtomicU64>,
+}
+
+impl std::fmt::Debug for Offer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Offer").field("bytes", &self.bytes.len()).field("read", &self.is_read()).finish()
+    }
 }
 
 impl Offer {
@@ -178,14 +301,22 @@ impl Offer {
 
     /// The offered build, read from its bytes the first time it is asked for.
     pub(crate) fn built(&self) -> KernelResult<Arc<Built>> {
-        self.built
-            .get_or_init(|| {
-                catallax_app::handover::read_body(&self.bytes, &mut Decider::default())
-                    .map(Arc::new)
-                    .map_err(|refusal| format!("{}: {}", refusal.code, refusal.detail))
-            })
-            .clone()
-            .map_err(KernelError::InvalidInput)
+        self.read().clone().map_err(KernelError::InvalidInput)
+    }
+
+    /// The offered build or why its bytes did not read, read the first time.
+    pub(crate) fn read(&self) -> &Result<Arc<Built>, String> {
+        self.built.get_or_init(|| {
+            self.reads.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            catallax_app::handover::read_body(&self.bytes, &mut Decider::default())
+                .map(Arc::new)
+                .map_err(|refusal| format!("{}: {}", refusal.code, refusal.detail))
+        })
+    }
+
+    /// The size of the offered bytes.
+    pub(crate) fn len(&self) -> usize {
+        self.bytes.len()
     }
 }
 
@@ -195,8 +326,9 @@ pub(crate) fn encode(builds: &[Handed]) -> KernelResult<Vec<u8>> {
     out.extend((builds.len() as u32).to_le_bytes());
     for handed in builds {
         let topology = serde_json::to_vec(&handed.topology).map_err(|e| KernelError::InvalidInput(e.to_string()))?;
+        let identity = serde_json::to_vec(&handed.identity).map_err(|e| KernelError::InvalidInput(e.to_string()))?;
         let body = handed.body.as_deref().unwrap_or_default();
-        for part in [handed.key.as_bytes(), body, &topology] {
+        for part in [handed.key.as_bytes(), body, &topology, &identity] {
             out.extend((part.len() as u64).to_le_bytes());
             out.extend(part);
         }
@@ -223,10 +355,17 @@ pub(crate) fn decode(bytes: &[u8]) -> KernelResult<Vec<(String, Received)>> {
         let key = String::from_utf8(part()?.to_vec()).map_err(|_| broken())?;
         let body = part()?;
         let topology: Option<HandedTopology> = serde_json::from_slice(part()?).map_err(|_| broken())?;
+        let identity: Option<HandedIdentity> = serde_json::from_slice(part()?).map_err(|_| broken())?;
         let received = if body.is_empty() {
             Received::Topology(Arc::new(topology.ok_or_else(broken)?))
         } else {
-            Received::Build(Offer { bytes: body.into(), built: Arc::default(), topology: topology.map(Arc::new) })
+            Received::Build(Offer {
+                bytes: body.into(),
+                built: Arc::default(),
+                topology: topology.map(Arc::new),
+                identity: identity.map(Arc::new),
+                reads: Arc::default(),
+            })
         };
         builds.push((key, received));
     }

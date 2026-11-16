@@ -19,9 +19,10 @@ pub(super) struct Ids {
     pub faces: BTreeMap<CatFace, FaceId>,
     pub edges: BTreeMap<CatEdge, EdgeId>,
     pub vertices: BTreeMap<CatVertex, VertexId>,
-    face_keys: BTreeMap<FaceId, FaceKey>,
-    edge_keys: BTreeMap<EdgeId, NamedEdgeKey>,
-    vertex_keys: BTreeMap<VertexId, VertexKey>,
+    /// The exact identity keys, computed from `source` when a later body first needs
+    /// them. A handed-over body's ids come from the kernel that built it instead.
+    keys: std::sync::OnceLock<IdKeys>,
+    source: Option<AppBody>,
     origins: BTreeMap<FaceId, Vec<Origin>>,
     /// The same origins in the interface's terms, by the caller's operation tags.
     pub face_origins: BTreeMap<FaceId, Vec<soliddraft_kernel_api::Origin>>,
@@ -31,6 +32,95 @@ pub(super) struct Ids {
     edge_names: BTreeMap<EdgeId, String>,
     edge_origins: BTreeMap<EdgeId, [soliddraft_kernel_api::Origin; 2]>,
     vertex_names: BTreeMap<VertexId, String>,
+}
+
+/// Each entity's exact identity key, by interface id.
+struct IdKeys {
+    faces: BTreeMap<FaceId, FaceKey>,
+    edges: BTreeMap<EdgeId, NamedEdgeKey>,
+    vertices: BTreeMap<VertexId, VertexKey>,
+}
+
+/// Gives each Catallax entity of a new body its interface id.
+trait Assign {
+    fn face(&mut self, face: CatFace) -> FaceId;
+    fn edge(&mut self, edge: CatEdge) -> EdgeId;
+    fn vertex(&mut self, vertex: CatVertex) -> VertexId;
+}
+
+/// Ids carried over from a parent entity with the same exact key, else new ones.
+struct ByKey<'a> {
+    keys: Keys,
+    parents: Vec<&'a IdKeys>,
+    next: &'a mut u64,
+    found: IdKeys,
+}
+
+impl Assign for ByKey<'_> {
+    fn face(&mut self, face: CatFace) -> FaceId {
+        let key = self.keys.faces.remove(&face).expect("every named face has a key");
+        let parents = self.parents.iter().map(|p| &p.faces).collect::<Vec<_>>();
+        let id = assign(&key, FaceKey::same, &parents, self.next, FaceId::from_raw);
+        self.found.faces.insert(id, key);
+        id
+    }
+
+    fn edge(&mut self, edge: CatEdge) -> EdgeId {
+        let key = self.keys.edges.remove(&edge).expect("every named edge has a key");
+        let parents = self.parents.iter().map(|p| &p.edges).collect::<Vec<_>>();
+        let id = assign(&key, NamedEdgeKey::same, &parents, self.next, EdgeId::from_raw);
+        self.found.edges.insert(id, key);
+        id
+    }
+
+    fn vertex(&mut self, vertex: CatVertex) -> VertexId {
+        let key = self.keys.vertices.remove(&vertex).expect("every named vertex has a key");
+        let parents = self.parents.iter().map(|p| &p.vertices).collect::<Vec<_>>();
+        let id = assign(&key, VertexKey::same, &parents, self.next, VertexId::from_raw);
+        self.found.vertices.insert(id, key);
+        id
+    }
+}
+
+/// Ids of a handed-over body: the handing kernel's id for each handle index, mapped to
+/// the id this kernel gave the entity that kernel's id first named, else a new one. An
+/// entity that kept its parent's id there keeps it here, with no exact key compared.
+pub(super) struct Handed<'a> {
+    pub faces: BTreeMap<u32, u64>,
+    pub edges: BTreeMap<u32, u64>,
+    pub vertices: BTreeMap<u32, u64>,
+    pub seen: &'a mut BTreeMap<u64, u64>,
+    pub next: &'a mut u64,
+}
+
+impl Handed<'_> {
+    fn id(&mut self, theirs: Option<u64>) -> u64 {
+        if let Some(ours) = theirs.and_then(|theirs| self.seen.get(&theirs)) {
+            return *ours;
+        }
+        *self.next += 1;
+        if let Some(theirs) = theirs {
+            self.seen.insert(theirs, *self.next);
+        }
+        *self.next
+    }
+}
+
+impl Assign for Handed<'_> {
+    fn face(&mut self, face: CatFace) -> FaceId {
+        let theirs = self.faces.get(&face.index()).copied();
+        FaceId::from_raw(self.id(theirs))
+    }
+
+    fn edge(&mut self, edge: CatEdge) -> EdgeId {
+        let theirs = self.edges.get(&edge.index()).copied();
+        EdgeId::from_raw(self.id(theirs))
+    }
+
+    fn vertex(&mut self, vertex: CatVertex) -> VertexId {
+        let theirs = self.vertices.get(&vertex.index()).copied();
+        VertexId::from_raw(self.id(theirs))
+    }
 }
 
 fn assign<I: Copy + Ord, K>(
@@ -66,14 +156,43 @@ impl Ids {
         next: &mut u64,
         selected_edges: &[EdgeId],
     ) -> Self {
-        let mut keys = Keys::new(app);
+        let mut by_key = ByKey {
+            keys: Keys::new(app),
+            parents: parents.iter().map(|p| p.keys()).collect(),
+            next,
+            found: IdKeys { faces: BTreeMap::new(), edges: BTreeMap::new(), vertices: BTreeMap::new() },
+        };
+        let ids = Self::assigned(app, parents, tags, selected_edges, &mut by_key, None);
+        let _ = ids.keys.set(by_key.found);
+        ids
+    }
+
+    /// The ids of a handed-over body, assigned as [`Handed`] says. Its exact keys are
+    /// computed from `app` only if a later body built here needs them.
+    pub fn handed(
+        app: &AppBody,
+        parents: &[&Ids],
+        tags: &BTreeMap<String, OpTag>,
+        handed: &mut Handed<'_>,
+        selected_edges: &[EdgeId],
+    ) -> Self {
+        Self::assigned(app, parents, tags, selected_edges, handed, Some(app.clone()))
+    }
+
+    fn assigned(
+        app: &AppBody,
+        parents: &[&Ids],
+        tags: &BTreeMap<String, OpTag>,
+        selected_edges: &[EdgeId],
+        assign: &mut dyn Assign,
+        source: Option<AppBody>,
+    ) -> Self {
         let mut ids = Self {
             faces: BTreeMap::new(),
             edges: BTreeMap::new(),
             vertices: BTreeMap::new(),
-            face_keys: BTreeMap::new(),
-            edge_keys: BTreeMap::new(),
-            vertex_keys: BTreeMap::new(),
+            keys: std::sync::OnceLock::new(),
+            source,
             origins: BTreeMap::new(),
             face_origins: BTreeMap::new(),
             named: Vec::new(),
@@ -83,11 +202,8 @@ impl Ids {
         };
         for face in app.names.faces.keys() {
             let origins = app.names.faces[face].clone();
-            let key = keys.faces.remove(face).expect("every named face has a key");
-            let parent_keys = parents.iter().map(|p| &p.face_keys).collect::<Vec<_>>();
-            let id = assign(&key, FaceKey::same, &parent_keys, next, FaceId::from_raw);
+            let id = assign.face(*face);
             ids.faces.insert(*face, id);
-            ids.face_keys.insert(id, key);
             // An origin whose role the interface cannot express is left out, never guessed.
             let mut named = Vec::new();
             for o in &origins {
@@ -105,11 +221,8 @@ impl Ids {
             ids.origins.insert(id, origins);
         }
         for (edge, name) in &app.names.edges {
-            let key = keys.edges.remove(edge).expect("every named edge has a key");
-            let parent_keys = parents.iter().map(|p| &p.edge_keys).collect::<Vec<_>>();
-            let id = assign(&key, NamedEdgeKey::same, &parent_keys, next, EdgeId::from_raw);
+            let id = assign.edge(*edge);
             ids.edges.insert(*edge, id);
-            ids.edge_keys.insert(id, key);
             if let Some(name) = name {
                 ids.edge_names.insert(id, serde_json::to_string(name).expect("edge name serializes"));
                 let [a, b] = name.between();
@@ -122,11 +235,8 @@ impl Ids {
             }
         }
         for (vertex, name) in &app.names.vertices {
-            let key = keys.vertices.remove(vertex).expect("every named vertex has a key");
-            let parent_keys = parents.iter().map(|p| &p.vertex_keys).collect::<Vec<_>>();
-            let id = assign(&key, VertexKey::same, &parent_keys, next, VertexId::from_raw);
+            let id = assign.vertex(*vertex);
             ids.vertices.insert(*vertex, id);
-            ids.vertex_keys.insert(id, key);
             if let Some(name) = name {
                 ids.vertex_names.insert(id, serde_json::to_string(name).expect("vertex name serializes"));
             }
@@ -134,26 +244,53 @@ impl Ids {
         ids
     }
 
+    /// The exact identity keys, computed from the body the first time they are needed.
+    fn keys(&self) -> &IdKeys {
+        self.keys.get_or_init(|| {
+            let app = self.source.as_ref().expect("ids without keys keep their body");
+            let mut keys = Keys::new(app);
+            IdKeys {
+                faces: self
+                    .faces
+                    .iter()
+                    .map(|(cat, id)| (*id, keys.faces.remove(cat).expect("a key per face")))
+                    .collect(),
+                edges: self
+                    .edges
+                    .iter()
+                    .map(|(cat, id)| (*id, keys.edges.remove(cat).expect("a key per edge")))
+                    .collect(),
+                vertices: self
+                    .vertices
+                    .iter()
+                    .map(|(cat, id)| (*id, keys.vertices.remove(cat).expect("a key per vertex")))
+                    .collect(),
+            }
+        })
+    }
+
     pub fn record(&self, seq: u64, tag: &OpTag, op: OpKind, step: &str, parents: &[&Ids]) -> HistoryRecord {
         // A drafted face keeps its source origins on a new support, so it descends from
         // the face it tilts. Elsewhere a new support means a new face.
         let tilts = op == OpKind::Draft;
+        let keys = self.keys();
         let faces = changes(
-            self.face_keys.keys().copied(),
-            parents.iter().flat_map(|p| p.face_keys.keys().copied()),
+            self.faces.values().copied(),
+            parents.iter().flat_map(|p| p.faces.values().copied()),
             |old, new| {
                 parents.iter().any(|p| {
                     p.origins.get(&old).is_some_and(|os| self.origins[&new].iter().any(|o| os.contains(o)))
                         && (tilts
-                            || p.face_keys
+                            || p.keys()
+                                .faces
                                 .get(&old)
-                                .is_some_and(|k| same_surface(&k.support, &self.face_keys[&new].support)))
+                                .is_some_and(|k| same_surface(&k.support, &keys.faces[&new].support)))
                 })
             },
         );
         let edges = changes(
-            self.edge_keys.keys().copied(),
-            parents.iter().flat_map(|p| p.edge_keys.keys().copied()),
+            self.edges.values().copied(),
+            parents.iter().flat_map(|p| p.edges.values().copied()),
             |old, new| {
                 self.edge_names
                     .get(&new)
@@ -161,14 +298,57 @@ impl Ids {
             },
         );
         let vertices = changes(
-            self.vertex_keys.keys().copied(),
-            parents.iter().flat_map(|p| p.vertex_keys.keys().copied()),
+            self.vertices.values().copied(),
+            parents.iter().flat_map(|p| p.vertices.values().copied()),
             |_, _| false,
         );
+        let face_roles = self.face_roles(&faces.created, tag, op, step);
+        HistoryRecord { seq, tag: tag.clone(), op, faces, edges, vertices, face_roles }
+    }
+
+    /// A handed-over body's record: the handing kernel's changes in this kernel's ids,
+    /// through the map [`Handed`] kept, and the roles of its created faces named here.
+    /// A change naming an entity this kernel never mapped is left out.
+    pub fn handed_record(
+        &self,
+        theirs: &HistoryRecord,
+        seen: &BTreeMap<u64, u64>,
+        seq: u64,
+        tag: &OpTag,
+        step: &str,
+    ) -> HistoryRecord {
+        fn mapped<I: Copy>(
+            changes: &EntityChanges<I>,
+            seen: &BTreeMap<u64, u64>,
+            raw: impl Fn(I) -> u64,
+            wrap: impl Fn(u64) -> I,
+        ) -> EntityChanges<I> {
+            let ids = |list: &[I]| list.iter().filter_map(|id| seen.get(&raw(*id)).map(|ours| wrap(*ours))).collect();
+            EntityChanges {
+                created: ids(&changes.created),
+                modified: ids(&changes.modified),
+                deleted: ids(&changes.deleted),
+                split: changes
+                    .split
+                    .iter()
+                    .filter_map(|split| {
+                        Some(Split { from: wrap(*seen.get(&raw(split.from))?), into: ids(&split.into) })
+                    })
+                    .collect(),
+            }
+        }
+        let faces = mapped(&theirs.faces, seen, FaceId::raw, FaceId::from_raw);
+        let edges = mapped(&theirs.edges, seen, EdgeId::raw, EdgeId::from_raw);
+        let vertices = mapped(&theirs.vertices, seen, VertexId::raw, VertexId::from_raw);
+        let face_roles = self.face_roles(&faces.created, tag, theirs.op, step);
+        HistoryRecord { seq, tag: tag.clone(), op: theirs.op, faces, edges, vertices, face_roles }
+    }
+
+    /// What each created face's origins from this step make it, in the interface's terms.
+    fn face_roles(&self, created: &[FaceId], tag: &OpTag, op: OpKind, step: &str) -> Vec<FaceOrigin> {
         // A merged face keeps every origin this step gave it, so each one keeps its name.
         if op == OpKind::ScanFit {
-            let face_roles = faces
-                .created
+            return created
                 .iter()
                 .flat_map(|face| {
                     self.face_origins[face]
@@ -177,10 +357,8 @@ impl Ids {
                         .map(|origin| FaceOrigin { face: *face, role: origin.role.clone() })
                 })
                 .collect();
-            return HistoryRecord { seq, tag: tag.clone(), op, faces, edges, vertices, face_roles };
         }
-        let face_roles = faces
-            .created
+        created
             .iter()
             .flat_map(|face| {
                 let mut roles: Vec<_> = self.origins[face]
@@ -202,8 +380,7 @@ impl Ids {
                 }
                 roles.into_iter().map(|role| FaceOrigin { face: *face, role })
             })
-            .collect();
-        HistoryRecord { seq, tag: tag.clone(), op, faces, edges, vertices, face_roles }
+            .collect()
     }
 }
 

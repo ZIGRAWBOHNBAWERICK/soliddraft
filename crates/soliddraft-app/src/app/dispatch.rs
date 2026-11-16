@@ -18,7 +18,36 @@ use super::workspace::SolidDraftApp;
 impl SolidDraftApp {
     pub(super) fn apply_actions(&mut self, ctx: &egui::Context) {
         for action in self.state.take_actions() {
+            // In the browser a command that needs exact geometry the page has not read yet
+            // waits, with the actions after it, until the page has read it.
+            #[cfg(target_arch = "wasm32")]
+            {
+                if let Some(reading) = &mut self.reading {
+                    reading.held.push(action);
+                    continue;
+                }
+                if self.needs_exact(&action) && self.unread_body().is_some() {
+                    self.reading = Some(super::workspace::Reading { held: vec![action], drawn: false });
+                    ctx.request_repaint();
+                    continue;
+                }
+            }
             self.apply(ctx, action);
+        }
+    }
+
+    /// Whether an action reads the part's exact geometry: checks, exports, sections,
+    /// measurements, a sketch on a face, and any command built on the page rather than
+    /// in the kernel worker.
+    #[cfg(target_arch = "wasm32")]
+    fn needs_exact(&self, action: &AppAction) -> bool {
+        match action {
+            AppAction::CheckPart | AppAction::Export { .. } | AppAction::ToggleSection | AppAction::MeasureEntity => {
+                true
+            }
+            AppAction::StartSketchOn(SketchPlane::Face { .. }) => true,
+            AppAction::Command(command) => !self.state.doc.edits_scalar(command),
+            _ => false,
         }
     }
 

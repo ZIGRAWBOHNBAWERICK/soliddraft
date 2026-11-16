@@ -134,6 +134,14 @@ impl Kernel for Counting {
         self.inner.read_offers(at_most)
     }
 
+    fn exact_unread(&self, body: BodyId) -> KernelResult<bool> {
+        self.inner.exact_unread(body)
+    }
+
+    fn read_exact(&self, body: BodyId) -> KernelResult<()> {
+        self.inner.read_exact(body)
+    }
+
     fn import_source(
         &self,
         format: crate::ImportFormat,

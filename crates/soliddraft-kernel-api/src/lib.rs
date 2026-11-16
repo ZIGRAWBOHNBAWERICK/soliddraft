@@ -1440,6 +1440,20 @@ pub trait Kernel: Send + Sync {
         Ok(0)
     }
 
+    /// Whether `body` was adopted from another kernel without reading its exact geometry,
+    /// which the next query that needs it reads first. A caller that can show it is busy
+    /// reads it with [`Kernel::read_exact`] before such a query.
+    fn exact_unread(&self, body: BodyId) -> KernelResult<bool> {
+        let _ = body;
+        Ok(false)
+    }
+
+    /// Reads the exact geometry of a body adopted without it; nothing for any other body.
+    fn read_exact(&self, body: BodyId) -> KernelResult<()> {
+        let _ = body;
+        Ok(())
+    }
+
     /// Builds or replays the explicitly selected source format and its repair decisions.
     fn import_source(
         &self,

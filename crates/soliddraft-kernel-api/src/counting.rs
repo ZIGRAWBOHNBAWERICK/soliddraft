@@ -126,8 +126,8 @@ impl Kernel for Counting {
         self.inner.hand_over()
     }
 
-    fn offer_builds(&self, bytes: &[u8]) -> KernelResult<usize> {
-        self.inner.offer_builds(bytes)
+    fn offer_builds(&self, source: u64, bytes: &[u8]) -> KernelResult<usize> {
+        self.inner.offer_builds(source, bytes)
     }
 
     fn read_offers(&self, at_most: usize) -> KernelResult<usize> {

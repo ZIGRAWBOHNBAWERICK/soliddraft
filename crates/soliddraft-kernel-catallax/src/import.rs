@@ -415,6 +415,7 @@ impl CatallaxKernel {
                     // Imports are rebuilt from their source, not handed over.
                     key: String::new(),
                     handed_previews: Default::default(),
+                    source: None,
                     app,
                     ids,
                     display,

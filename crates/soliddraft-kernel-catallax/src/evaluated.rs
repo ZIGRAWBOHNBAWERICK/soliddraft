@@ -129,6 +129,14 @@ impl AppBody {
         Some(AppBody { checkpoint: Exact::Offered(Box::new(unread)), names, recipe: Some(recipe) })
     }
 
+    /// The kernel instance an offered build came from.
+    pub(crate) fn handed_source(&self) -> Option<u64> {
+        match &self.checkpoint {
+            Exact::Offered(unread) => Some(unread.offer.source),
+            _ => None,
+        }
+    }
+
     /// What came with an offered build for adopting it unread.
     pub(crate) fn handed_identity(&self) -> Option<&Arc<crate::handover::HandedIdentity>> {
         match &self.checkpoint {

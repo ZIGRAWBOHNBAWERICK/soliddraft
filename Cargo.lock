@@ -5394,6 +5394,7 @@ dependencies = [
  "soliddraft-model",
  "soliddraft-tessellation",
  "thiserror 2.0.21",
+ "zip 9.0.5",
 ]
 
 [[package]]

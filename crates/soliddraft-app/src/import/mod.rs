@@ -463,7 +463,7 @@ struct Shape {
 }
 
 /// The middle of an enclosure, in millimetres.
-fn middle(bounds: &soliddraft_kernel_api::SupportBounds) -> Option<f64> {
+pub(crate) fn middle(bounds: &soliddraft_kernel_api::SupportBounds) -> Option<f64> {
     let value = |r: &soliddraft_kernel_api::ExactRational| {
         Some(r.numerator.parse::<f64>().ok()? / r.denominator.parse::<f64>().ok()?)
     };

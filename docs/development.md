@@ -13,7 +13,7 @@ A part, assembly or drawing file on the command line opens it. Without a file, t
 
 Inspect > Section and the viewport navigation bar cut the display on XY, YZ, ZX or a planar face. Drag Offset to move the cut, Flip side to switch the retained half, and Close section to restore the view. The cap preserves openings. Saving and exporting keep the whole part.
 
-Fillet and Chamfer accept picked edges or a picked face's boundary edges. A refused operation leaves the part unchanged and shows the kernel's reason. Desktop depth, fillet-radius and chamfer-distance drags show provisional construction before exact proof finishes. One drag is one undo step. A failed edit restores the last proved part and leaves the failed feature red with its reason. See [backend limits](needs-catallax.md).
+Fillet and Chamfer accept picked edges or a picked face's boundary edges. A face pick leaves out smooth edges, where the face meets its neighbour tangentially, such as a seam or the line where a slot's straight wall meets its round end. Only planar, cylindrical and spherical faces are tested for this, so an edge on any other face is kept. A refused operation leaves the part unchanged and shows the kernel's reason. Desktop depth, fillet-radius and chamfer-distance drags show provisional construction before exact proof finishes. One drag is one undo step. A failed edit restores the last proved part and leaves the failed feature red with its reason. See [backend limits](needs-catallax.md).
 
 ## Command line
 

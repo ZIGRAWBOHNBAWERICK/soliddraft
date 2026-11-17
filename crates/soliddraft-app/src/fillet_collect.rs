@@ -1,10 +1,16 @@
 //! What the open Fillet or Chamfer panel collects from viewport picks, and the typed
-//! size it accepts. An edge pick adds or removes that edge; a face pick adds every edge
-//! on its boundary that is not collected yet, or nothing when one of them has no name.
-//! Anything else, and a size that is not a positive number, is refused beside the
-//! control it came from and changes nothing.
+//! size it accepts. An edge pick adds or removes that edge; a face pick adds every sharp
+//! edge on its boundary that is not collected yet, or nothing when one of them has no
+//! name. A face pick leaves out smooth edges, where two faces meet tangentially, as
+//! SolidWorks does: there is no corner there to round. Anything else, and a size that is
+//! not a positive number, is refused beside the control it came from and changes nothing.
+
+use soliddraft_kernel_api::{
+    BodyId, EdgeId, EnclosedSupport, FaceId, Kernel, SupportEntity, SurfaceKind, Topology, Vec3,
+};
 
 use crate::document::{Document, Selection};
+use crate::import::middle;
 use crate::state::FeatureEditor;
 
 /// The input the panel refused, shown beside the control it came from until the user
@@ -36,6 +42,9 @@ pub fn collect(editor: &mut FeatureEditor, doc: &Document, pick: Selection) {
             _ => Some("That edge has no name yet; pick it again once the part has rebuilt"),
         },
         Selection::Face(face) => match (doc.face_edge_refs(face), editor.edges_mut()) {
+            (Some(refs), Some(_)) if refs.is_empty() => {
+                Some("Every edge of that face is smooth, so there is no corner to round; pick a sharp edge")
+            }
             (Some(refs), Some(list)) => {
                 for r in refs {
                     if !list.iter().any(|x| x.label == r.label) {
@@ -50,6 +59,52 @@ pub fn collect(editor: &mut FeatureEditor, doc: &Document, pick: Selection) {
         _ => Some("Pick an edge or a face of the part"),
     };
     editor.feedback.pick = refused.map(str::to_owned);
+}
+
+/// The largest angle between two faces' normals at which the edge they share is smooth.
+const SMOOTH_DEG: f64 = 1.0;
+
+/// Whether `edge` is smooth: a seam, or an edge whose two faces have the same outward
+/// normal at its midpoint, such as where a fillet meets a wall or a slot's straight
+/// wall meets its round end. Read from the kernel's own planes, cylinders and spheres;
+/// an edge on any other surface is not known to be smooth and stays sharp.
+pub fn smooth(kernel: &dyn Kernel, body: BodyId, topology: &Topology, edge: EdgeId) -> bool {
+    let Some(info) = topology.edge(edge) else { return false };
+    let [a, b] = info.faces[..] else { return false };
+    if a == b {
+        return true;
+    }
+    let normal = |face| outward_normal(kernel, body, topology, face, info.midpoint);
+    match (normal(a), normal(b)) {
+        (Some(na), Some(nb)) => na.dot(nb) >= SMOOTH_DEG.to_radians().cos(),
+        _ => false,
+    }
+}
+
+/// The unit normal out of the material of `face` at `at`, a point on its boundary.
+fn outward_normal(kernel: &dyn Kernel, body: BodyId, topology: &Topology, face: FaceId, at: Vec3) -> Option<Vec3> {
+    let info = topology.face(face)?;
+    let point =
+        |p: &[soliddraft_kernel_api::SupportBounds; 3]| Some(Vec3::new(middle(&p[0])?, middle(&p[1])?, middle(&p[2])?));
+    let (radial, outward) = match info.surface {
+        SurfaceKind::Plane => return info.normal?.normalized(),
+        SurfaceKind::Cylinder | SurfaceKind::Sphere => {
+            match kernel.entity_support_enclosed(body, SupportEntity::Face(face)).ok()? {
+                EnclosedSupport::Axis { direction, through, radius_squared: Some(_), outward } => {
+                    let axis = point(&direction)?.normalized()?;
+                    let offset = at - point(&through)?;
+                    (offset - axis * offset.dot(axis), outward?)
+                }
+                EnclosedSupport::Point { at: centre, radius_squared: Some(_), outward } => {
+                    (at - point(&centre)?, outward?)
+                }
+                _ => return None,
+            }
+        }
+        _ => return None,
+    };
+    let radial = radial.normalized()?;
+    Some(if outward { radial } else { -radial })
 }
 
 /// Reads a typed radius or distance in millimetres: a positive, finite number.

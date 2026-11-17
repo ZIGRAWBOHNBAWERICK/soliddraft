@@ -1,0 +1,64 @@
+//! An edge a later feature split into pieces between the same two faces is named piece by
+//! piece, by the faces at its ends, and a feature on one piece survives save and reopen.
+
+use soliddraft_app::document::Document;
+
+fn bracket() -> Document {
+    let bytes = include_bytes!("../../../site/parts/bracket.dwprt");
+    soliddraft_app::file::open_bytes("bracket.dwprt", bytes, soliddraft_app::kernel(), None).unwrap()
+}
+
+/// In the sample bracket two countersinks split the edge between the base's end cap and
+/// the side of line 2 into three pieces. Each piece has its own name and label, and every
+/// edge of the bracket has a name.
+#[test]
+fn each_piece_of_a_split_edge_has_its_own_name() {
+    let doc = bracket();
+    let body = doc.model().body().unwrap();
+    let topology = doc.model().kernel().topology(body).unwrap();
+    let mut pieces = Vec::new();
+    for edge in &topology.edges {
+        let named = doc.model().edge_ref(edge.id).unwrap_or_else(|e| panic!("{} has no name: {e}", edge.id));
+        assert_eq!(doc.model().resolve_edge(&named, body).unwrap(), edge.id, "{}", named.label);
+        if named.piece.is_some() {
+            pieces.push(named);
+        }
+    }
+    let mut labels: Vec<&str> = pieces.iter().map(|p| &*p.label).collect();
+    labels.sort();
+    let shared = "Boss-Extrude1 · End cap ∩ Boss-Extrude1 · Side of line 2 · ends at ";
+    assert_eq!(
+        labels,
+        [
+            format!("{shared}Boss-Extrude1 · Side of line 1, Hole1 · Hole 3 countersink"),
+            format!("{shared}Boss-Extrude1 · Side of line 3, Hole1 · Hole 4 countersink"),
+            format!("{shared}Hole1 · Hole 3 countersink, Hole1 · Hole 4 countersink"),
+        ]
+    );
+    assert!(pieces.iter().all(|p| p.piece.as_ref().unwrap().along.is_none()), "the end faces tell the pieces apart");
+}
+
+/// Each piece's saved reference, read back in the reopened part, finds that same piece.
+#[test]
+fn a_saved_piece_reference_finds_its_piece_after_reopening() {
+    let doc = bracket();
+    let body = doc.model().body().unwrap();
+    let topology = doc.model().kernel().topology(body).unwrap();
+    let pieces: Vec<_> = topology
+        .edges
+        .iter()
+        .filter_map(|e| doc.model().edge_ref(e.id).ok().filter(|r| r.piece.is_some()).map(|r| (e.midpoint, r)))
+        .collect();
+    assert_eq!(pieces.len(), 3);
+    let saved = doc.model().to_bytes().unwrap();
+    let reopened = soliddraft_app::file::open_bytes("bracket.dwprt", &saved, soliddraft_app::kernel(), None).unwrap();
+    let again = reopened.model().body().unwrap();
+    let edges = reopened.model().kernel().topology(again).unwrap().edges;
+    for (midpoint, piece) in pieces {
+        let stored: soliddraft_model::EdgeRef = serde_json::from_str(&serde_json::to_string(&piece).unwrap()).unwrap();
+        assert_eq!(stored, piece);
+        let found = reopened.model().resolve_edge(&stored, again).unwrap();
+        let at = edges.iter().find(|e| e.id == found).unwrap().midpoint;
+        assert!((at - midpoint).length() < 1e-6, "{} found an edge at {at:?}, not {midpoint:?}", piece.label);
+    }
+}

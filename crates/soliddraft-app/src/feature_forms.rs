@@ -548,7 +548,7 @@ fn picked_edges(ui: &mut egui::Ui, editor: &mut crate::state::FeatureEditor) {
             ui,
             "Click edges or faces in the viewport",
             Icon::Axis,
-            edges.iter().map(|e| e.label.as_str()),
+            edges.iter().map(|e| &*e.label),
         ) && let Some(edges) = editor.edges_mut()
         {
             edges.remove(i);

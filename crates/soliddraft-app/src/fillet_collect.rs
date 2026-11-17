@@ -39,7 +39,8 @@ pub fn collect(editor: &mut FeatureEditor, doc: &Document, pick: Selection) {
                 }
                 None
             }
-            _ => Some("That edge has no name yet; pick it again once the part has rebuilt"),
+            (None, Some(_)) => Some(unnamed(doc, edge)),
+            _ => Some("This feature takes no edges".to_owned()),
         },
         Selection::Face(face) => match (doc.face_edge_refs(face), editor.edges_mut()) {
             (Some(refs), Some(_)) if refs.is_empty() => {
@@ -53,12 +54,23 @@ pub fn collect(editor: &mut FeatureEditor, doc: &Document, pick: Selection) {
                 }
                 None
             }
-            _ => Some("Not every edge of that face has a name; pick its edges one at a time"),
+            _ => Some("Not every edge of that face has a name; pick its edges one at a time".to_owned()),
         },
-        Selection::Vertex(_) => Some("A vertex cannot be rounded: pick an edge or a face"),
-        _ => Some("Pick an edge or a face of the part"),
+        Selection::Vertex(_) => Some("A vertex cannot be rounded: pick an edge or a face".to_owned()),
+        _ => Some("Pick an edge or a face of the part".to_owned()),
     };
-    editor.feedback.pick = refused.map(str::to_owned);
+    editor.feedback.pick = refused;
+}
+
+/// Why a picked edge has no reference: the part is still rebuilding, or the edge cannot
+/// be told apart from another one between the same faces.
+fn unnamed(doc: &Document, edge: soliddraft_kernel_api::EdgeId) -> String {
+    match doc.model().edge_ref(edge) {
+        Err(soliddraft_model::NamingError::NotUnique(_, why)) if doc.exact_display_current() => {
+            format!("That edge cannot be named uniquely ({why}); pick a neighbouring edge or face instead")
+        }
+        _ => "That edge has no name yet; pick it again once the part has rebuilt".to_owned(),
+    }
 }
 
 /// The largest angle between two faces' normals at which the edge they share is smooth.

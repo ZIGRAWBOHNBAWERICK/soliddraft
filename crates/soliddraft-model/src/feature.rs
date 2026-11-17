@@ -662,7 +662,7 @@ impl PullRef {
     pub fn label(&self) -> String {
         match self {
             Self::Axis { axis } => axis.label().into(),
-            Self::Edge { edge } if !edge.label.is_empty() => edge.label.clone(),
+            Self::Edge { edge } if !edge.label.is_empty() => edge.label.to_string(),
             Self::Edge { .. } => "Edge".into(),
             Self::Face { face } if !face.label.is_empty() => face.label.clone(),
             Self::Face { .. } => "Face".into(),

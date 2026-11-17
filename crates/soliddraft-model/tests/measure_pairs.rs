@@ -154,7 +154,7 @@ fn pair_rows_follow_both_references() {
     let r = row(&d, "diagonal_gap");
     assert_eq!(r["tracked"]["state"], "stale");
     assert!((r["value"].as_f64().unwrap() - 1125f64.sqrt()).abs() < 1e-9);
-    assert!(r["tracked"]["reason"].as_str().unwrap().contains(&e0.label));
+    assert!(r["tracked"]["reason"].as_str().unwrap().contains(&*e0.label));
     assert_eq!(r["tracked"]["check"]["state"], "unknown");
     d.undo().unwrap();
     assert_eq!(row(&d, "diagonal_gap")["tracked"]["state"], "current");
@@ -164,7 +164,7 @@ fn pair_rows_follow_both_references() {
     fillet(&mut d, e1.clone());
     let r = row(&d, "diagonal_gap");
     assert_eq!(r["tracked"]["state"], "stale");
-    assert!(r["tracked"]["reason"].as_str().unwrap().contains(&e1.label));
+    assert!(r["tracked"]["reason"].as_str().unwrap().contains(&*e1.label));
 
     let reopened = Document::from_bytes(&d.to_bytes().unwrap(), kernel).unwrap();
     assert_eq!(reopened.tracked()[0], definition);
@@ -294,7 +294,7 @@ fn pair_definitions_follow_both_refs_and_quantity() {
     root(&diag, 1125.0);
     assert_eq!(diag["tracked"]["check"]["state"], "unknown");
     let reason = diag["tracked"]["reason"].as_str().unwrap();
-    assert!(reason.contains("measure.unresolved-reference") && reason.contains(&e0.label), "{reason}");
+    assert!(reason.contains("measure.unresolved-reference") && reason.contains(&*e0.label), "{reason}");
     let cap = row(&d, "cap_gap");
     about(&cap, 15.0);
     current(&d, &cap, "fail");
@@ -320,7 +320,7 @@ fn pair_definitions_follow_both_refs_and_quantity() {
     fillet(&mut other, e1.clone());
     let diag = row(&other, "diagonal_gap");
     assert_eq!(diag["tracked"]["state"], "stale");
-    assert!(diag["tracked"]["reason"].as_str().unwrap().contains(&e1.label), "{diag}");
+    assert!(diag["tracked"]["reason"].as_str().unwrap().contains(&*e1.label), "{diag}");
 
     // One pair of edges, three quantities: none reuses another's number.
     let (plain, _) = holed(kernel);

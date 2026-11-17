@@ -1956,6 +1956,12 @@ impl Document {
         })
     }
 
+    /// The display shows the current revision's proved exact body, so its entities have
+    /// their final names.
+    pub fn exact_display_current(&self) -> bool {
+        self.current_exact_display()
+    }
+
     fn current_exact_display(&self) -> bool {
         // Headless proposal documents have exact named entities without a rendered mesh.
         self.proof_state().current_proved_model() && self.provisional.is_none() && self.shown_revision == self.revision
@@ -5180,7 +5186,7 @@ fn view_status(
                             model::ReferenceSlot::Edge { index },
                             model::FeatureKind::Fillet(b) | model::FeatureKind::Chamfer(b),
                         ) => {
-                            let label = b.edges.get(index as usize).map(|e| e.label.clone()).unwrap_or_default();
+                            let label = b.edges.get(index as usize).map(|e| e.label.to_string()).unwrap_or_default();
                             (index as usize, RefKind::Edge, label)
                         }
                         (model::ReferenceSlot::Face { index }, model::FeatureKind::Thicken(s)) => {

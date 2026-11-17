@@ -185,6 +185,9 @@ pub struct ViewportState {
     /// How the grid looks, as the user chose.
     pub grid_style: GridStyle,
     pub hover: Option<Picked>,
+    /// The last frame drawn asked for the pick under the pointer, which reads the id
+    /// buffer back from the GPU.
+    pub picking: bool,
     /// The reference under the pointer, when no model is.
     pub hover_reference: Option<Reference>,
     /// The shown sketch whose curve is under the pointer, outside sketch editing.
@@ -221,6 +224,7 @@ impl Default for ViewportState {
             references: ReferenceDisplay::default(),
             grid_style: GridStyle::default(),
             hover: None,
+            picking: false,
             hover_reference: None,
             hover_sketch: None,
             hover_point: None,
@@ -411,6 +415,7 @@ impl ViewportState {
         let hover_px = hover_pos.map(pixel);
         // Keep requesting the clicked pixel even if the pointer leaves it while the GPU catches up.
         let cursor_px = self.context_pick.map(|pick| pixel(pick.at)).or(hover_px);
+        self.picking = cursor_px.is_some();
         self.hover = None;
         self.hover_reference = None;
         self.hover_sketch = None;
@@ -664,6 +669,7 @@ impl ViewportState {
         let hover_pos = if response.hovered() && !response.dragged() { response.hover_pos() } else { None };
         let cursor_px = hover_pos
             .map(|p| [((p.x - rect.left()) * ppp).max(0.0) as u32, ((p.y - rect.top()) * ppp).max(0.0) as u32]);
+        self.picking = cursor_px.is_some();
         self.hover = None;
         self.hover_point = None;
         if let Some(px) = cursor_px {

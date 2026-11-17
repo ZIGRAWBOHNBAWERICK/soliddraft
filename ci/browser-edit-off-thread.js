@@ -105,7 +105,23 @@ const baseline = await page.eval(() => {
 });
 const bound = LONG * baseline / REFERENCE_MS;
 console.log(`Calibration loop ${baseline.toFixed(1)} ms (${REFERENCE_MS} ms on the M3): regression bound ${Math.round(bound)} ms`);
+// Moves the pointer to the side panel. eframe follows the pointer through `mousemove` on
+// the document; a `pointermove` alone leaves it where the last click put it.
+const pointerToPanel = () => page.eval(() => {
+  document.getElementById('soliddraft').dispatchEvent(new MouseEvent('mousemove',
+    { clientX: 150, clientY: 450, bubbles: true }));
+  return true;
+});
+// A frame must show the viewport asking for no pick before a timed step starts. A move is
+// not assumed to have landed: a frame that still saw the pointer over the viewport reads a
+// pick back from the GPU, which software rendering takes most of a second to answer.
+async function pointerOff(what) {
+  await pointerToPanel();
+  await until(building, state => state && state.picking === false,
+    `${what}: no frame saw the pointer outside the viewport`, 100);
+}
 async function window_(what, act, bounded = true) {
+  if (bounded) await pointerOff(what);
   // Marks in the page's performance trace, so CI's trace shows each step's span.
   await page.eval(`(() => { window.longTasks = []; performance.mark(${JSON.stringify(what + ': start')}); return true; })()`);
   await act();
@@ -186,11 +202,7 @@ await window_('Cancelling a depth edit', async () => {
   // Cancel is drawn over the viewport, where the pointer would have the viewport pick
   // under it every frame: a GPU readback that software rendering takes most of a
   // second to answer. The pointer moves to the side panel, as a user's would.
-  await page.eval(() => {
-    document.getElementById('soliddraft').dispatchEvent(new PointerEvent('pointermove',
-      { clientX: 150, clientY: 450, bubbles: true, pointerId: 1, pointerType: 'mouse', isPrimary: true }));
-    return true;
-  });
+  await pointerToPanel();
   await idle('The cancelled edit');
   await depthShown(12, 'The cancelled edit');
   // The worker answers the cancelled edit later; the page drops the builds it carries.

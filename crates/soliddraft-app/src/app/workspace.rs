@@ -634,7 +634,10 @@ impl SolidDraftApp {
             ctx.request_repaint();
         }
         let cancel = cancel.map(|centre| serde_json::json!({ "x": centre.x, "y": centre.y }));
-        crate::web::show_build(serde_json::json!({ "pending": pending, "cancel": cancel, "reading": reading }));
+        let picking = self.state.viewport.picking;
+        crate::web::show_build(
+            serde_json::json!({ "pending": pending, "cancel": cancel, "reading": reading, "picking": picking }),
+        );
     }
 
     fn edit_suite_frame(&mut self, root: &mut egui::Ui) {

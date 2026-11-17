@@ -552,6 +552,13 @@ jobs:
       SOLIDDRAFT_REQUIRE_GPU: "1"
       LP_NUM_THREADS: "1"
       WGPU_BACKEND: vulkan
+      # Only Mesa's software driver. Works around a Vulkan loader crash: unpinned, the
+      # loader loads every installed Mesa driver and unloads the unused ones, and one
+      # test thread's unload crashed another thread's rendering (SIGSEGV in libvulkan
+      # with Mesa 26.0.8). https://github.com/KhronosGroup/Vulkan-Loader/issues/2113
+      # Remove this pin once that issue is fixed upstream.
+      VK_DRIVER_FILES: /usr/share/vulkan/icd.d/lvp_icd.json
+      VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.json
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -726,6 +733,11 @@ jobs:
           chmod 700 "$RUNNER_TEMP/soliddraft-runtime"
           echo "XDG_RUNTIME_DIR=$RUNNER_TEMP/soliddraft-runtime" >> "$GITHUB_ENV"
           echo "WGPU_BACKEND=vulkan" >> "$GITHUB_ENV"
+          # Only Mesa's software driver, a workaround for
+          # https://github.com/KhronosGroup/Vulkan-Loader/issues/2113; see the Linux GPU
+          # jobs above. Remove it once that issue is fixed upstream.
+          echo "VK_DRIVER_FILES=/usr/share/vulkan/icd.d/lvp_icd.json" >> "$GITHUB_ENV"
+          echo "VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json" >> "$GITHUB_ENV"
       - run: cargo test --workspace --all-features --locked --no-fail-fast
 
   # Catallax is compiled into the application WebAssembly module.
@@ -959,6 +971,13 @@ jobs:
     runs-on: ubuntu-latest
     env:
       WGPU_BACKEND: vulkan
+      # Only Mesa's software driver. Works around a Vulkan loader crash: unpinned, the
+      # loader loads every installed Mesa driver and unloads the unused ones, and one
+      # test thread's unload crashed another thread's rendering (SIGSEGV in libvulkan
+      # with Mesa 26.0.8). https://github.com/KhronosGroup/Vulkan-Loader/issues/2113
+      # Remove this pin once that issue is fixed upstream.
+      VK_DRIVER_FILES: /usr/share/vulkan/icd.d/lvp_icd.json
+      VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.json
       SOLIDDRAFT_REQUIRE_GPU: "1"
       XDG_RUNTIME_DIR: /tmp/soliddraft-runtime
     steps:
@@ -1048,6 +1067,13 @@ jobs:
     timeout-minutes: 90
     env:
       WGPU_BACKEND: vulkan
+      # Only Mesa's software driver. Works around a Vulkan loader crash: unpinned, the
+      # loader loads every installed Mesa driver and unloads the unused ones, and one
+      # test thread's unload crashed another thread's rendering (SIGSEGV in libvulkan
+      # with Mesa 26.0.8). https://github.com/KhronosGroup/Vulkan-Loader/issues/2113
+      # Remove this pin once that issue is fixed upstream.
+      VK_DRIVER_FILES: /usr/share/vulkan/icd.d/lvp_icd.json
+      VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.json
       XDG_RUNTIME_DIR: /tmp/soliddraft-runtime
     steps:
       - uses: actions/checkout@v4

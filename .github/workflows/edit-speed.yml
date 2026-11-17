@@ -25,6 +25,11 @@ jobs:
     timeout-minutes: 150
     env:
       WGPU_BACKEND: vulkan
+      # Only Mesa's software driver, a workaround for
+      # https://github.com/KhronosGroup/Vulkan-Loader/issues/2113; see hosted.yml.
+      # Remove it once that issue is fixed upstream.
+      VK_DRIVER_FILES: /usr/share/vulkan/icd.d/lvp_icd.json
+      VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.json
       LP_NUM_THREADS: '1'
       XDG_RUNTIME_DIR: /tmp/edit-speed-runtime
     steps:

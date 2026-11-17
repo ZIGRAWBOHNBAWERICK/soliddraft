@@ -84,6 +84,14 @@ opt-level = 2
 [profile.release]
 debug = 1
 
+# The browser build's release profile. crates/soliddraft-web/index.html selects it for
+# `trunk build --release`; native and macOS release builds keep [profile.release].
+# One codegen unit per crate made the browser's edit rebuild and mesh about 5% faster,
+# with identical geometry.
+[profile.web-release]
+inherits = "release"
+codegen-units = 1
+
 [workspace.lints.rust]
 unsafe_code = "deny"
 missing_docs = "warn"

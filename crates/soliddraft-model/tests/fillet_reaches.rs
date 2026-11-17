@@ -11,7 +11,7 @@ struct Reaching(CatallaxKernel);
 impl Reaching {
     fn top(&self, body: BodyId) -> FaceId {
         let t = self.0.topology(body).unwrap();
-        t.faces.iter().find(|f| f.bbox.min.z > 10.0 - 1e-6).unwrap().id
+        t.faces.iter().find(|f| (f.centroid.z - 10.0).abs() < 1e-3).unwrap().id
     }
 }
 

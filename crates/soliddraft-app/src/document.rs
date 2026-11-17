@@ -2006,8 +2006,18 @@ impl Document {
             // taken from that proof rather than proved again: the part is usable at once.
             // If they cannot be (another kernel, retained inputs gone), the part is proved
             // as before.
-            if let Err(why) = self.model.rebuild_reusing(&model) {
-                log::debug!("cancel proves the restored part again: {why}");
+            match self.model.rebuild_reusing(&model) {
+                Ok(()) => {
+                    // Nothing is proved for the restored part, so the cancelled build is
+                    // no longer wanted: its answer is dropped and its job can be stopped.
+                    if let Some(worker) = self.worker.as_mut() {
+                        worker.invalidate();
+                        worker.protect(None);
+                    }
+                    self.pending = None;
+                    self.edit_request = None;
+                }
+                Err(why) => log::debug!("cancel proves the restored part again: {why}"),
             }
             self.after_history_change();
             return Ok(());

@@ -71,10 +71,6 @@ pub struct SolidDraftApp {
     /// Actions waiting while the page reads the exact geometry they need.
     #[cfg(target_arch = "wasm32")]
     pub(super) reading: Option<Reading>,
-    /// Cancel was clicked and the build it cancelled is still owed: the page says
-    /// Cancelling and offers no second Cancel. Only the browser builds off the page.
-    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
-    pub(super) cancelling: bool,
 }
 
 /// Actions held until the part's bodies adopted from the kernel worker are read. An edit
@@ -189,7 +185,6 @@ impl SolidDraftApp {
             opening: None,
             #[cfg(target_arch = "wasm32")]
             reading: None,
-            cancelling: false,
         }
     }
 
@@ -609,7 +604,7 @@ impl SolidDraftApp {
         let pending = self.state.doc.proof_pending() || opening.is_some() || reading;
         let mut cancel = None;
         if !pending {
-            self.cancelling = false;
+            self.state.cancelling = false;
         }
         if pending {
             egui::Area::new(egui::Id::new("browser-build"))
@@ -622,15 +617,15 @@ impl SolidDraftApp {
                             ui.label(match &opening {
                                 Some(name) => format!("Opening {name}"),
                                 None if reading => "Reading the part".to_owned(),
-                                None if self.cancelling => "Cancelling…".to_owned(),
+                                None if self.state.cancelling => "Cancelling…".to_owned(),
                                 None => "Building the part".to_owned(),
                             });
-                            let button = ui.add_enabled(!self.cancelling, egui::Button::new("Cancel"));
+                            let button = ui.add_enabled(!self.state.cancelling, egui::Button::new("Cancel"));
                             if button.clicked() {
                                 // Cancelling an open keeps the part on screen; cancelling a
                                 // read drops the actions waiting for it.
                                 if self.opening.take().is_none() && self.reading.take().is_none() {
-                                    self.cancelling = true;
+                                    self.state.cancelling = true;
                                     self.state.push(AppAction::CancelBuild);
                                 }
                             }
@@ -650,7 +645,7 @@ impl SolidDraftApp {
             "cancel": cancel,
             "reading": reading,
             "picking": picking,
-            "cancelling": self.cancelling,
+            "cancelling": self.state.cancelling,
         }));
     }
 

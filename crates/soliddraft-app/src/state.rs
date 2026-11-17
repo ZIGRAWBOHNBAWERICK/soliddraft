@@ -1265,6 +1265,9 @@ pub struct AppState {
     pub import_report: bool,
     /// Files the importer refused this session, for the import report.
     pub import_refusals: Vec<crate::import::report::Refusal>,
+    /// Cancel was clicked and the build it cancels is still owed: the browser says
+    /// Cancelling and offers no second Cancel. A refused Cancel clears it.
+    pub cancelling: bool,
     pub scan: crate::scan::Workspace,
     pub provider_dialog: Option<crate::chat::ProviderDialog>,
     /// The open File locations page.
@@ -1461,6 +1464,7 @@ impl AppState {
             import_dialog: None,
             import_report: false,
             import_refusals: Vec::new(),
+            cancelling: false,
             scan: Default::default(),
             provider_dialog: None,
             locations_dialog: None,

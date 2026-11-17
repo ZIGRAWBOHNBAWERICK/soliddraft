@@ -283,7 +283,7 @@ impl SolidDraftApp {
                     Err(e) => {
                         // Nothing was cancelled, so the build goes on and Cancel stays
                         // offered; the page must not keep saying Cancelling.
-                        self.cancelling = false;
+                        self.state.cancelling = false;
                         self.state.note(e, NoteKind::Error)
                     }
                 }

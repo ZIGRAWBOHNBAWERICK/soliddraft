@@ -418,7 +418,7 @@ pub(super) fn named_origin(
     named_origin_for_edges(origin, parents, tags, &[])
 }
 
-fn named_origin_for_edges(
+pub(super) fn named_origin_for_edges(
     origin: &Origin,
     parents: &[&Ids],
     tags: &BTreeMap<String, OpTag>,

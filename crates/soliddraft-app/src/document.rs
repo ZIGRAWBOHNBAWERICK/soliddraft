@@ -4444,8 +4444,23 @@ impl Document {
         let k = self.kernel();
         let r = self.model.round(&OpTag::new("preview"), b, chamfer, &edges, base)?;
         // The faces the rounding makes carry the preview mark, so the viewport can tint them.
-        let made: HashMap<FaceId, FeatureId> =
-            r.record.faces.created.iter().map(|face| (*face, PREVIEW_MADE as FeatureId)).collect();
+        // An approximate result is new throughout, so its rounds are found by their roles.
+        let rounds: Vec<FaceId> = r
+            .record
+            .face_roles
+            .iter()
+            .filter(|o| {
+                matches!(
+                    o.role,
+                    soliddraft_kernel_api::FaceRole::Blend { .. } | soliddraft_kernel_api::FaceRole::Corner { .. }
+                )
+            })
+            .map(|o| o.face)
+            .collect();
+        let made: HashMap<FaceId, FeatureId> = if rounds.is_empty() { &r.record.faces.created } else { &rounds }
+            .iter()
+            .map(|face| (*face, PREVIEW_MADE as FeatureId))
+            .collect();
         let mesh = preview_mesh_marked(k.as_ref(), r.body, &self.tess_params, &made);
         let _ = k.release(r.body);
         Ok(Preview { result: Some(mesh?), tool: None, removes: false, guides: Default::default() })

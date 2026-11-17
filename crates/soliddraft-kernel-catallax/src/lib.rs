@@ -578,8 +578,9 @@ impl CatallaxKernel {
                 if outcome.body().definition().faces.is_empty() {
                     return Err(KernelError::Unsupported(NOTHING_LEFT.into()));
                 }
-                let approximate = approximate::Approximate::new(outcome, &parent_ids, &tags, &mut state.next);
-                let record = approximate.record(seq, tag, op, &result, &parent_ids, &tags);
+                let approximate =
+                    approximate::Approximate::new(outcome, &parent_ids, &tags, selected_edges, &mut state.next);
+                let record = approximate.record(seq, tag, op, &parent_ids);
                 history.insert(seq, record.clone());
                 let body = BodyId::from_raw(state.id());
                 state.bodies.insert(

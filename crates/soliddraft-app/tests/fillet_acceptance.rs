@@ -33,12 +33,16 @@ const OWNER_POCKET: &str =
 /// rounded sides, two flat sides, the bottom, two ends, four pocket walls and the floor.
 const OWNER_FACES: usize = 13;
 
-/// The largest rim radius before the fillet meets a neighbouring face, measured with
-/// OpenCASCADE on the same part. See `OWNER_RADII`.
-const OWNER_LARGEST: f64 = 9.0;
+/// The radius at which the rim fillet first meets a face beside it. On the rounded side
+/// the pocket wall stands at x = 32 and the part's outer side at x = 40, so 8 mm of wall
+/// remain under the R25 round. A rim fillet along that wall of radius r has its centre
+/// where (17 + r)^2 + (z - 35)^2 = (25 - r)^2, which has a solution only up to r = 4,
+/// where the fillet reaches the outer side face. OpenCASCADE builds the whole rim at
+/// 3.998 and refuses it at 4.
+const OWNER_CONTACT: f64 = 4.0;
 
-/// The radii the owner's pocket rim must take, smallest to largest.
-const OWNER_RADII: [f64; 5] = [0.5, 1.0, 2.0, 5.0, OWNER_LARGEST];
+/// The largest radius the test asks of the whole rim, just under [`OWNER_CONTACT`].
+const OWNER_LARGEST: f64 = 3.99;
 
 /// What became of one fillet request.
 #[derive(Debug)]
@@ -261,27 +265,64 @@ fn owner_rim(radius: f64) {
 
 #[test]
 fn owner_pocket_rim_takes_r0_5() {
-    owner_rim(OWNER_RADII[0]);
+    owner_rim(0.5);
 }
 
 #[test]
 fn owner_pocket_rim_takes_r1() {
-    owner_rim(OWNER_RADII[1]);
+    owner_rim(1.0);
 }
 
 #[test]
 fn owner_pocket_rim_takes_r2() {
-    owner_rim(OWNER_RADII[2]);
-}
-
-#[test]
-fn owner_pocket_rim_takes_r5() {
-    owner_rim(OWNER_RADII[3]);
+    owner_rim(2.0);
 }
 
 #[test]
 fn owner_pocket_rim_takes_the_largest_radius_that_fits() {
-    owner_rim(OWNER_RADII[4]);
+    owner_rim(OWNER_LARGEST);
+}
+
+/// Past [`OWNER_CONTACT`] the whole rim cannot be rounded, in any CAD system. The user
+/// reads which face the fillet runs into and the largest radius that fits, in plain words.
+#[test]
+fn owner_pocket_rim_at_r5_names_the_face_it_reaches_and_the_radius_that_fits() {
+    let (mut part, rim) = owner_part();
+    let mut row = part.fillet("owner-pocket-rim", rim, 5.0);
+    let message = row.message.clone();
+    let limit =
+        message.split("under ").nth(1).and_then(|rest| rest.split(" mm").next()).and_then(|n| n.parse::<f64>().ok());
+    let plain =
+        !["fillet.", "features.", "intersect.", "numbers.", "Catallax"].iter().any(|code| message.contains(code));
+    let names_face = message.contains("Boss-Extrude1 ·");
+    if row.result == "refused" && !(plain && names_face && limit.is_some_and(|l| (3.9..=OWNER_CONTACT).contains(&l))) {
+        row.result = "unclear";
+        row.stage = format!("{}; message", row.stage);
+    } else if row.result == "refused" {
+        row.result = "pass";
+    } else {
+        row.result = "built";
+        row.stage = "a rim fillet past the contact radius built".into();
+    }
+    report("owner-pocket-rim-r5", &[row], |_| true);
+}
+
+/// Without the edge along the thin wall, the rest of the rim takes R5: its arcs end on
+/// that wall. OpenCASCADE builds these five edges up to R8.
+#[test]
+fn owner_pocket_rim_without_the_thin_wall_edge_takes_r5() {
+    let (mut part, rim) = owner_part();
+    let topology = part.topology();
+    let thin_wall_edge = topology
+        .edges
+        .iter()
+        .find(|e| (e.bbox.min.x - 32.0).abs() < 0.01 && (e.bbox.max.x - 32.0).abs() < 0.01 && e.bbox.min.z > 50.0)
+        .map(|e| part.edge_name(e.id))
+        .expect("the rim edge along the thin wall");
+    let edges: Vec<String> = rim.into_iter().filter(|e| *e != thin_wall_edge).collect();
+    assert_eq!(edges.len(), 5);
+    let rows = vec![part.fillet("owner-pocket-rim-five", edges, 5.0)];
+    report("owner-pocket-rim-five-r5", &rows, |_| true);
 }
 
 /// A 60 x 40 x 20 box with all twelve edges rounded. Its 20 mm height takes at most R10.

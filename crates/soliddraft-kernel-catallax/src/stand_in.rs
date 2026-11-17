@@ -21,7 +21,7 @@ pub(crate) fn numerical(
     let (model, result) = (&built.model, built.result);
     let options = NumericalOptions::default();
     let mut dec = Decider::default();
-    let (mut definition, trims) = catallax_step::numerical::definition_from_exact_model(
+    let (mut definition, trims) = catallax_features::numerical_embedding::definition_from_exact_model(
         model,
         result,
         recipe.name.clone(),

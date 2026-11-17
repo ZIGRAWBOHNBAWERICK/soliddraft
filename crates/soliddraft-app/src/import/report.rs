@@ -21,7 +21,7 @@ pub enum Tier {
     /// It did not open.
     Refused,
     /// One of several bodies of a file whose record lists repairs it does not attribute
-    /// to one body, and none of this body's faces was repaired.
+    /// to one body, and no face repair is attributed to this body.
     FileRepaired,
     /// It is suppressed, rolled back or not built yet, so it has no reliable tier.
     NotEvaluated,
@@ -154,7 +154,7 @@ fn opened_as(doc: &Document, id: FeatureId) -> (Tier, String) {
     if solid.is_some() && !record.changes.is_empty() {
         let file = record.changes.iter().map(change_text).collect::<Vec<_>>().join("; ");
         if faces == 0 {
-            text.push_str("No face of this body was repaired.");
+            text.push_str("No face repairs are attributed to this body.");
         }
         text.push_str(&format!(" The file's record also lists repairs it does not attribute to one body: {file}."));
     }

@@ -133,6 +133,6 @@ fn a_repair_on_one_body_of_a_file_is_not_spread_to_its_siblings() {
     let file = "The file's record also lists repairs it does not attribute to one body: seam closed automatically within 0.01 mm.";
     assert_eq!(report[0].why, format!("4 faces repaired within a stated deviation from the source. {file}"));
     for sibling in &report[1..] {
-        assert_eq!(sibling.why, format!("No face of this body was repaired. {file}"));
+        assert_eq!(sibling.why, format!("No face repairs are attributed to this body. {file}"));
     }
 }

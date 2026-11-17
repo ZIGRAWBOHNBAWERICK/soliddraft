@@ -597,7 +597,7 @@ impl CatallaxKernel {
             }
         };
         if op == OpKind::Fillet
-            && let Some(refusal) = stopped_short(&app, &result)
+            && let Some(refusal) = stopped_short(app.checkpoint.built(), &result)
         {
             return Err(refusal);
         }
@@ -873,8 +873,7 @@ const NOTHING_LEFT: &str = "this would leave nothing of the part";
 /// and keeps the request in `requested_radius`. SolidDraft never builds a radius other
 /// than the one the feature records, so it refuses as Catallax did before, naming the
 /// largest radius that fits. A radius that consumes a face exactly still builds.
-fn stopped_short(app: &AppBody, step: &str) -> Option<KernelError> {
-    let built = app.checkpoint.built();
+fn stopped_short(built: &catallax_features::Built, step: &str) -> Option<KernelError> {
     let limit = built
         .fillets
         .iter()
@@ -1148,6 +1147,13 @@ fn build(
             build_error(op, e)
         }
     })?;
+    // Checked before anything else reads the build, so no stand-in hides it.
+    if op == OpKind::Fillet
+        && let EvaluatedApplicationOutcome::Exact(app) = &outcome
+        && let Some(refusal) = stopped_short(app.checkpoint.built(), input["result"].as_str().unwrap_or_default())
+    {
+        return Err(refusal);
+    }
     #[cfg(feature = "numerical-stand-in")]
     let outcome = if stand_in.contains(&op) {
         stand_in::numerical(outcome, &converted.recipe).map_err(|e| KernelError::Failed {

@@ -4889,15 +4889,19 @@ impl Document {
                         }
                     }
                 }
+                // Whether or not its mass is known yet, an approximate result says so.
+                if !f.is_sketch()
+                    && let Some(body) = f.body
+                    && let Some(tolerance) = self.kernel_body_tolerance(body)
+                {
+                    details.push(("Accuracy".to_owned(), approximate_words(&tolerance)));
+                }
                 if !f.is_sketch()
                     && !matches!(&f.kind, FeatureKind::Scan(scan) if scan.fit.is_none())
                     && self.current_exact_display()
                     && let Some(body) = f.body
                     && let Some(mp) = crate::measure::mass::cached(self, body)
                 {
-                    if let Some(tolerance) = self.kernel_body_tolerance(body) {
-                        details.push(("Accuracy".to_owned(), approximate_words(&tolerance)));
-                    }
                     details.push(("Volume".to_owned(), format!("{:.0} mm³", mp.volume)));
                     details.push(("Surface area".to_owned(), format!("{:.0} mm²", mp.area)));
                     let material = self.material();

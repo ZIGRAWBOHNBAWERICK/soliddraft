@@ -114,3 +114,25 @@ fn a_suppressed_import_is_not_evaluated() {
     let report = rows(&doc, &[]);
     assert_eq!((report[0].tier, report[0].why.as_str()), (Tier::NotEvaluated, "Suppressed, so it is not built."));
 }
+
+/// A file of several solids shares one repair record. Its repaired body shows its own
+/// repaired faces; an exact sibling never shows the other body's repairs as its own, and
+/// the file's seam repair is named as the file's.
+#[test]
+fn a_repair_on_one_body_of_a_file_is_not_spread_to_its_siblings() {
+    let seam = std::str::from_utf8(include_bytes!("../../../ci/fixtures/import/block-seam-4um.step")).unwrap();
+    let blocks = std::str::from_utf8(include_bytes!("../../../ci/fixtures/import/two-blocks-5um.step")).unwrap();
+    // Two exact blocks, renumbered past the seam block's entities, after it in one file.
+    let copy = blocks.split("DATA;\n").nth(1).unwrap().split("ENDSEC;").next().unwrap().replace('#', "#900");
+    let source = seam.replace("ENDSEC;\nEND-ISO-10303-21;", &format!("{copy}ENDSEC;\nEND-ISO-10303-21;"));
+    assert_ne!(source, seam, "the blocks were not added");
+    let doc = imported("mixed.step", ImportFormat::Step, source.as_bytes());
+    let report = rows(&doc, &[]);
+    let tiers: Vec<Tier> = report.iter().map(|row| row.tier).collect();
+    assert_eq!(tiers, [Tier::Repaired, Tier::FileRepaired, Tier::FileRepaired]);
+    let file = "The file's record also lists repairs it does not attribute to one body: seam closed automatically within 0.01 mm.";
+    assert_eq!(report[0].why, format!("4 faces repaired within a stated deviation from the source. {file}"));
+    for sibling in &report[1..] {
+        assert_eq!(sibling.why, format!("No face of this body was repaired. {file}"));
+    }
+}

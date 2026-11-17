@@ -20,6 +20,9 @@ pub enum Tier {
     Surface,
     /// It did not open.
     Refused,
+    /// One of several bodies of a file whose record lists repairs it does not attribute
+    /// to one body, and none of this body's faces was repaired.
+    FileRepaired,
     /// It is suppressed, rolled back or not built yet, so it has no reliable tier.
     NotEvaluated,
 }
@@ -31,6 +34,7 @@ impl Tier {
             Tier::Repaired => "Solid, repaired",
             Tier::Surface => "Surface body",
             Tier::Refused => "Refused",
+            Tier::FileRepaired => "Solid, file repaired",
             Tier::NotEvaluated => "Not evaluated",
         }
     }
@@ -121,31 +125,61 @@ fn opened_as(doc: &Document, id: FeatureId) -> (Tier, String) {
     let Some(record) = doc.model().import_record(model_id(id)) else {
         return (Tier::Exact, "Closed as it is.".into());
     };
+    // A file of several solids shares one record. A repaired face names its solid, so it
+    // belongs to that body; a gap change names only source entities, so it stays the
+    // file's and is never spread over every body the file gave.
+    let solid = match &feature.kind {
+        FeatureKind::ImportStep(import) => import.source_solid.as_deref(),
+        _ => None,
+    };
+    let own = |of: &str| solid.is_none_or(|solid| solid == of);
+    let faces = record.face_tolerances.iter().filter(|f| own(&f.solid)).count()
+        + record.source_incidence.iter().filter(|f| own(&f.solid)).count();
+    let changes: Vec<String> = record.changes.iter().map(change_text).collect();
+    let file_repaired = record.changes.iter().any(|c| c.approval != Approval::Declined);
     let mut why: Vec<String> = Vec::new();
-    for change in &record.changes {
-        let kind = super::kind_name(&change.kind);
-        why.push(match change.approval {
-            Approval::Declined => format!("Declined {kind}; the solid stays open"),
-            Approval::Automatic => format!("{kind} closed automatically within {} mm", change.tolerance_mm),
-            Approval::User => format!(
-                "{kind} closed within {} mm, approved by {}",
-                change.tolerance_mm,
-                change.approver.as_deref().unwrap_or("the reviewer")
-            ),
-        });
+    if solid.is_none() {
+        why.extend(changes);
     }
-    let refitted = record.face_tolerances.len() + record.source_incidence.len();
-    if refitted > 0 {
+    if faces > 0 {
         why.push(format!(
-            "{refitted} {} repaired within a stated deviation from the source",
-            if refitted == 1 { "face" } else { "faces" }
+            "{faces} {} repaired within a stated deviation from the source",
+            if faces == 1 { "face" } else { "faces" }
         ));
     }
-    let repaired = record.changes.iter().any(|c| c.approval != Approval::Declined) || refitted > 0;
-    if why.is_empty() {
-        (Tier::Exact, "Closed as it is.".into())
+    let mut text = capitalised(&why.join("; "));
+    if !text.is_empty() {
+        text.push('.');
+    }
+    if solid.is_some() && !record.changes.is_empty() {
+        let file = record.changes.iter().map(change_text).collect::<Vec<_>>().join("; ");
+        if faces == 0 {
+            text.push_str("No face of this body was repaired.");
+        }
+        text.push_str(&format!(" The file's record also lists repairs it does not attribute to one body: {file}."));
+    }
+    let own_repaired = faces > 0 || (solid.is_none() && file_repaired);
+    let tier = if own_repaired {
+        Tier::Repaired
+    } else if solid.is_some() && file_repaired {
+        Tier::FileRepaired
     } else {
-        (if repaired { Tier::Repaired } else { Tier::Exact }, capitalised(&why.join("; ")) + ".")
+        Tier::Exact
+    };
+    if text.is_empty() { (tier, "Closed as it is.".into()) } else { (tier, text.trim_start().to_owned()) }
+}
+
+/// A gap change in words.
+fn change_text(change: &soliddraft_kernel_api::RepairChange) -> String {
+    let kind = super::kind_name(&change.kind);
+    match change.approval {
+        Approval::Declined => format!("declined {kind}; the solid stays open"),
+        Approval::Automatic => format!("{kind} closed automatically within {} mm", change.tolerance_mm),
+        Approval::User => format!(
+            "{kind} closed within {} mm, approved by {}",
+            change.tolerance_mm,
+            change.approver.as_deref().unwrap_or("the reviewer")
+        ),
     }
 }
 

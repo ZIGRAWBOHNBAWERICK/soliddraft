@@ -253,6 +253,7 @@ fn a_certified_coarse_rod_cut_is_redrawn_at_fine_quality_for_export() {
 
 #[test]
 fn a_saved_rod_cache_without_quality_is_regenerated_after_reopening() {
+    const SENTINEL_BOX: [f64; 4] = [-12345.5, -12345.5, 12345.5, 12345.5];
     use soliddraft_app::document::Document;
     use soliddraft_document::manifest::{self, Entry, Package};
     use soliddraft_kernel_catallax::CatallaxKernel;
@@ -273,6 +274,7 @@ fn a_saved_rod_cache_without_quality_is_regenerated_after_reopening() {
     call(&mut state, "make_drawing", json!({ "template": "iso-a3" }));
     let path = dir.join("old.dwdrw");
     call(&mut state, "drawing_save", json!({ "path": path }));
+    let saved = previews(&state.drawing.session.as_ref().unwrap().doc.drawing);
 
     // Generate the cache format written before quality was stored separately from proof.
     let bytes = std::fs::read(&path).unwrap();
@@ -283,6 +285,8 @@ fn a_saved_rod_cache_without_quality_is_regenerated_after_reopening() {
         if name.starts_with("cache/views/") {
             let mut geometry: Value = serde_json::from_slice(&bytes).unwrap();
             assert_eq!(geometry.as_object_mut().unwrap().remove("coarse"), Some(json!(true)));
+            // A sentinel no projection makes: a view still carrying it was not drawn again.
+            geometry["bbox"] = json!(SENTINEL_BOX);
             bytes = serde_json::to_vec(&geometry).unwrap();
         }
         entries.push(Entry::new(name, bytes));
@@ -295,9 +299,12 @@ fn a_saved_rod_cache_without_quality_is_regenerated_after_reopening() {
     call(&mut reopened, "open", json!({ "path": path }));
     let shown = reopened.drawing.session.as_ref().unwrap().doc.drawing.clone();
     assert_eq!(shown.sheets[0].views.len(), 4);
-    // A cache with no stored quality is drawn again on opening, from whatever the screen
-    // reads; a view says it is proved only when it read a certified mesh.
-    assert_eq!(certified_view_meshes(&kernel), proved_views(&shown), "{:?}", previews(&shown));
+    // Opening shows the cached views as they were saved, sentinel and labels included: it
+    // draws nothing and claims no proof the cache did not record. A cache of unknown
+    // quality is drawn again only when certified line work is asked for, below.
+    assert!(shown.sheets[0].views.iter().all(|v| v.geometry.bbox == SENTINEL_BOX));
+    assert_eq!(previews(&shown), saved);
+    assert_eq!(certified_view_meshes(&kernel), 0, "opening read no certified mesh");
     assert_eq!(shown.model.pinned, PartContext::new(&reopened.doc).unwrap().digest);
     soliddraft_app::drawing::follow_part(&mut reopened);
     assert_eq!(reopened.drawing.session.as_ref().unwrap().doc.drawing, shown);
@@ -309,6 +316,7 @@ fn a_saved_rod_cache_without_quality_is_regenerated_after_reopening() {
     apply_with(&mut fine, &Command::UpdateFromModel, &part.certified_part()).unwrap();
     assert_eq!(certified_view_meshes(&kernel), 4, "each fine view read a certified mesh");
     assert!(fine.sheets[0].views.iter().all(|v| !v.geometry.unproved && !v.geometry.coarse));
+    assert!(fine.sheets[0].views.iter().all(|v| v.geometry.bbox != SENTINEL_BOX), "every view was drawn again");
 
     let mut exported = Vec::new();
     for (tool, extension) in

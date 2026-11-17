@@ -5,8 +5,8 @@ use std::sync::Arc;
 
 use soliddraft_document::DocumentId;
 use soliddraft_kernel_api::{
-    BodyId, EdgeId, FaceId, FieldMass, FieldMassAccuracy, Kernel, KernelResult, OpResult, OpTag, Plane, Topology,
-    VertexId,
+    BodyId, EdgeId, FaceId, FieldMass, FieldMassAccuracy, Kernel, KernelError, KernelResult, OpResult, OpTag, Plane,
+    Topology, VertexId,
 };
 use soliddraft_sketch::profile::Region;
 use soliddraft_sketch::{EntityKind, Sketch, SolveStatus};
@@ -63,6 +63,10 @@ pub struct BuiltSketch {
     /// The closed regions, or why the sketch has none.
     pub regions: Result<Vec<Region>, String>,
 }
+
+/// What a refused fillet's message adds before the faces it would run into, named as
+/// the tree names them: "...; runs into Boss-Extrude1 · Side of arc 3".
+pub const RUNS_INTO: &str = "; runs into ";
 
 /// How a face is named for people.
 #[derive(Clone, Debug, PartialEq)]
@@ -728,7 +732,19 @@ impl Document {
                 .chamfer_distances(tag, body, edges, b.size, b.other_distance)
                 .map_err(|e| e.to_string());
         }
-        self.kernel.fillet(tag, body, edges, b.size).map_err(|e| e.to_string())
+        self.kernel
+            .fillet(tag, body, edges, b.size)
+            .map_err(|e| self.fillet_reaches(&e, body).unwrap_or_else(|| e.to_string()))
+    }
+
+    /// A fillet of `body` refused because it would run into other faces, with those
+    /// faces named as the tree names them, after [`RUNS_INTO`]. `None` for any other error.
+    pub(crate) fn fillet_reaches(&self, error: &KernelError, body: BodyId) -> Option<String> {
+        let KernelError::FilletReaches { faces, .. } = error else { return None };
+        let t = self.view_of(body).ok();
+        let names: Vec<String> =
+            faces.iter().filter_map(|face| self.label_in(*face, t.as_ref()?)).map(|label| label.text).collect();
+        Some(if names.is_empty() { error.to_string() } else { format!("{error}{RUNS_INTO}{}", names.join(" and ")) })
     }
 
     /// Moves the rollback bar without an undo entry and rebuilds, for views that show

@@ -1,15 +1,42 @@
 //! Geometry refusals in the interface. Diagnostics retain the original reason.
 
-pub(crate) fn for_user(message: &str) -> String {
+/// What the user reads for a kernel or backend `message`: plain words, never a code.
+pub fn for_user(message: &str) -> String {
+    let (message, reaches) = match message.split_once(soliddraft_model::RUNS_INTO) {
+        Some((message, faces)) => (message, Some(faces.trim())),
+        None => (message, None),
+    };
+    if let Some(reaches) = reaches.filter(|faces| !faces.is_empty()) {
+        return match radius_limit(message) {
+            Some(limit) => format!("This fillet runs into {reaches}. Try a radius under {limit} mm."),
+            None => format!("This fillet runs into {reaches}. Reduce the radius or round fewer edges."),
+        };
+    }
     if message.contains("fillet.radius-too-large") {
-        if let Some(limit) = message.split("; radius limit ").nth(1).and_then(|s| s.split_once(" mm").map(|(n, _)| n))
-            && limit.parse::<f64>().is_ok_and(|n| n.is_finite() && n > 0.0)
-        {
-            return format!("The radius is too large for this edge. Try a radius under {limit} mm.");
-        }
-        return "The radius is too large for this edge. Try a smaller radius.".into();
+        return match radius_limit(message) {
+            Some(limit) => format!("The radius is too large for this edge. Try a radius under {limit} mm."),
+            None => "The radius is too large for this edge. Try a smaller radius.".into(),
+        };
+    }
+    // When the exact construction and the general one both refused, the general one's
+    // reason is the one that holds: the exact one may only lack a construction.
+    if let Some((_, general)) = message.split_once(NUMERICAL_REFUSED) {
+        return plain_message(general).to_owned();
     }
     plain_message(message).to_owned()
+}
+
+/// What a refusal says before the general fillet construction's own reason.
+const NUMERICAL_REFUSED: &str = "numerical continuation refused ";
+
+/// The smallest radius limit a fillet refusal states, as the kernel wrote it.
+fn radius_limit(message: &str) -> Option<&str> {
+    message
+        .split("; radius limit ")
+        .skip(1)
+        .filter_map(|rest| rest.split_once(" mm").map(|(n, _)| n))
+        .filter(|n| n.parse::<f64>().is_ok_and(|n| n.is_finite() && n > 0.0))
+        .min_by(|a, b| a.parse::<f64>().unwrap().total_cmp(&b.parse::<f64>().unwrap()))
 }
 
 fn plain_message(message: &str) -> &str {
@@ -28,6 +55,15 @@ fn plain_message(message: &str) -> &str {
         "This edge and radius cannot be rounded together. Try a smaller radius or a different edge."
     } else if message.contains("fillet.unsupported-topology") {
         "This selection does not define a supported sharp edge. Choose a different edge."
+    } else if message.contains("features.numerical-fillet-network")
+        || message.contains("features.numerical-fillet-closure")
+        || message.contains("fillet.numerical-chain")
+    {
+        "Rounding these edges together is not supported yet. Select different edges."
+    } else if message.contains("fillet.numerical-contact") {
+        "The fillet cannot roll along this edge at this radius. Try a different radius or select different edges."
+    } else if message.contains("features.numerical-") || message.contains("fillet.numerical-") {
+        "This fillet cannot be made on the selected edges. Reduce the radius or select different edges."
     } else if message.contains("recipe.ambiguous-reference") {
         "This selection matches more than one edge or face. Pick the intended edge or face again."
     } else if message.contains("draft.parallel-face-normal") {
@@ -176,6 +212,53 @@ mod tests {
             for_user("export_step failed: numbers.operation-budget: operation work allowance exhausted"),
             "This operation reached its calculation limit. Try a simpler shape or suppress a feature."
         );
+    }
+
+    /// A fillet that would run into other faces names them as the tree does, with the
+    /// largest radius that fits when the kernel found one, and never a code.
+    #[test]
+    fn a_fillet_that_reaches_other_faces_names_them_and_the_radius_that_fits() {
+        let refusal = "fillet failed in the kernel: fillet.radius-too-large: step op_9: the ball reaches a face; \
+                       radius limit 3.999 mm";
+        assert_eq!(
+            for_user(&format!("{refusal}{}Boss-Extrude1 · Side of line 2", soliddraft_model::RUNS_INTO)),
+            "This fillet runs into Boss-Extrude1 · Side of line 2. Try a radius under 3.999 mm."
+        );
+        assert_eq!(
+            for_user(&format!(
+                "fillet failed in the kernel: fillet.unsupported-overflow: a face{}Cut-Extrude1 · Floor and \
+                 Boss-Extrude1 · End cap",
+                soliddraft_model::RUNS_INTO
+            )),
+            "This fillet runs into Cut-Extrude1 · Floor and Boss-Extrude1 · End cap. Reduce the radius or round fewer \
+             edges."
+        );
+        // Of two stated limits, the smaller one fits both constructions.
+        assert_eq!(
+            for_user(
+                "fillet.radius-too-large: exact path refused fillet.radius-too-large: a; radius limit 5 mm; numerical \
+                 continuation refused fillet.radius-too-large: b; radius limit 4.5 mm"
+            ),
+            "The radius is too large for this edge. Try a radius under 4.5 mm."
+        );
+    }
+
+    /// When the exact construction and the general one both refuse, the user reads the
+    /// general one's reason: the exact one's may only say it has no construction.
+    #[test]
+    fn the_general_fillet_construction_gives_the_reason() {
+        let both = "fillet failed in the kernel (status 0): features.numerical-fillet-network: step op_96: \
+                    features.numerical-fillet-network: exact path refused fillet.unsupported-overflow: a non-end \
+                    neighbour intersects the blend carrier; numerical continuation refused \
+                    features.numerical-fillet-network: the retained spline assembly needs one outer-boundary edge";
+        assert_eq!(for_user(both), "Rounding these edges together is not supported yet. Select different edges.");
+        for code in ["features.numerical-fillet-source", "fillet.numerical-body", "features.numerical-fillet-name"] {
+            let shown = for_user(&format!("fillet failed in the kernel (status 0): {code}: detail"));
+            assert_eq!(
+                shown,
+                "This fillet cannot be made on the selected edges. Reduce the radius or select different edges."
+            );
+        }
     }
 
     /// A fillet the kernel cannot trim against its neighbours says so, rather than the

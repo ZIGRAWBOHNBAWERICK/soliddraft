@@ -751,6 +751,7 @@ impl CatallaxKernel {
         let built = build(
             &input,
             op,
+            &parents,
             prefix.as_ref().map(|solid| &solid.app),
             &files,
             capture.then_some(&mut questions),
@@ -1088,9 +1089,11 @@ impl From<EvaluatedApplicationOutcome> for Outcome {
 type BuildAnswer = (Outcome, BTreeMap<String, catallax_recipe::StepId>, String, Option<Arc<handover::HandedTopology>>);
 
 /// Builds a legacy recipe, returning the body and the legacy step names' Catallax step ids.
+#[allow(clippy::too_many_arguments)]
 fn build(
     input: &Value,
     op: OpKind,
+    parents: &[Arc<Solid>],
     prefix: Option<&AppBody>,
     files: &catallax_features::ImportFiles<'_>,
     questions: Option<&mut Vec<Value>>,
@@ -1137,6 +1140,10 @@ fn build(
             .is_some_and(|segments| segments.iter().any(|s| s["kind"] == "spline"));
         if op == OpKind::Sweep && spline && e.code() == "features.unsupported-path" {
             KernelError::InvalidInput("This spline sweep was refused because it needs one spline segment and a profile that keeps its direction".into())
+        } else if op == OpKind::Fillet
+            && let Some(reaches) = fillet_reaches(&e, parents)
+        {
+            reaches
         } else {
             build_error(op, e)
         }
@@ -1154,6 +1161,51 @@ fn build(
     #[cfg(not(feature = "numerical-stand-in"))]
     let _ = stand_in;
     Ok((outcome.into(), converted.steps, key, None))
+}
+
+/// What a Catallax fillet refusal writes before each face of the input body the fillet
+/// would run into, followed by the face's handle as Catallax prints it: "; reaches face #12".
+const REACHES: &str = "; reaches face #";
+
+/// A fillet Catallax refused because it would run into faces other than those beside
+/// its edges, with those faces as the input body's ids. `None` when the refusal names
+/// no such face, or names one the input body does not have.
+fn fillet_reaches(error: &Error, parents: &[Arc<Solid>]) -> Option<KernelError> {
+    let Error::Build(catallax_features::BuildError::Geometry { refusal, .. }) = error else { return None };
+    let handles = reached_handles(&refusal.detail);
+    let faces = handles
+        .iter()
+        .map(|index| {
+            parents.iter().find_map(|parent| {
+                parent.ids.faces.iter().find_map(|(cat, face)| (cat.index() == *index).then_some(*face))
+            })
+        })
+        .collect::<Option<Vec<FaceId>>>()?;
+    if faces.is_empty() {
+        return None;
+    }
+    let radius_limit_mm = refusal
+        .detail
+        .split("; radius limit ")
+        .skip(1)
+        .filter_map(|rest| rest.split_once(" mm")?.0.parse::<f64>().ok())
+        .filter(|limit| limit.is_finite() && *limit > 0.0)
+        .min_by(f64::total_cmp);
+    Some(KernelError::FilletReaches { faces, radius_limit_mm, message: format!("{}: {error}", error.code()) })
+}
+
+/// The face handles a refusal names after [`REACHES`], in order, each once.
+fn reached_handles(detail: &str) -> Vec<u32> {
+    let mut handles = Vec::new();
+    for rest in detail.split(REACHES).skip(1) {
+        let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
+        if let Ok(index) = digits.parse()
+            && !handles.contains(&index)
+        {
+            handles.push(index);
+        }
+    }
+    handles
 }
 
 fn loft_fillet_refusal(error: &Error) -> Option<&'static str> {
@@ -2430,6 +2482,15 @@ impl Kernel for CatallaxKernel {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_fillet_refusal_names_each_face_it_reaches_once() {
+        let detail = "exact path refused fillet.radius-too-large: the ball reaches a face; radius limit 4 mm; \
+                      reaches face #12; numerical continuation refused fillet.radius-too-large: the same face; \
+                      reaches face #12; reaches face #3.";
+        assert_eq!(reached_handles(detail), [12, 3]);
+        assert!(reached_handles("fillet.unsupported-overflow: a face; reaches face #").is_empty());
+    }
 
     #[test]
     fn certified_display_is_cached_after_a_refused_request_retries() {

@@ -943,6 +943,17 @@ pub enum KernelError {
         /// The application's request allowance.
         limit: u64,
     },
+    /// A fillet whose radius would carry it into faces of the body other than the two
+    /// beside each picked edge. The application names `faces` for the user.
+    #[error("fillet failed in the kernel: {message}")]
+    FilletReaches {
+        /// Faces of the input body the fillet would run into.
+        faces: Vec<FaceId>,
+        /// The largest radius in millimetres that fits, when the kernel found one.
+        radius_limit_mm: Option<f64>,
+        /// The kernel's own explanation, for diagnostics.
+        message: String,
+    },
     /// The backend does not implement this operation or input.
     #[error("unsupported: {0}")]
     Unsupported(String),

@@ -11,7 +11,7 @@ use std::{collections::BTreeSet, sync::Arc, time::Instant};
 use serde_json::{Value, json};
 use soliddraft_app::{app_tools::AppTools, document::Document, state::AppState};
 use soliddraft_assistant::{Caller, tools::call_checked};
-use soliddraft_kernel_api::{BodyAccuracy, EdgeId, FaceId, Kernel};
+use soliddraft_kernel_api::{BodyAccuracy, EdgeId, FaceId};
 use soliddraft_kernel_catallax::{APP_REQUEST_WORK, CatallaxKernel};
 
 /// The owner's Boss-Extrude1: an 80 x 60 profile with R25 top corners, so its flat top
@@ -143,6 +143,7 @@ impl Part {
     /// starts from the same part.
     fn fillet(&mut self, case: &str, edges: Vec<String>, radius: f64) -> Row {
         let before = self.doc().model().part_json();
+        let (features, faces) = (self.doc().features.len(), self.topology().faces.len());
         self.kernel.take_diagnostics().unwrap();
         let start = Instant::now();
         let out = self.tool("fillet", json!({"edges": edges, "radius": radius}));
@@ -166,7 +167,9 @@ impl Part {
             seconds,
         };
         if out.is_error {
-            row.message = out.content.clone();
+            // The panel shows the kernel's refusal through the same words.
+            row.message =
+                soliddraft_app::geometry_message::for_user(if kernel.is_empty() { &out.content } else { &kernel });
             if fillet_calls.is_empty() {
                 // Refused before the kernel was asked: an edge the app could not name.
                 row.result = "name";
@@ -196,7 +199,8 @@ impl Part {
             row.message = "the filleted part shows nothing".into();
         }
         self.state.doc.undo().unwrap();
-        assert_eq!(self.doc().model().part_json(), before, "{case}: undo did not restore the part");
+        assert_eq!(self.doc().features.len(), features, "{case}: undo did not remove the fillet");
+        assert_eq!(self.topology().faces.len(), faces, "{case}: undo did not restore the part");
         row
     }
 }

@@ -157,7 +157,12 @@ pub fn failed_operations_return_errors(k: &dyn Kernel) {
 
     let too_big = k.fillet(&tag("too_big"), b, &edges, 50.0);
     assert!(
-        matches!(too_big, Err(KernelError::Failed { op: OpKind::Fillet, .. } | KernelError::InvalidResult { .. })),
+        matches!(
+            too_big,
+            Err(KernelError::Failed { op: OpKind::Fillet, .. }
+                | KernelError::FilletReaches { .. }
+                | KernelError::InvalidResult { .. })
+        ),
         "{too_big:?}"
     );
 

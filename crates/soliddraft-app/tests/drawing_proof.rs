@@ -29,6 +29,19 @@ fn previews(drawing: &Drawing) -> Vec<bool> {
     drawing.sheets.iter().flat_map(|s| &s.views).map(|v| v.geometry.unproved).collect()
 }
 
+/// How many certified meshes the drawing's view projections asked the kernel for, in the
+/// calls `kernel` logged since it was last asked. A view may say it is certified only
+/// when its projection read one: a preview must never be labelled as proved.
+fn certified_view_meshes(kernel: &soliddraft_kernel_catallax::CatallaxKernel) -> usize {
+    let calls = kernel.take_diagnostics().unwrap();
+    calls["calls"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|c| c["operation"] == "tessellate" && c["log_scope"] == "view_curves")
+        .count()
+}
+
 #[test]
 fn an_exported_drawing_never_comes_from_a_preview() {
     let dir = std::env::temp_dir().join(format!("soliddraft-drawing-proof-{}", std::process::id()));
@@ -184,16 +197,21 @@ fn a_certified_coarse_rod_cut_is_redrawn_at_fine_quality_for_export() {
         }
         call(&mut state, tool, step["arguments"].clone());
     }
+    kernel.take_diagnostics().unwrap();
     call(&mut state, "make_drawing", json!({ "template": "iso-a3" }));
     let shown = state.drawing.session.as_ref().unwrap().doc.drawing.clone();
     let views = shown.sheets[0].views.len();
     assert_eq!(views, 4);
-    // Catallax refuses this body's preview, so the screen uses a proved coarse mesh.
-    assert!(shown.sheets[0].views.iter().all(|v| !v.geometry.unproved && v.geometry.coarse));
+    // The screen draws at coarse quality from whatever Catallax gives it. Since Catallax
+    // 9566aa24 that is the unproved preview of this body, which it used to refuse, so the
+    // screen no longer borrows a certified mesh. Either way the label must say which it is.
+    assert_eq!(certified_view_meshes(&kernel), 0, "the screen read no certified mesh");
+    assert!(shown.sheets[0].views.iter().all(|v| v.geometry.unproved && v.geometry.coarse), "{:?}", previews(&shown));
 
     let part = PartContext::new(&state.doc).unwrap();
     let mut fine = shown.clone();
     apply_with(&mut fine, &Command::UpdateFromModel, &part.certified_part()).unwrap();
+    assert_eq!(certified_view_meshes(&kernel), views, "each fine view read a certified mesh");
     assert!(fine.sheets[0].views.iter().all(|v| !v.geometry.unproved && !v.geometry.coarse));
     let fine_svg = export::bytes(&layout_sheet(&fine, 0), Format::Svg, &fine.meta.title).unwrap();
 
@@ -271,7 +289,10 @@ fn a_saved_rod_cache_without_quality_is_regenerated_after_reopening() {
     call(&mut reopened, "open", json!({ "path": path }));
     let shown = reopened.drawing.session.as_ref().unwrap().doc.drawing.clone();
     assert_eq!(shown.sheets[0].views.len(), 4);
-    assert!(shown.sheets[0].views.iter().all(|v| !v.geometry.unproved));
+    // A cache with no stored quality is drawn again on opening. The screen takes Catallax's
+    // unproved preview of this body, so no view may be labelled certified.
+    assert_eq!(certified_view_meshes(&kernel), 0, "the reopened screen read no certified mesh");
+    assert!(shown.sheets[0].views.iter().all(|v| v.geometry.unproved), "{:?}", previews(&shown));
     assert_eq!(shown.model.pinned, PartContext::new(&reopened.doc).unwrap().digest);
     soliddraft_app::drawing::follow_part(&mut reopened);
     assert_eq!(reopened.drawing.session.as_ref().unwrap().doc.drawing, shown);

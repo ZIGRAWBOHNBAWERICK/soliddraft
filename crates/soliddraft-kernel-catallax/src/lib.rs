@@ -2581,7 +2581,8 @@ mod tests {
             let evidence = kernel.take_diagnostics().unwrap();
             let recipe = kernel.body_recipe(cut).unwrap();
             let (Outcome::Exact(replayed), steps, _, _) =
-                build(&recipe, OpKind::Subtract, None, &Default::default(), None, &Default::default(), &[]).unwrap()
+                build(&recipe, OpKind::Subtract, &[], None, &Default::default(), None, &Default::default(), &[])
+                    .unwrap()
             else {
                 panic!("an exact cut")
             };
@@ -2633,7 +2634,8 @@ mod tests {
             }
             let recipe = kernel.body_recipe(swept.body).unwrap();
             let (Outcome::Exact(fresh), _, _, _) =
-                build(&recipe, OpKind::ExtrudeTo, None, &Default::default(), None, &Default::default(), &[]).unwrap()
+                build(&recipe, OpKind::ExtrudeTo, &[], None, &Default::default(), None, &Default::default(), &[])
+                    .unwrap()
             else {
                 panic!("an exact sweep")
             };

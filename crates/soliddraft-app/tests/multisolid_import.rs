@@ -328,9 +328,12 @@ fn saved_exhausted_body_id_range_refuses_import_without_changes() {
             let state = &app.state().state;
             assert_eq!(
                 state.note.as_ref().unwrap().text,
-                "This part cannot hold more bodies. Import the file into a new part."
+                "two-solids.step was refused: This part cannot hold more bodies. Import the file into a new part."
             );
-            assert!(state.import_dialog.is_some(), "the reviewed source remains available after refusal");
+            // Answering the review again cannot help, so the dialog closes; the refused
+            // file stays in the import report.
+            assert!(state.import_dialog.is_none(), "a refused import leaves its dialog open");
+            assert!(state.import_refusals.iter().any(|r| r.file == "two-solids.step"), "{:?}", state.import_refusals);
             assert_eq!(state.doc.model().to_bytes().unwrap(), before);
             assert_eq!(state.doc.revision(), revision);
             assert_eq!(state.doc.undo_depth(), depth);

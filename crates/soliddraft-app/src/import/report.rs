@@ -198,6 +198,33 @@ pub fn request(ctx: &egui::Context) {
     ctx.data_mut(|d| d.insert_temp(requested_id(), true));
 }
 
+/// A fresh note about an import, shown whole above the status bar with its link to the
+/// report: the status bar has room for only the start of it.
+pub fn notice(ctx: &egui::Context, state: &AppState) {
+    let Some(note) = state.note.as_ref().filter(|note| note.report) else { return };
+    if note.at.elapsed() >= crate::command_line::NOTE_ON_BAR || state.import_report {
+        return;
+    }
+    egui::Area::new(egui::Id::new("import notice"))
+        .anchor(egui::Align2::RIGHT_BOTTOM, egui::vec2(-12.0, -36.0))
+        .order(egui::Order::Foreground)
+        .show(ctx, |ui| {
+            egui::Frame::popup(ui.style()).show(ui, |ui| {
+                ui.set_max_width(420.0);
+                let color = if note.kind == crate::state::NoteKind::Error {
+                    crate::theme::error()
+                } else {
+                    ui.visuals().text_color()
+                };
+                ui.add(egui::Label::new(egui::RichText::new(&note.text).color(color)).wrap());
+                if ui.link("Open the import report").clicked() {
+                    request(ui.ctx());
+                }
+            });
+        });
+    ctx.request_repaint_after(std::time::Duration::from_millis(250));
+}
+
 /// The Import report window, while it is open.
 pub fn window(ctx: &egui::Context, state: &mut AppState) {
     if ctx.data_mut(|d| d.remove_temp::<bool>(requested_id())).unwrap_or(false) {

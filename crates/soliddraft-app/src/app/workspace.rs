@@ -603,6 +603,9 @@ impl SolidDraftApp {
         let reading = self.reading.is_some();
         let pending = self.state.doc.proof_pending() || opening.is_some() || reading;
         let mut cancel = None;
+        if !pending {
+            self.state.cancelling = false;
+        }
         if pending {
             egui::Area::new(egui::Id::new("browser-build"))
                 .anchor(egui::Align2::CENTER_BOTTOM, egui::vec2(0.0, -64.0))
@@ -614,13 +617,15 @@ impl SolidDraftApp {
                             ui.label(match &opening {
                                 Some(name) => format!("Opening {name}"),
                                 None if reading => "Reading the part".to_owned(),
+                                None if self.state.cancelling => "Cancelling…".to_owned(),
                                 None => "Building the part".to_owned(),
                             });
-                            let button = ui.button("Cancel");
+                            let button = ui.add_enabled(!self.state.cancelling, egui::Button::new("Cancel"));
                             if button.clicked() {
                                 // Cancelling an open keeps the part on screen; cancelling a
                                 // read drops the actions waiting for it.
                                 if self.opening.take().is_none() && self.reading.take().is_none() {
+                                    self.state.cancelling = true;
                                     self.state.push(AppAction::CancelBuild);
                                 }
                             }
@@ -635,9 +640,13 @@ impl SolidDraftApp {
         }
         let cancel = cancel.map(|centre| serde_json::json!({ "x": centre.x, "y": centre.y }));
         let picking = self.state.viewport.picking;
-        crate::web::show_build(
-            serde_json::json!({ "pending": pending, "cancel": cancel, "reading": reading, "picking": picking }),
-        );
+        crate::web::show_build(serde_json::json!({
+            "pending": pending,
+            "cancel": cancel,
+            "reading": reading,
+            "picking": picking,
+            "cancelling": self.state.cancelling,
+        }));
     }
 
     fn edit_suite_frame(&mut self, root: &mut egui::Ui) {
@@ -777,6 +786,7 @@ impl eframe::App for SolidDraftApp {
         crate::web::begin_frame();
         self.edit_suite_frame(root);
         self.dialogs(ctx);
+        crate::import::report::notice(ctx, &self.state);
         #[cfg(target_arch = "wasm32")]
         self.building(ctx);
         crate::preferences::window(ctx, &mut self.preferences, &mut self.state);

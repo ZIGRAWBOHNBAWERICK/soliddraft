@@ -8,19 +8,25 @@ fn bracket() -> Document {
     soliddraft_app::file::open_bytes("bracket.dwprt", bytes, soliddraft_app::kernel(), None).unwrap()
 }
 
-/// Every edge of the `--demo` sample part, a plate with a flange and a boss, has a name
-/// that finds it again. 26 of its 48 edges had none while two edges between the same
-/// faces could not be told apart.
+/// The `--demo` sample part, a plate with a flange and a boss, names 46 of its 48 edges,
+/// each finding its edge again; on main 26 had no name. The other two are pieces between
+/// the same faces that also end at the same faces, so nothing stable tells them apart and
+/// they stay unnamed rather than being told apart by place.
 #[test]
-fn every_edge_of_the_demo_part_has_a_name() {
+fn the_demo_part_names_every_edge_its_end_faces_single_out() {
     let doc = soliddraft_app::demo_document();
     let body = doc.model().body().unwrap();
     let topology = doc.model().kernel().topology(body).unwrap();
     assert_eq!(topology.edges.len(), 48);
+    let mut unnamed = Vec::new();
     for edge in &topology.edges {
-        let named = doc.model().edge_ref(edge.id).unwrap_or_else(|e| panic!("{} has no name: {e}", edge.id));
-        assert_eq!(doc.model().resolve_edge(&named, body).unwrap(), edge.id, "{}", named.label);
+        match doc.model().edge_ref(edge.id) {
+            Ok(named) => assert_eq!(doc.model().resolve_edge(&named, body).unwrap(), edge.id, "{}", named.label),
+            Err(why) => unnamed.push(why.to_string()),
+        }
     }
+    assert_eq!(unnamed.len(), 2, "{unnamed:?}");
+    assert!(unnamed.iter().all(|why| why.contains("end at the faces it ended at")), "{unnamed:?}");
 }
 
 /// In the sample bracket two countersinks split the edge between the base's end cap and
@@ -50,7 +56,6 @@ fn each_piece_of_a_split_edge_has_its_own_name() {
             format!("{shared}Hole1 · Hole 3 countersink, Hole1 · Hole 4 countersink"),
         ]
     );
-    assert!(pieces.iter().all(|p| p.piece.as_ref().unwrap().along.is_none()), "the end faces tell the pieces apart");
 }
 
 /// Each piece's saved reference, read back in the reopened part, finds that same piece.
@@ -108,32 +113,18 @@ fn a_piece_reference_needs_repair_when_its_split_is_gone() {
     }
 }
 
-/// A piece known only by its place along the shared curve is never matched to the one
-/// edge left when the split is gone, and a place without its saved count never matches.
+/// A piece whose end faces no longer single it out is never bound by its place: with the
+/// three pieces all present, a reference that has lost its end faces asks for repair and
+/// offers the pieces, rather than taking one of them.
 #[test]
-fn a_place_alone_never_binds_the_only_remaining_edge() {
-    let mut doc = bracket();
+fn a_piece_its_end_faces_do_not_single_out_asks_for_repair() {
+    let doc = bracket();
     let body = doc.model().body().unwrap();
     let topology = doc.model().kernel().topology(body).unwrap();
-    let (edge, named) = topology
-        .edges
-        .iter()
-        .find_map(|e| doc.model().edge_ref(e.id).ok().filter(|r| r.piece.is_some()).map(|r| (e.id, r)))
-        .unwrap();
-    // The same piece by its place alone: the place among the three that finds it.
-    let at = |along: u32, among: Option<u32>| {
-        let mut r = named.clone();
-        r.piece = Some(Box::new(soliddraft_model::EdgePiece { ends: Vec::new(), along: Some(along), among }));
-        r
-    };
-    let place = (0..3).find(|k| doc.model().resolve_edge(&at(*k, Some(3)), body).ok() == Some(edge)).unwrap();
-    assert!(doc.model().resolve_edge(&at(place, None), body).is_err(), "a place without its count matched");
-
-    let holes = doc.features.iter().find(|f| f.name == "Hole1").unwrap().id;
-    doc.apply(Command::Suppress { id: holes, suppressed: true }).unwrap();
-    let whole = doc.model().body().unwrap();
-    for along in 0..3 {
-        let found = doc.model().resolve_edge(&at(along, Some(3)), whole);
-        assert!(found.is_err(), "place {along} of 3 bound the one remaining edge: {found:?}");
-    }
+    let named =
+        topology.edges.iter().find_map(|e| doc.model().edge_ref(e.id).ok().filter(|r| r.piece.is_some())).unwrap();
+    let mut bare = named.clone();
+    bare.piece = Some(Box::new(soliddraft_model::EdgePiece { ends: Vec::new() }));
+    let repair = doc.model().resolve_edge(&bare, body).unwrap_err();
+    assert_eq!(repair.candidates.len(), 3, "{repair:?}");
 }

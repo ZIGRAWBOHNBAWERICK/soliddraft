@@ -328,13 +328,9 @@ fn nonconvex_shell_builds_displays_edits_and_exports() {
     exercise(state, "nonconvex-shell", "edit_shell", json!({"feature":"Shell1","thickness":0.75}), Volume::Less);
 }
 
-/// A round too large for a tangent shadow, and a round of the crossing edges of two equal
-/// cylinders, are refused and leave the part unchanged. The crossing splits the edges
-/// between the two cylinders into pieces, each of which now has a name, so the kernel refuses
-/// the round itself rather than the names refusing it, as they did before.
 #[test]
 fn tangent_shadow_and_ambiguous_equal_crossing_preserve_the_part() {
-    for (equal, expected) in [(false, "fillet.radius-too-large"), (true, "fillet.unsupported-topology")] {
+    for (equal, expected) in [(false, "fillet.radius-too-large"), (true, "recipe.ambiguous-reference")] {
         let mut state = fresh();
         accepted(
             &mut state,

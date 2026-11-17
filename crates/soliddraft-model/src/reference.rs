@@ -252,17 +252,10 @@ pub struct EdgeRef {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct EdgePiece {
     /// The other faces that meet at the edge's ends. Each piece ends against different
-    /// faces, so they tell the pieces apart.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    /// faces, so they tell the pieces apart. They are the piece's only identity: a place
+    /// along the curve is never saved, since after a replacement the same place can hold
+    /// a different edge.
     pub ends: Vec<FaceRef>,
-    /// The edge's place along the curve the faces share, counted among the edges that
-    /// `ends` leaves, for pieces whose end faces do not tell them apart.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub along: Option<u32>,
-    /// How many edges `along` counted among. A place is only this piece while the count
-    /// holds; a cut added or removed upstream makes it a repair.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub among: Option<u32>,
 }
 
 /// A vertex, named by the faces that meet at it. A vertex is where its faces meet, so it
@@ -639,10 +632,10 @@ pub(crate) fn resolve_edge(r: &EdgeRef, view: &View, names: &NameMap) -> Result<
     }
 }
 
-/// Finds one of several edges between the same two faces by its saved piece: the faces at
-/// its ends, then its place among the pieces while their count holds. A piece is never
-/// taken on the strength of being the only edge left: the cut that made it may be gone,
-/// and then the reference needs repair.
+/// Finds one of several edges between the same two faces by the faces at its ends. A piece
+/// is never taken on the strength of being the only edge left, since the cut that made it
+/// may be gone, nor by its place along the curve, since a replacement can put a different
+/// edge there; either needs repair.
 fn resolve_piece(
     r: &EdgeRef,
     piece: &EdgePiece,
@@ -660,30 +653,14 @@ fn resolve_piece(
             candidates: ranked(candidates),
         });
     }
-    if let Some(place) = piece.along {
-        // A place names a piece only among the same pieces it was counted among. It is
-        // never evidence on its own: one remaining edge, or a different count, means the
-        // split that made the piece changed, and the reference needs repair.
-        let among = piece.among.unwrap_or(0) as usize;
-        if left.len() < 2 || left.len() != among {
-            let detail = if left.len() < 2 {
-                format!("one edge is left between the {label} where the piece was one of {among}")
-            } else {
-                format!("{} pieces lie between the {label} where there were {among}", left.len())
-            };
-            return Err(Unresolved {
-                reason: RepairReason::Mismatch { detail: detail.clone() },
-                message: detail,
-                candidates: ranked(&left),
-            });
-        }
+    if left.len() > 1 || piece.ends.is_empty() {
+        // The end faces no longer single the piece out. Its place along the curve is no
+        // identity, so the reference asks for repair and lists the candidates in order.
         order_along(&mut left);
-        left = left.get(place as usize).into_iter().copied().collect();
-    } else if piece.ends.is_empty() {
         return Err(Unresolved {
             reason: RepairReason::Ambiguous,
-            message: format!("{} edges lie between the {label}", candidates.len()),
-            candidates: ranked(candidates),
+            message: format!("{} edges between the {label} end at the faces it ended at", left.len()),
+            candidates: left.iter().map(|edge| Candidate::Edge(edge.id)).collect(),
         });
     }
     match left.as_slice() {
@@ -873,24 +850,8 @@ pub(crate) fn name_edge(edge: EdgeId, view: &View, names: &NameMap) -> Result<Ed
                 ends.push(named);
             }
         }
-        r.piece = Some(Box::new(EdgePiece { ends, along: None, among: None }));
+        r.piece = Some(Box::new(EdgePiece { ends }));
         resolved = resolve_edge(&r, view, names);
-        let r_faces = EdgeRef { piece: None, ..r.clone() };
-        if matches!(&resolved, Err(Unresolved { reason: RepairReason::Ambiguous, .. }))
-            && let Some(piece) = r.piece.as_mut()
-        {
-            // The end faces leave several pieces: name this one by its place among them.
-            let (_, between) = edges_between(&r_faces, view, names)
-                .map_err(|u| NamingError::NotUnique(edge.to_string(), u.message))?;
-            let mut left = narrow_by_ends(&piece.ends, between, view, names)
-                .map_err(|u| NamingError::NotUnique(edge.to_string(), u.message))?;
-            order_along(&mut left);
-            if let Some(place) = left.iter().position(|e| e.id == edge) {
-                piece.along = Some(place as u32);
-                piece.among = Some(left.len() as u32);
-            }
-            resolved = resolve_edge(&r, view, names);
-        }
     }
     match resolved {
         Ok(back) if back == edge => Ok(r),

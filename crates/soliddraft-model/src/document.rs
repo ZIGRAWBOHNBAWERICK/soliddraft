@@ -627,17 +627,13 @@ impl Document {
         };
         // A piece of an edge that a later feature split names the faces at its ends, so
         // every piece has its own label.
-        let (split, along) = r.piece.as_deref().map_or((false, None), |p| (!p.ends.is_empty(), p.along));
-        if split {
+        if r.piece.is_some() {
             let info = t.edge(edge).expect("named edges are in the topology");
             let ends: Vec<String> = reference::end_faces(info, &View { topology: &t })
                 .into_iter()
                 .map(|f| self.face_label(f).map(|l| l.text).unwrap_or_else(|| f.to_string()))
                 .collect();
             label.push_str(&format!(" · ends at {}", ends.join(", ")));
-        }
-        if let Some(place) = along {
-            label.push_str(&format!(" · piece {}", place + 1));
         }
         r.label = label.into();
         Ok(r)

@@ -148,7 +148,7 @@ fn built(doc: &model::Document, feature: model::FeatureId) -> Result<(), String>
 }
 
 #[cfg(target_arch = "wasm32")]
-pub use browser::{submit, trace};
+pub use browser::{abandon_unwanted, submit, trace};
 
 #[cfg(target_arch = "wasm32")]
 mod browser {
@@ -176,10 +176,17 @@ mod browser {
     /// still arrives, and its builds must not reach the kernel a later job reads.
     type Live = Box<dyn Fn() -> bool>;
 
+    /// What a job was sent as, so a restarted worker can be sent it again.
+    struct Sent {
+        slot: &'static str,
+        header: String,
+        part: Vec<u8>,
+    }
+
     /// Who waits for a job: its answer's handler, the context to repaint, the kernel of
-    /// the part that asked, which is offered the builds the worker made for the job, and
-    /// whether that job is still wanted.
-    type Waiting = (Answered, egui::Context, Arc<dyn soliddraft_kernel_api::Kernel>, Live);
+    /// the part that asked, which is offered the builds the worker made for the job,
+    /// whether that job is still wanted, and the job as sent.
+    type Waiting = (Answered, egui::Context, Arc<dyn soliddraft_kernel_api::Kernel>, Live, Sent);
 
     #[derive(Default)]
     struct Shared {
@@ -194,11 +201,11 @@ mod browser {
     impl Shared {
         /// Whether job `id`'s builds are still wanted, before they are copied off the message.
         fn live(&self, id: u64) -> bool {
-            self.waiting.get(&id).is_some_and(|(_, _, _, live)| live())
+            self.waiting.get(&id).is_some_and(|(_, _, _, live, _)| live())
         }
 
         fn answer(&mut self, id: u64, result: Result<serde_json::Value, String>, hand_over: &[u8]) {
-            if let Some((answered, ctx, kernel, _)) = self.waiting.remove(&id) {
+            if let Some((answered, ctx, kernel, _, _)) = self.waiting.remove(&id) {
                 // The builds come first, so a rebuild the answer starts takes them.
                 if !hand_over.is_empty()
                     && let Err(error) = kernel.offer_builds(self.session, hand_over)
@@ -212,7 +219,7 @@ mod browser {
 
         fn stop(&mut self, reason: &str) {
             self.stopped = true;
-            for (_, (answered, ctx, _, _)) in self.waiting.drain() {
+            for (_, (answered, ctx, _, _, _)) in self.waiting.drain() {
                 answered(Err(format!("The kernel worker stopped: {reason}. Try again.")));
                 ctx.request_repaint();
             }
@@ -329,21 +336,79 @@ mod browser {
             let client = client.as_ref().expect("the kernel worker started");
             let id = NEXT.with(|next| next.replace(next.get() + 1));
             let header = serde_json::to_string(job).map_err(|error| error.to_string())?;
-            let bytes = js_sys::Uint8Array::from(part.as_slice());
-            let message = js_sys::Object::new();
-            set(&message, "id", &(id as f64).into());
-            set(&message, "slot", &job.slot().into());
-            set(&message, "header", &header.into());
-            set(&message, "part", &bytes);
-            if tracing() {
-                set(&message, "trace", &true.into());
-            }
+            let sent = Sent { slot: job.slot(), header, part };
+            post(&client.worker, id, &sent)?;
             client
-                .worker
-                .post_message_with_transfer(&message, &js_sys::Array::of1(&bytes.buffer()))
-                .map_err(|error| format!("The kernel worker did not take the job: {error:?}"))?;
-            client.shared.borrow_mut().waiting.insert(id, (Box::new(answered), ctx.clone(), kernel, Box::new(live)));
+                .shared
+                .borrow_mut()
+                .waiting
+                .insert(id, (Box::new(answered), ctx.clone(), kernel, Box::new(live), sent));
             Ok(id)
+        })
+    }
+
+    /// Posts job `id` to `worker`.
+    fn post(worker: &web_sys::Worker, id: u64, sent: &Sent) -> Result<(), String> {
+        let bytes = js_sys::Uint8Array::from(sent.part.as_slice());
+        let message = js_sys::Object::new();
+        set(&message, "id", &(id as f64).into());
+        set(&message, "slot", &sent.slot.into());
+        set(&message, "header", &sent.header.as_str().into());
+        set(&message, "part", &bytes);
+        if tracing() {
+            set(&message, "trace", &true.into());
+        }
+        worker
+            .post_message_with_transfer(&message, &js_sys::Array::of1(&bytes.buffer()))
+            .map_err(|error| format!("The kernel worker did not take the job: {error:?}"))
+    }
+
+    /// Stops the worker's jobs that nobody wants any more, such as a cancelled edit's
+    /// build, instead of letting them run to completion. The worker cannot be interrupted
+    /// inside a job, so it is replaced: the jobs still wanted are sent again to a new
+    /// worker under their ids, and the unwanted ones are dropped unanswered, as a
+    /// superseded job is. Returns whether a job was dropped.
+    pub fn abandon_unwanted() -> bool {
+        CLIENT.with_borrow_mut(|client| {
+            let Some(old) = client.as_ref() else { return false };
+            let mut shared = old.shared.borrow_mut();
+            let unwanted: Vec<u64> =
+                shared.waiting.iter().filter(|(_, (_, _, _, live, _))| !live()).map(|(id, _)| *id).collect();
+            if unwanted.is_empty() || shared.stopped {
+                return false;
+            }
+            for id in &unwanted {
+                shared.waiting.remove(id);
+                trace("page abandoned job", *id, String::new());
+            }
+            let wanted: Vec<(u64, Waiting)> = shared.waiting.drain().collect();
+            drop(shared);
+            // Dropping the old client terminates its worker, and the job it was running.
+            *client = None;
+            let fresh = match Client::start() {
+                Ok(fresh) => fresh,
+                Err(error) => {
+                    for (_, (answered, ctx, _, _, _)) in wanted {
+                        answered(Err(error.clone()));
+                        ctx.request_repaint();
+                    }
+                    return true;
+                }
+            };
+            for (id, waiting) in wanted {
+                match post(&fresh.worker, id, &waiting.4) {
+                    Ok(()) => {
+                        fresh.shared.borrow_mut().waiting.insert(id, waiting);
+                    }
+                    Err(error) => {
+                        let (answered, ctx, _, _, _) = waiting;
+                        answered(Err(error));
+                        ctx.request_repaint();
+                    }
+                }
+            }
+            *client = Some(fresh);
+            true
         })
     }
 

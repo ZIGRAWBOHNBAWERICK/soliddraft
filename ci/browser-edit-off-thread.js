@@ -199,15 +199,19 @@ await window_('Cancelling a depth edit', async () => {
   await typeDepth(14);
   const state = await until(building, state => state && state.pending && state.cancel, 'The edit showed no Cancel', 100);
   await click([state.cancel.x, state.cancel.y]);
+  // The screen answers the click at once: the next frames say Cancelling, or the part
+  // is already back.
+  await until(building, drawn => drawn && (drawn.cancelling || !drawn.pending), 'Cancel changed nothing on screen', 10);
   // Cancel is drawn over the viewport, where the pointer would have the viewport pick
   // under it every frame: a GPU readback that software rendering takes most of a
   // second to answer. The pointer moves to the side panel, as a user's would.
   await pointerToPanel();
   await idle('The cancelled edit');
   await depthShown(12, 'The cancelled edit');
-  // The worker answers the cancelled edit later; the page drops the builds it carries.
-  const dropped = () => page.eval(`window.sdKernelTrace.slice(${before}).some(step => step.stage === 'page dropped builds')`);
-  await until(dropped, Boolean, 'The cancelled edit\'s answer never came, or its builds were offered');
+  // The cancelled edit's job is abandoned with its worker, or, if it finished first, the
+  // page drops the builds its answer carries. Either way none reach the part.
+  const dropped = () => page.eval(`window.sdKernelTrace.slice(${before}).some(step => step.stage === 'page abandoned job' || step.stage === 'page dropped builds')`);
+  await until(dropped, Boolean, 'The cancelled edit was neither abandoned nor dropped, or its builds were offered');
   await idle('After the cancelled edit\'s answer');
   await depthShown(12, 'After the cancelled edit\'s answer');
 }, false);

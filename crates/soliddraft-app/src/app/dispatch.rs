@@ -280,7 +280,12 @@ impl SolidDraftApp {
                         crate::kernel_worker::abandon_unwanted();
                         self.state.note("Cancelled the change still building", NoteKind::Info)
                     }
-                    Err(e) => self.state.note(e, NoteKind::Error),
+                    Err(e) => {
+                        // Nothing was cancelled, so the build goes on and Cancel stays
+                        // offered; the page must not keep saying Cancelling.
+                        self.cancelling = false;
+                        self.state.note(e, NoteKind::Error)
+                    }
                 }
                 self.sync_sketch_session();
             }

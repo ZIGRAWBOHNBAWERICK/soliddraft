@@ -74,7 +74,7 @@ pub struct SolidDraftApp {
     /// Cancel was clicked and the build it cancelled is still owed: the page says
     /// Cancelling and offers no second Cancel. Only the browser builds off the page.
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
-    cancelling: bool,
+    pub(super) cancelling: bool,
 }
 
 /// Actions held until the part's bodies adopted from the kernel worker are read. An edit

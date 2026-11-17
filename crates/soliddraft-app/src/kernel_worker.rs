@@ -593,6 +593,27 @@ mod tests {
         assert!(shared.is_empty(), "the tray took ids of the bracket: {shared:?}");
     }
 
+    /// The tree names a body every frame, through `Kernel::body_kind`. On a body adopted
+    /// unread with no topology handed over, that answers from what came with the build
+    /// and reads no exact geometry, where the topology the name asked for before does.
+    #[test]
+    fn a_body_kind_reads_no_exact_geometry() {
+        let part = include_bytes!("../../../site/parts/bracket.dwprt").to_vec();
+        let page = Arc::new(soliddraft_kernel_catallax::CatallaxKernel::new());
+        let worker = Arc::new(soliddraft_kernel_catallax::CatallaxKernel::new());
+        worker.keep_builds().unwrap();
+        // Built and handed over before anything meshed it, so no topology travels.
+        model::Document::from_bytes(&part, worker.clone()).unwrap();
+        page.offer_builds(1, &worker.hand_over().unwrap()).unwrap();
+        let opened = model::Document::from_bytes(&part, page.clone()).unwrap();
+        let (_, body) = opened.live_bodies().last().copied().unwrap();
+        assert_eq!(page.bodies_read(), 0);
+        assert_eq!(page.body_kind(body).unwrap(), soliddraft_kernel_api::BodyKind::Solid);
+        assert_eq!(page.bodies_read(), 0, "the body's kind read its exact geometry");
+        page.topology(body).unwrap();
+        assert_eq!(page.bodies_read(), 1, "its topology is computed from the exact geometry");
+    }
+
     #[test]
     fn jobs_round_trip_as_the_worker_reads_them() {
         let job = Job::MassProperties { feature: model::FeatureId(3) };

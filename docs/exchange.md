@@ -104,6 +104,12 @@ MCP clients use `preview_import {"path":"source.step"}` to read the preview, the
 
 The focused rollout check is `CARGO_BUILD_JOBS=3 cargo test -p soliddraft-app --test step_import_rollout -- --test-threads=1`. Set `SOLIDDRAFT_STEP_IMPORT_PROOF_DIR` to keep its source files, saved parts, display screenshots, measured f32 mesh bounds and checked export reports outside the checkout. The test uses the real import dialog and renderer. It also takes an approved seam through the dialog, renderer, save, reopen and export. It does not independently validate the export in another CAD application; the `import-repair` scenario does.
 
+## Import report
+
+File > Import report lists every STEP, IGES and mesh file imported into the part in one table: what each opened as and why. A file opens as an exact solid when its faces closed as they are, as a repaired solid when it closed after the repairs the record lists, or as a surface body when it holds open faces with no volume or mass. A file the importer refused this session is listed as refused, with its reason, whether the file could not be read or the part refused its body; it has no tree row, so the report is the place to find it again. A review left unanswered is not a refusal. A suppressed or rolled-back import is not built, so it shows as not evaluated. The bodies of one file share its repair record. A repaired face names its solid, so it counts for that body only; a gap repair names only source entities, so the report lists it as the file's. A body with no face repairs attributed to it, from a file whose record lists repairs, shows as a solid with the file repaired. A curved import also names the check it did not run: self-intersection is not verified on curved faces or edges. Show in tree selects an import, and Replace file reviews a new source for it.
+
+The report opens only when asked for. After an import that did not open as an exact solid, the status bar says what it opened as, and its details link to the report. An exact import says only that it was imported. The tree and Details stay as they were.
+
 ## Replace an imported file
 
 In the Edit Suite frame, select an imported feature and choose Replace file in its

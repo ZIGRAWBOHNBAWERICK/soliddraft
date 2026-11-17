@@ -1214,6 +1214,13 @@ pub trait Kernel: Send + Sync {
         self.tessellate_edges(body, params)
     }
 
+    /// Whether a body is a closed solid or open faces, without computing its topology or
+    /// reading its exact geometry, so a label can ask it every frame.
+    fn body_kind(&self, body: BodyId) -> KernelResult<BodyKind> {
+        let _ = body;
+        Ok(BodyKind::Solid)
+    }
+
     /// Volume, area, centroid and inertia.
     fn mass_properties(&self, body: BodyId) -> KernelResult<MassProperties>;
 

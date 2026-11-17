@@ -877,7 +877,7 @@ fn topology_view(app: &AppBody, ids: &Ids, mesh: TopologyMesh<'_>, proven: bool)
         None => (bounds(mesh.positions.iter().copied().map(Vec3::from), chord), Some(chord)),
     };
     Ok(Topology {
-        kind: BodyKind::Solid,
+        kind: if app.is_surface() { BodyKind::Sheet } else { BodyKind::Solid },
         faces,
         edges,
         vertex_count: vertices.len(),

@@ -1,5 +1,7 @@
 //! Review immutable STEP or IGES source bytes before committing the imported feature.
 
+pub mod report;
+
 use std::collections::BTreeMap;
 use std::path::Path;
 
@@ -651,7 +653,57 @@ fn commit_file(doc: &mut Document, swap: &FileSwap, reviewed: &ImportStepFeature
     Ok(swap.imports[0].0)
 }
 
+/// Why an import was not committed.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum CommitError {
+    /// The review is incomplete or out of date. Answering it again can succeed.
+    Review(String),
+    /// The file, or the body it makes, was refused. The import report keeps it.
+    Refused(String),
+}
+
+impl CommitError {
+    pub fn message(&self) -> &str {
+        match self {
+            CommitError::Review(message) | CommitError::Refused(message) => message,
+        }
+    }
+}
+
+impl From<CommitError> for String {
+    fn from(error: CommitError) -> String {
+        match error {
+            CommitError::Review(message) | CommitError::Refused(message) => message,
+        }
+    }
+}
+
 pub fn commit(doc: &mut Document, preview: &Preview, review: &Review) -> Result<FeatureId, String> {
+    commit_reviewed(doc, preview, review).map_err(String::from)
+}
+
+/// Commits a reviewed import, telling a review to answer again from a refused file.
+pub fn commit_reviewed(doc: &mut Document, preview: &Preview, review: &Review) -> Result<FeatureId, CommitError> {
+    let feature = answered(doc, preview, review).map_err(CommitError::Review)?;
+    admit(doc, preview, feature).map_err(CommitError::Refused)
+}
+
+/// Commits an import from the dialog. A refused file becomes a row of the import report,
+/// and a file that imports clears its earlier refusal.
+pub fn commit_in(state: &mut AppState, preview: &Preview, review: &Review) -> Result<FeatureId, CommitError> {
+    let file = preview.feature.source_name.clone();
+    let format = preview.feature.format;
+    let result = commit_reviewed(&mut state.doc, preview, review);
+    match &result {
+        Ok(_) => state.import_refusals.retain(|r| r.file != file || r.format != format),
+        Err(CommitError::Refused(reason)) => report::keep_refusal(state, file, format, reason.clone()),
+        Err(CommitError::Review(_)) => {}
+    }
+    result
+}
+
+/// The source feature with the review's answers, or why the review must be answered again.
+fn answered(doc: &Document, preview: &Preview, review: &Review) -> Result<ImportStepFeature, String> {
     if doc.revision() != preview.revision || doc.model().id() != preview.document || doc.proof_pending() {
         return Err("the part changed during the preview; review the import again".into());
     }
@@ -687,6 +739,12 @@ pub fn commit(doc: &mut Document, preview: &Preview, review: &Review) -> Result<
     if preview.proposals.proposals.iter().any(|p| p.disposition == Disposition::Ask && !answered(p)) {
         return Err("this repair needs an explicit tolerance approval before it can be imported".into());
     }
+    Ok(feature)
+}
+
+/// Builds the answered import on a scratch copy of the part and commits it, or says why
+/// the file or its body was refused.
+fn admit(doc: &mut Document, preview: &Preview, feature: ImportStepFeature) -> Result<FeatureId, String> {
     if let Some(swap) = &preview.file {
         // Answers cannot go through a match yet. A single-solid import takes the answered
         // file as a plain replacement instead, its references left for repair.
@@ -846,6 +904,13 @@ fn proposal_group(ui: &mut egui::Ui, proposal: &Proposal, allowed: &mut BTreeMap
     ui.label(format!("File entities {}", proposal.entities.join(", ")));
 }
 
+/// What the status bar says after a new import that did not open as an exact solid.
+fn opened_note(doc: &Document, id: FeatureId, format: ImportFormat) -> Option<String> {
+    let FeatureKind::ImportStep(import) = &doc.feature(id)?.kind else { return None };
+    let row = report::row(doc, id, import.source_name.clone(), format);
+    (row.tier != report::Tier::Exact).then(|| format!("{} opened as: {}. {}", row.file, row.tier.label(), row.why))
+}
+
 pub fn window(ctx: &egui::Context, state: &mut AppState) {
     let Some(mut preview) = state.import_dialog.take() else { return };
     let mut open = true;
@@ -919,7 +984,13 @@ pub fn window(ctx: &egui::Context, state: &mut AppState) {
             });
             Review { decline: Vec::new(), accept: accept.collect() }
         };
-        match commit(&mut state.doc, &preview, &review) {
+        match commit_in(state, &preview, &review) {
+            Ok(id)
+                if preview.replacement.is_none()
+                    && let Some(note) = opened_note(&state.doc, id, format) =>
+            {
+                state.note_import(note)
+            }
             Ok(_) => state.note(
                 if decline {
                     "Import saved with declined repairs; the solid stays open".into()
@@ -939,7 +1010,7 @@ pub fn window(ctx: &egui::Context, state: &mut AppState) {
                 NoteKind::Info,
             ),
             Err(error) => {
-                state.note(error, NoteKind::Error);
+                state.note(error.message(), NoteKind::Error);
                 state.import_dialog = Some(preview);
             }
         }

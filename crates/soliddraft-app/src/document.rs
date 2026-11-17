@@ -1067,6 +1067,8 @@ pub enum Selection {
 
 /// What the tree, the property panel and the agent tools call the part's body.
 pub const BODY_NAME: &str = "Solid body";
+/// The body row's name when the part's one body is open faces, as an imported surface.
+pub const SURFACE_BODY_NAME: &str = "Surface body";
 
 /// What a pick id in the id buffer stands for.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -3630,9 +3632,22 @@ impl Document {
         self.model.body_features(self.active_body).into_iter().map(app_id).collect()
     }
 
-    /// The body label used by the tree and the property panel.
+    /// The body label used by the tree and the property panel. A body of open faces, such
+    /// as a STEP surface model imported as it is, is named a surface body.
     pub fn body_name(&self, key: u32) -> String {
-        if key == 0 && self.model.next_body() == 1 { BODY_NAME.to_owned() } else { format!("Body {}", key + 1) }
+        let surface = self.body_is_surface(key);
+        match (key == 0 && self.model.next_body() == 1, surface) {
+            (true, false) => BODY_NAME.to_owned(),
+            (true, true) => SURFACE_BODY_NAME.to_owned(),
+            (false, false) => format!("Body {}", key + 1),
+            (false, true) => format!("Surface body {}", key + 1),
+        }
+    }
+
+    /// Whether body `key` is open faces that enclose no volume.
+    pub fn body_is_surface(&self, key: u32) -> bool {
+        let Some((_, body)) = self.model.live_bodies().into_iter().find(|(k, _)| *k == key) else { return false };
+        self.model.kernel().body_kind(body).is_ok_and(|kind| kind == soliddraft_kernel_api::BodyKind::Sheet)
     }
 
     /// Selects a solid and uses it for subsequent features.
@@ -4642,8 +4657,11 @@ impl Document {
                 let contributing = self.body_features();
                 let built =
                     self.features[..end].iter().filter(|f| contributing.contains(&f.id) && f.body.is_some()).count();
-                let details =
+                let mut details =
                     vec![("Built from".to_owned(), format!("{built} feature{}", if built == 1 { "" } else { "s" }))];
+                if self.body_is_surface(self.active_body) {
+                    details.push(("Kind".to_owned(), "Surface: open faces, no volume or mass".to_owned()));
+                }
                 Some(EntityInfo { title: self.body_name(self.active_body), feature: None, details })
             }
             Selection::Feature(id) => {

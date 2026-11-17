@@ -2453,6 +2453,9 @@ fn registry() -> Vec<CommandSpec> {
             .shown(|s| crate::scan::part_active(s) && !cfg!(target_arch = "wasm32"))
             .app_only("It opens the scan workspace to review both deviation maps before accepting the fitted part")
             .when(crate::scan::can_fit).undo(Undo::Step),
+        cmd("import_report", "Import report", Icon::Import, "List every imported file: what it opened as, and why")
+            .run(|_| AppAction::ShowImportReport)
+            .app_only("It opens a window listing each imported file, what it opened as and why"),
         cmd("scan_workspace", "Scan workspace", Icon::Import, "Show the scan reference and its deviation maps")
             .run(|_| AppAction::ShowScan).outside_sketch().shown(crate::scan::part_active)
             .app_only("It shows the scan reference and deviation maps in the viewport")

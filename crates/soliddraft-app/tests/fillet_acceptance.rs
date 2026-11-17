@@ -58,6 +58,8 @@ struct Row {
     kernel: String,
     /// What the user reads.
     message: String,
+    /// What the `fillet` tool answered.
+    tool: String,
     accuracy: String,
     faces: usize,
     work: Option<u64>,
@@ -68,7 +70,7 @@ impl Row {
     fn json(&self) -> Value {
         json!({
             "case": self.case, "radius": self.radius, "edges": self.edges, "result": self.result,
-            "stage": self.stage, "kernel": self.kernel, "message": self.message,
+            "stage": self.stage, "kernel": self.kernel, "message": self.message, "tool": self.tool,
             "accuracy": self.accuracy, "faces": self.faces, "work": self.work, "seconds": self.seconds,
         })
     }
@@ -161,15 +163,24 @@ impl Part {
             stage: String::new(),
             kernel: kernel.clone(),
             message: String::new(),
+            tool: out.content.clone(),
             accuracy: String::new(),
             faces: 0,
             work,
             seconds,
         };
         if out.is_error {
-            // The panel shows the kernel's refusal through the same words.
-            row.message =
-                soliddraft_app::geometry_message::for_user(if kernel.is_empty() { &out.content } else { &kernel });
+            // The panel shows the kernel's refusal through the same words, with the faces
+            // the document names for it. The kernel's own record never carries those
+            // names, so the tool's answer is read when the document added them.
+            let named = [soliddraft_model::RUNS_INTO, soliddraft_model::FITS_BETWEEN]
+                .iter()
+                .any(|marker| out.content.contains(marker));
+            row.message = soliddraft_app::geometry_message::for_user(if kernel.is_empty() || named {
+                &out.content
+            } else {
+                &kernel
+            });
             if fillet_calls.is_empty() {
                 // Refused before the kernel was asked: an edge the app could not name.
                 row.result = "name";

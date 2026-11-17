@@ -42,7 +42,7 @@ pub mod values;
 pub mod view;
 
 pub use command::{Command, CommandError, Executed};
-pub use document::{BuiltSketch, Document, FaceLabel, FeatureStatus, RUNS_INTO, feature_of_tag};
+pub use document::{BuiltSketch, Document, FITS_BETWEEN, FaceLabel, FeatureStatus, RUNS_INTO, feature_of_tag};
 pub use evaluate::{plane_on_face, shell_refusal};
 pub use feature::{
     BlendFeature, BuiltinShape, DatumAxis, DatumPlane, DraftFeature, EndCondition, ExtrudeFeature, ExtrudeOp, Feature,

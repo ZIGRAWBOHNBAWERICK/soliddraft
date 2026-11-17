@@ -140,6 +140,15 @@ fn assign<I: Copy + Ord, K>(
 }
 
 impl Ids {
+    /// The faces whose Catallax origins include every origin of `support`, as a
+    /// refusal names a face by the origins it was made from.
+    pub(crate) fn faces_made_by(&self, support: &[Origin]) -> Vec<FaceId> {
+        if support.is_empty() {
+            return Vec::new();
+        }
+        self.origins.iter().filter(|(_, os)| support.iter().all(|o| os.contains(o))).map(|(id, _)| *id).collect()
+    }
+
     /// Each interface id by its Catallax handle's index, which a hand-over keeps.
     pub fn by_index(
         &self,

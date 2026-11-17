@@ -1173,20 +1173,41 @@ fn build(
 /// would run into, followed by the face's handle as Catallax prints it: "; reaches face #12".
 const REACHES: &str = "; reaches face #";
 
+/// What a Catallax `fillet.radius-too-large` refusal writes before the faces a ball of
+/// that radius cannot touch at once, as a JSON list of each face's origins:
+/// `; limiting contact supports [[{"step":"op_3",...}],[{"step":"op_45",...}]]`.
+const LIMITING_SUPPORTS: &str = "; limiting contact supports ";
+
 /// A fillet Catallax refused because it would run into faces other than those beside
-/// its edges, with those faces as the input body's ids. `None` when the refusal names
-/// no such face, or names one the input body does not have.
+/// its edges, or because no ball of its radius touches two faces at once, with those
+/// faces as the input body's ids. `None` when the refusal names no such face, or names
+/// one the input body does not have.
 fn fillet_reaches(error: &Error, parents: &[Arc<Solid>]) -> Option<KernelError> {
     let Error::Build(catallax_features::BuildError::Geometry { refusal, .. }) = error else { return None };
     let handles = reached_handles(&refusal.detail);
-    let faces = handles
-        .iter()
-        .map(|index| {
-            parents.iter().find_map(|parent| {
-                parent.ids.faces.iter().find_map(|(cat, face)| (cat.index() == *index).then_some(*face))
+    let (faces, between) = if handles.is_empty() {
+        let supports = limiting_supports(&refusal.detail)?;
+        let mut faces = Vec::new();
+        for support in &supports {
+            let made = parents.iter().map(|parent| parent.ids.faces_made_by(support)).find(|made| !made.is_empty())?;
+            for face in made {
+                if !faces.contains(&face) {
+                    faces.push(face);
+                }
+            }
+        }
+        (faces, true)
+    } else {
+        let faces = handles
+            .iter()
+            .map(|index| {
+                parents.iter().find_map(|parent| {
+                    parent.ids.faces.iter().find_map(|(cat, face)| (cat.index() == *index).then_some(*face))
+                })
             })
-        })
-        .collect::<Option<Vec<FaceId>>>()?;
+            .collect::<Option<Vec<FaceId>>>()?;
+        (faces, false)
+    };
     if faces.is_empty() {
         return None;
     }
@@ -1197,7 +1218,14 @@ fn fillet_reaches(error: &Error, parents: &[Arc<Solid>]) -> Option<KernelError> 
         .filter_map(|rest| rest.split_once(" mm")?.0.parse::<f64>().ok())
         .filter(|limit| limit.is_finite() && *limit > 0.0)
         .min_by(f64::total_cmp);
-    Some(KernelError::FilletReaches { faces, radius_limit_mm, message: format!("{}: {error}", error.code()) })
+    Some(KernelError::FilletReaches { faces, between, radius_limit_mm, message: format!("{}: {error}", error.code()) })
+}
+
+/// The origins of each face a refusal names after [`LIMITING_SUPPORTS`], first list only.
+fn limiting_supports(detail: &str) -> Option<Vec<Vec<catallax_recipe::Origin>>> {
+    let (_, rest) = detail.split_once(LIMITING_SUPPORTS)?;
+    let mut list = serde_json::Deserializer::from_str(rest).into_iter::<Vec<Vec<catallax_recipe::Origin>>>();
+    list.next()?.ok().filter(|supports| !supports.is_empty())
 }
 
 /// The face handles a refusal names after [`REACHES`], in order, each once.
@@ -2496,6 +2524,19 @@ mod tests {
                       reaches face #12; reaches face #3.";
         assert_eq!(reached_handles(detail), [12, 3]);
         assert!(reached_handles("fillet.unsupported-overflow: a face; reaches face #").is_empty());
+    }
+
+    /// The faces a ball cannot touch at once, as Catallax names them by origin before
+    /// the terminal radius limit.
+    #[test]
+    fn a_fillet_refusal_names_the_faces_it_does_not_fit_between() {
+        let detail = r#"no ball of this radius rolls along the edge against both faces; maximum unknown; limiting contact supports [[{"step":"op_3","role":{"side":{"segment":"l0s2"}}}],[{"step":"op_45","role":{"side":{"segment":"l0s1"}}}]]; radius limit 3.999 mm"#;
+        let supports = limiting_supports(detail).unwrap();
+        assert_eq!(supports.len(), 2);
+        assert_eq!(supports[0][0].step.as_str(), "op_3");
+        assert_eq!(supports[1][0].step.as_str(), "op_45");
+        assert!(limiting_supports("fillet.radius-too-large: a; radius limit 4 mm").is_none());
+        assert!(limiting_supports("a; limiting contact supports not json; radius limit 4 mm").is_none());
     }
 
     #[test]

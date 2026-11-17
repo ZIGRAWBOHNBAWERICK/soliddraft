@@ -68,6 +68,11 @@ pub struct BuiltSketch {
 /// the tree names them: "...; runs into Boss-Extrude1 · Side of arc 3".
 pub const RUNS_INTO: &str = "; runs into ";
 
+/// What a refused fillet's message adds before the two faces it is too large to fit
+/// between, named as the tree names them: "...; does not fit between Boss-Extrude1 ·
+/// Side of arc 3 and Cut-Extrude1 · Side of line 2".
+pub const FITS_BETWEEN: &str = "; does not fit between ";
+
 /// How a face is named for people.
 #[derive(Clone, Debug, PartialEq)]
 pub struct FaceLabel {
@@ -737,14 +742,20 @@ impl Document {
             .map_err(|e| self.fillet_reaches(&e, body).unwrap_or_else(|| e.to_string()))
     }
 
-    /// A fillet of `body` refused because it would run into other faces, with those
-    /// faces named as the tree names them, after [`RUNS_INTO`]. `None` for any other error.
+    /// A fillet of `body` refused because it would run into other faces, or does not fit
+    /// between two, with those faces named as the tree names them after [`RUNS_INTO`] or
+    /// [`FITS_BETWEEN`]. `None` for any other error.
     pub(crate) fn fillet_reaches(&self, error: &KernelError, body: BodyId) -> Option<String> {
-        let KernelError::FilletReaches { faces, .. } = error else { return None };
+        let KernelError::FilletReaches { faces, between, .. } = error else { return None };
         let t = self.view_of(body).ok();
-        let names: Vec<String> =
-            faces.iter().filter_map(|face| self.label_in(*face, t.as_ref()?)).map(|label| label.text).collect();
-        Some(if names.is_empty() { error.to_string() } else { format!("{error}{RUNS_INTO}{}", names.join(" and ")) })
+        let mut names: Vec<String> = Vec::new();
+        for label in faces.iter().filter_map(|face| self.label_in(*face, t.as_ref()?)) {
+            if !names.contains(&label.text) {
+                names.push(label.text);
+            }
+        }
+        let marker = if *between { FITS_BETWEEN } else { RUNS_INTO };
+        Some(if names.is_empty() { error.to_string() } else { format!("{error}{marker}{}", names.join(" and ")) })
     }
 
     /// Moves the rollback bar without an undo entry and rebuilds, for views that show

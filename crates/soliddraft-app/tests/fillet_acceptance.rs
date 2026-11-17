@@ -289,7 +289,8 @@ fn owner_pocket_rim_takes_the_largest_radius_that_fits() {
 }
 
 /// Past [`OWNER_CONTACT`] the whole rim cannot be rounded, in any CAD system. The user
-/// reads which face the fillet runs into and the largest radius that fits, in plain words.
+/// reads, in plain words, the faces the fillet runs into or cannot fit between, and the
+/// largest radius that fits.
 #[test]
 fn owner_pocket_rim_at_r5_names_the_face_it_reaches_and_the_radius_that_fits() {
     let (mut part, rim) = owner_part();

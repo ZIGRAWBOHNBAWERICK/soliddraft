@@ -2,6 +2,15 @@
 
 /// What the user reads for a kernel or backend `message`: plain words, never a code.
 pub fn for_user(message: &str) -> String {
+    if let Some((message, faces)) = message.split_once(soliddraft_model::FITS_BETWEEN)
+        && !faces.trim().is_empty()
+    {
+        let faces = faces.trim();
+        return match radius_limit(message) {
+            Some(limit) => format!("A fillet this size does not fit between {faces}. Try a radius under {limit} mm."),
+            None => format!("A fillet this size does not fit between {faces}. Try a smaller radius."),
+        };
+    }
     let (message, reaches) = match message.split_once(soliddraft_model::RUNS_INTO) {
         Some((message, faces)) => (message, Some(faces.trim())),
         None => (message, None),
@@ -240,6 +249,15 @@ mod tests {
             )),
             "This fillet runs into Cut-Extrude1 · Floor and Boss-Extrude1 · End cap. Reduce the radius or round fewer \
              edges."
+        );
+        // A ball too large to touch both faces of the edge at once names those faces.
+        assert_eq!(
+            for_user(&format!(
+                "{refusal}{}Boss-Extrude1 · Side of arc 1 and Cut-Extrude1 · Side of line 1",
+                soliddraft_model::FITS_BETWEEN
+            )),
+            "A fillet this size does not fit between Boss-Extrude1 · Side of arc 1 and Cut-Extrude1 · Side of line \
+             1. Try a radius under 3.999 mm."
         );
         // Of two stated limits, the smaller one fits both constructions.
         assert_eq!(

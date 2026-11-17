@@ -34,6 +34,7 @@ impl Kernel for Reaching {
     fn fillet(&self, _tag: &OpTag, body: BodyId, _edges: &[EdgeId], _radius: f64) -> KernelResult<OpResult> {
         Err(KernelError::FilletReaches {
             faces: vec![self.top(body)],
+            between: false,
             radius_limit_mm: Some(4.0),
             message: "fillet.radius-too-large: the ball reaches a face; radius limit 4 mm".into(),
         })

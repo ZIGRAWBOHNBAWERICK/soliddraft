@@ -44,7 +44,7 @@ pub fn collect(editor: &mut FeatureEditor, doc: &Document, pick: Selection) {
         },
         Selection::Face(face) => match (doc.face_edge_refs(face), editor.edges_mut()) {
             (Some(refs), Some(_)) if refs.is_empty() => {
-                Some("Every edge of that face is smooth, so there is no corner to round; pick a sharp edge")
+                Some("Every edge of that face is smooth, so there is no corner to round; pick a sharp edge".to_owned())
             }
             (Some(refs), Some(list)) => {
                 for r in refs {

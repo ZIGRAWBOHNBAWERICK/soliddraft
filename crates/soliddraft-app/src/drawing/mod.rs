@@ -1966,6 +1966,7 @@ pub fn status(state: &AppState) -> Option<Status> {
         text: text.clone(),
         color: theme::muted(),
         fresh: at.elapsed() < MESSAGE_ON_BAR,
+        report: false,
     });
     let position = match s.cursor {
         Some(c) => format!("x {:.1}   y {:.1} mm", c.u, c.v),

@@ -261,6 +261,7 @@ impl SolidDraftApp {
         crate::drawing::reference::window(ctx, &mut self.state);
         crate::locations::window(ctx, &mut self.state);
         crate::import::window(ctx, &mut self.state);
+        crate::import::report::window(ctx, &mut self.state);
         crate::scan::window(ctx, &mut self.state);
         crate::recovery::window(ctx, &mut self.state);
         #[cfg(target_arch = "wasm32")]
@@ -411,6 +412,7 @@ fn part_status(st: &AppState) -> Status {
                 text: crate::geometry_message::for_user(text),
                 color: theme::error(),
                 fresh: true,
+                report: false,
             })
             .or_else(|| st.note.as_ref().filter(|note| note.kind == NoteKind::Error).map(StatusNote::of))
             .or_else(|| {
@@ -419,6 +421,7 @@ fn part_status(st: &AppState) -> Status {
                     text: text.to_owned(),
                     color: theme::warn(),
                     fresh: true,
+                    report: false,
                 })
             })
             .or_else(|| st.note.as_ref().map(StatusNote::of)),
@@ -526,6 +529,7 @@ fn main_menus(ui: &mut egui::Ui, st: &mut AppState) {
         menu_command(ui, st, "import_step", "Import STEP…");
         menu_command(ui, st, "import_iges", "Import IGES…");
         menu_command(ui, st, "import_mesh", "Import mesh solid…");
+        menu_command(ui, st, "import_report", "Import report");
         menu_command(ui, st, "import_scan", "Import scan reference…");
         menu_command(ui, st, "scan_workspace", "Scan workspace");
         menu_command(ui, st, "make_drawing", "New drawing from part…");

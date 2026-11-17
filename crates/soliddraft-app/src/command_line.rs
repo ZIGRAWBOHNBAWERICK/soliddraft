@@ -146,6 +146,8 @@ pub struct StatusNote {
     pub color: Color32,
     /// Still new enough for the bar.
     pub fresh: bool,
+    /// The details link to the import report.
+    pub report: bool,
 }
 
 impl StatusNote {
@@ -155,7 +157,12 @@ impl StatusNote {
             NoteKind::Ok => theme::ok(),
             NoteKind::Error => theme::error(),
         };
-        Self { text: crate::geometry_message::for_user(&note.text), color, fresh: note.at.elapsed() < NOTE_ON_BAR }
+        Self {
+            text: crate::geometry_message::for_user(&note.text),
+            color,
+            fresh: note.at.elapsed() < NOTE_ON_BAR,
+            report: note.report,
+        }
     }
 }
 
@@ -668,6 +675,10 @@ fn status_details(ui: &mut egui::Ui, status: &Status) {
     ui.label(egui::RichText::new(headline).family(theme::semibold()).size(11.5).color(*color));
     if let Some(note) = &status.note {
         row(ui, &note.text, note.color);
+        if note.report && ui.link(egui::RichText::new("Open the import report").size(11.5)).clicked() {
+            crate::import::report::request(ui.ctx());
+            ui.close();
+        }
     }
     for detail in &status.details {
         row(ui, detail, theme::muted());

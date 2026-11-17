@@ -1483,7 +1483,12 @@ impl SolidDraftApp {
                 if let Some(path) = path {
                     match crate::import::Preview::read(&self.state.doc, &path) {
                         Ok(preview) => self.state.import_dialog = Some(preview),
-                        Err(message) => self.state.note(message, NoteKind::Error),
+                        Err(message) => crate::import::report::refused(
+                            &mut self.state,
+                            &path,
+                            soliddraft_kernel_api::ImportFormat::Step,
+                            message,
+                        ),
                     }
                 }
             }
@@ -1499,10 +1504,16 @@ impl SolidDraftApp {
                         soliddraft_kernel_api::ImportFormat::Iges,
                     ) {
                         Ok(preview) => self.state.import_dialog = Some(preview),
-                        Err(message) => self.state.note(message, NoteKind::Error),
+                        Err(message) => crate::import::report::refused(
+                            &mut self.state,
+                            &path,
+                            soliddraft_kernel_api::ImportFormat::Iges,
+                            message,
+                        ),
                     }
                 }
             }
+            AppAction::ShowImportReport => self.state.import_report = true,
             AppAction::ShowScan => {
                 if crate::scan::part_active(&self.state) {
                     self.state.scan.open = true;
@@ -1541,7 +1552,12 @@ impl SolidDraftApp {
                         soliddraft_kernel_api::ImportFormat::Mesh,
                     ) {
                         Ok(preview) => self.state.import_dialog = Some(preview),
-                        Err(message) => self.state.note(message, NoteKind::Error),
+                        Err(message) => crate::import::report::refused(
+                            &mut self.state,
+                            &path,
+                            soliddraft_kernel_api::ImportFormat::Mesh,
+                            message,
+                        ),
                     }
                 }
             }

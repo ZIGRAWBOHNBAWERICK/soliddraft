@@ -1,5 +1,7 @@
 //! Review immutable STEP or IGES source bytes before committing the imported feature.
 
+pub mod report;
+
 use std::collections::BTreeMap;
 use std::path::Path;
 
@@ -846,6 +848,13 @@ fn proposal_group(ui: &mut egui::Ui, proposal: &Proposal, allowed: &mut BTreeMap
     ui.label(format!("File entities {}", proposal.entities.join(", ")));
 }
 
+/// What the status bar says after a new import that did not open as an exact solid.
+fn opened_note(doc: &Document, id: FeatureId, format: ImportFormat) -> Option<String> {
+    let FeatureKind::ImportStep(import) = &doc.feature(id)?.kind else { return None };
+    let row = report::row(doc, id, import.source_name.clone(), format);
+    (row.tier != report::Tier::Exact).then(|| format!("{} opened as: {}. {}", row.file, row.tier.label(), row.why))
+}
+
 pub fn window(ctx: &egui::Context, state: &mut AppState) {
     let Some(mut preview) = state.import_dialog.take() else { return };
     let mut open = true;
@@ -920,6 +929,12 @@ pub fn window(ctx: &egui::Context, state: &mut AppState) {
             Review { decline: Vec::new(), accept: accept.collect() }
         };
         match commit(&mut state.doc, &preview, &review) {
+            Ok(id)
+                if preview.replacement.is_none()
+                    && let Some(note) = opened_note(&state.doc, id, format) =>
+            {
+                state.note_import(note)
+            }
             Ok(_) => state.note(
                 if decline {
                     "Import saved with declined repairs; the solid stays open".into()

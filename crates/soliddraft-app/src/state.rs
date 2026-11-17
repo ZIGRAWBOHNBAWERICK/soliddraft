@@ -167,6 +167,8 @@ pub enum AppAction {
     ImportScan(Option<PathBuf>),
     FitScan,
     ShowScan,
+    /// Opens the Import report window.
+    ShowImportReport,
     /// Review a replacement source for an imported feature.
     ReplaceImport {
         feature: FeatureId,
@@ -1218,6 +1220,8 @@ pub struct Note {
     pub text: String,
     pub kind: NoteKind,
     pub at: Instant,
+    /// The status bar's details link to the import report.
+    pub report: bool,
 }
 
 /// Inline rename of a tree row.
@@ -1257,6 +1261,10 @@ pub struct AppState {
     pub palette: Option<crate::palette::Palette>,
     /// The open Provider dialog.
     pub import_dialog: Option<crate::import::Preview>,
+    /// The Import report window is open.
+    pub import_report: bool,
+    /// Files the importer refused this session, for the import report.
+    pub import_refusals: Vec<crate::import::report::Refusal>,
     pub scan: crate::scan::Workspace,
     pub provider_dialog: Option<crate::chat::ProviderDialog>,
     /// The open File locations page.
@@ -1451,6 +1459,8 @@ impl AppState {
             show_shortcuts: false,
             palette: None,
             import_dialog: None,
+            import_report: false,
+            import_refusals: Vec::new(),
             scan: Default::default(),
             provider_dialog: None,
             locations_dialog: None,
@@ -1624,7 +1634,13 @@ impl AppState {
                 serde_json::json!({"type": "diagnostic", "code": "app-warning", "level": "warning"}),
             );
         }
-        self.note = Some(Note { text: text.into(), kind, at: Instant::now() });
+        self.note = Some(Note { text: text.into(), kind, at: Instant::now(), report: false });
+    }
+
+    /// A note about an import that did not open as an exact solid, with a link from the
+    /// status bar's details to the import report.
+    pub fn note_import(&mut self, text: impl Into<String>) {
+        self.note = Some(Note { text: text.into(), kind: NoteKind::Info, at: Instant::now(), report: true });
     }
 
     /// Ghost geometry the viewport shows this frame: added or removed material.

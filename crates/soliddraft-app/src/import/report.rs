@@ -20,6 +20,8 @@ pub enum Tier {
     Surface,
     /// It did not open.
     Refused,
+    /// It is suppressed, rolled back or not built yet, so it has no reliable tier.
+    NotEvaluated,
 }
 
 impl Tier {
@@ -29,6 +31,7 @@ impl Tier {
             Tier::Repaired => "Solid, repaired",
             Tier::Surface => "Surface body",
             Tier::Refused => "Refused",
+            Tier::NotEvaluated => "Not evaluated",
         }
     }
 }
@@ -44,9 +47,14 @@ pub struct Refusal {
 /// Records a file the importer refused, keeps it for the report and says why.
 pub fn refused(state: &mut AppState, path: &std::path::Path, format: ImportFormat, reason: String) {
     let file = path.file_name().map_or_else(|| path.display().to_string(), |name| name.to_string_lossy().into_owned());
-    state.import_refusals.retain(|r| r.file != file || r.format != format);
-    state.import_refusals.push(Refusal { file, format, reason: reason.clone() });
+    keep_refusal(state, file, format, reason.clone());
     state.note(reason, NoteKind::Error);
+}
+
+/// Keeps `file`'s latest refusal for the report.
+pub fn keep_refusal(state: &mut AppState, file: String, format: ImportFormat, reason: String) {
+    state.import_refusals.retain(|r| r.file != file || r.format != format);
+    state.import_refusals.push(Refusal { file, format, reason });
 }
 
 /// One row of the report.
@@ -93,14 +101,22 @@ pub fn row(doc: &Document, id: FeatureId, file: String, format: ImportFormat) ->
 
 /// What import feature `id` opened as, and why.
 fn opened_as(doc: &Document, id: FeatureId) -> (Tier, String) {
-    let Some(feature) = doc.feature(id) else { return (Tier::Refused, "The import is no longer in the part.".into()) };
-    if let FeatureStatus::Error(error) = &feature.status {
-        return (Tier::Refused, error.clone());
+    let unbuilt = |why: &str| (Tier::NotEvaluated, why.to_owned());
+    let Some(feature) = doc.feature(id) else { return unbuilt("The import is no longer in the part.") };
+    match &feature.status {
+        FeatureStatus::Error(error) => return (Tier::Refused, error.clone()),
+        FeatureStatus::Inactive if feature.suppressed => return unbuilt("Suppressed, so it is not built."),
+        FeatureStatus::Inactive => return unbuilt("Past the rollback bar, so it is not built."),
+        FeatureStatus::Pending => return unbuilt("Its proof is still pending."),
+        FeatureStatus::Ok | FeatureStatus::NeedsRepair(_) | FeatureStatus::AnsweredWithinBound(_) => {}
     }
-    let surface =
-        feature.body.is_some_and(|body| doc.model().kernel().body_kind(body).is_ok_and(|kind| kind == BodyKind::Sheet));
-    if surface {
-        return (Tier::Surface, "The file holds open faces, not a closed solid. No volume or mass.".into());
+    let Some(body) = feature.body else { return unbuilt("It has no body.") };
+    match doc.model().kernel().body_kind(body) {
+        Err(_) => return unbuilt("Its body's kind could not be read."),
+        Ok(BodyKind::Sheet) => {
+            return (Tier::Surface, "The file holds open faces, not a closed solid. No volume or mass.".into());
+        }
+        Ok(_) => {}
     }
     let Some(record) = doc.model().import_record(model_id(id)) else {
         return (Tier::Exact, "Closed as it is.".into());

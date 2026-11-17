@@ -1,8 +1,9 @@
 //! The import report: what each imported file opened as and why, refused files included.
 
-use soliddraft_app::document::Document;
+use soliddraft_app::document::{Command, Document};
 use soliddraft_app::import::report::{Refusal, Tier, rows};
-use soliddraft_app::import::{Preview, Review, commit};
+use soliddraft_app::import::{CommitError, Preview, Review, commit, commit_in};
+use soliddraft_app::state::AppState;
 use soliddraft_kernel_api::ImportFormat;
 
 fn import(doc: &mut Document, name: &str, format: ImportFormat, source: &[u8]) {
@@ -77,4 +78,39 @@ fn a_refused_file_is_listed_after_the_imports() {
     assert_eq!(report.len(), 2);
     assert_eq!((report[1].file.as_str(), report[1].tier, report[1].feature), ("frame.igs", Tier::Refused, None));
     assert_eq!(report[1].why, "Incidence gap too wide.");
+}
+
+/// A file that reads but whose body the part refuses becomes a report row, apart from a
+/// review the user can answer again, which does not.
+#[test]
+fn a_body_refused_at_admission_is_a_report_row_and_a_review_error_is_not() {
+    let doc = imported("occt-box.igs", ImportFormat::Iges, include_bytes!("../../../ci/fixtures/import/occt-box.igs"));
+    let mut state = AppState::new(doc);
+    let block = include_bytes!("../../../ci/fixtures/import/block-seam-4um.step").to_vec();
+    let preview = Preview::from_source(&state.doc, "block.step", block, ImportFormat::Step).unwrap();
+
+    let unknown = Review { decline: vec!["g9".into()], accept: Vec::new() };
+    assert!(matches!(commit_in(&mut state, &preview, &unknown), Err(CommitError::Review(_))));
+    assert_eq!(rows(&state.doc, &state.import_refusals).len(), 1, "a review error is not a refusal");
+
+    let refused = commit_in(&mut state, &preview, &Review::default());
+    let reason = "an imported body must come first in the part";
+    assert_eq!(refused, Err(CommitError::Refused(reason.into())));
+    let report = rows(&state.doc, &state.import_refusals);
+    assert_eq!(report.len(), 2);
+    assert_eq!(
+        (report[1].file.as_str(), report[1].tier, report[1].why.as_str()),
+        ("block.step", Tier::Refused, reason)
+    );
+}
+
+/// A suppressed surface import is not built, so the report says it was not evaluated and
+/// never infers that it is exact.
+#[test]
+fn a_suppressed_import_is_not_evaluated() {
+    let mut doc = imported("surface-square.step", ImportFormat::Step, include_bytes!("data/surface-square.step"));
+    let id = doc.features[0].id;
+    doc.apply(Command::Suppress { id, suppressed: true }).unwrap();
+    let report = rows(&doc, &[]);
+    assert_eq!((report[0].tier, report[0].why.as_str()), (Tier::NotEvaluated, "Suppressed, so it is not built."));
 }

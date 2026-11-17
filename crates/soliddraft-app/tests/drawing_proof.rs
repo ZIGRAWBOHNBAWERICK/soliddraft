@@ -29,6 +29,11 @@ fn previews(drawing: &Drawing) -> Vec<bool> {
     drawing.sheets.iter().flat_map(|s| &s.views).map(|v| v.geometry.unproved).collect()
 }
 
+/// How many of a drawing's views say they were drawn from a certified mesh.
+fn proved_views(drawing: &Drawing) -> usize {
+    previews(drawing).into_iter().filter(|preview| !preview).count()
+}
+
 /// How many certified meshes the drawing's view projections asked the kernel for, in the
 /// calls `kernel` logged since it was last asked. A view may say it is certified only
 /// when its projection read one: a preview must never be labelled as proved.
@@ -202,11 +207,12 @@ fn a_certified_coarse_rod_cut_is_redrawn_at_fine_quality_for_export() {
     let shown = state.drawing.session.as_ref().unwrap().doc.drawing.clone();
     let views = shown.sheets[0].views.len();
     assert_eq!(views, 4);
-    // The screen draws at coarse quality from whatever Catallax gives it. Since Catallax
-    // 9566aa24 that is the unproved preview of this body, which it used to refuse, so the
-    // screen no longer borrows a certified mesh. Either way the label must say which it is.
-    assert_eq!(certified_view_meshes(&kernel), 0, "the screen read no certified mesh");
-    assert!(shown.sheets[0].views.iter().all(|v| v.geometry.unproved && v.geometry.coarse), "{:?}", previews(&shown));
+    // The screen draws at coarse quality from whatever Catallax gives it: since Catallax
+    // 9566aa24 the unproved preview of this body, which earlier pins refused, so the screen
+    // borrowed the certified mesh instead. Whichever it is, a view says it is proved only
+    // when its projection read a certified mesh.
+    assert!(shown.sheets[0].views.iter().all(|v| v.geometry.coarse));
+    assert_eq!(certified_view_meshes(&kernel), proved_views(&shown), "{:?}", previews(&shown));
 
     let part = PartContext::new(&state.doc).unwrap();
     let mut fine = shown.clone();
@@ -289,13 +295,20 @@ fn a_saved_rod_cache_without_quality_is_regenerated_after_reopening() {
     call(&mut reopened, "open", json!({ "path": path }));
     let shown = reopened.drawing.session.as_ref().unwrap().doc.drawing.clone();
     assert_eq!(shown.sheets[0].views.len(), 4);
-    // A cache with no stored quality is drawn again on opening. The screen takes Catallax's
-    // unproved preview of this body, so no view may be labelled certified.
-    assert_eq!(certified_view_meshes(&kernel), 0, "the reopened screen read no certified mesh");
-    assert!(shown.sheets[0].views.iter().all(|v| v.geometry.unproved), "{:?}", previews(&shown));
+    // A cache with no stored quality is drawn again on opening, from whatever the screen
+    // reads; a view says it is proved only when it read a certified mesh.
+    assert_eq!(certified_view_meshes(&kernel), proved_views(&shown), "{:?}", previews(&shown));
     assert_eq!(shown.model.pinned, PartContext::new(&reopened.doc).unwrap().digest);
     soliddraft_app::drawing::follow_part(&mut reopened);
     assert_eq!(reopened.drawing.session.as_ref().unwrap().doc.drawing, shown);
+
+    // The certified path, asked for explicitly: a fine redraw reads one certified mesh
+    // per view and every view says it is proved.
+    let part = PartContext::new(&reopened.doc).unwrap();
+    let mut fine = shown.clone();
+    apply_with(&mut fine, &Command::UpdateFromModel, &part.certified_part()).unwrap();
+    assert_eq!(certified_view_meshes(&kernel), 4, "each fine view read a certified mesh");
+    assert!(fine.sheets[0].views.iter().all(|v| !v.geometry.unproved && !v.geometry.coarse));
 
     let mut exported = Vec::new();
     for (tool, extension) in

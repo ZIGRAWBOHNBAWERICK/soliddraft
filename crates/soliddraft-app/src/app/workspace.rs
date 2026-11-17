@@ -71,6 +71,10 @@ pub struct SolidDraftApp {
     /// Actions waiting while the page reads the exact geometry they need.
     #[cfg(target_arch = "wasm32")]
     pub(super) reading: Option<Reading>,
+    /// Cancel was clicked and the build it cancelled is still owed: the page says
+    /// Cancelling and offers no second Cancel. Only the browser builds off the page.
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    cancelling: bool,
 }
 
 /// Actions held until the part's bodies adopted from the kernel worker are read. An edit
@@ -185,6 +189,7 @@ impl SolidDraftApp {
             opening: None,
             #[cfg(target_arch = "wasm32")]
             reading: None,
+            cancelling: false,
         }
     }
 
@@ -603,6 +608,9 @@ impl SolidDraftApp {
         let reading = self.reading.is_some();
         let pending = self.state.doc.proof_pending() || opening.is_some() || reading;
         let mut cancel = None;
+        if !pending {
+            self.cancelling = false;
+        }
         if pending {
             egui::Area::new(egui::Id::new("browser-build"))
                 .anchor(egui::Align2::CENTER_BOTTOM, egui::vec2(0.0, -64.0))
@@ -614,13 +622,15 @@ impl SolidDraftApp {
                             ui.label(match &opening {
                                 Some(name) => format!("Opening {name}"),
                                 None if reading => "Reading the part".to_owned(),
+                                None if self.cancelling => "Cancelling…".to_owned(),
                                 None => "Building the part".to_owned(),
                             });
-                            let button = ui.button("Cancel");
+                            let button = ui.add_enabled(!self.cancelling, egui::Button::new("Cancel"));
                             if button.clicked() {
                                 // Cancelling an open keeps the part on screen; cancelling a
                                 // read drops the actions waiting for it.
                                 if self.opening.take().is_none() && self.reading.take().is_none() {
+                                    self.cancelling = true;
                                     self.state.push(AppAction::CancelBuild);
                                 }
                             }
@@ -635,9 +645,13 @@ impl SolidDraftApp {
         }
         let cancel = cancel.map(|centre| serde_json::json!({ "x": centre.x, "y": centre.y }));
         let picking = self.state.viewport.picking;
-        crate::web::show_build(
-            serde_json::json!({ "pending": pending, "cancel": cancel, "reading": reading, "picking": picking }),
-        );
+        crate::web::show_build(serde_json::json!({
+            "pending": pending,
+            "cancel": cancel,
+            "reading": reading,
+            "picking": picking,
+            "cancelling": self.cancelling,
+        }));
     }
 
     fn edit_suite_frame(&mut self, root: &mut egui::Ui) {

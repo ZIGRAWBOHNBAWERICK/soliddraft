@@ -273,7 +273,13 @@ impl SolidDraftApp {
                     drag.cancel(&mut self.state.doc);
                 }
                 match self.state.doc.cancel_build() {
-                    Ok(()) => self.state.note("Cancelled the change still building", NoteKind::Info),
+                    Ok(()) => {
+                        // The cancelled build stops now instead of running to completion,
+                        // so the restored part does not wait behind it.
+                        #[cfg(target_arch = "wasm32")]
+                        crate::kernel_worker::abandon_unwanted();
+                        self.state.note("Cancelled the change still building", NoteKind::Info)
+                    }
                     Err(e) => self.state.note(e, NoteKind::Error),
                 }
                 self.sync_sketch_session();

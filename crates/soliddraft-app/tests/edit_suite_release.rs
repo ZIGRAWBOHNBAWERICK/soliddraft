@@ -521,6 +521,11 @@ fn cancel_returns_a_part_still_building_to_its_last_accepted_revision() {
     edit(&mut doc, 30.0);
     assert!(doc.proof_pending());
     doc.cancel_build().unwrap();
+    // The accepted part is usable at once: its builds come from its earlier proof, while
+    // the cancelled edit's build is still held.
+    assert!(!doc.proof_pending(), "the restored part waits for a proof");
+    assert!(doc.proof_state().current_proved_model());
+    assert_eq!(doc.model().geometry_hash(), accepted);
     drop(release);
     settle(&mut doc);
     assert_eq!(doc.model().geometry_hash(), accepted, "the edit still building is undone");

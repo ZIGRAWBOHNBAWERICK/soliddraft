@@ -364,9 +364,10 @@ pub(crate) fn show_build(shown: serde_json::Value) {
 }
 
 /// Whether the last frame drawn owed a build, the centre of the Cancel button it drew,
-/// whether it was reading exact geometry a command waits for, and whether the viewport's
-/// last frame asked for the pick under the pointer, as JSON: `{"pending": bool, "cancel":
-/// {"x", "y"} or null, "reading": bool, "picking": bool}`. Read only, for browser checks.
+/// whether it was reading exact geometry a command waits for, whether the viewport's last
+/// frame asked for the pick under the pointer, and whether a Cancel is still being carried
+/// out, as JSON: `{"pending": bool, "cancel": {"x", "y"} or null, "reading": bool,
+/// "picking": bool, "cancelling": bool}`. Read only, for browser checks.
 #[wasm_bindgen]
 pub fn shown_build() -> String {
     SHOWN_BUILD.with_borrow(|build| build.clone())

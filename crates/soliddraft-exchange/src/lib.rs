@@ -129,6 +129,12 @@ impl Report {
     /// One line for a status bar or a terminal.
     pub fn summary(&self) -> String {
         match self {
+            Report::Step(StepReport { approximate: Some(approximate), faces, edges, .. }) => format!(
+                "{faces} faces, {edges} edges; approximate part built within {} mm; lengths written to within {} mm; \
+                 the file's distance from the part is not established",
+                approximate.tolerance_mm,
+                bound_mm(approximate.max_length_rounding_mm)
+            ),
             Report::Step(r) => {
                 // A fitted surface's distance from its exact definition adds to the file's own.
                 let bound = if r.fit_mm > 0.0 { (r.max_deviation_mm + r.fit_mm).next_up() } else { r.max_deviation_mm };
@@ -223,13 +229,18 @@ pub fn export(
         Format::Step => {
             let options = StepOptions { product_name: name.to_owned(), ..StepOptions::default() };
             let step = kernel.export_step(body, &options)?;
+            let answer_kind = if step.report.approximate.is_some() {
+                proof::AnswerKind::Approximate
+            } else {
+                proof::AnswerKind::Proved
+            };
             let features = kernel
                 .history(body)?
                 .into_iter()
                 .map(|record| proof::FeatureProof {
                     id: record.tag.as_str().to_owned(),
                     name: record.tag.as_str().to_owned(),
-                    answer_kind: proof::AnswerKind::Proved,
+                    answer_kind,
                     model_bound: None,
                     display_bound: None,
                     work_used: None,
@@ -383,6 +394,7 @@ mod tests {
             removed_faces: 0,
             removed_edges: 0,
             warnings: Vec::new(),
+            approximate: None,
         })
     }
 

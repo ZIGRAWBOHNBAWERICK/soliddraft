@@ -99,6 +99,7 @@ web-sys = { workspace = true, features = [
 
 [dev-dependencies]
 proptest.workspace = true
+soliddraft-kernel-catallax = { workspace = true, features = ["numerical-stand-in"] }
 soliddraft-kernel-api = { workspace = true, features = ["counting"] }
 soliddraft-recipe.workspace = true
 egui_kittest.workspace = true

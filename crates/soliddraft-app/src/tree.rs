@@ -778,7 +778,8 @@ fn under_defined(state: &AppState, feature: &Feature) -> bool {
 
 /// The mark before a feature row's eye: whether export can trust the feature. A green
 /// dot is proved, an open amber ring is pending, a red cross is refused, a diamond is
-/// answered within a stated bound, and a grey ring is inactive. Hover gives the reason.
+/// answered within a stated bound or built within a stated tolerance, and a grey ring is
+/// inactive. Hover gives the reason.
 fn proof_badge(ui: &mut egui::Ui, state: &AppState, feature: &Feature, row: Rect) {
     let id = feature.id;
     let (label, reason) = if let Some(drag) = state.drag_preview.as_ref().filter(|drag| drag.feature() == id) {
@@ -821,7 +822,13 @@ fn proof_badge(ui: &mut egui::Ui, state: &AppState, feature: &Feature, row: Rect
         ("Pending", format!("Waiting for {name} to build. Repair that feature before exporting."))
     } else {
         match &feature.status {
-            FeatureStatus::Ok => ("Proved", "The current feature is proved.".to_owned()),
+            FeatureStatus::Ok => match feature.body.and_then(|body| state.doc.kernel_body_tolerance(body)) {
+                Some(tolerance) => (
+                    APPROXIMATE_LABEL,
+                    format!("Built within {tolerance} mm, with no exact proof. It exports as an approximate part."),
+                ),
+                None => ("Proved", "The current feature is proved.".to_owned()),
+            },
             FeatureStatus::AnsweredWithinBound(bound) => (crate::document::WITHIN_BOUND_LABEL, bound.description()),
             FeatureStatus::Pending => {
                 ("Pending", "The current edit is waiting for proof. Export waits for proof.".to_owned())
@@ -837,13 +844,13 @@ fn proof_badge(ui: &mut egui::Ui, state: &AppState, feature: &Feature, row: Rect
         "Proved" => theme::ok(),
         "Pending" => theme::warn(),
         "Refused" => theme::error(),
-        crate::document::WITHIN_BOUND_LABEL => theme::bounded(),
+        crate::document::WITHIN_BOUND_LABEL | APPROXIMATE_LABEL => theme::bounded(),
         _ => theme::muted(),
     };
     let centre = pos2(row.right() - 4.0 - tree_visibility::EYE_WIDTH - BADGE_WIDTH / 2.0, row.center().y);
     if ui.is_rect_visible(Rect::from_center_size(centre, vec2(8.0, 8.0))) {
         let painter = ui.painter();
-        if label == crate::document::WITHIN_BOUND_LABEL {
+        if label == crate::document::WITHIN_BOUND_LABEL || label == APPROXIMATE_LABEL {
             painter.add(egui::Shape::convex_polygon(
                 vec![
                     centre + vec2(0.0, -4.0),
@@ -877,6 +884,9 @@ fn proof_badge(ui: &mut egui::Ui, state: &AppState, feature: &Feature, row: Rect
     });
     response.on_hover_text(format!("{label}: {reason}"));
 }
+
+/// The proof badge's word for a feature whose body was built within a stated tolerance.
+const APPROXIMATE_LABEL: &str = "Approximate";
 
 /// The icon of a feature's kind, in its tree row.
 pub(crate) fn feature_icon(kind: &FeatureKind) -> Icon {

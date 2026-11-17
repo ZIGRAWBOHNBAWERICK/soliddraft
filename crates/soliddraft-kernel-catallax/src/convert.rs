@@ -589,13 +589,16 @@ fn plane_vectors(plane: &catallax_shapes::Plane) -> Result<(Vec3, Vec3), catalla
 }
 
 /// A planar face's supporting point and outward unit normal.
-fn outward_plane(surface: &Surface, sense: Sense) -> Result<(Option<Vec3>, Option<Vec3>), catallax_numbers::Refusal> {
+pub(super) fn outward_plane(
+    surface: &Surface,
+    sense: Sense,
+) -> Result<(Option<Vec3>, Option<Vec3>), catallax_numbers::Refusal> {
     let Surface::Plane(plane) = surface else { return Ok((None, None)) };
     let (origin, normal) = plane_vectors(plane)?;
     Ok((Some(origin), normal.normalized().map(|n| if sense == Sense::Same { n } else { -n })))
 }
 
-fn surface_kind(surface: &Surface) -> SurfaceKind {
+pub(super) fn surface_kind(surface: &Surface) -> SurfaceKind {
     match surface.kind() {
         CatSurface::Plane => SurfaceKind::Plane,
         CatSurface::Cylinder => SurfaceKind::Cylinder,

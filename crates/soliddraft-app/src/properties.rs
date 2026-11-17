@@ -1193,6 +1193,9 @@ fn material_panel(ui: &mut egui::Ui, state: &mut AppState) {
                 && let Some(body) = state.doc.display_body()
                 && let Some(properties) = crate::measure::mass::cached(&state.doc, body)
             {
+                if let Some(tolerance) = state.doc.kernel_body_tolerance(body) {
+                    hint(ui, &crate::document::approximate_words(&tolerance));
+                }
                 ui.label(format!("Volume: {:.3} mm³", properties.volume));
                 match soliddraft_materials::mass::of_body(&properties, state.doc.material()) {
                     Ok(mass) => {

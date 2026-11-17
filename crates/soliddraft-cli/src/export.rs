@@ -29,6 +29,8 @@ Meshes use the part's export tolerance (`soliddraft quality --export`); a recipe
 uses the default, 0.01 mm. Each report gives what was written and how far it may
 lie from the exact part. A part with a feature that did not build is refused.
 STEP and IGES output over the requested tolerance is refused before any file is written.
+So is STEP of an approximate part, built within a stated tolerance: the file's distance
+from the part is not established, so no requested tolerance can be confirmed.
 IGES also refuses unsupported definitions; it never substitutes a mesh or fitted surface.
 
 A part whose last feature is a lattice or gyroid exports its certified, labelled
@@ -197,6 +199,16 @@ fn publish(a: &Args, exports: &[Export], work: RequestWork) -> Result<(), String
         if let Report::Step(report) = &out.report
             && !report.within_tolerance
         {
+            // An approximate part's file has no established distance from the part, so it
+            // cannot be held to the requested tolerance: written-length rounding is no bound.
+            if let Some(approximate) = &report.approximate {
+                return Err(format!(
+                    "{}: STEP export refused: the part is approximate, built within {} mm, and the file's \
+                     distance from it is not established, so the requested tolerance cannot be confirmed",
+                    path.display(),
+                    approximate.tolerance_mm
+                ));
+            }
             return Err(format!(
                 "{}: STEP export refused: proven deviation {} mm exceeds the requested tolerance",
                 path.display(),
@@ -296,6 +308,7 @@ mod tests {
                 removed_faces: 0,
                 removed_edges: 0,
                 warnings: Vec::new(),
+                approximate: None,
             }),
         };
         let mesh = Export {
@@ -331,6 +344,21 @@ mod tests {
         publish(&a, &accepted, work).unwrap();
         assert_eq!(std::fs::read(&first).unwrap(), accepted[0].bytes);
         assert_eq!(std::fs::read(&second).unwrap(), accepted[1].bytes);
+
+        // An approximate part's file rounds its lengths finely, but that bounds no distance
+        // from the part, so the gate refuses it before writing.
+        let mut approximate = step(false);
+        if let Report::Step(report) = &mut approximate.report {
+            report.max_deviation = soliddraft_kernel_api::NOT_ESTABLISHED.into();
+            report.max_deviation_mm = 0.0;
+            report.approximate =
+                Some(soliddraft_kernel_api::ApproximateStep { tolerance_mm: 0.01, max_length_rounding_mm: 1e-12 });
+        }
+        let third = dir.join("third.step");
+        let a = Args { outputs: vec![(third.clone(), Format::Step)], ..a };
+        let error = publish(&a, &[approximate], work).unwrap_err();
+        assert!(error.contains("approximate") && error.contains("not established"), "{error}");
+        assert!(!third.exists());
         std::fs::remove_dir_all(dir).unwrap();
     }
 }

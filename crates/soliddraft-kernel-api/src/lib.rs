@@ -531,6 +531,21 @@ pub enum BodyKind {
     Sheet,
 }
 
+/// How closely a body's geometry is known.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum BodyAccuracy {
+    /// Exact geometry, checked by the kernel.
+    #[default]
+    Exact,
+    /// Built within a stated tolerance, with no exact proof. Its display, measurements
+    /// and mass properties are estimates.
+    Approximate {
+        /// The tolerance the kernel stated before building, in millimetres, as a decimal.
+        tolerance_mm: String,
+    },
+}
+
 /// The geometric type of a face's surface.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -582,6 +597,11 @@ pub enum FaceAccuracy {
     /// The backend supplies no carrier accuracy, for example a field preview.
     #[default]
     Unknown,
+    /// Part of a body built within a stated tolerance, with no exact proof.
+    Approximate {
+        /// The tolerance stated before the build, in millimetres.
+        tolerance_mm: f64,
+    },
 }
 
 /// One face of a body.
@@ -782,7 +802,8 @@ pub struct StepReport {
     /// does not govern it. Zero for a body with no fitted surface.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub fit_mm: f64,
-    /// True when `max_deviation` meets the requested tolerance.
+    /// True when `max_deviation` meets the requested tolerance. Always false for an
+    /// [`ApproximateStep`], whose deviation is not established.
     pub within_tolerance: bool,
     /// Solids written.
     pub solids: usize,
@@ -806,7 +827,27 @@ pub struct StepReport {
     /// Warnings the backend attached to the export, in words. Empty for a clean export.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub warnings: Vec<String>,
+    /// What is known of a file written from a body built within a stated tolerance.
+    /// `None` for an exact body.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub approximate: Option<ApproximateStep>,
 }
+
+/// A STEP file of a body built within a stated tolerance. The distance between the file
+/// and the body is not established, so the report's `max_deviation` reads
+/// [`NOT_ESTABLISHED`], `max_deviation_mm` and `fit_mm` are zero, and `within_tolerance`
+/// is false: no requested tolerance is shown to hold.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ApproximateStep {
+    /// The tolerance the body was built within, in millimetres.
+    pub tolerance_mm: f64,
+    /// The largest rounding of one written length, in millimetres, rounded up. It bounds
+    /// no distance between the file's geometry and the body.
+    pub max_length_rounding_mm: f64,
+}
+
+/// [`StepReport::max_deviation`] of a file whose distance from its body is not established.
+pub const NOT_ESTABLISHED: &str = "not established";
 
 /// A STEP AP242 file and its report.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -1219,6 +1260,13 @@ pub trait Kernel: Send + Sync {
     fn body_kind(&self, body: BodyId) -> KernelResult<BodyKind> {
         let _ = body;
         Ok(BodyKind::Solid)
+    }
+
+    /// Whether a body is exact or built within a stated tolerance, without computing
+    /// anything, so a label can ask it every frame.
+    fn body_accuracy(&self, body: BodyId) -> KernelResult<BodyAccuracy> {
+        let _ = body;
+        Ok(BodyAccuracy::Exact)
     }
 
     /// Volume, area, centroid and inertia.

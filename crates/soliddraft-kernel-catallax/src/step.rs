@@ -63,6 +63,7 @@ pub(super) fn export(app: &AppBody, options: &StepOptions) -> KernelResult<StepE
             removed_faces: report.regularizations.iter().map(|r| r.removed_faces).sum(),
             removed_edges: report.regularizations.iter().map(|r| r.removed_edges).sum(),
             warnings: answer.marks.iter().map(|m| format!("{}: {}", m.code, m.detail)).collect(),
+            approximate: None,
         },
     })
 }

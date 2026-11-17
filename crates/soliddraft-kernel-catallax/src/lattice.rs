@@ -299,7 +299,13 @@ impl CatallaxKernel {
         let input = state.get(body)?;
         let mut history = input.history.clone();
         history.push(record.clone());
-        let stored = Stored { steps: input.steps.clone(), result: input.result.clone(), history, solid: None };
+        let stored = Stored {
+            steps: input.steps.clone(),
+            result: input.result.clone(),
+            history,
+            solid: None,
+            approximate: None,
+        };
         state.bodies.insert(id, stored);
         state.fields.insert(id, Arc::new(Field { stage: Box::new(stage), preview, topology }));
         Ok(OpResult { body: id, record })

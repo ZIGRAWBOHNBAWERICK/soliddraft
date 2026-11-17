@@ -82,9 +82,9 @@ fn check_fillet_display(source: &str, rail: soliddraft_kernel_api::Vec3, bounded
     eprintln!("F04 display: {work:?}; {}", out.content);
     if !bounded {
         assert!(out.is_error && work.exhausted, "{}; {work:?}", out.content);
-        assert_eq!(work.used, 19_999_956);
+        assert_eq!(work.used, 19_999_998);
         assert_eq!(state.doc.display_failure(), Some(out.content.as_str()));
-        for expected in ["SD-DISPLAY-01", "0.01 mm", "19999956 work units", "20000000"] {
+        for expected in ["SD-DISPLAY-01", "0.01 mm", "19999998 work units", "20000000"] {
             assert!(out.content.contains(expected), "missing {expected}: {}", out.content);
         }
         for forbidden in ["kernel", "step op_", "mesh.spline", "numbers.operation"] {

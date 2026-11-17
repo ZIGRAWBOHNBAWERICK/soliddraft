@@ -19,6 +19,8 @@ pub enum AnswerKind {
     Refused,
     /// Suppressed or below the rollback bar.
     Inactive,
+    /// Built within a stated tolerance, with no exact proof.
+    Approximate,
 }
 
 impl AnswerKind {
@@ -30,6 +32,7 @@ impl AnswerKind {
             Self::WithinStatedBound => "Within a stated bound",
             Self::Refused => "Refused",
             Self::Inactive => "Inactive",
+            Self::Approximate => "Approximate, within its stated tolerance",
         }
     }
 }
@@ -79,11 +82,9 @@ impl super::Export {
     ) -> Result<(), String> {
         if matches!(self.report, super::Report::Step(_) | super::Report::StandIn(_)) {
             let proof = self.proof.as_ref().ok_or("This STEP file has no proof report; export was not written")?;
-            if proof
-                .features
-                .iter()
-                .any(|feature| !matches!(feature.answer_kind, AnswerKind::Proved | AnswerKind::Inactive))
-            {
+            if proof.features.iter().any(|feature| {
+                !matches!(feature.answer_kind, AnswerKind::Proved | AnswerKind::Approximate | AnswerKind::Inactive)
+            }) {
                 return Err("This part has an unproved answer. STEP export requires a proved result.".into());
             }
             let hash = format!("{:x}", Sha256::digest(&self.bytes));

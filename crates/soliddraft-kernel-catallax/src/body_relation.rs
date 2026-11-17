@@ -71,6 +71,10 @@ fn motion(body: PlacedBody) -> KernelResult<Isometry> {
 fn operands(k: &CatallaxKernel, a: BodyId, b: BodyId) -> KernelResult<(Model, [catallax_topology::BodyId; 2])> {
     let state = k.state()?;
     let (first, second) = (state.get(a)?, state.get(b)?);
+    // Their recipes would replay as exact bodies.
+    if first.approximate.is_some() || second.approximate.is_some() {
+        return Err(crate::approximate::not_yet());
+    }
     let mut steps = first.steps.clone();
     steps.extend(second.steps.clone());
     let prefix = [first, second]
@@ -85,7 +89,8 @@ fn operands(k: &CatallaxKernel, a: BodyId, b: BodyId) -> KernelResult<(Model, [c
     drop(state);
     let files = sources.iter().map(|(sha, bytes)| (sha.clone(), &bytes[..])).collect();
     let (app, names, _, _) =
-        build(&input, OpKind::Intersect, prefix.as_ref().map(|s| &s.app), &files, None, &Default::default())?;
+        build(&input, OpKind::Intersect, prefix.as_ref().map(|s| &s.app), &files, None, &Default::default(), &[])?;
+    let crate::Outcome::Exact(app) = app else { return Err(crate::approximate::not_yet()) };
     let built = app.checkpoint.built();
     let bodies = result_names.map(|name| built.bodies[&names[&name]]);
     Ok((built.model.clone(), bodies))

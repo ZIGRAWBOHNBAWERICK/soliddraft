@@ -1717,7 +1717,11 @@ impl SolidDraftApp {
                 match written {
                     Ok(report) => {
                         let kind = match &report {
-                            soliddraft_exchange::Report::Step(r) if !r.within_tolerance => NoteKind::Error,
+                            // An approximate part's file says so in its summary; it is not
+                            // over a tolerance it never claimed.
+                            soliddraft_exchange::Report::Step(r) if !r.within_tolerance && r.approximate.is_none() => {
+                                NoteKind::Error
+                            }
                             soliddraft_exchange::Report::Mesh(r) if !r.closed => NoteKind::Error,
                             _ => NoteKind::Ok,
                         };

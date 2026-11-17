@@ -74,7 +74,7 @@ fn check_display(name: &str, source: &str, bounded: bool) {
                 assert!(app.query_all_by_label("Fillet1 proof: Proved").next().is_none());
             } else {
                 assert!(out.is_error && work.exhausted, "{}; {work:?}", out.content);
-                assert_eq!(work.used, 19_999_956);
+                assert_eq!(work.used, 19_999_998);
                 assert_eq!(app.state().state.doc.model().to_bytes().unwrap(), before);
                 assert_eq!(app.state().state.doc.undo_depth(), undo);
                 assert!(!app.state().state.doc.features.iter().any(|feature| feature.name == "Fillet1"));
@@ -84,7 +84,7 @@ fn check_display(name: &str, source: &str, bounded: bool) {
                 app.get_by_label("Status details").click();
                 app.run_steps(4);
                 let painted = ribbon::painted(app);
-                for expected in ["SD-DISPLAY-01", "19999956 work units", "20000000"] {
+                for expected in ["SD-DISPLAY-01", "19999998 work units", "20000000"] {
                     assert!(
                         painted.iter().any(|text| text.text.contains(expected)),
                         "missing {expected} in status chip details"

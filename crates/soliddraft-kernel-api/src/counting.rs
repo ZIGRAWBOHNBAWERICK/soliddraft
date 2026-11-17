@@ -138,6 +138,10 @@ impl Kernel for Counting {
         self.inner.body_kind(body)
     }
 
+    fn body_accuracy(&self, body: BodyId) -> KernelResult<crate::BodyAccuracy> {
+        self.inner.body_accuracy(body)
+    }
+
     fn exact_unread(&self, body: BodyId) -> KernelResult<bool> {
         self.inner.exact_unread(body)
     }

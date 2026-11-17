@@ -1,4 +1,5 @@
-//! Proven quantities in millimetres, square millimetres and degrees.
+//! Measured quantities in millimetres, square millimetres and degrees: proven, except on a
+//! body built within a stated tolerance.
 
 use serde::{Deserialize, Serialize};
 
@@ -12,9 +13,13 @@ pub enum Certainty {
     Exact,
     /// A nonzero enclosure, rounded outward at the interface.
     Bounded,
+    /// An estimate on a body built within a stated tolerance. No bound is claimed:
+    /// `lo` and `hi` equal `value`.
+    Approximate,
 }
 
-/// A proven quantity. Bounded endpoints enclose the kernel's rational interval.
+/// A measured quantity. Bounded endpoints enclose the kernel's rational interval; an
+/// approximate one claims no bound.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Measurement {
     /// Nearest double of the enclosure midpoint.

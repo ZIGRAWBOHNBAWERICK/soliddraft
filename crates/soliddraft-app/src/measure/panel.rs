@@ -173,8 +173,13 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
             match state.measure.cached.as_ref().and_then(|c| c.point.as_ref()) {
                 Some(Ok(point)) => {
                     let c = |i: usize| point["coordinates"][i]["value"].as_f64().unwrap_or(f64::NAN);
-                    let exact = (0..3).all(|i| point["coordinates"][i]["certainty"] == "exact");
-                    let how = if exact { "exact" } else { "bounded" };
+                    let how = if (0..3).all(|i| point["coordinates"][i]["certainty"] == "exact") {
+                        "exact"
+                    } else if (0..3).any(|i| point["coordinates"][i]["certainty"] == "approximate") {
+                        "approximate"
+                    } else {
+                        "bounded"
+                    };
                     ui.label(format!("Midpoint {}, {how}", super::hover::format([c(0), c(1), c(2)])));
                 }
                 Some(Err(error)) => {

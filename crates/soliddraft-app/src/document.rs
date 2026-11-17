@@ -1069,6 +1069,15 @@ pub enum Selection {
 pub const BODY_NAME: &str = "Solid body";
 /// The body row's name when the part's one body is open faces, as an imported surface.
 pub const SURFACE_BODY_NAME: &str = "Surface body";
+/// The body row's name when the part's one body was built within a stated tolerance.
+pub const APPROXIMATE_BODY_NAME: &str = "Approximate solid body";
+/// The body row's name when that body is also open faces.
+pub const APPROXIMATE_SURFACE_BODY_NAME: &str = "Approximate surface body";
+
+/// How a body built within `tolerance_mm` is described, in Details.
+pub fn approximate_words(tolerance_mm: &str) -> String {
+    format!("Approximate, built within {tolerance_mm} mm. Its display, measurements and mass are estimates")
+}
 
 /// What a pick id in the id buffer stands for.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -3656,14 +3665,35 @@ impl Document {
     }
 
     /// The body label used by the tree and the property panel. A body of open faces, such
-    /// as a STEP surface model imported as it is, is named a surface body.
+    /// as a STEP surface model imported as it is, is named a surface body, and one built
+    /// within a stated tolerance an approximate body.
     pub fn body_name(&self, key: u32) -> String {
         let surface = self.body_is_surface(key);
-        match (key == 0 && self.model.next_body() == 1, surface) {
-            (true, false) => BODY_NAME.to_owned(),
-            (true, true) => SURFACE_BODY_NAME.to_owned(),
-            (false, false) => format!("Body {}", key + 1),
-            (false, true) => format!("Surface body {}", key + 1),
+        let approximate = self.body_tolerance(key).is_some();
+        match (key == 0 && self.model.next_body() == 1, surface, approximate) {
+            (true, false, false) => BODY_NAME.to_owned(),
+            (true, true, false) => SURFACE_BODY_NAME.to_owned(),
+            (true, false, true) => APPROXIMATE_BODY_NAME.to_owned(),
+            (true, true, true) => APPROXIMATE_SURFACE_BODY_NAME.to_owned(),
+            (false, false, false) => format!("Body {}", key + 1),
+            (false, true, false) => format!("Surface body {}", key + 1),
+            (false, false, true) => format!("Approximate body {}", key + 1),
+            (false, true, true) => format!("Approximate surface body {}", key + 1),
+        }
+    }
+
+    /// The tolerance body `key` was built within, as a decimal in millimetres, or `None`
+    /// for an exact body.
+    pub fn body_tolerance(&self, key: u32) -> Option<String> {
+        let (_, body) = self.model.live_bodies().into_iter().find(|(k, _)| *k == key)?;
+        self.kernel_body_tolerance(body)
+    }
+
+    /// The tolerance kernel body `body` was built within, as [`Document::body_tolerance`].
+    pub fn kernel_body_tolerance(&self, body: BodyId) -> Option<String> {
+        match self.model.kernel().body_accuracy(body).ok()? {
+            soliddraft_kernel_api::BodyAccuracy::Approximate { tolerance_mm } => Some(tolerance_mm),
+            soliddraft_kernel_api::BodyAccuracy::Exact => None,
         }
     }
 
@@ -4685,6 +4715,9 @@ impl Document {
                 if self.body_is_surface(self.active_body) {
                     details.push(("Kind".to_owned(), "Surface: open faces, no volume or mass".to_owned()));
                 }
+                if let Some(tolerance) = self.body_tolerance(self.active_body) {
+                    details.push(("Accuracy".to_owned(), approximate_words(&tolerance)));
+                }
                 Some(EntityInfo { title: self.body_name(self.active_body), feature: None, details })
             }
             Selection::Feature(id) => {
@@ -4847,6 +4880,9 @@ impl Document {
                     && let Some(body) = f.body
                     && let Some(mp) = crate::measure::mass::cached(self, body)
                 {
+                    if let Some(tolerance) = self.kernel_body_tolerance(body) {
+                        details.push(("Accuracy".to_owned(), approximate_words(&tolerance)));
+                    }
                     details.push(("Volume".to_owned(), format!("{:.0} mm³", mp.volume)));
                     details.push(("Surface area".to_owned(), format!("{:.0} mm²", mp.area)));
                     let material = self.material();
@@ -4910,6 +4946,9 @@ impl Document {
                                 format!("Fitted, deviation ≤ {max_deviation_mm:e} mm")
                             }
                             soliddraft_kernel_api::FaceAccuracy::Unknown => "Unknown".into(),
+                            soliddraft_kernel_api::FaceAccuracy::Approximate { tolerance_mm } => {
+                                format!("Approximate, built within {tolerance_mm} mm")
+                            }
                         },
                     ),
                     ("Area".to_owned(), format!("{:.1} mm²", nf.area)),

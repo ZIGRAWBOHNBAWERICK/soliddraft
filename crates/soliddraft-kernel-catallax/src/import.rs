@@ -433,6 +433,7 @@ impl CatallaxKernel {
                     measured: OnceLock::new(),
                     mass: OnceLock::new(),
                 })),
+                approximate: None,
             },
         );
         Ok(ImportStepResult {

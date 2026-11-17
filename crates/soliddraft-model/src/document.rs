@@ -324,6 +324,19 @@ impl Document {
                         (AnswerKind::Pending, Some("Waiting for proof".into()))
                     } else {
                         match self.status(feature.id) {
+                            Some(FeatureStatus::Ok)
+                                if self.body_after(feature.id).is_some_and(|body| {
+                                    matches!(
+                                        self.kernel.body_accuracy(body),
+                                        Ok(soliddraft_kernel_api::BodyAccuracy::Approximate { .. })
+                                    )
+                                }) =>
+                            {
+                                (
+                                    AnswerKind::Approximate,
+                                    Some("Built within a stated tolerance, with no exact proof".into()),
+                                )
+                            }
                             Some(FeatureStatus::Ok) => (AnswerKind::Proved, None),
                             Some(FeatureStatus::Failed(reason)) => (AnswerKind::Refused, Some(reason.clone())),
                             Some(FeatureStatus::RepairNeeded(_)) => {

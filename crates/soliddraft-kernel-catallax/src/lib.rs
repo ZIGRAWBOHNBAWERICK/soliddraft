@@ -4,6 +4,7 @@
 //! immutable Catallax application build. Legacy history is derived from Catallax's
 //! origin sets; display estimates never decide topology or operation success.
 
+mod approximate;
 mod assembly_measure;
 mod body_relation;
 mod checks;
@@ -31,10 +32,12 @@ mod sweep;
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 
-use catallax_app::{Error, EvaluatedApplicationBody};
+use catallax_app::{Error, EvaluatedApplicationBody, EvaluatedApplicationOutcome, NumericalApplicationBody};
 
 mod evaluated;
 mod handover;
+#[cfg(feature = "numerical-stand-in")]
+mod stand_in;
 use catallax_mesh::{MeshOptions, PreviewMesh, PreviewOptions, preview_mesh_body};
 use catallax_numbers::{Decider, Rational};
 use catallax_recipe::StepId;
@@ -45,7 +48,7 @@ use soliddraft_kernel_api::*;
 pub use diagnostics::{APP_REQUEST_WORK, APP_WORK_TARGET, RequestWork, with_request_allowance};
 
 /// The pinned Catallax application entry revision.
-pub const CATALLAX_REVISION: &str = "2c60dce949568b46b23b9cc96c6c760e329bb303";
+pub const CATALLAX_REVISION: &str = "ceb686c353e9b119deb073b901d0574b1c62e54b";
 
 /// An in-process Catallax backend. There is no global kernel state or kernel thread.
 #[derive(Default)]
@@ -85,6 +88,9 @@ struct State {
     handed_ids: BTreeMap<(u64, u64), u64>,
     /// How many offered builds were read from their bytes.
     offer_reads: Arc<std::sync::atomic::AtomicU64>,
+    /// Operations whose exact results this kernel retains as numerical bodies, standing
+    /// in for Catallax until it returns numerical results itself.
+    stand_in: Vec<OpKind>,
 }
 
 /// A build kept for a hand-over: its recipe key, its bytes, and what adopting it unread
@@ -96,6 +102,8 @@ struct Stored {
     result: String,
     history: Vec<HistoryRecord>,
     solid: Option<Arc<Solid>>,
+    /// A body Catallax built within a stated tolerance, which has no exact solid.
+    approximate: Option<Arc<approximate::Approximate>>,
 }
 
 struct Solid {
@@ -391,7 +399,11 @@ impl State {
         if self.fields.contains_key(&body) {
             return Err(terminal_field(body));
         }
-        self.get(body)?.solid.clone().ok_or_else(|| gap("Profile sheet queries"))
+        let stored = self.get(body)?;
+        if stored.approximate.is_some() {
+            return Err(approximate::not_yet());
+        }
+        stored.solid.clone().ok_or_else(|| gap("Profile sheet queries"))
     }
 
     fn step(&self, body: BodyId) -> KernelResult<StepId> {
@@ -442,6 +454,14 @@ impl CatallaxKernel {
             state: Mutex::new(State { capture: true, ..State::default() }),
             diagnostics: Some(diagnostics::Diagnostics::new(max_work)),
         }
+    }
+
+    /// A backend whose builds of `ops` come back as numerical bodies, as Catallax will
+    /// return rolling-ball fillets. It stands in for Catallax's numerical results in
+    /// tests until Catallax returns them itself.
+    #[cfg(feature = "numerical-stand-in")]
+    pub fn with_numerical_stand_in(ops: &[OpKind]) -> Self {
+        Self { state: Mutex::new(State { stand_in: ops.to_vec(), ..State::default() }), diagnostics: None }
     }
 
     /// Takes completed kernel calls and their portable recipe questions.
@@ -527,11 +547,6 @@ impl CatallaxKernel {
         step: Value,
     ) -> KernelResult<OpResult> {
         let (mut state, evaluated) = self.evaluate(state, op, inputs, context, step)?;
-        if op == OpKind::Fillet
-            && let Some(refusal) = stopped_short(&evaluated.app, &evaluated.result)
-        {
-            return Err(refusal);
-        }
         let Evaluated { app, key, handed, names, steps, mut history, parents, seq, result } = evaluated;
         // Catallax names faces by recipe step; the interface uses the caller's tag.
         let mut tags: BTreeMap<String, OpTag> = names
@@ -555,6 +570,35 @@ impl CatallaxKernel {
                     tags.insert(format!("{id}__scan_origin"), fitted_tag.clone());
                 }
             }
+        }
+        let app = match app {
+            Outcome::Exact(app) => app,
+            Outcome::Approximate(outcome) => {
+                let parent_ids = parents.iter().map(|p| &p.ids).collect::<Vec<_>>();
+                if outcome.body().definition().faces.is_empty() {
+                    return Err(KernelError::Unsupported(NOTHING_LEFT.into()));
+                }
+                let approximate = approximate::Approximate::new(outcome, &parent_ids, &tags, &mut state.next);
+                let record = approximate.record(seq, tag, op, &result, &parent_ids, &tags);
+                history.insert(seq, record.clone());
+                let body = BodyId::from_raw(state.id());
+                state.bodies.insert(
+                    body,
+                    Stored {
+                        steps,
+                        result,
+                        history: history.into_values().collect(),
+                        solid: None,
+                        approximate: Some(Arc::new(approximate)),
+                    },
+                );
+                return Ok(OpResult { body, record });
+            }
+        };
+        if op == OpKind::Fillet
+            && let Some(refusal) = stopped_short(&app, &result)
+        {
+            return Err(refusal);
         }
         if is_empty(&app) {
             if op == OpKind::Sweep {
@@ -639,9 +683,10 @@ impl CatallaxKernel {
         if state.kept.is_some() {
             state.kept_solids.push(solid.clone());
         }
-        state
-            .bodies
-            .insert(body, Stored { steps, result, history: history.into_values().collect(), solid: Some(solid) });
+        state.bodies.insert(
+            body,
+            Stored { steps, result, history: history.into_values().collect(), solid: Some(solid), approximate: None },
+        );
         Ok(OpResult { body, record })
     }
 
@@ -656,6 +701,11 @@ impl CatallaxKernel {
     ) -> KernelResult<(MutexGuard<'a, State>, Evaluated)> {
         if let Some(field) = inputs.iter().chain(context).find(|body| state.fields.contains_key(body)) {
             return Err(terminal_field(*field));
+        }
+        // An approximate body's recipe would replay here as an exact build, so neither an
+        // input nor a context body may be one. Profiles store no body and pass.
+        if inputs.iter().chain(context).any(|body| state.bodies.get(body).is_some_and(|s| s.approximate.is_some())) {
+            return Err(approximate::not_yet());
         }
         let mut steps = BTreeMap::new();
         let mut history = BTreeMap::new();
@@ -693,6 +743,7 @@ impl CatallaxKernel {
         let capture = state.capture;
         let offered = state.offered.clone();
         let keeping = state.kept.is_some();
+        let stand_in = state.stand_in.clone();
         drop(state);
         let mut questions = Vec::new();
         let files = sources.iter().map(|(sha, bytes)| (sha.clone(), &bytes[..])).collect();
@@ -703,10 +754,11 @@ impl CatallaxKernel {
             &files,
             capture.then_some(&mut questions),
             &offered,
+            &stand_in,
         );
         // A build made here is kept for hand-over outside the lock; an offered one is not.
         let kept = match &built {
-            Ok((app, _, key, _)) if keeping && matches!(app.checkpoint, Exact::Checkpoint(_)) => {
+            Ok((Outcome::Exact(app), _, key, _)) if keeping && matches!(app.checkpoint, Exact::Checkpoint(_)) => {
                 Some((key.clone(), handover::write(app.checkpoint.built())?))
             }
             _ => None,
@@ -717,7 +769,9 @@ impl CatallaxKernel {
         if let (Some((key, bytes)), Some(list)) = (kept, state.kept.as_mut()) {
             list.push((key, bytes, None));
         }
-        if matches!(&built, Ok((app, _, _, _)) if matches!(app.checkpoint, Exact::Checkpoint(_))) {
+        if matches!(&built, Ok((Outcome::Exact(app), _, _, _)) if matches!(app.checkpoint, Exact::Checkpoint(_)))
+            || matches!(&built, Ok((Outcome::Approximate(_), _, _, _)))
+        {
             state.fresh += 1;
         }
         let (app, names, key, handed) = built?;
@@ -751,6 +805,11 @@ impl CatallaxKernel {
 
     fn solid(&self, body: BodyId) -> KernelResult<Arc<Solid>> {
         self.state()?.solid(body)
+    }
+
+    /// The numerical body stored as `body`, if it is one.
+    fn approximate(&self, body: BodyId) -> KernelResult<Option<Arc<approximate::Approximate>>> {
+        Ok(self.state()?.get(body)?.approximate.clone())
     }
 }
 
@@ -793,7 +852,7 @@ fn terminal_field(body: BodyId) -> KernelError {
 
 /// The operation's result, before it becomes a stored body.
 struct Evaluated {
-    app: AppBody,
+    app: Outcome,
     key: String,
     /// The topology another kernel computed for an offered build.
     handed: Option<Arc<handover::HandedTopology>>,
@@ -1008,9 +1067,24 @@ fn converted_recipe(input: &Value, op: OpKind) -> KernelResult<catallax_app::sol
     Ok(converted)
 }
 
-/// A build: its exact result, the step ids of the caller's tags, its recipe key for a
+/// What a build made: exact geometry, or geometry built within a stated tolerance.
+enum Outcome {
+    Exact(AppBody),
+    Approximate(Arc<NumericalApplicationBody>),
+}
+
+impl From<EvaluatedApplicationOutcome> for Outcome {
+    fn from(outcome: EvaluatedApplicationOutcome) -> Self {
+        match outcome {
+            EvaluatedApplicationOutcome::Exact(app) => Outcome::Exact(app.into()),
+            EvaluatedApplicationOutcome::Numerical(body) => Outcome::Approximate(body),
+        }
+    }
+}
+
+/// A build: its result, the step ids of the caller's tags, its recipe key for a
 /// hand-over, and the topology another kernel computed when the build was offered.
-type BuildAnswer = (AppBody, BTreeMap<String, catallax_recipe::StepId>, String, Option<Arc<handover::HandedTopology>>);
+type BuildAnswer = (Outcome, BTreeMap<String, catallax_recipe::StepId>, String, Option<Arc<handover::HandedTopology>>);
 
 /// Builds a legacy recipe, returning the body and the legacy step names' Catallax step ids.
 fn build(
@@ -1020,6 +1094,7 @@ fn build(
     files: &catallax_features::ImportFiles<'_>,
     questions: Option<&mut Vec<Value>>,
     offered: &BTreeMap<String, handover::Offer>,
+    stand_in: &[OpKind],
 ) -> KernelResult<BuildAnswer> {
     let converted = converted_recipe(input, op)?;
     if let Some(questions) = questions {
@@ -1032,13 +1107,13 @@ fn build(
         if files.is_empty()
             && let Some(app) = AppBody::offered(offer.clone(), &converted.recipe)
         {
-            return Ok((app, converted.steps, key, offer.topology.clone()));
+            return Ok((Outcome::Exact(app), converted.steps, key, offer.topology.clone()));
         }
         // An offer whose bytes cannot be read is passed over; the build is evaluated instead.
         if let Ok(built) = offer.built()
             && let Some(app) = AppBody::adopted(built, &converted.recipe)
         {
-            return Ok((app, converted.steps, key, offer.topology.clone()));
+            return Ok((Outcome::Exact(app), converted.steps, key, offer.topology.clone()));
         }
     }
     // Earlier bodies remain immutable for undo, branches and concurrent queries.
@@ -1061,7 +1136,22 @@ fn build(
             build_error(op, e)
         }
     })?;
-    Ok((app.into(), converted.steps, key, None))
+    // Catallax's application entry returns exact bodies only, for now. A numerical one
+    // is retained as Catallax built it, never turned into a refusal or an exact body.
+    let outcome = EvaluatedApplicationOutcome::Exact(app);
+    #[cfg(feature = "numerical-stand-in")]
+    let outcome = if stand_in.contains(&op) {
+        stand_in::numerical(outcome, &converted.recipe).map_err(|e| KernelError::Failed {
+            op,
+            code: 0,
+            message: format!("{}: {}", e.code, e.detail),
+        })?
+    } else {
+        outcome
+    };
+    #[cfg(not(feature = "numerical-stand-in"))]
+    let _ = stand_in;
+    Ok((outcome.into(), converted.steps, key, None))
 }
 
 /// [`catallax_app::build_incremental_without_display`] for a recipe that reads STEP
@@ -1341,7 +1431,17 @@ impl Kernel for CatallaxKernel {
         if self.field(body)?.is_some() {
             return Ok(BodyKind::Solid);
         }
+        if let Some(approximate) = self.approximate(body)? {
+            return Ok(approximate.kind());
+        }
         Ok(if self.solid(body)?.app.is_surface() { BodyKind::Sheet } else { BodyKind::Solid })
+    }
+
+    fn body_accuracy(&self, body: BodyId) -> KernelResult<BodyAccuracy> {
+        if self.field(body)?.is_some() {
+            return Ok(BodyAccuracy::Exact);
+        }
+        Ok(self.approximate(body)?.map_or(BodyAccuracy::Exact, |approximate| approximate.accuracy()))
     }
 
     fn exact_unread(&self, body: BodyId) -> KernelResult<bool> {
@@ -1428,7 +1528,13 @@ impl Kernel for CatallaxKernel {
             let body = BodyId::from_raw(state.id());
             state.bodies.insert(
                 body,
-                Stored { steps: BTreeMap::from([(seq, step)]), result, history: vec![record.clone()], solid: None },
+                Stored {
+                    steps: BTreeMap::from([(seq, step)]),
+                    result,
+                    history: vec![record.clone()],
+                    solid: None,
+                    approximate: None,
+                },
             );
             Ok(OpResult { body, record })
         })
@@ -1499,7 +1605,13 @@ impl Kernel for CatallaxKernel {
             let body = BodyId::from_raw(state.id());
             state.bodies.insert(
                 body,
-                Stored { steps: BTreeMap::from([(seq, step)]), result, history: vec![record.clone()], solid: None },
+                Stored {
+                    steps: BTreeMap::from([(seq, step)]),
+                    result,
+                    history: vec![record.clone()],
+                    solid: None,
+                    approximate: None,
+                },
             );
             Ok(OpResult { body, record })
         })
@@ -1651,7 +1763,11 @@ impl Kernel for CatallaxKernel {
             let step = json!({"op":"native","base":base,"native":native});
             let (state, evaluated) = self.evaluate(state, OpKind::Shell, &[body], &[], step)?;
             drop(state);
-            if is_empty(&evaluated.app) {
+            let empty = match &evaluated.app {
+                Outcome::Exact(app) => is_empty(app),
+                Outcome::Approximate(outcome) => outcome.body().definition().faces.is_empty(),
+            };
+            if empty {
                 Ok(())
             } else {
                 Err(KernelError::Failed {
@@ -1866,6 +1982,9 @@ impl Kernel for CatallaxKernel {
             if self.field(body)?.is_some() {
                 return Err(KernelError::Unsupported("field meshes require labelled certified export".into()));
             }
+            if let Some(approximate) = self.approximate(body)? {
+                return approximate.mesh(&options(params)?);
+            }
             let solid = self.solid(body)?;
             let options = options(params)?;
             let mesh = solid.display(&options, "tessellate")?;
@@ -1886,6 +2005,9 @@ impl Kernel for CatallaxKernel {
         self.observe("tessellate_edges", || {
             if self.field(body)?.is_some() {
                 return Ok(vec![]);
+            }
+            if let Some(approximate) = self.approximate(body)? {
+                return approximate.edges(&options(params)?);
             }
             let solid = self.solid(body)?;
             let mesh = solid.display(&options(params)?, "tessellate_edges")?;
@@ -1935,6 +2057,9 @@ impl Kernel for CatallaxKernel {
     }
 
     fn rendering(&self, body: BodyId, params: &TessellationParams) -> KernelResult<Mesh> {
+        if let Some(approximate) = self.approximate(body)? {
+            return self.observe("preview", || approximate.mesh(&options(params)?));
+        }
         if self.field(body)?.is_none() {
             let solid = self.solid(body)?;
             if solid.has_splines() {
@@ -1948,6 +2073,9 @@ impl Kernel for CatallaxKernel {
     fn rendering_edges(&self, body: BodyId, params: &TessellationParams) -> KernelResult<Vec<EdgePolyline>> {
         if self.field(body)?.is_some() {
             return self.preview_edges(body, params);
+        }
+        if let Some(approximate) = self.approximate(body)? {
+            return self.observe("preview_edges", || approximate.edges(&options(params)?));
         }
         let solid = self.solid(body)?;
         if solid.has_splines() {
@@ -1977,7 +2105,7 @@ impl Kernel for CatallaxKernel {
 
     fn display_bound(&self, body: BodyId) -> KernelResult<Option<DisplayBound>> {
         self.observe("display_bound", || {
-            if self.field(body)?.is_some() {
+            if self.field(body)?.is_some() || self.approximate(body)?.is_some() {
                 return Ok(None);
             }
             let solid = self.solid(body)?;
@@ -1992,6 +2120,9 @@ impl Kernel for CatallaxKernel {
         self.observe("preview", || {
             if let Some(field) = self.field(body)? {
                 return Ok(field.preview());
+            }
+            if let Some(approximate) = self.approximate(body)? {
+                return approximate.mesh(&options(params)?);
             }
             let solid = self.solid(body)?;
             let options = options(params)?;
@@ -2019,6 +2150,9 @@ impl Kernel for CatallaxKernel {
             if self.field(body)?.is_some() {
                 return Ok(vec![]);
             }
+            if let Some(approximate) = self.approximate(body)? {
+                return approximate.edges(&options(params)?);
+            }
             let solid = self.solid(body)?;
             let options = options(params)?;
             if let Some((_, edges)) = solid.handed_previews.get(&preview_key(&display_key(&options))) {
@@ -2036,6 +2170,9 @@ impl Kernel for CatallaxKernel {
         self.observe("mass_properties", || {
             if self.field(body)?.is_some() {
                 return Err(KernelError::Unsupported("a field's moments need an explicit field mass request".into()));
+            }
+            if let Some(approximate) = self.approximate(body)? {
+                return approximate.mass_properties();
             }
             let solid = self.solid(body)?;
             if solid.app.is_surface() {
@@ -2086,11 +2223,17 @@ impl Kernel for CatallaxKernel {
     }
 
     fn cached_mass_properties(&self, body: BodyId) -> Option<MassProperties> {
+        if let Some(approximate) = self.approximate(body).ok()? {
+            return approximate.cached_mass();
+        }
         self.solid(body).ok()?.mass.get()?.as_ref().ok().copied()
     }
 
     fn validate(&self, body: BodyId) -> KernelResult<Validation> {
         self.observe("validate", || {
+            if let Some(approximate) = self.approximate(body)? {
+                return Ok(approximate.validation());
+            }
             let solid = self.solid(body)?;
             let built = solid.app.checkpoint.built();
             let faults = built.model.check(built.result);
@@ -2107,6 +2250,9 @@ impl Kernel for CatallaxKernel {
         self.observe("topology", || {
             if let Some(field) = self.field(body)? {
                 return Ok(field.topology());
+            }
+            if let Some(approximate) = self.approximate(body)? {
+                return approximate.topology();
             }
             let solid = self.solid(body)?;
             // Logical topology uses the initial screen mesh, independent of later refinement requests.
@@ -2142,6 +2288,10 @@ impl Kernel for CatallaxKernel {
 
     fn measured_topology(&self, body: BodyId) -> KernelResult<Topology> {
         self.observe("measured_topology", || {
+            // An approximate body's measures are estimates on its display either way.
+            if let Some(approximate) = self.approximate(body)? {
+                return approximate.topology();
+            }
             let solid = self.solid(body)?;
             if let Some(value) = solid.measured.get() {
                 return value.clone();
@@ -2152,11 +2302,17 @@ impl Kernel for CatallaxKernel {
     }
 
     fn edge_length(&self, body: BodyId, edge: EdgeId) -> KernelResult<Measurement> {
-        self.observe("edge_length", || measure::edge_length(self, body, edge))
+        self.observe("edge_length", || match self.approximate(body)? {
+            Some(approximate) => approximate.edge_length(edge),
+            None => measure::edge_length(self, body, edge),
+        })
     }
 
     fn face_area(&self, body: BodyId, face: FaceId) -> KernelResult<Measurement> {
-        self.observe("face_area", || measure::face_area(self, body, face))
+        self.observe("face_area", || match self.approximate(body)? {
+            Some(approximate) => approximate.face_area(face),
+            None => measure::face_area(self, body, face),
+        })
     }
 
     fn edge_midpoint(&self, body: BodyId, edge: EdgeId) -> KernelResult<PointProof> {
@@ -2217,6 +2373,9 @@ impl Kernel for CatallaxKernel {
         let recipe: usize = stored.steps.values().map(|s| s.to_string().len()).sum();
         let history: usize = stored.history.iter().map(|r| 256 + r.face_roles.len() * 32).sum();
         let mut bytes = recipe + history;
+        if let Some(approximate) = &stored.approximate {
+            bytes += approximate.retained_bytes();
+        }
         if let Some(solid) = &stored.solid {
             let brep = match solid.app.unread_bytes() {
                 Some(unread) => unread,
@@ -2288,7 +2447,10 @@ impl Kernel for CatallaxKernel {
 
     fn export_step(&self, body: BodyId, options: &StepOptions) -> KernelResult<StepExport> {
         self.observe_export("export_step", || {
-            let write = || step::export(&self.solid(body)?.app, options);
+            let write = || match self.approximate(body)? {
+                Some(approximate) => approximate.export_step(options),
+                None => step::export(&self.solid(body)?.app, options),
+            };
             lattice::export_allowance("export_step", write).map(|(export, _)| export)
         })
     }
@@ -2386,8 +2548,11 @@ mod tests {
             let cut = kernel.boolean(&OpTag::new("cut"), BooleanOp::Subtract, base, tool).unwrap().body;
             let evidence = kernel.take_diagnostics().unwrap();
             let recipe = kernel.body_recipe(cut).unwrap();
-            let (replayed, steps, _, _) =
-                build(&recipe, OpKind::Subtract, None, &Default::default(), None, &Default::default()).unwrap();
+            let (Outcome::Exact(replayed), steps, _, _) =
+                build(&recipe, OpKind::Subtract, None, &Default::default(), None, &Default::default(), &[]).unwrap()
+            else {
+                panic!("an exact cut")
+            };
             let operations = evidence["calls"][0]["operation_log"]["operations"].as_array().unwrap();
             let result = steps[recipe["result"].as_str().unwrap()].as_str();
             assert!(operations.iter().any(|op| op["id"] == result), "{evidence}");
@@ -2435,8 +2600,11 @@ mod tests {
                 assert!(!operations.iter().any(|op| &op["id"] == id), "rebuilt read-only target {id}: {evidence}");
             }
             let recipe = kernel.body_recipe(swept.body).unwrap();
-            let (fresh, _, _, _) =
-                build(&recipe, OpKind::ExtrudeTo, None, &Default::default(), None, &Default::default()).unwrap();
+            let (Outcome::Exact(fresh), _, _, _) =
+                build(&recipe, OpKind::ExtrudeTo, None, &Default::default(), None, &Default::default(), &[]).unwrap()
+            else {
+                panic!("an exact sweep")
+            };
             assert_eq!(kernel.solid(swept.body).unwrap().app.names, fresh.names);
             assert_eq!(
                 kernel.export_step(swept.body, &StepOptions::default()).unwrap(),

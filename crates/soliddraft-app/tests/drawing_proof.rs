@@ -29,6 +29,24 @@ fn previews(drawing: &Drawing) -> Vec<bool> {
     drawing.sheets.iter().flat_map(|s| &s.views).map(|v| v.geometry.unproved).collect()
 }
 
+/// How many of a drawing's views say they were drawn from a certified mesh.
+fn proved_views(drawing: &Drawing) -> usize {
+    previews(drawing).into_iter().filter(|preview| !preview).count()
+}
+
+/// How many certified meshes the drawing's view projections asked the kernel for, in the
+/// calls `kernel` logged since it was last asked. A view may say it is certified only
+/// when its projection read one: a preview must never be labelled as proved.
+fn certified_view_meshes(kernel: &soliddraft_kernel_catallax::CatallaxKernel) -> usize {
+    let calls = kernel.take_diagnostics().unwrap();
+    calls["calls"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|c| c["operation"] == "tessellate" && c["log_scope"] == "view_curves")
+        .count()
+}
+
 #[test]
 fn an_exported_drawing_never_comes_from_a_preview() {
     let dir = std::env::temp_dir().join(format!("soliddraft-drawing-proof-{}", std::process::id()));
@@ -184,16 +202,22 @@ fn a_certified_coarse_rod_cut_is_redrawn_at_fine_quality_for_export() {
         }
         call(&mut state, tool, step["arguments"].clone());
     }
+    kernel.take_diagnostics().unwrap();
     call(&mut state, "make_drawing", json!({ "template": "iso-a3" }));
     let shown = state.drawing.session.as_ref().unwrap().doc.drawing.clone();
     let views = shown.sheets[0].views.len();
     assert_eq!(views, 4);
-    // Catallax refuses this body's preview, so the screen uses a proved coarse mesh.
-    assert!(shown.sheets[0].views.iter().all(|v| !v.geometry.unproved && v.geometry.coarse));
+    // The screen draws at coarse quality from whatever Catallax gives it: since Catallax
+    // 9566aa24 the unproved preview of this body, which earlier pins refused, so the screen
+    // borrowed the certified mesh instead. Whichever it is, a view says it is proved only
+    // when its projection read a certified mesh.
+    assert!(shown.sheets[0].views.iter().all(|v| v.geometry.coarse));
+    assert_eq!(certified_view_meshes(&kernel), proved_views(&shown), "{:?}", previews(&shown));
 
     let part = PartContext::new(&state.doc).unwrap();
     let mut fine = shown.clone();
     apply_with(&mut fine, &Command::UpdateFromModel, &part.certified_part()).unwrap();
+    assert_eq!(certified_view_meshes(&kernel), views, "each fine view read a certified mesh");
     assert!(fine.sheets[0].views.iter().all(|v| !v.geometry.unproved && !v.geometry.coarse));
     let fine_svg = export::bytes(&layout_sheet(&fine, 0), Format::Svg, &fine.meta.title).unwrap();
 
@@ -229,6 +253,7 @@ fn a_certified_coarse_rod_cut_is_redrawn_at_fine_quality_for_export() {
 
 #[test]
 fn a_saved_rod_cache_without_quality_is_regenerated_after_reopening() {
+    const SENTINEL_BOX: [f64; 4] = [-12345.5, -12345.5, 12345.5, 12345.5];
     use soliddraft_app::document::Document;
     use soliddraft_document::manifest::{self, Entry, Package};
     use soliddraft_kernel_catallax::CatallaxKernel;
@@ -249,6 +274,7 @@ fn a_saved_rod_cache_without_quality_is_regenerated_after_reopening() {
     call(&mut state, "make_drawing", json!({ "template": "iso-a3" }));
     let path = dir.join("old.dwdrw");
     call(&mut state, "drawing_save", json!({ "path": path }));
+    let saved = previews(&state.drawing.session.as_ref().unwrap().doc.drawing);
 
     // Generate the cache format written before quality was stored separately from proof.
     let bytes = std::fs::read(&path).unwrap();
@@ -259,6 +285,8 @@ fn a_saved_rod_cache_without_quality_is_regenerated_after_reopening() {
         if name.starts_with("cache/views/") {
             let mut geometry: Value = serde_json::from_slice(&bytes).unwrap();
             assert_eq!(geometry.as_object_mut().unwrap().remove("coarse"), Some(json!(true)));
+            // A sentinel no projection makes: a view still carrying it was not drawn again.
+            geometry["bbox"] = json!(SENTINEL_BOX);
             bytes = serde_json::to_vec(&geometry).unwrap();
         }
         entries.push(Entry::new(name, bytes));
@@ -271,10 +299,24 @@ fn a_saved_rod_cache_without_quality_is_regenerated_after_reopening() {
     call(&mut reopened, "open", json!({ "path": path }));
     let shown = reopened.drawing.session.as_ref().unwrap().doc.drawing.clone();
     assert_eq!(shown.sheets[0].views.len(), 4);
-    assert!(shown.sheets[0].views.iter().all(|v| !v.geometry.unproved));
+    // Opening shows the cached views as they were saved, sentinel and labels included: it
+    // draws nothing and claims no proof the cache did not record. A cache of unknown
+    // quality is drawn again only when certified line work is asked for, below.
+    assert!(shown.sheets[0].views.iter().all(|v| v.geometry.bbox == SENTINEL_BOX));
+    assert_eq!(previews(&shown), saved);
+    assert_eq!(certified_view_meshes(&kernel), 0, "opening read no certified mesh");
     assert_eq!(shown.model.pinned, PartContext::new(&reopened.doc).unwrap().digest);
     soliddraft_app::drawing::follow_part(&mut reopened);
     assert_eq!(reopened.drawing.session.as_ref().unwrap().doc.drawing, shown);
+
+    // The certified path, asked for explicitly: a fine redraw reads one certified mesh
+    // per view and every view says it is proved.
+    let part = PartContext::new(&reopened.doc).unwrap();
+    let mut fine = shown.clone();
+    apply_with(&mut fine, &Command::UpdateFromModel, &part.certified_part()).unwrap();
+    assert_eq!(certified_view_meshes(&kernel), 4, "each fine view read a certified mesh");
+    assert!(fine.sheets[0].views.iter().all(|v| !v.geometry.unproved && !v.geometry.coarse));
+    assert!(fine.sheets[0].views.iter().all(|v| v.geometry.bbox != SENTINEL_BOX), "every view was drawn again");
 
     let mut exported = Vec::new();
     for (tool, extension) in

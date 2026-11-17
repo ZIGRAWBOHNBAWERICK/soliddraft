@@ -81,10 +81,14 @@ fn check_fillet_display(source: &str, rail: soliddraft_kernel_api::Vec3, bounded
     });
     eprintln!("F04 display: {work:?}; {}", out.content);
     if !bounded {
+        // The refusal class and what it reports are fixed; the work spent before the
+        // allowance runs out is wherever Catallax's last charges stop, which moves with
+        // the kernel. The message must name the work that was actually measured.
         assert!(out.is_error && work.exhausted, "{}; {work:?}", out.content);
-        assert_eq!(work.used, 19_999_998);
+        assert!(work.used <= work.limit && work.limit == APP_WORK_TARGET, "{work:?}");
         assert_eq!(state.doc.display_failure(), Some(out.content.as_str()));
-        for expected in ["SD-DISPLAY-01", "0.01 mm", "19999998 work units", "20000000"] {
+        let measured = format!("{} work units", work.used);
+        for expected in ["SD-DISPLAY-01", "0.01 mm", measured.as_str(), "20000000"] {
             assert!(out.content.contains(expected), "missing {expected}: {}", out.content);
         }
         for forbidden in ["kernel", "step op_", "mesh.spline", "numbers.operation"] {

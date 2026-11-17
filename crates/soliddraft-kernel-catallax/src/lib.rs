@@ -32,7 +32,7 @@ mod sweep;
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 
-use catallax_app::{Error, EvaluatedApplicationBody, EvaluatedApplicationOutcome, NumericalApplicationBody};
+use catallax_app::{Error, EvaluatedApplicationOutcome, NumericalApplicationBody};
 
 mod evaluated;
 mod handover;
@@ -48,7 +48,7 @@ use soliddraft_kernel_api::*;
 pub use diagnostics::{APP_REQUEST_WORK, APP_WORK_TARGET, RequestWork, with_request_allowance};
 
 /// The pinned Catallax application entry revision.
-pub const CATALLAX_REVISION: &str = "9566aa24011d9ba3dde38d717f66be6be97c5015";
+pub const CATALLAX_REVISION: &str = "23b51f266f5f22b22fcc18151695e40091bd918b";
 
 /// An in-process Catallax backend. There is no global kernel state or kernel thread.
 #[derive(Default)]
@@ -1120,11 +1120,15 @@ fn build(
     // Clone only the selected checkpoint, after releasing the body arena lock.
     // A handed-over body has no continuation; its prefix is rebuilt from the recipe.
     let prefix = prefix.and_then(|app| app.checkpoint.continuation());
-    let app = if files.is_empty() {
-        catallax_app::build_incremental_without_display(&converted.recipe, prefix, &mut Decider::default())
-    } else {
-        build_with_files(&converted.recipe, prefix, files)
-    }
+    // Catallax tries the exact construction first and returns a numerical body, built
+    // within its stated tolerance, where only that construction succeeds. Either is kept
+    // as Catallax built it, never turned into a refusal or the other kind.
+    let outcome = catallax_app::build_incremental_with_files_without_display(
+        &converted.recipe,
+        prefix,
+        files,
+        &mut Decider::default(),
+    )
     .map_err(|e| {
         let spline = input["steps"].as_array()
             .and_then(|steps| steps.iter().find(|step| step["id"] == input["result"]))
@@ -1136,9 +1140,6 @@ fn build(
             build_error(op, e)
         }
     })?;
-    // Catallax's application entry returns exact bodies only, for now. A numerical one
-    // is retained as Catallax built it, never turned into a refusal or an exact body.
-    let outcome = EvaluatedApplicationOutcome::Exact(app);
     #[cfg(feature = "numerical-stand-in")]
     let outcome = if stand_in.contains(&op) {
         stand_in::numerical(outcome, &converted.recipe).map_err(|e| KernelError::Failed {
@@ -1152,37 +1153,6 @@ fn build(
     #[cfg(not(feature = "numerical-stand-in"))]
     let _ = stand_in;
     Ok((outcome.into(), converted.steps, key, None))
-}
-
-/// [`catallax_app::build_incremental_without_display`] for a recipe that reads STEP
-/// sources: the same default allowance, result check and picking names.
-fn build_with_files(
-    recipe: &catallax_recipe::Recipe,
-    prefix: Option<catallax_features::EvaluationCheckpoint>,
-    files: &catallax_features::ImportFiles<'_>,
-) -> Result<EvaluatedApplicationBody, Error> {
-    let run = || {
-        let checkpoint =
-            catallax_features::evaluate_incremental_with_files(recipe, prefix, files, &mut Decider::default())
-                .map_err(Error::Build)?;
-        let built = checkpoint.built();
-        let (model, body) = (&built.model, built.result);
-        let faults = model.check(body);
-        if !faults.is_empty() {
-            return Err(Error::InvalidBody(faults));
-        }
-        let names = catallax_app::Names {
-            faces: model.faces_of_body(body).into_iter().map(|f| (f, model.face_origins(f).to_vec())).collect(),
-            edges: model.edges_of_body(body).into_iter().map(|e| (e, model.edge_name(body, e))).collect(),
-            vertices: model.vertices_of_body(body).into_iter().map(|v| (v, model.vertex_name(body, v))).collect(),
-        };
-        Ok(EvaluatedApplicationBody { checkpoint, names })
-    };
-    if catallax_numbers::operation_budget_active() {
-        return run();
-    }
-    let (result, work) = catallax_numbers::with_operation_budget(catallax_app::DEFAULT_BUILD_WORK, run);
-    if work.exhausted { Err(Error::ResourceLimit) } else { result }
 }
 
 fn loft_fillet_refusal(error: &Error) -> Option<&'static str> {

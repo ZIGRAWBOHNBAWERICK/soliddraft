@@ -60,6 +60,9 @@ struct Row {
     message: String,
     /// What the `fillet` tool answered.
     tool: String,
+    /// The Catallax recipe of the last build the fillet asked for, so the kernel lanes
+    /// can run the same case. Kept only for a refused fillet.
+    recipe: Option<Value>,
     accuracy: String,
     faces: usize,
     work: Option<u64>,
@@ -164,6 +167,7 @@ impl Part {
             kernel: kernel.clone(),
             message: String::new(),
             tool: out.content.clone(),
+            recipe: None,
             accuracy: String::new(),
             faces: 0,
             work,
@@ -189,6 +193,7 @@ impl Part {
             } else {
                 row.result = "refused";
                 row.stage = stage(&kernel);
+                row.recipe = calls["questions"].as_array().and_then(|q| q.last()).map(|q| q["problem"].clone());
             }
             assert_eq!(self.doc().model().part_json(), before, "{case}: a refused fillet changed the part");
             return row;
@@ -220,9 +225,16 @@ impl Part {
 /// Writes the rows where the triage reads them, then fails on any row that did not pass.
 fn report(case: &str, rows: &[Row], must_pass: impl Fn(&Row) -> bool) {
     let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("fillet-acceptance");
-    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::create_dir_all(dir.join("recipes")).unwrap();
     let table: Vec<Value> = rows.iter().map(Row::json).collect();
     std::fs::write(dir.join(format!("{case}.json")), serde_json::to_vec_pretty(&table).unwrap()).unwrap();
+    // One recipe per refused case, outside the table: the triage reads only the rows.
+    if let [row] = rows
+        && let Some(recipe) = &row.recipe
+    {
+        std::fs::write(dir.join("recipes").join(format!("{case}.json")), serde_json::to_vec_pretty(recipe).unwrap())
+            .unwrap();
+    }
     for row in rows {
         eprintln!(
             "{} R{} {} [{}] {} {:.1}s {}",

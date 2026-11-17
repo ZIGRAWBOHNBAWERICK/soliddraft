@@ -21,10 +21,16 @@ pub fn for_user(message: &str) -> String {
     // When the exact construction and the general one both refused, the general one's
     // reason is the one that holds: the exact one may only lack a construction.
     if let Some((_, general)) = message.split_once(NUMERICAL_REFUSED) {
-        return plain_message(general).to_owned();
+        let plain = plain_message(general);
+        // A reason these words do not cover yet still never shows its code.
+        return if plain == general { GENERIC_FILLET.into() } else { plain.into() };
     }
     plain_message(message).to_owned()
 }
+
+/// A fillet refused for a reason with no plainer words of its own.
+const GENERIC_FILLET: &str =
+    "This fillet cannot be made on the selected edges. Reduce the radius or select different edges.";
 
 /// What a refusal says before the general fillet construction's own reason.
 const NUMERICAL_REFUSED: &str = "numerical continuation refused ";
@@ -62,6 +68,8 @@ fn plain_message(message: &str) -> &str {
         "Rounding these edges together is not supported yet. Select different edges."
     } else if message.contains("fillet.numerical-contact") {
         "The fillet cannot roll along this edge at this radius. Try a different radius or select different edges."
+    } else if message.contains("shapes.rational-atlas") || message.contains("fillet.fitting") {
+        "The fillet surface could not be fitted along these edges. Try a different radius or select different edges."
     } else if message.contains("features.numerical-") || message.contains("fillet.numerical-") {
         "This fillet cannot be made on the selected edges. Reduce the radius or select different edges."
     } else if message.contains("recipe.ambiguous-reference") {
@@ -252,6 +260,19 @@ mod tests {
                     neighbour intersects the blend carrier; numerical continuation refused \
                     features.numerical-fillet-network: the retained spline assembly needs one outer-boundary edge";
         assert_eq!(for_user(both), "Rounding these edges together is not supported yet. Select different edges.");
+        let atlas = "fillet failed in the kernel (status 0): shapes.rational-atlas-unproven: step op_96: \
+                     shapes.rational-atlas-unproven: exact path refused fillet.unsupported-topology: a curved \
+                     intersection fillet needs one closed ring; numerical continuation refused \
+                     shapes.rational-atlas-unproven: the complete regular chart cover could not be proved";
+        assert_eq!(
+            for_user(atlas),
+            "The fillet surface could not be fitted along these edges. Try a different radius or select different \
+             edges."
+        );
+        // A general reason these words do not know yet still shows no code.
+        let unknown = "fillet failed in the kernel (status 0): exact path refused fillet.unsupported-topology: x; \
+                       numerical continuation refused vertex.new-reason: y";
+        assert_eq!(for_user(unknown), super::GENERIC_FILLET);
         for code in ["features.numerical-fillet-source", "fillet.numerical-body", "features.numerical-fillet-name"] {
             let shown = for_user(&format!("fillet failed in the kernel (status 0): {code}: detail"));
             assert_eq!(

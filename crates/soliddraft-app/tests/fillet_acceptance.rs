@@ -297,8 +297,9 @@ fn owner_pocket_rim_at_r5_names_the_face_it_reaches_and_the_radius_that_fits() {
     let message = row.message.clone();
     let limit =
         message.split("under ").nth(1).and_then(|rest| rest.split(" mm").next()).and_then(|n| n.parse::<f64>().ok());
-    let plain =
-        !["fillet.", "features.", "intersect.", "numbers.", "Catallax"].iter().any(|code| message.contains(code));
+    let plain = !["fillet.", "features.", "intersect.", "numbers.", "shapes.", "Catallax"]
+        .iter()
+        .any(|code| message.contains(code));
     let names_face = message.contains("Boss-Extrude1 ·");
     if row.result == "refused" && !(plain && names_face && limit.is_some_and(|l| (3.9..=OWNER_CONTACT).contains(&l))) {
         row.result = "unclear";

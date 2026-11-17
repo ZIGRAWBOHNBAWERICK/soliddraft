@@ -541,7 +541,12 @@ fn ranked_edges(fp: &EdgeFingerprint, edges: impl Iterator<Item = EdgeId>, view:
 /// The one edge a reference names: the edge between a face carrying the first name's
 /// origin and a face carrying the second's. Faces may have been split or merged, as long
 /// as one edge remains, or one edge and both support faces retain their fingerprints.
-pub(crate) fn resolve_edge(r: &EdgeRef, view: &View, names: &NameMap) -> Result<EdgeId, Unresolved> {
+/// The faces each side of `r` can be, and the edges that lie between them.
+fn edges_between<'a>(
+    r: &EdgeRef,
+    view: &View<'a>,
+    names: &NameMap,
+) -> Result<(Vec<Vec<FaceId>>, Vec<&'a EdgeInfo>), Unresolved> {
     let all_edges = || view.topology.edges.iter().map(|e| e.id);
     let sides = [face_set(&r.faces[0], view, names), face_set(&r.faces[1], view, names)];
     let mut sets = Vec::new();
@@ -572,6 +577,12 @@ pub(crate) fn resolve_edge(r: &EdgeRef, view: &View, names: &NameMap) -> Result<
         _ => false,
     };
     let found: Vec<&EdgeInfo> = view.topology.edges.iter().filter(between).collect();
+    Ok((sets, found))
+}
+
+pub(crate) fn resolve_edge(r: &EdgeRef, view: &View, names: &NameMap) -> Result<EdgeId, Unresolved> {
+    let all_edges = || view.topology.edges.iter().map(|e| e.id);
+    let (sets, found) = edges_between(r, view, names)?;
     let label = format!(
         "{} of {} and {} of {}",
         r.faces[0].generator, r.faces[0].feature, r.faces[1].generator, r.faces[1].feature
@@ -641,26 +652,25 @@ fn resolve_piece(
     names: &NameMap,
 ) -> Result<EdgeId, Unresolved> {
     let ranked = |edges: &[&EdgeInfo]| ranked_edges(&r.fingerprint, edges.iter().map(|edge| edge.id), view);
-    let mut left: Vec<&EdgeInfo> = candidates.to_vec();
-    if !piece.ends.is_empty() {
-        let sets = piece.ends.iter().map(|face| face_set(face, view, names)).collect::<Result<Vec<_>, _>>()?;
-        left.retain(|edge| {
-            let at = end_faces(edge, view);
-            sets.iter().all(|set| set.iter().any(|face| at.contains(face)))
+    let mut left = narrow_by_ends(&piece.ends, candidates.to_vec(), view, names)?;
+    if left.is_empty() {
+        return Err(Unresolved {
+            reason: RepairReason::Missing,
+            message: format!("no edge between the {label} ends at the faces it ended at"),
+            candidates: ranked(candidates),
         });
-        if left.is_empty() {
-            return Err(Unresolved {
-                reason: RepairReason::Missing,
-                message: format!("no edge between the {label} ends at the faces it ended at"),
-                candidates: ranked(candidates),
-            });
-        }
     }
     if let Some(place) = piece.along {
-        if let Some(among) = piece.among
-            && left.len() != among as usize
-        {
-            let detail = format!("{} pieces lie between the {label} where there were {among}", left.len());
+        // A place names a piece only among the same pieces it was counted among. It is
+        // never evidence on its own: one remaining edge, or a different count, means the
+        // split that made the piece changed, and the reference needs repair.
+        let among = piece.among.unwrap_or(0) as usize;
+        if left.len() < 2 || left.len() != among {
+            let detail = if left.len() < 2 {
+                format!("one edge is left between the {label} where the piece was one of {among}")
+            } else {
+                format!("{} pieces lie between the {label} where there were {among}", left.len())
+            };
             return Err(Unresolved {
                 reason: RepairReason::Mismatch { detail: detail.clone() },
                 message: detail,
@@ -697,6 +707,26 @@ fn resolve_piece(
             candidates: ranked(&left),
         }),
     }
+}
+
+/// The edges among `candidates` that end against every one of `ends`.
+fn narrow_by_ends<'a>(
+    ends: &[FaceRef],
+    candidates: Vec<&'a EdgeInfo>,
+    view: &View,
+    names: &NameMap,
+) -> Result<Vec<&'a EdgeInfo>, Unresolved> {
+    if ends.is_empty() {
+        return Ok(candidates);
+    }
+    let sets = ends.iter().map(|face| face_set(face, view, names)).collect::<Result<Vec<_>, _>>()?;
+    Ok(candidates
+        .into_iter()
+        .filter(|edge| {
+            let at = end_faces(edge, view);
+            sets.iter().all(|set| set.iter().any(|face| at.contains(face)))
+        })
+        .collect())
 }
 
 /// The faces other than an edge's own that meet at its end vertices, in vertex order.
@@ -845,25 +875,21 @@ pub(crate) fn name_edge(edge: EdgeId, view: &View, names: &NameMap) -> Result<Ed
         }
         r.piece = Some(Box::new(EdgePiece { ends, along: None, among: None }));
         resolved = resolve_edge(&r, view, names);
-        if matches!(&resolved, Err(Unresolved { reason: RepairReason::Ambiguous, .. })) {
-            // Every place that resolves is one piece; this edge is one of them.
-            let mut places = Vec::new();
-            for along in 0..view.topology.edges.len() as u32 {
-                if let Some(piece) = r.piece.as_mut() {
-                    piece.along = Some(along);
-                }
-                match resolve_edge(&r, view, names) {
-                    Ok(found) => places.push((along, found)),
-                    Err(_) => break,
-                }
+        let r_faces = EdgeRef { piece: None, ..r.clone() };
+        if matches!(&resolved, Err(Unresolved { reason: RepairReason::Ambiguous, .. }))
+            && let Some(piece) = r.piece.as_mut()
+        {
+            // The end faces leave several pieces: name this one by its place among them.
+            let (_, between) = edges_between(&r_faces, view, names)
+                .map_err(|u| NamingError::NotUnique(edge.to_string(), u.message))?;
+            let mut left = narrow_by_ends(&piece.ends, between, view, names)
+                .map_err(|u| NamingError::NotUnique(edge.to_string(), u.message))?;
+            order_along(&mut left);
+            if let Some(place) = left.iter().position(|e| e.id == edge) {
+                piece.along = Some(place as u32);
+                piece.among = Some(left.len() as u32);
             }
-            if let (Some(piece), Some(&(along, _))) =
-                (r.piece.as_mut(), places.iter().find(|(_, found)| *found == edge))
-            {
-                piece.along = Some(along);
-                piece.among = Some(places.len() as u32);
-                resolved = resolve_edge(&r, view, names);
-            }
+            resolved = resolve_edge(&r, view, names);
         }
     }
     match resolved {

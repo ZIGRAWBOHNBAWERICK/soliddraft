@@ -107,3 +107,33 @@ fn a_piece_reference_needs_repair_when_its_split_is_gone() {
         assert!(found.is_err(), "{} rebound to {:?}", piece.label, found);
     }
 }
+
+/// A piece known only by its place along the shared curve is never matched to the one
+/// edge left when the split is gone, and a place without its saved count never matches.
+#[test]
+fn a_place_alone_never_binds_the_only_remaining_edge() {
+    let mut doc = bracket();
+    let body = doc.model().body().unwrap();
+    let topology = doc.model().kernel().topology(body).unwrap();
+    let (edge, named) = topology
+        .edges
+        .iter()
+        .find_map(|e| doc.model().edge_ref(e.id).ok().filter(|r| r.piece.is_some()).map(|r| (e.id, r)))
+        .unwrap();
+    // The same piece by its place alone: the place among the three that finds it.
+    let at = |along: u32, among: Option<u32>| {
+        let mut r = named.clone();
+        r.piece = Some(Box::new(soliddraft_model::EdgePiece { ends: Vec::new(), along: Some(along), among }));
+        r
+    };
+    let place = (0..3).find(|k| doc.model().resolve_edge(&at(*k, Some(3)), body).ok() == Some(edge)).unwrap();
+    assert!(doc.model().resolve_edge(&at(place, None), body).is_err(), "a place without its count matched");
+
+    let holes = doc.features.iter().find(|f| f.name == "Hole1").unwrap().id;
+    doc.apply(Command::Suppress { id: holes, suppressed: true }).unwrap();
+    let whole = doc.model().body().unwrap();
+    for along in 0..3 {
+        let found = doc.model().resolve_edge(&at(along, Some(3)), whole);
+        assert!(found.is_err(), "place {along} of 3 bound the one remaining edge: {found:?}");
+    }
+}

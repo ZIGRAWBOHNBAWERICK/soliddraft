@@ -4472,14 +4472,24 @@ impl Document {
         self.model.edge_ref(edge).ok()
     }
 
-    /// Persistent references to every edge on a face's boundary, so a picked face can
-    /// stand for its edges in a fillet or chamfer. None unless every edge has a name.
+    /// Persistent references to the edges on a face's boundary, so a picked face can
+    /// stand for its edges in a fillet or chamfer. Smooth edges, where the face meets its
+    /// neighbour tangentially, are left out, as SolidWorks leaves them out of a face
+    /// pick. None unless every edge kept has a name.
     pub fn face_edge_refs(&self, face: FaceId) -> Option<Vec<EdgeRef>> {
         if !self.current_exact_display() {
             return None;
         }
-        let topology = self.kernel().topology(self.display_body()?).ok()?;
-        topology.face(face)?.edges.iter().map(|&e| self.model.edge_ref(e).ok()).collect()
+        let body = self.display_body()?;
+        let kernel = self.kernel().as_ref();
+        let topology = kernel.topology(body).ok()?;
+        topology
+            .face(face)?
+            .edges
+            .iter()
+            .filter(|&&e| !crate::fillet_collect::smooth(kernel, body, &topology, e))
+            .map(|&e| self.model.edge_ref(e).ok())
+            .collect()
     }
 
     /// A persistent reference to a planar face of the part, for sketching on it. A piece

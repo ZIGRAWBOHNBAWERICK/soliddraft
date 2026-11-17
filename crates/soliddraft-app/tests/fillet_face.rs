@@ -201,6 +201,30 @@ fn slot_document() -> Document {
     doc
 }
 
+/// The box with a 10 mm hole through it, 1 mm in from the front wall. Catallax cannot
+/// yet trim a fillet of the hole's rim against the hole wall.
+fn holed_box_document() -> Document {
+    let mut doc = Document::new("Holed box", soliddraft_app::kernel());
+    doc.apply(Command::AddExtrude {
+        params: ExtrudeParams {
+            profile: ProfileKind::Rectangle { width: 60.0, height: 40.0 },
+            depth: 20.0,
+            ..Default::default()
+        },
+        via_assistant: false,
+    })
+    .unwrap();
+    let sketch = doc
+        .apply(Command::AddSketch { plane: SketchPlane::Reference { plane: PlaneKind::Top, offset: 20.0 } })
+        .unwrap()
+        .unwrap();
+    let mut drawing = soliddraft_sketch::Sketch::new();
+    drawing.circle_at(P2::new(0.0, -14.0), 10.0).unwrap();
+    doc.apply(Command::EditSketch { id: sketch, sketch: drawing }).unwrap();
+    doc.apply(Command::AddCut { params: soliddraft_app::document::CutParams::new(sketch) }).unwrap();
+    doc
+}
+
 /// The midpoint of a straight top edge of the slot.
 fn straight_top_edge(doc: &Document) -> glam::Vec3 {
     doc.edges
@@ -646,6 +670,69 @@ fn fillet_edge_on_the_slot_rounds_the_straight_top_edge() {
     assert_rounded_slot_on_screen(&mut app, before);
 }
 
+/// A face pick takes the face's sharp edges and leaves out its smooth ones, as SolidWorks
+/// does. The slot's straight wall meets each round end tangentially along a vertical
+/// line, where there is no corner to round, so the pick takes only the wall's top and
+/// bottom edges.
+#[test]
+fn a_slot_wall_pick_leaves_out_its_tangent_edges() {
+    let _gpu = gpu();
+    let mut app = harness(slot_document());
+    click_world(&mut app, glam::Vec3::new(0.0, -5.0, 5.0));
+    let sharp = {
+        let state = &app.state().state;
+        let Some(Selection::Face(face)) = state.doc.selection else {
+            panic!("the slot's straight wall is picked, not {:?}", state.doc.selection);
+        };
+        let boundary = face_boundary(&state.doc, face);
+        let topology = state.doc.kernel().topology(state.doc.display_body().unwrap()).unwrap();
+        let level = |e: &EdgeId| {
+            let bbox = topology.edge(*e).expect("a boundary edge").bbox;
+            (bbox.max.z - bbox.min.z).abs() < 1e-9
+        };
+        assert_eq!(boundary.len(), 4, "the wall has a top, a bottom and two tangent lines: {boundary:?}");
+        let sharp: Vec<EdgeId> = boundary.into_iter().filter(level).collect();
+        assert_eq!(sharp.len(), 2, "the wall's top and bottom edges");
+        sharp
+    };
+
+    button(&mut app, "Fillet");
+    let state = &app.state().state;
+    let editor = state.editor.as_ref().expect("Fillet opens on the wall pick");
+    let mut shown = panel_edges(&state.doc, editor.edges());
+    shown.sort();
+    assert_eq!(shown, sharp, "the wall pick takes its top and bottom edges, not the lines tangent to the round ends");
+    assert_eq!(editor.feedback.pick, None);
+}
+
+/// A fillet the kernel cannot trim against the faces around it says so in the panel,
+/// instead of the text every other kernel failure gets. The diagnostic behind it is an
+/// `intersect.` refusal from inside the fillet.
+#[test]
+fn a_fillet_the_kernel_cannot_trim_says_so_in_the_panel() {
+    let _gpu = gpu();
+    let mut app = harness(holed_box_document());
+    click_world(&mut app, glam::Vec3::new(-5.0, -14.0, 20.0));
+    assert!(
+        matches!(app.state().state.doc.selection, Some(Selection::Edge(_))),
+        "the hole's rim is picked, not {:?}",
+        app.state().state.doc.selection
+    );
+    button(&mut app, "Fillet");
+    type_field(&mut app, "Radius value", "2");
+    app.run_steps(30);
+    let diagnostic = {
+        let editor = app.state().state.editor.as_ref().expect("Fillet opens on the rim pick");
+        editor.error.clone().expect("the panel shows the refusal")
+    };
+    assert!(diagnostic.contains("intersect."), "an intersection refusal inside the fillet: {diagnostic}");
+    let shown = "The fillet could not be trimmed where it meets the faces around it. Try a different radius or \
+                 select different edges.";
+    assert!(app.query_all_by_label(shown).next().is_some(), "the panel names the trim: {diagnostic}");
+    assert!(app.query_all_by_label("This operation is unavailable for the selected shape.").next().is_none());
+    app.render().unwrap().save(proof_folder().join("fillet-trim-refusal.png")).unwrap();
+}
+
 // ---------------------------------------------------------------------------
 // (2) and (3) A kernel refusal: the typed reason, and a part that stays usable.
 
@@ -829,7 +916,8 @@ fn output_refusals_are_plain_in_the_window() {
         ),
         (
             "fillet failed in the kernel: intersect.unsupported-pair: surface pair is outside piece 4 coverage",
-            "This operation is unavailable for the selected shape.",
+            "The fillet could not be trimmed where it meets the faces around it. Try a different radius or select \
+             different edges.",
             "construction-refusal",
         ),
     ] {

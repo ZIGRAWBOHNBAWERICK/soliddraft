@@ -23,7 +23,7 @@ fn plain_message(message: &str) -> &str {
     } else if message.contains("fillet.contact-off-face") {
         "The fillet would leave the selected faces. Reduce the radius or choose different edges."
     } else if message.contains("fillet.unsupported-overflow") {
-        "This fillet reaches another face. Reduce the radius or round fewer edges."
+        overflow(message)
     } else if message.contains("fillet.unsupported-contact") {
         "This edge and radius cannot be rounded together. Try a smaller radius or a different edge."
     } else if message.contains("fillet.unsupported-topology") {
@@ -48,6 +48,10 @@ fn plain_message(message: &str) -> &str {
         || (message.contains("export_step") && message.contains("unsupported"))
     {
         "Coming soon"
+    } else if message.contains("fillet failed") && message.contains("intersect.") {
+        // The kernel could not cut the rounded face where it meets the faces around it.
+        "The fillet could not be trimmed where it meets the faces around it. Try a different radius or select \
+         different edges."
     } else if message.contains("fillet.") {
         "This fillet cannot be made on the selected edges. Reduce the radius or select different edges."
     } else if message.contains("numbers.operation-budget") {
@@ -62,6 +66,32 @@ fn plain_message(message: &str) -> &str {
         "This operation is unavailable for the selected shape."
     } else {
         message
+    }
+}
+
+/// `fillet.unsupported-overflow` names several refusals, and only some of them find the
+/// fillet on another face. Others find rounds of the same feature running into each
+/// other, a face the kernel cannot prove clear, or a contact that runs off its own face
+/// or edge, so the explanation follows the reason given.
+fn overflow(message: &str) -> &'static str {
+    let says = |phrases: &[&str]| phrases.iter().any(|p| message.contains(p));
+    if says(&[
+        "blend carriers meet",
+        "two strips",
+        "two blend bands",
+        "another blend",
+        "junction affected regions",
+        "meets another corner",
+        "consume a strip",
+    ]) {
+        "The rounded edges run into each other. Reduce the radius or round fewer edges."
+    } else if says(&["reaches a neighbouring face", "intersects the blend carrier", "meets the corner's support"]) {
+        "This fillet reaches another face. Reduce the radius or round fewer edges."
+    } else if says(&["not proved clear", "reaches the hull", "trimmed against"]) {
+        "This fillet may run into another face. Reduce the radius or round fewer edges."
+    } else {
+        "This fillet would have to continue past the faces beside its edge, which is not supported yet. Reduce the \
+         radius or select different edges."
     }
 }
 
@@ -146,6 +176,77 @@ mod tests {
             for_user("export_step failed: numbers.operation-budget: operation work allowance exhausted"),
             "This operation reached its calculation limit. Try a simpler shape or suppress a feature."
         );
+    }
+
+    /// A fillet the kernel cannot trim against its neighbours says so, rather than the
+    /// generic text every other kernel failure gets.
+    #[test]
+    fn an_intersection_refusal_inside_a_fillet_names_the_trim() {
+        let trim = "The fillet could not be trimmed where it meets the faces around it. Try a different radius or \
+                    select different edges.";
+        for diagnostic in [
+            "fillet failed in the kernel (status 0): intersect.unsupported-pair: step 3: intersect.unsupported-pair: \
+             surface pair is outside piece 4 coverage",
+            "fillet failed in the kernel (status 0): intersect.fillet-cut-plane: step 2: intersect.fillet-cut-plane: \
+             the cut does not meet its plane",
+        ] {
+            assert_eq!(for_user(diagnostic), trim, "{diagnostic}");
+        }
+        assert_eq!(
+            for_user("chamfer failed in the kernel (status 0): intersect.unsupported-pair: no coverage"),
+            "This operation is unavailable for the selected shape."
+        );
+    }
+
+    /// Only the overflow refusal that finds another face says the fillet reaches one.
+    #[test]
+    fn overflow_says_another_face_only_when_one_is_reached() {
+        let at = |detail: &str| {
+            for_user(&format!(
+                "fillet failed in the kernel (status 0): fillet.unsupported-overflow: step 2: \
+                 fillet.unsupported-overflow: {detail}"
+            ))
+        };
+        for reached in [
+            "variable contact region reaches a neighbouring face and needs continuation",
+            // A fillet along a plate edge whose radius cuts into a hole beside it.
+            "a non-end neighbour intersects the blend carrier; its trimmed contact continuation must be resolved \
+             before publishing; maximum unknown",
+            "a non-incident face meets the corner's support; its trimmed continuation must be resolved before publishing",
+        ] {
+            assert_eq!(at(reached), "This fillet reaches another face. Reduce the radius or round fewer edges.");
+        }
+        for crossing in [
+            "nonincident blend carriers meet and require simultaneous contact-region trimming",
+            "two blend bands are not proved apart and need trimmed continuation",
+            "a junction's separation from another blend is unproved",
+        ] {
+            assert_eq!(at(crossing), "The rounded edges run into each other. Reduce the radius or round fewer edges.");
+        }
+        for unproved in [
+            "a face reaches the hull of the blend band and needs trimmed continuation",
+            "a non-incident face is not proved clear of the corner sphere",
+            "a crossing band is not proved clear of another input support",
+            "a void inside the inscribed shell needs its blend region trimmed against it",
+        ] {
+            assert_eq!(at(unproved), "This fillet may run into another face. Reduce the radius or round fewer edges.");
+        }
+        for nothing_reached in [
+            "a contact rail leaves its end-wall edge and needs neighbour continuation",
+            "the deeper strip at a vertex runs past the unselected edge and needs neighbour continuation",
+            "an offset junction endpoint is not strictly inside its selected run",
+            "a crossing contact leaves its input face",
+            "a contact rail passes the round's rail outside its edge and needs neighbour continuation",
+            "rail contact is not a circle",
+        ] {
+            let shown = at(nothing_reached);
+            assert!(!shown.contains("another face"), "{nothing_reached}: {shown}");
+            assert_eq!(
+                shown,
+                "This fillet would have to continue past the faces beside its edge, which is not supported yet. \
+                 Reduce the radius or select different edges."
+            );
+        }
     }
 
     #[test]

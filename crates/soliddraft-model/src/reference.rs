@@ -259,6 +259,10 @@ pub struct EdgePiece {
     /// `ends` leaves, for pieces whose end faces do not tell them apart.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub along: Option<u32>,
+    /// How many edges `along` counted among. A place is only this piece while the count
+    /// holds; a cut added or removed upstream makes it a repair.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub among: Option<u32>,
 }
 
 /// A vertex, named by the faces that meet at it. A vertex is where its faces meet, so it
@@ -602,7 +606,7 @@ pub(crate) fn resolve_edge(r: &EdgeRef, view: &View, names: &NameMap) -> Result<
             message: format!("no edge is left between the {label}"),
             candidates: ranked_edges(&r.fingerprint, all_edges(), view),
         }),
-        [e] if e.curve != r.fingerprint.curve => {
+        [e] if r.piece.is_none() && e.curve != r.fingerprint.curve => {
             let detail = format!("the edge became {:?} instead of {:?}", e.curve, r.fingerprint.curve);
             Err(Unresolved {
                 reason: RepairReason::Mismatch { detail: detail.clone() },
@@ -610,37 +614,88 @@ pub(crate) fn resolve_edge(r: &EdgeRef, view: &View, names: &NameMap) -> Result<
                 candidates: vec![Candidate::Edge(e.id)],
             })
         }
-        [e] => Ok(e.id),
-        many => {
-            let mut left: Vec<&EdgeInfo> = many.to_vec();
-            let (ends, along) = r.piece.as_deref().map_or((&[][..], None), |p| (p.ends.as_slice(), p.along));
-            if !ends.is_empty() {
-                let sets = ends.iter().map(|face| face_set(face, view, names)).collect::<Result<Vec<_>, _>>()?;
-                left.retain(|edge| {
-                    let at = end_faces(edge, view);
-                    sets.iter().all(|set| set.iter().any(|face| at.contains(face)))
-                });
-            }
-            if let Some(place) = along
-                && left.len() > 1
-            {
-                order_along(&mut left);
-                left = left.get(place as usize).into_iter().copied().collect();
-            }
-            match left.as_slice() {
-                [e] if e.curve == r.fingerprint.curve => Ok(e.id),
-                [] => Err(Unresolved {
-                    reason: RepairReason::Missing,
-                    message: format!("no edge between the {label} ends at the faces it ended at"),
-                    candidates: ranked_edges(&r.fingerprint, many.iter().map(|edge| edge.id), view),
-                }),
-                _ => Err(Unresolved {
+        [e] if r.piece.is_none() => Ok(e.id),
+        candidates => {
+            let Some(piece) = r.piece.as_deref() else {
+                return Err(Unresolved {
                     reason: RepairReason::Ambiguous,
-                    message: format!("{} edges lie between the {label}", left.len().max(2)),
-                    candidates: ranked_edges(&r.fingerprint, left.iter().map(|edge| edge.id), view),
-                }),
-            }
+                    message: format!("{} edges lie between the {label}", candidates.len()),
+                    candidates: ranked_edges(&r.fingerprint, candidates.iter().map(|edge| edge.id), view),
+                });
+            };
+            resolve_piece(r, piece, candidates, &label, view, names)
         }
+    }
+}
+
+/// Finds one of several edges between the same two faces by its saved piece: the faces at
+/// its ends, then its place among the pieces while their count holds. A piece is never
+/// taken on the strength of being the only edge left: the cut that made it may be gone,
+/// and then the reference needs repair.
+fn resolve_piece(
+    r: &EdgeRef,
+    piece: &EdgePiece,
+    candidates: &[&EdgeInfo],
+    label: &str,
+    view: &View,
+    names: &NameMap,
+) -> Result<EdgeId, Unresolved> {
+    let ranked = |edges: &[&EdgeInfo]| ranked_edges(&r.fingerprint, edges.iter().map(|edge| edge.id), view);
+    let mut left: Vec<&EdgeInfo> = candidates.to_vec();
+    if !piece.ends.is_empty() {
+        let sets = piece.ends.iter().map(|face| face_set(face, view, names)).collect::<Result<Vec<_>, _>>()?;
+        left.retain(|edge| {
+            let at = end_faces(edge, view);
+            sets.iter().all(|set| set.iter().any(|face| at.contains(face)))
+        });
+        if left.is_empty() {
+            return Err(Unresolved {
+                reason: RepairReason::Missing,
+                message: format!("no edge between the {label} ends at the faces it ended at"),
+                candidates: ranked(candidates),
+            });
+        }
+    }
+    if let Some(place) = piece.along {
+        if let Some(among) = piece.among
+            && left.len() != among as usize
+        {
+            let detail = format!("{} pieces lie between the {label} where there were {among}", left.len());
+            return Err(Unresolved {
+                reason: RepairReason::Mismatch { detail: detail.clone() },
+                message: detail,
+                candidates: ranked(&left),
+            });
+        }
+        order_along(&mut left);
+        left = left.get(place as usize).into_iter().copied().collect();
+    } else if piece.ends.is_empty() {
+        return Err(Unresolved {
+            reason: RepairReason::Ambiguous,
+            message: format!("{} edges lie between the {label}", candidates.len()),
+            candidates: ranked(candidates),
+        });
+    }
+    match left.as_slice() {
+        [e] if e.curve == r.fingerprint.curve => Ok(e.id),
+        [e] => {
+            let detail = format!("the edge became {:?} instead of {:?}", e.curve, r.fingerprint.curve);
+            Err(Unresolved {
+                reason: RepairReason::Mismatch { detail: detail.clone() },
+                message: format!("the edge between the {label}: {detail}"),
+                candidates: vec![Candidate::Edge(e.id)],
+            })
+        }
+        [] => Err(Unresolved {
+            reason: RepairReason::Missing,
+            message: format!("no piece is left at its place between the {label}"),
+            candidates: ranked(candidates),
+        }),
+        _ => Err(Unresolved {
+            reason: RepairReason::Ambiguous,
+            message: format!("{} edges lie between the {label}", left.len()),
+            candidates: ranked(&left),
+        }),
     }
 }
 
@@ -788,20 +843,27 @@ pub(crate) fn name_edge(edge: EdgeId, view: &View, names: &NameMap) -> Result<Ed
                 ends.push(named);
             }
         }
-        r.piece = Some(Box::new(EdgePiece { ends, along: None }));
+        r.piece = Some(Box::new(EdgePiece { ends, along: None, among: None }));
         resolved = resolve_edge(&r, view, names);
-        let pieces = view.topology.edges.len() as u32;
-        let mut along = 0;
-        while along < pieces && matches!(&resolved, Err(Unresolved { reason: RepairReason::Ambiguous, .. })) {
-            if let Some(piece) = r.piece.as_mut() {
+        if matches!(&resolved, Err(Unresolved { reason: RepairReason::Ambiguous, .. })) {
+            // Every place that resolves is one piece; this edge is one of them.
+            let mut places = Vec::new();
+            for along in 0..view.topology.edges.len() as u32 {
+                if let Some(piece) = r.piece.as_mut() {
+                    piece.along = Some(along);
+                }
+                match resolve_edge(&r, view, names) {
+                    Ok(found) => places.push((along, found)),
+                    Err(_) => break,
+                }
+            }
+            if let (Some(piece), Some(&(along, _))) =
+                (r.piece.as_mut(), places.iter().find(|(_, found)| *found == edge))
+            {
                 piece.along = Some(along);
+                piece.among = Some(places.len() as u32);
+                resolved = resolve_edge(&r, view, names);
             }
-            resolved = resolve_edge(&r, view, names);
-            if !matches!(&resolved, Ok(back) if *back == edge) {
-                resolved =
-                    Err(Unresolved { reason: RepairReason::Ambiguous, message: String::new(), candidates: Vec::new() });
-            }
-            along += 1;
         }
     }
     match resolved {

@@ -1,7 +1,7 @@
 //! An edge a later feature split into pieces between the same two faces is named piece by
 //! piece, by the faces at its ends, and a feature on one piece survives save and reopen.
 
-use soliddraft_app::document::Document;
+use soliddraft_app::document::{Command, Document};
 
 fn bracket() -> Document {
     let bytes = include_bytes!("../../../site/parts/bracket.dwprt");
@@ -75,5 +75,35 @@ fn a_saved_piece_reference_finds_its_piece_after_reopening() {
         let found = reopened.model().resolve_edge(&stored, again).unwrap();
         let at = edges.iter().find(|e| e.id == found).unwrap().midpoint;
         assert!((at - midpoint).length() < 1e-6, "{} found an edge at {at:?}, not {midpoint:?}", piece.label);
+    }
+}
+
+/// A piece's reference never rebinds to the edge that remains when the cut that split it
+/// is gone. Suppressing the countersinks leaves one whole edge between the end cap and
+/// the side of line 2; each piece's saved reference asks for repair instead of taking it.
+#[test]
+fn a_piece_reference_needs_repair_when_its_split_is_gone() {
+    let mut doc = bracket();
+    let body = doc.model().body().unwrap();
+    let topology = doc.model().kernel().topology(body).unwrap();
+    let pieces: Vec<_> =
+        topology.edges.iter().filter_map(|e| doc.model().edge_ref(e.id).ok().filter(|r| r.piece.is_some())).collect();
+    assert_eq!(pieces.len(), 3);
+    let holes = doc.features.iter().find(|f| f.name == "Hole1").unwrap().id;
+    doc.apply(Command::Suppress { id: holes, suppressed: true }).unwrap();
+    let whole = doc.model().body().unwrap();
+    let edges = doc.model().kernel().topology(whole).unwrap().edges;
+    let between = edges
+        .iter()
+        .filter(|e| {
+            doc.model()
+                .edge_ref(e.id)
+                .is_ok_and(|r| r.label == "Boss-Extrude1 · End cap ∩ Boss-Extrude1 · Side of line 2".into())
+        })
+        .count();
+    assert_eq!(between, 1, "suppressing the countersinks leaves one whole edge");
+    for piece in pieces {
+        let found = doc.model().resolve_edge(&piece, whole);
+        assert!(found.is_err(), "{} rebound to {:?}", piece.label, found);
     }
 }

@@ -1639,8 +1639,8 @@ impl AppState {
 
     /// A note about an import that did not open as an exact solid, with a link from the
     /// status bar's details to the import report.
-    pub fn note_import(&mut self, text: impl Into<String>) {
-        self.note = Some(Note { text: text.into(), kind: NoteKind::Info, at: Instant::now(), report: true });
+    pub fn note_import(&mut self, text: impl Into<String>, kind: NoteKind) {
+        self.note = Some(Note { text: text.into(), kind, at: Instant::now(), report: true });
     }
 
     /// Ghost geometry the viewport shows this frame: added or removed material.

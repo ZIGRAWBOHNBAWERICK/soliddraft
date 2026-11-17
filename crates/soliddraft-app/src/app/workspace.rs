@@ -791,6 +791,7 @@ impl eframe::App for SolidDraftApp {
         crate::web::begin_frame();
         self.edit_suite_frame(root);
         self.dialogs(ctx);
+        crate::import::report::notice(ctx, &self.state);
         #[cfg(target_arch = "wasm32")]
         self.building(ctx);
         crate::preferences::window(ctx, &mut self.preferences, &mut self.state);

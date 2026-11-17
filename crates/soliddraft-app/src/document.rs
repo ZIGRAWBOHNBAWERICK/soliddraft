@@ -2002,6 +2002,13 @@ impl Document {
         let (depth, model) = (accepted.depth, accepted.model.clone());
         let wanted = model.geometry_hash();
         if self.walk_history(depth, &wanted)? || self.restore_definitions(&model, &wanted)? {
+            // The restored definitions are the ones already proved, so their builds are
+            // taken from that proof rather than proved again: the part is usable at once.
+            // If they cannot be (another kernel, retained inputs gone), the part is proved
+            // as before.
+            if let Err(why) = self.model.rebuild_reusing(&model) {
+                log::debug!("cancel proves the restored part again: {why}");
+            }
             self.after_history_change();
             return Ok(());
         }

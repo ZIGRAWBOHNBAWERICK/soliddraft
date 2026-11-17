@@ -984,12 +984,17 @@ pub fn window(ctx: &egui::Context, state: &mut AppState) {
             });
             Review { decline: Vec::new(), accept: accept.collect() }
         };
-        match commit_in(state, &preview, &review) {
+        let committed = commit_in(state, &preview, &review);
+        if committed.is_ok() && preview.replacement.is_none() {
+            // A new import is framed, however small it is.
+            state.push(crate::state::AppAction::ZoomFit);
+        }
+        match committed {
             Ok(id)
                 if preview.replacement.is_none()
                     && let Some(note) = opened_note(&state.doc, id, format) =>
             {
-                state.note_import(note)
+                state.note_import(note, NoteKind::Info)
             }
             Ok(_) => state.note(
                 if decline {
@@ -1009,9 +1014,15 @@ pub fn window(ctx: &egui::Context, state: &mut AppState) {
                 },
                 NoteKind::Info,
             ),
-            Err(error) => {
-                state.note(error.message(), NoteKind::Error);
+            Err(CommitError::Review(error)) => {
+                // The review can be answered again, so the dialog stays.
+                state.note(error, NoteKind::Error);
                 state.import_dialog = Some(preview);
+            }
+            Err(CommitError::Refused(error)) => {
+                // Answering again cannot help: the dialog closes, and the refusal stays in
+                // the import report, which the notice links to.
+                state.note_import(format!("{} was refused: {error}", preview.feature.source_name), NoteKind::Error);
             }
         }
     } else if open && !cancelled {

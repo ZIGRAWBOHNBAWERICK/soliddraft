@@ -39,7 +39,7 @@ fn filleted(r: f64) -> (Document, FeatureId, FeatureId) {
         .unwrap();
     let edge = top_edge(&doc);
     let fillet =
-        doc.apply(Command::AddFillet { params: FilletParams { edges: vec![edge], radius: r } }).unwrap().unwrap();
+        doc.apply_form(Command::AddFillet { params: FilletParams { edges: vec![edge], radius: r } }).unwrap().unwrap();
     (doc, block, fillet)
 }
 
@@ -104,15 +104,17 @@ fn a_numerical_fillet_takes_a_radius_edit_and_keeps_its_part_when_an_edit_is_ref
     let (mut doc, block, fillet) = filleted(2.0);
     let round = rounds(&doc, fillet);
     let edges = vec![top_edge_before(&doc, block)];
-    doc.apply(Command::EditFillet { id: fillet, params: FilletParams { edges: edges.clone(), radius: 3.0 } }).unwrap();
+    doc.apply_form(Command::EditFillet { id: fillet, params: FilletParams { edges: edges.clone(), radius: 3.0 } })
+        .unwrap();
     assert_eq!(doc.feature(fillet).unwrap().status, FeatureStatus::Ok);
     assert_eq!(doc.body_name(0), APPROXIMATE_BODY_NAME);
     assert_eq!(rounds(&doc, fillet), round, "the round keeps its name through the edit");
     assert_volume(volume(&doc, fillet), 480.0 - removed(3.0, 10.0));
 
     // The block is 6 mm tall: no fillet of 7 mm fits along its top edge.
-    let refused = doc.apply(Command::EditFillet { id: fillet, params: FilletParams { edges, radius: 7.0 } });
-    assert!(refused.is_err(), "{refused:?}");
+    let refused = doc.apply_form(Command::EditFillet { id: fillet, params: FilletParams { edges, radius: 7.0 } });
+    let why = soliddraft_app::geometry_message::for_user(&refused.unwrap_err());
+    assert!(why.starts_with("The radius is too large for this edge."), "{why}");
     assert_eq!(doc.feature(fillet).unwrap().status, FeatureStatus::Ok);
     assert_volume(volume(&doc, fillet), 480.0 - removed(3.0, 10.0));
     assert_eq!(doc.body_name(0), APPROXIMATE_BODY_NAME);
@@ -137,6 +139,6 @@ fn a_numerical_fillet_saves_reopens_and_edits_after_reopening() {
 
     let block = reopened.features[0].id;
     let edges = vec![top_edge_before(&reopened, block)];
-    reopened.apply(Command::EditFillet { id, params: FilletParams { edges, radius: 1.0 } }).unwrap();
+    reopened.apply_form(Command::EditFillet { id, params: FilletParams { edges, radius: 1.0 } }).unwrap();
     assert_volume(volume(&reopened, id), 480.0 - removed(1.0, 10.0));
 }

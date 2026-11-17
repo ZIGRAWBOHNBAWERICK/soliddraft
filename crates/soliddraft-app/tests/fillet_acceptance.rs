@@ -174,6 +174,7 @@ impl Part {
                 // Refused before the kernel was asked: an edge the app could not name.
                 row.result = "name";
                 row.stage = "naming".into();
+                row.kernel = out.content.clone();
             } else {
                 row.result = "refused";
                 row.stage = stage(&kernel);

@@ -27,6 +27,7 @@ libm = "0.2"
 [dev-dependencies]
 proptest.workspace = true
 soliddraft-kernel-catallax.workspace = true
+zip.workspace = true
 
 [lints]
 workspace = true

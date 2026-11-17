@@ -751,8 +751,8 @@ dependencies = [
 
 [[package]]
 name = "catallax-app"
-version = "0.1.5"
-source = "git+https://github.com/BohnBawerick/catallax?rev=8bf3999acd2ebd708a3d664e2daa41362f77da5f#8bf3999acd2ebd708a3d664e2daa41362f77da5f"
+version = "0.3.0"
+source = "git+https://github.com/BohnBawerick/catallax?rev=2c60dce949568b46b23b9cc96c6c760e329bb303#2c60dce949568b46b23b9cc96c6c760e329bb303"
 dependencies = [
  "catallax-boolean",
  "catallax-features",
@@ -771,8 +771,8 @@ dependencies = [
 
 [[package]]
 name = "catallax-boolean"
-version = "0.1.5"
-source = "git+https://github.com/BohnBawerick/catallax?rev=8bf3999acd2ebd708a3d664e2daa41362f77da5f#8bf3999acd2ebd708a3d664e2daa41362f77da5f"
+version = "0.3.0"
+source = "git+https://github.com/BohnBawerick/catallax?rev=2c60dce949568b46b23b9cc96c6c760e329bb303#2c60dce949568b46b23b9cc96c6c760e329bb303"
 dependencies = [
  "catallax-intersect",
  "catallax-numbers",
@@ -783,8 +783,8 @@ dependencies = [
 
 [[package]]
 name = "catallax-compare"
-version = "0.1.5"
-source = "git+https://github.com/BohnBawerick/catallax?rev=8bf3999acd2ebd708a3d664e2daa41362f77da5f#8bf3999acd2ebd708a3d664e2daa41362f77da5f"
+version = "0.3.0"
+source = "git+https://github.com/BohnBawerick/catallax?rev=2c60dce949568b46b23b9cc96c6c760e329bb303#2c60dce949568b46b23b9cc96c6c760e329bb303"
 dependencies = [
  "catallax-boolean",
  "catallax-features",
@@ -799,8 +799,8 @@ dependencies = [
 
 [[package]]
 name = "catallax-features"
-version = "0.1.5"
-source = "git+https://github.com/BohnBawerick/catallax?rev=8bf3999acd2ebd708a3d664e2daa41362f77da5f#8bf3999acd2ebd708a3d664e2daa41362f77da5f"
+version = "0.3.0"
+source = "git+https://github.com/BohnBawerick/catallax?rev=2c60dce949568b46b23b9cc96c6c760e329bb303#2c60dce949568b46b23b9cc96c6c760e329bb303"
 dependencies = [
  "catallax-boolean",
  "catallax-import",
@@ -818,8 +818,8 @@ dependencies = [
 
 [[package]]
 name = "catallax-field"
-version = "0.1.5"
-source = "git+https://github.com/BohnBawerick/catallax?rev=8bf3999acd2ebd708a3d664e2daa41362f77da5f#8bf3999acd2ebd708a3d664e2daa41362f77da5f"
+version = "0.3.0"
+source = "git+https://github.com/BohnBawerick/catallax?rev=2c60dce949568b46b23b9cc96c6c760e329bb303#2c60dce949568b46b23b9cc96c6c760e329bb303"
 dependencies = [
  "catallax-boolean",
  "catallax-features",
@@ -836,8 +836,8 @@ dependencies = [
 
 [[package]]
 name = "catallax-iges"
-version = "0.1.5"
-source = "git+https://github.com/BohnBawerick/catallax?rev=8bf3999acd2ebd708a3d664e2daa41362f77da5f#8bf3999acd2ebd708a3d664e2daa41362f77da5f"
+version = "0.3.0"
+source = "git+https://github.com/BohnBawerick/catallax?rev=2c60dce949568b46b23b9cc96c6c760e329bb303#2c60dce949568b46b23b9cc96c6c760e329bb303"
 dependencies = [
  "catallax-numbers",
  "catallax-shapes",
@@ -846,8 +846,8 @@ dependencies = [
 
 [[package]]
 name = "catallax-import"
-version = "0.1.5"
-source = "git+https://github.com/BohnBawerick/catallax?rev=8bf3999acd2ebd708a3d664e2daa41362f77da5f#8bf3999acd2ebd708a3d664e2daa41362f77da5f"
+version = "0.3.0"
+source = "git+https://github.com/BohnBawerick/catallax?rev=2c60dce949568b46b23b9cc96c6c760e329bb303#2c60dce949568b46b23b9cc96c6c760e329bb303"
 dependencies = [
  "catallax-boolean",
  "catallax-intersect",
@@ -863,8 +863,8 @@ dependencies = [
 
 [[package]]
 name = "catallax-intersect"
-version = "0.1.5"
-source = "git+https://github.com/BohnBawerick/catallax?rev=8bf3999acd2ebd708a3d664e2daa41362f77da5f#8bf3999acd2ebd708a3d664e2daa41362f77da5f"
+version = "0.3.0"
+source = "git+https://github.com/BohnBawerick/catallax?rev=2c60dce949568b46b23b9cc96c6c760e329bb303#2c60dce949568b46b23b9cc96c6c760e329bb303"
 dependencies = [
  "catallax-numbers",
  "catallax-shapes",
@@ -873,8 +873,8 @@ dependencies = [
 
 [[package]]
 name = "catallax-measure"
-version = "0.1.5"
-source = "git+https://github.com/BohnBawerick/catallax?rev=8bf3999acd2ebd708a3d664e2daa41362f77da5f#8bf3999acd2ebd708a3d664e2daa41362f77da5f"
+version = "0.3.0"
+source = "git+https://github.com/BohnBawerick/catallax?rev=2c60dce949568b46b23b9cc96c6c760e329bb303#2c60dce949568b46b23b9cc96c6c760e329bb303"
 dependencies = [
  "catallax-boolean",
  "catallax-intersect",
@@ -886,8 +886,8 @@ dependencies = [
 
 [[package]]
 name = "catallax-mesh"
-version = "0.1.5"
-source = "git+https://github.com/BohnBawerick/catallax?rev=8bf3999acd2ebd708a3d664e2daa41362f77da5f#8bf3999acd2ebd708a3d664e2daa41362f77da5f"
+version = "0.3.0"
+source = "git+https://github.com/BohnBawerick/catallax?rev=2c60dce949568b46b23b9cc96c6c760e329bb303#2c60dce949568b46b23b9cc96c6c760e329bb303"
 dependencies = [
  "catallax-import",
  "catallax-intersect",
@@ -900,8 +900,8 @@ dependencies = [
 
 [[package]]
 name = "catallax-numbers"
-version = "0.1.5"
-source = "git+https://github.com/BohnBawerick/catallax?rev=8bf3999acd2ebd708a3d664e2daa41362f77da5f#8bf3999acd2ebd708a3d664e2daa41362f77da5f"
+version = "0.3.0"
+source = "git+https://github.com/BohnBawerick/catallax?rev=2c60dce949568b46b23b9cc96c6c760e329bb303#2c60dce949568b46b23b9cc96c6c760e329bb303"
 dependencies = [
  "catallax-transfer-derive",
  "im",
@@ -915,8 +915,8 @@ dependencies = [
 
 [[package]]
 name = "catallax-recipe"
-version = "0.1.5"
-source = "git+https://github.com/BohnBawerick/catallax?rev=8bf3999acd2ebd708a3d664e2daa41362f77da5f#8bf3999acd2ebd708a3d664e2daa41362f77da5f"
+version = "0.3.0"
+source = "git+https://github.com/BohnBawerick/catallax?rev=2c60dce949568b46b23b9cc96c6c760e329bb303#2c60dce949568b46b23b9cc96c6c760e329bb303"
 dependencies = [
  "catallax-numbers",
  "serde",
@@ -925,8 +925,8 @@ dependencies = [
 
 [[package]]
 name = "catallax-shapes"
-version = "0.1.5"
-source = "git+https://github.com/BohnBawerick/catallax?rev=8bf3999acd2ebd708a3d664e2daa41362f77da5f#8bf3999acd2ebd708a3d664e2daa41362f77da5f"
+version = "0.3.0"
+source = "git+https://github.com/BohnBawerick/catallax?rev=2c60dce949568b46b23b9cc96c6c760e329bb303#2c60dce949568b46b23b9cc96c6c760e329bb303"
 dependencies = [
  "catallax-numbers",
  "im",
@@ -934,8 +934,8 @@ dependencies = [
 
 [[package]]
 name = "catallax-step"
-version = "0.1.5"
-source = "git+https://github.com/BohnBawerick/catallax?rev=8bf3999acd2ebd708a3d664e2daa41362f77da5f#8bf3999acd2ebd708a3d664e2daa41362f77da5f"
+version = "0.3.0"
+source = "git+https://github.com/BohnBawerick/catallax?rev=2c60dce949568b46b23b9cc96c6c760e329bb303#2c60dce949568b46b23b9cc96c6c760e329bb303"
 dependencies = [
  "catallax-intersect",
  "catallax-numbers",
@@ -946,8 +946,8 @@ dependencies = [
 
 [[package]]
 name = "catallax-topology"
-version = "0.1.5"
-source = "git+https://github.com/BohnBawerick/catallax?rev=8bf3999acd2ebd708a3d664e2daa41362f77da5f#8bf3999acd2ebd708a3d664e2daa41362f77da5f"
+version = "0.3.0"
+source = "git+https://github.com/BohnBawerick/catallax?rev=2c60dce949568b46b23b9cc96c6c760e329bb303#2c60dce949568b46b23b9cc96c6c760e329bb303"
 dependencies = [
  "catallax-numbers",
  "catallax-recipe",
@@ -957,16 +957,16 @@ dependencies = [
 
 [[package]]
 name = "catallax-trace"
-version = "0.1.5"
-source = "git+https://github.com/BohnBawerick/catallax?rev=8bf3999acd2ebd708a3d664e2daa41362f77da5f#8bf3999acd2ebd708a3d664e2daa41362f77da5f"
+version = "0.3.0"
+source = "git+https://github.com/BohnBawerick/catallax?rev=2c60dce949568b46b23b9cc96c6c760e329bb303#2c60dce949568b46b23b9cc96c6c760e329bb303"
 dependencies = [
  "libm",
 ]
 
 [[package]]
 name = "catallax-transfer-derive"
-version = "0.1.5"
-source = "git+https://github.com/BohnBawerick/catallax?rev=8bf3999acd2ebd708a3d664e2daa41362f77da5f#8bf3999acd2ebd708a3d664e2daa41362f77da5f"
+version = "0.3.0"
+source = "git+https://github.com/BohnBawerick/catallax?rev=2c60dce949568b46b23b9cc96c6c760e329bb303#2c60dce949568b46b23b9cc96c6c760e329bb303"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -5326,7 +5326,7 @@ dependencies = [
 
 [[package]]
 name = "soliddraft-app"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "bytemuck",
  "chrono",
@@ -5376,7 +5376,7 @@ dependencies = [
 
 [[package]]
 name = "soliddraft-assembly"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "bytemuck",
  "glam",
@@ -5394,11 +5394,12 @@ dependencies = [
  "soliddraft-model",
  "soliddraft-tessellation",
  "thiserror 2.0.21",
+ "zip 9.0.5",
 ]
 
 [[package]]
 name = "soliddraft-assistant"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "apple-native-keyring-store",
  "keyring-core",
@@ -5414,7 +5415,7 @@ dependencies = [
 
 [[package]]
 name = "soliddraft-cli"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "dxf",
  "egui-wgpu",
@@ -5442,7 +5443,7 @@ dependencies = [
 
 [[package]]
 name = "soliddraft-document"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "blake3",
  "fs2",
@@ -5456,7 +5457,7 @@ dependencies = [
 
 [[package]]
 name = "soliddraft-drawing"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "dxf",
  "flate2",
@@ -5478,7 +5479,7 @@ dependencies = [
 
 [[package]]
 name = "soliddraft-exchange"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -5493,7 +5494,7 @@ dependencies = [
 
 [[package]]
 name = "soliddraft-kernel-api"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -5502,7 +5503,7 @@ dependencies = [
 
 [[package]]
 name = "soliddraft-kernel-catallax"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "catallax-app",
  "catallax-boolean",
@@ -5528,7 +5529,7 @@ dependencies = [
 
 [[package]]
 name = "soliddraft-materials"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "roxmltree 0.20.0",
  "serde",
@@ -5541,7 +5542,7 @@ dependencies = [
 
 [[package]]
 name = "soliddraft-model"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -5559,7 +5560,7 @@ dependencies = [
 
 [[package]]
 name = "soliddraft-recipe"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -5570,7 +5571,7 @@ dependencies = [
 
 [[package]]
 name = "soliddraft-scene"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "base64",
  "glam",
@@ -5591,7 +5592,7 @@ dependencies = [
 
 [[package]]
 name = "soliddraft-server"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "env_logger",
  "flate2",
@@ -5605,7 +5606,7 @@ dependencies = [
 
 [[package]]
 name = "soliddraft-sketch"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "ezpz",
  "serde",
@@ -5617,7 +5618,7 @@ dependencies = [
 
 [[package]]
 name = "soliddraft-tessellation"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "glam",
  "serde",
@@ -5629,7 +5630,7 @@ dependencies = [
 
 [[package]]
 name = "soliddraft-web"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "eframe",
  "js-sys",

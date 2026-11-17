@@ -12,5 +12,7 @@ Both regenerations kept all other entry bytes, source pins, timestamps and compr
 Keep the binary files as generated.
 
 The regression test opens, proves, updates and saves the assembly, then compares the
-entire saved archive with the fixture. Bounded-mate support must add no fields or
+saved archive with the fixture entry for entry. Every byte must match except
+`manifest.json.writer`, which must name the build under test. From 0.6.0 a version bump
+therefore needs no regenerated fixture. Bounded-mate support must add no fields or
 change any placements in this exact case.

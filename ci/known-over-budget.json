@@ -24,6 +24,19 @@
       "stl_export_timeouts": {"seconds": 600, "scenarios": ["gyroid", "lattice"]},
       "measurement_context": "The work PC was also running a Catallax replay during this sweep, so these are not quiet timing measurements. A separate dedicated Linux CI replay also exceeded the field_mass timing budgets in graded-fields. The other timing failures and both export timeouts remain unresolved.",
       "report": "https://github.com/ZIGRAWBOHNBAWERICK/soliddraft/pull/300#issuecomment-6874660909"
+    },
+    "0.6.0": {
+      "source": "a663caff9ae8336647dc3bdcb33a5977ff2e4221",
+      "kernel": "2c60dce949568b46b23b9cc96c6c760e329bb303",
+      "strict_timing_scenarios": [
+        "graded-fields", "loft", "p5-flanged-housing", "p5-placed-housing",
+        "ring-fillet", "rod-cut-28deg", "skew-corner-fillet", "sphere-revolve",
+        "spline-sweep", "torus-revolve", "canonical-p1", "canonical-p5", "loft-edge-fillet",
+        "draft-oblique-pull", "sketch-fillet-chamfer-split"
+      ],
+      "stl_export_timeouts": {"seconds": 600, "scenarios": ["gyroid", "lattice"]},
+      "measurement_context": "The work PC ran no Catallax replay during this sweep. The two export timeouts and the first 13 timing failures match 0.5.0. draft-oblique-pull is a new scenario whose draft and reopen steps took 1.6 to 2.1 s. sketch-fillet-chamfer-split took 1.56 to 1.65 s for one requested measurement in four runs, under the 2 s gate. It was not in the 0.5.0 sweep; in five alternating runs on the same machine, 0.5.0 took 1.56 to 1.85 s on that step and 0.6.0 took 1.75 to 1.88 s, so the budget overrun predates 0.6.0.",
+      "report": "https://github.com/ZIGRAWBOHNBAWERICK/soliddraft/pull/328#issuecomment-6929403548"
     }
   }
 }

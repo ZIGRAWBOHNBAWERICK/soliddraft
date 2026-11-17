@@ -347,8 +347,43 @@ fn pre_b5_axis_aligned_assembly_keeps_exact_proofs_and_archive_bytes() {
     assert!(report.refusal.is_none() && report.mate_refusal.is_none(), "{report:?}");
     doc.finish_loading();
     doc.save(None).unwrap();
-    assert_eq!(std::fs::read(dir.join("rig.dwasm")).unwrap(), files[2].1);
+    assert_same_archive_with_current_writer(&std::fs::read(dir.join("rig.dwasm")).unwrap(), files[2].1);
     std::fs::remove_dir_all(dir).unwrap();
+}
+
+/// A re-saved archive matches its fixture entry for entry and byte for byte, except that
+/// `manifest.json` names this build as its writer. Every other manifest byte stays exact,
+/// so a release version bump needs no regenerated fixture.
+fn assert_same_archive_with_current_writer(saved: &[u8], fixture: &[u8]) {
+    use std::io::{Cursor, Read};
+    let mut saved = zip::ZipArchive::new(Cursor::new(saved)).unwrap();
+    let mut fixture = zip::ZipArchive::new(Cursor::new(fixture)).unwrap();
+    assert_eq!(saved.comment(), fixture.comment());
+    assert_eq!(saved.len(), fixture.len());
+    for index in 0..fixture.len() {
+        let mut ours = saved.by_index(index).unwrap();
+        let mut theirs = fixture.by_index(index).unwrap();
+        let name = theirs.name().unwrap().into_owned();
+        assert_eq!(ours.name().unwrap(), name);
+        assert_eq!(ours.compression(), theirs.compression(), "{name}");
+        assert_eq!(ours.last_modified(), theirs.last_modified(), "{name}");
+        assert_eq!(ours.unix_mode(), theirs.unix_mode(), "{name}");
+        let (mut got, mut want) = (Vec::new(), Vec::new());
+        ours.read_to_end(&mut got).unwrap();
+        theirs.read_to_end(&mut want).unwrap();
+        if name == "manifest.json" {
+            let want = String::from_utf8(want).unwrap();
+            let manifest: serde_json::Value = serde_json::from_str(&want).unwrap();
+            let old = format!("\"writer\": {}", manifest["writer"]);
+            assert_eq!(want.matches(&old).count(), 1, "{want}");
+            let current = serde_json::Value::from(soliddraft_document::manifest::writer());
+            let want = want.replacen(&old, &format!("\"writer\": {current}"), 1);
+            assert_eq!(String::from_utf8(got).unwrap(), want);
+        } else {
+            assert_eq!(ours.crc32(), theirs.crc32(), "{name}");
+            assert_eq!(got, want, "{name}");
+        }
+    }
 }
 
 #[test]

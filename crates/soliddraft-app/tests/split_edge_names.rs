@@ -8,6 +8,21 @@ fn bracket() -> Document {
     soliddraft_app::file::open_bytes("bracket.dwprt", bytes, soliddraft_app::kernel(), None).unwrap()
 }
 
+/// Every edge of the `--demo` sample part, a plate with a flange and a boss, has a name
+/// that finds it again. 26 of its 48 edges had none while two edges between the same
+/// faces could not be told apart.
+#[test]
+fn every_edge_of_the_demo_part_has_a_name() {
+    let doc = soliddraft_app::demo_document();
+    let body = doc.model().body().unwrap();
+    let topology = doc.model().kernel().topology(body).unwrap();
+    assert_eq!(topology.edges.len(), 48);
+    for edge in &topology.edges {
+        let named = doc.model().edge_ref(edge.id).unwrap_or_else(|e| panic!("{} has no name: {e}", edge.id));
+        assert_eq!(doc.model().resolve_edge(&named, body).unwrap(), edge.id, "{}", named.label);
+    }
+}
+
 /// In the sample bracket two countersinks split the edge between the base's end cap and
 /// the side of line 2 into three pieces. Each piece has its own name and label, and every
 /// edge of the bracket has a name.

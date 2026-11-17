@@ -56,7 +56,7 @@ A 40 x 30 x 12 mm block with all four uprights rounded at R2 and its top loop th
 
 The reverse order builds since [Catallax PR 340](https://github.com/BohnBawerick/catallax/pull/340): R1 rounds on the four uprights of that block after its top loop is rounded at R2. The build takes about 2 s, the screen shows it through Catallax's unproved preview mesh and it exports as one STEP solid within tolerance. Its certified mesh exceeds the application's work allowance with `application.work-limit`, and its exact volume took about five minutes on a desktop.
 
-A full symmetric union of equal crossing cylinders can stop at an ambiguous application edge reference before the fillet evaluator runs. The app retains `recipe.ambiguous-reference` for that failure and leaves the part unchanged. Starting the narrow cylinder on the crossing-axis plane instead reaches `mesh.precision-or-budget` while reading topology at this pin. These arrangements remain outside the completed app acceptance; neither is evidence that singular fillet geometry builds.
+A full symmetric union of equal crossing cylinders splits the edges between the two cylinders into pieces. The app names each piece, so a round of them reaches the fillet evaluator, which refuses it with `fillet.unsupported-topology` and leaves the part unchanged. Starting the narrow cylinder on the crossing-axis plane instead reaches `mesh.precision-or-budget` while reading topology at this pin. These arrangements remain outside the completed app acceptance; neither is evidence that singular fillet geometry builds.
 
 ## Two-body intersection and distance
 

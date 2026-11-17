@@ -91,7 +91,7 @@ impl Source {
     /// The label saved when the reference was created. A pair names both sources.
     pub fn label(&self) -> String {
         match self {
-            Self::Edge { reference } => reference.label.clone(),
+            Self::Edge { reference } => reference.label.to_string(),
             Self::Face { reference } => reference.label.clone(),
             Self::Pair { a, b, .. } => format!("{} and {}", a.label(), b.label()),
         }

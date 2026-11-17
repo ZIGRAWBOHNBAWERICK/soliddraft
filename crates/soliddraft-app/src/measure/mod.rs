@@ -25,7 +25,7 @@ pub fn source(doc: &Document, selection: Selection) -> Result<Source, String> {
     match selection {
         Selection::Edge(edge) => {
             let mut reference = doc.model().edge_ref(edge).map_err(|e| e.to_string())?;
-            reference.label = label;
+            reference.label = label.into();
             Ok(Source::Edge { reference })
         }
         Selection::Face(face) => {

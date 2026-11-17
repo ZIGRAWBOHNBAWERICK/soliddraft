@@ -238,10 +238,24 @@ pub struct EdgeRef {
     /// unchanged fingerprints even when only one candidate remains.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub disambiguate: bool,
+    /// Which piece this is, when several edges lie between `faces`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub piece: Option<Box<EdgePiece>>,
     /// What the edge was called when the reference was made, for repair prompts.
     /// Resolution never reads it.
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub label: String,
+    #[serde(default, skip_serializing_if = "str::is_empty")]
+    pub label: Box<str>,
+}
+
+/// One of several edges between the same two faces, as a cut or hole that splits an edge
+/// leaves it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct EdgePiece {
+    /// The other faces that meet at the edge's ends. Each piece ends against different
+    /// faces, so they tell the pieces apart. They are the piece's only identity: a place
+    /// along the curve is never saved, since after a replacement the same place can hold
+    /// a different edge.
+    pub ends: Vec<FaceRef>,
 }
 
 /// A vertex, named by the faces that meet at it. A vertex is where its faces meet, so it
@@ -520,7 +534,12 @@ fn ranked_edges(fp: &EdgeFingerprint, edges: impl Iterator<Item = EdgeId>, view:
 /// The one edge a reference names: the edge between a face carrying the first name's
 /// origin and a face carrying the second's. Faces may have been split or merged, as long
 /// as one edge remains, or one edge and both support faces retain their fingerprints.
-pub(crate) fn resolve_edge(r: &EdgeRef, view: &View, names: &NameMap) -> Result<EdgeId, Unresolved> {
+/// The faces each side of `r` can be, and the edges that lie between them.
+fn edges_between<'a>(
+    r: &EdgeRef,
+    view: &View<'a>,
+    names: &NameMap,
+) -> Result<(Vec<Vec<FaceId>>, Vec<&'a EdgeInfo>), Unresolved> {
     let all_edges = || view.topology.edges.iter().map(|e| e.id);
     let sides = [face_set(&r.faces[0], view, names), face_set(&r.faces[1], view, names)];
     let mut sets = Vec::new();
@@ -551,6 +570,12 @@ pub(crate) fn resolve_edge(r: &EdgeRef, view: &View, names: &NameMap) -> Result<
         _ => false,
     };
     let found: Vec<&EdgeInfo> = view.topology.edges.iter().filter(between).collect();
+    Ok((sets, found))
+}
+
+pub(crate) fn resolve_edge(r: &EdgeRef, view: &View, names: &NameMap) -> Result<EdgeId, Unresolved> {
+    let all_edges = || view.topology.edges.iter().map(|e| e.id);
+    let (sets, found) = edges_between(r, view, names)?;
     let label = format!(
         "{} of {} and {} of {}",
         r.faces[0].generator, r.faces[0].feature, r.faces[1].generator, r.faces[1].feature
@@ -585,7 +610,7 @@ pub(crate) fn resolve_edge(r: &EdgeRef, view: &View, names: &NameMap) -> Result<
             message: format!("no edge is left between the {label}"),
             candidates: ranked_edges(&r.fingerprint, all_edges(), view),
         }),
-        [e] if e.curve != r.fingerprint.curve => {
+        [e] if r.piece.is_none() && e.curve != r.fingerprint.curve => {
             let detail = format!("the edge became {:?} instead of {:?}", e.curve, r.fingerprint.curve);
             Err(Unresolved {
                 reason: RepairReason::Mismatch { detail: detail.clone() },
@@ -593,13 +618,116 @@ pub(crate) fn resolve_edge(r: &EdgeRef, view: &View, names: &NameMap) -> Result<
                 candidates: vec![Candidate::Edge(e.id)],
             })
         }
-        [e] => Ok(e.id),
-        many => Err(Unresolved {
+        [e] if r.piece.is_none() => Ok(e.id),
+        candidates => {
+            let Some(piece) = r.piece.as_deref() else {
+                return Err(Unresolved {
+                    reason: RepairReason::Ambiguous,
+                    message: format!("{} edges lie between the {label}", candidates.len()),
+                    candidates: ranked_edges(&r.fingerprint, candidates.iter().map(|edge| edge.id), view),
+                });
+            };
+            resolve_piece(r, piece, candidates, &label, view, names)
+        }
+    }
+}
+
+/// Finds one of several edges between the same two faces by the faces at its ends. A piece
+/// is never taken on the strength of being the only edge left, since the cut that made it
+/// may be gone, nor by its place along the curve, since a replacement can put a different
+/// edge there; either needs repair.
+fn resolve_piece(
+    r: &EdgeRef,
+    piece: &EdgePiece,
+    candidates: &[&EdgeInfo],
+    label: &str,
+    view: &View,
+    names: &NameMap,
+) -> Result<EdgeId, Unresolved> {
+    let ranked = |edges: &[&EdgeInfo]| ranked_edges(&r.fingerprint, edges.iter().map(|edge| edge.id), view);
+    let mut left = narrow_by_ends(&piece.ends, candidates.to_vec(), view, names)?;
+    if left.is_empty() {
+        return Err(Unresolved {
+            reason: RepairReason::Missing,
+            message: format!("no edge between the {label} ends at the faces it ended at"),
+            candidates: ranked(candidates),
+        });
+    }
+    if left.len() > 1 || piece.ends.is_empty() {
+        // The end faces no longer single the piece out. Its place along the curve is no
+        // identity, so the reference asks for repair and lists the candidates in order.
+        order_along(&mut left);
+        return Err(Unresolved {
             reason: RepairReason::Ambiguous,
-            message: format!("{} edges lie between the {label}", many.len()),
-            candidates: ranked_edges(&r.fingerprint, many.iter().map(|edge| edge.id), view),
+            message: format!("{} edges between the {label} end at the faces it ended at", left.len()),
+            candidates: left.iter().map(|edge| Candidate::Edge(edge.id)).collect(),
+        });
+    }
+    match left.as_slice() {
+        [e] if e.curve == r.fingerprint.curve => Ok(e.id),
+        [e] => {
+            let detail = format!("the edge became {:?} instead of {:?}", e.curve, r.fingerprint.curve);
+            Err(Unresolved {
+                reason: RepairReason::Mismatch { detail: detail.clone() },
+                message: format!("the edge between the {label}: {detail}"),
+                candidates: vec![Candidate::Edge(e.id)],
+            })
+        }
+        [] => Err(Unresolved {
+            reason: RepairReason::Missing,
+            message: format!("no piece is left at its place between the {label}"),
+            candidates: ranked(candidates),
+        }),
+        _ => Err(Unresolved {
+            reason: RepairReason::Ambiguous,
+            message: format!("{} edges lie between the {label}", left.len()),
+            candidates: ranked(&left),
         }),
     }
+}
+
+/// The edges among `candidates` that end against every one of `ends`.
+fn narrow_by_ends<'a>(
+    ends: &[FaceRef],
+    candidates: Vec<&'a EdgeInfo>,
+    view: &View,
+    names: &NameMap,
+) -> Result<Vec<&'a EdgeInfo>, Unresolved> {
+    if ends.is_empty() {
+        return Ok(candidates);
+    }
+    let sets = ends.iter().map(|face| face_set(face, view, names)).collect::<Result<Vec<_>, _>>()?;
+    Ok(candidates
+        .into_iter()
+        .filter(|edge| {
+            let at = end_faces(edge, view);
+            sets.iter().all(|set| set.iter().any(|face| at.contains(face)))
+        })
+        .collect())
+}
+
+/// The faces other than an edge's own that meet at its end vertices, in vertex order.
+pub(crate) fn end_faces(edge: &EdgeInfo, view: &View) -> Vec<FaceId> {
+    let mut faces = Vec::new();
+    for vertex in edge.vertices.iter().filter_map(|v| view.topology.vertex(*v)) {
+        for face in vertex.edges.iter().filter_map(|e| view.topology.edge(*e)).flat_map(|e| e.faces.iter().copied()) {
+            if !edge.faces.contains(&face) && !faces.contains(&face) {
+                faces.push(face);
+            }
+        }
+    }
+    faces
+}
+
+/// Orders edges that lie along one shared curve by where their midpoints fall along the
+/// direction the midpoints spread most, then by length.
+fn order_along(edges: &mut [&EdgeInfo]) {
+    let pick = |f: fn(f64, f64) -> f64| {
+        edges.iter().map(|e| e.midpoint).reduce(|a, b| Vec3::new(f(a.x, b.x), f(a.y, b.y), f(a.z, b.z)))
+    };
+    let (Some(low), Some(high)) = (pick(f64::min), pick(f64::max)) else { return };
+    let axis = high - low;
+    edges.sort_by(|a, b| a.midpoint.dot(axis).total_cmp(&b.midpoint.dot(axis)).then(a.length.total_cmp(&b.length)));
 }
 
 /// The origin-based name of a face, without checking that it is unique. A face merged
@@ -688,7 +816,13 @@ pub(crate) fn name_edge(edge: EdgeId, view: &View, names: &NameMap) -> Result<Ed
         Some(faces) => faces,
         None => [origin_name(*a, view, names)?, origin_name(*b, view, names)?],
     };
-    let mut r = EdgeRef { disambiguate: false, faces, fingerprint: EdgeFingerprint::of(info), label: String::new() };
+    let mut r = EdgeRef {
+        disambiguate: false,
+        faces,
+        fingerprint: EdgeFingerprint::of(info),
+        piece: None,
+        label: Box::default(),
+    };
     let mut resolved = resolve_edge(&r, view, names);
     let supports = [r.faces[0].fingerprint.surface, r.faces[1].fingerprint.surface];
     if info.curve == CurveKind::Line
@@ -701,6 +835,22 @@ pub(crate) fn name_edge(edge: EdgeId, view: &View, names: &NameMap) -> Result<Ed
         && matches!(&resolved, Err(Unresolved { reason: RepairReason::Ambiguous, .. }))
     {
         r.disambiguate = true;
+        resolved = resolve_edge(&r, view, names);
+    }
+    // Several edges between the same two faces: tell them apart by the faces at their
+    // ends, then by their place along the shared curve.
+    if !r.disambiguate && matches!(&resolved, Err(Unresolved { reason: RepairReason::Ambiguous, .. })) {
+        let mut ends: Vec<FaceRef> = Vec::new();
+        for face in end_faces(info, view) {
+            let named = origin_name(face, view, names)?;
+            let same = |n: &FaceRef| {
+                n.feature == named.feature && n.generator == named.generator && n.ordinal == named.ordinal
+            };
+            if !ends.iter().any(same) {
+                ends.push(named);
+            }
+        }
+        r.piece = Some(Box::new(EdgePiece { ends }));
         resolved = resolve_edge(&r, view, names);
     }
     match resolved {
@@ -765,7 +915,8 @@ mod tests {
             faces: [a, b],
             fingerprint: EdgeFingerprint { curve: CurveKind::Line, midpoint: Vec3::ZERO, length: 1.0 },
             disambiguate: false,
-            label: String::new(),
+            piece: None,
+            label: Box::default(),
         };
         let kind = crate::FeatureKind::Fillet(crate::BlendFeature {
             edges: vec![edge(imported(2), other.clone()), edge(other.clone(), imported(7))],

@@ -481,7 +481,7 @@ fn held(app: &App) -> Vec<Held> {
             let e = topology.edges.iter().find(|e| e.id == id).expect("the edge is on the body");
             let m = e.midpoint;
             Held {
-                label: r.label.clone(),
+                label: r.label.to_string(),
                 length: e.length,
                 curve: e.curve,
                 midpoint: Vec3::new(m.x as f32, m.y as f32, m.z as f32),
@@ -510,7 +510,7 @@ fn the_fillet(app: &App) -> (Vec<String>, f64) {
         .collect();
     assert_eq!(live.len(), 1, "one fillet: {:?}", doc.features.iter().map(|f| &f.name).collect::<Vec<_>>());
     assert_eq!(live[0].0.status, FeatureStatus::Ok, "the fillet built");
-    (live[0].1.edges.iter().map(|e| e.label.clone()).collect(), live[0].1.radius)
+    (live[0].1.edges.iter().map(|e| e.label.to_string()).collect(), live[0].1.radius)
 }
 
 fn assert_valid_drawn(app: &App, what: &str) {

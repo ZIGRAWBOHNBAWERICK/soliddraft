@@ -620,11 +620,22 @@ impl Document {
         let faces = &t.edge(edge).expect("named edges are in the topology").faces;
         let labels: Vec<String> =
             faces.iter().map(|f| self.face_label(*f).map(|l| l.text).unwrap_or_else(|| f.to_string())).collect();
-        r.label = if labels.len() == 2 && labels[0] == labels[1] {
+        let mut label = if labels.len() == 2 && labels[0] == labels[1] {
             format!("{} · seam", labels[0])
         } else {
             labels.join(" ∩ ")
         };
+        // A piece of an edge that a later feature split names the faces at its ends, so
+        // every piece has its own label.
+        if r.piece.is_some() {
+            let info = t.edge(edge).expect("named edges are in the topology");
+            let ends: Vec<String> = reference::end_faces(info, &View { topology: &t })
+                .into_iter()
+                .map(|f| self.face_label(f).map(|l| l.text).unwrap_or_else(|| f.to_string()))
+                .collect();
+            label.push_str(&format!(" · ends at {}", ends.join(", ")));
+        }
+        r.label = label.into();
         Ok(r)
     }
 

@@ -663,7 +663,7 @@ fn support_of(
     let body = part.body().ok_or_else(|| unavailable(format!("{} has no body", r.path)))?;
     let label = match entity {
         SupportEntity::Face(face) => part.face_label(face).map(|l| l.text).unwrap_or_default(),
-        SupportEntity::Edge(edge) => part.edge_ref(edge).map(|e| e.label).unwrap_or_default(),
+        SupportEntity::Edge(edge) => part.edge_ref(edge).map(|e| e.label.into_string()).unwrap_or_default(),
         SupportEntity::Vertex(vertex) => part.vertex_ref(vertex).map(|v| v.label).unwrap_or_default(),
     };
     let support = part
@@ -877,7 +877,7 @@ fn profile_of(part: &PartDocument, r: &DocRef, entity: SupportEntity) -> Result<
     let kernel = part.kernel();
     let label = match entity {
         SupportEntity::Face(face) => part.face_label(face).map(|l| l.text).unwrap_or_default(),
-        SupportEntity::Edge(edge) => part.edge_ref(edge).map(|e| e.label).unwrap_or_default(),
+        SupportEntity::Edge(edge) => part.edge_ref(edge).map(|e| e.label.into_string()).unwrap_or_default(),
         SupportEntity::Vertex(vertex) => part.vertex_ref(vertex).map(|v| v.label).unwrap_or_default(),
     };
     let named = if label.is_empty() { String::new() } else { format!(", {label}") };

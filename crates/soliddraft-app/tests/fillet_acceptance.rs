@@ -204,9 +204,21 @@ impl Part {
             BodyAccuracy::Exact => "exact".into(),
             BodyAccuracy::Approximate { tolerance_mm } => format!("approximate within {tolerance_mm} mm"),
         };
-        row.faces = self.topology().faces.len();
+        let topology = model.kernel().topology(body);
+        row.faces = topology.as_ref().map_or(0, |topology| topology.faces.len());
         let fillet = self.doc().features.last().unwrap();
-        if !matches!(fillet.status, soliddraft_app::document::FeatureStatus::Ok) {
+        if let Err(error) = topology {
+            // The kernel made the body but cannot sample it, so the user cannot see or pick it.
+            row.result = "refused";
+            row.stage = "display".into();
+            row.kernel = error.to_string();
+            row.message = format!(
+                "{:?}; {} triangles shown; the user reads {:?}",
+                fillet.status,
+                self.doc().triangle_count(),
+                self.doc().proof_message()
+            );
+        } else if !matches!(fillet.status, soliddraft_app::document::FeatureStatus::Ok) {
             row.result = "refused";
             row.stage = "status".into();
             row.message = format!("{:?}", fillet.status);

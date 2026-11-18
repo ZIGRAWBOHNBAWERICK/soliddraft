@@ -244,7 +244,7 @@ class KnownGapNotesTests(unittest.TestCase):
                 '"steps": [{"scenario": "bracket", "step": 19, "tool": "edit_extrude", "last_measured_ms": 1}, '
                 '{"scenario": "drawing", "step": 24, "tool": "edit_extrude", "last_measured_ms": 1}, '
                 '{"scenario": "drawing", "step": 35, "tool": "edit_extrude", "last_measured_ms": 1}]}')
-            with patch.object(release, "ROOT", root):
+            with patch.object(release, "ROOT", root), patch.object(release, "version", return_value="0.7.0"):
                 text = "\n".join(release.known_gap_notes())
         self.assertIn("## Known limitations", text)
         self.assertIn("- bracket: steps 19 (edit_extrude).", text)

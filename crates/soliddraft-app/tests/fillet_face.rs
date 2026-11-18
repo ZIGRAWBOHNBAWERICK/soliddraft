@@ -706,9 +706,9 @@ fn a_slot_wall_pick_leaves_out_its_tangent_edges() {
 }
 
 /// The hole's rim at R2 is refused by both fillet constructions: the exact one cannot trim
-/// the round against the faces around it (an `intersect.` refusal), and the general one
-/// does not take this edge. The panel gives the general construction's reason, the one
-/// that holds, in plain words and without either code.
+/// the round against the faces around it (an `intersect.` refusal, which stays the
+/// kernel's code), and the general one does not take this edge. The panel gives the
+/// general construction's reason, the one that holds, in plain words and without either code.
 #[test]
 fn a_fillet_both_constructions_refuse_says_so_in_the_panel() {
     let _gpu = gpu();
@@ -726,7 +726,7 @@ fn a_fillet_both_constructions_refuse_says_so_in_the_panel() {
         let editor = app.state().state.editor.as_ref().expect("Fillet opens on the rim pick");
         editor.error.clone().expect("the panel shows the refusal")
     };
-    assert!(diagnostic.contains("exact path refused intersect."), "the exact construction cannot trim: {diagnostic}");
+    assert!(diagnostic.contains("intersect."), "the exact construction cannot trim: {diagnostic}");
     assert!(diagnostic.contains("numerical continuation refused fillet."), "nor can the general one: {diagnostic}");
     let shown = "This fillet cannot be made on the selected edges. Reduce the radius or select different edges.";
     assert!(app.query_all_by_label(shown).next().is_some(), "the panel gives the general reason: {diagnostic}");

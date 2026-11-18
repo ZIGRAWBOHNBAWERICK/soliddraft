@@ -14,7 +14,7 @@ use soliddraft_app::{
 use soliddraft_assistant::{Caller, ToolHost};
 use soliddraft_kernel_api::ImportFormat;
 
-const BLOCK: &[u8] = include_bytes!("../../../ci/fixtures/import/block-seam-4um.step");
+const BLOCK: &[u8] = include_bytes!("../../../ci/fixtures/import/block-closed.step");
 const MESH: &[u8] = include_bytes!("../../../ci/fixtures/import/tetrahedron.obj");
 
 fn call(doc: &mut Document, name: &str, input: Value) -> Result<Value, String> {
@@ -188,16 +188,18 @@ fn closed_mesh_review_accepts_displays_saves_reopens_and_exports_an_exact_solid(
 }
 
 #[test]
-fn source_cleanup_certificate_is_visible_and_survives_a_saved_part() {
+fn source_cleanup_keeps_tolerant_authority_and_its_saved_record() {
     let mut doc = Document::new("Source cleanup", soliddraft_app::kernel());
     let source = include_bytes!("../../soliddraft-kernel-catallax/tests/fixtures/planar-source-incidence.step");
     let preview = Preview::from_bytes(&doc, "incidence.step", source.to_vec()).unwrap();
     let id = commit(&mut doc, &preview, &Review::default()).unwrap();
     let record = doc.model().import_record(soliddraft_model::FeatureId(id as u32)).unwrap();
-    assert_eq!(record.format, "catallax-import-repair/3");
-    assert_eq!(record.source_incidence.len(), 1);
-    let rows = soliddraft_app::import::record_rows(record);
-    assert!(rows.iter().any(|(name, _)| name.ends_with("source to result")));
+    assert_eq!(
+        doc.kernel().body_accuracy(doc.display_body().unwrap()).unwrap(),
+        soliddraft_kernel_api::BodyAccuracy::Tolerant
+    );
+    assert_eq!(soliddraft_app::import::report::rows(&doc, &[])[0].tier, soliddraft_app::import::report::Tier::Tolerant);
+    assert!(doc.body_tolerance(0).is_none(), "source cleanup is not a whole-body certificate");
     let saved = doc.model().to_bytes().unwrap();
     let reopened = soliddraft_app::file::open_bytes("cleanup.dwprt", &saved, soliddraft_app::kernel(), None).unwrap();
     assert_eq!(reopened.model().import_record(soliddraft_model::FeatureId(id as u32)), Some(record));
@@ -265,16 +267,19 @@ fn mesh_refusals_are_plain_and_do_not_change_the_part() {
 }
 
 #[test]
-fn source_cleanup_outside_the_certified_limit_is_refused_before_editing() {
-    let doc = Document::new("Refused cleanup", soliddraft_app::kernel());
+fn cleanup_beyond_the_certified_limit_is_tolerant_not_certified() {
+    let mut doc = Document::new("Tolerant cleanup", soliddraft_app::kernel());
     let source = include_str!("../../soliddraft-kernel-catallax/tests/fixtures/planar-source-incidence.step")
         .replace("(0.000001,0,1)", "(0.003,0,1)");
-    let original = doc.model().to_bytes().unwrap();
-    let error = Preview::from_bytes(&doc, "tilted.step", source.into_bytes()).unwrap_err();
-    assert_eq!(error, "This STEP file could not be imported without an unverified repair.");
-    assert_eq!(doc.model().to_bytes().unwrap(), original);
-    assert!(doc.features.is_empty());
-    assert_eq!(doc.revision(), 0);
+    let bytes = source.into_bytes();
+    let preview = Preview::from_bytes(&doc, "tilted.step", bytes.clone()).unwrap();
+    commit(&mut doc, &preview, &Review::default()).unwrap();
+    let body = doc.display_body().unwrap();
+    assert_eq!(doc.kernel().body_accuracy(body).unwrap(), soliddraft_kernel_api::BodyAccuracy::Tolerant);
+    assert!(doc.body_tolerance(0).is_none());
+    assert!(doc.triangle_count() > 0);
+    let FeatureKind::ImportStep(import) = &doc.features[0].kind else { panic!("import feature") };
+    assert_eq!(import.source, bytes);
 }
 
 #[test]

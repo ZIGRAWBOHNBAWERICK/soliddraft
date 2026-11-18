@@ -67,7 +67,9 @@ pub(super) fn require_solids(opened: &OpenedStep) -> KernelResult<()> {
     if opened.bodies().is_empty() {
         return Err(KernelError::InvalidInput("This STEP file contains no supported bodies.".into()));
     }
-    if !opened.bodies().iter().any(|body| body.tier() != Tier::SurfaceBody) {
+    if !(0..opened.bodies().len())
+        .any(|index| opened.bodies()[index].tier() != Tier::SurfaceBody && opened.body(index).is_some())
+    {
         return Err(body_refusal(opened, 0));
     }
     Ok(())

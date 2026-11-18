@@ -203,10 +203,13 @@ pub(super) fn replace_file(request: &FileReplacementRequest<'_>) -> KernelResult
         decisions: BTreeMap::new(),
     };
     let outcome = replace_step_file(&recipe, &edit, &files, &mut Decider::default()).map_err(|refusal| {
-        KernelError::InvalidInput(format!(
-            "The new file could not replace the old one ({}): {}",
-            refusal.code, refusal.detail
-        ))
+        let message = match refusal.code {
+            "import.invalid-decision" => "Replacing this file needs repair answers, which file replacement cannot apply yet. Nothing was changed.",
+            "numbers.operation-budget" | "application.work-limit" | "import.resource-limit" =>
+                "The new file could not be checked for replacement within the available work limit. Nothing was changed.",
+            _ => "The new file's geometry could not be verified for replacement. Nothing was changed.",
+        };
+        KernelError::InvalidInput(message.into())
     })?;
     let analysis = match outcome {
         FileReplacementOutcome::Ready(verified) => verified.analysis,
@@ -282,7 +285,11 @@ impl CatallaxKernel {
         }
         if format == ImportFormat::Step && request.decisions.is_empty() && request.record.is_none() {
             let opened = self.opened_step(request.source)?;
-            if tolerant::needs_default(&opened) {
+            // Surface models retain the existing sheet reader, including beside tolerant solids.
+            let surface = request.source_solid.is_some_and(|selected| {
+                opened.source().bodies().iter().any(|source| source.name() == selected && !source.declared_solid())
+            });
+            if tolerant::needs_default(&opened) && !surface {
                 return self.import_tolerant_body(tag, request);
             }
         }

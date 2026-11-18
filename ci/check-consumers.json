@@ -140,6 +140,12 @@
       "test-macos",
       "application-loop"
     ],
+    "ci/fixtures/import/block-closed.step": [
+      "lint",
+      "kernel",
+      "test-linux",
+      "application-loop"
+    ],
     "ci/fixtures/import/block-seam-4um.step": [
       "lint",
       "kernel",

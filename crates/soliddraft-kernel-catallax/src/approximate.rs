@@ -30,8 +30,10 @@ pub(crate) struct Approximate {
     /// Each face's origins in the interface's terms.
     pub face_origins: BTreeMap<FaceId, Vec<Origin>>,
     samples: crate::MeshCache<Sample>,
-    topology: OnceLock<KernelResult<Topology>>,
-    mass: OnceLock<KernelResult<MassProperties>>,
+    // Only answers are kept. A refusal may be the caller's allowance running out, and the
+    // next caller, with a fresh one, must get the answer and not that refusal again.
+    topology: OnceLock<Topology>,
+    mass: OnceLock<MassProperties>,
 }
 
 /// What an approximate body cannot do yet: anything that needs its exact model.
@@ -185,7 +187,11 @@ impl Approximate {
 
     /// Faces, edges and vertices, measured on the default display sample.
     pub(crate) fn topology(&self) -> KernelResult<Topology> {
-        self.topology.get_or_init(|| self.compute_topology()).clone()
+        if let Some(topology) = self.topology.get() {
+            return Ok(topology.clone());
+        }
+        let topology = self.compute_topology()?;
+        Ok(self.topology.get_or_init(|| topology).clone())
     }
 
     fn compute_topology(&self) -> KernelResult<Topology> {
@@ -292,7 +298,11 @@ impl Approximate {
 
     /// Volume, area, centroid and inertia of the closed display sample.
     pub(crate) fn mass_properties(&self) -> KernelResult<MassProperties> {
-        self.mass.get_or_init(|| self.compute_mass()).clone()
+        if let Some(mass) = self.mass.get() {
+            return Ok(*mass);
+        }
+        let mass = self.compute_mass()?;
+        Ok(*self.mass.get_or_init(|| mass))
     }
 
     fn compute_mass(&self) -> KernelResult<MassProperties> {
@@ -309,7 +319,7 @@ impl Approximate {
 
     /// Mass properties already estimated, without starting.
     pub(crate) fn cached_mass(&self) -> Option<MassProperties> {
-        self.mass.get()?.as_ref().ok().copied()
+        self.mass.get().copied()
     }
 
     /// Catallax admitted the body under its stated tolerance; an exact check has no
@@ -826,6 +836,27 @@ mod tests {
         }
         let mass = approximate.mass_properties().unwrap_err().to_string();
         assert!(mass.contains("surface body encloses no volume"), "{mass}");
+    }
+
+    /// A query that runs out of its caller's work allowance is refused, and that refusal is
+    /// not kept: the next query, with allowance enough, gets the body's topology and mass.
+    #[test]
+    fn a_query_refused_for_lack_of_allowance_does_not_stay_refused() {
+        let (definition, _, recipe) = block_definition();
+        let options = catallax_app::NumericalOptions::default();
+        let block = catallax_topology::numerical::build(definition, options, &mut Decider::default()).unwrap();
+        let outcome = NumericalApplicationBody::new(block, Arc::new(recipe), std::collections::BTreeMap::new());
+        let approximate = Approximate::new(Arc::new(outcome), &[], &BTreeMap::new(), &[], &mut 0);
+        let (starved, work) = catallax_numbers::with_operation_budget(1, || approximate.topology());
+        assert!(work.exhausted, "{work:?}");
+        assert!(starved.unwrap_err().to_string().contains("numbers.operation-budget"));
+        let (starved, work) = catallax_numbers::with_operation_budget(1, || approximate.mass_properties());
+        assert!(work.exhausted && starved.is_err(), "{work:?}");
+        assert_eq!(approximate.cached_mass(), None);
+        assert_eq!(approximate.topology().unwrap().faces.len(), 6);
+        let mass = approximate.mass_properties().unwrap();
+        assert!((mass.volume - 480.0).abs() < 1e-6, "{mass:?}");
+        assert_eq!(approximate.cached_mass(), Some(mass));
     }
 
     /// A face key is any string, and STEP quotes it. A semicolon inside the quotes must not

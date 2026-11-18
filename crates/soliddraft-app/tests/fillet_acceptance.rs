@@ -29,6 +29,10 @@ const OWNER_BOSS: &str = r#"{"plane":"front","operations":[
 const OWNER_POCKET: &str =
     r#"{"plane":"top","offset":60,"shapes":[{"shape":"rectangle","center":[15,-38,60],"width":34,"height":22.67}]}"#;
 
+/// The two sample-part edges SolidDraft cannot name: arcs of the boss foot between the same
+/// two faces that also end at the same faces.
+const UNNAMEABLE: [&str; 2] = ["Boss-Extrude3 · Edge 6", "Boss-Extrude3 · Edge 8"];
+
 /// The correct pocket part has 13 faces: the flat top opened by the pocket mouth, two
 /// rounded sides, two flat sides, the bottom, two ends, four pocket walls and the floor.
 const OWNER_FACES: usize = 13;
@@ -573,8 +577,11 @@ fn demo_edges(quarter: usize) {
             part.fillet("demo-edge", vec![name], 1.0)
         })
         .collect();
-    // Two arcs of the boss have no name of their own in the app; every other edge rounds.
-    report(&format!("demo-edges-{}", quarter + 1), &rows, |row| row.result != "name");
+    // Two arcs of the boss have no name of their own in the app. Those two rows, and no
+    // other, may stop at naming; every other edge rounds.
+    report(&format!("demo-edges-{}", quarter + 1), &rows, |row| {
+        !(row.result == "name" && row.edges.len() == 1 && UNNAMEABLE.contains(&row.edges[0].as_str()))
+    });
 }
 
 #[test]

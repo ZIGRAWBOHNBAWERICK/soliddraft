@@ -67,6 +67,9 @@ struct Row {
     faces: usize,
     work: Option<u64>,
     seconds: f64,
+    /// What became of the built part's STEP export, where the case asks for one:
+    /// `exported N bytes` and the export's report, or the refusal.
+    step: String,
 }
 
 impl Row {
@@ -75,6 +78,7 @@ impl Row {
             "case": self.case, "radius": self.radius, "edges": self.edges, "result": self.result,
             "stage": self.stage, "kernel": self.kernel, "message": self.message, "tool": self.tool,
             "accuracy": self.accuracy, "faces": self.faces, "work": self.work, "seconds": self.seconds,
+            "step": self.step,
         })
     }
 }
@@ -147,6 +151,31 @@ impl Part {
     /// Adds a fillet as the panel's OK does, reports it, and undoes it so the next case
     /// starts from the same part.
     fn fillet(&mut self, case: &str, edges: Vec<String>, radius: f64) -> Row {
+        self.fillet_and(case, edges, radius, false)
+    }
+
+    /// Exports the open part as STEP, as File › Export does, and keeps the file beside the
+    /// reports. The application reads no approximate STEP back: its Import STEP admits
+    /// exact solids only. OpenCASCADE opens these files outside this test, as CI's
+    /// `ci/check-step.py` opens the bracket's.
+    fn export(&mut self, name: &str) -> String {
+        let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("fillet-acceptance").join("step");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(format!("{name}.step"));
+        let exported = self.tool("export_step", json!({ "path": path.to_str().unwrap() }));
+        if exported.is_error {
+            return format!("export refused: {}", exported.content);
+        }
+        let report = serde_json::from_str::<Value>(&exported.content).unwrap();
+        let written = std::fs::read_to_string(&path).unwrap_or_default();
+        if !written.starts_with("ISO-10303-21;") || !written.trim_end().ends_with("END-ISO-10303-21;") {
+            return "export refused: the file written is not a complete STEP file".into();
+        }
+        format!("exported {} bytes: {}", written.len(), report["report"].as_str().unwrap_or_default())
+    }
+
+    /// As [`Part::fillet`]; `export` also writes the built part to STEP.
+    fn fillet_and(&mut self, case: &str, edges: Vec<String>, radius: f64, export: bool) -> Row {
         let before = self.doc().model().part_json();
         let (features, faces) = (self.doc().features.len(), self.topology().faces.len());
         self.kernel.take_diagnostics().unwrap();
@@ -172,6 +201,7 @@ impl Part {
             faces: 0,
             work,
             seconds,
+            step: String::new(),
         };
         if out.is_error {
             // The panel shows the kernel's refusal through the same words, with the faces
@@ -240,6 +270,14 @@ impl Part {
             row.stage = "display".into();
             row.message = "the filleted part shows nothing".into();
         }
+        if export && row.result == "pass" {
+            row.step = self.export(&format!("{case}-r{radius}"));
+            if !row.step.starts_with("exported") {
+                row.result = "refused";
+                row.stage = "step".into();
+                row.message = row.step.clone();
+            }
+        }
         self.state.doc.undo().unwrap();
         assert_eq!(self.doc().features.len(), features, "{case}: undo did not remove the fillet");
         assert_eq!(self.topology().faces.len(), faces, "{case}: undo did not restore the part");
@@ -268,13 +306,14 @@ fn report(case: &str, rows: &[Row], must_pass: impl Fn(&Row) -> bool) {
     }
     for row in rows {
         eprintln!(
-            "{} R{} {} [{}] {} {:.1}s {}",
+            "{} R{} {} [{}] {} {:.1}s {} {}",
             row.case,
             row.radius,
             row.result,
             row.stage,
             row.accuracy,
             row.seconds,
+            row.step,
             if row.result == "pass" { String::new() } else { format!("{} | {}", row.message, row.kernel) }
         );
     }
@@ -316,9 +355,84 @@ fn owner_part() -> (Part, Vec<String>) {
     (part, rim)
 }
 
+/// The whole rim through a session, as the owner would keep working on it: built at R2,
+/// saved, reopened by a new kernel, edited to the largest radius that fits, and an edit
+/// past that refused with the last good solid kept and still exported.
+#[test]
+fn owner_pocket_rim_saves_reopens_edits_and_keeps_its_solid_when_an_edit_is_refused() {
+    use soliddraft_app::document::{APPROXIMATE_BODY_NAME, FeatureStatus};
+    /// The faces the fillet made, by the names the tree and the picks show.
+    fn rounds(doc: &Document, fillet: &str) -> Vec<String> {
+        let id = doc.features.iter().find(|f| f.name == fillet).expect("the fillet is in the tree").id;
+        doc.faces.iter().filter(|face| face.feature == id).map(|face| face.label.clone()).collect()
+    }
+    /// The part as it stands: its fillet is built, the body is approximate and shown.
+    fn standing(part: &Part, fillet: &str, stage: &str) -> Option<f64> {
+        let doc = part.doc();
+        let feature = doc.features.iter().find(|f| f.name == fillet).expect("the fillet is in the tree");
+        assert_eq!(feature.status, FeatureStatus::Ok, "{stage}");
+        assert_eq!(doc.body_name(0), APPROXIMATE_BODY_NAME, "{stage}");
+        assert!(doc.triangle_count() > 0, "{stage}: the part shows nothing");
+        assert_eq!(part.topology().faces.len(), OWNER_FACES + 6, "{stage}");
+        doc.mass_properties(feature.id).map(|mass| mass.volume)
+    }
+
+    let (mut part, rim) = owner_part();
+    let built = part.tool("fillet", json!({"edges": rim, "radius": 2.0}));
+    assert!(!built.is_error, "R2: {}", built.content);
+    let fillet = part.doc().features.last().unwrap().name.clone();
+    let names = rounds(part.doc(), &fillet);
+    assert_eq!(names.len(), 6, "one round for each rim edge: {names:?}");
+    let at_r2 = standing(&part, &fillet, "built at R2");
+
+    let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("fillet-acceptance").join("saved");
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("owner-pocket-rim-r2.dwprt");
+    let path = path.to_str().unwrap();
+    let saved = part.tool("save", json!({ "path": path }));
+    assert!(!saved.is_error, "save: {}", saved.content);
+
+    // A new kernel builds the saved part again from its recipe.
+    let mut part = Part::new("Reopened");
+    let opened = part.tool("open", json!({ "path": path }));
+    assert!(!opened.is_error, "open: {}", opened.content);
+    assert_eq!(rounds(part.doc(), &fillet), names, "the rounds keep their names through save and reopen");
+    let reopened = standing(&part, &fillet, "reopened at R2");
+    if let (Some(before), Some(after)) = (at_r2, reopened) {
+        assert!((before - after).abs() < before * 1e-9, "the reopened part is the saved one: {before} != {after}");
+    }
+
+    let edited = part.tool("edit_fillet", json!({ "feature": fillet, "radius": OWNER_LARGEST }));
+    assert!(!edited.is_error, "edit to R{OWNER_LARGEST}: {}", edited.content);
+    assert_eq!(rounds(part.doc(), &fillet), names, "the rounds keep their names through the edit");
+    let at_largest = standing(&part, &fillet, "edited to the largest radius");
+    if let (Some(smaller), Some(larger)) = (reopened, at_largest) {
+        assert!(larger < smaller, "a larger rim round removes more: {larger} !< {smaller}");
+    }
+
+    // R5 is past the wall: the edit is refused in plain words and the R3.99 part stays.
+    let kept = part.doc().model().part_json();
+    let refused = part.tool("edit_fillet", json!({ "feature": fillet, "radius": 5.0 }));
+    assert!(refused.is_error, "R5 must not build: {}", refused.content);
+    let why = soliddraft_app::geometry_message::for_user(&refused.content);
+    assert!(why.contains("Try a radius under"), "{why}");
+    assert!(!["fillet.", "features.", "numbers."].iter().any(|code| why.contains(code)), "{why}");
+    assert_eq!(part.doc().model().part_json(), kept, "a refused edit changed the part");
+    assert_eq!(rounds(part.doc(), &fillet), names);
+    let after_refusal = standing(&part, &fillet, "after the refused R5");
+    if let (Some(before), Some(after)) = (at_largest, after_refusal) {
+        assert!((before - after).abs() < before * 1e-9, "the refused edit kept the solid: {before} != {after}");
+    }
+    let step = part.export("owner-pocket-rim-session");
+    assert!(step.starts_with("exported") && step.contains("19 faces"), "{step}");
+    eprintln!(
+        "owner rim session: volume at R2 {at_r2:?}, reopened {reopened:?}, at R{OWNER_LARGEST} {at_largest:?}, after the refused R5 {after_refusal:?}; {step}"
+    );
+}
+
 fn owner_rim(radius: f64) {
     let (mut part, rim) = owner_part();
-    let rows = vec![part.fillet("owner-pocket-rim", rim, radius)];
+    let rows = vec![part.fillet_and("owner-pocket-rim", rim, radius, true)];
     report(&format!("owner-pocket-rim-r{radius}"), &rows, |_| true);
 }
 
@@ -386,6 +500,39 @@ fn owner_pocket_rim_without_the_thin_wall_edge_takes_r5() {
     report("owner-pocket-rim-five-r5", &rows, |_| true);
 }
 
+/// At R8 the two arcs of that five-edge rim no longer end on the thin wall: the ball's
+/// contact with the pocket wall would leave it. The refusal comes at once, in plain words,
+/// with the radius that fits.
+#[test]
+fn owner_pocket_rim_without_the_thin_wall_edge_refuses_r8_at_once() {
+    let (mut part, rim) = owner_part();
+    let topology = part.topology();
+    let thin_wall_edge = topology
+        .edges
+        .iter()
+        .find(|e| (e.bbox.min.x - 32.0).abs() < 0.01 && (e.bbox.max.x - 32.0).abs() < 0.01 && e.bbox.min.z > 50.0)
+        .map(|e| part.edge_name(e.id))
+        .expect("the rim edge along the thin wall");
+    let edges: Vec<String> = rim.into_iter().filter(|e| *e != thin_wall_edge).collect();
+    let mut row = part.fillet("owner-pocket-rim-five", edges, 8.0);
+    let message = row.message.clone();
+    let limit =
+        message.split("under ").nth(1).and_then(|rest| rest.split(" mm").next()).and_then(|n| n.parse::<f64>().ok());
+    let plain = !["fillet.", "features.", "intersect.", "numbers.", "shapes.", "Catallax"]
+        .iter()
+        .any(|code| message.contains(code));
+    if row.result == "refused" && plain && limit.is_some_and(|l| (7.9..=8.0).contains(&l)) && row.seconds < 5.0 {
+        row.result = "pass";
+    } else if row.result == "refused" {
+        row.result = "unclear";
+        row.stage = format!("{}; message or time", row.stage);
+    } else {
+        row.result = "built";
+        row.stage = "a rim fillet past its end contact built".into();
+    }
+    report("owner-pocket-rim-five-r8", &[row], |_| true);
+}
+
 /// A 60 x 40 x 20 box with all twelve edges rounded. Its 20 mm height takes at most R10.
 fn box_all_edges(radius: f64) {
     let mut part = Part::new("Box");
@@ -426,7 +573,8 @@ fn demo_edges(quarter: usize) {
             part.fillet("demo-edge", vec![name], 1.0)
         })
         .collect();
-    report(&format!("demo-edges-{}", quarter + 1), &rows, |_| false);
+    // Two arcs of the boss have no name of their own in the app; every other edge rounds.
+    report(&format!("demo-edges-{}", quarter + 1), &rows, |row| row.result != "name");
 }
 
 #[test]

@@ -159,13 +159,11 @@ impl Part {
     }
 
     /// Exports the open part as STEP, as File › Export does, and keeps the file beside the
-    /// reports. The application reads no approximate STEP back: its Import STEP admits
-    /// exact solids only. OpenCASCADE opens these files outside this test, as CI's
+    /// reports. OpenCASCADE opens these files outside this test, as CI's
     /// `ci/check-step.py` opens the bracket's.
     fn export(&mut self, name: &str) -> String {
-        let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("fillet-acceptance").join("step");
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join(format!("{name}.step"));
+        let path = step_path(name);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         let exported = self.tool("export_step", json!({ "path": path.to_str().unwrap() }));
         if exported.is_error {
             return format!("export refused: {}", exported.content);
@@ -250,6 +248,7 @@ impl Part {
         row.accuracy = match model.kernel().body_accuracy(body).unwrap() {
             BodyAccuracy::Exact => "exact".into(),
             BodyAccuracy::Approximate { tolerance_mm } => format!("approximate within {tolerance_mm} mm"),
+            BodyAccuracy::Tolerant => "tolerant".into(),
         };
         let topology = model.kernel().topology(body);
         row.faces = topology.as_ref().map_or(0, |topology| topology.faces.len());
@@ -287,6 +286,48 @@ impl Part {
         assert_eq!(self.topology().faces.len(), faces, "{case}: undo did not restore the part");
         row
     }
+}
+
+fn step_path(name: &str) -> std::path::PathBuf {
+    std::path::Path::new(env!("CARGO_TARGET_TMPDIR"))
+        .join("fillet-acceptance")
+        .join("step")
+        .join(format!("{name}.step"))
+}
+
+fn import_exported_step(name: &str, faces: usize) {
+    use soliddraft_app::{
+        document::FeatureKind,
+        import::report::{self, Tier},
+    };
+    let path = step_path(name);
+    let mut part = Part::new("Reimported fillets");
+    let preview = part.tool("preview_import", json!({"path":path.to_str().unwrap()}));
+    assert!(!preview.is_error, "{name} preview: {}", preview.content);
+    let preview: Value = serde_json::from_str(&preview.content).unwrap();
+    let imported = part.tool("import_step", json!({"path":path.to_str().unwrap(),"preview_token":preview["token"]}));
+    assert!(!imported.is_error, "{name} import: {}", imported.content);
+    let doc = part.doc();
+    assert_eq!(doc.model().live_bodies().len(), 1, "{name}");
+    assert_eq!(doc.features.len(), 1, "{name}");
+    assert_eq!(part.topology().faces.len(), faces, "{name}: an exported face was lost");
+    assert!(doc.triangle_count() > 0, "{name}: the imported body is not displayed");
+    let body = doc.display_body().unwrap();
+    let tier = report::rows(doc, &[])[0].tier;
+    match doc.kernel().body_accuracy(body).unwrap() {
+        BodyAccuracy::Exact => assert!(matches!(tier, Tier::Exact | Tier::Repaired | Tier::FileRepaired)),
+        BodyAccuracy::Tolerant => {
+            assert_eq!(tier, Tier::Tolerant);
+            assert!(doc.body_tolerance(0).is_none(), "local fits are not a whole-body bound");
+            assert_eq!(
+                doc.model().proof_report().features[0].answer_kind,
+                soliddraft_exchange::proof::AnswerKind::Approximate
+            );
+        }
+        accuracy => panic!("{name}: imported accuracy is not labelled correctly: {accuracy:?}"),
+    }
+    let FeatureKind::ImportStep(import) = &doc.features[0].kind else { panic!("import feature") };
+    assert_eq!(import.source, std::fs::read(&path).unwrap(), "{name}: source bytes changed");
 }
 
 /// Writes the rows where the triage reads them, then fails on any row that did not pass.
@@ -453,6 +494,7 @@ fn owner_pocket_rim_takes_r1() {
 #[test]
 fn owner_pocket_rim_takes_r2() {
     owner_rim(2.0);
+    import_exported_step("owner-pocket-rim-r2", OWNER_FACES + 6);
 }
 
 #[test]
@@ -544,8 +586,9 @@ fn box_all_edges(radius: f64) {
     part.build("extrude", r#"{"sketch":"Sketch1","depth":20,"flip":false}"#);
     let edges: Vec<String> = part.topology().edges.iter().map(|e| part.edge_name(e.id)).collect();
     assert_eq!(edges.len(), 12);
-    let rows = vec![part.fillet("box-all-edges", edges, radius)];
+    let rows = vec![part.fillet_and("box-all-edges", edges, radius, true)];
     report(&format!("box-all-edges-r{radius}"), &rows, |_| true);
+    import_exported_step(&format!("box-all-edges-r{radius}"), rows[0].faces);
 }
 
 #[test]

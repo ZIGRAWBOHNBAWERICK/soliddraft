@@ -439,30 +439,6 @@ impl Approximate {
     }
 }
 
-/// Runs a sampled query on the active allowance, or the application's ordinary request
-/// allowance. A numerical writer's smaller standalone guard must not replace it.
-fn on_request_allowance<T>(
-    operation: &str,
-    run: impl FnOnce(&mut Decider) -> Result<T, Refusal>,
-) -> Result<T, Refusal> {
-    let observed = || crate::numerical(operation, |dec| run(dec).map(catallax_numbers::Answer::exact));
-    if catallax_numbers::operation_budget_active() {
-        return observed().map(|answer| answer.value);
-    }
-    let (result, work) = catallax_numbers::with_operation_budget(catallax_app::DEFAULT_BUILD_WORK, observed);
-    if work.exhausted {
-        return Err(Refusal::new(
-            "numbers.operation-budget",
-            format!("{operation} exhausted the application's work allowance"),
-        ));
-    }
-    result.map(|answer| answer.value)
-}
-
-/// The display sample of a numerical body: Catallax writes the body's numerical STEP file
-/// and previews that file. The preview names faces and edges by STEP entity; the writer
-/// labels each entity with its definition key, which names them here. Nothing about the
-/// sample is proved.
 /// Writes or shows an approximate body on the caller's allowance, or on the app's request
 /// allowance when none is active, as an exact body's display and export run. Left to
 /// itself, Catallax's numerical STEP writer stops at its smaller standalone default,
@@ -485,6 +461,10 @@ fn on_request_allowance<T>(
     result.map(|answer| answer.value)
 }
 
+/// The display sample of a numerical body: Catallax writes the body's numerical STEP file
+/// and previews that file. The preview names faces and edges by STEP entity; the writer
+/// labels each entity with its definition key, which names them here. Nothing about the
+/// sample is proved.
 fn sample_through_step(body: &NumericalBody, options: &PreviewOptions, dec: &mut Decider) -> Result<Sample, Refusal> {
     let step = catallax_step::numerical::build(body, &Default::default(), dec)?;
     let step = step.bytes();

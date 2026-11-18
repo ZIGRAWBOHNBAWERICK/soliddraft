@@ -197,6 +197,12 @@ def known_gap_notes():
              "These application steps took longer than the 1,000 ms feature click budget when measured; "
              f"this is not a claim of meeting the budget. Follow-up: {policy['follow_up']}.", ""]
     lines += [f"- {scenario}: steps {', '.join(numbers)}." for scenario, numbers in steps.items()] + [""]
+    if version() == "0.7.0":
+        lines += ["### Fillet selection and STEP re-import", "",
+                  "Two curved sample-part edges, `Boss-Extrude3 · Edge 6` and "
+                  "`Boss-Extrude3 · Edge 8`, cannot be named or selected for a fillet through the interface. "
+                  "The numerical STEP re-import catch-up is not included; STEP files exported from "
+                  "approximate bodies cannot be re-imported by this release.", ""]
     releases = policy.get("release_limitations", {})
     limitation = releases.get(version()) if releases else None
     if limitation:

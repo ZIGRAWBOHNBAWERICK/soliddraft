@@ -253,11 +253,17 @@ fn report(case: &str, rows: &[Row], must_pass: impl Fn(&Row) -> bool) {
     std::fs::create_dir_all(dir.join("recipes")).unwrap();
     let table: Vec<Value> = rows.iter().map(Row::json).collect();
     std::fs::write(dir.join(format!("{case}.json")), serde_json::to_vec_pretty(&table).unwrap()).unwrap();
-    // One recipe per refused case, outside the table: the triage reads only the rows.
-    if let [row] = rows
-        && let Some(recipe) = &row.recipe
-    {
-        std::fs::write(dir.join("recipes").join(format!("{case}.json")), serde_json::to_vec_pretty(recipe).unwrap())
+    // One recipe per refused fillet, outside the table: the triage reads only the rows.
+    // A case of several fillets names each recipe after its first edge.
+    for row in rows {
+        let Some(recipe) = &row.recipe else { continue };
+        let name = if rows.len() == 1 {
+            case.to_owned()
+        } else {
+            let edge: String = row.edges[0].chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-').collect();
+            format!("{case}-{edge}")
+        };
+        std::fs::write(dir.join("recipes").join(format!("{name}.json")), serde_json::to_vec_pretty(recipe).unwrap())
             .unwrap();
     }
     for row in rows {

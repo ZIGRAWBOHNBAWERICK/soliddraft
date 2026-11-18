@@ -14,6 +14,9 @@ use soliddraft_assistant::{Caller, tools::call_checked};
 use soliddraft_kernel_api::{BodyAccuracy, EdgeId, FaceId};
 use soliddraft_kernel_catallax::{APP_REQUEST_WORK, CatallaxKernel};
 
+#[path = "support/ui.rs"]
+mod ribbon;
+
 /// The owner's Boss-Extrude1: an 80 x 60 profile with R25 top corners, so its flat top
 /// is 30 mm wide and runs tangentially into the rounded sides, extruded 76 mm.
 const OWNER_BOSS: &str = r#"{"plane":"front","operations":[
@@ -28,10 +31,6 @@ const OWNER_BOSS: &str = r#"{"plane":"front","operations":[
 /// the line where the flat top meets the rounded side, cut 35 mm deep.
 const OWNER_POCKET: &str =
     r#"{"plane":"top","offset":60,"shapes":[{"shape":"rectangle","center":[15,-38,60],"width":34,"height":22.67}]}"#;
-
-/// The two sample-part edges SolidDraft cannot name: arcs of the boss foot between the same
-/// two faces that also end at the same faces.
-const UNNAMEABLE: [&str; 2] = ["Boss-Extrude3 · Edge 6", "Boss-Extrude3 · Edge 8"];
 
 /// The correct pocket part has 13 faces: the flat top opened by the pocket mouth, two
 /// rounded sides, two flat sides, the bottom, two ends, four pocket walls and the floor.
@@ -296,21 +295,27 @@ fn step_path(name: &str) -> std::path::PathBuf {
 }
 
 fn import_exported_step(name: &str, faces: usize) {
+    use egui_kittest::kittest::Queryable;
     use soliddraft_app::{
         document::FeatureKind,
         import::report::{self, Tier},
     };
     let path = step_path(name);
-    let mut part = Part::new("Reimported fillets");
-    let preview = part.tool("preview_import", json!({"path":path.to_str().unwrap()}));
-    assert!(!preview.is_error, "{name} preview: {}", preview.content);
-    let preview: Value = serde_json::from_str(&preview.content).unwrap();
-    let imported = part.tool("import_step", json!({"path":path.to_str().unwrap(),"preview_token":preview["token"]}));
-    assert!(!imported.is_error, "{name} import: {}", imported.content);
-    let doc = part.doc();
+    let case = ribbon::case(&format!("fillet-roundtrip-{name}"));
+    let mut app = ribbon::app(Document::new("Reimported fillets", soliddraft_app::kernel()));
+    app.state_mut().state.push(soliddraft_app::state::AppAction::ImportStep(Some(path.clone())));
+    app.run_steps(3);
+    assert!(app.state().state.import_dialog.is_some(), "{name}: Import STEP did not open");
+    app.get_by_role_and_label(egui::accesskit::Role::Button, "Accept").click();
+    app.run_steps(3);
+    let doc = &app.state().state.doc;
     assert_eq!(doc.model().live_bodies().len(), 1, "{name}");
     assert_eq!(doc.features.len(), 1, "{name}");
-    assert_eq!(part.topology().faces.len(), faces, "{name}: an exported face was lost");
+    assert_eq!(
+        doc.kernel().topology(doc.display_body().unwrap()).unwrap().faces.len(),
+        faces,
+        "{name}: an exported face was lost"
+    );
     assert!(doc.triangle_count() > 0, "{name}: the imported body is not displayed");
     let body = doc.display_body().unwrap();
     let tier = report::rows(doc, &[])[0].tier;
@@ -328,6 +333,7 @@ fn import_exported_step(name: &str, faces: usize) {
     }
     let FeatureKind::ImportStep(import) = &doc.features[0].kind else { panic!("import feature") };
     assert_eq!(import.source, std::fs::read(&path).unwrap(), "{name}: source bytes changed");
+    case.frame(&mut app, "imported");
 }
 
 /// Writes the rows where the triage reads them, then fails on any row that did not pass.
@@ -620,11 +626,7 @@ fn demo_edges(quarter: usize) {
             part.fillet("demo-edge", vec![name], 1.0)
         })
         .collect();
-    // Two arcs of the boss have no name of their own in the app. Those two rows, and no
-    // other, may stop at naming; every other edge rounds.
-    report(&format!("demo-edges-{}", quarter + 1), &rows, |row| {
-        !(row.result == "name" && row.edges.len() == 1 && UNNAMEABLE.contains(&row.edges[0].as_str()))
-    });
+    report(&format!("demo-edges-{}", quarter + 1), &rows, |_| true);
 }
 
 #[test]

@@ -1072,8 +1072,26 @@ mod tests {
             assert_eq!(resolve_edge(&reference, &View { topology: &body }, &names).unwrap(), selected);
             let mut unique = body.clone();
             unique.edges.retain(|edge| edge.id == selected);
-            let legacy = name_edge(selected, &View { topology: &unique }, &names).unwrap();
+            let legacy = if curve == CurveKind::Other {
+                // A frozen legacy-format reference, without the optional branch fields.
+                serde_json::from_str::<EdgeRef>(
+                    r#"{
+                    "faces": [
+                        {"feature":2,"generator":{"kind":"other"},"fingerprint":{
+                            "surface":"cylinder","centroid":[1,0,6],"area":1}},
+                        {"feature":4,"generator":{"kind":"other"},"fingerprint":{
+                            "surface":"plane","normal":[0,1,0],"centroid":[2,0,6],"area":1}}
+                    ],
+                    "fingerprint":{"curve":"other","midpoint":[4,3,6],"length":12}
+                }"#,
+                )
+                .unwrap()
+            } else {
+                name_edge(selected, &View { topology: &unique }, &names).unwrap()
+            };
             assert!(!legacy.disambiguate);
+            assert_eq!(legacy.fingerprint.curve, curve);
+            assert_eq!(resolve_edge(&legacy, &View { topology: &unique }, &names).unwrap(), selected);
             for edge in &mut unique.edges {
                 edge.midpoint.x += 8.0;
             }

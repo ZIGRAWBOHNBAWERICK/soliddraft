@@ -1,4 +1,4 @@
-//! A1: the independent V9 contract on the real adapter and exact fixture bytes.
+//! Default imports and replay of saved certified repairs on the real adapter.
 
 use soliddraft_kernel_api::{
     Approval, Decision, Disposition, ImportOptions, ImportStepRequest, Kernel, OpTag, RepairRecord,
@@ -10,13 +10,28 @@ const BLOCK: &[u8] = include_bytes!("../../../ci/fixtures/import/block-seam-4um.
 const WIDE: &[u8] = include_bytes!("../../../ci/fixtures/import/block-seam-20um.step");
 const TWO: &[u8] = include_bytes!("../../../ci/fixtures/import/two-blocks-5um.step");
 
+fn certified_record(name: &str, source: &[u8]) -> RepairRecord {
+    let mut model = catallax_topology::Model::new();
+    let imported = catallax_import::apply_source(
+        &mut model,
+        catallax_import::SourceFormat::Step,
+        source,
+        name,
+        &catallax_import::ImportOptions::default(),
+        &[],
+        None,
+    )
+    .unwrap();
+    serde_json::from_value(serde_json::to_value(imported.record).unwrap()).unwrap()
+}
+
 #[test]
 fn source_incidence_certificates_round_trip_and_tampering_is_refused() {
     let source = include_bytes!("fixtures/planar-source-incidence.step");
     let feature = ImportStepFeature::new("incidence.step", source.to_vec());
+    let certificate = certified_record(&feature.source_name, source);
     let kernel = CatallaxKernel::new();
     let options = ImportOptions::default();
-    kernel.propose_import(source, &options).unwrap();
     let request = ImportStepRequest {
         source_solid: None,
         name: &feature.source_name,
@@ -24,9 +39,13 @@ fn source_incidence_certificates_round_trip_and_tampering_is_refused() {
         sha256: &feature.sha256,
         options: &options,
         decisions: &[],
-        record: None,
+        record: Some(&certificate),
     };
     let imported = kernel.import_step(&OpTag::new("incidence"), &request).unwrap();
+    assert_eq!(
+        kernel.body_accuracy(imported.bodies[0].result.body).unwrap(),
+        soliddraft_kernel_api::BodyAccuracy::Exact
+    );
     assert_eq!(imported.record.format, catallax_import::INCIDENCE_REPAIR_FORMAT);
     assert_eq!(imported.record.source_incidence.len(), 1);
     let saved: RepairRecord = serde_json::from_slice(&serde_json::to_vec(&imported.record).unwrap()).unwrap();
@@ -42,22 +61,14 @@ fn source_incidence_certificates_round_trip_and_tampering_is_refused() {
 }
 
 #[test]
-fn reviewed_import_round_trips_the_kernel_question_and_builds_one_exact_body() {
+fn saved_certified_repairs_and_declined_answers_replay_without_downgrading() {
     let kernel = CatallaxKernel::new();
     let options = ImportOptions::default();
     let preview = kernel.propose_import(BLOCK, &options).unwrap();
     assert_eq!(preview.source_sha256, "1a602addaa4b534ef9427427d5231ba689a811a11159a5f9e7ebc17b3365c32b");
-    assert_eq!(preview.proposals.len(), 1);
-    let proposal = &preview.proposals[0];
-    assert_eq!(proposal.id, "g0");
-    assert_eq!(proposal.question, "repair:1a602addaa4b:g0");
-    assert_eq!(proposal.kind, "seam_close");
-    assert_eq!(proposal.distance_min_mm, "0.004");
-    assert_eq!(proposal.distance_max_mm, "0.004");
-    assert_eq!(proposal.tolerance_mm, "0.01");
-    assert_eq!(proposal.disposition, Disposition::Auto);
-    assert!(proposal.entities.iter().any(|e| e == "#176"));
-    let feature = ImportStepFeature::new("block-seam-4um.step", BLOCK.to_vec()).declined(&proposal.question);
+    assert!(preview.proposals.is_empty(), "default tolerant admission needs no certified repair answers");
+    let feature = ImportStepFeature::new("block-seam-4um.step", BLOCK.to_vec()).declined("repair:1a602addaa4b:g0");
+    let certificate = certified_record(&feature.source_name, &feature.source);
     let decisions = feature.kernel_decisions().unwrap();
     assert_eq!(decisions, [Decision::Decline { id: "g0".into() }]);
     let request = ImportStepRequest {
@@ -72,11 +83,16 @@ fn reviewed_import_round_trips_the_kernel_question_and_builds_one_exact_body() {
     let declined = kernel.import_step(&OpTag::new("declined"), &request).unwrap();
     assert_eq!(declined.left_open, ["#178"]);
     assert!(declined.bodies.is_empty());
-    let accepted =
-        kernel.import_step(&OpTag::new("imported"), &ImportStepRequest { decisions: &[], ..request }).unwrap();
+    let accepted = kernel
+        .import_step(
+            &OpTag::new("imported"),
+            &ImportStepRequest { decisions: &[], record: Some(&certificate), ..request },
+        )
+        .unwrap();
     assert!(accepted.left_open.is_empty());
     assert_eq!(accepted.bodies.len(), 1);
     let body = accepted.bodies[0].result.body;
+    assert_eq!(kernel.body_accuracy(body).unwrap(), soliddraft_kernel_api::BodyAccuracy::Exact);
     let topology = kernel.topology(body).unwrap();
     assert_eq!(topology.faces.len(), 6);
     assert_eq!(topology.edges.len(), 12);
@@ -206,11 +222,13 @@ fn exported_source(mut step: serde_json::Value) -> Vec<u8> {
     bytes
 }
 
-fn round_trip_source(name: &str, source: &[u8], volume: f64) -> RepairRecord {
+fn round_trip_source(name: &str, source: &[u8], volume: f64, saved: Option<&RepairRecord>) -> RepairRecord {
     let kernel = CatallaxKernel::new();
     let feature = ImportStepFeature::new(name, source.to_vec());
     let options = ImportOptions::default();
-    kernel.propose_import(source, &options).unwrap();
+    if saved.is_none() {
+        kernel.propose_import(source, &options).unwrap();
+    }
     let request = ImportStepRequest {
         source_solid: None,
         name,
@@ -218,7 +236,7 @@ fn round_trip_source(name: &str, source: &[u8], volume: f64) -> RepairRecord {
         sha256: &feature.sha256,
         options: &options,
         decisions: &[],
-        record: None,
+        record: saved,
     };
     let imported = kernel.import_step(&OpTag::new("wider"), &request).unwrap();
     assert_eq!(imported.bodies.len(), 1);
@@ -243,19 +261,19 @@ fn spheres_tori_and_non_unit_cones_import_display_and_replay() {
         ("cone", json!({"op":"cone","base_radius":"4","top_radius":"1","height":"5"}), 35.0 * pi),
         ("widening cone", json!({"op":"cone","base_radius":"1","top_radius":"4","height":"5"}), 35.0 * pi),
     ] {
-        round_trip_source(name, &exported_source(step), volume);
+        round_trip_source(name, &exported_source(step), volume, None);
     }
 }
 
 #[test]
-fn binary_noise_cleanup_keeps_its_measured_bounds_on_reopen() {
+fn saved_binary_noise_cleanup_keeps_its_measured_bounds_on_reopen() {
     let source = exported_source(serde_json::json!({"op":"cylinder","radius":"2","height":"5"}));
     let text = String::from_utf8(source).unwrap();
     let noisy = text
         .replace("(2.,0.,0.)", "(2.,-7.3478807948841188E-16,0.)")
         .replace("(2.,0.,5.)", "(2.,-7.3478807948841188E-16,5.)");
-    assert_ne!(text, noisy);
-    let record = round_trip_source("noisy.step", noisy.as_bytes(), 20.0 * std::f64::consts::PI);
+    let certificate = certified_record("noisy.step", noisy.as_bytes());
+    let record = round_trip_source("noisy.step", noisy.as_bytes(), 20.0 * std::f64::consts::PI, Some(&certificate));
     assert!(record.derivative.is_some());
     assert_eq!(record.face_tolerances.len(), 3);
     assert!(record.face_tolerances.iter().all(|f| f.deviation_upper_mm.parse::<f64>().unwrap() < 1e-9));
@@ -285,5 +303,5 @@ fn a_certified_spline_patch_imports_as_a_solid_and_replays() {
     let line = text.lines().find(|line| line.starts_with(&format!("{surface_id}="))).unwrap();
     let spline = text.replace(line, &format!("{surface_id}=B_SPLINE_SURFACE_WITH_KNOTS('',1,1,((#900001,#900002),(#900003,#900004)),.UNSPECIFIED.,.F.,.F.,.F.,(2,2),(2,2),(0.,1.),(0.,1.),.UNSPECIFIED.);"))
         .replace("DATA;", &format!("DATA;\n{points}"));
-    round_trip_source("spline.step", spline.as_bytes(), 24.0);
+    round_trip_source("spline.step", spline.as_bytes(), 24.0, None);
 }

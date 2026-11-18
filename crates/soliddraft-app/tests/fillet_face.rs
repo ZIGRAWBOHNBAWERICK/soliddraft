@@ -670,6 +670,75 @@ fn fillet_edge_on_the_slot_rounds_the_straight_top_edge() {
     assert_rounded_slot_on_screen(&mut app, before);
 }
 
+fn demo_branch_pick_fillets_and_reopens(label: &str) {
+    let _gpu = gpu();
+    let mut app = harness(soliddraft_app::demo_document());
+    ribbon::run_command(&mut app, "view_back");
+    let (edge, midpoint, faces) = {
+        let doc = &app.state().state.doc;
+        let topology = doc.kernel().topology(doc.display_body().unwrap()).unwrap();
+        let edge = topology
+            .edges
+            .iter()
+            .find(|edge| {
+                doc.named_edge(edge.id).is_some_and(|name| {
+                    format!("{} · {}", doc.feature(name.feature).unwrap().name, name.label) == label
+                })
+            })
+            .unwrap_or_else(|| panic!("missing {label}"));
+        assert_eq!(edge.curve, soliddraft_kernel_api::CurveKind::Other, "saved curve classifications must not change");
+        let midpoint = glam::vec3(
+            ((edge.bbox.min.x + edge.bbox.max.x) * 0.5) as f32,
+            ((edge.bbox.min.y + edge.bbox.max.y) * 0.5) as f32,
+            ((edge.bbox.min.z + edge.bbox.max.z) * 0.5) as f32,
+        );
+        (edge.id, midpoint, topology.faces.len())
+    };
+    click_world(&mut app, midpoint);
+    assert_eq!(
+        app.state().state.doc.selection,
+        Some(Selection::Edge(edge)),
+        "{label}: the viewport picked the wrong edge"
+    );
+    button(&mut app, "Fillet");
+    type_field(&mut app, "Radius value", "1");
+    let editor = app.state().state.editor.as_ref().expect("Fillet opens on the selected edge");
+    assert_eq!(editor.edges().len(), 1);
+    assert!(editor.error.is_none(), "{label}: {:?}", editor.error);
+    assert!(editor.preview.result.is_some(), "{label}: no fillet preview");
+    ok(&mut app);
+    let doc = &app.state().state.doc;
+    the_rounding(doc, false);
+    let rounded_faces = doc.kernel().topology(doc.display_body().unwrap()).unwrap().faces.len();
+    assert!(rounded_faces > faces);
+    assert!(doc.triangle_count() > 0);
+    let saved = doc.model().to_bytes().unwrap();
+    let frame = proof_folder().join(format!("demo-{}.png", label.rsplit(' ').next().unwrap()));
+    app.render().unwrap().save(frame).unwrap();
+    drop(app);
+    let reopened =
+        soliddraft_app::file::open_bytes("demo-fillet.dwprt", &saved, soliddraft_app::kernel(), None).unwrap();
+    the_rounding(&reopened, false);
+    assert!(reopened.features.iter().all(|feature| feature.status == FeatureStatus::Ok));
+    assert_eq!(reopened.kernel().topology(reopened.display_body().unwrap()).unwrap().faces.len(), rounded_faces);
+    let mut app = harness(reopened);
+    assert!(app.state().state.doc.triangle_count() > 0);
+    app.render()
+        .unwrap()
+        .save(proof_folder().join(format!("demo-{}-reopened.png", label.rsplit(' ').next().unwrap())))
+        .unwrap();
+}
+
+#[test]
+fn demo_edge_6_viewport_pick_fillets_and_reopens() {
+    demo_branch_pick_fillets_and_reopens("Boss-Extrude3 · Edge 6");
+}
+
+#[test]
+fn demo_edge_8_viewport_pick_fillets_and_reopens() {
+    demo_branch_pick_fillets_and_reopens("Boss-Extrude3 · Edge 8");
+}
+
 /// A face pick takes the face's sharp edges and leaves out its smooth ones, as SolidWorks
 /// does. The slot's straight wall meets each round end tangentially along a vertical
 /// line, where there is no corner to round, so the pick takes only the wall's top and

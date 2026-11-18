@@ -705,11 +705,12 @@ fn a_slot_wall_pick_leaves_out_its_tangent_edges() {
     assert_eq!(editor.feedback.pick, None);
 }
 
-/// A fillet the kernel cannot trim against the faces around it says so in the panel,
-/// instead of the text every other kernel failure gets. The diagnostic behind it is an
-/// `intersect.` refusal from inside the fillet.
+/// The hole's rim at R2 is refused by both fillet constructions: the exact one cannot trim
+/// the round against the faces around it (an `intersect.` refusal), and the general one
+/// does not take this edge. The panel gives the general construction's reason, the one
+/// that holds, in plain words and without either code.
 #[test]
-fn a_fillet_the_kernel_cannot_trim_says_so_in_the_panel() {
+fn a_fillet_both_constructions_refuse_says_so_in_the_panel() {
     let _gpu = gpu();
     let mut app = harness(holed_box_document());
     click_world(&mut app, glam::Vec3::new(-5.0, -14.0, 20.0));
@@ -725,10 +726,10 @@ fn a_fillet_the_kernel_cannot_trim_says_so_in_the_panel() {
         let editor = app.state().state.editor.as_ref().expect("Fillet opens on the rim pick");
         editor.error.clone().expect("the panel shows the refusal")
     };
-    assert!(diagnostic.contains("intersect."), "an intersection refusal inside the fillet: {diagnostic}");
-    let shown = "The fillet could not be trimmed where it meets the faces around it. Try a different radius or \
-                 select different edges.";
-    assert!(app.query_all_by_label(shown).next().is_some(), "the panel names the trim: {diagnostic}");
+    assert!(diagnostic.contains("exact path refused intersect."), "the exact construction cannot trim: {diagnostic}");
+    assert!(diagnostic.contains("numerical continuation refused fillet."), "nor can the general one: {diagnostic}");
+    let shown = "This fillet cannot be made on the selected edges. Reduce the radius or select different edges.";
+    assert!(app.query_all_by_label(shown).next().is_some(), "the panel gives the general reason: {diagnostic}");
     assert!(app.query_all_by_label("This operation is unavailable for the selected shape.").next().is_none());
     app.render().unwrap().save(proof_folder().join("fillet-trim-refusal.png")).unwrap();
 }

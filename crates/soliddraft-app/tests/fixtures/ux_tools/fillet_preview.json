@@ -90,8 +90,8 @@
       "refused_radius_text": ["0", "-1", "abc", "NaN", "inf"],
       "slot_overflow_radius_text": "20",
       "slot_overflow_reason": "fillet.radius-too-large",
-      "slot_overflow_message": "The radius is too large for this edge. Try a radius under 5 mm.",
-      "slot_overflow_note": "At Catallax 27edb84d the proved radius-too-large refusal replaces the generic contact refusal and advises a radius below 5 mm. Historical ruling (a), data/from-main/sdc-d-ux-fillet-f3/report.md: slot R20 exceeds the 5 mm end radius and 10 mm depth. Refuse it; the version-4 tangent-continuation path at Catallax 659259eedbd0f156ab601784f29f42e87e419c76 reports fillet.unsupported-contact. The historical baseline at e7f307bd11a95c3051ec22e0eaaa06fdea98e9fc expected fillet.unsupported-overflow."
+      "slot_overflow_message": "A fillet this size does not fit between Boss-Extrude1 · End cap and Boss-Extrude1 · Side of arc 3. Try a radius under 5 mm.",
+      "slot_overflow_note": "At the rolling-ball fillet integration commit 23b51f26 the refusal also names its limiting contact supports, and SolidDraft names the two faces a ball this size cannot touch at once: the slot's top and its R5 end. At Catallax 27edb84d the proved radius-too-large refusal replaces the generic contact refusal and advises a radius below 5 mm. Historical ruling (a), data/from-main/sdc-d-ux-fillet-f3/report.md: slot R20 exceeds the 5 mm end radius and 10 mm depth. Refuse it; the version-4 tangent-continuation path at Catallax 659259eedbd0f156ab601784f29f42e87e419c76 reports fillet.unsupported-contact. The historical baseline at e7f307bd11a95c3051ec22e0eaaa06fdea98e9fc expected fillet.unsupported-overflow."
     }
   },
   "tolerances": {

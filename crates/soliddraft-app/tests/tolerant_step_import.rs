@@ -36,7 +36,14 @@ fn tolerant_and_certified_imports_display_with_their_own_authority_and_reopen() 
     soliddraft_app::file::set_config_dir(Some(root.join("config")));
     let certified = box_step();
     let tolerant = include_str!("../../../ci/fixtures/import/block-seam-4um.step").to_owned();
-    for (name, source, tier) in [("certified", certified, Tier::Exact), ("tolerant", tolerant, Tier::Tolerant)] {
+    // This generated box has one vertex 0.1 mm off its unchanged curves. It needs the
+    // native tolerant path, not an exact-model cast or a whole-body certificate.
+    let native = include_str!("data/native-tolerant-vertex.step").to_owned();
+    for (name, source, tier) in [
+        ("certified", certified, Tier::Exact),
+        ("tolerant", tolerant, Tier::Tolerant),
+        ("native-tolerant", native, Tier::Tolerant),
+    ] {
         let path = root.join(format!("{name}.step"));
         std::fs::write(&path, &source).unwrap();
         let mut app = Harness::builder()

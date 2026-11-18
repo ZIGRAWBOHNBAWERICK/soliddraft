@@ -544,6 +544,8 @@ pub enum BodyAccuracy {
         /// The tolerance the kernel stated before building, in millimetres, as a decimal.
         tolerance_mm: String,
     },
+    /// Imported with sampled local tolerances, without a whole-body error certificate.
+    Tolerant,
 }
 
 /// The geometric type of a face's surface.
@@ -831,6 +833,9 @@ pub struct StepReport {
     /// `None` for an exact body.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub approximate: Option<ApproximateStep>,
+    /// A retained tolerant import, without a certified whole-body deviation.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub tolerant: bool,
 }
 
 /// A STEP file of a body built within a stated tolerance. The distance between the file

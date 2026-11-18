@@ -8,12 +8,9 @@ fn bracket() -> Document {
     soliddraft_app::file::open_bytes("bracket.dwprt", bytes, soliddraft_app::kernel(), None).unwrap()
 }
 
-/// The `--demo` sample part, a plate with a flange and a boss, names 46 of its 48 edges,
-/// each finding its edge again; on main 26 had no name. The other two are pieces between
-/// the same faces that also end at the same faces, so nothing stable tells them apart and
-/// they stay unnamed rather than being told apart by place.
+/// Every edge of the sample part has a name that finds the same edge again.
 #[test]
-fn the_demo_part_names_every_edge_its_end_faces_single_out() {
+fn the_demo_part_names_every_edge() {
     let doc = soliddraft_app::demo_document();
     let body = doc.model().body().unwrap();
     let topology = doc.model().kernel().topology(body).unwrap();
@@ -22,11 +19,14 @@ fn the_demo_part_names_every_edge_its_end_faces_single_out() {
     for edge in &topology.edges {
         match doc.model().edge_ref(edge.id) {
             Ok(named) => assert_eq!(doc.model().resolve_edge(&named, body).unwrap(), edge.id, "{}", named.label),
-            Err(why) => unnamed.push(why.to_string()),
+            Err(why) => unnamed.push(format!(
+                "{why}; {:?} between {:?}",
+                edge.curve,
+                edge.faces.iter().map(|face| topology.face(*face).unwrap().surface).collect::<Vec<_>>()
+            )),
         }
     }
-    assert_eq!(unnamed.len(), 2, "{unnamed:?}");
-    assert!(unnamed.iter().all(|why| why.contains("end at the faces it ended at")), "{unnamed:?}");
+    assert!(unnamed.is_empty(), "{unnamed:?}");
 }
 
 /// In the sample bracket two countersinks split the edge between the base's end cap and

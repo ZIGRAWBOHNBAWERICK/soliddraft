@@ -12,10 +12,12 @@ use crate::state::{AppAction, AppState, NoteKind};
 /// What an imported file opened as, from best to worst.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Tier {
-    /// Its faces closed as they are. Nothing changed.
+    /// Its geometry passed certification.
     Exact,
     /// It closed after stated repairs, each with its bound.
     Repaired,
+    /// Closed material with sampled local tolerances, not a certificate.
+    Tolerant,
     /// Open faces with no volume or mass.
     Surface,
     /// It did not open.
@@ -30,11 +32,12 @@ pub enum Tier {
 impl Tier {
     pub fn label(self) -> &'static str {
         match self {
-            Tier::Exact => "Exact solid",
-            Tier::Repaired => "Solid, repaired",
+            Tier::Exact => "Certified solid",
+            Tier::Repaired => "Certified solid, repaired",
+            Tier::Tolerant => "Tolerant solid",
             Tier::Surface => "Surface body",
             Tier::Refused => "Refused",
-            Tier::FileRepaired => "Solid, file repaired",
+            Tier::FileRepaired => "Certified solid, file repaired",
             Tier::NotEvaluated => "Not evaluated",
         }
     }
@@ -122,9 +125,20 @@ fn opened_as(doc: &Document, id: FeatureId) -> (Tier, String) {
         }
         Ok(_) => {}
     }
+    if doc
+        .model()
+        .kernel()
+        .body_accuracy(body)
+        .is_ok_and(|accuracy| accuracy == soliddraft_kernel_api::BodyAccuracy::Tolerant)
+    {
+        return (Tier::Tolerant, crate::document::TOLERANT_WORDS.into());
+    }
     let Some(record) = doc.model().import_record(model_id(id)) else {
         return (Tier::Exact, "Closed as it is.".into());
     };
+    if record.tolerant.is_some() {
+        return (Tier::Exact, "Certified by the default reader. Source admission evidence is recorded.".into());
+    }
     // A file of several solids shares one record. A repaired face names its solid, so it
     // belongs to that body; a gap change names only source entities, so it stays the
     // file's and is never spread over every body the file gave.

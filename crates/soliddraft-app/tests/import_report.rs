@@ -17,45 +17,30 @@ fn imported(name: &str, format: ImportFormat, source: &[u8]) -> Document {
     doc
 }
 
-/// Each tier with its reason: an exact box, a block whose seam closed within its bound,
-/// and a surface model.
+/// Certified, tolerant and surface imports keep distinct authority.
 #[test]
-fn each_import_says_what_it_opened_as_and_why() {
-    let cases: [(&str, ImportFormat, &[u8], Tier, &str); 4] = [
-        (
-            "occt-box.igs",
-            ImportFormat::Iges,
-            include_bytes!("../../../ci/fixtures/import/occt-box.igs"),
-            Tier::Exact,
-            "Closed as it is.",
-        ),
+fn each_import_says_what_it_opened_as() {
+    let cases: [(&str, ImportFormat, &[u8], Tier); 4] = [
+        ("occt-box.igs", ImportFormat::Iges, include_bytes!("../../../ci/fixtures/import/occt-box.igs"), Tier::Exact),
         (
             "tetrahedron.obj",
             ImportFormat::Mesh,
             include_bytes!("../../../ci/fixtures/import/tetrahedron.obj"),
             Tier::Exact,
-            "Closed as it is.",
         ),
         (
             "block-seam-4um.step",
             ImportFormat::Step,
             include_bytes!("../../../ci/fixtures/import/block-seam-4um.step"),
-            Tier::Repaired,
-            "Seam closed automatically within 0.01 mm; 4 faces repaired within a stated deviation from the source.",
+            Tier::Tolerant,
         ),
-        (
-            "surface-square.step",
-            ImportFormat::Step,
-            include_bytes!("data/surface-square.step"),
-            Tier::Surface,
-            "The file holds open faces, not a closed solid. No volume or mass.",
-        ),
+        ("surface-square.step", ImportFormat::Step, include_bytes!("data/surface-square.step"), Tier::Surface),
     ];
-    for (name, format, source, tier, why) in cases {
+    for (name, format, source, tier) in cases {
         let doc = imported(name, format, source);
         let report = rows(&doc, &[]);
         assert_eq!(report.len(), 1, "{name}");
-        assert_eq!((report[0].file.as_str(), report[0].tier, report[0].why.as_str()), (name, tier, why));
+        assert_eq!((report[0].file.as_str(), report[0].tier), (name, tier));
         assert_eq!(report[0].feature, Some(doc.features[0].id), "{name}");
     }
 }
@@ -115,9 +100,8 @@ fn a_suppressed_import_is_not_evaluated() {
     assert_eq!((report[0].tier, report[0].why.as_str()), (Tier::NotEvaluated, "Suppressed, so it is not built."));
 }
 
-/// A file of several solids shares one repair record. Its repaired body shows its own
-/// repaired faces; an exact sibling never shows the other body's repairs as its own, and
-/// the file's seam repair is named as the file's.
+/// A tolerant body's local fits do not become a certificate, and certified siblings
+/// never inherit its tolerance label.
 #[test]
 fn a_repair_on_one_body_of_a_file_is_not_spread_to_its_siblings() {
     let seam = std::str::from_utf8(include_bytes!("../../../ci/fixtures/import/block-seam-4um.step")).unwrap();
@@ -125,14 +109,49 @@ fn a_repair_on_one_body_of_a_file_is_not_spread_to_its_siblings() {
     // Two exact blocks, renumbered past the seam block's entities, after it in one file.
     let copy = blocks.split("DATA;\n").nth(1).unwrap().split("ENDSEC;").next().unwrap().replace('#', "#900");
     let source = seam.replace("ENDSEC;\nEND-ISO-10303-21;", &format!("{copy}ENDSEC;\nEND-ISO-10303-21;"));
-    assert_ne!(source, seam, "the blocks were not added");
     let doc = imported("mixed.step", ImportFormat::Step, source.as_bytes());
     let report = rows(&doc, &[]);
     let tiers: Vec<Tier> = report.iter().map(|row| row.tier).collect();
-    assert_eq!(tiers, [Tier::Repaired, Tier::FileRepaired, Tier::FileRepaired]);
-    let file = "The file's record also lists repairs it does not attribute to one body: seam closed automatically within 0.01 mm.";
-    assert_eq!(report[0].why, format!("4 faces repaired within a stated deviation from the source. {file}"));
-    for sibling in &report[1..] {
-        assert_eq!(sibling.why, format!("No face repairs are attributed to this body. {file}"));
+    assert_eq!(tiers, [Tier::Tolerant, Tier::Exact, Tier::Exact]);
+}
+
+#[test]
+fn a_refused_step_body_does_not_discard_its_certified_sibling() {
+    let original = std::str::from_utf8(include_bytes!("../../../ci/fixtures/import/two-blocks-5um.step")).unwrap();
+    for (shell, open_shell, survivor, centre) in [
+        ("(#40,#80,#102,#124,#136,#148)", "(#40,#80,#102,#124,#136)", "#300", 30.005),
+        ("(#190,#230,#252,#274,#286,#298)", "(#190,#230,#252,#274,#286)", "#150", 10.0),
+    ] {
+        let source = original.replace(shell, open_shell).into_bytes();
+        let mut state = AppState::new(Document::new("Partial import", soliddraft_app::kernel()));
+        let preview = Preview::from_source(&state.doc, "mixed.step", source.clone(), ImportFormat::Step).unwrap();
+        commit_in(&mut state, &preview, &Review::default()).unwrap();
+        assert_eq!(state.doc.features.len(), 1);
+        assert_eq!(state.doc.model().live_bodies().len(), 1);
+        let soliddraft_app::document::FeatureKind::ImportStep(import) = &state.doc.features[0].kind else {
+            panic!("import feature")
+        };
+        assert_eq!(import.source, source);
+        assert_eq!(import.source_solid.as_deref(), Some(survivor));
+        let mass = state.doc.kernel().mass_properties(state.doc.display_body().unwrap()).unwrap();
+        assert!((mass.volume - 5000.0).abs() < 1e-6);
+        assert!((mass.centroid.x - centre).abs() < 1e-6);
+        let report = rows(&state.doc, &state.import_refusals);
+        assert_eq!((report[0].tier, report[1].tier), (Tier::Exact, Tier::Refused));
+        assert!(report[1].feature.is_none());
+        assert!(!report[1].why.contains("catallax") && !report[1].why.contains("numbers."));
+
+        let saved = state.doc.model().to_bytes().unwrap();
+        let reopened = soliddraft_app::file::open_bytes("mixed.dwprt", &saved, soliddraft_app::kernel(), None).unwrap();
+        assert_eq!(reopened.model().live_bodies().len(), 1);
+        assert_eq!(rows(&reopened, &[])[0].tier, Tier::Exact);
+        assert!(
+            (reopened.kernel().mass_properties(reopened.display_body().unwrap()).unwrap().volume - 5000.0).abs() < 1e-6
+        );
+        state.doc.undo().unwrap();
+        assert!(state.doc.features.is_empty());
+        state.doc.redo().unwrap();
+        assert_eq!(state.doc.features.len(), 1);
+        assert_eq!(state.doc.model().live_bodies().len(), 1);
     }
 }

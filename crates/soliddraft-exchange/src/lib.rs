@@ -129,6 +129,9 @@ impl Report {
     /// One line for a status bar or a terminal.
     pub fn summary(&self) -> String {
         match self {
+            Report::Step(StepReport { tolerant: true, faces, edges, .. }) => format!(
+                "{faces} faces, {edges} edges; tolerant import; the file's distance from the part is not certified"
+            ),
             Report::Step(StepReport { approximate: Some(approximate), faces, edges, .. }) => format!(
                 "{faces} faces, {edges} edges; approximate part built within {} mm; lengths written to within {} mm; \
                  the file's distance from the part is not established",
@@ -229,7 +232,7 @@ pub fn export(
         Format::Step => {
             let options = StepOptions { product_name: name.to_owned(), ..StepOptions::default() };
             let step = kernel.export_step(body, &options)?;
-            let answer_kind = if step.report.approximate.is_some() {
+            let answer_kind = if step.report.approximate.is_some() || step.report.tolerant {
                 proof::AnswerKind::Approximate
             } else {
                 proof::AnswerKind::Proved
@@ -395,6 +398,7 @@ mod tests {
             removed_edges: 0,
             warnings: Vec::new(),
             approximate: None,
+            tolerant: false,
         })
     }
 

@@ -11,6 +11,8 @@ use soliddraft_kernel_api::*;
 
 use crate::{CatallaxKernel, MeshCache, Solid, Stored, convert, display_key};
 
+mod tolerant;
+
 fn options(input: &ImportOptions) -> KernelResult<catallax_import::ImportOptions> {
     Ok(catallax_import::ImportOptions {
         search_radius_mm: Rational::parse(&input.search_radius_mm)
@@ -27,7 +29,7 @@ fn step_refusal(error: catallax_import::ImportRefusal) -> KernelError {
     use catallax_import::ImportRefusal::*;
     let message = match error {
         Malformed { .. } => "This file could not be read as a STEP solid.".into(),
-        Unsupported { type_name, .. } => return KernelError::Unsupported(format!("STEP import of {type_name}")),
+        Unsupported { .. } => "This STEP file contains a surface or curve that cannot be imported. Try exporting it again as a solid.".into(),
         UnknownUnit { .. } => "This STEP file's length units could not be read.".into(),
         HashMismatch { .. } => "The saved import does not match the original file.".into(),
         NotSolid { .. } => "This STEP file does not contain a supported closed solid.".into(),
@@ -45,7 +47,9 @@ fn step_refusal(error: catallax_import::ImportRefusal) -> KernelError {
             "This repair moves the part further than the allowed movement. Raise the limit or decline the repair.".into()
         }
         ValidationFailed { detail, .. } if detail.contains("convex planar cover") || detail.contains("not be bounded") => {
-            return KernelError::Unsupported(format!("STEP import repair: {detail}"));
+            return KernelError::Unsupported(
+                "This STEP file needs a planar repair that cannot be verified yet. Try exporting it again.".into(),
+            );
         }
         ValidationFailed { .. } | IncidenceGap { .. } | PlanarRepairNotVerified { .. } => {
             "This STEP file could not be imported without an unverified repair.".into()
@@ -69,16 +73,14 @@ fn source_format(format: ImportFormat) -> catallax_import::SourceFormat {
     }
 }
 
-pub(super) fn source_solids(format: ImportFormat, source: &[u8]) -> KernelResult<Vec<String>> {
+pub(super) fn source_solids(kernel: &CatallaxKernel, format: ImportFormat, source: &[u8]) -> KernelResult<Vec<String>> {
     if format == ImportFormat::Mesh {
         return Err(KernelError::InvalidInput("Mesh solids do not have source entity selectors.".into()));
     }
     // A STEP file's surface models are source bodies too: each builds as a surface body,
     // keyed by its entity like a solid, so a file of several is imported body by body.
     if format == ImportFormat::Step {
-        let file = catallax_import::read_step(source).map_err(|error| refusal(format, error))?;
-        let solids = file.solids.into_iter().map(|solid| solid.name);
-        return Ok(solids.chain(file.surface_models.into_iter().map(|model| model.name)).collect());
+        return Ok(kernel.opened_step(source)?.source().bodies().iter().map(|body| body.name().to_owned()).collect());
     }
     source_format(format).solid_entities(source).map_err(|error| refusal(format, error))
 }
@@ -116,13 +118,31 @@ fn refusal(format: ImportFormat, error: catallax_import::ImportRefusal) -> Kerne
     KernelError::InvalidInput(message)
 }
 
-pub(super) fn propose(format: ImportFormat, source: &[u8], input: &ImportOptions) -> KernelResult<ProposalSet> {
+pub(super) fn propose(
+    kernel: &CatallaxKernel,
+    format: ImportFormat,
+    source: &[u8],
+    input: &ImportOptions,
+) -> KernelResult<ProposalSet> {
     if format == ImportFormat::Mesh {
         checked_mesh(source)?;
         return Ok(ProposalSet { source_sha256: catallax_import::sha256_hex(source), proposals: Vec::new() });
     }
-    let proposals = catallax_import::propose_source(source_format(format), source, &options(input)?)
-        .map_err(|error| refusal(format, error))?;
+    if format == ImportFormat::Step
+        && let Ok(opened) = kernel.opened_step(source)
+        && tolerant::needs_default(&opened)
+    {
+        return Ok(ProposalSet { source_sha256: catallax_import::sha256_hex(source), proposals: Vec::new() });
+    }
+    let proposals = match catallax_import::propose_source(source_format(format), source, &options(input)?) {
+        Ok(proposals) => proposals,
+        Err(_) if format == ImportFormat::Step => {
+            let opened = kernel.opened_step(source)?;
+            tolerant::require_solids(&opened)?;
+            return Ok(ProposalSet { source_sha256: catallax_import::sha256_hex(source), proposals: Vec::new() });
+        }
+        Err(error) => return Err(refusal(format, error)),
+    };
     if !matches!(proposals.format.as_str(), PROPOSALS_FORMAT | catallax_import::INCIDENCE_PROPOSALS_FORMAT) {
         return Err(match format {
             ImportFormat::Mesh => unreachable!(),
@@ -257,6 +277,15 @@ impl CatallaxKernel {
         if format == ImportFormat::Mesh {
             return self.import_mesh_body(tag, request);
         }
+        if format == ImportFormat::Step && request.record.is_some_and(|saved| saved.format == tolerant::FORMAT) {
+            return self.import_tolerant_body(tag, request);
+        }
+        if format == ImportFormat::Step && request.decisions.is_empty() && request.record.is_none() {
+            let opened = self.opened_step(request.source)?;
+            if tolerant::needs_default(&opened) {
+                return self.import_tolerant_body(tag, request);
+            }
+        }
         if let Some(saved) = request.record {
             require_repair_format(format, &saved.format)?;
         }
@@ -270,8 +299,14 @@ impl CatallaxKernel {
             &options(request.options)?,
             &decisions,
             None,
-        )
-        .map_err(|error| refusal(format, error))?;
+        );
+        let imported = match imported {
+            Ok(imported) => imported,
+            Err(_) if format == ImportFormat::Step && request.decisions.is_empty() && request.record.is_none() => {
+                return self.import_tolerant_body(tag, request);
+            }
+            Err(error) => return Err(refusal(format, error)),
+        };
         require_repair_format(format, &imported.record.format)?;
         let mismatch =
             || KernelError::InvalidInput("the saved import record does not match this file and its decisions".into());
@@ -339,6 +374,7 @@ impl CatallaxKernel {
             changes: Vec::new(),
             face_tolerances: Vec::new(),
             source_incidence: Vec::new(),
+            tolerant: None,
         };
         if request.record.is_some_and(|saved| saved != &record) {
             return Err(KernelError::InvalidInput("The saved mesh import does not match this file.".into()));

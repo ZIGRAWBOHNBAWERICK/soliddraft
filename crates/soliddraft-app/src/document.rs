@@ -1073,6 +1073,10 @@ pub const SURFACE_BODY_NAME: &str = "Surface body";
 pub const APPROXIMATE_BODY_NAME: &str = "Approximate solid body";
 /// The body row's name when that body is also open faces.
 pub const APPROXIMATE_SURFACE_BODY_NAME: &str = "Approximate surface body";
+/// A STEP body admitted with local, sampled tolerances rather than a certificate.
+pub const TOLERANT_BODY_NAME: &str = "Tolerant solid body";
+/// The accuracy statement for sampled STEP admission, without a global error claim.
+pub const TOLERANT_WORDS: &str = "Tolerant import. Faces and edges were fitted within local tolerances, not certified. Display, measurements and mass are estimates";
 
 /// How a body built within `tolerance_mm` is described, in Details.
 pub fn approximate_words(tolerance_mm: &str) -> String {
@@ -3674,6 +3678,19 @@ impl Document {
     /// as a STEP surface model imported as it is, is named a surface body, and one built
     /// within a stated tolerance an approximate body.
     pub fn body_name(&self, key: u32) -> String {
+        if self
+            .model
+            .live_bodies()
+            .into_iter()
+            .find(|(k, _)| *k == key)
+            .is_some_and(|(_, body)| self.kernel_body_is_tolerant(body))
+        {
+            return if key == 0 && self.model.next_body() == 1 {
+                TOLERANT_BODY_NAME.to_owned()
+            } else {
+                format!("Tolerant body {}", key + 1)
+            };
+        }
         let surface = self.body_is_surface(key);
         let approximate = self.body_tolerance(key).is_some();
         match (key == 0 && self.model.next_body() == 1, surface, approximate) {
@@ -3709,7 +3726,24 @@ impl Document {
     pub fn kernel_body_tolerance(&self, body: BodyId) -> Option<String> {
         match self.model.kernel().body_accuracy(body).ok()? {
             soliddraft_kernel_api::BodyAccuracy::Approximate { tolerance_mm } => Some(tolerance_mm),
+            soliddraft_kernel_api::BodyAccuracy::Exact | soliddraft_kernel_api::BodyAccuracy::Tolerant => None,
+        }
+    }
+
+    /// Whether a body came from the default reader's sampled admission.
+    pub fn kernel_body_is_tolerant(&self, body: BodyId) -> bool {
+        self.model
+            .kernel()
+            .body_accuracy(body)
+            .is_ok_and(|accuracy| accuracy == soliddraft_kernel_api::BodyAccuracy::Tolerant)
+    }
+
+    /// Accuracy words for Details and measurement panels.
+    pub fn kernel_body_accuracy_words(&self, body: BodyId) -> Option<String> {
+        match self.model.kernel().body_accuracy(body).ok()? {
             soliddraft_kernel_api::BodyAccuracy::Exact => None,
+            soliddraft_kernel_api::BodyAccuracy::Approximate { tolerance_mm } => Some(approximate_words(&tolerance_mm)),
+            soliddraft_kernel_api::BodyAccuracy::Tolerant => Some(TOLERANT_WORDS.into()),
         }
     }
 
@@ -4746,8 +4780,8 @@ impl Document {
                 if self.body_is_surface(self.active_body) {
                     details.push(("Kind".to_owned(), "Surface: open faces, no volume or mass".to_owned()));
                 }
-                if let Some(tolerance) = self.body_tolerance(self.active_body) {
-                    details.push(("Accuracy".to_owned(), approximate_words(&tolerance)));
+                if let Some(words) = self.display_body().and_then(|body| self.kernel_body_accuracy_words(body)) {
+                    details.push(("Accuracy".to_owned(), words));
                 }
                 Some(EntityInfo { title: self.body_name(self.active_body), feature: None, details })
             }
@@ -4905,12 +4939,12 @@ impl Document {
                         }
                     }
                 }
-                // Whether or not its mass is known yet, an approximate result says so.
+                // Whether or not its mass is known yet, a non-certified result says so.
                 if !f.is_sketch()
                     && let Some(body) = f.body
-                    && let Some(tolerance) = self.kernel_body_tolerance(body)
+                    && let Some(words) = self.kernel_body_accuracy_words(body)
                 {
-                    details.push(("Accuracy".to_owned(), approximate_words(&tolerance)));
+                    details.push(("Accuracy".to_owned(), words));
                 }
                 if !f.is_sketch()
                     && !matches!(&f.kind, FeatureKind::Scan(scan) if scan.fit.is_none())

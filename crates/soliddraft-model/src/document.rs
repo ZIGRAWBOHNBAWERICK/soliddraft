@@ -335,6 +335,18 @@ impl Document {
                         match self.status(feature.id) {
                             Some(FeatureStatus::Ok)
                                 if self.body_after(feature.id).is_some_and(|body| {
+                                    self.kernel
+                                        .body_accuracy(body)
+                                        .is_ok_and(|accuracy| accuracy == soliddraft_kernel_api::BodyAccuracy::Tolerant)
+                                }) =>
+                            {
+                                (
+                                    AnswerKind::Approximate,
+                                    Some("Tolerant import, without a whole-body certificate".into()),
+                                )
+                            }
+                            Some(FeatureStatus::Ok)
+                                if self.body_after(feature.id).is_some_and(|body| {
                                     matches!(
                                         self.kernel.body_accuracy(body),
                                         Ok(soliddraft_kernel_api::BodyAccuracy::Approximate { .. })

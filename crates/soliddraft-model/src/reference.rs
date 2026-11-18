@@ -837,8 +837,7 @@ pub(crate) fn name_edge(edge: EdgeId, view: &View, names: &NameMap) -> Result<Ed
         r.disambiguate = true;
         resolved = resolve_edge(&r, view, names);
     }
-    // Several edges between the same two faces: tell them apart by the faces at their
-    // ends, then by their place along the shared curve.
+    // Other split edges follow the faces at their ends, never their position along a curve.
     if !r.disambiguate && matches!(&resolved, Err(Unresolved { reason: RepairReason::Ambiguous, .. })) {
         let mut ends: Vec<FaceRef> = Vec::new();
         for face in end_faces(info, view) {
@@ -851,6 +850,15 @@ pub(crate) fn name_edge(edge: EdgeId, view: &View, names: &NameMap) -> Result<Ed
             }
         }
         r.piece = Some(Box::new(EdgePiece { ends }));
+        resolved = resolve_edge(&r, view, names);
+    }
+    if matches!(supports, [SurfaceKind::Cylinder, SurfaceKind::Plane] | [SurfaceKind::Plane, SurfaceKind::Cylinder])
+        && matches!(&resolved, Err(Unresolved { reason: RepairReason::Ambiguous, .. }))
+    {
+        // Two branches may end against the same faces. Only unchanged geometry
+        // distinguishes them; moved supports or edges require another pick.
+        r.disambiguate = true;
+        r.piece = None;
         resolved = resolve_edge(&r, view, names);
     }
     match resolved {
@@ -1031,78 +1039,80 @@ mod tests {
 
     #[test]
     fn shared_face_pair_names_an_unchanged_generator_but_never_guesses_after_a_move() {
-        let a = origin("F2", FaceRole::Other);
-        let b = origin("F4", FaceRole::Other);
-        let a_names = [NamedFace { origin: a.clone(), generator: Generator::Other, ordinal: 0 }];
-        let b_names = [NamedFace { origin: b.clone(), generator: Generator::Other, ordinal: 0 }];
-        let names: NameMap = [(FeatureId(2), &a_names[..]), (FeatureId(4), &b_names[..])].into();
-        let mut sides = vec![face(1, 6.0, vec![a]), face(2, 6.0, vec![b])];
-        sides[0].surface = SurfaceKind::Cylinder;
-        sides[0].normal = None;
-        sides[1].normal = Some(Vec3::Y);
-        let mut body = topology(sides);
-        body.edges = [-4.0, 4.0]
-            .into_iter()
-            .enumerate()
-            .map(|(index, x)| EdgeInfo {
-                id: EdgeId::from_raw(index as u64 + 1),
-                curve: CurveKind::Line,
-                length: 12.0,
-                midpoint: Vec3::new(x, 3.0, 6.0),
-                bbox: Aabb { min: Vec3::new(x, 3.0, 0.0), max: Vec3::new(x, 3.0, 12.0) },
-                faces: vec![FaceId::from_raw(1), FaceId::from_raw(2)],
-                construction_origins: None,
-                vertices: vec![],
-            })
-            .collect();
-        let selected = EdgeId::from_raw(2);
-        let reference = name_edge(selected, &View { topology: &body }, &names).unwrap();
-        assert!(reference.disambiguate);
-        let saved = serde_json::to_string(&reference).unwrap();
-        let reference: EdgeRef = serde_json::from_str(&saved).unwrap();
-        assert_eq!(resolve_edge(&reference, &View { topology: &body }, &names).unwrap(), selected);
-        let mut unique = body.clone();
-        unique.edges.retain(|edge| edge.id == selected);
-        let legacy = name_edge(selected, &View { topology: &unique }, &names).unwrap();
-        assert!(!legacy.disambiguate);
-        for edge in &mut unique.edges {
-            edge.midpoint.x += 8.0;
+        for curve in [CurveKind::Line, CurveKind::Circle, CurveKind::Spline, CurveKind::Other] {
+            let a = origin("F2", FaceRole::Other);
+            let b = origin("F4", FaceRole::Other);
+            let a_names = [NamedFace { origin: a.clone(), generator: Generator::Other, ordinal: 0 }];
+            let b_names = [NamedFace { origin: b.clone(), generator: Generator::Other, ordinal: 0 }];
+            let names: NameMap = [(FeatureId(2), &a_names[..]), (FeatureId(4), &b_names[..])].into();
+            let mut sides = vec![face(1, 6.0, vec![a]), face(2, 6.0, vec![b])];
+            sides[0].surface = SurfaceKind::Cylinder;
+            sides[0].normal = None;
+            sides[1].normal = Some(Vec3::Y);
+            let mut body = topology(sides);
+            body.edges = [-4.0, 4.0]
+                .into_iter()
+                .enumerate()
+                .map(|(index, x)| EdgeInfo {
+                    id: EdgeId::from_raw(index as u64 + 1),
+                    curve,
+                    length: 12.0,
+                    midpoint: Vec3::new(x, 3.0, 6.0),
+                    bbox: Aabb { min: Vec3::new(x, 3.0, 0.0), max: Vec3::new(x, 3.0, 12.0) },
+                    faces: vec![FaceId::from_raw(1), FaceId::from_raw(2)],
+                    construction_origins: None,
+                    vertices: vec![],
+                })
+                .collect();
+            let selected = EdgeId::from_raw(2);
+            let reference = name_edge(selected, &View { topology: &body }, &names).unwrap();
+            assert!(reference.disambiguate);
+            let saved = serde_json::to_string(&reference).unwrap();
+            let reference: EdgeRef = serde_json::from_str(&saved).unwrap();
+            assert_eq!(resolve_edge(&reference, &View { topology: &body }, &names).unwrap(), selected);
+            let mut unique = body.clone();
+            unique.edges.retain(|edge| edge.id == selected);
+            let legacy = name_edge(selected, &View { topology: &unique }, &names).unwrap();
+            assert!(!legacy.disambiguate);
+            for edge in &mut unique.edges {
+                edge.midpoint.x += 8.0;
+            }
+            for face in &mut unique.faces {
+                face.centroid.x += 8.0;
+            }
+            assert_eq!(
+                resolve_edge(&legacy, &View { topology: &unique }, &names).unwrap(),
+                selected,
+                "single-edge references retain their existing behavior"
+            );
+            let mut moved = body.clone();
+            for edge in &mut moved.edges {
+                edge.midpoint.x += 8.0;
+            }
+            for face in &mut moved.faces {
+                face.centroid.x += 8.0;
+            }
+            assert!(
+                matches!(
+                    resolve_edge(&reference, &View { topology: &moved }, &names).unwrap_err().reason,
+                    RepairReason::Ambiguous
+                ),
+                "a different branch at the old point must not steal the reference"
+            );
+            let mut lost = moved.clone();
+            lost.edges.retain(|edge| edge.id != selected);
+            assert!(
+                resolve_edge(&reference, &View { topology: &lost }, &names).is_err(),
+                "the surviving opposite branch must not take a missing generator's reference"
+            );
+            body.edges[0].midpoint = body.edges[1].midpoint;
+            assert!(
+                matches!(
+                    resolve_edge(&reference, &View { topology: &body }, &names).unwrap_err().reason,
+                    RepairReason::Ambiguous
+                ),
+                "equal fingerprints stay ambiguous"
+            );
         }
-        for face in &mut unique.faces {
-            face.centroid.x += 8.0;
-        }
-        assert_eq!(
-            resolve_edge(&legacy, &View { topology: &unique }, &names).unwrap(),
-            selected,
-            "single-edge references retain their existing behavior"
-        );
-        let mut moved = body.clone();
-        for edge in &mut moved.edges {
-            edge.midpoint.x += 8.0;
-        }
-        for face in &mut moved.faces {
-            face.centroid.x += 8.0;
-        }
-        assert!(
-            matches!(
-                resolve_edge(&reference, &View { topology: &moved }, &names).unwrap_err().reason,
-                RepairReason::Ambiguous
-            ),
-            "a different branch at the old point must not steal the reference"
-        );
-        let mut lost = moved.clone();
-        lost.edges.retain(|edge| edge.id != selected);
-        assert!(
-            resolve_edge(&reference, &View { topology: &lost }, &names).is_err(),
-            "the surviving opposite branch must not take a missing generator's reference"
-        );
-        body.edges[0].midpoint = body.edges[1].midpoint;
-        assert!(
-            matches!(
-                resolve_edge(&reference, &View { topology: &body }, &names).unwrap_err().reason,
-                RepairReason::Ambiguous
-            ),
-            "equal fingerprints stay ambiguous"
-        );
     }
 }

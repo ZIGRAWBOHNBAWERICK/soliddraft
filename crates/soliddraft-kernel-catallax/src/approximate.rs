@@ -18,12 +18,19 @@ use soliddraft_kernel_api::*;
 
 use crate::convert;
 
+mod imported;
+
+enum Geometry {
+    Numerical(Arc<NumericalApplicationBody>),
+    Imported { opened: Arc<catallax_import::tolerant::opened::OpenedStep>, index: usize },
+}
+
 /// The display sample of a numerical body, keyed by its definition's face and edge keys.
 pub(crate) type Sample = PreviewMesh<String, String>;
 
 /// A numerical body, its interface ids and what has been read from its sample.
 pub(crate) struct Approximate {
-    pub outcome: Arc<NumericalApplicationBody>,
+    geometry: Geometry,
     pub faces: BTreeMap<String, FaceId>,
     pub edges: BTreeMap<String, EdgeId>,
     pub vertices: BTreeMap<String, VertexId>,
@@ -79,7 +86,7 @@ impl Approximate {
             })
             .collect();
         Approximate {
-            outcome,
+            geometry: Geometry::Numerical(outcome),
             faces,
             edges,
             vertices,
@@ -90,23 +97,32 @@ impl Approximate {
         }
     }
 
-    pub(crate) fn body(&self) -> &NumericalBody {
-        self.outcome.body()
-    }
-
-    /// The tolerance stated before the build, as Catallax holds it.
-    pub(crate) fn tolerance(&self) -> &Rational {
-        &self.body().options().tolerance_mm
+    fn body(&self) -> KernelResult<&NumericalBody> {
+        match &self.geometry {
+            Geometry::Numerical(outcome) => Ok(outcome.body()),
+            Geometry::Imported { opened, index } => match opened.body(*index) {
+                Some(catallax_import::tolerant::opened::BodyView::Numerical(body)) => Ok(body),
+                _ => Err(not_yet()),
+            },
+        }
     }
 
     pub(crate) fn accuracy(&self) -> BodyAccuracy {
-        BodyAccuracy::Approximate { tolerance_mm: decimal(self.tolerance()) }
+        match &self.geometry {
+            Geometry::Numerical(outcome) => {
+                BodyAccuracy::Approximate { tolerance_mm: decimal(&outcome.body().options().tolerance_mm) }
+            }
+            Geometry::Imported { .. } => BodyAccuracy::Tolerant,
+        }
     }
 
     pub(crate) fn kind(&self) -> BodyKind {
-        match self.body().kind() {
-            catallax_topology::BodyKind::Surface => BodyKind::Sheet,
-            _ => BodyKind::Solid,
+        match &self.geometry {
+            Geometry::Imported { .. } => BodyKind::Solid,
+            Geometry::Numerical(outcome) => match outcome.body().kind() {
+                catallax_topology::BodyKind::Surface => BodyKind::Sheet,
+                _ => BodyKind::Solid,
+            },
         }
     }
 
@@ -153,8 +169,13 @@ impl Approximate {
             return Err(crate::gap("Display of an approximate surface body"));
         }
         self.samples.get(crate::display_key(options), || {
-            on_request_allowance("approximate_display", |dec| {
-                sample_through_step(self.body(), &PreviewOptions::from(options), dec)
+            on_request_allowance("approximate_display", |dec| match &self.geometry {
+                Geometry::Imported { opened, index } => {
+                    imported::sample(opened, *index, &PreviewOptions::from(options), dec)
+                }
+                Geometry::Numerical(outcome) => {
+                    sample_through_step(outcome.body(), &PreviewOptions::from(options), dec)
+                }
             })
             .map_err(|refusal| match refusal.code {
                 INCOMPLETE => KernelError::Unsupported("The display of this approximate body is incomplete.".into()),
@@ -195,11 +216,18 @@ impl Approximate {
     }
 
     fn compute_topology(&self) -> KernelResult<Topology> {
+        if let Geometry::Imported { opened, index } = &self.geometry {
+            return imported::topology(self, opened, *index);
+        }
+        self.compute_numerical_topology(self.body()?)
+    }
+
+    fn compute_numerical_topology(&self, body: &NumericalBody) -> KernelResult<Topology> {
         let options = catallax_mesh::MeshOptions::default();
         let chord = options.chord_tolerance.to_f64_nearest();
         let sample = self.sample(&options)?;
-        let definition = self.body().definition();
-        let tolerance = self.tolerance().to_f64_nearest();
+        let definition = body.definition();
+        let tolerance = body.options().tolerance_mm.to_f64_nearest();
         let point = |i: usize| Vec3::from(sample.positions[i]);
         let mut adjacency: BTreeMap<usize, Vec<FaceId>> = BTreeMap::new();
         let mut faces = Vec::new();
@@ -346,18 +374,21 @@ impl Approximate {
     /// The body as a numerical STEP file: the file states that it is approximate. Catallax
     /// bounds the rounding of each written length, not the file's distance from the body.
     pub(crate) fn export_step(&self, options: &StepOptions) -> KernelResult<StepExport> {
+        if let Geometry::Imported { opened, index } = &self.geometry {
+            return imported::export_step(opened, *index, options);
+        }
         let limit = Rational::from_f64_exact(options.tolerance)
             .filter(|limit| limit.sign() == catallax_numbers::Sign::Positive)
             .ok_or_else(|| KernelError::InvalidInput("the STEP tolerance must be a positive number".into()))?;
+        let body = self.body()?;
         let product = if options.product_name.trim().is_empty() { "part" } else { options.product_name.as_str() };
         let step_options = catallax_step::numerical::NumericalStepOptions {
             product_name: product.to_owned(),
             max_scalar_rounding_error_mm: limit.clone(),
             ..Default::default()
         };
-        let step =
-            on_request_allowance("export_step", |dec| catallax_step::numerical::build(self.body(), &step_options, dec))
-                .map_err(|e| crate::query_error("export_step", e))?;
+        let step = on_request_allowance("export_step", |dec| catallax_step::numerical::build(body, &step_options, dec))
+            .map_err(|error| crate::query_error("export_step", error))?;
         let report = step.report();
         let rounding = &report.max_scalar_rounding_error_mm;
         let [faces, edges, vertices] = report.counts;
@@ -384,8 +415,9 @@ impl Approximate {
                 removed_faces: 0,
                 removed_edges: 0,
                 warnings: Vec::new(),
+                tolerant: false,
                 approximate: Some(ApproximateStep {
-                    tolerance_mm: self.tolerance().to_f64_nearest(),
+                    tolerance_mm: body.options().tolerance_mm.to_f64_nearest(),
                     max_length_rounding_mm: crate::step::f64_up(rounding),
                 }),
             },
@@ -405,6 +437,26 @@ impl Approximate {
         });
         bytes
     }
+}
+
+/// Runs a sampled query on the active allowance, or the application's ordinary request
+/// allowance. A numerical writer's smaller standalone guard must not replace it.
+fn on_request_allowance<T>(
+    operation: &str,
+    run: impl FnOnce(&mut Decider) -> Result<T, Refusal>,
+) -> Result<T, Refusal> {
+    let observed = || crate::numerical(operation, |dec| run(dec).map(catallax_numbers::Answer::exact));
+    if catallax_numbers::operation_budget_active() {
+        return observed().map(|answer| answer.value);
+    }
+    let (result, work) = catallax_numbers::with_operation_budget(catallax_app::DEFAULT_BUILD_WORK, observed);
+    if work.exhausted {
+        return Err(Refusal::new(
+            "numbers.operation-budget",
+            format!("{operation} exhausted the application's work allowance"),
+        ));
+    }
+    result.map(|answer| answer.value)
 }
 
 /// The display sample of a numerical body: Catallax writes the body's numerical STEP file

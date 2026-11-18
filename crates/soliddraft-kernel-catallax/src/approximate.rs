@@ -151,11 +151,9 @@ impl Approximate {
             return Err(crate::gap("Display of an approximate surface body"));
         }
         self.samples.get(crate::display_key(options), || {
-            crate::numerical("approximate_display", |dec| {
+            on_request_allowance("approximate_display", |dec| {
                 sample_through_step(self.body(), &PreviewOptions::from(options), dec)
-                    .map(catallax_numbers::Answer::exact)
             })
-            .map(|answer| answer.value)
             .map_err(|refusal| match refusal.code {
                 INCOMPLETE => KernelError::Unsupported("The display of this approximate body is incomplete.".into()),
                 _ => crate::query_error("approximate_display", refusal),
@@ -347,11 +345,9 @@ impl Approximate {
             max_scalar_rounding_error_mm: limit.clone(),
             ..Default::default()
         };
-        let step = crate::numerical("export_step", |dec| {
-            catallax_step::numerical::build(self.body(), &step_options, dec).map(catallax_numbers::Answer::exact)
-        })
-        .map_err(|e| crate::query_error("export_step", e))?
-        .value;
+        let step =
+            on_request_allowance("export_step", |dec| catallax_step::numerical::build(self.body(), &step_options, dec))
+                .map_err(|e| crate::query_error("export_step", e))?;
         let report = step.report();
         let rounding = &report.max_scalar_rounding_error_mm;
         let [faces, edges, vertices] = report.counts;
@@ -405,6 +401,28 @@ impl Approximate {
 /// and previews that file. The preview names faces and edges by STEP entity; the writer
 /// labels each entity with its definition key, which names them here. Nothing about the
 /// sample is proved.
+/// Writes or shows an approximate body on the caller's allowance, or on the app's request
+/// allowance when none is active, as an exact body's display and export run. Left to
+/// itself, Catallax's numerical STEP writer stops at its smaller standalone default,
+/// which the STEP of a rounded pocket rim passes.
+fn on_request_allowance<T>(
+    operation: &str,
+    run: impl FnOnce(&mut Decider) -> Result<T, Refusal>,
+) -> Result<T, Refusal> {
+    let observed = || crate::numerical(operation, |dec| run(dec).map(catallax_numbers::Answer::exact));
+    if catallax_numbers::operation_budget_active() {
+        return observed().map(|answer| answer.value);
+    }
+    let (result, work) = catallax_numbers::with_operation_budget(catallax_app::DEFAULT_BUILD_WORK, observed);
+    if work.exhausted {
+        return Err(Refusal::new(
+            "numbers.operation-budget",
+            format!("{operation} exhausted the application's work allowance"),
+        ));
+    }
+    result.map(|answer| answer.value)
+}
+
 fn sample_through_step(body: &NumericalBody, options: &PreviewOptions, dec: &mut Decider) -> Result<Sample, Refusal> {
     let step = catallax_step::numerical::build(body, &Default::default(), dec)?;
     let step = step.bytes();

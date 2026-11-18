@@ -29,7 +29,13 @@ pub fn for_user(message: &str) -> String {
     }
     // When the exact construction and the general one both refused, the general one's
     // reason is the one that holds: the exact one may only lack a construction.
-    if let Some((_, general)) = message.split_once(NUMERICAL_REFUSED) {
+    if let Some((exact, general)) = message.split_once(NUMERICAL_REFUSED) {
+        // Unless the general one could not take the body in at all: then it said nothing
+        // of the fillet, and the exact construction's reason is the one there is.
+        if general.starts_with("features.numerical-embedding") {
+            let plain = plain_message(exact);
+            return if plain == exact { GENERIC_FILLET.into() } else { plain.into() };
+        }
         let plain = plain_message(general);
         // A reason these words do not cover yet still never shows its code.
         return if plain == general { GENERIC_FILLET.into() } else { plain.into() };
@@ -291,6 +297,13 @@ mod tests {
             "The fillet surface could not be fitted along these edges. Try a different radius or select different \
              edges."
         );
+        // The general construction could not take the body in, so it said nothing of the
+        // fillet: the exact construction's reason is the one shown.
+        let unembedded = "fillet failed in the kernel (status 0): fillet.unsupported-end: step op_9: \
+                          fillet.unsupported-end: an arc strip ends at a meridian only on an end plane through its \
+                          ring axis; numerical continuation refused features.numerical-embedding-fit: a traced edge \
+                          has no fitted curve";
+        assert_eq!(for_user(unembedded), "Fillets ending here are not supported yet.");
         // A general reason these words do not know yet still shows no code.
         let unknown = "fillet failed in the kernel (status 0): exact path refused fillet.unsupported-topology: x; \
                        numerical continuation refused vertex.new-reason: y";

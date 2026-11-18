@@ -3579,7 +3579,9 @@ impl Document {
         self.meshes.clear();
         self.picks.clear();
         let topology = next.map(|body| (body, self.kernel().topology(body)));
-        if let Some((_, Err(error))) = &topology {
+        if let Some((body, Err(error))) = &topology
+            && self.sampled_only(*body, error)
+        {
             // Catallax made the body but cannot sample its faces, so nothing could be drawn,
             // picked or measured: refuse it like a body with no display mesh.
             self.display_failure = Some(display_unavailable(error.to_string()));
@@ -3694,6 +3696,16 @@ impl Document {
     }
 
     /// The tolerance kernel body `body` was built within, as [`Document::body_tolerance`].
+    /// Whether a body that failed its topology query is refused for it. An approximate
+    /// body's faces, edges and picks all come from its display sample, so a body Catallax
+    /// built and cannot sample is withdrawn. An exact body is treated as it was before
+    /// this rule: an edit that leaves an exact loft whose face-area measurement runs out
+    /// of budget is still accepted, as `loft_app` expects.
+    fn sampled_only(&self, body: BodyId, error: &soliddraft_kernel_api::KernelError) -> bool {
+        self.kernel_body_tolerance(body).is_some()
+            || matches!(error, soliddraft_kernel_api::KernelError::QueryFailed { query, .. } if query == "approximate_display")
+    }
+
     pub fn kernel_body_tolerance(&self, body: BodyId) -> Option<String> {
         match self.model.kernel().body_accuracy(body).ok()? {
             soliddraft_kernel_api::BodyAccuracy::Approximate { tolerance_mm } => Some(tolerance_mm),

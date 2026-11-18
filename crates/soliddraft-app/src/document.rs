@@ -3578,9 +3578,13 @@ impl Document {
         self.edges.clear();
         self.meshes.clear();
         self.picks.clear();
-        if let Some(body) = next
-            && let Ok(topology) = self.kernel().topology(body)
-        {
+        let topology = next.map(|body| (body, self.kernel().topology(body)));
+        if let Some((_, Err(error))) = &topology {
+            // Catallax made the body but cannot sample its faces, so nothing could be drawn,
+            // picked or measured: refuse it like a body with no display mesh.
+            self.display_failure = Some(display_unavailable(error.to_string()));
+        }
+        if let Some((body, Ok(topology))) = topology {
             self.tess_params = self.quality.retarget(body, &topology, &self.model.settings().viewport);
             let kept = self.recent.iter().position(|s| s.body == body && s.params == self.tess_params);
             let cached = self.quality.reuse(body);

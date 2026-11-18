@@ -91,6 +91,10 @@ fn plain_message(message: &str) -> &str {
         "Draft cannot tilt this body yet. Try other faces, or draft before the cuts."
     } else if message.contains("mesh.precision-or-budget") {
         "This shape could not be displayed. Try suppressing a feature."
+    } else if message.contains("approximate_display") {
+        // Catallax built an approximate body but could not sample its surfaces.
+        "The approximate surfaces of this shape could not be displayed. Try a different size or select \
+         different edges."
     } else if has_code(message, "measure") || has_code(message, "iges") {
         // Measurements and IGES output the kernel does not cover yet.
         "Coming soon"
@@ -383,6 +387,7 @@ mod tests {
             "fillet.unsupported-topology",
             "recipe.ambiguous-reference",
             "mesh.precision-or-budget",
+            "approximate_display failed (status 0): step.numerical-rounding-topology",
             "measure.unsupported-surface",
             "measure.unsupported-pair",
             "measure.nonplanar-face",

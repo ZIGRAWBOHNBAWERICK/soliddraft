@@ -26,6 +26,9 @@ pub struct Rules {
     pub display_bound: Option<DisplayBound>,
     /// Bodies with more volume than this cannot be meshed for display.
     pub refuse_display_above: Option<f64>,
+    /// Bodies with more volume than this cannot be sampled for their faces and edges, as
+    /// when Catallax builds an approximate body its display writer then refuses.
+    pub refuse_topology_above: Option<f64>,
     /// Pair proofs fail, as an incomplete bound would.
     pub refuse_pairs: bool,
     /// Refuses the next background proof reservation before any feature builds.
@@ -168,6 +171,14 @@ impl Kernel for Gated {
         self.inner.validate(body)
     }
     fn topology(&self, body: BodyId) -> KernelResult<Topology> {
+        let above = self.rules.lock().unwrap().refuse_topology_above;
+        if above.is_some_and(|limit| self.inner.mass_properties(body).is_ok_and(|m| m.volume > limit)) {
+            return Err(KernelError::QueryFailed {
+                query: "approximate_display".into(),
+                code: 0,
+                message: "step.numerical-rounding-topology: the scenario refuses to sample this body".into(),
+            });
+        }
         self.inner.topology(body)
     }
     fn edge_length(&self, body: BodyId, edge: EdgeId) -> KernelResult<Measurement> {

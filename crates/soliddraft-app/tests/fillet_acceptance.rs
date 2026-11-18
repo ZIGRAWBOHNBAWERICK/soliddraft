@@ -190,12 +190,25 @@ impl Part {
                 row.result = "name";
                 row.stage = "naming".into();
                 row.kernel = out.content.clone();
+            } else if kernel.is_empty() {
+                // The kernel built the fillet, and the app refused a body it could not show.
+                row.result = "refused";
+                row.stage = "display".into();
+                row.kernel = out.content.clone();
             } else {
                 row.result = "refused";
                 row.stage = stage(&kernel);
                 row.recipe = calls["questions"].as_array().and_then(|q| q.last()).map(|q| q["problem"].clone());
             }
-            assert_eq!(self.doc().model().part_json(), before, "{case}: a refused fillet changed the part");
+            // A fillet refused after it was built, because its body could not be displayed,
+            // used up its feature id, as an undone feature does: ids are never reused.
+            // Everything else is as before.
+            let ids = |part: &str| {
+                let mut part: Value = serde_json::from_str(part).unwrap();
+                part.as_object_mut().unwrap().remove("next_feature");
+                part
+            };
+            assert_eq!(ids(&self.doc().model().part_json()), ids(&before), "{case}: a refused fillet changed the part");
             return row;
         }
         let model = self.doc().model();

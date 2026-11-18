@@ -32,7 +32,7 @@ mod sweep;
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 
-use catallax_app::{Error, EvaluatedApplicationBody, EvaluatedApplicationOutcome, NumericalApplicationBody};
+use catallax_app::{Error, EvaluatedApplicationOutcome, NumericalApplicationBody};
 
 mod evaluated;
 mod handover;
@@ -48,7 +48,7 @@ use soliddraft_kernel_api::*;
 pub use diagnostics::{APP_REQUEST_WORK, APP_WORK_TARGET, RequestWork, with_request_allowance};
 
 /// The pinned Catallax application entry revision.
-pub const CATALLAX_REVISION: &str = "9566aa24011d9ba3dde38d717f66be6be97c5015";
+pub const CATALLAX_REVISION: &str = "403081f8e0f98cfd798bbb1af766288a574ef5f5";
 
 /// An in-process Catallax backend. There is no global kernel state or kernel thread.
 #[derive(Default)]
@@ -578,8 +578,9 @@ impl CatallaxKernel {
                 if outcome.body().definition().faces.is_empty() {
                     return Err(KernelError::Unsupported(NOTHING_LEFT.into()));
                 }
-                let approximate = approximate::Approximate::new(outcome, &parent_ids, &tags, &mut state.next);
-                let record = approximate.record(seq, tag, op, &result, &parent_ids, &tags);
+                let approximate =
+                    approximate::Approximate::new(outcome, &parent_ids, &tags, selected_edges, &mut state.next);
+                let record = approximate.record(seq, tag, op, &parent_ids);
                 history.insert(seq, record.clone());
                 let body = BodyId::from_raw(state.id());
                 state.bodies.insert(
@@ -596,7 +597,7 @@ impl CatallaxKernel {
             }
         };
         if op == OpKind::Fillet
-            && let Some(refusal) = stopped_short(&app, &result)
+            && let Some(refusal) = stopped_short(app.checkpoint.built(), &result)
         {
             return Err(refusal);
         }
@@ -750,6 +751,7 @@ impl CatallaxKernel {
         let built = build(
             &input,
             op,
+            &parents,
             prefix.as_ref().map(|solid| &solid.app),
             &files,
             capture.then_some(&mut questions),
@@ -871,8 +873,7 @@ const NOTHING_LEFT: &str = "this would leave nothing of the part";
 /// and keeps the request in `requested_radius`. SolidDraft never builds a radius other
 /// than the one the feature records, so it refuses as Catallax did before, naming the
 /// largest radius that fits. A radius that consumes a face exactly still builds.
-fn stopped_short(app: &AppBody, step: &str) -> Option<KernelError> {
-    let built = app.checkpoint.built();
+fn stopped_short(built: &catallax_features::Built, step: &str) -> Option<KernelError> {
     let limit = built
         .fillets
         .iter()
@@ -1087,9 +1088,11 @@ impl From<EvaluatedApplicationOutcome> for Outcome {
 type BuildAnswer = (Outcome, BTreeMap<String, catallax_recipe::StepId>, String, Option<Arc<handover::HandedTopology>>);
 
 /// Builds a legacy recipe, returning the body and the legacy step names' Catallax step ids.
+#[allow(clippy::too_many_arguments)]
 fn build(
     input: &Value,
     op: OpKind,
+    parents: &[Arc<Solid>],
     prefix: Option<&AppBody>,
     files: &catallax_features::ImportFiles<'_>,
     questions: Option<&mut Vec<Value>>,
@@ -1120,11 +1123,15 @@ fn build(
     // Clone only the selected checkpoint, after releasing the body arena lock.
     // A handed-over body has no continuation; its prefix is rebuilt from the recipe.
     let prefix = prefix.and_then(|app| app.checkpoint.continuation());
-    let app = if files.is_empty() {
-        catallax_app::build_incremental_without_display(&converted.recipe, prefix, &mut Decider::default())
-    } else {
-        build_with_files(&converted.recipe, prefix, files)
-    }
+    // Catallax tries the exact construction first and returns a numerical body, built
+    // within its stated tolerance, where only that construction succeeds. Either is kept
+    // as Catallax built it, never turned into a refusal or the other kind.
+    let outcome = catallax_app::build_incremental_with_files_without_display(
+        &converted.recipe,
+        prefix,
+        files,
+        &mut Decider::default(),
+    )
     .map_err(|e| {
         let spline = input["steps"].as_array()
             .and_then(|steps| steps.iter().find(|step| step["id"] == input["result"]))
@@ -1132,13 +1139,21 @@ fn build(
             .is_some_and(|segments| segments.iter().any(|s| s["kind"] == "spline"));
         if op == OpKind::Sweep && spline && e.code() == "features.unsupported-path" {
             KernelError::InvalidInput("This spline sweep was refused because it needs one spline segment and a profile that keeps its direction".into())
+        } else if op == OpKind::Fillet
+            && let Some(reaches) = fillet_reaches(&e, parents)
+        {
+            reaches
         } else {
             build_error(op, e)
         }
     })?;
-    // Catallax's application entry returns exact bodies only, for now. A numerical one
-    // is retained as Catallax built it, never turned into a refusal or an exact body.
-    let outcome = EvaluatedApplicationOutcome::Exact(app);
+    // Checked before anything else reads the build, so no stand-in hides it.
+    if op == OpKind::Fillet
+        && let EvaluatedApplicationOutcome::Exact(app) = &outcome
+        && let Some(refusal) = stopped_short(app.checkpoint.built(), input["result"].as_str().unwrap_or_default())
+    {
+        return Err(refusal);
+    }
     #[cfg(feature = "numerical-stand-in")]
     let outcome = if stand_in.contains(&op) {
         stand_in::numerical(outcome, &converted.recipe).map_err(|e| KernelError::Failed {
@@ -1154,35 +1169,77 @@ fn build(
     Ok((outcome.into(), converted.steps, key, None))
 }
 
-/// [`catallax_app::build_incremental_without_display`] for a recipe that reads STEP
-/// sources: the same default allowance, result check and picking names.
-fn build_with_files(
-    recipe: &catallax_recipe::Recipe,
-    prefix: Option<catallax_features::EvaluationCheckpoint>,
-    files: &catallax_features::ImportFiles<'_>,
-) -> Result<EvaluatedApplicationBody, Error> {
-    let run = || {
-        let checkpoint =
-            catallax_features::evaluate_incremental_with_files(recipe, prefix, files, &mut Decider::default())
-                .map_err(Error::Build)?;
-        let built = checkpoint.built();
-        let (model, body) = (&built.model, built.result);
-        let faults = model.check(body);
-        if !faults.is_empty() {
-            return Err(Error::InvalidBody(faults));
+/// What a Catallax fillet refusal writes before each face of the input body the fillet
+/// would run into, followed by the face's handle as Catallax prints it: "; reaches face #12".
+const REACHES: &str = "; reaches face #";
+
+/// What a Catallax `fillet.radius-too-large` refusal writes before the faces a ball of
+/// that radius cannot touch at once, as a JSON list of each face's origins:
+/// `; limiting contact supports [[{"step":"op_3",...}],[{"step":"op_45",...}]]`.
+const LIMITING_SUPPORTS: &str = "; limiting contact supports ";
+
+/// A fillet Catallax refused because it would run into faces other than those beside
+/// its edges, or because no ball of its radius touches two faces at once, with those
+/// faces as the input body's ids. `None` when the refusal names no such face, or names
+/// one the input body does not have.
+fn fillet_reaches(error: &Error, parents: &[Arc<Solid>]) -> Option<KernelError> {
+    let Error::Build(catallax_features::BuildError::Geometry { refusal, .. }) = error else { return None };
+    let handles = reached_handles(&refusal.detail);
+    let (faces, between) = if handles.is_empty() {
+        let supports = limiting_supports(&refusal.detail)?;
+        let mut faces = Vec::new();
+        for support in &supports {
+            let made = parents.iter().map(|parent| parent.ids.faces_made_by(support)).find(|made| !made.is_empty())?;
+            for face in made {
+                if !faces.contains(&face) {
+                    faces.push(face);
+                }
+            }
         }
-        let names = catallax_app::Names {
-            faces: model.faces_of_body(body).into_iter().map(|f| (f, model.face_origins(f).to_vec())).collect(),
-            edges: model.edges_of_body(body).into_iter().map(|e| (e, model.edge_name(body, e))).collect(),
-            vertices: model.vertices_of_body(body).into_iter().map(|v| (v, model.vertex_name(body, v))).collect(),
-        };
-        Ok(EvaluatedApplicationBody { checkpoint, names })
+        (faces, true)
+    } else {
+        let faces = handles
+            .iter()
+            .map(|index| {
+                parents.iter().find_map(|parent| {
+                    parent.ids.faces.iter().find_map(|(cat, face)| (cat.index() == *index).then_some(*face))
+                })
+            })
+            .collect::<Option<Vec<FaceId>>>()?;
+        (faces, false)
     };
-    if catallax_numbers::operation_budget_active() {
-        return run();
+    if faces.is_empty() {
+        return None;
     }
-    let (result, work) = catallax_numbers::with_operation_budget(catallax_app::DEFAULT_BUILD_WORK, run);
-    if work.exhausted { Err(Error::ResourceLimit) } else { result }
+    let radius_limit_mm = refusal
+        .detail
+        .split("; radius limit ")
+        .skip(1)
+        .filter_map(|rest| rest.split_once(" mm")?.0.parse::<f64>().ok())
+        .filter(|limit| limit.is_finite() && *limit > 0.0)
+        .min_by(f64::total_cmp);
+    Some(KernelError::FilletReaches { faces, between, radius_limit_mm, message: format!("{}: {error}", error.code()) })
+}
+
+/// The origins of each face a refusal names after [`LIMITING_SUPPORTS`], first list only.
+fn limiting_supports(detail: &str) -> Option<Vec<Vec<catallax_recipe::Origin>>> {
+    let (_, rest) = detail.split_once(LIMITING_SUPPORTS)?;
+    let mut list = serde_json::Deserializer::from_str(rest).into_iter::<Vec<Vec<catallax_recipe::Origin>>>();
+    list.next()?.ok().filter(|supports| !supports.is_empty())
+}
+
+/// The face handles a refusal names after [`REACHES`], in order, each once.
+fn reached_handles(detail: &str) -> Vec<u32> {
+    let mut handles = Vec::new();
+    for rest in detail.split(REACHES).skip(1) {
+        let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
+        if let Ok(index) = digits.parse()
+            && !handles.contains(&index)
+        {
+            handles.push(index);
+        }
+    }
+    handles
 }
 
 fn loft_fillet_refusal(error: &Error) -> Option<&'static str> {
@@ -2461,6 +2518,28 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_fillet_refusal_names_each_face_it_reaches_once() {
+        let detail = "exact path refused fillet.radius-too-large: the ball reaches a face; radius limit 4 mm; \
+                      reaches face #12; numerical continuation refused fillet.radius-too-large: the same face; \
+                      reaches face #12; reaches face #3.";
+        assert_eq!(reached_handles(detail), [12, 3]);
+        assert!(reached_handles("fillet.unsupported-overflow: a face; reaches face #").is_empty());
+    }
+
+    /// The faces a ball cannot touch at once, as Catallax names them by origin before
+    /// the terminal radius limit.
+    #[test]
+    fn a_fillet_refusal_names_the_faces_it_does_not_fit_between() {
+        let detail = r#"no ball of this radius rolls along the edge against both faces; maximum unknown; limiting contact supports [[{"step":"op_3","role":{"side":{"segment":"l0s2"}}}],[{"step":"op_45","role":{"side":{"segment":"l0s1"}}}]]; radius limit 3.999 mm"#;
+        let supports = limiting_supports(detail).unwrap();
+        assert_eq!(supports.len(), 2);
+        assert_eq!(supports[0][0].step.as_str(), "op_3");
+        assert_eq!(supports[1][0].step.as_str(), "op_45");
+        assert!(limiting_supports("fillet.radius-too-large: a; radius limit 4 mm").is_none());
+        assert!(limiting_supports("a; limiting contact supports not json; radius limit 4 mm").is_none());
+    }
+
+    #[test]
     fn certified_display_is_cached_after_a_refused_request_retries() {
         let kernel = CatallaxKernel::new();
         let body = contract::cylinder(&kernel, Vec3::ZERO, 5.0, 10.0);
@@ -2549,7 +2628,8 @@ mod tests {
             let evidence = kernel.take_diagnostics().unwrap();
             let recipe = kernel.body_recipe(cut).unwrap();
             let (Outcome::Exact(replayed), steps, _, _) =
-                build(&recipe, OpKind::Subtract, None, &Default::default(), None, &Default::default(), &[]).unwrap()
+                build(&recipe, OpKind::Subtract, &[], None, &Default::default(), None, &Default::default(), &[])
+                    .unwrap()
             else {
                 panic!("an exact cut")
             };
@@ -2601,7 +2681,8 @@ mod tests {
             }
             let recipe = kernel.body_recipe(swept.body).unwrap();
             let (Outcome::Exact(fresh), _, _, _) =
-                build(&recipe, OpKind::ExtrudeTo, None, &Default::default(), None, &Default::default(), &[]).unwrap()
+                build(&recipe, OpKind::ExtrudeTo, &[], None, &Default::default(), None, &Default::default(), &[])
+                    .unwrap()
             else {
                 panic!("an exact sweep")
             };

@@ -939,7 +939,10 @@ impl Document {
         };
         let result = match result {
             Ok(r) => r,
-            Err(err) => return Built::failed(current, feature_error(err)),
+            Err(err) => {
+                let message = self.fillet_reaches(&err, body).unwrap_or_else(|| feature_error(err));
+                return Built::failed(current, message);
+            }
         };
         let faces = result
             .record

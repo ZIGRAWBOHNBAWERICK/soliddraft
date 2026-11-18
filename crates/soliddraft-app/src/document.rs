@@ -3578,9 +3578,15 @@ impl Document {
         self.edges.clear();
         self.meshes.clear();
         self.picks.clear();
-        if let Some(body) = next
-            && let Ok(topology) = self.kernel().topology(body)
+        let topology = next.map(|body| (body, self.kernel().topology(body)));
+        if let Some((body, Err(error))) = &topology
+            && self.sampled_only(*body, error)
         {
+            // Catallax made the body but cannot sample its faces, so nothing could be drawn,
+            // picked or measured: refuse it like a body with no display mesh.
+            self.display_failure = Some(display_unavailable(error.to_string()));
+        }
+        if let Some((body, Ok(topology))) = topology {
             self.tess_params = self.quality.retarget(body, &topology, &self.model.settings().viewport);
             let kept = self.recent.iter().position(|s| s.body == body && s.params == self.tess_params);
             let cached = self.quality.reuse(body);
@@ -3690,6 +3696,16 @@ impl Document {
     }
 
     /// The tolerance kernel body `body` was built within, as [`Document::body_tolerance`].
+    /// Whether a body that failed its topology query is refused for it. An approximate
+    /// body's faces, edges and picks all come from its display sample, so a body Catallax
+    /// built and cannot sample is withdrawn. An exact body is treated as it was before
+    /// this rule: an edit that leaves an exact loft whose face-area measurement runs out
+    /// of budget is still accepted, as `loft_app` expects.
+    fn sampled_only(&self, body: BodyId, error: &soliddraft_kernel_api::KernelError) -> bool {
+        self.kernel_body_tolerance(body).is_some()
+            || matches!(error, soliddraft_kernel_api::KernelError::QueryFailed { query, .. } if query == "approximate_display")
+    }
+
     pub fn kernel_body_tolerance(&self, body: BodyId) -> Option<String> {
         match self.model.kernel().body_accuracy(body).ok()? {
             soliddraft_kernel_api::BodyAccuracy::Approximate { tolerance_mm } => Some(tolerance_mm),
@@ -4444,8 +4460,23 @@ impl Document {
         let k = self.kernel();
         let r = self.model.round(&OpTag::new("preview"), b, chamfer, &edges, base)?;
         // The faces the rounding makes carry the preview mark, so the viewport can tint them.
-        let made: HashMap<FaceId, FeatureId> =
-            r.record.faces.created.iter().map(|face| (*face, PREVIEW_MADE as FeatureId)).collect();
+        // An approximate result is new throughout, so its rounds are found by their roles.
+        let rounds: Vec<FaceId> = r
+            .record
+            .face_roles
+            .iter()
+            .filter(|o| {
+                matches!(
+                    o.role,
+                    soliddraft_kernel_api::FaceRole::Blend { .. } | soliddraft_kernel_api::FaceRole::Corner { .. }
+                )
+            })
+            .map(|o| o.face)
+            .collect();
+        let made: HashMap<FaceId, FeatureId> = if rounds.is_empty() { &r.record.faces.created } else { &rounds }
+            .iter()
+            .map(|face| (*face, PREVIEW_MADE as FeatureId))
+            .collect();
         let mesh = preview_mesh_marked(k.as_ref(), r.body, &self.tess_params, &made);
         let _ = k.release(r.body);
         Ok(Preview { result: Some(mesh?), tool: None, removes: false, guides: Default::default() })
@@ -4874,15 +4905,19 @@ impl Document {
                         }
                     }
                 }
+                // Whether or not its mass is known yet, an approximate result says so.
+                if !f.is_sketch()
+                    && let Some(body) = f.body
+                    && let Some(tolerance) = self.kernel_body_tolerance(body)
+                {
+                    details.push(("Accuracy".to_owned(), approximate_words(&tolerance)));
+                }
                 if !f.is_sketch()
                     && !matches!(&f.kind, FeatureKind::Scan(scan) if scan.fit.is_none())
                     && self.current_exact_display()
                     && let Some(body) = f.body
                     && let Some(mp) = crate::measure::mass::cached(self, body)
                 {
-                    if let Some(tolerance) = self.kernel_body_tolerance(body) {
-                        details.push(("Accuracy".to_owned(), approximate_words(&tolerance)));
-                    }
                     details.push(("Volume".to_owned(), format!("{:.0} mm³", mp.volume)));
                     details.push(("Surface area".to_owned(), format!("{:.0} mm²", mp.area)));
                     let material = self.material();

@@ -167,6 +167,33 @@ fn a_new_feature_over_an_edit_the_viewport_can_draw_keeps_the_edit() {
     assert!(doc.triangle_count() > 0, "the part stays on screen");
 }
 
+/// Catallax can build a body and then refuse to sample its faces, as its numerical display
+/// writer did for every rolling-ball fillet at one revision. The viewport then has nothing
+/// to draw, so the body is refused like one with no display mesh, in plain words.
+#[test]
+fn a_new_feature_whose_faces_cannot_be_sampled_is_rolled_back() {
+    let kernel = Arc::new(Gated::default());
+    let (mut doc, _) = part(kernel.clone());
+    let before = (doc.features.len(), doc.undo_depth(), doc.display_body(), doc.triangle_count());
+    assert!(before.3 > 0);
+
+    kernel.rules.lock().unwrap().refuse_topology_above = Some(40.0 * 30.0 * 20.0);
+    let refused = doc.apply(add(25.0)).unwrap_err();
+
+    assert!(refused.contains("approximate_display"), "{refused}");
+    assert_eq!(
+        (doc.features.len(), doc.undo_depth(), doc.display_body(), doc.triangle_count()),
+        before,
+        "the part stays on screen"
+    );
+    assert_eq!(doc.display_failure(), Some(refused.as_str()));
+    assert_eq!(
+        soliddraft_app::geometry_message::for_user(&refused),
+        "The approximate surfaces of this shape could not be displayed. Try a different size or select different \
+         edges."
+    );
+}
+
 /// Undo does not roll back, so the model can pass the mesh on screen. An edit made there
 /// has no drawn model to return to, and it must not clear the mesh by trying.
 #[test]

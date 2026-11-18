@@ -307,10 +307,15 @@ struct Loops {
 
 /// The point on the perpendicular bisector of `from`-`to` closest to `c`. Ends that
 /// were joined within tolerance may sit a little apart; this keeps both radii equal.
+/// A centre already on the bisector is kept as drawn: projecting it again only adds
+/// rounding, and an R25 corner whose centre moves by 1e-15 no longer meets its tangent
+/// line smoothly, so the kernel sees a sharp corner there.
 fn bisector_center(c: P2, from: P2, to: P2) -> P2 {
     let m = from.mid(to);
     let n = (to - from).perp().normalized();
-    m + n.scale((c - m).dot(n))
+    let on = m + n.scale((c - m).dot(n));
+    let size = [c.u, c.v, from.u, from.v, to.u, to.v].iter().fold(1.0_f64, |a, x| a.max(x.abs()));
+    if on.dist(c) <= 1e-12 * size { c } else { on }
 }
 
 fn segments(edges: &[Edge], nodes: &[P2], chain: &Chain) -> RegionLoop {
@@ -774,6 +779,17 @@ fn ellipse_crossings(ellipse: Ellipse, start: f64, sweep: f64, p: P2) -> usize {
 mod tests {
     use super::*;
     use crate::ConstraintKind;
+
+    /// A tangent corner keeps its exact centre, so it still meets its lines smoothly; a
+    /// centre off the bisector still moves onto it.
+    #[test]
+    fn an_arc_centre_on_the_bisector_is_kept_exactly() {
+        let (from, to) = (P2::new(40.0, 35.0), P2::new(15.0, 60.0));
+        assert_eq!(bisector_center(P2::new(15.0, 35.0), from, to), P2::new(15.0, 35.0));
+        let moved = bisector_center(P2::new(15.0, 35.001), from, to);
+        assert!((moved.dist(from) - moved.dist(to)).abs() < 1e-12, "{moved:?}");
+        assert!(moved.dist(P2::new(15.0, 35.0)) < 1e-3, "{moved:?}");
+    }
 
     fn square(s: &mut Sketch, o: P2, w: f64, join: bool) -> Vec<EntityId> {
         let c = [o, o + P2::new(w, 0.0), o + P2::new(w, w), o + P2::new(0.0, w)];

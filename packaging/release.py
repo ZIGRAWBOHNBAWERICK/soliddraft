@@ -203,12 +203,23 @@ def known_gap_notes():
                   "`Boss-Extrude3 · Edge 8`, cannot be named or selected for a fillet through the interface. "
                   "The numerical STEP re-import catch-up is not included; STEP files exported from "
                   "approximate bodies cannot be re-imported by this release.", ""]
+    if version() == "0.7.1":
+        lines += ["### STEP import", "",
+                  "SolidDraft 0.7.1 runs on Catallax 0.4.0. Import STEP can reopen supported "
+                  "approximate bodies as Tolerant, while sources that certify remain Certified. "
+                  "The two formerly unnamed curved sample-part edges can now be selected and filleted.", "",
+                  "The owner pocket-rim R2 fillet builds, displays, saves and exports. Reopening its "
+                  "exported STEP reaches the unchanged 100,000,000-unit opening allowance and refuses "
+                  "with \"This file is too complex to open yet.\" No blank import feature or partial body "
+                  "is published; the existing part stays unchanged. Bounded reopening awaits the Catallax "
+                  "opening fix. Supported box fillet STEP round trips remain available.", ""]
     releases = policy.get("release_limitations", {})
-    limitation = releases.get(version()) if releases else None
+    limitation = releases.get("0.7.0" if version() == "0.7.1" else version()) if releases else None
     if limitation:
         timing = limitation["strict_timing_scenarios"]
         timeouts = limitation["stl_export_timeouts"]
-        lines += [f"### {version()} validation", "",
+        validation_version = "0.7.0 carried-forward" if version() == "0.7.1" else version()
+        lines += [f"### {validation_version} validation", "",
                   f"Validation of SolidDraft `{limitation['source']}` with Catallax `{limitation['kernel']}` "
                   "did not pass the full strict scenario verdict. Timing budgets remain unchanged.", "",
                   f"{len(timing)} scenarios passed functional checks but exceeded strict timing budgets:", "",

@@ -3,7 +3,7 @@
 use egui_kittest::{Harness, kittest::Queryable};
 use soliddraft_app::{
     app::{Automation, SolidDraftApp},
-    document::{Command, Document, ExtrudeParams, ProfileKind, Selection, TOLERANT_BODY_NAME},
+    document::{Command, Document, ExtrudeParams, ProfileKind, Selection},
     import::report::{self, Tier},
     state::AppAction,
 };
@@ -39,10 +39,12 @@ fn tolerant_and_certified_imports_display_with_their_own_authority_and_reopen() 
     // This generated box has one vertex 0.1 mm off its unchanged curves. It needs the
     // native tolerant path, not an exact-model cast or a whole-body certificate.
     let native = include_str!("data/native-tolerant-vertex.step").to_owned();
-    for (name, source, tier) in [
-        ("certified", certified, Tier::Exact),
-        ("tolerant", tolerant, Tier::Tolerant),
-        ("native-tolerant", native, Tier::Tolerant),
+    let healed = include_str!("../../../ci/fixtures/import/healed-and-tolerant.step").to_owned();
+    for (name, source, tier, body_count) in [
+        ("certified", certified, Tier::Exact, 1),
+        ("certified-repaired", tolerant, Tier::Repaired, 1),
+        ("native-tolerant", native, Tier::Tolerant, 1),
+        ("healed-checked", healed, Tier::Tolerant, 2),
     ] {
         let path = root.join(format!("{name}.step"));
         std::fs::write(&path, &source).unwrap();
@@ -70,13 +72,25 @@ fn tolerant_and_certified_imports_display_with_their_own_authority_and_reopen() 
         });
         let topology = doc.kernel().topology(body).unwrap();
         assert_eq!((topology.faces.len(), topology.edges.len(), topology.vertices.len()), (6, 12, 8));
-        assert_eq!(report::rows(doc, &[])[0].tier, tier);
-        assert!(doc.meshes[&body].triangle_count() > 0);
-        let imported_volume = doc.kernel().mass_properties(body).unwrap().volume;
+        assert_eq!(doc.features.len(), body_count);
+        let rows = report::rows(doc, &[]);
+        assert_eq!(rows.len(), body_count);
+        assert!(rows.iter().all(|row| row.tier == tier));
+        assert_eq!(doc.meshes.len(), body_count);
+        assert!(doc.meshes.values().all(|mesh| mesh.triangle_count() > 0));
+        let imported_volumes: std::collections::BTreeMap<_, _> = doc
+            .model()
+            .live_bodies()
+            .into_iter()
+            .map(|(key, body)| (key, doc.kernel().mass_properties(body).unwrap().volume))
+            .collect();
         if tier == Tier::Tolerant {
             assert_eq!(doc.kernel().body_accuracy(body).unwrap(), BodyAccuracy::Tolerant);
-            assert_eq!(doc.body_name(0), TOLERANT_BODY_NAME);
-            assert!(doc.body_tolerance(0).is_none(), "local fits are not a whole-body deviation bound");
+            for (key, body) in doc.model().live_bodies() {
+                assert_eq!(doc.kernel().body_accuracy(body).unwrap(), BodyAccuracy::Tolerant);
+                assert!(doc.body_name(key).starts_with("Tolerant"));
+                assert!(doc.body_tolerance(key).is_none(), "local fits are not a whole-body deviation bound");
+            }
             let details = doc.describe(Selection::Body).unwrap();
             assert!(details.details.iter().any(|(key, value)| key == "Accuracy" && value.contains("Tolerant")));
             assert!(
@@ -86,36 +100,53 @@ fn tolerant_and_certified_imports_display_with_their_own_authority_and_reopen() 
                     .iter()
                     .all(|feature| feature.answer_kind != soliddraft_exchange::proof::AnswerKind::Proved)
             );
-            let export = doc.model().export_at(soliddraft_exchange::Format::Step, None).unwrap();
-            let soliddraft_exchange::Report::Step(report) = &export.report else { panic!("STEP report") };
-            assert!(report.tolerant && report.approximate.is_none() && !report.within_tolerance);
-            assert_eq!((report.faces, report.edges, report.vertices), (6, 12, 8));
-            assert!(export.report.summary().contains("not certified"));
+            if body_count == 1 {
+                let export = doc.model().export_at(soliddraft_exchange::Format::Step, None).unwrap();
+                let soliddraft_exchange::Report::Step(report) = &export.report else { panic!("STEP report") };
+                assert!(report.tolerant && report.approximate.is_none() && !report.within_tolerance);
+                assert_eq!((report.faces, report.edges, report.vertices), (6, 12, 8));
+                assert!(export.report.summary().contains("not certified"));
+            } else {
+                for (_, body) in doc.model().live_bodies() {
+                    let export = doc.kernel().export_step(body, &StepOptions::default()).unwrap();
+                    assert!(export.report.tolerant && !export.report.within_tolerance);
+                    assert!(export.report.approximate.is_none());
+                    assert_eq!((export.report.faces, export.report.edges, export.report.vertices), (6, 12, 8));
+                }
+            }
         } else {
             assert_eq!(doc.kernel().body_accuracy(body).unwrap(), BodyAccuracy::Exact);
             assert!(report::rows(doc, &[])[0].tier.label().contains("Certified"));
-            assert!((doc.kernel().mass_properties(body).unwrap().volume - 480.0).abs() < 1e-6);
+            let expected_volume = if name == "certified" { 480.0 } else { 10004.0 };
+            assert!((doc.kernel().mass_properties(body).unwrap().volume - expected_volume).abs() < 1e-6);
         }
         app.render().unwrap().save(root.join(format!("{name}.png"))).unwrap();
         let part = root.join(format!("{name}.dwprt"));
         soliddraft_app::file::save(&mut app.state_mut().state.doc, &part).unwrap();
         let reopened = soliddraft_app::file::open(&part, soliddraft_app::kernel(), None).unwrap();
-        assert_eq!(report::rows(&reopened, &[])[0].tier, tier);
-        assert!(
-            (reopened.kernel().mass_properties(reopened.display_body().unwrap()).unwrap().volume - imported_volume)
-                .abs()
-                < 1e-6
-        );
+        let rows = report::rows(&reopened, &[]);
+        assert_eq!(rows.len(), body_count);
+        assert!(rows.iter().all(|row| row.tier == tier));
         let soliddraft_app::document::FeatureKind::ImportStep(import) = &reopened.features[0].kind else {
             panic!("import feature")
         };
         assert_eq!(import.source, source.as_bytes());
         assert_eq!(std::fs::read(&path).unwrap(), source.as_bytes());
-        assert_eq!(reopened.faces.len(), 6);
+        let bodies = reopened.model().live_bodies();
+        assert_eq!(bodies.len(), body_count);
+        for (key, body) in bodies {
+            let topology = reopened.kernel().topology(body).unwrap();
+            assert_eq!((topology.faces.len(), topology.edges.len(), topology.vertices.len()), (6, 12, 8));
+            let accuracy = if tier == Tier::Tolerant { BodyAccuracy::Tolerant } else { BodyAccuracy::Exact };
+            assert_eq!(reopened.kernel().body_accuracy(body).unwrap(), accuracy);
+            let before = imported_volumes[&key];
+            let after = reopened.kernel().mass_properties(body).unwrap().volume;
+            assert!((after - before).abs() < 1e-6, "{name} body {key}: {before} -> {after}");
+        }
         app.state_mut().state.doc = reopened;
         app.run_steps(3);
         app.render().unwrap().save(root.join(format!("{name}-reopened.png"))).unwrap();
-        if tier == Tier::Exact {
+        if name == "certified" {
             app.state_mut()
                 .state
                 .doc

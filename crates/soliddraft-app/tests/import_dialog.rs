@@ -10,7 +10,7 @@ const BLOCK: &[u8] = include_bytes!("../../../ci/fixtures/import/block-seam-4um.
 const WIDE: &[u8] = include_bytes!("../../../ci/fixtures/import/block-seam-20um.step");
 
 #[test]
-fn tolerant_preview_cancel_and_accept_keeps_reviewed_bytes() {
+fn certified_preview_cancel_and_accept_keeps_reviewed_bytes() {
     let doc = Document::new("Import test", soliddraft_app::kernel());
     let original_revision = doc.revision();
     let mut state = AppState::new(doc);
@@ -44,7 +44,7 @@ fn tolerant_preview_cancel_and_accept_keeps_reviewed_bytes() {
     assert!(app.state().doc.display_body().is_some());
     assert_eq!(
         app.state().doc.kernel().body_accuracy(app.state().doc.display_body().unwrap()).unwrap(),
-        soliddraft_kernel_api::BodyAccuracy::Tolerant
+        soliddraft_kernel_api::BodyAccuracy::Exact
     );
     std::fs::remove_file(path).unwrap();
 }

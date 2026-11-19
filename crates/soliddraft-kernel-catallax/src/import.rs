@@ -13,6 +13,8 @@ use crate::{CatallaxKernel, MeshCache, Solid, Stored, convert, display_key};
 
 mod tolerant;
 
+pub(super) const TOO_COMPLEX: &str = "This file is too complex to open yet.";
+
 fn options(input: &ImportOptions) -> KernelResult<catallax_import::ImportOptions> {
     Ok(catallax_import::ImportOptions {
         search_radius_mm: Rational::parse(&input.search_radius_mm)
@@ -60,7 +62,7 @@ fn step_refusal(error: catallax_import::ImportRefusal) -> KernelError {
         SelfIntersectionNotVerified { faces, .. } => {
             format!("This STEP solid could not be checked for crossing faces at {} and {}.", faces[0], faces[1])
         }
-        ResourceLimit => "This STEP file could not be checked within the available work limit.".into(),
+        ResourceLimit => TOO_COMPLEX.into(),
     };
     KernelError::InvalidInput(message)
 }
@@ -128,12 +130,6 @@ pub(super) fn propose(
         checked_mesh(source)?;
         return Ok(ProposalSet { source_sha256: catallax_import::sha256_hex(source), proposals: Vec::new() });
     }
-    if format == ImportFormat::Step
-        && let Ok(opened) = kernel.opened_step(source)
-        && tolerant::needs_default(&opened)
-    {
-        return Ok(ProposalSet { source_sha256: catallax_import::sha256_hex(source), proposals: Vec::new() });
-    }
     let proposals = match catallax_import::propose_source(source_format(format), source, &options(input)?) {
         Ok(proposals) => proposals,
         Err(_) if format == ImportFormat::Step => {
@@ -152,7 +148,17 @@ pub(super) fn propose(
             ),
         });
     }
-    wire(proposals)
+    let proposals: ProposalSet = wire(proposals)?;
+    // An unanswered repair on a refused sibling must not block admitted bodies.
+    // Explicit answers still use the source-certified whole-file transaction.
+    if format == ImportFormat::Step
+        && proposals.proposals.iter().any(|proposal| proposal.disposition == Disposition::Ask)
+        && let Ok(opened) = kernel.opened_step(source)
+        && tolerant::has_refused_siblings(&opened)
+    {
+        return Ok(ProposalSet { source_sha256: proposals.source_sha256, proposals: Vec::new() });
+    }
+    Ok(proposals)
 }
 
 fn require_repair_format(source: ImportFormat, format: &str) -> KernelResult<()> {
@@ -283,16 +289,6 @@ impl CatallaxKernel {
         if format == ImportFormat::Step && request.record.is_some_and(|saved| saved.format == tolerant::FORMAT) {
             return self.import_tolerant_body(tag, request);
         }
-        if format == ImportFormat::Step && request.decisions.is_empty() && request.record.is_none() {
-            let opened = self.opened_step(request.source)?;
-            // Surface models retain the existing sheet reader, including beside tolerant solids.
-            let surface = request.source_solid.is_some_and(|selected| {
-                opened.source().bodies().iter().any(|source| source.name() == selected && !source.declared_solid())
-            });
-            if tolerant::needs_default(&opened) && !surface {
-                return self.import_tolerant_body(tag, request);
-            }
-        }
         if let Some(saved) = request.record {
             require_repair_format(format, &saved.format)?;
         }
@@ -309,7 +305,12 @@ impl CatallaxKernel {
         );
         let imported = match imported {
             Ok(imported) => imported,
-            Err(_) if format == ImportFormat::Step && request.decisions.is_empty() && request.record.is_none() => {
+            Err(error) if format == ImportFormat::Step && request.decisions.is_empty() && request.record.is_none() => {
+                if matches!(&error, catallax_import::ImportRefusal::InvalidDecision { .. })
+                    && !self.opened_step(request.source).is_ok_and(|opened| tolerant::has_refused_siblings(&opened))
+                {
+                    return Err(refusal(format, error));
+                }
                 return self.import_tolerant_body(tag, request);
             }
             Err(error) => return Err(refusal(format, error)),

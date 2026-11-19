@@ -20,7 +20,7 @@ fn imported(name: &str, format: ImportFormat, source: &[u8]) -> Document {
 /// Certified, tolerant and surface imports keep distinct authority.
 #[test]
 fn each_import_says_what_it_opened_as() {
-    let cases: [(&str, ImportFormat, &[u8], Tier); 4] = [
+    let cases: [(&str, ImportFormat, &[u8], Tier); 5] = [
         ("occt-box.igs", ImportFormat::Iges, include_bytes!("../../../ci/fixtures/import/occt-box.igs"), Tier::Exact),
         (
             "tetrahedron.obj",
@@ -32,6 +32,12 @@ fn each_import_says_what_it_opened_as() {
             "block-seam-4um.step",
             ImportFormat::Step,
             include_bytes!("../../../ci/fixtures/import/block-seam-4um.step"),
+            Tier::Repaired,
+        ),
+        (
+            "native-tolerant.step",
+            ImportFormat::Step,
+            include_bytes!("data/native-tolerant-vertex.step"),
             Tier::Tolerant,
         ),
         ("surface-square.step", ImportFormat::Step, include_bytes!("data/surface-square.step"), Tier::Surface),
@@ -100,8 +106,7 @@ fn a_suppressed_import_is_not_evaluated() {
     assert_eq!((report[0].tier, report[0].why.as_str()), (Tier::NotEvaluated, "Suppressed, so it is not built."));
 }
 
-/// A tolerant body's local fits do not become a certificate, and certified siblings
-/// never inherit its tolerance label.
+/// A body repair is distinguished from the file-level note on its unchanged siblings.
 #[test]
 fn a_repair_on_one_body_of_a_file_is_not_spread_to_its_siblings() {
     let seam = std::str::from_utf8(include_bytes!("../../../ci/fixtures/import/block-seam-4um.step")).unwrap();
@@ -112,7 +117,7 @@ fn a_repair_on_one_body_of_a_file_is_not_spread_to_its_siblings() {
     let doc = imported("mixed.step", ImportFormat::Step, source.as_bytes());
     let report = rows(&doc, &[]);
     let tiers: Vec<Tier> = report.iter().map(|row| row.tier).collect();
-    assert_eq!(tiers, [Tier::Tolerant, Tier::Exact, Tier::Exact]);
+    assert_eq!(tiers, [Tier::Repaired, Tier::FileRepaired, Tier::FileRepaired]);
 }
 
 #[test]

@@ -1,11 +1,10 @@
-//! Bodies Catallax built within a stated tolerance, with no exact proof.
+//! Unproved bodies: numerical constructions and tolerant imports.
 //!
-//! Catallax returns such a body as a `NumericalApplicationBody`. It has no exact model,
-//! so none of the exact queries apply to it. Catallax does not yet display or measure a
-//! numerical body directly; it writes one to STEP. [`sample_through_step`] previews that
-//! file, and the display, picking, measurements and mass properties here all read that
-//! sample. They are estimates and say so. When Catallax displays numerical bodies
-//! itself, that function is the one to replace.
+//! Numerical bodies have no exact model. Tolerant imports may retain a checked healed
+//! model, whose certificate does not cover the original source. Display, picking,
+//! measurements and mass properties use unproved samples and remain estimates.
+//! Numerical bodies currently reach the sampler through STEP. [`sample_through_step`]
+//! is the boundary to replace when direct sampling is available.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, OnceLock};

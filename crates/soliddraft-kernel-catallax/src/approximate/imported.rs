@@ -13,6 +13,11 @@ impl Approximate {
             *next
         };
         let (face_keys, edge_keys, vertex_keys): (Vec<_>, Vec<_>, Vec<_>) = match opened.body(index) {
+            Some(BodyView::Certified { model, body }) => (
+                model.faces_of_body(body).into_iter().map(|face| checked_key(face.index())).collect(),
+                model.edges_of_body(body).into_iter().map(|edge| checked_key(edge.index())).collect(),
+                model.vertices_of_body(body).into_iter().map(|vertex| checked_key(vertex.index())).collect(),
+            ),
             Some(BodyView::Tolerant { import, body }) => {
                 let definition = import.bodies()[body].definition();
                 let used_edges: BTreeSet<_> = definition
@@ -80,6 +85,42 @@ pub(super) fn sample(
     dec: &mut Decider,
 ) -> Result<Sample, Refusal> {
     match opened.body(index) {
+        Some(BodyView::Certified { model, body }) => {
+            // The checked model is the actual healed geometry, not a certificate against the source.
+            let preview = catallax_mesh::preview_mesh_body(model, body, options, dec)?;
+            let shown: BTreeSet<_> =
+                preview.faces.iter().filter(|face| !face.triangles.is_empty()).map(|face| face.face).collect();
+            if model.faces_of_body(body).into_iter().any(|face| !shown.contains(&face)) {
+                return Err(Refusal::new(INCOMPLETE, "the healed model has an undisplayed face"));
+            }
+            Ok(catallax_mesh::PreviewMesh {
+                positions: preview.positions,
+                triangles: preview
+                    .triangles
+                    .into_iter()
+                    .map(|triangle| catallax_mesh::Triangle {
+                        vertices: triangle.vertices,
+                        face: checked_key(triangle.face.index()),
+                    })
+                    .collect(),
+                faces: preview
+                    .faces
+                    .into_iter()
+                    .map(|face| catallax_mesh::PreviewFace {
+                        face: checked_key(face.face.index()),
+                        triangles: face.triangles,
+                    })
+                    .collect(),
+                edges: preview
+                    .edges
+                    .into_iter()
+                    .map(|edge| catallax_mesh::PreviewEdge {
+                        edge: checked_key(edge.edge.index()),
+                        vertices: edge.vertices,
+                    })
+                    .collect(),
+            })
+        }
         Some(BodyView::Tolerant { import, body }) => catallax_mesh::preview_tolerant_body(import, body, options, dec),
         Some(BodyView::Numerical(body)) => super::sample_through_step(body, options, dec),
         _ => Err(Refusal::new(INCOMPLETE, "the selected source body has no admitted display geometry")),
@@ -87,6 +128,9 @@ pub(super) fn sample(
 }
 
 pub(super) fn topology(this: &Approximate, opened: &Arc<OpenedStep>, index: usize) -> KernelResult<Topology> {
+    if let Some(BodyView::Certified { model, body }) = opened.body(index) {
+        return checked_topology(this, model, body);
+    }
     let Some(BodyView::Tolerant { import, body }) = opened.body(index) else {
         return this.compute_numerical_topology(this.body()?);
     };
@@ -216,9 +260,132 @@ pub(super) fn topology(this: &Approximate, opened: &Arc<OpenedStep>, index: usiz
     })
 }
 
+fn checked_key(index: u32) -> String {
+    format!("checked:{index}")
+}
+
+fn checked_topology(
+    this: &Approximate,
+    model: &catallax_topology::Model,
+    body: catallax_topology::BodyId,
+) -> KernelResult<Topology> {
+    let options = catallax_mesh::MeshOptions::default();
+    let chord = options.chord_tolerance.to_f64_nearest();
+    let sample = this.sample(&options)?;
+    let ranges: BTreeMap<_, _> = sample.faces.iter().map(|face| (face.face.as_str(), &face.triangles)).collect();
+    let mut adjacency: BTreeMap<catallax_topology::EdgeId, Vec<FaceId>> = BTreeMap::new();
+    let mut faces = Vec::new();
+    for native in model.faces_of_body(body) {
+        let key = checked_key(native.index());
+        let id = this.faces[&key];
+        let range = ranges.get(key.as_str()).ok_or_else(|| crate::gap("Display of an imported face"))?;
+        let triangles: Vec<_> = sample.triangles[(*range).clone()]
+            .iter()
+            .map(|triangle| triangle.vertices.map(|vertex| Vec3::from(sample.positions[vertex])))
+            .collect();
+        let (area, centroid) = area_centroid(&triangles);
+        if area <= 0.0 {
+            return Err(KernelError::InvalidInput("One of the healed faces could not be displayed.".into()));
+        }
+        let face = model.face(native);
+        let mut edges = Vec::new();
+        for boundary in &face.loops {
+            if let catallax_topology::Loop::Coedges(coedges) = model.loop_(*boundary) {
+                for coedge in coedges {
+                    let edge = model.coedge(*coedge).edge;
+                    let edge_id = this.edges[&checked_key(edge.index())];
+                    if !edges.contains(&edge_id) {
+                        edges.push(edge_id);
+                    }
+                    let adjacent = adjacency.entry(edge).or_default();
+                    if !adjacent.contains(&id) {
+                        adjacent.push(id);
+                    }
+                }
+            }
+        }
+        let surface = model.geom().surface(face.surface);
+        let (origin, normal) =
+            convert::outward_plane(surface, face.sense).map_err(|error| crate::query_error("face_plane", error))?;
+        let centroid = match (origin, normal) {
+            (Some(origin), Some(normal)) => centroid + normal * (origin.dot(normal) - centroid.dot(normal)),
+            _ => centroid,
+        };
+        faces.push(FaceInfo {
+            id,
+            surface: convert::surface_kind(surface),
+            normal,
+            accuracy: FaceAccuracy::Unknown,
+            area,
+            centroid,
+            bbox: bounds(triangles.iter().flatten().copied(), chord),
+            edges,
+            origins: this.face_origins[&id].clone(),
+        });
+    }
+    let polylines: BTreeMap<_, _> = sample.edges.iter().map(|edge| (edge.edge.as_str(), edge)).collect();
+    let mut edges = Vec::new();
+    for native in model.edges_of_body(body) {
+        let key = checked_key(native.index());
+        let polyline = polylines.get(key.as_str()).ok_or_else(|| crate::gap("Display of a healed edge"))?;
+        let points: Vec<_> = polyline.vertices.iter().map(|vertex| Vec3::from(sample.positions[*vertex])).collect();
+        let length = points.windows(2).map(|points| points[0].distance(points[1])).sum();
+        let edge = model.edge(native);
+        let curve = match model.geom().curve(edge.curve).kind() {
+            catallax_shapes::CurveKind::Line => CurveKind::Line,
+            catallax_shapes::CurveKind::Circle => CurveKind::Circle,
+            catallax_shapes::CurveKind::Ellipse => CurveKind::Ellipse,
+            catallax_shapes::CurveKind::BSpline => CurveKind::Spline,
+            _ => CurveKind::Other,
+        };
+        edges.push(EdgeInfo {
+            id: this.edges[&key],
+            curve,
+            length,
+            midpoint: along(&points, length / 2.0),
+            bbox: bounds(points.iter().copied(), chord),
+            faces: adjacency.remove(&native).unwrap_or_default(),
+            construction_origins: None,
+            vertices: [edge.start, edge.end]
+                .into_iter()
+                .flatten()
+                .map(|vertex| this.vertices[&checked_key(vertex.index())])
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .collect(),
+        });
+    }
+    let vertices: Vec<_> = model
+        .vertices_of_body(body)
+        .into_iter()
+        .map(|native| {
+            let id = this.vertices[&checked_key(native.index())];
+            VertexInfo {
+                id,
+                position: model.geom().approx_point(model.vertex(native).point).into(),
+                edges: edges.iter().filter(|edge| edge.vertices.contains(&id)).map(|edge| edge.id).collect(),
+            }
+        })
+        .collect();
+    Ok(Topology {
+        kind: BodyKind::Solid,
+        faces,
+        edges,
+        vertex_count: vertices.len(),
+        vertices,
+        bbox: bounds(sample.positions.iter().copied().map(Vec3::from), chord),
+        display_chord_height: Some(chord),
+    })
+}
+
 pub(super) fn export_step(opened: &OpenedStep, index: usize, options: &StepOptions) -> KernelResult<StepExport> {
     let bytes = super::on_request_allowance("export_step", |dec| {
         let bytes = match opened.body(index) {
+            Some(BodyView::Certified { model, body }) => {
+                let mut bytes = Vec::new();
+                catallax_step::write_step(model, &[body], &Default::default(), dec, &mut bytes)?;
+                bytes
+            }
             Some(BodyView::Tolerant { import, body }) => import.export_body(body, dec).map_err(error)?.into_bytes(),
             Some(BodyView::Numerical(body)) => catallax_step::numerical::build(
                 body,

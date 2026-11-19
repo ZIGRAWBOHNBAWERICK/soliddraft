@@ -66,7 +66,7 @@ fn saved_certified_repairs_and_declined_answers_replay_without_downgrading() {
     let options = ImportOptions::default();
     let preview = kernel.propose_import(BLOCK, &options).unwrap();
     assert_eq!(preview.source_sha256, "1a602addaa4b534ef9427427d5231ba689a811a11159a5f9e7ebc17b3365c32b");
-    assert!(preview.proposals.is_empty(), "default tolerant admission needs no certified repair answers");
+    assert_eq!(preview.proposals.len(), 1);
     let feature = ImportStepFeature::new("block-seam-4um.step", BLOCK.to_vec()).declined("repair:1a602addaa4b:g0");
     let certificate = certified_record(&feature.source_name, &feature.source);
     let decisions = feature.kernel_decisions().unwrap();

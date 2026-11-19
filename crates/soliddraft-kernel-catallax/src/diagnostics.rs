@@ -97,8 +97,16 @@ impl Diagnostics {
             (None, false) => (run(), None),
         });
         if work.is_some_and(|w| w.exhausted) && !matches!(result, Err(KernelError::DisplayLimit { .. })) {
-            result =
-                Err(KernelError::Unavailable("numbers.operation-budget: operation work allowance exhausted".into()));
+            result = Err(
+                if matches!(
+                    operation,
+                    "propose_import" | "source_solids" | "import_step" | "import_iges" | "import_mesh"
+                ) {
+                    KernelError::InvalidInput(crate::import::TOO_COMPLEX.into())
+                } else {
+                    KernelError::Unavailable("numbers.operation-budget: operation work allowance exhausted".into())
+                },
+            );
         }
         if let Some(work) = work {
             let mut totals = self.work.lock().expect("diagnostic work lock");

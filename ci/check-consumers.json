@@ -146,6 +146,12 @@
       "test-linux",
       "application-loop"
     ],
+    "ci/fixtures/import/healed-and-tolerant.step": [
+      "lint",
+      "kernel",
+      "test-linux",
+      "application-loop"
+    ],
     "ci/fixtures/import/block-seam-4um.step": [
       "lint",
       "kernel",

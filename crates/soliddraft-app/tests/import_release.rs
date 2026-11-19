@@ -188,7 +188,7 @@ fn closed_mesh_review_accepts_displays_saves_reopens_and_exports_an_exact_solid(
 }
 
 #[test]
-fn source_cleanup_keeps_tolerant_authority_and_its_saved_record() {
+fn source_cleanup_keeps_its_certificate_and_saved_record() {
     let mut doc = Document::new("Source cleanup", soliddraft_app::kernel());
     let source = include_bytes!("../../soliddraft-kernel-catallax/tests/fixtures/planar-source-incidence.step");
     let preview = Preview::from_bytes(&doc, "incidence.step", source.to_vec()).unwrap();
@@ -196,10 +196,10 @@ fn source_cleanup_keeps_tolerant_authority_and_its_saved_record() {
     let record = doc.model().import_record(soliddraft_model::FeatureId(id as u32)).unwrap();
     assert_eq!(
         doc.kernel().body_accuracy(doc.display_body().unwrap()).unwrap(),
-        soliddraft_kernel_api::BodyAccuracy::Tolerant
+        soliddraft_kernel_api::BodyAccuracy::Exact
     );
-    assert_eq!(soliddraft_app::import::report::rows(&doc, &[])[0].tier, soliddraft_app::import::report::Tier::Tolerant);
-    assert!(doc.body_tolerance(0).is_none(), "source cleanup is not a whole-body certificate");
+    assert!(record.tolerant.is_none());
+    assert_eq!(record.source_incidence.len(), 1);
     let saved = doc.model().to_bytes().unwrap();
     let reopened = soliddraft_app::file::open_bytes("cleanup.dwprt", &saved, soliddraft_app::kernel(), None).unwrap();
     assert_eq!(reopened.model().import_record(soliddraft_model::FeatureId(id as u32)), Some(record));

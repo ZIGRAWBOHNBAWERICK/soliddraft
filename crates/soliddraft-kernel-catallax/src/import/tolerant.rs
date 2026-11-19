@@ -12,7 +12,7 @@ fn admission_error(error: catallax_import::tolerant::Error) -> KernelError {
         catallax_import::tolerant::Error::Source(error) => super::step_refusal(error),
         catallax_import::tolerant::Error::Numerical(error) => {
             let message = if error.code.contains("budget") || error.code.contains("deadline") {
-                "This STEP file could not be checked within the available work limit."
+                TOO_COMPLEX
             } else if error.code.contains("unit") {
                 "This STEP file's units could not be read consistently."
             } else if error.code.contains("resolution") || error.code.contains("precision") {
@@ -36,7 +36,7 @@ fn body_refusal(opened: &OpenedStep, index: usize) -> KernelError {
         return admission_error(error.clone());
     }
     let message = match body.first_blocker() {
-        Some(NativeStage::RequestLimit) => "This STEP body could not be checked within the available work limit.",
+        Some(NativeStage::RequestLimit) => TOO_COMPLEX,
         Some(NativeStage::BodyBuild) => {
             "This STEP body's surfaces or curves could not be read. Export it again as a STEP solid."
         }
@@ -75,16 +75,43 @@ pub(super) fn require_solids(opened: &OpenedStep) -> KernelResult<()> {
     Ok(())
 }
 
-pub(super) fn needs_default(opened: &OpenedStep) -> bool {
-    let (admitted, needs_default) = opened.bodies().iter().enumerate().map(|(index, _)| opened.body(index)).fold(
-        (false, false),
-        |(admitted, needs_default), body| match body {
-            Some(BodyView::Certified { .. }) => (true, needs_default),
-            Some(BodyView::Tolerant { .. } | BodyView::Numerical(_)) => (true, true),
-            _ => (admitted, true),
-        },
-    );
-    admitted && needs_default
+pub(super) fn has_refused_siblings(opened: &OpenedStep) -> bool {
+    let mut admitted = false;
+    let mut refused = false;
+    for (index, outcome) in opened.bodies().iter().enumerate() {
+        match opened.body(index) {
+            _ if outcome.tier() == Tier::SurfaceBody && opened.source().bodies()[index].declared_solid() => {
+                refused = true;
+            }
+            Some(BodyView::Certified { .. } | BodyView::Numerical(_) | BodyView::Tolerant { .. })
+                if outcome.tier() != Tier::SurfaceBody =>
+            {
+                admitted = true
+            }
+            Some(BodyView::Surfaces { .. }) | None => refused = true,
+            _ => {}
+        }
+        if admitted && refused {
+            return true;
+        }
+    }
+    false
+}
+
+fn resource_limited(error: &catallax_import::tolerant::Error) -> bool {
+    match error {
+        catallax_import::tolerant::Error::Source(catallax_import::ImportRefusal::ResourceLimit) => true,
+        catallax_import::tolerant::Error::Numerical(error) => {
+            error.code.contains("budget") || error.code.contains("deadline") || error.code.contains("precision-limit")
+        }
+        _ => false,
+    }
+}
+
+fn resource_incomplete(opened: &OpenedStep) -> bool {
+    opened.bodies().iter().any(|body| {
+        body.refusal().is_some_and(resource_limited) || body.upgrade_refusal().is_some_and(resource_limited)
+    })
 }
 
 impl CatallaxKernel {
@@ -93,11 +120,24 @@ impl CatallaxKernel {
         if let Some(opened) = self.state()?.tolerant_imports.get(&sha256) {
             return Ok(opened.clone());
         }
-        let step = catallax_recipe::StepId::new("import_source").expect("constant step id");
-        let opened = opened::open_step(source, &sha256, &step, Default::default(), &mut Decider::default())
-            .map_err(admission_error)?;
-        let opened = Arc::new(opened);
-        self.state()?.tolerant_imports.insert(sha256, opened.clone());
+        let read = || {
+            let step = catallax_recipe::StepId::new("import_source").expect("constant step id");
+            let opened = opened::open_step(source, &sha256, &step, Default::default(), &mut Decider::default())
+                .map_err(admission_error)?;
+            if catallax_numbers::current_operation_work().exhausted {
+                return Err(KernelError::InvalidInput(TOO_COMPLEX.into()));
+            }
+            let complete = !resource_incomplete(&opened);
+            Ok((Arc::new(opened), complete))
+        };
+        let (opened, complete) = if catallax_numbers::operation_budget_active() {
+            read()
+        } else {
+            crate::with_request_allowance(crate::APP_REQUEST_WORK, read).0
+        }?;
+        if complete {
+            self.state()?.tolerant_imports.insert(sha256, opened.clone());
+        }
         Ok(opened)
     }
 
@@ -122,9 +162,12 @@ impl CatallaxKernel {
         if opened.bodies()[index].tier() == Tier::SurfaceBody {
             return Err(body_refusal(&opened, index));
         }
-        // A checked upgrade owns an actual exact model. Normalize only that model,
-        // through Catallax's certified writer, into a reusable feature checkpoint.
-        let certified_source = if let Some(BodyView::Certified { model, body }) = opened.body(index) {
+        // Checked storage certifies its own geometry, not necessarily the original source.
+        // Only an unchanged, non-approximate outcome can become an exact app checkpoint.
+        let certified_source = if !opened.bodies()[index].approximate()
+            && opened.bodies()[index].tier() == Tier::ValidSolid
+            && let Some(BodyView::Certified { model, body }) = opened.body(index)
+        {
             Some(
                 crate::numerical("import_step", |dec| {
                     let mut bytes = Vec::new();
@@ -211,5 +254,120 @@ impl CatallaxKernel {
             left_open: Vec::new(),
             record,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use soliddraft_kernel_api::{BodyAccuracy, Kernel, StepOptions};
+
+    const CLOSED: &str = include_str!("../../../../ci/fixtures/import/block-closed.step");
+    const TOLERANT: &str = include_str!("../../../soliddraft-app/tests/data/native-tolerant-vertex.step");
+
+    fn mixed(first: &str, second: &str) -> Vec<u8> {
+        let data = second.split_once("DATA;").unwrap().1.split_once("ENDSEC;").unwrap().0;
+        let mut renamed = String::new();
+        let mut chars = data.chars().peekable();
+        while let Some(character) = chars.next() {
+            renamed.push(character);
+            if character == '#' {
+                let number: String = std::iter::from_fn(|| chars.next_if(char::is_ascii_digit)).collect();
+                renamed.push_str(&(number.parse::<u64>().unwrap() + 1000).to_string());
+            }
+        }
+        let (prefix, suffix) = first.rsplit_once("ENDSEC;").unwrap();
+        format!("{prefix}{renamed}ENDSEC;{suffix}").into_bytes()
+    }
+
+    #[test]
+    fn healed_checked_storage_beside_a_tolerant_body_stays_tolerant() {
+        let source: &[u8] = include_bytes!("../../../../ci/fixtures/import/healed-and-tolerant.step");
+        let kernel = CatallaxKernel::new();
+        let opened = kernel.opened_step(source).unwrap();
+        assert_eq!(opened.bodies().len(), 2);
+        let index = opened.source().bodies().iter().position(|body| body.name() == "#178").unwrap();
+        assert_eq!(opened.bodies()[index].tier(), Tier::RepairedSolid);
+        assert!(opened.bodies()[index].approximate());
+        assert!(matches!(opened.body(index), Some(BodyView::Certified { .. })));
+        assert!(matches!(opened.body(1 - index), Some(BodyView::Tolerant { .. })));
+        let options = Default::default();
+        let sha256 = catallax_import::sha256_hex(source);
+        let request = ImportStepRequest {
+            source_solid: Some(opened.source().bodies()[index].name()),
+            name: "mixed.step",
+            source,
+            sha256: &sha256,
+            options: &options,
+            decisions: &[],
+            record: None,
+        };
+        let imported = kernel.import_step(&OpTag::new("healed"), &request).unwrap();
+        let body = imported.bodies[0].result.body;
+        assert_eq!(kernel.body_accuracy(body).unwrap(), BodyAccuracy::Tolerant);
+        assert!(imported.record.derivative.is_none());
+        assert_eq!(kernel.topology(body).unwrap().faces.len(), 6);
+        assert!(!kernel.tessellate(body, &Default::default()).unwrap().indices.is_empty());
+        assert!((kernel.mass_properties(body).unwrap().volume - 10004.0).abs() < 0.001);
+        let exported = kernel.export_step(body, &StepOptions::default()).unwrap();
+        assert!(exported.report.tolerant);
+        assert!(!exported.report.within_tolerance);
+        let replay = kernel
+            .import_step(&OpTag::new("healed_replay"), &ImportStepRequest { record: Some(&imported.record), ..request })
+            .unwrap();
+        assert_eq!(kernel.body_accuracy(replay.bodies[0].result.body).unwrap(), BodyAccuracy::Tolerant);
+    }
+
+    #[test]
+    fn a_cold_open_is_charged_and_an_exhausted_open_can_retry_with_more_work() {
+        let source = mixed(CLOSED, TOLERANT);
+        let measured = CatallaxKernel::new().opened_step(&source).unwrap();
+        assert!(measured.native_admission_work_used() > 0);
+        let limit = measured.read_work_used()
+            + measured.checked_upgrade_work_used()
+            + measured.native_admission_work_used()
+            + measured.bodies().len() as u64;
+        let sha256 = catallax_import::sha256_hex(&source);
+        let (partial, work) = crate::with_request_allowance(limit, || {
+            opened::open_step(
+                &source,
+                &sha256,
+                &catallax_recipe::StepId::new("import_source").unwrap(),
+                Default::default(),
+                &mut Decider::default(),
+            )
+        });
+        assert!(work.exhausted);
+        let partial = partial.unwrap();
+        assert!(resource_incomplete(&partial));
+        let kernel = CatallaxKernel::new();
+        let (limited, work) = crate::with_request_allowance(limit, || kernel.opened_step(&source));
+        assert!(work.exhausted);
+        assert!(limited.is_err());
+        let (retried, work) = crate::with_request_allowance(crate::APP_REQUEST_WORK, || kernel.opened_step(&source));
+        assert!(!work.exhausted);
+        let retried = retried.unwrap();
+        assert!(!resource_incomplete(&retried));
+        assert!(matches!(retried.body(0), Some(BodyView::Certified { .. })));
+        assert!(matches!(retried.body(1), Some(BodyView::Tolerant { .. })));
+        let options = Default::default();
+        let sha256 = catallax_import::sha256_hex(&source);
+        let imported = kernel
+            .import_step(
+                &OpTag::new("retried"),
+                &ImportStepRequest {
+                    source_solid: Some(retried.source().bodies()[1].name()),
+                    name: "mixed.step",
+                    source: &source,
+                    sha256: &sha256,
+                    options: &options,
+                    decisions: &[],
+                    record: None,
+                },
+            )
+            .unwrap();
+        let body = imported.bodies[0].result.body;
+        assert_eq!(kernel.body_accuracy(body).unwrap(), BodyAccuracy::Tolerant);
+        assert!(!kernel.tessellate(body, &Default::default()).unwrap().indices.is_empty());
     }
 }

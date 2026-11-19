@@ -145,6 +145,7 @@ impl Kernel for Importer {
                 changes: vec![change],
                 face_tolerances: Vec::new(),
                 source_incidence: Vec::new(),
+                tolerant: None,
             },
         })
     }

@@ -822,6 +822,9 @@ fn proof_badge(ui: &mut egui::Ui, state: &AppState, feature: &Feature, row: Rect
         ("Pending", format!("Waiting for {name} to build. Repair that feature before exporting."))
     } else {
         match &feature.status {
+            FeatureStatus::Ok if feature.body.is_some_and(|body| state.doc.kernel_body_is_tolerant(body)) => {
+                ("Tolerant", crate::document::TOLERANT_WORDS.to_owned())
+            }
             FeatureStatus::Ok => match feature.body.and_then(|body| state.doc.kernel_body_tolerance(body)) {
                 Some(tolerance) => (
                     APPROXIMATE_LABEL,
@@ -844,13 +847,13 @@ fn proof_badge(ui: &mut egui::Ui, state: &AppState, feature: &Feature, row: Rect
         "Proved" => theme::ok(),
         "Pending" => theme::warn(),
         "Refused" => theme::error(),
-        crate::document::WITHIN_BOUND_LABEL | APPROXIMATE_LABEL => theme::bounded(),
+        crate::document::WITHIN_BOUND_LABEL | APPROXIMATE_LABEL | "Tolerant" => theme::bounded(),
         _ => theme::muted(),
     };
     let centre = pos2(row.right() - 4.0 - tree_visibility::EYE_WIDTH - BADGE_WIDTH / 2.0, row.center().y);
     if ui.is_rect_visible(Rect::from_center_size(centre, vec2(8.0, 8.0))) {
         let painter = ui.painter();
-        if label == crate::document::WITHIN_BOUND_LABEL || label == APPROXIMATE_LABEL {
+        if label == crate::document::WITHIN_BOUND_LABEL || label == APPROXIMATE_LABEL || label == "Tolerant" {
             painter.add(egui::Shape::convex_polygon(
                 vec![
                     centre + vec2(0.0, -4.0),

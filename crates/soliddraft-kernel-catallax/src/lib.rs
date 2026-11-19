@@ -48,7 +48,7 @@ use soliddraft_kernel_api::*;
 pub use diagnostics::{APP_REQUEST_WORK, APP_WORK_TARGET, RequestWork, with_request_allowance};
 
 /// The pinned Catallax application entry revision.
-pub const CATALLAX_REVISION: &str = "6aac740b4e8cf70c2ada3749fda5cc3f0f8d1062";
+pub const CATALLAX_REVISION: &str = "bb2f8375e4e9f4b590ef0a0ec312bfaf85d0bb1e";
 
 /// An in-process Catallax backend. There is no global kernel state or kernel thread.
 #[derive(Default)]
@@ -67,6 +67,8 @@ struct State {
     /// Imported STEP sources by SHA-256. Catallax reads them again for every build
     /// that continues an imported body, even when the import itself is reused.
     files: BTreeMap<String, Arc<[u8]>>,
+    /// Default STEP admission shared by the file's body imports and repair preview.
+    tolerant_imports: BTreeMap<String, Arc<catallax_import::tolerant::opened::OpenedStep>>,
     /// Builds this kernel made since [`Kernel::keep_builds`], by recipe key, as bytes.
     kept: Option<Vec<Kept>>,
     /// Every body stored while keeping builds, so a hand-over finds the topology of one
@@ -1374,7 +1376,7 @@ impl Kernel for CatallaxKernel {
     }
 
     fn propose_import(&self, source: &[u8], options: &ImportOptions) -> KernelResult<ProposalSet> {
-        self.observe("propose_import", || import::propose(ImportFormat::Step, source, options))
+        self.observe("propose_import", || import::propose(self, ImportFormat::Step, source, options))
     }
 
     fn import_step(&self, tag: &OpTag, request: &ImportStepRequest<'_>) -> KernelResult<ImportStepResult> {
@@ -1387,7 +1389,7 @@ impl Kernel for CatallaxKernel {
         source: &[u8],
         options: &ImportOptions,
     ) -> KernelResult<ProposalSet> {
-        self.observe("propose_import", || import::propose(format, source, options))
+        self.observe("propose_import", || import::propose(self, format, source, options))
     }
 
     fn replace_import_file(&self, request: &FileReplacementRequest<'_>) -> KernelResult<FileReplacement> {
@@ -1533,7 +1535,7 @@ impl Kernel for CatallaxKernel {
     }
 
     fn source_solids(&self, format: ImportFormat, source: &[u8]) -> KernelResult<Vec<String>> {
-        self.observe("source_solids", || import::source_solids(format, source))
+        self.observe("source_solids", || import::source_solids(self, format, source))
     }
 
     fn import_source(

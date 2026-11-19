@@ -16,7 +16,7 @@ mod ribbon;
 use ribbon::App;
 
 /// A 40 x 25 x 10.004 mm block from the origin.
-const BLOCK: &[u8] = include_bytes!("../../../ci/fixtures/import/block-seam-4um.step");
+const BLOCK: &[u8] = include_bytes!("../../../ci/fixtures/import/block-closed.step");
 const TOP: f32 = 10.004;
 const HANG_GUARD: Duration = Duration::from_secs(600);
 
@@ -94,6 +94,11 @@ fn import(case: &ribbon::Case, app: &mut App) {
     isometric(app);
     all_ok(app);
     assert!((volume(app) - 10004.0).abs() < 1e-6);
+    let doc = &app.state().state.doc;
+    assert_eq!(
+        doc.kernel().body_accuracy(doc.display_body().unwrap()).unwrap(),
+        soliddraft_kernel_api::BodyAccuracy::Exact
+    );
 }
 
 /// Saves, reopens and checks the part comes back whole, with its imported names.

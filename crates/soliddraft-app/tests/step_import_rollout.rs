@@ -298,15 +298,34 @@ fn approved_seam_repair_renders_saves_reopens_and_exports_with_its_record() {
 fn malformed_and_unsupported_step_files_get_plain_messages_without_editing_the_part() {
     let doc = soliddraft_app::new_document();
     let source = std::str::from_utf8(include_bytes!("../../../ci/fixtures/import/block-seam-4um.step")).unwrap();
-    for (source, expected) in [
-        (source.replace("PLANE(", "B_SPLINE_SURFACE_WITH_KNOTS("), "This file could not be read as a STEP solid."),
-        (source.replace("MANIFOLD_SOLID_BREP(", "FACETED_BREP("), "Coming soon"),
-        (source.replace("PLANE(", "SURFACE_OF_LINEAR_EXTRUSION("), "Coming soon"),
+    let original = doc.model().to_bytes().unwrap();
+    for source in [
+        source.replace("PLANE(", "B_SPLINE_SURFACE_WITH_KNOTS("),
+        source.replace("PLANE(", "SURFACE_OF_LINEAR_EXTRUSION("),
     ] {
         let error =
             soliddraft_app::import::Preview::from_bytes(&doc, "unsupported.step", source.into_bytes()).unwrap_err();
-        assert_eq!(error, expected);
+        assert!(!error.contains("catallax") && !error.contains("numbers.") && !error.contains("topology."), "{error}");
+        assert_eq!(doc.model().to_bytes().unwrap(), original);
     }
     assert!(doc.features.is_empty());
     assert_eq!(doc.revision(), 0);
+}
+
+#[test]
+fn a_faceted_brep_opens_with_default_tolerant_authority() {
+    let source = include_str!("../../../ci/fixtures/import/block-seam-4um.step")
+        .replace("MANIFOLD_SOLID_BREP(", "FACETED_BREP(")
+        .into_bytes();
+    let mut doc = soliddraft_app::new_document();
+    let preview = soliddraft_app::import::Preview::from_bytes(&doc, "faceted.step", source.clone()).unwrap();
+    soliddraft_app::import::commit(&mut doc, &preview, &Default::default()).unwrap();
+    let body = doc.display_body().unwrap();
+    assert_eq!(doc.kernel().body_accuracy(body).unwrap(), soliddraft_kernel_api::BodyAccuracy::Tolerant);
+    assert_eq!(doc.kernel().topology(body).unwrap().faces.len(), 6);
+    assert!(doc.triangle_count() > 0);
+    let soliddraft_app::document::FeatureKind::ImportStep(import) = &doc.features[0].kind else {
+        panic!("import feature")
+    };
+    assert_eq!(import.source, source);
 }

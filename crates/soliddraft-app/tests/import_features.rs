@@ -7,9 +7,9 @@ use soliddraft_app::command_tools::{CommandTools, ProposalBook, Surface};
 use soliddraft_app::document::{Document, FeatureStatus};
 use soliddraft_assistant::{Caller, ToolHost};
 
-/// A 40 x 25 x 10.004 mm block from the origin, with one 4 micrometre seam that the
-/// import closes on its own.
-const BLOCK: &[u8] = include_bytes!("../../../ci/fixtures/import/block-seam-4um.step");
+/// A closed 40 x 25 x 10.004 mm block from the origin. Feature coverage uses a
+/// certified input; locally fitted imports have separate tolerant-authority coverage.
+const BLOCK: &[u8] = include_bytes!("../../../ci/fixtures/import/block-closed.step");
 const TOP_Z: f64 = 10.004;
 
 fn call(doc: &mut Document, book: &mut ProposalBook, name: &str, input: Value) -> Result<Value, String> {
@@ -38,6 +38,10 @@ impl Part {
         let preview = part.call("preview_import", json!({"path":source})).unwrap();
         let input = json!({"path":source,"preview_token":preview["token"],"decline":[]});
         part.call("import_step", input).unwrap();
+        assert_eq!(
+            part.doc.kernel().body_accuracy(part.doc.display_body().unwrap()).unwrap(),
+            soliddraft_kernel_api::BodyAccuracy::Exact
+        );
         part
     }
 

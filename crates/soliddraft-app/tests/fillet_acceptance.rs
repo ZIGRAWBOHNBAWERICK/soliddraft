@@ -14,6 +14,9 @@ use soliddraft_assistant::{Caller, tools::call_checked};
 use soliddraft_kernel_api::{BodyAccuracy, EdgeId, FaceId};
 use soliddraft_kernel_catallax::{APP_REQUEST_WORK, CatallaxKernel};
 
+#[path = "support/ui.rs"]
+mod ribbon;
+
 /// The owner's Boss-Extrude1: an 80 x 60 profile with R25 top corners, so its flat top
 /// is 30 mm wide and runs tangentially into the rounded sides, extruded 76 mm.
 const OWNER_BOSS: &str = r#"{"plane":"front","operations":[
@@ -28,10 +31,6 @@ const OWNER_BOSS: &str = r#"{"plane":"front","operations":[
 /// the line where the flat top meets the rounded side, cut 35 mm deep.
 const OWNER_POCKET: &str =
     r#"{"plane":"top","offset":60,"shapes":[{"shape":"rectangle","center":[15,-38,60],"width":34,"height":22.67}]}"#;
-
-/// The two sample-part edges SolidDraft cannot name: arcs of the boss foot between the same
-/// two faces that also end at the same faces.
-const UNNAMEABLE: [&str; 2] = ["Boss-Extrude3 · Edge 6", "Boss-Extrude3 · Edge 8"];
 
 /// The correct pocket part has 13 faces: the flat top opened by the pocket mouth, two
 /// rounded sides, two flat sides, the bottom, two ends, four pocket walls and the floor.
@@ -159,13 +158,11 @@ impl Part {
     }
 
     /// Exports the open part as STEP, as File › Export does, and keeps the file beside the
-    /// reports. The application reads no approximate STEP back: its Import STEP admits
-    /// exact solids only. OpenCASCADE opens these files outside this test, as CI's
+    /// reports. OpenCASCADE opens these files outside this test, as CI's
     /// `ci/check-step.py` opens the bracket's.
     fn export(&mut self, name: &str) -> String {
-        let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("fillet-acceptance").join("step");
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join(format!("{name}.step"));
+        let path = step_path(name);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         let exported = self.tool("export_step", json!({ "path": path.to_str().unwrap() }));
         if exported.is_error {
             return format!("export refused: {}", exported.content);
@@ -250,6 +247,7 @@ impl Part {
         row.accuracy = match model.kernel().body_accuracy(body).unwrap() {
             BodyAccuracy::Exact => "exact".into(),
             BodyAccuracy::Approximate { tolerance_mm } => format!("approximate within {tolerance_mm} mm"),
+            BodyAccuracy::Tolerant => "tolerant".into(),
         };
         let topology = model.kernel().topology(body);
         row.faces = topology.as_ref().map_or(0, |topology| topology.faces.len());
@@ -287,6 +285,82 @@ impl Part {
         assert_eq!(self.topology().faces.len(), faces, "{case}: undo did not restore the part");
         row
     }
+}
+
+fn step_path(name: &str) -> std::path::PathBuf {
+    std::path::Path::new(env!("CARGO_TARGET_TMPDIR"))
+        .join("fillet-acceptance")
+        .join("step")
+        .join(format!("{name}.step"))
+}
+
+fn import_exported_step(name: &str, faces: usize) {
+    use egui_kittest::kittest::Queryable;
+    use soliddraft_app::{
+        document::FeatureKind,
+        import::report::{self, Tier},
+    };
+    let path = step_path(name);
+    let case = ribbon::case(&format!("fillet-roundtrip-{name}"));
+    let mut app = ribbon::app(Document::new("Reimported fillets", soliddraft_app::kernel()));
+    app.state_mut().state.push(soliddraft_app::state::AppAction::ImportStep(Some(path.clone())));
+    app.run_steps(3);
+    assert!(app.state().state.import_dialog.is_some(), "{name}: Import STEP did not open");
+    app.get_by_role_and_label(egui::accesskit::Role::Button, "Accept").click();
+    app.run_steps(3);
+    let doc = &app.state().state.doc;
+    assert_eq!(doc.model().live_bodies().len(), 1, "{name}");
+    assert_eq!(doc.features.len(), 1, "{name}");
+    assert_eq!(
+        doc.kernel().topology(doc.display_body().unwrap()).unwrap().faces.len(),
+        faces,
+        "{name}: an exported face was lost"
+    );
+    assert!(doc.triangle_count() > 0, "{name}: the imported body is not displayed");
+    let body = doc.display_body().unwrap();
+    let tier = report::rows(doc, &[])[0].tier;
+    match doc.kernel().body_accuracy(body).unwrap() {
+        BodyAccuracy::Exact => assert!(matches!(tier, Tier::Exact | Tier::Repaired | Tier::FileRepaired)),
+        BodyAccuracy::Tolerant => {
+            assert_eq!(tier, Tier::Tolerant);
+            assert!(doc.body_tolerance(0).is_none(), "local fits are not a whole-body bound");
+            assert_eq!(
+                doc.model().proof_report().features[0].answer_kind,
+                soliddraft_exchange::proof::AnswerKind::Approximate
+            );
+        }
+        accuracy => panic!("{name}: imported accuracy is not labelled correctly: {accuracy:?}"),
+    }
+    let FeatureKind::ImportStep(import) = &doc.features[0].kind else { panic!("import feature") };
+    assert_eq!(import.source, std::fs::read(&path).unwrap(), "{name}: source bytes changed");
+    case.frame(&mut app, "imported");
+}
+
+fn refuse_exported_step_at_work_limit(name: &str) {
+    use egui_kittest::kittest::Queryable;
+    use soliddraft_app::import::report::{self, Tier};
+
+    let case = ribbon::case(&format!("fillet-roundtrip-refused-{name}"));
+    let mut app = ribbon::app(Document::new("Reimported fillets", soliddraft_app::kernel()));
+    app.state_mut().state.push(soliddraft_app::state::AppAction::ImportStep(Some(step_path(name))));
+    app.run_steps(3);
+    assert!(app.state().state.import_dialog.is_some(), "{name}: Import STEP did not open");
+    app.get_by_role_and_label(egui::accesskit::Role::Button, "Accept").click();
+    app.run_steps(3);
+
+    let state = &app.state().state;
+    assert!(state.import_dialog.is_none(), "{name}: a refused file must close its review");
+    assert!(state.doc.features.is_empty(), "{name}: a refusal published an import feature");
+    assert!(state.doc.model().live_bodies().is_empty(), "{name}: a refusal published a partial body");
+    assert!(state.doc.display_body().is_none());
+    assert_eq!(state.doc.triangle_count(), 0);
+    assert_eq!(state.doc.undo_depth(), 0, "{name}: a refusal changed the part");
+    let rows = report::rows(&state.doc, &state.import_refusals);
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].tier, Tier::Refused);
+    assert!(rows[0].feature.is_none());
+    assert_eq!(rows[0].why, "This file is too complex to open yet.");
+    case.frame(&mut app, "refused");
 }
 
 /// Writes the rows where the triage reads them, then fails on any row that did not pass.
@@ -453,6 +527,8 @@ fn owner_pocket_rim_takes_r1() {
 #[test]
 fn owner_pocket_rim_takes_r2() {
     owner_rim(2.0);
+    // Catallax phase-3 I2: this export still exceeds bounded STEP admission.
+    refuse_exported_step_at_work_limit("owner-pocket-rim-r2");
 }
 
 #[test]
@@ -544,8 +620,9 @@ fn box_all_edges(radius: f64) {
     part.build("extrude", r#"{"sketch":"Sketch1","depth":20,"flip":false}"#);
     let edges: Vec<String> = part.topology().edges.iter().map(|e| part.edge_name(e.id)).collect();
     assert_eq!(edges.len(), 12);
-    let rows = vec![part.fillet("box-all-edges", edges, radius)];
+    let rows = vec![part.fillet_and("box-all-edges", edges, radius, true)];
     report(&format!("box-all-edges-r{radius}"), &rows, |_| true);
+    import_exported_step(&format!("box-all-edges-r{radius}"), rows[0].faces);
 }
 
 #[test]
@@ -577,11 +654,7 @@ fn demo_edges(quarter: usize) {
             part.fillet("demo-edge", vec![name], 1.0)
         })
         .collect();
-    // Two arcs of the boss have no name of their own in the app. Those two rows, and no
-    // other, may stop at naming; every other edge rounds.
-    report(&format!("demo-edges-{}", quarter + 1), &rows, |row| {
-        !(row.result == "name" && row.edges.len() == 1 && UNNAMEABLE.contains(&row.edges[0].as_str()))
-    });
+    report(&format!("demo-edges-{}", quarter + 1), &rows, |_| true);
 }
 
 #[test]

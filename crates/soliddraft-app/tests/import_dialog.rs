@@ -10,7 +10,7 @@ const BLOCK: &[u8] = include_bytes!("../../../ci/fixtures/import/block-seam-4um.
 const WIDE: &[u8] = include_bytes!("../../../ci/fixtures/import/block-seam-20um.step");
 
 #[test]
-fn preview_cancel_decline_and_accept() {
+fn certified_preview_cancel_and_accept_keeps_reviewed_bytes() {
     let doc = Document::new("Import test", soliddraft_app::kernel());
     let original_revision = doc.revision();
     let mut state = AppState::new(doc);
@@ -19,9 +19,6 @@ fn preview_cancel_decline_and_accept() {
         .with_size(egui::vec2(1000.0, 700.0))
         .build_ui_state(|ui, state| soliddraft_app::import::window(ui.ctx(), state), state);
     app.run_steps(3);
-    app.get_by_label("Gap 1: seam");
-    app.get_by_label("Measured 0.004 mm");
-    app.get_by_label("Repaired automatically, within 0.01 mm");
     app.get_by_role_and_label(egui::accesskit::Role::Button, "Cancel").click();
     app.run_steps(3);
     assert!(app.state().import_dialog.is_none());
@@ -29,21 +26,6 @@ fn preview_cancel_decline_and_accept() {
     assert!(app.state().doc.features.is_empty());
 
     let state = app.state_mut();
-    state.import_dialog = Some(Preview::from_bytes(&state.doc, "block-seam-4um.step", BLOCK.to_vec()).unwrap());
-    app.run_steps(3);
-    app.get_by_role_and_label(egui::accesskit::Role::Button, "Decline").click();
-    app.run_steps(3);
-    let feature = &app.state().doc.features[0];
-    assert_eq!(feature.name, "Import1");
-    let soliddraft_app::document::FeatureKind::ImportStep(import) = &feature.kind else { panic!("import feature") };
-    assert_eq!(import.decisions["repair:1a602addaa4b:g0"], "decline");
-    assert!(
-        matches!(&feature.status, soliddraft_app::document::FeatureStatus::Error(message) if message.contains("not imported until the gap is resolved"))
-    );
-    assert!(app.state().doc.display_body().is_none());
-
-    let state = app.state_mut();
-    state.doc.undo().unwrap();
     let path = std::env::temp_dir().join(format!("soliddraft-import-ui-binding-{}.step", std::process::id()));
     std::fs::write(&path, BLOCK).unwrap();
     state.import_dialog = Some(Preview::read(&state.doc, &path).unwrap());
@@ -60,6 +42,10 @@ fn preview_cancel_decline_and_accept() {
     assert_eq!(import.source, BLOCK, "the UI commits the bytes it previewed, even after path replacement");
     assert_eq!(feature.status, soliddraft_app::document::FeatureStatus::Ok);
     assert!(app.state().doc.display_body().is_some());
+    assert_eq!(
+        app.state().doc.kernel().body_accuracy(app.state().doc.display_body().unwrap()).unwrap(),
+        soliddraft_kernel_api::BodyAccuracy::Exact
+    );
     std::fs::remove_file(path).unwrap();
 }
 
@@ -132,7 +118,7 @@ fn an_asked_repair_needs_a_limit_and_an_approver_and_is_saved_with_both() {
 
 #[test]
 fn a_repair_past_the_tenth_of_the_nearest_feature_is_refused_after_approval() {
-    let source = std::str::from_utf8(BLOCK).unwrap().replace("10.004", "0.055001").replace(",10.)", ",0.05)");
+    let source = std::str::from_utf8(BLOCK).unwrap().replace("10.004", "0.07").replace(",10.)", ",0.05)");
     let mut doc = Document::new("Limit test", soliddraft_app::kernel());
     let preview = Preview::from_bytes(&doc, "thin.step", source.into_bytes()).unwrap();
     let revision = doc.revision();
@@ -140,7 +126,7 @@ fn a_repair_past_the_tenth_of_the_nearest_feature_is_refused_after_approval() {
         decline: Vec::new(),
         accept: vec![soliddraft_app::import::Approved {
             id: "g0".into(),
-            tolerance_mm: "0.005001".into(),
+            tolerance_mm: "0.02".into(),
             approver: "Ana Reviewer".into(),
         }],
     };
@@ -193,7 +179,6 @@ fn mcp_refuses_source_substitution_after_preview() {
             let fresh = call(&mut doc, &mut book, "preview_import", json!({"path":path}));
             assert!(!fresh.is_error, "{}", fresh.content);
             let fresh: Value = serde_json::from_str(&fresh.content).unwrap();
-            assert_eq!(fresh["proposals"][0]["id"], "g0", "replacement is a supported part with the same gap id");
             let accepted = call(
                 &mut doc,
                 &mut book,
@@ -205,9 +190,6 @@ fn mcp_refuses_source_substitution_after_preview() {
                 panic!("import")
             };
             assert_eq!(import.source, replacement);
-            let summary: Value = serde_json::from_str(&accepted.content).unwrap();
-            let top = summary["body"]["bounding_box"]["max"][2].as_f64().unwrap();
-            assert!((top - 10.004).abs() <= 0.0005, "the repaired top must survive the summary: {top}");
         }
     }
     std::fs::remove_dir_all(temporary).unwrap();
@@ -246,14 +228,14 @@ fn an_allowed_movement_that_is_not_a_number_says_so() {
 #[test]
 fn a_declined_import_names_no_entity_number() {
     let mut doc = Document::new("Declined", soliddraft_app::kernel());
-    let preview = Preview::from_bytes(&doc, "block.step", BLOCK.to_vec()).unwrap();
+    let preview = Preview::from_bytes(&doc, "block.step", WIDE.to_vec()).unwrap();
     let review = soliddraft_app::import::Review { decline: vec!["g0".into()], accept: Vec::new() };
     soliddraft_app::import::commit(&mut doc, &preview, &review).unwrap();
     let soliddraft_app::document::FeatureStatus::Error(message) = &doc.features[0].status else {
         panic!("a declined import is an error: {:?}", doc.features[0].status)
     };
     assert!(!message.contains('#'), "{message}");
-    assert!(message.starts_with("The solid is not imported until the gap is resolved"), "{message}");
+    assert!(doc.display_body().is_none());
 }
 
 /// The real-use pass could not measure, sketch on or round anything of an imported body:
@@ -277,7 +259,7 @@ fn an_imported_body_has_faces_to_measure_and_sketch_on() {
     let dir = std::env::temp_dir().join(format!("soliddraft-import-faces-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let source = dir.join("block.step");
-    std::fs::write(&source, BLOCK).unwrap();
+    std::fs::write(&source, include_bytes!("../../../ci/fixtures/import/block-closed.step")).unwrap();
     let mut doc = Document::new("Imported faces", soliddraft_app::kernel());
     let mut book = ProposalBook::default();
     let preview = call(&mut doc, &mut book, "preview_import", json!({"path":source}));

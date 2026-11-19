@@ -199,6 +199,13 @@ fn publish(a: &Args, exports: &[Export], work: RequestWork) -> Result<(), String
         if let Report::Step(report) = &out.report
             && !report.within_tolerance
         {
+            if report.tolerant {
+                return Err(format!(
+                    "{}: STEP export refused: the part is a tolerant import, and the file's distance from it \
+                     is not certified, so the requested tolerance cannot be confirmed",
+                    path.display()
+                ));
+            }
             // An approximate part's file has no established distance from the part, so it
             // cannot be held to the requested tolerance: written-length rounding is no bound.
             if let Some(approximate) = &report.approximate {
@@ -309,6 +316,7 @@ mod tests {
                 removed_edges: 0,
                 warnings: Vec::new(),
                 approximate: None,
+                tolerant: false,
             }),
         };
         let mesh = Export {

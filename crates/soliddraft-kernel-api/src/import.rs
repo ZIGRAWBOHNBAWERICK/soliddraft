@@ -260,6 +260,10 @@ pub struct RepairRecord {
     /// Whole-face bounds for repairs of inconsistent source definitions.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub source_incidence: Vec<SourceIncidence>,
+    /// Kernel admission controls and evidence for a tolerant STEP import.
+    /// Reopening verifies this against the unchanged source.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tolerant: Option<serde_json::Value>,
 }
 
 /// How far from a feature the importer looks for another that might close a gap.

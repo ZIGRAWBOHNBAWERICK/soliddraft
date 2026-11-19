@@ -685,7 +685,7 @@ pub fn commit(doc: &mut Document, preview: &Preview, review: &Review) -> Result<
 /// Commits a reviewed import, telling a review to answer again from a refused file.
 pub fn commit_reviewed(doc: &mut Document, preview: &Preview, review: &Review) -> Result<FeatureId, CommitError> {
     let feature = answered(doc, preview, review).map_err(CommitError::Review)?;
-    admit(doc, preview, feature).map_err(CommitError::Refused)
+    admit(doc, preview, feature).map(|(id, _)| id).map_err(CommitError::Refused)
 }
 
 /// Commits an import from the dialog. A refused file becomes a row of the import report,
@@ -693,13 +693,20 @@ pub fn commit_reviewed(doc: &mut Document, preview: &Preview, review: &Review) -
 pub fn commit_in(state: &mut AppState, preview: &Preview, review: &Review) -> Result<FeatureId, CommitError> {
     let file = preview.feature.source_name.clone();
     let format = preview.feature.format;
-    let result = commit_reviewed(&mut state.doc, preview, review);
+    let result = answered(&state.doc, preview, review)
+        .map_err(CommitError::Review)
+        .and_then(|feature| admit(&mut state.doc, preview, feature).map_err(CommitError::Refused));
     match &result {
-        Ok(_) => state.import_refusals.retain(|r| r.file != file || r.format != format),
+        Ok((_, refusals)) => {
+            state.import_refusals.retain(|r| r.file != file || r.format != format);
+            if !refusals.is_empty() {
+                report::keep_refusal(state, file, format, refusals.join(" "));
+            }
+        }
         Err(CommitError::Refused(reason)) => report::keep_refusal(state, file, format, reason.clone()),
         Err(CommitError::Review(_)) => {}
     }
-    result
+    result.map(|(id, _)| id)
 }
 
 /// The source feature with the review's answers, or why the review must be answered again.
@@ -744,16 +751,20 @@ fn answered(doc: &Document, preview: &Preview, review: &Review) -> Result<Import
 
 /// Builds the answered import on a scratch copy of the part and commits it, or says why
 /// the file or its body was refused.
-fn admit(doc: &mut Document, preview: &Preview, feature: ImportStepFeature) -> Result<FeatureId, String> {
+fn admit(
+    doc: &mut Document,
+    preview: &Preview,
+    feature: ImportStepFeature,
+) -> Result<(FeatureId, Vec<String>), String> {
     if let Some(swap) = &preview.file {
         // Answers cannot go through a match yet. A single-solid import takes the answered
         // file as a plain replacement instead, its references left for repair.
         let single = swap.imports.iter().all(|(_, import)| import.source_solid.is_none());
         if feature.decisions.is_empty() || !single {
-            return commit_file(doc, swap, &feature);
+            return commit_file(doc, swap, &feature).map(|id| (id, Vec::new()));
         }
     }
-    let command = match preview.replacement {
+    let mut command = match preview.replacement {
         Some(id) => Command::EditFeature { id, kind: FeatureKind::ImportStep(feature) },
         None => {
             let solids = if feature.format == ImportFormat::Mesh {
@@ -777,21 +788,45 @@ fn admit(doc: &mut Document, preview: &Preview, feature: ImportStepFeature) -> R
             }
         }
     };
-    // Validate the whole import before changing the part, then reuse its builds.
+    // Keep independently admitted STEP bodies; replacements and explicit repair reviews
+    // still validate their entire transaction before changing the part.
     let mut trial = doc.scratch();
-    let trial_result = trial.apply(command.clone());
-    if matches!(command, Command::ImportBodies(_))
+    let mut trial_result = trial.apply(command.clone());
+    let mut refusals = Vec::new();
+    if let Command::ImportBodies(imports) = &command
         && let Some(failed) = trial
             .features
             .iter()
             .filter(|f| doc.feature(f.id).is_none())
             .find(|f| f.status != crate::document::FeatureStatus::Ok)
     {
-        return Err(match &failed.status {
-            crate::document::FeatureStatus::Error(message) => message.clone(),
-            _ => "The imported bodies could not be built. Restore the full feature tree and review the file again."
-                .into(),
-        });
+        use crate::document::FeatureStatus;
+        let added = || trial.features.iter().filter(|f| doc.feature(f.id).is_none());
+        let partial = preview.feature.format == ImportFormat::Step
+            && preview.feature.decisions.is_empty()
+            && added().count() == imports.len()
+            && added().all(|f| matches!(f.status, FeatureStatus::Ok | FeatureStatus::Error(_)))
+            && added().any(|f| f.status == FeatureStatus::Ok);
+        if !partial {
+            return Err(match &failed.status {
+                FeatureStatus::Error(message) => message.clone(),
+                _ => "The imported bodies could not be built. Restore the full feature tree and review the file again."
+                    .into(),
+            });
+        }
+        let mut admitted = Vec::new();
+        for (index, (import, built)) in imports.iter().zip(added()).enumerate() {
+            match &built.status {
+                FeatureStatus::Ok => admitted.push(import.clone()),
+                FeatureStatus::Error(reason) => refusals.push(format!("Body {}: {reason}", index + 1)),
+                _ => unreachable!("partial admission requires completed builds"),
+            }
+        }
+        command = Command::ImportBodies(admitted);
+        let mut accepted = doc.scratch();
+        accepted.reuse_builds_from(trial.model());
+        trial_result = accepted.apply(command.clone());
+        trial = accepted;
     }
     let imported = match preview.replacement {
         Some(id) => trial.feature(id),
@@ -816,7 +851,7 @@ fn admit(doc: &mut Document, preview: &Preview, feature: ImportStepFeature) -> R
     }
     let declined_record = declined.then(|| record.cloned()).flatten();
     doc.reuse_builds_from(trial.model());
-    match doc.apply(command) {
+    let id = match doc.apply(command) {
         Ok(Some(id)) => Ok(id),
         Err(error) => {
             let imported = doc.features.last().ok_or("the import made no feature")?;
@@ -824,7 +859,8 @@ fn admit(doc: &mut Document, preview: &Preview, feature: ImportStepFeature) -> R
             if declined && record == declined_record.as_ref() { Ok(imported.id) } else { Err(error) }
         }
         Ok(None) => preview.replacement.ok_or_else(|| "the import made no feature".into()),
-    }
+    }?;
+    Ok((id, refusals))
 }
 
 /// The repair record as rows of the feature's properties: how each gap was answered and the
@@ -832,6 +868,16 @@ fn admit(doc: &mut Document, preview: &Preview, feature: ImportStepFeature) -> R
 /// the source. Output error belongs to an export, and later features are not covered.
 pub fn record_rows(record: &RepairRecord) -> Vec<(String, String)> {
     let mut rows = Vec::new();
+    if record.tolerant.is_some() {
+        rows.push((
+            "Admission".into(),
+            if record.derivative.is_some() {
+                "Certified solid. Source admission evidence is recorded.".into()
+            } else {
+                crate::document::TOLERANT_WORDS.into()
+            },
+        ));
+    }
     for (index, change) in record.changes.iter().enumerate() {
         let gap = format!("Gap {}", index + 1);
         rows.push((gap.clone(), answer_text(change)));

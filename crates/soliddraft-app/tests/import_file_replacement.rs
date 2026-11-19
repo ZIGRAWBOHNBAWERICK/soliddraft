@@ -318,9 +318,8 @@ fn two_seamed_blocks() -> Vec<u8> {
     out.into_bytes()
 }
 
-/// The new file's review answers a repair question, which a whole-file replacement cannot
-/// carry yet: Accept refuses and changes nothing. Both seams of the two-block file are
-/// repaired automatically, so declining one is an answer the review can give.
+/// A replacement cannot carry repair answers. The original small seams open tolerantly;
+/// the replacement's wider seams require review, and declining one must change nothing.
 #[test]
 fn a_reviewed_new_file_with_repair_answers_refuses_and_changes_nothing() {
     let file = two_seamed_blocks();
@@ -332,11 +331,13 @@ fn a_reviewed_new_file_with_repair_answers_refuses_and_changes_nothing() {
     let first = doc.features[0].id;
     let saved = doc.model().to_bytes().unwrap();
     let (old_sources, depth, revision) = (sources(&doc), doc.undo_depth(), doc.revision());
-    let preview =
-        Preview::from_bytes(&doc, "renumbered.step", renumbered(&file)).unwrap().replacing(&doc, first).unwrap();
-    let review = Review { decline: vec!["g0".into()], accept: Vec::new() };
-    let error = commit(&mut doc, &preview, &review).unwrap_err();
-    assert!(error.contains("repair answers") && error.contains("Nothing was changed"), "{error}");
+    let reviewed = String::from_utf8(renumbered(&file)).unwrap().replace("10.004", "10.02");
+    let error = Preview::from_bytes(&doc, "renumbered.step", reviewed.into_bytes())
+        .unwrap()
+        .replacing(&doc, first)
+        .unwrap_err();
+    assert!(error.contains("repair answers"), "{error}");
+    assert!(!error.contains("import.invalid-decision") && !error.contains("import_0"), "{error}");
     assert_eq!(doc.model().to_bytes().unwrap(), saved);
     assert_eq!(sources(&doc), old_sources);
     assert_eq!((doc.undo_depth(), doc.revision()), (depth, revision));

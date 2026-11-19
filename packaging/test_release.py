@@ -266,6 +266,18 @@ class KnownGapNotesTests(unittest.TestCase):
         self.assertIn("https://github.com/ZIGRAWBOHNBAWERICK/soliddraft/issues/27", text)
         self.assertNotIn("https://github.com/BohnBawerick/soliddraft/issues/", text)
 
+    def test_point_release_keeps_limits_without_obsolete_import_refusals(self):
+        with patch.object(release, "version", return_value="0.7.1"):
+            text = "\n".join(release.known_gap_notes())
+        self.assertIn("SolidDraft 0.7.1 runs on Catallax 0.4.0", text)
+        self.assertIn("This file is too complex to open yet.", text)
+        self.assertIn("15 scenarios passed functional checks but exceeded strict timing budgets", text)
+        self.assertIn("STL export timed out after 600 seconds", text)
+        self.assertIn("installed double-click opening remains unverified", text)
+        self.assertIn("0.7.0 carried-forward validation", text)
+        self.assertNotIn("cannot be named or selected", text)
+        self.assertNotIn("cannot be re-imported by this release", text)
+
     def test_release_limitations_do_not_leak_into_another_version(self):
         with patch.object(release, "version", return_value="0.5.1"):
             text = "\n".join(release.known_gap_notes())

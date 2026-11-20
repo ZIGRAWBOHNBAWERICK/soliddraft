@@ -375,6 +375,13 @@ jobs:
           SOLIDDRAFT_STEP_PROOF_DIR="$out" cargo test --locked -p soliddraft-exchange --test bracket \
             step_carries_the_proven_deviation_and_the_body_faces -- --exact
           python3 ci/check-step.py "$out/cli-bracket.step" "$out/step-report.json"
+      - name: Export the P1 bracket with its manufacturing information and read it in OpenCASCADE
+        run: |
+          out="$RUNNER_TEMP/bracket-export/pmi"
+          mkdir -p "$out"
+          SOLIDDRAFT_PMI_PROOF_DIR="$out" cargo test --locked -p soliddraft-app --test pmi_bracket
+          python3 ci/check-step-pmi.py "$out/p1-bracket-pmi.step" ci/fixtures/pmi/p1-bracket-pmi.json
+          python3 ci/check-step-pmi.py "$out/p1-bracket-pmi-reexported.step" ci/fixtures/pmi/p1-bracket-pmi.json
       - uses: actions/upload-artifact@v4
         if: always()
         with:

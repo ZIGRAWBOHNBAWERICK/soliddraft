@@ -105,6 +105,12 @@
       "lint",
       "application-loop"
     ],
+    "ci/check-step-pmi.py": [
+      "step-opencascade"
+    ],
+    "ci/fixtures/pmi/p1-bracket-pmi.json": [
+      "step-opencascade"
+    ],
     "ci/check-step.py": [
       "step-opencascade",
       "application-loop"

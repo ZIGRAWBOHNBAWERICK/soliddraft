@@ -178,6 +178,7 @@ The running selector and its map are the candidate policy; `--head` names the tr
 | `ci/select-checks.py` | all | Selection job, and the routing tests in lint; it controls its own obligations |
 | `ci/check-field-moments.py`, `ci/check-graded-stl.py`, `ci/check-gyroid-stl.py`, `ci/check-lattice-stl.py` | `application-loop` | Called by `ci/run-scenarios.py` |
 | `ci/check-step.py` | `step-opencascade`, `application-loop` | OpenCASCADE job, and called by `ci/run-scenarios.py` |
+| `ci/check-step-pmi.py`, `ci/fixtures/pmi/p1-bracket-pmi.json` | `step-opencascade` | OpenCASCADE job: reads the P1 bracket's manufacturing information from its STEP file |
 | `ci/edit_speed.py`, `ci/test_edit_speed.py` | None | The `edit-speed.yml` pull request workflow, and Python discovery in lint |
 | `ci/balance.py`, `ci/test-durations.json`, `ci/test-durations-macos.json` | `test-linux`, `test-macos` | Current test inventory partitioning |
 | `ci/scenario-durations.json` | `application-loop` | Current scenario inventory partitioning |

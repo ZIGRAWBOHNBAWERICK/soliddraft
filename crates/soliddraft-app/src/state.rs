@@ -1267,6 +1267,9 @@ pub struct AppState {
     pub palette: Option<crate::palette::Palette>,
     /// The open Provider dialog.
     pub import_dialog: Option<crate::import::Preview>,
+    /// Import STEP asked the browser for a file: the next uploaded STEP file is reviewed
+    /// for import, not opened as a document.
+    pub step_upload: bool,
     /// The Import report window is open.
     pub import_report: bool,
     /// Files the importer refused this session, for the import report.
@@ -1469,6 +1472,7 @@ impl AppState {
             show_shortcuts: false,
             palette: None,
             import_dialog: None,
+            step_upload: false,
             import_report: false,
             import_refusals: Vec::new(),
             cancelling: false,

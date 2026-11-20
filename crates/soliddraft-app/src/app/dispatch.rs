@@ -1513,6 +1513,8 @@ impl SolidDraftApp {
                 self.state.note("New part", NoteKind::Info);
             }
             AppAction::ImportStep(path) => {
+                // In the browser the file arrives as an upload, frames after the request.
+                self.state.step_upload = path.is_none() && cfg!(target_arch = "wasm32");
                 let path = path.or_else(|| crate::platform::open_path("Import STEP", "STEP", &["step", "stp"]));
                 if let Some(path) = path {
                     match crate::import::Preview::read(&self.state.doc, &path) {

@@ -231,8 +231,9 @@ fn the_bracket_carries_its_manufacturing_information_through_step_and_a_bore_edi
 
     // C1: a new part opens the file and has every item on the same face.
     let mut second = state("Imported bracket");
-    call(&mut second, "preview_import", json!({"path": step}));
-    let imported = call(&mut second, "import_step", json!({"path": step, "decline": []}));
+    let preview = call(&mut second, "preview_import", json!({"path": step}));
+    let imported =
+        call(&mut second, "import_step", json!({"path": step, "decline": [], "preview_token": preview["token"]}));
     assert_eq!(
         imported["manufacturing_information"]["summary"], "16 manufacturing items read",
         "{}",

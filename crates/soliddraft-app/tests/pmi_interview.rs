@@ -15,6 +15,8 @@
 mod bracket;
 
 use bracket::{build, call, face, faces, state};
+use std::collections::BTreeSet;
+
 use serde_json::{Value, json};
 use soliddraft_app::state::AppState;
 use soliddraft_kernel_api::SurfaceKind;
@@ -71,6 +73,44 @@ fn recognised(state: &mut AppState) -> Vec<Value> {
     features
 }
 
+/// What a question asks, without the faces that end its id: `holes Ø4 size`.
+fn asks(question: &Value) -> &str {
+    let id = question["id"].as_str().unwrap();
+    id.split_once(": ").map_or(id, |(asks, _)| asks)
+}
+
+/// The faces a question's proposal is on, one per member, by their names.
+fn asked_of(question: &Value) -> Vec<String> {
+    let item = &question["proposal"]["item"];
+    let features =
+        item.get("features").and_then(Value::as_array).cloned().unwrap_or_else(|| vec![item["feature"].clone()]);
+    features.iter().map(|feature| feature[0]["label"].as_str().unwrap().to_owned()).collect()
+}
+
+/// No two open questions share an id.
+fn unique(questions: &[Value]) {
+    let ids: BTreeSet<&str> = questions.iter().map(|q| q["id"].as_str().unwrap()).collect();
+    assert_eq!(ids.len(), questions.len(), "{questions:#?}");
+}
+
+/// The open questions.
+fn interview(state: &mut AppState) -> Vec<Value> {
+    call(state, "pmi_interview", json!({}))["questions"].as_array().unwrap().clone()
+}
+
+/// The names of the items of `kind` (as `pmi_list` gives it) on a face, and how many.
+fn items_on(state: &mut AppState, kind: &str, face: &str) -> Vec<String> {
+    let listed = call(state, "pmi_list", json!({}));
+    listed["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|row| row["kind"] == kind)
+        .filter(|row| row["faces"].as_array().unwrap().iter().flat_map(|f| f.as_array().unwrap()).any(|f| f == face))
+        .map(|row| row["name"].as_str().unwrap().to_owned())
+        .collect()
+}
+
 #[test]
 fn a_bare_import_is_recognised_interviewed_and_drawn() {
     let scratch = std::env::temp_dir().join(format!("soliddraft-pmi-interview-{}", std::process::id()));
@@ -114,8 +154,7 @@ fn a_bare_import_is_recognised_interviewed_and_drawn() {
     // a proposal but the material.
     let f = faces(&imported, 30.0);
     let questions = call(&mut imported, "pmi_interview", json!({}))["questions"].as_array().unwrap().clone();
-    let asked: Vec<(&str, &str)> =
-        questions.iter().map(|q| (q["id"].as_str().unwrap(), q["proposes"].as_str().unwrap())).collect();
+    let asked: Vec<(&str, &str)> = questions.iter().map(|q| (asks(q), q["proposes"].as_str().unwrap())).collect();
     assert_eq!(
         asked,
         [
@@ -136,6 +175,11 @@ fn a_bare_import_is_recognised_interviewed_and_drawn() {
         ]
     );
     assert!(questions.iter().all(|q| !q["reason"].as_str().unwrap().is_empty()), "every question says why");
+    // A feature's question names it by its faces: the bore's by its wall.
+    let bore_size = questions.iter().find(|q| asks(q) == "hole \u{d8}8 size").unwrap();
+    assert_eq!(asked_of(bore_size), std::slice::from_ref(&f.bore), "{bore_size}");
+    assert_eq!(bore_size["id"], format!("hole \u{d8}8 size: {}", f.bore));
+    unique(&questions);
     // The datums are the bracket's own: the underside, the flange's back and the left end.
     let datum_face = |letter: &str| {
         let question = questions.iter().find(|q| q["id"] == format!("datum {letter}")).unwrap();
@@ -151,7 +195,7 @@ fn a_bare_import_is_recognised_interviewed_and_drawn() {
     call(&mut imported, "pmi_add", json!({"kind": "datum", "letter": "A", "faces": [f.a]}));
     call(&mut imported, "pmi_add", json!({"kind": "diameter", "name": "Bore", "faces": [f.bore], "tolerance": "H7"}));
     let open = call(&mut imported, "pmi_interview", json!({}))["questions"].as_array().unwrap().clone();
-    let ids: Vec<&str> = open.iter().map(|q| q["id"].as_str().unwrap()).collect();
+    let ids: Vec<&str> = open.iter().map(asks).collect();
     assert!(!ids.contains(&"datum A") && !ids.contains(&"hole \u{d8}8 size"), "{ids:?}");
     assert_eq!(ids.len(), questions.len() - 2, "{ids:?}");
 
@@ -183,4 +227,135 @@ fn a_bare_import_is_recognised_interviewed_and_drawn() {
     assert_eq!(drawing["views"], 4);
     let _ = face(&imported, SurfaceKind::Plane, [None, None, Some(0.0)]);
     let _ = std::fs::remove_dir_all(&scratch);
+}
+
+/// One hole of the pattern sized and another located by hand: each item answers for
+/// its own hole only, so the interview still asks the size of the other three and the
+/// position of the other three, and accepting every proposal covers each hole once.
+#[test]
+fn a_partly_annotated_pattern_is_asked_about_its_other_holes() {
+    let dir = std::env::temp_dir().join(format!("soliddraft-pmi-interview-partial-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let (_, mut imported) = bare_import(&dir);
+    let f = faces(&imported, 30.0);
+    for (letter, face) in [("A", &f.a), ("B", &f.b), ("C", &f.c)] {
+        call(&mut imported, "pmi_add", json!({"kind": "datum", "letter": letter, "faces": [face]}));
+    }
+    call(
+        &mut imported,
+        "pmi_add",
+        json!({"kind": "diameter", "name": "First hole", "faces": [f.holes[0]], "tolerance": "H13", "through": true}),
+    );
+    call(
+        &mut imported,
+        "pmi_add",
+        json!({"kind": "tolerance", "name": "Second hole position", "characteristic": "position", "value": "0.5",
+               "diameter_zone": true, "datums": ["A", "B", "C"], "faces": [f.holes[1]]}),
+    );
+
+    let questions = interview(&mut imported);
+    unique(&questions);
+    let find = |asked: &str| {
+        let found: Vec<&Value> = questions.iter().filter(|q| asks(q) == asked).collect();
+        assert_eq!(found.len(), 1, "one {asked} question: {questions:#?}");
+        found[0].clone()
+    };
+    // The holes but one, in no particular order: recognition orders a pattern's holes.
+    let others = |except: usize| -> BTreeSet<String> {
+        f.holes.iter().enumerate().filter(|(i, _)| *i != except).map(|(_, hole)| hole.clone()).collect()
+    };
+    let set = |question: &Value| -> BTreeSet<String> { asked_of(question).into_iter().collect() };
+    let size = find("holes \u{d8}4 size");
+    assert_eq!(set(&size), others(0), "the sized hole is not asked again, the other three are: {size}");
+    assert_eq!(size["proposes"], "3\u{d7} \u{d8}4 H13 THRU");
+    assert_eq!(size["asks"], "What are the remaining 3 of the 4 holes \u{d8}4 for?");
+    let position = find("holes \u{d8}4 position");
+    assert_eq!(set(&position), others(1), "the located hole is not asked again, the other three are: {position}");
+
+    let answered = call(&mut imported, "pmi_answer", json!({"accept": "all", "material": "6061-T6"}));
+    assert_eq!(answered["questions"], json!([]), "{answered}");
+    for hole in &f.holes {
+        assert_eq!(items_on(&mut imported, "Diameter", hole).len(), 1, "{hole} has one size");
+        assert_eq!(items_on(&mut imported, "Position", hole).len(), 1, "{hole} has one position");
+    }
+    assert_eq!(items_on(&mut imported, "Diameter", &f.holes[0]), ["First hole"]);
+    assert_eq!(items_on(&mut imported, "Position", &f.holes[1]), ["Second hole position"]);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A plate with a through hole and a blind hole of one diameter: two features, not a
+/// pattern, whose questions differ by their faces. Each answer lands on its own hole,
+/// whether accepted by id or with every other proposal.
+#[test]
+fn equal_holes_on_different_features_are_asked_and_answered_apart() {
+    let mut plate = state("Plate");
+    for (tool, arguments) in [
+        (
+            "sketch",
+            json!({"plane": "top", "offset": 0, "shapes": [{"shape": "rectangle", "center": [30, 20, 0], "width": 60, "height": 40}]}),
+        ),
+        ("extrude", json!({"sketch": "Sketch1", "depth": 10, "flip": false})),
+        (
+            "sketch",
+            json!({"plane": "top", "offset": -1, "shapes": [{"shape": "circle", "center": [15, 20, -1], "diameter": 6}]}),
+        ),
+        ("cut", json!({"sketch": "Sketch2", "depth": 12, "through_all": false, "flip": true})),
+        (
+            "sketch",
+            json!({"plane": "top", "offset": -1, "shapes": [{"shape": "circle", "center": [45, 20, -1], "diameter": 6}]}),
+        ),
+        ("cut", json!({"sketch": "Sketch3", "depth": 5, "through_all": false, "flip": true})),
+    ] {
+        call(&mut plate, tool, arguments);
+    }
+    let through = face(&plate, SurfaceKind::Cylinder, [Some(15.0), Some(20.0), None]);
+    let blind = face(&plate, SurfaceKind::Cylinder, [Some(45.0), Some(20.0), None]);
+    let found = call(&mut plate, "pmi_recognise", json!({}));
+    let holes: Vec<&Value> = found["features"].as_array().unwrap().iter().filter(|f| f["kind"] == "hole").collect();
+    assert_eq!(holes.len(), 2, "two holes, no pattern: {found}");
+    assert!(holes.iter().all(|hole| hole["name"] == "Hole \u{d8}6"), "{found}");
+
+    let questions = interview(&mut plate);
+    unique(&questions);
+    let of = |questions: &[Value], asked: &str, wall: &str| -> Option<Value> {
+        let found: Vec<&Value> =
+            questions.iter().filter(|q| asks(q) == asked && asked_of(q) == [wall.to_owned()]).collect();
+        assert!(found.len() <= 1, "{found:#?}");
+        found.first().map(|q| (*q).clone())
+    };
+    for wall in [&through, &blind] {
+        for asked in ["hole \u{d8}6 size", "hole \u{d8}6 position"] {
+            assert!(of(&questions, asked, wall).is_some(), "{asked} of {wall}: {questions:#?}");
+        }
+    }
+
+    // Accepting the blind hole's size by its id sizes that hole, and only it.
+    let blind_size = of(&questions, "hole \u{d8}6 size", &blind).unwrap();
+    assert_eq!(blind_size["proposes"], "\u{d8}6 H13");
+    let answered = call(&mut plate, "pmi_answer", json!({"accept": [blind_size["id"]]}));
+    assert_eq!(answered["accepted"], json!([blind_size["id"]]));
+    assert_eq!(items_on(&mut plate, "Diameter", &blind).len(), 1, "{answered}");
+    assert_eq!(items_on(&mut plate, "Diameter", &through).len(), 0, "{answered}");
+    let open = interview(&mut plate);
+    assert!(of(&open, "hole \u{d8}6 size", &blind).is_none(), "{open:#?}");
+    let through_size = of(&open, "hole \u{d8}6 size", &through).expect("the through hole is still asked");
+    assert_eq!(through_size["proposes"], "\u{d8}6 H13 THRU");
+
+    // Accept all: each remaining proposal once, on its own hole.
+    let answered = call(&mut plate, "pmi_answer", json!({"accept": "all", "material": "6061-T6"}));
+    assert_eq!(answered["questions"], json!([]), "{answered}");
+    for wall in [&through, &blind] {
+        assert_eq!(items_on(&mut plate, "Diameter", wall).len(), 1, "{wall} has one size: {answered}");
+        assert_eq!(items_on(&mut plate, "Position", wall).len(), 1, "{wall} has one position: {answered}");
+    }
+    let listed = call(&mut plate, "pmi_list", json!({}));
+    let rows = listed["items"].as_array().unwrap();
+    assert!(rows.iter().all(|row| row.get("problem").is_none()), "{listed}");
+    let callout_on = |wall: &str| {
+        rows.iter()
+            .find(|row| row["kind"] == "Diameter" && row["faces"] == json!([[wall]]))
+            .map(|row| row["callout"].as_str().unwrap().to_owned())
+    };
+    assert_eq!(callout_on(&through).as_deref(), Some("\u{d8}6 H13 THRU"));
+    assert_eq!(callout_on(&blind).as_deref(), Some("\u{d8}6 H13"));
 }

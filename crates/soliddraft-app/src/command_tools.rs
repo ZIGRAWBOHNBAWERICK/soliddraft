@@ -3294,8 +3294,14 @@ impl ToolHost for CommandTools<'_> {
                     .map_err(|e| format!("bad decline list: {e}"))?;
                 let accept = serde_json::from_value(input.get("accept").cloned().unwrap_or(json!([])))
                     .map_err(|e| format!("bad accept list: {e}"))?;
+                self.doc.pmi_import = None;
                 crate::import::commit(self.doc, &preview, &crate::import::Review { decline, accept })?;
-                Ok(self.summary())
+                let mut summary = self.summary();
+                if let Some(report) = &self.doc.pmi_import {
+                    summary["manufacturing_information"] =
+                        json!({ "summary": crate::pmi::import_summary(report), "report": report });
+                }
+                Ok(summary)
             })(),
             "model_summary" => Ok(self.summary()),
             "feature" => self.feature(input["name"].as_str().unwrap_or_default()),

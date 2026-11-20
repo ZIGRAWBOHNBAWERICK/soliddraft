@@ -291,9 +291,13 @@ class Browser {
     return v;
   }
 
-  close() {
+  // Chromium's helpers still write into the profile until the browser exits, so wait for it.
+  async close() {
     this.ws?.close();
+    if (this.process.exitCode !== null || this.process.signalCode !== null) return;
+    const exited = new Promise(resolve => this.process.once('exit', resolve));
     this.process.kill('SIGKILL');
+    await Promise.race([exited, new Promise(resolve => setTimeout(resolve, 10000))]);
   }
 }
 
@@ -364,6 +368,6 @@ try {
   if (browser?.stderr) console.error(browser.stderr.split('\n').slice(-20).join('\n'));
   process.exitCode = 1;
 } finally {
-  browser?.close();
-  fs.rmSync(profile, { recursive: true, force: true });
+  await browser?.close();
+  fs.rmSync(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
 }

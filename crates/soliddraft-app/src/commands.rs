@@ -2828,6 +2828,7 @@ fn registry() -> Vec<CommandSpec> {
     .chain(crate::grid::registry::commands())
     .chain(crate::mates::registry::commands())
     .chain(crate::interference::registry::commands())
+    .chain(crate::pmi::registry::commands())
     .chain(crate::subassembly::registry::commands())
     .collect()
 }

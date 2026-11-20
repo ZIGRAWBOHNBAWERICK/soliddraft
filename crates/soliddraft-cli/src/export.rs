@@ -300,6 +300,7 @@ mod tests {
         let step = |within_tolerance| Export {
             bytes: b"must not be published".to_vec(),
             proof: Some(soliddraft_exchange::proof::ProofReport::default()),
+            pmi: None,
             report: Report::Step(soliddraft_kernel_api::StepReport {
                 max_deviation: if within_tolerance { "0" } else { "0.001" }.into(),
                 max_deviation_mm: if within_tolerance { 0.0 } else { 0.001 },
@@ -322,6 +323,7 @@ mod tests {
         let mesh = Export {
             bytes: b"mesh must not be published".to_vec(),
             proof: None,
+            pmi: None,
             report: Report::Mesh(soliddraft_exchange::MeshReport {
                 triangles: 12,
                 vertices: 8,

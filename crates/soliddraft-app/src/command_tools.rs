@@ -1258,7 +1258,7 @@ fn split_name(name: &str) -> Option<(&str, &str)> {
     Some((f.trim(), l.trim()))
 }
 
-fn face_by_name(doc: &Document, name: &str) -> Option<FaceId> {
+pub(crate) fn face_by_name(doc: &Document, name: &str) -> Option<FaceId> {
     let (feature, label) = split_name(name)?;
     let id = doc.features.iter().find(|f| f.name == feature)?.id;
     doc.faces.iter().find(|f| f.feature == id && f.label.eq_ignore_ascii_case(label)).map(|f| f.id)
@@ -1270,7 +1270,7 @@ fn edge_by_name(doc: &Document, name: &str) -> Option<soliddraft_kernel_api::Edg
     doc.edges.iter().find(|e| e.feature == id && e.label.eq_ignore_ascii_case(label)).map(|e| e.id)
 }
 
-fn name_of_face(doc: &Document, face: FaceId) -> Option<String> {
+pub(crate) fn name_of_face(doc: &Document, face: FaceId) -> Option<String> {
     let nf = doc.named_face(face)?;
     Some(format!("{} · {}", doc.feature(nf.feature).map(|f| f.name.as_str()).unwrap_or("Body"), nf.label))
 }

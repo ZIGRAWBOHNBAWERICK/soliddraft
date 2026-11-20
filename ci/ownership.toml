@@ -649,6 +649,20 @@ paths = ["crates/soliddraft-app/src/interference/"]
 module = ["interference"]
 
 [[areas]]
+name = "pmi.app"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/pmi/"]
+module = ["pmi"]
+
+[[areas]]
+name = "pmi.model"
+owner = "core"
+crate = "soliddraft-model"
+paths = ["crates/soliddraft-model/src/pmi.rs"]
+module = ["pmi"]
+
+[[areas]]
 name = "kernel.field_preview"
 owner = "core"
 crate = "soliddraft-kernel-catallax"

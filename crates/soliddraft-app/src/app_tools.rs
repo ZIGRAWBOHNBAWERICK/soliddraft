@@ -272,6 +272,9 @@ impl AppTools<'_> {
         if let Some(result) = crate::subassembly::tools::run(self.state, name, input) {
             return Some(result);
         }
+        if let Some(result) = crate::pmi::tools::run(self.state, name, input) {
+            return Some(result);
+        }
         let drawing_active = self.state.drawing.is_active();
         let assembly_active = self.state.assembly.is_active();
         Some(match name {
@@ -418,7 +421,11 @@ impl AppTools<'_> {
             } else { error }
         })?;
         out.write_with(&path, crate::platform::write_file)?;
-        Ok(json!({ "exported": path, "report": out.report.summary(), "evidence": out.report }))
+        let mut result = json!({ "exported": path, "report": out.report.summary(), "evidence": out.report });
+        if let Some(pmi) = &out.pmi {
+            result["manufacturing_information"] = json!(pmi);
+        }
+        Ok(result)
     }
 
     fn roll_to_end(&mut self) -> Result<Value, String> {

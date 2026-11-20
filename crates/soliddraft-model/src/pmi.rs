@@ -180,19 +180,22 @@ impl Document {
         notes
     }
 
-    /// The items a STEP file's manufacturing information becomes on the faces of an
-    /// import feature of that file, and what cannot be placed. Face keys of the file
+    /// The items a STEP file's manufacturing information becomes on the faces of the
+    /// import features of that file, one per solid, and what cannot be placed. Face keys of the file
     /// are matched to the feature's faces by the import's own face roles; an item on a
     /// face the import did not build is left out by name. Nothing is added to the part:
     /// run the returned items through
     /// [`Command::PutPmiItem`](crate::Command::PutPmiItem).
-    pub fn pmi_from_step(&self, feature: FeatureId, read: &StepPmi) -> (Vec<PmiItem<FaceRef>>, PmiImport) {
+    pub fn pmi_from_step(&self, features: &[FeatureId], read: &StepPmi) -> (Vec<PmiItem<FaceRef>>, PmiImport) {
         let mut report = PmiImport::default();
         for skipped in &read.skipped {
             report.left_out.push((format!("{} {}", skipped.kind, skipped.entity), skipped.reason.clone()));
         }
         let mut items = Vec::new();
-        let is_import = self.feature(feature).is_some_and(|f| matches!(f.kind, FeatureKind::ImportStep(_)));
+        let is_import = !features.is_empty()
+            && features
+                .iter()
+                .all(|id| self.feature(*id).is_some_and(|f| matches!(f.kind, FeatureKind::ImportStep(_))));
         let body = self.body();
         let topology = body.and_then(|body| self.view_of(body).ok());
         let (true, Some(topology)) = (is_import, topology) else {
@@ -205,7 +208,7 @@ impl Document {
         let face_of = |key: &str| -> Option<FaceId> {
             let mut found = topology.faces.iter().filter(|face| {
                 face.origins.iter().any(|origin| {
-                    crate::feature_of_tag(origin.tag.as_str()) == Some(feature)
+                    crate::feature_of_tag(origin.tag.as_str()).is_some_and(|id| features.contains(&id))
                         && matches!(&origin.role, FaceRole::Imported { key: k } if k == key)
                 })
             });

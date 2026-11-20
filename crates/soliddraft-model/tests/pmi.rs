@@ -195,7 +195,7 @@ fn step_carries_the_items_to_another_part_and_back_onto_the_same_faces() {
         add(&mut other, FeatureKind::ImportStep(ImportStepFeature::new("block.step", step.text.clone().into_bytes())));
     let read = other.kernel().read_step_pmi(step.text.as_bytes()).unwrap();
     assert_eq!(read.skipped, Vec::new());
-    let (items, report) = other.pmi_from_step(import, &read);
+    let (items, report) = other.pmi_from_step(&[import], &read);
     assert_eq!(report.left_out, Vec::new());
     assert_eq!(report.added, ["Datum A", "Datum B", "Bore diameter", "Bore position", "Bore finish", "Thickness"]);
     for item in items {

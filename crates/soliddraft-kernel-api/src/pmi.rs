@@ -361,6 +361,25 @@ impl Limits {
         }
     }
 
+    /// Reads limits as people type them: a tolerance class (`H7`), a symmetric
+    /// deviation (`±0.1`, `+-0.1`) or an upper and a lower one (`+0.1/0`, `+0.2/-0.1`).
+    pub fn parse(text: &str) -> Option<Limits> {
+        let text = text.trim();
+        if let Some(fit) = Limits::fit(text) {
+            return Some(fit);
+        }
+        let symmetric =
+            text.strip_prefix('\u{b1}').or_else(|| text.strip_prefix("+-")).or_else(|| text.strip_prefix("+/-"));
+        if let Some(value) = symmetric {
+            let upper = Decimal::parse(value)?;
+            let lower = Decimal::parse(&format!("-{}", upper.as_str()))?;
+            return upper.is_positive().then_some(Limits::Deviations { upper, lower });
+        }
+        let (upper, lower) = text.split_once('/')?;
+        let (upper, lower) = (Decimal::parse(upper)?, Decimal::parse(lower)?);
+        (upper.value() > lower.value()).then_some(Limits::Deviations { upper, lower })
+    }
+
     /// Reads a tolerance class such as `H7` or `js6`.
     pub fn fit(class: &str) -> Option<Limits> {
         let class = class.trim();
@@ -777,6 +796,13 @@ mod tests {
         assert!(Limits::fit("7H").is_none());
         assert_eq!(Limits::Deviations { upper: d("0.1"), lower: d("-0.1") }.suffix(), " \u{b1}0.1");
         assert_eq!(Limits::Deviations { upper: d("0.1"), lower: d("0") }.suffix(), " +0.1/0");
+        for text in ["H7", "\u{b1}0.1", "+-0.1", "+0.1/0", "+0.2/-0.1", "0/-0.1"] {
+            let limits = Limits::parse(text).unwrap_or_else(|| panic!("{text} reads as limits"));
+            assert_eq!(Limits::parse(limits.suffix().trim()), Some(limits), "{text}");
+        }
+        for text in ["", "0.1", "-0.1/+0.1", "\u{b1}0", "H"] {
+            assert!(Limits::parse(text).is_none(), "{text}");
+        }
     }
 
     #[test]

@@ -86,8 +86,28 @@ enum Shape {
 /// The body's faces, with the round edges that give a cylinder its axis.
 struct Body<'a> {
     faces: HashMap<FaceId, FaceInfo>,
+    /// The round edges of the cylinder faces: centre, unit axis and radius.
+    rounds: HashMap<EdgeId, (Vec3, Vec3, f64)>,
     index: &'a PartIndex<'a>,
     tol: f64,
+}
+
+/// A round edge's centre, unit axis and radius. The kernel gives most as a circle or an
+/// arc; one it gives as a spline is read through the kernel's own lines and arcs.
+fn round_of(part: &Part, curve: &Curve3) -> Option<(Vec3, Vec3, f64)> {
+    let read = |curve: &Curve3| match curve {
+        Curve3::Circle { center, normal, radius } | Curve3::Arc { center, normal, radius, .. } => {
+            Some((*center, normal.normalized()?, *radius))
+        }
+        _ => None,
+    };
+    if matches!(curve, Curve3::Line { .. }) {
+        return None;
+    }
+    read(curve).or_else(|| match part.kernel.lines_and_arcs(curve, 1e-6).ok()?.as_slice() {
+        [one] => read(one),
+        _ => None,
+    })
 }
 
 impl Body<'_> {
@@ -96,11 +116,9 @@ impl Body<'_> {
         let info = self.faces.get(&face)?;
         match info.surface {
             SurfaceKind::Plane => Some(Shape::Plane { point: info.centroid, normal: info.normal?.normalized()? }),
-            SurfaceKind::Cylinder => info.edges.iter().find_map(|edge| match self.index.edge_curve(*edge)? {
-                Curve3::Circle { center, normal, radius } | Curve3::Arc { center, normal, radius, .. } => {
-                    Some(Shape::Round { centre: *center, axis: normal.normalized()?, radius: *radius })
-                }
-                _ => None,
+            SurfaceKind::Cylinder => info.edges.iter().find_map(|edge| {
+                let (centre, axis, radius) = *self.rounds.get(edge)?;
+                Some(Shape::Round { centre, axis, radius })
             }),
             _ => None,
         }
@@ -118,17 +136,13 @@ impl Body<'_> {
         let mut best: Option<((bool, f64), EdgeId, Vec3)> = None;
         for face in feature {
             for edge in &self.faces.get(face)?.edges {
-                let (Curve3::Circle { center, normal, .. } | Curve3::Arc { center, normal, .. }) =
-                    self.index.edge_curve(*edge)?
-                else {
-                    continue;
-                };
+                let Some((centre, normal, _)) = self.rounds.get(edge).copied() else { continue };
                 if normal.cross(axis).length() > 1e-6 {
                     continue;
                 }
-                let key = (visible_in(view, *edge), view.xf.frame.depth(*center));
+                let key = (visible_in(view, *edge), view.xf.frame.depth(centre));
                 if best.as_ref().is_none_or(|(k, _, _)| (key.0, key.1) > (k.0, k.1 + self.tol)) {
-                    best = Some((key, *edge, *center));
+                    best = Some((key, *edge, centre));
                 }
             }
         }
@@ -840,8 +854,18 @@ pub fn import(
         .filter(|v| !v.pictorial)
         .filter(|v| drawing.view(v.id).is_some_and(|view| !matches!(view.kind, crate::ViewKind::Section { .. })))
         .collect();
+    let mut rounds = HashMap::new();
+    for face in topology.faces.iter().filter(|f| f.surface == SurfaceKind::Cylinder) {
+        for edge in &face.edges {
+            if !rounds.contains_key(edge)
+                && let Some(round) = index.edge_curve(*edge).and_then(|curve| round_of(part, curve))
+            {
+                rounds.insert(*edge, round);
+            }
+        }
+    }
     let mut planner = Planner {
-        body: Body { faces: topology.faces.into_iter().map(|f| (f.id, f)).collect(), index, tol: 1e-6 * size },
+        body: Body { faces: topology.faces.into_iter().map(|f| (f.id, f)).collect(), rounds, index, tol: 1e-6 * size },
         bbox: candidates.iter().filter_map(|v| Some((v.id, drawing.view(v.id)?.geometry.bbox))).collect(),
         views: candidates,
         plans: Vec::new(),

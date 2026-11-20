@@ -122,6 +122,107 @@ fn look(app: &mut App, look: Look) {
     settle(app);
 }
 
+/// The standard views, then the part turned to yaws and pitches in degrees.
+fn ways() -> impl Iterator<Item = Look> {
+    let turned = [-90.0_f32, 90.0, -45.0, -135.0, 45.0, 135.0, 0.0, 180.0]
+        .into_iter()
+        .flat_map(|yaw| [-25.0_f32, 25.0].map(|pitch| Look::Turned(yaw, pitch)));
+    VIEWS.into_iter().map(Look::View).chain(turned)
+}
+
+/// The display mesh's triangles with the pick id of each one's face.
+fn triangles(app: &App) -> Vec<([Vec3; 3], u32)> {
+    let doc = &app.state().state.doc;
+    doc.meshes
+        .values()
+        .flat_map(|mesh| {
+            mesh.indices.chunks_exact(3).map(|tri| {
+                ([tri[0], tri[1], tri[2]].map(|i| mesh.positions[i as usize]), mesh.face_picks[tri[0] as usize])
+            })
+        })
+        .collect()
+}
+
+/// The pick id of the nearest triangle the ray meets, and how far along it is.
+fn first_hit(triangles: &[([Vec3; 3], u32)], origin: Vec3, along: Vec3) -> Option<(f32, u32)> {
+    triangles
+        .iter()
+        .filter_map(|([a, b, c], pick)| hit(origin, along, *a, *b, *c).map(|t| (t, *pick)))
+        .min_by(|x, y| x.0.total_cmp(&y.0))
+}
+
+/// Turns of the part from which nothing hides `world` on `face`, nearest the face's
+/// outward normal there first.
+fn sightlines(app: &App, face: FaceId, world: Vec3) -> Vec<Look> {
+    let Some(pick) = app.state().state.doc.pick_of_face(face) else {
+        return Vec::new();
+    };
+    let triangles = triangles(app);
+    let normal = triangles
+        .iter()
+        .filter(|(_, p)| *p == pick)
+        .min_by(|(x, _), (y, _)| {
+            let centre = |t: &[Vec3; 3]| (t[0] + t[1] + t[2]) / 3.0;
+            centre(x).distance(world).total_cmp(&centre(y).distance(world))
+        })
+        .map(|([a, b, c], _)| (*b - *a).cross(*c - *a).normalize_or_zero());
+    let Some(normal) = normal else {
+        return Vec::new();
+    };
+    let mut ways: Vec<(f32, f32, f32)> = (0..24)
+        .flat_map(|yaw| (-5..=5).map(move |pitch| (yaw as f32 * 15.0, pitch as f32 * 15.0)))
+        .map(|(yaw, pitch)| {
+            let (y, p) = (yaw.to_radians(), pitch.to_radians());
+            let from = Vec3::new(p.cos() * y.cos(), p.cos() * y.sin(), p.sin());
+            (from.dot(normal), yaw, pitch)
+        })
+        .filter(|(facing, _, _)| *facing > 0.15)
+        .collect();
+    ways.sort_by(|x, y| y.0.total_cmp(&x.0));
+    ways.into_iter()
+        .filter(|(_, yaw, pitch)| {
+            let (y, p) = (yaw.to_radians(), pitch.to_radians());
+            let from = Vec3::new(p.cos() * y.cos(), p.cos() * y.sin(), p.sin());
+            let reach = 1000.0;
+            first_hit(&triangles, world + from * reach, -from)
+                .is_some_and(|(t, hit)| hit == pick && (t - reach).abs() < 0.5)
+        })
+        .map(|(_, yaw, pitch)| Look::Turned(yaw, pitch))
+        .take(3)
+        .collect()
+}
+
+/// Whether `world` is on screen and the display mesh's nearest triangle under it, along
+/// the camera's ray, belongs to `face`.
+fn shown(app: &App, face: FaceId, world: Vec3) -> bool {
+    let state = &app.state().state;
+    let (camera, rect) = (&state.viewport.camera, state.viewport.rect);
+    let Some(at) = camera.project(world, rect).filter(|at| rect.shrink(4.0).contains(*at)) else {
+        return false;
+    };
+    let Some(pick) = state.doc.pick_of_face(face) else {
+        return false;
+    };
+    let (origin, along) = camera.ray(at, rect);
+    first_hit(&triangles(app), origin, along).is_some_and(|(_, hit)| hit == pick)
+}
+
+/// Möller-Trumbore: the distance along the ray to the triangle, if it is hit.
+fn hit(origin: Vec3, along: Vec3, a: Vec3, b: Vec3, c: Vec3) -> Option<f32> {
+    let (ab, ac) = (b - a, c - a);
+    let p = along.cross(ac);
+    let det = ab.dot(p);
+    if det.abs() < 1e-12 {
+        return None;
+    }
+    let s = origin - a;
+    let u = s.dot(p) / det;
+    let q = s.cross(ab);
+    let v = along.dot(q) / det;
+    let t = ac.dot(q) / det;
+    (u >= 0.0 && v >= 0.0 && u + v <= 1.0 && t > 0.0).then_some(t)
+}
+
 /// Clicks a point of the part if it is on screen, and says whether that selected `face`.
 fn try_point(app: &mut App, face: FaceId, world: Vec3) -> Option<(Pos2, bool)> {
     // Nothing selected: a selection shows its feature's dimensions over the part, and a
@@ -150,13 +251,24 @@ fn find(app: &mut App, target: &Target) -> Pos2 {
             return at;
         }
     }
-    // The standard views, then the part turned by hand to look into what they hide,
-    // such as the underside of a slot.
-    let turned = [-90.0_f32, 90.0, -45.0, -135.0, 45.0, 135.0, 0.0, 180.0]
-        .into_iter()
-        .flat_map(|yaw| [-25.0_f32, 25.0].map(|pitch| Look::Turned(yaw, pitch)));
+    // Directly: for a point of the face, a direction the display mesh shows it from,
+    // turned to and clicked once.
+    for &world in &target.points {
+        for way in sightlines(app, target.face, world) {
+            look(app, way);
+            if !shown(app, target.face, world) {
+                continue;
+            }
+            if let Some((at, true)) = try_point(app, target.face, world) {
+                FOUND.with(|found| found.borrow_mut().insert(target.face, (way, world)));
+                return at;
+            }
+        }
+    }
+    // Should that miss: the standard views, then the part turned by hand to look into
+    // what they hide, such as the underside of a slot, clicking every point.
     let mut seen = Vec::new();
-    for way in VIEWS.into_iter().map(Look::View).chain(turned) {
+    for way in ways() {
         look(app, way);
         for world in &target.points {
             match try_point(app, target.face, *world) {

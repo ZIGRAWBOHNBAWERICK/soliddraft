@@ -157,7 +157,6 @@ pub fn update_from_model(drawing: &mut Drawing, part: &Part) -> Result<UpdateRep
     let made_from_part = drawing.sheets.iter().position(|sheet| sheet.annotations.iter().any(|a| a.source.is_some()));
     if let Some(sheet) = made_from_part {
         crate::pmi_items::refresh(drawing, part);
-        crate::pmi_items::place_notes(drawing, sheet, part);
         let views: Vec<ViewContext> = drawing.sheets[sheet]
             .views
             .iter()
@@ -165,6 +164,7 @@ pub fn update_from_model(drawing: &mut Drawing, part: &Part) -> Result<UpdateRep
             .filter_map(|v| contexts.get(&v.id).cloned())
             .collect();
         crate::pmi_items::import(drawing, sheet, part, &index, &views)?;
+        crate::pmi_items::place_notes(drawing, sheet, part);
     }
     collect(drawing, &mut report);
     drawing.accept_source(part);

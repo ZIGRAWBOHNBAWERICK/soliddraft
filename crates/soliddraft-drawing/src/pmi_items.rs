@@ -581,8 +581,9 @@ impl Planner<'_> {
                 let Shape::Round { axis, radius, .. } = self.body.feature(&ends[0])? else {
                     return Err("a slot needs round ends".into());
                 };
-                // The end the callout's leader reaches: the one on the side it leans to.
-                let (view, edge, _, centre, placement, dir) = self.callout(&[ends[1].as_slice()], axis, radius)?;
+                // The leader reaches the end on the side callouts go, so it lands on the round.
+                let (view, edge, _, centre, placement, dir) =
+                    self.callout(&[ends[0].as_slice(), ends[1].as_slice()], axis, radius)?;
                 let scale = self.views.iter().find(|v| v.id == view).map_or(1.0, |v| v.xf.scale);
                 let on = Point2::new(centre.u + dir.u * radius * scale, centre.v + dir.v * radius * scale);
                 let at = self.views.iter().find(|v| v.id == view).map(|v| v.xf.unproject(on));
@@ -818,7 +819,25 @@ pub fn place_notes(drawing: &mut Drawing, sheet: usize, part: &Part) {
         state: AnnotationState::Ok,
         source: Some(PmiSource::Notes),
     };
+    let id = annotation.id;
     drawing.sheets[sheet].annotations.push(annotation);
+    // Along the bottom of the drawing area until it is clear of what is there.
+    let others: Vec<AnnotationId> =
+        drawing.sheets[sheet].annotations.iter().map(|a| a.id).filter(|a| *a != id).collect();
+    let planned = places(drawing, &[id]);
+    for _ in 0..MOVES {
+        let laid = lay(drawing, sheet);
+        if laid.clash(&[id], &others).is_none() {
+            return;
+        }
+        if laid.off_frame(&[id]) {
+            break;
+        }
+        if let Some(a) = drawing.annotation_mut(id) {
+            a.placement = Point2::new(round(a.placement.u + 5.0), a.placement.v);
+        }
+    }
+    put(drawing, &[id], &planned);
 }
 
 /// Brings every annotation made from the part's items up to the part as it is now: its
@@ -1088,7 +1107,8 @@ struct Laid {
     lines: BTreeMap<AnnotationId, Vec<(f64, f64)>>,
     /// Points along everything else on the sheet: views, the sheet format, tables.
     fixed: Vec<(f64, f64)>,
-    paper: (f64, f64),
+    /// The drawing frame inside its zone band: left, bottom, right, top.
+    frame: [f64; 4],
 }
 
 fn points_of(path: &kurbo::BezPath, out: &mut Vec<(f64, f64)>) {
@@ -1126,7 +1146,12 @@ fn text_box(text: &display::TextItem) -> Rect {
 
 fn lay(drawing: &Drawing, sheet: usize) -> Laid {
     let list = display::layout_sheet(drawing, sheet);
-    let mut laid = Laid { texts: BTreeMap::new(), lines: BTreeMap::new(), fixed: Vec::new(), paper: list.paper };
+    let frame = drawing.sheets.get(sheet).map_or([0.0, 0.0, list.paper.0, list.paper.1], |page| {
+        let template = crate::library::template(page.template.as_str());
+        let ([l, b, r, t], band) = (template.frame(), template.zones.band);
+        [l + band, b + band, r - band, t - band]
+    });
+    let mut laid = Laid { texts: BTreeMap::new(), lines: BTreeMap::new(), fixed: Vec::new(), frame };
     for item in list.printable() {
         match (item.owner(), item) {
             (Owner::Annotation(id) | Owner::AnnotationEnd(id, _), Item::Text(text)) => {
@@ -1173,23 +1198,20 @@ fn lay(drawing: &Drawing, sheet: usize) -> Laid {
 }
 
 impl Laid {
-    /// True when a text of `group` reaches beyond the paper.
-    fn off_paper(&self, group: &[AnnotationId]) -> bool {
-        group
-            .iter()
-            .filter_map(|id| self.texts.get(id))
-            .flatten()
-            .any(|b| b.x0 < 0.0 || b.y0 < 0.0 || b.x1 > self.paper.0 || b.y1 > self.paper.1)
+    /// True when a text of `group` reaches beyond the drawing frame.
+    fn off_frame(&self, group: &[AnnotationId]) -> bool {
+        let [l, b, r, t] = self.frame;
+        group.iter().filter_map(|id| self.texts.get(id)).flatten().any(|x| x.x0 < l || x.y0 < b || x.x1 > r || x.y1 > t)
     }
 
     /// What the texts of `group` lie over, or that lies over them: another annotation
     /// among `others`, or something fixed on the sheet.
     fn clash(&self, group: &[AnnotationId], others: &[AnnotationId]) -> Option<Option<AnnotationId>> {
         let boxes: Vec<&Rect> = group.iter().filter_map(|id| self.texts.get(id)).flatten().collect();
+        if self.off_frame(group) {
+            return Some(None);
+        }
         for b in &boxes {
-            if b.x0 < 0.0 || b.y0 < 0.0 || b.x1 > self.paper.0 || b.y1 > self.paper.1 {
-                return Some(None);
-            }
             if self.fixed.iter().any(|p| b.holds(*p)) {
                 return Some(None);
             }
@@ -1229,35 +1251,55 @@ fn settle(drawing: &mut Drawing, sheet: usize, made: &[Made]) {
     for lead in order.filter(|m| !m.hosted) {
         let group: Vec<AnnotationId> =
             std::iter::once(lead.id).chain(made.iter().filter(|m| m.host == Some(lead.id)).map(|m| m.id)).collect();
-        let planned: Vec<Option<Point2>> =
-            group.iter().map(|id| drawing.annotation(*id).map(|a| a.placement)).collect();
-        let mut clear = false;
-        for _ in 0..MOVES {
-            let laid = lay(drawing, sheet);
-            if laid.off_paper(&group) {
-                break;
-            }
-            if laid.clash(&group, &settled).is_none() {
-                clear = true;
-                break;
-            }
-            for member in &group {
-                if let Some(a) = drawing.annotation_mut(*member) {
-                    a.placement = Point2::new(
-                        round(a.placement.u + lead.slide.along.u * lead.slide.step),
-                        round(a.placement.v + lead.slide.along.v * lead.slide.step),
-                    );
+        let planned = places(drawing, &group);
+        // A stacked dimension moves out along its stack. A callout or a symbol moves
+        // along its leader or, when that leads nowhere, straight across or straight up;
+        // the way that needs the fewest steps wins.
+        let along = lead.slide.along;
+        let mut ways = vec![along];
+        if !lead.stacked && along.u.abs() > 1e-9 && along.v.abs() > 1e-9 {
+            ways.push(Point2::new(along.u.signum(), 0.0));
+            ways.push(Point2::new(0.0, along.v.signum()));
+        }
+        let mut best: Option<(usize, Vec<Option<Point2>>)> = None;
+        for way in ways {
+            put(drawing, &group, &planned);
+            for moves in 0..MOVES {
+                if best.as_ref().is_some_and(|(fewest, _)| moves >= *fewest) {
+                    break;
+                }
+                let laid = lay(drawing, sheet);
+                if laid.clash(&group, &settled).is_none() {
+                    best = Some((moves, places(drawing, &group)));
+                    break;
+                }
+                if laid.off_frame(&group) && moves > 0 {
+                    break;
+                }
+                for member in &group {
+                    if let Some(a) = drawing.annotation_mut(*member) {
+                        a.placement = Point2::new(
+                            round(a.placement.u + way.u * lead.slide.step),
+                            round(a.placement.v + way.v * lead.slide.step),
+                        );
+                    }
                 }
             }
         }
-        if !clear {
-            for (member, at) in group.iter().zip(&planned) {
-                if let (Some(a), Some(at)) = (drawing.annotation_mut(*member), at) {
-                    a.placement = *at;
-                }
-            }
-        }
+        put(drawing, &group, best.as_ref().map_or(&planned, |(_, at)| at));
         settled.extend(group);
+    }
+}
+
+fn places(drawing: &Drawing, group: &[AnnotationId]) -> Vec<Option<Point2>> {
+    group.iter().map(|id| drawing.annotation(*id).map(|a| a.placement)).collect()
+}
+
+fn put(drawing: &mut Drawing, group: &[AnnotationId], at: &[Option<Point2>]) {
+    for (member, at) in group.iter().zip(at) {
+        if let (Some(a), Some(at)) = (drawing.annotation_mut(*member), at) {
+            a.placement = *at;
+        }
     }
 }
 

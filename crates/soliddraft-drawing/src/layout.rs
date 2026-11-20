@@ -71,6 +71,9 @@ pub struct MadeDrawing {
 /// for dimensions.
 const VIEW_GAP: f64 = 30.0;
 const GRID_MARGIN: f64 = 25.0;
+/// Room added left of the views when the part's manufacturing information comes in, for
+/// the dimensions stacked there.
+const REQUIREMENTS_MARGIN: f64 = 20.0;
 /// Room left between a view and the section cut from it, beyond what views keep, for
 /// the callouts of the view.
 const SECTION_ROOM: f64 = 45.0;
@@ -131,6 +134,8 @@ pub fn make_drawing(part: &Part, new: &NewDrawing) -> Result<MadeDrawing, Drawin
         curves.push(project::view_curves(part, &ViewSpec::standard(*v))?);
     }
     let extent = |c: &ViewCurves| (c.bbox_2d[2] - c.bbox_2d[0], c.bbox_2d[3] - c.bbox_2d[1]);
+    // Stacked dimensions go on the outer sides of the views, and the left is one.
+    let left = if new.requirements { GRID_MARGIN + REQUIREMENTS_MARGIN } else { GRID_MARGIN };
 
     // The grid of orthographic views around the base view.
     let cell = |fold: Option<FoldDirection>, i: usize| -> Option<(i32, i32)> {
@@ -155,7 +160,7 @@ pub fn make_drawing(part: &Part, new: &NewDrawing) -> Result<MadeDrawing, Drawin
     let used = |sizes: &[f64; 3]| sizes.iter().filter(|s| **s > 0.0).count().max(1) as f64;
     let grid = |s: f64| {
         (
-            s * col_w.iter().sum::<f64>() + VIEW_GAP * (used(&col_w) - 1.0) + 2.0 * GRID_MARGIN,
+            s * col_w.iter().sum::<f64>() + VIEW_GAP * (used(&col_w) - 1.0) + GRID_MARGIN + left,
             s * row_h.iter().sum::<f64>() + VIEW_GAP * (used(&row_h) - 1.0) + 2.0 * GRID_MARGIN,
         )
     };
@@ -185,7 +190,7 @@ pub fn make_drawing(part: &Part, new: &NewDrawing) -> Result<MadeDrawing, Drawin
         }
         let edges = |sizes: &[f64; 3], start: f64, sign: f64| {
             let mut out = [(0.0, 0.0); 3];
-            let mut at = start + sign * GRID_MARGIN;
+            let mut at = start + sign * if sign > 0.0 { left } else { GRID_MARGIN };
             for (i, size) in sizes.iter().enumerate() {
                 if *size > 0.0 {
                     let end = at + sign * s * size;
@@ -217,7 +222,7 @@ pub fn make_drawing(part: &Part, new: &NewDrawing) -> Result<MadeDrawing, Drawin
     // Cell centres, from the grid's top-left corner.
     let (grid_w, _) = grid(s);
     let mut col_x = [0.0; 3];
-    let mut x = area.x0 + GRID_MARGIN;
+    let mut x = area.x0 + left;
     for c in 0..3 {
         if col_w[c] > 0.0 {
             col_x[c] = x + s * col_w[c] / 2.0;
@@ -333,8 +338,9 @@ pub fn make_drawing(part: &Part, new: &NewDrawing) -> Result<MadeDrawing, Drawin
             projections.push((view.0.id, view.1.projected));
             crate::apply(&mut drawing, &crate::Command::PlaceView { sheet: 0, view: view.0 })?;
         }
+        let report = pmi_items::import(&mut drawing, 0, part, &index, &contexts)?;
         pmi_items::place_notes(&mut drawing, 0, part);
-        pmi_items::import(&mut drawing, 0, part, &index, &contexts)?
+        report
     } else {
         PmiReport::default()
     };

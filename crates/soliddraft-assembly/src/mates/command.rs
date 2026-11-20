@@ -237,7 +237,14 @@ impl AssemblyDocument {
                 free: solved.status.free,
                 ..MateRefusal::new(
                     RefusalCode::UnderConstrained,
-                    format!("{} freedoms would remain: {}", solved.status.remaining_dof, free.join(", ")),
+                    format!(
+                        "{} would remain: {}",
+                        match solved.status.remaining_dof {
+                            1 => "1 freedom".to_owned(),
+                            n => format!("{n} freedoms"),
+                        },
+                        free.join(", ")
+                    ),
                 )
             });
         }

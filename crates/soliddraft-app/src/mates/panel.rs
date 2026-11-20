@@ -850,7 +850,10 @@ fn details(ui: &mut egui::Ui, state: &mut AppState) {
     ui.label(match solver["state"].as_str() {
         Some("solved") => "Fully constrained".to_owned(),
         Some("error") => "The mates cannot be solved".to_owned(),
-        _ => format!("{} freedoms remain", solver["remaining_dof"]),
+        _ => match solver["remaining_dof"].as_u64() {
+            Some(1) => "1 freedom remains".to_owned(),
+            _ => format!("{} freedoms remain", solver["remaining_dof"]),
+        },
     });
     for w in warnings {
         ui.colored_label(theme::error(), w);
@@ -899,7 +902,7 @@ fn conflicts(ui: &mut egui::Ui, c: &MateRefusal, mates: &serde_json::Value, acti
         });
     }
     if let Some(dof) = c.remaining_dof {
-        ui.label(format!("{dof} freedoms would remain"));
+        ui.label(if dof == 1 { "1 freedom would remain".to_owned() } else { format!("{dof} freedoms would remain") });
     }
     for m in &c.free {
         ui.label(m.describe());

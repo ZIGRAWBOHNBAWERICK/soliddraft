@@ -47,7 +47,7 @@ const extra = (process.env.CHROME_ARGS || '').split(/\s+/).filter(Boolean);
 const loaded = shown => shown.open && !shown.opening && !shown.loading;
 const parts = shown => shown.components.map(c => c.label.replace(/<.*/, ''));
 function placements(shown) { return shown.components.map(c => [c.translation, c.rotation]); }
-function near(a, b) { return a.flat().every((x, i) => Math.abs(x - b.flat()[i]) < 1e-6); }
+function near(a, b) { const [p, q] = [a.flat(2), b.flat(2)]; return p.length === q.length && p.every((x, i) => Math.abs(x - q[i]) < 1e-6); }
 
 class Browser {
   constructor(profile) {
@@ -140,6 +140,17 @@ class Browser {
         await sleep(80);
         await call('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', buttons: 0, clickCount: 1 });
         await v.settle(600);
+      },
+      // A click on a face in the viewport. The pointer rests on it first, so the id
+      // buffer read back around it is current, and the press and release go together:
+      // a software renderer can take a second a frame, and a press held across frames
+      // reads as the start of a drag.
+      async pick([x, y]) {
+        await call('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y });
+        await v.settle(1500);
+        await call('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount: 1 });
+        await call('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', buttons: 0, clickCount: 1 });
+        await v.settle(1000);
       },
       async key(key, code, keyCode, modifiers = 0, text) {
         const base = { key, code, windowsVirtualKeyCode: keyCode, nativeVirtualKeyCode: keyCode, modifiers };
@@ -274,11 +285,11 @@ async function main() {
   const [first, , second] = shown.components.map(c => c.translation);
   await v.command('Top');
   await v.command('Fit');
-  await v.click(await v.screen(first[0], first[1], first[2] + FLOOR));
+  await v.pick(await v.screen(first[0], first[1], first[2] + FLOOR));
   shown = await v.assembly('first pick', s => s.mate_panel.a);
   await v.command('Bottom');
   await v.command('Fit');
-  await v.click(await v.screen(second[0], second[1], second[2]));
+  await v.pick(await v.screen(second[0], second[1], second[2]));
   shown = await v.assembly('second pick', s => s.mate_panel.b);
   check(shown.mate_panel.a.component !== shown.mate_panel.b.component, `both picks are on one component: ${JSON.stringify(shown.mate_panel)}`);
   await v.shot('2-picked');

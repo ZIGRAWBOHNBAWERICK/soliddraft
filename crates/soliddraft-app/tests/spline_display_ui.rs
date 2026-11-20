@@ -69,9 +69,8 @@ fn check_display(name: &str, source: &str, bounded: bool) {
                 assert!(mesh.unproved && bound.measured_mm <= 0.01);
                 assert!(!bound.method.is_empty() && !bound.definition.is_empty());
                 assert!(!app.state().state.doc.meshes.is_empty(), "the bounded fillet is visible");
-                assert_eq!(app.state().state.edit_status().unwrap().0, soliddraft_app::document::WITHIN_BOUND_LABEL);
-                assert!(app.query_all_by_label("Fillet1 proof: Answered within a stated bound").next().is_some());
-                assert!(app.query_all_by_label("Fillet1 proof: Proved").next().is_none());
+                assert!(app.state().state.edit_status().is_none());
+                assert!(app.query_all_by_label_contains("Fillet1 status:").next().is_none());
             } else {
                 // The class and its report are fixed; the work spent before the allowance
                 // runs out moves with the kernel, so the chip must show what was measured.

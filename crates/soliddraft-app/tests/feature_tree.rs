@@ -379,13 +379,18 @@ fn a_sketch_between_a_feature_and_its_sketch_drops_below_the_feature() {
 }
 
 #[test]
-fn rows_carry_the_proof_mark_with_its_reason() {
+fn rows_mark_only_unfinished_features_with_their_reason() {
     let case = ribbon::case("tree-proof");
     let mut app = ribbon::app(ribbon::plate());
     ribbon::until(&mut app, "the plate proof", |app| !app.state().state.doc.proof_pending());
     app.run_steps(8);
     case.run(&mut app, |app| {
-        let badge = app.get_by_label("Boss-Extrude1 proof: Proved").rect();
+        // A built feature has no mark.
+        assert!(app.query_all_by_label_contains("Boss-Extrude1 status:").next().is_none());
+        let id = app.state().state.doc.features[0].id;
+        app.state_mut().state.push(AppAction::EditFeature(id));
+        app.run_steps(8);
+        let badge = app.get_by_label("Boss-Extrude1 status: Working").rect();
         let feature = row(app, "Boss-Extrude1");
         assert!(feature.contains_rect(badge), "the mark sits in the feature's row");
         let summary =
@@ -394,8 +399,11 @@ fn rows_carry_the_proof_mark_with_its_reason() {
         app.hover_at(badge.center());
         app.run_steps(90);
         let text = ribbon::painted(app).into_iter().map(|p| p.text).collect::<Vec<_>>().join("\n");
-        assert!(text.contains("Proved: The current feature is proved."), "hover gives the reason: {text}");
-        case.frame(app, "proved");
+        assert!(text.contains("Working: Finish or cancel this feature edit."), "hover gives the reason: {text}");
+        case.frame(app, "working");
+        app.key_press(Key::Escape);
+        app.run_steps(8);
+        assert!(app.query_all_by_label_contains("Boss-Extrude1 status:").next().is_none());
     });
 }
 

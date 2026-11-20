@@ -406,7 +406,7 @@ impl DragPreview {
         if let Shown::Failed { value, message } = &self.shown {
             return (format!("Edit failed · {} {} mm: {message}", self.dimension().label(), fmt_mm(*value)), true);
         }
-        let phase = if self.pending() { "Proof pending" } else { "Preview" };
+        let phase = if self.pending() { "Working" } else { "Preview" };
         let mut label = format!("{phase} · {} {} mm", self.dimension().label(), fmt_mm(self.value));
         if let Some(notice) = &self.notice {
             label.push_str(&format!(" · {notice}"));

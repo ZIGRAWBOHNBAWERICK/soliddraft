@@ -2123,10 +2123,7 @@ impl Document {
             return Some((message, true));
         }
         if self.proof_pending() {
-            return Some(("Proof pending", false));
-        }
-        if self.proof_state().answered_within_bound {
-            return Some((WITHIN_BOUND_LABEL, false));
+            return Some(("Working", false));
         }
         self.display_failure
             .as_deref()
@@ -4757,7 +4754,7 @@ impl Document {
             return Some(EntityInfo {
                 title: label.into(),
                 feature: Some(feature),
-                details: vec![("State".into(), "Revision-bound preview · proof pending".into())],
+                details: vec![("State".into(), "Revision-bound preview · working".into())],
             });
         }
         match sel {
@@ -4983,7 +4980,7 @@ impl Document {
                     }
                     FeatureStatus::Inactive => details.push(("State".to_owned(), "Rolled back".to_owned())),
                     FeatureStatus::Ok => {}
-                    FeatureStatus::Pending => details.push(("State".into(), "Proof pending".into())),
+                    FeatureStatus::Pending => details.push(("State".into(), "Working".into())),
                     FeatureStatus::AnsweredWithinBound(bound) => {
                         details.push((WITHIN_BOUND_LABEL.into(), bound.description()))
                     }

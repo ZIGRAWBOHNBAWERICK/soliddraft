@@ -61,7 +61,6 @@ pub struct Palette {
     pub selection_ink: Color32,
     pub hover: Color32,
     pub ok: Color32,
-    pub bounded: Color32,
     pub warn: Color32,
     pub error: Color32,
     /// Notice fills behind warn and error text.
@@ -141,7 +140,6 @@ pub mod edit_suite {
         selection_ink: rgb(0xf5, 0xa5, 0x24),
         hover: POPUP_HOVER,
         ok: rgb(0x63, 0xd6, 0x8f),
-        bounded: rgb(0xd2, 0xa0, 0xff),
         warn: rgb(0xf5, 0xa5, 0x24),
         error: rgb(0xff, 0xb4, 0xad),
         warn_soft: rgba(245, 165, 36, 51),
@@ -252,9 +250,6 @@ pub fn hover() -> Color32 {
 }
 pub fn ok() -> Color32 {
     palette().ok
-}
-pub fn bounded() -> Color32 {
-    palette().bounded
 }
 pub fn warn() -> Color32 {
     palette().warn

@@ -39,8 +39,8 @@ Catallax refuses profiles it cannot verify as a solid without crossing or foldin
 The editor explains the refusal and keeps the existing part.
 
 Spline displays try certification first.
-When the native result instead meets its preset measured display rule, the proof light says "Answered within a stated bound".
-Its tooltip records the 0.01 mm limit, measured surface deviation and measurement method against the retained boundary.
+When the native result instead meets its preset measured display rule, the feature shows no status mark.
+Its Details row "Answered within a stated bound" records the 0.01 mm limit, measured surface deviation and measurement method against the retained boundary.
 This display result remains separate from the exact part's proof and from certified exports.
 A deviation above the limit or a request that cannot finish within its work allowance still refuses and retains the part.
 

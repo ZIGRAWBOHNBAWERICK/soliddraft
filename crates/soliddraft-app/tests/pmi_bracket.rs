@@ -310,5 +310,19 @@ fn the_bracket_carries_its_manufacturing_information_through_step_and_a_bore_edi
     assert_eq!(*nominal, Some(10.0));
     assert_eq!(bore.callout(&[10.0]), "\u{d8}10 H7");
     assert!(read.pmi.item("Bore position").is_some());
+
+    // A later feature on top: a fifth hole through the plate. Every item stays on its
+    // faces, and the file carries all of them.
+    call(
+        &mut first,
+        "sketch",
+        json!({"plane": "top", "offset": -1, "shapes": [{"shape": "circle", "center": [30, 36, -1], "diameter": 3}]}),
+    );
+    call(&mut first, "cut", json!({"sketch": "Sketch18", "depth": 7, "through_all": false, "flip": true}));
+    assert_eq!(callouts(&mut first), expected("10"));
+    let later = dir.join("p1-bracket-pmi-later-feature.step");
+    assert_eq!(export(&mut first, &later)["manufacturing_information"], json!({"items": 14}));
+    let read = first.doc.kernel().read_step_pmi(&std::fs::read(&later).unwrap()).unwrap();
+    assert_eq!((read.pmi.items.len(), read.skipped.len()), (24, 0));
     let _ = std::fs::remove_dir_all(&scratch);
 }

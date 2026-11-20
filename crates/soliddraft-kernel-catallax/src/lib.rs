@@ -2541,6 +2541,64 @@ mod tests {
         assert!(limiting_supports("a; limiting contact supports not json; radius limit 4 mm").is_none());
     }
 
+    /// Checkpoint 2, Q32: the field draws only field-only features, lattices and gyroids.
+    /// Every other body, early preview included, is drawn from the boundary model.
+    #[test]
+    fn only_field_only_features_preview_from_the_field() {
+        use std::collections::BTreeSet;
+        let kernel = CatallaxKernel::new();
+        let params = TessellationParams::default();
+        let block = contract::block(&kernel);
+        let pin = contract::cylinder(&kernel, Vec3::new(1.0, 1.0, 1.0), 0.5, 3.0);
+        let cut = kernel.boolean(&OpTag::new("cut"), BooleanOp::Subtract, block, pin).unwrap().body;
+        let top: Vec<EdgeId> =
+            kernel.topology(block).unwrap().edges.iter().filter(|e| e.bbox.min.z > 10.0 - 1e-6).map(|e| e.id).collect();
+        let rounded = kernel.fillet(&OpTag::new("round"), block, &top, 2.0).unwrap().body;
+        for body in [block, pin, cut, rounded] {
+            assert!(kernel.field(body).unwrap().is_none(), "{body:?} has no field stage");
+            let preview = kernel.preview(body, &params).unwrap();
+            let drawn: BTreeSet<FaceId> = preview.triangle_faces.iter().copied().collect();
+            let faces: BTreeSet<FaceId> = kernel.topology(body).unwrap().faces.iter().map(|f| f.id).collect();
+            assert_eq!(drawn, faces, "{body:?} is previewed face by face from its boundary model");
+        }
+        let lattice = kernel
+            .lattice(
+                &OpTag::new("lattice"),
+                block,
+                &Lattice {
+                    cell: LatticeCell::Cubic,
+                    cell_size_mm: 5.0,
+                    radius_mm: Grade::Constant(1.0),
+                    frame: FieldFrame::Part,
+                    accuracy_mm: 0.1,
+                    min_detail_mm: 0.5,
+                },
+            )
+            .unwrap()
+            .body;
+        let gyroid = kernel
+            .gyroid(
+                &OpTag::new("gyroid"),
+                block,
+                &Gyroid {
+                    kind: GyroidKind::Network,
+                    period_mm: 10.0,
+                    level: Grade::Constant(0.0),
+                    frame: FieldFrame::Part,
+                    accuracy_mm: 0.1,
+                    min_detail_mm: 0.5,
+                },
+            )
+            .unwrap()
+            .body;
+        for body in [lattice, gyroid] {
+            let field = kernel.field(body).unwrap().expect("a field-only feature keeps its field stage");
+            let preview = kernel.preview(body, &params).unwrap();
+            assert!(preview.unproved && preview.triangle_count() > 0);
+            assert_eq!(preview.positions, field.preview().positions, "{body:?} is drawn from its field sample");
+        }
+    }
+
     #[test]
     fn certified_display_is_cached_after_a_refused_request_retries() {
         let kernel = CatallaxKernel::new();

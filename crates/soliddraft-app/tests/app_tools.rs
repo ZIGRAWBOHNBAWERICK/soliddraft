@@ -497,9 +497,7 @@ fn every_tool_runs_without_a_window_and_undoes_as_its_row_says() {
         json!({ "name": "LA", "a": top, "b": bottom, "reference": reference, "min_degrees": -180, "max_degrees": 180 }),
     );
     s.call("assembly_delete_mate", json!({ "mate": "LA" }));
-    for command in
-        ["assembly_mate_path", "assembly_mate_cam", "assembly_mate_universal_joint", "assembly_physical_dynamics"]
-    {
+    for command in ["assembly_mate_path", "assembly_mate_cam", "assembly_physical_dynamics"] {
         s.refuse_motion(command);
     }
     // The B1 families, each added and taken away again.
@@ -575,6 +573,11 @@ fn every_tool_runs_without_a_window_and_undoes_as_its_row_says() {
     s.call("assembly_delete_mate", json!({"mate":"RP"}));
     s.call("assembly_mate_screw", json!({"name":"SC","joint":"C1","pitch":8}));
     s.call("assembly_delete_mate", json!({"mate":"SC"}));
+    let joint = s
+        .call("assembly_mate_universal_joint", json!({"name":"U","input":shaft(pins[1]),"output":shaft(third as u64)}));
+    let row = joint["assembly"]["mates"].as_array().unwrap().iter().find(|m| m["name"] == "U").unwrap().clone();
+    assert_eq!((row["kind"].as_str(), row["mechanism"].as_str()), (Some("universal_joint"), Some("universal_joint")));
+    s.call("assembly_delete_mate", json!({"mate":"U"}));
     s.call("assembly_delete_mate", json!({"mate":"C2"}));
     s.call("assembly_delete_mate", json!({"mate":"C1"}));
     s.state.assembly.session.as_mut().unwrap().doc.delete(&[soliddraft_assembly::ComponentId(third)]).unwrap();

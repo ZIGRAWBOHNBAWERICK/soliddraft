@@ -1144,6 +1144,40 @@ impl AssemblyDocument {
         self.mate_mechanical(name, &[joint], None, super::Mechanism::Screw, [pitch, 1.0], reverse, strict)
     }
 
+    /// Couples two shafts through a universal (Hooke's) joint, by their axes. Turning either
+    /// shaft turns the other; with the shafts at an angle, the output turns unevenly. The
+    /// pose when the mate is made sets the cross's place.
+    pub fn mate_universal_joint(
+        &mut self,
+        name: &str,
+        input: &EndpointSelector,
+        output: &EndpointSelector,
+        strict: bool,
+    ) -> Result<MateId, MateRefusal> {
+        self.transact("Universal Joint mate", strict, |doc, truth| {
+            check_new_name(truth, name)?;
+            if input.component == output.component {
+                return Err(MateRefusal::invalid("a universal joint couples two different shafts"));
+            }
+            let ends = vec![doc.endpoint(truth, input)?, doc.endpoint(truth, output)?];
+            let id = MateId(truth.take_id());
+            truth.mates.push(MateEntry::Known(Mate::Mechanical {
+                id,
+                name: name.into(),
+                mechanism: super::Mechanism::UniversalJoint,
+                joints: Vec::new(),
+                ends,
+                reference: None,
+                factor: [1.0, 1.0],
+                reverse: false,
+                offset: 0.0,
+                angles: [0.0; 2],
+            }));
+            doc.refresh_mechanical(truth, Some(name))?;
+            Ok(id)
+        })
+    }
+
     #[allow(clippy::too_many_arguments, reason = "shared implementation for the three authored mechanical relations")]
     fn mate_mechanical(
         &mut self,
@@ -1589,6 +1623,11 @@ impl AssemblyDocument {
                     (Mate::LimitDistance { max, .. }, MateEdit::Max(text)) => *max = literal(text)?,
                     (Mate::Mechanical { mechanism: super::Mechanism::Gear, factor, .. }, MateEdit::Ratio(r)) => {
                         *factor = check_ratio(*r)?
+                    }
+                    (Mate::Mechanical { mechanism: super::Mechanism::UniversalJoint, .. }, MateEdit::Reverse(_)) => {
+                        return Err(MateRefusal::invalid(format!(
+                            "{name}: a universal joint has no direction to reverse"
+                        )));
                     }
                     (Mate::Mechanical { reverse, .. }, MateEdit::Reverse(on)) => *reverse = *on,
                     (

@@ -132,10 +132,7 @@ pub(crate) fn run(state: &mut AppState, name: &str, input: &Value) -> Option<Res
         return Some(drag(state, input).map(|_| json!({"assembly": summary(state), "pending": state.assembly.session.as_ref().is_some_and(|s| s.doc.drag_pending()), "motion": state.assembly.session.as_ref().and_then(|s| s.doc.drag_report())})));
     }
 
-    if matches!(
-        name,
-        "assembly_mate_path" | "assembly_mate_cam" | "assembly_mate_universal_joint" | "assembly_physical_dynamics"
-    ) {
+    if matches!(name, "assembly_mate_path" | "assembly_mate_cam" | "assembly_physical_dynamics") {
         return Some(Err(refused(MateRefusal::new(
             soliddraft_assembly::RefusalCode::UnsupportedMotion,
             format!("{name} is outside the static rigid-motion mate solver"),
@@ -146,6 +143,7 @@ pub(crate) fn run(state: &mut AppState, name: &str, input: &Value) -> Option<Res
         "assembly_mate_gear"
             | "assembly_mate_rack_and_pinion"
             | "assembly_mate_screw"
+            | "assembly_mate_universal_joint"
             | "assembly_mate_angle"
             | "assembly_mate_limit_angle"
             | "assembly_measure_planes"
@@ -226,6 +224,14 @@ fn call(state: &mut AppState, name: &str, input: &Value) -> Result<Value, String
             )
             .map(|id| json!({"mate":id}))
         }
+        "assembly_mate_universal_joint" => doc
+            .mate_universal_joint(
+                text(input, "name")?,
+                &selector(&input["input"])?,
+                &selector(&input["output"])?,
+                strict,
+            )
+            .map(|id| json!({"mate":id})),
         "assembly_mate_angle" | "assembly_mate_limit_angle" => {
             let (a, b, reference) = (selector(&input["a"])?, selector(&input["b"])?, selector(&input["reference"])?);
             let number = |key| input[key].as_f64().ok_or_else(|| format!("{key} is a signed angle in degrees"));

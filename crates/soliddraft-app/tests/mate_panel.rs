@@ -725,11 +725,12 @@ fn universal_joint_picked_in_the_window_drives_the_bent_shaft() {
     let output_start = session(&h).doc.assembly().component(soliddraft_assembly::ComponentId(9)).unwrap().placement;
     assert!(output_start.rotation.angle_between(tilt) < 1e-9, "{output_start:?}");
 
-    // Pick each shaft's side at the middle of its axis, seen from the front.
+    // Pick each shaft's side at the middle of its axis, seen from the right: from the front
+    // the output shaft stands in front of the input.
     button(&mut h, "Mate");
     button(&mut h, "Universal Joint");
     assert_eq!(h.state().state.assembly.mate.family, soliddraft_app::mates::Family::UniversalJoint);
-    view(&mut h, StandardView::Front);
+    view(&mut h, StandardView::Right);
     settle(&mut h);
     let input_mid = Vec3::new(10.0, 5.0, 22.0);
     let output_mid = (output_start.translation + tilt * glam::DVec3::new(0.0, 0.0, 22.0)).as_vec3();

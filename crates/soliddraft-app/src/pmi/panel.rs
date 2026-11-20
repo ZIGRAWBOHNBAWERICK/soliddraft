@@ -558,6 +558,8 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
     }
     follow_selection(state);
     theme::section_label(ui, "Manufacturing information");
+    // Fields as wide as the sheet, so their hints read in full.
+    ui.spacing_mut().text_edit_width = ui.available_width();
     form(ui, state);
     ui.separator();
     notes(ui, state);
@@ -565,7 +567,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
     // The items take what is left of the sheet and scroll in it.
     let rows = rows(state);
     let height = ui.available_height().max(120.0);
-    egui::ScrollArea::vertical().id_salt("pmi_items").max_height(height).show(ui, |ui| {
+    egui::ScrollArea::vertical().id_salt("pmi_items").auto_shrink([false, true]).max_height(height).show(ui, |ui| {
         list(ui, state, &rows);
         if let Some(report) = &state.doc.pmi_import
             && !report.left_out.is_empty()

@@ -574,7 +574,7 @@ impl CommandSpec {
         self
     }
 
-    fn when(mut self, enabled: fn(&AppState) -> bool) -> Self {
+    pub(crate) fn when(mut self, enabled: fn(&AppState) -> bool) -> Self {
         self.enabled = enabled;
         self
     }

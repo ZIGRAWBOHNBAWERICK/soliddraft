@@ -74,3 +74,20 @@ pub(crate) fn import_summary(report: &PmiImport) -> String {
         n => format!("{read}; {n} left out"),
     }
 }
+
+/// What the Drawing and files action did, in a sentence for the status line.
+pub fn package_summary(report: &serde_json::Value) -> String {
+    let count = |value: &serde_json::Value| value.as_array().map_or(0, Vec::len);
+    let drawing = &report["drawing"];
+    let mut text = format!(
+        "STEP, PDF and DXF written: {} items in the file, {} on the drawing",
+        report["manufacturing_information"]["items"].as_u64().unwrap_or(0),
+        count(&drawing["items"]),
+    );
+    for (key, what) in [("not_shown", "not shown"), ("overlaps", "overlapping"), ("not_in_file", "not in the file")] {
+        if count(&drawing[key]) > 0 {
+            text.push_str(&format!(", {} {what}", count(&drawing[key])));
+        }
+    }
+    text
+}

@@ -610,6 +610,9 @@ pub struct DrawingSession {
     pub last_export: Option<PathBuf>,
     /// The part's mesh version the drawing last looked at.
     pub seen_version: u64,
+    /// What bringing in the part's manufacturing information did when the drawing was
+    /// made: the items drawn and the ones no view could carry.
+    pub requirements: soliddraft_drawing::PmiReport,
     /// Rows expanded in the drawing tree.
     pub expanded: std::collections::HashSet<ViewId>,
     pub annotations_open: bool,
@@ -656,6 +659,7 @@ impl DrawingSession {
             export_dir: None,
             last_export: None,
             seen_version: 0,
+            requirements: Default::default(),
             expanded: std::collections::HashSet::new(),
             annotations_open: true,
             attention_focus: None,
@@ -951,6 +955,10 @@ pub(crate) fn create_drawing_for_part(part_doc: &Document, new: &NewDrawing) -> 
         scale: new.scale,
     };
     let part = ctx.part();
+    // A part that states manufacturing information gets a drawing of it: every item
+    // once, and the part's notes in place of the template's.
+    let stated = !part.requirements.rows.is_empty() || !part.requirements.notes.is_empty();
+    let request = soliddraft_drawing::NewDrawing { requirements: stated, ..request };
     let made = soliddraft_drawing::make_drawing(&part, &request).map_err(|e| e.to_string())?;
     let overrides = std::mem::take(&mut drawing.sheets[0].format_overrides);
     drawing = made.drawing;
@@ -964,6 +972,7 @@ pub(crate) fn create_drawing_for_part(part_doc: &Document, new: &NewDrawing) -> 
     // drawing area, clear of the views.
     if let Some(notes) = &template.notes
         && !notes.lines.is_empty()
+        && !stated
     {
         let [l, b, _, _] = template.drawing_area();
         let lines = notes.lines.len() as f64 + 1.0;
@@ -990,6 +999,7 @@ pub(crate) fn create_drawing_for_part(part_doc: &Document, new: &NewDrawing) -> 
     session.part_seen = Some(part_doc.model().id());
     session.doc.seen_digest = ctx.digest.clone();
     session.doc.log_mark = part_doc.command_log().len();
+    session.requirements = made.requirements;
     Ok(session)
 }
 

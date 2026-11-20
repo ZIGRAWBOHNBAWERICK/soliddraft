@@ -108,6 +108,9 @@ pub enum AppAction {
     MeasureEntity,
     /// Opens or closes the Manufacturing information panel.
     ToggleManufacturingInformation,
+    /// Writes the part's STEP file with its manufacturing information and a drawing of
+    /// it as PDF and DXF, side by side.
+    ManufacturingPackage,
     /// Run independent construction checks on the current part.
     CheckPart,
     ToggleSection,

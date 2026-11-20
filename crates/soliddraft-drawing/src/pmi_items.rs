@@ -147,8 +147,6 @@ struct Slide {
 
 /// One annotation before it is on the sheet.
 struct Plan {
-    /// The item's name, for the report.
-    name: String,
     source: PmiSource,
     view: ViewId,
     body: AnnotationKind,
@@ -337,10 +335,8 @@ impl Planner<'_> {
     }
 
     /// A linear dimension between two ends.
-    #[allow(clippy::too_many_arguments)]
     fn linear(
         &mut self,
-        name: &str,
         source: PmiSource,
         from: &End,
         to: &End,
@@ -401,7 +397,6 @@ impl Planner<'_> {
             dimension.tolerance = tolerance;
             dimension.requirement = true;
             let plan = Plan {
-                name: name.to_owned(),
                 source: source.clone(),
                 view: view.id,
                 body: AnnotationKind::Dimension(dimension),
@@ -438,15 +433,13 @@ impl Planner<'_> {
             return Err(problem.clone());
         }
         let item = row.on_body.as_ref().ok_or("its faces are not on the body")?;
-        let name = item.id.clone();
-        let source = PmiSource::Item { item: name.clone() };
+        let source = PmiSource::Item { item: item.id.clone() };
         let no_slide = Slide { along: Point2::new(0.0, 1.0), step: 3.0 };
         match &item.kind {
             PmiKind::Datum { letter, feature } => match self.body.feature(feature)? {
                 Shape::Plane { point, normal } => {
                     let (view, edge, attach, on, out) = self.on_line(point, normal)?;
                     self.plans.push(Plan {
-                        name,
                         source,
                         view,
                         body: AnnotationKind::Datum { letter: letter.clone() },
@@ -466,7 +459,6 @@ impl Planner<'_> {
                     let on = Point2::new(centre.u + dir.u * radius * scale, centre.v + dir.v * radius * scale);
                     let at = self.views.iter().find(|v| v.id == view).map(|v| v.xf.unproject(on));
                     self.plans.push(Plan {
-                        name,
                         source,
                         view,
                         body: AnnotationKind::Datum { letter: letter.clone() },
@@ -492,15 +484,11 @@ impl Planner<'_> {
                 let mut dimension = Dimension::measured(kind, value, precision_for(value));
                 dimension.tolerance = *tolerance;
                 dimension.requirement = true;
-                let count =
-                    if features.len() > 1 { format!("{}{} ", features.len(), self.times) } else { String::new() };
-                let thru = if *through { format!(" {}", self.through) } else { String::new() };
-                dimension.text = format!("{count}{}{thru}", Dimension::VALUE_TEXT);
+                dimension.text = size_text(features.len(), *through, &self.times, &self.through);
                 if let Some(face) = first.first() {
                     self.sizes.insert(*face, self.plans.len());
                 }
                 self.plans.push(Plan {
-                    name,
                     source,
                     view,
                     body: AnnotationKind::Dimension(dimension),
@@ -519,7 +507,7 @@ impl Planner<'_> {
                 };
                 let (from, to) = (end(from)?, end(to)?);
                 let value = row.measured.first().copied().ok_or("the part could not measure it")?;
-                self.linear(&name, source, &from, &to, value, *tolerance)?;
+                self.linear(source, &from, &to, value, *tolerance)?;
             }
             PmiKind::Slot { ends, .. } => {
                 let Shape::Round { axis, radius, .. } = self.body.feature(&ends[0])? else {
@@ -531,7 +519,6 @@ impl Planner<'_> {
                 let on = Point2::new(centre.u + dir.u * radius * scale, centre.v + dir.v * radius * scale);
                 let at = self.views.iter().find(|v| v.id == view).map(|v| v.xf.unproject(on));
                 self.plans.push(Plan {
-                    name,
                     source,
                     view,
                     body: AnnotationKind::Note { text: row.callout(), leader: Vec::new() },
@@ -563,7 +550,6 @@ impl Planner<'_> {
                         at.u - self.shoulder - 1.0 - self.frame_width(&body)
                     };
                     self.plans.push(Plan {
-                        name: name.clone(),
                         source: source.clone(),
                         view,
                         body,
@@ -580,7 +566,6 @@ impl Planner<'_> {
                     let (view, edge, attach, on, out) = self.on_line(point, normal)?;
                     let reach = SYMBOL_OFFSET + 2.0 * th;
                     self.plans.push(Plan {
-                        name: name.clone(),
                         source: source.clone(),
                         view,
                         body,
@@ -606,7 +591,6 @@ impl Planner<'_> {
                     Shape::Plane { point, normal } => {
                         let (view, edge, attach, on, out) = self.on_line(point, normal)?;
                         self.plans.push(Plan {
-                            name,
                             source,
                             view,
                             body,
@@ -626,7 +610,6 @@ impl Planner<'_> {
                         let on = Point2::new(centre.u + dir.u * radius * scale, centre.v + dir.v * radius * scale);
                         let at = self.views.iter().find(|v| v.id == view).map(|v| v.xf.unproject(on));
                         self.plans.push(Plan {
-                            name,
                             source,
                             view,
                             body,
@@ -660,9 +643,7 @@ impl Planner<'_> {
             let from = End { shape: self.body.feature(&datum)?, faces: datum, at: At::Feature, pair: None };
             let to = End { shape: self.body.feature(feature)?, faces: feature.clone(), at: At::Feature, pair: None };
             let source = PmiSource::Located { item: row.item.id.clone(), datum: located.datum.clone(), micrometres };
-            let name =
-                format!("{} ({} from {})", row.item.id, crate::measure::format_value(located.value, 3), located.datum);
-            self.linear(&name, source, &from, &to, located.value, Tolerance::Basic)?;
+            self.linear(source, &from, &to, located.value, Tolerance::Basic)?;
         }
         Ok(())
     }
@@ -694,6 +675,143 @@ impl Planner<'_> {
                 };
             }
         }
+    }
+}
+
+/// What a size's dimension shows around its value: the count of a pattern before it and
+/// the through mark after it, as in `4× <DIM> THRU`.
+fn size_text(count: usize, through: bool, times: &str, through_mark: &str) -> String {
+    let count = if count > 1 { format!("{count}{times} ") } else { String::new() };
+    let through = if through { format!(" {through_mark}") } else { String::new() };
+    format!("{count}{}{through}", Dimension::VALUE_TEXT)
+}
+
+/// The part's notes as the sheet writes them: the template's heading, then each note
+/// with its number.
+fn notes_text(heading: &str, notes: &[String]) -> String {
+    std::iter::once(heading.to_owned())
+        .chain(notes.iter().enumerate().map(|(i, note)| format!("{}. {note}", i + 1)))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn notes_heading(template: &str) -> String {
+    crate::library::template(template).notes.as_ref().map_or_else(|| "NOTES".to_owned(), |n| n.heading.clone())
+}
+
+/// Puts the part's notes on sheet `sheet`, in the template's notes block at the bottom
+/// left of the drawing area. The general tolerance and the material are not repeated
+/// here: the title block shows them. Does nothing when the part has no other note or the
+/// sheet shows them already.
+pub fn place_notes(drawing: &mut Drawing, sheet: usize, part: &Part) {
+    let notes = &part.requirements.notes.notes;
+    let Some(page) = drawing.sheets.get(sheet) else { return };
+    if notes.is_empty() || page.annotations.iter().any(|a| a.source == Some(PmiSource::Notes)) {
+        return;
+    }
+    let template = crate::library::template(page.template.as_str());
+    let (offset, height) = template.notes.as_ref().map_or(([8.0, 6.0], 2.5), |n| (n.offset, n.height));
+    let [left, bottom, _, _] = template.drawing_area();
+    let lines = notes.len() as f64 + 1.0;
+    let annotation = Annotation {
+        id: drawing.next_annotation_id(),
+        view: crate::ids::SHEET,
+        body: AnnotationKind::Note {
+            text: notes_text(&notes_heading(page.template.as_str()), notes),
+            leader: Vec::new(),
+        },
+        anchors: Vec::new(),
+        placement: Point2::new(left + offset[0], bottom + lines * height * 1.7),
+        style: StyleOverrides { text_height: Some(height), ..Default::default() },
+        state: AnnotationState::Ok,
+        source: Some(PmiSource::Notes),
+    };
+    drawing.sheets[sheet].annotations.push(annotation);
+}
+
+/// Brings every annotation made from the part's items up to the part as it is now: its
+/// tolerance, its count, its letter, its text. An annotation whose item the part no
+/// longer has, or that no longer applies, is taken off the drawing. Returns the names of
+/// the items taken off.
+pub fn refresh(drawing: &mut Drawing, part: &Part) -> Vec<String> {
+    let rows: BTreeMap<&str, &PmiRow> = part.requirements.rows.iter().map(|row| (row.item.id.as_str(), row)).collect();
+    let notes = &part.requirements.notes.notes;
+    let mut removed = Vec::new();
+    for sheet in &mut drawing.sheets {
+        let style = crate::library::template(sheet.template.as_str()).style_file();
+        let heading = notes_heading(sheet.template.as_str());
+        sheet.annotations.retain_mut(|annotation| {
+            let Some(source) = annotation.source.clone() else { return true };
+            let keep = match &source {
+                PmiSource::Notes => {
+                    if let AnnotationKind::Note { text, .. } = &mut annotation.body {
+                        *text = notes_text(&heading, notes);
+                    }
+                    !notes.is_empty()
+                }
+                PmiSource::Located { item, datum, micrometres } => rows.get(item.as_str()).is_some_and(|row| {
+                    row.applies()
+                        && row
+                            .located
+                            .iter()
+                            .any(|l| l.datum == *datum && (l.value * 1000.0).round() as i64 == *micrometres)
+                }),
+                PmiSource::Item { item } => match rows.get(item.as_str()).filter(|row| row.applies()) {
+                    Some(row) => {
+                        update(annotation, row, &style.symbols);
+                        true
+                    }
+                    None => false,
+                },
+            };
+            if !keep && let Some(item) = source.item() {
+                removed.push(item.to_owned());
+            }
+            keep
+        });
+    }
+    removed.sort();
+    removed.dedup();
+    removed
+}
+
+/// Copies what the part states about an item into the annotation that shows it.
+fn update(annotation: &mut Annotation, row: &PmiRow, symbols: &crate::library::Symbols) {
+    match (&mut annotation.body, &row.item.kind) {
+        (AnnotationKind::Dimension(d), PmiKind::Size { features, tolerance, through, .. }) => {
+            d.tolerance = *tolerance;
+            d.requirement = true;
+            d.text = size_text(features.len(), *through, &symbols.times, &symbols.through);
+            if let Some(value) = row.measured.first() {
+                d.value = crate::DimValue::Measured { value: *value };
+            }
+        }
+        (AnnotationKind::Dimension(d), PmiKind::Location { tolerance, .. }) => {
+            d.tolerance = *tolerance;
+            d.requirement = true;
+            if let Some(value) = row.measured.first() {
+                d.value = crate::DimValue::Measured { value: *value };
+            }
+        }
+        (AnnotationKind::Note { text, .. }, PmiKind::Slot { .. }) => *text = row.callout(),
+        (
+            AnnotationKind::Gdt { characteristic, tolerance, diameter, material, datums },
+            PmiKind::Gdt { characteristic: c, tolerance: t, diameter: d, material: m, datums: refs, .. },
+        ) => {
+            (*characteristic, *tolerance, *diameter, *material) = (*c, *t, *d, *m);
+            datums.clone_from(refs);
+        }
+        (AnnotationKind::Datum { letter }, PmiKind::Datum { letter: stated, .. }) => letter.clone_from(stated),
+        (
+            AnnotationKind::SurfaceFinish { text, process, method, lay, allowance, all_around },
+            PmiKind::SurfaceFinish { text: t, process: p, method: m, lay: l, allowance: a, all_around: all, .. },
+        ) => {
+            (*process, *lay, *all_around) = (*p, *l, *all);
+            text.clone_from(t);
+            method.clone_from(m);
+            allowance.clone_from(a);
+        }
+        _ => {}
     }
 }
 
@@ -986,7 +1104,10 @@ pub fn shown(drawing: &Drawing) -> BTreeMap<String, usize> {
         let key = match &annotation.source {
             Some(PmiSource::Item { item }) => item.clone(),
             Some(PmiSource::Located { item, datum, micrometres }) => {
-                format!("{item}: {} from {datum}", crate::measure::format_value(*micrometres as f64 / 1000.0, 3))
+                format!(
+                    "{item}: {} from {datum}",
+                    soliddraft_kernel_api::pmi::length_text(*micrometres as f64 / 1000.0)
+                )
             }
             Some(PmiSource::Notes) | None => continue,
         };

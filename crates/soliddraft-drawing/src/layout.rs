@@ -330,6 +330,7 @@ pub fn make_drawing(part: &Part, new: &NewDrawing) -> Result<MadeDrawing, Drawin
             projections.push((view.0.id, view.1.projected));
             crate::apply(&mut drawing, &crate::Command::PlaceView { sheet: 0, view: view.0 })?;
         }
+        pmi_items::place_notes(&mut drawing, 0, part);
         pmi_items::import(&mut drawing, 0, part, &index, &contexts)?
     } else {
         PmiReport::default()

@@ -152,6 +152,20 @@ pub fn update_from_model(drawing: &mut Drawing, part: &Part) -> Result<UpdateRep
             }
         }
     }
+    // What the drawing shows of the part's manufacturing information follows the part:
+    // its values, and which items there are.
+    let made_from_part = drawing.sheets.iter().position(|sheet| sheet.annotations.iter().any(|a| a.source.is_some()));
+    if let Some(sheet) = made_from_part {
+        crate::pmi_items::refresh(drawing, part);
+        crate::pmi_items::place_notes(drawing, sheet, part);
+        let views: Vec<ViewContext> = drawing.sheets[sheet]
+            .views
+            .iter()
+            .filter(|v| !failed.contains(&v.id) && !v.excluded_from_update)
+            .filter_map(|v| contexts.get(&v.id).cloned())
+            .collect();
+        crate::pmi_items::import(drawing, sheet, part, &index, &views)?;
+    }
     collect(drawing, &mut report);
     drawing.accept_source(part);
     Ok(report)

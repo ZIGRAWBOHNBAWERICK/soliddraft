@@ -47,7 +47,9 @@ rules = [
   { from = [0, 9],   to = [180, 9] },
   { from = [0, 18],  to = [180, 18] },
   { from = [0, 27],  to = [180, 27] },
-  { from = [60, 0],  to = [60, 36] },
+  { from = [60, 0],  to = [60, 18] },
+  { from = [40, 18], to = [40, 36] },
+  { from = [80, 18], to = [80, 36] },
   { from = [120, 18], to = [120, 36] },
   { from = [120, 0], to = [120, 9] },
   { from = [24, 0],  to = [24, 9] },
@@ -58,41 +60,55 @@ rules = [
 key = "designer"
 label = "DRAWN"
 value = "${designer}"
-cell = [0, 27, 60, 9]
+cell = [0, 27, 40, 9]
 size = 3.5
 
 [[title_block.field]]
 key = "checked"
 label = "CHECKED"
 value = "${checked}"
-cell = [60, 27, 60, 9]
+cell = [40, 27, 40, 9]
 size = 3.5
 
 [[title_block.field]]
 key = "approved"
 label = "APPROVED"
 value = "${approved}"
-cell = [120, 27, 60, 9]
+cell = [80, 27, 40, 9]
 size = 3.5
 
 [[title_block.field]]
 key = "document_type"
 label = "TYPE"
 value = "${document_type}"
-cell = [0, 18, 60, 9]
+cell = [0, 18, 40, 9]
 size = 3.5
 
 [[title_block.field]]
 key = "status"
 label = "STATUS"
 value = "${status}"
-cell = [60, 18, 60, 9]
+cell = [40, 18, 40, 9]
 size = 3.5
 
 [[title_block.field]]
 key = "date"
 label = "DATE"
 value = "${date}"
+cell = [80, 18, 40, 9]
+size = 3.5
+
+[[title_block.field]]
+key = "material"
+label = "Material"
+value = "${material}"
+cell = [120, 27, 60, 9]
+size = 3.5
+
+[[title_block.field]]
+key = "general_tolerance"
+label = "General tolerance"
+value = "${general_tolerance}"
 cell = [120, 18, 60, 9]
 size = 3.5
 

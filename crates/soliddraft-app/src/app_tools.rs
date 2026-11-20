@@ -294,6 +294,7 @@ impl AppTools<'_> {
             "export_stand_in" => self.export_part(ExportFormat::StandIn, input),
             "roll_to_end" => self.roll_to_end(),
             "make_drawing" => self.make_drawing(input),
+            "manufacturing_package" => self.manufacturing_package(input),
             "show_drawing" => self.session().map(|_| ()).map(|()| {
                 self.state.assembly.active = false;
                 self.state.drawing.active = true;
@@ -434,6 +435,59 @@ impl AppTools<'_> {
         }
         self.state.doc.apply(Command::Rollback(None))?;
         Ok(self.summary())
+    }
+
+    /// One action for the shop: the part's STEP file with its manufacturing information,
+    /// and a drawing made from that information as PDF and DXF beside it. The answer
+    /// says what each file holds and lists, by name, every item the drawing could not
+    /// show, every text that lies over something, and anything on the drawing that the
+    /// file does not state.
+    pub(crate) fn manufacturing_package(&mut self, input: &Value) -> Result<Value, String> {
+        let step = PathBuf::from(input["path"].as_str().unwrap_or_default());
+        if !ExportFormat::Step.suits(&step) {
+            return Err("the path must end in .step or .stp".into());
+        }
+        let template = input["template"].as_str().unwrap_or("iso-a3");
+        let mut new = self.drawing_request(&json!({ "template": template }))?;
+        // Front, top and side; the section through the tightest hole comes with the
+        // manufacturing information.
+        for (view, on) in &mut new.views {
+            if *view == soliddraft_kernel_api::drawing::StandardView::Isometric {
+                *on = false;
+            }
+        }
+        let exported = self.export_part(ExportFormat::Step, &json!({ "path": step }))?;
+        let on_body = self.state.doc.model().pmi_on_body();
+        let written: std::collections::BTreeSet<String> =
+            on_body.pmi.items.iter().take(on_body.items).map(|item| item.id.clone()).collect();
+        let session = drawing::create_drawing(self.state, &new)?;
+        let requirements = session.requirements.clone();
+        self.install_drawing(session);
+        let (pdf, dxf) = (step.with_extension("pdf"), step.with_extension("dxf"));
+        self.export_sheet(SheetFormat::Pdf, &json!({ "path": pdf }))?;
+        self.export_sheet(SheetFormat::Dxf, &json!({ "path": dxf }))?;
+        let s = self.session()?;
+        let sheet = s.sheet;
+        let drawing = &s.doc.drawing;
+        let overlaps: Vec<Value> = soliddraft_drawing::pmi_items::overlaps(drawing, sheet)
+            .into_iter()
+            .map(|(what, over)| json!({ "annotation": what, "over": over }))
+            .collect();
+        let shown = soliddraft_drawing::pmi_items::shown(drawing);
+        Ok(json!({
+            "step": step,
+            "pdf": pdf,
+            "dxf": dxf,
+            "manufacturing_information": exported["manufacturing_information"],
+            "drawing": {
+                "views": drawing.sheets[sheet].views.len(),
+                "items": requirements.placed,
+                "shown": shown,
+                "not_shown": requirements.unplaced,
+                "overlaps": overlaps,
+                "not_in_file": soliddraft_drawing::pmi_items::not_from_part(drawing, &written),
+            },
+        }))
     }
 
     /// Makes a drawing as the New drawing PropertyManager does with its defaults.
@@ -715,6 +769,7 @@ impl ToolHost for AppTools<'_> {
             && matches!(
                 name,
                 "make_drawing"
+                    | "manufacturing_package"
                     | "show_drawing"
                     | "make_assembly"
                     | "show_assembly"

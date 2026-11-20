@@ -44,6 +44,7 @@ impl SolidDraftApp {
         match action {
             AppAction::CheckPart
             | AppAction::Export { .. }
+            | AppAction::ManufacturingPackage
             | AppAction::ToggleSection
             | AppAction::MeasureEntity
             | AppAction::ToggleManufacturingInformation => true,
@@ -1185,6 +1186,21 @@ impl SolidDraftApp {
                 self.state.pmi.open = !self.state.pmi.open;
                 // The panel lives in the details sheet, so opening it shows the sheet.
                 self.state.options_details = self.state.pmi.open;
+            }
+            AppAction::ManufacturingPackage => {
+                let name = format!("{}.step", self.state.doc.name);
+                let Some(path) = crate::platform::save_path("Drawing and files", "STEP", "step", &name) else {
+                    return;
+                };
+                let written = crate::app_tools::AppTools { state: &mut self.state }
+                    .manufacturing_package(&serde_json::json!({ "path": path }));
+                match written {
+                    Ok(report) => {
+                        let text = crate::pmi::package_summary(&report);
+                        self.state.note(text, NoteKind::Info);
+                    }
+                    Err(error) => self.state.note(error, NoteKind::Error),
+                }
             }
             AppAction::ToggleSection => self.state.section.toggle(&self.state.doc),
             AppAction::ShowMaterial => {

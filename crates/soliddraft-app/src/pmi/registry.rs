@@ -50,6 +50,13 @@ fn notes_params() -> Vec<(&'static str, Value)> {
     ]
 }
 
+fn package_params() -> Vec<(&'static str, Value)> {
+    vec![
+        ("path", string("The STEP file to write, ending in .step; the drawing goes beside it as .pdf and .dxf")),
+        ("template", optional(string("The sheet template's id; iso-a3 when left out"))),
+    ]
+}
+
 pub(crate) fn commands() -> Vec<CommandSpec> {
     let row = |id, label, doc| CommandSpec::new(id, label, Icon::Tolerance, doc);
     vec![
@@ -63,6 +70,22 @@ pub(crate) fn commands() -> Vec<CommandSpec> {
         .run(|_| AppAction::ToggleManufacturingInformation)
         .lit(|s| s.pmi.open)
         .app_only("It opens the Manufacturing information panel; the pmi tools change the same items without it"),
+        row(
+            "manufacturing_package",
+            "Drawing and files",
+            "Write the STEP file with its manufacturing information and a drawing of it as PDF and DXF",
+        )
+        .on(RibbonTab::Inspect, "Annotate", Size::Large)
+        .shown(|s| !s.in_sketch())
+        .run(|_| AppAction::ManufacturingPackage)
+        .when(|s| s.doc.display_body().is_some() && !s.doc.proof_pending() && s.doc.model().live_bodies().len() == 1)
+        .agents(
+            Agents::Mcp,
+            "Writes path (.step) with the part's manufacturing information, and a drawing made from it as .pdf and .dxf \
+             beside it. The answer lists what the drawing shows, what it could not show, what overlaps and what is on \
+             the drawing but not in the file.",
+            package_params,
+        ),
         row("pmi_add", "Add manufacturing information", "Put a datum, dimension, tolerance or finish on faces").agents(
             Agents::Mcp,
             "Adds one item to the part, or replaces the item named in replaces. A dimension takes no size: it reads the part's.",

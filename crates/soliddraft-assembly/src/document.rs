@@ -188,20 +188,53 @@ pub struct AssemblyDocument {
     pub(crate) solver_status: Option<SolverStatus>,
 }
 
-/// An assembly being opened on another thread ([`AssemblyDocument::open_in_background`]).
+/// An opened document with its scene, or why it could not be opened.
+type Opened = Result<(AssemblyDocument, Scene), LoadError>;
+
+/// An assembly being opened on another thread ([`AssemblyDocument::open_in_background`]),
+/// or, when it loads on the caller's thread, opened the first time it is asked for.
 pub struct Opening {
-    rx: std::sync::mpsc::Receiver<Result<(AssemblyDocument, Scene), LoadError>>,
+    state: Mutex<OpeningState>,
+}
+
+enum OpeningState {
+    Thread(std::sync::mpsc::Receiver<Opened>),
+    Here(Option<Box<dyn FnOnce() -> Opened + Send>>),
 }
 
 impl Opening {
+    /// Opens with `open` on a thread of its own, or later on the caller's thread when
+    /// `here` is set.
+    fn start(here: bool, open: impl FnOnce() -> Opened + Send + 'static) -> Opening {
+        if here {
+            return Opening { state: Mutex::new(OpeningState::Here(Some(Box::new(open)))) };
+        }
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::Builder::new()
+            .name("assembly open".into())
+            .spawn(move || {
+                let _ = tx.send(open());
+            })
+            .expect("the open thread starts");
+        Opening { state: Mutex::new(OpeningState::Thread(rx)) }
+    }
+
     /// The opened document and its scene once the structure is read, without waiting.
-    pub fn try_take(&self) -> Option<Result<(AssemblyDocument, Scene), LoadError>> {
-        self.rx.try_recv().ok()
+    /// Opening on the caller's thread, the first call reads the structure.
+    pub fn try_take(&self) -> Option<Opened> {
+        let mut state = self.state.lock().ok()?;
+        match &mut *state {
+            OpeningState::Thread(rx) => rx.try_recv().ok(),
+            OpeningState::Here(open) => open.take().map(|open| open()),
+        }
     }
 
     /// The opened document and its scene, waiting for them.
-    pub fn wait(self) -> Result<(AssemblyDocument, Scene), LoadError> {
-        self.rx.recv().expect("the open thread sends its result")
+    pub fn wait(self) -> Opened {
+        match self.state.into_inner().expect("the opening lock") {
+            OpeningState::Thread(rx) => rx.recv().expect("the open thread sends its result"),
+            OpeningState::Here(open) => open.expect("an opening is taken once")(),
+        }
     }
 }
 
@@ -288,18 +321,25 @@ impl AssemblyDocument {
     /// [`AssemblyDocument::open`].
     pub fn open_in_background(path: impl AsRef<Path>, options: OpenOptions) -> Opening {
         let path = path.as_ref().to_path_buf();
-        let (tx, rx) = std::sync::mpsc::channel();
-        std::thread::Builder::new()
-            .name("assembly open".into())
-            .spawn(move || {
-                let opened = AssemblyDocument::open(&path, options).map(|mut doc| {
-                    let scene = Scene::new(&mut doc);
-                    (doc, scene)
-                });
-                let _ = tx.send(opened);
+        Opening::start(options.loads_here(), move || {
+            AssemblyDocument::open(&path, options).map(|mut doc| {
+                let scene = Scene::new(&mut doc);
+                (doc, scene)
             })
-            .expect("the open thread starts");
-        Opening { rx }
+        })
+    }
+
+    /// Opens an assembly from the bytes of its file, which was at `path`, as
+    /// [`AssemblyDocument::open_in_background`] opens one from the file: in the browser,
+    /// a file handed to the page.
+    pub fn open_bytes_in_background(bytes: Vec<u8>, path: Option<PathBuf>, options: OpenOptions) -> Opening {
+        Opening::start(options.loads_here(), move || {
+            let package = AssemblyPackage::from_bytes(bytes)?;
+            AssemblyDocument::open_package(package, path.as_deref(), options).map(|mut doc| {
+                let scene = Scene::new(&mut doc);
+                (doc, scene)
+            })
+        })
     }
 
     /// Opens an assembly from an opened file.
@@ -376,7 +416,7 @@ impl AssemblyDocument {
     /// until `budget` is spent (at least one batch); the rest waits for the next call.
     /// Returns true while loading goes on.
     pub fn poll(&mut self, budget: std::time::Duration) -> bool {
-        let started = std::time::Instant::now();
+        let started = web_time::Instant::now();
         self.take_levels();
         loop {
             let Some(handle) = self.loading.as_mut() else { return false };
@@ -656,8 +696,14 @@ impl AssemblyDocument {
         }
     }
 
-    /// Starts building the hierarchy on another thread from a copy of the boxes.
+    /// Starts building the hierarchy on another thread from a copy of the boxes, or
+    /// builds it now when the document loads on the caller's thread.
     fn start_bvh(&mut self) {
+        if self.options.loads_here() {
+            self.bvh = Some((self.table.len(), crate::bvh::Bvh::build(&self.table)));
+            self.bvh_moved.clear();
+            return;
+        }
         let (bounds, flags) = (self.table.all_bounds().to_vec(), self.table.all_flags().to_vec());
         let origin = self.table.bounds(OccurrenceIndex::ROOT).center();
         let (tx, rx) = std::sync::mpsc::channel();
@@ -1360,6 +1406,17 @@ impl AssemblyDocument {
     /// Saves to `path` (the document's own file when `None`), atomically, with the
     /// display copies of everything it shows.
     pub fn save(&mut self, path: Option<&Path>) -> Result<PathBuf, FileError> {
+        self.save_with(path, |path, bytes| Ok(soliddraft_document::save_atomic(path, bytes)?))
+    }
+
+    /// Saves as [`AssemblyDocument::save`] does, handing the file's bytes to `write`
+    /// instead of writing them: the browser downloads them. The document takes `path` as
+    /// its file only once `write` succeeds.
+    pub fn save_with(
+        &mut self,
+        path: Option<&Path>,
+        write: impl FnOnce(&Path, &[u8]) -> Result<(), FileError>,
+    ) -> Result<PathBuf, FileError> {
         let path = match path.or(self.path.as_deref()) {
             Some(p) => soliddraft_document::kind::saved_path(p, DocKind::Assembly),
             None => return Err(FileError::Io(std::io::Error::other("the assembly has no file yet; name one"))),
@@ -1383,12 +1440,19 @@ impl AssemblyDocument {
         }
         self.finish_loading();
         let copies = self.copies();
-        if let Err(error) = self.assembly.save(&path, self.id, None, &copies) {
-            if let Some(sources) = original {
-                self.assembly.sources = sources;
+        let written = self.assembly.to_bytes(self.id, None, &copies).and_then(|bytes| {
+            write(&path, &bytes)?;
+            Ok(bytes)
+        });
+        let bytes = match written {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                if let Some(sources) = original {
+                    self.assembly.sources = sources;
+                }
+                return Err(error);
             }
-            return Err(error);
-        }
+        };
         if rebasing {
             for record in self.undo.iter_mut().chain(&mut self.redo) {
                 for image in [&mut record.before, &mut record.after] {
@@ -1405,7 +1469,7 @@ impl AssemblyDocument {
         self.path = Some(path.clone());
         // The saved file now holds every copy shown: read them from it first. The files
         // read before stay behind it, so undoing a Rebuild still finds the old copies.
-        if let Ok(p) = AssemblyPackage::open(&path) {
+        if let Ok(p) = AssemblyPackage::from_bytes(bytes) {
             self.packages.insert(0, p);
         }
         Ok(path)
@@ -1728,7 +1792,7 @@ impl AssemblyDocument {
     /// undo history.
     pub fn rebuild(&mut self) -> RebuildReport {
         self.cancel_drag();
-        let started = std::time::Instant::now();
+        let started = web_time::Instant::now();
         self.finish_loading();
         let resolver = self.resolver();
         let mut proposed = self.assembly.clone();

@@ -19,12 +19,13 @@
 //! current revision, which marks the definition stale. Without any of those the
 //! definition fails, and the rest of the assembly still opens.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use web_time::Instant;
 
 use soliddraft_document::resolve::{Location, Resolution, Resolver};
 use soliddraft_document::{ContentHash, DocKind, DocRef, OpenDocument, RevisionStore, identify_file};
@@ -68,6 +69,17 @@ pub struct OpenOptions {
     pub threads: usize,
     /// Resolve every reference after loading to fill in freshness.
     pub check_freshness: bool,
+    /// Load on the caller's thread, a step each time an event is asked for, instead of
+    /// on threads of the loader's own. The browser always loads this way: a page has one
+    /// thread. The document, its meshes and its freshness come out the same either way.
+    pub same_thread: bool,
+}
+
+impl OpenOptions {
+    /// True when loading runs on the caller's thread: asked for, or in the browser.
+    pub fn loads_here(&self) -> bool {
+        self.same_thread || cfg!(target_arch = "wasm32")
+    }
 }
 
 /// Where the loader looks for display copies and referenced documents.
@@ -81,6 +93,8 @@ pub(crate) struct Lookup {
     pub path: Option<PathBuf>,
     pub search: Vec<PathBuf>,
     pub open: Vec<OpenDocument>,
+    /// Load on the caller's thread ([`OpenOptions::loads_here`]).
+    pub here: bool,
 }
 
 impl Lookup {
@@ -98,6 +112,7 @@ impl Lookup {
             path: path.map(Path::to_path_buf),
             search: options.search.clone(),
             open: options.open.clone(),
+            here: options.loads_here(),
         };
         l.resolver = Mutex::new(l.resolver_for(path));
         l
@@ -110,13 +125,48 @@ impl Lookup {
 
     /// The file a reference resolves to now, with its current revision.
     fn resolve(&self, r: &DocRef) -> Option<(PathBuf, Option<ContentHash>)> {
-        let resolver = self.resolver.lock().ok()?;
-        found(resolver.resolve(r))
+        let resolution = self.resolver.lock().ok()?.resolve(r);
+        self.found(resolution)
+    }
+
+    /// The bytes of an open document whose file cannot be read, from the revision store
+    /// at the document's revision. In the browser the documents open are the files handed
+    /// to the page, and the page holds their bytes there: it has no folder to read.
+    fn held(&self, d: &OpenDocument) -> Option<Vec<u8>> {
+        self.revisions.as_ref()?.fetch(d.id, &d.revision).ok()
+    }
+
+    /// Where a resolution found its target, with the target's revision now.
+    fn found(&self, resolution: Resolution) -> Option<(PathBuf, Option<ContentHash>)> {
+        let Resolution::Found(t) = resolution else { return None };
+        match &t.location {
+            Location::File(p) => Some((p.clone(), t.revision().cloned())),
+            Location::Open(d) => {
+                let path = d.path.clone()?;
+                // An open document's unsaved edits are not in its file. A document held
+                // in the revision store is at the revision it is held at.
+                let revision = identify_file(&path).ok().map(|i| i.revision).or_else(|| {
+                    self.revisions.as_ref().filter(|s| s.has(d.id, &d.revision)).map(|_| d.revision.clone())
+                });
+                Some((path, revision))
+            }
+        }
     }
 
     fn current(&self, r: &DocRef) -> Result<Option<(Vec<u8>, ContentHash)>, String> {
-        let Some((path, _)) = self.resolve(r) else { return Ok(None) };
-        let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
+        let Ok(resolver) = self.resolver.lock() else { return Ok(None) };
+        let Resolution::Found(target) = resolver.resolve(r) else { return Ok(None) };
+        drop(resolver);
+        let read = target.path().map(std::fs::read);
+        let held = match &target.location {
+            Location::Open(d) if !matches!(read, Some(Ok(_))) => self.held(d),
+            _ => None,
+        };
+        let bytes = match (read, held) {
+            (_, Some(bytes)) | (Some(Ok(bytes)), None) => bytes,
+            (Some(Err(e)), None) => return Err(e.to_string()),
+            (None, None) => return Ok(None),
+        };
         let identity = soliddraft_document::identify(std::io::Cursor::new(&bytes)).map_err(|e| e.to_string())?;
         if Some(identity.id) != r.id || identity.kind != r.kind {
             return Ok(None);
@@ -129,27 +179,6 @@ pub(crate) fn matches_reference(bytes: &[u8], reference: &DocRef) -> bool {
     soliddraft_document::identify(std::io::Cursor::new(bytes)).is_ok_and(|identity| {
         Some(identity.id) == reference.id && identity.kind == reference.kind && identity.revision == reference.pinned
     })
-}
-
-/// Where a resolution found its target, with the target's revision now.
-fn found(resolution: Resolution) -> Option<(PathBuf, Option<ContentHash>)> {
-    {
-        match resolution {
-            Resolution::Found(t) => {
-                let path = match &t.location {
-                    Location::File(p) => p.clone(),
-                    Location::Open(d) => d.path.clone()?,
-                };
-                let revision = match &t.location {
-                    // An open document's unsaved edits are not in its file.
-                    Location::Open(_) => identify_file(&path).ok().map(|i| i.revision),
-                    Location::File(_) => t.revision().cloned(),
-                };
-                Some((path, revision))
-            }
-            Resolution::Missing(_) => None,
-        }
-    }
 }
 
 impl Lookup {
@@ -321,46 +350,72 @@ pub(crate) struct LevelJob {
 /// A loaded level, or why it could not be.
 pub(crate) type LevelDone = (DefinitionIndex, Level, Result<SharedMesh, String>);
 
-/// Loads coarse and fine meshes on request, one at a time, on its own thread, for one
-/// structure generation: definition indices mean nothing after a restructure.
+/// Loads coarse and fine meshes on request, one at a time, for one structure generation:
+/// definition indices mean nothing after a restructure. On a thread of its own, or, when
+/// the lookup loads here, one job each time the levels are taken.
 pub(crate) struct LevelWorker {
-    jobs: Sender<LevelJob>,
-    done: Receiver<LevelDone>,
+    backend: Levels,
     pub generation: u64,
     pub pending: HashSet<(DefinitionIndex, Level)>,
     /// Levels that could not be loaded: not asked for again in this generation.
     pub failed: HashSet<(DefinitionIndex, Level)>,
 }
 
+enum Levels {
+    Thread { jobs: Sender<LevelJob>, done: Receiver<LevelDone> },
+    Here { lookup: Box<Lookup>, readers: Vec<crate::file::CopyReader>, queue: VecDeque<LevelJob> },
+}
+
 impl LevelWorker {
     pub fn spawn(lookup: Lookup, generation: u64) -> LevelWorker {
-        let (jobs, queue) = channel::<LevelJob>();
-        let (done_tx, done) = channel();
-        std::thread::Builder::new()
-            .name("assembly levels".into())
-            .spawn(move || {
-                let mut readers: Vec<_> = lookup.packages.iter().map(|p| p.reader()).collect();
-                for job in queue {
-                    let mesh = lookup.level_mesh(&job.reference, job.quality.as_ref(), job.level, &mut readers);
-                    if done_tx.send((job.def, job.level, mesh.map(Arc::new))).is_err() {
-                        return;
+        let backend = if lookup.here {
+            let readers = lookup.packages.iter().map(|p| p.reader()).collect();
+            Levels::Here { lookup: Box::new(lookup), readers, queue: VecDeque::new() }
+        } else {
+            let (jobs, queue) = channel::<LevelJob>();
+            let (done_tx, done) = channel();
+            std::thread::Builder::new()
+                .name("assembly levels".into())
+                .spawn(move || {
+                    let mut readers: Vec<_> = lookup.packages.iter().map(|p| p.reader()).collect();
+                    for job in queue {
+                        let mesh = lookup.level_mesh(&job.reference, job.quality.as_ref(), job.level, &mut readers);
+                        if done_tx.send((job.def, job.level, mesh.map(Arc::new))).is_err() {
+                            return;
+                        }
                     }
-                }
-            })
-            .expect("the level loader thread starts");
-        LevelWorker { jobs, done, generation, pending: HashSet::new(), failed: HashSet::new() }
+                })
+                .expect("the level loader thread starts");
+            Levels::Thread { jobs, done }
+        };
+        LevelWorker { backend, generation, pending: HashSet::new(), failed: HashSet::new() }
     }
 
     /// Queues a job unless the same one is queued or has failed.
     pub fn request(&mut self, job: LevelJob) {
         if !self.failed.contains(&(job.def, job.level)) && self.pending.insert((job.def, job.level)) {
-            let _ = self.jobs.send(job);
+            match &mut self.backend {
+                Levels::Thread { jobs, .. } => {
+                    let _ = jobs.send(job);
+                }
+                Levels::Here { queue, .. } => queue.push_back(job),
+            }
         }
     }
 
-    /// The levels loaded since the last call.
+    /// The levels loaded since the last call. Loading here, this loads the next one.
     pub fn take(&mut self) -> Vec<LevelDone> {
-        let out: Vec<LevelDone> = self.done.try_iter().collect();
+        let out: Vec<LevelDone> = match &mut self.backend {
+            Levels::Thread { done, .. } => done.try_iter().collect(),
+            Levels::Here { lookup, readers, queue } => queue
+                .pop_front()
+                .map(|job| {
+                    let mesh = lookup.level_mesh(&job.reference, job.quality.as_ref(), job.level, readers);
+                    (job.def, job.level, mesh.map(Arc::new))
+                })
+                .into_iter()
+                .collect(),
+        };
         for (d, l, mesh) in &out {
             self.pending.remove(&(*d, *l));
             if mesh.is_err() {
@@ -473,10 +528,10 @@ pub(crate) fn structure(
     Ok(Structure { store, table, root, refs, parents })
 }
 
-/// Fetches sub-assembly structures on every core.
+/// Fetches sub-assembly structures on every core, or in turn when the lookup loads here.
 fn fetch_all(lookup: &Lookup, wanted: &[(DefinitionIndex, DocRef)]) -> Vec<Result<Fetched, String>> {
     let threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(2).clamp(1, 8).min(wanted.len());
-    if threads <= 1 {
+    if threads <= 1 || lookup.here {
         return wanted.iter().map(|(_, r)| lookup.fetch_structure(r)).collect();
     }
     let chunk = wanted.len().div_ceil(threads);
@@ -512,23 +567,34 @@ pub enum LoadEvent {
 
 /// The background half of an open: meshes and freshness, arriving as events.
 pub struct LoadHandle {
-    events: Receiver<LoadEvent>,
+    events: Events,
     /// Part definitions to load.
     pub total: usize,
     done: bool,
 }
 
+/// Where a load's events come from.
+enum Events {
+    /// The loader's threads.
+    Threads(Receiver<LoadEvent>),
+    /// Steps run on the caller's thread, one each time an event is asked for.
+    Here(Box<Steps>),
+}
+
 impl LoadHandle {
-    /// The next event if one has arrived, without waiting.
+    /// The next event if one has arrived, without waiting. Loading here, this runs the
+    /// next step and answers its event.
     pub fn try_event(&mut self) -> Option<LoadEvent> {
-        let e = self.events.try_recv().ok()?;
-        if matches!(e, LoadEvent::Finished { .. }) {
-            self.done = true;
-        }
+        let e = match &mut self.events {
+            Events::Threads(events) => events.try_recv().ok()?,
+            Events::Here(steps) => steps.next()?,
+        };
+        self.done |= matches!(e, LoadEvent::Finished { .. });
         Some(e)
     }
 
-    /// Every event that has arrived, without waiting.
+    /// Every event that has arrived, without waiting. Loading here, this runs every
+    /// step that is left.
     pub fn try_events(&mut self) -> Vec<LoadEvent> {
         std::iter::from_fn(|| self.try_event()).collect()
     }
@@ -538,10 +604,11 @@ impl LoadHandle {
         if self.done {
             return None;
         }
-        let e = self.events.recv().ok()?;
-        if matches!(e, LoadEvent::Finished { .. }) {
-            self.done = true;
-        }
+        let e = match &mut self.events {
+            Events::Threads(events) => events.recv().ok()?,
+            Events::Here(steps) => steps.next()?,
+        };
+        self.done |= matches!(e, LoadEvent::Finished { .. });
         Some(e)
     }
 
@@ -553,20 +620,29 @@ impl LoadHandle {
 
 const BATCH: usize = 256;
 
-/// Starts the background phases on a thread of their own.
+/// How many display meshes one step makes when loading here. A part without a display
+/// copy is rebuilt on a kernel, so a step makes one, and a frame waits for at most one
+/// rebuild beyond its budget.
+const STEP: usize = 1;
+
+/// Starts the background phases: on a thread of their own, or, when the lookup loads
+/// here, as steps the handle runs when asked for events.
 pub(crate) fn spawn(
     lookup: Lookup,
     parts: Vec<(DefinitionIndex, DocRef, Option<Quality>)>,
     freshness: Freshen,
     threads: usize,
 ) -> LoadHandle {
-    let (tx, rx) = channel();
     let total = parts.len();
+    if lookup.here {
+        return LoadHandle { events: Events::Here(Box::new(Steps::new(lookup, parts, freshness))), total, done: false };
+    }
+    let (tx, rx) = channel();
     std::thread::Builder::new()
         .name("assembly loader".into())
         .spawn(move || run(lookup, parts, freshness, threads, tx))
         .expect("the loader thread starts");
-    LoadHandle { events: rx, total, done: false }
+    LoadHandle { events: Events::Threads(rx), total, done: false }
 }
 
 /// The references whose freshness to check: each definition with its reference and the
@@ -574,6 +650,100 @@ pub(crate) fn spawn(
 pub(crate) struct Freshen {
     pub refs: Vec<(DefinitionIndex, DocRef, DefinitionIndex)>,
     pub root: DefinitionIndex,
+}
+
+/// A reference to check: the definition, its reference, and the assembly holding it.
+type Held = (DefinitionIndex, DocRef, DefinitionIndex);
+
+impl Freshen {
+    /// The sub-assemblies' references, parents before children, so their files are known
+    /// when their parts are resolved; then the parts'.
+    fn split(self) -> (Vec<Held>, Vec<Held>) {
+        let (mut assemblies, parts): (Vec<_>, Vec<_>) =
+            self.refs.into_iter().partition(|(_, r, _)| r.kind == DocKind::Assembly);
+        let parent_of: HashMap<DefinitionIndex, DefinitionIndex> =
+            assemblies.iter().map(|(i, _, p)| (*i, *p)).collect();
+        let depth = |mut i: DefinitionIndex| {
+            let mut d = 0;
+            while let Some(p) = parent_of.get(&i) {
+                i = *p;
+                d += 1;
+            }
+            d
+        };
+        assemblies.sort_by_key(|(i, _, _)| depth(*i));
+        (assemblies, parts)
+    }
+}
+
+fn freshness_of(found: &Option<(PathBuf, Option<ContentHash>)>, r: &DocRef) -> Freshness {
+    match found {
+        None => Freshness::Missing,
+        Some((_, Some(now))) if *now != r.pinned => Freshness::NewerAvailable { now: now.clone() },
+        Some(_) => Freshness::Current,
+    }
+}
+
+/// The sub-assemblies' freshness, each resolved from the file that holds it, in order;
+/// the file each was found at goes into `path_of`.
+fn assembly_freshness(
+    lookup: &Lookup,
+    assemblies: &[Held],
+    path_of: &mut HashMap<DefinitionIndex, PathBuf>,
+) -> Vec<(DefinitionIndex, Freshness)> {
+    let mut resolvers: HashMap<Option<PathBuf>, Resolver> = HashMap::new();
+    let mut batch = Vec::new();
+    for (i, r, parent) in assemblies {
+        let referencing = path_of.get(parent).cloned();
+        let resolver =
+            resolvers.entry(referencing.clone()).or_insert_with(|| lookup.resolver_for(referencing.as_deref()));
+        let hit = lookup.found(resolver.resolve(r));
+        if let Some((p, _)) = &hit {
+            path_of.insert(*i, p.clone());
+        }
+        batch.push((*i, freshness_of(&hit, r)));
+    }
+    batch
+}
+
+/// Resolves parts' references from the files that hold them, each document once.
+#[derive(Default)]
+struct PartFreshness {
+    resolvers: HashMap<Option<PathBuf>, Resolver>,
+    seen: HashMap<soliddraft_document::DocumentId, Option<(PathBuf, Option<ContentHash>)>>,
+}
+
+impl PartFreshness {
+    fn batch(
+        &mut self,
+        lookup: &Lookup,
+        path_of: &HashMap<DefinitionIndex, PathBuf>,
+        parts: &[Held],
+    ) -> Vec<(DefinitionIndex, Freshness)> {
+        let mut batch = Vec::with_capacity(parts.len());
+        for (i, r, parent) in parts {
+            let Some(id) = r.id else { continue };
+            let hit = self.seen.entry(id).or_insert_with(|| {
+                let referencing = path_of.get(parent).cloned();
+                let resolver = self
+                    .resolvers
+                    .entry(referencing.clone())
+                    .or_insert_with(|| lookup.resolver_for(referencing.as_deref()));
+                lookup.found(resolver.resolve(r))
+            });
+            batch.push((*i, freshness_of(hit, r)));
+        }
+        batch
+    }
+}
+
+/// Display meshes for `parts`, as [`Lookup::mesh`] makes them.
+fn meshes(
+    lookup: &Lookup,
+    parts: &[(DefinitionIndex, DocRef, Option<Quality>)],
+    readers: &mut [crate::file::CopyReader],
+) -> Vec<(DefinitionIndex, MeshResult)> {
+    parts.iter().map(|(i, r, q)| (*i, lookup.mesh(r, q.as_ref(), readers).map(|(m, p)| (Arc::new(m), p)))).collect()
 }
 
 fn run(
@@ -600,10 +770,7 @@ fn run(
                     if start >= parts.len() {
                         break;
                     }
-                    let batch = parts[start..(start + BATCH).min(parts.len())]
-                        .iter()
-                        .map(|(i, r, q)| (*i, lookup.mesh(r, q.as_ref(), &mut readers).map(|(m, p)| (Arc::new(m), p))))
-                        .collect();
+                    let batch = meshes(lookup, &parts[start..(start + BATCH).min(parts.len())], &mut readers);
                     if tx.send(LoadEvent::Meshes(batch)).is_err() {
                         return;
                     }
@@ -616,40 +783,14 @@ fn run(
     // Every reference is resolved from the file that holds it: sub-assemblies first,
     // parents before children, so their files are known when their parts are resolved;
     // then the parts, on every worker. Each document is resolved once.
-    let Freshen { refs, root } = freshness;
+    let root = freshness.root;
+    let (assemblies, parts) = freshness.split();
     let mut path_of: HashMap<DefinitionIndex, PathBuf> = HashMap::new();
     if let Some(p) = &lookup.path {
         path_of.insert(root, p.clone());
     }
-    let (mut assemblies, parts): (Vec<_>, Vec<_>) = refs.into_iter().partition(|(_, r, _)| r.kind == DocKind::Assembly);
-    let parent_of: HashMap<DefinitionIndex, DefinitionIndex> = assemblies.iter().map(|(i, _, p)| (*i, *p)).collect();
-    let depth = |mut i: DefinitionIndex| {
-        let mut d = 0;
-        while let Some(p) = parent_of.get(&i) {
-            i = *p;
-            d += 1;
-        }
-        d
-    };
-    assemblies.sort_by_key(|(i, _, _)| depth(*i));
-    let freshness_of = |found: &Option<(PathBuf, Option<ContentHash>)>, r: &DocRef| match found {
-        None => Freshness::Missing,
-        Some((_, Some(now))) if *now != r.pinned => Freshness::NewerAvailable { now: now.clone() },
-        Some(_) => Freshness::Current,
-    };
-    let mut resolvers: HashMap<Option<PathBuf>, Resolver> = HashMap::new();
-    let mut batch = Vec::new();
-    for (i, r, parent) in &assemblies {
-        let referencing = path_of.get(parent).cloned();
-        let resolver =
-            resolvers.entry(referencing.clone()).or_insert_with(|| lookup.resolver_for(referencing.as_deref()));
-        let hit = found(resolver.resolve(r));
-        if let Some((p, _)) = &hit {
-            path_of.insert(*i, p.clone());
-        }
-        batch.push((*i, freshness_of(&hit, r)));
-    }
-    if !batch.is_empty() && tx.send(LoadEvent::Freshness(std::mem::take(&mut batch))).is_err() {
+    let batch = assembly_freshness(&lookup, &assemblies, &mut path_of);
+    if !batch.is_empty() && tx.send(LoadEvent::Freshness(batch)).is_err() {
         return;
     }
     let next = AtomicUsize::new(0);
@@ -657,26 +798,13 @@ fn run(
         for _ in 0..threads.min(parts.len().div_ceil(BATCH)).max(1) {
             let (tx, next, parts, lookup, path_of) = (tx.clone(), &next, &parts, &lookup, &path_of);
             scope.spawn(move || {
-                let mut resolvers: HashMap<Option<PathBuf>, Resolver> = HashMap::new();
-                let mut seen: HashMap<soliddraft_document::DocumentId, Option<(PathBuf, Option<ContentHash>)>> =
-                    HashMap::new();
+                let mut resolved = PartFreshness::default();
                 loop {
                     let start = next.fetch_add(BATCH, Ordering::Relaxed);
                     if start >= parts.len() {
                         break;
                     }
-                    let mut batch = Vec::with_capacity(BATCH);
-                    for (i, r, parent) in &parts[start..(start + BATCH).min(parts.len())] {
-                        let Some(id) = r.id else { continue };
-                        let hit = seen.entry(id).or_insert_with(|| {
-                            let referencing = path_of.get(parent).cloned();
-                            let resolver = resolvers
-                                .entry(referencing.clone())
-                                .or_insert_with(|| lookup.resolver_for(referencing.as_deref()));
-                            found(resolver.resolve(r))
-                        });
-                        batch.push((*i, freshness_of(hit, r)));
-                    }
+                    let batch = resolved.batch(lookup, path_of, &parts[start..(start + BATCH).min(parts.len())]);
                     if tx.send(LoadEvent::Freshness(batch)).is_err() {
                         return;
                     }
@@ -685,4 +813,92 @@ fn run(
         }
     });
     let _ = tx.send(LoadEvent::Finished { display, freshness: started.elapsed() });
+}
+
+/// The loader's phases as steps on the caller's thread, in the order the threads run
+/// them: the display meshes, then the sub-assemblies' freshness, then the parts'.
+struct Steps {
+    lookup: Lookup,
+    parts: Vec<(DefinitionIndex, DocRef, Option<Quality>)>,
+    readers: Vec<crate::file::CopyReader>,
+    /// The next part to load, or to check.
+    next: usize,
+    phase: Phase,
+    started: Instant,
+    display: Duration,
+    freshen: Option<Freshen>,
+    checked: Vec<Held>,
+    path_of: HashMap<DefinitionIndex, PathBuf>,
+    resolved: PartFreshness,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Phase {
+    Display,
+    Assemblies,
+    Parts,
+    Done,
+}
+
+impl Steps {
+    fn new(lookup: Lookup, parts: Vec<(DefinitionIndex, DocRef, Option<Quality>)>, freshen: Freshen) -> Steps {
+        let readers = lookup.packages.iter().map(|p| p.reader()).collect();
+        Steps {
+            lookup,
+            parts,
+            readers,
+            next: 0,
+            phase: Phase::Display,
+            started: Instant::now(),
+            display: Duration::ZERO,
+            freshen: Some(freshen),
+            checked: Vec::new(),
+            path_of: HashMap::new(),
+            resolved: PartFreshness::default(),
+        }
+    }
+
+    /// Runs the next step and answers its event; `None` once finished.
+    fn next(&mut self) -> Option<LoadEvent> {
+        loop {
+            match self.phase {
+                Phase::Display => {
+                    if self.next < self.parts.len() {
+                        let end = (self.next + STEP).min(self.parts.len());
+                        let batch = meshes(&self.lookup, &self.parts[self.next..end], &mut self.readers);
+                        self.next = end;
+                        return Some(LoadEvent::Meshes(batch));
+                    }
+                    self.display = self.started.elapsed();
+                    self.started = Instant::now();
+                    self.phase = Phase::Assemblies;
+                }
+                Phase::Assemblies => {
+                    let freshen = self.freshen.take().expect("checked once");
+                    if let Some(p) = &self.lookup.path {
+                        self.path_of.insert(freshen.root, p.clone());
+                    }
+                    let (assemblies, parts) = freshen.split();
+                    self.checked = parts;
+                    self.next = 0;
+                    self.phase = Phase::Parts;
+                    let batch = assembly_freshness(&self.lookup, &assemblies, &mut self.path_of);
+                    if !batch.is_empty() {
+                        return Some(LoadEvent::Freshness(batch));
+                    }
+                }
+                Phase::Parts => {
+                    if self.next < self.checked.len() {
+                        let end = (self.next + BATCH).min(self.checked.len());
+                        let batch = self.resolved.batch(&self.lookup, &self.path_of, &self.checked[self.next..end]);
+                        self.next = end;
+                        return Some(LoadEvent::Freshness(batch));
+                    }
+                    self.phase = Phase::Done;
+                    return Some(LoadEvent::Finished { display: self.display, freshness: self.started.elapsed() });
+                }
+                Phase::Done => return None,
+            }
+        }
+    }
 }

@@ -70,9 +70,10 @@ pub(crate) fn commands() -> Vec<CommandSpec> {
         .run(|_| AppAction::ToggleManufacturingInformation)
         .lit(|s| s.pmi.open)
         .app_only("It opens the Manufacturing information panel; the pmi tools change the same items without it"),
-        row(
+        CommandSpec::new(
             "manufacturing_package",
             "Drawing and files",
+            Icon::Cad("drawing"),
             "Write the STEP file with its manufacturing information and a drawing of it as PDF and DXF",
         )
         .on(RibbonTab::Inspect, "Annotate", Size::Large)

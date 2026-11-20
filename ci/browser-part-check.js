@@ -14,7 +14,8 @@
 // read-only `shown_options` export reports the row selected and Details drawn, and clicks
 // Details once where that frame drew it.
 function check(value, message) { if (!value) throw new Error(message); }
-const INSPECT = [19, 241], CHECK = [87, 185], CLOSE_REPORT = [536, 35], BOSS = [380, 255];
+// Check sits under the Measure and Annotate groups of the Inspect tab.
+const INSPECT = [19, 241], CHECK = [87, 245], CLOSE_REPORT = [536, 35], BOSS = [380, 255];
 
 check(await page.eval(() => location.search === '?demo'), 'Open the application at /?demo first');
 const size = await page.eval(() => [innerWidth, innerHeight]);

@@ -5584,6 +5584,41 @@ fn plain_kernel_error(error: soliddraft_kernel_api::KernelError) -> String {
     }
 }
 
+impl Document {
+    /// Adds an item of manufacturing information, or replaces the one called `replaces`,
+    /// as one undo entry.
+    pub fn put_pmi(
+        &mut self,
+        item: soliddraft_kernel_api::pmi::PmiItem<model::FaceRef>,
+        replaces: Option<String>,
+    ) -> Result<(), String> {
+        self.run_pmi("", vec![model::Command::PutPmiItem { item: Box::new(item), replaces }])
+    }
+
+    /// Removes an item of manufacturing information, as one undo entry.
+    pub fn remove_pmi(&mut self, id: &str) -> Result<(), String> {
+        self.run_pmi("", vec![model::Command::RemovePmiItem { id: id.to_owned() }])
+    }
+
+    /// Sets the notes of the whole part, as one undo entry.
+    pub fn set_part_notes(&mut self, notes: soliddraft_kernel_api::pmi::PartNotes) -> Result<(), String> {
+        self.run_pmi("", vec![model::Command::SetPartNotes { notes }])
+    }
+
+    /// Runs commands that change only the manufacturing information: one alone as it
+    /// is, several as one undo entry called `label`. The body is not rebuilt.
+    pub(crate) fn run_pmi(&mut self, label: &str, mut commands: Vec<model::Command>) -> Result<(), String> {
+        let command = match commands.len() {
+            0 => return Ok(()),
+            1 => commands.remove(0),
+            _ => model::Command::Batch { label: label.to_owned(), commands },
+        };
+        self.model.execute(command).map_err(|error| error.to_string())?;
+        self.touch();
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -5908,40 +5943,5 @@ mod tests {
         assert_eq!(d.display_index(), Some(2));
         d.apply(Command::Rollback(None)).unwrap();
         built(&d);
-    }
-}
-
-impl Document {
-    /// Adds an item of manufacturing information, or replaces the one called `replaces`,
-    /// as one undo entry.
-    pub fn put_pmi(
-        &mut self,
-        item: soliddraft_kernel_api::pmi::PmiItem<model::FaceRef>,
-        replaces: Option<String>,
-    ) -> Result<(), String> {
-        self.run_pmi("", vec![model::Command::PutPmiItem { item: Box::new(item), replaces }])
-    }
-
-    /// Removes an item of manufacturing information, as one undo entry.
-    pub fn remove_pmi(&mut self, id: &str) -> Result<(), String> {
-        self.run_pmi("", vec![model::Command::RemovePmiItem { id: id.to_owned() }])
-    }
-
-    /// Sets the notes of the whole part, as one undo entry.
-    pub fn set_part_notes(&mut self, notes: soliddraft_kernel_api::pmi::PartNotes) -> Result<(), String> {
-        self.run_pmi("", vec![model::Command::SetPartNotes { notes }])
-    }
-
-    /// Runs commands that change only the manufacturing information: one alone as it
-    /// is, several as one undo entry called `label`. The body is not rebuilt.
-    pub(crate) fn run_pmi(&mut self, label: &str, mut commands: Vec<model::Command>) -> Result<(), String> {
-        let command = match commands.len() {
-            0 => return Ok(()),
-            1 => commands.remove(0),
-            _ => model::Command::Batch { label: label.to_owned(), commands },
-        };
-        self.model.execute(command).map_err(|error| error.to_string())?;
-        self.touch();
-        Ok(())
     }
 }

@@ -136,9 +136,11 @@ fn triangles(app: &App) -> Vec<([Vec3; 3], u32)> {
     doc.meshes
         .values()
         .flat_map(|mesh| {
-            mesh.indices.chunks_exact(3).map(|tri| {
-                ([tri[0], tri[1], tri[2]].map(|i| mesh.positions[i as usize]), mesh.face_picks[tri[0] as usize])
-            })
+            mesh.indices
+                .as_chunks::<3>()
+                .0
+                .iter()
+                .map(|tri| (tri.map(|i| mesh.positions[i as usize]), mesh.face_picks[tri[0] as usize]))
         })
         .collect()
 }

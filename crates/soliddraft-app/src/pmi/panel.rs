@@ -558,20 +558,23 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
     }
     follow_selection(state);
     theme::section_label(ui, "Manufacturing information");
-    let rows = rows(state);
-    egui::ScrollArea::vertical().id_salt("pmi_items").max_height(230.0).show(ui, |ui| list(ui, state, &rows));
-    if let Some(report) = &state.doc.pmi_import
-        && !report.left_out.is_empty()
-    {
-        ui.add_space(4.0);
-        ui.label(egui::RichText::new("Not read from the file").color(theme::muted()));
-        for (name, reason) in &report.left_out {
-            ui.label(format!("{name}: {reason}"));
-        }
-    }
-    ui.separator();
     form(ui, state);
     ui.separator();
     notes(ui, state);
     ui.separator();
+    // The items take what is left of the sheet and scroll in it.
+    let rows = rows(state);
+    let height = ui.available_height().max(120.0);
+    egui::ScrollArea::vertical().id_salt("pmi_items").max_height(height).show(ui, |ui| {
+        list(ui, state, &rows);
+        if let Some(report) = &state.doc.pmi_import
+            && !report.left_out.is_empty()
+        {
+            ui.add_space(4.0);
+            ui.label(egui::RichText::new("Not read from the file").color(theme::muted()));
+            for (name, reason) in &report.left_out {
+                ui.label(format!("{name}: {reason}"));
+            }
+        }
+    });
 }

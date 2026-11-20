@@ -100,48 +100,72 @@ fn round(app: &App, at: [Option<f64>; 3], axis: usize, centre: [f32; 3], radius:
     Target { face: face(app, SurfaceKind::Cylinder, at), points }
 }
 
+/// A way to look at the part: a standard view, or the part turned by hand to a yaw and
+/// a pitch in degrees.
+#[derive(Clone, Copy, Debug)]
+enum Look {
+    View(&'static str),
+    Turned(f32, f32),
+}
+
+fn look(app: &mut App, look: Look) {
+    match look {
+        Look::View(view) => ribbon::run_command(app, view),
+        Look::Turned(yaw, pitch) => {
+            let camera = &mut app.state_mut().state.viewport.camera;
+            camera.orbit(0.0, 0.0);
+            camera.yaw = yaw.to_radians();
+            camera.pitch = pitch.to_radians();
+        }
+    }
+    ribbon::run_command(app, "zoom_fit");
+    settle(app);
+}
+
+/// Clicks a point of the part if it is on screen, and says whether that selected `face`.
+fn try_point(app: &mut App, face: FaceId, world: Vec3) -> Option<(Pos2, bool)> {
+    let rect = app.state().state.viewport.rect;
+    let at = app.state().state.viewport.camera.project(world, rect).filter(|at| rect.contains(*at))?;
+    ribbon::pick_at(app, at);
+    app.run_steps(2);
+    Some((at, app.state().state.doc.selection == Some(Selection::Face(face))))
+}
+
+thread_local! {
+    /// Where each face was found last time, so a face picked twice is searched once.
+    static FOUND: std::cell::RefCell<std::collections::BTreeMap<FaceId, (Look, Vec3)>> = Default::default();
+}
+
 /// Finds a view and a screen point where a click selects the target's face, and leaves
 /// the app in that view.
 fn find(app: &mut App, target: &Target) -> Pos2 {
-    let mut seen = Vec::new();
+    if let Some((known, world)) = FOUND.with(|found| found.borrow().get(&target.face).copied()) {
+        look(app, known);
+        if let Some((at, true)) = try_point(app, target.face, world) {
+            return at;
+        }
+    }
     // The standard views, then the part turned by hand to look into what they hide,
     // such as the underside of a slot.
     let turned = [-90.0_f32, 90.0, -45.0, -135.0, 45.0, 135.0, 0.0, 180.0]
         .into_iter()
-        .flat_map(|yaw| [-25.0_f32, 25.0].map(|pitch| (yaw, pitch)));
-    let looks = VIEWS.into_iter().map(Ok).chain(turned.map(Err));
-    for look in looks {
-        let view = match look {
-            Ok(view) => {
-                ribbon::run_command(app, view);
-                view.to_owned()
-            }
-            Err((yaw, pitch)) => {
-                let camera = &mut app.state_mut().state.viewport.camera;
-                camera.orbit(0.0, 0.0);
-                camera.yaw = yaw.to_radians();
-                camera.pitch = pitch.to_radians();
-                format!("turned to {yaw}, {pitch}")
-            }
-        };
-        ribbon::run_command(app, "zoom_fit");
-        settle(app);
-        let rect = app.state().state.viewport.rect;
+        .flat_map(|yaw| [-25.0_f32, 25.0].map(|pitch| Look::Turned(yaw, pitch)));
+    let mut seen = Vec::new();
+    for way in VIEWS.into_iter().map(Look::View).chain(turned) {
+        look(app, way);
         for world in &target.points {
-            let Some(at) = app.state().state.viewport.camera.project(*world, rect).filter(|at| rect.contains(*at))
-            else {
-                continue;
-            };
-            ribbon::pick_at(app, at);
-            app.run_steps(2);
-            let doc = &app.state().state.doc;
-            if doc.selection == Some(Selection::Face(target.face)) {
-                return at;
+            match try_point(app, target.face, *world) {
+                Some((at, true)) => {
+                    FOUND.with(|found| found.borrow_mut().insert(target.face, (way, *world)));
+                    return at;
+                }
+                Some((_, false)) => {
+                    let doc = &app.state().state.doc;
+                    let title = doc.selection.and_then(|s| doc.describe(s)).map_or("nothing".into(), |d| d.title);
+                    seen.push(format!("{way:?}: {title}"));
+                }
+                None => {}
             }
-            seen.push(format!(
-                "{view}: {}",
-                doc.selection.and_then(|s| doc.describe(s)).map_or("nothing".into(), |d| d.title)
-            ));
         }
     }
     let wanted = app.state().state.doc.describe(Selection::Face(target.face)).map(|d| d.title);

@@ -183,7 +183,25 @@ fn the_bracket_carries_its_manufacturing_information_through_step_and_a_bore_edi
     let soliddraft_kernel_api::pmi::PmiKind::Size { nominal, .. } = &bore.kind else { panic!("a size") };
     assert_eq!(*nominal, Some(10.0));
     assert_eq!(bore.callout(&[10.0]), "\u{d8}10 H7");
-    assert!(read.pmi.item("Bore position").is_some());
+    // The file states the fit itself, and the position tolerance is still on the bore:
+    // the same face as the diameter, with its zone and its three datums.
+    let soliddraft_kernel_api::pmi::PmiKind::Size { tolerance, features: bore_faces, .. } = &bore.kind else {
+        panic!("a size")
+    };
+    assert_eq!(*tolerance, soliddraft_kernel_api::pmi::Tolerance::parse("H7").unwrap());
+    let position = read.pmi.item("Bore position").expect("the position tolerance is in the file");
+    assert_eq!(position.callout(&[]), "Position \u{d8}0.05 A|B|C");
+    let soliddraft_kernel_api::pmi::PmiKind::Gdt { features: toleranced, .. } = &position.kind else {
+        panic!("a geometric tolerance")
+    };
+    assert_eq!(toleranced, bore_faces, "the tolerance is on the bore's face");
+    // And in the part: the bore's three items read as before, on a bore of 10 mm.
+    let listed = callouts(&mut first);
+    for (name, callout) in
+        [("Bore diameter", "\u{d8}10 H7"), ("Bore finish", "Ra 1.6"), ("Bore position", "Position \u{d8}0.05 A|B|C")]
+    {
+        assert!(listed.contains(&(name.to_owned(), callout.to_owned())), "{name} reads {callout}: {listed:?}");
+    }
 
     // A later feature on top: a fifth hole through the plate. Every item stays on its
     // faces, and the file carries all of them.

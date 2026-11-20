@@ -71,6 +71,9 @@ pub struct MadeDrawing {
 /// for dimensions.
 const VIEW_GAP: f64 = 30.0;
 const GRID_MARGIN: f64 = 25.0;
+/// Room left between a view and the section cut from it, beyond what views keep, for
+/// the callouts of the view.
+const SECTION_ROOM: f64 = 45.0;
 /// Room kept around pictorial views, which get no dimensions.
 const PICTORIAL_MARGIN: f64 = 5.0;
 /// Space kept above the title block.
@@ -387,8 +390,30 @@ fn section_through_hole(
     else {
         return Ok(None);
     };
-    let line = crate::derived::cutting_line(drawing, part, index, parent, centre, true)?;
-    crate::derived::new_section(drawing, part, index, 0, parent, line, false, None).map(Some)
+    // Cut up the sheet, so the section goes beside its parent, and look the way that
+    // puts it on the right, where a sheet has room.
+    let line = crate::derived::cutting_line(drawing, part, index, parent, centre, false)?;
+    let to_the_right = |flip: bool| {
+        project::section_arrow(&line, flip).is_some_and(|arrow| match drawing.sheets[0].projection {
+            crate::Projection::FirstAngle => arrow.u > 0.0,
+            crate::Projection::ThirdAngle => arrow.u < 0.0,
+        })
+    };
+    let flip = !to_the_right(false) && to_the_right(true);
+    let (mut view, context) = crate::derived::new_section(drawing, part, index, 0, parent, line, flip, None)?;
+    // Further from its parent than a view needs, to leave the parent's callouts room.
+    if let Some(axis) = view.alignment.as_ref().map(|a| a.axis)
+        && let Some(beside) = drawing.view(parent)
+        && view.position.u > beside.position.u
+    {
+        let want = Point2::new(view.position.u + SECTION_ROOM, view.position.v);
+        if let Some(at) = crate::derived::free_spot(drawing, 0, &view, want, Some((axis, beside.position)))
+            && at.u > view.position.u
+        {
+            view.position = at;
+        }
+    }
+    Ok(Some((view, context)))
 }
 
 #[derive(Clone, Copy, Debug)]

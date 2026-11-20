@@ -163,6 +163,17 @@ struct Plan {
     host: Option<usize>,
     /// For a stacked linear dimension: the stack it is in and its span.
     stack: Option<(u8, i8, f64)>,
+    /// Its item turned out not to be drawable: nothing of it goes on the sheet.
+    dropped: bool,
+}
+
+/// The passes over the part's items. Distances are planned and stacked first, so the
+/// callouts planned after them point away from the stacks.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Pass {
+    Distances,
+    Sizes,
+    Rest,
 }
 
 /// One end of a distance on the body.
@@ -180,11 +191,18 @@ struct Planner<'a> {
     bbox: BTreeMap<ViewId, [f64; 4]>,
     plans: Vec<Plan>,
     /// Diagonals taken around each round centre, by view.
-    diagonals: BTreeMap<(ViewId, i64, i64), Vec<(i8, i8)>>,
+    diagonals_taken: BTreeMap<(ViewId, i64, i64), Vec<(i8, i8)>>,
     /// Symbols already on each edge, by view.
     on_edge: BTreeMap<(ViewId, EdgeId), usize>,
     /// The plan of the size on each feature, by its first face.
     sizes: BTreeMap<FaceId, usize>,
+    /// The sides of each view that carry stacked dimensions: view, vertical, side.
+    stacked: BTreeSet<(ViewId, u8, i8)>,
+    /// For each view, the way that leads away from the other views: across, then up.
+    away: BTreeMap<ViewId, (i8, i8)>,
+    /// The side the basic distances from each datum take in each view.
+    datum_sides: BTreeMap<(ViewId, u8, String), i8>,
+    pass: Pass,
     /// Text height and leader shoulder of the sheet's style.
     text_height: f64,
     shoulder: f64,
@@ -198,42 +216,71 @@ fn unit(p: Point2) -> Point2 {
 }
 
 impl Planner<'_> {
-    /// The next free diagonal around a round centre, the right-hand ones first so a
-    /// frame can sit under the text.
+    /// The diagonals of a view in the order callouts take them: those that point at
+    /// no stack of dimensions first, and of those the right-hand ones, so a frame can
+    /// sit under the text.
+    fn diagonals(&self, view: ViewId) -> [(i8, i8); 4] {
+        let mut order = [(1, 1), (1, -1), (-1, 1), (-1, -1)];
+        order.sort_by_key(|(across, up)| {
+            i32::from(self.stacked.contains(&(view, 1, *across))) + i32::from(self.stacked.contains(&(view, 0, *up)))
+        });
+        order
+    }
+
+    /// The next free diagonal around a round centre.
     fn diagonal(&mut self, view: ViewId, centre: Point2) -> Point2 {
+        let order = self.diagonals(view);
         let key = (view, (centre.u * 1e3).round() as i64, (centre.v * 1e3).round() as i64);
-        let taken = self.diagonals.entry(key).or_default();
-        let up = if centre.v >= 0.0 { 1 } else { -1 };
-        let order = [(1, up), (1, -up), (-1, up), (-1, -up)];
+        let taken = self.diagonals_taken.entry(key).or_default();
         let dir = order.into_iter().find(|d| !taken.contains(d)).unwrap_or(order[0]);
         taken.push(dir);
         let s = std::f64::consts::FRAC_1_SQRT_2;
         Point2::new(f64::from(dir.0) * s, f64::from(dir.1) * s)
     }
 
-    /// A callout on a round edge: a diameter, a radius, a slot's callout.
+    /// How many annotations are planned in a view.
+    fn planned_in(&self, view: ViewId) -> i32 {
+        self.plans.iter().filter(|plan| !plan.dropped && plan.view == view).count() as i32
+    }
+
+    /// A callout on a round edge: a diameter, a radius, a slot's callout. Of the
+    /// features of a pattern it points at the one furthest out the way callouts go in
+    /// its view, so the leader is short and crosses nothing.
     fn callout(
         &mut self,
-        feature: &[FaceId],
+        features: &[&[FaceId]],
         axis: Vec3,
         radius: f64,
     ) -> Result<(ViewId, EdgeId, Attach, Point2, Point2, Point2), String> {
-        let mut best: Option<((bool, i32), ViewId, EdgeId, Attach, Point2, f64)> = None;
+        let first = features.first().copied().ok_or("it is on no feature")?;
+        let mut best: Option<((bool, i32), &ViewContext)> = None;
         for (order, view) in self.views.iter().enumerate() {
             if axis.dot(view.xf.frame.direction).abs() < 1.0 - 1e-6 {
                 continue;
             }
-            let Some((edge, attach, centre, visible)) = self.body.round_edge(feature, view, axis) else { continue };
+            let Some((_, _, _, visible)) = self.body.round_edge(first, view, axis) else { continue };
             let key = (visible, -(order as i32));
-            if best.as_ref().is_none_or(|(k, ..)| key > *k) {
-                best = Some((key, view.id, edge, attach, view.xf.point(centre), view.xf.scale));
+            if best.as_ref().is_none_or(|(k, _)| key > *k) {
+                best = Some((key, view));
             }
         }
-        let (_, view, edge, attach, centre, scale) = best.ok_or("no view looks along its axis")?;
-        let dir = self.diagonal(view, centre);
+        let (_, view) = best.ok_or("no view looks along its axis")?;
+        let lead = self.diagonals(view.id)[0];
+        let mut chosen: Option<(f64, EdgeId, Attach, Point2)> = None;
+        for feature in features {
+            let Some((edge, attach, centre, _)) = self.body.round_edge(feature, view, axis) else { continue };
+            let at = view.xf.point(centre);
+            let out = at.u * f64::from(lead.0) + at.v * f64::from(lead.1);
+            if chosen.as_ref().is_none_or(|(o, ..)| out > *o + 1e-9) {
+                chosen = Some((out, edge, attach, at));
+            }
+        }
+        let (_, edge, attach, centre) = chosen.ok_or("no view looks along its axis")?;
+        let (id, scale) = (view.id, view.xf.scale);
+        let dir = self.diagonal(id, centre);
         let reach = radius * scale + CALLOUT_REACH;
         let placement = Point2::new(round(centre.u + dir.u * reach), round(centre.v + dir.v * reach));
-        Ok((view, edge, attach, centre, placement, dir))
+        Ok((id, edge, attach, centre, placement, dir))
     }
 
     /// The outward side of a view at a point: the unit direction to the nearest side of
@@ -249,7 +296,7 @@ impl Planner<'_> {
     /// A symbol on the line a flat face shows as: the view, the edge, the point on it and
     /// the outward direction.
     fn on_line(&mut self, point: Vec3, normal: Vec3) -> Result<(ViewId, EdgeId, Attach, Point2, Point2), String> {
-        let mut best: Option<((bool, i32), &ViewContext, EdgeId)> = None;
+        let mut best: Option<((bool, i32, i32), &ViewContext, EdgeId)> = None;
         for (order, view) in self.views.iter().enumerate() {
             let frame = &view.xf.frame;
             if normal.dot(frame.direction).abs() > 1e-6 {
@@ -261,7 +308,8 @@ impl Planner<'_> {
             let Some((edge, visible)) = plane_edge(self.body.index, view, point, normal, self.body.tol) else {
                 continue;
             };
-            let key = (visible, -(order as i32));
+            // A visible line first, then the view with the fewest annotations so far.
+            let key = (visible, -self.planned_in(view.id), -(order as i32));
             if best.as_ref().is_none_or(|(k, ..)| key > *k) {
                 best = Some((key, view, edge));
             }
@@ -341,8 +389,12 @@ impl Planner<'_> {
     }
 
     /// A linear dimension between two ends.
+    /// `datum` is the letter of the datum a basic distance is measured from: all the
+    /// basic distances from one datum in a view go on one side, the one that leads away
+    /// from the other views.
     fn linear(
         &mut self,
+        datum: Option<&str>,
         source: PmiSource,
         from: &End,
         to: &End,
@@ -384,7 +436,18 @@ impl Planner<'_> {
             let vertical = orientation == LinearOrientation::Vertical;
             // Across the measuring direction, the side the two ends lean to.
             let lean = if vertical { a.2.u + b.2.u } else { a.2.v + b.2.v };
-            let side: i8 = if lean >= 0.0 { 1 } else { -1 };
+            let leaning: i8 = if lean >= 0.0 { 1 } else { -1 };
+            let side = match datum {
+                Some(letter) => {
+                    let away = self.away.get(&view.id).map_or(0, |a| if vertical { a.0 } else { a.1 });
+                    *self.datum_sides.entry((view.id, u8::from(vertical), letter.to_owned())).or_insert(if away == 0 {
+                        leaning
+                    } else {
+                        away
+                    })
+                }
+                None => leaning,
+            };
             let across = if vertical { Point2::new(f64::from(side), 0.0) } else { Point2::new(0.0, f64::from(side)) };
             let (Some(a), Some(b)) = (
                 self.end_anchor(from, view, direction, towards, Some(across)),
@@ -411,6 +474,7 @@ impl Planner<'_> {
                 slide: Slide { along: across, step: STACK_STEP },
                 host: None,
                 stack: Some((u8::from(vertical), side, value * view.xf.scale)),
+                dropped: false,
             };
             best = Some((score, plan));
         }
@@ -419,26 +483,20 @@ impl Planner<'_> {
         Ok(())
     }
 
-    /// The width of a tolerance frame, as the display draws it.
-    fn frame_width(&self, body: &AnnotationKind) -> f64 {
-        let AnnotationKind::Gdt { tolerance, diameter, material, datums, .. } = body else { return 0.0 };
-        let th = self.text_height;
-        let (h, pad) = (2.0 * th, th * 0.45);
-        let modifier = |regardless: bool| if regardless { 0.0 } else { th * 1.3 };
-        let value = format!("{}{}", if *diameter { "Ø" } else { "" }, display::tolerance_text(*tolerance));
-        let mut width = h + display::text_width(&value, th) + 2.0 * pad + modifier(material.is_regardless());
-        for datum in datums {
-            width +=
-                (display::text_width(&datum.letter, th) + 2.0 * pad + modifier(datum.material.is_regardless())).max(h);
-        }
-        width
-    }
-
     fn row(&mut self, row: &PmiRow, rows: &[PmiRow]) -> Result<(), String> {
         if let Some(problem) = &row.problem {
             return Err(problem.clone());
         }
         let item = row.on_body.as_ref().ok_or("its faces are not on the body")?;
+        let wanted = match &item.kind {
+            PmiKind::Location { .. } => self.pass == Pass::Distances,
+            PmiKind::Size { .. } => self.pass == Pass::Sizes,
+            PmiKind::Gdt { .. } => self.pass != Pass::Sizes,
+            _ => self.pass == Pass::Rest,
+        };
+        if !wanted {
+            return Ok(());
+        }
         let source = PmiSource::Item { item: item.id.clone() };
         let no_slide = Slide { along: Point2::new(0.0, 1.0), step: 3.0 };
         match &item.kind {
@@ -457,10 +515,11 @@ impl Planner<'_> {
                         slide: Slide { along: out, step: 3.0 },
                         host: None,
                         stack: None,
+                        dropped: false,
                     });
                 }
                 Shape::Round { axis, radius, .. } => {
-                    let (view, edge, _, centre, placement, dir) = self.callout(feature, axis, radius)?;
+                    let (view, edge, _, centre, placement, dir) = self.callout(&[feature.as_slice()], axis, radius)?;
                     let scale = self.views.iter().find(|v| v.id == view).map_or(1.0, |v| v.xf.scale);
                     let on = Point2::new(centre.u + dir.u * radius * scale, centre.v + dir.v * radius * scale);
                     let at = self.views.iter().find(|v| v.id == view).map(|v| v.xf.unproject(on));
@@ -473,6 +532,7 @@ impl Planner<'_> {
                         slide: Slide { along: dir, step: 3.0 },
                         host: None,
                         stack: None,
+                        dropped: false,
                     });
                 }
             },
@@ -481,7 +541,8 @@ impl Planner<'_> {
                 let Shape::Round { axis, radius, .. } = self.body.feature(first)? else {
                     return Err("a size needs a round face".into());
                 };
-                let (view, edge, centred, centre, placement, dir) = self.callout(first, axis, radius)?;
+                let all: Vec<&[FaceId]> = features.iter().map(Vec::as_slice).collect();
+                let (view, edge, centred, centre, placement, dir) = self.callout(&all, axis, radius)?;
                 let (kind, value) = match size {
                     SizeKind::Diameter => (DimensionKind::Diameter, 2.0 * radius),
                     SizeKind::Radius => (DimensionKind::Radius, radius),
@@ -503,6 +564,7 @@ impl Planner<'_> {
                     slide: Slide { along: dir, step: 3.0 },
                     host: None,
                     stack: None,
+                    dropped: false,
                 });
             }
             PmiKind::Location { from, to, tolerance, .. } => {
@@ -513,14 +575,14 @@ impl Planner<'_> {
                 };
                 let (from, to) = (end(from)?, end(to)?);
                 let value = row.measured.first().copied().ok_or("the part could not measure it")?;
-                self.linear(source, &from, &to, value, *tolerance)?;
+                self.linear(None, source, &from, &to, value, *tolerance)?;
             }
             PmiKind::Slot { ends, .. } => {
                 let Shape::Round { axis, radius, .. } = self.body.feature(&ends[0])? else {
                     return Err("a slot needs round ends".into());
                 };
                 // The end the callout's leader reaches: the one on the side it leans to.
-                let (view, edge, _, centre, placement, dir) = self.callout(&ends[1], axis, radius)?;
+                let (view, edge, _, centre, placement, dir) = self.callout(&[ends[1].as_slice()], axis, radius)?;
                 let scale = self.views.iter().find(|v| v.id == view).map_or(1.0, |v| v.xf.scale);
                 let on = Point2::new(centre.u + dir.u * radius * scale, centre.v + dir.v * radius * scale);
                 let at = self.views.iter().find(|v| v.id == view).map(|v| v.xf.unproject(on));
@@ -533,9 +595,13 @@ impl Planner<'_> {
                     slide: Slide { along: dir, step: 3.0 },
                     host: None,
                     stack: None,
+                    dropped: false,
                 });
             }
             PmiKind::Gdt { characteristic, tolerance, diameter, material, datums, features } => {
+                if self.pass == Pass::Distances {
+                    return self.located(row, rows, features);
+                }
                 let first = features.first().ok_or("it is on no feature")?;
                 let body = AnnotationKind::Gdt {
                     characteristic: *characteristic,
@@ -553,7 +619,7 @@ impl Planner<'_> {
                     let u = if right {
                         at.u + self.shoulder + 1.0
                     } else {
-                        at.u - self.shoulder - 1.0 - self.frame_width(&body)
+                        at.u - self.shoulder - 1.0 - gdt_width(&body, th)
                     };
                     self.plans.push(Plan {
                         source: source.clone(),
@@ -564,6 +630,7 @@ impl Planner<'_> {
                         slide: no_slide,
                         host: Some(host),
                         stack: None,
+                        dropped: false,
                     });
                 } else {
                     let Shape::Plane { point, normal } = self.body.feature(first)? else {
@@ -580,9 +647,9 @@ impl Planner<'_> {
                         slide: Slide { along: out, step: 3.0 },
                         host: None,
                         stack: None,
+                        dropped: false,
                     });
                 }
-                self.located(row, rows, features)?;
             }
             PmiKind::SurfaceFinish { text, process, method, lay, allowance, all_around, feature } => {
                 let body = AnnotationKind::SurfaceFinish {
@@ -608,10 +675,12 @@ impl Planner<'_> {
                             slide: Slide { along: out, step: 3.0 },
                             host: None,
                             stack: None,
+                            dropped: false,
                         });
                     }
                     Shape::Round { axis, radius, .. } => {
-                        let (view, edge, _, centre, placement, dir) = self.callout(feature, axis, radius)?;
+                        let (view, edge, _, centre, placement, dir) =
+                            self.callout(&[feature.as_slice()], axis, radius)?;
                         let scale = self.views.iter().find(|v| v.id == view).map_or(1.0, |v| v.xf.scale);
                         let on = Point2::new(centre.u + dir.u * radius * scale, centre.v + dir.v * radius * scale);
                         let at = self.views.iter().find(|v| v.id == view).map(|v| v.xf.unproject(on));
@@ -624,6 +693,7 @@ impl Planner<'_> {
                             slide: Slide { along: dir, step: 3.0 },
                             host: None,
                             stack: None,
+                            dropped: false,
                         });
                     }
                 }
@@ -649,7 +719,7 @@ impl Planner<'_> {
             let from = End { shape: self.body.feature(&datum)?, faces: datum, at: At::Feature, pair: None };
             let to = End { shape: self.body.feature(feature)?, faces: feature.clone(), at: At::Feature, pair: None };
             let source = PmiSource::Located { item: row.item.id.clone(), datum: located.datum.clone(), micrometres };
-            self.linear(source, &from, &to, located.value, Tolerance::Basic)?;
+            self.linear(Some(&located.datum), source, &from, &to, located.value, Tolerance::Basic)?;
         }
         Ok(())
     }
@@ -658,8 +728,11 @@ impl Planner<'_> {
     fn stack(&mut self) {
         let mut stacks: BTreeMap<(ViewId, u8, i8), Vec<usize>> = BTreeMap::new();
         for (i, plan) in self.plans.iter().enumerate() {
-            if let Some((vertical, side, _)) = plan.stack {
+            if let Some((vertical, side, _)) = plan.stack
+                && !plan.dropped
+            {
                 stacks.entry((plan.view, vertical, side)).or_default().push(i);
+                self.stacked.insert((plan.view, vertical, side));
             }
         }
         for ((view, vertical, side), mut members) in stacks {
@@ -682,6 +755,19 @@ impl Planner<'_> {
             }
         }
     }
+}
+
+/// The width of a tolerance frame at text height `th`, as the display draws it.
+fn gdt_width(body: &AnnotationKind, th: f64) -> f64 {
+    let AnnotationKind::Gdt { tolerance, diameter, material, datums, .. } = body else { return 0.0 };
+    let (h, pad) = (2.0 * th, th * 0.45);
+    let modifier = |regardless: bool| if regardless { 0.0 } else { th * 1.3 };
+    let value = format!("{}{}", if *diameter { "Ø" } else { "" }, display::tolerance_text(*tolerance));
+    let mut width = h + display::text_width(&value, th) + 2.0 * pad + modifier(material.is_regardless());
+    for datum in datums {
+        width += (display::text_width(&datum.letter, th) + 2.0 * pad + modifier(datum.material.is_regardless())).max(h);
+    }
+    width
 }
 
 /// What a size's dimension shows around its value: the count of a pattern before it and
@@ -847,36 +933,66 @@ pub fn import(
         .filter(|v| drawing.view(v.id).is_some_and(|view| !matches!(view.kind, crate::ViewKind::Section { .. })))
         .collect();
     let axes = part.kernel.face_carriers(part.body)?.into_iter().filter_map(|c| Some((c.id, c.axis?))).collect();
+    // The way out of the group of views, for each view: away from the middle of the
+    // others.
+    let places: Vec<(ViewId, Point2)> =
+        candidates.iter().filter_map(|v| Some((v.id, drawing.view(v.id)?.position))).collect();
+    let away: BTreeMap<ViewId, (i8, i8)> = places
+        .iter()
+        .map(|(id, at)| {
+            let others: Vec<&Point2> = places.iter().filter(|(other, _)| other != id).map(|(_, p)| p).collect();
+            let n = others.len().max(1) as f64;
+            let (mu, mv) = (others.iter().map(|p| p.u).sum::<f64>() / n, others.iter().map(|p| p.v).sum::<f64>() / n);
+            let sign = |d: f64| {
+                if others.is_empty() || d.abs() < 1.0 {
+                    0
+                } else if d > 0.0 {
+                    1
+                } else {
+                    -1
+                }
+            };
+            (*id, (sign(at.u - mu), sign(at.v - mv)))
+        })
+        .collect();
     let mut planner = Planner {
         body: Body { faces: topology.faces.into_iter().map(|f| (f.id, f)).collect(), axes, index, tol: 1e-6 * size },
         bbox: candidates.iter().filter_map(|v| Some((v.id, drawing.view(v.id)?.geometry.bbox))).collect(),
         views: candidates,
         plans: Vec::new(),
-        diagonals: BTreeMap::new(),
+        diagonals_taken: BTreeMap::new(),
         on_edge: BTreeMap::new(),
         sizes: BTreeMap::new(),
+        stacked: BTreeSet::new(),
+        away,
+        datum_sides: BTreeMap::new(),
+        pass: Pass::Distances,
         text_height: style.text.height,
         shoulder: style.lines.leader_shoulder,
         times: style.symbols.times.clone(),
         through: style.symbols.through.clone(),
     };
-    // Sizes first, so a tolerance finds the size it sits under.
-    let order = |row: &&PmiRow| !matches!(row.item.kind, PmiKind::Size { .. });
-    let mut ordered: Vec<&PmiRow> = rows.iter().collect();
-    ordered.sort_by_key(order);
     let mut failed: BTreeMap<String, String> = BTreeMap::new();
-    for row in ordered {
-        if present.contains_key(&row.item.id) {
-            continue;
+    for pass in [Pass::Distances, Pass::Sizes, Pass::Rest] {
+        planner.pass = pass;
+        for row in rows {
+            if present.contains_key(&row.item.id) || failed.contains_key(&row.item.id) {
+                continue;
+            }
+            if let Err(reason) = planner.row(row, rows) {
+                // Nothing of an item that fails is drawn.
+                for plan in &mut planner.plans {
+                    if plan.source.item() == Some(row.item.id.as_str()) {
+                        plan.dropped = true;
+                    }
+                }
+                failed.insert(row.item.id.clone(), reason);
+            }
         }
-        if let Err(reason) = planner.row(row, rows) {
-            // Nothing of an item that fails is drawn.
-            planner.plans.retain(|plan| plan.source.item() != Some(row.item.id.as_str()));
-            planner.sizes.retain(|_, plan| *plan < planner.plans.len());
-            failed.insert(row.item.id.clone(), reason);
+        if pass == Pass::Distances {
+            planner.stack();
         }
     }
-    planner.stack();
     for row in rows {
         match failed.remove(&row.item.id) {
             Some(reason) => report.unplaced.push(Unplaced { name: row.item.id.clone(), reason }),
@@ -886,8 +1002,13 @@ pub fn import(
     }
 
     let mut next = drawing.next_annotation_id();
-    let mut made: Vec<(AnnotationId, Slide, Option<usize>)> = Vec::new();
+    let mut ids: Vec<Option<AnnotationId>> = Vec::new();
+    let mut made: Vec<Made> = Vec::new();
     for plan in planner.plans {
+        if plan.dropped {
+            ids.push(None);
+            continue;
+        }
         let anchors = plan
             .anchors
             .iter()
@@ -905,11 +1026,29 @@ pub fn import(
             state: AnnotationState::Ok,
             source: Some(plan.source),
         });
-        made.push((next, plan.slide, plan.host));
+        let host = plan.host.and_then(|host| ids.get(host).copied().flatten());
+        made.push(Made {
+            id: next,
+            slide: plan.slide,
+            host,
+            hosted: plan.host.is_some(),
+            stacked: plan.stack.is_some(),
+        });
+        ids.push(Some(next));
         next = AnnotationId(next.0 + 1);
     }
     settle(drawing, sheet, &made);
     Ok(report)
+}
+
+/// An annotation just put on the sheet, for settling.
+struct Made {
+    id: AnnotationId,
+    slide: Slide,
+    /// The annotation it sits under and moves with.
+    host: Option<AnnotationId>,
+    hosted: bool,
+    stacked: bool,
 }
 
 /// Brings the part's manufacturing information into the views of sheet `sheet`,
@@ -1013,10 +1152,36 @@ fn lay(drawing: &Drawing, sheet: usize) -> Laid {
             }
         }
     }
+    // A tolerance frame and a datum's box are as much in the way as a text.
+    if let Some(page) = drawing.sheets.get(sheet) {
+        let th = crate::library::template(page.template.as_str()).style_file().text.height;
+        for a in &page.annotations {
+            let origin = page.view(a.view).map_or(Point2::default(), |v| v.position);
+            let (u, v) = (a.placement.u + origin.u, a.placement.v + origin.v);
+            let frame = match &a.body {
+                AnnotationKind::Gdt { .. } => Rect { x0: u, y0: v - th, x1: u + gdt_width(&a.body, th), y1: v + th },
+                AnnotationKind::Datum { letter } => {
+                    let half = (display::text_width(letter, th) + th).max(2.0 * th) / 2.0;
+                    Rect { x0: u - half, y0: v - th, x1: u + half, y1: v + th }
+                }
+                _ => continue,
+            };
+            laid.texts.entry(a.id).or_default().push(frame);
+        }
+    }
     laid
 }
 
 impl Laid {
+    /// True when a text of `group` reaches beyond the paper.
+    fn off_paper(&self, group: &[AnnotationId]) -> bool {
+        group
+            .iter()
+            .filter_map(|id| self.texts.get(id))
+            .flatten()
+            .any(|b| b.x0 < 0.0 || b.y0 < 0.0 || b.x1 > self.paper.0 || b.y1 > self.paper.1)
+    }
+
     /// What the texts of `group` lie over, or that lies over them: another annotation
     /// among `others`, or something fixed on the sheet.
     fn clash(&self, group: &[AnnotationId], others: &[AnnotationId]) -> Option<Option<AnnotationId>> {
@@ -1053,26 +1218,42 @@ impl Laid {
 
 /// Moves each new annotation, with what sits under it, along its own direction until
 /// its texts are clear of the views, the sheet and the annotations settled before it.
-fn settle(drawing: &mut Drawing, sheet: usize, made: &[(AnnotationId, Slide, Option<usize>)]) {
-    let new: BTreeSet<AnnotationId> = made.iter().map(|m| m.0).collect();
+/// The stacked dimensions settle first, nearest their views; the callouts and symbols
+/// then clear them. An annotation that finds no clear place on the paper stays where it
+/// was planned, and [`overlaps`] names it.
+fn settle(drawing: &mut Drawing, sheet: usize, made: &[Made]) {
+    let new: BTreeSet<AnnotationId> = made.iter().map(|m| m.id).collect();
     let mut settled: Vec<AnnotationId> =
         drawing.sheets[sheet].annotations.iter().map(|a| a.id).filter(|id| !new.contains(id)).collect();
-    for (i, (id, slide, host)) in made.iter().enumerate() {
-        if host.is_some() {
-            continue;
-        }
+    let order = made.iter().filter(|m| m.stacked).chain(made.iter().filter(|m| !m.stacked));
+    for lead in order.filter(|m| !m.hosted) {
         let group: Vec<AnnotationId> =
-            std::iter::once(*id).chain(made.iter().filter(|m| m.2 == Some(i)).map(|m| m.0)).collect();
+            std::iter::once(lead.id).chain(made.iter().filter(|m| m.host == Some(lead.id)).map(|m| m.id)).collect();
+        let planned: Vec<Option<Point2>> =
+            group.iter().map(|id| drawing.annotation(*id).map(|a| a.placement)).collect();
+        let mut clear = false;
         for _ in 0..MOVES {
-            if lay(drawing, sheet).clash(&group, &settled).is_none() {
+            let laid = lay(drawing, sheet);
+            if laid.off_paper(&group) {
+                break;
+            }
+            if laid.clash(&group, &settled).is_none() {
+                clear = true;
                 break;
             }
             for member in &group {
                 if let Some(a) = drawing.annotation_mut(*member) {
                     a.placement = Point2::new(
-                        round(a.placement.u + slide.along.u * slide.step),
-                        round(a.placement.v + slide.along.v * slide.step),
+                        round(a.placement.u + lead.slide.along.u * lead.slide.step),
+                        round(a.placement.v + lead.slide.along.v * lead.slide.step),
                     );
+                }
+            }
+        }
+        if !clear {
+            for (member, at) in group.iter().zip(&planned) {
+                if let (Some(a), Some(at)) = (drawing.annotation_mut(*member), at) {
+                    a.placement = *at;
                 }
             }
         }

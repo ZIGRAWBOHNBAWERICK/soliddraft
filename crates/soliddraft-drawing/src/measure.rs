@@ -526,11 +526,10 @@ pub fn display_text(dim: &Dimension, symbols: &crate::library::Symbols) -> Strin
             format!("{core} ±{}", format_value(value, dim.precision.max(1)))
         }
         crate::Tolerance::Deviation { upper, lower } => {
-            format!(
-                "{core} +{}/{}",
-                format_value(upper, dim.precision.max(1)),
-                format_value(lower, dim.precision.max(1))
-            )
+            // A deviation of nothing is written 0, with no decimals (ISO 129-1).
+            let deviation =
+                |value: f64| if value == 0.0 { "0".to_owned() } else { format_value(value, dim.precision.max(1)) };
+            format!("{core} +{}/{}", deviation(upper), deviation(lower))
         }
         crate::Tolerance::Limits { upper, lower } => {
             format!(

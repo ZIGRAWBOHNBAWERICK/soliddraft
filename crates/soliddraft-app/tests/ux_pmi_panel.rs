@@ -103,6 +103,7 @@ fn round(app: &App, at: [Option<f64>; 3], axis: usize, centre: [f32; 3], radius:
 /// Finds a view and a screen point where a click selects the target's face, and leaves
 /// the app in that view.
 fn find(app: &mut App, target: &Target) -> Pos2 {
+    let mut seen = Vec::new();
     for view in VIEWS {
         ribbon::run_command(app, view);
         ribbon::run_command(app, "zoom_fit");
@@ -115,12 +116,18 @@ fn find(app: &mut App, target: &Target) -> Pos2 {
             };
             ribbon::pick_at(app, at);
             app.run_steps(2);
-            if app.state().state.doc.selection == Some(Selection::Face(target.face)) {
+            let doc = &app.state().state.doc;
+            if doc.selection == Some(Selection::Face(target.face)) {
                 return at;
             }
+            seen.push(format!(
+                "{view}: {}",
+                doc.selection.and_then(|s| doc.describe(s)).map_or("nothing".into(), |d| d.title)
+            ));
         }
     }
-    panic!("no view shows a point of the face");
+    let wanted = app.state().state.doc.describe(Selection::Face(target.face)).map(|d| d.title);
+    panic!("no view shows a point of {wanted:?}; the clicks selected {seen:?}");
 }
 
 /// Picks the target's face in the viewport, as a person does.

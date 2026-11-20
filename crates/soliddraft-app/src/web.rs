@@ -319,27 +319,32 @@ pub fn upload(extensions: &[&str], multiple: bool, purpose: crate::platform::Pur
     let picked = input.clone();
     let on_change = Closure::once(move || {
         let Some(list) = picked.files() else { return };
-        let files: Vec<web_sys::File> = (0..list.length()).filter_map(|i| list.get(i)).collect();
-        if files.is_empty() {
-            return;
-        }
-        wasm_bindgen_futures::spawn_local(async move {
-            let mut read = Vec::with_capacity(files.len());
-            for file in files {
-                match JsFuture::from(file.array_buffer()).await {
-                    Ok(buffer) => read.push((file.name(), js_sys::Uint8Array::new(&buffer).to_vec())),
-                    Err(e) => log::error!("reading {}: {}", file.name(), js_error(e)),
-                }
-            }
-            if !read.is_empty() {
-                UPLOAD.with(|u| *u.borrow_mut() = Some(crate::platform::Uploaded { purpose, files: read }));
-                repaint();
-            }
-        });
+        read((0..list.length()).filter_map(|i| list.get(i)).collect(), purpose);
     });
     input.set_onchange(Some(on_change.as_ref().unchecked_ref()));
     on_change.forget();
     input.click();
+}
+
+/// Reads `files`, such as files dropped on the page, and hands them over together through
+/// [`take_upload`], marked with `purpose`.
+pub fn read(files: Vec<web_sys::File>, purpose: crate::platform::Purpose) {
+    if files.is_empty() {
+        return;
+    }
+    wasm_bindgen_futures::spawn_local(async move {
+        let mut read = Vec::with_capacity(files.len());
+        for file in files {
+            match JsFuture::from(file.array_buffer()).await {
+                Ok(buffer) => read.push((file.name(), js_sys::Uint8Array::new(&buffer).to_vec())),
+                Err(e) => log::error!("reading {}: {}", file.name(), js_error(e)),
+            }
+        }
+        if !read.is_empty() {
+            UPLOAD.with(|u| *u.borrow_mut() = Some(crate::platform::Uploaded { purpose, files: read }));
+            repaint();
+        }
+    });
 }
 
 /// The files last uploaded, once.

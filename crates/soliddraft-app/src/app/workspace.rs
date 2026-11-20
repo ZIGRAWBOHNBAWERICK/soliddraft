@@ -786,18 +786,17 @@ impl eframe::App for SolidDraftApp {
                 crate::assembly::dropped(&mut self.state, dropped);
             }
         }
+        // They are read as an upload is: placed in the active assembly, or else opened.
         #[cfg(target_arch = "wasm32")]
         {
-            let dropped: Vec<(String, Vec<u8>)> = ctx.input(|i| {
-                i.raw.dropped_files.iter().filter_map(|f| Some((f.name.clone(), f.bytes.as_ref()?.to_vec()))).collect()
-            });
-            if !dropped.is_empty() {
-                if self.state.assembly.is_active() {
-                    crate::assembly::insert_bytes(&mut self.state, dropped);
-                } else {
-                    self.open_uploads(dropped);
-                }
-            }
+            let dropped: Vec<web_sys::File> =
+                ctx.input(|i| i.raw.dropped_files.iter().filter_map(|f| f.web_file().cloned()).collect());
+            let purpose = if self.state.assembly.is_active() {
+                crate::platform::Purpose::Insert
+            } else {
+                crate::platform::Purpose::Open
+            };
+            crate::web::read(dropped, purpose);
         }
         self.request_assembly_levels();
         self.state.poll_assistant();

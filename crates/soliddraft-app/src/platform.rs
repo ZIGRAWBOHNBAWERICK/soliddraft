@@ -2,9 +2,25 @@
 //!
 //! On the desktop a dialog asks for a path and files go to disk. The browser has no file
 //! system: saving downloads the file under the name it would have had, and opening
-//! uploads one, which arrives a frame or more later through [`take_upload`].
+//! uploads files, which arrive a frame or more later through [`take_upload`].
 
 use std::path::{Path, PathBuf};
+
+/// What uploaded files are for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Purpose {
+    /// To open: a document, or an assembly with the documents it places.
+    Open,
+    /// To place in the open assembly.
+    Insert,
+}
+
+/// Files the browser handed over, each with its name, and what they are for.
+#[derive(Debug)]
+pub struct Uploaded {
+    pub purpose: Purpose,
+    pub files: Vec<(String, Vec<u8>)>,
+}
 
 /// Asks where to save a file. In the browser the file downloads to wherever the browser
 /// puts downloads, so this returns `default_name` without asking.
@@ -30,13 +46,30 @@ pub fn open_path(title: &str, filter: &str, extensions: &[&str]) -> Option<PathB
     #[cfg(target_arch = "wasm32")]
     {
         let _ = (title, filter);
-        crate::web::upload(extensions);
+        crate::web::upload(extensions, false, Purpose::Open);
+        None
+    }
+}
+
+/// Asks for a document to open, as [`open_path`] does. The browser takes several files
+/// at once, so an assembly can be opened with the parts it places, which it has no
+/// folder to find.
+pub fn open_document(title: &str, filter: &str, extensions: &[&str]) -> Option<PathBuf> {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        open_path(title, filter, extensions)
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = (title, filter);
+        crate::web::upload(extensions, true, Purpose::Open);
         None
     }
 }
 
 /// Asks for one or more files with one of `extensions`, such as the parts to insert in an
-/// assembly. The browser cannot hand over several files by path, so it asks for none.
+/// assembly. In the browser this starts an upload and returns `None`; the files arrive
+/// later through [`take_upload`], for [`Purpose::Insert`].
 pub fn open_paths(title: &str, filter: &str, extensions: &[&str]) -> Option<Vec<PathBuf>> {
     #[cfg(not(target_arch = "wasm32"))]
     {
@@ -44,7 +77,8 @@ pub fn open_paths(title: &str, filter: &str, extensions: &[&str]) -> Option<Vec<
     }
     #[cfg(target_arch = "wasm32")]
     {
-        let _ = (title, filter, extensions);
+        let _ = (title, filter);
+        crate::web::upload(extensions, true, Purpose::Insert);
         None
     }
 }
@@ -96,9 +130,9 @@ pub fn write_export(path: &Path, files: Vec<(std::path::PathBuf, Vec<u8>)>) -> R
     Ok(())
 }
 
-/// The file the user last uploaded, with its name, once it has arrived. Always `None` on
-/// the desktop, where opening a file is immediate.
-pub fn take_upload() -> Option<(String, Vec<u8>)> {
+/// The files the user last uploaded, once they have arrived. Always `None` on the
+/// desktop, where opening a file is immediate.
+pub fn take_upload() -> Option<Uploaded> {
     #[cfg(not(target_arch = "wasm32"))]
     {
         None

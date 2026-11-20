@@ -1649,8 +1649,8 @@ impl SolidDraftApp {
                 }
             }
             AppAction::Open(path) => {
-                let path =
-                    path.or_else(|| crate::platform::open_path("Open", "SolidDraft documents", &file::OPEN_EXTENSIONS));
+                let path = path
+                    .or_else(|| crate::platform::open_document("Open", "SolidDraft documents", &file::OPEN_EXTENSIONS));
                 let Some(path) = path else { return };
                 match soliddraft_document::DocKind::of_path(&path) {
                     Some(soliddraft_document::DocKind::Drawing) => {

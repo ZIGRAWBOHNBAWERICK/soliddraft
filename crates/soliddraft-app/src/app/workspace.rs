@@ -229,6 +229,35 @@ impl SolidDraftApp {
         }
     }
 
+    /// Opens uploaded files: a STEP file Import STEP asked for goes to its review. An
+    /// assembly opens with the other files as the documents it places, since the page has
+    /// no folder to find them in; otherwise the first file opens.
+    fn open_uploads(&mut self, mut files: Vec<(String, Vec<u8>)>) {
+        use soliddraft_document::DocKind;
+        let step_asked = std::mem::take(&mut self.state.step_upload);
+        if files.is_empty() {
+            return;
+        }
+        let is_step = |name: &str| {
+            std::path::Path::new(name)
+                .extension()
+                .is_some_and(|e| e.eq_ignore_ascii_case("step") || e.eq_ignore_ascii_case("stp"))
+        };
+        if step_asked && is_step(&files[0].0) {
+            let (name, bytes) = files.swap_remove(0);
+            return self.review_step_upload(&name, bytes);
+        }
+        let assembly =
+            files.iter().position(|(name, _)| DocKind::of_path(std::path::Path::new(name)) == Some(DocKind::Assembly));
+        let (name, bytes) = files.remove(assembly.unwrap_or(0));
+        if assembly.is_some() {
+            crate::assembly::hold_all(&mut self.state, &files);
+        } else if !files.is_empty() {
+            self.state.note(format!("Opened {name}; open one part or drawing at a time"), NoteKind::Info);
+        }
+        self.open_bytes(&name, &bytes);
+    }
+
     pub(super) fn open_bytes(&mut self, name: &str, bytes: &[u8]) {
         use soliddraft_document::DocKind;
         match DocKind::of_path(std::path::Path::new(name)) {
@@ -242,10 +271,7 @@ impl SolidDraftApp {
                 }
                 Err(e) => self.state.note(format!("{name}: {e}"), NoteKind::Error),
             },
-            Some(DocKind::Assembly) => self.state.note(
-                format!("{name}: assemblies open from their folder, with their parts, in the desktop app"),
-                NoteKind::Error,
-            ),
+            Some(DocKind::Assembly) => crate::assembly::open_bytes(&mut self.state, name, bytes.to_vec()),
             #[cfg(target_arch = "wasm32")]
             _ if self.opening.is_none() => self.open_in_worker(name, bytes),
             _ => {
@@ -751,13 +777,26 @@ impl eframe::App for SolidDraftApp {
         self.shortcuts(ctx);
         crate::drawing::frame(&mut self.state, &mut self.dock);
         crate::assembly::frame(&mut self.state, &mut self.dock, ctx);
-        // The browser hands over a dropped file's name only, not a path to read.
+        // The browser hands over a dropped file's name and bytes, not a path to read.
         #[cfg(not(target_arch = "wasm32"))]
         {
             let dropped: Vec<PathBuf> =
                 ctx.input(|i| i.raw.dropped_files.iter().map(|f| f.path().to_path_buf()).collect());
             if !dropped.is_empty() {
                 crate::assembly::dropped(&mut self.state, dropped);
+            }
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            let dropped: Vec<(String, Vec<u8>)> = ctx.input(|i| {
+                i.raw.dropped_files.iter().filter_map(|f| Some((f.name.clone(), f.bytes.as_ref()?.to_vec()))).collect()
+            });
+            if !dropped.is_empty() {
+                if self.state.assembly.is_active() {
+                    crate::assembly::insert_bytes(&mut self.state, dropped);
+                } else {
+                    self.open_uploads(dropped);
+                }
             }
         }
         self.request_assembly_levels();
@@ -767,14 +806,10 @@ impl eframe::App for SolidDraftApp {
         }
         self.focus_tool_document();
         // In the browser an opened file arrives as an upload, frames after the request.
-        if let Some((name, bytes)) = crate::platform::take_upload() {
-            let step = std::path::Path::new(&name)
-                .extension()
-                .is_some_and(|e| e.eq_ignore_ascii_case("step") || e.eq_ignore_ascii_case("stp"));
-            if std::mem::take(&mut self.state.step_upload) && step {
-                self.review_step_upload(&name, bytes);
-            } else {
-                self.open_bytes(&name, &bytes);
+        if let Some(uploaded) = crate::platform::take_upload() {
+            match uploaded.purpose {
+                crate::platform::Purpose::Insert => crate::assembly::insert_bytes(&mut self.state, uploaded.files),
+                crate::platform::Purpose::Open => self.open_uploads(uploaded.files),
             }
         }
         #[cfg(target_arch = "wasm32")]

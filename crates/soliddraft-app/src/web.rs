@@ -17,7 +17,7 @@ thread_local! {
     /// the app last ran at.
     static POINTER_CLOCK: RefCell<(Option<f64>, f64, bool)> = const { RefCell::new((None, 0.0, false)) };
     static CONTEXT: RefCell<Option<egui::Context>> = const { RefCell::new(None) };
-    static UPLOAD: RefCell<Option<(String, Vec<u8>)>> = const { RefCell::new(None) };
+    static UPLOAD: RefCell<Option<crate::platform::Uploaded>> = const { RefCell::new(None) };
     static FEEDBACK_DOCUMENT: RefCell<Option<(&'static str, usize)>> = const { RefCell::new(None) };
 }
 
@@ -306,25 +306,34 @@ pub fn download(name: &str, bytes: &[u8]) -> Result<(), String> {
     Ok(())
 }
 
-/// Opens the browser's file picker for one file with one of `extensions`. The file
-/// arrives through [`take_upload`].
-pub fn upload(extensions: &[&str]) {
+/// Opens the browser's file picker for files with one of `extensions`, several when
+/// `multiple` is set. The files arrive together through [`take_upload`], marked with
+/// `purpose`.
+pub fn upload(extensions: &[&str], multiple: bool, purpose: crate::platform::Purpose) {
     let Some(document) = window().document() else { return };
     let Ok(input) = document.create_element("input") else { return };
     let input: web_sys::HtmlInputElement = input.unchecked_into();
     input.set_type("file");
+    input.set_multiple(multiple);
     input.set_accept(&extensions.iter().map(|e| format!(".{e}")).collect::<Vec<_>>().join(","));
     let picked = input.clone();
     let on_change = Closure::once(move || {
-        let Some(file) = picked.files().and_then(|f| f.get(0)) else { return };
+        let Some(list) = picked.files() else { return };
+        let files: Vec<web_sys::File> = (0..list.length()).filter_map(|i| list.get(i)).collect();
+        if files.is_empty() {
+            return;
+        }
         wasm_bindgen_futures::spawn_local(async move {
-            match JsFuture::from(file.array_buffer()).await {
-                Ok(buffer) => {
-                    let bytes = js_sys::Uint8Array::new(&buffer).to_vec();
-                    UPLOAD.with(|u| *u.borrow_mut() = Some((file.name(), bytes)));
-                    repaint();
+            let mut read = Vec::with_capacity(files.len());
+            for file in files {
+                match JsFuture::from(file.array_buffer()).await {
+                    Ok(buffer) => read.push((file.name(), js_sys::Uint8Array::new(&buffer).to_vec())),
+                    Err(e) => log::error!("reading {}: {}", file.name(), js_error(e)),
                 }
-                Err(e) => log::error!("reading {}: {}", file.name(), js_error(e)),
+            }
+            if !read.is_empty() {
+                UPLOAD.with(|u| *u.borrow_mut() = Some(crate::platform::Uploaded { purpose, files: read }));
+                repaint();
             }
         });
     });
@@ -333,8 +342,8 @@ pub fn upload(extensions: &[&str]) {
     input.click();
 }
 
-/// The last uploaded file and its name, once.
-pub fn take_upload() -> Option<(String, Vec<u8>)> {
+/// The files last uploaded, once.
+pub fn take_upload() -> Option<crate::platform::Uploaded> {
     UPLOAD.with(|u| u.borrow_mut().take())
 }
 
@@ -344,6 +353,41 @@ thread_local! {
     static SHOWN_OPTIONS: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
     static SHOWN_BUILD: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
     static SHOWN_PMI: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
+    static SHOWN_ASSEMBLY: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
+    static SHOWN_ASSEMBLY_VIEW: std::cell::RefCell<Option<(crate::viewport::camera::Camera, egui::Rect)>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Notes the camera and the rectangle the assembly viewport drew with, for
+/// [`assembly_screen_point`].
+pub(crate) fn show_assembly_view(camera: &crate::viewport::camera::Camera, rect: egui::Rect) {
+    SHOWN_ASSEMBLY_VIEW.with_borrow_mut(|view| *view = Some((camera.clone(), rect)));
+}
+
+/// Where the point `(x, y, z)` of the open assembly, in millimetres, was drawn in the last
+/// frame, as `[x, y]` in the page's pixels, or nothing when it is behind the camera or no
+/// assembly was drawn. Read only, for browser checks that click on a face.
+#[wasm_bindgen]
+pub fn assembly_screen_point(x: f32, y: f32, z: f32) -> Option<Vec<f32>> {
+    SHOWN_ASSEMBLY_VIEW.with_borrow(|view| {
+        let (camera, rect) = view.as_ref()?;
+        let at = camera.project(glam::Vec3::new(x, y, z), *rect)?;
+        Some(vec![at.x, at.y])
+    })
+}
+
+/// Notes the assembly the last frame showed, for [`shown_assembly`].
+pub(crate) fn show_assembly(shown: serde_json::Value) {
+    SHOWN_ASSEMBLY.with_borrow_mut(|assembly| *assembly = shown.to_string());
+}
+
+/// The open assembly as the last frame showed it, as JSON (see `assembly::shown`): its
+/// name, whether it is active, unsaved, opening or loading, its components with their
+/// placements and how each part was found, its mates, and the files handed to the page.
+/// Read only, for browser checks.
+#[wasm_bindgen]
+pub fn shown_assembly() -> String {
+    SHOWN_ASSEMBLY.with_borrow(|assembly| assembly.clone())
 }
 
 /// Notes the items the Manufacturing information panel is drawing, for

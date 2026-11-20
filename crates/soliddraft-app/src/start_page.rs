@@ -90,10 +90,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
                 if tile(ui, "New part", "A solid body from sketches and features", tile_width, true).clicked() {
                     state.push(AppAction::NewPart);
                 }
-                // The browser build has no assemblies yet: the tile says so, greyed.
-                let assemblies = crate::commands::get("new_assembly").is_some_and(|c| c.is_enabled(state));
-                let caption = if assemblies { "Parts placed and mated together" } else { "Desktop app only" };
-                if tile(ui, "New assembly", caption, tile_width, assemblies).clicked() {
+                if tile(ui, "New assembly", "Parts placed and mated together", tile_width, true).clicked() {
                     run(state, "new_assembly");
                 }
                 if tile(ui, "New drawing", "Sheets with views of a part", tile_width, true).clicked() {

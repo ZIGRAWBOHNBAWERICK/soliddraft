@@ -594,7 +594,7 @@ impl CommandSpec {
         self
     }
 
-    fn hint(mut self, hint: fn(&AppState) -> Option<String>) -> Self {
+    pub(crate) fn hint(mut self, hint: fn(&AppState) -> Option<String>) -> Self {
         self.hint = hint;
         self
     }

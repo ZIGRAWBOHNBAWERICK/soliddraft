@@ -185,7 +185,7 @@ fn insert_one(state: &mut AppState, input: &Value) -> Result<Value, String> {
     }
     let revisions = state.revisions.clone();
     let s = state.assembly.session.as_mut().ok_or("no assembly is open")?;
-    let path = place(s, &*revisions, Path::new(file), placement)?;
+    let path = place(s, &*revisions, &Placing::File(PathBuf::from(file)), placement)?;
     s.doc.finish_loading();
     s.selected = Some(path.clone());
     Ok(json!({ "inserted": path, "assembly": summary(state) }))

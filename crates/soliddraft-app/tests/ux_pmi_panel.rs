@@ -124,6 +124,11 @@ fn look(app: &mut App, look: Look) {
 
 /// Clicks a point of the part if it is on screen, and says whether that selected `face`.
 fn try_point(app: &mut App, face: FaceId, world: Vec3) -> Option<(Pos2, bool)> {
+    // Nothing selected: a selection shows its feature's dimensions over the part, and a
+    // click on one of those is not a click on a face. The pause keeps two clicks from
+    // reading as a double click.
+    app.state_mut().state.push(AppAction::Select(None));
+    app.run_steps(30);
     let rect = app.state().state.viewport.rect;
     let at = app.state().state.viewport.camera.project(world, rect).filter(|at| rect.contains(*at))?;
     ribbon::pick_at(app, at);

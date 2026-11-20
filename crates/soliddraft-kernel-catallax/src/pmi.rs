@@ -163,6 +163,8 @@ fn file_items<F: Clone>(item: &PmiItem<F>) -> KernelResult<Vec<cx::Item<F>>> {
             features: features.clone(),
             limits: limits(id, *tolerance)?,
             through: *through,
+            // The app has no threads on the part yet.
+            thread: None,
             nominal: None,
         })),
         PmiKind::Location { from, to, tolerance, .. } => one(location(id, from, to, *tolerance)?),
@@ -184,6 +186,7 @@ fn file_items<F: Clone>(item: &PmiItem<F>) -> KernelResult<Vec<cx::Item<F>>> {
                         features: ends.to_vec(),
                         limits: None,
                         through: false,
+                        thread: None,
                         nominal: None,
                     }),
                 },
@@ -249,6 +252,9 @@ fn to_catallax<F: Clone>(pmi: &Pmi<F>) -> KernelResult<(cx::Pmi<F>, Vec<usize>)>
 fn app_item<F: Clone>(item: &cx::Item<F>) -> Option<PmiItem<F>> {
     let kind = match &item.kind {
         cx::ItemKind::Datum(datum) => PmiKind::Datum { letter: datum.letter.clone(), feature: datum.feature.clone() },
+        // A threaded size has no form in the app yet, so it is left out by name, not read
+        // as a plain diameter.
+        cx::ItemKind::Size(size) if size.thread.is_some() => return None,
         cx::ItemKind::Size(size) => PmiKind::Size {
             size: match size.kind {
                 cx::SizeKind::Diameter => SizeKind::Diameter,

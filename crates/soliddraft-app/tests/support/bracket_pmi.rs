@@ -22,7 +22,7 @@ pub fn call(state: &mut AppState, tool: &str, arguments: Value) -> Value {
 
 /// The bracket's build steps of the canonical scenario: everything before its edits.
 pub fn build(state: &mut AppState) {
-    let scenario: Value = serde_json::from_str(include_str!("../../../ci/scenarios/canonical-p1.json")).unwrap();
+    let scenario: Value = serde_json::from_str(include_str!("../../../../ci/scenarios/canonical-p1.json")).unwrap();
     for step in scenario["steps"].as_array().unwrap() {
         call(state, step["tool"].as_str().unwrap(), step["arguments"].clone());
         if step["label"] == "original" {

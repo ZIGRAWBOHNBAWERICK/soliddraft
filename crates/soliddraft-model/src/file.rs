@@ -146,6 +146,8 @@ struct Recipe {
     appearances: Vec<AppearanceAssignment>,
     #[serde(default, skip_serializing_if = "Snapshots::is_empty")]
     snapshots: Snapshots,
+    #[serde(default, skip_serializing_if = "crate::pmi::PartPmi::is_empty")]
+    pmi: crate::pmi::PartPmi,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -218,6 +220,7 @@ impl Document {
             material: self.materials.material.clone(),
             appearances: self.materials.appearances.clone(),
             snapshots: self.materials.snapshots.clone(),
+            pmi: self.pmi.clone(),
         }
     }
 
@@ -238,7 +241,8 @@ impl Document {
     }
 
     /// The hash of what decides the part's shape: the truth without the part's and
-    /// features' names, value expressions, text properties, repair-prompt labels, provenance, material, appearances
+    /// features' names, value expressions, text properties, repair-prompt labels, provenance, material, appearances,
+    /// manufacturing information
     /// and the unused feature-id counter. Renaming a feature changes
     /// the semantic hash and not this one.
     pub fn geometry_hash(&self) -> ContentHash {
@@ -416,6 +420,14 @@ impl Document {
         let mut doc = Document::new(recipe.name, kernel);
         doc.id = manifest::legacy_identity(DocKind::Part, &probe, Vec::new()).id;
         doc.materials = materials;
+        // Every item must fit the ones before it, as it had to when it was added.
+        for item in recipe.pmi.items {
+            if let Some(problem) = doc.pmi.problem_with(&item, None) {
+                return Err(FileError::Invalid(format!("{}: {problem}", item.id)));
+            }
+            doc.pmi.items.push(item);
+        }
+        doc.pmi.part = recipe.pmi.part;
         for (datum, name) in recipe.datum_names {
             doc.rename_datum(datum, &name).map_err(|e| FileError::Invalid(e.to_string()))?;
         }
@@ -494,6 +506,7 @@ fn shape_hash(truth: &Value) -> ContentHash {
             "material",
             "appearances",
             "snapshots",
+            "pmi",
             "values",
             "configurations",
             "properties",

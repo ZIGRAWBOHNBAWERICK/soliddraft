@@ -24,6 +24,7 @@ mod lattice;
 mod loft;
 mod measure;
 mod native;
+mod pmi;
 mod scan;
 mod shell;
 mod step;
@@ -2508,10 +2509,41 @@ impl Kernel for CatallaxKernel {
         self.observe_export("export_step", || {
             let write = || match self.approximate(body)? {
                 Some(approximate) => approximate.export_step(options),
-                None => step::export(&self.solid(body)?.app, options),
+                None => step::export(&self.solid(body)?.app, options, None),
             };
             lattice::export_allowance("export_step", write).map(|(export, _)| export)
         })
+    }
+
+    fn pmi_nominals(
+        &self,
+        body: BodyId,
+        pmi: &soliddraft_kernel_api::pmi::Pmi<FaceId>,
+    ) -> KernelResult<Vec<Option<f64>>> {
+        let solid = self.solid(body)?;
+        pmi::nominals(&solid, body, pmi)
+    }
+
+    fn export_step_with_pmi(
+        &self,
+        body: BodyId,
+        options: &StepOptions,
+        pmi: &soliddraft_kernel_api::pmi::Pmi<FaceId>,
+    ) -> KernelResult<StepExport> {
+        self.observe_export("export_step", || {
+            // A body built within a tolerance has no exact faces to attach to yet.
+            if self.approximate(body)?.is_some() {
+                return Err(KernelError::Unsupported("export_step_with_pmi".into()));
+            }
+            let solid = self.solid(body)?;
+            let on_model = pmi::on_model(&solid, body, pmi)?;
+            let write = || step::export(&solid.app, options, Some(&on_model));
+            lattice::export_allowance("export_step", write).map(|(export, _)| export)
+        })
+    }
+
+    fn read_step_pmi(&self, source: &[u8]) -> KernelResult<soliddraft_kernel_api::pmi::StepPmi> {
+        pmi::read(source)
     }
 }
 
@@ -2644,7 +2676,7 @@ mod tests {
             }
             let solid = kernel.solid(cut).unwrap();
             assert_eq!(solid.app.names, replayed.names);
-            assert_eq!(kernel.export_step(cut, &options).unwrap(), step::export(&replayed, &options).unwrap());
+            assert_eq!(kernel.export_step(cut, &options).unwrap(), step::export(&replayed, &options, None).unwrap());
             assert!((kernel.mass_properties(cut).unwrap().volume - 11760.0).abs() < 1e-6);
 
             // The later-created target is not the leading operand. This refusal
@@ -2691,7 +2723,7 @@ mod tests {
             assert_eq!(kernel.solid(swept.body).unwrap().app.names, fresh.names);
             assert_eq!(
                 kernel.export_step(swept.body, &StepOptions::default()).unwrap(),
-                step::export(&fresh, &StepOptions::default()).unwrap()
+                step::export(&fresh, &StepOptions::default(), None).unwrap()
             );
             assert!((kernel.mass_properties(swept.body).unwrap().volume - 45.0 * std::f64::consts::PI).abs() < 1e-6);
             let history = kernel.history(swept.body).unwrap();

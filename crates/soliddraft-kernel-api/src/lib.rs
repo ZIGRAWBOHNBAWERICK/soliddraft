@@ -28,6 +28,7 @@ pub mod contract;
 pub mod counting;
 pub mod drawing;
 pub mod measure;
+pub mod pmi;
 pub use assembly_measure::{
     Axis, EnclosedSupport, ExactAxis, ExactAxisPlane, ExactPoint, ExactRadius, ExactRational, ExactSupport,
     SupportBounds, SupportEntity, SupportSource,
@@ -1559,6 +1560,36 @@ pub trait Kernel: Send + Sync {
     fn export_step(&self, body: BodyId, options: &StepOptions) -> KernelResult<StepExport> {
         let _ = (body, options);
         Err(KernelError::Unsupported("export_step".into()))
+    }
+
+    /// The nominal value in millimetres of every dimension of `pmi`, measured on the
+    /// body: one entry per item, `None` for an item that is not a size or a distance.
+    /// A dimension that does not fit its faces, such as a diameter on a plane, fails the
+    /// call with [`KernelError::InvalidInput`] naming the item.
+    fn pmi_nominals(&self, body: BodyId, pmi: &pmi::Pmi<FaceId>) -> KernelResult<Vec<Option<f64>>> {
+        let _ = (body, pmi);
+        Err(KernelError::Unsupported("pmi_nominals".into()))
+    }
+
+    /// Writes a solid as [`Kernel::export_step`] does, with its manufacturing
+    /// information as AP242 semantic PMI on the faces it applies to. Every dimension's
+    /// nominal value is measured on the body; `nominal` fields are not read.
+    fn export_step_with_pmi(
+        &self,
+        body: BodyId,
+        options: &StepOptions,
+        pmi: &pmi::Pmi<FaceId>,
+    ) -> KernelResult<StepExport> {
+        let _ = (body, options, pmi);
+        Err(KernelError::Unsupported("export_step_with_pmi".into()))
+    }
+
+    /// Reads the manufacturing information of a STEP file. Faces are named by the keys
+    /// [`FaceRole::Imported`] gives the faces of the same file's import. Items the
+    /// backend cannot represent are listed, never guessed.
+    fn read_step_pmi(&self, source: &[u8]) -> KernelResult<pmi::StepPmi> {
+        let _ = source;
+        Err(KernelError::Unsupported("read_step_pmi".into()))
     }
 }
 

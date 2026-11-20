@@ -18,6 +18,9 @@
 //! - **Materials and appearances.** A part's material and the appearances of the part,
 //!   its features' faces and single faces, each scoped to configurations, with copies
 //!   of what they use (see [`materials`]). Mass comes from the material's density.
+//! - **Manufacturing information.** Datums, dimensions with limits, geometric
+//!   tolerances and surface textures on persistently named faces, and the part's
+//!   notes (see [`pmi`]). A dimension's size is measured on the body, never stored.
 //! - **Files.** [`Document::save`] and [`Document::open`] read and write the versioned
 //!   native format (see [`file`]); a saved file round-trips exactly. What the user shows
 //!   and hides travels with the part, outside its truth (see [`view`]).
@@ -34,6 +37,7 @@ mod feature;
 pub mod file;
 pub mod materials;
 pub mod params;
+pub mod pmi;
 pub mod rebuild;
 pub mod reference;
 pub mod tracked;

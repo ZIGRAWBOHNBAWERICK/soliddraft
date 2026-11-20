@@ -116,6 +116,8 @@ pub struct Document {
     pub(crate) next_body: u32,
     /// The material, the appearances and the copies of both the part holds.
     pub(crate) materials: PartMaterials,
+    /// The manufacturing information: items on faces and the part's notes.
+    pub(crate) pmi: crate::pmi::PartPmi,
     /// Viewport quality, export accuracy and whether to save display data: kept in the
     /// file's `settings.json`, outside the part's truth and hashes.
     pub(crate) settings: Settings,
@@ -168,6 +170,7 @@ impl Document {
             next_id: 1,
             next_body: 1,
             materials: PartMaterials::default(),
+            pmi: crate::pmi::PartPmi::default(),
             settings: Settings::default(),
             view: Visibility::default(),
             kernel,
@@ -632,6 +635,9 @@ impl Document {
         }
         for row in &self.values.tracked {
             out.extend(held(&row.name, reference::face_refs(&row.source)));
+        }
+        for item in &self.pmi.items {
+            out.extend(held(&item.id, reference::face_refs(item)));
         }
         out
     }

@@ -102,6 +102,7 @@ impl Document {
             next_id: self.next_id,
             next_body: self.next_body,
             materials: self.materials.clone(),
+            pmi: self.pmi.clone(),
             settings: self.settings.clone(),
             view: self.view.clone(),
             kernel: self.kernel.clone(),

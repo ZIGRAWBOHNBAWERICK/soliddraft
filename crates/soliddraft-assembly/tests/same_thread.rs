@@ -151,11 +151,20 @@ fn an_assembly_opened_on_the_callers_thread_is_the_one_the_loader_threads_open()
     assert!(matches!(here.store().get(large_def).freshness, Freshness::NewerAvailable { .. }));
     assert_eq!(here.bvh_ready().map(|b| b.len()), Some(threads.bvh().len()), "the hierarchy is built at once");
 
-    // A coarse level, asked for and taken a job at a time.
-    here.request_levels(&[(large_def, Level::Coarse)]);
-    assert_eq!(here.levels_pending(), 1);
-    here.finish_levels();
-    assert!(here.store().get(large_def).level_mesh(Level::Coarse).is_some());
+    // A coarse level, asked for and taken a job at a time. The small block's file is at
+    // the pinned revision, so its coarse level comes from the display data it keeps; the
+    // large block's pinned revision is nowhere now, so it has none on either loader.
+    let small_def = here.store().iter().find(|(_, d)| d.label.contains("small")).map(|(i, _)| i).unwrap();
+    for doc in [&mut here, &mut threads] {
+        doc.request_levels(&[(small_def, Level::Coarse), (large_def, Level::Coarse)]);
+        doc.finish_levels();
+    }
+    assert_eq!(here.levels_pending(), 0);
+    let coarse =
+        |doc: &AssemblyDocument, def| doc.store().get(def).level_mesh(Level::Coarse).map(|m| m.positions.clone());
+    assert!(coarse(&here, small_def).is_some());
+    assert!(coarse(&here, large_def).is_none());
+    assert_eq!(coarse(&here, small_def), coarse(&threads, small_def));
 
     // Rebuild on the caller's thread moves the large block on, as with threads.
     let (a, b) = (here.rebuild(), threads.rebuild());

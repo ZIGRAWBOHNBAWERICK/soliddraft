@@ -78,8 +78,8 @@ struct Target {
     points: Vec<Vec3>,
 }
 
-fn plane(app: &App, at: [Option<f64>; 3], point: [f32; 3]) -> Target {
-    Target { face: face(app, SurfaceKind::Plane, at), points: vec![Vec3::from(point)] }
+fn plane(app: &App, at: [Option<f64>; 3], points: &[[f32; 3]]) -> Target {
+    Target { face: face(app, SurfaceKind::Plane, at), points: points.iter().copied().map(Vec3::from).collect() }
 }
 
 /// A round face about an axis along `axis` (0 for x, 1 for y, 2 for z) through `centre`:
@@ -104,8 +104,26 @@ fn round(app: &App, at: [Option<f64>; 3], axis: usize, centre: [f32; 3], radius:
 /// the app in that view.
 fn find(app: &mut App, target: &Target) -> Pos2 {
     let mut seen = Vec::new();
-    for view in VIEWS {
-        ribbon::run_command(app, view);
+    // The standard views, then the part turned by hand to look into what they hide,
+    // such as the underside of a slot.
+    let turned = [-90.0_f32, 90.0, -45.0, -135.0, 45.0, 135.0, 0.0, 180.0]
+        .into_iter()
+        .flat_map(|yaw| [-25.0_f32, 25.0].map(|pitch| (yaw, pitch)));
+    let looks = VIEWS.into_iter().map(Ok).chain(turned.map(Err));
+    for look in looks {
+        let view = match look {
+            Ok(view) => {
+                ribbon::run_command(app, view);
+                view.to_owned()
+            }
+            Err((yaw, pitch)) => {
+                let camera = &mut app.state_mut().state.viewport.camera;
+                camera.orbit(0.0, 0.0);
+                camera.yaw = yaw.to_radians();
+                camera.pitch = pitch.to_radians();
+                format!("turned to {yaw}, {pitch}")
+            }
+        };
         ribbon::run_command(app, "zoom_fit");
         settle(app);
         let rect = app.state().state.viewport.rect;
@@ -185,18 +203,27 @@ fn a_person_puts_the_bracket_s_fourteen_items_on_its_faces() {
         ribbon::run_command(app, "manufacturing_information");
         assert!(app.state().state.pmi.open);
 
-        let a = plane(app, [None, None, Some(0.0)], [20.0, 20.0, 0.0]);
-        let b = plane(app, [None, Some(0.0), None], [10.0, 0.0, 15.0]);
-        let c = plane(app, [Some(0.0), None, None], [0.0, 20.0, 2.5]);
+        let a = plane(app, [None, None, Some(0.0)], &[[20.0, 20.0, 0.0], [42.0, 8.0, 0.0]]);
+        let b = plane(app, [None, Some(0.0), None], &[[10.0, 0.0, 15.0], [50.0, 0.0, 26.0], [8.0, 0.0, 2.0]]);
+        let c = plane(
+            app,
+            [Some(0.0), None, None],
+            &[[0.0, 20.0, 2.5], [0.0, 31.0, 3.5], [0.0, 2.5, 22.0], [0.0, 1.5, 12.0], [0.0, 36.0, 1.5]],
+        );
         let bore = round(app, [Some(30.0), Some(25.0), Some(7.5)], 2, [30.0, 25.0, 0.0], 4.0, &[13.0, 9.0]);
         let boss = round(app, [Some(30.0), Some(25.0), Some(10.0)], 2, [30.0, 25.0, 0.0], 8.0, &[10.0]);
-        let boss_top = plane(app, [Some(30.0), Some(25.0), Some(15.0)], [36.0, 25.0, 15.0]);
+        let boss_top = plane(
+            app,
+            [Some(30.0), Some(25.0), Some(15.0)],
+            &[[36.0, 25.0, 15.0], [30.0, 31.0, 15.0], [24.5, 25.0, 15.0]],
+        );
         let holes: Vec<Target> = [[10.0, 12.0], [10.0, 32.0], [50.0, 12.0], [50.0, 32.0]]
             .into_iter()
             .map(|[x, y]| round(app, [Some(x), Some(y), Some(2.5)], 2, [x as f32, y as f32, 0.0], 2.0, &[4.0, 1.0]))
             .collect();
-        let slot_low = plane(app, [Some(30.0), Some(2.5), Some(15.0)], [30.0, 0.5, 15.0]);
-        let slot_high = plane(app, [Some(30.0), Some(2.5), Some(21.0)], [30.0, 0.5, 21.0]);
+        let across = |z: f32| [[30.0, 0.6, z], [26.0, 2.5, z], [34.0, 4.2, z], [30.0, 4.4, z]];
+        let slot_low = plane(app, [Some(30.0), Some(2.5), Some(15.0)], &across(15.0));
+        let slot_high = plane(app, [Some(30.0), Some(2.5), Some(21.0)], &across(21.0));
         // The slot's ends are half cylinders about x = 23 and x = 37 at z = 18.
         let end = |app: &App, low: bool| {
             let found: Vec<FaceId> = app

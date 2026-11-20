@@ -63,6 +63,40 @@ struct Listed {
     geometry: soliddraft_document::ContentHash,
     pmi: PartPmi,
     rows: Vec<PmiRow>,
+    /// The rows as a browser check reads them; see
+    /// `web::shown_manufacturing_information`. Empty on the desktop.
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    shown: String,
+}
+
+/// The listed rows for a browser check: each item with its callout and its faces, a
+/// face by its name, its surface and its centroid to a micrometre.
+fn shown(doc: &Document, rows: &[PmiRow]) -> String {
+    let face = |face: &FaceId| -> String {
+        let name = crate::command_tools::name_of_face(doc, *face).unwrap_or_default();
+        match doc.named_face(*face) {
+            Some(named) => {
+                let c = [named.centroid.x, named.centroid.y, named.centroid.z]
+                    .map(|v| (f64::from(v) * 1000.0).round() / 1000.0 + 0.0);
+                format!("{name} @ {:?} ({}, {}, {})", named.surface, c[0], c[1], c[2])
+            }
+            None => name,
+        }
+    };
+    let items: Vec<serde_json::Value> = rows
+        .iter()
+        .map(|row| {
+            let faces: Vec<Vec<String>> = row.on_body.as_ref().map_or_else(Vec::new, |on_body| {
+                on_body.features().into_iter().map(|feature| feature.iter().map(face).collect()).collect()
+            });
+            let mut item = serde_json::json!({ "name": row.item.id, "callout": row.callout(), "faces": faces });
+            if let Some(problem) = &row.problem {
+                item["problem"] = serde_json::json!(problem);
+            }
+            item
+        })
+        .collect();
+    serde_json::json!({ "items": items, "notes": doc.model().part_notes() }).to_string()
 }
 
 pub struct State {
@@ -355,7 +389,9 @@ fn rows(state: &mut AppState) -> Vec<PmiRow> {
     let pmi = state.doc.model().pmi();
     let current = state.pmi.listed.as_ref().is_some_and(|listed| listed.geometry == geometry && &listed.pmi == pmi);
     if !current || state.doc.proof_pending() {
-        let listed = Listed { geometry, pmi: pmi.clone(), rows: state.doc.model().pmi_rows() };
+        let rows = state.doc.model().pmi_rows();
+        let shown = if cfg!(target_arch = "wasm32") { shown(&state.doc, &rows) } else { String::new() };
+        let listed = Listed { geometry, pmi: pmi.clone(), rows, shown };
         state.pmi.listed = Some(listed);
     }
     state.pmi.listed.as_ref().map(|listed| listed.rows.clone()).unwrap_or_default()
@@ -566,6 +602,10 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
     ui.separator();
     // The items take what is left of the sheet and scroll in it.
     let rows = rows(state);
+    #[cfg(target_arch = "wasm32")]
+    if let Some(listed) = &state.pmi.listed {
+        crate::web::show_manufacturing_information(&listed.shown);
+    }
     let height = ui.available_height().max(120.0);
     egui::ScrollArea::vertical().id_salt("pmi_items").auto_shrink([false, true]).max_height(height).show(ui, |ui| {
         list(ui, state, &rows);

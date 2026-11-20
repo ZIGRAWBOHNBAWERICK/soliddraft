@@ -41,6 +41,33 @@ Importing a STEP file reads its manufacturing information onto the imported face
 
 Replacing an imported file keeps the part's own items: they follow the faces the replacement matched.
 
+## On a drawing
+
+A drawing of a part that states manufacturing information shows it. Make drawing brings every item in, once, and places it:
+
+| Item | Where it goes |
+|---|---|
+| Diameter, radius | On the round edge, in a view that looks along its axis, with the count of a pattern before it and THRU after a through hole |
+| Distance | Between its two ends in a view that sees both edge on, stacked outside the view |
+| Slot | One callout on a round end, where the slot is seen in true shape |
+| Datum, tolerance or finish of a flat face | On the line the face shows as, in the view with the fewest annotations that sees it edge on |
+| Tolerance of a feature with a size | Under that size |
+| The basic distances of a position tolerance | Framed dimensions from the datum's line to each feature's centre, one for each distinct distance, on the outer side of the view |
+
+The drawing also gets a section through the hole the part holds tightest: the one with a fit, or else the narrowest tolerance. The title block names the part's material and general tolerance, and the part's other notes go in the notes block in place of the template's.
+
+The drawing places everything itself. Stacked dimensions settle first, nearest their views; callouts and symbols then move along their leaders, or straight across or up, until no text lies over a line, another text or the frame.
+
+Each annotation made this way belongs to its item in the part. Its tolerance, count and text are the part's, and the drawing does not edit them: change the item in the part and update the drawing. An item removed from the part leaves the drawing, and a new one comes in, at the next update.
+
+An item no view can show is not drawn somewhere it does not belong. It is listed by name with the reason, such as a height on a drawing that has only the top view.
+
+## Drawing and files
+
+Inspect > Drawing and files writes three files in one action: the STEP file with the part's manufacturing information, and a drawing made from that information as PDF and DXF beside it. The drawing has the front, top and side views and the section, and stays open in the app.
+
+The action reports what it wrote: how many items are in the file, which are on the drawing, which the drawing could not show, any text that lies over something, and anything on the drawing that the file does not state. The last three lists are empty for a part whose items all apply.
+
 ## Scripted commands
 
 | Tool | What it does |
@@ -49,6 +76,7 @@ Replacing an imported file keeps the part's own items: they follow the faces the
 | `pmi_remove` | Removes the named item |
 | `pmi_notes` | Sets the general tolerance, the material note and the other notes |
 | `pmi_list` | Lists every item with its callout, its faces, its measured values, its locating distances and any problem, and the part's notes |
+| `manufacturing_package` | Writes `path` (.step) and a drawing of the part's manufacturing information beside it as .pdf and .dxf, and reports what the drawing shows and what it could not |
 
 ```json
 {"kind": "diameter", "name": "Bore diameter", "faces": ["Cut-Extrude1 · Wall of circle 1"], "tolerance": "H7"}
@@ -58,4 +86,4 @@ Replacing an imported file keeps the part's own items: they follow the faces the
 
 ## What is checked
 
-`crates/soliddraft-app/tests/pmi_bracket.rs` builds the P1 bracket, adds its fourteen items, exports it, imports the file into a new part, saves, reopens and exports again, and edits the bore from 8 to 10 mm. `crates/soliddraft-app/tests/ux_pmi_panel.rs` adds the same fourteen items by hand in the app window. Hosted CI reads the exported files in OpenCASCADE through `ci/check-step-pmi.py`. OpenCASCADE has no reader for the surface texture entity or for an attribute of a feature, so it does not read a finish or the word "through".
+`crates/soliddraft-app/tests/pmi_bracket.rs` builds the P1 bracket, adds its fourteen items, exports it, imports the file into a new part, saves, reopens and exports again, and edits the bore from 8 to 10 mm. `crates/soliddraft-app/tests/ux_pmi_panel.rs` adds the same fourteen items by hand in the app window. `crates/soliddraft-app/tests/pmi_drawing.rs` writes the three files in one action and checks the drawing: four views, every item once, the six basic distances, no overlap, nothing that the file does not state, and the title block. Hosted CI reads the exported files in OpenCASCADE through `ci/check-step-pmi.py`. OpenCASCADE has no reader for the surface texture entity or for an attribute of a feature, so it does not read a finish or the word "through".

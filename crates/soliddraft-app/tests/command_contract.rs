@@ -822,7 +822,7 @@ fn command_ids_shortcuts_agent_schemas_and_availability_stay_compatible() {
         "Inspect",
         &[
             ("Measure", &["measure", "mass_properties", "material"]),
-            ("Annotate", &["manufacturing_information"]),
+            ("Annotate", &["manufacturing_information", "manufacturing_package"]),
             ("Check", &["check", "section"]),
             ("Surface quality", &["draft_check"]),
         ],

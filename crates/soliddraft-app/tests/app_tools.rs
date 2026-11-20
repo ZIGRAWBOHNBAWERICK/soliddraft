@@ -231,6 +231,15 @@ fn every_tool_runs_without_a_window_and_undoes_as_its_row_says() {
     }
 
     // The drawing.
+    // One action writes the STEP file and a drawing of it as PDF and DXF, and leaves the
+    // drawing open.
+    let package = dir.join("board-package.step");
+    let written = s.call("manufacturing_package", json!({ "path": package }));
+    for extension in ["step", "pdf", "dxf"] {
+        assert!(package.with_extension(extension).is_file(), "{extension} is written: {written}");
+    }
+    assert_eq!(written["drawing"]["not_in_file"], json!([]), "{written}");
+    s.call("drawing_show_part", json!({}));
     s.call("make_drawing", json!({ "template": "iso-a3" }));
     s.call("drawing_show_part", json!({}));
     s.call("show_drawing", json!({}));

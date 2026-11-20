@@ -32,8 +32,13 @@ fn sketch(build: impl FnOnce(&mut Sketch)) -> FeatureKind {
 }
 
 fn extrude(sketch: FeatureId, operation: ExtrudeOp, end: EndCondition) -> FeatureKind {
-    let reverse = operation == ExtrudeOp::Cut;
-    FeatureKind::Extrude(ExtrudeFeature { profile: ProfileSource::Sketch { feature: sketch }, operation, end, reverse })
+    // Every sketch is on the plate's underside, so bosses and cuts both run upwards.
+    FeatureKind::Extrude(ExtrudeFeature {
+        profile: ProfileSource::Sketch { feature: sketch },
+        operation,
+        end,
+        reverse: false,
+    })
 }
 
 fn bore_sketch(diameter: f64) -> FeatureKind {

@@ -359,6 +359,8 @@ thread_local! {
     static SHOWN_BUILD: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
     static SHOWN_PMI: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
     static SHOWN_ASSEMBLY: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
+    static SHOWN_CONTROLS: std::cell::RefCell<std::collections::BTreeMap<String, egui::Pos2>> =
+        const { std::cell::RefCell::new(std::collections::BTreeMap::new()) };
     static SHOWN_ASSEMBLY_VIEW: std::cell::RefCell<Option<(crate::viewport::camera::Camera, egui::Rect)>> =
         const { std::cell::RefCell::new(None) };
 }
@@ -388,8 +390,8 @@ pub(crate) fn show_assembly(shown: serde_json::Value) {
 
 /// The open assembly as the last frame showed it, as JSON (see `assembly::shown`): its
 /// name, whether it is active, unsaved, opening or loading, its components with their
-/// placements and how each part was found, its mates, and the files handed to the page.
-/// Read only, for browser checks.
+/// placements and how each part was found, the selection, its mates, and the files handed
+/// to the page. Read only, for browser checks.
 #[wasm_bindgen]
 pub fn shown_assembly() -> String {
     SHOWN_ASSEMBLY.with_borrow(|assembly| assembly.clone())
@@ -414,6 +416,26 @@ pub fn shown_manufacturing_information() -> String {
 /// Notes the selection the options bar drew and where it drew Details, for [`shown_options`].
 pub(crate) fn show_options(shown: serde_json::Value) {
     SHOWN_OPTIONS.with_borrow_mut(|options| *options = shown.to_string());
+}
+
+/// Notes where the control `name` was drawn in this frame, for [`shown_controls`].
+pub(crate) fn show_control(name: impl Into<String>, rect: egui::Rect) {
+    SHOWN_CONTROLS.with_borrow_mut(|controls| controls.insert(name.into(), rect.center()));
+}
+
+/// The centres of the named controls the last frame drew, in the page's pixels, as JSON:
+/// `{"<name>": {"x", "y"}}`. The options bar notes `Assembly options` or `Drawing options`,
+/// the Mate panel its type list as `Mate type` and each entry of the open list as
+/// `Mate type: <family>`, and the assembly's options the component's placement fields as
+/// `Placement X` to `Placement Rotate Z`. Read only, for browser checks that click a
+/// control the canvas draws.
+#[wasm_bindgen]
+pub fn shown_controls() -> String {
+    SHOWN_CONTROLS.with_borrow(|controls| {
+        let shown: serde_json::Map<String, serde_json::Value> =
+            controls.iter().map(|(name, at)| (name.clone(), serde_json::json!({ "x": at.x, "y": at.y }))).collect();
+        serde_json::Value::Object(shown).to_string()
+    })
 }
 
 /// What the options bar drew in the last frame, as JSON: the selected entity's title, or
@@ -444,6 +466,7 @@ pub(crate) fn begin_frame() {
     SHOWN_DETAILS.with_borrow_mut(String::clear);
     SHOWN_PART_CHECK.with_borrow_mut(String::clear);
     SHOWN_OPTIONS.with_borrow_mut(String::clear);
+    SHOWN_CONTROLS.with_borrow_mut(std::collections::BTreeMap::clear);
     SHOWN_PMI.with_borrow_mut(String::clear);
 }
 

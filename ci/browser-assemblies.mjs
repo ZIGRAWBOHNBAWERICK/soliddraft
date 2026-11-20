@@ -1,5 +1,5 @@
 // Assemblies in the browser build, driven in headless Chrome as a visitor drives them.
-// Usage: node ci/browser-assemblies.mjs CHROME URL OUTDIR TRAY COLLAR
+// Usage: node ci/browser-assemblies.mjs CHROME URL OUTDIR TRAY COLLAR RIG BLOCK SHAFT
 //
 // TRAY and COLLAR are part files (site/parts/tray.dwprt and collar.dwprt). The page has no
 // folder, so every part reaches it as a file handed over. The visitor starts a new
@@ -12,21 +12,30 @@
 // part found at the revision it pins. Last, the saved file opens alone: the parts still
 // show, from the copies the file keeps, and each says its file cannot be found.
 //
+// RIG, BLOCK and SHAFT are ci/fixtures/universal-joint: two shafts on hinges in two blocks
+// locked 40 degrees apart. The visitor opens the rig with both parts, chooses Universal
+// Joint in the Mate panel's type list and picks the input shaft, then the output shaft,
+// seen from the right. Then one later feature on top: the input turned 30 degrees through
+// its Rotate Z placement field drives the output by the Hooke relation,
+// tan(output) = tan(input) / cos(40 degrees). The joint is saved and reopened with its
+// parts.
+//
 // The app draws into one canvas and takes only trusted input: keys and clicks sent as the
 // browser's own, through the DevTools protocol. The canvas has no text to read, so the
 // check reads the assembly through the read-only `shown_assembly` export, and finds a
 // face's place on screen through `assembly_screen_point`. Commands run through the
 // command palette by name; Enter adds the mate the Mate panel holds. The clicks go to the
-// start page's New assembly and Open tiles at fixed points of a 1400 x 813 page.
+// start page's New assembly and Open tiles at fixed points of a 1400 x 813 page. Other
+// controls are found through the read-only `shown_controls` export.
 
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const [chrome, url, out, tray, collar] = process.argv.slice(2);
-if (!chrome || !url || !out || !tray || !collar) {
-  throw new Error('usage: browser-assemblies.mjs CHROME URL OUTDIR TRAY COLLAR');
+const [chrome, url, out, tray, collar, rig, block, shaft] = process.argv.slice(2);
+if (!chrome || !url || !out || !tray || !collar || !rig || !block || !shaft) {
+  throw new Error('usage: browser-assemblies.mjs CHROME URL OUTDIR TRAY COLLAR RIG BLOCK SHAFT');
 }
 fs.mkdirSync(out, { recursive: true });
 const downloads = path.join(path.resolve(out), 'downloads');
@@ -48,6 +57,19 @@ const loaded = shown => shown.open && !shown.opening && !shown.loading;
 const parts = shown => shown.components.map(c => c.label.replace(/<.*/, ''));
 function placements(shown) { return shown.components.map(c => [c.translation, c.rotation]); }
 function near(a, b) { const [p, q] = [a.flat(2), b.flat(2)]; return p.length === q.length && p.every((x, i) => Math.abs(x - q[i]) < 1e-6); }
+// Quaternions as [x, y, z, w], as the export gives them.
+function multiply([ax, ay, az, aw], [bx, by, bz, bw]) {
+  return [aw * bx + ax * bw + ay * bz - az * by, aw * by - ax * bz + ay * bw + az * bx, aw * bz + ax * by - ay * bx + az * bw, aw * bw - ax * bx - ay * by - az * bz];
+}
+function about([x, y, z], angle) { const s = Math.sin(angle / 2); return [x * s, y * s, z * s, Math.cos(angle / 2)]; }
+function rotate(q, [x, y, z]) {
+  const [, rx, ry, rz] = [0, ...multiply(multiply(q, [x, y, z, 0]), [-q[0], -q[1], -q[2], q[3]])];
+  return [rx, ry, rz];
+}
+// Two turns agree when they take X and Y to the same places.
+function sameTurn(p, q, tolerance) {
+  return [[1, 0, 0], [0, 1, 0]].every(axis => rotate(p, axis).every((x, i) => Math.abs(x - rotate(q, axis)[i]) < tolerance));
+}
 
 class Browser {
   constructor(profile) {
@@ -229,6 +251,17 @@ class Browser {
         await v.shot(`assembly-${label}`);
         throw new Error(`${label}: the assembly is ${JSON.stringify(shown)}`);
       },
+      // The centre of the control `name` in the last frame, once it is drawn.
+      async control(name) {
+        for (let t = 0; t < 100; t++) {
+          const text = await v.eval(`window.wasmBindings.shown_controls()`);
+          const at = text ? JSON.parse(text)[name] : null;
+          if (at) return [at.x, at.y];
+          await sleep(100);
+        }
+        await v.shot(`no-control-${name.replace(/\W+/g, '-')}`);
+        throw new Error(`no control named ${name} is drawn`);
+      },
       // Where a point of the assembly was drawn, in the page's pixels.
       async screen(x, y, z) {
         const at = await v.eval(`(() => { const p = window.wasmBindings.assembly_screen_point(${x}, ${y}, ${z}); return p ? Array.from(p) : null; })()`);
@@ -343,9 +376,92 @@ async function main() {
   await v.settle(1000);
   await v.stopped('at the end');
   await v.shot('5-alone');
+  const alone = shown;
 
-  fs.writeFileSync(path.join(out, 'assemblies.json'), JSON.stringify({ mated, reopened, alone: shown, saved: path.basename(saved) }, null, 1));
-  console.log(`Assemblies in the browser: three components from two uploads, a mate picked in the viewport putting the second tray ${FLOOR} mm up on the first one's floor, saved as ${path.basename(saved)}, reopened with its parts at the same placements with the mate kept, and opened alone from the copies it keeps.`);
+  const joint = await universalJoint(v);
+
+  fs.writeFileSync(path.join(out, 'assemblies.json'), JSON.stringify({ mated, reopened, alone, saved: path.basename(saved), joint }, null, 1));
+  console.log(`Assemblies in the browser: three components from two uploads, a mate picked in the viewport putting the second tray ${FLOOR} mm up on the first one's floor, saved as ${path.basename(saved)}, reopened with its parts at the same placements with the mate kept, and opened alone from the copies it keeps. A Universal Joint picked between two shafts meeting at ${BEND} degrees drove the output ${joint.follows.toFixed(6)} degrees for a ${TURN} degree input turn, and reopened with its parts.`);
+}
+
+// The rig's shafts: the input (component 4) on a hinge at (10, 5, 0) along Z, the output
+// (component 9) in a block turned 40 degrees about X.
+const BEND = 40;
+const TURN = 30;
+const INPUT = '4';
+const OUTPUT = '9';
+
+async function universalJoint(v) {
+  step('load the site again and open the Universal Joint rig with its parts');
+  await v.load();
+  await v.choose([rig, block, shaft], () => v.click(OPEN));
+  let shown = await v.assembly('rig', s => loaded(s) && s.components.length === 4 && s.components.every(c => c.freshness !== 'unchecked'));
+  check(JSON.stringify(parts(shown)) === '["block","shaft","block","shaft"]', `the rig's components are ${parts(shown)}`);
+  check(shown.mates === 4, `the rig has ${shown.mates} mates, not 4`);
+  check(shown.components.every(c => c.state === 'DisplayReady' && c.freshness === 'current' && !c.warning), `not every rig part is found: ${JSON.stringify(shown.components)}`);
+  const component = (s, at) => s.components.find(c => c.path === at);
+  const start = component(shown, OUTPUT);
+  const tilt = about([1, 0, 0], BEND * Math.PI / 180);
+  check(sameTurn(start.rotation, tilt, 1e-9), `the output shaft starts at ${start.rotation}, not ${BEND} degrees about X`);
+
+  step('choose Universal Joint in the Mate panel');
+  await v.command('Mate');
+  await v.assembly('mate panel', s => s.mate_panel.open);
+  await v.click(await v.control('Mate type'));
+  await v.click(await v.control('Mate type: Universal Joint'));
+  await v.shot('6-universal-joint-chosen');
+
+  // Each shaft's side at the middle of its axis, seen from the right: from the front the
+  // output shaft stands in front of the input.
+  step('pick the input shaft, then the output shaft');
+  await v.command('Right');
+  await v.command('Fit');
+  const middle = rotate(tilt, [0, 0, 22]).map((x, i) => x + start.translation[i]);
+  await v.pick(await v.screen(10, 5, 22));
+  shown = await v.assembly('input pick', s => s.mate_panel.a);
+  check(shown.mate_panel.a.component === Number(INPUT) && shown.mate_panel.a.face.startsWith('Boss-Extrude1'), `the first pick is ${JSON.stringify(shown.mate_panel.a)}`);
+  await v.pick(await v.screen(...middle));
+  shown = await v.assembly('output pick', s => s.mate_panel.b);
+  check(shown.mate_panel.b.component === Number(OUTPUT) && shown.mate_panel.b.face.startsWith('Boss-Extrude1'), `the second pick is ${JSON.stringify(shown.mate_panel.b)}`);
+  await v.shot('7-shafts-picked');
+  await v.key('Enter', 'Enter', 13, 0, '\r');
+  shown = await v.assembly('joined', s => s.mates === 5 || s.mate_panel.error);
+  check(shown.mates === 5, `the Universal Joint was refused: ${shown.mate_panel.error}`);
+  await v.key('Escape', 'Escape', 27);
+  await v.assembly('mate panel closed', s => !s.mate_panel.open);
+
+  // The later feature on top: the input turned through its placement field, under mates.
+  step(`turn the input shaft ${TURN} degrees through its placement field`);
+  await v.pick(await v.screen(10, 5, 22));
+  await v.assembly('input selected', s => s.selected === INPUT);
+  await v.click(await v.control('Assembly options'));
+  await v.click(await v.control('Placement Rotate Z'));
+  await v.key('a', 'KeyA', 65, 2, 'a');
+  for (const ch of String(TURN)) {
+    await v.key(ch, `Digit${ch}`, ch.charCodeAt(0), 0, ch);
+  }
+  await v.key('Enter', 'Enter', 13, 0, '\r');
+  const turn = TURN * Math.PI / 180;
+  const input = about([0, 0, 1], turn);
+  shown = await v.assembly('driven', s => sameTurn(component(s, INPUT).rotation, input, 1e-7));
+  const bend = BEND * Math.PI / 180;
+  const follows = Math.atan2(Math.sin(turn), Math.cos(turn) * Math.cos(bend));
+  const expected = multiply(about(rotate(tilt, [0, 0, 1]), follows), start.rotation);
+  check(sameTurn(component(shown, OUTPUT).rotation, expected, 1e-7), `the output turned to ${component(shown, OUTPUT).rotation}, not ${expected}`);
+  await v.shot('8-driven');
+  const driven = shown;
+
+  step('save the joint and open it again with its parts');
+  const saved = await v.download('save joint', () => v.key('s', 'KeyS', 83, 2, 's'));
+  await v.assembly('joint saved', s => !s.dirty);
+  await v.load();
+  await v.choose([saved, block, shaft], () => v.click(OPEN));
+  shown = await v.assembly('joint reopened', s => loaded(s) && s.components.length === 4 && s.components.every(c => c.freshness !== 'unchecked'));
+  check(shown.mates === 5, `the reopened rig has ${shown.mates} mates, not 5`);
+  check(near(placements(shown), placements(driven)), `the reopened placements are ${JSON.stringify(placements(shown))}, not ${JSON.stringify(placements(driven))}`);
+  await v.stopped('joint at the end');
+  await v.shot('9-joint-reopened');
+  return { driven, reopened: shown, follows: follows * 180 / Math.PI, saved: path.basename(saved) };
 }
 
 try {

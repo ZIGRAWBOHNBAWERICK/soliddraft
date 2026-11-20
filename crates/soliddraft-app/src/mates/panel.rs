@@ -551,15 +551,23 @@ pub fn show_suite(ui: &mut egui::Ui, state: &mut AppState) {
             let draft = &mut state.assembly.mate;
             match key {
                 Key::Type => {
-                    egui::ComboBox::from_id_salt("mate_family").selected_text(draft.family.label()).show_ui(ui, |ui| {
-                        for family in Family::ALL {
-                            if ui.selectable_label(draft.family == family, family.label()).clicked()
-                                && draft.family != family
-                            {
-                                choose_family(draft, family);
+                    let list = egui::ComboBox::from_id_salt("mate_family").selected_text(draft.family.label()).show_ui(
+                        ui,
+                        |ui| {
+                            for family in Family::ALL {
+                                let entry = ui.selectable_label(draft.family == family, family.label());
+                                #[cfg(target_arch = "wasm32")]
+                                crate::web::show_control(format!("Mate type: {}", family.label()), entry.rect);
+                                if entry.clicked() && draft.family != family {
+                                    choose_family(draft, family);
+                                }
                             }
-                        }
-                    });
+                        },
+                    );
+                    #[cfg(target_arch = "wasm32")]
+                    crate::web::show_control("Mate type", list.response.rect);
+                    #[cfg(not(target_arch = "wasm32"))]
+                    let _ = list;
                 }
                 Key::Picks => {
                     let count =

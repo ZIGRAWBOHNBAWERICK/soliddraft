@@ -120,6 +120,18 @@
     "ci/fixtures/pmi/p1-bracket-pmi.step": [
       "web"
     ],
+    "ci/fixtures/universal-joint/block.dwprt": [
+      "web"
+    ],
+    "ci/fixtures/universal-joint/rig.dwasm": [
+      "web"
+    ],
+    "ci/fixtures/universal-joint/rig.txt": [
+      "web"
+    ],
+    "ci/fixtures/universal-joint/shaft.dwprt": [
+      "web"
+    ],
     "ci/check-step.py": [
       "step-opencascade",
       "application-loop"

@@ -1678,15 +1678,15 @@ impl AppState {
             return Some(if matches!(drag.shown(), crate::drag::Shown::Failed { .. }) {
                 ("Edit failed", NoteKind::Error)
             } else if drag.pending() {
-                ("Proof pending", NoteKind::Info)
+                ("Working", NoteKind::Info)
             } else {
                 ("Preview", NoteKind::Info)
             });
         }
         if self.doc.proof_pending() {
-            return Some(("Proof pending", NoteKind::Info));
+            return Some(("Working", NoteKind::Info));
         }
-        self.doc.proof_state().answered_within_bound.then_some((crate::document::WITHIN_BOUND_LABEL, NoteKind::Info))
+        None
     }
 
     pub(crate) fn feature_edit_open(&self) -> bool {

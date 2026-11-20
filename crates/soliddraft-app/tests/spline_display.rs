@@ -126,7 +126,7 @@ fn check_fillet_display(source: &str, rail: soliddraft_kernel_api::Vec3, bounded
             assert!(!proof.current_proved_display());
             let answer = serde_json::to_value(state.doc.display_answer(feature).unwrap()).unwrap();
             assert_eq!(answer["display"], native);
-            assert_eq!(state.edit_status().unwrap().0, soliddraft_app::document::WITHIN_BOUND_LABEL);
+            assert!(state.edit_status().is_none(), "a bounded display lights nothing");
         };
         check(&state);
         for chord_height in [0.01, 0.005] {

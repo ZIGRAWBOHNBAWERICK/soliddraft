@@ -336,15 +336,19 @@ fn a_bounded_answer_is_distinct_from_proof_and_keeps_its_definition_and_limit() 
         assert!(proof.answered_within_bound);
         assert!(!proof.failed && !proof.pending);
         assert!(!proof.current_proved_model());
-        assert_eq!(state.edit_status().unwrap().0, soliddraft_app::document::WITHIN_BOUND_LABEL);
-        let badge = app.get_by_label("Boss-Extrude1 proof: Answered within a stated bound").rect();
+        // A bounded answer lights nothing: no status line and no mark in the tree.
+        assert!(state.edit_status().is_none());
+        assert!(app.query_all_by_label_contains("Boss-Extrude1 status:").next().is_none());
         let row = ribbon::control(&app, "Boss-Extrude1", ribbon::window(&app)).rect;
-        assert!(row.contains_rect(badge), "the mark sits in the feature's tree row");
         assert!(ribbon::painted_in(&app, row).iter().any(|text| text.text.contains("0.008 mm")));
-        let palette = soliddraft_app::theme::palette();
-        assert_ne!(palette.bounded, palette.ok);
-        assert_ne!(palette.bounded, palette.warn);
-        assert_ne!(palette.bounded, palette.error);
+        let details = app.state().state.doc.describe(Selection::Feature(id)).unwrap().details;
+        let (_, described) = details
+            .iter()
+            .find(|(key, _)| key == soliddraft_app::document::WITHIN_BOUND_LABEL)
+            .expect("Details keeps the bound");
+        for detail in ["0.008 mm", "0.01 mm", "Kept profile A", "Imported profile maximum deviation"] {
+            assert!(described.contains(detail), "{detail} is in Details in {mode:?}: {described}");
+        }
         let caller = Caller::Mcp { client: "bounded-fixture".into() };
         for (tool, extension) in [("export_step", "step"), ("export_iges", "iges"), ("export_stl", "stl")] {
             let destination = case.path(&format!("bounded.{extension}"));
@@ -357,12 +361,6 @@ fn a_bounded_answer_is_distinct_from_proof_and_keeps_its_definition_and_limit() 
             );
             assert!(output.is_error && output.content.contains("stated bound"), "{tool}: {}", output.content);
             assert_eq!(std::fs::read(destination).unwrap(), b"existing export");
-        }
-        app.hover_at(badge.center());
-        app.run_steps(90);
-        let text = ribbon::painted(&app).into_iter().map(|p| p.text).collect::<Vec<_>>().join("\n");
-        for detail in ["0.008 mm", "0.01 mm", "Kept profile A", "Imported profile maximum deviation"] {
-            assert!(text.contains(detail), "{detail} is shown in {mode:?}");
         }
         case.frame(&mut app, &format!("{mode:?}-within-bound"));
     }
@@ -611,7 +609,7 @@ impl Drop for Release {
 }
 
 #[test]
-fn proof_lights_follow_the_changed_feature_and_unproved_exports_leave_files_alone() {
+fn status_marks_follow_the_changed_feature_and_unfinished_exports_leave_files_alone() {
     let case = ribbon::case("edit-suite-proof");
     let kernel = Arc::new(gated::Gated::default());
     let mut doc = Document::new("Proof lights", kernel.clone());
@@ -625,15 +623,15 @@ fn proof_lights_follow_the_changed_feature_and_unproved_exports_leave_files_alon
     let mut app = suite(doc);
     let _release = Release(kernel.clone());
     case.run(&mut app, |app| {
-        assert!(app.query_all_by_label("Boss-Extrude1 proof: Proved").next().is_some());
-        assert!(app.query_all_by_label("Boss-Extrude2 proof: Proved").next().is_some());
+        // Built features carry no mark.
+        assert!(app.query_all_by_label_contains(" status: ").next().is_none());
         kernel.rules.lock().unwrap().hold = Some(30.0);
         params.depth = 30.0;
         app.state_mut().state.push(AppAction::Command(Command::EditExtrude { id: edited, params: params.clone() }));
         app.run_steps(8);
-        assert!(app.query_all_by_label("Boss-Extrude1 proof: Proved").next().is_some());
-        assert!(app.query_all_by_label("Boss-Extrude2 proof: Pending").next().is_some());
-        assert_eq!(app.state().state.edit_status().unwrap().0, "Proof pending");
+        assert!(app.query_all_by_label_contains("Boss-Extrude1 status:").next().is_none());
+        assert!(app.query_all_by_label("Boss-Extrude2 status: Working").next().is_some());
+        assert_eq!(app.state().state.edit_status().unwrap().0, "Working");
         let caller = Caller::Mcp { client: "proof-light-test".into() };
         let path = case.path("part.step");
         std::fs::write(&path, b"existing export").unwrap();
@@ -653,15 +651,15 @@ fn proof_lights_follow_the_changed_feature_and_unproved_exports_leave_files_alon
         kernel.rules.lock().unwrap().hold = None;
         kernel.changed.notify_all();
         ribbon::until(app, "accepted proof", |app| !app.state().state.doc.proof_pending());
-        assert!(app.query_all_by_label("Boss-Extrude2 proof: Proved").next().is_some());
+        assert!(app.query_all_by_label_contains("Boss-Extrude2 status:").next().is_none());
         kernel.rules.lock().unwrap().refuse = vec![35.0];
         params.depth = 35.0;
         app.state_mut().state.push(AppAction::Command(Command::EditExtrude { id: edited, params: params.clone() }));
         app.run_steps(8);
         ribbon::until(app, "refused proof", |app| !app.state().state.doc.proof_pending());
         app.run_steps(4);
-        assert!(app.query_all_by_label("Boss-Extrude1 proof: Proved").next().is_some());
-        assert!(app.query_all_by_label("Boss-Extrude2 proof: Refused").next().is_some());
+        assert!(app.query_all_by_label_contains("Boss-Extrude1 status:").next().is_none());
+        assert!(app.query_all_by_label("Boss-Extrude2 status: Refused").next().is_some());
         for (tool, extension) in [("export_step", "step"), ("export_iges", "iges"), ("export_stl", "stl")] {
             let destination = case.path(&format!("part.{extension}"));
             std::fs::write(&destination, b"existing export").unwrap();
@@ -685,7 +683,7 @@ fn proof_lights_follow_the_changed_feature_and_unproved_exports_leave_files_alon
         app.run_steps(8);
         ribbon::until(app, "undo proof", |app| !app.state().state.doc.proof_pending());
         app.run_steps(4);
-        assert!(app.query_all_by_label("Boss-Extrude2 proof: Proved").next().is_some());
+        assert!(app.query_all_by_label_contains("Boss-Extrude2 status:").next().is_none());
         let output = call_checked(
             &mut AppTools { state: &mut app.state_mut().state },
             "export_step",
@@ -714,9 +712,9 @@ fn a_proof_start_refusal_belongs_to_the_changed_chip() {
         }));
         ribbon::until(app, "proof start refusal", |app| app.state().state.doc.proof_state().failed);
         app.run_steps(8);
-        let badge = app.get_by_label("Boss-Extrude1 proof: Refused").rect();
-        assert!(app.query_all_by_label(&format!("{later} proof: Pending")).next().is_some());
-        assert!(app.query_all_by_label(&format!("{later} proof: Refused")).next().is_none());
+        let badge = app.get_by_label("Boss-Extrude1 status: Refused").rect();
+        assert!(app.query_all_by_label(&format!("{later} status: Working")).next().is_some());
+        assert!(app.query_all_by_label(&format!("{later} status: Refused")).next().is_none());
         app.hover_at(badge.center());
         app.run_steps(90);
         assert!(ribbon::painted(app).iter().any(|text| text.text.contains("could not start its proof")));
@@ -744,7 +742,7 @@ fn file_export_action_writes_the_step_and_both_proof_reports() {
         app.state_mut().state.push(AppAction::EditFeature(id));
         app.run_steps(8);
         assert!(app.state().state.editor.is_some());
-        assert!(app.query_all_by_label("Boss-Extrude1 proof: Pending").next().is_some());
+        assert!(app.query_all_by_label("Boss-Extrude1 status: Working").next().is_some());
         app.state_mut()
             .state
             .push(AppAction::Export { format: soliddraft_exchange::Format::Step, path: Some(path.clone()) });
@@ -755,7 +753,7 @@ fn file_export_action_writes_the_step_and_both_proof_reports() {
         app.key_press(Key::Escape);
         app.run_steps(8);
         assert!(app.state().state.editor.is_none());
-        assert!(app.query_all_by_label("Boss-Extrude1 proof: Proved").next().is_some());
+        assert!(app.query_all_by_label_contains("Boss-Extrude1 status:").next().is_none());
         app.state_mut()
             .state
             .push(AppAction::Export { format: soliddraft_exchange::Format::Step, path: Some(path.clone()) });

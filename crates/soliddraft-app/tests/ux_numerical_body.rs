@@ -98,7 +98,7 @@ fn an_approximate_body_draws_picks_and_says_what_it_is() {
         assert_eq!(app.state().state.doc.selection, Some(Selection::Body));
         open_details(app);
         let shown = texts(app);
-        assert!(shown.iter().any(|t| t == "Boss-Extrude1 proof: Approximate"), "{shown:?}");
+        assert!(!shown.iter().any(|t| t.starts_with("Boss-Extrude1 status:")), "no light on a built body: {shown:?}");
         assert!(shown.iter().any(|t| t == WORDS), "Details does not say the body is approximate: {shown:?}");
         assert!(!shown.iter().any(|t| t.to_lowercase().contains("numerical")), "{shown:?}");
         case.frame(app, "02-body-details");

@@ -223,9 +223,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
                     let status = if failed { FeatureStatus::Error(message.clone()) } else { FeatureStatus::Pending };
                     (message, status)
                 }
-                _ if f.status == FeatureStatus::Pending => {
-                    (format!("{} · proof pending", f.summary()), f.status.clone())
-                }
+                _ if f.status == FeatureStatus::Pending => (format!("{} · working", f.summary()), f.status.clone()),
                 _ if matches!(f.status, FeatureStatus::Error(_)) => {
                     (format!("Failed · {}", f.summary()), f.status.clone())
                 }
@@ -391,7 +389,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
                 );
                 tree_visibility::eye(ui, state, resp.rect, ViewItem::Feature(item.id), &item.name);
                 if let Some(feature) = state.doc.feature(item.id) {
-                    proof_badge(ui, state, feature, resp.rect);
+                    status_mark(ui, state, feature, resp.rect);
                 }
                 resp
             };
@@ -626,7 +624,7 @@ pub(crate) struct RowSpec<'a> {
     pub(crate) suppressed: bool,
     /// A sketch that is not fully defined: its name reads `(-) Name`, as in SolidWorks.
     pub(crate) under_defined: bool,
-    /// Keeps room before the eye for the feature's proof mark (see [`proof_badge`]).
+    /// Keeps room before the eye for the feature's status mark (see [`status_mark`]).
     pub(crate) badge: bool,
     pub(crate) drop_above: bool,
 }
@@ -776,120 +774,84 @@ fn under_defined(state: &AppState, feature: &Feature) -> bool {
     matches!(status, Some(crate::sketch::SolveStatus::UnderDefined))
 }
 
-/// The mark before a feature row's eye: whether export can trust the feature. A green
-/// dot is proved, an open amber ring is pending, a red cross is refused, a diamond is
-/// answered within a stated bound or built within a stated tolerance, and a grey ring is
-/// inactive. Hover gives the reason.
-fn proof_badge(ui: &mut egui::Ui, state: &AppState, feature: &Feature, row: Rect) {
+/// The mark before a feature row's eye. An open amber ring says the feature is still
+/// working, a red cross that it was refused, and a grey ring that it is inactive. A built
+/// feature has no mark. Hover gives the reason.
+fn status_mark(ui: &mut egui::Ui, state: &AppState, feature: &Feature, row: Rect) {
     let id = feature.id;
     let (label, reason) = if let Some(drag) = state.drag_preview.as_ref().filter(|drag| drag.feature() == id) {
         let (reason, failed) = drag.label();
-        let label = if failed {
-            "Refused"
-        } else if drag.proved_request().is_some() && !drag.pending() {
-            "Proved"
+        if failed {
+            (REFUSED, crate::geometry_message::for_user(&reason))
+        } else if drag.pending() {
+            (WORKING, crate::geometry_message::for_user(&reason))
         } else {
-            "Pending"
-        };
-        if let Some(bound) = drag.display_bound() {
-            (
-                crate::document::WITHIN_BOUND_LABEL,
-                format!(
-                    "Measured display deviation: {} mm\nRule limit: {} mm\n{}",
-                    bound.measured_mm, bound.level_mm, bound.method
-                ),
-            )
-        } else {
-            (label, crate::geometry_message::for_user(&reason))
+            return;
         }
     } else if let Some(editor) = state.editor.as_ref().filter(|editor| editor.target == Some(id)) {
         match &editor.error {
-            Some(reason) => ("Refused", crate::geometry_message::for_user(reason)),
-            None => ("Pending", "Finish or cancel this feature edit. Its preview cannot export.".into()),
+            Some(reason) => (REFUSED, crate::geometry_message::for_user(reason)),
+            None => (WORKING, "Finish or cancel this feature edit. Its preview cannot export.".into()),
         }
     } else if state.sketch.as_ref().is_some_and(|sketch| sketch.feature == id) {
-        ("Pending", "Finish or cancel this sketch edit before exporting.".into())
+        (WORKING, "Finish or cancel this sketch edit before exporting.".into())
     } else if let Some(form) = state.doc.combine_form.as_ref().filter(|form| form.editing == Some(id)) {
         match &form.error {
-            Some(reason) => ("Refused", crate::geometry_message::for_user(reason)),
-            None => ("Pending", "Finish or cancel this feature edit. Its preview cannot export.".into()),
+            Some(reason) => (REFUSED, crate::geometry_message::for_user(reason)),
+            None => (WORKING, "Finish or cancel this feature edit. Its preview cannot export.".into()),
         }
     } else if let Some(soliddraft_model::FeatureStatus::Blocked(input)) =
         state.doc.model().status(soliddraft_model::FeatureId(id as u32))
         && !matches!(feature.status, FeatureStatus::Inactive)
     {
         let name = state.doc.feature(u64::from(input.0)).map_or("an earlier feature", |feature| feature.name.as_str());
-        ("Pending", format!("Waiting for {name} to build. Repair that feature before exporting."))
+        (WORKING, format!("Waiting for {name} to build. Repair that feature before exporting."))
     } else {
         match &feature.status {
-            FeatureStatus::Ok if feature.body.is_some_and(|body| state.doc.kernel_body_is_tolerant(body)) => {
-                ("Tolerant", crate::document::TOLERANT_WORDS.to_owned())
-            }
-            FeatureStatus::Ok => match feature.body.and_then(|body| state.doc.kernel_body_tolerance(body)) {
-                Some(tolerance) => (
-                    APPROXIMATE_LABEL,
-                    format!("Built within {tolerance} mm, with no exact proof. It exports as an approximate part."),
-                ),
-                None => ("Proved", "The current feature is proved.".to_owned()),
-            },
-            FeatureStatus::AnsweredWithinBound(bound) => (crate::document::WITHIN_BOUND_LABEL, bound.description()),
-            FeatureStatus::Pending => {
-                ("Pending", "The current edit is waiting for proof. Export waits for proof.".to_owned())
-            }
-            FeatureStatus::Error(reason) => ("Refused", crate::geometry_message::for_user(reason)),
+            FeatureStatus::Ok | FeatureStatus::AnsweredWithinBound(_) => return,
+            FeatureStatus::Pending => (WORKING, "The current edit is still building. Export waits for it.".to_owned()),
+            FeatureStatus::Error(reason) => (REFUSED, crate::geometry_message::for_user(reason)),
             FeatureStatus::NeedsRepair(_) => {
-                ("Refused", "A reference is missing. Choose Repair to replace it.".to_owned())
+                (REFUSED, "A reference is missing. Choose Repair to replace it.".to_owned())
             }
-            FeatureStatus::Inactive => ("Inactive", "This feature is suppressed or past the rollback bar.".to_owned()),
+            FeatureStatus::Inactive => (INACTIVE, "This feature is suppressed or past the rollback bar.".to_owned()),
         }
-    };
-    let color = match label {
-        "Proved" => theme::ok(),
-        "Pending" => theme::warn(),
-        "Refused" => theme::error(),
-        crate::document::WITHIN_BOUND_LABEL | APPROXIMATE_LABEL | "Tolerant" => theme::bounded(),
-        _ => theme::muted(),
     };
     let centre = pos2(row.right() - 4.0 - tree_visibility::EYE_WIDTH - BADGE_WIDTH / 2.0, row.center().y);
     if ui.is_rect_visible(Rect::from_center_size(centre, vec2(8.0, 8.0))) {
         let painter = ui.painter();
-        if label == crate::document::WITHIN_BOUND_LABEL || label == APPROXIMATE_LABEL || label == "Tolerant" {
-            painter.add(egui::Shape::convex_polygon(
-                vec![
-                    centre + vec2(0.0, -4.0),
-                    centre + vec2(4.0, 0.0),
-                    centre + vec2(0.0, 4.0),
-                    centre + vec2(-4.0, 0.0),
-                ],
-                color,
-                Stroke::NONE,
-            ));
-        } else if label == "Refused" {
-            for sign in [-1.0, 1.0] {
-                painter.line_segment(
-                    [centre + vec2(-3.0, -3.0 * sign), centre + vec2(3.0, 3.0 * sign)],
-                    Stroke::new(1.5, color),
-                );
+        match label {
+            REFUSED => {
+                for sign in [-1.0, 1.0] {
+                    painter.line_segment(
+                        [centre + vec2(-3.0, -3.0 * sign), centre + vec2(3.0, 3.0 * sign)],
+                        Stroke::new(1.5, theme::error()),
+                    );
+                }
             }
-        } else if label == "Proved" {
-            painter.circle_filled(centre, 3.0, color);
-        } else {
-            painter.circle_stroke(centre, 3.0, Stroke::new(1.5, color));
+            WORKING => {
+                painter.circle_stroke(centre, 3.0, Stroke::new(1.5, theme::warn()));
+            }
+            _ => {
+                painter.circle_stroke(centre, 3.0, Stroke::new(1.5, theme::muted()));
+            }
         }
     }
     let response = ui.interact(
         Rect::from_center_size(centre, vec2(BADGE_WIDTH, theme::ROW_HEIGHT - 6.0)),
-        ui.id().with(("proof", id)),
+        ui.id().with(("status", id)),
         Sense::hover(),
     );
     response.widget_info(|| {
-        egui::WidgetInfo::labeled(egui::WidgetType::Label, true, format!("{} proof: {label}", feature.name))
+        egui::WidgetInfo::labeled(egui::WidgetType::Label, true, format!("{} status: {label}", feature.name))
     });
     response.on_hover_text(format!("{label}: {reason}"));
 }
 
-/// The proof badge's word for a feature whose body was built within a stated tolerance.
-const APPROXIMATE_LABEL: &str = "Approximate";
+/// The status mark's words.
+const WORKING: &str = "Working";
+const REFUSED: &str = "Refused";
+const INACTIVE: &str = "Inactive";
 
 /// The icon of a feature's kind, in its tree row.
 pub(crate) fn feature_icon(kind: &FeatureKind) -> Icon {

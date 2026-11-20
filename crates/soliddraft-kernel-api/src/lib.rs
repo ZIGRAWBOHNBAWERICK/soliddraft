@@ -1563,10 +1563,11 @@ pub trait Kernel: Send + Sync {
     }
 
     /// The nominal value in millimetres of every dimension of `pmi`, measured on the
-    /// body: one entry per item, `None` for an item that is not a size or a distance.
+    /// body: one entry per item, holding one value for a size or a distance, the length,
+    /// the width and the end radius for a slot, and nothing for any other item.
     /// A dimension that does not fit its faces, such as a diameter on a plane, fails the
     /// call with [`KernelError::InvalidInput`] naming the item.
-    fn pmi_nominals(&self, body: BodyId, pmi: &pmi::Pmi<FaceId>) -> KernelResult<Vec<Option<f64>>> {
+    fn pmi_nominals(&self, body: BodyId, pmi: &pmi::Pmi<FaceId>) -> KernelResult<Vec<Vec<f64>>> {
         let _ = (body, pmi);
         Err(KernelError::Unsupported("pmi_nominals".into()))
     }

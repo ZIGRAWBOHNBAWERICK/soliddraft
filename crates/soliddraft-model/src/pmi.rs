@@ -6,12 +6,20 @@
 //! position tolerance. A dimension stores no size. Its value is measured on the body
 //! each time it is asked for, so it is always the size the part has.
 //!
+//! A feature under a position tolerance is located from the datums of that tolerance:
+//! a basic distance from each datum plane its axis runs along. Nobody states those
+//! distances. They are measured ([`Located`]), written into a STEP file with the
+//! tolerance, and left out again when such a file is read, since the part measures
+//! its own.
+//!
 //! An item whose face is gone, or whose faces no longer fit it (a diameter on a face
 //! that became a plane), is not moved to another face and not dropped. It stays in the
 //! part with its problem, and applies again when the face comes back.
 
 use serde::{Deserialize, Serialize};
-use soliddraft_kernel_api::pmi::{Feature, PartNotes, Pmi, PmiItem, PmiKind, StepPmi};
+use soliddraft_kernel_api::pmi::{
+    Anchor, At, Feature, GdtCharacteristic, PartNotes, Pmi, PmiItem, PmiKind, StepPmi, Tolerance,
+};
 use soliddraft_kernel_api::{FaceId, FaceRole, KernelError};
 
 use crate::document::Document;
@@ -28,8 +36,12 @@ pub struct PmiRow {
     pub item: PmiItem<FaceRef>,
     /// The item on the body's faces, when every face it names is there.
     pub on_body: Option<PmiItem<FaceId>>,
-    /// A dimension's measured value in millimetres.
-    pub nominal: Option<f64>,
+    /// The measured values in millimetres: one for a size or a distance; the length,
+    /// the width and the end radius for a slot.
+    pub measured: Vec<f64>,
+    /// For a position tolerance, the basic distances that locate its features from
+    /// its datums.
+    pub located: Vec<Located>,
     /// Why the item does not apply as it stands, for people.
     pub problem: Option<String>,
 }
@@ -37,7 +49,7 @@ pub struct PmiRow {
 impl PmiRow {
     /// The item as a drawing writes it, such as `Ø8 H7`.
     pub fn callout(&self) -> String {
-        self.item.callout(self.nominal)
+        self.item.callout(&self.measured)
     }
 
     /// True when the item applies: its faces are there and, for a dimension, measure.
@@ -46,11 +58,51 @@ impl PmiRow {
     }
 }
 
+/// A basic distance that locates one feature of a position tolerance from one of its
+/// datums.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Located {
+    /// The datum it is measured from.
+    pub datum: String,
+    /// Which of the tolerance's features it locates, from zero.
+    pub feature: usize,
+    /// The distance in millimetres.
+    pub value: f64,
+}
+
+impl Located {
+    /// The name a file gives the distance, after its tolerance's: `Hole position/2
+    /// from B`.
+    pub fn name(&self, tolerance: &str) -> String {
+        locating_name(tolerance, self.feature, &self.datum)
+    }
+}
+
+fn locating_name(tolerance: &str, feature: usize, datum: &str) -> String {
+    format!("{tolerance}/{} from {datum}", feature + 1)
+}
+
+fn locating<F: Clone>(datum: &Feature<F>, feature: &Feature<F>) -> PmiKind<F> {
+    PmiKind::Location {
+        from: Anchor { feature: datum.clone(), at: At::Feature },
+        to: Anchor { feature: feature.clone(), at: At::Feature },
+        tolerance: Tolerance::Basic,
+        nominal: None,
+    }
+}
+
+fn same_faces<F: PartialEq>(a: &[F], b: &[F]) -> bool {
+    a.len() == b.len() && a.iter().all(|face| b.contains(face))
+}
+
 /// The part's manufacturing information as a STEP file takes it.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct PmiOnBody {
-    /// The items that apply, on the body's faces, with the part's notes.
+    /// The items that apply, on the body's faces, with the part's notes, followed by
+    /// the locating distances of the position tolerances among them.
     pub pmi: Pmi<FaceId>,
+    /// How many of the part's items `pmi` holds, without the locating distances.
+    pub items: usize,
     /// The items left out, by name, with the reason.
     pub left_out: Vec<(String, String)>,
 }
@@ -93,7 +145,8 @@ impl Document {
         let names = self.name_map();
         let mut rows: Vec<PmiRow> = Vec::with_capacity(self.pmi.items.len());
         for item in &self.pmi.items {
-            let mut row = PmiRow { item: item.clone(), on_body: None, nominal: None, problem: None };
+            let mut row =
+                PmiRow { item: item.clone(), on_body: None, measured: Vec::new(), located: Vec::new(), problem: None };
             let (Some(body), Some(topology)) = (body, topology.as_ref()) else {
                 row.problem = Some("The part has no body.".to_owned());
                 rows.push(row);
@@ -124,7 +177,7 @@ impl Document {
                     if on_body.is_dimension() {
                         let alone = Pmi { items: vec![on_body.clone()], part: PartNotes::default() };
                         match self.kernel.pmi_nominals(body, &alone) {
-                            Ok(values) => row.nominal = values.into_iter().next().flatten(),
+                            Ok(values) => row.measured = values.into_iter().next().unwrap_or_default(),
                             Err(error) => row.problem = Some(reason(error, &item.id)),
                         }
                     }
@@ -134,20 +187,52 @@ impl Document {
             rows.push(row);
         }
         // A tolerance leans on its datums: one whose datum does not apply does not either.
-        let standing: Vec<String> = rows
+        let standing: std::collections::BTreeMap<String, Feature<FaceId>> = rows
             .iter()
             .filter(|row| row.applies())
-            .filter_map(|row| match &row.item.kind {
-                PmiKind::Datum { letter, .. } => Some(letter.clone()),
+            .filter_map(|row| match row.on_body.as_ref().map(|item| &item.kind) {
+                Some(PmiKind::Datum { letter, feature }) => Some((letter.clone(), feature.clone())),
                 _ => None,
             })
             .collect();
         for row in &mut rows {
-            if let PmiKind::Tolerance { datums, .. } = &row.item.kind
+            if let PmiKind::Gdt { datums, .. } = &row.item.kind
                 && row.problem.is_none()
-                && let Some(missing) = datums.iter().find(|letter| !standing.contains(letter))
+                && let Some(missing) =
+                    datums.iter().flat_map(|datum| datum.letters()).find(|letter| !standing.contains_key(*letter))
             {
                 row.problem = Some(format!("Datum {missing} does not apply."));
+            }
+        }
+        // A feature under a position tolerance is located from each datum plane of the
+        // tolerance that its axis runs along. The kernel decides which: a distance it
+        // cannot measure, such as one to a plane the axis crosses, is not one.
+        if let Some(body) = body {
+            for row in &mut rows {
+                let Some(PmiItem {
+                    kind: PmiKind::Gdt { characteristic: GdtCharacteristic::Position, datums, features, .. },
+                    ..
+                }) = row.on_body.as_ref().filter(|_| row.problem.is_none())
+                else {
+                    continue;
+                };
+                for (index, feature) in features.iter().enumerate() {
+                    for datum in datums {
+                        let Some(from) = standing.get(datum.letter.as_str()) else { continue };
+                        let alone = Pmi {
+                            items: vec![PmiItem { id: row.item.id.clone(), kind: locating(from, feature) }],
+                            part: PartNotes::default(),
+                        };
+                        let value = self
+                            .kernel
+                            .pmi_nominals(body, &alone)
+                            .ok()
+                            .and_then(|values| values.first().and_then(|measured| measured.first().copied()));
+                        if let Some(value) = value.filter(|value| value.abs() > 1e-9) {
+                            row.located.push(Located { datum: datum.letter.clone(), feature: index, value });
+                        }
+                    }
+                }
             }
         }
         rows
@@ -158,16 +243,51 @@ impl Document {
     /// part's own, or else the name of the material assigned to the part.
     pub fn pmi_on_body(&self) -> PmiOnBody {
         let mut out = PmiOnBody::default();
+        let mut locating_items = Vec::new();
         for row in self.pmi_rows() {
-            match (row.on_body, row.problem) {
-                (Some(item), None) => out.pmi.items.push(item),
+            let problem = row.problem.clone().or_else(|| row.item.file_problem());
+            match (row.on_body, problem) {
+                (Some(item), None) => {
+                    if let PmiKind::Gdt { datums, features, .. } = &item.kind {
+                        for located in &row.located {
+                            let from = datums
+                                .iter()
+                                .find(|datum| datum.letter == located.datum)
+                                .and_then(|datum| self.pmi.datum_feature(&datum.letter))
+                                .and_then(|feature| self.pmi_feature_on_body(feature));
+                            if let (Some(from), Some(to)) = (from, features.get(located.feature)) {
+                                locating_items.push(PmiItem { id: located.name(&item.id), kind: locating(&from, to) });
+                            }
+                        }
+                    }
+                    out.pmi.items.push(item);
+                }
                 (_, problem) => {
                     out.left_out.push((row.item.id, problem.unwrap_or_else(|| "It does not apply.".to_owned())));
                 }
             }
         }
+        out.items = out.pmi.items.len();
+        out.pmi.items.extend(locating_items);
         out.pmi.part = self.part_notes();
         out
+    }
+
+    /// The faces of the body a feature of the part's information names now.
+    fn pmi_feature_on_body(&self, feature: &Feature<FaceRef>) -> Option<Feature<FaceId>> {
+        let body = self.body()?;
+        let topology = self.view_of(body).ok()?;
+        let view = View { topology: &topology };
+        let names = self.name_map();
+        let mut faces: Feature<FaceId> = Vec::new();
+        for face in feature {
+            for id in reference::resolve_faces(face, &view, &names).ok()? {
+                if !faces.contains(&id) {
+                    faces.push(id);
+                }
+            }
+        }
+        Some(faces)
     }
 
     /// The part's notes, with the assigned material's name where the part gives no
@@ -215,8 +335,32 @@ impl Document {
             let first = found.next()?;
             found.next().is_none().then_some(first.id)
         };
+        // The locating distances a file of ours holds beside a position tolerance are
+        // not items: the part measures its own.
+        let derived = |item: &PmiItem<String>| -> bool {
+            let PmiKind::Location { from, to, tolerance: Tolerance::Basic, .. } = &item.kind else { return false };
+            from.at == At::Feature
+                && to.at == At::Feature
+                && read.pmi.items.iter().any(|other| {
+                    let PmiKind::Gdt { characteristic: GdtCharacteristic::Position, datums, features, .. } =
+                        &other.kind
+                    else {
+                        return false;
+                    };
+                    features.iter().enumerate().any(|(index, feature)| {
+                        same_faces(feature, &to.feature)
+                            && datums.iter().any(|datum| {
+                                item.id == locating_name(&other.id, index, &datum.letter)
+                                    && read
+                                        .pmi
+                                        .datum_feature(&datum.letter)
+                                        .is_some_and(|on| same_faces(on, &from.feature))
+                            })
+                    })
+                })
+        };
         let mut taken = self.pmi.clone();
-        for item in &read.pmi.items {
+        for item in read.pmi.items.iter().filter(|item| !derived(item)) {
             let placed = item.try_map(|key| {
                 let face = face_of(key).ok_or_else(|| "A face it is attached to was not imported.".to_owned())?;
                 self.face_ref(face).map_err(|error| error.to_string())
@@ -233,7 +377,7 @@ impl Document {
                 PmiKind::Size { nominal, .. } | PmiKind::Location { nominal, .. } => *nominal = None,
                 _ => {}
             }
-            item.id = taken.free_name(&item.id);
+            item.id = taken.free_name(&item.id.replace('/', " "));
             if let PmiKind::Datum { letter, .. } = &item.kind
                 && taken.datum_letters().contains(&letter.as_str())
             {

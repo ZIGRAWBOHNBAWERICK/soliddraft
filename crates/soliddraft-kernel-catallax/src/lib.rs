@@ -2515,11 +2515,7 @@ impl Kernel for CatallaxKernel {
         })
     }
 
-    fn pmi_nominals(
-        &self,
-        body: BodyId,
-        pmi: &soliddraft_kernel_api::pmi::Pmi<FaceId>,
-    ) -> KernelResult<Vec<Option<f64>>> {
+    fn pmi_nominals(&self, body: BodyId, pmi: &soliddraft_kernel_api::pmi::Pmi<FaceId>) -> KernelResult<Vec<Vec<f64>>> {
         let solid = self.solid(body)?;
         pmi::nominals(&solid, body, pmi)
     }

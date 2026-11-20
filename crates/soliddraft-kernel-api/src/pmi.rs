@@ -1,9 +1,16 @@
 //! Manufacturing information on a part: datums, dimensions with their limits, geometric
 //! tolerances and surface textures on faces, and the notes of the whole part.
 //!
+//! The tolerance types here ([`Tolerance`], [`GdtCharacteristic`], [`DatumRef`],
+//! [`MaterialCondition`], [`SurfaceProcess`], [`Lay`]) are the part's and the drawing's
+//! alike: a drawing shows what the part states.
+//!
 //! A [`Pmi`] is generic over what names a face. The part document names faces by its
 //! persistent references, a kernel call by [`FaceId`](crate::FaceId), and a STEP file by
 //! the face keys its import reports.
+//!
+//! A slot with round ends is one item, as on a drawing (`20×6 +0.1/0 R3`); a STEP file
+//! holds its length, its width and its end radius as three dimensions.
 //!
 //! A dimension holds no size of its own. Its nominal value is measured on the body
 //! ([`Kernel::pmi_nominals`](crate::Kernel::pmi_nominals)), so an edit that moves a face
@@ -98,6 +105,389 @@ impl From<Decimal> for String {
 /// The faces of one feature: a bore's cylinder, or the two flats of a slot.
 pub type Feature<F> = Vec<F>;
 
+/// An ISO 286 tolerance class, such as `H7` or `js6`: one or two letters, capitals for
+/// a hole and small letters for a shaft, and a grade of one or two digits.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub struct FitClass {
+    text: [u8; 4],
+    letters: u8,
+    len: u8,
+}
+
+impl FitClass {
+    /// Reads a class as people write it.
+    pub fn parse(class: &str) -> Option<FitClass> {
+        let class = class.trim();
+        let split = class.find(|c: char| c.is_ascii_digit())?;
+        let (deviation, grade) = class.split_at(split);
+        let letters = (1..=2).contains(&deviation.len())
+            && (deviation.bytes().all(|b| b.is_ascii_uppercase()) || deviation.bytes().all(|b| b.is_ascii_lowercase()));
+        let digits = (1..=2).contains(&grade.len()) && grade.bytes().all(|b| b.is_ascii_digit());
+        if !(letters && digits) {
+            return None;
+        }
+        let mut text = [0; 4];
+        text[..class.len()].copy_from_slice(class.as_bytes());
+        Some(FitClass { text, letters: deviation.len() as u8, len: class.len() as u8 })
+    }
+
+    /// The whole class, such as `H7`.
+    pub fn as_str(&self) -> &str {
+        std::str::from_utf8(&self.text[..usize::from(self.len)]).unwrap_or_default()
+    }
+
+    /// The fundamental deviation, such as `H`.
+    pub fn deviation(&self) -> &str {
+        &self.as_str()[..usize::from(self.letters)]
+    }
+
+    /// The tolerance grade, such as `7`.
+    pub fn grade(&self) -> &str {
+        &self.as_str()[usize::from(self.letters)..]
+    }
+}
+
+impl std::fmt::Display for FitClass {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl TryFrom<String> for FitClass {
+    type Error = String;
+
+    fn try_from(text: String) -> Result<FitClass, String> {
+        FitClass::parse(&text).ok_or_else(|| format!("`{text}` is not a tolerance class such as H7"))
+    }
+}
+
+impl From<FitClass> for String {
+    fn from(class: FitClass) -> String {
+        class.as_str().to_owned()
+    }
+}
+
+/// The tolerance of a dimension, in millimetres or degrees.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum Tolerance {
+    /// No tolerance shown: the part's general tolerance applies.
+    #[default]
+    None,
+    /// Plus or minus one value.
+    Symmetric {
+        /// The deviation, greater than zero.
+        value: f64,
+    },
+    /// Separate upper and lower deviations.
+    Deviation {
+        /// Upper deviation.
+        upper: f64,
+        /// Lower deviation, negative below the nominal value.
+        lower: f64,
+    },
+    /// The deviations shown as upper and lower limits.
+    Limits {
+        /// Upper deviation.
+        upper: f64,
+        /// Lower deviation, negative below the nominal value.
+        lower: f64,
+    },
+    /// An ISO 286 tolerance class.
+    Fit {
+        /// The class, such as H7.
+        class: FitClass,
+    },
+    /// Theoretically exact (basic): the value places a tolerance zone and takes no
+    /// limits of its own. A geometric tolerance governs the feature it locates.
+    Basic,
+}
+
+impl Tolerance {
+    /// True when no tolerance is given.
+    pub fn is_none(&self) -> bool {
+        *self == Tolerance::None
+    }
+
+    /// The upper and lower deviations in millimetres, for a tolerance given as numbers.
+    pub fn deviations(&self) -> Option<(f64, f64)> {
+        match *self {
+            Tolerance::Symmetric { value } => Some((value, -value)),
+            Tolerance::Deviation { upper, lower } | Tolerance::Limits { upper, lower } => Some((upper, lower)),
+            Tolerance::None | Tolerance::Fit { .. } | Tolerance::Basic => None,
+        }
+    }
+
+    /// The tolerance as a callout writes it after the value: ` H7`, ` ±0.1` or
+    /// ` +0.1/0`; nothing for none and for basic.
+    pub fn suffix(&self) -> String {
+        let signed = |value: f64| {
+            let text = length_text(value);
+            if value > 0.0 { format!("+{text}") } else { text }
+        };
+        match *self {
+            Tolerance::None | Tolerance::Basic => String::new(),
+            Tolerance::Fit { class } => format!(" {class}"),
+            Tolerance::Symmetric { value } => format!(" \u{b1}{}", length_text(value)),
+            Tolerance::Deviation { upper, lower } | Tolerance::Limits { upper, lower } => {
+                format!(" {}/{}", signed(upper), signed(lower))
+            }
+        }
+    }
+
+    /// Reads a tolerance as people type it: a class (`H7`), a symmetric deviation
+    /// (`±0.1`, `+-0.1`), an upper and a lower deviation (`+0.1/0`, `+0.2/-0.1`), or
+    /// `basic`.
+    pub fn parse(text: &str) -> Option<Tolerance> {
+        let text = text.trim();
+        if text.eq_ignore_ascii_case("basic") {
+            return Some(Tolerance::Basic);
+        }
+        if let Some(class) = FitClass::parse(text) {
+            return Some(Tolerance::Fit { class });
+        }
+        let symmetric =
+            text.strip_prefix('\u{b1}').or_else(|| text.strip_prefix("+-")).or_else(|| text.strip_prefix("+/-"));
+        if let Some(value) = symmetric {
+            let value = Decimal::parse(value)?.value();
+            return (value > 0.0).then_some(Tolerance::Symmetric { value });
+        }
+        let (upper, lower) = text.split_once('/')?;
+        let (upper, lower) = (Decimal::parse(upper)?.value(), Decimal::parse(lower)?.value());
+        (upper > lower).then_some(Tolerance::Deviation { upper, lower })
+    }
+
+    /// Why the tolerance cannot stand, or `None` when it can.
+    pub fn problem(&self) -> Option<&'static str> {
+        match *self {
+            Tolerance::Symmetric { value } if !(value > 0.0 && value.is_finite()) => {
+                Some("The deviation must be more than zero.")
+            }
+            Tolerance::Deviation { upper, lower } | Tolerance::Limits { upper, lower }
+                if !(upper > lower && upper.is_finite() && lower.is_finite()) =>
+            {
+                Some("The upper deviation must be above the lower one.")
+            }
+            _ => None,
+        }
+    }
+}
+
+/// What a surface finish allows the process to do.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SurfaceProcess {
+    /// Any process: the basic symbol.
+    #[default]
+    Any,
+    /// Material must be removed: the symbol with a bar.
+    Removal,
+    /// Material must not be removed: the symbol with a circle.
+    NoRemoval,
+}
+
+/// The direction of the lay on a surface finish symbol.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Lay {
+    /// Parallel to the projection plane of the view: "=".
+    Parallel,
+    /// Perpendicular to it: "⊥".
+    Perpendicular,
+    /// Crossed in two directions: "X".
+    Crossed,
+    /// Many directions: "M".
+    Multidirectional,
+    /// Roughly circular about the surface's centre: "C".
+    Circular,
+    /// Roughly radial: "R".
+    Radial,
+    /// Particulate, non-directional: "P".
+    Particulate,
+}
+
+impl Lay {
+    /// The letter or sign written on the symbol.
+    pub fn symbol(self) -> &'static str {
+        match self {
+            Lay::Parallel => "=",
+            Lay::Perpendicular => "⊥",
+            Lay::Crossed => "X",
+            Lay::Multidirectional => "M",
+            Lay::Circular => "C",
+            Lay::Radial => "R",
+            Lay::Particulate => "P",
+        }
+    }
+}
+
+/// A geometric characteristic of ISO 1101 and ASME Y14.5.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GdtCharacteristic {
+    /// Form: straightness.
+    Straightness,
+    /// Form: flatness.
+    Flatness,
+    /// Form: circularity (roundness).
+    Circularity,
+    /// Form: cylindricity.
+    Cylindricity,
+    /// Profile of a line.
+    ProfileOfLine,
+    /// Profile of a surface.
+    ProfileOfSurface,
+    /// Orientation: angularity.
+    Angularity,
+    /// Orientation: perpendicularity.
+    Perpendicularity,
+    /// Orientation: parallelism.
+    Parallelism,
+    /// Location: position.
+    Position,
+    /// Location: concentricity (coaxiality).
+    Concentricity,
+    /// Location: symmetry.
+    Symmetry,
+    /// Runout: circular runout.
+    CircularRunout,
+    /// Runout: total runout.
+    TotalRunout,
+}
+
+impl GdtCharacteristic {
+    /// Every characteristic, in the standards' order.
+    pub const ALL: [GdtCharacteristic; 14] = [
+        GdtCharacteristic::Straightness,
+        GdtCharacteristic::Flatness,
+        GdtCharacteristic::Circularity,
+        GdtCharacteristic::Cylindricity,
+        GdtCharacteristic::ProfileOfLine,
+        GdtCharacteristic::ProfileOfSurface,
+        GdtCharacteristic::Angularity,
+        GdtCharacteristic::Perpendicularity,
+        GdtCharacteristic::Parallelism,
+        GdtCharacteristic::Position,
+        GdtCharacteristic::Concentricity,
+        GdtCharacteristic::Symmetry,
+        GdtCharacteristic::CircularRunout,
+        GdtCharacteristic::TotalRunout,
+    ];
+
+    /// The name in words, as in pickers.
+    pub fn name(self) -> &'static str {
+        match self {
+            GdtCharacteristic::Straightness => "Straightness",
+            GdtCharacteristic::Flatness => "Flatness",
+            GdtCharacteristic::Circularity => "Circularity",
+            GdtCharacteristic::Cylindricity => "Cylindricity",
+            GdtCharacteristic::ProfileOfLine => "Profile of a line",
+            GdtCharacteristic::ProfileOfSurface => "Profile of a surface",
+            GdtCharacteristic::Angularity => "Angularity",
+            GdtCharacteristic::Perpendicularity => "Perpendicularity",
+            GdtCharacteristic::Parallelism => "Parallelism",
+            GdtCharacteristic::Position => "Position",
+            GdtCharacteristic::Concentricity => "Concentricity",
+            GdtCharacteristic::Symmetry => "Symmetry",
+            GdtCharacteristic::CircularRunout => "Circular runout",
+            GdtCharacteristic::TotalRunout => "Total runout",
+        }
+    }
+
+    /// The snake-case key, as in files and on the command line.
+    pub fn key(self) -> &'static str {
+        match self {
+            GdtCharacteristic::Straightness => "straightness",
+            GdtCharacteristic::Flatness => "flatness",
+            GdtCharacteristic::Circularity => "circularity",
+            GdtCharacteristic::Cylindricity => "cylindricity",
+            GdtCharacteristic::ProfileOfLine => "profile_of_line",
+            GdtCharacteristic::ProfileOfSurface => "profile_of_surface",
+            GdtCharacteristic::Angularity => "angularity",
+            GdtCharacteristic::Perpendicularity => "perpendicularity",
+            GdtCharacteristic::Parallelism => "parallelism",
+            GdtCharacteristic::Position => "position",
+            GdtCharacteristic::Concentricity => "concentricity",
+            GdtCharacteristic::Symmetry => "symmetry",
+            GdtCharacteristic::CircularRunout => "circular_runout",
+            GdtCharacteristic::TotalRunout => "total_runout",
+        }
+    }
+
+    /// The characteristic with this key.
+    pub fn from_key(key: &str) -> Option<GdtCharacteristic> {
+        GdtCharacteristic::ALL.into_iter().find(|c| c.key() == key)
+    }
+
+    /// Form tolerances never take datums; orientation and runout tolerances always do.
+    pub fn takes_datums(self) -> Option<bool> {
+        match self {
+            GdtCharacteristic::Straightness
+            | GdtCharacteristic::Flatness
+            | GdtCharacteristic::Circularity
+            | GdtCharacteristic::Cylindricity => Some(false),
+            GdtCharacteristic::Angularity
+            | GdtCharacteristic::Perpendicularity
+            | GdtCharacteristic::Parallelism
+            | GdtCharacteristic::CircularRunout
+            | GdtCharacteristic::TotalRunout => Some(true),
+            _ => None,
+        }
+    }
+}
+
+/// The material condition a tolerance or datum reference applies at.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MaterialCondition {
+    /// Regardless of feature size: no modifier.
+    #[default]
+    Regardless,
+    /// Maximum material condition: Ⓜ.
+    Maximum,
+    /// Least material condition: Ⓛ.
+    Least,
+}
+
+impl MaterialCondition {
+    /// True for regardless of feature size, which writes nothing.
+    pub fn is_regardless(&self) -> bool {
+        *self == MaterialCondition::Regardless
+    }
+
+    /// The modifier letter drawn in a circle: "M", "L" or "".
+    pub fn letter(self) -> &'static str {
+        match self {
+            MaterialCondition::Regardless => "",
+            MaterialCondition::Maximum => "M",
+            MaterialCondition::Least => "L",
+        }
+    }
+}
+
+/// One datum reference of a feature control frame.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DatumRef {
+    /// The datum letter, or a common datum such as "A-B".
+    pub letter: String,
+    /// The material condition it applies at.
+    #[serde(default, skip_serializing_if = "MaterialCondition::is_regardless")]
+    pub material: MaterialCondition,
+}
+
+impl DatumRef {
+    /// A datum reference regardless of feature size.
+    pub fn new(letter: &str) -> DatumRef {
+        DatumRef { letter: letter.to_owned(), material: MaterialCondition::Regardless }
+    }
+
+    /// The single letters the reference names: `A` and `B` for the common datum `A-B`.
+    pub fn letters(&self) -> impl Iterator<Item = &str> {
+        self.letter.split('-').map(str::trim)
+    }
+}
+
 /// The manufacturing information of one part.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Pmi<F> {
@@ -164,34 +554,43 @@ impl<F> PmiItem<F> {
             PmiKind::Datum { letter, feature: faces } => {
                 PmiKind::Datum { letter: letter.clone(), feature: feature(faces)? }
             }
-            PmiKind::Size { size, features, limits, nominal } => PmiKind::Size {
+            PmiKind::Size { size, features, tolerance, through, nominal } => PmiKind::Size {
                 size: *size,
                 features: features.iter().map(&mut feature).collect::<Result<_, _>>()?,
-                limits: limits.clone(),
-                nominal: nominal.clone(),
+                tolerance: *tolerance,
+                through: *through,
+                nominal: *nominal,
             },
-            PmiKind::Location { from, to, limits, nominal } => PmiKind::Location {
+            PmiKind::Location { from, to, tolerance, nominal } => PmiKind::Location {
                 from: Anchor { feature: feature(&from.feature)?, at: from.at },
                 to: Anchor { feature: feature(&to.feature)?, at: to.at },
-                limits: limits.clone(),
-                nominal: nominal.clone(),
+                tolerance: *tolerance,
+                nominal: *nominal,
             },
-            PmiKind::Tolerance { characteristic, value, diameter_zone, material, datums, features } => {
-                PmiKind::Tolerance {
-                    characteristic: *characteristic,
-                    value: value.clone(),
-                    diameter_zone: *diameter_zone,
-                    material: *material,
-                    datums: datums.clone(),
-                    features: features.iter().map(&mut feature).collect::<Result<_, _>>()?,
+            PmiKind::Slot { flats, ends, tolerance } => PmiKind::Slot {
+                flats: [feature(&flats[0])?, feature(&flats[1])?],
+                ends: [feature(&ends[0])?, feature(&ends[1])?],
+                tolerance: *tolerance,
+            },
+            PmiKind::Gdt { characteristic, tolerance, diameter, material, datums, features } => PmiKind::Gdt {
+                characteristic: *characteristic,
+                tolerance: *tolerance,
+                diameter: *diameter,
+                material: *material,
+                datums: datums.clone(),
+                features: features.iter().map(&mut feature).collect::<Result<_, _>>()?,
+            },
+            PmiKind::SurfaceFinish { text, process, method, lay, allowance, all_around, feature: faces } => {
+                PmiKind::SurfaceFinish {
+                    text: text.clone(),
+                    process: *process,
+                    method: method.clone(),
+                    lay: *lay,
+                    allowance: allowance.clone(),
+                    all_around: *all_around,
+                    feature: feature(faces)?,
                 }
             }
-            PmiKind::Texture { parameter, value, process, feature: faces } => PmiKind::Texture {
-                parameter: parameter.clone(),
-                value: value.clone(),
-                process: *process,
-                feature: feature(faces)?,
-            },
         };
         Ok(PmiItem { id: self.id.clone(), kind })
     }
@@ -199,15 +598,16 @@ impl<F> PmiItem<F> {
     /// Every feature the item names, in order.
     pub fn features(&self) -> Vec<&Feature<F>> {
         match &self.kind {
-            PmiKind::Datum { feature, .. } | PmiKind::Texture { feature, .. } => vec![feature],
-            PmiKind::Size { features, .. } | PmiKind::Tolerance { features, .. } => features.iter().collect(),
+            PmiKind::Datum { feature, .. } | PmiKind::SurfaceFinish { feature, .. } => vec![feature],
+            PmiKind::Size { features, .. } | PmiKind::Gdt { features, .. } => features.iter().collect(),
             PmiKind::Location { from, to, .. } => vec![&from.feature, &to.feature],
+            PmiKind::Slot { flats, ends, .. } => flats.iter().chain(ends).collect(),
         }
     }
 
-    /// True for a size or a distance: an item with a nominal value.
+    /// True for a size, a distance or a slot: an item with measured values.
     pub fn is_dimension(&self) -> bool {
-        matches!(self.kind, PmiKind::Size { .. } | PmiKind::Location { .. })
+        matches!(self.kind, PmiKind::Size { .. } | PmiKind::Location { .. } | PmiKind::Slot { .. })
     }
 }
 
@@ -228,13 +628,16 @@ pub enum PmiKind<F> {
         size: SizeKind,
         /// The features it applies to. Several are a pattern, such as four equal holes.
         features: Vec<Feature<F>>,
-        /// The limits, or `None` for a size under the part's general tolerance.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        limits: Option<Limits>,
+        /// The tolerance. None leaves the size under the part's general tolerance.
+        #[serde(default, skip_serializing_if = "Tolerance::is_none")]
+        tolerance: Tolerance,
+        /// The size is a hole's diameter and the hole goes through the part.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        through: bool,
         /// The value a STEP file stated, in millimetres. `None` in a part: the size is
         /// measured on the body.
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        nominal: Option<Decimal>,
+        nominal: Option<f64>,
     },
     /// The distance between two features.
     Location {
@@ -242,40 +645,61 @@ pub enum PmiKind<F> {
         from: Anchor<F>,
         /// The feature it is measured to.
         to: Anchor<F>,
-        /// The limits, or `None` for a distance under the general tolerance.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        limits: Option<Limits>,
+        /// The tolerance. None leaves the distance under the general tolerance.
+        #[serde(default, skip_serializing_if = "Tolerance::is_none")]
+        tolerance: Tolerance,
         /// The value a STEP file stated, in millimetres. `None` in a part.
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        nominal: Option<Decimal>,
+        nominal: Option<f64>,
     },
-    /// A geometric tolerance.
-    Tolerance {
-        /// The characteristic.
-        characteristic: Characteristic,
-        /// The width of the tolerance zone in millimetres.
-        value: Decimal,
-        /// The zone is a cylinder and the value its diameter.
+    /// A slot with round ends, as one item: its length over the ends, the width between
+    /// its flats and the radius of its ends, such as `20×6 +0.1/0 R3`.
+    Slot {
+        /// The two flat sides.
+        flats: [Feature<F>; 2],
+        /// The two round ends.
+        ends: [Feature<F>; 2],
+        /// The tolerance of the length and the width.
+        #[serde(default, skip_serializing_if = "Tolerance::is_none")]
+        tolerance: Tolerance,
+    },
+    /// A geometric tolerance: a feature control frame (ISO 1101, ASME Y14.5).
+    Gdt {
+        /// The geometric characteristic.
+        characteristic: GdtCharacteristic,
+        /// The tolerance value in millimetres.
+        tolerance: f64,
+        /// The tolerance zone is a cylinder: the value carries a diameter sign.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-        diameter_zone: bool,
+        diameter: bool,
         /// The material condition the tolerance applies at.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        material: Option<MaterialCondition>,
-        /// The datum letters it refers to: primary, secondary, tertiary.
+        #[serde(default, skip_serializing_if = "MaterialCondition::is_regardless")]
+        material: MaterialCondition,
+        /// Datum references, primary first.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        datums: Vec<String>,
+        datums: Vec<DatumRef>,
         /// The features it applies to. Several are a pattern.
         features: Vec<Feature<F>>,
     },
-    /// A surface texture requirement.
-    Texture {
-        /// The roughness parameter, such as `Ra`.
-        parameter: String,
-        /// Its limit in micrometres.
-        value: Decimal,
+    /// A surface finish requirement (ISO 1302, ASME Y14.36).
+    SurfaceFinish {
+        /// The roughness requirement, such as "Ra 1.6".
+        text: String,
         /// What the process may do to the surface.
         #[serde(default)]
-        process: Process,
+        process: SurfaceProcess,
+        /// The production method, such as "Ground".
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        method: String,
+        /// The direction of the lay.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        lay: Option<Lay>,
+        /// The machining allowance, such as "0.5".
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        allowance: String,
+        /// The requirement holds all around the outline.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        all_around: bool,
         /// The feature it applies to.
         feature: Feature<F>,
     },
@@ -322,207 +746,15 @@ impl At {
     }
 }
 
-/// The limits of a dimension.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "limits", rename_all = "snake_case")]
-pub enum Limits {
-    /// Deviations from the nominal value in millimetres, such as +0.1 and 0.
-    Deviations {
-        /// The upper deviation.
-        upper: Decimal,
-        /// The lower deviation, below the upper one.
-        lower: Decimal,
-    },
-    /// An ISO 286 tolerance class, such as H7.
-    Fit {
-        /// The fundamental deviation: capital letters for a hole, small for a shaft.
-        deviation: String,
-        /// The tolerance grade number, such as `7`.
-        grade: String,
-    },
-}
-
-impl Limits {
-    /// The limits as a drawing writes them after the nominal value: ` H7`, ` ±0.1`, or
-    /// ` +0.1/0`.
-    pub fn suffix(&self) -> String {
-        match self {
-            Limits::Fit { deviation, grade } => format!(" {deviation}{grade}"),
-            Limits::Deviations { upper, lower } => {
-                let signed = |value: &Decimal| {
-                    if value.is_positive() { format!("+{value}") } else { value.to_string() }
-                };
-                if upper.is_positive() && lower.as_str().strip_prefix('-') == Some(upper.as_str()) {
-                    format!(" \u{b1}{upper}")
-                } else {
-                    format!(" {}/{}", signed(upper), signed(lower))
-                }
-            }
-        }
-    }
-
-    /// Reads limits as people type them: a tolerance class (`H7`), a symmetric
-    /// deviation (`±0.1`, `+-0.1`) or an upper and a lower one (`+0.1/0`, `+0.2/-0.1`).
-    pub fn parse(text: &str) -> Option<Limits> {
-        let text = text.trim();
-        if let Some(fit) = Limits::fit(text) {
-            return Some(fit);
-        }
-        let symmetric =
-            text.strip_prefix('\u{b1}').or_else(|| text.strip_prefix("+-")).or_else(|| text.strip_prefix("+/-"));
-        if let Some(value) = symmetric {
-            let upper = Decimal::parse(value)?;
-            let lower = Decimal::parse(&format!("-{}", upper.as_str()))?;
-            return upper.is_positive().then_some(Limits::Deviations { upper, lower });
-        }
-        let (upper, lower) = text.split_once('/')?;
-        let (upper, lower) = (Decimal::parse(upper)?, Decimal::parse(lower)?);
-        (upper.value() > lower.value()).then_some(Limits::Deviations { upper, lower })
-    }
-
-    /// Reads a tolerance class such as `H7` or `js6`.
-    pub fn fit(class: &str) -> Option<Limits> {
-        let class = class.trim();
-        let split = class.find(|c: char| c.is_ascii_digit())?;
-        let (deviation, grade) = class.split_at(split);
-        let letters = (1..=2).contains(&deviation.len())
-            && (deviation.bytes().all(|b| b.is_ascii_uppercase()) || deviation.bytes().all(|b| b.is_ascii_lowercase()));
-        let digits = (1..=2).contains(&grade.len()) && grade.bytes().all(|b| b.is_ascii_digit());
-        (letters && digits).then(|| Limits::Fit { deviation: deviation.to_owned(), grade: grade.to_owned() })
-    }
-}
-
-/// A geometric characteristic, ISO 1101.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Characteristic {
-    /// Angularity.
-    Angularity,
-    /// Circular run-out.
-    CircularRunout,
-    /// Coaxiality.
-    Coaxiality,
-    /// Concentricity.
-    Concentricity,
-    /// Cylindricity.
-    Cylindricity,
-    /// Flatness.
-    Flatness,
-    /// Profile of a line.
-    LineProfile,
-    /// Parallelism.
-    Parallelism,
-    /// Perpendicularity.
-    Perpendicularity,
-    /// Position.
-    Position,
-    /// Roundness.
-    Roundness,
-    /// Straightness.
-    Straightness,
-    /// Profile of a surface.
-    SurfaceProfile,
-    /// Symmetry.
-    Symmetry,
-    /// Total run-out.
-    TotalRunout,
-}
-
-/// Whether a characteristic refers to datums.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum DatumUse {
-    /// Never: a form tolerance.
-    None,
-    /// With or without.
-    Optional,
-    /// Always, one to three.
-    Required,
-}
-
-impl Characteristic {
-    /// Every characteristic, in the order menus list them.
-    pub const ALL: [Characteristic; 15] = [
-        Characteristic::Position,
-        Characteristic::Flatness,
-        Characteristic::Perpendicularity,
-        Characteristic::Parallelism,
-        Characteristic::Angularity,
-        Characteristic::Straightness,
-        Characteristic::Roundness,
-        Characteristic::Cylindricity,
-        Characteristic::Concentricity,
-        Characteristic::Coaxiality,
-        Characteristic::Symmetry,
-        Characteristic::CircularRunout,
-        Characteristic::TotalRunout,
-        Characteristic::LineProfile,
-        Characteristic::SurfaceProfile,
-    ];
-
-    /// The characteristic in words, such as `Position`.
-    pub fn label(self) -> &'static str {
-        match self {
-            Characteristic::Angularity => "Angularity",
-            Characteristic::CircularRunout => "Circular run-out",
-            Characteristic::Coaxiality => "Coaxiality",
-            Characteristic::Concentricity => "Concentricity",
-            Characteristic::Cylindricity => "Cylindricity",
-            Characteristic::Flatness => "Flatness",
-            Characteristic::LineProfile => "Profile of a line",
-            Characteristic::Parallelism => "Parallelism",
-            Characteristic::Perpendicularity => "Perpendicularity",
-            Characteristic::Position => "Position",
-            Characteristic::Roundness => "Roundness",
-            Characteristic::Straightness => "Straightness",
-            Characteristic::SurfaceProfile => "Profile of a surface",
-            Characteristic::Symmetry => "Symmetry",
-            Characteristic::TotalRunout => "Total run-out",
-        }
-    }
-
-    /// Whether the characteristic refers to datums.
-    pub fn datum_use(self) -> DatumUse {
-        match self {
-            Characteristic::Cylindricity
-            | Characteristic::Flatness
-            | Characteristic::Roundness
-            | Characteristic::Straightness => DatumUse::None,
-            Characteristic::LineProfile | Characteristic::Position | Characteristic::SurfaceProfile => {
-                DatumUse::Optional
-            }
-            Characteristic::Angularity
-            | Characteristic::CircularRunout
-            | Characteristic::Coaxiality
-            | Characteristic::Concentricity
-            | Characteristic::Parallelism
-            | Characteristic::Perpendicularity
-            | Characteristic::Symmetry
-            | Characteristic::TotalRunout => DatumUse::Required,
-        }
-    }
-}
-
-/// The material condition a geometric tolerance applies at.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum MaterialCondition {
-    /// Maximum material requirement.
-    Maximum,
-    /// Least material requirement.
-    Least,
-}
-
-/// What a surface texture requirement allows the process to do.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Process {
-    /// Any process.
-    #[default]
-    Any,
-    /// Material must be removed.
-    Removal,
-    /// Material must not be removed.
-    NoRemoval,
+/// A surface finish's roughness as a parameter and its limit in micrometres: `Ra` and
+/// `1.6` for "Ra 1.6". `None` for a requirement written any other way.
+pub fn roughness(text: &str) -> Option<(&str, Decimal)> {
+    let mut words = text.split_whitespace();
+    let (parameter, value) = (words.next()?, words.next()?);
+    let named = parameter.bytes().next().is_some_and(|b| b.is_ascii_alphabetic())
+        && parameter.bytes().all(|b| b.is_ascii_alphanumeric());
+    let value = Decimal::parse(value).filter(Decimal::is_positive)?;
+    (named && words.next().is_none()).then_some((parameter, value))
 }
 
 /// What applies to the whole part.
@@ -563,6 +795,14 @@ impl<F: PartialEq> Pmi<F> {
             .collect()
     }
 
+    /// The feature of datum `letter`.
+    pub fn datum_feature(&self, letter: &str) -> Option<&Feature<F>> {
+        self.items.iter().find_map(|item| match &item.kind {
+            PmiKind::Datum { letter: named, feature } if named == letter => Some(feature),
+            _ => None,
+        })
+    }
+
     /// The first unused datum letter: `A`, `B`, ... skipping `I`, `O` and `Q`, which
     /// drawings leave out.
     pub fn next_datum_letter(&self) -> String {
@@ -590,6 +830,9 @@ impl<F: PartialEq> Pmi<F> {
         if item.id.trim().is_empty() {
             return Some("The item needs a name.".into());
         }
+        if item.id.contains('/') {
+            return Some("A name cannot hold a slash.".into());
+        }
         if others().any(|other| other.id == item.id) {
             return Some(format!("Another item is already called {}.", item.id));
         }
@@ -601,15 +844,7 @@ impl<F: PartialEq> Pmi<F> {
                 return Some("A face is picked twice.".into());
             }
         }
-        let range = |limits: &Option<Limits>| match limits {
-            Some(Limits::Deviations { upper, lower }) if upper.value() <= lower.value() => {
-                Some("The upper deviation must be above the lower one.".to_owned())
-            }
-            Some(Limits::Fit { deviation, grade }) if Limits::fit(&format!("{deviation}{grade}")).is_none() => {
-                Some("A tolerance class is one or two letters and a grade, such as H7.".to_owned())
-            }
-            _ => None,
-        };
+        let range = |tolerance: &Tolerance| tolerance.problem().map(str::to_owned);
         match &item.kind {
             PmiKind::Datum { letter, feature } => {
                 if !is_datum_letter(letter) {
@@ -627,13 +862,16 @@ impl<F: PartialEq> Pmi<F> {
                 }
                 None
             }
-            PmiKind::Size { features, limits, .. } => {
+            PmiKind::Size { size, features, tolerance, through, .. } => {
                 if features.is_empty() {
                     return Some("Pick the faces it applies to.".into());
                 }
-                range(limits)
+                if *through && *size != SizeKind::Diameter {
+                    return Some("Only a hole's diameter goes through.".into());
+                }
+                range(tolerance)
             }
-            PmiKind::Location { from, to, limits, .. } => {
+            PmiKind::Location { from, to, tolerance, .. } => {
                 let same = from.at == to.at
                     && from.feature.len() == to.feature.len()
                     && from.feature.iter().all(|face| to.feature.contains(face));
@@ -643,19 +881,28 @@ impl<F: PartialEq> Pmi<F> {
                 if [from, to].iter().any(|end| end.at == At::Middle && end.feature.len() != 2) {
                     return Some("The middle is taken between two faces.".into());
                 }
-                range(limits)
+                if matches!(tolerance, Tolerance::Fit { .. }) {
+                    return Some("A tolerance class belongs to a size, not a distance.".into());
+                }
+                range(tolerance)
             }
-            PmiKind::Tolerance { characteristic, value, datums, features, .. } => {
+            PmiKind::Slot { tolerance, .. } => {
+                if matches!(tolerance, Tolerance::Fit { .. } | Tolerance::Basic) {
+                    return Some("A slot takes deviations, such as +0.1/0.".into());
+                }
+                range(tolerance)
+            }
+            PmiKind::Gdt { characteristic, tolerance, datums, features, .. } => {
                 if features.is_empty() {
                     return Some("Pick the faces it applies to.".into());
                 }
-                if !value.is_positive() {
+                if !(*tolerance > 0.0 && tolerance.is_finite()) {
                     return Some("The tolerance must be more than zero.".into());
                 }
                 if datums.len() > 3 {
                     return Some("A tolerance refers to at most three datums.".into());
                 }
-                if datums.iter().enumerate().any(|(i, letter)| datums[..i].contains(letter)) {
+                if datums.iter().enumerate().any(|(i, datum)| datums[..i].iter().any(|d| d.letter == datum.letter)) {
                     return Some("A datum is referred to twice.".into());
                 }
                 let defined: Vec<&str> = others()
@@ -664,20 +911,19 @@ impl<F: PartialEq> Pmi<F> {
                         _ => None,
                     })
                     .collect();
-                if let Some(missing) = datums.iter().find(|letter| !defined.contains(&letter.as_str())) {
+                if let Some(missing) =
+                    datums.iter().flat_map(DatumRef::letters).find(|letter| !defined.contains(letter))
+                {
                     return Some(format!("Datum {missing} is not defined."));
                 }
-                match (characteristic.datum_use(), datums.len()) {
-                    (DatumUse::None, 1..) => Some(format!("{} refers to no datum.", characteristic.label())),
-                    (DatumUse::Required, 0) => Some(format!("{} needs a datum.", characteristic.label())),
+                match (characteristic.takes_datums(), datums.len()) {
+                    (Some(false), 1..) => Some(format!("{} refers to no datum.", characteristic.name())),
+                    (Some(true), 0) => Some(format!("{} needs a datum.", characteristic.name())),
                     _ => None,
                 }
             }
-            PmiKind::Texture { parameter, value, .. } => {
-                if parameter.is_empty() || !parameter.bytes().all(|b| b.is_ascii_alphanumeric()) {
-                    return Some("The roughness parameter is letters and digits, such as Ra.".into());
-                }
-                (!value.is_positive()).then(|| "The roughness value must be more than zero.".to_owned())
+            PmiKind::SurfaceFinish { text, .. } => {
+                text.trim().is_empty().then(|| "The finish needs a requirement, such as Ra 1.6.".to_owned())
             }
         }
     }
@@ -686,9 +932,10 @@ impl<F: PartialEq> Pmi<F> {
     pub fn users_of_datum(&self, letter: &str) -> Vec<&str> {
         self.items
             .iter()
-            .filter(
-                |item| matches!(&item.kind, PmiKind::Tolerance { datums, .. } if datums.iter().any(|d| d == letter)),
-            )
+            .filter(|item| {
+                matches!(&item.kind, PmiKind::Gdt { datums, .. }
+                    if datums.iter().flat_map(DatumRef::letters).any(|d| d == letter))
+            })
             .map(|item| item.id.as_str())
             .collect()
     }
@@ -700,51 +947,89 @@ pub fn length_text(value: f64) -> String {
 }
 
 impl<F> PmiItem<F> {
-    /// The item as a drawing writes it, with a dimension's measured value: `Ø8 H7`,
-    /// `4× Ø4 +0.1/0`, `15 ±0.1`, `Position Ø0.05 A|B|C`, `Ra 1.6`, `Datum A`. A
-    /// dimension without a measured value reads `?`.
-    pub fn callout(&self, nominal: Option<f64>) -> String {
-        let measured = nominal.map_or_else(|| "?".to_owned(), length_text);
-        let suffix = |limits: &Option<Limits>| limits.as_ref().map(Limits::suffix).unwrap_or_default();
+    /// The item as a drawing writes it, with its measured values: `Ø8 H7`,
+    /// `4× Ø4 +0.1/0 THRU`, `15 ±0.1`, `20×6 +0.1/0 R3`, `Position Ø0.05 A|B|C`,
+    /// `Ra 1.6`, `Datum A`. A size or a distance has one value; a slot its length, its
+    /// width and its end radius. A value that is missing reads `?`.
+    pub fn callout(&self, measured: &[f64]) -> String {
+        let value = |index: usize| measured.get(index).map_or_else(|| "?".to_owned(), |v| length_text(*v));
         match &self.kind {
             PmiKind::Datum { letter, .. } => format!("Datum {letter}"),
-            PmiKind::Size { size, features, limits, .. } => {
+            PmiKind::Size { size, features, tolerance, through, .. } => {
                 let count = if features.len() > 1 { format!("{}\u{d7} ", features.len()) } else { String::new() };
                 let sign = match size {
                     SizeKind::Diameter => "\u{d8}",
                     SizeKind::Radius => "R",
                 };
-                format!("{count}{sign}{measured}{}", suffix(limits))
+                let thru = if *through { " THRU" } else { "" };
+                format!("{count}{sign}{}{}{thru}", value(0), tolerance.suffix())
             }
-            PmiKind::Location { limits, .. } => format!("{measured}{}", suffix(limits)),
-            PmiKind::Tolerance { characteristic, value, diameter_zone, material, datums, .. } => {
-                let mut text =
-                    format!("{} {}{value}", characteristic.label(), if *diameter_zone { "\u{d8}" } else { "" });
-                match material {
-                    Some(MaterialCondition::Maximum) => text.push_str(" (M)"),
-                    Some(MaterialCondition::Least) => text.push_str(" (L)"),
-                    None => {}
+            PmiKind::Location { tolerance, .. } => format!("{}{}", value(0), tolerance.suffix()),
+            PmiKind::Slot { tolerance, .. } => {
+                format!("{}\u{d7}{}{} R{}", value(0), value(1), tolerance.suffix(), value(2))
+            }
+            PmiKind::Gdt { characteristic, tolerance, diameter, material, datums, .. } => {
+                let mut text = format!(
+                    "{} {}{}",
+                    characteristic.name(),
+                    if *diameter { "\u{d8}" } else { "" },
+                    length_text(*tolerance)
+                );
+                if !material.is_regardless() {
+                    text.push_str(&format!(" ({})", material.letter()));
                 }
                 if !datums.is_empty() {
+                    let letters: Vec<String> = datums
+                        .iter()
+                        .map(|datum| {
+                            if datum.material.is_regardless() {
+                                datum.letter.clone()
+                            } else {
+                                format!("{} ({})", datum.letter, datum.material.letter())
+                            }
+                        })
+                        .collect();
                     text.push(' ');
-                    text.push_str(&datums.join("|"));
+                    text.push_str(&letters.join("|"));
                 }
                 text
             }
-            PmiKind::Texture { parameter, value, .. } => format!("{parameter} {value}"),
+            PmiKind::SurfaceFinish { text, .. } => text.clone(),
+        }
+    }
+
+    /// Why a STEP file cannot hold the item as it stands, or `None` when it can. The
+    /// item still stands on the part and on its drawing.
+    pub fn file_problem(&self) -> Option<String> {
+        match &self.kind {
+            PmiKind::Gdt { datums, .. }
+                if datums.iter().any(|datum| !datum.material.is_regardless() || datum.letter.contains('-')) =>
+            {
+                Some("Coming soon".to_owned())
+            }
+            PmiKind::SurfaceFinish { method, lay, allowance, all_around, .. }
+                if !method.is_empty() || lay.is_some() || !allowance.is_empty() || *all_around =>
+            {
+                Some("Coming soon".to_owned())
+            }
+            PmiKind::SurfaceFinish { text, .. } if roughness(text).is_none() => {
+                Some("The finish must read as a parameter and a value, such as Ra 1.6.".to_owned())
+            }
+            _ => None,
         }
     }
 
     /// What kind of item it is, in words: `Datum`, `Diameter`, `Radius`, `Distance`,
-    /// the characteristic's name, or `Surface finish`.
+    /// `Slot`, the characteristic's name, or `Surface finish`.
     pub fn kind_label(&self) -> &'static str {
         match &self.kind {
             PmiKind::Datum { .. } => "Datum",
             PmiKind::Size { size: SizeKind::Diameter, .. } => "Diameter",
             PmiKind::Size { size: SizeKind::Radius, .. } => "Radius",
             PmiKind::Location { .. } => "Distance",
-            PmiKind::Tolerance { characteristic, .. } => characteristic.label(),
-            PmiKind::Texture { .. } => "Surface finish",
+            PmiKind::Slot { .. } => "Slot",
+            PmiKind::Gdt { characteristic, .. } => characteristic.name(),
+            PmiKind::SurfaceFinish { .. } => "Surface finish",
         }
     }
 }
@@ -789,20 +1074,23 @@ mod tests {
     }
 
     #[test]
-    fn limits_read_as_a_drawing_writes_them() {
-        let d = |text| Decimal::parse(text).unwrap();
-        assert_eq!(Limits::fit("H7").unwrap().suffix(), " H7");
-        assert_eq!(Limits::fit("js6").unwrap().suffix(), " js6");
-        assert!(Limits::fit("7H").is_none());
-        assert_eq!(Limits::Deviations { upper: d("0.1"), lower: d("-0.1") }.suffix(), " \u{b1}0.1");
-        assert_eq!(Limits::Deviations { upper: d("0.1"), lower: d("0") }.suffix(), " +0.1/0");
+    fn tolerances_read_as_a_drawing_writes_them() {
+        let class = FitClass::parse("js6").unwrap();
+        assert_eq!((class.as_str(), class.deviation(), class.grade()), ("js6", "js", "6"));
+        assert!(FitClass::parse("7H").is_none() && FitClass::parse("H").is_none());
+        assert_eq!(Tolerance::parse("H7").unwrap().suffix(), " H7");
+        assert_eq!(Tolerance::Symmetric { value: 0.1 }.suffix(), " \u{b1}0.1");
+        assert_eq!(Tolerance::Deviation { upper: 0.1, lower: 0.0 }.suffix(), " +0.1/0");
         for text in ["H7", "\u{b1}0.1", "+-0.1", "+0.1/0", "+0.2/-0.1", "0/-0.1"] {
-            let limits = Limits::parse(text).unwrap_or_else(|| panic!("{text} reads as limits"));
-            assert_eq!(Limits::parse(limits.suffix().trim()), Some(limits), "{text}");
+            let tolerance = Tolerance::parse(text).unwrap_or_else(|| panic!("{text} reads as a tolerance"));
+            assert_eq!(Tolerance::parse(tolerance.suffix().trim()), Some(tolerance), "{text}");
         }
+        assert_eq!(Tolerance::parse("basic"), Some(Tolerance::Basic));
         for text in ["", "0.1", "-0.1/+0.1", "\u{b1}0", "H"] {
-            assert!(Limits::parse(text).is_none(), "{text}");
+            assert!(Tolerance::parse(text).is_none(), "{text}");
         }
+        assert_eq!(roughness("Ra 1.6").map(|(name, value)| (name, value.to_string())), Some(("Ra", "1.6".to_owned())));
+        assert!(roughness("smooth").is_none() && roughness("Ra 1.6 max").is_none() && roughness("1.6 Ra").is_none());
     }
 
     #[test]
@@ -812,15 +1100,74 @@ mod tests {
             kind: PmiKind::Size {
                 size: SizeKind::Diameter,
                 features: vec![vec!["#17".to_owned()]],
-                limits: Limits::fit("H7"),
+                tolerance: Tolerance::parse("H7").unwrap(),
+                through: false,
                 nominal: None,
             },
         };
         let text = serde_json::to_string(&item).unwrap();
         assert_eq!(
             text,
-            r##"{"id":"Bore diameter","type":"size","size":"diameter","features":[["#17"]],"limits":{"limits":"fit","deviation":"H","grade":"7"}}"##
+            r##"{"id":"Bore diameter","type":"size","size":"diameter","features":[["#17"]],"tolerance":{"type":"fit","class":"H7"}}"##
         );
         assert_eq!(serde_json::from_str::<PmiItem<String>>(&text).unwrap(), item);
+    }
+
+    #[test]
+    fn items_read_as_a_drawing_writes_them() {
+        let face = |name: &str| vec![name.to_owned()];
+        let item = |kind| PmiItem { id: "x".to_owned(), kind };
+        let holes = item(PmiKind::Size {
+            size: SizeKind::Diameter,
+            features: vec![face("a"), face("b"), face("c"), face("d")],
+            tolerance: Tolerance::Deviation { upper: 0.1, lower: 0.0 },
+            through: true,
+            nominal: None,
+        });
+        assert_eq!(holes.callout(&[4.0]), "4\u{d7} \u{d8}4 +0.1/0 THRU");
+        let slot = item(PmiKind::Slot {
+            flats: [face("a"), face("b")],
+            ends: [face("c"), face("d")],
+            tolerance: Tolerance::Deviation { upper: 0.1, lower: 0.0 },
+        });
+        assert_eq!(slot.callout(&[20.0, 6.0, 3.0]), "20\u{d7}6 +0.1/0 R3");
+        assert_eq!(slot.callout(&[]), "?\u{d7}? +0.1/0 R?");
+        let position = item(PmiKind::Gdt {
+            characteristic: GdtCharacteristic::Position,
+            tolerance: 0.05,
+            diameter: true,
+            material: MaterialCondition::Regardless,
+            datums: ["A", "B", "C"].map(DatumRef::new).to_vec(),
+            features: vec![face("a")],
+        });
+        assert_eq!(position.callout(&[]), "Position \u{d8}0.05 A|B|C");
+    }
+
+    #[test]
+    fn an_item_that_does_not_fit_says_why() {
+        let datum = |letter: &str, face: &str| PmiItem {
+            id: format!("Datum {letter}"),
+            kind: PmiKind::Datum { letter: letter.to_owned(), feature: vec![face.to_owned()] },
+        };
+        let part = Pmi { items: vec![datum("A", "a")], part: PartNotes::default() };
+        assert_eq!(
+            part.problem_with(&datum("A", "b"), None).as_deref(),
+            Some("Another item is already called Datum A.")
+        );
+        let flatness = |datums: &[&str]| PmiItem {
+            id: "Flatness".to_owned(),
+            kind: PmiKind::Gdt {
+                characteristic: GdtCharacteristic::Flatness,
+                tolerance: 0.05,
+                diameter: false,
+                material: MaterialCondition::Regardless,
+                datums: datums.iter().map(|letter| DatumRef::new(letter)).collect(),
+                features: vec![vec!["a".to_owned()]],
+            },
+        };
+        assert_eq!(part.problem_with(&flatness(&[]), None), None);
+        assert_eq!(part.problem_with(&flatness(&["A"]), None).as_deref(), Some("Flatness refers to no datum."));
+        assert_eq!(part.problem_with(&flatness(&["B"]), None).as_deref(), Some("Datum B is not defined."));
+        assert_eq!(part.users_of_datum("A"), Vec::<&str>::new());
     }
 }

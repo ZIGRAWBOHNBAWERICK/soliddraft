@@ -3,9 +3,12 @@
 
 use std::sync::Arc;
 
-use soliddraft_kernel_api::pmi::{Anchor, At, Characteristic, Decimal, Limits, PartNotes, PmiItem, PmiKind, SizeKind};
+use soliddraft_kernel_api::pmi::{
+    Anchor, At, DatumRef, GdtCharacteristic, MaterialCondition, PartNotes, PmiItem, PmiKind, SizeKind, Tolerance,
+};
 use soliddraft_kernel_api::{FaceId, StepOptions, SurfaceKind, Vec3};
 use soliddraft_kernel_catallax::CatallaxKernel;
+use soliddraft_model::pmi::Located;
 use soliddraft_model::sketch::{P2, Sketch, SolveStatus, solve::solve};
 use soliddraft_model::{
     Command, CommandError, DatumPlane, Document, EndCondition, ExtrudeFeature, ExtrudeOp, FaceRef, FeatureId,
@@ -79,8 +82,8 @@ fn cylinders(doc: &Document) -> Vec<FaceRef> {
     doc.pmi_feature(&found).unwrap()
 }
 
-fn decimal(text: &str) -> Decimal {
-    Decimal::parse(text).unwrap()
+fn datums(letters: &[&str]) -> Vec<DatumRef> {
+    letters.iter().map(|letter| DatumRef::new(letter)).collect()
 }
 
 fn put(doc: &mut Document, id: &str, kind: PmiKind<FaceRef>) {
@@ -102,26 +105,35 @@ fn annotate(doc: &mut Document) {
         PmiKind::Size {
             size: SizeKind::Diameter,
             features: vec![bore.clone()],
-            limits: Limits::fit("H7"),
+            tolerance: Tolerance::parse("H7").unwrap(),
+            through: true,
             nominal: None,
         },
     );
     put(
         doc,
         "Bore position",
-        PmiKind::Tolerance {
-            characteristic: Characteristic::Position,
-            value: decimal("0.05"),
-            diameter_zone: true,
-            material: None,
-            datums: vec!["A".into(), "B".into()],
+        PmiKind::Gdt {
+            characteristic: GdtCharacteristic::Position,
+            tolerance: 0.05,
+            diameter: true,
+            material: MaterialCondition::Regardless,
+            datums: datums(&["A", "B"]),
             features: vec![bore.clone()],
         },
     );
     put(
         doc,
         "Bore finish",
-        PmiKind::Texture { parameter: "Ra".into(), value: decimal("1.6"), process: Default::default(), feature: bore },
+        PmiKind::SurfaceFinish {
+            text: "Ra 1.6".into(),
+            process: Default::default(),
+            method: String::new(),
+            lay: None,
+            allowance: String::new(),
+            all_around: false,
+            feature: bore,
+        },
     );
     put(
         doc,
@@ -129,7 +141,7 @@ fn annotate(doc: &mut Document) {
         PmiKind::Location {
             from: Anchor { feature: bottom, at: At::Feature },
             to: Anchor { feature: top, at: At::Feature },
-            limits: Some(Limits::Deviations { upper: decimal("0.1"), lower: decimal("-0.1") }),
+            tolerance: Tolerance::Symmetric { value: 0.1 },
             nominal: None,
         },
     );
@@ -151,7 +163,7 @@ fn expected(bore: &str) -> Vec<(String, String, Option<String>)> {
     [
         ("Datum A", "Datum A".to_owned()),
         ("Datum B", "Datum B".to_owned()),
-        ("Bore diameter", format!("\u{d8}{bore} H7")),
+        ("Bore diameter", format!("\u{d8}{bore} H7 THRU")),
         ("Bore position", "Position \u{d8}0.05 A|B".to_owned()),
         ("Bore finish", "Ra 1.6".to_owned()),
         ("Thickness", "10 \u{b1}0.1".to_owned()),
@@ -167,6 +179,13 @@ fn dimensions_read_the_size_the_part_has() {
     bored_block(&mut d, 8.0);
     annotate(&mut d);
     assert_eq!(callouts(&d), expected("8"));
+
+    // The bore is located from the datum its axis runs along: 20 mm from the side.
+    // Its axis crosses the underside, so no distance is measured from that.
+    let rows = d.pmi_rows();
+    let position = rows.iter().find(|row| row.item.id == "Bore position").unwrap();
+    assert_eq!(position.located, [Located { datum: "B".into(), feature: 0, value: 20.0 }]);
+    assert!(rows.iter().filter(|row| row.item.id != "Bore position").all(|row| row.located.is_empty()));
 }
 
 #[test]
@@ -187,6 +206,9 @@ fn step_carries_the_items_to_another_part_and_back_onto_the_same_faces() {
     annotate(&mut d);
     let on_body = d.pmi_on_body();
     assert_eq!(on_body.left_out, Vec::new());
+    // The six items, and the distance that locates the bore from datum B.
+    assert_eq!((on_body.items, on_body.pmi.items.len()), (6, 7));
+    assert_eq!(on_body.pmi.items[6].id, "Bore position/1 from B");
     let step = d.kernel().export_step_with_pmi(d.body().unwrap(), &StepOptions::default(), &on_body.pmi).unwrap();
 
     // Another part opens the file: the body, then what the file says about it.
@@ -197,6 +219,8 @@ fn step_carries_the_items_to_another_part_and_back_onto_the_same_faces() {
     assert_eq!(read.skipped, Vec::new());
     let (items, report) = other.pmi_from_step(&[import], &read);
     assert_eq!(report.left_out, Vec::new());
+    // The locating distance is in the file and is not an item: the part measures its own.
+    assert!(read.pmi.item("Bore position/1 from B").is_some());
     assert_eq!(report.added, ["Datum A", "Datum B", "Bore diameter", "Bore position", "Bore finish", "Thickness"]);
     for item in items {
         other.execute(Command::PutPmiItem { item: Box::new(item), replaces: None }).unwrap();
@@ -304,12 +328,12 @@ fn commands_refuse_what_does_not_fit_and_undo_what_they_did() {
     );
     let orphan = PmiItem {
         id: "Runout".into(),
-        kind: PmiKind::Tolerance {
-            characteristic: Characteristic::TotalRunout,
-            value: decimal("0.1"),
-            diameter_zone: false,
-            material: None,
-            datums: vec!["D".into()],
+        kind: PmiKind::Gdt {
+            characteristic: GdtCharacteristic::TotalRunout,
+            tolerance: 0.1,
+            diameter: false,
+            material: MaterialCondition::Regardless,
+            datums: datums(&["D"]),
             features: vec![bore.clone()],
         },
     };
@@ -329,7 +353,7 @@ fn commands_refuse_what_does_not_fit_and_undo_what_they_did() {
         kind: PmiKind::Datum { letter: "D".into(), feature: facing(&d, Vec3::new(0.0, 0.0, -1.0)) },
     };
     d.execute(Command::PutPmiItem { item: Box::new(renamed), replaces: Some("Datum A".into()) }).unwrap();
-    let position = d.pmi().item("Bore position").unwrap().callout(None);
+    let position = d.pmi().item("Bore position").unwrap().callout(&[]);
     assert_eq!(position, "Position \u{d8}0.05 D|B");
     d.undo().unwrap();
     assert_eq!(callouts(&d), expected("8"));

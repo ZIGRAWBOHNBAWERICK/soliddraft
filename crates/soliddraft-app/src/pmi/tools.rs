@@ -2,8 +2,8 @@
 
 use serde_json::{Value, json};
 use soliddraft_kernel_api::pmi::{
-    Anchor, At, Characteristic, Decimal, Feature, Limits, MaterialCondition, PartNotes, PmiItem, PmiKind, Process,
-    SizeKind,
+    Anchor, At, DatumRef, Feature, GdtCharacteristic, Lay, MaterialCondition, PartNotes, PmiItem, PmiKind, SizeKind,
+    SurfaceProcess, Tolerance,
 };
 use soliddraft_model::FaceRef;
 
@@ -15,14 +15,14 @@ fn text<'a>(input: &'a Value, key: &str) -> Option<&'a str> {
     input.get(key).and_then(Value::as_str).map(str::trim).filter(|text| !text.is_empty())
 }
 
-/// A decimal given as text or as a number.
-fn decimal(input: &Value, key: &str) -> Result<Decimal, String> {
+/// A number given as a number or as text.
+fn number(input: &Value, key: &str) -> Result<f64, String> {
     let read = match input.get(key) {
-        Some(Value::String(text)) => Decimal::parse(text),
-        Some(Value::Number(number)) => number.as_f64().and_then(Decimal::from_f64),
+        Some(Value::String(text)) => text.trim().parse::<f64>().ok(),
+        Some(Value::Number(number)) => number.as_f64(),
         _ => return Err(format!("{key} is required")),
     };
-    read.ok_or_else(|| format!("{key} is a decimal number, such as 0.05"))
+    read.filter(|value| value.is_finite()).ok_or_else(|| format!("{key} is a number, such as 0.05"))
 }
 
 /// The faces of one feature, from their names.
@@ -56,22 +56,29 @@ fn features(doc: &Document, input: &Value) -> Result<Vec<Feature<FaceRef>>, Stri
     }
 }
 
-fn one_feature(doc: &Document, input: &Value) -> Result<Feature<FaceRef>, String> {
-    feature(doc, input.get("faces").ok_or("faces is required")?, "faces")
+fn named_feature(doc: &Document, input: &Value, key: &str) -> Result<Feature<FaceRef>, String> {
+    feature(doc, input.get(key).ok_or_else(|| format!("{key} is required"))?, key)
 }
 
-fn limits(input: &Value) -> Result<Option<Limits>, String> {
-    match text(input, "limits") {
-        None => Ok(None),
-        Some(written) => Limits::parse(written)
-            .map(Some)
-            .ok_or_else(|| format!("limits `{written}` are not H7, \u{b1}0.1, +0.1/0 or +0.2/-0.1")),
+/// The two features `key` lists, such as a slot's flat sides.
+fn pair(doc: &Document, input: &Value, key: &str) -> Result<[Feature<FaceRef>; 2], String> {
+    let wrong = || format!("{key} is two features, each a list of face names");
+    match input.get(key).and_then(Value::as_array).map(Vec::as_slice) {
+        Some([first, second]) => Ok([feature(doc, first, key)?, feature(doc, second, key)?]),
+        _ => Err(wrong()),
+    }
+}
+
+fn tolerance(input: &Value) -> Result<Tolerance, String> {
+    match text(input, "tolerance") {
+        None => Ok(Tolerance::None),
+        Some(written) => Tolerance::parse(written)
+            .ok_or_else(|| format!("tolerance `{written}` is not H7, \u{b1}0.1, +0.1/0, +0.2/-0.1 or basic")),
     }
 }
 
 fn anchor(doc: &Document, input: &Value, end: &str) -> Result<Anchor<FaceRef>, String> {
-    let faces = format!("{end}_faces");
-    let feature = feature(doc, input.get(&faces).ok_or_else(|| format!("{faces} is required"))?, &faces)?;
+    let feature = named_feature(doc, input, &format!("{end}_faces"))?;
     let at = match text(input, &format!("{end}_at")) {
         None | Some("feature") => At::Feature,
         Some("middle") => At::Middle,
@@ -82,14 +89,39 @@ fn anchor(doc: &Document, input: &Value, end: &str) -> Result<Anchor<FaceRef>, S
     Ok(Anchor { feature, at })
 }
 
-fn characteristic(name: &str) -> Result<Characteristic, String> {
-    let wanted = name.to_ascii_lowercase().replace(['-', '_'], " ");
-    Characteristic::ALL.into_iter().find(|c| c.label().to_ascii_lowercase().replace('-', " ") == wanted).ok_or_else(
-        || {
-            let names: Vec<String> = Characteristic::ALL.iter().map(|c| c.label().to_ascii_lowercase()).collect();
-            format!("no characteristic `{name}` (there are: {})", names.join(", "))
-        },
-    )
+fn characteristic(name: &str) -> Result<GdtCharacteristic, String> {
+    let key = name.trim().to_ascii_lowercase().replace([' ', '-'], "_");
+    GdtCharacteristic::from_key(&key).ok_or_else(|| {
+        let keys: Vec<&str> = GdtCharacteristic::ALL.iter().map(|c| c.key()).collect();
+        format!("no characteristic `{name}` (there are: {})", keys.join(", "))
+    })
+}
+
+fn material(input: &Value, key: &str) -> Result<MaterialCondition, String> {
+    match text(input, key) {
+        None | Some("regardless") => Ok(MaterialCondition::Regardless),
+        Some("maximum") => Ok(MaterialCondition::Maximum),
+        Some("least") => Ok(MaterialCondition::Least),
+        Some(other) => Err(format!("{key} `{other}` is not regardless, maximum or least")),
+    }
+}
+
+fn lay(name: &str) -> Result<Lay, String> {
+    Ok(match name {
+        "parallel" => Lay::Parallel,
+        "perpendicular" => Lay::Perpendicular,
+        "crossed" => Lay::Crossed,
+        "multidirectional" => Lay::Multidirectional,
+        "circular" => Lay::Circular,
+        "radial" => Lay::Radial,
+        "particulate" => Lay::Particulate,
+        other => {
+            return Err(format!(
+                "lay `{other}` is not parallel, perpendicular, crossed, multidirectional, circular, radial or \
+                 particulate"
+            ));
+        }
+    })
 }
 
 /// The item a `pmi_add` call describes, named, on the part's faces.
@@ -109,53 +141,59 @@ fn item(doc: &Document, input: &Value) -> Result<PmiItem<FaceRef>, String> {
                     })
                     .unwrap_or_else(|| pmi.next_datum_letter()),
             };
-            PmiKind::Datum { letter, feature: one_feature(doc, input)? }
+            PmiKind::Datum { letter, feature: named_feature(doc, input, "faces")? }
         }
         size @ ("diameter" | "radius") => PmiKind::Size {
             size: if size == "diameter" { SizeKind::Diameter } else { SizeKind::Radius },
             features: features(doc, input)?,
-            limits: limits(input)?,
+            tolerance: tolerance(input)?,
+            through: input["through"].as_bool().unwrap_or(false),
             nominal: None,
         },
         "distance" => PmiKind::Location {
             from: anchor(doc, input, "from")?,
             to: anchor(doc, input, "to")?,
-            limits: limits(input)?,
+            tolerance: tolerance(input)?,
             nominal: None,
         },
-        "tolerance" => PmiKind::Tolerance {
+        "slot" => PmiKind::Slot {
+            flats: pair(doc, input, "flats")?,
+            ends: pair(doc, input, "ends")?,
+            tolerance: tolerance(input)?,
+        },
+        "tolerance" => PmiKind::Gdt {
             characteristic: characteristic(text(input, "characteristic").ok_or("characteristic is required")?)?,
-            value: decimal(input, "value")?,
-            diameter_zone: input["diameter_zone"].as_bool().unwrap_or(false),
-            material: match text(input, "material") {
-                None => None,
-                Some("maximum") => Some(MaterialCondition::Maximum),
-                Some("least") => Some(MaterialCondition::Least),
-                Some(other) => return Err(format!("material `{other}` is not maximum or least")),
-            },
+            tolerance: number(input, "value")?,
+            diameter: input["diameter_zone"].as_bool().unwrap_or(false),
+            material: material(input, "material")?,
             datums: match input.get("datums").filter(|value| !value.is_null()) {
                 None => Vec::new(),
                 Some(list) => list
                     .as_array()
                     .ok_or("datums is a list of letters")?
                     .iter()
-                    .map(|letter| letter.as_str().map(str::to_owned).ok_or("datums is a list of letters"))
+                    .map(|letter| letter.as_str().map(DatumRef::new).ok_or("datums is a list of letters"))
                     .collect::<Result<_, _>>()?,
             },
             features: features(doc, input)?,
         },
-        "finish" => PmiKind::Texture {
-            parameter: text(input, "parameter").unwrap_or("Ra").to_owned(),
-            value: decimal(input, "value")?,
+        "finish" => PmiKind::SurfaceFinish {
+            text: text(input, "roughness").ok_or("roughness is required, such as Ra 1.6")?.to_owned(),
             process: match text(input, "process") {
-                None | Some("any") => Process::Any,
-                Some("removal") => Process::Removal,
-                Some("no_removal") => Process::NoRemoval,
+                None | Some("any") => SurfaceProcess::Any,
+                Some("removal") => SurfaceProcess::Removal,
+                Some("no_removal") => SurfaceProcess::NoRemoval,
                 Some(other) => return Err(format!("process `{other}` is not any, removal or no_removal")),
             },
-            feature: one_feature(doc, input)?,
+            method: text(input, "method").unwrap_or_default().to_owned(),
+            lay: text(input, "lay").map(lay).transpose()?,
+            allowance: text(input, "allowance").unwrap_or_default().to_owned(),
+            all_around: input["all_around"].as_bool().unwrap_or(false),
+            feature: named_feature(doc, input, "faces")?,
         },
-        other => return Err(format!("kind `{other}` is not datum, diameter, radius, distance, tolerance or finish")),
+        other => {
+            return Err(format!("kind `{other}` is not datum, diameter, radius, distance, slot, tolerance or finish"));
+        }
     };
     let mut item = PmiItem { id: String::new(), kind };
     item.id = match (text(input, "name"), replaces) {
@@ -197,8 +235,11 @@ pub(crate) fn rows(doc: &Document) -> Value {
                 "callout": row.callout(),
                 "faces": faces,
             });
-            if let Some(nominal) = row.nominal {
-                value["nominal_mm"] = json!(nominal);
+            if !row.measured.is_empty() {
+                value["measured_mm"] = json!(row.measured);
+            }
+            if !row.located.is_empty() {
+                value["located"] = json!(row.located);
             }
             if let Some(problem) = &row.problem {
                 value["problem"] = json!(problem);

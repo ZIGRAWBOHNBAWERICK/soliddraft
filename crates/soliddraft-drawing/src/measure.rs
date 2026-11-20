@@ -520,7 +520,8 @@ pub fn display_text(dim: &Dimension, symbols: &crate::library::Symbols) -> Strin
     };
     let core = format!("{prefix}{number}{suffix}");
     let with_tol = match dim.tolerance {
-        crate::Tolerance::None => core,
+        crate::Tolerance::None | crate::Tolerance::Basic => core,
+        crate::Tolerance::Fit { class } => format!("{core} {class}"),
         crate::Tolerance::Symmetric { value } => {
             format!("{core} ±{}", format_value(value, dim.precision.max(1)))
         }

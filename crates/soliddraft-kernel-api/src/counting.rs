@@ -478,7 +478,7 @@ impl Kernel for Counting {
         self.inner.export_step(body, options)
     }
 
-    fn pmi_nominals(&self, body: BodyId, pmi: &crate::pmi::Pmi<FaceId>) -> KernelResult<Vec<Option<f64>>> {
+    fn pmi_nominals(&self, body: BodyId, pmi: &crate::pmi::Pmi<FaceId>) -> KernelResult<Vec<Vec<f64>>> {
         self.inner.pmi_nominals(body, pmi)
     }
 

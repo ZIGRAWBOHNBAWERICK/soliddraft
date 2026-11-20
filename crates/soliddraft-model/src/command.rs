@@ -1307,9 +1307,9 @@ impl Document {
                             && was != now
                         {
                             for other in &mut self.pmi.items {
-                                if let PmiKind::Tolerance { datums, .. } = &mut other.kind {
-                                    for letter in datums.iter_mut().filter(|letter| *letter == was) {
-                                        letter.clone_from(now);
+                                if let PmiKind::Gdt { datums, .. } = &mut other.kind {
+                                    for datum in datums.iter_mut().filter(|datum| datum.letter == *was) {
+                                        datum.letter.clone_from(now);
                                     }
                                 }
                             }

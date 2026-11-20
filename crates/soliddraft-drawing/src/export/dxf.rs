@@ -118,7 +118,8 @@ pub fn dxf(list: &DisplayList) -> Result<Vec<u8>, DrawingError> {
             let measured_text =
                 scale.is_some() && (r.format.text.is_empty() || r.format.text.contains(Dimension::VALUE_TEXT));
             let (upper, lower, tolerances, limits) = match r.format.tolerance {
-                Tolerance::None => (0.0, 0.0, false, false),
+                // A class or a basic value is part of the dimension's text.
+                Tolerance::None | Tolerance::Fit { .. } | Tolerance::Basic => (0.0, 0.0, false, false),
                 Tolerance::Symmetric { value } => (value, value, true, false),
                 Tolerance::Deviation { upper, lower } => (upper, -lower, true, false),
                 Tolerance::Limits { upper, lower } => (upper, -lower, false, true),

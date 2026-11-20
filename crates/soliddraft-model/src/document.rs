@@ -269,6 +269,7 @@ impl Document {
         match soliddraft_exchange::export_step_with_pmi(kernel, body, &self.name, &on_body.pmi) {
             Ok(mut out) => {
                 if let Some(pmi) = &mut out.pmi {
+                    pmi.items = on_body.items;
                     pmi.left_out = on_body.left_out;
                 }
                 Ok(out)
@@ -284,7 +285,8 @@ impl Document {
                 )
                 .map_err(|e| e.to_string())?;
                 let mut left_out = on_body.left_out;
-                left_out.extend(on_body.pmi.items.iter().map(|item| (item.id.clone(), "Coming soon".to_owned())));
+                let stated = on_body.pmi.items.iter().take(on_body.items);
+                left_out.extend(stated.map(|item| (item.id.clone(), "Coming soon".to_owned())));
                 out.pmi = Some(soliddraft_exchange::PmiExported { items: 0, left_out });
                 Ok(out)
             }

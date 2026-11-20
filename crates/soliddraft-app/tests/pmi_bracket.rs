@@ -46,8 +46,9 @@ fn face(state: &AppState, surface: SurfaceKind, at: [Option<f64>; 3]) -> String 
         .iter()
         .filter(|f| f.surface == surface)
         .filter(|f| {
-            let c = [f.centroid.x, f.centroid.y, f.centroid.z];
-            at.iter().zip(c).all(|(want, have)| want.is_none_or(|want| (want - have).abs() < 1e-6))
+            // The app keeps display centroids in single precision.
+            let c = [f.centroid.x, f.centroid.y, f.centroid.z].map(f64::from);
+            at.iter().zip(c).all(|(want, have)| want.is_none_or(|want| (want - have).abs() < 1e-3))
         })
         .collect();
     assert_eq!(found.len(), 1, "one {surface:?} face at {at:?}, found {}", found.len());
@@ -79,7 +80,7 @@ fn faces(state: &AppState, bore_x: f64) -> Faces {
             .doc
             .faces
             .iter()
-            .filter(|f| f.surface == SurfaceKind::Cylinder && (f.centroid.z - 18.0).abs() < 1e-6)
+            .filter(|f| f.surface == SurfaceKind::Cylinder && (f.centroid.z - 18.0).abs() < 1e-3)
             .filter(|f| (f.centroid.x < 30.0) == low)
             .collect();
         assert_eq!(found.len(), 1, "one slot end");
@@ -198,7 +199,7 @@ fn places(state: &AppState) -> Vec<(String, Vec<(SurfaceKind, [i64; 3])>)> {
                 .map(|id| {
                     let face = state.doc.named_face(*id).unwrap();
                     let c = face.centroid;
-                    (face.surface, [c.x, c.y, c.z].map(|v| (v * 1e6).round() as i64))
+                    (face.surface, [c.x, c.y, c.z].map(|v| (f64::from(v) * 1e3).round() as i64))
                 })
                 .collect();
             faces.sort_by_key(|face| face.1);

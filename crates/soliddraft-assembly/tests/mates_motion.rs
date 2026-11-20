@@ -1187,3 +1187,56 @@ fn universal_joint_turns_the_output_by_the_hooke_relation_and_reopens() {
     assert_eq!(reopened.assembly(), &before);
     std::fs::remove_dir_all(r.dir).unwrap();
 }
+#[test]
+fn universal_joint_refuses_shafts_at_right_angles() {
+    // A Hooke's joint locks with its shafts at right angles: tan(output) cos(b) = tan(input)
+    // leaves the input no turn. Both quarter-turn bearings put the output shaft at right
+    // angles to the input's Z. About Y the output's zero arm stays along the input's, so the
+    // measured angle stays finite; about X the input arm lies along the output axis.
+    for (name, tilt) in [
+        ("arms-alike", DQuat::from_rotation_y(std::f64::consts::FRAC_PI_2)),
+        ("arm-on-axis", DQuat::from_rotation_x(std::f64::consts::FRAC_PI_2)),
+    ] {
+        let mut r = rig(&format!("universal-joint-square-{name}"), Profile::Circle);
+        let reference = r.doc.assembly().sources[0].document.clone();
+        let bearing = r.doc.insert(reference.clone(), Placement::new(tilt, DVec3::ZERO)).unwrap();
+        let output = r.doc.insert(reference, Placement::new(tilt, DVec3::ZERO)).unwrap();
+        r.doc.finish_loading();
+        r.doc.mate_lock("L", r.a, bearing, false).unwrap();
+        hinge(&mut r.doc, "H1", r.a, r.b);
+        hinge(&mut r.doc, "H2", bearing, output);
+        move_under_mates(&mut r.doc, r.b, Placement::IDENTITY);
+        let before = r.doc.assembly().clone();
+        let refused = r.doc.mate_universal_joint("U", &cylinder(r.b), &cylinder(output), false).unwrap_err();
+        assert_eq!(refused.code, RefusalCode::Invalid, "{name}: {refused:?}");
+        assert!(refused.message.contains("shafts at right angles"), "{name}: {refused:?}");
+        assert_eq!(refused.mates, ["U"], "{name}");
+        assert_eq!(&before, r.doc.assembly(), "{name}");
+        std::fs::remove_dir_all(r.dir).unwrap();
+    }
+}
+#[test]
+fn universal_joint_refuses_a_drag_that_squares_the_shafts() {
+    let mut r = rig("universal-joint-squared", Profile::Circle);
+    let reference = r.doc.assembly().sources[0].document.clone();
+    let tilt = DQuat::from_rotation_x(40f64.to_radians());
+    // The bearing is free, so dragging it swings the output shaft with it.
+    let bearing = r.doc.insert(reference.clone(), Placement::new(tilt, DVec3::ZERO)).unwrap();
+    let output = r.doc.insert(reference, Placement::new(tilt, DVec3::ZERO)).unwrap();
+    r.doc.finish_loading();
+    hinge(&mut r.doc, "H1", r.a, r.b);
+    hinge(&mut r.doc, "H2", bearing, output);
+    move_under_mates(&mut r.doc, r.b, Placement::IDENTITY);
+    r.doc.mate_universal_joint("U", &cylinder(r.b), &cylinder(output), false).unwrap();
+    bounded(&mut r.doc, "U");
+    let before = r.doc.assembly().clone();
+    r.doc.begin_drag(occurrence(bearing)).unwrap();
+    let square = Placement::new(DQuat::from_rotation_y(std::f64::consts::FRAC_PI_2), DVec3::ZERO);
+    let refused = r.doc.preview_drag(square).unwrap_err();
+    assert!(refused.message.contains("shafts at right angles"), "{refused:?}");
+    assert_eq!(refused.mates, ["U"]);
+    r.doc.commit_drag().unwrap();
+    assert_eq!(&before, r.doc.assembly());
+    bounded(&mut r.doc, "U");
+    std::fs::remove_dir_all(r.dir).unwrap();
+}

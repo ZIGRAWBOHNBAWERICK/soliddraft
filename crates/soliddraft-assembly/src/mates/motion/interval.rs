@@ -16,6 +16,8 @@ pub(super) trait Number:
     fn sin_cos(self) -> (Self, Self);
     fn pi() -> Self;
     fn positive(self) -> Self;
+    /// Whether the value is proved to differ from zero.
+    fn nonzero(self) -> bool;
 }
 impl Number for f64 {
     fn f(v: f64) -> Self {
@@ -26,6 +28,9 @@ impl Number for f64 {
     }
     fn positive(self) -> Self {
         if self.is_nan() { self } else { self.max(0.0) }
+    }
+    fn nonzero(self) -> bool {
+        self != 0.0 && !self.is_nan()
     }
     fn q(v: &BigRational) -> Self {
         nearest(v)
@@ -186,6 +191,9 @@ impl Number for Interval {
     }
     fn positive(self) -> Self {
         if !self.finite() { Self::whole() } else { Self::new(self.lo.max(0.0), self.hi.max(0.0)) }
+    }
+    fn nonzero(self) -> bool {
+        self.finite() && (self.lo > 0.0 || self.hi < 0.0)
     }
     fn q(v: &BigRational) -> Self {
         let f = nearest(v);

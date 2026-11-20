@@ -9,7 +9,7 @@ use super::{MateRefusal, RefusalCode};
 use crate::placement::Placement;
 use glam::{DQuat, DVec3};
 use interval::{Interval, Number, radians};
-pub(super) use native::{mechanical_value, native_constraint, projection};
+pub(super) use native::{mechanical_value, native_constraint, projection, square_shafts};
 use num_rational::BigRational;
 use num_traits::Zero;
 use serde::Serialize;
@@ -778,6 +778,9 @@ fn numeric(bodies: &BTreeMap<Body, Placement>, cs: &[Constraint]) -> Result<BTre
     for _ in 0..ITERATIONS {
         let r = values(&poses, cs, false);
         if r.iter().any(|x| !x.is_finite()) {
+            if let Some(refusal) = cs.iter().find_map(|c| locked(c, &poses)) {
+                return Err(refusal);
+            }
             return Err(refused(
                 cs,
                 RefusalCode::Uncertified,
@@ -837,6 +840,12 @@ fn numeric(bodies: &BTreeMap<Body, Placement>, cs: &[Constraint]) -> Result<BTre
     certify(&poses, cs).map_err(|r| refused(cs, r.code, &r.message))?;
     Ok(poses)
 }
+/// A named reason why `c` cannot hold at `poses`, ahead of the generic residual refusals.
+fn locked(c: &Constraint, poses: &BTreeMap<Body, Placement>) -> Option<MateRefusal> {
+    let Constraint::Motion { relation, .. } = c else { return None };
+    let Relation::Native { reads, rule } = relation.as_ref() else { return None };
+    square_shafts(reads, rule, poses).map(|why| refused(std::slice::from_ref(c), RefusalCode::Invalid, why))
+}
 fn certify(poses: &BTreeMap<Body, Placement>, cs: &[Constraint]) -> Result<Vec<BoundedProof>, MateRefusal> {
     let mut proofs: BTreeMap<String, BoundedProof> = BTreeMap::new();
     for c in cs {
@@ -848,6 +857,9 @@ fn certify(poses: &BTreeMap<Body, Placement>, cs: &[Constraint]) -> Result<Vec<B
             bound_mm: MM,
             bound_angle: RAD,
         });
+        if let Some(refusal) = locked(c, poses) {
+            return Err(refusal);
+        }
         for r in residual::<Interval>(c, poses, false) {
             let bound = if r.angular { RAD } else { MM };
             if !r.value.finite() || r.value.abs_max() > bound {

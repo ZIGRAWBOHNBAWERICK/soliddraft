@@ -166,7 +166,8 @@ input arm lies in the plane of both shafts (the Hooke joint in Uicker, Pennock a
 only couples the turns: hold each shaft with a Hinge or Concentric, and keep the axes
 meeting with other mates if the joint centre matters. Two arms on one component are refused.
 The joint has no direction, so `reverse` is refused. Shafts at right angles lock a real
-joint; there the bounded solve cannot enclose the angle and refuses by name.
+joint. Making the mate, or a drag that would put the shafts there, is refused by name
+whenever the shafts are not proved off a right angle.
 
 These relations capture the current pose as their initial phase. They reference the source
 joint ids and analytic endpoints. Deleting a referenced source joint or enabling a source

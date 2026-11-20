@@ -1274,6 +1274,12 @@ impl AssemblyDocument {
                 && let Relation::Native { reads, rule } = relation.as_ref()
                 && let Rule::Mechanical { id, scope, angles: previous, .. } = rule.as_ref()
             {
+                if let Some(why) = motion::square_shafts(reads, rule, &p.bodies) {
+                    return Err(MateRefusal {
+                        mates: vec![mate.clone()],
+                        ..MateRefusal::new(RefusalCode::Invalid, why)
+                    });
+                }
                 let (value, measured) = motion::mechanical_value(reads, rule, &p.bodies);
                 if !value.is_finite() || !measured.iter().all(|v| v.is_finite()) {
                     return Err(MateRefusal::new(RefusalCode::Uncertified, "the joint angle cannot be measured"));

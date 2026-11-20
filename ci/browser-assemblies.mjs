@@ -55,7 +55,8 @@ class Browser {
     this.process = spawn(chrome, [
       '--headless=new', '--remote-debugging-port=0', `--user-data-dir=${profile}`,
       '--no-first-run', '--no-default-browser-check', `--window-size=${SIZE.width},${SIZE.height}`, ...extra, 'about:blank',
-    ], { stdio: ['ignore', 'ignore', 'pipe'] });
+    // Its own process group, so the helpers Chrome starts can be stopped with it.
+    ], { stdio: ['ignore', 'ignore', 'pipe'], detached: true });
     this.stderr = '';
     this.process.stderr.on('data', d => { this.stderr += d; });
     this.events = [];
@@ -242,13 +243,26 @@ class Browser {
     return v;
   }
 
-  // Chromium's helpers still write into the profile until the browser exits, so wait for it.
+  // Chromium's helpers write into the profile until they exit, and a killed browser leaves
+  // them running: one still wrote there while a check deleted the profile. So the browser
+  // closes itself through the DevTools protocol, which ends its helpers, and whatever is
+  // left of its process group is killed before the profile goes.
   async close() {
+    const running = () => this.process.exitCode === null && this.process.signalCode === null;
+    const within = ms => new Promise(resolve => setTimeout(resolve, ms));
+    if (running()) {
+      const exited = new Promise(resolve => this.process.once('exit', resolve));
+      if (this.ws?.readyState === WebSocket.OPEN) {
+        await Promise.race([this.send('Browser.close').catch(() => {}), within(5000)]);
+      }
+      await Promise.race([exited, within(10000)]);
+    }
     this.ws?.close();
-    if (this.process.exitCode !== null || this.process.signalCode !== null) return;
-    const exited = new Promise(resolve => this.process.once('exit', resolve));
-    this.process.kill('SIGKILL');
-    await Promise.race([exited, new Promise(resolve => setTimeout(resolve, 10000))]);
+    try {
+      process.kill(-this.process.pid, 'SIGKILL');
+    } catch (error) {
+      if (error.code !== 'ESRCH') throw error;
+    }
   }
 }
 

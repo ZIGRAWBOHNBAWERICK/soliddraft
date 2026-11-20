@@ -281,6 +281,9 @@
     "ci/gate-cases.json": [
       "lint"
     ],
+    "ci/kernel-parts.json": [
+      "lint"
+    ],
     "ci/known-over-budget.json": [
       "lint",
       "application-loop"

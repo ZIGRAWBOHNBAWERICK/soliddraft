@@ -1,6 +1,7 @@
 //! The P1 bracket test's first two checks through the application's tools.
 //!
-//! C1: the bracket's fourteen items of manufacturing information go into its STEP file,
+//! C1: the bracket's fourteen items of manufacturing information go into its STEP file
+//! with the distances that locate the bore and the holes from the datums,
 //! come back onto the same faces in a new part, and stay there through save and reopen.
 //! C2: the bore edited from 8 to 10 mm reads Ø10 H7 with its position tolerance still
 //! attached, and exports again.
@@ -112,23 +113,21 @@ fn annotate(state: &mut AppState) {
         json!({"kind": "datum", "letter": "A", "faces": [f.a]}),
         json!({"kind": "datum", "letter": "B", "faces": [f.b]}),
         json!({"kind": "datum", "letter": "C", "faces": [f.c]}),
-        json!({"kind": "diameter", "name": "Bore diameter", "faces": [f.bore], "limits": "H7"}),
-        json!({"kind": "finish", "name": "Bore finish", "faces": [f.bore], "value": "1.6"}),
+        json!({"kind": "diameter", "name": "Bore diameter", "faces": [f.bore], "tolerance": "H7"}),
+        json!({"kind": "finish", "name": "Bore finish", "faces": [f.bore], "roughness": "Ra 1.6"}),
         json!({"kind": "tolerance", "name": "Bore position", "characteristic": "position", "value": "0.05",
                "diameter_zone": true, "datums": abc, "faces": [f.bore]}),
-        json!({"kind": "diameter", "name": "Boss diameter", "faces": [f.boss], "limits": "\u{b1}0.1"}),
+        json!({"kind": "diameter", "name": "Boss diameter", "faces": [f.boss], "tolerance": "\u{b1}0.1"}),
         json!({"kind": "distance", "name": "Boss height", "from_faces": [f.a], "to_faces": [f.boss_top],
-               "limits": "\u{b1}0.1"}),
-        json!({"kind": "diameter", "name": "Hole diameter", "features": pattern, "limits": "+0.1/0"}),
+               "tolerance": "\u{b1}0.1"}),
+        json!({"kind": "diameter", "name": "Hole diameter", "features": pattern, "tolerance": "+0.1/0",
+               "through": true}),
         json!({"kind": "tolerance", "name": "Hole position", "characteristic": "position", "value": "0.2",
                "diameter_zone": true, "datums": abc, "features": pattern}),
-        json!({"kind": "distance", "name": "Slot width", "from_faces": [f.slot_low], "to_faces": [f.slot_high],
-               "limits": "+0.1/0"}),
-        json!({"kind": "distance", "name": "Slot length", "from_faces": [f.slot_ends[0]], "from_at": "outer",
-               "to_faces": [f.slot_ends[1]], "to_at": "outer", "limits": "+0.1/0"}),
-        json!({"kind": "radius", "name": "Slot end radius", "features": [[f.slot_ends[0]], [f.slot_ends[1]]]}),
+        json!({"kind": "slot", "name": "Slot", "flats": [[f.slot_low], [f.slot_high]],
+               "ends": [[f.slot_ends[0]], [f.slot_ends[1]]], "tolerance": "+0.1/0"}),
         json!({"kind": "distance", "name": "Slot height", "from_faces": [f.a],
-               "to_faces": [f.slot_low, f.slot_high], "to_at": "middle", "limits": "\u{b1}0.1"}),
+               "to_faces": [f.slot_low, f.slot_high], "to_at": "middle", "tolerance": "\u{b1}0.1"}),
         json!({"kind": "tolerance", "name": "Flatness of A", "characteristic": "flatness", "value": "0.05",
                "faces": [f.a]}),
         json!({"kind": "tolerance", "name": "Perpendicularity of B", "characteristic": "perpendicularity",
@@ -168,11 +167,9 @@ fn expected(bore: &str) -> Vec<(String, String)> {
         ("Bore position", "Position \u{d8}0.05 A|B|C".to_owned()),
         ("Boss diameter", "\u{d8}16 \u{b1}0.1".to_owned()),
         ("Boss height", "15 \u{b1}0.1".to_owned()),
-        ("Hole diameter", "4\u{d7} \u{d8}4 +0.1/0".to_owned()),
+        ("Hole diameter", "4\u{d7} \u{d8}4 +0.1/0 THRU".to_owned()),
         ("Hole position", "Position \u{d8}0.2 A|B|C".to_owned()),
-        ("Slot width", "6 +0.1/0".to_owned()),
-        ("Slot length", "20 +0.1/0".to_owned()),
-        ("Slot end radius", "2\u{d7} R3".to_owned()),
+        ("Slot", "20\u{d7}6 +0.1/0 R3".to_owned()),
         ("Slot height", "18 \u{b1}0.1".to_owned()),
         ("Flatness of A", "Flatness 0.05".to_owned()),
         ("Perpendicularity of B", "Perpendicularity 0.1 A".to_owned()),
@@ -180,6 +177,40 @@ fn expected(bore: &str) -> Vec<(String, String)> {
     .into_iter()
     .map(|(name, callout)| (name.to_owned(), callout))
     .collect()
+}
+
+/// The basic distances that locate the bore and the four holes from datums B and C, as
+/// (item, feature, datum, millimetres), sorted.
+fn located(state: &mut AppState) -> Vec<(String, u64, String, i64)> {
+    let listed = call(state, "pmi_list", json!({}));
+    let mut found = Vec::new();
+    for row in listed["items"].as_array().unwrap() {
+        for one in row["located"].as_array().into_iter().flatten() {
+            found.push((
+                row["name"].as_str().unwrap().to_owned(),
+                one["feature"].as_u64().unwrap(),
+                one["datum"].as_str().unwrap().to_owned(),
+                (one["value"].as_f64().unwrap() * 1e6).round() as i64,
+            ));
+        }
+    }
+    found.sort();
+    found
+}
+
+fn expected_located() -> Vec<(String, u64, String, i64)> {
+    let mm = |value: i64| value * 1_000_000;
+    // Holes in the order they were given: (10, 12), (10, 32), (50, 12), (50, 32).
+    let mut all = vec![
+        ("Bore position".to_owned(), 0, "B".to_owned(), mm(25)),
+        ("Bore position".to_owned(), 0, "C".to_owned(), mm(30)),
+    ];
+    for (index, (x, y)) in [(10, 12), (10, 32), (50, 12), (50, 32)].into_iter().enumerate() {
+        all.push(("Hole position".to_owned(), index as u64, "B".to_owned(), mm(y)));
+        all.push(("Hole position".to_owned(), index as u64, "C".to_owned(), mm(x)));
+    }
+    all.sort();
+    all
 }
 
 /// Where each item sits: per item, the surface kind and centroid of every face.
@@ -210,7 +241,7 @@ fn places(state: &AppState) -> Vec<(String, Vec<(SurfaceKind, [i64; 3])>)> {
 
 fn export(state: &mut AppState, path: &std::path::Path) -> Value {
     let result = call(state, "export_step", json!({"path": path}));
-    assert_eq!(result["manufacturing_information"], json!({"items": 16}), "{result}");
+    assert_eq!(result["manufacturing_information"], json!({"items": 14}), "{result}");
     result
 }
 
@@ -225,6 +256,7 @@ fn the_bracket_carries_its_manufacturing_information_through_step_and_a_bore_edi
     build(&mut first);
     annotate(&mut first);
     assert_eq!(callouts(&mut first), expected("8"));
+    assert_eq!(located(&mut first), expected_located());
     let step = dir.join("p1-bracket-pmi.step");
     export(&mut first, &step);
     let original = places(&first);
@@ -235,11 +267,12 @@ fn the_bracket_carries_its_manufacturing_information_through_step_and_a_bore_edi
     let imported =
         call(&mut second, "import_step", json!({"path": step, "decline": [], "preview_token": preview["token"]}));
     assert_eq!(
-        imported["manufacturing_information"]["summary"], "16 manufacturing items read",
+        imported["manufacturing_information"]["summary"], "14 manufacturing items read",
         "{}",
         imported["manufacturing_information"]
     );
     assert_eq!(callouts(&mut second), expected("8"));
+    assert_eq!(located(&mut second), expected_located());
     assert_eq!(places(&second), original);
     let notes = json!({"general_tolerance": "ISO 2768-m", "material": "6061-T6", "notes": ["Break sharp edges"]});
     assert_eq!(call(&mut second, "pmi_list", json!({}))["notes"], notes);
@@ -260,7 +293,8 @@ fn the_bracket_carries_its_manufacturing_information_through_step_and_a_bore_edi
     let again = dir.join("p1-bracket-pmi-reexported.step");
     export(&mut third, &again);
     let reread = third.doc.kernel().read_step_pmi(&std::fs::read(&again).unwrap()).unwrap();
-    assert_eq!((reread.pmi.items.len(), reread.skipped.len()), (16, 0));
+    // The fourteen items and the ten distances that locate the bore and the holes.
+    assert_eq!((reread.pmi.items.len(), reread.skipped.len()), (24, 0));
 
     // C2: the bore goes from 8 to 10 mm and keeps its fit and its position tolerance.
     call(&mut first, "drive", json!({"sketch": "Sketch4", "dimension": 1, "expression": "10"}));
@@ -269,9 +303,9 @@ fn the_bracket_carries_its_manufacturing_information_through_step_and_a_bore_edi
     export(&mut first, &edited);
     let read = first.doc.kernel().read_step_pmi(&std::fs::read(&edited).unwrap()).unwrap();
     let bore = read.pmi.item("Bore diameter").unwrap();
-    assert_eq!(bore.callout(None), "\u{d8}? H7");
     let soliddraft_kernel_api::pmi::PmiKind::Size { nominal, .. } = &bore.kind else { panic!("a size") };
-    assert_eq!(nominal.as_ref().map(|value| value.as_str()), Some("10"));
+    assert_eq!(*nominal, Some(10.0));
+    assert_eq!(bore.callout(&[10.0]), "\u{d8}10 H7");
     assert!(read.pmi.item("Bore position").is_some());
     let _ = std::fs::remove_dir_all(&scratch);
 }

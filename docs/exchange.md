@@ -80,6 +80,10 @@ A part with a feature that needs a repair, is blocked or failed is refused, so n
 - In the app, File > Export offers STEP AP242, IGES 5.3, STL, 3MF and OBJ. Mesh formats open Print check for review before saving. The status bar shows the saved export's report in one line.
 - On the command line, `soliddraft export <part.dwprt | recipe.json> --out bracket.step --out bracket.iges --out bracket.3mf --out bracket.obj` writes each file; `--json` prints each export report. It does not measure the body for acceptance checks.
 
+## Manufacturing information in STEP
+
+A part with manufacturing information writes it into its STEP file as AP242 semantic PMI and reads it back on import. See [manufacturing information](manufacturing-information.md#in-step).
+
 ## The OpenCASCADE check
 
 Hosted CI's STEP job exports the bracket and opens its STEP in OpenCASCADE through `ci/check-step.py`. The check passes when OpenCASCADE reads one valid solid with the face count of the report and of the exact body less the report's `removed_faces`, removed counts that are whole numbers from 0 to the exact body's face and edge counts, and a volume within the reported deviation of Catallax's exact volume. A surface moved by at most `d` changes the enclosed volume by at most `area * d` to first order, so the allowance is that product, plus OpenCASCADE's own integration error estimate and the exact volume's measurement width.
@@ -92,7 +96,7 @@ The `iges-export` application scenario builds the bracket through MCP, exports `
 
 Default STEP import keeps a source-certified result when Catallax can produce one, including certified source repairs. Otherwise it uses Catallax's default tolerant reader, including numerical bodies written by fillets. Certified is the higher label; bodies admitted through local fits are labelled Tolerant. A checked model of healed geometry does not by itself certify the original source. Local tolerances are not a whole-body deviation bound: a tolerant body's display, measurements and mass are estimates. A refused body keeps the kernel's reason in plain words.
 
-File > Import STEP reads a source file and shows its preview. Accept uses default admission and automatic repairs. A certified source repair above the automatic cap, or with no known nearest feature, asks for an allowed movement of at least the measured gap and who approved it. Accept stays off until both are given. Decline keeps that source with a declined answer and an unbuilt import in the tree. Cancel, including closing the preview, leaves the part unchanged.
+File > Import STEP reads a source file and shows its preview. In the browser the file is uploaded and gets the same preview from the same bytes; Open is unchanged and opens saved documents. Accept uses default admission and automatic repairs. A certified source repair above the automatic cap, or with no known nearest feature, asks for an allowed movement of at least the measured gap and who approved it. Accept stays off until both are given. Decline keeps that source with a declined answer and an unbuilt import in the tree. Cancel, including closing the preview, leaves the part unchanged.
 
 Default STEP imports keep each body Catallax admits independently and list refused bodies with their reasons in Import report. Admitted bodies become separate import features in one undo step. Each keeps the original bytes, their hash, admission evidence and its source selector, so reordering features cannot swap solids. Part-level limits, multi-body reviews with explicit repair answers, IGES imports and replacements remain all-or-nothing.
 

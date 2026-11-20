@@ -64,6 +64,7 @@ fn new_annotation(
         placement,
         style: StyleOverrides::default(),
         state: AnnotationState::Ok,
+        source: None,
     }
 }
 

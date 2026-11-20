@@ -11,12 +11,13 @@
 //! left at the top right, at the largest scale up to the sheet's that fits there.
 
 use serde::{Deserialize, Serialize};
-use soliddraft_kernel_api::Point2;
 use soliddraft_kernel_api::drawing::{StandardView, ViewCurves, ViewSpec};
+use soliddraft_kernel_api::{Point2, Vec3};
 
 use crate::ids::ViewId;
 use crate::model_items::{self, ImportReport};
 use crate::part::{Part, PartIndex};
+use crate::pmi_items::{self, PmiReport};
 use crate::project::{self, Projected, ViewContext};
 use crate::sheet::Scale;
 use crate::template::Template;
@@ -43,6 +44,10 @@ pub struct NewDrawing {
     /// Put centre marks on the circles orthographic views see face-on.
     #[serde(default)]
     pub centre_marks: bool,
+    /// Bring in the part's manufacturing information, each item once, with a section
+    /// through the hole that is held tightest.
+    #[serde(default)]
+    pub requirements: bool,
     /// The sheet scale, or `None` to pick the largest of the template's scales that
     /// fits.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -56,6 +61,8 @@ pub struct MadeDrawing {
     pub drawing: Drawing,
     /// What Model items did.
     pub import: ImportReport,
+    /// What bringing in the part's manufacturing information did.
+    pub requirements: PmiReport,
     /// Each view's projection, for tools that pick on the views.
     pub projections: Vec<(ViewId, Projected)>,
 }
@@ -64,6 +71,12 @@ pub struct MadeDrawing {
 /// for dimensions.
 const VIEW_GAP: f64 = 30.0;
 const GRID_MARGIN: f64 = 25.0;
+/// Room added left of the views when the part's manufacturing information comes in, for
+/// the dimensions stacked there.
+const REQUIREMENTS_MARGIN: f64 = 20.0;
+/// Room left between a view and the section cut from it, beyond what views keep, for
+/// the callouts of the view.
+const SECTION_ROOM: f64 = 45.0;
 /// Room kept around pictorial views, which get no dimensions.
 const PICTORIAL_MARGIN: f64 = 5.0;
 /// Space kept above the title block.
@@ -121,6 +134,8 @@ pub fn make_drawing(part: &Part, new: &NewDrawing) -> Result<MadeDrawing, Drawin
         curves.push(project::view_curves(part, &ViewSpec::standard(*v))?);
     }
     let extent = |c: &ViewCurves| (c.bbox_2d[2] - c.bbox_2d[0], c.bbox_2d[3] - c.bbox_2d[1]);
+    // Stacked dimensions go on the outer sides of the views, and the left is one.
+    let left = if new.requirements { GRID_MARGIN + REQUIREMENTS_MARGIN } else { GRID_MARGIN };
 
     // The grid of orthographic views around the base view.
     let cell = |fold: Option<FoldDirection>, i: usize| -> Option<(i32, i32)> {
@@ -145,7 +160,7 @@ pub fn make_drawing(part: &Part, new: &NewDrawing) -> Result<MadeDrawing, Drawin
     let used = |sizes: &[f64; 3]| sizes.iter().filter(|s| **s > 0.0).count().max(1) as f64;
     let grid = |s: f64| {
         (
-            s * col_w.iter().sum::<f64>() + VIEW_GAP * (used(&col_w) - 1.0) + 2.0 * GRID_MARGIN,
+            s * col_w.iter().sum::<f64>() + VIEW_GAP * (used(&col_w) - 1.0) + GRID_MARGIN + left,
             s * row_h.iter().sum::<f64>() + VIEW_GAP * (used(&row_h) - 1.0) + 2.0 * GRID_MARGIN,
         )
     };
@@ -175,7 +190,7 @@ pub fn make_drawing(part: &Part, new: &NewDrawing) -> Result<MadeDrawing, Drawin
         }
         let edges = |sizes: &[f64; 3], start: f64, sign: f64| {
             let mut out = [(0.0, 0.0); 3];
-            let mut at = start + sign * GRID_MARGIN;
+            let mut at = start + sign * if sign > 0.0 { left } else { GRID_MARGIN };
             for (i, size) in sizes.iter().enumerate() {
                 if *size > 0.0 {
                     let end = at + sign * s * size;
@@ -207,7 +222,7 @@ pub fn make_drawing(part: &Part, new: &NewDrawing) -> Result<MadeDrawing, Drawin
     // Cell centres, from the grid's top-left corner.
     let (grid_w, _) = grid(s);
     let mut col_x = [0.0; 3];
-    let mut x = area.x0 + GRID_MARGIN;
+    let mut x = area.x0 + left;
     for c in 0..3 {
         if col_w[c] > 0.0 {
             col_x[c] = x + s * col_w[c] / 2.0;
@@ -316,8 +331,95 @@ pub fn make_drawing(part: &Part, new: &NewDrawing) -> Result<MadeDrawing, Drawin
     } else {
         ImportReport::default()
     };
-    let projections = contexts.into_iter().map(|c| (c.id, c.projected)).collect();
-    Ok(MadeDrawing { drawing, import, projections })
+    let mut projections: Vec<(ViewId, Projected)> = Vec::new();
+    let requirements = if new.requirements {
+        // The section first, so nothing is placed where it goes.
+        if let Some(view) = section_through_hole(&drawing, part, &index, &contexts)? {
+            projections.push((view.0.id, view.1.projected));
+            crate::apply(&mut drawing, &crate::Command::PlaceView { sheet: 0, view: view.0 })?;
+        }
+        let report = pmi_items::import(&mut drawing, 0, part, &index, &contexts)?;
+        pmi_items::place_notes(&mut drawing, 0, part);
+        report
+    } else {
+        PmiReport::default()
+    };
+    projections.splice(0..0, contexts.into_iter().map(|c| (c.id, c.projected)));
+    Ok(MadeDrawing { drawing, import, requirements, projections })
+}
+
+/// A section through the axis of the hole the part holds tightest: the one whose diameter
+/// has a fit, or else the narrowest tolerance. The cut is drawn on the view that looks
+/// along the hole, across the sheet. `None` when no diameter of the part has a tolerance
+/// or no view looks along its axis.
+fn section_through_hole(
+    drawing: &Drawing,
+    part: &Part,
+    index: &PartIndex,
+    views: &[ViewContext],
+) -> Result<Option<(View, ViewContext)>, DrawingError> {
+    use soliddraft_kernel_api::drawing::Curve3;
+    use soliddraft_kernel_api::pmi::{PmiKind, SizeKind, Tolerance};
+    let topology = part.kernel.topology(part.body)?;
+    let mut best: Option<(f64, Vec3, Vec3)> = None;
+    for row in &part.requirements.rows {
+        let Some(PmiKind::Size { size: SizeKind::Diameter, features, tolerance, .. }) =
+            row.on_body.as_ref().map(|item| &item.kind)
+        else {
+            continue;
+        };
+        let band = match tolerance {
+            Tolerance::Fit { .. } => 0.0,
+            other => match other.deviations() {
+                Some((upper, lower)) => upper - lower,
+                None => continue,
+            },
+        };
+        let axis = features.first().and_then(|f| f.first()).and_then(|face| {
+            let info = topology.faces.iter().find(|f| f.id == *face)?;
+            info.edges.iter().find_map(|edge| match index.edge_curve(*edge)? {
+                Curve3::Circle { center, normal, .. } | Curve3::Arc { center, normal, .. } => {
+                    Some((*center, normal.normalized()?))
+                }
+                _ => None,
+            })
+        });
+        if let Some((centre, axis)) = axis
+            && best.as_ref().is_none_or(|(b, ..)| band < *b)
+        {
+            best = Some((band, centre, axis));
+        }
+    }
+    let Some((_, centre, axis)) = best else { return Ok(None) };
+    let Some(parent) =
+        views.iter().find(|v| !v.pictorial && axis.dot(v.xf.frame.direction).abs() > 1.0 - 1e-6).map(|v| v.id)
+    else {
+        return Ok(None);
+    };
+    // Cut up the sheet, so the section goes beside its parent, and look the way that
+    // puts it on the right, where a sheet has room.
+    let line = crate::derived::cutting_line(drawing, part, index, parent, centre, false)?;
+    let to_the_right = |flip: bool| {
+        project::section_arrow(&line, flip).is_some_and(|arrow| match drawing.sheets[0].projection {
+            crate::Projection::FirstAngle => arrow.u > 0.0,
+            crate::Projection::ThirdAngle => arrow.u < 0.0,
+        })
+    };
+    let flip = !to_the_right(false) && to_the_right(true);
+    let (mut view, context) = crate::derived::new_section(drawing, part, index, 0, parent, line, flip, None)?;
+    // Further from its parent than a view needs, to leave the parent's callouts room.
+    if let Some(axis) = view.alignment.as_ref().map(|a| a.axis)
+        && let Some(beside) = drawing.view(parent)
+        && view.position.u > beside.position.u
+    {
+        let want = Point2::new(view.position.u + SECTION_ROOM, view.position.v);
+        if let Some(at) = crate::derived::free_spot(drawing, 0, &view, want, Some((axis, beside.position)))
+            && at.u > view.position.u
+        {
+            view.position = at;
+        }
+    }
+    Ok(Some((view, context)))
 }
 
 #[derive(Clone, Copy, Debug)]

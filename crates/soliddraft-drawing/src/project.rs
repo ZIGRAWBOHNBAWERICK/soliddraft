@@ -784,6 +784,7 @@ pub fn centre_marks(projected: &Projected, view: ViewId, first_id: u32) -> Vec<A
             placement: c.centre,
             style: StyleOverrides::default(),
             state: AnnotationState::Ok,
+            source: None,
         })
         .collect()
 }

@@ -42,9 +42,12 @@ impl SolidDraftApp {
     #[cfg(target_arch = "wasm32")]
     fn needs_exact(&self, action: &AppAction) -> bool {
         match action {
-            AppAction::CheckPart | AppAction::Export { .. } | AppAction::ToggleSection | AppAction::MeasureEntity => {
-                true
-            }
+            AppAction::CheckPart
+            | AppAction::Export { .. }
+            | AppAction::ManufacturingPackage
+            | AppAction::ToggleSection
+            | AppAction::MeasureEntity
+            | AppAction::ToggleManufacturingInformation => true,
             AppAction::StartSketchOn(SketchPlane::Face { .. }) => true,
             AppAction::Command(command) => !self.state.doc.edits_scalar(command),
             _ => false,
@@ -1179,6 +1182,26 @@ impl SolidDraftApp {
                 self.state.rename = None;
             }
             AppAction::MeasureEntity => self.state.measure.open = !self.state.measure.open,
+            AppAction::ToggleManufacturingInformation => {
+                self.state.pmi.open = !self.state.pmi.open;
+                // The panel lives in the details sheet, so opening it shows the sheet.
+                self.state.options_details = self.state.pmi.open;
+            }
+            AppAction::ManufacturingPackage => {
+                let name = format!("{}.step", self.state.doc.name);
+                let Some(path) = crate::platform::save_path("Drawing and files", "STEP", "step", &name) else {
+                    return;
+                };
+                let written = crate::app_tools::AppTools { state: &mut self.state }
+                    .manufacturing_package(&serde_json::json!({ "path": path }));
+                match written {
+                    Ok(report) => {
+                        let text = crate::pmi::package_summary(&report);
+                        self.state.note(text, NoteKind::Info);
+                    }
+                    Err(error) => self.state.note(error, NoteKind::Error),
+                }
+            }
             AppAction::ToggleSection => self.state.section.toggle(&self.state.doc),
             AppAction::ShowMaterial => {
                 self.state.doc.selection = Some(Selection::Body);
@@ -1490,6 +1513,8 @@ impl SolidDraftApp {
                 self.state.note("New part", NoteKind::Info);
             }
             AppAction::ImportStep(path) => {
+                // In the browser the file arrives as an upload, frames after the request.
+                self.state.step_upload = path.is_none() && cfg!(target_arch = "wasm32");
                 let path = path.or_else(|| crate::platform::open_path("Import STEP", "STEP", &["step", "stp"]));
                 if let Some(path) = path {
                     match crate::import::Preview::read(&self.state.doc, &path) {

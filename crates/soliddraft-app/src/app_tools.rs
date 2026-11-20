@@ -272,6 +272,9 @@ impl AppTools<'_> {
         if let Some(result) = crate::subassembly::tools::run(self.state, name, input) {
             return Some(result);
         }
+        if let Some(result) = crate::pmi::tools::run(self.state, name, input) {
+            return Some(result);
+        }
         let drawing_active = self.state.drawing.is_active();
         let assembly_active = self.state.assembly.is_active();
         Some(match name {
@@ -291,6 +294,7 @@ impl AppTools<'_> {
             "export_stand_in" => self.export_part(ExportFormat::StandIn, input),
             "roll_to_end" => self.roll_to_end(),
             "make_drawing" => self.make_drawing(input),
+            "manufacturing_package" => self.manufacturing_package(input),
             "show_drawing" => self.session().map(|_| ()).map(|()| {
                 self.state.assembly.active = false;
                 self.state.drawing.active = true;
@@ -418,7 +422,11 @@ impl AppTools<'_> {
             } else { error }
         })?;
         out.write_with(&path, crate::platform::write_file)?;
-        Ok(json!({ "exported": path, "report": out.report.summary(), "evidence": out.report }))
+        let mut result = json!({ "exported": path, "report": out.report.summary(), "evidence": out.report });
+        if let Some(pmi) = &out.pmi {
+            result["manufacturing_information"] = json!(pmi);
+        }
+        Ok(result)
     }
 
     fn roll_to_end(&mut self) -> Result<Value, String> {
@@ -427,6 +435,74 @@ impl AppTools<'_> {
         }
         self.state.doc.apply(Command::Rollback(None))?;
         Ok(self.summary())
+    }
+
+    /// One action for the shop: the part's STEP file with its manufacturing information,
+    /// and a drawing made from that information as PDF and DXF beside it. The answer
+    /// says what each file holds and lists, by name, every item the drawing could not
+    /// show, every text that lies over something, and anything on the drawing that the
+    /// file does not state.
+    pub(crate) fn manufacturing_package(&mut self, input: &Value) -> Result<Value, String> {
+        let step = PathBuf::from(input["path"].as_str().unwrap_or_default());
+        if !ExportFormat::Step.suits(&step) {
+            return Err("the path must end in .step or .stp".into());
+        }
+        let template = input["template"].as_str().unwrap_or("iso-a3");
+        let mut new = self.drawing_request(&json!({ "template": template }))?;
+        // Front, top and side; the section through the tightest hole comes with the
+        // manufacturing information.
+        for (view, on) in &mut new.views {
+            if *view == soliddraft_kernel_api::drawing::StandardView::Isometric {
+                *on = false;
+            }
+        }
+        // Everything is made before anything is written, so a refusal leaves no file.
+        let exported = self.state.export_part_at(ExportFormat::Step, None)?;
+        let mut files: Vec<(PathBuf, Vec<u8>)> = Vec::new();
+        exported.write_with(&step, |file, bytes| {
+            files.push((file.to_owned(), bytes.to_vec()));
+            Ok(())
+        })?;
+        let on_body = self.state.doc.model().pmi_on_body();
+        let written: std::collections::BTreeSet<String> =
+            on_body.pmi.items.iter().take(on_body.items).map(|item| item.id.clone()).collect();
+        let session = drawing::create_drawing(self.state, &new)?;
+        let requirements = session.requirements.clone();
+        self.install_drawing(session);
+        let (pdf, dxf) = (step.with_extension("pdf"), step.with_extension("dxf"));
+        {
+            let part = PartContext::new(&self.state.doc);
+            let s = self.state.drawing.session.as_ref().ok_or_else(|| NO_DRAWING.to_owned())?;
+            for (format, path) in [(SheetFormat::Pdf, &pdf), (SheetFormat::Dxf, &dxf)] {
+                let (bytes, _) = drawing::sheet_bytes(s, part.as_ref(), format)?;
+                files.push((path.clone(), bytes));
+            }
+        }
+        // On the desktop each is a file beside the STEP file; in the browser they arrive
+        // as one download.
+        crate::platform::write_export(&step, files)?;
+        let s = self.session()?;
+        let sheet = s.sheet;
+        let drawing = &s.doc.drawing;
+        let overlaps: Vec<Value> = soliddraft_drawing::pmi_items::overlaps(drawing, sheet)
+            .into_iter()
+            .map(|(what, over)| json!({ "annotation": what, "over": over }))
+            .collect();
+        let shown = soliddraft_drawing::pmi_items::shown(drawing);
+        Ok(json!({
+            "step": step,
+            "pdf": pdf,
+            "dxf": dxf,
+            "manufacturing_information": exported.pmi,
+            "drawing": {
+                "views": drawing.sheets[sheet].views.len(),
+                "items": requirements.placed,
+                "shown": shown,
+                "not_shown": requirements.unplaced,
+                "overlaps": overlaps,
+                "not_in_file": soliddraft_drawing::pmi_items::not_from_part(drawing, &written),
+            },
+        }))
     }
 
     /// Makes a drawing as the New drawing PropertyManager does with its defaults.
@@ -708,6 +784,7 @@ impl ToolHost for AppTools<'_> {
             && matches!(
                 name,
                 "make_drawing"
+                    | "manufacturing_package"
                     | "show_drawing"
                     | "make_assembly"
                     | "show_assembly"

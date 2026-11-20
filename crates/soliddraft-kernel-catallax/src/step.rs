@@ -13,7 +13,13 @@ use crate::{numerical, query_error};
 /// against the represented body, rounded up to a decimal and to the next `f64`, never down.
 /// A fitted carrier's own fit to its exact definition is reported beside it. A body
 /// with a ring band is written only under its certificate, so a ring without one is refused.
-pub(super) fn export(app: &AppBody, options: &StepOptions) -> KernelResult<StepExport> {
+/// With `pmi`, the body's manufacturing information is written on its faces as AP242
+/// semantic PMI.
+pub(super) fn export(
+    app: &AppBody,
+    options: &StepOptions,
+    pmi: Option<&catallax_step::pmi::Pmi<catallax_topology::FaceId>>,
+) -> KernelResult<StepExport> {
     if !options.tolerance.is_finite() || options.tolerance <= 0.0 {
         return Err(KernelError::InvalidInput(format!(
             "the STEP tolerance is {} mm; it must be more than zero",
@@ -30,7 +36,20 @@ pub(super) fn export(app: &AppBody, options: &StepOptions) -> KernelResult<StepE
     let mut bytes = Vec::new();
     let built = app.checkpoint.built();
     let mut fit = carrier_fit(built);
+    if pmi.is_some() && has_ring_band(built) {
+        return Err(KernelError::Unsupported("export_step_with_pmi".into()));
+    }
     let answer = numerical("export_step", |dec| {
+        if let Some(pmi) = pmi {
+            return catallax_step::write_step_with_pmi(
+                &built.model,
+                built.result,
+                &catallax_options,
+                pmi,
+                dec,
+                &mut bytes,
+            );
+        }
         if has_ring_band(built) {
             let (answer, ring_fit) = write_ring_body(built, &catallax_options, dec, &mut bytes)?;
             fit = fit.clone().max(ring_fit);
@@ -38,7 +57,7 @@ pub(super) fn export(app: &AppBody, options: &StepOptions) -> KernelResult<StepE
         }
         catallax_step::write_step(&built.model, &[built.result], &catallax_options, dec, &mut bytes)
     })
-    .map_err(|e| query_error("export_step", e))?;
+    .map_err(|e| if pmi.is_some() { crate::pmi::error("export_step", e) } else { query_error("export_step", e) })?;
     let text = String::from_utf8(bytes).map_err(|e| KernelError::QueryFailed {
         query: "export_step".into(),
         code: 0,

@@ -1258,7 +1258,7 @@ fn split_name(name: &str) -> Option<(&str, &str)> {
     Some((f.trim(), l.trim()))
 }
 
-fn face_by_name(doc: &Document, name: &str) -> Option<FaceId> {
+pub(crate) fn face_by_name(doc: &Document, name: &str) -> Option<FaceId> {
     let (feature, label) = split_name(name)?;
     let id = doc.features.iter().find(|f| f.name == feature)?.id;
     doc.faces.iter().find(|f| f.feature == id && f.label.eq_ignore_ascii_case(label)).map(|f| f.id)
@@ -1270,7 +1270,7 @@ fn edge_by_name(doc: &Document, name: &str) -> Option<soliddraft_kernel_api::Edg
     doc.edges.iter().find(|e| e.feature == id && e.label.eq_ignore_ascii_case(label)).map(|e| e.id)
 }
 
-fn name_of_face(doc: &Document, face: FaceId) -> Option<String> {
+pub(crate) fn name_of_face(doc: &Document, face: FaceId) -> Option<String> {
     let nf = doc.named_face(face)?;
     Some(format!("{} · {}", doc.feature(nf.feature).map(|f| f.name.as_str()).unwrap_or("Body"), nf.label))
 }
@@ -3294,8 +3294,14 @@ impl ToolHost for CommandTools<'_> {
                     .map_err(|e| format!("bad decline list: {e}"))?;
                 let accept = serde_json::from_value(input.get("accept").cloned().unwrap_or(json!([])))
                     .map_err(|e| format!("bad accept list: {e}"))?;
+                self.doc.pmi_import = None;
                 crate::import::commit(self.doc, &preview, &crate::import::Review { decline, accept })?;
-                Ok(self.summary())
+                let mut summary = self.summary();
+                if let Some(report) = &self.doc.pmi_import {
+                    summary["manufacturing_information"] =
+                        json!({ "summary": crate::pmi::import_summary(report), "report": report });
+                }
+                Ok(summary)
             })(),
             "model_summary" => Ok(self.summary()),
             "feature" => self.feature(input["name"].as_str().unwrap_or_default()),

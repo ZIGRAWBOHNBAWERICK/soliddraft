@@ -215,6 +215,20 @@ impl SolidDraftApp {
 
     /// Opens a document file from its bytes: an upload in the browser, or a document the
     /// browser keeps for the recent list.
+    /// Opens the import review on a STEP file the browser uploaded for Import STEP: the
+    /// same review a file picked on the desktop gets, from the same bytes.
+    fn review_step_upload(&mut self, name: &str, bytes: Vec<u8>) {
+        match crate::import::Preview::from_bytes(&self.state.doc, name, bytes) {
+            Ok(preview) => self.state.import_dialog = Some(preview),
+            Err(message) => crate::import::report::refused(
+                &mut self.state,
+                std::path::Path::new(name),
+                soliddraft_kernel_api::ImportFormat::Step,
+                message,
+            ),
+        }
+    }
+
     pub(super) fn open_bytes(&mut self, name: &str, bytes: &[u8]) {
         use soliddraft_document::DocKind;
         match DocKind::of_path(std::path::Path::new(name)) {
@@ -754,7 +768,14 @@ impl eframe::App for SolidDraftApp {
         self.focus_tool_document();
         // In the browser an opened file arrives as an upload, frames after the request.
         if let Some((name, bytes)) = crate::platform::take_upload() {
-            self.open_bytes(&name, &bytes);
+            let step = std::path::Path::new(&name)
+                .extension()
+                .is_some_and(|e| e.eq_ignore_ascii_case("step") || e.eq_ignore_ascii_case("stp"));
+            if std::mem::take(&mut self.state.step_upload) && step {
+                self.review_step_upload(&name, bytes);
+            } else {
+                self.open_bytes(&name, &bytes);
+            }
         }
         #[cfg(target_arch = "wasm32")]
         self.poll_opening();

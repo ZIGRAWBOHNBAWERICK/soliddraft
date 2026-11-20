@@ -851,6 +851,7 @@ fn admit(
     }
     let declined_record = declined.then(|| record.cloned()).flatten();
     doc.reuse_builds_from(trial.model());
+    let before: Vec<FeatureId> = doc.features.iter().map(|f| f.id).collect();
     let id = match doc.apply(command) {
         Ok(Some(id)) => Ok(id),
         Err(error) => {
@@ -860,6 +861,12 @@ fn admit(
         }
         Ok(None) => preview.replacement.ok_or_else(|| "the import made no feature".into()),
     }?;
+    // A new import brings the file's manufacturing information with it. A replaced
+    // file keeps the part's own: its items follow the faces the replacement matched.
+    if preview.replacement.is_none() {
+        let added: Vec<FeatureId> = doc.features.iter().map(|f| f.id).filter(|id| !before.contains(id)).collect();
+        crate::pmi::after_import(doc, &added);
+    }
     Ok((id, refusals))
 }
 

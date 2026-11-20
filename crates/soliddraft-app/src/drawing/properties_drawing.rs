@@ -684,6 +684,8 @@ fn annotation_panel(
                         Tolerance::Symmetric { value } => format!("Bilateral ± {value}"),
                         Tolerance::Deviation { upper, lower } => format!("Deviation +{upper} / {lower}"),
                         Tolerance::Limits { upper, lower } => format!("Limits +{upper} / {lower}"),
+                        Tolerance::Fit { class } => format!("Class {class}"),
+                        Tolerance::Basic => "Basic".to_owned(),
                     };
                     value_row(ui, "Tolerance", &tol);
                     value_row(ui, "Precision", &format!("{} decimal{}", d.precision, if d.precision == 1 { "" } else { "s" }));

@@ -131,6 +131,23 @@ fn every_tool_runs_without_a_window_and_undoes_as_its_row_says() {
     s.call("feature", json!({ "name": "Boss-Extrude1" }));
     s.call("selection", json!({}));
     s.call("measure", json!({ "a": "Boss-Extrude1 · Start cap", "b": "Boss-Extrude1 · End cap" }));
+    // Manufacturing information: one undo step each, and the part ends as it began.
+    s.call("pmi_add", json!({ "kind": "datum", "faces": ["Boss-Extrude1 · Start cap"] }));
+    s.call("pmi_notes", json!({ "general_tolerance": "ISO 2768-m" }));
+    let listed = s.call("pmi_list", json!({}));
+    assert_eq!(listed["items"][0]["callout"], "Datum A", "{listed}");
+    assert_eq!(listed["notes"]["general_tolerance"], "ISO 2768-m", "{listed}");
+    s.call("pmi_remove", json!({ "name": "Datum A" }));
+    s.call("pmi_notes", json!({ "general_tolerance": "" }));
+    // Recognition and the interview read the part; an answer is one undo step.
+    let recognised = s.call("pmi_recognise", json!({}));
+    assert!(recognised["features"].is_array(), "{recognised}");
+    let asked = s.call("pmi_interview", json!({}));
+    assert!(asked["questions"].as_array().unwrap().iter().any(|q| q["id"] == "general tolerance"), "{asked}");
+    s.call("pmi_answer", json!({ "accept": ["general tolerance"] }));
+    assert_eq!(s.call("pmi_list", json!({}))["notes"]["general_tolerance"], "ISO 2768-mK");
+    s.call("undo", json!({}));
+    assert_eq!(s.call("pmi_list", json!({}))["items"], json!([]));
     let mass = s.call("mass_properties", json!({ "name": "Boss-Extrude1" }));
     assert!((mass["volume_mm3"].as_f64().unwrap() - 120.0 * 90.0 * 10.0).abs() < 1.0, "{mass}");
 
@@ -302,6 +319,15 @@ fn every_tool_runs_without_a_window_and_undoes_as_its_row_says() {
     assert!(s.state.doc.features.is_empty());
     s.call("sketch", json!({"plane":"top","shapes":[{"shape":"rectangle","center":[0,0,0],"width":40,"height":30}]}));
     s.call("extrude", json!({"sketch":"Sketch1","depth":12,"flip":false}));
+    // One action writes the STEP file and a drawing of it as PDF and DXF, and opens the
+    // drawing.
+    let package = dir.join("plate-package.step");
+    let written = s.call("manufacturing_package", json!({ "path": package }));
+    for extension in ["step", "pdf", "dxf"] {
+        assert!(package.with_extension(extension).is_file(), "{extension} is written: {written}");
+    }
+    assert_eq!(written["drawing"]["not_in_file"], json!([]), "{written}");
+    s.call("drawing_close", json!({}));
     let area = s.call("measure_entity", json!({"entity":"Boss-Extrude1 · End cap"}));
     assert_eq!(area["quantity"], "face_area");
     assert_eq!(area["value"], 1200.0);

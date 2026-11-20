@@ -610,6 +610,9 @@ pub struct DrawingSession {
     pub last_export: Option<PathBuf>,
     /// The part's mesh version the drawing last looked at.
     pub seen_version: u64,
+    /// What bringing in the part's manufacturing information did when the drawing was
+    /// made: the items drawn and the ones no view could carry.
+    pub requirements: soliddraft_drawing::PmiReport,
     /// Rows expanded in the drawing tree.
     pub expanded: std::collections::HashSet<ViewId>,
     pub annotations_open: bool,
@@ -656,6 +659,7 @@ impl DrawingSession {
             export_dir: None,
             last_export: None,
             seen_version: 0,
+            requirements: Default::default(),
             expanded: std::collections::HashSet::new(),
             annotations_open: true,
             attention_focus: None,
@@ -947,9 +951,14 @@ pub(crate) fn create_drawing_for_part(part_doc: &Document, new: &NewDrawing) -> 
         hidden: soliddraft_drawing::HiddenLines::Visible,
         model_items: false,
         centre_marks: true,
+        requirements: false,
         scale: new.scale,
     };
     let part = ctx.part();
+    // A part that states manufacturing information gets a drawing of it: every item
+    // once, and the part's notes in place of the template's.
+    let stated = !part.requirements.rows.is_empty() || !part.requirements.notes.is_empty();
+    let request = soliddraft_drawing::NewDrawing { requirements: stated, ..request };
     let made = soliddraft_drawing::make_drawing(&part, &request).map_err(|e| e.to_string())?;
     let overrides = std::mem::take(&mut drawing.sheets[0].format_overrides);
     drawing = made.drawing;
@@ -963,6 +972,7 @@ pub(crate) fn create_drawing_for_part(part_doc: &Document, new: &NewDrawing) -> 
     // drawing area, clear of the views.
     if let Some(notes) = &template.notes
         && !notes.lines.is_empty()
+        && !stated
     {
         let [l, b, _, _] = template.drawing_area();
         let lines = notes.lines.len() as f64 + 1.0;
@@ -980,6 +990,7 @@ pub(crate) fn create_drawing_for_part(part_doc: &Document, new: &NewDrawing) -> 
             placement: Point2::new(l + notes.offset[0], t - notes.offset[1]),
             style: StyleOverrides { text_height: Some(notes.height), ..Default::default() },
             state: AnnotationState::Ok,
+            source: None,
         });
     }
     doc.touch();
@@ -988,6 +999,7 @@ pub(crate) fn create_drawing_for_part(part_doc: &Document, new: &NewDrawing) -> 
     session.part_seen = Some(part_doc.model().id());
     session.doc.seen_digest = ctx.digest.clone();
     session.doc.log_mark = part_doc.command_log().len();
+    session.requirements = made.requirements;
     Ok(session)
 }
 
@@ -1811,6 +1823,18 @@ pub(crate) fn write_sheet(
     format: export::Format,
     path: &Path,
 ) -> Result<SheetExport, String> {
+    let (bytes, written) = sheet_bytes(s, part, format)?;
+    crate::platform::write_file(path, &bytes)?;
+    s.last_export = Some(path.to_path_buf());
+    Ok(written)
+}
+
+/// The drawing as `format`, as [`write_sheet`] writes it, without writing it.
+pub(crate) fn sheet_bytes(
+    s: &DrawingSession,
+    part: Option<&PartContext>,
+    format: export::Format,
+) -> Result<(Vec<u8>, SheetExport), String> {
     if !matches!(format, export::Format::Pdf) && s.doc.drawing.sheets.get(s.sheet).is_none() {
         return Err("The current sheet is no longer available; select a sheet before exporting".into());
     }
@@ -1840,8 +1864,7 @@ pub(crate) fn write_sheet(
         }
         _ => export::bytes(&list_of(s.sheet), format, &s.doc.drawing.meta.title),
     };
-    bytes.map_err(|e| e.to_string()).and_then(|bytes| crate::platform::write_file(path, &bytes))?;
-    s.last_export = Some(path.to_path_buf());
+    let bytes = bytes.map_err(|e| e.to_string())?;
     let written: Vec<&View> = match format {
         export::Format::Pdf => drawing.sheets.iter().flat_map(|sheet| &sheet.views).collect(),
         _ => drawing.sheets.get(s.sheet).map_or_else(Vec::new, |sheet| sheet.views.iter().collect()),
@@ -1850,7 +1873,7 @@ pub(crate) fn write_sheet(
     for view in &written {
         accuracy.add(view.geometry.accuracy());
     }
-    Ok(SheetExport { views: written.len(), redrawn, revision: drawing.model.pinned.clone(), accuracy })
+    Ok((bytes, SheetExport { views: written.len(), redrawn, revision: drawing.model.pinned.clone(), accuracy }))
 }
 
 /// A copy of `drawing` with unproved or coarse views drawn from the fine certified

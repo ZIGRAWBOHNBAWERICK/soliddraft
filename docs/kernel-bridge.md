@@ -53,6 +53,10 @@ The model summary exposes derived `edit_state`: `document`, `requested_revision`
 
 `Kernel::export_step` writes a solid as STEP AP242 through Catallax's exporter, `catallax-step`, from the body's exact build. Its report gives Catallax's proven bound on the distance between the written and the exact geometry, rounded up to a decimal and to the next `f64`, with the counts of solids, faces, edges and vertices written and of fitted intersection curves. A bound over the requested tolerance is reported with Catallax's warning, not hidden. STL and 3MF come from `tessellate` meshes. See [part export](exchange.md).
 
+### Manufacturing information
+
+`Kernel::export_step_with_pmi` writes the same solid with its manufacturing information as AP242 semantic PMI, through `catallax_step::write_step_with_pmi`. `Kernel::pmi_nominals` measures every dimension exactly on the body, and `Kernel::read_step_pmi` reads a file's information through `catallax_import::read_step_pmi`, keyed by the face names its import reports. The adapter converts values to exact rationals and back, and turns a slot, one item in the app, into the three dimensions a file holds and back. A body with approximate faces is not supported yet: the kernel answers `Unsupported` and the app writes the file without the items and names each as left out. See [manufacturing information](manufacturing-information.md).
+
 ## Interface work that follows removal
 
 The SMLib removal kept the existing operation and recipe interfaces. Construction previews now add the scoped edit entries above. Several parts still reflect SMLib's design and belong to the next roadmap step:

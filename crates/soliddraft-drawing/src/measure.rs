@@ -520,16 +520,16 @@ pub fn display_text(dim: &Dimension, symbols: &crate::library::Symbols) -> Strin
     };
     let core = format!("{prefix}{number}{suffix}");
     let with_tol = match dim.tolerance {
-        crate::Tolerance::None => core,
+        crate::Tolerance::None | crate::Tolerance::Basic => core,
+        crate::Tolerance::Fit { class } => format!("{core} {class}"),
         crate::Tolerance::Symmetric { value } => {
             format!("{core} ±{}", format_value(value, dim.precision.max(1)))
         }
         crate::Tolerance::Deviation { upper, lower } => {
-            format!(
-                "{core} +{}/{}",
-                format_value(upper, dim.precision.max(1)),
-                format_value(lower, dim.precision.max(1))
-            )
+            // A deviation of nothing is written 0, with no decimals (ISO 129-1).
+            let deviation =
+                |value: f64| if value == 0.0 { "0".to_owned() } else { format_value(value, dim.precision.max(1)) };
+            format!("{core} +{}/{}", deviation(upper), deviation(lower))
         }
         crate::Tolerance::Limits { upper, lower } => {
             format!(
@@ -541,7 +541,7 @@ pub fn display_text(dim: &Dimension, symbols: &crate::library::Symbols) -> Strin
     };
     let text = if dim.text.is_empty() { Dimension::VALUE_TEXT.to_owned() } else { dim.text.clone() };
     let text = text.replace(Dimension::VALUE_TEXT, &with_tol);
-    if symbols.reference_parentheses && matches!(dim.value, crate::DimValue::Measured { .. }) {
+    if symbols.reference_parentheses && !dim.requirement && matches!(dim.value, crate::DimValue::Measured { .. }) {
         format!("({text})")
     } else {
         text

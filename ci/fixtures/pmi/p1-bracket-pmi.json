@@ -1,0 +1,614 @@
+{
+ "datums": {
+  "A": [
+   {
+    "centroid": [
+     30.0,
+     19.847,
+     0.0
+    ],
+    "surface": "plane"
+   }
+  ],
+  "B": [
+   {
+    "centroid": [
+     30.0,
+     0.0,
+     14.8
+    ],
+    "surface": "plane"
+   }
+  ],
+  "C": [
+   {
+    "centroid": [
+     0.0,
+     13.269,
+     8.269
+    ],
+    "surface": "plane"
+   }
+  ]
+ },
+ "dimensions": [
+  {
+   "basic": true,
+   "faces": [
+    {
+     "centroid": [
+      0.0,
+      13.269,
+      8.269
+     ],
+     "surface": "plane"
+    }
+   ],
+   "to_faces": [
+    {
+     "centroid": [
+      10.0,
+      12.0,
+      2.5
+     ],
+     "radius": 2.0,
+     "surface": "cylinder"
+    }
+   ],
+   "type": "Location_LinearDistance",
+   "value": 10.0
+  },
+  {
+   "basic": true,
+   "faces": [
+    {
+     "centroid": [
+      0.0,
+      13.269,
+      8.269
+     ],
+     "surface": "plane"
+    }
+   ],
+   "to_faces": [
+    {
+     "centroid": [
+      10.0,
+      32.0,
+      2.5
+     ],
+     "radius": 2.0,
+     "surface": "cylinder"
+    }
+   ],
+   "type": "Location_LinearDistance",
+   "value": 10.0
+  },
+  {
+   "basic": true,
+   "faces": [
+    {
+     "centroid": [
+      0.0,
+      13.269,
+      8.269
+     ],
+     "surface": "plane"
+    }
+   ],
+   "to_faces": [
+    {
+     "centroid": [
+      30.0,
+      25.0,
+      7.5
+     ],
+     "radius": 4.0,
+     "surface": "cylinder"
+    }
+   ],
+   "type": "Location_LinearDistance",
+   "value": 30.0
+  },
+  {
+   "basic": true,
+   "faces": [
+    {
+     "centroid": [
+      0.0,
+      13.269,
+      8.269
+     ],
+     "surface": "plane"
+    }
+   ],
+   "to_faces": [
+    {
+     "centroid": [
+      50.0,
+      12.0,
+      2.5
+     ],
+     "radius": 2.0,
+     "surface": "cylinder"
+    }
+   ],
+   "type": "Location_LinearDistance",
+   "value": 50.0
+  },
+  {
+   "basic": true,
+   "faces": [
+    {
+     "centroid": [
+      0.0,
+      13.269,
+      8.269
+     ],
+     "surface": "plane"
+    }
+   ],
+   "to_faces": [
+    {
+     "centroid": [
+      50.0,
+      32.0,
+      2.5
+     ],
+     "radius": 2.0,
+     "surface": "cylinder"
+    }
+   ],
+   "type": "Location_LinearDistance",
+   "value": 50.0
+  },
+  {
+   "basic": true,
+   "faces": [
+    {
+     "centroid": [
+      30.0,
+      0.0,
+      14.8
+     ],
+     "surface": "plane"
+    }
+   ],
+   "to_faces": [
+    {
+     "centroid": [
+      10.0,
+      12.0,
+      2.5
+     ],
+     "radius": 2.0,
+     "surface": "cylinder"
+    }
+   ],
+   "type": "Location_LinearDistance",
+   "value": 12.0
+  },
+  {
+   "basic": true,
+   "faces": [
+    {
+     "centroid": [
+      30.0,
+      0.0,
+      14.8
+     ],
+     "surface": "plane"
+    }
+   ],
+   "to_faces": [
+    {
+     "centroid": [
+      10.0,
+      32.0,
+      2.5
+     ],
+     "radius": 2.0,
+     "surface": "cylinder"
+    }
+   ],
+   "type": "Location_LinearDistance",
+   "value": 32.0
+  },
+  {
+   "basic": true,
+   "faces": [
+    {
+     "centroid": [
+      30.0,
+      0.0,
+      14.8
+     ],
+     "surface": "plane"
+    }
+   ],
+   "to_faces": [
+    {
+     "centroid": [
+      30.0,
+      25.0,
+      7.5
+     ],
+     "radius": 4.0,
+     "surface": "cylinder"
+    }
+   ],
+   "type": "Location_LinearDistance",
+   "value": 25.0
+  },
+  {
+   "basic": true,
+   "faces": [
+    {
+     "centroid": [
+      30.0,
+      0.0,
+      14.8
+     ],
+     "surface": "plane"
+    }
+   ],
+   "to_faces": [
+    {
+     "centroid": [
+      50.0,
+      12.0,
+      2.5
+     ],
+     "radius": 2.0,
+     "surface": "cylinder"
+    }
+   ],
+   "type": "Location_LinearDistance",
+   "value": 12.0
+  },
+  {
+   "basic": true,
+   "faces": [
+    {
+     "centroid": [
+      30.0,
+      0.0,
+      14.8
+     ],
+     "surface": "plane"
+    }
+   ],
+   "to_faces": [
+    {
+     "centroid": [
+      50.0,
+      32.0,
+      2.5
+     ],
+     "radius": 2.0,
+     "surface": "cylinder"
+    }
+   ],
+   "type": "Location_LinearDistance",
+   "value": 32.0
+  },
+  {
+   "class": true,
+   "faces": [
+    {
+     "centroid": [
+      30.0,
+      25.0,
+      7.5
+     ],
+     "radius": 4.0,
+     "surface": "cylinder"
+    }
+   ],
+   "type": "Size_Diameter",
+   "value": 8.0
+  },
+  {
+   "faces": [
+    {
+     "centroid": [
+      10.0,
+      12.0,
+      2.5
+     ],
+     "radius": 2.0,
+     "surface": "cylinder"
+    },
+    {
+     "centroid": [
+      10.0,
+      32.0,
+      2.5
+     ],
+     "radius": 2.0,
+     "surface": "cylinder"
+    },
+    {
+     "centroid": [
+      50.0,
+      12.0,
+      2.5
+     ],
+     "radius": 2.0,
+     "surface": "cylinder"
+    },
+    {
+     "centroid": [
+      50.0,
+      32.0,
+      2.5
+     ],
+     "radius": 2.0,
+     "surface": "cylinder"
+    }
+   ],
+   "lower": 0.0,
+   "type": "Size_Diameter",
+   "upper": 0.1,
+   "value": 4.0
+  },
+  {
+   "faces": [
+    {
+     "centroid": [
+      21.09,
+      2.5,
+      18.0
+     ],
+     "radius": 3.0,
+     "surface": "cylinder"
+    },
+    {
+     "centroid": [
+      38.91,
+      2.5,
+      18.0
+     ],
+     "radius": 3.0,
+     "surface": "cylinder"
+    }
+   ],
+   "type": "Size_Radius",
+   "value": 3.0
+  },
+  {
+   "faces": [
+    {
+     "centroid": [
+      21.09,
+      2.5,
+      18.0
+     ],
+     "radius": 3.0,
+     "surface": "cylinder"
+    }
+   ],
+   "lower": 0.0,
+   "to_faces": [
+    {
+     "centroid": [
+      38.91,
+      2.5,
+      18.0
+     ],
+     "radius": 3.0,
+     "surface": "cylinder"
+    }
+   ],
+   "type": "Location_LinearDistance_FromOuterToOuter",
+   "upper": 0.1,
+   "value": 20.0
+  },
+  {
+   "faces": [
+    {
+     "centroid": [
+      30.0,
+      19.847,
+      0.0
+     ],
+     "surface": "plane"
+    }
+   ],
+   "lower": 0.1,
+   "to_faces": [
+    {
+     "centroid": [
+      30.0,
+      2.5,
+      15.0
+     ],
+     "surface": "plane"
+    }
+   ],
+   "type": "Location_LinearDistance",
+   "upper": 0.1,
+   "value": 18.0
+  },
+  {
+   "faces": [
+    {
+     "centroid": [
+      30.0,
+      19.847,
+      0.0
+     ],
+     "surface": "plane"
+    }
+   ],
+   "lower": 0.1,
+   "to_faces": [
+    {
+     "centroid": [
+      30.0,
+      25.0,
+      15.0
+     ],
+     "surface": "plane"
+    }
+   ],
+   "type": "Location_LinearDistance",
+   "upper": 0.1,
+   "value": 15.0
+  },
+  {
+   "faces": [
+    {
+     "centroid": [
+      30.0,
+      2.5,
+      15.0
+     ],
+     "surface": "plane"
+    }
+   ],
+   "lower": 0.0,
+   "to_faces": [
+    {
+     "centroid": [
+      30.0,
+      2.5,
+      21.0
+     ],
+     "surface": "plane"
+    }
+   ],
+   "type": "Location_LinearDistance",
+   "upper": 0.1,
+   "value": 6.0
+  },
+  {
+   "faces": [
+    {
+     "centroid": [
+      30.0,
+      25.0,
+      10.0
+     ],
+     "radius": 8.0,
+     "surface": "cylinder"
+    }
+   ],
+   "lower": 0.1,
+   "type": "Size_Diameter",
+   "upper": 0.1,
+   "value": 16.0
+  }
+ ],
+ "not_read": [
+  "Bore finish (Ra 1.6): OpenCASCADE has no reader for the AP242 surface texture entity",
+  "THRU on Hole diameter: an attribute of the feature, which OpenCASCADE reads on the product only"
+ ],
+ "notes": {
+  "general tolerance": "ISO 2768-m",
+  "material": "6061-T6",
+  "note 1": "Break sharp edges"
+ },
+ "tolerances": [
+  {
+   "datums": [
+    "A",
+    "B",
+    "C"
+   ],
+   "diameter_zone": true,
+   "faces": [
+    {
+     "centroid": [
+      10.0,
+      12.0,
+      2.5
+     ],
+     "radius": 2.0,
+     "surface": "cylinder"
+    },
+    {
+     "centroid": [
+      10.0,
+      32.0,
+      2.5
+     ],
+     "radius": 2.0,
+     "surface": "cylinder"
+    },
+    {
+     "centroid": [
+      50.0,
+      12.0,
+      2.5
+     ],
+     "radius": 2.0,
+     "surface": "cylinder"
+    },
+    {
+     "centroid": [
+      50.0,
+      32.0,
+      2.5
+     ],
+     "radius": 2.0,
+     "surface": "cylinder"
+    }
+   ],
+   "type": "Position",
+   "value": 0.2
+  },
+  {
+   "datums": [
+    "A",
+    "B",
+    "C"
+   ],
+   "diameter_zone": true,
+   "faces": [
+    {
+     "centroid": [
+      30.0,
+      25.0,
+      7.5
+     ],
+     "radius": 4.0,
+     "surface": "cylinder"
+    }
+   ],
+   "type": "Position",
+   "value": 0.05
+  },
+  {
+   "datums": [
+    "A"
+   ],
+   "faces": [
+    {
+     "centroid": [
+      30.0,
+      0.0,
+      14.8
+     ],
+     "surface": "plane"
+    }
+   ],
+   "type": "Perpendicularity",
+   "value": 0.1
+  },
+  {
+   "faces": [
+    {
+     "centroid": [
+      30.0,
+      19.847,
+      0.0
+     ],
+     "surface": "plane"
+    }
+   ],
+   "type": "Flatness",
+   "value": 0.05
+  }
+ ]
+}

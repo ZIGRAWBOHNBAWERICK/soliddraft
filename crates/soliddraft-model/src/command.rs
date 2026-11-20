@@ -256,6 +256,33 @@ pub enum Command {
         /// The state.
         state: Box<PartMaterials>,
     },
+    /// Adds an item of manufacturing information, or replaces the one called
+    /// `replaces`. A datum whose letter changes takes the tolerances that refer to it
+    /// along.
+    PutPmiItem {
+        /// The item.
+        item: Box<soliddraft_kernel_api::pmi::PmiItem<crate::FaceRef>>,
+        /// The name of the item it takes the place of.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        replaces: Option<String>,
+    },
+    /// Removes an item of manufacturing information. A datum a tolerance refers to
+    /// stays until that tolerance lets go of it.
+    RemovePmiItem {
+        /// The item's name.
+        id: String,
+    },
+    /// Sets the notes of the whole part: general tolerance, material and others.
+    SetPartNotes {
+        /// The notes.
+        notes: soliddraft_kernel_api::pmi::PartNotes,
+    },
+    /// Puts back the part's whole manufacturing information, as undo of the commands
+    /// above does.
+    RestorePmi {
+        /// The state.
+        state: Box<crate::pmi::PartPmi>,
+    },
     /// Several commands as one undo entry, such as an assistant proposal.
     Batch {
         /// What the batch does, for the undo menu.
@@ -598,6 +625,12 @@ impl Document {
     /// old state back.
     fn materials_changed(&self, old: PartMaterials, redo: Command, label: String) -> Applied {
         Applied { inverse: Command::RestoreMaterials { state: Box::new(old) }, redo, created: None, label }
+    }
+
+    /// What a command that changed only the manufacturing information did: its inverse
+    /// puts the old state back.
+    fn pmi_changed(&self, old: crate::pmi::PartPmi, redo: Command, label: String) -> Applied {
+        Applied { inverse: Command::RestorePmi { state: Box::new(old) }, redo, created: None, label }
     }
 
     fn index(&self, id: FeatureId) -> Result<usize, CommandError> {
@@ -1249,6 +1282,76 @@ impl Document {
                 let old = std::mem::replace(&mut self.materials, *state.clone());
                 let label = "restore materials".to_owned();
                 Ok(self.materials_changed(old, Command::RestoreMaterials { state }, label))
+            }
+            Command::PutPmiItem { item, replaces } => {
+                use soliddraft_kernel_api::pmi::PmiKind;
+                if let Some(old) = &replaces
+                    && self.pmi.item(old).is_none()
+                {
+                    return Err(CommandError::Invalid(format!("The part has no item called {old}.")));
+                }
+                if let Some(problem) = self.pmi.problem_with(&item, replaces.as_deref()) {
+                    return Err(CommandError::Invalid(problem));
+                }
+                let old = self.pmi.clone();
+                let label = match &replaces {
+                    Some(_) => format!("edit {}", item.id),
+                    None => format!("add {}", item.id),
+                };
+                match replaces.as_deref().and_then(|name| self.pmi.items.iter().position(|i| i.id == name)) {
+                    Some(at) => {
+                        let before = std::mem::replace(&mut self.pmi.items[at], (*item).clone());
+                        // A renamed datum keeps the tolerances that refer to it.
+                        if let (PmiKind::Datum { letter: was, .. }, PmiKind::Datum { letter: now, .. }) =
+                            (&before.kind, &item.kind)
+                            && was != now
+                        {
+                            for other in &mut self.pmi.items {
+                                if let PmiKind::Gdt { datums, .. } = &mut other.kind {
+                                    for datum in datums.iter_mut().filter(|datum| datum.letter == *was) {
+                                        datum.letter.clone_from(now);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    None => self.pmi.items.push((*item).clone()),
+                }
+                Ok(self.pmi_changed(old, Command::PutPmiItem { item, replaces }, label))
+            }
+            Command::RemovePmiItem { id } => {
+                use soliddraft_kernel_api::pmi::PmiKind;
+                let Some(at) = self.pmi.items.iter().position(|item| item.id == id) else {
+                    return Err(CommandError::Invalid(format!("The part has no item called {id}.")));
+                };
+                if let PmiKind::Datum { letter, .. } = &self.pmi.items[at].kind {
+                    let users = self.pmi.users_of_datum(letter);
+                    if let Some(first) = users.first() {
+                        return Err(CommandError::Invalid(format!(
+                            "Datum {letter} is used by {first}. Remove or change that tolerance first."
+                        )));
+                    }
+                }
+                let old = self.pmi.clone();
+                self.pmi.items.remove(at);
+                let label = format!("remove {id}");
+                Ok(self.pmi_changed(old, Command::RemovePmiItem { id }, label))
+            }
+            Command::SetPartNotes { notes } => {
+                let blank = |text: &String| text.trim().is_empty();
+                if notes.general_tolerance.as_ref().is_some_and(blank)
+                    || notes.material.as_ref().is_some_and(blank)
+                    || notes.notes.iter().any(blank)
+                {
+                    return Err(CommandError::Invalid("A note cannot be empty.".into()));
+                }
+                let old = self.pmi.clone();
+                self.pmi.part = notes.clone();
+                Ok(self.pmi_changed(old, Command::SetPartNotes { notes }, "part notes".to_owned()))
+            }
+            Command::RestorePmi { state } => {
+                let old = std::mem::replace(&mut self.pmi, *state.clone());
+                Ok(self.pmi_changed(old, Command::RestorePmi { state }, "restore manufacturing information".to_owned()))
             }
             Command::Batch { label, commands } => {
                 let dirty = self.dirty;

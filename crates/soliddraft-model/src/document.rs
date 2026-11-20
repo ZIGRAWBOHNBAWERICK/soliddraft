@@ -116,6 +116,8 @@ pub struct Document {
     pub(crate) next_body: u32,
     /// The material, the appearances and the copies of both the part holds.
     pub(crate) materials: PartMaterials,
+    /// The manufacturing information: items on faces and the part's notes.
+    pub(crate) pmi: crate::pmi::PartPmi,
     /// Viewport quality, export accuracy and whether to save display data: kept in the
     /// file's `settings.json`, outside the part's truth and hashes.
     pub(crate) settings: Settings,
@@ -168,6 +170,7 @@ impl Document {
             next_id: 1,
             next_body: 1,
             materials: PartMaterials::default(),
+            pmi: crate::pmi::PartPmi::default(),
             settings: Settings::default(),
             view: Visibility::default(),
             kernel,
@@ -257,6 +260,41 @@ impl Document {
         self.export_at(format, None)
     }
 
+    /// The part as STEP with its manufacturing information on its faces. Items that do
+    /// not apply are left out and named in the result. A body the kernel cannot attach
+    /// information to yet is written without any, and every item is named as left out.
+    fn export_step_with_pmi(&self, body: BodyId) -> Result<soliddraft_exchange::Export, String> {
+        let on_body = self.pmi_on_body();
+        let kernel = self.kernel.as_ref();
+        match soliddraft_exchange::export_step_with_pmi(kernel, body, &self.name, &on_body.pmi) {
+            Ok(mut out) => {
+                if let Some(pmi) = &mut out.pmi {
+                    pmi.items = on_body.items;
+                    pmi.left_out = on_body.left_out;
+                }
+                Ok(out)
+            }
+            Err(soliddraft_exchange::ExportError::Kernel(KernelError::Unsupported(_))) => {
+                let tolerance = self.settings.export;
+                let mut out = soliddraft_exchange::export(
+                    kernel,
+                    body,
+                    &self.name,
+                    soliddraft_exchange::Format::Step,
+                    &tolerance,
+                )
+                .map_err(|e| e.to_string())?;
+                let mut left_out = on_body.left_out;
+                let stated = on_body.pmi.items.iter().take(on_body.items);
+                left_out.extend(stated.map(|item| (item.id.clone(), "Coming soon".to_owned())));
+                out.pmi = Some(soliddraft_exchange::PmiExported { items: 0, left_out });
+                Ok(out)
+            }
+            Err(soliddraft_exchange::ExportError::Kernel(KernelError::InvalidInput(detail))) => Err(detail),
+            Err(other) => Err(other.to_string()),
+        }
+    }
+
     /// Exports at an explicit mesh accuracy without changing the document settings.
     pub fn export_at(
         &self,
@@ -292,11 +330,16 @@ impl Document {
                 bytes: output.bytes,
                 report: soliddraft_exchange::Report::FieldMesh(output.report),
                 proof: None,
+                pmi: None,
             });
         }
 
-        let mut out = soliddraft_exchange::export(self.kernel.as_ref(), body, &self.name, format, &tolerance)
-            .map_err(|e| e.to_string())?;
+        let mut out = if format == soliddraft_exchange::Format::Step && !self.pmi.is_empty() {
+            self.export_step_with_pmi(body)?
+        } else {
+            soliddraft_exchange::export(self.kernel.as_ref(), body, &self.name, format, &tolerance)
+                .map_err(|e| e.to_string())?
+        };
         if out.proof.is_some() {
             out.proof = Some(self.proof_report());
         }
@@ -314,6 +357,7 @@ impl Document {
             bytes: output.bytes,
             report: soliddraft_exchange::Report::StandIn(Box::new(output.report)),
             proof: Some(self.proof_report()),
+            pmi: None,
         })
     }
 
@@ -632,6 +676,9 @@ impl Document {
         }
         for row in &self.values.tracked {
             out.extend(held(&row.name, reference::face_refs(&row.source)));
+        }
+        for item in &self.pmi.items {
+            out.extend(held(&item.id, reference::face_refs(item)));
         }
         out
     }

@@ -35,6 +35,7 @@ pub mod library;
 pub mod measure;
 pub mod model_items;
 mod part;
+pub mod pmi_items;
 pub mod project;
 mod sheet;
 mod template;
@@ -44,15 +45,16 @@ mod view;
 
 pub use annotation::{
     Anchor, Annotation, AnnotationKind, AnnotationState, Attach, DatumRef, DimType, DimValue, Dimension, DimensionKind,
-    DimensionSet, GdtCharacteristic, Lay, LinearOrientation, MaterialCondition, ParameterRef, SetKind, StyleOverrides,
-    SurfaceProcess, Tolerance,
+    DimensionSet, GdtCharacteristic, Lay, LinearOrientation, MaterialCondition, ParameterRef, PmiSource, SetKind,
+    StyleOverrides, SurfaceProcess, Tolerance,
 };
 pub use command::{Command, UndoStack, apply, apply_with, next_letter};
 pub use entity::{EntityKind, EntityRef, Fingerprint, ModelEntity};
 pub use ids::{AnnotationId, SHEET, TemplateId, ViewId};
 pub use layout::{MadeDrawing, NewDrawing, default_views, make_drawing};
 pub use model_items::{ImportReport, ModelDimension, ModelMeasure};
-pub use part::{Entity, Namer, Part, PartIndex, PartSource, Resolution, feature_name};
+pub use part::{Entity, Namer, Part, PartIndex, PartSource, Requirements, Resolution, feature_name};
+pub use pmi_items::{PmiReport, Unplaced};
 pub use sheet::{Projection, RevisionRow, Scale, Sheet, Table, TableKind};
 pub use soliddraft_document::{ContentHash, DocKind, DocRef, DocumentId};
 pub use template::{DimensionStyle, LineWidths, Margins, PaperSize, Template, TitleBlock, TitleField, ZoneGrid};
@@ -131,6 +133,10 @@ pub struct Drawing {
     /// with the views, so a title never comes from a later part than its line work.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub source_properties: BTreeMap<String, String>,
+    /// The part's notes at the pinned revision: its general tolerance, its material and
+    /// its other notes. The title block and the notes show these.
+    #[serde(default, skip_serializing_if = "soliddraft_kernel_api::pmi::PartNotes::is_empty")]
+    pub part_notes: soliddraft_kernel_api::pmi::PartNotes,
 }
 
 impl Drawing {
@@ -145,6 +151,7 @@ impl Drawing {
             next_datum_label: "A".to_owned(),
             settings: DrawingSettings::default(),
             source_properties: BTreeMap::new(),
+            part_notes: Default::default(),
         }
     }
 
@@ -185,6 +192,7 @@ impl Drawing {
         self.model.pinned = part.digest.clone();
         self.model.configuration = part.source.configuration.clone();
         self.source_properties = part.source.properties.clone();
+        self.part_notes = part.requirements.notes.clone();
     }
 
     /// True when the views show the part revision the drawing is pinned at: every view

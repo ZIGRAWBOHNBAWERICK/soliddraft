@@ -46,6 +46,7 @@ pub mod palette;
 pub mod panels;
 pub mod part_check;
 pub mod platform;
+pub mod pmi;
 pub mod preferences;
 pub mod print_check;
 pub mod properties;

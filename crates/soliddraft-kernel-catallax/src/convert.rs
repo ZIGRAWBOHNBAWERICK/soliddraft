@@ -607,6 +607,18 @@ pub(super) fn outward_plane(
     Ok((Some(origin), normal.normalized().map(|n| if sense == Sense::Same { n } else { -n })))
 }
 
+/// A circular cylinder's axis and radius, as the nearest doubles.
+fn cylinder_axis(surface: &Surface) -> Result<Option<FaceAxis>, catallax_numbers::Refusal> {
+    let Surface::Cylinder(cylinder) = surface else { return Ok(None) };
+    let (o, a) = (&cylinder.origin, &cylinder.axis);
+    let direction = Vec3::new(nearest(&a.x)?, nearest(&a.y)?, nearest(&a.z)?).normalized();
+    Ok(direction.map(|direction| FaceAxis {
+        point: Vec3::new(nearest(&o.x).unwrap_or(0.0), nearest(&o.y).unwrap_or(0.0), nearest(&o.z).unwrap_or(0.0)),
+        direction,
+        radius: cylinder.radius_sq.to_f64().sqrt(),
+    }))
+}
+
 pub(super) fn surface_kind(surface: &Surface) -> SurfaceKind {
     match surface.kind() {
         CatSurface::Plane => SurfaceKind::Plane,
@@ -907,8 +919,16 @@ pub(super) fn face_carriers(app: &AppBody, ids: &Ids) -> KernelResult<Vec<FaceCa
         let face = model.face(cat);
         let surface = model.geom().surface(face.surface);
         let (on_plane, normal) = outward_plane(surface, face.sense).map_err(|e| query_error("face_plane", e))?;
+        let axis = cylinder_axis(surface).map_err(|e| query_error("face_axis", e))?;
         let id = ids.faces[&cat];
-        Ok(FaceCarrier { id, surface: surface_kind(surface), normal, on_plane, origins: ids.face_origins[&id].clone() })
+        Ok(FaceCarrier {
+            id,
+            surface: surface_kind(surface),
+            normal,
+            on_plane,
+            axis,
+            origins: ids.face_origins[&id].clone(),
+        })
     };
     model.faces_of_body(built.result).into_iter().map(carrier).collect()
 }

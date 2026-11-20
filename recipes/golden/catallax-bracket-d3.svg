@@ -52,17 +52,21 @@
 <path d="M230 278 L410 278" stroke="#000000" stroke-width="0.18"/>
 <path d="M230 269 L410 269" stroke="#000000" stroke-width="0.18"/>
 <path d="M230 260 L410 260" stroke="#000000" stroke-width="0.18"/>
-<path d="M290 287 L290 251" stroke="#000000" stroke-width="0.18"/>
+<path d="M290 287 L290 269" stroke="#000000" stroke-width="0.18"/>
+<path d="M270 269 L270 251" stroke="#000000" stroke-width="0.18"/>
+<path d="M310 269 L310 251" stroke="#000000" stroke-width="0.18"/>
 <path d="M350 269 L350 251" stroke="#000000" stroke-width="0.18"/>
 <path d="M350 287 L350 278" stroke="#000000" stroke-width="0.18"/>
 <path d="M254 287 L254 278" stroke="#000000" stroke-width="0.18"/>
 <path d="M370 287 L370 278" stroke="#000000" stroke-width="0.18"/>
 <text x="231.2" y="253.8" font-size="2.476" fill="#000000" stroke="none">Designed by</text>
-<text x="291.2" y="253.8" font-size="2.476" fill="#000000" stroke="none">Checked by</text>
-<text x="351.2" y="253.8" font-size="2.476" fill="#000000" stroke="none">Approved by</text>
+<text x="271.2" y="253.8" font-size="2.476" fill="#000000" stroke="none">Checked by</text>
+<text x="311.2" y="253.8" font-size="2.476" fill="#000000" stroke="none">Approved by</text>
 <text x="231.2" y="262.8" font-size="2.476" fill="#000000" stroke="none">Document type</text>
-<text x="291.2" y="262.8" font-size="2.476" fill="#000000" stroke="none">Document status</text>
-<text x="351.2" y="262.8" font-size="2.476" fill="#000000" stroke="none">Date</text>
+<text x="271.2" y="262.8" font-size="2.476" fill="#000000" stroke="none">Document status</text>
+<text x="311.2" y="262.8" font-size="2.476" fill="#000000" stroke="none">Date</text>
+<text x="351.2" y="253.8" font-size="2.476" fill="#000000" stroke="none">Material</text>
+<text x="351.2" y="262.8" font-size="2.476" fill="#000000" stroke="none">General tolerance</text>
 <text x="231.2" y="271.8" font-size="2.476" fill="#000000" stroke="none">Legal owner</text>
 <text x="291.2" y="271.8" font-size="2.476" fill="#000000" stroke="none">Title</text>
 <text x="231.2" y="280.8" font-size="2.476" fill="#000000" stroke="none">Projection</text>
@@ -2756,7 +2760,7 @@
 </g>
 <g id="TEXT" fill="none" stroke-linecap="round" stroke-linejoin="round" font-family="Inter, sans-serif">
 <text x="231.5" y="267.5" font-size="4.814" fill="#000000" stroke="none">Part drawing</text>
-<text x="351.5" y="267.5" font-size="4.814" fill="#000000" stroke="none">2026-10-14</text>
+<text x="311.5" y="267.5" font-size="4.814" fill="#000000" stroke="none">2026-10-14</text>
 <text x="291.5" y="276.5" font-size="5.502" font-weight="600" fill="#000000" stroke="none">Bracket</text>
 <text x="255.5" y="285.5" font-size="4.814" fill="#000000" stroke="none">1:1</text>
 <text x="351.5" y="285.5" font-size="4.814" fill="#000000" stroke="none">B</text>

@@ -74,6 +74,7 @@ fn saved_history(name: &str, save_as: bool, redo: bool, control: Control) {
         placement: Point2::new(0.0, 0.0),
         style: Default::default(),
         state: AnnotationState::Ok,
+        source: None,
     };
     drawing(&mut app, DrawingAction::Command(Command::AddAnnotation { annotation }));
     if redo {

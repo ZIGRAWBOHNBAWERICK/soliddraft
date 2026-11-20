@@ -28,6 +28,8 @@ pub mod contract;
 pub mod counting;
 pub mod drawing;
 pub mod measure;
+pub mod pmi;
+pub mod recognition;
 pub use assembly_measure::{
     Axis, EnclosedSupport, ExactAxis, ExactAxisPlane, ExactPoint, ExactRadius, ExactRational, ExactSupport,
     SupportBounds, SupportEntity, SupportSource,
@@ -648,9 +650,24 @@ pub struct FaceCarrier {
     /// `None` for curved faces.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub on_plane: Option<Vec3>,
+    /// The axis and radius of a face on a circular cylinder. `None` for every other
+    /// face.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub axis: Option<FaceAxis>,
     /// As [`FaceInfo::origins`].
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub origins: Vec<Origin>,
+}
+
+/// The circular cylinder a face lies on, as nearest doubles to the exact model's values.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct FaceAxis {
+    /// A point of the axis.
+    pub point: Vec3,
+    /// The axis's unit direction.
+    pub direction: Vec3,
+    /// The cylinder's radius in millimetres.
+    pub radius: f64,
 }
 
 /// One edge of a body.
@@ -1559,6 +1576,44 @@ pub trait Kernel: Send + Sync {
     fn export_step(&self, body: BodyId, options: &StepOptions) -> KernelResult<StepExport> {
         let _ = (body, options);
         Err(KernelError::Unsupported("export_step".into()))
+    }
+
+    /// The holes, hole patterns, bosses and slots of a body, read off its faces. It
+    /// works the same on a body the app built and on an imported one.
+    fn recognise(&self, body: BodyId) -> KernelResult<recognition::Recognised> {
+        let _ = body;
+        Err(KernelError::Unsupported("recognise".into()))
+    }
+
+    /// The nominal value in millimetres of every dimension of `pmi`, measured on the
+    /// body: one entry per item, holding one value for a size or a distance, the length,
+    /// the width and the end radius for a slot, and nothing for any other item.
+    /// A dimension that does not fit its faces, such as a diameter on a plane, fails the
+    /// call with [`KernelError::InvalidInput`] naming the item.
+    fn pmi_nominals(&self, body: BodyId, pmi: &pmi::Pmi<FaceId>) -> KernelResult<Vec<Vec<f64>>> {
+        let _ = (body, pmi);
+        Err(KernelError::Unsupported("pmi_nominals".into()))
+    }
+
+    /// Writes a solid as [`Kernel::export_step`] does, with its manufacturing
+    /// information as AP242 semantic PMI on the faces it applies to. Every dimension's
+    /// nominal value is measured on the body; `nominal` fields are not read.
+    fn export_step_with_pmi(
+        &self,
+        body: BodyId,
+        options: &StepOptions,
+        pmi: &pmi::Pmi<FaceId>,
+    ) -> KernelResult<StepExport> {
+        let _ = (body, options, pmi);
+        Err(KernelError::Unsupported("export_step_with_pmi".into()))
+    }
+
+    /// Reads the manufacturing information of a STEP file. Faces are named by the keys
+    /// [`FaceRole::Imported`] gives the faces of the same file's import. Items the
+    /// backend cannot represent are listed, never guessed.
+    fn read_step_pmi(&self, source: &[u8]) -> KernelResult<pmi::StepPmi> {
+        let _ = source;
+        Err(KernelError::Unsupported("read_step_pmi".into()))
     }
 }
 

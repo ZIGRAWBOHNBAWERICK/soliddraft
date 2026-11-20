@@ -25,6 +25,7 @@ fn new_drawing(template: &str) -> NewDrawing {
         hidden: HiddenLines::Visible,
         model_items: true,
         centre_marks: false,
+        requirements: false,
         scale: None,
     }
 }

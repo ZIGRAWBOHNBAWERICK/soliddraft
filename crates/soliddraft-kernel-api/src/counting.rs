@@ -478,6 +478,27 @@ impl Kernel for Counting {
         self.inner.export_step(body, options)
     }
 
+    fn recognise(&self, body: BodyId) -> KernelResult<crate::recognition::Recognised> {
+        self.inner.recognise(body)
+    }
+
+    fn pmi_nominals(&self, body: BodyId, pmi: &crate::pmi::Pmi<FaceId>) -> KernelResult<Vec<Vec<f64>>> {
+        self.inner.pmi_nominals(body, pmi)
+    }
+
+    fn export_step_with_pmi(
+        &self,
+        body: BodyId,
+        options: &crate::StepOptions,
+        pmi: &crate::pmi::Pmi<FaceId>,
+    ) -> KernelResult<crate::StepExport> {
+        self.inner.export_step_with_pmi(body, options, pmi)
+    }
+
+    fn read_step_pmi(&self, source: &[u8]) -> KernelResult<crate::pmi::StepPmi> {
+        self.inner.read_step_pmi(source)
+    }
+
     fn view_curves(&self, body: BodyId, spec: &drawing::ViewSpec) -> KernelResult<drawing::ViewCurves> {
         self.inner.view_curves(body, spec)
     }

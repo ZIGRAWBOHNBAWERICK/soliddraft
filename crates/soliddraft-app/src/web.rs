@@ -343,6 +343,23 @@ thread_local! {
     static SHOWN_PART_CHECK: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
     static SHOWN_OPTIONS: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
     static SHOWN_BUILD: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
+    static SHOWN_PMI: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
+}
+
+/// Notes the items the Manufacturing information panel is drawing, for
+/// [`shown_manufacturing_information`].
+pub(crate) fn show_manufacturing_information(shown: &str) {
+    SHOWN_PMI.with_borrow_mut(|pmi| shown.clone_into(pmi));
+}
+
+/// The items the Manufacturing information panel drew in the last frame, as JSON:
+/// `{"items": [{"name", "callout", "faces": [[...]], "problem"?}], "notes": {...}}`. Each
+/// face reads `<its name> @ <surface> (x, y, z)`, the centroid to a micrometre, so a
+/// check can tell that an item is on the same face after a save and a reopen. Empty when
+/// that frame drew no panel. Read only, for browser checks.
+#[wasm_bindgen]
+pub fn shown_manufacturing_information() -> String {
+    SHOWN_PMI.with_borrow(|pmi| pmi.clone())
 }
 
 /// Notes the selection the options bar drew and where it drew Details, for [`shown_options`].
@@ -378,6 +395,7 @@ pub(crate) fn begin_frame() {
     SHOWN_DETAILS.with_borrow_mut(String::clear);
     SHOWN_PART_CHECK.with_borrow_mut(String::clear);
     SHOWN_OPTIONS.with_borrow_mut(String::clear);
+    SHOWN_PMI.with_borrow_mut(String::clear);
 }
 
 /// Notes the outcome the Part check window is drawing, for [`shown_part_check`].

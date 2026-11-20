@@ -37,6 +37,8 @@ const DARK: [(&str, &str); 8] = [
 pub enum Icon {
     Sketch,
     SmartDim,
+    /// A feature control frame: manufacturing information.
+    Tolerance,
     OnPlane,
     Extrude,
     Revolve,
@@ -290,6 +292,11 @@ fn paint_drawn(painter: &Painter, icon: Icon, rect: Rect, color: Color32) {
             g.arrow_head(p, (14.0, 11.0), vec2(1.0, 0.0), 2.4);
             g.line(p, &[(2.0, 4.0), (2.0, 13.0)]);
             g.line(p, &[(14.0, 4.0), (14.0, 13.0)]);
+        }
+        Icon::Tolerance => {
+            g.closed(p, &[(2.0, 5.0), (14.0, 5.0), (14.0, 11.0), (2.0, 11.0)]);
+            g.line(p, &[(6.0, 5.0), (6.0, 11.0)]);
+            g.line(p, &[(10.0, 5.0), (10.0, 11.0)]);
         }
         Icon::OnPlane => {
             g.closed(p, &[(2.0, 12.0), (6.0, 5.0), (14.0, 5.0), (10.0, 12.0)]);

@@ -200,6 +200,34 @@ pub struct Export {
     pub proof: Option<proof::ProofReport>,
     /// What was written.
     pub report: Report,
+    /// What became of the part's manufacturing information, for a part that has some.
+    pub pmi: Option<PmiExported>,
+}
+
+/// What a STEP export did with a part's manufacturing information.
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct PmiExported {
+    /// Items written to the file, on their faces.
+    pub items: usize,
+    /// Items not written, by name, each with the reason.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub left_out: Vec<(String, String)>,
+}
+
+impl PmiExported {
+    /// The outcome in a line: `14 manufacturing items`, or with the names left out.
+    pub fn summary(&self) -> String {
+        let items = if self.items == 1 {
+            "1 manufacturing item".to_owned()
+        } else {
+            format!("{} manufacturing items", self.items)
+        };
+        if self.left_out.is_empty() {
+            return items;
+        }
+        let names: Vec<&str> = self.left_out.iter().map(|(name, _)| name.as_str()).collect();
+        format!("{items}; left out: {}", names.join(", "))
+    }
 }
 
 /// Why an export failed. A failed export writes nothing.
@@ -219,6 +247,56 @@ pub enum ExportError {
     Package(String),
 }
 
+/// Exports `body` as STEP with its manufacturing information as AP242 semantic PMI on
+/// the faces it applies to. Every dimension's value is measured on the body.
+pub fn export_step_with_pmi(
+    kernel: &dyn Kernel,
+    body: BodyId,
+    name: &str,
+    pmi: &soliddraft_kernel_api::pmi::Pmi<soliddraft_kernel_api::FaceId>,
+) -> Result<Export, ExportError> {
+    let mut out = step(kernel, body, name, Some(pmi))?;
+    out.pmi = Some(PmiExported { items: pmi.items.len(), left_out: Vec::new() });
+    Ok(out)
+}
+
+fn step(
+    kernel: &dyn Kernel,
+    body: BodyId,
+    name: &str,
+    pmi: Option<&soliddraft_kernel_api::pmi::Pmi<soliddraft_kernel_api::FaceId>>,
+) -> Result<Export, ExportError> {
+    let options = StepOptions { product_name: name.to_owned(), ..StepOptions::default() };
+    let step = match pmi {
+        Some(pmi) => kernel.export_step_with_pmi(body, &options, pmi)?,
+        None => kernel.export_step(body, &options)?,
+    };
+    let answer_kind = if step.report.approximate.is_some() || step.report.tolerant {
+        proof::AnswerKind::Approximate
+    } else {
+        proof::AnswerKind::Proved
+    };
+    let features = kernel
+        .history(body)?
+        .into_iter()
+        .map(|record| proof::FeatureProof {
+            id: record.tag.as_str().to_owned(),
+            name: record.tag.as_str().to_owned(),
+            answer_kind,
+            model_bound: None,
+            display_bound: None,
+            work_used: None,
+            message: None,
+        })
+        .collect();
+    Ok(Export {
+        bytes: step.text.into_bytes(),
+        report: Report::Step(step.report),
+        proof: Some(proof::ProofReport { features }),
+        pmi: None,
+    })
+}
+
 /// Exports `body` as `format`. `name` is written where the format supports it; meshes use
 /// `tolerance`, the document's export setting.
 pub fn export(
@@ -229,36 +307,10 @@ pub fn export(
     tolerance: &ExportTolerance,
 ) -> Result<Export, ExportError> {
     match format {
-        Format::Step => {
-            let options = StepOptions { product_name: name.to_owned(), ..StepOptions::default() };
-            let step = kernel.export_step(body, &options)?;
-            let answer_kind = if step.report.approximate.is_some() || step.report.tolerant {
-                proof::AnswerKind::Approximate
-            } else {
-                proof::AnswerKind::Proved
-            };
-            let features = kernel
-                .history(body)?
-                .into_iter()
-                .map(|record| proof::FeatureProof {
-                    id: record.tag.as_str().to_owned(),
-                    name: record.tag.as_str().to_owned(),
-                    answer_kind,
-                    model_bound: None,
-                    display_bound: None,
-                    work_used: None,
-                    message: None,
-                })
-                .collect();
-            Ok(Export {
-                bytes: step.text.into_bytes(),
-                report: Report::Step(step.report),
-                proof: Some(proof::ProofReport { features }),
-            })
-        }
+        Format::Step => step(kernel, body, name, None),
         Format::Iges => {
             let iges = kernel.export_iges(body, &soliddraft_kernel_api::IgesOptions::default())?;
-            Ok(Export { bytes: iges.text.into_bytes(), report: Report::Iges(iges.report), proof: None })
+            Ok(Export { bytes: iges.text.into_bytes(), report: Report::Iges(iges.report), proof: None, pmi: None })
         }
         Format::StandIn => {
             Err(ExportError::Invalid("a mass stand-in comes from a part's active lattice or gyroid".into()))
@@ -289,7 +341,7 @@ pub fn export(
                 unavailable_controls: mesh.unavailable_controls,
                 print_check: qualified.map(|output| output.report),
             };
-            Ok(Export { bytes, report: Report::Mesh(report), proof: None })
+            Ok(Export { bytes, report: Report::Mesh(report), proof: None, pmi: None })
         }
     }
 }

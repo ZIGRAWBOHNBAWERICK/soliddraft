@@ -7,6 +7,7 @@ import pathlib
 import re
 import subprocess
 import sys
+import tempfile
 import tomllib
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -459,6 +460,124 @@ def with_base_rules(result, base_script, changes, event, ref, packages, sources)
 
 # None means full coverage. Empty lists are never valid archive or scenario plans.
 FULL_WORK = {'packages': None, 'test_targets': None, 'scenarios': None}
+KERNEL_PARTS = 'ci/kernel-parts.json'
+INVENTORY = 'ci/scenario-inventory.json'
+# Every narrowed pin move still runs this scenario as a smoke test.
+SMOKE_SCENARIO = 'ci/scenarios/bracket.json'
+# Tests point this at a local repository; the selector always reads the official one.
+CATALLAX_FETCH = CATALLAX_GIT
+CATALLAX_MANIFEST = re.compile(r'Cargo\.toml|Cargo\.lock|crates/[^/]+/Cargo\.toml')
+
+
+def parse_kernel_parts(text):
+    """Patterns that sort a changed Catallax path into ignored, shared core or named parts."""
+    data = json.loads(text)
+    if (not isinstance(data, dict) or data.get('format') != 'soliddraft-kernel-parts/1'
+            or not isinstance(data.get('parts'), dict) or not data['parts']):
+        raise ValueError(f'{KERNEL_PARTS}: invalid schema')
+    compiled = lambda patterns: [re.compile(p) for p in patterns]
+    parts = {name: compiled(part['paths']) for name, part in data['parts'].items()}
+    return compiled(data['ignored']), compiled(data['core']), parts
+
+
+def kernel_part_of(path, kernel_map):
+    """None for shared core, else the set of parts the path changes (empty when ignored)."""
+    ignored, core, parts = kernel_map
+    if any(p.fullmatch(path) for p in ignored):
+        return set()
+    if any(p.fullmatch(path) for p in core):
+        return None
+    named = {name for name, patterns in parts.items() if any(p.fullmatch(path) for p in patterns)}
+    # A path no entry knows counts as shared core.
+    return named or None
+
+
+def catallax_pin(lock_text):
+    revisions = {source[1] for package in tomllib.loads(lock_text).get('package', [])
+                 if (source := CATALLAX_SOURCE.fullmatch(package.get('source', '')))}
+    return revisions.pop() if len(revisions) == 1 else None
+
+
+def without_versions(path, text):
+    """Catallax's own release numbers; any other manifest or lockfile difference is shared core."""
+    data = tomllib.loads(text)
+    if path == 'Cargo.lock':
+        for package in data.get('package', []):
+            if 'source' not in package:
+                package.pop('version', None)
+    else:
+        data.get('package', {}).pop('version', None)
+        data.get('workspace', {}).get('package', {}).pop('version', None)
+    return data
+
+
+def catallax_changes(old, new):
+    """Changed Catallax paths between two pins, reading manifests whose only change is a version."""
+    with tempfile.TemporaryDirectory() as directory:
+        run = lambda *args: subprocess.run(['git', '-C', directory, *args], check=True,
+                                           capture_output=True, timeout=300).stdout
+        run('init', '-q')
+        run('remote', 'add', 'origin', CATALLAX_FETCH)
+        run('fetch', '-q', '--filter=blob:none', '--depth=1', 'origin', old, new)
+        paths = [p for p in run('diff', '--no-renames', '--name-only', '-z', old, new).decode().split('\0') if p]
+        changed = []
+        for path in paths:
+            if CATALLAX_MANIFEST.fullmatch(path):
+                try:
+                    texts = [run('show', f'{revision}:{path}').decode() for revision in (old, new)]
+                    if without_versions(path, texts[0]) == without_versions(path, texts[1]):
+                        continue
+                except (subprocess.CalledProcessError, ValueError):
+                    pass
+            changed.append(path)
+        return changed
+
+
+def scenario_parts(text):
+    """Scenario file -> listed kernel parts, or None for a scenario with no list."""
+    return {entry['file']: set(entry['kernel_parts']) if 'kernel_parts' in entry else None
+            for entry in json.loads(text)['scenarios']}
+
+
+def pin_move_scenarios(root, base, head):
+    """Scenarios a Catallax pin move needs: those using a changed part, plus the smoke test.
+
+    None means every scenario: shared core changed, a scenario has no list, or the kernel
+    diff could not be read. Both trees' part maps and lists apply, so neither can narrow alone.
+    """
+    old = new = None
+    try:
+        old, new = (catallax_pin(content(root, 'Cargo.lock', revision)) for revision in (base, head))
+        if not old or not new or old == new:
+            return None
+        maps = [parse_kernel_parts(content(root, KERNEL_PARTS, revision)) for revision in (base, head)]
+        listed = [scenario_parts(content(root, INVENTORY, revision)) for revision in (base, head)]
+        changed_paths = catallax_changes(old, new)
+    except (ValueError, KeyError, TypeError, AttributeError, re.error, OSError,
+            subprocess.SubprocessError) as error:
+        print(f'kernel parts: reading Catallax {old}..{new} failed, all scenarios run: {error}', file=sys.stderr)
+        return None
+    changed = set()
+    for path in changed_paths:
+        for kernel_map in maps:
+            parts = kernel_part_of(path, kernel_map)
+            if parts is None:
+                print(f'kernel parts: shared core changed ({path}), all scenarios run', file=sys.stderr)
+                return None
+            changed |= parts
+    files = sorted(p for p in git(root, 'ls-tree', '-r', '--name-only', head, '--', 'ci/scenarios/').decode().splitlines()
+                   if re.fullmatch(r'ci/scenarios/[^/]+\.json', p))
+    selected = {SMOKE_SCENARIO}
+    for path in files:
+        lists = [side.get(path) for side in listed]
+        if any(parts is None for parts in lists):
+            print(f'kernel parts: {path} lists no kernel parts, all scenarios run', file=sys.stderr)
+            return None
+        if changed & set().union(*lists):
+            selected.add(path)
+    print(f'kernel parts changed by Catallax {old[:12]}..{new[:12]}: {", ".join(sorted(changed)) or "none"}; '
+          f'{len(selected)} of {len(files)} scenarios run', file=sys.stderr)
+    return sorted(selected)
 
 
 def work_plan(root, base, head, changes, event, packages):
@@ -469,10 +588,23 @@ def work_plan(root, base, head, changes, event, packages):
     paths = {path for change in changes for path in change[1:]}
     rust = {}
     scenarios = set()
+    pin = set()
     for path in paths:
         if ((path.startswith('docs/') and path.endswith('.md') and path != 'docs/RELEASING.md')
                 or path in {'README.md', 'LICENSE', 'NOTICE'}):
             continue
+        status = next(change[0] for change in changes if path in change[1:])
+        name = pathlib.PurePosixPath(path).name
+        if status == 'M' and name in {'Cargo.lock', 'Cargo.toml'}:
+            sources = [content(root, path, base), content(root, path, head)]
+            try:
+                moved = catallax_lock_move(sources) if name == 'Cargo.lock' else catallax_manifest_move(sources)
+            except (ValueError, KeyError, TypeError, AttributeError):
+                moved = False
+            if moved:
+                pin.add(path)
+                continue
+            return full
         match = re.fullmatch(r'crates/(soliddraft-[a-z0-9-]+)/(src|tests)/(.+\.rs)', path)
         if match and match[1] in packages:
             rust[path] = match
@@ -481,6 +613,12 @@ def work_plan(root, base, head, changes, event, packages):
         else:
             # Policy, manifests, dependencies, helpers, fixtures, removed scenarios and unknown data.
             return full
+    if pin:
+        # A revision-only Catallax move narrows scenarios alone; anything else beside it keeps full work.
+        if rust or scenarios or 'Cargo.lock' not in pin:
+            return full
+        full['scenarios'] = pin_move_scenarios(root, base, head)
+        return full
     if scenarios:
         if rust:
             # Scenario fixtures also feed Rust regressions outside the changed crate's consumers.

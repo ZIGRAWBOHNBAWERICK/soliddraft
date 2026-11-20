@@ -66,6 +66,63 @@ def jobs(text):
             for i, m in enumerate(starts)}
 
 
+# Kernel parts a scenario's own steps show it uses. A scenario's list must name at least these,
+# so a step added later with a new kind of feature cannot leave its part off the list.
+TOOL_PARTS = {
+    **dict.fromkeys(('extrude', 'edit_extrude', 'cut', 'edit_cut'), {'extrude', 'boolean'}),
+    **dict.fromkeys(('revolve', 'edit_revolve'), {'revolve', 'boolean'}),
+    **dict.fromkeys(('sweep', 'edit_sweep'), {'sweep', 'boolean'}),
+    **dict.fromkeys(('loft', 'edit_loft'), {'loft', 'boolean'}),
+    **dict.fromkeys(('fillet', 'edit_fillet'), {'fillet'}),
+    **dict.fromkeys(('chamfer', 'edit_chamfer'), {'chamfer'}),
+    **dict.fromkeys(('shell', 'edit_shell', 'thicken', 'edit_thicken', 'offset', 'edit_offset'), {'shell'}),
+    **dict.fromkeys(('draft', 'edit_draft'), {'draft'}),
+    **dict.fromkeys(('hole', 'edit_hole'), {'hole', 'boolean'}),
+    **dict.fromkeys(('mirror', 'edit_mirror', 'linear_pattern', 'circular_pattern', 'edit_pattern'),
+                    {'pattern', 'boolean'}),
+    **dict.fromkeys(('lattice', 'edit_lattice', 'gyroid', 'edit_gyroid', 'grade_field', 'field_mass'), {'field'}),
+    # Catallax reads STEP and IGES files with its export crates' entity code.
+    **dict.fromkeys(('import_step', 'import_iges', 'import_scene', 'preview_import', 'replace_import'),
+                    {'import', 'step', 'iges'}),
+    'import_mesh': {'import'},
+    'export_step': {'step'},
+    'export_iges': {'iges'},
+    **dict.fromkeys(('measure', 'measure_entity', 'track'), {'measure'}),
+    **dict.fromkeys(('assembly_check_interference', 'assembly_check_clearance', 'assembly_check_hole_alignment'),
+                    {'assembly'}),
+}
+EXPORT_PARTS = {'step': {'step'}, 'iges': {'iges'}, 'stl': {'mesh'}, '3mf': {'mesh'}, 'obj': {'mesh'}}
+
+
+def step_parts(step):
+    tool = step['tool']
+    parts = set(TOOL_PARTS.get(tool, ()))
+    if tool.startswith('drawing_') or tool in {'make_drawing', 'show_drawing'}:
+        parts.add('mesh')
+    if any(key in step for key in ('checked_step_export', 'step_oracle', 'checked_step_faces')):
+        parts.add('step')
+    if 'checked_iges_export' in step:
+        parts.add('iges')
+    if step.get('refusal'):
+        # The exported kernel question is replayed by the pinned catallax-verify.
+        parts.add('verify')
+    for item in step.get('exports', []):
+        parts |= EXPORT_PARTS.get(item.get('format'), set())
+        if item.get('stand_in') or 'replay' in item:
+            parts |= {'field', 'verify'}
+    for kind in step.get('export', []):
+        parts |= EXPORT_PARTS.get(kind, set())
+    return parts
+
+
+def floor_parts(scenario):
+    parts = set().union(*(step_parts(step) for step in scenario['steps']))
+    if parts:
+        # Every solid is drawn live and measured after each step.
+        parts |= {'mesh', 'measure'}
+    return parts
+
+
 class Inventory(unittest.TestCase):
     def test_known_gaps_render_release_notes(self):
         spec = importlib.util.spec_from_file_location('release', ROOT / 'packaging/release.py')
@@ -85,6 +142,47 @@ class Inventory(unittest.TestCase):
         self.assertEqual({e['file'] for e in entries},
                          {str(p.relative_to(ROOT)) for p in (ROOT / 'ci/scenarios').glob('*.json')})
         self.assertTrue(all(e['owners'] for e in entries))
+
+    def test_every_scenario_lists_known_kernel_parts_covering_its_steps(self):
+        known = set(read('kernel-parts.json')['parts'])
+        for entry in read('scenario-inventory.json')['scenarios']:
+            with self.subTest(scenario=entry['id']):
+                parts = entry['kernel_parts']
+                self.assertEqual(parts, sorted(set(parts)))
+                self.assertTrue(parts)
+                self.assertLessEqual(set(parts), known)
+                scenario = json.loads((ROOT / entry['file']).read_text())
+                self.assertLessEqual(floor_parts(scenario), set(parts))
+
+    def test_kernel_part_map_sorts_catallax_paths(self):
+        kernel_map = selector.parse_kernel_parts((ROOT / 'ci/kernel-parts.json').read_text())
+        expected = {
+            'docs/milestones/M4.md': set(),
+            'crates/catallax-features/tests/radius_limits.rs': set(),
+            'tools/release/replay-upgrades.json': set(),
+            'tools/checks/raw_step.py': {'step'},
+            'crates/catallax-features/src/fillet_build.rs': {'fillet'},
+            'crates/catallax-shapes/src/spline_fillet/numerical_walk.rs': {'fillet'},
+            'crates/catallax-mesh/src/preview/imported.rs': {'import'},
+            'crates/catallax-mesh/src/triangulate.rs': {'mesh'},
+            'crates/catallax-measure/src/linear_fillet.rs': {'fillet'},
+            'crates/catallax-measure/src/engine.rs': {'measure'},
+            'crates/catallax-boolean/src/spline_fillet.rs': {'fillet'},
+            'crates/catallax-step/src/oblique_draft.rs': {'draft'},
+            'crates/catallax-field/src/fillet_network.rs': {'field', 'fillet'},
+            'crates/catallax-app/src/pattern.rs': {'pattern'},
+            'crates/catallax-numbers/src/operation.rs': None,
+            'crates/catallax-shapes/src/bspline/curve.rs': None,
+            'crates/catallax-app/src/lib.rs': None,
+            'crates/catallax-features/src/evaluate.rs': None,
+            'crates/catallax-import/Cargo.toml': None,
+            'Cargo.lock': None,
+            'crates/catallax-new/src/lib.rs': None,
+            'unknown.txt': None,
+        }
+        for path, parts in expected.items():
+            with self.subTest(path=path):
+                self.assertEqual(selector.kernel_part_of(path, kernel_map), parts)
 
     def test_acceptance_has_numeric_output_and_error_path(self):
         entries = read('scenario-inventory.json')['scenarios']

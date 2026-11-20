@@ -232,6 +232,136 @@ class WorkPlan(unittest.TestCase):
         self.assertIsNone(selector.union_work(candidate, accepted)['test_targets'])
 
 
+class PinMove(unittest.TestCase):
+    """A revision-only Catallax move runs the scenarios whose kernel parts changed, plus the bracket."""
+
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root = pathlib.Path(temporary.name) / 'soliddraft'
+        self.kernel = pathlib.Path(temporary.name) / 'catallax'
+        self.packages = {'soliddraft-app': set()}
+        for repository in (self.root, self.kernel):
+            repository.mkdir()
+            git(repository, 'init', '-q')
+        git(self.kernel, 'config', 'uploadpack.allowAnySHA1InWant', 'true')
+        self.kernel_files = {
+            'Cargo.toml': '[workspace.package]\nversion = "0.4.0"\n',
+            'Cargo.lock': 'version = 4\n\n[[package]]\nname = "catallax-app"\nversion = "0.4.0"\n',
+            'crates/catallax-features/src/fillet_build.rs': '// fillet\n',
+            'crates/catallax-features/src/draft.rs': '// draft\n',
+            'crates/catallax-numbers/src/lib.rs': '// core\n',
+            'docs/notes.md': 'notes\n',
+        }
+        self.old = self.kernel_commit({})
+        self.scenarios = {'bracket': ['boolean', 'extrude', 'step'], 'fillet': ['extrude', 'fillet'],
+                          'draft': ['draft', 'extrude'], 'sketch': ['extrude']}
+        self.write_app(self.old, self.scenarios)
+        self.base = commit(self.root)
+        patcher = mock.patch.object(selector, 'CATALLAX_FETCH', self.kernel.as_uri())
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def kernel_commit(self, edits):
+        self.kernel_files.update(edits)
+        for path, text in self.kernel_files.items():
+            write(self.kernel, path, text)
+        return commit(self.kernel)
+
+    def write_app(self, pin, scenarios):
+        source = f'git+https://github.com/BohnBawerick/catallax?rev={pin}#{pin}'
+        write(self.root, 'Cargo.lock', f'version = 4\n\n[[package]]\nname = "catallax-app"\nversion = "0.4.0"\n'
+                                       f'source = "{source}"\n')
+        write(self.root, 'ci/kernel-parts.json', (ROOT / 'ci/kernel-parts.json').read_text())
+        entries = []
+        for name, parts in scenarios.items():
+            write(self.root, f'ci/scenarios/{name}.json', '{}')
+            entry = {'id': name, 'file': f'ci/scenarios/{name}.json'}
+            if parts is not None:
+                entry['kernel_parts'] = parts
+            entries.append(entry)
+        write(self.root, 'ci/scenario-inventory.json', json.dumps({'scenarios': entries}))
+
+    def bump(self, edits, scenarios=None):
+        new = self.kernel_commit(edits)
+        self.write_app(new, scenarios or self.scenarios)
+        commit(self.root)
+        self.log = io.StringIO()
+        with contextlib.redirect_stderr(self.log):
+            return selector.work_plan(self.root, self.base, 'HEAD', [['M', 'Cargo.lock']], 'pull_request',
+                                      self.packages)
+
+    def scenarios_run(self, plan):
+        self.assertIsNone(plan['packages'])
+        self.assertIsNone(plan['test_targets'])
+        return plan['scenarios'] and [pathlib.PurePosixPath(p).stem for p in plan['scenarios']]
+
+    def test_a_feature_change_runs_its_scenarios_and_the_bracket(self):
+        plan = self.bump({'crates/catallax-features/src/fillet_build.rs': '// fillet edit\n'})
+        self.assertEqual(self.scenarios_run(plan), ['bracket', 'fillet'])
+
+    def test_documentation_and_release_numbers_run_only_the_bracket(self):
+        plan = self.bump({'docs/notes.md': 'edited\n', 'Cargo.toml': '[workspace.package]\nversion = "0.5.0"\n',
+                          'Cargo.lock': self.kernel_files['Cargo.lock'].replace('0.4.0', '0.5.0')})
+        self.assertEqual(self.scenarios_run(plan), ['bracket'])
+
+    def test_shared_core_dependencies_and_unknown_paths_run_everything(self):
+        for edits in ({'crates/catallax-numbers/src/lib.rs': '// core edit\n'},
+                      {'crates/catallax-new/src/lib.rs': '// new crate\n'},
+                      {'Cargo.toml': self.kernel_files['Cargo.toml'] + '[workspace.dependencies]\nx = "1"\n'}):
+            with self.subTest(edits=list(edits)):
+                self.base = git(self.root, 'rev-parse', 'HEAD')
+                self.assertIsNone(self.bump(edits)['scenarios'], self.log.getvalue())
+                self.assertIn(f'shared core changed ({list(edits)[-1]})', self.log.getvalue())
+
+    def test_a_scenario_with_no_list_on_either_side_runs_everything(self):
+        scenarios = dict(self.scenarios, sketch=None)
+        self.assertIsNone(self.bump({'crates/catallax-features/src/draft.rs': '// edit\n'}, scenarios)['scenarios'])
+
+    def test_a_list_shortened_beside_the_bump_cannot_skip_its_scenario(self):
+        scenarios = dict(self.scenarios, draft=['extrude'])
+        plan = self.bump({'crates/catallax-features/src/draft.rs': '// edit\n'}, scenarios)
+        self.assertEqual(self.scenarios_run(plan), ['bracket', 'draft'])
+
+    def test_an_unreadable_kernel_history_runs_everything(self):
+        with mock.patch.object(selector, 'CATALLAX_FETCH', (self.root / 'missing').as_uri()):
+            plan = self.bump({'crates/catallax-features/src/fillet_build.rs': '// fillet edit\n'})
+        self.assertIsNone(plan['scenarios'])
+
+    def test_other_edits_beside_the_bump_keep_full_work(self):
+        new = self.kernel_commit({'crates/catallax-features/src/fillet_build.rs': '// fillet edit\n'})
+        self.write_app(new, self.scenarios)
+        write(self.root, 'crates/soliddraft-app/src/lib.rs', '// edit\n')
+        write(self.root, 'ci/scenarios/fillet.json', '{"edited": true}')
+        commit(self.root)
+        for extra in (['M', 'crates/soliddraft-app/src/lib.rs'], ['M', 'ci/scenarios/fillet.json'],
+                      ['M', 'ci/run-scenarios.py']):
+            with self.subTest(extra=extra):
+                plan = selector.work_plan(self.root, self.base, 'HEAD', [['M', 'Cargo.lock'], extra],
+                                          'pull_request', self.packages)
+                self.assertIsNone(plan['scenarios'])
+        # Main pushes, nightly runs and release qualification keep every scenario.
+        for event in ('push', 'schedule', 'workflow_dispatch'):
+            self.assertEqual(selector.work_plan(self.root, self.base, 'HEAD', [['M', 'Cargo.lock']], event,
+                                                self.packages), selector.FULL_WORK)
+
+
+def git(repository, *args):
+    return subprocess.check_output(['git', '-C', str(repository), *args], stderr=subprocess.DEVNULL).decode().strip()
+
+
+def write(repository, path, text):
+    destination = repository / path
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text(text)
+
+
+def commit(repository):
+    git(repository, 'add', '.')
+    git(repository, '-c', 'user.name=CI Test', '-c', 'user.email=ci@example.invalid', 'commit', '-qm', 'fixture')
+    return git(repository, 'rev-parse', 'HEAD')
+
+
 class Runner(unittest.TestCase):
     def test_archive_and_doctest_arguments_preserve_full_features_and_lock(self):
         plan = {'packages': ['soliddraft-app'], 'test_targets': ['isolated'], 'scenarios': None}

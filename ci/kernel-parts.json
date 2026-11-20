@@ -1,0 +1,167 @@
+{
+  "format": "soliddraft-kernel-parts/1",
+  "notes": [
+    "Each pattern fully matches a path in the Catallax repository. A changed path in 'ignored' changes no part.",
+    "A changed path in 'core', or one that matches no entry, is shared core: every scenario runs.",
+    "A path may match several parts; it changes each of them. Crate-wide parts skip the files a feature part owns.",
+    "The selector judges a pin move with this map from both the base and the candidate tree and unites the answers."
+  ],
+  "ignored": [
+    "(?:docs|evidence|site|data|parts|licenses|ci|\\.github|\\.claude|\\.agents|\\.config)/.*",
+    "tools/(?!checks/).*",
+    "(?:README|ROADMAP|VISION|AGENTS|CLAUDE|CHANGELOG|CONTRIBUTING|RECIPE)\\.md",
+    "LICENSE|NOTICE|\\.gitignore|dist-workspace\\.toml",
+    "crates/[^/]+/(?:tests|benches|examples)/.*",
+    "crates/[^/]+/(?:README\\.md|CHANGELOG\\.md)",
+    "crates/catallax-preview/.*"
+  ],
+  "core": [
+    "Cargo\\.toml|Cargo\\.lock|rust-toolchain(?:\\.toml)?|crates/[^/]+/Cargo\\.toml|crates/[^/]+/build\\.rs",
+    "crates/catallax-(?:numbers|topology|recipe|trace|intersect|transfer-derive)/.*",
+    "crates/catallax-shapes/(?!src/(?:rolling_[a-z_]+|spline_fillet|linear_fillet|offset|offset_chart|offset_sweep|oblique_draft|bezier_extrusion)(?:\\.rs|/)).*",
+    "crates/catallax-app/(?!src/(?:assembly|pattern|numerical_sweeps)\\.rs$).*",
+    "crates/catallax-features/src/(?:lib|evaluate|certified|numerical|numerical_embedding|placement|profile|stock|polyhedron|planar_face|refusal_limit|end_condition)(?:\\.rs|/.*)"
+  ],
+  "parts": {
+    "boolean": {
+      "description": "Unions, cuts, imprinting and sewing of solids.",
+      "paths": [
+        "crates/catallax-boolean/(?!src/spline_fillet\\.rs$).*"
+      ]
+    },
+    "extrude": {
+      "description": "Extruded bosses and cuts, end conditions and tapered extrusions.",
+      "paths": [
+        "crates/catallax-features/src/(?:extrude|extrude_algebraic|tapered_extrude)\\.rs",
+        "crates/catallax-shapes/src/bezier_extrusion(?:\\.rs|/.*)",
+        "crates/catallax-measure/src/bezier_extrusion\\.rs"
+      ]
+    },
+    "revolve": {
+      "description": "Revolved solids and their circular, conical and cylindrical skins.",
+      "paths": [
+        "crates/catallax-features/src/(?:revolve|circular_build|circular_skin|cone_build|cone_skin|cylinder_skin)(?:\\.rs|/.*)"
+      ]
+    },
+    "sweep": {
+      "description": "Sweeps along straight, arc and spline paths.",
+      "paths": [
+        "crates/catallax-features/src/(?:sweep|general_sweep|cone_sweep)(?:\\.rs|/.*)",
+        "crates/catallax-shapes/src/offset_sweep\\.rs",
+        "crates/catallax-measure/src/pipe\\.rs",
+        "crates/catallax-app/src/numerical_sweeps\\.rs"
+      ]
+    },
+    "loft": {
+      "description": "Lofts between profiles.",
+      "paths": [
+        "crates/catallax-features/src/loft(?:\\.rs|/.*)",
+        "crates/catallax-cli/src/numerical_loft_step\\.rs"
+      ]
+    },
+    "fillet": {
+      "description": "Edge fillets: exact, rolling-ball, spline and numerical.",
+      "paths": [
+        "crates/catallax-features/src/(?:fillet[a-z_]*|edge_blend|evaluate_numerical_fillet|cone_rounded|rounded_polyhedron)\\.rs",
+        "crates/catallax-shapes/src/(?:rolling_[a-z_]+|spline_fillet|linear_fillet)(?:\\.rs|/.*)",
+        "crates/catallax-boolean/src/spline_fillet\\.rs",
+        "crates/catallax-measure/src/(?:linear_fillet|saddle|mitre|torus|ring|junction)(?:\\.rs|/.*)",
+        "crates/catallax-field/src/(?:fillet[a-z_]*|rolling_region)(?:\\.rs|/.*)"
+      ]
+    },
+    "chamfer": {
+      "description": "Edge chamfers.",
+      "paths": [
+        "crates/catallax-features/src/chamfer[a-z_]*\\.rs",
+        "crates/catallax-field/src/chamfer\\.rs"
+      ]
+    },
+    "shell": {
+      "description": "Shells, thickened faces and offset bodies.",
+      "paths": [
+        "crates/catallax-features/src/(?:analytic_shell|bored_shell|planar_shell|spline_cap_shell|offset_fit|polyhedral_offset|sharp_thicken|sharp_planar|distance_build|planar_distance|radial)(?:\\.rs|/.*)",
+        "crates/catallax-shapes/src/(?:offset|offset_chart)\\.rs",
+        "crates/catallax-measure/src/offset_prism\\.rs",
+        "crates/catallax-field/src/(?:planar_shell|offset_spline|sheet)\\.rs"
+      ]
+    },
+    "draft": {
+      "description": "Drafted faces.",
+      "paths": [
+        "crates/catallax-features/src/draft[a-z_]*\\.rs",
+        "crates/catallax-shapes/src/oblique_draft\\.rs",
+        "crates/catallax-(?:mesh|step)/src/oblique_[a-z_]+\\.rs",
+        "crates/catallax-field/src/draft[a-z_]*\\.rs"
+      ]
+    },
+    "hole": {
+      "description": "Hole wizard holes: counterbores, countersinks and drill points.",
+      "paths": [
+        "crates/catallax-features/src/hole(?:\\.rs|/.*)"
+      ]
+    },
+    "pattern": {
+      "description": "Feature patterns and mirrors.",
+      "paths": [
+        "crates/catallax-app/src/pattern\\.rs"
+      ]
+    },
+    "field": {
+      "description": "The signed distance field: lattices, gyroids, graded fields, stand-ins and field mass.",
+      "paths": [
+        "crates/catallax-field/.*",
+        "crates/catallax-features/src/(?:lattice|stand_in)\\.rs",
+        "crates/catallax-cli/src/(?:stand_in|printing)(?:\\.rs|/.*)"
+      ]
+    },
+    "import": {
+      "description": "STEP, IGES and mesh import, repair and edits of imported bodies.",
+      "paths": [
+        "crates/catallax-import/.*",
+        "crates/catallax-features/src/(?:import_edit|import_replace|mesh_import)\\.rs",
+        "crates/catallax-mesh/src/preview/(?:imported|tolerant)\\.rs",
+        "crates/catallax-cli/src/import_recipe\\.rs",
+        "crates/catallax-field/src/import_[a-z_]+\\.rs"
+      ]
+    },
+    "step": {
+      "description": "STEP export and the raw STEP checks SolidDraft CI runs from the pinned checkout.",
+      "paths": [
+        "crates/catallax-step/(?!src/oblique_[a-z_]+\\.rs$).*",
+        "crates/catallax-cli/src/numerical_step\\.rs",
+        "tools/checks/.*"
+      ]
+    },
+    "iges": {
+      "description": "IGES export.",
+      "paths": [
+        "crates/catallax-iges/.*",
+        "crates/catallax-cli/src/iges\\.rs"
+      ]
+    },
+    "mesh": {
+      "description": "Display meshes, drawing views and STL, 3MF and OBJ tessellation.",
+      "paths": [
+        "crates/catallax-mesh/(?!src/preview/(?:imported|tolerant)\\.rs$|src/oblique_[a-z_]+\\.rs$).*"
+      ]
+    },
+    "measure": {
+      "description": "Mass properties, bounds and entity measurement.",
+      "paths": [
+        "crates/catallax-measure/(?!src/(?:bezier_extrusion|pipe|linear_fillet|saddle|mitre|torus|ring|junction|offset_prism)(?:\\.rs$|/)).*"
+      ]
+    },
+    "assembly": {
+      "description": "Answers on placed parts: interference and clearance.",
+      "paths": [
+        "crates/catallax-app/src/assembly\\.rs"
+      ]
+    },
+    "verify": {
+      "description": "catallax-verify, which replays exported kernel questions and stand-ins.",
+      "paths": [
+        "crates/catallax-(?:cli|compare)/.*"
+      ]
+    }
+  }
+}

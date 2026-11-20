@@ -25,8 +25,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const [chrome, url, out, step] = process.argv.slice(2);
-if (!chrome || !url || !out || !step) {
+const [chrome, url, out, file] = process.argv.slice(2);
+if (!chrome || !url || !out || !file) {
   throw new Error('usage: browser-manufacturing-information.mjs CHROME URL OUTDIR STEP');
 }
 fs.mkdirSync(out, { recursive: true });
@@ -40,6 +40,9 @@ const ACCEPT_IMPORT = [56, 147];
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 function check(value, message) { if (!value) throw new Error(message); }
+// What the visitor is doing, on stderr, so a run that stops says where.
+const started = Date.now();
+function step(what) { console.error(`[${((Date.now() - started) / 1000).toFixed(1)} s] ${what}`); }
 const extra = (process.env.CHROME_ARGS || '').split(/\s+/).filter(Boolean);
 
 // The bracket's items in the part's order, each with its callout and where its faces
@@ -284,27 +287,35 @@ let browser;
 async function main() {
   browser = await new Browser(profile).connect();
   const v = await browser.visitor();
+  step('load the site');
   await v.load();
   check(await v.eval(`typeof window.wasmBindings.shown_manufacturing_information === 'function'`), 'the build has no panel export');
 
   // A new part, then Import STEP with the bracket's file as the upload.
+  step('new part, Import STEP, upload');
   await v.click(NEW_PART);
   await v.settle(1500);
-  await v.choose(step, () => v.command('Import STEP'));
+  await v.choose(file, () => v.command('Import STEP'));
   await v.shot('1-import-review');
+  step('accept the import');
   await v.click(ACCEPT_IMPORT);
 
   // The panel lists what the file states, on the faces the file names.
+  step('open the panel and read its items');
   await v.command('Manufacturing information');
   const imported = await v.panel('after the import', EXPECTED.length);
   checkItems(imported, 'after the import');
   await v.shot('2-imported-with-its-items');
 
   // Save (a download), load the site afresh, open the saved file.
+  step('save');
   const saved = await v.download('save', () => v.key('s', 'KeyS', 83, 2, 's'));
   check(saved.endsWith('.dwprt'), `the part saves as a .dwprt file, not ${saved}`);
+  step('load the site again');
   await v.load();
+  step('open the saved part');
   await v.choose(saved, () => v.click(OPEN));
+  step('open the panel and read its items');
   await v.command('Manufacturing information');
   const reopened = await v.panel('after the reopen', EXPECTED.length);
   checkItems(reopened, 'after the reopen');
@@ -313,6 +324,7 @@ async function main() {
   await v.shot('3-reopened-with-its-items');
 
   // One action: the STEP file and a drawing of it as PDF and DXF, in one download.
+  step('Drawing and files');
   const pack = await v.download('drawing and files', () => v.command('Drawing and files'));
   check(pack.endsWith('.zip'), `the files arrive as one .zip, not ${pack}`);
   const bytes = fs.readFileSync(pack);

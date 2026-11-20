@@ -254,6 +254,22 @@ class Browser {
         const status = await v.eval(`(() => { const s = document.getElementById('status'); return s.classList.contains('hidden') ? null : s.textContent; })()`);
         check(status === null, `${label}: the page stopped: ${status}`);
       },
+      // Waits until a part is open and nothing is being built or read: the options bar
+      // is drawn, and three looks in a row find no build owed. A command sent while a
+      // part is still opening would be lost.
+      async ready(label) {
+        let quiet = 0;
+        for (let t = 0; t < 1500; t++) {
+          await v.stopped(label);
+          const [options, build] = await v.eval(`[window.wasmBindings.shown_options(), window.wasmBindings.shown_build()]`);
+          const state = build ? JSON.parse(build) : null;
+          quiet = options && state && !state.pending && !state.reading ? quiet + 1 : 0;
+          if (quiet === 3) return;
+          await sleep(200);
+        }
+        await v.shot(`not-ready-${label}`);
+        throw new Error(`${label}: the part did not finish opening`);
+      },
       // The panel's rows once it lists `count` items, as the export gives them.
       async panel(label, count) {
         let shown = null;
@@ -301,6 +317,7 @@ async function main() {
   await v.click(ACCEPT_IMPORT);
 
   // The panel lists what the file states, on the faces the file names.
+  await v.ready('after the import');
   step('open the panel and read its items');
   await v.command('Manufacturing information');
   const imported = await v.panel('after the import', EXPECTED.length);
@@ -315,6 +332,7 @@ async function main() {
   await v.load();
   step('open the saved part');
   await v.choose(saved, () => v.click(OPEN));
+  await v.ready('after the reopen');
   step('open the panel and read its items');
   await v.command('Manufacturing information');
   const reopened = await v.panel('after the reopen', EXPECTED.length);

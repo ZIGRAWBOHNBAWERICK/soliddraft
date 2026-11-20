@@ -283,14 +283,37 @@ fn mechanical<N: Number>(reads: &[Read], rule: &Rule, poses: &BTreeMap<Body, Pla
 /// the input arm's projection on the output's plane of turn. The output arm sits a fixed
 /// quarter turn from that projection, so holding this angle at its value when the mate was
 /// made holds the arms at right angles. It is unwrapped about `center` for continuous turns.
-/// The projection vanishes only when the input arm lies along the output axis, which a
-/// real joint reaches only with the shafts at right angles; the bounded solve then cannot
-/// enclose the angle and refuses by name.
+///
+/// With the shafts at right angles, cos(shaft angle) is zero and the relation asks
+/// tan(input turn) to be zero: a real joint locks. The measured angle misses this. It still
+/// reads a value whenever the input arm stays off the output axis, and the input would turn
+/// freely while the output stood still. So the value is NaN unless the shafts
+/// are proved off a right angle (the cosine's enclosure excludes zero), and
+/// [`square_shafts`] names the refusal.
 fn universal_joint<N: Number>(reads: &[Read], poses: &BTreeMap<Body, Placement>, center: f64) -> (N, [N; 2]) {
+    let (input, output) = (world::<N>(&reads[0], poses).direction(), world::<N>(&reads[1], poses).direction());
+    if !dot(input, output).nonzero() {
+        return (N::f(f64::NAN), [N::f(f64::NAN); 2]);
+    }
     let arm = clock(&reads[0], poses);
-    let (axis, zero) = (world::<N>(&reads[1], poses).direction(), clock(&reads[1], poses));
+    let (axis, zero) = (output, clock(&reads[1], poses));
     let turn = dot(axis, cross(zero, arm)).atan2(dot(zero, arm), center);
     (turn, [turn, N::f(0.0)])
+}
+/// Why a Universal Joint cannot hold at these poses: its shafts are not proved off a right
+/// angle (see [`universal_joint`]). `None` for every other relation.
+pub(in crate::mates) fn square_shafts(
+    reads: &[Read],
+    rule: &Rule,
+    poses: &BTreeMap<Body, Placement>,
+) -> Option<&'static str> {
+    let Rule::Mechanical { mechanism: super::super::Mechanism::UniversalJoint, .. } = rule else {
+        return None;
+    };
+    let (input, output) =
+        (world::<Interval>(&reads[0], poses).direction(), world::<Interval>(&reads[1], poses).direction());
+    (!dot(input, output).nonzero())
+        .then_some("a universal joint locks with its shafts at right angles; set the shafts at another angle")
 }
 pub(in crate::mates) fn mechanical_value(
     reads: &[Read],

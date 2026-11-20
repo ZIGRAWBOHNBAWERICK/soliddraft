@@ -4,7 +4,7 @@ use crate::commands::{Agents, CommandSpec, Size, Undo};
 use crate::icons::Icon;
 use crate::state::{AppAction, RibbonTab};
 use serde_json::Value;
-use soliddraft_assistant::tools::schema::{array, boolean, optional, string};
+use soliddraft_assistant::tools::schema::{any_of, array, boolean, optional, string};
 
 fn add_params() -> Vec<(&'static str, Value)> {
     let faces = || array(string("A face name, such as Boss-Extrude1 · End cap"), "The faces of one feature");
@@ -52,7 +52,13 @@ fn notes_params() -> Vec<(&'static str, Value)> {
 
 fn answer_params() -> Vec<(&'static str, Value)> {
     vec![
-        ("accept", optional(string("\"all\", or a list of question ids from pmi_interview"))),
+        (
+            "accept",
+            optional(any_of(vec![
+                string("\"all\" takes every proposal"),
+                array(string("A question id from pmi_interview"), "The questions whose proposals to take"),
+            ])),
+        ),
         ("material", optional(string("The part's material, which no rule can propose"))),
     ]
 }

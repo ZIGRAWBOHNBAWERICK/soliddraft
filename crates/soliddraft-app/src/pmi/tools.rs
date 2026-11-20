@@ -334,7 +334,7 @@ pub(crate) fn run(state: &mut AppState, name: &str, input: &Value) -> Option<Res
 /// Takes the interview's proposals for the questions named in `accept` (or all of them),
 /// and the material when it is given, as one undo entry. Answers what was added and
 /// the questions still open.
-fn answer(doc: &mut Document, input: &Value) -> Result<Value, String> {
+pub(super) fn answer(doc: &mut Document, input: &Value) -> Result<Value, String> {
     use soliddraft_model::interview::Proposal;
     let questions = doc.model().interview()?;
     let material = text(input, "material").map(str::trim).filter(|text| !text.is_empty());

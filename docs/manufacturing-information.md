@@ -41,6 +41,27 @@ Importing a STEP file reads its manufacturing information onto the imported face
 
 Replacing an imported file keeps the part's own items: they follow the faces the replacement matched.
 
+## An imported part: recognition and the interview
+
+A STEP file from elsewhere often has geometry and no requirements. Two things help.
+
+**Recognition** reads the part's features off its faces: round holes, groups of equal holes, round bosses and round-ended slots. For each it gives the faces that are the feature, whether a hole or a slot goes through, the faces a hole opens onto and the ones that close it, and its sizes. It is geometry and nothing else: the same on a modelled part and on an imported one, whatever the part states. Not read yet: countersinks and counterbores as one feature, pockets, steps, fillets and chamfers.
+
+**The interview** lists the decisions the part has not taken, one at a time, each with a proposal and the reason for it. Tick Interview in the panel. Accept takes a proposal as it stands; to answer another way, add the item with the form, and the question goes away. A decision the part has already taken is not asked.
+
+| Question | Proposal | Rule |
+|---|---|---|
+| Material | None | No rule can tell a material from a shape |
+| General tolerance | ISO 2768-mK | The medium class for lengths and class K for form |
+| Datums A, B, C | Three flat faces | The largest flat face, the largest square to it, the largest square to both |
+| What a lone hole through a boss is for | H7, and Ra 1.6 | A fitted hole; H7 is the first-choice hole of ISO 286, and reaming leaves about Ra 1.6 |
+| What equal holes in a pattern are for | H13 | Fastener holes; H13 is the clearance class of ISO 273, medium series |
+| How closely a fastener hole is located | Position, the hole less the largest screw it clears | The floating fastener rule, with the screw from the ISO 273 table |
+| How closely a fitted hole is located | Position Ø0.05 | A starting value, to set from what mates with the hole |
+| A boss's size and height, a slot's size and place | The measured values, no tolerance of their own | A drawing needs them; the general tolerance covers them |
+
+The proposals come from these rules and tables only. Nothing is inferred by a language model.
+
 ## On a drawing
 
 A drawing of a part that states manufacturing information shows it. Make drawing brings every item in, once, and places it:
@@ -76,6 +97,9 @@ The action reports what it wrote: how many items are in the file, which are on t
 | `pmi_remove` | Removes the named item |
 | `pmi_notes` | Sets the general tolerance, the material note and the other notes |
 | `pmi_list` | Lists every item with its callout, its faces, its measured values, its locating distances and any problem, and the part's notes |
+| `pmi_recognise` | Lists the features the part's faces show, each with its faces, whether it goes through, what it opens onto and its sizes |
+| `pmi_interview` | Lists the open questions with their proposals and reasons |
+| `pmi_answer` | Takes the proposals named in `accept`, or all of them, and sets the material when given, as one undo step |
 | `manufacturing_package` | Writes `path` (.step) and a drawing of the part's manufacturing information beside it as .pdf and .dxf, and reports what the drawing shows and what it could not |
 
 ```json
@@ -86,4 +110,4 @@ The action reports what it wrote: how many items are in the file, which are on t
 
 ## What is checked
 
-`crates/soliddraft-app/tests/pmi_bracket.rs` builds the P1 bracket, adds its fourteen items, exports it, imports the file into a new part, saves, reopens and exports again, and edits the bore from 8 to 10 mm. `crates/soliddraft-app/tests/ux_pmi_panel.rs` adds the same fourteen items by hand in the app window. `crates/soliddraft-app/tests/pmi_drawing.rs` writes the three files in one action and checks the drawing: four views, every item once, the six basic distances, no overlap, nothing that the file does not state, and the title block. Hosted CI reads the exported files in OpenCASCADE through `ci/check-step-pmi.py`. OpenCASCADE has no reader for the surface texture entity or for an attribute of a feature, so it does not read a finish or the word "through".
+`crates/soliddraft-app/tests/pmi_bracket.rs` builds the P1 bracket, adds its fourteen items, exports it, imports the file into a new part, saves, reopens and exports again, and edits the bore from 8 to 10 mm. `crates/soliddraft-app/tests/ux_pmi_panel.rs` adds the same fourteen items by hand in the app window. `crates/soliddraft-app/tests/pmi_interview.rs` imports the bracket's bare STEP file, compares what recognition finds face by face with the bracket as built, runs the interview and draws the answered part. `crates/soliddraft-app/tests/pmi_drawing.rs` writes the three files in one action and checks the drawing: four views, every item once, the six basic distances, no overlap, nothing that the file does not state, and the title block. Hosted CI reads the exported files in OpenCASCADE through `ci/check-step-pmi.py`. OpenCASCADE has no reader for the surface texture entity or for an attribute of a feature, so it does not read a finish or the word "through".

@@ -67,6 +67,8 @@ struct Listed {
     /// `web::shown_manufacturing_information`. Empty on the desktop.
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
     shown: String,
+    /// The interview's open questions, worked out when the interview is first shown.
+    questions: Option<Result<Vec<soliddraft_model::interview::Question>, String>>,
 }
 
 /// The listed rows for a browser check: each item with its callout and its faces, a
@@ -128,6 +130,8 @@ pub struct State {
     error: Option<String>,
     notes: Option<NotesDraft>,
     listed: Option<Listed>,
+    /// The interview is shown above the items.
+    pub interview: bool,
 }
 
 /// The part's notes while they are typed.
@@ -184,6 +188,7 @@ impl Default for State {
             error: None,
             notes: None,
             listed: None,
+            interview: false,
         }
     }
 }
@@ -391,7 +396,7 @@ fn rows(state: &mut AppState) -> Vec<PmiRow> {
     if !current || state.doc.proof_pending() {
         let rows = state.doc.model().pmi_rows();
         let shown = if cfg!(target_arch = "wasm32") { shown(&state.doc, &rows) } else { String::new() };
-        let listed = Listed { geometry, pmi: pmi.clone(), rows, shown };
+        let listed = Listed { geometry, pmi: pmi.clone(), rows, shown, questions: None };
         state.pmi.listed = Some(listed);
     }
     state.pmi.listed.as_ref().map(|listed| listed.rows.clone()).unwrap_or_default()
@@ -588,6 +593,52 @@ fn notes(ui: &mut egui::Ui, state: &mut AppState) {
 }
 
 /// The panel, in the property panel while it is open.
+/// The interview: each decision the part has not taken, with the proposal the rules
+/// make and why, and a button to take it.
+fn interview(ui: &mut egui::Ui, state: &mut AppState) {
+    let questions = match state.pmi.listed.as_mut() {
+        Some(listed) => listed.questions.get_or_insert_with(|| state.doc.model().interview()).clone(),
+        None => return,
+    };
+    let questions = match questions {
+        Ok(questions) => questions,
+        Err(error) => {
+            ui.label(error);
+            return;
+        }
+    };
+    if questions.is_empty() {
+        ui.label(egui::RichText::new("Nothing is missing.").color(theme::muted()));
+        return;
+    }
+    let mut accept: Option<serde_json::Value> = None;
+    if ui.button("Accept every proposal").clicked() {
+        accept = Some(serde_json::json!("all"));
+    }
+    for question in &questions {
+        ui.add_space(4.0);
+        ui.label(egui::RichText::new(&question.asks).family(theme::semibold()).color(theme::ink()));
+        if question.proposes.is_empty() {
+            ui.label("No rule can say. Type it in the notes above.");
+        } else {
+            ui.horizontal(|ui| {
+                ui.label(format!("Proposed: {}", question.proposes));
+                let button = ui.small_button("Accept");
+                button.widget_info(|| {
+                    egui::WidgetInfo::labeled(egui::WidgetType::Button, true, format!("Accept {}", question.id))
+                });
+                if button.clicked() {
+                    accept = Some(serde_json::json!([question.id]));
+                }
+            });
+        }
+        ui.label(egui::RichText::new(&question.reason).color(theme::muted()));
+    }
+    if let Some(accept) = accept {
+        state.pmi.error = super::tools::answer(&mut state.doc, &serde_json::json!({ "accept": accept })).err();
+    }
+}
+
 pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
     if !state.pmi.open {
         return;
@@ -606,8 +657,13 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
     if let Some(listed) = &state.pmi.listed {
         crate::web::show_manufacturing_information(&listed.shown);
     }
+    ui.checkbox(&mut state.pmi.interview, "Interview: ask for what is missing");
     let height = ui.available_height().max(120.0);
     egui::ScrollArea::vertical().id_salt("pmi_items").auto_shrink([false, true]).max_height(height).show(ui, |ui| {
+        if state.pmi.interview {
+            interview(ui, state);
+            ui.separator();
+        }
         list(ui, state, &rows);
         if let Some(report) = &state.doc.pmi_import
             && !report.left_out.is_empty()

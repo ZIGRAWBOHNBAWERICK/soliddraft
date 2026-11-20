@@ -139,6 +139,14 @@ fn every_tool_runs_without_a_window_and_undoes_as_its_row_says() {
     assert_eq!(listed["notes"]["general_tolerance"], "ISO 2768-m", "{listed}");
     s.call("pmi_remove", json!({ "name": "Datum A" }));
     s.call("pmi_notes", json!({ "general_tolerance": "" }));
+    // Recognition and the interview read the part; an answer is one undo step.
+    let recognised = s.call("pmi_recognise", json!({}));
+    assert!(recognised["features"].is_array(), "{recognised}");
+    let asked = s.call("pmi_interview", json!({}));
+    assert!(asked["questions"].as_array().unwrap().iter().any(|q| q["id"] == "general tolerance"), "{asked}");
+    s.call("pmi_answer", json!({ "accept": ["general tolerance"] }));
+    assert_eq!(s.call("pmi_list", json!({}))["notes"]["general_tolerance"], "ISO 2768-mK");
+    s.call("undo", json!({}));
     assert_eq!(s.call("pmi_list", json!({}))["items"], json!([]));
     let mass = s.call("mass_properties", json!({ "name": "Boss-Extrude1" }));
     assert!((mass["volume_mm3"].as_f64().unwrap() - 120.0 * 90.0 * 10.0).abs() < 1.0, "{mass}");

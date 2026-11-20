@@ -781,6 +781,7 @@ fn details(ui: &mut egui::Ui, state: &mut AppState) {
             Some("perpendicular") => format!("{name}: perpendicular"),
             Some("gear") => format!("{name}: gear ratio {} : {}", m["factor"][0], m["factor"][1]),
             Some("rack_and_pinion" | "screw") => format!("{name}: {} mm per turn", m["factor"][0]),
+            Some("universal_joint") => format!("{name}: universal joint"),
             Some("angle") => format!("{name}: {} degrees", m["degrees"]),
             Some("limit_angle") => format!("{name}: {} to {} degrees", m["min_degrees"], m["max_degrees"]),
             Some("width") => {

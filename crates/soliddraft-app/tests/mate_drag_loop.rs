@@ -17,6 +17,7 @@ fn drag_and_hinge_limit_application_loops() {
         include_str!("../../../ci/scenarios/mate-bounded.json"),
         include_str!("../../../ci/scenarios/mate-drag.json"),
         include_str!("../../../ci/scenarios/mate-gear-motion.json"),
+        include_str!("../../../ci/scenarios/mate-universal-joint.json"),
         include_str!("../../../ci/scenarios/mate-rack-motion.json"),
         include_str!("../../../ci/scenarios/mate-screw-motion.json"),
         include_str!("../../../ci/scenarios/mate-linear-motion.json"),

@@ -350,7 +350,7 @@ pub(crate) fn commands() -> Vec<CommandSpec> {
         row("assembly_mate_screw", "Screw mate", "Couple axial travel and rotation of a Concentric joint").agents(Agents::Mcp, "Saves a motion relation with continuous angles and certified residuals; does not model collisions.", screw_params).undo(Undo::Step),
         row("assembly_mate_path", "Path mate", "Unavailable in the static mate solver").agents(Agents::Mcp, "Returns a named unsupported_motion refusal.", unsupported_motion_params),
         row("assembly_mate_cam", "Cam mate", "Unavailable in the static mate solver").agents(Agents::Mcp, "Returns a named unsupported_motion refusal.", unsupported_motion_params),
-        row("assembly_mate_universal_joint", "Universal Joint mate", "Unavailable in the static mate solver").agents(Agents::Mcp, "Returns a named unsupported_motion refusal.", unsupported_motion_params),
+        row("assembly_mate_universal_joint", "Universal Joint mate", "Couple two shafts' rotations through a universal joint").agents(Agents::Mcp, "Saves a motion relation with certified residuals: the shafts turn together, unevenly when they meet at an angle. Does not model collisions.", universal_joint_params).undo(Undo::Step),
         row("assembly_physical_dynamics", "Physical Dynamics", "Unavailable in the static mate solver").agents(Agents::Mcp, "Returns a named unsupported_motion refusal.", unsupported_motion_params),
         row("assembly_mate_angle", "Angle mate", "Set a signed angle about an explicit reference direction")
             .agents(Agents::Mcp, "Rotates projected directions about the reference; certified bounds are reported per mate.", angle_params).undo(Undo::Step),
@@ -500,6 +500,14 @@ fn gear_params() -> Vec<(&'static str, Value)> {
         ("joint_b", string("Second Hinge or unlocked Concentric mate name")),
         ("ratio", optional(array(number("Positive ratio"), "First rotation : second rotation, default [1,1]"))),
         ("reverse", optional(boolean("Same direction instead of the default opposite rotation"))),
+        ("require_fully_constrained", optional(boolean("Refuse remaining freedom"))),
+    ]
+}
+fn universal_joint_params() -> Vec<(&'static str, Value)> {
+    vec![
+        ("name", string("Mate name")),
+        ("input", face("The input shaft's cylinder or axis")),
+        ("output", face("The output shaft's cylinder or axis, on another component")),
         ("require_fully_constrained", optional(boolean("Refuse remaining freedom"))),
     ]
 }

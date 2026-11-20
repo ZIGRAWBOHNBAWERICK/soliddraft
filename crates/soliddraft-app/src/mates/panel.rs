@@ -27,6 +27,8 @@ pub enum Family {
     Gear,
     RackAndPinion,
     Screw,
+    /// The input shaft's axis, then the output shaft's: a Hooke's joint between them.
+    UniversalJoint,
     Angle,
     LimitAngle,
     Coincident,
@@ -56,10 +58,11 @@ pub enum Family {
 }
 
 impl Family {
-    pub const ALL: [Family; 19] = [
+    pub const ALL: [Family; 20] = [
         Family::Gear,
         Family::RackAndPinion,
         Family::Screw,
+        Family::UniversalJoint,
         Family::Angle,
         Family::LimitAngle,
         Family::Coincident,
@@ -83,6 +86,7 @@ impl Family {
             Family::Gear => "Gear",
             Family::RackAndPinion => "Rack and Pinion",
             Family::Screw => "Screw",
+            Family::UniversalJoint => "Universal Joint",
             Family::Angle => "Angle",
             Family::LimitAngle => "Limit Angle",
             Family::Coincident => "Coincident",
@@ -119,6 +123,7 @@ impl Family {
             Family::Gear
                 | Family::RackAndPinion
                 | Family::Screw
+                | Family::UniversalJoint
                 | Family::Angle
                 | Family::LimitAngle
                 | Family::Perpendicular
@@ -348,6 +353,7 @@ fn add(state: &mut AppState) {
             Family::Hinge => "Pick the two axes' faces, then the two planes",
             Family::Symmetric => "Pick the face, its mirror image, then the symmetry plane",
             Family::Slot => "Pick a wall or round end of the slot, then the pin",
+            Family::UniversalJoint => "Pick the input shaft, then the output shaft",
             _ => "Pick two faces first",
         };
         state.assembly.mate.error = Some(wanted.into());
@@ -388,6 +394,7 @@ fn add(state: &mut AppState) {
             s.doc.mate_width(&name, [a, b], [&ends[2], &ends[3]], alignment, &width, false)
         }
         Family::Lock => s.doc.mate_lock(&name, picked[0].component, picked[1].component, false),
+        Family::UniversalJoint => s.doc.mate_universal_joint(&name, a, b, false),
         Family::Concentric => s.doc.mate_concentric(&name, a, b, alignment, lock_rotation, false),
         Family::Tangent => s.doc.mate_tangent(&name, a, b, alignment, false),
         Family::Hinge => {
@@ -631,6 +638,7 @@ fn details(ui: &mut egui::Ui, state: &mut AppState) {
         Family::Angle | Family::LimitAngle => &["First direction", "Second direction", "Positive rotation direction"],
         Family::Symmetric => &["Face", "Mirror image", "Symmetry plane"],
         Family::Slot => &["Slot", "Pin"],
+        Family::UniversalJoint => &["Input shaft", "Output shaft"],
         _ => &["First face", "Second face"],
     };
     for (label, slot) in slots.iter().zip([&d.a, &d.b, &d.c, &d.d]) {
@@ -773,6 +781,7 @@ fn details(ui: &mut egui::Ui, state: &mut AppState) {
             Some("perpendicular") => format!("{name}: perpendicular"),
             Some("gear") => format!("{name}: gear ratio {} : {}", m["factor"][0], m["factor"][1]),
             Some("rack_and_pinion" | "screw") => format!("{name}: {} mm per turn", m["factor"][0]),
+            Some("universal_joint") => format!("{name}: universal joint"),
             Some("angle") => format!("{name}: {} degrees", m["degrees"]),
             Some("limit_angle") => format!("{name}: {} to {} degrees", m["min_degrees"], m["max_degrees"]),
             Some("width") => {
@@ -841,7 +850,10 @@ fn details(ui: &mut egui::Ui, state: &mut AppState) {
     ui.label(match solver["state"].as_str() {
         Some("solved") => "Fully constrained".to_owned(),
         Some("error") => "The mates cannot be solved".to_owned(),
-        _ => format!("{} freedoms remain", solver["remaining_dof"]),
+        _ => match solver["remaining_dof"].as_u64() {
+            Some(1) => "1 freedom remains".to_owned(),
+            _ => format!("{} freedoms remain", solver["remaining_dof"]),
+        },
     });
     for w in warnings {
         ui.colored_label(theme::error(), w);
@@ -890,7 +902,7 @@ fn conflicts(ui: &mut egui::Ui, c: &MateRefusal, mates: &serde_json::Value, acti
         });
     }
     if let Some(dof) = c.remaining_dof {
-        ui.label(format!("{dof} freedoms would remain"));
+        ui.label(if dof == 1 { "1 freedom would remain".to_owned() } else { format!("{dof} freedoms would remain") });
     }
     for m in &c.free {
         ui.label(m.describe());

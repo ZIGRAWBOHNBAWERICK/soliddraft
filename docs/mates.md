@@ -25,6 +25,7 @@ are in `crates/soliddraft-app/src/mates/`.
 | Gear | Rotation of two existing Hinge or unlocked Concentric joints, in a ratio, opposite by default |
 | Rack and Pinion | A pinion joint rotation coupled to translation along the rack's selected plane normal or axis |
 | Screw | Rotation and axial translation of an unlocked Concentric joint, at a positive pitch |
+| Universal Joint | Rotation of two shafts through a Hooke's joint: one turn, uneven when the shafts meet at an angle |
 | Symmetric | One part's plane, line or point the mirror image of another's about a plane: two turns and a translation for planes, two turns and two translations for lines, three translations for points |
 | Linear Coupler | One translation: how far one part slides along its plane's normal or axis is a ratio of how far another slides |
 | Limit Distance | The turns a Distance fixes; its translation stays free between a least and a greatest distance |
@@ -47,7 +48,7 @@ conflict as a numerical solve. Independent exact groups keep that path when anot
 needs bounded motions.
 
 A group with general rotations, an Angle or Limit Angle, a curved-curved Tangent, a
-point-point or axis-axis Distance, a mechanical coupling, or enclosed native supports uses the bounded solver.
+point-point or axis-axis Distance, a mechanical coupling or Universal Joint, or enclosed native supports uses the bounded solver.
 Every accepted mate in that group reports a `proof` with `certainty: "bounded"`,
 `bound_mm: 1e-9`, `bound_angle: 1e-9`, and the certified residuals. The angular bound is in
 radians. These are residual bounds at the stored pose, not an exact-coincidence claim or a
@@ -154,6 +155,19 @@ millimetres per revolution. Positive rotation about the joint's first axis advan
 component along that axis. `reverse` reverses this travel. Screw cannot use a Hinge, which
 already holds axial travel.
 
+`assembly_mate_universal_joint` takes `input` and `output`, a cylinder or axis on each of two
+shafts. It models the cross of a Hooke's joint. The input arm is fixed in the input shaft
+along its zero direction, the one Hinge stops use. The output arm is fixed in the output shaft
+at right angles to its axis and to the input arm, in the pose when the mate is made. The arms
+stay at right angles while either shaft turns. With the shafts at an angle b, this gives
+tan(output turn) = tan(input turn) / cos(b), with both turns counted from the pose where the
+input arm lies in the plane of both shafts (the Hooke joint in Uicker, Pennock and Shigley,
+*Theory of Machines and Mechanisms*). Parallel shafts turn together evenly. The relation
+only couples the turns: hold each shaft with a Hinge or Concentric, and keep the axes
+meeting with other mates if the joint centre matters. Two arms on one component are refused.
+The joint has no direction, so `reverse` is refused. Shafts at right angles lock a real
+joint; there the bounded solve cannot enclose the angle and refuses by name.
+
 These relations capture the current pose as their initial phase. They reference the source
 joint ids and analytic endpoints. Deleting a referenced source joint or enabling a source
 Concentric's Lock rotation is refused atomically. `assembly_edit_mate` accepts a Gear's `ratio`,
@@ -168,8 +182,10 @@ overrides. Each occurrence keeps its own winding, and the child file stays uncha
 Consecutive target orientations must differ by less than 180 degrees
 to identify the intended turn. A quaternion alone cannot distinguish whole revolutions in
 one update. A rotation drag can advance a screw axially; a translation drag can turn it.
-Gear, Rack and Screw report bounded proofs under B5's residual contract. Their stored file
-entry has `kind: "mechanical"` and `mechanism: "gear"`, `"rack_and_pinion"` or `"screw"`.
+Gear, Rack, Screw and Universal Joint report bounded proofs under B5's residual contract.
+Their stored file entry has `kind: "mechanical"` and `mechanism: "gear"`, `"rack_and_pinion"`,
+`"screw"` or `"universal_joint"`. A Universal Joint stores no joints and its two shaft axes as
+`ends`.
 
 Linear Coupler remains exact on axis-aligned supports. Dragging either component drives its
 partner. Scalar coefficients in bounds are divided out exactly, so a scaled slide can stop
@@ -512,6 +528,7 @@ a time. `require_fully_constrained` refuses a result with any freedom left.
 | `assembly_mate_symmetric` | Mirrors `a` onto `b` about `plane`; `alignment` between planes or axes |
 | `assembly_mate_gear` | Couples two joint rotations by a ratio |
 | `assembly_mate_rack_and_pinion` | Couples a pinion joint to rack translation in millimetres per revolution |
+| `assembly_mate_universal_joint` | Couples two shafts' turns through a Hooke's joint, by their axes |
 | `assembly_mate_screw` | Couples a Concentric joint's rotation and axial travel by pitch |
 | `assembly_drag` | Begins, updates, commits or cancels a placement preview, or performs one complete move |
 | `assembly_mate_linear_coupler` | Couples `b`'s slide to `a`'s by `ratio`, with `reverse` and optional `reference_a` and `reference_b` components |
@@ -565,7 +582,8 @@ the redo stack. Refusals are JSON: `refused` holds the code, with `message`, `ma
 The panel offers every family above except Origin, which has its own button for the selected
 component. Coincident, Distance, Parallel, Perpendicular, Concentric, Linear Coupler, Limit
 Distance and Profile Center take two picked faces, and Tangent takes the plane, then the
-cylinder or sphere. Slot takes a wall or round end of the slot, then the pin. Symmetric takes
+cylinder or sphere. Slot takes a wall or round end of the slot, then the pin. Universal Joint
+takes the input shaft, then the output shaft. Symmetric takes
 three: the face, its mirror image, then the symmetry plane. Angle and Limit Angle also take
 three: two directions followed by the positive reference direction. Width takes four: the groove's two,
 then the tab's. Hinge takes four too: the two axes' faces, then the two planes. Lock takes one
@@ -609,7 +627,7 @@ still shows, solves nothing and reports `proof_unavailable` per mate until Updat
 
 ## Limits for later batches
 
-Path, Cam, arc Slot, Universal Joint and Physical Dynamics remain unsupported. Collision
+Path, Cam, arc Slot and Physical Dynamics remain unsupported. Collision
 uses the mesh-certified tier while dragging. Mate Controller is deferred. Mechanical relations add kinematics without
 contact simulation.
 

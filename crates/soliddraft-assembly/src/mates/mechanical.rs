@@ -13,6 +13,9 @@ pub enum Mechanism {
     RackAndPinion,
     /// Axial travel per revolution of a concentric joint.
     Screw,
+    /// A Hooke's joint between two shafts' axes: the cross keeps its two arms at right
+    /// angles, so the output turns unevenly when the shafts meet at an angle.
+    UniversalJoint,
 }
 impl Mechanism {
     pub(crate) fn kind(self) -> &'static str {
@@ -20,6 +23,7 @@ impl Mechanism {
             Self::Gear => "gear",
             Self::RackAndPinion => "rack_and_pinion",
             Self::Screw => "screw",
+            Self::UniversalJoint => "universal_joint",
         }
     }
 }

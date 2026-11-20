@@ -158,6 +158,7 @@ pub(in crate::mates) fn native_constraint(
             super::super::Mechanism::RackAndPinion => {
                 kinds.len() == 3 && kinds[..2] == [Kind::Axis; 2] && directed(kinds[2])
             }
+            super::super::Mechanism::UniversalJoint => kinds == [Kind::Axis; 2] && reads[0].body != reads[1].body,
         },
         Rule::Angle { min, max, .. } => {
             if !min.is_finite() || !max.is_finite() || *min < -180.0 || *max > 180.0 || min > max {
@@ -244,9 +245,13 @@ fn joint_angle<N: Number>(reads: &[Read], poses: &BTreeMap<Body, Placement>, cen
 }
 fn mechanical<N: Number>(reads: &[Read], rule: &Rule, poses: &BTreeMap<Body, Placement>) -> (N, [N; 2]) {
     let Rule::Mechanical { mechanism, factor, reverse, angles, reference, frame, .. } = rule else { unreachable!() };
+    if *mechanism == super::super::Mechanism::UniversalJoint {
+        return universal_joint(reads, poses, angles[0]);
+    }
     let a = joint_angle::<N>(reads, poses, angles[0]);
     let sign = N::f(if *reverse { -1.0 } else { 1.0 });
     match mechanism {
+        super::super::Mechanism::UniversalJoint => unreachable!("measured above"),
         super::super::Mechanism::Gear => {
             let b = joint_angle::<N>(&reads[2..], poses, angles[1]);
             (N::f(factor[0]) * b + sign * N::f(factor[1]) * a, [a, b])
@@ -265,6 +270,27 @@ fn mechanical<N: Number>(reads: &[Read], rule: &Rule, poses: &BTreeMap<Body, Pla
             (travel - sign * N::f(factor[0]) * a / radians::<N>(360.0), [a, N::f(0.0)])
         }
     }
+}
+/// A Hooke's joint. The cross's input arm is fixed in the input shaft along its zero
+/// direction (the one Hinge stops use); its output arm is fixed in the output shaft, at
+/// right angles to the output axis and to the input arm. The arms stay at right angles,
+/// which is the joint's whole kinematic content (the Hooke universal joint in Uicker,
+/// Pennock and Shigley, *Theory of Machines and Mechanisms*); it gives
+/// tan(output turn) = tan(input turn) / cos(shaft angle), with turns measured from the pose
+/// where the input arm lies in the plane of both shafts.
+///
+/// The value is the angle, about the output axis, from the output shaft's zero direction to
+/// the input arm's projection on the output's plane of turn. The output arm sits a fixed
+/// quarter turn from that projection, so holding this angle at its value when the mate was
+/// made holds the arms at right angles. It is unwrapped about `center` for continuous turns.
+/// The projection vanishes only when the input arm lies along the output axis, which a
+/// real joint reaches only with the shafts at right angles; the bounded solve then cannot
+/// enclose the angle and refuses by name.
+fn universal_joint<N: Number>(reads: &[Read], poses: &BTreeMap<Body, Placement>, center: f64) -> (N, [N; 2]) {
+    let arm = clock(&reads[0], poses);
+    let (axis, zero) = (world::<N>(&reads[1], poses).direction(), clock(&reads[1], poses));
+    let turn = dot(axis, cross(zero, arm)).atan2(dot(zero, arm), center);
+    (turn, [turn, N::f(0.0)])
 }
 pub(in crate::mates) fn mechanical_value(
     reads: &[Read],
@@ -362,7 +388,8 @@ pub(super) fn residual<N: Number>(
     match rule {
         Rule::Mechanical { mechanism, offset, .. } => {
             let (value, _) = mechanical::<N>(reads, rule, poses);
-            scalar(out, value - N::f(*offset), *mechanism == super::super::Mechanism::Gear);
+            let angular = matches!(mechanism, super::super::Mechanism::Gear | super::super::Mechanism::UniversalJoint);
+            scalar(out, value - N::f(*offset), angular);
         }
         Rule::Angle { min, max, limit } => {
             let n = world::<N>(&reads[2], poses).direction();

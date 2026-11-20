@@ -1139,3 +1139,51 @@ fn guarded_rotation_and_a_mate_driven_follower_cannot_cross_an_obstacle() {
     r.doc.cancel_drag();
     std::fs::remove_dir_all(r.dir).unwrap();
 }
+#[test]
+fn universal_joint_turns_the_output_by_the_hooke_relation_and_reopens() {
+    let mut r = rig("universal-joint", Profile::Circle);
+    let reference = r.doc.assembly().sources[0].document.clone();
+    // The output shaft's bearing is tilted 40 degrees about X, so the shafts meet at 40
+    // degrees and the plane of both shafts is the YZ plane.
+    let bend = 40f64.to_radians();
+    let tilt = DQuat::from_rotation_x(bend);
+    let bearing = r.doc.insert(reference.clone(), Placement::new(tilt, DVec3::ZERO)).unwrap();
+    let output = r.doc.insert(reference, Placement::new(tilt, DVec3::ZERO)).unwrap();
+    r.doc.finish_loading();
+    r.doc.mate_lock("L", r.a, bearing, false).unwrap();
+    hinge(&mut r.doc, "H1", r.a, r.b);
+    hinge(&mut r.doc, "H2", bearing, output);
+    // The input's zero direction, along Y, lies in the plane of both shafts: the textbook
+    // reference pose, where both turns count from zero.
+    move_under_mates(&mut r.doc, r.b, Placement::IDENTITY);
+    assert!(r.doc.mate_universal_joint("U", &cylinder(r.b), &cylinder(r.b), false).is_err());
+    r.doc.mate_universal_joint("U", &cylinder(r.b), &cylinder(output), false).unwrap();
+    let start = r.doc.assembly().component(output).unwrap().placement.rotation;
+    let axis = tilt * DVec3::Z;
+    let expect = |input: f64| {
+        // tan(output) = tan(input) / cos(bend), on the branch that follows the input.
+        let turn = input.sin().atan2(input.cos() * bend.cos());
+        DQuat::from_axis_angle(axis, turn) * start
+    };
+    for degrees in [30.0f64, 90.0, 150.0] {
+        let input = degrees.to_radians();
+        move_under_mates(&mut r.doc, r.b, Placement::new(DQuat::from_rotation_z(input), DVec3::ZERO));
+        let turned = r.doc.assembly().component(output).unwrap().placement.rotation;
+        assert!(turned.angle_between(expect(input)) < 1e-7, "{degrees}: {turned:?} against {:?}", expect(input));
+    }
+    // Driven from the output, the input follows back.
+    move_under_mates(&mut r.doc, output, Placement::new(expect(60f64.to_radians()), DVec3::ZERO));
+    let input = r.doc.assembly().component(r.b).unwrap().placement.rotation;
+    assert!(input.angle_between(DQuat::from_rotation_z(60f64.to_radians())) < 1e-7, "{input:?}");
+    bounded(&mut r.doc, "U");
+    let before = r.doc.assembly().clone();
+    let refused = r.doc.edit_mates(&[("U".into(), MateEdit::Reverse(true))]).unwrap_err();
+    assert_eq!(refused.code, RefusalCode::Invalid, "{refused:?}");
+    assert_eq!(&before, r.doc.assembly());
+    r.doc.save(None).unwrap();
+    let mut reopened = AssemblyDocument::open(&r.file, options()).unwrap();
+    reopened.finish_loading();
+    bounded(&mut reopened, "U");
+    assert_eq!(reopened.assembly(), &before);
+    std::fs::remove_dir_all(r.dir).unwrap();
+}

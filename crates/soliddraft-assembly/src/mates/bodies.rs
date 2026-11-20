@@ -450,16 +450,14 @@ impl AssemblyDocument {
                                 ..
                             } => {
                                 let angles = scope.mechanical_angles(&prefix, *id, *angles);
-                                let count = if *mechanism == super::Mechanism::Gear { 2 } else { 1 };
+                                let (count, end_count) = match mechanism {
+                                    super::Mechanism::Gear => (2, 4),
+                                    super::Mechanism::RackAndPinion => (1, 3),
+                                    super::Mechanism::Screw => (1, 2),
+                                    super::Mechanism::UniversalJoint => (0, 2),
+                                };
                                 if joints.len() != count
-                                    || ends.len()
-                                        != if *mechanism == super::Mechanism::Gear {
-                                            4
-                                        } else if *mechanism == super::Mechanism::RackAndPinion {
-                                            3
-                                        } else {
-                                            2
-                                        }
+                                    || ends.len() != end_count
                                     || !factor.iter().all(|v| v.is_finite() && *v > 0.0)
                                     || !offset.is_finite()
                                     || !angles.iter().all(|v| v.is_finite())

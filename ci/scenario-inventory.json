@@ -1223,6 +1223,27 @@
       "evidence": "result.json, protocol.json, command summaries, work/rig.dwasm and pinned parts"
     },
     {
+      "id": "mate-universal-joint",
+      "file": "ci/scenarios/mate-universal-joint.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-assembly",
+        "soliddraft-model",
+        "soliddraft-kernel-catallax"
+      ],
+      "kernel_parts": [
+        "boolean",
+        "extrude",
+        "measure",
+        "mesh"
+      ],
+      "catallax_revision": "ccfb4e4bee95cbb42f7c1ea1dbdfe8874ed01c4a",
+      "route": "MCP universal joint mate and drag commands -> assembly transaction -> bounded residual checks",
+      "supported_limits": "Universal Joint between two shaft axes at 40 degrees: the Hooke relation in both drive directions, refusals, undo/redo, Hinge stops on top and save/reopen; no contact or dynamics.",
+      "evidence": "result.json, protocol.json, command summaries, work/rig.dwasm and pinned parts"
+    },
+    {
       "id": "mate-hinge",
       "file": "ci/scenarios/mate-hinge.json",
       "acceptance": true,

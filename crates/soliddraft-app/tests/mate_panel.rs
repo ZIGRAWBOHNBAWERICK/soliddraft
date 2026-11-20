@@ -676,3 +676,94 @@ fn width_lock_and_conflicts_in_the_window() {
     drop(h);
     let _ = std::fs::remove_dir_all(dir);
 }
+
+/// The Universal Joint picked in the window between two shafts meeting at 40 degrees, then
+/// one later feature on top: the input turned under mates drives the output by the Hooke
+/// relation. The rig comes from the mate-universal-joint scenario's own steps.
+#[test]
+fn universal_joint_picked_in_the_window_drives_the_bent_shaft() {
+    let _gpu = gpu_lock();
+    let instance = egui_wgpu::wgpu::Instance::default();
+    let adapters = pollster::block_on(instance.enumerate_adapters(egui_wgpu::wgpu::Backends::all()));
+    if adapters.is_empty() {
+        assert!(std::env::var_os("SOLIDDRAFT_REQUIRE_GPU").is_none(), "required GPU unavailable");
+        eprintln!("no GPU adapter; skipping");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!("soliddraft-mate-universal-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("work")).unwrap();
+    soliddraft_app::file::set_config_dir(Some(dir.join("config")));
+    let mut h: App<'static> = Harness::builder()
+        .with_size(vec2(1600.0, 1000.0))
+        .with_pixels_per_point(1.0)
+        .with_render_every_step(true)
+        .with_step_dt(1.0 / 60.0)
+        .wgpu()
+        .build_eframe(|cc| SolidDraftApp::new(cc, soliddraft_app::new_document(), Automation::default()));
+    h.run_steps(3);
+
+    // The base and both shafts on their hinges, the output's bearing locked at 40 degrees:
+    // every scenario step before the Universal Joint.
+    let spec: serde_json::Value =
+        serde_json::from_str(include_str!("../../../ci/scenarios/mate-universal-joint.json")).unwrap();
+    {
+        let st = &mut h.state_mut().state;
+        for step in spec["steps"].as_array().unwrap() {
+            let name = step["tool"].as_str().unwrap();
+            if name == "assembly_mate_universal_joint" {
+                break;
+            }
+            let arguments =
+                serde_json::to_string(&step["arguments"]).unwrap().replace("{bundle}", dir.to_str().unwrap());
+            tool(st, name, serde_json::from_str(&arguments).unwrap());
+        }
+        st.push(AppAction::Assembly(AssemblyAction::Show));
+    }
+    settle(&mut h);
+    let tilt = glam::DQuat::from_rotation_x(40f64.to_radians());
+    let output_start = session(&h).doc.assembly().component(soliddraft_assembly::ComponentId(9)).unwrap().placement;
+    assert!(output_start.rotation.angle_between(tilt) < 1e-9, "{output_start:?}");
+
+    // Pick each shaft's side at the middle of its axis, seen from the right: from the front
+    // the output shaft stands in front of the input.
+    button(&mut h, "Mate");
+    button(&mut h, "Universal Joint");
+    assert_eq!(h.state().state.assembly.mate.family, soliddraft_app::mates::Family::UniversalJoint);
+    view(&mut h, StandardView::Right);
+    settle(&mut h);
+    let input_mid = Vec3::new(10.0, 5.0, 22.0);
+    let output_mid = (output_start.translation + tilt * glam::DVec3::new(0.0, 0.0, 22.0)).as_vec3();
+    for (at, component) in [(input_mid, 4), (output_mid, 9)] {
+        let at = screen(&h, at);
+        click_at(&mut h, at);
+        settle(&mut h);
+        let d = &h.state().state.assembly.mate;
+        let picked = [&d.a, &d.b].into_iter().flatten().last().cloned().expect("a pick names a face");
+        assert_eq!(picked.component.0, component, "{picked:?}");
+        assert!(picked.face.label.starts_with("Boss-Extrude1"), "{picked:?}");
+    }
+    snapshot(&mut h, "universal-1-picked");
+    type_into(&mut h, "Mate name", "U");
+    button(&mut h, "Add mate");
+    settle(&mut h);
+    assert!(h.state().state.assembly.mate.error.is_none(), "{:?}", h.state().state.assembly.mate.error);
+    assert_readout(&mut h, "U: universal joint");
+    snapshot(&mut h, "universal-2-added");
+
+    // Turn the input 30 degrees under mates: the bent output turns atan(tan 30 / cos 40).
+    let turn = glam::DQuat::from_rotation_z(30f64.to_radians());
+    let arguments = json!({ "path": "4", "placement": { "translation": [10, 5, 0], "rotation": turn.to_array() } });
+    tool(&mut h.state_mut().state, "assembly_drag", arguments);
+    settle(&mut h);
+    let bend = 40f64.to_radians();
+    let follows = 30f64.to_radians().sin().atan2(30f64.to_radians().cos() * bend.cos());
+    let expected = glam::DQuat::from_axis_angle(tilt * glam::DVec3::Z, follows) * output_start.rotation;
+    let output = session(&h).doc.assembly().component(soliddraft_assembly::ComponentId(9)).unwrap().placement;
+    assert!(output.rotation.angle_between(expected) < 1e-7, "{output:?} against {expected:?}");
+    view(&mut h, StandardView::Isometric);
+    settle(&mut h);
+    snapshot(&mut h, "universal-3-driven");
+    drop(h);
+    let _ = std::fs::remove_dir_all(dir);
+}

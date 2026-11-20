@@ -11,6 +11,8 @@ use egui::{Sense, vec2};
 pub const HEIGHT: f32 = 46.0;
 
 pub fn panel(root: &mut egui::Ui, state: &mut AppState) {
+    // A face picked while the details sheet is closed is still a pick.
+    crate::pmi::panel::follow_selection(state);
     egui::Panel::top("options_bar")
         .exact_size(HEIGHT)
         .resizable(false)

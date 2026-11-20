@@ -329,8 +329,12 @@ fn item(doc: &Document, form: &State) -> Result<PmiItem<FaceRef>, String> {
     Ok(item)
 }
 
-/// Follows the viewport: a face selected since last frame joins the picks.
-fn follow_selection(state: &mut AppState) {
+/// Follows the viewport while the panel is open: a face selected since last frame joins
+/// the picks.
+pub fn follow_selection(state: &mut AppState) {
+    if !state.pmi.open {
+        return;
+    }
     let selection = state.doc.selection;
     let form = &mut state.pmi;
     if selection == form.seen {
@@ -555,7 +559,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
     follow_selection(state);
     theme::section_label(ui, "Manufacturing information");
     let rows = rows(state);
-    list(ui, state, &rows);
+    egui::ScrollArea::vertical().id_salt("pmi_items").max_height(230.0).show(ui, |ui| list(ui, state, &rows));
     if let Some(report) = &state.doc.pmi_import
         && !report.left_out.is_empty()
     {

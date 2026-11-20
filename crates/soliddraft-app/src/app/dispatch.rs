@@ -1181,7 +1181,11 @@ impl SolidDraftApp {
                 self.state.rename = None;
             }
             AppAction::MeasureEntity => self.state.measure.open = !self.state.measure.open,
-            AppAction::ToggleManufacturingInformation => self.state.pmi.open = !self.state.pmi.open,
+            AppAction::ToggleManufacturingInformation => {
+                self.state.pmi.open = !self.state.pmi.open;
+                // The panel lives in the details sheet, so opening it shows the sheet.
+                self.state.options_details = self.state.pmi.open;
+            }
             AppAction::ToggleSection => self.state.section.toggle(&self.state.doc),
             AppAction::ShowMaterial => {
                 self.state.doc.selection = Some(Selection::Body);

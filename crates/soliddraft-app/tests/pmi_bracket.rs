@@ -213,8 +213,11 @@ fn expected_located() -> Vec<(String, u64, String, i64)> {
     all
 }
 
-/// Where each item sits: per item, the surface kind and centroid of every face.
-fn places(state: &AppState) -> Vec<(String, Vec<(SurfaceKind, [i64; 3])>)> {
+/// Per item, the surface kind and centroid of every face it is on.
+type Places = Vec<(String, Vec<(SurfaceKind, [i64; 3])>)>;
+
+/// Where each item sits.
+fn places(state: &AppState) -> Places {
     state
         .doc
         .model()

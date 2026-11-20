@@ -86,28 +86,10 @@ enum Shape {
 /// The body's faces, with the round edges that give a cylinder its axis.
 struct Body<'a> {
     faces: HashMap<FaceId, FaceInfo>,
-    /// The round edges of the cylinder faces: centre, unit axis and radius.
-    rounds: HashMap<EdgeId, (Vec3, Vec3, f64)>,
+    /// The cylinder each round face lies on, from the exact model.
+    axes: HashMap<FaceId, soliddraft_kernel_api::FaceAxis>,
     index: &'a PartIndex<'a>,
     tol: f64,
-}
-
-/// A round edge's centre, unit axis and radius. The kernel gives most as a circle or an
-/// arc; one it gives as a spline is read through the kernel's own lines and arcs.
-fn round_of(part: &Part, curve: &Curve3) -> Option<(Vec3, Vec3, f64)> {
-    let read = |curve: &Curve3| match curve {
-        Curve3::Circle { center, normal, radius } | Curve3::Arc { center, normal, radius, .. } => {
-            Some((*center, normal.normalized()?, *radius))
-        }
-        _ => None,
-    };
-    if matches!(curve, Curve3::Line { .. }) {
-        return None;
-    }
-    read(curve).or_else(|| match part.kernel.lines_and_arcs(curve, 1e-6).ok()?.as_slice() {
-        [one] => read(one),
-        _ => None,
-    })
 }
 
 impl Body<'_> {
@@ -116,10 +98,12 @@ impl Body<'_> {
         let info = self.faces.get(&face)?;
         match info.surface {
             SurfaceKind::Plane => Some(Shape::Plane { point: info.centroid, normal: info.normal?.normalized()? }),
-            SurfaceKind::Cylinder => info.edges.iter().find_map(|edge| {
-                let (centre, axis, radius) = *self.rounds.get(edge)?;
-                Some(Shape::Round { centre, axis, radius })
-            }),
+            SurfaceKind::Cylinder => {
+                let axis = self.axes.get(&face)?;
+                // The point of the axis level with the face's middle.
+                let centre = axis.point + axis.direction * (info.centroid - axis.point).dot(axis.direction);
+                Some(Shape::Round { centre, axis: axis.direction, radius: axis.radius })
+            }
             _ => None,
         }
     }
@@ -130,23 +114,31 @@ impl Body<'_> {
         self.face(*face).ok_or_else(|| "only flat and round faces are drawn".to_owned())
     }
 
-    /// The round edge of a feature that `view` shows best, with its centre and whether
-    /// the view shows it as a visible line: visible first, then nearest the eye.
-    fn round_edge(&self, feature: &[FaceId], view: &ViewContext, axis: Vec3) -> Option<(EdgeId, Vec3, bool)> {
-        let mut best: Option<((bool, f64), EdgeId, Vec3)> = None;
+    /// The round edge of a feature that `view` shows best: the edge, where on it an
+    /// annotation attaches to stand at its centre, that centre, and whether the view
+    /// shows the edge as a visible line. Visible first, then nearest the eye. A round
+    /// edge is any edge of the feature's faces but the straight ones along the axis.
+    fn round_edge(&self, feature: &[FaceId], view: &ViewContext, axis: Vec3) -> Option<(EdgeId, Attach, Vec3, bool)> {
+        let mut best: Option<((bool, f64), EdgeId, Attach, Vec3)> = None;
         for face in feature {
+            let on_axis = self.axes.get(face)?.point;
             for edge in &self.faces.get(face)?.edges {
-                let Some((centre, normal, _)) = self.rounds.get(edge).copied() else { continue };
-                if normal.cross(axis).length() > 1e-6 {
-                    continue;
-                }
+                let curve = self.index.edge_curve(*edge)?;
+                let (attach, centre) = match curve {
+                    Curve3::Line { .. } => continue,
+                    Curve3::Circle { center, .. } | Curve3::Arc { center, .. } => (Attach::Centre, *center),
+                    other => {
+                        let centre = on_axis + axis * (other.point_at(0.5) - on_axis).dot(axis);
+                        (Attach::Point { at: centre }, centre)
+                    }
+                };
                 let key = (visible_in(view, *edge), view.xf.frame.depth(centre));
-                if best.as_ref().is_none_or(|(k, _, _)| (key.0, key.1) > (k.0, k.1 + self.tol)) {
-                    best = Some((key, *edge, centre));
+                if best.as_ref().is_none_or(|(k, ..)| (key.0, key.1) > (k.0, k.1 + self.tol)) {
+                    best = Some((key, *edge, attach, centre));
                 }
             }
         }
-        best.map(|(key, edge, centre)| (edge, centre, key.0))
+        best.map(|(key, edge, attach, centre)| (edge, attach, centre, key.0))
     }
 }
 
@@ -225,23 +217,23 @@ impl Planner<'_> {
         feature: &[FaceId],
         axis: Vec3,
         radius: f64,
-    ) -> Result<(ViewId, EdgeId, Point2, Point2, Point2), String> {
-        let mut best: Option<((bool, i32), ViewId, EdgeId, Point2, f64)> = None;
+    ) -> Result<(ViewId, EdgeId, Attach, Point2, Point2, Point2), String> {
+        let mut best: Option<((bool, i32), ViewId, EdgeId, Attach, Point2, f64)> = None;
         for (order, view) in self.views.iter().enumerate() {
             if axis.dot(view.xf.frame.direction).abs() < 1.0 - 1e-6 {
                 continue;
             }
-            let Some((edge, centre, visible)) = self.body.round_edge(feature, view, axis) else { continue };
+            let Some((edge, attach, centre, visible)) = self.body.round_edge(feature, view, axis) else { continue };
             let key = (visible, -(order as i32));
             if best.as_ref().is_none_or(|(k, ..)| key > *k) {
-                best = Some((key, view.id, edge, view.xf.point(centre), view.xf.scale));
+                best = Some((key, view.id, edge, attach, view.xf.point(centre), view.xf.scale));
             }
         }
-        let (_, view, edge, centre, scale) = best.ok_or("no view looks along its axis")?;
+        let (_, view, edge, attach, centre, scale) = best.ok_or("no view looks along its axis")?;
         let dir = self.diagonal(view, centre);
         let reach = radius * scale + CALLOUT_REACH;
         let placement = Point2::new(round(centre.u + dir.u * reach), round(centre.v + dir.v * reach));
-        Ok((view, edge, centre, placement, dir))
+        Ok((view, edge, attach, centre, placement, dir))
     }
 
     /// The outward side of a view at a point: the unit direction to the nearest side of
@@ -332,11 +324,11 @@ impl Planner<'_> {
                 Some((edge, attach, view.xf.point(model), visible, false))
             }
             Shape::Round { axis, radius, .. } => {
-                let (edge, on_axis, visible) = self.body.round_edge(&end.faces, view, axis)?;
+                let (edge, centred, on_axis, visible) = self.body.round_edge(&end.faces, view, axis)?;
                 let attach = match end.at {
                     At::Inner => Attach::Point { at: on_axis + direction * (radius * towards) },
                     At::Outer => Attach::Point { at: on_axis - direction * (radius * towards) },
-                    _ => Attach::Centre,
+                    _ => centred,
                 };
                 let model = match attach {
                     Attach::Point { at } => at,
@@ -468,7 +460,7 @@ impl Planner<'_> {
                     });
                 }
                 Shape::Round { axis, radius, .. } => {
-                    let (view, edge, centre, placement, dir) = self.callout(feature, axis, radius)?;
+                    let (view, edge, _, centre, placement, dir) = self.callout(feature, axis, radius)?;
                     let scale = self.views.iter().find(|v| v.id == view).map_or(1.0, |v| v.xf.scale);
                     let on = Point2::new(centre.u + dir.u * radius * scale, centre.v + dir.v * radius * scale);
                     let at = self.views.iter().find(|v| v.id == view).map(|v| v.xf.unproject(on));
@@ -489,7 +481,7 @@ impl Planner<'_> {
                 let Shape::Round { axis, radius, .. } = self.body.feature(first)? else {
                     return Err("a size needs a round face".into());
                 };
-                let (view, edge, centre, placement, dir) = self.callout(first, axis, radius)?;
+                let (view, edge, centred, centre, placement, dir) = self.callout(first, axis, radius)?;
                 let (kind, value) = match size {
                     SizeKind::Diameter => (DimensionKind::Diameter, 2.0 * radius),
                     SizeKind::Radius => (DimensionKind::Radius, radius),
@@ -506,7 +498,7 @@ impl Planner<'_> {
                     source,
                     view,
                     body: AnnotationKind::Dimension(dimension),
-                    anchors: vec![(edge, Attach::Centre, centre)],
+                    anchors: vec![(edge, centred, centre)],
                     placement,
                     slide: Slide { along: dir, step: 3.0 },
                     host: None,
@@ -528,7 +520,7 @@ impl Planner<'_> {
                     return Err("a slot needs round ends".into());
                 };
                 // The end the callout's leader reaches: the one on the side it leans to.
-                let (view, edge, centre, placement, dir) = self.callout(&ends[1], axis, radius)?;
+                let (view, edge, _, centre, placement, dir) = self.callout(&ends[1], axis, radius)?;
                 let scale = self.views.iter().find(|v| v.id == view).map_or(1.0, |v| v.xf.scale);
                 let on = Point2::new(centre.u + dir.u * radius * scale, centre.v + dir.v * radius * scale);
                 let at = self.views.iter().find(|v| v.id == view).map(|v| v.xf.unproject(on));
@@ -619,7 +611,7 @@ impl Planner<'_> {
                         });
                     }
                     Shape::Round { axis, radius, .. } => {
-                        let (view, edge, centre, placement, dir) = self.callout(feature, axis, radius)?;
+                        let (view, edge, _, centre, placement, dir) = self.callout(feature, axis, radius)?;
                         let scale = self.views.iter().find(|v| v.id == view).map_or(1.0, |v| v.xf.scale);
                         let on = Point2::new(centre.u + dir.u * radius * scale, centre.v + dir.v * radius * scale);
                         let at = self.views.iter().find(|v| v.id == view).map(|v| v.xf.unproject(on));
@@ -854,18 +846,9 @@ pub fn import(
         .filter(|v| !v.pictorial)
         .filter(|v| drawing.view(v.id).is_some_and(|view| !matches!(view.kind, crate::ViewKind::Section { .. })))
         .collect();
-    let mut rounds = HashMap::new();
-    for face in topology.faces.iter().filter(|f| f.surface == SurfaceKind::Cylinder) {
-        for edge in &face.edges {
-            if !rounds.contains_key(edge)
-                && let Some(round) = index.edge_curve(*edge).and_then(|curve| round_of(part, curve))
-            {
-                rounds.insert(*edge, round);
-            }
-        }
-    }
+    let axes = part.kernel.face_carriers(part.body)?.into_iter().filter_map(|c| Some((c.id, c.axis?))).collect();
     let mut planner = Planner {
-        body: Body { faces: topology.faces.into_iter().map(|f| (f.id, f)).collect(), rounds, index, tol: 1e-6 * size },
+        body: Body { faces: topology.faces.into_iter().map(|f| (f.id, f)).collect(), axes, index, tol: 1e-6 * size },
         bbox: candidates.iter().filter_map(|v| Some((v.id, drawing.view(v.id)?.geometry.bbox))).collect(),
         views: candidates,
         plans: Vec::new(),

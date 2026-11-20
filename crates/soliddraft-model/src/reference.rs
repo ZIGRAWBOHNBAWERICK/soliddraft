@@ -970,6 +970,7 @@ mod tests {
             surface: SurfaceKind::Plane,
             normal: Some(Vec3::Z),
             on_plane: Some(Vec3::new(3.0, 4.0, z)),
+            axis: None,
             origins,
         }
     }

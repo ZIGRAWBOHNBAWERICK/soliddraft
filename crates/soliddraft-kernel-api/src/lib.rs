@@ -649,9 +649,24 @@ pub struct FaceCarrier {
     /// `None` for curved faces.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub on_plane: Option<Vec3>,
+    /// The axis and radius of a face on a circular cylinder. `None` for every other
+    /// face.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub axis: Option<FaceAxis>,
     /// As [`FaceInfo::origins`].
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub origins: Vec<Origin>,
+}
+
+/// The circular cylinder a face lies on, as nearest doubles to the exact model's values.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct FaceAxis {
+    /// A point of the axis.
+    pub point: Vec3,
+    /// The axis's unit direction.
+    pub direction: Vec3,
+    /// The cylinder's radius in millimetres.
+    pub radius: f64,
 }
 
 /// One edge of a body.

@@ -1823,6 +1823,18 @@ pub(crate) fn write_sheet(
     format: export::Format,
     path: &Path,
 ) -> Result<SheetExport, String> {
+    let (bytes, written) = sheet_bytes(s, part, format)?;
+    crate::platform::write_file(path, &bytes)?;
+    s.last_export = Some(path.to_path_buf());
+    Ok(written)
+}
+
+/// The drawing as `format`, as [`write_sheet`] writes it, without writing it.
+pub(crate) fn sheet_bytes(
+    s: &DrawingSession,
+    part: Option<&PartContext>,
+    format: export::Format,
+) -> Result<(Vec<u8>, SheetExport), String> {
     if !matches!(format, export::Format::Pdf) && s.doc.drawing.sheets.get(s.sheet).is_none() {
         return Err("The current sheet is no longer available; select a sheet before exporting".into());
     }
@@ -1852,8 +1864,7 @@ pub(crate) fn write_sheet(
         }
         _ => export::bytes(&list_of(s.sheet), format, &s.doc.drawing.meta.title),
     };
-    bytes.map_err(|e| e.to_string()).and_then(|bytes| crate::platform::write_file(path, &bytes))?;
-    s.last_export = Some(path.to_path_buf());
+    let bytes = bytes.map_err(|e| e.to_string())?;
     let written: Vec<&View> = match format {
         export::Format::Pdf => drawing.sheets.iter().flat_map(|sheet| &sheet.views).collect(),
         _ => drawing.sheets.get(s.sheet).map_or_else(Vec::new, |sheet| sheet.views.iter().collect()),
@@ -1862,7 +1873,7 @@ pub(crate) fn write_sheet(
     for view in &written {
         accuracy.add(view.geometry.accuracy());
     }
-    Ok(SheetExport { views: written.len(), redrawn, revision: drawing.model.pinned.clone(), accuracy })
+    Ok((bytes, SheetExport { views: written.len(), redrawn, revision: drawing.model.pinned.clone(), accuracy }))
 }
 
 /// A copy of `drawing` with unproved or coarse views drawn from the fine certified

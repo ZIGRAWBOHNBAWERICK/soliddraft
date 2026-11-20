@@ -456,7 +456,13 @@ impl AppTools<'_> {
                 *on = false;
             }
         }
-        let exported = self.export_part(ExportFormat::Step, &json!({ "path": step }))?;
+        // Everything is made before anything is written, so a refusal leaves no file.
+        let exported = self.state.export_part_at(ExportFormat::Step, None)?;
+        let mut files: Vec<(PathBuf, Vec<u8>)> = Vec::new();
+        exported.write_with(&step, |file, bytes| {
+            files.push((file.to_owned(), bytes.to_vec()));
+            Ok(())
+        })?;
         let on_body = self.state.doc.model().pmi_on_body();
         let written: std::collections::BTreeSet<String> =
             on_body.pmi.items.iter().take(on_body.items).map(|item| item.id.clone()).collect();
@@ -464,8 +470,17 @@ impl AppTools<'_> {
         let requirements = session.requirements.clone();
         self.install_drawing(session);
         let (pdf, dxf) = (step.with_extension("pdf"), step.with_extension("dxf"));
-        self.export_sheet(SheetFormat::Pdf, &json!({ "path": pdf }))?;
-        self.export_sheet(SheetFormat::Dxf, &json!({ "path": dxf }))?;
+        {
+            let part = PartContext::new(&self.state.doc);
+            let s = self.state.drawing.session.as_ref().ok_or_else(|| NO_DRAWING.to_owned())?;
+            for (format, path) in [(SheetFormat::Pdf, &pdf), (SheetFormat::Dxf, &dxf)] {
+                let (bytes, _) = drawing::sheet_bytes(s, part.as_ref(), format)?;
+                files.push((path.clone(), bytes));
+            }
+        }
+        // On the desktop each is a file beside the STEP file; in the browser they arrive
+        // as one download.
+        crate::platform::write_export(&step, files)?;
         let s = self.session()?;
         let sheet = s.sheet;
         let drawing = &s.doc.drawing;
@@ -478,7 +493,7 @@ impl AppTools<'_> {
             "step": step,
             "pdf": pdf,
             "dxf": dxf,
-            "manufacturing_information": exported["manufacturing_information"],
+            "manufacturing_information": exported.pmi,
             "drawing": {
                 "views": drawing.sheets[sheet].views.len(),
                 "items": requirements.placed,

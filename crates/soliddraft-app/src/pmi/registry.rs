@@ -83,9 +83,10 @@ pub(crate) fn commands() -> Vec<CommandSpec> {
             Agents::Mcp,
             "Writes path (.step) with the part's manufacturing information, and a drawing made from it as .pdf and .dxf \
              beside it. The answer lists what the drawing shows, what it could not show, what overlaps and what is on \
-             the drawing but not in the file.",
+             the drawing but not in the file. The drawing becomes the active document, in place of an open drawing.",
             package_params,
-        ),
+        )
+        .undo(Undo::Replaces),
         row("pmi_add", "Add manufacturing information", "Put a datum, dimension, tolerance or finish on faces").agents(
             Agents::Mcp,
             "Adds one item to the part, or replaces the item named in replaces. A dimension takes no size: it reads the part's.",

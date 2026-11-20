@@ -1,7 +1,8 @@
 //! Manufacturing information command registry rows.
 
-use crate::commands::{Agents, CommandSpec};
+use crate::commands::{Agents, CommandSpec, Size, Undo};
 use crate::icons::Icon;
+use crate::state::{AppAction, RibbonTab};
 use serde_json::Value;
 use soliddraft_assistant::tools::schema::{array, boolean, optional, string};
 
@@ -50,23 +51,36 @@ fn notes_params() -> Vec<(&'static str, Value)> {
 }
 
 pub(crate) fn commands() -> Vec<CommandSpec> {
-    let row = |id, label, doc| CommandSpec::new(id, label, Icon::SmartDim, doc);
+    let row = |id, label, doc| CommandSpec::new(id, label, Icon::Tolerance, doc);
     vec![
+        row(
+            "manufacturing_information",
+            "Manufacturing information",
+            "Put datums, dimensions, tolerances and finishes on the part's faces",
+        )
+        .on(RibbonTab::Inspect, "Annotate", Size::Large)
+        .shown(|s| !s.in_sketch())
+        .run(|_| AppAction::ToggleManufacturingInformation)
+        .lit(|s| s.pmi.open)
+        .app_only("It opens the Manufacturing information panel; the pmi tools change the same items without it"),
         row("pmi_add", "Add manufacturing information", "Put a datum, dimension, tolerance or finish on faces").agents(
             Agents::Mcp,
             "Adds one item to the part, or replaces the item named in replaces. A dimension takes no size: it reads the part's.",
             add_params,
-        ),
+        )
+        .undo(Undo::Step),
         row("pmi_remove", "Remove manufacturing information", "Remove one item from the part").agents(
             Agents::Mcp,
             "Removes the named item. A datum a tolerance refers to stays until that tolerance lets go of it.",
             remove_params,
-        ),
+        )
+        .undo(Undo::Step),
         row("pmi_notes", "Part notes", "Set the general tolerance, the material note and other notes").agents(
             Agents::Mcp,
             "Sets the notes that apply to the whole part. A field left out keeps its value.",
             notes_params,
-        ),
+        )
+        .undo(Undo::Step),
         row("pmi_list", "List manufacturing information", "List the part's items as a drawing writes them").agents(
             Agents::Mcp,
             "Every item with its callout, its faces and what is wrong with it if it does not apply, and the part's notes.",

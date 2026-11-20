@@ -39,6 +39,9 @@ fn active_tool(state: &AppState) -> (Icon, String, String) {
     if state.measure.open {
         return (Icon::Measure, "Measure".into(), "Pick edges or faces to measure".into());
     }
+    if state.pmi.open {
+        return (Icon::Tolerance, "Manufacturing information".into(), state.pmi.kind.prompt().into());
+    }
     (Icon::Glyph("cursor"), "Select".into(), "".into())
 }
 
@@ -180,7 +183,7 @@ fn show(ui: &mut egui::Ui, state: &mut AppState) {
         response.on_hover_text(&label);
 
         let mut details_at = None;
-        if state.doc.selection.is_some() || state.measure.open {
+        if state.doc.selection.is_some() || state.measure.open || state.pmi.open {
             let response = ui.button("Details");
             sheet_anchor = response.rect;
             details_at = Some(response.rect.center());
@@ -203,7 +206,7 @@ fn show(ui: &mut egui::Ui, state: &mut AppState) {
             .show(ui, |ui| {
                 ui.horizontal_centered(|ui| {
                     ui.spacing_mut().item_spacing.x = 8.0;
-                    if state.in_sketch() || state.editor.is_some() || state.measure.open {
+                    if state.in_sketch() || state.editor.is_some() || state.measure.open || state.pmi.open {
                         ui.label(egui::RichText::new(prompt).color(theme::muted()));
                     } else if let Some(selection) = state.doc.selection {
                         selection_options(ui, state, selection);

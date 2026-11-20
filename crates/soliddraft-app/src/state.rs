@@ -106,6 +106,8 @@ pub enum AppAction {
     /// Computes mass properties only after the user requests them.
     MeasureMassProperties,
     MeasureEntity,
+    /// Opens or closes the Manufacturing information panel.
+    ToggleManufacturingInformation,
     /// Run independent construction checks on the current part.
     CheckPart,
     ToggleSection,
@@ -1235,6 +1237,7 @@ pub struct Rename {
 pub struct AppState {
     pub doc: Document,
     pub measure: crate::measure::panel::State,
+    pub pmi: crate::pmi::panel::State,
     pub part_check: Option<crate::part_check::Inspection>,
     pub print_check: Option<crate::print_check::Dialog>,
     pub section: crate::section::State,
@@ -1440,6 +1443,7 @@ impl AppState {
         Self {
             doc,
             measure: Default::default(),
+            pmi: Default::default(),
             part_check: None,
             print_check: None,
             section: Default::default(),

@@ -42,9 +42,11 @@ impl SolidDraftApp {
     #[cfg(target_arch = "wasm32")]
     fn needs_exact(&self, action: &AppAction) -> bool {
         match action {
-            AppAction::CheckPart | AppAction::Export { .. } | AppAction::ToggleSection | AppAction::MeasureEntity => {
-                true
-            }
+            AppAction::CheckPart
+            | AppAction::Export { .. }
+            | AppAction::ToggleSection
+            | AppAction::MeasureEntity
+            | AppAction::ToggleManufacturingInformation => true,
             AppAction::StartSketchOn(SketchPlane::Face { .. }) => true,
             AppAction::Command(command) => !self.state.doc.edits_scalar(command),
             _ => false,
@@ -1179,6 +1181,7 @@ impl SolidDraftApp {
                 self.state.rename = None;
             }
             AppAction::MeasureEntity => self.state.measure.open = !self.state.measure.open,
+            AppAction::ToggleManufacturingInformation => self.state.pmi.open = !self.state.pmi.open,
             AppAction::ToggleSection => self.state.section.toggle(&self.state.doc),
             AppAction::ShowMaterial => {
                 self.state.doc.selection = Some(Selection::Body);

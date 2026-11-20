@@ -131,6 +131,15 @@ fn every_tool_runs_without_a_window_and_undoes_as_its_row_says() {
     s.call("feature", json!({ "name": "Boss-Extrude1" }));
     s.call("selection", json!({}));
     s.call("measure", json!({ "a": "Boss-Extrude1 · Start cap", "b": "Boss-Extrude1 · End cap" }));
+    // Manufacturing information: one undo step each, and the part ends as it began.
+    s.call("pmi_add", json!({ "kind": "datum", "faces": ["Boss-Extrude1 · Start cap"] }));
+    s.call("pmi_notes", json!({ "general_tolerance": "ISO 2768-m" }));
+    let listed = s.call("pmi_list", json!({}));
+    assert_eq!(listed["items"][0]["callout"], "Datum A", "{listed}");
+    assert_eq!(listed["notes"]["general_tolerance"], "ISO 2768-m", "{listed}");
+    s.call("pmi_remove", json!({ "name": "Datum A" }));
+    s.call("pmi_notes", json!({ "general_tolerance": "" }));
+    assert_eq!(s.call("pmi_list", json!({}))["items"], json!([]));
     let mass = s.call("mass_properties", json!({ "name": "Boss-Extrude1" }));
     assert!((mass["volume_mm3"].as_f64().unwrap() - 120.0 * 90.0 * 10.0).abs() < 1.0, "{mass}");
 

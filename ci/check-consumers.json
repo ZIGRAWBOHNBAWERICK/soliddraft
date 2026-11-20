@@ -33,6 +33,9 @@
     "ci/browser-documents.mjs": [
       "web"
     ],
+    "ci/browser-manufacturing-information.mjs": [
+      "web"
+    ],
     "ci/browser-edit-off-thread.js": [
       "web"
     ],
@@ -110,6 +113,9 @@
     ],
     "ci/fixtures/pmi/p1-bracket-pmi.json": [
       "step-opencascade"
+    ],
+    "ci/fixtures/pmi/p1-bracket-pmi.step": [
+      "web"
     ],
     "ci/check-step.py": [
       "step-opencascade",

@@ -926,6 +926,21 @@ jobs:
           name: browser-documents
           path: ${{ runner.temp }}/browser-documents
           if-no-files-found: ignore
+      - name: Import a STEP file's manufacturing information, save and reopen it in Chromium
+        timeout-minutes: 15
+        env:
+          CHROME_ARGS: --no-sandbox --enable-unsafe-swiftshader --use-angle=swiftshader
+        run: |
+          python3 -m http.server 8769 --bind 127.0.0.1 --directory target/web-dist > "$RUNNER_TEMP/pmi-server.log" 2>&1 &
+          server=$!
+          trap 'kill "$server"' EXIT
+          node ci/browser-manufacturing-information.mjs /usr/bin/google-chrome http://127.0.0.1:8769/ "$RUNNER_TEMP/browser-manufacturing-information" ci/fixtures/pmi/p1-bracket-pmi.step
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-manufacturing-information
+          path: ${{ runner.temp }}/browser-manufacturing-information
+          if-no-files-found: ignore
 
   msrv:
     needs: select

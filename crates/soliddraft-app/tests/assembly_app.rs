@@ -216,6 +216,96 @@ fn make_assembly_places_the_open_part() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
+/// The browser has no folder: the parts arrive as files handed to the page, by name and
+/// bytes, and the assembly is opened again from its bytes with them. Here the files exist
+/// only as bytes; the folder they were made in is gone before the assembly sees them.
+#[test]
+fn an_assembly_of_files_handed_over_saves_and_reopens_without_their_folder() {
+    let _turn = turn();
+    let dir = folder("handed-over");
+    let files: Vec<(String, Vec<u8>)> = [("block.dwprt", 40.0, 30.0, 10.0), ("pin.dwprt", 10.0, 10.0, 60.0)]
+        .into_iter()
+        .map(|(name, w, d, h)| {
+            let path = part(&dir.join("parts").join(name), w, d, h);
+            (name.to_owned(), std::fs::read(path).unwrap())
+        })
+        .collect();
+    std::fs::remove_dir_all(dir.join("parts")).unwrap();
+    let mut state = AppState::new(soliddraft_app::new_document());
+    let mut dock = DockState::new(vec![Tab::Viewport]);
+    let ctx = egui::Context::default();
+
+    // Inserted from their bytes, with no assembly open first: the note says to start one.
+    assembly::insert_bytes(&mut state, files.clone());
+    assert!(state.assembly.session.is_none() && state.assembly.held.is_empty());
+    assembly::apply(&mut state, &mut dock, AssemblyAction::New);
+    assembly::insert_bytes(&mut state, files.clone());
+    session(&mut state).doc.finish_loading();
+    assembly::frame(&mut state, &mut dock, &ctx);
+    let s = session(&mut state);
+    let placed = components(s);
+    assert_eq!(placed.len(), 2, "{placed:?} {:?}", state.note.as_ref().map(|n| n.text.clone()));
+    let s = session(&mut state);
+    assert!(placed[0].0.starts_with("block<") && placed[1].0.starts_with("pin<"), "{placed:?}");
+    assert!(
+        s.doc
+            .store()
+            .iter()
+            .filter(|(_, d)| d.kind == soliddraft_document::DocKind::Part)
+            .all(|(_, d)| d.state == LoadState::DisplayReady)
+    );
+    let paths: Vec<String> = s.doc.assembly().sources.iter().map(|s| s.document.path.clone()).collect();
+    assert_eq!(paths, ["block.dwprt", "pin.dwprt"], "a file handed over is referenced by its name");
+    assert_eq!(state.assembly.held.len(), 2);
+
+    // A move, then a save: the file's bytes, as the browser downloads them.
+    let first = path_of(session(&mut state), 0);
+    let moved = Placement::translation(DVec3::new(0.0, 0.0, 5.0));
+    assembly::apply(&mut state, &mut dock, AssemblyAction::Place(first, moved));
+    let file = dir.join("rig.dwasm");
+    assembly::apply(&mut state, &mut dock, AssemblyAction::Save(Some(file.clone())));
+    let bytes = std::fs::read(&file).unwrap();
+    let saved = components(session(&mut state));
+
+    // Opened again from its bytes, with the parts handed over beside it, as File > Open
+    // takes several files in the browser: found, current, at the saved placements.
+    let mut state = AppState::new(soliddraft_app::new_document());
+    assembly::hold_all(&mut state, &files);
+    assembly::open_bytes(&mut state, "rig.dwasm", bytes.clone());
+    wait_open(&mut state, &mut dock, &ctx);
+    let reopened = components(session(&mut state));
+    assert_eq!(reopened.len(), 2);
+    for ((l0, p0), (l1, p1)) in saved.iter().zip(&reopened) {
+        assert_eq!(l0, l1);
+        assert!(close(*p0, *p1), "{l0}: {p0:?} {p1:?}");
+    }
+    let shown = assembly::shown(&state);
+    assert_eq!(shown["open"], true);
+    assert_eq!(shown["name"], "Assembly1");
+    assert_eq!(shown["dirty"], false);
+    assert_eq!(shown["components"].as_array().map(Vec::len), Some(2));
+    for c in shown["components"].as_array().unwrap() {
+        assert_eq!(c["state"], "DisplayReady", "{c}");
+        assert_eq!(c["freshness"], "current", "{c}");
+        assert!(c["warning"].is_null(), "{c}");
+    }
+    assert_eq!(shown["components"][0]["translation"], serde_json::json!([0.0, 0.0, 5.0]));
+    assert_eq!(shown["held"], serde_json::json!(["block.dwprt", "pin.dwprt"]));
+
+    // Opened alone: still drawn from the copies the file keeps, each part said to be
+    // missing.
+    let mut state = AppState::new(soliddraft_app::new_document());
+    assembly::open_bytes(&mut state, "rig.dwasm", bytes);
+    wait_open(&mut state, &mut dock, &ctx);
+    let shown = assembly::shown(&state);
+    for c in shown["components"].as_array().unwrap() {
+        assert_eq!(c["state"], "DisplayReady", "{c}");
+        assert_eq!(c["freshness"], "missing", "{c}");
+        assert_eq!(c["warning"], "The file cannot be found; the assembly shows its copy", "{c}");
+    }
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 fn gpu_available() -> bool {
     let _ = env_logger::try_init();
     let instance = egui_wgpu::wgpu::Instance::default();

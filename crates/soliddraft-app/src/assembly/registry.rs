@@ -8,11 +8,6 @@ use soliddraft_assistant::tools::schema::{array, non_empty_array, number, object
 const ASSEMBLY: &str = "It works on the assembly open in the window; soliddraft asm makes, places and saves assembly \
                         files without it";
 
-/// Why an assembly command is off in the browser build, whose loader has no threads.
-fn desktop_only(_: &AppState) -> Option<String> {
-    cfg!(target_arch = "wasm32").then(|| "Assemblies open in the desktop app".to_owned())
-}
-
 fn insert_params() -> Vec<(&'static str, Value)> {
     let placement = object(&[
         ("translation", optional(array(number("mm"), "[x, y, z] in millimetres"))),
@@ -40,13 +35,10 @@ pub(super) fn registry() -> Vec<CommandSpec> {
         cmd("new_assembly", "New assembly", Icon::Tree, "Start a new, empty assembly in a tab beside the part")
             .both()
             .run(|_| AppAction::Assembly(AssemblyAction::New))
-            .when(|_| !cfg!(target_arch = "wasm32"))
-            .hint(desktop_only)
             .app_only(ASSEMBLY),
         cmd("make_assembly", "Make assembly", Icon::Tree, "Start an assembly that places this saved part")
             .run(|_| AppAction::Assembly(AssemblyAction::FromPart))
-            .when(|s| has_body(s) && !cfg!(target_arch = "wasm32"))
-            .hint(desktop_only)
+            .when(has_body)
             .agents(Agents::Mcp, "Places the saved, unmodified part at the origin, floating.", Vec::new)
             .undo(Undo::Step),
         cmd(

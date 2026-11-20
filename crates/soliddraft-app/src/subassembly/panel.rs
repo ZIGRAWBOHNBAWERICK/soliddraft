@@ -33,6 +33,11 @@ pub enum FormAction {
 }
 
 /// The tree's context menu entry for the parts chosen in it.
+/// Why Form subassembly is off in the browser: it writes a new file beside the assembly's,
+/// and a page has no folder to write in.
+pub(crate) const BROWSER: &str =
+    "Form subassembly writes a new assembly file beside this one, which works in the desktop app";
+
 pub fn context_menu(ui: &mut egui::Ui, actions: &mut Vec<AppAction>) {
     if ui.button("Form subassembly…").clicked() {
         actions.push(AppAction::Assembly(AssemblyAction::Form(FormAction::Open)));
@@ -43,6 +48,9 @@ pub fn context_menu(ui: &mut egui::Ui, actions: &mut Vec<AppAction>) {
 pub fn apply(state: &mut AppState, action: FormAction) {
     match action {
         FormAction::Open => {
+            if cfg!(target_arch = "wasm32") {
+                return state.note(BROWSER, NoteKind::Info);
+            }
             let Some(s) = state.assembly.session.as_ref() else { return };
             let chosen = if s.chosen.is_empty() { s.selected.iter().cloned().collect() } else { s.chosen.clone() };
             state.assembly.form = Draft { open: true, document: Some(s.doc.id()), paths: chosen, ..Draft::default() };

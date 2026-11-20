@@ -95,6 +95,11 @@ pub struct AssemblyState {
     pub opening: Option<(PathBuf, Opening)>,
     pub active: bool,
     last_part: Option<soliddraft_document::OpenDocument>,
+    /// The part and assembly files handed to the page this session, as the browser hands
+    /// them over: uploaded to open an assembly with, inserted, or dropped. They count as
+    /// open documents, their bytes held in the revision store, because the page has no
+    /// folder to find them in.
+    pub held: Vec<soliddraft_document::OpenDocument>,
     /// The Mate panel's fields.
     pub mate: crate::mates::Draft,
     /// The Form subassembly panel's fields.
@@ -329,11 +334,12 @@ impl AssemblySession {
 }
 
 /// What opening and inserting may consult: the referenced documents folders, the
-/// revisions this session has seen, and the part's kernel for parts without display
-/// data.
+/// documents open, the revisions this session has seen, and the part's kernel for parts
+/// without display data.
 fn options(state: &AppState) -> OpenOptions {
     OpenOptions {
         search: crate::settings::file_locations().search_folders().to_vec(),
+        open: documents(state),
         revisions: Some(state.revisions.clone()),
         display: Some(Arc::new(KernelSource::new(state.doc.kernel().clone()))),
         check_freshness: true,
@@ -350,12 +356,67 @@ fn open_part(state: &AppState) -> soliddraft_document::OpenDocument {
     }
 }
 
+/// The documents open in this session: the part, then the files handed to the page. The
+/// part comes first, so its unsaved edits count over a file held at an older revision.
+fn documents(state: &AppState) -> Vec<soliddraft_document::OpenDocument> {
+    std::iter::once(open_part(state)).chain(state.assembly.held.iter().cloned()).collect()
+}
+
 pub(crate) fn refresh(state: &mut AppState) {
     let part = open_part(state);
+    let open = documents(state);
     if let Some(session) = state.assembly.session.as_mut() {
-        session.doc.refresh_references(vec![part.clone()]);
+        session.doc.refresh_references(open);
     }
     state.assembly.last_part = Some(part);
+}
+
+/// Holds a part or assembly file handed to the page as an open document, its bytes in the
+/// revision store, in place of an earlier one of the same document.
+fn hold(state: &mut AppState, name: &str, bytes: &[u8]) -> Result<soliddraft_document::Identity, String> {
+    let identity = soliddraft_document::identify(std::io::Cursor::new(bytes)).map_err(|e| format!("{name}: {e}"))?;
+    if !matches!(identity.kind, DocKind::Part | DocKind::Assembly) {
+        return Err(format!("{name}: a {} cannot be placed in an assembly", identity.kind));
+    }
+    state.revisions.record(identity.id, &identity.revision, bytes);
+    state.assembly.held.retain(|d| d.id != identity.id);
+    state.assembly.held.push(soliddraft_document::OpenDocument {
+        id: identity.id,
+        kind: identity.kind,
+        path: Some(PathBuf::from(name)),
+        revision: identity.revision.clone(),
+    });
+    Ok(identity)
+}
+
+/// Holds the part and assembly files handed over with an assembly to open, so it finds
+/// them. Other files are left out, and the note says so.
+pub fn hold_all(state: &mut AppState, files: &[(String, Vec<u8>)]) {
+    let refused: Vec<String> = files.iter().filter_map(|(name, bytes)| hold(state, name, bytes).err()).collect();
+    if let Some(first) = refused.first() {
+        state.note(first.clone(), NoteKind::Error);
+    }
+    refresh(state);
+}
+
+/// Opens an assembly from the bytes of its file, called `name`, as the browser hands it
+/// over. Its parts come from the documents held this session, or show as the copies the
+/// file keeps.
+pub fn open_bytes(state: &mut AppState, name: &str, bytes: Vec<u8>) {
+    #[cfg(target_arch = "wasm32")]
+    crate::documents_browser::remember(name, DocKind::Assembly, &bytes);
+    state.note(format!("Opening {name}…"), NoteKind::Info);
+    let path = PathBuf::from(name);
+    let opening = AssemblyDocument::open_bytes_in_background(bytes, Some(path.clone()), options(state));
+    state.assembly.opening = Some((path, opening));
+}
+
+/// Places files handed to the page, by name and bytes, in the open assembly.
+pub fn insert_bytes(state: &mut AppState, files: Vec<(String, Vec<u8>)>) {
+    if state.assembly.session.is_none() {
+        return state.note("Open or start an assembly to insert parts in", NoteKind::Info);
+    }
+    insert(state, files.into_iter().map(|(name, bytes)| Placing::Bytes(name, bytes)).collect());
 }
 
 pub(crate) fn warning(def: &soliddraft_assembly::Definition) -> Option<String> {
@@ -368,8 +429,19 @@ pub(crate) fn warning(def: &soliddraft_assembly::Definition) -> Option<String> {
 }
 
 fn from_part(state: &mut AppState) -> Result<(), String> {
-    let part =
-        state.doc.path.clone().filter(|_| !state.doc.dirty).ok_or("Save the part before making an assembly of it")?;
+    const SAVE_FIRST: &str = "Save the part before making an assembly of it";
+    if state.doc.dirty {
+        return Err(SAVE_FIRST.into());
+    }
+    // The browser places the part from its bytes: the page has no file to read it from.
+    let part = if cfg!(target_arch = "wasm32") {
+        let bytes = state.doc.model().to_bytes().map_err(|e| e.to_string())?;
+        let name = format!("{}.{}", state.doc.name, crate::file::EXTENSION);
+        hold(state, &name, &bytes)?;
+        Placing::Bytes(name, bytes)
+    } else {
+        Placing::File(state.doc.path.clone().ok_or(SAVE_FIRST)?)
+    };
     let mut session = new_session(state, format!("{} assembly", state.doc.name));
     session.selected = Some(place(&mut session, &*state.revisions, &part, None)?);
     session.doc.finish_loading();
@@ -438,6 +510,65 @@ pub fn frame(state: &mut AppState, dock: &mut DockState<Tab>, ctx: &egui::Contex
     if loaded || state.assembly.last_part.as_ref() != Some(&part) {
         refresh(state);
     }
+    #[cfg(target_arch = "wasm32")]
+    crate::web::show_assembly(shown(state));
+}
+
+/// The open assembly as the window shows it, as JSON, for browser checks: `{"open": false}`
+/// with nothing open, else its `name`, whether it is `active`, `dirty`, `opening` another
+/// or `loading`, each of the root's `components` (`path`, `label`, `state` and
+/// `freshness` of what it places, a `warning` or `problem`, `translation` in millimetres
+/// and `rotation` as `[x, y, z, w]`), the number of `mates`, the Mate panel's picks and
+/// error, and the names of the files `held` for it.
+pub fn shown(state: &AppState) -> serde_json::Value {
+    let held: Vec<String> =
+        state.assembly.held.iter().filter_map(|d| d.path.as_ref().map(|p| p.display().to_string())).collect();
+    let opening = state.assembly.opening.is_some();
+    let Some(s) = state.assembly.session.as_ref() else {
+        return serde_json::json!({ "open": false, "opening": opening, "held": held });
+    };
+    let table = s.doc.table();
+    let components: Vec<serde_json::Value> = s
+        .components()
+        .into_iter()
+        .map(|r| {
+            let def = s.doc.store().get(table.definition(r));
+            let local = table.local(r);
+            let freshness = match &def.freshness {
+                Freshness::Unchecked => "unchecked",
+                Freshness::Current => "current",
+                Freshness::NewerAvailable { .. } => "newer",
+                Freshness::Missing => "missing",
+            };
+            serde_json::json!({
+                "path": table.path(r).to_string(),
+                "label": s.doc.label(r),
+                "state": format!("{:?}", def.state),
+                "freshness": freshness,
+                "warning": warning(def),
+                "problem": def.problem,
+                "translation": local.translation.to_array(),
+                "rotation": local.rotation.to_array(),
+            })
+        })
+        .collect();
+    serde_json::json!({
+        "open": true,
+        "active": state.assembly.is_active(),
+        "name": s.doc.assembly().name,
+        "dirty": s.doc.is_dirty(),
+        "opening": opening,
+        "loading": s.doc.is_loading(),
+        "components": components,
+        "mates": s.doc.assembly().mates.len(),
+        "mate_panel": {
+            "open": state.assembly.mate.open,
+            "a": state.assembly.mate.a.as_ref().map(|p| serde_json::json!({ "component": p.component.0, "face": p.face.label })),
+            "b": state.assembly.mate.b.as_ref().map(|p| serde_json::json!({ "component": p.component.0, "face": p.face.label })),
+            "error": state.assembly.mate.error,
+        },
+        "held": held,
+    })
 }
 
 /// Files dropped on the window: placed in the active assembly, or else the first one
@@ -572,7 +703,7 @@ pub fn apply(state: &mut AppState, dock: &mut DockState<Tab>, action: AssemblyAc
             }) else {
                 return;
             };
-            insert(state, &files);
+            insert(state, files.into_iter().map(Placing::File).collect());
         }
         AssemblyAction::Save(path) => save(state, path),
         AssemblyAction::SaveAs => {
@@ -639,17 +770,45 @@ pub fn apply(state: &mut AppState, dock: &mut DockState<Tab>, action: AssemblyAc
     }
 }
 
+/// A file to place: where it is, or, handed to the page, its name and bytes.
+enum Placing {
+    File(PathBuf),
+    Bytes(String, Vec<u8>),
+}
+
+impl Placing {
+    fn path(&self) -> &Path {
+        match self {
+            Placing::File(path) => path,
+            Placing::Bytes(name, _) => Path::new(name),
+        }
+    }
+}
+
 /// Places each file in the open assembly, pinned at its revision now. The first
-/// component goes at the origin and each later one beside what is there, along x.
-fn insert(state: &mut AppState, files: &[PathBuf]) {
+/// component goes at the origin and each later one beside what is there, along x. A file
+/// handed to the page is held first, so the assembly finds it again.
+fn insert(state: &mut AppState, files: Vec<Placing>) {
+    let mut problems = Vec::new();
+    let mut held = Vec::new();
+    for file in files {
+        match &file {
+            Placing::Bytes(name, bytes) => match hold(state, name, bytes) {
+                Ok(_) => held.push(file),
+                Err(e) => problems.push(e),
+            },
+            Placing::File(_) => held.push(file),
+        }
+    }
+    refresh(state);
     let revisions = state.revisions.clone();
     let Some(s) = state.assembly.session.as_mut() else { return };
     let mut placed = Vec::new();
-    let mut problems = Vec::new();
-    for file in files {
+    let files = held;
+    for file in &files {
         match place(s, &*revisions, file, None) {
             Ok(path) => placed.push(path),
-            Err(e) => problems.push(format!("{}: {}", file.display(), readable(&e))),
+            Err(e) => problems.push(format!("{}: {}", file.path().display(), readable(&e))),
         }
     }
     if let Some(last) = placed.last() {
@@ -659,7 +818,7 @@ fn insert(state: &mut AppState, files: &[PathBuf]) {
     match (placed.len(), problems.first()) {
         (_, Some(p)) => state.note(p.clone(), NoteKind::Error),
         (1, None) => {
-            let name = files[0].file_stem().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            let name = files[0].path().file_stem().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
             state.note(format!("Inserted {name}"), NoteKind::Ok)
         }
         (n, None) => state.note(format!("Inserted {n} components"), NoteKind::Ok),
@@ -668,20 +827,24 @@ fn insert(state: &mut AppState, files: &[PathBuf]) {
 
 /// Places one file: reads it for its id and revision, hands its bytes to the revision
 /// store so an assembly with no folder yet can show it, and places it at `placement`, or
-/// beside what is there.
+/// beside what is there. A file handed to the page is referenced by its name.
 fn place(
     s: &mut AssemblySession,
     revisions: &dyn soliddraft_document::RevisionStore,
-    file: &Path,
+    file: &Placing,
     placement: Option<Placement>,
 ) -> Result<OccurrencePath, String> {
-    let bytes = std::fs::read(file).map_err(|e| e.to_string())?;
+    let (bytes, absolute) = match file {
+        Placing::File(path) => {
+            (std::fs::read(path).map_err(|e| e.to_string())?, std::path::absolute(path).map_err(|e| e.to_string())?)
+        }
+        Placing::Bytes(name, bytes) => (bytes.clone(), PathBuf::from(name)),
+    };
     let identity = soliddraft_document::identify(std::io::Cursor::new(&bytes)).map_err(|e| e.to_string())?;
     if !matches!(identity.kind, DocKind::Part | DocKind::Assembly) {
         return Err(format!("a {} cannot be placed in an assembly", identity.kind));
     }
     revisions.record(identity.id, &identity.revision, &bytes);
-    let absolute = std::path::absolute(file).map_err(|e| e.to_string())?;
     let mut r =
         DocRef::new(identity.id, identity.kind, absolute.to_string_lossy().replace('\\', "/"), identity.revision);
     if let Some(here) = s.doc.path() {
@@ -728,10 +891,27 @@ fn save(state: &mut AppState, path: Option<PathBuf>) {
     if path.is_none() && s.doc.path().is_none() {
         return apply_save_as(state);
     }
-    match s.doc.save(path.as_deref()) {
+    // The browser downloads the file and keeps it for the recent list.
+    let mut written = None;
+    let saved = if cfg!(target_arch = "wasm32") {
+        s.doc.save_with(path.as_deref(), |path, bytes| {
+            crate::platform::write_file(path, bytes).map_err(std::io::Error::other)?;
+            written = Some(bytes.to_vec());
+            Ok(())
+        })
+    } else {
+        s.doc.save(path.as_deref())
+    };
+    match saved {
         Ok(saved) => {
-            if let Ok(bytes) = std::fs::read(&saved) {
+            if let Some(bytes) = written.or_else(|| std::fs::read(&saved).ok()) {
                 state.revisions.record(s.doc.id(), &s.doc.revision(), &bytes);
+                #[cfg(target_arch = "wasm32")]
+                crate::documents_browser::remember(
+                    &saved.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
+                    DocKind::Assembly,
+                    &bytes,
+                );
             }
             crate::file::remember(&saved);
             state.recent = crate::file::recent();
@@ -758,6 +938,8 @@ pub fn viewport(ui: &mut egui::Ui, state: &mut AppState) {
     let hover_label = s.shown.1.as_ref().and_then(|p| s.doc.table().find(p)).map(|r| s.doc.label(r));
     let empty = s.components().is_empty();
     let events = s.viewport.show_assembly(ui, frame, hover_label.as_deref(), nav);
+    #[cfg(target_arch = "wasm32")]
+    crate::web::show_assembly_view(&s.viewport.camera, s.viewport.rect);
     let picked = |s: &AssemblySession, texel: Option<[u32; 2]>| {
         let scene = s.scene.lock().expect("the scene lock");
         texel.and_then(|t| scene.decode(t)).map(|p| p.occurrence)

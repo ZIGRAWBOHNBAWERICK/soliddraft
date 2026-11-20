@@ -941,6 +941,21 @@ jobs:
           name: browser-manufacturing-information
           path: ${{ runner.temp }}/browser-manufacturing-information
           if-no-files-found: ignore
+      - name: Make, mate, save and reopen an assembly of uploaded parts in Chromium
+        timeout-minutes: 15
+        env:
+          CHROME_ARGS: --no-sandbox --enable-unsafe-swiftshader --use-angle=swiftshader
+        run: |
+          python3 -m http.server 8772 --bind 127.0.0.1 --directory target/web-dist > "$RUNNER_TEMP/assemblies-server.log" 2>&1 &
+          server=$!
+          trap 'kill "$server"' EXIT
+          node ci/browser-assemblies.mjs /usr/bin/google-chrome http://127.0.0.1:8772/ "$RUNNER_TEMP/browser-assemblies" site/parts/tray.dwprt site/parts/collar.dwprt
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-assemblies
+          path: ${{ runner.temp }}/browser-assemblies
+          if-no-files-found: ignore
 
   msrv:
     needs: select

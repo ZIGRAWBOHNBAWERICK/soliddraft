@@ -13,7 +13,8 @@
 //! as bounding boxes, and writes the rest into per-definition lists. Each pass then
 //! draws the meshes with one `multi_draw_indexed_indirect` call and the boxes with one
 //! more. Elsewhere (WebGL2) every instance is drawn with one `draw_indexed` per
-//! definition. The id pass writes the occurrence's row and the face into the
+//! definition. WebGL2 has no base vertex either, so there each mesh's indices are written
+//! with its offset in the vertex pool already added. The id pass writes the occurrence's row and the face into the
 //! `Rg32Uint` id target either way.
 //!
 //! When culling, each instance also picks one of its definition's three display levels
@@ -718,6 +719,16 @@ impl AssemblyRenderer {
             None
         } else {
             let vat = self.vertices.push(device, queue, encoder, bytemuck::cast_slice(&all_verts));
+            // WebGL2 has no base vertex: its indices are written already offset to their
+            // mesh's vertices, and drawn from vertex 0.
+            if let Some(vat) = vat.filter(|_| !self.multi_draw) {
+                let base = vat / std::mem::size_of::<Vertex>() as u64;
+                for &(_, _, v, i0, count, _) in &placed {
+                    for index in &mut all_idx[i0..i0 + count] {
+                        *index += (base + v as u64) as u32;
+                    }
+                }
+            }
             let iat = vat.and_then(|_| self.indices.push(device, queue, encoder, bytemuck::cast_slice(&all_idx)));
             vat.zip(iat)
         };
@@ -731,7 +742,7 @@ impl AssemblyRenderer {
                     self.meshes.resize(i + 1, [None; LEVELS]);
                 }
                 self.meshes[i][level.index()] = Some(MeshRange {
-                    base_vertex: (base + v as u64) as i32,
+                    base_vertex: if self.multi_draw { (base + v as u64) as i32 } else { 0 },
                     first_index: (iat / 4) as u32 + i0 as u32,
                     index_count: count as u32,
                     lo: b.min.as_vec3().to_array(),

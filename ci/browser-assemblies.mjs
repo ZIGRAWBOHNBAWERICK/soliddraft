@@ -1,0 +1,346 @@
+// Assemblies in the browser build, driven in headless Chrome as a visitor drives them.
+// Usage: node ci/browser-assemblies.mjs CHROME URL OUTDIR TRAY COLLAR
+//
+// TRAY and COLLAR are part files (site/parts/tray.dwprt and collar.dwprt). The page has no
+// folder, so every part reaches it as a file handed over. The visitor starts a new
+// assembly from the start page, inserts both parts with one upload and the tray again
+// with a second, and mates the second tray's underside onto the first tray's floor, picked
+// in the viewport from above and from below: the later feature on top, which needs each
+// tray's exact solid from the bytes the page holds. The visitor saves the assembly (a
+// download), loads the site again and opens the saved file with the two part files in
+// one upload: the same three components at the same placements, the mate kept, every
+// part found at the revision it pins. Last, the saved file opens alone: the parts still
+// show, from the copies the file keeps, and each says its file cannot be found.
+//
+// The app draws into one canvas and takes only trusted input: keys and clicks sent as the
+// browser's own, through the DevTools protocol. The canvas has no text to read, so the
+// check reads the assembly through the read-only `shown_assembly` export, and finds a
+// face's place on screen through `assembly_screen_point`. Commands run through the
+// command palette by name; Enter adds the mate the Mate panel holds. The clicks go to the
+// start page's New assembly and Open tiles at fixed points of a 1400 x 813 page.
+
+import { spawn } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+
+const [chrome, url, out, tray, collar] = process.argv.slice(2);
+if (!chrome || !url || !out || !tray || !collar) {
+  throw new Error('usage: browser-assemblies.mjs CHROME URL OUTDIR TRAY COLLAR');
+}
+fs.mkdirSync(out, { recursive: true });
+const downloads = path.join(path.resolve(out), 'downloads');
+fs.rmSync(downloads, { recursive: true, force: true });
+fs.mkdirSync(downloads, { recursive: true });
+const SIZE = { width: 1400, height: 813 };
+const NEW_ASSEMBLY = [304, 145];
+const OPEN = [663, 147];
+// The tray is 60 x 40 x 20 mm, open at the top, with 2 mm walls: its floor is 2 mm up.
+const FLOOR = 2;
+
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+function check(value, message) { if (!value) throw new Error(message); }
+const started = Date.now();
+function step(what) { console.error(`[${((Date.now() - started) / 1000).toFixed(1)} s] ${what}`); }
+const extra = (process.env.CHROME_ARGS || '').split(/\s+/).filter(Boolean);
+
+const loaded = shown => shown.open && !shown.opening && !shown.loading;
+const parts = shown => shown.components.map(c => c.label.replace(/<.*/, ''));
+function placements(shown) { return shown.components.map(c => [c.translation, c.rotation]); }
+function near(a, b) { const [p, q] = [a.flat(2), b.flat(2)]; return p.length === q.length && p.every((x, i) => Math.abs(x - q[i]) < 1e-6); }
+
+class Browser {
+  constructor(profile) {
+    this.profile = profile;
+    this.process = spawn(chrome, [
+      '--headless=new', '--remote-debugging-port=0', `--user-data-dir=${profile}`,
+      '--no-first-run', '--no-default-browser-check', `--window-size=${SIZE.width},${SIZE.height}`, ...extra, 'about:blank',
+    ], { stdio: ['ignore', 'ignore', 'pipe'] });
+    this.stderr = '';
+    this.process.stderr.on('data', d => { this.stderr += d; });
+    this.events = [];
+  }
+
+  async connect() {
+    const file = path.join(this.profile, 'DevToolsActivePort');
+    let port;
+    for (let t = 0; t < 100 && !port; t++) {
+      if (fs.existsSync(file)) [port] = fs.readFileSync(file, 'utf8').split('\n');
+      if (!port) await sleep(100);
+    }
+    check(port, 'Chrome did not open its DevTools port');
+    const version = await (await fetch(`http://127.0.0.1:${port}/json/version`)).json();
+    this.ws = new WebSocket(version.webSocketDebuggerUrl);
+    await new Promise((resolve, reject) => { this.ws.onopen = resolve; this.ws.onerror = reject; });
+    this.id = 0;
+    this.waiting = new Map();
+    this.ws.onmessage = event => {
+      const m = JSON.parse(event.data);
+      if (m.id && this.waiting.has(m.id)) {
+        const { resolve, reject } = this.waiting.get(m.id);
+        this.waiting.delete(m.id);
+        if (m.error) reject(new Error(`${m.error.message} ${m.error.data || ''}`)); else resolve(m.result);
+      } else if (m.method) {
+        this.events.push(m);
+      }
+    };
+    return this;
+  }
+
+  send(method, params = {}, sessionId) {
+    return new Promise((resolve, reject) => {
+      const n = ++this.id;
+      this.waiting.set(n, { resolve, reject });
+      this.ws.send(JSON.stringify({ id: n, method, params, sessionId }));
+    });
+  }
+
+  async visitor() {
+    const { targetId } = await this.send('Target.createTarget', { url: 'about:blank' });
+    const { sessionId } = await this.send('Target.attachToTarget', { targetId, flatten: true });
+    const call = (method, params) => this.send(method, params, sessionId);
+    const events = this.events;
+    await call('Page.enable');
+    await call('Emulation.setDeviceMetricsOverride', { ...SIZE, deviceScaleFactor: 1, mobile: false });
+    // The app draws on animation frames, which a page in the background does not get.
+    await call('Emulation.setFocusEmulationEnabled', { enabled: true });
+    await call('Page.bringToFront');
+    await this.send('Browser.setDownloadBehavior', { behavior: 'allow', downloadPath: downloads, eventsEnabled: true });
+    const v = {
+      async eval(expression) {
+        const r = await call('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true });
+        if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description || r.exceptionDetails.text);
+        return r.result.value;
+      },
+      async load() {
+        await call('Page.bringToFront');
+        await call('Page.navigate', { url });
+        for (let t = 0; t < 240; t++) {
+          await sleep(500);
+          const ready = await v.eval(`document.readyState === 'complete' && !!document.querySelector('#status.hidden')`).catch(() => false);
+          if (ready) {
+            await sleep(3000);
+            return;
+          }
+        }
+        await v.shot('not-started');
+        throw new Error('the app did not start');
+      },
+      async frames(n = 3) {
+        await v.eval(`new Promise(done => { let left = ${n}; const tick = () => --left ? requestAnimationFrame(tick) : done(); requestAnimationFrame(tick); })`);
+      },
+      async settle(ms) {
+        await sleep(ms);
+        await v.frames();
+      },
+      async click([x, y]) {
+        await call('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y });
+        await v.settle(300);
+        await call('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount: 1 });
+        await sleep(80);
+        await call('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', buttons: 0, clickCount: 1 });
+        await v.settle(600);
+      },
+      // A click on a face in the viewport. The pointer rests on it first, so the id
+      // buffer read back around it is current, and the press and release go together:
+      // a software renderer can take a second a frame, and a press held across frames
+      // reads as the start of a drag.
+      async pick([x, y]) {
+        await call('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y });
+        await v.settle(1500);
+        await call('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount: 1 });
+        await call('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', buttons: 0, clickCount: 1 });
+        await v.settle(1000);
+      },
+      async key(key, code, keyCode, modifiers = 0, text) {
+        const base = { key, code, windowsVirtualKeyCode: keyCode, nativeVirtualKeyCode: keyCode, modifiers };
+        await call('Input.dispatchKeyEvent', { type: text ? 'keyDown' : 'rawKeyDown', ...base, text });
+        await call('Input.dispatchKeyEvent', { type: 'keyUp', ...base });
+        await v.settle(600);
+      },
+      // Ctrl+Shift+P, the command's name, Enter.
+      async command(name, enter = () => v.key('Enter', 'Enter', 13, 0, '\r')) {
+        await call('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 1000, y: 450 });
+        await v.key('P', 'KeyP', 80, 2 | 8, 'P');
+        for (const ch of name) {
+          await call('Input.dispatchKeyEvent', { type: 'char', text: ch });
+          await sleep(30);
+        }
+        await v.settle(500);
+        await enter();
+      },
+      // Runs `trigger`, which opens a file dialog, and answers the dialog with `files`.
+      async choose(files, trigger) {
+        await call('Page.setInterceptFileChooserDialog', { enabled: true });
+        const from = events.length;
+        await trigger();
+        for (let t = 0; t < 100; t++) {
+          const opened = events.slice(from).find(e => e.method === 'Page.fileChooserOpened');
+          if (opened) {
+            await call('DOM.setFileInputFiles', { files: [files].flat().map(f => path.resolve(f)), backendNodeId: opened.params.backendNodeId });
+            await call('Page.setInterceptFileChooserDialog', { enabled: false });
+            await v.settle(1500);
+            return;
+          }
+          await sleep(100);
+        }
+        await v.shot('no-file-dialog');
+        throw new Error('no file dialog opened');
+      },
+      // Runs `trigger` and waits for the download it starts; answers the file's path.
+      async download(label, trigger) {
+        const from = events.length;
+        await trigger();
+        for (let t = 0; t < 600; t++) {
+          const mine = events.slice(from);
+          const begun = mine.find(e => e.method === 'Browser.downloadWillBegin');
+          const done = begun && mine.find(e => e.method === 'Browser.downloadProgress' && e.params.guid === begun.params.guid && e.params.state === 'completed');
+          if (done) {
+            // Chrome keeps the file under its download id.
+            const kept = path.join(downloads, begun.params.guid);
+            const named = path.join(downloads, begun.params.suggestedFilename);
+            if (fs.existsSync(kept)) fs.renameSync(kept, named);
+            check(fs.existsSync(named), `${label}: ${begun.params.suggestedFilename} is not in ${downloads}`);
+            return named;
+          }
+          await v.stopped(label);
+          await sleep(200);
+        }
+        await v.shot(`no-download-${label}`);
+        throw new Error(`${label}: no download arrived`);
+      },
+      // The page shows its status element again when it stops.
+      async stopped(label) {
+        const status = await v.eval(`(() => { const s = document.getElementById('status'); return s.classList.contains('hidden') ? null : s.textContent; })()`);
+        check(status === null, `${label}: the page stopped: ${status}`);
+      },
+      // The assembly as the last frame showed it, once `done` says it is what the step
+      // waits for.
+      async assembly(label, done) {
+        let shown = null;
+        for (let t = 0; t < 900; t++) {
+          await v.stopped(label);
+          const text = await v.eval(`window.wasmBindings.shown_assembly()`);
+          shown = text ? JSON.parse(text) : null;
+          if (shown && done(shown)) return shown;
+          await sleep(200);
+        }
+        await v.shot(`assembly-${label}`);
+        throw new Error(`${label}: the assembly is ${JSON.stringify(shown)}`);
+      },
+      // Where a point of the assembly was drawn, in the page's pixels.
+      async screen(x, y, z) {
+        const at = await v.eval(`(() => { const p = window.wasmBindings.assembly_screen_point(${x}, ${y}, ${z}); return p ? Array.from(p) : null; })()`);
+        check(at, `the point (${x}, ${y}, ${z}) is not on screen`);
+        return at;
+      },
+      async shot(label) {
+        const { data } = await call('Page.captureScreenshot', { format: 'png' });
+        fs.writeFileSync(path.join(out, `${label}.png`), Buffer.from(data, 'base64'));
+      },
+    };
+    return v;
+  }
+
+  // Chromium's helpers still write into the profile until the browser exits, so wait for it.
+  async close() {
+    this.ws?.close();
+    if (this.process.exitCode !== null || this.process.signalCode !== null) return;
+    const exited = new Promise(resolve => this.process.once('exit', resolve));
+    this.process.kill('SIGKILL');
+    await Promise.race([exited, new Promise(resolve => setTimeout(resolve, 10000))]);
+  }
+}
+
+const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'soliddraft-assemblies-'));
+let browser;
+
+async function main() {
+  browser = await new Browser(profile).connect();
+  const v = await browser.visitor();
+  step('load the site');
+  await v.load();
+  check(await v.eval(`typeof window.wasmBindings.shown_assembly === 'function' && typeof window.wasmBindings.assembly_screen_point === 'function'`), 'the build has no assembly exports');
+
+  // New assembly from the start page, then both parts in one upload.
+  step('new assembly');
+  await v.click(NEW_ASSEMBLY);
+  await v.assembly('new', s => s.open && s.active && s.components.length === 0);
+  step('insert the tray and the collar');
+  await v.choose([tray, collar], () => v.command('Insert component'));
+  let shown = await v.assembly('inserted', s => loaded(s) && s.components.length === 2);
+  check(JSON.stringify(parts(shown)) === '["tray","collar"]', `the components are ${parts(shown)}`);
+  check(shown.components.every(c => c.state === 'DisplayReady'), `not every part shows: ${JSON.stringify(shown.components)}`);
+  check(JSON.stringify(shown.held) === '["tray.dwprt","collar.dwprt"]', `the page holds ${shown.held}`);
+  step('insert the tray again');
+  await v.choose(tray, () => v.command('Insert component'));
+  shown = await v.assembly('inserted again', s => loaded(s) && s.components.length === 3);
+  check(JSON.stringify(parts(shown)) === '["tray","collar","tray"]', `the components are ${parts(shown)}`);
+  await v.shot('1-inserted');
+
+  // The later feature on top: a mate, picked in the viewport.
+  step('mate the second tray onto the first one\'s floor');
+  await v.command('Mate');
+  await v.assembly('mate panel', s => s.mate_panel.open);
+  const [first, , second] = shown.components.map(c => c.translation);
+  await v.command('Top');
+  await v.command('Fit');
+  await v.pick(await v.screen(first[0], first[1], first[2] + FLOOR));
+  shown = await v.assembly('first pick', s => s.mate_panel.a);
+  await v.command('Bottom');
+  await v.command('Fit');
+  await v.pick(await v.screen(second[0], second[1], second[2]));
+  shown = await v.assembly('second pick', s => s.mate_panel.b);
+  check(shown.mate_panel.a.component !== shown.mate_panel.b.component, `both picks are on one component: ${JSON.stringify(shown.mate_panel)}`);
+  await v.shot('2-picked');
+  await v.key('Enter', 'Enter', 13, 0, '\r');
+  shown = await v.assembly('mated', s => s.mates === 1 || s.mate_panel.error);
+  check(shown.mates === 1, `the mate was refused: ${shown.mate_panel.error}`);
+  const [a, , b] = shown.components.map(c => c.translation);
+  check(Math.abs(b[2] - a[2] - FLOOR) < 1e-9, `the second tray stands ${b[2] - a[2]} mm above the first, not ${FLOOR}`);
+  await v.command('Isometric');
+  await v.command('Fit');
+  await v.shot('3-mated');
+  const mated = shown;
+
+  // Save (a download), load the site afresh, open the file with its parts.
+  step('save');
+  const saved = await v.download('save', () => v.key('s', 'KeyS', 83, 2, 's'));
+  check(saved.endsWith('.dwasm'), `the assembly saves as a .dwasm file, not ${saved}`);
+  shown = await v.assembly('saved', s => !s.dirty);
+  step('load the site again and open the saved assembly with its parts');
+  await v.load();
+  await v.choose([saved, tray, collar], () => v.click(OPEN));
+  shown = await v.assembly('reopened', s => loaded(s) && s.components.length === 3 && s.components.every(c => c.freshness !== 'unchecked'));
+  check(JSON.stringify(parts(shown)) === JSON.stringify(parts(mated)), `the reopened components are ${parts(shown)}`);
+  check(near(placements(shown), placements(mated)), `the reopened placements are ${JSON.stringify(placements(shown))}, not ${JSON.stringify(placements(mated))}`);
+  check(shown.mates === 1, `the reopened assembly has ${shown.mates} mates`);
+  check(shown.components.every(c => c.state === 'DisplayReady' && c.freshness === 'current' && !c.warning), `not every part is found: ${JSON.stringify(shown.components)}`);
+  await v.shot('4-reopened');
+  const reopened = shown;
+
+  // The file alone: its copies show, and each part says its file is not here.
+  step('load the site again and open the saved assembly alone');
+  await v.load();
+  await v.choose(saved, () => v.click(OPEN));
+  shown = await v.assembly('alone', s => loaded(s) && s.components.length === 3 && s.components.every(c => c.freshness !== 'unchecked'));
+  check(near(placements(shown), placements(mated)), `alone, the placements are ${JSON.stringify(placements(shown))}`);
+  check(shown.components.every(c => c.state === 'DisplayReady' && c.freshness === 'missing' && c.warning), `alone, the parts are ${JSON.stringify(shown.components)}`);
+  await v.settle(1000);
+  await v.stopped('at the end');
+  await v.shot('5-alone');
+
+  fs.writeFileSync(path.join(out, 'assemblies.json'), JSON.stringify({ mated, reopened, alone: shown, saved: path.basename(saved) }, null, 1));
+  console.log(`Assemblies in the browser: three components from two uploads, a mate picked in the viewport putting the second tray ${FLOOR} mm up on the first one's floor, saved as ${path.basename(saved)}, reopened with its parts at the same placements with the mate kept, and opened alone from the copies it keeps.`);
+}
+
+try {
+  await main();
+} catch (error) {
+  console.error(error.stack || String(error));
+  if (browser?.stderr) console.error(browser.stderr.split('\n').slice(-20).join('\n'));
+  process.exitCode = 1;
+} finally {
+  await browser?.close();
+  fs.rmSync(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+}

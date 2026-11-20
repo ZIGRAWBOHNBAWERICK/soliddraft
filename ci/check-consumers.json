@@ -33,6 +33,9 @@
     "ci/browser-documents.mjs": [
       "web"
     ],
+    "ci/browser-assemblies.mjs": [
+      "web"
+    ],
     "ci/browser-manufacturing-information.mjs": [
       "web"
     ],

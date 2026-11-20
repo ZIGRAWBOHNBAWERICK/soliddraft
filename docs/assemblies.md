@@ -311,6 +311,14 @@ Opening never waits for meshes or for other files.
 frame never pays for more than it asked. Once loading is done the bounding volume
 hierarchy is built on another thread.
 
+`OpenOptions::same_thread` runs every phase on the caller's thread instead: each event
+`poll` asks for runs the next step, one part's display mesh, the sub-assemblies'
+freshness, or a batch of parts' freshness, so a frame's budget still bounds the wait. The
+coarse and fine levels load one per poll, `open_in_background` reads the structure on the
+first `Opening::try_take`, and the bounding volume hierarchy is built once loading is
+done. The browser always loads this way; the document, its meshes and its freshness are
+the same as with the loader's threads (`tests/same_thread.rs`).
+
 When the file has no copy of a pinned revision, the loader tries, in order: the copies
 of the sub-assembly files it has opened, the referenced file if it is still at that
 revision, the revision store, and last the referenced file at its current revision,
@@ -318,6 +326,13 @@ which marks the definition stale. For a part, those three read the part file's o
 display data first (`FileSource` reads only that and needs no kernel); `KernelSource`
 rebuilds the part on a kernel when the file has none for its current shape. Without any
 of them the definition fails and the rest of the assembly opens.
+
+A document open in the session whose file cannot be read is read from the revision store
+at the revision it is open at. That is how the browser works without a folder: each file
+handed to the page is an open document named by its file name, and its bytes are held in
+the store, so loading, freshness, Rebuild and exact work find it there
+(`AssemblyDocument::open_bytes_in_background` opens an assembly from its bytes, and
+`save_with` saves one to bytes).
 
 Exact work (measure, mass, drawing projection) asks for a part's kernel body with
 `AssemblyDocument::exact`. That reads the part at the pinned revision; when the document
@@ -516,9 +531,10 @@ exits with status 1 and writes nothing to the assembly file.
 
 ## In the app
 
-The desktop app opens one assembly at a time, in a tab beside the part
+The app opens one assembly at a time, in a tab beside the part
 (`crates/soliddraft-app/src/assembly.rs`). While that tab is active the ribbon, the tree,
-the property panel and the status bar are the assembly's.
+the property panel and the status bar are the assembly's. The browser app works the same
+way with files handed to the page in place of a folder; see [web.md](web.md).
 
 - **File > New assembly** starts an empty assembly. **File > Make assembly from part**
   saves the open part if it has unsaved changes, then starts an assembly that places it

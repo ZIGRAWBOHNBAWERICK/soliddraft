@@ -28,6 +28,8 @@ pub(crate) fn commands() -> Vec<CommandSpec> {
             "Move the selected parts into a new assembly file placed where they were",
         )
         .assembly()
+        .when(|_| !cfg!(target_arch = "wasm32"))
+        .hint(|_| cfg!(target_arch = "wasm32").then(|| super::panel::BROWSER.to_owned()))
         .agents(
             Agents::Mcp,
             "Writes the new file without replacing any, keeps every mate and reference and \

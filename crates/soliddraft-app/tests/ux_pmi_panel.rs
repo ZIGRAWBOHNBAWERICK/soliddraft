@@ -349,7 +349,15 @@ fn a_person_puts_the_bracket_s_fourteen_items_on_its_faces() {
         press(app, "From");
         pick(app, &slot_low);
         pick(app, &slot_high);
-        press(app, "Middle");
+        // The form has the choice twice: where the distance starts and, below it, where
+        // it ends. The slot's centre is where it ends.
+        let ends_at = app
+            .get_all_by_role_and_label(egui::accesskit::Role::Button, "Middle")
+            .map(|node| node.rect())
+            .max_by(|a, b| a.top().total_cmp(&b.top()))
+            .expect("the form offers the middle of two faces");
+        ribbon::click_at(app, ends_at.center());
+        app.run_steps(4);
         ribbon::type_field(app, "Tolerance", "\u{b1}0.1");
         ribbon::type_field(app, "Item name", "Slot height");
         add(app);

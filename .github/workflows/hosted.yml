@@ -941,8 +941,8 @@ jobs:
           name: browser-manufacturing-information
           path: ${{ runner.temp }}/browser-manufacturing-information
           if-no-files-found: ignore
-      - name: Make, mate, save and reopen an assembly of uploaded parts, and add a Universal Joint, in Chromium
-        timeout-minutes: 25
+      - name: Make, mate, save and reopen an assembly of uploaded parts, add a Universal Joint, and choose between uploaded assemblies, in Chromium
+        timeout-minutes: 30
         env:
           CHROME_ARGS: --no-sandbox --enable-unsafe-swiftshader --use-angle=swiftshader
         run: |

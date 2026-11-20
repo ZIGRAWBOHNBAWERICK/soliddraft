@@ -20,6 +20,12 @@
 // tan(output) = tan(input) / cos(40 degrees). The joint is saved and reopened with its
 // parts.
 //
+// Last, a parent assembly that places the saved tray assembly is opened from one upload
+// that lists that child first, with the tray and collar parts. Neither opens on its own:
+// the page asks which one to open, the visitor chooses the parent, and it opens with the
+// child and its parts found. Then one later feature on top: the tray inserted in the
+// parent the choice opened.
+//
 // The app draws into one canvas and takes only trusted input: keys and clicks sent as the
 // browser's own, through the DevTools protocol. The canvas has no text to read, so the
 // check reads the assembly through the read-only `shown_assembly` export, and finds a
@@ -379,9 +385,10 @@ async function main() {
   const alone = shown;
 
   const joint = await universalJoint(v);
+  const choice = await chosenAssembly(v, saved, [tray, collar]);
 
-  fs.writeFileSync(path.join(out, 'assemblies.json'), JSON.stringify({ mated, reopened, alone, saved: path.basename(saved), joint }, null, 1));
-  console.log(`Assemblies in the browser: three components from two uploads, a mate picked in the viewport putting the second tray ${FLOOR} mm up on the first one's floor, saved as ${path.basename(saved)}, reopened with its parts at the same placements with the mate kept, and opened alone from the copies it keeps. A Universal Joint picked between two shafts meeting at ${BEND} degrees drove the output ${joint.follows.toFixed(6)} degrees for a ${TURN} degree input turn, and reopened with its parts.`);
+  fs.writeFileSync(path.join(out, 'assemblies.json'), JSON.stringify({ mated, reopened, alone, saved: path.basename(saved), joint, choice }, null, 1));
+  console.log(`Assemblies in the browser: three components from two uploads, a mate picked in the viewport putting the second tray ${FLOOR} mm up on the first one's floor, saved as ${path.basename(saved)}, reopened with its parts at the same placements with the mate kept, and opened alone from the copies it keeps. A Universal Joint picked between two shafts meeting at ${BEND} degrees drove the output ${joint.follows.toFixed(6)} degrees for a ${TURN} degree input turn, and reopened with its parts. A parent and its child assembly uploaded child first opened the parent the visitor chose, with ${choice.chosen.held.length} files held for it, and took a tray inserted on top.`);
 }
 
 // The rig's shafts: the input (component 4) on a hinge at (10, 5, 0) along Z, the output
@@ -462,6 +469,61 @@ async function universalJoint(v) {
   await v.stopped('joint at the end');
   await v.shot('9-joint-reopened');
   return { driven, reopened: shown, follows: follows * 180 / Math.PI, saved: path.basename(saved) };
+}
+
+// A parent assembly placing the assembly `saved`, opened from one upload that lists that
+// child first, with `files`, the parts the child places. Neither assembly opens until the
+// visitor chooses the parent.
+async function chosenAssembly(v, saved, files) {
+  const named = file => path.basename(file);
+  // The parent downloads under the name the child did, so each gets a name of its own.
+  const child = path.join(downloads, 'child.dwasm');
+  fs.copyFileSync(saved, child);
+  step('load the site again and start a parent assembly that places a saved assembly');
+  await v.load();
+  await v.click(NEW_ASSEMBLY);
+  await v.assembly('parent new', s => s.open && s.active && s.components.length === 0);
+  await v.choose(child, () => v.command('Insert component'));
+  await v.assembly('parent', s => loaded(s) && s.components.length === 1 && s.components.every(c => c.freshness !== 'unchecked'));
+  const made = await v.download('save parent', () => v.key('s', 'KeyS', 83, 2, 's'));
+  await v.assembly('parent saved', s => !s.dirty);
+  const parent = path.join(downloads, 'parent.dwasm');
+  fs.renameSync(made, parent);
+
+  step('load the site again and open the child, the parent and the parts, the child first');
+  await v.load();
+  await v.choose([child, parent, ...files], () => v.click(OPEN));
+  let shown = await v.assembly('choosing', s => !s.open && !s.opening && s.choosing?.length > 0);
+  check(JSON.stringify(shown.choosing) === '["child.dwasm","parent.dwasm"]', `the page offers ${shown.choosing}`);
+  check(shown.held.length === 0, `the page holds ${shown.held} before a choice`);
+  await v.settle(1000);
+  const choosing = JSON.parse(await v.eval(`window.wasmBindings.shown_assembly()`));
+  check(!choosing.open && !choosing.opening, `an assembly opened before the choice: ${JSON.stringify(choosing)}`);
+  await v.shot('10-choose');
+
+  step('choose the parent');
+  await v.click(await v.control('Open assembly: parent.dwasm'));
+  shown = await v.assembly('chosen', s => loaded(s) && s.components.length === 1 && s.components.every(c => c.freshness !== 'unchecked'));
+  check(shown.file === 'parent.dwasm', `${shown.file} opened, not parent.dwasm`);
+  check(shown.choosing.length === 0, `the page still offers ${shown.choosing}`);
+  const held = JSON.stringify(['child.dwasm', ...files.map(named)]);
+  check(JSON.stringify(shown.held) === held, `the page holds ${shown.held}, not ${held}`);
+  const [sub] = shown.components;
+  check(sub.state === 'DisplayReady' && sub.freshness === 'current' && !sub.warning, `the child is ${JSON.stringify(sub)}`);
+  await v.shot('11-chosen');
+  const chosen = shown;
+
+  // One later feature on top: a part inserted in the parent the choice opened.
+  const part = files[0];
+  step(`insert ${named(part)} in the parent`);
+  await v.choose(part, () => v.command('Insert component'));
+  shown = await v.assembly('inserted', s => loaded(s) && s.components.length === 2 && s.components.every(c => c.freshness !== 'unchecked'));
+  check(shown.file === 'parent.dwasm' && shown.dirty, `the part went to ${shown.file}, dirty ${shown.dirty}`);
+  const stem = named(part).replace(/\.dwprt$/, '');
+  check(parts(shown)[1] === stem && shown.components[1].freshness === 'current', `the inserted component is ${JSON.stringify(shown.components[1])}`);
+  await v.stopped('chosen at the end');
+  await v.shot('12-inserted');
+  return { choosing, chosen, inserted: shown };
 }
 
 try {

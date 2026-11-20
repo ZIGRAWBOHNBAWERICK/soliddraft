@@ -306,6 +306,73 @@ fn an_assembly_of_files_handed_over_saves_and_reopens_without_their_folder() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
+/// A parent assembly and the child assembly it places, uploaded together with the child
+/// listed first, as a browser hands over files in whatever order they were picked.
+/// Neither opens on its own: the visitor chooses, and the parent opens with the child and
+/// its parts held for it.
+#[test]
+fn uploaded_assemblies_open_the_one_chosen() {
+    let _turn = turn();
+    let dir = folder("chosen");
+    let parts: Vec<(String, Vec<u8>)> = [("block.dwprt", 40.0, 30.0, 10.0), ("pin.dwprt", 10.0, 10.0, 60.0)]
+        .into_iter()
+        .map(|(name, w, d, h)| {
+            let path = part(&dir.join("parts").join(name), w, d, h);
+            (name.to_owned(), std::fs::read(path).unwrap())
+        })
+        .collect();
+    std::fs::remove_dir_all(dir.join("parts")).unwrap();
+    let mut dock = DockState::new(vec![Tab::Viewport]);
+    let ctx = egui::Context::default();
+    let saved = |state: &mut AppState, dock: &mut DockState<Tab>, name: &str| {
+        let file = dir.join(name);
+        assembly::apply(state, dock, AssemblyAction::Save(Some(file.clone())));
+        (name.to_owned(), std::fs::read(file).unwrap())
+    };
+
+    // The child places both parts; the parent places the child.
+    let mut state = AppState::new(soliddraft_app::new_document());
+    assembly::apply(&mut state, &mut dock, AssemblyAction::New);
+    assembly::insert_bytes(&mut state, parts.clone());
+    session(&mut state).doc.finish_loading();
+    assembly::frame(&mut state, &mut dock, &ctx);
+    let child = saved(&mut state, &mut dock, "child.dwasm");
+    let mut state = AppState::new(soliddraft_app::new_document());
+    assembly::hold_all(&mut state, &parts);
+    assembly::apply(&mut state, &mut dock, AssemblyAction::New);
+    assembly::insert_bytes(&mut state, vec![child.clone()]);
+    session(&mut state).doc.finish_loading();
+    assembly::frame(&mut state, &mut dock, &ctx);
+    assert_eq!(components(session(&mut state)).len(), 1);
+    let parent = saved(&mut state, &mut dock, "parent.dwasm");
+
+    // The child first: nothing opens, and both assemblies are offered.
+    let mut state = AppState::new(soliddraft_app::new_document());
+    let upload = vec![child, parent, parts[0].clone(), parts[1].clone()];
+    assembly::open_uploaded(&mut state, upload);
+    assert!(state.assembly.session.is_none() && state.assembly.opening.is_none());
+    let shown = assembly::shown(&state);
+    assert_eq!(shown["choosing"], serde_json::json!(["child.dwasm", "parent.dwasm"]));
+    assert_eq!(shown["held"], serde_json::json!([]));
+
+    // A name that is not one of them changes nothing.
+    assembly::open_choice(&mut state, "block.dwprt");
+    assert!(state.assembly.opening.is_none() && state.assembly.choice.is_some());
+
+    // The parent chosen: it opens, with the child and the parts held for it.
+    assembly::open_choice(&mut state, "parent.dwasm");
+    wait_open(&mut state, &mut dock, &ctx);
+    let shown = assembly::shown(&state);
+    assert_eq!(shown["file"], "parent.dwasm");
+    assert_eq!(shown["choosing"], serde_json::json!([]));
+    assert_eq!(shown["held"], serde_json::json!(["child.dwasm", "block.dwprt", "pin.dwprt"]));
+    let placed = shown["components"].as_array().unwrap();
+    assert_eq!(placed.len(), 1, "{shown}");
+    assert_eq!(placed[0]["freshness"], "current", "{shown}");
+    assert!(placed[0]["warning"].is_null(), "{shown}");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 fn gpu_available() -> bool {
     let _ = env_logger::try_init();
     let instance = egui_wgpu::wgpu::Instance::default();

@@ -550,6 +550,7 @@ fn create(o: &Options) -> Result<(), String> {
             hidden: o.hidden,
             model_items: o.model_items,
             centre_marks: false,
+            requirements: false,
             scale: None,
         };
         let made = soliddraft_drawing::make_drawing(part, &new).map_err(|e| e.to_string())?;
@@ -1015,8 +1016,16 @@ fn build<'k>(
     let backend = format!("{} {}", report.backend.name, report.backend.version);
     // The CLI only writes files, so its views come from the certified mesh.
     let dimensions = feature_dimensions(recipe);
-    let part =
-        Part { kernel, body, digest: revision, dimensions, namer: None, preview: false, source: Default::default() };
+    let part = Part {
+        kernel,
+        body,
+        digest: revision,
+        dimensions,
+        namer: None,
+        preview: false,
+        source: Default::default(),
+        requirements: Default::default(),
+    };
     Ok((part, backend))
 }
 

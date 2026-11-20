@@ -719,6 +719,7 @@ fn build_set(s: &DrawingSession, kind: SetKind, placement: Point2) -> Annotation
         placement,
         style: StyleOverrides::default(),
         state: AnnotationState::Ok,
+        source: None,
     }
 }
 
@@ -838,6 +839,7 @@ fn symbol_annotation(s: &DrawingSession, view: ViewId, anchors: Vec<Anchor>, pla
         placement,
         style: StyleOverrides::default(),
         state: AnnotationState::Ok,
+        source: None,
     }
 }
 

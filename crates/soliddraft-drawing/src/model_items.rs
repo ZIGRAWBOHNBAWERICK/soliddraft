@@ -193,14 +193,20 @@ fn canonical_axis(a: Vec3) -> Vec3 {
 }
 
 /// True when the view shows the curve of `edge` as visible line work.
-fn visible_in(view: &ViewContext, edge: EdgeId) -> bool {
+pub(crate) fn visible_in(view: &ViewContext, edge: EdgeId) -> bool {
     view.curves.curves.iter().any(|c| c.visible && c.source == CurveSource::Edge(edge))
 }
 
 /// The best edge of the body lying in the plane through `p` normal to `axis` and not
 /// seen end on in `view`: visible first, then the longest in the view, then the nearest
 /// the eye.
-fn plane_edge(index: &PartIndex, view: &ViewContext, p: Vec3, axis: Vec3, tol: f64) -> Option<(EdgeId, bool)> {
+pub(crate) fn plane_edge(
+    index: &PartIndex,
+    view: &ViewContext,
+    p: Vec3,
+    axis: Vec3,
+    tol: f64,
+) -> Option<(EdgeId, bool)> {
     let mut best: Option<((bool, f64, f64), EdgeId)> = None;
     for (id, curve) in index.edges() {
         let samples = curve.sample(0.0);
@@ -447,6 +453,7 @@ fn place(drawing: &mut Drawing, sheet: usize, index: &PartIndex, plans: Vec<Plan
             placement: at,
             style: StyleOverrides::default(),
             state: AnnotationState::Ok,
+            source: None,
         });
         next = crate::ids::AnnotationId(next.0 + 1);
     }

@@ -28,6 +28,7 @@ fn new_drawing() -> NewDrawing {
         hidden: HiddenLines::Visible,
         model_items: false,
         centre_marks: false,
+        requirements: false,
         scale: None,
     }
 }

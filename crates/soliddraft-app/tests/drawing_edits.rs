@@ -38,6 +38,7 @@ fn drawing(doc: &Document) -> DrawingDoc {
         hidden: soliddraft_drawing::HiddenLines::Visible,
         model_items: false,
         centre_marks: false,
+        requirements: false,
         scale: Some(Scale::FULL),
     };
     let made = soliddraft_drawing::make_drawing(&ctx.certified_part(), &new).unwrap();
@@ -287,6 +288,7 @@ fn round_dimension_repairs_accept_circles_and_remeasure_the_value() {
             placement: Point2::new(20.0, 20.0),
             style: Default::default(),
             state: AnnotationState::Dangling { lost: vec![0], cause: "hole was deleted".into() },
+            source: None,
         };
         let id = a.id;
         d.apply(Command::AddDimension { annotation: a }, None).unwrap();
@@ -350,6 +352,7 @@ fn section_flip_and_redraw_refresh_anchors_values_and_exports_atomically() {
         placement: Point2::new(0.0, 20.0),
         style: Default::default(),
         state: AnnotationState::Ok,
+        source: None,
     };
     let aid = annotation.id;
     d.apply(Command::AddDimension { annotation }, None).unwrap();

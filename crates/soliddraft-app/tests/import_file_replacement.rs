@@ -629,6 +629,7 @@ fn a_drawing_dimension_survives_a_file_replacement() {
         hidden: soliddraft_drawing::HiddenLines::Visible,
         model_items: false,
         centre_marks: false,
+        requirements: false,
         scale: Some(Scale::FULL),
     };
     let made = soliddraft_drawing::make_drawing(&part, &new).unwrap();
@@ -654,6 +655,7 @@ fn a_drawing_dimension_survives_a_file_replacement() {
         placement: Point2::new(0.0, 30.0),
         style: Default::default(),
         state: AnnotationState::Ok,
+        source: None,
     };
     let id = annotation.id;
     drawing.apply(DrawingCommand::AddDimension { annotation }, None).unwrap();

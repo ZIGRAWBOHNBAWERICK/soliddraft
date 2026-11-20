@@ -29,6 +29,45 @@ pub struct Annotation {
     /// Whether its references still resolve.
     #[serde(default)]
     pub state: AnnotationState,
+    /// The item of the part's manufacturing information this annotation shows, when the
+    /// drawing made it from the part. Its values are the part's: the drawing copies them
+    /// at every update and never edits them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<PmiSource>,
+}
+
+/// What of the part's manufacturing information an annotation shows.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum PmiSource {
+    /// One item, by the name the part gives it.
+    Item {
+        /// The item's name in the part.
+        item: String,
+    },
+    /// A basic distance that locates a feature of a position tolerance from one of its
+    /// datums. The part measures it; nobody states it.
+    Located {
+        /// The tolerance's name in the part.
+        item: String,
+        /// The datum it is measured from.
+        datum: String,
+        /// The distance in micrometres, which tells apart the rows and columns of a
+        /// pattern.
+        micrometres: i64,
+    },
+    /// The part's notes.
+    Notes,
+}
+
+impl PmiSource {
+    /// The name of the part item behind the annotation, if it has one.
+    pub fn item(&self) -> Option<&str> {
+        match self {
+            PmiSource::Item { item } | PmiSource::Located { item, .. } => Some(item),
+            PmiSource::Notes => None,
+        }
+    }
 }
 
 impl Annotation {
@@ -254,6 +293,10 @@ pub struct Dimension {
     /// Whether a length is measured in the view plane or in 3D.
     #[serde(default)]
     pub dim_type: DimType,
+    /// True for a requirement the part states, such as a toleranced size. A requirement
+    /// is never marked as a reference dimension.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub requirement: bool,
 }
 
 impl Dimension {
@@ -273,6 +316,7 @@ impl Dimension {
             precision,
             text: Dimension::default_text(),
             dim_type: DimType::Projected,
+            requirement: false,
         }
     }
 }

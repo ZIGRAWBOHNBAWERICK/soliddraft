@@ -11,12 +11,13 @@
 //! left at the top right, at the largest scale up to the sheet's that fits there.
 
 use serde::{Deserialize, Serialize};
-use soliddraft_kernel_api::Point2;
 use soliddraft_kernel_api::drawing::{StandardView, ViewCurves, ViewSpec};
+use soliddraft_kernel_api::{Point2, Vec3};
 
 use crate::ids::ViewId;
 use crate::model_items::{self, ImportReport};
 use crate::part::{Part, PartIndex};
+use crate::pmi_items::{self, PmiReport};
 use crate::project::{self, Projected, ViewContext};
 use crate::sheet::Scale;
 use crate::template::Template;
@@ -43,6 +44,10 @@ pub struct NewDrawing {
     /// Put centre marks on the circles orthographic views see face-on.
     #[serde(default)]
     pub centre_marks: bool,
+    /// Bring in the part's manufacturing information, each item once, with a section
+    /// through the hole that is held tightest.
+    #[serde(default)]
+    pub requirements: bool,
     /// The sheet scale, or `None` to pick the largest of the template's scales that
     /// fits.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -56,6 +61,8 @@ pub struct MadeDrawing {
     pub drawing: Drawing,
     /// What Model items did.
     pub import: ImportReport,
+    /// What bringing in the part's manufacturing information did.
+    pub requirements: PmiReport,
     /// Each view's projection, for tools that pick on the views.
     pub projections: Vec<(ViewId, Projected)>,
 }
@@ -316,8 +323,71 @@ pub fn make_drawing(part: &Part, new: &NewDrawing) -> Result<MadeDrawing, Drawin
     } else {
         ImportReport::default()
     };
-    let projections = contexts.into_iter().map(|c| (c.id, c.projected)).collect();
-    Ok(MadeDrawing { drawing, import, projections })
+    let mut projections: Vec<(ViewId, Projected)> = Vec::new();
+    let requirements = if new.requirements {
+        // The section first, so nothing is placed where it goes.
+        if let Some(view) = section_through_hole(&drawing, part, &index, &contexts)? {
+            projections.push((view.0.id, view.1.projected));
+            crate::apply(&mut drawing, &crate::Command::PlaceView { sheet: 0, view: view.0 })?;
+        }
+        pmi_items::import(&mut drawing, 0, part, &index, &contexts)?
+    } else {
+        PmiReport::default()
+    };
+    projections.splice(0..0, contexts.into_iter().map(|c| (c.id, c.projected)));
+    Ok(MadeDrawing { drawing, import, requirements, projections })
+}
+
+/// A section through the axis of the hole the part holds tightest: the one whose diameter
+/// has a fit, or else the narrowest tolerance. The cut is drawn on the view that looks
+/// along the hole, across the sheet. `None` when no diameter of the part has a tolerance
+/// or no view looks along its axis.
+fn section_through_hole(
+    drawing: &Drawing,
+    part: &Part,
+    index: &PartIndex,
+    views: &[ViewContext],
+) -> Result<Option<(View, ViewContext)>, DrawingError> {
+    use soliddraft_kernel_api::drawing::Curve3;
+    use soliddraft_kernel_api::pmi::{PmiKind, SizeKind, Tolerance};
+    let topology = part.kernel.topology(part.body)?;
+    let mut best: Option<(f64, Vec3, Vec3)> = None;
+    for row in &part.requirements.rows {
+        let Some(PmiKind::Size { size: SizeKind::Diameter, features, tolerance, .. }) =
+            row.on_body.as_ref().map(|item| &item.kind)
+        else {
+            continue;
+        };
+        let band = match tolerance {
+            Tolerance::Fit { .. } => 0.0,
+            other => match other.deviations() {
+                Some((upper, lower)) => upper - lower,
+                None => continue,
+            },
+        };
+        let axis = features.first().and_then(|f| f.first()).and_then(|face| {
+            let info = topology.faces.iter().find(|f| f.id == *face)?;
+            info.edges.iter().find_map(|edge| match index.edge_curve(*edge)? {
+                Curve3::Circle { center, normal, .. } | Curve3::Arc { center, normal, .. } => {
+                    Some((*center, normal.normalized()?))
+                }
+                _ => None,
+            })
+        });
+        if let Some((centre, axis)) = axis
+            && best.as_ref().is_none_or(|(b, ..)| band < *b)
+        {
+            best = Some((band, centre, axis));
+        }
+    }
+    let Some((_, centre, axis)) = best else { return Ok(None) };
+    let Some(parent) =
+        views.iter().find(|v| !v.pictorial && axis.dot(v.xf.frame.direction).abs() > 1.0 - 1e-6).map(|v| v.id)
+    else {
+        return Ok(None);
+    };
+    let line = crate::derived::cutting_line(drawing, part, index, parent, centre, true)?;
+    crate::derived::new_section(drawing, part, index, 0, parent, line, false, None).map(Some)
 }
 
 #[derive(Clone, Copy, Debug)]

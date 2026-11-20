@@ -1179,6 +1179,7 @@ fn build_dimension(s: &DrawingSession, prop: &resolve::Proposal, placement_sheet
         placement,
         style: StyleOverrides::default(),
         state: AnnotationState::Ok,
+        source: None,
     }
 }
 
@@ -1219,6 +1220,7 @@ fn note_tool(s: &mut DrawingSession, hit: Option<Hit>, p: Point2, push: &mut imp
         placement,
         style: StyleOverrides::default(),
         state: AnnotationState::Ok,
+        source: None,
     };
     push(DrawingAction::Command(Command::AddNote { annotation: a }));
     push(DrawingAction::Select(Some(DrawingSel::Annotation(id))));
@@ -1274,6 +1276,7 @@ fn circle_tool(
                 placement,
                 style: StyleOverrides::default(),
                 state: AnnotationState::Ok,
+                source: None,
             }
         }
         _ => Annotation {
@@ -1284,6 +1287,7 @@ fn circle_tool(
             placement: circle.centre,
             style: StyleOverrides::default(),
             state: AnnotationState::Ok,
+            source: None,
         },
     };
     push(DrawingAction::Command(Command::AddAnnotation { annotation: a }));

@@ -947,6 +947,7 @@ pub(crate) fn create_drawing_for_part(part_doc: &Document, new: &NewDrawing) -> 
         hidden: soliddraft_drawing::HiddenLines::Visible,
         model_items: false,
         centre_marks: true,
+        requirements: false,
         scale: new.scale,
     };
     let part = ctx.part();
@@ -980,6 +981,7 @@ pub(crate) fn create_drawing_for_part(part_doc: &Document, new: &NewDrawing) -> 
             placement: Point2::new(l + notes.offset[0], t - notes.offset[1]),
             style: StyleOverrides { text_height: Some(notes.height), ..Default::default() },
             state: AnnotationState::Ok,
+            source: None,
         });
     }
     doc.touch();

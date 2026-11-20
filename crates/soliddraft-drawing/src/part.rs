@@ -41,6 +41,18 @@ pub struct Part<'k> {
     pub preview: bool,
     /// The configuration and text properties this revision resolves to.
     pub source: PartSource,
+    /// The part's manufacturing information as it stands on the body.
+    pub requirements: Requirements,
+}
+
+/// The part's manufacturing information as a drawing takes it: every item with the
+/// body's faces it is on and its measured values, and the notes of the whole part.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Requirements {
+    /// The items, in the part's order.
+    pub rows: Vec<soliddraft_model::pmi::PmiRow>,
+    /// The general tolerance, the material and the other notes.
+    pub notes: soliddraft_kernel_api::pmi::PartNotes,
 }
 
 /// What a drawing records of its part, beside the revision.

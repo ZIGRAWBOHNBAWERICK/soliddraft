@@ -542,7 +542,7 @@ pub fn display_text(dim: &Dimension, symbols: &crate::library::Symbols) -> Strin
     };
     let text = if dim.text.is_empty() { Dimension::VALUE_TEXT.to_owned() } else { dim.text.clone() };
     let text = text.replace(Dimension::VALUE_TEXT, &with_tol);
-    if symbols.reference_parentheses && matches!(dim.value, crate::DimValue::Measured { .. }) {
+    if symbols.reference_parentheses && !dim.requirement && matches!(dim.value, crate::DimValue::Measured { .. }) {
         format!("({text})")
     } else {
         text

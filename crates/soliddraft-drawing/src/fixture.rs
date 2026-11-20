@@ -119,7 +119,16 @@ pub fn bracket_a3() -> Drawing {
     let mut annotations = Vec::new();
     let mut add = |view: ViewId, body: AnnotationKind, anchors: Vec<Anchor>, placement: Point2, state| {
         let id = AnnotationId(annotations.len() as u32 + 1);
-        annotations.push(Annotation { id, view, body, anchors, placement, style: StyleOverrides::default(), state });
+        annotations.push(Annotation {
+            id,
+            view,
+            body,
+            anchors,
+            placement,
+            style: StyleOverrides::default(),
+            state,
+            source: None,
+        });
     };
     let linear = |orientation, value| {
         AnnotationKind::Dimension(Dimension::measured(DimensionKind::Linear { orientation }, value, 0))

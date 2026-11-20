@@ -27,6 +27,7 @@ mod views;
 use crate::sheet::{Projection, Sheet};
 use crate::view::{HiddenLines, TangentEdges, View, ViewKind, ViewScale};
 use crate::{Drawing, library};
+pub use symbols::tolerance_text;
 pub(crate) use tables::keep_above_title_block;
 pub use tables::{REVISION_COLUMNS, revision_table_home, revision_table_size, table_bounds};
 pub use views::{LocationLabel, clip_polygon, hatch_lines, location_labels, zone_at};
@@ -416,6 +417,8 @@ pub fn property(drawing: &Drawing, sheet: &Sheet, sheet_index: usize, sheet_coun
         "sheet" => (sheet_index + 1).to_string(),
         "sheets" => sheet_count.to_string(),
         "document_type" => "Part drawing".into(),
+        "material" => drawing.part_notes.material.clone().unwrap_or_default(),
+        "general_tolerance" => drawing.part_notes.general_tolerance.clone().unwrap_or_default(),
         "units" => match drawing.meta.units {
             crate::Units::Millimetre => "mm".into(),
             crate::Units::Inch => "in".into(),
@@ -829,7 +832,7 @@ pub fn text_width(text: &str, height: f64) -> f64 {
 
 fn editable_dimension(d: &Dimension, symbols: &crate::library::Symbols) -> Dimension {
     let mut format = d.clone();
-    if symbols.reference_parentheses && matches!(d.value, crate::DimValue::Measured { .. }) {
+    if symbols.reference_parentheses && !d.requirement && matches!(d.value, crate::DimValue::Measured { .. }) {
         let text = if d.text.is_empty() { Dimension::VALUE_TEXT } else { &d.text };
         format.text = format!("({text})");
     }
@@ -1031,9 +1034,9 @@ fn annotation_items(sheet: &Sheet, a: &Annotation, ctx: &Context<'_>, list: &mut
     }
     let items = &mut list.items;
     if let Some((pos, angle, text, halign, valign)) = text_at {
-        if let AnnotationState::Changed { .. } = a.state {
-            // A highlight behind the text so a reviewer sees what moved.
-            let w = text_width(&text, th) + 2.0;
+        // The box around the text, one millimetre clear of it on every side.
+        let boxed = |text: &str| {
+            let w = text_width(text, th) + 2.0;
             let h = th + 1.6;
             let (ox, oy) = match (halign, valign) {
                 (Align::Centre, VAlign::Bottom) => (-w / 2.0, -0.8),
@@ -1044,6 +1047,15 @@ fn annotation_items(sheet: &Sheet, a: &Annotation, ctx: &Context<'_>, list: &mut
             };
             let mut box_path = rect(ox, oy, ox + w, oy + h);
             box_path.apply_affine(Affine::translate((pos.u, pos.v)) * Affine::rotate(angle.to_radians()));
+            box_path
+        };
+        if let AnnotationKind::Dimension(Dimension { tolerance: crate::Tolerance::Basic, .. }) = &a.body {
+            // A theoretically exact dimension is framed (ISO 129-1).
+            push(items, boxed(&text), None, role);
+        }
+        if let AnnotationState::Changed { .. } = a.state {
+            // A highlight behind the text so a reviewer sees what moved.
+            let box_path = boxed(&text);
             items.push(Item::Path(PathItem {
                 path: box_path,
                 width: 0.0,

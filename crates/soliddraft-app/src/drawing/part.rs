@@ -61,6 +61,10 @@ impl<'a> PartContext<'a> {
                 configuration: self.doc.model().active_configuration().cloned(),
                 properties: self.doc.model().resolved_properties(),
             },
+            requirements: soliddraft_drawing::Requirements {
+                rows: self.doc.model().pmi_rows(),
+                notes: self.doc.model().part_notes(),
+            },
         }
     }
 

@@ -35,6 +35,7 @@ mod evaluate;
 mod exact;
 mod feature;
 pub mod file;
+pub mod interview;
 pub mod materials;
 pub mod params;
 pub mod pmi;

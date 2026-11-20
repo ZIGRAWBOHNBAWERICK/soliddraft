@@ -25,6 +25,7 @@ mod loft;
 mod measure;
 mod native;
 mod pmi;
+mod recognition;
 mod scan;
 mod shell;
 mod step;
@@ -49,7 +50,7 @@ use soliddraft_kernel_api::*;
 pub use diagnostics::{APP_REQUEST_WORK, APP_WORK_TARGET, RequestWork, with_request_allowance};
 
 /// The pinned Catallax application entry revision.
-pub const CATALLAX_REVISION: &str = "212329e8029ca75143387fcaea80604071b53533";
+pub const CATALLAX_REVISION: &str = "c6721e615fc4ea25a9021c7ee0b27ab1c90f4dad";
 
 /// An in-process Catallax backend. There is no global kernel state or kernel thread.
 #[derive(Default)]
@@ -2513,6 +2514,10 @@ impl Kernel for CatallaxKernel {
             };
             lattice::export_allowance("export_step", write).map(|(export, _)| export)
         })
+    }
+
+    fn recognise(&self, body: BodyId) -> KernelResult<soliddraft_kernel_api::recognition::Recognised> {
+        self.observe("recognise", || recognition::recognise(&*self.solid(body)?))
     }
 
     fn pmi_nominals(&self, body: BodyId, pmi: &soliddraft_kernel_api::pmi::Pmi<FaceId>) -> KernelResult<Vec<Vec<f64>>> {

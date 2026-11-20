@@ -298,6 +298,95 @@ pub(crate) fn run(state: &mut AppState, name: &str, input: &Value) -> Option<Res
             Ok(json!({ "notes": doc.model().part_notes() }))
         })(),
         "pmi_list" => Ok(rows(doc)),
+        "pmi_recognise" => doc.model().recognised().map(|features| {
+            let names = |faces: &[soliddraft_kernel_api::FaceId]| -> Vec<String> {
+                faces.iter().filter_map(|face| name_of_face(doc, *face)).collect()
+            };
+            let listed: Vec<Value> = features
+                .iter()
+                .map(|feature| {
+                    let mut row = json!({
+                        "kind": feature.kind,
+                        "name": feature.name,
+                        "faces": names(&feature.faces),
+                        "sizes_mm": feature.sizes.iter().map(|(name, value)| (name.clone(), json!(value))).collect::<serde_json::Map<String, Value>>(),
+                    });
+                    if let Some(through) = feature.through {
+                        row["through"] = json!(through);
+                    }
+                    if !feature.opens_onto.is_empty() {
+                        row[if feature.kind == "boss" { "stands_on" } else { "opens_onto" }] = json!(names(&feature.opens_onto));
+                    }
+                    if !feature.closed_by.is_empty() {
+                        row["closed_by"] = json!(names(&feature.closed_by));
+                    }
+                    row
+                })
+                .collect();
+            json!({ "features": listed })
+        }),
+        "pmi_interview" => doc.model().interview().map(|questions| json!({ "questions": questions })),
+        "pmi_answer" => answer(doc, input),
         _ => return None,
     })
+}
+
+/// Takes the interview's proposals for the questions named in `accept` (or all of them),
+/// and the material when it is given, as one undo entry. Answers what was added and
+/// the questions still open.
+fn answer(doc: &mut Document, input: &Value) -> Result<Value, String> {
+    use soliddraft_model::interview::Proposal;
+    let questions = doc.model().interview()?;
+    let material = text(input, "material").map(str::trim).filter(|text| !text.is_empty());
+    let all = input.get("accept").and_then(Value::as_str) == Some("all");
+    let named: Vec<String> = match input.get("accept") {
+        Some(Value::Array(ids)) => ids
+            .iter()
+            .map(|id| id.as_str().map(str::to_owned).ok_or("accept lists question ids, or is \"all\""))
+            .collect::<Result<_, _>>()?,
+        Some(Value::String(word)) if word == "all" => {
+            questions.iter().filter(|q| q.proposal.is_some()).map(|q| q.id.clone()).collect()
+        }
+        Some(Value::Null) | None => Vec::new(),
+        Some(_) => return Err("accept lists question ids, or is \"all\"".into()),
+    };
+    if named.is_empty() && material.is_none() {
+        return Err("Nothing to answer: give accept, material or both.".into());
+    }
+    let mut notes = doc.model().pmi().part.clone();
+    let mut notes_changed = false;
+    if let Some(material) = material {
+        notes.material = Some(material.to_owned());
+        notes_changed = true;
+    }
+    let mut commands = Vec::new();
+    let mut accepted = Vec::new();
+    for id in &named {
+        let question = questions
+            .iter()
+            .find(|q| q.id == *id)
+            .ok_or_else(|| format!("No open question `{id}`. pmi_interview lists the open ones."))?;
+        match &question.proposal {
+            Some(Proposal::Item { item }) => {
+                commands.push(soliddraft_model::Command::PutPmiItem { item: item.clone(), replaces: None });
+            }
+            Some(Proposal::GeneralTolerance { text }) => {
+                notes.general_tolerance = Some(text.clone());
+                notes_changed = true;
+            }
+            None if all => continue,
+            None => return Err(format!("`{id}` has no proposal. Answer it yourself: {}", question.asks)),
+        }
+        accepted.push(id.clone());
+    }
+    if notes_changed {
+        commands.insert(0, soliddraft_model::Command::SetPartNotes { notes });
+    }
+    doc.run_pmi("Interview answers", commands)?;
+    Ok(json!({
+        "accepted": accepted,
+        "material": material,
+        "questions": doc.model().interview()?,
+        "items": rows(doc)["items"],
+    }))
 }

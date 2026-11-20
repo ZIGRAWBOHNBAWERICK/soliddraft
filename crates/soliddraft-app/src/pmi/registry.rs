@@ -50,6 +50,13 @@ fn notes_params() -> Vec<(&'static str, Value)> {
     ]
 }
 
+fn answer_params() -> Vec<(&'static str, Value)> {
+    vec![
+        ("accept", optional(string("\"all\", or a list of question ids from pmi_interview"))),
+        ("material", optional(string("The part's material, which no rule can propose"))),
+    ]
+}
+
 fn package_params() -> Vec<(&'static str, Value)> {
     vec![
         ("path", string("The STEP file to write, ending in .step; the drawing goes beside it as .pdf and .dxf")),
@@ -104,6 +111,30 @@ pub(crate) fn commands() -> Vec<CommandSpec> {
             Agents::Mcp,
             "Sets the notes that apply to the whole part. A field left out keeps its value.",
             notes_params,
+        )
+        .undo(Undo::Step),
+        row(
+            "pmi_recognise",
+            "Recognise features",
+            "List the holes, hole patterns, bosses and slots the part's faces show",
+        )
+        .agents(
+            Agents::Mcp,
+            "Reads the features off the body's faces, on a modelled or an imported part: each with its faces, whether \
+             it goes through, what it opens onto and its sizes. It is geometry, not a proposal.",
+            Vec::new,
+        ),
+        row("pmi_interview", "Interview", "List what the part's manufacturing information still lacks").agents(
+            Agents::Mcp,
+            "The decisions still open, in order: material, general tolerance, datums, then each hole, boss and slot. \
+             Each has a proposal from rules and standards tables and the reason for it. Nothing is added to the part.",
+            Vec::new,
+        ),
+        row("pmi_answer", "Answer the interview", "Take the interview's proposals as the part's items").agents(
+            Agents::Mcp,
+            "Adds the proposals of the questions named in accept, or of every question with accept \"all\", and sets \
+             the material when it is given, as one undo step. Answer a question another way with pmi_add or pmi_notes.",
+            answer_params,
         )
         .undo(Undo::Step),
         row("pmi_list", "List manufacturing information", "List the part's items as a drawing writes them").agents(

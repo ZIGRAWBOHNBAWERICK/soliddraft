@@ -29,6 +29,7 @@ pub mod counting;
 pub mod drawing;
 pub mod measure;
 pub mod pmi;
+pub mod recognition;
 pub use assembly_measure::{
     Axis, EnclosedSupport, ExactAxis, ExactAxisPlane, ExactPoint, ExactRadius, ExactRational, ExactSupport,
     SupportBounds, SupportEntity, SupportSource,
@@ -1575,6 +1576,13 @@ pub trait Kernel: Send + Sync {
     fn export_step(&self, body: BodyId, options: &StepOptions) -> KernelResult<StepExport> {
         let _ = (body, options);
         Err(KernelError::Unsupported("export_step".into()))
+    }
+
+    /// The holes, hole patterns, bosses and slots of a body, read off its faces. It
+    /// works the same on a body the app built and on an imported one.
+    fn recognise(&self, body: BodyId) -> KernelResult<recognition::Recognised> {
+        let _ = body;
+        Err(KernelError::Unsupported("recognise".into()))
     }
 
     /// The nominal value in millimetres of every dimension of `pmi`, measured on the

@@ -609,9 +609,10 @@ fn shown_component(s: &AssemblySession, r: OccurrenceIndex) -> serde_json::Value
 /// or `loading`, each of the root's `components` (`path`, `label`, `state` and
 /// `freshness` of what it places, a `warning` or `problem`, `translation` in millimetres
 /// and `rotation` as `[x, y, z, w]`, and a subassembly's own `components` in the same
-/// form), the `selected` component's path, the number of `mates`, the Mate panel's picks
-/// and error, the `file` it came from, the names of the files `held` for it, and the
-/// assemblies of an upload it is `choosing` between.
+/// form), the `selected` component's path, the number of `mates` and their
+/// `mate_names`, the `undo` step's label and depth, the window's last `note` (`text`
+/// and `kind`), the Mate panel's picks and error, the `file` it came from, the names of
+/// the files `held` for it, and the assemblies of an upload it is `choosing` between.
 pub fn shown(state: &AppState) -> serde_json::Value {
     let held: Vec<String> =
         state.assembly.held.iter().filter_map(|d| d.path.as_ref().map(|p| p.display().to_string())).collect();
@@ -633,6 +634,12 @@ pub fn shown(state: &AppState) -> serde_json::Value {
         "components": components,
         "selected": s.selected.as_ref().map(|p| p.to_string()),
         "mates": s.doc.assembly().mates.len(),
+        "mate_names": s.doc.assembly().mates.iter().map(|m| match m {
+            soliddraft_assembly::MateEntry::Known(mate) => mate.name(),
+            soliddraft_assembly::MateEntry::Future(kept) => kept["name"].as_str().unwrap_or_default(),
+        }).collect::<Vec<_>>(),
+        "undo": { "label": s.doc.undo_label(), "depth": s.doc.undo_depth() },
+        "note": state.note.as_ref().map(|n| serde_json::json!({ "text": n.text, "kind": format!("{:?}", n.kind) })),
         "mate_panel": {
             "open": state.assembly.mate.open,
             "a": state.assembly.mate.a.as_ref().map(|p| serde_json::json!({ "component": p.component.0, "face": p.face.label })),

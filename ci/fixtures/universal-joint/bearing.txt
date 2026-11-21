@@ -1,0 +1,10 @@
+# rig.dwasm with its Universal Joint made and the lock between the two blocks deleted, so
+# the output block turns freely and its shaft turns with it. The browser check
+# (ci/browser-assemblies.mjs) opens bearing.dwasm with block.dwprt and shaft.dwprt and
+# turns that block 90 degrees about X, which would set the shafts at right angles: the
+# drag must be refused by name and change nothing. Run from this folder after rig.txt:
+# soliddraft run --script bearing.txt
+open {"path":"rig.dwasm"}
+assembly_mate_universal_joint {"name":"U","input":{"component":4,"feature":"Boss-Extrude1","generator":"side"},"output":{"component":9,"feature":"Boss-Extrude1","generator":"side"}}
+assembly_delete_mate {"mate":"L"}
+assembly_save {"path":"bearing.dwasm"}

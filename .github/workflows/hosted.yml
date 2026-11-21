@@ -941,7 +941,7 @@ jobs:
           name: browser-manufacturing-information
           path: ${{ runner.temp }}/browser-manufacturing-information
           if-no-files-found: ignore
-      - name: Make, mate, save and reopen an assembly of uploaded parts, add a Universal Joint, and choose between uploaded assemblies, in Chromium
+      - name: Make, mate, save and reopen an assembly of uploaded parts, add a Universal Joint, refuse it a right angle, and choose between uploaded assemblies, in Chromium
         timeout-minutes: 30
         env:
           CHROME_ARGS: --no-sandbox --enable-unsafe-swiftshader --use-angle=swiftshader
@@ -949,7 +949,7 @@ jobs:
           python3 -m http.server 8772 --bind 127.0.0.1 --directory target/web-dist > "$RUNNER_TEMP/assemblies-server.log" 2>&1 &
           server=$!
           trap 'kill "$server"' EXIT
-          node ci/browser-assemblies.mjs /usr/bin/google-chrome http://127.0.0.1:8772/ "$RUNNER_TEMP/browser-assemblies" site/parts/tray.dwprt site/parts/collar.dwprt ci/fixtures/universal-joint/rig.dwasm ci/fixtures/universal-joint/block.dwprt ci/fixtures/universal-joint/shaft.dwprt
+          node ci/browser-assemblies.mjs /usr/bin/google-chrome http://127.0.0.1:8772/ "$RUNNER_TEMP/browser-assemblies" site/parts/tray.dwprt site/parts/collar.dwprt ci/fixtures/universal-joint/rig.dwasm ci/fixtures/universal-joint/block.dwprt ci/fixtures/universal-joint/shaft.dwprt ci/fixtures/universal-joint/bearing.dwasm
       - if: always()
         uses: actions/upload-artifact@v4
         with:

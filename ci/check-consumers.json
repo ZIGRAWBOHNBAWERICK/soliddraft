@@ -123,6 +123,12 @@
     "ci/fixtures/pmi/p1-bracket-pmi.step": [
       "web"
     ],
+    "ci/fixtures/universal-joint/bearing.dwasm": [
+      "web"
+    ],
+    "ci/fixtures/universal-joint/bearing.txt": [
+      "web"
+    ],
     "ci/fixtures/universal-joint/block.dwprt": [
       "web"
     ],

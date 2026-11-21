@@ -1,5 +1,5 @@
 // Assemblies in the browser build, driven in headless Chrome as a visitor drives them.
-// Usage: node ci/browser-assemblies.mjs CHROME URL OUTDIR TRAY COLLAR RIG BLOCK SHAFT
+// Usage: node ci/browser-assemblies.mjs CHROME URL OUTDIR TRAY COLLAR RIG BLOCK SHAFT BEARING
 //
 // TRAY and COLLAR are part files (site/parts/tray.dwprt and collar.dwprt). The page has no
 // folder, so every part reaches it as a file handed over. The visitor starts a new
@@ -28,6 +28,13 @@
 // and the child opened alone through File > Open: the old choice is gone, so it cannot
 // open over the child.
 //
+// BEARING is ci/fixtures/universal-joint/bearing.dwasm: the rig with its Universal Joint
+// made and the lock between the blocks deleted, so the output block turns freely. The
+// visitor selects that block and types 90 degrees into its Rotate X placement field,
+// which would set the shafts at right angles. The drag is refused by name and leaves the
+// placements, the mates and undo as they were. Then one later feature on top: 60 degrees
+// in the same field is taken, the output shaft follows its bore, and Undo puts it back.
+//
 // The app draws into one canvas and takes only trusted input: keys and clicks sent as the
 // browser's own, through the DevTools protocol. The canvas has no text to read, so the
 // check reads the assembly through the read-only `shown_assembly` export, and finds a
@@ -41,9 +48,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { startChrome, stopChrome } from './chrome.mjs';
 
-const [chrome, url, out, tray, collar, rig, block, shaft] = process.argv.slice(2);
-if (!chrome || !url || !out || !tray || !collar || !rig || !block || !shaft) {
-  throw new Error('usage: browser-assemblies.mjs CHROME URL OUTDIR TRAY COLLAR RIG BLOCK SHAFT');
+const [chrome, url, out, tray, collar, rig, block, shaft, bearing] = process.argv.slice(2);
+if (!chrome || !url || !out || !tray || !collar || !rig || !block || !shaft || !bearing) {
+  throw new Error('usage: browser-assemblies.mjs CHROME URL OUTDIR TRAY COLLAR RIG BLOCK SHAFT BEARING');
 }
 fs.mkdirSync(out, { recursive: true });
 const downloads = path.join(path.resolve(out), 'downloads');
@@ -374,9 +381,10 @@ async function main() {
 
   const joint = await universalJoint(v);
   const choice = await chosenAssembly(v, saved, [tray, collar], parts(mated));
+  const bearingDrag = await refusedDrag(v);
 
-  fs.writeFileSync(path.join(out, 'assemblies.json'), JSON.stringify({ mated, reopened, alone, saved: path.basename(saved), joint, choice }, null, 1));
-  console.log(`Assemblies in the browser: three components from two uploads, a mate picked in the viewport putting the second tray ${FLOOR} mm up on the first one's floor, saved as ${path.basename(saved)}, reopened with its parts at the same placements with the mate kept, and opened alone from the copies it keeps. A Universal Joint picked between two shafts meeting at ${BEND} degrees drove the output ${joint.follows.toFixed(6)} degrees for a ${TURN} degree input turn, and reopened with its parts. A parent and its child assembly uploaded child first opened the parent the visitor chose, with ${choice.chosen.held.length} files held for it, and took a tray inserted on top.`);
+  fs.writeFileSync(path.join(out, 'assemblies.json'), JSON.stringify({ mated, reopened, alone, saved: path.basename(saved), joint, choice, bearing: bearingDrag }, null, 1));
+  console.log(`Assemblies in the browser: three components from two uploads, a mate picked in the viewport putting the second tray ${FLOOR} mm up on the first one's floor, saved as ${path.basename(saved)}, reopened with its parts at the same placements with the mate kept, and opened alone from the copies it keeps. A Universal Joint picked between two shafts meeting at ${BEND} degrees drove the output ${joint.follows.toFixed(6)} degrees for a ${TURN} degree input turn, and reopened with its parts. A parent and its child assembly uploaded child first opened the parent the visitor chose, with ${choice.chosen.held.length} files held for it, and took a tray inserted on top. Turning the joint's free output block to set the shafts at right angles was refused by name with nothing changed, and a 60 degree turn after it was taken and undone.`);
 }
 
 // The rig's shafts: the input (component 4) on a hinge at (10, 5, 0) along Z, the output
@@ -532,6 +540,76 @@ async function chosenAssembly(v, saved, files, placed) {
   await v.stopped('choice replaced');
   await v.shot('13-choice-replaced');
   return { choosing, chosen, inserted, replaced };
+}
+
+// The bearing fixture: the rig with its Universal Joint U made and the lock between the
+// blocks deleted, so the output block (component 7) turns freely and carries the output
+// shaft on its hinge.
+const BEARING = '7';
+const REFUSAL = 'a universal joint locks with its shafts at right angles; set the shafts at another angle';
+
+// Types `degrees` into the placement field `name` of the selected component, and Enter.
+async function placementField(v, name, degrees) {
+  await v.click(await v.control(name));
+  await v.key('a', 'KeyA', 65, 2, 'a');
+  for (const ch of String(degrees)) {
+    await v.key(ch, `Digit${ch}`, ch.charCodeAt(0), 0, ch);
+  }
+  await v.key('Enter', 'Enter', 13, 0, '\r');
+}
+
+async function refusedDrag(v) {
+  step('load the site again and open the joint whose output block turns freely');
+  await v.load();
+  await v.choose([bearing, block, shaft], () => v.click(OPEN));
+  let shown = await v.assembly('bearing', s => loaded(s) && s.components.length === 4 && s.components.every(c => c.freshness !== 'unchecked'));
+  check(JSON.stringify(shown.mate_names) === '["O","H","H2","U"]', `the joint's mates are ${shown.mate_names}`);
+  const component = (s, at) => s.components.find(c => c.path === at);
+  const tilt = about([1, 0, 0], BEND * Math.PI / 180);
+  check(sameTurn(component(shown, BEARING).rotation, tilt, 1e-9), `the bearing block starts at ${component(shown, BEARING).rotation}`);
+
+  // A corner of the block's top, clear of its shaft, seen from above.
+  step('select the bearing block');
+  await v.command('Top');
+  await v.command('Fit');
+  const corner = rotate(tilt, [-12, -8, 10]).map((x, i) => x + component(shown, BEARING).translation[i]);
+  await v.pick(await v.screen(...corner));
+  const before = await v.assembly('bearing selected', s => s.selected === BEARING);
+  check(before.note?.kind !== 'Error', `an error shows before the drag: ${before.note?.text}`);
+  await v.click(await v.control('Assembly options'));
+
+  step('turn the bearing block to 90 degrees about X, which would set the shafts at right angles');
+  await placementField(v, 'Placement Rotate X', 90);
+  shown = await v.assembly('refused', s => s.note?.kind === 'Error');
+  check(shown.note.text === REFUSAL, `the refusal says "${shown.note.text}", not "${REFUSAL}"`);
+  check(JSON.stringify(placements(shown)) === JSON.stringify(placements(before)), `the refused drag moved ${JSON.stringify(placements(shown))} from ${JSON.stringify(placements(before))}`);
+  check(JSON.stringify(shown.mate_names) === JSON.stringify(before.mate_names), `the refused drag changed the mates to ${shown.mate_names}`);
+  check(JSON.stringify(shown.undo) === JSON.stringify(before.undo), `the refused drag changed undo to ${JSON.stringify(shown.undo)} from ${JSON.stringify(before.undo)}`);
+  check(shown.dirty === before.dirty, `the refused drag left the joint dirty: ${shown.dirty}`);
+  await v.shot('13-refused');
+  const refused = shown;
+
+  // One later feature on top: the same field takes 60 degrees, the output shaft's hinge
+  // carries it along, and Undo puts the block back.
+  step('turn the bearing block to 60 degrees about X instead');
+  await placementField(v, 'Placement Rotate X', 60);
+  shown = await v.assembly('turned', s => s.undo.depth === before.undo.depth + 1 || s.note?.text !== REFUSAL);
+  check(shown.undo.depth === before.undo.depth + 1, `the 60 degree turn was not taken: ${JSON.stringify(shown.note)}`);
+  const sixty = about([1, 0, 0], 60 * Math.PI / 180);
+  check(sameTurn(component(shown, BEARING).rotation, sixty, 1e-9), `the bearing block turned to ${component(shown, BEARING).rotation}`);
+  const axis = rotate(component(shown, OUTPUT).rotation, [0, 0, 1]);
+  const bore = rotate(sixty, [0, 0, 1]);
+  check(axis.every((x, i) => Math.abs(x - bore[i]) < 1e-9), `the output shaft points along ${axis}, not its bore ${bore}`);
+  await v.shot('14-turned');
+  const turned = shown;
+
+  step('undo the turn');
+  await v.command('Undo');
+  shown = await v.assembly('undone', s => s.undo.depth === before.undo.depth);
+  check(near(placements(shown), placements(before)), `after Undo the placements are ${JSON.stringify(placements(shown))}, not ${JSON.stringify(placements(before))}`);
+  check(JSON.stringify(shown.mate_names) === JSON.stringify(before.mate_names), `after Undo the mates are ${shown.mate_names}`);
+  await v.stopped('bearing at the end');
+  return { refused, turned, undone: shown };
 }
 
 try {

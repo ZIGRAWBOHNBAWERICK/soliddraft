@@ -385,7 +385,7 @@ async function main() {
   const alone = shown;
 
   const joint = await universalJoint(v);
-  const choice = await chosenAssembly(v, saved, [tray, collar]);
+  const choice = await chosenAssembly(v, saved, [tray, collar], parts(mated));
 
   fs.writeFileSync(path.join(out, 'assemblies.json'), JSON.stringify({ mated, reopened, alone, saved: path.basename(saved), joint, choice }, null, 1));
   console.log(`Assemblies in the browser: three components from two uploads, a mate picked in the viewport putting the second tray ${FLOOR} mm up on the first one's floor, saved as ${path.basename(saved)}, reopened with its parts at the same placements with the mate kept, and opened alone from the copies it keeps. A Universal Joint picked between two shafts meeting at ${BEND} degrees drove the output ${joint.follows.toFixed(6)} degrees for a ${TURN} degree input turn, and reopened with its parts. A parent and its child assembly uploaded child first opened the parent the visitor chose, with ${choice.chosen.held.length} files held for it, and took a tray inserted on top.`);
@@ -472,9 +472,9 @@ async function universalJoint(v) {
 }
 
 // A parent assembly placing the assembly `saved`, opened from one upload that lists that
-// child first, with `files`, the parts the child places. Neither assembly opens until the
-// visitor chooses the parent.
-async function chosenAssembly(v, saved, files) {
+// child first, with `files`, the part files of the components the child places, named in
+// `placed`. Neither assembly opens until the visitor chooses the parent.
+async function chosenAssembly(v, saved, files, placed) {
   const named = file => path.basename(file);
   // The parent downloads under the name the child did, so each gets a name of its own.
   const child = path.join(downloads, 'child.dwasm');
@@ -503,13 +503,18 @@ async function chosenAssembly(v, saved, files) {
 
   step('choose the parent');
   await v.click(await v.control('Open assembly: parent.dwasm'));
-  shown = await v.assembly('chosen', s => loaded(s) && s.components.length === 1 && s.components.every(c => c.freshness !== 'unchecked'));
+  const checked = c => c.freshness !== 'unchecked' && c.components.every(checked);
+  shown = await v.assembly('chosen', s => loaded(s) && s.components.length === 1 && s.components.every(checked));
   check(shown.file === 'parent.dwasm', `${shown.file} opened, not parent.dwasm`);
   check(shown.choosing.length === 0, `the page still offers ${shown.choosing}`);
   const held = JSON.stringify(['child.dwasm', ...files.map(named)]);
   check(JSON.stringify(shown.held) === held, `the page holds ${shown.held}, not ${held}`);
+  // A subassembly has no mesh of its own: its structure is read, and its parts are drawn.
   const [sub] = shown.components;
-  check(sub.state === 'DisplayReady' && sub.freshness === 'current' && !sub.warning, `the child is ${JSON.stringify(sub)}`);
+  check(sub.state === 'MetadataOnly' && sub.freshness === 'current' && !sub.warning, `the child is ${JSON.stringify(sub)}`);
+  const inside = JSON.stringify(parts(sub));
+  check(inside === JSON.stringify(placed), `the child places ${inside}, not ${JSON.stringify(placed)}`);
+  check(sub.components.every(c => c.state === 'DisplayReady' && c.freshness === 'current' && !c.warning), `not every part in the child is found: ${JSON.stringify(sub.components)}`);
   await v.shot('11-chosen');
   const chosen = shown;
 

@@ -370,6 +370,14 @@ fn uploaded_assemblies_open_the_one_chosen() {
     assert_eq!(placed.len(), 1, "{shown}");
     assert_eq!(placed[0]["freshness"], "current", "{shown}");
     assert!(placed[0]["warning"].is_null(), "{shown}");
+    // The child has no mesh of its own; its two parts are found and drawn.
+    assert_eq!(placed[0]["state"], "MetadataOnly", "{shown}");
+    let inside = placed[0]["components"].as_array().unwrap();
+    assert_eq!(inside.len(), 2, "{shown}");
+    for c in inside {
+        assert_eq!(c["state"], "DisplayReady", "{c}");
+        assert_eq!(c["freshness"], "current", "{c}");
+    }
     let _ = std::fs::remove_dir_all(dir);
 }
 

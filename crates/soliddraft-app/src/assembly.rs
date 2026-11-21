@@ -578,12 +578,40 @@ pub fn frame(state: &mut AppState, dock: &mut DockState<Tab>, ctx: &egui::Contex
     crate::web::show_assembly(shown(state));
 }
 
+/// One component as [`shown`] lists it.
+fn shown_component(s: &AssemblySession, r: OccurrenceIndex) -> serde_json::Value {
+    let table = s.doc.table();
+    let def = s.doc.store().get(table.definition(r));
+    let local = table.local(r);
+    let freshness = match &def.freshness {
+        Freshness::Unchecked => "unchecked",
+        Freshness::Current => "current",
+        Freshness::NewerAvailable { .. } => "newer",
+        Freshness::Missing => "missing",
+    };
+    let inside: Vec<serde_json::Value> =
+        table.children(r).filter(|c| !table.flags(*c).has(Flags::REMOVED)).map(|c| shown_component(s, c)).collect();
+    serde_json::json!({
+        "path": table.path(r).to_string(),
+        "label": s.doc.label(r),
+        "state": format!("{:?}", def.state),
+        "freshness": freshness,
+        "warning": warning(def),
+        "problem": def.problem,
+        "translation": local.translation.to_array(),
+        "rotation": local.rotation.to_array(),
+        "components": inside,
+    })
+}
+
 /// The open assembly as the window shows it, as JSON, for browser checks: `{"open": false}`
 /// with nothing open, else its `name`, whether it is `active`, `dirty`, `opening` another
 /// or `loading`, each of the root's `components` (`path`, `label`, `state` and
 /// `freshness` of what it places, a `warning` or `problem`, `translation` in millimetres
-/// and `rotation` as `[x, y, z, w]`), the `selected` component's path, the number of
-/// `mates`, the Mate panel's picks and error, and the names of the files `held` for it.
+/// and `rotation` as `[x, y, z, w]`, and a subassembly's own `components` in the same
+/// form), the `selected` component's path, the number of `mates`, the Mate panel's picks
+/// and error, the `file` it came from, the names of the files `held` for it, and the
+/// assemblies of an upload it is `choosing` between.
 pub fn shown(state: &AppState) -> serde_json::Value {
     let held: Vec<String> =
         state.assembly.held.iter().filter_map(|d| d.path.as_ref().map(|p| p.display().to_string())).collect();
@@ -593,31 +621,7 @@ pub fn shown(state: &AppState) -> serde_json::Value {
     let Some(s) = state.assembly.session.as_ref() else {
         return serde_json::json!({ "open": false, "opening": opening, "held": held, "choosing": choosing });
     };
-    let table = s.doc.table();
-    let components: Vec<serde_json::Value> = s
-        .components()
-        .into_iter()
-        .map(|r| {
-            let def = s.doc.store().get(table.definition(r));
-            let local = table.local(r);
-            let freshness = match &def.freshness {
-                Freshness::Unchecked => "unchecked",
-                Freshness::Current => "current",
-                Freshness::NewerAvailable { .. } => "newer",
-                Freshness::Missing => "missing",
-            };
-            serde_json::json!({
-                "path": table.path(r).to_string(),
-                "label": s.doc.label(r),
-                "state": format!("{:?}", def.state),
-                "freshness": freshness,
-                "warning": warning(def),
-                "problem": def.problem,
-                "translation": local.translation.to_array(),
-                "rotation": local.rotation.to_array(),
-            })
-        })
-        .collect();
+    let components: Vec<serde_json::Value> = s.components().into_iter().map(|r| shown_component(s, r)).collect();
     serde_json::json!({
         "open": true,
         "active": state.assembly.is_active(),

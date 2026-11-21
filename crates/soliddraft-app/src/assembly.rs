@@ -518,8 +518,8 @@ pub fn frame(state: &mut AppState, dock: &mut DockState<Tab>, ctx: &egui::Contex
 /// with nothing open, else its `name`, whether it is `active`, `dirty`, `opening` another
 /// or `loading`, each of the root's `components` (`path`, `label`, `state` and
 /// `freshness` of what it places, a `warning` or `problem`, `translation` in millimetres
-/// and `rotation` as `[x, y, z, w]`), the number of `mates`, the Mate panel's picks and
-/// error, and the names of the files `held` for it.
+/// and `rotation` as `[x, y, z, w]`), the `selected` component's path, the number of
+/// `mates`, the Mate panel's picks and error, and the names of the files `held` for it.
 pub fn shown(state: &AppState) -> serde_json::Value {
     let held: Vec<String> =
         state.assembly.held.iter().filter_map(|d| d.path.as_ref().map(|p| p.display().to_string())).collect();
@@ -560,6 +560,7 @@ pub fn shown(state: &AppState) -> serde_json::Value {
         "opening": opening,
         "loading": s.doc.is_loading(),
         "components": components,
+        "selected": s.selected.as_ref().map(|p| p.to_string()),
         "mates": s.doc.assembly().mates.len(),
         "mate_panel": {
             "open": state.assembly.mate.open,
@@ -1220,6 +1221,8 @@ pub fn properties(ui: &mut egui::Ui, state: &mut AppState) {
                 resp.widget_info(|| {
                     egui::WidgetInfo::labeled(egui::WidgetType::DragValue, true, format!("Placement {label}"))
                 });
+                #[cfg(target_arch = "wasm32")]
+                crate::web::show_control(format!("Placement {label}"), resp.rect);
                 busy |= resp.dragged() || resp.has_focus();
                 changed |= resp.changed();
                 started |= resp.drag_started();

@@ -155,7 +155,10 @@ fn show(ui: &mut egui::Ui, state: &mut AppState) {
         return;
     }
     if state.assembly.is_active() || state.drawing.is_active() || state.drawing.new.is_some() {
-        let response = ui.button(if state.assembly.is_active() { "Assembly options" } else { "Drawing options" });
+        let name = if state.assembly.is_active() { "Assembly options" } else { "Drawing options" };
+        let response = ui.button(name);
+        #[cfg(target_arch = "wasm32")]
+        crate::web::show_control(name, response.rect);
         if response.clicked() {
             state.options_details = !state.options_details;
         }

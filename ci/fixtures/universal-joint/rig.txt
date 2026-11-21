@@ -1,0 +1,25 @@
+# The Universal Joint rig of ci/scenarios/mate-universal-joint.json, every step before the
+# joint: a base block and a shaft on a hinge in its hole, and a second block locked to the
+# base at 40 degrees about X with a second shaft on a hinge in its hole. The browser check
+# (ci/browser-assemblies.mjs) opens rig.dwasm with block.dwprt and shaft.dwprt and adds the
+# joint there. Run from this folder: soliddraft run --script rig.txt
+sketch {"plane":"top","shapes":[{"shape":"rectangle","center":[0,0,0],"width":40,"height":30}]}
+extrude {"sketch":"Sketch1","depth":10,"flip":false}
+sketch {"plane":"top","shapes":[{"shape":"circle","center":[10,5,0],"diameter":8}]}
+cut {"sketch":"Sketch2","through_all":true,"depth":10,"flip":true}
+save {"path":"block.dwprt"}
+make_assembly
+assembly_save {"path":"rig.dwasm"}
+new_part
+sketch {"plane":"top","shapes":[{"shape":"circle","center":[0,0,0],"diameter":8}]}
+extrude {"sketch":"Sketch1","depth":30,"flip":false}
+save {"path":"shaft.dwprt"}
+show_assembly
+insert_component {"paths":["shaft.dwprt"],"placement":{"translation":[10,5,0],"rotation":[0,0,0,1]}}
+assembly_mate_origin {"name":"O","component":2,"align_axes":true}
+assembly_mate_hinge {"name":"H","axes":[{"component":2,"feature":"Cut-Extrude1","generator":"side"},{"component":4,"feature":"Boss-Extrude1","generator":"side"}],"planes":[{"component":2,"feature":"Boss-Extrude1","generator":"start_cap"},{"component":4,"feature":"Boss-Extrude1","generator":"start_cap"}],"alignment":"aligned","plane_alignment":"aligned"}
+insert_component {"paths":["block.dwprt"],"placement":{"translation":[0,-40,0],"rotation":[0.3420201433256687,0.0,0.0,0.9396926207859084]}}
+assembly_mate_lock {"name":"L","a":2,"b":7}
+insert_component {"paths":["shaft.dwprt"],"placement":{"translation":[10,-36.16977778440511,3.2139380484326963],"rotation":[0.3420201433256687,0.0,0.0,0.9396926207859084]}}
+assembly_mate_hinge {"name":"H2","axes":[{"component":7,"feature":"Cut-Extrude1","generator":"side"},{"component":9,"feature":"Boss-Extrude1","generator":"side"}],"planes":[{"component":7,"feature":"Boss-Extrude1","generator":"start_cap"},{"component":9,"feature":"Boss-Extrude1","generator":"start_cap"}],"alignment":"aligned","plane_alignment":"aligned"}
+assembly_save {"path":"rig.dwasm"}

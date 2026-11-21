@@ -34,10 +34,10 @@
 // start page's New assembly and Open tiles at fixed points of a 1400 x 813 page. Other
 // controls are found through the read-only `shown_controls` export.
 
-import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { startChrome, stopChrome } from './chrome.mjs';
 
 const [chrome, url, out, tray, collar, rig, block, shaft] = process.argv.slice(2);
 if (!chrome || !url || !out || !tray || !collar || !rig || !block || !shaft) {
@@ -80,11 +80,10 @@ function sameTurn(p, q, tolerance) {
 class Browser {
   constructor(profile) {
     this.profile = profile;
-    this.process = spawn(chrome, [
+    this.process = startChrome(chrome, [
       '--headless=new', '--remote-debugging-port=0', `--user-data-dir=${profile}`,
       '--no-first-run', '--no-default-browser-check', `--window-size=${SIZE.width},${SIZE.height}`, ...extra, 'about:blank',
-    // Its own process group, so the helpers Chrome starts can be stopped with it.
-    ], { stdio: ['ignore', 'ignore', 'pipe'], detached: true });
+    ]);
     this.stderr = '';
     this.process.stderr.on('data', d => { this.stderr += d; });
     this.events = [];
@@ -282,26 +281,10 @@ class Browser {
     return v;
   }
 
-  // Chromium's helpers write into the profile until they exit, and a killed browser leaves
-  // them running: one still wrote there while a check deleted the profile. So the browser
-  // closes itself through the DevTools protocol, which ends its helpers, and whatever is
-  // left of its process group is killed before the profile goes.
   async close() {
-    const running = () => this.process.exitCode === null && this.process.signalCode === null;
-    const within = ms => new Promise(resolve => setTimeout(resolve, ms));
-    if (running()) {
-      const exited = new Promise(resolve => this.process.once('exit', resolve));
-      if (this.ws?.readyState === WebSocket.OPEN) {
-        await Promise.race([this.send('Browser.close').catch(() => {}), within(5000)]);
-      }
-      await Promise.race([exited, within(10000)]);
-    }
+    const connected = this.ws?.readyState === WebSocket.OPEN;
+    await stopChrome(this.process, connected ? () => this.send('Browser.close') : null);
     this.ws?.close();
-    try {
-      process.kill(-this.process.pid, 'SIGKILL');
-    } catch (error) {
-      if (error.code !== 'ESRCH') throw error;
-    }
   }
 }
 

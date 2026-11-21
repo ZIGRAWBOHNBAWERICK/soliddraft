@@ -30,6 +30,9 @@
     "ci/test_ci_speed.py": [
       "lint"
     ],
+    "ci/chrome.mjs": [
+      "web"
+    ],
     "ci/browser-documents.mjs": [
       "web"
     ],

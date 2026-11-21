@@ -20,10 +20,10 @@
 // button at fixed points of a 1400 x 813 page; commands run through the command palette
 // by name.
 
-import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { startChrome, stopChrome } from './chrome.mjs';
 
 const [chrome, url, out, file] = process.argv.slice(2);
 if (!chrome || !url || !out || !file) {
@@ -103,10 +103,10 @@ function checkItems(shown, when) {
 class Browser {
   constructor(profile) {
     this.profile = profile;
-    this.process = spawn(chrome, [
+    this.process = startChrome(chrome, [
       '--headless=new', '--remote-debugging-port=0', `--user-data-dir=${profile}`,
       '--no-first-run', '--no-default-browser-check', `--window-size=${SIZE.width},${SIZE.height}`, ...extra, 'about:blank',
-    ], { stdio: ['ignore', 'ignore', 'pipe'] });
+    ]);
     this.stderr = '';
     this.process.stderr.on('data', d => { this.stderr += d; });
     this.events = [];
@@ -291,13 +291,10 @@ class Browser {
     return v;
   }
 
-  // Chromium's helpers still write into the profile until the browser exits, so wait for it.
   async close() {
+    const connected = this.ws?.readyState === WebSocket.OPEN;
+    await stopChrome(this.process, connected ? () => this.send('Browser.close') : null);
     this.ws?.close();
-    if (this.process.exitCode !== null || this.process.signalCode !== null) return;
-    const exited = new Promise(resolve => this.process.once('exit', resolve));
-    this.process.kill('SIGKILL');
-    await Promise.race([exited, new Promise(resolve => setTimeout(resolve, 10000))]);
   }
 }
 

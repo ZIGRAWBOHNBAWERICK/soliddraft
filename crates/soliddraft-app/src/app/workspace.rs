@@ -767,7 +767,6 @@ impl eframe::App for SolidDraftApp {
 
     fn ui(&mut self, root: &mut egui::Ui, frame: &mut eframe::Frame) {
         crate::multibody::show(root.ctx(), &mut self.state);
-        crate::assembly::show_choice(root.ctx(), &mut self.state);
         let ctx = &root.ctx().clone();
         log::debug!("ui frame {}", self.frame);
         self.state.doc.set_repaint(ctx);
@@ -842,6 +841,8 @@ impl eframe::App for SolidDraftApp {
         crate::web::begin_frame();
         self.edit_suite_frame(root);
         self.dialogs(ctx);
+        // After the frame's controls are cleared, so the browser check finds its buttons.
+        crate::assembly::show_choice(ctx, &mut self.state);
         crate::import::report::notice(ctx, &self.state);
         #[cfg(target_arch = "wasm32")]
         self.building(ctx);

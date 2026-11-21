@@ -587,7 +587,7 @@ async function refusedDrag(v) {
   check(JSON.stringify(shown.mate_names) === JSON.stringify(before.mate_names), `the refused drag changed the mates to ${shown.mate_names}`);
   check(JSON.stringify(shown.undo) === JSON.stringify(before.undo), `the refused drag changed undo to ${JSON.stringify(shown.undo)} from ${JSON.stringify(before.undo)}`);
   check(shown.dirty === before.dirty, `the refused drag left the joint dirty: ${shown.dirty}`);
-  await v.shot('13-refused');
+  await v.shot('14-refused');
   const refused = shown;
 
   // One later feature on top: the same field takes 60 degrees, the output shaft's hinge
@@ -601,7 +601,7 @@ async function refusedDrag(v) {
   const axis = rotate(component(shown, OUTPUT).rotation, [0, 0, 1]);
   const bore = rotate(sixty, [0, 0, 1]);
   check(axis.every((x, i) => Math.abs(x - bore[i]) < 1e-9), `the output shaft points along ${axis}, not its bore ${bore}`);
-  await v.shot('14-turned');
+  await v.shot('15-turned');
   const turned = shown;
 
   step('undo the turn');

@@ -239,6 +239,9 @@ impl SolidDraftApp {
         if files.is_empty() {
             return;
         }
+        // A new upload replaces an Open assembly choice still waiting for an answer, so
+        // the old choice cannot open over what this one opens.
+        self.state.assembly.choice = None;
         let is_step = |name: &str| {
             std::path::Path::new(name)
                 .extension()
@@ -260,6 +263,7 @@ impl SolidDraftApp {
 
     pub(super) fn open_bytes(&mut self, name: &str, bytes: &[u8]) {
         use soliddraft_document::DocKind;
+        self.state.assembly.choice = None;
         match DocKind::of_path(std::path::Path::new(name)) {
             Some(DocKind::Drawing) => match crate::drawing::document::DrawingDoc::from_bytes(bytes) {
                 Ok(mut doc) => {

@@ -24,7 +24,9 @@
 // that lists that child first, with the tray and collar parts. Neither opens on its own:
 // the page asks which one to open, the visitor chooses the parent, and it opens with the
 // child and its parts found. Then one later feature on top: the tray inserted in the
-// parent the choice opened.
+// parent the choice opened. Then the same upload again with the choice left unanswered,
+// and the child opened alone through File > Open: the old choice is gone, so it cannot
+// open over the child.
 //
 // The app draws into one canvas and takes only trusted input: keys and clicks sent as the
 // browser's own, through the DevTools protocol. The canvas has no text to read, so the
@@ -50,6 +52,9 @@ fs.mkdirSync(downloads, { recursive: true });
 const SIZE = { width: 1400, height: 813 };
 const NEW_ASSEMBLY = [304, 145];
 const OPEN = [663, 147];
+// The File menu, and its Open item once the menu is open.
+const FILE_MENU = [122, 15];
+const FILE_OPEN = [132, 68];
 // The tray is 60 x 40 x 20 mm, open at the top, with 2 mm walls: its floor is 2 mm up.
 const FLOOR = 2;
 
@@ -511,7 +516,22 @@ async function chosenAssembly(v, saved, files, placed) {
   check(parts(shown)[1] === stem && shown.components[1].freshness === 'current', `the inserted component is ${JSON.stringify(shown.components[1])}`);
   await v.stopped('chosen at the end');
   await v.shot('12-inserted');
-  return { choosing, chosen, inserted: shown };
+  const inserted = shown;
+
+  step('open the child and the parent again, leave the choice, and open the child alone');
+  await v.load();
+  await v.choose([child, parent, ...files], () => v.click(OPEN));
+  await v.assembly('choosing again', s => !s.open && !s.opening && s.choosing?.length === 2);
+  await v.choose([child, ...files], async () => { await v.click(FILE_MENU); await v.click(FILE_OPEN); });
+  await v.assembly('child alone', s => loaded(s) && s.file === 'child.dwasm' && s.components.every(c => c.freshness !== 'unchecked'));
+  await v.settle(1000);
+  const replaced = JSON.parse(await v.eval(`window.wasmBindings.shown_assembly()`));
+  const offered = Object.keys(JSON.parse(await v.eval(`window.wasmBindings.shown_controls()`))).filter(n => n.startsWith('Open assembly'));
+  check(replaced.file === 'child.dwasm', `${replaced.file} is open, not child.dwasm`);
+  check(replaced.choosing.length === 0 && offered.length === 0, `the old choice is still offered: ${JSON.stringify(replaced.choosing)}, buttons ${JSON.stringify(offered)}`);
+  await v.stopped('choice replaced');
+  await v.shot('13-choice-replaced');
+  return { choosing, chosen, inserted, replaced };
 }
 
 try {

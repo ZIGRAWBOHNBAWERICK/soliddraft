@@ -546,7 +546,8 @@ async function chosenAssembly(v, saved, files, placed) {
 // blocks deleted, so the output block (component 7) turns freely and carries the output
 // shaft on its hinge.
 const BEARING = '7';
-const REFUSAL = 'a universal joint locks with its shafts at right angles; set the shafts at another angle';
+// The note shows a refusal as its code, then its message.
+const REFUSAL = 'invalid: a universal joint locks with its shafts at right angles; set the shafts at another angle';
 
 // Types `degrees` into the placement field `name` of the selected component, and Enter.
 async function placementField(v, name, degrees) {
@@ -593,7 +594,7 @@ async function refusedDrag(v) {
   // carries it along, and Undo puts the block back.
   step('turn the bearing block to 60 degrees about X instead');
   await placementField(v, 'Placement Rotate X', 60);
-  shown = await v.assembly('turned', s => s.undo.depth === before.undo.depth + 1 || s.note?.text !== REFUSAL);
+  shown = await v.assembly('turned', s => s.undo.depth === before.undo.depth + 1 || (s.note?.kind === 'Error' && s.note.text !== REFUSAL));
   check(shown.undo.depth === before.undo.depth + 1, `the 60 degree turn was not taken: ${JSON.stringify(shown.note)}`);
   const sixty = about([1, 0, 0], 60 * Math.PI / 180);
   check(sameTurn(component(shown, BEARING).rotation, sixty, 1e-9), `the bearing block turned to ${component(shown, BEARING).rotation}`);

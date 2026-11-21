@@ -231,13 +231,17 @@ impl SolidDraftApp {
 
     /// Opens uploaded files: a STEP file Import STEP asked for goes to its review. An
     /// assembly opens with the other files as the documents it places, since the page has
-    /// no folder to find them in; otherwise the first file opens.
+    /// no folder to find them in, and the visitor chooses which when there are several;
+    /// otherwise the first file opens.
     fn open_uploads(&mut self, mut files: Vec<(String, Vec<u8>)>) {
         use soliddraft_document::DocKind;
         let step_asked = std::mem::take(&mut self.state.step_upload);
         if files.is_empty() {
             return;
         }
+        // A new upload replaces an Open assembly choice still waiting for an answer, so
+        // the old choice cannot open over what this one opens.
+        self.state.assembly.choice = None;
         let is_step = |name: &str| {
             std::path::Path::new(name)
                 .extension()
@@ -247,12 +251,11 @@ impl SolidDraftApp {
             let (name, bytes) = files.swap_remove(0);
             return self.review_step_upload(&name, bytes);
         }
-        let assembly =
-            files.iter().position(|(name, _)| DocKind::of_path(std::path::Path::new(name)) == Some(DocKind::Assembly));
-        let (name, bytes) = files.remove(assembly.unwrap_or(0));
-        if assembly.is_some() {
-            crate::assembly::hold_all(&mut self.state, &files);
-        } else if !files.is_empty() {
+        if files.iter().any(|(name, _)| DocKind::of_path(std::path::Path::new(name)) == Some(DocKind::Assembly)) {
+            return crate::assembly::open_uploaded(&mut self.state, files);
+        }
+        let (name, bytes) = files.remove(0);
+        if !files.is_empty() {
             self.state.note(format!("Opened {name}; open one part or drawing at a time"), NoteKind::Info);
         }
         self.open_bytes(&name, &bytes);
@@ -260,6 +263,7 @@ impl SolidDraftApp {
 
     pub(super) fn open_bytes(&mut self, name: &str, bytes: &[u8]) {
         use soliddraft_document::DocKind;
+        self.state.assembly.choice = None;
         match DocKind::of_path(std::path::Path::new(name)) {
             Some(DocKind::Drawing) => match crate::drawing::document::DrawingDoc::from_bytes(bytes) {
                 Ok(mut doc) => {
@@ -841,6 +845,8 @@ impl eframe::App for SolidDraftApp {
         crate::web::begin_frame();
         self.edit_suite_frame(root);
         self.dialogs(ctx);
+        // After the frame's controls are cleared, so the browser check finds its buttons.
+        crate::assembly::show_choice(ctx, &mut self.state);
         crate::import::report::notice(ctx, &self.state);
         #[cfg(target_arch = "wasm32")]
         self.building(ctx);

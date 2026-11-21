@@ -100,6 +100,9 @@ pub struct AssemblyState {
     /// open documents, their bytes held in the revision store, because the page has no
     /// folder to find them in.
     pub held: Vec<soliddraft_document::OpenDocument>,
+    /// Files uploaded together that hold more than one assembly, by name and bytes, kept
+    /// until the visitor chooses which assembly opens.
+    pub choice: Option<Vec<(String, Vec<u8>)>>,
     /// The Mate panel's fields.
     pub mate: crate::mates::Draft,
     /// The Form subassembly panel's fields.
@@ -399,6 +402,67 @@ pub fn hold_all(state: &mut AppState, files: &[(String, Vec<u8>)]) {
     refresh(state);
 }
 
+fn is_assembly(name: &str) -> bool {
+    DocKind::of_path(std::path::Path::new(name)) == Some(DocKind::Assembly)
+}
+
+/// Opens uploaded files that hold assemblies. With one assembly it opens, the other files
+/// held as the documents it places. With more than one, nothing opens yet: a parent
+/// and the child assembly it places can arrive in either order, so the visitor chooses
+/// which one opens, in the window [`show_choice`] draws.
+pub fn open_uploaded(state: &mut AppState, mut files: Vec<(String, Vec<u8>)>) {
+    let assemblies: Vec<usize> = (0..files.len()).filter(|&i| is_assembly(&files[i].0)).collect();
+    match assemblies[..] {
+        [] => {}
+        [only] => {
+            let (name, bytes) = files.remove(only);
+            hold_all(state, &files);
+            open_bytes(state, &name, bytes);
+        }
+        _ => state.assembly.choice = Some(files),
+    }
+}
+
+/// Opens the uploaded assembly called `name` that the visitor chose, holding the other
+/// files of its upload, the other assemblies among them, as documents it may place.
+pub fn open_choice(state: &mut AppState, name: &str) {
+    let Some(mut files) = state.assembly.choice.take() else { return };
+    let Some(at) = files.iter().position(|(n, _)| n == name && is_assembly(n)) else {
+        state.assembly.choice = Some(files);
+        return;
+    };
+    let (name, bytes) = files.remove(at);
+    hold_all(state, &files);
+    open_bytes(state, &name, bytes);
+}
+
+/// The window that asks which of several uploaded assemblies opens. Closing it opens
+/// none of them.
+pub fn show_choice(ctx: &egui::Context, state: &mut AppState) {
+    let Some(files) = &state.assembly.choice else { return };
+    let names: Vec<String> = files.iter().map(|(n, _)| n.clone()).filter(|n| is_assembly(n)).collect();
+    let mut open = true;
+    let mut chosen = None;
+    egui::Window::new("Open assembly").collapsible(false).resizable(false).open(&mut open).show(ctx, |ui| {
+        ui.label("These files hold more than one assembly. Choose the one to open.");
+        ui.label("The other files stay available as the parts and subassemblies it places.");
+        for name in &names {
+            let button = ui.button(name);
+            #[cfg(target_arch = "wasm32")]
+            crate::web::show_control(format!("Open assembly: {name}"), button.rect);
+            if button.clicked() {
+                chosen = Some(name.clone());
+            }
+        }
+    });
+    if let Some(name) = chosen {
+        open_choice(state, &name);
+    } else if !open {
+        state.assembly.choice = None;
+        state.note("Opened nothing; open the files again to choose an assembly", NoteKind::Info);
+    }
+}
+
 /// Opens an assembly from the bytes of its file, called `name`, as the browser hands it
 /// over. Its parts come from the documents held this session, or show as the copies the
 /// file keeps.
@@ -514,54 +578,68 @@ pub fn frame(state: &mut AppState, dock: &mut DockState<Tab>, ctx: &egui::Contex
     crate::web::show_assembly(shown(state));
 }
 
+/// One component as [`shown`] lists it.
+fn shown_component(s: &AssemblySession, r: OccurrenceIndex) -> serde_json::Value {
+    let table = s.doc.table();
+    let def = s.doc.store().get(table.definition(r));
+    let local = table.local(r);
+    let freshness = match &def.freshness {
+        Freshness::Unchecked => "unchecked",
+        Freshness::Current => "current",
+        Freshness::NewerAvailable { .. } => "newer",
+        Freshness::Missing => "missing",
+    };
+    let inside: Vec<serde_json::Value> =
+        table.children(r).filter(|c| !table.flags(*c).has(Flags::REMOVED)).map(|c| shown_component(s, c)).collect();
+    serde_json::json!({
+        "path": table.path(r).to_string(),
+        "label": s.doc.label(r),
+        "state": format!("{:?}", def.state),
+        "freshness": freshness,
+        "warning": warning(def),
+        "problem": def.problem,
+        "translation": local.translation.to_array(),
+        "rotation": local.rotation.to_array(),
+        "components": inside,
+    })
+}
+
 /// The open assembly as the window shows it, as JSON, for browser checks: `{"open": false}`
 /// with nothing open, else its `name`, whether it is `active`, `dirty`, `opening` another
 /// or `loading`, each of the root's `components` (`path`, `label`, `state` and
 /// `freshness` of what it places, a `warning` or `problem`, `translation` in millimetres
-/// and `rotation` as `[x, y, z, w]`), the `selected` component's path, the number of
-/// `mates`, the Mate panel's picks and error, and the names of the files `held` for it.
+/// and `rotation` as `[x, y, z, w]`, and a subassembly's own `components` in the same
+/// form), the `selected` component's path, the number of `mates` and their
+/// `mate_names`, the `undo` step's label and depth, the window's last `note` (`text`
+/// and `kind`), the Mate panel's picks and error, the `file` it came from, the names of
+/// the files `held` for it, and the assemblies of an upload it is `choosing` between.
 pub fn shown(state: &AppState) -> serde_json::Value {
     let held: Vec<String> =
         state.assembly.held.iter().filter_map(|d| d.path.as_ref().map(|p| p.display().to_string())).collect();
     let opening = state.assembly.opening.is_some();
+    let choosing: Vec<&str> =
+        state.assembly.choice.iter().flatten().map(|(n, _)| n.as_str()).filter(|n| is_assembly(n)).collect();
     let Some(s) = state.assembly.session.as_ref() else {
-        return serde_json::json!({ "open": false, "opening": opening, "held": held });
+        return serde_json::json!({ "open": false, "opening": opening, "held": held, "choosing": choosing });
     };
-    let table = s.doc.table();
-    let components: Vec<serde_json::Value> = s
-        .components()
-        .into_iter()
-        .map(|r| {
-            let def = s.doc.store().get(table.definition(r));
-            let local = table.local(r);
-            let freshness = match &def.freshness {
-                Freshness::Unchecked => "unchecked",
-                Freshness::Current => "current",
-                Freshness::NewerAvailable { .. } => "newer",
-                Freshness::Missing => "missing",
-            };
-            serde_json::json!({
-                "path": table.path(r).to_string(),
-                "label": s.doc.label(r),
-                "state": format!("{:?}", def.state),
-                "freshness": freshness,
-                "warning": warning(def),
-                "problem": def.problem,
-                "translation": local.translation.to_array(),
-                "rotation": local.rotation.to_array(),
-            })
-        })
-        .collect();
+    let components: Vec<serde_json::Value> = s.components().into_iter().map(|r| shown_component(s, r)).collect();
     serde_json::json!({
         "open": true,
         "active": state.assembly.is_active(),
         "name": s.doc.assembly().name,
+        "file": s.doc.path().map(|p| p.display().to_string()),
         "dirty": s.doc.is_dirty(),
         "opening": opening,
         "loading": s.doc.is_loading(),
         "components": components,
         "selected": s.selected.as_ref().map(|p| p.to_string()),
         "mates": s.doc.assembly().mates.len(),
+        "mate_names": s.doc.assembly().mates.iter().map(|m| match m {
+            soliddraft_assembly::MateEntry::Known(mate) => mate.name(),
+            soliddraft_assembly::MateEntry::Future(kept) => kept["name"].as_str().unwrap_or_default(),
+        }).collect::<Vec<_>>(),
+        "undo": { "label": s.doc.undo_label(), "depth": s.doc.undo_depth() },
+        "note": state.note.as_ref().map(|n| serde_json::json!({ "text": n.text, "kind": format!("{:?}", n.kind) })),
         "mate_panel": {
             "open": state.assembly.mate.open,
             "a": state.assembly.mate.a.as_ref().map(|p| serde_json::json!({ "component": p.component.0, "face": p.face.label })),
@@ -569,6 +647,7 @@ pub fn shown(state: &AppState) -> serde_json::Value {
             "error": state.assembly.mate.error,
         },
         "held": held,
+        "choosing": choosing,
     })
 }
 

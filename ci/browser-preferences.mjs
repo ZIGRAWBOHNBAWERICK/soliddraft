@@ -17,10 +17,10 @@
 // The clicks go to fixed points of a 1400 x 813 page. When the Preferences window's
 // layout changes, the frames this writes to OUTDIR show where its controls moved.
 
-import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { startChrome, stopChrome } from './chrome.mjs';
 
 const [chrome, url, out] = process.argv.slice(2);
 if (!chrome || !url || !out) throw new Error('usage: browser-preferences.mjs CHROME URL OUTDIR');
@@ -45,10 +45,10 @@ function check(value, message) { if (!value) throw new Error(message); }
 
 const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'soliddraft-preferences-'));
 const extra = (process.env.CHROME_ARGS || '').split(/\s+/).filter(Boolean);
-const browser = spawn(chrome, [
+const browser = startChrome(chrome, [
   '--headless=new', '--remote-debugging-port=0', `--user-data-dir=${profile}`,
   '--no-first-run', '--no-default-browser-check', `--window-size=${SIZE.width},${SIZE.height}`, ...extra, 'about:blank',
-], { stdio: ['ignore', 'ignore', 'pipe'] });
+]);
 let stderr = '';
 browser.stderr.on('data', d => { stderr += d; });
 
@@ -61,8 +61,10 @@ try {
   console.error(stderr.split('\n').slice(-20).join('\n'));
   process.exitCode = 1;
 } finally {
+  const connected = ws?.readyState === WebSocket.OPEN;
+  await stopChrome(browser, connected ? async () => ws.send(JSON.stringify({ id: 0, method: 'Browser.close' })) : null);
   ws?.close();
-  browser.kill();
+  fs.rmSync(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
 }
 
 async function main() {

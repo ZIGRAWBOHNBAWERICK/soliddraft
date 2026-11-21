@@ -30,6 +30,9 @@
     "ci/test_ci_speed.py": [
       "lint"
     ],
+    "ci/chrome.mjs": [
+      "web"
+    ],
     "ci/browser-documents.mjs": [
       "web"
     ],
@@ -118,6 +121,12 @@
       "step-opencascade"
     ],
     "ci/fixtures/pmi/p1-bracket-pmi.step": [
+      "web"
+    ],
+    "ci/fixtures/universal-joint/bearing.dwasm": [
+      "web"
+    ],
+    "ci/fixtures/universal-joint/bearing.txt": [
       "web"
     ],
     "ci/fixtures/universal-joint/block.dwprt": [

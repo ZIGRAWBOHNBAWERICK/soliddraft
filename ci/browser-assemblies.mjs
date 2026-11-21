@@ -1,5 +1,5 @@
 // Assemblies in the browser build, driven in headless Chrome as a visitor drives them.
-// Usage: node ci/browser-assemblies.mjs CHROME URL OUTDIR TRAY COLLAR RIG BLOCK SHAFT
+// Usage: node ci/browser-assemblies.mjs CHROME URL OUTDIR TRAY COLLAR RIG BLOCK SHAFT BEARING
 //
 // TRAY and COLLAR are part files (site/parts/tray.dwprt and collar.dwprt). The page has no
 // folder, so every part reaches it as a file handed over. The visitor starts a new
@@ -20,6 +20,21 @@
 // tan(output) = tan(input) / cos(40 degrees). The joint is saved and reopened with its
 // parts.
 //
+// Last, a parent assembly that places the saved tray assembly is opened from one upload
+// that lists that child first, with the tray and collar parts. Neither opens on its own:
+// the page asks which one to open, the visitor chooses the parent, and it opens with the
+// child and its parts found. Then one later feature on top: the tray inserted in the
+// parent the choice opened. Then the same upload again with the choice left unanswered,
+// and the child opened alone through File > Open: the old choice is gone, so it cannot
+// open over the child.
+//
+// BEARING is ci/fixtures/universal-joint/bearing.dwasm: the rig with its Universal Joint
+// made and the lock between the blocks deleted, so the output block turns freely. The
+// visitor selects that block and types 90 degrees into its Rotate X placement field,
+// which would set the shafts at right angles. The drag is refused by name and leaves the
+// placements, the mates and undo as they were. Then one later feature on top: 60 degrees
+// in the same field is taken, the output shaft follows its bore, and Undo puts it back.
+//
 // The app draws into one canvas and takes only trusted input: keys and clicks sent as the
 // browser's own, through the DevTools protocol. The canvas has no text to read, so the
 // check reads the assembly through the read-only `shown_assembly` export, and finds a
@@ -28,14 +43,14 @@
 // start page's New assembly and Open tiles at fixed points of a 1400 x 813 page. Other
 // controls are found through the read-only `shown_controls` export.
 
-import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { startChrome, stopChrome } from './chrome.mjs';
 
-const [chrome, url, out, tray, collar, rig, block, shaft] = process.argv.slice(2);
-if (!chrome || !url || !out || !tray || !collar || !rig || !block || !shaft) {
-  throw new Error('usage: browser-assemblies.mjs CHROME URL OUTDIR TRAY COLLAR RIG BLOCK SHAFT');
+const [chrome, url, out, tray, collar, rig, block, shaft, bearing] = process.argv.slice(2);
+if (!chrome || !url || !out || !tray || !collar || !rig || !block || !shaft || !bearing) {
+  throw new Error('usage: browser-assemblies.mjs CHROME URL OUTDIR TRAY COLLAR RIG BLOCK SHAFT BEARING');
 }
 fs.mkdirSync(out, { recursive: true });
 const downloads = path.join(path.resolve(out), 'downloads');
@@ -44,6 +59,9 @@ fs.mkdirSync(downloads, { recursive: true });
 const SIZE = { width: 1400, height: 813 };
 const NEW_ASSEMBLY = [304, 145];
 const OPEN = [663, 147];
+// The File menu, and its Open item once the menu is open.
+const FILE_MENU = [122, 15];
+const FILE_OPEN = [132, 68];
 // The tray is 60 x 40 x 20 mm, open at the top, with 2 mm walls: its floor is 2 mm up.
 const FLOOR = 2;
 
@@ -74,11 +92,10 @@ function sameTurn(p, q, tolerance) {
 class Browser {
   constructor(profile) {
     this.profile = profile;
-    this.process = spawn(chrome, [
+    this.process = startChrome(chrome, [
       '--headless=new', '--remote-debugging-port=0', `--user-data-dir=${profile}`,
       '--no-first-run', '--no-default-browser-check', `--window-size=${SIZE.width},${SIZE.height}`, ...extra, 'about:blank',
-    // Its own process group, so the helpers Chrome starts can be stopped with it.
-    ], { stdio: ['ignore', 'ignore', 'pipe'], detached: true });
+    ]);
     this.stderr = '';
     this.process.stderr.on('data', d => { this.stderr += d; });
     this.events = [];
@@ -276,26 +293,10 @@ class Browser {
     return v;
   }
 
-  // Chromium's helpers write into the profile until they exit, and a killed browser leaves
-  // them running: one still wrote there while a check deleted the profile. So the browser
-  // closes itself through the DevTools protocol, which ends its helpers, and whatever is
-  // left of its process group is killed before the profile goes.
   async close() {
-    const running = () => this.process.exitCode === null && this.process.signalCode === null;
-    const within = ms => new Promise(resolve => setTimeout(resolve, ms));
-    if (running()) {
-      const exited = new Promise(resolve => this.process.once('exit', resolve));
-      if (this.ws?.readyState === WebSocket.OPEN) {
-        await Promise.race([this.send('Browser.close').catch(() => {}), within(5000)]);
-      }
-      await Promise.race([exited, within(10000)]);
-    }
+    const connected = this.ws?.readyState === WebSocket.OPEN;
+    await stopChrome(this.process, connected ? () => this.send('Browser.close') : null);
     this.ws?.close();
-    try {
-      process.kill(-this.process.pid, 'SIGKILL');
-    } catch (error) {
-      if (error.code !== 'ESRCH') throw error;
-    }
   }
 }
 
@@ -379,9 +380,11 @@ async function main() {
   const alone = shown;
 
   const joint = await universalJoint(v);
+  const choice = await chosenAssembly(v, saved, [tray, collar], parts(mated));
+  const bearingDrag = await refusedDrag(v);
 
-  fs.writeFileSync(path.join(out, 'assemblies.json'), JSON.stringify({ mated, reopened, alone, saved: path.basename(saved), joint }, null, 1));
-  console.log(`Assemblies in the browser: three components from two uploads, a mate picked in the viewport putting the second tray ${FLOOR} mm up on the first one's floor, saved as ${path.basename(saved)}, reopened with its parts at the same placements with the mate kept, and opened alone from the copies it keeps. A Universal Joint picked between two shafts meeting at ${BEND} degrees drove the output ${joint.follows.toFixed(6)} degrees for a ${TURN} degree input turn, and reopened with its parts.`);
+  fs.writeFileSync(path.join(out, 'assemblies.json'), JSON.stringify({ mated, reopened, alone, saved: path.basename(saved), joint, choice, bearing: bearingDrag }, null, 1));
+  console.log(`Assemblies in the browser: three components from two uploads, a mate picked in the viewport putting the second tray ${FLOOR} mm up on the first one's floor, saved as ${path.basename(saved)}, reopened with its parts at the same placements with the mate kept, and opened alone from the copies it keeps. A Universal Joint picked between two shafts meeting at ${BEND} degrees drove the output ${joint.follows.toFixed(6)} degrees for a ${TURN} degree input turn, and reopened with its parts. A parent and its child assembly uploaded child first opened the parent the visitor chose, with ${choice.chosen.held.length} files held for it, and took a tray inserted on top. Turning the joint's free output block to set the shafts at right angles was refused by name with nothing changed, and a 60 degree turn after it was taken and undone.`);
 }
 
 // The rig's shafts: the input (component 4) on a hinge at (10, 5, 0) along Z, the output
@@ -462,6 +465,152 @@ async function universalJoint(v) {
   await v.stopped('joint at the end');
   await v.shot('9-joint-reopened');
   return { driven, reopened: shown, follows: follows * 180 / Math.PI, saved: path.basename(saved) };
+}
+
+// A parent assembly placing the assembly `saved`, opened from one upload that lists that
+// child first, with `files`, the part files of the components the child places, named in
+// `placed`. Neither assembly opens until the visitor chooses the parent.
+async function chosenAssembly(v, saved, files, placed) {
+  const named = file => path.basename(file);
+  // The parent downloads under the name the child did, so each gets a name of its own.
+  const child = path.join(downloads, 'child.dwasm');
+  fs.copyFileSync(saved, child);
+  step('load the site again and start a parent assembly that places a saved assembly');
+  await v.load();
+  await v.click(NEW_ASSEMBLY);
+  await v.assembly('parent new', s => s.open && s.active && s.components.length === 0);
+  await v.choose(child, () => v.command('Insert component'));
+  await v.assembly('parent', s => loaded(s) && s.components.length === 1 && s.components.every(c => c.freshness !== 'unchecked'));
+  const made = await v.download('save parent', () => v.key('s', 'KeyS', 83, 2, 's'));
+  await v.assembly('parent saved', s => !s.dirty);
+  const parent = path.join(downloads, 'parent.dwasm');
+  fs.renameSync(made, parent);
+
+  step('load the site again and open the child, the parent and the parts, the child first');
+  await v.load();
+  await v.choose([child, parent, ...files], () => v.click(OPEN));
+  let shown = await v.assembly('choosing', s => !s.open && !s.opening && s.choosing?.length > 0);
+  check(JSON.stringify(shown.choosing) === '["child.dwasm","parent.dwasm"]', `the page offers ${shown.choosing}`);
+  check(shown.held.length === 0, `the page holds ${shown.held} before a choice`);
+  await v.settle(1000);
+  const choosing = JSON.parse(await v.eval(`window.wasmBindings.shown_assembly()`));
+  check(!choosing.open && !choosing.opening, `an assembly opened before the choice: ${JSON.stringify(choosing)}`);
+  await v.shot('10-choose');
+
+  step('choose the parent');
+  await v.click(await v.control('Open assembly: parent.dwasm'));
+  const checked = c => c.freshness !== 'unchecked' && c.components.every(checked);
+  shown = await v.assembly('chosen', s => loaded(s) && s.components.length === 1 && s.components.every(checked));
+  check(shown.file === 'parent.dwasm', `${shown.file} opened, not parent.dwasm`);
+  check(shown.choosing.length === 0, `the page still offers ${shown.choosing}`);
+  const held = JSON.stringify(['child.dwasm', ...files.map(named)]);
+  check(JSON.stringify(shown.held) === held, `the page holds ${shown.held}, not ${held}`);
+  // A subassembly has no mesh of its own: its structure is read, and its parts are drawn.
+  const [sub] = shown.components;
+  check(sub.state === 'MetadataOnly' && sub.freshness === 'current' && !sub.warning, `the child is ${JSON.stringify(sub)}`);
+  const inside = JSON.stringify(parts(sub));
+  check(inside === JSON.stringify(placed), `the child places ${inside}, not ${JSON.stringify(placed)}`);
+  check(sub.components.every(c => c.state === 'DisplayReady' && c.freshness === 'current' && !c.warning), `not every part in the child is found: ${JSON.stringify(sub.components)}`);
+  await v.shot('11-chosen');
+  const chosen = shown;
+
+  // One later feature on top: a part inserted in the parent the choice opened.
+  const part = files[0];
+  step(`insert ${named(part)} in the parent`);
+  await v.choose(part, () => v.command('Insert component'));
+  shown = await v.assembly('inserted', s => loaded(s) && s.components.length === 2 && s.components.every(c => c.freshness !== 'unchecked'));
+  check(shown.file === 'parent.dwasm' && shown.dirty, `the part went to ${shown.file}, dirty ${shown.dirty}`);
+  const stem = named(part).replace(/\.dwprt$/, '');
+  check(parts(shown)[1] === stem && shown.components[1].freshness === 'current', `the inserted component is ${JSON.stringify(shown.components[1])}`);
+  await v.stopped('chosen at the end');
+  await v.shot('12-inserted');
+  const inserted = shown;
+
+  step('open the child and the parent again, leave the choice, and open the child alone');
+  await v.load();
+  await v.choose([child, parent, ...files], () => v.click(OPEN));
+  await v.assembly('choosing again', s => !s.open && !s.opening && s.choosing?.length === 2);
+  await v.choose([child, ...files], async () => { await v.click(FILE_MENU); await v.click(FILE_OPEN); });
+  await v.assembly('child alone', s => loaded(s) && s.file === 'child.dwasm' && s.components.every(c => c.freshness !== 'unchecked'));
+  await v.settle(1000);
+  const replaced = JSON.parse(await v.eval(`window.wasmBindings.shown_assembly()`));
+  const offered = Object.keys(JSON.parse(await v.eval(`window.wasmBindings.shown_controls()`))).filter(n => n.startsWith('Open assembly'));
+  check(replaced.file === 'child.dwasm', `${replaced.file} is open, not child.dwasm`);
+  check(replaced.choosing.length === 0 && offered.length === 0, `the old choice is still offered: ${JSON.stringify(replaced.choosing)}, buttons ${JSON.stringify(offered)}`);
+  await v.stopped('choice replaced');
+  await v.shot('13-choice-replaced');
+  return { choosing, chosen, inserted, replaced };
+}
+
+// The bearing fixture: the rig with its Universal Joint U made and the lock between the
+// blocks deleted, so the output block (component 7) turns freely and carries the output
+// shaft on its hinge.
+const BEARING = '7';
+// The note shows a refusal as its code, then its message.
+const REFUSAL = 'invalid: a universal joint locks with its shafts at right angles; set the shafts at another angle';
+
+// Types `degrees` into the placement field `name` of the selected component, and Enter.
+async function placementField(v, name, degrees) {
+  await v.click(await v.control(name));
+  await v.key('a', 'KeyA', 65, 2, 'a');
+  for (const ch of String(degrees)) {
+    await v.key(ch, `Digit${ch}`, ch.charCodeAt(0), 0, ch);
+  }
+  await v.key('Enter', 'Enter', 13, 0, '\r');
+}
+
+async function refusedDrag(v) {
+  step('load the site again and open the joint whose output block turns freely');
+  await v.load();
+  await v.choose([bearing, block, shaft], () => v.click(OPEN));
+  let shown = await v.assembly('bearing', s => loaded(s) && s.components.length === 4 && s.components.every(c => c.freshness !== 'unchecked'));
+  check(JSON.stringify(shown.mate_names) === '["O","H","H2","U"]', `the joint's mates are ${shown.mate_names}`);
+  const component = (s, at) => s.components.find(c => c.path === at);
+  const tilt = about([1, 0, 0], BEND * Math.PI / 180);
+  check(sameTurn(component(shown, BEARING).rotation, tilt, 1e-9), `the bearing block starts at ${component(shown, BEARING).rotation}`);
+
+  // A corner of the block's top, clear of its shaft, seen from above.
+  step('select the bearing block');
+  await v.command('Top');
+  await v.command('Fit');
+  const corner = rotate(tilt, [-12, -8, 10]).map((x, i) => x + component(shown, BEARING).translation[i]);
+  await v.pick(await v.screen(...corner));
+  const before = await v.assembly('bearing selected', s => s.selected === BEARING);
+  check(before.note?.kind !== 'Error', `an error shows before the drag: ${before.note?.text}`);
+  await v.click(await v.control('Assembly options'));
+
+  step('turn the bearing block to 90 degrees about X, which would set the shafts at right angles');
+  await placementField(v, 'Placement Rotate X', 90);
+  shown = await v.assembly('refused', s => s.note?.kind === 'Error');
+  check(shown.note.text === REFUSAL, `the refusal says "${shown.note.text}", not "${REFUSAL}"`);
+  check(JSON.stringify(placements(shown)) === JSON.stringify(placements(before)), `the refused drag moved ${JSON.stringify(placements(shown))} from ${JSON.stringify(placements(before))}`);
+  check(JSON.stringify(shown.mate_names) === JSON.stringify(before.mate_names), `the refused drag changed the mates to ${shown.mate_names}`);
+  check(JSON.stringify(shown.undo) === JSON.stringify(before.undo), `the refused drag changed undo to ${JSON.stringify(shown.undo)} from ${JSON.stringify(before.undo)}`);
+  check(shown.dirty === before.dirty, `the refused drag left the joint dirty: ${shown.dirty}`);
+  await v.shot('14-refused');
+  const refused = shown;
+
+  // One later feature on top: the same field takes 60 degrees, the output shaft's hinge
+  // carries it along, and Undo puts the block back.
+  step('turn the bearing block to 60 degrees about X instead');
+  await placementField(v, 'Placement Rotate X', 60);
+  shown = await v.assembly('turned', s => s.undo.depth === before.undo.depth + 1 || (s.note?.kind === 'Error' && s.note.text !== REFUSAL));
+  check(shown.undo.depth === before.undo.depth + 1, `the 60 degree turn was not taken: ${JSON.stringify(shown.note)}`);
+  const sixty = about([1, 0, 0], 60 * Math.PI / 180);
+  check(sameTurn(component(shown, BEARING).rotation, sixty, 1e-9), `the bearing block turned to ${component(shown, BEARING).rotation}`);
+  const axis = rotate(component(shown, OUTPUT).rotation, [0, 0, 1]);
+  const bore = rotate(sixty, [0, 0, 1]);
+  check(axis.every((x, i) => Math.abs(x - bore[i]) < 1e-9), `the output shaft points along ${axis}, not its bore ${bore}`);
+  await v.shot('15-turned');
+  const turned = shown;
+
+  step('undo the turn');
+  await v.command('Undo');
+  shown = await v.assembly('undone', s => s.undo.depth === before.undo.depth);
+  check(near(placements(shown), placements(before)), `after Undo the placements are ${JSON.stringify(placements(shown))}, not ${JSON.stringify(placements(before))}`);
+  check(JSON.stringify(shown.mate_names) === JSON.stringify(before.mate_names), `after Undo the mates are ${shown.mate_names}`);
+  await v.stopped('bearing at the end');
+  return { refused, turned, undone: shown };
 }
 
 try {

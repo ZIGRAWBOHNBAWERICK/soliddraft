@@ -15,10 +15,10 @@
 // to the New part tile and to Extrude's Rectangle button at fixed points of a 1400 x 813
 // page; tests/documents_start.rs checks both are there.
 
-import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { killGroup, startChrome, stopChrome } from './chrome.mjs';
 
 const [chrome, url, out] = process.argv.slice(2);
 if (!chrome || !url || !out) throw new Error('usage: browser-documents.mjs CHROME URL OUTDIR');
@@ -57,10 +57,10 @@ class Browser {
     this.profile = profile;
     // A Chrome that was killed leaves its port file behind; the new one writes its own.
     fs.rmSync(path.join(profile, 'DevToolsActivePort'), { force: true });
-    this.process = spawn(chrome, [
+    this.process = startChrome(chrome, [
       '--headless=new', '--remote-debugging-port=0', `--user-data-dir=${profile}`,
       '--no-first-run', '--no-default-browser-check', `--window-size=${SIZE.width},${SIZE.height}`, ...extra, 'about:blank',
-    ], { stdio: ['ignore', 'ignore', 'pipe'] });
+    ]);
     this.stderr = '';
     this.process.stderr.on('data', d => { this.stderr += d; });
     this.requests = [];
@@ -186,9 +186,10 @@ class Browser {
     return v;
   }
 
-  close() {
+  async close() {
+    const connected = this.ws?.readyState === WebSocket.OPEN;
+    await stopChrome(this.process, connected ? () => this.send('Browser.close') : null);
     this.ws?.close();
-    this.process.kill('SIGKILL');
   }
 }
 
@@ -222,8 +223,10 @@ async function main() {
 
   // Killed mid-edit: no page teardown runs.
   await a.key('e', 'KeyE', 69, 0, 'e');
-  browser.process.kill('SIGKILL');
-  await new Promise(resolve => browser.process.once('exit', resolve));
+  const killed = new Promise(resolve => browser.process.once('exit', resolve));
+  killGroup(browser.process);
+  await killed;
+  browser.ws?.close();
   open.pop();
 
   // The same browser again.
@@ -256,7 +259,7 @@ async function main() {
 // A step that hangs says where it was instead of waiting for the job to time out.
 const deadline = setTimeout(() => {
   console.error('FAIL the documents check took over eight minutes');
-  for (const b of open) b.close();
+  for (const b of open) killGroup(b.process);
   process.exit(1);
 }, 8 * 60 * 1000);
 
@@ -269,6 +272,7 @@ try {
   process.exitCode = 1;
 } finally {
   clearTimeout(deadline);
-  for (const b of open) b.close();
+  for (const b of open) await b.close();
+  fs.rmSync(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
   process.exit(process.exitCode ?? 0);
 }

@@ -270,10 +270,10 @@ impl DrawingDoc {
             self.redo_picking.clear();
             self.rescale_picking();
             self.touch();
-            if matches!(cmd, Command::DeleteView { .. } | Command::DeleteSheet { .. }) {
-                if let Some(report) = &mut self.last_update {
-                    report.dangling_views.retain(|failure| self.drawing.view(failure.view).is_some());
-                }
+            if matches!(cmd, Command::DeleteView { .. } | Command::DeleteSheet { .. })
+                && let Some(report) = &mut self.last_update
+            {
+                report.dangling_views.retain(|failure| self.drawing.view(failure.view).is_some());
             }
             if let (Some(id), Some(p)) = (remade, p.as_ref()) {
                 let redrawn: Vec<_> = project::dependent_views(&self.drawing, id)

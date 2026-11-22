@@ -101,7 +101,7 @@
 </g>
 <g id="HIDDEN" fill="none" stroke-linecap="round" stroke-linejoin="round" font-family="Inter, sans-serif">
 <path d="M132 90 L108 90" stroke="#000000" stroke-width="0.25" stroke-dasharray="3 1.5" data-accuracy="exact"/>
-<path d="M132 90 C132 90 126.627 90 120 90 C113.373 90 108 90 108 90" stroke="#000000" stroke-width="0.25" stroke-dasharray="3 1.5" data-accuracy="exact"/>
+<path d="M132 90 C132 90 126.627 90 120 90 C113.373 90 108 90 108 90" stroke="#000000" stroke-width="0.25" stroke-dasharray="3 1.5" data-accuracy="approximate"/>
 <path d="M50 75 L60 75" stroke="#000000" stroke-width="0.25" stroke-dasharray="3 1.5" data-accuracy="exact"/>
 <path d="M50 75 L60 75" stroke="#000000" stroke-width="0.25" stroke-dasharray="3 1.5" data-accuracy="exact"/>
 <path d="M50 63 L60 63" stroke="#000000" stroke-width="0.25" stroke-dasharray="3 1.5" data-accuracy="exact"/>
@@ -122,11 +122,11 @@
 <path d="M50 195 L60 195" stroke="#000000" stroke-width="0.25" stroke-dasharray="3 1.5" data-accuracy="exact"/>
 <path d="M290 90 L200 90" stroke="#000000" stroke-width="0.25" stroke-dasharray="3 1.5" data-accuracy="exact"/>
 <path d="M290 90 L200 90" stroke="#000000" stroke-width="0.25" stroke-dasharray="3 1.5" data-accuracy="exact"/>
-<path d="M245 90 C238.373 90 233 90 233 90 C233 90 238.373 90 245 90 C251.627 90 257 90 257 90 C257 90 251.627 90 245 90 Z" stroke="#000000" stroke-width="0.25" stroke-dasharray="3 1.5" data-accuracy="exact"/>
-<path d="M267 90 C264.515 90 262.5 90 262.5 90 C262.5 90 264.515 90 267 90 C269.485 90 271.5 90 271.5 90 C271.5 90 269.485 90 267 90 Z" stroke="#000000" stroke-width="0.25" stroke-dasharray="3 1.5" data-accuracy="exact"/>
-<path d="M223 90 C220.515 90 218.5 90 218.5 90 C218.5 90 220.515 90 223 90 C225.485 90 227.5 90 227.5 90 C227.5 90 225.485 90 223 90 Z" stroke="#000000" stroke-width="0.25" stroke-dasharray="3 1.5" data-accuracy="exact"/>
-<path d="M267 90 C264.515 90 262.5 90 262.5 90 C262.5 90 264.515 90 267 90 C269.485 90 271.5 90 271.5 90 C271.5 90 269.485 90 267 90 Z" stroke="#000000" stroke-width="0.25" stroke-dasharray="3 1.5" data-accuracy="exact"/>
-<path d="M223 90 C220.515 90 218.5 90 218.5 90 C218.5 90 220.515 90 223 90 C225.485 90 227.5 90 227.5 90 C227.5 90 225.485 90 223 90 Z" stroke="#000000" stroke-width="0.25" stroke-dasharray="3 1.5" data-accuracy="exact"/>
+<path d="M245 90 C238.373 90 233 90 233 90 C233 90 238.373 90 245 90 C251.627 90 257 90 257 90 C257 90 251.627 90 245 90 Z" stroke="#000000" stroke-width="0.25" stroke-dasharray="3 1.5" data-accuracy="approximate"/>
+<path d="M267 90 C264.515 90 262.5 90 262.5 90 C262.5 90 264.515 90 267 90 C269.485 90 271.5 90 271.5 90 C271.5 90 269.485 90 267 90 Z" stroke="#000000" stroke-width="0.25" stroke-dasharray="3 1.5" data-accuracy="approximate"/>
+<path d="M223 90 C220.515 90 218.5 90 218.5 90 C218.5 90 220.515 90 223 90 C225.485 90 227.5 90 227.5 90 C227.5 90 225.485 90 223 90 Z" stroke="#000000" stroke-width="0.25" stroke-dasharray="3 1.5" data-accuracy="approximate"/>
+<path d="M267 90 C264.515 90 262.5 90 262.5 90 C262.5 90 264.515 90 267 90 C269.485 90 271.5 90 271.5 90 C271.5 90 269.485 90 267 90 Z" stroke="#000000" stroke-width="0.25" stroke-dasharray="3 1.5" data-accuracy="approximate"/>
+<path d="M223 90 C220.515 90 218.5 90 218.5 90 C218.5 90 220.515 90 223 90 C225.485 90 227.5 90 227.5 90 C227.5 90 225.485 90 223 90 Z" stroke="#000000" stroke-width="0.25" stroke-dasharray="3 1.5" data-accuracy="approximate"/>
 <path d="M233 90 L233 75" stroke="#000000" stroke-width="0.25" stroke-dasharray="3 1.5" data-accuracy="exact"/>
 <path d="M257 75 L257 90" stroke="#000000" stroke-width="0.25" stroke-dasharray="3 1.5" data-accuracy="exact"/>
 <path d="M239 100 L239 70" stroke="#000000" stroke-width="0.25" stroke-dasharray="3 1.5" data-accuracy="exact"/>
@@ -140,7 +140,7 @@
 <path d="M218.5 100 L218.5 90" stroke="#000000" stroke-width="0.25" stroke-dasharray="3 1.5" data-accuracy="exact"/>
 <path d="M227.5 90 L227.5 100" stroke="#000000" stroke-width="0.25" stroke-dasharray="3 1.5" data-accuracy="exact"/>
 <path d="M376.5 149.5 L328.5 149.5" stroke="#000000" stroke-width="0.25" stroke-dasharray="3 1.5" data-accuracy="exact"/>
-<path d="M376.5 149.5 C376.5 149.5 365.755 149.5 352.5 149.5 C339.245 149.5 328.5 149.5 328.5 149.5" stroke="#000000" stroke-width="0.25" stroke-dasharray="3 1.5" data-accuracy="exact"/>
+<path d="M376.5 149.5 C376.5 149.5 365.755 149.5 352.5 149.5 C339.245 149.5 328.5 149.5 328.5 149.5" stroke="#000000" stroke-width="0.25" stroke-dasharray="3 1.5" data-accuracy="approximate"/>
 <path d="M340.5 159.165 L340.5 109.5" stroke="#000000" stroke-width="0.25" stroke-dasharray="3 1.5" data-accuracy="exact"/>
 <path d="M364.5 109.5 L364.5 159.165" stroke="#000000" stroke-width="0.25" stroke-dasharray="3 1.5" data-accuracy="exact"/>
 </g>
@@ -151,19 +151,19 @@
 <g id="VISIBLE" fill="none" stroke-linecap="round" stroke-linejoin="round" font-family="Inter, sans-serif">
 <path d="M170 100 L50 100" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
 <path d="M50 100 L170 100" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
-<path d="M126 100 C126 100 123.314 100 120 100 C116.686 100 114 100 114 100 C114 100 116.686 100 120 100 C123.314 100 126 100 126 100 Z" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
-<path d="M79.5 100 C79.5 100 77.485 100 75 100 C72.515 100 70.5 100 70.5 100 C70.5 100 72.515 100 75 100 C77.485 100 79.5 100 79.5 100 Z" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
-<path d="M79.5 100 C79.5 100 77.485 100 75 100 C72.515 100 70.5 100 70.5 100 C70.5 100 72.515 100 75 100 C77.485 100 79.5 100 79.5 100 Z" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
-<path d="M169.5 100 C169.5 100 167.485 100 165 100 C162.515 100 160.5 100 160.5 100 C160.5 100 162.515 100 165 100 C167.485 100 169.5 100 169.5 100 Z" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
-<path d="M169.5 100 C169.5 100 167.485 100 165 100 C162.515 100 160.5 100 160.5 100 C160.5 100 162.515 100 165 100 C167.485 100 169.5 100 169.5 100 Z" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
+<path d="M126 100 C126 100 123.314 100 120 100 C116.686 100 114 100 114 100 C114 100 116.686 100 120 100 C123.314 100 126 100 126 100 Z" stroke="#000000" stroke-width="0.5" data-accuracy="approximate"/>
+<path d="M79.5 100 C79.5 100 77.485 100 75 100 C72.515 100 70.5 100 70.5 100 C70.5 100 72.515 100 75 100 C77.485 100 79.5 100 79.5 100 Z" stroke="#000000" stroke-width="0.5" data-accuracy="approximate"/>
+<path d="M79.5 100 C79.5 100 77.485 100 75 100 C72.515 100 70.5 100 70.5 100 C70.5 100 72.515 100 75 100 C77.485 100 79.5 100 79.5 100 Z" stroke="#000000" stroke-width="0.5" data-accuracy="approximate"/>
+<path d="M169.5 100 C169.5 100 167.485 100 165 100 C162.515 100 160.5 100 160.5 100 C160.5 100 162.515 100 165 100 C167.485 100 169.5 100 169.5 100 Z" stroke="#000000" stroke-width="0.5" data-accuracy="approximate"/>
+<path d="M169.5 100 C169.5 100 167.485 100 165 100 C162.515 100 160.5 100 160.5 100 C160.5 100 162.515 100 165 100 C167.485 100 169.5 100 169.5 100 Z" stroke="#000000" stroke-width="0.5" data-accuracy="approximate"/>
 <path d="M60 90 L170 90" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
 <path d="M170 90 L132 90" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
 <path d="M108 90 L60 90" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
-<path d="M108 90 C108 90 113.373 90 120 90 C126.627 90 132 90 132 90" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
-<path d="M79.5 90 C79.5 90 77.485 90 75 90 C72.515 90 70.5 90 70.5 90 C70.5 90 72.515 90 75 90 C77.485 90 79.5 90 79.5 90 Z" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
-<path d="M79.5 90 C79.5 90 77.485 90 75 90 C72.515 90 70.5 90 70.5 90 C70.5 90 72.515 90 75 90 C77.485 90 79.5 90 79.5 90 Z" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
-<path d="M169.5 90 C169.5 90 167.485 90 165 90 C162.515 90 160.5 90 160.5 90 C160.5 90 162.515 90 165 90 C167.485 90 169.5 90 169.5 90 Z" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
-<path d="M169.5 90 C169.5 90 167.485 90 165 90 C162.515 90 160.5 90 160.5 90 C160.5 90 162.515 90 165 90 C167.485 90 169.5 90 169.5 90 Z" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
+<path d="M108 90 C108 90 113.373 90 120 90 C126.627 90 132 90 132 90" stroke="#000000" stroke-width="0.5" data-accuracy="approximate"/>
+<path d="M79.5 90 C79.5 90 77.485 90 75 90 C72.515 90 70.5 90 70.5 90 C70.5 90 72.515 90 75 90 C77.485 90 79.5 90 79.5 90 Z" stroke="#000000" stroke-width="0.5" data-accuracy="approximate"/>
+<path d="M79.5 90 C79.5 90 77.485 90 75 90 C72.515 90 70.5 90 70.5 90 C70.5 90 72.515 90 75 90 C77.485 90 79.5 90 79.5 90 Z" stroke="#000000" stroke-width="0.5" data-accuracy="approximate"/>
+<path d="M169.5 90 C169.5 90 167.485 90 165 90 C162.515 90 160.5 90 160.5 90 C160.5 90 162.515 90 165 90 C167.485 90 169.5 90 169.5 90 Z" stroke="#000000" stroke-width="0.5" data-accuracy="approximate"/>
+<path d="M169.5 90 C169.5 90 167.485 90 165 90 C162.515 90 160.5 90 160.5 90 C160.5 90 162.515 90 165 90 C167.485 90 169.5 90 169.5 90 Z" stroke="#000000" stroke-width="0.5" data-accuracy="approximate"/>
 <path d="M50 100 L50 40" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
 <path d="M170 100 L170 90" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
 <path d="M60 90 L60 40" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
@@ -176,28 +176,28 @@
 <path d="M50 75 L50 63" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
 <path d="M60 63 L60 75" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
 <path d="M60 75 L60 63" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
-<path d="M132 70 C132 70 126.627 70 120 70 C113.373 70 108 70 108 70 C108 70 113.373 70 120 70 C126.627 70 132 70 132 70 Z" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
-<path d="M126 70 C126 70 123.314 70 120 70 C116.686 70 114 70 114 70 C114 70 116.686 70 120 70 C123.314 70 126 70 126 70 Z" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
+<path d="M132 70 C132 70 126.627 70 120 70 C113.373 70 108 70 108 70 C108 70 113.373 70 120 70 C126.627 70 132 70 132 70 Z" stroke="#000000" stroke-width="0.5" data-accuracy="approximate"/>
+<path d="M126 70 C126 70 123.314 70 120 70 C116.686 70 114 70 114 70 C114 70 116.686 70 120 70 C123.314 70 126 70 126 70 Z" stroke="#000000" stroke-width="0.5" data-accuracy="approximate"/>
 <path d="M108 90 L108 70" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
 <path d="M132 70 L132 90" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
 <path d="M170 130 L50 130" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
 <path d="M170 220 L170 130" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
 <path d="M50 220 L170 220" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
 <path d="M50 130 L50 220" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
-<path d="M126 175 C126 171.686 123.314 169 120 169 C116.686 169 114 171.686 114 175 C114 178.314 116.686 181 120 181 C123.314 181 126 178.314 126 175 Z" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
-<path d="M79.5 197 C79.5 194.515 77.485 192.5 75 192.5 C72.515 192.5 70.5 194.515 70.5 197 C70.5 199.485 72.515 201.5 75 201.5 C77.485 201.5 79.5 199.485 79.5 197 Z" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
-<path d="M79.5 153 C79.5 150.515 77.485 148.5 75 148.5 C72.515 148.5 70.5 150.515 70.5 153 C70.5 155.485 72.515 157.5 75 157.5 C77.485 157.5 79.5 155.485 79.5 153 Z" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
-<path d="M169.5 197 C169.5 194.515 167.485 192.5 165 192.5 C162.515 192.5 160.5 194.515 160.5 197 C160.5 199.485 162.515 201.5 165 201.5 C167.485 201.5 169.5 199.485 169.5 197 Z" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
-<path d="M169.5 153 C169.5 150.515 167.485 148.5 165 148.5 C162.515 148.5 160.5 150.515 160.5 153 C160.5 155.485 162.515 157.5 165 157.5 C167.485 157.5 169.5 155.485 169.5 153 Z" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
+<path d="M126 175 C126 171.686 123.314 169 120 169 C116.686 169 114 171.686 114 175 C114 178.314 116.686 181 120 181 C123.314 181 126 178.314 126 175 Z" stroke="#000000" stroke-width="0.5" data-accuracy="approximate"/>
+<path d="M79.5 197 C79.5 194.515 77.485 192.5 75 192.5 C72.515 192.5 70.5 194.515 70.5 197 C70.5 199.485 72.515 201.5 75 201.5 C77.485 201.5 79.5 199.485 79.5 197 Z" stroke="#000000" stroke-width="0.5" data-accuracy="approximate"/>
+<path d="M79.5 153 C79.5 150.515 77.485 148.5 75 148.5 C72.515 148.5 70.5 150.515 70.5 153 C70.5 155.485 72.515 157.5 75 157.5 C77.485 157.5 79.5 155.485 79.5 153 Z" stroke="#000000" stroke-width="0.5" data-accuracy="approximate"/>
+<path d="M169.5 197 C169.5 194.515 167.485 192.5 165 192.5 C162.515 192.5 160.5 194.515 160.5 197 C160.5 199.485 162.515 201.5 165 201.5 C167.485 201.5 169.5 199.485 169.5 197 Z" stroke="#000000" stroke-width="0.5" data-accuracy="approximate"/>
+<path d="M169.5 153 C169.5 150.515 167.485 148.5 165 148.5 C162.515 148.5 160.5 150.515 160.5 153 C160.5 155.485 162.515 157.5 165 157.5 C167.485 157.5 169.5 155.485 169.5 153 Z" stroke="#000000" stroke-width="0.5" data-accuracy="approximate"/>
 <path d="M60 220 L170 220" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
 <path d="M170 220 L170 130" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
 <path d="M170 130 L60 130" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
 <path d="M60 220 L60 130" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
-<path d="M132 175 C132 168.373 126.627 163 120 163 C113.373 163 108 168.373 108 175 C108 181.627 113.373 187 120 187 C126.627 187 132 181.627 132 175 Z" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
-<path d="M79.5 197 C79.5 194.515 77.485 192.5 75 192.5 C72.515 192.5 70.5 194.515 70.5 197 C70.5 199.485 72.515 201.5 75 201.5 C77.485 201.5 79.5 199.485 79.5 197 Z" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
-<path d="M79.5 153 C79.5 150.515 77.485 148.5 75 148.5 C72.515 148.5 70.5 150.515 70.5 153 C70.5 155.485 72.515 157.5 75 157.5 C77.485 157.5 79.5 155.485 79.5 153 Z" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
-<path d="M169.5 197 C169.5 194.515 167.485 192.5 165 192.5 C162.515 192.5 160.5 194.515 160.5 197 C160.5 199.485 162.515 201.5 165 201.5 C167.485 201.5 169.5 199.485 169.5 197 Z" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
-<path d="M169.5 153 C169.5 150.515 167.485 148.5 165 148.5 C162.515 148.5 160.5 150.515 160.5 153 C160.5 155.485 162.515 157.5 165 157.5 C167.485 157.5 169.5 155.485 169.5 153 Z" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
+<path d="M132 175 C132 168.373 126.627 163 120 163 C113.373 163 108 168.373 108 175 C108 181.627 113.373 187 120 187 C126.627 187 132 181.627 132 175 Z" stroke="#000000" stroke-width="0.5" data-accuracy="approximate"/>
+<path d="M79.5 197 C79.5 194.515 77.485 192.5 75 192.5 C72.515 192.5 70.5 194.515 70.5 197 C70.5 199.485 72.515 201.5 75 201.5 C77.485 201.5 79.5 199.485 79.5 197 Z" stroke="#000000" stroke-width="0.5" data-accuracy="approximate"/>
+<path d="M79.5 153 C79.5 150.515 77.485 148.5 75 148.5 C72.515 148.5 70.5 150.515 70.5 153 C70.5 155.485 72.515 157.5 75 157.5 C77.485 157.5 79.5 155.485 79.5 153 Z" stroke="#000000" stroke-width="0.5" data-accuracy="approximate"/>
+<path d="M169.5 197 C169.5 194.515 167.485 192.5 165 192.5 C162.515 192.5 160.5 194.515 160.5 197 C160.5 199.485 162.515 201.5 165 201.5 C167.485 201.5 169.5 199.485 169.5 197 Z" stroke="#000000" stroke-width="0.5" data-accuracy="approximate"/>
+<path d="M169.5 153 C169.5 150.515 167.485 148.5 165 148.5 C162.515 148.5 160.5 150.515 160.5 153 C160.5 155.485 162.515 157.5 165 157.5 C167.485 157.5 169.5 155.485 169.5 153 Z" stroke="#000000" stroke-width="0.5" data-accuracy="approximate"/>
 <path d="M50 220 L60 220" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
 <path d="M60 130 L50 130" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
 <path d="M50 130 L50 220" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
@@ -206,15 +206,15 @@
 <path d="M60 220 L60 130" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
 <path d="M60 195 L60 155" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
 <path d="M60 155 L60 195" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
-<path d="M132 175 C132 168.373 126.627 163 120 163 C113.373 163 108 168.373 108 175 C108 181.627 113.373 187 120 187 C126.627 187 132 181.627 132 175 Z" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
-<path d="M126 175 C126 171.686 123.314 169 120 169 C116.686 169 114 171.686 114 175 C114 178.314 116.686 181 120 181 C123.314 181 126 178.314 126 175 Z" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
+<path d="M132 175 C132 168.373 126.627 163 120 163 C113.373 163 108 168.373 108 175 C108 181.627 113.373 187 120 187 C126.627 187 132 181.627 132 175 Z" stroke="#000000" stroke-width="0.5" data-accuracy="approximate"/>
+<path d="M126 175 C126 171.686 123.314 169 120 169 C116.686 169 114 171.686 114 175 C114 178.314 116.686 181 120 181 C123.314 181 126 178.314 126 175 Z" stroke="#000000" stroke-width="0.5" data-accuracy="approximate"/>
 <path d="M290 100 L200 100" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
 <path d="M200 100 L290 100" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
-<path d="M245 100 C241.686 100 239 100 239 100 C239 100 241.686 100 245 100 C248.314 100 251 100 251 100 C251 100 248.314 100 245 100 Z" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
-<path d="M267 100 C264.515 100 262.5 100 262.5 100 C262.5 100 264.515 100 267 100 C269.485 100 271.5 100 271.5 100 C271.5 100 269.485 100 267 100 Z" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
-<path d="M223 100 C220.515 100 218.5 100 218.5 100 C218.5 100 220.515 100 223 100 C225.485 100 227.5 100 227.5 100 C227.5 100 225.485 100 223 100 Z" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
-<path d="M267 100 C264.515 100 262.5 100 262.5 100 C262.5 100 264.515 100 267 100 C269.485 100 271.5 100 271.5 100 C271.5 100 269.485 100 267 100 Z" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
-<path d="M223 100 C220.515 100 218.5 100 218.5 100 C218.5 100 220.515 100 223 100 C225.485 100 227.5 100 227.5 100 C227.5 100 225.485 100 223 100 Z" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
+<path d="M245 100 C241.686 100 239 100 239 100 C239 100 241.686 100 245 100 C248.314 100 251 100 251 100 C251 100 248.314 100 245 100 Z" stroke="#000000" stroke-width="0.5" data-accuracy="approximate"/>
+<path d="M267 100 C264.515 100 262.5 100 262.5 100 C262.5 100 264.515 100 267 100 C269.485 100 271.5 100 271.5 100 C271.5 100 269.485 100 267 100 Z" stroke="#000000" stroke-width="0.5" data-accuracy="approximate"/>
+<path d="M223 100 C220.515 100 218.5 100 218.5 100 C218.5 100 220.515 100 223 100 C225.485 100 227.5 100 227.5 100 C227.5 100 225.485 100 223 100 Z" stroke="#000000" stroke-width="0.5" data-accuracy="approximate"/>
+<path d="M267 100 C264.515 100 262.5 100 262.5 100 C262.5 100 264.515 100 267 100 C269.485 100 271.5 100 271.5 100 C271.5 100 269.485 100 267 100 Z" stroke="#000000" stroke-width="0.5" data-accuracy="approximate"/>
+<path d="M223 100 C220.515 100 218.5 100 218.5 100 C218.5 100 220.515 100 223 100 C225.485 100 227.5 100 227.5 100 C227.5 100 225.485 100 223 100 Z" stroke="#000000" stroke-width="0.5" data-accuracy="approximate"/>
 <path d="M290 100 L290 40" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
 <path d="M290 100 L290 90" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
 <path d="M290 90 L290 40" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
@@ -231,8 +231,8 @@
 <path d="M265 63 L265 75" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
 <path d="M225 63 L265 63" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
 <path d="M225 75 L225 63" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
-<path d="M245 70 C238.373 70 233 70 233 70 C233 70 238.373 70 245 70 C251.627 70 257 70 257 70 C257 70 251.627 70 245 70 Z" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
-<path d="M245 70 C241.686 70 239 70 239 70 C239 70 241.686 70 245 70 C248.314 70 251 70 251 70 C251 70 248.314 70 245 70 Z" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
+<path d="M245 70 C238.373 70 233 70 233 70 C233 70 238.373 70 245 70 C251.627 70 257 70 257 70 C257 70 251.627 70 245 70 Z" stroke="#000000" stroke-width="0.5" data-accuracy="approximate"/>
+<path d="M245 70 C241.686 70 239 70 239 70 C239 70 241.686 70 245 70 C248.314 70 251 70 251 70 C251 70 248.314 70 245 70 Z" stroke="#000000" stroke-width="0.5" data-accuracy="approximate"/>
 <path d="M233 75 L233 70" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
 <path d="M257 70 L257 75" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
 <path d="M365.303 87.361 L397.123 68.99" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
@@ -241,11 +241,11 @@
 <path d="M365.303 83.279 L397.123 64.907" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
 <path d="M397.123 64.907 L358.232 42.454" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
 <path d="M326.412 60.825 L358.232 42.454" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
-<path d="M357.536 63.887 C357.536 65.8 360.222 67.351 363.536 67.351 C366.849 67.351 369.536 65.8 369.536 63.887" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
-<path d="M341.438 60.11 C342.317 59.603 342.317 58.781 341.438 58.273 C340.56 57.766 339.135 57.766 338.257 58.273 C337.378 58.781 337.378 59.603 338.257 60.11 C339.135 60.618 340.56 60.618 341.438 60.11 Z" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
-<path d="M356.995 51.129 C357.873 50.622 357.873 49.799 356.995 49.292 C356.116 48.785 354.692 48.785 353.813 49.292 C352.934 49.799 352.934 50.622 353.813 51.129 C354.692 51.636 356.116 51.636 356.995 51.129 Z" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
-<path d="M373.258 78.482 C374.137 77.974 374.137 77.152 373.258 76.644 C372.38 76.137 370.955 76.137 370.076 76.644 C369.198 77.152 369.198 77.974 370.076 78.482 C370.955 78.989 372.38 78.989 373.258 78.482 Z" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
-<path d="M388.815 69.5 C389.693 68.993 389.693 68.17 388.815 67.663 C387.936 67.156 386.511 67.156 385.633 67.663 C384.754 68.17 384.754 68.993 385.633 69.5 C386.511 70.007 387.936 70.007 388.815 69.5 Z" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
+<path d="M357.536 63.887 C357.536 65.8 360.222 67.351 363.536 67.351 C366.849 67.351 369.536 65.8 369.536 63.887" stroke="#000000" stroke-width="0.5" data-accuracy="approximate"/>
+<path d="M341.438 60.11 C342.317 59.603 342.317 58.781 341.438 58.273 C340.56 57.766 339.135 57.766 338.257 58.273 C337.378 58.781 337.378 59.603 338.257 60.11 C339.135 60.618 340.56 60.618 341.438 60.11 Z" stroke="#000000" stroke-width="0.5" data-accuracy="approximate"/>
+<path d="M356.995 51.129 C357.873 50.622 357.873 49.799 356.995 49.292 C356.116 48.785 354.692 48.785 353.813 49.292 C352.934 49.799 352.934 50.622 353.813 51.129 C354.692 51.636 356.116 51.636 356.995 51.129 Z" stroke="#000000" stroke-width="0.5" data-accuracy="approximate"/>
+<path d="M373.258 78.482 C374.137 77.974 374.137 77.152 373.258 76.644 C372.38 76.137 370.955 76.137 370.076 76.644 C369.198 77.152 369.198 77.974 370.076 78.482 C370.955 78.989 372.38 78.989 373.258 78.482 Z" stroke="#000000" stroke-width="0.5" data-accuracy="approximate"/>
+<path d="M388.815 69.5 C389.693 68.993 389.693 68.17 388.815 67.663 C387.936 67.156 386.511 67.156 385.633 67.663 C384.754 68.17 384.754 68.993 385.633 69.5 C386.511 70.007 387.936 70.007 388.815 69.5 Z" stroke="#000000" stroke-width="0.5" data-accuracy="approximate"/>
 <path d="M322.877 62.866 L322.877 38.371" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
 <path d="M365.303 87.361 L365.303 83.279" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
 <path d="M326.412 60.825 L326.412 40.412" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
@@ -261,23 +261,23 @@
 <path d="M335.251 44.699 L335.251 49.598" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
 <path d="M349.393 36.534 L335.251 44.699" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
 <path d="M349.393 41.433 L349.393 36.534" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
-<path d="M367.778 58.171 C370.121 56.818 370.121 54.625 367.778 53.272 C365.435 51.919 361.636 51.919 359.293 53.272 C356.95 54.625 356.95 56.818 359.293 58.171 C361.636 59.524 365.435 59.524 367.778 58.171 Z" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
-<path d="M365.657 56.946 C366.828 56.27 366.828 55.173 365.657 54.497 C364.485 53.821 362.586 53.821 361.414 54.497 C360.243 55.173 360.243 56.27 361.414 56.946 C362.586 57.623 364.485 57.623 365.657 56.946 Z" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
+<path d="M367.778 58.171 C370.121 56.818 370.121 54.625 367.778 53.272 C365.435 51.919 361.636 51.919 359.293 53.272 C356.95 54.625 356.95 56.818 359.293 58.171 C361.636 59.524 365.435 59.524 367.778 58.171 Z" stroke="#000000" stroke-width="0.5" data-accuracy="approximate"/>
+<path d="M365.657 56.946 C366.828 56.27 366.828 55.173 365.657 54.497 C364.485 53.821 362.586 53.821 361.414 54.497 C360.243 55.173 360.243 56.27 361.414 56.946 C362.586 57.623 364.485 57.623 365.657 56.946 Z" stroke="#000000" stroke-width="0.5" data-accuracy="approximate"/>
 <path d="M345.858 39.392 L349.393 41.433" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
 <path d="M357.536 63.887 L357.536 55.722" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
 <path d="M369.536 55.722 L369.536 63.887" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
 <path d="M310 182 L190 182" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
 <path d="M266 182 L310 182" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
-<path d="M266 182 C266 182 263.314 182 260 182 C256.686 182 254 182 254 182" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
+<path d="M266 182 C266 182 263.314 182 260 182 C256.686 182 254 182 254 182" stroke="#000000" stroke-width="0.5" data-accuracy="approximate"/>
 <path d="M190 182 L254 182" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
-<path d="M219.5 182 C219.5 182 217.485 182 215 182 C212.515 182 210.5 182 210.5 182 C210.5 182 212.515 182 215 182 C217.485 182 219.5 182 219.5 182 Z" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
-<path d="M309.5 182 C309.5 182 307.485 182 305 182 C302.515 182 300.5 182 300.5 182 C300.5 182 302.515 182 305 182 C307.485 182 309.5 182 309.5 182 Z" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
+<path d="M219.5 182 C219.5 182 217.485 182 215 182 C212.515 182 210.5 182 210.5 182 C210.5 182 212.515 182 215 182 C217.485 182 219.5 182 219.5 182 Z" stroke="#000000" stroke-width="0.5" data-accuracy="approximate"/>
+<path d="M309.5 182 C309.5 182 307.485 182 305 182 C302.515 182 300.5 182 300.5 182 C300.5 182 302.515 182 305 182 C307.485 182 309.5 182 309.5 182 Z" stroke="#000000" stroke-width="0.5" data-accuracy="approximate"/>
 <path d="M310 172 L272 172" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
 <path d="M248 172 L200 172" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
 <path d="M200 172 L248 172" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
 <path d="M272 172 L310 172" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
-<path d="M219.5 172 C219.5 172 217.485 172 215 172 C212.515 172 210.5 172 210.5 172 C210.5 172 212.515 172 215 172 C217.485 172 219.5 172 219.5 172 Z" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
-<path d="M309.5 172 C309.5 172 307.485 172 305 172 C302.515 172 300.5 172 300.5 172 C300.5 172 302.515 172 305 172 C307.485 172 309.5 172 309.5 172 Z" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
+<path d="M219.5 172 C219.5 172 217.485 172 215 172 C212.515 172 210.5 172 210.5 172 C210.5 172 212.515 172 215 172 C217.485 172 219.5 172 219.5 172 Z" stroke="#000000" stroke-width="0.5" data-accuracy="approximate"/>
+<path d="M309.5 172 C309.5 172 307.485 172 305 172 C302.515 172 300.5 172 300.5 172 C300.5 172 302.515 172 305 172 C307.485 172 309.5 172 309.5 172 Z" stroke="#000000" stroke-width="0.5" data-accuracy="approximate"/>
 <path d="M310 182 L310 172" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
 <path d="M310 172 L310 182" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
 <path d="M190 182 L190 122" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
@@ -290,9 +290,9 @@
 <path d="M200 122 L200 145" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
 <path d="M200 157 L200 145" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
 <path d="M200 157 L200 172" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
-<path d="M272 152 C272 152 266.627 152 260 152 C253.373 152 248 152 248 152" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
+<path d="M272 152 C272 152 266.627 152 260 152 C253.373 152 248 152 248 152" stroke="#000000" stroke-width="0.5" data-accuracy="approximate"/>
 <path d="M248 152 L254 152" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
-<path d="M266 152 C266 152 263.314 152 260 152 C256.686 152 254 152 254 152" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
+<path d="M266 152 C266 152 263.314 152 260 152 C256.686 152 254 152 254 152" stroke="#000000" stroke-width="0.5" data-accuracy="approximate"/>
 <path d="M266 152 L272 152" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
 <path d="M248 172 L248 152" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
 <path d="M272 152 L272 172" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
@@ -305,9 +305,9 @@
 <path d="M327.52 149.5 L377.48 149.5" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
 <path d="M377.48 149.5 L376.5 149.5" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
 <path d="M328.5 149.5 L327.52 149.5" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
-<path d="M328.5 149.5 C328.5 149.5 339.245 149.5 352.5 149.5 C365.755 149.5 376.5 149.5 376.5 149.5" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
-<path d="M376.5 109.5 C376.5 109.5 365.755 109.5 352.5 109.5 C339.245 109.5 328.5 109.5 328.5 109.5 C328.5 109.5 339.245 109.5 352.5 109.5 C365.755 109.5 376.5 109.5 376.5 109.5" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
-<path d="M364.5 109.5 C364.5 109.5 359.127 109.5 352.5 109.5 C345.873 109.5 340.5 109.5 340.5 109.5 C340.5 109.5 345.873 109.5 352.5 109.5 C359.127 109.5 364.5 109.5 364.5 109.5" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
+<path d="M328.5 149.5 C328.5 149.5 339.245 149.5 352.5 149.5 C365.755 149.5 376.5 149.5 376.5 149.5" stroke="#000000" stroke-width="0.5" data-accuracy="approximate"/>
+<path d="M376.5 109.5 C376.5 109.5 365.755 109.5 352.5 109.5 C339.245 109.5 328.5 109.5 328.5 109.5 C328.5 109.5 339.245 109.5 352.5 109.5 C365.755 109.5 376.5 109.5 376.5 109.5" stroke="#000000" stroke-width="0.5" data-accuracy="approximate"/>
+<path d="M364.5 109.5 C364.5 109.5 359.127 109.5 352.5 109.5 C345.873 109.5 340.5 109.5 340.5 109.5 C340.5 109.5 345.873 109.5 352.5 109.5 C359.127 109.5 364.5 109.5 364.5 109.5" stroke="#000000" stroke-width="0.5" data-accuracy="approximate"/>
 <path d="M328.5 149.5 L328.5 109.5" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
 <path d="M376.5 109.5 L376.5 149.5" stroke="#000000" stroke-width="0.5" data-accuracy="exact"/>
 </g>

@@ -72,8 +72,8 @@ pub use load::{LoadError, LoadEvent, OpenOptions};
 pub use mates::{
     Alignment, BoundedProof, EndView, EndpointSelector, Entity, FaceEndpoint, FaceSelector, FreeMotion,
     GeneratorChoice, Mate, MateEdit, MateEntry, MateId, MateRefusal, PartEndpoint, PartPlane, PlaneMeasurement,
-    PlaneProof, ProofIdentity, RefusalCode, SlotConstraint, SlotInput, SolverState, SolverStatus, StoredSupport,
-    StoredTurn, SupportProof, WidthConstraint, WidthInput,
+    PlaneProof, ProofIdentity, RefusalCode, SlotConstraint, SlotInput, SolverState, SolverStatus, StoredPiece,
+    StoredSupport, StoredTurn, SupportProof, WidthConstraint, WidthInput,
 };
 pub use mesh::{DisplayMesh, MeshBounds, MeshFace, SharedMesh};
 pub use occurrence::{Counts, Flags, OccurrenceIndex, OccurrenceTable};

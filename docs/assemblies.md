@@ -76,7 +76,8 @@ level of detail.
   placements of one bolt share one source. A source lives as long as a component places
   it: deleting its last component removes it, and Undo brings both back. A hidden or
   suppressed component still places its source. A source's `configuration` picks the
-  configuration placed; it is reserved and always the default for now.
+  configuration placed; it is reserved and always the default for now. A placed
+  sub-assembly shows the configuration its file was saved in.
 - **Components** place a source. `placement` is rigid: `translation` in millimetres and
   `rotation` as a unit quaternion `[x, y, z, w]`, each left out when it is the identity's.
   There is no scale and no mirror: scale would change dimensions and mass, and a mirrored
@@ -101,8 +102,123 @@ level of detail.
   no mates keeps them as authored.
   Interference and clearance checks read placements and save nothing; see
   [interference.md](interference.md).
-- **Reserved.** `configurations` and `display_states` are kept exactly as read until those
-  formats are defined.
+- **Configurations and the exploded view**: see [Configurations](#configurations) and
+  [Exploded views](#exploded-views).
+- **Reserved.** `display_states` is kept exactly as read until its format is defined.
+
+## Configurations
+
+A configuration is a named state of the assembly: which components are hidden or
+suppressed, where each sits, the overrides below them, the values that drive its mates and
+its exploded view. The truth always holds the active configuration's state, so loading,
+mates, interference and saving read it as they read any assembly. Every other
+configuration keeps its own state in its row:
+
+```json
+"configurations": [
+  { "id": 9, "name": "Default" },
+  { "id": 10, "name": "Open", "state": {
+      "components": [ { "id": 2 }, { "id": 4, "placement": { "translation": [10.0, 10.0, 44.0] } } ],
+      "values": [ { "id": 8, "name": "gap", "expression": "30 mm" } ] } }
+]
+```
+
+- The row without a `state` is the active one. Adding the first configuration also adds
+  `Default`, active, for the state the assembly had; the new one starts as a copy of it.
+- Activating a configuration swaps: the truth's state goes into the row that was active
+  and the chosen row's state into the truth, as one undo step. A component inserted while
+  another configuration was active keeps its state; a value is matched by id.
+- Every other edit changes the active configuration. Deleting a component takes it out of
+  every configuration, and Undo brings it back.
+- Names are unique. The active configuration cannot be deleted; with one row left the
+  assembly goes back to having none. An assembly with more than 1,024 components, or one
+  with 64 configurations, refuses another.
+- The geometry hash leaves out the other configurations and the exploded view, so the
+  active configuration decides the assembly's shape.
+
+Part configurations placed per component, and choosing a sub-assembly's configuration from
+the assembly above it, are follow-ups.
+
+## Exploded views
+
+An exploded view is a list of steps in the active configuration, each moving some
+occurrences, with everything under them, a distance along a direction in the root's frame,
+after the steps before it:
+
+```json
+"explode": [ { "id": 11, "occurrences": ["4"], "direction": [0.0, 0.0, 1.0], "distance": 50.0 } ]
+```
+
+It is for display and drawings. Showing it moves rows of the occurrence table and never a
+placement: the truth, its revision and the undo history do not change. Any edit, a drag
+and an interference check show the assembled positions first. Adding, changing and
+deleting steps are undo steps. Auto explode replaces the steps with one per shown
+component, each moving it straight away from the middle of the assembly; the component
+nearest the middle stays. A configuration made from another starts with copies of its
+steps; a step's id names it within its configuration.
+
+`AssemblyDocument::exploded_worlds` answers where each occurrence shows exploded without
+showing it, for drawings.
+
+## Pack and Go
+
+Pack and Go copies an assembly and every document it references, at any depth, into a new
+or empty folder, so the folder opens anywhere on its own
+(`soliddraft_assembly::pack_and_go`).
+
+- Parts and mesh references are copied byte for byte. Each assembly is written again with
+  its references pointing at the copies.
+- A sub-assembly whose file changes that way gets a new revision: the assemblies above it
+  pin the new one, and their display copies of it are replaced. A pin that was already
+  behind its file stays as it was, so the copy shows what the original showed.
+- Ids are kept: a packed file is the same document in a new place.
+- A prefix or a suffix goes on every copied file's name. Without `flatten` the files keep
+  the folders they were in below the assembly's; with it they all land in the destination.
+- Drawings in the assembly's folder whose model is packed come along when asked, pointed at
+  their models' copies; their views stay current when only paths moved.
+- Nothing is written unless every reference resolves, and nothing in the destination is
+  replaced; two files that would land on one name are refused.
+
+## Drawings of assemblies
+
+A drawing's model can be an assembly (`crates/soliddraft-drawing/src/assembly.rs`). Its
+views draw every shown part from its display mesh, placed where the assembly puts it, with
+hidden lines removed across all the parts' triangles together, so one part hides another.
+Each curve keeps the occurrence it belongs to. The line work is as faithful as the display
+meshes, and says so: every curve is a polygon. A view can show the exploded view.
+
+The bill of materials lists parts only: one row per part document, in the order the tree
+first places it, with its name, its file and how many times it is placed. Hidden parts
+count; suppressed parts do not. A balloon carries its row's item number and a leader to a
+visible edge of one occurrence of that part, and sits outside the view clear of the others.
+
+Rebuild brings the drawing to the saved assembly as one undo step: every base view's line
+work at its scale, the BOM's rows, each balloon moved onto its occurrence and renumbered
+from its row, a balloon for every new row, and the new pin. A balloon whose occurrence is
+gone, or shows no edge in the view, is marked as needing attention. Section, detail and
+projected views of assemblies are follow-ups.
+
+## Robotics export
+
+`soliddraft_scene::export` writes an assembly as URDF, with its meshes as binary STL in
+millimetres in a folder beside it, or as OpenUSD text with UsdPhysics joints. Every part
+occurrence that is not suppressed is a link with its display mesh as visual and collision
+geometry. The part with an Origin mate, else the first component, hangs from `base_link`
+at the assembly's origin. Mates become joints:
+
+| Mates between two parts | Joint |
+|---|---|
+| Hinge with angle limits | revolute, between the limits |
+| Hinge without limits | continuous |
+| Concentric between axes, without Lock rotation | continuous about the axis |
+| anything else | fixed, at the pose the assembly holds |
+
+A Gear between two of those joints makes the second follow the first (URDF `mimic`,
+`newton:mimicJoint` in OpenUSD). The joints form a tree from `base_link`: a mate that would
+close a loop is left out, and a part no mate reaches is fixed to `base_link` where it
+stands. Every choice like that is reported in words, naming the mates. Each joint frame
+puts the joint's axis along its X. URDF lengths are metres; the OpenUSD layer is in
+millimetres with Z up. Prismatic, planar and spherical joints are follow-ups.
 
 ## Occurrence paths
 
@@ -518,6 +634,11 @@ soliddraft asm colour <file.dwasm> <path>... (--rgb '#rrggbb' [--metallic <0-1>]
 soliddraft asm quality <file.dwasm> [<path>... (--set <quality> | --none)] [--every <quality>] [--json]
 soliddraft asm rename <file.dwasm> <component> <name>
 soliddraft asm delete <file.dwasm> <component>...
+soliddraft asm config <file.dwasm> (list [--json] | add <name> | activate <name> | rename <name> <new> | delete <name>)
+soliddraft asm explode <file.dwasm> (list [--json] | add <path>... --direction x,y,z --distance <mm> | edit <step> ... | delete <step> | auto [--distance <mm>])
+soliddraft asm drawing <file.dwasm> <out.dwdrw> [--template <id>] [--exploded] [--pdf <out.pdf>] [--svg <out.svg>] [--json]
+soliddraft asm export <file.dwasm> <out.urdf | out.usda> [--json]
+soliddraft asm pack <file.dwasm> <folder> [--prefix <text>] [--suffix <text>] [--flatten] [--drawings] [--json]
 soliddraft asm rebuild <file.dwasm> [--search <folder>]... [--json]
 soliddraft asm generate <folder> [--unique <n>] [--placements <n>] [--modules <n>] [--no-part-files] [--seed <n>]
 soliddraft asm bench <file.dwasm> [--size <w>x<h>] [--frames <n>] [--json]
@@ -557,6 +678,15 @@ way with files handed to the page in place of a folder; see [web.md](web.md).
   applies with `move_to` when the field lets go, as one undo step.
 - **Interference** opens the Interference panel, which checks the parts for interference
   or a clearance on certified meshes; see [interference.md](interference.md).
+- **Configurations** opens a panel in the property area: the configurations with the
+  active one marked, Activate and Delete for the others, a name field and Add, then the
+  exploded view's steps with their distances, Explode or Collapse, Auto explode, and the
+  six directions to move the chosen components along. **Explode** on the ribbon shows the
+  exploded view or the assembled positions.
+- **Make drawing** makes a drawing of the saved assembly with a BOM and balloons and opens
+  it; Rebuild in the drawing, and its BOM and Balloon tiles, bring it to the assembly.
+- **Pack and Go** asks for an empty folder and packs the saved assembly, its parts and the
+  drawings beside it there. **Export URDF** and **Export USD** ask where to write.
 - **Save assembly** (Ctrl+S) and **Save assembly as** (Ctrl+Shift+S) write the `.dwasm`
   with its display copies; **File > Open** and Open recent open one with
   `open_in_background`. Undo and redo follow the active tab.

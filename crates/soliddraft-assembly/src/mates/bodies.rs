@@ -129,6 +129,12 @@ pub(crate) enum Rule {
         mode: solver::SlotMode,
         lock: Option<super::StoredTurn>,
     },
+    /// The ends are the outline, then the point kept on it.
+    Path,
+    /// The ends are the cam's outline, then the follower; `outside` is the side it rides on.
+    Cam {
+        outside: bool,
+    },
 }
 
 /// A mate, read from the assembly that holds it and placed in the root.
@@ -609,6 +615,8 @@ impl AssemblyDocument {
                                 };
                                 Rule::Slot { sign: sign(alignment), mode, lock: *lock_rotation }
                             }
+                            Mate::Path { .. } => Rule::Path,
+                            Mate::Cam { outside, .. } => Rule::Cam { outside: *outside },
                             Mate::Origin { .. } | Mate::Lock { .. } => unreachable!("handled above"),
                         };
                         let mut ends = Vec::new();

@@ -1432,6 +1432,84 @@ impl AssemblyDocument {
         })
     }
 
+    /// Keeps a point of one part (a vertex or a sphere's centre) on the outline of a planar
+    /// face of another, in one undo step. The point slides along the outline's lines and
+    /// arcs; the part turns freely about it.
+    pub fn mate_path(
+        &mut self,
+        name: &str,
+        path: &EndpointSelector,
+        point: &EndpointSelector,
+        strict: bool,
+    ) -> Result<MateId, MateRefusal> {
+        self.transact("Path mate", strict, |doc, truth| {
+            check_new_name(truth, name)?;
+            if path.component == point.component {
+                return Err(MateRefusal::invalid("a mate ties two different components"));
+            }
+            let path = doc.endpoint_as(truth, path, Some(ShapeKind::Outline), name)?;
+            let point = doc.endpoint(truth, point)?;
+            if !matches!(point.support, Some(StoredSupport::Point { .. })) {
+                return Err(MateRefusal {
+                    mates: vec![name.to_owned()],
+                    ..MateRefusal::new(
+                        RefusalCode::UnsupportedReference,
+                        format!("{name}: a Path moves a point along it: a vertex or a sphere's centre"),
+                    )
+                });
+            }
+            let id = MateId(truth.take_id());
+            truth.mates.push(MateEntry::Known(Mate::Path { id, name: name.into(), path, point }));
+            Ok(id)
+        })
+    }
+
+    /// Keeps a follower of one part (a cylinder parallel to the cam's axis, a sphere or a
+    /// vertex) touching a cam of another, in one undo step. The cam is the outline of its
+    /// flat end face swept along the face's normal. The follower keeps to the side of the
+    /// profile it is on now.
+    pub fn mate_cam(
+        &mut self,
+        name: &str,
+        cam: &EndpointSelector,
+        follower: &EndpointSelector,
+        strict: bool,
+    ) -> Result<MateId, MateRefusal> {
+        self.transact("Cam mate", strict, |doc, truth| {
+            check_new_name(truth, name)?;
+            if cam.component == follower.component {
+                return Err(MateRefusal::invalid("a mate ties two different components"));
+            }
+            let (cam_component, follower_component) = (cam.component, follower.component);
+            let cam = doc.endpoint_as(truth, cam, Some(ShapeKind::Outline), name)?;
+            let follower = doc.endpoint(truth, follower)?;
+            let round = matches!(
+                follower.support,
+                Some(StoredSupport::Axis { radius: Some(_), outward: Some(_), .. }) | Some(StoredSupport::Point { .. })
+            );
+            if !round {
+                return Err(MateRefusal {
+                    mates: vec![name.to_owned()],
+                    ..MateRefusal::new(
+                        RefusalCode::UnsupportedReference,
+                        format!("{name}: a Cam's follower is a cylinder, a sphere or a vertex"),
+                    )
+                });
+            }
+            let at = |c: ComponentId| truth.component(c).map(|x| x.placement).unwrap_or_default();
+            let outside = super::motion::outline_side(
+                cam.support.as_ref(),
+                follower.support.as_ref(),
+                &at(cam_component),
+                &at(follower_component),
+            )
+            .ok_or_else(|| MateRefusal::invalid(format!("{name}: the cam's outline could not be read")))?;
+            let id = MateId(truth.take_id());
+            truth.mates.push(MateEntry::Known(Mate::Cam { id, name: name.into(), cam, follower, outside }));
+            Ok(id)
+        })
+    }
+
     /// A Linear Coupler's offset at the placements `truth` holds: `ratio[0]` times how far
     /// `b`'s plane or axis lies along its direction, less (plus, with `reverse`) `ratio[1]`
     /// times how far `a`'s does, each from its reference component's origin or the
@@ -1926,7 +2004,19 @@ pub(crate) enum Local {
     Point(LocalPoint),
     Profile(LocalProfile),
     Slot(LocalSlot),
+    Outline(LocalOutline),
 }
+
+/// A planar face's outline in its part's frame, as a Path or a Cam reads it.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct LocalOutline {
+    pub plane: LocalPlane,
+    /// Each piece's start, and for an arc its centre, radius squared and turn.
+    pub pieces: Vec<(LocalPoint, Option<LocalArc>)>,
+}
+
+/// An arc of an outline: its centre, its radius squared and whether it turns anticlockwise.
+pub(crate) type LocalArc = (LocalPoint, BigRational, bool);
 
 /// A profile in its part's frame.
 #[derive(Clone, Debug, PartialEq)]
@@ -1949,6 +2039,10 @@ fn read_shape(body: Body, shape: Shape) -> Read {
             edges: Some(p.edges),
         }),
         Shape::Slot(s) => Local::Slot(LocalSlot { depth: s.depth, ends: s.ends }),
+        Shape::Outline(o) => Local::Outline(LocalOutline {
+            plane: LocalPlane { normal: o.normal, offset: o.offset },
+            pieces: o.pieces.into_iter().map(|p| (p.from, p.arc)).collect(),
+        }),
     };
     Read { body, local, radius: None }
 }
@@ -2051,6 +2145,17 @@ fn stored_read(end: &End) -> Option<Read> {
         Some(StoredSupport::Slot { depth, ends, .. }) => {
             (Local::Slot(LocalSlot { depth: *depth, ends: ends.map(|e| e.map(exact)) }), None)
         }
+        Some(StoredSupport::Outline { normal, offset, pieces }) => {
+            let pieces = pieces
+                .iter()
+                .map(|p| {
+                    let arc = p.centre.zip(p.radius).map(|(c, r)| (c.map(exact), exact(r) * exact(r), p.anticlockwise));
+                    (p.from.map(exact), arc)
+                })
+                .collect();
+            let plane = LocalPlane { normal: *normal, offset: exact(*offset) };
+            (Local::Outline(LocalOutline { plane, pieces }), None)
+        }
         None => {
             let normal = end.entity.stored_normal()?;
             (Local::Plane(LocalPlane { normal, offset: BigRational::zero() }), None)
@@ -2074,7 +2179,7 @@ fn constraint(mate: String, reads: Vec<Read>, rule: &Rule) -> Result<Vec<Constra
             (Local::Plane(p), Local::Plane(q)) => p.normal.iter().zip(q.normal).any(|(x, y)| x.abs() != y.abs()),
             _ => false,
         });
-    if matches!(rule, Rule::Mechanical { .. } | Rule::Hinge { limits: Some(_), .. })
+    if matches!(rule, Rule::Mechanical { .. } | Rule::Hinge { limits: Some(_), .. } | Rule::Path | Rule::Cam { .. })
         || nonparallel_width
         || reads.iter().any(|r| matches!(r.local, Local::Native(_)))
     {
@@ -2085,7 +2190,9 @@ fn constraint(mate: String, reads: Vec<Read>, rule: &Rule) -> Result<Vec<Constra
     let second = reads.next().expect("two ends");
     let (a, b) = (first.body, second.body);
     let out = match rule {
-        Rule::Mechanical { .. } => unreachable!("mechanical relations use bounded residuals"),
+        Rule::Mechanical { .. } | Rule::Path | Rule::Cam { .. } => {
+            unreachable!("mechanical, path and cam relations use bounded residuals")
+        }
         Rule::Angle { min, max, limit } => {
             check_angle_limits([*min, *max])?;
             let third = reads.next().expect("reference direction");
@@ -2300,7 +2407,7 @@ fn constraint(mate: String, reads: Vec<Read>, rule: &Rule) -> Result<Vec<Constra
                 Local::Point(point) => {
                     vec![Constraint::FromPlane { mate, a, plane, b, point, direction: None, gap, upto: None, says }]
                 }
-                Local::Native(_) | Local::Plane(_) | Local::Profile(_) | Local::Slot(_) => {
+                Local::Native(_) | Local::Plane(_) | Local::Profile(_) | Local::Slot(_) | Local::Outline(_) => {
                     return Err(unsupported("a Tangent's second end is a cylinder or a sphere"));
                 }
             }

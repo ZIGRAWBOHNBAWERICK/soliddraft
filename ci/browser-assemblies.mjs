@@ -35,6 +35,13 @@
 // placements, the mates and undo as they were. Then one later feature on top: 60 degrees
 // in the same field is taken, the output shaft follows its bore, and Undo puts it back.
 //
+// Then configurations and the exploded view on the saved tray assembly, opened with its
+// parts: the visitor opens the Configurations panel, names a configuration Lifted and adds
+// it, activates it, and explodes it with Auto explode. The parts move apart on screen and
+// their placements do not; Explode collapses them back. Saved and opened again with its
+// parts, the assembly is in Lifted with its exploded view, and activating Default, made
+// before the view, shows none: each configuration keeps its own.
+//
 // The app draws into one canvas and takes only trusted input: keys and clicks sent as the
 // browser's own, through the DevTools protocol. The canvas has no text to read, so the
 // check reads the assembly through the read-only `shown_assembly` export, and finds a
@@ -382,9 +389,10 @@ async function main() {
   const joint = await universalJoint(v);
   const choice = await chosenAssembly(v, saved, [tray, collar], parts(mated));
   const bearingDrag = await refusedDrag(v);
+  const configured = await configuredExplode(v, saved, [tray, collar], mated);
 
-  fs.writeFileSync(path.join(out, 'assemblies.json'), JSON.stringify({ mated, reopened, alone, saved: path.basename(saved), joint, choice, bearing: bearingDrag }, null, 1));
-  console.log(`Assemblies in the browser: three components from two uploads, a mate picked in the viewport putting the second tray ${FLOOR} mm up on the first one's floor, saved as ${path.basename(saved)}, reopened with its parts at the same placements with the mate kept, and opened alone from the copies it keeps. A Universal Joint picked between two shafts meeting at ${BEND} degrees drove the output ${joint.follows.toFixed(6)} degrees for a ${TURN} degree input turn, and reopened with its parts. A parent and its child assembly uploaded child first opened the parent the visitor chose, with ${choice.chosen.held.length} files held for it, and took a tray inserted on top. Turning the joint's free output block to set the shafts at right angles was refused by name with nothing changed, and a 60 degree turn after it was taken and undone.`);
+  fs.writeFileSync(path.join(out, 'assemblies.json'), JSON.stringify({ mated, reopened, alone, saved: path.basename(saved), joint, choice, bearing: bearingDrag, configured }, null, 1));
+  console.log(`Assemblies in the browser: three components from two uploads, a mate picked in the viewport putting the second tray ${FLOOR} mm up on the first one's floor, saved as ${path.basename(saved)}, reopened with its parts at the same placements with the mate kept, and opened alone from the copies it keeps. A Universal Joint picked between two shafts meeting at ${BEND} degrees drove the output ${joint.follows.toFixed(6)} degrees for a ${TURN} degree input turn, and reopened with its parts. A parent and its child assembly uploaded child first opened the parent the visitor chose, with ${choice.chosen.held.length} files held for it, and took a tray inserted on top. Turning the joint's free output block to set the shafts at right angles was refused by name with nothing changed, and a 60 degree turn after it was taken and undone. A configuration added and activated in the panel took an auto exploded view that moved ${configured.moved} parts on screen and no placement, saved, reopened in that configuration, and showed no exploded view in Default.`);
 }
 
 // The rig's shafts: the input (component 4) on a hinge at (10, 5, 0) along Z, the output
@@ -611,6 +619,65 @@ async function refusedDrag(v) {
   check(JSON.stringify(shown.mate_names) === JSON.stringify(before.mate_names), `after Undo the mates are ${shown.mate_names}`);
   await v.stopped('bearing at the end');
   return { refused, turned, undone: shown };
+}
+
+// Types `text` into the focused field, a key at a time.
+async function type(v, text) {
+  for (const ch of text) {
+    await v.key(ch, `Key${ch.toUpperCase()}`, ch.toUpperCase().charCodeAt(0), 0, ch);
+  }
+}
+
+async function configuredExplode(v, saved, files, mated) {
+  step('load the site again and open the saved assembly with its parts');
+  await v.load();
+  await v.choose([saved, ...files], () => v.click(OPEN));
+  let shown = await v.assembly('configurations', s => loaded(s) && s.components.length === 3 && s.components.every(c => c.freshness !== 'unchecked'));
+  check(shown.configurations.length === 0 && shown.explode_steps === 0, `the tray assembly starts with ${JSON.stringify(shown.configurations)} and ${shown.explode_steps} steps`);
+  const assembled = placements(shown);
+
+  step('add a configuration called Lifted in the Configurations panel');
+  await v.command('Configurations');
+  await v.assembly('configurations panel', s => s.configure_open);
+  await v.click(await v.control('Configuration name'));
+  await type(v, 'Lifted');
+  await v.click(await v.control('Add configuration'));
+  shown = await v.assembly('added', s => s.configurations.length === 2 || s.note?.kind === 'Error');
+  check(JSON.stringify(shown.configurations) === '["Default","Lifted"]', `the configurations are ${JSON.stringify(shown.configurations)}: ${JSON.stringify(shown.note)}`);
+  check(shown.active_configuration === 'Default', `${shown.active_configuration} is active after Add`);
+
+  step('activate Lifted and explode it');
+  await v.click(await v.control('Activate Lifted'));
+  shown = await v.assembly('lifted', s => s.active_configuration === 'Lifted');
+  await v.click(await v.control('Auto explode'));
+  shown = await v.assembly('exploded', s => s.exploded || s.note?.kind === 'Error');
+  check(shown.exploded && shown.explode_steps >= 1, `Auto explode did not explode: ${JSON.stringify(shown.note)}`);
+  const moved = shown.components.filter((c, i) => !near([c.translation], [assembled[i][0]])).length;
+  check(moved >= 1, `no part moved on screen: ${JSON.stringify(placements(shown))}`);
+  await v.command('Isometric');
+  await v.command('Fit');
+  await v.shot('16-exploded');
+
+  step('collapse the exploded view');
+  await v.click(await v.control('Explode or collapse'));
+  shown = await v.assembly('collapsed', s => !s.exploded);
+  check(near(placements(shown), assembled), `collapsed, the placements are ${JSON.stringify(placements(shown))}, not ${JSON.stringify(assembled)}`);
+  check(near(placements(shown), placements(mated)), 'the exploded view moved a placement');
+
+  step('save, open again and switch back to Default');
+  const again = await v.download('save configured', () => v.key('s', 'KeyS', 83, 2, 's'));
+  await v.load();
+  await v.choose([again, ...files], () => v.click(OPEN));
+  shown = await v.assembly('configured reopened', s => loaded(s) && s.components.length === 3 && s.components.every(c => c.freshness !== 'unchecked'));
+  check(shown.active_configuration === 'Lifted' && shown.explode_steps >= 1, `reopened in ${shown.active_configuration} with ${shown.explode_steps} steps`);
+  await v.command('Configurations');
+  await v.assembly('configurations panel again', s => s.configure_open);
+  await v.click(await v.control('Activate Default'));
+  shown = await v.assembly('default', s => s.active_configuration === 'Default');
+  check(shown.explode_steps === 0, `Default has ${shown.explode_steps} explode steps of Lifted's`);
+  check(near(placements(shown), assembled), `Default's placements are ${JSON.stringify(placements(shown))}`);
+  await v.stopped('configured at the end');
+  return { moved, reopened: shown.configurations };
 }
 
 try {

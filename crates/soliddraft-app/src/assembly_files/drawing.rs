@@ -74,7 +74,7 @@ pub fn assembly_model(doc: &mut AssemblyDocument) -> Result<AssemblyModel, Strin
                 path: path.to_string(),
                 item,
                 positions: mesh.positions.iter().map(&at).collect(),
-                triangles: mesh.indices.chunks_exact(3).map(|t| [t[0], t[1], t[2]]).collect(),
+                triangles: mesh.indices.as_chunks::<3>().0.to_vec(),
                 faces: faces.clone(),
                 edges: mesh.edges.iter().map(|e| e.iter().map(&at).collect()).collect(),
             }

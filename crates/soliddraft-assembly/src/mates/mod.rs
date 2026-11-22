@@ -211,6 +211,32 @@ pub enum StoredSupport {
         /// The round ends' radius.
         radius: f64,
     },
+    /// The outline of a planar face, as a Path or a Cam reads it.
+    Outline {
+        /// The plane's outward normal, each component -1, 0 or 1.
+        normal: [i8; 3],
+        /// The plane's offset along the normal.
+        offset: f64,
+        /// The pieces round the outline.
+        pieces: Vec<StoredPiece>,
+    },
+}
+
+/// One piece of a stored outline: a line or an arc from `from` to the next piece's `from`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StoredPiece {
+    /// Where it starts.
+    pub from: [f64; 3],
+    /// An arc's centre; absent for a line.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub centre: Option<[f64; 3]>,
+    /// An arc's radius.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub radius: Option<f64>,
+    /// An arc turns anticlockwise about the outline's normal.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub anticlockwise: bool,
 }
 
 /// One side of a mate between planes: a face or a reference plane of one placed part.
@@ -709,6 +735,35 @@ pub enum Mate {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         lock_rotation: Option<StoredTurn>,
     },
+    /// A point of one part kept on a path of another: the outline of a planar face, its
+    /// straight edges and circular arcs in turn. The point slides along the path and the
+    /// part turns freely about it.
+    Path {
+        /// The mate's id.
+        id: MateId,
+        /// A label; commands find a mate by it.
+        name: String,
+        /// The planar face whose outline is the path.
+        path: FaceEndpoint,
+        /// The point: a vertex or a sphere's centre.
+        point: FaceEndpoint,
+    },
+    /// A follower of one part kept touching a cam of another: the cam's profile is the
+    /// outline of its flat end face, swept along the face's normal. A round follower's axis
+    /// stays parallel to that normal and its surface touches the profile; a point follower
+    /// touches it with the point. The follower stays on the side of the profile it was on.
+    Cam {
+        /// The mate's id.
+        id: MateId,
+        /// A label; commands find a mate by it.
+        name: String,
+        /// The cam's flat end face, whose outline is its profile.
+        cam: FaceEndpoint,
+        /// The follower: a cylinder, a sphere or a vertex.
+        follower: FaceEndpoint,
+        /// The follower rides outside the profile rather than inside it.
+        outside: bool,
+    },
 }
 
 impl Mate {
@@ -732,7 +787,9 @@ impl Mate {
             | Mate::LinearCoupler { id, .. }
             | Mate::LimitDistance { id, .. }
             | Mate::ProfileCenter { id, .. }
-            | Mate::Slot { id, .. } => *id,
+            | Mate::Slot { id, .. }
+            | Mate::Path { id, .. }
+            | Mate::Cam { id, .. } => *id,
         }
     }
 
@@ -756,7 +813,9 @@ impl Mate {
             | Mate::LinearCoupler { name, .. }
             | Mate::LimitDistance { name, .. }
             | Mate::ProfileCenter { name, .. }
-            | Mate::Slot { name, .. } => name,
+            | Mate::Slot { name, .. }
+            | Mate::Path { name, .. }
+            | Mate::Cam { name, .. } => name,
         }
     }
 
@@ -781,6 +840,8 @@ impl Mate {
             Mate::LimitDistance { .. } => "limit_distance",
             Mate::ProfileCenter { .. } => "profile_center",
             Mate::Slot { .. } => "slot",
+            Mate::Path { .. } => "path",
+            Mate::Cam { .. } => "cam",
         }
     }
 
@@ -831,6 +892,8 @@ impl Mate {
             Mate::Angle { a, b, reference, .. } | Mate::LimitAngle { a, b, reference, .. } => vec![a, b, reference],
             Mate::Symmetric { a, b, plane, .. } => vec![a, b, plane],
             Mate::Slot { slot, pin, .. } => vec![slot, pin],
+            Mate::Path { path, point, .. } => vec![path, point],
+            Mate::Cam { cam, follower, .. } => vec![cam, follower],
             Mate::Width { groove, tab, .. } => groove.iter().chain(tab).collect(),
             Mate::Hinge { axes, planes, .. } => axes.iter().chain(planes).collect(),
             Mate::Origin { .. } | Mate::Lock { .. } => Vec::new(),
@@ -853,6 +916,8 @@ impl Mate {
             Mate::Angle { a, b, reference, .. } | Mate::LimitAngle { a, b, reference, .. } => vec![a, b, reference],
             Mate::Symmetric { a, b, plane, .. } => vec![a, b, plane],
             Mate::Slot { slot, pin, .. } => vec![slot, pin],
+            Mate::Path { path, point, .. } => vec![path, point],
+            Mate::Cam { cam, follower, .. } => vec![cam, follower],
             Mate::Width { groove, tab, .. } => groove.iter_mut().chain(tab).collect(),
             Mate::Hinge { axes, planes, .. } => axes.iter_mut().chain(planes).collect(),
             Mate::Origin { .. } | Mate::Lock { .. } => Vec::new(),
@@ -896,7 +961,9 @@ impl Mate {
             | Mate::Symmetric { .. }
             | Mate::LinearCoupler { .. }
             | Mate::ProfileCenter { .. }
-            | Mate::Slot { .. } => None,
+            | Mate::Slot { .. }
+            | Mate::Path { .. }
+            | Mate::Cam { .. } => None,
         }
     }
 
@@ -919,7 +986,9 @@ impl Mate {
             | Mate::Origin { .. }
             | Mate::Perpendicular { .. }
             | Mate::Lock { .. }
-            | Mate::LinearCoupler { .. } => None,
+            | Mate::LinearCoupler { .. }
+            | Mate::Path { .. }
+            | Mate::Cam { .. } => None,
         }
     }
 
@@ -959,6 +1028,8 @@ impl Mate {
             }
             Mate::Symmetric { a, b, plane, .. } => vec![&mut a.path, &mut b.path, &mut plane.path],
             Mate::Slot { slot, pin, .. } => vec![&mut slot.path, &mut pin.path],
+            Mate::Path { path, point, .. } => vec![&mut path.path, &mut point.path],
+            Mate::Cam { cam, follower, .. } => vec![&mut cam.path, &mut follower.path],
             Mate::LinearCoupler { a, b, reference_a, reference_b, .. } => [&mut a.path, &mut b.path]
                 .into_iter()
                 .chain(reference_a.iter_mut().map(|r| &mut r.path))

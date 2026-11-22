@@ -497,9 +497,7 @@ fn every_tool_runs_without_a_window_and_undoes_as_its_row_says() {
         json!({ "name": "LA", "a": top, "b": bottom, "reference": reference, "min_degrees": -180, "max_degrees": 180 }),
     );
     s.call("assembly_delete_mate", json!({ "mate": "LA" }));
-    for command in ["assembly_mate_path", "assembly_mate_cam", "assembly_physical_dynamics"] {
-        s.refuse_motion(command);
-    }
+    s.refuse_motion("assembly_physical_dynamics");
     // The B1 families, each added and taken away again.
     let cap = |c: u64, feature: &str, g: &str| json!({ "component": c, "feature": feature, "generator": g });
     let side = json!({ "component": parts[1], "feature": "Boss-Extrude1", "generator": "side", "normal": [1, 0, 0] });
@@ -622,7 +620,7 @@ fn every_tool_runs_without_a_window_and_undoes_as_its_row_says() {
         "generator": "side",
         "normal": [0, 1, 0],
     });
-    let slot = json!({ "name": "SL", "slot": wall, "pin": shaft(pins[1]), "mode": "center" });
+    let slot = json!({ "name": "SL", "slot": wall.clone(), "pin": shaft(pins[1]), "mode": "center" });
     let slotted = s.call("assembly_mate_slot", slot);
     let row = slotted["assembly"]["mates"].as_array().unwrap().iter().find(|m| m["name"] == "SL").unwrap().clone();
     assert_eq!(
@@ -630,6 +628,49 @@ fn every_tool_runs_without_a_window_and_undoes_as_its_row_says() {
         (Some("slot"), Some("center"))
     );
     s.call("assembly_delete_mate", json!({ "mate": "SL" }));
+    // Path and Cam on the slotted plate's outline: a corner runs along it, a pin rides it.
+    let plate = json!({ "component": wall["component"], "feature": "Boss-Extrude1", "generator": "end_cap" });
+    let corner = json!({
+        "component": parts[1],
+        "vertex": ["Boss-Extrude1 · Start cap", "Boss-Extrude1 · Side of line 2", "Boss-Extrude1 · Side of line 3"],
+    });
+    let pathed = s.call("assembly_mate_path", json!({ "name": "PA", "path": plate, "point": corner }));
+    let row = pathed["assembly"]["mates"].as_array().unwrap().iter().find(|m| m["name"] == "PA").unwrap().clone();
+    assert_eq!((row["kind"].as_str(), row["path"]["support"]["kind"].as_str()), (Some("path"), Some("outline")));
+    s.call("assembly_delete_mate", json!({ "mate": "PA" }));
+    let cammed = s.call("assembly_mate_cam", json!({ "name": "CM", "cam": plate, "follower": shaft(pins[1]) }));
+    let row = cammed["assembly"]["mates"].as_array().unwrap().iter().find(|m| m["name"] == "CM").unwrap().clone();
+    // The pin stands inside the plate's outline, so it rides the outline from inside.
+    assert_eq!((row["kind"].as_str(), row["outside"].as_bool()), (Some("cam"), Some(false)));
+    s.call("assembly_delete_mate", json!({ "mate": "CM" }));
+
+    // Configurations and the exploded view: each change one step, the display none.
+    s.call("assembly_configurations", json!({}));
+    s.call("assembly_add_configuration", json!({ "name": "Open" }));
+    s.call("assembly_rename_configuration", json!({ "name": "Open", "to": "Wide" }));
+    s.call("assembly_activate_configuration", json!({ "name": "Wide" }));
+    s.call("assembly_activate_configuration", json!({ "name": "Default" }));
+    s.call("assembly_delete_configuration", json!({ "name": "Wide" }));
+    let mover = parts[1].to_string();
+    let step = s.call("assembly_explode_step", json!({ "paths": [mover], "direction": [0, 0, 1], "distance": 30 }));
+    let step = step["added"].as_u64().unwrap();
+    s.call("assembly_edit_explode_step", json!({ "step": step, "distance": 40 }));
+    let shown = s.call("assembly_explode", json!({ "exploded": true }));
+    assert_eq!(shown["configurations"]["explode"]["shown"], true);
+    s.call("assembly_explode", json!({ "exploded": false }));
+    s.call("assembly_delete_explode_step", json!({ "step": step }));
+    s.call("assembly_auto_explode", json!({ "distance": 20 }));
+    s.call("undo", json!({}));
+    s.call("assembly_save", json!({ "path": assembly_file }));
+    // The files it writes: robots, a drawing with its BOM, and a packed copy.
+    let urdf = s.call("assembly_export_urdf", json!({ "path": s.path("robot/rig.urdf") }));
+    assert!(urdf["exported"]["links"].as_array().unwrap().len() >= 3);
+    s.call("assembly_export_usd", json!({ "path": s.path("robot/rig.usda") }));
+    let drawn = s.call("assembly_make_drawing", json!({}));
+    assert!(!drawn["drawing"]["sheets"][0]["tables"][0]["bom"].as_array().unwrap().is_empty());
+    s.call("show_assembly", json!({}));
+    let packed = s.call("assembly_pack_and_go", json!({ "folder": s.path("packed") }));
+    assert!(packed["packed"]["files"].as_array().unwrap().len() >= 3);
 
     // The second part moves into a file of its own, placed where it was, in one undo step.
     let at = parts[1].to_string();

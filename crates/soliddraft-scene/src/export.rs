@@ -399,7 +399,7 @@ fn export_mesh(name: &str, m: &DisplayMesh) -> ExportMesh {
     ExportMesh {
         name: safe(name),
         positions: m.positions.iter().map(|p| DVec3::new(p[0] as f64, p[1] as f64, p[2] as f64)).collect(),
-        triangles: m.indices.chunks_exact(3).map(|t| [t[0], t[1], t[2]]).collect(),
+        triangles: m.indices.as_chunks::<3>().0.to_vec(),
     }
 }
 
@@ -436,7 +436,7 @@ fn escape(s: &str) -> String {
 /// The articulation as a URDF at `path` and its meshes as binary STL in millimetres in a
 /// `<name>_meshes` folder beside it, scaled to metres in the URDF: every file's path and
 /// bytes, the URDF last.
-pub fn urdf_files(a: &Articulation, path: &Path) -> Vec<(PathBuf, Vec<u8>)> {
+pub fn urdf_files(a: &Articulation, path: &Path) -> Files {
     let dir = path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
     let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("robot");
     let mesh_dir_name = format!("{stem}_meshes");
@@ -555,6 +555,7 @@ pub fn usda_text(a: &Articulation) -> String {
     );
     let mut prim_path: Vec<String> = vec![String::new(); a.links.len()];
     let _ = writeln!(x, "def Xform \"{root}\" (\n    prepend apiSchemas = [\"PhysicsArticulationRootAPI\"]\n)\n{{");
+    #[allow(clippy::too_many_arguments, reason = "the recursion carries the layer, the tree and the paths it names")]
     fn link(
         x: &mut String,
         a: &Articulation,
@@ -650,12 +651,12 @@ pub fn usda_text(a: &Articulation) -> String {
     x
 }
 
+/// Files to write: each path with its bytes.
+pub type Files = Vec<(PathBuf, Vec<u8>)>;
+
 /// The open assembly's export to `path`, `.urdf` or `.usda` for OpenUSD, without writing
 /// anything: the articulation and every file's path and bytes, the named file last.
-pub fn export_files(
-    doc: &mut AssemblyDocument,
-    path: &Path,
-) -> Result<(Articulation, Vec<(PathBuf, Vec<u8>)>), String> {
+pub fn export_files(doc: &mut AssemblyDocument, path: &Path) -> Result<(Articulation, Files), String> {
     let ext = path.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase).unwrap_or_default();
     if !matches!(ext.as_str(), "urdf" | "usda") {
         return Err("export an assembly to a .urdf or a .usda file".into());

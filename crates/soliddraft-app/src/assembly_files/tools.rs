@@ -46,6 +46,9 @@ pub(crate) fn run(state: &mut AppState, name: &str, input: &Value) -> Option<Res
             let d = state.drawing.session.as_ref().ok_or("no drawing")?;
             Ok(json!({ "done": said, "drawing": &d.doc.drawing }))
         })(),
+        #[cfg(target_arch = "wasm32")]
+        "assembly_export_urdf" | "assembly_export_usd" => Err(super::BROWSER_EXPORT.to_owned()),
+        #[cfg(not(target_arch = "wasm32"))]
         "assembly_export_urdf" | "assembly_export_usd" => (|| {
             let path = PathBuf::from(text(input, "path")?);
             let want = if name == "assembly_export_urdf" { "urdf" } else { "usda" };

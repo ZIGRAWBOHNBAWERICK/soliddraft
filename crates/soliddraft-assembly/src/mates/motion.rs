@@ -2,6 +2,7 @@
 
 mod interval;
 mod native;
+mod outline;
 use super::solver::{
     self, Along, Body, Constraint, FreeMotion, LocalAxis, LocalPlane, LocalPoint, Mirrored, Slide, SlotMode, WidthMode,
 };
@@ -12,6 +13,7 @@ use interval::{Interval, Number, radians};
 pub(super) use native::{mechanical_value, native_constraint, projection, square_shafts};
 use num_rational::BigRational;
 use num_traits::Zero;
+pub(super) use outline::outline_side;
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
 

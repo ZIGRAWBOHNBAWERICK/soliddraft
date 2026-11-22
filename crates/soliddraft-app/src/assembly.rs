@@ -618,7 +618,10 @@ fn shown_component(s: &AssemblySession, r: OccurrenceIndex) -> serde_json::Value
 /// form), the `selected` component's path, the number of `mates` and their
 /// `mate_names`, the `undo` step's label and depth, the window's last `note` (`text`
 /// and `kind`), the Mate panel's picks and error, the `file` it came from, the names of
-/// the files `held` for it, and the assemblies of an upload it is `choosing` between.
+/// the files `held` for it, the assemblies of an upload it is `choosing` between, whether
+/// the Configurations panel is open (`configure_open`), the `configurations` by name and
+/// the `active_configuration`, how many `explode_steps` it has and whether it is shown
+/// `exploded` (a component's `translation` is then where the exploded view shows it).
 pub fn shown(state: &AppState) -> serde_json::Value {
     let held: Vec<String> =
         state.assembly.held.iter().filter_map(|d| d.path.as_ref().map(|p| p.display().to_string())).collect();
@@ -654,6 +657,11 @@ pub fn shown(state: &AppState) -> serde_json::Value {
         },
         "held": held,
         "choosing": choosing,
+        "configure_open": state.assembly.configure.open,
+        "configurations": s.doc.assembly().configurations.iter().map(|c| c.name.clone()).collect::<Vec<_>>(),
+        "active_configuration": s.doc.assembly().active_configuration().map(|c| c.name.clone()),
+        "explode_steps": s.doc.assembly().explode.len(),
+        "exploded": s.doc.is_exploded(),
     })
 }
 

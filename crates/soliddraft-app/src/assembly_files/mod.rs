@@ -10,7 +10,6 @@ pub(crate) mod tools;
 use crate::state::{AppState, NoteKind};
 use soliddraft_assembly::{PackReport, PackRequest};
 use soliddraft_document::DocRef;
-use std::path::{Path, PathBuf};
 
 /// What the ribbon asks for.
 #[derive(Clone, Debug, PartialEq)]
@@ -45,26 +44,21 @@ pub(crate) fn pack(state: &mut AppState, mut request: PackRequest, drawings: boo
     soliddraft_assembly::pack_and_go(&request, drawings).map_err(|e| e.to_string())
 }
 
-/// Exports the open assembly to `path`: on the desktop every file is written; in the
-/// browser a URDF and its meshes download as one zip.
+/// Why the robot exports are not offered in the browser.
+pub const BROWSER_EXPORT: &str = "URDF and USD export lives with scene import in the desktop app";
+
+/// Exports the open assembly to `path`, writing every file. The scene crate is the
+/// desktop's, as scene import is.
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn export(
     state: &mut AppState,
-    path: &Path,
-) -> Result<(soliddraft_scene::export::Articulation, Vec<PathBuf>), String> {
+    path: &std::path::Path,
+) -> Result<(soliddraft_scene::export::Articulation, Vec<std::path::PathBuf>), String> {
     let s = state.assembly.session.as_mut().ok_or("no assembly is open")?;
     let (articulation, files) = soliddraft_scene::export::export_files(&mut s.doc, path)?;
-    let paths: Vec<PathBuf> = files.iter().map(|(p, _)| p.clone()).collect();
-    if cfg!(target_arch = "wasm32") && files.len() > 1 {
-        let dir = path.parent().unwrap_or(Path::new(""));
-        let entries: Vec<(String, Vec<u8>)> = files
-            .into_iter()
-            .map(|(p, b)| (p.strip_prefix(dir).unwrap_or(&p).to_string_lossy().replace('\\', "/"), b))
-            .collect();
-        crate::platform::write_file(&path.with_extension("zip"), &crate::zip::stored(&entries))?;
-    } else {
-        for (p, bytes) in &files {
-            crate::platform::write_file(p, bytes)?;
-        }
+    let paths: Vec<std::path::PathBuf> = files.iter().map(|(p, _)| p.clone()).collect();
+    for (p, bytes) in &files {
+        crate::platform::write_file(p, bytes)?;
     }
     Ok((articulation, paths))
 }
@@ -93,6 +87,9 @@ pub fn apply(state: &mut AppState, action: FilesAction) {
                 Err(e) => state.note(e, NoteKind::Error),
             }
         }
+        #[cfg(target_arch = "wasm32")]
+        FilesAction::Export(_) => state.note(BROWSER_EXPORT, NoteKind::Info),
+        #[cfg(not(target_arch = "wasm32"))]
         FilesAction::Export(ext) => {
             let Some(s) = state.assembly.session.as_ref() else { return };
             let (label, filter) =

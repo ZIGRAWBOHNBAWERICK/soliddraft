@@ -31,6 +31,8 @@ are in `crates/soliddraft-app/src/mates/`.
 | Limit Distance | The turns a Distance fixes; its translation stays free between a least and a greatest distance |
 | Profile Center | Two rectangles, regular polygons or circles centred on each other, their planes a distance apart: everything for polygons, everything but the spin for circles unless Lock rotation holds it |
 | Slot | A pin's axis in a straight slot: two turns and the translation across the slot, and along it a bound between the ends or a position |
+| Path | A point (a vertex or a sphere's centre) on the outline of a planar face: two translations, the point sliding along the outline's lines and arcs and its part turning freely about it |
+| Cam | A follower touching a cam's profile, the outline of the cam's flat end face swept along its normal: one translation for a ball or a vertex, and for a roller also the two turns that keep its axis parallel to the cam's |
 
 Coincident and Distance also take a plane with an axis or a point: the axis lies parallel to
 the plane, or the point sits on it or a distance in front of it. Coincident also takes two
@@ -48,7 +50,8 @@ conflict as a numerical solve. Independent exact groups keep that path when anot
 needs bounded motions.
 
 A group with general rotations, an Angle or Limit Angle, a curved-curved Tangent, a
-point-point or axis-axis Distance, a mechanical coupling or Universal Joint, or enclosed native supports uses the bounded solver.
+point-point or axis-axis Distance, a mechanical coupling or Universal Joint, a Path or a Cam,
+or enclosed native supports uses the bounded solver.
 Every accepted mate in that group reports a `proof` with `certainty: "bounded"`,
 `bound_mm: 1e-9`, `bound_angle: 1e-9`, and the certified residuals. The angular bound is in
 radians. These are residual bounds at the stored pose, not an exact-coincidence claim or a
@@ -108,6 +111,33 @@ byte unchanged. Failure to find or enclose a solution returns `uncertified`, nam
 mates. It does not claim the system is over-constrained. A Jacobian whose ranks at 1e-6 and
 1e-9 disagree returns `uncertain_rank`. Every refusal leaves truth, placements and undo/redo
 history unchanged.
+
+## Path and Cam
+
+Both read an outline: the outer loop of a planar face, read exactly from the kernel as
+straight edges and circular arcs between exact corners. The face's plane must be
+axis-aligned in its part, as other exact supports are; splines, ellipses and other curves
+are refused by name. A loop of one whole circle is one piece. Which way each arc turns is
+read from a point the kernel samples on it, away from its ends.
+
+`assembly_mate_path` takes `path`, the planar face, and `point`, a vertex or a sphere.
+The point stays in the face's plane and on its outline. It slides freely along it and its
+part turns freely about it; a position along the path is not held yet.
+
+`assembly_mate_cam` takes `cam`, the cam's flat end face, and `follower`: a cylinder whose
+axis is parallel to the face's normal (a roller), a sphere or a vertex. The profile is the
+end face's outline swept along its normal, so the follower may sit at any height along the
+cam. The follower keeps to the side of the profile it is on when the mate is made: outside
+for a disc cam, inside for a groove. A roller's surface touches the profile; its axis
+stays parallel to the cam's.
+
+The residual is the signed distance from the point or the follower's centre to the
+outline in its plane, positive outside: the least distance to any piece, less the
+follower's radius. Each piece's distance is enclosed in outward-rounded arithmetic, and
+the least of the enclosures encloses the least distance, so the certificate holds wherever
+the nearest piece changes. Which side the point lies on is decided once, in doubles: by
+the nearest piece away from a corner, and by the winding of a fine polygon round the
+outline at a corner.
 
 ## Move and rotate under mates
 
@@ -536,6 +566,8 @@ a time. `require_fully_constrained` refuses a result with any freedom left.
 | `assembly_mate_limit_distance` | Holds a distance between `min` and `max`, `aligned` or `opposed` |
 | `assembly_mate_profile_center` | Centres two profiles `distance` apart; `lock_rotation` for circles |
 | `assembly_mate_slot` | Puts `pin` in `slot`: `free`, `center`, `distance` or `percent`, with `flipped` and `lock_rotation` |
+| `assembly_mate_path` | Keeps `point` on the outline of the planar face `path` |
+| `assembly_mate_cam` | Keeps `follower` touching the profile of `cam`, the cam's flat end face |
 | `assembly_edit_mate` | Changes a literal distance, an alignment, `align_axes`, a width's or slot's `percent` or `flipped`, a hinge's `plane_alignment`, a `lock_rotation`, a limit's `min` or `max`, or a coupler's `ratio` or `reverse` |
 | `assembly_delete_mate` | Removes a mate; components stay where they are |
 | `assembly_set_value` | Adds or changes a value |
@@ -584,7 +616,9 @@ The panel offers every family above except Origin, which has its own button for 
 component. Coincident, Distance, Parallel, Perpendicular, Concentric, Linear Coupler, Limit
 Distance and Profile Center take two picked faces, and Tangent takes the plane, then the
 cylinder or sphere. Slot takes a wall or round end of the slot, then the pin. Universal Joint
-takes the input shaft, then the output shaft. Symmetric takes
+takes the input shaft, then the output shaft. Path takes the flat face whose outline is the
+path, then a ball; a vertex is named through the MCP tool. Cam takes the cam's flat end
+face, then the roller or ball. Symmetric takes
 three: the face, its mirror image, then the symmetry plane. Angle and Limit Angle also take
 three: two directions followed by the positive reference direction. Width takes four: the groove's two,
 then the tab's. Hinge takes four too: the two axes' faces, then the two planes. Lock takes one
@@ -628,7 +662,9 @@ still shows, solves nothing and reports `proof_unavailable` per mate until Updat
 
 ## Limits for later batches
 
-Path, Cam, arc Slot and Physical Dynamics remain unsupported. Collision
+Arc Slot and Physical Dynamics remain unsupported. A Path holds no position along the
+path and no pitch or yaw, and follows face outlines only, not sketch curves or splines; a
+Cam reads lines and circular arcs only. Collision
 uses the mesh-certified tier while dragging. Mate Controller is deferred. Mechanical relations add kinematics without
 contact simulation.
 

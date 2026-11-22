@@ -2,7 +2,7 @@
 
 use crate::assembly::AssemblyAction;
 use crate::assembly_files::FilesAction;
-use crate::commands::{Agents, CommandSpec, Size, Tab};
+use crate::commands::{Agents, CommandSpec, Size, Tab, Undo};
 use crate::icons::Icon;
 use crate::state::AppAction;
 use serde_json::Value;
@@ -61,7 +61,8 @@ pub(crate) fn commands() -> Vec<CommandSpec> {
              parts; the BOM lists parts with quantities; each row gets a balloon on the first view. The drawing \
              opens; Rebuild brings it to the assembly later.",
             drawing_params,
-        ),
+        )
+        .undo(Undo::Replaces),
         row(
             "assembly_pack_and_go",
             "Pack and Go",
@@ -85,6 +86,8 @@ pub(crate) fn commands() -> Vec<CommandSpec> {
         )
         .on(Tab::Assembly, "File", Size::Small)
         .run(|_| AppAction::Assembly(AssemblyAction::Files(FilesAction::Export("urdf"))))
+        .when(|s| s.assembly.is_active() && !cfg!(target_arch = "wasm32"))
+        .hint(|_| cfg!(target_arch = "wasm32").then(|| super::BROWSER_EXPORT.to_owned()))
         .agents(Agents::Mcp, JOINTS, urdf_params),
         row(
             "assembly_export_usd",
@@ -94,6 +97,8 @@ pub(crate) fn commands() -> Vec<CommandSpec> {
         )
         .on(Tab::Assembly, "File", Size::Small)
         .run(|_| AppAction::Assembly(AssemblyAction::Files(FilesAction::Export("usda"))))
+        .when(|s| s.assembly.is_active() && !cfg!(target_arch = "wasm32"))
+        .hint(|_| cfg!(target_arch = "wasm32").then(|| super::BROWSER_EXPORT.to_owned()))
         .agents(Agents::Mcp, JOINTS, usd_params),
     ]
 }

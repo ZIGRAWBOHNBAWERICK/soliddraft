@@ -64,6 +64,8 @@ pub fn apply(state: &mut AppState, action: ConfigureAction) {
             state.assembly.mate.open = false;
             state.assembly.interference.open = false;
         }
+        // Where the property area is a sheet, as in the browser, the panel opens it.
+        state.options_details = d.open;
         return;
     }
     let distance = state.assembly.configure.distance;
@@ -144,7 +146,10 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
                 ui.label(egui::RichText::new("active").color(theme::muted()));
             } else {
                 ui.label(format!("○ {}", c.name));
-                if ui.small_button("Activate").on_hover_text(format!("Show {}", c.name)).clicked() {
+                let activate = ui.small_button("Activate").on_hover_text(format!("Show {}", c.name));
+                #[cfg(target_arch = "wasm32")]
+                crate::web::show_control(format!("Activate {}", c.name), activate.rect);
+                if activate.clicked() {
                     actions.push(ConfigureAction::Activate(c.id));
                 }
                 if ui.small_button("Delete").clicked() {
@@ -154,9 +159,15 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
         });
     }
     ui.horizontal(|ui| {
-        ui.add(egui::TextEdit::singleline(&mut d.name).hint_text("New configuration").desired_width(130.0))
-            .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, "Configuration name"));
-        if ui.add_enabled(!d.name.trim().is_empty(), egui::Button::new("Add")).clicked() {
+        let field = ui.add(egui::TextEdit::singleline(&mut d.name).hint_text("New configuration").desired_width(130.0));
+        field.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, "Configuration name"));
+        let add = ui.add_enabled(!d.name.trim().is_empty(), egui::Button::new("Add"));
+        #[cfg(target_arch = "wasm32")]
+        {
+            crate::web::show_control("Configuration name", field.rect);
+            crate::web::show_control("Add configuration", add.rect);
+        }
+        if add.clicked() {
             actions.push(ConfigureAction::Add);
         }
     });
@@ -172,10 +183,17 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
     theme::section_label(ui, "Exploded view");
     ui.horizontal(|ui| {
         let label = if exploded { "Collapse" } else { "Explode" };
-        if ui.add_enabled(!truth.explode.is_empty(), egui::Button::new(label)).clicked() {
+        let toggle = ui.add_enabled(!truth.explode.is_empty(), egui::Button::new(label));
+        let auto = ui.button("Auto explode");
+        #[cfg(target_arch = "wasm32")]
+        {
+            crate::web::show_control("Explode or collapse", toggle.rect);
+            crate::web::show_control("Auto explode", auto.rect);
+        }
+        if toggle.clicked() {
             actions.push(ConfigureAction::Explode(!exploded));
         }
-        if ui.button("Auto explode").clicked() {
+        if auto.clicked() {
             actions.push(ConfigureAction::AutoExplode);
         }
     });

@@ -25,6 +25,27 @@ pub(crate) fn run(state: &mut AppState, name: &str, input: &Value) -> Option<Res
             let report = super::pack(state, request, drawings)?;
             Ok(json!({ "packed": report, "assembly": summary(state) }))
         })(),
+        "assembly_make_drawing" => (|| {
+            let mut request = super::drawing::AssemblyDrawingRequest::default();
+            if let Some(t) = input["template"].as_str() {
+                request.template = t.to_owned();
+            }
+            request.exploded = input["exploded"].as_bool();
+            if let Some(list) = input["views"].as_array() {
+                let views = list
+                    .iter()
+                    .map(|v| {
+                        let name = v.as_str().unwrap_or_default();
+                        soliddraft_kernel_api::drawing::StandardView::from_name(name)
+                            .ok_or_else(|| format!("{name} is not a standard view"))
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                request.views = Some(views);
+            }
+            let said = super::drawing::make_drawing(state, &request)?;
+            let d = state.drawing.session.as_ref().ok_or("no drawing")?;
+            Ok(json!({ "done": said, "drawing": &d.doc.drawing }))
+        })(),
         "assembly_export_urdf" | "assembly_export_usd" => (|| {
             let path = PathBuf::from(text(input, "path")?);
             let want = if name == "assembly_export_urdf" { "urdf" } else { "usda" };

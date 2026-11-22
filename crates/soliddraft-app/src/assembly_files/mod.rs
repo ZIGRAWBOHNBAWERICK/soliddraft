@@ -3,6 +3,7 @@
 //! with joints. What each writes is `soliddraft-assembly`'s and `soliddraft-scene`'s (see
 //! `docs/assemblies.md`); this module holds the commands and their dialogs.
 
+pub mod drawing;
 pub(crate) mod registry;
 pub(crate) mod tools;
 
@@ -18,6 +19,8 @@ pub enum FilesAction {
     PackAndGo,
     /// Asks for a file and exports to it: `urdf` or `usda`.
     Export(&'static str),
+    /// Makes a drawing of the assembly with a BOM and balloons.
+    MakeDrawing,
 }
 
 /// Why Pack and Go is not offered in the browser.
@@ -68,6 +71,10 @@ pub(crate) fn export(
 
 pub fn apply(state: &mut AppState, action: FilesAction) {
     match action {
+        FilesAction::MakeDrawing => match drawing::make_drawing(state, &drawing::AssemblyDrawingRequest::default()) {
+            Ok(said) => state.note(said, NoteKind::Ok),
+            Err(e) => state.note(e, NoteKind::Error),
+        },
         FilesAction::PackAndGo => {
             if cfg!(target_arch = "wasm32") {
                 return state.note(BROWSER_PACK, NoteKind::Info);

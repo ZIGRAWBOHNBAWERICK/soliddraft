@@ -18,6 +18,20 @@ fn pack_params() -> Vec<(&'static str, Value)> {
     ]
 }
 
+fn drawing_params() -> Vec<(&'static str, Value)> {
+    vec![
+        ("template", optional(string("A drawing template id, such as iso-a3; iso-a3 when left out"))),
+        (
+            "views",
+            optional(soliddraft_assistant::tools::schema::array(
+                string("isometric, front, top, right, left, back or bottom"),
+                "The views, side by side, the first ballooned; the isometric alone when exploded, else isometric and front",
+            )),
+        ),
+        ("exploded", optional(boolean("Show the exploded view; whenever the assembly has one when left out"))),
+    ]
+}
+
 fn urdf_params() -> Vec<(&'static str, Value)> {
     vec![("path", string("The file to write, ending in .urdf; its meshes go in a folder beside it"))]
 }
@@ -33,6 +47,21 @@ const JOINTS: &str = "Every part is a link. A Hinge becomes a revolute joint (co
 pub(crate) fn commands() -> Vec<CommandSpec> {
     let row = |id, label, icon, doc| CommandSpec::new(id, label, icon, doc).assembly();
     vec![
+        row(
+            "assembly_make_drawing",
+            "Make drawing",
+            Icon::Cad("drawing"),
+            "Make a drawing of the assembly with a bill of materials and balloons",
+        )
+        .on(Tab::Assembly, "File", Size::Small)
+        .run(|_| AppAction::Assembly(AssemblyAction::Files(FilesAction::MakeDrawing)))
+        .agents(
+            Agents::Mcp,
+            "The assembly must be saved. Views come from the parts' display meshes with hidden lines removed across \
+             parts; the BOM lists parts with quantities; each row gets a balloon on the first view. The drawing \
+             opens; Rebuild brings it to the assembly later.",
+            drawing_params,
+        ),
         row(
             "assembly_pack_and_go",
             "Pack and Go",

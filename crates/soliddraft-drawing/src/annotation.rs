@@ -155,6 +155,14 @@ pub enum AnnotationKind {
     /// Ordinate, baseline or chain dimensions: several distances along one direction
     /// measured from the first anchor or from one anchor to the next.
     DimensionSet(DimensionSet),
+    /// A balloon on an assembly drawing: the BOM item number in a circle, with a leader
+    /// to its anchor on the occurrence it numbers.
+    Balloon {
+        /// The BOM item.
+        item: u32,
+        /// The occurrence the leader points at, by its path in the assembly.
+        occurrence: String,
+    },
 }
 
 /// Ordinate, baseline or chain dimensions as one annotation. Anchor 0 is the origin (for

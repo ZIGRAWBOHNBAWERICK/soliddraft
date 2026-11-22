@@ -16,7 +16,12 @@ pub(crate) fn summary(state: &mut AppState) -> Option<Value> {
         let table = s.doc.table();
         let def = s.doc.store().get(table.definition(row));
         let reference = s.doc.reference(table.definition(row));
-        let placement = table.local(row);
+        // The placement is the truth's; an exploded view moves only what is shown.
+        let step = table.step(row);
+        let placement = match step.member {
+            None => s.doc.assembly().component(step.component).map(|c| c.placement).unwrap_or(table.local(row)),
+            Some(_) => table.local(row),
+        };
         let bounds = table.bounds(row);
         let (status, now) = freshness(def);
         json!({

@@ -22,6 +22,7 @@
 
 pub mod annotate;
 mod annotation;
+pub mod assembly;
 mod command;
 pub mod derived;
 pub mod display;

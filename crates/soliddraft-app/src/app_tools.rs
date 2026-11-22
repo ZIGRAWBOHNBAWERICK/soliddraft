@@ -392,6 +392,14 @@ impl AppTools<'_> {
     /// Opens the drawing's part in place of the open part, as the app does after opening
     /// a drawing or repairing its reference. Says which part is open.
     fn open_model(&mut self) -> Result<String, String> {
+        if let Some(file) = drawing::model_to_open(self.state)?
+            && DocKind::of_path(&file) == Some(DocKind::Assembly)
+        {
+            crate::assembly::tools::open(self.state, file)?;
+            self.state.assembly.active = false;
+            self.state.drawing.active = true;
+            return Ok(self.state.assembly.session.as_ref().map(|a| a.doc.assembly().name.clone()).unwrap_or_default());
+        }
         if let Some(file) = drawing::model_to_open(self.state)? {
             let caller = Caller::Mcp { client: "drawing".into() };
             let out = self.part().call("open", json!({ "path": file }), &caller);
@@ -675,6 +683,16 @@ impl AppTools<'_> {
     /// views to its revision.
     fn rebuild(&mut self) -> Result<Value, String> {
         self.session()?;
+        if crate::assembly_files::drawing::drawing_is_of_assembly(self.state) {
+            let wanted = self.session()?.doc.drawing.model.id;
+            if self.state.assembly.session.as_ref().map(|a| a.doc.id()) != wanted {
+                let file = drawing::model_to_open(self.state)?
+                    .ok_or("the drawing's assembly was not found; drawing_repair_reference points it at the file")?;
+                crate::assembly::tools::open(self.state, file)?;
+            }
+            let said = drawing::update_views(self.state)?;
+            return Ok(self.drawing_said(said));
+        }
         if !drawing::part_is_model(self.state) {
             if drawing::model_to_open(self.state)?.is_none() {
                 return Err(

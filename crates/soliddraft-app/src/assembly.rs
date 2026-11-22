@@ -775,7 +775,13 @@ pub fn apply(state: &mut AppState, dock: &mut DockState<Tab>, action: AssemblyAc
         AssemblyAction::Form(action) => crate::subassembly::apply(state, action),
         AssemblyAction::Interference(action) => crate::interference::apply(state, action),
         AssemblyAction::Configure(action) => crate::configurations::apply(state, action),
-        AssemblyAction::Files(action) => crate::assembly_files::apply(state, action),
+        AssemblyAction::Files(action) => {
+            let drawing = action == crate::assembly_files::FilesAction::MakeDrawing;
+            crate::assembly_files::apply(state, action);
+            if drawing && state.drawing.active {
+                crate::drawing::show_drawing_tab(dock);
+            }
+        }
         AssemblyAction::Open(path) => {
             state.note(format!("Opening {}…", path.display()), NoteKind::Info);
             let opening = AssemblyDocument::open_in_background(&path, options(state));

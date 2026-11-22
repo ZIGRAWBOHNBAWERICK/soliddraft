@@ -140,7 +140,17 @@ pub fn write(path: &Path, drawing: &Drawing, meta: &FileMeta) -> Result<(), Draw
 /// writes a drawing beside its model's copy. Its id, views and annotations are kept.
 pub fn repoint(bytes: &[u8], model: &soliddraft_document::DocRef) -> Result<Vec<u8>, DrawingError> {
     let (mut drawing, meta) = from_bytes(bytes)?;
+    // Views made from the pinned revision are made from the copy's: moving references
+    // changes an assembly's revision, not what it shows.
+    let current = drawing.views_match_pin();
     drawing.model = model.clone();
+    if current {
+        for v in drawing.sheets.iter_mut().flat_map(|s| s.views.iter_mut()) {
+            if !v.excluded_from_update {
+                v.geometry.source_digest = model.pinned.as_str().to_owned();
+            }
+        }
+    }
     to_bytes(&drawing, &meta)
 }
 

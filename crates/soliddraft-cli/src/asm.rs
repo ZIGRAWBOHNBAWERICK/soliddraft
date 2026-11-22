@@ -39,6 +39,7 @@ usage: soliddraft asm new <file.dwasm> [--name <name>]
        soliddraft asm config <file.dwasm> (list [--json] | add <name> | activate <name> | rename <name> <new> | delete <name>)
        soliddraft asm explode <file.dwasm> (list [--json] | add <path>... --direction x,y,z --distance <mm>
                  | edit <step> [--direction x,y,z] [--distance <mm>] | delete <step> | auto [--distance <mm>])
+       soliddraft asm drawing <file.dwasm> <out.dwdrw> [--template <id>] [--exploded] [--pdf <out.pdf>] [--svg <out.svg>] [--json]
        soliddraft asm export <file.dwasm> <out.urdf | out.usda> [--json]
        soliddraft asm pack <file.dwasm> <folder> [--prefix <text>] [--suffix <text>] [--flatten] [--drawings] [--json]
        soliddraft asm rebuild <file.dwasm> [--search <folder>]... [--json]
@@ -99,6 +100,13 @@ explode     Lists, adds, changes or deletes the steps of the active
             away from the middle (50 mm by default). An exploded view is for
             display and drawings; it never changes a placement. list --json
             also gives where each moved occurrence shows exploded.
+
+drawing     Writes a drawing of the assembly: an isometric and a front view (or,
+            with --exploded, the exploded isometric) with hidden lines removed
+            across parts, a bill of materials listing every part with its
+            quantity, and a balloon per row. When the drawing exists and shows
+            this assembly it is brought up to date instead: views, BOM and
+            balloons move with the assembly. --pdf and --svg export the sheet.
 
 export      Writes the assembly for robotics and simulation tools: URDF (with
             its meshes as STL in a folder beside it) or OpenUSD text (.usda)
@@ -258,6 +266,7 @@ pub(crate) fn run(args: &[String]) -> ExitCode {
         }),
         "config" => edit_if(&file, &a, |doc| crate::asm_config::config(doc, rest, &a)),
         "explode" => edit_if(&file, &a, |doc| crate::asm_config::explode(doc, rest, &a)),
+        "drawing" => edit_if(&file, &a, |doc| crate::asm_files::drawing(doc, rest, &a)),
         "export" => edit_if(&file, &a, |doc| crate::asm_files::export(doc, rest, &a)),
         "pack" => crate::asm_files::pack(&file, rest, &a, search_folders(&a.search)),
         "rebuild" => rebuild(&file, &a),

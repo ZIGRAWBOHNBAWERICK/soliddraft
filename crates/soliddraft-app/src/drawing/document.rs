@@ -324,6 +324,7 @@ impl DrawingDoc {
             label: None,
             crop: None,
             broken_out: Vec::new(),
+            exploded: false,
         };
         let mut with_view = s.clone();
         with_view.views.push(view.clone());

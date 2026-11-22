@@ -1,0 +1,392 @@
+{
+  "format": "soliddraft-scenario/1",
+  "name": "assembly-pack-export",
+  "folders": [
+    "work"
+  ],
+  "max_work": 20000000,
+  "steps": [
+    {
+      "tool": "sketch",
+      "arguments": {
+        "plane": "top",
+        "shapes": [
+          {
+            "shape": "rectangle",
+            "center": [
+              0,
+              0,
+              0
+            ],
+            "width": 40,
+            "height": 30
+          }
+        ]
+      },
+      "checks": []
+    },
+    {
+      "tool": "extrude",
+      "arguments": {
+        "sketch": "Sketch1",
+        "depth": 10,
+        "flip": false
+      },
+      "checks": []
+    },
+    {
+      "tool": "sketch",
+      "arguments": {
+        "plane": "top",
+        "shapes": [
+          {
+            "shape": "circle",
+            "center": [
+              10,
+              5,
+              0
+            ],
+            "diameter": 8
+          }
+        ]
+      },
+      "checks": []
+    },
+    {
+      "tool": "cut",
+      "arguments": {
+        "sketch": "Sketch2",
+        "through_all": true,
+        "depth": 10,
+        "flip": true
+      },
+      "checks": []
+    },
+    {
+      "tool": "save",
+      "arguments": {
+        "path": "{bundle}/work/a.dwprt"
+      },
+      "checks": [],
+      "files": [
+        "{bundle}/work/a.dwprt"
+      ]
+    },
+    {
+      "tool": "make_assembly",
+      "arguments": {},
+      "checks": []
+    },
+    {
+      "tool": "assembly_save",
+      "arguments": {
+        "path": "{bundle}/work/rig.dwasm"
+      },
+      "checks": [],
+      "files": [
+        "{bundle}/work/rig.dwasm"
+      ]
+    },
+    {
+      "tool": "new_part",
+      "arguments": {},
+      "checks": []
+    },
+    {
+      "tool": "sketch",
+      "arguments": {
+        "plane": "top",
+        "shapes": [
+          {
+            "shape": "circle",
+            "center": [
+              0,
+              0,
+              0
+            ],
+            "diameter": 8
+          }
+        ]
+      },
+      "checks": []
+    },
+    {
+      "tool": "extrude",
+      "arguments": {
+        "sketch": "Sketch1",
+        "depth": 30,
+        "flip": false
+      },
+      "checks": []
+    },
+    {
+      "tool": "save",
+      "arguments": {
+        "path": "{bundle}/work/shaft.dwprt"
+      },
+      "checks": [],
+      "files": [
+        "{bundle}/work/shaft.dwprt"
+      ]
+    },
+    {
+      "tool": "show_assembly",
+      "arguments": {},
+      "checks": []
+    },
+    {
+      "tool": "insert_component",
+      "arguments": {
+        "paths": [
+          "{bundle}/work/shaft.dwprt"
+        ],
+        "placement": {
+          "translation": [
+            10,
+            5,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0,
+            1
+          ]
+        }
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/components/1/path",
+          "equals": "4"
+        }
+      ]
+    },
+    {
+      "tool": "assembly_mate_origin",
+      "arguments": {
+        "name": "O",
+        "component": 2,
+        "align_axes": true
+      },
+      "checks": []
+    },
+    {
+      "tool": "assembly_mate_hinge",
+      "arguments": {
+        "name": "H",
+        "axes": [
+          {
+            "component": 2,
+            "feature": "Cut-Extrude1",
+            "generator": "side"
+          },
+          {
+            "component": 4,
+            "feature": "Boss-Extrude1",
+            "generator": "side"
+          }
+        ],
+        "planes": [
+          {
+            "component": 2,
+            "feature": "Boss-Extrude1",
+            "generator": "start_cap"
+          },
+          {
+            "component": 4,
+            "feature": "Boss-Extrude1",
+            "generator": "start_cap"
+          }
+        ],
+        "angle_limits": [
+          -30,
+          60
+        ],
+        "alignment": "aligned",
+        "plane_alignment": "aligned"
+      },
+      "checks": []
+    },
+    {
+      "tool": "assembly_save",
+      "arguments": {
+        "path": "{bundle}/work/rig.dwasm"
+      },
+      "checks": [],
+      "files": [
+        "{bundle}/work/rig.dwasm"
+      ]
+    },
+    {
+      "tool": "assembly_make_drawing",
+      "arguments": {
+        "views": [
+          "isometric"
+        ]
+      },
+      "checks": []
+    },
+    {
+      "tool": "drawing_save",
+      "arguments": {
+        "path": "{bundle}/work/rig.dwdrw"
+      },
+      "checks": [],
+      "files": [
+        "{bundle}/work/rig.dwdrw"
+      ]
+    },
+    {
+      "tool": "show_assembly",
+      "arguments": {},
+      "checks": []
+    },
+    {
+      "tool": "assembly_export_urdf",
+      "arguments": {
+        "path": "{bundle}/work/robot/rig.urdf"
+      },
+      "checks": [
+        {
+          "pointer": "/result/exported/links",
+          "length": 3
+        },
+        {
+          "pointer": "/result/exported/joints",
+          "length": 2
+        },
+        {
+          "pointer": "/result/exported/joints/1/kind",
+          "equals": "revolute"
+        },
+        {
+          "pointer": "/result/exported/joints/1/limits/0",
+          "equals": -30.0
+        },
+        {
+          "pointer": "/result/exported/joints/1/limits/1",
+          "equals": 60.0
+        },
+        {
+          "pointer": "/result/exported/joints/1/mates/0",
+          "equals": "H"
+        }
+      ],
+      "files": [
+        "{bundle}/work/robot/rig.urdf"
+      ]
+    },
+    {
+      "tool": "assembly_export_usd",
+      "arguments": {
+        "path": "{bundle}/work/robot/rig.usda"
+      },
+      "checks": [
+        {
+          "pointer": "/result/exported/joints/1/kind",
+          "equals": "revolute"
+        }
+      ],
+      "files": [
+        "{bundle}/work/robot/rig.usda"
+      ]
+    },
+    {
+      "tool": "assembly_export_urdf",
+      "arguments": {
+        "path": "{bundle}/work/robot/rig.step"
+      },
+      "checks": [],
+      "refused": "the path must end in .urdf"
+    },
+    {
+      "tool": "assembly_pack_and_go",
+      "arguments": {
+        "folder": "{bundle}/work/packed",
+        "prefix": "P-",
+        "drawings": true
+      },
+      "checks": [
+        {
+          "pointer": "/result/packed/files",
+          "length": 4
+        },
+        {
+          "pointer": "/result/packed/files/3/kind",
+          "equals": "assembly"
+        }
+      ],
+      "files": [
+        "{bundle}/work/packed/P-rig.dwasm",
+        "{bundle}/work/packed/P-a.dwprt",
+        "{bundle}/work/packed/P-shaft.dwprt",
+        "{bundle}/work/packed/P-rig.dwdrw"
+      ]
+    },
+    {
+      "tool": "assembly_pack_and_go",
+      "arguments": {
+        "folder": "{bundle}/work/packed"
+      },
+      "checks": [],
+      "refused": "is not empty"
+    },
+    {
+      "tool": "open",
+      "arguments": {
+        "path": "{bundle}/work/packed/P-rig.dwasm"
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/components/0/status",
+          "equals": "current"
+        },
+        {
+          "pointer": "/summary/assembly/components/1/status",
+          "equals": "current"
+        },
+        {
+          "pointer": "/summary/assembly/solver/remaining_dof",
+          "equals": 1
+        }
+      ]
+    },
+    {
+      "tool": "insert_component",
+      "arguments": {
+        "paths": [
+          "{bundle}/work/packed/P-shaft.dwprt"
+        ],
+        "placement": {
+          "translation": [
+            -10,
+            5,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0,
+            1
+          ]
+        }
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/components",
+          "length": 3
+        }
+      ]
+    },
+    {
+      "tool": "assembly_save",
+      "arguments": {
+        "path": "{bundle}/work/packed/P-rig.dwasm"
+      },
+      "checks": [],
+      "files": [
+        "{bundle}/work/packed/P-rig.dwasm"
+      ]
+    }
+  ]
+}

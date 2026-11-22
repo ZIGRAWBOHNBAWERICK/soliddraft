@@ -1,0 +1,407 @@
+{
+  "format": "soliddraft-scenario/1",
+  "name": "assembly-drawing-bom",
+  "folders": [
+    "work"
+  ],
+  "max_work": 20000000,
+  "steps": [
+    {
+      "tool": "sketch",
+      "arguments": {
+        "plane": "top",
+        "shapes": [
+          {
+            "shape": "rectangle",
+            "center": [
+              0,
+              0,
+              0
+            ],
+            "width": 40,
+            "height": 30
+          }
+        ]
+      },
+      "checks": []
+    },
+    {
+      "tool": "extrude",
+      "arguments": {
+        "sketch": "Sketch1",
+        "depth": 14,
+        "flip": false
+      },
+      "checks": []
+    },
+    {
+      "tool": "save",
+      "arguments": {
+        "path": "{bundle}/work/a.dwprt"
+      },
+      "checks": [],
+      "files": [
+        "{bundle}/work/a.dwprt"
+      ]
+    },
+    {
+      "tool": "make_assembly",
+      "arguments": {},
+      "checks": []
+    },
+    {
+      "tool": "assembly_save",
+      "arguments": {
+        "path": "{bundle}/work/rig.dwasm"
+      },
+      "checks": [],
+      "files": [
+        "{bundle}/work/rig.dwasm"
+      ]
+    },
+    {
+      "tool": "new_part",
+      "arguments": {},
+      "checks": []
+    },
+    {
+      "tool": "sketch",
+      "arguments": {
+        "plane": "top",
+        "shapes": [
+          {
+            "shape": "rectangle",
+            "center": [
+              0,
+              0,
+              0
+            ],
+            "width": 20,
+            "height": 10
+          }
+        ]
+      },
+      "checks": []
+    },
+    {
+      "tool": "extrude",
+      "arguments": {
+        "sketch": "Sketch1",
+        "depth": 6,
+        "flip": false
+      },
+      "checks": []
+    },
+    {
+      "tool": "save",
+      "arguments": {
+        "path": "{bundle}/work/b.dwprt"
+      },
+      "checks": [],
+      "files": [
+        "{bundle}/work/b.dwprt"
+      ]
+    },
+    {
+      "tool": "show_assembly",
+      "arguments": {},
+      "checks": []
+    },
+    {
+      "tool": "insert_component",
+      "arguments": {
+        "paths": [
+          "{bundle}/work/b.dwprt"
+        ],
+        "placement": {
+          "translation": [
+            10,
+            10,
+            14
+          ],
+          "rotation": [
+            0,
+            0,
+            0,
+            1
+          ]
+        }
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/components/1/path",
+          "equals": "4"
+        }
+      ]
+    },
+    {
+      "tool": "insert_component",
+      "arguments": {
+        "paths": [
+          "{bundle}/work/b.dwprt"
+        ],
+        "placement": {
+          "translation": [
+            -10,
+            -10,
+            14
+          ],
+          "rotation": [
+            0,
+            0,
+            0,
+            1
+          ]
+        }
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/components/2/path",
+          "equals": "5"
+        }
+      ]
+    },
+    {
+      "tool": "assembly_make_drawing",
+      "arguments": {
+        "views": [
+          "isometric"
+        ]
+      },
+      "checks": [],
+      "refused": "save the assembly first"
+    },
+    {
+      "tool": "assembly_save",
+      "arguments": {
+        "path": "{bundle}/work/rig.dwasm"
+      },
+      "checks": [],
+      "files": [
+        "{bundle}/work/rig.dwasm"
+      ]
+    },
+    {
+      "tool": "assembly_make_drawing",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/result/drawing/sheets/0/views",
+          "length": 2
+        },
+        {
+          "pointer": "/result/drawing/sheets/0/tables/0/bom",
+          "length": 2
+        },
+        {
+          "pointer": "/result/drawing/sheets/0/tables/0/bom/0/quantity",
+          "equals": 1
+        },
+        {
+          "pointer": "/result/drawing/sheets/0/tables/0/bom/1/quantity",
+          "equals": 2
+        },
+        {
+          "pointer": "/result/drawing/sheets/0/tables/0/bom/1/name",
+          "equals": "b"
+        },
+        {
+          "pointer": "/result/drawing/sheets/0/annotations",
+          "length": 2
+        },
+        {
+          "pointer": "/result/drawing/sheets/0/annotations/0/body/item",
+          "equals": 1
+        },
+        {
+          "pointer": "/result/drawing/sheets/0/annotations/1/body/item",
+          "equals": 2
+        },
+        {
+          "pointer": "/result/drawing/model/kind",
+          "equals": "assembly"
+        }
+      ]
+    },
+    {
+      "tool": "drawing_save",
+      "arguments": {
+        "path": "{bundle}/work/rig.dwdrw"
+      },
+      "checks": [],
+      "files": [
+        "{bundle}/work/rig.dwdrw"
+      ]
+    },
+    {
+      "tool": "drawing_export_pdf",
+      "arguments": {
+        "path": "{bundle}/work/rig.pdf"
+      },
+      "checks": [],
+      "files": [
+        "{bundle}/work/rig.pdf"
+      ]
+    },
+    {
+      "tool": "show_assembly",
+      "arguments": {},
+      "checks": []
+    },
+    {
+      "tool": "new_part",
+      "arguments": {},
+      "checks": []
+    },
+    {
+      "tool": "sketch",
+      "arguments": {
+        "plane": "top",
+        "shapes": [
+          {
+            "shape": "rectangle",
+            "center": [
+              0,
+              0,
+              0
+            ],
+            "width": 50,
+            "height": 40
+          }
+        ]
+      },
+      "checks": []
+    },
+    {
+      "tool": "extrude",
+      "arguments": {
+        "sketch": "Sketch1",
+        "depth": 3,
+        "flip": false
+      },
+      "checks": []
+    },
+    {
+      "tool": "save",
+      "arguments": {
+        "path": "{bundle}/work/c.dwprt"
+      },
+      "checks": [],
+      "files": [
+        "{bundle}/work/c.dwprt"
+      ]
+    },
+    {
+      "tool": "show_assembly",
+      "arguments": {},
+      "checks": []
+    },
+    {
+      "tool": "insert_component",
+      "arguments": {
+        "paths": [
+          "{bundle}/work/c.dwprt"
+        ],
+        "placement": {
+          "translation": [
+            0,
+            0,
+            30
+          ],
+          "rotation": [
+            0,
+            0,
+            0,
+            1
+          ]
+        }
+      },
+      "checks": []
+    },
+    {
+      "tool": "drawing_rebuild",
+      "arguments": {},
+      "checks": [],
+      "refused": "save the assembly first"
+    },
+    {
+      "tool": "assembly_save",
+      "arguments": {
+        "path": "{bundle}/work/rig.dwasm"
+      },
+      "checks": [],
+      "files": [
+        "{bundle}/work/rig.dwasm"
+      ]
+    },
+    {
+      "tool": "drawing_rebuild",
+      "arguments": {},
+      "checks": []
+    },
+    {
+      "tool": "drawing_save",
+      "arguments": {
+        "path": "{bundle}/work/rig.dwdrw"
+      },
+      "checks": [
+        {
+          "pointer": "/inspect/drawing/bom",
+          "length": 3
+        },
+        {
+          "pointer": "/inspect/drawing/balloons",
+          "equals": 3
+        },
+        {
+          "pointer": "/inspect/drawing/bom/2/name",
+          "equals": "c"
+        }
+      ],
+      "files": [
+        "{bundle}/work/rig.dwdrw"
+      ],
+      "inspect": {
+        "drawing": [
+          "asm",
+          "drawing",
+          "{bundle}/work/rig.dwasm",
+          "{bundle}/work/rig.dwdrw",
+          "--json"
+        ]
+      }
+    },
+    {
+      "tool": "open",
+      "arguments": {
+        "path": "{bundle}/work/rig.dwdrw"
+      },
+      "checks": [
+        {
+          "pointer": "/summary/drawing/part",
+          "equals": "current"
+        },
+        {
+          "pointer": "/summary/drawing/views_match_pin",
+          "equals": true
+        },
+        {
+          "pointer": "/summary/drawing/sheets/0/annotations",
+          "length": 3
+        },
+        {
+          "pointer": "/summary/drawing/sheets/0/annotations/2/kind",
+          "equals": "balloon"
+        },
+        {
+          "pointer": "/summary/drawing/sheets/0/annotations/2/state",
+          "equals": "ok"
+        },
+        {
+          "pointer": "/summary/drawing/sheets/0/title_block/document_type",
+          "equals": "Assembly drawing"
+        }
+      ]
+    }
+  ]
+}

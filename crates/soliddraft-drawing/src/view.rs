@@ -41,6 +41,9 @@ pub struct View {
     /// depth and the cut is hatched.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub broken_out: Vec<BrokenOut>,
+    /// For a view of an assembly: it shows the assembly's exploded view.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub exploded: bool,
 }
 
 impl View {

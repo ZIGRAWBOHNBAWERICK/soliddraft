@@ -379,6 +379,10 @@ fn polygon_face_loops_keep_holes_and_coedge_order() {
     for boundary in std::iter::once(&section.regions[0].outer).chain(&section.regions[0].holes) {
         for i in 0..boundary.len() {
             assert!(boundary[i].curve.end().distance(boundary[(i + 1) % boundary.len()].curve.start()) < 1e-8);
+            let soliddraft_kernel_api::drawing::CurveSource::Section(face) = boundary[i].source else {
+                panic!("the cap boundary must identify the original wall");
+            };
+            assert!(k.topology(body).unwrap().face(face).unwrap().normal.is_none());
         }
     }
     for id in [body, outer, inner] {

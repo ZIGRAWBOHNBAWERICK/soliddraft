@@ -53,6 +53,30 @@ fn run(stack: &mut UndoStack, d: &mut Drawing, part: &Part, c: Command) {
 }
 
 #[test]
+fn rebuild_commits_successful_views_alongside_base_and_projected_refusals() {
+    for projected in [false, true] {
+        let mut k = BoxKernel::new();
+        let mut d = drawing(&box_part(&k, "block", Vec3::new(40.0, 30.0, 10.0)));
+        let view = d.sheets[0]
+            .views
+            .iter()
+            .find(|v| if projected { matches!(v.kind, ViewKind::Projected { .. }) } else { v.id == FRONT })
+            .unwrap();
+        let id = view.id;
+        let before = view.geometry.clone();
+        k.refuse_direction = Some(project::spec_in(&d, 0, view).unwrap().direction);
+        let changed = box_part(&k, "block", Vec3::new(60.0, 30.0, 10.0));
+        let report = UndoStack::new().run(&mut d, &Command::UpdateFromModel, Some(&changed)).unwrap().unwrap();
+        assert!(report.views_updated > 0);
+        assert!(report.dangling_views.iter().any(|f| f.view == id && f.cause.contains("test direction refused")));
+        assert_eq!(d.model.pinned, changed.digest);
+        assert_eq!(d.view(id).unwrap().geometry, before);
+        assert!(!d.views_match_pin());
+        assert!(export::check_sheet(&d, &d.sheets[0]).is_err());
+    }
+}
+
+#[test]
 fn letters_skip_i_o_and_q() {
     assert_eq!(next_letter("A"), "B");
     assert_eq!(next_letter("H"), "J");

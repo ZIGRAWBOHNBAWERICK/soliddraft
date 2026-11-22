@@ -101,7 +101,12 @@ pub fn update_from_model(drawing: &mut Drawing, part: &Part) -> Result<UpdateRep
         projections: Vec::new(),
     };
     let mut contexts = Contexts::new();
-    let ids: Vec<ViewId> = drawing.sheets.iter().flat_map(|s| &s.views).map(|v| v.id).collect();
+    let mut ids: Vec<ViewId> = drawing.sheets.iter().flat_map(|s| &s.views).map(|v| v.id).collect();
+    ids.sort_by_key(|&id| {
+        std::iter::successors(drawing.view(id), |view| view.parent().and_then(|parent| drawing.view(parent)))
+            .take(17)
+            .count()
+    });
     let mut failed: Vec<ViewId> = Vec::new();
     for id in ids {
         let view = drawing.view(id).expect("listed");
@@ -117,9 +122,6 @@ pub fn update_from_model(drawing: &mut Drawing, part: &Part) -> Result<UpdateRep
             continue;
         }
         if let Err(e) = project::compute_in(drawing, part, &index, id, &mut contexts) {
-            if !may_dangle(view) {
-                return Err(e);
-            }
             failed.push(id);
             report.dangling_views.push(DanglingView { view: id, cause: view_cause(&e) });
             continue;
@@ -170,14 +172,6 @@ pub fn update_from_model(drawing: &mut Drawing, part: &Part) -> Result<UpdateRep
     collect(drawing, &mut report);
     drawing.accept_source(part);
     Ok(report)
-}
-
-/// True for views made from something that can go away: derived views, and views with
-/// a crop or broken-out section.
-fn may_dangle(view: &crate::View) -> bool {
-    view.parent().is_some_and(|_| !matches!(view.kind, ViewKind::Projected { .. }))
-        || view.crop.is_some()
-        || !view.broken_out.is_empty()
 }
 
 /// Why a view could not be made, in words for the Needs attention panel.

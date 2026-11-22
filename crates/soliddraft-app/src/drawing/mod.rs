@@ -754,7 +754,7 @@ impl DrawingSession {
     }
 
     pub fn is_up_to_date(&self) -> bool {
-        !self.doc.is_stale() && self.doc.refused_views().next().is_none()
+        !self.doc.is_stale() && self.doc.drawing.views_match_pin() && self.doc.refused_views().next().is_none()
     }
 }
 
@@ -1251,12 +1251,14 @@ pub(crate) fn put_opened(state: &mut AppState, doc: DrawingDoc) -> String {
     state.drawing.repair = None;
     state.drawing.active = true;
     reference::refresh(state);
-    let words = match state.drawing.session.as_ref().map(DrawingSession::link_state) {
-        Some(LinkState::Missing) => "the part was not found",
-        Some(LinkState::Newer { .. }) => "a newer version of the part is available",
-        Some(LinkState::Current) => "up to date with the part",
-        Some(LinkState::Unverified) => "the source is not a SolidDraft document",
-        Some(LinkState::Unknown) | None => "the part is not resolved",
+    let opened = state.drawing.session.as_ref().expect("drawing just opened");
+    let words = match opened.link_state() {
+        LinkState::Missing => "the part was not found",
+        LinkState::Newer { .. } => "a newer version of the part is available",
+        LinkState::Current if !opened.is_up_to_date() => "the drawing needs a rebuild",
+        LinkState::Current => "up to date with the part",
+        LinkState::Unverified => "the source is not a SolidDraft document",
+        LinkState::Unknown => "the part is not resolved",
     };
     format!("{title} · {views} view{} · {words}", if views == 1 { "" } else { "s" })
 }
@@ -1751,7 +1753,7 @@ pub(crate) fn add_centre_marks(s: &mut DrawingSession, views: &[ViewId]) -> usiz
 /// is older than its part and so wants a Rebuild now.
 pub(crate) fn set_automatic_update(s: &mut DrawingSession, on: bool) -> Result<bool, String> {
     s.doc.apply(Command::SetAutomaticUpdate { on }, None)?;
-    Ok(on && s.doc.is_stale())
+    Ok(on && !s.is_up_to_date())
 }
 
 /// Adds a sheet after the last one, from the first sheet's template, and shows it.
@@ -1954,6 +1956,8 @@ pub fn status(state: &AppState) -> Option<Status> {
         (format!("{part} not found · repair the reference"), theme::error())
     } else if s.doc.is_stale() {
         (format!("Newer version of {part} available · showing rev {rev} (Ctrl+B rebuilds)"), theme::warn())
+    } else if !s.is_up_to_date() {
+        ("The drawing needs a rebuild".to_owned(), theme::warn())
     } else if dangling > 0 || changed > 0 {
         let mut parts = Vec::new();
         if dangling > 0 {

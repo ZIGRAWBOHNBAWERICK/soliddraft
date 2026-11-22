@@ -29,6 +29,7 @@ pub struct BoxKernel {
     bodies: Mutex<HashMap<u64, BoxBody>>,
     next: Mutex<u64>,
     pub detail_strokes: bool,
+    pub refuse_direction: Option<Vec3>,
 }
 
 /// The faces of a box: outward normal, and in-plane axes u and v with u x v = normal.
@@ -43,7 +44,7 @@ const FACES: [(Vec3, Vec3, Vec3); 6] = [
 
 impl BoxKernel {
     pub fn new() -> BoxKernel {
-        BoxKernel { bodies: Mutex::new(HashMap::new()), next: Mutex::new(1), detail_strokes: false }
+        BoxKernel { next: Mutex::new(1), ..Self::default() }
     }
 
     /// A box from `min` to `max` made by the operation tagged `tag`.
@@ -136,6 +137,9 @@ impl Kernel for BoxKernel {
     }
 
     fn view_curves(&self, body: BodyId, spec: &ViewSpec) -> KernelResult<ViewCurves> {
+        if self.refuse_direction.is_some_and(|direction| direction.distance(spec.direction) < 1e-9) {
+            return Err(KernelError::InvalidInput("test direction refused".into()));
+        }
         if !self.detail_strokes {
             return Err(KernelError::Unsupported("drawing view".into()));
         }

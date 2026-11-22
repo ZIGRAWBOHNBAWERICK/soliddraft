@@ -129,6 +129,7 @@ impl DrawingSession {
             LinkState::Missing => Some(("Part not found".to_owned(), theme::error())),
             LinkState::Newer { .. } => Some(("Newer version available".to_owned(), theme::warn())),
             _ if self.doc.is_stale() => Some(("Newer version available".to_owned(), theme::warn())),
+            _ if !self.is_up_to_date() => Some(("Rebuild needed".to_owned(), theme::warn())),
             _ => None,
         }
     }
@@ -477,6 +478,13 @@ pub fn bar(ui: &mut egui::Ui, s: &DrawingSession, rect: Rect, push: &mut impl Fn
         _ if s.doc.is_stale() => (
             format!("Newer version of {part} available"),
             format!("The sheet shows rev {pinned}; the open part moved on."),
+            theme::warn(),
+            DrawingAction::Rebuild,
+            "Rebuild",
+        ),
+        _ if !s.is_up_to_date() => (
+            "The drawing needs a rebuild".to_owned(),
+            format!("Some saved views could not be updated to rev {pinned}."),
             theme::warn(),
             DrawingAction::Rebuild,
             "Rebuild",

@@ -928,7 +928,7 @@ fn sheet_panel(ui: &mut egui::Ui, s: &mut DrawingSession, actions: &mut Vec<Draw
             if ui.checkbox(&mut on, "Rebuild after every change of the open part").changed() {
                 actions.push(DrawingAction::ToggleAutomaticUpdate);
             }
-            if s.doc.is_stale() && ui.button("Rebuild now").clicked() {
+            if !s.is_up_to_date() && ui.button("Rebuild now").clicked() {
                 actions.push(DrawingAction::Rebuild);
             }
             section_gap(ui);

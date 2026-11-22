@@ -249,13 +249,19 @@ fn section_of_cut<K: Kernel + ?Sized>(
     let edge_by_mid: Vec<(EdgeId, Vec3)> =
         topology.edges.iter().filter(|e| on_cap(e.id)).map(|e| (e.id, e.midpoint)).collect();
     let tag = |mut c: ViewCurve| {
-        let mid = c.curve.point_at(0.5);
-        let edge = edge_by_mid
-            .iter()
-            .map(|(id, m)| (*id, m.distance(mid)))
-            .filter(|(_, d)| *d <= 1e-4 * size)
-            .min_by(|a, b| a.1.total_cmp(&b.1))
-            .map(|(id, _)| id);
+        let edge = match c.source {
+            CurveSource::Edge(edge) => Some(edge),
+            CurveSource::Unknown => {
+                let mid = c.curve.point_at(0.5);
+                edge_by_mid
+                    .iter()
+                    .map(|(id, m)| (*id, m.distance(mid)))
+                    .filter(|(_, d)| *d <= 1e-4 * size)
+                    .min_by(|a, b| a.1.total_cmp(&b.1))
+                    .map(|(id, _)| id)
+            }
+            _ => None,
+        };
         c.source = section(edge.and_then(cut_face));
         c
     };

@@ -269,14 +269,16 @@ pub(super) fn face_drawing_loops(solid: &Solid, body: BodyId, face: FaceId) -> K
         .map(|chain| {
             chain
                 .iter()
-                .map(|edge| ViewCurve {
-                    approximate: marked || edge.drawn.fit.is_some(),
-                    ..ViewCurve::new(curve3(&edge.drawn.curve), CurveSource::Unknown, true)
+                .map(|edge| {
+                    Ok(ViewCurve {
+                        approximate: marked || edge.drawn.fit.is_some(),
+                        ..ViewCurve::new(curve3(&edge.drawn.curve), CurveSource::Edge(edge_id(solid, edge.edge)?), true)
+                    })
                 })
-                .collect::<Vec<_>>()
+                .collect::<KernelResult<Vec<_>>>()
         })
-        .filter(|chain| !chain.is_empty())
-        .collect();
+        .collect::<KernelResult<_>>()?;
+    loops.retain(|chain| !chain.is_empty());
     // Catallax does not order loops outer-first. The largest planar loop encloses the holes.
     let area = |curves: &[ViewCurve]| soliddraft_kernel_api::drawing::section::loop_area_vector(curves).length();
     loops.sort_by(|a, b| area(b).total_cmp(&area(a)));

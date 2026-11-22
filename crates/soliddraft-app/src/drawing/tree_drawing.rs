@@ -163,6 +163,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
                     format!("Newer version available (rev {}): Rebuild brings the views to it", now.short()),
                 ),
                 _ if s.doc.is_stale() => (Dot::Warn, "The open part moved on: Rebuild brings the views to it".into()),
+                _ if !s.is_up_to_date() => (Dot::Warn, "Some views need a rebuild".into()),
                 LinkState::Current => (Dot::Ok, format!("Up to date · {}", s.found_words())),
                 LinkState::Unverified => (Dot::None, "Not a SolidDraft document; no revision to compare".into()),
                 LinkState::Unknown => (Dot::None, "Not resolved yet".into()),
@@ -184,7 +185,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
             if let Some(colour) = match &state {
                 LinkState::Missing => Some(theme::error()),
                 LinkState::Newer { .. } => Some(theme::warn()),
-                _ if s.doc.is_stale() => Some(theme::warn()),
+                _ if !s.is_up_to_date() => Some(theme::warn()),
                 _ => None,
             } {
                 let glyph = Rect::from_center_size(pos2(r.rect.right() - 34.0, r.rect.center().y), vec2(14.0, 14.0));

@@ -181,7 +181,7 @@ impl<'a> Evidence<'a> {
         };
         let curves = doc.kernel().view_curves(body, &spec)?;
         let frame = spec.frame().ok_or("invalid scenario view frame")?;
-        std::fs::write(dir.join("view.svg"), crate::view::svg(&curves, &[], &frame))?;
+        std::fs::write(dir.join("view.svg"), crate::view::svg(&curves, &[], &frame).0)?;
         let result = json!({
             "backend":doc.kernel().backend(),"method":"mesh","mesh":"unproved preview","live_document":true,
             "request":self.sequence,"revision":doc.revision(),

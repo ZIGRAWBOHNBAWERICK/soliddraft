@@ -75,6 +75,17 @@ fn rebuild_names_a_broken_out_cut_that_no_longer_reaches_the_part() {
     assert!(state.drawing.session.as_ref().unwrap().has_issues());
     let status = soliddraft_app::drawing::status(&state).unwrap();
     assert!(status.headline.0.contains(&name) && status.headline.0.contains(cause));
+
+    use soliddraft_app::drawing::{DrawingSession, document::DrawingDoc};
+    use soliddraft_drawing::file::{FileMeta, from_bytes, to_bytes};
+    let drawing = &state.drawing.session.as_ref().unwrap().doc.drawing;
+    let bytes = to_bytes(drawing, &FileMeta::new("Catallax", drawing.meta.units)).unwrap();
+    let (reopened, _) = from_bytes(&bytes).unwrap();
+    state.drawing.session = Some(DrawingSession::new(DrawingDoc::new(reopened)));
+    let session = state.drawing.session.as_ref().unwrap();
+    assert!(session.has_issues());
+    assert!(!session.is_up_to_date());
+    assert!(soliddraft_app::drawing::status(&state).unwrap().headline.0.contains("needs a rebuild"));
 }
 
 /// How many views Catallax drew as hidden-line views, in the calls `kernel` logged since
@@ -287,7 +298,6 @@ fn a_rod_cut_exports_the_saved_catallax_views() {
         assert!(!out.is_error, "{tool}: {}", out.content);
         let result: Value = serde_json::from_str(&out.content).unwrap();
         assert_eq!(result["views"], json!(views), "{tool}: {result}");
-        assert_eq!(result["redrawn_from_certified_mesh"], 0);
         assert_eq!(result["method"], "catallax");
         assert!(path.is_file());
     }

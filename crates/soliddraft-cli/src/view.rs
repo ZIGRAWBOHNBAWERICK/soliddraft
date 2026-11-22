@@ -14,7 +14,7 @@ use soliddraft_kernel_catallax::CatallaxKernel;
 
 pub(crate) const USAGE: &str = "\
 usage: soliddraft view <recipe.json | part.dwprt> [--dir <view>[,<view>...]] [--up x,y,z]
-                      [--seams] [--smooth] [--tolerance <mm>] [--mesh]
+                      [--seams] [--smooth]
                       [--section x,y,z] [--svg <out.svg>] [--json] [--curves]
 
 Replays a recipe, or rebuilds a part file, on the Catallax kernel and computes
@@ -27,8 +27,6 @@ comes from.
   --up         which way is up on the sheet (default z, or y for top and bottom)
   --seams      show seams
   --smooth     show edges between tangent faces
-  --tolerance  mesh preview only (unavailable in this command)
-  --mesh       mesh preview only (unavailable in this command)
   --section    cut the body by the plane through this point that faces the eye,
                remove the material in front of it and hatch the cut faces
   --svg        write the view to this SVG file; with several views, put {view} in
@@ -183,9 +181,12 @@ pub(crate) fn run(args: &[String]) -> ExitCode {
             }
         };
         let frame = spec.frame().expect("checked when parsing");
+        let mut svg_approximate = false;
         if let Some(path) = &o.svg {
             let path = path.replace("{view}", name);
-            if let Err(e) = std::fs::write(&path, svg(&curves, regions.as_deref().unwrap_or(&[]), &frame)) {
+            let (drawing, quality) = svg(&curves, regions.as_deref().unwrap_or(&[]), &frame);
+            svg_approximate = quality;
+            if let Err(e) = std::fs::write(&path, drawing) {
                 eprintln!("{path}: {e}");
                 ok = false;
             }
@@ -215,7 +216,7 @@ pub(crate) fn run(args: &[String]) -> ExitCode {
             println!("{}", serde_json::to_string(&summary).expect("summaries serialise"));
         } else {
             let cut = regions.as_ref().map(|r| format!(", {} cut regions", r.len())).unwrap_or_default();
-            let quality = if approximate { " approximate" } else { "" };
+            let quality = if approximate || svg_approximate { " approximate" } else { "" };
             println!(
                 "{source_name} view {name}: {visible} visible, {hidden} hidden{cut}, {method}{quality}, digest {}, {millis:.1} ms",
                 curves.digest()
@@ -259,19 +260,14 @@ const HIDDEN_STYLE: &str = r##"fill="none" stroke="#000" stroke-width="0.25" str
 /// The view as an SVG drawing at 1:1 in millimetres. Lines, and arcs whose plane faces
 /// the eye, are written exactly; other curves as polylines within 0.01 mm. Cut regions
 /// are hatched at 45 degrees, 3 mm apart.
-pub(crate) fn svg(curves: &ViewCurves, regions: &[CutRegion], frame: &ViewFrame) -> String {
+pub(crate) fn svg(curves: &ViewCurves, regions: &[CutRegion], frame: &ViewFrame) -> (String, bool) {
     let margin = 5.0;
     let [x0, y0, x1, y1] = curves.bbox_2d;
     let (w, h) = (x1 - x0 + 2.0 * margin, y1 - y0 + 2.0 * margin);
     let mut out = String::new();
     let method = method(curves);
-    let approximate = approximate(curves) || regions_approximate(regions);
-    let _ = writeln!(
-        out,
-        r#"<svg xmlns="http://www.w3.org/2000/svg" width="{w:.3}mm" height="{h:.3}mm" viewBox="{:.3} {:.3} {w:.3} {h:.3}" data-method="{method}" data-approximate="{approximate}">"#,
-        x0 - margin,
-        -y1 - margin
-    );
+    let unproved = curves.unproved || !curves.approximate.is_empty();
+    let mut approximate = unproved;
     if !regions.is_empty() {
         out.push_str(
             "<defs><pattern id=\"hatch\" width=\"3\" height=\"3\" patternUnits=\"userSpaceOnUse\" \
@@ -281,10 +277,12 @@ pub(crate) fn svg(curves: &ViewCurves, regions: &[CutRegion], frame: &ViewFrame)
         for r in regions {
             // One closed subpath per loop: each curve after the first continues from
             // where the previous one ended, so its own move-to is dropped.
-            let ring = |l: &[soliddraft_kernel_api::drawing::ViewCurve]| {
+            let mut region_approximate = unproved;
+            let mut ring = |l: &[soliddraft_kernel_api::drawing::ViewCurve]| {
                 let mut d = String::new();
                 for (i, c) in l.iter().enumerate() {
-                    let part = path_data(&c.curve, frame);
+                    let (part, sampled) = path_data(&c.curve, frame);
+                    region_approximate |= c.approximate || sampled;
                     if i == 0 {
                         d.push_str(&part);
                     } else {
@@ -301,51 +299,65 @@ pub(crate) fn svg(curves: &ViewCurves, regions: &[CutRegion], frame: &ViewFrame)
                 d.push(' ');
                 d.push_str(&ring(h));
             }
-            let _ = writeln!(out, r#"<path d="{d}" fill="url(#hatch)" fill-rule="evenodd" stroke="none"/>"#);
+            approximate |= region_approximate;
+            let accuracy = accuracy_attr(region_approximate);
+            let _ = writeln!(out, r#"<path d="{d}" fill="url(#hatch)" fill-rule="evenodd" stroke="none"{accuracy}/>"#);
         }
     }
     // Hidden first, so visible lines are drawn over them.
     for visible in [false, true] {
         let _ = writeln!(out, "<g {}>", if visible { VISIBLE_STYLE } else { HIDDEN_STYLE });
         for c in curves.curves.iter().filter(|c| c.visible == visible) {
-            let accuracy = if c.approximate || curves.unproved || !curves.approximate.is_empty() {
-                r#" data-accuracy="approximate""#
-            } else {
-                ""
-            };
-            let _ = writeln!(out, r#"<path d="{}"{accuracy}/>"#, path_data(&c.curve, frame));
+            let (d, sampled) = path_data(&c.curve, frame);
+            let path_approximate = unproved || c.approximate || sampled;
+            approximate |= path_approximate;
+            let accuracy = accuracy_attr(path_approximate);
+            let _ = writeln!(out, r#"<path d="{d}"{accuracy}/>"#);
         }
         out.push_str("</g>\n");
     }
     out.push_str("</svg>\n");
-    out
+    let document = format!(
+        r#"<svg xmlns="http://www.w3.org/2000/svg" width="{w:.3}mm" height="{h:.3}mm" viewBox="{:.3} {:.3} {w:.3} {h:.3}" data-method="{method}" data-approximate="{approximate}">
+{out}"#,
+        x0 - margin,
+        -y1 - margin,
+    );
+    (document, approximate)
+}
+
+fn accuracy_attr(approximate: bool) -> &'static str {
+    if approximate { r#" data-accuracy="approximate""# } else { "" }
 }
 
 /// SVG path data for a curve, with sheet Y pointing up.
-fn path_data(curve: &Curve3, frame: &ViewFrame) -> String {
+fn path_data(curve: &Curve3, frame: &ViewFrame) -> (String, bool) {
     let pt = |p: Vec3| {
         let q = frame.project(p);
         format!("{:.4} {:.4}", q.u, -q.v)
     };
     match curve {
-        Curve3::Line { a, b } => format!("M {} L {}", pt(*a), pt(*b)),
+        Curve3::Line { a, b } => (format!("M {} L {}", pt(*a), pt(*b)), false),
         Curve3::Arc { normal, radius, start_deg, end_deg, .. } if normal.cross(frame.direction).length() < 1e-9 => {
             let angle = end_deg - start_deg;
             let sweep = u8::from(normal.dot(frame.direction) * angle < 0.0);
             let large = u8::from(angle.abs() > 180.0);
-            format!("M {} A {r:.4} {r:.4} 0 {large} {sweep} {}", pt(curve.start()), pt(curve.end()), r = radius)
+            (
+                format!("M {} A {r:.4} {r:.4} 0 {large} {sweep} {}", pt(curve.start()), pt(curve.end()), r = radius),
+                false,
+            )
         }
         Curve3::Circle { normal, .. } if normal.cross(frame.direction).length() < 1e-9 => {
             let (a, b) = (curve.point_at(0.0), curve.point_at(0.5));
             let r = a.distance(b) / 2.0;
-            format!("M {} A {r:.4} {r:.4} 0 1 0 {} A {r:.4} {r:.4} 0 1 0 {} Z", pt(a), pt(b), pt(a))
+            (format!("M {} A {r:.4} {r:.4} 0 1 0 {} A {r:.4} {r:.4} 0 1 0 {} Z", pt(a), pt(b), pt(a)), false)
         }
         _ => {
             let mut d = String::new();
             for (i, p) in curve.sample(0.01).into_iter().enumerate() {
                 let _ = write!(d, "{}{}", if i == 0 { "M " } else { " L " }, pt(p));
             }
-            d
+            (d, true)
         }
     }
 }
@@ -353,6 +365,29 @@ fn path_data(curve: &Curve3, frame: &ViewFrame) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use soliddraft_kernel_api::drawing::{CurveSource, ViewCurve};
+
+    #[test]
+    fn svg_labels_sampled_strokes_and_hatch_boundaries() {
+        let frame = ViewSpec::new(Vec3::Z, Vec3::Y).frame().unwrap();
+        let rim = |normal| {
+            ViewCurve::new(Curve3::Circle { center: Vec3::ZERO, normal, radius: 4.0 }, CurveSource::Unknown, true)
+        };
+        let tilted = Vec3::new(0.0, 0.6, 0.8);
+        for (stroke, hatch) in [(Vec3::Z, Vec3::Z), (tilted, Vec3::Z), (Vec3::Z, tilted)] {
+            let curves = ViewCurves::new(vec![rim(stroke)], &frame);
+            let regions = [CutRegion { outer: vec![rim(Vec3::Z)], holes: vec![vec![rim(hatch)]] }];
+            assert!(!approximate(&curves) && !regions_approximate(&regions));
+            let (drawing, marked) = svg(&curves, &regions, &frame);
+            assert_eq!(marked, stroke == tilted || hatch == tilted);
+            assert!(drawing.lines().next().unwrap().contains(&format!(r#"data-approximate="{marked}""#)));
+            let paths: Vec<_> = drawing.lines().filter(|line| line.starts_with("<path ")).collect();
+            assert_eq!(paths.len(), 2);
+            for (path, axis) in paths.into_iter().zip([hatch, stroke]) {
+                assert_eq!(path.contains(r#"data-accuracy="approximate""#), axis == tilted);
+            }
+        }
+    }
 
     #[test]
     fn face_on_svg_arcs_keep_their_sweep_under_y_inversion() {
@@ -362,7 +397,8 @@ mod tests {
         {
             let curve =
                 Curve3::Arc { center: Vec3::ZERO, normal, x_axis: Vec3::X, radius: 1.0, start_deg: 0.0, end_deg };
-            let d = path_data(&curve, &frame);
+            let (d, sampled) = path_data(&curve, &frame);
+            assert!(!sampled);
             let fields: Vec<_> = d.split_whitespace().collect();
             assert_eq!(fields[3], "A");
             assert_eq!((fields[7].parse(), fields[8].parse()), (Ok(large), Ok(sweep)));

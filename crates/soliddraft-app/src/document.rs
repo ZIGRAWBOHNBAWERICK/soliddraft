@@ -1027,8 +1027,17 @@ impl Feature {
                 s.source.name,
                 if s.fit.is_some() { "Fitted part and scan reference" } else { "Scan reference" }
             ),
-            FeatureKind::Lattice(l) => format!("unproved preview · ±{} mm", fmt_mm(l.accuracy_mm)),
-            FeatureKind::Gyroid(g) => format!("unproved preview · ±{} mm", fmt_mm(g.accuracy_mm)),
+            FeatureKind::Lattice(l) => self.field_summary(l.accuracy_mm),
+            FeatureKind::Gyroid(g) => self.field_summary(g.accuracy_mm),
+        }
+    }
+
+    /// A field's accuracy, called an unproved preview only while the screen draws one: a
+    /// refused, suppressed or rolled-back field shows no preview.
+    fn field_summary(&self, accuracy_mm: f64) -> String {
+        match self.status {
+            FeatureStatus::Ok | FeatureStatus::Pending => format!("unproved preview · ±{} mm", fmt_mm(accuracy_mm)),
+            _ => format!("±{} mm", fmt_mm(accuracy_mm)),
         }
     }
 

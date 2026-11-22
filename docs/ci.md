@@ -175,6 +175,7 @@ The running selector and its map are the candidate policy; `--head` names the tr
 | `ci/browser-part-check.js` | `web` | Browser Inspect > Check in the web job |
 | `ci/browser-preferences.mjs` | `web` | Browser preferences check in the web job |
 | `ci/browser-manufacturing-information.mjs`, `ci/fixtures/pmi/p1-bracket-pmi.step` | `web` | Browser check: Import STEP reads the bracket's manufacturing information, and the items stay on their faces through save and a fresh reopen |
+| `ci/browser-field-preview.mjs`, `ci/fixtures/field-preview/*` | `web` | Browser check: lattices and gyroids show labelled field previews, exports run only the certified routes, a refused export writes nothing, and a refused field is marked with its reason |
 | `ci/check-consumers.json` | all | The selector; it controls its own obligations |
 | `ci/check-gate.py` | all | Merge gate, and the gate tests in lint; it controls mandatory checks |
 | `ci/check-registry.json` | all | Merge gate, and the wiring tests in lint; it controls mandatory checks |

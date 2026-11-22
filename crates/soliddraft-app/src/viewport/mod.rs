@@ -546,12 +546,18 @@ impl ViewportState {
             );
             ui.ctx().request_repaint();
         }
-        if doc.model().active_field().is_some_and(|f| doc.model().status(f.id).is_some_and(|s| s.is_ok())) {
+        let unproved = doc.model().active_field().is_some_and(|f| doc.model().status(f.id).is_some_and(|s| s.is_ok()));
+        if unproved {
             ui.put(
                 Rect::from_min_size(rect.left_top() + vec2(12.0, 12.0), vec2(160.0, 24.0)),
                 egui::Label::new(egui::RichText::new("unproved preview").color(theme::muted())),
             );
         }
+        #[cfg(target_arch = "wasm32")]
+        crate::web::show_viewport(serde_json::json!({
+            "label": unproved.then_some("unproved preview"),
+            "triangles": doc.display_body().and_then(|body| doc.meshes.get(&body)).map_or(0, |mesh| mesh.indices.len() / 3),
+        }));
         if scene.axes.contains(&true) {
             self.paint_origin_axes(&painter, scene.reach, rect, scene.axes);
         }

@@ -359,6 +359,9 @@ thread_local! {
     static SHOWN_BUILD: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
     static SHOWN_PMI: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
     static SHOWN_ASSEMBLY: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
+    static SHOWN_VIEWPORT: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
+    static SHOWN_PRINT_CHECK: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
+    static SHOWN_MARKS: std::cell::RefCell<Vec<serde_json::Value>> = const { std::cell::RefCell::new(Vec::new()) };
     static SHOWN_CONTROLS: std::cell::RefCell<std::collections::BTreeMap<String, egui::Pos2>> =
         const { std::cell::RefCell::new(std::collections::BTreeMap::new()) };
     static SHOWN_ASSEMBLY_VIEW: std::cell::RefCell<Option<(crate::viewport::camera::Camera, egui::Rect)>> =
@@ -468,6 +471,54 @@ pub(crate) fn begin_frame() {
     SHOWN_OPTIONS.with_borrow_mut(String::clear);
     SHOWN_CONTROLS.with_borrow_mut(std::collections::BTreeMap::clear);
     SHOWN_PMI.with_borrow_mut(String::clear);
+    SHOWN_VIEWPORT.with_borrow_mut(String::clear);
+    SHOWN_PRINT_CHECK.with_borrow_mut(String::clear);
+    SHOWN_MARKS.with_borrow_mut(Vec::clear);
+}
+
+/// Notes what the part viewport drew, for [`shown_viewport`].
+pub(crate) fn show_viewport(shown: serde_json::Value) {
+    SHOWN_VIEWPORT.with_borrow_mut(|viewport| *viewport = shown.to_string());
+}
+
+/// What the part viewport drew in the last frame, as JSON: `{"label", "triangles"}`. The
+/// label is `"unproved preview"` when the viewport drew that label over a lattice or gyroid,
+/// and null otherwise; `triangles` counts the triangles of the part's display mesh. Empty
+/// when that frame drew no part viewport. Read only, for browser checks.
+#[wasm_bindgen]
+pub fn shown_viewport() -> String {
+    SHOWN_VIEWPORT.with_borrow(|viewport| viewport.clone())
+}
+
+/// Notes the outcome the Print check window is drawing, for [`shown_print_check`].
+pub(crate) fn show_print_check(shown: serde_json::Value) {
+    SHOWN_PRINT_CHECK.with_borrow_mut(|check| *check = shown.to_string());
+}
+
+/// The Print check window in the last frame, as JSON: `{"format", "route", "requested_mm",
+/// "state", "message"}`. The route is `"distance field"` or `"boundary model"`; the state is
+/// `"checking"`, `"refused"` with the refusal the window shows as its message, `"checked"`
+/// with the report's summary, or `"stale"`. The window's buttons are in [`shown_controls`]
+/// as `Save checked export` and `Print check: Cancel`. Empty when that frame drew no Print
+/// check window. Read only, for browser checks.
+#[wasm_bindgen]
+pub fn shown_print_check() -> String {
+    SHOWN_PRINT_CHECK.with_borrow(|check| check.clone())
+}
+
+/// Notes a status mark the feature tree drew, for [`shown_marks`].
+pub(crate) fn show_mark(feature: &str, mark: &str, reason: &str) {
+    SHOWN_MARKS
+        .with_borrow_mut(|marks| marks.push(serde_json::json!({ "feature": feature, "mark": mark, "reason": reason })));
+}
+
+/// The status marks the feature tree drew in the last frame, as JSON:
+/// `[{"feature", "mark", "reason"}]`, with `mark` one of `Working`, `Refused` and
+/// `Inactive` and `reason` the words its hover gives. A built feature has no mark. Read
+/// only, for browser checks.
+#[wasm_bindgen]
+pub fn shown_marks() -> String {
+    SHOWN_MARKS.with_borrow(|marks| serde_json::Value::Array(marks.clone()).to_string())
 }
 
 /// Notes the outcome the Part check window is drawing, for [`shown_part_check`].

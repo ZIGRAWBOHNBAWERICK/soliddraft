@@ -219,13 +219,9 @@ pub fn regenerate_view(drawing: &mut Drawing, part: &Part, id: ViewId) -> Result
         .into_iter()
         .filter(|child| *child == id || !drawing.view(*child).is_some_and(|v| v.excluded_from_update))
         .collect();
-    regenerate_views(drawing, part, &ids)
-}
-
-fn regenerate_views(drawing: &mut Drawing, part: &Part, ids: &[ViewId]) -> Result<(), DrawingError> {
     let index = PartIndex::build(part)?;
     let mut contexts = Contexts::new();
-    for &id in ids {
+    for &id in &ids {
         project::compute_in(drawing, part, &index, id, &mut contexts)?;
         follow_parent(drawing, id, &contexts);
         let ctx = &contexts[&id];

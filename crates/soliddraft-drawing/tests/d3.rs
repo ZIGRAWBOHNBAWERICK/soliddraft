@@ -503,6 +503,20 @@ fn a_detail_on_sheet_two_and_its_parent_point_at_each_other() {
 }
 
 #[test]
+fn unmarked_circular_hatch_boundaries_are_approximate_after_sampling() {
+    use soliddraft_kernel_api::drawing::{Curve3, CurveSource, CutRegion, ViewCurve, ViewSpec};
+    let frame = ViewSpec::new(Vec3::Z, Vec3::Y).frame().unwrap();
+    let xf = project::ViewTransform { frame, scale: 1.0, centre: Point2::new(0.0, 0.0) };
+    let circle = |radius| {
+        ViewCurve::new(Curve3::Circle { center: Vec3::ZERO, normal: Vec3::Z, radius }, CurveSource::Unknown, true)
+    };
+    let region = CutRegion { outer: vec![circle(10.0)], holes: vec![vec![circle(4.0)]] };
+    let polygon = project::region_polygon(&region, &xf, None);
+    assert!(polygon.outer.len() > 4 && polygon.holes[0].len() > 4);
+    assert!(polygon.approximate);
+}
+
+#[test]
 fn the_dxf_keeps_dimensions_and_hatches_as_such() {
     let k = BoxKernel::new();
     let part = box_part(&k, "block", Vec3::new(40.0, 30.0, 10.0));

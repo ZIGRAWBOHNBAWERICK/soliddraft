@@ -502,9 +502,9 @@ struct CreateReport<'a> {
     dimensions_skipped: &'a [String],
     annotations: usize,
     location_labels: Vec<LocationOut>,
-    written: &'a [String],
-    #[serde(skip_serializing_if = "Option::is_none")]
-    accuracy: Option<AccuracyCounts>,
+    written: Vec<&'a str>,
+    #[serde(flatten)]
+    outputs: &'a OutputReport,
 }
 
 /// A location label pair in the JSON report.
@@ -558,7 +558,7 @@ fn create(o: &Options) -> Result<(), String> {
         let made = soliddraft_drawing::make_drawing(part, &new).map_err(|e| e.to_string())?;
         let (mut drawing, import) = (made.drawing, made.import);
         apply_steps(&mut drawing, part, &o.steps)?;
-        let accuracy = write_outputs(&drawing, &outs, &source.backend, &[])?;
+        let outputs = write_outputs(&drawing, &outs, &source.backend, &[]);
         let name = drawing_path.as_ref().map(|p| p.display().to_string()).unwrap_or_default();
         if o.json {
             let report = CreateReport {
@@ -580,8 +580,8 @@ fn create(o: &Options) -> Result<(), String> {
                         on_view: l.on_view(),
                     })
                     .collect(),
-                written: &outs,
-                accuracy,
+                written: outputs.exports.iter().map(|file| file.path.as_str()).collect(),
+                outputs: &outputs,
             };
             println!("{}", serde_json::to_string(&report).expect("reports serialise"));
         } else {
@@ -593,14 +593,14 @@ fn create(o: &Options) -> Result<(), String> {
                 source.name,
                 drawing.sheets[0].scale,
                 import.placed,
-                outs.join(", ")
+                outputs.exports.iter().map(|file| file.path.as_str()).collect::<Vec<_>>().join(", ")
             );
-            report_approximation(accuracy);
+            outputs.print_written_sheets();
             for s in &import.skipped {
                 println!("  not dimensioned: {s}");
             }
         }
-        Ok(())
+        outputs.finish()
     })
 }
 
@@ -672,8 +672,8 @@ struct UpdateOut<'a> {
     #[serde(flatten)]
     update: &'a UpdateReport,
     repairs: Vec<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    accuracy: Option<AccuracyCounts>,
+    #[serde(flatten)]
+    outputs: &'a OutputReport,
 }
 
 /// The search folders: `--search` and File locations' referenced-documents folders.
@@ -749,14 +749,19 @@ fn update(o: &Options) -> Result<(), String> {
         let saved = soliddraft_document::kind::saved_path(&path, DocKind::Drawing);
         let meta = meta.rewritten(&source.backend, drawing.meta.units);
         file::write(&saved, &drawing, &meta).map_err(|e| e.to_string())?;
-        let accuracy = write_outputs(&drawing, &o.outs, &source.backend, &report.dangling_views)?;
+        let outputs = write_outputs(&drawing, &o.outs, &source.backend, &report.dangling_views);
         // The report after repairs: what still needs attention.
         let mut final_report = report.clone();
         final_report.dangling.retain(|d| drawing.annotation(d.annotation).is_some_and(|a| a.needs_attention()));
         let name = saved.display().to_string();
         if o.json {
-            let out =
-                UpdateOut { drawing: &name, model: &drawing.model.path, update: &final_report, repairs, accuracy };
+            let out = UpdateOut {
+                drawing: &name,
+                model: &drawing.model.path,
+                update: &final_report,
+                repairs,
+                outputs: &outputs,
+            };
             println!("{}", serde_json::to_string(&out).expect("reports serialise"));
         } else {
             println!(
@@ -768,7 +773,7 @@ fn update(o: &Options) -> Result<(), String> {
                 report.changed.len(),
                 final_report.dangling.len()
             );
-            report_approximation(accuracy);
+            outputs.print_written_sheets();
             for c in &report.changed {
                 println!("  changed {}: {} -> {}", c.annotation, c.previous, c.now);
             }
@@ -782,7 +787,7 @@ fn update(o: &Options) -> Result<(), String> {
                 println!("  {r}");
             }
         }
-        Ok(())
+        outputs.finish()
     })
 }
 
@@ -797,9 +802,52 @@ fn sheet_path(out: &Path, i: usize) -> PathBuf {
     out.with_file_name(format!("{stem}-{}.{ext}", i + 1))
 }
 
-fn report_approximation(accuracy: Option<AccuracyCounts>) {
-    if let Some(accuracy) = accuracy.filter(|counts| counts.approximate != 0) {
-        println!("  exported approximate drawing curves: {}", accuracy.approximate);
+#[derive(Default, Serialize)]
+struct OutputReport {
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    exports: Vec<WrittenFile>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    accuracy: Option<AccuracyCounts>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    output_errors: Vec<String>,
+}
+
+#[derive(Serialize)]
+struct WrittenFile {
+    path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    accuracy: Option<AccuracyCounts>,
+}
+
+impl OutputReport {
+    fn write(&mut self, path: &Path, bytes: Result<Vec<u8>, String>, accuracy: Option<AccuracyCounts>) -> bool {
+        let result = bytes.and_then(|bytes| soliddraft_document::save_atomic(path, &bytes).map_err(|e| e.to_string()));
+        let path = path.display().to_string();
+        match result {
+            Ok(()) => {
+                self.exports.push(WrittenFile { path, accuracy });
+                true
+            }
+            Err(error) => {
+                self.output_errors.push(format!("{path}: {error}"));
+                false
+            }
+        }
+    }
+
+    fn print_written_sheets(&self) {
+        for file in &self.exports {
+            if let Some(accuracy) = file.accuracy {
+                println!(
+                    "  {}: {} exact, {} polygon, {} approximate drawing curves",
+                    file.path, accuracy.exact, accuracy.polygon, accuracy.approximate
+                );
+            }
+        }
+    }
+
+    fn finish(self) -> Result<(), String> {
+        if self.output_errors.is_empty() { Ok(()) } else { Err(self.output_errors.join("\n")) }
     }
 }
 
@@ -810,7 +858,7 @@ fn write_outputs(
     outs: &[String],
     backend: &str,
     refused: &[soliddraft_drawing::DanglingView],
-) -> Result<Option<AccuracyCounts>, String> {
+) -> OutputReport {
     let format_of =
         |out: &str| Path::new(out).extension().and_then(|ext| ext.to_str()).and_then(Format::from_extension);
     let wrote_sheets = outs.iter().any(|out| format_of(out).is_some());
@@ -835,25 +883,32 @@ fn write_outputs(
     } else {
         Vec::new()
     };
-    let mut errors = Vec::new();
+    let mut report = OutputReport::default();
+    let mut written = vec![(false, false); lists.len()];
     for out in outs {
         let path = Path::new(out);
         match format_of(out) {
             _ if DocKind::of_path(path) == Some(DocKind::Drawing) => {
                 let meta = FileMeta::new(backend, drawing.meta.units);
                 let to = soliddraft_document::kind::saved_path(path, DocKind::Drawing);
-                let bytes = file::to_bytes(drawing, &meta).map_err(|e| e.to_string())?;
-                soliddraft_document::save_atomic(&to, &bytes).map_err(|e| format!("{}: {e}", to.display()))?;
+                report.write(&to, file::to_bytes(drawing, &meta).map_err(|e| e.to_string()), None);
             }
             Some(Format::Pdf) => {
                 let sheets = lists.iter().map(|sheet| sheet.as_ref().cloned()).collect::<Result<Vec<_>, _>>();
                 match sheets {
                     Ok(sheets) => {
                         let info = PdfInfo { title: drawing.meta.title.clone(), author: drawing.meta.designer.clone() };
-                        let bytes = export::pdf(&sheets, &info).map_err(|e| e.to_string())?;
-                        soliddraft_document::save_atomic(path, &bytes).map_err(|e| format!("{out}: {e}"))?;
+                        let mut accuracy = AccuracyCounts::default();
+                        for sheet in &sheets {
+                            accuracy.add(sheet.accuracy());
+                        }
+                        if report.write(path, export::pdf(&sheets, &info).map_err(|e| e.to_string()), Some(accuracy)) {
+                            for (_, page) in &mut written {
+                                *page = true;
+                            }
+                        }
                     }
-                    Err(error) => errors.push(format!("{out}: {error}")),
+                    Err(error) => report.output_errors.push(format!("{out}: {error}")),
                 }
             }
             Some(format) => {
@@ -861,33 +916,36 @@ fn write_outputs(
                     let path = sheet_path(path, i);
                     match list {
                         Ok(list) => {
-                            let bytes = export::bytes(list, format, &drawing.meta.title).map_err(|e| e.to_string())?;
-                            soliddraft_document::save_atomic(&path, &bytes)
-                                .map_err(|e| format!("{}: {e}", path.display()))?;
+                            let dxf = matches!(format, Format::Dxf);
+                            let accuracy = if dxf { list.dxf_accuracy() } else { list.accuracy() };
+                            let bytes = export::bytes(list, format, &drawing.meta.title).map_err(|e| e.to_string());
+                            if report.write(&path, bytes, Some(accuracy)) {
+                                if dxf {
+                                    written[i].0 = true;
+                                } else {
+                                    written[i].1 = true;
+                                }
+                            }
                         }
-                        Err(error) => errors.push(format!("{}: {error}", path.display())),
+                        Err(error) => report.output_errors.push(format!("{}: {error}", path.display())),
                     }
                 }
             }
-            None => return Err(format!("{out}: write .dwdrw, .svg, .pdf or .dxf")),
+            None => report.output_errors.push(format!("{out}: write .dwdrw, .svg, .pdf or .dxf")),
         }
     }
-    if !errors.is_empty() {
-        return Err(errors.join("\n"));
-    }
-    Ok(wrote_sheets.then(|| {
-        let mut accuracy = AccuracyCounts::default();
-        let has_dxf = outs.iter().any(|out| matches!(format_of(out), Some(Format::Dxf)));
-        let has_page = outs.iter().any(|out| matches!(format_of(out), Some(Format::Pdf | Format::Svg)));
-        for list in lists.iter().filter_map(|list| list.as_ref().ok()) {
-            accuracy.add(match (has_dxf, has_page) {
+    for (list, formats) in lists.iter().zip(written) {
+        if let Ok(list) = list {
+            let accuracy = match formats {
                 (true, true) => list.accuracy_with_dxf(),
                 (true, false) => list.dxf_accuracy(),
-                _ => list.accuracy(),
-            });
+                (false, true) => list.accuracy(),
+                (false, false) => continue,
+            };
+            report.accuracy.get_or_insert_with(AccuracyCounts::default).add(accuracy);
         }
-        accuracy
-    }))
+    }
+    report
 }
 
 /// The view a command-line name means: a standard view's name, a section, detail or
@@ -1223,10 +1281,29 @@ mod tests {
         second.views = vec![view];
         second.annotations.clear();
         drawing.sheets.push(second);
+        let outline = vec![
+            Point2::new(-10.0, -10.0),
+            Point2::new(10.0, -10.0),
+            Point2::new(10.0, 10.0),
+            Point2::new(-10.0, 10.0),
+        ];
+        drawing.sheets[0].views[0].geometry.hatch.push(soliddraft_drawing::Polygon {
+            outer: outline,
+            approximate: true,
+            ..Default::default()
+        });
         let dir = std::env::temp_dir().join(format!("soliddraft-partial-sheet-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let paths = ["result.pdf", "result.svg", "result.dxf"].map(|out| dir.join(out).display().to_string());
-        let error = write_outputs(&drawing, &paths, "test", &[refusal]).unwrap_err();
+        let report = write_outputs(&drawing, &paths, "test", &[refusal]);
+        let json = serde_json::to_value(&report).unwrap();
+        let exports = json["exports"].as_array().unwrap();
+        assert_eq!(exports.len(), 2);
+        for (file, path) in exports.iter().zip(&paths[1..]) {
+            assert_eq!(file["path"].as_str(), Some(path.as_str()));
+            assert!(file["accuracy"]["approximate"].as_u64().unwrap() > 0);
+        }
+        let error = report.finish().unwrap_err();
         assert!(error.contains("Isometric view: drawing work allowance exhausted"));
         for name in ["result.pdf", "result-2.svg", "result-2.dxf"] {
             assert!(!dir.join(name).exists(), "{name}");

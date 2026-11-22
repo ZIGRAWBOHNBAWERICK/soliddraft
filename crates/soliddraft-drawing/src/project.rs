@@ -412,7 +412,11 @@ pub fn region_polygon(r: &CutRegion, xf: &ViewTransform, clip: Option<Boundary>)
         outer: ring(&r.outer),
         holes: r.holes.iter().map(|h| ring(h)).collect(),
         clip,
-        approximate: r.outer.iter().chain(r.holes.iter().flatten()).any(|c| c.approximate),
+        approximate: r
+            .outer
+            .iter()
+            .chain(r.holes.iter().flatten())
+            .any(|c| c.approximate || !matches!(c.curve, Curve3::Line { .. } | Curve3::Polyline { .. })),
     }
 }
 

@@ -243,7 +243,7 @@ fn section_of_cut<K: Kernel + ?Sized>(
             c
         })
         .collect();
-    let mut curves = ViewCurves { unproved, catallax, approximate, ..ViewCurves::new(curves, frame) };
+    let curves = ViewCurves { unproved, catallax, approximate, ..ViewCurves::new(curves, frame) };
 
     // Each cap face's loops, each curve tagged through the cap edge it runs along.
     let edge_by_mid: Vec<(EdgeId, Vec3)> =
@@ -273,9 +273,6 @@ fn section_of_cut<K: Kernel + ?Sized>(
             outer: outer.into_iter().map(tag).collect(),
             holes: loops.map(|l| l.into_iter().map(tag).collect()).collect(),
         });
-    }
-    if regions.iter().any(|r| r.outer.iter().chain(r.holes.iter().flatten()).any(|c| c.approximate)) {
-        curves.approximate.push("section.fitted-boundary".into());
     }
     Ok(SectionView { curves, regions })
 }

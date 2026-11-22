@@ -112,6 +112,16 @@ fn certified_views(kernel: &soliddraft_kernel_catallax::CatallaxKernel) -> usize
     calls["calls"].as_array().unwrap().iter().filter(|c| exact_view(c)).count()
 }
 
+fn finish_viewport_work(state: &mut AppState) {
+    let projection = soliddraft_tessellation::Projection::Orthographic { pixels_per_mm: 1.0 };
+    let started = std::time::Instant::now();
+    while state.doc.update_display(&projection, 0.016) && state.doc.display_quality().pending() {
+        assert!(started.elapsed() < HANG, "the viewport worker did not answer");
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert!(!state.doc.display_quality().pending(), "the viewport worker stopped with pending work");
+}
+
 fn assert_no_drawing_queries(kernel: &soliddraft_kernel_catallax::CatallaxKernel) {
     let log = kernel.take_diagnostics().unwrap();
     for call in log["calls"].as_array().unwrap() {
@@ -125,6 +135,7 @@ fn assert_no_drawing_queries(kernel: &soliddraft_kernel_catallax::CatallaxKernel
                         | "section_curves"
                         | "edge_curve"
                         | "face_loops"
+                        | "lines_and_arcs"
                         | "preview"
                         | "preview_edges"
                         | "tessellate"
@@ -322,6 +333,7 @@ fn a_rod_cut_exports_the_saved_catallax_views() {
         }
         call(&mut state, tool, step["arguments"].clone());
     }
+    finish_viewport_work(&mut state);
     kernel.take_diagnostics().unwrap();
     call(&mut state, "make_drawing", json!({ "template": "iso-a3" }));
     let shown = state.drawing.session.as_ref().unwrap().doc.drawing.clone();
@@ -393,6 +405,7 @@ fn a_legacy_rod_cache_refuses_export_until_explicit_rebuild() {
     let kernel = Arc::new(CatallaxKernel::with_operation_log());
     let mut reopened = AppState::new(Document::new("Part1", kernel.clone()));
     call(&mut reopened, "open", json!({ "path": path }));
+    finish_viewport_work(&mut reopened);
     let shown = reopened.drawing.session.as_ref().unwrap().doc.drawing.clone();
     assert_eq!(shown.sheets[0].views.len(), 4);
     assert!(shown.sheets[0].views.iter().all(|v| v.geometry.bbox == SENTINEL_BOX));

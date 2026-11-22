@@ -2,7 +2,7 @@
 
 use egui_kittest::Harness;
 use soliddraft_app::app::{Automation, SolidDraftApp};
-use soliddraft_app::drawing::{self, DrawingAction, DrawingDoc, DrawingSession, DrawingTool, PendingView, PlaceKind};
+use soliddraft_app::drawing::{self, DrawingAction, DrawingSession, DrawingTool, NewDrawing, PendingView, PlaceKind};
 use soliddraft_app::state::AppAction;
 use soliddraft_drawing::export::Format;
 use soliddraft_drawing::project::{Projected, ViewTransform};
@@ -19,11 +19,11 @@ fn app() -> App {
         std::fs::create_dir_all(&dir).unwrap();
         soliddraft_app::file::set_config_dir(Some(dir));
     });
-    let mut app = Harness::builder()
-        .with_size(egui::vec2(1440.0, 900.0))
-        .build_eframe(|cc| SolidDraftApp::new(cc, soliddraft_app::new_document(), Automation::default()));
-    app.state_mut().state.drawing.session =
-        Some(DrawingSession::new(DrawingDoc::new(soliddraft_drawing::fixture::bracket_a3())));
+    let mut app = Harness::builder().with_size(egui::vec2(1440.0, 900.0)).build_eframe(|cc| {
+        SolidDraftApp::new(cc, soliddraft_app::command_tools::board_bracket(), Automation::default())
+    });
+    let state = &mut app.state_mut().state;
+    state.drawing.session = Some(drawing::create_drawing(state, &NewDrawing::new()).unwrap());
     action(&mut app, DrawingAction::ShowDrawing);
     app
 }

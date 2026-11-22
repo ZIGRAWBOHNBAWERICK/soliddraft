@@ -67,10 +67,13 @@ class Host(unittest.TestCase):
 
 class Truncation(unittest.TestCase):
     def test_a_scenario_stops_after_its_last_edit_without_export_acceptance(self):
-        source = dict(steps=[dict(tool="sketch", drawing={}), dict(tool="edit_extrude", checked_step_export={}),
-                             dict(tool="save")])
+        checks = [{"pointer": "/summary/drawing/up_to_date", "equals": True}]
+        drawing_checks = [{"pointer": "/summary/drawing/sheets/0/views/0/preview", "equals": False}]
+        source = dict(steps=[dict(tool="sketch", drawing={}),
+                             dict(tool="edit_extrude", checks=checks, drawing_checks=drawing_checks,
+                                  checked_step_export={}), dict(tool="save")])
         self.assertEqual(edit_speed.truncated(source, {2: "edit_extrude"})["steps"],
-                         [dict(tool="sketch"), dict(tool="edit_extrude")])
+                         [dict(tool="sketch"), dict(tool="edit_extrude", checks=checks)])
 
     def test_a_moved_edit_is_refused(self):
         with self.assertRaises(AssertionError):

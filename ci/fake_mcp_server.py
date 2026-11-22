@@ -38,6 +38,20 @@ if len(sys.argv) > 1 and sys.argv[1] == "export":
                                "sha256": hashlib.sha256(path.read_bytes()).hexdigest()},
                       "request_work": {"used": 1, "limit": limit, "exhausted": False}}))
     sys.exit(0)
+if sys.argv[1] == "draw":
+    outputs = [pathlib.Path(sys.argv[i + 1]) for i, arg in enumerate(sys.argv) if arg == "--out"]
+    for output in outputs:
+        if mode == "ok" or mode == f"drawing-refused{output.suffix}":
+            output.write_bytes(b"drawing output")
+    if mode == "ok":
+        print(json.dumps({"backend": f"catallax {revision_pin}"}))
+        sys.exit(0)
+    reason = "unrelated view error" if mode == "drawing-refused-wrong" else (
+        "Front view: view_curves failed (status 0): numbers.operation-budget"
+    )
+    print(f"soliddraft draw: {reason}", file=sys.stderr)
+    sys.exit(1)
+
 bundle = pathlib.Path(sys.argv[sys.argv.index("--bundle") + 1])
 bundle.mkdir(parents=True)
 sequence = 0

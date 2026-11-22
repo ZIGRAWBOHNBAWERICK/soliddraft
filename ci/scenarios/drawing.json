@@ -330,10 +330,6 @@
           "equals": "Isometric view"
         },
         {
-          "pointer": "/summary/drawing/sheets/0/views/0/preview",
-          "equals": false
-        },
-        {
           "pointer": "/summary/drawing/up_to_date",
           "equals": true
         },
@@ -348,6 +344,12 @@
         {
           "pointer": "/summary/drawing/sheets/0/views/0/accuracy/exact",
           "minimum": 1
+        }
+      ],
+      "drawing_checks": [
+        {
+          "pointer": "/summary/drawing/sheets/0/views/0/preview",
+          "equals": false
         },
         {
           "pointer": "/summary/drawing/sheets/0/views/0/accuracy/polygon",

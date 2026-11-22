@@ -336,33 +336,6 @@ fn import_exported_step(name: &str, faces: usize) {
     case.frame(&mut app, "imported");
 }
 
-fn refuse_exported_step_at_work_limit(name: &str) {
-    use egui_kittest::kittest::Queryable;
-    use soliddraft_app::import::report::{self, Tier};
-
-    let case = ribbon::case(&format!("fillet-roundtrip-refused-{name}"));
-    let mut app = ribbon::app(Document::new("Reimported fillets", soliddraft_app::kernel()));
-    app.state_mut().state.push(soliddraft_app::state::AppAction::ImportStep(Some(step_path(name))));
-    app.run_steps(3);
-    assert!(app.state().state.import_dialog.is_some(), "{name}: Import STEP did not open");
-    app.get_by_role_and_label(egui::accesskit::Role::Button, "Accept").click();
-    app.run_steps(3);
-
-    let state = &app.state().state;
-    assert!(state.import_dialog.is_none(), "{name}: a refused file must close its review");
-    assert!(state.doc.features.is_empty(), "{name}: a refusal published an import feature");
-    assert!(state.doc.model().live_bodies().is_empty(), "{name}: a refusal published a partial body");
-    assert!(state.doc.display_body().is_none());
-    assert_eq!(state.doc.triangle_count(), 0);
-    assert_eq!(state.doc.undo_depth(), 0, "{name}: a refusal changed the part");
-    let rows = report::rows(&state.doc, &state.import_refusals);
-    assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0].tier, Tier::Refused);
-    assert!(rows[0].feature.is_none());
-    assert_eq!(rows[0].why, "This file is too complex to open yet.");
-    case.frame(&mut app, "refused");
-}
-
 /// Writes the rows where the triage reads them, then fails on any row that did not pass.
 fn report(case: &str, rows: &[Row], must_pass: impl Fn(&Row) -> bool) {
     let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("fillet-acceptance");
@@ -527,8 +500,7 @@ fn owner_pocket_rim_takes_r1() {
 #[test]
 fn owner_pocket_rim_takes_r2() {
     owner_rim(2.0);
-    // Catallax phase-3 I2: this export still exceeds bounded STEP admission.
-    refuse_exported_step_at_work_limit("owner-pocket-rim-r2");
+    import_exported_step("owner-pocket-rim-r2", OWNER_FACES + 6);
 }
 
 #[test]

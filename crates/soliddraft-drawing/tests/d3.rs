@@ -10,8 +10,8 @@ use soliddraft_drawing::export;
 use soliddraft_drawing::{
     AnnotationKind, AnnotationState, Boundary, Command, ContentHash, DatumRef, DocKind, DocRef, DocumentId, Drawing,
     DrawingMeta, GdtCharacteristic, HiddenLines, LinearOrientation, MaterialCondition, NewDrawing, Part, PartIndex,
-    Polygon, RevisionRow, SetKind, SurfaceProcess, Template, UndoStack, ViewId, ViewKind, annotate, apply, derived,
-    edge_near, next_letter, project, update_from_model,
+    RevisionRow, SetKind, SurfaceProcess, Template, UndoStack, ViewId, ViewKind, annotate, apply, derived, edge_near,
+    next_letter, project, update_from_model,
 };
 use soliddraft_kernel_api::{Point2, Vec3};
 use support::{BoxKernel, box_part};
@@ -50,6 +50,110 @@ fn texts(d: &Drawing, sheet: usize) -> Vec<String> {
 
 fn run(stack: &mut UndoStack, d: &mut Drawing, part: &Part, c: Command) {
     stack.run(d, &c, Some(part)).unwrap_or_else(|e| panic!("{}: {e}", c.name()));
+}
+
+#[test]
+fn rebuild_commits_successful_views_alongside_base_and_projected_refusals() {
+    for projected in [false, true] {
+        let mut k = BoxKernel::new();
+        k.detail_strokes = true;
+        let mut d = drawing(&box_part(&k, "block", Vec3::new(40.0, 30.0, 10.0)));
+        export::check_sheet(&d, &d.sheets[0]).unwrap();
+        let view = d.sheets[0]
+            .views
+            .iter()
+            .find(|v| if projected { matches!(v.kind, ViewKind::Projected { .. }) } else { v.id == FRONT })
+            .unwrap();
+        let id = view.id;
+        let target = usize::from(projected);
+        if projected {
+            apply(&mut d, &Command::AddSheet { name: "Sheet2".into(), template: "iso-a3".into() }).unwrap();
+            apply(&mut d, &Command::MoveViewToSheet { view: id, sheet: target, to: Point2::new(140.0, 100.0) })
+                .unwrap();
+        }
+        let view = d.view(id).unwrap();
+        let before = view.geometry.clone();
+        k.refuse_direction = Some(project::spec_in(&d, target, view).unwrap().direction);
+        let healthy = d.sheets[0].views.iter().find(|v| v.id != id).unwrap().id;
+        let mut saved = Vec::new();
+        for view in [id, healthy] {
+            let note = soliddraft_drawing::Annotation {
+                id: d.next_annotation_id(),
+                view,
+                body: AnnotationKind::Note { text: "Old manufacturing requirement".into(), leader: vec![] },
+                anchors: vec![],
+                placement: Point2::new(0.0, 0.0),
+                style: Default::default(),
+                state: AnnotationState::Ok,
+                source: Some(soliddraft_drawing::PmiSource::Item { item: "removed requirement".into() }),
+            };
+            apply(&mut d, &Command::AddAnnotation { annotation: note.clone() }).unwrap();
+            saved.push(note);
+        }
+        let changed = box_part(&k, "block", Vec3::new(60.0, 30.0, 10.0));
+        let report = UndoStack::new().run(&mut d, &Command::UpdateFromModel, Some(&changed)).unwrap().unwrap();
+        assert!(report.views_updated > 0);
+        let failure = report.dangling_views.iter().find(|f| f.view == id).unwrap();
+        assert!(failure.cause.contains("test direction refused"));
+        assert_eq!(failure.name, if projected { "Top view" } else { "Front view" });
+        assert_eq!(d.model.pinned, changed.digest);
+        assert_eq!(d.view(id).unwrap().geometry, before);
+        assert_eq!(d.annotation(saved[0].id), Some(&saved[0]));
+        assert!(d.annotation(saved[1].id).is_none());
+        assert!(!d.views_match_pin());
+        for rebuilt in d.sheets[0].views.iter().filter(|v| v.id != id) {
+            assert_eq!(rebuilt.geometry.source_digest, changed.digest.as_str());
+        }
+        let error = export::check_sheet(&d, &d.sheets[target]).unwrap_err().to_string();
+        assert!(error.contains(&failure.name), "{error}");
+        assert!(error.contains("does not match the drawing's accepted revision"), "{error}");
+
+        let mut repaired = BoxKernel::new();
+        repaired.detail_strokes = true;
+        let part = box_part(&repaired, "block", Vec3::new(60.0, 30.0, 10.0));
+        run(&mut UndoStack::new(), &mut d, &part, Command::SetViewCrop { view: id, crop: None });
+        assert!(d.annotation(saved[0].id).is_none());
+        export::check_sheet(&d, &d.sheets[target]).unwrap();
+    }
+}
+
+#[test]
+fn a_refused_section_keeps_its_cutting_line_on_the_rebuilt_parent() {
+    let mut k = BoxKernel::new();
+    k.detail_strokes = true;
+    let part = box_part(&k, "block", Vec3::new(40.0, 30.0, 10.0));
+    let mut d = drawing(&part);
+    let index = PartIndex::build(&part).unwrap();
+    let parent = derived::context(&d, &part, &index, FRONT).unwrap();
+    let model_line = vec![Vec3::new(20.0, 0.0, 1.0), Vec3::new(20.0, 0.0, 9.0)];
+    let line: Vec<_> = model_line.iter().map(|&p| parent.xf.point(p)).collect();
+    let mut section = d.view(FRONT).unwrap().clone();
+    section.id = d.next_view_id();
+    section.kind = ViewKind::Section {
+        parent: FRONT,
+        line: line.clone(),
+        model_line,
+        flip: false,
+        label: "A".into(),
+        hatch: None,
+    };
+    let id = section.id;
+    let saved_geometry = section.geometry.clone();
+    apply(&mut d, &Command::AddSheet { name: "Section sheet".into(), template: "iso-a3".into() }).unwrap();
+    d.sheets[1].views.push(section);
+
+    let changed = box_part(&k, "block", Vec3::new(40.0, 30.0, 30.0));
+    let report = update_from_model(&mut d, &changed).unwrap();
+    assert_eq!(report.dangling_views[0].view, id);
+    let section = d.view(id).unwrap();
+    assert_eq!(section.geometry, saved_geometry);
+    let ViewKind::Section { line: moved, .. } = &section.kind else { panic!("saved section") };
+    for (before, after) in line.iter().zip(moved) {
+        assert_eq!(after.u, before.u);
+        assert!((after.v - before.v + 10.0 * parent.xf.scale).abs() < 1e-6);
+    }
+    export::check_sheet(&d, &d.sheets[0]).unwrap();
+    assert!(layout_sheet(&d, 0).items.iter().any(|item| item.role() == Role::CuttingPlane));
 }
 
 #[test]
@@ -197,7 +301,8 @@ fn drawing_roundtrip(d: &Drawing) -> Drawing {
 
 #[test]
 fn parent_crop_refreshes_nested_details_across_sheets_history_and_save() {
-    let k = BoxKernel::new();
+    let mut k = BoxKernel::new();
+    k.detail_strokes = true;
     let part = box_part(&k, "block", Vec3::new(40.0, 30.0, 10.0));
     for sheet in [0, 1] {
         let mut d = drawing(&part);
@@ -264,7 +369,8 @@ fn same_revision_rebuild_repairs_an_obsolete_fine_detail_cache() {
 
 #[test]
 fn detail_updates_preserve_coarse_and_fine_quality() {
-    let k = BoxKernel::new();
+    let mut k = BoxKernel::new();
+    k.detail_strokes = true;
     let mut part = box_part(&k, "block", Vec3::new(40.0, 30.0, 10.0));
     let mut d = drawing(&part);
     let mut stack = UndoStack::new();
@@ -473,8 +579,102 @@ fn a_detail_on_sheet_two_and_its_parent_point_at_each_other() {
 }
 
 #[test]
-fn the_dxf_keeps_dimensions_and_hatches_as_such() {
+fn unmarked_circular_hatch_boundaries_are_approximate_after_sampling() {
+    use soliddraft_kernel_api::drawing::{Curve3, CurveSource, CutRegion, ViewCurve, ViewSpec};
+    let frame = ViewSpec::new(Vec3::Z, Vec3::Y).frame().unwrap();
+    let xf = project::ViewTransform { frame, scale: 1.0, centre: Point2::new(0.0, 0.0) };
+    let circle = |radius| {
+        ViewCurve::new(Curve3::Circle { center: Vec3::ZERO, normal: Vec3::Z, radius }, CurveSource::Unknown, true)
+    };
+    let region = CutRegion { outer: vec![circle(10.0)], holes: vec![vec![circle(4.0)]] };
+    let polygon = project::region_polygon(&region, &xf, None);
+    assert!(polygon.outer.len() > 4 && polygon.holes[0].len() > 4);
+    assert!(polygon.approximate);
+}
+
+#[test]
+fn dxf_marks_the_polygon_used_to_clip_a_circular_hatch() {
     let k = BoxKernel::new();
+    let mut drawing = drawing(&box_part(&k, "block", Vec3::new(40.0, 30.0, 10.0)));
+    let view = drawing.view_mut(FRONT).unwrap();
+    view.geometry.hatch.push(soliddraft_drawing::Polygon {
+        outer: vec![
+            Point2::new(-10.0, -10.0),
+            Point2::new(10.0, -10.0),
+            Point2::new(10.0, 10.0),
+            Point2::new(-10.0, 10.0),
+        ],
+        clip: Some(Boundary::Circle { center: Point2::new(0.0, 0.0), radius: 4.0 }),
+        ..Default::default()
+    });
+    let list = layout_sheet(&drawing, 0);
+    assert_eq!(list.hatches[0].loops[0].len(), 96);
+    assert_eq!(list.dxf_accuracy().approximate, 1);
+}
+
+fn fitted_hatch(d: &mut Drawing, xf: &project::ViewTransform) -> soliddraft_drawing::display::DisplayList {
+    use soliddraft_kernel_api::drawing::{Curve3, CurveSource, CutRegion, ViewCurve};
+    let square = [(-8.0, -8.0), (8.0, -8.0), (8.0, 8.0), (-8.0, 8.0)];
+    let point = |(u, v)| xf.unproject(Point2::new(u, v));
+    let outer = (0..4)
+        .map(|i| ViewCurve {
+            approximate: i == 0,
+            ..ViewCurve::new(
+                Curve3::Line { a: point(square[i]), b: point(square[(i + 1) % 4]) },
+                CurveSource::Unknown,
+                true,
+            )
+        })
+        .collect();
+    let cut = CutRegion { outer, holes: Vec::new() };
+    let clip = Boundary::rectangle(Point2::new(-5.0, -5.0), Point2::new(5.0, 5.0));
+    let polygon = project::region_polygon(&cut, xf, Some(clip));
+    d.view_mut(FRONT).unwrap().geometry.hatch.push(polygon);
+    let meta = soliddraft_drawing::file::FileMeta::new("test", d.meta.units);
+    let bytes = soliddraft_drawing::file::to_bytes(d, &meta).unwrap();
+    let (d, _) = soliddraft_drawing::file::from_bytes(&bytes).unwrap();
+    layout_sheet(&d, 0)
+}
+
+fn fitted_hatch_fixture() -> soliddraft_drawing::display::DisplayList {
+    let mut k = BoxKernel::new();
+    k.detail_strokes = true;
+    let part = box_part(&k, "block", Vec3::new(40.0, 30.0, 10.0));
+    let mut d = drawing(&part);
+    let index = PartIndex::build(&part).unwrap();
+    let ctx = derived::context(&d, &part, &index, FRONT).unwrap();
+    fitted_hatch(&mut d, &ctx.xf)
+}
+
+#[test]
+fn fitted_hatch_reports_approximation_in_svg() {
+    let list = fitted_hatch_fixture();
+    let svg = export::svg(&list);
+    assert_eq!(list.accuracy().approximate, 1);
+    assert!(svg.contains(r#"data-accuracy="approximate""#));
+}
+
+#[test]
+fn fitted_hatch_reports_approximation_in_pdf() {
+    let list = fitted_hatch_fixture();
+    let pdf = export::pdf(std::slice::from_ref(&list), &export::PdfInfo::default()).unwrap();
+    assert!(pdf.starts_with(b"%PDF-"));
+    assert_eq!(list.accuracy().approximate, 1);
+}
+
+#[test]
+fn fitted_hatch_reports_approximation_in_dxf() {
+    let list = fitted_hatch_fixture();
+    let bytes = export::dxf(&list).unwrap();
+    let counts = export::dxf::count_entities(&bytes).unwrap();
+    assert_eq!(counts.get("HATCH/HATCH"), Some(&1), "{counts:?}");
+    assert_eq!(list.dxf_accuracy().approximate, 1);
+}
+
+#[test]
+fn the_dxf_keeps_dimensions_and_hatches_as_such() {
+    let mut k = BoxKernel::new();
+    k.detail_strokes = true;
     let part = box_part(&k, "block", Vec3::new(40.0, 30.0, 10.0));
     let mut d =
         soliddraft_drawing::make_drawing(&part, &NewDrawing { model_items: true, ..new_drawing() }).unwrap().drawing;
@@ -491,12 +691,8 @@ fn the_dxf_keeps_dimensions_and_hatches_as_such() {
     )
     .unwrap();
     apply(&mut d, &Command::AddAnnotation { annotation: set }).unwrap();
-    // A hatched square on the front view, as a section would have.
-    let square = vec![Point2::new(-5.0, -5.0), Point2::new(5.0, -5.0), Point2::new(5.0, 5.0), Point2::new(-5.0, 5.0)];
-    d.view_mut(FRONT).unwrap().geometry.hatch.push(Polygon { outer: square, holes: Vec::new(), clip: None });
-    let list = layout_sheet(&d, 0);
+    let list = fitted_hatch(&mut d, &ctx.xf);
     assert!(list.items.iter().any(|i| i.role() == Role::Hatch));
-    assert_eq!(list.hatches.len(), 1);
     let bytes = export::dxf(&list).unwrap();
     let counts = export::dxf::count_entities(&bytes).unwrap();
     assert_eq!(counts.get("HATCH/HATCH"), Some(&1), "{counts:?}");
@@ -518,4 +714,154 @@ fn the_dxf_keeps_dimensions_and_hatches_as_such() {
             < 1e-9
     );
     assert!(back.blocks().any(|b| b.name == ordinate.dimension_base.block_name));
+}
+
+#[test]
+fn export_accuracy_counts_printed_paths_only() {
+    use soliddraft_drawing::Accuracy;
+
+    let k = BoxKernel::new();
+    let part = box_part(&k, "block", Vec3::new(40.0, 30.0, 10.0));
+    let mut drawing = drawing(&part);
+    let view = drawing.view_mut(FRONT).unwrap();
+    let hidden = view.geometry.curves.iter_mut().find(|curve| !curve.visible).unwrap();
+    hidden.accuracy = Accuracy::Exact;
+    hidden.path = kurbo::BezPath::from_svg("M 0 0 C 0 5 5 10 10 10").unwrap();
+    assert_eq!(view.geometry.accuracy().approximate, 1);
+    assert_eq!(layout_sheet(&drawing, 0).accuracy().approximate, 1);
+    drawing.view_mut(FRONT).unwrap().display.hidden = HiddenLines::Removed;
+    let layout = layout_sheet(&drawing, 0);
+    assert_eq!(layout.accuracy().approximate, 0);
+    assert!(layout.accuracy().exact + layout.accuracy().polygon > 0);
+}
+
+#[test]
+fn unsupported_views_use_mesh_only_for_preview() {
+    use soliddraft_drawing::DrawingError;
+    use soliddraft_kernel_api::{
+        KernelError,
+        drawing::{StandardView, ViewSpec},
+    };
+
+    let mut k = BoxKernel::new();
+    k.unsupported_view = true;
+    let mut part = box_part(&k, "block", Vec3::new(40.0, 30.0, 10.0));
+    let spec = ViewSpec::standard(StandardView::Front);
+    assert!(matches!(project::view_curves(&part, &spec), Err(DrawingError::Kernel(KernelError::Unsupported(_)))));
+    part.preview = true;
+    let view = project::view_curves(&part, &spec).unwrap();
+    assert!(view.unproved && !view.catallax && !view.curves.is_empty());
+}
+
+#[test]
+fn export_refuses_unmarked_saved_crops_even_when_proved() {
+    let k = BoxKernel::new();
+    let part = box_part(&k, "block", Vec3::new(40.0, 30.0, 10.0));
+    let mut drawing = drawing(&part);
+    run(&mut UndoStack::new(), &mut drawing, &part, Command::SetViewCrop { view: FRONT, crop: Some(left_half()) });
+    for view in &mut drawing.sheets[0].views {
+        assert!(!view.geometry.unproved);
+        view.geometry.catallax = false;
+    }
+    let saved = drawing_roundtrip(&drawing);
+    let list = layout_sheet(&saved, 0);
+    let path = std::env::temp_dir().join(format!("soliddraft-legacy-crop-{}.svg", std::process::id()));
+    let errors = [
+        export::write(&list, export::Format::Svg, "Box", &path).unwrap_err(),
+        export::pdf(std::slice::from_ref(&list), &export::PdfInfo::default()).unwrap_err(),
+        export::dxf(&list).unwrap_err(),
+    ];
+    for error in errors {
+        assert!(error.to_string().contains("Front view") && error.to_string().contains("Redraw it once"));
+    }
+    assert!(!path.exists());
+    assert_eq!(saved.view(FRONT).unwrap().crop, Some(left_half()));
+}
+
+#[test]
+fn export_refuses_geometry_regenerated_against_an_unaccepted_revision() {
+    let k = BoxKernel::new();
+    let old = box_part(&k, "block", Vec3::new(40.0, 30.0, 10.0));
+    let current = box_part(&k, "block", Vec3::new(60.0, 30.0, 10.0));
+    let mut drawing = drawing(&old);
+    run(&mut UndoStack::new(), &mut drawing, &current, Command::SetViewCrop { view: FRONT, crop: Some(left_half()) });
+    assert_eq!(drawing.model.pinned, old.digest);
+    assert_eq!(drawing.view(FRONT).unwrap().geometry.source_digest, current.digest.as_str());
+    for view in &mut drawing.sheets[0].views {
+        view.geometry.catallax = true;
+    }
+    assert!(export::check_sheet(&drawing, &drawing.sheets[0]).unwrap_err().to_string().contains("accepted revision"));
+}
+
+#[test]
+fn export_preserves_a_frozen_detail_after_rebuild_and_reopen() {
+    use soliddraft_drawing::display::Owner;
+
+    let k = BoxKernel::new();
+    let old = box_part(&k, "block", Vec3::new(40.0, 30.0, 10.0));
+    let new = box_part(&k, "block", Vec3::new(60.0, 30.0, 10.0));
+    let mut drawing = drawing(&old);
+    let mut stack = UndoStack::new();
+    let detail = corner_detail(&mut drawing, &old, &mut stack, FRONT, 0);
+    let detail_item =
+        |item: &Item| matches!(item, Item::Path(p) if matches!(p.owner, Owner::Curve(id, _) if id == detail));
+    let mut earlier = layout_sheet(&drawing, 0);
+    earlier.items.retain(detail_item);
+    assert!(!earlier.items.is_empty());
+    let expected = export::svg(&earlier);
+    drawing.view_mut(detail).unwrap().excluded_from_update = true;
+    let list = layout_sheet(&drawing, 0);
+    let written = String::from_utf8(export::bytes(&list, export::Format::Svg, "Box").unwrap()).unwrap();
+    for path in expected.lines().filter(|line| line.starts_with("<path ")) {
+        assert!(written.lines().any(|line| line == path), "missing saved detail path {path}");
+    }
+    run(&mut stack, &mut drawing, &new, Command::SetViewCrop { view: FRONT, crop: Some(left_half()) });
+    update_from_model(&mut drawing, &new).unwrap();
+    for view in &mut drawing.sheets[0].views {
+        view.geometry.catallax = true;
+    }
+
+    for saved in [&drawing, &drawing_roundtrip(&drawing)] {
+        assert_ne!(saved.view(detail).unwrap().geometry.source_digest, saved.model.pinned.as_str());
+        let list = layout_sheet(saved, 0);
+        assert_eq!(
+            list.printable().filter(|item| detail_item(item)).collect::<Vec<_>>(),
+            earlier.items.iter().collect::<Vec<_>>()
+        );
+        for format in export::Format::ALL {
+            assert!(!export::bytes(&list, format, "Box").unwrap().is_empty());
+        }
+    }
+}
+
+#[test]
+fn detail_uses_its_own_tangents_and_seams_inside_the_parent_crop() {
+    use soliddraft_drawing::{CurveKind, TangentEdges};
+
+    let mut k = BoxKernel::new();
+    k.detail_strokes = true;
+    let part = box_part(&k, "block", Vec3::new(40.0, 30.0, 10.0));
+    let mut drawing = drawing(&part);
+    let mut stack = UndoStack::new();
+    let detail = corner_detail(&mut drawing, &part, &mut stack, FRONT, 0);
+    let flags = |d: &Drawing, id| {
+        let curves = &d.view(id).unwrap().geometry.curves;
+        (curves.iter().any(|c| c.tangent), curves.iter().any(|c| c.kind == CurveKind::Seam))
+    };
+    let set = |d: &mut Drawing, stack: &mut UndoStack, view, enabled| {
+        let mut display = d.view(view).unwrap().display;
+        display.tangent = if enabled { TangentEdges::Phantom } else { TangentEdges::Removed };
+        display.seams = enabled;
+        run(stack, d, &part, Command::SetViewDisplay { view, display });
+    };
+    set(&mut drawing, &mut stack, detail, true);
+    assert_eq!(flags(&drawing, FRONT), (false, false));
+    assert_eq!(flags(&drawing, detail), (true, true));
+    run(&mut stack, &mut drawing, &part, Command::SetViewCrop { view: FRONT, crop: Some(left_half()) });
+    assert_eq!(flags(&drawing, detail), (false, false));
+    run(&mut stack, &mut drawing, &part, Command::SetViewCrop { view: FRONT, crop: None });
+    set(&mut drawing, &mut stack, FRONT, true);
+    set(&mut drawing, &mut stack, detail, false);
+    assert_eq!(flags(&drawing, FRONT), (true, true));
+    assert_eq!(flags(&drawing, detail), (false, false));
 }

@@ -1,7 +1,4 @@
-//! An exported drawing never comes from a preview. The drawing tab shows views drawn
-//! from Catallax's unproved preview mesh, which the drawing writers refuse. Exporting
-//! draws the views again from the certified mesh, on a copy, and leaves the drawing on
-//! screen as it was.
+//! Sheet exports write the saved Catallax line work.
 
 use serde_json::{Value, json};
 use soliddraft_app::app_tools::AppTools;
@@ -10,76 +7,153 @@ use soliddraft_app::drawing::part::PartContext;
 use soliddraft_app::state::AppState;
 use soliddraft_assistant::Caller;
 use soliddraft_assistant::tools::call_checked;
-use soliddraft_drawing::display::layout_sheet;
-use soliddraft_drawing::export::{self, Format};
-use soliddraft_drawing::{Command, Drawing, DrawingError, apply_with};
+use soliddraft_drawing::{Command, Drawing, apply_with};
 
 mod gated;
 
 /// The hang guard every test shares: a wait this long means stuck, not slow.
 const HANG: std::time::Duration = std::time::Duration::from_secs(600);
 
-fn call(state: &mut AppState, name: &str, arguments: Value) {
+fn call(state: &mut AppState, name: &str, arguments: Value) -> Value {
     let caller = Caller::Mcp { client: "test".into() };
     let out = call_checked(&mut AppTools { state }, name, arguments, &caller);
     assert!(!out.is_error, "{name}: {}", out.content);
-}
-
-fn previews(drawing: &Drawing) -> Vec<bool> {
-    drawing.sheets.iter().flat_map(|s| &s.views).map(|v| v.geometry.unproved).collect()
-}
-
-/// How many of a drawing's views say they were drawn from a certified mesh.
-fn proved_views(drawing: &Drawing) -> usize {
-    previews(drawing).into_iter().filter(|preview| !preview).count()
-}
-
-/// How many certified meshes the drawing's view projections asked the kernel for, in the
-/// calls `kernel` logged since it was last asked. A view may say it is certified only
-/// when its projection read one: a preview must never be labelled as proved.
-fn certified_view_meshes(kernel: &soliddraft_kernel_catallax::CatallaxKernel) -> usize {
-    let calls = kernel.take_diagnostics().unwrap();
-    calls["calls"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .filter(|c| c["operation"] == "tessellate" && c["log_scope"] == "view_curves")
-        .count()
+    serde_json::from_str(&out.content).unwrap()
 }
 
 #[test]
-fn an_exported_drawing_never_comes_from_a_preview() {
-    let dir = std::env::temp_dir().join(format!("soliddraft-drawing-proof-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
-    let mut state = AppState::new(board_bracket());
-    call(&mut state, "make_drawing", json!({ "template": "iso-a3" }));
+fn rebuild_names_a_broken_out_cut_that_no_longer_reaches_the_part() {
+    use soliddraft_app::document::Document;
+    use soliddraft_drawing::{Boundary, BrokenOut};
+    use soliddraft_kernel_api::Point2;
+    use soliddraft_kernel_api::drawing::StandardView;
+    use std::sync::Arc;
 
-    // The screen shows previews, and no writer takes them as they are.
-    let shown = state.drawing.session.as_ref().unwrap().doc.drawing.clone();
-    assert!(!previews(&shown).is_empty() && previews(&shown).iter().all(|p| *p), "{:?}", previews(&shown));
-    let list = layout_sheet(&shown, 0);
-    for format in [Format::Pdf, Format::Dxf, Format::Svg] {
-        assert!(matches!(export::bytes(&list, format, "Part1"), Err(DrawingError::Unproved)), "{format:?}");
+    let kernel = Arc::new(soliddraft_kernel_catallax::CatallaxKernel::new());
+    let mut state = AppState::new(Document::new("Plate", kernel));
+    call(
+        &mut state,
+        "sketch",
+        json!({"plane":"top","shapes":[{"shape":"rectangle","center":[0,0,0],"width":40,"height":30}]}),
+    );
+    call(&mut state, "extrude", json!({"sketch":"Sketch1","depth":10,"flip":false}));
+    call(&mut state, "make_drawing", json!({"template":"iso-a3"}));
+    call(&mut state, "drawing_auto_update", json!({"on":false}));
+    let ctx = PartContext::new(&state.doc).unwrap();
+    let session = state.drawing.session.as_mut().unwrap();
+    let view = session
+        .sheet()
+        .views
+        .iter()
+        .find(|view| {
+            soliddraft_drawing::project::spec_in(&session.doc.drawing, 0, view).is_some_and(|spec| {
+                spec.direction == soliddraft_kernel_api::drawing::ViewSpec::standard(StandardView::Top).direction
+            })
+        })
+        .unwrap();
+    let name = soliddraft_drawing::project::view_label_in(&session.doc.drawing, session.sheet(), view);
+    let view = view.id;
+    let command = Command::AddBrokenOut {
+        view,
+        broken_out: BrokenOut {
+            boundary: Boundary::rectangle(Point2::new(-4.0, -4.0), Point2::new(4.0, 4.0)),
+            depth: 7.0,
+        },
+    };
+    session.doc.apply(command, Some(&ctx)).unwrap();
+    call(&mut state, "drawing_show_part", json!({}));
+    call(&mut state, "edit_extrude", json!({"feature":"Boss-Extrude1","depth":5,"flip":false}));
+
+    let caller = Caller::Mcp { client: "test".into() };
+    let out = call_checked(&mut AppTools { state: &mut state }, "drawing_rebuild", json!({}), &caller);
+    assert!(!out.is_error, "{}", out.content);
+    let reply: Value = serde_json::from_str(&out.content).unwrap();
+    let cause = "the cutting plane is behind the whole body";
+    assert!(reply["done"].as_str().is_some_and(|message| message.contains(&name) && message.contains(cause)));
+    assert_eq!(reply["drawing"]["up_to_date"], false);
+    let refusal = &reply["drawing"]["refused_views"][0];
+    assert_eq!(refusal["name"], name);
+    let refused_view = reply["drawing"]["sheets"][0]["views"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|view| view["id"] == refusal["id"])
+        .unwrap();
+    assert_eq!(refused_view["up_to_date"], false);
+    assert!(refusal["cause"].as_str().is_some_and(|message| message.contains(cause)));
+    assert!(state.drawing.session.as_ref().unwrap().has_issues());
+    let status = soliddraft_app::drawing::status(&state).unwrap();
+    assert!(status.headline.0.contains(&name) && status.headline.0.contains(cause));
+
+    let session = state.drawing.session.as_mut().unwrap();
+    let error = session.doc.apply(Command::SetViewExcluded { view, excluded: true }, None).unwrap_err();
+    assert!(error.contains(&name) && error.contains(cause), "{error}");
+    assert!(!session.doc.drawing.view(view).unwrap().excluded_from_update);
+    let report = call(&mut state, "drawing_rebuild", json!({}));
+    assert!(report["done"].as_str().is_some_and(|message| message.contains(&name) && message.contains(cause)));
+
+    use soliddraft_app::drawing::{DrawingSession, document::DrawingDoc};
+    use soliddraft_drawing::file::{FileMeta, from_bytes, to_bytes};
+    let drawing = &state.drawing.session.as_ref().unwrap().doc.drawing;
+    let bytes = to_bytes(drawing, &FileMeta::new("Catallax", drawing.meta.units)).unwrap();
+    let (reopened, _) = from_bytes(&bytes).unwrap();
+    state.drawing.session = Some(DrawingSession::new(DrawingDoc::new(reopened)));
+    let session = state.drawing.session.as_ref().unwrap();
+    assert!(session.has_issues());
+    assert!(!session.is_up_to_date());
+    assert!(soliddraft_app::drawing::status(&state).unwrap().headline.0.contains("needs a rebuild"));
+}
+
+/// How many views Catallax drew as hidden-line views, in the calls `kernel` logged since
+/// it was last asked. A view may say it is proved only when its projection came from
+/// one: a preview must never be labelled as proved.
+fn certified_views(kernel: &soliddraft_kernel_catallax::CatallaxKernel) -> usize {
+    let calls = kernel.take_diagnostics().unwrap();
+    calls["calls"].as_array().unwrap().iter().filter(|c| exact_view(c)).count()
+}
+
+fn finish_viewport_work(state: &mut AppState) {
+    let projection = soliddraft_tessellation::Projection::Orthographic { pixels_per_mm: 1.0 };
+    let started = std::time::Instant::now();
+    while state.doc.update_display(&projection, 0.016) && state.doc.display_quality().pending() {
+        assert!(started.elapsed() < HANG, "the viewport worker did not answer");
+        std::thread::sleep(std::time::Duration::from_millis(10));
     }
+    assert!(!state.doc.display_quality().pending(), "the viewport worker stopped with pending work");
+}
 
-    // The same views drawn from the certified mesh are proven and can be written.
-    let part = PartContext::new(&state.doc).unwrap();
-    let mut certified = shown.clone();
-    apply_with(&mut certified, &Command::UpdateFromModel, &part.certified_part()).unwrap();
-    assert!(previews(&certified).iter().all(|p| !p), "{:?}", previews(&certified));
-    assert!(export::bytes(&layout_sheet(&certified, 0), Format::Svg, "Part1").is_ok());
-
-    // So exporting succeeds only by drawing the views again from the certified mesh,
-    // and the drawing on screen keeps its previews.
-    for (tool, file) in
-        [("drawing_export_pdf", "sheet.pdf"), ("drawing_export_dxf", "sheet.dxf"), ("drawing_export_svg", "sheet.svg")]
-    {
-        call(&mut state, tool, json!({ "path": dir.join(file) }));
-        assert!(dir.join(file).is_file(), "{tool} wrote no {file}");
+fn assert_no_drawing_queries(kernel: &soliddraft_kernel_catallax::CatallaxKernel) {
+    let log = kernel.take_diagnostics().unwrap();
+    for call in log["calls"].as_array().unwrap() {
+        assert!(
+            !matches!(
+                call["operation"].as_str(),
+                Some(
+                    "view_curves"
+                        | "section_view"
+                        | "silhouette_curves"
+                        | "section_curves"
+                        | "edge_curve"
+                        | "face_loops"
+                        | "lines_and_arcs"
+                        | "preview"
+                        | "preview_edges"
+                        | "tessellate"
+                        | "tessellate_edges"
+                )
+            ),
+            "export ran a drawing query: {call}"
+        );
     }
-    assert_eq!(state.drawing.session.as_ref().unwrap().doc.drawing, shown);
-    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A top-level view call whose operation log holds Catallax's hidden-line view.
+fn exact_view(call: &Value) -> bool {
+    call["operation"] == "view_curves"
+        && call["nested"] == false
+        && call["operation_log"]["operations"]
+            .as_array()
+            .is_some_and(|log| log.iter().any(|e| e["operation"] == "view_curves" && e["status"] == "answered"))
 }
 
 #[test]
@@ -121,10 +195,10 @@ fn drawings_never_pair_requested_definitions_with_a_retained_body() {
     let part = PartContext::new(&state.doc).unwrap();
     let mut certified = state.drawing.session.as_ref().unwrap().doc.drawing.clone();
     certified.settings.automatic_update = true;
-    apply_with(&mut certified, &Command::UpdateFromModel, &part.certified_part()).unwrap();
+    apply_with(&mut certified, &Command::UpdateFromModel, &part.part()).unwrap();
     state.drawing.session.as_mut().unwrap().doc.drawing = certified.clone();
     call(&mut state, "drawing_export_svg", json!({ "path": dir.join("proved.svg") }));
-    let proved_svg = std::fs::read(dir.join("proved.svg")).unwrap();
+    assert!(dir.join("proved.svg").is_file());
 
     state.drag_dimension(DragStep::Start { feature: block, dimension: Dimension::Depth });
     state.drag_dimension(DragStep::Move(14.0));
@@ -143,10 +217,9 @@ fn drawings_never_pair_requested_definitions_with_a_retained_body() {
     let session = state.drawing.session.as_ref().unwrap();
     assert_eq!(session.doc.drawing, certified);
     assert_eq!(session.doc.seen_digest, certified.model.pinned);
-    // Already-certified views remain deliberately pinned; export does not recertify
-    // them against the pending definition or silently substitute another body.
-    call(&mut state, "drawing_export_svg", json!({ "path": dir.join("pending-pinned.svg") }));
-    assert_eq!(std::fs::read(dir.join("pending-pinned.svg")).unwrap(), proved_svg);
+    let pending_path = dir.join("pending-pinned.svg");
+    call(&mut state, "drawing_export_svg", json!({ "path": pending_path }));
+    assert_eq!(std::fs::read(pending_path).unwrap(), std::fs::read(dir.join("proved.svg")).unwrap());
 
     settle(&mut state);
     let part = PartContext::new(&state.doc).unwrap();
@@ -184,8 +257,66 @@ fn drawings_never_pair_requested_definitions_with_a_retained_body() {
     std::fs::remove_dir_all(dir).unwrap();
 }
 
+fn assert_rod_circle(path: &std::path::Path, drawing: &Drawing) {
+    use kurbo::{BezPath, PathEl, Rect, Shape};
+    use quick_xml::events::Event;
+
+    let (view, radius) = drawing.sheets[0]
+        .views
+        .iter()
+        .find_map(|view| {
+            let spec = soliddraft_drawing::project::view_spec(drawing, view.id).ok()?;
+            (spec.direction == soliddraft_kernel_api::Vec3::Z)
+                .then(|| (view, soliddraft_drawing::project::scale_in(drawing, 0, view)))
+        })
+        .expect("the rod has a top view");
+    let svg = std::fs::read_to_string(path).unwrap();
+    let mut xml = quick_xml::Reader::from_str(&svg);
+    let mut centre = None;
+    let mut rim = None::<Rect>;
+    loop {
+        match xml.read_event().unwrap() {
+            Event::Start(el) if el.name().as_ref() == b"svg" => {
+                let view_box = el.try_get_attribute("viewBox").unwrap().unwrap();
+                let values: Vec<f64> = std::str::from_utf8(&view_box.value)
+                    .unwrap()
+                    .split_whitespace()
+                    .map(|v| v.parse().unwrap())
+                    .collect();
+                centre = Some(kurbo::Point::new(view.position.u, values[3] - view.position.v));
+            }
+            Event::Empty(el) if el.name().as_ref() == b"path" => {
+                let Some(accuracy) = el.try_get_attribute("data-accuracy").unwrap() else { continue };
+                if accuracy.value.as_ref() == b"polygon" {
+                    continue;
+                }
+                let d = el.try_get_attribute("d").unwrap().unwrap();
+                let path = BezPath::from_svg(std::str::from_utf8(&d.value).unwrap()).unwrap();
+                let bbox = path.bounding_box();
+                let c = centre.expect("the sheet has a viewBox");
+                let target = Rect::new(c.x - radius, c.y - radius, c.x + radius, c.y + radius).inflate(0.005, 0.005);
+                if path.elements().iter().any(|el| matches!(el, PathEl::CurveTo(..)))
+                    && target.contains(bbox.origin())
+                    && target.contains(kurbo::Point::new(bbox.x1, bbox.y1))
+                {
+                    rim = Some(rim.map_or(bbox, |other| other.union(bbox)));
+                }
+            }
+            Event::Eof => break,
+            _ => {}
+        }
+    }
+    let bounds = rim.expect("the 2 mm rod rim is drawn with curved paths");
+    let c = centre.unwrap();
+    for (got, want) in
+        [(bounds.x0, c.x - radius), (bounds.x1, c.x + radius), (bounds.y0, c.y - radius), (bounds.y1, c.y + radius)]
+    {
+        assert!((got - want).abs() < 0.005, "rod rim {bounds:?} at {c:?}, radius {radius}");
+    }
+}
+
 #[test]
-fn a_certified_coarse_rod_cut_is_redrawn_at_fine_quality_for_export() {
+fn a_rod_cut_exports_the_saved_catallax_views() {
     use soliddraft_app::document::Document;
     use soliddraft_kernel_catallax::CatallaxKernel;
     use std::sync::Arc;
@@ -202,25 +333,14 @@ fn a_certified_coarse_rod_cut_is_redrawn_at_fine_quality_for_export() {
         }
         call(&mut state, tool, step["arguments"].clone());
     }
+    finish_viewport_work(&mut state);
     kernel.take_diagnostics().unwrap();
     call(&mut state, "make_drawing", json!({ "template": "iso-a3" }));
     let shown = state.drawing.session.as_ref().unwrap().doc.drawing.clone();
     let views = shown.sheets[0].views.len();
     assert_eq!(views, 4);
-    // The screen draws at coarse quality from whatever Catallax gives it: since Catallax
-    // 9566aa24 the unproved preview of this body, which earlier pins refused, so the screen
-    // borrowed the certified mesh instead. Whichever it is, a view says it is proved only
-    // when its projection read a certified mesh.
-    assert!(shown.sheets[0].views.iter().all(|v| v.geometry.coarse));
-    assert_eq!(certified_view_meshes(&kernel), proved_views(&shown), "{:?}", previews(&shown));
-
-    let part = PartContext::new(&state.doc).unwrap();
-    let mut fine = shown.clone();
-    apply_with(&mut fine, &Command::UpdateFromModel, &part.certified_part()).unwrap();
-    assert_eq!(certified_view_meshes(&kernel), views, "each fine view read a certified mesh");
-    assert!(fine.sheets[0].views.iter().all(|v| !v.geometry.unproved && !v.geometry.coarse));
-    let fine_svg = export::bytes(&layout_sheet(&fine, 0), Format::Svg, &fine.meta.title).unwrap();
-
+    assert!(shown.sheets[0].views.iter().all(|v| v.geometry.catallax && !v.geometry.unproved));
+    assert_eq!(certified_views(&kernel), views);
     for (tool, extension) in
         [("drawing_export_svg", "svg"), ("drawing_export_pdf", "pdf"), ("drawing_export_dxf", "dxf")]
     {
@@ -229,30 +349,19 @@ fn a_certified_coarse_rod_cut_is_redrawn_at_fine_quality_for_export() {
         let out = call_checked(&mut AppTools { state: &mut state }, tool, json!({ "path": path }), &caller);
         assert!(!out.is_error, "{tool}: {}", out.content);
         let result: Value = serde_json::from_str(&out.content).unwrap();
-        assert_eq!(result["redrawn_from_certified_mesh"], json!(views), "{tool}: {result}");
+        assert_eq!(result["views"], json!(views), "{tool}: {result}");
+        assert_eq!(result["method"], "catallax");
         assert!(path.is_file());
     }
-    assert_eq!(std::fs::read(dir.join("rod.svg")).unwrap(), fine_svg);
+    assert_rod_circle(&dir.join("rod.svg"), &shown);
     assert_eq!(state.drawing.session.as_ref().unwrap().doc.drawing, shown);
 
-    state.drawing.session.as_mut().unwrap().doc.drawing = fine;
-    let calls = kernel.take_diagnostics().unwrap();
-    assert!(calls["calls"].as_array().unwrap().iter().any(|c| c["operation"] == "view_curves"));
-    call(&mut state, "drawing_export_svg", json!({ "path": dir.join("fine.svg") }));
-    let calls = kernel.take_diagnostics().unwrap();
-    assert!(
-        !calls["calls"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|c| matches!(c["operation"].as_str(), Some("view_curves" | "tessellate")))
-    );
-    assert_eq!(std::fs::read(dir.join("fine.svg")).unwrap(), fine_svg);
+    assert_no_drawing_queries(&kernel);
     std::fs::remove_dir_all(dir).unwrap();
 }
 
 #[test]
-fn a_saved_rod_cache_without_quality_is_regenerated_after_reopening() {
+fn a_legacy_rod_cache_refuses_export_until_explicit_rebuild() {
     const SENTINEL_BOX: [f64; 4] = [-12345.5, -12345.5, 12345.5, 12345.5];
     use soliddraft_app::document::Document;
     use soliddraft_document::manifest::{self, Entry, Package};
@@ -274,9 +383,6 @@ fn a_saved_rod_cache_without_quality_is_regenerated_after_reopening() {
     call(&mut state, "make_drawing", json!({ "template": "iso-a3" }));
     let path = dir.join("old.dwdrw");
     call(&mut state, "drawing_save", json!({ "path": path }));
-    let saved = previews(&state.drawing.session.as_ref().unwrap().doc.drawing);
-
-    // Generate the cache format written before quality was stored separately from proof.
     let bytes = std::fs::read(&path).unwrap();
     let mut package = Package::from_bytes(&bytes).unwrap();
     let mut entries = Vec::new();
@@ -284,9 +390,11 @@ fn a_saved_rod_cache_without_quality_is_regenerated_after_reopening() {
         let mut bytes = package.read(&name).unwrap().unwrap();
         if name.starts_with("cache/views/") {
             let mut geometry: Value = serde_json::from_slice(&bytes).unwrap();
-            assert_eq!(geometry.as_object_mut().unwrap().remove("coarse"), Some(json!(true)));
+            assert_eq!(geometry.as_object_mut().unwrap().remove("catallax"), Some(json!(true)));
             // A sentinel no projection makes: a view still carrying it was not drawn again.
             geometry["bbox"] = json!(SENTINEL_BOX);
+            geometry["curves"] = json!([]);
+            geometry.as_object_mut().unwrap().remove("unproved");
             bytes = serde_json::to_vec(&geometry).unwrap();
         }
         entries.push(Entry::new(name, bytes));
@@ -297,49 +405,152 @@ fn a_saved_rod_cache_without_quality_is_regenerated_after_reopening() {
     let kernel = Arc::new(CatallaxKernel::with_operation_log());
     let mut reopened = AppState::new(Document::new("Part1", kernel.clone()));
     call(&mut reopened, "open", json!({ "path": path }));
+    finish_viewport_work(&mut reopened);
     let shown = reopened.drawing.session.as_ref().unwrap().doc.drawing.clone();
     assert_eq!(shown.sheets[0].views.len(), 4);
-    // Opening shows the cached views as they were saved, sentinel and labels included: it
-    // draws nothing and claims no proof the cache did not record. A cache of unknown
-    // quality is drawn again only when certified line work is asked for, below.
     assert!(shown.sheets[0].views.iter().all(|v| v.geometry.bbox == SENTINEL_BOX));
-    assert_eq!(previews(&shown), saved);
-    assert_eq!(certified_view_meshes(&kernel), 0, "opening read no certified mesh");
+    assert!(shown.sheets[0].views.iter().all(|v| !v.geometry.unproved && !v.geometry.coarse));
+    assert_eq!(certified_views(&kernel), 0, "opening drew no view");
     assert_eq!(shown.model.pinned, PartContext::new(&reopened.doc).unwrap().digest);
+    let session = reopened.drawing.session.as_ref().unwrap();
+    assert!(!session.is_up_to_date());
+    assert_eq!(session.doc.stale_views().len(), 4);
     soliddraft_app::drawing::follow_part(&mut reopened);
     assert_eq!(reopened.drawing.session.as_ref().unwrap().doc.drawing, shown);
 
-    // The certified path, asked for explicitly: a fine redraw reads one certified mesh
-    // per view and every view says it is proved.
-    let part = PartContext::new(&reopened.doc).unwrap();
-    let mut fine = shown.clone();
-    apply_with(&mut fine, &Command::UpdateFromModel, &part.certified_part()).unwrap();
-    assert_eq!(certified_view_meshes(&kernel), 4, "each fine view read a certified mesh");
-    assert!(fine.sheets[0].views.iter().all(|v| !v.geometry.unproved && !v.geometry.coarse));
-    assert!(fine.sheets[0].views.iter().all(|v| v.geometry.bbox != SENTINEL_BOX), "every view was drawn again");
-
-    let mut exported = Vec::new();
+    kernel.take_diagnostics().unwrap();
+    let caller = Caller::Mcp { client: "test".into() };
     for (tool, extension) in
         [("drawing_export_svg", "svg"), ("drawing_export_pdf", "pdf"), ("drawing_export_dxf", "dxf")]
     {
-        kernel.take_diagnostics().unwrap();
-        let path = dir.join(format!("reopened.{extension}"));
-        let caller = Caller::Mcp { client: "test".into() };
+        let path = dir.join(format!("legacy.{extension}"));
         let out = call_checked(&mut AppTools { state: &mut reopened }, tool, json!({ "path": path }), &caller);
-        assert!(!out.is_error, "{tool}: {}", out.content);
-        let result: Value = serde_json::from_str(&out.content).unwrap();
-        let calls = kernel.take_diagnostics().unwrap();
-        let fine_requests = calls["calls"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .filter(|c| c["operation"] == "tessellate" && c["log_scope"] == "view_curves")
-            .count();
-        eprintln!("{tool}: redrawn={}, fine tessellations={fine_requests}", result["redrawn_from_certified_mesh"]);
-        exported.push((result["redrawn_from_certified_mesh"].clone(), fine_requests));
+        assert!(out.is_error && out.content.contains("Redraw it once"), "{tool}: {}", out.content);
+        assert!(!path.exists());
+    }
+    assert_no_drawing_queries(&kernel);
+    assert_eq!(reopened.drawing.session.as_ref().unwrap().doc.drawing, shown);
+
+    let view = shown.sheets[0].views[0].id;
+    let session = reopened.drawing.session.as_mut().unwrap();
+    session.doc.apply(Command::SetViewExcluded { view, excluded: true }, None).unwrap();
+    let path = dir.join("frozen.svg");
+    let out =
+        call_checked(&mut AppTools { state: &mut reopened }, "drawing_export_svg", json!({ "path": path }), &caller);
+    assert!(out.is_error && out.content.contains("Include the view in automatic update, then rebuild."));
+    assert!(!path.exists());
+    assert_no_drawing_queries(&kernel);
+    reopened
+        .drawing
+        .session
+        .as_mut()
+        .unwrap()
+        .doc
+        .apply(Command::SetViewExcluded { view, excluded: false }, None)
+        .unwrap();
+    call(&mut reopened, "drawing_rebuild", json!({}));
+    assert_eq!(certified_views(&kernel), 4);
+    let path = dir.join("reopened.svg");
+    call(&mut reopened, "drawing_export_svg", json!({ "path": path }));
+    assert_no_drawing_queries(&kernel);
+    assert_rod_circle(&path, &reopened.drawing.session.as_ref().unwrap().doc.drawing);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn single_sheet_exports_check_only_the_written_views() {
+    use soliddraft_app::drawing::{DrawingSession, document::DrawingDoc};
+    use soliddraft_drawing::file::{FileMeta, from_bytes, to_bytes};
+    use soliddraft_drawing::{Sheet, ViewKind, library};
+
+    let dir = std::env::temp_dir().join(format!("soliddraft-drawing-sheet-scope-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut state = AppState::new(board_bracket());
+    call(&mut state, "make_drawing", json!({ "template": "iso-a3" }));
+    let session = state.drawing.session.as_mut().unwrap();
+    let drawing = &mut session.doc.drawing;
+    let parent = drawing.sheets[0].views.iter().find_map(|v| v.parent()).unwrap();
+    let pos = drawing.sheets[0].views.iter().position(|v| v.id == parent).unwrap();
+    let parent = drawing.sheets[0].views.remove(pos);
+    let mut unrelated = parent.clone();
+    unrelated.id = drawing.next_view_id();
+    unrelated.geometry.catallax = false;
+    unrelated.kind = ViewKind::Section {
+        parent: parent.id,
+        line: vec![],
+        flip: false,
+        label: "A".into(),
+        model_line: vec![],
+        hatch: None,
+    };
+    let mut other = Sheet::from_template("Other", &library::template("iso-a3").template());
+    other.views.extend([parent, unrelated]);
+    drawing.sheets.push(other);
+
+    call(&mut state, "drawing_export_svg", json!({ "path": dir.join("active.svg") }));
+    call(&mut state, "drawing_export_dxf", json!({ "path": dir.join("active.dxf") }));
+    let caller = Caller::Mcp { client: "test".into() };
+    let pdf = dir.join("all.pdf");
+    let refused =
+        call_checked(&mut AppTools { state: &mut state }, "drawing_export_pdf", json!({ "path": pdf }), &caller);
+    assert!(refused.is_error, "{}", refused.content);
+    assert!(!pdf.exists());
+
+    let session = state.drawing.session.as_mut().unwrap();
+    let old = soliddraft_drawing::ContentHash::of_bytes(b"older part");
+    session.doc.drawing.sheets[1].views.pop();
+    let frozen = &mut session.doc.drawing.sheets[1].views[0];
+    frozen.excluded_from_update = true;
+    frozen.geometry.source_digest = old.as_str().into();
+    let drawing = &session.doc.drawing;
+    let pinned = drawing.model.pinned.clone();
+    let bytes = to_bytes(drawing, &FileMeta::new("Catallax", drawing.meta.units)).unwrap();
+    let (reopened, _) = from_bytes(&bytes).unwrap();
+    let mut session = DrawingSession::new(DrawingDoc::new(reopened));
+    session.sheet = 1;
+    assert!(session.is_up_to_date());
+    state.drawing.session = Some(session);
+    for (tool, extension) in [("drawing_export_svg", "svg"), ("drawing_export_dxf", "dxf")] {
+        let path = dir.join(format!("frozen.{extension}"));
+        let report = call(&mut state, tool, json!({ "path": path }));
+        assert_eq!(report["pinned_revision"], pinned.short(), "{report}");
+        assert_eq!(report["revision"], old.as_str(), "{report}");
         assert!(path.is_file());
     }
-    assert_eq!(reopened.drawing.session.as_ref().unwrap().doc.drawing, shown);
+    let report = call(&mut state, "drawing_export_pdf", json!({ "path": pdf }));
+    let mut revisions = [old, pinned];
+    revisions.sort();
+    assert_eq!(report["revision"], Value::Null, "{report}");
+    assert_eq!(report["view_revisions"], json!(revisions), "{report}");
+
     std::fs::remove_dir_all(dir).unwrap();
-    assert!(exported.iter().all(|(redrawn, fine)| *redrawn == json!(4) && *fine == 4), "{exported:?}");
+}
+
+#[test]
+fn pdf_and_dxf_exports_report_the_single_approximate_hatch() {
+    use soliddraft_app::drawing::{DrawingSession, document::DrawingDoc};
+    use soliddraft_drawing::Polygon;
+    use soliddraft_kernel_api::Point2;
+
+    let dir = std::env::temp_dir().join(format!("soliddraft-fitted-hatch-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut drawing = soliddraft_drawing::fixture::bracket_a3();
+    for view in &mut drawing.sheets[0].views {
+        view.geometry.catallax = true;
+        view.geometry.curves.clear();
+    }
+    drawing.sheets[0].views[0].geometry.hatch.push(Polygon {
+        outer: vec![Point2::new(-5.0, -5.0), Point2::new(5.0, -5.0), Point2::new(5.0, 5.0), Point2::new(-5.0, 5.0)],
+        approximate: true,
+        ..Default::default()
+    });
+    let mut state = AppState::new(board_bracket());
+    state.drawing.session = Some(DrawingSession::new(DrawingDoc::new(drawing)));
+    for (tool, extension) in [("drawing_export_pdf", "pdf"), ("drawing_export_dxf", "dxf")] {
+        let path = dir.join(format!("hatch.{extension}"));
+        let report = call(&mut state, tool, json!({ "path": path }));
+        assert_eq!(report["accuracy"]["approximate"], 1, "{tool}: {report}");
+        assert!(path.is_file());
+    }
+    std::fs::remove_dir_all(dir).unwrap();
 }

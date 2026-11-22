@@ -20,6 +20,12 @@ fn unavailable(error: KernelError) -> BodyQueryRefusal {
     }
 }
 
+fn describe_undecided_clearance(result: &mut PairResult) {
+    if result.outcome == Outcome::Clear && result.clearance == Some(ClearanceOutcome::Undecided) {
+        result.why = "The parts are separated, but the exact clearance is undecided.".into();
+    }
+}
+
 impl AssemblyDocument {
     pub(super) fn exact_pair(
         &mut self,
@@ -55,6 +61,7 @@ impl AssemblyDocument {
             Ok(answer) => answer,
             Err(r) => {
                 result.exact_refused.push(r);
+                describe_undecided_clearance(result);
                 return;
             }
         };
@@ -115,7 +122,7 @@ impl AssemblyDocument {
         match gap {
             Some(Ok(gap)) => {
                 // A boundary distance alone cannot distinguish containment from separation.
-                if positive == Some(false) || result.outcome == Outcome::Clear {
+                if positive == Some(false) || (result.outcome == Outcome::Clear && gap.distance.lo > 0.0) {
                     result.distance = DistanceBounds { lo: gap.distance.lo, hi: Some(gap.distance.hi) };
                     if gap.zero {
                         result.outcome = Outcome::Touching;
@@ -129,11 +136,13 @@ impl AssemblyDocument {
                         Some(false) => ClearanceOutcome::Below,
                         None => ClearanceOutcome::Undecided,
                     });
-                } else if gap.zero {
+                } else if gap.zero && result.outcome != Outcome::Clear {
                     result.distance = DistanceBounds { lo: 0.0, hi: Some(0.0) };
                     result.clearance = clearance.map(|_| ClearanceOutcome::Below);
                 }
-                if clearance.is_some() && result.clearance == Some(ClearanceOutcome::Undecided) {
+                if let Some(refusal) = gap.clearance_refusal {
+                    result.exact_refused.push(refusal);
+                } else if clearance.is_some() && result.clearance == Some(ClearanceOutcome::Undecided) {
                     result.exact_refused.push(BodyQueryRefusal {
                         query: "Clearance".into(), code: "body-relation.clearance-undecided".into(),
                         message: "The clearance was not determined. The proven distance range crosses the requested clearance.".into(),
@@ -143,5 +152,6 @@ impl AssemblyDocument {
             Some(Err(r)) => result.exact_refused.push(r),
             None => {}
         }
+        describe_undecided_clearance(result);
     }
 }

@@ -11,7 +11,7 @@ use std::{collections::BTreeSet, sync::Arc, time::Instant};
 use serde_json::{Value, json};
 use soliddraft_app::{app_tools::AppTools, document::Document, state::AppState};
 use soliddraft_assistant::{Caller, tools::call_checked};
-use soliddraft_kernel_api::{BodyAccuracy, EdgeId, FaceId};
+use soliddraft_kernel_api::{Aabb, BodyAccuracy, EdgeId, FaceId, KernelError, KernelResult};
 use soliddraft_kernel_catallax::{APP_REQUEST_WORK, CatallaxKernel};
 
 #[path = "support/ui.rs"]
@@ -294,7 +294,9 @@ fn step_path(name: &str) -> std::path::PathBuf {
         .join(format!("{name}.step"))
 }
 
-fn import_exported_step(name: &str, faces: usize) {
+/// Imports a case's exported STEP file through the dialog and returns the imported body's
+/// volume, or why it has none, and its box.
+fn import_exported_step(name: &str, faces: usize) -> (KernelResult<f64>, Aabb) {
     use egui_kittest::kittest::Queryable;
     use soliddraft_app::{
         document::FeatureKind,
@@ -333,35 +335,14 @@ fn import_exported_step(name: &str, faces: usize) {
     }
     let FeatureKind::ImportStep(import) = &doc.features[0].kind else { panic!("import feature") };
     assert_eq!(import.source, std::fs::read(&path).unwrap(), "{name}: source bytes changed");
+    let measured = (doc.kernel().mass_properties(body).map(|m| m.volume), doc.kernel().topology(body).unwrap().bbox);
     case.frame(&mut app, "imported");
+    measured
 }
 
-fn refuse_exported_step_at_work_limit(name: &str) {
-    use egui_kittest::kittest::Queryable;
-    use soliddraft_app::import::report::{self, Tier};
-
-    let case = ribbon::case(&format!("fillet-roundtrip-refused-{name}"));
-    let mut app = ribbon::app(Document::new("Reimported fillets", soliddraft_app::kernel()));
-    app.state_mut().state.push(soliddraft_app::state::AppAction::ImportStep(Some(step_path(name))));
-    app.run_steps(3);
-    assert!(app.state().state.import_dialog.is_some(), "{name}: Import STEP did not open");
-    app.get_by_role_and_label(egui::accesskit::Role::Button, "Accept").click();
-    app.run_steps(3);
-
-    let state = &app.state().state;
-    assert!(state.import_dialog.is_none(), "{name}: a refused file must close its review");
-    assert!(state.doc.features.is_empty(), "{name}: a refusal published an import feature");
-    assert!(state.doc.model().live_bodies().is_empty(), "{name}: a refusal published a partial body");
-    assert!(state.doc.display_body().is_none());
-    assert_eq!(state.doc.triangle_count(), 0);
-    assert_eq!(state.doc.undo_depth(), 0, "{name}: a refusal changed the part");
-    let rows = report::rows(&state.doc, &state.import_refusals);
-    assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0].tier, Tier::Refused);
-    assert!(rows[0].feature.is_none());
-    assert_eq!(rows[0].why, "This file is too complex to open yet.");
-    case.frame(&mut app, "refused");
-}
+/// How far a STEP round trip may move each corner of the box, as the STEP import rollout's
+/// re-export check allows the volume to move.
+const ROUND_TRIP_TOLERANCE: f64 = 1e-6;
 
 /// Writes the rows where the triage reads them, then fails on any row that did not pass.
 fn report(case: &str, rows: &[Row], must_pass: impl Fn(&Row) -> bool) {
@@ -524,11 +505,26 @@ fn owner_pocket_rim_takes_r1() {
     owner_rim(1.0);
 }
 
+/// Since Catallax's check-once change (its interface note of 21 Nov 2026), reopening an
+/// exported file trusts the tolerance the file records, so the R2 round trip that used to
+/// exceed the work limit now opens within it, with every face and the same box.
 #[test]
 fn owner_pocket_rim_takes_r2() {
-    owner_rim(2.0);
-    // Catallax phase-3 I2: this export still exceeds bounded STEP admission.
-    refuse_exported_step_at_work_limit("owner-pocket-rim-r2");
+    let (mut part, rim) = owner_part();
+    let rows = vec![part.fillet_and("owner-pocket-rim", rim, 2.0, true)];
+    report("owner-pocket-rim-r2", &rows, |_| true);
+    let exported_box = part.topology().bbox;
+    let (volume, bbox) = import_exported_step("owner-pocket-rim-r2", OWNER_FACES + 6);
+    // The reimported rim is a tolerant body whose approximate display is not closed, so its
+    // mass is refused by name rather than estimated. Firstmate tracks that open display as a
+    // follow-on; until it closes, the box stands in for the volume.
+    assert!(
+        matches!(&volume, Err(KernelError::Unsupported(why)) if why == "The approximate display of this body is not closed, so its mass is not estimated."),
+        "the reimported rim's mass: {volume:?}"
+    );
+    for (got, want) in [(bbox.min, exported_box.min), (bbox.max, exported_box.max)] {
+        assert!(got.distance(want) < ROUND_TRIP_TOLERANCE, "the reimported rim keeps its box: {want:?} -> {got:?}");
+    }
 }
 
 #[test]
@@ -622,7 +618,7 @@ fn box_all_edges(radius: f64) {
     assert_eq!(edges.len(), 12);
     let rows = vec![part.fillet_and("box-all-edges", edges, radius, true)];
     report(&format!("box-all-edges-r{radius}"), &rows, |_| true);
-    import_exported_step(&format!("box-all-edges-r{radius}"), rows[0].faces);
+    let _ = import_exported_step(&format!("box-all-edges-r{radius}"), rows[0].faces);
 }
 
 #[test]

@@ -179,7 +179,7 @@ pub(super) fn hatch_items(
                 role: Role::Hatch,
                 owner: Owner::View(view.id),
                 fill: false,
-                accuracy: None,
+                accuracy: poly.approximate.then_some(super::Accuracy::Approximate),
             }));
         }
         let loops = match &clip {
@@ -195,6 +195,7 @@ pub(super) fn hatch_items(
                 loops,
                 angle: pattern.angle,
                 spacing: pattern.spacing,
+                approximate: poly.approximate || matches!(clip, Some(Boundary::Circle { .. })),
             });
         }
     }

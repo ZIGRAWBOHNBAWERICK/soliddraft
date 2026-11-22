@@ -101,6 +101,14 @@ pub enum DrawingError {
     /// The kernel failed.
     #[error("kernel: {0}")]
     Kernel(#[from] soliddraft_kernel_api::KernelError),
+    /// A named view whose drawing query failed.
+    #[error("{view}: {source}")]
+    ViewRefused {
+        /// The name on the drawing.
+        view: String,
+        /// The kernel's refusal.
+        source: soliddraft_kernel_api::KernelError,
+    },
     /// Reading or writing a file failed.
     #[error("{0}")]
     Io(String),
@@ -108,8 +116,8 @@ pub enum DrawingError {
     #[error("{0}")]
     Format(String),
     /// The views were drawn from the kernel's unproved preview, which is for the screen
-    /// only. Update them from the certified mesh before exporting.
-    #[error("the views come from an unproved preview; update them from the certified mesh to export")]
+    /// only. Update them from the kernel's exact drawing queries before exporting.
+    #[error("the views come from an unproved preview; update them from the part to export")]
     Unproved,
 }
 
@@ -195,15 +203,10 @@ impl Drawing {
         self.part_notes = part.requirements.notes.clone();
     }
 
-    /// True when the views show the part revision the drawing is pinned at: every view
-    /// that takes part in updates was made from it.
+    /// True when every view included in updates shows the drawing's pinned revision.
     pub fn views_match_pin(&self) -> bool {
         let pinned = self.model.pinned.as_str();
-        self.sheets
-            .iter()
-            .flat_map(|s| &s.views)
-            .filter(|v| !v.excluded_from_update)
-            .all(|v| v.geometry.source_digest == pinned)
+        self.sheets.iter().flat_map(|s| &s.views).all(|v| v.accepts_revision(pinned))
     }
 
     /// The view with id `id`, on any sheet.

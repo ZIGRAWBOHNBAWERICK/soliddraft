@@ -204,7 +204,10 @@ fn drawing_workspace(harness: &mut Harness<'_, SolidDraftApp>) {
     let top = session.doc.drawing.sheets[0]
         .views
         .iter()
-        .find(|v| soliddraft_drawing::project::view_label(&session.doc.drawing.sheets[0], v) == "Top view")
+        .find(|v| {
+            soliddraft_drawing::project::view_label_in(&session.doc.drawing, &session.doc.drawing.sheets[0], v)
+                == "Top view"
+        })
         .unwrap()
         .id;
     let boss = session.screen_of_model(top, Vec3::new(70.0, 45.0, 30.0)).unwrap();

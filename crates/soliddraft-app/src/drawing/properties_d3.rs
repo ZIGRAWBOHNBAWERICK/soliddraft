@@ -12,7 +12,7 @@ use crate::theme;
 use egui::{Rect, pos2, vec2};
 use soliddraft_drawing::display::{self, scale_text};
 use soliddraft_drawing::library;
-use soliddraft_drawing::project::{effective_scale, view_label};
+use soliddraft_drawing::project::effective_scale;
 use soliddraft_drawing::{
     AnnotationKind, Command, DatumRef, GdtCharacteristic, Lay, LinearOrientation, MaterialCondition, RevisionRow,
     SetKind, SurfaceProcess, TableKind, View, ViewId, ViewKind, ViewScale, next_letter,
@@ -87,8 +87,7 @@ fn simple_panel(ui: &mut egui::Ui, icon: Icon, title: &str, text: &str, actions:
 }
 
 fn view_name_of(s: &DrawingSession, view: Option<ViewId>) -> String {
-    view.and_then(|v| s.doc.drawing.sheet_of(v).and_then(|sh| sh.view(v).map(|vw| view_label(sh, vw))))
-        .unwrap_or_else(|| "click a view".into())
+    view.and_then(|v| s.doc.view_name(v)).unwrap_or_else(|| "click a view".into())
 }
 
 fn hatch_combo(ui: &mut egui::Ui, salt: &str, current: Option<&str>) -> Option<Option<String>> {
@@ -794,12 +793,7 @@ pub fn view_extras(ui: &mut egui::Ui, s: &DrawingSession, v: &View, actions: &mu
         }
     }
     for l in labels.iter().filter(|l| l.parent == id && l.view_sheet != l.parent_sheet) {
-        let name = s
-            .doc
-            .drawing
-            .sheet_of(l.view)
-            .and_then(|sh| sh.view(l.view).map(|c| view_label(sh, c)))
-            .unwrap_or_default();
+        let name = s.doc.view_name(l.view).unwrap_or_default();
         value_row(ui, "Child", &format!("{name} on {}, zone {}", sheet_name(l.view_sheet), l.view_zone));
     }
     let names: Vec<String> = s.doc.drawing.sheets.iter().map(|sh| sh.name.clone()).collect();

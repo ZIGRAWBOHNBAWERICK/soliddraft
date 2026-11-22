@@ -538,6 +538,22 @@ def cli(binary, arguments, directory, label, timeout):
             "pass": result.returncode == 0}
 
 
+def check_drawing(binary, directory, timeout, expected):
+    saved, svg = directory / "drawing.dwdrw", directory / "drawing.svg"
+    drawing = cli(binary, ["draw", directory / "part.dwprt", "--template", "iso-a3",
+                           "--out", saved, "--out", svg, "--kernel-log", directory / "drawing.kernel.json",
+                           "--json"], directory, "drawing", timeout)
+    if isinstance(expected, str):
+        stderr = (directory / "drawing.stderr").read_text()
+        drawing["expected_refusal"] = expected
+        drawing["pass"] = drawing["exit"] == 1 and expected in stderr and not (saved.exists() or svg.exists())
+    elif drawing["pass"]:
+        rendered = json.loads((directory / "drawing.stdout").read_text())
+        drawing["backend"] = rendered["backend"]
+        drawing["pass"] = rendered["backend"].startswith("catallax ")
+    return drawing
+
+
 def oracle_command(oracle, path):
     """The independent checker for one exported STL. Only a named kind or the cubic lattice runs."""
     kind = oracle.get("kind")
@@ -1140,17 +1156,12 @@ def run(args):
                     checks.append({"check": "SVG contains curves",
                                    "pass": (directory / "view.svg").exists() and "<path " in (directory / "view.svg").read_text()})
             if step.get("drawing"):
-                drawing = cli(args.soliddraft, ["draw", directory / "part.dwprt", "--template", "iso-a3",
-                    "--out", directory / "drawing.dwdrw", "--out", directory / "drawing.svg", "--kernel-log", directory / "drawing.kernel.json", "--json"], directory, "drawing", args.timeout)
-                if drawing["pass"]:
-                    rendered = json.loads((directory / "drawing.stdout").read_text())
-                    drawing["backend"] = rendered["backend"]
-                    drawing["pass"] &= rendered["backend"].startswith("catallax ")
-                checks.append(drawing)
+                checks.append(check_drawing(args.soliddraft, directory, args.timeout, step["drawing"]))
             # Volume/area acceptance is an explicit request after the click's display,
             # not automatic work on the normal edit path or a pre-warming step.
             evidence = command
-            if any(spec["pointer"].startswith("/measurement/") for spec in step.get("checks", [])):
+            rules = step.get("checks", []) + step.get("drawing_checks", [])
+            if any(spec["pointer"].startswith("/measurement/") for spec in rules):
                 started = time.perf_counter_ns()
                 measured = wait(client, entry, "scenario_measure", {})
                 measured_ms = (time.perf_counter_ns() - started) / 1_000_000
@@ -1179,7 +1190,7 @@ def run(args):
                 evidence = {**command, "measurement": measurement}
             if step.get("inspect"):
                 evidence["inspect"] = inspect(args.soliddraft, step["inspect"], args.out, directory, args.timeout)
-            checks.extend(check(evidence, spec, previous) for spec in step.get("checks", []))
+            checks.extend(check(evidence, spec, previous) for spec in rules)
             previous[number] = evidence
             if "same_geometry_as_step" in step:
                 earlier = step["same_geometry_as_step"]

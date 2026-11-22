@@ -1034,7 +1034,7 @@ impl Document {
                     .map_err(|r| Box::new(RepairNeeded { slot: ReferenceSlot::Pull, ..r }))?;
                 match self.kernel.edge_curve(body, id) {
                     Ok(Curve3::Line { a, b }) => (b - a).normalized().ok_or_else(|| mismatch("the edge has no length")),
-                    Ok(Curve3::Arc { normal, .. } | Curve3::Circle { normal, .. }) => Ok(normal),
+                    Ok(Curve3::Circle { normal, .. }) => Ok(normal),
                     Ok(_) => Err(mismatch("the edge is neither straight nor circular")),
                     Err(e) => Err(Box::new(kernel_repair(ReferenceSlot::Pull, e))),
                 }

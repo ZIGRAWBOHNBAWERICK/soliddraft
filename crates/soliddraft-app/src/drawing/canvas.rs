@@ -517,7 +517,11 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
 
     // The update banner, or the reference bar while the part moved on or is missing.
     let update_shown = s.doc.last_update.as_ref().is_some_and(|r| {
-        !r.dismissed && (!r.changed.is_empty() || !r.dangling.is_empty() || r.at.elapsed().as_secs() < 12)
+        !r.dismissed
+            && (!r.changed.is_empty()
+                || !r.dangling.is_empty()
+                || s.doc.refused_views().next().is_some()
+                || r.at.elapsed().as_secs() < 12)
     });
     if update_shown {
         if let Some(r) = s.doc.last_update.clone() {
@@ -612,15 +616,15 @@ fn hover_label(s: &DrawingSession, owner: Owner) -> Option<String> {
             };
             Some(format!(
                 "{} · {}{kind}{}",
-                project::view_label(sheet, v),
+                project::view_label_in(&s.doc.drawing, sheet, v),
                 c.source.role,
                 if c.visible { "" } else { " · hidden" }
             ))
         }
         Owner::View(view) => sheet.view(view).map(|v| match &v.kind {
-            ViewKind::Section { .. } => format!("{} · cutting line", project::view_label(sheet, v)),
-            ViewKind::Detail { .. } => format!("{} · boundary", project::view_label(sheet, v)),
-            _ => project::view_label(sheet, v),
+            ViewKind::Section { .. } => format!("{} · cutting line", project::view_label_in(&s.doc.drawing, sheet, v)),
+            ViewKind::Detail { .. } => format!("{} · boundary", project::view_label_in(&s.doc.drawing, sheet, v)),
+            _ => project::view_label_in(&s.doc.drawing, sheet, v),
         }),
         Owner::Annotation(id) | Owner::AnnotationEnd(id, _) => {
             let a = s.doc.drawing.annotation(id)?;
@@ -965,14 +969,12 @@ fn place_tool(
         // Hover card naming the resulting orientation and the modifier.
         if let Some(d) = pending.direction {
             let sheet = s.sheet();
-            let mut tmp = sheet.clone();
-            tmp.views.push(pending.view.clone());
-            let name = project::view_label(&tmp, &pending.view);
+            let name = project::view_label_in(&s.doc.drawing, sheet, &pending.view);
             let line1 = format!("Projected view · {}", name.trim_end_matches(" view"));
             let line2 = if d.is_diagonal() {
                 "Pictorial, not aligned".to_owned()
             } else if pending.aligned {
-                format!("Aligned to {} · hold Ctrl to break alignment", project::view_label(sheet, pv))
+                format!("Aligned to {} · hold Ctrl to break alignment", s.doc.view_name(pv.id).unwrap_or_default())
             } else {
                 "Free (Ctrl held)".to_owned()
             };
@@ -1365,11 +1367,15 @@ fn banner(
             if r.dangling.len() == 1 { "" } else { "s" }
         ));
     }
-    let detail = parts.join(" · ");
+    let refusals: Vec<_> = s.doc.view_refusal_messages().collect();
+    let has_errors = !r.dangling.is_empty() || !refusals.is_empty();
+    let detail = std::iter::once(parts.join(" · ")).chain(refusals).collect::<Vec<_>>().join("\n");
     let width = (rect.width() - 40.0).min(820.0);
-    let area = Rect::from_min_size(pos2(rect.center().x - width / 2.0, rect.top() + 38.0), vec2(width, 44.0));
-    let bg = if r.dangling.is_empty() { theme::warn_soft() } else { theme::error_soft() };
-    let stroke = if r.dangling.is_empty() { theme::warn() } else { theme::error() };
+    let detail = ui.painter().layout(detail, egui::FontId::proportional(11.5), theme::ink(), (width - 250.0).max(80.0));
+    let height = (detail.size().y + 30.0).max(44.0);
+    let area = Rect::from_min_size(pos2(rect.center().x - width / 2.0, rect.top() + 38.0), vec2(width, height));
+    let bg = if has_errors { theme::error_soft() } else { theme::warn_soft() };
+    let stroke = if has_errors { theme::error() } else { theme::warn() };
     ui.scope_builder(
         egui::UiBuilder::new().max_rect(area).layout(egui::Layout::left_to_right(egui::Align::Center)),
         |ui| {
@@ -1387,7 +1393,7 @@ fn banner(
             ui.vertical(|ui| {
                 ui.add_space(5.0);
                 ui.label(egui::RichText::new(head).family(theme::semibold()).size(12.0).color(theme::ink()));
-                ui.label(egui::RichText::new(detail).size(11.5).color(theme::ink()));
+                ui.label(detail);
             });
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.add_space(8.0);

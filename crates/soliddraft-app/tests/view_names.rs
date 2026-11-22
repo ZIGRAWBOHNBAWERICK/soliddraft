@@ -9,7 +9,7 @@ use soliddraft_app::command_tools::board_bracket;
 use soliddraft_app::state::AppState;
 use soliddraft_assistant::Caller;
 use soliddraft_assistant::tools::call_checked;
-use soliddraft_drawing::project::view_label;
+use soliddraft_drawing::project::view_label_in;
 use soliddraft_drawing::{HiddenLines, ViewId};
 
 fn call(state: &mut AppState, name: &str, arguments: Value) -> Result<Value, String> {
@@ -42,9 +42,10 @@ fn a_label_that_names_several_views_is_refused_and_an_id_reaches_one() {
     let mut state = AppState::new(board_bracket());
     call(&mut state, "make_drawing", json!({ "template": "iso-a3" })).unwrap();
     call(&mut state, "drawing_add_sheet", json!({})).unwrap();
-    let sheet = &state.drawing.session.as_ref().unwrap().doc.drawing.sheets[0];
+    let drawing = &state.drawing.session.as_ref().unwrap().doc.drawing;
+    let sheet = &drawing.sheets[0];
     let base = sheet.views.iter().find(|v| v.parent().is_none()).expect("a base view");
-    let (front_id, front) = (base.id, view_label(sheet, base));
+    let (front_id, front) = (base.id, view_label_in(drawing, sheet, base));
 
     // Two sheets with a view of the same label each, such as two Front views.
     let other = copy_view(&mut state, front_id, 1, None);

@@ -750,11 +750,12 @@ impl DrawingSession {
     /// True while the drawing has stale views or annotations needing attention: the
     /// dot on the document tab.
     pub fn has_issues(&self) -> bool {
-        self.doc.is_stale() || self.doc.attention_count() > 0 || self.link_state() == LinkState::Missing
+        !self.is_up_to_date() || self.doc.attention_count() > 0 || self.link_state() == LinkState::Missing
     }
 
     pub fn is_up_to_date(&self) -> bool {
         !self.doc.is_stale()
+            && self.doc.drawing.sheets.iter().flat_map(|sheet| &sheet.views).all(|v| self.doc.view_is_up_to_date(v))
     }
 }
 
@@ -1195,6 +1196,9 @@ pub(crate) fn update_views(state: &mut AppState) -> Result<String, String> {
             session.attention_focus = r.dangling.first().copied();
         }
     }
+    for refusal in session.doc.view_refusal_messages() {
+        text.push_str(&format!(" · {refusal}"));
+    }
     session.fold_cache.clear();
     session.pending = None;
     Ok(text)
@@ -1248,12 +1252,15 @@ pub(crate) fn put_opened(state: &mut AppState, doc: DrawingDoc) -> String {
     state.drawing.repair = None;
     state.drawing.active = true;
     reference::refresh(state);
-    let words = match state.drawing.session.as_ref().map(DrawingSession::link_state) {
-        Some(LinkState::Missing) => "the part was not found",
-        Some(LinkState::Newer { .. }) => "a newer version of the part is available",
-        Some(LinkState::Current) => "up to date with the part",
-        Some(LinkState::Unverified) => "the source is not a SolidDraft document",
-        Some(LinkState::Unknown) | None => "the part is not resolved",
+    let opened = state.drawing.session.as_ref().expect("drawing just opened");
+    let words = match (opened.link_state(), opened.doc.rebuild_guidance()) {
+        (LinkState::Missing, _) => "the part was not found",
+        (_, Some(guidance)) => guidance,
+        (LinkState::Newer { .. }, _) => "a newer version of the part is available",
+        (LinkState::Current, _) if !opened.is_up_to_date() => "the drawing needs a rebuild",
+        (LinkState::Current, _) => "up to date with the part",
+        (LinkState::Unverified, _) => "the source is not a SolidDraft document",
+        (LinkState::Unknown, _) => "the part is not resolved",
     };
     format!("{title} · {views} view{} · {words}", if views == 1 { "" } else { "s" })
 }
@@ -1487,8 +1494,7 @@ pub fn apply(state: &mut AppState, dock: &mut DockState<Tab>, ctx: &egui::Contex
             if let Some(s) = state.drawing.session.as_mut() {
                 if s.doc.undo_label() == Some("Update from model") {
                     s.doc.undo();
-                    s.doc.last_update = None;
-                    s.say("Rebuild undone; the views are older than the part again");
+                    s.say("Rebuild undone");
                 } else {
                     s.say("The last change was not an update");
                 }
@@ -1749,7 +1755,7 @@ pub(crate) fn add_centre_marks(s: &mut DrawingSession, views: &[ViewId]) -> usiz
 /// is older than its part and so wants a Rebuild now.
 pub(crate) fn set_automatic_update(s: &mut DrawingSession, on: bool) -> Result<bool, String> {
     s.doc.apply(Command::SetAutomaticUpdate { on }, None)?;
-    Ok(on && s.doc.is_stale())
+    Ok(on && !s.is_up_to_date())
 }
 
 /// Adds a sheet after the last one, from the first sheet's template, and shows it.
@@ -1784,14 +1790,16 @@ fn export_sheet(state: &mut AppState, format: export::Format, path: Option<PathB
     });
     let Some(path) = path else { return };
     let path = if path.extension().is_none() { path.with_extension(format.extension()) } else { path };
-    let written = write_sheet(s, PartContext::new(&state.doc).as_ref(), format, &path);
+    let written = write_sheet(s, format, &path);
     match written {
         Ok(w) => {
-            let redrawn = match w.redrawn {
+            // The kernel fitted these curves or measured where they cut and hide: Q14
+            // shows such results as approximate.
+            let approximate = match w.accuracy.approximate {
                 0 => String::new(),
-                n => format!(" · {n} view{} drawn from the certified mesh", if n == 1 { "" } else { "s" }),
+                n => format!(" · {n} curve{} approximate", if n == 1 { "" } else { "s" }),
             };
-            s.say(format!("Exported {}{redrawn}", path.display()));
+            s.say(format!("Exported {}{approximate}", path.display()));
             state.note(format!("Exported {}", path.display()), NoteKind::Ok);
         }
         Err(e) => {
@@ -1806,41 +1814,77 @@ fn export_sheet(state: &mut AppState, format: export::Format, path: Option<PathB
 pub struct SheetExport {
     /// Views on the sheets written.
     pub views: usize,
-    /// Views that were screen previews and were drawn again from the certified mesh.
-    pub redrawn: usize,
-    /// The part revision the written views show.
-    pub revision: ContentHash,
-    /// How many written curves are the model's own curves and how many are mesh polylines.
+    /// The part revision accepted by the drawing.
+    pub pinned_revision: ContentHash,
+    /// Distinct part revisions of the written views.
+    pub view_revisions: std::collections::BTreeSet<String>,
+    /// How many written curves are exact, mesh polylines or approximate.
     pub accuracy: AccuracyCounts,
 }
 
 /// Writes the drawing as `format` at `path`: the current sheet, or every sheet as a
-/// page of a PDF. Unproved or coarse screen views are drawn again from the fine
-/// certified mesh of `part`, on a copy.
-pub(crate) fn write_sheet(
-    s: &mut DrawingSession,
-    part: Option<&PartContext>,
-    format: export::Format,
-    path: &Path,
-) -> Result<SheetExport, String> {
-    let (bytes, written) = sheet_bytes(s, part, format)?;
+/// page of a PDF.
+pub(crate) fn write_sheet(s: &mut DrawingSession, format: export::Format, path: &Path) -> Result<SheetExport, String> {
+    let (bytes, written) = sheet_bytes(s, format)?;
     crate::platform::write_file(path, &bytes)?;
     s.last_export = Some(path.to_path_buf());
     Ok(written)
 }
 
 /// The drawing as `format`, as [`write_sheet`] writes it, without writing it.
-pub(crate) fn sheet_bytes(
-    s: &DrawingSession,
-    part: Option<&PartContext>,
-    format: export::Format,
-) -> Result<(Vec<u8>, SheetExport), String> {
-    if !matches!(format, export::Format::Pdf) && s.doc.drawing.sheets.get(s.sheet).is_none() {
+pub(crate) fn sheet_bytes(s: &DrawingSession, format: export::Format) -> Result<(Vec<u8>, SheetExport), String> {
+    let prepared = prepare_sheets(s, matches!(format, export::Format::Pdf))?;
+    let bytes = prepared.bytes(format)?;
+    let mut report = prepared.report;
+    if matches!(format, export::Format::Dxf) {
+        report.accuracy = prepared.lists[0].dxf_accuracy();
+    }
+    Ok((bytes, report))
+}
+
+pub(crate) struct PreparedSheets {
+    lists: Vec<display::DisplayList>,
+    info: export::PdfInfo,
+    report: SheetExport,
+}
+
+impl PreparedSheets {
+    pub(crate) fn package_accuracy(&self) -> AccuracyCounts {
+        self.lists[0].accuracy_with_dxf()
+    }
+
+    pub(crate) fn bytes(&self, format: export::Format) -> Result<Vec<u8>, String> {
+        match format {
+            export::Format::Pdf => export::pdf(&self.lists, &self.info),
+            _ => export::bytes(&self.lists[0], format, &self.info.title),
+        }
+        .map_err(|e| e.to_string())
+    }
+}
+
+pub(crate) fn prepare_sheets(s: &DrawingSession, all_sheets: bool) -> Result<PreparedSheets, String> {
+    if !all_sheets && s.doc.drawing.sheets.get(s.sheet).is_none() {
         return Err("The current sheet is no longer available; select a sheet before exporting".into());
     }
     let stale = s.doc.stale_views();
-    let (drawing, redrawn) = certified(&s.doc.drawing, part)?;
-    let drawing = drawing.as_ref().unwrap_or(&s.doc.drawing);
+    let drawing = &s.doc.drawing;
+    let writes_sheet = |i| all_sheets || i == s.sheet;
+    let failures: Vec<_> = s
+        .doc
+        .refused_views()
+        .filter(|(i, ..)| writes_sheet(*i))
+        .map(|(_, _, name, cause)| format!("{name}: {cause}"))
+        .collect();
+    if !failures.is_empty() {
+        return Err(failures.join("\n"));
+    }
+    let mut views = 0;
+    let mut view_revisions = std::collections::BTreeSet::new();
+    for (_, sheet) in drawing.sheets.iter().enumerate().filter(|(i, _)| writes_sheet(*i)) {
+        export::check_sheet(drawing, sheet).map_err(|error| error.to_string())?;
+        views += sheet.views.len();
+        view_revisions.extend(sheet.views.iter().map(|view| view.geometry.source_digest.clone()));
+    }
     let count = drawing.sheets.len();
     let list_of = |i: usize| {
         let format_file = library::template(drawing.sheets[i].template.as_str());
@@ -1853,48 +1897,14 @@ pub(crate) fn sheet_bytes(
         };
         display::layout(drawing, i, &ctx)
     };
-    let bytes = match format {
-        export::Format::Pdf => {
-            let lists: Vec<_> = (0..count).map(list_of).collect();
-            let info = export::PdfInfo {
-                title: s.doc.drawing.meta.title.clone(),
-                author: s.doc.drawing.meta.designer.clone(),
-            };
-            export::pdf(&lists, &info)
-        }
-        _ => export::bytes(&list_of(s.sheet), format, &s.doc.drawing.meta.title),
-    };
-    let bytes = bytes.map_err(|e| e.to_string())?;
-    let written: Vec<&View> = match format {
-        export::Format::Pdf => drawing.sheets.iter().flat_map(|sheet| &sheet.views).collect(),
-        _ => drawing.sheets.get(s.sheet).map_or_else(Vec::new, |sheet| sheet.views.iter().collect()),
-    };
+    let lists: Vec<_> = (0..count).filter(|&i| writes_sheet(i)).map(list_of).collect();
     let mut accuracy = AccuracyCounts::default();
-    for view in &written {
-        accuracy.add(view.geometry.accuracy());
+    for list in &lists {
+        accuracy.add(list.accuracy());
     }
-    Ok((bytes, SheetExport { views: written.len(), redrawn, revision: drawing.model.pinned.clone(), accuracy }))
-}
-
-/// A copy of `drawing` with unproved or coarse views drawn from the fine certified
-/// mesh, or `None` when all views are already fine and proved, with the number drawn
-/// again. Only views of the open part's current revision can be regenerated.
-/// Another revision waits for a Rebuild.
-fn certified(drawing: &Drawing, part: Option<&PartContext>) -> Result<(Option<Drawing>, usize), String> {
-    let needs_fine: Vec<&View> =
-        drawing.sheets.iter().flat_map(|s| &s.views).filter(|v| v.geometry.unproved || v.geometry.coarse).collect();
-    if needs_fine.is_empty() {
-        return Ok((None, 0));
-    }
-    let unproved = || soliddraft_drawing::DrawingError::Unproved.to_string();
-    let part = part.ok_or_else(unproved)?;
-    if needs_fine.iter().any(|v| v.geometry.source_digest != part.digest.as_str()) {
-        return Err(unproved());
-    }
-    let mut copy = drawing.clone();
-    soliddraft_drawing::apply_with(&mut copy, &Command::UpdateFromModel, &part.certified_part())
-        .map_err(|e| e.to_string())?;
-    Ok((Some(copy), needs_fine.len()))
+    let info = export::PdfInfo { title: drawing.meta.title.clone(), author: drawing.meta.designer.clone() };
+    let report = SheetExport { views, pinned_revision: drawing.model.pinned.clone(), view_revisions, accuracy };
+    Ok(PreparedSheets { lists, info, report })
 }
 
 fn save_drawing(state: &mut AppState, path: Option<PathBuf>) {
@@ -1954,10 +1964,17 @@ pub fn status(state: &AppState) -> Option<Status> {
     let rev = s.doc.drawing.model.pinned.short();
     let dangling = s.doc.dangling_count();
     let changed = s.doc.attention_count() - dangling;
-    let headline = if s.link_state() == LinkState::Missing {
+    let refused: Vec<_> = s.doc.view_refusal_messages().collect();
+    let headline = if !refused.is_empty() {
+        (refused.join(" · "), theme::error())
+    } else if s.link_state() == LinkState::Missing {
         (format!("{part} not found · repair the reference"), theme::error())
+    } else if let Some(guidance) = s.doc.rebuild_guidance() {
+        (guidance.to_owned(), theme::warn())
     } else if s.doc.is_stale() {
         (format!("Newer version of {part} available · showing rev {rev} (Ctrl+B rebuilds)"), theme::warn())
+    } else if !s.is_up_to_date() {
+        ("The drawing needs a rebuild".to_owned(), theme::warn())
     } else if dangling > 0 || changed > 0 {
         let mut parts = Vec::new();
         if dangling > 0 {

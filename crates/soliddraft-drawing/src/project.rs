@@ -8,8 +8,7 @@
 //! its parent's frame and magnifies it. Scales chain the same way. Curves are projected
 //! with the kernel's [`ViewFrame`], scaled, and moved so the centre of their bounding box
 //! is the view's origin (for a detail, the centre of its boundary). Lines stay lines and
-//! circular arcs become cubic Béziers, which a parallel projection maps exactly, so a
-//! circle seen at an angle is an exact ellipse.
+//! circular arcs become cubic Bézier approximations before projection.
 //!
 //! [`compute_view`] makes any view's line work, parents first; crops and broken-out
 //! sections are applied last, by clipping the line work with
@@ -141,9 +140,29 @@ pub fn compute_view(
     sheet: usize,
     memo: &mut Contexts,
 ) -> Result<ViewContext, DrawingError> {
-    compute_view_at(drawing, part, index, view, sheet, memo, 0)
+    compute_view_at(drawing, part, index, view, sheet, memo, 0, None)
 }
 
+pub(crate) fn reproject_parent_marks(kind: &mut ViewKind, xf: &ViewTransform) {
+    match kind {
+        ViewKind::Section { line, model_line, .. } if model_line.len() == line.len() => {
+            for (p, m) in line.iter_mut().zip(model_line.iter()) {
+                *p = xf.point(*m);
+            }
+        }
+        ViewKind::Detail { center, profile, model_center: Some(m), .. } => {
+            let to = xf.point(*m);
+            let (du, dv) = (to.u - center.u, to.v - center.v);
+            *center = to;
+            for p in profile {
+                *p = Point2::new(round(p.u + du), round(p.v + dv));
+            }
+        }
+        _ => {}
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 fn compute_view_at(
     drawing: &Drawing,
     part: &Part,
@@ -152,42 +171,75 @@ fn compute_view_at(
     sheet: usize,
     memo: &mut Contexts,
     depth: u8,
+    projection: Option<(ViewDisplay, ViewTransform)>,
 ) -> Result<ViewContext, DrawingError> {
     if depth > 16 {
         return Err(DrawingError::BadView(view.id));
     }
-    if let Some(parent) = view.parent()
+    if let Some(parent) = view.geometry_parent()
         && !memo.contains_key(&parent)
     {
         let p = drawing.view(parent).ok_or(DrawingError::UnknownView(parent))?;
         let ps = sheet_of(drawing, parent).unwrap_or(sheet);
-        let ctx = compute_view_at(drawing, part, index, p, ps, memo, depth + 1)?;
+        let ctx = compute_view_at(drawing, part, index, p, ps, memo, depth + 1, None)?;
         memo.insert(parent, ctx);
     }
+    let display = projection.map_or(view.display, |(display, _)| display);
     let scale = scale_in(drawing, sheet, view);
-    let mut ctx = match &view.kind {
+    let refused = |error| view_refusal(|| view_label_in(drawing, &drawing.sheets[sheet], view), error);
+    let mut kind = view.kind.clone();
+    if let Some(parent) = view.geometry_parent() {
+        reproject_parent_marks(&mut kind, &memo[&parent].xf);
+    }
+    let mut ctx = match &kind {
         ViewKind::Base { .. } | ViewKind::Projected { .. } => {
-            let spec = spec_in(drawing, sheet, view).ok_or(DrawingError::BadView(view.id))?;
-            let curves = view_curves(part, &spec)?;
-            let xf = transform(&curves, &spec, scale)?;
+            let spec = with_display(spec_in(drawing, sheet, view).ok_or(DrawingError::BadView(view.id))?, &display);
+            let curves = view_curves(part, &spec).map_err(refused)?;
+            let xf = match projection {
+                Some((_, xf)) => xf,
+                None => transform(&curves, &spec, scale)?,
+            };
             let projected = project(index, &curves, &xf, part.digest.as_str(), part.preview);
             ViewContext { id: view.id, curves, xf, pictorial: is_pictorial(&spec), projected }
         }
         ViewKind::Section { parent, line, flip, model_line, .. } => {
             let pctx = &memo[parent];
             let (direction, up) = section_axes(&pctx.xf.frame, line, *flip).ok_or(DrawingError::BadView(view.id))?;
-            let spec = with_display(ViewSpec::new(direction, up), &view.display);
+            let spec = with_display(ViewSpec::new(direction, up), &display);
             let origin = model_line.first().copied().unwrap_or_else(|| pctx.xf.unproject(line[0]));
             let section = part
                 .kernel
-                .section_view(part.body, &SectionSpec { view: ViewSpec { preview: part.preview, ..spec }, origin })?;
-            let xf = transform(&section.curves, &spec, scale)?;
+                .section_view(part.body, &SectionSpec { view: ViewSpec { preview: part.preview, ..spec }, origin })
+                .map_err(|e| refused(e.into()))?;
+            let xf = match projection {
+                Some((_, xf)) => xf,
+                None => transform(&section.curves, &spec, scale)?,
+            };
             let mut projected = project(index, &section.curves, &xf, part.digest.as_str(), part.preview);
             projected.geometry.hatch = section.regions.iter().map(|r| region_polygon(r, &xf, None)).collect();
             ViewContext { id: view.id, curves: section.curves, xf, pictorial: false, projected }
         }
         ViewKind::Detail { parent, center, radius, profile, model_center, .. } => {
-            let pctx = &memo[parent];
+            let original = drawing.view(*parent).ok_or(DrawingError::UnknownView(*parent))?;
+            let includes_tangents = |display: ViewDisplay| display.tangent != crate::TangentEdges::Removed;
+            let parent_xf = memo[parent].xf;
+            let alternate = if includes_tangents(display) != includes_tangents(original.display)
+                || display.seams != original.display.seams
+            {
+                Some(compute_view_at(
+                    drawing,
+                    part,
+                    index,
+                    original,
+                    sheet_of(drawing, *parent).unwrap_or(sheet),
+                    memo,
+                    depth + 1,
+                    Some((display, parent_xf)),
+                )?)
+            } else {
+                None
+            };
+            let pctx = alternate.as_ref().unwrap_or(&memo[parent]);
             let ratio = scale / pctx.xf.scale;
             let model = model_center.unwrap_or_else(|| pctx.xf.unproject(*center));
             let probe = ViewTransform { frame: pctx.xf.frame, scale, centre: Point2::new(0.0, 0.0) };
@@ -229,9 +281,10 @@ fn compute_view_at(
                                 outer: crate::display::clip_polygon(&outer, &window),
                                 holes: holes.iter().map(|l| crate::display::clip_polygon(l, &window)).collect(),
                                 clip: Some(c.mapped(du, dv, ratio)),
+                                approximate: h.approximate || matches!(boundary, Boundary::Circle { .. }),
                             }
                         }
-                        None => Polygon { outer, holes, clip: Some(boundary.clone()) },
+                        None => Polygon { outer, holes, clip: Some(boundary.clone()), approximate: h.approximate },
                     }
                 })
                 .filter(|h| h.outer.len() >= 3)
@@ -248,6 +301,7 @@ fn compute_view_at(
                 outline: None,
                 bbox: parent.geometry.bbox,
                 unproved: parent.geometry.unproved,
+                catallax: parent.geometry.catallax,
                 coarse: parent.geometry.coarse,
             };
             let mut projected = Projected { geometry, transform: xf, circles };
@@ -259,15 +313,18 @@ fn compute_view_at(
         ViewKind::Auxiliary { parent, edge, flip, .. } => {
             let pctx = &memo[parent];
             let (direction, up) = auxiliary_axes(index, pctx, edge, *flip)?;
-            let spec = with_display(ViewSpec::new(direction, up), &view.display);
-            let curves = view_curves(part, &spec)?;
-            let xf = transform(&curves, &spec, scale)?;
+            let spec = with_display(ViewSpec::new(direction, up), &display);
+            let curves = view_curves(part, &spec).map_err(refused)?;
+            let xf = match projection {
+                Some((_, xf)) => xf,
+                None => transform(&curves, &spec, scale)?,
+            };
             let projected = project(index, &curves, &xf, part.digest.as_str(), part.preview);
             ViewContext { id: view.id, curves, xf, pictorial: false, projected }
         }
     };
-    for b in &view.broken_out {
-        broken_out(part, index, &mut ctx, b)?;
+    for cut in &view.broken_out {
+        broken_out(part, index, &mut ctx, cut, &display).map_err(refused)?;
     }
     if let Some(crop) = &view.crop {
         clip_projected(&mut ctx.projected, crop, true);
@@ -284,7 +341,14 @@ fn compute_view_at(
     Ok(ctx)
 }
 
-fn with_display(mut spec: ViewSpec, display: &ViewDisplay) -> ViewSpec {
+pub(crate) fn view_refusal(label: impl FnOnce() -> String, error: DrawingError) -> DrawingError {
+    match error {
+        DrawingError::Kernel(source) => DrawingError::ViewRefused { view: label(), source },
+        other => other,
+    }
+}
+
+pub(crate) fn with_display(mut spec: ViewSpec, display: &ViewDisplay) -> ViewSpec {
     spec.smooth_edges = display.tangent != crate::view::TangentEdges::Removed;
     spec.seams = display.seams;
     spec
@@ -292,7 +356,13 @@ fn with_display(mut spec: ViewSpec, display: &ViewDisplay) -> ViewSpec {
 
 /// Cuts a broken-out section into a view: the material in front of the plane `depth`
 /// behind the part's nearest point is removed inside the boundary.
-fn broken_out(part: &Part, index: &PartIndex, ctx: &mut ViewContext, b: &BrokenOut) -> Result<(), DrawingError> {
+fn broken_out(
+    part: &Part,
+    index: &PartIndex,
+    ctx: &mut ViewContext,
+    b: &BrokenOut,
+    display: &ViewDisplay,
+) -> Result<(), DrawingError> {
     let d = ctx.xf.frame.direction;
     let bbox = part.kernel.topology(part.body)?.bbox;
     let front = (0..8)
@@ -305,8 +375,7 @@ fn broken_out(part: &Part, index: &PartIndex, ctx: &mut ViewContext, b: &BrokenO
             .dot(d)
         })
         .fold(f64::NEG_INFINITY, f64::max);
-    let mut spec = ctx.spec();
-    spec.smooth_edges = ctx.projected.geometry.curves.iter().any(|c| c.tangent);
+    let mut spec = with_display(ctx.spec(), display);
     spec.preview = part.preview;
     let section = part.kernel.section_view(part.body, &SectionSpec { view: spec, origin: d * (front - b.depth) })?;
     let mut cut = project(index, &section.curves, &ctx.xf, part.digest.as_str(), part.preview);
@@ -314,6 +383,7 @@ fn broken_out(part: &Part, index: &PartIndex, ctx: &mut ViewContext, b: &BrokenO
     clip_projected(&mut cut, &b.boundary, true);
     ctx.projected.geometry.curves.extend(cut.geometry.curves);
     ctx.projected.geometry.unproved |= cut.geometry.unproved;
+    ctx.projected.geometry.catallax &= cut.geometry.catallax;
     ctx.projected
         .geometry
         .hatch
@@ -338,7 +408,16 @@ pub fn region_polygon(r: &CutRegion, xf: &ViewTransform, clip: Option<Boundary>)
         }
         out
     };
-    Polygon { outer: ring(&r.outer), holes: r.holes.iter().map(|h| ring(h)).collect(), clip }
+    Polygon {
+        outer: ring(&r.outer),
+        holes: r.holes.iter().map(|h| ring(h)).collect(),
+        clip,
+        approximate: r
+            .outer
+            .iter()
+            .chain(r.holes.iter().flatten())
+            .any(|c| c.approximate || !matches!(c.curve, Curve3::Line { .. } | Curve3::Polyline { .. })),
+    }
 }
 
 /// Keeps the part of every curve, hatch and face-on circle inside `boundary` (or
@@ -632,12 +711,15 @@ fn scale_of<'a>(find: &FindScale<'a>, sheet_scale: f64, view: &View, depth: u8) 
     }
 }
 
-/// The kernel's curves for a view, with the mesh method when the backend has no exact
-/// hidden-line removal.
+/// The kernel's curves for a view, with a mesh fallback for previews.
 pub fn view_curves(part: &Part, spec: &ViewSpec) -> Result<ViewCurves, DrawingError> {
     let spec = &ViewSpec { preview: part.preview, ..*spec };
     match part.kernel.view_curves(part.body, spec) {
-        Err(KernelError::Unsupported(_)) => Ok(mesh_hlr::view_curves(part.kernel, part.body, spec)?),
+        Err(KernelError::Unsupported(_)) if spec.preview => {
+            let mut curves = mesh_hlr::view_curves(part.kernel, part.body, spec)?;
+            curves.unproved = true;
+            Ok(curves)
+        }
         other => Ok(other?),
     }
 }
@@ -717,10 +799,11 @@ pub fn project(index: &PartIndex, curves: &ViewCurves, xf: &ViewTransform, diges
         let (source, kind) = source_ref(index, c);
         // Visibility fragments keep the complete edge's exact circle metadata.
         let geometry = match c.source {
-            CurveSource::Edge(edge) => index.edge_curve(edge).unwrap_or(&c.curve),
+            CurveSource::Edge(edge) if !c.approximate => index.exact_edge_curve(edge).unwrap_or(&c.curve),
             _ => &c.curve,
         };
-        if let Curve3::Circle { center, normal, radius } = geometry
+        if !c.approximate
+            && let Curve3::Circle { center, normal, radius } = geometry
             && normal.cross(xf.frame.direction).length() < 1e-6
             && matches!(c.source, CurveSource::Edge(_))
             && !circles.iter().any(|k| k.entity.kernel_hint == source.kernel_hint)
@@ -733,7 +816,11 @@ pub fn project(index: &PartIndex, curves: &ViewCurves, xf: &ViewTransform, diges
                 model_radius: *radius,
             });
         }
-        out.push(Curve2 { path, source, visible: c.visible, kind, tangent: c.smooth, accuracy: accuracy_of(&c.curve) });
+        // The kernel's marks win over the curve's kind: a fitted line is still approximate.
+        let accuracy =
+            if c.approximate || !curves.approximate.is_empty() { Accuracy::Approximate } else { accuracy_of(&c.curve) };
+        let accuracy = accuracy.for_path(&path);
+        out.push(Curve2 { path, source, visible: c.visible, kind, tangent: c.smooth, accuracy });
     }
     let [x0, y0, x1, y1] = curves.bbox_2d;
     let (lo, hi) = (
@@ -747,6 +834,7 @@ pub fn project(index: &PartIndex, curves: &ViewCurves, xf: &ViewTransform, diges
         outline: None,
         bbox: [lo.u, lo.v, hi.u, hi.v],
         unproved: curves.unproved,
+        catallax: curves.catallax,
         coarse,
     };
     Projected { geometry, transform: *xf, circles }
@@ -813,11 +901,11 @@ pub fn standard_label(view: StandardView) -> &'static str {
 }
 
 /// A view's name in the tree: its own label, or what it shows.
-pub fn view_label(sheet: &Sheet, view: &View) -> String {
+pub fn view_label_in(drawing: &Drawing, sheet: &Sheet, view: &View) -> String {
+    let find = |id: ViewId| drawing.sheets.iter().find_map(|s| s.view(id).map(|v| (v, s.projection)));
     if let Some(l) = &view.label {
         return l.clone();
     }
-    let find = |id: ViewId| sheet.view(id).map(|v| (v, sheet.projection));
     match &view.kind {
         ViewKind::Section { label, .. } => format!("Section {label}-{label}"),
         ViewKind::Detail { label, .. } => format!("Detail {label}"),
@@ -913,12 +1001,7 @@ fn source_ref(index: &PartIndex, c: &ViewCurve) -> (EntityRef, CurveKind) {
 /// Chord tolerance on the sheet for curves that are neither lines nor arcs.
 const SHEET_CHORD_MM: f64 = 0.01;
 
-/// Whether a kernel curve is the model's own curve or a polyline from its mesh.
-///
-/// The kernel keeps a whole line or an untrimmed circle after polygon visibility and
-/// answers a polyline for everything else; a NURBS curve is sampled on the sheet, so it
-/// is labelled by what the path holds, not by what the model has.
-pub fn accuracy_of(curve: &Curve3) -> Accuracy {
+fn accuracy_of(curve: &Curve3) -> Accuracy {
     match curve {
         Curve3::Line { .. } | Curve3::Arc { .. } | Curve3::Circle { .. } => Accuracy::Exact,
         Curve3::Polyline { .. } | Curve3::Nurbs { .. } => Accuracy::Polygon,
@@ -1072,15 +1155,18 @@ mod tests {
     }
 
     #[test]
-    fn lines_arcs_and_circles_are_exact_and_mesh_polylines_are_polygon() {
+    fn circular_paths_are_approximate_and_mesh_polylines_are_polygon() {
         let a = Vec3::ZERO;
         let b = Vec3::new(10.0, 0.0, 0.0);
-        assert_eq!(accuracy_of(&Curve3::Line { a, b }), Accuracy::Exact);
-        assert_eq!(accuracy_of(&Curve3::Circle { center: a, normal: Vec3::Z, radius: 5.0 }), Accuracy::Exact);
+        let frame = ViewSpec::new(Vec3::Z, Vec3::Y).frame().unwrap();
+        let xf = ViewTransform { frame, scale: 1.0, centre: Point2::new(0.0, 0.0) };
+        let accuracy = |curve: &Curve3| accuracy_of(curve).for_path(&path_of(curve, &xf));
+        assert_eq!(accuracy(&Curve3::Line { a, b }), Accuracy::Exact);
+        assert_eq!(accuracy(&Curve3::Circle { center: a, normal: Vec3::Z, radius: 5.0 }), Accuracy::Approximate);
         let arc =
             Curve3::Arc { center: a, normal: Vec3::Z, x_axis: Vec3::X, radius: 5.0, start_deg: 0.0, end_deg: 90.0 };
-        assert_eq!(accuracy_of(&arc), Accuracy::Exact);
-        assert_eq!(accuracy_of(&Curve3::Polyline { points: vec![a, b] }), Accuracy::Polygon);
+        assert_eq!(accuracy(&arc), Accuracy::Approximate);
+        assert_eq!(accuracy(&Curve3::Polyline { points: vec![a, b] }), Accuracy::Polygon);
         assert_eq!(Accuracy::default(), Accuracy::Polygon, "a file without the label makes the weaker claim");
     }
 

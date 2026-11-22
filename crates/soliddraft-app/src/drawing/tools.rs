@@ -14,7 +14,7 @@ use crate::theme;
 use egui::{Stroke, vec2};
 use soliddraft_drawing::display::{self as layout, Owner};
 use soliddraft_drawing::measure::{CurveShape, precision_for, shape_of, shape_of_curve};
-use soliddraft_drawing::project::{self, view_label};
+use soliddraft_drawing::project::{self, view_label_in};
 use soliddraft_drawing::{
     AlignAxis, Anchor, Annotation, AnnotationKind, AnnotationState, Attach, Boundary, BrokenOut, Command, CurveKind,
     DimType, DimensionSet, DrawingError, EntityRef, LinearOrientation, Part, PartIndex, SetKind, StyleOverrides,
@@ -293,14 +293,10 @@ fn place_pending(
             sheet2.painter.extend(egui::Shape::dashed_line(&[sheet2.s(a), sheet2.s(b)], stroke, 6.0, 4.0));
         }
     }
-    let name = {
-        let mut tmp = s.sheet().clone();
-        tmp.views.push(pending.view.clone());
-        view_label(&tmp, &pending.view)
-    };
+    let name = view_label_in(&s.doc.drawing, s.sheet(), &pending.view);
     let line2 = match (&pending.view.alignment, &parent) {
-        (Some(_), Some(pv)) => format!("Aligned with {} · Ctrl frees it", view_label(s.sheet(), pv)),
-        (None, Some(pv)) if !ctrl => format!("Free · from {}", view_label(s.sheet(), pv)),
+        (Some(_), Some(pv)) => format!("Aligned with {} · Ctrl frees it", s.doc.view_name(pv.id).unwrap_or_default()),
+        (None, Some(pv)) if !ctrl => format!("Free · from {}", s.doc.view_name(pv.id).unwrap_or_default()),
         _ => "Free (Ctrl held)".to_owned(),
     };
     card(sheet2.painter, sheet2.s(pending.view.position) + vec2(30.0, -30.0), &name, &line2);

@@ -994,6 +994,24 @@ class RunnerEndToEnd(unittest.TestCase):
                 report, _ = self.run_step(mode, extra={"view": "unavailable"} if declared else {})
                 self.assertEqual(report["pass"], expected)
 
+    def test_a_drawing_refusal_names_the_view_and_leaves_no_output(self):
+        refusal = "Front view: view_curves failed (status 0): numbers.operation-budget"
+        for mode, drawing, expected in [("ok", True, True), ("drawing-refused", True, False),
+                                        ("drawing-refused", refusal, True), ("ok", refusal, False),
+                                        ("drawing-refused-wrong", refusal, False),
+                                        ("drawing-refused.dwdrw", refusal, False),
+                                        ("drawing-refused.svg", refusal, False)]:
+            with self.subTest(mode=mode, drawing=drawing):
+                report, _ = self.run_step(mode, extra={"drawing": drawing})
+                self.assertEqual(report["pass"], expected)
+
+    def test_drawing_checks_are_enforced_in_the_full_scenario(self):
+        for expected, passes in [([], True), (["missing feature"], False)]:
+            report, _ = self.run_step("ok", extra={
+                "drawing_checks": [{"pointer": "/summary/features", "equals": expected}],
+            })
+            self.assertEqual(report["pass"], passes)
+
     def test_export_report_checks_and_refusals_run_through_the_cli(self):
         exports = [{"format": "stl", "checks": [{"pointer": "/report/deviation_bound_mm", "maximum": 0.1}]}]
         report, _ = self.run_step("ok", extra={"exports": exports})

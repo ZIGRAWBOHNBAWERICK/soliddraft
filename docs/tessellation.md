@@ -156,8 +156,8 @@ three levels:
   parameters, for the quality slider.
 
 The Catallax adapter keeps five exact chord tolerances per immutable body in LRU order.
-The certified display, three viewport levels and drawing mesh can coexist: a file save
-must not evict the viewport mesh just to ask for its coarse and standard levels.
+The certified display and viewport levels can coexist. A file save must not evict the
+viewport mesh just to ask for its coarse and standard levels.
 Each tolerance has its own build lock. Background refinement cannot hold the cache
 lock while a query reads an already available mesh at another tolerance. A refused
 mesh request is not cached as a permanent failure.

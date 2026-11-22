@@ -3,8 +3,8 @@
 use std::{cell::RefCell, collections::HashMap, sync::Mutex, thread::ThreadId, time::Instant};
 
 use catallax_numbers::{
-    BoundKind, MarkLog, OperationEntry, OperationWork, current_operation_work, operation_budget_active,
-    with_operation_budget, with_operation_log,
+    BoundKind, MarkLog, OperationEntry, current_operation_work, operation_budget_active, with_operation_budget,
+    with_operation_log,
 };
 use serde_json::{Value, json};
 use soliddraft_kernel_api::{KernelError, KernelResult};
@@ -87,16 +87,19 @@ impl Diagnostics {
             (_, true) => {
                 let result = run();
                 let after = current_operation_work();
-                (result, Some(OperationWork { used: after.used - before.used, exhausted: after.exhausted }))
+                (result, Some(Spent { used: after.used - before.used, exhausted: after.exhausted }))
             }
             (Some(limit), false) => {
                 // A request allowance, so a refusal inside names this limit, not the default.
                 let (result, work) = with_request_allowance(limit, run);
-                (result, Some(OperationWork { used: work.used, exhausted: work.exhausted }))
+                (result, Some(Spent { used: work.used, exhausted: work.exhausted }))
             }
             (None, false) => (run(), None),
         });
-        if work.is_some_and(|w| w.exhausted) && !matches!(result, Err(KernelError::DisplayLimit { .. })) {
+        if work.is_some_and(|w| w.exhausted)
+            && (operation != "body_relation" || result.is_err())
+            && !matches!(result, Err(KernelError::DisplayLimit { .. }))
+        {
             result = Err(
                 if matches!(
                     operation,
@@ -167,6 +170,13 @@ pub const APP_REQUEST_WORK: u64 = 100_000_000;
 /// The work one edit should fit in. A request that uses more is marked
 /// `over_target` in the diagnostics, with its work per stage, for the speed phase.
 pub const APP_WORK_TARGET: u64 = 20_000_000;
+
+/// The work one observed call charged to its allowance.
+#[derive(Clone, Copy)]
+struct Spent {
+    used: u64,
+    exhausted: bool,
+}
 
 /// The deterministic work one whole request used: opening, rebuilding and writing.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -363,5 +373,35 @@ mod feature_work_tests {
             })
             .unwrap();
         assert_eq!(work, Some(5));
+    }
+}
+
+#[cfg(test)]
+mod relation_tests {
+    use crate::CatallaxKernel;
+    use soliddraft_kernel_api::{Kernel, PlacedBody, contract};
+
+    #[test]
+    fn observed_clash_survives_exhausted_contact_query() {
+        let mut full = CatallaxKernel::with_operation_log();
+        let body = contract::block(&full);
+        let first = PlacedBody { body, translation: [0.0; 3], rotation: [0.0, 0.0, 0.0, 1.0] };
+        let second = PlacedBody { translation: [0.0, 0.0, 9.0], ..first };
+        full.take_diagnostics().unwrap();
+        assert!(full.body_relation(first, second, None).unwrap().contact.is_ok());
+        let log = full.take_diagnostics().unwrap();
+        let calls = log["calls"].as_array().unwrap();
+        let call = calls.iter().find(|c| c["operation"] == "body_relation" && c["nested"] == false).unwrap();
+        let operations = call["operation_log"]["operations"].as_array().unwrap();
+        let proof = operations.iter().find(|op| op["operation"] == "body_relation").unwrap();
+        let work = proof["work"]["after"].as_u64().unwrap();
+
+        let mut limited = CatallaxKernel::with_diagnostics(work + 1);
+        std::mem::swap(&mut full.state, &mut limited.state);
+        let result = limited.body_relation(first, second, None).unwrap();
+        let overlap = result.overlap.unwrap();
+        assert_eq!(overlap.positive, Some(true));
+        assert!(overlap.volume.lo <= 1200.0 && overlap.volume.hi >= 1200.0);
+        assert_eq!(result.contact.unwrap_err().code, "numbers.operation-budget");
     }
 }

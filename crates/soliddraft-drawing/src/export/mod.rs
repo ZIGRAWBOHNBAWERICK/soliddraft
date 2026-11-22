@@ -61,17 +61,55 @@ impl Format {
 
 /// One sheet's bytes in `format`. `title` goes into the PDF's document properties.
 pub fn bytes(list: &DisplayList, format: Format, title: &str) -> Result<Vec<u8>, DrawingError> {
-    proven(std::slice::from_ref(list))?;
     match format {
         Format::Pdf => pdf(std::slice::from_ref(list), &PdfInfo { title: title.to_owned(), author: String::new() }),
         Format::Dxf => dxf(list),
-        Format::Svg => Ok(svg(list).into_bytes()),
+        Format::Svg => {
+            proven(std::slice::from_ref(list))?;
+            Ok(svg(list).into_bytes())
+        }
     }
 }
 
-/// Refuses line work drawn from an unproved preview: an exported drawing is made from
-/// the certified mesh.
+/// What to do with a view excluded from automatic update whose saved line work cannot
+/// be exported.
+pub const INCLUDE_FOR_REDRAW: &str = "Include the view in automatic update, then rebuild.";
+
+/// Checks the saved views of a sheet before laying it out for export.
+pub fn check_sheet(drawing: &crate::Drawing, sheet: &crate::Sheet) -> Result<(), DrawingError> {
+    sheet_error(drawing, sheet).map_or(Ok(()), |error| Err(DrawingError::BadRequest(error)))
+}
+
+pub(crate) fn sheet_error(drawing: &crate::Drawing, sheet: &crate::Sheet) -> Option<String> {
+    let pinned = drawing.model.pinned.as_str();
+    for view in &sheet.views {
+        let label = || crate::project::view_label_in(drawing, sheet, view);
+        if !view.has_saved_catallax_linework() {
+            let guidance = if view.needs_inclusion_for_redraw() {
+                INCLUDE_FOR_REDRAW
+            } else {
+                "Redraw it once in the drawing editor before exporting."
+            };
+            return Some(format!(
+                "{} has no saved Catallax line work. {guidance} Check any crop or broken-out boundary after the redraw.",
+                label()
+            ));
+        }
+        if !view.accepts_revision(pinned) {
+            return Some(format!(
+                "{} does not match the drawing's accepted revision. Rebuild the drawing before exporting.",
+                label()
+            ));
+        }
+    }
+    None
+}
+
+/// Checks that every sheet can export its saved Catallax line work.
 pub(crate) fn proven(sheets: &[DisplayList]) -> Result<(), DrawingError> {
+    if let Some(error) = sheets.iter().find_map(|list| list.export_error.as_ref()) {
+        return Err(DrawingError::BadRequest(error.clone()));
+    }
     if sheets.iter().any(|list| list.unproved) {
         return Err(DrawingError::Unproved);
     }

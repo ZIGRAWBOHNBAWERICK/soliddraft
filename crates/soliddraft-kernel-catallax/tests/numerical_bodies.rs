@@ -155,3 +155,21 @@ fn an_approximate_pattern_source_is_never_replayed_as_exact() {
     let error = k.body_relation(placed(stock), placed(boss), None).unwrap_err().to_string();
     assert!(error.ends_with("is coming soon."), "{error}");
 }
+
+#[test]
+fn numerical_bodies_can_preview_but_cannot_export_drawing_curves() {
+    use soliddraft_kernel_api::drawing::{SectionSpec, StandardView, ViewSpec};
+
+    let k = CatallaxKernel::with_numerical_stand_in(&[OpKind::Extrude]);
+    let body = numerical_block(&k).body;
+    let view = ViewSpec::standard(StandardView::Front);
+    let preview = k.view_curves(body, &ViewSpec { preview: true, ..view }).unwrap();
+    assert!(preview.unproved && !preview.curves.is_empty());
+    for result in
+        [k.view_curves(body, &view), k.section_view(body, &SectionSpec { view, origin: Vec3::ZERO }).map(|s| s.curves)]
+    {
+        assert!(
+            matches!(result, Err(KernelError::QueryFailed { message, .. }) if message.starts_with("app.view-solid:"))
+        );
+    }
+}

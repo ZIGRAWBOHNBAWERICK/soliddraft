@@ -1447,11 +1447,31 @@ pub trait Kernel: Send + Sync {
         Err(KernelError::Unsupported("edge_curve".into()))
     }
 
+    /// The edge geometry and whether it was fitted.
+    fn edge_drawing(&self, body: BodyId, edge: EdgeId) -> KernelResult<drawing::ViewCurve> {
+        self.edge_curve(body, edge).map(|curve| drawing::ViewCurve::new(curve, drawing::CurveSource::Edge(edge), true))
+    }
+
     /// The boundary loops of a face, outer loop first, each a chain of exact edge curves
     /// in loop order.
     fn face_loops(&self, body: BodyId, face: FaceId) -> KernelResult<Vec<Vec<drawing::Curve3>>> {
         let _ = (body, face);
         Err(KernelError::Unsupported("face_loops".into()))
+    }
+
+    /// Boundary loops with approximation status on each curve.
+    fn face_drawing_loops(&self, body: BodyId, face: FaceId) -> KernelResult<Vec<Vec<drawing::ViewCurve>>> {
+        self.face_loops(body, face).map(|loops| {
+            loops
+                .into_iter()
+                .map(|chain| {
+                    chain
+                        .into_iter()
+                        .map(|curve| drawing::ViewCurve::new(curve, drawing::CurveSource::Unknown, true))
+                        .collect()
+                })
+                .collect()
+        })
     }
 
     /// `curve` as lines and circular arcs within `tolerance`, in order, for exporters

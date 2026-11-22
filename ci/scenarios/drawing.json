@@ -330,10 +330,6 @@
           "equals": "Isometric view"
         },
         {
-          "pointer": "/summary/drawing/sheets/0/views/0/preview",
-          "equals": true
-        },
-        {
           "pointer": "/summary/drawing/up_to_date",
           "equals": true
         },
@@ -348,10 +344,16 @@
         {
           "pointer": "/summary/drawing/sheets/0/views/0/accuracy/exact",
           "minimum": 1
+        }
+      ],
+      "drawing_checks": [
+        {
+          "pointer": "/summary/drawing/sheets/0/views/0/preview",
+          "equals": false
         },
         {
           "pointer": "/summary/drawing/sheets/0/views/0/accuracy/polygon",
-          "minimum": 1
+          "equals": 0
         }
       ]
     },
@@ -557,16 +559,12 @@
           "equals": 5
         },
         {
-          "pointer": "/result/redrawn_from_certified_mesh",
-          "equals": 5
-        },
-        {
           "pointer": "/result/accuracy/exact",
           "minimum": 1
         },
         {
           "pointer": "/result/accuracy/polygon",
-          "minimum": 1
+          "equals": 0
         }
       ],
       "files": [
@@ -585,16 +583,12 @@
           "equals": 5
         },
         {
-          "pointer": "/result/redrawn_from_certified_mesh",
-          "equals": 5
-        },
-        {
           "pointer": "/result/accuracy/exact",
           "minimum": 1
         },
         {
           "pointer": "/result/accuracy/polygon",
-          "minimum": 1
+          "equals": 0
         }
       ],
       "files": [
@@ -613,16 +607,12 @@
           "equals": 5
         },
         {
-          "pointer": "/result/redrawn_from_certified_mesh",
-          "equals": 5
-        },
-        {
           "pointer": "/result/accuracy/exact",
           "minimum": 1
         },
         {
           "pointer": "/result/accuracy/polygon",
-          "minimum": 1
+          "equals": 0
         }
       ],
       "files": [
@@ -743,10 +733,15 @@
       "arguments": {
         "path": "{bundle}/stale.svg"
       },
-      "label": "export of a stale preview",
-      "refused": "unproved preview",
-      "absent": [
-        "{bundle}/stale.svg"
+      "label": "export of the saved revision",
+      "helpers": [
+        ["check-same-file.py", "{bundle}/bracket.svg", "{bundle}/stale.svg"]
+      ],
+      "checks": [
+        {
+          "pointer": "/result/method",
+          "equals": "catallax"
+        }
       ]
     },
     {
@@ -792,16 +787,12 @@
           "equals": 5
         },
         {
-          "pointer": "/result/redrawn_from_certified_mesh",
-          "equals": 5
-        },
-        {
           "pointer": "/result/accuracy/exact",
           "minimum": 1
         },
         {
           "pointer": "/result/accuracy/polygon",
-          "minimum": 1
+          "equals": 0
         }
       ],
       "files": [

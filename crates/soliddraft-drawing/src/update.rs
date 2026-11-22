@@ -9,14 +9,14 @@
 
 use serde::{Deserialize, Serialize};
 
-use soliddraft_kernel_api::Point2;
+use soliddraft_kernel_api::{KernelError, Point2};
 
 use crate::annotation::{Annotation, AnnotationKind, AnnotationState, Attach, DimValue};
 use crate::entity::{EntityKind, EntityRef};
 use crate::ids::{AnnotationId, ViewId};
 use crate::library::{self, Symbols};
 use crate::measure::{AnchorGeometry, anchor_point, extension_direction, measure, value_text};
-use crate::part::{Entity, Part, PartIndex, Resolution, feature_name, round};
+use crate::part::{Entity, Part, PartIndex, Resolution, feature_name};
 use crate::project::{self, Contexts, Projected, ViewContext};
 use crate::view::ViewKind;
 use crate::{ContentHash, Drawing, DrawingError};
@@ -52,6 +52,9 @@ pub struct UpdateReport {
 pub struct DanglingView {
     /// The view.
     pub view: ViewId,
+    /// The view's name on the drawing, for reports.
+    #[serde(default)]
+    pub name: String,
     /// Why, in words.
     pub cause: String,
 }
@@ -101,30 +104,33 @@ pub fn update_from_model(drawing: &mut Drawing, part: &Part) -> Result<UpdateRep
         projections: Vec::new(),
     };
     let mut contexts = Contexts::new();
-    let ids: Vec<ViewId> = drawing.sheets.iter().flat_map(|s| &s.views).map(|v| v.id).collect();
-    let mut failed: Vec<ViewId> = Vec::new();
-    for id in ids {
+    let mut ids: Vec<ViewId> = drawing.sheets.iter().flat_map(|s| &s.views).map(|v| v.id).collect();
+    ids.sort_by_key(|&id| {
+        std::iter::successors(drawing.view(id), |view| view.geometry_parent().and_then(|parent| drawing.view(parent)))
+            .take(17)
+            .count()
+    });
+    for &id in &ids {
         let view = drawing.view(id).expect("listed");
         if view.excluded_from_update {
             continue;
         }
-        if view.parent().is_some_and(|p| failed.contains(&p)) {
-            failed.push(id);
-            report
-                .dangling_views
-                .push(DanglingView { view: id, cause: "the view it is made from could not be updated".into() });
-            continue;
-        }
-        if let Err(e) = project::compute_in(drawing, part, &index, id, &mut contexts) {
-            if !may_dangle(view) {
-                return Err(e);
-            }
-            failed.push(id);
-            report.dangling_views.push(DanglingView { view: id, cause: view_cause(&e) });
+        let failure = view
+            .geometry_parent()
+            .and_then(|parent| report.dangling_views.iter().find(|failure| failure.view == parent))
+            .map(|failure| failure.cause.clone());
+        let failure = failure
+            .or_else(|| project::compute_in(drawing, part, &index, id, &mut contexts).err().map(|e| view_cause(&e)));
+        if let Some(cause) = failure {
+            let sheet = drawing.sheet_of(id).expect("listed");
+            report.dangling_views.push(DanglingView {
+                view: id,
+                name: project::view_label_in(drawing, sheet, view),
+                cause,
+            });
             continue;
         }
         let ctx = &contexts[&id];
-        follow_parent(drawing, id, &contexts);
         let view = drawing.view_mut(id).expect("listed");
         // Proof and quality can improve independently at the same revision.
         if view.geometry.source_digest != part.digest.as_str()
@@ -140,11 +146,15 @@ pub fn update_from_model(drawing: &mut Drawing, part: &Part) -> Result<UpdateRep
         }
         report.projections.push((id, ctx.projected.clone()));
     }
+    for id in ids {
+        follow_parent(drawing, id, &contexts);
+    }
+    let failed = |id| report.dangling_views.iter().any(|failure| failure.view == id);
     for sheet in &mut drawing.sheets {
         let symbols = library::template(sheet.template.as_str()).style_file().symbols.clone();
         for a in &mut sheet.annotations {
             let Some(ctx) = contexts.get(&a.view) else { continue };
-            if failed.contains(&a.view) || sheet.views.iter().any(|v| v.id == a.view && v.excluded_from_update) {
+            if failed(a.view) || sheet.views.iter().any(|v| v.id == a.view && v.excluded_from_update) {
                 continue;
             }
             if let Some(change) = re_resolve(a, &index, ctx, &symbols) {
@@ -156,11 +166,11 @@ pub fn update_from_model(drawing: &mut Drawing, part: &Part) -> Result<UpdateRep
     // its values, and which items there are.
     let made_from_part = drawing.sheets.iter().position(|sheet| sheet.annotations.iter().any(|a| a.source.is_some()));
     if let Some(sheet) = made_from_part {
-        crate::pmi_items::refresh(drawing, part);
+        crate::pmi_items::refresh(drawing, part, |id| !failed(id));
         let views: Vec<ViewContext> = drawing.sheets[sheet]
             .views
             .iter()
-            .filter(|v| !failed.contains(&v.id) && !v.excluded_from_update)
+            .filter(|v| !failed(v.id) && !v.excluded_from_update)
             .filter_map(|v| contexts.get(&v.id).cloned())
             .collect();
         crate::pmi_items::import(drawing, sheet, part, &index, &views)?;
@@ -171,20 +181,16 @@ pub fn update_from_model(drawing: &mut Drawing, part: &Part) -> Result<UpdateRep
     Ok(report)
 }
 
-/// True for views made from something that can go away: derived views, and views with
-/// a crop or broken-out section.
-fn may_dangle(view: &crate::View) -> bool {
-    view.parent().is_some_and(|_| !matches!(view.kind, ViewKind::Projected { .. }))
-        || view.crop.is_some()
-        || !view.broken_out.is_empty()
-}
-
 /// Why a view could not be made, in words for the Needs attention panel.
 fn view_cause(e: &DrawingError) -> String {
     match e {
+        DrawingError::ViewRefused { source, .. } => source.to_string(),
         DrawingError::LostReference(why) => {
             let mut c = why.chars();
             c.next().map(|f| f.to_uppercase().collect::<String>() + c.as_str()).unwrap_or_default()
+        }
+        DrawingError::Kernel(KernelError::QueryFailed { message, .. }) => {
+            format!("The kernel refused to draw it: {message}")
         }
         DrawingError::Kernel(k) => format!("The part cannot be cut there any more: {k}"),
         other => other.to_string(),
@@ -195,25 +201,13 @@ fn view_cause(e: &DrawingError) -> String {
 /// part: a section's cutting line and a detail's centre.
 pub(crate) fn follow_parent(drawing: &mut Drawing, id: ViewId, contexts: &Contexts) {
     let Some(view) = drawing.view(id) else { return };
-    let Some(pctx) = view.parent().and_then(|p| contexts.get(&p)) else { return };
+    let Some(parent) = view.geometry_parent().and_then(|p| drawing.view(p)) else { return };
+    let Some(pctx) = contexts.get(&parent.id).filter(|ctx| ctx.projected.geometry == parent.geometry) else {
+        return;
+    };
     let xf = pctx.xf;
     let view = drawing.view_mut(id).expect("found");
-    match &mut view.kind {
-        ViewKind::Section { line, model_line, .. } if model_line.len() == line.len() => {
-            for (p, m) in line.iter_mut().zip(model_line.iter()) {
-                *p = xf.point(*m);
-            }
-        }
-        ViewKind::Detail { center, profile, model_center: Some(m), .. } => {
-            let to = xf.point(*m);
-            let (du, dv) = (to.u - center.u, to.v - center.v);
-            *center = to;
-            for p in profile {
-                *p = Point2::new(round(p.u + du), round(p.v + dv));
-            }
-        }
-        _ => {}
-    }
+    project::reproject_parent_marks(&mut view.kind, &xf);
 }
 
 /// Points an auxiliary view at another edge, the repair for a lost reference edge, and
@@ -230,17 +224,22 @@ pub fn reattach_view(drawing: &mut Drawing, part: &Part, id: ViewId, entity: Ent
 /// Remakes a view and its dependent descendants, keeping placement and accepted
 /// dimension values. Descendants excluded from updates keep their linework.
 pub fn regenerate_view(drawing: &mut Drawing, part: &Part, id: ViewId) -> Result<(), DrawingError> {
-    let index = PartIndex::build(part)?;
-    let mut contexts = Contexts::new();
-    let ids: Vec<_> = project::dependent_views(drawing, id)
-        .into_iter()
+    let descendants = project::dependent_views(drawing, id);
+    let ids: Vec<_> = descendants
+        .iter()
+        .copied()
         .filter(|child| *child == id || !drawing.view(*child).is_some_and(|v| v.excluded_from_update))
         .collect();
+    let index = PartIndex::build(part)?;
+    let mut contexts = Contexts::new();
     for &id in &ids {
         project::compute_in(drawing, part, &index, id, &mut contexts)?;
-        follow_parent(drawing, id, &contexts);
-        let geometry = contexts[&id].projected.geometry.clone();
-        drawing.view_mut(id).ok_or(DrawingError::UnknownView(id))?.geometry = geometry;
+        let ctx = &contexts[&id];
+        let view = drawing.view_mut(id).ok_or(DrawingError::UnknownView(id))?;
+        view.geometry = ctx.projected.geometry.clone();
+    }
+    for child in descendants {
+        follow_parent(drawing, child, &contexts);
     }
     for sheet in &mut drawing.sheets {
         let symbols = &library::template(sheet.template.as_str()).style_file().symbols;
@@ -249,6 +248,7 @@ pub fn regenerate_view(drawing: &mut Drawing, part: &Part, id: ViewId) -> Result
             re_resolve(a, &index, context, symbols);
         }
     }
+    crate::pmi_items::refresh(drawing, part, |view| ids.contains(&view));
     Ok(())
 }
 

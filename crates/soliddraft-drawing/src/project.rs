@@ -902,17 +902,8 @@ pub fn standard_label(view: StandardView) -> &'static str {
 }
 
 /// A view's name in the tree: its own label, or what it shows.
-pub fn view_label(sheet: &Sheet, view: &View) -> String {
-    let find = |id: ViewId| sheet.view(id).map(|v| (v, sheet.projection));
-    view_label_with(view, || view_axes(&find, view, sheet.projection, 0))
-}
-
 pub fn view_label_in(drawing: &Drawing, sheet: &Sheet, view: &View) -> String {
     let find = |id: ViewId| drawing.sheets.iter().find_map(|s| s.view(id).map(|v| (v, s.projection)));
-    view_label_with(view, || view_axes(&find, view, sheet.projection, 0))
-}
-
-fn view_label_with(view: &View, axes: impl FnOnce() -> Option<(Vec3, Vec3)>) -> String {
     if let Some(l) = &view.label {
         return l.clone();
     }
@@ -921,7 +912,7 @@ fn view_label_with(view: &View, axes: impl FnOnce() -> Option<(Vec3, Vec3)>) -> 
         ViewKind::Detail { label, .. } => format!("Detail {label}"),
         ViewKind::Auxiliary { label, .. } if !label.is_empty() => format!("View {label}"),
         ViewKind::Auxiliary { .. } => "Auxiliary view".into(),
-        _ => match axes().and_then(|(d, u)| standard_of(d, u)) {
+        _ => match view_axes(&find, view, sheet.projection, 0).and_then(|(d, u)| standard_of(d, u)) {
             Some(s) => standard_label(s).to_owned(),
             None if matches!(view.kind, ViewKind::Base { .. }) => "Model view".into(),
             None => "Pictorial view".into(),

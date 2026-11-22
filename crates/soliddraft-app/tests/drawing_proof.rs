@@ -50,7 +50,7 @@ fn rebuild_names_a_broken_out_cut_that_no_longer_reaches_the_part() {
             })
         })
         .unwrap();
-    let name = soliddraft_drawing::project::view_label(session.sheet(), view);
+    let name = soliddraft_drawing::project::view_label_in(&session.doc.drawing, session.sheet(), view);
     let command = Command::AddBrokenOut {
         view: view.id,
         broken_out: BrokenOut {
@@ -71,6 +71,13 @@ fn rebuild_names_a_broken_out_cut_that_no_longer_reaches_the_part() {
     assert_eq!(reply["drawing"]["up_to_date"], false);
     let refusal = &reply["drawing"]["refused_views"][0];
     assert_eq!(refusal["name"], name);
+    let refused_view = reply["drawing"]["sheets"][0]["views"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|view| view["id"] == refusal["id"])
+        .unwrap();
+    assert_eq!(refused_view["up_to_date"], false);
     assert!(refusal["cause"].as_str().is_some_and(|message| message.contains(cause)));
     assert!(state.drawing.session.as_ref().unwrap().has_issues());
     let status = soliddraft_app::drawing::status(&state).unwrap();
@@ -359,6 +366,9 @@ fn a_legacy_rod_cache_refuses_export_until_explicit_rebuild() {
     assert!(shown.sheets[0].views.iter().all(|v| !v.geometry.unproved && !v.geometry.coarse));
     assert_eq!(certified_views(&kernel), 0, "opening drew no view");
     assert_eq!(shown.model.pinned, PartContext::new(&reopened.doc).unwrap().digest);
+    let session = reopened.drawing.session.as_ref().unwrap();
+    assert!(!session.is_up_to_date());
+    assert_eq!(session.doc.stale_views().len(), 4);
     soliddraft_app::drawing::follow_part(&mut reopened);
     assert_eq!(reopened.drawing.session.as_ref().unwrap().doc.drawing, shown);
 

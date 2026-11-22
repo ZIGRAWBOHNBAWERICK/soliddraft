@@ -184,6 +184,12 @@ fn exceeds(
                 }
                 let Some(Some(b)) = prepared_b.as_ref() else { continue };
                 let Some(bounds) = witness_step(a.face_to_face(b, model, &options, dec))? else { continue };
+                let upper = bounds.upper;
+                #[cfg(test)]
+                let upper = tests::face_upper(upper);
+                if upper.as_ref().is_some_and(|hi| hi <= clearance) {
+                    return Ok(Answer::exact(true));
+                }
                 if let Some([p, q]) = bounds.witnesses {
                     let delta = &p.minus(&q).norm_squared() - &Real::from(limit.clone());
                     let sign = match dec.sign(&delta) {
@@ -195,8 +201,6 @@ fn exceeds(
                     if witness_step(sign)? == Some(true) {
                         return Ok(Answer::exact(true));
                     }
-                } else if bounds.upper.is_some_and(|hi| &hi <= clearance) {
-                    return Ok(Answer::exact(true));
                 }
             }
         }
@@ -330,7 +334,20 @@ mod tests {
     use soliddraft_kernel_api::contract;
 
     thread_local! {
+        static FACE_UPPER_FLOOR: std::cell::Cell<Option<Rational>> = const { std::cell::Cell::new(None) };
         static NATIVE_ENCLOSURE: std::cell::Cell<Option<Enclosure>> = const { std::cell::Cell::new(None) };
+    }
+
+    pub(super) fn face_upper(upper: Option<Rational>) -> Option<Rational> {
+        FACE_UPPER_FLOOR.with(|slot| {
+            let floor = slot.take();
+            let upper = match (upper, &floor) {
+                (Some(hi), Some(floor)) if &hi < floor => Some(floor.clone()),
+                (upper, _) => upper,
+            };
+            slot.set(floor);
+            upper
+        })
     }
 
     pub(super) fn replace_native_enclosure(mut answer: Answer<queries::BodyRelation>) -> Answer<queries::BodyRelation> {
@@ -351,15 +368,20 @@ mod tests {
         let a = PlacedBody { body, translation: [0.0; 3], rotation: [0.0, 0.0, 0.0, 1.0] };
         let b = PlacedBody { translation: [0.0, 0.0, 11.0], ..a };
         let enclosure = Enclosure { lo: Rational::parse("0.9").unwrap(), hi: Rational::parse("1.1").unwrap() };
-        for (first, second) in [(a, b), (b, a)] {
-            for (threshold, expected) in [(1.0, Some(false)), (0.99, None)] {
-                NATIVE_ENCLOSURE.set(Some(enclosure.clone()));
-                let result = k.body_relation(first, second, Some(threshold)).unwrap();
-                assert_eq!(result.overlap.unwrap().positive, Some(false));
-                let gap = result.gap.unwrap().unwrap();
-                assert!(gap.distance.lo < threshold && gap.distance.hi > threshold);
-                assert_eq!(gap.exceeds_clearance, expected);
-                assert!(gap.clearance_refusal.is_none());
+        for floor in [None, Some(enclosure.hi.clone())] {
+            for (first, second) in [(a, b), (b, a)] {
+                for (threshold, expected) in [(1.0, Some(false)), (0.99, None)] {
+                    NATIVE_ENCLOSURE.set(Some(enclosure.clone()));
+                    FACE_UPPER_FLOOR.set(floor.clone());
+                    let result = k.body_relation(first, second, Some(threshold));
+                    FACE_UPPER_FLOOR.set(None);
+                    let result = result.unwrap();
+                    assert_eq!(result.overlap.unwrap().positive, Some(false));
+                    let gap = result.gap.unwrap().unwrap();
+                    assert!(gap.distance.lo < threshold && gap.distance.hi > threshold);
+                    assert_eq!(gap.exceeds_clearance, expected);
+                    assert!(gap.clearance_refusal.is_none());
+                }
             }
         }
     }

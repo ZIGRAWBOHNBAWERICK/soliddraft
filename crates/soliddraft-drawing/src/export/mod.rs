@@ -73,13 +73,13 @@ pub fn bytes(list: &DisplayList, format: Format, title: &str) -> Result<Vec<u8>,
 pub fn check_sheet(drawing: &crate::Drawing, sheet: &crate::Sheet) -> Result<(), DrawingError> {
     for view in &sheet.views {
         let label = || crate::project::view_label_in(drawing, sheet, view);
-        if !view.geometry.catallax || view.geometry.unproved {
+        if !view.has_saved_catallax_linework() {
             return Err(DrawingError::BadRequest(format!(
                 "{} has no saved Catallax line work. Redraw it once in the drawing editor before exporting. Check any crop or broken-out boundary after the redraw.",
                 label()
             )));
         }
-        if !view.excluded_from_update && view.geometry.source_digest != drawing.model.pinned.as_str() {
+        if !view.accepts_revision(drawing.model.pinned.as_str()) {
             return Err(DrawingError::BadRequest(format!(
                 "{} does not match the drawing's accepted revision. Rebuild the drawing before exporting.",
                 label()

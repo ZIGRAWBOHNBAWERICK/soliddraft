@@ -74,6 +74,22 @@ fn rebuild_commits_successful_views_alongside_base_and_projected_refusals() {
         let view = d.view(id).unwrap();
         let before = view.geometry.clone();
         k.refuse_direction = Some(project::spec_in(&d, target, view).unwrap().direction);
+        let healthy = d.sheets[0].views.iter().find(|v| v.id != id).unwrap().id;
+        let mut saved = Vec::new();
+        for view in [id, healthy] {
+            let note = soliddraft_drawing::Annotation {
+                id: d.next_annotation_id(),
+                view,
+                body: AnnotationKind::Note { text: "Old manufacturing requirement".into(), leader: vec![] },
+                anchors: vec![],
+                placement: Point2::new(0.0, 0.0),
+                style: Default::default(),
+                state: AnnotationState::Ok,
+                source: Some(soliddraft_drawing::PmiSource::Item { item: "removed requirement".into() }),
+            };
+            apply(&mut d, &Command::AddAnnotation { annotation: note.clone() }).unwrap();
+            saved.push(note);
+        }
         let changed = box_part(&k, "block", Vec3::new(60.0, 30.0, 10.0));
         let report = UndoStack::new().run(&mut d, &Command::UpdateFromModel, Some(&changed)).unwrap().unwrap();
         assert!(report.views_updated > 0);
@@ -82,6 +98,8 @@ fn rebuild_commits_successful_views_alongside_base_and_projected_refusals() {
         assert_eq!(failure.name, if projected { "Top view" } else { "Front view" });
         assert_eq!(d.model.pinned, changed.digest);
         assert_eq!(d.view(id).unwrap().geometry, before);
+        assert_eq!(d.annotation(saved[0].id), Some(&saved[0]));
+        assert!(d.annotation(saved[1].id).is_none());
         assert!(!d.views_match_pin());
         for rebuilt in d.sheets[0].views.iter().filter(|v| v.id != id) {
             assert_eq!(rebuilt.geometry.source_digest, changed.digest.as_str());
@@ -546,6 +564,64 @@ fn dxf_marks_the_polygon_used_to_clip_a_circular_hatch() {
     assert_eq!(list.dxf_accuracy().approximate, 1);
 }
 
+fn fitted_hatch(d: &mut Drawing, xf: &project::ViewTransform) -> soliddraft_drawing::display::DisplayList {
+    use soliddraft_kernel_api::drawing::{Curve3, CurveSource, CutRegion, ViewCurve};
+    let square = [(-8.0, -8.0), (8.0, -8.0), (8.0, 8.0), (-8.0, 8.0)];
+    let point = |(u, v)| xf.unproject(Point2::new(u, v));
+    let outer = (0..4)
+        .map(|i| ViewCurve {
+            approximate: i == 0,
+            ..ViewCurve::new(
+                Curve3::Line { a: point(square[i]), b: point(square[(i + 1) % 4]) },
+                CurveSource::Unknown,
+                true,
+            )
+        })
+        .collect();
+    let cut = CutRegion { outer, holes: Vec::new() };
+    let clip = Boundary::rectangle(Point2::new(-5.0, -5.0), Point2::new(5.0, 5.0));
+    let polygon = project::region_polygon(&cut, xf, Some(clip));
+    d.view_mut(FRONT).unwrap().geometry.hatch.push(polygon);
+    let meta = soliddraft_drawing::file::FileMeta::new("test", d.meta.units);
+    let bytes = soliddraft_drawing::file::to_bytes(d, &meta).unwrap();
+    let (d, _) = soliddraft_drawing::file::from_bytes(&bytes).unwrap();
+    layout_sheet(&d, 0)
+}
+
+fn fitted_hatch_fixture() -> soliddraft_drawing::display::DisplayList {
+    let k = BoxKernel::new();
+    let part = box_part(&k, "block", Vec3::new(40.0, 30.0, 10.0));
+    let mut d = drawing(&part);
+    let index = PartIndex::build(&part).unwrap();
+    let ctx = derived::context(&d, &part, &index, FRONT).unwrap();
+    fitted_hatch(&mut d, &ctx.xf)
+}
+
+#[test]
+fn fitted_hatch_reports_approximation_in_svg() {
+    let list = fitted_hatch_fixture();
+    let svg = export::svg(&list);
+    assert_eq!(list.accuracy().approximate, 1);
+    assert!(svg.contains(r#"data-accuracy="approximate""#));
+}
+
+#[test]
+fn fitted_hatch_reports_approximation_in_pdf() {
+    let list = fitted_hatch_fixture();
+    let pdf = export::pdf(std::slice::from_ref(&list), &export::PdfInfo::default()).unwrap();
+    assert!(pdf.starts_with(b"%PDF-"));
+    assert_eq!(list.accuracy().approximate, 1);
+}
+
+#[test]
+fn fitted_hatch_reports_approximation_in_dxf() {
+    let list = fitted_hatch_fixture();
+    let bytes = export::dxf(&list).unwrap();
+    let counts = export::dxf::count_entities(&bytes).unwrap();
+    assert_eq!(counts.get("HATCH/HATCH"), Some(&1), "{counts:?}");
+    assert_eq!(list.dxf_accuracy().approximate, 1);
+}
+
 #[test]
 fn the_dxf_keeps_dimensions_and_hatches_as_such() {
     let k = BoxKernel::new();
@@ -565,32 +641,8 @@ fn the_dxf_keeps_dimensions_and_hatches_as_such() {
     )
     .unwrap();
     apply(&mut d, &Command::AddAnnotation { annotation: set }).unwrap();
-    use soliddraft_kernel_api::drawing::{Curve3, CurveSource, CutRegion, ViewCurve};
-    let square = [(-8.0, -8.0), (8.0, -8.0), (8.0, 8.0), (-8.0, 8.0)];
-    let point = |(u, v)| ctx.xf.unproject(Point2::new(u, v));
-    let outer = (0..4)
-        .map(|i| ViewCurve {
-            approximate: i == 0,
-            ..ViewCurve::new(
-                Curve3::Line { a: point(square[i]), b: point(square[(i + 1) % 4]) },
-                CurveSource::Unknown,
-                true,
-            )
-        })
-        .collect();
-    let cut = CutRegion { outer, holes: Vec::new() };
-    let clip = Boundary::rectangle(Point2::new(-5.0, -5.0), Point2::new(5.0, 5.0));
-    let polygon = project::region_polygon(&cut, &ctx.xf, Some(clip));
-    d.view_mut(FRONT).unwrap().geometry.hatch.push(polygon);
-    let meta = soliddraft_drawing::file::FileMeta::new("test", d.meta.units);
-    let bytes = soliddraft_drawing::file::to_bytes(&d, &meta).unwrap();
-    let (d, _) = soliddraft_drawing::file::from_bytes(&bytes).unwrap();
-    let list = layout_sheet(&d, 0);
+    let list = fitted_hatch(&mut d, &ctx.xf);
     assert!(list.items.iter().any(|i| i.role() == Role::Hatch));
-    assert_eq!(list.hatches.len(), 1);
-    assert_eq!(list.accuracy().approximate, 1);
-    assert_eq!(list.dxf_accuracy().approximate, 1);
-    assert!(export::svg(&list).contains(r#"data-accuracy="approximate""#));
     let bytes = export::dxf(&list).unwrap();
     let counts = export::dxf::count_entities(&bytes).unwrap();
     assert_eq!(counts.get("HATCH/HATCH"), Some(&1), "{counts:?}");

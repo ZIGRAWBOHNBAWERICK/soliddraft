@@ -847,7 +847,6 @@ fn drawing_json(state: &AppState) -> Option<Value> {
     let s = state.drawing.session.as_ref()?;
     let d = &s.doc.drawing;
     let style = s.doc.style();
-    let pinned = d.model.pinned.as_str();
     let refusals: std::collections::BTreeMap<_, _> =
         s.doc.refused_views().map(|(_, id, name, cause)| (id, (name, cause))).collect();
     let (mut changed, mut dangling) = (Vec::new(), Vec::new());
@@ -876,8 +875,7 @@ fn drawing_json(state: &AppState) -> Option<Value> {
                         },
                         "cropped": v.crop.is_some(),
                         "excluded_from_update": v.excluded_from_update,
-                        "up_to_date": v.excluded_from_update
-                            || (v.geometry.source_digest == pinned && !refusals.contains_key(&v.id)),
+                        "up_to_date": s.doc.view_is_up_to_date(v),
                         "preview": v.geometry.unproved,
                         "curves": v.geometry.curves.len(),
                         "accuracy": v.geometry.accuracy(),

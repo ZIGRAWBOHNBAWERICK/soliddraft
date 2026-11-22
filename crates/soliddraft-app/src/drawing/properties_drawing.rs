@@ -9,7 +9,7 @@ use crate::theme;
 use egui::{Align2, Color32, CornerRadius, Rect, Sense, Stroke, StrokeKind, pos2, vec2};
 use soliddraft_drawing::display::annotation_name;
 use soliddraft_drawing::library as templates;
-use soliddraft_drawing::project::{standard_label, view_label};
+use soliddraft_drawing::project::{standard_label, view_label_in};
 use soliddraft_drawing::{
     AnnotationKind, AnnotationState, Command, DimensionKind, HiddenLines, LinearOrientation, Projection, TangentEdges,
     Tolerance, ViewScale,
@@ -295,7 +295,8 @@ fn needs_attention(ui: &mut egui::Ui, s: &mut DrawingSession, actions: &mut Vec<
         for a in &dangling {
             let AnnotationState::Dangling { lost, cause } = &a.state else { continue };
             let name = annotation_name(a, style);
-            let view_name = sheet.view(a.view).map(|v| view_label(&sheet, v)).unwrap_or_else(|| "sheet".into());
+            let view_name =
+                sheet.view(a.view).map(|v| view_label_in(&s.doc.drawing, &sheet, v)).unwrap_or_else(|| "sheet".into());
             let focused = s.attention_focus == Some(a.id) || s.selection == Some(DrawingSel::Annotation(a.id));
             let card = egui::Frame::new()
                 .fill(if focused { theme::field_bg() } else { theme::panel() })
@@ -352,7 +353,10 @@ fn needs_attention(ui: &mut egui::Ui, s: &mut DrawingSession, actions: &mut Vec<
             for a in &changed {
                 let AnnotationState::Changed { previous } = &a.state else { continue };
                 let name = annotation_name(a, style);
-                let view_name = sheet.view(a.view).map(|v| view_label(&sheet, v)).unwrap_or_else(|| "sheet".into());
+                let view_name = sheet
+                    .view(a.view)
+                    .map(|v| view_label_in(&s.doc.drawing, &sheet, v))
+                    .unwrap_or_else(|| "sheet".into());
                 egui::Frame::new()
                     .fill(theme::panel())
                     .stroke(Stroke::new(1.0, theme::line()))
@@ -429,7 +433,7 @@ fn view_panel(
 ) {
     let sheet = s.sheet().clone();
     let Some(v) = sheet.view(id).cloned() else { return };
-    let name = view_label(&sheet, &v);
+    let name = view_label_in(&s.doc.drawing, &sheet, &v);
     let head = header(ui, Icon::Display, &name);
     let close = small_button(
         ui,
@@ -441,7 +445,7 @@ fn view_panel(
     if close.clicked() {
         actions.push(DrawingAction::Select(None));
     }
-    let stale = s.doc.stale_views().contains(&id);
+    let stale = !s.doc.view_is_up_to_date(&v);
     egui::ScrollArea::vertical().id_salt("view_pm").auto_shrink([false, false]).show(ui, |ui| {
         egui::Frame::new().inner_margin(egui::Margin::symmetric(10, 8)).show(ui, |ui| {
             theme::section_label(ui, "Reference");
@@ -450,19 +454,19 @@ fn view_panel(
             let orientation = match &v.kind {
                 soliddraft_drawing::ViewKind::Base { .. } => name.trim_end_matches(" view").to_owned(),
                 soliddraft_drawing::ViewKind::Projected { parent, direction, .. } => {
-                    let parent_name = sheet.view(*parent).map(|p| view_label(&sheet, p)).unwrap_or_default();
+                    let parent_name = s.doc.view_name(*parent).unwrap_or_default();
                     format!("{:?} of {parent_name}", direction).to_lowercase()
                 }
                 soliddraft_drawing::ViewKind::Section { parent, .. } => {
-                    let parent_name = s.doc.drawing.sheet_of(*parent).and_then(|sh| sh.view(*parent).map(|p| view_label(sh, p))).unwrap_or_default();
+                    let parent_name = s.doc.view_name(*parent).unwrap_or_default();
                     format!("section of {parent_name}")
                 }
                 soliddraft_drawing::ViewKind::Detail { parent, .. } => {
-                    let parent_name = s.doc.drawing.sheet_of(*parent).and_then(|sh| sh.view(*parent).map(|p| view_label(sh, p))).unwrap_or_default();
+                    let parent_name = s.doc.view_name(*parent).unwrap_or_default();
                     format!("detail of {parent_name}")
                 }
                 soliddraft_drawing::ViewKind::Auxiliary { parent, .. } => {
-                    let parent_name = s.doc.drawing.sheet_of(*parent).and_then(|sh| sh.view(*parent).map(|p| view_label(sh, p))).unwrap_or_default();
+                    let parent_name = s.doc.view_name(*parent).unwrap_or_default();
                     format!("auxiliary of {parent_name}")
                 }
             };
@@ -554,7 +558,7 @@ fn view_panel(
             theme::section_label(ui, "Alignment and children");
             match v.alignment {
                 Some(al) => {
-                    let parent_name = sheet.view(al.parent).map(|p| view_label(&sheet, p)).unwrap_or_default();
+                    let parent_name = s.doc.view_name(al.parent).unwrap_or_default();
                     let axis = match al.axis {
                         soliddraft_drawing::AlignAxis::Horizontal => "side by side",
                         soliddraft_drawing::AlignAxis::Vertical => "one above the other",
@@ -571,8 +575,10 @@ fn view_panel(
                     }
                 }
             }
-            let children: Vec<String> =
-                sheet.views.iter().filter(|c| c.parent() == Some(id)).map(|c| view_label(&sheet, c)).collect();
+            let children: Vec<String> = s.doc.drawing.sheets.iter()
+                .flat_map(|sheet| sheet.views.iter().filter(|c| c.parent() == Some(id))
+                    .map(|c| view_label_in(&s.doc.drawing, sheet, c)))
+                .collect();
             if !children.is_empty() {
                 value_row(ui, "Children", &children.join(", "));
             }
@@ -639,7 +645,7 @@ fn annotation_panel(
     let view_name = if a.view == SHEET {
         "Sheet".to_owned()
     } else {
-        sheet.view(a.view).map(|v| view_label(&sheet, v)).unwrap_or_default()
+        sheet.view(a.view).map(|v| view_label_in(&s.doc.drawing, &sheet, v)).unwrap_or_default()
     };
     let scale = sheet.view(a.view).map(|v| soliddraft_drawing::project::effective_scale(&sheet, v)).unwrap_or(1.0);
     let _ = scale;
@@ -823,18 +829,14 @@ fn placing_panel(ui: &mut egui::Ui, s: &DrawingSession, kind: super::PlaceKind, 
         }
         super::PlaceKind::Projected { parent } => {
             theme::section_label(ui, "Parent");
-            let parent_name = sheet.view(*parent).map(|p| view_label(sheet, p)).unwrap_or_default();
+            let parent_name = s.doc.view_name(*parent).unwrap_or_default();
             value_row(ui, "From", &parent_name);
             let direction = s.pending.as_ref().and_then(|p| p.direction);
             let angle = match sheet.projection {
                 Projection::FirstAngle => "first angle",
                 Projection::ThirdAngle => "third angle",
             };
-            let result = s.pending.as_ref().map(|p| {
-                let mut tmp = sheet.clone();
-                tmp.views.push(p.view.clone());
-                view_label(&tmp, &p.view)
-            });
+            let result = s.pending.as_ref().map(|p| view_label_in(&s.doc.drawing, sheet, &p.view));
             let text = match (direction, result) {
                 (Some(d), Some(r)) => format!("{} → {r} ({angle})", format!("{d:?}").to_lowercase()),
                 _ => "move the pointer around the parent".into(),

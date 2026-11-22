@@ -17,7 +17,7 @@ use crate::annotation::{
 use crate::ids::{AnnotationId, SHEET, ViewId};
 use crate::library::{Align, FieldDef, StyleFile, TemplateFile, Weight};
 use crate::measure::{CurveShape, display_text, shape_of};
-use crate::project::{effective_scale, view_bounds, view_label};
+use crate::project::{effective_scale, view_bounds};
 use crate::view::{Accuracy, AccuracyCounts};
 
 mod symbols;
@@ -1261,11 +1261,6 @@ pub fn annotation_name(a: &Annotation, style: &StyleFile) -> String {
         AnnotationKind::Datum { letter } => format!("Datum {letter}"),
         AnnotationKind::RevisionSymbol { revision } => format!("Rev {revision}"),
     }
-}
-
-/// The caption of a view for lists.
-pub fn view_name(sheet: &Sheet, view: &View) -> String {
-    view_label(sheet, view)
 }
 
 #[cfg(test)]

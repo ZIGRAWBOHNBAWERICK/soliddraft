@@ -844,14 +844,20 @@ pub fn place_notes(drawing: &mut Drawing, sheet: usize, part: &Part) {
 /// tolerance, its count, its letter, its text. An annotation whose item the part no
 /// longer has, or that no longer applies, is taken off the drawing. Returns the names of
 /// the items taken off.
-pub fn refresh(drawing: &mut Drawing, part: &Part) -> Vec<String> {
+pub(crate) fn refresh(drawing: &mut Drawing, part: &Part, failed: &[ViewId]) -> Vec<String> {
     let rows: BTreeMap<&str, &PmiRow> = part.requirements.rows.iter().map(|row| (row.item.id.as_str(), row)).collect();
     let notes = &part.requirements.notes.notes;
     let mut removed = Vec::new();
     for sheet in &mut drawing.sheets {
         let style = crate::library::template(sheet.template.as_str()).style_file();
         let heading = notes_heading(sheet.template.as_str());
+        let views = &sheet.views;
         sheet.annotations.retain_mut(|annotation| {
+            if failed.contains(&annotation.view)
+                || views.iter().any(|v| v.id == annotation.view && v.excluded_from_update)
+            {
+                return true;
+            }
             let Some(source) = annotation.source.clone() else { return true };
             let keep = match &source {
                 PmiSource::Notes => {

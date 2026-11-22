@@ -969,14 +969,12 @@ fn place_tool(
         // Hover card naming the resulting orientation and the modifier.
         if let Some(d) = pending.direction {
             let sheet = s.sheet();
-            let mut tmp = sheet.clone();
-            tmp.views.push(pending.view.clone());
-            let name = project::view_label(&tmp, &pending.view);
+            let name = project::view_label_in(&s.doc.drawing, sheet, &pending.view);
             let line1 = format!("Projected view · {}", name.trim_end_matches(" view"));
             let line2 = if d.is_diagonal() {
                 "Pictorial, not aligned".to_owned()
             } else if pending.aligned {
-                format!("Aligned to {} · hold Ctrl to break alignment", project::view_label(sheet, pv))
+                format!("Aligned to {} · hold Ctrl to break alignment", s.doc.view_name(pv.id).unwrap_or_default())
             } else {
                 "Free (Ctrl held)".to_owned()
             };

@@ -754,7 +754,8 @@ impl DrawingSession {
     }
 
     pub fn is_up_to_date(&self) -> bool {
-        !self.doc.is_stale() && self.doc.drawing.views_match_pin() && self.doc.refused_views().next().is_none()
+        !self.doc.is_stale()
+            && self.doc.drawing.sheets.iter().flat_map(|sheet| &sheet.views).all(|v| self.doc.view_is_up_to_date(v))
     }
 }
 

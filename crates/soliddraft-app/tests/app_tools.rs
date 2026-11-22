@@ -263,7 +263,7 @@ fn every_tool_runs_without_a_window_and_undoes_as_its_row_says() {
     assert_eq!(placed["kind"], "section", "{placed}");
     assert_eq!(
         (placed["parent"].as_str(), placed["preview"].as_bool(), placed["up_to_date"].as_bool()),
-        (Some(first.as_str()), Some(true), Some(true)),
+        (Some(first.as_str()), Some(true), Some(false)),
         "{placed}"
     );
     s.call("drawing_hidden_lines", json!({ "view": first, "shown": false }));

@@ -164,7 +164,7 @@ pub fn update_from_model(drawing: &mut Drawing, part: &Part) -> Result<UpdateRep
     // its values, and which items there are.
     let made_from_part = drawing.sheets.iter().position(|sheet| sheet.annotations.iter().any(|a| a.source.is_some()));
     if let Some(sheet) = made_from_part {
-        crate::pmi_items::refresh(drawing, part);
+        crate::pmi_items::refresh(drawing, part, &failed);
         let views: Vec<ViewContext> = drawing.sheets[sheet]
             .views
             .iter()

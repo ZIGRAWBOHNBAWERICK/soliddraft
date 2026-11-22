@@ -281,7 +281,7 @@ fn view_named(harness: &App<'_>, name: &str) -> ViewId {
     sheet
         .views
         .iter()
-        .find(|v| soliddraft_drawing::project::view_label(sheet, v) == name)
+        .find(|v| soliddraft_drawing::project::view_label_in(&s.doc.drawing, sheet, v) == name)
         .unwrap_or_else(|| panic!("no view {name}"))
         .id
 }

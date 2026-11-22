@@ -44,6 +44,14 @@ pub struct View {
 }
 
 impl View {
+    pub fn has_saved_catallax_linework(&self) -> bool {
+        self.geometry.catallax && !self.geometry.unproved
+    }
+
+    pub fn accepts_revision(&self, digest: &str) -> bool {
+        self.excluded_from_update || self.geometry.source_digest == digest
+    }
+
     /// The parent view, for every kind except a base view.
     pub fn parent(&self) -> Option<ViewId> {
         match self.kind {

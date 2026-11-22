@@ -207,11 +207,7 @@ impl Drawing {
     /// that takes part in updates was made from it.
     pub fn views_match_pin(&self) -> bool {
         let pinned = self.model.pinned.as_str();
-        self.sheets
-            .iter()
-            .flat_map(|s| &s.views)
-            .filter(|v| !v.excluded_from_update)
-            .all(|v| v.geometry.source_digest == pinned)
+        self.sheets.iter().flat_map(|s| &s.views).all(|v| v.accepts_revision(pinned))
     }
 
     /// The view with id `id`, on any sheet.

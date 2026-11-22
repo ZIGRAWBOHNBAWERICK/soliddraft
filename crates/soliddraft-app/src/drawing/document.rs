@@ -178,29 +178,43 @@ impl DrawingDoc {
         self.seen_digest != self.drawing.model.pinned
     }
 
-    /// Views whose geometry is older than the part.
+    pub(super) fn view_name(&self, id: ViewId) -> Option<String> {
+        let sheet = self.drawing.sheet_of(id)?;
+        Some(project::view_label_in(&self.drawing, sheet, sheet.view(id)?))
+    }
+
+    pub fn view_is_up_to_date(&self, view: &View) -> bool {
+        view.has_saved_catallax_linework()
+            && view.accepts_revision(self.seen_digest.as_str())
+            && view.accepts_revision(self.drawing.model.pinned.as_str())
+            && (view.excluded_from_update || !self.active_refusals().any(|f| f.view == view.id))
+    }
+
+    /// Views that need a redraw.
     pub fn stale_views(&self) -> Vec<ViewId> {
-        let digest = self.seen_digest.as_str();
         self.drawing
             .sheets
             .iter()
             .flat_map(|s| &s.views)
-            .filter(|v| v.geometry.source_digest != digest && !v.excluded_from_update)
+            .filter(|v| !self.view_is_up_to_date(v))
             .map(|v| v.id)
             .collect()
     }
 
-    pub fn refused_views(&self) -> impl Iterator<Item = (usize, ViewId, String, &str)> {
+    fn active_refusals(&self) -> impl Iterator<Item = &soliddraft_drawing::DanglingView> {
         self.last_update
             .iter()
             .filter(|update| update.to_revision == self.drawing.model.pinned)
             .flat_map(|update| &update.dangling_views)
-            .filter_map(|failure| {
-                let i = project::sheet_of(&self.drawing, failure.view)?;
-                let sheet = &self.drawing.sheets[i];
-                let view = sheet.view(failure.view).filter(|v| !v.excluded_from_update)?;
-                Some((i, view.id, project::view_label_in(&self.drawing, sheet, view), failure.cause.as_str()))
-            })
+    }
+
+    pub fn refused_views(&self) -> impl Iterator<Item = (usize, ViewId, String, &str)> {
+        self.active_refusals().filter_map(|failure| {
+            let i = project::sheet_of(&self.drawing, failure.view)?;
+            let sheet = &self.drawing.sheets[i];
+            let view = sheet.view(failure.view).filter(|v| !v.excluded_from_update)?;
+            Some((i, view.id, project::view_label_in(&self.drawing, sheet, view), failure.cause.as_str()))
+        })
     }
 
     pub fn view_refusal_messages(&self) -> impl Iterator<Item = String> {

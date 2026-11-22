@@ -12,10 +12,10 @@ use soliddraft_document::{ContentHash, DocKind, DocRef, DocumentId, Resolution, 
 use soliddraft_drawing::export::{self, Format, PdfInfo};
 use soliddraft_drawing::file::{self, FileMeta};
 use soliddraft_drawing::{
-    AccuracyCounts, AnnotationId, AnnotationKind, Boundary, BrokenOut, Command, DatumRef, Drawing, DrawingMeta,
-    GdtCharacteristic, HiddenLines, LinearOrientation, MaterialCondition, ModelDimension, ModelMeasure, NewDrawing,
-    Part, PartIndex, RevisionRow, SetKind, SurfaceProcess, TangentEdges, Template, UndoStack, UpdateReport, ViewId,
-    annotate, derived, display, project,
+    AccuracyCounts, AnnotationId, AnnotationKind, Boundary, BrokenOut, Command, DatumRef, Drawing, DrawingError,
+    DrawingMeta, GdtCharacteristic, HiddenLines, LinearOrientation, MaterialCondition, ModelDimension, ModelMeasure,
+    NewDrawing, Part, PartIndex, RevisionRow, SetKind, SurfaceProcess, TangentEdges, Template, UndoStack, UpdateReport,
+    ViewId, annotate, derived, display, project,
 };
 use soliddraft_kernel_api::drawing::StandardView;
 use soliddraft_kernel_api::{BooleanOp, Kernel, Point2, Vec3};
@@ -721,45 +721,83 @@ fn update(o: &Options) -> Result<(), String> {
         // A drawing from before the envelope is saved under the current name beside it.
         let saved = soliddraft_document::kind::saved_path(&path, DocKind::Drawing);
         let meta = meta.rewritten(&source.backend, drawing.meta.units);
-        file::write(&saved, &drawing, &meta).map_err(|e| e.to_string())?;
-        let repairs = (|| -> Result<Vec<String>, String> {
-            let mut repairs = Vec::new();
-            let mut run = |c: Command| {
-                stack.run(&mut drawing, &c, Some(part)).map(|_| ()).map_err(|e| format!("{}: {e}", c.name()))
-            };
-            if o.accept {
-                for c in &report.changed {
-                    run(Command::AcceptChange { annotation: c.annotation })?;
-                    repairs.push(format!("accepted {}", c.annotation));
-                }
-            }
-            for (id, end, at) in &o.reattach {
-                let annotation = AnnotationId(*id);
-                let entity = soliddraft_drawing::edge_near(part, *at)
-                    .map_err(|e| format!("Cannot reattach end {end} of {annotation}: {e}"))?;
-                run(Command::Reattach { annotation, end: *end, entity })?;
-                repairs.push(format!("reattached end {end} of {annotation}"));
-            }
-            for id in &o.freeze {
-                run(Command::FreezeAsNote { annotation: AnnotationId(*id) })?;
-                repairs.push(format!("kept annotation {id} as a note"));
-            }
-            for id in &o.delete {
-                run(Command::DeleteAnnotation { annotation: AnnotationId(*id) })?;
-                repairs.push(format!("deleted annotation {id}"));
-            }
-            if !repairs.is_empty() {
-                file::write(&saved, &drawing, &meta).map_err(|e| e.to_string())?;
-            }
-            Ok(repairs)
-        })()
-        .map_err(|error| {
+        let repair_error = |error: String| {
             let mut message = format!("Annotation repair failed: {error}");
             for refusal in &report.dangling_views {
                 message.push_str(&format!("\n{}: {}", refusal.name, refusal.cause));
             }
             message
-        })?;
+        };
+        let requested = (|| -> Result<Vec<(Command, String)>, DrawingError> {
+            let mut requested = Vec::new();
+            let annotation = |id| drawing.annotation(id).ok_or(DrawingError::UnknownAnnotation(id));
+            if o.accept {
+                for c in &report.changed {
+                    annotation(c.annotation)?;
+                    requested.push((
+                        Command::AcceptChange { annotation: c.annotation },
+                        format!("accepted {}", c.annotation),
+                    ));
+                }
+            }
+            for (id, end, at) in &o.reattach {
+                let id = AnnotationId(*id);
+                if *end >= annotation(id)?.anchors.len() {
+                    return Err(DrawingError::BadRequest(format!("{id} has no end {end}")));
+                }
+                if !at.is_finite() {
+                    return Err(DrawingError::BadRequest(format!("The point for end {end} of {id} must be finite")));
+                }
+                let entity = soliddraft_drawing::edge_near(part, *at)?;
+                requested.push((
+                    Command::Reattach { annotation: id, end: *end, entity },
+                    format!("reattached end {end} of {id}"),
+                ));
+            }
+            for id in &o.freeze {
+                annotation(AnnotationId(*id))?;
+                requested.push((
+                    Command::FreezeAsNote { annotation: AnnotationId(*id) },
+                    format!("kept annotation {id} as a note"),
+                ));
+            }
+            let mut deleted = std::collections::BTreeSet::new();
+            for id in &o.delete {
+                annotation(AnnotationId(*id))?;
+                if !deleted.insert(*id) {
+                    return Err(DrawingError::BadRequest(format!("Annotation {id} was requested for deletion twice")));
+                }
+                requested.push((
+                    Command::DeleteAnnotation { annotation: AnnotationId(*id) },
+                    format!("deleted annotation {id}"),
+                ));
+            }
+            Ok(requested)
+        })()
+        .map_err(|error| repair_error(error.to_string()))?;
+        let prepared = if requested.is_empty() {
+            None
+        } else {
+            let mut edited = drawing.clone();
+            let mut result = Ok(());
+            for (command, _) in &requested {
+                if let Err(error) = soliddraft_drawing::apply_with(&mut edited, command, part) {
+                    let message = repair_error(format!("{}: {error}", command.name()));
+                    if matches!(error, DrawingError::BadRequest(_) | DrawingError::UnknownAnnotation(_)) {
+                        return Err(message);
+                    }
+                    result = Err(message);
+                    break;
+                }
+            }
+            Some(result.map(|()| edited))
+        };
+        file::write(&saved, &drawing, &meta).map_err(|e| e.to_string())?;
+        if let Some(prepared) = prepared {
+            drawing = prepared?;
+            file::write(&saved, &drawing, &meta).map_err(|e| repair_error(e.to_string()))?;
+        }
+        let repairs = requested.into_iter().map(|(_, name)| name).collect::<Vec<_>>();
         let outputs = write_outputs(&drawing, &o.outs, &source.backend, &report.dangling_views);
         // The report after repairs: what still needs attention.
         let mut final_report = report.clone();

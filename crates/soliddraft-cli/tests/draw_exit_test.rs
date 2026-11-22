@@ -194,17 +194,46 @@ fn reattach_refusal_keeps_the_partial_rebuild() {
     std::fs::remove_dir_all(dir).unwrap();
 }
 
+fn assert_invalid_repair_leaves_drawing_untouched(dir: &Path, repairs: &[&str]) {
+    let path = dir.join("box.dwdrw");
+    let before = std::fs::read(&path).unwrap();
+    let mut args = vec!["draw", "--update", "box.dwdrw", "--out", "unexpected.svg"];
+    args.extend_from_slice(repairs);
+    let out = run(dir, &args);
+    assert!(!out.status.success());
+    let error = String::from_utf8(out.stderr).unwrap();
+    assert!(error.contains("Annotation repair failed"), "{error}");
+    assert_eq!(std::fs::read(&path).unwrap(), before);
+    assert!(!dir.join("unexpected.svg").exists());
+}
+
 #[test]
-fn unknown_keep_as_note_keeps_the_partial_rebuild() {
-    let (dir, before) = shortened_box("keep-as-note");
-    assert_failed_repair_keeps_rebuild(&dir, &before, "--keep-as-note", "999999");
+fn unknown_keep_as_note_leaves_drawing_untouched() {
+    let (dir, _) = shortened_box("keep-as-note");
+    assert_invalid_repair_leaves_drawing_untouched(&dir, &["--keep-as-note", "999999"]);
     std::fs::remove_dir_all(dir).unwrap();
 }
 
 #[test]
-fn unknown_delete_keeps_the_partial_rebuild() {
-    let (dir, before) = shortened_box("delete");
-    assert_failed_repair_keeps_rebuild(&dir, &before, "--delete", "999999");
+fn unknown_delete_leaves_a_healthy_drawing_untouched() {
+    let (dir, mut drawing) = shortened_box("delete");
+    let path = dir.join("box.dwdrw");
+    let (_, meta) = file::read(&path).unwrap();
+    drawing.sheets[1].views[0].broken_out.clear();
+    file::write(&path, &drawing, &meta).unwrap();
+    assert_invalid_repair_leaves_drawing_untouched(&dir, &["--delete", "999999"]);
+    let id = drawing.sheets[0].annotations[0].id.0.to_string();
+    assert_invalid_repair_leaves_drawing_untouched(&dir, &["--delete", &id, "--delete", &id]);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn invalid_reattach_arguments_leave_drawing_untouched() {
+    let (dir, drawing) = shortened_box("invalid-reattach");
+    let id = drawing.sheets[1].annotations.last().unwrap().id.0;
+    for argument in [format!("{id}:999:20,0,5"), format!("{id}:0:NaN,0,5"), "999999:0:20,0,5".into()] {
+        assert_invalid_repair_leaves_drawing_untouched(&dir, &["--accept", "--reattach", &argument]);
+    }
     std::fs::remove_dir_all(dir).unwrap();
 }
 

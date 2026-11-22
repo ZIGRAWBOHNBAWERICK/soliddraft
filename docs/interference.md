@@ -172,8 +172,9 @@ interval it marks as not reaching the requested accuracy; the pair still shows a
 interfering, with that interval. A clear pair has a gap proved positive by Catallax's pruned
 minimum-distance search over both solids, which runs only once the overlap is proved empty,
 so containment is never mistaken for a gap. A proved zero gap after an empty overlap is
-touching. Anything Catallax leaves unresolved comes back as a refusal and never shows as
-clear. Contact faces retain their source names in two lists because clipped patches do not
+touching. A refusal leaves the pair unresolved when no proof settles whether the bodies
+are separate. When separation is already proved, the pair stays clear and a refused
+clearance comparison is reported as undecided. Contact faces retain their source names in two lists because clipped patches do not
 necessarily pair one to one. Edge and point contacts have no area patches and need a distance
 proof to settle touching.
 

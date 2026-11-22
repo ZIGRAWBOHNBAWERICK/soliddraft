@@ -490,20 +490,25 @@ fn single_sheet_exports_check_only_the_written_views() {
     frozen.excluded_from_update = true;
     frozen.geometry.source_digest = old.as_str().into();
     let drawing = &session.doc.drawing;
+    let pinned = drawing.model.pinned.clone();
     let bytes = to_bytes(drawing, &FileMeta::new("Catallax", drawing.meta.units)).unwrap();
     let (reopened, _) = from_bytes(&bytes).unwrap();
     let mut session = DrawingSession::new(DrawingDoc::new(reopened));
     session.sheet = 1;
-    assert!(!session.is_up_to_date());
+    assert!(session.is_up_to_date());
     state.drawing.session = Some(session);
-    for (tool, extension) in
-        [("drawing_export_svg", "svg"), ("drawing_export_dxf", "dxf"), ("drawing_export_pdf", "pdf")]
-    {
+    for (tool, extension) in [("drawing_export_svg", "svg"), ("drawing_export_dxf", "dxf")] {
         let path = dir.join(format!("frozen.{extension}"));
-        let out = call_checked(&mut AppTools { state: &mut state }, tool, json!({ "path": path }), &caller);
-        assert!(out.is_error && out.content.contains("accepted revision"), "{tool}: {}", out.content);
-        assert!(!path.exists());
+        let report = call(&mut state, tool, json!({ "path": path }));
+        assert_eq!(report["pinned_revision"], pinned.short(), "{report}");
+        assert_eq!(report["revision"], old.as_str(), "{report}");
+        assert!(path.is_file());
     }
+    let report = call(&mut state, "drawing_export_pdf", json!({ "path": pdf }));
+    let mut revisions = [old, pinned];
+    revisions.sort();
+    assert_eq!(report["revision"], Value::Null, "{report}");
+    assert_eq!(report["view_revisions"], json!(revisions), "{report}");
 
     std::fs::remove_dir_all(dir).unwrap();
 }

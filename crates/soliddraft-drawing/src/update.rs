@@ -92,14 +92,6 @@ pub struct DanglingAnnotation {
 /// of a Rebuild; the caller binds and re-paths the reference (see
 /// `soliddraft_document::resolve::repin`).
 pub fn update_from_model(drawing: &mut Drawing, part: &Part) -> Result<UpdateReport, DrawingError> {
-    rebuild(drawing, part, &[])
-}
-
-pub(crate) fn rebuild(
-    drawing: &mut Drawing,
-    part: &Part,
-    previous_refusals: &[DanglingView],
-) -> Result<UpdateReport, DrawingError> {
     let index = PartIndex::build(part)?;
     let mut report = UpdateReport {
         digest_before: drawing.model.pinned.clone(),
@@ -157,15 +149,6 @@ pub(crate) fn rebuild(
     for id in ids {
         follow_parent(drawing, id, &contexts);
     }
-    report.dangling_views.extend(previous_refusals.iter().filter_map(|failure| {
-        let sheet = drawing.sheet_of(failure.view)?;
-        let view = sheet.view(failure.view)?;
-        view.excluded_from_update.then(|| DanglingView {
-            view: view.id,
-            name: project::view_label_in(drawing, sheet, view),
-            cause: failure.cause.clone(),
-        })
-    }));
     let failed = |id| report.dangling_views.iter().any(|failure| failure.view == id);
     for sheet in &mut drawing.sheets {
         let symbols = library::template(sheet.template.as_str()).style_file().symbols.clone();

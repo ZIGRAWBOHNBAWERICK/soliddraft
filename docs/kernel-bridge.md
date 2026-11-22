@@ -27,7 +27,7 @@ The screen does not use those certified meshes. A proved body's viewport and fea
 
 Mesh exports and the mesh quality report use `tessellate`. Drawing exports use saved line work marked as drawn by Catallax. A backend without a preview answers the preview calls with `tessellate`.
 
-A drawing context takes the current proved model body with its matching definition hash, never the viewport's retained fallback. During a dimension drag, pending proof or a failed edit, automatic following and Rebuild keep the last views and explain why they wait. Export keeps the saved revision while the open part has a pending change. Frozen views retain their saved geometry. If a frozen view is older than the drawing's accepted revision, include it in automatic update and rebuild before exporting its sheet.
+A drawing context takes the current proved model body with its matching definition hash, never the viewport's retained fallback. During a dimension drag, pending proof or a failed edit, automatic following and Rebuild keep the last views and explain why they wait. Export keeps the saved revision while the open part has a pending change. Frozen views with saved Catallax line work export at the revision they show.
 
 Topology contains exact definitions and incidence with Catallax's proven measures: face areas, centroids and boxes, edge lengths and half-arc-length points, and the body's box. Mass properties include the proven centroidal inertia.
 

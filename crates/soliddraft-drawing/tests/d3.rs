@@ -108,20 +108,6 @@ fn rebuild_commits_successful_views_alongside_base_and_projected_refusals() {
         assert!(error.contains(&failure.name), "{error}");
         assert!(error.contains("does not match the drawing's accepted revision"), "{error}");
 
-        let mut stack = UndoStack::new();
-        for view in [id, healthy] {
-            apply(&mut d, &Command::SetViewExcluded { view, excluded: true }).unwrap();
-        }
-        apply(&mut d, &Command::AddAnnotation { annotation: saved[1].clone() }).unwrap();
-        let frozen = stack.rebuild(&mut d, &changed, &report.dangling_views).unwrap();
-        assert_eq!(frozen.dangling_views, report.dangling_views);
-        assert_eq!(d.view(id).unwrap().geometry, before);
-        assert_eq!(d.annotation(saved[0].id), Some(&saved[0]));
-        assert!(d.annotation(saved[1].id).is_none());
-        for view in [id, healthy] {
-            apply(&mut d, &Command::SetViewExcluded { view, excluded: false }).unwrap();
-        }
-
         let mut repaired = BoxKernel::new();
         repaired.detail_strokes = true;
         let part = box_part(&repaired, "block", Vec3::new(60.0, 30.0, 10.0));
@@ -808,7 +794,7 @@ fn export_refuses_geometry_regenerated_against_an_unaccepted_revision() {
 }
 
 #[test]
-fn export_preserves_a_current_frozen_detail_and_refuses_an_older_one() {
+fn export_preserves_a_frozen_detail_after_rebuild_and_reopen() {
     use soliddraft_drawing::display::Owner;
 
     let k = BoxKernel::new();
@@ -835,16 +821,16 @@ fn export_preserves_a_current_frozen_detail_and_refuses_an_older_one() {
         view.geometry.catallax = true;
     }
 
-    let saved = drawing_roundtrip(&drawing);
-    assert_ne!(saved.view(detail).unwrap().geometry.source_digest, saved.model.pinned.as_str());
-    let list = layout_sheet(&saved, 0);
-    assert_eq!(
-        list.printable().filter(|item| detail_item(item)).collect::<Vec<_>>(),
-        earlier.items.iter().collect::<Vec<_>>()
-    );
-    for format in export::Format::ALL {
-        let error = export::bytes(&list, format, "Box").unwrap_err().to_string();
-        assert!(error.contains("accepted revision") && error.contains(export::INCLUDE_FOR_REDRAW), "{error}");
+    for saved in [&drawing, &drawing_roundtrip(&drawing)] {
+        assert_ne!(saved.view(detail).unwrap().geometry.source_digest, saved.model.pinned.as_str());
+        let list = layout_sheet(saved, 0);
+        assert_eq!(
+            list.printable().filter(|item| detail_item(item)).collect::<Vec<_>>(),
+            earlier.items.iter().collect::<Vec<_>>()
+        );
+        for format in export::Format::ALL {
+            assert!(!export::bytes(&list, format, "Box").unwrap().is_empty());
+        }
     }
 }
 

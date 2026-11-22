@@ -85,7 +85,7 @@ pub(crate) fn sheet_error(drawing: &crate::Drawing, sheet: &crate::Sheet) -> Opt
     for view in &sheet.views {
         let label = || crate::project::view_label_in(drawing, sheet, view);
         if !view.has_saved_catallax_linework() {
-            let guidance = if view.excluded_from_update {
+            let guidance = if view.needs_inclusion_for_redraw() {
                 INCLUDE_FOR_REDRAW
             } else {
                 "Redraw it once in the drawing editor before exporting."
@@ -96,9 +96,10 @@ pub(crate) fn sheet_error(drawing: &crate::Drawing, sheet: &crate::Sheet) -> Opt
             ));
         }
         if !view.accepts_revision(pinned) {
-            let guidance =
-                if view.excluded_from_update { INCLUDE_FOR_REDRAW } else { "Rebuild the drawing before exporting." };
-            return Some(format!("{} does not match the drawing's accepted revision. {guidance}", label()));
+            return Some(format!(
+                "{} does not match the drawing's accepted revision. Rebuild the drawing before exporting.",
+                label()
+            ));
         }
     }
     None

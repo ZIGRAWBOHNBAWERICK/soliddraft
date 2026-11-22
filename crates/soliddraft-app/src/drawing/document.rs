@@ -188,7 +188,7 @@ impl DrawingDoc {
             .sheets
             .iter()
             .flat_map(|sheet| &sheet.views)
-            .any(|view| view.needs_inclusion_for_redraw(self.drawing.model.pinned.as_str()))
+            .any(View::needs_inclusion_for_redraw)
             .then_some(soliddraft_drawing::export::INCLUDE_FOR_REDRAW)
     }
 
@@ -199,11 +199,11 @@ impl DrawingDoc {
     pub(super) fn view_update_reason(&self, view: &View) -> Option<&str> {
         if let Some(failure) = self.active_refusals().find(|f| f.view == view.id) {
             Some(&failure.cause)
-        } else if view.needs_inclusion_for_redraw(self.drawing.model.pinned.as_str()) {
+        } else if view.needs_inclusion_for_redraw() {
             Some(soliddraft_drawing::export::INCLUDE_FOR_REDRAW)
         } else if !view.has_saved_catallax_linework() {
             Some("Rebuild to replace the saved line work with Catallax line work")
-        } else if (!view.excluded_from_update && !view.accepts_revision(self.seen_digest.as_str()))
+        } else if !view.accepts_revision(self.seen_digest.as_str())
             || !view.accepts_revision(self.drawing.model.pinned.as_str())
         {
             Some("Rebuild to match the part revision")
@@ -285,18 +285,7 @@ impl DrawingDoc {
                 }
                 _ => None,
             };
-            let report = match (&cmd, p.as_ref()) {
-                (Command::UpdateFromModel, Some(part)) => {
-                    let previous = self
-                        .last_update
-                        .as_ref()
-                        .filter(|update| update.to_revision == from)
-                        .map_or(&[][..], |update| update.dangling_views.as_slice());
-                    self.stack.rebuild(&mut self.drawing, part, previous).map(Some)
-                }
-                _ => self.stack.run(&mut self.drawing, &cmd, p.as_ref()),
-            }
-            .map_err(|e| e.to_string())?;
+            let report = self.stack.run(&mut self.drawing, &cmd, p.as_ref()).map_err(|e| e.to_string())?;
             self.undo_picking.push(PickingCache {
                 last_update: self.last_update.clone(),
                 transforms: self.transforms.clone(),

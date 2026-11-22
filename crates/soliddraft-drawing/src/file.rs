@@ -136,6 +136,14 @@ pub fn write(path: &Path, drawing: &Drawing, meta: &FileMeta) -> Result<(), Draw
         .map_err(|e| DrawingError::Io(format!("cannot write {}: {e}", path.display())))
 }
 
+/// The drawing in `bytes` with its model reference replaced by `model`, as Pack and Go
+/// writes a drawing beside its model's copy. Its id, views and annotations are kept.
+pub fn repoint(bytes: &[u8], model: &soliddraft_document::DocRef) -> Result<Vec<u8>, DrawingError> {
+    let (mut drawing, meta) = from_bytes(bytes)?;
+    drawing.model = model.clone();
+    to_bytes(&drawing, &meta)
+}
+
 /// Reads a drawing from a file's bytes, in this version's format or the one before.
 pub fn from_bytes(bytes: &[u8]) -> Result<(Drawing, FileMeta), DrawingError> {
     let mut package = Package::from_bytes(bytes).map_err(envelope)?;

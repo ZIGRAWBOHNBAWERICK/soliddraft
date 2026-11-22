@@ -275,6 +275,9 @@ impl AppTools<'_> {
         if let Some(result) = crate::configurations::tools::run(self.state, name, input) {
             return Some(result);
         }
+        if let Some(result) = crate::assembly_files::tools::run(self.state, name, input) {
+            return Some(result);
+        }
         if let Some(result) = crate::pmi::tools::run(self.state, name, input) {
             return Some(result);
         }

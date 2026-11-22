@@ -9,6 +9,7 @@
 pub mod app;
 pub mod app_tools;
 pub mod assembly;
+pub mod assembly_files;
 pub mod chat;
 pub mod command_line;
 #[macro_use]

@@ -2830,6 +2830,7 @@ fn registry() -> Vec<CommandSpec> {
     .chain(crate::pmi::registry::commands())
     .chain(crate::subassembly::registry::commands())
     .chain(crate::configurations::registry::commands())
+    .chain(crate::assembly_files::registry::commands())
     .collect()
 }
 

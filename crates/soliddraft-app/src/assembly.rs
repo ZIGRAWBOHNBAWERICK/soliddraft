@@ -71,6 +71,8 @@ pub enum AssemblyAction {
     Interference(crate::interference::InterferenceAction),
     /// Configurations and the exploded view.
     Configure(crate::configurations::ConfigureAction),
+    /// Pack and Go and the exports.
+    Files(crate::assembly_files::FilesAction),
 }
 
 /// The workspaces of an assembly document in Edit Suite.
@@ -773,6 +775,7 @@ pub fn apply(state: &mut AppState, dock: &mut DockState<Tab>, action: AssemblyAc
         AssemblyAction::Form(action) => crate::subassembly::apply(state, action),
         AssemblyAction::Interference(action) => crate::interference::apply(state, action),
         AssemblyAction::Configure(action) => crate::configurations::apply(state, action),
+        AssemblyAction::Files(action) => crate::assembly_files::apply(state, action),
         AssemblyAction::Open(path) => {
             state.note(format!("Opening {}…", path.display()), NoteKind::Info);
             let opening = AssemblyDocument::open_in_background(&path, options(state));

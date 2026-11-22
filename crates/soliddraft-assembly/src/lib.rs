@@ -48,6 +48,7 @@ pub mod load;
 pub mod mates;
 pub mod mesh;
 pub mod occurrence;
+pub mod pack;
 pub mod path;
 pub mod placement;
 pub mod reference_mesh;
@@ -76,6 +77,7 @@ pub use mates::{
 };
 pub use mesh::{DisplayMesh, MeshBounds, MeshFace, SharedMesh};
 pub use occurrence::{Counts, Flags, OccurrenceIndex, OccurrenceTable};
+pub use pack::{PackError, PackReport, PackRequest, PackedFile, pack_and_go};
 pub use path::{ComponentId, OccurrencePath, PatternId, SourceId, Step};
 pub use placement::{Aabb, Placement};
 pub use scene::{Draw, Instance, Picked, Scene};

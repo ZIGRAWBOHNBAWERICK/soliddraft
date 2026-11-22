@@ -39,6 +39,8 @@ usage: soliddraft asm new <file.dwasm> [--name <name>]
        soliddraft asm config <file.dwasm> (list [--json] | add <name> | activate <name> | rename <name> <new> | delete <name>)
        soliddraft asm explode <file.dwasm> (list [--json] | add <path>... --direction x,y,z --distance <mm>
                  | edit <step> [--direction x,y,z] [--distance <mm>] | delete <step> | auto [--distance <mm>])
+       soliddraft asm export <file.dwasm> <out.urdf | out.usda> [--json]
+       soliddraft asm pack <file.dwasm> <folder> [--prefix <text>] [--suffix <text>] [--flatten] [--drawings] [--json]
        soliddraft asm rebuild <file.dwasm> [--search <folder>]... [--json]
        soliddraft asm generate <folder> [--unique <n>] [--placements <n>] [--modules <n>] [--no-part-files] [--seed <n>]
        soliddraft asm bench <file.dwasm> [--size <w>x<h>] [--frames <n>] [--json]
@@ -97,6 +99,23 @@ explode     Lists, adds, changes or deletes the steps of the active
             away from the middle (50 mm by default). An exploded view is for
             display and drawings; it never changes a placement. list --json
             also gives where each moved occurrence shows exploded.
+
+export      Writes the assembly for robotics and simulation tools: URDF (with
+            its meshes as STL in a folder beside it) or OpenUSD text (.usda)
+            with UsdPhysics joints. Every part is a link; a Hinge becomes a
+            revolute joint (continuous without limits), a Concentric between
+            axes a continuous one, a Gear a mimic joint, and anything else a
+            fixed joint at the assembly's pose. It prints what it could not
+            carry. The assembly is not changed.
+
+pack        Pack and Go: copies the assembly and every document it references,
+            at any depth, into a new or empty folder, so it opens there on its own.
+            Parts are copied as they are; assemblies are written again with their
+            references pointing at the copies. Ids are kept. --prefix and --suffix
+            rename every copied file; --flatten puts them all in the folder itself;
+            --drawings also brings the drawings in the assembly's folder whose model
+            is packed. Nothing is written unless every reference is found, and
+            nothing is replaced.
 
 rebuild     Re-pins every reference at its document's current revision, refreshes
             the display copies and saves. Exits 1 when a reference is missing.
@@ -239,6 +258,8 @@ pub(crate) fn run(args: &[String]) -> ExitCode {
         }),
         "config" => edit_if(&file, &a, |doc| crate::asm_config::config(doc, rest, &a)),
         "explode" => edit_if(&file, &a, |doc| crate::asm_config::explode(doc, rest, &a)),
+        "export" => edit_if(&file, &a, |doc| crate::asm_files::export(doc, rest, &a)),
+        "pack" => crate::asm_files::pack(&file, rest, &a, search_folders(&a.search)),
         "rebuild" => rebuild(&file, &a),
         "generate" => generate(&file, &a),
         "bench" => bench(&file, &a),

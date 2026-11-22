@@ -21,6 +21,7 @@
 //! had a texture.
 
 pub mod assemble;
+pub mod export;
 mod gltf_read;
 mod obj;
 mod shapes;

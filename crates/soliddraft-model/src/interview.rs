@@ -21,6 +21,11 @@
 //!   to, under the general tolerance;
 //! - the general tolerance is ISO 2768-mK.
 //!
+//! A question about a feature names the feature by its faces, so two features of one
+//! size are two questions. Each hole of a pattern is asked about on its own account:
+//! an item on some of its holes answers for those holes only, and the question that
+//! remains asks about the rest.
+//!
 //! What recognition found and what the interview proposes are kept apart: recognition
 //! is geometry and is the same whatever the part states, while a proposal is a
 //! suggestion a person accepts or replaces.
@@ -29,8 +34,8 @@ use std::collections::BTreeSet;
 
 use serde::{Deserialize, Serialize};
 use soliddraft_kernel_api::pmi::{
-    Anchor, At, DatumRef, FitClass, GdtCharacteristic, MaterialCondition, PmiItem, PmiKind, SizeKind, SurfaceProcess,
-    Tolerance, length_text,
+    Anchor, At, DatumRef, Feature, FitClass, GdtCharacteristic, MaterialCondition, PmiItem, PmiKind, SizeKind,
+    SurfaceProcess, Tolerance, length_text,
 };
 use soliddraft_kernel_api::recognition::Recognised;
 use soliddraft_kernel_api::{FaceId, FaceInfo, SurfaceKind, Topology, Vec3};
@@ -78,7 +83,9 @@ pub enum Proposal {
 /// One decision the part has not taken yet.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Question {
-    /// A name that stays the same while the question is open, such as `datum A`.
+    /// A name that stays the same while the question is open, such as `datum A`. A
+    /// question about a feature ends with the persistent names of the faces it asks
+    /// about, one for each hole of a pattern, such as `hole Ø8 size: Import1 · Face 7`.
     pub id: String,
     /// The question, for people.
     pub asks: String,
@@ -136,6 +143,24 @@ fn square(a: Vec3, b: Vec3) -> bool {
 
 fn parallel(a: Vec3, b: Vec3) -> bool {
     a.cross(b).length() < 1e-9
+}
+
+/// The id of a question about a feature: what it asks, then the persistent name of one
+/// face of each member it asks about. Members own disjoint faces, so features of one
+/// size, and different holes of one pattern, never share an id.
+fn question_id(key: &str, aspect: &str, members: &[Feature<FaceRef>]) -> String {
+    let faces: Vec<String> = members
+        .iter()
+        .filter_map(|member| member.first())
+        .map(|face| {
+            if face.label.is_empty() {
+                format!("{} {} {}", face.feature, face.generator, face.ordinal + 1)
+            } else {
+                face.label.clone()
+            }
+        })
+        .collect();
+    format!("{key} {aspect}: {}", faces.join(", "))
 }
 
 /// The body's state the questions are worked out from.
@@ -406,17 +431,33 @@ fn holes(asking: &mut Asking, found: &Recognised) {
     }
     for group in groups {
         let first = &found.holes[group[0]];
-        let walls: Vec<Vec<FaceId>> = group.iter().map(|hole| found.holes[*hole].faces.clone()).collect();
-        let all: Vec<FaceId> = walls.iter().flatten().copied().collect();
+        let walls: Vec<&[FaceId]> = group.iter().map(|hole| found.holes[*hole].faces.as_slice()).collect();
         let diameter = length_text(first.diameter);
         let pattern = group.len() > 1;
-        let what = if pattern { format!("{} holes Ø{diameter}", group.len()) } else { format!("hole Ø{diameter}") };
         let key = if pattern { format!("holes Ø{diameter}") } else { format!("hole Ø{diameter}") };
         let Some(features) = walls.iter().map(|wall| asking.refs(wall)).collect::<Option<Vec<_>>>() else { continue };
+        // Each hole is answered for on its own: the holes no item of a kind covers yet,
+        // as their walls. An item on one wall of a pattern leaves the others open.
+        let open = |covered: &BTreeSet<FaceId>| -> Vec<Feature<FaceRef>> {
+            walls
+                .iter()
+                .zip(&features)
+                .filter(|(wall, _)| !wall.iter().any(|face| covered.contains(face)))
+                .map(|(_, feature)| feature.clone())
+                .collect()
+        };
+        // What a question about these holes calls them.
+        let what = |members: &[Feature<FaceRef>]| match (pattern, members.len()) {
+            (false, _) => format!("hole Ø{diameter}"),
+            (true, n) if n == group.len() => format!("{n} holes Ø{diameter}"),
+            (true, 1) => format!("remaining one of the {} holes Ø{diameter}", group.len()),
+            (true, n) => format!("remaining {n} of the {} holes Ø{diameter}", group.len()),
+        };
         // A lone hole through a boss is fitted; holes in a pattern take fasteners.
         let fitted = !pattern && found.bosses.iter().any(|boss| first.opens_onto.contains(&boss.top));
         let screw = screw_for(first.diameter);
-        if !all.iter().any(|face| asking.sized.contains(face)) {
+        let members = open(&asking.sized);
+        if !members.is_empty() {
             let (tolerance, reason) = if fitted {
                 (
                     fit("H7"),
@@ -438,21 +479,23 @@ fn holes(asking: &mut Asking, found: &Recognised) {
                     ),
                 )
             };
+            let id = question_id(&key, "size", &members);
+            let asks = format!("What {} the {} for?", if members.len() > 1 { "are" } else { "is" }, what(&members));
             let name = asking.name(&format!("{} diameter", capital(&key)));
             let item = PmiItem {
                 id: name,
                 kind: PmiKind::Size {
                     size: SizeKind::Diameter,
-                    features: features.clone(),
+                    features: members,
                     tolerance,
                     through: first.through,
                     nominal: None,
                 },
             };
-            let verb = if pattern { "are" } else { "is" };
-            asking.ask(format!("{key} size"), format!("What {verb} the {what} for?"), &reason, item, &[first.diameter]);
+            asking.ask(id, asks, &reason, item, &[first.diameter]);
         }
-        if !all.iter().any(|face| asking.positioned.contains(face)) && asking.datums.len() == 3 {
+        let members = open(&asking.positioned);
+        if !members.is_empty() && asking.datums.len() == 3 {
             let (value, reason) = match (fitted, screw) {
                 (true, _) => {
                     (0.05, "A starting value for a fitted hole. Set it from what mates with the hole.".to_owned())
@@ -466,6 +509,8 @@ fn holes(asking: &mut Asking, found: &Recognised) {
                 ),
                 (false, None) => (0.2, "A starting value. Set it from what passes through the hole.".to_owned()),
             };
+            let id = question_id(&key, "position", &members);
+            let asks = format!("How closely must the {} be located?", what(&members));
             let name = asking.name(&format!("{} position", capital(&key)));
             let item = PmiItem {
                 id: name,
@@ -475,18 +520,15 @@ fn holes(asking: &mut Asking, found: &Recognised) {
                     diameter: true,
                     material: MaterialCondition::Regardless,
                     datums: asking.datum_refs(),
-                    features: features.clone(),
+                    features: members,
                 },
             };
-            asking.ask(
-                format!("{key} position"),
-                format!("How closely must the {what} be located?"),
-                &reason,
-                item,
-                &[],
-            );
+            asking.ask(id, asks, &reason, item, &[]);
         }
-        if fitted && !all.iter().any(|face| asking.finished.contains(face)) {
+        // Only a lone hole is fitted, so this asks about one wall at most.
+        if let Some(wall) = open(&asking.finished).into_iter().next().filter(|_| fitted) {
+            let id = question_id(&key, "finish", std::slice::from_ref(&wall));
+            let asks = format!("What finish does the {} need?", what(std::slice::from_ref(&wall)));
             let name = asking.name(&format!("{} finish", capital(&key)));
             let item = PmiItem {
                 id: name,
@@ -497,16 +539,10 @@ fn holes(asking: &mut Asking, found: &Recognised) {
                     lay: None,
                     allowance: String::new(),
                     all_around: false,
-                    feature: features[0].clone(),
+                    feature: wall,
                 },
             };
-            asking.ask(
-                format!("{key} finish"),
-                format!("What finish does the {what} need?"),
-                "Reaming, the usual way to an H7 hole, leaves about Ra 1.6.",
-                item,
-                &[],
-            );
+            asking.ask(id, asks, "Reaming, the usual way to an H7 hole, leaves about Ra 1.6.", item, &[]);
         }
     }
 }
@@ -522,20 +558,21 @@ fn bosses(asking: &mut Asking, found: &Recognised) {
         let diameter = length_text(boss.diameter);
         let key = format!("boss Ø{diameter}");
         let Some(wall) = asking.refs(&boss.faces) else { continue };
+        let id = |aspect: &str| question_id(&key, aspect, std::slice::from_ref(&wall));
         if !boss.faces.iter().any(|face| asking.sized.contains(face)) {
             let name = asking.name(&format!("{} diameter", capital(&key)));
             let item = PmiItem {
                 id: name,
                 kind: PmiKind::Size {
                     size: SizeKind::Diameter,
-                    features: vec![wall],
+                    features: vec![wall.clone()],
                     tolerance: Tolerance::None,
                     through: false,
                     nominal: None,
                 },
             };
             asking.ask(
-                format!("{key} size"),
+                id("size"),
                 format!("How large is the {key}?"),
                 "A drawing needs its size. With no tolerance of its own the general tolerance covers it.",
                 item,
@@ -560,7 +597,7 @@ fn bosses(asking: &mut Asking, found: &Recognised) {
                 },
             };
             asking.ask(
-                format!("{key} height"),
+                id("height"),
                 format!("How high does the {key} stand?"),
                 &format!("Its top is parallel to datum {letter}, so its height is held from there."),
                 item,
@@ -577,6 +614,7 @@ fn slots(asking: &mut Asking, found: &Recognised) {
         let key = format!("slot {}×{}", length_text(slot.length), length_text(slot.width));
         let (Some(low), Some(high)) = (asking.refs(&[slot.flats[0]]), asking.refs(&[slot.flats[1]])) else { continue };
         let (Some(near), Some(far)) = (asking.refs(&slot.ends[0]), asking.refs(&slot.ends[1])) else { continue };
+        let id = |aspect: &str| question_id(&key, aspect, std::slice::from_ref(&low));
         if !slot.flats.iter().any(|face| asking.slotted.contains(face)) {
             let name = asking.name(&capital(&key));
             let item = PmiItem {
@@ -588,7 +626,7 @@ fn slots(asking: &mut Asking, found: &Recognised) {
                 },
             };
             asking.ask(
-                format!("{key} size"),
+                id("size"),
                 format!("How large is the {key}?"),
                 "A drawing needs its size. With no tolerance of its own the general tolerance covers it.",
                 item,
@@ -607,13 +645,13 @@ fn slots(asking: &mut Asking, found: &Recognised) {
                 id: name,
                 kind: PmiKind::Location {
                     from: Anchor { feature: from, at: At::Feature },
-                    to: Anchor { feature: [low, high].concat(), at: At::Middle },
+                    to: Anchor { feature: [low.clone(), high].concat(), at: At::Middle },
                     tolerance: Tolerance::None,
                     nominal: None,
                 },
             };
             asking.ask(
-                format!("{key} height"),
+                id("height"),
                 format!("Where is the {key} held from?"),
                 &format!("Its sides are parallel to datum {letter}, so its middle is held from there."),
                 item,

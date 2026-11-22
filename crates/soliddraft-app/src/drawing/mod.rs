@@ -1784,20 +1784,16 @@ fn export_sheet(state: &mut AppState, format: export::Format, path: Option<PathB
     });
     let Some(path) = path else { return };
     let path = if path.extension().is_none() { path.with_extension(format.extension()) } else { path };
-    let written = write_sheet(s, PartContext::new(&state.doc).as_ref(), format, &path);
+    let written = write_sheet(s, format, &path);
     match written {
         Ok(w) => {
-            let redrawn = match w.views {
-                0 => String::new(),
-                n => format!(" · {n} view{} drawn again for export", if n == 1 { "" } else { "s" }),
-            };
             // The kernel fitted these curves or measured where they cut and hide: Q14
             // shows such results as approximate.
             let approximate = match w.accuracy.approximate {
                 0 => String::new(),
                 n => format!(" · {n} curve{} approximate", if n == 1 { "" } else { "s" }),
             };
-            s.say(format!("Exported {}{redrawn}{approximate}", path.display()));
+            s.say(format!("Exported {}{approximate}", path.display()));
             state.note(format!("Exported {}", path.display()), NoteKind::Ok);
         }
         Err(e) => {
@@ -1819,26 +1815,17 @@ pub struct SheetExport {
 }
 
 /// Writes the drawing as `format` at `path`: the current sheet, or every sheet as a
-/// page of a PDF. The written views are redrawn from the kernel on a copy.
-pub(crate) fn write_sheet(
-    s: &mut DrawingSession,
-    part: Option<&PartContext>,
-    format: export::Format,
-    path: &Path,
-) -> Result<SheetExport, String> {
-    let (bytes, written) = sheet_bytes(s, part, format)?;
+/// page of a PDF.
+pub(crate) fn write_sheet(s: &mut DrawingSession, format: export::Format, path: &Path) -> Result<SheetExport, String> {
+    let (bytes, written) = sheet_bytes(s, format)?;
     crate::platform::write_file(path, &bytes)?;
     s.last_export = Some(path.to_path_buf());
     Ok(written)
 }
 
 /// The drawing as `format`, as [`write_sheet`] writes it, without writing it.
-pub(crate) fn sheet_bytes(
-    s: &DrawingSession,
-    part: Option<&PartContext>,
-    format: export::Format,
-) -> Result<(Vec<u8>, SheetExport), String> {
-    let prepared = prepare_sheets(s, part, matches!(format, export::Format::Pdf))?;
+pub(crate) fn sheet_bytes(s: &DrawingSession, format: export::Format) -> Result<(Vec<u8>, SheetExport), String> {
+    let prepared = prepare_sheets(s, matches!(format, export::Format::Pdf))?;
     Ok((prepared.bytes(format)?, prepared.report))
 }
 
@@ -1858,28 +1845,17 @@ impl PreparedSheets {
     }
 }
 
-pub(crate) fn prepare_sheets(
-    s: &DrawingSession,
-    part: Option<&PartContext>,
-    all_sheets: bool,
-) -> Result<PreparedSheets, String> {
+pub(crate) fn prepare_sheets(s: &DrawingSession, all_sheets: bool) -> Result<PreparedSheets, String> {
     if !all_sheets && s.doc.drawing.sheets.get(s.sheet).is_none() {
         return Err("The current sheet is no longer available; select a sheet before exporting".into());
     }
     let stale = s.doc.stale_views();
-    let mut drawing = s.doc.drawing.clone();
+    let drawing = &s.doc.drawing;
     let writes_sheet = |i| all_sheets || i == s.sheet;
-    let ids: Vec<_> = drawing
-        .sheets
-        .iter()
-        .enumerate()
-        .filter(|(i, _)| writes_sheet(*i))
-        .flat_map(|(_, sheet)| sheet.views.iter().map(|v| v.id))
-        .collect();
-    if !ids.is_empty() {
-        let part = part.ok_or_else(|| soliddraft_drawing::DrawingError::Unproved.to_string())?;
-        soliddraft_drawing::redraw_for_export(&mut drawing, &part.certified_part(), &ids)
-            .map_err(|error| error.to_string())?;
+    let mut views = 0;
+    for (_, sheet) in drawing.sheets.iter().enumerate().filter(|(i, _)| writes_sheet(*i)) {
+        export::check_sheet(drawing, sheet).map_err(|error| error.to_string())?;
+        views += sheet.views.len();
     }
     let count = drawing.sheets.len();
     let list_of = |i: usize| {
@@ -1891,15 +1867,15 @@ pub(crate) fn prepare_sheets(
             sheet_index: i,
             sheet_count: count,
         };
-        display::layout(&drawing, i, &ctx)
+        display::layout(drawing, i, &ctx)
     };
     let lists: Vec<_> = (0..count).filter(|&i| writes_sheet(i)).map(list_of).collect();
     let mut accuracy = AccuracyCounts::default();
     for list in &lists {
         accuracy.add(list.accuracy());
     }
-    let info = export::PdfInfo { title: drawing.meta.title, author: drawing.meta.designer };
-    let report = SheetExport { views: ids.len(), revision: drawing.model.pinned, accuracy };
+    let info = export::PdfInfo { title: drawing.meta.title.clone(), author: drawing.meta.designer.clone() };
+    let report = SheetExport { views, revision: drawing.model.pinned.clone(), accuracy };
     Ok(PreparedSheets { lists, info, report })
 }
 

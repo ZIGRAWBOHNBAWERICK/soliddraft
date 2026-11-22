@@ -47,8 +47,7 @@ impl<'a> PartContext<'a> {
         })
     }
 
-    /// The part as `soliddraft-drawing` takes it, for line work on the screen: views
-    /// come from the kernel's unproved preview.
+    /// The part as `soliddraft-drawing` takes it for Catallax line work.
     pub fn part(&self) -> Part<'_> {
         Part {
             kernel: self.kernel.as_ref(),
@@ -56,7 +55,7 @@ impl<'a> PartContext<'a> {
             digest: self.digest.clone(),
             dimensions: feature_dimensions(self.doc),
             namer: Some(self),
-            preview: true,
+            preview: false,
             source: PartSource {
                 configuration: self.doc.model().active_configuration().cloned(),
                 properties: self.doc.model().resolved_properties(),
@@ -66,12 +65,6 @@ impl<'a> PartContext<'a> {
                 notes: self.doc.model().part_notes(),
             },
         }
-    }
-
-    /// The part for an exported drawing: views come from the kernel's exact drawing
-    /// queries, with no preview.
-    pub fn certified_part(&self) -> Part<'_> {
-        Part { preview: false, ..self.part() }
     }
 
     fn feature_name(&self, id: u64) -> String {

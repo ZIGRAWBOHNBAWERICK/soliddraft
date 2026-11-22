@@ -442,6 +442,9 @@ pub struct ViewGeometry {
     /// it and are made from certified line work instead.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub unproved: bool,
+    /// The saved line work came from Catallax drawing queries.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub catallax: bool,
     /// Screen or unknown quality, independently of whether the mesh was proved.
     /// Older caches have unknown quality and must be regenerated for export.
     #[serde(default = "unknown_quality")]

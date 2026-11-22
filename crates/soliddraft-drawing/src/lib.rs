@@ -59,8 +59,8 @@ pub use sheet::{Projection, RevisionRow, Scale, Sheet, Table, TableKind};
 pub use soliddraft_document::{ContentHash, DocKind, DocRef, DocumentId};
 pub use template::{DimensionStyle, LineWidths, Margins, PaperSize, Template, TitleBlock, TitleField, ZoneGrid};
 pub use update::{
-    ChangedValue, DanglingAnnotation, DanglingView, UpdateReport, edge_near, reattach, reattach_view,
-    redraw_for_export, regenerate_view, update_from_model,
+    ChangedValue, DanglingAnnotation, DanglingView, UpdateReport, edge_near, reattach, reattach_view, regenerate_view,
+    update_from_model,
 };
 pub use view::{
     Accuracy, AccuracyCounts, AlignAxis, Alignment, Boundary, BrokenOut, Curve2, CurveKind, FoldDirection, HiddenLines,
@@ -101,6 +101,14 @@ pub enum DrawingError {
     /// The kernel failed.
     #[error("kernel: {0}")]
     Kernel(#[from] soliddraft_kernel_api::KernelError),
+    /// A named view whose drawing query failed.
+    #[error("{view}: {source}")]
+    ViewRefused {
+        /// The name on the drawing.
+        view: String,
+        /// The kernel's refusal.
+        source: soliddraft_kernel_api::KernelError,
+    },
     /// Reading or writing a file failed.
     #[error("{0}")]
     Io(String),

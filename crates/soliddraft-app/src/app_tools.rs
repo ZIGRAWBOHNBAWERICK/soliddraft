@@ -472,9 +472,8 @@ impl AppTools<'_> {
         let (pdf, dxf) = (step.with_extension("pdf"), step.with_extension("dxf"));
         let mut accuracy = serde_json::Map::new();
         {
-            let part = PartContext::new(&self.state.doc);
             let s = self.state.drawing.session.as_ref().ok_or_else(|| NO_DRAWING.to_owned())?;
-            let prepared = drawing::prepare_sheets(s, part.as_ref(), false)?;
+            let prepared = drawing::prepare_sheets(s, false)?;
             for (format, path) in [(SheetFormat::Pdf, &pdf), (SheetFormat::Dxf, &dxf)] {
                 accuracy.insert(format.extension().into(), json!(prepared.report.accuracy));
                 files.push((path.clone(), prepared.bytes(format)?));
@@ -717,9 +716,8 @@ impl AppTools<'_> {
         if path.extension().is_none_or(|e| !e.eq_ignore_ascii_case(format.extension())) {
             return Err(format!("the path must end in .{}", format.extension()));
         }
-        let part = PartContext::new(&self.state.doc);
         let s = self.state.drawing.session.as_mut().ok_or_else(|| NO_DRAWING.to_owned())?;
-        let written = drawing::write_sheet(s, part.as_ref(), format, &path)?;
+        let written = drawing::write_sheet(s, format, &path)?;
         Ok(json!({
             "exported": path,
             "views": written.views,

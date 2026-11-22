@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 
 use soliddraft_drawing::{ContentHash, ModelDimension, ModelMeasure, Part};
-use soliddraft_kernel_api::drawing::{Curve3, CurveSource, ViewCurve, ViewCurves, ViewSpec, mesh_hlr};
+use soliddraft_kernel_api::drawing::Curve3;
 use soliddraft_kernel_api::{
     Aabb, BackendInfo, BodyId, BodyKind, BooleanOp, CurveKind, EdgeId, EdgeInfo, EdgePolyline, EntityChanges, Extrude,
     FaceId, FaceInfo, HistoryRecord, Kernel, KernelError, KernelResult, MassProperties, Mesh, OpKind, OpResult, OpTag,
@@ -28,7 +28,6 @@ struct BoxBody {
 pub struct BoxKernel {
     bodies: Mutex<HashMap<u64, BoxBody>>,
     next: Mutex<u64>,
-    pub preview_extent: Option<Vec3>,
 }
 
 /// The faces of a box: outward normal, and in-plane axes u and v with u x v = normal.
@@ -43,7 +42,7 @@ const FACES: [(Vec3, Vec3, Vec3); 6] = [
 
 impl BoxKernel {
     pub fn new() -> BoxKernel {
-        BoxKernel { bodies: Mutex::new(HashMap::new()), next: Mutex::new(1), preview_extent: None }
+        BoxKernel { bodies: Mutex::new(HashMap::new()), next: Mutex::new(1) }
     }
 
     /// A box from `min` to `max` made by the operation tagged `tag`.
@@ -133,19 +132,6 @@ impl Kernel for BoxKernel {
 
     fn shell(&self, _: &OpTag, _: BodyId, _: &[FaceId], _: f64) -> KernelResult<OpResult> {
         Err(KernelError::Unsupported("shell".into()))
-    }
-
-    fn view_curves(&self, body: BodyId, spec: &ViewSpec) -> KernelResult<ViewCurves> {
-        let Some(extent) = self.preview_extent.filter(|_| spec.preview) else {
-            return Err(KernelError::Unsupported("box view".into()));
-        };
-        let mut preview = mesh_hlr::view_curves(self, body, spec)?;
-        preview.curves.push(ViewCurve::new(
-            Curve3::Line { a: extent, b: extent + Vec3::Z },
-            CurveSource::Unknown,
-            false,
-        ));
-        Ok(ViewCurves { unproved: true, ..ViewCurves::new(preview.curves, &spec.frame().unwrap()) })
     }
 
     fn tessellate(&self, body: BodyId, _: &TessellationParams) -> KernelResult<Mesh> {

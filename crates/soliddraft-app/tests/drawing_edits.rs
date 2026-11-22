@@ -41,7 +41,7 @@ fn drawing(doc: &Document) -> DrawingDoc {
         requirements: false,
         scale: Some(Scale::FULL),
     };
-    let made = soliddraft_drawing::make_drawing(&ctx.certified_part(), &new).unwrap();
+    let made = soliddraft_drawing::make_drawing(&ctx.part(), &new).unwrap();
     let mut drawing = DrawingDoc::new(made.drawing);
     for (id, p) in &made.projections {
         drawing.remember(*id, p);
@@ -53,7 +53,7 @@ fn drawing(doc: &Document) -> DrawingDoc {
 fn cropping_a_parent_refreshes_detail_picking_in_the_same_history_step() {
     let doc = part(ProfileKind::Circle { diameter: 10.0 });
     let ctx = PartContext::new(&doc).unwrap();
-    let certified = ctx.certified_part();
+    let certified = ctx.part();
     let mut drawing = drawing(&doc);
     let top = ViewId(2);
     let index = PartIndex::build(&certified).unwrap();
@@ -93,15 +93,8 @@ fn cropping_a_parent_refreshes_detail_picking_in_the_same_history_step() {
     assert!(fresh.projected.circles.is_empty());
     assert_eq!(drawing.circles[&detail], fresh.projected.circles);
     assert_eq!(drawing.transforms[&detail], fresh.projected.transform);
-    assert!(drawing.drawing.view(detail).unwrap().geometry.unproved);
-    assert!(matches!(
-        soliddraft_drawing::export::bytes(
-            &soliddraft_drawing::display::layout_sheet(&drawing.drawing, 0),
-            soliddraft_drawing::export::Format::Svg,
-            "Circle",
-        ),
-        Err(soliddraft_drawing::DrawingError::Unproved)
-    ));
+    assert!(drawing.drawing.view(detail).unwrap().geometry.catallax);
+    assert!(soliddraft_drawing::export::check_sheet(&drawing.drawing, &drawing.drawing.sheets[0]).is_ok());
     drawing.undo().unwrap();
     assert_eq!(drawing.circles[&detail], before);
     drawing.redo().unwrap();
@@ -232,7 +225,7 @@ fn transferring_a_sheet_scale_circle_keeps_geometry_picking_and_history_together
 fn a_section_frame_follows_undo_redo_and_a_new_history_branch() {
     let doc = part(ProfileKind::Rectangle { width: 40.0, height: 30.0 });
     let ctx = PartContext::new(&doc).unwrap();
-    let part = ctx.certified_part();
+    let part = ctx.part();
     let index = PartIndex::build(&part).unwrap();
     let mut d = drawing(&doc);
     let top = ViewId(2);
@@ -269,7 +262,7 @@ fn a_section_frame_follows_undo_redo_and_a_new_history_branch() {
 fn round_dimension_repairs_accept_circles_and_remeasure_the_value() {
     let doc = part(ProfileKind::Circle { diameter: 10.0 });
     let ctx = PartContext::new(&doc).unwrap();
-    let part = ctx.certified_part();
+    let part = ctx.part();
     for (kind, value) in [(DimensionKind::Diameter, 10.0), (DimensionKind::Radius, 5.0)] {
         let mut d = drawing(&doc);
         let view = ViewId(2);
@@ -329,7 +322,7 @@ fn off_origin_circle_centres_follow_the_transform_after_rescaling() {
 fn section_flip_and_redraw_refresh_anchors_values_and_exports_atomically() {
     let doc = part(ProfileKind::Rectangle { width: 40.0, height: 30.0 });
     let ctx = PartContext::new(&doc).unwrap();
-    let part = ctx.certified_part();
+    let part = ctx.part();
     let index = PartIndex::build(&part).unwrap();
     let mut d = drawing(&doc);
     let top = ViewId(2);

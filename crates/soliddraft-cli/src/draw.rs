@@ -558,7 +558,7 @@ fn create(o: &Options) -> Result<(), String> {
         let made = soliddraft_drawing::make_drawing(part, &new).map_err(|e| e.to_string())?;
         let (mut drawing, import) = (made.drawing, made.import);
         apply_steps(&mut drawing, part, &o.steps)?;
-        let accuracy = write_outputs(&drawing, &drawing, &outs, &source.backend)?;
+        let accuracy = write_outputs(&drawing, &outs, &source.backend)?;
         let name = drawing_path.as_ref().map(|p| p.display().to_string()).unwrap_or_default();
         if o.json {
             let report = CreateReport {
@@ -639,7 +639,7 @@ fn with_part<R>(
                 name: doc.name.clone(),
                 backend: format!("{} {}", backend.name, backend.version),
             };
-            f(&ctx.certified_part(), &source)
+            f(&ctx.part(), &source)
         }
         Some(kind) => Err(format!("{}: a drawing is made of a part, not a {kind}", path.display())),
         None => {
@@ -762,25 +762,11 @@ fn update(o: &Options) -> Result<(), String> {
             run(&mut stack, &mut drawing, Command::DeleteAnnotation { annotation: AnnotationId(*id) })?;
             repairs.push(format!("deleted annotation {id}"));
         }
-        let mut export = None;
-        if writes_sheet {
-            let ids: Vec<_> = drawing
-                .sheets
-                .iter()
-                .flat_map(|sheet| &sheet.views)
-                .filter(|view| !report.projections.iter().any(|(id, _)| *id == view.id))
-                .map(|view| view.id)
-                .collect();
-            if !ids.is_empty() {
-                let copy = export.insert(drawing.clone());
-                soliddraft_drawing::redraw_for_export(copy, part, &ids).map_err(|e| e.to_string())?;
-            }
-        }
         // A drawing from before the envelope is saved under the current name beside it.
         let saved = soliddraft_document::kind::saved_path(&path, DocKind::Drawing);
         let meta = meta.rewritten(&source.backend, drawing.meta.units);
+        let accuracy = write_outputs(&drawing, &o.outs, &source.backend)?;
         file::write(&saved, &drawing, &meta).map_err(|e| e.to_string())?;
-        let accuracy = write_outputs(&drawing, export.as_ref().unwrap_or(&drawing), &o.outs, &source.backend)?;
         // The report after repairs: what still needs attention.
         let mut final_report = report.clone();
         final_report.dangling.retain(|d| drawing.annotation(d.annotation).is_some_and(|a| a.needs_attention()));
@@ -833,19 +819,22 @@ fn report_approximation(accuracy: Option<AccuracyCounts>) {
 
 /// Writes the drawing in each format `outs` names. A drawing file written here is a new
 /// document (Save as copy), with its own id. Every file is written atomically.
-fn write_outputs(
-    drawing: &Drawing,
-    export: &Drawing,
-    outs: &[String],
-    backend: &str,
-) -> Result<Option<AccuracyCounts>, String> {
-    let lists: Vec<_> = (0..export.sheets.len()).map(|i| display::layout_sheet(export, i)).collect();
-    let mut wrote_sheets = false;
+fn write_outputs(drawing: &Drawing, outs: &[String], backend: &str) -> Result<Option<AccuracyCounts>, String> {
+    let wrote_sheets = outs
+        .iter()
+        .any(|out| Path::new(out).extension().and_then(|ext| ext.to_str()).and_then(Format::from_extension).is_some());
+    let lists: Vec<_> = if wrote_sheets {
+        for sheet in &drawing.sheets {
+            export::check_sheet(drawing, sheet).map_err(|error| error.to_string())?;
+        }
+        (0..drawing.sheets.len()).map(|i| display::layout_sheet(drawing, i)).collect()
+    } else {
+        Vec::new()
+    };
     for out in outs {
         let path = Path::new(out);
         let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
         let format = Format::from_extension(ext);
-        wrote_sheets |= format.is_some();
         let files: Vec<(PathBuf, Vec<u8>)> = match format {
             _ if DocKind::of_path(path) == Some(DocKind::Drawing) => {
                 let meta = FileMeta::new(backend, drawing.meta.units);

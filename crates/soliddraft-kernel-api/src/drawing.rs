@@ -267,6 +267,9 @@ pub struct ViewCurves {
     /// Drawn from an unproved preview mesh, for the screen only. Never exported.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub unproved: bool,
+    /// The line work came from Catallax drawing queries.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub catallax: bool,
     /// The kernel's codes for what it measured rather than proved across the whole
     /// view, such as where it placed a cut between two crossing curves or decided a
     /// piece's visibility. Empty for a view the kernel proved. Every curve of a view
@@ -279,7 +282,7 @@ impl ViewCurves {
     /// Collects curves and computes their sheet bounds in `frame`.
     pub fn new(curves: Vec<ViewCurve>, frame: &ViewFrame) -> ViewCurves {
         let bbox_2d = sheet_bounds(&curves, frame);
-        ViewCurves { curves, bbox_2d, unproved: false, approximate: Vec::new() }
+        ViewCurves { curves, bbox_2d, unproved: false, catallax: false, approximate: Vec::new() }
     }
 
     /// Number of visible and hidden curves.

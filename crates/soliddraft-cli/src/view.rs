@@ -28,7 +28,7 @@ comes from.
   --seams      show seams
   --smooth     show edges between tangent faces
   --tolerance  mesh preview only (unavailable in this command)
-  --mesh       accepted for compatibility
+  --mesh       mesh preview only (unavailable in this command)
   --section    cut the body by the plane through this point that faces the eye,
                remove the material in front of it and hatch the cut faces
   --svg        write the view to this SVG file; with several views, put {view} in
@@ -89,7 +89,7 @@ fn parse(args: &[String]) -> Result<Options, String> {
             "--seams" => seams = true,
             "--smooth" => smooth = true,
             "--tolerance" => return Err("--tolerance applies to mesh preview only".into()),
-            "--mesh" => {}
+            "--mesh" => return Err("--mesh applies to mesh preview only".into()),
             "--section" => o.section = Some(vector(&value("--section")?).ok_or("--section needs x,y,z")?),
             "--svg" => o.svg = Some(value("--svg")?),
             "--json" => o.json = true,
@@ -191,7 +191,7 @@ pub(crate) fn run(args: &[String]) -> ExitCode {
             }
         }
         let (visible, hidden) = curves.counts();
-        let method = method(&curves);
+        let method = "catallax";
         let approximate = approximate(&curves) || regions.as_deref().is_some_and(regions_approximate);
         if o.json {
             let summary = Summary {

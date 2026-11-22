@@ -614,7 +614,7 @@ fn a_drawing_dimension_survives_a_file_replacement() {
     let preview = Preview::from_bytes(&doc, "block.step", block_step(20.0, Some([0.0, 0.0]))).unwrap();
     commit(&mut doc, &preview, &Review::default()).unwrap();
     let ctx = PartContext::new(&doc).unwrap();
-    let part = ctx.certified_part();
+    let part = ctx.part();
     let template = soliddraft_drawing::Template::by_id("iso-a3").unwrap();
     let new = soliddraft_drawing::NewDrawing {
         views: soliddraft_drawing::default_views(&template),
@@ -662,7 +662,7 @@ fn a_drawing_dimension_survives_a_file_replacement() {
 
     assert!(replace(&mut doc, block_step(20.0, None)).is_empty(), "the drawing is not part of the part");
     let ctx = PartContext::new(&doc).unwrap();
-    let report = soliddraft_drawing::update_from_model(&mut drawing.drawing, &ctx.certified_part()).unwrap();
+    let report = soliddraft_drawing::update_from_model(&mut drawing.drawing, &ctx.part()).unwrap();
     assert!(report.dangling.is_empty(), "{:?}", report.dangling);
     let annotation = drawing.drawing.annotation(id).unwrap();
     assert_eq!(annotation.state, AnnotationState::Ok);

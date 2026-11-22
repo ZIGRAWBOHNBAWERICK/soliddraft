@@ -134,7 +134,7 @@ fn exact_view(solid: &Solid, spec: &ViewSpec) -> KernelResult<ViewCurves> {
             approximate: curve.fit.is_some(),
         });
     }
-    Ok(ViewCurves { approximate: view_marks(&drawn.marks), ..ViewCurves::new(curves, &frame) })
+    Ok(ViewCurves { catallax: true, approximate: view_marks(&drawn.marks), ..ViewCurves::new(curves, &frame) })
 }
 
 /// The outline of `body` seen from `direction`: Catallax's contour generators, each drawn
@@ -231,9 +231,6 @@ pub(super) fn edge_drawing(solid: &Solid, body: BodyId, edge: EdgeId) -> KernelR
         .iter()
         .find_map(|(id, e)| (*e == edge).then_some(*id))
         .ok_or(KernelError::UnknownEdge { body, edge })?;
-    if let Some(curve) = solid.drawn_edges.lock().expect("the edge drawing lock").get(&id) {
-        return Ok(curve.clone());
-    }
     let built = solid.app.checkpoint.built();
     let drawn =
         catallax("edge_curve", |dec| views::edge_drawing(&built.model, built.result, id, dec).map_err(|q| q.refusal))?;
@@ -241,7 +238,6 @@ pub(super) fn edge_drawing(solid: &Solid, body: BodyId, edge: EdgeId) -> KernelR
         approximate: drawn.value.fit.is_some() || !drawn.marks.is_empty(),
         ..ViewCurve::new(curve3(&drawn.value.curve), CurveSource::Edge(edge), true)
     };
-    solid.drawn_edges.lock().expect("the edge drawing lock").insert(id, curve.clone());
     Ok(curve)
 }
 

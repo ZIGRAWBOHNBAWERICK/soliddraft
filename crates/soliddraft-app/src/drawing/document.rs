@@ -331,7 +331,8 @@ impl DrawingDoc {
         let k = project::effective_scale(&with_view, &view);
         let part = ctx.part();
         let index = soliddraft_drawing::PartIndex::build(&part).map_err(|e| e.to_string())?;
-        let p = project::project_part(&part, &index, &spec, k).map_err(|e| e.to_string())?;
+        let p = project::project_part(&part, &index, &spec, k)
+            .map_err(|e| format!("{}: {e}", project::view_label(&with_view, &view)))?;
         view.geometry = p.geometry.clone();
         Ok((view, p))
     }

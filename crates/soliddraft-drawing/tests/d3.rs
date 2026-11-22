@@ -521,60 +521,6 @@ fn the_dxf_keeps_dimensions_and_hatches_as_such() {
 }
 
 #[test]
-fn export_reprojects_stale_detail_windows_and_cross_sheet_marks() {
-    use kurbo::Shape;
-    use soliddraft_drawing::display::Owner;
-
-    let k = BoxKernel::new();
-    let part = box_part(&k, "block", Vec3::new(40.0, 30.0, 10.0));
-    let mut d = drawing(&part);
-    let mut stack = UndoStack::new();
-    run(&mut stack, &mut d, &part, Command::AddSheet { name: "Detail sheet".into(), template: "iso-a3".into() });
-    let id = corner_detail(&mut d, &part, &mut stack, FRONT, 1);
-    let index = PartIndex::build(&part).unwrap();
-    let corner = derived::context(&d, &part, &index, FRONT).unwrap().xf.point(Vec3::new(40.0, 0.0, 10.0));
-    let parent = d.view(FRONT).unwrap().position;
-
-    for polygon in [false, true] {
-        let mut stale = d.clone();
-        let child = stale.view_mut(id).unwrap();
-        let ViewKind::Detail { center, profile, .. } = &mut child.kind else { panic!("detail view") };
-        center.u -= 30.0;
-        if polygon {
-            *profile = vec![
-                Point2::new(center.u - 5.0, center.v - 5.0),
-                Point2::new(center.u + 5.0, center.v - 5.0),
-                Point2::new(center.u + 5.0, center.v + 5.0),
-                Point2::new(center.u - 5.0, center.v + 5.0),
-            ];
-        }
-        let child_geometry = child.geometry.clone();
-        let mut active_sheet = stale.clone();
-        soliddraft_drawing::redraw_for_export(&mut active_sheet, &part, &[FRONT]).unwrap();
-        assert_eq!(active_sheet.view(id).unwrap().geometry, child_geometry);
-        let list = layout_sheet(&active_sheet, 0);
-        let marker = list
-            .printable()
-            .find_map(|item| match item {
-                Item::Path(path) if path.role == Role::Boundary && path.owner == Owner::View(id) => Some(path),
-                _ => None,
-            })
-            .unwrap();
-        let center = marker.path.bounding_box().center();
-        assert!((center.x - parent.u - corner.u).abs() < 1e-6);
-        assert!((center.y - parent.v - corner.v).abs() < 1e-6);
-
-        soliddraft_drawing::redraw_for_export(&mut stale, &part, &[id]).unwrap();
-        let geometry = &stale.view(id).unwrap().geometry;
-        assert!(!geometry.curves.is_empty(), "the known box corner lies in the detail window");
-        let outline = geometry.outline.as_ref().unwrap().bounds();
-        for (actual, expected) in outline.into_iter().zip([-10.0, -10.0, 10.0, 10.0]) {
-            assert!((actual - expected).abs() < 1e-6, "{outline:?}");
-        }
-    }
-}
-
-#[test]
 fn export_accuracy_counts_printed_paths_only() {
     use soliddraft_drawing::Accuracy;
 
@@ -591,27 +537,18 @@ fn export_accuracy_counts_printed_paths_only() {
 }
 
 #[test]
-fn export_keeps_a_preview_crop_on_its_model_corner() {
-    let mut k = BoxKernel::new();
-    k.preview_extent = Some(Vec3::new(100.0, 0.0, 0.0));
-    let mut part = box_part(&k, "block", Vec3::new(40.0, 30.0, 10.0));
-    part.preview = true;
+fn export_refuses_unmarked_saved_crops_even_when_proved() {
+    let k = BoxKernel::new();
+    let part = box_part(&k, "block", Vec3::new(40.0, 30.0, 10.0));
     let mut drawing = drawing(&part);
-    let index = PartIndex::build(&part).unwrap();
-    let front = derived::context(&drawing, &part, &index, FRONT).unwrap();
-    let corner = Vec3::new(40.0, 0.0, 10.0);
-    let at = front.xf.point(corner);
-    let crop = Boundary::Circle { center: at, radius: 2.0 };
-    run(&mut UndoStack::new(), &mut drawing, &part, Command::SetViewCrop { view: FRONT, crop: Some(crop) });
-    part.preview = false;
-    soliddraft_drawing::redraw_for_export(&mut drawing, &part, &[FRONT]).unwrap();
-    let view = drawing.view(FRONT).unwrap();
-    assert!(!view.geometry.curves.is_empty(), "the right-hand box corner is inside the crop");
-    let Boundary::Circle { center, radius } = view.crop.as_ref().unwrap() else { panic!("circle") };
-    let scale = project::view_scale(&drawing, FRONT).unwrap();
-    assert!((center.u - 20.0 * scale).abs() < 1e-6);
-    assert!((center.v - 5.0 * scale).abs() < 1e-6);
-    assert_eq!(*radius, 2.0);
+    run(&mut UndoStack::new(), &mut drawing, &part, Command::SetViewCrop { view: FRONT, crop: Some(left_half()) });
+    for view in &drawing.sheets[0].views {
+        assert!(!view.geometry.unproved);
+    }
+    let saved = drawing_roundtrip(&drawing);
+    let error = export::check_sheet(&saved, &saved.sheets[0]).unwrap_err();
+    assert!(error.to_string().contains("Front view") && error.to_string().contains("Redraw it once"));
+    assert_eq!(saved.view(FRONT).unwrap().crop, Some(left_half()));
 }
 
 #[test]
@@ -623,8 +560,36 @@ fn export_refuses_geometry_regenerated_against_an_unaccepted_revision() {
     run(&mut UndoStack::new(), &mut drawing, &current, Command::SetViewCrop { view: FRONT, crop: Some(left_half()) });
     assert_eq!(drawing.model.pinned, old.digest);
     assert_eq!(drawing.view(FRONT).unwrap().geometry.source_digest, current.digest.as_str());
-    assert!(matches!(
-        soliddraft_drawing::redraw_for_export(&mut drawing, &current, &[FRONT]),
-        Err(soliddraft_drawing::DrawingError::Unproved)
-    ));
+    for view in &mut drawing.sheets[0].views {
+        view.geometry.catallax = true;
+    }
+    assert!(export::check_sheet(&drawing, &drawing.sheets[0]).unwrap_err().to_string().contains("accepted revision"));
+}
+
+#[test]
+fn export_preserves_the_saved_frozen_detail() {
+    use soliddraft_drawing::display::Owner;
+
+    let k = BoxKernel::new();
+    let old = box_part(&k, "block", Vec3::new(40.0, 30.0, 10.0));
+    let new = box_part(&k, "block", Vec3::new(60.0, 30.0, 10.0));
+    let mut drawing = drawing(&old);
+    let mut stack = UndoStack::new();
+    let detail = corner_detail(&mut drawing, &old, &mut stack, FRONT, 0);
+    drawing.view_mut(detail).unwrap().excluded_from_update = true;
+    run(&mut stack, &mut drawing, &new, Command::SetViewCrop { view: FRONT, crop: Some(left_half()) });
+    update_from_model(&mut drawing, &new).unwrap();
+    for view in &mut drawing.sheets[0].views {
+        view.geometry.catallax = true;
+    }
+
+    let saved = drawing_roundtrip(&drawing);
+    assert_ne!(saved.view(detail).unwrap().geometry.source_digest, saved.model.pinned.as_str());
+    export::check_sheet(&saved, &saved.sheets[0]).unwrap();
+    let list = layout_sheet(&saved, 0);
+    assert!(
+        list.printable()
+            .any(|item| matches!(item, Item::Path(p) if matches!(p.owner, Owner::Curve(id, _) if id == detail)))
+    );
+    assert!(export::bytes(&list, export::Format::Svg, "Box").is_ok());
 }

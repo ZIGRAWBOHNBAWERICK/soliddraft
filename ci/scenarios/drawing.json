@@ -331,7 +331,7 @@
         },
         {
           "pointer": "/summary/drawing/sheets/0/views/0/preview",
-          "equals": true
+          "equals": false
         },
         {
           "pointer": "/summary/drawing/up_to_date",
@@ -731,10 +731,12 @@
       "arguments": {
         "path": "{bundle}/stale.svg"
       },
-      "label": "export of a stale preview",
-      "refused": "unproved preview",
-      "absent": [
-        "{bundle}/stale.svg"
+      "label": "export of the saved revision",
+      "checks": [
+        {
+          "pointer": "/result/method",
+          "equals": "catallax"
+        }
       ]
     },
     {

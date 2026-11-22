@@ -135,7 +135,6 @@ pub fn update_from_model(drawing: &mut Drawing, part: &Part) -> Result<UpdateRep
                 && view.geometry.coarse == ctx.projected.geometry.coarse
                 && view.geometry != ctx.projected.geometry)
         {
-            ctx.reproject_windows(view);
             view.geometry = ctx.projected.geometry.clone();
             report.views_updated += 1;
         }
@@ -183,6 +182,7 @@ fn may_dangle(view: &crate::View) -> bool {
 /// Why a view could not be made, in words for the Needs attention panel.
 fn view_cause(e: &DrawingError) -> String {
     match e {
+        DrawingError::ViewRefused { source, .. } => source.to_string(),
         DrawingError::LostReference(why) => {
             let mut c = why.chars();
             c.next().map(|f| f.to_uppercase().collect::<String>() + c.as_str()).unwrap_or_default()
@@ -223,20 +223,10 @@ pub fn regenerate_view(drawing: &mut Drawing, part: &Part, id: ViewId) -> Result
         .into_iter()
         .filter(|child| *child == id || !drawing.view(*child).is_some_and(|v| v.excluded_from_update))
         .collect();
-    regenerate_views(drawing, part, &ids, false)
+    regenerate_views(drawing, part, &ids)
 }
 
-/// Draws the selected views for export at their pinned revision.
-pub fn redraw_for_export(drawing: &mut Drawing, part: &Part, ids: &[ViewId]) -> Result<(), DrawingError> {
-    if drawing.model.pinned != part.digest
-        || ids.iter().any(|&id| drawing.view(id).is_some_and(|v| v.geometry.source_digest != part.digest.as_str()))
-    {
-        return Err(DrawingError::Unproved);
-    }
-    regenerate_views(drawing, part, ids, true)
-}
-
-fn regenerate_views(drawing: &mut Drawing, part: &Part, ids: &[ViewId], for_export: bool) -> Result<(), DrawingError> {
+fn regenerate_views(drawing: &mut Drawing, part: &Part, ids: &[ViewId]) -> Result<(), DrawingError> {
     let index = PartIndex::build(part)?;
     let mut contexts = Contexts::new();
     for &id in ids {
@@ -244,18 +234,7 @@ fn regenerate_views(drawing: &mut Drawing, part: &Part, ids: &[ViewId], for_expo
         follow_parent(drawing, id, &contexts);
         let ctx = &contexts[&id];
         let view = drawing.view_mut(id).ok_or(DrawingError::UnknownView(id))?;
-        ctx.reproject_windows(view);
         view.geometry = ctx.projected.geometry.clone();
-    }
-    if for_export {
-        for view in drawing.sheets.iter_mut().flat_map(|sheet| &mut sheet.views) {
-            if let Some(parent) = view.parent()
-                && ids.contains(&parent)
-                && !ids.contains(&view.id)
-            {
-                project::reproject_parent_marks(&mut view.kind, &contexts[&parent].xf);
-            }
-        }
     }
     for sheet in &mut drawing.sheets {
         let symbols = &library::template(sheet.template.as_str()).style_file().symbols;

@@ -187,11 +187,10 @@ drawing follows inside the same command, so the step checks that every view is a
 part's revision, that the section regenerated, that the plate's thickness dimension now
 reads 12 and is marked changed from 10, and that nothing dangles. Undo and redo move the
 dimension back and forth. The part and the drawing are saved; SVG, PDF and DXF are
-exported and each export reports that all five views were drawn again from the certified
-mesh. The saved drawing is opened again with its section, states and references, and
-rebuilt. Finally automatic update is turned off, the plate is edited again, and an export
-is refused because the views are stale previews and no file is left behind; a Rebuild
-brings the views to the part and the export succeeds. Every drawing tool runs through
+exported from the five saved Catallax views. The saved drawing is opened again with
+its section, states and references, and rebuilt. Finally automatic update is turned
+off and the plate is edited again. Export writes the saved revision, then Rebuild
+brings the drawing to the current part before the next export. Every drawing tool runs through
 the command bundle, so each step has the part's reference evidence and the drawing's
 view and annotation states in `command.json`.
 
@@ -483,15 +482,13 @@ Later steps still run so the cost distribution is retained.
 An open drawing follows the part inside the editing command, so the kernel calls that
 regenerate its views (`view_curves`, `section_view`) are in that click. Each such call
 on the command thread is also timed against the 1,000 ms reference (`drawing view calls`
-in the step's checks), alongside the click timing. A section on screen is cut from the
-preview mesh with no boolean, so it costs about what a view costs; the certified section
-an export draws subtracts a half-space through a Catallax boolean, inside the export's
-recorded wait. The drawing exports (`drawing_export_svg`,
+in the step's checks), alongside the click timing. Creating or rebuilding a saved section
+subtracts a half-space through a Catallax boolean. The drawing exports (`drawing_export_svg`,
 `drawing_export_pdf`, `drawing_export_dxf`) are the `output` class: their wait is the
 caller's wait for the certified file and is recorded in the step's timing with no
 budget, as the CLI export and drawing checks are; an output listed as a known gap is a
 warning to remove the listing. Each export reports how many views it wrote and the accuracy of the printed curves.
-Export redraws each written view using Catallax queries and requires the matching model revision.
+Export uses saved Catallax line work. Older caches without its marker need an explicit redraw.
 
 The timing reference was calibrated from the
 [current-main baseline run](https://github.com/BohnBawerick/soliddraft/actions/runs/40229375814)

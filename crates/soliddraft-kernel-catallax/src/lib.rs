@@ -127,9 +127,6 @@ struct Solid {
     topology: OnceLock<KernelResult<Topology>>,
     measured: OnceLock<KernelResult<Topology>>,
     mass: OnceLock<KernelResult<MassProperties>>,
-    /// Edge drawings already answered, by Catallax edge: a drawing reads every edge on
-    /// each update.
-    drawn_edges: std::sync::Mutex<BTreeMap<catallax_topology::EdgeId, drawing::ViewCurve>>,
 }
 
 /// A display key as text, which a hand-over carries between kernels.
@@ -680,7 +677,6 @@ impl CatallaxKernel {
             topology,
             measured: OnceLock::new(),
             mass: OnceLock::new(),
-            drawn_edges: Default::default(),
         });
         // A build kept for a hand-over takes what adopting it unread needs, while the
         // body that made it is at hand: later features may release it.

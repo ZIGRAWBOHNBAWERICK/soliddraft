@@ -434,6 +434,7 @@ pub fn apply(state: &mut AppState, action: MateAction) {
             state.assembly.mate.open = !state.assembly.mate.open;
             if state.assembly.mate.open {
                 state.assembly.interference.open = false;
+                state.assembly.configure.open = false;
             }
         }
         MateAction::Pick(path, name) => pick(state, &path, &name),

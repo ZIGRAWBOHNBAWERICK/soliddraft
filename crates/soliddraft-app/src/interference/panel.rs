@@ -68,6 +68,7 @@ pub fn apply(state: &mut AppState, action: InterferenceAction) {
             d.open = !d.open;
             if d.open {
                 state.assembly.mate.open = false;
+                state.assembly.configure.open = false;
             }
 
             state.options_details = d.open;

@@ -69,6 +69,8 @@ pub enum AssemblyAction {
     Mate(crate::mates::MateAction),
     Form(crate::subassembly::FormAction),
     Interference(crate::interference::InterferenceAction),
+    /// Configurations and the exploded view.
+    Configure(crate::configurations::ConfigureAction),
 }
 
 /// The workspaces of an assembly document in Edit Suite.
@@ -109,6 +111,8 @@ pub struct AssemblyState {
     pub form: crate::subassembly::Draft,
     /// The Interference panel's fields and last report.
     pub interference: crate::interference::Draft,
+    /// The Configurations panel's fields.
+    pub configure: crate::configurations::Draft,
     pub collision_drag: bool,
     pub dynamic_clearance: bool,
     pub clearance_mm: f64,
@@ -768,6 +772,7 @@ pub fn apply(state: &mut AppState, dock: &mut DockState<Tab>, action: AssemblyAc
         AssemblyAction::Mate(action) => crate::mates::apply(state, action),
         AssemblyAction::Form(action) => crate::subassembly::apply(state, action),
         AssemblyAction::Interference(action) => crate::interference::apply(state, action),
+        AssemblyAction::Configure(action) => crate::configurations::apply(state, action),
         AssemblyAction::Open(path) => {
             state.note(format!("Opening {}…", path.display()), NoteKind::Info);
             let opening = AssemblyDocument::open_in_background(&path, options(state));
@@ -1198,6 +1203,7 @@ pub fn tree(ui: &mut egui::Ui, state: &mut AppState) {
 pub fn properties(ui: &mut egui::Ui, state: &mut AppState) {
     let forming = state.assembly.form.open;
     let checking = state.assembly.interference.open;
+    let configuring = state.assembly.configure.open;
     let collision_drag = &mut state.assembly.collision_drag;
     let dynamic_clearance = &mut state.assembly.dynamic_clearance;
     let clearance_mm = &mut state.assembly.clearance_mm;
@@ -1234,6 +1240,14 @@ pub fn properties(ui: &mut egui::Ui, state: &mut AppState) {
             egui::Frame::new()
                 .inner_margin(egui::Margin::symmetric(12, 0))
                 .show(ui, |ui| crate::interference::panel::show(ui, state));
+        });
+        return;
+    }
+    if configuring {
+        egui::ScrollArea::vertical().id_salt("assembly_configurations").auto_shrink([false, true]).show(ui, |ui| {
+            egui::Frame::new()
+                .inner_margin(egui::Margin::symmetric(12, 0))
+                .show(ui, |ui| crate::configurations::show(ui, state));
         });
         return;
     }

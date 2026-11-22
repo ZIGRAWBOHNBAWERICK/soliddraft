@@ -37,6 +37,7 @@ pub(crate) fn summary(state: &mut AppState) -> Option<Value> {
         "revision": s.doc.revision(), "geometry_hash": s.doc.assembly().geometry_hash(), "dirty": s.doc.is_dirty(), "undo": s.doc.undo_label(),
         "components": components, "occurrences": occurrences, "mates": mates, "values": values, "solver": solver,
         "proof_rebuilds": s.doc.parts_rebuilt_for_proofs(),
+        "configured": crate::configurations::tools::describe(&s.doc),
         "accepted_state": accepted_state(s),
         "import": imported(s),
     }))

@@ -272,6 +272,9 @@ impl AppTools<'_> {
         if let Some(result) = crate::subassembly::tools::run(self.state, name, input) {
             return Some(result);
         }
+        if let Some(result) = crate::configurations::tools::run(self.state, name, input) {
+            return Some(result);
+        }
         if let Some(result) = crate::pmi::tools::run(self.state, name, input) {
             return Some(result);
         }

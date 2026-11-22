@@ -99,7 +99,7 @@ pub(super) fn view_curves(k: &CatallaxKernel, body: BodyId, spec: &ViewSpec) -> 
 }
 
 pub(super) fn require_drawing_solid(k: &CatallaxKernel, body: BodyId, query: &str) -> KernelResult<()> {
-    if k.field(body)?.is_some() || k.approximate(body)?.is_some() || k.topology(body)?.kind != BodyKind::Solid {
+    if k.field(body)?.is_some() || k.approximate(body)?.is_some() || k.body_kind(body)? != BodyKind::Solid {
         return Err(crate::query_error(query, Refusal::new("app.view-solid", "the body has no exact drawing solid")));
     }
     Ok(())

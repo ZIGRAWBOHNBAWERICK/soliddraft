@@ -92,6 +92,14 @@ pub struct DanglingAnnotation {
 /// of a Rebuild; the caller binds and re-paths the reference (see
 /// `soliddraft_document::resolve::repin`).
 pub fn update_from_model(drawing: &mut Drawing, part: &Part) -> Result<UpdateReport, DrawingError> {
+    rebuild(drawing, part, &[])
+}
+
+pub(crate) fn rebuild(
+    drawing: &mut Drawing,
+    part: &Part,
+    previous_refusals: &[DanglingView],
+) -> Result<UpdateReport, DrawingError> {
     let index = PartIndex::build(part)?;
     let mut report = UpdateReport {
         digest_before: drawing.model.pinned.clone(),
@@ -110,7 +118,6 @@ pub fn update_from_model(drawing: &mut Drawing, part: &Part) -> Result<UpdateRep
             .take(17)
             .count()
     });
-    let mut failed: Vec<ViewId> = Vec::new();
     for &id in &ids {
         let view = drawing.view(id).expect("listed");
         if view.excluded_from_update {
@@ -123,7 +130,6 @@ pub fn update_from_model(drawing: &mut Drawing, part: &Part) -> Result<UpdateRep
         let failure = failure
             .or_else(|| project::compute_in(drawing, part, &index, id, &mut contexts).err().map(|e| view_cause(&e)));
         if let Some(cause) = failure {
-            failed.push(id);
             let sheet = drawing.sheet_of(id).expect("listed");
             report.dangling_views.push(DanglingView {
                 view: id,
@@ -151,11 +157,21 @@ pub fn update_from_model(drawing: &mut Drawing, part: &Part) -> Result<UpdateRep
     for id in ids {
         follow_parent(drawing, id, &contexts);
     }
+    report.dangling_views.extend(previous_refusals.iter().filter_map(|failure| {
+        let sheet = drawing.sheet_of(failure.view)?;
+        let view = sheet.view(failure.view)?;
+        view.excluded_from_update.then(|| DanglingView {
+            view: view.id,
+            name: project::view_label_in(drawing, sheet, view),
+            cause: failure.cause.clone(),
+        })
+    }));
+    let failed = |id| report.dangling_views.iter().any(|failure| failure.view == id);
     for sheet in &mut drawing.sheets {
         let symbols = library::template(sheet.template.as_str()).style_file().symbols.clone();
         for a in &mut sheet.annotations {
             let Some(ctx) = contexts.get(&a.view) else { continue };
-            if failed.contains(&a.view) || sheet.views.iter().any(|v| v.id == a.view && v.excluded_from_update) {
+            if failed(a.view) || sheet.views.iter().any(|v| v.id == a.view && v.excluded_from_update) {
                 continue;
             }
             if let Some(change) = re_resolve(a, &index, ctx, &symbols) {
@@ -167,11 +183,11 @@ pub fn update_from_model(drawing: &mut Drawing, part: &Part) -> Result<UpdateRep
     // its values, and which items there are.
     let made_from_part = drawing.sheets.iter().position(|sheet| sheet.annotations.iter().any(|a| a.source.is_some()));
     if let Some(sheet) = made_from_part {
-        crate::pmi_items::refresh(drawing, part, |id| !failed.contains(&id));
+        crate::pmi_items::refresh(drawing, part, |id| !failed(id));
         let views: Vec<ViewContext> = drawing.sheets[sheet]
             .views
             .iter()
-            .filter(|v| !failed.contains(&v.id) && !v.excluded_from_update)
+            .filter(|v| !failed(v.id) && !v.excluded_from_update)
             .filter_map(|v| contexts.get(&v.id).cloned())
             .collect();
         crate::pmi_items::import(drawing, sheet, part, &index, &views)?;

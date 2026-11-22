@@ -2647,6 +2647,18 @@ mod tests {
     }
 
     #[test]
+    fn an_exact_view_of_a_cold_cylinder_builds_no_display_mesh() {
+        let kernel = CatallaxKernel::new();
+        let body = contract::cylinder(&kernel, Vec3::ZERO, 5.0, 10.0);
+        let view = kernel.view_curves(body, &drawing::ViewSpec::standard(drawing::StandardView::Top)).unwrap();
+        assert!(view.catallax && !view.unproved);
+        assert_eq!(kernel.state().unwrap().fresh_topologies, 0);
+        let mut meshes = 0;
+        kernel.solid(body).unwrap().display.each(|_| meshes += 1);
+        assert_eq!(meshes, 0);
+    }
+
+    #[test]
     fn certified_display_is_cached_after_a_refused_request_retries() {
         let kernel = CatallaxKernel::new();
         let body = contract::cylinder(&kernel, Vec3::ZERO, 5.0, 10.0);

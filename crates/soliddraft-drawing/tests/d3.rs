@@ -108,6 +108,20 @@ fn rebuild_commits_successful_views_alongside_base_and_projected_refusals() {
         assert!(error.contains(&failure.name), "{error}");
         assert!(error.contains("does not match the drawing's accepted revision"), "{error}");
 
+        let mut stack = UndoStack::new();
+        for view in [id, healthy] {
+            apply(&mut d, &Command::SetViewExcluded { view, excluded: true }).unwrap();
+        }
+        apply(&mut d, &Command::AddAnnotation { annotation: saved[1].clone() }).unwrap();
+        let frozen = stack.rebuild(&mut d, &changed, &report.dangling_views).unwrap();
+        assert_eq!(frozen.dangling_views, report.dangling_views);
+        assert_eq!(d.view(id).unwrap().geometry, before);
+        assert_eq!(d.annotation(saved[0].id), Some(&saved[0]));
+        assert!(d.annotation(saved[1].id).is_none());
+        for view in [id, healthy] {
+            apply(&mut d, &Command::SetViewExcluded { view, excluded: false }).unwrap();
+        }
+
         let mut repaired = BoxKernel::new();
         repaired.detail_strokes = true;
         let part = box_part(&repaired, "block", Vec3::new(60.0, 30.0, 10.0));

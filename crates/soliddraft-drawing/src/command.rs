@@ -968,14 +968,34 @@ impl UndoStack {
         command: &Command,
         part: Option<&Part>,
     ) -> Result<Option<UpdateReport>, DrawingError> {
-        let before = drawing.clone();
-        let result = match part {
+        self.record(drawing, command.name(), |drawing| match part {
             Some(p) => apply_with(drawing, command, p),
             None => apply(drawing, command).map(|_| None),
-        };
-        match result {
+        })
+    }
+
+    /// Rebuilds and records undo, retaining previous refusals for views skipped by the rebuild.
+    pub fn rebuild(
+        &mut self,
+        drawing: &mut Drawing,
+        part: &Part,
+        previous_refusals: &[crate::DanglingView],
+    ) -> Result<UpdateReport, DrawingError> {
+        self.record(drawing, Command::UpdateFromModel.name(), |drawing| {
+            update::rebuild(drawing, part, previous_refusals)
+        })
+    }
+
+    fn record<T>(
+        &mut self,
+        drawing: &mut Drawing,
+        name: &'static str,
+        run: impl FnOnce(&mut Drawing) -> Result<T, DrawingError>,
+    ) -> Result<T, DrawingError> {
+        let before = drawing.clone();
+        match run(drawing) {
             Ok(r) => {
-                self.undo.push((command.name(), before));
+                self.undo.push((name, before));
                 self.redo.clear();
                 Ok(r)
             }

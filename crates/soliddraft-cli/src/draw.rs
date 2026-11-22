@@ -724,42 +724,48 @@ fn update(o: &Options) -> Result<(), String> {
         // A drawing from before the envelope is saved under the current name beside it.
         let saved = soliddraft_document::kind::saved_path(&path, DocKind::Drawing);
         let meta = meta.rewritten(&source.backend, drawing.meta.units);
-        if !report.dangling_views.is_empty() && !o.reattach.is_empty() {
+        let partial = !report.dangling_views.is_empty();
+        if partial {
             file::write(&saved, &drawing, &meta).map_err(|e| e.to_string())?;
         }
-        let mut repairs = Vec::new();
-        let run = |stack: &mut soliddraft_drawing::UndoStack, drawing: &mut Drawing, c: Command| {
-            stack.run(drawing, &c, Some(part)).map(|_| ()).map_err(|e| e.to_string())
-        };
-        if o.accept {
-            for c in &report.changed {
-                run(&mut stack, &mut drawing, Command::AcceptChange { annotation: c.annotation })?;
-                repairs.push(format!("accepted {}", c.annotation));
-            }
-        }
-        for (id, end, at) in &o.reattach {
-            let annotation = AnnotationId(*id);
-            let result = soliddraft_drawing::edge_near(part, *at)
-                .map_err(|e| e.to_string())
-                .and_then(|entity| run(&mut stack, &mut drawing, Command::Reattach { annotation, end: *end, entity }));
-            result.map_err(|error| {
-                let mut message = format!("Cannot reattach end {end} of {annotation}: {error}");
-                for refusal in &report.dangling_views {
-                    message.push_str(&format!("\n{}: {}", refusal.name, refusal.cause));
+        let repairs = (|| -> Result<Vec<String>, String> {
+            let mut repairs = Vec::new();
+            let mut run = |c: Command| {
+                stack.run(&mut drawing, &c, Some(part)).map(|_| ()).map_err(|e| format!("{}: {e}", c.name()))
+            };
+            if o.accept {
+                for c in &report.changed {
+                    run(Command::AcceptChange { annotation: c.annotation })?;
+                    repairs.push(format!("accepted {}", c.annotation));
                 }
-                message
-            })?;
-            repairs.push(format!("reattached end {end} of {annotation}"));
+            }
+            for (id, end, at) in &o.reattach {
+                let annotation = AnnotationId(*id);
+                let entity = soliddraft_drawing::edge_near(part, *at)
+                    .map_err(|e| format!("Cannot reattach end {end} of {annotation}: {e}"))?;
+                run(Command::Reattach { annotation, end: *end, entity })?;
+                repairs.push(format!("reattached end {end} of {annotation}"));
+            }
+            for id in &o.freeze {
+                run(Command::FreezeAsNote { annotation: AnnotationId(*id) })?;
+                repairs.push(format!("kept annotation {id} as a note"));
+            }
+            for id in &o.delete {
+                run(Command::DeleteAnnotation { annotation: AnnotationId(*id) })?;
+                repairs.push(format!("deleted annotation {id}"));
+            }
+            Ok(repairs)
+        })()
+        .map_err(|error| {
+            let mut message = format!("Annotation repair failed: {error}");
+            for refusal in &report.dangling_views {
+                message.push_str(&format!("\n{}: {}", refusal.name, refusal.cause));
+            }
+            message
+        })?;
+        if !partial || !repairs.is_empty() {
+            file::write(&saved, &drawing, &meta).map_err(|e| e.to_string())?;
         }
-        for id in &o.freeze {
-            run(&mut stack, &mut drawing, Command::FreezeAsNote { annotation: AnnotationId(*id) })?;
-            repairs.push(format!("kept annotation {id} as a note"));
-        }
-        for id in &o.delete {
-            run(&mut stack, &mut drawing, Command::DeleteAnnotation { annotation: AnnotationId(*id) })?;
-            repairs.push(format!("deleted annotation {id}"));
-        }
-        file::write(&saved, &drawing, &meta).map_err(|e| e.to_string())?;
         let outputs = write_outputs(&drawing, &o.outs, &source.backend, &report.dangling_views);
         // The report after repairs: what still needs attention.
         let mut final_report = report.clone();

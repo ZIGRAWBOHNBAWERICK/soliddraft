@@ -280,7 +280,18 @@ impl DrawingDoc {
                 }
                 _ => None,
             };
-            let report = self.stack.run(&mut self.drawing, &cmd, p.as_ref()).map_err(|e| e.to_string())?;
+            let report = match (&cmd, p.as_ref()) {
+                (Command::UpdateFromModel, Some(part)) => {
+                    let previous = self
+                        .last_update
+                        .as_ref()
+                        .filter(|update| update.to_revision == from)
+                        .map_or(&[][..], |update| update.dangling_views.as_slice());
+                    self.stack.rebuild(&mut self.drawing, part, previous).map(Some)
+                }
+                _ => self.stack.run(&mut self.drawing, &cmd, p.as_ref()),
+            }
+            .map_err(|e| e.to_string())?;
             self.undo_picking.push(PickingCache {
                 last_update: self.last_update.clone(),
                 transforms: self.transforms.clone(),
@@ -311,15 +322,7 @@ impl DrawingDoc {
                     }
                 }
             }
-            if let (Some(mut r), Some(ctx)) = (report, part) {
-                r.dangling_views.extend(
-                    self.last_update
-                        .iter()
-                        .filter(|update| update.to_revision == from)
-                        .flat_map(|update| &update.dangling_views)
-                        .filter(|failure| self.drawing.view(failure.view).is_some_and(|v| v.excluded_from_update))
-                        .cloned(),
-                );
+            if let (Some(r), Some(ctx)) = (report, part) {
                 for (id, projected) in &r.projections {
                     self.remember(*id, projected);
                 }

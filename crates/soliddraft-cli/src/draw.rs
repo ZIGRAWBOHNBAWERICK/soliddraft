@@ -724,10 +724,7 @@ fn update(o: &Options) -> Result<(), String> {
         // A drawing from before the envelope is saved under the current name beside it.
         let saved = soliddraft_document::kind::saved_path(&path, DocKind::Drawing);
         let meta = meta.rewritten(&source.backend, drawing.meta.units);
-        let partial = !report.dangling_views.is_empty();
-        if partial {
-            file::write(&saved, &drawing, &meta).map_err(|e| e.to_string())?;
-        }
+        file::write(&saved, &drawing, &meta).map_err(|e| e.to_string())?;
         let repairs = (|| -> Result<Vec<String>, String> {
             let mut repairs = Vec::new();
             let mut run = |c: Command| {
@@ -754,6 +751,9 @@ fn update(o: &Options) -> Result<(), String> {
                 run(Command::DeleteAnnotation { annotation: AnnotationId(*id) })?;
                 repairs.push(format!("deleted annotation {id}"));
             }
+            if !repairs.is_empty() {
+                file::write(&saved, &drawing, &meta).map_err(|e| e.to_string())?;
+            }
             Ok(repairs)
         })()
         .map_err(|error| {
@@ -763,9 +763,6 @@ fn update(o: &Options) -> Result<(), String> {
             }
             message
         })?;
-        if !partial || !repairs.is_empty() {
-            file::write(&saved, &drawing, &meta).map_err(|e| e.to_string())?;
-        }
         let outputs = write_outputs(&drawing, &o.outs, &source.backend, &report.dangling_views);
         // The report after repairs: what still needs attention.
         let mut final_report = report.clone();
@@ -868,11 +865,6 @@ impl OutputReport {
     }
 }
 
-enum SheetOutputError {
-    Refused(String),
-    Invalid(String),
-}
-
 /// Writes the drawing in each format `outs` names. A drawing file written here is a new
 /// document (Save as copy), with its own id. Every file is written atomically.
 fn write_outputs(
@@ -883,28 +875,20 @@ fn write_outputs(
 ) -> OutputReport {
     let format_of =
         |out: &str| Path::new(out).extension().and_then(|ext| ext.to_str()).and_then(Format::from_extension);
-    let wrote_sheets = outs.iter().any(|out| format_of(out).is_some());
-    let lists: Vec<_> = if wrote_sheets {
-        drawing
-            .sheets
-            .iter()
-            .enumerate()
-            .map(|(i, sheet)| {
-                let causes: Vec<_> = refused
-                    .iter()
-                    .filter(|f| sheet.view(f.view).is_some())
-                    .map(|f| format!("{}: {}", f.name, f.cause))
-                    .collect();
-                if !causes.is_empty() {
-                    return Err(SheetOutputError::Refused(causes.join("\n")));
-                }
-                export::check_sheet(drawing, sheet).map_err(|error| SheetOutputError::Invalid(error.to_string()))?;
-                Ok(display::layout_sheet(drawing, i))
-            })
-            .collect()
-    } else {
-        Vec::new()
-    };
+    let refusals: Vec<_> = drawing
+        .sheets
+        .iter()
+        .map(|sheet| {
+            refused
+                .iter()
+                .filter(|f| sheet.view(f.view).is_some())
+                .map(|f| format!("{}: {}", f.name, f.cause))
+                .collect::<Vec<_>>()
+                .join("\n")
+        })
+        .collect();
+    let lists: Vec<_> = drawing.sheets.iter().map(|_| std::cell::OnceCell::new()).collect();
+    let list = |i: usize| lists[i].get_or_init(|| display::layout_sheet(drawing, i));
     let mut report = OutputReport::default();
     let mut written = vec![(false, false); lists.len()];
     'outputs: for out in outs {
@@ -918,56 +902,42 @@ fn write_outputs(
                 }
             }
             Some(Format::Pdf) => {
-                if let Some(error) = lists.iter().find_map(|sheet| match sheet {
-                    Err(SheetOutputError::Invalid(error)) => Some(error),
-                    _ => None,
-                }) {
-                    report.errors.push(format!("{out}: {error}"));
+                let causes: Vec<_> = refusals.iter().filter(|cause| !cause.is_empty()).map(String::as_str).collect();
+                if !causes.is_empty() {
+                    report.errors.push(format!("{out}: {}", causes.join("\n")));
+                    continue;
+                }
+                let sheets: Vec<_> = (0..lists.len()).map(|i| list(i).clone()).collect();
+                let info = PdfInfo { title: drawing.meta.title.clone(), author: drawing.meta.designer.clone() };
+                let mut accuracy = AccuracyCounts::default();
+                for sheet in &sheets {
+                    accuracy.add(sheet.accuracy());
+                }
+                if !report.write(path, export::pdf(&sheets, &info).map_err(|e| e.to_string()), Some(accuracy)) {
                     break;
                 }
-                let sheets = lists.iter().map(|sheet| sheet.as_ref().cloned()).collect::<Result<Vec<_>, _>>();
-                match sheets {
-                    Ok(sheets) => {
-                        let info = PdfInfo { title: drawing.meta.title.clone(), author: drawing.meta.designer.clone() };
-                        let mut accuracy = AccuracyCounts::default();
-                        for sheet in &sheets {
-                            accuracy.add(sheet.accuracy());
-                        }
-                        if !report.write(path, export::pdf(&sheets, &info).map_err(|e| e.to_string()), Some(accuracy)) {
-                            break;
-                        }
-                        for (_, page) in &mut written {
-                            *page = true;
-                        }
-                    }
-                    Err(SheetOutputError::Refused(error)) => report.errors.push(format!("{out}: {error}")),
-                    Err(SheetOutputError::Invalid(_)) => unreachable!(),
+                for (_, page) in &mut written {
+                    *page = true;
                 }
             }
             Some(format) => {
-                for (i, list) in lists.iter().enumerate() {
+                for (i, cause) in refusals.iter().enumerate() {
                     let path = sheet_path(path, i);
-                    match list {
-                        Ok(list) => {
-                            let dxf = matches!(format, Format::Dxf);
-                            let accuracy = if dxf { list.dxf_accuracy() } else { list.accuracy() };
-                            let bytes = export::bytes(list, format, &drawing.meta.title).map_err(|e| e.to_string());
-                            if !report.write(&path, bytes, Some(accuracy)) {
-                                break 'outputs;
-                            }
-                            if dxf {
-                                written[i].0 = true;
-                            } else {
-                                written[i].1 = true;
-                            }
-                        }
-                        Err(SheetOutputError::Refused(error)) => {
-                            report.errors.push(format!("{}: {error}", path.display()));
-                        }
-                        Err(SheetOutputError::Invalid(error)) => {
-                            report.errors.push(format!("{}: {error}", path.display()));
-                            break 'outputs;
-                        }
+                    if !cause.is_empty() {
+                        report.errors.push(format!("{}: {cause}", path.display()));
+                        continue;
+                    }
+                    let list = list(i);
+                    let dxf = matches!(format, Format::Dxf);
+                    let accuracy = if dxf { list.dxf_accuracy() } else { list.accuracy() };
+                    let bytes = export::bytes(list, format, &drawing.meta.title).map_err(|e| e.to_string());
+                    if !report.write(&path, bytes, Some(accuracy)) {
+                        break 'outputs;
+                    }
+                    if dxf {
+                        written[i].0 = true;
+                    } else {
+                        written[i].1 = true;
                     }
                 }
             }
@@ -977,8 +947,8 @@ fn write_outputs(
             }
         }
     }
-    for (list, formats) in lists.iter().zip(written) {
-        if let Ok(list) = list {
+    for (list, formats) in lists.into_iter().zip(written) {
+        if let Some(list) = list.into_inner() {
             let accuracy = match formats {
                 (true, true) => list.accuracy_with_dxf(),
                 (true, false) => list.dxf_accuracy(),

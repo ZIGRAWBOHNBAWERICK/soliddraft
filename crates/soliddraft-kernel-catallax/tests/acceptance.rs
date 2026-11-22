@@ -213,6 +213,28 @@ fn refused_extrusion_does_not_change_its_profile_and_handles_stay_owned() {
 }
 
 #[test]
+fn exact_views_and_sections_refuse_profile_only_bodies() {
+    use soliddraft_kernel_api::drawing::{StandardView, ViewSpec};
+
+    let k = CatallaxKernel::new();
+    let profile = k
+        .create_body_from_profile(&OpTag::new("profile"), &Profile::circle(Plane::XY, Point2::new(0.0, 0.0), 2.0))
+        .unwrap()
+        .body;
+    let block = contract::block(&k);
+    let face = k.topology(block).unwrap().faces[0].id;
+    let extracted = k.create_profile_from_face(&OpTag::new("face profile"), block, face).unwrap().body;
+    for body in [profile, extracted] {
+        let view = k.view_curves(body, &ViewSpec::standard(StandardView::Front)).unwrap_err();
+        let section = k.section_view(body, &contract::bracket_section_spec()).unwrap_err();
+        for (failure, operation) in [(view, "view_curves"), (section, "section_view")] {
+            assert!(matches!(failure, KernelError::QueryFailed { query, message, .. }
+                if query == operation && message.starts_with("app.view-solid:")));
+        }
+    }
+}
+
+#[test]
 fn exported_views_and_sections_are_catallax_curves_on_the_original_body() {
     use soliddraft_kernel_api::drawing::{Curve3, CurveSource, StandardView, ViewSpec};
 

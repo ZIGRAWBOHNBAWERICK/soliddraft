@@ -2482,7 +2482,7 @@ impl Kernel for CatallaxKernel {
                 Ok(section)
             } else {
                 drawing_queries::check_exact_tolerance(&spec.view)?;
-                drawing_queries::require_drawing_solid(self, body, "section_view")?;
+                drawing_queries::drawing_solid(self, body, "section_view")?;
                 drawing::section::by_half_space(self, body, spec)
             }
         })

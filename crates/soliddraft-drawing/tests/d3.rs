@@ -750,13 +750,32 @@ fn export_accuracy_counts_printed_paths_only() {
 }
 
 #[test]
+fn unsupported_views_use_mesh_only_for_preview() {
+    use soliddraft_drawing::DrawingError;
+    use soliddraft_kernel_api::{
+        KernelError,
+        drawing::{StandardView, ViewSpec},
+    };
+
+    let mut k = BoxKernel::new();
+    k.unsupported_view = true;
+    let mut part = box_part(&k, "block", Vec3::new(40.0, 30.0, 10.0));
+    let spec = ViewSpec::standard(StandardView::Front);
+    assert!(matches!(project::view_curves(&part, &spec), Err(DrawingError::Kernel(KernelError::Unsupported(_)))));
+    part.preview = true;
+    let view = project::view_curves(&part, &spec).unwrap();
+    assert!(view.unproved && !view.catallax && !view.curves.is_empty());
+}
+
+#[test]
 fn export_refuses_unmarked_saved_crops_even_when_proved() {
     let k = BoxKernel::new();
     let part = box_part(&k, "block", Vec3::new(40.0, 30.0, 10.0));
     let mut drawing = drawing(&part);
     run(&mut UndoStack::new(), &mut drawing, &part, Command::SetViewCrop { view: FRONT, crop: Some(left_half()) });
-    for view in &drawing.sheets[0].views {
+    for view in &mut drawing.sheets[0].views {
         assert!(!view.geometry.unproved);
+        view.geometry.catallax = false;
     }
     let saved = drawing_roundtrip(&drawing);
     let list = layout_sheet(&saved, 0);

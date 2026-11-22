@@ -58,8 +58,7 @@ pub(super) fn view_curves(k: &CatallaxKernel, body: BodyId, spec: &ViewSpec) -> 
     }
     if !spec.preview {
         check_exact_tolerance(spec)?;
-        require_drawing_solid(k, body, "view_curves")?;
-        return exact_view(k.solid(body)?.as_ref(), spec);
+        return exact_view(drawing_solid(k, body, "view_curves")?.as_ref(), spec);
     }
     if k.topology(body)?.kind != BodyKind::Solid {
         return Err(KernelError::Unsupported("view_curves of a sheet body".into()));
@@ -98,11 +97,15 @@ pub(super) fn view_curves(k: &CatallaxKernel, body: BodyId, spec: &ViewSpec) -> 
     })
 }
 
-pub(super) fn require_drawing_solid(k: &CatallaxKernel, body: BodyId, query: &str) -> KernelResult<()> {
-    if k.field(body)?.is_some() || k.approximate(body)?.is_some() || k.body_kind(body)? != BodyKind::Solid {
-        return Err(crate::query_error(query, Refusal::new("app.view-solid", "the body has no exact drawing solid")));
+pub(super) fn drawing_solid(k: &CatallaxKernel, body: BodyId, query: &str) -> KernelResult<std::sync::Arc<Solid>> {
+    let state = k.state()?;
+    if !state.fields.contains_key(&body)
+        && let Some(solid) = &state.get(body)?.solid
+        && !solid.app.is_surface()
+    {
+        return Ok(solid.clone());
     }
-    Ok(())
+    Err(crate::query_error(query, Refusal::new("app.view-solid", "the body has no exact drawing solid")))
 }
 
 /// Catallax's hidden-line view, each stroke drawn as an exact or fitted curve. Tangent

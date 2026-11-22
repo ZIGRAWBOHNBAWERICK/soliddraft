@@ -579,9 +579,9 @@ fn view_panel(
                     }
                 }
             }
-            let children: Vec<String> = s.doc.drawing.sheets.iter()
-                .flat_map(|sheet| sheet.views.iter().filter(|c| c.parent() == Some(id))
-                    .map(|c| view_label_in(&s.doc.drawing, sheet, c)))
+            let children: Vec<String> = sheet.views.iter()
+                .filter(|c| c.parent() == Some(id))
+                .map(|c| view_label_in(&s.doc.drawing, &sheet, c))
                 .collect();
             if !children.is_empty() {
                 value_row(ui, "Children", &children.join(", "));

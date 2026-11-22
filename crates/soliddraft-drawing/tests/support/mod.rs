@@ -29,6 +29,7 @@ pub struct BoxKernel {
     bodies: Mutex<HashMap<u64, BoxBody>>,
     next: Mutex<u64>,
     pub detail_strokes: bool,
+    pub unsupported_view: bool,
     pub refuse_direction: Option<Vec3>,
 }
 
@@ -140,22 +141,26 @@ impl Kernel for BoxKernel {
         if self.refuse_direction.is_some_and(|direction| direction.distance(spec.direction) < 1e-9) {
             return Err(KernelError::InvalidInput("test direction refused".into()));
         }
-        if !self.detail_strokes {
+        if self.unsupported_view {
             return Err(KernelError::Unsupported("drawing view".into()));
         }
         let view = mesh_hlr::view_curves(self, body, spec)?;
         let (max, face) = self.with(body, |b| (b.max, FaceId::from_raw(b.first_id)))?;
         let near = Vec3::new(max.x - 1.0, 0.0, max.z - 1.0);
         let mut curves = view.curves;
-        if spec.smooth_edges {
+        if self.detail_strokes && spec.smooth_edges {
             let mut tangent = ViewCurve::new(Curve3::Line { a: near, b: near - Vec3::X }, CurveSource::Unknown, true);
             tangent.smooth = true;
             curves.push(tangent);
         }
-        if spec.seams {
+        if self.detail_strokes && spec.seams {
             curves.push(ViewCurve::new(Curve3::Line { a: near, b: near + Vec3::Z }, CurveSource::Seam(face), true));
         }
-        Ok(ViewCurves { catallax: true, ..ViewCurves::new(curves, &spec.frame().unwrap()) })
+        Ok(ViewCurves {
+            catallax: !spec.preview,
+            unproved: view.unproved || spec.preview,
+            ..ViewCurves::new(curves, &spec.frame().unwrap())
+        })
     }
 
     fn tessellate(&self, body: BodyId, _: &TessellationParams) -> KernelResult<Mesh> {

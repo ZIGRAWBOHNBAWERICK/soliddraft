@@ -28,15 +28,15 @@ end. The slot edit must rebuild only the slot, and the undo and the return to th
 must run no kernel operation. Step 25 makes a drawing. Steps 27-32 change the plate
 width to 140 mm, undo and redo, save, diverge, reopen and export checked STEP.
 Model commands, viewport screenshots, SVG views and drawing output use Catallax.
-The view and drawing checks require that backend. Views use the same polygon
-hidden-line method as the drawing workspace.
+The view and drawing checks require that backend. Standalone SVG captures use
+unproved polygon hidden-line previews. The drawing workspace uses Catallax's
+hidden-line and section queries, and sheet exports write the saved line work.
 
 The adapter uses Catallax's `build_incremental_without_display` entry. Exact
 checkpoints and picking names build immediately; certified meshes enter a
-per-body cache only when requested. Topology, drawing curves and native reference
-points read the same default certified mesh as before. A topology query can still
-require that mesh during an edit. The selectable viewport uses the separate
-unproved preview. Memory accounting does not request a display.
+per-body cache only when requested. Topology and native reference points can
+still require the default mesh during an edit. The selectable viewport uses
+the separate unproved preview. Memory accounting does not request a display.
 
 `edit-display-reuse.json` checks foreground mesh calls and GPU body placements on a
 rounded boss. It edits the boss diameter and the last fillet, undoes and redoes,
@@ -499,7 +499,7 @@ for protocol, SVG serialization and run-to-run variation. The new check measures
 that entire external request, not just the kernel call. The click budget and
 existing approved-gap records are unchanged.
 
-Faster fine meshing of curved faces inside `view_curves` remains kernel
+Faster fine meshing of curved faces for preview `view_curves` remains kernel
 follow-up. The advisory timing policy does not change geometric proofs or mesh
 accuracy requirements.
 

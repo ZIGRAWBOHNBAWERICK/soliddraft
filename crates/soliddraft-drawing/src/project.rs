@@ -711,14 +711,13 @@ fn scale_of<'a>(find: &FindScale<'a>, sheet_scale: f64, view: &View, depth: u8) 
     }
 }
 
-/// The kernel's curves for a view, with the mesh method when the backend has no exact
-/// hidden-line removal.
+/// The kernel's curves for a view, with a mesh fallback for previews.
 pub fn view_curves(part: &Part, spec: &ViewSpec) -> Result<ViewCurves, DrawingError> {
     let spec = &ViewSpec { preview: part.preview, ..*spec };
     match part.kernel.view_curves(part.body, spec) {
-        Err(KernelError::Unsupported(_)) => {
+        Err(KernelError::Unsupported(_)) if spec.preview => {
             let mut curves = mesh_hlr::view_curves(part.kernel, part.body, spec)?;
-            curves.unproved |= spec.preview;
+            curves.unproved = true;
             Ok(curves)
         }
         other => Ok(other?),

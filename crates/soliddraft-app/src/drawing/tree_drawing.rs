@@ -156,17 +156,18 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
             let file = model.path.rsplit('/').next().unwrap_or(&model.path).to_owned();
             let sub = format!("rev {}", model.pinned.short());
             let state = s.link_state();
-            let (dot, tip) = match &state {
-                LinkState::Missing => (Dot::Error, "Not found: select for the repair".to_owned()),
-                LinkState::Newer { now } => (
+            let (dot, tip) = match (&state, s.doc.rebuild_guidance()) {
+                (LinkState::Missing, _) => (Dot::Error, "Not found: select for the repair".to_owned()),
+                (_, Some(guidance)) => (Dot::Warn, guidance.into()),
+                (LinkState::Newer { now }, _) => (
                     Dot::Warn,
                     format!("Newer version available (rev {}): Rebuild brings the views to it", now.short()),
                 ),
                 _ if s.doc.is_stale() => (Dot::Warn, "The open part moved on: Rebuild brings the views to it".into()),
                 _ if !s.is_up_to_date() => (Dot::Warn, "Some views need a rebuild".into()),
-                LinkState::Current => (Dot::Ok, format!("Up to date · {}", s.found_words())),
-                LinkState::Unverified => (Dot::None, "Not a SolidDraft document; no revision to compare".into()),
-                LinkState::Unknown => (Dot::None, "Not resolved yet".into()),
+                (LinkState::Current, _) => (Dot::Ok, format!("Up to date · {}", s.found_words())),
+                (LinkState::Unverified, _) => (Dot::None, "Not a SolidDraft document; no revision to compare".into()),
+                (LinkState::Unknown, _) => (Dot::None, "Not resolved yet".into()),
             };
             let r = row(
                 ui,
@@ -195,7 +196,9 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
                 actions.push(DrawingAction::Select(Some(DrawingSel::Model)));
             }
             r.context_menu(|ui| {
-                if ui.button("Rebuild").clicked() {
+                if let Some(guidance) = s.doc.rebuild_guidance() {
+                    ui.label(guidance);
+                } else if ui.button("Rebuild").clicked() {
                     actions.push(DrawingAction::Rebuild);
                     ui.close();
                 }
@@ -409,7 +412,9 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
                 });
                 if open && depth == 2 {
                     let reference = format!("{model} rev {rev}");
-                    let tip = if stale.contains(&id) {
+                    let tip = if v.needs_inclusion_for_redraw() {
+                        soliddraft_drawing::export::INCLUDE_FOR_REDRAW
+                    } else if stale.contains(&id) {
                         "Newer version available; this view shows the pinned revision until a Rebuild"
                     } else {
                         "The model this view shows, at the revision of the last update"

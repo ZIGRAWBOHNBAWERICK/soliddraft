@@ -110,7 +110,7 @@ pub fn update_from_model(drawing: &mut Drawing, part: &Part) -> Result<UpdateRep
             .count()
     });
     let mut failed: Vec<ViewId> = Vec::new();
-    for id in ids {
+    for &id in &ids {
         let view = drawing.view(id).expect("listed");
         if view.excluded_from_update {
             continue;
@@ -132,7 +132,6 @@ pub fn update_from_model(drawing: &mut Drawing, part: &Part) -> Result<UpdateRep
             continue;
         }
         let ctx = &contexts[&id];
-        follow_parent(drawing, id, &contexts);
         let view = drawing.view_mut(id).expect("listed");
         // Proof and quality can improve independently at the same revision.
         if view.geometry.source_digest != part.digest.as_str()
@@ -147,6 +146,9 @@ pub fn update_from_model(drawing: &mut Drawing, part: &Part) -> Result<UpdateRep
             report.views_updated += 1;
         }
         report.projections.push((id, ctx.projected.clone()));
+    }
+    for id in ids {
+        follow_parent(drawing, id, &contexts);
     }
     for sheet in &mut drawing.sheets {
         let symbols = library::template(sheet.template.as_str()).style_file().symbols.clone();
@@ -164,7 +166,7 @@ pub fn update_from_model(drawing: &mut Drawing, part: &Part) -> Result<UpdateRep
     // its values, and which items there are.
     let made_from_part = drawing.sheets.iter().position(|sheet| sheet.annotations.iter().any(|a| a.source.is_some()));
     if let Some(sheet) = made_from_part {
-        crate::pmi_items::refresh(drawing, part, &failed);
+        crate::pmi_items::refresh(drawing, part, |id| !failed.contains(&id));
         let views: Vec<ViewContext> = drawing.sheets[sheet]
             .views
             .iter()
@@ -199,7 +201,10 @@ fn view_cause(e: &DrawingError) -> String {
 /// part: a section's cutting line and a detail's centre.
 pub(crate) fn follow_parent(drawing: &mut Drawing, id: ViewId, contexts: &Contexts) {
     let Some(view) = drawing.view(id) else { return };
-    let Some(pctx) = view.geometry_parent().and_then(|p| contexts.get(&p)) else { return };
+    let Some(parent) = view.geometry_parent().and_then(|p| drawing.view(p)) else { return };
+    let Some(pctx) = contexts.get(&parent.id).filter(|ctx| ctx.projected.geometry == parent.geometry) else {
+        return;
+    };
     let xf = pctx.xf;
     let view = drawing.view_mut(id).expect("found");
     project::reproject_parent_marks(&mut view.kind, &xf);
@@ -219,18 +224,22 @@ pub fn reattach_view(drawing: &mut Drawing, part: &Part, id: ViewId, entity: Ent
 /// Remakes a view and its dependent descendants, keeping placement and accepted
 /// dimension values. Descendants excluded from updates keep their linework.
 pub fn regenerate_view(drawing: &mut Drawing, part: &Part, id: ViewId) -> Result<(), DrawingError> {
-    let ids: Vec<_> = project::dependent_views(drawing, id)
-        .into_iter()
+    let descendants = project::dependent_views(drawing, id);
+    let ids: Vec<_> = descendants
+        .iter()
+        .copied()
         .filter(|child| *child == id || !drawing.view(*child).is_some_and(|v| v.excluded_from_update))
         .collect();
     let index = PartIndex::build(part)?;
     let mut contexts = Contexts::new();
     for &id in &ids {
         project::compute_in(drawing, part, &index, id, &mut contexts)?;
-        follow_parent(drawing, id, &contexts);
         let ctx = &contexts[&id];
         let view = drawing.view_mut(id).ok_or(DrawingError::UnknownView(id))?;
         view.geometry = ctx.projected.geometry.clone();
+    }
+    for child in descendants {
+        follow_parent(drawing, child, &contexts);
     }
     for sheet in &mut drawing.sheets {
         let symbols = &library::template(sheet.template.as_str()).style_file().symbols;
@@ -239,6 +248,7 @@ pub fn regenerate_view(drawing: &mut Drawing, part: &Part, id: ViewId) -> Result
             re_resolve(a, &index, context, symbols);
         }
     }
+    crate::pmi_items::refresh(drawing, part, |view| ids.contains(&view));
     Ok(())
 }
 

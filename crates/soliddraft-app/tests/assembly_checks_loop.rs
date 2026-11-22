@@ -141,3 +141,52 @@ fn interference_clearance_and_hole_alignment_application_loops() {
         std::fs::remove_dir_all(dir).unwrap();
     }
 }
+
+#[test]
+fn p3_copies_report_proved_overlap_and_an_unresolved_sliver() {
+    let dir = std::env::temp_dir().join(format!("soliddraft-p3-interference-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut state = AppState::new(soliddraft_app::new_document());
+    let scenario: Value = serde_json::from_str(include_str!("../../../ci/scenarios/p3-rounded-boss.json")).unwrap();
+    for step in scenario["steps"].as_array().unwrap().iter().take(8) {
+        let tool = step["tool"].as_str().unwrap();
+        let (error, result) = call(&mut state, tool, step["arguments"].clone());
+        assert!(!error, "{tool}: {result}");
+    }
+    let part_file = dir.join("p3.dwprt");
+    for (tool, arguments) in [
+        ("save", json!({"path": part_file})),
+        ("make_assembly", json!({})),
+        ("assembly_save", json!({"path": dir.join("rig.dwasm")})),
+        (
+            "insert_component",
+            json!({
+                "paths": [part_file],
+                "placement": {"translation": [20, 0, 0], "rotation": [0, 0, 0, 1]}
+            }),
+        ),
+    ] {
+        let (error, result) = call(&mut state, tool, arguments);
+        assert!(!error, "{tool}: {result}");
+    }
+    let (error, result) = call(&mut state, "assembly_check_interference", json!({}));
+    assert!(!error, "{result}");
+    let pair = &result["report"]["results"][0];
+    assert_eq!(pair["outcome"], "interferes", "{pair}");
+    let overlap = &pair["overlap_mm3"];
+    let lo = overlap["lo"].as_f64().unwrap();
+    assert!(lo > 0.0 && overlap["hi"].as_f64().unwrap() > 2.0 * lo, "{pair}");
+
+    let assembly = &mut state.assembly.session.as_mut().unwrap().doc;
+    let second = assembly.assembly().components.last().unwrap().id;
+    let path = soliddraft_assembly::OccurrencePath::root().child(soliddraft_assembly::Step::component(second));
+    let sliver = soliddraft_assembly::Placement::translation(glam::DVec3::new(39.999, 0.0, 0.0));
+    assembly.move_to(&[(path, sliver)]).unwrap();
+    let (error, result) = call(&mut state, "assembly_check_interference", json!({}));
+    assert!(!error, "{result}");
+    assert_eq!(result["report"]["clear"], 0, "{result}");
+    let pair = &result["report"]["results"][0];
+    assert_eq!(pair["outcome"], "touching_or_undecided", "{pair}");
+    assert!(pair["exact_refused"].as_array().unwrap().iter().any(|r| r["query"] == "Overlap volume"), "{pair}");
+    std::fs::remove_dir_all(dir).unwrap();
+}

@@ -588,7 +588,9 @@ fn view_panel(
             if ui.checkbox(&mut excluded, "Exclude this view from updates").changed() {
                 actions.push(DrawingAction::Command(Command::SetViewExcluded { view: id, excluded }));
             }
-            if stale {
+            if v.needs_inclusion_for_redraw() {
+                hint(ui, soliddraft_drawing::export::INCLUDE_FOR_REDRAW);
+            } else if stale {
                 ui.add_space(4.0);
                 if ui.button("Rebuild").on_hover_text("Bring the views to the current part (Ctrl+B)").clicked() {
                     actions.push(DrawingAction::Rebuild);
@@ -930,7 +932,9 @@ fn sheet_panel(ui: &mut egui::Ui, s: &mut DrawingSession, actions: &mut Vec<Draw
             if ui.checkbox(&mut on, "Rebuild after every change of the open part").changed() {
                 actions.push(DrawingAction::ToggleAutomaticUpdate);
             }
-            if !s.is_up_to_date() && ui.button("Rebuild now").clicked() {
+            if let Some(guidance) = s.doc.rebuild_guidance() {
+                hint(ui, guidance);
+            } else if !s.is_up_to_date() && ui.button("Rebuild now").clicked() {
                 actions.push(DrawingAction::Rebuild);
             }
             section_gap(ui);

@@ -1253,13 +1253,14 @@ pub(crate) fn put_opened(state: &mut AppState, doc: DrawingDoc) -> String {
     state.drawing.active = true;
     reference::refresh(state);
     let opened = state.drawing.session.as_ref().expect("drawing just opened");
-    let words = match opened.link_state() {
-        LinkState::Missing => "the part was not found",
-        LinkState::Newer { .. } => "a newer version of the part is available",
-        LinkState::Current if !opened.is_up_to_date() => "the drawing needs a rebuild",
-        LinkState::Current => "up to date with the part",
-        LinkState::Unverified => "the source is not a SolidDraft document",
-        LinkState::Unknown => "the part is not resolved",
+    let words = match (opened.link_state(), opened.doc.rebuild_guidance()) {
+        (LinkState::Missing, _) => "the part was not found",
+        (_, Some(guidance)) => guidance,
+        (LinkState::Newer { .. }, _) => "a newer version of the part is available",
+        (LinkState::Current, _) if !opened.is_up_to_date() => "the drawing needs a rebuild",
+        (LinkState::Current, _) => "up to date with the part",
+        (LinkState::Unverified, _) => "the source is not a SolidDraft document",
+        (LinkState::Unknown, _) => "the part is not resolved",
     };
     format!("{title} · {views} view{} · {words}", if views == 1 { "" } else { "s" })
 }
@@ -1813,8 +1814,10 @@ fn export_sheet(state: &mut AppState, format: export::Format, path: Option<PathB
 pub struct SheetExport {
     /// Views on the sheets written.
     pub views: usize,
-    /// The part revision the written views show.
-    pub revision: ContentHash,
+    /// The part revision accepted by the drawing.
+    pub pinned_revision: ContentHash,
+    /// Distinct part revisions of the written views.
+    pub view_revisions: std::collections::BTreeSet<String>,
     /// How many written curves are exact, mesh polylines or approximate.
     pub accuracy: AccuracyCounts,
 }
@@ -1876,9 +1879,11 @@ pub(crate) fn prepare_sheets(s: &DrawingSession, all_sheets: bool) -> Result<Pre
         return Err(failures.join("\n"));
     }
     let mut views = 0;
+    let mut view_revisions = std::collections::BTreeSet::new();
     for (_, sheet) in drawing.sheets.iter().enumerate().filter(|(i, _)| writes_sheet(*i)) {
         export::check_sheet(drawing, sheet).map_err(|error| error.to_string())?;
         views += sheet.views.len();
+        view_revisions.extend(sheet.views.iter().map(|view| view.geometry.source_digest.clone()));
     }
     let count = drawing.sheets.len();
     let list_of = |i: usize| {
@@ -1898,7 +1903,7 @@ pub(crate) fn prepare_sheets(s: &DrawingSession, all_sheets: bool) -> Result<Pre
         accuracy.add(list.accuracy());
     }
     let info = export::PdfInfo { title: drawing.meta.title.clone(), author: drawing.meta.designer.clone() };
-    let report = SheetExport { views, revision: drawing.model.pinned.clone(), accuracy };
+    let report = SheetExport { views, pinned_revision: drawing.model.pinned.clone(), view_revisions, accuracy };
     Ok(PreparedSheets { lists, info, report })
 }
 
@@ -1964,6 +1969,8 @@ pub fn status(state: &AppState) -> Option<Status> {
         (refused.join(" · "), theme::error())
     } else if s.link_state() == LinkState::Missing {
         (format!("{part} not found · repair the reference"), theme::error())
+    } else if let Some(guidance) = s.doc.rebuild_guidance() {
+        (guidance.to_owned(), theme::warn())
     } else if s.doc.is_stale() {
         (format!("Newer version of {part} available · showing rev {rev} (Ctrl+B rebuilds)"), theme::warn())
     } else if !s.is_up_to_date() {

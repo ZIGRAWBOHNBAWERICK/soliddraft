@@ -14,10 +14,11 @@ mod gated;
 /// The hang guard every test shares: a wait this long means stuck, not slow.
 const HANG: std::time::Duration = std::time::Duration::from_secs(600);
 
-fn call(state: &mut AppState, name: &str, arguments: Value) {
+fn call(state: &mut AppState, name: &str, arguments: Value) -> Value {
     let caller = Caller::Mcp { client: "test".into() };
     let out = call_checked(&mut AppTools { state }, name, arguments, &caller);
     assert!(!out.is_error, "{name}: {}", out.content);
+    serde_json::from_str(&out.content).unwrap()
 }
 
 #[test]
@@ -383,6 +384,23 @@ fn a_legacy_rod_cache_refuses_export_until_explicit_rebuild() {
     }
     assert_eq!(certified_views(&kernel), 0);
     assert_eq!(reopened.drawing.session.as_ref().unwrap().doc.drawing, shown);
+
+    let view = shown.sheets[0].views[0].id;
+    let session = reopened.drawing.session.as_mut().unwrap();
+    session.doc.apply(Command::SetViewExcluded { view, excluded: true }, None).unwrap();
+    let path = dir.join("frozen.svg");
+    let out =
+        call_checked(&mut AppTools { state: &mut reopened }, "drawing_export_svg", json!({ "path": path }), &caller);
+    assert!(out.is_error && out.content.contains("Include the view in automatic update, then rebuild."));
+    assert!(!path.exists());
+    reopened
+        .drawing
+        .session
+        .as_mut()
+        .unwrap()
+        .doc
+        .apply(Command::SetViewExcluded { view, excluded: false }, None)
+        .unwrap();
     call(&mut reopened, "drawing_rebuild", json!({}));
     assert_eq!(certified_views(&kernel), 4);
     let path = dir.join("reopened.svg");
@@ -428,5 +446,26 @@ fn single_sheet_exports_check_only_the_written_views() {
         call_checked(&mut AppTools { state: &mut state }, "drawing_export_pdf", json!({ "path": pdf }), &caller);
     assert!(refused.is_error, "{}", refused.content);
     assert!(!pdf.exists());
+
+    let session = state.drawing.session.as_mut().unwrap();
+    let old = soliddraft_drawing::ContentHash::of_bytes(b"older part");
+    let pinned = session.doc.drawing.model.pinned.clone();
+    session.doc.drawing.sheets[1].views.pop();
+    let frozen = &mut session.doc.drawing.sheets[1].views[0];
+    frozen.excluded_from_update = true;
+    frozen.geometry.source_digest = old.as_str().into();
+    session.sheet = 1;
+    for (tool, extension) in [("drawing_export_svg", "svg"), ("drawing_export_dxf", "dxf")] {
+        let report = call(&mut state, tool, json!({ "path": dir.join(format!("frozen.{extension}")) }));
+        assert_eq!(report["pinned_revision"], pinned.short(), "{report}");
+        assert_eq!(report["revision"], old.as_str(), "{report}");
+        assert_eq!(report["view_revisions"], json!([old]), "{report}");
+    }
+    let report = call(&mut state, "drawing_export_pdf", json!({ "path": pdf }));
+    let mut revisions = [old, pinned];
+    revisions.sort();
+    assert_eq!(report["revision"], Value::Null, "{report}");
+    assert_eq!(report["view_revisions"], json!(revisions), "{report}");
+
     std::fs::remove_dir_all(dir).unwrap();
 }

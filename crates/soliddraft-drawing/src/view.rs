@@ -48,6 +48,10 @@ impl View {
         self.geometry.catallax && !self.geometry.unproved
     }
 
+    pub fn needs_inclusion_for_redraw(&self) -> bool {
+        self.excluded_from_update && !self.has_saved_catallax_linework()
+    }
+
     pub fn accepts_revision(&self, digest: &str) -> bool {
         self.excluded_from_update || self.geometry.source_digest == digest
     }

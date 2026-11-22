@@ -715,7 +715,13 @@ impl AppTools<'_> {
             "views": written.views,
             "method": if written.views == 0 { "none" } else { "catallax" },
             "approximate": written.accuracy.approximate > 0,
-            "revision": written.revision.short(),
+            "revision": if written.view_revisions.len() == 1 {
+                written.view_revisions.first()
+            } else {
+                None
+            },
+            "pinned_revision": written.pinned_revision.short(),
+            "view_revisions": written.view_revisions,
             "accuracy": written.accuracy,
         }))
     }

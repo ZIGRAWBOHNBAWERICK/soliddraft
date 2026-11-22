@@ -183,6 +183,15 @@ impl DrawingDoc {
         Some(project::view_label_in(&self.drawing, sheet, sheet.view(id)?))
     }
 
+    pub(super) fn rebuild_guidance(&self) -> Option<&'static str> {
+        self.drawing
+            .sheets
+            .iter()
+            .flat_map(|sheet| &sheet.views)
+            .any(View::needs_inclusion_for_redraw)
+            .then_some(soliddraft_drawing::export::INCLUDE_FOR_REDRAW)
+    }
+
     pub fn view_is_up_to_date(&self, view: &View) -> bool {
         view.has_saved_catallax_linework()
             && view.accepts_revision(self.seen_digest.as_str())

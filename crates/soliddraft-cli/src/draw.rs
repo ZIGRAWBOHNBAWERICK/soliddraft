@@ -1343,6 +1343,13 @@ mod tests {
             assert!(std::fs::metadata(dir.join(name)).unwrap().len() > 0, "{name}");
         }
         drawing.sheets.truncate(1);
+        let pdf = &paths[0];
+        let report = write_outputs(&drawing, std::slice::from_ref(pdf), "test", &[]);
+        let json = serde_json::to_value(&report).unwrap();
+        assert_eq!(json["exports"][0]["path"].as_str(), Some(pdf.as_str()));
+        assert_eq!(json["exports"][0]["accuracy"]["approximate"], 1);
+        report.finish().unwrap();
+        assert!(std::fs::read(pdf).unwrap().starts_with(b"%PDF-"));
         std::fs::create_dir(dir.join("directory.svg")).unwrap();
         for invalid in ["typo.exe", "directory.svg"] {
             let paths = ["before.svg", invalid, "existing.svg"].map(|out| dir.join(out).display().to_string());

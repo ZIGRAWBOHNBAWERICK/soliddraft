@@ -69,13 +69,20 @@ pub fn bytes(list: &DisplayList, format: Format, title: &str) -> Result<Vec<u8>,
     }
 }
 
+pub const INCLUDE_FOR_REDRAW: &str = "Include the view in automatic update, then rebuild.";
+
 /// Checks the saved views of a sheet before laying it out for export.
 pub fn check_sheet(drawing: &crate::Drawing, sheet: &crate::Sheet) -> Result<(), DrawingError> {
     for view in &sheet.views {
         let label = || crate::project::view_label_in(drawing, sheet, view);
         if !view.has_saved_catallax_linework() {
+            let guidance = if view.needs_inclusion_for_redraw() {
+                INCLUDE_FOR_REDRAW
+            } else {
+                "Redraw it once in the drawing editor before exporting."
+            };
             return Err(DrawingError::BadRequest(format!(
-                "{} has no saved Catallax line work. Redraw it once in the drawing editor before exporting. Check any crop or broken-out boundary after the redraw.",
+                "{} has no saved Catallax line work. {guidance} Check any crop or broken-out boundary after the redraw.",
                 label()
             )));
         }

@@ -107,7 +107,53 @@ fn rebuild_commits_successful_views_alongside_base_and_projected_refusals() {
         let error = export::check_sheet(&d, &d.sheets[target]).unwrap_err().to_string();
         assert!(error.contains(&failure.name), "{error}");
         assert!(error.contains("does not match the drawing's accepted revision"), "{error}");
+
+        let mut repaired = BoxKernel::new();
+        repaired.detail_strokes = true;
+        let part = box_part(&repaired, "block", Vec3::new(60.0, 30.0, 10.0));
+        run(&mut UndoStack::new(), &mut d, &part, Command::SetViewCrop { view: id, crop: None });
+        assert!(d.annotation(saved[0].id).is_none());
+        export::check_sheet(&d, &d.sheets[target]).unwrap();
     }
+}
+
+#[test]
+fn a_refused_section_keeps_its_cutting_line_on_the_rebuilt_parent() {
+    let mut k = BoxKernel::new();
+    k.detail_strokes = true;
+    let part = box_part(&k, "block", Vec3::new(40.0, 30.0, 10.0));
+    let mut d = drawing(&part);
+    let index = PartIndex::build(&part).unwrap();
+    let parent = derived::context(&d, &part, &index, FRONT).unwrap();
+    let model_line = vec![Vec3::new(20.0, 0.0, 1.0), Vec3::new(20.0, 0.0, 9.0)];
+    let line: Vec<_> = model_line.iter().map(|&p| parent.xf.point(p)).collect();
+    let mut section = d.view(FRONT).unwrap().clone();
+    section.id = d.next_view_id();
+    section.kind = ViewKind::Section {
+        parent: FRONT,
+        line: line.clone(),
+        model_line,
+        flip: false,
+        label: "A".into(),
+        hatch: None,
+    };
+    let id = section.id;
+    let saved_geometry = section.geometry.clone();
+    apply(&mut d, &Command::AddSheet { name: "Section sheet".into(), template: "iso-a3".into() }).unwrap();
+    d.sheets[1].views.push(section);
+
+    let changed = box_part(&k, "block", Vec3::new(40.0, 30.0, 30.0));
+    let report = update_from_model(&mut d, &changed).unwrap();
+    assert_eq!(report.dangling_views[0].view, id);
+    let section = d.view(id).unwrap();
+    assert_eq!(section.geometry, saved_geometry);
+    let ViewKind::Section { line: moved, .. } = &section.kind else { panic!("saved section") };
+    for (before, after) in line.iter().zip(moved) {
+        assert_eq!(after.u, before.u);
+        assert!((after.v - before.v + 10.0 * parent.xf.scale).abs() < 1e-6);
+    }
+    export::check_sheet(&d, &d.sheets[0]).unwrap();
+    assert!(layout_sheet(&d, 0).items.iter().any(|item| item.role() == Role::CuttingPlane));
 }
 
 #[test]

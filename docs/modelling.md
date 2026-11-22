@@ -365,6 +365,19 @@ A field part has two explicit outputs besides its certified STL, each computed o
 
 While a field is last, every CAD command (sketch, extrude, revolve, sweep, cut, hole, fillet, chamfer, shell, draft, patterns, mirror) and a second field are disabled with the field's reason, and their agent verbs refuse with it before reading any named input. The reason is Catallax's terminal-field policy, `lattice.cad-after-lattice`; Catallax also refuses a CAD operation that reads a field body. Return before the field to continue CAD work.
 
+## Field preview and first display
+
+What the screen draws and what an export writes come from separate routes, and the app says which one you are looking at.
+
+- Only a lattice or a gyroid draws from a sample of its distance field. The viewport labels it "unproved preview", and its tree row gives the accuracy the export will be held to. Every other feature, early preview included, draws from the boundary model: each face is drawn and can be picked.
+- A feature shows at once. Its first display is the screen's mesh and never waits for a certified one.
+- A feature row carries a mark only while it is unfinished: an amber ring, "Working", while it or an earlier feature rebuilds, and a red cross, "Refused", with Catallax's reason when it was refused. A refused field drops the "unproved preview" label. While a field waits on an edit before it, the screen keeps the field it last built and export waits.
+- A preview never stands in for an export. A mesh export of a boundary-model part runs the print route at the export accuracy, whatever the viewport quality. A field part exports only its certified field STL; STEP, IGES, 3MF and OBJ are refused before any mesh is made. When Catallax refuses the certified STL, the Print check window names the refusal, offers no Save and leaves the file as it was, though the screen still shows the preview.
+
+Two limits remain. The Lattice and Gyroid editors show nothing until OK, where other features preview as you type. A field whose preview needs more sample cells than the preview limit, such as thin beams with a coarse minimum detail, is refused at once with `field.print-budget`, and the part keeps its earlier body.
+
+`crates/soliddraft-app/tests/field_preview_acceptance.rs` holds these rules in the desktop app, with the route of every mesh request logged. `ci/browser-field-preview.mjs` holds them in the browser build.
+
 ## Named values
 
 The `set_value` tool creates or changes a named expression. `drive` binds a sketch

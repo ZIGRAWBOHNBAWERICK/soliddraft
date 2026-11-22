@@ -1,0 +1,4 @@
+sketch {"plane":"top","offset":20,"shapes":[{"shape":"rectangle","center":[0,0,20],"width":6,"height":6}]}
+extrude {"sketch":"Sketch1","depth":10,"flip":false}
+lattice {"cell":"cubic","cell_size":100,"radius":1,"accuracy":0.5,"min_detail":0.1}
+save {"path":"lattice.dwprt"}

@@ -1,0 +1,283 @@
+{
+  "format": "soliddraft-scenario/1",
+  "name": "hole-thread",
+  "max_work": 20000000,
+  "steps": [
+    {
+      "tool": "sketch",
+      "arguments": {
+        "plane": "top",
+        "shapes": [
+          {
+            "shape": "rectangle",
+            "center": [
+              30,
+              20,
+              0
+            ],
+            "width": 60,
+            "height": 40
+          }
+        ]
+      }
+    },
+    {
+      "tool": "extrude",
+      "arguments": {
+        "sketch": "Sketch1",
+        "depth": 10,
+        "flip": false
+      },
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 24000,
+          "tolerance": 0.005
+        }
+      ]
+    },
+    {
+      "tool": "hole",
+      "arguments": {
+        "face": "Boss-Extrude1 \u00b7 End cap",
+        "points": [
+          [
+            15,
+            20,
+            10
+          ],
+          [
+            45,
+            20,
+            10
+          ]
+        ],
+        "thread": {
+          "size": 6
+        }
+      },
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 23607.300918,
+          "tolerance": 0.005
+        }
+      ],
+      "label": "tapped"
+    },
+    {
+      "tool": "pmi_list",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/items/0/callout",
+          "equals": "2\u00d7 M6x1-6H THRU"
+        },
+        {
+          "pointer": "/items/0/stated_by",
+          "equals": "Hole1"
+        },
+        {
+          "pointer": "/items/0/measured_mm/0",
+          "approx": 5,
+          "tolerance": 1e-06
+        }
+      ]
+    },
+    {
+      "tool": "edit_hole",
+      "arguments": {
+        "feature": "Hole1",
+        "thread": {
+          "size": 8,
+          "pitch": 1,
+          "length": 8
+        }
+      },
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 23230.309799,
+          "tolerance": 0.005
+        }
+      ],
+      "label": "fine"
+    },
+    {
+      "tool": "pmi_list",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/items/0/callout",
+          "equals": "2\u00d7 M8x1-6H DEEP 8"
+        }
+      ]
+    },
+    {
+      "tool": "undo",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 23607.300918,
+          "tolerance": 0.005
+        },
+        {
+          "pointer": "/rebuild/operations",
+          "equals": 0
+        }
+      ],
+      "same_geometry_as_step": 3
+    },
+    {
+      "tool": "redo",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 23230.309799,
+          "tolerance": 0.005
+        },
+        {
+          "pointer": "/rebuild/operations",
+          "equals": 0
+        }
+      ],
+      "same_geometry_as_step": 5
+    },
+    {
+      "tool": "edit_hole",
+      "arguments": {
+        "feature": "Hole1",
+        "diameter": 9
+      },
+      "refused": "A M8x1-6H thread is cut in a hole from \u00d86.917 to under \u00d88; this hole is \u00d89.",
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 23230.309799,
+          "tolerance": 0.005
+        }
+      ],
+      "same_geometry_as_step": 5
+    },
+    {
+      "tool": "sketch",
+      "arguments": {
+        "plane": "top",
+        "offset": 7,
+        "shapes": [
+          {
+            "shape": "rectangle",
+            "center": [
+              30,
+              20,
+              7
+            ],
+            "width": 80,
+            "height": 60
+          }
+        ]
+      }
+    },
+    {
+      "tool": "cut",
+      "arguments": {
+        "sketch": "Sketch2",
+        "depth": 10,
+        "through_all": false,
+        "flip": true
+      },
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 16261.216862,
+          "tolerance": 0.005
+        }
+      ],
+      "label": "milled"
+    },
+    {
+      "tool": "pmi_list",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/items/0/callout",
+          "equals": "2\u00d7 M8x1-6H DEEP 8"
+        },
+        {
+          "pointer": "/items/0/problem",
+          "absent": true
+        }
+      ]
+    },
+    {
+      "tool": "save",
+      "arguments": {
+        "path": "{bundle}/hole-thread.dwprt"
+      },
+      "files": [
+        "{bundle}/hole-thread.dwprt"
+      ]
+    },
+    {
+      "tool": "open",
+      "arguments": {
+        "path": "{bundle}/hole-thread.dwprt"
+      },
+      "fresh_process": true,
+      "same_geometry_as_step": 11,
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 16261.216862,
+          "tolerance": 0.005
+        }
+      ],
+      "checked_step_export": "{bundle}/hole-thread.dwprt",
+      "checked_step_max_work": 20000000,
+      "step_oracle": {
+        "surfaces": {
+          "plane": 6,
+          "cylinder": 2
+        },
+        "volume": 16261.216862,
+        "floor": 1e-06,
+        "inside": [
+          [
+            5,
+            5,
+            3.5
+          ]
+        ],
+        "outside": [
+          [
+            15,
+            20,
+            3.5
+          ],
+          [
+            45,
+            20,
+            3.5
+          ],
+          [
+            30,
+            20,
+            8.5
+          ]
+        ]
+      }
+    },
+    {
+      "tool": "pmi_list",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/items/0/callout",
+          "equals": "2\u00d7 M8x1-6H DEEP 8"
+        }
+      ]
+    }
+  ]
+}

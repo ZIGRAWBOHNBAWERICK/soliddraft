@@ -10,6 +10,13 @@
 // fourteen items must be on the same faces. Last, Inspect > Drawing and files must hand
 // over one download holding the STEP file, the PDF and the DXF.
 //
+// Before the drawing, the visitor drills a tapped hole in the reopened part: Hole from
+// the command palette, a click on the plate's top, Thread set to Tapped, OK. The panel
+// must list the thread as a fifteenth item, `M8x1.25-6H THRU` on the new wall, the
+// viewport must draw the thread's marks (the read-only `shown_threads` export), and both
+// must come back after a second save and a fresh reopen. The face is found on screen
+// through `part_screen_point`, and the form's controls through `shown_controls`.
+//
 // The app draws into one canvas and takes only trusted input: keys and clicks sent as the
 // browser's own, through the DevTools protocol. The canvas has no text to read, so the
 // check reads the panel's rows through the read-only `shown_manufacturing_information`
@@ -71,6 +78,10 @@ const EXPECTED = [
   ['Perpendicularity of B', 'Perpendicularity 0.1 A', [[B]]],
 ];
 const NOTES = { general_tolerance: 'ISO 2768-m', material: '6061-T6', notes: ['Break sharp edges'] };
+// The tapped hole: through the 5 mm plate at x 50, y 22, between two mounting holes. The
+// form's Tapped takes the coarse thread whose tap drill is nearest the drawn Ø6.6: M8.
+const TAPPED_AT = [50, 22, 5];
+const THREAD = ['Hole1 thread', 'M8x1.25-6H THRU', [[C(50, 22, 2.5)]]];
 
 // `<name> @ <Surface> (x, y, z)` as the panel export writes a face.
 function place(face) {
@@ -82,6 +93,18 @@ function place(face) {
 // The display mesh gives centroids to a few hundredths of a millimetre.
 function at(have, want) {
   return have[0] === want[0] && [1, 2, 3].every(i => Math.abs(have[i] - want[i]) < 0.05);
+}
+
+function checkThread(shown, when) {
+  check(shown.items.length === EXPECTED.length + 1, `${when}: ${shown.items.length} items, not ${EXPECTED.length + 1}: ${JSON.stringify(shown.items.map(i => i.name))}`);
+  checkItems({ ...shown, items: shown.items.slice(0, EXPECTED.length) }, when);
+  const [name, callout, features] = THREAD;
+  const item = shown.items[EXPECTED.length];
+  check(item.name === name && item.callout === callout, `${when}: the last item is ${item.name} "${item.callout}", not ${name} "${callout}"`);
+  check(!item.problem, `${when}: ${name} does not apply: ${item.problem}`);
+  const have = item.faces.map(feature => feature.map(place));
+  check(have.length === features.length && features.every((feature, f) => feature.every(want => have[f].some(face => at(face, want)))),
+    `${when}: ${name} is on ${JSON.stringify(item.faces)}, not on ${JSON.stringify(features)}`);
 }
 
 function checkItems(shown, when) {
@@ -283,6 +306,26 @@ class Browser {
         await v.shot(`panel-${label}`);
         throw new Error(`${label}: the panel lists ${shown ? shown.items.length : 'no'} items, not ${count}`);
       },
+      // The page point of a control the last frames drew, by its name in `shown_controls`.
+      async control(name) {
+        for (let t = 0; t < 100; t++) {
+          const shown = JSON.parse(await v.eval(`window.wasmBindings.shown_controls()`) || '{}');
+          if (shown[name]) return [shown[name].x, shown[name].y];
+          await v.settle(100);
+        }
+        await v.shot(`no-control-${name.replace(/\W+/g, '-')}`);
+        throw new Error(`no control named ${name} was drawn`);
+      },
+      // How many thread mark segments the viewport draws, once it draws some.
+      async threads(label) {
+        for (let t = 0; t < 300; t++) {
+          const drawn = await v.eval(`window.wasmBindings.shown_threads()`);
+          if (drawn > 0) return drawn;
+          await sleep(200);
+        }
+        await v.shot(`no-threads-${label}`);
+        throw new Error(`${label}: the viewport draws no thread marks`);
+      },
       async shot(label) {
         const { data } = await call('Page.captureScreenshot', { format: 'png' });
         fs.writeFileSync(path.join(out, `${label}.png`), Buffer.from(data, 'base64'));
@@ -342,6 +385,40 @@ async function main() {
     `the reopened part lists ${JSON.stringify(reopened)}, not ${JSON.stringify(imported)}`);
   await v.shot('3-reopened-with-its-items');
 
+  // A tapped hole on the plate's top, made in the Hole form.
+  step('Hole, click the plate top, Tapped, OK');
+  await v.command('Hole');
+  await v.settle(800);
+  const face = await v.eval(`window.wasmBindings.part_screen_point(${TAPPED_AT.join(', ')})`);
+  check(face, 'the plate top is on screen');
+  await v.click(face);
+  await v.click(await v.control('Hole thread'));
+  await v.click(await v.control('Hole thread: Tapped'));
+  await v.shot('3a-tapped-hole-form');
+  await v.click(await v.control('Form OK'));
+  await v.ready('after the tapped hole');
+  const tapped = await v.panel('after the tapped hole', EXPECTED.length + 1);
+  checkThread(tapped, 'after the tapped hole');
+  const marks = await v.threads('after the tapped hole');
+  await v.shot('3b-tapped-hole');
+
+  // Saved again and reopened afresh, the thread is still stated and still drawn.
+  step('save the tapped part');
+  const tappedFile = await v.download('save the tapped part', () => v.key('s', 'KeyS', 83, 2, 's'));
+  step('load the site again');
+  await v.load();
+  step('open the tapped part');
+  await v.choose(tappedFile, () => v.click(OPEN));
+  await v.ready('after reopening the tapped part');
+  await v.command('Manufacturing information');
+  const tappedAgain = await v.panel('after reopening the tapped part', EXPECTED.length + 1);
+  checkThread(tappedAgain, 'after reopening the tapped part');
+  check(JSON.stringify(tappedAgain) === JSON.stringify(tapped),
+    `the reopened tapped part lists ${JSON.stringify(tappedAgain)}, not ${JSON.stringify(tapped)}`);
+  const marksAgain = await v.threads('after reopening the tapped part');
+  check(marksAgain === marks, `the reopened part draws ${marksAgain} thread mark segments, not ${marks}`);
+  await v.shot('3c-tapped-reopened');
+
   // One action: the STEP file and a drawing of it as PDF and DXF, in one download.
   step('Drawing and files');
   const pack = await v.download('drawing and files', () => v.command('Drawing and files'));
@@ -354,8 +431,8 @@ async function main() {
   await v.stopped('after Drawing and files');
   await v.shot('4-drawing');
 
-  fs.writeFileSync(path.join(out, 'manufacturing-information.json'), JSON.stringify({ imported, reopened, saved: path.basename(saved), download: path.basename(pack), bytes: bytes.length }, null, 1));
-  console.log(`Manufacturing information in the browser: ${imported.items.length} items read from the uploaded STEP file, the same ${reopened.items.length} on the same faces after save and a fresh reopen, and ${path.basename(pack)} (${bytes.length} bytes) with the STEP file, the PDF and the DXF.`);
+  fs.writeFileSync(path.join(out, 'manufacturing-information.json'), JSON.stringify({ imported, reopened, tapped, tappedAgain, marks, saved: path.basename(saved), download: path.basename(pack), bytes: bytes.length }, null, 1));
+  console.log(`Manufacturing information in the browser: ${imported.items.length} items read from the uploaded STEP file, the same ${reopened.items.length} on the same faces after save and a fresh reopen, a tapped hole stated as ${THREAD[1]} and drawn with ${marks} mark segments before and after a second save and reopen, and ${path.basename(pack)} (${bytes.length} bytes) with the STEP file, the PDF and the DXF.`);
 }
 
 try {

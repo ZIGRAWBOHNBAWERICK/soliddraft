@@ -56,6 +56,12 @@ edits the run, undoes and redoes, refuses an oblique join, a zero-length line an
 reversal with no turn axis without changing the body, measures a face by name, saves,
 reopens in a fresh process and exports checked STEP.
 
+`hole-thread.json` drills two holes tapped M6 through a plate and lists the thread item
+the hole states, changes the thread to M8x1 for 8 mm, undoes and redoes, refuses a drill
+the thread does not fit without changing the part, mills the plate's top with a later
+cut, saves, reopens in a fresh process and exports checked STEP. The thread is cosmetic:
+the volumes are the tap drills'.
+
 `spline-sweep.json` sweeps a polygon along a spatial cubic spline with fixed
 orientation. It edits the controls, undoes and redoes, refuses a returning path
 without changing the part, then saves and reopens in a fresh process. The spline

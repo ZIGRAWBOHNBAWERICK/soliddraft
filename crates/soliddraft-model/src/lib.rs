@@ -41,6 +41,7 @@ pub mod params;
 pub mod pmi;
 pub mod rebuild;
 pub mod reference;
+pub mod thread;
 pub mod tracked;
 mod value_expr;
 pub mod values;

@@ -1080,6 +1080,9 @@ impl Document {
         if h.points.is_empty() {
             return Built::failed(current, "the hole has no points");
         }
+        if let Some(problem) = h.thread_problem() {
+            return Built::failed(current, problem);
+        }
         let plane = match self.plane_of(&PlaneRef::Face { face: h.face.clone() }, body) {
             Ok(p) => p,
             Err(r) => return Built::pass(FeatureStatus::RepairNeeded(vec![*r]), current),

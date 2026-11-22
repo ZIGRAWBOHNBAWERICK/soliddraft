@@ -18,6 +18,7 @@ fn add_params() -> Vec<(&'static str, Value)> {
         ("letter", optional(string("A datum's letter; the next free one when left out"))),
         ("tolerance", optional(string("A dimension's tolerance: H7, ±0.1, +0.1/0, +0.2/-0.1 or basic"))),
         ("through", optional(boolean("true for the diameter of a hole that goes through the part"))),
+        ("thread", optional(string("A threaded hole's designation, such as M6x1-6H; a diameter only"))),
         ("from_faces", optional(faces())),
         ("from_at", optional(string("Where a distance starts: feature, middle, inner or outer"))),
         ("to_faces", optional(faces())),

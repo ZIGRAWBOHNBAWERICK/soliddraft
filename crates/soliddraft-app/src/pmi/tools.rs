@@ -148,6 +148,7 @@ fn item(doc: &Document, input: &Value) -> Result<PmiItem<FaceRef>, String> {
             features: features(doc, input)?,
             tolerance: tolerance(input)?,
             through: input["through"].as_bool().unwrap_or(false),
+            thread: text(input, "thread").map(|t| t.trim().to_owned()).filter(|t| !t.is_empty()),
             nominal: None,
         },
         "distance" => PmiKind::Location {
@@ -243,6 +244,10 @@ pub(crate) fn rows(doc: &Document) -> Value {
             }
             if let Some(problem) = &row.problem {
                 value["problem"] = json!(problem);
+            }
+            if let Some(feature) = row.feature {
+                // A threaded hole states the item; it changes with the hole.
+                value["stated_by"] = json!(doc.feature(u64::from(feature.0)).map(|f| f.name.clone()));
             }
             value
         })

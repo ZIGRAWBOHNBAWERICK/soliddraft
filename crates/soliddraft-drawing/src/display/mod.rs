@@ -1080,9 +1080,9 @@ fn annotation_items(sheet: &Sheet, a: &Annotation, ctx: &Context<'_>, list: &mut
                 [a, b, c, d] => crate::measure::centreline([*a, *b, *c, *d]),
                 _ => None,
             };
-            if let Some([a, b]) = ends {
+            if let Some([start, end]) = ends {
                 let role = if matches!(a.state, AnnotationState::Dangling { .. }) { role } else { Role::Centre };
-                push(items, line(a, b), Some(CENTRE_DASH.to_vec()), role);
+                push(items, line(start, end), Some(CENTRE_DASH.to_vec()), role);
             }
         }
         AnnotationKind::Weld { size } => {

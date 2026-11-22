@@ -1787,7 +1787,7 @@ fn export_sheet(state: &mut AppState, format: export::Format, path: Option<PathB
     let written = write_sheet(s, PartContext::new(&state.doc).as_ref(), format, &path);
     match written {
         Ok(w) => {
-            let redrawn = match w.redrawn {
+            let redrawn = match w.views {
                 0 => String::new(),
                 n => format!(" · {n} view{} drawn again for export", if n == 1 { "" } else { "s" }),
             };
@@ -1812,8 +1812,6 @@ fn export_sheet(state: &mut AppState, format: export::Format, path: Option<PathB
 pub struct SheetExport {
     /// Views on the sheets written.
     pub views: usize,
-    /// Views drawn again for export.
-    pub redrawn: usize,
     /// The part revision the written views show.
     pub revision: ContentHash,
     /// How many written curves are exact, mesh polylines or approximate.
@@ -1821,8 +1819,7 @@ pub struct SheetExport {
 }
 
 /// Writes the drawing as `format` at `path`: the current sheet, or every sheet as a
-/// page of a PDF. Unproved or coarse screen views are drawn again from the kernel's
-/// exact drawing queries on `part`, on a copy.
+/// page of a PDF. The written views are redrawn from the kernel on a copy.
 pub(crate) fn write_sheet(
     s: &mut DrawingSession,
     part: Option<&PartContext>,
@@ -1871,23 +1868,23 @@ pub(crate) fn sheet_bytes(
         };
         display::layout(&drawing, i, &ctx)
     };
+    let lists: Vec<_> = (0..count).filter(|&i| writes_sheet(i)).map(list_of).collect();
+    let mut accuracy = AccuracyCounts::default();
+    for list in &lists {
+        accuracy.add(list.accuracy());
+    }
     let bytes = match format {
         export::Format::Pdf => {
-            let lists: Vec<_> = (0..count).map(list_of).collect();
             let info = export::PdfInfo {
                 title: s.doc.drawing.meta.title.clone(),
                 author: s.doc.drawing.meta.designer.clone(),
             };
             export::pdf(&lists, &info)
         }
-        _ => export::bytes(&list_of(s.sheet), format, &s.doc.drawing.meta.title),
+        _ => export::bytes(&lists[0], format, &s.doc.drawing.meta.title),
     };
     let bytes = bytes.map_err(|e| e.to_string())?;
-    let mut accuracy = AccuracyCounts::default();
-    for id in &ids {
-        accuracy.add(drawing.view(*id).expect("redrawn view").geometry.accuracy());
-    }
-    Ok((bytes, SheetExport { views: ids.len(), redrawn: ids.len(), revision: drawing.model.pinned, accuracy }))
+    Ok((bytes, SheetExport { views: ids.len(), revision: drawing.model.pinned, accuracy }))
 }
 
 fn save_drawing(state: &mut AppState, path: Option<PathBuf>) {

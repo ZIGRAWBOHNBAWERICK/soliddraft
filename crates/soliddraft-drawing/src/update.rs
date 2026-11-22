@@ -16,7 +16,7 @@ use crate::entity::{EntityKind, EntityRef};
 use crate::ids::{AnnotationId, ViewId};
 use crate::library::{self, Symbols};
 use crate::measure::{AnchorGeometry, anchor_point, extension_direction, measure, value_text};
-use crate::part::{Entity, Part, PartIndex, Resolution, feature_name, round};
+use crate::part::{Entity, Part, PartIndex, Resolution, feature_name};
 use crate::project::{self, Contexts, Projected, ViewContext};
 use crate::view::ViewKind;
 use crate::{ContentHash, Drawing, DrawingError};
@@ -201,22 +201,7 @@ pub(crate) fn follow_parent(drawing: &mut Drawing, id: ViewId, contexts: &Contex
     let Some(pctx) = view.parent().and_then(|p| contexts.get(&p)) else { return };
     let xf = pctx.xf;
     let view = drawing.view_mut(id).expect("found");
-    match &mut view.kind {
-        ViewKind::Section { line, model_line, .. } if model_line.len() == line.len() => {
-            for (p, m) in line.iter_mut().zip(model_line.iter()) {
-                *p = xf.point(*m);
-            }
-        }
-        ViewKind::Detail { center, profile, model_center: Some(m), .. } => {
-            let to = xf.point(*m);
-            let (du, dv) = (to.u - center.u, to.v - center.v);
-            *center = to;
-            for p in profile {
-                *p = Point2::new(round(p.u + du), round(p.v + dv));
-            }
-        }
-        _ => {}
-    }
+    project::reproject_parent_marks(&mut view.kind, &xf);
 }
 
 /// Points an auxiliary view at another edge, the repair for a lost reference edge, and
@@ -237,7 +222,7 @@ pub fn regenerate_view(drawing: &mut Drawing, part: &Part, id: ViewId) -> Result
         .into_iter()
         .filter(|child| *child == id || !drawing.view(*child).is_some_and(|v| v.excluded_from_update))
         .collect();
-    regenerate_views(drawing, part, &ids)
+    regenerate_views(drawing, part, &ids, false)
 }
 
 /// Draws the selected views for export at their pinned revision.
@@ -245,10 +230,10 @@ pub fn redraw_for_export(drawing: &mut Drawing, part: &Part, ids: &[ViewId]) -> 
     if ids.iter().any(|&id| drawing.view(id).is_some_and(|v| v.geometry.source_digest != part.digest.as_str())) {
         return Err(DrawingError::Unproved);
     }
-    regenerate_views(drawing, part, ids)
+    regenerate_views(drawing, part, ids, true)
 }
 
-fn regenerate_views(drawing: &mut Drawing, part: &Part, ids: &[ViewId]) -> Result<(), DrawingError> {
+fn regenerate_views(drawing: &mut Drawing, part: &Part, ids: &[ViewId], for_export: bool) -> Result<(), DrawingError> {
     let index = PartIndex::build(part)?;
     let mut contexts = Contexts::new();
     for &id in ids {
@@ -256,6 +241,16 @@ fn regenerate_views(drawing: &mut Drawing, part: &Part, ids: &[ViewId]) -> Resul
         follow_parent(drawing, id, &contexts);
         let geometry = contexts[&id].projected.geometry.clone();
         drawing.view_mut(id).ok_or(DrawingError::UnknownView(id))?.geometry = geometry;
+    }
+    if for_export {
+        for view in drawing.sheets.iter_mut().flat_map(|sheet| &mut sheet.views) {
+            if let Some(parent) = view.parent()
+                && ids.contains(&parent)
+                && !ids.contains(&view.id)
+            {
+                project::reproject_parent_marks(&mut view.kind, &contexts[&parent].xf);
+            }
+        }
     }
     for sheet in &mut drawing.sheets {
         let symbols = &library::template(sheet.template.as_str()).style_file().symbols;

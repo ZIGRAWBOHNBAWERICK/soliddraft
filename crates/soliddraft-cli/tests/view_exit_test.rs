@@ -142,3 +142,20 @@ fn catallax_plane_section_writes_hatched_svg_with_mesh_flag() {
     assert!(svg.contains("hatch"));
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn exact_view_rejects_explicit_mesh_tolerance() {
+    let recipe = recipes_dir().join("bracket.json");
+    for trailing in [&[][..], &["--section", "70,45,0"][..]] {
+        let out = Command::new(env!("CARGO_BIN_EXE_soliddraft"))
+            .arg("view")
+            .arg(&recipe)
+            .args(["--tolerance", "0.0001"])
+            .args(trailing)
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(2));
+        assert!(String::from_utf8_lossy(&out.stderr).contains("--tolerance applies to mesh preview only"));
+        assert!(out.stdout.is_empty());
+    }
+}

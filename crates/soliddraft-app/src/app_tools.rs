@@ -470,11 +470,13 @@ impl AppTools<'_> {
         let requirements = session.requirements.clone();
         self.install_drawing(session);
         let (pdf, dxf) = (step.with_extension("pdf"), step.with_extension("dxf"));
+        let mut accuracy = serde_json::Map::new();
         {
             let part = PartContext::new(&self.state.doc);
             let s = self.state.drawing.session.as_ref().ok_or_else(|| NO_DRAWING.to_owned())?;
             for (format, path) in [(SheetFormat::Pdf, &pdf), (SheetFormat::Dxf, &dxf)] {
-                let (bytes, _) = drawing::sheet_bytes(s, part.as_ref(), format)?;
+                let (bytes, report) = drawing::sheet_bytes(s, part.as_ref(), format)?;
+                accuracy.insert(format.extension().into(), json!(report.accuracy));
                 files.push((path.clone(), bytes));
             }
         }
@@ -496,6 +498,7 @@ impl AppTools<'_> {
             "manufacturing_information": exported.pmi,
             "drawing": {
                 "views": drawing.sheets[sheet].views.len(),
+                "accuracy": accuracy,
                 "items": requirements.placed,
                 "shown": shown,
                 "not_shown": requirements.unplaced,
@@ -721,7 +724,6 @@ impl AppTools<'_> {
             "exported": path,
             "views": written.views,
             "redrawn_from_certified_mesh": 0,
-            "redrawn": written.redrawn,
             "method": if written.views == 0 { "none" } else { "catallax" },
             "approximate": written.accuracy.approximate > 0,
             "revision": written.revision.short(),

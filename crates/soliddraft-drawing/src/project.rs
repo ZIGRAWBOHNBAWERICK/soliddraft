@@ -144,6 +144,25 @@ pub fn compute_view(
     compute_view_at(drawing, part, index, view, sheet, memo, 0)
 }
 
+pub(crate) fn reproject_parent_marks(kind: &mut ViewKind, xf: &ViewTransform) {
+    match kind {
+        ViewKind::Section { line, model_line, .. } if model_line.len() == line.len() => {
+            for (p, m) in line.iter_mut().zip(model_line.iter()) {
+                *p = xf.point(*m);
+            }
+        }
+        ViewKind::Detail { center, profile, model_center: Some(m), .. } => {
+            let to = xf.point(*m);
+            let (du, dv) = (to.u - center.u, to.v - center.v);
+            *center = to;
+            for p in profile {
+                *p = Point2::new(round(p.u + du), round(p.v + dv));
+            }
+        }
+        _ => {}
+    }
+}
+
 fn compute_view_at(
     drawing: &Drawing,
     part: &Part,
@@ -165,7 +184,11 @@ fn compute_view_at(
         memo.insert(parent, ctx);
     }
     let scale = scale_in(drawing, sheet, view);
-    let mut ctx = match &view.kind {
+    let mut kind = view.kind.clone();
+    if let Some(parent) = view.parent() {
+        reproject_parent_marks(&mut kind, &memo[&parent].xf);
+    }
+    let mut ctx = match &kind {
         ViewKind::Base { .. } | ViewKind::Projected { .. } => {
             let spec = spec_in(drawing, sheet, view).ok_or(DrawingError::BadView(view.id))?;
             let curves = view_curves(part, &spec)?;
@@ -637,9 +660,9 @@ fn scale_of<'a>(find: &FindScale<'a>, sheet_scale: f64, view: &View, depth: u8) 
 pub fn view_curves(part: &Part, spec: &ViewSpec) -> Result<ViewCurves, DrawingError> {
     let spec = &ViewSpec { preview: part.preview, ..*spec };
     match part.kernel.view_curves(part.body, spec) {
-        Err(KernelError::Unsupported(_)) if spec.preview => {
+        Err(KernelError::Unsupported(_)) => {
             let mut curves = mesh_hlr::view_curves(part.kernel, part.body, spec)?;
-            curves.unproved = true;
+            curves.unproved |= spec.preview;
             Ok(curves)
         }
         other => Ok(other?),

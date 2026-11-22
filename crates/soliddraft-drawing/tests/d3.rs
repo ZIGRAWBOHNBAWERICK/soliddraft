@@ -519,3 +519,73 @@ fn the_dxf_keeps_dimensions_and_hatches_as_such() {
     );
     assert!(back.blocks().any(|b| b.name == ordinate.dimension_base.block_name));
 }
+
+#[test]
+fn export_reprojects_stale_detail_windows_and_cross_sheet_marks() {
+    use kurbo::Shape;
+    use soliddraft_drawing::display::Owner;
+
+    let k = BoxKernel::new();
+    let part = box_part(&k, "block", Vec3::new(40.0, 30.0, 10.0));
+    let mut d = drawing(&part);
+    let mut stack = UndoStack::new();
+    run(&mut stack, &mut d, &part, Command::AddSheet { name: "Detail sheet".into(), template: "iso-a3".into() });
+    let id = corner_detail(&mut d, &part, &mut stack, FRONT, 1);
+    let index = PartIndex::build(&part).unwrap();
+    let corner = derived::context(&d, &part, &index, FRONT).unwrap().xf.point(Vec3::new(40.0, 0.0, 10.0));
+    let parent = d.view(FRONT).unwrap().position;
+
+    for polygon in [false, true] {
+        let mut stale = d.clone();
+        let child = stale.view_mut(id).unwrap();
+        let ViewKind::Detail { center, profile, .. } = &mut child.kind else { panic!("detail view") };
+        center.u -= 30.0;
+        if polygon {
+            *profile = vec![
+                Point2::new(center.u - 5.0, center.v - 5.0),
+                Point2::new(center.u + 5.0, center.v - 5.0),
+                Point2::new(center.u + 5.0, center.v + 5.0),
+                Point2::new(center.u - 5.0, center.v + 5.0),
+            ];
+        }
+        let child_geometry = child.geometry.clone();
+        let mut active_sheet = stale.clone();
+        soliddraft_drawing::redraw_for_export(&mut active_sheet, &part, &[FRONT]).unwrap();
+        assert_eq!(active_sheet.view(id).unwrap().geometry, child_geometry);
+        let list = layout_sheet(&active_sheet, 0);
+        let marker = list
+            .printable()
+            .find_map(|item| match item {
+                Item::Path(path) if path.role == Role::Boundary && path.owner == Owner::View(id) => Some(path),
+                _ => None,
+            })
+            .unwrap();
+        let center = marker.path.bounding_box().center();
+        assert!((center.x - parent.u - corner.u).abs() < 1e-6);
+        assert!((center.y - parent.v - corner.v).abs() < 1e-6);
+
+        soliddraft_drawing::redraw_for_export(&mut stale, &part, &[id]).unwrap();
+        let geometry = &stale.view(id).unwrap().geometry;
+        assert!(!geometry.curves.is_empty(), "the known box corner lies in the detail window");
+        let outline = geometry.outline.as_ref().unwrap().bounds();
+        for (actual, expected) in outline.into_iter().zip([-10.0, -10.0, 10.0, 10.0]) {
+            assert!((actual - expected).abs() < 1e-6, "{outline:?}");
+        }
+    }
+}
+
+#[test]
+fn export_accuracy_counts_printed_paths_only() {
+    use soliddraft_drawing::Accuracy;
+
+    let k = BoxKernel::new();
+    let part = box_part(&k, "block", Vec3::new(40.0, 30.0, 10.0));
+    let mut drawing = drawing(&part);
+    let view = drawing.view_mut(FRONT).unwrap();
+    view.geometry.curves.iter_mut().find(|curve| !curve.visible).unwrap().accuracy = Accuracy::Approximate;
+    assert_eq!(layout_sheet(&drawing, 0).accuracy().approximate, 1);
+    drawing.view_mut(FRONT).unwrap().display.hidden = HiddenLines::Removed;
+    let layout = layout_sheet(&drawing, 0);
+    assert_eq!(layout.accuracy().approximate, 0);
+    assert!(layout.accuracy().exact + layout.accuracy().polygon > 0);
+}

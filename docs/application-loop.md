@@ -490,8 +490,8 @@ recorded wait. The drawing exports (`drawing_export_svg`,
 `drawing_export_pdf`, `drawing_export_dxf`) are the `output` class: their wait is the
 caller's wait for the certified file and is recorded in the step's timing with no
 budget, as the CLI export and drawing checks are; an output listed as a known gap is a
-warning to remove the listing. Each export reports how many views it drew again from the certified
-mesh, and a view that is a preview of another revision refuses to export.
+warning to remove the listing. Each export reports how many views it wrote and the accuracy of the printed curves.
+Export redraws each written view using Catallax queries and requires the matching model revision.
 
 The timing reference was calibrated from the
 [current-main baseline run](https://github.com/BohnBawerick/soliddraft/actions/runs/40229375814)

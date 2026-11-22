@@ -27,7 +27,7 @@ comes from.
   --up         which way is up on the sheet (default z, or y for top and bottom)
   --seams      show seams
   --smooth     show edges between tangent faces
-  --tolerance  curve accuracy in mm (default: the kernel's)
+  --tolerance  mesh preview only (unavailable in this command)
   --mesh       accepted for compatibility
   --section    cut the body by the plane through this point that faces the eye,
                remove the material in front of it and hatch the cut faces
@@ -77,7 +77,7 @@ fn vector(s: &str) -> Option<Vec3> {
 fn parse(args: &[String]) -> Result<Options, String> {
     let mut file = None;
     let mut dirs = "front".to_string();
-    let (mut up, mut seams, mut smooth, mut tolerance) = (None, false, false, 0.0);
+    let (mut up, mut seams, mut smooth) = (None, false, false);
     let mut o =
         Options { file: String::new(), views: Vec::new(), svg: None, json: false, curves: false, section: None };
     let mut it = args.iter();
@@ -88,9 +88,7 @@ fn parse(args: &[String]) -> Result<Options, String> {
             "--up" => up = Some(vector(&value("--up")?).ok_or("--up needs x,y,z")?),
             "--seams" => seams = true,
             "--smooth" => smooth = true,
-            "--tolerance" => {
-                tolerance = value("--tolerance")?.parse().map_err(|_| "--tolerance needs a number of millimetres")?
-            }
+            "--tolerance" => return Err("--tolerance applies to mesh preview only".into()),
             "--mesh" => {}
             "--section" => o.section = Some(vector(&value("--section")?).ok_or("--section needs x,y,z")?),
             "--svg" => o.svg = Some(value("--svg")?),
@@ -118,7 +116,6 @@ fn parse(args: &[String]) -> Result<Options, String> {
         }
         spec.seams = seams;
         spec.smooth_edges = smooth;
-        spec.tolerance = tolerance;
         if spec.frame().is_none() {
             return Err(format!("view {name}: the direction is parallel to up"));
         }

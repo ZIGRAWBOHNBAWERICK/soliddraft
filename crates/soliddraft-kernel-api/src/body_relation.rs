@@ -53,6 +53,9 @@ pub struct BodyDistance {
     pub zero: bool,
     /// Whether the requested clearance is exceeded. Absent when not requested or undecided.
     pub exceeds_clearance: Option<bool>,
+    /// A calculation limit reached while comparing the clearance to a proved gap.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub clearance_refusal: Option<BodyQueryRefusal>,
 }
 
 /// Independent answers: a refused volume does not discard proved contact faces.

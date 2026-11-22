@@ -147,7 +147,7 @@ export const captions: Caption[] = [
     from: 0.6,
     to: 1,
     title: "SVG, PDF and DXF out.",
-    line: "Sections and details fold off the base view. Every exported curve says whether it is the model's exact curve, a fitted approximation, or a mesh polyline.",
+    line: "Sections and details fold off the base view. SVG labels each view curve's accuracy. Export reports count approximate curves for SVG, PDF and DXF.",
   },
   {
     chapter: "screen",

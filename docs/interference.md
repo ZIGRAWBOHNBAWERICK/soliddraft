@@ -179,7 +179,9 @@ proof to settle touching.
 
 Clearance decisions compare the rational gap with the requested length's shortest
 round-trip decimal, matching authored dimensions: a gap equal to the clearance does not
-exceed it. When the gap's interval crosses the clearance, the clearance is undecided.
+exceed it. When the gap's interval crosses the clearance, an admitted witness at or within
+the threshold can still settle the comparison. Without such a proof, clearance stays
+undecided. A calculation limit during that comparison is reported alongside the proved gap.
 Display bounds round outward, including zero-width rational intervals between two doubles.
 A marked enclosure is shown as bounded, never as exact.
 

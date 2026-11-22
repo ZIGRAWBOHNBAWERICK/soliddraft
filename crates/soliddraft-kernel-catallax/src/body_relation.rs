@@ -10,8 +10,12 @@ use soliddraft_kernel_api::*;
 
 use crate::{CatallaxKernel, Solid, build, numerical};
 
+fn calculation_limit(code: &str) -> bool {
+    code.contains("budget") || code.contains("work-limit") || code.contains("deadline")
+}
+
 fn refused(query: &str, code: &str) -> BodyQueryRefusal {
-    let reason = if code.contains("budget") || code.contains("work-limit") || code.contains("deadline") {
+    let reason = if calculation_limit(code) {
         "The check reached its calculation limit."
     } else if code == "app.relation-envelope" {
         "A lattice or gyroid part's material lies on its beams or sheet, not in the whole region its solid outlines."
@@ -124,31 +128,46 @@ fn source_faces(solid: &Solid, contact: &queries::ContactFaces, patches: &[queri
         .collect()
 }
 
-/// Whether `gap` exceeds `clearance`, decided by exact comparison: a gap equal to the
-/// clearance does not exceed it. `None` when the enclosure straddles the clearance.
-fn exceeds(model: &mut Model, bodies: [NativeBodyId; 2], gap: &Enclosure, clearance: &Rational) -> Option<bool> {
+fn witness_step<T>(result: Result<T, Refusal>) -> Result<Option<T>, Refusal> {
+    if catallax_numbers::current_operation_work().exhausted {
+        return Err(Refusal::new("numbers.operation-budget", "operation work allowance exhausted"));
+    }
+    match result {
+        Ok(value) => Ok(Some(value)),
+        Err(r) if calculation_limit(r.code) => Err(r),
+        Err(_) => Ok(None),
+    }
+}
+
+fn exceeds(
+    model: &mut Model,
+    bodies: [NativeBodyId; 2],
+    gap: &Enclosure,
+    clearance: &Rational,
+) -> Result<Option<bool>, BodyQueryRefusal> {
     if &gap.lo > clearance {
-        return Some(true);
+        return Ok(Some(true));
     }
     if &gap.hi <= clearance {
-        return Some(false);
+        return Ok(Some(false));
     }
     let within = numerical("clearance_witness", |dec| {
         let accuracy = Accuracy::default();
-        let [first, second] = bodies.map(|body| {
-            model
-                .faces_of_body(body)
-                .into_iter()
-                .filter_map(|face| {
-                    let bounds = catallax_measure::face_bounding_box(model, face, &accuracy, dec).ok()?.value;
-                    Some((face, bounds))
-                })
-                .collect::<Vec<_>>()
-        });
+        let mut bounds = |body| {
+            let mut faces = Vec::new();
+            for face in model.faces_of_body(body) {
+                if let Some(bounds) = witness_step(catallax_measure::face_bounding_box(model, face, &accuracy, dec))? {
+                    faces.push((face, bounds.value));
+                }
+            }
+            Ok::<_, Refusal>(faces)
+        };
+        let [first, second] = [bounds(bodies[0])?, bounds(bodies[1])?];
         let limit = clearance * clearance;
         let options = Options { width: Rational::parse("1e-9").unwrap(), ..Options::default() };
         for (a, ab) in &first {
             for (b, bb) in &second {
+                dec.check_deadline()?;
                 let separation_sq = (0..3).fold(Rational::zero(), |sum, i| {
                     let d = (&ab.min[i] - &bb.max[i]).max(&bb.min[i] - &ab.max[i]).max(Rational::zero());
                     sum + &d * &d
@@ -156,25 +175,28 @@ fn exceeds(model: &mut Model, bodies: [NativeBodyId; 2], gap: &Enclosure, cleara
                 if separation_sq > limit {
                     continue;
                 }
-                let (Ok(a), Ok(b)) = (PreparedFace::new(model, *a, dec), PreparedFace::new(model, *b, dec)) else {
-                    continue;
-                };
-                let Ok(bounds) = a.face_to_face(&b, model, &options, dec) else { continue };
-                if bounds.upper.is_some_and(|hi| &hi <= clearance) {
-                    return Ok(Answer::exact(true));
-                }
+                let Some(a) = witness_step(PreparedFace::new(model, *a, dec))? else { continue };
+                let Some(b) = witness_step(PreparedFace::new(model, *b, dec))? else { continue };
+                let Some(bounds) = witness_step(a.face_to_face(&b, model, &options, dec))? else { continue };
                 if let Some([p, q]) = bounds.witnesses {
                     let delta = &p.minus(&q).norm_squared() - &Real::from(limit.clone());
-                    if matches!(dec.sign(&delta), Outcome::Proven(StrictSign::Negative) | Outcome::ProvenCoincident(_))
-                    {
+                    let sign = match dec.sign(&delta) {
+                        Outcome::Proven(StrictSign::Negative) | Outcome::ProvenCoincident(_) => Ok(true),
+                        Outcome::Proven(StrictSign::Positive) => Ok(false),
+                        Outcome::NotExact(n) => Err(Refusal::from(n)),
+                        Outcome::Refused(r) => Err(r),
+                    };
+                    if witness_step(sign)? == Some(true) {
                         return Ok(Answer::exact(true));
                     }
+                } else if bounds.upper.is_some_and(|hi| &hi <= clearance) {
+                    return Ok(Answer::exact(true));
                 }
             }
         }
         Ok(Answer::exact(false))
     });
-    (within.is_ok_and(|answer| answer.value) && !catallax_numbers::current_operation_work().exhausted).then_some(false)
+    answer("Clearance", within).map(|within| within.then_some(false))
 }
 
 fn zero_gap(clearance: Option<f64>) -> BodyDistance {
@@ -182,6 +204,7 @@ fn zero_gap(clearance: Option<f64>) -> BodyDistance {
         distance: measurement(&Enclosure { lo: Rational::zero(), hi: Rational::zero() }, false),
         zero: true,
         exceeds_clearance: clearance.map(|_| false),
+        clearance_refusal: None,
     }
 }
 
@@ -259,14 +282,22 @@ pub(super) fn relation(
                     Ok(OverlapVolume { volume: measurement(&overlap, marked), positive: Some(true) }),
                     Some(Ok(zero_gap(clearance))),
                 ),
-                queries::BodyRelation::Clear { gap } => (
-                    Ok(no_overlap()),
-                    Some(Ok(BodyDistance {
-                        distance: measurement(&gap, marked),
-                        zero: false,
-                        exceeds_clearance: threshold.as_ref().and_then(|c| exceeds(&mut model, [a, b], &gap, c)),
-                    })),
-                ),
+                queries::BodyRelation::Clear { gap } => {
+                    let (exceeds_clearance, clearance_refusal) =
+                        match threshold.as_ref().map_or(Ok(None), |c| exceeds(&mut model, [a, b], &gap, c)) {
+                            Ok(decision) => (decision, None),
+                            Err(refusal) => (None, Some(refusal)),
+                        };
+                    (
+                        Ok(no_overlap()),
+                        Some(Ok(BodyDistance {
+                            distance: measurement(&gap, marked),
+                            zero: false,
+                            exceeds_clearance,
+                            clearance_refusal,
+                        })),
+                    )
+                }
             }
         }
         // Catallax answers contact only once it has proved the overlap empty.
@@ -283,4 +314,27 @@ pub(super) fn relation(
         }
     };
     Ok(BodyRelation { overlap, contact, gap })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use soliddraft_kernel_api::contract;
+
+    #[test]
+    fn a_straddling_gap_uses_an_admitted_witness_at_exact_clearance() {
+        let k = CatallaxKernel::new();
+        let body = contract::block(&k);
+        let Operands { mut model, bodies: [a, b], .. } = operands(&k, body, body).unwrap();
+        let placed = PlacedBody { body, translation: [0.0, 0.0, 11.0], rotation: [0.0, 0.0, 0.0, 1.0] };
+        let b = transformed_body(&mut model, b, &motion(placed).unwrap(), Clone::clone);
+        let clearance = Rational::from_i64(1);
+        let enclosure = Enclosure { lo: Rational::parse("0.9").unwrap(), hi: Rational::parse("1.1").unwrap() };
+        for bodies in [[a, b], [b, a]] {
+            assert_eq!(exceeds(&mut model, bodies, &enclosure, &clearance), Ok(Some(false)));
+        }
+        let (answer, work) = crate::with_request_allowance(0, || exceeds(&mut model, [a, b], &enclosure, &clearance));
+        assert!(work.exhausted);
+        assert_eq!(answer.unwrap_err().code, "numbers.operation-budget");
+    }
 }

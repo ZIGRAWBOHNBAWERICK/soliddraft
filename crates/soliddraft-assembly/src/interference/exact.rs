@@ -145,7 +145,9 @@ impl AssemblyDocument {
                     result.distance = DistanceBounds { lo: 0.0, hi: Some(0.0) };
                     result.clearance = clearance.map(|_| ClearanceOutcome::Below);
                 }
-                if clearance.is_some() && result.clearance == Some(ClearanceOutcome::Undecided) {
+                if let Some(refusal) = gap.clearance_refusal {
+                    result.exact_refused.push(refusal);
+                } else if clearance.is_some() && result.clearance == Some(ClearanceOutcome::Undecided) {
                     result.exact_refused.push(BodyQueryRefusal {
                         query: "Clearance".into(), code: "body-relation.clearance-undecided".into(),
                         message: "The clearance was not determined. The proven distance range crosses the requested clearance.".into(),

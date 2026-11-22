@@ -780,10 +780,17 @@ pub fn sheet_views_are_refused(k: &dyn Kernel) {
     let p = k
         .create_body_from_profile(&tag("sheet"), &Profile::rectangle(Plane::XY, Point2::new(0.0, 0.0), 4.0, 4.0))
         .unwrap();
-    match k.view_curves(p.body, &ViewSpec::standard(StandardView::Top)) {
-        Err(KernelError::Unsupported(_)) => {}
-        Ok(v) => assert!(v.curves.is_empty(), "{v:?}"),
-        Err(e) => panic!("a view of a sheet failed with {e}"),
+    let view = ViewSpec::standard(StandardView::Top);
+    for result in [
+        k.view_curves(p.body, &view),
+        k.section_view(p.body, &SectionSpec { view, origin: Vec3::ZERO }).map(|s| s.curves),
+    ] {
+        match result {
+            Err(KernelError::Unsupported(_)) => {}
+            Err(KernelError::QueryFailed { message, .. }) if message.starts_with("app.view-solid:") => {}
+            Ok(v) => assert!(v.curves.is_empty(), "{v:?}"),
+            Err(e) => panic!("a view of a sheet failed with {e}"),
+        }
     }
     let b = block(k);
     assert!(matches!(k.view_curves(b, &ViewSpec::new(Vec3::Z, Vec3::Z)), Err(KernelError::InvalidInput(_))));

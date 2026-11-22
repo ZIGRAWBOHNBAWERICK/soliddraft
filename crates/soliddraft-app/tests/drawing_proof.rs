@@ -293,7 +293,7 @@ fn a_certified_coarse_rod_cut_is_redrawn_at_fine_quality_for_export() {
         let out = call_checked(&mut AppTools { state: &mut state }, tool, json!({ "path": path }), &caller);
         assert!(!out.is_error, "{tool}: {}", out.content);
         let result: Value = serde_json::from_str(&out.content).unwrap();
-        assert_eq!(result["redrawn"], json!(views), "{tool}: {result}");
+        assert_eq!(result["views"], json!(views), "{tool}: {result}");
         assert_eq!(result["redrawn_from_certified_mesh"], 0);
         assert_eq!(result["method"], "catallax");
         assert!(path.is_file());
@@ -380,13 +380,13 @@ fn a_saved_rod_cache_without_quality_is_regenerated_after_reopening() {
         let fine_requests = calls["calls"].as_array().unwrap().iter().filter(|c| exact_view(c)).count();
         assert_eq!(result["redrawn_from_certified_mesh"], 0);
         assert_eq!(result["method"], "catallax");
-        exported.push((result["redrawn"].clone(), fine_requests));
+        exported.push((result["views"].clone(), fine_requests));
         assert!(path.is_file());
     }
     assert_eq!(reopened.drawing.session.as_ref().unwrap().doc.drawing, shown);
     assert_rod_circle(&dir.join("reopened.svg"), &shown);
     std::fs::remove_dir_all(dir).unwrap();
-    assert!(exported.iter().all(|(redrawn, fine)| *redrawn == json!(4) && *fine == 4), "{exported:?}");
+    assert!(exported.iter().all(|(views, fine)| *views == json!(4) && *fine == 4), "{exported:?}");
 }
 
 #[test]

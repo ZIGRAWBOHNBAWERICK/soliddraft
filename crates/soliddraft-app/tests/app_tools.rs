@@ -328,6 +328,11 @@ fn every_tool_runs_without_a_window_and_undoes_as_its_row_says() {
         assert!(package.with_extension(extension).is_file(), "{extension} is written: {written}");
     }
     assert_eq!(written["drawing"]["not_in_file"], json!([]), "{written}");
+    for format in ["pdf", "dxf"] {
+        let counts = &written["drawing"]["accuracy"][format];
+        assert!(counts["exact"].as_u64().is_some_and(|n| n > 0), "{written}");
+        assert_eq!(counts["approximate"], 0, "{written}");
+    }
     s.call("drawing_close", json!({}));
     let area = s.call("measure_entity", json!({"entity":"Boss-Extrude1 · End cap"}));
     assert_eq!(area["quantity"], "face_area");

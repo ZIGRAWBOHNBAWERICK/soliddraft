@@ -18,7 +18,7 @@ use crate::ids::{AnnotationId, SHEET, ViewId};
 use crate::library::{Align, FieldDef, StyleFile, TemplateFile, Weight};
 use crate::measure::{CurveShape, display_text, shape_of};
 use crate::project::{effective_scale, view_bounds, view_label};
-use crate::view::Accuracy;
+use crate::view::{Accuracy, AccuracyCounts};
 
 mod symbols;
 mod tables;
@@ -262,6 +262,22 @@ impl DisplayList {
     /// changed-value highlight and the out-of-date hatch).
     pub fn printable(&self) -> impl Iterator<Item = &Item> {
         self.items.iter().filter(|i| !matches!(i.role(), Role::Changed | Role::Stale))
+    }
+
+    /// Accuracy counts for the curve paths sent to the sheet writers.
+    pub fn accuracy(&self) -> AccuracyCounts {
+        let mut counts = AccuracyCounts::default();
+        for item in self.printable() {
+            if let Item::Path(path) = item {
+                match path.accuracy {
+                    Some(Accuracy::Exact) => counts.exact += 1,
+                    Some(Accuracy::Polygon) => counts.polygon += 1,
+                    Some(Accuracy::Approximate) => counts.approximate += 1,
+                    None => {}
+                }
+            }
+        }
+        counts
     }
 }
 

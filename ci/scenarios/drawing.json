@@ -557,10 +557,6 @@
           "equals": 5
         },
         {
-          "pointer": "/result/redrawn",
-          "equals": 5
-        },
-        {
           "pointer": "/result/accuracy/exact",
           "minimum": 1
         },
@@ -585,10 +581,6 @@
           "equals": 5
         },
         {
-          "pointer": "/result/redrawn",
-          "equals": 5
-        },
-        {
           "pointer": "/result/accuracy/exact",
           "minimum": 1
         },
@@ -610,10 +602,6 @@
       "checks": [
         {
           "pointer": "/result/views",
-          "equals": 5
-        },
-        {
-          "pointer": "/result/redrawn",
           "equals": 5
         },
         {
@@ -789,10 +777,6 @@
       "checks": [
         {
           "pointer": "/result/views",
-          "equals": 5
-        },
-        {
-          "pointer": "/result/redrawn",
           "equals": 5
         },
         {

@@ -44,33 +44,29 @@ pub(super) fn resolved_view(k: &CatallaxKernel, body: BodyId, spec: &ViewSpec) -
 }
 
 /// A view of `body`. A screen view comes from the display mesh and is marked unproved;
-/// an exported one is Catallax's hidden-line view. A body with no exact solid, such as a
-/// lattice or a body built within a tolerance, keeps the mesh view, whose curves are
-/// polylines.
+/// an exported one is Catallax's hidden-line view.
 pub(super) fn view_curves(k: &CatallaxKernel, body: BodyId, spec: &ViewSpec) -> KernelResult<ViewCurves> {
     if spec.frame().is_none() {
         return Err(KernelError::InvalidInput("view direction is zero or parallel to up".into()));
     }
+    if !spec.preview {
+        require_drawing_solid(k, body, "view_curves")?;
+        return exact_view(k.solid(body)?.as_ref(), spec);
+    }
     if k.topology(body)?.kind != BodyKind::Solid {
         return Err(KernelError::Unsupported("view_curves of a sheet body".into()));
     }
-    let exact = k.field(body)?.is_none() && k.approximate(body)?.is_none();
-    if exact && !spec.preview {
-        return exact_view(k.solid(body)?.as_ref(), spec);
-    }
-    if spec.preview && spec.tolerance <= 0.0 && k.solid(body).is_ok_and(|solid| solid.has_splines()) {
+    if spec.tolerance <= 0.0 && k.solid(body).is_ok_and(|solid| solid.has_splines()) {
         let spec =
             ViewSpec { tolerance: catallax_mesh::MeshOptions::default().chord_tolerance.to_f64_nearest(), ..*spec };
         // Automatic screen line work shares the named mesh.
-        return mesh_hlr::rendering_view_curves(k, body, &spec);
+        let mut view = mesh_hlr::rendering_view_curves(k, body, &spec)?;
+        view.unproved = true;
+        return Ok(view);
     }
     let spec = &resolved_view(k, body, spec);
     let mut view = mesh_hlr::view_curves(k, body, spec)?;
-    if exact {
-        // Exported views come from the hidden-line view, so a screen view from the mesh
-        // claims no proof.
-        view.unproved = true;
-    }
+    view.unproved = true;
     let Ok(solid) = k.solid(body) else { return Ok(view) };
     let mut counts = BTreeMap::new();
     for curve in &view.curves {
@@ -81,17 +77,24 @@ pub(super) fn view_curves(k: &CatallaxKernel, body: BodyId, spec: &ViewSpec) -> 
     for curve in &mut view.curves {
         if let CurveSource::Edge(edge) = curve.source
             && counts[&curve.source] == 1
+            && let Ok(drawn) = edge_drawing(&solid, body, edge)
+            && matches!(drawn.curve, Curve3::Line { .. } | Curve3::Circle { .. })
         {
-            let geometry = edge_curve(&solid, body, edge)?;
-            if matches!(geometry, Curve3::Line { .. } | Curve3::Circle { .. }) {
-                curve.curve = geometry;
-            }
+            curve.curve = drawn.curve;
+            curve.approximate |= drawn.approximate;
         }
     }
     Ok(ViewCurves {
         unproved: view.unproved,
         ..ViewCurves::new(view.curves, &spec.frame().expect("mesh_hlr checked the frame"))
     })
+}
+
+pub(super) fn require_drawing_solid(k: &CatallaxKernel, body: BodyId, query: &str) -> KernelResult<()> {
+    if k.field(body)?.is_some() || k.approximate(body)?.is_some() || k.topology(body)?.kind != BodyKind::Solid {
+        return Err(crate::query_error(query, Refusal::new("app.view-solid", "the body has no exact drawing solid")));
+    }
+    Ok(())
 }
 
 /// Catallax's hidden-line view, each stroke drawn as an exact or fitted curve. Tangent
@@ -221,7 +224,7 @@ fn in_plane_face(
 }
 
 /// The exact or fitted curve of an edge, from its start to its end.
-pub(super) fn edge_curve(solid: &Solid, body: BodyId, edge: EdgeId) -> KernelResult<Curve3> {
+pub(super) fn edge_drawing(solid: &Solid, body: BodyId, edge: EdgeId) -> KernelResult<ViewCurve> {
     let id = solid
         .ids
         .edges
@@ -234,14 +237,17 @@ pub(super) fn edge_curve(solid: &Solid, body: BodyId, edge: EdgeId) -> KernelRes
     let built = solid.app.checkpoint.built();
     let drawn =
         catallax("edge_curve", |dec| views::edge_drawing(&built.model, built.result, id, dec).map_err(|q| q.refusal))?;
-    let curve = curve3(&drawn.value.curve);
+    let curve = ViewCurve {
+        approximate: drawn.value.fit.is_some() || !drawn.marks.is_empty(),
+        ..ViewCurve::new(curve3(&drawn.value.curve), CurveSource::Edge(edge), true)
+    };
     solid.drawn_edges.lock().expect("the edge drawing lock").insert(id, curve.clone());
     Ok(curve)
 }
 
 /// A face's boundary loops as exact or fitted edge curves in travel order, outer loop
 /// first.
-pub(super) fn face_loops(solid: &Solid, body: BodyId, face: FaceId) -> KernelResult<Vec<Vec<Curve3>>> {
+pub(super) fn face_drawing_loops(solid: &Solid, body: BodyId, face: FaceId) -> KernelResult<Vec<Vec<ViewCurve>>> {
     let id = solid
         .ids
         .faces
@@ -252,17 +258,26 @@ pub(super) fn face_loops(solid: &Solid, body: BodyId, face: FaceId) -> KernelRes
     let drawn = catallax("face_loops", |dec| {
         views::face_drawing_loops(&built.model, built.result, id, dec).map_err(|q| q.refusal)
     })?;
-    let mut loops: Vec<Vec<Curve3>> = drawn
+    let marked = !view_marks(&drawn.marks).is_empty();
+    let mut loops: Vec<Vec<ViewCurve>> = drawn
         .value
         .iter()
-        .map(|chain| chain.iter().map(|edge| curve3(&edge.drawn.curve)).collect::<Vec<_>>())
+        .map(|chain| {
+            chain
+                .iter()
+                .map(|edge| ViewCurve {
+                    approximate: marked || edge.drawn.fit.is_some(),
+                    ..ViewCurve::new(curve3(&edge.drawn.curve), CurveSource::Unknown, true)
+                })
+                .collect::<Vec<_>>()
+        })
         .filter(|chain| !chain.is_empty())
         .collect();
     // Catallax does not order loops outer-first. The largest planar loop encloses the holes.
-    let area = |curves: &[Curve3]| {
+    let area = |curves: &[ViewCurve]| {
         curves
             .iter()
-            .map(|c| c.sample(0.0).windows(2).fold(Vec3::ZERO, |sum, p| sum + p[0].cross(p[1])))
+            .map(|c| c.curve.sample(0.0).windows(2).fold(Vec3::ZERO, |sum, p| sum + p[0].cross(p[1])))
             .fold(Vec3::ZERO, |sum, area| sum + area)
             .length()
     };
@@ -317,7 +332,7 @@ fn curve3(curve: &DrawingCurve) -> Curve3 {
         }
         DrawingCurve::Nurbs { degree, knots, points, weights } => Curve3::Nurbs {
             degree: *degree as u32,
-            knots: knots.clone(),
+            knots: knots.iter().map(|knot| knot - knots[0]).collect(),
             points: points.iter().map(v).collect(),
             weights: weights.clone(),
         },

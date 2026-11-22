@@ -557,7 +557,7 @@
           "equals": 5
         },
         {
-          "pointer": "/result/redrawn_from_certified_mesh",
+          "pointer": "/result/redrawn",
           "equals": 5
         },
         {
@@ -585,7 +585,7 @@
           "equals": 5
         },
         {
-          "pointer": "/result/redrawn_from_certified_mesh",
+          "pointer": "/result/redrawn",
           "equals": 5
         },
         {
@@ -613,7 +613,7 @@
           "equals": 5
         },
         {
-          "pointer": "/result/redrawn_from_certified_mesh",
+          "pointer": "/result/redrawn",
           "equals": 5
         },
         {
@@ -792,7 +792,7 @@
           "equals": 5
         },
         {
-          "pointer": "/result/redrawn_from_certified_mesh",
+          "pointer": "/result/redrawn",
           "equals": 5
         },
         {

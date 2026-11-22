@@ -1,6 +1,6 @@
 //! The phase D0 exit test, through the `soliddraft view` binary as separate processes:
 //!
-//! The bracket's four Catallax views repeat across runs and match the polygon golden.
+//! The bracket's four Catallax views repeat across runs and match the Catallax golden.
 //! SVG output carries visible and hidden line work.
 
 use std::collections::BTreeMap;
@@ -70,7 +70,7 @@ fn bracket_catallax_views_match_golden_across_runs() {
             );
         }
     }
-    assert!(runs.iter().flatten().all(|s| s.backend.starts_with("catallax ") && s.method == "mesh"));
+    assert!(runs.iter().flatten().all(|s| s.backend.starts_with("catallax ") && s.method == "catallax"));
     assert!(got.values().all(|v| v.visible > 0 && v.hidden > 0));
 
     let backend = runs[0][0].backend.clone();
@@ -135,7 +135,7 @@ fn catallax_plane_section_writes_hatched_svg_with_mesh_flag() {
     ]);
     let report: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
     assert!(report["backend"].as_str().unwrap().starts_with("catallax "));
-    assert_eq!(report["method"], "mesh");
+    assert_eq!(report["method"], "catallax");
     assert_eq!(report["regions"], serde_json::json!([910.0, 560.0, 230.0]));
     let svg = std::fs::read_to_string(svg).unwrap();
     assert!(svg.starts_with("<svg") && svg.trim_end().ends_with("</svg>"));

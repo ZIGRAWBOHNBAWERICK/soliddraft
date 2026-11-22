@@ -20,6 +20,14 @@ fn unavailable(error: KernelError) -> BodyQueryRefusal {
     }
 }
 
+fn leave_overlap_unresolved(result: &mut PairResult, clearance: Option<f64>) {
+    if result.outcome == Outcome::Clear {
+        result.outcome = Outcome::TouchingOrUndecided;
+        result.clearance = clearance.map(|_| ClearanceOutcome::Undecided);
+        result.why = "The exact check could not determine whether the solids overlap.".into();
+    }
+}
+
 impl AssemblyDocument {
     pub(super) fn exact_pair(
         &mut self,
@@ -55,6 +63,7 @@ impl AssemblyDocument {
             Ok(answer) => answer,
             Err(r) => {
                 result.exact_refused.push(r);
+                leave_overlap_unresolved(result, clearance);
                 return;
             }
         };
@@ -111,6 +120,9 @@ impl AssemblyDocument {
                 }
                 result.why = "The exact solids have no overlap volume.".into();
             }
+        }
+        if positive.is_none() {
+            leave_overlap_unresolved(result, clearance);
         }
         match gap {
             Some(Ok(gap)) => {

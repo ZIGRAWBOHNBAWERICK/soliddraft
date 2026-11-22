@@ -28,7 +28,7 @@ comes from.
   --seams      show seams
   --smooth     show edges between tangent faces
   --tolerance  curve accuracy in mm (default: the kernel's)
-  --mesh       use polygon hidden-line removal (the default on Catallax)
+  --mesh       accepted for compatibility
   --section    cut the body by the plane through this point that faces the eye,
                remove the material in front of it and hatch the cut faces
   --svg        write the view to this SVG file; with several views, put {view} in
@@ -44,6 +44,7 @@ struct Summary<'a> {
     backend: String,
     view: String,
     method: &'static str,
+    approximate: bool,
     visible: usize,
     hidden: usize,
     digest: String,
@@ -193,12 +194,15 @@ pub(crate) fn run(args: &[String]) -> ExitCode {
             }
         }
         let (visible, hidden) = curves.counts();
+        let method = method(&curves);
+        let approximate = approximate(&curves) || regions.as_deref().is_some_and(regions_approximate);
         if o.json {
             let summary = Summary {
                 recipe: &source_name,
                 backend: format!("{} {}", backend.name, backend.version),
                 view: name.clone(),
-                method: "mesh",
+                method,
+                approximate,
                 visible,
                 hidden,
                 digest: curves.digest(),
@@ -214,8 +218,9 @@ pub(crate) fn run(args: &[String]) -> ExitCode {
             println!("{}", serde_json::to_string(&summary).expect("summaries serialise"));
         } else {
             let cut = regions.as_ref().map(|r| format!(", {} cut regions", r.len())).unwrap_or_default();
+            let quality = if approximate { " approximate" } else { "" };
             println!(
-                "{source_name} view {name}: {visible} visible, {hidden} hidden{cut}, digest {}, {millis:.1} ms",
+                "{source_name} view {name}: {visible} visible, {hidden} hidden{cut}, {method}{quality}, digest {}, {millis:.1} ms",
                 curves.digest()
             );
         }
@@ -238,6 +243,18 @@ pub(crate) fn run(args: &[String]) -> ExitCode {
     if ok { ExitCode::SUCCESS } else { ExitCode::FAILURE }
 }
 
+fn method(curves: &ViewCurves) -> &'static str {
+    if curves.unproved { "mesh" } else { "catallax" }
+}
+
+fn approximate(curves: &ViewCurves) -> bool {
+    curves.unproved || !curves.approximate.is_empty() || curves.curves.iter().any(|c| c.approximate)
+}
+
+fn regions_approximate(regions: &[CutRegion]) -> bool {
+    regions.iter().any(|region| region.outer.iter().chain(region.holes.iter().flatten()).any(|c| c.approximate))
+}
+
 /// Visible lines 0.5 mm, hidden 0.25 mm dashed, after ISO 128. Units are model mm.
 const VISIBLE_STYLE: &str = r##"fill="none" stroke="#000" stroke-width="0.5" stroke-linecap="round""##;
 const HIDDEN_STYLE: &str = r##"fill="none" stroke="#000" stroke-width="0.25" stroke-dasharray="3 1.5""##;
@@ -250,9 +267,11 @@ pub(crate) fn svg(curves: &ViewCurves, regions: &[CutRegion], frame: &ViewFrame)
     let [x0, y0, x1, y1] = curves.bbox_2d;
     let (w, h) = (x1 - x0 + 2.0 * margin, y1 - y0 + 2.0 * margin);
     let mut out = String::new();
+    let method = method(curves);
+    let approximate = approximate(curves) || regions_approximate(regions);
     let _ = writeln!(
         out,
-        r#"<svg xmlns="http://www.w3.org/2000/svg" width="{w:.3}mm" height="{h:.3}mm" viewBox="{:.3} {:.3} {w:.3} {h:.3}">"#,
+        r#"<svg xmlns="http://www.w3.org/2000/svg" width="{w:.3}mm" height="{h:.3}mm" viewBox="{:.3} {:.3} {w:.3} {h:.3}" data-method="{method}" data-approximate="{approximate}">"#,
         x0 - margin,
         -y1 - margin
     );
@@ -292,7 +311,12 @@ pub(crate) fn svg(curves: &ViewCurves, regions: &[CutRegion], frame: &ViewFrame)
     for visible in [false, true] {
         let _ = writeln!(out, "<g {}>", if visible { VISIBLE_STYLE } else { HIDDEN_STYLE });
         for c in curves.curves.iter().filter(|c| c.visible == visible) {
-            let _ = writeln!(out, r#"<path d="{}"/>"#, path_data(&c.curve, frame));
+            let accuracy = if c.approximate || curves.unproved || !curves.approximate.is_empty() {
+                r#" data-accuracy="approximate""#
+            } else {
+                ""
+            };
+            let _ = writeln!(out, r#"<path d="{}"{accuracy}/>"#, path_data(&c.curve, frame));
         }
         out.push_str("</g>\n");
     }
@@ -309,10 +333,9 @@ fn path_data(curve: &Curve3, frame: &ViewFrame) -> String {
     match curve {
         Curve3::Line { a, b } => format!("M {} L {}", pt(*a), pt(*b)),
         Curve3::Arc { normal, radius, start_deg, end_deg, .. } if normal.cross(frame.direction).length() < 1e-9 => {
-            // Counter-clockwise about a normal towards the eye is counter-clockwise on the
-            // sheet, which is clockwise on SVG's Y-down canvas: sweep flag 1.
-            let sweep = u8::from(normal.dot(frame.direction) > 0.0);
-            let large = u8::from(end_deg - start_deg > 180.0);
+            let angle = end_deg - start_deg;
+            let sweep = u8::from(normal.dot(frame.direction) * angle < 0.0);
+            let large = u8::from(angle.abs() > 180.0);
             format!("M {} A {r:.4} {r:.4} 0 {large} {sweep} {}", pt(curve.start()), pt(curve.end()), r = radius)
         }
         Curve3::Circle { normal, .. } if normal.cross(frame.direction).length() < 1e-9 => {
@@ -326,6 +349,29 @@ fn path_data(curve: &Curve3, frame: &ViewFrame) -> String {
                 let _ = write!(d, "{}{}", if i == 0 { "M " } else { " L " }, pt(p));
             }
             d
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn face_on_svg_arcs_keep_their_sweep_under_y_inversion() {
+        let frame = ViewSpec::new(Vec3::Z, Vec3::Y).frame().unwrap();
+        for (normal, end_deg, large, sweep) in
+            [(Vec3::Z, 90.0, 0, 0), (-Vec3::Z, 90.0, 0, 1), (Vec3::Z, -270.0, 1, 1), (-Vec3::Z, -270.0, 1, 0)]
+        {
+            let curve =
+                Curve3::Arc { center: Vec3::ZERO, normal, x_axis: Vec3::X, radius: 1.0, start_deg: 0.0, end_deg };
+            let d = path_data(&curve, &frame);
+            let fields: Vec<_> = d.split_whitespace().collect();
+            assert_eq!(fields[3], "A");
+            assert_eq!((fields[7].parse(), fields[8].parse()), (Ok(large), Ok(sweep)));
+            assert_eq!(fields[1].parse::<f64>(), Ok(1.0));
+            let y = if normal == Vec3::Z { -1.0 } else { 1.0 };
+            assert_eq!(fields[10].parse::<f64>(), Ok(y));
         }
     }
 }

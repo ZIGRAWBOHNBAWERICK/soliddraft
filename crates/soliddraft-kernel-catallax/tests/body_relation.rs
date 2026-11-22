@@ -128,7 +128,7 @@ fn copies_one_millimetre_apart_are_clear_and_a_clearance_of_exactly_that_is_not_
 }
 
 #[test]
-fn a_proved_overlap_is_a_clash_however_wide_its_volume_and_an_open_pair_is_never_clear() {
+fn a_proved_overlap_is_a_clash_however_wide_its_volume() {
     let k = CatallaxKernel::new();
     let a = p3(&k);
     // Copies overlapping by half: the Boolean refuses, a ball inside both proves the
@@ -140,15 +140,6 @@ fn a_proved_overlap_is_a_clash_however_wide_its_volume_and_an_open_pair_is_never
     assert_eq!(overlap.volume.certainty, Certainty::Bounded);
     let gap = report.gap.as_ref().unwrap().as_ref().unwrap();
     assert!(gap.zero && gap.distance.hi == 0.0, "{gap:?}");
-
-    // Copies touching along their end faces: whatever Catallax settles, the pair never
-    // reads as clear.
-    let report = k.body_relation(along_x(a, 0.0), along_x(a, 40.0), Some(0.5)).unwrap();
-    eprintln!("touching copies: {report:?}");
-    assert_ne!(report.overlap.as_ref().ok().and_then(|o| o.positive), Some(true), "{report:?}");
-    if let Some(Ok(gap)) = &report.gap {
-        assert!(gap.distance.lo <= 0.0 && gap.exceeds_clearance != Some(true), "{report:?}");
-    }
 }
 
 #[test]

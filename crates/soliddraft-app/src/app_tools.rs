@@ -720,7 +720,10 @@ impl AppTools<'_> {
         Ok(json!({
             "exported": path,
             "views": written.views,
-            "redrawn_from_certified_mesh": written.redrawn,
+            "redrawn_from_certified_mesh": 0,
+            "redrawn": written.redrawn,
+            "method": if written.views == 0 { "none" } else { "catallax" },
+            "approximate": written.accuracy.approximate > 0,
             "revision": written.revision.short(),
             "accuracy": written.accuracy,
         }))

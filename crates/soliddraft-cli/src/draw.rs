@@ -556,7 +556,7 @@ fn create(o: &Options) -> Result<(), String> {
         let made = soliddraft_drawing::make_drawing(part, &new).map_err(|e| e.to_string())?;
         let (mut drawing, import) = (made.drawing, made.import);
         apply_steps(&mut drawing, part, &o.steps)?;
-        write_outputs(&drawing, &outs, &source.backend)?;
+        write_outputs(&drawing, &drawing, &outs, &source.backend)?;
         let name = drawing_path.as_ref().map(|p| p.display().to_string()).unwrap_or_default();
         if o.json {
             let report = CreateReport {
@@ -739,11 +739,28 @@ fn update(o: &Options) -> Result<(), String> {
             run(&mut stack, &mut drawing, Command::DeleteAnnotation { annotation: AnnotationId(*id) })?;
             repairs.push(format!("deleted annotation {id}"));
         }
+        let writes_sheet = o.outs.iter().any(|out| {
+            Path::new(out).extension().and_then(|ext| ext.to_str()).and_then(Format::from_extension).is_some()
+        });
+        let mut export = None;
+        if writes_sheet {
+            let ids: Vec<_> = drawing
+                .sheets
+                .iter()
+                .flat_map(|sheet| &sheet.views)
+                .filter(|view| !report.projections.iter().any(|(id, _)| *id == view.id))
+                .map(|view| view.id)
+                .collect();
+            if !ids.is_empty() {
+                let copy = export.insert(drawing.clone());
+                soliddraft_drawing::redraw_for_export(copy, part, &ids).map_err(|e| e.to_string())?;
+            }
+        }
         // A drawing from before the envelope is saved under the current name beside it.
         let saved = soliddraft_document::kind::saved_path(&path, DocKind::Drawing);
         let meta = meta.rewritten(&source.backend, drawing.meta.units);
         file::write(&saved, &drawing, &meta).map_err(|e| e.to_string())?;
-        write_outputs(&drawing, &o.outs, &source.backend)?;
+        write_outputs(&drawing, export.as_ref().unwrap_or(&drawing), &o.outs, &source.backend)?;
         // The report after repairs: what still needs attention.
         let mut final_report = report.clone();
         final_report.dangling.retain(|d| drawing.annotation(d.annotation).is_some_and(|a| a.needs_attention()));
@@ -788,8 +805,8 @@ fn sheet_path(out: &Path, i: usize) -> PathBuf {
 
 /// Writes the drawing in each format `outs` names. A drawing file written here is a new
 /// document (Save as copy), with its own id. Every file is written atomically.
-fn write_outputs(drawing: &Drawing, outs: &[String], backend: &str) -> Result<(), String> {
-    let lists: Vec<_> = (0..drawing.sheets.len()).map(|i| display::layout_sheet(drawing, i)).collect();
+fn write_outputs(drawing: &Drawing, export: &Drawing, outs: &[String], backend: &str) -> Result<(), String> {
+    let lists: Vec<_> = (0..export.sheets.len()).map(|i| display::layout_sheet(export, i)).collect();
     for out in outs {
         let path = Path::new(out);
         let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");

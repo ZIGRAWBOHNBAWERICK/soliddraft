@@ -42,20 +42,30 @@ pub struct CutRegion {
 impl CutRegion {
     /// The region's area in the plane: the outer boundary's less its holes'.
     pub fn area(&self, frame: &ViewFrame) -> f64 {
-        // Exact arcs and splines are sampled finely: the chords' shortfall is then about
-        // a hundred-millionth of the region's area, well below the thousandth of a square
-        // millimetre areas are reported to.
-        let first = self.outer.first().map_or(Vec3::ZERO, |c| c.curve.start());
-        let size = self
-            .outer
-            .iter()
-            .flat_map(|c| [c.curve.end(), c.curve.point_at(0.5)])
-            .fold(1.0_f64, |size, p| size.max(p.distance(first)));
-        let chord = 1e-8 * size;
         let ring = |curves: &[ViewCurve]| {
-            let points: Vec<Point2> =
-                curves.iter().flat_map(|c| c.curve.sample(chord)).map(|p| frame.project(p)).collect();
-            shoelace(&points).abs()
+            let Some(first) = curves.first() else { return 0.0 };
+            let origin = first.curve.start();
+            let project = |point: Vec3| frame.project(point - origin);
+            let mut points = Vec::new();
+            let mut correction = 0.0;
+            for c in curves {
+                match &c.curve {
+                    Curve3::Circle { normal, radius, .. } => {
+                        points.push(project(c.curve.start()));
+                        correction += std::f64::consts::PI * radius * radius * normal.dot(frame.direction);
+                    }
+                    Curve3::Arc { normal, radius, start_deg, end_deg, .. } => {
+                        points.extend([project(c.curve.start()), project(c.curve.end())]);
+                        let angle = (end_deg - start_deg).to_radians();
+                        correction += 0.5 * radius * radius * (angle - angle.sin()) * normal.dot(frame.direction);
+                    }
+                    curve => {
+                        let chord = 1e-8 * origin.distance(curve.point_at(0.5)).max(1.0);
+                        points.extend(curve.sample(chord).into_iter().map(project));
+                    }
+                }
+            }
+            (shoelace(&points) + correction).abs()
         };
         ring(&self.outer) - self.holes.iter().map(|h| ring(h)).sum::<f64>()
     }
@@ -229,29 +239,33 @@ fn section_of_cut<K: Kernel + ?Sized>(
             c
         })
         .collect();
-    let curves = ViewCurves { unproved, approximate, ..ViewCurves::new(curves, frame) };
+    let mut curves = ViewCurves { unproved, approximate, ..ViewCurves::new(curves, frame) };
 
     // Each cap face's loops, each curve tagged through the cap edge it runs along.
     let edge_by_mid: Vec<(EdgeId, Vec3)> =
         topology.edges.iter().filter(|e| on_cap(e.id)).map(|e| (e.id, e.midpoint)).collect();
-    let tag = |c: Curve3| {
-        let mid = c.point_at(0.5);
+    let tag = |mut c: ViewCurve| {
+        let mid = c.curve.point_at(0.5);
         let edge = edge_by_mid
             .iter()
             .map(|(id, m)| (*id, m.distance(mid)))
             .filter(|(_, d)| *d <= 1e-4 * size)
             .min_by(|a, b| a.1.total_cmp(&b.1))
             .map(|(id, _)| id);
-        ViewCurve::new(c, section(edge.and_then(cut_face)), true)
+        c.source = section(edge.and_then(cut_face));
+        c
     };
     let mut regions = Vec::new();
     for &cap in &caps {
-        let mut loops = k.face_loops(cut, cap)?.into_iter();
+        let mut loops = k.face_drawing_loops(cut, cap)?.into_iter();
         let Some(outer) = loops.next() else { continue };
         regions.push(CutRegion {
             outer: outer.into_iter().map(tag).collect(),
             holes: loops.map(|l| l.into_iter().map(tag).collect()).collect(),
         });
+    }
+    if regions.iter().any(|r| r.outer.iter().chain(r.holes.iter().flatten()).any(|c| c.approximate)) {
+        curves.approximate.push("section.fitted-boundary".into());
     }
     Ok(SectionView { curves, regions })
 }
@@ -567,4 +581,34 @@ fn regions_of(crossings: &[Crossing], frame: &ViewFrame, size: f64) -> (Vec<CutR
         windows.push(Window { outer: flat[o].clone(), holes: mine.iter().map(|&h| flat[h].clone()).collect() });
     }
     (regions, windows)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn circular_sections_keep_sub_thousandth_area_precision() {
+        let frame = ViewSpec::new(Vec3::Z, Vec3::Y).frame().unwrap();
+        let center = Vec3::new(25_000.0, -190.0, 0.0);
+        for normal in [Vec3::Z, -Vec3::Z] {
+            let boundary = |curve| ViewCurve::new(curve, CurveSource::Unknown, true);
+            let outer = [0.0, 180.0]
+                .map(|start_deg| {
+                    boundary(Curve3::Arc {
+                        center,
+                        normal,
+                        x_axis: Vec3::X,
+                        radius: 1000.0,
+                        start_deg,
+                        end_deg: start_deg + 180.0,
+                    })
+                })
+                .to_vec();
+            let hole = boundary(Curve3::Circle { center, normal: -normal, radius: 200.0 });
+            let region = CutRegion { outer, holes: vec![vec![hole]] };
+            let expected = std::f64::consts::PI * (1_000_000.0 - 40_000.0);
+            assert!((region.area(&frame) - expected).abs() < 0.0005);
+        }
+    }
 }

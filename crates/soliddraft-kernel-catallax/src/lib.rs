@@ -129,7 +129,7 @@ struct Solid {
     mass: OnceLock<KernelResult<MassProperties>>,
     /// Edge drawings already answered, by Catallax edge: a drawing reads every edge on
     /// each update.
-    drawn_edges: std::sync::Mutex<BTreeMap<catallax_topology::EdgeId, drawing::Curve3>>,
+    drawn_edges: std::sync::Mutex<BTreeMap<catallax_topology::EdgeId, drawing::ViewCurve>>,
 }
 
 /// A display key as text, which a hand-over carries between kernels.
@@ -2481,8 +2481,11 @@ impl Kernel for CatallaxKernel {
         self.observe("section_view", || {
             if spec.view.preview {
                 let view = drawing_queries::resolved_view(self, body, &spec.view);
-                drawing::section::by_mesh_slice(self, body, &drawing::SectionSpec { view, ..*spec })
+                let mut section = drawing::section::by_mesh_slice(self, body, &drawing::SectionSpec { view, ..*spec })?;
+                section.curves.unproved = true;
+                Ok(section)
             } else {
+                drawing_queries::require_drawing_solid(self, body, "section_view")?;
                 drawing::section::by_half_space(self, body, spec)
             }
         })
@@ -2494,10 +2497,20 @@ impl Kernel for CatallaxKernel {
         self.observe("section_curves", || drawing_queries::section_curves(self, body, plane))
     }
     fn edge_curve(&self, body: BodyId, edge: EdgeId) -> KernelResult<drawing::Curve3> {
-        self.observe("edge_curve", || drawing_queries::edge_curve(self.solid(body)?.as_ref(), body, edge))
+        Ok(self.edge_drawing(body, edge)?.curve)
+    }
+    fn edge_drawing(&self, body: BodyId, edge: EdgeId) -> KernelResult<drawing::ViewCurve> {
+        self.observe("edge_curve", || drawing_queries::edge_drawing(self.solid(body)?.as_ref(), body, edge))
     }
     fn face_loops(&self, body: BodyId, face: FaceId) -> KernelResult<Vec<Vec<drawing::Curve3>>> {
-        self.observe("face_loops", || drawing_queries::face_loops(self.solid(body)?.as_ref(), body, face))
+        Ok(self
+            .face_drawing_loops(body, face)?
+            .into_iter()
+            .map(|chain| chain.into_iter().map(|edge| edge.curve).collect())
+            .collect())
+    }
+    fn face_drawing_loops(&self, body: BodyId, face: FaceId) -> KernelResult<Vec<Vec<drawing::ViewCurve>>> {
+        self.observe("face_loops", || drawing_queries::face_drawing_loops(self.solid(body)?.as_ref(), body, face))
     }
     fn lines_and_arcs(&self, _: &drawing::Curve3, _: f64) -> KernelResult<Vec<drawing::Curve3>> {
         self.observe("lines_and_arcs", || Err(gap("Curve approximation for drawings")))

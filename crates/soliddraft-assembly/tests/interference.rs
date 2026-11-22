@@ -19,7 +19,7 @@ use soliddraft_kernel_catallax::CatallaxKernel;
 use soliddraft_model::sketch::{P2, Sketch, solve::solve};
 use soliddraft_model::{
     Command, DatumPlane, Document, EndCondition, ExtrudeFeature, ExtrudeOp, FeatureKind, PatternFeature, PatternSpec,
-    ProfileSource, SketchFeature, SketchPlane,
+    ProfileSource, RevolveFeature, SketchFeature, SketchPlane,
 };
 
 fn kernel() -> Arc<dyn Kernel> {
@@ -637,4 +637,62 @@ fn a_part_hidden_or_suppressed_only_by_another_revision_is_not_left_out_quietly(
         let report = doc.check_interference(&CheckRequest::default()).unwrap();
         assert!(!report.complete && report.skipped[0].path == branch, "suppress {suppress}");
     }
+}
+
+#[test]
+fn a_pin_crossing_a_cone_in_a_thin_sliver_is_unresolved() {
+    let dir = folder("cone-sliver");
+    let (wall, pin, root) = (dir.join("wall.dwprt"), dir.join("pin.dwprt"), dir.join("sliver.dwasm"));
+    let mut part = Document::new("Cone", kernel());
+    let mut sketch = Sketch::new();
+    sketch.polyline_loop(&[P2::new(0.0, 0.0), P2::new(10.0, 0.0), P2::new(6.0, 20.0), P2::new(0.0, 20.0)]).unwrap();
+    solve(&mut sketch, None, true);
+    let sketch = part
+        .execute(Command::AddFeature {
+            kind: FeatureKind::Sketch(SketchFeature {
+                plane: SketchPlane::Datum { datum: DatumPlane::Front, offset: 0.0 },
+                sketch,
+            }),
+            name: None,
+            position: None,
+            via_assistant: false,
+        })
+        .unwrap()
+        .created
+        .unwrap();
+    part.execute(Command::AddFeature {
+        kind: FeatureKind::Revolve(RevolveFeature {
+            sketch,
+            axis_origin: [0.0; 3],
+            axis_direction: [0.0, 0.0, 1.0],
+            angle_deg: 360.0,
+        }),
+        name: None,
+        position: None,
+        via_assistant: false,
+    })
+    .unwrap();
+    part.save(&wall).unwrap();
+    let mut sketch = Sketch::new();
+    sketch.circle_at(P2::new(0.0, 0.0), 2.0).unwrap();
+    new_extrusion(&pin, DatumPlane::Top, sketch, 4.0);
+
+    let mut doc = AssemblyDocument::new_with("Sliver", options());
+    doc.save(Some(&root)).unwrap();
+    doc.insert(reference(&root, &wall), Placement::IDENTITY).unwrap();
+    let rotation = DQuat::from_rotation_x(30_f64.to_radians());
+    let end = DVec3::new(0.0, 9.619, 10.0) - rotation * DVec3::new(0.0, 0.0, 2.0);
+    doc.insert(reference(&root, &pin), Placement::new(rotation, end)).unwrap();
+    doc.finish_loading();
+
+    let report = doc.check_interference(&CheckRequest { clearance: Some(0.5), ..CheckRequest::default() }).unwrap();
+    assert_eq!(report.clear, 0, "{report:#?}");
+    let pair = &report.results[0];
+    assert_eq!(pair.outcome, Outcome::TouchingOrUndecided, "{pair:#?}");
+    assert_eq!(pair.clearance, Some(ClearanceOutcome::Undecided), "{pair:#?}");
+    assert!(
+        pair.exact_refused.iter().any(|r| r.query == "Overlap volume" && r.code == "intersect.trace-native-cover"),
+        "{pair:#?}"
+    );
+    std::fs::remove_dir_all(dir).unwrap();
 }

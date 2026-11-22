@@ -1,10 +1,10 @@
 //! Exact body-pair queries on private copies at the accepted placements.
 
 use catallax_app::queries;
-use catallax_measure::{Accuracy, Enclosure};
-use catallax_numbers::{Answer, Rational, Refusal};
-use catallax_shapes::{Isometry, Pose, RVector3, Rotation};
-use catallax_topology::{Model, transformed_body};
+use catallax_measure::{Accuracy, Enclosure, distance::PreparedFace};
+use catallax_numbers::{Answer, Outcome, Rational, Real, Refusal, StrictSign};
+use catallax_shapes::{Isometry, Pose, RVector3, Rotation, distance::Options};
+use catallax_topology::{BodyId as NativeBodyId, Model, transformed_body};
 use serde_json::json;
 use soliddraft_kernel_api::*;
 
@@ -126,14 +126,55 @@ fn source_faces(solid: &Solid, contact: &queries::ContactFaces, patches: &[queri
 
 /// Whether `gap` exceeds `clearance`, decided by exact comparison: a gap equal to the
 /// clearance does not exceed it. `None` when the enclosure straddles the clearance.
-fn exceeds(gap: &Enclosure, clearance: &Rational) -> Option<bool> {
+fn exceeds(model: &mut Model, bodies: [NativeBodyId; 2], gap: &Enclosure, clearance: &Rational) -> Option<bool> {
     if &gap.lo > clearance {
-        Some(true)
-    } else if &gap.hi <= clearance {
-        Some(false)
-    } else {
-        None
+        return Some(true);
     }
+    if &gap.hi <= clearance {
+        return Some(false);
+    }
+    let within = numerical("clearance_witness", |dec| {
+        let accuracy = Accuracy::default();
+        let [first, second] = bodies.map(|body| {
+            model
+                .faces_of_body(body)
+                .into_iter()
+                .filter_map(|face| {
+                    let bounds = catallax_measure::face_bounding_box(model, face, &accuracy, dec).ok()?.value;
+                    Some((face, bounds))
+                })
+                .collect::<Vec<_>>()
+        });
+        let limit = clearance * clearance;
+        let options = Options { width: Rational::parse("1e-9").unwrap(), ..Options::default() };
+        for (a, ab) in &first {
+            for (b, bb) in &second {
+                let separation_sq = (0..3).fold(Rational::zero(), |sum, i| {
+                    let d = (&ab.min[i] - &bb.max[i]).max(&bb.min[i] - &ab.max[i]).max(Rational::zero());
+                    sum + &d * &d
+                });
+                if separation_sq > limit {
+                    continue;
+                }
+                let (Ok(a), Ok(b)) = (PreparedFace::new(model, *a, dec), PreparedFace::new(model, *b, dec)) else {
+                    continue;
+                };
+                let Ok(bounds) = a.face_to_face(&b, model, &options, dec) else { continue };
+                if bounds.upper.is_some_and(|hi| &hi <= clearance) {
+                    return Ok(Answer::exact(true));
+                }
+                if let Some([p, q]) = bounds.witnesses {
+                    let delta = &p.minus(&q).norm_squared() - &Real::from(limit.clone());
+                    if matches!(dec.sign(&delta), Outcome::Proven(StrictSign::Negative) | Outcome::ProvenCoincident(_))
+                    {
+                        return Ok(Answer::exact(true));
+                    }
+                }
+            }
+        }
+        Ok(Answer::exact(false))
+    });
+    (within.is_ok_and(|answer| answer.value) && !catallax_numbers::current_operation_work().exhausted).then_some(false)
 }
 
 fn zero_gap(clearance: Option<f64>) -> BodyDistance {
@@ -223,7 +264,7 @@ pub(super) fn relation(
                     Some(Ok(BodyDistance {
                         distance: measurement(&gap, marked),
                         zero: false,
-                        exceeds_clearance: threshold.as_ref().and_then(|c| exceeds(&gap, c)),
+                        exceeds_clearance: threshold.as_ref().and_then(|c| exceeds(&mut model, [a, b], &gap, c)),
                     })),
                 ),
             }

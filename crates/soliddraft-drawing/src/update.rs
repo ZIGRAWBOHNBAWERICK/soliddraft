@@ -233,13 +233,25 @@ pub fn reattach_view(drawing: &mut Drawing, part: &Part, id: ViewId, entity: Ent
 /// Remakes a view and its dependent descendants, keeping placement and accepted
 /// dimension values. Descendants excluded from updates keep their linework.
 pub fn regenerate_view(drawing: &mut Drawing, part: &Part, id: ViewId) -> Result<(), DrawingError> {
-    let index = PartIndex::build(part)?;
-    let mut contexts = Contexts::new();
     let ids: Vec<_> = project::dependent_views(drawing, id)
         .into_iter()
         .filter(|child| *child == id || !drawing.view(*child).is_some_and(|v| v.excluded_from_update))
         .collect();
-    for &id in &ids {
+    regenerate_views(drawing, part, &ids)
+}
+
+/// Draws the selected views for export at their pinned revision.
+pub fn redraw_for_export(drawing: &mut Drawing, part: &Part, ids: &[ViewId]) -> Result<(), DrawingError> {
+    if ids.iter().any(|&id| drawing.view(id).is_some_and(|v| v.geometry.source_digest != part.digest.as_str())) {
+        return Err(DrawingError::Unproved);
+    }
+    regenerate_views(drawing, part, ids)
+}
+
+fn regenerate_views(drawing: &mut Drawing, part: &Part, ids: &[ViewId]) -> Result<(), DrawingError> {
+    let index = PartIndex::build(part)?;
+    let mut contexts = Contexts::new();
+    for &id in ids {
         project::compute_in(drawing, part, &index, id, &mut contexts)?;
         follow_parent(drawing, id, &contexts);
         let geometry = contexts[&id].projected.geometry.clone();

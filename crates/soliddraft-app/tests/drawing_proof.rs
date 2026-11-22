@@ -128,7 +128,7 @@ fn drawings_never_pair_requested_definitions_with_a_retained_body() {
     apply_with(&mut certified, &Command::UpdateFromModel, &part.certified_part()).unwrap();
     state.drawing.session.as_mut().unwrap().doc.drawing = certified.clone();
     call(&mut state, "drawing_export_svg", json!({ "path": dir.join("proved.svg") }));
-    let proved_svg = std::fs::read(dir.join("proved.svg")).unwrap();
+    assert!(dir.join("proved.svg").is_file());
 
     state.drag_dimension(DragStep::Start { feature: block, dimension: Dimension::Depth });
     state.drag_dimension(DragStep::Move(14.0));
@@ -147,10 +147,16 @@ fn drawings_never_pair_requested_definitions_with_a_retained_body() {
     let session = state.drawing.session.as_ref().unwrap();
     assert_eq!(session.doc.drawing, certified);
     assert_eq!(session.doc.seen_digest, certified.model.pinned);
-    // Already-certified views remain deliberately pinned; export does not recertify
-    // them against the pending definition or silently substitute another body.
-    call(&mut state, "drawing_export_svg", json!({ "path": dir.join("pending-pinned.svg") }));
-    assert_eq!(std::fs::read(dir.join("pending-pinned.svg")).unwrap(), proved_svg);
+    let pending_path = dir.join("pending-pinned.svg");
+    let caller = Caller::Mcp { client: "test".into() };
+    let refused = call_checked(
+        &mut AppTools { state: &mut state },
+        "drawing_export_svg",
+        json!({ "path": pending_path }),
+        &caller,
+    );
+    assert!(refused.is_error);
+    assert!(!pending_path.exists());
 
     settle(&mut state);
     let part = PartContext::new(&state.doc).unwrap();
@@ -188,6 +194,64 @@ fn drawings_never_pair_requested_definitions_with_a_retained_body() {
     std::fs::remove_dir_all(dir).unwrap();
 }
 
+fn assert_rod_circle(path: &std::path::Path, drawing: &Drawing) {
+    use kurbo::{BezPath, PathEl, Rect, Shape};
+    use quick_xml::events::Event;
+
+    let (view, radius) = drawing.sheets[0]
+        .views
+        .iter()
+        .find_map(|view| {
+            let spec = soliddraft_drawing::project::view_spec(drawing, view.id).ok()?;
+            (spec.direction == soliddraft_kernel_api::Vec3::Z)
+                .then(|| (view, soliddraft_drawing::project::scale_in(drawing, 0, view)))
+        })
+        .expect("the rod has a top view");
+    let svg = std::fs::read_to_string(path).unwrap();
+    let mut xml = quick_xml::Reader::from_str(&svg);
+    let mut centre = None;
+    let mut rim = None::<Rect>;
+    loop {
+        match xml.read_event().unwrap() {
+            Event::Start(el) if el.name().as_ref() == b"svg" => {
+                let view_box = el.try_get_attribute("viewBox").unwrap().unwrap();
+                let values: Vec<f64> = std::str::from_utf8(&view_box.value)
+                    .unwrap()
+                    .split_whitespace()
+                    .map(|v| v.parse().unwrap())
+                    .collect();
+                centre = Some(kurbo::Point::new(view.position.u, values[3] - view.position.v));
+            }
+            Event::Empty(el) if el.name().as_ref() == b"path" => {
+                let Some(accuracy) = el.try_get_attribute("data-accuracy").unwrap() else { continue };
+                if accuracy.value.as_ref() == b"polygon" {
+                    continue;
+                }
+                let d = el.try_get_attribute("d").unwrap().unwrap();
+                let path = BezPath::from_svg(std::str::from_utf8(&d.value).unwrap()).unwrap();
+                let bbox = path.bounding_box();
+                let c = centre.expect("the sheet has a viewBox");
+                let target = Rect::new(c.x - radius, c.y - radius, c.x + radius, c.y + radius).inflate(0.005, 0.005);
+                if path.elements().iter().any(|el| matches!(el, PathEl::CurveTo(..)))
+                    && target.contains(bbox.origin())
+                    && target.contains(kurbo::Point::new(bbox.x1, bbox.y1))
+                {
+                    rim = Some(rim.map_or(bbox, |other| other.union(bbox)));
+                }
+            }
+            Event::Eof => break,
+            _ => {}
+        }
+    }
+    let bounds = rim.expect("the 2 mm rod rim is drawn with curved paths");
+    let c = centre.unwrap();
+    for (got, want) in
+        [(bounds.x0, c.x - radius), (bounds.x1, c.x + radius), (bounds.y0, c.y - radius), (bounds.y1, c.y + radius)]
+    {
+        assert!((got - want).abs() < 0.005, "rod rim {bounds:?} at {c:?}, radius {radius}");
+    }
+}
+
 #[test]
 fn a_certified_coarse_rod_cut_is_redrawn_at_fine_quality_for_export() {
     use soliddraft_app::document::Document;
@@ -221,8 +285,6 @@ fn a_certified_coarse_rod_cut_is_redrawn_at_fine_quality_for_export() {
     apply_with(&mut fine, &Command::UpdateFromModel, &part.certified_part()).unwrap();
     assert_eq!(certified_views(&kernel), views, "Catallax drew each fine view");
     assert!(fine.sheets[0].views.iter().all(|v| !v.geometry.unproved && !v.geometry.coarse));
-    let fine_svg = export::bytes(&layout_sheet(&fine, 0), Format::Svg, &fine.meta.title).unwrap();
-
     for (tool, extension) in
         [("drawing_export_svg", "svg"), ("drawing_export_pdf", "pdf"), ("drawing_export_dxf", "dxf")]
     {
@@ -231,25 +293,19 @@ fn a_certified_coarse_rod_cut_is_redrawn_at_fine_quality_for_export() {
         let out = call_checked(&mut AppTools { state: &mut state }, tool, json!({ "path": path }), &caller);
         assert!(!out.is_error, "{tool}: {}", out.content);
         let result: Value = serde_json::from_str(&out.content).unwrap();
-        assert_eq!(result["redrawn_from_certified_mesh"], json!(views), "{tool}: {result}");
+        assert_eq!(result["redrawn"], json!(views), "{tool}: {result}");
+        assert_eq!(result["redrawn_from_certified_mesh"], 0);
+        assert_eq!(result["method"], "catallax");
         assert!(path.is_file());
     }
-    assert_eq!(std::fs::read(dir.join("rod.svg")).unwrap(), fine_svg);
+    assert_rod_circle(&dir.join("rod.svg"), &shown);
     assert_eq!(state.drawing.session.as_ref().unwrap().doc.drawing, shown);
 
     state.drawing.session.as_mut().unwrap().doc.drawing = fine;
-    let calls = kernel.take_diagnostics().unwrap();
-    assert!(calls["calls"].as_array().unwrap().iter().any(|c| c["operation"] == "view_curves"));
+    kernel.take_diagnostics().unwrap();
     call(&mut state, "drawing_export_svg", json!({ "path": dir.join("fine.svg") }));
-    let calls = kernel.take_diagnostics().unwrap();
-    assert!(
-        !calls["calls"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|c| matches!(c["operation"].as_str(), Some("view_curves" | "tessellate")))
-    );
-    assert_eq!(std::fs::read(dir.join("fine.svg")).unwrap(), fine_svg);
+    assert_eq!(certified_views(&kernel), views);
+    assert_rod_circle(&dir.join("fine.svg"), &shown);
     std::fs::remove_dir_all(dir).unwrap();
 }
 
@@ -276,9 +332,6 @@ fn a_saved_rod_cache_without_quality_is_regenerated_after_reopening() {
     call(&mut state, "make_drawing", json!({ "template": "iso-a3" }));
     let path = dir.join("old.dwdrw");
     call(&mut state, "drawing_save", json!({ "path": path }));
-    let saved = previews(&state.drawing.session.as_ref().unwrap().doc.drawing);
-
-    // Generate the cache format written before quality was stored separately from proof.
     let bytes = std::fs::read(&path).unwrap();
     let mut package = Package::from_bytes(&bytes).unwrap();
     let mut entries = Vec::new();
@@ -289,6 +342,8 @@ fn a_saved_rod_cache_without_quality_is_regenerated_after_reopening() {
             assert_eq!(geometry.as_object_mut().unwrap().remove("coarse"), Some(json!(true)));
             // A sentinel no projection makes: a view still carrying it was not drawn again.
             geometry["bbox"] = json!(SENTINEL_BOX);
+            geometry["curves"] = json!([]);
+            geometry.as_object_mut().unwrap().remove("unproved");
             bytes = serde_json::to_vec(&geometry).unwrap();
         }
         entries.push(Entry::new(name, bytes));
@@ -305,20 +360,11 @@ fn a_saved_rod_cache_without_quality_is_regenerated_after_reopening() {
     // draws nothing and claims no proof the cache did not record. A cache of unknown
     // quality is drawn again only when certified line work is asked for, below.
     assert!(shown.sheets[0].views.iter().all(|v| v.geometry.bbox == SENTINEL_BOX));
-    assert_eq!(previews(&shown), saved);
+    assert!(shown.sheets[0].views.iter().all(|v| !v.geometry.unproved && !v.geometry.coarse));
     assert_eq!(certified_views(&kernel), 0, "opening drew no view");
     assert_eq!(shown.model.pinned, PartContext::new(&reopened.doc).unwrap().digest);
     soliddraft_app::drawing::follow_part(&mut reopened);
     assert_eq!(reopened.drawing.session.as_ref().unwrap().doc.drawing, shown);
-
-    // The certified path, asked for explicitly: Catallax draws each view and every view
-    // says it is proved.
-    let part = PartContext::new(&reopened.doc).unwrap();
-    let mut fine = shown.clone();
-    apply_with(&mut fine, &Command::UpdateFromModel, &part.certified_part()).unwrap();
-    assert_eq!(certified_views(&kernel), 4, "Catallax drew each fine view");
-    assert!(fine.sheets[0].views.iter().all(|v| !v.geometry.unproved && !v.geometry.coarse));
-    assert!(fine.sheets[0].views.iter().all(|v| v.geometry.bbox != SENTINEL_BOX), "every view was drawn again");
 
     let mut exported = Vec::new();
     for (tool, extension) in
@@ -332,11 +378,51 @@ fn a_saved_rod_cache_without_quality_is_regenerated_after_reopening() {
         let result: Value = serde_json::from_str(&out.content).unwrap();
         let calls = kernel.take_diagnostics().unwrap();
         let fine_requests = calls["calls"].as_array().unwrap().iter().filter(|c| exact_view(c)).count();
-        eprintln!("{tool}: redrawn={}, exact views={fine_requests}", result["redrawn_from_certified_mesh"]);
-        exported.push((result["redrawn_from_certified_mesh"].clone(), fine_requests));
+        assert_eq!(result["redrawn_from_certified_mesh"], 0);
+        assert_eq!(result["method"], "catallax");
+        exported.push((result["redrawn"].clone(), fine_requests));
         assert!(path.is_file());
     }
     assert_eq!(reopened.drawing.session.as_ref().unwrap().doc.drawing, shown);
+    assert_rod_circle(&dir.join("reopened.svg"), &shown);
     std::fs::remove_dir_all(dir).unwrap();
     assert!(exported.iter().all(|(redrawn, fine)| *redrawn == json!(4) && *fine == 4), "{exported:?}");
+}
+
+#[test]
+fn single_sheet_exports_ignore_other_views_but_read_cross_sheet_parents() {
+    use soliddraft_drawing::{Sheet, ViewKind, library};
+
+    let dir = std::env::temp_dir().join(format!("soliddraft-drawing-sheet-scope-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut state = AppState::new(board_bracket());
+    call(&mut state, "make_drawing", json!({ "template": "iso-a3" }));
+    let session = state.drawing.session.as_mut().unwrap();
+    let drawing = &mut session.doc.drawing;
+    let parent = drawing.sheets[0].views.iter().find_map(|v| v.parent()).unwrap();
+    let pos = drawing.sheets[0].views.iter().position(|v| v.id == parent).unwrap();
+    let parent = drawing.sheets[0].views.remove(pos);
+    let mut unrelated = parent.clone();
+    unrelated.id = drawing.next_view_id();
+    unrelated.kind = ViewKind::Section {
+        parent: parent.id,
+        line: vec![],
+        flip: false,
+        label: "A".into(),
+        model_line: vec![],
+        hatch: None,
+    };
+    let mut other = Sheet::from_template("Other", &library::template("iso-a3").template());
+    other.views.extend([parent, unrelated]);
+    drawing.sheets.push(other);
+
+    call(&mut state, "drawing_export_svg", json!({ "path": dir.join("active.svg") }));
+    call(&mut state, "drawing_export_dxf", json!({ "path": dir.join("active.dxf") }));
+    let caller = Caller::Mcp { client: "test".into() };
+    let pdf = dir.join("all.pdf");
+    let refused =
+        call_checked(&mut AppTools { state: &mut state }, "drawing_export_pdf", json!({ "path": pdf }), &caller);
+    assert!(refused.is_error, "{}", refused.content);
+    assert!(!pdf.exists());
+    std::fs::remove_dir_all(dir).unwrap();
 }

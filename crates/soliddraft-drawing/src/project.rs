@@ -637,7 +637,11 @@ fn scale_of<'a>(find: &FindScale<'a>, sheet_scale: f64, view: &View, depth: u8) 
 pub fn view_curves(part: &Part, spec: &ViewSpec) -> Result<ViewCurves, DrawingError> {
     let spec = &ViewSpec { preview: part.preview, ..*spec };
     match part.kernel.view_curves(part.body, spec) {
-        Err(KernelError::Unsupported(_)) => Ok(mesh_hlr::view_curves(part.kernel, part.body, spec)?),
+        Err(KernelError::Unsupported(_)) if spec.preview => {
+            let mut curves = mesh_hlr::view_curves(part.kernel, part.body, spec)?;
+            curves.unproved = true;
+            Ok(curves)
+        }
         other => Ok(other?),
     }
 }
@@ -717,10 +721,11 @@ pub fn project(index: &PartIndex, curves: &ViewCurves, xf: &ViewTransform, diges
         let (source, kind) = source_ref(index, c);
         // Visibility fragments keep the complete edge's exact circle metadata.
         let geometry = match c.source {
-            CurveSource::Edge(edge) => index.edge_curve(edge).unwrap_or(&c.curve),
+            CurveSource::Edge(edge) if !c.approximate => index.exact_edge_curve(edge).unwrap_or(&c.curve),
             _ => &c.curve,
         };
-        if let Curve3::Circle { center, normal, radius } = geometry
+        if !c.approximate
+            && let Curve3::Circle { center, normal, radius } = geometry
             && normal.cross(xf.frame.direction).length() < 1e-6
             && matches!(c.source, CurveSource::Edge(_))
             && !circles.iter().any(|k| k.entity.kernel_hint == source.kernel_hint)

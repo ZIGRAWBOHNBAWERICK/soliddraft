@@ -1812,7 +1812,7 @@ fn export_sheet(state: &mut AppState, format: export::Format, path: Option<PathB
 pub struct SheetExport {
     /// Views on the sheets written.
     pub views: usize,
-    /// Views that were screen previews and were drawn again for export.
+    /// Views drawn again for export.
     pub redrawn: usize,
     /// The part revision the written views show.
     pub revision: ContentHash,
@@ -1845,8 +1845,20 @@ pub(crate) fn sheet_bytes(
         return Err("The current sheet is no longer available; select a sheet before exporting".into());
     }
     let stale = s.doc.stale_views();
-    let (drawing, redrawn) = certified(&s.doc.drawing, part)?;
-    let drawing = drawing.as_ref().unwrap_or(&s.doc.drawing);
+    let mut drawing = s.doc.drawing.clone();
+    let writes_sheet = |i| matches!(format, export::Format::Pdf) || i == s.sheet;
+    let ids: Vec<_> = drawing
+        .sheets
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| writes_sheet(*i))
+        .flat_map(|(_, sheet)| sheet.views.iter().map(|v| v.id))
+        .collect();
+    if !ids.is_empty() {
+        let part = part.ok_or_else(|| soliddraft_drawing::DrawingError::Unproved.to_string())?;
+        soliddraft_drawing::redraw_for_export(&mut drawing, &part.certified_part(), &ids)
+            .map_err(|error| error.to_string())?;
+    }
     let count = drawing.sheets.len();
     let list_of = |i: usize| {
         let format_file = library::template(drawing.sheets[i].template.as_str());
@@ -1857,7 +1869,7 @@ pub(crate) fn sheet_bytes(
             sheet_index: i,
             sheet_count: count,
         };
-        display::layout(drawing, i, &ctx)
+        display::layout(&drawing, i, &ctx)
     };
     let bytes = match format {
         export::Format::Pdf => {
@@ -1871,49 +1883,11 @@ pub(crate) fn sheet_bytes(
         _ => export::bytes(&list_of(s.sheet), format, &s.doc.drawing.meta.title),
     };
     let bytes = bytes.map_err(|e| e.to_string())?;
-    let written: Vec<&View> = match format {
-        export::Format::Pdf => drawing.sheets.iter().flat_map(|sheet| &sheet.views).collect(),
-        _ => drawing.sheets.get(s.sheet).map_or_else(Vec::new, |sheet| sheet.views.iter().collect()),
-    };
     let mut accuracy = AccuracyCounts::default();
-    for view in &written {
-        accuracy.add(view.geometry.accuracy());
+    for id in &ids {
+        accuracy.add(drawing.view(*id).expect("redrawn view").geometry.accuracy());
     }
-    Ok((bytes, SheetExport { views: written.len(), redrawn, revision: drawing.model.pinned.clone(), accuracy }))
-}
-
-/// A copy of `drawing` with unproved or coarse views drawn by the kernel's exact
-/// drawing queries, or `None` when all views are already fine and proved, with the number drawn
-/// again. Only views of the open part's current revision can be regenerated.
-/// Another revision waits for a Rebuild.
-fn certified(drawing: &Drawing, part: Option<&PartContext>) -> Result<(Option<Drawing>, usize), String> {
-    let needs_fine: Vec<&View> =
-        drawing.sheets.iter().flat_map(|s| &s.views).filter(|v| v.geometry.unproved || v.geometry.coarse).collect();
-    if needs_fine.is_empty() {
-        return Ok((None, 0));
-    }
-    let unproved = || soliddraft_drawing::DrawingError::Unproved.to_string();
-    let part = part.ok_or_else(unproved)?;
-    if needs_fine.iter().any(|v| v.geometry.source_digest != part.digest.as_str()) {
-        return Err(unproved());
-    }
-    let mut copy = drawing.clone();
-    let report = soliddraft_drawing::apply_with(&mut copy, &Command::UpdateFromModel, &part.certified_part())
-        .map_err(|e| e.to_string())?;
-    // A view the kernel refused to draw is not written: the export says why, rather than
-    // writing its screen preview or refusing it as a preview.
-    if let Some(dangling) =
-        report.iter().flat_map(|r| &r.dangling_views).find(|d| needs_fine.iter().any(|v| v.id == d.view))
-    {
-        let name = copy
-            .sheet_of(dangling.view)
-            .and_then(|sheet| {
-                sheet.view(dangling.view).map(|view| soliddraft_drawing::project::view_label(sheet, view))
-            })
-            .unwrap_or_else(|| "A view".into());
-        return Err(format!("{name} could not be drawn for export. {}", dangling.cause));
-    }
-    Ok((Some(copy), needs_fine.len()))
+    Ok((bytes, SheetExport { views: ids.len(), redrawn: ids.len(), revision: drawing.model.pinned, accuracy }))
 }
 
 fn save_drawing(state: &mut AppState, path: Option<PathBuf>) {

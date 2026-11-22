@@ -199,7 +199,7 @@ impl DrawingDoc {
                 let i = project::sheet_of(&self.drawing, failure.view)?;
                 let sheet = &self.drawing.sheets[i];
                 let view = sheet.view(failure.view).filter(|v| !v.excluded_from_update)?;
-                Some((i, view.id, project::view_label(sheet, view), failure.cause.as_str()))
+                Some((i, view.id, project::view_label_in(&self.drawing, sheet, view), failure.cause.as_str()))
             })
     }
 
@@ -366,7 +366,7 @@ impl DrawingDoc {
         let part = ctx.part();
         let index = soliddraft_drawing::PartIndex::build(&part).map_err(|e| e.to_string())?;
         let p = project::project_part(&part, &index, &spec, k)
-            .map_err(|e| format!("{}: {e}", project::view_label(&with_view, &view)))?;
+            .map_err(|e| format!("{}: {e}", project::view_label_in(&self.drawing, &with_view, &view)))?;
         view.geometry = p.geometry.clone();
         Ok((view, p))
     }

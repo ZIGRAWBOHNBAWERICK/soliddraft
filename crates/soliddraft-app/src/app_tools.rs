@@ -20,7 +20,7 @@ use soliddraft_document::DocKind;
 use soliddraft_drawing::display::{annotation_name, field_value};
 use soliddraft_drawing::export::Format as SheetFormat;
 use soliddraft_drawing::measure::value_text;
-use soliddraft_drawing::project::{self, view_label};
+use soliddraft_drawing::project::{self, view_label_in};
 use soliddraft_drawing::{
     AnnotationId, AnnotationKind, AnnotationState, Boundary, Command as DrawingCommand, Drawing, HiddenLines,
     PartIndex, SHEET, TangentEdges, ViewDisplay, ViewId, ViewKind, derived,
@@ -653,13 +653,9 @@ impl AppTools<'_> {
         let id = view.id;
         session.doc.remember(id, &vctx.projected);
         drawing::run_command(self.state, DrawingCommand::PlaceView { sheet, view })?;
-        let placed = self
-            .session()?
-            .doc
-            .drawing
-            .sheet_of(id)
-            .and_then(|s| s.view(id).map(|v| view_label(s, v)))
-            .unwrap_or_default();
+        let drawing = &self.session()?.doc.drawing;
+        let placed =
+            drawing.sheet_of(id).and_then(|s| s.view(id).map(|v| view_label_in(drawing, s, v))).unwrap_or_default();
         Ok(json!({ "placed": placed, "id": id.0, "drawing": drawing_json(self.state) }))
     }
 
@@ -813,20 +809,22 @@ impl ToolHost for AppTools<'_> {
 fn find_view(drawing: &Drawing, wanted: &Value) -> Result<(ViewId, String), String> {
     let all = || drawing.sheets.iter().flat_map(|sheet| sheet.views.iter().map(move |v| (sheet, v)));
     let listed = || {
-        let views: Vec<String> =
-            all().map(|(sheet, v)| format!("{} (id {}, {})", view_label(sheet, v), v.id.0, sheet.name)).collect();
+        let views: Vec<String> = all()
+            .map(|(sheet, v)| format!("{} (id {}, {})", view_label_in(drawing, sheet, v), v.id.0, sheet.name))
+            .collect();
         if views.is_empty() { "no views".to_owned() } else { views.join(", ") }
     };
     if let Some(n) = wanted.as_u64() {
         return all()
             .find(|(_, v)| u64::from(v.id.0) == n)
-            .map(|(sheet, v)| (v.id, view_label(sheet, v)))
+            .map(|(sheet, v)| (v.id, view_label_in(drawing, sheet, v)))
             .ok_or_else(|| format!("no view has id {n} (the drawing has: {})", listed()));
     }
     let name = wanted.as_str().unwrap_or_default().trim();
-    let found: Vec<_> = all().filter(|(sheet, v)| view_label(sheet, v).eq_ignore_ascii_case(name)).collect();
+    let found: Vec<_> =
+        all().filter(|(sheet, v)| view_label_in(drawing, sheet, v).eq_ignore_ascii_case(name)).collect();
     match found[..] {
-        [(sheet, v)] => Ok((v.id, view_label(sheet, v))),
+        [(sheet, v)] => Ok((v.id, view_label_in(drawing, sheet, v))),
         [] => Err(format!("no view named `{name}` (the drawing has: {})", listed())),
         _ => {
             let ids: Vec<String> = found.iter().map(|(sheet, v)| format!("{} ({})", v.id.0, sheet.name)).collect();
@@ -858,14 +856,14 @@ fn drawing_json(state: &AppState) -> Option<Value> {
         .iter()
         .enumerate()
         .map(|(index, sheet)| {
-            let name_of = |id: ViewId| sheet.view(id).map(|v| view_label(sheet, v));
+            let name_of = |id: ViewId| d.sheet_of(id).and_then(|s| s.view(id).map(|v| view_label_in(d, s, v)));
             let views: Vec<Value> = sheet
                 .views
                 .iter()
                 .map(|v| {
                     json!({
                         "id": v.id.0,
-                        "name": view_label(sheet, v),
+                        "name": view_label_in(d, sheet, v),
                         "kind": kind_name(&v.kind),
                         "parent": v.parent().and_then(name_of),
                         "parent_id": v.parent().map(|p| p.0),

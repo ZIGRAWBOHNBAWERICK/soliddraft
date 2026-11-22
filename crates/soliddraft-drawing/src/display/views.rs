@@ -195,7 +195,7 @@ pub(super) fn hatch_items(
                 loops,
                 angle: pattern.angle,
                 spacing: pattern.spacing,
-                approximate: poly.approximate,
+                approximate: poly.approximate || matches!(clip, Some(Boundary::Circle { .. })),
             });
         }
     }

@@ -186,7 +186,7 @@ fn compute_view_at(
     }
     let display = projection.map_or(view.display, |(display, _)| display);
     let scale = scale_in(drawing, sheet, view);
-    let refused = |error| view_refusal(|| view_label(&drawing.sheets[sheet], view), error);
+    let refused = |error| view_refusal(|| view_label_in(drawing, &drawing.sheets[sheet], view), error);
     let mut kind = view.kind.clone();
     if let Some(parent) = view.geometry_parent() {
         reproject_parent_marks(&mut kind, &memo[&parent].xf);
@@ -281,7 +281,7 @@ fn compute_view_at(
                                 outer: crate::display::clip_polygon(&outer, &window),
                                 holes: holes.iter().map(|l| crate::display::clip_polygon(l, &window)).collect(),
                                 clip: Some(c.mapped(du, dv, ratio)),
-                                approximate: h.approximate,
+                                approximate: h.approximate || matches!(boundary, Boundary::Circle { .. }),
                             }
                         }
                         None => Polygon { outer, holes, clip: Some(boundary.clone()), approximate: h.approximate },
@@ -903,16 +903,25 @@ pub fn standard_label(view: StandardView) -> &'static str {
 
 /// A view's name in the tree: its own label, or what it shows.
 pub fn view_label(sheet: &Sheet, view: &View) -> String {
+    let find = |id: ViewId| sheet.view(id).map(|v| (v, sheet.projection));
+    view_label_with(view, || view_axes(&find, view, sheet.projection, 0))
+}
+
+pub fn view_label_in(drawing: &Drawing, sheet: &Sheet, view: &View) -> String {
+    let find = |id: ViewId| drawing.sheets.iter().find_map(|s| s.view(id).map(|v| (v, s.projection)));
+    view_label_with(view, || view_axes(&find, view, sheet.projection, 0))
+}
+
+fn view_label_with(view: &View, axes: impl FnOnce() -> Option<(Vec3, Vec3)>) -> String {
     if let Some(l) = &view.label {
         return l.clone();
     }
-    let find = |id: ViewId| sheet.view(id).map(|v| (v, sheet.projection));
     match &view.kind {
         ViewKind::Section { label, .. } => format!("Section {label}-{label}"),
         ViewKind::Detail { label, .. } => format!("Detail {label}"),
         ViewKind::Auxiliary { label, .. } if !label.is_empty() => format!("View {label}"),
         ViewKind::Auxiliary { .. } => "Auxiliary view".into(),
-        _ => match view_axes(&find, view, sheet.projection, 0).and_then(|(d, u)| standard_of(d, u)) {
+        _ => match axes().and_then(|(d, u)| standard_of(d, u)) {
             Some(s) => standard_label(s).to_owned(),
             None if matches!(view.kind, ViewKind::Base { .. }) => "Model view".into(),
             None => "Pictorial view".into(),

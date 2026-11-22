@@ -11,7 +11,7 @@ use egui::{Align2, Color32, CornerRadius, Rect, Sense, Stroke, pos2, vec2};
 use soliddraft_drawing::display::annotation_name;
 use soliddraft_drawing::display::scale_text;
 use soliddraft_drawing::project::effective_scale;
-use soliddraft_drawing::project::view_label;
+use soliddraft_drawing::project::view_label_in;
 use soliddraft_drawing::{AnnotationKind, AnnotationState, Command, Projection, ViewId, ViewKind, ViewScale};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -303,7 +303,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
             }
             for (id, depth) in order {
                 let v = sheet.view(id).unwrap();
-                let name = view_label(sheet, v);
+                let name = view_label_in(&s.doc.drawing, sheet, v);
                 // A derived view's scale and its location on another sheet.
                 let mut sub = String::new();
                 let own = effective_scale(sheet, v);
@@ -466,7 +466,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
                     let view_name = if a.view == SHEET {
                         "sheet".to_owned()
                     } else {
-                        sheet.view(a.view).map(|v| view_label(sheet, v)).unwrap_or_default()
+                        sheet.view(a.view).map(|v| view_label_in(&s.doc.drawing, sheet, v)).unwrap_or_default()
                     };
                     let (dot, sub) = match &a.state {
                         AnnotationState::Ok => (Dot::Ok, view_name.clone()),

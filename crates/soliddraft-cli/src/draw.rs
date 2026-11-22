@@ -808,8 +808,8 @@ struct OutputReport {
     exports: Vec<WrittenFile>,
     #[serde(skip_serializing_if = "Option::is_none")]
     accuracy: Option<AccuracyCounts>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    output_errors: Vec<String>,
+    #[serde(skip)]
+    errors: Vec<String>,
 }
 
 #[derive(Serialize)]
@@ -829,7 +829,7 @@ impl OutputReport {
                 true
             }
             Err(error) => {
-                self.output_errors.push(format!("{path}: {error}"));
+                self.errors.push(format!("{path}: {error}"));
                 false
             }
         }
@@ -847,8 +847,13 @@ impl OutputReport {
     }
 
     fn finish(self) -> Result<(), String> {
-        if self.output_errors.is_empty() { Ok(()) } else { Err(self.output_errors.join("\n")) }
+        if self.errors.is_empty() { Ok(()) } else { Err(self.errors.join("\n")) }
     }
+}
+
+enum SheetOutputError {
+    Refused(String),
+    Invalid(String),
 }
 
 /// Writes the drawing in each format `outs` names. A drawing file written here is a new
@@ -874,9 +879,9 @@ fn write_outputs(
                     .map(|f| format!("{}: {}", f.name, f.cause))
                     .collect();
                 if !causes.is_empty() {
-                    return Err(causes.join("\n"));
+                    return Err(SheetOutputError::Refused(causes.join("\n")));
                 }
-                export::check_sheet(drawing, sheet).map_err(|error| error.to_string())?;
+                export::check_sheet(drawing, sheet).map_err(|error| SheetOutputError::Invalid(error.to_string()))?;
                 Ok(display::layout_sheet(drawing, i))
             })
             .collect()
@@ -885,15 +890,24 @@ fn write_outputs(
     };
     let mut report = OutputReport::default();
     let mut written = vec![(false, false); lists.len()];
-    for out in outs {
+    'outputs: for out in outs {
         let path = Path::new(out);
         match format_of(out) {
             _ if DocKind::of_path(path) == Some(DocKind::Drawing) => {
                 let meta = FileMeta::new(backend, drawing.meta.units);
                 let to = soliddraft_document::kind::saved_path(path, DocKind::Drawing);
-                report.write(&to, file::to_bytes(drawing, &meta).map_err(|e| e.to_string()), None);
+                if !report.write(&to, file::to_bytes(drawing, &meta).map_err(|e| e.to_string()), None) {
+                    break;
+                }
             }
             Some(Format::Pdf) => {
+                if let Some(error) = lists.iter().find_map(|sheet| match sheet {
+                    Err(SheetOutputError::Invalid(error)) => Some(error),
+                    _ => None,
+                }) {
+                    report.errors.push(format!("{out}: {error}"));
+                    break;
+                }
                 let sheets = lists.iter().map(|sheet| sheet.as_ref().cloned()).collect::<Result<Vec<_>, _>>();
                 match sheets {
                     Ok(sheets) => {
@@ -902,13 +916,15 @@ fn write_outputs(
                         for sheet in &sheets {
                             accuracy.add(sheet.accuracy());
                         }
-                        if report.write(path, export::pdf(&sheets, &info).map_err(|e| e.to_string()), Some(accuracy)) {
-                            for (_, page) in &mut written {
-                                *page = true;
-                            }
+                        if !report.write(path, export::pdf(&sheets, &info).map_err(|e| e.to_string()), Some(accuracy)) {
+                            break;
+                        }
+                        for (_, page) in &mut written {
+                            *page = true;
                         }
                     }
-                    Err(error) => report.output_errors.push(format!("{out}: {error}")),
+                    Err(SheetOutputError::Refused(error)) => report.errors.push(format!("{out}: {error}")),
+                    Err(SheetOutputError::Invalid(_)) => unreachable!(),
                 }
             }
             Some(format) => {
@@ -919,19 +935,29 @@ fn write_outputs(
                             let dxf = matches!(format, Format::Dxf);
                             let accuracy = if dxf { list.dxf_accuracy() } else { list.accuracy() };
                             let bytes = export::bytes(list, format, &drawing.meta.title).map_err(|e| e.to_string());
-                            if report.write(&path, bytes, Some(accuracy)) {
-                                if dxf {
-                                    written[i].0 = true;
-                                } else {
-                                    written[i].1 = true;
-                                }
+                            if !report.write(&path, bytes, Some(accuracy)) {
+                                break 'outputs;
+                            }
+                            if dxf {
+                                written[i].0 = true;
+                            } else {
+                                written[i].1 = true;
                             }
                         }
-                        Err(error) => report.output_errors.push(format!("{}: {error}", path.display())),
+                        Err(SheetOutputError::Refused(error)) => {
+                            report.errors.push(format!("{}: {error}", path.display()));
+                        }
+                        Err(SheetOutputError::Invalid(error)) => {
+                            report.errors.push(format!("{}: {error}", path.display()));
+                            break 'outputs;
+                        }
                     }
                 }
             }
-            None => report.output_errors.push(format!("{out}: write .dwdrw, .svg, .pdf or .dxf")),
+            None => {
+                report.errors.push(format!("{out}: write .dwdrw, .svg, .pdf or .dxf"));
+                break;
+            }
         }
     }
     for (list, formats) in lists.iter().zip(written) {
@@ -1270,6 +1296,11 @@ mod tests {
             view.geometry.catallax = true;
             view.geometry.unproved = false;
             view.geometry.source_digest = drawing.model.pinned.as_str().to_owned();
+            view.geometry.curves.retain(|curve| !curve.path.to_svg().contains(['C', 'Q']));
+            for curve in &mut view.geometry.curves {
+                curve.accuracy = soliddraft_drawing::Accuracy::Exact;
+            }
+            view.geometry.hatch.clear();
         }
         let mut second = drawing.sheets[0].clone();
         let view = drawing.sheets[0].views.pop().unwrap();
@@ -1301,7 +1332,7 @@ mod tests {
         assert_eq!(exports.len(), 2);
         for (file, path) in exports.iter().zip(&paths[1..]) {
             assert_eq!(file["path"].as_str(), Some(path.as_str()));
-            assert!(file["accuracy"]["approximate"].as_u64().unwrap() > 0);
+            assert_eq!(file["accuracy"]["approximate"], 1);
         }
         let error = report.finish().unwrap_err();
         assert!(error.contains("Isometric view: drawing work allowance exhausted"));
@@ -1310,6 +1341,19 @@ mod tests {
         }
         for name in ["result.svg", "result.dxf"] {
             assert!(std::fs::metadata(dir.join(name)).unwrap().len() > 0, "{name}");
+        }
+        drawing.sheets.truncate(1);
+        std::fs::create_dir(dir.join("directory.svg")).unwrap();
+        for invalid in ["typo.exe", "directory.svg"] {
+            let paths = ["before.svg", invalid, "existing.svg"].map(|out| dir.join(out).display().to_string());
+            std::fs::write(&paths[2], b"keep this file").unwrap();
+            let report = write_outputs(&drawing, &paths, "test", &[]);
+            let json = serde_json::to_value(&report).unwrap();
+            assert_eq!(json["exports"].as_array().unwrap().len(), 1);
+            assert_eq!(json["exports"][0]["path"].as_str(), Some(paths[0].as_str()));
+            assert!(json.get("output_errors").is_none());
+            assert!(report.finish().is_err());
+            assert_eq!(std::fs::read(&paths[2]).unwrap(), b"keep this file");
         }
         std::fs::remove_dir_all(dir).unwrap();
     }

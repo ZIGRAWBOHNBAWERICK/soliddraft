@@ -376,10 +376,13 @@ pub fn sheet_bounds(curves: &[ViewCurve], frame: &ViewFrame) -> [f64; 4] {
                 *radius,
                 Some((start_deg.min(*end_deg).to_radians(), (end_deg - start_deg).abs().to_radians())),
             ),
-            Curve3::Nurbs { points, .. } if !points.is_empty() => {
-                for &point in points {
-                    include(frame.project(point));
-                }
+            Curve3::Nurbs { degree, knots, points, weights }
+                if *degree > 0
+                    && points.len() > *degree as usize
+                    && knots.len() == points.len() + *degree as usize + 1
+                    && (weights.is_empty() || (weights.len() == points.len() && weights.iter().all(|w| *w > 0.0))) =>
+            {
+                Nurbs::new(*degree as usize, knots, points, weights).include_projected_bounds(frame, &mut include);
                 continue;
             }
             _ => {
@@ -834,6 +837,42 @@ impl Nurbs {
         Nurbs { p, knots: knots.to_vec(), points }
     }
 
+    fn include_projected_bounds(self, frame: &ViewFrame, include: &mut impl FnMut(Point2)) {
+        let mut pieces = vec![(self, 0)];
+        while let Some((piece, depth)) = pieces.pop() {
+            let project = |[x, y, z, w]: [f64; 4]| frame.project(Vec3::new(x / w, y / w, z / w));
+            let first = project(piece.points[0]);
+            let last = project(*piece.points.last().unwrap());
+            let mut low = first;
+            let mut high = first;
+            for &control in &piece.points[1..] {
+                let p = project(control);
+                low = Point2::new(low.u.min(p.u), low.v.min(p.v));
+                high = Point2::new(high.u.max(p.u), high.v.max(p.v));
+            }
+            let tolerance = 1e-4;
+            let tight = first.u.min(last.u) - low.u <= tolerance
+                && high.u - first.u.max(last.u) <= tolerance
+                && first.v.min(last.v) - low.v <= tolerance
+                && high.v - first.v.max(last.v) <= tolerance;
+            let lo = piece.knots[piece.p];
+            let hi = piece.knots[piece.points.len()];
+            let mid = lo + (hi - lo) * 0.5;
+            if tight
+                || depth >= 16
+                || mid <= lo
+                || mid >= hi
+                || piece.knots.iter().filter(|&&k| k == mid).count() > piece.p
+            {
+                include(low);
+                include(high);
+            } else {
+                let (left, right) = piece.split(mid);
+                pieces.extend([(left, depth + 1), (right, depth + 1)]);
+            }
+        }
+    }
+
     fn into_curve(self, degree: u32, rational: bool) -> Curve3 {
         let points = self.points.iter().map(|h| Vec3::new(h[0] / h[3], h[1] / h[3], h[2] / h[3])).collect();
         let weights = if rational { self.points.iter().map(|h| h[3]).collect() } else { Vec::new() };
@@ -976,10 +1015,10 @@ mod tests {
         let curves = [ViewCurve::new(spline, CurveSource::Unknown, true)];
         let frame = ViewSpec::new(Vec3::Z, Vec3::Y).frame().unwrap();
         let bounds = sheet_bounds(&curves, &frame);
-        assert!(bounds[1] <= -80. && bounds[3] >= 18.);
+        assert!(bounds[1] <= -80. && (18.0..=18.0001).contains(&bounds[3]), "{bounds:?}");
         let frame = ViewSpec::new(Vec3::Z, Vec3::X).frame().unwrap();
         let bounds = sheet_bounds(&curves, &frame);
-        assert!(bounds[0] <= -18. && bounds[2] >= 80.);
+        assert!((-18.0001..=-18.0).contains(&bounds[0]) && bounds[2] >= 80.0, "{bounds:?}");
     }
 
     fn quarter_arc() -> Curve3 {

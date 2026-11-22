@@ -65,19 +65,29 @@ fn rebuild_commits_successful_views_alongside_base_and_projected_refusals() {
             .find(|v| if projected { matches!(v.kind, ViewKind::Projected { .. }) } else { v.id == FRONT })
             .unwrap();
         let id = view.id;
+        let target = usize::from(projected);
+        if projected {
+            apply(&mut d, &Command::AddSheet { name: "Sheet2".into(), template: "iso-a3".into() }).unwrap();
+            apply(&mut d, &Command::MoveViewToSheet { view: id, sheet: target, to: Point2::new(140.0, 100.0) })
+                .unwrap();
+        }
+        let view = d.view(id).unwrap();
         let before = view.geometry.clone();
-        k.refuse_direction = Some(project::spec_in(&d, 0, view).unwrap().direction);
+        k.refuse_direction = Some(project::spec_in(&d, target, view).unwrap().direction);
         let changed = box_part(&k, "block", Vec3::new(60.0, 30.0, 10.0));
         let report = UndoStack::new().run(&mut d, &Command::UpdateFromModel, Some(&changed)).unwrap().unwrap();
         assert!(report.views_updated > 0);
-        assert!(report.dangling_views.iter().any(|f| f.view == id && f.cause.contains("test direction refused")));
+        let failure = report.dangling_views.iter().find(|f| f.view == id).unwrap();
+        assert!(failure.cause.contains("test direction refused"));
+        assert_eq!(failure.name, if projected { "Top view" } else { "Front view" });
         assert_eq!(d.model.pinned, changed.digest);
         assert_eq!(d.view(id).unwrap().geometry, before);
         assert!(!d.views_match_pin());
         for rebuilt in d.sheets[0].views.iter().filter(|v| v.id != id) {
             assert_eq!(rebuilt.geometry.source_digest, changed.digest.as_str());
         }
-        let error = export::check_sheet(&d, &d.sheets[0]).unwrap_err().to_string();
+        let error = export::check_sheet(&d, &d.sheets[target]).unwrap_err().to_string();
+        assert!(error.contains(&failure.name), "{error}");
         assert!(error.contains("does not match the drawing's accepted revision"), "{error}");
     }
 }
@@ -514,6 +524,26 @@ fn unmarked_circular_hatch_boundaries_are_approximate_after_sampling() {
     let polygon = project::region_polygon(&region, &xf, None);
     assert!(polygon.outer.len() > 4 && polygon.holes[0].len() > 4);
     assert!(polygon.approximate);
+}
+
+#[test]
+fn dxf_marks_the_polygon_used_to_clip_a_circular_hatch() {
+    let k = BoxKernel::new();
+    let mut drawing = drawing(&box_part(&k, "block", Vec3::new(40.0, 30.0, 10.0)));
+    let view = drawing.view_mut(FRONT).unwrap();
+    view.geometry.hatch.push(soliddraft_drawing::Polygon {
+        outer: vec![
+            Point2::new(-10.0, -10.0),
+            Point2::new(10.0, -10.0),
+            Point2::new(10.0, 10.0),
+            Point2::new(-10.0, 10.0),
+        ],
+        clip: Some(Boundary::Circle { center: Point2::new(0.0, 0.0), radius: 4.0 }),
+        ..Default::default()
+    });
+    let list = layout_sheet(&drawing, 0);
+    assert_eq!(list.hatches[0].loops[0].len(), 96);
+    assert_eq!(list.dxf_accuracy().approximate, 1);
 }
 
 #[test]

@@ -107,8 +107,23 @@ fn interference_clearance_and_hole_alignment_application_loops() {
             let (_, after) = call(&mut state, "model_summary", json!({}));
             assert_eq!(before["assembly"]["accepted_state"], after["assembly"]["accepted_state"]);
 
+            let part: soliddraft_assembly::OccurrencePath = "4".parse().unwrap();
+            let at = soliddraft_assembly::Placement::translation(glam::DVec3::new(3.0, 7.0, 11.0));
+            state.assembly.session.as_mut().unwrap().doc.move_to(&[(part.clone(), at)]).unwrap();
+            let (error, warm) = call(&mut state, "assembly_check_clearance", json!({"clearance":"0.5 mm"}));
+            assert!(!error && warm["report"]["met"] == 1, "{warm}");
+            let ((error, refined), work) = soliddraft_kernel_catallax::with_request_allowance(0, || {
+                call(&mut state, "assembly_check_clearance", json!({"clearance":"1 mm"}))
+            });
+            assert!(!error && work.exhausted, "{refined}");
+            let pair = &refined["report"]["results"][0];
+            assert_eq!(pair["outcome"], "clear", "{pair}");
+            assert_eq!(pair["clearance"], "undecided", "{pair}");
+            assert!(pair["distance"]["lo"].as_f64().unwrap() > 0.0, "{pair}");
+            assert!(pair["why"].as_str().unwrap().contains("separated"), "{pair}");
+            assert!(pair["exact_refused"].as_array().unwrap().iter().any(|r| r["code"] == "numbers.operation-budget"));
+
             // A gap below the mesh chord bound is still decided from the exact solids.
-            let part = "4".parse().unwrap();
             let at = soliddraft_assembly::Placement::translation(glam::DVec3::new(3.0, 7.0, 10.0001));
             state.assembly.session.as_mut().unwrap().doc.move_to(&[(part, at)]).unwrap();
             let (error, met) = call(&mut state, "assembly_check_clearance", json!({"clearance":"0.00005 mm"}));

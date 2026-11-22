@@ -124,7 +124,11 @@ pub fn update_from_model(drawing: &mut Drawing, part: &Part) -> Result<UpdateRep
         if let Some(cause) = failure {
             failed.push(id);
             let sheet = drawing.sheet_of(id).expect("listed");
-            report.dangling_views.push(DanglingView { view: id, name: project::view_label(sheet, view), cause });
+            report.dangling_views.push(DanglingView {
+                view: id,
+                name: project::view_label_in(drawing, sheet, view),
+                cause,
+            });
             continue;
         }
         let ctx = &contexts[&id];

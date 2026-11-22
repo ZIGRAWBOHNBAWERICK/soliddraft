@@ -616,15 +616,15 @@ fn hover_label(s: &DrawingSession, owner: Owner) -> Option<String> {
             };
             Some(format!(
                 "{} · {}{kind}{}",
-                project::view_label(sheet, v),
+                project::view_label_in(&s.doc.drawing, sheet, v),
                 c.source.role,
                 if c.visible { "" } else { " · hidden" }
             ))
         }
         Owner::View(view) => sheet.view(view).map(|v| match &v.kind {
-            ViewKind::Section { .. } => format!("{} · cutting line", project::view_label(sheet, v)),
-            ViewKind::Detail { .. } => format!("{} · boundary", project::view_label(sheet, v)),
-            _ => project::view_label(sheet, v),
+            ViewKind::Section { .. } => format!("{} · cutting line", project::view_label_in(&s.doc.drawing, sheet, v)),
+            ViewKind::Detail { .. } => format!("{} · boundary", project::view_label_in(&s.doc.drawing, sheet, v)),
+            _ => project::view_label_in(&s.doc.drawing, sheet, v),
         }),
         Owner::Annotation(id) | Owner::AnnotationEnd(id, _) => {
             let a = s.doc.drawing.annotation(id)?;

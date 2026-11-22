@@ -20,11 +20,9 @@ fn unavailable(error: KernelError) -> BodyQueryRefusal {
     }
 }
 
-fn leave_overlap_unresolved(result: &mut PairResult, clearance: Option<f64>) {
-    if result.outcome == Outcome::Clear {
-        result.outcome = Outcome::TouchingOrUndecided;
-        result.clearance = clearance.map(|_| ClearanceOutcome::Undecided);
-        result.why = "The exact check could not determine whether the solids overlap.".into();
+fn describe_undecided_clearance(result: &mut PairResult) {
+    if result.outcome == Outcome::Clear && result.clearance == Some(ClearanceOutcome::Undecided) {
+        result.why = "The parts are separated, but the exact clearance is undecided.".into();
     }
 }
 
@@ -63,7 +61,7 @@ impl AssemblyDocument {
             Ok(answer) => answer,
             Err(r) => {
                 result.exact_refused.push(r);
-                leave_overlap_unresolved(result, clearance);
+                describe_undecided_clearance(result);
                 return;
             }
         };
@@ -121,13 +119,10 @@ impl AssemblyDocument {
                 result.why = "The exact solids have no overlap volume.".into();
             }
         }
-        if positive.is_none() {
-            leave_overlap_unresolved(result, clearance);
-        }
         match gap {
             Some(Ok(gap)) => {
                 // A boundary distance alone cannot distinguish containment from separation.
-                if positive == Some(false) || result.outcome == Outcome::Clear {
+                if positive == Some(false) || (result.outcome == Outcome::Clear && gap.distance.lo > 0.0) {
                     result.distance = DistanceBounds { lo: gap.distance.lo, hi: Some(gap.distance.hi) };
                     if gap.zero {
                         result.outcome = Outcome::Touching;
@@ -141,7 +136,7 @@ impl AssemblyDocument {
                         Some(false) => ClearanceOutcome::Below,
                         None => ClearanceOutcome::Undecided,
                     });
-                } else if gap.zero {
+                } else if gap.zero && result.outcome != Outcome::Clear {
                     result.distance = DistanceBounds { lo: 0.0, hi: Some(0.0) };
                     result.clearance = clearance.map(|_| ClearanceOutcome::Below);
                 }
@@ -157,5 +152,6 @@ impl AssemblyDocument {
             Some(Err(r)) => result.exact_refused.push(r),
             None => {}
         }
+        describe_undecided_clearance(result);
     }
 }

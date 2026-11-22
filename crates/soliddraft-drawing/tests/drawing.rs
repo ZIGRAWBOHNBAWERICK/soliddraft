@@ -380,19 +380,19 @@ fn changing_projection_preserves_existing_views_through_rebuild_and_reopen() {
     let specs: Vec<_> =
         d.sheets[0].views.iter().map(|v| soliddraft_drawing::project::spec_of(&d.sheets[0], v)).collect();
     let labels: Vec<_> =
-        d.sheets[0].views.iter().map(|v| soliddraft_drawing::project::view_label(&d.sheets[0], v)).collect();
+        d.sheets[0].views.iter().map(|v| soliddraft_drawing::project::view_label_in(&d, &d.sheets[0], v)).collect();
     let mut stack = UndoStack::new();
     stack.run(&mut d, &Command::SetSheetProjection { sheet: 0, projection: Projection::ThirdAngle }, None).unwrap();
     for (i, v) in d.sheets[0].views.iter().enumerate() {
         assert_eq!(soliddraft_drawing::project::spec_of(&d.sheets[0], v), specs[i]);
-        assert_eq!(soliddraft_drawing::project::view_label(&d.sheets[0], v), labels[i]);
+        assert_eq!(soliddraft_drawing::project::view_label_in(&d, &d.sheets[0], v), labels[i]);
     }
     let mut placed = d.view(ViewId(3)).unwrap().clone();
     placed.id = d.next_view_id();
     if let ViewKind::Projected { projection, .. } = &mut placed.kind {
         *projection = None;
     }
-    assert_eq!(soliddraft_drawing::project::view_label(&d.sheets[0], &placed), "Right view");
+    assert_eq!(soliddraft_drawing::project::view_label_in(&d, &d.sheets[0], &placed), "Right view");
     let mut with_new = d.clone();
     apply(&mut with_new, &Command::PlaceView { sheet: 0, view: placed.clone() }).unwrap();
     assert!(matches!(
@@ -474,7 +474,8 @@ fn round_dimension_repairs_reject_straight_edges_without_losing_the_warning() {
 
 #[test]
 fn scaled_dxf_dimensions_remeasure_from_their_definition_points() {
-    let k = BoxKernel::new();
+    let mut k = BoxKernel::new();
+    k.detail_strokes = true;
     let part = box_part(&k, "block", Vec3::new(100.0, 30.0, 10.0));
     let (mut d, _) = make_drawing(&part, &new_drawing("iso-a3")).unwrap();
     apply(&mut d, &Command::SetSheetScale { sheet: 0, scale: Scale::new(1, 2) }).unwrap();
@@ -504,7 +505,8 @@ fn scaled_dxf_dimensions_remeasure_from_their_definition_points() {
 
 #[test]
 fn the_file_and_the_exports_carry_the_drawing() {
-    let k = BoxKernel::new();
+    let mut k = BoxKernel::new();
+    k.detail_strokes = true;
     let part = box_part(&k, "block", Vec3::new(40.0, 30.0, 10.0));
     let (d, _) = make_drawing(&part, &new_drawing("iso-a3")).unwrap();
     let bytes = file::to_bytes(&d, &FileMeta::new("boxes test", d.meta.units)).unwrap();

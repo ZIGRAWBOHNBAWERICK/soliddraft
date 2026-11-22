@@ -128,10 +128,20 @@ pub fn make_drawing(part: &Part, new: &NewDrawing) -> Result<MadeDrawing, Drawin
     // The base view goes first so projected views follow their parent.
     planned.swap(0, base);
 
+    let view_display = |v| {
+        if project::is_pictorial(&ViewSpec::standard(v)) {
+            ViewDisplay::PICTORIAL
+        } else {
+            ViewDisplay { hidden: new.hidden, ..ViewDisplay::ORTHOGRAPHIC }
+        }
+    };
     // The kernel's curves for every view, unscaled.
     let mut curves: Vec<ViewCurves> = Vec::new();
     for (v, _) in &planned {
-        curves.push(project::view_curves(part, &ViewSpec::standard(*v))?);
+        let spec = project::with_display(ViewSpec::standard(*v), &view_display(*v));
+        let curves_for_view = project::view_curves(part, &spec)
+            .map_err(|e| project::view_refusal(|| project::standard_label(*v).to_owned(), e))?;
+        curves.push(curves_for_view);
     }
     let extent = |c: &ViewCurves| (c.bbox_2d[2] - c.bbox_2d[0], c.bbox_2d[3] - c.bbox_2d[1]);
     // Stacked dimensions go on the outer sides of the views, and the left is one.
@@ -247,12 +257,7 @@ pub fn make_drawing(part: &Part, new: &NewDrawing) -> Result<MadeDrawing, Drawin
     for (i, ((v, fold), c)) in planned.iter().zip(&cells).enumerate() {
         let id = ViewId(i as u32 + 1);
         ids.push(id);
-        let is_pictorial = project::is_pictorial(&ViewSpec::standard(*v));
-        let display = if is_pictorial {
-            ViewDisplay::PICTORIAL
-        } else {
-            ViewDisplay { hidden: new.hidden, ..ViewDisplay::ORTHOGRAPHIC }
-        };
+        let display = view_display(*v);
         let (kind, alignment, scale, position) = match (c, fold) {
             (Some((cx, cy)), Some(f)) if i != 0 => {
                 let axis = if *cy == 0 { AlignAxis::Horizontal } else { AlignAxis::Vertical };

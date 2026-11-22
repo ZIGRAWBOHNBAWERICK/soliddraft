@@ -11,7 +11,7 @@ use egui::{Align2, Color32, CornerRadius, Rect, Sense, Stroke, pos2, vec2};
 use soliddraft_drawing::display::annotation_name;
 use soliddraft_drawing::display::scale_text;
 use soliddraft_drawing::project::effective_scale;
-use soliddraft_drawing::project::view_label;
+use soliddraft_drawing::project::view_label_in;
 use soliddraft_drawing::{AnnotationKind, AnnotationState, Command, Projection, ViewId, ViewKind, ViewScale};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -105,7 +105,10 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
     );
     let dangling = s.doc.dangling_count();
     let changed = s.doc.attention_count() - dangling;
-    let (status, colour) = if let Some(marker) = s.marker() {
+    let refused = s.doc.refused_views().count();
+    let (status, colour) = if refused > 0 {
+        (format!("{refused} refused"), theme::error())
+    } else if let Some(marker) = s.marker() {
         marker
     } else if dangling > 0 {
         (format!("{dangling} dangling"), theme::error())
@@ -153,16 +156,18 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
             let file = model.path.rsplit('/').next().unwrap_or(&model.path).to_owned();
             let sub = format!("rev {}", model.pinned.short());
             let state = s.link_state();
-            let (dot, tip) = match &state {
-                LinkState::Missing => (Dot::Error, "Not found: select for the repair".to_owned()),
-                LinkState::Newer { now } => (
+            let (dot, tip) = match (&state, s.doc.rebuild_guidance()) {
+                (LinkState::Missing, _) => (Dot::Error, "Not found: select for the repair".to_owned()),
+                (_, Some(guidance)) => (Dot::Warn, guidance.into()),
+                (LinkState::Newer { now }, _) => (
                     Dot::Warn,
                     format!("Newer version available (rev {}): Rebuild brings the views to it", now.short()),
                 ),
                 _ if s.doc.is_stale() => (Dot::Warn, "The open part moved on: Rebuild brings the views to it".into()),
-                LinkState::Current => (Dot::Ok, format!("Up to date · {}", s.found_words())),
-                LinkState::Unverified => (Dot::None, "Not a SolidDraft document; no revision to compare".into()),
-                LinkState::Unknown => (Dot::None, "Not resolved yet".into()),
+                _ if !s.is_up_to_date() => (Dot::Warn, "Some views need a rebuild".into()),
+                (LinkState::Current, _) => (Dot::Ok, format!("Up to date · {}", s.found_words())),
+                (LinkState::Unverified, _) => (Dot::None, "Not a SolidDraft document; no revision to compare".into()),
+                (LinkState::Unknown, _) => (Dot::None, "Not resolved yet".into()),
             };
             let r = row(
                 ui,
@@ -181,7 +186,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
             if let Some(colour) = match &state {
                 LinkState::Missing => Some(theme::error()),
                 LinkState::Newer { .. } => Some(theme::warn()),
-                _ if s.doc.is_stale() => Some(theme::warn()),
+                _ if !s.is_up_to_date() => Some(theme::warn()),
                 _ => None,
             } {
                 let glyph = Rect::from_center_size(pos2(r.rect.right() - 34.0, r.rect.center().y), vec2(14.0, 14.0));
@@ -191,7 +196,9 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
                 actions.push(DrawingAction::Select(Some(DrawingSel::Model)));
             }
             r.context_menu(|ui| {
-                if ui.button("Rebuild").clicked() {
+                if let Some(guidance) = s.doc.rebuild_guidance() {
+                    ui.label(guidance);
+                } else if ui.button("Rebuild").clicked() {
                     actions.push(DrawingAction::Rebuild);
                     ui.close();
                 }
@@ -281,8 +288,6 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
             }
             // Views: parents first, children indented under them.
             let model = &s.doc.drawing.meta.title;
-            let rev = s.doc.drawing.model.pinned.short().to_owned();
-            let stale = s.doc.stale_views();
             // Each view right after its parent, children in sheet order.
             fn descend(sheet: &soliddraft_drawing::Sheet, parent: ViewId, depth: u8, order: &mut Vec<(ViewId, u8)>) {
                 for c in sheet.views.iter().filter(|c| c.parent() == Some(parent)) {
@@ -299,7 +304,8 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
             }
             for (id, depth) in order {
                 let v = sheet.view(id).unwrap();
-                let name = view_label(sheet, v);
+                let name = view_label_in(&s.doc.drawing, sheet, v);
+                let update_reason = s.doc.view_update_reason(v);
                 // A derived view's scale and its location on another sheet.
                 let mut sub = String::new();
                 let own = effective_scale(sheet, v);
@@ -320,7 +326,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
                     ViewKind::Auxiliary { .. } => Icon::Plane,
                     _ => Icon::Display,
                 };
-                let dot = if stale.contains(&id) {
+                let dot = if update_reason.is_some() {
                     Dot::Warn
                 } else {
                     let worst = sheet
@@ -350,11 +356,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
                         selected: selection == Some(DrawingSel::View(id)),
                         dim: v.excluded_from_update,
                         dot,
-                        tip: Some(if stale.contains(&id) {
-                            "Out of date: update views"
-                        } else {
-                            "Click to select; double-click to fold a view off it"
-                        }),
+                        tip: Some(update_reason.unwrap_or("Click to select; double-click to fold a view off it")),
                     },
                 );
                 if r.clicked() {
@@ -404,12 +406,8 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
                     }
                 });
                 if open && depth == 2 {
-                    let reference = format!("{model} rev {rev}");
-                    let tip = if stale.contains(&id) {
-                        "Newer version available; this view shows the pinned revision until a Rebuild"
-                    } else {
-                        "The model this view shows, at the revision of the last update"
-                    };
+                    let reference = format!("{model} rev {}", super::document::DrawingDoc::view_revision(v));
+                    let tip = update_reason.unwrap_or("The part revision this view shows");
                     row(
                         ui,
                         RowSpec {
@@ -462,7 +460,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
                     let view_name = if a.view == SHEET {
                         "sheet".to_owned()
                     } else {
-                        sheet.view(a.view).map(|v| view_label(sheet, v)).unwrap_or_default()
+                        sheet.view(a.view).map(|v| view_label_in(&s.doc.drawing, sheet, v)).unwrap_or_default()
                     };
                     let (dot, sub) = match &a.state {
                         AnnotationState::Ok => (Dot::Ok, view_name.clone()),

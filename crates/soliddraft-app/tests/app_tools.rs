@@ -246,8 +246,9 @@ fn every_tool_runs_without_a_window_and_undoes_as_its_row_says() {
     assert_eq!(drawing["active"], true, "{drawing}");
     let views = drawing["sheets"][0]["views"].as_array().unwrap().clone();
     for v in &views {
-        let (exact, polygon) = (v["accuracy"]["exact"].as_u64().unwrap(), v["accuracy"]["polygon"].as_u64().unwrap());
-        assert_eq!(exact + polygon, v["curves"].as_u64().unwrap(), "every curve carries one label: {v}");
+        let count = |label: &str| v["accuracy"][label].as_u64().unwrap();
+        let labelled = count("exact") + count("polygon") + count("approximate");
+        assert_eq!(labelled, v["curves"].as_u64().unwrap(), "every curve carries one label: {v}");
     }
     assert!(views.iter().any(|v| v["accuracy"]["exact"].as_u64() > Some(0)), "whole lines stay exact: {drawing}");
     let name = |v: &Value| v["name"].as_str().unwrap().to_owned();
@@ -262,7 +263,7 @@ fn every_tool_runs_without_a_window_and_undoes_as_its_row_says() {
     assert_eq!(placed["kind"], "section", "{placed}");
     assert_eq!(
         (placed["parent"].as_str(), placed["preview"].as_bool(), placed["up_to_date"].as_bool()),
-        (Some(first.as_str()), Some(true), Some(true)),
+        (Some(first.as_str()), Some(false), Some(true)),
         "{placed}"
     );
     s.call("drawing_hidden_lines", json!({ "view": first, "shown": false }));
@@ -296,14 +297,14 @@ fn every_tool_runs_without_a_window_and_undoes_as_its_row_says() {
         let path = s.path(file);
         let written = s.call(tool, json!({ "path": path }));
         assert!(dir.join(file).is_file(), "{tool} wrote no {file}");
-        let exact = written["accuracy"]["exact"].as_u64().unwrap();
-        let polygon = written["accuracy"]["polygon"].as_u64().unwrap();
+        let count = |label: &str| written["accuracy"][label].as_u64().unwrap();
+        let (exact, polygon, approximate) = (count("exact"), count("polygon"), count("approximate"));
         // The PDF writes every sheet; the others write the active sheet, which is the
-        // added empty one here.
+        // added empty one here. Written views are Catallax's curves, not mesh polylines.
         if written["views"].as_u64().unwrap() > 0 {
-            assert!(exact > 0 && polygon > 0, "{tool} reports what it wrote as exact and as polygon: {written}");
+            assert!(exact > 0 && polygon == 0, "{tool} reports what it wrote as exact: {written}");
         } else {
-            assert_eq!((exact, polygon), (0, 0), "{tool} wrote no view: {written}");
+            assert_eq!((exact, polygon, approximate), (0, 0, 0), "{tool} wrote no view: {written}");
         }
     }
     let (part, copy) = (s.path("part.dwprt"), s.path("copy.dwprt"));
@@ -327,6 +328,9 @@ fn every_tool_runs_without_a_window_and_undoes_as_its_row_says() {
         assert!(package.with_extension(extension).is_file(), "{extension} is written: {written}");
     }
     assert_eq!(written["drawing"]["not_in_file"], json!([]), "{written}");
+    let counts = &written["drawing"]["accuracy"];
+    assert!(counts["exact"].as_u64().is_some_and(|n| n > 0), "{written}");
+    assert_eq!(counts["approximate"], 0, "{written}");
     s.call("drawing_close", json!({}));
     let area = s.call("measure_entity", json!({"entity":"Boss-Extrude1 · End cap"}));
     assert_eq!(area["quantity"], "face_area");

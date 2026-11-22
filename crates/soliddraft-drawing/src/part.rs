@@ -17,7 +17,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use soliddraft_document::ConfigurationId;
 use soliddraft_kernel_api::drawing::Curve3;
-use soliddraft_kernel_api::{BodyId, EdgeId, FaceId, HistoryRecord, Kernel, SurfaceKind, Vec3};
+use soliddraft_kernel_api::{BodyId, EdgeId, FaceId, HistoryRecord, Kernel, KernelError, SurfaceKind, Vec3};
 
 use crate::entity::{EntityKind, EntityRef};
 use crate::model_items::ModelDimension;
@@ -112,6 +112,7 @@ pub enum Resolution {
 struct IndexedEdge {
     id: EdgeId,
     curve: Curve3,
+    approximate: bool,
     origin: String,
     role: &'static str,
     point: Vec3,
@@ -158,12 +159,29 @@ impl<'k> PartIndex<'k> {
         let edge_origin = origins(&history, |r| r.edges.generated().collect());
         let face_origin = origins(&history, |r| r.faces.generated().collect());
         let mut edges = Vec::with_capacity(topology.edges.len());
+        let mut display_edges = None;
         for e in &topology.edges {
-            let curve = kernel.edge_curve(body, e.id)?;
+            let (curve, approximate) = match kernel.edge_drawing(body, e.id) {
+                Ok(drawn) => (drawn.curve, drawn.approximate),
+                Err(error @ (KernelError::QueryFailed { .. } | KernelError::Unsupported(_))) => {
+                    if display_edges.is_none() {
+                        display_edges = Some(kernel.rendering_edges(body, &Default::default())?);
+                    }
+                    let points = display_edges
+                        .as_ref()
+                        .and_then(|edges| edges.iter().find(|edge| edge.edge == e.id))
+                        .ok_or(error)?
+                        .points
+                        .clone();
+                    (Curve3::Polyline { points }, true)
+                }
+                Err(error) => return Err(error.into()),
+            };
             edges.push(IndexedEdge {
                 id: e.id,
                 role: curve_role(&curve),
                 curve,
+                approximate,
                 origin: edge_origin.get(&e.id).cloned().unwrap_or_default(),
                 point: e.midpoint,
                 size: e.length,
@@ -197,6 +215,10 @@ impl<'k> PartIndex<'k> {
     /// The exact curve of an edge of the body.
     pub fn edge_curve(&self, id: EdgeId) -> Option<&Curve3> {
         self.edges.iter().find(|e| e.id == id).map(|e| &e.curve)
+    }
+
+    pub(crate) fn exact_edge_curve(&self, id: EdgeId) -> Option<&Curve3> {
+        self.edges.iter().find(|e| e.id == id && !e.approximate).map(|e| &e.curve)
     }
 
     /// Every edge of the body with its exact curve.
@@ -319,9 +341,8 @@ fn origins<Id: Copy + Eq + std::hash::Hash>(
 pub(crate) fn curve_role(curve: &Curve3) -> &'static str {
     match curve {
         Curve3::Line { .. } => "line",
-        Curve3::Arc { .. } => "arc",
         Curve3::Circle { .. } => "circle",
-        Curve3::Nurbs { .. } | Curve3::Polyline { .. } => "curve",
+        Curve3::Arc { .. } | Curve3::Nurbs { .. } | Curve3::Polyline { .. } => "curve",
     }
 }
 

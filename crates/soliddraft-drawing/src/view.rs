@@ -47,6 +47,23 @@ pub struct View {
 }
 
 impl View {
+    /// True when the saved line work was drawn by the kernel's exact drawing queries,
+    /// which is what an export writes.
+    pub fn has_saved_catallax_linework(&self) -> bool {
+        self.geometry.catallax && !self.geometry.unproved
+    }
+
+    /// True when the view is excluded from automatic update and its saved line work
+    /// cannot be exported, so it must be included and rebuilt first.
+    pub fn needs_inclusion_for_redraw(&self) -> bool {
+        self.excluded_from_update && !self.has_saved_catallax_linework()
+    }
+
+    /// True when the view was drawn from `digest` or excluded from automatic update.
+    pub fn accepts_revision(&self, digest: &str) -> bool {
+        self.excluded_from_update || self.geometry.source_digest == digest
+    }
+
     /// The parent view, for every kind except a base view.
     pub fn parent(&self) -> Option<ViewId> {
         match self.kind {
@@ -55,6 +72,13 @@ impl View {
             | ViewKind::Section { parent, .. }
             | ViewKind::Detail { parent, .. }
             | ViewKind::Auxiliary { parent, .. } => Some(parent),
+        }
+    }
+
+    pub(crate) fn geometry_parent(&self) -> Option<ViewId> {
+        match self.kind {
+            ViewKind::Base { .. } | ViewKind::Projected { .. } => None,
+            _ => self.parent(),
         }
     }
 
@@ -445,6 +469,9 @@ pub struct ViewGeometry {
     /// it and are made from certified line work instead.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub unproved: bool,
+    /// The saved line work came from Catallax drawing queries.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub catallax: bool,
     /// Screen or unknown quality, independently of whether the mesh was proved.
     /// Older caches have unknown quality and must be regenerated for export.
     #[serde(default = "unknown_quality")]
@@ -481,13 +508,21 @@ pub struct Curve2 {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Accuracy {
-    /// The model's own curve: a whole line or an untrimmed circle the kernel kept after
-    /// polygon visibility, or an arc. Its endpoints and shape are exact.
+    /// The model's own curve, with its exact endpoints and shape.
     Exact,
     /// A polyline from the display mesh, at its chord tolerance: a silhouette, an edge
     /// split by visibility, a section crossing or a curve the kernel has not converted.
+    /// A spline sampled on the sheet is labelled this way too.
     #[default]
     Polygon,
+    /// A fitted curve, measured placement or cubic approximation of a circular curve.
+    Approximate,
+}
+
+impl Accuracy {
+    pub(crate) fn for_path(self, path: &BezPath) -> Self {
+        if path.elements().iter().any(|el| matches!(el, kurbo::PathEl::CurveTo(..))) { Self::Approximate } else { self }
+    }
 }
 
 /// How many curves of a view carry each accuracy label.
@@ -497,6 +532,9 @@ pub struct AccuracyCounts {
     pub exact: usize,
     /// Curves whose path is a mesh polyline.
     pub polygon: usize,
+    /// Curves whose geometry or placement is approximate.
+    #[serde(default)]
+    pub approximate: usize,
 }
 
 impl AccuracyCounts {
@@ -504,14 +542,19 @@ impl AccuracyCounts {
     pub fn add(&mut self, other: AccuracyCounts) {
         self.exact += other.exact;
         self.polygon += other.polygon;
+        self.approximate += other.approximate;
     }
 }
 
 impl ViewGeometry {
-    /// How many of the view's curves are exact and how many are mesh polylines.
+    /// How many of the view's curves carry each accuracy label.
     pub fn accuracy(&self) -> AccuracyCounts {
-        let exact = self.curves.iter().filter(|c| c.accuracy == Accuracy::Exact).count();
-        AccuracyCounts { exact, polygon: self.curves.len() - exact }
+        let count = |accuracy| self.curves.iter().filter(|c| c.accuracy.for_path(&c.path) == accuracy).count();
+        AccuracyCounts {
+            exact: count(Accuracy::Exact),
+            polygon: count(Accuracy::Polygon),
+            approximate: count(Accuracy::Approximate),
+        }
     }
 }
 
@@ -541,6 +584,10 @@ pub struct Polygon {
     /// section or a broken-out section.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub clip: Option<Boundary>,
+    /// True when a boundary of the region is approximate: fitted by the kernel or
+    /// sampled on the sheet.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub approximate: bool,
 }
 
 /// Serialises a [`BezPath`] as SVG path data, which is shorter and easier to read than

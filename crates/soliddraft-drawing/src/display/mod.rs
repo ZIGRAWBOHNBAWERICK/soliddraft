@@ -17,8 +17,8 @@ use crate::annotation::{
 use crate::ids::{AnnotationId, SHEET, ViewId};
 use crate::library::{Align, FieldDef, StyleFile, TemplateFile, Weight};
 use crate::measure::{CurveShape, display_text, shape_of};
-use crate::project::{effective_scale, view_bounds, view_label};
-use crate::view::Accuracy;
+use crate::project::{effective_scale, view_bounds};
+use crate::view::{Accuracy, AccuracyCounts};
 
 mod symbols;
 mod tables;
@@ -182,6 +182,7 @@ pub struct DisplayList {
     /// Some view's line work came from the kernel's unproved preview. Shown on screen,
     /// never exported.
     pub unproved: bool,
+    pub(crate) export_error: Option<String>,
 }
 
 /// One dimension as its definition points, in sheet millimetres.
@@ -255,6 +256,9 @@ pub struct HatchRecord {
     pub angle: f64,
     /// Distance between lines in millimetres.
     pub spacing: f64,
+    /// True when a boundary of the region is approximate: fitted by the kernel or
+    /// sampled on the sheet.
+    pub approximate: bool,
 }
 
 impl DisplayList {
@@ -262,6 +266,42 @@ impl DisplayList {
     /// changed-value highlight and the out-of-date hatch).
     pub fn printable(&self) -> impl Iterator<Item = &Item> {
         self.items.iter().filter(|i| !matches!(i.role(), Role::Changed | Role::Stale))
+    }
+
+    /// Accuracy counts for the curve paths sent to the sheet writers.
+    pub fn accuracy(&self) -> AccuracyCounts {
+        self.count_accuracy(false)
+    }
+
+    /// Accuracy counts as the DXF writer carries them, hatch boundaries included.
+    pub fn dxf_accuracy(&self) -> AccuracyCounts {
+        self.count_accuracy(!self.hatches.is_empty())
+    }
+
+    /// The sheet's counts, with the approximate count raised to the DXF writer's when
+    /// its hatch boundaries add approximations.
+    pub fn accuracy_with_dxf(&self) -> AccuracyCounts {
+        let mut counts = self.accuracy();
+        counts.approximate = counts.approximate.max(self.dxf_accuracy().approximate);
+        counts
+    }
+
+    fn count_accuracy(&self, native_hatches: bool) -> AccuracyCounts {
+        let mut counts = AccuracyCounts::default();
+        for item in self.printable().filter(|item| !native_hatches || item.role() != Role::Hatch) {
+            if let Item::Path(path) = item {
+                match path.accuracy {
+                    Some(Accuracy::Exact) => counts.exact += 1,
+                    Some(Accuracy::Polygon) => counts.polygon += 1,
+                    Some(Accuracy::Approximate) => counts.approximate += 1,
+                    None => {}
+                }
+            }
+        }
+        if native_hatches {
+            counts.approximate += self.hatches.iter().filter(|h| h.approximate).count();
+        }
+        counts
     }
 }
 
@@ -437,11 +477,13 @@ pub fn layout(drawing: &Drawing, sheet_index: usize, ctx: &Context<'_>) -> Displ
         dimensions: Vec::new(),
         hatches: Vec::new(),
         unproved: false,
+        export_error: None,
     };
     let Some(sheet) = drawing.sheets.get(sheet_index) else {
         return list;
     };
     list.unproved = sheet.views.iter().any(|v| v.geometry.unproved);
+    list.export_error = crate::export::sheet_error(drawing, sheet);
     format_items(drawing, sheet, ctx, &mut list.items);
     tables::table_items(drawing, sheet, ctx, &mut list.items);
     for view in &sheet.views {
@@ -683,7 +725,7 @@ fn view_items(drawing: &Drawing, sheet: &Sheet, view: &View, ctx: &Context<'_>, 
             role,
             owner: Owner::Curve(view.id, i),
             fill: false,
-            accuracy: Some(c.accuracy),
+            accuracy: Some(c.accuracy.for_path(&c.path)),
         }));
     }
     views::boundary_items(view, ctx, items);
@@ -1231,11 +1273,6 @@ pub fn annotation_name(a: &Annotation, style: &StyleFile) -> String {
         AnnotationKind::RevisionSymbol { revision } => format!("Rev {revision}"),
         AnnotationKind::Balloon { item, .. } => format!("Balloon {item}"),
     }
-}
-
-/// The caption of a view for lists.
-pub fn view_name(sheet: &Sheet, view: &View) -> String {
-    view_label(sheet, view)
 }
 
 #[cfg(test)]

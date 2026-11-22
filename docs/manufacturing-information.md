@@ -47,7 +47,7 @@ A STEP file from elsewhere often has geometry and no requirements. Two things he
 
 **Recognition** reads the part's features off its faces: round holes, groups of equal holes, round bosses and round-ended slots. For each it gives the faces that are the feature, whether a hole or a slot goes through, the faces a hole opens onto and the ones that close it, and its sizes. It is geometry and nothing else: the same on a modelled part and on an imported one, whatever the part states. Not read yet: countersinks and counterbores as one feature, pockets, steps, fillets and chamfers.
 
-**The interview** lists the decisions the part has not taken, one at a time, each with a proposal and the reason for it. Tick Interview in the panel. Accept takes a proposal as it stands; to answer another way, add the item with the form, and the question goes away. A decision the part has already taken is not asked.
+**The interview** lists the decisions the part has not taken, one at a time, each with a proposal and the reason for it. Tick Interview in the panel. Accept takes a proposal as it stands; to answer another way, add the item with the form, and the question goes away. A decision the part has already taken is not asked. A question about a hole, boss or slot names it by its faces, so two features of one size are asked and answered apart; its id ends with those faces' names, such as `hole Ø8 size: Import1 · Face 7`. Each hole of a pattern counts on its own: a size or position on some of its holes answers for those holes, and the question asks about the rest.
 
 | Question | Proposal | Rule |
 |---|---|---|
@@ -79,7 +79,7 @@ The drawing also gets a section through the hole the part holds tightest: the on
 
 The drawing places everything itself. Stacked dimensions settle first, nearest their views; callouts and symbols then move along their leaders, or straight across or up, until no text lies over a line, another text or the frame.
 
-Each annotation made this way belongs to its item in the part. Its tolerance, count and text are the part's, and the drawing does not edit them: change the item in the part and update the drawing. An item removed from the part leaves the drawing, and a new one comes in, at the next update.
+Each annotation made this way belongs to its item in the part. To change its tolerance, count or text, edit the item in the part and rebuild the drawing. Rebuild refreshes imported items and keeps the saved items on views that refused to redraw.
 
 An item no view can show is not drawn somewhere it does not belong. It is listed by name with the reason, such as a height on a drawing that has only the top view.
 
@@ -87,7 +87,7 @@ An item no view can show is not drawn somewhere it does not belong. It is listed
 
 Inspect > Drawing and files writes three files in one action: the STEP file with the part's manufacturing information, and a drawing made from that information as PDF and DXF beside it. The drawing has the front, top and side views and the section, and stays open in the app.
 
-The action reports what it wrote: how many items are in the file, which are on the drawing, which the drawing could not show, any text that lies over something, and anything on the drawing that the file does not state. The last three lists are empty for a part whose items all apply.
+The action reports what it wrote: how many items are in the file, which are on the drawing, which the drawing could not show, any text that lies over something, and anything on the drawing that the file does not state. The last three lists are empty for a part whose items all apply. The app summary counts approximate curves once for the sheet shared by PDF and DXF.
 
 ## Scripted commands
 
@@ -100,7 +100,7 @@ The action reports what it wrote: how many items are in the file, which are on t
 | `pmi_recognise` | Lists the features the part's faces show, each with its faces, whether it goes through, what it opens onto and its sizes |
 | `pmi_interview` | Lists the open questions with their proposals and reasons |
 | `pmi_answer` | Takes the proposals named in `accept`, or all of them, and sets the material when given, as one undo step |
-| `manufacturing_package` | Writes `path` (.step) and a drawing of the part's manufacturing information beside it as .pdf and .dxf, and reports what the drawing shows and what it could not |
+| `manufacturing_package` | Writes `path` (.step) and a drawing of the part's manufacturing information beside it as .pdf and .dxf. Reports what the drawing shows and what it could not, with accuracy counts in `drawing.accuracy`. |
 
 ```json
 {"kind": "diameter", "name": "Bore diameter", "faces": ["Cut-Extrude1 · Wall of circle 1"], "tolerance": "H7"}
@@ -110,4 +110,4 @@ The action reports what it wrote: how many items are in the file, which are on t
 
 ## What is checked
 
-`crates/soliddraft-app/tests/pmi_bracket.rs` builds the P1 bracket, adds its fourteen items, exports it, imports the file into a new part, saves, reopens and exports again, and edits the bore from 8 to 10 mm. `crates/soliddraft-app/tests/ux_pmi_panel.rs` adds the same fourteen items by hand in the app window. `crates/soliddraft-app/tests/pmi_interview.rs` imports the bracket's bare STEP file, compares what recognition finds face by face with the bracket as built, runs the interview and draws the answered part. `crates/soliddraft-app/tests/pmi_drawing.rs` writes the three files in one action and checks the drawing: four views, every item once, the six basic distances, no overlap, nothing that the file does not state, and the title block. Hosted CI reads the exported files in OpenCASCADE through `ci/check-step-pmi.py`. OpenCASCADE has no reader for the surface texture entity or for an attribute of a feature, so it does not read a finish or the word "through".
+`crates/soliddraft-app/tests/pmi_bracket.rs` builds the P1 bracket, adds its fourteen items, exports it, imports the file into a new part, saves, reopens and exports again, and edits the bore from 8 to 10 mm. `crates/soliddraft-app/tests/ux_pmi_panel.rs` adds the same fourteen items by hand in the app window. `crates/soliddraft-app/tests/pmi_interview.rs` imports the bracket's bare STEP file, compares what recognition finds face by face with the bracket as built, runs the interview and draws the answered part; it also checks that a pattern with items on some of its holes is asked about the others, and that a through hole and a blind hole of one diameter are answered on their own faces, by id and with Accept all. `crates/soliddraft-app/tests/pmi_drawing.rs` writes the three files in one action and checks the drawing: four views, every item once, the six basic distances, no overlap, nothing that the file does not state, and the title block. Hosted CI reads the exported files in OpenCASCADE through `ci/check-step-pmi.py`. OpenCASCADE has no reader for the surface texture entity or for an attribute of a feature, so it does not read a finish or the word "through".

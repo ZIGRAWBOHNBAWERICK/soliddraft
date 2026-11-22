@@ -515,6 +515,14 @@ impl Kernel for Counting {
         self.inner.section_view(body, spec)
     }
 
+    fn edge_drawing(&self, body: BodyId, edge: EdgeId) -> KernelResult<drawing::ViewCurve> {
+        self.inner.edge_drawing(body, edge)
+    }
+
+    fn face_drawing_loops(&self, body: BodyId, face: FaceId) -> KernelResult<Vec<Vec<drawing::ViewCurve>>> {
+        self.inner.face_drawing_loops(body, face)
+    }
+
     fn edge_curve(&self, body: BodyId, edge: EdgeId) -> KernelResult<drawing::Curve3> {
         self.inner.edge_curve(body, edge)
     }

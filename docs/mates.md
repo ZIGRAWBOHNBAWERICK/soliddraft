@@ -681,11 +681,8 @@ regression scenarios continue to check axis-aligned placements and rational meas
 
 ## Static assembly checks
 
-The Assembly tab's Interference button opens the check panel. Interference Detection and
-Clearance Verification use certified meshes from the pinned part revisions. Each result
-says clear, interferes, or touching or undecided; clearance results state met, below, or
-undecided. Exact overlap volumes and exact touching without a mate remain follow-up Catallax
-work. See [interference.md](interference.md) for the mesh bounds and refusals.
+The Assembly tab's Interference button opens the check panel. See [Interference Detection
+and Clearance Verification](interference.md) for the static checks, proofs and refusals.
 
 Choose Hole alignment in the same panel to inspect internal cylindrical axes, including
 native cylinders in imported parts. Set the maximum lateral deviation and check the whole
@@ -738,7 +735,7 @@ The panel shows the nearest moving pair's distance interval. At a stop it names 
 nearest faces and highlights one nearest face per part in orange. These are nearest
 mesh faces, not a claim of exact B-rep contact. The default chord bound is 0.01 mm per
 part, so a stop normally leaves a small gap above the requested distance. Exact contact
-and exact clearance at the threshold need the kernel's exact two-body tier as follow-up.
+and exact threshold checks during motion remain follow-up work.
 Physical Dynamics, force transfer and sliding contact are outside this batch.
 
 For MCP, set `collision: true` or `clearance: "2 mm"` on `assembly_drag` with

@@ -20,7 +20,7 @@ use soliddraft_document::DocKind;
 use soliddraft_drawing::display::{annotation_name, field_value};
 use soliddraft_drawing::export::Format as SheetFormat;
 use soliddraft_drawing::measure::value_text;
-use soliddraft_drawing::project::{self, view_label};
+use soliddraft_drawing::project::{self, view_label_in};
 use soliddraft_drawing::{
     AnnotationId, AnnotationKind, AnnotationState, Boundary, Command as DrawingCommand, Drawing, HiddenLines,
     PartIndex, SHEET, TangentEdges, ViewDisplay, ViewId, ViewKind, derived,
@@ -484,13 +484,10 @@ impl AppTools<'_> {
         let requirements = session.requirements.clone();
         self.install_drawing(session);
         let (pdf, dxf) = (step.with_extension("pdf"), step.with_extension("dxf"));
-        {
-            let part = PartContext::new(&self.state.doc);
-            let s = self.state.drawing.session.as_ref().ok_or_else(|| NO_DRAWING.to_owned())?;
-            for (format, path) in [(SheetFormat::Pdf, &pdf), (SheetFormat::Dxf, &dxf)] {
-                let (bytes, _) = drawing::sheet_bytes(s, part.as_ref(), format)?;
-                files.push((path.clone(), bytes));
-            }
+        let prepared = drawing::prepare_sheets(self.session()?, false)?;
+        let accuracy = prepared.package_accuracy();
+        for (format, path) in [(SheetFormat::Pdf, &pdf), (SheetFormat::Dxf, &dxf)] {
+            files.push((path.clone(), prepared.bytes(format)?));
         }
         // On the desktop each is a file beside the STEP file; in the browser they arrive
         // as one download.
@@ -510,6 +507,7 @@ impl AppTools<'_> {
             "manufacturing_information": exported.pmi,
             "drawing": {
                 "views": drawing.sheets[sheet].views.len(),
+                "accuracy": accuracy,
                 "items": requirements.placed,
                 "shown": shown,
                 "not_shown": requirements.unplaced,
@@ -669,13 +667,9 @@ impl AppTools<'_> {
         let id = view.id;
         session.doc.remember(id, &vctx.projected);
         drawing::run_command(self.state, DrawingCommand::PlaceView { sheet, view })?;
-        let placed = self
-            .session()?
-            .doc
-            .drawing
-            .sheet_of(id)
-            .and_then(|s| s.view(id).map(|v| view_label(s, v)))
-            .unwrap_or_default();
+        let drawing = &self.session()?.doc.drawing;
+        let placed =
+            drawing.sheet_of(id).and_then(|s| s.view(id).map(|v| view_label_in(drawing, s, v))).unwrap_or_default();
         Ok(json!({ "placed": placed, "id": id.0, "drawing": drawing_json(self.state) }))
     }
 
@@ -738,14 +732,20 @@ impl AppTools<'_> {
         if path.extension().is_none_or(|e| !e.eq_ignore_ascii_case(format.extension())) {
             return Err(format!("the path must end in .{}", format.extension()));
         }
-        let part = PartContext::new(&self.state.doc);
         let s = self.state.drawing.session.as_mut().ok_or_else(|| NO_DRAWING.to_owned())?;
-        let written = drawing::write_sheet(s, part.as_ref(), format, &path)?;
+        let written = drawing::write_sheet(s, format, &path)?;
         Ok(json!({
             "exported": path,
             "views": written.views,
-            "redrawn_from_certified_mesh": written.redrawn,
-            "revision": written.revision.short(),
+            "method": if written.views == 0 { "none" } else { "catallax" },
+            "approximate": written.accuracy.approximate > 0,
+            "revision": if written.view_revisions.len() == 1 {
+                written.view_revisions.first()
+            } else {
+                None
+            },
+            "pinned_revision": written.pinned_revision.short(),
+            "view_revisions": written.view_revisions,
             "accuracy": written.accuracy,
         }))
     }
@@ -839,20 +839,22 @@ impl ToolHost for AppTools<'_> {
 fn find_view(drawing: &Drawing, wanted: &Value) -> Result<(ViewId, String), String> {
     let all = || drawing.sheets.iter().flat_map(|sheet| sheet.views.iter().map(move |v| (sheet, v)));
     let listed = || {
-        let views: Vec<String> =
-            all().map(|(sheet, v)| format!("{} (id {}, {})", view_label(sheet, v), v.id.0, sheet.name)).collect();
+        let views: Vec<String> = all()
+            .map(|(sheet, v)| format!("{} (id {}, {})", view_label_in(drawing, sheet, v), v.id.0, sheet.name))
+            .collect();
         if views.is_empty() { "no views".to_owned() } else { views.join(", ") }
     };
     if let Some(n) = wanted.as_u64() {
         return all()
             .find(|(_, v)| u64::from(v.id.0) == n)
-            .map(|(sheet, v)| (v.id, view_label(sheet, v)))
+            .map(|(sheet, v)| (v.id, view_label_in(drawing, sheet, v)))
             .ok_or_else(|| format!("no view has id {n} (the drawing has: {})", listed()));
     }
     let name = wanted.as_str().unwrap_or_default().trim();
-    let found: Vec<_> = all().filter(|(sheet, v)| view_label(sheet, v).eq_ignore_ascii_case(name)).collect();
+    let found: Vec<_> =
+        all().filter(|(sheet, v)| view_label_in(drawing, sheet, v).eq_ignore_ascii_case(name)).collect();
     match found[..] {
-        [(sheet, v)] => Ok((v.id, view_label(sheet, v))),
+        [(sheet, v)] => Ok((v.id, view_label_in(drawing, sheet, v))),
         [] => Err(format!("no view named `{name}` (the drawing has: {})", listed())),
         _ => {
             let ids: Vec<String> = found.iter().map(|(sheet, v)| format!("{} ({})", v.id.0, sheet.name)).collect();
@@ -875,21 +877,22 @@ fn drawing_json(state: &AppState) -> Option<Value> {
     let s = state.drawing.session.as_ref()?;
     let d = &s.doc.drawing;
     let style = s.doc.style();
-    let pinned = d.model.pinned.as_str();
+    let refusals: std::collections::BTreeMap<_, _> =
+        s.doc.refused_views().map(|(_, id, name, cause)| (id, (name, cause))).collect();
     let (mut changed, mut dangling) = (Vec::new(), Vec::new());
     let sheets: Vec<Value> = d
         .sheets
         .iter()
         .enumerate()
         .map(|(index, sheet)| {
-            let name_of = |id: ViewId| sheet.view(id).map(|v| view_label(sheet, v));
+            let name_of = |id: ViewId| d.sheet_of(id).and_then(|s| s.view(id).map(|v| view_label_in(d, s, v)));
             let views: Vec<Value> = sheet
                 .views
                 .iter()
                 .map(|v| {
                     json!({
                         "id": v.id.0,
-                        "name": view_label(sheet, v),
+                        "name": view_label_in(d, sheet, v),
                         "kind": kind_name(&v.kind),
                         "parent": v.parent().and_then(name_of),
                         "parent_id": v.parent().map(|p| p.0),
@@ -902,7 +905,7 @@ fn drawing_json(state: &AppState) -> Option<Value> {
                         },
                         "cropped": v.crop.is_some(),
                         "excluded_from_update": v.excluded_from_update,
-                        "up_to_date": v.excluded_from_update || v.geometry.source_digest == pinned,
+                        "up_to_date": s.doc.view_is_up_to_date(v),
                         "preview": v.geometry.unproved,
                         "curves": v.geometry.curves.len(),
                         "accuracy": v.geometry.accuracy(),
@@ -985,6 +988,9 @@ fn drawing_json(state: &AppState) -> Option<Value> {
         "views_match_pin": d.views_match_pin(),
         "changed": changed,
         "dangling": dangling,
+        "refused_views": refusals.iter().map(|(id, (name, cause))| {
+            json!({ "id": id.0, "name": name, "cause": cause })
+        }).collect::<Vec<_>>(),
         "part": part,
         "automatic_update": d.settings.automatic_update,
         "undo": s.doc.undo_label(),

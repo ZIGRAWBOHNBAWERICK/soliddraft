@@ -1,6 +1,6 @@
 //! The phase D0 exit test, through the `soliddraft view` binary as separate processes:
 //!
-//! The bracket's four Catallax views repeat across runs and match the polygon golden.
+//! The bracket's four Catallax views repeat across runs and match the Catallax golden.
 //! SVG output carries visible and hidden line work.
 
 use std::collections::BTreeMap;
@@ -70,7 +70,7 @@ fn bracket_catallax_views_match_golden_across_runs() {
             );
         }
     }
-    assert!(runs.iter().flatten().all(|s| s.backend.starts_with("catallax ") && s.method == "mesh"));
+    assert!(runs.iter().flatten().all(|s| s.backend.starts_with("catallax ") && s.method == "catallax"));
     assert!(got.values().all(|v| v.visible > 0 && v.hidden > 0));
 
     let backend = runs[0][0].backend.clone();
@@ -116,7 +116,7 @@ fn mesh_method_agrees_with_the_kernel_on_visible_lengths() {
 }
 
 #[test]
-fn catallax_plane_section_writes_hatched_svg_with_mesh_flag() {
+fn catallax_plane_section_writes_hatched_svg() {
     let dir = std::env::temp_dir().join(format!("soliddraft-section-test-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let svg = dir.join("section.svg");
@@ -128,17 +128,37 @@ fn catallax_plane_section_writes_hatched_svg_with_mesh_flag() {
         "front",
         "--section",
         "70,45,0",
-        "--mesh",
         "--svg",
         svg.to_str().unwrap(),
         "--json",
     ]);
     let report: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
     assert!(report["backend"].as_str().unwrap().starts_with("catallax "));
-    assert_eq!(report["method"], "mesh");
+    assert_eq!(report["method"], "catallax");
     assert_eq!(report["regions"], serde_json::json!([910.0, 560.0, 230.0]));
     let svg = std::fs::read_to_string(svg).unwrap();
     assert!(svg.starts_with("<svg") && svg.trim_end().ends_with("</svg>"));
     assert!(svg.contains("hatch"));
     std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn exact_view_rejects_explicit_mesh_options() {
+    let recipe = recipes_dir().join("bracket.json");
+    for trailing in [&[][..], &["--section", "70,45,0"][..]] {
+        for flag in [&["--mesh"][..], &["--tolerance", "0.0001"][..]] {
+            let out = Command::new(env!("CARGO_BIN_EXE_soliddraft"))
+                .arg("view")
+                .arg(&recipe)
+                .args(flag)
+                .args(trailing)
+                .output()
+                .unwrap();
+            assert_eq!(out.status.code(), Some(2));
+            assert!(
+                String::from_utf8_lossy(&out.stderr).contains(&format!("{} applies to mesh preview only", flag[0]))
+            );
+            assert!(out.stdout.is_empty());
+        }
+    }
 }

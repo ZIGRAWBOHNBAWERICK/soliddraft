@@ -676,8 +676,7 @@ way with files handed to the page in place of a folder; see [web.md](web.md).
 - **The property panel** places the selection: x, y and z in millimetres and rotations
   about x, then y, then z in degrees, relative to the assembly that holds it. A change
   applies with `move_to` when the field lets go, as one undo step.
-- **Interference** opens the Interference panel, which checks the parts for interference
-  or a clearance on certified meshes; see [interference.md](interference.md).
+- **Interference** opens the panel for [interference and clearance checks](interference.md).
 - **Configurations** opens a panel in the property area: the configurations with the
   active one marked, Activate and Delete for the others, a name field and Add, then the
   exploded view's steps with their distances, Explode or Collapse, Auto explode, and the
@@ -691,7 +690,9 @@ way with files handed to the page in place of a folder; see [web.md](web.md).
   with its display copies; **File > Open** and Open recent open one with
   `open_in_background`. Undo and redo follow the active tab.
 
-The browser build leaves these commands off, because the loader needs threads.
+The browser app has these commands too, loading on the page's one thread and taking files
+handed to it in place of a folder ([web.md](web.md)). Form subassembly, Pack and Go and
+URDF and USD export write files beside the assembly's, so they stay in the desktop app.
 
 ## For the interface
 

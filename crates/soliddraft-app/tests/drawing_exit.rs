@@ -281,7 +281,7 @@ fn view_named(harness: &App<'_>, name: &str) -> ViewId {
     sheet
         .views
         .iter()
-        .find(|v| soliddraft_drawing::project::view_label(sheet, v) == name)
+        .find(|v| soliddraft_drawing::project::view_label_in(&s.doc.drawing, sheet, v) == name)
         .unwrap_or_else(|| panic!("no view {name}"))
         .id
 }
@@ -414,7 +414,7 @@ fn bracket_drawing_dimensioned_exported_updated_and_repaired() {
     let length = smart_dimension(
         &mut harness,
         front,
-        &[Vec3::new(0.0, 0.0, 30.0), Vec3::new(120.0, 0.0, 5.0)],
+        &[Vec3::new(0.0, 0.0, 50.0), Vec3::new(120.0, 0.0, 5.0)],
         vec2(-120.0, 50.0),
     );
     let (v, _) = value_of(&harness, length);

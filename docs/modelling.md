@@ -111,9 +111,10 @@ arc traversed against its own direction, such as a concave bite out of an edge, 
 | Mirror | a reference plane or a planar face, and whether the original stays |
 | Draft | faces by persistent name, a neutral plane (reference plane or planar face), an angle and the pull's sense |
 
-A part has one body. The first boss makes it, later bosses join it, and cuts remove from
-it. Every closed region of the sketch is swept; four circles make four holes. Through all
-reaches past the far side of the body's bounding box.
+The first boss creates a solid in the target body. Later bosses add material to that
+body, and cuts remove material from it. See [Bodies and Combine](#bodies-and-combine)
+for how to create and select another body. Every closed region of the sketch is swept;
+four circles make four holes. Through all reaches past the far side of the body's bounding box.
 
 A sketch on a face of the part lies on the face's plane with its normal pointing out of
 the material. Its X axis is horizontal when the face is not, and the world X axis

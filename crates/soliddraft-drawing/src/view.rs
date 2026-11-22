@@ -481,18 +481,21 @@ pub struct Curve2 {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Accuracy {
-    /// The model's own curve: a whole line or an untrimmed circle the kernel kept after
-    /// polygon visibility, or an arc. Its endpoints and shape are exact.
+    /// The model's own curve, with its exact endpoints and shape.
     Exact,
     /// A polyline from the display mesh, at its chord tolerance: a silhouette, an edge
     /// split by visibility, a section crossing or a curve the kernel has not converted.
     /// A spline sampled on the sheet is labelled this way too.
     #[default]
     Polygon,
-    /// The kernel's own curve, but fitted or placed within a tolerance it measured
-    /// rather than proved: a fitted intersection or outline, or any curve of a view
-    /// whose cuts or visibility the kernel measured.
+    /// A fitted curve, measured placement or cubic approximation of a circular curve.
     Approximate,
+}
+
+impl Accuracy {
+    pub(crate) fn for_path(self, path: &BezPath) -> Self {
+        if path.elements().iter().any(|el| matches!(el, kurbo::PathEl::CurveTo(..))) { Self::Approximate } else { self }
+    }
 }
 
 /// How many curves of a view carry each accuracy label.
@@ -502,7 +505,7 @@ pub struct AccuracyCounts {
     pub exact: usize,
     /// Curves whose path is a mesh polyline.
     pub polygon: usize,
-    /// Curves the kernel fitted or placed by measurement.
+    /// Curves whose geometry or placement is approximate.
     #[serde(default)]
     pub approximate: usize,
 }
@@ -519,7 +522,7 @@ impl AccuracyCounts {
 impl ViewGeometry {
     /// How many of the view's curves carry each accuracy label.
     pub fn accuracy(&self) -> AccuracyCounts {
-        let count = |accuracy| self.curves.iter().filter(|c| c.accuracy == accuracy).count();
+        let count = |accuracy| self.curves.iter().filter(|c| c.accuracy.for_path(&c.path) == accuracy).count();
         AccuracyCounts {
             exact: count(Accuracy::Exact),
             polygon: count(Accuracy::Polygon),

@@ -20,6 +20,63 @@ fn call(state: &mut AppState, name: &str, arguments: Value) {
     assert!(!out.is_error, "{name}: {}", out.content);
 }
 
+#[test]
+fn rebuild_names_a_broken_out_cut_that_no_longer_reaches_the_part() {
+    use soliddraft_app::document::Document;
+    use soliddraft_drawing::{Boundary, BrokenOut};
+    use soliddraft_kernel_api::Point2;
+    use soliddraft_kernel_api::drawing::StandardView;
+    use std::sync::Arc;
+
+    let kernel = Arc::new(soliddraft_kernel_catallax::CatallaxKernel::new());
+    let mut state = AppState::new(Document::new("Plate", kernel));
+    call(
+        &mut state,
+        "sketch",
+        json!({"plane":"top","shapes":[{"shape":"rectangle","center":[0,0,0],"width":40,"height":30}]}),
+    );
+    call(&mut state, "extrude", json!({"sketch":"Sketch1","depth":10,"flip":false}));
+    call(&mut state, "make_drawing", json!({"template":"iso-a3"}));
+    call(&mut state, "drawing_auto_update", json!({"on":false}));
+    let ctx = PartContext::new(&state.doc).unwrap();
+    let session = state.drawing.session.as_mut().unwrap();
+    let view = session
+        .sheet()
+        .views
+        .iter()
+        .find(|view| {
+            soliddraft_drawing::project::spec_in(&session.doc.drawing, 0, view).is_some_and(|spec| {
+                spec.direction == soliddraft_kernel_api::drawing::ViewSpec::standard(StandardView::Top).direction
+            })
+        })
+        .unwrap();
+    let name = soliddraft_drawing::project::view_label(session.sheet(), view);
+    let command = Command::AddBrokenOut {
+        view: view.id,
+        broken_out: BrokenOut {
+            boundary: Boundary::rectangle(Point2::new(-4.0, -4.0), Point2::new(4.0, 4.0)),
+            depth: 7.0,
+        },
+    };
+    session.doc.apply(command, Some(&ctx)).unwrap();
+    call(&mut state, "drawing_show_part", json!({}));
+    call(&mut state, "edit_extrude", json!({"feature":"Boss-Extrude1","depth":5,"flip":false}));
+
+    let caller = Caller::Mcp { client: "test".into() };
+    let out = call_checked(&mut AppTools { state: &mut state }, "drawing_rebuild", json!({}), &caller);
+    assert!(!out.is_error, "{}", out.content);
+    let reply: Value = serde_json::from_str(&out.content).unwrap();
+    let cause = "the cutting plane is behind the whole body";
+    assert!(reply["done"].as_str().is_some_and(|message| message.contains(&name) && message.contains(cause)));
+    assert_eq!(reply["drawing"]["up_to_date"], false);
+    let refusal = &reply["drawing"]["refused_views"][0];
+    assert_eq!(refusal["name"], name);
+    assert!(refusal["cause"].as_str().is_some_and(|message| message.contains(cause)));
+    assert!(state.drawing.session.as_ref().unwrap().has_issues());
+    let status = soliddraft_app::drawing::status(&state).unwrap();
+    assert!(status.headline.0.contains(&name) && status.headline.0.contains(cause));
+}
+
 /// How many views Catallax drew as hidden-line views, in the calls `kernel` logged since
 /// it was last asked. A view may say it is proved only when its projection came from
 /// one: a preview must never be labelled as proved.

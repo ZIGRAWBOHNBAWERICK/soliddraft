@@ -720,23 +720,6 @@ fn update(o: &Options) -> Result<(), String> {
             .run(&mut drawing, &Command::UpdateFromModel, Some(part))
             .map_err(|e| e.to_string())?
             .expect("an update reports");
-        let writes_sheet = o.outs.iter().any(|out| {
-            Path::new(out).extension().and_then(|ext| ext.to_str()).and_then(Format::from_extension).is_some()
-        });
-        if writes_sheet && !report.dangling_views.is_empty() {
-            let refused: Vec<_> = report
-                .dangling_views
-                .iter()
-                .map(|failure| {
-                    let label = drawing
-                        .sheet_of(failure.view)
-                        .and_then(|sheet| sheet.view(failure.view).map(|view| project::view_label(sheet, view)))
-                        .unwrap_or_else(|| failure.view.to_string());
-                    format!("{label}: {}", failure.cause)
-                })
-                .collect();
-            return Err(refused.join("\n"));
-        }
         rebind(&mut drawing.model, &target);
         let mut repairs = Vec::new();
         let run = |stack: &mut soliddraft_drawing::UndoStack, drawing: &mut Drawing, c: Command| {
@@ -766,6 +749,23 @@ fn update(o: &Options) -> Result<(), String> {
         let saved = soliddraft_document::kind::saved_path(&path, DocKind::Drawing);
         let meta = meta.rewritten(&source.backend, drawing.meta.units);
         file::write(&saved, &drawing, &meta).map_err(|e| e.to_string())?;
+        let writes_sheet = o.outs.iter().any(|out| {
+            Path::new(out).extension().and_then(|ext| ext.to_str()).and_then(Format::from_extension).is_some()
+        });
+        let refused: Vec<_> = report
+            .dangling_views
+            .iter()
+            .map(|failure| {
+                let label = drawing
+                    .sheet_of(failure.view)
+                    .and_then(|sheet| sheet.view(failure.view).map(|view| project::view_label(sheet, view)))
+                    .unwrap_or_else(|| failure.view.to_string());
+                format!("{label}: {}", failure.cause)
+            })
+            .collect();
+        if writes_sheet && !refused.is_empty() {
+            return Err(refused.join("\n"));
+        }
         let accuracy = write_outputs(&drawing, &o.outs, &source.backend)?;
         // The report after repairs: what still needs attention.
         let mut final_report = report.clone();
@@ -791,6 +791,9 @@ fn update(o: &Options) -> Result<(), String> {
             }
             for d in &final_report.dangling {
                 println!("  dangling {}: {}", d.annotation, d.cause);
+            }
+            for refusal in refused {
+                println!("  {refusal}");
             }
             for r in &repairs {
                 println!("  {r}");

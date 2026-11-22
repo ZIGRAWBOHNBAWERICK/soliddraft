@@ -351,7 +351,7 @@
         },
         {
           "pointer": "/summary/drawing/sheets/0/views/0/accuracy/polygon",
-          "minimum": 1
+          "equals": 0
         }
       ]
     },

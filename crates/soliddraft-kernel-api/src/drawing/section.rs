@@ -42,33 +42,37 @@ pub struct CutRegion {
 impl CutRegion {
     /// The region's area in the plane: the outer boundary's less its holes'.
     pub fn area(&self, frame: &ViewFrame) -> f64 {
-        let ring = |curves: &[ViewCurve]| {
-            let Some(first) = curves.first() else { return 0.0 };
-            let origin = first.curve.start();
-            let project = |point: Vec3| frame.project(point - origin);
-            let mut points = Vec::new();
-            let mut correction = 0.0;
-            for c in curves {
-                match &c.curve {
-                    Curve3::Circle { normal, radius, .. } => {
-                        points.push(project(c.curve.start()));
-                        correction += std::f64::consts::PI * radius * radius * normal.dot(frame.direction);
-                    }
-                    Curve3::Arc { normal, radius, start_deg, end_deg, .. } => {
-                        points.extend([project(c.curve.start()), project(c.curve.end())]);
-                        let angle = (end_deg - start_deg).to_radians();
-                        correction += 0.5 * radius * radius * (angle - angle.sin()) * normal.dot(frame.direction);
-                    }
-                    curve => {
-                        let chord = 1e-8 * origin.distance(curve.point_at(0.5)).max(1.0);
-                        points.extend(curve.sample(chord).into_iter().map(project));
-                    }
-                }
-            }
-            (shoelace(&points) + correction).abs()
-        };
+        let ring = |curves: &[ViewCurve]| loop_area_vector(curves).dot(frame.direction).abs();
         ring(&self.outer) - self.holes.iter().map(|h| ring(h)).sum::<f64>()
     }
+}
+
+/// The oriented area of a closed boundary, with analytic circular contributions.
+pub fn loop_area_vector(curves: &[ViewCurve]) -> Vec3 {
+    let Some(first) = curves.first() else { return Vec3::ZERO };
+    let origin = first.curve.start();
+    let mut area = Vec3::ZERO;
+    for c in curves {
+        match &c.curve {
+            Curve3::Circle { normal, radius, .. } => {
+                area = area + *normal * (std::f64::consts::PI * radius * radius);
+            }
+            Curve3::Arc { normal, radius, start_deg, end_deg, .. } => {
+                let angle = (end_deg - start_deg).to_radians();
+                area = area
+                    + (c.curve.start() - origin).cross(c.curve.end() - origin) * 0.5
+                    + *normal * (0.5 * radius * radius * (angle - angle.sin()));
+            }
+            curve => {
+                let chord = 1e-8 * origin.distance(curve.point_at(0.5)).max(1.0);
+                let points = curve.sample(chord);
+                for pair in points.windows(2) {
+                    area = area + (pair[0] - origin).cross(pair[1] - origin) * 0.5;
+                }
+            }
+        }
+    }
+    area
 }
 
 /// A section view: the cut body's line work and the regions to hatch.
@@ -586,6 +590,26 @@ fn regions_of(crossings: &[Crossing], frame: &ViewFrame, size: f64) -> (Vec<CutR
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn circular_outer_loop_has_more_area_than_a_close_polygonal_hole() {
+        let frame = ViewSpec::new(Vec3::Z, Vec3::Y).frame().unwrap();
+        let radius = 99.999_f64;
+        let angle = std::f64::consts::TAU / 80.0;
+        let points = (0..80)
+            .map(|i| {
+                let (sin, cos) = (i as f64 * angle).sin_cos();
+                Vec3::new(radius * cos, radius * sin, 0.0)
+            })
+            .collect::<Vec<_>>();
+        let edge = |curve| ViewCurve::new(curve, CurveSource::Unknown, true);
+        let outer = vec![edge(Curve3::Circle { center: Vec3::ZERO, normal: Vec3::Z, radius: 100.0 })];
+        let hole = (0..80).map(|i| edge(Curve3::Line { a: points[i], b: points[(i + 1) % 80] })).collect();
+        let region = CutRegion { outer, holes: vec![hole] };
+        let expected = std::f64::consts::PI * 100.0_f64.powi(2) - 40.0 * radius.powi(2) * angle.sin();
+        assert!((region.area(&frame) - expected).abs() < 1e-8);
+        assert!(loop_area_vector(&region.outer).length() > loop_area_vector(&region.holes[0]).length());
+    }
 
     #[test]
     fn circular_sections_keep_sub_thousandth_area_precision() {

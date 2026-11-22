@@ -528,7 +528,10 @@ fn export_accuracy_counts_printed_paths_only() {
     let part = box_part(&k, "block", Vec3::new(40.0, 30.0, 10.0));
     let mut drawing = drawing(&part);
     let view = drawing.view_mut(FRONT).unwrap();
-    view.geometry.curves.iter_mut().find(|curve| !curve.visible).unwrap().accuracy = Accuracy::Approximate;
+    let hidden = view.geometry.curves.iter_mut().find(|curve| !curve.visible).unwrap();
+    hidden.accuracy = Accuracy::Exact;
+    hidden.path = kurbo::BezPath::from_svg("M 0 0 C 0 5 5 10 10 10").unwrap();
+    assert_eq!(view.geometry.accuracy().approximate, 1);
     assert_eq!(layout_sheet(&drawing, 0).accuracy().approximate, 1);
     drawing.view_mut(FRONT).unwrap().display.hidden = HiddenLines::Removed;
     let layout = layout_sheet(&drawing, 0);

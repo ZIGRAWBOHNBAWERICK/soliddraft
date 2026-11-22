@@ -750,11 +750,11 @@ impl DrawingSession {
     /// True while the drawing has stale views or annotations needing attention: the
     /// dot on the document tab.
     pub fn has_issues(&self) -> bool {
-        self.doc.is_stale() || self.doc.attention_count() > 0 || self.link_state() == LinkState::Missing
+        !self.is_up_to_date() || self.doc.attention_count() > 0 || self.link_state() == LinkState::Missing
     }
 
     pub fn is_up_to_date(&self) -> bool {
-        !self.doc.is_stale()
+        !self.doc.is_stale() && self.doc.refused_views().next().is_none()
     }
 }
 
@@ -1194,6 +1194,9 @@ pub(crate) fn update_views(state: &mut AppState) -> Result<String, String> {
         if !r.dangling.is_empty() {
             session.attention_focus = r.dangling.first().copied();
         }
+    }
+    for refusal in session.doc.view_refusal_messages() {
+        text.push_str(&format!(" · {refusal}"));
     }
     session.fold_cache.clear();
     session.pending = None;
@@ -1851,24 +1854,14 @@ pub(crate) fn prepare_sheets(s: &DrawingSession, all_sheets: bool) -> Result<Pre
     let stale = s.doc.stale_views();
     let drawing = &s.doc.drawing;
     let writes_sheet = |i| all_sheets || i == s.sheet;
-    if let Some(update) = &s.doc.last_update
-        && update.to_revision == drawing.model.pinned
-    {
-        let failures: Vec<_> = drawing
-            .sheets
-            .iter()
-            .enumerate()
-            .filter(|(i, _)| writes_sheet(*i))
-            .flat_map(|(_, sheet)| {
-                update.dangling_views.iter().filter_map(move |failure| {
-                    let view = sheet.view(failure.view).filter(|v| !v.excluded_from_update)?;
-                    Some(format!("{}: {}", project::view_label(sheet, view), failure.cause))
-                })
-            })
-            .collect();
-        if !failures.is_empty() {
-            return Err(failures.join("\n"));
-        }
+    let failures: Vec<_> = s
+        .doc
+        .refused_views()
+        .filter(|(i, ..)| writes_sheet(*i))
+        .map(|(_, _, name, cause)| format!("{name}: {cause}"))
+        .collect();
+    if !failures.is_empty() {
+        return Err(failures.join("\n"));
     }
     let mut views = 0;
     for (_, sheet) in drawing.sheets.iter().enumerate().filter(|(i, _)| writes_sheet(*i)) {
@@ -1954,7 +1947,10 @@ pub fn status(state: &AppState) -> Option<Status> {
     let rev = s.doc.drawing.model.pinned.short();
     let dangling = s.doc.dangling_count();
     let changed = s.doc.attention_count() - dangling;
-    let headline = if s.link_state() == LinkState::Missing {
+    let refused: Vec<_> = s.doc.view_refusal_messages().collect();
+    let headline = if !refused.is_empty() {
+        (refused.join(" · "), theme::error())
+    } else if s.link_state() == LinkState::Missing {
         (format!("{part} not found · repair the reference"), theme::error())
     } else if s.doc.is_stale() {
         (format!("Newer version of {part} available · showing rev {rev} (Ctrl+B rebuilds)"), theme::warn())

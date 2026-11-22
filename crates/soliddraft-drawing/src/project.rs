@@ -8,8 +8,7 @@
 //! its parent's frame and magnifies it. Scales chain the same way. Curves are projected
 //! with the kernel's [`ViewFrame`], scaled, and moved so the centre of their bounding box
 //! is the view's origin (for a detail, the centre of its boundary). Lines stay lines and
-//! circular arcs become cubic Béziers, which a parallel projection maps exactly, so a
-//! circle seen at an angle is an exact ellipse.
+//! circular arcs become cubic Bézier approximations before projection.
 //!
 //! [`compute_view`] makes any view's line work, parents first; crops and broken-out
 //! sections are applied last, by clipping the line work with
@@ -811,6 +810,7 @@ pub fn project(index: &PartIndex, curves: &ViewCurves, xf: &ViewTransform, diges
         // The kernel's marks win over the curve's kind: a fitted line is still approximate.
         let accuracy =
             if c.approximate || !curves.approximate.is_empty() { Accuracy::Approximate } else { accuracy_of(&c.curve) };
+        let accuracy = accuracy.for_path(&path);
         out.push(Curve2 { path, source, visible: c.visible, kind, tangent: c.smooth, accuracy });
     }
     let [x0, y0, x1, y1] = curves.bbox_2d;
@@ -992,12 +992,7 @@ fn source_ref(index: &PartIndex, c: &ViewCurve) -> (EntityRef, CurveKind) {
 /// Chord tolerance on the sheet for curves that are neither lines nor arcs.
 const SHEET_CHORD_MM: f64 = 0.01;
 
-/// Whether a kernel curve is the model's own curve or a polyline from its mesh.
-///
-/// The kernel keeps a whole line or an untrimmed circle after polygon visibility and
-/// answers a polyline for everything else; a NURBS curve is sampled on the sheet, so it
-/// is labelled by what the path holds, not by what the model has.
-pub fn accuracy_of(curve: &Curve3) -> Accuracy {
+fn accuracy_of(curve: &Curve3) -> Accuracy {
     match curve {
         Curve3::Line { .. } | Curve3::Arc { .. } | Curve3::Circle { .. } => Accuracy::Exact,
         Curve3::Polyline { .. } | Curve3::Nurbs { .. } => Accuracy::Polygon,
@@ -1151,15 +1146,18 @@ mod tests {
     }
 
     #[test]
-    fn lines_arcs_and_circles_are_exact_and_mesh_polylines_are_polygon() {
+    fn circular_paths_are_approximate_and_mesh_polylines_are_polygon() {
         let a = Vec3::ZERO;
         let b = Vec3::new(10.0, 0.0, 0.0);
-        assert_eq!(accuracy_of(&Curve3::Line { a, b }), Accuracy::Exact);
-        assert_eq!(accuracy_of(&Curve3::Circle { center: a, normal: Vec3::Z, radius: 5.0 }), Accuracy::Exact);
+        let frame = ViewSpec::new(Vec3::Z, Vec3::Y).frame().unwrap();
+        let xf = ViewTransform { frame, scale: 1.0, centre: Point2::new(0.0, 0.0) };
+        let accuracy = |curve: &Curve3| accuracy_of(curve).for_path(&path_of(curve, &xf));
+        assert_eq!(accuracy(&Curve3::Line { a, b }), Accuracy::Exact);
+        assert_eq!(accuracy(&Curve3::Circle { center: a, normal: Vec3::Z, radius: 5.0 }), Accuracy::Approximate);
         let arc =
             Curve3::Arc { center: a, normal: Vec3::Z, x_axis: Vec3::X, radius: 5.0, start_deg: 0.0, end_deg: 90.0 };
-        assert_eq!(accuracy_of(&arc), Accuracy::Exact);
-        assert_eq!(accuracy_of(&Curve3::Polyline { points: vec![a, b] }), Accuracy::Polygon);
+        assert_eq!(accuracy(&arc), Accuracy::Approximate);
+        assert_eq!(accuracy(&Curve3::Polyline { points: vec![a, b] }), Accuracy::Polygon);
         assert_eq!(Accuracy::default(), Accuracy::Polygon, "a file without the label makes the weaker claim");
     }
 

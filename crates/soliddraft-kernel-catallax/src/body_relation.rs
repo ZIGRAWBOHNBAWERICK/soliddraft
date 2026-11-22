@@ -346,13 +346,15 @@ mod tests {
         let b = PlacedBody { translation: [0.0, 0.0, 11.0], ..a };
         let enclosure = Enclosure { lo: Rational::parse("0.9").unwrap(), hi: Rational::parse("1.1").unwrap() };
         for (first, second) in [(a, b), (b, a)] {
-            NATIVE_ENCLOSURE.set(Some(enclosure.clone()));
-            let result = k.body_relation(first, second, Some(1.0)).unwrap();
-            assert_eq!(result.overlap.unwrap().positive, Some(false));
-            let gap = result.gap.unwrap().unwrap();
-            assert!(gap.distance.lo < 1.0 && gap.distance.hi > 1.0);
-            assert_eq!(gap.exceeds_clearance, Some(false));
-            assert!(gap.clearance_refusal.is_none());
+            for (threshold, expected) in [(1.0, Some(false)), (0.99, None)] {
+                NATIVE_ENCLOSURE.set(Some(enclosure.clone()));
+                let result = k.body_relation(first, second, Some(threshold)).unwrap();
+                assert_eq!(result.overlap.unwrap().positive, Some(false));
+                let gap = result.gap.unwrap().unwrap();
+                assert!(gap.distance.lo < threshold && gap.distance.hi > threshold);
+                assert_eq!(gap.exceeds_clearance, expected);
+                assert!(gap.clearance_refusal.is_none());
+            }
         }
     }
 

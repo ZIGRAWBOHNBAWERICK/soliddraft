@@ -105,7 +105,10 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
     );
     let dangling = s.doc.dangling_count();
     let changed = s.doc.attention_count() - dangling;
-    let (status, colour) = if let Some(marker) = s.marker() {
+    let refused = s.doc.refused_views().count();
+    let (status, colour) = if refused > 0 {
+        (format!("{refused} refused"), theme::error())
+    } else if let Some(marker) = s.marker() {
         marker
     } else if dangling > 0 {
         (format!("{dangling} dangling"), theme::error())

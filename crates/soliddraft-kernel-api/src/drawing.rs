@@ -376,6 +376,12 @@ pub fn sheet_bounds(curves: &[ViewCurve], frame: &ViewFrame) -> [f64; 4] {
                 *radius,
                 Some((start_deg.min(*end_deg).to_radians(), (end_deg - start_deg).abs().to_radians())),
             ),
+            Curve3::Nurbs { points, .. } if !points.is_empty() => {
+                for &point in points {
+                    include(frame.project(point));
+                }
+                continue;
+            }
             _ => {
                 for point in c.curve.sample(0.0) {
                     include(frame.project(point));
@@ -957,6 +963,23 @@ mod tests {
         for (value, want) in curves.bbox_2d.into_iter().zip([-radius, -0.8 * radius, radius, 0.8 * radius]) {
             assert!((value - want).abs() < 1e-9);
         }
+    }
+
+    #[test]
+    fn sheet_bounds_include_the_quadratic_peak_in_both_axes() {
+        let spline = Curve3::Nurbs {
+            degree: 2,
+            knots: vec![0., 0., 0., 1., 1., 1.],
+            points: vec![Vec3::ZERO, Vec3::new(1000., 60., 0.), Vec3::new(2000., -80., 0.)],
+            weights: Vec::new(),
+        };
+        let curves = [ViewCurve::new(spline, CurveSource::Unknown, true)];
+        let frame = ViewSpec::new(Vec3::Z, Vec3::Y).frame().unwrap();
+        let bounds = sheet_bounds(&curves, &frame);
+        assert!(bounds[1] <= -80. && bounds[3] >= 18.);
+        let frame = ViewSpec::new(Vec3::Z, Vec3::X).frame().unwrap();
+        let bounds = sheet_bounds(&curves, &frame);
+        assert!(bounds[0] <= -18. && bounds[2] >= 80.);
     }
 
     fn quarter_arc() -> Curve3 {

@@ -470,14 +470,10 @@ impl AppTools<'_> {
         let requirements = session.requirements.clone();
         self.install_drawing(session);
         let (pdf, dxf) = (step.with_extension("pdf"), step.with_extension("dxf"));
-        let mut accuracy = serde_json::Map::new();
-        {
-            let s = self.state.drawing.session.as_ref().ok_or_else(|| NO_DRAWING.to_owned())?;
-            let prepared = drawing::prepare_sheets(s, false)?;
-            for (format, path) in [(SheetFormat::Pdf, &pdf), (SheetFormat::Dxf, &dxf)] {
-                accuracy.insert(format.extension().into(), json!(prepared.report.accuracy));
-                files.push((path.clone(), prepared.bytes(format)?));
-            }
+        let prepared = drawing::prepare_sheets(self.session()?, false)?;
+        let accuracy = prepared.report.accuracy;
+        for (format, path) in [(SheetFormat::Pdf, &pdf), (SheetFormat::Dxf, &dxf)] {
+            files.push((path.clone(), prepared.bytes(format)?));
         }
         // On the desktop each is a file beside the STEP file; in the browser they arrive
         // as one download.
@@ -855,6 +851,8 @@ fn drawing_json(state: &AppState) -> Option<Value> {
     let d = &s.doc.drawing;
     let style = s.doc.style();
     let pinned = d.model.pinned.as_str();
+    let refusals: std::collections::BTreeMap<_, _> =
+        s.doc.refused_views().map(|(_, id, name, cause)| (id, (name, cause))).collect();
     let (mut changed, mut dangling) = (Vec::new(), Vec::new());
     let sheets: Vec<Value> = d
         .sheets
@@ -881,7 +879,8 @@ fn drawing_json(state: &AppState) -> Option<Value> {
                         },
                         "cropped": v.crop.is_some(),
                         "excluded_from_update": v.excluded_from_update,
-                        "up_to_date": v.excluded_from_update || v.geometry.source_digest == pinned,
+                        "up_to_date": v.excluded_from_update
+                            || (v.geometry.source_digest == pinned && !refusals.contains_key(&v.id)),
                         "preview": v.geometry.unproved,
                         "curves": v.geometry.curves.len(),
                         "accuracy": v.geometry.accuracy(),
@@ -964,6 +963,9 @@ fn drawing_json(state: &AppState) -> Option<Value> {
         "views_match_pin": d.views_match_pin(),
         "changed": changed,
         "dangling": dangling,
+        "refused_views": refusals.iter().map(|(id, (name, cause))| {
+            json!({ "id": id.0, "name": name, "cause": cause })
+        }).collect::<Vec<_>>(),
         "part": part,
         "automatic_update": d.settings.automatic_update,
         "undo": s.doc.undo_label(),

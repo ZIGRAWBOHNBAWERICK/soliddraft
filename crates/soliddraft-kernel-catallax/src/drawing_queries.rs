@@ -278,13 +278,7 @@ pub(super) fn face_drawing_loops(solid: &Solid, body: BodyId, face: FaceId) -> K
         .filter(|chain| !chain.is_empty())
         .collect();
     // Catallax does not order loops outer-first. The largest planar loop encloses the holes.
-    let area = |curves: &[ViewCurve]| {
-        curves
-            .iter()
-            .map(|c| c.curve.sample(0.0).windows(2).fold(Vec3::ZERO, |sum, p| sum + p[0].cross(p[1])))
-            .fold(Vec3::ZERO, |sum, area| sum + area)
-            .length()
-    };
+    let area = |curves: &[ViewCurve]| soliddraft_kernel_api::drawing::section::loop_area_vector(curves).length();
     loops.sort_by(|a, b| area(b).total_cmp(&area(a)));
     Ok(loops)
 }

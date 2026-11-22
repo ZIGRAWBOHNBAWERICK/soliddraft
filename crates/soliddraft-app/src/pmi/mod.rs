@@ -89,10 +89,8 @@ pub fn package_summary(report: &serde_json::Value) -> String {
             text.push_str(&format!(", {} {what}", count(&drawing[key])));
         }
     }
-    for (key, format) in [("pdf", "PDF"), ("dxf", "DXF")] {
-        if let Some(n) = drawing["accuracy"][key]["approximate"].as_u64().filter(|&n| n > 0) {
-            text.push_str(&format!(", {format} has {n} approximate drawing curves"));
-        }
+    if let Some(n) = drawing["accuracy"]["approximate"].as_u64().filter(|&n| n > 0) {
+        text.push_str(&format!(", {n} approximate drawing curves"));
     }
     text
 }

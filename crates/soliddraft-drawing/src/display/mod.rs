@@ -697,7 +697,7 @@ fn view_items(drawing: &Drawing, sheet: &Sheet, view: &View, ctx: &Context<'_>, 
             role,
             owner: Owner::Curve(view.id, i),
             fill: false,
-            accuracy: Some(c.accuracy),
+            accuracy: Some(c.accuracy.for_path(&c.path)),
         }));
     }
     views::boundary_items(view, ctx, items);

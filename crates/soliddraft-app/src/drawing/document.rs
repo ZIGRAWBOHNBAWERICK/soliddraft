@@ -190,6 +190,23 @@ impl DrawingDoc {
             .collect()
     }
 
+    pub fn refused_views(&self) -> impl Iterator<Item = (usize, ViewId, String, &str)> {
+        self.last_update
+            .iter()
+            .filter(|update| update.to_revision == self.drawing.model.pinned)
+            .flat_map(|update| &update.dangling_views)
+            .filter_map(|failure| {
+                let i = project::sheet_of(&self.drawing, failure.view)?;
+                let sheet = &self.drawing.sheets[i];
+                let view = sheet.view(failure.view).filter(|v| !v.excluded_from_update)?;
+                Some((i, view.id, project::view_label(sheet, view), failure.cause.as_str()))
+            })
+    }
+
+    pub fn view_refusal_messages(&self) -> impl Iterator<Item = String> {
+        self.refused_views().map(|(_, _, name, cause)| format!("{name}: {cause}"))
+    }
+
     pub fn attention_count(&self) -> usize {
         self.drawing.annotations_needing_attention().count()
     }

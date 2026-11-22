@@ -576,6 +576,12 @@ fn export_preserves_the_saved_frozen_detail() {
     let mut drawing = drawing(&old);
     let mut stack = UndoStack::new();
     let detail = corner_detail(&mut drawing, &old, &mut stack, FRONT, 0);
+    let detail_item =
+        |item: &Item| matches!(item, Item::Path(p) if matches!(p.owner, Owner::Curve(id, _) if id == detail));
+    let mut earlier = layout_sheet(&drawing, 0);
+    earlier.items.retain(detail_item);
+    assert!(!earlier.items.is_empty());
+    let expected = export::svg(&earlier);
     drawing.view_mut(detail).unwrap().excluded_from_update = true;
     run(&mut stack, &mut drawing, &new, Command::SetViewCrop { view: FRONT, crop: Some(left_half()) });
     update_from_model(&mut drawing, &new).unwrap();
@@ -587,9 +593,44 @@ fn export_preserves_the_saved_frozen_detail() {
     assert_ne!(saved.view(detail).unwrap().geometry.source_digest, saved.model.pinned.as_str());
     export::check_sheet(&saved, &saved.sheets[0]).unwrap();
     let list = layout_sheet(&saved, 0);
-    assert!(
-        list.printable()
-            .any(|item| matches!(item, Item::Path(p) if matches!(p.owner, Owner::Curve(id, _) if id == detail)))
+    assert_eq!(
+        list.printable().filter(|item| detail_item(item)).collect::<Vec<_>>(),
+        earlier.items.iter().collect::<Vec<_>>()
     );
-    assert!(export::bytes(&list, export::Format::Svg, "Box").is_ok());
+    let written = String::from_utf8(export::bytes(&list, export::Format::Svg, "Box").unwrap()).unwrap();
+    for path in expected.lines().filter(|line| line.starts_with("<path ")) {
+        assert!(written.lines().any(|line| line == path), "missing saved detail path {path}");
+    }
+}
+
+#[test]
+fn detail_uses_its_own_tangents_and_seams_inside_the_parent_crop() {
+    use soliddraft_drawing::{CurveKind, TangentEdges};
+
+    let mut k = BoxKernel::new();
+    k.detail_strokes = true;
+    let part = box_part(&k, "block", Vec3::new(40.0, 30.0, 10.0));
+    let mut drawing = drawing(&part);
+    let mut stack = UndoStack::new();
+    let detail = corner_detail(&mut drawing, &part, &mut stack, FRONT, 0);
+    let flags = |d: &Drawing, id| {
+        let curves = &d.view(id).unwrap().geometry.curves;
+        (curves.iter().any(|c| c.tangent), curves.iter().any(|c| c.kind == CurveKind::Seam))
+    };
+    let set = |d: &mut Drawing, stack: &mut UndoStack, view, enabled| {
+        let mut display = d.view(view).unwrap().display;
+        display.tangent = if enabled { TangentEdges::Phantom } else { TangentEdges::Removed };
+        display.seams = enabled;
+        run(stack, d, &part, Command::SetViewDisplay { view, display });
+    };
+    set(&mut drawing, &mut stack, detail, true);
+    assert_eq!(flags(&drawing, FRONT), (false, false));
+    assert_eq!(flags(&drawing, detail), (true, true));
+    run(&mut stack, &mut drawing, &part, Command::SetViewCrop { view: FRONT, crop: Some(left_half()) });
+    assert_eq!(flags(&drawing, detail), (false, false));
+    run(&mut stack, &mut drawing, &part, Command::SetViewCrop { view: FRONT, crop: None });
+    set(&mut drawing, &mut stack, FRONT, true);
+    set(&mut drawing, &mut stack, detail, false);
+    assert_eq!(flags(&drawing, FRONT), (true, true));
+    assert_eq!(flags(&drawing, detail), (false, false));
 }

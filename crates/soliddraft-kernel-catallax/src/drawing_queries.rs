@@ -43,6 +43,13 @@ pub(super) fn resolved_view(k: &CatallaxKernel, body: BodyId, spec: &ViewSpec) -
     }
 }
 
+pub(super) fn check_exact_tolerance(spec: &ViewSpec) -> KernelResult<()> {
+    if spec.tolerance != 0.0 {
+        return Err(KernelError::InvalidInput("Drawing tolerance applies to mesh preview only".into()));
+    }
+    Ok(())
+}
+
 /// A view of `body`. A screen view comes from the display mesh and is marked unproved;
 /// an exported one is Catallax's hidden-line view.
 pub(super) fn view_curves(k: &CatallaxKernel, body: BodyId, spec: &ViewSpec) -> KernelResult<ViewCurves> {
@@ -50,6 +57,7 @@ pub(super) fn view_curves(k: &CatallaxKernel, body: BodyId, spec: &ViewSpec) -> 
         return Err(KernelError::InvalidInput("view direction is zero or parallel to up".into()));
     }
     if !spec.preview {
+        check_exact_tolerance(spec)?;
         require_drawing_solid(k, body, "view_curves")?;
         return exact_view(k.solid(body)?.as_ref(), spec);
     }

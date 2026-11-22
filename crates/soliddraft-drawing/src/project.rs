@@ -141,7 +141,7 @@ pub fn compute_view(
     sheet: usize,
     memo: &mut Contexts,
 ) -> Result<ViewContext, DrawingError> {
-    compute_view_at(drawing, part, index, view, sheet, memo, 0)
+    compute_view_at(drawing, part, index, view, sheet, memo, 0, None)
 }
 
 pub(crate) fn reproject_parent_marks(kind: &mut ViewKind, xf: &ViewTransform) {
@@ -163,6 +163,7 @@ pub(crate) fn reproject_parent_marks(kind: &mut ViewKind, xf: &ViewTransform) {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn compute_view_at(
     drawing: &Drawing,
     part: &Part,
@@ -171,6 +172,7 @@ fn compute_view_at(
     sheet: usize,
     memo: &mut Contexts,
     depth: u8,
+    projection: Option<(ViewDisplay, ViewTransform)>,
 ) -> Result<ViewContext, DrawingError> {
     if depth > 16 {
         return Err(DrawingError::BadView(view.id));
@@ -180,9 +182,10 @@ fn compute_view_at(
     {
         let p = drawing.view(parent).ok_or(DrawingError::UnknownView(parent))?;
         let ps = sheet_of(drawing, parent).unwrap_or(sheet);
-        let ctx = compute_view_at(drawing, part, index, p, ps, memo, depth + 1)?;
+        let ctx = compute_view_at(drawing, part, index, p, ps, memo, depth + 1, None)?;
         memo.insert(parent, ctx);
     }
+    let display = projection.map_or(view.display, |(display, _)| display);
     let scale = scale_in(drawing, sheet, view);
     let refused = |error| view_refusal(|| view_label(&drawing.sheets[sheet], view), error);
     let mut kind = view.kind.clone();
@@ -191,28 +194,53 @@ fn compute_view_at(
     }
     let mut ctx = match &kind {
         ViewKind::Base { .. } | ViewKind::Projected { .. } => {
-            let spec = spec_in(drawing, sheet, view).ok_or(DrawingError::BadView(view.id))?;
+            let spec = with_display(spec_in(drawing, sheet, view).ok_or(DrawingError::BadView(view.id))?, &display);
             let curves = view_curves(part, &spec).map_err(refused)?;
-            let xf = transform(&curves, &spec, scale)?;
+            let xf = match projection {
+                Some((_, xf)) => xf,
+                None => transform(&curves, &spec, scale)?,
+            };
             let projected = project(index, &curves, &xf, part.digest.as_str(), part.preview);
             ViewContext { id: view.id, curves, xf, pictorial: is_pictorial(&spec), projected }
         }
         ViewKind::Section { parent, line, flip, model_line, .. } => {
             let pctx = &memo[parent];
             let (direction, up) = section_axes(&pctx.xf.frame, line, *flip).ok_or(DrawingError::BadView(view.id))?;
-            let spec = with_display(ViewSpec::new(direction, up), &view.display);
+            let spec = with_display(ViewSpec::new(direction, up), &display);
             let origin = model_line.first().copied().unwrap_or_else(|| pctx.xf.unproject(line[0]));
             let section = part
                 .kernel
                 .section_view(part.body, &SectionSpec { view: ViewSpec { preview: part.preview, ..spec }, origin })
                 .map_err(|e| refused(e.into()))?;
-            let xf = transform(&section.curves, &spec, scale)?;
+            let xf = match projection {
+                Some((_, xf)) => xf,
+                None => transform(&section.curves, &spec, scale)?,
+            };
             let mut projected = project(index, &section.curves, &xf, part.digest.as_str(), part.preview);
             projected.geometry.hatch = section.regions.iter().map(|r| region_polygon(r, &xf, None)).collect();
             ViewContext { id: view.id, curves: section.curves, xf, pictorial: false, projected }
         }
         ViewKind::Detail { parent, center, radius, profile, model_center, .. } => {
-            let pctx = &memo[parent];
+            let original = drawing.view(*parent).ok_or(DrawingError::UnknownView(*parent))?;
+            let includes_tangents = |display: ViewDisplay| display.tangent != crate::TangentEdges::Removed;
+            let parent_xf = memo[parent].xf;
+            let alternate = if includes_tangents(display) != includes_tangents(original.display)
+                || display.seams != original.display.seams
+            {
+                Some(compute_view_at(
+                    drawing,
+                    part,
+                    index,
+                    original,
+                    sheet_of(drawing, *parent).unwrap_or(sheet),
+                    memo,
+                    depth + 1,
+                    Some((display, parent_xf)),
+                )?)
+            } else {
+                None
+            };
+            let pctx = alternate.as_ref().unwrap_or(&memo[parent]);
             let ratio = scale / pctx.xf.scale;
             let model = model_center.unwrap_or_else(|| pctx.xf.unproject(*center));
             let probe = ViewTransform { frame: pctx.xf.frame, scale, centre: Point2::new(0.0, 0.0) };
@@ -285,15 +313,18 @@ fn compute_view_at(
         ViewKind::Auxiliary { parent, edge, flip, .. } => {
             let pctx = &memo[parent];
             let (direction, up) = auxiliary_axes(index, pctx, edge, *flip)?;
-            let spec = with_display(ViewSpec::new(direction, up), &view.display);
+            let spec = with_display(ViewSpec::new(direction, up), &display);
             let curves = view_curves(part, &spec).map_err(refused)?;
-            let xf = transform(&curves, &spec, scale)?;
+            let xf = match projection {
+                Some((_, xf)) => xf,
+                None => transform(&curves, &spec, scale)?,
+            };
             let projected = project(index, &curves, &xf, part.digest.as_str(), part.preview);
             ViewContext { id: view.id, curves, xf, pictorial: false, projected }
         }
     };
     for cut in &view.broken_out {
-        broken_out(part, index, &mut ctx, cut, &view.display).map_err(refused)?;
+        broken_out(part, index, &mut ctx, cut, &display).map_err(refused)?;
     }
     if let Some(crop) = &view.crop {
         clip_projected(&mut ctx.projected, crop, true);

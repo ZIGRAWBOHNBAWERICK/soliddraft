@@ -732,6 +732,9 @@
         "path": "{bundle}/stale.svg"
       },
       "label": "export of the saved revision",
+      "helpers": [
+        ["check-same-file.py", "{bundle}/bracket.svg", "{bundle}/stale.svg"]
+      ],
       "checks": [
         {
           "pointer": "/result/method",

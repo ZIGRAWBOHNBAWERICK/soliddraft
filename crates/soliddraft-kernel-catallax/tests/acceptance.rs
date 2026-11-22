@@ -771,3 +771,20 @@ fn a_support_plane_costs_no_numerical_work() {
     assert_eq!(calls[0]["work"]["used"], 0, "{evidence}");
     assert_eq!(calls[0]["operation_log"]["operations"].as_array().unwrap().len(), 0, "{evidence}");
 }
+
+#[test]
+fn exact_views_and_sections_refuse_mesh_tolerances() {
+    use soliddraft_kernel_api::drawing::{SectionSpec, StandardView, ViewSpec};
+
+    let k = CatallaxKernel::new();
+    let body = contract::block(&k);
+    let spec = ViewSpec { tolerance: 1e-12, ..ViewSpec::standard(StandardView::Front) };
+    for result in [
+        k.view_curves(body, &spec).map(|_| ()),
+        k.section_view(body, &SectionSpec { view: spec, origin: Vec3::new(0.0, 5.0, 0.0) }).map(|_| ()),
+    ] {
+        assert!(matches!(result, Err(KernelError::InvalidInput(message)) if message.contains("mesh preview only")));
+    }
+    let preview = ViewSpec { tolerance: 0.01, preview: true, ..spec };
+    assert!(k.view_curves(body, &preview).unwrap().unproved);
+}

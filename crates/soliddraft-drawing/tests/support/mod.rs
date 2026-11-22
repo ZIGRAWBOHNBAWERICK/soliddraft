@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 
 use soliddraft_drawing::{ContentHash, ModelDimension, ModelMeasure, Part};
-use soliddraft_kernel_api::drawing::Curve3;
+use soliddraft_kernel_api::drawing::{Curve3, CurveSource, ViewCurve, ViewCurves, ViewSpec, mesh_hlr};
 use soliddraft_kernel_api::{
     Aabb, BackendInfo, BodyId, BodyKind, BooleanOp, CurveKind, EdgeId, EdgeInfo, EdgePolyline, EntityChanges, Extrude,
     FaceId, FaceInfo, HistoryRecord, Kernel, KernelError, KernelResult, MassProperties, Mesh, OpKind, OpResult, OpTag,
@@ -28,6 +28,7 @@ struct BoxBody {
 pub struct BoxKernel {
     bodies: Mutex<HashMap<u64, BoxBody>>,
     next: Mutex<u64>,
+    pub detail_strokes: bool,
 }
 
 /// The faces of a box: outward normal, and in-plane axes u and v with u x v = normal.
@@ -42,7 +43,7 @@ const FACES: [(Vec3, Vec3, Vec3); 6] = [
 
 impl BoxKernel {
     pub fn new() -> BoxKernel {
-        BoxKernel { bodies: Mutex::new(HashMap::new()), next: Mutex::new(1) }
+        BoxKernel { bodies: Mutex::new(HashMap::new()), next: Mutex::new(1), detail_strokes: false }
     }
 
     /// A box from `min` to `max` made by the operation tagged `tag`.
@@ -132,6 +133,25 @@ impl Kernel for BoxKernel {
 
     fn shell(&self, _: &OpTag, _: BodyId, _: &[FaceId], _: f64) -> KernelResult<OpResult> {
         Err(KernelError::Unsupported("shell".into()))
+    }
+
+    fn view_curves(&self, body: BodyId, spec: &ViewSpec) -> KernelResult<ViewCurves> {
+        if !self.detail_strokes {
+            return Err(KernelError::Unsupported("drawing view".into()));
+        }
+        let view = mesh_hlr::view_curves(self, body, spec)?;
+        let (max, face) = self.with(body, |b| (b.max, FaceId::from_raw(b.first_id)))?;
+        let near = Vec3::new(max.x - 1.0, 0.0, max.z - 1.0);
+        let mut curves = view.curves;
+        if spec.smooth_edges {
+            let mut tangent = ViewCurve::new(Curve3::Line { a: near, b: near - Vec3::X }, CurveSource::Unknown, true);
+            tangent.smooth = true;
+            curves.push(tangent);
+        }
+        if spec.seams {
+            curves.push(ViewCurve::new(Curve3::Line { a: near, b: near + Vec3::Z }, CurveSource::Seam(face), true));
+        }
+        Ok(ViewCurves::new(curves, &spec.frame().unwrap()))
     }
 
     fn tessellate(&self, body: BodyId, _: &TessellationParams) -> KernelResult<Mesh> {

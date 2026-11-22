@@ -27,11 +27,13 @@ pub struct UpdateReport {
     pub views: usize,
     pub changed: Vec<AnnotationId>,
     pub dangling: Vec<AnnotationId>,
+    pub dangling_views: Vec<soliddraft_drawing::DanglingView>,
     pub at: Instant,
     pub dismissed: bool,
 }
 
 struct PickingCache {
+    last_update: Option<UpdateReport>,
     transforms: HashMap<ViewId, ViewTransform>,
     circles: HashMap<ViewId, Vec<CircleInfo>>,
 }
@@ -220,20 +222,33 @@ impl DrawingDoc {
                 _ => None,
             };
             let report = self.stack.run(&mut self.drawing, &cmd, p.as_ref()).map_err(|e| e.to_string())?;
-            self.undo_picking.push(PickingCache { transforms: self.transforms.clone(), circles: self.circles.clone() });
+            self.undo_picking.push(PickingCache {
+                last_update: self.last_update.clone(),
+                transforms: self.transforms.clone(),
+                circles: self.circles.clone(),
+            });
             self.redo_picking.clear();
             self.rescale_picking();
             self.touch();
-            if let (Some(id), Some(p)) = (remade, p.as_ref())
-                && let Ok(index) = soliddraft_drawing::PartIndex::build(p)
-            {
-                let mut contexts = project::Contexts::new();
-                for child in project::dependent_views(&self.drawing, id) {
-                    if child != id && self.drawing.view(child).is_some_and(|v| v.excluded_from_update) {
-                        continue;
-                    }
-                    if project::compute_in(&self.drawing, p, &index, child, &mut contexts).is_ok() {
-                        self.remember(child, &contexts[&child].projected);
+            if matches!(cmd, Command::DeleteView { .. } | Command::DeleteSheet { .. }) {
+                if let Some(report) = &mut self.last_update {
+                    report.dangling_views.retain(|failure| self.drawing.view(failure.view).is_some());
+                }
+            }
+            if let (Some(id), Some(p)) = (remade, p.as_ref()) {
+                let redrawn: Vec<_> = project::dependent_views(&self.drawing, id)
+                    .into_iter()
+                    .filter(|&child| child == id || self.drawing.view(child).is_some_and(|v| !v.excluded_from_update))
+                    .collect();
+                if let Some(report) = &mut self.last_update {
+                    report.dangling_views.retain(|failure| !redrawn.contains(&failure.view));
+                }
+                if let Ok(index) = soliddraft_drawing::PartIndex::build(p) {
+                    let mut contexts = project::Contexts::new();
+                    for child in redrawn {
+                        if project::compute_in(&self.drawing, p, &index, child, &mut contexts).is_ok() {
+                            self.remember(child, &contexts[&child].projected);
+                        }
                     }
                 }
             }
@@ -254,6 +269,7 @@ impl DrawingDoc {
                     views: r.projections.len(),
                     changed,
                     dangling,
+                    dangling_views: r.dangling_views,
                     at: Instant::now(),
                     dismissed: false,
                 });
@@ -263,6 +279,7 @@ impl DrawingDoc {
     }
 
     fn swap_picking(&mut self, mut cache: PickingCache) -> PickingCache {
+        std::mem::swap(&mut self.last_update, &mut cache.last_update);
         std::mem::swap(&mut self.transforms, &mut cache.transforms);
         std::mem::swap(&mut self.circles, &mut cache.circles);
         cache

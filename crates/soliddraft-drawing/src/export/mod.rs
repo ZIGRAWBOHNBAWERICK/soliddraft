@@ -75,7 +75,7 @@ pub fn check_sheet(drawing: &crate::Drawing, sheet: &crate::Sheet) -> Result<(),
         let label = || crate::project::view_label(sheet, view);
         if !view.geometry.catallax || view.geometry.unproved {
             return Err(DrawingError::BadRequest(format!(
-                "{} has no saved Catallax line work. Redraw it once in the drawing editor before exporting.",
+                "{} has no saved Catallax line work. Redraw it once in the drawing editor before exporting. Check any crop or broken-out boundary after the redraw.",
                 label()
             )));
         }

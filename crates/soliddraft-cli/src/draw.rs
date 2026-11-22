@@ -765,8 +765,8 @@ fn update(o: &Options) -> Result<(), String> {
         // A drawing from before the envelope is saved under the current name beside it.
         let saved = soliddraft_document::kind::saved_path(&path, DocKind::Drawing);
         let meta = meta.rewritten(&source.backend, drawing.meta.units);
-        let accuracy = write_outputs(&drawing, &o.outs, &source.backend)?;
         file::write(&saved, &drawing, &meta).map_err(|e| e.to_string())?;
+        let accuracy = write_outputs(&drawing, &o.outs, &source.backend)?;
         // The report after repairs: what still needs attention.
         let mut final_report = report.clone();
         final_report.dangling.retain(|d| drawing.annotation(d.annotation).is_some_and(|a| a.needs_attention()));

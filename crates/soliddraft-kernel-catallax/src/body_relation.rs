@@ -254,6 +254,8 @@ pub(super) fn relation(
     let related = numerical("body_relation", |dec| {
         queries::body_relation(&model, a, b, &Accuracy::default(), dec).map_err(|r| r.refusal)
     });
+    #[cfg(test)]
+    let related = related.map(tests::replace_native_enclosure);
     let related = if related.is_err() && catallax_numbers::current_operation_work().exhausted {
         Err(Refusal::new("numbers.operation-budget", "operation work allowance exhausted"))
     } else {
@@ -320,6 +322,39 @@ pub(super) fn relation(
 mod tests {
     use super::*;
     use soliddraft_kernel_api::contract;
+
+    thread_local! {
+        static NATIVE_ENCLOSURE: std::cell::Cell<Option<Enclosure>> = const { std::cell::Cell::new(None) };
+    }
+
+    pub(super) fn replace_native_enclosure(mut answer: Answer<queries::BodyRelation>) -> Answer<queries::BodyRelation> {
+        if let Some(enclosure) = NATIVE_ENCLOSURE.take() {
+            let queries::BodyRelation::Clear { gap } = &mut answer.value else {
+                panic!("the two blocks are 1 mm apart");
+            };
+            assert!(enclosure.lo < gap.lo && gap.hi < enclosure.hi);
+            *gap = enclosure;
+        }
+        answer
+    }
+
+    #[test]
+    fn public_relation_settles_clearance_when_the_native_enclosure_straddles() {
+        let k = CatallaxKernel::new();
+        let body = contract::block(&k);
+        let a = PlacedBody { body, translation: [0.0; 3], rotation: [0.0, 0.0, 0.0, 1.0] };
+        let b = PlacedBody { translation: [0.0, 0.0, 11.0], ..a };
+        let enclosure = Enclosure { lo: Rational::parse("0.9").unwrap(), hi: Rational::parse("1.1").unwrap() };
+        for (first, second) in [(a, b), (b, a)] {
+            NATIVE_ENCLOSURE.set(Some(enclosure.clone()));
+            let result = k.body_relation(first, second, Some(1.0)).unwrap();
+            assert_eq!(result.overlap.unwrap().positive, Some(false));
+            let gap = result.gap.unwrap().unwrap();
+            assert!(gap.distance.lo < 1.0 && gap.distance.hi > 1.0);
+            assert_eq!(gap.exceeds_clearance, Some(false));
+            assert!(gap.clearance_refusal.is_none());
+        }
+    }
 
     #[test]
     fn a_straddling_gap_uses_an_admitted_witness_at_exact_clearance() {

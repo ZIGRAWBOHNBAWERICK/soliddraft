@@ -108,11 +108,12 @@ pub fn update_from_model(drawing: &mut Drawing, part: &Part) -> Result<UpdateRep
         if view.excluded_from_update {
             continue;
         }
-        if view.parent().is_some_and(|p| failed.contains(&p)) {
+        if let Some(parent_failure) =
+            view.parent().and_then(|parent| report.dangling_views.iter().find(|failure| failure.view == parent))
+        {
+            let cause = parent_failure.cause.clone();
             failed.push(id);
-            report
-                .dangling_views
-                .push(DanglingView { view: id, cause: "the view it is made from could not be updated".into() });
+            report.dangling_views.push(DanglingView { view: id, cause });
             continue;
         }
         if let Err(e) = project::compute_in(drawing, part, &index, id, &mut contexts) {

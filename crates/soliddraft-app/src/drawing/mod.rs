@@ -1487,7 +1487,6 @@ pub fn apply(state: &mut AppState, dock: &mut DockState<Tab>, ctx: &egui::Contex
             if let Some(s) = state.drawing.session.as_mut() {
                 if s.doc.undo_label() == Some("Update from model") {
                     s.doc.undo();
-                    s.doc.last_update = None;
                     s.say("Rebuild undone; the views are older than the part again");
                 } else {
                     s.say("The last change was not an update");
@@ -1852,6 +1851,25 @@ pub(crate) fn prepare_sheets(s: &DrawingSession, all_sheets: bool) -> Result<Pre
     let stale = s.doc.stale_views();
     let drawing = &s.doc.drawing;
     let writes_sheet = |i| all_sheets || i == s.sheet;
+    if let Some(update) = &s.doc.last_update
+        && update.to_revision == drawing.model.pinned
+    {
+        let failures: Vec<_> = drawing
+            .sheets
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| writes_sheet(*i))
+            .flat_map(|(_, sheet)| {
+                update.dangling_views.iter().filter_map(move |failure| {
+                    let view = sheet.view(failure.view).filter(|v| !v.excluded_from_update)?;
+                    Some(format!("{}: {}", project::view_label(sheet, view), failure.cause))
+                })
+            })
+            .collect();
+        if !failures.is_empty() {
+            return Err(failures.join("\n"));
+        }
+    }
     let mut views = 0;
     for (_, sheet) in drawing.sheets.iter().enumerate().filter(|(i, _)| writes_sheet(*i)) {
         export::check_sheet(drawing, sheet).map_err(|error| error.to_string())?;

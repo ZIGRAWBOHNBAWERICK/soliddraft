@@ -568,6 +568,9 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
     // The sheet tabs under the canvas.
     sheets::strip(ui, s, strip, &mut push);
 
+    #[cfg(target_arch = "wasm32")]
+    crate::web::show_drawing(s);
+
     for a in actions {
         state.push(a);
     }

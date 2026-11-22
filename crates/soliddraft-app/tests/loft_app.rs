@@ -316,14 +316,18 @@ fn three_section_smooth_loft_previews_and_commits_without_changing_the_allowance
     use soliddraft_app::state::EditorParams;
 
     let mut case = ux_tools::Case::new("loft-smooth-three-section");
-    let mut doc = profiles();
+    let mut doc = Document::new("Loft", soliddraft_app::kernel());
+    // Widen only one edge of the middle rectangle to limit spline face integration.
+    rectangle(&mut doc, 0, 1.0, 2.0, 2.0);
+    rectangle(&mut doc, 3, 1.125, 2.25, 2.0);
+    rectangle(&mut doc, 6, 1.0, 2.0, 2.0);
     doc.selection = Some(Selection::Feature(doc.features[0].id));
     let mut app = ux_tools::launch(doc, ux_tools::STANDARD);
     app.state_mut()
         .state
         .viewport
         .camera
-        .fit_framed(Some((glam::Vec3::new(-2.0, -2.0, 0.0), glam::Vec3::new(2.0, 2.0, 6.0))));
+        .fit_framed(Some((glam::Vec3::new(0.0, -1.0, 0.0), glam::Vec3::new(2.25, 1.0, 6.0))));
     ux_tools::settle(&mut app);
     case.run(&mut app, |case, app| {
         ribbon::run_command(app, "loft");
@@ -354,7 +358,9 @@ fn three_section_smooth_loft_previews_and_commits_without_changing_the_allowance
         assert!(matches!(&app.state().state.doc.features[3].kind, FeatureKind::Loft(l)
             if l.profiles.len() == 3 && l.shape == soliddraft_kernel_api::LoftShape::Smooth));
         let measured = volume(&app.state().state.doc);
-        assert!((measured - 4596.0 / 70.0).abs() < 1e-7, "{measured}");
+        // The natural cubic bulge averages 5/8 of its peak. Ruled gives 25.5 and omitting Sketch2 gives 24.
+        let expected = 24.0 + 6.0 * 2.0 * 0.25 * (5.0 / 8.0);
+        assert!((measured - expected).abs() < 1e-7, "{measured}");
         assert!(!app.state().state.doc.proof_state().failed);
         case.note(format!("three-section Smooth volume {measured} mm3"));
         case.frame(app, "committed");

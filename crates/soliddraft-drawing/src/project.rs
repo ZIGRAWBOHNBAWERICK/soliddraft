@@ -761,6 +761,40 @@ pub struct Projected {
 }
 
 impl Projected {
+    /// Visible circular hole rims, deduplicated where the same diameter shares a centre.
+    pub fn hole_rows(&self, namer: &dyn crate::Namer) -> Vec<crate::HoleRow> {
+        let visible: std::collections::HashSet<_> = self
+            .geometry
+            .curves
+            .iter()
+            .filter(|curve| curve.visible && curve.kind == CurveKind::Edge)
+            .filter_map(|curve| curve.source.kernel_hint)
+            .collect();
+        let mut holes: Vec<_> = self
+            .circles
+            .iter()
+            .filter(|circle| circle.entity.kernel_hint.is_some_and(|id| visible.contains(&id)) && namer.is_hole(circle))
+            .map(|circle| {
+                let coordinate = self.transform.frame.project(circle.model_centre);
+                let scale = self.transform.scale;
+                crate::HoleRow {
+                    coordinates: Point2::new(round(coordinate.u), round(coordinate.v)),
+                    centre: Point2::new(round(circle.centre.u / scale), round(circle.centre.v / scale)),
+                    diameter: round(circle.model_radius * 2.0),
+                }
+            })
+            .collect();
+        holes.sort_by(|a, b| {
+            a.coordinates
+                .u
+                .total_cmp(&b.coordinates.u)
+                .then(a.coordinates.v.total_cmp(&b.coordinates.v))
+                .then(a.diameter.total_cmp(&b.diameter))
+        });
+        holes.dedup_by(|a, b| a.coordinates == b.coordinates && a.diameter == b.diameter);
+        holes
+    }
+
     /// Width and height in view millimetres.
     pub fn size(&self) -> (f64, f64) {
         let [x0, y0, x1, y1] = self.geometry.bbox;

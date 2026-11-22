@@ -119,8 +119,58 @@ pub fn measure(kind: &DimensionKind, dim_type: DimType, anchors: &[AnchorGeometr
             let cos = (a.u * b.u + a.v * b.v).clamp(-1.0, 1.0);
             Some(cos.acos().to_degrees())
         }
-        DimensionKind::Ordinate | DimensionKind::Chamfer => None,
+        DimensionKind::Chamfer => chamfer(projected_edge_ends(anchors, xf)?, xf.scale).map(|(size, _)| size),
+        DimensionKind::Ordinate => None,
     }
+}
+
+/// The projected ends of two straight model edges, in anchor order.
+pub(crate) fn projected_edge_ends(anchors: &[AnchorGeometry], xf: &ViewTransform) -> Option<[Point2; 4]> {
+    let [a, b, c, d] = anchors else { return None };
+    if !anchors.iter().all(|g| matches!(g.curve, Some(Curve3::Line { .. }))) {
+        return None;
+    }
+    Some([a, b, c, d].map(|g| xf.point(anchor_point(g, xf, Point2::default()))))
+}
+
+/// The chamfer leg normal to the adjacent edge and the angle to that edge.
+/// The two straight edges must share a corner in the profile view.
+pub fn chamfer([a, b, c, d]: [Point2; 4], scale: f64) -> Option<(f64, f64)> {
+    let anchor_distance = |p: Point2, q: Point2| (p.u - q.u).hypot(p.v - q.v);
+    if scale <= 0.0 || ![a, b].into_iter().any(|p| [c, d].into_iter().any(|q| anchor_distance(p, q) <= 1e-6)) {
+        return None;
+    }
+    let bevel = kurbo::Vec2::new(b.u - a.u, b.v - a.v) / scale;
+    let side = kurbo::Vec2::new(d.u - c.u, d.v - c.v) / scale;
+    let normal = bevel.cross(side).abs() / side.length();
+    let along = bevel.dot(side).abs() / side.length();
+    (normal.is_finite() && normal > 1e-6 && along > 1e-6).then(|| (normal, normal.atan2(along).to_degrees()))
+}
+
+/// The centreline of two distinct parallel segments, spanning their shared length.
+pub fn centreline([a, b, c, d]: [Point2; 4]) -> Option<[Point2; 2]> {
+    let span = kurbo::Vec2::new(b.u - a.u, b.v - a.v);
+    let other = kurbo::Vec2::new(d.u - c.u, d.v - c.v);
+    if span.length() <= 1e-6 || other.length() <= 1e-6 {
+        return None;
+    }
+    let axis = span / span.length();
+    let offset = kurbo::Vec2::new(c.u - a.u, c.v - a.v);
+    let gap = axis.cross(offset);
+    if gap.abs() <= 1e-6 || axis.cross(other / other.length()).abs() > 1e-6 {
+        return None;
+    }
+    let c = axis.dot(offset);
+    let d = c + axis.dot(other);
+    let (start, end) = (c.min(d).max(0.0), c.max(d).min(span.length()));
+    if end - start <= 1e-6 {
+        return None;
+    }
+    let mid = kurbo::Vec2::new(-axis.y, axis.x) * (gap / 2.0);
+    Some([start - 2.0, end + 2.0].map(|t| {
+        let p = mid + axis * t;
+        Point2::new(a.u + p.x, a.v + p.y)
+    }))
 }
 
 /// The distances of a dimension set from its anchors' geometry, one per anchor after the
@@ -155,7 +205,13 @@ pub fn format_value(value: f64, precision: u8) -> String {
 /// compares.
 pub fn value_text(d: &Dimension) -> String {
     match &d.value {
-        DimValue::Measured { value } => format_value(*value, d.precision),
+        DimValue::Measured { value } => {
+            let size = format_value(*value, d.precision);
+            d.chamfer_angle.map_or_else(
+                || size.clone(),
+                |angle| format!("{size} × {}°", format_value(angle, precision_for(angle))),
+            )
+        }
         DimValue::Driving { parameter } => format!("{}.{}", parameter.feature, parameter.name),
     }
 }
@@ -538,6 +594,11 @@ pub fn display_text(dim: &Dimension, symbols: &crate::library::Symbols) -> Strin
                 format_value(value + lower, dim.precision.max(1))
             )
         }
+    };
+    let with_tol = if let Some(angle) = dim.chamfer_angle {
+        format!("{with_tol} {} {}{}", symbols.times, format_value(angle, precision_for(angle)), symbols.degree)
+    } else {
+        with_tol
     };
     let text = if dim.text.is_empty() { Dimension::VALUE_TEXT.to_owned() } else { dim.text.clone() };
     let text = text.replace(Dimension::VALUE_TEXT, &with_tol);

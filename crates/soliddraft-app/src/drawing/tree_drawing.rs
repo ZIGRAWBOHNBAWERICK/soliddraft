@@ -504,6 +504,33 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
                     });
                 }
             }
+            for (i, table) in
+                sheet.tables.iter().enumerate().filter(|(_, t)| t.kind == soliddraft_drawing::TableKind::Hole)
+            {
+                let name = table
+                    .hole_view
+                    .and_then(|id| sheet.view(id))
+                    .map(|v| view_label_in(&s.doc.drawing, &sheet, v))
+                    .unwrap_or_default();
+                let r = row(
+                    ui,
+                    RowSpec {
+                        indent: 2,
+                        chevron: None,
+                        icon: Icon::Hole,
+                        name: "Hole table",
+                        sub: &name,
+                        selected: selection == Some(DrawingSel::HoleTable(i)) && si == s.sheet,
+                        dim: false,
+                        dot: Dot::None,
+                        tip: None,
+                    },
+                );
+                if r.clicked() {
+                    actions.push(DrawingAction::SetSheet(si));
+                    actions.push(DrawingAction::Select(Some(DrawingSel::HoleTable(i))));
+                }
+            }
             let revisions = sheet.revision_table().map(|t| t.revisions.len());
             let rev_sub = match revisions {
                 Some(n) => format!("({n} row{})", if n == 1 { "" } else { "s" }),

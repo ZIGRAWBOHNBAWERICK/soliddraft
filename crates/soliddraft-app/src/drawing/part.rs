@@ -141,6 +141,12 @@ impl Namer for PartContext<'_> {
         })
     }
 
+    fn is_hole(&self, circle: &CircleInfo) -> bool {
+        self.feature_of(&circle.entity)
+            .and_then(|(id, _, _)| self.doc.feature(id))
+            .is_some_and(|f| matches!(f.kind, FeatureKind::Cut(_) | FeatureKind::Hole(_)))
+    }
+
     /// "4× Ø9 THRU", "Ø12 DEEP 20" or "Ø24": holes of the same cut and size are counted
     /// by centre, since the far end of a hole lies under its near end face-on.
     fn hole_callout(&self, circle: &CircleInfo, projected: &Projected, symbols: &Symbols) -> Option<String> {

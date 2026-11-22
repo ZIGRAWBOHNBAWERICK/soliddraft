@@ -165,13 +165,35 @@ pub struct Table {
     /// current revision.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub revisions: Vec<RevisionRow>,
+    /// The view a hole table lists.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hole_view: Option<ViewId>,
+    /// The visible holes at the drawing's pinned revision.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub holes: Vec<HoleRow>,
 }
 
 impl Table {
     /// An empty revision table with its top-left corner at `position`.
     pub fn revision(position: Point2) -> Table {
-        Table { kind: TableKind::Revision, position, revisions: Vec::new() }
+        Table { kind: TableKind::Revision, position, revisions: Vec::new(), hole_view: None, holes: Vec::new() }
     }
+
+    /// A hole table at a sheet position, linked to the view that supplied its rows.
+    pub fn hole(position: Point2, view: ViewId, holes: Vec<HoleRow>) -> Table {
+        Table { kind: TableKind::Hole, position, revisions: Vec::new(), hole_view: Some(view), holes }
+    }
+}
+
+/// One face-on hole diameter and its position.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct HoleRow {
+    /// X and Y measured along the view axes from the model origin, in model millimetres.
+    pub coordinates: Point2,
+    /// Centre in view coordinates at 1:1, for the hole tag.
+    pub centre: Point2,
+    /// The diameter in model millimetres.
+    pub diameter: f64,
 }
 
 /// One row of a revision table.

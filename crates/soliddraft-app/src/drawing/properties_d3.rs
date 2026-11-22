@@ -835,6 +835,33 @@ pub fn annotation_body(
 ) -> bool {
     let id = a.id;
     match &a.body {
+        AnnotationKind::Weld { size } => {
+            theme::section_label(ui, "Arrow-side fillet");
+            let edit = ui.id().with(("weld_size", id.0));
+            let saved = size.map(|n| n.to_string()).unwrap_or_default();
+            let mut value = ui.data_mut(|data| data.get_temp::<String>(edit)).unwrap_or_else(|| saved.clone());
+            if text_field(ui, "Weld size", &mut value, "mm") {
+                ui.data_mut(|data| data.remove::<String>(edit));
+                let input = value.trim();
+                let parsed = if input.is_empty() {
+                    Some(None)
+                } else {
+                    input.parse::<f64>().ok().filter(|n| n.is_finite() && *n > 0.0).map(Some)
+                };
+                if let Some(new) = parsed {
+                    if new != *size {
+                        actions.push(DrawingAction::Command(Command::EditAnnotation {
+                            annotation: id,
+                            body: AnnotationKind::Weld { size: new },
+                        }));
+                    }
+                } else {
+                    hint(ui, "Enter a positive weld size in millimetres");
+                }
+            } else if value != saved {
+                ui.data_mut(|data| data.insert_temp(edit, value));
+            }
+        }
         AnnotationKind::Gdt { .. } => {
             let Some(mut g) = GdtDraft::from_body(&a.body) else { return false };
             if gdt_editor(ui, &mut g, "gdt_edit") {

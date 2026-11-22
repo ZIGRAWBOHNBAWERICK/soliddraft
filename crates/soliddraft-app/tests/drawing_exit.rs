@@ -973,8 +973,8 @@ fn drawing_annotations_follow_the_part_through_save_and_reopen() {
     assert_eq!(chamfer.len(), 1, "the Chamfer ribbon tool adds a dimension");
 
     click_button(&mut app, "Centreline");
-    pick(&mut app, top, [60., 0., 10.]);
-    pick(&mut app, top, [60., 90., 10.]);
+    pick(&mut app, front, [100., 0., 0.]);
+    pick(&mut app, front, [100., 0., 10.]);
     let centreline = annotations_of_kind(&app, |b| matches!(b, AnnotationKind::Centreline));
     assert_eq!(centreline.len(), 1);
     let centre_id = centreline[0].id;
@@ -982,7 +982,7 @@ fn drawing_annotations_follow_the_part_through_save_and_reopen() {
     click_button(&mut app, "Weld");
     pick(&mut app, front, [100., 0., 10.]);
     pick(&mut app, front, [100., 0., 27.]);
-    type_field(&mut app, "Weld size", "4");
+    type_field(&mut app, "Weld size field", "4");
 
     click_button(&mut app, "Hole table");
     pick(&mut app, top, [25., 23., 10.]);
@@ -990,7 +990,7 @@ fn drawing_annotations_follow_the_part_through_save_and_reopen() {
     let table_at = screen_of_sheet(&app, Point2::new(position.u + 80., position.v + 42.));
     click_at(&mut app, table_at);
 
-    let check_sheet = |app: &App<'_>| {
+    let check_sheet = |app: &App<'_>, thickness| {
         let s = session(app);
         let list = layout_sheet(&s.doc.drawing, 0);
         let texts: Vec<_> = list
@@ -1001,7 +1001,7 @@ fn drawing_annotations_follow_the_part_through_save_and_reopen() {
                 _ => None,
             })
             .collect();
-        for text in ["6 × 45°", "4", "HOLE TABLE", "A1", "A5"] {
+        for text in ["6 × 45°", "HOLE TABLE", "A1", "A5"] {
             assert!(texts.iter().any(|actual| actual.contains(text)), "missing {text}: {texts:?}");
         }
         let centres: Vec<_> = list
@@ -1014,10 +1014,24 @@ fn drawing_annotations_follow_the_part_through_save_and_reopen() {
             .collect();
         assert_eq!(centres.len(), 1);
         assert!(centres[0].dash.is_some());
+        let outline = centres[0].path.elements();
+        let [kurbo::PathEl::MoveTo(a), kurbo::PathEl::LineTo(b)] = outline else { panic!("{outline:?}") };
+        let vertical = s.sheet_point(front, Vec3::new(100., 0., thickness / 2.0)).unwrap().v;
+        assert!((a.y - vertical).abs() < 1e-6 && (b.y - vertical).abs() < 1e-6, "{outline:?}");
         assert_eq!(s.doc.dangling_count(), 0);
         assert_eq!(s.sheet().tables.len(), 1);
+        let rows = &s.sheet().tables[0].holes;
+        assert_eq!(rows.iter().map(|r| r.diameter).collect::<Vec<_>>(), [9., 9., 12., 9., 9.]);
+        let welds = annotations_of_kind(app, |b| matches!(b, AnnotationKind::Weld { .. }));
+        assert_eq!(welds.len(), 1);
+        assert_eq!(welds[0].body, AnnotationKind::Weld { size: Some(4.0) });
+        assert!(
+            list.items
+                .iter()
+                .any(|i| matches!(i, Item::Text(t) if t.owner == Owner::Annotation(welds[0].id) && t.text == "4"))
+        );
     };
-    check_sheet(&app);
+    check_sheet(&app, 10.);
 
     click_button(&mut app, "Views tab");
     click_button(&mut app, "Show part");
@@ -1031,17 +1045,17 @@ fn drawing_annotations_follow_the_part_through_save_and_reopen() {
     app.state_mut().state.push(AppAction::SaveAs(Some(part)));
     settle(&mut app);
     open_drawings(&mut app);
-    check_sheet(&app);
+    check_sheet(&app, 11.);
 
     let drawing = dir.join("annotations.dwdrw");
     push(&mut app, DrawingAction::Save(Some(drawing.clone())));
     push(&mut app, DrawingAction::CloseDrawing);
     push(&mut app, DrawingAction::OpenFile(drawing));
     settle(&mut app);
-    check_sheet(&app);
+    check_sheet(&app, 11.);
     push(&mut app, DrawingAction::Rebuild);
     settle(&mut app);
-    check_sheet(&app);
+    check_sheet(&app, 11.);
 
     // Add a diameter dimension to a hole in the reopened drawing.
     let id = smart_dimension(&mut app, top, &[Vec3::new(29.5, 23., 11.)], vec2(-34., 23.));

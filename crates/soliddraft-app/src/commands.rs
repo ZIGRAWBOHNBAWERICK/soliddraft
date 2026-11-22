@@ -3091,15 +3091,24 @@ fn drawing_registry() -> Vec<CommandSpec> {
         )
         .on(Annotate, "Notes", Small)
             .app_only(CANVAS),
-        cmd("drawing_chamfer_dimension", "Chamfer", Icon::Chamfer, "Dimension a chamfer").on(Annotate, "Notes", Small),
+        drawing_tool!(
+            "drawing_chamfer_dimension", "Chamfer", Icon::Chamfer, "Dimension a chamfer in profile",
+            DrawingTool::Chamfer => DrawingTool::Chamfer
+        )
+        .on(Annotate, "Notes", Small)
+        .app_only(CANVAS),
         drawing_tool!(
             "drawing_centre_mark", "Centre mark", Icon::Point, "Mark the centre of a circle seen face-on",
             DrawingTool::CentreMark => DrawingTool::CentreMark
         )
         .on(Annotate, "Centre", Large)
             .app_only(CANVAS),
-        cmd("drawing_centreline", "Centreline", Icon::Axis, "Draw a centreline between two edges")
-            .on(Annotate, "Centre", Large),
+        drawing_tool!(
+            "drawing_centreline", "Centreline", Icon::Axis, "Draw a centreline between two parallel edges",
+            DrawingTool::Centreline => DrawingTool::Centreline
+        )
+        .on(Annotate, "Centre", Large)
+        .app_only(CANVAS),
         cmd(
             "drawing_auto_centre_marks",
             "Auto centre marks",
@@ -3127,7 +3136,12 @@ fn drawing_registry() -> Vec<CommandSpec> {
         )
         .on(Annotate, "Symbols", Small)
             .app_only(CANVAS),
-        cmd("drawing_weld", "Weld", Icon::Construction, "A weld symbol").on(Annotate, "Symbols", Small),
+        drawing_tool!(
+            "drawing_weld", "Weld", Icon::Construction, "An arrow-side fillet weld symbol",
+            DrawingTool::Weld => DrawingTool::Weld
+        )
+        .on(Annotate, "Symbols", Small)
+        .app_only(CANVAS),
         cmd(
             "drawing_revision_table",
             "Revision table",
@@ -3138,7 +3152,12 @@ fn drawing_registry() -> Vec<CommandSpec> {
         .run(|_| AppAction::Drawing(DrawingAction::Select(Some(DrawingSel::Revisions))))
         .lit(|s| session(s).is_some_and(|d| d.selection == Some(DrawingSel::Revisions)))
             .app_only(PANEL),
-        cmd("drawing_hole_table", "Hole table", Icon::Hole, "Tabulate the holes of a view").on(Annotate, "Tables", Small),
+        drawing_tool!(
+            "drawing_hole_table", "Hole table", Icon::Hole, "Tabulate the holes of a view",
+            DrawingTool::HoleTable => DrawingTool::HoleTable
+        )
+        .on(Annotate, "Tables", Small)
+        .app_only(CANVAS),
         CommandSpec::new("drawing_bom", "BOM", Icon::Mass, "A bill of materials")
             .drawing()
             .on(Annotate, "Tables", Small)

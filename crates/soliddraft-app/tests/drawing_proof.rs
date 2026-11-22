@@ -1,7 +1,7 @@
 //! An exported drawing never comes from a preview. The drawing tab shows views drawn
-//! from Catallax's unproved preview mesh, which the drawing writers refuse. Exporting
-//! draws the views again from the certified mesh, on a copy, and leaves the drawing on
-//! screen as it was.
+//! from a display mesh and marked unproved, which the drawing writers refuse. Exporting
+//! draws the views again from Catallax's hidden-line views, on a copy, and leaves the
+//! drawing on screen as it was.
 
 use serde_json::{Value, json};
 use soliddraft_app::app_tools::AppTools;
@@ -29,22 +29,26 @@ fn previews(drawing: &Drawing) -> Vec<bool> {
     drawing.sheets.iter().flat_map(|s| &s.views).map(|v| v.geometry.unproved).collect()
 }
 
-/// How many of a drawing's views say they were drawn from a certified mesh.
+/// How many of a drawing's views say they are proved.
 fn proved_views(drawing: &Drawing) -> usize {
     previews(drawing).into_iter().filter(|preview| !preview).count()
 }
 
-/// How many certified meshes the drawing's view projections asked the kernel for, in the
-/// calls `kernel` logged since it was last asked. A view may say it is certified only
-/// when its projection read one: a preview must never be labelled as proved.
-fn certified_view_meshes(kernel: &soliddraft_kernel_catallax::CatallaxKernel) -> usize {
+/// How many views Catallax drew as hidden-line views, in the calls `kernel` logged since
+/// it was last asked. A view may say it is proved only when its projection came from
+/// one: a preview must never be labelled as proved.
+fn certified_views(kernel: &soliddraft_kernel_catallax::CatallaxKernel) -> usize {
     let calls = kernel.take_diagnostics().unwrap();
-    calls["calls"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .filter(|c| c["operation"] == "tessellate" && c["log_scope"] == "view_curves")
-        .count()
+    calls["calls"].as_array().unwrap().iter().filter(|c| exact_view(c)).count()
+}
+
+/// A top-level view call whose operation log holds Catallax's hidden-line view.
+fn exact_view(call: &Value) -> bool {
+    call["operation"] == "view_curves"
+        && call["nested"] == false
+        && call["operation_log"]["operations"]
+            .as_array()
+            .is_some_and(|log| log.iter().any(|e| e["operation"] == "view_curves" && e["status"] == "answered"))
 }
 
 #[test]
@@ -63,15 +67,15 @@ fn an_exported_drawing_never_comes_from_a_preview() {
         assert!(matches!(export::bytes(&list, format, "Part1"), Err(DrawingError::Unproved)), "{format:?}");
     }
 
-    // The same views drawn from the certified mesh are proven and can be written.
+    // The same views drawn by Catallax are proven and can be written.
     let part = PartContext::new(&state.doc).unwrap();
     let mut certified = shown.clone();
     apply_with(&mut certified, &Command::UpdateFromModel, &part.certified_part()).unwrap();
     assert!(previews(&certified).iter().all(|p| !p), "{:?}", previews(&certified));
     assert!(export::bytes(&layout_sheet(&certified, 0), Format::Svg, "Part1").is_ok());
 
-    // So exporting succeeds only by drawing the views again from the certified mesh,
-    // and the drawing on screen keeps its previews.
+    // So exporting succeeds only by drawing the views again through Catallax, and the
+    // drawing on screen keeps its previews.
     for (tool, file) in
         [("drawing_export_pdf", "sheet.pdf"), ("drawing_export_dxf", "sheet.dxf"), ("drawing_export_svg", "sheet.svg")]
     {
@@ -207,17 +211,15 @@ fn a_certified_coarse_rod_cut_is_redrawn_at_fine_quality_for_export() {
     let shown = state.drawing.session.as_ref().unwrap().doc.drawing.clone();
     let views = shown.sheets[0].views.len();
     assert_eq!(views, 4);
-    // The screen draws at coarse quality from whatever Catallax gives it: since Catallax
-    // 9566aa24 the unproved preview of this body, which earlier pins refused, so the screen
-    // borrowed the certified mesh instead. Whichever it is, a view says it is proved only
-    // when its projection read a certified mesh.
+    // The screen draws at coarse quality from a display mesh. A view says it is proved
+    // only when Catallax drew it.
     assert!(shown.sheets[0].views.iter().all(|v| v.geometry.coarse));
-    assert_eq!(certified_view_meshes(&kernel), proved_views(&shown), "{:?}", previews(&shown));
+    assert_eq!(certified_views(&kernel), proved_views(&shown), "{:?}", previews(&shown));
 
     let part = PartContext::new(&state.doc).unwrap();
     let mut fine = shown.clone();
     apply_with(&mut fine, &Command::UpdateFromModel, &part.certified_part()).unwrap();
-    assert_eq!(certified_view_meshes(&kernel), views, "each fine view read a certified mesh");
+    assert_eq!(certified_views(&kernel), views, "Catallax drew each fine view");
     assert!(fine.sheets[0].views.iter().all(|v| !v.geometry.unproved && !v.geometry.coarse));
     let fine_svg = export::bytes(&layout_sheet(&fine, 0), Format::Svg, &fine.meta.title).unwrap();
 
@@ -304,17 +306,17 @@ fn a_saved_rod_cache_without_quality_is_regenerated_after_reopening() {
     // quality is drawn again only when certified line work is asked for, below.
     assert!(shown.sheets[0].views.iter().all(|v| v.geometry.bbox == SENTINEL_BOX));
     assert_eq!(previews(&shown), saved);
-    assert_eq!(certified_view_meshes(&kernel), 0, "opening read no certified mesh");
+    assert_eq!(certified_views(&kernel), 0, "opening drew no view");
     assert_eq!(shown.model.pinned, PartContext::new(&reopened.doc).unwrap().digest);
     soliddraft_app::drawing::follow_part(&mut reopened);
     assert_eq!(reopened.drawing.session.as_ref().unwrap().doc.drawing, shown);
 
-    // The certified path, asked for explicitly: a fine redraw reads one certified mesh
-    // per view and every view says it is proved.
+    // The certified path, asked for explicitly: Catallax draws each view and every view
+    // says it is proved.
     let part = PartContext::new(&reopened.doc).unwrap();
     let mut fine = shown.clone();
     apply_with(&mut fine, &Command::UpdateFromModel, &part.certified_part()).unwrap();
-    assert_eq!(certified_view_meshes(&kernel), 4, "each fine view read a certified mesh");
+    assert_eq!(certified_views(&kernel), 4, "Catallax drew each fine view");
     assert!(fine.sheets[0].views.iter().all(|v| !v.geometry.unproved && !v.geometry.coarse));
     assert!(fine.sheets[0].views.iter().all(|v| v.geometry.bbox != SENTINEL_BOX), "every view was drawn again");
 
@@ -329,13 +331,8 @@ fn a_saved_rod_cache_without_quality_is_regenerated_after_reopening() {
         assert!(!out.is_error, "{tool}: {}", out.content);
         let result: Value = serde_json::from_str(&out.content).unwrap();
         let calls = kernel.take_diagnostics().unwrap();
-        let fine_requests = calls["calls"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .filter(|c| c["operation"] == "tessellate" && c["log_scope"] == "view_curves")
-            .count();
-        eprintln!("{tool}: redrawn={}, fine tessellations={fine_requests}", result["redrawn_from_certified_mesh"]);
+        let fine_requests = calls["calls"].as_array().unwrap().iter().filter(|c| exact_view(c)).count();
+        eprintln!("{tool}: redrawn={}, exact views={fine_requests}", result["redrawn_from_certified_mesh"]);
         exported.push((result["redrawn_from_certified_mesh"].clone(), fine_requests));
         assert!(path.is_file());
     }

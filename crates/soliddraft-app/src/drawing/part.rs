@@ -68,7 +68,8 @@ impl<'a> PartContext<'a> {
         }
     }
 
-    /// The part for an exported drawing: views come from the certified mesh.
+    /// The part for an exported drawing: views come from the kernel's exact drawing
+    /// queries, with no preview.
     pub fn certified_part(&self) -> Part<'_> {
         Part { preview: false, ..self.part() }
     }

@@ -566,7 +566,7 @@
         },
         {
           "pointer": "/result/accuracy/polygon",
-          "minimum": 1
+          "equals": 0
         }
       ],
       "files": [
@@ -594,7 +594,7 @@
         },
         {
           "pointer": "/result/accuracy/polygon",
-          "minimum": 1
+          "equals": 0
         }
       ],
       "files": [
@@ -622,7 +622,7 @@
         },
         {
           "pointer": "/result/accuracy/polygon",
-          "minimum": 1
+          "equals": 0
         }
       ],
       "files": [
@@ -801,7 +801,7 @@
         },
         {
           "pointer": "/result/accuracy/polygon",
-          "minimum": 1
+          "equals": 0
         }
       ],
       "files": [

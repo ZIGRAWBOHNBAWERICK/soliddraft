@@ -476,6 +476,7 @@ impl CatallaxKernel {
                     topology: OnceLock::new(),
                     measured: OnceLock::new(),
                     mass: OnceLock::new(),
+                    drawn_edges: Default::default(),
                 })),
                 approximate: None,
             },

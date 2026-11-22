@@ -213,7 +213,7 @@ fn refused_extrusion_does_not_change_its_profile_and_handles_stay_owned() {
 }
 
 #[test]
-fn polygon_views_and_boolean_sections_keep_sources_on_the_original_body() {
+fn exported_views_and_sections_are_catallax_curves_on_the_original_body() {
     use soliddraft_kernel_api::drawing::{Curve3, CurveSource, StandardView, ViewSpec};
 
     let k = CatallaxKernel::new();
@@ -224,8 +224,14 @@ fn polygon_views_and_boolean_sections_keep_sources_on_the_original_body() {
         let spec = ViewSpec::standard(direction);
         let view = k.view_curves(body, &spec).unwrap();
         let again = k.view_curves(body, &spec).unwrap();
-        assert_eq!(view, again, "polygon output must be deterministic");
+        assert_eq!(view, again, "exported views must be deterministic");
         assert!(view.counts().0 > 0);
+        // An exported view is Catallax's hidden-line view: no mesh polylines, no proof
+        // claimed for a preview.
+        assert!(!view.unproved);
+        assert!(view.curves.iter().all(|c| !matches!(c.curve, Curve3::Polyline { .. })), "{direction:?}: {view:?}");
+        let screen = k.view_curves(body, &ViewSpec { preview: true, ..spec }).unwrap();
+        assert!(screen.unproved, "a screen view from the mesh claims no proof");
         assert!(view.curves.iter().all(|c| match c.source {
             CurveSource::Edge(e) => topology.edge(e).is_some(),
             CurveSource::Silhouette(f) | CurveSource::Seam(f) => topology.face(f).is_some(),
@@ -269,6 +275,67 @@ fn polygon_views_and_boolean_sections_keep_sources_on_the_original_body() {
     k.release(body).unwrap();
     contract::box_section_view_hatches_the_cut(&k);
     contract::section_planes_off_the_body(&k);
+    for curve in section.curves.curves.iter().chain(section.regions.iter().flat_map(|r| r.outer.iter())) {
+        assert!(!matches!(curve.curve, Curve3::Polyline { .. }), "an exported section is exact: {curve:?}");
+    }
+}
+
+#[test]
+fn drawing_queries_meet_the_kernel_contract() {
+    let k = CatallaxKernel::new();
+    contract::view_curves_are_tagged(&k);
+    contract::view_curves_are_repeatable(&k);
+    contract::sheet_views_are_refused(&k);
+    contract::box_section_is_a_closed_loop(&k);
+    contract::edge_curves_are_exact(&k);
+    contract::silhouettes_outline_curved_faces(&k);
+    // The mesh method is the yardstick: the exact views agree with it on every edge's
+    // visible length.
+    contract::view_curves_match_mesh_hlr(&k);
+}
+
+#[test]
+fn a_section_through_a_face_tags_its_edges_with_the_faces_that_leave_the_plane() {
+    use soliddraft_kernel_api::drawing::CurveSource;
+
+    let k = CatallaxKernel::new();
+    let b = contract::block(&k);
+    let t = k.topology(b).unwrap();
+    let curves = k.section_curves(b, &Plane::XY.with_origin(Vec3::new(0.0, 0.0, 10.0))).unwrap();
+    assert_eq!(curves.len(), 4, "{curves:?}");
+    for c in &curves {
+        let CurveSource::Section(f) = c.source else { panic!("{:?}", c.source) };
+        let face = t.face(f).unwrap();
+        assert!((face.centroid.z - 5.0).abs() < 1e-9, "the top edge is tagged with the top face: {c:?}");
+        assert!(!c.approximate);
+    }
+}
+
+#[test]
+fn fitted_outlines_are_approximate_and_a_refused_view_is_never_a_mesh_view() {
+    use soliddraft_kernel_api::drawing::{CurveSource, StandardView, ViewSpec};
+    use soliddraft_kernel_catallax::with_request_allowance;
+
+    let k = CatallaxKernel::new();
+    let (_, body) = build(&k, &parse(include_str!("../../../recipes/boss-fillet.json")).unwrap()).unwrap();
+    let spec = ViewSpec::standard(StandardView::Isometric);
+    let view = k.view_curves(body, &spec).unwrap();
+    let fitted: Vec<_> = view.curves.iter().filter(|c| c.approximate).collect();
+    eprintln!("boss fillet: {} curves, {} fitted, view marks {:?}", view.curves.len(), fitted.len(), view.approximate);
+    // The fillet's torus seen obliquely has no exact outline: Catallax fits it.
+    assert!(fitted.iter().any(|c| matches!(c.source, CurveSource::Silhouette(_))), "{view:?}");
+    let silhouettes = k.silhouette_curves(body, spec.direction).unwrap();
+    assert!(silhouettes.iter().any(|c| c.approximate), "{silhouettes:?}");
+
+    // Out of allowance, the view is refused, not drawn from the mesh.
+    let fresh = CatallaxKernel::new();
+    let (_, body) = build(&fresh, &parse(BRACKET).unwrap()).unwrap();
+    fresh.topology(body).unwrap();
+    let (answer, work) = with_request_allowance(10_000, || fresh.view_curves(body, &spec));
+    assert!(work.exhausted);
+    let error = answer.expect_err("an exhausted view is refused");
+    assert!(!matches!(error, KernelError::Unsupported(_)), "{error}");
+    assert!(error.to_string().contains("operation-budget"), "{error}");
 }
 
 #[test]

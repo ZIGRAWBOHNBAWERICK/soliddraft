@@ -42,9 +42,19 @@ pub struct CutRegion {
 impl CutRegion {
     /// The region's area in the plane: the outer boundary's less its holes'.
     pub fn area(&self, frame: &ViewFrame) -> f64 {
+        // Exact arcs and splines are sampled finely: the chords' shortfall is then about
+        // a hundred-millionth of the region's area, well below the thousandth of a square
+        // millimetre areas are reported to.
+        let first = self.outer.first().map_or(Vec3::ZERO, |c| c.curve.start());
+        let size = self
+            .outer
+            .iter()
+            .flat_map(|c| [c.curve.end(), c.curve.point_at(0.5)])
+            .fold(1.0_f64, |size, p| size.max(p.distance(first)));
+        let chord = 1e-8 * size;
         let ring = |curves: &[ViewCurve]| {
             let points: Vec<Point2> =
-                curves.iter().flat_map(|c| c.curve.sample(0.0)).map(|p| frame.project(p)).collect();
+                curves.iter().flat_map(|c| c.curve.sample(chord)).map(|p| frame.project(p)).collect();
             shoelace(&points).abs()
         };
         ring(&self.outer) - self.holes.iter().map(|h| ring(h)).sum::<f64>()
@@ -203,7 +213,7 @@ fn section_of_cut<K: Kernel + ?Sized>(
     let section = |e: Option<FaceId>| e.map_or(CurveSource::Unknown, CurveSource::Section);
 
     let view = k.view_curves(cut, &spec.view)?;
-    let unproved = view.unproved;
+    let (unproved, approximate) = (view.unproved, view.approximate);
     let curves = view
         .curves
         .into_iter()
@@ -219,7 +229,7 @@ fn section_of_cut<K: Kernel + ?Sized>(
             c
         })
         .collect();
-    let curves = ViewCurves { unproved, ..ViewCurves::new(curves, frame) };
+    let curves = ViewCurves { unproved, approximate, ..ViewCurves::new(curves, frame) };
 
     // Each cap face's loops, each curve tagged through the cap edge it runs along.
     let edge_by_mid: Vec<(EdgeId, Vec3)> =

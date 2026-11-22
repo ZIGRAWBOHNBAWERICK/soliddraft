@@ -246,8 +246,9 @@ fn every_tool_runs_without_a_window_and_undoes_as_its_row_says() {
     assert_eq!(drawing["active"], true, "{drawing}");
     let views = drawing["sheets"][0]["views"].as_array().unwrap().clone();
     for v in &views {
-        let (exact, polygon) = (v["accuracy"]["exact"].as_u64().unwrap(), v["accuracy"]["polygon"].as_u64().unwrap());
-        assert_eq!(exact + polygon, v["curves"].as_u64().unwrap(), "every curve carries one label: {v}");
+        let count = |label: &str| v["accuracy"][label].as_u64().unwrap();
+        let labelled = count("exact") + count("polygon") + count("approximate");
+        assert_eq!(labelled, v["curves"].as_u64().unwrap(), "every curve carries one label: {v}");
     }
     assert!(views.iter().any(|v| v["accuracy"]["exact"].as_u64() > Some(0)), "whole lines stay exact: {drawing}");
     let name = |v: &Value| v["name"].as_str().unwrap().to_owned();
@@ -296,14 +297,14 @@ fn every_tool_runs_without_a_window_and_undoes_as_its_row_says() {
         let path = s.path(file);
         let written = s.call(tool, json!({ "path": path }));
         assert!(dir.join(file).is_file(), "{tool} wrote no {file}");
-        let exact = written["accuracy"]["exact"].as_u64().unwrap();
-        let polygon = written["accuracy"]["polygon"].as_u64().unwrap();
+        let count = |label: &str| written["accuracy"][label].as_u64().unwrap();
+        let (exact, polygon, approximate) = (count("exact"), count("polygon"), count("approximate"));
         // The PDF writes every sheet; the others write the active sheet, which is the
-        // added empty one here.
+        // added empty one here. Written views are Catallax's curves, not mesh polylines.
         if written["views"].as_u64().unwrap() > 0 {
-            assert!(exact > 0 && polygon > 0, "{tool} reports what it wrote as exact and as polygon: {written}");
+            assert!(exact > 0 && polygon == 0, "{tool} reports what it wrote as exact: {written}");
         } else {
-            assert_eq!((exact, polygon), (0, 0), "{tool} wrote no view: {written}");
+            assert_eq!((exact, polygon, approximate), (0, 0, 0), "{tool} wrote no view: {written}");
         }
     }
     let (part, copy) = (s.path("part.dwprt"), s.path("copy.dwprt"));

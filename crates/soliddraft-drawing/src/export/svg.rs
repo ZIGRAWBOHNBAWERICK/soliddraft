@@ -58,6 +58,7 @@ pub fn svg(list: &DisplayList) -> String {
                     let accuracy = match p.accuracy {
                         Some(Accuracy::Exact) => r#" data-accuracy="exact""#,
                         Some(Accuracy::Polygon) => r#" data-accuracy="polygon""#,
+                        Some(Accuracy::Approximate) => r#" data-accuracy="approximate""#,
                         None => "",
                     };
                     let _ = writeln!(
@@ -161,11 +162,13 @@ mod tests {
     fn view_curves_carry_their_accuracy_and_nothing_else_does() {
         let mut drawing = bracket_a3();
         drawing.sheets[0].views[0].geometry.curves[0].accuracy = Accuracy::Polygon;
+        drawing.sheets[0].views[0].geometry.curves[1].accuracy = Accuracy::Approximate;
         let s = svg(&layout_sheet(&drawing, 0));
         let labelled = s.matches("data-accuracy=").count();
         let curves: usize = drawing.sheets[0].views.iter().map(|v| v.geometry.curves.len()).sum();
         assert_eq!(labelled, curves, "one label per view curve");
         assert_eq!(s.matches(r#"data-accuracy="polygon""#).count(), 1);
+        assert_eq!(s.matches(r#"data-accuracy="approximate""#).count(), 1);
         assert!(s.contains(r#"data-accuracy="exact""#));
         let dimension_layer = s.split(r#"<g id="DIMENSION""#).nth(1).unwrap().split("</g>").next().unwrap();
         assert!(!dimension_layer.contains("data-accuracy"), "annotation line work carries no label");

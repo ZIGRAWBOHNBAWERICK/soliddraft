@@ -108,12 +108,16 @@ pub struct ViewCurve {
     /// which drawings show thin or leave out.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub smooth: bool,
+    /// True when the kernel fitted the curve within a stated tolerance in place of the
+    /// exact curve, which drawings label approximate.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub approximate: bool,
 }
 
 impl ViewCurve {
     /// A curve that is not a tangent edge.
     pub fn new(curve: Curve3, source: CurveSource, visible: bool) -> ViewCurve {
-        ViewCurve { curve, source, visible, smooth: false }
+        ViewCurve { curve, source, visible, smooth: false, approximate: false }
     }
 }
 
@@ -263,13 +267,19 @@ pub struct ViewCurves {
     /// Drawn from an unproved preview mesh, for the screen only. Never exported.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub unproved: bool,
+    /// The kernel's codes for what it measured rather than proved across the whole
+    /// view, such as where it placed a cut between two crossing curves or decided a
+    /// piece's visibility. Empty for a view the kernel proved. Every curve of a view
+    /// with a code here is approximate.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub approximate: Vec<String>,
 }
 
 impl ViewCurves {
     /// Collects curves and computes their sheet bounds in `frame`.
     pub fn new(curves: Vec<ViewCurve>, frame: &ViewFrame) -> ViewCurves {
         let bbox_2d = sheet_bounds(&curves, frame);
-        ViewCurves { curves, bbox_2d, unproved: false }
+        ViewCurves { curves, bbox_2d, unproved: false, approximate: Vec::new() }
     }
 
     /// Number of visible and hidden curves.

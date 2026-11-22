@@ -733,7 +733,10 @@ pub fn project(index: &PartIndex, curves: &ViewCurves, xf: &ViewTransform, diges
                 model_radius: *radius,
             });
         }
-        out.push(Curve2 { path, source, visible: c.visible, kind, tangent: c.smooth, accuracy: accuracy_of(&c.curve) });
+        // The kernel's marks win over the curve's kind: a fitted line is still approximate.
+        let accuracy =
+            if c.approximate || !curves.approximate.is_empty() { Accuracy::Approximate } else { accuracy_of(&c.curve) };
+        out.push(Curve2 { path, source, visible: c.visible, kind, tangent: c.smooth, accuracy });
     }
     let [x0, y0, x1, y1] = curves.bbox_2d;
     let (lo, hi) = (

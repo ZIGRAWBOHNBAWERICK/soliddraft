@@ -3,8 +3,8 @@
 use std::{cell::RefCell, collections::HashMap, sync::Mutex, thread::ThreadId, time::Instant};
 
 use catallax_numbers::{
-    BoundKind, MarkLog, OperationEntry, OperationWork, current_operation_work, operation_budget_active,
-    with_operation_budget, with_operation_log,
+    BoundKind, MarkLog, OperationEntry, current_operation_work, operation_budget_active, with_operation_budget,
+    with_operation_log,
 };
 use serde_json::{Value, json};
 use soliddraft_kernel_api::{KernelError, KernelResult};
@@ -87,12 +87,12 @@ impl Diagnostics {
             (_, true) => {
                 let result = run();
                 let after = current_operation_work();
-                (result, Some(OperationWork { used: after.used - before.used, exhausted: after.exhausted }))
+                (result, Some(Spent { used: after.used - before.used, exhausted: after.exhausted }))
             }
             (Some(limit), false) => {
                 // A request allowance, so a refusal inside names this limit, not the default.
                 let (result, work) = with_request_allowance(limit, run);
-                (result, Some(OperationWork { used: work.used, exhausted: work.exhausted }))
+                (result, Some(Spent { used: work.used, exhausted: work.exhausted }))
             }
             (None, false) => (run(), None),
         });
@@ -167,6 +167,13 @@ pub const APP_REQUEST_WORK: u64 = 100_000_000;
 /// The work one edit should fit in. A request that uses more is marked
 /// `over_target` in the diagnostics, with its work per stage, for the speed phase.
 pub const APP_WORK_TARGET: u64 = 20_000_000;
+
+/// The work one observed call charged to its allowance.
+#[derive(Clone, Copy)]
+struct Spent {
+    used: u64,
+    exhausted: bool,
+}
 
 /// The deterministic work one whole request used: opening, rebuilding and writing.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

@@ -1,9 +1,9 @@
 //! Exact body-pair queries on private copies at the accepted placements.
 
 use catallax_app::queries;
-use catallax_measure::{Accuracy, Enclosure, distance::PreparedFace};
-use catallax_numbers::{Answer, Outcome, Rational, Real, Refusal, StrictSign};
-use catallax_shapes::{Isometry, Pose, RVector3, Rotation, distance::Options};
+use catallax_measure::{Accuracy, Enclosure};
+use catallax_numbers::{Answer, Rational, Refusal};
+use catallax_shapes::{Isometry, Pose, RVector3, Rotation};
 use catallax_topology::{Model, transformed_body};
 use serde_json::json;
 use soliddraft_kernel_api::*;
@@ -13,6 +13,8 @@ use crate::{CatallaxKernel, Solid, build, numerical};
 fn refused(query: &str, code: &str) -> BodyQueryRefusal {
     let reason = if code.contains("budget") || code.contains("work-limit") || code.contains("deadline") {
         "The check reached its calculation limit."
+    } else if code == "app.relation-envelope" {
+        "A lattice or gyroid part's material lies on its beams or sheet, not in the whole region its solid outlines."
     } else if code == "body-relation.marked" {
         "The check returned an approximation or an unresolved accuracy bound."
     } else if code.contains("distance") || code.contains("surface") || code.contains("curve") {
@@ -38,8 +40,9 @@ fn answer<T>(query: &str, result: Result<Answer<T>, Refusal>) -> Result<T, BodyQ
     Ok(answer.value)
 }
 
-/// Even a zero-width rational interval can lie between two doubles.
-fn measurement(e: &Enclosure) -> Measurement {
+/// Even a zero-width rational interval can lie between two doubles. A marked enclosure
+/// is bounded, never exact.
+fn measurement(e: &Enclosure, marked: bool) -> Measurement {
     let mut lo = e.lo.to_f64_nearest();
     let mut hi = e.hi.to_f64_nearest();
     if Rational::from_f64_exact(lo).is_some_and(|r| r > e.lo) {
@@ -52,7 +55,7 @@ fn measurement(e: &Enclosure) -> Measurement {
         value: crate::convert::midpoint(e),
         lo,
         hi,
-        certainty: if e.is_exact() { Certainty::Exact } else { Certainty::Bounded },
+        certainty: if e.is_exact() && !marked { Certainty::Exact } else { Certainty::Bounded },
     }
 }
 
@@ -66,9 +69,17 @@ fn motion(body: PlacedBody) -> KernelResult<Isometry> {
     Ok(Isometry::from(&Pose::from_rational(rotation, RVector3::new(exact(x)?, exact(y)?, exact(z)?))))
 }
 
+/// Both bodies in one model, and the refusal for relating them when either is only the
+/// envelope of a lattice or gyroid region.
+struct Operands {
+    model: Model,
+    bodies: [catallax_topology::BodyId; 2],
+    envelope: Option<Refusal>,
+}
+
 /// Both source chains already use unique operation ids in this kernel. Evaluate their
 /// union once so both handles belong to one model, retaining the longest common prefix.
-fn operands(k: &CatallaxKernel, a: BodyId, b: BodyId) -> KernelResult<(Model, [catallax_topology::BodyId; 2])> {
+fn operands(k: &CatallaxKernel, a: BodyId, b: BodyId) -> KernelResult<Operands> {
     let state = k.state()?;
     let (first, second) = (state.get(a)?, state.get(b)?);
     // Their recipes would replay as exact bodies.
@@ -92,8 +103,10 @@ fn operands(k: &CatallaxKernel, a: BodyId, b: BodyId) -> KernelResult<(Model, [c
         build(&input, OpKind::Intersect, &[], prefix.as_ref().map(|s| &s.app), &files, None, &Default::default(), &[])?;
     let crate::Outcome::Exact(app) = app else { return Err(crate::approximate::not_yet()) };
     let built = app.checkpoint.built();
+    // A part whose result reads a lattice or gyroid has only the region's envelope here.
+    let envelope = result_names.iter().find_map(|name| queries::field_only_envelope(built, &names[name]));
     let bodies = result_names.map(|name| built.bodies[&names[&name]]);
-    Ok((built.model.clone(), bodies))
+    Ok(Operands { model: built.model.clone(), bodies, envelope })
 }
 
 fn source_faces(solid: &Solid, contact: &queries::ContactFaces, patches: &[queries::ContactPatch]) -> Vec<FaceId> {
@@ -111,76 +124,38 @@ fn source_faces(solid: &Solid, contact: &queries::ContactFaces, patches: &[queri
         .collect()
 }
 
-fn minimum_gap(
-    model: &mut Model,
-    [a, b]: [catallax_topology::BodyId; 2],
-    clearance: Option<f64>,
-) -> Result<BodyDistance, BodyQueryRefusal> {
-    if [a, b].iter().any(|body| !model.body(*body).marks.is_empty()) {
-        return Err(refused("Minimum distance", "body-relation.marked"));
+/// Whether `gap` exceeds `clearance`, decided by exact comparison: a gap equal to the
+/// clearance does not exceed it. `None` when the enclosure straddles the clearance.
+fn exceeds(gap: &Enclosure, clearance: &Rational) -> Option<bool> {
+    if &gap.lo > clearance {
+        Some(true)
+    } else if &gap.hi <= clearance {
+        Some(false)
+    } else {
+        None
     }
-    // Match the decimal conversion used to build authored dimensions.
-    let threshold = clearance.and_then(|c| crate::native::number(c, "clearance").ok().map(|n| n.value().clone()));
-    let mut within = false;
-    let enclosure = answer(
-        "Minimum distance",
-        numerical("body_minimum_distance", |dec| {
-            let prepare = |body, dec: &mut catallax_numbers::Decider| {
-                model
-                    .faces_of_body(body)
-                    .into_iter()
-                    .map(|face| PreparedFace::new(model, face, dec))
-                    .collect::<Result<Vec<_>, _>>()
-            };
-            let first = prepare(a, dec)?;
-            let second = prepare(b, dec)?;
-            let options = Options { width: Rational::parse("1e-9").unwrap(), ..Options::default() };
-            let mut lower: Option<Rational> = None;
-            let mut upper: Option<Rational> = None;
-            for a in &first {
-                for b in &second {
-                    let bounds = a.face_to_face(b, model, &options, dec)?;
-                    if !within
-                        && let Some(c) = &threshold
-                        && &bounds.lower <= c
-                    {
-                        if bounds.upper.as_ref().is_some_and(|hi| hi <= c) {
-                            within = true;
-                        } else if let Some([p, q]) = &bounds.witnesses {
-                            // A ball may straddle exact equality; its admitted witness can settle it.
-                            let delta = &p.minus(q).norm_squared() - &Real::from(c * c);
-                            within = match dec.sign(&delta) {
-                                Outcome::Proven(StrictSign::Negative) | Outcome::ProvenCoincident(_) => true,
-                                Outcome::Proven(StrictSign::Positive) => false,
-                                Outcome::NotExact(n) => return Err(Refusal::from(n)),
-                                Outcome::Refused(r) => return Err(r),
-                            };
-                        }
-                    }
-                    lower = Some(lower.map_or(bounds.lower.clone(), |lo| lo.min(bounds.lower)));
-                    if let Some(hi) = bounds.upper {
-                        upper = Some(upper.map_or(hi.clone(), |old| old.min(hi)));
-                    }
-                }
-            }
-            let (Some(lo), Some(hi)) = (lower, upper) else {
-                return Err(Refusal::new("body-relation.empty-boundary", "a solid has no boundary"));
-            };
-            Ok(Answer::exact(Enclosure { lo, hi }))
-        }),
-    )?;
-    let exceeds_clearance = threshold.as_ref().and_then(|c| {
-        if &enclosure.lo > c {
-            Some(true)
-        } else if within || &enclosure.hi <= c {
-            Some(false)
-        } else {
-            None
-        }
-    });
-    Ok(BodyDistance { distance: measurement(&enclosure), zero: enclosure.hi.is_zero(), exceeds_clearance })
 }
 
+fn zero_gap(clearance: Option<f64>) -> BodyDistance {
+    BodyDistance {
+        distance: measurement(&Enclosure { lo: Rational::zero(), hi: Rational::zero() }, false),
+        zero: true,
+        exceeds_clearance: clearance.map(|_| false),
+    }
+}
+
+fn no_overlap() -> OverlapVolume {
+    OverlapVolume {
+        volume: measurement(&Enclosure { lo: Rational::zero(), hi: Rational::zero() }, false),
+        positive: Some(false),
+    }
+}
+
+/// Clash, clear or unresolved, as Catallax's relation answers it for the two placed
+/// solids. A clash is a proved positive overlap however wide its volume enclosure; a
+/// clear pair has a proved positive gap. Anything Catallax leaves unresolved comes back
+/// refused, never clear. A lattice or gyroid part is refused: its B-rep is only the
+/// envelope of the region its beams or sheet fill.
 pub(super) fn relation(
     k: &CatallaxKernel,
     a: PlacedBody,
@@ -193,47 +168,78 @@ pub(super) fn relation(
     if clearance.is_some_and(|c| !c.is_finite() || c < 0.0) {
         return Err(KernelError::InvalidInput("A clearance must be a finite length of zero or more".into()));
     }
+    let field = k.field(a.body)?.is_some() || k.field(b.body)?.is_some();
+    let operands = if field { None } else { Some(operands(k, a.body, b.body)?) };
+    let envelope = match &operands {
+        None => Some(Refusal::new("app.relation-envelope", "a lattice or gyroid part has only its envelope")),
+        Some(operands) => operands.envelope.clone(),
+    };
+    if let Some(refusal) = envelope {
+        return Ok(BodyRelation {
+            overlap: Err(refused("Overlap volume", refusal.code)),
+            contact: Err(refused("Contact faces", refusal.code)),
+            gap: clearance.map(|_| Err(refused("Minimum distance", refusal.code))),
+        });
+    }
+    let Operands { mut model, bodies, .. } = operands.expect("a part without a field has operands");
     let (first, second) = (k.solid(a.body)?, k.solid(b.body)?);
-    let (mut model, bodies) = operands(k, a.body, b.body)?;
     let motions = [motion(a)?, motion(b)?];
-    let bodies = std::array::from_fn(|i| transformed_body(&mut model, bodies[i], &motions[i], Clone::clone));
-    let [a, b] = bodies;
-    let overlap = answer(
-        "Overlap volume",
-        numerical("overlap_volume", |dec| {
-            queries::overlap_volume(&model, a, b, &Accuracy::default(), dec).map_err(|r| r.refusal)
-        }),
-    )
-    .map(|e| OverlapVolume {
-        positive: if e.lo > Rational::zero() {
-            Some(true)
-        } else if e.hi.is_zero() {
-            Some(false)
-        } else {
-            None
-        },
-        volume: measurement(&e),
+    let [a, b] = std::array::from_fn(|i| transformed_body(&mut model, bodies[i], &motions[i], Clone::clone));
+    // Match the decimal conversion used to build authored dimensions.
+    let threshold = clearance.and_then(|c| crate::native::number(c, "clearance").ok().map(|n| n.value().clone()));
+    let related = numerical("body_relation", |dec| {
+        queries::body_relation(&model, a, b, &Accuracy::default(), dec).map_err(|r| r.refusal)
     });
-    let contact = answer(
-        "Contact faces",
-        numerical("contact_faces", |dec| queries::contact_faces(&model, a, b, dec).map_err(|r| r.refusal)),
-    )
-    .map(|contact| BodyContactFaces {
-        first: source_faces(&first, &contact, &contact.first),
-        second: source_faces(&second, &contact, &contact.second),
-    });
-    let zero_distance = overlap.as_ref().is_ok_and(|v| v.positive == Some(true))
-        || contact.as_ref().is_ok_and(|c| !c.first.is_empty() || !c.second.is_empty());
-    let gap = if zero_distance {
-        Some(Ok(BodyDistance {
-            distance: measurement(&Enclosure { lo: Rational::zero(), hi: Rational::zero() }),
-            zero: true,
-            exceeds_clearance: clearance.map(|_| false),
-        }))
-    } else if clearance.is_some() || overlap.as_ref().is_ok_and(|v| v.positive == Some(false)) {
-        Some(minimum_gap(&mut model, bodies, clearance))
+    let related = if catallax_numbers::current_operation_work().exhausted {
+        Err(Refusal::new("numbers.operation-budget", "operation work allowance exhausted"))
     } else {
-        None
+        related
+    };
+    // Solids a proved gap keeps apart share no face, so the imprint is not run.
+    let apart = related.as_ref().is_ok_and(|r| matches!(r.value, queries::BodyRelation::Clear { .. }));
+    let contact = if apart {
+        Ok(BodyContactFaces { first: Vec::new(), second: Vec::new() })
+    } else {
+        answer(
+            "Contact faces",
+            numerical("contact_faces", |dec| queries::contact_faces(&model, a, b, dec).map_err(|r| r.refusal)),
+        )
+        .map(|contact| BodyContactFaces {
+            first: source_faces(&first, &contact, &contact.first),
+            second: source_faces(&second, &contact, &contact.second),
+        })
+    };
+    let touching = contact.as_ref().is_ok_and(|c| !c.first.is_empty() || !c.second.is_empty());
+    let (overlap, gap) = match related {
+        Ok(answer) => {
+            let marked = !answer.marks.is_empty();
+            match answer.value {
+                queries::BodyRelation::Clash { overlap } => (
+                    Ok(OverlapVolume { volume: measurement(&overlap, marked), positive: Some(true) }),
+                    Some(Ok(zero_gap(clearance))),
+                ),
+                queries::BodyRelation::Clear { gap } => (
+                    Ok(no_overlap()),
+                    Some(Ok(BodyDistance {
+                        distance: measurement(&gap, marked),
+                        zero: false,
+                        exceeds_clearance: threshold.as_ref().and_then(|c| exceeds(&gap, c)),
+                    })),
+                ),
+            }
+        }
+        // Catallax answers contact only once it has proved the overlap empty.
+        Err(r) if r.code == "assembly.contact" => (Ok(no_overlap()), Some(Ok(zero_gap(clearance)))),
+        Err(r) => {
+            let refused_overlap = Err(refused("Overlap volume", r.code));
+            // Shared faces prove a zero distance even when the overlap stays open.
+            let gap = if touching {
+                Some(Ok(zero_gap(clearance)))
+            } else {
+                clearance.map(|_| Err(refused("Minimum distance", r.code)))
+            };
+            (refused_overlap, gap)
+        }
     };
     Ok(BodyRelation { overlap, contact, gap })
 }

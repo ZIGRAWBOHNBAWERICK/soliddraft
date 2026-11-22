@@ -9,7 +9,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use soliddraft_kernel_api::Point2;
+use soliddraft_kernel_api::{KernelError, Point2};
 
 use crate::annotation::{Annotation, AnnotationKind, AnnotationState, Attach, DimValue};
 use crate::entity::{EntityKind, EntityRef};
@@ -185,6 +185,9 @@ fn view_cause(e: &DrawingError) -> String {
         DrawingError::LostReference(why) => {
             let mut c = why.chars();
             c.next().map(|f| f.to_uppercase().collect::<String>() + c.as_str()).unwrap_or_default()
+        }
+        DrawingError::Kernel(KernelError::QueryFailed { message, .. }) => {
+            format!("The kernel refused to draw it: {message}")
         }
         DrawingError::Kernel(k) => format!("The part cannot be cut there any more: {k}"),
         other => other.to_string(),

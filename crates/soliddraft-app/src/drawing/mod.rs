@@ -1789,9 +1789,15 @@ fn export_sheet(state: &mut AppState, format: export::Format, path: Option<PathB
         Ok(w) => {
             let redrawn = match w.redrawn {
                 0 => String::new(),
-                n => format!(" · {n} view{} drawn from the certified mesh", if n == 1 { "" } else { "s" }),
+                n => format!(" · {n} view{} drawn again for export", if n == 1 { "" } else { "s" }),
             };
-            s.say(format!("Exported {}{redrawn}", path.display()));
+            // The kernel fitted these curves or measured where they cut and hide: Q14
+            // shows such results as approximate.
+            let approximate = match w.accuracy.approximate {
+                0 => String::new(),
+                n => format!(" · {n} curve{} approximate", if n == 1 { "" } else { "s" }),
+            };
+            s.say(format!("Exported {}{redrawn}{approximate}", path.display()));
             state.note(format!("Exported {}", path.display()), NoteKind::Ok);
         }
         Err(e) => {
@@ -1806,17 +1812,17 @@ fn export_sheet(state: &mut AppState, format: export::Format, path: Option<PathB
 pub struct SheetExport {
     /// Views on the sheets written.
     pub views: usize,
-    /// Views that were screen previews and were drawn again from the certified mesh.
+    /// Views that were screen previews and were drawn again for export.
     pub redrawn: usize,
     /// The part revision the written views show.
     pub revision: ContentHash,
-    /// How many written curves are the model's own curves and how many are mesh polylines.
+    /// How many written curves are exact, mesh polylines or approximate.
     pub accuracy: AccuracyCounts,
 }
 
 /// Writes the drawing as `format` at `path`: the current sheet, or every sheet as a
-/// page of a PDF. Unproved or coarse screen views are drawn again from the fine
-/// certified mesh of `part`, on a copy.
+/// page of a PDF. Unproved or coarse screen views are drawn again from the kernel's
+/// exact drawing queries on `part`, on a copy.
 pub(crate) fn write_sheet(
     s: &mut DrawingSession,
     part: Option<&PartContext>,
@@ -1876,8 +1882,8 @@ pub(crate) fn sheet_bytes(
     Ok((bytes, SheetExport { views: written.len(), redrawn, revision: drawing.model.pinned.clone(), accuracy }))
 }
 
-/// A copy of `drawing` with unproved or coarse views drawn from the fine certified
-/// mesh, or `None` when all views are already fine and proved, with the number drawn
+/// A copy of `drawing` with unproved or coarse views drawn by the kernel's exact
+/// drawing queries, or `None` when all views are already fine and proved, with the number drawn
 /// again. Only views of the open part's current revision can be regenerated.
 /// Another revision waits for a Rebuild.
 fn certified(drawing: &Drawing, part: Option<&PartContext>) -> Result<(Option<Drawing>, usize), String> {
@@ -1892,8 +1898,21 @@ fn certified(drawing: &Drawing, part: Option<&PartContext>) -> Result<(Option<Dr
         return Err(unproved());
     }
     let mut copy = drawing.clone();
-    soliddraft_drawing::apply_with(&mut copy, &Command::UpdateFromModel, &part.certified_part())
+    let report = soliddraft_drawing::apply_with(&mut copy, &Command::UpdateFromModel, &part.certified_part())
         .map_err(|e| e.to_string())?;
+    // A view the kernel refused to draw is not written: the export says why, rather than
+    // writing its screen preview or refusing it as a preview.
+    if let Some(dangling) =
+        report.iter().flat_map(|r| &r.dangling_views).find(|d| needs_fine.iter().any(|v| v.id == d.view))
+    {
+        let name = copy
+            .sheet_of(dangling.view)
+            .and_then(|sheet| {
+                sheet.view(dangling.view).map(|view| soliddraft_drawing::project::view_label(sheet, view))
+            })
+            .unwrap_or_else(|| "A view".into());
+        return Err(format!("{name} could not be drawn for export. {}", dangling.cause));
+    }
     Ok((Some(copy), needs_fine.len()))
 }
 

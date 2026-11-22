@@ -108,8 +108,8 @@ pub enum DrawingError {
     #[error("{0}")]
     Format(String),
     /// The views were drawn from the kernel's unproved preview, which is for the screen
-    /// only. Update them from the certified mesh before exporting.
-    #[error("the views come from an unproved preview; update them from the certified mesh to export")]
+    /// only. Update them from the kernel's exact drawing queries before exporting.
+    #[error("the views come from an unproved preview; update them from the part to export")]
     Unproved,
 }
 

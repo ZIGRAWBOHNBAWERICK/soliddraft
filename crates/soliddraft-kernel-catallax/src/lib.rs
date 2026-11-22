@@ -50,7 +50,7 @@ use soliddraft_kernel_api::*;
 pub use diagnostics::{APP_REQUEST_WORK, APP_WORK_TARGET, RequestWork, with_request_allowance};
 
 /// The pinned Catallax application entry revision.
-pub const CATALLAX_REVISION: &str = "ccfb4e4bee95cbb42f7c1ea1dbdfe8874ed01c4a";
+pub const CATALLAX_REVISION: &str = "b9aa4309345e72d6eaf8bbd835f5cdd921ddadf8";
 
 /// An in-process Catallax backend. There is no global kernel state or kernel thread.
 #[derive(Default)]
@@ -127,6 +127,9 @@ struct Solid {
     topology: OnceLock<KernelResult<Topology>>,
     measured: OnceLock<KernelResult<Topology>>,
     mass: OnceLock<KernelResult<MassProperties>>,
+    /// Edge drawings already answered, by Catallax edge: a drawing reads every edge on
+    /// each update.
+    drawn_edges: std::sync::Mutex<BTreeMap<catallax_topology::EdgeId, drawing::Curve3>>,
 }
 
 /// A display key as text, which a hand-over carries between kernels.
@@ -677,6 +680,7 @@ impl CatallaxKernel {
             topology,
             measured: OnceLock::new(),
             mass: OnceLock::new(),
+            drawn_edges: Default::default(),
         });
         // A build kept for a hand-over takes what adopting it unread needs, while the
         // body that made it is at hand: later features may release it.
@@ -2483,11 +2487,11 @@ impl Kernel for CatallaxKernel {
             }
         })
     }
-    fn silhouette_curves(&self, _: BodyId, _: Vec3) -> KernelResult<Vec<drawing::ViewCurve>> {
-        self.observe("silhouette_curves", || Err(gap("Exact silhouettes")))
+    fn silhouette_curves(&self, body: BodyId, direction: Vec3) -> KernelResult<Vec<drawing::ViewCurve>> {
+        self.observe("silhouette_curves", || drawing_queries::silhouette_curves(self, body, direction))
     }
-    fn section_curves(&self, _: BodyId, _: &Plane) -> KernelResult<Vec<drawing::ViewCurve>> {
-        self.observe("section_curves", || Err(gap("Section curves")))
+    fn section_curves(&self, body: BodyId, plane: &Plane) -> KernelResult<Vec<drawing::ViewCurve>> {
+        self.observe("section_curves", || drawing_queries::section_curves(self, body, plane))
     }
     fn edge_curve(&self, body: BodyId, edge: EdgeId) -> KernelResult<drawing::Curve3> {
         self.observe("edge_curve", || drawing_queries::edge_curve(self.solid(body)?.as_ref(), body, edge))

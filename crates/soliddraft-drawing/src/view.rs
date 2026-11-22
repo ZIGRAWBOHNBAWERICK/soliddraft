@@ -483,8 +483,13 @@ pub enum Accuracy {
     Exact,
     /// A polyline from the display mesh, at its chord tolerance: a silhouette, an edge
     /// split by visibility, a section crossing or a curve the kernel has not converted.
+    /// A spline sampled on the sheet is labelled this way too.
     #[default]
     Polygon,
+    /// The kernel's own curve, but fitted or placed within a tolerance it measured
+    /// rather than proved: a fitted intersection or outline, or any curve of a view
+    /// whose cuts or visibility the kernel measured.
+    Approximate,
 }
 
 /// How many curves of a view carry each accuracy label.
@@ -494,6 +499,9 @@ pub struct AccuracyCounts {
     pub exact: usize,
     /// Curves whose path is a mesh polyline.
     pub polygon: usize,
+    /// Curves the kernel fitted or placed by measurement.
+    #[serde(default)]
+    pub approximate: usize,
 }
 
 impl AccuracyCounts {
@@ -501,14 +509,19 @@ impl AccuracyCounts {
     pub fn add(&mut self, other: AccuracyCounts) {
         self.exact += other.exact;
         self.polygon += other.polygon;
+        self.approximate += other.approximate;
     }
 }
 
 impl ViewGeometry {
-    /// How many of the view's curves are exact and how many are mesh polylines.
+    /// How many of the view's curves carry each accuracy label.
     pub fn accuracy(&self) -> AccuracyCounts {
-        let exact = self.curves.iter().filter(|c| c.accuracy == Accuracy::Exact).count();
-        AccuracyCounts { exact, polygon: self.curves.len() - exact }
+        let count = |accuracy| self.curves.iter().filter(|c| c.accuracy == accuracy).count();
+        AccuracyCounts {
+            exact: count(Accuracy::Exact),
+            polygon: count(Accuracy::Polygon),
+            approximate: count(Accuracy::Approximate),
+        }
     }
 }
 

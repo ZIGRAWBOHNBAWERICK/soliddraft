@@ -1,0 +1,10 @@
+review:
+  max_fix_rounds: 6
+
+ci:
+  instructions: |
+    Fix the code, not the check.
+    Never loosen a tolerance, a time budget, or a work budget.
+    Never raise a limit.
+    Never mark, gate, or configure a check as skipped.
+    If the only way to pass is to loosen or skip, stop and report it.

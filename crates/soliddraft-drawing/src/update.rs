@@ -52,6 +52,7 @@ pub struct UpdateReport {
 pub struct DanglingView {
     /// The view.
     pub view: ViewId,
+    /// The view's name on the drawing, for reports.
     #[serde(default)]
     pub name: String,
     /// Why, in words.

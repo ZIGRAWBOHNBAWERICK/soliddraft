@@ -180,8 +180,20 @@ fn p3_copies_report_proved_overlap_and_an_unresolved_sliver() {
     let assembly = &mut state.assembly.session.as_mut().unwrap().doc;
     let second = assembly.assembly().components.last().unwrap().id;
     let path = soliddraft_assembly::OccurrencePath::root().child(soliddraft_assembly::Step::component(second));
+    // A 0.001 mm sliver of overlap is still a proved clash, however small its volume.
     let sliver = soliddraft_assembly::Placement::translation(glam::DVec3::new(39.999, 0.0, 0.0));
-    assembly.move_to(&[(path, sliver)]).unwrap();
+    assembly.move_to(&[(path.clone(), sliver)]).unwrap();
+    let (error, result) = call(&mut state, "assembly_check_interference", json!({}));
+    assert!(!error, "{result}");
+    let pair = &result["report"]["results"][0];
+    assert_eq!(pair["outcome"], "interferes", "{pair}");
+    assert!(pair["overlap_mm3"]["lo"].as_f64().unwrap() > 0.0, "{pair}");
+
+    // The same pair touching end to end: the Boolean refuses the fillets' torus pairs and
+    // nothing settles the pair, which must stay open and never read as clear.
+    let assembly = &mut state.assembly.session.as_mut().unwrap().doc;
+    let tangent = soliddraft_assembly::Placement::translation(glam::DVec3::new(40.0, 0.0, 0.0));
+    assembly.move_to(&[(path, tangent)]).unwrap();
     let (error, result) = call(&mut state, "assembly_check_interference", json!({}));
     assert!(!error, "{result}");
     assert_eq!(result["report"]["clear"], 0, "{result}");

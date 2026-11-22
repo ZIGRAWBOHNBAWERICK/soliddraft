@@ -689,9 +689,11 @@ fn a_pin_crossing_a_cone_in_a_thin_sliver_is_unresolved() {
     assert_eq!(report.clear, 0, "{report:#?}");
     let pair = &report.results[0];
     assert_eq!(pair.outcome, Outcome::TouchingOrUndecided, "{pair:#?}");
-    assert_eq!(pair.clearance, Some(ClearanceOutcome::Undecided), "{pair:#?}");
+    // The certified meshes come within 0.02 mm of each other, which proves the pair
+    // below a 0.5 mm clearance whatever the exact solids leave open.
+    assert_eq!(pair.clearance, Some(ClearanceOutcome::Below), "{pair:#?}");
     assert!(
-        pair.exact_refused.iter().any(|r| r.query == "Overlap volume" && r.code == "intersect.trace-native-cover"),
+        pair.exact_refused.iter().any(|r| r.query == "Overlap volume" && r.code == "intersect.trace-native-window"),
         "{pair:#?}"
     );
     std::fs::remove_dir_all(dir).unwrap();

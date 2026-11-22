@@ -161,14 +161,28 @@ mod tests {
     #[test]
     fn view_curves_carry_their_accuracy_and_nothing_else_does() {
         let mut drawing = bracket_a3();
-        drawing.sheets[0].views[0].geometry.curves[0].accuracy = Accuracy::Polygon;
-        drawing.sheets[0].views[0].geometry.curves[1].accuracy = Accuracy::Approximate;
+        // Two straight curves, so a path drawn in cubic segments cannot relabel them.
+        let straight = |c: &&crate::Curve2| !c.path.elements().iter().any(|e| matches!(e, kurbo::PathEl::CurveTo(..)));
+        let picked: Vec<usize> = drawing.sheets[0].views[0]
+            .geometry
+            .curves
+            .iter()
+            .enumerate()
+            .filter(|(_, c)| straight(c))
+            .map(|(i, _)| i)
+            .take(2)
+            .collect();
+        drawing.sheets[0].views[0].geometry.curves[picked[0]].accuracy = Accuracy::Polygon;
+        drawing.sheets[0].views[0].geometry.curves[picked[1]].accuracy = Accuracy::Approximate;
         let s = svg(&layout_sheet(&drawing, 0));
         let labelled = s.matches("data-accuracy=").count();
         let curves: usize = drawing.sheets[0].views.iter().map(|v| v.geometry.curves.len()).sum();
         assert_eq!(labelled, curves, "one label per view curve");
         assert_eq!(s.matches(r#"data-accuracy="polygon""#).count(), 1);
-        assert_eq!(s.matches(r#"data-accuracy="approximate""#).count(), 1);
+        // Arcs and circles reach the sheet as cubic segments, which only approximate them.
+        let cubic: usize =
+            drawing.sheets[0].views.iter().flat_map(|v| &v.geometry.curves).filter(|c| !straight(c)).count();
+        assert_eq!(s.matches(r#"data-accuracy="approximate""#).count(), cubic + 1);
         assert!(s.contains(r#"data-accuracy="exact""#));
         let dimension_layer = s.split(r#"<g id="DIMENSION""#).nth(1).unwrap().split("</g>").next().unwrap();
         assert!(!dimension_layer.contains("data-accuracy"), "annotation line work carries no label");

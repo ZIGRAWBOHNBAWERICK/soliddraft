@@ -1244,8 +1244,9 @@ impl Laid {
 /// Moves each new annotation, with what sits under it, along its own direction until
 /// its texts are clear of the views, the sheet and the annotations settled before it.
 /// The stacked dimensions settle first, nearest their views; the callouts and symbols
-/// then clear them. An annotation that finds no clear place on the paper stays where it
-/// was planned, and [`overlaps`] names it.
+/// then clear them. A callout or a symbol with no clear place along its direction tries
+/// across it. An annotation that finds no clear place on the paper stays where it was
+/// planned, and [`overlaps`] names it.
 fn settle(drawing: &mut Drawing, sheet: usize, made: &[Made]) {
     let new: BTreeSet<AnnotationId> = made.iter().map(|m| m.id).collect();
     let mut settled: Vec<AnnotationId> =
@@ -1265,29 +1266,38 @@ fn settle(drawing: &mut Drawing, sheet: usize, made: &[Made]) {
             ways.push(Point2::new(0.0, along.v.signum()));
         }
         let mut best: Option<(usize, Vec<Option<Point2>>)> = None;
-        for way in ways {
-            put(drawing, &group, &planned);
-            for moves in 0..MOVES {
-                if best.as_ref().is_some_and(|(fewest, _)| moves >= *fewest) {
-                    break;
-                }
-                let laid = lay(drawing, sheet);
-                if laid.clash(&group, &settled).is_none() {
-                    best = Some((moves, places(drawing, &group)));
-                    break;
-                }
-                if laid.off_frame(&group) && moves > 0 {
-                    break;
-                }
-                for member in &group {
-                    if let Some(a) = drawing.annotation_mut(*member) {
-                        a.placement = Point2::new(
-                            round(a.placement.u + way.u * lead.slide.step),
-                            round(a.placement.v + way.v * lead.slide.step),
-                        );
+        let slide = |ways: &[Point2], best: &mut Option<(usize, Vec<Option<Point2>>)>, drawing: &mut Drawing| {
+            for way in ways {
+                put(drawing, &group, &planned);
+                for moves in 0..MOVES {
+                    if best.as_ref().is_some_and(|(fewest, _)| moves >= *fewest) {
+                        break;
+                    }
+                    let laid = lay(drawing, sheet);
+                    if laid.clash(&group, &settled).is_none() {
+                        *best = Some((moves, places(drawing, &group)));
+                        break;
+                    }
+                    if laid.off_frame(&group) && moves > 0 {
+                        break;
+                    }
+                    for member in &group {
+                        if let Some(a) = drawing.annotation_mut(*member) {
+                            a.placement = Point2::new(
+                                round(a.placement.u + way.u * lead.slide.step),
+                                round(a.placement.v + way.v * lead.slide.step),
+                            );
+                        }
                     }
                 }
             }
+        };
+        slide(&ways, &mut best, drawing);
+        // A callout or a symbol boxed in along its own direction, as a datum is beside a
+        // dimension stack on the same side of its view, slides across that direction
+        // instead. Layouts that settle along it are unchanged.
+        if best.is_none() && !lead.stacked {
+            slide(&[Point2::new(-along.v, along.u), Point2::new(along.v, -along.u)], &mut best, drawing);
         }
         put(drawing, &group, best.as_ref().map_or(&planned, |(_, at)| at));
         settled.extend(group);

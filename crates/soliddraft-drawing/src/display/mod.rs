@@ -255,6 +255,8 @@ pub struct HatchRecord {
     pub angle: f64,
     /// Distance between lines in millimetres.
     pub spacing: f64,
+    /// True when a boundary of the region is approximate: fitted by the kernel or
+    /// sampled on the sheet.
     pub approximate: bool,
 }
 
@@ -270,10 +272,13 @@ impl DisplayList {
         self.count_accuracy(false)
     }
 
+    /// Accuracy counts as the DXF writer carries them, hatch boundaries included.
     pub fn dxf_accuracy(&self) -> AccuracyCounts {
         self.count_accuracy(!self.hatches.is_empty())
     }
 
+    /// The sheet's counts, with the approximate count raised to the DXF writer's when
+    /// its hatch boundaries add approximations.
     pub fn accuracy_with_dxf(&self) -> AccuracyCounts {
         let mut counts = self.accuracy();
         counts.approximate = counts.approximate.max(self.dxf_accuracy().approximate);

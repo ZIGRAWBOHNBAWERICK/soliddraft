@@ -44,14 +44,20 @@ pub struct View {
 }
 
 impl View {
+    /// True when the saved line work was drawn by the kernel's exact drawing queries,
+    /// which is what an export writes.
     pub fn has_saved_catallax_linework(&self) -> bool {
         self.geometry.catallax && !self.geometry.unproved
     }
 
+    /// True when the view is excluded from automatic update and its saved line work
+    /// cannot be exported, so it must be included and rebuilt first.
     pub fn needs_inclusion_for_redraw(&self) -> bool {
         self.excluded_from_update && !self.has_saved_catallax_linework()
     }
 
+    /// True when the view may show the part revision `digest`: it was drawn from it, or
+    /// it is excluded from automatic update.
     pub fn accepts_revision(&self, digest: &str) -> bool {
         self.excluded_from_update || self.geometry.source_digest == digest
     }
@@ -576,6 +582,8 @@ pub struct Polygon {
     /// section or a broken-out section.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub clip: Option<Boundary>,
+    /// True when a boundary of the region is approximate: fitted by the kernel or
+    /// sampled on the sheet.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub approximate: bool,
 }

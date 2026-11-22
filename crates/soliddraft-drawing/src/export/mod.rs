@@ -69,6 +69,8 @@ pub fn bytes(list: &DisplayList, format: Format, title: &str) -> Result<Vec<u8>,
     }
 }
 
+/// What to do with a view excluded from automatic update whose saved line work cannot
+/// be exported.
 pub const INCLUDE_FOR_REDRAW: &str = "Include the view in automatic update, then rebuild.";
 
 /// Checks the saved views of a sheet before laying it out for export.

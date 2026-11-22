@@ -17,8 +17,12 @@ fn call(doc: &mut Document, name: &str, input: Value) -> Value {
 }
 
 fn profiles() -> Document {
+    square_profiles([(2, 0), (4, 3), (2, 6)])
+}
+
+fn square_profiles(sections: [(i32, i32); 3]) -> Document {
     let mut doc = Document::new("Loft", soliddraft_app::kernel());
-    for (size, z) in [(2, 0), (4, 3), (2, 6)] {
+    for (size, z) in sections {
         call(
             &mut doc,
             "sketch",
@@ -34,7 +38,9 @@ fn volume(doc: &Document) -> f64 {
 
 #[test]
 fn loft_edit_cache_undo_reopen_and_refusal_preserve_the_exact_part() {
-    let mut doc = profiles();
+    // Aligned, equal squares use planar faces in Catallax and avoid rational patch area integration.
+    // The three-section preview test below covers the bulged Smooth loft.
+    let mut doc = square_profiles([(2, 0), (2, 7), (2, 16)]);
     call(&mut doc, "loft", json!({"profiles":["Sketch1","Sketch2"],"shape":"ruled"}));
     assert!((volume(&doc) - 28.0).abs() < 1e-7);
     let first = doc.display_body().unwrap();
@@ -56,7 +62,13 @@ fn loft_edit_cache_undo_reopen_and_refusal_preserve_the_exact_part() {
         assert_eq!(doc.display_body(), Some(first));
     }
     call(&mut doc, "edit_loft", json!({"feature":"Loft1","profiles":["Sketch1","Sketch2","Sketch3"],"shape":"smooth"}));
-    assert!((volume(&doc) - 4596.0 / 70.0).abs() < 1e-7);
+    assert!(matches!(
+        &doc.features[3].kind,
+        FeatureKind::Loft(loft)
+            if loft.profiles.len() == 3 && loft.shape == soliddraft_kernel_api::LoftShape::Smooth
+    ));
+    let smooth_volume = 2.0 * 2.0 * 16.0;
+    assert!((volume(&doc) - smooth_volume).abs() < 1e-7);
     call(&mut doc, "undo", json!({}));
     assert_eq!(doc.display_body(), Some(first));
     call(&mut doc, "redo", json!({}));
@@ -76,7 +88,7 @@ fn loft_edit_cache_undo_reopen_and_refusal_preserve_the_exact_part() {
     call(&mut doc, "save", json!({"path":path}));
     let mut reopened = Document::new("Reopened", soliddraft_app::kernel());
     call(&mut reopened, "open", json!({"path":path}));
-    assert!((volume(&reopened) - 4596.0 / 70.0).abs() < 1e-7);
+    assert!((volume(&reopened) - smooth_volume).abs() < 1e-7);
     assert_eq!(doc.features[3].kind, reopened.features[3].kind);
     assert!(
         reopened
@@ -93,11 +105,12 @@ fn loft_edit_cache_undo_reopen_and_refusal_preserve_the_exact_part() {
     let FeatureKind::Sketch(mut sketch) = doc.features[1].kind.clone() else { panic!("sketch") };
     sketch.plane = soliddraft_app::document::SketchPlane::Reference {
         plane: soliddraft_app::document::PlaneKind::Top,
-        offset: 4.0,
+        offset: 8.0,
     };
     doc.apply(soliddraft_app::document::Command::EditFeature { id: sketch_id, kind: FeatureKind::Sketch(sketch) })
         .unwrap();
     assert_ne!(body, doc.display_body());
+    assert!((volume(&doc) - smooth_volume).abs() < 1e-7);
 }
 
 #[test]

@@ -199,6 +199,7 @@ fn new_body_and_combine_are_available_in_the_application() {
         assert!((volume(&app.state().state.doc, 1) - 1500.0).abs() < 1e-6);
         case.frame(app, "combined");
         ribbon::run_command(app, "undo");
+        ribbon::until(app, "undo rebuild", |app| !app.state().state.doc.proof_pending());
         assert_eq!(app.state().state.doc.meshes.len(), 2);
     });
 }

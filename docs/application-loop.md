@@ -28,9 +28,8 @@ end. The slot edit must rebuild only the slot, and the undo and the return to th
 must run no kernel operation. Step 25 makes a drawing. Steps 27-32 change the plate
 width to 140 mm, undo and redo, save, diverge, reopen and export checked STEP.
 Model commands, viewport screenshots, SVG views and drawing output use Catallax.
-The view and drawing checks require that backend. Standalone SVG captures use
-unproved polygon hidden-line previews. The drawing workspace uses Catallax's
-hidden-line and section queries, and sheet exports write the saved line work.
+The view and drawing checks require that backend. The `scenario_view` SVG capture
+uses an unproved polygon hidden-line preview.
 
 The adapter uses Catallax's `build_incremental_without_display` entry. Exact
 checkpoints and picking names build immediately; certified meshes enter a
@@ -238,10 +237,10 @@ MCP tool call has a numbered directory under `commands/` containing:
   persistent reference: the feature holding it, its slot, its identity, the Catallax
   origins, carrier counts and whether the built sketch's plane matches those carriers.
   With a drawing open, the summary's `drawing` says for each view whether its line
-  work is at the pinned revision and whether it is a screen preview, how many of its
-  curves are exact, mesh polylines or approximate (`accuracy`), for each annotation its state, value and the model entities it is
-  attached to, and lists the changed and dangling annotations. A drawing export's
-  result reports the same counts for the curves it wrote.
+  work is at the pinned revision and whether it is a screen preview. It also lists
+  annotation states, values and model attachments, including changed and dangling
+  annotations. See the [MCP drawing fields](assistant.md#mcp) for accuracy and export
+  revision reports.
   `resolved` is null when that feature was not built. These observations run only after
   execution when `--bundle` was requested; the scenario runner makes the assertions.
   The `rebuild` report's `features_recomputed` lists the features whose kernel
@@ -482,13 +481,11 @@ Later steps still run so the cost distribution is retained.
 An open drawing follows the part inside the editing command, so the kernel calls that
 regenerate its views (`view_curves`, `section_view`) are in that click. Each such call
 on the command thread is also timed against the 1,000 ms reference (`drawing view calls`
-in the step's checks), alongside the click timing. Creating or rebuilding a saved section
-subtracts a half-space through a Catallax boolean. The drawing exports (`drawing_export_svg`,
+in the step's checks), alongside the click timing. The drawing exports (`drawing_export_svg`,
 `drawing_export_pdf`, `drawing_export_dxf`) are the `output` class: their wait is the
-caller's wait for the certified file and is recorded in the step's timing with no
+caller's wait for the file and is recorded in the step's timing with no
 budget, as the CLI export and drawing checks are; an output listed as a known gap is a
-warning to remove the listing. Each export reports how many views it wrote and the accuracy of the printed curves.
-Export uses saved Catallax line work. Older caches without its marker need an explicit redraw.
+warning to remove the listing. See [drawing export eligibility](documents.md#pinned-revisions-and-rebuild).
 
 The timing reference was calibrated from the
 [current-main baseline run](https://github.com/BohnBawerick/soliddraft/actions/runs/40229375814)

@@ -1,6 +1,6 @@
-//! Drawing queries. Exported views, silhouettes, sections, edge curves and face loops
-//! come from Catallax's hidden-line views and drawing curves. Screen views may keep the
-//! display mesh, marked unproved.
+//! Drawing queries for creating and rebuilding saved views. Catallax supplies hidden-line
+//! views, silhouettes, sections, edge curves and face loops. Preview requests use the
+//! display mesh and mark the result unproved.
 
 use std::collections::{BTreeMap, BTreeSet};
 

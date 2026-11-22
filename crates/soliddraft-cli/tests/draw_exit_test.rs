@@ -167,13 +167,32 @@ fn update_text_names_a_drawing_copy_written_before_an_output_error() {
 
 #[test]
 fn accept_saves_repairs_to_a_partial_rebuild() {
-    let (dir, before) = shortened_box("accept");
+    use soliddraft_drawing::{AnnotationKind, DimValue};
+
+    let (dir, mut before) = shortened_box("accept");
+    soliddraft(&dir, &["draw", "box.json", "--views", "front,top", "--out", "short-box.dwdrw"]);
+    let (short, _) = file::read(&dir.join("short-box.dwdrw")).unwrap();
+    let height = |annotation: &soliddraft_drawing::Annotation, expected| {
+        matches!(&annotation.body, AnnotationKind::Dimension(dim)
+            if matches!(dim.value, DimValue::Measured { value } if value == expected))
+    };
+    let short_height = short.sheets[0].annotations.iter().find(|a| height(a, 5.0)).unwrap();
+    let old_height = before.sheets[0].annotations.iter_mut().find(|a| height(a, 10.0)).unwrap();
+    // Keep the old value and use unambiguous anchors so this exercises acceptance.
+    old_height.anchors.clone_from(&short_height.anchors);
+    let id = old_height.id;
+    let path = dir.join("box.dwdrw");
+    let (_, meta) = file::read(&path).unwrap();
+    file::write(&path, &before, &meta).unwrap();
+
     let report: Value =
         serde_json::from_str(&soliddraft(&dir, &["draw", "--update", "box.dwdrw", "--accept", "--json"])).unwrap();
-    assert!(!report["repairs"].as_array().unwrap().is_empty(), "{report}");
+    assert_eq!(report["repairs"], serde_json::json!([format!("accepted {id}")]), "{report}");
     assert_eq!(report["dangling_views"][0]["name"], "Top view");
     let after = assert_partial_box_saved(&dir, &before);
-    assert!(after.sheets[0].annotations.iter().all(|a| !matches!(a.state, AnnotationState::Changed { .. })));
+    let accepted = after.annotation(id).unwrap();
+    assert!(height(accepted, 5.0));
+    assert_eq!(accepted.state, AnnotationState::Ok);
     std::fs::remove_dir_all(dir).unwrap();
 }
 

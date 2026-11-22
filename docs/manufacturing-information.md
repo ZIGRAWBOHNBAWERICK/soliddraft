@@ -79,7 +79,7 @@ The drawing also gets a section through the hole the part holds tightest: the on
 
 The drawing places everything itself. Stacked dimensions settle first, nearest their views; callouts and symbols then move along their leaders, or straight across or up, until no text lies over a line, another text or the frame.
 
-Each annotation made this way belongs to its item in the part. Its tolerance, count and text are the part's, and the drawing does not edit them: change the item in the part and update the drawing. An item removed from the part leaves the drawing, and a new one comes in, at the next update.
+Each annotation made this way belongs to its item in the part. To change its tolerance, count or text, edit the item in the part and rebuild the drawing. Rebuild refreshes imported items and keeps the saved items on views that refused to redraw.
 
 An item no view can show is not drawn somewhere it does not belong. It is listed by name with the reason, such as a height on a drawing that has only the top view.
 
@@ -87,7 +87,7 @@ An item no view can show is not drawn somewhere it does not belong. It is listed
 
 Inspect > Drawing and files writes three files in one action: the STEP file with the part's manufacturing information, and a drawing made from that information as PDF and DXF beside it. The drawing has the front, top and side views and the section, and stays open in the app.
 
-The action reports what it wrote: how many items are in the file, which are on the drawing, which the drawing could not show, any text that lies over something, and anything on the drawing that the file does not state. The last three lists are empty for a part whose items all apply.
+The action reports what it wrote: how many items are in the file, which are on the drawing, which the drawing could not show, any text that lies over something, and anything on the drawing that the file does not state. The last three lists are empty for a part whose items all apply. The app summary counts approximate curves once for the sheet shared by PDF and DXF.
 
 ## Scripted commands
 
@@ -100,7 +100,7 @@ The action reports what it wrote: how many items are in the file, which are on t
 | `pmi_recognise` | Lists the features the part's faces show, each with its faces, whether it goes through, what it opens onto and its sizes |
 | `pmi_interview` | Lists the open questions with their proposals and reasons |
 | `pmi_answer` | Takes the proposals named in `accept`, or all of them, and sets the material when given, as one undo step |
-| `manufacturing_package` | Writes `path` (.step) and a drawing of the part's manufacturing information beside it as .pdf and .dxf, and reports what the drawing shows and what it could not |
+| `manufacturing_package` | Writes `path` (.step) and a drawing of the part's manufacturing information beside it as .pdf and .dxf. Reports what the drawing shows and what it could not, with accuracy counts in `drawing.accuracy`. |
 
 ```json
 {"kind": "diameter", "name": "Bore diameter", "faces": ["Cut-Extrude1 · Wall of circle 1"], "tolerance": "H7"}

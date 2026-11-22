@@ -131,6 +131,12 @@ The headless command line serves a new part over stdio, or over HTTP with `--htt
 claude mcp add soliddraft -- soliddraft mcp --demo
 ```
 
+Drawing exports return `accuracy` counts for the paths written and set `approximate`
+when the approximate count is nonzero. `method` is `catallax` when the output contains
+views and `none` when it contains none. `pinned_revision` is the drawing's short pin.
+`view_revisions` lists the distinct saved view digests in the output, and `revision`
+gives the full digest when there is exactly one, or `null` otherwise.
+
 ## Tests
 
 The assistant tests run without a network or a key. `MockProvider` encodes scripted replies as real event streams, with empty thinking blocks and signatures as `claude-opus-5-5` sends them, and reads them back through the same parser as the real provider. The phase 3 exit test, `crates/soliddraft-app/tests/assistant_exit_test.rs`, builds the sample bracket without its fillet, hole pattern and slot, then runs the three example exchanges from text: "Add a fillet to the inside corner, R8", "Add four 9 mm holes on a 90 x 44 pattern" and "Cut a 40 x 12 slot through the flange". Each proposal is previewed, applied (the test checks the volume each one adds or removes, and the command log) and undone. An MCP client then makes the same three changes over HTTP and undoes them. `crates/soliddraft-cli/tests/mcp_stdio.rs` drives the command line over stdio, and the interface test in `exit_test.rs` clicks a proposal card through Preview, Apply and Undo.

@@ -166,33 +166,36 @@ binary64 rationals. Quarter turns stay exact; the query does not fit a rotation 
 These are proofs of the accepted placements, not of a user's ideal angle before storage.
 
 Catallax's `queries::body_relation` answers the pair. A clash has a proved positive overlap
-volume. Where the overlap Boolean refuses, Catallax proves the clash from a point inside both
-solids and encloses the volume between a ball inside both and the boxes' overlap, a wide
-interval it marks as not reaching the requested accuracy; the pair still shows as
-interfering, with that interval. A clear pair has a gap proved positive by Catallax's pruned
-minimum-distance search over both solids, which runs only once the overlap is proved empty,
+volume. If the overlap Boolean refuses, Catallax can still prove a clash by finding a
+point inside both solids. The volume of a ball inside both gives the lower bound, and
+the overlap of their boxes gives the upper bound. The pair shows as interfering even
+if the interval misses the requested accuracy. For separation, Catallax proves a positive
+gap with a pruned minimum-distance search. It searches only after proving empty overlap,
 so containment is never mistaken for a gap. A proved zero gap after an empty overlap is
 touching. A refusal leaves the pair unresolved when no proof settles whether the bodies
 are separate. When separation is already proved, the pair stays clear and a refused
-clearance comparison is reported as undecided. Contact faces retain their source names in two lists because clipped patches do not
-necessarily pair one to one. Edge and point contacts have no area patches and need a distance
-proof to settle touching.
+clearance comparison is reported as undecided. Contact faces retain their source names
+in two lists because clipped patches do not necessarily pair one to one. Edge and point
+contacts have no area patches and need a distance proof to settle touching.
 
 Clearance decisions compare the rational gap with the requested length's shortest
 round-trip decimal, matching authored dimensions: a gap equal to the clearance does not
-exceed it. When the gap's interval crosses the clearance, an admitted witness at or within
-the threshold can still settle the comparison. Without such a proof, clearance stays
-undecided. A calculation limit during that comparison is reported alongside the proved gap.
+exceed it. When the interval crosses the clearance, an exact squared-distance check
+can settle the comparison with a witness at or within the threshold. The adapter uses
+face bounding boxes to skip pairs before preparing their geometry. Without that proof,
+clearance stays undecided. A calculation limit during the check is reported alongside
+the proved gap.
 Display bounds round outward, including zero-width rational intervals between two doubles.
 A marked enclosure is shown as bounded, never as exact.
 
 A lattice or gyroid part is never related through its solid, which is only the envelope of
 the region its beams or sheet fill: every quantity refuses with `app.relation-envelope`.
 
-`overlap_mm3` records the volume enclosure; `contact_faces` records the two lists of source
-face labels. Calculation limits and unsupported face combinations retain typed refusals. No
-sampled distance or estimated volume replaces a refused quantity. The existing certified-mesh
-eligibility and scope limits still apply.
+`overlap_mm3` records the volume enclosure and `contact_faces` records the two lists of
+source face labels. The report omits closest-point witnesses and clipped-patch geometry.
+Calculation limits and unsupported face combinations retain typed refusals. A refused
+quantity stays unavailable. Bodies with bounded numerical geometry are ineligible for
+the exact query. The existing certified-mesh eligibility and scope limits still apply.
 
 `exact-body-relations.json` exercises touching without mates, named contact faces, a zero
 clearance and an invalid-clearance refusal through the real application commands. The

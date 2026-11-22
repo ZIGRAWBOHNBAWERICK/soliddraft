@@ -264,7 +264,7 @@ pub struct ViewCurves {
     /// Bounds of every curve in sheet coordinates (see [`ViewFrame::project`]):
     /// `[min x, min y, max x, max y]`. All zero when there are no curves.
     pub bbox_2d: [f64; 4],
-    /// Drawn from an unproved preview mesh, for the screen only. Never exported.
+    /// Drawn from an unproved mesh for previews and scenario captures. Ineligible for sheet export.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub unproved: bool,
     /// The line work came from Catallax drawing queries.

@@ -27,7 +27,9 @@ cargo run --release -p soliddraft-cli -- export recipes/bracket.json --out brack
 cargo run --release -p soliddraft-cli -- draw recipes/bracket.json --template iso-a3
 ```
 
-Replay prints each step's face, edge and vertex counts, volume, area, validity and geometric digest. Export chooses its format from each output filename and reports its deviation. View writes hidden-line views. Part rebuilds a saved part and prints each feature's state. Draw makes a drawing of the recipe's result. Each subcommand has `--help`.
+Replay prints each step's face, edge and vertex counts, volume, area, validity and geometric digest. Export chooses its format from each output filename and reports its deviation. Part rebuilds a saved part and prints each feature's state. Draw makes a drawing of the recipe's result. Each subcommand has `--help`.
+
+`soliddraft view` writes Catallax hidden-line views. The text and JSON reports and the SVG identify the method and whether the result contains approximations. The former `--tolerance` and `--mesh` options return a mesh-preview-only error when supplied.
 
 See [assistant.md](assistant.md) for API keys, the desktop assistant, MCP and scripted commands. See [application-loop.md](application-loop.md) for agent scenarios, per-command evidence and windowless viewport captures.
 

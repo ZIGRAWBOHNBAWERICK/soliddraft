@@ -96,6 +96,7 @@ fn symbol_zones(sheet: &Sheet, revision: &str, ctx: &Context<'_>) -> String {
 
 /// Every table of a sheet as items.
 pub(super) fn table_items(_drawing: &Drawing, sheet: &Sheet, ctx: &Context<'_>, items: &mut Vec<Item>) {
+    let mut next_prefix = "A".to_owned();
     for (i, table) in sheet.tables.iter().enumerate() {
         let owner = Owner::Table(i);
         match table.kind {
@@ -109,20 +110,22 @@ pub(super) fn table_items(_drawing: &Drawing, sheet: &Sheet, ctx: &Context<'_>, 
             }
             TableKind::Hole => {
                 let Some(view) = table.hole_view.and_then(|id| sheet.view(id)) else { continue };
+                let prefix = next_prefix;
+                next_prefix = crate::next_letter(&prefix);
                 let number = |n| crate::measure::format_value(n, crate::measure::precision_for(n));
                 let rows = table.holes.iter().enumerate().map(|(i, h)| {
-                    [format!("A{}", i + 1), number(h.coordinates.u), number(h.coordinates.v), number(h.diameter)]
+                    [format!("{prefix}{}", i + 1), number(h.coordinates.u), number(h.coordinates.v), number(h.diameter)]
                 });
                 grid(table, ("HOLE TABLE · MODEL ORIGIN", &HOLE_COLUMNS), rows, owner, ctx, items);
 
                 let scale = crate::project::effective_scale(sheet, view);
                 let mut tags = table.holes.iter().enumerate().peekable();
                 while let Some((i, h)) = tags.next() {
-                    let mut label = format!("A{}", i + 1);
+                    let mut label = format!("{prefix}{}", i + 1);
                     let mut diameter = h.diameter;
                     while tags.peek().is_some_and(|(_, next)| next.coordinates == h.coordinates) {
                         let (j, next) = tags.next().expect("peeked");
-                        label.push_str(&format!(", A{}", j + 1));
+                        label.push_str(&format!(", {prefix}{}", j + 1));
                         diameter = next.diameter;
                     }
                     let pos = Point2::new(

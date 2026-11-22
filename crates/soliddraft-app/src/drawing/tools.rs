@@ -907,7 +907,7 @@ pub(super) fn line_annotation_tool(
     clicked: bool,
     push: &mut impl FnMut(DrawingAction),
 ) {
-    use soliddraft_drawing::measure::{centreline, chamfer};
+    use soliddraft_drawing::measure::{AnchorGeometry, centreline, chamfer};
     use soliddraft_drawing::{Dimension, DimensionKind, Entity, Resolution};
     use soliddraft_kernel_api::drawing::Curve3;
 
@@ -932,15 +932,8 @@ pub(super) fn line_annotation_tool(
             push(DrawingAction::Select(Some(DrawingSel::Annotation(id))));
         }
     };
-    if is_chamfer
-        && let Some(view) = s.draft.view
-        && let [a, b, c, d] = s.draft.anchors.as_slice()
-        && let Some(xf) = s.doc.transforms.get(&view)
-        && let Some((size, angle)) = chamfer([a.cached, b.cached, c.cached, d.cached], xf.scale)
-    {
-        let mut dim = Dimension::measured(DimensionKind::Chamfer, size, precision_for(size));
-        dim.chamfer_angle = Some(angle);
-        place(s, view, AnnotationKind::Dimension(dim), to_view(s, view, p), s.draft.anchors.clone());
+    if let (Some(view), Some(dim)) = (s.draft.view, &s.draft.chamfer) {
+        place(s, view, AnnotationKind::Dimension(dim.clone()), to_view(s, view, p), s.draft.anchors.clone());
         return;
     }
     if !clicked {
@@ -960,7 +953,9 @@ pub(super) fn line_annotation_tool(
         return;
     };
     let Some(xf) = s.doc.transforms.get(&view) else { return };
-    let Some(ctx) = PartContext::new(doc).filter(|ctx| ctx.digest.as_str() == v.geometry.source_digest) else {
+    let Some(ctx) =
+        PartContext::new(doc).filter(|ctx| s.model_is(ctx.id) && ctx.digest.as_str() == v.geometry.source_digest)
+    else {
         s.say("Rebuild the drawing with its part before picking an edge");
         return;
     };
@@ -990,10 +985,27 @@ pub(super) fn line_annotation_tool(
     };
     let points = [first.cached, second.cached, ends[0].cached, ends[1].cached];
     if is_chamfer {
-        if chamfer(points, xf.scale).is_none() {
+        let geometry: Vec<_> = s
+            .draft
+            .anchors
+            .iter()
+            .chain(&ends)
+            .map(|anchor| AnchorGeometry {
+                curve: match index.resolve(&anchor.entity) {
+                    Resolution::Found(Entity::Edge(id)) => index.edge_curve(id),
+                    _ => None,
+                },
+                point: anchor.entity.fingerprint.point,
+                attach: anchor.attach,
+            })
+            .collect();
+        let Some((size, angle)) = chamfer(&geometry, xf) else {
             s.say("Pick a straight adjoining edge that meets the bevel at an acute angle");
             return;
-        }
+        };
+        let mut dim = Dimension::measured(DimensionKind::Chamfer, size, precision_for(size));
+        dim.chamfer_angle = Some(angle);
+        s.draft.chamfer = Some(dim);
         s.draft.anchors.extend(ends);
     } else if let Some([a, b]) = centreline(points) {
         let middle = Point2::new((a.u + b.u) / 2.0, (a.v + b.v) / 2.0);
@@ -1029,7 +1041,8 @@ pub(super) fn hole_table_tool(
         s.say("Rebuild the drawing with its part before making a hole table");
         return;
     };
-    let Some(ctx) = PartContext::new(doc).filter(|part| part.digest.as_str() == projected.geometry.source_digest)
+    let Some(ctx) = PartContext::new(doc)
+        .filter(|part| s.model_is(part.id) && part.digest.as_str() == projected.geometry.source_digest)
     else {
         s.say("Rebuild the drawing with its part before making a hole table");
         return;

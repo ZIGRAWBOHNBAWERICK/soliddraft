@@ -448,6 +448,8 @@ pub struct ToolDraft {
     pub orientation: LinearOrientation,
     /// Picks so far: dimension set points, or a symbol's anchor.
     pub anchors: Vec<Anchor>,
+    /// Chamfer measurement after both profile edges have been picked.
+    pub chamfer: Option<soliddraft_drawing::Dimension>,
     /// The feature control frame being built.
     pub gdt: GdtDraft,
     /// The next datum's letter; empty for the drawing's next one.
@@ -476,6 +478,7 @@ impl Default for ToolDraft {
             depth: 10.0,
             orientation: LinearOrientation::Horizontal,
             anchors: Vec::new(),
+            chamfer: None,
             gdt: GdtDraft::default(),
             datum: String::new(),
             finish: FinishDraft::default(),
@@ -492,6 +495,7 @@ impl ToolDraft {
         self.view = None;
         self.points.clear();
         self.anchors.clear();
+        self.chamfer = None;
         self.pending = None;
         self.flip = false;
         self.target_sheet = None;

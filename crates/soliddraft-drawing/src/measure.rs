@@ -119,30 +119,36 @@ pub fn measure(kind: &DimensionKind, dim_type: DimType, anchors: &[AnchorGeometr
             let cos = (a.u * b.u + a.v * b.v).clamp(-1.0, 1.0);
             Some(cos.acos().to_degrees())
         }
-        DimensionKind::Chamfer => chamfer(projected_edge_ends(anchors, xf)?, xf.scale).map(|(size, _)| size),
+        DimensionKind::Chamfer => chamfer(anchors, xf).map(|(size, _)| size),
         DimensionKind::Ordinate => None,
     }
 }
 
-/// The projected ends of two straight model edges, in anchor order.
-pub(crate) fn projected_edge_ends(anchors: &[AnchorGeometry], xf: &ViewTransform) -> Option<[Point2; 4]> {
+fn edge_ends(anchors: &[AnchorGeometry], xf: &ViewTransform) -> Option<[Vec3; 4]> {
     let [a, b, c, d] = anchors else { return None };
     if !anchors.iter().all(|g| matches!(g.curve, Some(Curve3::Line { .. }))) {
         return None;
     }
-    Some([a, b, c, d].map(|g| xf.point(anchor_point(g, xf, Point2::default()))))
+    Some([a, b, c, d].map(|g| anchor_point(g, xf, Point2::default())))
+}
+
+/// The projected ends of two straight model edges, in anchor order.
+pub(crate) fn projected_edge_ends(anchors: &[AnchorGeometry], xf: &ViewTransform) -> Option<[Point2; 4]> {
+    Some(edge_ends(anchors, xf)?.map(|p| xf.point(p)))
 }
 
 /// The chamfer leg normal to the adjacent edge and the angle to that edge.
-/// The two straight edges must share a corner in the profile view.
-pub fn chamfer([a, b, c, d]: [Point2; 4], scale: f64) -> Option<(f64, f64)> {
-    let anchor_distance = |p: Point2, q: Point2| (p.u - q.u).hypot(p.v - q.v);
-    if scale <= 0.0 || ![a, b].into_iter().any(|p| [c, d].into_iter().any(|q| anchor_distance(p, q) <= 1e-6)) {
+/// Both edges must share a model vertex and lie in the profile plane.
+pub fn chamfer(anchors: &[AnchorGeometry], xf: &ViewTransform) -> Option<(f64, f64)> {
+    let [a, b, c, d] = edge_ends(anchors, xf)?;
+    if ![a, b].into_iter().any(|p| [c, d].into_iter().any(|q| p.distance(q) <= 1e-6)) {
         return None;
     }
-    let bevel = kurbo::Vec2::new(b.u - a.u, b.v - a.v) / scale;
-    let side = kurbo::Vec2::new(d.u - c.u, d.v - c.v) / scale;
-    let normal = bevel.cross(side).abs() / side.length();
+    let (bevel, side) = (b - a, d - c);
+    if [bevel, side].into_iter().any(|v| v.dot(xf.frame.direction).abs() > 1e-6) {
+        return None;
+    }
+    let normal = bevel.cross(side).length() / side.length();
     let along = bevel.dot(side).abs() / side.length();
     (normal.is_finite() && normal > 1e-6 && along > 1e-6).then(|| (normal, normal.atan2(along).to_degrees()))
 }
@@ -629,6 +635,36 @@ mod tests {
             scale: 0.5,
             centre: Point2::new(0.0, 0.0),
         }
+    }
+
+    #[test]
+    fn chamfer_uses_the_model_leg_and_rejects_a_projected_false_corner() {
+        let bevel = Curve3::Line { a: Vec3::ZERO, b: Vec3::new(6.0, 0.0, 6.0) };
+        let ends = |side: Curve3| {
+            let anchors = [
+                AnchorGeometry { curve: Some(&bevel), point: Vec3::ZERO, attach: Attach::Start },
+                AnchorGeometry { curve: Some(&bevel), point: Vec3::ZERO, attach: Attach::End },
+                AnchorGeometry { curve: Some(&side), point: Vec3::ZERO, attach: Attach::Start },
+                AnchorGeometry { curve: Some(&side), point: Vec3::ZERO, attach: Attach::End },
+            ];
+            chamfer(&anchors, &xf())
+        };
+        let (size, angle) = ends(Curve3::Line { a: Vec3::ZERO, b: Vec3::new(-20.0, 0.0, 0.0) }).unwrap();
+        assert!((size - 6.0).abs() < 1e-9);
+        assert!((angle - 45.0).abs() < 1e-9);
+        assert_eq!(ends(Curve3::Line { a: Vec3::Y, b: Vec3::new(-20.0, 1.0, 0.0) }), None);
+        assert_eq!(ends(Curve3::Line { a: Vec3::ZERO, b: Vec3::new(-20.0, 1.0, 0.0) }), None);
+    }
+
+    #[test]
+    fn centreline_spans_the_shared_length_of_parallel_edges() {
+        let p = Point2::new;
+        assert_eq!(
+            centreline([p(0.0, 0.0), p(15.0, 0.0), p(20.0, 6.0), p(5.0, 6.0)]),
+            Some([p(3.0, 3.0), p(17.0, 3.0)])
+        );
+        assert_eq!(centreline([p(0.0, 0.0), p(15.0, 0.0), p(20.0, 6.0), p(16.0, 6.0)]), None);
+        assert_eq!(centreline([p(0.0, 0.0), p(15.0, 0.0), p(10.0, 6.0), p(5.0, 7.0)]), None);
     }
 
     #[test]

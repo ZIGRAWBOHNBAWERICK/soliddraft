@@ -347,12 +347,10 @@ pub(crate) fn remeasure(
         AnnotationKind::Dimension(d) => {
             let old = value_text(d);
             let measured = if d.kind == crate::DimensionKind::Chamfer {
-                crate::measure::projected_edge_ends(&geometry, &ctx.xf)
-                    .and_then(|ends| crate::measure::chamfer(ends, ctx.xf.scale))
-                    .map(|(size, angle)| {
-                        d.chamfer_angle = Some(crate::model_items::round_value(angle));
-                        size
-                    })
+                crate::measure::chamfer(&geometry, &ctx.xf).map(|(size, angle)| {
+                    d.chamfer_angle = Some(crate::model_items::round_value(angle));
+                    size
+                })
             } else {
                 measure(&d.kind, d.dim_type, &geometry, &ctx.xf)
             };

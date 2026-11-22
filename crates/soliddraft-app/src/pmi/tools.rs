@@ -340,22 +340,27 @@ pub(crate) fn run(state: &mut AppState, name: &str, input: &Value) -> Option<Res
 /// and the material when it is given, as one undo entry. Answers what was added and
 /// the questions still open.
 pub(super) fn answer(doc: &mut Document, input: &Value) -> Result<Value, String> {
-    use soliddraft_model::interview::Proposal;
+    use soliddraft_model::interview::{Proposal, Question};
     let questions = doc.model().interview()?;
     let material = text(input, "material").map(str::trim).filter(|text| !text.is_empty());
-    let all = input.get("accept").and_then(Value::as_str) == Some("all");
-    let named: Vec<String> = match input.get("accept") {
+    let wrong = || "accept lists question ids, or is \"all\"".to_owned();
+    // "all" takes the questions themselves, never their ids looked up again.
+    let chosen: Vec<&Question> = match input.get("accept") {
         Some(Value::Array(ids)) => ids
             .iter()
-            .map(|id| id.as_str().map(str::to_owned).ok_or("accept lists question ids, or is \"all\""))
+            .map(|id| {
+                let id = id.as_str().ok_or_else(wrong)?;
+                questions
+                    .iter()
+                    .find(|q| q.id == id)
+                    .ok_or_else(|| format!("No open question `{id}`. pmi_interview lists the open ones."))
+            })
             .collect::<Result<_, _>>()?,
-        Some(Value::String(word)) if word == "all" => {
-            questions.iter().filter(|q| q.proposal.is_some()).map(|q| q.id.clone()).collect()
-        }
+        Some(Value::String(word)) if word == "all" => questions.iter().filter(|q| q.proposal.is_some()).collect(),
         Some(Value::Null) | None => Vec::new(),
-        Some(_) => return Err("accept lists question ids, or is \"all\"".into()),
+        Some(_) => return Err(wrong()),
     };
-    if named.is_empty() && material.is_none() {
+    if chosen.is_empty() && material.is_none() {
         return Err("Nothing to answer: give accept, material or both.".into());
     }
     let mut notes = doc.model().pmi().part.clone();
@@ -366,11 +371,7 @@ pub(super) fn answer(doc: &mut Document, input: &Value) -> Result<Value, String>
     }
     let mut commands = Vec::new();
     let mut accepted = Vec::new();
-    for id in &named {
-        let question = questions
-            .iter()
-            .find(|q| q.id == *id)
-            .ok_or_else(|| format!("No open question `{id}`. pmi_interview lists the open ones."))?;
+    for question in chosen {
         match &question.proposal {
             Some(Proposal::Item { item }) => {
                 commands.push(soliddraft_model::Command::PutPmiItem { item: item.clone(), replaces: None });
@@ -379,10 +380,9 @@ pub(super) fn answer(doc: &mut Document, input: &Value) -> Result<Value, String>
                 notes.general_tolerance = Some(text.clone());
                 notes_changed = true;
             }
-            None if all => continue,
-            None => return Err(format!("`{id}` has no proposal. Answer it yourself: {}", question.asks)),
+            None => return Err(format!("`{}` has no proposal. Answer it yourself: {}", question.id, question.asks)),
         }
-        accepted.push(id.clone());
+        accepted.push(question.id.clone());
     }
     if notes_changed {
         commands.insert(0, soliddraft_model::Command::SetPartNotes { notes });

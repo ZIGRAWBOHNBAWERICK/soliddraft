@@ -94,7 +94,9 @@ try {
     await sleep(400);
   };
   const enter = () => key('Enter', 'Enter', 13, 0, '\r');
+  const moveToCanvas = () => call('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 1000, y: 450 });
   const command = async name => {
+    await moveToCanvas();
     await key('P', 'KeyP', 80, 2 | 8, 'P');
     for (const ch of name) {
       await call('Input.dispatchKeyEvent', { type: 'char', text: ch });
@@ -138,8 +140,9 @@ try {
   // File > Open also works on the start page after the app has loaded.
   await open(part, () => key('o', 'KeyO', 79, 2, 'o'));
   await sleep(4000);
-  await command('Make drawing');
-  await enter();
+  await moveToCanvas();
+  await key('D', 'KeyD', 68, 2 | 8, 'D');
+  await key('Enter', 'Enter', 13);
   const initial = await sheet('new drawing', s => s.up_to_date);
   await tool('Chamfer', 'Chamfer dimension');
   await pick('Top view', 117, 3, 10);

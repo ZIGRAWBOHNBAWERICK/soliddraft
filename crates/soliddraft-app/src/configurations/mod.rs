@@ -199,7 +199,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
     });
     ui.horizontal(|ui| {
         ui.label("Distance");
-        ui.add(egui::DragValue::new(&mut d.distance).range(-1e6..=1e6).speed(1.0).suffix(" mm"))
+        ui.add(egui::DragValue::new(&mut d.distance).range(-1e6..=1e6).speed(1.0).max_decimals(3).suffix(" mm"))
             .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::DragValue, true, "Explode distance"));
     });
     ui.label(format!("Move the {chosen} chosen along:"));
@@ -220,11 +220,11 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
             ui.label(format!("{}. {}", i + 1, what.join(", ")));
             let mut mm = step.distance;
             // Typed, not dragged: each change is an undo step.
-            let r = ui.add(egui::DragValue::new(&mut mm).speed(0.0).suffix(" mm"));
+            let r = ui.add(egui::DragValue::new(&mut mm).speed(0.0).max_decimals(3).suffix(" mm"));
             if r.changed() {
                 actions.push(ConfigureAction::EditStep(step.id, mm));
             }
-            if ui.small_button("✕").on_hover_text("Delete the step").clicked() {
+            if ui.small_button("Delete").on_hover_text("Delete the step").clicked() {
                 actions.push(ConfigureAction::DeleteStep(step.id));
             }
         });

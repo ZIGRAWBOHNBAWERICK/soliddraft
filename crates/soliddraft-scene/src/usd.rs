@@ -278,11 +278,13 @@ impl Reader<'_> {
         for path in &paths {
             let prim = stage.prim(path.clone()).map_err(|e| err(self.file, e))?;
             let kind = prim.type_name().ok().flatten().map(|t| t.as_str().to_owned()).unwrap_or_default();
+            let planar = if kind == "PhysicsJoint" { planar_axis(&prim) } else { None };
             let joint_kind = match kind.as_str() {
                 "PhysicsRevoluteJoint" => JointKind::Revolute,
                 "PhysicsPrismaticJoint" => JointKind::Prismatic,
                 "PhysicsFixedJoint" => JointKind::Fixed,
                 "PhysicsSphericalJoint" => JointKind::Spherical,
+                "PhysicsJoint" if planar.is_some() => JointKind::Planar,
                 "PhysicsJoint" | "PhysicsDistanceJoint" => JointKind::Other,
                 _ => continue,
             };
@@ -311,11 +313,11 @@ impl Reader<'_> {
             // root's own placement does not move; with the root as body0 it is the root's.
             let root = scene.world(0);
             let frame = if b0.is_none() && root.determinant() != 0.0 { root.inverse() * frame } else { frame };
-            let axis = match attr_token(&prim, "physics:axis").as_deref() {
+            let axis = planar.unwrap_or_else(|| match attr_token(&prim, "physics:axis").as_deref() {
                 Some("Y") => DVec3::Y,
                 Some("Z") => DVec3::Z,
                 _ => DVec3::X,
-            };
+            });
             let lo = attr_float(&prim, "physics:lowerLimit");
             let hi = attr_float(&prim, "physics:upperLimit");
             let (kind, limits) = match (joint_kind, lo, hi) {
@@ -341,6 +343,32 @@ impl Reader<'_> {
         }
         Ok(())
     }
+}
+
+/// A D6 joint is planar when it locks translation along its normal and rotation
+/// about the other two axes. Any additional limit changes those freedoms.
+fn planar_axis(prim: &Prim) -> Option<DVec3> {
+    let applied = prim.api_schema_instance_names("PhysicsLimitAPI").ok()?;
+    if applied.len() != 3 {
+        return None;
+    }
+    [
+        (DVec3::X, ["transX", "rotY", "rotZ"]),
+        (DVec3::Y, ["transY", "rotX", "rotZ"]),
+        (DVec3::Z, ["transZ", "rotX", "rotY"]),
+    ]
+    .into_iter()
+    .find_map(|(normal, locks)| {
+        locks
+            .iter()
+            .all(|axis| {
+                let low = attr_float(prim, &format!("limit:{axis}:physics:low"));
+                let high = attr_float(prim, &format!("limit:{axis}:physics:high"));
+                applied.iter().any(|name| name.as_str() == *axis)
+                    && matches!((low, high), (Some(lo), Some(hi)) if lo > hi)
+            })
+            .then_some(normal)
+    })
 }
 
 /// A USD row-vector matrix as a column-vector one.

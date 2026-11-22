@@ -213,14 +213,23 @@ at the assembly's origin. Mates become joints:
 | Hinge with angle limits | revolute, between the limits |
 | Hinge without limits | continuous |
 | Concentric between axes, without Lock rotation | continuous about the axis |
+| Concentric between axes, with Lock rotation | prismatic along the axis |
+| Coincident or Distance between two planes | planar, with the plane normal as its axis |
+| Coincident or Concentric between two points | spherical, with the common point as its pivot |
 | anything else | fixed, at the pose the assembly holds |
+
+Prismatic, planar and spherical mappings require a single mate between the two
+parts. Additional mates on the same pair can restrict motion further. URDF writes
+an unlimited slide with infinite limits. It uses the `spherical` joint type read
+by SolidDraft's importer. ROS urdfdom supports its own list of joint types, which
+excludes `spherical`.
 
 A Gear between two of those joints makes the second follow the first (URDF `mimic`,
 `newton:mimicJoint` in OpenUSD). The joints form a tree from `base_link`: a mate that would
 close a loop is left out, and a part no mate reaches is fixed to `base_link` where it
 stands. Every choice like that is reported in words, naming the mates. Each joint frame
 puts the joint's axis along its X. URDF lengths are metres; the OpenUSD layer is in
-millimetres with Z up. Prismatic, planar and spherical joints are follow-ups.
+millimetres with Z up.
 
 ## Occurrence paths
 

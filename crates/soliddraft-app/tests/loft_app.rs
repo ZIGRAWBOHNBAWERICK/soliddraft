@@ -4,6 +4,7 @@ use serde_json::{Value, json};
 use soliddraft_app::command_tools::{CommandTools, ProposalBook, Surface};
 use soliddraft_app::document::{Document, FeatureKind, Selection};
 use soliddraft_assistant::{Caller, ToolHost};
+use soliddraft_kernel_api::LoftShape;
 
 fn call(doc: &mut Document, name: &str, input: Value) -> Value {
     let mut book = ProposalBook::default();
@@ -17,32 +18,42 @@ fn call(doc: &mut Document, name: &str, input: Value) -> Value {
 }
 
 fn profiles() -> Document {
-    square_profiles([(2, 0), (4, 3), (2, 6)])
-}
-
-fn square_profiles(sections: [(i32, i32); 3]) -> Document {
     let mut doc = Document::new("Loft", soliddraft_app::kernel());
-    for (size, z) in sections {
-        call(
-            &mut doc,
-            "sketch",
-            json!({"plane":"top","offset":z,"shapes":[{"shape":"rectangle","center":[0,0,z],"width":size,"height":size}]}),
-        );
+    for (size, z) in [(2.0, 0), (4.0, 3), (2.0, 6)] {
+        rectangle(&mut doc, z, 0.0, size, size);
     }
     doc
+}
+
+fn rectangle(doc: &mut Document, z: i32, x: f64, width: f64, height: f64) {
+    call(
+        doc,
+        "sketch",
+        json!({"plane":"top","offset":z,"shapes":[{"shape":"rectangle","center":[x,0,z],"width":width,"height":height}]}),
+    );
 }
 
 fn volume(doc: &Document) -> f64 {
     doc.kernel().mass_properties(doc.display_body().expect("a solid")).unwrap().volume
 }
 
+fn assert_loft(doc: &Document, shape: LoftShape, profile_count: usize, expected_volume: f64) {
+    let FeatureKind::Loft(loft) = &doc.features[3].kind else { panic!("expected Loft1") };
+    assert_eq!(loft.shape, shape);
+    assert_eq!(loft.profiles.len(), profile_count);
+    let actual = volume(doc);
+    assert!((actual - expected_volume).abs() < 1e-7, "expected volume {expected_volume}, got {actual}");
+}
+
 #[test]
 fn loft_edit_cache_undo_reopen_and_refusal_preserve_the_exact_part() {
-    // Aligned, equal squares use planar faces in Catallax and avoid rational patch area integration.
-    // The three-section preview test below covers the bulged Smooth loft.
-    let mut doc = square_profiles([(2, 0), (2, 7), (2, 16)]);
+    let mut doc = Document::new("Loft", soliddraft_app::kernel());
+    // The first two rectangles form a prism. Widening the last at one edge curves only one wall.
+    rectangle(&mut doc, 0, 1.0, 2.0, 2.0);
+    rectangle(&mut doc, 7, 1.0, 2.0, 2.0);
+    rectangle(&mut doc, 16, 17.0 / 16.0, 17.0 / 8.0, 2.0);
     call(&mut doc, "loft", json!({"profiles":["Sketch1","Sketch2"],"shape":"ruled"}));
-    assert!((volume(&doc) - 28.0).abs() < 1e-7);
+    assert_loft(&doc, LoftShape::Ruled, 2, 28.0);
     let first = doc.display_body().unwrap();
     for name in ["loft", "edit_loft"] {
         let before = doc.model().to_bytes().unwrap();
@@ -62,16 +73,15 @@ fn loft_edit_cache_undo_reopen_and_refusal_preserve_the_exact_part() {
         assert_eq!(doc.display_body(), Some(first));
     }
     call(&mut doc, "edit_loft", json!({"feature":"Loft1","profiles":["Sketch1","Sketch2","Sketch3"],"shape":"smooth"}));
-    assert!(matches!(
-        &doc.features[3].kind,
-        FeatureKind::Loft(loft)
-            if loft.profiles.len() == 3 && loft.shape == soliddraft_kernel_api::LoftShape::Smooth
-    ));
-    let smooth_volume = 2.0 * 2.0 * 16.0;
-    assert!((volume(&doc) - smooth_volume).abs() < 1e-7);
+    // Integrate the section area (2 * width) against z, using natural cubics through the three
+    // stations for width and z. The ruled result is 65.125 and dropping Sketch2 gives 66.
+    let smooth_volume = 64.90625;
+    assert_loft(&doc, LoftShape::Smooth, 3, smooth_volume);
     call(&mut doc, "undo", json!({}));
     assert_eq!(doc.display_body(), Some(first));
+    assert_loft(&doc, LoftShape::Ruled, 2, 28.0);
     call(&mut doc, "redo", json!({}));
+    assert_loft(&doc, LoftShape::Smooth, 3, smooth_volume);
     let before = doc.model().to_bytes().unwrap();
     let body = doc.display_body();
     let mut book = ProposalBook::default();
@@ -88,7 +98,7 @@ fn loft_edit_cache_undo_reopen_and_refusal_preserve_the_exact_part() {
     call(&mut doc, "save", json!({"path":path}));
     let mut reopened = Document::new("Reopened", soliddraft_app::kernel());
     call(&mut reopened, "open", json!({"path":path}));
-    assert!((volume(&reopened) - smooth_volume).abs() < 1e-7);
+    assert_loft(&reopened, LoftShape::Smooth, 3, smooth_volume);
     assert_eq!(doc.features[3].kind, reopened.features[3].kind);
     assert!(
         reopened
@@ -110,7 +120,8 @@ fn loft_edit_cache_undo_reopen_and_refusal_preserve_the_exact_part() {
     doc.apply(soliddraft_app::document::Command::EditFeature { id: sketch_id, kind: FeatureKind::Sketch(sketch) })
         .unwrap();
     assert_ne!(body, doc.display_body());
-    assert!((volume(&doc) - smooth_volume).abs() < 1e-7);
+    // With Sketch2 at z = 8, the same integral changes to 64.75 (ruled: 65).
+    assert_loft(&doc, LoftShape::Smooth, 3, 64.75);
 }
 
 #[test]

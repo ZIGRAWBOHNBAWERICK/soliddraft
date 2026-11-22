@@ -15,6 +15,7 @@ pub mod pick;
 pub mod planes;
 pub mod render;
 pub mod scenes;
+pub mod threads;
 
 use crate::dimension_edit::DimensionAction;
 use crate::document::{AxisKind, DisplayMesh, Document, FeatureId, Reference, Selection};
@@ -209,7 +210,13 @@ pub struct ViewportState {
     pub dimensions_of: Option<FeatureId>,
     /// A depth arrow drag: where the pointer pressed and the depth then.
     arrow_drag: Option<(Pos2, f32)>,
+    /// The thread marks drawn last, with the part, display and revision they were made
+    /// for.
+    threads: Option<(ThreadsKey, Option<Arc<DisplayMesh>>)>,
 }
+
+/// What thread marks are made for: the part, its display version and its revision.
+type ThreadsKey = (soliddraft_document::DocumentId, u64, u64);
 
 impl Default for ViewportState {
     fn default() -> Self {
@@ -237,6 +244,7 @@ impl Default for ViewportState {
             navigation_bar: navigation_bar::NavigationBar::default(),
             all_dimensions: false,
             dimensions_of: None,
+            threads: None,
             arrow_drag: None,
         }
     }
@@ -512,6 +520,13 @@ impl ViewportState {
             _ => None,
         };
         input.ghost = ghost;
+        input.threads = if visible.body { self.thread_marks(doc) } else { None };
+        #[cfg(target_arch = "wasm32")]
+        crate::web::show_part_view(
+            &self.camera,
+            rect,
+            input.threads.as_ref().map_or(0, |t| t.edges.iter().map(|e| e.segments.len() / 2).sum()),
+        );
         input.preview = preview;
         input.preview_pickable = preview_pickable;
         input.pick_revision = pick_revision;
@@ -702,6 +717,20 @@ impl ViewportState {
         events
     }
 
+    /// The marks of the part's cosmetic threads, made again only when the part or its
+    /// display changes.
+    fn thread_marks(&mut self, doc: &Document) -> Option<Arc<DisplayMesh>> {
+        let key = (doc.model().id(), doc.mesh_version, doc.revision());
+        match &self.threads {
+            Some((made, marks)) if *made == key => marks.clone(),
+            _ => {
+                let marks = threads::marks(doc);
+                self.threads = Some((key, marks.clone()));
+                marks
+            }
+        }
+    }
+
     /// The scene behind the model, without its screen grid while the grid is hidden.
     fn backdrop(&self) -> scenes::Backdrop {
         let mut backdrop = self.scene.map_or_else(|| theme::viewport_backdrop().into(), scenes::Scene::backdrop);
@@ -770,6 +799,7 @@ impl ViewportState {
             meshes: (NO_PART, Vec::new()),
             ghost: None,
             preview: None,
+            threads: None,
             preview_pickable: false,
             pick_revision: None,
             pick_out: self.pick.clone(),

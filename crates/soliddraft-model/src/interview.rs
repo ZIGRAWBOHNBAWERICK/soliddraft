@@ -446,6 +446,7 @@ fn holes(asking: &mut Asking, found: &Recognised) {
                     features: features.clone(),
                     tolerance,
                     through: first.through,
+                    thread: None,
                     nominal: None,
                 },
             };
@@ -531,6 +532,7 @@ fn bosses(asking: &mut Asking, found: &Recognised) {
                     features: vec![wall],
                     tolerance: Tolerance::None,
                     through: false,
+                    thread: None,
                     nominal: None,
                 },
             };

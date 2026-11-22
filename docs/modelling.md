@@ -106,7 +106,7 @@ arc traversed against its own direction, such as a concave bite out of an edge, 
 | Extrude | a profile (a sketch, or a built-in rectangle or circle on a reference plane), boss or cut, blind depth or through all, reversed or not |
 | Extrude end | blind, through all, up to the next boundary, or up to a face by persistent name |
 | Fillet, Chamfer | edges by persistent name, radius or distance |
-| Hole | a planar face by persistent name, centres in the face's sketch frame, diameter, blind depth or through, flat or drill-point tip, counterbore or countersink |
+| Hole | a planar face by persistent name, centres in the face's sketch frame, diameter, blind depth or through, flat or drill-point tip, counterbore or countersink, and a cosmetic thread |
 | Linear and circular pattern | a direction and spacing, or an axis and angle, and the number of copies; copies the body and unites the copies with it |
 | Mirror | a reference plane or a planar face, and whether the original stays |
 | Draft | faces by persistent name, a neutral plane (reference plane or planar face), an angle and the pull's sense |
@@ -136,6 +136,35 @@ The kernel's coplanar Boolean rules decide the shared face. Boundary-limited ext
 and sketches on separate reference-plane features still use the world-space frame path.
 
 A hole's faces are named by the hole's place in the point list and the part of the hole: entry, counterbore wall and floor, countersink, wall, floor or tip. A pattern's or mirror's copy faces are named by the copy number and ranked by the names of the faces they copy, so editing the spacing, the count or an earlier feature keeps them. A drafted face keeps the name of the face it tilts. An extrusion up to a boundary starts on its sketch face like every other extrusion.
+
+### Threaded holes
+
+A hole can be tapped. Set Thread to Tapped in the hole's form and pick an ISO metric
+size from M1.6 to M64 and its coarse or fine pitch (ISO 262). The drill becomes the
+tap drill: the ISO 2306 drill for a coarse thread, such as Ø5 for M6, and the nominal
+diameter less the pitch for a fine one, such as Ø7 for M8x1. The drill stays editable.
+The thread's tolerance class (6H unless chosen) and its depth are in the form's sheet;
+Full depth threads the whole wall, or the thread stops at a depth measured from the face
+the hole starts on.
+
+The thread is cosmetic: the hole keeps the plain cylinder of its drill, and no teeth are
+modelled. The viewport draws the thread on the wall, a helix at its pitch over the part
+of the wall it covers, a circle where it ends and a circle of its major diameter where
+it starts. The marks follow the body: a later feature that removes part of the wall
+leaves the thread on what is left of it.
+
+The hole states the thread as an item of the part's manufacturing information: the
+diameter of its walls with the designation, such as `2× M6x1-6H DEEP 12` (see
+[manufacturing information](manufacturing-information.md)). The part stores no item of
+its own for it; editing the thread changes the item and taking the thread out removes
+it.
+
+A thread that does not fit its hole stops the hole with the reason: a drill that is not
+between the thread's minor and major diameters (`A M6x1-6H thread is cut in a hole from
+Ø4.917 to under Ø6; this hole is Ø6.6.`), a thread deeper than a blind hole, a thread
+that ends inside the counterbore, or a size or pitch that is not in the table. The
+scripted `hole` and `edit_hole` lines take a `thread` with `size`, and optionally
+`pitch`, `class` and `length`; `edit_hole` takes `plain: true` to take a thread out.
 
 Mass properties are requested explicitly from Inspect, Mass props, after selecting
 a solid feature. Editing or displaying the hole does not request this proof. The

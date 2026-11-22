@@ -712,6 +712,49 @@ fn before_ridealong_inputs(id: &str, current: &mut Value) {
     }
 }
 
+/// Hole and Edit hole gained an optional thread, Edit hole an optional `plain`, and the
+/// diameter of both became optional: a threaded hole's is its tap drill, and an edit
+/// keeps the one it has. A call that gives the diameter keeps its meaning.
+fn before_hole_thread(id: &str, current: &mut Value) {
+    fn restore(op: &str, schema: &mut Value) {
+        if !matches!(op, "hole" | "edit_hole") {
+            return;
+        }
+        let properties = schema["properties"].as_object_mut().expect("hole inputs");
+        assert_eq!(
+            properties.remove("thread"),
+            Some(json!({
+                "type": "object", "additionalProperties": false,
+                "properties": {"size": {"type": "number"}, "pitch": {"type": "number"},
+                    "class": {"type": "string"}, "length": {"type": "number"}},
+                "required": ["size"],
+            })),
+            "{op}: a thread is a size, and optionally its pitch, class and length"
+        );
+        if op == "edit_hole" {
+            assert_eq!(properties.remove("plain"), Some(json!({"type": "boolean"})), "plain is one optional boolean");
+        }
+        let required = schema["required"].as_array_mut().expect("required inputs");
+        assert!(
+            !required.iter().any(|field| ["thread", "plain", "diameter"].contains(&field.as_str().unwrap_or_default())),
+            "{op}: the thread, plain and the diameter stay optional"
+        );
+        required.push(json!("diameter"));
+    }
+    if id == "propose" {
+        let variants = current
+            .pointer_mut("/tool/input/properties/commands/items/anyOf")
+            .and_then(Value::as_array_mut)
+            .expect("proposal variants");
+        for schema in variants {
+            let op = schema["properties"]["op"]["const"].as_str().expect("operation").to_owned();
+            restore(&op, schema);
+        }
+    } else if let Some(schema) = current.pointer_mut("/tool/input") {
+        restore(id, schema);
+    }
+}
+
 fn before_print_accuracy(id: &str, current: &mut Value) {
     if !["export_stl", "export_3mf", "export_obj"].contains(&id) {
         return;
@@ -871,6 +914,7 @@ fn command_ids_shortcuts_agent_schemas_and_availability_stay_compatible() {
         before_distance_verbs(id, &mut current);
         before_feature_pattern_source(id, &mut current);
         before_draft_pull(id, &mut current);
+        before_hole_thread(id, &mut current);
         before_print_accuracy(id, &mut current);
         if id == "check" {
             assert_eq!(current["agents"], "app", "Check opens its own report");

@@ -366,6 +366,33 @@ thread_local! {
         const { std::cell::RefCell::new(std::collections::BTreeMap::new()) };
     static SHOWN_ASSEMBLY_VIEW: std::cell::RefCell<Option<(crate::viewport::camera::Camera, egui::Rect)>> =
         const { std::cell::RefCell::new(None) };
+    static SHOWN_PART_VIEW: std::cell::RefCell<Option<(crate::viewport::camera::Camera, egui::Rect, usize)>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Notes the camera and the rectangle the part viewport drew with, and how many line
+/// segments of thread marks it drew, for [`part_screen_point`] and [`shown_threads`].
+pub(crate) fn show_part_view(camera: &crate::viewport::camera::Camera, rect: egui::Rect, threads: usize) {
+    SHOWN_PART_VIEW.with_borrow_mut(|view| *view = Some((camera.clone(), rect, threads)));
+}
+
+/// Where the point `(x, y, z)` of the open part, in millimetres, was drawn in the last
+/// frame, as `[x, y]` in the page's pixels, or nothing when it is behind the camera or no
+/// part was drawn. Read only, for browser checks that click on a face.
+#[wasm_bindgen]
+pub fn part_screen_point(x: f32, y: f32, z: f32) -> Option<Vec<f32>> {
+    SHOWN_PART_VIEW.with_borrow(|view| {
+        let (camera, rect, _) = view.as_ref()?;
+        let at = camera.project(glam::Vec3::new(x, y, z), *rect)?;
+        Some(vec![at.x, at.y])
+    })
+}
+
+/// How many line segments of cosmetic thread marks the part viewport drew in the last
+/// frame. Read only, for browser checks.
+#[wasm_bindgen]
+pub fn shown_threads() -> usize {
+    SHOWN_PART_VIEW.with_borrow(|view| view.as_ref().map_or(0, |(_, _, threads)| *threads))
 }
 
 /// Notes the camera and the rectangle the assembly viewport drew with, for
@@ -430,8 +457,10 @@ pub(crate) fn show_control(name: impl Into<String>, rect: egui::Rect) {
 /// `{"<name>": {"x", "y"}}`. The options bar notes `Assembly options` or `Drawing options`,
 /// the Mate panel its type list as `Mate type` and each entry of the open list as
 /// `Mate type: <family>`, and the assembly's options the component's placement fields as
-/// `Placement X` to `Placement Rotate Z`. Read only, for browser checks that click a
-/// control the canvas draws.
+/// `Placement X` to `Placement Rotate Z`, a feature form its OK button as `Form OK`, and
+/// the Hole form its `Hole thread`, `Thread size` and `Thread pitch` choices with each
+/// entry of an open list as `<choice>: <entry>`. Read only, for browser checks that click
+/// a control the canvas draws.
 #[wasm_bindgen]
 pub fn shown_controls() -> String {
     SHOWN_CONTROLS.with_borrow(|controls| {

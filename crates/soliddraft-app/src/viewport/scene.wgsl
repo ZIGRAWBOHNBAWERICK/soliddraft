@@ -563,9 +563,14 @@ fn vs_edge(in: LineIn) -> LineOut {
 fn fs_edge(in: LineOut) -> @location(0) vec4<f32> {
     let ghost = (body.flags & 2u) != 0u;
     let removes = (body.flags & 8u) != 0u;
+    let thread = (body.flags & 16u) != 0u;
     var color = srgb_to_linear(vec3<f32>(0.16, 0.19, 0.25));
     var alpha = 0.9;
-    if (ghost && removes) {
+    if (thread) {
+        // Cosmetic thread marks (render.rs THREAD_MARKS), in a blue apart from the edges.
+        color = srgb_to_linear(vec3<f32>(0.18, 0.40, 0.72));
+        alpha = 0.95;
+    } else if (ghost && removes) {
         color = srgb_to_linear(vec3<f32>(0.62, 0.12, 0.10));
         alpha = 0.95;
     } else if (ghost) {

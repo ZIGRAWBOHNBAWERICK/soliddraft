@@ -11,7 +11,7 @@ To add an item, choose its kind, pick its faces in the viewport and fill in the 
 | Kind | Pick | Values |
 |---|---|---|
 | Datum | The face that is the datum | A letter; the next free one when left empty |
-| Diameter, Radius | The round face, or each round face of a pattern | A tolerance: a class (`H7`), a symmetric deviation (`±0.1`) or two deviations (`+0.1/0`). Through hole, for a diameter |
+| Diameter, Radius | The round face, or each round face of a pattern | A tolerance: a class (`H7`), a symmetric deviation (`±0.1`) or two deviations (`+0.1/0`). Through hole, for a diameter. A thread's designation, such as `M6x1-6H`, for a threaded hole's diameter, which then takes no tolerance |
 | Distance | The faces it starts on, then From, then the faces it ends on | Where each end is taken: the face or axis, the middle of two faces, the near or the far side of a round face. A tolerance |
 | Slot | The two flat sides and the two round ends | A tolerance for the length and the width |
 | Geometric tolerance | The face, or each face of a pattern | The characteristic, the value, a cylindrical zone, a material condition and the datums, primary first |
@@ -31,13 +31,19 @@ Items name faces the way features do, so they survive edits upstream. An item wh
 
 Manufacturing information is part of the part's revision and not of its shape: changing it marks drawings out of date and leaves the geometry hash alone.
 
+## Threads
+
+A threaded hole states its thread itself (see [threaded holes](modelling.md#threaded-holes)): each hole feature with a thread lists one item, the diameter of its walls with the designation and how deep the thread goes, such as `2× M6x1-6H DEEP 12` or `M8x1-6H THRU`, named after the hole (`Hole1 thread`). The panel says which hole states it and offers no Edit or Delete: change the thread in the hole. The diameter it measures is the drill's.
+
+A diameter added in the panel can carry a designation too, for a threaded hole the part did not drill, such as one of an imported part.
+
 ## In STEP
 
 Exporting a part with manufacturing information as STEP writes the items into the file as AP242 semantic PMI, on the faces they apply to. The export reports how many items it wrote and names every item it left out with the reason. An item that does not apply is left out. So is one a STEP file cannot hold as it stands, such as a finish that is not a parameter and a value.
 
-In the file a slot is three dimensions (length, width, end radius), a hole that goes through carries an attribute saying so, and each locating distance of a position tolerance is a basic dimension.
+In the file a slot is three dimensions (length, width, end radius), a hole that goes through carries an attribute saying so, a threaded hole's diameter carries its designation as an attribute (AP242 edition 1 has no thread entity), and each locating distance of a position tolerance is a basic dimension. The depth of a thread that stops short is not in the file.
 
-Importing a STEP file reads its manufacturing information onto the imported faces, as one undo step after the import. The Manufacturing information panel lists what was not read, by name, with the reason. Nothing is guessed: an item the reader cannot represent in full is left out. The locating distances a file of ours holds are not read as items, since the part measures its own. The file's notes fill only what the part does not say itself.
+Importing a STEP file reads its manufacturing information onto the imported faces, as one undo step after the import. A threaded diameter keeps its designation. The Manufacturing information panel lists what was not read, by name, with the reason. Nothing is guessed: an item the reader cannot represent in full is left out. The locating distances a file of ours holds are not read as items, since the part measures its own. The file's notes fill only what the part does not say itself.
 
 Replacing an imported file keeps the part's own items: they follow the faces the replacement matched.
 
@@ -69,6 +75,7 @@ A drawing of a part that states manufacturing information shows it. Make drawing
 | Item | Where it goes |
 |---|---|
 | Diameter, radius | On the round edge, in a view that looks along its axis, with the count of a pattern before it and THRU after a through hole |
+| Thread | The same way, as a callout of the designation followed by THRU or the thread's depth: `4× M6x1-6H THRU`, `M8x1-6H DEEP 12` |
 | Distance | Between its two ends in a view that sees both edge on, stacked outside the view |
 | Slot | One callout on a round end, where the slot is seen in true shape |
 | Datum, tolerance or finish of a flat face | On the line the face shows as, in the view with the fewest annotations that sees it edge on |

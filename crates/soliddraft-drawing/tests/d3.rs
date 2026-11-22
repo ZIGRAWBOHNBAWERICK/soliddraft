@@ -10,8 +10,8 @@ use soliddraft_drawing::export;
 use soliddraft_drawing::{
     AnnotationKind, AnnotationState, Boundary, Command, ContentHash, DatumRef, DocKind, DocRef, DocumentId, Drawing,
     DrawingMeta, GdtCharacteristic, HiddenLines, LinearOrientation, MaterialCondition, NewDrawing, Part, PartIndex,
-    Polygon, RevisionRow, SetKind, SurfaceProcess, Template, UndoStack, ViewId, ViewKind, annotate, apply, derived,
-    edge_near, next_letter, project, update_from_model,
+    RevisionRow, SetKind, SurfaceProcess, Template, UndoStack, ViewId, ViewKind, annotate, apply, derived, edge_near,
+    next_letter, project, update_from_model,
 };
 use soliddraft_kernel_api::{Point2, Vec3};
 use support::{BoxKernel, box_part};
@@ -56,7 +56,9 @@ fn run(stack: &mut UndoStack, d: &mut Drawing, part: &Part, c: Command) {
 fn rebuild_commits_successful_views_alongside_base_and_projected_refusals() {
     for projected in [false, true] {
         let mut k = BoxKernel::new();
+        k.detail_strokes = true;
         let mut d = drawing(&box_part(&k, "block", Vec3::new(40.0, 30.0, 10.0)));
+        export::check_sheet(&d, &d.sheets[0]).unwrap();
         let view = d.sheets[0]
             .views
             .iter()
@@ -72,7 +74,11 @@ fn rebuild_commits_successful_views_alongside_base_and_projected_refusals() {
         assert_eq!(d.model.pinned, changed.digest);
         assert_eq!(d.view(id).unwrap().geometry, before);
         assert!(!d.views_match_pin());
-        assert!(export::check_sheet(&d, &d.sheets[0]).is_err());
+        for rebuilt in d.sheets[0].views.iter().filter(|v| v.id != id) {
+            assert_eq!(rebuilt.geometry.source_digest, changed.digest.as_str());
+        }
+        let error = export::check_sheet(&d, &d.sheets[0]).unwrap_err().to_string();
+        assert!(error.contains("does not match the drawing's accepted revision"), "{error}");
     }
 }
 
@@ -515,12 +521,32 @@ fn the_dxf_keeps_dimensions_and_hatches_as_such() {
     )
     .unwrap();
     apply(&mut d, &Command::AddAnnotation { annotation: set }).unwrap();
-    // A hatched square on the front view, as a section would have.
-    let square = vec![Point2::new(-5.0, -5.0), Point2::new(5.0, -5.0), Point2::new(5.0, 5.0), Point2::new(-5.0, 5.0)];
-    d.view_mut(FRONT).unwrap().geometry.hatch.push(Polygon { outer: square, holes: Vec::new(), clip: None });
+    use soliddraft_kernel_api::drawing::{Curve3, CurveSource, CutRegion, ViewCurve};
+    let square = [(-8.0, -8.0), (8.0, -8.0), (8.0, 8.0), (-8.0, 8.0)];
+    let point = |(u, v)| ctx.xf.unproject(Point2::new(u, v));
+    let outer = (0..4)
+        .map(|i| ViewCurve {
+            approximate: i == 0,
+            ..ViewCurve::new(
+                Curve3::Line { a: point(square[i]), b: point(square[(i + 1) % 4]) },
+                CurveSource::Unknown,
+                true,
+            )
+        })
+        .collect();
+    let cut = CutRegion { outer, holes: Vec::new() };
+    let clip = Boundary::rectangle(Point2::new(-5.0, -5.0), Point2::new(5.0, 5.0));
+    let polygon = project::region_polygon(&cut, &ctx.xf, Some(clip));
+    d.view_mut(FRONT).unwrap().geometry.hatch.push(polygon);
+    let meta = soliddraft_drawing::file::FileMeta::new("test", d.meta.units);
+    let bytes = soliddraft_drawing::file::to_bytes(&d, &meta).unwrap();
+    let (d, _) = soliddraft_drawing::file::from_bytes(&bytes).unwrap();
     let list = layout_sheet(&d, 0);
     assert!(list.items.iter().any(|i| i.role() == Role::Hatch));
     assert_eq!(list.hatches.len(), 1);
+    assert_eq!(list.accuracy().approximate, 1);
+    assert_eq!(list.dxf_accuracy().approximate, 1);
+    assert!(export::svg(&list).contains(r#"data-accuracy="approximate""#));
     let bytes = export::dxf(&list).unwrap();
     let counts = export::dxf::count_entities(&bytes).unwrap();
     assert_eq!(counts.get("HATCH/HATCH"), Some(&1), "{counts:?}");

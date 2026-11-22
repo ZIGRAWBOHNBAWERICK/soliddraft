@@ -193,7 +193,8 @@ pub(crate) fn run(args: &[String]) -> ExitCode {
         }
         let (visible, hidden) = curves.counts();
         let method = "catallax";
-        let approximate = approximate(&curves) || regions.as_deref().is_some_and(regions_approximate);
+        let approximate =
+            svg_approximate || approximate(&curves) || regions.as_deref().is_some_and(regions_approximate);
         if o.json {
             let summary = Summary {
                 recipe: &source_name,
@@ -216,7 +217,7 @@ pub(crate) fn run(args: &[String]) -> ExitCode {
             println!("{}", serde_json::to_string(&summary).expect("summaries serialise"));
         } else {
             let cut = regions.as_ref().map(|r| format!(", {} cut regions", r.len())).unwrap_or_default();
-            let quality = if approximate || svg_approximate { " approximate" } else { "" };
+            let quality = if approximate { " approximate" } else { "" };
             println!(
                 "{source_name} view {name}: {visible} visible, {hidden} hidden{cut}, {method}{quality}, digest {}, {millis:.1} ms",
                 curves.digest()

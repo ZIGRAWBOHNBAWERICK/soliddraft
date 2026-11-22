@@ -1830,16 +1830,25 @@ pub(crate) fn write_sheet(s: &mut DrawingSession, format: export::Format, path: 
 /// The drawing as `format`, as [`write_sheet`] writes it, without writing it.
 pub(crate) fn sheet_bytes(s: &DrawingSession, format: export::Format) -> Result<(Vec<u8>, SheetExport), String> {
     let prepared = prepare_sheets(s, matches!(format, export::Format::Pdf))?;
-    Ok((prepared.bytes(format)?, prepared.report))
+    let bytes = prepared.bytes(format)?;
+    let mut report = prepared.report;
+    if matches!(format, export::Format::Dxf) {
+        report.accuracy = prepared.lists[0].dxf_accuracy();
+    }
+    Ok((bytes, report))
 }
 
 pub(crate) struct PreparedSheets {
     lists: Vec<display::DisplayList>,
     info: export::PdfInfo,
-    pub(crate) report: SheetExport,
+    report: SheetExport,
 }
 
 impl PreparedSheets {
+    pub(crate) fn package_accuracy(&self) -> AccuracyCounts {
+        self.lists[0].accuracy_with_dxf()
+    }
+
     pub(crate) fn bytes(&self, format: export::Format) -> Result<Vec<u8>, String> {
         match format {
             export::Format::Pdf => export::pdf(&self.lists, &self.info),

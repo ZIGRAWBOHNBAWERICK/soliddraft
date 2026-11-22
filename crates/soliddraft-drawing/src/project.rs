@@ -176,7 +176,7 @@ fn compute_view_at(
     if depth > 16 {
         return Err(DrawingError::BadView(view.id));
     }
-    if let Some(parent) = view.parent()
+    if let Some(parent) = view.geometry_parent()
         && !memo.contains_key(&parent)
     {
         let p = drawing.view(parent).ok_or(DrawingError::UnknownView(parent))?;
@@ -188,7 +188,7 @@ fn compute_view_at(
     let scale = scale_in(drawing, sheet, view);
     let refused = |error| view_refusal(|| view_label(&drawing.sheets[sheet], view), error);
     let mut kind = view.kind.clone();
-    if let Some(parent) = view.parent() {
+    if let Some(parent) = view.geometry_parent() {
         reproject_parent_marks(&mut kind, &memo[&parent].xf);
     }
     let mut ctx = match &kind {
@@ -281,9 +281,10 @@ fn compute_view_at(
                                 outer: crate::display::clip_polygon(&outer, &window),
                                 holes: holes.iter().map(|l| crate::display::clip_polygon(l, &window)).collect(),
                                 clip: Some(c.mapped(du, dv, ratio)),
+                                approximate: h.approximate,
                             }
                         }
-                        None => Polygon { outer, holes, clip: Some(boundary.clone()) },
+                        None => Polygon { outer, holes, clip: Some(boundary.clone()), approximate: h.approximate },
                     }
                 })
                 .filter(|h| h.outer.len() >= 3)
@@ -407,7 +408,12 @@ pub fn region_polygon(r: &CutRegion, xf: &ViewTransform, clip: Option<Boundary>)
         }
         out
     };
-    Polygon { outer: ring(&r.outer), holes: r.holes.iter().map(|h| ring(h)).collect(), clip }
+    Polygon {
+        outer: ring(&r.outer),
+        holes: r.holes.iter().map(|h| ring(h)).collect(),
+        clip,
+        approximate: r.outer.iter().chain(r.holes.iter().flatten()).any(|c| c.approximate),
+    }
 }
 
 /// Keeps the part of every curve, hatch and face-on circle inside `boundary` (or

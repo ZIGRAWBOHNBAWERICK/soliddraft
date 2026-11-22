@@ -55,6 +55,13 @@ impl View {
         }
     }
 
+    pub(crate) fn geometry_parent(&self) -> Option<ViewId> {
+        match self.kind {
+            ViewKind::Base { .. } | ViewKind::Projected { .. } => None,
+            _ => self.parent(),
+        }
+    }
+
     /// The section, detail or view letter of a derived view, if it has one.
     pub fn letter(&self) -> Option<&str> {
         match &self.kind {
@@ -557,6 +564,8 @@ pub struct Polygon {
     /// section or a broken-out section.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub clip: Option<Boundary>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub approximate: bool,
 }
 
 /// Serialises a [`BezPath`] as SVG path data, which is shorter and easier to read than

@@ -558,7 +558,7 @@ fn create(o: &Options) -> Result<(), String> {
         let made = soliddraft_drawing::make_drawing(part, &new).map_err(|e| e.to_string())?;
         let (mut drawing, import) = (made.drawing, made.import);
         apply_steps(&mut drawing, part, &o.steps)?;
-        let accuracy = write_outputs(&drawing, &outs, &source.backend)?;
+        let accuracy = write_outputs(&drawing, &outs, &source.backend, &[])?;
         let name = drawing_path.as_ref().map(|p| p.display().to_string()).unwrap_or_default();
         if o.json {
             let report = CreateReport {
@@ -749,24 +749,7 @@ fn update(o: &Options) -> Result<(), String> {
         let saved = soliddraft_document::kind::saved_path(&path, DocKind::Drawing);
         let meta = meta.rewritten(&source.backend, drawing.meta.units);
         file::write(&saved, &drawing, &meta).map_err(|e| e.to_string())?;
-        let writes_sheet = o.outs.iter().any(|out| {
-            Path::new(out).extension().and_then(|ext| ext.to_str()).and_then(Format::from_extension).is_some()
-        });
-        let refused: Vec<_> = report
-            .dangling_views
-            .iter()
-            .map(|failure| {
-                let label = drawing
-                    .sheet_of(failure.view)
-                    .and_then(|sheet| sheet.view(failure.view).map(|view| project::view_label(sheet, view)))
-                    .unwrap_or_else(|| failure.view.to_string());
-                format!("{label}: {}", failure.cause)
-            })
-            .collect();
-        if writes_sheet && !refused.is_empty() {
-            return Err(refused.join("\n"));
-        }
-        let accuracy = write_outputs(&drawing, &o.outs, &source.backend)?;
+        let accuracy = write_outputs(&drawing, &o.outs, &source.backend, &report.dangling_views)?;
         // The report after repairs: what still needs attention.
         let mut final_report = report.clone();
         final_report.dangling.retain(|d| drawing.annotation(d.annotation).is_some_and(|a| a.needs_attention()));
@@ -792,8 +775,8 @@ fn update(o: &Options) -> Result<(), String> {
             for d in &final_report.dangling {
                 println!("  dangling {}: {}", d.annotation, d.cause);
             }
-            for refusal in refused {
-                println!("  {refusal}");
+            for refusal in &report.dangling_views {
+                println!("  {}: {}", refusal.name, refusal.cause);
             }
             for r in &repairs {
                 println!("  {r}");
@@ -822,51 +805,86 @@ fn report_approximation(accuracy: Option<AccuracyCounts>) {
 
 /// Writes the drawing in each format `outs` names. A drawing file written here is a new
 /// document (Save as copy), with its own id. Every file is written atomically.
-fn write_outputs(drawing: &Drawing, outs: &[String], backend: &str) -> Result<Option<AccuracyCounts>, String> {
-    let wrote_sheets = outs
-        .iter()
-        .any(|out| Path::new(out).extension().and_then(|ext| ext.to_str()).and_then(Format::from_extension).is_some());
+fn write_outputs(
+    drawing: &Drawing,
+    outs: &[String],
+    backend: &str,
+    refused: &[soliddraft_drawing::DanglingView],
+) -> Result<Option<AccuracyCounts>, String> {
+    let format_of =
+        |out: &str| Path::new(out).extension().and_then(|ext| ext.to_str()).and_then(Format::from_extension);
+    let wrote_sheets = outs.iter().any(|out| format_of(out).is_some());
     let lists: Vec<_> = if wrote_sheets {
-        for sheet in &drawing.sheets {
-            export::check_sheet(drawing, sheet).map_err(|error| error.to_string())?;
-        }
-        (0..drawing.sheets.len()).map(|i| display::layout_sheet(drawing, i)).collect()
+        drawing
+            .sheets
+            .iter()
+            .enumerate()
+            .map(|(i, sheet)| {
+                let causes: Vec<_> = refused
+                    .iter()
+                    .filter(|f| sheet.view(f.view).is_some())
+                    .map(|f| format!("{}: {}", f.name, f.cause))
+                    .collect();
+                if !causes.is_empty() {
+                    return Err(causes.join("\n"));
+                }
+                export::check_sheet(drawing, sheet).map_err(|error| error.to_string())?;
+                Ok(display::layout_sheet(drawing, i))
+            })
+            .collect()
     } else {
         Vec::new()
     };
+    let mut errors = Vec::new();
     for out in outs {
         let path = Path::new(out);
-        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-        let format = Format::from_extension(ext);
-        let files: Vec<(PathBuf, Vec<u8>)> = match format {
+        match format_of(out) {
             _ if DocKind::of_path(path) == Some(DocKind::Drawing) => {
                 let meta = FileMeta::new(backend, drawing.meta.units);
                 let to = soliddraft_document::kind::saved_path(path, DocKind::Drawing);
-                vec![(to, file::to_bytes(drawing, &meta).map_err(|e| e.to_string())?)]
+                let bytes = file::to_bytes(drawing, &meta).map_err(|e| e.to_string())?;
+                soliddraft_document::save_atomic(&to, &bytes).map_err(|e| format!("{}: {e}", to.display()))?;
             }
             Some(Format::Pdf) => {
-                let info = PdfInfo { title: drawing.meta.title.clone(), author: drawing.meta.designer.clone() };
-                vec![(path.to_path_buf(), export::pdf(&lists, &info).map_err(|e| e.to_string())?)]
+                let sheets = lists.iter().map(|sheet| sheet.as_ref().cloned()).collect::<Result<Vec<_>, _>>();
+                match sheets {
+                    Ok(sheets) => {
+                        let info = PdfInfo { title: drawing.meta.title.clone(), author: drawing.meta.designer.clone() };
+                        let bytes = export::pdf(&sheets, &info).map_err(|e| e.to_string())?;
+                        soliddraft_document::save_atomic(path, &bytes).map_err(|e| format!("{out}: {e}"))?;
+                    }
+                    Err(error) => errors.push(format!("{out}: {error}")),
+                }
             }
-            Some(format) => lists
-                .iter()
-                .enumerate()
-                .map(|(i, list)| {
-                    export::bytes(list, format, &drawing.meta.title)
-                        .map(|b| (sheet_path(path, i), b))
-                        .map_err(|e| e.to_string())
-                })
-                .collect::<Result<_, _>>()?,
+            Some(format) => {
+                for (i, list) in lists.iter().enumerate() {
+                    let path = sheet_path(path, i);
+                    match list {
+                        Ok(list) => {
+                            let bytes = export::bytes(list, format, &drawing.meta.title).map_err(|e| e.to_string())?;
+                            soliddraft_document::save_atomic(&path, &bytes)
+                                .map_err(|e| format!("{}: {e}", path.display()))?;
+                        }
+                        Err(error) => errors.push(format!("{}: {error}", path.display())),
+                    }
+                }
+            }
             None => return Err(format!("{out}: write .dwdrw, .svg, .pdf or .dxf")),
-        };
-        for (p, bytes) in files {
-            soliddraft_document::save_atomic(&p, &bytes).map_err(|e| format!("{}: {e}", p.display()))?;
         }
+    }
+    if !errors.is_empty() {
+        return Err(errors.join("\n"));
     }
     Ok(wrote_sheets.then(|| {
         let mut accuracy = AccuracyCounts::default();
-        for list in &lists {
-            accuracy.add(list.accuracy());
+        let has_dxf = outs.iter().any(|out| matches!(format_of(out), Some(Format::Dxf)));
+        let has_page = outs.iter().any(|out| matches!(format_of(out), Some(Format::Pdf | Format::Svg)));
+        for list in lists.iter().filter_map(|list| list.as_ref().ok()) {
+            accuracy.add(match (has_dxf, has_page) {
+                (true, true) => list.accuracy_with_dxf(),
+                (true, false) => list.dxf_accuracy(),
+                _ => list.accuracy(),
+            });
         }
         accuracy
     }))
@@ -1186,6 +1204,38 @@ fn capitalise(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_refused_sheet_does_not_block_separate_healthy_files() {
+        let mut drawing = soliddraft_drawing::fixture::bracket_a3();
+        for view in &mut drawing.sheets[0].views {
+            view.geometry.catallax = true;
+            view.geometry.unproved = false;
+            view.geometry.source_digest = drawing.model.pinned.as_str().to_owned();
+        }
+        let mut second = drawing.sheets[0].clone();
+        let view = drawing.sheets[0].views.pop().unwrap();
+        let refusal = soliddraft_drawing::DanglingView {
+            view: view.id,
+            name: "Isometric view".into(),
+            cause: "drawing work allowance exhausted".into(),
+        };
+        second.views = vec![view];
+        second.annotations.clear();
+        drawing.sheets.push(second);
+        let dir = std::env::temp_dir().join(format!("soliddraft-partial-sheet-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let paths = ["result.pdf", "result.svg", "result.dxf"].map(|out| dir.join(out).display().to_string());
+        let error = write_outputs(&drawing, &paths, "test", &[refusal]).unwrap_err();
+        assert!(error.contains("Isometric view: drawing work allowance exhausted"));
+        for name in ["result.pdf", "result-2.svg", "result-2.dxf"] {
+            assert!(!dir.join(name).exists(), "{name}");
+        }
+        for name in ["result.svg", "result.dxf"] {
+            assert!(std::fs::metadata(dir.join(name)).unwrap().len() > 0, "{name}");
+        }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 
     #[test]
     fn the_bracket_recipe_defines_its_dimensions() {

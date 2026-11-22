@@ -255,6 +255,7 @@ pub struct HatchRecord {
     pub angle: f64,
     /// Distance between lines in millimetres.
     pub spacing: f64,
+    pub approximate: bool,
 }
 
 impl DisplayList {
@@ -266,8 +267,22 @@ impl DisplayList {
 
     /// Accuracy counts for the curve paths sent to the sheet writers.
     pub fn accuracy(&self) -> AccuracyCounts {
+        self.count_accuracy(false)
+    }
+
+    pub fn dxf_accuracy(&self) -> AccuracyCounts {
+        self.count_accuracy(!self.hatches.is_empty())
+    }
+
+    pub fn accuracy_with_dxf(&self) -> AccuracyCounts {
+        let mut counts = self.accuracy();
+        counts.approximate = counts.approximate.max(self.dxf_accuracy().approximate);
+        counts
+    }
+
+    fn count_accuracy(&self, native_hatches: bool) -> AccuracyCounts {
         let mut counts = AccuracyCounts::default();
-        for item in self.printable() {
+        for item in self.printable().filter(|item| !native_hatches || item.role() != Role::Hatch) {
             if let Item::Path(path) = item {
                 match path.accuracy {
                     Some(Accuracy::Exact) => counts.exact += 1,
@@ -276,6 +291,9 @@ impl DisplayList {
                     None => {}
                 }
             }
+        }
+        if native_hatches {
+            counts.approximate += self.hatches.iter().filter(|h| h.approximate).count();
         }
         counts
     }

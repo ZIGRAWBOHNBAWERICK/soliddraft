@@ -471,7 +471,7 @@ impl AppTools<'_> {
         self.install_drawing(session);
         let (pdf, dxf) = (step.with_extension("pdf"), step.with_extension("dxf"));
         let prepared = drawing::prepare_sheets(self.session()?, false)?;
-        let accuracy = prepared.report.accuracy;
+        let accuracy = prepared.package_accuracy();
         for (format, path) in [(SheetFormat::Pdf, &pdf), (SheetFormat::Dxf, &dxf)] {
             files.push((path.clone(), prepared.bytes(format)?));
         }

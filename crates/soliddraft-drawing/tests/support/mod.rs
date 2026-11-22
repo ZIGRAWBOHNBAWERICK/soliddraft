@@ -155,7 +155,7 @@ impl Kernel for BoxKernel {
         if spec.seams {
             curves.push(ViewCurve::new(Curve3::Line { a: near, b: near + Vec3::Z }, CurveSource::Seam(face), true));
         }
-        Ok(ViewCurves::new(curves, &spec.frame().unwrap()))
+        Ok(ViewCurves { catallax: true, ..ViewCurves::new(curves, &spec.frame().unwrap()) })
     }
 
     fn tessellate(&self, body: BodyId, _: &TessellationParams) -> KernelResult<Mesh> {

@@ -157,16 +157,16 @@ fn exceeds(
             let mut faces = Vec::new();
             for face in model.faces_of_body(body) {
                 if let Some(bounds) = witness_step(catallax_measure::face_bounding_box(model, face, &accuracy, dec))? {
-                    faces.push((face, bounds.value));
+                    faces.push((face, bounds.value, None));
                 }
             }
             Ok::<_, Refusal>(faces)
         };
-        let [first, second] = [bounds(bodies[0])?, bounds(bodies[1])?];
+        let [mut first, mut second] = [bounds(bodies[0])?, bounds(bodies[1])?];
         let limit = clearance * clearance;
         let options = Options { width: Rational::parse("1e-9").unwrap(), ..Options::default() };
-        for (a, ab) in &first {
-            for (b, bb) in &second {
+        for (a, ab, prepared_a) in &mut first {
+            for (b, bb, prepared_b) in &mut second {
                 dec.check_deadline()?;
                 let separation_sq = (0..3).fold(Rational::zero(), |sum, i| {
                     let d = (&ab.min[i] - &bb.max[i]).max(&bb.min[i] - &ab.max[i]).max(Rational::zero());
@@ -175,9 +175,15 @@ fn exceeds(
                 if separation_sq > limit {
                     continue;
                 }
-                let Some(a) = witness_step(PreparedFace::new(model, *a, dec))? else { continue };
-                let Some(b) = witness_step(PreparedFace::new(model, *b, dec))? else { continue };
-                let Some(bounds) = witness_step(a.face_to_face(&b, model, &options, dec))? else { continue };
+                if prepared_a.is_none() {
+                    *prepared_a = Some(witness_step(PreparedFace::new(model, *a, dec))?);
+                }
+                let Some(Some(a)) = prepared_a.as_ref() else { break };
+                if prepared_b.is_none() {
+                    *prepared_b = Some(witness_step(PreparedFace::new(model, *b, dec))?);
+                }
+                let Some(Some(b)) = prepared_b.as_ref() else { continue };
+                let Some(bounds) = witness_step(a.face_to_face(b, model, &options, dec))? else { continue };
                 if let Some([p, q]) = bounds.witnesses {
                     let delta = &p.minus(&q).norm_squared() - &Real::from(limit.clone());
                     let sign = match dec.sign(&delta) {

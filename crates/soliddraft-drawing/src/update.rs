@@ -52,6 +52,8 @@ pub struct UpdateReport {
 pub struct DanglingView {
     /// The view.
     pub view: ViewId,
+    #[serde(default)]
+    pub name: String,
     /// Why, in words.
     pub cause: String,
 }
@@ -103,7 +105,7 @@ pub fn update_from_model(drawing: &mut Drawing, part: &Part) -> Result<UpdateRep
     let mut contexts = Contexts::new();
     let mut ids: Vec<ViewId> = drawing.sheets.iter().flat_map(|s| &s.views).map(|v| v.id).collect();
     ids.sort_by_key(|&id| {
-        std::iter::successors(drawing.view(id), |view| view.parent().and_then(|parent| drawing.view(parent)))
+        std::iter::successors(drawing.view(id), |view| view.geometry_parent().and_then(|parent| drawing.view(parent)))
             .take(17)
             .count()
     });
@@ -113,17 +115,16 @@ pub fn update_from_model(drawing: &mut Drawing, part: &Part) -> Result<UpdateRep
         if view.excluded_from_update {
             continue;
         }
-        if let Some(parent_failure) =
-            view.parent().and_then(|parent| report.dangling_views.iter().find(|failure| failure.view == parent))
-        {
-            let cause = parent_failure.cause.clone();
+        let failure = view
+            .geometry_parent()
+            .and_then(|parent| report.dangling_views.iter().find(|failure| failure.view == parent))
+            .map(|failure| failure.cause.clone());
+        let failure = failure
+            .or_else(|| project::compute_in(drawing, part, &index, id, &mut contexts).err().map(|e| view_cause(&e)));
+        if let Some(cause) = failure {
             failed.push(id);
-            report.dangling_views.push(DanglingView { view: id, cause });
-            continue;
-        }
-        if let Err(e) = project::compute_in(drawing, part, &index, id, &mut contexts) {
-            failed.push(id);
-            report.dangling_views.push(DanglingView { view: id, cause: view_cause(&e) });
+            let sheet = drawing.sheet_of(id).expect("listed");
+            report.dangling_views.push(DanglingView { view: id, name: project::view_label(sheet, view), cause });
             continue;
         }
         let ctx = &contexts[&id];
@@ -194,7 +195,7 @@ fn view_cause(e: &DrawingError) -> String {
 /// part: a section's cutting line and a detail's centre.
 pub(crate) fn follow_parent(drawing: &mut Drawing, id: ViewId, contexts: &Contexts) {
     let Some(view) = drawing.view(id) else { return };
-    let Some(pctx) = view.parent().and_then(|p| contexts.get(&p)) else { return };
+    let Some(pctx) = view.geometry_parent().and_then(|p| contexts.get(&p)) else { return };
     let xf = pctx.xf;
     let view = drawing.view_mut(id).expect("found");
     project::reproject_parent_marks(&mut view.kind, &xf);

@@ -173,12 +173,21 @@ current revision.
 
 ## Pinned revisions and Rebuild
 
-A drawing opens showing the part revision it is pinned at: its views' line work is cached
-in the file and was made from that revision. An edited part changes nothing in the drawing
-until a Rebuild (`soliddraft draw --update`, `soliddraft doc rebuild`, Update views in the
-app) regenerates the views, re-resolves the annotations and re-pins the reference. While
-the part and the drawing are both open in the app, automatic update still follows each
-rebuild of that part, as before.
+A drawing opens with its saved line work. Each view keeps the revision it shows, which
+can be older than the drawing's pin when the view is excluded from updates. Rebuild
+redraws the included views, re-resolves annotations and pins the drawing to the accepted
+part revision. If Catallax refuses a view, Rebuild keeps its old line work, names the view
+and cause, and keeps the views that redrew. While the part and drawing are both open in
+the app, automatic update follows each rebuild of that part.
+
+Export writes saved Catallax line work, preserving crops and excluded views at their saved
+revisions. If a part edit is pending, export uses the drawing's saved views. A sheet
+with a recorded view refusal reports the view and cause. SVG and DXF can still export
+other eligible sheets. A PDF requires all its sheets to be eligible.
+Included views must match the drawing's pin. If export refuses older line work without
+the Catallax marker, redraw the view once in the editor and check any crop or broken-out
+boundary afterward. If the view is excluded from updates, choose **Include in automatic
+update** before rebuilding.
 
 Exact work on a pinned revision that is not current (measuring it, projecting a new view
 of it) needs that revision's bytes. They come from a `RevisionStore`:
@@ -344,11 +353,15 @@ soliddraft draw <part.dwprt | recipe.json> ...
 
 `doc refs` exits with status 1 when a reference is missing.
 
+`draw --update` saves the rebuilt drawing before handling `--out` files. A named view
+refusal skips affected sheet exports and lets other eligible outputs proceed. An ordinary
+output error stops later writes and the report still lists files already written.
+
 ## In the app
 
 - **Open** takes a drawing as well as a part (`File > Open`, a path on the command line,
-  the recent list). A drawing opens showing the part revision it is pinned at. Its
-  reference is resolved at once (`crates/soliddraft-app/src/drawing/reference.rs`), in the
+  the recent list). The app opens the saved views and resolves their part reference at
+  once (`crates/soliddraft-app/src/drawing/reference.rs`), in the
   order above, and the answer is kept until something it was made from changes: the open
   part and its revision, either file's path, the stored reference or File locations.
   When the part is a file and the part tab holds nothing unsaved, the part opens in the
@@ -363,10 +376,10 @@ soliddraft draw <part.dwprt | recipe.json> ...
   shows for a part that is not open, from its file.
 - **Rebuild** sits where SolidWorks keeps it: `Edit > Rebuild drawing` (Ctrl+B, also U),
   the Model group of the Views tab, the bar over the sheet and the model row's menu. It
-  re-projects the views, re-resolves the annotations, re-pins the reference at the part's
-  current revision and binds it to where the part was found, as one undo step. When the
-  part is not open but its file is found, the file opens in the part tab first and the
-  rebuild follows. A missing part asks for a repair instead.
+  applies the [rebuild rules above](#pinned-revisions-and-rebuild) and binds the reference
+  to where the part was found, as one undo step. When the part is closed but its file is
+  found, the file opens in the part tab first and the rebuild follows. A missing part
+  asks for a repair instead.
 - **Repair reference.** A part that cannot be found opens the dialog, also reachable from
   the ribbon, the model row and the bar. It says what was wrong at the stored path (no
   file, a different part, another kind, unreadable) and that nothing with the id was in

@@ -71,6 +71,7 @@ def truncated(source, targets):
     for step in steps:
         step.pop("checked_step_export", None)
         step.pop("drawing", None)
+        step.pop("drawing_checks", None)
     return {**source, "steps": steps}
 
 

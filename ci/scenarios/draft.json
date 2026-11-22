@@ -639,7 +639,7 @@
           "tolerance": 0.001
         }
       ],
-      "drawing": true,
+      "drawing": "Isometric view: view_curves failed (status 0): numbers.operation-budget",
       "label": "draft edit",
       "exports": [
         {

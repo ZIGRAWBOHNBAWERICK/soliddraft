@@ -108,12 +108,16 @@ pub struct ViewCurve {
     /// which drawings show thin or leave out.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub smooth: bool,
+    /// True when the kernel fitted the curve within a stated tolerance in place of the
+    /// exact curve, which drawings label approximate.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub approximate: bool,
 }
 
 impl ViewCurve {
     /// A curve that is not a tangent edge.
     pub fn new(curve: Curve3, source: CurveSource, visible: bool) -> ViewCurve {
-        ViewCurve { curve, source, visible, smooth: false }
+        ViewCurve { curve, source, visible, smooth: false, approximate: false }
     }
 }
 
@@ -260,16 +264,25 @@ pub struct ViewCurves {
     /// Bounds of every curve in sheet coordinates (see [`ViewFrame::project`]):
     /// `[min x, min y, max x, max y]`. All zero when there are no curves.
     pub bbox_2d: [f64; 4],
-    /// Drawn from an unproved preview mesh, for the screen only. Never exported.
+    /// Drawn from an unproved mesh for previews and scenario captures. Ineligible for sheet export.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub unproved: bool,
+    /// The line work came from Catallax drawing queries.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub catallax: bool,
+    /// The kernel's codes for what it measured rather than proved across the whole
+    /// view, such as where it placed a cut between two crossing curves or decided a
+    /// piece's visibility. Empty for a view the kernel proved. Every curve of a view
+    /// with a code here is approximate.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub approximate: Vec<String>,
 }
 
 impl ViewCurves {
     /// Collects curves and computes their sheet bounds in `frame`.
     pub fn new(curves: Vec<ViewCurve>, frame: &ViewFrame) -> ViewCurves {
         let bbox_2d = sheet_bounds(&curves, frame);
-        ViewCurves { curves, bbox_2d, unproved: false }
+        ViewCurves { curves, bbox_2d, unproved: false, catallax: false, approximate: Vec::new() }
     }
 
     /// Number of visible and hidden curves.
@@ -347,11 +360,56 @@ pub fn sheet_bounds(curves: &[ViewCurve], frame: &ViewFrame) -> [f64; 4] {
         return [0.0; 4];
     }
     let mut bbox = [f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY];
+    let mut include = |q: Point2| {
+        bbox = [bbox[0].min(q.u), bbox[1].min(q.v), bbox[2].max(q.u), bbox[3].max(q.v)];
+    };
     for c in curves {
-        for p in c.curve.sample(0.0) {
-            let q = frame.project(p);
-            bbox = [bbox[0].min(q.u), bbox[1].min(q.v), bbox[2].max(q.u), bbox[3].max(q.v)];
-        }
+        let (center, x, y, radius, span) = match &c.curve {
+            Curve3::Circle { center, normal, radius } => {
+                let x = perpendicular(*normal);
+                (*center, x, normal.cross(x), *radius, None)
+            }
+            Curve3::Arc { center, normal, x_axis, radius, start_deg, end_deg } => (
+                *center,
+                *x_axis,
+                normal.cross(*x_axis),
+                *radius,
+                Some((start_deg.min(*end_deg).to_radians(), (end_deg - start_deg).abs().to_radians())),
+            ),
+            Curve3::Nurbs { degree, knots, points, weights }
+                if *degree > 0
+                    && points.len() > *degree as usize
+                    && knots.len() == points.len() + *degree as usize + 1
+                    && (weights.is_empty() || (weights.len() == points.len() && weights.iter().all(|w| *w > 0.0))) =>
+            {
+                Nurbs::new(*degree as usize, knots, points, weights).include_projected_bounds(frame, &mut include);
+                continue;
+            }
+            _ => {
+                for point in c.curve.sample(0.0) {
+                    include(frame.project(point));
+                }
+                continue;
+            }
+        };
+        let range = |axis: Vec3| {
+            let origin = center.dot(axis);
+            let (a, b) = (x.dot(axis), y.dot(axis));
+            let extent = radius * a.hypot(b);
+            let Some((start, sweep)) = span else { return [origin - extent, origin + extent] };
+            let at = |angle: f64| origin + radius * (a * angle.cos() + b * angle.sin());
+            let (first, last) = (at(start), at(start + sweep));
+            let contains = |angle: f64| (angle - start).rem_euclid(std::f64::consts::TAU) <= sweep;
+            let peak = b.atan2(a);
+            [
+                if contains(peak + std::f64::consts::PI) { origin - extent } else { first.min(last) },
+                if contains(peak) { origin + extent } else { first.max(last) },
+            ]
+        };
+        let [left, right] = range(frame.right);
+        let [bottom, top] = range(frame.up);
+        include(Point2::new(left, bottom));
+        include(Point2::new(right, top));
     }
     bbox
 }
@@ -779,6 +837,42 @@ impl Nurbs {
         Nurbs { p, knots: knots.to_vec(), points }
     }
 
+    fn include_projected_bounds(self, frame: &ViewFrame, include: &mut impl FnMut(Point2)) {
+        let mut pieces = vec![(self, 0)];
+        while let Some((piece, depth)) = pieces.pop() {
+            let project = |[x, y, z, w]: [f64; 4]| frame.project(Vec3::new(x / w, y / w, z / w));
+            let first = project(piece.points[0]);
+            let last = project(*piece.points.last().unwrap());
+            let mut low = first;
+            let mut high = first;
+            for &control in &piece.points[1..] {
+                let p = project(control);
+                low = Point2::new(low.u.min(p.u), low.v.min(p.v));
+                high = Point2::new(high.u.max(p.u), high.v.max(p.v));
+            }
+            let tolerance = 1e-4;
+            let tight = first.u.min(last.u) - low.u <= tolerance
+                && high.u - first.u.max(last.u) <= tolerance
+                && first.v.min(last.v) - low.v <= tolerance
+                && high.v - first.v.max(last.v) <= tolerance;
+            let lo = piece.knots[piece.p];
+            let hi = piece.knots[piece.points.len()];
+            let mid = lo + (hi - lo) * 0.5;
+            if tight
+                || depth >= 16
+                || mid <= lo
+                || mid >= hi
+                || piece.knots.iter().filter(|&&k| k == mid).count() > piece.p
+            {
+                include(low);
+                include(high);
+            } else {
+                let (left, right) = piece.split(mid);
+                pieces.extend([(left, depth + 1), (right, depth + 1)]);
+            }
+        }
+    }
+
     fn into_curve(self, degree: u32, rational: bool) -> Curve3 {
         let points = self.points.iter().map(|h| Vec3::new(h[0] / h[3], h[1] / h[3], h[2] / h[3])).collect();
         let weights = if rational { self.points.iter().map(|h| h[3]).collect() } else { Vec::new() };
@@ -890,6 +984,42 @@ fn fit_arc(samples: &[Vec3], tol: f64) -> Option<Curve3> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sheet_bounds_include_analytic_extrema_between_samples() {
+        let frame = ViewSpec::new(Vec3::Z, Vec3::Y).frame().unwrap();
+        let radius = 10_000.0;
+        let phase = 2.5_f64.to_radians();
+        let x_axis = Vec3::new(phase.cos(), phase.sin(), 0.0);
+        for (start_deg, end_deg) in [(-45.0, 135.0), (135.0, -45.0)] {
+            let arc = Curve3::Arc { center: Vec3::ZERO, normal: Vec3::Z, x_axis, radius, start_deg, end_deg };
+            let curves = ViewCurves::new(vec![ViewCurve::new(arc, CurveSource::Unknown, true)], &frame);
+            assert!((curves.bbox_2d[2] - radius).abs() < 1e-9);
+            assert!((curves.bbox_2d[3] - radius).abs() < 1e-9);
+        }
+        let circle = Curve3::Circle { center: Vec3::ZERO, normal: Vec3::new(0.0, 0.6, 0.8), radius };
+        let curves = ViewCurves::new(vec![ViewCurve::new(circle, CurveSource::Unknown, true)], &frame);
+        for (value, want) in curves.bbox_2d.into_iter().zip([-radius, -0.8 * radius, radius, 0.8 * radius]) {
+            assert!((value - want).abs() < 1e-9);
+        }
+    }
+
+    #[test]
+    fn sheet_bounds_include_the_quadratic_peak_in_both_axes() {
+        let spline = Curve3::Nurbs {
+            degree: 2,
+            knots: vec![0., 0., 0., 1., 1., 1.],
+            points: vec![Vec3::ZERO, Vec3::new(1000., 60., 0.), Vec3::new(2000., -80., 0.)],
+            weights: Vec::new(),
+        };
+        let curves = [ViewCurve::new(spline, CurveSource::Unknown, true)];
+        let frame = ViewSpec::new(Vec3::Z, Vec3::Y).frame().unwrap();
+        let bounds = sheet_bounds(&curves, &frame);
+        assert!(bounds[1] <= -80. && (18.0..=18.0001).contains(&bounds[3]), "{bounds:?}");
+        let frame = ViewSpec::new(Vec3::Z, Vec3::X).frame().unwrap();
+        let bounds = sheet_bounds(&curves, &frame);
+        assert!((-18.0001..=-18.0).contains(&bounds[0]) && bounds[2] >= 80.0, "{bounds:?}");
+    }
 
     fn quarter_arc() -> Curve3 {
         // A rational quadratic quarter circle of radius 2 in the XY plane, from (2,0,0) to (0,2,0).

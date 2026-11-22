@@ -127,8 +127,10 @@ impl DrawingSession {
     pub fn marker(&self) -> Option<(String, Color32)> {
         match self.link_state() {
             LinkState::Missing => Some(("Part not found".to_owned(), theme::error())),
+            _ if self.doc.rebuild_guidance().is_some() => Some(("Include view in updates".to_owned(), theme::warn())),
             LinkState::Newer { .. } => Some(("Newer version available".to_owned(), theme::warn())),
             _ if self.doc.is_stale() => Some(("Newer version available".to_owned(), theme::warn())),
+            _ if !self.is_up_to_date() => Some(("Rebuild needed".to_owned(), theme::warn())),
             _ => None,
         }
     }
@@ -459,27 +461,31 @@ fn candidate_card(
 pub fn bar(ui: &mut egui::Ui, s: &DrawingSession, rect: Rect, push: &mut impl FnMut(DrawingAction)) {
     let part = &s.doc.drawing.meta.title;
     let pinned = s.doc.drawing.model.pinned.short();
-    let (head, detail, colour, action, label) = match s.link_state() {
-        LinkState::Missing => (
+    let (head, detail, colour, action) = match (s.link_state(), s.doc.rebuild_guidance()) {
+        (LinkState::Missing, _) => (
             format!("{part} not found"),
             format!("Not at {}, not found by id. The sheet shows rev {pinned}.", s.doc.drawing.model.path),
             theme::error(),
-            DrawingAction::ShowRepair { replace: false },
-            "Repair…",
+            Some((DrawingAction::ShowRepair { replace: false }, "Repair…")),
         ),
-        LinkState::Newer { now } => (
+        (_, Some(guidance)) => ("A view is excluded from updates".to_owned(), guidance.to_owned(), theme::warn(), None),
+        (LinkState::Newer { now }, _) => (
             format!("Newer version of {part} available"),
             format!("The sheet shows rev {pinned}; the part is at rev {} ({}).", now.short(), s.found_words()),
             theme::warn(),
-            DrawingAction::Rebuild,
-            "Rebuild",
+            Some((DrawingAction::Rebuild, "Rebuild")),
         ),
         _ if s.doc.is_stale() => (
             format!("Newer version of {part} available"),
             format!("The sheet shows rev {pinned}; the open part moved on."),
             theme::warn(),
-            DrawingAction::Rebuild,
-            "Rebuild",
+            Some((DrawingAction::Rebuild, "Rebuild")),
+        ),
+        _ if !s.is_up_to_date() => (
+            "The drawing needs a rebuild".to_owned(),
+            format!("Some saved views could not be updated to rev {pinned}."),
+            theme::warn(),
+            Some((DrawingAction::Rebuild, "Rebuild")),
         ),
         _ => return,
     };
@@ -516,9 +522,11 @@ pub fn bar(ui: &mut egui::Ui, s: &DrawingSession, rect: Rect, push: &mut impl Fn
                 {
                     push(DrawingAction::DismissMarker);
                 }
-                let button = egui::Button::new(egui::RichText::new(label).color(theme::on_accent())).fill(colour);
-                if ui.add(button).clicked() {
-                    push(action);
+                if let Some((action, label)) = action {
+                    let button = egui::Button::new(egui::RichText::new(label).color(theme::on_accent())).fill(colour);
+                    if ui.add(button).clicked() {
+                        push(action);
+                    }
                 }
             });
         },
@@ -550,6 +558,7 @@ pub fn panel(ui: &mut egui::Ui, s: &DrawingSession, part_open: bool, actions: &m
         let state = s.link_state();
         let (status, colour) = match &state {
             LinkState::Unknown => ("Not resolved yet".to_owned(), theme::muted()),
+            LinkState::Current if !s.is_up_to_date() => ("The drawing needs a rebuild".to_owned(), theme::warn()),
             LinkState::Current => ("Up to date".to_owned(), theme::ok()),
             LinkState::Newer { now } => (format!("Newer version available · rev {}", now.short()), theme::warn()),
             LinkState::Unverified => ("Not a SolidDraft document; no revision to compare".to_owned(), theme::muted()),
@@ -587,7 +596,9 @@ pub fn panel(ui: &mut egui::Ui, s: &DrawingSession, part_open: bool, actions: &m
         ui.add_space(6.0);
         ui.horizontal_wrapped(|ui| {
             let newer = matches!(state, LinkState::Newer { .. }) || s.doc.is_stale();
-            if newer {
+            if let Some(guidance) = s.doc.rebuild_guidance() {
+                ui.label(guidance);
+            } else if newer {
                 let rebuild =
                     egui::Button::new(egui::RichText::new("Rebuild").color(theme::on_accent())).fill(theme::warn());
                 if ui.add(rebuild).on_hover_text("Bring the views to the current revision (Ctrl+B)").clicked() {

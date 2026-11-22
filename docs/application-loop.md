@@ -28,15 +28,14 @@ end. The slot edit must rebuild only the slot, and the undo and the return to th
 must run no kernel operation. Step 25 makes a drawing. Steps 27-32 change the plate
 width to 140 mm, undo and redo, save, diverge, reopen and export checked STEP.
 Model commands, viewport screenshots, SVG views and drawing output use Catallax.
-The view and drawing checks require that backend. Views use the same polygon
-hidden-line method as the drawing workspace.
+The view and drawing checks require that backend. The `scenario_view` SVG capture
+uses an unproved polygon hidden-line preview.
 
 The adapter uses Catallax's `build_incremental_without_display` entry. Exact
 checkpoints and picking names build immediately; certified meshes enter a
-per-body cache only when requested. Topology, drawing curves and native reference
-points read the same default certified mesh as before. A topology query can still
-require that mesh during an edit. The selectable viewport uses the separate
-unproved preview. Memory accounting does not request a display.
+per-body cache only when requested. Topology and native reference points can
+still require the default mesh during an edit. The selectable viewport uses
+the separate unproved preview. Memory accounting does not request a display.
 
 `edit-display-reuse.json` checks foreground mesh calls and GPU body placements on a
 rounded boss. It edits the boss diameter and the last fillet, undoes and redoes,
@@ -187,11 +186,10 @@ drawing follows inside the same command, so the step checks that every view is a
 part's revision, that the section regenerated, that the plate's thickness dimension now
 reads 12 and is marked changed from 10, and that nothing dangles. Undo and redo move the
 dimension back and forth. The part and the drawing are saved; SVG, PDF and DXF are
-exported and each export reports that all five views were drawn again from the certified
-mesh. The saved drawing is opened again with its section, states and references, and
-rebuilt. Finally automatic update is turned off, the plate is edited again, and an export
-is refused because the views are stale previews and no file is left behind; a Rebuild
-brings the views to the part and the export succeeds. Every drawing tool runs through
+exported from the five saved Catallax views. The saved drawing is opened again with
+its section, states and references, and rebuilt. Finally automatic update is turned
+off and the plate is edited again. Export writes the saved revision, then Rebuild
+brings the drawing to the current part before the next export. Every drawing tool runs through
 the command bundle, so each step has the part's reference evidence and the drawing's
 view and annotation states in `command.json`.
 
@@ -239,11 +237,10 @@ MCP tool call has a numbered directory under `commands/` containing:
   persistent reference: the feature holding it, its slot, its identity, the Catallax
   origins, carrier counts and whether the built sketch's plane matches those carriers.
   With a drawing open, the summary's `drawing` says for each view whether its line
-  work is at the pinned revision and whether it is a screen preview, how many of its
-  curves are the model's exact lines and circles and how many are mesh polylines
-  (`accuracy`), for each annotation its state, value and the model entities it is
-  attached to, and lists the changed and dangling annotations. A drawing export's
-  result reports the same counts for the curves it wrote.
+  work is at the pinned revision and whether it is a screen preview. It also lists
+  annotation states, values and model attachments, including changed and dangling
+  annotations. See the [MCP drawing fields](assistant.md#mcp) for accuracy and export
+  revision reports.
   `resolved` is null when that feature was not built. These observations run only after
   execution when `--bundle` was requested; the scenario runner makes the assertions.
   The `rebuild` report's `features_recomputed` lists the features whose kernel
@@ -484,15 +481,11 @@ Later steps still run so the cost distribution is retained.
 An open drawing follows the part inside the editing command, so the kernel calls that
 regenerate its views (`view_curves`, `section_view`) are in that click. Each such call
 on the command thread is also timed against the 1,000 ms reference (`drawing view calls`
-in the step's checks), alongside the click timing. A section on screen is cut from the
-preview mesh with no boolean, so it costs about what a view costs; the certified section
-an export draws subtracts a half-space through a Catallax boolean, inside the export's
-recorded wait. The drawing exports (`drawing_export_svg`,
+in the step's checks), alongside the click timing. The drawing exports (`drawing_export_svg`,
 `drawing_export_pdf`, `drawing_export_dxf`) are the `output` class: their wait is the
-caller's wait for the certified file and is recorded in the step's timing with no
+caller's wait for the file and is recorded in the step's timing with no
 budget, as the CLI export and drawing checks are; an output listed as a known gap is a
-warning to remove the listing. Each export reports how many views it drew again from the certified
-mesh, and a view that is a preview of another revision refuses to export.
+warning to remove the listing. See [drawing export eligibility](documents.md#pinned-revisions-and-rebuild).
 
 The timing reference was calibrated from the
 [current-main baseline run](https://github.com/BohnBawerick/soliddraft/actions/runs/40229375814)
@@ -503,7 +496,7 @@ for protocol, SVG serialization and run-to-run variation. The new check measures
 that entire external request, not just the kernel call. The click budget and
 existing approved-gap records are unchanged.
 
-Faster fine meshing of curved faces inside `view_curves` remains kernel
+Faster fine meshing of curved faces for preview `view_curves` remains kernel
 follow-up. The advisory timing policy does not change geometric proofs or mesh
 accuracy requirements.
 

@@ -141,6 +141,9 @@
     "ci/fixtures/universal-joint/shaft.dwprt": [
       "web"
     ],
+    "ci/check-same-file.py": [
+      "application-loop"
+    ],
     "ci/check-step.py": [
       "step-opencascade",
       "application-loop"

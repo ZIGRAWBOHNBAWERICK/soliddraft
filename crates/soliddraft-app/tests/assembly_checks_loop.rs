@@ -107,8 +107,23 @@ fn interference_clearance_and_hole_alignment_application_loops() {
             let (_, after) = call(&mut state, "model_summary", json!({}));
             assert_eq!(before["assembly"]["accepted_state"], after["assembly"]["accepted_state"]);
 
+            let part: soliddraft_assembly::OccurrencePath = "4".parse().unwrap();
+            let at = soliddraft_assembly::Placement::translation(glam::DVec3::new(3.0, 7.0, 11.0));
+            state.assembly.session.as_mut().unwrap().doc.move_to(&[(part.clone(), at)]).unwrap();
+            let (error, warm) = call(&mut state, "assembly_check_clearance", json!({"clearance":"0.5 mm"}));
+            assert!(!error && warm["report"]["met"] == 1, "{warm}");
+            let ((error, refined), work) = soliddraft_kernel_catallax::with_request_allowance(0, || {
+                call(&mut state, "assembly_check_clearance", json!({"clearance":"1 mm"}))
+            });
+            assert!(!error && work.exhausted, "{refined}");
+            let pair = &refined["report"]["results"][0];
+            assert_eq!(pair["outcome"], "clear", "{pair}");
+            assert_eq!(pair["clearance"], "undecided", "{pair}");
+            assert!(pair["distance"]["lo"].as_f64().unwrap() > 0.0, "{pair}");
+            assert!(pair["why"].as_str().unwrap().contains("separated"), "{pair}");
+            assert!(pair["exact_refused"].as_array().unwrap().iter().any(|r| r["code"] == "numbers.operation-budget"));
+
             // A gap below the mesh chord bound is still decided from the exact solids.
-            let part = "4".parse().unwrap();
             let at = soliddraft_assembly::Placement::translation(glam::DVec3::new(3.0, 7.0, 10.0001));
             state.assembly.session.as_mut().unwrap().doc.move_to(&[(part, at)]).unwrap();
             let (error, met) = call(&mut state, "assembly_check_clearance", json!({"clearance":"0.00005 mm"}));
@@ -125,4 +140,55 @@ fn interference_clearance_and_hole_alignment_application_loops() {
         }
         std::fs::remove_dir_all(dir).unwrap();
     }
+}
+
+#[test]
+fn p3_copies_report_proved_overlap_and_unresolved_tangency() {
+    let dir = std::env::temp_dir().join(format!("soliddraft-p3-interference-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut state = AppState::new(soliddraft_app::new_document());
+    let scenario: Value = serde_json::from_str(include_str!("../../../ci/scenarios/p3-rounded-boss.json")).unwrap();
+    for step in scenario["steps"].as_array().unwrap().iter().take(8) {
+        let tool = step["tool"].as_str().unwrap();
+        let (error, result) = call(&mut state, tool, step["arguments"].clone());
+        assert!(!error, "{tool}: {result}");
+    }
+    let part_file = dir.join("p3.dwprt");
+    for (tool, arguments) in [
+        ("save", json!({"path": part_file})),
+        ("make_assembly", json!({})),
+        ("assembly_save", json!({"path": dir.join("rig.dwasm")})),
+        (
+            "insert_component",
+            json!({
+                "paths": [part_file],
+                "placement": {"translation": [20, 0, 0], "rotation": [0, 0, 0, 1]}
+            }),
+        ),
+    ] {
+        let (error, result) = call(&mut state, tool, arguments);
+        assert!(!error, "{tool}: {result}");
+    }
+    let (error, result) = call(&mut state, "assembly_check_interference", json!({}));
+    assert!(!error, "{result}");
+    let pair = &result["report"]["results"][0];
+    assert_eq!(pair["outcome"], "interferes", "{pair}");
+    let overlap = &pair["overlap_mm3"];
+    let lo = overlap["lo"].as_f64().unwrap();
+    assert!(lo > 0.0 && overlap["hi"].as_f64().unwrap() > 2.0 * lo, "{pair}");
+
+    let assembly = &mut state.assembly.session.as_mut().unwrap().doc;
+    let second = assembly.assembly().components.last().unwrap().id;
+    let path = soliddraft_assembly::OccurrencePath::root().child(soliddraft_assembly::Step::component(second));
+    // The same pair touching end to end: the Boolean refuses the fillets' torus pairs and
+    // nothing settles the pair, which must stay open and never read as clear.
+    let tangent = soliddraft_assembly::Placement::translation(glam::DVec3::new(40.0, 0.0, 0.0));
+    assembly.move_to(&[(path, tangent)]).unwrap();
+    let (error, result) = call(&mut state, "assembly_check_interference", json!({}));
+    assert!(!error, "{result}");
+    assert_eq!(result["report"]["clear"], 0, "{result}");
+    let pair = &result["report"]["results"][0];
+    assert_eq!(pair["outcome"], "touching_or_undecided", "{pair}");
+    assert!(pair["exact_refused"].as_array().unwrap().iter().any(|r| r["query"] == "Overlap volume"), "{pair}");
+    std::fs::remove_dir_all(dir).unwrap();
 }

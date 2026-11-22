@@ -17,6 +17,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use serde_json::Value;
+use soliddraft_drawing::{AnnotationState, Drawing, apply, file};
+use soliddraft_kernel_api::Point2;
 
 /// 2026-10-14, so the title block's date is fixed.
 const DATE_EPOCH: &str = "1791936000";
@@ -30,14 +32,228 @@ fn bless() -> bool {
 }
 
 fn soliddraft(dir: &Path, args: &[&str]) -> String {
-    let out = Command::new(env!("CARGO_BIN_EXE_soliddraft"))
+    let out = run(dir, args);
+    assert!(out.status.success(), "soliddraft {args:?} failed: {}", String::from_utf8_lossy(&out.stderr));
+    String::from_utf8(out.stdout).unwrap()
+}
+
+fn run(dir: &Path, args: &[&str]) -> std::process::Output {
+    Command::new(env!("CARGO_BIN_EXE_soliddraft"))
         .args(args)
         .current_dir(dir)
         .env("SOURCE_DATE_EPOCH", DATE_EPOCH)
         .output()
-        .expect("running soliddraft");
-    assert!(out.status.success(), "soliddraft {args:?} failed: {}", String::from_utf8_lossy(&out.stderr));
-    String::from_utf8(out.stdout).unwrap()
+        .expect("running soliddraft")
+}
+
+fn shortened_box(case: &str) -> (PathBuf, Drawing) {
+    use soliddraft_drawing::Command;
+
+    let dir = std::env::temp_dir().join(format!("soliddraft-draw-{case}-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let recipe = dir.join("box.json");
+    std::fs::copy(recipes_dir().join("box.json"), &recipe).unwrap();
+    soliddraft(
+        &dir,
+        &[
+            "draw",
+            "box.json",
+            "--views",
+            "front,top",
+            "--hidden",
+            "visible",
+            "--broken-out",
+            "top:0,0,10:4:7",
+            "--out",
+            "box.dwdrw",
+        ],
+    );
+    let path = dir.join("box.dwdrw");
+    let (mut drawing, meta) = file::read(&path).unwrap();
+    let cut = drawing.sheets[0].views.iter().find(|v| !v.broken_out.is_empty()).unwrap().id;
+    apply(&mut drawing, &Command::AddSheet { name: "Cut".into(), template: "iso-a3".into() }).unwrap();
+    apply(&mut drawing, &Command::MoveViewToSheet { view: cut, sheet: 1, to: Point2::new(140.0, 100.0) }).unwrap();
+    let mut annotation = drawing.sheets[0].annotations.iter().find(|a| !a.anchors.is_empty()).unwrap().clone();
+    annotation.id = drawing.next_annotation_id();
+    annotation.view = cut;
+    apply(&mut drawing, &Command::AddAnnotation { annotation }).unwrap();
+    file::write(&path, &drawing, &meta).unwrap();
+    edit_recipe(&recipe, |v| v["steps"][1]["distance"] = 5.into());
+    (dir, drawing)
+}
+
+fn assert_partial_box_saved(dir: &Path, before: &Drawing) -> Drawing {
+    let (after, _) = file::read(&dir.join("box.dwdrw")).unwrap();
+    assert_ne!(after.model.pinned, before.model.pinned);
+    assert_eq!(after.sheets[0].views[0].geometry.source_digest, after.model.pinned.as_str());
+    assert_eq!(after.sheets[1].views[0].geometry, before.sheets[1].views[0].geometry);
+    let list = soliddraft_drawing::display::layout_sheet(&after, 0);
+    assert_shortened_box_outline(&soliddraft_drawing::export::svg(&list), &after);
+    after
+}
+
+fn assert_shortened_box_outline(svg: &str, drawing: &Drawing) {
+    let visible = svg.split_once("<g id=\"VISIBLE\"").unwrap().1.split_once("</g>").unwrap().0;
+    let (low, high) = visible
+        .lines()
+        .filter_map(|line| line.trim().strip_prefix("<path d=\""))
+        .flat_map(|path| {
+            let coordinates = path.split_once('"').unwrap().0;
+            coordinates
+                .split(['M', 'L', 'Z'])
+                .filter(|pair| !pair.trim().is_empty())
+                .map(|pair| pair.split_whitespace().nth(1).unwrap().parse::<f64>().unwrap())
+        })
+        .fold((f64::INFINITY, f64::NEG_INFINITY), |(low, high), y| (low.min(y), high.max(y)));
+    let sheet = &drawing.sheets[0];
+    let scale = soliddraft_drawing::project::effective_scale(sheet, &sheet.views[0]);
+    assert!((high - low - 5.0 * scale).abs() < 0.002, "front outline spans {} paper mm", high - low);
+}
+
+#[test]
+fn pdf_refusal_allows_healthy_svg_before_a_later_legacy_cache_error() {
+    let (dir, mut drawing) = shortened_box("pdf-refusal");
+    let path = dir.join("box.dwdrw");
+    let (_, meta) = file::read(&path).unwrap();
+    let mut legacy = drawing.sheets[0].clone();
+    legacy.name = "Legacy".into();
+    let view = &mut legacy.views[0];
+    view.id = drawing.next_view_id();
+    view.label = Some("Legacy view".into());
+    view.excluded_from_update = true;
+    view.geometry.catallax = false;
+    legacy.annotations.clear();
+    drawing.sheets.push(legacy);
+    file::write(&path, &drawing, &meta).unwrap();
+
+    let out = run(
+        &dir,
+        &["draw", "--update", "box.dwdrw", "--out", "all.pdf", "--out", "sheet.svg", "--out", "later.dxf", "--json"],
+    );
+    assert!(!out.status.success());
+    let error = String::from_utf8(out.stderr).unwrap();
+    assert!(
+        error.contains("all.pdf: Top view:") && error.contains("the cutting plane is behind the whole body"),
+        "{error}"
+    );
+    assert!(error.contains("sheet-3.svg: Legacy view has no saved Catallax line work"), "{error}");
+    assert!(error.find("all.pdf:").unwrap() < error.find("sheet-3.svg:").unwrap());
+    let report: Value = serde_json::from_slice(&out.stdout).unwrap();
+    let exports = report["exports"].as_array().unwrap();
+    assert_eq!(exports.len(), 1);
+    assert_eq!(exports[0]["path"], "sheet.svg");
+    let after = assert_partial_box_saved(&dir, &drawing);
+    assert_shortened_box_outline(&std::fs::read_to_string(dir.join("sheet.svg")).unwrap(), &after);
+    for name in ["all.pdf", "sheet-2.svg", "sheet-3.svg", "later.dxf"] {
+        assert!(!dir.join(name).exists(), "{name}");
+    }
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn update_text_names_a_drawing_copy_written_before_an_output_error() {
+    let (dir, before) = shortened_box("written-copy");
+    let out = run(&dir, &["draw", "--update", "box.dwdrw", "--out", "copy.dwdrw", "--out", "typo.exe"]);
+    assert!(!out.status.success());
+    let error = String::from_utf8(out.stderr).unwrap();
+    assert!(error.contains("typo.exe"), "{error}");
+    let report = String::from_utf8(out.stdout).unwrap();
+    assert!(report.lines().any(|line| line.trim() == "copy.dwdrw"), "{report}");
+    let (copy, _) = file::read(&dir.join("copy.dwdrw")).unwrap();
+    assert_ne!(copy.model.pinned, before.model.pinned);
+    assert_eq!(copy.sheets[1].views[0].geometry, before.sheets[1].views[0].geometry);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn accept_saves_repairs_to_a_partial_rebuild() {
+    use soliddraft_drawing::{AnnotationKind, DimValue};
+
+    let (dir, mut before) = shortened_box("accept");
+    soliddraft(&dir, &["draw", "box.json", "--views", "front,top", "--out", "short-box.dwdrw"]);
+    let (short, _) = file::read(&dir.join("short-box.dwdrw")).unwrap();
+    let height = |annotation: &soliddraft_drawing::Annotation, expected| {
+        matches!(&annotation.body, AnnotationKind::Dimension(dim)
+            if matches!(dim.value, DimValue::Measured { value } if value == expected))
+    };
+    let short_height = short.sheets[0].annotations.iter().find(|a| height(a, 5.0)).unwrap();
+    let old_height = before.sheets[0].annotations.iter_mut().find(|a| height(a, 10.0)).unwrap();
+    // Keep the old value and use unambiguous anchors so this exercises acceptance.
+    old_height.anchors.clone_from(&short_height.anchors);
+    let id = old_height.id;
+    let path = dir.join("box.dwdrw");
+    let (_, meta) = file::read(&path).unwrap();
+    file::write(&path, &before, &meta).unwrap();
+
+    let report: Value =
+        serde_json::from_str(&soliddraft(&dir, &["draw", "--update", "box.dwdrw", "--accept", "--json"])).unwrap();
+    assert_eq!(report["repairs"], serde_json::json!([format!("accepted {id}")]), "{report}");
+    assert_eq!(report["dangling_views"][0]["name"], "Top view");
+    let after = assert_partial_box_saved(&dir, &before);
+    let accepted = after.annotation(id).unwrap();
+    assert!(height(accepted, 5.0));
+    assert_eq!(accepted.state, AnnotationState::Ok);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+fn assert_failed_repair_keeps_rebuild(dir: &Path, before: &Drawing, flag: &str, argument: &str) {
+    let out = run(dir, &["draw", "--update", "box.dwdrw", flag, argument, "--json"]);
+    assert!(!out.status.success());
+    let error = String::from_utf8(out.stderr).unwrap();
+    assert!(error.contains("Annotation repair failed") && error.contains("Top view:"), "{error}");
+    assert!(error.contains("the cutting plane is behind the whole body"), "{error}");
+    assert_partial_box_saved(dir, before);
+}
+
+#[test]
+fn reattach_refusal_keeps_the_partial_rebuild() {
+    let (dir, before) = shortened_box("reattach");
+    let annotation = before.sheets[1].annotations.last().unwrap().id.0;
+    assert_failed_repair_keeps_rebuild(&dir, &before, "--reattach", &format!("{annotation}:0:20,0,5"));
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+fn assert_invalid_repair_leaves_drawing_untouched(dir: &Path, repairs: &[&str]) {
+    let path = dir.join("box.dwdrw");
+    let before = std::fs::read(&path).unwrap();
+    let mut args = vec!["draw", "--update", "box.dwdrw", "--out", "unexpected.svg"];
+    args.extend_from_slice(repairs);
+    let out = run(dir, &args);
+    assert!(!out.status.success());
+    let error = String::from_utf8(out.stderr).unwrap();
+    assert!(error.contains("Annotation repair failed"), "{error}");
+    assert_eq!(std::fs::read(&path).unwrap(), before);
+    assert!(!dir.join("unexpected.svg").exists());
+}
+
+#[test]
+fn unknown_keep_as_note_leaves_drawing_untouched() {
+    let (dir, _) = shortened_box("keep-as-note");
+    assert_invalid_repair_leaves_drawing_untouched(&dir, &["--keep-as-note", "999999"]);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn unknown_delete_leaves_a_healthy_drawing_untouched() {
+    let (dir, mut drawing) = shortened_box("delete");
+    let path = dir.join("box.dwdrw");
+    let (_, meta) = file::read(&path).unwrap();
+    drawing.sheets[1].views[0].broken_out.clear();
+    file::write(&path, &drawing, &meta).unwrap();
+    assert_invalid_repair_leaves_drawing_untouched(&dir, &["--delete", "999999"]);
+    let id = drawing.sheets[0].annotations[0].id.0.to_string();
+    assert_invalid_repair_leaves_drawing_untouched(&dir, &["--delete", &id, "--delete", &id]);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn invalid_reattach_arguments_leave_drawing_untouched() {
+    let (dir, drawing) = shortened_box("invalid-reattach");
+    let id = drawing.sheets[1].annotations.last().unwrap().id.0;
+    for argument in [format!("{id}:999:20,0,5"), format!("{id}:0:NaN,0,5"), "999999:0:20,0,5".into()] {
+        assert_invalid_repair_leaves_drawing_untouched(&dir, &["--accept", "--reattach", &argument]);
+    }
+    std::fs::remove_dir_all(dir).unwrap();
 }
 
 fn golden(name: &str, got: &str) {

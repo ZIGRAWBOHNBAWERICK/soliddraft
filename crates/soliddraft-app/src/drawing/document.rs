@@ -27,11 +27,13 @@ pub struct UpdateReport {
     pub views: usize,
     pub changed: Vec<AnnotationId>,
     pub dangling: Vec<AnnotationId>,
+    pub dangling_views: Vec<soliddraft_drawing::DanglingView>,
     pub at: Instant,
     pub dismissed: bool,
 }
 
 struct PickingCache {
+    last_update: Option<UpdateReport>,
     transforms: HashMap<ViewId, ViewTransform>,
     circles: HashMap<ViewId, Vec<CircleInfo>>,
 }
@@ -176,16 +178,75 @@ impl DrawingDoc {
         self.seen_digest != self.drawing.model.pinned
     }
 
-    /// Views whose geometry is older than the part.
+    pub(super) fn view_name(&self, id: ViewId) -> Option<String> {
+        let sheet = self.drawing.sheet_of(id)?;
+        Some(project::view_label_in(&self.drawing, sheet, sheet.view(id)?))
+    }
+
+    pub(super) fn rebuild_guidance(&self) -> Option<&'static str> {
+        self.drawing
+            .sheets
+            .iter()
+            .flat_map(|sheet| &sheet.views)
+            .any(View::needs_inclusion_for_redraw)
+            .then_some(soliddraft_drawing::export::INCLUDE_FOR_REDRAW)
+    }
+
+    pub fn view_is_up_to_date(&self, view: &View) -> bool {
+        self.view_update_reason(view).is_none()
+    }
+
+    pub(super) fn view_update_reason(&self, view: &View) -> Option<&str> {
+        if let Some(failure) = self.active_refusals().find(|f| f.view == view.id) {
+            Some(&failure.cause)
+        } else if view.needs_inclusion_for_redraw() {
+            Some(soliddraft_drawing::export::INCLUDE_FOR_REDRAW)
+        } else if !view.has_saved_catallax_linework() {
+            Some("Rebuild to replace the saved line work with Catallax line work")
+        } else if !view.accepts_revision(self.seen_digest.as_str())
+            || !view.accepts_revision(self.drawing.model.pinned.as_str())
+        {
+            Some("Rebuild to match the part revision")
+        } else {
+            None
+        }
+    }
+
+    pub(super) fn view_revision(view: &View) -> String {
+        let digest = view.geometry.source_digest.as_str();
+        let digits = digest.split_once(':').map_or(digest, |(_, digits)| digits);
+        if digits.is_empty() { "unknown".into() } else { digits.chars().take(8).collect() }
+    }
+
+    /// Views that need a redraw.
     pub fn stale_views(&self) -> Vec<ViewId> {
-        let digest = self.seen_digest.as_str();
         self.drawing
             .sheets
             .iter()
             .flat_map(|s| &s.views)
-            .filter(|v| v.geometry.source_digest != digest && !v.excluded_from_update)
+            .filter(|v| !self.view_is_up_to_date(v))
             .map(|v| v.id)
             .collect()
+    }
+
+    fn active_refusals(&self) -> impl Iterator<Item = &soliddraft_drawing::DanglingView> {
+        self.last_update
+            .iter()
+            .filter(|update| update.to_revision == self.drawing.model.pinned)
+            .flat_map(|update| &update.dangling_views)
+    }
+
+    pub fn refused_views(&self) -> impl Iterator<Item = (usize, ViewId, String, &str)> {
+        self.active_refusals().filter_map(|failure| {
+            let i = project::sheet_of(&self.drawing, failure.view)?;
+            let sheet = &self.drawing.sheets[i];
+            let view = sheet.view(failure.view)?;
+            Some((i, view.id, project::view_label_in(&self.drawing, sheet, view), failure.cause.as_str()))
+        })
+    }
+
+    pub fn view_refusal_messages(&self) -> impl Iterator<Item = String> {
+        self.refused_views().map(|(_, _, name, cause)| format!("{name}: {cause}"))
     }
 
     pub fn attention_count(&self) -> usize {
@@ -204,6 +265,11 @@ impl DrawingDoc {
         let part_key = part.and_then(|p| p.doc.model().journal_key());
         let journal = self.journal_command(|| serde_json::json!({"op":"execute", "command":cmd, "part":part_key}));
         journal.finish((|| {
+            if let Command::SetViewExcluded { view, excluded: true } = &cmd
+                && let Some((_, _, name, cause)) = self.refused_views().find(|(_, id, _, _)| id == view)
+            {
+                return Err(format!("Cannot exclude {name} from automatic update: {cause}"));
+            }
             let from = self.drawing.model.pinned.clone();
             let p = part.map(|c| c.part());
             // A remade view also changes its descendants' linework and picking data.
@@ -220,20 +286,33 @@ impl DrawingDoc {
                 _ => None,
             };
             let report = self.stack.run(&mut self.drawing, &cmd, p.as_ref()).map_err(|e| e.to_string())?;
-            self.undo_picking.push(PickingCache { transforms: self.transforms.clone(), circles: self.circles.clone() });
+            self.undo_picking.push(PickingCache {
+                last_update: self.last_update.clone(),
+                transforms: self.transforms.clone(),
+                circles: self.circles.clone(),
+            });
             self.redo_picking.clear();
             self.rescale_picking();
             self.touch();
-            if let (Some(id), Some(p)) = (remade, p.as_ref())
-                && let Ok(index) = soliddraft_drawing::PartIndex::build(p)
+            if matches!(cmd, Command::DeleteView { .. } | Command::DeleteSheet { .. })
+                && let Some(report) = &mut self.last_update
             {
-                let mut contexts = project::Contexts::new();
-                for child in project::dependent_views(&self.drawing, id) {
-                    if child != id && self.drawing.view(child).is_some_and(|v| v.excluded_from_update) {
-                        continue;
-                    }
-                    if project::compute_in(&self.drawing, p, &index, child, &mut contexts).is_ok() {
-                        self.remember(child, &contexts[&child].projected);
+                report.dangling_views.retain(|failure| self.drawing.view(failure.view).is_some());
+            }
+            if let (Some(id), Some(p)) = (remade, p.as_ref()) {
+                let redrawn: Vec<_> = project::dependent_views(&self.drawing, id)
+                    .into_iter()
+                    .filter(|&child| child == id || self.drawing.view(child).is_some_and(|v| !v.excluded_from_update))
+                    .collect();
+                if let Some(report) = &mut self.last_update {
+                    report.dangling_views.retain(|failure| !redrawn.contains(&failure.view));
+                }
+                if let Ok(index) = soliddraft_drawing::PartIndex::build(p) {
+                    let mut contexts = project::Contexts::new();
+                    for child in redrawn {
+                        if project::compute_in(&self.drawing, p, &index, child, &mut contexts).is_ok() {
+                            self.remember(child, &contexts[&child].projected);
+                        }
                     }
                 }
             }
@@ -254,6 +333,7 @@ impl DrawingDoc {
                     views: r.projections.len(),
                     changed,
                     dangling,
+                    dangling_views: r.dangling_views,
                     at: Instant::now(),
                     dismissed: false,
                 });
@@ -263,6 +343,7 @@ impl DrawingDoc {
     }
 
     fn swap_picking(&mut self, mut cache: PickingCache) -> PickingCache {
+        std::mem::swap(&mut self.last_update, &mut cache.last_update);
         std::mem::swap(&mut self.transforms, &mut cache.transforms);
         std::mem::swap(&mut self.circles, &mut cache.circles);
         cache
@@ -331,7 +412,8 @@ impl DrawingDoc {
         let k = project::effective_scale(&with_view, &view);
         let part = ctx.part();
         let index = soliddraft_drawing::PartIndex::build(&part).map_err(|e| e.to_string())?;
-        let p = project::project_part(&part, &index, &spec, k).map_err(|e| e.to_string())?;
+        let p = project::project_part(&part, &index, &spec, k)
+            .map_err(|e| format!("{}: {e}", project::view_label_in(&self.drawing, &with_view, &view)))?;
         view.geometry = p.geometry.clone();
         Ok((view, p))
     }

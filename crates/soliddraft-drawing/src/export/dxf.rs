@@ -520,6 +520,14 @@ mod tests {
     use crate::display::layout_sheet;
     use crate::fixture::bracket_a3;
 
+    fn bracket_display_list() -> DisplayList {
+        let mut drawing = bracket_a3();
+        for view in &mut drawing.sheets[0].views {
+            view.geometry.catallax = true;
+        }
+        layout_sheet(&drawing, 0)
+    }
+
     #[test]
     fn editable_dimensions_keep_precision_tolerances_and_literal_overrides() {
         for (tolerance, upper, lower, tol, limits) in [
@@ -528,7 +536,7 @@ mod tests {
             (Tolerance::Deviation { upper: 0.2, lower: -0.1 }, 0.2, 0.1, true, false),
             (Tolerance::Limits { upper: 0.2, lower: -0.1 }, 0.2, 0.1, false, true),
         ] {
-            let mut list = layout_sheet(&bracket_a3(), 0);
+            let mut list = bracket_display_list();
             list.dimensions.truncate(1);
             let r = &mut list.dimensions[0];
             r.format.precision = 2;
@@ -556,7 +564,7 @@ mod tests {
 
     #[test]
     fn true_lengths_keep_their_foreshortening_and_degenerate_lengths_stay_literal() {
-        let mut list = layout_sheet(&bracket_a3(), 0);
+        let mut list = bracket_display_list();
         list.dimensions.truncate(1);
         let r = &mut list.dimensions[0];
         r.format.dim_type = DimType::True;
@@ -586,7 +594,7 @@ mod tests {
 
     #[test]
     fn the_fixture_re_reads_with_entities_on_its_layers_and_no_splines() {
-        let bytes = dxf(&layout_sheet(&bracket_a3(), 0)).unwrap();
+        let bytes = dxf(&bracket_display_list()).unwrap();
         let counts = count_entities(&bytes).unwrap();
         assert!(!counts.keys().any(|k| k.ends_with("/SPLINE")), "{counts:?}");
         for key in [

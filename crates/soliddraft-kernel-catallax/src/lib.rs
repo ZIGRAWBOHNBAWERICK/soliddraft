@@ -50,7 +50,7 @@ use soliddraft_kernel_api::*;
 pub use diagnostics::{APP_REQUEST_WORK, APP_WORK_TARGET, RequestWork, with_request_allowance};
 
 /// The pinned Catallax application entry revision.
-pub const CATALLAX_REVISION: &str = "8c6358b433adade2f97638c944b5c1efcc8ab63b";
+pub const CATALLAX_REVISION: &str = "b9aa4309345e72d6eaf8bbd835f5cdd921ddadf8";
 
 /// An in-process Catallax backend. There is no global kernel state or kernel thread.
 #[derive(Default)]
@@ -2477,23 +2477,37 @@ impl Kernel for CatallaxKernel {
         self.observe("section_view", || {
             if spec.view.preview {
                 let view = drawing_queries::resolved_view(self, body, &spec.view);
-                drawing::section::by_mesh_slice(self, body, &drawing::SectionSpec { view, ..*spec })
+                let mut section = drawing::section::by_mesh_slice(self, body, &drawing::SectionSpec { view, ..*spec })?;
+                section.curves.unproved = true;
+                Ok(section)
             } else {
+                drawing_queries::check_exact_tolerance(&spec.view)?;
+                drawing_queries::drawing_solid(self, body, "section_view")?;
                 drawing::section::by_half_space(self, body, spec)
             }
         })
     }
-    fn silhouette_curves(&self, _: BodyId, _: Vec3) -> KernelResult<Vec<drawing::ViewCurve>> {
-        self.observe("silhouette_curves", || Err(gap("Exact silhouettes")))
+    fn silhouette_curves(&self, body: BodyId, direction: Vec3) -> KernelResult<Vec<drawing::ViewCurve>> {
+        self.observe("silhouette_curves", || drawing_queries::silhouette_curves(self, body, direction))
     }
-    fn section_curves(&self, _: BodyId, _: &Plane) -> KernelResult<Vec<drawing::ViewCurve>> {
-        self.observe("section_curves", || Err(gap("Section curves")))
+    fn section_curves(&self, body: BodyId, plane: &Plane) -> KernelResult<Vec<drawing::ViewCurve>> {
+        self.observe("section_curves", || drawing_queries::section_curves(self, body, plane))
     }
     fn edge_curve(&self, body: BodyId, edge: EdgeId) -> KernelResult<drawing::Curve3> {
-        self.observe("edge_curve", || drawing_queries::edge_curve(self.solid(body)?.as_ref(), body, edge))
+        Ok(self.edge_drawing(body, edge)?.curve)
+    }
+    fn edge_drawing(&self, body: BodyId, edge: EdgeId) -> KernelResult<drawing::ViewCurve> {
+        self.observe("edge_curve", || drawing_queries::edge_drawing(self.solid(body)?.as_ref(), body, edge))
     }
     fn face_loops(&self, body: BodyId, face: FaceId) -> KernelResult<Vec<Vec<drawing::Curve3>>> {
-        self.observe("face_loops", || drawing_queries::face_loops(self.solid(body)?.as_ref(), body, face))
+        Ok(self
+            .face_drawing_loops(body, face)?
+            .into_iter()
+            .map(|chain| chain.into_iter().map(|edge| edge.curve).collect())
+            .collect())
+    }
+    fn face_drawing_loops(&self, body: BodyId, face: FaceId) -> KernelResult<Vec<Vec<drawing::ViewCurve>>> {
+        self.observe("face_loops", || drawing_queries::face_drawing_loops(self.solid(body)?.as_ref(), body, face))
     }
     fn lines_and_arcs(&self, _: &drawing::Curve3, _: f64) -> KernelResult<Vec<drawing::Curve3>> {
         self.observe("lines_and_arcs", || Err(gap("Curve approximation for drawings")))
@@ -2630,6 +2644,18 @@ mod tests {
             assert!(preview.unproved && preview.triangle_count() > 0);
             assert_eq!(preview.positions, field.preview().positions, "{body:?} is drawn from its field sample");
         }
+    }
+
+    #[test]
+    fn an_exact_view_of_a_cold_cylinder_builds_no_display_mesh() {
+        let kernel = CatallaxKernel::new();
+        let body = contract::cylinder(&kernel, Vec3::ZERO, 5.0, 10.0);
+        let view = kernel.view_curves(body, &drawing::ViewSpec::standard(drawing::StandardView::Top)).unwrap();
+        assert!(view.catallax && !view.unproved);
+        assert_eq!(kernel.state().unwrap().fresh_topologies, 0);
+        let mut meshes = 0;
+        kernel.solid(body).unwrap().display.each(|_| meshes += 1);
+        assert_eq!(meshes, 0);
     }
 
     #[test]

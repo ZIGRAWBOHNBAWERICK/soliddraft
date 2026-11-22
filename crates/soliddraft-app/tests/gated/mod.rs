@@ -76,13 +76,17 @@ impl Gated {
     }
 }
 impl Kernel for Gated {
+    fn edge_drawing(&self, body: BodyId, edge: EdgeId) -> KernelResult<drawing::ViewCurve> {
+        self.inner.edge_drawing(body, edge)
+    }
+
     fn edge_curve(&self, body: BodyId, edge: EdgeId) -> KernelResult<drawing::Curve3> {
         self.inner.edge_curve(body, edge)
     }
     fn view_curves(&self, body: BodyId, spec: &drawing::ViewSpec) -> KernelResult<drawing::ViewCurves> {
         let delay = std::mem::take(&mut self.rules.lock().unwrap().drawing_delay);
         std::thread::sleep(delay);
-        drawing::mesh_hlr::view_curves(self, body, spec)
+        if spec.preview { drawing::mesh_hlr::view_curves(self, body, spec) } else { self.inner.view_curves(body, spec) }
     }
     fn backend(&self) -> BackendInfo {
         self.inner.backend()

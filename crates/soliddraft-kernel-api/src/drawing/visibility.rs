@@ -176,7 +176,13 @@ pub fn refine_visibility(
             }
         }
         for (t0, t1, visible) in runs {
-            out.push(ViewCurve { curve: c.curve.between(t0, t1), source: c.source, visible, smooth: c.smooth });
+            out.push(ViewCurve {
+                curve: c.curve.between(t0, t1),
+                source: c.source,
+                visible,
+                smooth: c.smooth,
+                approximate: c.approximate,
+            });
         }
     }
     Ok(out)

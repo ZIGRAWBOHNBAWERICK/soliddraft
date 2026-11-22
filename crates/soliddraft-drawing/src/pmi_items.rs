@@ -844,7 +844,7 @@ pub fn place_notes(drawing: &mut Drawing, sheet: usize, part: &Part) {
 /// tolerance, its count, its letter, its text. An annotation whose item the part no
 /// longer has, or that no longer applies, is taken off the drawing. Returns the names of
 /// the items taken off.
-pub fn refresh(drawing: &mut Drawing, part: &Part) -> Vec<String> {
+pub(crate) fn refresh(drawing: &mut Drawing, part: &Part, refresh_view: impl Fn(ViewId) -> bool) -> Vec<String> {
     let rows: BTreeMap<&str, &PmiRow> = part.requirements.rows.iter().map(|row| (row.item.id.as_str(), row)).collect();
     let notes = &part.requirements.notes.notes;
     let mut removed = Vec::new();
@@ -852,6 +852,9 @@ pub fn refresh(drawing: &mut Drawing, part: &Part) -> Vec<String> {
         let style = crate::library::template(sheet.template.as_str()).style_file();
         let heading = notes_heading(sheet.template.as_str());
         sheet.annotations.retain_mut(|annotation| {
+            if !refresh_view(annotation.view) {
+                return true;
+            }
             let Some(source) = annotation.source.clone() else { return true };
             let keep = match &source {
                 PmiSource::Notes => {
@@ -1241,8 +1244,9 @@ impl Laid {
 /// Moves each new annotation, with what sits under it, along its own direction until
 /// its texts are clear of the views, the sheet and the annotations settled before it.
 /// The stacked dimensions settle first, nearest their views; the callouts and symbols
-/// then clear them. An annotation that finds no clear place on the paper stays where it
-/// was planned, and [`overlaps`] names it.
+/// then clear them. A datum with no clear place along its direction tries across it.
+/// An annotation that finds no clear place on the paper stays where it was
+/// planned, and [`overlaps`] names it.
 fn settle(drawing: &mut Drawing, sheet: usize, made: &[Made]) {
     let new: BTreeSet<AnnotationId> = made.iter().map(|m| m.id).collect();
     let mut settled: Vec<AnnotationId> =
@@ -1262,29 +1266,36 @@ fn settle(drawing: &mut Drawing, sheet: usize, made: &[Made]) {
             ways.push(Point2::new(0.0, along.v.signum()));
         }
         let mut best: Option<(usize, Vec<Option<Point2>>)> = None;
-        for way in ways {
-            put(drawing, &group, &planned);
-            for moves in 0..MOVES {
-                if best.as_ref().is_some_and(|(fewest, _)| moves >= *fewest) {
-                    break;
-                }
-                let laid = lay(drawing, sheet);
-                if laid.clash(&group, &settled).is_none() {
-                    best = Some((moves, places(drawing, &group)));
-                    break;
-                }
-                if laid.off_frame(&group) && moves > 0 {
-                    break;
-                }
-                for member in &group {
-                    if let Some(a) = drawing.annotation_mut(*member) {
-                        a.placement = Point2::new(
-                            round(a.placement.u + way.u * lead.slide.step),
-                            round(a.placement.v + way.v * lead.slide.step),
-                        );
+        let slide = |ways: &[Point2], best: &mut Option<(usize, Vec<Option<Point2>>)>, drawing: &mut Drawing| {
+            for way in ways {
+                put(drawing, &group, &planned);
+                for moves in 0..MOVES {
+                    if best.as_ref().is_some_and(|(fewest, _)| moves >= *fewest) {
+                        break;
+                    }
+                    let laid = lay(drawing, sheet);
+                    if laid.clash(&group, &settled).is_none() {
+                        *best = Some((moves, places(drawing, &group)));
+                        break;
+                    }
+                    if laid.off_frame(&group) && moves > 0 {
+                        break;
+                    }
+                    for member in &group {
+                        if let Some(a) = drawing.annotation_mut(*member) {
+                            a.placement = Point2::new(
+                                round(a.placement.u + way.u * lead.slide.step),
+                                round(a.placement.v + way.v * lead.slide.step),
+                            );
+                        }
                     }
                 }
             }
+        };
+        slide(&ways, &mut best, drawing);
+        if best.is_none() && drawing.annotation(lead.id).is_some_and(|a| matches!(a.body, AnnotationKind::Datum { .. }))
+        {
+            slide(&[Point2::new(-along.v, along.u), Point2::new(along.v, -along.u)], &mut best, drawing);
         }
         put(drawing, &group, best.as_ref().map_or(&planned, |(_, at)| at));
         settled.extend(group);

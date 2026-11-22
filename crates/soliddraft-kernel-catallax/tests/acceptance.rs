@@ -227,7 +227,14 @@ fn exact_views_and_sections_refuse_profile_only_bodies() {
     for body in [profile, extracted] {
         let view = k.view_curves(body, &ViewSpec::standard(StandardView::Front)).unwrap_err();
         let section = k.section_view(body, &contract::bracket_section_spec()).unwrap_err();
-        for (failure, operation) in [(view, "view_curves"), (section, "section_view")] {
+        let silhouette = k.silhouette_curves(body, Vec3::Z).unwrap_err();
+        let cut = k.section_curves(body, &Plane::XY).unwrap_err();
+        for (failure, operation) in [
+            (view, "view_curves"),
+            (section, "section_view"),
+            (silhouette, "silhouette_curves"),
+            (cut, "section_curves"),
+        ] {
             assert!(matches!(failure, KernelError::QueryFailed { query, message, .. }
                 if query == operation && message.starts_with("app.view-solid:")));
         }

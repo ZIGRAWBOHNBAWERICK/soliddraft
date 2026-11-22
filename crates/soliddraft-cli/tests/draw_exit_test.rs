@@ -87,7 +87,27 @@ fn assert_partial_box_saved(dir: &Path, before: &Drawing) -> Drawing {
     assert_ne!(after.model.pinned, before.model.pinned);
     assert_eq!(after.sheets[0].views[0].geometry.source_digest, after.model.pinned.as_str());
     assert_eq!(after.sheets[1].views[0].geometry, before.sheets[1].views[0].geometry);
+    let list = soliddraft_drawing::display::layout_sheet(&after, 0);
+    assert_shortened_box_outline(&soliddraft_drawing::export::svg(&list), &after);
     after
+}
+
+fn assert_shortened_box_outline(svg: &str, drawing: &Drawing) {
+    let visible = svg.split_once("<g id=\"VISIBLE\"").unwrap().1.split_once("</g>").unwrap().0;
+    let (low, high) = visible
+        .lines()
+        .filter_map(|line| line.trim().strip_prefix("<path d=\""))
+        .flat_map(|path| {
+            let coordinates = path.split_once('"').unwrap().0;
+            coordinates
+                .split(['M', 'L', 'Z'])
+                .filter(|pair| !pair.trim().is_empty())
+                .map(|pair| pair.split_whitespace().nth(1).unwrap().parse::<f64>().unwrap())
+        })
+        .fold((f64::INFINITY, f64::NEG_INFINITY), |(low, high), y| (low.min(y), high.max(y)));
+    let sheet = &drawing.sheets[0];
+    let scale = soliddraft_drawing::project::effective_scale(sheet, &sheet.views[0]);
+    assert!((high - low - 5.0 * scale).abs() < 0.002, "front outline spans {} paper mm", high - low);
 }
 
 #[test]
@@ -122,11 +142,26 @@ fn pdf_refusal_allows_healthy_svg_before_a_later_legacy_cache_error() {
     let exports = report["exports"].as_array().unwrap();
     assert_eq!(exports.len(), 1);
     assert_eq!(exports[0]["path"], "sheet.svg");
-    assert!(std::fs::read_to_string(dir.join("sheet.svg")).unwrap().contains("<svg"));
+    let after = assert_partial_box_saved(&dir, &drawing);
+    assert_shortened_box_outline(&std::fs::read_to_string(dir.join("sheet.svg")).unwrap(), &after);
     for name in ["all.pdf", "sheet-2.svg", "sheet-3.svg", "later.dxf"] {
         assert!(!dir.join(name).exists(), "{name}");
     }
-    assert_partial_box_saved(&dir, &drawing);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn update_text_names_a_drawing_copy_written_before_an_output_error() {
+    let (dir, before) = shortened_box("written-copy");
+    let out = run(&dir, &["draw", "--update", "box.dwdrw", "--out", "copy.dwdrw", "--out", "typo.exe"]);
+    assert!(!out.status.success());
+    let error = String::from_utf8(out.stderr).unwrap();
+    assert!(error.contains("typo.exe"), "{error}");
+    let report = String::from_utf8(out.stdout).unwrap();
+    assert!(report.lines().any(|line| line.trim() == "copy.dwdrw"), "{report}");
+    let (copy, _) = file::read(&dir.join("copy.dwdrw")).unwrap();
+    assert_ne!(copy.model.pinned, before.model.pinned);
+    assert_eq!(copy.sheets[1].views[0].geometry, before.sheets[1].views[0].geometry);
     std::fs::remove_dir_all(dir).unwrap();
 }
 

@@ -808,7 +808,7 @@ fn export_refuses_geometry_regenerated_against_an_unaccepted_revision() {
 }
 
 #[test]
-fn export_preserves_the_saved_frozen_detail() {
+fn export_preserves_a_current_frozen_detail_and_refuses_an_older_one() {
     use soliddraft_drawing::display::Owner;
 
     let k = BoxKernel::new();
@@ -824,6 +824,11 @@ fn export_preserves_the_saved_frozen_detail() {
     assert!(!earlier.items.is_empty());
     let expected = export::svg(&earlier);
     drawing.view_mut(detail).unwrap().excluded_from_update = true;
+    let list = layout_sheet(&drawing, 0);
+    let written = String::from_utf8(export::bytes(&list, export::Format::Svg, "Box").unwrap()).unwrap();
+    for path in expected.lines().filter(|line| line.starts_with("<path ")) {
+        assert!(written.lines().any(|line| line == path), "missing saved detail path {path}");
+    }
     run(&mut stack, &mut drawing, &new, Command::SetViewCrop { view: FRONT, crop: Some(left_half()) });
     update_from_model(&mut drawing, &new).unwrap();
     for view in &mut drawing.sheets[0].views {
@@ -832,15 +837,14 @@ fn export_preserves_the_saved_frozen_detail() {
 
     let saved = drawing_roundtrip(&drawing);
     assert_ne!(saved.view(detail).unwrap().geometry.source_digest, saved.model.pinned.as_str());
-    export::check_sheet(&saved, &saved.sheets[0]).unwrap();
     let list = layout_sheet(&saved, 0);
     assert_eq!(
         list.printable().filter(|item| detail_item(item)).collect::<Vec<_>>(),
         earlier.items.iter().collect::<Vec<_>>()
     );
-    let written = String::from_utf8(export::bytes(&list, export::Format::Svg, "Box").unwrap()).unwrap();
-    for path in expected.lines().filter(|line| line.starts_with("<path ")) {
-        assert!(written.lines().any(|line| line == path), "missing saved detail path {path}");
+    for format in export::Format::ALL {
+        let error = export::bytes(&list, format, "Box").unwrap_err().to_string();
+        assert!(error.contains("accepted revision") && error.contains(export::INCLUDE_FOR_REDRAW), "{error}");
     }
 }
 

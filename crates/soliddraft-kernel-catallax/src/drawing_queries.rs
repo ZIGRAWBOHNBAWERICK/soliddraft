@@ -151,7 +151,7 @@ fn exact_view(solid: &Solid, spec: &ViewSpec) -> KernelResult<ViewCurves> {
 /// The outline of `body` seen from `direction`: Catallax's contour generators, each drawn
 /// as an exact or fitted curve and tagged with its curved face.
 pub(super) fn silhouette_curves(k: &CatallaxKernel, body: BodyId, direction: Vec3) -> KernelResult<Vec<ViewCurve>> {
-    let solid = k.solid(body)?;
+    let solid = drawing_solid(k, body, "silhouette_curves")?;
     let built = solid.app.checkpoint.built();
     let (model, result) = (&built.model, built.result);
     let toward = self::direction(direction)?;
@@ -183,7 +183,7 @@ pub(super) fn silhouette_curves(k: &CatallaxKernel, body: BodyId, direction: Vec
 /// exact or fitted curve and tagged with the face it cuts. An edge of the body in the
 /// plane is tagged with its face that leaves the plane, not a face lying in it.
 pub(super) fn section_curves(k: &CatallaxKernel, body: BodyId, plane: &Plane) -> KernelResult<Vec<ViewCurve>> {
-    let solid = k.solid(body)?;
+    let solid = drawing_solid(k, body, "section_curves")?;
     let built = solid.app.checkpoint.built();
     let (model, result) = (&built.model, built.result);
     let [x, y, z] = [plane.origin.x, plane.origin.y, plane.origin.z].map(|v| exact(v, "section origin"));

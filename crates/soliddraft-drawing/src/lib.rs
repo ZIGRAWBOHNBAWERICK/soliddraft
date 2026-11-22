@@ -203,8 +203,7 @@ impl Drawing {
         self.part_notes = part.requirements.notes.clone();
     }
 
-    /// True when the views show the part revision the drawing is pinned at: every view
-    /// that takes part in updates was made from it.
+    /// True when every view shows the part revision the drawing is pinned at.
     pub fn views_match_pin(&self) -> bool {
         let pinned = self.model.pinned.as_str();
         self.sheets.iter().flat_map(|s| &s.views).all(|v| v.accepts_revision(pinned))

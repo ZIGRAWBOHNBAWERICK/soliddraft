@@ -589,13 +589,10 @@ fn create(o: &Options) -> Result<(), String> {
             let sheets =
                 if drawing.sheets.len() > 1 { format!(" on {} sheets", drawing.sheets.len()) } else { String::new() };
             println!(
-                "{}: {views} views{sheets} at {}, {} dimensions; wrote {}",
-                source.name,
-                drawing.sheets[0].scale,
-                import.placed,
-                outputs.exports.iter().map(|file| file.path.as_str()).collect::<Vec<_>>().join(", ")
+                "{}: {views} views{sheets} at {}, {} dimensions",
+                source.name, drawing.sheets[0].scale, import.placed,
             );
-            outputs.print_written_sheets();
+            outputs.print_written_files();
             for s in &import.skipped {
                 println!("  not dimensioned: {s}");
             }
@@ -787,7 +784,7 @@ fn update(o: &Options) -> Result<(), String> {
                 report.changed.len(),
                 final_report.dangling.len()
             );
-            outputs.print_written_sheets();
+            outputs.print_written_files();
             for c in &report.changed {
                 println!("  changed {}: {} -> {}", c.annotation, c.previous, c.now);
             }
@@ -849,13 +846,15 @@ impl OutputReport {
         }
     }
 
-    fn print_written_sheets(&self) {
+    fn print_written_files(&self) {
         for file in &self.exports {
             if let Some(accuracy) = file.accuracy {
                 println!(
                     "  {}: {} exact, {} polygon, {} approximate drawing curves",
                     file.path, accuracy.exact, accuracy.polygon, accuracy.approximate
                 );
+            } else {
+                println!("  {}", file.path);
             }
         }
     }

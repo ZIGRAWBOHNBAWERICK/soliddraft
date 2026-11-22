@@ -188,7 +188,7 @@ impl DrawingDoc {
             .sheets
             .iter()
             .flat_map(|sheet| &sheet.views)
-            .any(View::needs_inclusion_for_redraw)
+            .any(|view| view.needs_inclusion_for_redraw(self.drawing.model.pinned.as_str()))
             .then_some(soliddraft_drawing::export::INCLUDE_FOR_REDRAW)
     }
 
@@ -199,11 +199,11 @@ impl DrawingDoc {
     pub(super) fn view_update_reason(&self, view: &View) -> Option<&str> {
         if let Some(failure) = self.active_refusals().find(|f| f.view == view.id) {
             Some(&failure.cause)
-        } else if view.needs_inclusion_for_redraw() {
+        } else if view.needs_inclusion_for_redraw(self.drawing.model.pinned.as_str()) {
             Some(soliddraft_drawing::export::INCLUDE_FOR_REDRAW)
         } else if !view.has_saved_catallax_linework() {
             Some("Rebuild to replace the saved line work with Catallax line work")
-        } else if !view.accepts_revision(self.seen_digest.as_str())
+        } else if (!view.excluded_from_update && !view.accepts_revision(self.seen_digest.as_str()))
             || !view.accepts_revision(self.drawing.model.pinned.as_str())
         {
             Some("Rebuild to match the part revision")
@@ -265,6 +265,11 @@ impl DrawingDoc {
         let part_key = part.and_then(|p| p.doc.model().journal_key());
         let journal = self.journal_command(|| serde_json::json!({"op":"execute", "command":cmd, "part":part_key}));
         journal.finish((|| {
+            if let Command::SetViewExcluded { view, excluded: true } = &cmd
+                && let Some((_, _, name, cause)) = self.refused_views().find(|(_, id, _, _)| id == view)
+            {
+                return Err(format!("Cannot exclude {name} from automatic update: {cause}"));
+            }
             let from = self.drawing.model.pinned.clone();
             let p = part.map(|c| c.part());
             // A remade view also changes its descendants' linework and picking data.

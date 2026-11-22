@@ -52,14 +52,13 @@ impl View {
 
     /// True when the view is excluded from automatic update and its saved line work
     /// cannot be exported, so it must be included and rebuilt first.
-    pub fn needs_inclusion_for_redraw(&self) -> bool {
-        self.excluded_from_update && !self.has_saved_catallax_linework()
+    pub fn needs_inclusion_for_redraw(&self, pinned: &str) -> bool {
+        self.excluded_from_update && (!self.has_saved_catallax_linework() || !self.accepts_revision(pinned))
     }
 
-    /// True when the view may show the part revision `digest`: it was drawn from it, or
-    /// it is excluded from automatic update.
+    /// True when the view was drawn from the part revision `digest`.
     pub fn accepts_revision(&self, digest: &str) -> bool {
-        self.excluded_from_update || self.geometry.source_digest == digest
+        self.geometry.source_digest == digest
     }
 
     /// The parent view, for every kind except a base view.

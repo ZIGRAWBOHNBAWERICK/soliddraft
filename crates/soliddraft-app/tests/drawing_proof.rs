@@ -86,20 +86,11 @@ fn rebuild_names_a_broken_out_cut_that_no_longer_reaches_the_part() {
     assert!(status.headline.0.contains(&name) && status.headline.0.contains(cause));
 
     let session = state.drawing.session.as_mut().unwrap();
-    session.doc.apply(Command::SetViewExcluded { view, excluded: true }, None).unwrap();
-    for rebuild in [false, true] {
-        if rebuild {
-            let report = call(&mut state, "drawing_rebuild", json!({}));
-            assert!(report["done"].as_str().is_some_and(|message| message.contains(&name) && message.contains(cause)));
-        }
-        let session = state.drawing.session.as_ref().unwrap();
-        assert!(session.has_issues());
-        assert!(!session.is_up_to_date());
-        let status = soliddraft_app::drawing::status(&state).unwrap();
-        assert!(status.headline.0.contains(&name) && status.headline.0.contains(cause));
-    }
-    let session = state.drawing.session.as_mut().unwrap();
-    session.doc.apply(Command::SetViewExcluded { view, excluded: false }, None).unwrap();
+    let error = session.doc.apply(Command::SetViewExcluded { view, excluded: true }, None).unwrap_err();
+    assert!(error.contains(&name) && error.contains(cause), "{error}");
+    assert!(!session.doc.drawing.view(view).unwrap().excluded_from_update);
+    let report = call(&mut state, "drawing_rebuild", json!({}));
+    assert!(report["done"].as_str().is_some_and(|message| message.contains(&name) && message.contains(cause)));
 
     use soliddraft_app::drawing::{DrawingSession, document::DrawingDoc};
     use soliddraft_drawing::file::{FileMeta, from_bytes, to_bytes};
@@ -119,6 +110,30 @@ fn rebuild_names_a_broken_out_cut_that_no_longer_reaches_the_part() {
 fn certified_views(kernel: &soliddraft_kernel_catallax::CatallaxKernel) -> usize {
     let calls = kernel.take_diagnostics().unwrap();
     calls["calls"].as_array().unwrap().iter().filter(|c| exact_view(c)).count()
+}
+
+fn assert_no_drawing_queries(kernel: &soliddraft_kernel_catallax::CatallaxKernel) {
+    let log = kernel.take_diagnostics().unwrap();
+    for call in log["calls"].as_array().unwrap() {
+        assert!(
+            !matches!(
+                call["operation"].as_str(),
+                Some(
+                    "view_curves"
+                        | "section_view"
+                        | "silhouette_curves"
+                        | "section_curves"
+                        | "edge_curve"
+                        | "face_loops"
+                        | "preview"
+                        | "preview_edges"
+                        | "tessellate"
+                        | "tessellate_edges"
+                )
+            ),
+            "export ran a drawing query: {call}"
+        );
+    }
 }
 
 /// A top-level view call whose operation log holds Catallax's hidden-line view.
@@ -329,7 +344,7 @@ fn a_rod_cut_exports_the_saved_catallax_views() {
     assert_rod_circle(&dir.join("rod.svg"), &shown);
     assert_eq!(state.drawing.session.as_ref().unwrap().doc.drawing, shown);
 
-    assert_eq!(certified_views(&kernel), 0, "exports use the saved curves");
+    assert_no_drawing_queries(&kernel);
     std::fs::remove_dir_all(dir).unwrap();
 }
 
@@ -390,6 +405,7 @@ fn a_legacy_rod_cache_refuses_export_until_explicit_rebuild() {
     soliddraft_app::drawing::follow_part(&mut reopened);
     assert_eq!(reopened.drawing.session.as_ref().unwrap().doc.drawing, shown);
 
+    kernel.take_diagnostics().unwrap();
     let caller = Caller::Mcp { client: "test".into() };
     for (tool, extension) in
         [("drawing_export_svg", "svg"), ("drawing_export_pdf", "pdf"), ("drawing_export_dxf", "dxf")]
@@ -399,7 +415,7 @@ fn a_legacy_rod_cache_refuses_export_until_explicit_rebuild() {
         assert!(out.is_error && out.content.contains("Redraw it once"), "{tool}: {}", out.content);
         assert!(!path.exists());
     }
-    assert_eq!(certified_views(&kernel), 0);
+    assert_no_drawing_queries(&kernel);
     assert_eq!(reopened.drawing.session.as_ref().unwrap().doc.drawing, shown);
 
     let view = shown.sheets[0].views[0].id;
@@ -410,6 +426,7 @@ fn a_legacy_rod_cache_refuses_export_until_explicit_rebuild() {
         call_checked(&mut AppTools { state: &mut reopened }, "drawing_export_svg", json!({ "path": path }), &caller);
     assert!(out.is_error && out.content.contains("Include the view in automatic update, then rebuild."));
     assert!(!path.exists());
+    assert_no_drawing_queries(&kernel);
     reopened
         .drawing
         .session
@@ -422,13 +439,15 @@ fn a_legacy_rod_cache_refuses_export_until_explicit_rebuild() {
     assert_eq!(certified_views(&kernel), 4);
     let path = dir.join("reopened.svg");
     call(&mut reopened, "drawing_export_svg", json!({ "path": path }));
-    assert_eq!(certified_views(&kernel), 0);
+    assert_no_drawing_queries(&kernel);
     assert_rod_circle(&path, &reopened.drawing.session.as_ref().unwrap().doc.drawing);
     std::fs::remove_dir_all(dir).unwrap();
 }
 
 #[test]
 fn single_sheet_exports_check_only_the_written_views() {
+    use soliddraft_app::drawing::{DrawingSession, document::DrawingDoc};
+    use soliddraft_drawing::file::{FileMeta, from_bytes, to_bytes};
     use soliddraft_drawing::{Sheet, ViewKind, library};
 
     let dir = std::env::temp_dir().join(format!("soliddraft-drawing-sheet-scope-{}", std::process::id()));
@@ -466,23 +485,54 @@ fn single_sheet_exports_check_only_the_written_views() {
 
     let session = state.drawing.session.as_mut().unwrap();
     let old = soliddraft_drawing::ContentHash::of_bytes(b"older part");
-    let pinned = session.doc.drawing.model.pinned.clone();
     session.doc.drawing.sheets[1].views.pop();
     let frozen = &mut session.doc.drawing.sheets[1].views[0];
     frozen.excluded_from_update = true;
     frozen.geometry.source_digest = old.as_str().into();
+    let drawing = &session.doc.drawing;
+    let bytes = to_bytes(drawing, &FileMeta::new("Catallax", drawing.meta.units)).unwrap();
+    let (reopened, _) = from_bytes(&bytes).unwrap();
+    let mut session = DrawingSession::new(DrawingDoc::new(reopened));
     session.sheet = 1;
-    for (tool, extension) in [("drawing_export_svg", "svg"), ("drawing_export_dxf", "dxf")] {
-        let report = call(&mut state, tool, json!({ "path": dir.join(format!("frozen.{extension}")) }));
-        assert_eq!(report["pinned_revision"], pinned.short(), "{report}");
-        assert_eq!(report["revision"], old.as_str(), "{report}");
-        assert_eq!(report["view_revisions"], json!([old]), "{report}");
+    assert!(!session.is_up_to_date());
+    state.drawing.session = Some(session);
+    for (tool, extension) in
+        [("drawing_export_svg", "svg"), ("drawing_export_dxf", "dxf"), ("drawing_export_pdf", "pdf")]
+    {
+        let path = dir.join(format!("frozen.{extension}"));
+        let out = call_checked(&mut AppTools { state: &mut state }, tool, json!({ "path": path }), &caller);
+        assert!(out.is_error && out.content.contains("accepted revision"), "{tool}: {}", out.content);
+        assert!(!path.exists());
     }
-    let report = call(&mut state, "drawing_export_pdf", json!({ "path": pdf }));
-    let mut revisions = [old, pinned];
-    revisions.sort();
-    assert_eq!(report["revision"], Value::Null, "{report}");
-    assert_eq!(report["view_revisions"], json!(revisions), "{report}");
 
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn pdf_and_dxf_exports_report_the_single_approximate_hatch() {
+    use soliddraft_app::drawing::{DrawingSession, document::DrawingDoc};
+    use soliddraft_drawing::Polygon;
+    use soliddraft_kernel_api::Point2;
+
+    let dir = std::env::temp_dir().join(format!("soliddraft-fitted-hatch-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut drawing = soliddraft_drawing::fixture::bracket_a3();
+    for view in &mut drawing.sheets[0].views {
+        view.geometry.catallax = true;
+        view.geometry.curves.clear();
+    }
+    drawing.sheets[0].views[0].geometry.hatch.push(Polygon {
+        outer: vec![Point2::new(-5.0, -5.0), Point2::new(5.0, -5.0), Point2::new(5.0, 5.0), Point2::new(-5.0, 5.0)],
+        approximate: true,
+        ..Default::default()
+    });
+    let mut state = AppState::new(board_bracket());
+    state.drawing.session = Some(DrawingSession::new(DrawingDoc::new(drawing)));
+    for (tool, extension) in [("drawing_export_pdf", "pdf"), ("drawing_export_dxf", "dxf")] {
+        let path = dir.join(format!("hatch.{extension}"));
+        let report = call(&mut state, tool, json!({ "path": path }));
+        assert_eq!(report["accuracy"]["approximate"], 1, "{tool}: {report}");
+        assert!(path.is_file());
+    }
     std::fs::remove_dir_all(dir).unwrap();
 }

@@ -1244,8 +1244,8 @@ impl Laid {
 /// Moves each new annotation, with what sits under it, along its own direction until
 /// its texts are clear of the views, the sheet and the annotations settled before it.
 /// The stacked dimensions settle first, nearest their views; the callouts and symbols
-/// then clear them. A callout or a symbol with no clear place along its direction tries
-/// across it. An annotation that finds no clear place on the paper stays where it was
+/// then clear them. A datum with no clear place along its direction tries across it.
+/// An annotation that finds no clear place on the paper stays where it was
 /// planned, and [`overlaps`] names it.
 fn settle(drawing: &mut Drawing, sheet: usize, made: &[Made]) {
     let new: BTreeSet<AnnotationId> = made.iter().map(|m| m.id).collect();
@@ -1293,10 +1293,8 @@ fn settle(drawing: &mut Drawing, sheet: usize, made: &[Made]) {
             }
         };
         slide(&ways, &mut best, drawing);
-        // A callout or a symbol boxed in along its own direction, as a datum is beside a
-        // dimension stack on the same side of its view, slides across that direction
-        // instead. Layouts that settle along it are unchanged.
-        if best.is_none() && !lead.stacked {
+        if best.is_none() && drawing.annotation(lead.id).is_some_and(|a| matches!(a.body, AnnotationKind::Datum { .. }))
+        {
             slide(&[Point2::new(-along.v, along.u), Point2::new(along.v, -along.u)], &mut best, drawing);
         }
         put(drawing, &group, best.as_ref().map_or(&planned, |(_, at)| at));

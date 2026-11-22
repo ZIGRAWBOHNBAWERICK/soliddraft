@@ -193,10 +193,29 @@ impl DrawingDoc {
     }
 
     pub fn view_is_up_to_date(&self, view: &View) -> bool {
-        view.has_saved_catallax_linework()
-            && view.accepts_revision(self.seen_digest.as_str())
-            && view.accepts_revision(self.drawing.model.pinned.as_str())
-            && (view.excluded_from_update || !self.active_refusals().any(|f| f.view == view.id))
+        self.view_update_reason(view).is_none()
+    }
+
+    pub(super) fn view_update_reason(&self, view: &View) -> Option<&str> {
+        if let Some(failure) = self.active_refusals().find(|f| f.view == view.id) {
+            Some(&failure.cause)
+        } else if view.needs_inclusion_for_redraw() {
+            Some(soliddraft_drawing::export::INCLUDE_FOR_REDRAW)
+        } else if !view.has_saved_catallax_linework() {
+            Some("Rebuild to replace the saved line work with Catallax line work")
+        } else if !view.accepts_revision(self.seen_digest.as_str())
+            || !view.accepts_revision(self.drawing.model.pinned.as_str())
+        {
+            Some("Rebuild to match the part revision")
+        } else {
+            None
+        }
+    }
+
+    pub(super) fn view_revision(view: &View) -> String {
+        let digest = view.geometry.source_digest.as_str();
+        let digits = digest.split_once(':').map_or(digest, |(_, digits)| digits);
+        if digits.is_empty() { "unknown".into() } else { digits.chars().take(8).collect() }
     }
 
     /// Views that need a redraw.
@@ -221,7 +240,7 @@ impl DrawingDoc {
         self.active_refusals().filter_map(|failure| {
             let i = project::sheet_of(&self.drawing, failure.view)?;
             let sheet = &self.drawing.sheets[i];
-            let view = sheet.view(failure.view).filter(|v| !v.excluded_from_update)?;
+            let view = sheet.view(failure.view)?;
             Some((i, view.id, project::view_label_in(&self.drawing, sheet, view), failure.cause.as_str()))
         })
     }
@@ -292,7 +311,15 @@ impl DrawingDoc {
                     }
                 }
             }
-            if let (Some(r), Some(ctx)) = (report, part) {
+            if let (Some(mut r), Some(ctx)) = (report, part) {
+                r.dangling_views.extend(
+                    self.last_update
+                        .iter()
+                        .filter(|update| update.to_revision == from)
+                        .flat_map(|update| &update.dangling_views)
+                        .filter(|failure| self.drawing.view(failure.view).is_some_and(|v| v.excluded_from_update))
+                        .cloned(),
+                );
                 for (id, projected) in &r.projections {
                     self.remember(*id, projected);
                 }

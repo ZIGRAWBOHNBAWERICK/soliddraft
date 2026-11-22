@@ -301,7 +301,8 @@ fn drawing_roundtrip(d: &Drawing) -> Drawing {
 
 #[test]
 fn parent_crop_refreshes_nested_details_across_sheets_history_and_save() {
-    let k = BoxKernel::new();
+    let mut k = BoxKernel::new();
+    k.detail_strokes = true;
     let part = box_part(&k, "block", Vec3::new(40.0, 30.0, 10.0));
     for sheet in [0, 1] {
         let mut d = drawing(&part);
@@ -368,7 +369,8 @@ fn same_revision_rebuild_repairs_an_obsolete_fine_detail_cache() {
 
 #[test]
 fn detail_updates_preserve_coarse_and_fine_quality() {
-    let k = BoxKernel::new();
+    let mut k = BoxKernel::new();
+    k.detail_strokes = true;
     let mut part = box_part(&k, "block", Vec3::new(40.0, 30.0, 10.0));
     let mut d = drawing(&part);
     let mut stack = UndoStack::new();
@@ -635,7 +637,8 @@ fn fitted_hatch(d: &mut Drawing, xf: &project::ViewTransform) -> soliddraft_draw
 }
 
 fn fitted_hatch_fixture() -> soliddraft_drawing::display::DisplayList {
-    let k = BoxKernel::new();
+    let mut k = BoxKernel::new();
+    k.detail_strokes = true;
     let part = box_part(&k, "block", Vec3::new(40.0, 30.0, 10.0));
     let mut d = drawing(&part);
     let index = PartIndex::build(&part).unwrap();
@@ -670,7 +673,8 @@ fn fitted_hatch_reports_approximation_in_dxf() {
 
 #[test]
 fn the_dxf_keeps_dimensions_and_hatches_as_such() {
-    let k = BoxKernel::new();
+    let mut k = BoxKernel::new();
+    k.detail_strokes = true;
     let part = box_part(&k, "block", Vec3::new(40.0, 30.0, 10.0));
     let mut d =
         soliddraft_drawing::make_drawing(&part, &NewDrawing { model_items: true, ..new_drawing() }).unwrap().drawing;
@@ -741,8 +745,17 @@ fn export_refuses_unmarked_saved_crops_even_when_proved() {
         assert!(!view.geometry.unproved);
     }
     let saved = drawing_roundtrip(&drawing);
-    let error = export::check_sheet(&saved, &saved.sheets[0]).unwrap_err();
-    assert!(error.to_string().contains("Front view") && error.to_string().contains("Redraw it once"));
+    let list = layout_sheet(&saved, 0);
+    let path = std::env::temp_dir().join(format!("soliddraft-legacy-crop-{}.svg", std::process::id()));
+    let errors = [
+        export::write(&list, export::Format::Svg, "Box", &path).unwrap_err(),
+        export::pdf(std::slice::from_ref(&list), &export::PdfInfo::default()).unwrap_err(),
+        export::dxf(&list).unwrap_err(),
+    ];
+    for error in errors {
+        assert!(error.to_string().contains("Front view") && error.to_string().contains("Redraw it once"));
+    }
+    assert!(!path.exists());
     assert_eq!(saved.view(FRONT).unwrap().crop, Some(left_half()));
 }
 

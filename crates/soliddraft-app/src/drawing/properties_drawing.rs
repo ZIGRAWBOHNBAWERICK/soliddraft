@@ -445,12 +445,16 @@ fn view_panel(
     if close.clicked() {
         actions.push(DrawingAction::Select(None));
     }
-    let stale = !s.doc.view_is_up_to_date(&v);
+    let update_reason = s.doc.view_update_reason(&v);
     egui::ScrollArea::vertical().id_salt("view_pm").auto_shrink([false, false]).show(ui, |ui| {
         egui::Frame::new().inner_margin(egui::Margin::symmetric(10, 8)).show(ui, |ui| {
             theme::section_label(ui, "Reference");
-            let state_text = if stale { "out of date" } else { "up to date" };
-            value_row(ui, "Model", &format!("{part} (rev {}, {state_text})", s.doc.drawing.model.pinned.short()));
+            let state_text = if update_reason.is_some() { "needs redraw" } else { "up to date" };
+            let revision = super::document::DrawingDoc::view_revision(&v);
+            value_row(ui, "Model", &format!("{part} (rev {revision}, {state_text})"));
+            if let Some(reason) = update_reason.filter(|reason| *reason != soliddraft_drawing::export::INCLUDE_FOR_REDRAW) {
+                hint(ui, reason);
+            }
             let orientation = match &v.kind {
                 soliddraft_drawing::ViewKind::Base { .. } => name.trim_end_matches(" view").to_owned(),
                 soliddraft_drawing::ViewKind::Projected { parent, direction, .. } => {
@@ -588,9 +592,9 @@ fn view_panel(
             if ui.checkbox(&mut excluded, "Exclude this view from updates").changed() {
                 actions.push(DrawingAction::Command(Command::SetViewExcluded { view: id, excluded }));
             }
-            if v.needs_inclusion_for_redraw() {
+            if v.excluded_from_update && update_reason.is_some() {
                 hint(ui, soliddraft_drawing::export::INCLUDE_FOR_REDRAW);
-            } else if stale {
+            } else if update_reason.is_some() {
                 ui.add_space(4.0);
                 if ui.button("Rebuild").on_hover_text("Bring the views to the current part (Ctrl+B)").clicked() {
                     actions.push(DrawingAction::Rebuild);

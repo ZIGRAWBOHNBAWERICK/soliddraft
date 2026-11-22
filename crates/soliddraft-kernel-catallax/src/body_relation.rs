@@ -128,14 +128,17 @@ fn source_faces(solid: &Solid, contact: &queries::ContactFaces, patches: &[queri
         .collect()
 }
 
-fn witness_step<T>(result: Result<T, Refusal>) -> Result<Option<T>, Refusal> {
+fn witness_step<T>(result: Result<T, Refusal>, first_refusal: &mut Option<Refusal>) -> Result<Option<T>, Refusal> {
     if catallax_numbers::current_operation_work().exhausted {
         return Err(Refusal::new("numbers.operation-budget", "operation work allowance exhausted"));
     }
     match result {
         Ok(value) => Ok(Some(value)),
         Err(r) if calculation_limit(r.code) => Err(r),
-        Err(_) => Ok(None),
+        Err(r) => {
+            first_refusal.get_or_insert(r);
+            Ok(None)
+        }
     }
 }
 
@@ -153,10 +156,13 @@ fn exceeds(
     }
     let within = numerical("clearance_witness", |dec| {
         let accuracy = Accuracy::default();
+        let mut first_refusal = None;
         let mut bounds = |body| {
             let mut faces = Vec::new();
             for face in model.faces_of_body(body) {
-                if let Some(bounds) = witness_step(catallax_measure::face_bounding_box(model, face, &accuracy, dec))? {
+                if let Some(bounds) =
+                    witness_step(catallax_measure::face_bounding_box(model, face, &accuracy, dec), &mut first_refusal)?
+                {
                     faces.push((face, bounds.value, None));
                 }
             }
@@ -176,14 +182,16 @@ fn exceeds(
                     continue;
                 }
                 if prepared_a.is_none() {
-                    *prepared_a = Some(witness_step(PreparedFace::new(model, *a, dec))?);
+                    *prepared_a = Some(witness_step(PreparedFace::new(model, *a, dec), &mut first_refusal)?);
                 }
                 let Some(Some(a)) = prepared_a.as_ref() else { break };
                 if prepared_b.is_none() {
-                    *prepared_b = Some(witness_step(PreparedFace::new(model, *b, dec))?);
+                    *prepared_b = Some(witness_step(PreparedFace::new(model, *b, dec), &mut first_refusal)?);
                 }
                 let Some(Some(b)) = prepared_b.as_ref() else { continue };
-                let Some(bounds) = witness_step(a.face_to_face(b, model, &options, dec))? else { continue };
+                let Some(bounds) = witness_step(a.face_to_face(b, model, &options, dec), &mut first_refusal)? else {
+                    continue;
+                };
                 let upper = bounds.upper;
                 #[cfg(test)]
                 let upper = tests::face_upper(upper);
@@ -198,13 +206,13 @@ fn exceeds(
                         Outcome::NotExact(n) => Err(Refusal::from(n)),
                         Outcome::Refused(r) => Err(r),
                     };
-                    if witness_step(sign)? == Some(true) {
+                    if witness_step(sign, &mut first_refusal)? == Some(true) {
                         return Ok(Answer::exact(true));
                     }
                 }
             }
         }
-        Ok(Answer::exact(false))
+        first_refusal.map_or_else(|| Ok(Answer::exact(false)), Err)
     });
     answer("Clearance", within).map(|within| within.then_some(false))
 }

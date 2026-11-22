@@ -182,6 +182,7 @@ pub struct DisplayList {
     /// Some view's line work came from the kernel's unproved preview. Shown on screen,
     /// never exported.
     pub unproved: bool,
+    pub(crate) export_error: Option<String>,
 }
 
 /// One dimension as its definition points, in sheet millimetres.
@@ -474,11 +475,13 @@ pub fn layout(drawing: &Drawing, sheet_index: usize, ctx: &Context<'_>) -> Displ
         dimensions: Vec::new(),
         hatches: Vec::new(),
         unproved: false,
+        export_error: None,
     };
     let Some(sheet) = drawing.sheets.get(sheet_index) else {
         return list;
     };
     list.unproved = sheet.views.iter().any(|v| v.geometry.unproved);
+    list.export_error = crate::export::sheet_error(drawing, sheet);
     format_items(drawing, sheet, ctx, &mut list.items);
     tables::table_items(drawing, sheet, ctx, &mut list.items);
     for view in &sheet.views {

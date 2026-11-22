@@ -721,6 +721,12 @@ fn update(o: &Options) -> Result<(), String> {
             .map_err(|e| e.to_string())?
             .expect("an update reports");
         rebind(&mut drawing.model, &target);
+        // A drawing from before the envelope is saved under the current name beside it.
+        let saved = soliddraft_document::kind::saved_path(&path, DocKind::Drawing);
+        let meta = meta.rewritten(&source.backend, drawing.meta.units);
+        if !report.dangling_views.is_empty() && !o.reattach.is_empty() {
+            file::write(&saved, &drawing, &meta).map_err(|e| e.to_string())?;
+        }
         let mut repairs = Vec::new();
         let run = |stack: &mut soliddraft_drawing::UndoStack, drawing: &mut Drawing, c: Command| {
             stack.run(drawing, &c, Some(part)).map(|_| ()).map_err(|e| e.to_string())
@@ -732,9 +738,17 @@ fn update(o: &Options) -> Result<(), String> {
             }
         }
         for (id, end, at) in &o.reattach {
-            let entity = soliddraft_drawing::edge_near(part, *at).map_err(|e| e.to_string())?;
             let annotation = AnnotationId(*id);
-            run(&mut stack, &mut drawing, Command::Reattach { annotation, end: *end, entity })?;
+            let result = soliddraft_drawing::edge_near(part, *at)
+                .map_err(|e| e.to_string())
+                .and_then(|entity| run(&mut stack, &mut drawing, Command::Reattach { annotation, end: *end, entity }));
+            result.map_err(|error| {
+                let mut message = format!("Cannot reattach end {end} of {annotation}: {error}");
+                for refusal in &report.dangling_views {
+                    message.push_str(&format!("\n{}: {}", refusal.name, refusal.cause));
+                }
+                message
+            })?;
             repairs.push(format!("reattached end {end} of {annotation}"));
         }
         for id in &o.freeze {
@@ -745,9 +759,6 @@ fn update(o: &Options) -> Result<(), String> {
             run(&mut stack, &mut drawing, Command::DeleteAnnotation { annotation: AnnotationId(*id) })?;
             repairs.push(format!("deleted annotation {id}"));
         }
-        // A drawing from before the envelope is saved under the current name beside it.
-        let saved = soliddraft_document::kind::saved_path(&path, DocKind::Drawing);
-        let meta = meta.rewritten(&source.backend, drawing.meta.units);
         file::write(&saved, &drawing, &meta).map_err(|e| e.to_string())?;
         let outputs = write_outputs(&drawing, &o.outs, &source.backend, &report.dangling_views);
         // The report after repairs: what still needs attention.

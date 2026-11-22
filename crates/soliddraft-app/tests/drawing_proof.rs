@@ -52,8 +52,9 @@ fn rebuild_names_a_broken_out_cut_that_no_longer_reaches_the_part() {
         })
         .unwrap();
     let name = soliddraft_drawing::project::view_label_in(&session.doc.drawing, session.sheet(), view);
+    let view = view.id;
     let command = Command::AddBrokenOut {
-        view: view.id,
+        view,
         broken_out: BrokenOut {
             boundary: Boundary::rectangle(Point2::new(-4.0, -4.0), Point2::new(4.0, 4.0)),
             depth: 7.0,
@@ -83,6 +84,22 @@ fn rebuild_names_a_broken_out_cut_that_no_longer_reaches_the_part() {
     assert!(state.drawing.session.as_ref().unwrap().has_issues());
     let status = soliddraft_app::drawing::status(&state).unwrap();
     assert!(status.headline.0.contains(&name) && status.headline.0.contains(cause));
+
+    let session = state.drawing.session.as_mut().unwrap();
+    session.doc.apply(Command::SetViewExcluded { view, excluded: true }, None).unwrap();
+    for rebuild in [false, true] {
+        if rebuild {
+            let report = call(&mut state, "drawing_rebuild", json!({}));
+            assert!(report["done"].as_str().is_some_and(|message| message.contains(&name) && message.contains(cause)));
+        }
+        let session = state.drawing.session.as_ref().unwrap();
+        assert!(session.has_issues());
+        assert!(!session.is_up_to_date());
+        let status = soliddraft_app::drawing::status(&state).unwrap();
+        assert!(status.headline.0.contains(&name) && status.headline.0.contains(cause));
+    }
+    let session = state.drawing.session.as_mut().unwrap();
+    session.doc.apply(Command::SetViewExcluded { view, excluded: false }, None).unwrap();
 
     use soliddraft_app::drawing::{DrawingSession, document::DrawingDoc};
     use soliddraft_drawing::file::{FileMeta, from_bytes, to_bytes};

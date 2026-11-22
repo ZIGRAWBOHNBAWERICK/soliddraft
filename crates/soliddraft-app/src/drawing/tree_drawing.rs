@@ -288,8 +288,6 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
             }
             // Views: parents first, children indented under them.
             let model = &s.doc.drawing.meta.title;
-            let rev = s.doc.drawing.model.pinned.short().to_owned();
-            let stale = s.doc.stale_views();
             // Each view right after its parent, children in sheet order.
             fn descend(sheet: &soliddraft_drawing::Sheet, parent: ViewId, depth: u8, order: &mut Vec<(ViewId, u8)>) {
                 for c in sheet.views.iter().filter(|c| c.parent() == Some(parent)) {
@@ -307,6 +305,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
             for (id, depth) in order {
                 let v = sheet.view(id).unwrap();
                 let name = view_label_in(&s.doc.drawing, sheet, v);
+                let update_reason = s.doc.view_update_reason(v);
                 // A derived view's scale and its location on another sheet.
                 let mut sub = String::new();
                 let own = effective_scale(sheet, v);
@@ -327,7 +326,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
                     ViewKind::Auxiliary { .. } => Icon::Plane,
                     _ => Icon::Display,
                 };
-                let dot = if stale.contains(&id) {
+                let dot = if update_reason.is_some() {
                     Dot::Warn
                 } else {
                     let worst = sheet
@@ -357,11 +356,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
                         selected: selection == Some(DrawingSel::View(id)),
                         dim: v.excluded_from_update,
                         dot,
-                        tip: Some(if stale.contains(&id) {
-                            "Out of date: update views"
-                        } else {
-                            "Click to select; double-click to fold a view off it"
-                        }),
+                        tip: Some(update_reason.unwrap_or("Click to select; double-click to fold a view off it")),
                     },
                 );
                 if r.clicked() {
@@ -411,14 +406,8 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
                     }
                 });
                 if open && depth == 2 {
-                    let reference = format!("{model} rev {rev}");
-                    let tip = if v.needs_inclusion_for_redraw() {
-                        soliddraft_drawing::export::INCLUDE_FOR_REDRAW
-                    } else if stale.contains(&id) {
-                        "Newer version available; this view shows the pinned revision until a Rebuild"
-                    } else {
-                        "The model this view shows, at the revision of the last update"
-                    };
+                    let reference = format!("{model} rev {}", super::document::DrawingDoc::view_revision(v));
+                    let tip = update_reason.unwrap_or("The part revision this view shows");
                     row(
                         ui,
                         RowSpec {

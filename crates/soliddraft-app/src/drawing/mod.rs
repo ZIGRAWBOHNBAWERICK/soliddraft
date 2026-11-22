@@ -1494,7 +1494,7 @@ pub fn apply(state: &mut AppState, dock: &mut DockState<Tab>, ctx: &egui::Contex
             if let Some(s) = state.drawing.session.as_mut() {
                 if s.doc.undo_label() == Some("Update from model") {
                     s.doc.undo();
-                    s.say("Rebuild undone; the views are older than the part again");
+                    s.say("Rebuild undone");
                 } else {
                     s.say("The last change was not an update");
                 }

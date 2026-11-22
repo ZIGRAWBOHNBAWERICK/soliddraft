@@ -474,7 +474,8 @@ fn round_dimension_repairs_reject_straight_edges_without_losing_the_warning() {
 
 #[test]
 fn scaled_dxf_dimensions_remeasure_from_their_definition_points() {
-    let k = BoxKernel::new();
+    let mut k = BoxKernel::new();
+    k.detail_strokes = true;
     let part = box_part(&k, "block", Vec3::new(100.0, 30.0, 10.0));
     let (mut d, _) = make_drawing(&part, &new_drawing("iso-a3")).unwrap();
     apply(&mut d, &Command::SetSheetScale { sheet: 0, scale: Scale::new(1, 2) }).unwrap();
@@ -504,7 +505,8 @@ fn scaled_dxf_dimensions_remeasure_from_their_definition_points() {
 
 #[test]
 fn the_file_and_the_exports_carry_the_drawing() {
-    let k = BoxKernel::new();
+    let mut k = BoxKernel::new();
+    k.detail_strokes = true;
     let part = box_part(&k, "block", Vec3::new(40.0, 30.0, 10.0));
     let (d, _) = make_drawing(&part, &new_drawing("iso-a3")).unwrap();
     let bytes = file::to_bytes(&d, &FileMeta::new("boxes test", d.meta.units)).unwrap();

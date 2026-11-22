@@ -558,6 +558,7 @@ pub fn panel(ui: &mut egui::Ui, s: &DrawingSession, part_open: bool, actions: &m
         let state = s.link_state();
         let (status, colour) = match &state {
             LinkState::Unknown => ("Not resolved yet".to_owned(), theme::muted()),
+            LinkState::Current if !s.is_up_to_date() => ("The drawing needs a rebuild".to_owned(), theme::warn()),
             LinkState::Current => ("Up to date".to_owned(), theme::ok()),
             LinkState::Newer { now } => (format!("Newer version available · rev {}", now.short()), theme::warn()),
             LinkState::Unverified => ("Not a SolidDraft document; no revision to compare".to_owned(), theme::muted()),

@@ -720,6 +720,23 @@ fn update(o: &Options) -> Result<(), String> {
             .run(&mut drawing, &Command::UpdateFromModel, Some(part))
             .map_err(|e| e.to_string())?
             .expect("an update reports");
+        let writes_sheet = o.outs.iter().any(|out| {
+            Path::new(out).extension().and_then(|ext| ext.to_str()).and_then(Format::from_extension).is_some()
+        });
+        if writes_sheet && !report.dangling_views.is_empty() {
+            let refused: Vec<_> = report
+                .dangling_views
+                .iter()
+                .map(|failure| {
+                    let label = drawing
+                        .sheet_of(failure.view)
+                        .and_then(|sheet| sheet.view(failure.view).map(|view| project::view_label(sheet, view)))
+                        .unwrap_or_else(|| failure.view.to_string());
+                    format!("{label}: {}", failure.cause)
+                })
+                .collect();
+            return Err(refused.join("\n"));
+        }
         rebind(&mut drawing.model, &target);
         let mut repairs = Vec::new();
         let run = |stack: &mut soliddraft_drawing::UndoStack, drawing: &mut Drawing, c: Command| {
@@ -745,9 +762,6 @@ fn update(o: &Options) -> Result<(), String> {
             run(&mut stack, &mut drawing, Command::DeleteAnnotation { annotation: AnnotationId(*id) })?;
             repairs.push(format!("deleted annotation {id}"));
         }
-        let writes_sheet = o.outs.iter().any(|out| {
-            Path::new(out).extension().and_then(|ext| ext.to_str()).and_then(Format::from_extension).is_some()
-        });
         let mut export = None;
         if writes_sheet {
             let ids: Vec<_> = drawing

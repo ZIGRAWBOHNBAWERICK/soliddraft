@@ -589,3 +589,42 @@ fn export_accuracy_counts_printed_paths_only() {
     assert_eq!(layout.accuracy().approximate, 0);
     assert!(layout.accuracy().exact + layout.accuracy().polygon > 0);
 }
+
+#[test]
+fn export_keeps_a_preview_crop_on_its_model_corner() {
+    let mut k = BoxKernel::new();
+    k.preview_extent = Some(Vec3::new(100.0, 0.0, 0.0));
+    let mut part = box_part(&k, "block", Vec3::new(40.0, 30.0, 10.0));
+    part.preview = true;
+    let mut drawing = drawing(&part);
+    let index = PartIndex::build(&part).unwrap();
+    let front = derived::context(&drawing, &part, &index, FRONT).unwrap();
+    let corner = Vec3::new(40.0, 0.0, 10.0);
+    let at = front.xf.point(corner);
+    let crop = Boundary::Circle { center: at, radius: 2.0 };
+    run(&mut UndoStack::new(), &mut drawing, &part, Command::SetViewCrop { view: FRONT, crop: Some(crop) });
+    part.preview = false;
+    soliddraft_drawing::redraw_for_export(&mut drawing, &part, &[FRONT]).unwrap();
+    let view = drawing.view(FRONT).unwrap();
+    assert!(!view.geometry.curves.is_empty(), "the right-hand box corner is inside the crop");
+    let Boundary::Circle { center, radius } = view.crop.as_ref().unwrap() else { panic!("circle") };
+    let scale = project::view_scale(&drawing, FRONT).unwrap();
+    assert!((center.u - 20.0 * scale).abs() < 1e-6);
+    assert!((center.v - 5.0 * scale).abs() < 1e-6);
+    assert_eq!(*radius, 2.0);
+}
+
+#[test]
+fn export_refuses_geometry_regenerated_against_an_unaccepted_revision() {
+    let k = BoxKernel::new();
+    let old = box_part(&k, "block", Vec3::new(40.0, 30.0, 10.0));
+    let current = box_part(&k, "block", Vec3::new(60.0, 30.0, 10.0));
+    let mut drawing = drawing(&old);
+    run(&mut UndoStack::new(), &mut drawing, &current, Command::SetViewCrop { view: FRONT, crop: Some(left_half()) });
+    assert_eq!(drawing.model.pinned, old.digest);
+    assert_eq!(drawing.view(FRONT).unwrap().geometry.source_digest, current.digest.as_str());
+    assert!(matches!(
+        soliddraft_drawing::redraw_for_export(&mut drawing, &current, &[FRONT]),
+        Err(soliddraft_drawing::DrawingError::Unproved)
+    ));
+}

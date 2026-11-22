@@ -474,10 +474,10 @@ impl AppTools<'_> {
         {
             let part = PartContext::new(&self.state.doc);
             let s = self.state.drawing.session.as_ref().ok_or_else(|| NO_DRAWING.to_owned())?;
+            let prepared = drawing::prepare_sheets(s, part.as_ref(), false)?;
             for (format, path) in [(SheetFormat::Pdf, &pdf), (SheetFormat::Dxf, &dxf)] {
-                let (bytes, report) = drawing::sheet_bytes(s, part.as_ref(), format)?;
-                accuracy.insert(format.extension().into(), json!(report.accuracy));
-                files.push((path.clone(), bytes));
+                accuracy.insert(format.extension().into(), json!(prepared.report.accuracy));
+                files.push((path.clone(), prepared.bytes(format)?));
             }
         }
         // On the desktop each is a file beside the STEP file; in the browser they arrive

@@ -254,7 +254,7 @@ pub(super) fn relation(
     let related = numerical("body_relation", |dec| {
         queries::body_relation(&model, a, b, &Accuracy::default(), dec).map_err(|r| r.refusal)
     });
-    let related = if catallax_numbers::current_operation_work().exhausted {
+    let related = if related.is_err() && catallax_numbers::current_operation_work().exhausted {
         Err(Refusal::new("numbers.operation-budget", "operation work allowance exhausted"))
     } else {
         related

@@ -96,7 +96,10 @@ impl Diagnostics {
             }
             (None, false) => (run(), None),
         });
-        if work.is_some_and(|w| w.exhausted) && !matches!(result, Err(KernelError::DisplayLimit { .. })) {
+        if work.is_some_and(|w| w.exhausted)
+            && (operation != "body_relation" || result.is_err())
+            && !matches!(result, Err(KernelError::DisplayLimit { .. }))
+        {
             result = Err(
                 if matches!(
                     operation,
@@ -370,5 +373,35 @@ mod feature_work_tests {
             })
             .unwrap();
         assert_eq!(work, Some(5));
+    }
+}
+
+#[cfg(test)]
+mod relation_tests {
+    use crate::CatallaxKernel;
+    use soliddraft_kernel_api::{Kernel, PlacedBody, contract};
+
+    #[test]
+    fn observed_clash_survives_exhausted_contact_query() {
+        let mut full = CatallaxKernel::with_operation_log();
+        let body = contract::block(&full);
+        let first = PlacedBody { body, translation: [0.0; 3], rotation: [0.0, 0.0, 0.0, 1.0] };
+        let second = PlacedBody { translation: [0.0, 0.0, 9.0], ..first };
+        full.take_diagnostics().unwrap();
+        assert!(full.body_relation(first, second, None).unwrap().contact.is_ok());
+        let log = full.take_diagnostics().unwrap();
+        let calls = log["calls"].as_array().unwrap();
+        let call = calls.iter().find(|c| c["operation"] == "body_relation" && c["nested"] == false).unwrap();
+        let operations = call["operation_log"]["operations"].as_array().unwrap();
+        let proof = operations.iter().find(|op| op["operation"] == "body_relation").unwrap();
+        let work = proof["work"]["after"].as_u64().unwrap();
+
+        let mut limited = CatallaxKernel::with_diagnostics(work + 1);
+        std::mem::swap(&mut full.state, &mut limited.state);
+        let result = limited.body_relation(first, second, None).unwrap();
+        let overlap = result.overlap.unwrap();
+        assert_eq!(overlap.positive, Some(true));
+        assert!(overlap.volume.lo <= 1200.0 && overlap.volume.hi >= 1200.0);
+        assert_eq!(result.contact.unwrap_err().code, "numbers.operation-budget");
     }
 }

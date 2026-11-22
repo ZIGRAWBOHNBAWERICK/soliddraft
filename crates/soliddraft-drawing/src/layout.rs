@@ -316,7 +316,7 @@ pub fn make_drawing(part: &Part, new: &NewDrawing) -> Result<MadeDrawing, Drawin
         let projected = project::project(&index, &c, &xf, part.digest.as_str(), part.preview);
         drawing.view_mut(*id).expect("just placed").geometry = projected.geometry.clone();
         let pictorial = project::is_pictorial(&spec);
-        contexts.push(ViewContext { id: *id, curves: c, xf, pictorial, projected });
+        contexts.push(ViewContext { id: *id, curves: c, xf, pictorial, projected, window_offset: None });
     }
 
     if new.centre_marks {

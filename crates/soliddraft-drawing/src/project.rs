@@ -92,6 +92,7 @@ pub struct ViewContext {
     pub pictorial: bool,
     /// The curves projected into the view.
     pub projected: Projected,
+    pub(crate) window_offset: Option<Point2>,
 }
 
 /// Views computed so far, by id: the parents derived views are made from.
@@ -103,6 +104,22 @@ impl ViewContext {
         let mut memo = Contexts::new();
         compute_in(drawing, part, index, id, &mut memo)?;
         Ok(memo.remove(&id).expect("just computed"))
+    }
+
+    fn window(&self, boundary: &Boundary) -> Boundary {
+        match self.window_offset {
+            Some(offset) => boundary.mapped(offset.u, offset.v, 1.0),
+            None => boundary.clone(),
+        }
+    }
+
+    pub(crate) fn reproject_windows(&self, view: &mut View) {
+        if self.window_offset.is_some() {
+            view.crop = view.crop.as_ref().map(|crop| self.window(crop));
+            for cut in &mut view.broken_out {
+                cut.boundary = self.window(&cut.boundary);
+            }
+        }
     }
 
     /// The kernel request the view was made with.
@@ -194,7 +211,7 @@ fn compute_view_at(
             let curves = view_curves(part, &spec)?;
             let xf = transform(&curves, &spec, scale)?;
             let projected = project(index, &curves, &xf, part.digest.as_str(), part.preview);
-            ViewContext { id: view.id, curves, xf, pictorial: is_pictorial(&spec), projected }
+            ViewContext { id: view.id, curves, xf, pictorial: is_pictorial(&spec), projected, window_offset: None }
         }
         ViewKind::Section { parent, line, flip, model_line, .. } => {
             let pctx = &memo[parent];
@@ -207,7 +224,7 @@ fn compute_view_at(
             let xf = transform(&section.curves, &spec, scale)?;
             let mut projected = project(index, &section.curves, &xf, part.digest.as_str(), part.preview);
             projected.geometry.hatch = section.regions.iter().map(|r| region_polygon(r, &xf, None)).collect();
-            ViewContext { id: view.id, curves: section.curves, xf, pictorial: false, projected }
+            ViewContext { id: view.id, curves: section.curves, xf, pictorial: false, projected, window_offset: None }
         }
         ViewKind::Detail { parent, center, radius, profile, model_center, .. } => {
             let pctx = &memo[parent];
@@ -277,7 +294,14 @@ fn compute_view_at(
             clip_projected(&mut projected, &boundary, true);
             projected.geometry.bbox = boundary.bounds().map(round);
             projected.geometry.outline = Some(boundary);
-            ViewContext { id: view.id, curves: pctx.curves.clone(), xf, pictorial: pctx.pictorial, projected }
+            ViewContext {
+                id: view.id,
+                curves: pctx.curves.clone(),
+                xf,
+                pictorial: pctx.pictorial,
+                projected,
+                window_offset: None,
+            }
         }
         ViewKind::Auxiliary { parent, edge, flip, .. } => {
             let pctx = &memo[parent];
@@ -286,14 +310,34 @@ fn compute_view_at(
             let curves = view_curves(part, &spec)?;
             let xf = transform(&curves, &spec, scale)?;
             let projected = project(index, &curves, &xf, part.digest.as_str(), part.preview);
-            ViewContext { id: view.id, curves, xf, pictorial: false, projected }
+            ViewContext { id: view.id, curves, xf, pictorial: false, projected, window_offset: None }
         }
     };
-    for b in &view.broken_out {
-        broken_out(part, index, &mut ctx, b)?;
+    if !part.preview
+        && (view.geometry.coarse || view.geometry.unproved)
+        && (view.crop.is_some() || !view.broken_out.is_empty())
+    {
+        let preview = Part {
+            preview: true,
+            dimensions: Vec::new(),
+            digest: part.digest.clone(),
+            source: Default::default(),
+            requirements: Default::default(),
+            ..*part
+        };
+        let mut source = view.clone();
+        source.crop = None;
+        source.broken_out.clear();
+        let old = compute_view_at(drawing, &preview, index, &source, sheet, &mut Contexts::new(), depth)?.xf;
+        ctx.window_offset = Some(ctx.xf.point(old.unproject(Point2::new(0.0, 0.0))));
+    }
+    for cut in &view.broken_out {
+        let cut = BrokenOut { boundary: ctx.window(&cut.boundary), ..cut.clone() };
+        broken_out(part, index, &mut ctx, &cut)?;
     }
     if let Some(crop) = &view.crop {
-        clip_projected(&mut ctx.projected, crop, true);
+        let crop = ctx.window(crop);
+        clip_projected(&mut ctx.projected, &crop, true);
         let mut bbox = curves_bounds(&ctx.projected.geometry.curves).unwrap_or(ctx.projected.geometry.bbox);
         for h in &ctx.projected.geometry.hatch {
             for p in &h.outer {

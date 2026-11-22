@@ -135,6 +135,7 @@ pub fn update_from_model(drawing: &mut Drawing, part: &Part) -> Result<UpdateRep
                 && view.geometry.coarse == ctx.projected.geometry.coarse
                 && view.geometry != ctx.projected.geometry)
         {
+            ctx.reproject_windows(view);
             view.geometry = ctx.projected.geometry.clone();
             report.views_updated += 1;
         }
@@ -227,7 +228,9 @@ pub fn regenerate_view(drawing: &mut Drawing, part: &Part, id: ViewId) -> Result
 
 /// Draws the selected views for export at their pinned revision.
 pub fn redraw_for_export(drawing: &mut Drawing, part: &Part, ids: &[ViewId]) -> Result<(), DrawingError> {
-    if ids.iter().any(|&id| drawing.view(id).is_some_and(|v| v.geometry.source_digest != part.digest.as_str())) {
+    if drawing.model.pinned != part.digest
+        || ids.iter().any(|&id| drawing.view(id).is_some_and(|v| v.geometry.source_digest != part.digest.as_str()))
+    {
         return Err(DrawingError::Unproved);
     }
     regenerate_views(drawing, part, ids, true)
@@ -239,8 +242,10 @@ fn regenerate_views(drawing: &mut Drawing, part: &Part, ids: &[ViewId], for_expo
     for &id in ids {
         project::compute_in(drawing, part, &index, id, &mut contexts)?;
         follow_parent(drawing, id, &contexts);
-        let geometry = contexts[&id].projected.geometry.clone();
-        drawing.view_mut(id).ok_or(DrawingError::UnknownView(id))?.geometry = geometry;
+        let ctx = &contexts[&id];
+        let view = drawing.view_mut(id).ok_or(DrawingError::UnknownView(id))?;
+        ctx.reproject_windows(view);
+        view.geometry = ctx.projected.geometry.clone();
     }
     if for_export {
         for view in drawing.sheets.iter_mut().flat_map(|sheet| &mut sheet.views) {

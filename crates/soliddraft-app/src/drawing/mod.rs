@@ -1838,12 +1838,37 @@ pub(crate) fn sheet_bytes(
     part: Option<&PartContext>,
     format: export::Format,
 ) -> Result<(Vec<u8>, SheetExport), String> {
-    if !matches!(format, export::Format::Pdf) && s.doc.drawing.sheets.get(s.sheet).is_none() {
+    let prepared = prepare_sheets(s, part, matches!(format, export::Format::Pdf))?;
+    Ok((prepared.bytes(format)?, prepared.report))
+}
+
+pub(crate) struct PreparedSheets {
+    lists: Vec<display::DisplayList>,
+    info: export::PdfInfo,
+    pub(crate) report: SheetExport,
+}
+
+impl PreparedSheets {
+    pub(crate) fn bytes(&self, format: export::Format) -> Result<Vec<u8>, String> {
+        match format {
+            export::Format::Pdf => export::pdf(&self.lists, &self.info),
+            _ => export::bytes(&self.lists[0], format, &self.info.title),
+        }
+        .map_err(|e| e.to_string())
+    }
+}
+
+pub(crate) fn prepare_sheets(
+    s: &DrawingSession,
+    part: Option<&PartContext>,
+    all_sheets: bool,
+) -> Result<PreparedSheets, String> {
+    if !all_sheets && s.doc.drawing.sheets.get(s.sheet).is_none() {
         return Err("The current sheet is no longer available; select a sheet before exporting".into());
     }
     let stale = s.doc.stale_views();
     let mut drawing = s.doc.drawing.clone();
-    let writes_sheet = |i| matches!(format, export::Format::Pdf) || i == s.sheet;
+    let writes_sheet = |i| all_sheets || i == s.sheet;
     let ids: Vec<_> = drawing
         .sheets
         .iter()
@@ -1873,18 +1898,9 @@ pub(crate) fn sheet_bytes(
     for list in &lists {
         accuracy.add(list.accuracy());
     }
-    let bytes = match format {
-        export::Format::Pdf => {
-            let info = export::PdfInfo {
-                title: s.doc.drawing.meta.title.clone(),
-                author: s.doc.drawing.meta.designer.clone(),
-            };
-            export::pdf(&lists, &info)
-        }
-        _ => export::bytes(&lists[0], format, &s.doc.drawing.meta.title),
-    };
-    let bytes = bytes.map_err(|e| e.to_string())?;
-    Ok((bytes, SheetExport { views: ids.len(), revision: drawing.model.pinned, accuracy }))
+    let info = export::PdfInfo { title: drawing.meta.title, author: drawing.meta.designer };
+    let report = SheetExport { views: ids.len(), revision: drawing.model.pinned, accuracy };
+    Ok(PreparedSheets { lists, info, report })
 }
 
 fn save_drawing(state: &mut AppState, path: Option<PathBuf>) {

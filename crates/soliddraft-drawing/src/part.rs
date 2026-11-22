@@ -341,9 +341,8 @@ fn origins<Id: Copy + Eq + std::hash::Hash>(
 pub(crate) fn curve_role(curve: &Curve3) -> &'static str {
     match curve {
         Curve3::Line { .. } => "line",
-        Curve3::Arc { .. } => "arc",
         Curve3::Circle { .. } => "circle",
-        Curve3::Nurbs { .. } | Curve3::Polyline { .. } => "curve",
+        Curve3::Arc { .. } | Curve3::Nurbs { .. } | Curve3::Polyline { .. } => "curve",
     }
 }
 

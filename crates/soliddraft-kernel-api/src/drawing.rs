@@ -357,11 +357,47 @@ pub fn sheet_bounds(curves: &[ViewCurve], frame: &ViewFrame) -> [f64; 4] {
         return [0.0; 4];
     }
     let mut bbox = [f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY];
+    let mut include = |q: Point2| {
+        bbox = [bbox[0].min(q.u), bbox[1].min(q.v), bbox[2].max(q.u), bbox[3].max(q.v)];
+    };
     for c in curves {
-        for p in c.curve.sample(0.0) {
-            let q = frame.project(p);
-            bbox = [bbox[0].min(q.u), bbox[1].min(q.v), bbox[2].max(q.u), bbox[3].max(q.v)];
-        }
+        let (center, x, y, radius, span) = match &c.curve {
+            Curve3::Circle { center, normal, radius } => {
+                let x = perpendicular(*normal);
+                (*center, x, normal.cross(x), *radius, None)
+            }
+            Curve3::Arc { center, normal, x_axis, radius, start_deg, end_deg } => (
+                *center,
+                *x_axis,
+                normal.cross(*x_axis),
+                *radius,
+                Some((start_deg.min(*end_deg).to_radians(), (end_deg - start_deg).abs().to_radians())),
+            ),
+            _ => {
+                for point in c.curve.sample(0.0) {
+                    include(frame.project(point));
+                }
+                continue;
+            }
+        };
+        let range = |axis: Vec3| {
+            let origin = center.dot(axis);
+            let (a, b) = (x.dot(axis), y.dot(axis));
+            let extent = radius * a.hypot(b);
+            let Some((start, sweep)) = span else { return [origin - extent, origin + extent] };
+            let at = |angle: f64| origin + radius * (a * angle.cos() + b * angle.sin());
+            let (first, last) = (at(start), at(start + sweep));
+            let contains = |angle: f64| (angle - start).rem_euclid(std::f64::consts::TAU) <= sweep;
+            let peak = b.atan2(a);
+            [
+                if contains(peak + std::f64::consts::PI) { origin - extent } else { first.min(last) },
+                if contains(peak) { origin + extent } else { first.max(last) },
+            ]
+        };
+        let [left, right] = range(frame.right);
+        let [bottom, top] = range(frame.up);
+        include(Point2::new(left, bottom));
+        include(Point2::new(right, top));
     }
     bbox
 }
@@ -900,6 +936,25 @@ fn fit_arc(samples: &[Vec3], tol: f64) -> Option<Curve3> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sheet_bounds_include_analytic_extrema_between_samples() {
+        let frame = ViewSpec::new(Vec3::Z, Vec3::Y).frame().unwrap();
+        let radius = 10_000.0;
+        let phase = 2.5_f64.to_radians();
+        let x_axis = Vec3::new(phase.cos(), phase.sin(), 0.0);
+        for (start_deg, end_deg) in [(-45.0, 135.0), (135.0, -45.0)] {
+            let arc = Curve3::Arc { center: Vec3::ZERO, normal: Vec3::Z, x_axis, radius, start_deg, end_deg };
+            let curves = ViewCurves::new(vec![ViewCurve::new(arc, CurveSource::Unknown, true)], &frame);
+            assert!((curves.bbox_2d[2] - radius).abs() < 1e-9);
+            assert!((curves.bbox_2d[3] - radius).abs() < 1e-9);
+        }
+        let circle = Curve3::Circle { center: Vec3::ZERO, normal: Vec3::new(0.0, 0.6, 0.8), radius };
+        let curves = ViewCurves::new(vec![ViewCurve::new(circle, CurveSource::Unknown, true)], &frame);
+        for (value, want) in curves.bbox_2d.into_iter().zip([-radius, -0.8 * radius, radius, 0.8 * radius]) {
+            assert!((value - want).abs() < 1e-9);
+        }
+    }
 
     fn quarter_arc() -> Curve3 {
         // A rational quadratic quarter circle of radius 2 in the XY plane, from (2,0,0) to (0,2,0).

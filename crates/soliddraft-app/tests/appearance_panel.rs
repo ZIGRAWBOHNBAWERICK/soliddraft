@@ -371,6 +371,9 @@ fn named_state_renders_two_body_appearances_and_reopens_with_visibility() {
     let bytes = doc.model().to_bytes().unwrap();
     std::fs::write(out_dir().join("display-states.dwprt"), &bytes).unwrap();
 
+    doc.apply(Command::ActivateConfiguration { name: "Service".into() }).unwrap();
+    std::fs::write(out_dir().join("display-states-service.dwprt"), doc.model().to_bytes().unwrap()).unwrap();
+
     let back = soliddraft_model::Document::from_bytes(&bytes, soliddraft_app::kernel()).unwrap();
     let mut doc = Document::from_model(back);
     assert_eq!(doc.display_state().unwrap().id, inspection_id);

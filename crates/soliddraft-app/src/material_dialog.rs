@@ -176,7 +176,12 @@ pub(crate) fn show(ctx: &egui::Context, state: &mut AppState) {
                         });
                     }
                     if library.origin == Origin::BuiltIn {
-                        ui.label("Reference values. Check the source for test conditions and design minimums.");
+                        let handbook = material.source.as_deref().is_some_and(|source| source.contains("MIL-HDBK-5J"));
+                        ui.label(if handbook {
+                            "Handbook reference values. See the source for the strength basis."
+                        } else {
+                            "Typical reference values"
+                        });
                     }
                     if let Some(appearance) = &appearance {
                         let c = appearance.base_color;

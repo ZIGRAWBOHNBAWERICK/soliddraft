@@ -65,9 +65,8 @@ An extrusion or cut has these choices besides its end and depth:
 The Draft option works without Direction 2 and Thin feature. A draft with either is
 coming soon.
 
-Parts whose extrusions use From, Direction 2, Thin feature or Selected contours are
-saved as `soliddraft-part/4`, so an older application refuses them instead of building
-a different part. Other parts keep format 2, or 3 with several bodies.
+From, Direction 2, Thin feature and Selected contours require `soliddraft-part/6` or
+later. See [Native files](#native-files) for the full version chain.
 
 ## Loft
 
@@ -372,20 +371,38 @@ hash, not the geometry hash.
 
 ## Native files
 
-A part file (`.dwprt`) is a zip archive with two entries:
+A part file (`.dwprt`) is a zip archive with two required entries:
 
 - `manifest.json`: the part's id, kind and format, the application and kernel backend
   that saved it, its semantic and geometry hashes and its sections (see
   [documents.md](documents.md)).
-- `part.json`: format tag `soliddraft-part/2`, name, units, every feature with its
+- `part.json`: format tag, name, units, every feature with its
   parameters, sketch and references, the rollback bar and the next feature id. No
   kernel ids, no computed geometry: it rebuilds on Catallax.
 
-Writing is deterministic and floats round-trip bit for bit, so saving an opened file
-gives the same bytes. A file with a newer major version is refused, as is a recipe with
-repeated ids or a feature that reads one below it. Saving writes next to the target and
-renames over it. Part files from before the manifest (`.dwpart`, `recipe.json` with
-`soliddraft-part/1`) still open, with an id derived from their content.
+Both entries carry the part format. A save uses the highest version required by the
+part, including features that are suppressed or below the rollback bar.
+
+| Version | Data it adds |
+| --- | --- |
+| `soliddraft-part/1` | Pre-envelope recipe in a `.dwpart` file. The reader derives its id from its content. |
+| `soliddraft-part/2` | Base envelope, including whole-part materials and appearances. |
+| `soliddraft-part/3` | Explicit body identities. |
+| `soliddraft-part/4` | Historical development files. The reader accepts the part options, extrusion options and Hole Wizard data written under this shared tag. |
+| `soliddraft-part/5` | Parameter formulas and comments, configuration suppression, body-level materials and appearances, extended material data and display states. |
+| `soliddraft-part/6` | Extrusion options and references to Thin feature walls and ends. |
+| `soliddraft-part/7` | Hole Wizard features. |
+| `soliddraft-part/8` | Graded Shell and Thicken thicknesses. Constant thicknesses still use a number. |
+
+From format 5 onward, a file whose payload requires a newer version is refused.
+Graded walls in files tagged /1 through /4 still open and resave as format 8, including
+recovery copies. A legacy unstyled display mesh still provides a part's geometry when the
+kernel is unavailable.
+
+Writing is deterministic and floats round-trip bit for bit. Saving an unchanged file
+in the same format gives the same bytes. A file with an unsupported major version is
+refused, as is a recipe with repeated ids or a feature that reads one below it. Saving
+writes next to the target and renames over it.
 
 Application file, byte-upload/recovery and MCP loaders can seed the new document's
 existing build cache from the current model. Reuse requires the same document id and

@@ -5,7 +5,7 @@ use soliddraft_app::app_tools::AppTools;
 use soliddraft_app::document::{Document, FeatureStatus};
 use soliddraft_app::state::AppState;
 use soliddraft_assistant::{Caller, tools::call_checked};
-use soliddraft_document::manifest::Package;
+use soliddraft_document::manifest::{self, Entry, Package};
 
 fn call(state: &mut AppState, name: &str, args: Value) -> Result<(), String> {
     let output = call_checked(&mut AppTools { state }, name, args, &Caller::Mcp { client: "wall-thickness".into() });
@@ -129,18 +129,24 @@ fn graded_walls_use_format_eight_in_saves_and_recovery_copies() {
         "type": "thicken", "thickness": shell["thickness"], "faces": shell["open_faces"], "side": "front"
     });
     for wall in [shell, thicken] {
+        fixture["format"] = json!("soliddraft-part/1");
         fixture["features"][1]["kind"] = wall.clone();
         let part = soliddraft_model::Document::from_part_json(&fixture.to_string(), kernel.clone()).unwrap();
+        let expected = serde_json::from_value::<soliddraft_kernel_api::Grade>(wall["thickness"].clone()).unwrap();
         let (_, recovery) = part.snapshot().encode().unwrap();
         for bytes in [part.to_bytes().unwrap(), recovery] {
             let mut package = Package::from_bytes(&bytes).unwrap();
             assert_eq!(package.manifest().unwrap().format, "soliddraft-part/8");
             let truth: Value = serde_json::from_slice(&package.read("part.json").unwrap().unwrap()).unwrap();
             assert_eq!(truth["format"], "soliddraft-part/8");
+            let grade = serde_json::from_value::<soliddraft_kernel_api::Grade>(
+                truth["features"][1]["kind"]["thickness"].clone(),
+            )
+            .unwrap();
+            assert_eq!(grade, expected);
 
-            let reopened = Document::from_model(
-                soliddraft_model::Document::from_bytes(&bytes, kernel.clone()).unwrap(),
-            );
+            let reopened =
+                Document::from_model(soliddraft_model::Document::from_bytes(&bytes, kernel.clone()).unwrap());
             let error = &reopened.features.last().unwrap().status;
             assert!(
                 matches!(error, FeatureStatus::Error(message) if message.contains("Field-driven thickness is unavailable")),
@@ -148,6 +154,19 @@ fn graded_walls_use_format_eight_in_saves_and_recovery_copies() {
             );
             assert_eq!(reopened.model().part_json(), part.part_json());
             assert_volume(&AppState::new(reopened), 480.0);
+        }
+
+        let mut old_manifest = part.manifest();
+        old_manifest.format = "soliddraft-part/2".into();
+        fixture["format"] = json!(old_manifest.format);
+        let old = manifest::write_package(&old_manifest, &[Entry::new("part.json", fixture.to_string().into_bytes())])
+            .unwrap();
+        let reopened = soliddraft_model::Document::from_bytes(&old, kernel.clone()).unwrap();
+        assert_eq!(reopened.part_json(), part.part_json());
+        for version in 5..=7 {
+            fixture["format"] = json!(format!("soliddraft-part/{version}"));
+            let error = soliddraft_model::Document::from_part_json(&fixture.to_string(), kernel.clone()).unwrap_err();
+            assert!(error.to_string().contains("graded walls require soliddraft-part/8"), "{error}");
         }
     }
 }

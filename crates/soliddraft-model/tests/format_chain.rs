@@ -4,7 +4,7 @@
 //!
 //! Tags: `/2` plain, `/3` several bodies, `/4` development files of the extrusion-option,
 //! part-option and Hole Wizard work (read only), `/5` parameter, configuration and
-//! appearance data, `/6` extrusion options, `/7` Hole Wizard features.
+//! appearance data, `/6` extrusion options, `/7` Hole Wizard features, `/8` graded walls.
 
 use std::sync::Arc;
 
@@ -155,9 +155,13 @@ fn historical_format_four_opens_and_incompatible_tags_are_refused() {
     let later = json.replace(HOLE_WIZARD_FORMAT, "soliddraft-part/9");
     let Err(error) = Document::from_part_json(&later, kernel()) else { panic!("format 9 opened") };
     assert!(matches!(error, FileError::Format { .. }), "{error}");
-    for version in 1..=8 {
-        assert!(error.to_string().contains(&format!("soliddraft-part/{version}")), "{error}");
-    }
+    assert!(
+        error.to_string().ends_with(
+            "this version reads soliddraft-part/8, soliddraft-part/7, soliddraft-part/6, soliddraft-part/5, \
+             soliddraft-part/4, soliddraft-part/3, soliddraft-part/2 and soliddraft-part/1"
+        ),
+        "{error}"
+    );
 }
 
 #[test]

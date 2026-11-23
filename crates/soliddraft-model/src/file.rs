@@ -9,8 +9,8 @@
 //! - `part.json`: the truth. The format tag (`soliddraft-part/2`, `/3` for explicit
 //!   body identities, `/4` from development builds that wrote extrusion options or the
 //!   first part options or Hole Wizard features, `/5` for parameter, configuration and
-//!   appearance data, `/6` for extrusion options, or `/7` for Hole Wizard features), the
-//!   part's name and
+//!   appearance data, `/6` for extrusion options, `/7` for Hole Wizard features, or
+//!   `/8` for graded wall thickness), the part's name and
 //!   units, every feature in tree order with its parameters, sketch and persistent
 //!   references, the rollback bar and the next free feature id, and when it has them
 //!   the part's text properties and its material and appearance assignments with copies
@@ -80,11 +80,14 @@ const OPTIONS_VERSION: u32 = 6;
 /// require this version, which also reads everything before it.
 pub const HOLE_WIZARD_FORMAT: &str = "soliddraft-part/7";
 const HOLE_WIZARD_VERSION: u32 = 7;
+/// Parts with a graded thickness in Shell or Thicken require this version.
+pub const GRADED_WALL_FORMAT: &str = "soliddraft-part/8";
+const GRADED_WALL_VERSION: u32 = 8;
 /// Development builds wrote extrusion options, the first part options or Hole Wizard
 /// features under this tag. All still open: each is read by what it holds.
 const EARLY_OPTIONS_FORMAT: &str = "soliddraft-part/4";
 const EARLY_OPTIONS_VERSION: u32 = 4;
-const NEWEST_FORMAT: u32 = 7;
+const NEWEST_FORMAT: u32 = GRADED_WALL_VERSION;
 /// The format tag of part files from before the document envelope.
 pub const LEGACY_FORMAT: &str = "soliddraft-part/1";
 /// The file name extension parts are saved under.
@@ -109,7 +112,7 @@ pub enum FileError {
     Json(#[from] serde_json::Error),
     /// The format tag is not one this version reads.
     #[error(
-        "the file {}, this version reads {HOLE_WIZARD_FORMAT}, {OPTIONS_FORMAT}, {PART_OPTIONS_FORMAT}, {EARLY_OPTIONS_FORMAT}, {MULTIBODY_FORMAT}, {FORMAT} and {LEGACY_FORMAT}",
+        "the file {}, this version reads {GRADED_WALL_FORMAT}, {HOLE_WIZARD_FORMAT}, {OPTIONS_FORMAT}, {PART_OPTIONS_FORMAT}, {EARLY_OPTIONS_FORMAT}, {MULTIBODY_FORMAT}, {FORMAT} and {LEGACY_FORMAT}",
         found_tag(.found)
     )]
     Format {
@@ -218,7 +221,9 @@ impl Document {
     }
 
     fn recipe(&self) -> Recipe {
-        let format = if let Some(tag) = feature_options_after(&self.features, EARLY_OPTIONS_VERSION) {
+        let format = if uses_graded_walls(&self.features) {
+            GRADED_WALL_FORMAT
+        } else if let Some(tag) = feature_options_after(&self.features, EARLY_OPTIONS_VERSION) {
             tag
         } else if self.values.uses_formula_settings()
             || self.configurations.uses_formula_settings()
@@ -479,6 +484,10 @@ impl Document {
         {
             return Err(FileError::Invalid(format!("the feature options require {tag} or later")));
         }
+        // Pre-canonical files could carry graded walls under their original tags.
+        if version > EARLY_OPTIONS_VERSION && version < GRADED_WALL_VERSION && uses_graded_walls(&recipe.features) {
+            return Err(FileError::Invalid(format!("graded walls require {GRADED_WALL_FORMAT} or later")));
+        }
         materials.snapshots.normalise();
         materials.check().map_err(FileError::Invalid)?;
         let mut doc = Document::new(recipe.name, kernel);
@@ -521,6 +530,14 @@ impl Document {
     pub fn open(path: impl AsRef<Path>, kernel: Arc<dyn Kernel>) -> Result<Document, FileError> {
         Self::from_bytes(&std::fs::read(path)?, kernel)
     }
+}
+
+fn uses_graded_walls(features: &[Feature]) -> bool {
+    features.iter().any(|f| match &f.kind {
+        crate::FeatureKind::Shell(wall) => wall.thickness.constant().is_none(),
+        crate::FeatureKind::Thicken(wall) => wall.thickness.constant().is_none(),
+        _ => false,
+    })
 }
 
 fn feature_options_after(features: &[Feature], version: u32) -> Option<&'static str> {

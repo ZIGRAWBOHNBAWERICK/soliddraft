@@ -227,17 +227,28 @@ fn hole_wizard_through_all_tapped_hole_with_cosmetic_thread_and_non_planar_refus
         assert_eq!(p.wizard.as_ref().unwrap().end_condition, HoleEndCondition::ThroughAll);
         assert_eq!(p.thread.as_ref().map(|t| t.designation()).as_deref(), Some("M6x1-6H"));
     }
+    // On the Positions tab a click on the same face adds a hole there, though the preview
+    // has drilled that face since; the hole keeps the reference to the undrilled face.
+    let first_face = hole_params(&app).face;
+    click(&mut app, "Hole Wizard Positions tab");
+    ribbon::click_world(&mut app, glam::Vec3::new(20.0, 10.0, 20.0));
+    settle(&mut app);
+    {
+        let p = hole_params(&app);
+        assert_eq!(p.points, [soliddraft_sketch::P2::new(0.0, 0.0), soliddraft_sketch::P2::new(20.0, 10.0)]);
+        assert_eq!(p.face, first_face);
+    }
     click(&mut app, "Apply Hole Wizard");
     ux_tools::rebuilt(&mut app);
 
     let doc = &app.state().state.doc;
     let walls = doc.model().threaded_walls();
-    assert_eq!(walls.len(), 1);
+    assert_eq!(walls.len(), 2);
     assert!((walls[0].radius - 2.5).abs() < 1e-6);
     assert!(soliddraft_app::viewport::threads::marks(doc).is_some());
     let pmi: Vec<_> = doc.model().pmi_rows().into_iter().filter(|r| r.feature.is_some()).collect();
     assert_eq!(pmi.len(), 1);
-    assert_eq!(pmi[0].callout(), "M6x1-6H THRU");
+    assert!(pmi[0].callout().ends_with("M6x1-6H THRU"), "{}", pmi[0].callout());
 
     // Now test refusing a non-planar face (the cylindrical wall of the hole we just drilled!).
     let cyl_face = doc.faces.iter().find(|f| f.surface == SurfaceKind::Cylinder).expect("cylindrical hole wall").id;

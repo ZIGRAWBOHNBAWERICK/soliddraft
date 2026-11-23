@@ -361,6 +361,7 @@ thread_local! {
     static SHOWN_PMI: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
     static SHOWN_ASSEMBLY: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
     static SHOWN_VIEWPORT: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
+    static FIRST_PART_FRAME: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
     static SHOWN_PRINT_CHECK: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
     static SHOWN_MARKS: std::cell::RefCell<Vec<serde_json::Value>> = const { std::cell::RefCell::new(Vec::new()) };
     static SHOWN_CONTROLS: std::cell::RefCell<std::collections::BTreeMap<String, egui::Pos2>> =
@@ -513,22 +514,37 @@ pub(crate) fn begin_frame() {
     SHOWN_CONTROLS.with_borrow_mut(std::collections::BTreeMap::clear);
     SHOWN_PMI.with_borrow_mut(String::clear);
     SHOWN_VIEWPORT.with_borrow_mut(String::clear);
+    SHOWN_PART_VIEW.with_borrow_mut(|view| *view = None);
     SHOWN_PRINT_CHECK.with_borrow_mut(String::clear);
     SHOWN_MARKS.with_borrow_mut(Vec::clear);
 }
 
 /// Notes what the part viewport drew, for [`shown_viewport`].
 pub(crate) fn show_viewport(shown: serde_json::Value) {
+    FIRST_PART_FRAME.with_borrow_mut(|first| {
+        if first.is_empty() {
+            SHOWN_MARKS.with_borrow(|marks| {
+                *first = serde_json::json!({ "viewport": shown, "marks": marks }).to_string();
+            });
+        }
+    });
     SHOWN_VIEWPORT.with_borrow_mut(|viewport| *viewport = shown.to_string());
 }
 
-/// What the part viewport drew in the last frame, as JSON: `{"label", "triangles"}`. The
-/// label is `"unproved preview"` when the viewport drew that label over a lattice or gyroid,
-/// and null otherwise; `triangles` counts the triangles of the part's display mesh. Empty
-/// when that frame drew no part viewport. Read only, for browser checks.
+/// The part viewport's label, triangle count, pending build state and whether a
+/// construction preview took the body's place in the last frame. The label is
+/// `"unproved preview"` for a labelled lattice or gyroid and null otherwise.
+/// Empty when that frame drew no part viewport. Read only, for browser checks.
 #[wasm_bindgen]
 pub fn shown_viewport() -> String {
     SHOWN_VIEWPORT.with_borrow(|viewport| viewport.clone())
+}
+
+/// The first part viewport frame and the tree marks drawn with it since page load.
+/// Empty until that frame. Read only, for browser checks.
+#[wasm_bindgen]
+pub fn shown_first_part_frame() -> String {
+    FIRST_PART_FRAME.with_borrow(|first| first.clone())
 }
 
 /// Notes the outcome the Print check window is drawing, for [`shown_print_check`].

@@ -538,12 +538,6 @@ impl ViewportState {
         };
         input.ghost = ghost;
         input.threads = if visible.body { self.thread_marks(doc) } else { None };
-        #[cfg(target_arch = "wasm32")]
-        crate::web::show_part_view(
-            &self.camera,
-            rect,
-            input.threads.as_ref().map_or(0, |t| t.edges.iter().map(|e| e.segments.len() / 2).sum()),
-        );
         input.preview = preview;
         input.preview_pickable = preview_pickable;
         input.pick_revision = pick_revision;
@@ -551,8 +545,18 @@ impl ViewportState {
         if let Some(session) = &sketch {
             input.grid = self.grid(rect, &GridPlane::of_sketch(&session.plane));
         }
+        let unproved = doc.model().active_field().is_some_and(|f| doc.model().status(f.id).is_some_and(|s| s.is_ok()));
         #[cfg(target_arch = "wasm32")]
-        let (visible_meshes, display_mode) = (input.meshes.1.len(), input.display.label());
+        {
+            input.part_probe = Some(render::PartProbe {
+                camera: self.camera.clone(),
+                unproved,
+                pending: doc.proof_pending(),
+                display_state: doc.display_state().map(|state| state.name.clone()),
+                display_mode: input.display.label().to_string(),
+                visible_meshes: input.meshes.1.len(),
+            });
+        }
         ui.painter().add(egui_wgpu::Callback::new_paint_callback(rect, ViewportCallback(input)));
 
         let painter = ui.painter().with_clip_rect(rect);
@@ -581,21 +585,12 @@ impl ViewportState {
             );
             ui.ctx().request_repaint();
         }
-        let unproved = doc.model().active_field().is_some_and(|f| doc.model().status(f.id).is_some_and(|s| s.is_ok()));
         if unproved {
             ui.put(
                 Rect::from_min_size(rect.left_top() + vec2(12.0, 12.0), vec2(160.0, 24.0)),
                 egui::Label::new(egui::RichText::new("unproved preview").color(theme::muted())),
             );
         }
-        #[cfg(target_arch = "wasm32")]
-        crate::web::show_viewport(serde_json::json!({
-            "label": unproved.then_some("unproved preview"),
-            "display_state": doc.display_state().map(|state| &state.name),
-            "display_mode": display_mode,
-            "visible_meshes": visible_meshes,
-            "triangles": doc.display_body().and_then(|body| doc.meshes.get(&body)).map_or(0, |mesh| mesh.indices.len() / 3),
-        }));
         if scene.axes.contains(&true) {
             self.paint_origin_axes(&painter, scene.reach, rect, scene.axes);
         }
@@ -837,6 +832,8 @@ impl ViewportState {
             assembly: None,
             grid: self.grid(rect, &GridPlane::GROUND),
             planes: None,
+            #[cfg(target_arch = "wasm32")]
+            part_probe: None,
         }
     }
 

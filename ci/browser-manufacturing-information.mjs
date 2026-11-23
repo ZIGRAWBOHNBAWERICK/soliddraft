@@ -430,6 +430,13 @@ async function main() {
   check(marksAgain === marks, `the reopened part draws ${marksAgain} thread mark segments, not ${marks}`);
   await v.shot('3c-tapped-reopened');
 
+  await v.command('Section');
+  const section = await v.eval(`JSON.parse(window.wasmBindings.shown_viewport())`);
+  check(section.preview && section.triangles > 0, 'the section did not replace the tapped part on screen');
+  check(await v.eval(`window.wasmBindings.shown_threads()`) === 0, 'the section reports undrawn thread marks');
+  await v.command('Section');
+  check(await v.threads('after closing the section') === marks, 'the part did not restore its thread marks');
+
   // One action: the STEP file and a drawing of it as PDF and DXF, in one download.
   step('Drawing and files');
   const pack = await v.download('drawing and files', () => v.command('Drawing and files'));

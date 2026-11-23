@@ -74,6 +74,7 @@ pub struct AssemblyFrame {
     pub deviations: Vec<(DefinitionIndex, [f32; 3])>,
     /// How much display data the app lets the GPU hold: it caps the finest level drawn.
     pub budget: DeviceBudget,
+    /// The mode in which to draw assembly instances.
     pub display: super::render::DisplayMode,
 }
 

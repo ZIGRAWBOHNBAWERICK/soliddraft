@@ -418,3 +418,79 @@ fn named_state_renders_two_body_appearances_and_reopens_with_visibility() {
     let [red, _, blue] = colour(&image, right);
     assert!(blue > red + 30.0, "the blue face remains visible");
 }
+
+#[test]
+fn assembly_colour_replaces_and_reveals_the_part_finish_after_reopen() {
+    use glam::DVec3;
+    use soliddraft_app::assembly::AssemblyAction;
+    use soliddraft_assembly::{Assembly, DisplayMesh, OccurrencePath, Placement, RefCopy, Step};
+    use soliddraft_document::{ContentHash, DocKind, DocRef, DocumentId};
+
+    if !gpu_available() {
+        return;
+    }
+    let part = DocumentId::new();
+    let revision = ContentHash::of_bytes(b"painted blue block");
+    let mut mesh = DisplayMesh::cuboid(DVec3::ZERO, DVec3::splat(10.0));
+    for face in &mut mesh.faces {
+        face.style = Some([21, 101, 192, 0, 128]);
+    }
+    let mut assembly = Assembly::new("Painted assembly");
+    let source = assembly.add_source(DocRef::new(part, DocKind::Part, "Block.dwprt", revision.clone()));
+    let first = assembly.add_component(source, Placement::IDENTITY);
+    assembly.add_component(source, Placement::translation(DVec3::new(22.0, 0.0, 0.0)));
+    let id = DocumentId::new();
+    let copies = [RefCopy::part(part, revision, &mesh, "test")];
+    let file = out_dir().join("appearance-assembly.dwasm");
+    std::fs::write(&file, assembly.to_bytes(id, None, &copies).unwrap()).unwrap();
+
+    let mut app =
+        Harness::builder().with_size(vec2(1440.0, 900.0)).with_pixels_per_point(1.0).wgpu().build_eframe(|cc| {
+            SolidDraftApp::new(
+                cc,
+                soliddraft_app::document::Document::new("Part", soliddraft_app::kernel()),
+                Automation::default(),
+            )
+        });
+    let path = OccurrencePath::root().child(Step::component(first));
+    let open = |app: &mut Harness<'_, SolidDraftApp>| {
+        app.state_mut().state.push(AppAction::Assembly(AssemblyAction::Open(file.clone())));
+        let start = std::time::Instant::now();
+        loop {
+            app.run_steps(1);
+            if app.state().state.assembly.session.as_ref().is_some_and(|s| s.doc.id() == id && !s.doc.is_loading()) {
+                break;
+            }
+            assert!(start.elapsed().as_secs() < 20, "the saved assembly opened");
+        }
+        for action in [AppAction::SetView(StandardView::Top), AppAction::Assembly(AssemblyAction::ZoomFit)] {
+            app.state_mut().state.push(action);
+        }
+        app.run_steps(70);
+    };
+    let sample = |app: &mut Harness<'_, SolidDraftApp>, note: &str| {
+        let view = &app.state().state.assembly.session.as_ref().unwrap().viewport;
+        let points = [5.0, 27.0].map(|x| view.camera.project(glam::Vec3::new(x, 5.0, 10.0), view.rect).unwrap());
+        let image = app.render().unwrap();
+        image.save(out_dir().join(format!("appearance-assembly-{note}.png"))).unwrap();
+        points.map(|point| colour(&image, point))
+    };
+
+    open(&mut app);
+    assert!(sample(&mut app, "part-finish").iter().all(|c| c[2] > c[0] + 30.0));
+    let red = Appearance::new("override-red", "Red", Srgb::new(210, 33, 22));
+    app.state_mut().state.push(AppAction::Assembly(AssemblyAction::SetColour(path.clone(), Some(red))));
+    app.run_steps(10);
+    let [a, b] = sample(&mut app, "component-override");
+    assert!(a[0] > a[2] + 30.0 && b[2] > b[0] + 30.0);
+
+    app.state_mut().state.push(AppAction::Assembly(AssemblyAction::Save(Some(file.clone()))));
+    app.run_steps(10);
+    let reopened = soliddraft_assembly::AssemblyDocument::open(&file, Default::default()).unwrap();
+    let row = reopened.table().find(&path).unwrap();
+    assert_eq!(reopened.table().colour(row).unwrap().id.as_str(), "override-red");
+    open(&mut app);
+    app.state_mut().state.push(AppAction::Assembly(AssemblyAction::SetColour(path, None)));
+    app.run_steps(10);
+    assert!(sample(&mut app, "colour-removed").iter().all(|c| c[2] > c[0] + 30.0));
+}

@@ -1436,7 +1436,7 @@ fn appearance_place(doc: &crate::document::Document, target: &AppearanceTarget) 
     }
 }
 
-pub fn appearances(ui: &mut egui::Ui, state: &mut AppState) {
+pub(crate) fn appearances(ui: &mut egui::Ui, state: &mut AppState) {
     ui.collapsing("Appearances", |ui| {
         let data = state.doc.model().materials();
         let active = state.doc.display_state();

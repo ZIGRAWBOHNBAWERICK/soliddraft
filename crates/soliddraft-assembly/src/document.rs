@@ -879,6 +879,7 @@ impl AssemblyDocument {
         self.move_to(&moves)
     }
 
+    /// Applies a display state edit and refreshes the occurrence view.
     pub fn change_viewport_states(
         &mut self,
         states: soliddraft_document::display_state::DisplayStates<crate::AssemblyDisplay>,

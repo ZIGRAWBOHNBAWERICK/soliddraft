@@ -4,18 +4,24 @@ use serde::{Deserialize, Serialize};
 
 use crate::{ConfigurationId, DisplayStateId, DocumentId};
 
+/// How the viewport draws solids.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DisplayMode {
+    /// Draw shaded faces and solid edges.
     #[default]
     ShadedWithEdges,
+    /// Draw shaded faces.
     Shaded,
+    /// Draw edges alone.
     Wireframe,
 }
 
 impl DisplayMode {
+    /// Available viewport modes in menu order.
     pub const ALL: [Self; 3] = [Self::ShadedWithEdges, Self::Shaded, Self::Wireframe];
 
+    /// The name shown in menus.
     pub fn label(self) -> &'static str {
         match self {
             Self::ShadedWithEdges => "Shaded with edges",
@@ -29,12 +35,15 @@ impl DisplayMode {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "scope", content = "configurations", rename_all = "snake_case")]
 pub enum DisplayScope {
+    /// Available in current and future configurations.
     #[default]
     All,
+    /// Available in the listed configurations.
     Only(Vec<Option<ConfigurationId>>),
 }
 
 impl DisplayScope {
+    /// Checks whether the state can be selected in a configuration.
     pub fn includes(&self, config: Option<&ConfigurationId>) -> bool {
         match self {
             Self::All => true,
@@ -43,22 +52,30 @@ impl DisplayScope {
     }
 }
 
+/// One named view and the configurations that can select it.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct DisplayState<T> {
+    /// Stable identity in this document.
     pub id: DisplayStateId,
+    /// The name shown in the state picker.
     pub name: String,
+    /// Configurations where this state is available.
     #[serde(flatten)]
     pub scope: DisplayScope,
+    /// The saved viewport mode.
     pub mode: DisplayMode,
+    /// The visibility and appearance choices for this document kind.
     pub view: T,
 }
 
 impl<T: Default> DisplayState<T> {
+    /// Creates a state with no visibility or appearance overrides.
     pub fn new(name: String, scope: DisplayScope, mode: DisplayMode) -> Self {
         Self { id: DisplayStateId(DocumentId::new().to_string()), name, scope, mode, view: T::default() }
     }
 }
 
+/// Named states and the selected state recorded for each configuration.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(bound(serialize = "T: Serialize", deserialize = "T: Deserialize<'de>"))]
 pub struct DisplayStates<T> {
@@ -75,19 +92,23 @@ impl<T> Default for DisplayStates<T> {
 }
 
 impl<T> DisplayStates<T> {
+    /// Whether the document has only its implicit Default display state.
     pub fn is_empty(&self) -> bool {
         self.states.is_empty()
     }
 
+    /// Named states in the order users added them.
     pub fn states(&self) -> &[DisplayState<T>] {
         &self.states
     }
 
+    /// The selected named state, or none for the inherited view.
     pub fn selected(&self, config: Option<&ConfigurationId>) -> Option<&DisplayState<T>> {
         let (_, id) = self.active.iter().find(|(saved, _)| saved.as_ref() == config)?;
         self.states.iter().find(|s| s.id == *id && s.scope.includes(config))
     }
 
+    /// Switches a configuration to an available state or its inherited view.
     pub fn select(&mut self, config: Option<&ConfigurationId>, id: Option<DisplayStateId>) -> Result<(), String> {
         if let Some(id) = &id
             && !self.states.iter().any(|s| s.id == *id && s.scope.includes(config))
@@ -102,6 +123,7 @@ impl<T> DisplayStates<T> {
         Ok(())
     }
 
+    /// Adds a state or replaces one with the same identity.
     pub fn put(&mut self, mut state: DisplayState<T>) -> Result<(), String> {
         state.name = state.name.trim().to_owned();
         self.check_state(&state)?;
@@ -113,6 +135,7 @@ impl<T> DisplayStates<T> {
         Ok(())
     }
 
+    /// Deletes a state and returns its configurations to their inherited view.
     pub fn remove(&mut self, id: &DisplayStateId) {
         self.active.retain(|(_, active)| active != id);
         self.states.retain(|state| &state.id != id);
@@ -137,6 +160,7 @@ impl<T> DisplayStates<T> {
         Ok(())
     }
 
+    /// Checks names, IDs, scopes and selections after decoding.
     pub fn check(&self) -> Result<(), String> {
         for (i, state) in self.states.iter().enumerate() {
             self.check_state(state)?;

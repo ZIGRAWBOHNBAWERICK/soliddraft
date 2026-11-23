@@ -190,6 +190,7 @@ pub fn user_library() -> Result<Library, String> {
     Ok(lib)
 }
 
+/// The built-in catalog and the browser profile's custom library.
 #[cfg(target_arch = "wasm32")]
 pub fn material_catalog() -> Catalog {
     let mut libraries = Catalog::built_in_libraries();
@@ -197,6 +198,7 @@ pub fn material_catalog() -> Catalog {
     Catalog::from_libraries(libraries, Vec::new())
 }
 
+/// Loads the custom library saved in this browser profile.
 #[cfg(target_arch = "wasm32")]
 pub fn user_library() -> Result<Library, String> {
     match stored()["material_library"].as_str() {
@@ -205,6 +207,7 @@ pub fn user_library() -> Result<Library, String> {
     }
 }
 
+/// Saves the user library in the platform's settings store.
 pub fn save_material_library(library: &Library) -> Result<(), String> {
     #[cfg(target_arch = "wasm32")]
     return save_section("material_library", &library.to_toml()).map_err(|e| e.to_string());

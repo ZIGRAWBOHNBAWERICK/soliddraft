@@ -66,7 +66,9 @@ pub enum AssemblyAction {
     Undo,
     Redo,
     ZoomFit,
+    /// Edits the appearance of a component.
     SetColour(OccurrencePath, Option<soliddraft_materials::Appearance>),
+    /// Hides or shows a component.
     SetHidden(OccurrencePath, bool),
     Mate(crate::mates::MateAction),
     Form(crate::subassembly::FormAction),

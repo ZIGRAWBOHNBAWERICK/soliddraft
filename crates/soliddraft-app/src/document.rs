@@ -3881,6 +3881,7 @@ impl Document {
         self.set_material_for(None, material, default_appearance)
     }
 
+    /// Assigns or clears the material for the part or one body.
     pub fn set_material_for(
         &mut self,
         body: Option<u32>,
@@ -3900,14 +3901,17 @@ impl Document {
         Ok(())
     }
 
+    /// The part's named display states.
     pub fn display_states(&self) -> &soliddraft_document::display_state::DisplayStates<model::PartDisplay> {
         &self.model.materials().display_states
     }
 
+    /// The state selected for the current configuration.
     pub fn display_state(&self) -> Option<&soliddraft_document::display_state::DisplayState<model::PartDisplay>> {
         self.display_states().selected(self.model.active_configuration())
     }
 
+    /// Saves a display state edit and refreshes the viewport.
     pub fn change_display_states(
         &mut self,
         states: soliddraft_document::display_state::DisplayStates<model::PartDisplay>,
@@ -3920,6 +3924,7 @@ impl Document {
         Ok(())
     }
 
+    /// The kernel handles of bodies the selected display state hides.
     pub fn hidden_display_bodies(&self) -> Vec<BodyId> {
         let Some(state) = self.display_state().filter(|s| !s.view.hidden.is_empty()) else { return Vec::new() };
         self.model
@@ -4022,6 +4027,7 @@ impl Document {
         self.shown_appearance_at(face, None)
     }
 
+    /// The displayed appearance of a face, body or the whole part.
     pub fn shown_appearance_at(&self, face: Option<FaceId>, body: Option<u32>) -> Appearance {
         let configuration = self.model.active_configuration();
         let mut table = match self.appearance_preview() {

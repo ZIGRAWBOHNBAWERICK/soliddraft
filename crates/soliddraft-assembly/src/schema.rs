@@ -405,6 +405,7 @@ impl Assembly {
         }
     }
 
+    /// The selected display state of the assembly.
     pub fn viewport_state(&self) -> Option<&DisplayState<AssemblyDisplay>> {
         self.viewport_states.selected(None)
     }

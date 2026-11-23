@@ -425,8 +425,8 @@ fn format_6_is_written_only_for_options_and_older_files_still_open() {
     assert!(d.part_json().contains("\"direction2\""));
     let back = reopened(&d);
     // A file from a later version is refused rather than misread.
-    let later = back.part_json().replace("soliddraft-part/6", "soliddraft-part/7");
-    assert!(Document::from_part_json(&later, kernel()).is_err(), "a format 7 part is refused");
+    let later = back.part_json().replace("soliddraft-part/6", "soliddraft-part/8");
+    assert!(Document::from_part_json(&later, kernel()).is_err(), "a format 8 part is refused");
     // A format 2 file from before the options reads as an extrusion without them.
     let legacy = serde_json::json!({
         "format":"soliddraft-part/2", "name":"Legacy part", "units":"mm", "next_feature":2,

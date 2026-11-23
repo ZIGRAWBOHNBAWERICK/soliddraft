@@ -193,66 +193,12 @@ impl Namer for PartContext<'_> {
                 format!("{count}{}{diameter} {} {}", symbols.diameter, symbols.depth, trim(format_value(p.depth, 2)))
             }
             Some(FeatureKind::Hole(h)) => {
-                use soliddraft_kernel_api::{HoleDepth, HoleHead};
-                let mm = |value: f64| trim(format_value(value, 2));
                 let (id, placement) = found.map_or((0, 0), |(id, placement)| (id, placement.unwrap_or(0)));
                 let id = soliddraft_model::FeatureId(id as u32);
                 let model = self.doc.model();
                 let wall = model.threaded_walls().into_iter().find(|w| w.feature == id && w.placement == placement);
                 let top = wall.as_ref().map(|w| w.top).or_else(|| model.hole_top(id, placement)).unwrap_or(0.0);
-                let drill = match h.depth {
-                    HoleDepth::Through => symbols.through.clone(),
-                    HoleDepth::Blind { depth } => format!("{} {}", symbols.depth, mm(depth - top)),
-                };
-                let drilled = format!("{}{} {drill}", symbols.diameter, mm(h.diameter));
-                let main = match (&h.thread, &wall) {
-                    (Some(thread), Some(wall)) => {
-                        let tapped = match wall.depth() {
-                            None => format!("{} {}", thread.designation(), symbols.through),
-                            Some(depth) => format!("{} {} {}", thread.designation(), symbols.depth, mm(depth)),
-                        };
-                        let deeper = match h.depth {
-                            HoleDepth::Through => !wall.through,
-                            HoleDepth::Blind { depth } => depth > wall.end() + 1e-9,
-                        };
-                        if deeper { format!("{tapped}\n{drilled}") } else { tapped }
-                    }
-                    // A plain hole, or one whose thread a later cut took away.
-                    _ => drilled,
-                };
-                // The head as it is now: a cut off the top makes a counterbore shallower
-                // and a countersink narrower, and one that went deeper took the head away.
-                let head = match h.head {
-                    Some(HoleHead::Counterbore { diameter, depth }) => (depth > top + 1e-9).then(|| {
-                        format!(
-                            "{} {}{} {} {}",
-                            symbols.counterbore,
-                            symbols.diameter,
-                            mm(diameter),
-                            symbols.depth,
-                            mm(depth - top)
-                        )
-                    }),
-                    Some(HoleHead::Countersink { diameter, angle_deg }) => {
-                        let now = diameter - 2.0 * top * (angle_deg.to_radians() / 2.0).tan();
-                        (now > h.diameter + 1e-9).then(|| {
-                            format!(
-                                "{} {}{} {} {}{}",
-                                symbols.countersink,
-                                symbols.diameter,
-                                mm(now),
-                                symbols.times,
-                                mm(angle_deg),
-                                symbols.degree
-                            )
-                        })
-                    }
-                    None => None,
-                };
-                match head {
-                    Some(head) => format!("{count}{main}\n{head}"),
-                    None => format!("{count}{main}"),
-                }
+                format_built_hole_callout(h, &count, symbols, Some(&BuiltHole { top, wall }))
             }
             _ => format!("{count}{}{diameter}", symbols.diameter),
         })
@@ -261,6 +207,160 @@ impl Namer for PartContext<'_> {
 
 fn trim(s: String) -> String {
     if s.contains('.') { s.trim_end_matches('0').trim_end_matches('.').to_owned() } else { s }
+}
+
+/// What a hole is like in the part as built: a callout states the hole as it is now.
+pub struct BuiltHole {
+    /// Where the hole starts now: zero, or deeper where a later cut took material off the
+    /// face it was drilled from.
+    pub top: f64,
+    /// The hole's threaded wall as the body has it, or `None` when a later cut took the
+    /// thread away (or the hole has none).
+    pub wall: Option<soliddraft_model::thread::ThreadedWall>,
+}
+
+/// Formats a drawing hole callout from a [`soliddraft_model::HoleFeature`], including
+/// Hole Wizard counterbore, countersink, slot, thread, end-condition, and callout
+/// tolerance/precision data, as the feature states it.
+pub fn format_hole_callout(h: &soliddraft_model::HoleFeature, count: &str, symbols: &Symbols) -> String {
+    format_built_hole_callout(h, count, symbols, None)
+}
+
+/// The hole callout of [`format_hole_callout`], stated as `built` has the hole when given:
+/// a cut off the top makes a blind hole and a counterbore shallower and a countersink
+/// narrower, one that went deeper takes the head away, and the thread is the one the
+/// wall still has.
+pub fn format_built_hole_callout(
+    h: &soliddraft_model::HoleFeature,
+    count: &str,
+    symbols: &Symbols,
+    built: Option<&BuiltHole>,
+) -> String {
+    use soliddraft_kernel_api::{HoleDepth, HoleHead};
+    use soliddraft_model::hole_wizard::{CalloutParam, HoleEndCondition};
+
+    let fmt = |param: CalloutParam, value: f64| -> String {
+        if let Some(tol) = h.wizard.as_ref().and_then(|w| w.tolerance_for(param)) {
+            tol.format_value(value)
+        } else {
+            trim(format_value(value, 2))
+        }
+    };
+    let top = built.map_or(0.0, |b| b.top);
+
+    let depth_text = match h.wizard.as_ref().map(|w| &w.end_condition) {
+        Some(HoleEndCondition::ThroughAll) => symbols.through.clone(),
+        Some(HoleEndCondition::Blind { depth }) => {
+            format!("{} {}", symbols.depth, fmt(CalloutParam::Depth, *depth - top))
+        }
+        Some(HoleEndCondition::UpToNext) => "UP TO NEXT".to_owned(),
+        Some(HoleEndCondition::UpToVertex { .. }) => "UP TO VERTEX".to_owned(),
+        Some(HoleEndCondition::UpToSurface { .. }) => "UP TO SURFACE".to_owned(),
+        Some(HoleEndCondition::OffsetFromSurface { offset, .. }) => {
+            format!("OFFSET {}", fmt(CalloutParam::Depth, *offset))
+        }
+        None => match h.depth {
+            HoleDepth::Through => symbols.through.clone(),
+            HoleDepth::Blind { depth } => format!("{} {}", symbols.depth, fmt(CalloutParam::Depth, depth - top)),
+        },
+    };
+
+    let effective_depth = h.wizard.as_ref().map_or(h.depth, |w| w.legacy_depth());
+    let is_slot = h.wizard.as_ref().is_some_and(|w| w.hole_type.is_slot());
+    let drilled = format!("{}{} {depth_text}", symbols.diameter, fmt(CalloutParam::Diameter, h.diameter));
+
+    let mut lines = Vec::new();
+    match (&h.thread, built) {
+        // As built: the thread the wall still has, and the drill under it when the hole
+        // goes deeper than the thread.
+        (Some(thread), Some(built)) => match &built.wall {
+            Some(wall) => {
+                lines.push(match wall.depth() {
+                    None => format!("{count}{} {}", thread.designation(), symbols.through),
+                    Some(depth) => format!(
+                        "{count}{} {} {}",
+                        thread.designation(),
+                        symbols.depth,
+                        fmt(CalloutParam::ThreadDepth, depth)
+                    ),
+                });
+                let deeper = match effective_depth {
+                    HoleDepth::Through => !wall.through,
+                    HoleDepth::Blind { depth } => depth > wall.end() + 1e-9,
+                };
+                if deeper {
+                    lines.push(drilled);
+                }
+            }
+            // A later cut took the thread away: the hole is a plain one now.
+            None => lines.push(format!("{count}{drilled}")),
+        },
+        (Some(thread), None) => match (thread.length, effective_depth) {
+            (None, _) => lines.push(format!("{count}{} {depth_text}", thread.designation())),
+            (Some(length), depth) => {
+                lines.push(format!(
+                    "{count}{} {} {}",
+                    thread.designation(),
+                    symbols.depth,
+                    fmt(CalloutParam::ThreadDepth, length)
+                ));
+                let deeper = match depth {
+                    HoleDepth::Through => true,
+                    HoleDepth::Blind { depth } => depth > length + 1e-9,
+                };
+                if deeper {
+                    lines.push(drilled);
+                }
+            }
+        },
+        (None, _) if is_slot => {
+            let slot_len = h
+                .wizard
+                .as_ref()
+                .and_then(|w| w.slot_length.or_else(|| Some(w.size_row().default_slot_length_mm())))
+                .unwrap_or(h.diameter * 2.0);
+            lines.push(format!(
+                "{count}{}{} {} {} SLOT {depth_text}",
+                symbols.diameter,
+                fmt(CalloutParam::Diameter, h.diameter),
+                symbols.times,
+                fmt(CalloutParam::SlotLength, slot_len)
+            ));
+        }
+        (None, _) => lines.push(format!("{count}{drilled}")),
+    }
+
+    // The head as it is now: a cut off the top makes a counterbore shallower and a
+    // countersink narrower, and one that went deeper took the head away.
+    match h.effective_head() {
+        Some(HoleHead::Counterbore { diameter, depth }) if depth > top + 1e-9 => {
+            lines.push(format!(
+                "{} {}{} {} {}",
+                symbols.counterbore,
+                symbols.diameter,
+                fmt(CalloutParam::CounterboreDiameter, diameter),
+                symbols.depth,
+                fmt(CalloutParam::CounterboreDepth, depth - top)
+            ));
+        }
+        Some(HoleHead::Countersink { diameter, angle_deg }) => {
+            let now = diameter - 2.0 * top * (angle_deg.to_radians() / 2.0).tan();
+            if now > h.diameter + 1e-9 {
+                lines.push(format!(
+                    "{} {}{} {} {}{}",
+                    symbols.countersink,
+                    symbols.diameter,
+                    fmt(CalloutParam::CountersinkDiameter, now),
+                    symbols.times,
+                    fmt(CalloutParam::CountersinkAngle, angle_deg),
+                    symbols.degree
+                ));
+            }
+        }
+        _ => {}
+    }
+
+    lines.join("\n")
 }
 
 /// The hole callout of a circle in the drawing's own style.
@@ -337,4 +437,70 @@ fn sketch_circles(doc: &Document, sketch: u64) -> Vec<(Vec3, f64)> {
             _ => None,
         })
         .collect()
+}
+
+#[cfg(test)]
+mod hole_callout_tests {
+    use super::*;
+    use soliddraft_kernel_api::{HoleDepth, HoleHead, HoleTip, SurfaceKind, Vec3};
+    use soliddraft_model::hole_wizard::{
+        CalloutParam, CalloutTolerance, HoleStandard, HoleType, HoleWizardSpec, ToleranceMode,
+    };
+    use soliddraft_model::{FaceFingerprint, FaceRef, FeatureId, Generator, HoleFeature};
+
+    fn dummy_face() -> FaceRef {
+        FaceRef {
+            feature: FeatureId(1),
+            label: "Top".into(),
+            generator: Generator::EndCap,
+            ordinal: 0,
+            fingerprint: FaceFingerprint {
+                surface: SurfaceKind::Plane,
+                normal: Some(Vec3::Z),
+                centroid: Vec3::ZERO,
+                area: 100.0,
+            },
+        }
+    }
+
+    #[test]
+    fn counterbore_slot_and_tapped_hole_wizard_callouts_include_head_and_tolerances() {
+        let symbols = &library::template("iso-a3").style_file().symbols;
+        let mut spec = HoleWizardSpec::new(HoleStandard::Iso, HoleType::Counterbore);
+        spec.set_tolerance(CalloutTolerance {
+            param: CalloutParam::CounterboreDepth,
+            mode: ToleranceMode::Bilateral { upper: 0.1, lower: -0.05 },
+            precision: 2,
+        });
+        let cb = HoleFeature {
+            face: dummy_face(),
+            points: vec![],
+            diameter: 6.6,
+            depth: HoleDepth::Through,
+            tip: HoleTip::Flat,
+            head: Some(HoleHead::Counterbore { diameter: 11.0, depth: 6.4 }),
+            thread: None,
+            sketch: None,
+            wizard: Some(spec),
+        };
+        let text = format_hole_callout(&cb, "4× ", symbols);
+        assert!(text.contains("4× Ø6.6 THRU"), "{text}");
+        assert!(text.contains("Ø11") && text.contains("6.40 +0.10/-0.05"), "{text}");
+
+        let tap_spec = HoleWizardSpec::new(HoleStandard::AnsiInch, HoleType::StraightTap);
+        let resolved = tap_spec.resolve_defaults();
+        let tapped = HoleFeature {
+            face: dummy_face(),
+            points: vec![],
+            diameter: resolved.diameter,
+            depth: HoleDepth::Through,
+            tip: resolved.tip,
+            head: None,
+            thread: resolved.thread,
+            sketch: None,
+            wizard: Some(tap_spec),
+        };
+        let tap_text = format_hole_callout(&tapped, "2× ", symbols);
+        assert_eq!(tap_text, "2× 1/4-20 UNC-2B THRU");
+    }
 }

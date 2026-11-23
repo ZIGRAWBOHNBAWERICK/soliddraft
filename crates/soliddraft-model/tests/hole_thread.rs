@@ -79,6 +79,8 @@ fn tapped_plate() -> (Document, FeatureId) {
             tip: HoleTip::Cone { angle_deg: 118.0 },
             head: None,
             thread: Some(thread),
+            sketch: None,
+            wizard: None,
         }),
     );
     for (id, status) in d.statuses() {
@@ -268,6 +270,8 @@ fn a_thread_that_does_not_fit_its_hole_is_refused_by_name() {
             tip: HoleTip::Flat,
             head: None,
             thread: Some(thread),
+            sketch: None,
+            wizard: None,
         })
     };
     let clearance = add(&mut d, hole(6.6, HoleDepth::Through, m6(None)));

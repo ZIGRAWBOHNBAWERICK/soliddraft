@@ -468,8 +468,10 @@ pub(crate) fn show_visible_control(ui: &egui::Ui, name: impl Into<String>, rect:
 /// `Mate type: <family>`, and the assembly's options the component's placement fields as
 /// `Placement X` to `Placement Rotate Z`, a feature form its OK button as `Form OK`, and
 /// the Hole form its `Hole thread`, `Thread size` and `Thread pitch` choices with each
-/// entry of an open list as `<choice>: <entry>`. Read only, for browser checks that click
-/// a control the canvas draws.
+/// entry of an open list as `<choice>: <entry>`, and the Hole Wizard panel its tabs as
+/// `Hole Wizard Type tab` and `Hole Wizard Positions tab`, its type tiles as
+/// `Hole type: <type>` and its commit button as `Apply Hole Wizard`. Read only, for
+/// browser checks that click a control the canvas draws.
 #[wasm_bindgen]
 pub fn shown_controls() -> String {
     SHOWN_CONTROLS.with_borrow(|controls| {

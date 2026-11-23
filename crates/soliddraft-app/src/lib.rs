@@ -35,6 +35,7 @@ pub mod form_bar;
 pub mod geometry_message;
 mod grid;
 pub mod history_panel;
+pub mod hole_wizard_panel;
 pub mod icons;
 pub mod import;
 pub mod interference;

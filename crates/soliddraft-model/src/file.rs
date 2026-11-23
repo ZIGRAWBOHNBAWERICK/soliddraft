@@ -8,8 +8,9 @@
 //!   geometry hash, and its sections.
 //! - `part.json`: the truth. The format tag (`soliddraft-part/2`, `/3` for explicit
 //!   body identities, `/4` from development builds that wrote extrusion options or the
-//!   first part options, `/5` for parameter, configuration and appearance data, or `/6`
-//!   for extrusion options), the part's name and
+//!   first part options or Hole Wizard features, `/5` for parameter, configuration and
+//!   appearance data, `/6` for extrusion options, or `/7` for Hole Wizard features), the
+//!   part's name and
 //!   units, every feature in tree order with its parameters, sketch and persistent
 //!   references, the rollback bar and the next free feature id, and when it has them
 //!   the part's text properties and its material and appearance assignments with copies
@@ -74,11 +75,14 @@ pub const PART_OPTIONS_FORMAT: &str = "soliddraft-part/5";
 /// or use chosen contours require this version, which also reads everything before it.
 /// An older reader would drop those choices and build a different part, so it must refuse.
 pub const OPTIONS_FORMAT: &str = "soliddraft-part/6";
-/// Development builds wrote either extrusion options or the first part options under
-/// this tag. Both still open: each is read by what it holds.
+/// Parts with Hole Wizard features (position sketches, standards, end conditions, options)
+/// require this version, which also reads everything before it.
+pub const HOLE_WIZARD_FORMAT: &str = "soliddraft-part/7";
+/// Development builds wrote extrusion options, the first part options or Hole Wizard
+/// features under this tag. All still open: each is read by what it holds.
 const EARLY_OPTIONS_FORMAT: &str = "soliddraft-part/4";
 const EARLY_OPTIONS_VERSION: u32 = 4;
-const NEWEST_FORMAT: u32 = 6;
+const NEWEST_FORMAT: u32 = 7;
 /// The format tag of part files from before the document envelope.
 pub const LEGACY_FORMAT: &str = "soliddraft-part/1";
 /// The file name extension parts are saved under.
@@ -103,7 +107,7 @@ pub enum FileError {
     Json(#[from] serde_json::Error),
     /// The format tag is not one this version reads.
     #[error(
-        "the file {}, this version reads {OPTIONS_FORMAT}, {PART_OPTIONS_FORMAT}, {EARLY_OPTIONS_FORMAT}, {MULTIBODY_FORMAT}, {FORMAT} and {LEGACY_FORMAT}",
+        "the file {}, this version reads {HOLE_WIZARD_FORMAT}, {OPTIONS_FORMAT}, {PART_OPTIONS_FORMAT}, {EARLY_OPTIONS_FORMAT}, {MULTIBODY_FORMAT}, {FORMAT} and {LEGACY_FORMAT}",
         found_tag(.found)
     )]
     Format {
@@ -212,20 +216,24 @@ impl Document {
     }
 
     fn recipe(&self) -> Recipe {
+        let uses_hole_wizard =
+            self.features.iter().any(|f| matches!(&f.kind, crate::FeatureKind::Hole(h) if h.uses_wizard_format()));
+        let format = if uses_hole_wizard {
+            HOLE_WIZARD_FORMAT
+        } else if uses_options(&self.features) {
+            OPTIONS_FORMAT
+        } else if self.values.uses_formula_settings()
+            || self.configurations.uses_formula_settings()
+            || has_extended_styles(&self.materials)
+        {
+            PART_OPTIONS_FORMAT
+        } else if self.next_body > 1 {
+            MULTIBODY_FORMAT
+        } else {
+            FORMAT
+        };
         Recipe {
-            format: if uses_options(&self.features) {
-                OPTIONS_FORMAT
-            } else if self.values.uses_formula_settings()
-                || self.configurations.uses_formula_settings()
-                || has_extended_styles(&self.materials)
-            {
-                PART_OPTIONS_FORMAT
-            } else if self.next_body > 1 {
-                MULTIBODY_FORMAT
-            } else {
-                FORMAT
-            }
-            .into(),
+            format: format.into(),
             name: self.name.clone(),
             units: Units::Mm,
             features: self
@@ -460,6 +468,11 @@ impl Document {
         }
         if version < EARLY_OPTIONS_VERSION && uses_options(&recipe.features) {
             return Err(FileError::Invalid(format!("the extrusion options require {EARLY_OPTIONS_FORMAT} or later")));
+        }
+        if version < EARLY_OPTIONS_VERSION
+            && recipe.features.iter().any(|f| matches!(&f.kind, crate::FeatureKind::Hole(h) if h.uses_wizard_format()))
+        {
+            return Err(FileError::Invalid(format!("Hole Wizard features require {EARLY_OPTIONS_FORMAT} or later")));
         }
         materials.snapshots.normalise();
         materials.check().map_err(FileError::Invalid)?;

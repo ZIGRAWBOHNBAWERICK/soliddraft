@@ -293,6 +293,8 @@ fn a_hole_head_takes_globals_and_formulas() {
         tip: HoleTip::Flat,
         head,
         thread: None,
+        sketch: None,
+        wizard: None,
     };
     add(&mut doc, FeatureKind::Hole(hole));
     let table = doc.values_table();

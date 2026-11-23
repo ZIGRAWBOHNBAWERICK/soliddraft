@@ -114,24 +114,37 @@ pub struct HoleThread {
     pub size: f64,
     /// Pitch in millimetres.
     pub pitch: f64,
-    /// Tolerance class, such as `6H`.
+    /// Tolerance class, such as `6H` or `2B`.
     pub class: String,
     /// How deep the thread goes from the face the hole starts on, in millimetres. `None`
     /// threads the whole wall.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub length: Option<f64>,
+    /// Explicit callout designation for non-ISO threads (e.g. `1/4-20 UNC-2B`, `1/4-18 NPT`).
+    /// `None` formats as ISO metric `M{size}x{pitch}-{class}`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub designation_override: Option<String>,
 }
 
 impl HoleThread {
     /// The coarse thread of a size, in the medium class, along the whole wall.
     pub fn coarse(size: &MetricSize) -> HoleThread {
-        HoleThread { size: size.nominal, pitch: size.coarse, class: INTERNAL_CLASSES[0].to_owned(), length: None }
+        HoleThread {
+            size: size.nominal,
+            pitch: size.coarse,
+            class: INTERNAL_CLASSES[0].to_owned(),
+            length: None,
+            designation_override: None,
+        }
     }
 
-    /// The designation as a drawing and a STEP file write it, such as `M6x1-6H` or
-    /// `M8x1-6H`. The pitch is always written, coarse or fine, so nobody has to know
-    /// which pitch is the coarse one.
+    /// The designation as a drawing and a STEP file write it, such as `M6x1-6H`,
+    /// `M8x1-6H`, or `1/4-20 UNC-2B`. For ISO metric threads the pitch is always
+    /// written, coarse or fine, so nobody has to know which pitch is the coarse one.
     pub fn designation(&self) -> String {
+        if let Some(custom) = self.designation_override.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+            return custom.to_owned();
+        }
         let class = self.class.trim();
         let mut text = format!("M{}x{}", number(self.size), number(self.pitch));
         if !class.is_empty() {
@@ -168,30 +181,40 @@ impl HoleThread {
 
     /// Why the thread cannot be cut in this hole, for people, or `None` when it can.
     pub fn problem(&self, diameter: f64, depth: &HoleDepth, head: Option<&HoleHead>) -> Option<String> {
-        let Some(size) = self.metric() else {
-            return Some(format!("M{} is not an ISO metric thread size.", number(self.size)));
-        };
-        if !size.has_pitch(self.pitch) {
-            let pitches: Vec<String> = size.pitches().map(number).collect();
-            return Some(format!(
-                "M{} has no {} mm pitch; its pitches are {}.",
-                number(self.size),
-                number(self.pitch),
-                pitches.join(", ")
-            ));
+        if self.designation_override.is_some() {
+            if !(self.size.is_finite() && self.size > 0.0 && self.pitch.is_finite() && self.pitch > 0.0) {
+                return Some("Thread major diameter and pitch must be positive.".to_owned());
+            }
+        } else {
+            let Some(size) = self.metric() else {
+                return Some(format!("M{} is not an ISO metric thread size.", number(self.size)));
+            };
+            if !size.has_pitch(self.pitch) {
+                let pitches: Vec<String> = size.pitches().map(number).collect();
+                return Some(format!(
+                    "M{} has no {} mm pitch; its pitches are {}.",
+                    number(self.size),
+                    number(self.pitch),
+                    pitches.join(", ")
+                ));
+            }
+            // An ISO metric thread takes an ISO 965-1 internal class; a thread with its own
+            // designation (UNC, NPT and the like) carries its standard's class instead.
+            if !is_internal_class(self.class.trim()) {
+                return Some(format!(
+                    "{} is not a tolerance class of an internal thread: a grade from 4 to 8 and G or H, such as 6H, \
+                     or the pitch and crest classes, such as 5H6H.",
+                    self.class.trim()
+                ));
+            }
         }
-        if !is_internal_class(self.class.trim()) {
-            return Some(format!(
-                "{} is not a tolerance class of an internal thread: a grade from 4 to 8 and G or H, such as 6H, or \
-                 the pitch and crest classes, such as 5H6H.",
-                self.class.trim()
-            ));
-        }
-        if diameter >= self.size - 1e-9 || diameter < self.minor() - 1e-6 {
+        let tapered_pipe = matches!(self.class.trim(), "NPT" | "Rc" | "PT");
+        let min_drill = if tapered_pipe { 0.0 } else { self.minor() - 1e-6 };
+        if diameter >= self.size - 1e-9 || diameter <= 0.0 || diameter < min_drill {
             return Some(format!(
                 "A {} thread is cut in a hole from Ø{} to under Ø{}; this hole is Ø{}.",
                 self.designation(),
-                number(self.minor()),
+                number(if tapered_pipe { 0.0 } else { self.minor() }),
                 number(self.size),
                 number(diameter)
             ));
@@ -338,8 +361,13 @@ impl Document {
     fn hole_axes(&self, feature: &Feature, hole: &crate::feature::HoleFeature) -> Option<(Vec<Vec3>, Vec3)> {
         let (_, drilled) = self.bodies_before(feature.id).into_iter().find(|(key, _)| *key == feature.body)?;
         let plane = self.plane_of(&PlaneRef::Face { face: hole.face.clone() }, drilled).ok()?;
-        let entries = hole.points.iter().map(|p| plane.origin + plane.x_dir * p.u + plane.y_dir() * p.v).collect();
-        Some((entries, -plane.normal))
+        // A Hole Wizard hole can be drilled along the face normal, and takes its points
+        // from its position sketch.
+        let flip = hole.wizard.as_ref().is_some_and(|w| w.flip_direction);
+        let direction = if flip { plane.normal } else { -plane.normal };
+        let points = self.hole_points(hole).ok()?;
+        let entries = points.iter().map(|p| plane.origin + plane.x_dir * p.u + plane.y_dir() * p.v).collect();
+        Some((entries, direction))
     }
 
     /// The part's bodies with their faces: the one body, or each of several.
@@ -432,7 +460,9 @@ impl Document {
                 if spans.is_empty() {
                     continue;
                 }
-                let through = matches!(hole.depth, HoleDepth::Through) && length >= bottom - 1e-6;
+                // A Hole Wizard hole states its depth through its end condition.
+                let depth = hole.wizard.as_ref().map_or(hole.depth, |w| w.legacy_depth());
+                let through = matches!(depth, HoleDepth::Through) && length >= bottom - 1e-6;
                 let radius = radii.entry(body).or_insert_with(|| {
                     self.kernel
                         .face_carriers(body)

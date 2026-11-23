@@ -759,8 +759,15 @@ impl Document {
             FeatureKind::Hole(h) if !(h.diameter.is_finite() && h.diameter > 0.0) => {
                 Err(CommandError::Invalid(format!("hole diameter must be positive, got {}", h.diameter)))
             }
-            FeatureKind::Hole(h) if h.points.is_empty() => {
+            FeatureKind::Hole(h) if h.sketch.is_none() && h.points.is_empty() => {
                 Err(CommandError::Invalid("a hole needs at least one point".into()))
+            }
+            FeatureKind::Hole(h)
+                if h.wizard.as_ref().is_some_and(|w| {
+                    w.hole_type.is_slot() && w.slot_length.is_some_and(|l| !l.is_finite() || l <= 0.0)
+                }) =>
+            {
+                Err(CommandError::Invalid("slot length must be positive and finite".into()))
             }
             FeatureKind::Pattern(p) => match p.layout {
                 PatternSpec::Linear { count, .. } | PatternSpec::Circular { count, .. } if count < 2 => {

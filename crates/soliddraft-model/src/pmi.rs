@@ -214,15 +214,19 @@ impl Document {
                 format!("No wall of {} is threaded any more: a later feature took the thread away.", feature.name)
             });
             if groups.is_empty() {
-                // Nothing is left to measure: the item says what the hole states.
+                // Nothing is left to measure: the item says what the hole states. A Hole
+                // Wizard hole states its depth through its end condition, and its points
+                // through its position sketch.
+                let effective_depth = hole.wizard.as_ref().map_or(hole.depth, |w| w.legacy_depth());
                 let through =
-                    matches!(hole.depth, soliddraft_kernel_api::HoleDepth::Through) && thread.length.is_none();
-                let depth = match (thread.length, hole.depth) {
+                    matches!(effective_depth, soliddraft_kernel_api::HoleDepth::Through) && thread.length.is_none();
+                let depth = match (thread.length, effective_depth) {
                     (Some(length), _) => Some(length),
                     (None, soliddraft_kernel_api::HoleDepth::Blind { depth }) => Some(depth),
                     (None, soliddraft_kernel_api::HoleDepth::Through) => None,
                 };
-                groups.push(ThreadGroup { through, depth, body: None, placements: (0..hole.points.len()).collect() });
+                let count = self.hole_points(hole).map(|pts| pts.len()).unwrap_or(hole.points.len());
+                groups.push(ThreadGroup { through, depth, body: None, placements: (0..count).collect() });
             }
             let name = format!("{} thread", feature.name.replace('/', " "));
             for group in groups {

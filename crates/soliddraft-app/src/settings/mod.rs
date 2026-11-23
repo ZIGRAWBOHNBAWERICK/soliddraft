@@ -114,6 +114,16 @@ pub fn save_command_history(history: &History) -> Result<(), NotKept> {
     save_section("commands", history)
 }
 
+/// Saved Hole Wizard favorite presets, or empty when none are stored.
+pub fn hole_favorites() -> Vec<soliddraft_model::hole_wizard::HoleFavorite> {
+    serde_json::from_value(stored()["hole_favorites"].clone()).unwrap_or_default()
+}
+
+/// Persists the Hole Wizard favorite presets to desktop settings or browser storage.
+pub fn save_hole_favorites(favorites: &[soliddraft_model::hole_wizard::HoleFavorite]) -> Result<(), NotKept> {
+    save_section("hole_favorites", &favorites.to_vec())
+}
+
 fn command_history_from(all: &Value) -> History {
     let mut history: History = serde_json::from_value(all["commands"].clone()).unwrap_or_default();
     history.retain_known();

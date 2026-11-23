@@ -993,6 +993,21 @@ jobs:
           name: browser-feature-panel
           path: ${{ runner.temp }}/browser-feature-panel
           if-no-files-found: ignore
+      - name: Place a tapped Hole Wizard pattern by clicks, save and reopen it in Chromium
+        timeout-minutes: 15
+        env:
+          CHROME_ARGS: --no-sandbox --enable-unsafe-swiftshader --use-angle=swiftshader
+        run: |
+          python3 -m http.server 8775 --bind 127.0.0.1 --directory target/web-dist > "$RUNNER_TEMP/hole-wizard-server.log" 2>&1 &
+          server=$!
+          trap 'kill "$server"' EXIT
+          node ci/browser-hole-wizard.mjs /usr/bin/google-chrome http://127.0.0.1:8775/ "$RUNNER_TEMP/browser-hole-wizard" ci/fixtures/pmi/p1-bracket-pmi.step
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-hole-wizard
+          path: ${{ runner.temp }}/browser-hole-wizard
+          if-no-files-found: ignore
       - name: Make, mate, save and reopen an assembly of uploaded parts, add a Universal Joint, refuse it a right angle, and choose between uploaded assemblies, in Chromium
         timeout-minutes: 30
         env:

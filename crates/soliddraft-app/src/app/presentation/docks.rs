@@ -197,12 +197,35 @@ pub(in crate::app) fn pane(ui: &mut egui::Ui, state: &mut AppState) {
 fn feature_pane(ui: &mut egui::Ui, state: &mut AppState) {
     ui.spacing_mut().item_spacing = vec2(6.0, 4.0);
     let full = ui.available_rect_before_wrap();
+    let layout = egui::Layout::top_down(egui::Align::Min);
+    // A hole is set up in the Hole Wizard, which takes the tree's place as the SOLIDWORKS
+    // PropertyManager does. The hole's own form (OK, depths, thread) sits under it and
+    // takes what its open sections need, up to half the column.
+    if crate::hole_wizard_panel::active(state) {
+        let most = (full.height() * 0.5).max(160.0).min(full.height());
+        let wanted = crate::feature_panel::needed_height(ui.ctx()).unwrap_or(most);
+        let split = full.bottom() - wanted.clamp(160.0_f32.min(most), most);
+        let top = Rect::from_min_max(full.min, pos2(full.right(), split));
+        let bottom = Rect::from_min_max(pos2(full.left(), split), full.max);
+        let mut wizard = ui.new_child(
+            egui::UiBuilder::new().id_salt("hole_wizard_panel").max_rect(top.shrink2(vec2(10.0, 8.0))).layout(layout),
+        );
+        wizard.set_clip_rect(top.intersect(ui.clip_rect()));
+        crate::hole_wizard_panel::show_contents(&mut wizard, state);
+        ui.painter().hline(full.x_range(), split, egui::Stroke::new(1.0, theme::line_strong()));
+        let mut panel =
+            ui.new_child(egui::UiBuilder::new().id_salt("feature_panel_area").max_rect(bottom).layout(layout));
+        panel.set_clip_rect(bottom.intersect(ui.clip_rect()));
+        crate::feature_panel::show(&mut panel, state);
+        ui.allocate_rect(full, Sense::hover());
+        ui.painter().vline(full.right() - 0.5, full.y_range(), egui::Stroke::new(1.0, theme::line()));
+        return;
+    }
     let most = (full.height() * 0.68).max(160.0).min(full.height());
     let wanted = crate::feature_panel::needed_height(ui.ctx()).unwrap_or(most);
     let split = full.top() + wanted.clamp(160.0_f32.min(most), most);
     let top = Rect::from_min_max(full.min, pos2(full.right(), split));
     let bottom = Rect::from_min_max(pos2(full.left(), split), full.max);
-    let layout = egui::Layout::top_down(egui::Align::Min);
     let mut panel = ui.new_child(egui::UiBuilder::new().id_salt("feature_panel_area").max_rect(top).layout(layout));
     panel.set_clip_rect(top.intersect(ui.clip_rect()));
     crate::feature_panel::show(&mut panel, state);

@@ -1819,6 +1819,8 @@ impl Line {
                     },
                     head,
                     thread,
+                    sketch: None,
+                    wizard: None,
                 };
                 if let Some(problem) = hole.thread_problem() {
                     return Err(problem);

@@ -1,3 +1,5 @@
+//! The S menu in the real app across workspaces and restarts.
+
 #[path = "support/ui.rs"]
 mod ribbon;
 

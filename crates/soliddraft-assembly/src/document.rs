@@ -113,16 +113,18 @@ struct Record {
 pub(crate) struct Design {
     mates: Vec<MateEntry>,
     values: ValueTable,
+    controller: Option<crate::mates::MateController>,
 }
 
 impl Design {
     pub(crate) fn of(truth: &Assembly) -> Design {
-        Design { mates: truth.mates.clone(), values: truth.values.clone() }
+        Design { mates: truth.mates.clone(), values: truth.values.clone(), controller: truth.mate_controller.clone() }
     }
 
     pub(crate) fn restore(&self, truth: &mut Assembly) {
         truth.mates = self.mates.clone();
         truth.values = self.values.clone();
+        truth.mate_controller = self.controller.clone();
     }
 }
 

@@ -42,6 +42,11 @@
 // parts, the assembly is in Lifted with its exploded view, and activating Default, made
 // before the view, shows none: each configuration keeps its own.
 //
+// Then the Mate Controller on the saved tray assembly: the floor mate is set as the driven
+// mate, its value saved as position low, raised 12 mm through the controller's value field
+// and saved as high, animated back to low, saved, opened again with both positions, and
+// high applied.
+//
 // The app draws into one canvas and takes only trusted input: keys and clicks sent as the
 // browser's own, through the DevTools protocol. The canvas has no text to read, so the
 // check reads the assembly through the read-only `shown_assembly` export, and finds a
@@ -361,6 +366,9 @@ async function main() {
   // Save (a download), load the site afresh, open the file with its parts.
   step('save');
   const saved = await v.download('save', () => v.key('s', 'KeyS', 83, 2, 's'));
+  // Later saves download under the same name; the trays keep a copy of their own.
+  const trays = path.join(downloads, `trays-${path.basename(saved)}`);
+  fs.copyFileSync(saved, trays);
   check(saved.endsWith('.dwasm'), `the assembly saves as a .dwasm file, not ${saved}`);
   shown = await v.assembly('saved', s => !s.dirty);
   step('load the site again and open the saved assembly with its parts');
@@ -389,10 +397,11 @@ async function main() {
   const joint = await universalJoint(v);
   const choice = await chosenAssembly(v, saved, [tray, collar], parts(mated));
   const bearingDrag = await refusedDrag(v);
-  const configured = await configuredExplode(v, saved, [tray, collar], mated);
+  const configured = await configuredExplode(v, trays, [tray, collar], mated);
+  const controller = await mateController(v, trays, [tray, collar], mated);
 
-  fs.writeFileSync(path.join(out, 'assemblies.json'), JSON.stringify({ mated, reopened, alone, saved: path.basename(saved), joint, choice, bearing: bearingDrag, configured }, null, 1));
-  console.log(`Assemblies in the browser: three components from two uploads, a mate picked in the viewport putting the second tray ${FLOOR} mm up on the first one's floor, saved as ${path.basename(saved)}, reopened with its parts at the same placements with the mate kept, and opened alone from the copies it keeps. A Universal Joint picked between two shafts meeting at ${BEND} degrees drove the output ${joint.follows.toFixed(6)} degrees for a ${TURN} degree input turn, and reopened with its parts. A parent and its child assembly uploaded child first opened the parent the visitor chose, with ${choice.chosen.held.length} files held for it, and took a tray inserted on top. Turning the joint's free output block to set the shafts at right angles was refused by name with nothing changed, and a 60 degree turn after it was taken and undone. A configuration added and activated in the panel took an auto exploded view that moved ${configured.moved} parts on screen and no placement, saved, reopened in that configuration, and showed no exploded view in Default.`);
+  fs.writeFileSync(path.join(out, 'assemblies.json'), JSON.stringify({ mated, reopened, alone, saved: path.basename(saved), joint, choice, bearing: bearingDrag, configured, controller }, null, 1));
+  console.log(`Assemblies in the browser: three components from two uploads, a mate picked in the viewport putting the second tray ${FLOOR} mm up on the first one's floor, saved as ${path.basename(saved)}, reopened with its parts at the same placements with the mate kept, and opened alone from the copies it keeps. A Universal Joint picked between two shafts meeting at ${BEND} degrees drove the output ${joint.follows.toFixed(6)} degrees for a ${TURN} degree input turn, and reopened with its parts. A parent and its child assembly uploaded child first opened the parent the visitor chose, with ${choice.chosen.held.length} files held for it, and took a tray inserted on top. Turning the joint's free output block to set the shafts at right angles was refused by name with nothing changed, and a 60 degree turn after it was taken and undone. A configuration added and activated in the panel took an auto exploded view that moved ${configured.moved} parts on screen and no placement, saved, reopened in that configuration, and showed no exploded view in Default. The floor mate, driven from the Mate Controller, saved low and 12 mm higher positions, animated back to low, and reopened with both, high applying again.`);
 }
 
 // The rig's shafts: the input (component 4) on a hinge at (10, 5, 0) along Z, the output
@@ -624,7 +633,8 @@ async function refusedDrag(v) {
 // Types `text` into the focused field, a key at a time.
 async function type(v, text) {
   for (const ch of text) {
-    await v.key(ch, `Key${ch.toUpperCase()}`, ch.toUpperCase().charCodeAt(0), 0, ch);
+    const code = /[0-9]/.test(ch) ? `Digit${ch}` : `Key${ch.toUpperCase()}`;
+    await v.key(ch, code, ch.toUpperCase().charCodeAt(0), 0, ch);
   }
 }
 
@@ -678,6 +688,66 @@ async function configuredExplode(v, saved, files, mated) {
   check(near(placements(shown), assembled), `Default's placements are ${JSON.stringify(placements(shown))}`);
   await v.stopped('configured at the end');
   return { moved, reopened: shown.configurations };
+}
+
+
+// The Mate Controller on the saved tray assembly: the floor mate driven between two named
+// positions, an animation back to the first, saved and opened again with both positions.
+async function mateController(v, saved, files, mated) {
+  step('open the saved tray assembly and drive its floor mate from the Mate Controller');
+  await v.load();
+  await v.choose([saved, ...files], () => v.click(OPEN));
+  let shown = await v.assembly('controller opened', s => loaded(s) && s.components.length === 3 && s.components.every(c => c.freshness !== 'unchecked'));
+  const floor = mated.mate_names[0];
+  const height = s => { const [a, , b] = s.components.map(c => c.translation); return b[2] - a[2]; };
+  const start = height(shown);
+  await v.command('Mate');
+  await v.assembly('mate panel', s => s.mate_panel.open);
+  await v.click(await v.control('Mate more'));
+  await v.click(await v.control('Controller mates'));
+  await type(v, floor);
+  await v.click(await v.control('Set driven mates'));
+  shown = await v.assembly('driven', s => s.controller.mates.length === 1 || s.mate_panel.error);
+  check(JSON.stringify(shown.controller.mates) === JSON.stringify([floor]), `the controller drives ${JSON.stringify(shown.controller.mates)}: ${shown.mate_panel.error}`);
+  await v.click(await v.control('Position name'));
+  await type(v, 'low');
+  await v.click(await v.control('Save position'));
+  shown = await v.assembly('low saved', s => s.controller.positions.length === 1);
+
+  step('raise the second tray 12 mm through the controller and save that too');
+  await v.click(await v.control('Controller value 1'));
+  await v.key('a', 'KeyA', 65, 2, 'a');
+  await type(v, '12');
+  await v.click(await v.control('Apply values'));
+  shown = await v.assembly('raised', s => Math.abs(height(s) - start - 12) < 1e-9 || s.mate_panel.error);
+  check(Math.abs(height(shown) - start - 12) < 1e-9, `the tray stands ${height(shown)} mm up, not ${start + 12}: ${shown.mate_panel.error}`);
+  await v.click(await v.control('Position name'));
+  await v.key('a', 'KeyA', 65, 2, 'a');
+  await type(v, 'high');
+  await v.click(await v.control('Save position'));
+  shown = await v.assembly('high saved', s => s.controller.positions.length === 2);
+  check(JSON.stringify(shown.controller.positions) === '["low","high"]', `the positions are ${JSON.stringify(shown.controller.positions)}`);
+  await v.shot('17-controller-high');
+
+  step('animate back to low');
+  await v.click(await v.control('Animate to low'));
+  shown = await v.assembly('animated', s => !s.controller.animating && Math.abs(height(s) - start) < 1e-9);
+
+  step('save, open again and apply high');
+  const again = await v.download('save controller', () => v.key('s', 'KeyS', 83, 2, 's'));
+  await v.load();
+  await v.choose([again, ...files], () => v.click(OPEN));
+  shown = await v.assembly('controller reopened', s => loaded(s) && s.components.length === 3 && s.components.every(c => c.freshness !== 'unchecked'));
+  check(JSON.stringify(shown.controller.positions) === '["low","high"]', `reopened with ${JSON.stringify(shown.controller.positions)}`);
+  check(Math.abs(height(shown) - start) < 1e-9, `reopened ${height(shown)} mm up`);
+  await v.command('Mate');
+  await v.assembly('mate panel again', s => s.mate_panel.open);
+  await v.click(await v.control('Mate more'));
+  await v.click(await v.control('Apply high'));
+  shown = await v.assembly('high applied', s => Math.abs(height(s) - start - 12) < 1e-9 || s.mate_panel.error);
+  check(Math.abs(height(shown) - start - 12) < 1e-9, `Apply high left the tray ${height(shown)} mm up: ${shown.mate_panel.error}`);
+  await v.stopped('controller at the end');
+  return { floor, positions: shown.controller.positions };
 }
 
 try {

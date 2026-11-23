@@ -2,7 +2,7 @@
 use crate::mates::bodies::{self, Scope};
 use crate::mates::{MateRefusal, RefusalCode};
 use crate::schema::Assembly;
-use crate::{AssemblyDocument, EditError, OccurrencePath, Placement};
+use crate::{AssemblyDocument, ComponentId, EditError, OccurrencePath, Placement};
 
 #[derive(Clone)]
 pub(crate) struct Drag {
@@ -42,6 +42,13 @@ impl AssemblyDocument {
         if self.motion.is_some() {
             return self.queue_motion(target);
         }
+        self.preview_carrying(target, &[])
+    }
+
+    /// A drag preview in which the root components `carried` move by the dragged root
+    /// component's translation as well, as wishes the mates still correct: what Physical
+    /// Dynamics pushes.
+    pub(crate) fn preview_carrying(&mut self, target: Placement, carried: &[ComponentId]) -> Result<(), MateRefusal> {
         if !target.translation.is_finite()
             || !target.rotation.is_finite()
             || (target.rotation.length_squared() - 1.0).abs() > 1e-8
@@ -58,6 +65,12 @@ impl AssemblyDocument {
         let path = drag.path.clone();
         let mut candidate = drag.candidate.clone();
         let previous = Scope::new(&candidate, &self.table, &self.store).world(&path).unwrap_or(target);
+        let shift = target.translation - previous.translation;
+        for id in carried {
+            if let Some(c) = candidate.component_mut(*id) {
+                c.placement = Placement::new(c.placement.rotation, c.placement.translation + shift);
+            }
+        }
         match Self::owner(&path) {
             Ok(id) => {
                 candidate

@@ -177,6 +177,7 @@ impl Assembly {
             display_states: &self.display_states,
             mates: &self.mates,
             values: &self.values,
+            mate_controller: self.mate_controller.as_ref(),
             next_id: self.next_id,
         };
         let json = serde_json::to_value(&out).expect("an assembly always serialises");
@@ -210,6 +211,7 @@ impl Assembly {
             // Placements hold what mates decide: the same placements are the same shape.
             map.remove("mates");
             map.remove("values");
+            map.remove("mate_controller");
             for list in ["components", "patterns"] {
                 if let Some(Value::Array(items)) = map.get_mut(list) {
                     for item in items.iter_mut().filter_map(Value::as_object_mut) {
@@ -363,6 +365,8 @@ struct TruthOut<'a> {
     mates: &'a [MateEntry],
     #[serde(skip_serializing_if = "ValueTable::is_empty")]
     values: &'a ValueTable,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    mate_controller: Option<&'a crate::mates::MateController>,
     next_id: u32,
 }
 

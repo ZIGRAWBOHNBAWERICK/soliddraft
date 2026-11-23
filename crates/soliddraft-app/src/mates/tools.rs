@@ -5,7 +5,7 @@ use crate::state::AppState;
 use serde_json::{Value, json};
 use soliddraft_assembly::{
     Alignment, ComponentId, EndpointSelector, Entity, FaceEndpoint, FaceSelector, GeneratorChoice, Mate, MateEdit,
-    MateRefusal, SlotConstraint, SlotInput, WidthConstraint, WidthInput,
+    MateRefusal, PathOptions, SlotConstraint, SlotInput, WidthConstraint, WidthInput,
 };
 
 /// A refusal as a tool's error: typed JSON, with what it involved.
@@ -111,6 +111,67 @@ fn slot(input: &Value) -> Result<SlotInput, String> {
     }
 }
 
+/// Where a slot or path puts its pin or point, as a tool reports it.
+fn position(constraint: &SlotConstraint, distance: impl Fn(&soliddraft_model::Expression) -> Value) -> Value {
+    match constraint {
+        SlotConstraint::Free => json!({ "mode": "free" }),
+        SlotConstraint::Center => json!({ "mode": "center" }),
+        SlotConstraint::Distance { distance: d, flipped } => {
+            json!({ "mode": "distance", "distance": distance(d), "flipped": flipped })
+        }
+        SlotConstraint::Percent { percent, flipped } => {
+            json!({ "mode": "percent", "percent": percent, "flipped": flipped })
+        }
+    }
+}
+
+/// The Mate Controller tool.
+fn controller(doc: &mut soliddraft_assembly::AssemblyDocument, input: &Value) -> Result<Value, String> {
+    let name = |key: &str| text(input, key).map(str::to_owned);
+    match text(input, "action")? {
+        "show" => {}
+        "set" => {
+            let mates: Vec<String> = input["mates"]
+                .as_array()
+                .ok_or("mates is a list of mate names")?
+                .iter()
+                .map(|m| m.as_str().map(str::to_owned).ok_or("a mate's name is text"))
+                .collect::<Result<_, _>>()?;
+            doc.set_controller_mates(&mates).map_err(refused)?;
+        }
+        "save" => doc.save_controller_position(&name("position")?).map_err(refused)?,
+        "delete" => doc.delete_controller_position(&name("position")?).map_err(refused)?,
+        "apply" => {
+            if input["position"].is_null() {
+                let values: Vec<f64> = input["values"]
+                    .as_array()
+                    .ok_or("give a position or values")?
+                    .iter()
+                    .map(|v| v.as_f64().ok_or("a value is a number"))
+                    .collect::<Result<_, _>>()?;
+                doc.apply_controller_values(&values).map_err(refused)?;
+            } else {
+                doc.apply_controller_position(&name("position")?).map_err(refused)?;
+            }
+        }
+        "frames" => {
+            let steps = input["steps"].as_u64().unwrap_or(10) as usize;
+            let frames = doc.controller_frames(&name("from")?, &name("to")?, steps).map_err(refused)?;
+            let frames: Vec<Value> = frames
+                .iter()
+                .map(|f| json!(f.iter().map(|(c, p)| json!({ "component": c, "placement": p })).collect::<Vec<_>>()))
+                .collect();
+            return Ok(json!({ "frames": frames }));
+        }
+        other => return Err(format!("the action is show, set, save, apply, delete or frames, not {other}")),
+    }
+    Ok(json!({
+        "mates": doc.controller_mates(),
+        "positions": doc.mate_controller().map(|c| json!(c.positions)).unwrap_or(json!([])),
+        "values": soliddraft_assembly::controller_values(doc),
+    }))
+}
+
 fn ratio(v: &Value) -> Result<[f64; 2], String> {
     match v.as_array().map(|r| r.iter().map(Value::as_f64).collect::<Vec<_>>()).as_deref() {
         Some([Some(a), Some(b)]) => Ok([*a, *b]),
@@ -132,11 +193,10 @@ pub(crate) fn run(state: &mut AppState, name: &str, input: &Value) -> Option<Res
         return Some(drag(state, input).map(|_| json!({"assembly": summary(state), "pending": state.assembly.session.as_ref().is_some_and(|s| s.doc.drag_pending()), "motion": state.assembly.session.as_ref().and_then(|s| s.doc.drag_report())})));
     }
 
-    if matches!(name, "assembly_physical_dynamics") {
-        return Some(Err(refused(MateRefusal::new(
-            soliddraft_assembly::RefusalCode::UnsupportedMotion,
-            format!("{name} is outside the static rigid-motion mate solver"),
-        ))));
+    if name == "assembly_physical_dynamics" {
+        let mut input = input.clone();
+        input["push"] = json!(true);
+        return Some(drag(state, &input).map(|_| json!({"assembly": summary(state), "pending": state.assembly.session.as_ref().is_some_and(|s| s.doc.drag_pending()), "motion": state.assembly.session.as_ref().and_then(|s| s.doc.drag_report())})));
     }
     let known = matches!(
         name,
@@ -145,6 +205,7 @@ pub(crate) fn run(state: &mut AppState, name: &str, input: &Value) -> Option<Res
             | "assembly_mate_screw"
             | "assembly_mate_universal_joint"
             | "assembly_mate_path"
+            | "assembly_mate_controller"
             | "assembly_mate_cam"
             | "assembly_mate_angle"
             | "assembly_mate_limit_angle"
@@ -226,9 +287,25 @@ fn call(state: &mut AppState, name: &str, input: &Value) -> Result<Value, String
             )
             .map(|id| json!({"mate":id}))
         }
-        "assembly_mate_path" => doc
-            .mate_path(text(input, "name")?, &selector(&input["path"])?, &selector(&input["point"])?, strict)
-            .map(|id| json!({"mate":id})),
+        "assembly_mate_path" => {
+            let steer = |key: &str| -> Result<Option<(EndpointSelector, Alignment)>, String> {
+                if input[key].is_null() {
+                    return Ok(None);
+                }
+                let side = optional_alignment(&input[format!("{key}_alignment")])?;
+                Ok(Some((selector(&input[key])?, side)))
+            };
+            let options = PathOptions { position: slot(input)?, follow: steer("follow")?, up: steer("up")? };
+            doc.mate_path_with(
+                text(input, "name")?,
+                &selector(&input["path"])?,
+                &selector(&input["point"])?,
+                &options,
+                strict,
+            )
+            .map(|id| json!({"mate":id}))
+        }
+        "assembly_mate_controller" => return controller(doc, input),
         "assembly_mate_cam" => doc
             .mate_cam(text(input, "name")?, &selector(&input["cam"])?, &selector(&input["follower"])?, strict)
             .map(|id| json!({"mate":id})),
@@ -547,16 +624,7 @@ pub(crate) fn rows(s: &mut AssemblySession) -> (Value, Value, Value) {
                 Mate::Slot { slot, pin, constraint, lock_rotation, .. } => {
                     row["slot"] = endpoint(root, slot);
                     row["pin"] = endpoint(root, pin);
-                    row["position"] = match constraint {
-                        SlotConstraint::Free => json!({ "mode": "free" }),
-                        SlotConstraint::Center => json!({ "mode": "center" }),
-                        SlotConstraint::Distance { distance: d, flipped } => {
-                            json!({ "mode": "distance", "distance": distance(d), "flipped": flipped })
-                        }
-                        SlotConstraint::Percent { percent, flipped } => {
-                            json!({ "mode": "percent", "percent": percent, "flipped": flipped })
-                        }
-                    };
+                    row["position"] = position(constraint, distance);
                     row["lock_rotation"] = json!(lock_rotation.is_some());
                     if let Some(turn) = lock_rotation {
                         row["locked_turn"] = json!(turn);
@@ -577,9 +645,16 @@ pub(crate) fn rows(s: &mut AssemblySession) -> (Value, Value, Value) {
                     row["planes"] = json!(planes.iter().map(|e| endpoint(root, e)).collect::<Vec<_>>());
                     row["plane_alignment"] = json!(plane_alignment);
                 }
-                Mate::Path { path, point, .. } => {
+                Mate::Path { path, point, constraint, follow, up, .. } => {
                     row["path"] = endpoint(root, path);
                     row["point"] = endpoint(root, point);
+                    row["position"] = position(constraint, distance);
+                    for (key, steer) in [("follow", follow), ("up", up)] {
+                        if let Some(s) = steer {
+                            row[key] = endpoint(root, &s.direction);
+                            row[format!("{key}_alignment")] = json!(s.alignment);
+                        }
+                    }
                 }
                 Mate::Cam { cam, follower, outside, .. } => {
                     row["cam"] = endpoint(root, cam);
@@ -625,7 +700,8 @@ pub(crate) fn rows(s: &mut AssemblySession) -> (Value, Value, Value) {
 fn drag(state: &mut AppState, input: &Value) -> Result<(), String> {
     let s = state.assembly.session.as_mut().ok_or("no assembly is open")?;
     s.doc.poll_drag();
-    let guarded = input["collision"].as_bool().unwrap_or(false) || !input["clearance"].is_null();
+    let push = input["push"].as_bool().unwrap_or(false);
+    let guarded = push || input["collision"].as_bool().unwrap_or(false) || !input["clearance"].is_null();
     let clearance = input["clearance"]
         .as_str()
         .map(|text| {
@@ -638,8 +714,14 @@ fn drag(state: &mut AppState, input: &Value) -> Result<(), String> {
         "begin" => {
             let path =
                 serde_json::from_value(input["path"].clone()).map_err(|e| format!("the occurrence path: {e}"))?;
-            if guarded { s.doc.begin_guarded_drag(path, clearance) } else { s.doc.begin_drag(path) }
-                .map_err(|e| e.to_string())
+            if push {
+                s.doc.begin_dynamic_drag(path, clearance)
+            } else if guarded {
+                s.doc.begin_guarded_drag(path, clearance)
+            } else {
+                s.doc.begin_drag(path)
+            }
+            .map_err(|e| e.to_string())
         }
         "update" => {
             let target =
@@ -657,8 +739,14 @@ fn drag(state: &mut AppState, input: &Value) -> Result<(), String> {
                 serde_json::from_value(input["path"].clone()).map_err(|e| format!("the occurrence path: {e}"))?;
             let target =
                 serde_json::from_value(input["placement"].clone()).map_err(|e| format!("the placement: {e}"))?;
-            if guarded { s.doc.begin_guarded_drag(path, clearance) } else { s.doc.begin_drag(path) }
-                .map_err(|e| e.to_string())?;
+            if push {
+                s.doc.begin_dynamic_drag(path, clearance)
+            } else if guarded {
+                s.doc.begin_guarded_drag(path, clearance)
+            } else {
+                s.doc.begin_drag(path)
+            }
+            .map_err(|e| e.to_string())?;
             if let Err(e) = s.doc.preview_drag(target) {
                 s.doc.cancel_drag();
                 return Err(refused(e));

@@ -22,6 +22,7 @@ use crate::store::DefinitionStore;
 use num_rational::BigRational;
 use soliddraft_document::resolve::{Location, Resolution, Resolver};
 use soliddraft_document::{DocKind, DocRef};
+use soliddraft_model::Expression;
 
 /// An assembly's truth over the structure it was flattened into: `truth` decides the
 /// root's components and overrides, and each sub-assembly's own truth the rest.
@@ -129,8 +130,13 @@ pub(crate) enum Rule {
         mode: solver::SlotMode,
         lock: Option<super::StoredTurn>,
     },
-    /// The ends are the outline, then the point kept on it.
-    Path,
+    /// The ends are the outline, then the point kept on it, then the direction that follows
+    /// the path's tangent when `follow` has its sign, then the up direction when `up` has.
+    Path {
+        mode: solver::SlotMode,
+        follow: Option<i8>,
+        up: Option<i8>,
+    },
     /// The ends are the cam's outline, then the follower; `outside` is the side it rides on.
     Cam {
         outside: bool,
@@ -186,6 +192,26 @@ pub(crate) struct Problem {
 
 fn invalid(message: String) -> MateRefusal {
     MateRefusal::invalid(message)
+}
+
+/// Where a Slot puts its pin, or a Path its point, as the solver reads it.
+fn slot_mode(
+    constraint: &SlotConstraint,
+    name: &str,
+    length: &impl Fn(&Expression) -> Result<f64, MateRefusal>,
+) -> Result<solver::SlotMode, MateRefusal> {
+    let exact = |v: f64, what: &str| solver::exact(v).ok_or_else(|| invalid(format!("{name}: {what} is not finite")));
+    let hundred = BigRational::from_integer(100.into());
+    Ok(match constraint {
+        SlotConstraint::Free => solver::SlotMode::Free,
+        SlotConstraint::Center => solver::SlotMode::Centre,
+        SlotConstraint::Distance { distance, flipped } => {
+            solver::SlotMode::Distance { distance: exact(length(distance)?, "the distance")?, flipped: *flipped }
+        }
+        SlotConstraint::Percent { percent, flipped } => {
+            solver::SlotMode::Share { fraction: exact(*percent, "the percentage")? / hundred, flipped: *flipped }
+        }
+    })
 }
 
 impl<'a> Scope<'a> {
@@ -441,7 +467,9 @@ impl AssemblyDocument {
                         mates.push(Gathered::Lock { mate: name, a: ba, b: bb, relative: *relative });
                     }
                     _ => {
-                        let length = |e| holder.values.length(e).map_err(|e| super::command::value_refusal(&name, e));
+                        let length = |e: &Expression| {
+                            holder.values.length(e).map_err(|e| super::command::value_refusal(&name, e))
+                        };
                         let rule = match mate {
                             Mate::Mechanical {
                                 id,
@@ -597,25 +625,14 @@ impl AssemblyDocument {
                                 lock: *lock_rotation,
                             },
                             Mate::Slot { alignment, constraint, lock_rotation, .. } => {
-                                let exact = |v: f64, what: &str| {
-                                    solver::exact(v).ok_or_else(|| invalid(format!("{name}: {what} is not finite")))
-                                };
-                                let hundred = BigRational::from_integer(100.into());
-                                let mode = match constraint {
-                                    SlotConstraint::Free => solver::SlotMode::Free,
-                                    SlotConstraint::Center => solver::SlotMode::Centre,
-                                    SlotConstraint::Distance { distance, flipped } => solver::SlotMode::Distance {
-                                        distance: exact(length(distance)?, "the distance")?,
-                                        flipped: *flipped,
-                                    },
-                                    SlotConstraint::Percent { percent, flipped } => solver::SlotMode::Share {
-                                        fraction: exact(*percent, "the percentage")? / hundred,
-                                        flipped: *flipped,
-                                    },
-                                };
+                                let mode = slot_mode(constraint, &name, &length)?;
                                 Rule::Slot { sign: sign(alignment), mode, lock: *lock_rotation }
                             }
-                            Mate::Path { .. } => Rule::Path,
+                            Mate::Path { constraint, follow, up, .. } => Rule::Path {
+                                mode: slot_mode(constraint, &name, &length)?,
+                                follow: follow.as_ref().map(|s| sign(&s.alignment)),
+                                up: up.as_ref().map(|s| sign(&s.alignment)),
+                            },
                             Mate::Cam { outside, .. } => Rule::Cam { outside: *outside },
                             Mate::Origin { .. } | Mate::Lock { .. } => unreachable!("handled above"),
                         };

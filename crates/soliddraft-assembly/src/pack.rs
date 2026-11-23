@@ -19,7 +19,7 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::io::Cursor;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use serde::Serialize;
 use soliddraft_document::resolve::Resolver;
@@ -211,6 +211,7 @@ impl Pack {
             .last_modified_time(zip::DateTime::default());
         let mut zip = zip::ZipWriter::new(Cursor::new(Vec::new()));
         for (f, bytes) in &self.files {
+            check_output_path(&f.to)?;
             zip.start_file(entry_name(&f.to), options).map_err(|e| io(&e))?;
             zip.write_all(bytes).map_err(|e| io(&e))?;
         }
@@ -246,10 +247,32 @@ pub fn pack_and_go(request: &PackRequest, drawings: Option<Repoint>) -> Result<P
     let into = std::path::absolute(&request.into).map_err(|e| io(&request.into, &e))?;
     check_destination(&into, root.parent().unwrap_or(Path::new("")))?;
     let pack = gather(&PackRequest { root, ..request.clone() }, &Folders { search: &request.search }, drawings)?;
+    std::fs::create_dir_all(&into).map_err(|e| io(&into, &e))?;
+    let metadata = std::fs::symlink_metadata(&into).map_err(|e| io(&into, &e))?;
+    if !metadata.is_dir() {
+        return Err(PackError::Destination(format!("{} must be a directory", into.display())));
+    }
+    let destination = into.canonicalize().map_err(|e| io(&into, &e))?;
     for (f, bytes) in &pack.files {
-        let to = into.join(&f.to);
-        let dir = to.parent().unwrap_or(Path::new(""));
-        std::fs::create_dir_all(dir).map_err(|e| io(dir, &e))?;
+        let mut dir = destination.clone();
+        let parent = f.to.parent().expect("validated output path");
+        for component in parent.components() {
+            dir.push(component);
+            if let Err(e) = std::fs::create_dir(&dir)
+                && e.kind() != std::io::ErrorKind::AlreadyExists
+            {
+                return Err(io(&dir, &e));
+            }
+            let resolved = dir.canonicalize().map_err(|e| io(&dir, &e))?;
+            if !resolved.starts_with(&destination) || !resolved.is_dir() {
+                return Err(PackError::Destination(format!(
+                    "{} must resolve to a directory inside the pack",
+                    dir.display()
+                )));
+            }
+            dir = resolved;
+        }
+        let to = dir.join(f.to.file_name().expect("validated output path"));
         soliddraft_document::save_atomic(&to, bytes).map_err(|e| io(&to, &e))?;
     }
     Ok(pack.report(&into))
@@ -278,6 +301,9 @@ pub fn pack_zip(request: &PackRequest, drawings: Option<Repoint>) -> Result<Pack
 /// Gathers `request.root` and every document it reaches through `source`, and lays
 /// them out as `request` says, writing nothing. `request.into` is not used.
 pub fn gather(request: &PackRequest, source: &dyn PackSource, drawings: Option<Repoint>) -> Result<Pack, PackError> {
+    if !safe_name_fragment(&request.prefix) || !safe_name_fragment(&request.suffix) {
+        return Err(PackError::Destination("Pack and Go prefixes and suffixes must be filename fragments".into()));
+    }
     let io = |what: &Path, e: &dyn std::fmt::Display| PackError::Io(format!("{}: {e}", what.display()));
     let layout = Path::new(LAYOUT);
     let root = request.root.clone();
@@ -311,16 +337,18 @@ pub fn gather(request: &PackRequest, source: &dyn PackSource, drawings: Option<R
     }
 
     // 2. Where each lands.
-    let place = |from: &Path| {
+    let place = |from: &Path| -> Result<PathBuf, PackError> {
         let relative = match from.strip_prefix(&base) {
             Ok(r) if !request.flatten => r.to_path_buf(),
             _ => PathBuf::from(from.file_name().unwrap_or_default()),
         };
-        layout.join(renamed(&relative, &request.prefix, &request.suffix))
+        let to = renamed(&relative, &request.prefix, &request.suffix);
+        check_output_path(&to)?;
+        Ok(layout.join(to))
     };
     let mut taken: HashMap<PathBuf, PathBuf> = HashMap::new();
     for doc in docs.values_mut() {
-        let to = place(&doc.from);
+        let to = place(&doc.from)?;
         if let Some(other) = taken.insert(to.clone(), doc.from.clone()) {
             return Err(PackError::Clash(other, doc.from.clone(), unlaid(&to)));
         }
@@ -349,7 +377,7 @@ pub fn gather(request: &PackRequest, source: &dyn PackSource, drawings: Option<R
             if !model.id.is_some_and(|m| docs.contains_key(&m)) {
                 continue;
             }
-            let to = place(&path);
+            let to = place(&path)?;
             if let Some(other) = taken.insert(to.clone(), path.clone()) {
                 return Err(PackError::Clash(other, path.clone(), unlaid(&to)));
             }
@@ -506,6 +534,21 @@ fn renamed(relative: &Path, prefix: &str, suffix: &str) -> PathBuf {
         None => format!("{prefix}{stem}{suffix}"),
     };
     relative.with_file_name(name)
+}
+
+fn safe_name_fragment(fragment: &str) -> bool {
+    !fragment.contains(['/', '\\', ':', '\0']) && !fragment.contains("..")
+}
+
+fn check_output_path(path: &Path) -> Result<(), PackError> {
+    if path.file_name().is_some()
+        && path
+            .components()
+            .all(|c| matches!(c, Component::Normal(name) if safe_name_fragment(&name.to_string_lossy())))
+    {
+        return Ok(());
+    }
+    Err(PackError::Destination(format!("{} is not a safe path inside the pack", path.display())))
 }
 
 fn check_destination(into: &Path, base: &Path) -> Result<(), PackError> {

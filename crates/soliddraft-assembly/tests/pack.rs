@@ -294,3 +294,57 @@ fn files_a_page_holds_pack_into_a_zip_with_no_folder() {
     let without = HeldFiles::new(files[1..].to_vec());
     assert!(matches!(gather(&request, &without, None), Err(PackError::Missing(p)) if p == "parts/a.dwprt"));
 }
+
+#[test]
+fn pack_names_reject_absolute_paths_and_parent_components() {
+    let dir = folder("unsafe-names");
+    let root = dir.join("rig.dwasm");
+    AssemblyDocument::new("Rig").save(Some(&root)).unwrap();
+    let cases = [
+        ("../parent-".to_owned(), ""),
+        (dir.join("absolute-").to_string_lossy().into_owned(), ""),
+        (r"C:\absolute-".to_owned(), ""),
+        (String::new(), "/../../parent"),
+        (String::new(), r"\..\parent"),
+    ];
+    let mut accepted = Vec::new();
+    for (index, (prefix, suffix)) in cases.into_iter().enumerate() {
+        let into = dir.join(format!("pack-{index}"));
+        let request = PackRequest {
+            root: root.clone(),
+            into: into.clone(),
+            prefix,
+            suffix: suffix.into(),
+            flatten: true,
+            ..Default::default()
+        };
+        let folder_result = pack_and_go(&request, None);
+        let zip = into.with_extension("zip");
+        let zip_result = pack_zip(&PackRequest { into: zip.clone(), ..request.clone() }, None);
+        if !matches!(folder_result, Err(PackError::Destination(_)))
+            || into.exists()
+            || !matches!(zip_result, Err(PackError::Destination(_)))
+            || zip.exists()
+        {
+            accepted.push((request.prefix, request.suffix, folder_result, zip_result));
+        }
+    }
+    assert!(accepted.is_empty(), "{accepted:?}");
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn pack_folder_rejects_a_symlink_as_the_destination() {
+    let dir = folder("symlink-destination");
+    let root = dir.join("rig.dwasm");
+    AssemblyDocument::new("Rig").save(Some(&root)).unwrap();
+    let other = dir.join("other");
+    std::fs::create_dir(&other).unwrap();
+    let into = dir.join("packed");
+    std::os::unix::fs::symlink(&other, &into).unwrap();
+    let result = pack_and_go(&PackRequest { root, into, ..Default::default() }, None);
+    assert!(matches!(result, Err(PackError::Destination(_))), "{result:?}");
+    assert!(std::fs::read_dir(other).unwrap().next().is_none());
+    std::fs::remove_dir_all(dir).unwrap();
+}

@@ -5,6 +5,7 @@
 use serde_json::{Value, json};
 use soliddraft_app::app_tools::AppTools;
 use soliddraft_app::command_tools::board_bracket;
+use soliddraft_app::drawing::LinkState;
 use soliddraft_app::state::AppState;
 use soliddraft_assistant::Caller;
 use soliddraft_assistant::tools::call_checked;
@@ -51,6 +52,11 @@ impl Session {
 
     fn assembly(&self) -> &soliddraft_assembly::AssemblyDocument {
         &self.state.assembly.session.as_ref().expect("an assembly is open").doc
+    }
+
+    fn link(&mut self) -> LinkState {
+        soliddraft_app::drawing::reference::refresh(&mut self.state);
+        self.state.drawing.session.as_ref().expect("a drawing is open").link_state()
     }
 }
 
@@ -109,4 +115,31 @@ fn a_drawing_of_an_assembly_that_shows_a_mesh_is_refused() {
     let refused = s.try_call("assembly_make_drawing", json!({})).unwrap_err();
     assert!(refused.contains("mesh"), "{refused}");
     assert!(s.state.drawing.session.is_none(), "no drawing leaves the mesh out");
+}
+
+#[test]
+fn derived_views_wait_for_a_rebuild_when_the_assembly_moved_on() {
+    let mut s = Session::new("revision");
+    let made = drawn(&mut s, "rig");
+    let front = made["drawing"]["sheets"][0]["views"][1]["id"].clone();
+    assert_eq!(s.link(), LinkState::Current);
+
+    // Another configuration, made active: the drawing still shows the first revision.
+    s.call("show_assembly", json!({}));
+    s.call("assembly_add_configuration", json!({ "name": "Wide" }));
+    s.call("assembly_activate_configuration", json!({ "name": "Wide" }));
+    let refused = s.try_call("drawing_projected", json!({ "view": front, "direction": "right" })).unwrap_err();
+    assert!(refused.contains("Rebuild"), "{refused}");
+    let at = s.call("model_summary", json!({}))["assembly"]["components"][0]["translation"].clone();
+    let refused = s.try_call("drawing_detail", json!({ "view": front, "center": at, "radius": 10, "factor": 2 }));
+    assert!(refused.unwrap_err().contains("Rebuild"));
+
+    // Saved, the drawing sees a newer revision and still waits for its Rebuild.
+    s.call("assembly_save", json!({ "path": s.path("rig.dwasm") }));
+    assert!(matches!(s.link(), LinkState::Newer { .. }), "the saved revision is newer than the drawing's");
+    assert!(s.try_call("drawing_projected", json!({ "view": front, "direction": "right" })).is_err());
+    s.call("drawing_rebuild", json!({}));
+    assert_eq!(s.link(), LinkState::Current);
+    let placed = s.call("drawing_projected", json!({ "view": front, "direction": "right" }));
+    assert!(placed["placed"].is_string(), "{placed}");
 }

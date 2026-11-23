@@ -175,8 +175,20 @@ pub fn context(drawing: &Drawing, model: &AssemblyModel<'_>, id: ViewId) -> Resu
     with_part(model, exploded_at(drawing, id), |part, index| ViewContext::compute(drawing, part, index, id))
 }
 
+/// Refuses `model` at another revision than the one the drawing's views show: a view
+/// derived from it would sit beside views of the old one, and the drawing would keep its
+/// old pin.
+fn at_pinned_revision(drawing: &Drawing, model: &AssemblyModel<'_>) -> Result<(), DrawingError> {
+    if drawing.model.pinned != model.digest() {
+        return Err(DrawingError::BadRequest(
+            "the assembly has changed since the drawing's views were made; Rebuild the drawing first".into(),
+        ));
+    }
+    Ok(())
+}
+
 /// A view folded off `parent` on `direction`'s side, at the parent's scale, placed in
-/// line with it.
+/// line with it. The model must be at the revision the drawing shows.
 pub fn new_assembly_projected(
     drawing: &Drawing,
     model: &AssemblyModel<'_>,
@@ -184,6 +196,7 @@ pub fn new_assembly_projected(
     parent: ViewId,
     direction: FoldDirection,
 ) -> Result<View, DrawingError> {
+    at_pinned_revision(drawing, model)?;
     let exploded = exploded_at(drawing, parent);
     let (mut view, _) = with_part(model, exploded, |part, index| {
         crate::derived::new_projected(drawing, part, index, sheet, parent, direction)
@@ -193,7 +206,8 @@ pub fn new_assembly_projected(
 }
 
 /// A section of `parent` along a horizontal or vertical cutting line through the model
-/// point `through`, every part cut by its own kernel. A cut that meets no part is refused.
+/// point `through`, every part cut by its own kernel. A cut that meets no part is refused,
+/// and so is a model at another revision than the one the drawing shows.
 pub fn new_assembly_section(
     drawing: &Drawing,
     model: &AssemblyModel<'_>,
@@ -203,6 +217,7 @@ pub fn new_assembly_section(
     horizontal: bool,
     flip: bool,
 ) -> Result<View, DrawingError> {
+    at_pinned_revision(drawing, model)?;
     let exploded = exploded_at(drawing, parent);
     let (mut view, _) = with_part(model, exploded, |part, index| {
         let line = crate::derived::cutting_line(drawing, part, index, parent, through, horizontal)?;
@@ -216,7 +231,8 @@ pub fn new_assembly_section(
 }
 
 /// A detail of `parent` round the model point `center`, inside a circle of `radius`
-/// (the parent's view millimetres), magnified `factor` times.
+/// (the parent's view millimetres), magnified `factor` times. The model must be at the
+/// revision the drawing shows.
 pub fn new_assembly_detail(
     drawing: &Drawing,
     model: &AssemblyModel<'_>,
@@ -226,6 +242,7 @@ pub fn new_assembly_detail(
     radius: f64,
     factor: f64,
 ) -> Result<View, DrawingError> {
+    at_pinned_revision(drawing, model)?;
     let exploded = exploded_at(drawing, parent);
     let (mut view, _) = with_part(model, exploded, |part, index| {
         let at = crate::derived::context(drawing, part, index, parent)?.xf.point(center);

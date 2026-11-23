@@ -276,3 +276,49 @@ fn assembly_drawings_take_projected_section_and_detail_views_that_follow_the_ass
     let svg = soliddraft_drawing::export::svg::svg(&layout_sheet(&drawing, 0));
     assert!(svg.contains("SECTION A-A") || svg.contains("A-A"), "the section is labelled");
 }
+
+/// A drawing of `model` on `template` with the views asked for, ballooned.
+fn drawing_of(
+    model: &AssemblyModel<'_>,
+    template: &str,
+    views: Vec<StandardView>,
+    scale: Option<Scale>,
+) -> soliddraft_drawing::Drawing {
+    let new = NewAssemblyDrawing {
+        template: Template::by_id(template).unwrap(),
+        meta: DrawingMeta { title: "Rig".into(), ..DrawingMeta::default() },
+        views,
+        scale,
+        balloons: true,
+        exploded: false,
+    };
+    make_assembly_drawing(model, &new).unwrap()
+}
+
+/// The same assembly at a later revision.
+fn later<'k>(first: &AssemblyModel<'_>, revision: &[u8], parts: Vec<(PlacedPart<'k>, u32)>) -> AssemblyModel<'k> {
+    let mut next = model(revision, parts);
+    next.reference.as_mut().unwrap().id = first.reference.as_ref().unwrap().id;
+    next
+}
+
+#[test]
+fn a_derived_view_refuses_an_assembly_revision_its_drawing_does_not_show() {
+    let k = BoxKernel::new();
+    let first = model(b"r1", vec![base(&k), post(&k, "3", 10.0)]);
+    let drawing = drawing_of(&first, "iso-a3", vec![StandardView::Front], Some(Scale::FULL));
+    let front = drawing.sheets[0].views[0].id;
+    // The assembly changed since the drawing was made: its views still show r1.
+    let second = later(&first, b"r2", vec![base(&k), post(&k, "3", 60.0)]);
+    let at = Vec3::new(20.0, 30.0, 40.0);
+    for refused in [
+        new_assembly_projected(&drawing, &second, 0, front, FoldDirection::Right).map(|_| ()),
+        new_assembly_section(&drawing, &second, 0, front, at, false, false).map(|_| ()),
+        new_assembly_detail(&drawing, &second, 0, front, at, 6.0, 2.0).map(|_| ()),
+    ] {
+        let err = refused.expect_err("a view of r2 beside views of r1 is refused");
+        assert!(err.to_string().contains("Rebuild"), "{err}");
+    }
+    // At the revision it shows, the same views come.
+    new_assembly_projected(&drawing, &first, 0, front, FoldDirection::Right).unwrap();
+}

@@ -267,7 +267,8 @@ pub fn update(state: &mut AppState) -> Result<String, String> {
 }
 
 /// Places a view `make` derives from the assembly drawing's view `parent`, every part
-/// drawn by its kernel, as one undo step. The drawing's assembly must be the open one.
+/// drawn by its kernel, as one undo step. The drawing's assembly must be the open one, at
+/// the revision the drawing shows.
 /// Returns the new view's label and id.
 fn place_derived(
     state: &mut AppState,
@@ -277,9 +278,16 @@ fn place_derived(
 ) -> Result<(String, u32), String> {
     let d = state.drawing.session.as_ref().ok_or("no drawing is open")?;
     let wanted = d.doc.drawing.model.id;
+    let pinned = d.doc.drawing.model.pinned.clone();
     let a = state.assembly.session.as_mut().ok_or("open the drawing's assembly first")?;
     if Some(a.doc.id()) != wanted {
         return Err("the open assembly is not the one this drawing shows; open it first".into());
+    }
+    // A view of another revision would sit beside the drawing's views of this one.
+    if a.doc.revision() != pinned {
+        return Err(format!(
+            "{what}: the assembly has changed since the drawing's views were made; Rebuild the drawing first"
+        ));
     }
     let exact = exact_parts(&mut a.doc)?;
     let model = exact.model();

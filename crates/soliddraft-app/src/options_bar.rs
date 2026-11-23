@@ -441,7 +441,10 @@ fn details_sheet(ui: &mut egui::Ui, state: &mut AppState, anchor: egui::Rect) {
                 .inner_margin(8)
                 .show(ui, |ui| {
                     ui.set_width(width - 16.0);
-                    ui.set_height((screen.bottom() - anchor.bottom() - 32.0).clamp(120.0, 650.0));
+                    // The sheet ends above the bottom bar: its command line and pills stay in reach.
+                    let floor = egui::PanelState::load(ui.ctx(), crate::command_line::bar_id())
+                        .map_or(screen.bottom(), |bar| bar.outer_rect.top());
+                    ui.set_height((floor - anchor.bottom() - 32.0).clamp(120.0, 650.0));
                     // The sheet's one close control. The selection's own Clear X hides
                     // in here (properties_in_sheet).
                     if ui.button("Close options").clicked() {

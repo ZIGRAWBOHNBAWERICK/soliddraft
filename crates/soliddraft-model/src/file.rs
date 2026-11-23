@@ -6,8 +6,9 @@
 //! - `manifest.json`: the part's id, kind and format, the application and kernel that
 //!   wrote it, its semantic hash (the revision drawings and assemblies pin) and its
 //!   geometry hash, and its sections.
-//! - `part.json`: the truth. The format tag (`soliddraft-part/2`, or `/3` for explicit
-//!   body identities), the part's name and
+//! - `part.json`: the truth. The format tag (`soliddraft-part/2`, `/3` for explicit
+//!   body identities, or `/4` for spreadsheet formulas, parameter comments or
+//!   configuration suppression), the part's name and
 //!   units, every feature in tree order with its parameters, sketch and persistent
 //!   references, the rollback bar and the next free feature id, and when it has them
 //!   the part's text properties and its material and appearance assignments with copies
@@ -65,7 +66,7 @@ use crate::view::{self, Visibility};
 pub const FORMAT: &str = "soliddraft-part/2";
 /// Parts with explicit body identities require this version.
 pub const MULTIBODY_FORMAT: &str = "soliddraft-part/3";
-/// Parts using spreadsheet formulas or their settings require this version.
+/// Parts using spreadsheet formulas, parameter comments or configuration suppression require this version.
 pub const PARAMETERS_FORMAT: &str = "soliddraft-part/4";
 const NEWEST_FORMAT: u32 = 4;
 /// The format tag of part files from before the document envelope.
@@ -387,7 +388,7 @@ impl Document {
         if found != PARAMETERS_FORMAT
             && (recipe.values.uses_formula_settings() || recipe.configurations.uses_formula_settings())
         {
-            return Err(FileError::Invalid(format!("spreadsheet formulas require {PARAMETERS_FORMAT}")));
+            return Err(FileError::Invalid(format!("parameter and configuration edits require {PARAMETERS_FORMAT}")));
         }
         let mut ids: Vec<FeatureId> = recipe.features.iter().map(|f| f.id).collect();
         ids.sort();

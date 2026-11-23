@@ -45,6 +45,13 @@ pub(crate) enum Expr {
     Call(String, Vec<Expr>),
     Logical(bool),
     InvalidReference,
+    Physical(PhysicalProperty),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) enum PhysicalProperty {
+    Mass,
+    Volume,
 }
 
 #[derive(Clone, Copy)]
@@ -52,12 +59,13 @@ pub(crate) struct Quantity {
     pub(crate) value: f64,
     pub(crate) length: i32,
     pub(crate) angle: i32,
+    pub(crate) mass: i32,
     pub(crate) logical: bool,
 }
 
 impl Quantity {
-    fn number(value: f64) -> Self {
-        Self { value, length: 0, angle: 0, logical: false }
+    pub(crate) fn number(value: f64) -> Self {
+        Self { value, length: 0, angle: 0, mass: 0, logical: false }
     }
 
     fn logical(value: bool) -> Self {
@@ -65,7 +73,11 @@ impl Quantity {
     }
 
     pub(crate) fn is_unitless(&self) -> bool {
-        self.length == 0 && self.angle == 0
+        self.dimensions() == (0, 0, 0)
+    }
+
+    fn dimensions(self) -> (i32, i32, i32) {
+        (self.length, self.angle, self.mass)
     }
 
     fn document_units(mut self) -> Self {
@@ -157,9 +169,9 @@ fn eval(
     let mut eval = |e: &Expr| eval(e, degrees, reference);
     let q = match tree {
         Expr::Number(value, length, angle) => {
-            Quantity { value: *value, length: *length, angle: *angle, logical: false }
+            Quantity { value: *value, length: *length, angle: *angle, ..Quantity::number(0.0) }
         }
-        Expr::Ref(_) | Expr::Param(_) => reference(tree)?,
+        Expr::Ref(_) | Expr::Param(_) | Expr::Physical(_) => reference(tree)?,
         Expr::Formula(inner) => eval(inner)?,
         Expr::Logical(value) => Quantity::logical(*value),
         Expr::InvalidReference => return Err("missing value reference".into()),
@@ -190,7 +202,7 @@ fn eval(
                     if b_bare && !(a.is_unitless() && !a_bare) {
                         b = b.document_units();
                     }
-                    if (a.length, a.angle) != (b.length, b.angle) {
+                    if a.dimensions() != b.dimensions() {
                         return Err("incompatible units in sum".into());
                     }
                     a.value = if *op == '+' { a.value + b.value } else { a.value - b.value };
@@ -201,6 +213,7 @@ fn eval(
                     value: a.value * b.value,
                     length: a.length.checked_add(b.length).ok_or("unit exponent too large")?,
                     angle: a.angle.checked_add(b.angle).ok_or("unit exponent too large")?,
+                    mass: a.mass.checked_add(b.mass).ok_or("unit exponent too large")?,
                     logical: false,
                 },
                 '/' if b.value == 0.0 => return Err("division by zero".into()),
@@ -208,6 +221,7 @@ fn eval(
                     value: a.value / b.value,
                     length: a.length.checked_sub(b.length).ok_or("unit exponent too large")?,
                     angle: a.angle.checked_sub(b.angle).ok_or("unit exponent too large")?,
+                    mass: a.mass.checked_sub(b.mass).ok_or("unit exponent too large")?,
                     logical: false,
                 },
                 _ => return Err("unknown operator".into()),
@@ -473,11 +487,33 @@ impl Expression {
         matches!(self.tree, Expr::Formula(_))
     }
 
+    pub(crate) fn reads_physical_properties(&self) -> bool {
+        self.dependencies().iter().any(|e| matches!(e, Expr::Physical(_)))
+    }
+
+    pub(crate) fn dependencies(&self) -> Vec<&Expr> {
+        fn walk<'a>(tree: &'a Expr, out: &mut Vec<&'a Expr>) {
+            match tree {
+                Expr::Physical(_) | Expr::Param(_) | Expr::Ref(_) => out.push(tree),
+                Expr::Neg(e) | Expr::Formula(e) | Expr::Percent(e) => walk(e, out),
+                Expr::Binary(_, a, b) | Expr::Op(_, a, b) => {
+                    walk(a, out);
+                    walk(b, out);
+                }
+                Expr::Call(_, args) => args.iter().for_each(|e| walk(e, out)),
+                _ => {}
+            }
+        }
+        let mut out = Vec::new();
+        walk(&self.tree, &mut out);
+        out
+    }
+
     /// The ids of the values it reads, once each, in the order written.
     pub fn references(&self) -> Vec<u32> {
         fn walk(tree: &Expr, out: &mut Vec<u32>) {
             match tree {
-                Expr::Number(..) | Expr::Param(_) | Expr::Logical(_) | Expr::InvalidReference => {}
+                Expr::Number(..) | Expr::Param(_) | Expr::Logical(_) | Expr::InvalidReference | Expr::Physical(_) => {}
                 Expr::Ref(id) if out.contains(id) => {}
                 Expr::Ref(id) => out.push(*id),
                 Expr::Neg(inner) | Expr::Formula(inner) | Expr::Percent(inner) => walk(inner, out),
@@ -498,7 +534,9 @@ impl Expression {
         fn walk(tree: &Expr, input: &crate::values::Input) -> bool {
             match tree {
                 Expr::Param(found) => found == input,
-                Expr::Number(..) | Expr::Ref(_) | Expr::Logical(_) | Expr::InvalidReference => false,
+                Expr::Number(..) | Expr::Ref(_) | Expr::Logical(_) | Expr::InvalidReference | Expr::Physical(_) => {
+                    false
+                }
                 Expr::Neg(inner) | Expr::Formula(inner) | Expr::Percent(inner) => walk(inner, input),
                 Expr::Op(_, a, b) | Expr::Binary(_, a, b) => walk(a, input) || walk(b, input),
                 Expr::Call(_, args) => args.iter().any(|e| walk(e, input)),
@@ -663,12 +701,13 @@ impl ValueTable {
 
 /// The name of a quantity's unit.
 pub(crate) fn unit_name(q: Quantity) -> &'static str {
-    match (q.length, q.angle) {
-        (1, 0) => "mm",
-        (2, 0) => "mm²",
-        (3, 0) => "mm³",
-        (0, 1) => "deg",
-        (0, 0) => "",
+    match q.dimensions() {
+        (1, 0, 0) => "mm",
+        (2, 0, 0) => "mm²",
+        (3, 0, 0) => "mm³",
+        (0, 1, 0) => "deg",
+        (0, 0, 1) => "kg",
+        (0, 0, 0) => "",
         _ => "compound",
     }
 }

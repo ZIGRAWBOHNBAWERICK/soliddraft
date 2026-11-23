@@ -156,6 +156,11 @@ pub enum Command {
         /// Row to select, including Default.
         name: String,
     },
+    /// Applies an undoable parameters or configuration edit.
+    EditParameters {
+        /// The edit to apply to the current part.
+        edit: crate::configs::Edit,
+    },
     /// Replaces the authored table as one step: file defaults, row overrides, properties.
     SetConfigurationGrid {
         /// The whole candidate table.
@@ -998,6 +1003,7 @@ impl Document {
             command @ (Command::AddConfiguration { .. }
             | Command::SetConfigurationValue { .. }
             | Command::ActivateConfiguration { .. }
+            | Command::EditParameters { .. }
             | Command::SetConfigurationGrid { .. }
             | Command::RestoreConfigurations { .. }) => self.apply_configuration(command),
             command @ (Command::Track { .. }

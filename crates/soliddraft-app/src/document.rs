@@ -1192,6 +1192,7 @@ pub enum Command {
     ActivateConfiguration {
         name: String,
     },
+    EditParameters(model::configs::Edit),
     /// Replaces the whole configuration table as one step.
     SetConfigurationGrid {
         grid: Box<model::configs::Grid>,
@@ -1315,6 +1316,7 @@ impl Command {
             Command::AddConfiguration { .. }
             | Command::SetConfigurationValue { .. }
             | Command::ActivateConfiguration { .. } => "Configuration".into(),
+            Command::EditParameters(_) => "Edit parameters".into(),
             Command::SetConfigurationGrid { .. } => "Configuration grid".into(),
             Command::SetValue { .. } => "Set value".into(),
             Command::LinkSketchValues { .. } => "Link values".into(),
@@ -2973,6 +2975,7 @@ impl Document {
                 vec![model::Command::SetConfigurationValue { configuration, name, expression }]
             }
             Command::ActivateConfiguration { name } => vec![model::Command::ActivateConfiguration { name }],
+            Command::EditParameters(edit) => vec![model::Command::EditParameters { edit }],
             Command::SetConfigurationGrid { grid } => vec![model::Command::SetConfigurationGrid { grid }],
             Command::SetValue { name, expression } => vec![model::Command::SetValue { name, expression }],
             Command::LinkSketchValues { id, constraints, name, value } => {

@@ -79,6 +79,77 @@ fn spreadsheet_parameters_round_trip_in_configurations() {
 }
 
 #[test]
+fn tabs_keep_suppression_and_properties_through_edits_and_reopen() {
+    use soliddraft_model::configs::Edit;
+    let edit = |doc: &mut Document, edit| doc.execute(Command::EditParameters { edit }).unwrap();
+    let mut d = part();
+    let last = d.features().last().unwrap().id;
+    let original = d.geometry_hash();
+    add(&mut d, "Short");
+    override_value(&mut d, "Short", "plate_w", "120");
+    edit(&mut d, Edit::Suppress { configuration: "Short".into(), feature: last, suppressed: Some(true) });
+    edit(&mut d, Edit::Property { configuration: "Short".into(), name: "Finish".into(), text: "Mill".into() });
+    edit(&mut d, Edit::Comment { name: "plate_w".into(), text: "Overall width".into() });
+    edit(&mut d, Edit::Duplicate { configuration: "Short".into(), name: "Copy".into() });
+    edit(&mut d, Edit::Rename { configuration: "Copy".into(), name: "Demo".into() });
+    edit(&mut d, Edit::Move { configuration: "Demo".into(), offset: -1 });
+    let built = d.geometry_hash();
+    assert_ne!(built, original);
+    assert!(d.feature(last).unwrap().suppressed);
+    let grid = d.configuration_grid();
+    assert_eq!(grid.rows[1].name, "Demo");
+    assert_ne!(grid.rows[1].id, grid.rows[2].id);
+    assert_eq!(grid.rows[1].properties["Finish"], "Mill");
+    assert_eq!(d.values_table().globals[0].comment, "Overall width");
+
+    let mut reopened = Document::from_bytes(&d.to_bytes().unwrap(), kernel()).unwrap();
+    assert_eq!(reopened.geometry_hash(), built);
+    assert_eq!(reopened.configuration_suppression("Demo", last), Some((false, Some(true))));
+    assert_eq!(reopened.configuration_grid(), grid);
+    activate(&mut reopened, "Default");
+    assert_eq!(reopened.geometry_hash(), original);
+    activate(&mut reopened, "Short");
+    assert_eq!(reopened.geometry_hash(), built);
+    edit(&mut reopened, Edit::Delete { configuration: "Demo".into() });
+    edit(&mut reopened, Edit::Delete { configuration: "Short".into() });
+    assert_eq!(reopened.geometry_hash(), original);
+    reopened.undo().unwrap();
+    assert_eq!(reopened.geometry_hash(), built);
+    reopened.redo().unwrap();
+    assert_eq!(reopened.geometry_hash(), original);
+}
+
+#[test]
+fn physical_formulas_measure_the_active_build_and_refuse_geometry_cycles() {
+    let mut d = part();
+    set(&mut d, "PartVolume", "=Volume");
+    set(&mut d, "PartMass", "=Mass");
+    let mut steel = soliddraft_materials::Material::new("steel", "Steel");
+    steel.density_kg_m3 = Some(7850.0);
+    d.execute(Command::SetMaterial {
+        material: Some(steel),
+        default_appearance: None,
+        scope: soliddraft_document::ConfigScope::All,
+    })
+    .unwrap();
+    add(&mut d, "Short");
+    override_value(&mut d, "Short", "plate_w", "120");
+    for name in ["Default", "Short"] {
+        activate(&mut d, name);
+        let physical = d.mass(d.active_configuration()).unwrap();
+        let table = d.values_table();
+        let read = |name| table.globals.iter().find(|row| row.name == name).unwrap().values[table.active];
+        assert_eq!(read("PartVolume"), Some(physical.volume_mm3));
+        assert_eq!(read("PartMass"), Some(physical.mass_kg));
+    }
+    let error = d
+        .execute(Command::SetValue { name: "flange_d".into(), expression: "=IF(FALSE,PartVolume,12 mm)".into() })
+        .unwrap_err()
+        .to_string();
+    assert_eq!(soliddraft_model::formula_error_code(&error), "#CIRCULAR");
+}
+
+#[test]
 fn m2_variant_identity_and_saved_meshes() {
     let mut d = part();
     let original = d.geometry_hash();

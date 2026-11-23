@@ -102,6 +102,7 @@ impl Binary {
                     value: if sign == 1 { a.value * b.value } else { a.value / b.value },
                     length: combine(a.length, b.length, sign)?,
                     angle: combine(a.angle, b.angle, sign)?,
+                    mass: combine(a.mass, b.mass, sign)?,
                     logical: false,
                 }
             }
@@ -177,7 +178,7 @@ fn combine(a: i32, b: i32, sign: i32) -> Result<i32, String> {
 fn common_unit(a: Quantity, b: Quantity) -> Result<Quantity, String> {
     if a.is_unitless() {
         Ok(b)
-    } else if b.is_unitless() || (a.length, a.angle) == (b.length, b.angle) {
+    } else if b.is_unitless() || a.dimensions() == b.dimensions() {
         Ok(a)
     } else {
         Err("incompatible units".into())
@@ -215,7 +216,13 @@ fn power(a: Quantity, b: Quantity) -> Result<Quantity, String> {
         }
         Ok(raised as i32)
     };
-    Ok(Quantity { value, length: dimension(a.length)?, angle: dimension(a.angle)?, logical: false })
+    Ok(Quantity {
+        value,
+        length: dimension(a.length)?,
+        angle: dimension(a.angle)?,
+        mass: dimension(a.mass)?,
+        logical: false,
+    })
 }
 
 fn quotient(value: f64, step: f64) -> f64 {
@@ -276,11 +283,11 @@ pub(super) fn call(
     let a = values.first().copied().unwrap_or_else(|| Quantity::number(0.0));
     let b = values.get(1).copied().unwrap_or_else(|| Quantity::number(0.0));
     let angle = |q: Quantity| {
-        if (q.length, q.angle) == (0, 1) || q.is_unitless() && degrees { Ok(q.value.to_radians()) } else { scalar(q) }
+        if q.dimensions() == (0, 1, 0) || q.is_unitless() && degrees { Ok(q.value.to_radians()) } else { scalar(q) }
     };
     let inverse = |radians: f64| {
         if degrees {
-            Quantity { value: radians.to_degrees(), length: 0, angle: 1, logical: false }
+            Quantity { angle: 1, ..Quantity::number(radians.to_degrees()) }
         } else {
             Quantity::number(radians)
         }

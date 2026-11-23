@@ -640,13 +640,17 @@ fn owner_pocket_rim_at_r2_takes_a_through_hole_along_its_length() {
 
     let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("fillet-acceptance").join("saved");
     std::fs::create_dir_all(&dir).unwrap();
-    let path = dir.join("owner-pocket-rim-r2-drilled.dwprt");
-    let path = path.to_str().unwrap();
-    let saved = part.tool("save", json!({ "path": path }));
-    assert!(!saved.is_error, "save: {}", saved.content);
-    let mut part = Part::new("Reopened");
-    let opened = part.tool("open", json!({ "path": path }));
-    assert!(!opened.is_error, "open: {}", opened.content);
+    let save_and_reopen = |part: &mut Part, name: &str| {
+        let path = dir.join(name);
+        let path = path.to_str().unwrap();
+        let saved = part.tool("save", json!({ "path": path }));
+        assert!(!saved.is_error, "save {name}: {}", saved.content);
+        let mut reopened = Part::new("Reopened");
+        let opened = reopened.tool("open", json!({ "path": path }));
+        assert!(!opened.is_error, "open {name}: {}", opened.content);
+        reopened
+    };
+    let mut part = save_and_reopen(&mut part, "owner-pocket-rim-r2-drilled.dwprt");
     standing(&part, OWNER_FACES + 6 + 4, "reopened");
     assert_eq!(made_by(part.doc(), &fillet), rounds, "the rounds keep their names through save and reopen");
     assert_eq!(made_by(part.doc(), &hole).len(), 4);
@@ -677,12 +681,17 @@ fn owner_pocket_rim_at_r2_takes_a_through_hole_along_its_length() {
     let at_edited = volume(&part, &hole);
     check_bore(rounded, at_edited, 8.0);
 
+    let mut part = save_and_reopen(&mut part, "owner-pocket-rim-r2-edited.dwprt");
+    standing(&part, OWNER_FACES + 6 + 4, "reopened after edit");
+    let reopened = volume(&part, &hole);
+    assert!((at_edited - reopened).abs() < at_edited * 1e-9, "the edited bore changed on reopen");
+
     let later = part.tool("hole", json!({"face":cap, "points":[[25.0, at, 15.0]], "diameter":6.0}));
     assert!(!later.is_error, "second through hole: {}", later.content);
     standing(&part, OWNER_FACES + 6 + 8, "drilled again");
     let second = &part.doc().features.last().unwrap().name;
     assert_eq!(made_by(part.doc(), second).len(), 4, "the second hole has its own wall");
-    check_bore(at_edited, volume(&part, second), 6.0);
+    check_bore(reopened, volume(&part, second), 6.0);
 }
 
 #[test]

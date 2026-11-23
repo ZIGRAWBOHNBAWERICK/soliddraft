@@ -34,10 +34,17 @@ await page.eval(() => {
     });
   };
 
+  const blobs = new Map();
   const create = URL.createObjectURL.bind(URL);
   URL.createObjectURL = blob => {
-    window.sdSaved = blob;
-    return create(blob);
+    const url = create(blob);
+    blobs.set(url, blob);
+    return url;
+  };
+  const download = HTMLAnchorElement.prototype.click;
+  HTMLAnchorElement.prototype.click = function () {
+    if (this.download.endsWith('.dwprt')) window.sdSaved = blobs.get(this.href);
+    return download.call(this);
   };
   window.sdOpen = fetch('/fixtures/display-states-service.dwprt').then(r => {
     if (!r.ok) throw new Error('Display state fixture is missing');
@@ -81,6 +88,10 @@ await view('Working', 1);
 
 await page.press('Control+s');
 await until(() => page.eval(() => window.sdSaved?.size), size => size > 0, 'Save did not produce a part file');
+// Leave the saved part first, so the final frame can only come from a real reopen.
+await page.eval('sdClick(122, 15)');
+await page.eval('sdClick(138, 42)');
+await view(null, 0);
 await page.eval(() => { window.sdOpen = window.sdSaved; return true; });
 await page.press('Control+o');
 await until(() => page.eval(() => window.sdOpen === null), Boolean, 'Reopen did not consume the saved file');

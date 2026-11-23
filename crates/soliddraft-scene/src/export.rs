@@ -288,6 +288,13 @@ pub fn articulate(doc: &mut AssemblyDocument) -> Result<Articulation, String> {
             limits: None,
             mates: mates.iter().map(|(_, m)| m.name().to_owned()).collect(),
         };
+        if mates.iter().any(|(_, mate)| matches!(mate, Mate::Lock { .. })) {
+            if mates.len() > 1 {
+                notes.push(format!("{} carried as a fixed joint because of the Lock mate", edge.mates.join(", ")));
+            }
+            edges.insert((*a, *b), edge);
+            continue;
+        }
         let hinge = mates.iter().find_map(|&(prefix, m)| match m {
             Mate::Hinge { axes, angle_limits, .. } => Some((prefix, axes, *angle_limits)),
             _ => None,
@@ -354,11 +361,7 @@ pub fn articulate(doc: &mut AssemblyDocument) -> Result<Articulation, String> {
             edge.limits = None;
         }
         if edge.kind == JointKind::Fixed {
-            let others: Vec<&str> =
-                mates.iter().filter(|(_, m)| !matches!(m, Mate::Lock { .. })).map(|(_, m)| m.name()).collect();
-            if !others.is_empty() {
-                notes.push(format!("{} carried as a fixed joint at the assembly's pose", others.join(", ")));
-            }
+            notes.push(format!("{} carried as a fixed joint at the assembly's pose", edge.mates.join(", ")));
         }
         edges.insert((*a, *b), edge);
     }

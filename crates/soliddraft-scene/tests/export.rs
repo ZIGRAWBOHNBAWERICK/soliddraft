@@ -383,3 +383,20 @@ fn gear_multiplier_uses_the_exported_direction_of_each_hinge() {
     assert_eq!(spin.mimic, Some((lid.name.clone(), 2.0)));
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn lock_holds_an_existing_hinge_fixed_in_both_exports() {
+    let dir = folder("locked");
+    let (mut doc, [a, b]) = shafts(&dir, "Rig");
+    doc.mate_origin("Ground", a, true, false).unwrap();
+    add_hinge(&mut doc, "Hinge", [a, b], None);
+    doc.mate_lock("Lock", a, b, false).unwrap();
+    doc.save(None).unwrap();
+    let mut doc = AssemblyDocument::open(dir.join("hinge.dwasm"), options()).unwrap();
+    for extension in ["urdf", "usda"] {
+        let scene = exported_scene(&mut doc, &dir.join(format!("rig.{extension}")));
+        let kinds: Vec<_> = scene.joints.iter().map(|j| j.kind).collect();
+        assert_eq!(kinds, [JointKind::Fixed, JointKind::Fixed], "{extension}");
+    }
+    std::fs::remove_dir_all(dir).unwrap();
+}

@@ -250,7 +250,8 @@ at the assembly's origin. Mates become joints:
 | anything else | fixed, at the pose the assembly holds |
 
 Prismatic, planar and spherical mappings require a single mate between the two
-parts. Additional mates on the same pair can restrict motion further. URDF writes
+parts. Additional mates can restrict motion further. A Lock mate keeps its pair fixed,
+including a pair with a Hinge. URDF writes
 an unlimited slide with infinite limits. It uses the `spherical` joint type read
 by SolidDraft's importer. ROS urdfdom supports its own list of joint types, which
 excludes `spherical`.

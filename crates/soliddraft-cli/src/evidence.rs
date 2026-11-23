@@ -579,12 +579,12 @@ mod tests {
         assert!(!sketch.is_error, "{}", sketch.content);
         let commands = [
             ("extrude", json!({"sketch":"Sketch1","depth":10,"flip":false})),
-            ("edit_extrude", json!({"feature":"Boss-Extrude1","depth":11})),
-            ("edit_extrude", json!({"feature":"Boss-Extrude1","depth":12})),
+            ("edit_extrude", json!({"feature":"Boss-Extrude1","depth":11,"flip":false})),
+            ("edit_extrude", json!({"feature":"Boss-Extrude1","depth":12,"flip":false})),
         ];
         for (tool, input) in commands {
             let built = bundle.call(tool, input, &caller);
-            assert!(!built.is_error, "{}", built.content);
+            assert!(!built.is_error, "{tool}: {}", built.content);
             let pending = bundle.pending.as_ref().unwrap();
             assert!(pending.work.iter().any(|w| matches!(w, Work::Mesh(_))), "the command requested a mesh");
             assert!(counting.take_routes().is_empty(), "the evidence host retained command mesh routes");

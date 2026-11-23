@@ -185,7 +185,7 @@
           "tolerance": 0.001
         }
       ],
-      "drawing": "Isometric view: view_curves failed (status 0): numbers.operation-budget",
+      "drawing": true,
       "label": "draft build",
       "exports": [
         {

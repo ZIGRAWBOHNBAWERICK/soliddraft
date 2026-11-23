@@ -4,6 +4,8 @@ The [adapter manifest](../crates/soliddraft-kernel-catallax/Cargo.toml) records 
 
 Face-relative tools can be copied by feature patterns and used in planar first-hit targets. Field compilation resolves their supports through certified planar-boundary recovery; carriers outside that path refuse rather than reuse removed faces.
 
+Catallax `801cb656751d463237c116437c78a03cd873e434` adds certified STEP import for rectangular trims on equal-weight bilinear surfaces. It also admits distance-to-face, point, radial and oblique linear grades in its supported field recipes. SolidDraft's lattice and gyroid editors currently author constant and axis-linear grades. Picked-face, point and radial editors need the app's grade integration, and oblique grading needs an app input for the line through the anchors. Graded shells and lattice or gyroid stages on imported bodies still need kernel support. The spherical scan fitter has no SolidDraft command. [Catallax changes](https://github.com/BohnBawerick/catallax/pull/750).
+
 Each solid retains its `IncrementalApplicationBody` and owned `EvaluationCheckpoint`.
 For a new solid, the adapter merges operand and read-only context recipes, selects the
 longest matching leading checkpoint among them, and calls `catallax_app::build_incremental`.
@@ -59,11 +61,11 @@ The reverse order builds since [Catallax PR 340](https://github.com/BohnBawerick
 
 A full symmetric union of equal crossing cylinders can stop at an ambiguous application edge reference before the fillet evaluator runs. The app retains `recipe.ambiguous-reference` for that failure and leaves the part unchanged. Starting the narrow cylinder on the crossing-axis plane instead reaches `mesh.precision-or-budget` while reading topology at this pin. These arrangements remain outside the completed app acceptance; neither is evidence that singular fillet geometry builds.
 
-## STEP import work limit
+## Numerical STEP reopening
 
-SolidDraft 0.7.1 keeps the ordinary 100,000,000-unit opening allowance. The owner pocket-rim R2 fillet builds, displays, saves and exports, but reopening its STEP reaches that allowance during boundary trace reconstruction. It refuses with “This file is too complex to open yet.” No blank import feature or partial body is published, and the existing part stays unchanged. The box fillet round trips remain supported.
+The owner pocket-rim R2 fillet's STEP reopens as a tolerant body on the ordinary 100,000,000-unit opening allowance. The import keeps all 19 faces and the bounding box within 0.000001 mm. SolidDraft shows the approximate display and refuses to estimate mass until the display closes. Closing that display is a follow-on. [Fillet acceptance](../crates/soliddraft-app/tests/fillet_acceptance.rs).
 
-Bounded reopening of this numerical fillet is tracked as Catallax phase-3 review item **I2**. It requires a Catallax admission improvement, not a larger SolidDraft allowance.
+An import that exhausts the allowance says “This file is too complex to open yet” and leaves the existing part intact.
 
 ## Two-body intersection and distance
 

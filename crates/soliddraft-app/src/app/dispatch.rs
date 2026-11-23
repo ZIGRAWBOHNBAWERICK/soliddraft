@@ -911,6 +911,8 @@ impl SolidDraftApp {
                         match h.to_model() {
                             Ok(hole) => match (target, h.sketch_feature, h.position_sketch) {
                                 (Some(id), sketch_id, Some(sketch)) => {
+                                    let sketch_id = sketch_id
+                                        .unwrap_or_else(|| u64::from(self.state.doc.model().next_feature_id().0));
                                     Command::EditHoleWithSketch { id, sketch_id, sketch, hole }
                                 }
                                 (None, None, Some(sketch)) => Command::AddHoleWithSketch { sketch, hole },

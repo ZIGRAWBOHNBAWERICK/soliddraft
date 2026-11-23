@@ -1841,11 +1841,10 @@ pub enum Command {
         sketch: Sketch,
         hole: model::HoleFeature,
     },
-    /// Edits an existing Hole Wizard feature and its absorbed position sketch as one
-    /// undoable step.
+    /// Edits a hole and stores its position sketch in one undoable step.
     EditHoleWithSketch {
         id: FeatureId,
-        sketch_id: Option<FeatureId>,
+        sketch_id: FeatureId,
         sketch: Sketch,
         hole: model::HoleFeature,
     },
@@ -3664,20 +3663,23 @@ impl Document {
                     sketch,
                 });
                 let id = model_id(id);
+                let sketch_id = model_id(sketch_id);
                 let position = self.model.index_of(id).ok_or("The hole no longer exists")?;
-                let sketch_command = if let Some(sketch_id) = sketch_id {
-                    let sketch_id = model_id(sketch_id);
-                    hole.sketch = Some(sketch_id);
-                    model::Command::EditFeature { id: sketch_id, kind: sk_kind }
-                } else {
-                    hole.sketch = Some(self.model.next_feature_id());
-                    model::Command::AddFeatureInBody {
-                        body: self.model.features()[position].body,
+                let feature = &self.model.features()[position];
+                let model::FeatureKind::Hole(previous) = &feature.kind else {
+                    return Err("The feature is no longer a hole".into());
+                };
+                let sketch_command = match previous.sketch {
+                    Some(saved) if saved == sketch_id => model::Command::EditFeature { id: sketch_id, kind: sk_kind },
+                    None if sketch_id == self.model.next_feature_id() => model::Command::AddFeatureInBody {
+                        body: feature.body,
                         via_assistant: false,
                         kind: sk_kind,
                         position: Some(position),
-                    }
+                    },
+                    _ => return Err("The hole's position sketch has changed".into()),
                 };
+                hole.sketch = Some(sketch_id);
                 vec![sketch_command, model::Command::EditFeature { id, kind: model::FeatureKind::Hole(hole) }]
             }
             Command::ImportBodies(imports) => {

@@ -1237,6 +1237,63 @@ pub struct Rename {
     pub focus: bool,
 }
 
+/// Display length unit for the current file (Zoo bottom-bar model).
+/// Internal model and kernel coordinates always stay in millimetres.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DisplayUnit {
+    #[default]
+    Mm,
+    Cm,
+    M,
+    In,
+    Ft,
+    Yd,
+}
+
+impl DisplayUnit {
+    pub const ALL: [Self; 6] = [Self::In, Self::Ft, Self::Yd, Self::Mm, Self::Cm, Self::M];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Mm => "Millimeters",
+            Self::Cm => "Centimeters",
+            Self::M => "Meters",
+            Self::In => "Inches",
+            Self::Ft => "Feet",
+            Self::Yd => "Yards",
+        }
+    }
+
+    pub fn short(self) -> &'static str {
+        match self {
+            Self::Mm => "mm",
+            Self::Cm => "cm",
+            Self::M => "m",
+            Self::In => "in",
+            Self::Ft => "ft",
+            Self::Yd => "yd",
+        }
+    }
+
+    /// Millimetres per 1 unit.
+    pub fn mm_per_unit(self) -> f64 {
+        match self {
+            Self::Mm => 1.0,
+            Self::Cm => 10.0,
+            Self::M => 1000.0,
+            Self::In => 25.4,
+            Self::Ft => 304.8,
+            Self::Yd => 914.4,
+        }
+    }
+
+    /// Converts a length in millimetres to this unit.
+    pub fn from_mm(self, mm: f64) -> f64 {
+        mm / self.mm_per_unit()
+    }
+}
+
 pub struct AppState {
     pub doc: Document,
     pub measure: crate::measure::panel::State,
@@ -1263,6 +1320,10 @@ pub struct AppState {
     pub hover_point: Option<Vec3>,
     pub show_about: bool,
     pub show_shortcuts: bool,
+    pub show_design_properties: bool,
+    pub show_customize_bar: bool,
+    /// Display length unit for the current file (shown in the bottom bar).
+    pub display_unit: DisplayUnit,
     /// The open command palette.
     pub palette: Option<crate::palette::Palette>,
     /// The open Provider dialog.
@@ -1470,6 +1531,9 @@ impl AppState {
             hover_point: None,
             show_about: false,
             show_shortcuts: false,
+            show_design_properties: false,
+            show_customize_bar: false,
+            display_unit: DisplayUnit::default(),
             palette: None,
             import_dialog: None,
             step_upload: false,

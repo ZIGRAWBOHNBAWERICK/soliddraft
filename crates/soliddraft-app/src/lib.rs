@@ -67,6 +67,7 @@ pub mod subassembly;
 pub mod sweep_panel;
 pub mod theme;
 pub mod tool_palette;
+pub mod top_bar;
 pub mod tree;
 pub mod tree_visibility;
 pub mod values_tab;

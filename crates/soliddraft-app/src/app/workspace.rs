@@ -45,6 +45,8 @@ pub struct SolidDraftApp {
     pub state: AppState,
     /// The middle dock: the part and the drawing.
     pub(super) dock: DockState<Tab>,
+    /// Additional open part tabs parked beside the active part.
+    pub open_parts: crate::top_bar::OpenParts,
     /// The panel layout as last written to disk.
     saved_layout: Layout,
     /// The command line's chips and session height as last written to disk.
@@ -168,6 +170,7 @@ impl SolidDraftApp {
             saved_commands: state.commands.clone(),
             state,
             dock: center_dock(),
+            open_parts: crate::top_bar::OpenParts::default(),
             automation,
             frame: 0,
             bench,
@@ -698,22 +701,23 @@ impl SolidDraftApp {
         egui::Panel::top("menu")
             .exact_size(theme::MENU_HEIGHT)
             .frame(chrome_frame)
-            .show_separator_line(true)
-            .show(root, |ui| self.menu_bar(ui));
+            .show_separator_line(false)
+            .show(root, |ui| crate::top_bar::show(ui, &mut self.state, &mut self.dock, &mut self.open_parts));
         self.leave_start_page();
         let start = self.state.start.is_some();
-        if !start {
-            crate::left_bar::panel(root, &mut self.state);
-            crate::options_bar::panel(root, &mut self.state);
-        }
         let status = self.status();
         if start {
             crate::command_line::panel(root, &mut self.state, &status);
-        }
-        let window_width = root.available_width();
-        if !start {
+        } else {
+            // D1 Clear Bench top tool strip (workspace tabs + icon-over-label tools).
             crate::tool_palette::panel(root, &mut self.state);
+            // Contextual inline form strip (feature editor, sketch guides, mate, drawing sheet).
+            crate::options_bar::panel(root, &mut self.state);
+            // Bottom bar (Zoo model: chips, ai, command line, physical analysis, filter, units, status).
             crate::command_line::panel(root, &mut self.state, &status);
+            // Slim left toggle rail (Tree, History, Values, Props + Clear).
+            crate::left_bar::panel(root, &mut self.state);
+            let window_width = root.available_width();
             if self.state.tree_shown() {
                 self.side_panel(root, Side::Tree, window_width);
             }

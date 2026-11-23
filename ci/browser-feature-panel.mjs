@@ -242,6 +242,19 @@ class Browser {
         await v.shot(`no-control-${name.replace(/\W+/g, '-')}`);
         throw new Error(`no control named ${name} was drawn`);
       },
+      // Wheels the feature panel down until the control `name` shows inside it, as a
+      // visitor scrolls to a section, and answers its page point.
+      async reveal(name) {
+        const [x, y] = await v.control('Form OK');
+        for (let t = 0; t < 40; t++) {
+          const shown = JSON.parse(await v.eval(`window.wasmBindings.shown_controls()`) || '{}');
+          if (shown[name]) return [shown[name].x, shown[name].y];
+          await call('Input.dispatchMouseEvent', { type: 'mouseWheel', x, y: y + 120, deltaX: 0, deltaY: 60 });
+          await v.settle(200);
+        }
+        await v.shot(`not-revealed-${name.replace(/\W+/g, '-')}`);
+        throw new Error(`the panel never showed ${name}`);
+      },
       async shot(label) {
         const { data } = await call('Page.captureScreenshot', { format: 'png' });
         fs.writeFileSync(path.join(out, `${label}.png`), Buffer.from(data, 'base64'));
@@ -297,7 +310,7 @@ async function main() {
   check(section(opened, 'Direction 2').on === false, 'Direction 2 starts off');
   await v.shot('1-panel');
   step('tick Direction 2, OK');
-  await v.click(await v.control('Direction 2'));
+  await v.click(await v.reveal('Direction 2'));
   const ticked = await panel('Direction 2 ticked', shown => section(shown, 'Direction 2')?.on === true);
   check(section(ticked, 'Direction 2').open, 'ticking Direction 2 opens it');
   await v.shot('2-direction-2');
@@ -310,7 +323,7 @@ async function main() {
   await panel('the second extrusion asks for its profile', shown => shown?.title === 'Boss-Extrude');
   await v.click(await v.control('Circle'));
   await panel('the circle extrusion', shown => section(shown, 'Direction 1'));
-  await v.click(await v.control('Merge result'));
+  await v.click(await v.reveal('Merge result'));
   await v.shot('3-merge-off');
   await v.click(await v.control('Form OK'));
   await v.ready('after the second extrusion');

@@ -184,7 +184,8 @@ fn show(ui: &mut egui::Ui, state: &mut AppState) {
         response.on_hover_text(&label);
 
         let mut details_at = None;
-        if state.doc.selection.is_some() || state.measure.open || state.pmi.open {
+        let details = state.doc.selection.is_some() || state.measure.open || state.pmi.open;
+        if details && !crate::feature_panel::active(state) {
             let response = ui.button("Details");
             sheet_anchor = response.rect;
             details_at = Some(response.rect.center());
@@ -319,7 +320,9 @@ fn feature_dimensions(ui: &mut egui::Ui, state: &AppState, id: FeatureId, named:
 }
 
 fn details_sheet(ui: &mut egui::Ui, state: &mut AppState, anchor: egui::Rect) {
-    if !state.options_details {
+    // The feature panel shows the details while a feature is open. The sheet keeps its
+    // place and comes back when the feature closes.
+    if !state.options_details || crate::feature_panel::active(state) {
         return;
     }
     let screen = ui.ctx().input(|input| input.content_rect());

@@ -263,7 +263,7 @@ fn section_header(ui: &mut egui::Ui, title: &'static str, open: &mut bool, toggl
     let label = format!("{} {title}", if *open { "Fold" } else { "Unfold" });
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, label.clone()));
     #[cfg(target_arch = "wasm32")]
-    crate::web::show_control(format!("Section {title}"), rect);
+    crate::web::show_visible_control(ui, format!("Section {title}"), rect);
     let mut changed = false;
     match toggle {
         Some(on) => {
@@ -279,7 +279,7 @@ fn section_header(ui: &mut egui::Ui, title: &'static str, open: &mut bool, toggl
                 )
                 .inner;
             #[cfg(target_arch = "wasm32")]
-            crate::web::show_control(title, checkbox.rect);
+            crate::web::show_visible_control(ui, title, checkbox.rect);
             changed = checkbox.changed();
         }
         None => {

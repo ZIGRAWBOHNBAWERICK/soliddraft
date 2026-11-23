@@ -328,6 +328,26 @@ fn a_thin_feature_makes_a_tube() {
 }
 
 #[test]
+fn the_details_sheet_steps_aside_for_the_panel() {
+    let mut case = Case::new("feature-panel/details-sheet");
+    let (doc, _) = plate_with_circle(on_top(20.0));
+    let mut app = launch(doc, STANDARD);
+    case.run(&mut app, |case, app| {
+        click(app, "Details");
+        assert!(shows(app, "Close options"), "Details opens the sheet");
+        open(app, AppAction::StartExtrude);
+        assert!(shows(app, "Feature panel: Boss-Extrude"));
+        assert!(!shows(app, "Close options") && !shows(app, "Details"), "the panel shows the details while editing");
+        case.frame(app, "editing");
+        app.key_press(Key::Escape);
+        settle(app);
+        assert!(app.state().state.editor.is_none());
+        assert!(shows(app, "Close options"), "the sheet comes back when the feature closes");
+        case.frame(app, "closed");
+    });
+}
+
+#[test]
 fn the_create_menu_pins_commands_and_keeps_them() {
     let mut case = Case::new("feature-panel/create-menu");
     let mut app = launch(ribbon::plate(), STANDARD);

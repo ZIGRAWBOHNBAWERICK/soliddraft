@@ -700,12 +700,12 @@ fn noted_choice<T: Clone + PartialEq>(ui: &mut egui::Ui, label: &str, value: &mu
             for (v, entry) in choices {
                 let _response = ui.selectable_value(value, v.clone(), entry);
                 #[cfg(target_arch = "wasm32")]
-                crate::web::show_control(format!("{label}: {entry}"), _response.rect);
+                crate::web::show_visible_control(ui, format!("{label}: {entry}"), _response.rect);
             }
         },
     );
     #[cfg(target_arch = "wasm32")]
-    crate::web::show_control(label, shown.response.rect);
+    crate::web::show_visible_control(ui, label, shown.response.rect);
     shown.response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::ComboBox, true, label));
 }
 
@@ -766,7 +766,7 @@ fn merge(ui: &mut egui::Ui, merge: &mut bool, can_merge: bool) {
         let response =
             ui.checkbox(&mut shown, "Merge result").on_hover_text("Join the body it grows from. Off makes a new body");
         #[cfg(target_arch = "wasm32")]
-        crate::web::show_control("Merge result", response.rect);
+        crate::web::show_visible_control(ui, "Merge result", response.rect);
         if response.changed() {
             *merge = shown;
         }
@@ -1019,9 +1019,10 @@ pub(crate) fn render(
         } else {
             ("Rectangle", ProfileKind::Rectangle { width: 60.0, height: 40.0 })
         };
-        let button = ui.button(name).on_hover_text(format!("Extrude a sized {} on an origin plane", name.to_lowercase()));
+        let button =
+            ui.button(name).on_hover_text(format!("Extrude a sized {} on an origin plane", name.to_lowercase()));
         #[cfg(target_arch = "wasm32")]
-        crate::web::show_control(name, button.rect);
+        crate::web::show_visible_control(ui, name, button.rect);
         if button.clicked() {
             editor.params = EditorParams::Extrude(crate::document::ExtrudeParams { profile, ..Default::default() });
         }
@@ -1646,7 +1647,7 @@ pub(crate) fn render(
             if let Some((_, name)) = context.free_sketches.iter().find(|(v, _)| *v == id) {
                 let button = ui.button(name);
                 #[cfg(target_arch = "wasm32")]
-                crate::web::show_control(format!("Use {name}"), button.rect);
+                crate::web::show_visible_control(ui, format!("Use {name}"), button.rect);
                 if button.clicked() {
                     actions.push(AppAction::Select(Some(crate::document::Selection::Feature(id))));
                 }

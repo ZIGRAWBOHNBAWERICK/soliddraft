@@ -454,6 +454,14 @@ pub(crate) fn show_control(name: impl Into<String>, rect: egui::Rect) {
     SHOWN_CONTROLS.with_borrow_mut(|controls| controls.insert(name.into(), rect.center()));
 }
 
+/// Notes a control drawn inside a scroll area only where its centre shows, so a check
+/// scrolls to it, as a visitor would, and never clicks what lies under a hidden one.
+pub(crate) fn show_visible_control(ui: &egui::Ui, name: impl Into<String>, rect: egui::Rect) {
+    if ui.clip_rect().contains(rect.center()) {
+        show_control(name, rect);
+    }
+}
+
 /// The centres of the named controls the last frame drew, in the page's pixels, as JSON:
 /// `{"<name>": {"x", "y"}}`. The options bar notes `Assembly options` or `Drawing options`,
 /// the Mate panel its type list as `Mate type` and each entry of the open list as

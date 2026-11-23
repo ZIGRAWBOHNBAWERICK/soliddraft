@@ -34,7 +34,6 @@ pub(crate) fn commands() -> Vec<CommandSpec> {
             Icon::Formula,
             "Show parameters and configurations beside the tree",
         )
-        .on(RibbonTab::Solid, "Parameters", Size::Small)
         .on(RibbonTab::View, "Panels", Size::Small)
         .run(|_| AppAction::Values(ValuesAction::Show))
         .agents(

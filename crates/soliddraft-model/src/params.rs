@@ -4,7 +4,7 @@
 //! `Depth` or `D2`. The table names it after its feature, as in `BossExtrude1.Depth`.
 
 use serde::{Deserialize, Serialize};
-use soliddraft_kernel_api::{Grade, HoleDepth, HoleHead};
+use soliddraft_kernel_api::{Grade, HoleDepth, HoleHead, PointGrade, RadialGrade};
 use soliddraft_sketch::ConstraintKind;
 
 use crate::values::Input;
@@ -468,27 +468,45 @@ pub(crate) fn name_part(feature: &Feature) -> String {
 }
 
 /// A grade's parameters: the constant, or the start and end values and where they apply.
+/// A distance grade's near and far values are its start and end, and its span is where
+/// the end applies; a radial or point grade's distances are where its values apply.
 type GradeNames = [Parameter; 5];
 const RADIUS: GradeNames =
     [Parameter::Radius, Parameter::RadiusStart, Parameter::RadiusEnd, Parameter::RadiusStartAt, Parameter::RadiusEndAt];
 const LEVEL: GradeNames =
     [Parameter::Level, Parameter::LevelStart, Parameter::LevelEnd, Parameter::LevelStartAt, Parameter::LevelEndAt];
 
-fn grade_values(grade: &Grade, names: GradeNames) -> Vec<(Parameter, f64)> {
+fn grade_values<F>(grade: &Grade<F>, names: GradeNames) -> Vec<(Parameter, f64)> {
     match grade {
         Grade::Constant(v) => vec![(names[0], *v)],
         Grade::Linear(l) => vec![(names[1], l.start), (names[2], l.end), (names[3], l.from), (names[4], l.to)],
+        Grade::Distance(d) => vec![(names[1], d.near), (names[2], d.far), (names[4], d.span)],
+        Grade::Radial(RadialGrade { from, to, start, end, .. })
+        | Grade::Point(PointGrade { from, to, start, end, .. }) => {
+            vec![(names[1], *start), (names[2], *end), (names[3], *from), (names[4], *to)]
+        }
     }
 }
 
 /// Sets one of a grade's numbers; false when the grade has no such number.
-fn write_grade(grade: &mut Grade, names: GradeNames, parameter: Parameter, value: f64) -> bool {
+fn write_grade<F>(grade: &mut Grade<F>, names: GradeNames, parameter: Parameter, value: f64) -> bool {
     let slot = match grade {
         Grade::Constant(v) if parameter == names[0] => v,
         Grade::Linear(l) if parameter == names[1] => &mut l.start,
         Grade::Linear(l) if parameter == names[2] => &mut l.end,
         Grade::Linear(l) if parameter == names[3] => &mut l.from,
         Grade::Linear(l) if parameter == names[4] => &mut l.to,
+        Grade::Distance(d) if parameter == names[1] => &mut d.near,
+        Grade::Distance(d) if parameter == names[2] => &mut d.far,
+        Grade::Distance(d) if parameter == names[4] => &mut d.span,
+        Grade::Radial(RadialGrade { start, .. }) | Grade::Point(PointGrade { start, .. }) if parameter == names[1] => {
+            start
+        }
+        Grade::Radial(RadialGrade { end, .. }) | Grade::Point(PointGrade { end, .. }) if parameter == names[2] => end,
+        Grade::Radial(RadialGrade { from, .. }) | Grade::Point(PointGrade { from, .. }) if parameter == names[3] => {
+            from
+        }
+        Grade::Radial(RadialGrade { to, .. }) | Grade::Point(PointGrade { to, .. }) if parameter == names[4] => to,
         _ => return false,
     };
     *slot = value;

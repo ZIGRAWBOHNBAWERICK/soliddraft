@@ -722,8 +722,8 @@ impl SolidDraftApp {
                         return;
                     }
                     // The lattice's controls arrive with its editor slice.
-                    FeatureKind::Lattice(l) => EditorParams::Lattice(*l),
-                    FeatureKind::Gyroid(g) => EditorParams::Gyroid(*g),
+                    FeatureKind::Lattice(l) => EditorParams::Lattice(l.clone()),
+                    FeatureKind::Gyroid(g) => EditorParams::Gyroid(g.clone()),
                 };
                 if self.state.in_sketch() {
                     self.apply(ctx, AppAction::ExitSketch);
@@ -1040,6 +1040,24 @@ impl SolidDraftApp {
                             match self.state.doc.face_ref(f) {
                                 Some(face) => m.plane = soliddraft_model::PlaneRef::Face { face },
                                 None => e.error = Some("Mirror in a planar face or a reference plane".into()),
+                            }
+                            return;
+                        }
+                        // A grade by distance from picked faces takes each clicked face, or
+                        // gives it back.
+                        (
+                            EditorParams::Lattice(soliddraft_model::LatticeFeature { radius_mm: Some(grade), .. })
+                            | EditorParams::Gyroid(soliddraft_model::GyroidFeature { level: grade, .. }),
+                            Some(Selection::Face(f)),
+                        ) if grade.picks_faces() => {
+                            if let Some(reference) = self.state.doc.any_face_ref(f)
+                                && let Some(faces) = grade.picked_faces_mut()
+                            {
+                                if let Some(i) = faces.iter().position(|face| face == &reference) {
+                                    faces.remove(i);
+                                } else {
+                                    faces.push(reference);
+                                }
                             }
                             return;
                         }

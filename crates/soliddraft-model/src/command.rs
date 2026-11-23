@@ -722,12 +722,12 @@ impl Document {
             }
             FeatureKind::Lattice(l)
                 if l.cell_size_mm.is_some_and(|v| !v.is_finite() || v <= 0.0)
-                    || l.radius_mm.is_some_and(|g| !finite(&g) || g.endpoints().iter().any(|v| *v <= 0.0)) =>
+                    || l.radius_mm.as_ref().is_some_and(|g| !finite(g) || g.endpoints().iter().any(|v| *v <= 0.0)) =>
             {
                 Err(CommandError::Invalid("lattice cell size and density must be finite and positive".into()))
             }
-            FeatureKind::Lattice(l) if l.radius_mm.is_some_and(|g| !anchors_differ(&g)) => {
-                Err(CommandError::Invalid("a graded density needs two different anchors on its axis".into()))
+            FeatureKind::Lattice(l) if let Some(why) = l.radius_mm.as_ref().and_then(|g| g.impossible()) => {
+                Err(CommandError::Invalid(format!("graded density: {why}")))
             }
             FeatureKind::Lattice(l)
                 if !(l.accuracy_mm.is_finite()
@@ -740,8 +740,8 @@ impl Document {
             FeatureKind::Gyroid(g) if !(g.period_mm.is_finite() && g.period_mm > 0.0) || !finite(&g.level) => {
                 Err(CommandError::Invalid("gyroid period must be positive and its level finite".into()))
             }
-            FeatureKind::Gyroid(g) if !anchors_differ(&g.level) => {
-                Err(CommandError::Invalid("a graded level needs two different anchors on its axis".into()))
+            FeatureKind::Gyroid(g) if let Some(why) = g.level.impossible() => {
+                Err(CommandError::Invalid(format!("graded level: {why}")))
             }
             FeatureKind::Gyroid(g)
                 if !(g.accuracy_mm.is_finite()
@@ -1383,16 +1383,8 @@ impl Document {
 
 /// Refuses a material or appearance with values out of range.
 /// Every number a field grade is built from is finite.
-fn finite(grade: &soliddraft_kernel_api::Grade) -> bool {
+fn finite(grade: &crate::FieldGrade) -> bool {
     grade.values().iter().all(|v| v.is_finite())
-}
-
-/// A linear grade's anchors are two different places on its axis.
-fn anchors_differ(grade: &soliddraft_kernel_api::Grade) -> bool {
-    match grade {
-        soliddraft_kernel_api::Grade::Linear(l) => l.from != l.to,
-        soliddraft_kernel_api::Grade::Constant(_) => true,
-    }
 }
 
 fn check_entry(problems: Vec<soliddraft_materials::Problem>) -> Result<(), CommandError> {

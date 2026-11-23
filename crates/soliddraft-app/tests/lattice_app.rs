@@ -95,7 +95,7 @@ fn ribbon_and_editor_create_a_terminal_unproved_lattice() {
     let doc = &app.state().state.doc;
     let last = doc.features.last().unwrap();
     assert_eq!(last.name, "Lattice1");
-    let FeatureKind::Lattice(l) = last.kind else { panic!("last feature is lattice") };
+    let FeatureKind::Lattice(l) = &last.kind else { panic!("last feature is lattice") };
     assert_eq!(l.cell_size_mm, Some(5.0));
     assert_eq!(l.radius_mm, Some(1.0.into()));
     assert_eq!(last.status, soliddraft_app::document::FeatureStatus::Ok);
@@ -159,8 +159,8 @@ fn ribbon_and_editor_create_a_terminal_unproved_gyroid() {
     app.run_steps(12);
     let last = app.state().state.doc.features.last().unwrap();
     assert_eq!(last.name, "Gyroid1");
-    let FeatureKind::Gyroid(g) = last.kind else { panic!("last feature is gyroid") };
-    assert_eq!((g.period_mm, g.level), (10.0, soliddraft_kernel_api::Grade::Constant(0.0)));
+    let FeatureKind::Gyroid(g) = &last.kind else { panic!("last feature is gyroid") };
+    assert_eq!((g.period_mm, g.level.clone()), (10.0, soliddraft_kernel_api::Grade::Constant(0.0)));
     assert_eq!(last.status, soliddraft_app::document::FeatureStatus::Ok);
     assert!(last.summary().contains("unproved preview"));
 
@@ -171,8 +171,8 @@ fn ribbon_and_editor_create_a_terminal_unproved_gyroid() {
     app.run_steps(12);
     let last = app.state().state.doc.features.last().unwrap();
     assert_eq!(last.name, "Gyroid1");
-    let FeatureKind::Gyroid(g) = last.kind else { panic!("last feature is gyroid") };
-    assert_eq!((g.period_mm, g.level), (10.0, soliddraft_kernel_api::Grade::Constant(0.5)));
+    let FeatureKind::Gyroid(g) = &last.kind else { panic!("last feature is gyroid") };
+    assert_eq!((g.period_mm, g.level.clone()), (10.0, soliddraft_kernel_api::Grade::Constant(0.5)));
     assert_eq!(last.status, soliddraft_app::document::FeatureStatus::Ok);
     assert!(app.query_by_label("unproved preview").is_some(), "the viewport keeps its label");
     let image = std::path::PathBuf::from(

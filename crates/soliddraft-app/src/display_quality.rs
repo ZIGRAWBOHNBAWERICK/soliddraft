@@ -215,8 +215,6 @@ impl DisplayQuality {
         }
         let missing = self.cache.missing(&body, &self.levels);
         if missing.is_empty() {
-            self.worker.cancel(&body);
-            self.asked.clear();
             return;
         }
         let params: Vec<TessellationParams> = missing.iter().map(|l| *self.levels.params(*l)).collect();
@@ -245,7 +243,9 @@ impl DisplayQuality {
                 }
                 Err(e) => {
                     log::warn!("tessellating body {body:?}: {e}");
-                    if let Some(choice) = self.curved_surfaces {
+                    if let Some(choice) = self.curved_surfaces
+                        && self.asked.iter().all(|(level, key)| self.levels.key(*level) == *key)
+                    {
                         self.error = Some(format!("Curved surfaces ({}) could not be displayed: {e}", choice.label()));
                     }
                 }

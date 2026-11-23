@@ -500,6 +500,12 @@ fn skim_first_hole(state: &mut soliddraft_app::state::AppState) {
     tool(state, "cut", json!({"sketch": "Sketch2", "depth": 5, "through_all": false, "flip": true}));
 }
 
+fn browser_fixture(name: &str, doc: &Document) {
+    if let Some(dir) = std::env::var_os("SOLIDDRAFT_BROWSER_FIXTURES") {
+        std::fs::write(std::path::PathBuf::from(dir).join(name), doc.model().to_bytes().unwrap()).unwrap();
+    }
+}
+
 #[test]
 fn a_drawing_calls_out_each_counterbore_after_one_opening_is_skimmed() {
     let mut state = scripted_plate("Counterbored plate");
@@ -510,6 +516,7 @@ fn a_drawing_calls_out_each_counterbore_after_one_opening_is_skimmed() {
             "counterbore": {"diameter": 10, "depth": 3}}),
     );
     skim_first_hole(&mut state);
+    browser_fixture("drawing-skimmed-counterbores.dwprt", &state.doc);
     let mut top = soliddraft_app::drawing::NewDrawing::new();
     for (view, on) in &mut top.views {
         *on = *view == soliddraft_kernel_api::drawing::StandardView::Top;
@@ -546,6 +553,7 @@ fn updating_the_drawing_keeps_one_thread_note_when_two_groups_join() {
             "thread": {"size": 6, "length": 6}}),
     );
     skim_first_hole(&mut state);
+    browser_fixture("drawing-skimmed-threads.dwprt", &state.doc);
     let dir = std::env::temp_dir().join(format!("soliddraft-thread-groups-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     tool(&mut state, "manufacturing_package", json!({"path": dir.join("tapped.step")}));
@@ -589,10 +597,7 @@ fn hiding_a_body_in_a_display_state_hides_its_thread_marks() {
     states.put(hidden).unwrap();
     states.select(None, Some(id)).unwrap();
     doc.change_display_states(states).unwrap();
-    if let Some(dir) = std::env::var_os("SOLIDDRAFT_BROWSER_FIXTURES") {
-        std::fs::write(std::path::PathBuf::from(dir).join("thread-hidden.dwprt"), doc.model().to_bytes().unwrap())
-            .unwrap();
-    }
+    browser_fixture("thread-hidden.dwprt", doc);
     settle(&mut app);
     let image = case.frame(&mut app, "hidden");
     let after = thread_blue(&app, &image);

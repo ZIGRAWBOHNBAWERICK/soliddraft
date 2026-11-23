@@ -1,5 +1,5 @@
 // Run with chrome-devtools-axi run in a fresh 1600 x 1000 page on the packaged app.
-// Set the URL fragment to depth, offset, positions, formula, or visibility.
+// Set the URL fragment to depth, offset, positions, formula, visibility, callouts, or notes.
 // Serve the application test fixtures written to SOLIDDRAFT_BROWSER_FIXTURES at /fixtures/.
 await page.wait('#status.hidden', 60000);
 const scenario = await page.eval(() => location.hash.slice(1));
@@ -31,14 +31,19 @@ await page.eval(() => {
     this.files = files.files;
     this.dispatchEvent(new Event('change'));
   };
+  const blobs = new Map();
+  const create = URL.createObjectURL.bind(URL);
+  URL.createObjectURL = blob => {
+    const url = create(blob);
+    blobs.set(url, blob);
+    return url;
+  };
   const download = HTMLAnchorElement.prototype.click;
   HTMLAnchorElement.prototype.click = function () {
-    if (!this.download.endsWith('.dwprt')) return download.call(this);
-    fetch(this.href).then(response => response.blob()).then(blob => {
-      window.featureSaved = new File([blob], this.download);
-    });
+    if (!/\.dw(prt|drw)$/.test(this.download)) return download.call(this);
+    window.featureSaved = new File([blobs.get(this.href)], this.download);
   };
-  window.featureSavedPart = async () => {
+  window.featureSavedJson = async member => {
     const bytes = await window.featureSaved.arrayBuffer();
     const zip = new DataView(bytes);
     // ZIP end record and central directory give the compressed member's size and offset.
@@ -49,7 +54,7 @@ await page.eval(() => {
     for (let i = 0; i < zip.getUint16(end + 10, true); i++) {
       const nameSize = zip.getUint16(entry + 28, true);
       const name = new TextDecoder().decode(new Uint8Array(bytes, entry + 46, nameSize));
-      if (name === 'part.json') {
+      if (name === member) {
         const local = zip.getUint32(entry + 42, true);
         const start = local + 30 + zip.getUint16(local + 26, true) + zip.getUint16(local + 28, true);
         const data = new Uint8Array(bytes, start, zip.getUint32(entry + 20, true));
@@ -59,7 +64,7 @@ await page.eval(() => {
       }
       entry += 46 + nameSize + zip.getUint16(entry + 30, true) + zip.getUint16(entry + 32, true);
     }
-    throw new Error('The download has no part.json');
+    throw new Error(`The download has no ${member}`);
   };
   return true;
 });
@@ -113,16 +118,23 @@ async function open(name) {
   await until(() => shown('shown_build'), value => value && !value.pending && !value.reading, 'Part is still building');
   await page.wait(500);
 }
-async function save() {
+async function save(drawing = false) {
   await page.eval(() => { window.featureSaved = null; return true; });
-  await page.press('Control+s');
-  await until(() => page.eval(() => window.featureSaved?.size), size => size > 0, 'Save did not download the part');
-  return page.eval(() => window.featureSavedPart());
+  if (drawing) await command('Save drawing', 'drawing_save');
+  else await page.press('Control+s');
+  await until(() => page.eval(() => window.featureSaved?.size), size => size > 0, 'Save did not download the file');
+  return page.eval(`featureSavedJson('${drawing ? 'drawing' : 'part'}.json')`);
 }
 async function callout() {
   await command('Manufacturing information', 'manufacturing_information');
   const pmi = await until(() => shown('shown_manufacturing_information'), value => value?.items.length, 'No PMI was drawn');
   return pmi.items[0].callout;
+}
+const drawing = () => shown('shown_drawing');
+async function makeDrawing() {
+  await command('Make drawing', 'make_drawing');
+  await page.press('Enter');
+  return until(drawing, value => value?.up_to_date, 'The drawing did not open');
 }
 
 switch (scenario) {
@@ -179,6 +191,41 @@ switch (scenario) {
     await click('Display state');
     await click('Display state: Default');
     await until(threads, count => count > 0, 'The visible solid did not draw its thread marks');
+    break;
+  }
+  case 'callouts': {
+    await open('drawing-skimmed-counterbores.dwprt');
+    const initial = await makeDrawing();
+    for (const [x, z] of [[20, 9], [50, 10]]) {
+      await command('Hole callout', 'drawing_hole_callout');
+      const [sx, sy] = await page.eval(`Array.from(window.wasmBindings.drawing_screen_point('Top view', ${x}, 20, ${z}))`);
+      await page.eval(`featureClick({x: ${sx}, y: ${sy}}, 1)`);
+    }
+    await until(drawing, value => value?.annotations === initial.annotations + 2, 'The drawing did not place both callouts');
+    const stored = await save(true);
+    const callouts = stored.sheets[0].annotations.filter(a => a.body.type === 'hole_callout').map(a => a.body.text);
+    check(callouts.every(text => !/^2\s*×/.test(text)) &&
+      callouts.some(text => / 7\n.* 2$/.test(text)) &&
+      callouts.some(text => / 8\n.* 3$/.test(text)), `Counterbore callouts read ${JSON.stringify(callouts)}`);
+    break;
+  }
+  case 'notes': {
+    await open('drawing-skimmed-threads.dwprt');
+    await makeDrawing();
+    const notes = stored => stored.sheets[0].annotations.filter(a => a.source?.type === 'thread').map(a => a.body.text);
+    const before = notes(await save(true));
+    check(before.length === 2 && before.some(text => text.endsWith(' 5')) &&
+      before.some(text => text.endsWith(' 6')), `Initial thread notes read ${JSON.stringify(before)}`);
+    await command('Show part', 'drawing_show_part');
+    await click('Tree: Cut-Extrude1');
+    await command('Suppress', 'suppress');
+    await until(() => shown('shown_build'), value => value && !value.pending && !value.reading, 'Suppressed part is still building');
+    await command('Open drawings', 'show_drawing');
+    await command('Rebuild', 'drawing_rebuild');
+    await until(drawing, value => value?.up_to_date, 'The drawing did not rebuild');
+    const after = notes(await save(true));
+    check(after.length === 1 && after[0].startsWith('2× M6x1-6H') &&
+      after[0].endsWith(' 6'), `Rebuilt thread notes read ${JSON.stringify(after)}`);
     break;
   }
   default:

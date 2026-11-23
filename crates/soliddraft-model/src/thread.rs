@@ -251,6 +251,18 @@ impl Document {
     /// thread covers on it. A wall a later feature took away has none; one it shortened
     /// has the span that is left.
     pub fn threaded_walls(&self) -> Vec<ThreadedWall> {
+        let threaded_holes: Vec<_> = self
+            .features()
+            .iter()
+            .filter_map(|feature| {
+                let FeatureKind::Hole(hole) = &feature.kind else { return None };
+                let thread = hole.thread.as_ref()?;
+                (self.status(feature.id) == Some(&FeatureStatus::Ok)).then_some((feature, hole, thread))
+            })
+            .collect();
+        if threaded_holes.is_empty() {
+            return Vec::new();
+        }
         let Some(body) = self.body() else { return Vec::new() };
         let Ok(topology) = self.view_of(body) else { return Vec::new() };
         let view = View { topology: &topology };
@@ -261,12 +273,7 @@ impl Document {
             .map(|carriers| carriers.into_iter().filter_map(|c| Some((c.id, c.axis?.radius))).collect())
             .unwrap_or_default();
         let mut out = Vec::new();
-        for feature in self.features() {
-            let FeatureKind::Hole(hole) = &feature.kind else { continue };
-            let Some(thread) = &hole.thread else { continue };
-            if self.status(feature.id) != Some(&FeatureStatus::Ok) {
-                continue;
-            }
+        for (feature, hole, thread) in threaded_holes {
             let Some((_, drilled)) = self.bodies_before(feature.id).into_iter().find(|(key, _)| *key == feature.body)
             else {
                 continue;

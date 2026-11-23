@@ -18,7 +18,7 @@ use crate::feature::{DatumPlane, FeatureId};
 
 /// The entry a part keeps its view choices in.
 pub const ENTRY: &str = "view.json";
-/// The format tag of the view choices this version writes.
+/// The format tag for a view with body names or per-body visibility.
 pub const FORMAT: &str = "soliddraft-view/2";
 const LEGACY_FORMAT: &str = "soliddraft-view/1";
 
@@ -74,7 +74,7 @@ pub enum AnnotationValue {
     Spacing,
 }
 
-/// The part's explicit show and hide choices.
+/// The part's visibility choices and body names.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Visibility {
     choices: BTreeMap<ViewItem, bool>,
@@ -115,6 +115,7 @@ impl Visibility {
         };
     }
 
+    /// The custom name of body `key`, if one was set.
     pub fn body_name(&self, key: u32) -> Option<&str> {
         self.body_names.get(&key).map(String::as_str)
     }

@@ -294,6 +294,90 @@ fn scripted_lines_tap_a_hole_and_the_drawing_calls_it_out() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[test]
+fn a_hole_callout_names_the_head_of_the_hole_it_is_put_on() {
+    let kernel = std::sync::Arc::new(soliddraft_kernel_catallax::CatallaxKernel::with_diagnostics(20_000_000));
+    let mut state = soliddraft_app::state::AppState::new(Document::new("Headed holes", kernel));
+    let call = |state: &mut soliddraft_app::state::AppState, tool: &str, arguments: serde_json::Value| {
+        let out =
+            call_checked(&mut AppTools { state }, tool, arguments, &Caller::Mcp { client: "hole-callout".into() });
+        assert!(!out.is_error, "{tool}: {}", out.content);
+    };
+    call(
+        &mut state,
+        "sketch",
+        json!({"plane": "top", "shapes": [{"shape": "rectangle", "center": [30, 20, 0], "width": 60, "height": 40}]}),
+    );
+    call(&mut state, "extrude", json!({"sketch": "Sketch1", "depth": 10, "flip": false}));
+    let face = "Boss-Extrude1 \u{b7} End cap";
+    // Two Ø5 holes through, counterbored Ø10 for 3 mm; one tapped M6 through, countersunk
+    // Ø12 at 90°.
+    call(
+        &mut state,
+        "hole",
+        json!({"face": face, "points": [[12, 20, 10], [48, 20, 10]], "diameter": 5, "counterbore": {"diameter": 10, "depth": 3}}),
+    );
+    call(
+        &mut state,
+        "hole",
+        json!({"face": face, "points": [[30, 20, 10]], "thread": {"size": 6}, "countersink": {"diameter": 12, "angle": 90}}),
+    );
+    let callouts = |state: &soliddraft_app::state::AppState| -> Vec<(f64, String)> {
+        let mut top = soliddraft_app::drawing::NewDrawing::new();
+        for (view, on) in &mut top.views {
+            *on = *view == soliddraft_kernel_api::drawing::StandardView::Top;
+        }
+        let session = soliddraft_app::drawing::create_drawing(state, &top).unwrap();
+        let sheet = &session.doc.drawing.sheets[0];
+        let projected = session.doc.projected_of(sheet.views[0].id).expect("the top view is projected");
+        let ctx = soliddraft_app::drawing::part::PartContext::new(&state.doc).expect("the part is proved");
+        // Every circle the top view sees is a hole's: the plate and the cut are square.
+        let mut out: Vec<(f64, String)> = projected
+            .circles
+            .iter()
+            .map(|circle| {
+                let text =
+                    soliddraft_app::drawing::part::hole_callout(&ctx, circle, &projected, sheet.template.as_str());
+                ((circle.model_radius * 1000.0).round() / 1000.0, text)
+            })
+            .collect();
+        out.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
+        out.dedup();
+        out
+    };
+    let symbols = soliddraft_drawing::library::template("iso-a3").style_file().symbols.clone();
+    let (d, deep, cbore, csink, times, degree, thru) = (
+        symbols.diameter.as_str(),
+        symbols.depth.as_str(),
+        symbols.counterbore.as_str(),
+        symbols.countersink.as_str(),
+        symbols.times.as_str(),
+        symbols.degree.as_str(),
+        symbols.through.as_str(),
+    );
+    let counterbored = format!("2{times} {d}5 {thru}\n{cbore} {d}10 {deep} 3");
+    let countersunk = format!("M6x1-6H {thru}\n{csink} {d}12 {times} 90{degree}");
+    // Every circle of a hole, the head's as well as the drill's, calls out the whole hole
+    // with its head: the Ø10 circle is not called out as the Ø5 drill alone.
+    assert_eq!(
+        callouts(&state),
+        [(2.5, counterbored.clone()), (2.5, countersunk.clone()), (5.0, counterbored), (6.0, countersunk),]
+    );
+    // Milled 1 mm, the counterbore is 2 mm deep and the countersink Ø10 at the top.
+    call(
+        &mut state,
+        "sketch",
+        json!({"plane": "top", "offset": 9, "shapes": [{"shape": "rectangle", "center": [30, 20, 9], "width": 80, "height": 60}]}),
+    );
+    call(&mut state, "cut", json!({"sketch": "Sketch2", "depth": 5, "through_all": false, "flip": true}));
+    let counterbored = format!("2{times} {d}5 {thru}\n{cbore} {d}10 {deep} 2");
+    let countersunk = format!("M6x1-6H {thru}\n{csink} {d}10 {times} 90{degree}");
+    assert_eq!(
+        callouts(&state),
+        [(2.5, counterbored.clone()), (2.5, countersunk.clone()), (5.0, counterbored), (5.0, countersunk)]
+    );
+}
+
 /// A plate 60 x 40 x 10 made through the tools, with the tool caller.
 fn scripted_plate(name: &str) -> soliddraft_app::state::AppState {
     let kernel = std::sync::Arc::new(soliddraft_kernel_catallax::CatallaxKernel::with_diagnostics(20_000_000));

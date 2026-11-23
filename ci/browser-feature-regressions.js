@@ -7,7 +7,7 @@ const scenario = await page.eval(() => location.hash.slice(1));
 await page.eval(() => {
   const canvas = document.getElementById('soliddraft');
   canvas.focus();
-  const frame = () => new Promise(resolve => requestAnimationFrame(resolve));
+  const frame = () => new Promise(resolve => setTimeout(resolve, 90));
   window.featureClick = async ({ x, y }, count) => {
     const at = { clientX: x, clientY: y, bubbles: true, cancelable: true,
       pointerId: 1, pointerType: 'mouse', isPrimary: true, button: 0 };
@@ -94,7 +94,10 @@ async function command(label, id) {
   await page.press('Control+Shift+p');
   await until(controls, value => value?.['Command palette'], 'The command palette did not open');
   await page.type(label);
-  await click(`Command: ${id}`);
+  await until(controls, value => value?.[`Command: ${id}`], `No result for ${label}`);
+  await page.press('Enter');
+  await until(controls, value => !value?.['Command palette'], `The palette stayed open for ${label}`);
+  await page.wait(300);
 }
 async function replace(name, value) {
   await click(name);

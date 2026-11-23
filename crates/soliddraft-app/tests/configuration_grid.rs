@@ -82,9 +82,18 @@ fn resolved_thin(report: &Value, name: &str) -> Value {
 fn renaming_a_global_keeps_case_distinct_configuration_bindings() {
     use soliddraft_app::values_tab::{self, Field, ValuesAction};
 
-    let mut state = parameter_dependent_grid("Plate", "10 mm", "10 mm");
+    let doc = Document::new("Case-distinct formula references", soliddraft_app::kernel());
+    let mut state = AppState::new(doc);
+    call(
+        &mut state,
+        "sketch",
+        json!({ "plane": "top", "shapes": [{ "shape": "rectangle", "center": [0, 0, 0], "width": 60, "height": 40 }] }),
+    );
+    call(&mut state, "extrude", json!({ "sketch": "Sketch1", "depth": 10, "flip": false }));
+    call(&mut state, "set_value", json!({ "name": "Plate", "expression": "10 mm" }));
     call(&mut state, "set_value", json!({ "name": "plate", "expression": "20 mm" }));
     call(&mut state, "set_value", json!({ "name": "Width", "expression": "1 mm" }));
+    call(&mut state, "add_configuration", json!({ "name": "Thin" }));
     for (name, expression) in [("BossExtrude1.Depth", "=plate"), ("Width", "=Plate")] {
         call(
             &mut state,

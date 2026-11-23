@@ -278,6 +278,10 @@ async function open(v, label, file) {
   const first = await shown(v, 'shown_first_part_frame');
   check(first?.viewport.triangles > 0, `${label}: the first viewport frame drew no triangles: ${JSON.stringify(first)}`);
   check(first.viewport.pending === false, `${label}: the first viewport frame still owed a build`);
+  const settled = await until(v, label, 'shown_viewport', frame => frame.triangles > 0);
+  check(settled.label === first.viewport.label, `${label}: the preview label changed after the first frame`);
+  const marks = await shown(v, 'shown_marks');
+  check(JSON.stringify(marks) === JSON.stringify(first.marks), `${label}: the tree marks changed after the first frame`);
   await v.shot(`${label}-opened`);
   return first;
 }

@@ -184,6 +184,7 @@ fn a_legacy_hole_keeps_its_edited_position_pattern_after_reopen() {
     click(&mut app, "Apply Hole Wizard");
     ux_tools::rebuilt(&mut app);
     let doc = &app.state().state.doc;
+    browser_fixture("wizard-edited-positions.dwprt", doc);
     assert_eq!(doc.undo_depth(), undo_before + 1);
     assert_eq!(doc.model().truth()["format"], HOLE_WIZARD_FORMAT);
     let bytes = doc.model().to_bytes().unwrap();

@@ -565,6 +565,11 @@ fn updating_the_drawing_keeps_one_thread_note_when_two_groups_join() {
     tool(&mut state, "suppress", json!({"feature": "Cut-Extrude1", "suppressed": true}));
     tool(&mut state, "drawing_rebuild", json!({}));
     let merged = drawn_items(&state);
+    if let Some(dir) = std::env::var_os("SOLIDDRAFT_BROWSER_FIXTURES") {
+        let dir = std::path::PathBuf::from(dir);
+        browser_fixture("Tapped plate.dwprt", &state.doc);
+        tool(&mut state, "drawing_save", json!({"path": dir.join("drawing-merged-threads.dwdrw")}));
+    }
     std::fs::remove_dir_all(&dir).unwrap();
     assert_eq!(merged.len(), 1, "{merged:?}");
     assert!(merged[0].2.starts_with("2× M6x1-6H") && merged[0].2.ends_with(" 6"), "{merged:?}");

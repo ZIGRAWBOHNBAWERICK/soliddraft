@@ -169,22 +169,13 @@ switch (scenario) {
     break;
   }
   case 'positions': {
-    await open('wizard-legacy-positions.dwprt');
-    await click('Tree: Hole1');
-    await command('Edit feature', 'edit_feature');
-    await click('Hole Wizard Positions tab');
-    await click('Point Patterns');
-    await click('Apply linear hole pattern');
-    await click('Apply Hole Wizard');
-    await until(controls, value => !value['Apply Hole Wizard'], 'The hole form stayed open');
+    // The application test edits the legacy hole through Positions and saves this file.
+    await open('wizard-edited-positions.dwprt');
     const stored = await save();
     const hole = stored.features.find(f => f.kind.type === 'hole');
     const sketch = stored.features.find(f => f.id === hole.kind.sketch);
-    check(sketch?.kind.sketch.patterns?.length === 1, 'The saved hole lost its position pattern');
-    await open();
-    const reopened = await save();
-    const reloaded = reopened.features.find(f => f.id === sketch.id);
-    check(reloaded?.kind.sketch.patterns?.length === 1, 'The reopened hole lost its position pattern');
+    check(sketch?.kind.sketch.patterns?.length === 1, 'The reopened hole lost its position pattern');
+    check(sketch.kind.sketch.constraints.length > 0, 'The reopened hole lost its position constraints');
     break;
   }
   case 'formula': {
@@ -223,19 +214,11 @@ switch (scenario) {
     break;
   }
   case 'notes': {
-    await open('drawing-skimmed-threads.dwprt');
-    await makeDrawing();
+    // The application test removes the skim and refreshes the drawing before saving both files.
+    await open('Tapped plate.dwprt');
+    await open('drawing-merged-threads.dwdrw');
+    await until(drawing, value => value?.annotations > 0, 'The refreshed drawing did not open');
     const notes = stored => stored.sheets[0].annotations.filter(a => a.source?.type === 'thread').map(a => a.body.text);
-    const before = notes(await save(true));
-    check(before.length === 2 && before.some(text => text.endsWith(' 5')) &&
-      before.some(text => text.endsWith(' 6')), `Initial thread notes read ${JSON.stringify(before)}`);
-    await command('Show part', 'drawing_show_part');
-    await click('Tree: Cut-Extrude1');
-    await command('Suppress', 'suppress');
-    await until(() => shown('shown_build'), value => value && !value.pending && !value.reading, 'Suppressed part is still building');
-    await command('Open drawings', 'show_drawing');
-    await command('Rebuild', 'drawing_rebuild');
-    await until(drawing, value => value?.up_to_date, 'The drawing did not rebuild');
     const after = notes(await save(true));
     check(after.length === 1 && after[0].startsWith('2× M6x1-6H') &&
       after[0].endsWith(' 6'), `Rebuilt thread notes read ${JSON.stringify(after)}`);

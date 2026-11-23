@@ -1,8 +1,9 @@
-//! Shared Edit Suite theme tokens. The frame uses charcoal and amber in either
-//! saved appearance mode. Viewport scenes remain a separate choice.
+//! Shared D1 Clear Bench theme tokens: colours, spacing, radii and typography in one
+//! structured token set so a later themes lane can register additional themes cleanly.
+//! D1 Clear Bench daylight is the default. Viewport scenes remain a separate choice.
 //!
 //! The mode is process-wide: [`set_mode`] switches it and restyles the context, and the
-//! accessors ([`ink`], [`panel`], ...) read the active palette each call, so a widget
+//! accessors ([`ink`], [`panel`], ...) read the active token set each call, so a widget
 //! painted on the next frame is already in the new mode.
 
 use egui::{Color32, CornerRadius, FontFamily, FontId, Margin, Stroke, TextStyle, Vec2};
@@ -41,35 +42,49 @@ impl Mode {
 /// Shared semantic colours, read by egui and custom painters.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Palette {
-    /// Window chrome: the menu bar, the ribbon tab strip, the status bar and the gaps
-    /// between panels.
+    /// Window chrome: top bar, left toggle rail, frame gaps.
     pub chrome: Color32,
-    /// Panels: the tree, properties, the ribbon body, dialogs and menus.
+    /// Ribbon / top tool strip background.
+    pub ribbon: Color32,
+    /// Panels: side column panes, active document tab, dialogs and menus.
     pub panel: Color32,
-    /// Panel headers, the dock tab bar and plain buttons.
+    /// Panel headers, splitters and secondary buttons.
     pub panel_header: Color32,
     /// One-pixel separators and widget borders.
     pub line: Color32,
-    /// A stronger border, for a hovered widget.
+    /// Faint internal dividers.
+    pub line_faint: Color32,
+    /// A stronger border, for a hovered widget or floating card.
     pub line_strong: Color32,
     pub ink: Color32,
     pub muted: Color32,
     pub accent: Color32,
-    /// The accent as a fill: the active ribbon item, the selected tree row.
+    /// Accent hover fill for primary CTA buttons.
+    pub accent_hover: Color32,
+    /// The accent as a soft fill: active ribbon item, selected tree row.
     pub accent_soft: Color32,
     pub selection_bg: Color32,
     pub selection_ink: Color32,
     pub hover: Color32,
     pub ok: Color32,
+    pub ok_soft: Color32,
     pub warn: Color32,
     pub error: Color32,
     /// Notice fills behind warn and error text.
     pub warn_soft: Color32,
     pub error_soft: Color32,
+    /// Destructive / Close sketch CTA.
+    pub danger: Color32,
+    pub on_danger: Color32,
+    /// Coral Donate pill in the top bar.
+    pub donate_bg: Color32,
+    pub donate_ink: Color32,
+    pub donate_line: Color32,
+    /// Contextual inline feature form strip fill.
+    pub form_bg: Color32,
     /// Text fields and value pills.
     pub field_bg: Color32,
-    /// Tool chips and raised buttons: the brightest surface in light, a step above the
-    /// panel in dark.
+    /// Tool chips and raised buttons.
     pub chip: Color32,
     /// Text and icons on an accent-filled button.
     pub on_accent: Color32,
@@ -83,7 +98,6 @@ pub struct Palette {
     pub terminal_ink: Color32,
     pub terminal_accent: Color32,
     /// The modelling space, a vertical fade from `viewport_top` to `viewport_bottom`.
-    /// The ground shadow lands on the bottom tone.
     pub viewport_top: Color32,
     pub viewport_bottom: Color32,
     /// The drawing canvas around the sheet; the sheet itself stays paper white.
@@ -94,6 +108,66 @@ pub struct Palette {
     pub axis_z: Color32,
 }
 
+/// Unified spacing and shell dimensions in logical pixels.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Spacing {
+    pub top_bar_height: f32,
+    pub workspace_strip_height: f32,
+    pub tool_strip_height: f32,
+    pub options_height: f32,
+    pub rail_width: f32,
+    pub side_panel_default_width: f32,
+    pub side_panel_min_width: f32,
+    pub pane_header_height: f32,
+    pub splitter_height: f32,
+    pub bottom_bar_height: f32,
+    pub row_height: f32,
+    pub control_height: f32,
+    pub icon_size: f32,
+    pub ribbon_icon_size: f32,
+    pub tool_padding: f32,
+    pub group_gap: f32,
+}
+
+/// Unified typography sizes in logical pixels.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Typography {
+    pub heading: f32,
+    pub body: f32,
+    pub button: f32,
+    pub tool_label: f32,
+    pub small: f32,
+    pub rail_label: f32,
+    pub group_label: f32,
+    pub value: f32,
+}
+
+/// Unified corner radii in logical pixels.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Radii {
+    pub control: u8,
+    pub field: u8,
+    pub tool: u8,
+    pub window: u8,
+    pub floating: u8,
+    pub pill: u8,
+}
+
+/// One complete UI theme token set. The later themes lane can supply additional
+/// `Tokens` definitions without changing widget code.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Tokens {
+    pub id: &'static str,
+    pub label: &'static str,
+    pub is_dark: bool,
+    pub palette: Palette,
+    pub spacing: Spacing,
+    pub typography: Typography,
+    pub radii: Radii,
+    pub nav_shadow: egui::Shadow,
+    pub popup_shadow: egui::Shadow,
+}
+
 const fn rgb(r: u8, g: u8, b: u8) -> Color32 {
     Color32::from_rgb(r, g, b)
 }
@@ -102,91 +176,159 @@ const fn rgba(r: u8, g: u8, b: u8, a: u8) -> Color32 {
     Color32::from_rgba_unmultiplied_const(r, g, b, a)
 }
 
-/// Values from the approved L00 merged prototype, in logical pixels.
-pub mod edit_suite {
-    use super::{Palette, rgb, rgba};
+/// D1 Clear Bench daylight token set (approved design direction).
+pub mod clear_bench {
+    use super::{Palette, Radii, Spacing, Tokens, Typography, rgb, rgba};
     use egui::Color32;
 
-    pub const BAR: Color32 = rgb(0x22, 0x24, 0x27);
-    pub const CHIP_LINE: Color32 = rgb(0x4a, 0x4e, 0x55);
-    pub const POPUP: Color32 = rgb(0x35, 0x38, 0x3e);
-    pub const POPUP_HOVER: Color32 = rgba(255, 255, 255, 26);
-    pub const PRIMARY_HOVER: Color32 = rgb(0xff, 0xbc, 0x4d);
-    pub const DANGER: Color32 = rgb(0xe0, 0x3a, 0x2e);
-    pub const ON_DANGER: Color32 = Color32::WHITE;
-    pub const UNDER_DEFINED: Color32 = rgb(0x1d, 0x4f, 0xe0);
-    pub const UNDER_DEFINED_LABEL: Color32 = rgb(0x7f, 0xb2, 0xff);
-    /// A form's preview guides: the depth arrow, a draft's plane and pull, copy numbers.
-    /// The amber of the added material (scene.wgsl PREVIEW_ADD), deep enough for a white scene.
-    pub const PREVIEW_EDGE: Color32 = rgb(0xd9, 0x7f, 0x00);
-    /// The red of material a form removes, for a hole's ghost at the pointer.
-    pub const PREVIEW_REMOVE_EDGE: Color32 = rgb(0xd0, 0x3a, 0x30);
-    pub const FULLY_DEFINED: Color32 = rgb(0x0b, 0x0d, 0x11);
-    pub const CONSTRUCTION: Color32 = rgb(0x5b, 0x6b, 0x86);
-    pub const DIMENSION: Color32 = rgb(0x24, 0x56, 0xc4);
-    pub const SKETCH_SHEET: Color32 = rgb(0xf1, 0xf3, 0xf7);
-
     pub const PALETTE: Palette = Palette {
-        chrome: rgb(0x2a, 0x2c, 0x30),
-        panel: rgb(0x30, 0x33, 0x38),
-        panel_header: BAR,
-        line: rgb(0x19, 0x1a, 0x1d),
-        line_strong: rgb(0x47, 0x4b, 0x52),
-        ink: rgb(0xe6, 0xe8, 0xec),
-        muted: rgb(0xa3, 0xa8, 0xb1),
-        accent: rgb(0xf5, 0xa5, 0x24),
-        accent_soft: rgba(245, 165, 36, 51),
-        selection_bg: rgba(245, 165, 36, 51),
-        selection_ink: rgb(0xf5, 0xa5, 0x24),
-        hover: POPUP_HOVER,
-        ok: rgb(0x63, 0xd6, 0x8f),
-        warn: rgb(0xf5, 0xa5, 0x24),
-        error: rgb(0xff, 0xb4, 0xad),
-        warn_soft: rgba(245, 165, 36, 51),
-        error_soft: rgba(224, 58, 46, 46),
-        field_bg: rgb(0x3a, 0x3d, 0x43),
-        chip: rgb(0x3a, 0x3d, 0x43),
-        on_accent: rgb(0x23, 0x16, 0x00),
-        hud_bg: rgba(42, 44, 48, 242),
-        command_line: rgb(0x2a, 0x2c, 0x30),
-        command_prompt: rgb(0xf5, 0xa5, 0x24),
+        chrome: rgb(0xe9, 0xed, 0xf3),
+        ribbon: rgb(0xf5, 0xf7, 0xfa),
+        panel: Color32::WHITE,
+        panel_header: rgb(0xf1, 0xf4, 0xf8),
+        line: rgb(0xd3, 0xda, 0xe4),
+        line_faint: rgb(0xe7, 0xec, 0xf3),
+        line_strong: rgb(0xb5, 0xc0, 0xd0),
+        ink: rgb(0x17, 0x20, 0x30),
+        muted: rgb(0x4c, 0x58, 0x6a),
+        accent: rgb(0x1d, 0x52, 0xd6),
+        accent_hover: rgb(0x17, 0x43, 0xb5),
+        accent_soft: rgb(0xe4, 0xee, 0xff),
+        selection_bg: rgb(0xe4, 0xee, 0xff),
+        selection_ink: rgb(0x1d, 0x52, 0xd6),
+        hover: rgb(0xe5, 0xea, 0xf2),
+        ok: rgb(0x12, 0x6e, 0x3e),
+        ok_soft: rgb(0xe2, 0xf7, 0xec),
+        warn: rgb(0x9a, 0x44, 0x00),
+        error: rgb(0xc0, 0x20, 0x20),
+        warn_soft: rgb(0xfe, 0xf3, 0xc7),
+        error_soft: rgb(0xfe, 0xe2, 0xe2),
+        danger: rgb(0xc9, 0x26, 0x26),
+        on_danger: Color32::WHITE,
+        donate_bg: rgb(0xfe, 0xe9, 0xe7),
+        donate_ink: rgb(0xb4, 0x23, 0x18),
+        donate_line: rgb(0xf7, 0xb8, 0xb2),
+        form_bg: rgb(0xf0, 0xf5, 0xff),
+        field_bg: Color32::WHITE,
+        chip: rgb(0xee, 0xf2, 0xf7),
+        on_accent: Color32::WHITE,
+        hud_bg: rgba(255, 255, 255, 242),
+        command_line: rgb(0xf5, 0xf7, 0xfa),
+        command_prompt: rgb(0x1d, 0x52, 0xd6),
         terminal_bg: rgb(0x17, 0x18, 0x1b),
         terminal_ink: rgb(0xe6, 0xe9, 0xee),
-        terminal_accent: rgb(0xf5, 0xa5, 0x24),
-        // A scene supplies the backdrop in Edit Suite; White is the fallback.
+        terminal_accent: rgb(0x60, 0xa5, 0xfa),
         viewport_top: Color32::WHITE,
         viewport_bottom: Color32::WHITE,
-        canvas_bg: rgb(0x56, 0x5a, 0x62),
+        canvas_bg: rgb(0xdf, 0xe4, 0xec),
         axis_x: rgb(0xd2, 0x3b, 0x3b),
         axis_y: rgb(0x2e, 0x9e, 0x5b),
         axis_z: rgb(0x1f, 0x5f, 0xd0),
     };
 
-    pub const TITLE_HEIGHT: f32 = 34.0;
-    pub const OPTIONS_HEIGHT: f32 = 46.0;
+    pub const SPACING: Spacing = Spacing {
+        top_bar_height: 36.0,
+        workspace_strip_height: 28.0,
+        tool_strip_height: 58.0,
+        options_height: 44.0,
+        rail_width: 46.0,
+        side_panel_default_width: 266.0,
+        side_panel_min_width: 210.0,
+        pane_header_height: 30.0,
+        splitter_height: 7.0,
+        bottom_bar_height: 32.0,
+        row_height: 24.0,
+        control_height: 28.0,
+        icon_size: 16.0,
+        ribbon_icon_size: 20.0,
+        tool_padding: 6.0,
+        group_gap: 10.0,
+    };
+
+    pub const TYPOGRAPHY: Typography = Typography {
+        heading: 14.0,
+        body: 12.5,
+        button: 12.0,
+        tool_label: 11.0,
+        small: 10.5,
+        rail_label: 9.5,
+        group_label: 9.5,
+        value: 12.0,
+    };
+
+    pub const RADII: Radii = Radii {
+        control: 6,
+        field: 5,
+        tool: 7,
+        window: 8,
+        floating: 10,
+        pill: 99,
+    };
+
+    pub const TOKENS: Tokens = Tokens {
+        id: "clear_bench",
+        label: "Clear Bench (Daylight)",
+        is_dark: false,
+        palette: PALETTE,
+        spacing: SPACING,
+        typography: TYPOGRAPHY,
+        radii: RADII,
+        nav_shadow: egui::Shadow { offset: [0, 4], blur: 16, spread: 0, color: rgba(15, 23, 42, 34) },
+        popup_shadow: egui::Shadow { offset: [0, 8], blur: 24, spread: 0, color: rgba(15, 23, 42, 38) },
+    };
+}
+
+/// Compatibility constants backed by the active D1 Clear Bench daylight token set.
+pub mod edit_suite {
+    use super::{Palette, clear_bench, rgb};
+    use egui::Color32;
+
+    pub const BAR: Color32 = clear_bench::PALETTE.panel_header;
+    pub const CHIP_LINE: Color32 = clear_bench::PALETTE.line_strong;
+    pub const POPUP: Color32 = clear_bench::PALETTE.panel;
+    pub const POPUP_HOVER: Color32 = clear_bench::PALETTE.hover;
+    pub const PRIMARY_HOVER: Color32 = clear_bench::PALETTE.accent_hover;
+    pub const DANGER: Color32 = clear_bench::PALETTE.danger;
+    pub const ON_DANGER: Color32 = clear_bench::PALETTE.on_danger;
+    pub const UNDER_DEFINED: Color32 = rgb(0x1d, 0x4f, 0xe0);
+    pub const UNDER_DEFINED_LABEL: Color32 = rgb(0x1d, 0x52, 0xd6);
+    /// A form's preview guides: the depth arrow, a draft's plane and pull, copy numbers.
+    pub const PREVIEW_EDGE: Color32 = rgb(0xd9, 0x7f, 0x00);
+    /// The red of material a form removes, for a hole's ghost at the pointer.
+    pub const PREVIEW_REMOVE_EDGE: Color32 = rgb(0xd0, 0x3a, 0x30);
+    pub const FULLY_DEFINED: Color32 = rgb(0x0b, 0x0d, 0x11);
+    pub const CONSTRUCTION: Color32 = rgb(0x5b, 0x6b, 0x86);
+    pub const DIMENSION: Color32 = rgb(0x1d, 0x52, 0xd6);
+    pub const SKETCH_SHEET: Color32 = rgb(0xf1, 0xf3, 0xf7);
+
+    pub const PALETTE: Palette = clear_bench::PALETTE;
+
+    pub const TITLE_HEIGHT: f32 = clear_bench::SPACING.top_bar_height;
+    pub const OPTIONS_HEIGHT: f32 = clear_bench::SPACING.options_height;
     pub const PALETTE_WIDTH: f32 = 250.0;
-    pub const PANE_WIDTH: f32 = 236.0;
-    pub const COMMAND_LINE_HEIGHT: f32 = 30.0;
+    pub const PANE_WIDTH: f32 = clear_bench::SPACING.side_panel_default_width;
+    pub const COMMAND_LINE_HEIGHT: f32 = clear_bench::SPACING.bottom_bar_height;
     pub const TOOL_HEIGHT: f32 = 23.0;
-    pub const ROW_HEIGHT: f32 = 25.0;
-    pub const CONTROL_HEIGHT: f32 = 28.0;
-    pub const ICON_SIZE: f32 = 16.0;
-    pub const COLUMN_GAP: f32 = 2.0;
-    pub const TOOL_PADDING: f32 = 5.0;
-    pub const GROUP_GAP: f32 = 12.0;
-    pub const BODY_SIZE: f32 = 12.5;
-    pub const TOOL_LABEL_SIZE: f32 = 11.5;
-    pub const SMALL_SIZE: f32 = 10.5;
-    pub const GROUP_LABEL_SIZE: f32 = 9.0;
-    pub const VALUE_SIZE: f32 = 12.0;
-    pub const RADIUS: u8 = 6;
-    pub const FIELD_RADIUS: u8 = 4;
-    pub const TOOL_RADIUS: u8 = 5;
-    pub const FLOATING_RADIUS: u8 = 10;
-    pub const NAV_SHADOW: egui::Shadow = egui::Shadow { offset: [0, 4], blur: 16, spread: 0, color: rgba(0, 0, 0, 77) };
+    pub const ROW_HEIGHT: f32 = clear_bench::SPACING.row_height;
+    pub const CONTROL_HEIGHT: f32 = clear_bench::SPACING.control_height;
+    pub const ICON_SIZE: f32 = clear_bench::SPACING.icon_size;
+    pub const COLUMN_GAP: f32 = 4.0;
+    pub const TOOL_PADDING: f32 = clear_bench::SPACING.tool_padding;
+    pub const GROUP_GAP: f32 = clear_bench::SPACING.group_gap;
+    pub const BODY_SIZE: f32 = clear_bench::TYPOGRAPHY.body;
+    pub const TOOL_LABEL_SIZE: f32 = clear_bench::TYPOGRAPHY.tool_label;
+    pub const SMALL_SIZE: f32 = clear_bench::TYPOGRAPHY.small;
+    pub const GROUP_LABEL_SIZE: f32 = clear_bench::TYPOGRAPHY.group_label;
+    pub const VALUE_SIZE: f32 = clear_bench::TYPOGRAPHY.value;
+    pub const RADIUS: u8 = clear_bench::RADII.control;
+    pub const FIELD_RADIUS: u8 = clear_bench::RADII.field;
+    pub const TOOL_RADIUS: u8 = clear_bench::RADII.tool;
+    pub const FLOATING_RADIUS: u8 = clear_bench::RADII.floating;
+    pub const NAV_SHADOW: egui::Shadow = clear_bench::TOKENS.nav_shadow;
 }
 
 static MODE: AtomicU8 = AtomicU8::new(0);
+
 /// The mode the interface is in.
 pub fn mode() -> Mode {
     match MODE.load(Ordering::Relaxed) {
@@ -195,20 +337,53 @@ pub fn mode() -> Mode {
     }
 }
 
+/// The active token set. A future themes lane can swap this to any registered `Tokens`.
+pub fn tokens() -> &'static Tokens {
+    &clear_bench::TOKENS
+}
+
+/// Stable id of the active theme token set.
+pub fn active_theme_id() -> &'static str {
+    tokens().id
+}
+
+/// Whether the active UI chrome is dark.
+pub fn is_dark() -> bool {
+    tokens().is_dark
+}
+
 /// The active palette.
 pub fn palette() -> &'static Palette {
-    &edit_suite::PALETTE
+    &tokens().palette
+}
+
+/// The active spacing metrics.
+pub fn spacing() -> &'static Spacing {
+    &tokens().spacing
+}
+
+/// The active typography sizes.
+pub fn typography() -> &'static Typography {
+    &tokens().typography
+}
+
+/// The active corner radii.
+pub fn radii() -> &'static Radii {
+    &tokens().radii
 }
 
 /// Switches the mode and restyles `ctx`, so the next frame is drawn in it.
 pub fn set_mode(ctx: &egui::Context, mode: Mode) {
     MODE.store(mode as u8, Ordering::Relaxed);
-    ctx.set_theme(egui::Theme::Dark);
+    ctx.set_theme(if is_dark() { egui::Theme::Dark } else { egui::Theme::Light });
     ctx.all_styles_mut(apply_style);
 }
 
 pub fn chrome() -> Color32 {
     palette().chrome
+}
+pub fn ribbon() -> Color32 {
+    palette().ribbon
 }
 pub fn panel() -> Color32 {
     palette().panel
@@ -218,6 +393,9 @@ pub fn panel_header() -> Color32 {
 }
 pub fn line() -> Color32 {
     palette().line
+}
+pub fn line_faint() -> Color32 {
+    palette().line_faint
 }
 pub fn line_strong() -> Color32 {
     palette().line_strong
@@ -230,6 +408,9 @@ pub fn muted() -> Color32 {
 }
 pub fn accent() -> Color32 {
     palette().accent
+}
+pub fn accent_hover() -> Color32 {
+    palette().accent_hover
 }
 pub fn accent_soft() -> Color32 {
     palette().accent_soft
@@ -251,6 +432,9 @@ pub fn hover() -> Color32 {
 pub fn ok() -> Color32 {
     palette().ok
 }
+pub fn ok_soft() -> Color32 {
+    palette().ok_soft
+}
 pub fn warn() -> Color32 {
     palette().warn
 }
@@ -262,6 +446,24 @@ pub fn warn_soft() -> Color32 {
 }
 pub fn error_soft() -> Color32 {
     palette().error_soft
+}
+pub fn danger() -> Color32 {
+    palette().danger
+}
+pub fn on_danger() -> Color32 {
+    palette().on_danger
+}
+pub fn donate_bg() -> Color32 {
+    palette().donate_bg
+}
+pub fn donate_ink() -> Color32 {
+    palette().donate_ink
+}
+pub fn donate_line() -> Color32 {
+    palette().donate_line
+}
+pub fn form_bg() -> Color32 {
+    palette().form_bg
 }
 pub fn field_bg() -> Color32 {
     palette().field_bg
@@ -316,9 +518,9 @@ pub fn axis_color(axis: crate::document::AxisKind) -> Color32 {
     }
 }
 /// Dimension and witness lines over the modelling space. A light scene takes the blue an
-/// open sketch draws its dimensions in; the light ink is legible on a dark scene only.
+/// open sketch draws its dimensions in; a dark scene uses light ink.
 pub fn dimension_line(dark_scene: bool) -> Color32 {
-    if dark_scene { ink().gamma_multiply(0.7) } else { edit_suite::DIMENSION }
+    if dark_scene { Color32::from_rgb(0xd8, 0xe1, 0xee) } else { edit_suite::DIMENSION }
 }
 /// The session's quiet text: notes, tool lines, the header.
 pub fn terminal_muted() -> Color32 {
@@ -330,13 +532,13 @@ pub fn terminal_line() -> Color32 {
 }
 
 /// Corner radius used by buttons, fields and cards.
-pub const RADIUS: u8 = 4;
+pub const RADIUS: u8 = clear_bench::RADII.control;
 /// Corner radius of windows, menus and popups.
-pub const WINDOW_RADIUS: u8 = 6;
+pub const WINDOW_RADIUS: u8 = clear_bench::RADII.window;
 
-pub const MENU_HEIGHT: f32 = 30.0;
-pub const COMMAND_LINE_HEIGHT: f32 = 32.0;
-/// Keep room for the model and an optional pane in a narrow Edit Suite window.
+pub const MENU_HEIGHT: f32 = clear_bench::SPACING.top_bar_height;
+pub const COMMAND_LINE_HEIGHT: f32 = clear_bench::SPACING.bottom_bar_height;
+/// Keep room for the model and an optional pane in a narrow window.
 pub const COMPACT_WIDTH: f32 = 1100.0;
 pub const ROW_HEIGHT: f32 = 22.0;
 
@@ -403,24 +605,25 @@ fn fonts() -> egui::FontDefinitions {
 }
 
 fn apply_style(style: &mut egui::Style) {
+    let t = typography();
     style.text_styles = [
-        (TextStyle::Small, FontId::new(edit_suite::SMALL_SIZE, FontFamily::Proportional)),
-        (TextStyle::Body, FontId::new(edit_suite::BODY_SIZE, FontFamily::Proportional)),
-        (TextStyle::Button, FontId::new(12.0, FontFamily::Proportional)),
-        (TextStyle::Heading, FontId::new(13.5, semibold())),
-        (TextStyle::Monospace, FontId::new(edit_suite::VALUE_SIZE, FontFamily::Monospace)),
+        (TextStyle::Small, FontId::new(t.small, FontFamily::Proportional)),
+        (TextStyle::Body, FontId::new(t.body, FontFamily::Proportional)),
+        (TextStyle::Button, FontId::new(t.button, FontFamily::Proportional)),
+        (TextStyle::Heading, FontId::new(t.heading, semibold())),
+        (TextStyle::Monospace, FontId::new(t.value, FontFamily::Monospace)),
     ]
     .into();
 
     let spacing = &mut style.spacing;
     spacing.item_spacing = Vec2::new(6.0, 4.0);
-    spacing.button_padding = Vec2::new(8.0, 3.0);
+    spacing.button_padding = Vec2::new(8.0, 4.0);
     spacing.interact_size = Vec2::new(40.0, ROW_HEIGHT);
     spacing.indent = 16.0;
     spacing.icon_width = 14.0;
     spacing.icon_width_inner = 9.0;
-    spacing.menu_margin = Margin::same(4);
-    spacing.window_margin = Margin::same(10);
+    spacing.menu_margin = Margin::same(6);
+    spacing.window_margin = Margin::same(12);
     spacing.combo_width = 120.0;
     spacing.text_edit_width = 160.0;
     spacing.scroll.bar_width = 6.0;
@@ -435,26 +638,21 @@ fn apply_style(style: &mut egui::Style) {
 }
 
 fn visuals() -> egui::Visuals {
-    let p = palette();
-    let mut v = egui::Visuals::dark();
-    let r = CornerRadius::same(edit_suite::RADIUS);
-    let shadow = |blur: u8, offset: i8| egui::Shadow {
-        offset: [0, offset],
-        blur,
-        spread: 0,
-        color: Color32::from_black_alpha(110),
-    };
+    let t = tokens();
+    let p = &t.palette;
+    let mut v = if t.is_dark { egui::Visuals::dark() } else { egui::Visuals::light() };
+    let r = CornerRadius::same(t.radii.control);
     v.override_text_color = None;
     v.panel_fill = p.panel;
-    v.window_fill = edit_suite::POPUP;
-    v.window_stroke = Stroke::new(1.0, edit_suite::CHIP_LINE);
-    v.window_corner_radius = CornerRadius::same(WINDOW_RADIUS);
-    v.window_shadow = shadow(18, 6);
-    v.popup_shadow = shadow(12, 4);
-    v.menu_corner_radius = CornerRadius::same(WINDOW_RADIUS);
+    v.window_fill = p.panel;
+    v.window_stroke = Stroke::new(1.0, p.line_strong);
+    v.window_corner_radius = CornerRadius::same(t.radii.window);
+    v.window_shadow = t.popup_shadow;
+    v.popup_shadow = t.nav_shadow;
+    v.menu_corner_radius = CornerRadius::same(t.radii.window);
     v.extreme_bg_color = p.field_bg;
     v.faint_bg_color = p.panel_header;
-    v.code_bg_color = p.panel_header;
+    v.code_bg_color = p.chip;
     v.hyperlink_color = p.accent;
     v.warn_fg_color = p.warn;
     v.error_fg_color = p.error;
@@ -468,7 +666,7 @@ fn visuals() -> egui::Visuals {
     v.slider_trailing_fill = true;
     v.handle_shape = egui::style::HandleShape::Circle;
     v.resize_corner_size = 10.0;
-    v.weak_text_alpha = 0.6;
+    v.weak_text_alpha = 0.7;
 
     // Hints and secondary labels need opaque ink, not an alpha wash over the field.
     v.weak_text_color = Some(p.muted);
@@ -483,7 +681,7 @@ fn visuals() -> egui::Visuals {
         expansion: 0.0,
     };
     w.inactive = egui::style::WidgetVisuals {
-        weak_bg_fill: p.panel_header,
+        weak_bg_fill: p.chip,
         bg_fill: p.panel_header,
         bg_stroke: Stroke::new(1.0, p.line),
         fg_stroke: Stroke::new(1.0, p.ink),
@@ -509,16 +707,16 @@ fn visuals() -> egui::Visuals {
     w.open = egui::style::WidgetVisuals {
         weak_bg_fill: p.accent_soft,
         bg_fill: p.accent_soft,
-        bg_stroke: Stroke::new(1.0, p.line),
-        fg_stroke: Stroke::new(1.0, p.ink),
+        bg_stroke: Stroke::new(1.0, p.accent),
+        fg_stroke: Stroke::new(1.0, p.selection_ink),
         corner_radius: r,
         expansion: 0.0,
     };
     v
 }
 
-/// egui_dock style matched to the panel chrome: a thin tab strip on the header tone,
-/// no body frame, one-pixel separators that light up in the accent when hovered.
+/// egui_dock style matched to the D1 Clear Bench chrome. Document tabs live in the top
+/// bar, so the center dock's own tab strip is collapsed.
 pub fn dock_style(ctx: &egui::Context) -> egui_dock::Style {
     let p = palette();
     let mut s = egui_dock::Style::from_egui(&ctx.global_style());
@@ -534,11 +732,11 @@ pub fn dock_style(ctx: &egui::Context) -> egui_dock::Style {
     s.separator.color_dragged = p.accent;
 
     s.tab_bar.bg_fill = p.panel_header;
-    s.tab_bar.height = 28.0;
-    s.tab_bar.hline_color = p.line;
+    s.tab_bar.height = 0.0;
+    s.tab_bar.hline_color = Color32::TRANSPARENT;
     s.tab_bar.fill_tab_bar = false;
     s.tab_bar.corner_radius = CornerRadius::ZERO;
-    s.tab_bar.inner_margin = Margin::symmetric(6, 0);
+    s.tab_bar.inner_margin = Margin::ZERO;
 
     let base = egui_dock::TabInteractionStyle {
         outline_color: Color32::TRANSPARENT,
@@ -554,8 +752,8 @@ pub fn dock_style(ctx: &egui::Context) -> egui_dock::Style {
     s.tab.focused = active.clone();
     s.tab.active_with_kb_focus = active.clone();
     s.tab.focused_with_kb_focus = active;
-    s.tab.hline_below_active_tab_name = true;
-    s.tab.spacing = 10.0;
+    s.tab.hline_below_active_tab_name = false;
+    s.tab.spacing = 0.0;
     s.tab.minimum_width = None;
     s.tab.tab_body.inner_margin = Margin::ZERO;
     s.tab.tab_body.stroke = Stroke::NONE;
@@ -598,6 +796,8 @@ mod tests {
     #[test]
     fn names_parse_and_light_is_the_default() {
         assert_eq!(Mode::default(), Mode::Light);
+        assert_eq!(active_theme_id(), "clear_bench");
+        assert!(!is_dark());
         for m in Mode::ALL {
             assert_eq!(Mode::parse(&m.label().to_uppercase()), Some(m));
         }

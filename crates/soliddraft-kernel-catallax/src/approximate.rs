@@ -52,13 +52,48 @@ pub(crate) fn not_yet() -> KernelError {
     crate::gap("Exact work on an approximate body")
 }
 
+fn entity_ids<'a, I: Copy>(
+    keys: impl Iterator<Item = &'a String>,
+    before: Option<&BTreeMap<String, I>>,
+    mut fresh: impl FnMut() -> I,
+) -> BTreeMap<String, I> {
+    keys.map(|key| {
+        let id = before.and_then(|old| old.get(key)).copied().unwrap_or_else(&mut fresh);
+        (key.clone(), id)
+    })
+    .collect()
+}
+
+fn changes<I: Copy>(
+    current: &BTreeMap<String, I>,
+    exact: impl Iterator<Item = I>,
+    before: Option<&BTreeMap<String, I>>,
+) -> EntityChanges<I> {
+    EntityChanges {
+        created: current
+            .iter()
+            .filter(|(key, _)| before.is_none_or(|old| !old.contains_key(*key)))
+            .map(|(_, id)| *id)
+            .collect(),
+        deleted: exact
+            .chain(
+                before
+                    .into_iter()
+                    .flat_map(|old| old.iter().filter(|(key, _)| !current.contains_key(*key)).map(|(_, id)| *id)),
+            )
+            .collect(),
+        ..EntityChanges::default()
+    }
+}
+
 impl Approximate {
-    /// Gives each face, edge and vertex of `outcome` a new interface id and names its
-    /// faces through `parents` and `tags`, as an exact body's faces are named. A blend
-    /// names the picked edge among `selected_edges` when two edges share its name.
+    /// Keeps the numerical parent's ids by definition key and names new faces through
+    /// the exact parents and tags. A blend names the picked edge among `selected_edges`
+    /// when two edges share its name.
     pub(crate) fn new(
         outcome: Arc<NumericalApplicationBody>,
         parents: &[&convert::Ids],
+        before: Option<&Self>,
         tags: &BTreeMap<String, OpTag>,
         selected_edges: &[EdgeId],
         next: &mut u64,
@@ -68,11 +103,16 @@ impl Approximate {
             *next
         };
         let definition = outcome.body().definition();
-        let faces: BTreeMap<_, _> =
-            definition.faces.iter().map(|face| (face.key.clone(), FaceId::from_raw(id()))).collect();
-        let edges = definition.edges.iter().map(|edge| (edge.key.clone(), EdgeId::from_raw(id()))).collect();
+        let faces = entity_ids(definition.faces.iter().map(|face| &face.key), before.map(|b| &b.faces), || {
+            FaceId::from_raw(id())
+        });
+        let edges = entity_ids(definition.edges.iter().map(|edge| &edge.key), before.map(|b| &b.edges), || {
+            EdgeId::from_raw(id())
+        });
         let vertices =
-            definition.vertices.iter().map(|vertex| (vertex.key.clone(), VertexId::from_raw(id()))).collect();
+            entity_ids(definition.vertices.iter().map(|vertex| &vertex.key), before.map(|b| &b.vertices), || {
+                VertexId::from_raw(id())
+            });
         let face_origins = faces
             .iter()
             .map(|(key, face)| {
@@ -82,6 +122,7 @@ impl Approximate {
                     .into_iter()
                     .flatten()
                     .filter_map(|origin| convert::named_origin_for_edges(origin, parents, tags, selected_edges))
+                    .chain(before.and_then(|b| b.face_origins.get(face)).into_iter().flatten().cloned())
                     .collect();
                 named.sort();
                 named.dedup();
@@ -116,20 +157,6 @@ impl Approximate {
                 BodyAccuracy::Approximate { tolerance_mm: decimal(&outcome.body().options().tolerance_mm) }
             }
             Geometry::Imported { .. } => BodyAccuracy::Tolerant,
-        }
-    }
-
-    /// Names the faces this body shares with `before`, the numerical body it was built
-    /// from, as `before` named them. Catallax keeps a face's key through a construction
-    /// that leaves the face in place, such as a hole drilled through it. Those names came
-    /// from the exact parents `before` was built from, which are not parents here.
-    pub(crate) fn keep_names_of(&mut self, before: &Approximate) {
-        for (key, face) in &self.faces {
-            let Some(origins) = before.faces.get(key).and_then(|old| before.face_origins.get(old)) else { continue };
-            let named = self.face_origins.entry(*face).or_default();
-            named.extend(origins.iter().cloned());
-            named.sort();
-            named.dedup();
         }
     }
 
@@ -169,24 +196,39 @@ impl Approximate {
         }
     }
 
-    /// The record of the operation that built this body. No id carries over from the
-    /// exact parents, so their entities are deleted and every entity here is created.
-    pub(crate) fn record(&self, seq: u64, tag: &OpTag, op: OpKind, parents: &[&convert::Ids]) -> HistoryRecord {
-        fn changes<I>(created: Vec<I>, deleted: Vec<I>) -> EntityChanges<I> {
-            EntityChanges { created, deleted, split: Vec::new(), modified: Vec::new() }
-        }
-        let faces = changes(
-            self.faces.values().copied().collect(),
-            parents.iter().flat_map(|p| p.faces.values().copied()).collect(),
-        );
-        let edges = changes(
-            self.edges.values().copied().collect(),
-            parents.iter().flat_map(|p| p.edges.values().copied()).collect(),
-        );
+    /// The exact parents retire their ids. The numerical parent keeps ids for surviving keys.
+    pub(crate) fn record(
+        &self,
+        seq: u64,
+        tag: &OpTag,
+        op: OpKind,
+        parents: &[&convert::Ids],
+        before: Option<&Self>,
+    ) -> HistoryRecord {
+        let mut faces =
+            changes(&self.faces, parents.iter().flat_map(|p| p.faces.values().copied()), before.map(|b| &b.faces));
+        let edges =
+            changes(&self.edges, parents.iter().flat_map(|p| p.edges.values().copied()), before.map(|b| &b.edges));
         let vertices = changes(
-            self.vertices.values().copied().collect(),
-            parents.iter().flat_map(|p| p.vertices.values().copied()).collect(),
+            &self.vertices,
+            parents.iter().flat_map(|p| p.vertices.values().copied()),
+            before.map(|b| &b.vertices),
         );
+        if let Some(before) = before
+            && let (Geometry::Numerical(old), Geometry::Numerical(new)) = (&before.geometry, &self.geometry)
+        {
+            // The through-hole adds an inner loop to each surviving end cap.
+            let old_loops: BTreeMap<_, _> =
+                old.body().definition().faces.iter().map(|face| (&face.key, face.loops.len())).collect();
+            faces.modified = new
+                .body()
+                .definition()
+                .faces
+                .iter()
+                .filter(|face| old_loops.get(&face.key).is_some_and(|count| *count != face.loops.len()))
+                .map(|face| self.faces[&face.key])
+                .collect();
+        }
         // The roles this operation gave its faces, as named when the body was made.
         let face_roles = self
             .faces
@@ -898,7 +940,7 @@ mod tests {
         let options = catallax_app::NumericalOptions::default();
         let sheet = catallax_topology::numerical::build_surface(definition, options, &mut Decider::default()).unwrap();
         let outcome = NumericalApplicationBody::new(sheet, Arc::new(recipe), std::collections::BTreeMap::new());
-        let approximate = Approximate::new(Arc::new(outcome), &[], &BTreeMap::new(), &[], &mut 0);
+        let approximate = Approximate::new(Arc::new(outcome), &[], None, &BTreeMap::new(), &[], &mut 0);
         assert_eq!(approximate.kind(), BodyKind::Sheet);
         assert_eq!(approximate.accuracy(), BodyAccuracy::Approximate { tolerance_mm: "0.01".into() });
         let options = catallax_mesh::MeshOptions::default();
@@ -921,7 +963,7 @@ mod tests {
         let options = catallax_app::NumericalOptions::default();
         let block = catallax_topology::numerical::build(definition, options, &mut Decider::default()).unwrap();
         let outcome = NumericalApplicationBody::new(block, Arc::new(recipe), std::collections::BTreeMap::new());
-        let approximate = Approximate::new(Arc::new(outcome), &[], &BTreeMap::new(), &[], &mut 0);
+        let approximate = Approximate::new(Arc::new(outcome), &[], None, &BTreeMap::new(), &[], &mut 0);
         let (starved, work) = catallax_numbers::with_operation_budget(1, || approximate.topology());
         assert!(work.exhausted, "{work:?}");
         assert!(starved.unwrap_err().to_string().contains("numbers.operation-budget"));
@@ -943,7 +985,7 @@ mod tests {
         let options = catallax_app::NumericalOptions::default();
         let body = catallax_topology::numerical::build(definition, options, &mut Decider::default()).unwrap();
         let outcome = NumericalApplicationBody::new(body, Arc::new(recipe), std::collections::BTreeMap::new());
-        let approximate = Approximate::new(Arc::new(outcome), &[], &BTreeMap::new(), &[], &mut 0);
+        let approximate = Approximate::new(Arc::new(outcome), &[], None, &BTreeMap::new(), &[], &mut 0);
         let topology = approximate.topology().unwrap();
         let top = topology.face(approximate.faces["cap;top"]).unwrap();
         assert!((top.area - 80.0).abs() < 1e-6 && (top.centroid.z - 6.0).abs() < 1e-6, "{top:?}");

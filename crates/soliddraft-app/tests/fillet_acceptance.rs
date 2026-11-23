@@ -563,6 +563,7 @@ fn owner_pocket_rim_at_r2_takes_a_through_hole_along_its_length() {
 
     // An end cap of the boss: one of the two planar faces square to its 76 mm extrusion.
     let topology = part.topology();
+    let edge_names: Vec<_> = topology.edges.iter().map(|edge| part.edge_name(edge.id)).collect();
     let caps: Vec<_> = topology
         .faces
         .iter()
@@ -594,6 +595,33 @@ fn owner_pocket_rim_at_r2_takes_a_through_hole_along_its_length() {
     assert_eq!(made_by(part.doc(), &hole).len(), 4, "the hole's wall is four quarter cylinders");
     assert_eq!(made_by(part.doc(), &fillet), rounds, "the rounds keep their names through the hole");
     standing(&part, OWNER_FACES + 6 + 4, "drilled");
+    let drilled_topology = part.topology();
+    let doc = part.doc().model();
+    let hole_history = doc.kernel().history(doc.body().unwrap()).unwrap().pop().unwrap();
+    assert_eq!(hole_history.op, soliddraft_kernel_api::OpKind::Hole);
+    assert!(
+        topology
+            .edges
+            .iter()
+            .all(|edge| drilled_topology.edge(edge.id).is_some() && !hole_history.edges.mentions(edge.id)),
+        "the drill is clear of every existing rim and edge: {:?}",
+        hole_history.edges
+    );
+    assert_eq!(
+        topology.edges.iter().map(|edge| part.edge_name(edge.id)).collect::<Vec<_>>(),
+        edge_names,
+        "the viewport still names the untouched edges after their original feature"
+    );
+    assert!(
+        topology.vertices.iter().all(|old| drilled_topology.vertices.iter().any(|new| new.id == old.id)
+            && !hole_history.vertices.mentions(old.id)),
+        "the drill is clear of every existing vertex: {:?}",
+        hole_history.vertices
+    );
+    assert_eq!(hole_history.faces.created.len(), 4, "only the hole wall is new");
+    let modified: BTreeSet<_> = hole_history.faces.modified.into_iter().collect();
+    assert_eq!(modified, caps.iter().map(|cap| cap.id).collect(), "only the end caps get new trims");
+    assert!(hole_history.faces.deleted.is_empty() && hole_history.faces.split.is_empty());
     let volume = |part: &Part| {
         let doc = part.doc();
         let feature = doc.features.iter().find(|f| f.name == hole).unwrap().id;
@@ -619,6 +647,17 @@ fn owner_pocket_rim_at_r2_takes_a_through_hole_along_its_length() {
     standing(&part, OWNER_FACES + 6 + 4, "reopened");
     assert_eq!(made_by(part.doc(), &fillet), rounds, "the rounds keep their names through save and reopen");
     assert_eq!(made_by(part.doc(), &hole).len(), 4);
+    let fillet_prefix = format!("{fillet} · ");
+    assert_eq!(
+        part.topology()
+            .edges
+            .iter()
+            .map(|edge| part.edge_name(edge.id))
+            .filter(|name| name.starts_with(&fillet_prefix))
+            .collect::<Vec<_>>(),
+        edge_names.iter().filter(|name| name.starts_with(&fillet_prefix)).cloned().collect::<Vec<_>>(),
+        "the reopened viewport still assigns the rim edges to the fillet"
+    );
     if let (Some(before), Some(after)) = (at_drilled, volume(&part)) {
         assert!((before - after).abs() < before * 1e-9, "the reopened part is the saved one: {before} != {after}");
     }

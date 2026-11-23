@@ -551,7 +551,8 @@ impl CatallaxKernel {
         step: Value,
     ) -> KernelResult<OpResult> {
         let (mut state, evaluated) = self.evaluate(state, op, inputs, context, step)?;
-        let Evaluated { app, key, handed, names, steps, mut history, parents, seq, result } = evaluated;
+        let Evaluated { app, key, handed, names, steps, mut history, parents, approximate_parent, seq, result } =
+            evaluated;
         // Catallax names faces by recipe step; the interface uses the caller's tag.
         let mut tags: BTreeMap<String, OpTag> = names
             .into_iter()
@@ -582,14 +583,10 @@ impl CatallaxKernel {
                 if outcome.body().definition().faces.is_empty() {
                     return Err(KernelError::Unsupported(NOTHING_LEFT.into()));
                 }
-                let mut approximate =
-                    approximate::Approximate::new(outcome, &parent_ids, &tags, selected_edges, &mut state.next);
-                // A numerical input, such as the body a hole is drilled in, named its faces.
-                let before = inputs.iter().find_map(|body| state.bodies.get(body)?.approximate.clone());
-                if let Some(before) = before {
-                    approximate.keep_names_of(&before);
-                }
-                let record = approximate.record(seq, tag, op, &parent_ids);
+                let before = approximate_parent.as_deref();
+                let approximate =
+                    approximate::Approximate::new(outcome, &parent_ids, before, &tags, selected_edges, &mut state.next);
+                let record = approximate.record(seq, tag, op, &parent_ids, before);
                 history.insert(seq, record.clone());
                 let body = BodyId::from_raw(state.id());
                 state.bodies.insert(
@@ -722,7 +719,7 @@ impl CatallaxKernel {
         {
             return Err(approximate::not_yet());
         }
-        let reads_approximate = inputs.iter().any(|body| approximate_of(body).is_some());
+        let approximate_parent = inputs.iter().find_map(|body| approximate_of(body).cloned());
         let mut steps = BTreeMap::new();
         let mut history = BTreeMap::new();
         let mut parents = Vec::new();
@@ -775,7 +772,7 @@ impl CatallaxKernel {
         );
         // An approximate input never yields a body passed off as exact.
         let built = built.and_then(|built| match built.0 {
-            Outcome::Exact(_) if reads_approximate => Err(approximate::not_yet()),
+            Outcome::Exact(_) if approximate_parent.is_some() => Err(approximate::not_yet()),
             _ => Ok(built),
         });
         // A build made here is kept for hand-over outside the lock; an offered one is not.
@@ -797,7 +794,7 @@ impl CatallaxKernel {
             state.fresh += 1;
         }
         let (app, names, key, handed) = built?;
-        Ok((state, Evaluated { app, key, handed, names, steps, history, parents, seq, result }))
+        Ok((state, Evaluated { app, key, handed, names, steps, history, parents, approximate_parent, seq, result }))
     }
 
     /// Stores a Catallax-native step that reads the solid `base` and builds the chain.
@@ -882,6 +879,7 @@ struct Evaluated {
     steps: BTreeMap<u64, Value>,
     history: BTreeMap<u64, HistoryRecord>,
     parents: Vec<Arc<Solid>>,
+    approximate_parent: Option<Arc<approximate::Approximate>>,
     seq: u64,
     result: String,
 }

@@ -210,6 +210,8 @@ fn field(
     }
     let response = ui.add(edit);
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, label));
+    #[cfg(target_arch = "wasm32")]
+    crate::web::show_visible_control(ui, label, response.rect);
     if response.gained_focus() {
         response.scroll_to_me(None);
     }
@@ -562,6 +564,8 @@ fn contents(ui: &mut egui::Ui, state: &mut AppState) {
         let filter =
             ui.add(egui::TextEdit::singleline(&mut tab.filter).hint_text("Filter parameters").desired_width(122.0));
         filter.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, "Filter parameters"));
+        #[cfg(target_arch = "wasm32")]
+        crate::web::show_control("Filter parameters", filter.rect);
         if ui.add_enabled(state.doc.undo_label().is_some(), egui::Button::new("Undo")).clicked() {
             history = Some(AppAction::Undo);
         }

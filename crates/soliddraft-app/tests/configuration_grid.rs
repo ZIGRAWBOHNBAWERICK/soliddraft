@@ -92,6 +92,10 @@ fn renaming_a_global_keeps_case_distinct_configuration_bindings() {
             json!({ "configuration": "Thin", "name": name, "expression": expression }),
         );
     }
+    if let Some(dir) = std::env::var_os("SOLIDDRAFT_BROWSER_FIXTURES") {
+        std::fs::write(PathBuf::from(dir).join("formula-case-distinct.dwprt"), state.doc.model().to_bytes().unwrap())
+            .unwrap();
+    }
     let field = Field::Name("Plate".into());
     values_tab::apply(&mut state, ValuesAction::Commit(field.clone(), "Other".into()));
     assert!(state.values.error(&field).is_none(), "{:?}", state.values.error(&field));

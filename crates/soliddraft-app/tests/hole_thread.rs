@@ -589,6 +589,10 @@ fn hiding_a_body_in_a_display_state_hides_its_thread_marks() {
     states.put(hidden).unwrap();
     states.select(None, Some(id)).unwrap();
     doc.change_display_states(states).unwrap();
+    if let Some(dir) = std::env::var_os("SOLIDDRAFT_BROWSER_FIXTURES") {
+        std::fs::write(std::path::PathBuf::from(dir).join("thread-hidden.dwprt"), doc.model().to_bytes().unwrap())
+            .unwrap();
+    }
     settle(&mut app);
     let image = case.frame(&mut app, "hidden");
     let after = thread_blue(&app, &image);

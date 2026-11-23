@@ -58,6 +58,12 @@ fn drill(doc: &mut Document, params: HoleParams) -> u64 {
     id
 }
 
+fn browser_fixture(name: &str, doc: &Document) {
+    if let Some(dir) = std::env::var_os("SOLIDDRAFT_BROWSER_FIXTURES") {
+        std::fs::write(std::path::PathBuf::from(dir).join(name), doc.model().to_bytes().unwrap()).unwrap();
+    }
+}
+
 #[test]
 fn parameter_grid_edits_rebuild_a_blind_wizard_hole() {
     use soliddraft_app::state::AppState;
@@ -65,22 +71,25 @@ fn parameter_grid_edits_rebuild_a_blind_wizard_hole() {
 
     let mut doc = ribbon::plate();
     let before = volume(&doc);
-    let mut wizard = HoleWizardSpec::new(HoleStandard::Iso, HoleType::Simple);
+    let mut wizard = HoleWizardSpec::new(HoleStandard::Iso, HoleType::StraightTap);
     wizard.end_condition = HoleEndCondition::Blind { depth: 10.0 };
-    let params = HoleParams {
+    let mut params = HoleParams {
         face: Some(plate_face(&doc, Vec3::Z)),
         tip: HoleTip::Flat,
         wizard: Some(wizard),
         ..Default::default()
     };
+    params.apply_wizard_defaults();
+    params.tip = HoleTip::Flat;
     let name = drill(&mut doc, params);
+    browser_fixture("wizard-blind-depth.dwprt", &doc);
     let field = Field::Cell(format!("{}.Depth", doc.feature(name).unwrap().name), 0);
     let mut state = AppState::new(doc);
     for (input, depth) in [("5 mm", 5.0), ("=3 mm + 4 mm", 7.0)] {
         values_tab::apply(&mut state, ValuesAction::Commit(field.clone(), input.into()));
         assert!(state.values.error(&field).is_none(), "{:?}", state.values.error(&field));
         let removed = before - volume(&state.doc);
-        let expected = std::f64::consts::PI * 3.3_f64.powi(2) * depth;
+        let expected = std::f64::consts::PI * 2.5_f64.powi(2) * depth;
         assert!((removed - expected).abs() < 1e-4, "{input} removed {removed} mm³, expected {expected}");
     }
 }
@@ -122,6 +131,7 @@ fn tapped_surface_offset_is_called_out_as_blind() {
     params.apply_wizard_defaults();
     params.tip = HoleTip::Flat;
     drill(&mut doc, params);
+    browser_fixture("wizard-tapped-offset.dwprt", &doc);
     let walls = doc.model().threaded_walls();
     assert_eq!(walls.len(), 1);
     assert_eq!(walls[0].depth(), Some(15.0));
@@ -132,8 +142,10 @@ fn tapped_surface_offset_is_called_out_as_blind() {
 #[test]
 fn a_legacy_hole_keeps_its_edited_position_pattern_after_reopen() {
     let mut doc = ribbon::plate();
-    let params = HoleParams { face: Some(plate_face(&doc, Vec3::Z)), ..Default::default() };
+    let params =
+        HoleParams { face: Some(plate_face(&doc, Vec3::Z)), points: vec![P2::new(-10.0, -10.0)], ..Default::default() };
     let id = drill(&mut doc, params);
+    browser_fixture("wizard-legacy-positions.dwprt", &doc);
     let old = doc.model().to_bytes().unwrap();
     let reopened = soliddraft_model::Document::from_bytes(&old, soliddraft_app::kernel()).unwrap();
     let mut app = launch(Document::from_model(reopened), STANDARD);

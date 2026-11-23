@@ -58,11 +58,6 @@ impl ExactParts {
             bom: self.bom.clone(),
         }
     }
-
-    /// True when the assembly has an exploded view.
-    pub fn has_exploded(&self) -> bool {
-        self.exploded
-    }
 }
 
 /// The placements counted on one BOM row: a part document in the configuration it shows,

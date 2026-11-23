@@ -1,0 +1,25 @@
+name: Bounded Rust toolchain setup
+description: Reuse an installed toolchain or install it with a timeout and retries
+inputs:
+  channel:
+    required: true
+    description: Rust toolchain channel or version
+  components:
+    required: false
+    default: ''
+    description: Comma-separated Rust components
+  targets:
+    required: false
+    default: ''
+    description: Comma-separated Rust targets
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        CHANNEL: ${{ inputs.channel }}
+        COMPONENTS: ${{ inputs.components }}
+        TARGETS: ${{ inputs.targets }}
+      run: |
+        if command -v python3 >/dev/null 2>&1; then python3 ci/install-rust-toolchain.py "$CHANNEL" "$COMPONENTS" "$TARGETS" "Rust toolchain $CHANNEL"
+        else python ci/install-rust-toolchain.py "$CHANNEL" "$COMPONENTS" "$TARGETS" "Rust toolchain $CHANNEL"; fi

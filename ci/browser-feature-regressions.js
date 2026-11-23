@@ -83,10 +83,6 @@ async function until(read, accept, message) {
   } while (Date.now() < end);
   throw new Error(`${message}. Last value ${JSON.stringify(last)}`);
 }
-async function click(name) {
-  const at = (await until(controls, value => value?.[name], `Missing ${name}`))[name];
-  await clickAt(at);
-}
 async function clickAt(at) {
   await page.eval(`featureClick(${JSON.stringify(at)})`);
   await page.wait(300);
@@ -101,22 +97,34 @@ async function command(label, id) {
   await page.wait(300);
 }
 async function replace(name, value) {
-  await click(name);
+  const locate = async () => (await until(controls, controls => controls?.[name], `Missing ${name}`))[name];
+  await clickAt(await locate());
+  // Focusing the field can scroll it, so locate it again before typing.
+  const at = await locate();
+  await page.eval(`document.getElementById('soliddraft').dispatchEvent(new MouseEvent('mousemove', {
+    clientX: ${at.x}, clientY: ${at.y}, bubbles: true
+  }))`);
+  await clickAt(at);
   await page.press('Control+a');
+  await page.wait(400);
   await page.press('Backspace');
-  await page.wait(250);
+  await page.wait(400);
   if (value.length === 1) await page.press(value);
   else await page.type(value);
-  await page.wait(550);
+  await page.wait(800);
   await page.press('Enter');
-  await page.wait(300);
+  await page.wait(950);
 }
-async function parameters(filter) {
+async function parameters() {
   await command('Parameters', 'configuration_grid');
   await until(controls, value => value?.['Filter parameters'], 'The parameters pane did not open');
   // Expand the pane so its rows have room below the new-global controls.
   await clickAt({ x: 264, y: 759 });
-  await replace('Filter parameters', filter);
+  await until(controls, value => value?.['Filter parameters']?.y < 300, 'The expanded parameters pane did not open');
+}
+async function closeParameters() {
+  await clickAt({ x: 282, y: 35 });
+  await until(controls, value => !(value?.['Filter parameters']?.y < 300), 'The expanded parameters pane stayed open');
 }
 async function open(name) {
   await page.eval(`(async () => {
@@ -154,8 +162,9 @@ async function makeDrawing() {
 switch (scenario) {
   case 'depth': {
     await open('wizard-blind-depth.dwprt');
-    await parameters('Hole1.Depth');
+    await parameters();
     await replace('Default Hole1.Depth', '5');
+    await closeParameters();
     await until(() => shown('shown_build'), value => value && !value.pending && !value.reading, 'Edited part is still building');
     const stored = await save();
     const hole = stored.features.find(f => f.kind.type === 'hole');
@@ -182,8 +191,10 @@ switch (scenario) {
   }
   case 'formula': {
     await open('formula-case-distinct.dwprt');
-    await parameters('Plate');
+    await parameters();
     await replace('Name Plate', 'Other');
+    await until(controls, value => value?.['Name Other'], 'The global rename did not commit');
+    await closeParameters();
     const stored = await save();
     check(stored.values.entries.some(entry => entry.name === 'Other'), 'The global rename did not commit');
     const overrides = stored.configurations.rows.find(row => row.name === 'Thin').overrides;

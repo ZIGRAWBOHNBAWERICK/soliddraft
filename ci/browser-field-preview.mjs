@@ -25,7 +25,7 @@
 //
 // The app draws into one canvas and takes only trusted input: keys and clicks sent as the
 // browser's own, through the DevTools protocol. The canvas has no text to read, so the check
-// reads what the frame drew through the read-only `shown_viewport`, `shown_marks`,
+// reads what the frame drew through the read-only `shown_first_part_frame`,
 // `shown_print_check` and `shown_controls` exports. The Open tile sits at a fixed point of
 // a 1400 x 813 page; commands run through the command palette by name. The fixtures are saved
 // without display data, so each first display is made in the page.
@@ -275,10 +275,11 @@ async function open(v, label, file) {
   await v.load();
   await v.choose(file, () => v.click(OPEN));
   await v.ready(label);
-  const viewport = await until(v, label, 'shown_viewport', shown => shown.triangles > 0);
-  const marks = await shown(v, 'shown_marks');
-  await v.shot(`${label}-first-display`);
-  return { viewport, marks };
+  const first = await shown(v, 'shown_first_part_frame');
+  check(first?.viewport.triangles > 0, `${label}: the first viewport frame drew no triangles: ${JSON.stringify(first)}`);
+  check(first.viewport.pending === false, `${label}: the first viewport frame still owed a build`);
+  await v.shot(`${label}-opened`);
+  return first;
 }
 
 // Runs the STL command and waits for the Print check window's outcome.
@@ -327,7 +328,7 @@ async function main() {
   const v = await browser.visitor();
   step('load the site');
   await v.load();
-  for (const name of ['shown_viewport', 'shown_marks', 'shown_print_check', 'shown_controls']) {
+  for (const name of ['shown_first_part_frame', 'shown_print_check', 'shown_controls']) {
     check(await v.eval(`typeof window.wasmBindings.${name} === 'function'`), `the build has no ${name} export`);
   }
 

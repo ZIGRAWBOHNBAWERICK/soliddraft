@@ -572,6 +572,7 @@ impl ViewportState {
         crate::web::show_viewport(serde_json::json!({
             "label": unproved.then_some("unproved preview"),
             "triangles": doc.display_body().and_then(|body| doc.meshes.get(&body)).map_or(0, |mesh| mesh.indices.len() / 3),
+            "pending": doc.proof_pending(),
         }));
         if scene.axes.contains(&true) {
             self.paint_origin_axes(&painter, scene.reach, rect, scene.axes);

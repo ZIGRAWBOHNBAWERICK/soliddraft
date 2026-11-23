@@ -139,20 +139,17 @@ try {
   };
 
   await until('start page', () => evaluate("document.querySelector('#status.hidden') !== null"));
-  // The upload returns before the worker opens the part. Wait for the opened
-  // document and its proof before sending the drawing shortcut.
+  // New drawing asks for the part, then opens Drawing options after the worker finishes.
   await evaluate(`document.addEventListener('soliddraft-feedback', event => {
     const detail = JSON.parse(event.detail);
     if (detail.type === 'document') window.annotationTestDocument = detail;
   })`);
-  await open(part, () => key('o', 'KeyO', 79, 2, 'o'));
+  await open(part, () => click([484, 147]));
   await until('proved bracket', () => evaluate(`(() => {
     const build = JSON.parse(window.wasmBindings.shown_build() || 'null');
     return window.annotationTestDocument?.extension === '.dwprt'
       && window.annotationTestDocument?.count === 12 && build && !build.pending;
   })()`), 25_000);
-  await click([122, 15]); // File
-  await click([190, 250]); // New drawing from part
   await until('drawing options', () => evaluate(`Boolean(
     JSON.parse(window.wasmBindings.shown_controls())['Drawing options']
   )`), 25_000);

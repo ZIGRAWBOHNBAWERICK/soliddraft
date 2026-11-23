@@ -105,7 +105,9 @@ async function command(label, id) {
 async function replace(name, value) {
   await click(name);
   await page.press('Control+a');
-  await page.type(value);
+  await page.press('Backspace');
+  if (value.length === 1) await page.press(value);
+  else await page.type(value);
   await page.press('Enter');
 }
 async function parameters(filter) {
@@ -154,7 +156,7 @@ switch (scenario) {
   case 'depth': {
     await open('wizard-blind-depth.dwprt');
     await parameters('Hole1.Depth');
-    await replace('Default Hole1.Depth', '5 mm');
+    await replace('Default Hole1.Depth', '5');
     await until(() => shown('shown_build'), value => value && !value.pending && !value.reading, 'Edited part is still building');
     const text = await callout();
     check(text === 'M6x1-6H DEEP 5', `The edited hole reads ${text}`);

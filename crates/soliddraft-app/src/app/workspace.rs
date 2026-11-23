@@ -435,7 +435,11 @@ impl SolidDraftApp {
                 self.state.chat.preview = None;
                 let n = doc.features.len();
                 self.state.scan = Default::default();
-                self.state.doc = doc;
+                if std::mem::take(&mut self.state.open_in_new_tab) {
+                    self.open_parts.park_active(&mut self.state, doc);
+                } else {
+                    self.state.doc = doc;
+                }
                 match saved {
                     Some(saved) => self.state.remember_opened_revision(saved),
                     None => self.state.remember_revision(),
@@ -461,6 +465,7 @@ impl SolidDraftApp {
             }
             Err(e) => {
                 self.state.drawing_after_open = false;
+                self.state.open_in_new_tab = false;
                 self.state.note(e, NoteKind::Error);
             }
         }

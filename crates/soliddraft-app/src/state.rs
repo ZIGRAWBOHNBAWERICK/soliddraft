@@ -1390,6 +1390,9 @@ pub struct AppState {
     pub start: Option<crate::start_page::StartPage>,
     /// New drawing asked for a part file: once it opens, the drawing setup starts.
     pub drawing_after_open: bool,
+    /// The + button asked for an existing file: a part that opens next takes a new tab
+    /// and leaves the active part open beside it.
+    pub open_in_new_tab: bool,
     actions: Vec<AppAction>,
 }
 
@@ -1591,6 +1594,7 @@ impl AppState {
             recovery: None,
             start: None,
             drawing_after_open: false,
+            open_in_new_tab: false,
             actions: Vec::new(),
         }
     }

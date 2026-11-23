@@ -293,5 +293,19 @@ fn d1_build_edit_save_reopen_and_feature_on_top_round_trip() {
         let v2 = app.state().state.doc.kernel().mass_properties(body2).unwrap().volume;
         let expected = 72_000.0 + std::f64::consts::PI * 100.0 * 10.0;
         assert!((v2 - expected).abs() < 1e-3, "volume after boss on top: {v2} vs {expected}");
+
+        // 6. Open the saved file the way + > Open Existing File does: it takes a new tab
+        // and the part with the boss stays open beside it.
+        let tabs = app.state().open_parts.total();
+        app.state_mut().state.open_in_new_tab = true;
+        app.state_mut().state.push(AppAction::Open(Some(path.clone())));
+        app.run_steps(10);
+        ribbon::until(app, "part in the new tab settles", |app| !app.state().state.doc.proof_pending());
+        assert_eq!(app.state().open_parts.total(), tabs + 1, "the file opened in a new tab");
+        assert!(!app.state().state.open_in_new_tab, "the request is spent");
+        assert_eq!(app.state().state.doc.features.len(), 1, "the new tab shows the saved part");
+        let parked = app.state().open_parts.before.last().expect("the earlier part is parked");
+        assert_eq!(parked.doc.features.len(), 2, "the part with the boss kept its unsaved feature");
+        assert!(parked.doc.dirty);
     });
 }

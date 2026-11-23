@@ -100,6 +100,22 @@ impl OpenParts {
         self.next_number = self.next_number.max(self.total()) + 1;
         let name = format!("Part{}", self.next_number);
         let new_doc = Document::new(&name, crate::kernel());
+        state.start = None;
+        state.editor = None;
+        state.sketch = None;
+        state.chat.preview = None;
+        state.import_dialog = None;
+        state.scan = Default::default();
+        self.park_active(state, new_doc);
+        crate::drawing::show_part_tab(dock);
+        state.drawing.active = false;
+        state.assembly.active = false;
+        state.note(format!("Opened new tab {name}"), NoteKind::Info);
+    }
+
+    /// Parks the active part and its view, and makes `new_doc` the active part in a new
+    /// tab at the end of the strip. The caller closes any editor or sketch first.
+    pub fn park_active(&mut self, state: &mut AppState, new_doc: Document) {
         let mut new_viewport = ViewportState::default();
         new_viewport.preset = state.viewport.preset;
         new_viewport.references = state.viewport.references;
@@ -108,21 +124,10 @@ impl OpenParts {
         new_viewport.display = state.viewport.display;
         new_viewport.camera.fit_framed(None);
 
-        state.start = None;
-        state.editor = None;
-        state.sketch = None;
-        state.chat.preview = None;
-        state.import_dialog = None;
-        state.scan = Default::default();
-
         let old_doc = std::mem::replace(&mut state.doc, new_doc);
         let old_vp = std::mem::replace(&mut state.viewport, new_viewport);
         self.before.push(ParkedPart { doc: old_doc, viewport: old_vp });
         self.before.append(&mut self.after);
-        crate::drawing::show_part_tab(dock);
-        state.drawing.active = false;
-        state.assembly.active = false;
-        state.note(format!("Opened new tab {name}"), NoteKind::Info);
     }
 
     /// Switches to the part tab at `index`.
@@ -647,7 +652,7 @@ fn document_tabs(ui: &mut egui::Ui, state: &mut AppState, dock: &mut DockState<T
     let parts = open_parts.list(&state.doc);
     for (title, dirty, is_current, idx) in parts {
         let active = part_active && is_current;
-        match tab_pill(ui, Icon::Extrude, &title, dirty, active) {
+        match tab_pill(ui, idx, Icon::Extrude, &title, dirty, active) {
             TabClick::Select => action = Some(TabAction::SelectPart(idx)),
             TabClick::Close => action = Some(TabAction::ClosePart(idx)),
             TabClick::None => {}
@@ -656,7 +661,7 @@ fn document_tabs(ui: &mut egui::Ui, state: &mut AppState, dock: &mut DockState<T
 
     if let Some(session) = state.assembly.session.as_ref() {
         let title = format!("{}.dwasm", session.doc.assembly().name);
-        match tab_pill(ui, Icon::Assembly, &title, session.doc.is_dirty(), asm_active) {
+        match tab_pill(ui, usize::MAX - 1, Icon::Assembly, &title, session.doc.is_dirty(), asm_active) {
             TabClick::Select => action = Some(TabAction::SelectAssembly),
             TabClick::Close => action = Some(TabAction::CloseAssembly),
             TabClick::None => {}
@@ -665,7 +670,7 @@ fn document_tabs(ui: &mut egui::Ui, state: &mut AppState, dock: &mut DockState<T
 
     if let Some(session) = state.drawing.session.as_ref() {
         let title = format!("{}.dwdrw", session.title());
-        match tab_pill(ui, Icon::Sheet, &title, session.doc.dirty || session.has_issues(), drw_active) {
+        match tab_pill(ui, usize::MAX, Icon::Sheet, &title, session.doc.dirty || session.has_issues(), drw_active) {
             TabClick::Select => action = Some(TabAction::SelectDrawing),
             TabClick::Close => action = Some(TabAction::CloseDrawing),
             TabClick::None => {}
@@ -715,6 +720,8 @@ fn document_tabs(ui: &mut egui::Ui, state: &mut AppState, dock: &mut DockState<T
             }
             ui.separator();
             if ui.button("Open Existing File…").clicked() {
+                // A part opened from here takes a new tab; the active part stays open.
+                state.open_in_new_tab = true;
                 if let Some(cmd) = commands::get("open") {
                     state.run_command(cmd);
                 }
@@ -770,7 +777,8 @@ enum TabClick {
     Close,
 }
 
-fn tab_pill(ui: &mut egui::Ui, icon: Icon, title: &str, dirty: bool, active: bool) -> TabClick {
+/// One document tab. `slot` keeps the ids of two tabs with the same file name apart.
+fn tab_pill(ui: &mut egui::Ui, slot: usize, icon: Icon, title: &str, dirty: bool, active: bool) -> TabClick {
     let font = if active { theme::font_semibold(12.0) } else { theme::font_medium(12.0) };
     let ink = if active { theme::ink() } else { theme::muted() };
     let galley = ui.painter().layout_no_wrap(title.to_owned(), font, ink);
@@ -781,10 +789,10 @@ fn tab_pill(ui: &mut egui::Ui, icon: Icon, title: &str, dirty: bool, active: boo
     let close_rect = Rect::from_center_size(pos2(rect.right() - 12.0, rect.center().y), vec2(16.0, 16.0));
     let main_rect = Rect::from_min_max(rect.min, pos2(close_rect.left() - 2.0, rect.bottom()));
 
-    let main_resp = ui.interact(main_rect, ui.id().with(("doc_tab", title)), Sense::click());
+    let main_resp = ui.interact(main_rect, ui.id().with(("doc_tab", slot)), Sense::click());
     main_resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, active, title));
 
-    let close_resp = ui.interact(close_rect, ui.id().with(("doc_tab_close", title)), Sense::click());
+    let close_resp = ui.interact(close_rect, ui.id().with(("doc_tab_close", slot)), Sense::click());
     close_resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, format!("Close {title}")));
 
     let hovered = main_resp.hovered() || close_resp.hovered();

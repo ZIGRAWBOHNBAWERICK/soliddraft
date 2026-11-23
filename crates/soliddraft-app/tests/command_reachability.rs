@@ -223,6 +223,7 @@ fn file_contexts(dir: &std::path::Path, pending: &mut BTreeSet<&str>) {
     find_and_dispatch(&mut state, pending);
     tool(&mut state, "make_assembly", json!({}));
     find_and_dispatch(&mut state, pending);
+    tool(&mut state, "assembly_save", json!({"path":dir.join("rig.dwasm")}));
     tool(&mut state, "assembly_make_drawing", json!({}));
     find_and_dispatch(&mut state, pending);
 

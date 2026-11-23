@@ -25,7 +25,7 @@
 // the page asks which one to open, the visitor chooses the parent, and it opens with the
 // child and its parts found. Then one later feature on top: the tray inserted in the
 // parent the choice opened. Then the same upload again with the choice left unanswered,
-// and the child opened alone through File > Open: the old choice is gone, so it cannot
+// and the child opened alone through the start page's Open tile, which the choice window leaves uncovered: the old choice is gone, so it cannot
 // open over the child.
 //
 // BEARING is ci/fixtures/universal-joint/bearing.dwasm: the rig with its Universal Joint
@@ -71,9 +71,6 @@ fs.mkdirSync(downloads, { recursive: true });
 const SIZE = { width: 1400, height: 813 };
 const NEW_ASSEMBLY = [304, 145];
 const OPEN = [663, 147];
-// The File menu, and its Open item once the menu is open.
-const FILE_MENU = [122, 15];
-const FILE_OPEN = [132, 68];
 // The tray is 60 x 40 x 20 mm, open at the top, with 2 mm walls: its floor is 2 mm up.
 const FLOOR = 2;
 
@@ -547,7 +544,7 @@ async function chosenAssembly(v, saved, files, placed) {
   await v.load();
   await v.choose([child, parent, ...files], () => v.click(OPEN));
   await v.assembly('choosing again', s => !s.open && !s.opening && s.choosing?.length === 2);
-  await v.choose([child, ...files], async () => { await v.click(FILE_MENU); await v.click(FILE_OPEN); });
+  await v.choose([child, ...files], () => v.click(OPEN));
   await v.assembly('child alone', s => loaded(s) && s.file === 'child.dwasm' && s.components.every(c => c.freshness !== 'unchecked'));
   await v.settle(1000);
   const replaced = JSON.parse(await v.eval(`window.wasmBindings.shown_assembly()`));

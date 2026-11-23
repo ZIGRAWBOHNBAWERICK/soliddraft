@@ -24,7 +24,7 @@ use soliddraft_model::thread::HoleThread;
 use ux_tools::{Case, STANDARD, launch, settle};
 
 fn bar(app: &App) -> Rect {
-    egui::PanelState::load(&app.ctx, egui::Id::new("options_bar")).unwrap().outer_rect
+    soliddraft_app::options_bar::shown_rect(&app.ctx).expect("the options bar is drawn")
 }
 
 fn click_bar(app: &mut App, label: &str) {
@@ -39,6 +39,7 @@ fn more(app: &mut App) {
 }
 
 fn click(app: &mut App, label: &str) {
+    ribbon::open_form_sheet_for(app, label);
     let rect = app.get_by_label(label).rect();
     ribbon::click_at(app, rect.center());
     settle(app);
@@ -47,6 +48,9 @@ fn click(app: &mut App, label: &str) {
 /// Opens the form's choice that shows `shown`, on the bar or in its sheet, and picks
 /// `entry` in its list.
 fn choose(app: &mut App, shown: &str, entry: &str) {
+    if !app.query_all(egui_kittest::kittest::by()).any(|node| node.value().as_deref() == Some(shown)) {
+        more(app);
+    }
     let rect = app
         .query_all(egui_kittest::kittest::by())
         .filter(|node| node.value().as_deref() == Some(shown))

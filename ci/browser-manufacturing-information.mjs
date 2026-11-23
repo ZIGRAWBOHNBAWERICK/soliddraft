@@ -43,7 +43,7 @@ fs.mkdirSync(downloads, { recursive: true });
 const SIZE = { width: 1400, height: 813 };
 const NEW_PART = [124, 143];
 const OPEN = [663, 147];
-const ACCEPT_IMPORT = [56, 147];
+const ACCEPT_IMPORT = [57, 154];
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 function check(value, message) { if (!value) throw new Error(message); }
@@ -81,7 +81,7 @@ const NOTES = { general_tolerance: 'ISO 2768-m', material: '6061-T6', notes: ['B
 // The tapped hole: through the 5 mm plate at x 50, y 22, between two mounting holes. The
 // form's Tapped takes the coarse thread whose tap drill is nearest the drawn Ø6.6: M8.
 const TAPPED_AT = [50, 22, 5];
-const THREAD = ['Hole1 thread', 'M8x1.25-6H THRU', [[C(49.9, 22, 2.5)]]];
+const THREAD = ['Hole1 thread', 'M8x1.25-6H THRU', [[C(49.8, 22.1, 2.5)]]];
 // The tapped hole removes material from the datum face, moving that face's centroid.
 const TAPPED_A = P(29.681, 19.812, 0);
 const TAPPED_EXPECTED = EXPECTED.map(([name, callout, features]) => [name, callout,

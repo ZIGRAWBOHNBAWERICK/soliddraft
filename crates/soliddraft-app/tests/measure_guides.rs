@@ -192,7 +192,7 @@ fn the_sketch_switches_sit_in_the_options_bar_in_one_row() {
     open_line_tool(&mut h, id);
     // They covered the top of a fitted sketch in the viewport's corner; the bar holds
     // them now, beside the sketch's name. The palette has a Snap to grid tool of its own.
-    let bar = egui::PanelState::load(&h.ctx, egui::Id::new("options_bar")).unwrap().outer_rect;
+    let bar = soliddraft_app::options_bar::shown_rect(&h.ctx).expect("the options bar is drawn");
     let view = h.state().state.viewport.rect;
     let row = |label: &str| {
         assert!(h.query_all_by_label(label).all(|n| !view.contains(n.rect().center())), "no {label} over the sketch");

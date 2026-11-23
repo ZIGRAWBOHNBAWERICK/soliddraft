@@ -205,6 +205,9 @@ pub struct ViewportState {
     pick: Arc<Mutex<PickSample>>,
     cube_hover: Option<StandardView>,
     navigation_bar: navigation_bar::NavigationBar,
+    /// The height the options bar covers at the viewport's top while it floats there.
+    /// The view cube sits below it.
+    pub top_inset: f32,
     /// Shows feature dimensions without selecting the body.
     pub all_dimensions: bool,
     /// The feature a double-click chose: while it stays selected, the viewport shows its
@@ -244,6 +247,7 @@ impl Default for ViewportState {
             pick: Arc::new(Mutex::new(PickSample::default())),
             cube_hover: None,
             navigation_bar: navigation_bar::NavigationBar::default(),
+            top_inset: 0.0,
             all_dimensions: false,
             dimensions_of: None,
             threads: None,
@@ -375,7 +379,9 @@ impl ViewportState {
         // A fit frames the part clear of the heads-up pills and the navigation bar at the
         // bottom, and of an open sketch's status at the top.
         self.camera.set_framing(camera::Framing {
-            top: if sketching { SKETCH_STATUS_BAND } else { 8.0 },
+            // A part keeps clear of the options bar, which floats over the viewport's top
+            // whenever something is selected or a form is open.
+            top: if sketching { SKETCH_STATUS_BAND } else { crate::options_bar::HEIGHT + 8.0 },
             bottom: HUD_BAND,
             height: rect.height(),
         });
@@ -533,7 +539,7 @@ impl ViewportState {
         input.preview = preview;
         input.preview_pickable = preview_pickable;
         input.pick_revision = pick_revision;
-        input.planes = scene.frame(theme::accent(), self.hover_reference, selection);
+        input.planes = scene.frame(theme::reference_plane(), self.hover_reference, selection);
         if let Some(session) = &sketch {
             input.grid = self.grid(rect, &GridPlane::of_sketch(&session.plane));
         }
@@ -542,7 +548,8 @@ impl ViewportState {
         let painter = ui.painter().with_clip_rect(rect);
         for (id, plane, sk) in passive_sketches {
             let picked = self.hover_sketch == Some(id) || selection == Some(Selection::Feature(id));
-            let color = if picked { theme::accent() } else { theme::muted().gamma_multiply(0.9) };
+            let color =
+                if picked { theme::highlight() } else { theme::scene_muted(self.dark_scene()).gamma_multiply(0.9) };
             crate::sketcher::paint_passive(&painter, &self.camera, rect, plane, sk, color);
         }
         if let Some(session) = sketch {
@@ -749,9 +756,14 @@ impl ViewportState {
             .filter(|_| self.references.show_grid)
     }
 
+    /// Whether the scene behind the model is a dark one.
+    fn dark_scene(&self) -> bool {
+        self.scene.is_some_and(scenes::Scene::is_dark)
+    }
+
     fn grid(&self, rect: Rect, plane: &GridPlane) -> Option<GridFrame> {
         let ink = self.grid_style.color.unwrap_or_else(|| {
-            if self.scene.is_some_and(scenes::Scene::is_dark) { theme::ink() } else { theme::edit_suite::FULLY_DEFINED }
+            if self.dark_scene() { theme::scene_ink(true) } else { theme::edit_suite::FULLY_DEFINED }
         });
         let opacity = self.grid_style.opacity_in(theme::mode().is_dark());
         GridFrame::new(plane, self.grid_spacing(rect)?, &self.camera, ink, opacity)
@@ -866,9 +878,9 @@ impl ViewportState {
                     continue;
                 }
                 painter.add(egui::Shape::line(points.clone(), Stroke::new(5.0, theme::hud_bg())));
-                painter.add(egui::Shape::line(points.clone(), Stroke::new(2.5, theme::accent())));
+                painter.add(egui::Shape::line(points.clone(), Stroke::new(2.5, theme::highlight())));
                 for end in [points[0], points[points.len() - 1]] {
-                    painter.circle(end, 3.5, theme::accent(), Stroke::new(1.5, theme::hud_bg()));
+                    painter.circle(end, 3.5, theme::highlight(), Stroke::new(1.5, theme::hud_bg()));
                 }
             }
         }
@@ -877,11 +889,11 @@ impl ViewportState {
         // Under the heads-up toolbar, centred like it.
         let pill = Rect::from_center_size(pos2(rect.center().x, rect.top() + 58.0 + size.y / 2.0), size);
         let (fill, edge) =
-            if rounding.shown { (theme::hud_bg(), theme::accent()) } else { (theme::hud_bg(), theme::line()) };
+            if rounding.shown { (theme::hud_bg(), theme::highlight()) } else { (theme::hud_bg(), theme::line()) };
         painter.rect(pill, CornerRadius::same(14), fill, Stroke::new(1.0, edge), StrokeKind::Inside);
         let icon = Rect::from_center_size(pos2(pill.left() + 17.0, pill.center().y), vec2(14.0, 14.0));
         let glyph = if rounding.title.starts_with("Chamfer") { Icon::Chamfer } else { Icon::Fillet };
-        icons::paint(painter, glyph, icon, if rounding.shown { theme::accent() } else { theme::muted() });
+        icons::paint(painter, glyph, icon, if rounding.shown { theme::highlight() } else { theme::muted() });
         painter.galley(pos2(icon.right() + 7.0, pill.center().y - galley.size().y / 2.0), galley, theme::ink());
         let response = ui.interact(pill, ui.id().with("rounding preview"), Sense::hover());
         response.widget_info(|| {
@@ -914,7 +926,7 @@ impl ViewportState {
                     painter,
                     p,
                     text.clone(),
-                    theme::ink(),
+                    theme::scene_ink(self.dark_scene()),
                     Color32::TRANSPARENT,
                     Stroke::new(1.0, ink),
                 );
@@ -942,7 +954,7 @@ impl ViewportState {
                     painter,
                     at,
                     arrow.text.clone(),
-                    theme::ink(),
+                    theme::scene_ink(self.dark_scene()),
                     Color32::TRANSPARENT,
                     Stroke::new(1.0, ink),
                 );
@@ -954,7 +966,7 @@ impl ViewportState {
         let response = ui.interact(handle, ui.id().with("depth arrow"), Sense::drag());
         response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Slider, true, "Depth arrow"));
         let hot = response.hovered() || response.dragged();
-        painter.circle(from, if hot { 7.5 } else { 6.0 }, theme::accent(), Stroke::new(2.0, theme::hud_bg()));
+        painter.circle(from, if hot { 7.5 } else { 6.0 }, theme::highlight(), Stroke::new(2.0, theme::hud_bg()));
         if hot {
             ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
         }
@@ -981,7 +993,7 @@ impl ViewportState {
             painter,
             label_at,
             arrow.text.clone(),
-            theme::ink(),
+            theme::scene_ink(self.dark_scene()),
             Color32::TRANSPARENT,
             Stroke::new(1.0, ink),
         );
@@ -1069,20 +1081,20 @@ impl ViewportState {
             _ => None,
         };
         if let Some(p) = selected_edge {
-            draw_edge(p, Stroke::new(2.5, theme::accent()));
+            draw_edge(p, Stroke::new(2.5, theme::highlight()));
         }
         if let Some(pos) = selected_vertex {
-            draw_vertex(pos, 5.0, theme::accent());
+            draw_vertex(pos, 5.0, theme::highlight());
         }
         match self.hover {
             Some(Picked::Edge(p)) if pick_filter.edges && selected_edge != Some(p) => {
-                draw_edge(p, Stroke::new(2.0, theme::accent().gamma_multiply(0.7)))
+                draw_edge(p, Stroke::new(2.0, theme::highlight().gamma_multiply(0.7)))
             }
             Some(Picked::Vertex(p)) if pick_filter.edges => {
                 if let Some(pos) = pick::vertex_position(doc, p)
                     && selected_vertex != Some(pos)
                 {
-                    draw_vertex(pos, 4.5, theme::accent().gamma_multiply(0.7));
+                    draw_vertex(pos, 4.5, theme::highlight().gamma_multiply(0.7));
                 }
             }
             _ => {}
@@ -1155,8 +1167,11 @@ impl ViewportState {
                 .map(|p| self.camera.project(p, rect))
                 .collect();
             let Some(corners) = corners else { continue };
-            let ink =
-                theme::accent().gamma_multiply(if doc.selection == Some(Selection::Feature(f.id)) { 1.0 } else { 0.6 });
+            let ink = theme::highlight().gamma_multiply(if doc.selection == Some(Selection::Feature(f.id)) {
+                1.0
+            } else {
+                0.6
+            });
             let painter = ui.painter().with_clip_rect(rect);
             painter.add(egui::Shape::closed_line(corners.clone(), egui::Stroke::new(1.25, ink)));
             let label =
@@ -1189,7 +1204,8 @@ impl ViewportState {
         for (plane, at) in scene.labels(&self.camera, rect) {
             let name = plane.label();
             let painter = ui.painter().with_clip_rect(rect);
-            let shown = painter.text(at, Align2::RIGHT_TOP, name, theme::font(11.0), theme::muted());
+            let ink = theme::scene_muted(self.dark_scene());
+            let shown = painter.text(at, Align2::RIGHT_TOP, name, theme::font(11.0), ink);
             let response = ui.interact(shown, ui.id().with(("plane name", name)), Sense::hover());
             let description = format!("{name} in the view");
             response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, &description));
@@ -1221,7 +1237,7 @@ impl ViewportState {
 
     fn paint_view_cube(&mut self, ui: &mut egui::Ui, rect: Rect, events: &mut ViewportEvents) {
         let size = 84.0;
-        let center = pos2(rect.right() - 18.0 - size / 2.0, rect.top() + 20.0 + size / 2.0);
+        let center = pos2(rect.right() - 18.0 - size / 2.0, rect.top() + self.top_inset + 20.0 + size / 2.0);
         let area = Rect::from_center_size(center, Vec2::splat(size + 16.0));
         let resp = ui.interact(area, ui.id().with("view_cube"), Sense::click());
         let view = self.camera.view();

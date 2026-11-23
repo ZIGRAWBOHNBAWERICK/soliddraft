@@ -26,8 +26,8 @@
 // work from the edits cannot hide it, but a page task of 250 ms or more must come
 // behind the busy state the page draws while it reads the part.
 function check(value, message) { if (!value) throw new Error(message); }
-const CLOSE = [347, 92], BASE = [380, 203], DEPTH = [515, 268];
-const INSPECT = [19, 241], MEASURE = [92, 112];
+const CLOSE = [109, 184], BASE = [134, 271], DEPTH = [278, 361];
+const INSPECT = [247, 52], MEASURE = [40, 97];
 const LONG = 250;
 // The calibration loop's median on the Apple M3 the 250 ms target was measured on.
 const REFERENCE_MS = 60;

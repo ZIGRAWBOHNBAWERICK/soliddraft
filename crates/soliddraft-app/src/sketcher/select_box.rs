@@ -173,7 +173,7 @@ fn segment_meets(rect: Rect, a: Pos2, b: Pos2) -> bool {
 /// Draws the box: solid for a window, dotted for a crossing box.
 pub fn paint(painter: &egui::Painter, b: &SelectionBox) {
     let rect = b.rect();
-    let accent = theme::accent();
+    let accent = theme::highlight();
     painter.rect_filled(rect, CornerRadius::ZERO, accent.gamma_multiply(0.08));
     let stroke = Stroke::new(1.0, accent);
     match b.kind() {

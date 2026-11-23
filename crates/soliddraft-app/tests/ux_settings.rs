@@ -57,9 +57,8 @@ fn settings_command_opens_preferences_and_saves_navigation() {
     assert_eq!(app.state().preferences.as_ref().unwrap().draft.preset_id, "onshape");
     app.get_by_label("Close window").click();
     app.run_steps(3);
-    app.get_by_label("Tools").click();
-    app.run_steps(3);
-    app.get_by_label("Preferences…").click();
+    // The title bar's gear.
+    app.get_by_label("Preferences").click();
     app.run_steps(3);
     assert!(app.state().preferences.is_some());
     app.set_size(vec2(800.0, 640.0));

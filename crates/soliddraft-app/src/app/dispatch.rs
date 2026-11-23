@@ -1693,12 +1693,18 @@ impl SolidDraftApp {
             AppAction::Open(path) => {
                 let path = path
                     .or_else(|| crate::platform::open_document("Open", "SolidDraft documents", &file::OPEN_EXTENSIONS));
-                let Some(path) = path else { return };
+                let Some(path) = path else {
+                    // The browser's upload arrives later; on the desktop nothing was chosen.
+                    self.state.open_in_new_tab &= cfg!(target_arch = "wasm32");
+                    return;
+                };
                 match soliddraft_document::DocKind::of_path(&path) {
                     Some(soliddraft_document::DocKind::Drawing) => {
+                        self.state.open_in_new_tab = false;
                         self.apply(ctx, AppAction::Drawing(crate::drawing::DrawingAction::OpenFile(path)));
                     }
                     Some(soliddraft_document::DocKind::Assembly) => {
+                        self.state.open_in_new_tab = false;
                         self.apply(ctx, AppAction::Assembly(crate::assembly::AssemblyAction::Open(path)));
                     }
                     _ => {

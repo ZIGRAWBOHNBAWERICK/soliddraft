@@ -1237,6 +1237,63 @@ pub struct Rename {
     pub focus: bool,
 }
 
+/// Display length unit for the current file (Zoo bottom-bar model).
+/// Internal model and kernel coordinates always stay in millimetres.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DisplayUnit {
+    #[default]
+    Mm,
+    Cm,
+    M,
+    In,
+    Ft,
+    Yd,
+}
+
+impl DisplayUnit {
+    pub const ALL: [Self; 6] = [Self::In, Self::Ft, Self::Yd, Self::Mm, Self::Cm, Self::M];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Mm => "Millimeters",
+            Self::Cm => "Centimeters",
+            Self::M => "Meters",
+            Self::In => "Inches",
+            Self::Ft => "Feet",
+            Self::Yd => "Yards",
+        }
+    }
+
+    pub fn short(self) -> &'static str {
+        match self {
+            Self::Mm => "mm",
+            Self::Cm => "cm",
+            Self::M => "m",
+            Self::In => "in",
+            Self::Ft => "ft",
+            Self::Yd => "yd",
+        }
+    }
+
+    /// Millimetres per 1 unit.
+    pub fn mm_per_unit(self) -> f64 {
+        match self {
+            Self::Mm => 1.0,
+            Self::Cm => 10.0,
+            Self::M => 1000.0,
+            Self::In => 25.4,
+            Self::Ft => 304.8,
+            Self::Yd => 914.4,
+        }
+    }
+
+    /// Converts a length in millimetres to this unit.
+    pub fn from_mm(self, mm: f64) -> f64 {
+        mm / self.mm_per_unit()
+    }
+}
+
 pub struct AppState {
     pub doc: Document,
     pub measure: crate::measure::panel::State,
@@ -1267,6 +1324,11 @@ pub struct AppState {
     pub click_point: Option<(Selection, Vec3)>,
     pub show_about: bool,
     pub show_shortcuts: bool,
+    pub show_design_properties: bool,
+    pub show_customize_bar: bool,
+    /// The length unit the active part's readouts use, chosen in the bottom bar. Each
+    /// part tab keeps its own; it is not saved in the file.
+    pub display_unit: DisplayUnit,
     /// The open command palette.
     pub palette: Option<crate::palette::Palette>,
     /// The open Provider dialog.
@@ -1333,21 +1395,28 @@ pub struct AppState {
     pub start: Option<crate::start_page::StartPage>,
     /// New drawing asked for a part file: once it opens, the drawing setup starts.
     pub drawing_after_open: bool,
+    /// The + button asked for an existing file: a part that opens next takes a new tab
+    /// and leaves the active part open beside it.
+    pub open_in_new_tab: bool,
     actions: Vec<AppAction>,
 }
 
 impl AppState {
     pub fn tree_shown(&self) -> bool {
-        if self.assembly.is_active() {
+        let doc_shown = if self.assembly.is_active() {
             self.layout.suite.assembly
         } else if self.drawing.is_active() || self.drawing.new.is_some() {
             self.layout.suite.drawing
         } else {
             self.layout.suite.part
-        }
+        };
+        doc_shown && self.layout.panes.any_open()
     }
 
     pub fn show_tree(&mut self, shown: bool) {
+        if shown && !self.layout.panes.any_open() {
+            self.layout.panes = crate::panels::SidePanes::default();
+        }
         if self.assembly.is_active() {
             self.layout.suite.assembly = shown;
         } else if self.drawing.is_active() || self.drawing.new.is_some() {
@@ -1357,22 +1426,42 @@ impl AppState {
         }
     }
 
-    /// Whether the side area is shown with `pane` in it.
+    /// Whether `pane` is currently open in the stacked side column.
     pub fn pane_shown(&self, pane: crate::panels::Pane) -> bool {
-        self.tree_shown() && self.layout.pane == pane
+        self.tree_shown() && self.layout.panes.is_open(pane)
     }
 
-    /// Shows the side area with `pane` in it.
+    /// Opens `pane` in the stacked side column (leaving other open panes stacked beside it).
     pub fn show_pane(&mut self, pane: crate::panels::Pane) {
+        self.layout.panes.set(pane, true);
         self.layout.pane = pane;
         self.show_tree(true);
     }
 
-    /// What clicking the strip icon of `pane` does: it hides the side area when that pane
-    /// already shows there, and shows the pane otherwise.
-    pub fn toggle_pane(&mut self, pane: crate::panels::Pane) {
-        if self.pane_shown(pane) {
+    /// Closes a single `pane` in the stacked side column; if none remain open, clears the column.
+    pub fn close_pane(&mut self, pane: crate::panels::Pane) {
+        self.layout.panes.set(pane, false);
+        if !self.layout.panes.any_open() {
             self.show_tree(false);
+        }
+    }
+
+    /// Closes every open pane, clearing the side column completely.
+    pub fn clear_panes(&mut self) {
+        self.layout.panes.clear();
+        self.show_tree(false);
+    }
+
+    /// Toggles `pane` on or off in the stacked side column. When the column is hidden
+    /// (e.g. after F9), clicking a rail button opens just that pane.
+    pub fn toggle_pane(&mut self, pane: crate::panels::Pane) {
+        if !self.tree_shown() {
+            self.layout.panes.clear();
+            self.layout.panes.set(pane, true);
+            self.layout.pane = pane;
+            self.show_tree(true);
+        } else if self.layout.panes.is_open(pane) {
+            self.close_pane(pane);
         } else {
             self.show_pane(pane);
         }
@@ -1475,6 +1564,9 @@ impl AppState {
             click_point: None,
             show_about: false,
             show_shortcuts: false,
+            show_design_properties: false,
+            show_customize_bar: false,
+            display_unit: DisplayUnit::default(),
             palette: None,
             import_dialog: None,
             step_upload: false,
@@ -1508,6 +1600,7 @@ impl AppState {
             recovery: None,
             start: None,
             drawing_after_open: false,
+            open_in_new_tab: false,
             actions: Vec::new(),
         }
     }

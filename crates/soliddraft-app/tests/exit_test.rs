@@ -274,6 +274,23 @@ fn click_button(harness: &mut App<'_>, label: &str) {
         "Exit" if harness.state().state.in_sketch() => "Close sketch",
         _ => label,
     };
+    if harness.query_all_by_role_and_label(egui::accesskit::Role::Button, label).next().is_none() {
+        // The strip has no room for this tool's card: it is in its group's More menu.
+        let menus: Vec<String> = harness
+            .query_all_by_role(egui::accesskit::Role::Button)
+            .filter_map(|n| egui_kittest::kittest::NodeT::accesskit_node(&n).label().map(|l| l.to_string()))
+            .filter(|l| l.starts_with("More ") && l.ends_with(" tools"))
+            .collect();
+        for menu in menus {
+            harness.get_by_label(&menu).click();
+            harness.run_steps(8);
+            if harness.query_all_by_role_and_label(egui::accesskit::Role::Button, label).next().is_some() {
+                break;
+            }
+            harness.key_press(egui::Key::Escape);
+            harness.run_steps(8);
+        }
+    }
     harness
         .get_all_by_role_and_label(egui::accesskit::Role::Button, label)
         .next()

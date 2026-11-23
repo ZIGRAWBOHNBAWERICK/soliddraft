@@ -14,7 +14,7 @@ use soliddraft_app::state::{AppAction, EditorParams, ProfileFeature};
 use ux_tools::{Case, STANDARD, launch, settle};
 
 fn bar(app: &App) -> Rect {
-    egui::PanelState::load(&app.ctx, egui::Id::new("options_bar")).unwrap().outer_rect
+    soliddraft_app::options_bar::shown_rect(&app.ctx).expect("the options bar is drawn")
 }
 
 fn click_bar(app: &mut App, label: &str) {
@@ -37,7 +37,7 @@ fn click_tree_row(app: &mut App, name: &str) {
     let row = app
         .get_all_by_label(name)
         .map(|n| n.rect())
-        .find(|r| !bar(app).intersects(*r))
+        .find(|r| soliddraft_app::options_bar::shown_rect(&app.ctx).is_none_or(|bar| !bar.intersects(*r)))
         .unwrap_or_else(|| panic!("a tree row for {name}"));
     ribbon::click_at(app, row.center());
     settle(app);

@@ -161,10 +161,13 @@ pub fn rebuilt(app: &mut App) {
 pub fn menu_entry(app: &mut App, menu: &str, wanted: impl Fn(&str) -> bool) {
     let window = ribbon::window(app);
     ribbon::click_button(app, menu, window);
+    // The menu's entries are below the title bar, whose Save button has the same name.
+    let title = soliddraft_app::theme::MENU_HEIGHT;
     let entries: Vec<Rect> = app
         .query_all(By::new().role(egui::accesskit::Role::Button))
         .filter(|n| n.accesskit_node().label().is_some_and(|l| wanted(&l)))
         .map(|n| n.rect())
+        .filter(|r| r.top() >= title)
         .collect();
     assert_eq!(entries.len(), 1, "one entry in {menu}: {entries:?}");
     ribbon::click_at(app, entries[0].center());

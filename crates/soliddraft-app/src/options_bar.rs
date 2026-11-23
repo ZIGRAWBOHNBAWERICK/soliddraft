@@ -8,16 +8,132 @@ use crate::state::{AppAction, AppState};
 use crate::theme;
 use egui::{Sense, vec2};
 
-pub const HEIGHT: f32 = 46.0;
+pub const HEIGHT: f32 = theme::clear_bench::SPACING.options_height;
+
+/// Whether the options bar shows this frame. An idle part hides it, so the viewport has
+/// the room. An assembly and a drawing always show it: it holds their options button.
+pub fn is_shown(state: &AppState) -> bool {
+    state.editor.is_some()
+        || state.in_sketch()
+        || state.doc.selection.is_some()
+        || state.measure.open
+        || state.pmi.open
+        || state.assembly.is_active()
+        || state.drawing.is_active()
+        || state.drawing.new.is_some()
+}
+
+/// Whether the bar floats over the viewport's top edge instead of taking a row above it.
+/// In a part outside a sketch the bar comes and goes with every selection and feature
+/// form. A row of its own would resize the viewport each time, and the model would jump
+/// under the pointer that just clicked it.
+fn floats(state: &AppState) -> bool {
+    !state.in_sketch() && !state.assembly.is_active() && !state.drawing.is_active() && state.drawing.new.is_none()
+}
+
+/// Closes the details sheet when the document changes between a part, a sketch, an
+/// assembly and a drawing. It runs on frames that hide the bar too: otherwise the first
+/// frame that shows the bar would look like such a change and close a sheet that a
+/// command, such as Appearance, had just opened.
+fn follow_context(ctx: &egui::Context, state: &mut AppState) {
+    let context = (state.in_sketch(), state.assembly.is_active(), state.drawing.is_active());
+    ctx.data_mut(|data| {
+        let id = egui::Id::new("options_details_context");
+        if data.get_temp::<(bool, bool, bool)>(id) != Some(context) {
+            state.options_details = false;
+            data.insert_temp(id, context);
+        }
+    });
+}
+
+fn rect_id() -> egui::Id {
+    egui::Id::new("options_bar_rect")
+}
+
+/// Where the bar was drawn in the last frame, or `None` when that frame hid it.
+pub fn shown_rect(ctx: &egui::Context) -> Option<egui::Rect> {
+    ctx.data(|data| data.get_temp::<Option<egui::Rect>>(rect_id())).flatten()
+}
 
 pub fn panel(root: &mut egui::Ui, state: &mut AppState) {
     // A face picked while the details sheet is closed is still a pick.
     crate::pmi::panel::follow_selection(state);
-    egui::Panel::top("options_bar")
+    state.viewport.top_inset = 0.0;
+    if !is_shown(state) {
+        state.form_bar.reset();
+        follow_context(root.ctx(), state);
+        // The browser checks read this to know a part is open with nothing selected.
+        #[cfg(target_arch = "wasm32")]
+        crate::web::show_options(serde_json::json!({ "selected": null, "details": null }));
+        root.ctx().data_mut(|data| data.insert_temp(rect_id(), None::<egui::Rect>));
+        return;
+    }
+    if floats(state) {
+        let room = root.available_rect_before_wrap();
+        // Drawn by `float`, over the viewport, once the viewport is laid out. The view cube
+        // moves below the bar; the model stays where it is.
+        state.viewport.top_inset = HEIGHT;
+        let rect = egui::Rect::from_min_size(room.min, vec2(room.width(), HEIGHT));
+        root.ctx().data_mut(|data| {
+            data.insert_temp(rect_id(), Some(rect));
+            data.insert_temp(float_id(), Some(rect));
+        });
+        return;
+    }
+    let rect = egui::Panel::top("options_bar")
         .exact_size(HEIGHT)
         .resizable(false)
-        .frame(egui::Frame::new().fill(theme::chrome()).inner_margin(egui::Margin::symmetric(8, 6)))
-        .show(root, |ui| show(ui, state));
+        .frame(frame(state))
+        .show(root, |ui| show(ui, state))
+        .response
+        .rect;
+    root.ctx().data_mut(|data| data.insert_temp(rect_id(), Some(rect)));
+}
+
+fn margin() -> egui::Margin {
+    egui::Margin::symmetric(8, 5)
+}
+
+fn frame(state: &AppState) -> egui::Frame {
+    let fill = if state.editor.is_some() || state.in_sketch() || state.assembly.mate.open {
+        theme::form_bg()
+    } else {
+        theme::ribbon()
+    };
+    egui::Frame::new().fill(fill).inner_margin(margin())
+}
+
+fn float_id() -> egui::Id {
+    egui::Id::new("options_bar_float")
+}
+
+/// Draws the floating bar that `panel` reserved this frame, if any. Call it after the
+/// viewport is laid out, so the bar is painted over the viewport and takes the pointer
+/// there. It is part of the window's own layer: a separate area would spend its first
+/// frame measuring itself, deaf to a click sent in the next one.
+pub fn float(root: &mut egui::Ui, state: &mut AppState) {
+    let reserved = root.ctx().data_mut(|data| {
+        let reserved = data.get_temp::<Option<egui::Rect>>(float_id()).flatten();
+        data.insert_temp(float_id(), None::<egui::Rect>);
+        reserved
+    });
+    let Some(rect) = reserved else { return };
+    let mut ui = root.new_child(
+        egui::UiBuilder::new()
+            .id_salt("options_bar_float")
+            .max_rect(rect)
+            .layout(egui::Layout::top_down(egui::Align::Min)),
+    );
+    ui.set_clip_rect(rect);
+    // Nothing under the bar takes its clicks.
+    ui.interact(rect, ui.id().with("cover"), Sense::click_and_drag());
+    frame(state).show(&mut ui, |ui| {
+        let inner = rect.size() - margin().sum();
+        ui.set_min_size(inner);
+        ui.set_max_size(inner);
+        show(ui, state);
+    });
+    ui.painter().hline(rect.x_range(), rect.bottom() - 0.5, egui::Stroke::new(1.0, theme::line()));
 }
 
 fn active_tool(state: &AppState) -> (Icon, String, String) {
@@ -70,14 +186,7 @@ fn show(ui: &mut egui::Ui, state: &mut AppState) {
         return;
     }
     state.form_bar.reset();
-    let context = (state.in_sketch(), state.assembly.is_active(), state.drawing.is_active());
-    ui.data_mut(|data| {
-        let id = egui::Id::new("options_details_context");
-        if data.get_temp::<(bool, bool, bool)>(id) != Some(context) {
-            state.options_details = false;
-            data.insert_temp(id, context);
-        }
-    });
+    follow_context(ui.ctx(), state);
     let mut sheet_anchor = ui.available_rect_before_wrap();
     if state.drawing.is_active()
         && let Some(anchor) = crate::drawing::properties_drawing::sheet_bar(ui, state)
@@ -90,29 +199,6 @@ fn show(ui: &mut egui::Ui, state: &mut AppState) {
             vec2(ui.available_width(), 30.0),
             egui::Layout::right_to_left(egui::Align::Center),
             |ui| {
-                if ui
-                    .add_sized(
-                        vec2(116.0, 30.0),
-                        egui::Button::new(egui::RichText::new("Close sketch").color(theme::edit_suite::ON_DANGER))
-                            .fill(theme::edit_suite::DANGER),
-                    )
-                    .on_hover_text("Close sketch (Enter)")
-                    .clicked()
-                {
-                    state.push(AppAction::ExitSketch);
-                }
-                if let Some(sketch) = &state.sketch {
-                    let (text, color) = match &sketch.sketch.status {
-                        crate::sketch::SolveStatus::Empty => ("Empty", theme::muted()),
-                        crate::sketch::SolveStatus::UnderDefined => {
-                            ("Under defined", theme::edit_suite::UNDER_DEFINED_LABEL)
-                        }
-                        crate::sketch::SolveStatus::FullyDefined => ("Fully defined", theme::ink()),
-                        crate::sketch::SolveStatus::OverDefined { .. } => ("Over defined", theme::error()),
-                        crate::sketch::SolveStatus::Failed(_) => ("Solver failed", theme::error()),
-                    };
-                    ui.colored_label(color, text);
-                }
                 let more = ui.button("Sketch options");
                 sheet_anchor = more.rect;
                 if more.clicked() {
@@ -328,7 +414,15 @@ fn details_sheet(ui: &mut egui::Ui, state: &mut AppState, anchor: egui::Rect) {
     }
     let screen = ui.ctx().input(|input| input.content_rect());
     let width = 380.0_f32.min(screen.width() - 16.0);
-    let left = anchor.left().clamp(screen.left() + 8.0, (screen.right() - width - 8.0).max(screen.left() + 8.0));
+    // A sheet opened from the bar's left half drops over the side column, not over the
+    // model: the bar starts at the viewport's edge, and a sheet under its button would
+    // cover the part the sheet is about.
+    let column = egui::PanelState::load(ui.ctx(), crate::panels::Side::Tree.panel_id())
+        .filter(|_| state.tree_shown() && anchor.center().x < screen.center().x)
+        .map(|panel| panel.outer_rect.left());
+    let left = column
+        .unwrap_or(anchor.left())
+        .clamp(screen.left() + 8.0, (screen.right() - width - 8.0).max(screen.left() + 8.0));
     let id = egui::Id::new("document_options_details");
     // The sheet's first pass only measures it: egui draws it invisible and takes no click
     // in it. Run the pass again at once, so the first frame that shows the sheet also
@@ -347,7 +441,10 @@ fn details_sheet(ui: &mut egui::Ui, state: &mut AppState, anchor: egui::Rect) {
                 .inner_margin(8)
                 .show(ui, |ui| {
                     ui.set_width(width - 16.0);
-                    ui.set_height((screen.bottom() - anchor.bottom() - 32.0).clamp(120.0, 650.0));
+                    // The sheet ends above the bottom bar: its command line and pills stay in reach.
+                    let floor = egui::PanelState::load(ui.ctx(), crate::command_line::bar_id())
+                        .map_or(screen.bottom(), |bar| bar.outer_rect.top());
+                    ui.set_height((floor - anchor.bottom() - 32.0).clamp(120.0, 650.0));
                     // The sheet's one close control. The selection's own Clear X hides
                     // in here (properties_in_sheet).
                     if ui.button("Close options").clicked() {

@@ -967,11 +967,9 @@ fn view_keys_fit_normal_reverse_and_principal_views() {
     assert_eq!(view_name(&app), "Right", "F8 with nothing selected snaps to the nearest view");
 }
 
-/// Opens Preferences from the Tools menu, as a user does.
+/// Opens Preferences from the title bar's gear, as a user does.
 fn open_preferences(app: &mut App) {
-    app.get_by_label("Tools").click();
-    app.run_steps(3);
-    app.get_by_label("Preferences…").click();
+    app.get_by_label("Preferences").click();
     app.run_steps(4);
     assert!(app.state().preferences.is_some(), "the menu opened Preferences");
 }

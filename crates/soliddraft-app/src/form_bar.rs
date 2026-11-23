@@ -330,10 +330,8 @@ pub fn show<K: Copy + Eq + Hash + std::fmt::Debug>(
                     });
             });
     } else if let Some(error) = form.error {
-        // The form's one message area, under the bar and right of the tool palette, so it
-        // never covers a palette button.
-        let palette = egui::PanelState::load(ui.ctx(), egui::Id::new("tool_palette")).map(|p| p.outer_rect.right());
-        let left = palette.map_or(available.left() + title_width, |right| right.max(available.left())) + GAP;
+        // The form's one message area, under the bar and right of its title.
+        let left = available.left() + title_width + GAP;
         egui::Area::new(form.key.with("error"))
             .order(egui::Order::Foreground)
             .fixed_pos(egui::pos2(left, available.bottom() + 4.0))
@@ -344,7 +342,7 @@ pub fn show<K: Copy + Eq + Hash + std::fmt::Debug>(
                     .corner_radius(theme::RADIUS)
                     .inner_margin(8)
                     .show(ui, |ui| {
-                        ui.set_max_width((available.right() - left - 24.0).min(680.0));
+                        ui.set_max_width((available.right() - left - 24.0).clamp(160.0, 680.0));
                         ui.colored_label(theme::error(), error);
                     });
             });

@@ -1,17 +1,16 @@
-//! The side area: the feature tree or the Values table on the left, chosen by the first
-//! icons of the strip at the window's edge (see `left_bar.rs`). The assistant has no
-//! side area; it opens as a session above the command line at the bottom (see
-//! `command_line.rs`).
+//! The D1 Clear Bench single side area: stacks any combination of toggled panes
+//! (`Tree`, `History`, `Values`, `Props`) vertically top-to-bottom with draggable
+//! splitters and a close `×` per pane. Turning all panes off clears the column completely.
 //!
-//! The side area can be hidden and resized. What the user chose is kept in the app's
-//! settings file (see `settings.rs`) and restored at the next start.
+//! Layout choices persist in `settings.json` while remaining backwards-compatible with
+//! older settings files.
 
 use serde::{Deserialize, Serialize};
 
 /// The side areas.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Side {
-    /// The feature tree with the property panel under it, left of the viewport.
+    /// The single left side column (Browser / History / Values / Props).
     Tree,
 }
 
@@ -40,13 +39,13 @@ impl Side {
 
     pub fn min_width(self) -> f32 {
         match self {
-            Side::Tree => 200.0,
+            Side::Tree => 210.0,
         }
     }
 
     pub fn default_width(self) -> f32 {
         match self {
-            Side::Tree => 380.0,
+            Side::Tree => crate::theme::clear_bench::SPACING.side_panel_default_width,
         }
     }
 
@@ -61,26 +60,95 @@ impl Side {
     }
 }
 
-/// What the side area shows. Each has its own icon at the top of the left strip.
+/// Panes that can be toggled and stacked top-to-bottom in the single left side column.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Pane {
-    /// The document's tree: the feature tree of a part, or the assembly or drawing tree.
+    /// The document's browser / feature tree (part, assembly, or drawing).
     #[default]
     Tree,
-    /// Globals, the numbers typed into features and the configurations.
+    /// Chronological feature history with rollback playback controls.
+    History,
+    /// Globals, parameters and configurations (mount point for parameters lane).
     Values,
+    /// Selection & feature properties (mount point for feature panel lane).
+    Props,
 }
 
 impl Pane {
-    pub const ALL: [Pane; 2] = [Pane::Tree, Pane::Values];
+    pub const ALL: [Pane; 4] = [Pane::Tree, Pane::History, Pane::Values, Pane::Props];
+
+    pub fn index(self) -> usize {
+        match self {
+            Pane::Tree => 0,
+            Pane::History => 1,
+            Pane::Values => 2,
+            Pane::Props => 3,
+        }
+    }
+}
+
+/// Which panes are toggled on in the single left side column.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SidePanes {
+    pub tree: bool,
+    pub history: bool,
+    pub values: bool,
+    pub props: bool,
+}
+
+impl Default for SidePanes {
+    /// D1 Clear Bench default: Browser (`Tree`) + `History` stacked cleanly.
+    fn default() -> Self {
+        Self { tree: true, history: true, values: false, props: false }
+    }
+}
+
+impl SidePanes {
+    pub const NONE: Self = Self { tree: false, history: false, values: false, props: false };
+
+    pub fn is_open(self, pane: Pane) -> bool {
+        match pane {
+            Pane::Tree => self.tree,
+            Pane::History => self.history,
+            Pane::Values => self.values,
+            Pane::Props => self.props,
+        }
+    }
+
+    pub fn set(&mut self, pane: Pane, open: bool) {
+        match pane {
+            Pane::Tree => self.tree = open,
+            Pane::History => self.history = open,
+            Pane::Values => self.values = open,
+            Pane::Props => self.props = open,
+        }
+    }
+
+    pub fn toggle(&mut self, pane: Pane) {
+        let now = self.is_open(pane);
+        self.set(pane, !now);
+    }
+
+    pub fn any_open(self) -> bool {
+        self.tree || self.history || self.values || self.props
+    }
+
+    pub fn clear(&mut self) {
+        *self = Self::NONE;
+    }
+
+    pub fn active_list(self) -> Vec<Pane> {
+        Pane::ALL.into_iter().filter(|p| self.is_open(*p)).collect()
+    }
 }
 
 /// The widest a side area gets, whatever the window size.
 pub const MAX_WIDTH: f32 = 800.0;
 /// The viewport keeps at least this much beside the side area.
 pub const VIEWPORT_MIN_WIDTH: f32 = 320.0;
-/// The strip a hidden area leaves at its edge: a chevron and the title set on end.
+/// Width of the legacy strip id (D1 clears the side column to 0px when all panes are off).
 pub const STRIP_WIDTH: f32 = 22.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -90,15 +158,18 @@ pub struct SidePanel {
     pub width: f32,
 }
 
-/// Visibility and width of the side area. A file from a build that still had the
-/// assistant's side area keeps its `assistant` key, which this build ignores.
+/// Visibility, stacked panes, split weights, and width of the single side column.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Layout {
     pub tree: SidePanel,
     pub suite: SuitePanes,
-    /// What the side area shows while it is shown.
+    /// Primary focused pane (kept for backwards settings compatibility).
     pub pane: Pane,
+    /// Which panes are currently stacked open in the single side column.
+    pub panes: SidePanes,
+    /// Relative vertical weights for `[Tree, History, Values, Props]` when stacked.
+    pub split_weights: [f32; 4],
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -109,7 +180,7 @@ pub struct SuitePanes {
     pub drawing: bool,
 }
 
-/// Every document starts with its tree shown: the tree is the part's only history.
+/// Every document starts with its side column shown.
 impl Default for SuitePanes {
     fn default() -> Self {
         Self { part: true, assembly: true, drawing: true }
@@ -122,6 +193,8 @@ impl Default for Layout {
             tree: SidePanel { shown: true, width: Side::Tree.default_width() },
             suite: SuitePanes::default(),
             pane: Pane::default(),
+            panes: SidePanes::default(),
+            split_weights: [0.56, 0.44, 0.44, 0.44],
         }
     }
 }
@@ -144,7 +217,7 @@ impl Layout {
         p.shown = !p.shown;
     }
 
-    /// Brings a width that is not a number back to the default and the rest
+    /// Brings a width or weight that is not finite back to the default and the rest
     /// into range, so a hand-edited or stale file cannot hide a panel off-screen.
     pub fn clamped(mut self) -> Self {
         for side in Side::ALL {
@@ -153,6 +226,12 @@ impl Layout {
                 p.width = side.default_width();
             }
             p.width = p.width.clamp(side.min_width(), MAX_WIDTH);
+        }
+        for w in &mut self.split_weights {
+            if !w.is_finite() || *w < 0.1 {
+                *w = 0.5;
+            }
+            *w = w.clamp(0.1, 4.0);
         }
         self
     }
@@ -198,10 +277,12 @@ mod tests {
         layout.toggle(Side::Tree);
         layout.tree.width = 455.5;
         layout.pane = Pane::Values;
+        layout.panes.values = true;
         save_layout_in(&file, &layout).unwrap();
         let back = layout_in(&file);
         assert_eq!(back, layout);
         assert_eq!(back.pane, Pane::Values, "the side area remembers its pane");
+        assert!(back.panes.values);
         assert!(!back.tree.shown);
         assert_eq!(back.tree.width, 455.5);
         let all: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
@@ -232,10 +313,8 @@ mod tests {
     #[test]
     fn the_maximum_leaves_room_for_the_viewport() {
         let layout = Layout::default();
-        // 1440 wide: 1440 - 320 (viewport) = 1120, over the cap.
         assert_eq!(layout.max_width(Side::Tree, 1440.0), MAX_WIDTH);
         assert_eq!(layout.max_width(Side::Tree, 1000.0), 680.0);
-        // A narrow window never pushes the maximum under the minimum.
         assert_eq!(layout.max_width(Side::Tree, 400.0), Side::Tree.min_width());
     }
 }

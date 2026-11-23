@@ -94,10 +94,15 @@ fn click_at(harness: &mut App<'_>, pos: Pos2) {
     harness.run_steps(3);
 }
 
-/// Opens drawings from the Window menu.
+/// Shows the drawing from its tab in the title bar.
 fn open_drawings(harness: &mut App<'_>) {
-    click_button(harness, "Window");
-    click_button(harness, "Open drawings");
+    let tab = harness
+        .query_all_by_role(egui::accesskit::Role::Button)
+        .filter_map(|n| egui_kittest::kittest::NodeT::accesskit_node(&n).label().map(|l| l.to_string()))
+        .find(|l| l.ends_with(".dwdrw") && !l.starts_with("Close "))
+        .expect("the drawing has a tab in the title bar");
+    harness.get_by_label(&tab).click();
+    harness.run_steps(4);
 }
 
 fn make_drawing(harness: &mut App<'_>) {
@@ -124,6 +129,23 @@ fn click_button(harness: &mut App<'_>, label: &str) {
         && (harness.state().state.drawing.is_active() || harness.state().state.drawing.new.is_some())
     {
         open_options(harness);
+    }
+    if harness.query_all_by_role_and_label(egui::accesskit::Role::Button, label).next().is_none() {
+        // The strip has no room for this tool's card: it is in its group's More menu.
+        let menus: Vec<String> = harness
+            .query_all_by_role(egui::accesskit::Role::Button)
+            .filter_map(|n| egui_kittest::kittest::NodeT::accesskit_node(&n).label().map(|l| l.to_string()))
+            .filter(|l| l.starts_with("More ") && l.ends_with(" tools"))
+            .collect();
+        for menu in menus {
+            harness.get_by_label(&menu).click();
+            harness.run_steps(8);
+            if harness.query_all_by_role_and_label(egui::accesskit::Role::Button, label).next().is_some() {
+                break;
+            }
+            harness.key_press(egui::Key::Escape);
+            harness.run_steps(8);
+        }
     }
     let button = harness
         .get_all_by_role_and_label(egui::accesskit::Role::Button, label)

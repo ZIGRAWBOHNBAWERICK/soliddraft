@@ -15,7 +15,7 @@ use soliddraft_app::{
 use ux_tools::{Case, Look, STANDARD, launch, settle};
 
 fn bar(app: &App) -> Rect {
-    egui::PanelState::load(&app.ctx, egui::Id::new("options_bar")).unwrap().outer_rect
+    soliddraft_app::options_bar::shown_rect(&app.ctx).expect("the options bar is drawn")
 }
 
 fn suite(app: &mut App) {
@@ -72,6 +72,8 @@ fn feature_fields_and_finish_actions_stay_on_the_bar_and_spill_into_the_sheet() 
         }
         let mut app = launch(doc, STANDARD);
         suite(&mut app);
+        // The bar's whole width: with the side column beside it more forms need their sheet.
+        ribbon::close_tree(&mut app);
         case.run(&mut app, |case, app| {
             if sketch {
                 let id = app.state().state.doc.features[0].id;
@@ -189,8 +191,8 @@ fn tree_and_values_are_one_optional_pane_and_sketch_closes_from_the_bar() {
         ribbon::run_command(app, "sketch");
         settle(app);
         assert!(app.state().state.in_sketch());
-        assert!(bar(app).contains_rect(app.get_by_label("Close sketch").rect()));
         let palette = egui::PanelState::load(&app.ctx, egui::Id::new("tool_palette")).unwrap().outer_rect;
+        assert!(palette.contains_rect(app.get_by_label("Close sketch").rect()), "Close sketch is on the tool strip");
         assert!(!ribbon::painted_in(app, palette).iter().any(|p| p.text == "Exit"));
         let actions = ribbon::buttons_in(app, bar(app));
         assert!(!actions.iter().any(|(label, _)| matches!(label.as_str(), "OK" | "Cancel")));
@@ -202,7 +204,8 @@ fn tree_and_values_are_one_optional_pane_and_sketch_closes_from_the_bar() {
         }
         settle(app);
         assert!(app.state().state.sketch.as_ref().unwrap().sketch.drawn().count() > 0);
-        let status = ribbon::painted_in(app, bar(app)).into_iter().find(|p| p.text == "Under defined").unwrap();
+        // The sketch's status is beside Close sketch on the tool strip.
+        let status = ribbon::painted_in(app, palette).into_iter().find(|p| p.text == "Under defined").unwrap();
         assert_eq!(status.color, soliddraft_app::theme::edit_suite::UNDER_DEFINED_LABEL);
         let image = case.frame(app, "close-sketch");
         let close = app.get_by_label("Close sketch").rect();
@@ -212,7 +215,8 @@ fn tree_and_values_are_one_optional_pane_and_sketch_closes_from_the_bar() {
             soliddraft_app::theme::edit_suite::DANGER.to_array(),
             "Close sketch keeps the approved red fill on charcoal chrome"
         );
-        click_bar(app, "Close sketch");
+        ribbon::click_button(app, "Close sketch", palette);
+        settle(app);
         assert!(!app.state().state.in_sketch());
         assert!(app.state().state.editor.is_none());
         assert_eq!(app.state().state.doc.features.len(), 1, "closing saves the sketch without adding a feature");

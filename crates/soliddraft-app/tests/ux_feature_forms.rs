@@ -215,7 +215,8 @@ fn tree_and_values_are_one_optional_pane_and_sketch_closes_from_the_bar() {
             soliddraft_app::theme::edit_suite::DANGER.to_array(),
             "Close sketch keeps the approved red fill on charcoal chrome"
         );
-        click_bar(app, "Close sketch");
+        ribbon::click_button(app, "Close sketch", palette);
+        settle(app);
         assert!(!app.state().state.in_sketch());
         assert!(app.state().state.editor.is_none());
         assert_eq!(app.state().state.doc.features.len(), 1, "closing saves the sketch without adding a feature");

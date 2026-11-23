@@ -220,6 +220,8 @@ fn assembly_workspaces_route_named_tools_and_keep_the_part_camera() {
         app.set_size(vec2(960.0, 700.0));
         app.run_steps(8);
         assert!(app.state().state.active_viewport().rect.width() >= 300.0);
+        // A 960 point window gives the bar its actions' room with the side column closed.
+        ribbon::close_tree(app);
         let assembly_tab = ribbon::control(app, "Assembly tab", suite_palette(app)).rect;
         ribbon::click_at(app, assembly_tab.center());
         app.run_steps(8);
@@ -234,7 +236,11 @@ fn assembly_workspaces_route_named_tools_and_keep_the_part_camera() {
             .expect("an empty assembly explains how to add parts");
         assert!(viewport.contains_rect(hint.full), "the whole empty assembly hint fits the viewport");
         case.frame(app, "assembly-empty-960");
-        let more = app.get_by_label("More (2)").rect();
+        let more = app
+            .query_all_by_role(egui::accesskit::Role::Button)
+            .find(|n| ribbon::label_of(n).starts_with("More ("))
+            .expect("the Mate form has a More sheet at 960 points")
+            .rect();
         ribbon::click_at(app, more.center());
         app.run_steps(8);
         let value = app.get_by_label("Mate value").rect();
@@ -304,6 +310,8 @@ fn drawing_has_four_workspaces_and_asks_for_help_on_the_ai_line() {
         app.set_size(vec2(960.0, 700.0));
         app.run_steps(8);
         assert!(app.state().state.drawing.session.as_ref().unwrap().canvas_rect.width() >= 300.0);
+        // A 960 point window gives the bar its sheet controls' room with the side column closed.
+        ribbon::close_tree(app);
         let bar = soliddraft_app::options_bar::shown_rect(&app.ctx).expect("the options bar is drawn");
         let properties = app
             .query_all_by_label("Sheet properties")

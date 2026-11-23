@@ -522,6 +522,17 @@ pub fn highlight() -> Color32 {
     palette().highlight
 }
 
+/// Ink for marks drawn straight on the modelling space, with no ground of their own: the
+/// grid, a plane's name, a guide's value. A dark scene needs light ink whatever the frame.
+pub fn scene_ink(dark_scene: bool) -> Color32 {
+    if dark_scene { Color32::from_rgb(0xe6, 0xe8, 0xec) } else { ink() }
+}
+
+/// The quiet ink on the modelling space, by how dark its scene is.
+pub fn scene_muted(dark_scene: bool) -> Color32 {
+    if dark_scene { Color32::from_rgb(0xa3, 0xa8, 0xb1) } else { muted() }
+}
+
 pub fn on_highlight() -> Color32 {
     palette().on_highlight
 }

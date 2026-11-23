@@ -302,11 +302,21 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState, dock: &mut DockState<Tab>, 
             // Coral Donate pill with real donation links
             donate_button(ui);
 
-            // Center: Document tabs + `+` button (hidden while Start page is active)
+            // Centre: the document tabs and `+`, hidden on the start page. They keep to the
+            // room left of the buttons above: more tabs than fit scroll there instead of
+            // running under Donate.
             if !on_start {
                 ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                    ui.spacing_mut().item_spacing.x = 3.0;
-                    document_tabs(ui, state, dock, open_parts);
+                    egui::ScrollArea::horizontal()
+                        .id_salt("document_tabs")
+                        .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
+                        .auto_shrink([false, true])
+                        .show(ui, |ui| {
+                            ui.horizontal_centered(|ui| {
+                                ui.spacing_mut().item_spacing.x = 3.0;
+                                document_tabs(ui, state, dock, open_parts);
+                            });
+                        });
                 });
             }
         });

@@ -48,6 +48,9 @@ fn click(app: &mut App, label: &str) {
 /// Opens the form's choice that shows `shown`, on the bar or in its sheet, and picks
 /// `entry` in its list.
 fn choose(app: &mut App, shown: &str, entry: &str) {
+    if !app.query_all(egui_kittest::kittest::by()).any(|node| node.value().as_deref() == Some(shown)) {
+        more(app);
+    }
     let rect = app
         .query_all(egui_kittest::kittest::by())
         .filter(|node| node.value().as_deref() == Some(shown))

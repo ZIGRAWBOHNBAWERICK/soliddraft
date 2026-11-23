@@ -402,7 +402,7 @@ fn sketch_options_escape_and_smart_dimension_preview() {
         ribbon::close_options(app);
 
         // Close sketch leaves.
-        let close = ribbon::control(app, "Close sketch", options_bar(app)).rect.center();
+        let close = ribbon::control(app, "Close sketch", ribbon::palette_region(app)).rect.center();
         ribbon::click_at(app, close);
         settle(app);
         assert!(app.state().state.sketch.is_none(), "Close sketch leaves the sketch");

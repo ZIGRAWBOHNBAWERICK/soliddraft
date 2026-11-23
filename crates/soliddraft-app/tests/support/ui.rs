@@ -622,6 +622,11 @@ pub fn type_field(app: &mut App, label: &str, value: &str) {
     app.run_steps(4);
 }
 
+/// A node's accessible name, or nothing.
+pub fn label_of(node: &egui_kittest::Node<'_>) -> String {
+    node.accesskit_node().label().map(|l| l.to_string()).unwrap_or_default()
+}
+
 /// Opens the form's More sheet when the bar has no room for the field named `label`.
 pub fn open_form_sheet_for(app: &mut App, label: &str) {
     if app.query_all_by_label(label).next().is_some() {

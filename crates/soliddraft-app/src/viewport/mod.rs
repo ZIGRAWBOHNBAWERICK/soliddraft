@@ -545,7 +545,8 @@ impl ViewportState {
         let painter = ui.painter().with_clip_rect(rect);
         for (id, plane, sk) in passive_sketches {
             let picked = self.hover_sketch == Some(id) || selection == Some(Selection::Feature(id));
-            let color = if picked { theme::highlight() } else { theme::muted().gamma_multiply(0.9) };
+            let color =
+                if picked { theme::highlight() } else { theme::scene_muted(self.dark_scene()).gamma_multiply(0.9) };
             crate::sketcher::paint_passive(&painter, &self.camera, rect, plane, sk, color);
         }
         if let Some(session) = sketch {
@@ -752,9 +753,14 @@ impl ViewportState {
             .filter(|_| self.references.show_grid)
     }
 
+    /// Whether the scene behind the model is a dark one.
+    fn dark_scene(&self) -> bool {
+        self.scene.is_some_and(scenes::Scene::is_dark)
+    }
+
     fn grid(&self, rect: Rect, plane: &GridPlane) -> Option<GridFrame> {
         let ink = self.grid_style.color.unwrap_or_else(|| {
-            if self.scene.is_some_and(scenes::Scene::is_dark) { theme::ink() } else { theme::edit_suite::FULLY_DEFINED }
+            if self.dark_scene() { theme::scene_ink(true) } else { theme::edit_suite::FULLY_DEFINED }
         });
         let opacity = self.grid_style.opacity_in(theme::mode().is_dark());
         GridFrame::new(plane, self.grid_spacing(rect)?, &self.camera, ink, opacity)
@@ -917,7 +923,7 @@ impl ViewportState {
                     painter,
                     p,
                     text.clone(),
-                    theme::ink(),
+                    theme::scene_ink(self.dark_scene()),
                     Color32::TRANSPARENT,
                     Stroke::new(1.0, ink),
                 );
@@ -945,7 +951,7 @@ impl ViewportState {
                     painter,
                     at,
                     arrow.text.clone(),
-                    theme::ink(),
+                    theme::scene_ink(self.dark_scene()),
                     Color32::TRANSPARENT,
                     Stroke::new(1.0, ink),
                 );
@@ -984,7 +990,7 @@ impl ViewportState {
             painter,
             label_at,
             arrow.text.clone(),
-            theme::ink(),
+            theme::scene_ink(self.dark_scene()),
             Color32::TRANSPARENT,
             Stroke::new(1.0, ink),
         );
@@ -1195,7 +1201,8 @@ impl ViewportState {
         for (plane, at) in scene.labels(&self.camera, rect) {
             let name = plane.label();
             let painter = ui.painter().with_clip_rect(rect);
-            let shown = painter.text(at, Align2::RIGHT_TOP, name, theme::font(11.0), theme::muted());
+            let ink = theme::scene_muted(self.dark_scene());
+            let shown = painter.text(at, Align2::RIGHT_TOP, name, theme::font(11.0), ink);
             let response = ui.interact(shown, ui.id().with(("plane name", name)), Sense::hover());
             let description = format!("{name} in the view");
             response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, &description));

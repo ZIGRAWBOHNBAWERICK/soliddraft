@@ -96,13 +96,6 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
     let Some(s) = state.drawing.session.as_mut() else { return };
     let (head, _) = ui.allocate_exact_size(vec2(ui.available_width(), 30.0), Sense::hover());
     let title = if s.doc.dirty { format!("{} •", s.title()) } else { s.title() };
-    ui.painter().text(
-        pos2(head.left() + 12.0, head.center().y),
-        Align2::LEFT_CENTER,
-        title,
-        theme::font_semibold(12.5),
-        theme::ink(),
-    );
     let dangling = s.doc.dangling_count();
     let changed = s.doc.attention_count() - dangling;
     let refused = s.doc.refused_views().count();
@@ -117,12 +110,18 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
     } else {
         (format!("Up to date · rev {}", s.doc.drawing.model.pinned.short()), theme::ok())
     };
-    ui.painter().text(
-        pos2(head.right() - 12.0, head.center().y),
-        Align2::RIGHT_CENTER,
-        status,
-        theme::font_medium(11.0),
-        colour,
+    let status = ui.painter().layout_no_wrap(status, theme::font_medium(11.0), colour);
+    let status_left = head.right() - 12.0 - status.size().x;
+    ui.painter().galley(pos2(status_left, head.center().y - status.size().y / 2.0), status, colour);
+    // The title keeps to the room left of the status: in a narrow side column a long
+    // name is cut there instead of running under it.
+    let room = egui::Rect::from_min_max(head.min, pos2((status_left - 8.0).max(head.left()), head.bottom()));
+    ui.painter().with_clip_rect(room).text(
+        pos2(head.left() + 12.0, head.center().y),
+        Align2::LEFT_CENTER,
+        title,
+        theme::font_semibold(12.5),
+        theme::ink(),
     );
     ui.painter().hline(head.x_range(), head.bottom() - 0.5, Stroke::new(1.0, theme::line()));
 

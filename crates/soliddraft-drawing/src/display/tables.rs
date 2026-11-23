@@ -6,6 +6,7 @@ use soliddraft_kernel_api::Point2;
 use super::{Context, Item, Owner, PathItem, Role, TextItem, VAlign, line, rect, to_sheet, zone_at};
 use crate::Drawing;
 use crate::annotation::AnnotationKind;
+use crate::assembly::bom_filename;
 use crate::library::{self, Align, Weight};
 use crate::sheet::{Sheet, Table, TableKind};
 
@@ -227,7 +228,7 @@ fn bom_items(table: &Table, owner: Owner, ctx: &Context<'_>, items: &mut Vec<Ite
     }
     for (r, row) in table.bom.iter().enumerate() {
         let y = top - ROW * (r as f64 + 2.5);
-        let file = row.file.rsplit('/').next().unwrap_or(&row.file).to_owned();
+        let file = bom_filename(&row.file).to_owned();
         let cells = [row.item.to_string(), row.name.clone(), file, row.quantity.to_string()];
         let mut x = x0;
         for (i, (cell, (_, cw))) in cells.into_iter().zip(BOM_COLUMNS).enumerate() {

@@ -44,10 +44,20 @@ pub struct BomRow {
     pub item: u32,
     /// The part's name.
     pub name: String,
-    /// The part's file, as the assembly references it.
+    /// The part's filename in the shared bill of materials.
+    #[serde(serialize_with = "serialize_bom_filename")]
     pub file: String,
     /// How many times the assembly places it.
     pub quantity: u32,
+}
+
+pub(crate) fn bom_filename(path: &str) -> &str {
+    let name = path.rsplit(['/', '\\']).next().unwrap_or_default();
+    if matches!(name.as_bytes(), [drive, b':', ..] if drive.is_ascii_alphabetic()) { &name[2..] } else { name }
+}
+
+fn serialize_bom_filename<S: serde::Serializer>(path: &str, serializer: S) -> Result<S::Ok, S::Error> {
+    serializer.serialize_str(bom_filename(path))
 }
 
 /// An assembly as a drawing reads it.

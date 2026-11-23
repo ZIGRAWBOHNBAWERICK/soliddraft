@@ -120,6 +120,37 @@ impl Session {
 }
 
 #[test]
+fn assembly_drawing_bom_shares_only_the_part_filename() {
+    let dir = std::env::temp_dir().join(format!("soliddraft-drawing-bom-{}", std::process::id()));
+    std::fs::create_dir_all(dir.join("private")).unwrap();
+    let mut s = Session { state: AppState::new(board_bracket()), ran: BTreeSet::new(), dir: dir.clone() };
+    let part = dir.join("private/bracket.dwprt");
+    s.call("save", json!({ "path": part }));
+    let id = soliddraft_document::identify_file(&part).unwrap();
+    let root = dir.join("rig.dwasm");
+    soliddraft_assembly::AssemblyDocument::new("Rig").save(Some(&root)).unwrap();
+    let mut rig = soliddraft_assembly::AssemblyDocument::open(&root, Default::default()).unwrap();
+    let reference = soliddraft_document::DocRef::new(id.id, id.kind, part.to_str().unwrap(), id.revision);
+    rig.insert(reference, soliddraft_assembly::Placement::IDENTITY).unwrap();
+    rig.save(None).unwrap();
+    s.call("open", json!({ "path": root }));
+
+    let drawn = s.call("assembly_make_drawing", json!({}));
+    let path = dir.join("rig.dwdrw");
+    s.call("drawing_save", json!({ "path": path }));
+    let (mut reopened, _) = soliddraft_drawing::file::read(&path).unwrap();
+    let saved = &reopened.sheets[0].tables[0].bom[0].file;
+    let reported = &drawn["drawing"]["sheets"][0]["tables"][0]["bom"][0]["file"];
+    assert_eq!((saved.as_str(), reported.as_str()), ("bracket.dwprt", Some("bracket.dwprt")));
+    assert!(!drawn.to_string().contains(part.to_str().unwrap()));
+
+    reopened.sheets[0].tables[0].bom[0].file = r"C:\Users\example\bracket.dwprt".into();
+    let shared = serde_json::to_value(&reopened).unwrap();
+    assert_eq!(shared["sheets"][0]["tables"][0]["bom"][0]["file"], "bracket.dwprt");
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
 fn every_tool_runs_without_a_window_and_undoes_as_its_row_says() {
     let dir = std::env::temp_dir().join(format!("soliddraft-app-tools-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);

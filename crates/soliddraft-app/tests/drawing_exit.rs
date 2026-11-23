@@ -990,7 +990,7 @@ fn drawing_annotations_follow_the_part_through_save_and_reopen() {
     let table_at = screen_of_sheet(&app, Point2::new(position.u + 80., position.v + 42.));
     click_at(&mut app, table_at);
 
-    let check_sheet = |app: &App<'_>, thickness| {
+    let check_sheet = |app: &App<'_>, vertical: f64| {
         let s = session(app);
         let list = layout_sheet(&s.doc.drawing, 0);
         let texts: Vec<_> = list
@@ -1016,7 +1016,6 @@ fn drawing_annotations_follow_the_part_through_save_and_reopen() {
         assert!(centres[0].dash.is_some());
         let outline = centres[0].path.elements();
         let [kurbo::PathEl::MoveTo(a), kurbo::PathEl::LineTo(b)] = outline else { panic!("{outline:?}") };
-        let vertical = s.sheet_point(front, Vec3::new(100., 0., thickness / 2.0)).unwrap().v;
         assert!((a.y - vertical).abs() < 1e-6 && (b.y - vertical).abs() < 1e-6, "{outline:?}");
         assert_eq!(s.doc.dangling_count(), 0);
         assert_eq!(s.sheet().tables.len(), 1);
@@ -1031,7 +1030,10 @@ fn drawing_annotations_follow_the_part_through_save_and_reopen() {
                 .any(|i| matches!(i, Item::Text(t) if t.owner == Owner::Annotation(welds[0].id) && t.text == "4"))
         );
     };
-    check_sheet(&app, 10.);
+    let middle =
+        |app: &App<'_>, thickness| session(app).sheet_point(front, Vec3::new(100., 0., thickness / 2.0)).unwrap().v;
+    let before = middle(&app, 10.);
+    check_sheet(&app, before);
 
     click_button(&mut app, "Views tab");
     click_button(&mut app, "Show part");
@@ -1045,17 +1047,21 @@ fn drawing_annotations_follow_the_part_through_save_and_reopen() {
     app.state_mut().state.push(AppAction::SaveAs(Some(part)));
     settle(&mut app);
     open_drawings(&mut app);
-    check_sheet(&app, 11.);
+    let after = middle(&app, 11.);
+    let s = session(&app);
+    let scale = soliddraft_drawing::project::effective_scale(s.sheet(), s.sheet().view(front).unwrap());
+    assert!((after - before - 0.5 * scale).abs() < 1e-6);
+    check_sheet(&app, after);
 
     let drawing = dir.join("annotations.dwdrw");
     push(&mut app, DrawingAction::Save(Some(drawing.clone())));
     push(&mut app, DrawingAction::CloseDrawing);
     push(&mut app, DrawingAction::OpenFile(drawing));
     settle(&mut app);
-    check_sheet(&app, 11.);
+    check_sheet(&app, after);
     push(&mut app, DrawingAction::Rebuild);
     settle(&mut app);
-    check_sheet(&app, 11.);
+    check_sheet(&app, after);
 
     // Add a diameter dimension to a hole in the reopened drawing.
     let id = smart_dimension(&mut app, top, &[Vec3::new(29.5, 23., 11.)], vec2(28., -20.));

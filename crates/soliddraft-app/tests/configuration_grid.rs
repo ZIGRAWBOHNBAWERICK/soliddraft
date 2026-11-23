@@ -114,6 +114,26 @@ fn renaming_a_global_keeps_case_distinct_configuration_bindings() {
 }
 
 #[test]
+fn renaming_a_global_keeps_an_existing_case_insensitive_alias() {
+    use soliddraft_app::values_tab::{self, Field, ValuesAction};
+
+    let mut state = parameter_dependent_grid("Width", "10 mm", "10 mm");
+    call(&mut state, "set_value", json!({ "name": "Plate", "expression": "20 mm" }));
+    call(&mut state, "set_value", json!({ "name": "Stock", "expression": "30 mm" }));
+    call(
+        &mut state,
+        "set_configuration_value",
+        json!({ "configuration": "Thin", "name": "Width", "expression": "=plate" }),
+    );
+    let field = Field::Name("Stock".into());
+    values_tab::apply(&mut state, ValuesAction::Commit(field.clone(), "plate".into()));
+    assert!(state.values.error(&field).is_none(), "{:?}", state.values.error(&field));
+    let grid = state.doc.model().configuration_grid();
+    let thin = grid.rows.iter().find(|row| row.name == "Thin").unwrap();
+    assert_eq!(thin.values["Width"], "=Plate");
+}
+
+#[test]
 fn grid_retained_parameter_overrides_do_not_block_values_tab_text_property_edits() {
     use soliddraft_app::values_tab::{self, Field, ValuesAction};
     let mut state = parameter_dependent_grid("Ratio", "1 mm / 1 mm", "10 mm / (BossExtrude1.Depth - 10 mm)");

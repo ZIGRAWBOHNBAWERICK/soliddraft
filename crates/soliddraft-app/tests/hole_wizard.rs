@@ -96,29 +96,32 @@ fn parameter_grid_edits_rebuild_a_blind_wizard_hole() {
 
 #[test]
 fn up_to_next_skips_the_empty_corner_of_an_underside_recess() {
-    let mut doc = ribbon::plate();
-    let underside = HoleParams {
-        face: Some(plate_face(&doc, -Vec3::Z)),
-        diameter: 10.0,
-        depth: HoleDepth::Blind { depth: 10.0 },
-        tip: HoleTip::Flat,
-        ..Default::default()
-    };
-    drill(&mut doc, underside);
-    let before = volume(&doc);
-    let mut wizard = HoleWizardSpec::new(HoleStandard::Iso, HoleType::Simple);
-    wizard.end_condition = HoleEndCondition::UpToNext;
-    let params = HoleParams {
-        face: Some(plate_face(&doc, Vec3::Z)),
-        points: vec![P2::new(4.0, 4.0)],
-        diameter: 1.0,
-        tip: HoleTip::Flat,
-        wizard: Some(wizard),
-        ..Default::default()
-    };
-    drill(&mut doc, params);
-    let removed = before - volume(&doc);
-    assert!((removed - std::f64::consts::PI * 0.25 * 20.0).abs() < 1e-4, "removed {removed} mm³");
+    let results = [(HoleType::Simple, 0.0), (HoleType::Slot, 0.4)].map(|(hole_type, slot_length)| {
+        let mut doc = ribbon::plate();
+        let underside = HoleParams {
+            face: Some(plate_face(&doc, -Vec3::Z)),
+            diameter: 10.0,
+            depth: HoleDepth::Blind { depth: 10.0 },
+            tip: HoleTip::Flat,
+            ..Default::default()
+        };
+        drill(&mut doc, underside);
+        let before = volume(&doc);
+        let mut wizard = HoleWizardSpec::new(HoleStandard::Iso, hole_type);
+        wizard.end_condition = HoleEndCondition::UpToNext;
+        wizard.slot_length = (slot_length > 0.0).then_some(slot_length);
+        let params = HoleParams {
+            face: Some(plate_face(&doc, Vec3::Z)),
+            points: vec![P2::new(4.0, 4.0)],
+            diameter: 1.0,
+            tip: HoleTip::Flat,
+            wizard: Some(wizard),
+            ..Default::default()
+        };
+        drill(&mut doc, params);
+        (before - volume(&doc), (std::f64::consts::PI * 0.25 + slot_length) * 20.0)
+    });
+    assert!(results.iter().all(|(actual, expected)| (actual - expected).abs() < 1e-4), "{results:?}");
 }
 
 #[test]

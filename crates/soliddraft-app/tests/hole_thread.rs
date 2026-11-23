@@ -605,6 +605,38 @@ fn hiding_a_body_in_a_display_state_hides_its_thread_marks() {
 }
 
 #[test]
+fn hiding_the_active_body_keeps_thread_marks_on_a_visible_body() {
+    use soliddraft_app::document::ViewItem;
+
+    let mut state = scripted_plate("Two bodies");
+    tool(
+        &mut state,
+        "hole",
+        json!({"face": "Boss-Extrude1 · End cap", "points": [[30, 20, 10]], "thread": {"size": 6}}),
+    );
+    state.doc.new_body();
+    tool(
+        &mut state,
+        "sketch",
+        json!({"plane": "top", "shapes": [{"shape": "rectangle", "center": [90, 20, 0], "width": 20, "height": 20}]}),
+    );
+    tool(&mut state, "extrude", json!({"sketch": "Sketch2", "depth": 10, "flip": false}));
+    assert_eq!(state.doc.model().live_bodies().len(), 2);
+    let active = state.doc.active_body;
+    assert_ne!(active, 0);
+    let mut app = launch(state.doc, STANDARD);
+    ux_tools::rebuilt(&mut app);
+    ux_tools::pointer_to_chrome(&mut app);
+    let mut case = Case::new("thread-visible-other-body");
+    let before = case.frame(&mut app, "both-bodies");
+    assert!(thread_blue(&app, &before) > 50);
+    app.state_mut().state.doc.set_view_choice(ViewItem::Body(active), Some(false));
+    settle(&mut app);
+    let after = case.frame(&mut app, "active-body-hidden");
+    assert!(thread_blue(&app, &after) > 50, "the first body still shows its thread marks");
+}
+
+#[test]
 fn a_drawing_redraws_a_size_that_became_a_thread_and_back() {
     let mut state = scripted_plate("Bore plate");
     let face = "Boss-Extrude1 \u{b7} End cap";

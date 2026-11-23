@@ -149,12 +149,7 @@ impl DisplaySource for KernelSource {
     /// The part file's own standard level when it has one for its current shape and no
     /// other quality was asked for; otherwise the part rebuilt and tessellated.
     fn part_mesh(&self, part_file: &[u8]) -> Result<(DisplayMesh, String), String> {
-        if self.quality.is_none()
-            && let Ok(Some(found)) = display::read(part_file, Level::Standard)
-        {
-            return Ok(found);
-        }
-        self.rebuilt(part_file, self.quality.as_ref(), Level::Standard)
+        self.part_mesh_level(part_file, None, Level::Standard)
     }
 
     fn part_mesh_at(&self, part_file: &[u8], quality: &Quality) -> Result<(DisplayMesh, String), String> {
@@ -172,7 +167,7 @@ impl DisplaySource for KernelSource {
         let quality = quality.or(self.quality.as_ref());
         if quality.is_none()
             && level != Level::Fine
-            && let Ok(Some(found)) = display::read(part_file, level)
+            && let Ok(Some(found)) = display::read_for_styling(part_file, level)
         {
             return Ok(found);
         }

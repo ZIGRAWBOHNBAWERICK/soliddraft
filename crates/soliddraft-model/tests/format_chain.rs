@@ -8,6 +8,7 @@
 
 use std::sync::Arc;
 
+use soliddraft_document::manifest::{self, Entry};
 use soliddraft_kernel_api::{FaceId, Kernel, Vec3};
 use soliddraft_kernel_catallax::CatallaxKernel;
 use soliddraft_model::file::{FORMAT, HOLE_WIZARD_FORMAT, OPTIONS_FORMAT, PART_OPTIONS_FORMAT};
@@ -157,6 +158,18 @@ fn historical_format_four_opens_and_incompatible_tags_are_refused() {
     for version in 1..=8 {
         assert!(error.to_string().contains(&format!("soliddraft-part/{version}")), "{error}");
     }
+}
+
+#[test]
+fn part_manifest_and_truth_must_agree_on_the_major_version() {
+    let d = everything();
+    let mut manifest = d.manifest();
+    manifest.format = OPTIONS_FORMAT.into();
+    let truth = d.part_json();
+    let bytes = manifest::write_package(&manifest, &[Entry::new("part.json", truth.as_bytes())]).unwrap();
+    let error = Document::from_bytes(&bytes, kernel()).unwrap_err();
+    assert!(matches!(error, FileError::Invalid(_)), "{error}");
+    assert!(error.to_string().contains("does not match part.json"), "{error}");
 }
 
 #[test]

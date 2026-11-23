@@ -141,12 +141,27 @@ fn packed(value: f32) -> u8 {
 /// holds one made from its current geometry. `Ok(None)` when it holds none, or one
 /// from other geometry.
 pub fn read(part_file: &[u8], level: Level) -> Result<Option<(DisplayMesh, String)>, FileError> {
+    read_cached(part_file, level, false)
+}
+
+/// Reads a cached mesh for a caller that can rebuild its styling. Returns `None`
+/// when the part declares a style and its cached geometry has no face styles.
+pub fn read_for_styling(part_file: &[u8], level: Level) -> Result<Option<(DisplayMesh, String)>, FileError> {
+    read_cached(part_file, level, true)
+}
+
+fn read_cached(
+    part_file: &[u8],
+    level: Level,
+    require_styles: bool,
+) -> Result<Option<(DisplayMesh, String)>, FileError> {
     let mut package = Package::from_bytes(part_file)?;
     let Some(geometry) = package.manifest().and_then(|m| m.geometry_hash.clone()) else { return Ok(None) };
     let Some(bytes) = package.read(&entry(level))? else { return Ok(None) };
     let (mesh, made_by) = DisplayMesh::decode(&bytes).map_err(|e| FileError::Archive(e.to_string()))?;
     let current = made_by.rsplit(' ').next() == Some(geometry.as_str());
-    if current
+    if require_styles
+        && current
         && mesh.faces.iter().all(|face| face.style.is_none())
         && let Some(truth) = package.read_text("part.json")?
         && let Ok(recipe) = serde_json::from_str::<serde_json::Value>(&truth)

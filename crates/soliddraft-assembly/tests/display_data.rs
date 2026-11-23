@@ -9,8 +9,8 @@ use glam::DVec3;
 use soliddraft_assembly::{
     AssemblyDocument, DisplaySource, FileSource, KernelSource, LoadState, OccurrenceIndex, OpenOptions, Placement,
 };
-use soliddraft_document::{DocRef, identify_file};
 use soliddraft_document::manifest::{self, Entry, Package};
+use soliddraft_document::{DocRef, identify_file};
 use soliddraft_kernel_api::Kernel;
 use soliddraft_kernel_catallax::CatallaxKernel;
 use soliddraft_materials::{Catalog, MaterialId};

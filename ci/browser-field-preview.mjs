@@ -351,6 +351,12 @@ async function main() {
   check(plainFile.magic === 'CXPRINT1' && plainFile.route === 1, `tray: the saved STL is ${JSON.stringify(plainFile)}, not the checked print mesh`);
   evidence.tray = { first: plain, exported: plainExport, saved: plainFile };
 
+  await v.command('New assembly');
+  check((await shown(v, 'shown_assembly'))?.active === true, 'the new assembly did not take the viewport');
+  check(await shown(v, 'shown_viewport') === null, 'the assembly still reports a part viewport');
+  check(await v.eval(`window.wasmBindings.part_screen_point(0, 0, 0) == null`), 'the assembly still reports a part camera');
+  check(await v.eval(`window.wasmBindings.shown_threads()`) === 0, 'the assembly still reports part thread marks');
+
   // A lattice: the field sample on screen, the certified field mesh in the file.
   await field(v, 'lattice', lattice);
 

@@ -195,7 +195,10 @@ fn file_contexts(dir: &std::path::Path, pending: &mut BTreeSet<&str>) {
         .unwrap();
     find_and_dispatch(&mut state, pending);
 
-    let mut state = AppState::new(soliddraft_app::command_tools::board_bracket());
+    let mut state = AppState::new(soliddraft_app::new_document());
+    let rectangle = json!([{"shape":"rectangle","center":[0,0,20],"width":6,"height":6}]);
+    tool(&mut state, "sketch", json!({"plane":"top","offset":20,"shapes":rectangle}));
+    tool(&mut state, "extrude", json!({"sketch":"Sketch1","depth":10,"flip":false}));
     tool(&mut state, "lattice", json!({"cell":"cubic","cell_size":100,"radius":1,"accuracy":0.5,"min_detail":0.1}));
     find_and_dispatch(&mut state, pending);
 

@@ -109,7 +109,7 @@ fn number(v: f64) -> String {
 
 /// Stored text as a cell shows it: a formula starts with `=`.
 fn shown(text: &str) -> String {
-    if plain_number(text) { text.to_owned() } else { format!("={text}") }
+    if plain_number(text) || text.starts_with('=') { text.to_owned() } else { format!("={text}") }
 }
 
 /// A value with its unit, for a hover.
@@ -232,7 +232,9 @@ fn row_cells(
         })
         .response
         .on_hover_text(match (value, authored) {
-            (Some(v), Some(text)) if !plain_number(text) => format!("={text} comes to {}", with_unit(v, &row.unit)),
+            (Some(v), Some(text)) if !plain_number(text) => {
+                format!("{} comes to {}", shown(text), with_unit(v, &row.unit))
+            }
             (Some(v), None) if c > 0 => format!("Same as Default: {}", with_unit(v, &row.unit)),
             (Some(v), _) => with_unit(v, &row.unit),
             (None, _) => "Does not resolve in this configuration".into(),
@@ -492,10 +494,9 @@ fn run(state: &mut AppState, key: Field, command: Command) -> bool {
     }
 }
 
-/// A typed formula without its leading `=`; none when blank.
+/// A typed expression, keeping the leading `=` on spreadsheet formulas.
 fn formula(text: &str) -> Option<String> {
     let text = text.trim();
-    let text = text.strip_prefix('=').unwrap_or(text).trim();
     (!text.is_empty()).then(|| text.to_owned())
 }
 
@@ -646,7 +647,7 @@ mod tests {
         assert_eq!(shown("140"), "140");
         assert_eq!(shown("152.4 mm"), "152.4 mm");
         assert_eq!(shown("plate_w / 2"), "=plate_w / 2");
-        assert_eq!(formula(" =Width*2 "), Some("Width*2".to_owned()));
+        assert_eq!(formula(" =Width*2 "), Some("=Width*2".to_owned()));
         assert_eq!(formula("  "), None);
         assert_eq!(number(12.5), "12.5");
         assert_eq!(number(10.0), "10");

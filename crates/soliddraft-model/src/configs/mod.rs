@@ -40,6 +40,10 @@ impl Configurations {
         self.rows.is_empty()
     }
 
+    pub(crate) fn uses_formula_settings(&self) -> bool {
+        self.rows.iter().any(|row| row.overrides.values().any(|text| text.starts_with('=')))
+    }
+
     pub(crate) fn lookup<'a>(&'a self, defaults: &'a Values) -> &'a Values {
         self.resolved.as_ref().unwrap_or(defaults)
     }

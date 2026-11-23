@@ -55,6 +55,30 @@ fn m1_values_file_without_rows_keeps_hashes() {
 }
 
 #[test]
+fn spreadsheet_parameters_round_trip_in_configurations() {
+    let mut d = part();
+    set(&mut d, "flange_d", "=ROUND(PLATE_W/2,0)");
+    add(&mut d, "Narrow");
+    override_value(&mut d, "Narrow", "plate_w", "=SUM(4 cm,8 cm)");
+    add(&mut d, "Wide");
+    override_value(&mut d, "Wide", "plate_w", "=MAX(150 mm, 6 in)");
+    activate(&mut d, "Narrow");
+    numbers(&d, 120.0, 60.0);
+    assert_eq!(d.truth()["format"], "soliddraft-part/4");
+    let mut reopened = Document::from_bytes(&d.to_bytes().unwrap(), kernel()).unwrap();
+    assert_eq!(reopened.geometry_hash(), d.geometry_hash());
+    assert_eq!(reopened.configuration_summary(), d.configuration_summary());
+    for (name, width, depth) in [("Default", 140.0, 70.0), ("Wide", 152.4, 76.0), ("Narrow", 120.0, 60.0)] {
+        activate(&mut d, name);
+        activate(&mut reopened, name);
+        numbers(&reopened, width, depth);
+        assert_eq!(reopened.geometry_hash(), d.geometry_hash());
+    }
+    let result = reopened.execute(Command::SetValue { name: "plate_w".into(), expression: "=flange_d".into() });
+    assert_eq!(soliddraft_model::formula_error_code(&result.unwrap_err().to_string()), "#CIRCULAR");
+}
+
+#[test]
 fn m2_variant_identity_and_saved_meshes() {
     let mut d = part();
     let original = d.geometry_hash();

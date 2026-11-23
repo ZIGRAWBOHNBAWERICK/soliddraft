@@ -66,7 +66,7 @@ pub use reference::{
     Candidate, EdgeFingerprint, EdgePiece, EdgeRef, FaceFingerprint, FaceRef, Generator, NamedFace, NamingError,
     ReferenceSlot, RepairNeeded, RepairReason, VertexRef, face_refs,
 };
-pub use value_expr::{Expression, ValueTable};
+pub use value_expr::{Expression, FORMULA_FUNCTIONS, ValueTable, formula_error_code};
 
 /// The sketch types features are built from.
 pub use soliddraft_sketch as sketch;

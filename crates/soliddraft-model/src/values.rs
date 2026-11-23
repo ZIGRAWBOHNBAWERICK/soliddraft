@@ -11,7 +11,8 @@ use soliddraft_sketch::ConstraintId;
 
 use crate::params::{self, Parameter, Unit};
 use crate::value_expr::{
-    self, Expr, Expression, NamedValue, Quantity, check_name, check_parameter_name, evaluate_tree, rename_tokens,
+    self, Expr, Expression, NamedValue, Quantity, check_name, check_parameter_name, evaluate_tree,
+    evaluate_tree_with_angle, rename_tokens,
 };
 use crate::{Document, Feature, FeatureId, FeatureKind};
 
@@ -62,6 +63,8 @@ pub struct Values {
     /// Parameter names that no longer follow their feature's name.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     names: Vec<Pin>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub(crate) degrees: bool,
     /// The stored numbers the expressions read, from the last check against features.
     #[serde(skip)]
     known: Known,
@@ -132,7 +135,7 @@ impl Resolver<'_> {
         let found = match self.features {
             Some(features) => params::read(features, input).map(|(value, unit)| {
                 let (length, angle) = unit.dimensions();
-                (Quantity { value, length, angle }, unit)
+                (Quantity { value, length, angle, logical: false }, unit)
             }),
             None => self.values.known.0.iter().find(|(i, ..)| i == input).map(|(_, q, u)| (*q, *u)),
         };
@@ -171,7 +174,7 @@ impl Resolver<'_> {
         let expression = expression.expect("set above");
         self.visiting.push(node.clone());
         let mut depth = 1;
-        let mut q = evaluate_tree(&expression.tree, &mut |atom| {
+        let quantity = evaluate_tree_with_angle(&expression.tree, self.values.degrees, &mut |atom| {
             let next = match atom {
                 Expr::Ref(id) => Node::Value(*id),
                 Expr::Param(input) => Node::Input(input.clone()),
@@ -180,13 +183,15 @@ impl Resolver<'_> {
             let (quantity, dependency_depth) = self.get(&next)?;
             depth = depth.max(dependency_depth + 1);
             Ok(quantity)
-        })?;
+        });
         self.visiting.pop();
+        let mut q = quantity?;
         if depth > MAX_DEPENDENCY_DEPTH {
             return Err("value graph is too deep".into());
         }
         if let Some(unit) = unit {
-            q = coerce(q, unit, expression.is_bare_literal())?;
+            let use_input_unit = expression.is_bare_literal() || expression.is_formula() && q.is_unitless();
+            q = coerce(q, unit, use_input_unit)?;
         }
         self.done.push((node.clone(), q, depth));
         Ok((q, depth))
@@ -227,7 +232,11 @@ fn coerce(mut q: Quantity, unit: Unit, bare: bool) -> Result<Quantity, String> {
 impl Values {
     /// Whether there is no value data to persist.
     pub fn is_empty(&self) -> bool {
-        self.entries.is_empty() && self.bindings.is_empty() && self.tracked.is_empty() && self.names.is_empty()
+        self.entries.is_empty()
+            && self.bindings.is_empty()
+            && self.tracked.is_empty()
+            && self.names.is_empty()
+            && !self.degrees
     }
 
     fn pinned(&self, input: &Input) -> Option<&str> {
@@ -288,8 +297,16 @@ impl Values {
     /// Pins every parameter `text` names.
     fn pin_references(&mut self, text: &str, features: &[Feature]) {
         for name in value_expr::names(text) {
-            if !self.is_global(&name) && !self.tracked.iter().any(|r| r.name == name) {
-                self.parameter(&name, features);
+            let insensitive = text.starts_with('=');
+            if self.lookup(&name, insensitive).is_ok() {
+                continue;
+            }
+            if self.parameter(&name, features).is_none() && insensitive {
+                let mut matches =
+                    self.parameter_names(features).into_iter().filter(|p| p.name.eq_ignore_ascii_case(&name));
+                if let Some(parameter) = matches.next().filter(|_| matches.next().is_none()) {
+                    self.parameter(&parameter.name, features);
+                }
             }
         }
     }
@@ -533,7 +550,7 @@ impl Values {
         Ok(())
     }
 
-    fn lookup(&self, token: &str) -> Result<Expr, String> {
+    fn lookup(&self, token: &str, insensitive: bool) -> Result<Expr, String> {
         if self.tracked.iter().any(|r| r.name == token) {
             return Err(format!("{token} is tracked and cannot drive an expression"));
         }
@@ -543,11 +560,30 @@ impl Values {
         if let Some(pin) = self.names.iter().find(|p| p.name == token) {
             return Ok(Expr::Param(pin.input.clone()));
         }
+        if insensitive {
+            let mut matches =
+                self.entries.iter().filter(|v| v.name.eq_ignore_ascii_case(token)).map(|v| Expr::Ref(v.id)).chain(
+                    self.names
+                        .iter()
+                        .filter(|p| p.name.eq_ignore_ascii_case(token))
+                        .map(|p| Expr::Param(p.input.clone())),
+                );
+            if let Some(reference) = matches.next().filter(|_| matches.next().is_none()) {
+                return Ok(reference);
+            }
+        }
         Err(format!("unknown value {token}"))
     }
 
     fn parse(&self, text: &str) -> Result<Expression, String> {
-        value_expr::parse(text, &|token| self.lookup(token)).map(Expression::with_converted_literal)
+        value_expr::parse(text, &|token| self.lookup(token, text.starts_with('=')))
+            .map(Expression::with_converted_literal)
+    }
+
+    pub(crate) fn uses_formula_settings(&self) -> bool {
+        self.degrees
+            || self.entries.iter().any(|v| v.expression.is_formula())
+            || self.bindings.iter().any(|b| b.expression.is_formula())
     }
 
     /// Every global's quantity, reading stored numbers from `features` or, without

@@ -160,3 +160,22 @@ fn placements_in_the_same_configuration_share_a_bom_row() {
     assert_eq!(bom.as_array().map(Vec::len), Some(1), "{bom}");
     assert_eq!(bom[0]["quantity"], 2, "{bom}");
 }
+
+#[test]
+fn configuration_tools_refuse_ids_past_the_largest() {
+    let mut s = Session::new("ids");
+    s.block("a.dwprt", 40.0);
+    s.call("make_assembly", json!({}));
+    let added = s.call("assembly_explode_step", json!({ "paths": ["2"], "direction": [0, 0, 1], "distance": 30 }));
+    let step = added["added"].as_u64().unwrap();
+    let wrapped = step + (1u64 << 32);
+    assert!(s.try_call("assembly_edit_explode_step", json!({ "step": wrapped, "distance": 40 })).is_err());
+    assert!(s.try_call("assembly_delete_explode_step", json!({ "step": wrapped })).is_err());
+    let explode = &s.assembly().assembly().explode;
+    assert_eq!((explode.len(), explode[0].distance), (1, 30.0), "step {step} is untouched");
+    let component = 2u64 + (1u64 << 32);
+    let refused =
+        s.try_call("assembly_component_configuration", json!({ "component": component, "configuration": "Default" }));
+    assert!(refused.is_err());
+    assert!(s.assembly().assembly().sources.iter().all(|x| x.document.configuration.is_none()));
+}

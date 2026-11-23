@@ -29,6 +29,13 @@ pub(crate) fn describe(doc: &AssemblyDocument) -> Value {
     })
 }
 
+/// The id in `input[field]`: a whole number no larger than an id can be. A larger one is
+/// refused rather than wrapped onto another id.
+fn id_in(input: &Value, field: &str, what: &str) -> Result<u32, String> {
+    let n = input[field].as_u64().ok_or(what)?;
+    u32::try_from(n).map_err(|_| format!("{field} {n} is larger than any id"))
+}
+
 /// Where each occurrence an explode step moves shows in the exploded view.
 fn exploded(doc: &mut AssemblyDocument) -> Value {
     let moved: Vec<OccurrencePath> = doc.assembly().explode.iter().flat_map(|s| s.occurrences.clone()).collect();
@@ -123,12 +130,12 @@ fn run_one(state: &mut AppState, tool: &str, input: &Value) -> Result<Value, Str
             extra = json!({ "added": id, "exploded": exploded(doc) });
         }
         "assembly_edit_explode_step" => {
-            let id = input["step"].as_u64().ok_or("step is the step's id")? as u32;
+            let id = id_in(input, "step", "step is the step's id")?;
             edit(doc.edit_explode_step(id, direction(&input["direction"])?, input["distance"].as_f64()))?;
             extra = json!({ "exploded": exploded(doc) });
         }
         "assembly_delete_explode_step" => {
-            let id = input["step"].as_u64().ok_or("step is the step's id")? as u32;
+            let id = id_in(input, "step", "step is the step's id")?;
             edit(doc.delete_explode_step(id))?;
         }
         "assembly_auto_explode" => {
@@ -137,7 +144,7 @@ fn run_one(state: &mut AppState, tool: &str, input: &Value) -> Result<Value, Str
             extra = json!({ "added": ids, "exploded": exploded(doc) });
         }
         "assembly_component_configuration" => {
-            let id = input["component"].as_u64().ok_or("component is the component's id")? as u32;
+            let id = id_in(input, "component", "component is the component's id")?;
             let component = soliddraft_assembly::ComponentId(id);
             edit(doc.set_configuration(component, input["configuration"].as_str()))?;
             doc.finish_loading();

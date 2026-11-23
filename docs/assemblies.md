@@ -226,7 +226,10 @@ cuts every part with its own kernel, so its hatch regions are the kernel's, and 
 line that meets no part is refused.
 
 The bill of materials lists parts only: one row per part document, in the order the tree
-first places it, with its name, its file and how many times it is placed. Hidden parts
+first places it, with its name, its file and how many times it is placed. A part placed in
+another of its configurations has a row of its own, named for that configuration; a
+placement that names the configuration its file was saved in shares the row of one that
+names none. Hidden parts
 count; suppressed parts do not. A balloon carries its row's item number and a leader to a
 visible edge of one occurrence of that part, and sits outside the view clear of the others.
 

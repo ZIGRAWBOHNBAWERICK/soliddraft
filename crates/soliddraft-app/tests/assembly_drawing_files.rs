@@ -143,3 +143,20 @@ fn derived_views_wait_for_a_rebuild_when_the_assembly_moved_on() {
     let placed = s.call("drawing_projected", json!({ "view": front, "direction": "right" }));
     assert!(placed["placed"].is_string(), "{placed}");
 }
+
+#[test]
+fn placements_in_the_same_configuration_share_a_bom_row() {
+    let mut s = Session::new("bom");
+    let block = s.block("a.dwprt", 40.0);
+    s.call("make_assembly", json!({}));
+    let placement = json!({ "translation": [60, 0, 0], "rotation": [0, 0, 0, 1] });
+    let placed = s.call("insert_component", json!({ "paths": [block], "placement": placement }));
+    let second: u64 = placed["inserted"].as_str().unwrap().parse().unwrap();
+    // The second placement names Default, the configuration the first shows as saved.
+    s.call("assembly_component_configuration", json!({ "component": second, "configuration": "Default" }));
+    s.call("assembly_save", json!({ "path": s.path("rig.dwasm") }));
+    let drawn = s.call("assembly_make_drawing", json!({}));
+    let bom = &drawn["drawing"]["sheets"][0]["tables"][0]["bom"];
+    assert_eq!(bom.as_array().map(Vec::len), Some(1), "{bom}");
+    assert_eq!(bom[0]["quantity"], 2, "{bom}");
+}

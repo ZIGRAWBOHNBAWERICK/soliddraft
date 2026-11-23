@@ -15,7 +15,7 @@
 // Details once where that frame drew it.
 function check(value, message) { if (!value) throw new Error(message); }
 // Check sits under the Measure and Annotate groups of the Inspect tab.
-const INSPECT = [19, 241], CHECK = [87, 245], CLOSE_REPORT = [536, 35], BOSS = [380, 255];
+const INSPECT = [19, 241], CHECK = [87, 245], CLOSE_REPORT = [537, 35], BOSS = [380, 255];
 
 check(await page.eval(() => location.search === '?demo'), 'Open the application at /?demo first');
 const size = await page.eval(() => [innerWidth, innerHeight]);
@@ -71,16 +71,18 @@ async function until(read, done, what) {
   }
   throw new Error(`After Check, ${what}: ${JSON.stringify(value)}`);
 }
+// A pointer move gives the page a frame to update hover and readouts.
+const nudge = ([x, y] = [900, 450]) => page.eval(`(() => {
+  document.getElementById('soliddraft').dispatchEvent(new PointerEvent('pointermove',
+    { clientX: ${x}, clientY: ${y}, bubbles: true, pointerId: 1, pointerType: 'mouse', isPrimary: true }));
+  return true;
+})()`);
+await nudge(CLOSE_REPORT);
+await page.wait(250);
 await click(CLOSE_REPORT);
+await nudge();
 await until(() => page.eval(() => window.wasmBindings.shown_part_check()), drawn => drawn === '',
   'the Part check window did not close');
-// A frame without a click: the pointer moves over the viewport. The page draws a frame
-// for each input, and a changed selection shows Details only in a later frame.
-const nudge = () => page.eval(() => {
-  document.getElementById('soliddraft').dispatchEvent(new PointerEvent('pointermove',
-    { clientX: 900, clientY: 450, bubbles: true, pointerId: 1, pointerType: 'mouse', isPrimary: true }));
-  return true;
-});
 // Waits for a frame whose options bar shows `title` selected and draws Details, logs
 // both, and clicks Details once where that frame drew it. A click sent before then lands
 // where Details is not drawn yet.

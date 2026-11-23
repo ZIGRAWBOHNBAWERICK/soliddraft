@@ -813,6 +813,9 @@ impl eframe::App for SolidDraftApp {
             match uploaded.purpose {
                 crate::platform::Purpose::Insert => crate::assembly::insert_bytes(&mut self.state, uploaded.files),
                 crate::platform::Purpose::Open => self.open_uploads(uploaded.files),
+                crate::platform::Purpose::Parameters => {
+                    crate::values_tab::apply_upload(&mut self.state, uploaded.files)
+                }
             }
         }
         #[cfg(target_arch = "wasm32")]

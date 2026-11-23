@@ -4,6 +4,7 @@
 //! refused even when it carries a usable cached result.
 
 use quick_xml::{Reader, events::Event};
+use serde::{Deserialize, Serialize};
 use soliddraft_model::configs::{DEFAULT_ROW, Grid, GridRow, GridValue};
 use std::collections::BTreeSet;
 use std::io::{Cursor, Read, Write};
@@ -29,6 +30,7 @@ const PACKAGE: &str = "http://schemas.openxmlformats.org/package/2006/relationsh
 pub enum Format {
     Csv,
     Xlsx,
+    Json,
 }
 
 impl Format {
@@ -36,7 +38,8 @@ impl Format {
         match text {
             "csv" => Ok(Format::Csv),
             "xlsx" => Ok(Format::Xlsx),
-            other => Err(format!("the format is csv or xlsx, not `{other}`")),
+            "json" => Ok(Format::Json),
+            other => Err(format!("the format is csv, xlsx, or json, not `{other}`")),
         }
     }
 
@@ -44,15 +47,26 @@ impl Format {
         match self {
             Format::Csv => "csv",
             Format::Xlsx => "xlsx",
+            Format::Json => "json",
         }
     }
 }
 
 /// Reads a file's cells: the header, then each row, all the header's width.
 pub fn decode(format: Format, bytes: &[u8]) -> Result<Vec<Vec<String>>, String> {
+    if bytes.len() as u64 > MAX_BYTES {
+        return Err(format!("the table file is over {MAX_BYTES} bytes"));
+    }
     let table = match format {
         Format::Csv => read_csv(bytes)?,
         Format::Xlsx => read_xlsx(bytes)?,
+        Format::Json => {
+            let file: JsonTable = serde_json::from_slice(bytes).map_err(|error| error.to_string())?;
+            if file.format != JSON_FORMAT {
+                return Err(format!("unknown configuration table format {}", file.format));
+            }
+            std::iter::once(file.columns).chain(file.rows).collect()
+        }
     };
     check_shape(&table)?;
     Ok(table)
@@ -63,7 +77,22 @@ pub fn encode(format: Format, table: &[Vec<String>]) -> Result<Vec<u8>, String> 
     match format {
         Format::Csv => Ok(write_csv(table)),
         Format::Xlsx => write_xlsx(table),
+        Format::Json => {
+            check_shape(table)?;
+            let file = JsonTable { format: JSON_FORMAT.into(), columns: table[0].clone(), rows: table[1..].to_vec() };
+            serde_json::to_vec_pretty(&file).map_err(|error| error.to_string())
+        }
     }
+}
+
+const JSON_FORMAT: &str = "soliddraft-configuration-table/1";
+
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct JsonTable {
+    format: String,
+    columns: Vec<String>,
+    rows: Vec<Vec<String>>,
 }
 
 fn check_shape(table: &[Vec<String>]) -> Result<(), String> {
@@ -621,7 +650,7 @@ mod tests {
 
     #[test]
     fn csv_and_xlsx_return_the_same_cells() {
-        for format in [Format::Csv, Format::Xlsx] {
+        for format in [Format::Csv, Format::Xlsx, Format::Json] {
             let bytes = encode(format, &sample()).unwrap();
             assert_eq!(decode(format, &bytes).unwrap(), sample(), "{format:?}");
         }

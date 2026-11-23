@@ -611,26 +611,12 @@ fn nothing_reads_a_terminal_field_after_it() {
     after(k.gyroid(&OpTag::new("second"), field, &gyroid));
 }
 
-/// Grades beyond a linear one along a part axis: Catallax at this pin builds none of them.
-/// The application learns that from Catallax's own validation, and a build with each
-/// grade reaches Catallax and comes back with the same code, so the faces of a distance
-/// grade are spelled natively and nothing is refused before Catallax sees it.
 #[test]
-fn distance_radial_and_point_grades_are_refused_with_catallax_codes() {
+fn catallax_builds_distance_radial_and_point_grades_and_names_refusals() {
     let k = CatallaxKernel::new();
     for field in [GradedField::LatticeRadius, GradedField::GyroidLevel] {
-        k.field_grade(field, GradeKind::Constant).unwrap();
-        k.field_grade(field, GradeKind::Linear).unwrap();
-    }
-    let refusal = |field, kind| k.field_grade(field, kind).unwrap_err().to_string();
-    let distance = refusal(GradedField::LatticeRadius, GradeKind::Distance);
-    assert!(distance.contains("lattice.unsupported-grade"), "{distance}");
-    let distance = refusal(GradedField::GyroidLevel, GradeKind::Distance);
-    assert!(distance.contains("gyroid.unsupported"), "{distance}");
-    for field in [GradedField::LatticeRadius, GradedField::GyroidLevel] {
-        for kind in [GradeKind::Radial, GradeKind::Point] {
-            let missing = refusal(field, kind);
-            assert!(missing.contains(&format!("Catallax has no {} grade function", kind.name())), "{missing}");
+        for kind in GradeKind::ALL {
+            k.field_grade(field, kind).unwrap_or_else(|error| panic!("{field:?} {kind:?}: {error}"));
         }
     }
 
@@ -660,24 +646,29 @@ fn distance_radial_and_point_grades_are_refused_with_catallax_codes() {
         Grade::Radial(RadialGrade { axis: GradeAxis::Z, through: [0.0; 3], from: 0.0, to: 3.0, start, end })
     };
     let point = |start, end| Grade::Point(PointGrade { centre: [0.0, 0.0, 25.0], from: 0.0, to: 3.0, start, end });
-    for (grade, code) in [
-        (skin(1.0, 2.0), "lattice.unsupported-grade"),
-        (picked(1.0, 2.0), "lattice.unsupported-grade"),
-        (radial(1.0, 2.0), "Catallax has no radial grade function"),
-        (point(1.0, 2.0), "Catallax has no point grade function"),
-    ] {
-        let refused = k.lattice(&tag, region, &lattice(grade.clone())).unwrap_err().to_string();
-        assert!(refused.contains(code), "{grade:?}: {refused}");
+    for grade in [skin(1.0, 2.0), picked(1.0, 2.0), radial(1.0, 2.0), point(1.0, 2.0)] {
+        k.lattice(&tag, region, &lattice(grade.clone())).unwrap_or_else(|error| panic!("{grade:?}: {error}"));
     }
-    for (grade, code) in [
-        (skin(0.0, 0.1), "gyroid.unsupported"),
-        (picked(0.0, 0.1), "gyroid.unsupported"),
-        (radial(0.0, 0.1), "Catallax has no radial grade function"),
-        (point(0.0, 0.1), "Catallax has no point grade function"),
-    ] {
-        let refused = k.gyroid(&tag, region, &gyroid(grade.clone())).unwrap_err().to_string();
-        assert!(refused.contains(code), "{grade:?}: {refused}");
+    for grade in [skin(0.0, 0.1), picked(0.0, 0.1), radial(0.0, 0.1), point(0.0, 0.1)] {
+        k.gyroid(&tag, region, &gyroid(grade.clone())).unwrap_or_else(|error| panic!("{grade:?}: {error}"));
     }
+
+    let no_faces =
+        |near, far| Grade::Distance(DistanceGrade { faces: GradeFaces::Picked(vec![]), near, far, span: 5.0 });
+    let refused = k.lattice(&tag, region, &lattice(no_faces(1.0, 2.0))).unwrap_err().to_string();
+    assert!(refused.contains("lattice.unsupported-grade"), "{refused}");
+    let refused = k.gyroid(&tag, region, &gyroid(no_faces(0.0, 0.1))).unwrap_err().to_string();
+    assert!(refused.contains("gyroid.unsupported"), "{refused}");
+
+    for grade in [radial(1.0, 3.0), point(1.0, 3.0)] {
+        let refused = k.lattice(&tag, region, &lattice(grade)).unwrap_err().to_string();
+        assert!(refused.contains("lattice.grade-range-unsupported"), "{refused}");
+    }
+    for grade in [radial(-0.2, 0.2), point(-0.2, 0.2)] {
+        let refused = k.gyroid(&tag, region, &gyroid(grade)).unwrap_err().to_string();
+        assert!(refused.contains("gyroid.grade-range-unsupported"), "{refused}");
+    }
+
     // The refusals leave the region a CAD body that a constant lattice still fills.
     k.lattice(&tag, region, &lattice(Grade::Constant(1.0))).unwrap();
 }

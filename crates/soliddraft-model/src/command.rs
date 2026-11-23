@@ -726,30 +726,34 @@ impl Document {
             {
                 Err(CommandError::Invalid("lattice cell size and density must be finite and positive".into()))
             }
-            FeatureKind::Lattice(l) if let Some(why) = l.radius_mm.as_ref().and_then(|g| g.impossible()) => {
-                Err(CommandError::Invalid(format!("graded density: {why}")))
-            }
-            FeatureKind::Lattice(l)
-                if !(l.accuracy_mm.is_finite()
+            FeatureKind::Lattice(l) => {
+                if let Some(why) = l.radius_mm.as_ref().and_then(|g| g.impossible()) {
+                    Err(CommandError::Invalid(format!("graded density: {why}")))
+                } else if !(l.accuracy_mm.is_finite()
                     && l.accuracy_mm > 0.0
                     && l.min_detail_mm.is_finite()
-                    && l.min_detail_mm > 0.0) =>
-            {
-                Err(CommandError::Invalid("lattice accuracy and minimum detail must be positive".into()))
+                    && l.min_detail_mm > 0.0)
+                {
+                    Err(CommandError::Invalid("lattice accuracy and minimum detail must be positive".into()))
+                } else {
+                    Ok(())
+                }
             }
             FeatureKind::Gyroid(g) if !(g.period_mm.is_finite() && g.period_mm > 0.0) || !finite(&g.level) => {
                 Err(CommandError::Invalid("gyroid period must be positive and its level finite".into()))
             }
-            FeatureKind::Gyroid(g) if let Some(why) = g.level.impossible() => {
-                Err(CommandError::Invalid(format!("graded level: {why}")))
-            }
-            FeatureKind::Gyroid(g)
-                if !(g.accuracy_mm.is_finite()
+            FeatureKind::Gyroid(g) => {
+                if let Some(why) = g.level.impossible() {
+                    Err(CommandError::Invalid(format!("graded level: {why}")))
+                } else if !(g.accuracy_mm.is_finite()
                     && g.accuracy_mm > 0.0
                     && g.min_detail_mm.is_finite()
-                    && g.min_detail_mm > 0.0) =>
-            {
-                Err(CommandError::Invalid("gyroid accuracy and minimum detail must be positive".into()))
+                    && g.min_detail_mm > 0.0)
+                {
+                    Err(CommandError::Invalid("gyroid accuracy and minimum detail must be positive".into()))
+                } else {
+                    Ok(())
+                }
             }
             FeatureKind::Scan(s)
                 if s.source.bytes.is_empty() || crate::sha256_hex(&s.source.bytes) != s.source.sha256 =>

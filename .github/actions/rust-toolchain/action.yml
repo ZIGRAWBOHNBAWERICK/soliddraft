@@ -1,5 +1,5 @@
 name: Bounded Rust toolchain setup
-description: Reuse an installed toolchain or install it with an inactivity timeout and retries
+description: Bootstrap rustup when needed, then reuse or install a toolchain with bounded retries
 inputs:
   channel:
     required: true

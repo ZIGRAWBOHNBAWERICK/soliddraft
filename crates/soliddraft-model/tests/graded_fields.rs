@@ -311,12 +311,9 @@ fn refused_by_catallax(d: &Document, id: FeatureId, code: &str) {
     assert!(message.contains(code), "{message}");
 }
 
-/// A density graded by distance from a picked face, as a user builds it: saved with the
-/// face's persistent reference, refused by Catallax with its own code (the pin builds no
-/// distance grade), kept through an upstream edit, undo and a reopen, and turned back
-/// into a linear grade that builds on the edited part.
+/// A distance grade keeps its picked face and builds after an upstream edit, reopen and undo.
 #[test]
-fn a_distance_grade_keeps_its_face_through_edits_and_reopen_and_shows_catallax_refusal() {
+fn a_distance_grade_keeps_its_face_and_builds_through_edits_and_reopen() {
     let mut d = Document::new("Distance", kernel());
     let s = add(&mut d, sketch(6.0, 6.0, 20.0));
     let b = add(&mut d, boss(s, 10.0));
@@ -328,7 +325,7 @@ fn a_distance_grade_keeps_its_face_through_edits_and_reopen_and_shows_catallax_r
         span: 5.0,
     });
     let l = add(&mut d, lattice(grade.clone()));
-    refused_by_catallax(&d, l, "lattice.unsupported-grade");
+    assert!(status(&d, l).is_ok(), "{:?}", status(&d, l));
     assert!(d.feature(l).unwrap().kind.dependencies().contains(&b), "the grade reads the boss's face");
     let part: serde_json::Value = serde_json::from_str(&d.part_json()).unwrap();
     let saved = &part["features"].as_array().unwrap().last().unwrap()["kind"]["radius_mm"]["distance"];
@@ -338,64 +335,65 @@ fn a_distance_grade_keeps_its_face_through_edits_and_reopen_and_shows_catallax_r
     );
     assert_eq!(saved["faces"]["picked"].as_array().unwrap().len(), 1, "{saved}");
 
-    // An upstream edit moves the face; the reference follows it and Catallax answers again.
+    // An upstream edit moves the face and the grade follows it.
     edit(&mut d, b, boss(s, 12.0)).unwrap();
-    refused_by_catallax(&d, l, "lattice.unsupported-grade");
+    assert!(status(&d, l).is_ok(), "{:?}", status(&d, l));
     assert_eq!(d.feature(l).unwrap().kind, lattice(grade.clone()), "the grade does not change");
 
-    // Save and reopen on a fresh kernel: the same grade, face and refusal.
+    // Reopening on a fresh kernel rebuilds the same grade.
     let mut reopened = Document::from_bytes(&d.to_bytes().unwrap(), kernel()).unwrap();
     assert_eq!(reopened.feature(l).unwrap().kind, lattice(grade.clone()));
-    refused_by_catallax(&reopened, l, "lattice.unsupported-grade");
+    assert!(status(&reopened, l).is_ok(), "{:?}", status(&reopened, l));
     assert_eq!(reopened.part_json(), d.part_json(), "saving an opened file reproduces it");
 
-    // A grade Catallax builds replaces it, on the edited region; undo brings the face back.
+    // Undoing a switch to a linear grade restores the picked face.
     edit(&mut reopened, l, lattice(linear(20.0, 32.0, 1.0, 2.0))).unwrap();
     assert!(status(&reopened, l).is_ok(), "{:?}", status(&reopened, l));
     reopened.undo().unwrap();
     assert_eq!(reopened.feature(l).unwrap().kind, lattice(grade));
-    refused_by_catallax(&reopened, l, "lattice.unsupported-grade");
+    assert!(status(&reopened, l).is_ok(), "{:?}", status(&reopened, l));
 }
 
-/// The skin, a radial and a point grade on a lattice and a gyroid save as named functions
-/// and reopen unchanged; Catallax refuses each with its own answer.
 #[test]
-fn skin_radial_and_point_grades_save_reopen_and_name_the_refusal() {
+fn skin_radial_and_point_grades_build_save_and_reopen() {
     let skin: FieldGrade = Grade::Distance(DistanceGrade { faces: GradeFaces::Skin, near: 2.0, far: 1.0, span: 2.0 });
     let radial: FieldGrade =
         Grade::Radial(RadialGrade { axis: GradeAxis::Z, through: [0.0; 3], from: 0.0, to: 3.0, start: 1.0, end: 2.0 });
     let point: FieldGrade =
         Grade::Point(PointGrade { centre: [0.0, 0.0, 25.0], from: 0.0, to: 3.0, start: 1.0, end: 2.0 });
-    for (grade, saved, code) in [
-        (
-            skin,
-            serde_json::json!({"distance":{"faces":"skin","near":2.0,"far":1.0,"span":2.0}}),
-            "lattice.unsupported-grade",
-        ),
+    for (grade, saved) in [
+        (skin, serde_json::json!({"distance":{"faces":"skin","near":2.0,"far":1.0,"span":2.0}})),
         (
             radial,
             serde_json::json!({"radial":{"axis":"z","through":[0.0,0.0,0.0],"from":0.0,"to":3.0,"start":1.0,"end":2.0}}),
-            "Catallax has no radial grade function",
         ),
-        (
-            point,
-            serde_json::json!({"point":{"centre":[0.0,0.0,25.0],"from":0.0,"to":3.0,"start":1.0,"end":2.0}}),
-            "Catallax has no point grade function",
-        ),
+        (point, serde_json::json!({"point":{"centre":[0.0,0.0,25.0],"from":0.0,"to":3.0,"start":1.0,"end":2.0}})),
     ] {
         let (mut d, _, l) = d0();
         edit(&mut d, l, lattice(grade.clone())).unwrap();
-        refused_by_catallax(&d, l, code);
+        assert!(status(&d, l).is_ok(), "{:?}", status(&d, l));
         let part: serde_json::Value = serde_json::from_str(&d.part_json()).unwrap();
         assert_eq!(part["features"].as_array().unwrap().last().unwrap()["kind"]["radius_mm"], saved);
         let reopened = Document::from_bytes(&d.to_bytes().unwrap(), kernel()).unwrap();
         assert_eq!(reopened.feature(l).unwrap().kind, lattice(grade));
-        refused_by_catallax(&reopened, l, code);
+        assert!(status(&reopened, l).is_ok(), "{:?}", status(&reopened, l));
     }
     let (mut g, _, gid) = g0();
     let level: FieldGrade = Grade::Distance(DistanceGrade { faces: GradeFaces::Skin, near: 0.0, far: 0.1, span: 1.0 });
     edit(&mut g, gid, gyroid(level)).unwrap();
-    refused_by_catallax(&g, gid, "gyroid.unsupported");
+    assert!(status(&g, gid).is_ok(), "{:?}", status(&g, gid));
+}
+
+#[test]
+fn an_out_of_range_grade_reopens_with_the_same_catallax_refusal() {
+    let (mut d, _, l) = d0();
+    let grade =
+        lattice(Grade::Point(PointGrade { centre: [0.0, 0.0, 25.0], from: 0.0, to: 1.0, start: 1.0, end: 2.0 }));
+    edit(&mut d, l, grade.clone()).unwrap();
+    refused_by_catallax(&d, l, "lattice.grade-range-unsupported");
+    let reopened = Document::from_bytes(&d.to_bytes().unwrap(), kernel()).unwrap();
+    assert_eq!(reopened.feature(l).unwrap().kind, grade);
+    refused_by_catallax(&reopened, l, "lattice.grade-range-unsupported");
 }
 
 /// Impossible grade definitions are refused before the document changes, whatever the

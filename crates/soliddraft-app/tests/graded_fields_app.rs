@@ -88,7 +88,10 @@ fn the_editor_grades_d0s_beam_radius_along_z() {
     assert!(app.query_by_label("Beam radius").is_some(), "the designed label");
     app.get_by_label_contains("More (").click();
     app.run_steps(8);
-    button(&mut app, "Linear along an axis");
+    app.get_by_label("Beam radius grade").click();
+    app.run_steps(4);
+    app.get_by_label("Linear along an axis").click();
+    app.run_steps(4);
     button(&mut app, "z");
     for (name, value) in [("from", "20"), ("to", "30"), ("start", "1"), ("end", "2")] {
         field(&mut app, &format!("Beam radius {name} value"), value);

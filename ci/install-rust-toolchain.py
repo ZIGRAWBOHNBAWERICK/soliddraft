@@ -2,6 +2,7 @@
 """Install a rustup toolchain and retry stalled downloads."""
 import os
 from pathlib import Path
+import platform
 import shutil
 import subprocess
 import sys
@@ -11,6 +12,49 @@ import time
 
 DEFAULT_TIMEOUT = 120
 DEFAULT_ATTEMPTS = 3
+
+
+def bootstrap_rustup():
+    # These are the hosts used by Blade, boat and GitHub-hosted workflows.
+    systems = {"Linux": "unknown-linux-gnu", "Darwin": "apple-darwin", "Windows": "pc-windows-msvc"}
+    system = platform.system()
+    suffix = systems.get(system)
+    if suffix is None:
+        raise ValueError(f"cannot bootstrap rustup on {system}")
+    machine = platform.machine().lower()
+    arch = {"amd64": "x86_64", "arm64": "aarch64"}.get(machine, machine)
+    filename = "rustup-init.exe" if system == "Windows" else "rustup-init"
+    url = f"https://static.rust-lang.org/rustup/dist/{arch}-{suffix}/{filename}"
+    with tempfile.TemporaryDirectory() as directory:
+        installer = Path(directory) / filename
+        subprocess.run(
+            ["curl", "--proto", "=https", "--fail", "--silent", "--show-error", "--location",
+             "--retry", "2", "--retry-max-time", "30", "--max-time", "30", "--output", installer, url],
+            check=True, timeout=60,
+        )
+        installer.chmod(0o755)
+        subprocess.run([installer, "--default-toolchain", "none", "--no-modify-path", "-y"],
+                       check=True, timeout=30)
+
+
+def find_rustup(step_name):
+    rustup = shutil.which("rustup")
+    if rustup:
+        return rustup
+
+    cargo_bin = Path(os.environ.get("CARGO_HOME") or Path.home() / ".cargo").resolve() / "bin"
+    rustup = shutil.which("rustup", path=str(cargo_bin))
+    if not rustup:
+        print(f"{step_name}: bootstrapping rustup", flush=True)
+        bootstrap_rustup()
+        rustup = shutil.which("rustup", path=str(cargo_bin))
+        if not rustup:
+            raise FileNotFoundError(f"rustup bootstrap did not create an executable in {cargo_bin}")
+
+    if github_path := os.environ.get("GITHUB_PATH"):
+        with Path(github_path).open("a", encoding="utf-8") as path_file:
+            print(cargo_bin, file=path_file)
+    return rustup
 
 
 def run(command, timeout=30):
@@ -130,17 +174,16 @@ def main(argv):
         print("usage: install-rust-toolchain.py CHANNEL COMPONENTS TARGETS STEP_NAME", file=sys.stderr)
         return 2
     channel, component_list, target_list, step_name = argv[1:]
-    rustup = shutil.which("rustup")
-    if not rustup:
-        print(f"::error::{step_name}: rustup is not installed", file=sys.stderr)
-        return 1
     components = [value.strip() for value in component_list.split(",") if value.strip()]
     targets = [value.strip() for value in target_list.split(",") if value.strip()]
     try:
-        return install(rustup, channel, components, targets, step_name)
+        return install(find_rustup(step_name), channel, components, targets, step_name)
     except ValueError as error:
         print(f"::error::{step_name}: {error}", file=sys.stderr)
         return 2
+    except (OSError, subprocess.SubprocessError) as error:
+        print(f"::error::{step_name}: {error}", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":

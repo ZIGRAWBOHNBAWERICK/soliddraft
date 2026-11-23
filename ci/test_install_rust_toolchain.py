@@ -11,6 +11,58 @@ INSTALLER = ROOT / "ci/install-rust-toolchain.py"
 
 
 class RustToolchainInstall(unittest.TestCase):
+    def test_workspace_cargo_home_supplies_rustup_with_or_without_bootstrap(self):
+        for bootstrap in (False, True):
+            with self.subTest(bootstrap=bootstrap), tempfile.TemporaryDirectory() as directory:
+                root = pathlib.Path(directory)
+                cargo_home = root / "target" / ".ci-cargo"
+                rustup = cargo_home / "bin" / "rustup"
+                github_path = root / "github-path"
+                rustup_script = """#!%s
+import os, pathlib, shutil, sys
+assert os.environ['RUSTUP_HOME'].endswith('/target/.ci-rustup')
+args = sys.argv[1:]
+if args[:1] == ['--default-toolchain']:
+    assert args == ['--default-toolchain', 'none', '--no-modify-path', '-y']
+    rustup = pathlib.Path(os.environ['CARGO_HOME']) / 'bin' / 'rustup'
+    rustup.parent.mkdir(parents=True)
+    shutil.copy2(__file__, rustup)
+    sys.exit(0)
+with pathlib.Path(os.environ['CALLS']).open('a') as calls:
+    calls.write(' '.join(args) + '\\n')
+if args[:2] == ['toolchain', 'list'] and not %r:
+    print('stable-x86_64-unknown-linux-gnu (default)')
+if args[:2] == ['component', 'list']:
+    print('clippy-x86_64-unknown-linux-gnu (installed)')
+""" % (sys.executable, bootstrap)
+                if bootstrap:
+                    (root / "installer").write_text(rustup_script)
+                    curl = root / "curl"
+                    curl.write_text("""#!%s
+import pathlib, sys
+assert sys.argv[-1].startswith('https://static.rust-lang.org/rustup/dist/')
+path = pathlib.Path(sys.argv[sys.argv.index('--output') + 1])
+path.write_bytes(pathlib.Path(__file__).with_name('installer').read_bytes())
+""" % sys.executable)
+                    curl.chmod(0o755)
+                else:
+                    rustup.parent.mkdir(parents=True)
+                    rustup.write_text(rustup_script)
+                    rustup.chmod(0o755)
+
+                calls = root / "calls"
+                result = subprocess.run(
+                    [sys.executable, str(INSTALLER), "stable", "clippy", "", "Lint toolchain setup"],
+                    env=dict(os.environ, PATH=str(root), CARGO_HOME=str(cargo_home),
+                             RUSTUP_HOME=str(root / "target" / ".ci-rustup"),
+                             GITHUB_PATH=str(github_path), CALLS=str(calls)),
+                    capture_output=True, text=True, timeout=10,
+                )
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertEqual(github_path.read_text().splitlines(), [str(rustup.parent)])
+                self.assertEqual("toolchain install" in calls.read_text(), bootstrap)
+                self.assertIn("default stable", calls.read_text())
+
     def test_progressing_install_can_outlast_the_timeout(self):
         for progress in ("output", "download"):
             with self.subTest(progress=progress), tempfile.TemporaryDirectory() as directory:

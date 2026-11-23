@@ -121,7 +121,7 @@ pub fn hole_favorites() -> Vec<soliddraft_model::hole_wizard::HoleFavorite> {
 
 /// Persists the Hole Wizard favorite presets to desktop settings or browser storage.
 pub fn save_hole_favorites(favorites: &[soliddraft_model::hole_wizard::HoleFavorite]) -> Result<(), NotKept> {
-    save_section("hole_favorites", favorites)
+    save_section("hole_favorites", &favorites.to_vec())
 }
 
 fn command_history_from(all: &Value) -> History {

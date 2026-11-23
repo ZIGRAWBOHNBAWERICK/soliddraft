@@ -634,7 +634,11 @@ impl HoleParams {
                 && let Some(ent) = sk.entities.iter_mut().find(|e| e.id == eid)
             {
                 ent.kind = sketch::EntityKind::Point { p };
-                sketch::solve::solve(sk, Some((sketch::PointRef::new(eid, 0), p)), true);
+                sketch::solve::solve(
+                    sk,
+                    Some(sketch::solve::Drag { point: sketch::PointRef::new(eid, 0), to: p }),
+                    true,
+                );
                 self.sync_points_from_sketch();
             }
         } else if let Some(slot) = self.points.get_mut(idx) {

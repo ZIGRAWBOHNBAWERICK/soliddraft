@@ -241,7 +241,7 @@ impl SolidDraftApp {
                     {
                         h.position_sketch = Some(sketch.clone());
                         h.sync_points_from_sketch();
-                        editor.refresh_preview(&self.state.doc);
+                        editor.refresh(&self.state.doc);
                     }
                     return;
                 }
@@ -590,7 +590,7 @@ impl SolidDraftApp {
                 {
                     h.position_sketch = Some(session.sketch);
                     h.sync_points_from_sketch();
-                    editor.refresh_preview(&self.state.doc);
+                    editor.refresh(&self.state.doc);
                 }
             }
             AppAction::SyncHolePositionSketch => {
@@ -1062,7 +1062,7 @@ impl SolidDraftApp {
                                             }
                                         }
                                         h.picking_target = None;
-                                        e.refresh_preview(&self.state.doc);
+                                        e.refresh(&self.state.doc);
                                     }
                                     None => {
                                         e.error = Some(
@@ -1096,7 +1096,7 @@ impl SolidDraftApp {
                                         && let Some(uv) = click_uv
                                     {
                                         h.add_position_point(uv);
-                                        e.refresh_preview(&self.state.doc);
+                                        e.refresh(&self.state.doc);
                                         return;
                                     }
                                     // A new hole's first face click also places its first
@@ -1106,7 +1106,7 @@ impl SolidDraftApp {
                                     if first && let Some(uv) = click_uv {
                                         h.set_position_point(0, uv);
                                     }
-                                    e.refresh_preview(&self.state.doc);
+                                    e.refresh(&self.state.doc);
                                 }
                                 None => {
                                     let label = self
@@ -1127,14 +1127,35 @@ impl SolidDraftApp {
                         (EditorParams::Hole(h), Some(Selection::Vertex(v)))
                             if h.picking_target == Some(crate::document::HolePickTarget::Vertex) =>
                         {
-                            match self.state.doc.model().vertex_ref(v) {
+                            let resolved = self.state.doc.vertex_position(v).and_then(|pos| {
+                                let target = soliddraft_kernel_api::Vec3::new(
+                                    f64::from(pos.x),
+                                    f64::from(pos.y),
+                                    f64::from(pos.z),
+                                );
+                                let model = self.state.doc.model();
+                                let body = model.body()?;
+                                let topo = model.kernel().topology(body).ok()?;
+                                let best = topo
+                                    .vertices
+                                    .iter()
+                                    .min_by(|a, b| {
+                                        (a.position - target)
+                                            .length()
+                                            .total_cmp(&(b.position - target).length())
+                                    })?;
+                                ((best.position - target).length() < 1e-2).then_some(best.id)
+                            });
+                            match resolved.ok_or_else(|| "Selected vertex could not be resolved.".to_owned()).and_then(
+                                |vid| self.state.doc.model().vertex_ref(vid).map_err(|err| err.to_string()),
+                            ) {
                                 Ok(vertex) => {
                                     h.ensure_wizard().end_condition =
                                         soliddraft_model::hole_wizard::HoleEndCondition::UpToVertex { vertex };
                                     h.picking_target = None;
-                                    e.refresh_preview(&self.state.doc);
+                                    e.refresh(&self.state.doc);
                                 }
-                                Err(err) => e.error = Some(err.to_string()),
+                                Err(err) => e.error = Some(err),
                             }
                             return;
                         }

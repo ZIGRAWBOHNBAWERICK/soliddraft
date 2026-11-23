@@ -124,7 +124,7 @@ pub fn show_contents(ui: &mut egui::Ui, state: &mut AppState) {
 
     if changed {
         if let Some(ed) = state.editor.as_mut() {
-            ed.refresh_preview(&state.doc);
+            ed.refresh(&state.doc);
         }
     }
     if let Some((msg, kind)) = note {
@@ -480,6 +480,7 @@ fn show_type_tab(ui: &mut egui::Ui, params: &mut HoleParams, note: &mut Option<(
                     }
                 });
 
+                let mut mark_custom = false;
                 match &mut params.head {
                     Some(HoleHead::Counterbore { diameter, depth }) => {
                         ui.horizontal(|ui| {
@@ -499,7 +500,7 @@ fn show_type_tab(ui: &mut egui::Ui, params: &mut HoleParams, note: &mut Option<(
                                 )
                             });
                             if r.changed() {
-                                params.ensure_wizard().custom_sizing = true;
+                                mark_custom = true;
                                 changed = true;
                             }
                         });
@@ -520,7 +521,7 @@ fn show_type_tab(ui: &mut egui::Ui, params: &mut HoleParams, note: &mut Option<(
                                 )
                             });
                             if r.changed() {
-                                params.ensure_wizard().custom_sizing = true;
+                                mark_custom = true;
                                 changed = true;
                             }
                         });
@@ -543,7 +544,7 @@ fn show_type_tab(ui: &mut egui::Ui, params: &mut HoleParams, note: &mut Option<(
                                 )
                             });
                             if r.changed() {
-                                params.ensure_wizard().custom_sizing = true;
+                                mark_custom = true;
                                 changed = true;
                             }
                         });
@@ -560,7 +561,7 @@ fn show_type_tab(ui: &mut egui::Ui, params: &mut HoleParams, note: &mut Option<(
                                 )
                             });
                             if r.changed() {
-                                params.ensure_wizard().custom_sizing = true;
+                                mark_custom = true;
                                 changed = true;
                             }
                         });
@@ -572,7 +573,7 @@ fn show_type_tab(ui: &mut egui::Ui, params: &mut HoleParams, note: &mut Option<(
                     let mut cone = matches!(params.tip, HoleTip::Cone { .. });
                     if ui.checkbox(&mut cone, "Drill-point tip").changed() {
                         params.tip = if cone { HoleTip::Cone { angle_deg: 118.0 } } else { HoleTip::Flat };
-                        params.ensure_wizard().custom_sizing = true;
+                        mark_custom = true;
                         changed = true;
                     }
                     if let HoleTip::Cone { angle_deg } = &mut params.tip {
@@ -580,11 +581,14 @@ fn show_type_tab(ui: &mut egui::Ui, params: &mut HoleParams, note: &mut Option<(
                             ui.label("Tip angle");
                             let r = ui.add(egui::DragValue::new(angle_deg).speed(1.0).range(30.0..=179.0).suffix("°"));
                             if r.changed() {
-                                params.ensure_wizard().custom_sizing = true;
+                                mark_custom = true;
                                 changed = true;
                             }
                         });
                     }
+                }
+                if mark_custom {
+                    params.ensure_wizard().custom_sizing = true;
                 }
 
                 let restore = ui.button("Restore Default Values");

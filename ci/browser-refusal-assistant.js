@@ -2,7 +2,7 @@
 // Build a block, accept the radius offered for a refused fillet, edit the fillet,
 // reopen the downloaded part, and make a reference plane from its geometry.
 function check(value, message) { if (!value) throw new Error(message); }
-const NEW_PART = [124, 143], RECTANGLE = [630, 52], FILE = [122, 15], NEW_FROM_MENU = [138, 42];
+const NEW_PART = [124, 143], EXTRUDE = [87, 145], RECTANGLE = [620, 52];
 const TOP_EDGE = [923, 406], TOP_FACE = [950, 310], FILLET_ROW = [380, 229];
 const COMMAND_LINE = [920, 797], CLOSE_DETAILS = [347, 92];
 check(await page.eval(() => location.search === '' && innerWidth === 1400 && innerHeight === 813),
@@ -108,19 +108,23 @@ async function command(name) {
 async function showRadius(radius) {
   const picked = await until(() => shown('shown_options'), options => options?.selected === 'Fillet1' && options.details,
     'The built fillet is not selected');
-  await click(center(picked.details));
-  const details = await until(() => shown('shown_details'), drawn => drawn?.title === 'Fillet1', 'No details for the fillet');
+  let details = await shown('shown_details');
+  for (let attempt = 0; details?.title !== 'Fillet1' && attempt < 3; attempt++) {
+    await click(center(picked.details));
+    await page.wait(750);
+    details = await shown('shown_details');
+  }
+  check(details?.title === 'Fillet1', 'No details for the fillet');
   check(Object.fromEntries(details.rows).Radius === `${radius} mm`, `The fillet has the wrong radius: ${JSON.stringify(details)}`);
   await click(CLOSE_DETAILS);
 }
 
 await click(NEW_PART);
 await features(0);
-await page.eval(() => sdMove(900, 450));
-await page.press('e');
-await page.wait(500);
+await click(EXTRUDE);
+await until(() => shown('shown_options'), options => options === null, 'Open the Extrude profile picker');
 await click(RECTANGLE);
-await page.press('Enter');
+await confirmForm();
 await features(1);
 await idle();
 await page.press('i');
@@ -154,8 +158,7 @@ await idle();
 await showRadius('5');
 await page.press('Control+s');
 await until(() => page.eval(async () => (await window.sdSaved)?.size || 0), size => size > 0, 'Save did not download the part');
-await click(FILE);
-await click(NEW_FROM_MENU);
+await command('new_part');
 await features(0);
 await page.eval(() => { window.sdReopen = true; return true; });
 await page.press('Control+o');

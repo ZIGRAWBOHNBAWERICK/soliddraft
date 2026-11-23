@@ -722,6 +722,24 @@ fn before_print_accuracy(id: &str, current: &mut Value) {
     assert_eq!(added, json!({"type": "number"}), "print accuracy is one optional number");
 }
 
+/// Projected and Detail gained agent tools: the canvas tools are as they were.
+fn before_agent_derived_views(id: &str, current: &mut Value) {
+    let params: &[&str] = match id {
+        "drawing_projected" => &["direction", "view"],
+        "drawing_detail" => &["center", "factor", "radius", "view"],
+        _ => return,
+    };
+    assert_eq!((current["agents"].as_str(), current["undo"].as_str()), (Some("mcp"), Some("step")), "{id}");
+    assert_eq!(current["tool"]["name"], id);
+    let mut keys: Vec<&str> =
+        current["tool"]["input"]["properties"].as_object().expect("tool inputs").keys().map(String::as_str).collect();
+    keys.sort_unstable();
+    assert_eq!(keys, params, "{id}'s inputs");
+    current["agents"] = json!("app");
+    current["undo"] = json!("none");
+    current["tool"] = Value::Null;
+}
+
 fn baseline() -> Value {
     serde_json::from_str(include_str!("fixtures/ribbon_registry/baseline.json")).expect("the frozen contract")
 }
@@ -872,6 +890,7 @@ fn command_ids_shortcuts_agent_schemas_and_availability_stay_compatible() {
         before_feature_pattern_source(id, &mut current);
         before_draft_pull(id, &mut current);
         before_print_accuracy(id, &mut current);
+        before_agent_derived_views(id, &mut current);
         if id == "check" {
             assert_eq!(current["agents"], "app", "Check opens its own report");
             current["agents"] = row["agents"].clone();

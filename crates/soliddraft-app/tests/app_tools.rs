@@ -266,6 +266,11 @@ fn every_tool_runs_without_a_window_and_undoes_as_its_row_says() {
         (Some(first.as_str()), Some(false), Some(true)),
         "{placed}"
     );
+    let folded = s.call("drawing_projected", json!({ "view": first, "direction": "down_right" }));
+    let made = &folded["drawing"]["sheets"][0]["views"][views.len() + 1];
+    assert_eq!((made["kind"].as_str(), made["parent"].as_str()), (Some("projected"), Some(first.as_str())), "{made}");
+    let detail = s.call("drawing_detail", json!({ "view": first, "center": [70, 45, 0], "radius": 8, "factor": 2 }));
+    assert_eq!(detail["placed"], "Detail B", "{detail}");
     s.call("drawing_hidden_lines", json!({ "view": first, "shown": false }));
     s.call("drawing_tangent_edges", json!({ "view": first, "tangent": "visible" }));
     s.call("drawing_crop", json!({ "view": first, "crop": [-30, -30, 30, 30] }));
@@ -670,8 +675,19 @@ fn every_tool_runs_without_a_window_and_undoes_as_its_row_says() {
     let urdf = s.call("assembly_export_urdf", json!({ "path": s.path("robot/rig.urdf") }));
     assert!(urdf["exported"]["links"].as_array().unwrap().len() >= 3);
     s.call("assembly_export_usd", json!({ "path": s.path("robot/rig.usda") }));
+    let at = s.call("model_summary", json!({}))["assembly"]["components"][1]["translation"].clone();
     let drawn = s.call("assembly_make_drawing", json!({}));
     assert!(!drawn["drawing"]["sheets"][0]["tables"][0]["bom"].as_array().unwrap().is_empty());
+    // Views derived from its front view, every part drawn by its kernel, and a PDF of them.
+    let front = drawn["drawing"]["sheets"][0]["views"][1]["id"].clone();
+    let cut =
+        s.call("drawing_section", json!({ "view": front, "through": at, "direction": "vertical", "flip": false }));
+    assert_eq!(cut["placed"], "Section A-A", "{cut}");
+    s.call("drawing_projected", json!({ "view": front, "direction": "right" }));
+    let detail = s.call("drawing_detail", json!({ "view": front, "center": at, "radius": 10, "factor": 2 }));
+    assert_eq!(detail["placed"], "Detail B", "{detail}");
+    let pdf = s.call("drawing_export_pdf", json!({ "path": s.path("rig.pdf") }));
+    assert_eq!((pdf["views"].as_u64(), pdf["method"].as_str()), (Some(5), Some("catallax")), "{pdf}");
     s.call("show_assembly", json!({}));
     let packed = s.call("assembly_pack_and_go", json!({ "folder": s.path("packed") }));
     assert!(packed["packed"]["files"].as_array().unwrap().len() >= 3);

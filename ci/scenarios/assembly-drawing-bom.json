@@ -238,10 +238,117 @@
       "arguments": {
         "path": "{bundle}/work/rig.pdf"
       },
-      "checks": [],
-      "refused": "drawn from the assembly's display meshes",
-      "absent": [
+      "checks": [
+        {
+          "pointer": "/result/views",
+          "equals": 2
+        },
+        {
+          "pointer": "/result/method",
+          "equals": "catallax"
+        }
+      ],
+      "files": [
         "{bundle}/work/rig.pdf"
+      ]
+    },
+    {
+      "tool": "drawing_section",
+      "arguments": {
+        "view": "Front view",
+        "through": [
+          5,
+          0,
+          7
+        ],
+        "direction": "vertical",
+        "flip": false
+      },
+      "checks": [
+        {
+          "pointer": "/result/placed",
+          "equals": "Section A-A"
+        }
+      ]
+    },
+    {
+      "tool": "drawing_section",
+      "arguments": {
+        "view": "Front view",
+        "through": [
+          60,
+          0,
+          7
+        ],
+        "direction": "vertical",
+        "flip": false
+      },
+      "checks": [],
+      "refused": "crosses no part of the assembly"
+    },
+    {
+      "tool": "drawing_projected",
+      "arguments": {
+        "view": "Front view",
+        "direction": "up"
+      },
+      "checks": [
+        {
+          "pointer": "/result/drawing/sheets/0/views",
+          "length": 4
+        }
+      ]
+    },
+    {
+      "tool": "drawing_detail",
+      "arguments": {
+        "view": "Front view",
+        "center": [
+          10,
+          10,
+          17
+        ],
+        "radius": 8,
+        "factor": 2
+      },
+      "checks": [
+        {
+          "pointer": "/result/placed",
+          "equals": "Detail B"
+        },
+        {
+          "pointer": "/result/drawing/sheets/0/views",
+          "length": 5
+        }
+      ]
+    },
+    {
+      "tool": "drawing_export_pdf",
+      "arguments": {
+        "path": "{bundle}/work/rig-views.pdf"
+      },
+      "checks": [
+        {
+          "pointer": "/result/views",
+          "equals": 5
+        },
+        {
+          "pointer": "/result/method",
+          "equals": "catallax"
+        }
+      ],
+      "files": [
+        "{bundle}/work/rig-views.pdf"
+      ]
+    },
+    {
+      "tool": "drawing_save",
+      "arguments": {
+        "path": "{bundle}/work/rig.dwdrw"
+      },
+      "checks": [],
+      "files": [
+        "{bundle}/work/rig.dwdrw"
       ]
     },
     {
@@ -401,7 +508,30 @@
         {
           "pointer": "/summary/drawing/sheets/0/title_block/document_type",
           "equals": "Assembly drawing"
+        },
+        {
+          "pointer": "/summary/drawing/sheets/0/views",
+          "length": 5
         }
+      ]
+    },
+    {
+      "tool": "drawing_export_dxf",
+      "arguments": {
+        "path": "{bundle}/work/rig.dxf"
+      },
+      "checks": [
+        {
+          "pointer": "/result/views",
+          "equals": 5
+        },
+        {
+          "pointer": "/result/method",
+          "equals": "catallax"
+        }
+      ],
+      "files": [
+        "{bundle}/work/rig.dxf"
       ]
     }
   ]

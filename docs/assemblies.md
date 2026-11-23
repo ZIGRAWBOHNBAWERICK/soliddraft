@@ -181,13 +181,21 @@ or empty folder, so the folder opens anywhere on its own
 
 ## Drawings of assemblies
 
-A drawing's model can be an assembly (`crates/soliddraft-drawing/src/assembly.rs`). Its
-views draw every shown part from its display mesh, placed where the assembly puts it, with
-hidden lines removed across all the parts' triangles together, so one part hides another.
-Each curve keeps the occurrence it belongs to. The line work is as faithful as the display
-meshes, and says so: every curve is a polygon. A view can show the exploded view.
-Exports draw only Catallax's own line work and Catallax does not yet draw several placed
-parts in one view, so PDF, SVG and DXF exports refuse a drawing of an assembly by name.
+A drawing's model can be an assembly (`crates/soliddraft-drawing/src/assembly.rs`). Each
+shown part is rebuilt on the kernel at the revision the assembly pins, and its line work is
+Catallax's own view of that part, placed where the assembly puts it
+(`crates/soliddraft-drawing/src/placed.rs`). A part the kernel refuses refuses the view by
+name, as in a part drawing, and so does a part with no exact body, such as a mesh reference.
+No kernel query sees two parts at once, so where one part hides another the hiding is
+measured against the other parts' meshes; a curve that measurement decided is labelled
+approximate, and the view carries the code `assembly.part-visibility`. Each curve keeps the
+occurrence it belongs to. A view can show the exploded view. PDF, SVG and DXF exports
+work as for a part drawing.
+
+Projected, section and detail views come off an assembly drawing's views as off a part
+drawing's (`drawing_projected`, `drawing_section` and `drawing_detail` over MCP). A section
+cuts every part with its own kernel, so its hatch regions are the kernel's, and a cutting
+line that meets no part is refused.
 
 The bill of materials lists parts only: one row per part document, in the order the tree
 first places it, with its name, its file and how many times it is placed. Hidden parts
@@ -197,8 +205,9 @@ visible edge of one occurrence of that part, and sits outside the view clear of 
 Rebuild brings the drawing to the saved assembly as one undo step: every base view's line
 work at its scale, the BOM's rows, each balloon moved onto its occurrence and renumbered
 from its row, a balloon for every new row, and the new pin. A balloon whose occurrence is
-gone, or shows no edge in the view, is marked as needing attention. Section, detail and
-projected views of assemblies are follow-ups.
+gone, or shows no edge in the view, is marked as needing attention. Rebuild recomputes the
+projected, section and detail views too, and moves each cutting line and detail circle
+with the model point it went through.
 
 ## Robotics export
 

@@ -2870,7 +2870,14 @@ fn drawing_registry() -> Vec<CommandSpec> {
             .when(|s| sheet_view(s).is_some())
             .lit(|s| drawing_tool_is(s, |t| matches!(t, DrawingTool::PlaceView(PlaceKind::Projected { .. }))))
             .hint(|s| sheet_view(s).is_none().then(|| "Select a view first, then fold a new view off it".into()))
-            .app_only(CANVAS),
+            .agents(
+                Agents::Mcp,
+                "Folds a new view off a view on one of eight sides, at its scale: in line with it on a square side, a \
+                 pictorial view at a free place on a diagonal one. A part drawing needs the drawing's part open; an \
+                 assembly drawing draws every part from its kernel.",
+                app::projected_params,
+            )
+            .undo(Undo::Step),
         drawing_tool!(
             "drawing_section", "Section", Icon::Section,
             "Draw a cutting line on a view, pick the direction, place the section",
@@ -2882,7 +2889,7 @@ fn drawing_registry() -> Vec<CommandSpec> {
             Agents::Mcp,
             "A cutting line through a model point across the view, horizontal or vertical on the sheet. The section \
              is placed in line with the view on the side the sheet's projection angle puts it, with the drawing's \
-             next letter. The open part must be the drawing's.",
+             next letter. A part drawing needs the drawing's part open; an assembly drawing cuts every part with its kernel.",
             app::section_params,
         )
         .undo(Undo::Step),
@@ -2891,7 +2898,14 @@ fn drawing_registry() -> Vec<CommandSpec> {
             DrawingTool::Detail => DrawingTool::Detail
         )
         .on(Views, "Derived", Large)
-            .app_only(CANVAS),
+        .agents(
+            Agents::Mcp,
+            "Magnifies the region of a view inside a circle round a model point, with the drawing's next letter, \
+             placed at a free place near the view. A part drawing needs the drawing's part open; an assembly drawing \
+             draws every part from its kernel.",
+            app::detail_params,
+        )
+        .undo(Undo::Step),
         drawing_tool!(
             "drawing_auxiliary", "Auxiliary", Icon::Plane, "Pick an edge; the view unfolds square to it",
             DrawingTool::Auxiliary => DrawingTool::Auxiliary

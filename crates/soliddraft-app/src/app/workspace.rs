@@ -723,7 +723,10 @@ impl SolidDraftApp {
             // Slim left toggle rail (Tree, History, Values, Props + Clear).
             crate::left_bar::panel(root, &mut self.state);
             let window_width = root.available_width();
-            if self.state.tree_shown() || crate::feature_panel::active(&self.state) {
+            if self.state.tree_shown()
+                || crate::feature_panel::active(&self.state)
+                || crate::hole_wizard_panel::active(&self.state)
+            {
                 self.side_panel(root, Side::Tree, window_width);
             }
             // Contextual inline form strip sits over the viewport without shifting the side column.

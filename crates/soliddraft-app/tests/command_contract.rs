@@ -1112,6 +1112,14 @@ fn command_ids_shortcuts_agent_schemas_and_availability_stay_compatible() {
             assert_eq!((row["agents"].as_str(), current["agents"].as_str()), (Some("none"), Some("app")));
             current["agents"] = row["agents"].clone();
         }
+        // S opens the shortcut menu in every workspace: a command that had S gives it up
+        // and keeps every other key.
+        if let (Some(was), Some(now)) = (row["keys"].as_array(), current["keys"].as_array()) {
+            let without_s: Vec<_> = was.iter().filter(|key| key["chord"] != "S").cloned().collect();
+            if without_s.len() < was.len() && *now == without_s {
+                current["keys"] = row["keys"].clone();
+            }
+        }
         assert_eq!(&current, row, "{id} changed");
     }
     for list in ["agent_tools", "verbs"] {

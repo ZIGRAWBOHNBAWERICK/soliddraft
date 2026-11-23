@@ -281,8 +281,9 @@ fn registry_tools_are_named_on_the_strip_or_in_a_more_menu_and_run_from_there() 
 #[test]
 fn palette_tiles_pin_command_chips_by_id() {
     let case = ribbon::case("tool-palette-chips");
-    // Wide enough for Shell's card: a tool is dragged from the strip, not from a More menu.
-    let mut app = ribbon::app_at(ribbon::plate(), vec2(1600.0, 900.0), 1.0);
+    // Wide enough for Shell's card beside the Create menu: a tool is dragged from the
+    // strip, not from a More menu.
+    let mut app = ribbon::app_at(ribbon::plate(), vec2(1700.0, 900.0), 1.0);
 
     app.run_steps(8);
     case.run(&mut app, |app| {

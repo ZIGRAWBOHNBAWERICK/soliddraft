@@ -52,7 +52,10 @@ fn plate(doc: &mut Document) -> (FeatureId, FeatureId) {
     solve(&mut s, None, true);
     let sketch = add(
         doc,
-        FeatureKind::Sketch(SketchFeature { plane: SketchPlane::Datum { datum: DatumPlane::Top, offset: 0.0 }, sketch: s }),
+        FeatureKind::Sketch(SketchFeature {
+            plane: SketchPlane::Datum { datum: DatumPlane::Top, offset: 0.0 },
+            sketch: s,
+        }),
     );
     (sketch, add(doc, extrude(sketch, ExtrudeOptions::default())))
 }

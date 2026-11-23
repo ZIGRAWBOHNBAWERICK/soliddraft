@@ -12,11 +12,14 @@ await page.eval(() => {
     const at = { clientX: x, clientY: y, bubbles: true, cancelable: true,
       pointerId: 1, pointerType: 'mouse', isPrimary: true, button: 0 };
     canvas.dispatchEvent(new PointerEvent('pointermove', { ...at, buttons: 0 }));
+    // Each press and release reaches the app in a frame of its own; a double-click's two
+    // clicks still fall well inside its time.
+    const frame = () => new Promise(resolve => requestAnimationFrame(() => resolve()));
     for (let i = 0; i < count; i++) {
       canvas.dispatchEvent(new PointerEvent('pointerdown', { ...at, buttons: 1 }));
-      await new Promise(resolve => setTimeout(resolve, 50));
+      await frame();
       canvas.dispatchEvent(new PointerEvent('pointerup', { ...at, buttons: 0 }));
-      await new Promise(resolve => setTimeout(resolve, 50));
+      await frame();
     }
     return true;
   };

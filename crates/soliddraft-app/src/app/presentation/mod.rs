@@ -122,7 +122,10 @@ impl SolidDraftApp {
     pub(super) fn side_panel(&mut self, root: &mut egui::Ui, side: Side, window_width: f32) {
         // The feature property panel shows even when the user cleared the side column; the
         // column clears again when the feature closes.
-        if !self.state.tree_shown() && !crate::feature_panel::active(&self.state) {
+        if !self.state.tree_shown()
+            && !crate::feature_panel::active(&self.state)
+            && !crate::hole_wizard_panel::active(&self.state)
+        {
             return;
         }
         let frame = egui::Frame::new().fill(theme::panel()).inner_margin(egui::Margin::ZERO);

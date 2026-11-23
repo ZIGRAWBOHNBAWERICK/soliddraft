@@ -23,6 +23,10 @@ use soliddraft_model::hole_wizard::{HoleEndCondition, HoleFit, HoleStandard, Hol
 use ux_tools::{STANDARD, launch, settle};
 
 fn click(app: &mut App, label: &str) {
+    // The wizard shares the side column with the hole's form and scrolls: bring the
+    // control into view first, or the pointer lands on whatever covers its place.
+    app.get_by_label(label).scroll_to_me();
+    app.run_steps(24);
     let rect = app.get_by_label(label).rect();
     ribbon::click_at(app, rect.center());
     settle(app);

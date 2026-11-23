@@ -43,7 +43,7 @@ pub(in crate::app) fn pane(ui: &mut egui::Ui, state: &mut AppState) {
     // While a feature is created or edited the side column is its property panel, with the
     // tree kept below it: planes, axes and features are still picked from the tree. The
     // toggled panes come back when the feature closes.
-    if crate::feature_panel::active(state) {
+    if crate::feature_panel::active(state) || crate::hole_wizard_panel::active(state) {
         feature_pane(ui, state);
         return;
     }
@@ -209,6 +209,18 @@ fn feature_pane(ui: &mut egui::Ui, state: &mut AppState) {
     // A hole is set up in the Hole Wizard, which takes the tree's place as the SOLIDWORKS
     // PropertyManager does. The hole's own form (OK, depths, thread) sits under it and
     // takes what its open sections need, up to half the column.
+    // While its position sketch is open the hole's form steps aside and the wizard,
+    // which closes the sketch, takes the whole column.
+    if crate::hole_wizard_panel::active(state) && !crate::feature_panel::active(state) {
+        let mut wizard = ui.new_child(
+            egui::UiBuilder::new().id_salt("hole_wizard_panel").max_rect(full.shrink2(vec2(10.0, 8.0))).layout(layout),
+        );
+        wizard.set_clip_rect(full.intersect(ui.clip_rect()));
+        crate::hole_wizard_panel::show_contents(&mut wizard, state);
+        ui.allocate_rect(full, Sense::hover());
+        ui.painter().vline(full.right() - 0.5, full.y_range(), egui::Stroke::new(1.0, theme::line()));
+        return;
+    }
     if crate::hole_wizard_panel::active(state) {
         let most = (full.height() * 0.5).max(160.0).min(full.height());
         let wanted = crate::feature_panel::needed_height(ui.ctx()).unwrap_or(most);

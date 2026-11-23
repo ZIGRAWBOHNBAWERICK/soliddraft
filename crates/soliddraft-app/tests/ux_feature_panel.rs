@@ -133,7 +133,10 @@ fn extrude_numbers_accept_keyboard_input() {
         assert!(app.query_by_label("Flip direction").is_some(), "the flip stays a labelled checkbox");
         assert!(app.query_by_label("OK").is_some() && app.query_by_label("Cancel").is_some());
 
-        // Keyboard: Tab walks the numbers in reading order.
+        // Keyboard: Tab walks the numbers in reading order. The unfolded panel scrolls in
+        // the side column, so the field comes into view first.
+        app.get_by_label("Width value").scroll_to_me();
+        app.run_steps(24);
         let width = app.get_by_label("Width value").rect();
         ribbon::click_at(app, width.center());
         app.run_steps(2);

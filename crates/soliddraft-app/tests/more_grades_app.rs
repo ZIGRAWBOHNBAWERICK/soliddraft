@@ -24,10 +24,24 @@ fn button(app: &mut App, label: &str) {
     app.run_steps(4);
 }
 
+/// Unfolds the feature panel's folded sections, where the grade fields are.
+fn unfold(app: &mut App) {
+    use egui_kittest::kittest::NodeT;
+    for _ in 0..16 {
+        let Some(label) = app.query_all_by_label_contains("Unfold ").next().and_then(|n| n.accesskit_node().label())
+        else {
+            break;
+        };
+        app.get_by_label(&label).scroll_to_me();
+        app.run_steps(24);
+        app.get_by_label(&label).click();
+        app.run_steps(6);
+    }
+}
+
 fn field(app: &mut App, label: &str, text: &str) {
-    if app.query_by_label(label).is_none() && !app.state().state.form_bar.expanded {
-        app.get_by_label_contains("More (").click();
-        app.run_steps(8);
+    if app.query_by_label(label).is_none() {
+        unfold(app);
     }
     app.get_by_label(label).scroll_to_me();
     app.run_steps(24);
@@ -97,8 +111,7 @@ fn last(app: &App) -> (FeatureKind, FeatureStatus) {
 /// Opens the editor for `command` and shows every row of its form.
 fn open(app: &mut App, command: &str) {
     button(app, command);
-    app.get_by_label_contains("More (").click();
-    app.run_steps(8);
+    unfold(app);
 }
 
 fn shown(app: &App, label: &str) -> bool {
@@ -155,8 +168,7 @@ fn catallax_grades_build_and_reopen_from_both_field_editors() {
                 field(&mut app, "Beam radius span value", "5");
                 button(&mut app, "OK");
                 assert!(refusal(&app).is_some_and(|why| why.contains("at least one face")), "{:?}", refusal(&app));
-                app.get_by_label_contains("More (").click();
-                app.run_steps(8);
+                unfold(&mut app);
                 click_model(&mut app, glam::Vec3::new(1.0, 1.0, 30.0));
                 assert_picked_distance(&app);
 

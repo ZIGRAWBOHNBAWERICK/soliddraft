@@ -173,13 +173,16 @@ fn unchanged_dirty_document_retries_after_a_failed_recovery_write() {
     let t0 = Instant::now();
     assert_eq!(session.tick(&doc, None, KERNEL, t0), Some(Duration::from_secs(1)), "wake for the pending write result");
     session.flush();
+    // The flush records the failed write on the real clock and the retry waits from then,
+    // so the later ticks count from that moment: a slow write must not make them early.
+    let failed = Instant::now();
     std::fs::remove_dir(&copy).unwrap();
-    session.tick(&doc, None, KERNEL, t0 + Duration::from_secs(1));
-    session.tick(&doc, None, KERNEL, t0 + Duration::from_secs(11));
+    session.tick(&doc, None, KERNEL, failed + Duration::from_secs(1));
+    session.tick(&doc, None, KERNEL, failed + Duration::from_secs(11));
     session.flush();
     assert!(copy.is_file(), "the same dirty revision needs a retry without an edit");
     assert_eq!(
-        session.tick(&doc, None, KERNEL, t0 + Duration::from_secs(12)),
+        session.tick(&doc, None, KERNEL, failed + Duration::from_secs(12)),
         None,
         "a persisted unchanged document should stop polling"
     );

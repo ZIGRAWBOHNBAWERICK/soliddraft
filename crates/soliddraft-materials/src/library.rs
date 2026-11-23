@@ -499,7 +499,13 @@ note = "weighed"
             for m in &lib.materials {
                 let one = Library { materials: vec![m.clone()], ..lib.clone() };
                 let written = one.to_toml();
-                assert_eq!(written.contains("provenance"), !m.provenance.is_empty(), "{} {} provenance", lib.name, m.name);
+                assert_eq!(
+                    written.contains("provenance"),
+                    !m.provenance.is_empty(),
+                    "{} {} provenance",
+                    lib.name,
+                    m.name
+                );
             }
         }
     }

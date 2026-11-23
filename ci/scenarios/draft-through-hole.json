@@ -675,7 +675,7 @@
           "contains": "the face now faces [0.996, 0.0, 0.087] instead of [0.999, 0.0, 0.052]"
         }
       ],
-      "drawing": "Isometric view: view_curves failed (status 0): numbers.operation-budget",
+      "drawing": true,
       "label": "draft edit",
       "exports": [
         {

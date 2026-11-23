@@ -674,7 +674,7 @@
         "feature": "Draft1",
         "angle": 5
       },
-      "drawing": "Front view: view_curves failed (status 0): numbers.operation-budget",
+      "drawing": true,
       "label": "draft edit",
       "exports": [
         {

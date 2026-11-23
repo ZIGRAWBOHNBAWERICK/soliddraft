@@ -35,9 +35,6 @@ pub struct Rules {
     pub refuse_proof_reservation: bool,
     /// Delays the next drawing view to exercise native request handling.
     pub drawing_delay: std::time::Duration,
-    /// Grade kinds this kernel claims to build, as a later Catallax would; Catallax
-    /// itself still answers the build.
-    pub accept_grades: Vec<GradeKind>,
 }
 
 impl Gated {
@@ -80,9 +77,6 @@ impl Gated {
 }
 impl Kernel for Gated {
     fn field_grade(&self, field: GradedField, kind: GradeKind) -> KernelResult<()> {
-        if self.rules.lock().unwrap().accept_grades.contains(&kind) {
-            return Ok(());
-        }
         self.inner.field_grade(field, kind)
     }
     fn edge_drawing(&self, body: BodyId, edge: EdgeId) -> KernelResult<drawing::ViewCurve> {

@@ -126,8 +126,7 @@ fn settings(name: &str, accuracy_mm: f64, min_detail_mm: f64) -> KernelResult<Se
 }
 
 /// The native spelling of a grade: a linear grade's anchors are part points on its axis,
-/// and a distance grade names its faces through `face` (the skin is every face). Catallax
-/// has no radial or point grade function, so those are refused here, by name.
+/// and a distance grade names its faces through `face` (the skin is every face).
 fn grade(
     grade: &Grade,
     what: &str,
@@ -154,17 +153,26 @@ fn grade(
             far: native::number(distance.far, what)?,
             span: native::number(distance.span, &format!("{what} grade span"))?,
         },
-        Grade::Radial(_) | Grade::Point(_) => return Err(missing_grade(grade.kind())),
+        Grade::Radial(radial) => {
+            let mut direction = [0.0; 3];
+            direction[radial.axis.index()] = 1.0;
+            catallax_recipe::Grade::Radial {
+                origin: native::point(Vec3::from(radial.through), "grade axis origin")?,
+                direction: native::vector(Vec3::from(direction), "grade axis direction")?,
+                r0: native::number(radial.from, "grade start radius")?,
+                r1: native::number(radial.to, "grade end radius")?,
+                start: native::number(radial.start, what)?,
+                end: native::number(radial.end, what)?,
+            }
+        }
+        Grade::Point(point) => catallax_recipe::Grade::Point {
+            centre: native::point(Vec3::from(point.centre), "grade centre")?,
+            r0: native::number(point.from, "grade start radius")?,
+            r1: native::number(point.to, "grade end radius")?,
+            start: native::number(point.start, what)?,
+            end: native::number(point.end, what)?,
+        },
     })
-}
-
-/// The refusal for a grade Catallax has no function for.
-fn missing_grade(kind: GradeKind) -> KernelError {
-    KernelError::Unsupported(format!(
-        "{} grade: Catallax has no {} grade function at this version",
-        kind.name(),
-        kind.name()
-    ))
 }
 
 /// Whether Catallax builds a field driven by this kind of grade, answered by Catallax's
@@ -181,7 +189,15 @@ pub(super) fn grade_support(field: GradedField, kind: GradeKind) -> KernelResult
             Grade::Linear(LinearGrade { axis: GradeAxis::Z, from: 0.0, to: 10.0, start: near, end: far })
         }
         GradeKind::Distance => Grade::Distance(DistanceGrade { faces: GradeFaces::Skin, near, far, span: 10.0 }),
-        GradeKind::Radial | GradeKind::Point => return Err(missing_grade(kind)),
+        GradeKind::Radial => Grade::Radial(RadialGrade {
+            axis: GradeAxis::Z,
+            through: [0.0; 3],
+            from: 0.0,
+            to: 10.0,
+            start: near,
+            end: far,
+        }),
+        GradeKind::Point => Grade::Point(PointGrade { centre: [0.0; 3], from: 0.0, to: 10.0, start: near, end: far }),
     };
     let what = match field {
         GradedField::LatticeRadius => "density",

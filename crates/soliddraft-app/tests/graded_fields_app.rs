@@ -119,7 +119,12 @@ fn the_editor_grades_d0s_beam_radius_along_z() {
     field(&mut app, "Cell size value", "100");
     assert!(app.query_by_label("Beam radius").is_some(), "the designed label");
     unfold(&mut app);
-    button(&mut app, "Linear along an axis");
+    app.get_by_label("Beam radius grade").scroll_to_me();
+    app.run_steps(24);
+    app.get_by_label("Beam radius grade").click();
+    app.run_steps(4);
+    app.get_by_label("Linear along an axis").click();
+    app.run_steps(4);
     button(&mut app, "z");
     for (name, value) in [("from", "20"), ("to", "30"), ("start", "1"), ("end", "2")] {
         field(&mut app, &format!("Beam radius {name} value"), value);

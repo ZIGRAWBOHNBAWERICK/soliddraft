@@ -226,14 +226,15 @@ fn labeled_button(ui: &mut egui::Ui, caption: &str, accessible: &str, icon: Icon
 /// Display style menu modeled on `captain-attachment.png`:
 /// Shaded with edges, Shaded, Wireframe, plus Coming soon slots for Hidden edges & Translucent.
 fn display_style_menu(ui: &mut egui::Ui, current: DisplayMode, events: &mut ViewportEvents) {
-    ui.set_min_width(228.0);
+    let row_w = 258.0;
+    ui.set_width(row_w);
     for (mode, icon) in [
         (DisplayMode::ShadedWithEdges, Icon::Display),
         (DisplayMode::Shaded, Icon::Extrude),
         (DisplayMode::Wireframe, Icon::Wireframe),
     ] {
         let selected = current == mode;
-        let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 28.0), Sense::click());
+        let (rect, resp) = ui.allocate_exact_size(vec2(row_w, 28.0), Sense::click());
         resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, selected, mode.label()));
         if selected {
             ui.painter().rect_filled(rect, CornerRadius::same(6), theme::accent_soft());
@@ -274,7 +275,7 @@ fn display_style_menu(ui: &mut egui::Ui, current: DisplayMode, events: &mut View
 }
 
 fn coming_soon_display_row(ui: &mut egui::Ui, icon: Icon, label: &str) {
-    let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 26.0), Sense::hover());
+    let (rect, resp) = ui.allocate_exact_size(vec2(258.0, 26.0), Sense::hover());
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, false, label));
     let muted = theme::muted().gamma_multiply(0.75);
     icons::paint(

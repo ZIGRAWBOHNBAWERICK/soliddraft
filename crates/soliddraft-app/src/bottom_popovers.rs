@@ -4,7 +4,7 @@
 //! 3. Default units for the current file (in, ft, yd, mm, cm, m)
 
 use crate::icons::{self, Icon};
-use crate::state::{AppAction, AppState, DisplayUnit};
+use crate::state::{AppState, DisplayUnit};
 use crate::theme;
 use egui::{Align2, CornerRadius, Rect, RectAlign, Sense, Stroke, StrokeKind, pos2, vec2};
 
@@ -464,16 +464,23 @@ fn physical_analysis_control(ui: &mut egui::Ui, state: &mut AppState) {
                         ui.end_row();
                     });
                 } else {
-                    if phys.requested_body != Some(rev) && state.doc.proof_state().current_proved_display() {
+                    let target_feature =
+                        state.doc.features.iter().rev().find(|f| f.body == Some(body)).map(|f| f.id);
+                    if phys.requested_body != Some(rev)
+                        && state.doc.proof_state().current_proved_display()
+                        && let Some(feat_id) = target_feature
+                    {
                         phys.requested_body = Some(rev);
-                        state.push(AppAction::MeasureMassProperties);
+                        let _ = state.mass.request(&state.doc, feat_id, ui.ctx());
                     }
                     ui.horizontal(|ui| {
                         ui.spinner();
                         ui.label(egui::RichText::new("Computing exact physical properties…").color(theme::muted()));
                     });
-                    if ui.small_button("Compute now").clicked() {
-                        state.push(AppAction::MeasureMassProperties);
+                    if let Some(feat_id) = target_feature
+                        && ui.small_button("Compute now").clicked()
+                    {
+                        let _ = state.mass.request(&state.doc, feat_id, ui.ctx());
                     }
                 }
             } else {
@@ -531,12 +538,13 @@ fn units_control(ui: &mut egui::Ui, state: &mut AppState) {
         .align(RectAlign::TOP_END)
         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
         .show(|ui| {
-            ui.set_min_width(180.0);
+            let row_w = 196.0;
+            ui.set_width(row_w);
             ui.label(egui::RichText::new("Default units for current file").size(11.0).color(theme::muted()));
             ui.separator();
             for unit in DisplayUnit::ALL {
                 let is_current = state.display_unit == unit;
-                let (rect, item) = ui.allocate_exact_size(vec2(ui.available_width(), 24.0), Sense::click());
+                let (rect, item) = ui.allocate_exact_size(vec2(row_w, 24.0), Sense::click());
                 item.widget_info(|| {
                     egui::WidgetInfo::selected(egui::WidgetType::Button, true, is_current, unit.name())
                 });

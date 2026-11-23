@@ -669,11 +669,19 @@ impl Preferences {
 /// and drops it when closed.
 pub fn window(ctx: &egui::Context, prefs: &mut Option<Preferences>, state: &mut crate::state::AppState) {
     let Some(p) = prefs.as_mut() else { return };
+    if !p.is_capturing_key()
+        && p.capture.is_none()
+        && !egui::Popup::is_any_open(ctx)
+        && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
+    {
+        p.cancel_and_close();
+    }
     let mut open = true;
     egui::Window::new("Preferences")
         .open(&mut open)
-        .default_size([980.0, 640.0])
-        .min_size([700.0, 420.0])
+        .default_size([960.0, 620.0])
+        .min_size([700.0, 440.0])
+        .max_size([1120.0, 760.0])
         .collapsible(false)
         .show(ctx, |ui| p.ui(ui));
     for change in p.take_changes() {

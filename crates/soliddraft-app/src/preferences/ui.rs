@@ -109,71 +109,90 @@ pub(super) fn show(p: &mut Preferences, ui: &mut egui::Ui) {
     theme::hline(ui);
 
     // 2. Main 2-column body (grouped left nav + Profile footer | right content page).
-    let footer_h = 44.0;
-    let body_h = (ui.available_height() - footer_h).max(200.0);
+    let footer_h = 46.0;
+    let body_h = (ui.available_height() - footer_h).max(240.0);
+    let total_w = ui.available_width();
+    let nav_w = 212.0;
+    let content_w = (total_w - nav_w - 10.0).max(320.0);
     ui.allocate_ui_with_layout(
-        vec2(ui.available_width(), body_h),
+        vec2(total_w, body_h),
         egui::Layout::left_to_right(egui::Align::Min),
         |ui| {
-            // Left grouped navigation rail (`208px`, `--pane-head` fill)
-            egui::Frame::new()
-                .fill(theme::panel_header())
-                .inner_margin(egui::Margin::symmetric(8, 8))
-                .show(ui, |ui| {
-                    ui.set_width(196.0);
-                    ui.set_height((body_h - 16.0).max(160.0));
-                    let profile_h = 52.0;
-                    let nav_h = (ui.available_height() - profile_h).max(80.0);
-                    egui::ScrollArea::vertical()
-                        .id_salt("settings_categories")
-                        .max_height(nav_h)
-                        .auto_shrink([false, false])
-                        .show(ui, |ui| categories_list(p, ui));
-                    ui.add_space(4.0);
-                    theme::hline(ui);
-                    ui.add_space(4.0);
-                    profile_selector(ui);
-                });
+            // Left grouped navigation rail (`212px`, `--pane-head` fill)
+            ui.allocate_ui_with_layout(
+                vec2(nav_w, body_h),
+                egui::Layout::top_down(egui::Align::Min),
+                |ui| {
+                    egui::Frame::new()
+                        .fill(theme::panel_header())
+                        .inner_margin(egui::Margin::symmetric(8, 8))
+                        .show(ui, |ui| {
+                            ui.set_width(nav_w - 16.0);
+                            ui.set_height((body_h - 16.0).max(180.0));
+                            ui.vertical(|ui| {
+                                let profile_h = 54.0;
+                                let nav_h = (body_h - 16.0 - profile_h).max(100.0);
+                                egui::ScrollArea::vertical()
+                                    .id_salt("settings_categories")
+                                    .max_height(nav_h)
+                                    .auto_shrink([false, false])
+                                    .show(ui, |ui| categories_list(p, ui));
+                                ui.add_space(4.0);
+                                theme::hline(ui);
+                                ui.add_space(4.0);
+                                profile_selector(ui);
+                            });
+                        });
+                },
+            );
 
             ui.separator();
 
             // Right content surface (`#FFFFFF`)
-            egui::Frame::new()
-                .fill(theme::panel())
-                .inner_margin(egui::Margin::symmetric(14, 10))
-                .show(ui, |ui| {
-                    ui.set_min_width(0.0);
-                    ui.set_height((body_h - 20.0).max(160.0));
-                    egui::ScrollArea::vertical()
-                        .id_salt("settings_page")
-                        .auto_shrink([false, false])
+            ui.allocate_ui_with_layout(
+                vec2(content_w, body_h),
+                egui::Layout::top_down(egui::Align::Min),
+                |ui| {
+                    egui::Frame::new()
+                        .fill(theme::panel())
+                        .inner_margin(egui::Margin::symmetric(14, 10))
                         .show(ui, |ui| {
-                            if p.search.trim().is_empty() {
-                                match p.page {
-                                    MOUSE => mouse_page(p, ui),
-                                    ORBIT_ZOOM => orbit_zoom_page(p, ui),
-                                    VIEW_KEYS => view_keys_page(p, ui),
-                                    GRID_AND_PLANES => grid_and_planes_page(p, ui),
-                                    SHORTCUTS => shortcuts_page(p, ui),
-                                    AUTOSAVE => autosave_page(p, ui),
-                                    id => {
-                                        if let Some(c) = super::reserved_category(id) {
-                                            ui.heading(c.label);
-                                            ui.add_space(4.0);
-                                            ui.label("Coming soon");
+                            ui.set_width((content_w - 28.0).max(280.0));
+                            ui.set_height((body_h - 20.0).max(180.0));
+                            ui.vertical(|ui| {
+                                egui::ScrollArea::vertical()
+                                    .id_salt("settings_page")
+                                    .auto_shrink([false, false])
+                                    .show(ui, |ui| {
+                                        if p.search.trim().is_empty() {
+                                            match p.page {
+                                                MOUSE => mouse_page(p, ui),
+                                                ORBIT_ZOOM => orbit_zoom_page(p, ui),
+                                                VIEW_KEYS => view_keys_page(p, ui),
+                                                GRID_AND_PLANES => grid_and_planes_page(p, ui),
+                                                SHORTCUTS => shortcuts_page(p, ui),
+                                                AUTOSAVE => autosave_page(p, ui),
+                                                id => {
+                                                    if let Some(c) = super::reserved_category(id) {
+                                                        ui.heading(c.label);
+                                                        ui.add_space(4.0);
+                                                        ui.label("Coming soon");
+                                                    }
+                                                }
+                                            }
+                                        } else {
+                                            results(p, ui);
                                         }
-                                    }
-                                }
-                            } else {
-                                results(p, ui);
-                            }
-                            if let Some(Message { text, error }) = &p.message {
-                                ui.add_space(8.0);
-                                let color = if *error { theme::error() } else { theme::ok() };
-                                ui.label(egui::RichText::new(text).color(color));
-                            }
+                                        if let Some(Message { text, error }) = &p.message {
+                                            ui.add_space(8.0);
+                                            let color = if *error { theme::error() } else { theme::ok() };
+                                            ui.label(egui::RichText::new(text).color(color));
+                                        }
+                                    });
+                            });
                         });
-                });
+                },
+            );
         },
     );
 

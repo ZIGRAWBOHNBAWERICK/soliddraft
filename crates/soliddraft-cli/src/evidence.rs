@@ -587,10 +587,14 @@ mod tests {
             assert!(!built.is_error, "{tool}: {}", built.content);
             let pending = bundle.pending.as_ref().unwrap();
             assert!(pending.work.iter().any(|w| matches!(w, Work::Mesh(_))), "the command requested a mesh");
-            assert!(counting.take_routes().is_empty(), "the evidence host retained command mesh routes");
+            // The command's own mesh requests run on this thread. A display refinement on a
+            // background thread can land at any moment; the next boundary drains it.
+            let routes = counting.take_routes_here();
+            assert!(routes.is_empty(), "the evidence host retained command mesh routes after {tool}: {routes:?}");
             let view = bundle.call("scenario_view", json!({}), &caller);
             assert!(!view.is_error, "{}", view.content);
-            assert!(counting.take_routes().is_empty(), "the evidence host retained view mesh routes");
+            let routes = counting.take_routes_here();
+            assert!(routes.is_empty(), "the evidence host retained view mesh routes after {tool}: {routes:?}");
         }
         drop(bundle);
         std::fs::remove_dir_all(dir).unwrap();

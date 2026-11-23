@@ -27,7 +27,7 @@ use soliddraft_assistant::tools::schema::{
 };
 use soliddraft_assistant::{Caller, ToolHost, ToolOutput, ToolSpec};
 use soliddraft_kernel_api::{ArcTurn, FaceId, PathSegment, Plane, SurfaceKind, Sweep, SweepOrientation};
-use soliddraft_kernel_api::{Grade, HoleDepth, HoleHead, HoleTip};
+use soliddraft_kernel_api::{HoleDepth, HoleHead, HoleTip};
 use soliddraft_model::thread::HoleThread;
 use soliddraft_model::{DatumPlane, PatternSpec, PlaneRef, ShellOpenings};
 
@@ -456,11 +456,11 @@ pub enum Line {
     /// Offsets every face by a signed distance.
     Offset { distance: f64 },
     /// Builds a solid from selected faces.
-    Thicken { faces: Vec<String>, thickness: Grade, side: soliddraft_kernel_api::ThickenSide },
+    Thicken { faces: Vec<String>, thickness: soliddraft_model::FieldGrade, side: soliddraft_kernel_api::ThickenSide },
     /// Changes an offset distance.
     EditOffset { feature: String, distance: f64 },
     /// Changes thickness and side, retaining selected faces.
-    EditThicken { feature: String, thickness: Grade, side: soliddraft_kernel_api::ThickenSide },
+    EditThicken { feature: String, thickness: soliddraft_model::FieldGrade, side: soliddraft_kernel_api::ThickenSide },
     /// Hollows the part, leaving named faces open.
     Shell {
         /// Faces left open; empty requests a closed shell.
@@ -469,7 +469,7 @@ pub enum Line {
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         all_faces: bool,
         /// Positive constant or linear wall thickness, mm.
-        thickness: Grade,
+        thickness: soliddraft_model::FieldGrade,
     },
     /// Tilts faces about a neutral plane.
     Draft {
@@ -584,7 +584,7 @@ pub enum Line {
         /// The shell feature's name.
         feature: String,
         /// Positive constant or linear wall thickness, mm.
-        thickness: Grade,
+        thickness: soliddraft_model::FieldGrade,
     },
     /// Changes a draft's angle, and optionally its pull direction.
     EditDraft {
@@ -1298,7 +1298,7 @@ fn positive(what: &str, v: f64) -> Result<f64, String> {
     Ok(v)
 }
 
-fn shell_thickness(grade: Grade) -> Result<Grade, String> {
+fn shell_thickness(grade: soliddraft_model::FieldGrade) -> Result<soliddraft_model::FieldGrade, String> {
     for value in grade.endpoints() {
         positive("wall thickness", value)?;
     }
@@ -1977,7 +1977,7 @@ impl Line {
                     doc,
                     Command::AddFeature(FeatureKind::Thicken(soliddraft_model::ThickenFeature {
                         faces,
-                        thickness: *thickness,
+                        thickness: thickness.clone(),
                         side: *side,
                     })),
                 )?;
@@ -2000,7 +2000,7 @@ impl Line {
                 let Some(FeatureKind::Thicken(mut s)) = doc.feature(id).map(|f| f.kind.clone()) else {
                     return Err(format!("{feature} is not a thicken feature"));
                 };
-                s.thickness = *thickness;
+                s.thickness = thickness.clone();
                 s.side = *side;
                 run.apply(doc, Command::EditFeature { id, kind: FeatureKind::Thicken(s) })?;
             }
@@ -2016,7 +2016,7 @@ impl Line {
                             open_faces.iter().map(|f| face_ref_by_name(doc, f)).collect::<Result<Vec<_>, _>>()?,
                         )
                     },
-                    thickness: shell_thickness(*thickness)?,
+                    thickness: shell_thickness(thickness.clone())?,
                 };
                 run.apply(doc, Command::AddFeature(FeatureKind::Shell(shell)))?;
             }
@@ -2137,7 +2137,7 @@ impl Line {
                 let Some(FeatureKind::Shell(mut shell)) = doc.feature(id).map(|f| f.kind.clone()) else {
                     return Err(format!("{feature} is not a shell"));
                 };
-                shell.thickness = shell_thickness(*thickness)?;
+                shell.thickness = shell_thickness(thickness.clone())?;
                 run.apply(doc, Command::EditFeature { id, kind: FeatureKind::Shell(shell) })?;
             }
             Line::EditDraft { feature, angle, pull, reverse } => {

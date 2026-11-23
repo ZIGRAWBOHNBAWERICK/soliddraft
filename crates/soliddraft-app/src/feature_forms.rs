@@ -1005,7 +1005,7 @@ fn counted(count: usize, noun: &str) -> String {
     format!("{count} {noun}{}", if count == 1 { "" } else { "s" })
 }
 
-fn thickness(ui: &mut egui::Ui, label: &str, grade: &mut Grade, available: bool) -> bool {
+fn thickness(ui: &mut egui::Ui, label: &str, grade: &mut soliddraft_model::FieldGrade, available: bool) -> bool {
     match grade {
         Grade::Constant(value) => {
             let _response = number_field(ui, label, "mm", egui::DragValue::new(value).speed(0.1));
@@ -1013,12 +1013,14 @@ fn thickness(ui: &mut egui::Ui, label: &str, grade: &mut Grade, available: bool)
             crate::web::show_control("Thickness value", _response.rect);
         }
         Grade::Linear(_) if available => return ui.button("Linear grade").clicked(),
-        Grade::Linear(linear) => {
+        // A grade this wall cannot take here: offer the constant it starts from.
+        _ => {
+            let start = grade.endpoints().first().copied().unwrap_or(1.0);
             let response = ui.button("Use constant");
             #[cfg(target_arch = "wasm32")]
             crate::web::show_control("Use constant", response.rect);
             if response.clicked() {
-                *grade = Grade::Constant(linear.start);
+                *grade = Grade::Constant(start);
             }
         }
     }
@@ -1654,7 +1656,14 @@ pub(crate) fn render(
             EditorParams::Shell(soliddraft_model::ShellFeature { thickness, .. })
             | EditorParams::Thicken(soliddraft_model::ThickenFeature { thickness, .. }),
             Key::ThicknessGrade,
-        ) => properties::grade_options(ui, "Thickness", thickness, "mm", 0.1),
+        ) => {
+            // A wall takes a constant or a linear grade.
+            let walls = properties::GradeChoices {
+                offered: vec![soliddraft_kernel_api::GradeKind::Constant, soliddraft_kernel_api::GradeKind::Linear],
+                refusal: None,
+            };
+            properties::grade_options(ui, "Thickness", thickness, "mm", 0.1, &walls)
+        }
         (EditorParams::Lattice(p), Key::Cell) => {
             let cell = p.cell.get_or_insert(LatticeCell::Cubic);
             let response = egui::ComboBox::from_id_salt("cell_type")

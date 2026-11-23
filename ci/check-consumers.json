@@ -84,6 +84,12 @@
     "ci/browser-refusal-assistant.js": [
       "web"
     ],
+    "ci/browser-display-states.js": [
+      "web"
+    ],
+    "ci/browser-drawing-annotations.mjs": [
+      "web"
+    ],
     "ci/cargo-cache.sh": [],
     "ci/bootstrap": "all",
     "ci/hooks/pre-push": [
@@ -145,6 +151,9 @@
       "step-opencascade"
     ],
     "ci/fixtures/pmi/p1-bracket-pmi.step": [
+      "web"
+    ],
+    "ci/fixtures/drawing-annotations/bracket.dwprt": [
       "web"
     ],
     "ci/fixtures/universal-joint/bearing.dwasm": [

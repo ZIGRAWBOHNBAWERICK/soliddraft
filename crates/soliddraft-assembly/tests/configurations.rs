@@ -61,6 +61,7 @@ fn new_block(path: &Path, w: f64, d: f64, h: f64) {
             operation: ExtrudeOp::Boss,
             end: EndCondition::Blind { depth: h },
             reverse: false,
+            options: Default::default(),
         }),
     );
     doc.save(path).unwrap();

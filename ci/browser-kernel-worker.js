@@ -22,10 +22,10 @@
 // confirmed by the title Details draws for it. With software rendering a frame can take
 // longer than any fixed pause.
 function check(value, message) { if (!value) throw new Error(message); }
-const PART = [36, 52], INSPECT = [247, 52], MASS = [114, 97], CLOSE = [109, 184];
-const RECTANGLE = [892, 143], FILE = [158, 18], NEW_PART = [170, 49];
+const PART = [36, 52], INSPECT = [164, 52], MASS = [114, 97], CLOSE = [109, 184];
+const RECTANGLE = [99, 355], FILE = [158, 18], NEW_PART = [170, 49];
 // The feature tree's rows, in the side column.
-const TREE = 134, ROW = { first: 271, second: 297, third: 323 };
+const TREE = 134, ROW = { first: 297, second: 323, third: 349 };
 
 check(await page.eval(() => location.search === '?demo'), 'Open the application at /?demo first');
 const size = await page.eval(() => [innerWidth, innerHeight]);

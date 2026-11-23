@@ -69,22 +69,27 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
         color,
     );
     ui.painter().hline(head.x_range(), head.bottom() - 0.5, Stroke::new(1.0, theme::line()));
+    part_menu(&part, state);
     show_contents(ui, state);
+}
+
+/// The part header's menu: the whole part's appearance and material.
+pub fn part_menu(response: &egui::Response, state: &mut AppState) {
+    response.context_menu(|ui| {
+        if ui.button("Part appearance").clicked() {
+            state.push(AppAction::ShowPartAppearance);
+            ui.close();
+        }
+        if ui.button("Part material").clicked() {
+            state.push(AppAction::ShowMaterialLibrary);
+            ui.close();
+        }
+    });
 }
 
 /// The feature tree body without the standalone header (used inside the D1 Browser pane).
 pub fn show_contents(ui: &mut egui::Ui, state: &mut AppState) {
     let mut actions = Vec::new();
-    part.context_menu(|ui| {
-        if ui.button("Part appearance").clicked() {
-            actions.push(AppAction::ShowPartAppearance);
-            ui.close();
-        }
-        if ui.button("Part material").clicked() {
-            actions.push(AppAction::ShowMaterialLibrary);
-            ui.close();
-        }
-    });
     egui::ScrollArea::vertical().id_salt("tree").auto_shrink([false, false]).show(ui, |ui| {
         ui.add_space(4.0);
         let selected_feature = state.selected_feature();
@@ -891,13 +896,12 @@ pub(crate) fn row(ui: &mut egui::Ui, spec: RowSpec<'_>) -> egui::Response {
     if !spec.sub.is_empty() {
         let eye = if spec.shown.is_some() { crate::tree_visibility::EYE_WIDTH } else { 0.0 };
         let badge = if spec.badge { BADGE_WIDTH } else { 0.0 };
-        painter.text(
-            pos2(inner.right() - 8.0 - eye - badge, rect.center().y),
-            Align2::RIGHT_CENTER,
-            spec.sub,
-            theme::font(11.0),
-            theme::muted(),
-        );
+        let right = inner.right() - 8.0 - eye - badge;
+        // A summary longer than the room beside the name is cut short rather than drawn
+        // over it; the row's tooltip holds it whole.
+        if let Some(sub) = fitted(painter, spec.sub, right - after - 8.0) {
+            painter.text(pos2(right, rect.center().y), Align2::RIGHT_CENTER, sub, theme::font(11.0), theme::muted());
+        }
     }
     if let Some(err) = spec.error {
         painter.circle_filled(pos2(x0 + 29.0, rect.top() + 6.0), 3.0, theme::error());
@@ -913,6 +917,23 @@ pub(crate) fn row(ui: &mut egui::Ui, spec: RowSpec<'_>) -> egui::Response {
         return resp.on_hover_text(egui::RichText::new(w).color(theme::ink()));
     }
     resp
+}
+
+/// `text` in the row summary's font, cut to `room` points wide with an ellipsis; none
+/// when not even the ellipsis fits.
+fn fitted(painter: &egui::Painter, text: &str, room: f32) -> Option<String> {
+    let width = |t: &str| painter.layout_no_wrap(t.to_owned(), theme::font(11.0), Color32::PLACEHOLDER).size().x;
+    if width(text) <= room {
+        return Some(text.to_owned());
+    }
+    let mut chars: Vec<char> = text.chars().collect();
+    while chars.pop().is_some() {
+        let cut = format!("{}…", chars.iter().collect::<String>().trim_end());
+        if width(&cut) <= room {
+            return Some(cut);
+        }
+    }
+    None
 }
 
 /// The room a row keeps for the proof mark, between its summary and its eye.

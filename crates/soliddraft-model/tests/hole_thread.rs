@@ -319,6 +319,7 @@ fn pocket(doc: &mut Document, x: f64, y: f64, width: f64, height: f64, offset: f
             operation: ExtrudeOp::Cut,
             end: EndCondition::Blind { depth },
             reverse: false,
+            options: Default::default(),
         }),
     );
     for (id, status) in doc.statuses() {
@@ -341,6 +342,8 @@ fn through_plate(thread: HoleThread, head: Option<HoleHead>) -> (Document, Featu
             tip: HoleTip::Flat,
             head,
             thread: Some(thread),
+            sketch: None,
+            wizard: None,
         }),
     );
     (d, hole)
@@ -452,6 +455,7 @@ fn a_thread_stays_on_its_body_in_a_part_of_several_bodies() {
         operation: ExtrudeOp::Boss,
         end: EndCondition::Blind { depth: 5.0 },
         reverse: false,
+        options: Default::default(),
     })))
     .unwrap();
     for (id, status) in d.statuses() {

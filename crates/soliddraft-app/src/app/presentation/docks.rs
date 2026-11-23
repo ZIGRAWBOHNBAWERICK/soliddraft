@@ -7,7 +7,7 @@ use crate::state::{AppAction, AppState};
 use crate::theme;
 use crate::tree;
 use crate::viewport::Overlay;
-use egui::{CornerRadius, Rect, Sense, pos2, vec2};
+use egui::{Align2, CornerRadius, Rect, Sense, pos2, vec2};
 use egui_dock::{DockArea, DockState, TabViewer};
 
 use crate::app::dispatch::selection_of;
@@ -113,6 +113,14 @@ pub(in crate::app) fn pane(ui: &mut egui::Ui, state: &mut AppState) {
 
         if pane_header(&mut child, state, p) {
             close_request = Some(p);
+        }
+        // A part's Browser header offers the part's appearance and material, as the
+        // tree's own header does. The close button keeps its clicks.
+        if p == Pane::Tree && !state.assembly.is_active() && !state.drawing.is_active() {
+            let head =
+                Rect::from_min_size(pane_rect.min, vec2(pane_rect.width() - 34.0, theme::spacing().pane_header_height));
+            let response = child.interact(head, child.id().with("part_header_menu"), Sense::click());
+            tree::part_menu(&response, state);
         }
 
         let body_rect = Rect::from_min_max(

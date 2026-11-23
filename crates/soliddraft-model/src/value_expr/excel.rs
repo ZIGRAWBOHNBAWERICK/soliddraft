@@ -384,6 +384,8 @@ mod tests {
     }
 
     #[test]
+    // Excel's documented examples round 3.14159; the expected results are not π.
+    #[allow(clippy::approx_constant)]
     fn microsoft_excel_examples() {
         use std::f64::consts::PI;
         let cases = [

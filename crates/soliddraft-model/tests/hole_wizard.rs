@@ -59,6 +59,7 @@ fn plate(doc: &mut Document, width: f64, height: f64, thickness: f64) -> Feature
             operation: ExtrudeOp::Boss,
             end: EndCondition::Blind { depth: thickness },
             reverse: false,
+            options: Default::default(),
         }),
     )
 }
@@ -394,6 +395,7 @@ fn non_planar_face_and_coming_soon_options_refuse_by_name() {
             operation: ExtrudeOp::Boss,
             end: EndCondition::Blind { depth: 20.0 },
             reverse: false,
+            options: Default::default(),
         }),
     );
     let topo = d.kernel().topology(d.body().unwrap()).unwrap();

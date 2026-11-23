@@ -5396,7 +5396,7 @@ impl Document {
             .collect::<Result<Vec<_>, _>>()?;
         let result = self
             .kernel()
-            .shell_with_grade(&OpTag::new("preview"), body, &faces, shell.thickness)
+            .shell_with_grade(&OpTag::new("preview"), body, &faces, wall_grade(&shell.thickness)?)
             .map_err(|error| error.to_string())?;
         if let Some(refusal) = model::shell_refusal(&result) {
             let _ = self.kernel().release(result.body);
@@ -5425,7 +5425,7 @@ impl Document {
         thicken.thickness.check_thickness()?;
         let result = self
             .kernel()
-            .thicken_with_grade(&OpTag::new("preview"), body, faces, thicken.thickness, thicken.side)
+            .thicken_with_grade(&OpTag::new("preview"), body, faces, wall_grade(&thicken.thickness)?, thicken.side)
             .map_err(plain_kernel_error)?;
         let mesh = self.mesh_of(result.body);
         let _ = self.kernel().release(result.body);
@@ -6498,7 +6498,12 @@ pub fn grade_text(grade: &model::FieldGrade, unit: &str) -> String {
     }
 }
 
-pub(crate) fn wall_thickness_text(grade: &soliddraft_kernel_api::Grade) -> String {
+/// A wall thickness for a kernel request: it names no faces.
+fn wall_grade(grade: &model::FieldGrade) -> Result<soliddraft_kernel_api::Grade, String> {
+    grade.faceless().ok_or_else(|| "Wall thickness is a constant or a linear grade.".to_owned())
+}
+
+pub(crate) fn wall_thickness_text(grade: &model::FieldGrade) -> String {
     grade.constant().map_or_else(|| grade_text(grade, " mm"), |value| format!("{} mm", fmt_mm(value)))
 }
 

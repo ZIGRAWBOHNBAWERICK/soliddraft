@@ -492,8 +492,15 @@ note = "weighed"
 
     #[test]
     fn built_in_entries_write_as_before() {
+        // Writing a built-in library adds no provenance: an entry writes it only when its
+        // own data cites a source per value, as the 3D printing materials quote their data
+        // sheets. Every other entry writes as it did before provenance existed.
         for lib in crate::Catalog::built_in_libraries() {
-            assert!(!lib.to_toml().contains("provenance"), "{} gained provenance", lib.name);
+            for m in &lib.materials {
+                let one = Library { materials: vec![m.clone()], ..lib.clone() };
+                let written = one.to_toml();
+                assert_eq!(written.contains("provenance"), !m.provenance.is_empty(), "{} {} provenance", lib.name, m.name);
+            }
         }
     }
 

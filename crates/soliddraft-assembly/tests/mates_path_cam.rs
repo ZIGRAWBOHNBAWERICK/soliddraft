@@ -60,6 +60,7 @@ fn part(path: &Path, depth: f64, draw: impl FnOnce(&mut Sketch)) {
             operation: ExtrudeOp::Boss,
             end: EndCondition::Blind { depth },
             reverse: false,
+            options: Default::default(),
         }),
         name: None,
         position: None,

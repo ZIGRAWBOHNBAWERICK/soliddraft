@@ -270,6 +270,12 @@ impl<F> Grade<F> {
         }
     }
 
+    /// The same grade naming faces another way, when it names none: `None` for a distance
+    /// grade from picked faces, whose faces need resolving first.
+    pub fn faceless<G>(&self) -> Option<Grade<G>> {
+        self.try_map_faces(|_, _| Err(())).ok()
+    }
+
     /// Validates a wall thickness in millimetres over the whole part: a constant or a
     /// linear grade, the only ones a wall takes.
     pub fn check_thickness(&self) -> Result<(), &'static str> {

@@ -1135,18 +1135,15 @@ impl SolidDraftApp {
                                 Some(r) => {
                                     // Where the viewport click that picked the face met it.
                                     let click_uv = click_point.zip(self.state.doc.face_plane(f)).map(|(at, plane)| {
-                                            let at = soliddraft_kernel_api::Vec3::new(
-                                                f64::from(at.x),
-                                                f64::from(at.y),
-                                                f64::from(at.z),
-                                            );
-                                            let d = at - plane.origin;
-                                            let tenth = |v: f64| (v * 10.0).round() / 10.0 + 0.0;
-                                            crate::sketch::P2::new(
-                                                tenth(d.dot(plane.x_dir)),
-                                                tenth(d.dot(plane.y_dir())),
-                                            )
-                                        });
+                                        let at = soliddraft_kernel_api::Vec3::new(
+                                            f64::from(at.x),
+                                            f64::from(at.y),
+                                            f64::from(at.z),
+                                        );
+                                        let d = at - plane.origin;
+                                        let tenth = |v: f64| (v * 10.0).round() / 10.0 + 0.0;
+                                        crate::sketch::P2::new(tenth(d.dot(plane.x_dir)), tenth(d.dot(plane.y_dir())))
+                                    });
                                     if h.face.as_ref() == Some(&r)
                                         && h.wizard_tab == crate::document::HoleWizardTab::Positions
                                         && let Some(uv) = click_uv

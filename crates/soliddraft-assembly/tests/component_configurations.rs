@@ -62,6 +62,7 @@ fn block(w: f64, d: f64, h: f64) -> Document {
             operation: ExtrudeOp::Boss,
             end: EndCondition::Blind { depth: h },
             reverse: false,
+            options: Default::default(),
         }),
     );
     doc

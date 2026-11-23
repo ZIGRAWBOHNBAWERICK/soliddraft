@@ -105,14 +105,20 @@ pub(crate) fn toggle(ctx: &egui::Context, state: &mut AppState) {
     state.palette = if state.palette.as_ref().is_some_and(|p| p.shortcut.is_some()) {
         None
     } else {
+        // The visitor has found S: from now on the first-use hint stays away.
+        if !crate::settings::shortcut_menu().hint_seen {
+            let _ = crate::settings::save_shortcut_menu(&state.shortcut_menu);
+        }
         Some(crate::palette::Palette::for_shortcut(workspace, origin))
     };
 }
 
+/// Shows the first-use hint once a session. It is kept as seen only when the visitor
+/// first opens the menu (see [`toggle`]), so a new install stores no settings until the
+/// visitor changes something.
 pub(crate) fn teach(state: &mut AppState) {
     if state.start.is_none() && !state.shortcut_menu.hint_seen {
         state.shortcut_menu.hint_seen = true;
-        let _ = crate::settings::save_shortcut_menu(&state.shortcut_menu);
         state.note("Press S to open your shortcut menu.", NoteKind::Info);
     }
 }

@@ -1888,7 +1888,10 @@ impl Document {
         if !repairs.is_empty() {
             return Built::pass(FeatureStatus::RepairNeeded(repairs), current);
         }
-        let result = self.kernel.shell_with_grade(&OpTag::new(format!("{}.shell", f.id)), body, &faces, s.thickness);
+        let Some(thickness) = s.thickness.faceless() else {
+            return Built::failed(current, "Wall thickness is a constant or a linear grade.");
+        };
+        let result = self.kernel.shell_with_grade(&OpTag::new(format!("{}.shell", f.id)), body, &faces, thickness);
         if let Ok(r) = &result
             && let Some(refusal) = shell_refusal(r)
         {
@@ -1920,8 +1923,11 @@ impl Document {
         if let Err(error) = t.thickness.check_thickness() {
             return Built::failed(current, error);
         }
+        let Some(thickness) = t.thickness.faceless() else {
+            return Built::failed(current, "Wall thickness is a constant or a linear grade.");
+        };
         let result =
-            self.kernel.thicken_with_grade(&OpTag::new(format!("{}.thicken", f.id)), body, faces, t.thickness, t.side);
+            self.kernel.thicken_with_grade(&OpTag::new(format!("{}.thicken", f.id)), body, faces, thickness, t.side);
         self.finish(result, current, |r| self.distance_names(r, body, false))
     }
 

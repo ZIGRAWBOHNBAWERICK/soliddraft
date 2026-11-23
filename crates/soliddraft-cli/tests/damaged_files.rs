@@ -315,7 +315,9 @@ fn cases(kind: DocKind, valid: &[u8]) -> Vec<Case> {
         with_json(valid, manifest, |m| m["kind"] = json!(other)),
         Refusal::Version,
     ));
-    let newer = if kind == DocKind::Part { 5 } else { 3 };
+    // A major version above the newest this build reads: parts go to soliddraft-part/7
+    // (Hole Wizard), assemblies to soliddraft-assembly/2 (display states).
+    let newer = if kind == DocKind::Part { 8 } else { 3 };
     for tag in [format!("{major}/{newer}"), format!("{major}/99"), format!("{major}/0"), "other-format/1".to_owned()] {
         all.push(case(
             &format!("{truth} and manifest.json say {tag}"),

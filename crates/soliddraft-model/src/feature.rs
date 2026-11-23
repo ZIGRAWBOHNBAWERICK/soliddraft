@@ -923,7 +923,7 @@ pub struct ShellFeature {
     /// Faces removed to open the shell.
     pub open_faces: ShellOpenings,
     /// Positive wall thickness in millimetres, constant or graded.
-    pub thickness: Grade,
+    pub thickness: FieldGrade,
 }
 
 impl ShellFeature {
@@ -950,7 +950,7 @@ pub struct ThickenFeature {
     /// Persistent names of the selected faces.
     pub faces: Vec<FaceRef>,
     /// Positive thickness in millimetres, constant or graded.
-    pub thickness: Grade,
+    pub thickness: FieldGrade,
     /// Which side of the selected faces receives material.
     pub side: soliddraft_kernel_api::ThickenSide,
 }

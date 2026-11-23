@@ -1,5 +1,5 @@
 //! An extrusion's From, Direction 2, thin wall and selected contours: each builds, edits,
-//! saves in format 4, reopens to the same part and carries a later feature.
+//! saves in format 6, reopens to the same part and carries a later feature.
 
 use std::sync::Arc;
 

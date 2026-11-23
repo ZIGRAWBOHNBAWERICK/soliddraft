@@ -61,7 +61,8 @@ fn pinned_kernel_refuses_fields_on_imported_solids() {
             let command = soliddraft_app::commands::get(tool).unwrap();
             let shown = (command.shown)(&state);
             let enabled = command.is_enabled(&state);
-            let palette = soliddraft_app::palette::Palette { query: tool.into(), selected: 0 };
+            let mut palette = soliddraft_app::palette::Palette::default();
+            palette.query = tool.into();
             let searchable = palette.results(&state).iter().any(|result| result.command.id == tool);
             let original = state.doc.model().part_json();
             let depth = state.doc.undo_depth();

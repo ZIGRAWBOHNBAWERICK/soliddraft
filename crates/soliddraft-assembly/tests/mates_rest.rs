@@ -63,6 +63,7 @@ fn extrude(doc: &mut Document, s: FeatureId, operation: ExtrudeOp, depth: f64) {
             operation,
             end: EndCondition::Blind { depth },
             reverse: false,
+            options: Default::default(),
         }),
     );
 }

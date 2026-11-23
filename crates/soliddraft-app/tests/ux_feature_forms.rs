@@ -22,12 +22,6 @@ fn suite(app: &mut App) {
     settle(app);
 }
 
-fn click_bar(app: &mut App, label: &str) {
-    let rect = ribbon::control(app, label, bar(app)).rect;
-    ribbon::click_at(app, rect.center());
-    settle(app);
-}
-
 /// The side area, which is the feature's property panel while a form is open.
 fn panel(app: &App) -> Rect {
     ribbon::feature_panel(app)

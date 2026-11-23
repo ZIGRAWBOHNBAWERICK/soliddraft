@@ -131,8 +131,9 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
                     }
                 }
                 let create = groups.iter().any(|(group, _)| is_create_group(state, tab, group));
-                let lead_width: f32 = lead.iter().map(|(c, primary)| card_width(ui, state, c, *primary) + GAP).sum::<f32>()
-                    + if create { CREATE + GAP } else { 0.0 };
+                let lead_width: f32 =
+                    lead.iter().map(|(c, primary)| card_width(ui, state, c, *primary) + GAP).sum::<f32>()
+                        + if create { CREATE + GAP } else { 0.0 };
                 let widths: Vec<Vec<f32>> =
                     groups.iter().map(|(_, cs)| cs.iter().map(|c| card_width(ui, state, c, false)).collect()).collect();
                 let shown = fit(&widths, lead_width, !lead.is_empty(), ui.available_width() - 10.0);

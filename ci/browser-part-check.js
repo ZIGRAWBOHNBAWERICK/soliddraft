@@ -15,7 +15,7 @@
 // Details once where that frame drew it.
 function check(value, message) { if (!value) throw new Error(message); }
 // Check sits after the Measure and Annotate groups on the Inspect tab's strip.
-const INSPECT = [247, 52], CHECK = [543, 97], CLOSE_REPORT = [534, 37], BOSS = [134, 323];
+const INSPECT = [164, 52], CHECK = [543, 97], CLOSE_REPORT = [534, 37], BOSS = [134, 349];
 
 check(await page.eval(() => location.search === '?demo'), 'Open the application at /?demo first');
 const size = await page.eval(() => [innerWidth, innerHeight]);

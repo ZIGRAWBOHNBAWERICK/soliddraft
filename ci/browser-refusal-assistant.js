@@ -2,9 +2,13 @@
 // Build a block, accept the radius offered for a refused fillet, edit the fillet,
 // reopen the downloaded part, and make a reference plane from its geometry.
 function check(value, message) { if (!value) throw new Error(message); }
-const NEW_PART = [124, 143], EXTRUDE = [87, 145], RECTANGLE = [620, 52];
-const TOP_EDGE = [923, 406], TOP_FACE = [950, 310], FILLET_ROW = [380, 229];
-const COMMAND_LINE = [920, 797], CLOSE_DETAILS = [347, 92];
+// Fixed points of the 1400 x 813 page: the start page's New part, the tool strip's
+// Extrude, the block's top edge and top face once zoomed to fit, the command line and
+// the Close options button of the Details sheet. Extrude's Rectangle and the feature
+// tree's rows are found by name through shown_controls.
+const NEW_PART = [124, 143], EXTRUDE = [222, 95];
+const TOP_EDGE = [1022, 471], TOP_FACE = [868, 400];
+const COMMAND_LINE = [640, 797], CLOSE_DETAILS = [103, 184];
 check(await page.eval(() => location.search === '' && innerWidth === 1400 && innerHeight === 813),
   'Open a fresh 1400 x 813 SolidDraft page at /');
 await page.wait('#status.hidden', 60000);
@@ -122,8 +126,9 @@ async function showRadius(radius) {
 await click(NEW_PART);
 await features(0);
 await click(EXTRUDE);
-await until(() => shown('shown_options'), options => options === null, 'Open the Extrude profile picker');
-await click(RECTANGLE);
+await until(() => shown('shown_feature_panel'), panel => panel !== null, 'Open the Extrude profile picker');
+const rectangle = await until(controls, drawn => drawn?.Rectangle, 'The feature panel did not draw Rectangle');
+await click(center(rectangle.Rectangle));
 await confirmForm();
 await features(1);
 await idle();
@@ -164,7 +169,8 @@ await page.eval(() => { window.sdReopen = true; return true; });
 await page.press('Control+o');
 await features(2);
 await idle();
-await click(FILLET_ROW);
+const row = await until(controls, drawn => drawn?.['Tree: Fillet1'], 'The tree did not draw Fillet1');
+await click(center(row['Tree: Fillet1']));
 await showRadius('5');
 
 await page.press('i');

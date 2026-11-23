@@ -202,8 +202,9 @@ fn the_drawing_ribbon_and_keys_come_from_the_registry() {
             }
             for (command, _) in items.into_iter().filter(|(c, _)| (c.shown)(&harness.state().state)) {
                 let label = command.label_in(&harness.state().state);
+                // A tool the strip has no room for is in its group's More menu.
                 assert!(
-                    harness.query_all_by_label(&label).next().is_some(),
+                    harness.query_all_by_label(&label).next().is_some() || ribbon::open_more_menu(&mut harness, &label),
                     "drawing {} › {panel}: no button labelled {label}",
                     tab.label()
                 );

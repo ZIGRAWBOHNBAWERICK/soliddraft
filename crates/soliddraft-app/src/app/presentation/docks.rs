@@ -70,6 +70,18 @@ pub(in crate::app) fn pane(ui: &mut egui::Ui, state: &mut AppState) {
         }
     }
 
+    // An assembly and a drawing have no history steps yet. Their History pane only says
+    // so, and takes the height of that note instead of its share of the column.
+    let note_only = state.assembly.is_active() || state.drawing.is_active();
+    if let Some(history) = active.iter().position(|p| *p == Pane::History).filter(|_| note_only && active.len() > 1) {
+        let note = (theme::spacing().pane_header_height + 76.0).min(heights[history]);
+        let others: f32 = heights.iter().sum::<f32>() - heights[history];
+        let scale = if others > 0.0 { (usable_h - note) / others } else { 1.0 };
+        for (i, h) in heights.iter_mut().enumerate() {
+            *h = if i == history { note } else { *h * scale };
+        }
+    }
+
     let mut close_request: Option<Pane> = None;
     let mut split_drag: Option<(Pane, Pane, f32)> = None;
 

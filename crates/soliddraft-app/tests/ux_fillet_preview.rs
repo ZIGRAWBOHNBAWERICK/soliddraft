@@ -543,7 +543,7 @@ fn assert_painted_between(case: &Case, app: &App, message: &str, top: f32, botto
 
 /// Form feedback appears below the options bar.
 fn pick_band(app: &App) -> (f32, f32) {
-    let bar = egui::PanelState::load(&app.ctx, egui::Id::new("options_bar")).unwrap().outer_rect;
+    let bar = soliddraft_app::options_bar::shown_rect(&app.ctx).expect("the options bar is drawn");
     (bar.bottom(), viewport(app).bottom())
 }
 

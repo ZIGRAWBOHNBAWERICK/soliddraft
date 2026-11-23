@@ -227,6 +227,10 @@ pub fn click_button(app: &mut App, label: &str, within: Rect) {
 /// Opens the tool strip's More menu that lists the tool named `label`, when the strip had
 /// no room for its card. Returns whether a menu now shows it.
 pub fn open_more_menu(app: &mut App, label: &str) -> bool {
+    if app.query_all_by_role_and_label(egui::accesskit::Role::Button, label).next().is_some() {
+        // A menu opened for an earlier tool still shows this one.
+        return true;
+    }
     let menus: Vec<Rect> = app
         .query_all(By::new().role(egui::accesskit::Role::Button))
         .filter(|n| n.accesskit_node().label().is_some_and(|l| l.starts_with("More ") && l.ends_with(" tools")))

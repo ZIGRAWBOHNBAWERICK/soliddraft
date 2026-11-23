@@ -24,7 +24,7 @@ use soliddraft_model::thread::HoleThread;
 use ux_tools::{Case, STANDARD, launch, settle};
 
 fn bar(app: &App) -> Rect {
-    egui::PanelState::load(&app.ctx, egui::Id::new("options_bar")).unwrap().outer_rect
+    soliddraft_app::options_bar::shown_rect(&app.ctx).expect("the options bar is drawn")
 }
 
 fn click_bar(app: &mut App, label: &str) {

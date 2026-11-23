@@ -62,7 +62,7 @@ fn a_sketch_tool_asks_for_a_plane_then_arms_itself() {
 }
 
 fn plane_bar(app: &App) -> Rect {
-    egui::PanelState::load(&app.ctx, egui::Id::new("options_bar")).unwrap().outer_rect
+    soliddraft_app::options_bar::shown_rect(&app.ctx).expect("the options bar is drawn")
 }
 
 #[test]

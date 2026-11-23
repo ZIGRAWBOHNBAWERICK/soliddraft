@@ -43,7 +43,7 @@ fs.mkdirSync(downloads, { recursive: true });
 const SIZE = { width: 1400, height: 813 };
 const NEW_PART = [124, 143];
 const OPEN = [663, 147];
-const ACCEPT_IMPORT = [56, 147];
+const ACCEPT_IMPORT = [57, 154];
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 function check(value, message) { if (!value) throw new Error(message); }

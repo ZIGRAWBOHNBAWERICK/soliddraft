@@ -62,45 +62,78 @@ pub fn panel(root: &mut egui::Ui, state: &mut AppState) {
     if !is_shown(state) {
         state.form_bar.reset();
         follow_context(root.ctx(), state);
+        // The browser checks read this to know a part is open with nothing selected.
+        #[cfg(target_arch = "wasm32")]
+        crate::web::show_options(serde_json::json!({ "selected": null, "details": null }));
         root.ctx().data_mut(|data| data.insert_temp(rect_id(), None::<egui::Rect>));
         return;
     }
+    if floats(state) {
+        let room = root.available_rect_before_wrap();
+        // Drawn by `float`, over the viewport, once the viewport is laid out. The view cube
+        // moves below the bar; the model stays where it is.
+        state.viewport.top_inset = HEIGHT;
+        let rect = egui::Rect::from_min_size(room.min, vec2(room.width(), HEIGHT));
+        root.ctx().data_mut(|data| {
+            data.insert_temp(rect_id(), Some(rect));
+            data.insert_temp(float_id(), Some(rect));
+        });
+        return;
+    }
+    let rect = egui::Panel::top("options_bar")
+        .exact_size(HEIGHT)
+        .resizable(false)
+        .frame(frame(state))
+        .show(root, |ui| show(ui, state))
+        .response
+        .rect;
+    root.ctx().data_mut(|data| data.insert_temp(rect_id(), Some(rect)));
+}
+
+fn margin() -> egui::Margin {
+    egui::Margin::symmetric(8, 5)
+}
+
+fn frame(state: &AppState) -> egui::Frame {
     let fill = if state.editor.is_some() || state.in_sketch() || state.assembly.mate.open {
         theme::form_bg()
     } else {
         theme::ribbon()
     };
-    let margin = egui::Margin::symmetric(8, 5);
-    let frame = egui::Frame::new().fill(fill).inner_margin(margin);
-    let rect = if floats(state) {
-        let room = root.available_rect_before_wrap();
-        let rect = egui::Rect::from_min_size(room.min, vec2(room.width(), HEIGHT));
-        // The view cube moves below the bar; the model stays where it is.
-        state.viewport.top_inset = HEIGHT;
-        egui::Area::new(egui::Id::new("options_bar_float"))
-            .order(egui::Order::Middle)
-            .fixed_pos(rect.min)
-            .constrain(false)
-            .show(root.ctx(), |ui| {
-                frame.show(ui, |ui| {
-                    let inner = rect.size() - margin.sum();
-                    ui.set_min_size(inner);
-                    ui.set_max_size(inner);
-                    show(ui, state);
-                });
-                ui.painter().hline(rect.x_range(), rect.bottom() - 0.5, egui::Stroke::new(1.0, theme::line()));
-            });
-        rect
-    } else {
-        egui::Panel::top("options_bar")
-            .exact_size(HEIGHT)
-            .resizable(false)
-            .frame(frame)
-            .show(root, |ui| show(ui, state))
-            .response
-            .rect
-    };
-    root.ctx().data_mut(|data| data.insert_temp(rect_id(), Some(rect)));
+    egui::Frame::new().fill(fill).inner_margin(margin())
+}
+
+fn float_id() -> egui::Id {
+    egui::Id::new("options_bar_float")
+}
+
+/// Draws the floating bar that `panel` reserved this frame, if any. Call it after the
+/// viewport is laid out, so the bar is painted over the viewport and takes the pointer
+/// there. It is part of the window's own layer: a separate area would spend its first
+/// frame measuring itself, deaf to a click sent in the next one.
+pub fn float(root: &mut egui::Ui, state: &mut AppState) {
+    let reserved = root.ctx().data_mut(|data| {
+        let reserved = data.get_temp::<Option<egui::Rect>>(float_id()).flatten();
+        data.insert_temp(float_id(), None::<egui::Rect>);
+        reserved
+    });
+    let Some(rect) = reserved else { return };
+    let mut ui = root.new_child(
+        egui::UiBuilder::new()
+            .id_salt("options_bar_float")
+            .max_rect(rect)
+            .layout(egui::Layout::top_down(egui::Align::Min)),
+    );
+    ui.set_clip_rect(rect);
+    // Nothing under the bar takes its clicks.
+    ui.interact(rect, ui.id().with("cover"), Sense::click_and_drag());
+    frame(state).show(&mut ui, |ui| {
+        let inner = rect.size() - margin().sum();
+        ui.set_min_size(inner);
+        ui.set_max_size(inner);
+        show(ui, state);
+    });
+    ui.painter().hline(rect.x_range(), rect.bottom() - 0.5, egui::Stroke::new(1.0, theme::line()));
 }
 
 fn active_tool(state: &AppState) -> (Icon, String, String) {

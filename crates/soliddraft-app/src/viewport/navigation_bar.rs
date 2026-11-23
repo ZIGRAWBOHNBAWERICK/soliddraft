@@ -292,7 +292,7 @@ fn coming_soon_display_row(ui: &mut egui::Ui, icon: Icon, label: &str) {
         theme::font(10.5),
         muted,
     );
-    resp.on_hover_text(format!("{label} — coming soon"));
+    resp.on_hover_text(format!("{label}: coming soon"));
 }
 
 fn button(ui: &mut egui::Ui, label: &str, icon: Icon, active: bool, drag: bool, enabled: bool) -> egui::Response {

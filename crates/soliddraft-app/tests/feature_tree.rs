@@ -101,7 +101,7 @@ fn strip_icons_show_the_tree_or_values_and_hide_the_side_area() {
         let tree = ribbon::control(app, "Feature tree", bar);
         let history = ribbon::control(app, "History", bar);
         let values = ribbon::control(app, "Values", bar);
-        let props = ribbon::control(app, "Properties", bar);
+        let props = ribbon::control(app, "Props", bar);
         assert!(tree.rect.bottom() <= history.rect.top(), "Tree sits above History on the rail");
         assert!(history.rect.bottom() <= values.rect.top(), "History sits above Values on the rail");
         assert!(values.rect.bottom() <= props.rect.top(), "Values sits above Props on the rail");

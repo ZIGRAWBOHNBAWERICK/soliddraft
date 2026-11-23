@@ -15,7 +15,7 @@ use soliddraft_app::{
 use ux_tools::{Case, Look, STANDARD, launch, settle};
 
 fn bar(app: &App) -> Rect {
-    egui::PanelState::load(&app.ctx, egui::Id::new("options_bar")).unwrap().outer_rect
+    soliddraft_app::options_bar::shown_rect(&app.ctx).expect("the options bar is drawn")
 }
 
 fn suite(app: &mut App) {

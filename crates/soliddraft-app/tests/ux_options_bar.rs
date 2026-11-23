@@ -11,12 +11,12 @@ use ribbon::App;
 use soliddraft_app::document::{PlaneKind, Reference, Selection};
 
 use soliddraft_app::state::{EditorParams, Tool};
-use soliddraft_app::theme::{self, Mode};
+use soliddraft_app::theme::Mode;
 use soliddraft_app::viewport::{PickFilter, render::DisplayMode};
 use ux_tools::{Case, Look, STANDARD, launch, settle};
 
 fn bar(app: &App) -> Rect {
-    egui::PanelState::load(&app.ctx, egui::Id::new("options_bar")).expect("the options bar is laid out").outer_rect
+    soliddraft_app::options_bar::shown_rect(&app.ctx).expect("the options bar is drawn")
 }
 
 fn click(app: &mut App, label: &str) {
@@ -41,19 +41,22 @@ fn empty_selection_has_pick_filters_and_views_with_display_on_navigation() {
     let mut case = Case::new("options-bar-views");
     let mut app = launch(ribbon::plate(), STANDARD);
     case.run(&mut app, |case, app| {
-        assert!(app.query_all_by_label("Active tool: Select").next().is_some());
         edit_suite(app);
-        text(app, "Select");
-        assert_eq!(bar(app).top(), theme::MENU_HEIGHT, "the bar follows the title");
-        assert_eq!(bar(app).height(), soliddraft_app::options_bar::HEIGHT);
+        assert!(
+            soliddraft_app::options_bar::shown_rect(&app.ctx).is_none(),
+            "a part with nothing selected has no options bar"
+        );
         let before = ribbon::fingerprint(app);
-        for label in ["Pick", "Faces", "Edges", "Bodies"] {
-            text(app, label);
-        }
+        // The pick filters are in the bottom bar's Selection filter.
         assert_eq!(app.state().state.pick_filter, PickFilter::default());
-        for forbidden in ["Display", "Wireframe", "Shaded", "Shaded, edges", "Scene"] {
-            assert!(!ribbon::painted_in(app, bar(app)).iter().any(|p| p.text == forbidden));
+        let filter = app.get_by_label("Selection filter").rect();
+        ribbon::click_at(app, filter.center());
+        settle(app);
+        for label in ["All", "Faces", "Edges & vertices", "Bodies"] {
+            assert!(app.query_all_by_label(label).next().is_some(), "the Selection filter lists {label}");
         }
+        app.key_press(Key::Escape);
+        settle(app);
         let display = app.state().state.viewport.display;
         let navigation_display = app.get_by_label("Display style").rect();
         assert!(app.state().state.viewport.rect.contains_rect(navigation_display));
@@ -69,12 +72,14 @@ fn empty_selection_has_pick_filters_and_views_with_display_on_navigation() {
             "navigation applies the selected display style"
         );
         assert_ne!(app.state().state.viewport.display, display, "navigation changes the selected display mode");
-        click(app, "Front");
+        // The named views are on the View tab.
+        ribbon::switch_workspace(app, "view");
+        strip(app, "Front");
         let front = ribbon::fingerprint(app).camera;
-        click(app, "Top");
+        strip(app, "Top");
         assert_ne!(ribbon::fingerprint(app).camera, front, "view controls move the camera");
-        click(app, "Isometric");
-        click(app, "Fit");
+        strip(app, "Isometric");
+        strip(app, "Fit");
         let after = ribbon::fingerprint(app);
         assert_eq!(before.features, after.features);
         assert_eq!(before.undo_depth, after.undo_depth);
@@ -84,10 +89,23 @@ fn empty_selection_has_pick_filters_and_views_with_display_on_navigation() {
     });
 }
 
+/// Clicks a tool of the strip, in its group's More menu when the strip has no room for it.
+fn strip(app: &mut App, label: &str) {
+    ribbon::click_button(app, label, ribbon::palette_region(app));
+    settle(app);
+}
+
+/// Turns a pick filter on or off in the bottom bar's Selection filter.
 fn toggle_filter(app: &mut App, label: &str) {
+    if app.query_all_by_label(label).next().is_none() {
+        let filter = app.get_by_label("Selection filter").rect();
+        ribbon::click_at(app, filter.center());
+        settle(app);
+    }
     let checkbox = app.get_by_label(label).rect();
-    assert!(bar(app).contains_rect(checkbox));
     ribbon::click_at(app, checkbox.center());
+    settle(app);
+    app.key_press(Key::Escape);
     settle(app);
 }
 
@@ -97,7 +115,8 @@ fn pick_filters_control_real_picks_without_restricting_tools() {
     let mut app = launch(ribbon::plate(), STANDARD);
     edit_suite(&mut app);
     case.run(&mut app, |case, app| {
-        click(app, "Fit");
+        ribbon::run_command(app, "zoom_fit");
+        settle(app);
         let before = ribbon::fingerprint(app);
         let face = glam::Vec3::new(0.0, 0.0, 20.0);
         let edge = app.state().state.doc.edges.iter().find(|e| (e.midpoint.z - 20.0).abs() < 1e-9).unwrap().clone();
@@ -113,7 +132,7 @@ fn pick_filters_control_real_picks_without_restricting_tools() {
         app.state_mut().state.doc.selection = None;
         settle(app);
 
-        toggle_filter(app, "Edges");
+        toggle_filter(app, "Edges & vertices");
         toggle_filter(app, "Bodies");
         ribbon::click_world(app, face);
         settle(app);
@@ -204,8 +223,10 @@ fn picked_geometry_shows_dimensions_and_starts_rounding_with_the_pick() {
         case.frame(app, "body");
         app.state_mut().state.doc.selection = None;
         settle(app);
-        text(app, "Pick");
-        assert!(!ribbon::painted_in(app, bar(app)).iter().any(|p| p.text == "60 mm"), "selection values clear");
+        assert!(
+            soliddraft_app::options_bar::shown_rect(&app.ctx).is_none(),
+            "the bar and its selection values go with the selection"
+        );
     });
 }
 
@@ -217,12 +238,13 @@ fn sketch_tools_follow_the_palette_and_the_bar_fits_small_windows() {
         let mut app = launch(ribbon::blank(), look);
         edit_suite(&mut app);
         case.run(&mut app, |case, app| {
-            assert!(ribbon::window(app).contains_rect(bar(app)));
-            assert!(bar(app).bottom() < app.state().state.viewport.rect.top());
             case.frame(app, &format!("small-{mode:?}"));
             app.state_mut().state.doc.selection = Some(Selection::Reference(Reference::Plane(PlaneKind::Top)));
             ribbon::run_command(app, "sketch");
             settle(app);
+            // An open sketch gives the bar a row of its own above the viewport.
+            assert!(ribbon::window(app).contains_rect(bar(app)));
+            assert!(bar(app).bottom() <= app.state().state.viewport.rect.top());
             for (id, label, tool) in [
                 ("sketch_line", "Line", Tool::Line),
                 ("sketch_move", "Move entities", Tool::Move),
@@ -233,7 +255,10 @@ fn sketch_tools_follow_the_palette_and_the_bar_fits_small_windows() {
                 assert_eq!(app.state().state.sketch.as_ref().unwrap().tool, tool);
                 assert!(app.query_all_by_label(&format!("Active tool: {label}")).next().is_some());
                 text(app, label);
-                text(app, "Close sketch");
+                assert!(
+                    ribbon::painted_in(app, ribbon::palette_region(app)).iter().any(|p| p.text == "Close sketch"),
+                    "Close sketch is on the tool strip"
+                );
                 for forbidden in ["Fillet", "Chamfer", "Display"] {
                     assert!(!ribbon::painted_in(app, bar(app)).iter().any(|p| p.text == forbidden));
                 }

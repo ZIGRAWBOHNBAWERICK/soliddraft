@@ -59,16 +59,18 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
         ui.add_space(10.0);
         egui::Frame::new().inner_margin(egui::Margin::symmetric(12, 6)).show(ui, |ui| {
             ui.label(
-                egui::RichText::new("History rollback — Coming soon")
+                egui::RichText::new("History steps: coming soon")
                     .family(theme::semibold())
                     .size(12.0)
                     .color(theme::ink()),
             );
             ui.add_space(4.0);
             ui.label(
-                egui::RichText::new("Step-by-step history playback is currently available for Part documents.")
-                    .size(11.5)
-                    .color(theme::muted()),
+                egui::RichText::new(
+                    "Stepping through history works in a part. An assembly or a drawing has no steps yet.",
+                )
+                .size(11.5)
+                .color(theme::muted()),
             );
         });
         return;

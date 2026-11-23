@@ -735,6 +735,9 @@ impl SolidDraftApp {
                 show_dock(ui, &mut self.dock, egui::Id::new("center_dock"), &mut panels);
             }
         });
+        if !start {
+            crate::options_bar::float(root, &mut self.state);
+        }
     }
 
     /// Closes the start page once a document was opened, made or edited.

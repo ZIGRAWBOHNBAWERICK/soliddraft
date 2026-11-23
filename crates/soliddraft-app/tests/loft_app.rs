@@ -148,7 +148,7 @@ mod ux_tools;
 fn open_profiles(app: &mut ribbon::App) {
     use egui_kittest::kittest::Queryable;
 
-    let bar = egui::PanelState::load(&app.ctx, egui::Id::new("options_bar")).unwrap().outer_rect;
+    let bar = soliddraft_app::options_bar::shown_rect(&app.ctx).expect("the options bar is drawn");
     let (_, rect) = ribbon::buttons_in(app, bar).into_iter().find(|(name, _)| name.starts_with("More (")).unwrap();
     ribbon::click_at(app, rect.center());
     ux_tools::settle(app);

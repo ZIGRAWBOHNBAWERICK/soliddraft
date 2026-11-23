@@ -31,6 +31,21 @@ fn floats(state: &AppState) -> bool {
     !state.in_sketch() && !state.assembly.is_active() && !state.drawing.is_active() && state.drawing.new.is_none()
 }
 
+/// Closes the details sheet when the document changes between a part, a sketch, an
+/// assembly and a drawing. It runs on frames that hide the bar too: otherwise the first
+/// frame that shows the bar would look like such a change and close a sheet that a
+/// command, such as Appearance, had just opened.
+fn follow_context(ctx: &egui::Context, state: &mut AppState) {
+    let context = (state.in_sketch(), state.assembly.is_active(), state.drawing.is_active());
+    ctx.data_mut(|data| {
+        let id = egui::Id::new("options_details_context");
+        if data.get_temp::<(bool, bool, bool)>(id) != Some(context) {
+            state.options_details = false;
+            data.insert_temp(id, context);
+        }
+    });
+}
+
 fn rect_id() -> egui::Id {
     egui::Id::new("options_bar_rect")
 }
@@ -46,6 +61,7 @@ pub fn panel(root: &mut egui::Ui, state: &mut AppState) {
     state.viewport.top_inset = 0.0;
     if !is_shown(state) {
         state.form_bar.reset();
+        follow_context(root.ctx(), state);
         root.ctx().data_mut(|data| data.insert_temp(rect_id(), None::<egui::Rect>));
         return;
     }
@@ -137,14 +153,7 @@ fn show(ui: &mut egui::Ui, state: &mut AppState) {
         return;
     }
     state.form_bar.reset();
-    let context = (state.in_sketch(), state.assembly.is_active(), state.drawing.is_active());
-    ui.data_mut(|data| {
-        let id = egui::Id::new("options_details_context");
-        if data.get_temp::<(bool, bool, bool)>(id) != Some(context) {
-            state.options_details = false;
-            data.insert_temp(id, context);
-        }
-    });
+    follow_context(ui.ctx(), state);
     let mut sheet_anchor = ui.available_rect_before_wrap();
     if state.drawing.is_active()
         && let Some(anchor) = crate::drawing::properties_drawing::sheet_bar(ui, state)

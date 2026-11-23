@@ -527,14 +527,14 @@ fn menu_command(ui: &mut egui::Ui, st: &mut AppState, id: &str, label: &str) {
 }
 
 fn file_menu_contents(ui: &mut egui::Ui, st: &mut AppState) {
-    menu_command(ui, st, "new_part", "New Part");
-    menu_command(ui, st, "new_assembly", "New Assembly");
-    menu_command(ui, st, "make_assembly", "Make Assembly from Part");
-    menu_command(ui, st, "make_drawing", "New Drawing");
+    menu_command(ui, st, "new_part", "New part");
+    menu_command(ui, st, "new_assembly", "New assembly");
+    menu_command(ui, st, "make_assembly", "Make assembly from part");
+    menu_command(ui, st, "make_drawing", "New drawing from part…");
     menu_command(ui, st, "open", "Open…");
 
     #[cfg(not(target_arch = "wasm32"))]
-    ui.menu_button("Open Recent", |ui| {
+    ui.menu_button("Open recent", |ui| {
         if st.recent.is_empty() {
             ui.add_enabled(false, egui::Button::new("No recent files"));
         }
@@ -555,50 +555,50 @@ fn file_menu_contents(ui: &mut egui::Ui, st: &mut AppState) {
     ui.separator();
     ui.label(egui::RichText::new("INSERT").family(theme::semibold()).size(10.0).color(theme::muted()));
     if st.assembly.is_active() {
-        menu_command(ui, st, "insert_component", "Insert Component…");
+        menu_command(ui, st, "insert_component", "Insert component…");
     }
-    menu_command(ui, st, "import_step", "Insert STEP…");
-    menu_command(ui, st, "import_iges", "Insert IGES…");
-    menu_command(ui, st, "import_mesh", "Insert Mesh Solid…");
-    menu_command(ui, st, "import_scan", "Insert Scan Reference…");
-    menu_command(ui, st, "scan_workspace", "Scan Workspace");
-    menu_command(ui, st, "import_report", "Import Report");
+    menu_command(ui, st, "import_step", "Import STEP…");
+    menu_command(ui, st, "import_iges", "Import IGES…");
+    menu_command(ui, st, "import_mesh", "Import mesh solid…");
+    menu_command(ui, st, "import_scan", "Import scan reference…");
+    menu_command(ui, st, "scan_workspace", "Scan workspace");
+    menu_command(ui, st, "import_report", "Import report");
 
     ui.separator();
     if st.assembly.is_active() {
-        menu_command(ui, st, "assembly_save", "Save Assembly");
-        menu_command(ui, st, "assembly_save_as", "Save Assembly As…");
+        menu_command(ui, st, "assembly_save", "Save assembly");
+        menu_command(ui, st, "assembly_save_as", "Save assembly as…");
     } else {
         menu_command(ui, st, "save", "Save");
-        menu_command(ui, st, "save_as", "Save As…");
+        menu_command(ui, st, "save_as", "Save as…");
     }
 
     ui.separator();
     ui.label(egui::RichText::new("EXPORT").family(theme::semibold()).size(10.0).color(theme::muted()));
     if st.drawing.is_active() {
-        menu_command(ui, st, "drawing_export_svg", "Export Drawing SVG…");
-        menu_command(ui, st, "drawing_export_pdf", "Export Drawing PDF…");
-        menu_command(ui, st, "drawing_export_dxf", "Export Drawing DXF…");
+        menu_command(ui, st, "drawing_export_svg", "Export drawing SVG…");
+        menu_command(ui, st, "drawing_export_pdf", "Export drawing PDF…");
+        menu_command(ui, st, "drawing_export_dxf", "Export drawing DXF…");
     } else {
         menu_command(ui, st, "export_step", "Export STEP AP242…");
         menu_command(ui, st, "export_stl", "Export STL…");
         menu_command(ui, st, "export_3mf", "Export 3MF…");
         menu_command(ui, st, "export_iges", "Export IGES 5.3…");
         menu_command(ui, st, "export_obj", "Export OBJ…");
-        menu_command(ui, st, "manufacturing_package", "Export Manufacturing Package…");
+        menu_command(ui, st, "manufacturing_package", "Export manufacturing package…");
     }
 
     ui.separator();
-    if ui.button("Design Properties…").clicked() {
+    if ui.button("Design properties…").clicked() {
         st.show_design_properties = true;
         ui.close();
     }
-    menu_command(ui, st, "file_locations", "File Locations…");
-    if ui.button("Customize App Bar…").clicked() {
+    menu_command(ui, st, "file_locations", "File locations…");
+    if ui.button("Customize app bar…").clicked() {
         st.show_customize_bar = true;
         ui.close();
     }
-    menu_command(ui, st, "shortcuts", "Keyboard Shortcuts…");
+    menu_command(ui, st, "shortcuts", "Keyboard shortcuts…");
 
     #[cfg(target_arch = "wasm32")]
     if crate::journal_browser::has_offers() && ui.button("Crash report journals…").clicked() {
@@ -634,7 +634,7 @@ fn file_menu_contents(ui: &mut egui::Ui, st: &mut AppState) {
         });
     }
 
-    menu_command(ui, st, "give_feedback", "Give Feedback…");
+    menu_command(ui, st, "give_feedback", "Give feedback…");
     menu_command(ui, st, "about", "About SolidDraft");
     menu_command(ui, st, "quit", "Quit");
 }
@@ -710,22 +710,22 @@ fn document_tabs(ui: &mut egui::Ui, state: &mut AppState, dock: &mut DockState<T
             ui.set_min_width(210.0);
             ui.label(egui::RichText::new("OPEN IN NEW TAB").family(theme::semibold()).size(10.0).color(theme::muted()));
             ui.add_space(2.0);
-            if ui.button("New Part (.dwprt)").clicked() {
+            if ui.button("New part (.dwprt)").clicked() {
                 new_part_tab = true;
                 ui.close();
             }
-            if ui.button("New Assembly (.dwasm)").clicked() {
+            if ui.button("New assembly (.dwasm)").clicked() {
                 if let Some(cmd) = commands::get("new_assembly") {
                     state.run_command(cmd);
                 }
                 ui.close();
             }
-            if ui.button("New Drawing (.dwdrw)").clicked() {
+            if ui.button("New drawing (.dwdrw)").clicked() {
                 state.push(AppAction::NewDrawing);
                 ui.close();
             }
             ui.separator();
-            if ui.button("Open Existing File…").clicked() {
+            if ui.button("Open existing file…").clicked() {
                 // A part opened from here takes a new tab; the active part stays open.
                 state.open_in_new_tab = true;
                 if let Some(cmd) = commands::get("open") {
@@ -851,7 +851,7 @@ fn tab_pill(ui: &mut egui::Ui, slot: usize, icon: Icon, title: &str, dirty: bool
 pub fn dialogs(ctx: &egui::Context, state: &mut AppState) {
     if state.show_design_properties {
         let mut open = true;
-        egui::Window::new("Design Properties")
+        egui::Window::new("Design properties")
             .collapsible(false)
             .resizable(false)
             .default_width(360.0)
@@ -891,7 +891,7 @@ pub fn dialogs(ctx: &egui::Context, state: &mut AppState) {
                 });
                 ui.add_space(10.0);
                 ui.horizontal(|ui| {
-                    if ui.button("Assign Material…").clicked() {
+                    if ui.button("Assign material…").clicked() {
                         state.push(AppAction::ShowMaterial);
                     }
                     if ui.button("Open Values").clicked() {
@@ -904,7 +904,7 @@ pub fn dialogs(ctx: &egui::Context, state: &mut AppState) {
 
     if state.show_customize_bar {
         let mut open = true;
-        egui::Window::new("Customize App Bar")
+        egui::Window::new("Customize app bar")
             .collapsible(false)
             .resizable(false)
             .default_width(360.0)
@@ -936,10 +936,10 @@ pub fn dialogs(ctx: &egui::Context, state: &mut AppState) {
                 ui.add_space(8.0);
                 ui.separator();
                 ui.horizontal(|ui| {
-                    if ui.button("Reset Bar Tools").clicked() {
+                    if ui.button("Reset bar tools").clicked() {
                         state.command_line.settings.tools = crate::command_line::BarSettings::default().tools;
                     }
-                    if ui.button("Reset Panel Layout").clicked() {
+                    if ui.button("Reset panel layout").clicked() {
                         state.push(AppAction::ResetLayout);
                     }
                 });

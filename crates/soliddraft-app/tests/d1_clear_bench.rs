@@ -38,15 +38,15 @@ fn d1_top_bar_single_file_menu_tabs_and_utilities() {
         app.get_by_label("File").click();
         app.run_steps(6);
         for item in [
-            "New Part",
-            "New Assembly",
-            "New Drawing",
+            "New part",
+            "New assembly",
+            "New drawing from part…",
             "Open…",
             "Export STEP AP242…",
             "Export STL…",
-            "Design Properties…",
-            "Customize App Bar…",
-            "Keyboard Shortcuts…",
+            "Design properties…",
+            "Customize app bar…",
+            "Keyboard shortcuts…",
             "Preferences…",
         ] {
             assert!(app.query_by_label_contains(item).is_some(), "File menu has `{item}`");
@@ -66,7 +66,7 @@ fn d1_top_bar_single_file_menu_tabs_and_utilities() {
         assert_eq!(app.state().open_parts.total(), 1);
         app.get_by_label("New tab").click();
         app.run_steps(6);
-        app.get_by_label("New Part (.dwprt)").click();
+        app.get_by_label("New part (.dwprt)").click();
         app.run_steps(8);
         assert_eq!(app.state().open_parts.total(), 2);
         assert_eq!(app.state().state.doc.name, "Part2");

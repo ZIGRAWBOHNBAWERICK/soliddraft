@@ -213,8 +213,35 @@ pub fn click_button(app: &mut App, label: &str, within: Rect) {
             app.run_steps(8);
         }
     }
+    let shown =
+        app.query_all_by_role_and_label(egui::accesskit::Role::Button, label).any(|n| within.intersects(n.rect()));
+    if !shown && open_more_menu(app, label) {
+        let rect = button_rect(app, label, window(app));
+        click_at(app, rect.center());
+        return;
+    }
     let rect = button_rect(app, label, within);
     click_at(app, rect.center());
+}
+
+/// Opens the tool strip's More menu that lists the tool named `label`, when the strip had
+/// no room for its card. Returns whether a menu now shows it.
+pub fn open_more_menu(app: &mut App, label: &str) -> bool {
+    let menus: Vec<Rect> = app
+        .query_all(By::new().role(egui::accesskit::Role::Button))
+        .filter(|n| n.accesskit_node().label().is_some_and(|l| l.starts_with("More ") && l.ends_with(" tools")))
+        .map(|n| n.rect())
+        .collect();
+    for menu in menus {
+        click_at(app, menu.center());
+        app.run_steps(8);
+        if app.query_all_by_role_and_label(egui::accesskit::Role::Button, label).next().is_some() {
+            return true;
+        }
+        app.key_press(Key::Escape);
+        app.run_steps(8);
+    }
+    false
 }
 
 /// The bounds of the one button of that name in a region.
@@ -312,8 +339,16 @@ pub fn reveal_command(app: &mut App, id: &str) -> Control {
         _ => command.label_in(&app.state().state),
     };
     let palette = palette_region(app);
+    let on_strip = app
+        .query_all_by_role_and_label(egui::accesskit::Role::Button, &label)
+        .any(|node| palette.contains(node.rect().center()));
+    if !on_strip {
+        // The strip had no room for this tool's card: it is in its group's More menu.
+        assert!(open_more_menu(app, &label), "missing palette command {id}");
+        return control(app, &label, window(app));
+    }
     app.get_all_by_role_and_label(egui::accesskit::Role::Button, &label)
-        .find(|node| palette.x_range().contains(node.rect().center().x))
+        .find(|node| palette.contains(node.rect().center()))
         .unwrap_or_else(|| panic!("missing palette command {id}"))
         .scroll_to_me();
     app.run_steps(24);

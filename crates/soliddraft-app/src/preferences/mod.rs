@@ -681,9 +681,9 @@ pub fn window(ctx: &egui::Context, prefs: &mut Option<Preferences>, state: &mut 
         .title_bar(false)
         .pivot(egui::Align2::CENTER_CENTER)
         .default_pos(ctx.content_rect().center())
-        .default_size([960.0, 620.0])
-        .min_size([700.0, 440.0])
-        .max_size([1120.0, 760.0])
+        // One size for every page: a window that fits its content changes width from
+        // page to page and moves under the pointer.
+        .fixed_size((ctx.content_rect().size() - egui::vec2(48.0, 48.0)).min(egui::vec2(960.0, 620.0)))
         .collapsible(false)
         .show(ctx, |ui| p.ui(ui));
     for change in p.take_changes() {

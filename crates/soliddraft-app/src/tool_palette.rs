@@ -89,64 +89,68 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
                 ui.add_space(8.0);
             }
 
-            // Left-to-right scrollable icon-over-label tool cards
+            // Icon-over-label tool cards, left to right. A tab with more tools than the
+            // strip is wide keeps the first tools of each group as cards and puts the rest
+            // of the group in a More menu at its end, so no tool is scrolled out of sight.
             ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
                 ui.add_space(10.0);
+                let start = matches!(tab, Tab::Part(RibbonTab::Solid | RibbonTab::Sketch)) && !state.in_sketch();
+                let mut lead: Vec<(&'static CommandSpec, bool)> = Vec::new();
+                if start {
+                    lead.push((commands::get("sketch").expect("the registry has Start sketch"), true));
+                }
+                if tab == Tab::Part(RibbonTab::Sketch) {
+                    lead.push((commands::get("smart_dimension").expect("the registry has Smart Dimension"), false));
+                }
+                let mut groups: Vec<(&'static str, Vec<&'static CommandSpec>)> = Vec::new();
+                for (group, commands) in commands::ribbon(tab) {
+                    if state.drawing.is_active() && group == "Assistant" {
+                        continue;
+                    }
+                    if state.assembly.is_active() && tab == Tab::Assembly && group == "View" {
+                        continue;
+                    }
+                    let commands: Vec<_> = commands
+                        .into_iter()
+                        .map(|(command, _)| command)
+                        .filter(|command| {
+                            (command.shown)(state)
+                                && !(start && command.id == "sketch")
+                                && command.id != "smart_dimension"
+                                && !(state.in_sketch() && matches!(command.id, "sketch" | "exit_sketch"))
+                                && !(state.assembly.is_active()
+                                    && tab == Tab::Assembly
+                                    && command.id == "assembly_interference")
+                        })
+                        .collect();
+                    if !commands.is_empty() {
+                        groups.push((group, commands));
+                    }
+                }
+                let lead_width: f32 = lead.iter().map(|(c, primary)| card_width(ui, state, c, *primary) + GAP).sum();
+                let widths: Vec<Vec<f32>> =
+                    groups.iter().map(|(_, cs)| cs.iter().map(|c| card_width(ui, state, c, false)).collect()).collect();
+                let shown = fit(&widths, lead_width, !lead.is_empty(), ui.available_width() - 10.0);
+
                 egui::ScrollArea::horizontal()
                     .id_salt(("d1_tool_strip", state.drawing.is_active(), state.assembly.is_active(), tab.id()))
                     .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded)
                     .auto_shrink([false, true])
                     .show(ui, |ui| {
                         ui.horizontal_centered(|ui| {
-                            ui.spacing_mut().item_spacing.x = 4.0;
-                            let start =
-                                matches!(tab, Tab::Part(RibbonTab::Solid | RibbonTab::Sketch)) && !state.in_sketch();
+                            ui.spacing_mut().item_spacing.x = GAP;
                             let mut drew_any = false;
-                            if start {
-                                let command = commands::get("sketch").expect("the registry has Start sketch");
-                                let resp = tool_card(ui, state, command, true);
-                                if resp.clicked() {
-                                    pending = Some(command);
+                            for (command, primary) in &lead {
+                                if tool_card(ui, state, *command, *primary).clicked() {
+                                    pending = Some(*command);
                                 }
                                 drew_any = true;
                             }
-                            if tab == Tab::Part(RibbonTab::Sketch) {
-                                let command =
-                                    commands::get("smart_dimension").expect("the registry has Smart Dimension");
-                                let resp = tool_card(ui, state, command, false);
-                                if resp.clicked() {
-                                    pending = Some(command);
-                                }
-                                drew_any = true;
-                            }
-
-                            for (group, commands) in commands::ribbon(tab) {
-                                if state.drawing.is_active() && group == "Assistant" {
-                                    continue;
-                                }
-                                if state.assembly.is_active() && tab == Tab::Assembly && group == "View" {
-                                    continue;
-                                }
-                                let commands: Vec<_> = commands
-                                    .into_iter()
-                                    .map(|(command, _)| command)
-                                    .filter(|command| {
-                                        (command.shown)(state)
-                                            && !(start && command.id == "sketch")
-                                            && command.id != "smart_dimension"
-                                            && !(state.in_sketch() && matches!(command.id, "sketch" | "exit_sketch"))
-                                            && !(state.assembly.is_active()
-                                                && tab == Tab::Assembly
-                                                && command.id == "assembly_interference")
-                                    })
-                                    .collect();
-                                if commands.is_empty() {
-                                    continue;
-                                }
+                            for ((group, commands), shown) in groups.iter().zip(&shown) {
                                 if drew_any {
                                     group_divider(ui);
                                 }
-                                for command in commands {
+                                for command in commands[..*shown].iter().copied() {
                                     let resp = tool_card(ui, state, command, false);
                                     if command.id == "relations" {
                                         relations_anchor = resp.rect;
@@ -154,8 +158,15 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
                                     if resp.clicked() {
                                         pending = Some(command);
                                     }
-                                    drew_any = true;
                                 }
+                                let rest = &commands[*shown..];
+                                if !rest.is_empty() {
+                                    let more = more_card(ui, state, group, rest, &mut pending);
+                                    if rest.iter().any(|c| c.id == "relations") {
+                                        relations_anchor = more;
+                                    }
+                                }
+                                drew_any = true;
                             }
                         });
                     });
@@ -214,6 +225,145 @@ fn workspace_tab(
     resp.on_hover_text(hint)
 }
 
+/// The space between two cards of the strip.
+const GAP: f32 = 4.0;
+/// The width a group divider takes, with the gap after it.
+const DIVIDER: f32 = 9.0 + GAP;
+/// The width of a group's More card, with the gap before it.
+const MORE: f32 = 40.0 + GAP;
+
+/// How many tools of each group stay on the strip as cards when the strip is `room` wide.
+/// `widths` holds each group's card widths in order. Every group keeps at least one card;
+/// the group showing the most cards gives one up first, the later group on a tie.
+fn fit(widths: &[Vec<f32>], lead: f32, has_lead: bool, room: f32) -> Vec<usize> {
+    let mut shown: Vec<usize> = widths.iter().map(Vec::len).collect();
+    let total = |shown: &[usize]| {
+        let dividers = (widths.len() + usize::from(has_lead)).saturating_sub(1) as f32 * DIVIDER;
+        let cards: f32 = widths
+            .iter()
+            .zip(shown)
+            .map(|(w, n)| w[..*n].iter().map(|w| w + GAP).sum::<f32>() + if *n < w.len() { MORE } else { 0.0 })
+            .sum();
+        lead + dividers + cards
+    };
+    while total(&shown) > room {
+        let Some(most) = (0..shown.len()).filter(|i| shown[*i] > 1).max_by_key(|i| (shown[*i], *i)) else {
+            break;
+        };
+        shown[most] -= 1;
+    }
+    shown
+}
+
+/// The width `tool_card` gives a command's card.
+fn card_width(ui: &egui::Ui, state: &AppState, command: &CommandSpec, primary: bool) -> f32 {
+    let font = if primary { theme::font_semibold(11.0) } else { theme::font_medium(11.0) };
+    let galley = ui.painter().layout_no_wrap(card_caption(command, state), font, Color32::PLACEHOLDER);
+    (galley.size().x + 16.0).max(if primary { 76.0 } else { 54.0 })
+}
+
+/// The card at a group's end that opens a menu of the group's tools the strip has no room
+/// for. Returns where the card is.
+fn more_card(
+    ui: &mut egui::Ui,
+    state: &AppState,
+    group: &str,
+    rest: &[&'static CommandSpec],
+    pending: &mut Option<&'static CommandSpec>,
+) -> Rect {
+    let (rect, response) = ui.allocate_exact_size(vec2(MORE - GAP, 48.0), Sense::click());
+    let name = format!("More {group} tools");
+    let active = rest.iter().any(|c| (c.active)(state));
+    response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, active, name.clone()));
+    let open = egui::Popup::is_id_open(ui.ctx(), response.id.with("popup"));
+    let (fill, stroke) = if active {
+        (theme::selection_bg(), Stroke::new(1.0, theme::accent()))
+    } else if open || response.hovered() {
+        (theme::hover(), Stroke::NONE)
+    } else {
+        (Color32::TRANSPARENT, Stroke::NONE)
+    };
+    let stroke = if response.has_focus() { Stroke::new(1.5, theme::accent()) } else { stroke };
+    ui.painter().rect(rect, CornerRadius::same(theme::radii().tool), fill, stroke, StrokeKind::Inside);
+    let ink = if active { theme::selection_ink() } else { theme::muted() };
+    icons::paint(
+        ui.painter(),
+        icons::Icon::ChevronDown,
+        Rect::from_center_size(pos2(rect.center().x, rect.top() + 17.0), vec2(14.0, 14.0)),
+        ink,
+    );
+    let galley = ui.painter().layout_no_wrap("More".to_owned(), theme::font_medium(11.0), ink);
+    ui.painter().galley(
+        pos2(rect.center().x - galley.size().x / 2.0, rect.bottom() - galley.size().y - 5.0),
+        galley,
+        ink,
+    );
+    let response = response.on_hover_text(format!("{name} ({})", rest.len()));
+    egui::Popup::menu(&response)
+        .align(egui::RectAlign::BOTTOM_START)
+        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+        .show(|ui| {
+            ui.set_min_width(230.0);
+            ui.label(
+                egui::RichText::new(group.to_uppercase()).family(theme::semibold()).size(10.0).color(theme::muted()),
+            );
+            for command in rest.iter().copied() {
+                if menu_row(ui, state, command).clicked() {
+                    *pending = Some(command);
+                    ui.close();
+                }
+            }
+        });
+    rect
+}
+
+/// One tool in a group's More menu: its icon, name and shortcut.
+fn menu_row(ui: &mut egui::Ui, state: &AppState, command: &'static CommandSpec) -> egui::Response {
+    let enabled = command.is_enabled(state);
+    let active = (command.active)(state);
+    let accessible = label(command, state);
+    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width().max(230.0), 26.0), Sense::hover());
+    let response = ui.interact(
+        rect,
+        ui.id().with(("ribbon_tool", command.id)),
+        if enabled { Sense::click_and_drag() } else { Sense::hover() },
+    );
+    response.dnd_set_drag_payload(crate::command_line::ToolDrag { id: command.id });
+    response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, enabled, active, accessible.clone()));
+    if active {
+        ui.painter().rect_filled(rect, CornerRadius::same(4), theme::selection_bg());
+    } else if enabled && (response.hovered() || response.has_focus()) {
+        ui.painter().rect_filled(rect, CornerRadius::same(4), theme::hover());
+    }
+    let ink = if !enabled {
+        theme::muted().gamma_multiply(0.55)
+    } else if active {
+        theme::selection_ink()
+    } else {
+        theme::ink()
+    };
+    let treatment = if enabled { icons::Treatment::Normal } else { icons::Treatment::Disabled };
+    let icon = Rect::from_center_size(pos2(rect.left() + 14.0, rect.center().y), vec2(16.0, 16.0));
+    icons::paint_as(ui.painter(), command.icon, icon, ink, treatment);
+    ui.painter().text(
+        pos2(rect.left() + 30.0, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        &accessible,
+        theme::font(12.0),
+        ink,
+    );
+    if let Some(shortcut) = state.shortcuts.shortcut_text(command.id) {
+        ui.painter().text(
+            pos2(rect.right() - 8.0, rect.center().y),
+            egui::Align2::RIGHT_CENTER,
+            shortcut,
+            theme::font(11.0),
+            theme::muted(),
+        );
+    }
+    response.on_hover_text(command.tip(state))
+}
+
 fn group_divider(ui: &mut egui::Ui) {
     let (rect, _) = ui.allocate_exact_size(vec2(9.0, 36.0), Sense::hover());
     ui.painter().vline(rect.center().x, rect.y_range().shrink(2.0), Stroke::new(1.0, theme::line()));
@@ -227,8 +377,7 @@ fn tool_card(ui: &mut egui::Ui, state: &AppState, command: &'static CommandSpec,
 
     let font = if primary { theme::font_semibold(11.0) } else { theme::font_medium(11.0) };
     let galley = ui.painter().layout_no_wrap(caption, font, Color32::PLACEHOLDER);
-    let min_w = if primary { 76.0 } else { 54.0 };
-    let width = (galley.size().x + 16.0).max(min_w);
+    let width = card_width(ui, state, command, primary);
     let height = 48.0;
 
     let (rect, _) = ui.allocate_exact_size(vec2(width, height), Sense::hover());

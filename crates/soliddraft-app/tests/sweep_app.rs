@@ -526,10 +526,16 @@ fn spline_sweep_edits_reopens_and_refuses_a_return_without_changing_the_part() {
     assert!(!mesh.positions.is_empty() && !mesh.indices.is_empty());
     assert!(doc.proof_state().current_proved_display());
     assert!(doc.display_answer(doc.features[1].id).is_none());
-    let (export, _) = soliddraft_kernel_catallax::with_request_allowance(20_000_000, || {
-        doc.kernel().tessellate(body, &Default::default())
+    let export_params = soliddraft_kernel_api::TessellationParams::default();
+    let (refused, refused_work) =
+        soliddraft_kernel_catallax::with_request_allowance(0, || doc.kernel().tessellate(body, &export_params));
+    assert!(refused.is_err() && refused_work.exhausted, "{refused:?}; {refused_work:?}");
+    let (export, export_work) = soliddraft_kernel_catallax::with_request_allowance(20_000_000, || {
+        doc.kernel().tessellate(body, &export_params)
     });
-    assert!(export.is_err(), "a named screen result cannot replace an independent certified request");
+    let certified = export.unwrap_or_else(|error| panic!("{error}; {export_work:?}"));
+    assert!(!export_work.exhausted && (1..=20_000_000).contains(&export_work.used), "{export_work:?}");
+    assert!(!certified.unproved && certified.bounded.is_none() && !certified.indices.is_empty());
     call(&mut doc, "undo", json!({}));
     assert_eq!(doc.features[1].kind, before);
     check_spline(&doc, 48.0);

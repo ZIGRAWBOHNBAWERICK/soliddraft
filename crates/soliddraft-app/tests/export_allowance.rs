@@ -82,11 +82,24 @@ fn smooth_rendering_cannot_satisfy_an_independent_certified_export() {
     assert!(refused.is_error && work.exhausted, "{}; {work:?}", refused.content);
     assert!(refused.content.contains("numbers.operation-budget"), "{}", refused.content);
     assert_eq!(std::fs::read(&path).unwrap(), sentinel);
-    let (refused, work) = with_request_allowance(APP_WORK_TARGET, || call(&mut state, "export_stl", arguments));
-    eprintln!("three-section Smooth certified export: {work:?}; {}", refused.content);
-    assert!(refused.is_error && work.exhausted, "{}; {work:?}", refused.content);
-    assert!(refused.content.contains("numbers.operation-budget"), "{}", refused.content);
-    assert_eq!(std::fs::read(&path).unwrap(), sentinel, "a screen result cannot replace certified export");
+    let (exported, work) = with_request_allowance(APP_WORK_TARGET, || call(&mut state, "export_stl", arguments));
+    assert!(
+        !exported.is_error && !work.exhausted && work.used > 0 && work.used <= APP_WORK_TARGET,
+        "{}; {work:?}",
+        exported.content
+    );
+    let result: Value = serde_json::from_str(&exported.content).unwrap();
+    let evidence = &result["evidence"];
+    assert_eq!(evidence["closed"], true);
+    let print = &evidence["print_check"];
+    assert_eq!(print["route"], "brep");
+    assert_eq!(print["requested_accuracy_mm"], 0.01);
+    assert!((0.0..=0.01).contains(&print["certified_accuracy_mm"].as_f64().unwrap()));
+    let written = std::fs::read(&path).unwrap();
+    let triangles = u32::from_le_bytes(written[80..84].try_into().unwrap());
+    assert!(triangles > 0);
+    assert_eq!(evidence["triangles"], triangles);
+    assert_eq!(written.len(), 84 + 50 * triangles as usize);
     assert_eq!(state.doc.model().to_bytes().unwrap(), before);
     assert_eq!(state.doc.undo_depth(), undo);
     std::fs::remove_dir_all(dir).unwrap();

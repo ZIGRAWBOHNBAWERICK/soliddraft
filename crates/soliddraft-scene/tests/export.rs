@@ -107,16 +107,7 @@ fn rig(dir: &Path) -> AssemblyDocument {
     doc.finish_loading();
     doc.mate_origin("O", a, true, false).unwrap();
     let planes = |x: ComponentId| [datum(a, "Top plane"), datum(x, "Top plane")];
-    let [pa, pb] = planes(b);
-    doc.mate_hinge_limited(
-        "Lid",
-        [&cylinder(a), &cylinder(b)],
-        [&pa, &pb],
-        [Alignment::Aligned; 2],
-        Some([-30.0, 45.0]),
-        false,
-    )
-    .unwrap();
+    add_hinge(&mut doc, "Lid", [a, b], Some([-30.0, 45.0]));
     let [pa, pc] = planes(c);
     doc.mate_hinge("Spin", [&cylinder(a), &cylinder(c)], [&pa, &pc], Alignment::Aligned, Alignment::Aligned, false)
         .unwrap();
@@ -140,6 +131,23 @@ fn shafts(dir: &Path, name: &str) -> (AssemblyDocument, [ComponentId; 2]) {
 
 fn component(id: ComponentId) -> OccurrencePath {
     OccurrencePath::root().child(Step::component(id))
+}
+
+fn add_hinge(doc: &mut AssemblyDocument, name: &str, [a, b]: [ComponentId; 2], limits: Option<[f64; 2]>) {
+    doc.mate_hinge_limited(
+        name,
+        [&cylinder(a), &cylinder(b)],
+        [&datum(a, "Top plane"), &datum(b, "Top plane")],
+        [Alignment::Aligned; 2],
+        limits,
+        false,
+    )
+    .unwrap();
+}
+
+fn exported_scene(doc: &mut AssemblyDocument, path: &Path) -> Scene {
+    export::export(doc, path).unwrap();
+    read(path, &Options::default()).unwrap()
 }
 
 fn check_joints(a: &Articulation) {
@@ -271,4 +279,62 @@ fn export_uses_saved_placements_while_exploded_or_dragging() {
         assert!(expected == exploded, "{format} changed with the exploded view");
         assert!(expected == preview, "{format} changed during a drag preview");
     }
+}
+
+#[test]
+fn export_keeps_disconnected_hinges() {
+    let dir = folder("disconnected");
+    let (mut doc, ends) = shafts(&dir, "Rig");
+    let file = dir.join("hinge.dwasm");
+    let block = dir.join("block.dwprt");
+    part(&block, false);
+    let ground = doc.insert(reference(&file, &block), Placement::IDENTITY).unwrap();
+    doc.finish_loading();
+    doc.mate_origin("Ground", ground, true, false).unwrap();
+    add_hinge(&mut doc, "Separate hinge", ends, None);
+    doc.save(None).unwrap();
+    let mut doc = AssemblyDocument::open(&file, options()).unwrap();
+    for extension in ["urdf", "usda"] {
+        let scene = exported_scene(&mut doc, &dir.join(format!("rig.{extension}")));
+        let kinds: Vec<_> = scene.joints.iter().map(|j| j.kind).collect();
+        assert_eq!(kinds, [JointKind::Fixed, JointKind::Fixed, JointKind::Continuous], "{extension}");
+    }
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn export_keeps_mates_in_each_subassembly_occurrence() {
+    let dir = folder("nested");
+    let mut child = rig(&dir);
+    child.save(None).unwrap();
+    let file = dir.join("parent.dwasm");
+    let mut doc = AssemblyDocument::new_with("Parent", options());
+    doc.save(Some(&file)).unwrap();
+    let child = reference(&file, &dir.join("rig.dwasm"));
+    doc.insert(child.clone(), Placement::IDENTITY).unwrap();
+    doc.insert(child, Placement::new(DQuat::from_rotation_y(std::f64::consts::FRAC_PI_2), DVec3::X * 100.0)).unwrap();
+    doc.finish_loading();
+    doc.save(None).unwrap();
+    let mut doc = AssemblyDocument::open(&file, options()).unwrap();
+    let a = export::articulate(&mut doc).unwrap();
+    let mut axes = Vec::new();
+    for joint in &a.joints {
+        if let Some((leader, multiplier)) = &joint.mimic {
+            assert!((multiplier + 2.0).abs() < 1e-12, "{joint:?}");
+            let leader = a.joints.iter().find(|j| j.name == *leader).unwrap();
+            let holder = |link: usize| a.links[link].path.as_deref().unwrap().split_once('/').unwrap().0;
+            assert_eq!(holder(leader.child), holder(joint.child));
+            axes.push(DVec3::from_array(joint.axis));
+        }
+    }
+    assert_eq!(axes.len(), 2, "each placed rig keeps its own gear and hinges");
+    for want in [DVec3::Z, DVec3::X] {
+        assert!(axes.iter().any(|axis| (*axis - want).length() < 1e-6), "{axes:?}");
+    }
+    for extension in ["urdf", "usda"] {
+        let scene = exported_scene(&mut doc, &dir.join(format!("rig.{extension}")));
+        assert_eq!(scene.joints.iter().filter(|j| j.kind == JointKind::Revolute).count(), 2, "{extension}");
+        assert_eq!(scene.joints.iter().filter(|j| j.mimic.is_some()).count(), 2, "{extension}");
+    }
+    std::fs::remove_dir_all(dir).unwrap();
 }

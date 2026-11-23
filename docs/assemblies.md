@@ -256,9 +256,10 @@ by SolidDraft's importer. ROS urdfdom supports its own list of joint types, whic
 excludes `spherical`.
 
 A Gear between two of those joints makes the second follow the first (URDF `mimic`,
-`newton:mimicJoint` in OpenUSD). The joints form a tree from `base_link`: a mate that would
-close a loop is left out, and a part no mate reaches is fixed to `base_link` where it
-stands. Every choice like that is reported in words, naming the mates. Each joint frame
+`newton:mimicJoint` in OpenUSD). Each connected group of parts attaches to `base_link` by
+a fixed joint. It keeps its internal joints, including mates authored in sub-assemblies.
+An Origin mate picks the attachment part when the group has one. A mate that would close
+a loop is left out and named in the export report. Each joint frame
 puts the joint's axis along its X. URDF lengths are metres; the OpenUSD layer is in
 millimetres with Z up.
 

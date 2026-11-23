@@ -171,6 +171,9 @@ fn a_legacy_hole_keeps_its_edited_position_pattern_after_reopen() {
     settle(&mut app);
     click(&mut app, "Hole Wizard Positions tab");
     let EditorParams::Hole(h) = &mut app.state_mut().state.editor.as_mut().unwrap().params else { panic!() };
+    let sketch = h.ensure_position_sketch();
+    let point = soliddraft_sketch::PointRef::new(sketch.entities[1].id, 0);
+    sketch.constrain(soliddraft_sketch::ConstraintKind::Fix { point, at: P2::new(-10.0, -10.0) });
     h.lin_pat.count_x = 2;
     h.lin_pat.spacing_x = 12.0;
     h.lin_pat.count_y = 1;

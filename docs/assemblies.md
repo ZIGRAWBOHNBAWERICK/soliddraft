@@ -236,9 +236,11 @@ visible edge of one occurrence of that part, and sits outside the view clear of 
 Rebuild brings the drawing to the saved assembly as one undo step: every base view's line
 work at its scale, the BOM's rows, each balloon moved onto its occurrence and renumbered
 from its row, a balloon for every new row, and the new pin. A balloon whose occurrence is
-gone, or shows no edge in the view, is marked as needing attention. Rebuild recomputes the
-projected, section and detail views too, and moves each cutting line and detail circle
-with the model point it went through.
+gone, or shows no edge in the view, is marked as needing attention and shows `?`: its old
+number may be another row's now, so it numbers no row, and a row it numbered gets a new
+balloon. Rebuild recomputes the projected, section and detail views too, and moves each
+cutting line and detail circle with the model point it went through. A view excluded from
+updates keeps its line work and its balloons.
 
 ## Robotics export
 

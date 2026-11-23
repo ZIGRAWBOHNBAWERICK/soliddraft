@@ -8,7 +8,7 @@ use soliddraft_drawing::assembly::{
     AssemblyModel, BomRow, NewAssemblyDrawing, make_assembly_drawing, new_assembly_detail, new_assembly_projected,
     new_assembly_section, update_assembly_drawing,
 };
-use soliddraft_drawing::display::{Item, layout_sheet};
+use soliddraft_drawing::display::{Item, Owner, layout_sheet};
 use soliddraft_drawing::file::{FileMeta, from_bytes, to_bytes};
 use soliddraft_drawing::placed::{PlacedPart, component_of};
 use soliddraft_drawing::project;
@@ -349,4 +349,44 @@ fn a_rebuild_leaves_a_view_excluded_from_updates_as_it_was() {
     // The section cut from it follows the assembly; the excluded view keeps the old revision.
     assert_eq!(updated.view(section_id).unwrap().geometry.source_digest, second.digest().as_str());
     assert_eq!(updated.view(front).unwrap().geometry.source_digest, first.digest().as_str());
+}
+
+#[test]
+fn a_balloon_whose_part_went_claims_no_item_and_the_new_row_gets_its_own() {
+    let k = BoxKernel::new();
+    let first = model(b"r1", vec![base(&k), post(&k, "3", 10.0)]);
+    let mut drawing = drawing_of(&first, "iso-a3", vec![StandardView::Isometric], None);
+    let gone = drawing.sheets[0]
+        .annotations
+        .iter()
+        .find(|a| matches!(&a.body, AnnotationKind::Balloon { occurrence, .. } if occurrence == "2"))
+        .map(|a| a.id)
+        .unwrap();
+
+    // The base goes and a lid takes its place as item 1; the post stays item 2.
+    let lid = (cuboid(&k, "5", Vec3::new(0.0, 0.0, 70.0), Vec3::new(100.0, 60.0, 5.0)), 1);
+    let mut second = later(&first, b"r2", vec![lid, post(&k, "3", 10.0)]);
+    second.bom[0] = BomRow { item: 1, name: "Lid".into(), file: "parts/lid.dwprt".into(), quantity: 1 };
+    let updated = update_assembly_drawing(&drawing, &second).unwrap();
+    apply(&mut drawing, &Command::UpdateFromAssembly { drawing: Box::new(updated) }).unwrap();
+    let sheet = &drawing.sheets[0];
+    let lid_balloon = sheet
+        .annotations
+        .iter()
+        .find(|a| matches!(&a.body, AnnotationKind::Balloon { occurrence, .. } if occurrence == "5"));
+    let lid_balloon = lid_balloon.expect("the lid's row gets a balloon of its own");
+    assert!(matches!(lid_balloon.body, AnnotationKind::Balloon { item: 1, .. }));
+    assert_eq!(lid_balloon.state, AnnotationState::Ok);
+    let dangling = sheet.annotations.iter().find(|a| a.id == gone).unwrap();
+    assert!(matches!(dangling.state, AnnotationState::Dangling { .. }));
+    // On the sheet the dangling balloon shows no item number.
+    let shown: Vec<String> = layout_sheet(&drawing, 0)
+        .items
+        .iter()
+        .filter_map(|i| match i {
+            Item::Text(t) if t.owner == Owner::Annotation(gone) => Some(t.text.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(shown, ["?"], "the balloon of a part that went claims no BOM item");
 }

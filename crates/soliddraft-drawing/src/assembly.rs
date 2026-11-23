@@ -359,17 +359,18 @@ fn attach_point(
     None
 }
 
-/// Puts a balloon for every BOM row that has none on `view`, outside the view's box, on
-/// the line from the view's middle through its anchor.
+/// Puts a balloon for every BOM row that no balloon on `view` points at, outside the
+/// view's box, on the line from the view's middle through its anchor.
 fn add_balloons(drawing: &mut Drawing, model: &AssemblyModel<'_>, view: ViewId) -> Result<(), DrawingError> {
     let sheet = crate::project::sheet_of(drawing, view).ok_or(DrawingError::UnknownView(view))?;
     let ctx = context(drawing, model, view)?;
     let [bx0, by0, bx1, by1] = ctx.projected.geometry.bbox;
     let half = Point2::new((bx1 - bx0) / 2.0, (by1 - by0) / 2.0);
+    // Only a balloon that points at its part numbers a row: a dangling one claims none.
     let taken: Vec<u32> = drawing.sheets[sheet]
         .annotations
         .iter()
-        .filter(|a| a.view == view)
+        .filter(|a| a.view == view && !matches!(a.state, AnnotationState::Dangling { .. }))
         .filter_map(|a| match &a.body {
             AnnotationKind::Balloon { item, .. } => Some(*item),
             _ => None,

@@ -145,7 +145,7 @@ fn hole_wizard_iso_m6_four_holes_edit_positions_switch_ansi_inch_favorites_save_
     // 7. Edit positions later by editing the absorbed position sketch (add a 5th point at origin).
     {
         let mut sk = app.state().state.doc.feature(sketch_id).unwrap().sketch().unwrap().sketch.clone();
-        sk.add_entity(soliddraft_sketch::EntityKind::Point { p: soliddraft_sketch::P2::new(0.0, 0.0) });
+        sk.add(soliddraft_sketch::EntityKind::Point { p: soliddraft_sketch::P2::new(0.0, 0.0) }, false);
         soliddraft_sketch::solve::solve(&mut sk, None, true);
         app.state_mut().state.push(AppAction::Command(soliddraft_app::document::Command::EditSketch {
             id: sketch_id,

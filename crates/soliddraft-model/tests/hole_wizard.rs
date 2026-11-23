@@ -21,7 +21,7 @@ use soliddraft_model::hole_wizard::{
 };
 use soliddraft_model::sketch::{
     ConstraintKind, EntityId, EntityKind, P2, PointRef, Sketch, SolveStatus, solve::solve,
-    tools::{PatternDirection, PatternSpec},
+    tools::{Operation, PatternDirection, PatternSpec},
 };
 use soliddraft_model::{
     BlendFeature, Command, DatumPlane, Document, EndCondition, ExtrudeFeature, ExtrudeOp, FeatureId, FeatureKind,
@@ -114,15 +114,18 @@ fn iso_m6_four_hole_counterbore_edit_positions_switch_to_ansi_inch_save_reopen_a
 
     // Build a 2x2 position sketch using a fixed seed point + retained linear pattern.
     let mut pos_sketch = Sketch::new();
-    let seed: EntityId = pos_sketch.add_entity(EntityKind::Point { p: P2::new(-30.0, -20.0) });
-    pos_sketch.add_constraint(ConstraintKind::Fixed { point: PointRef::new(seed, 0) });
+    let seed: EntityId = pos_sketch.add(EntityKind::Point { p: P2::new(-30.0, -20.0) }, false);
+    pos_sketch.constrain(ConstraintKind::Fix { point: PointRef::new(seed, 0), at: P2::new(-30.0, -20.0) });
     pos_sketch
-        .linear_pattern(
-            &[seed],
-            P2::new(60.0, 0.0),
-            2,
-            Some(PatternDirection { step: P2::new(0.0, 40.0), count: 2 }),
-        )
+        .apply_operation(&Operation::Pattern {
+            entities: vec![seed],
+            spec: PatternSpec::Linear {
+                step: P2::new(60.0, 0.0),
+                count: 2,
+                second: Some(PatternDirection { step: P2::new(0.0, 40.0), count: 2 }),
+            },
+            skipped: vec![],
+        })
         .unwrap();
     solve(&mut pos_sketch, None, true);
     assert_eq!(
@@ -166,15 +169,15 @@ fn iso_m6_four_hole_counterbore_edit_positions_switch_to_ansi_inch_save_reopen_a
     let pat_id = edited_sf.sketch.patterns[0].id;
     edited_sf
         .sketch
-        .edit_pattern(
-            pat_id,
-            PatternSpec::Linear {
+        .apply_operation(&Operation::EditPattern {
+            group: pat_id,
+            spec: PatternSpec::Linear {
                 step: P2::new(30.0, 0.0),
                 count: 3,
                 second: Some(PatternDirection { step: P2::new(0.0, 40.0), count: 2 }),
             },
-            &[],
-        )
+            skipped: vec![],
+        })
         .unwrap();
     solve(&mut edited_sf.sketch, None, true);
     d.execute(Command::EditFeature { id: sketch_id, kind: FeatureKind::Sketch(edited_sf) }).unwrap();
@@ -241,8 +244,8 @@ fn through_all_tapped_holes_with_cosmetic_thread_iso_and_ansi_inch() {
 
     // 1. ISO M6 Through-All Straight Tap with cosmetic thread.
     let mut s1 = Sketch::new();
-    s1.add_entity(EntityKind::Point { p: P2::new(-25.0, 0.0) });
-    s1.add_entity(EntityKind::Point { p: P2::new(-5.0, 0.0) });
+    s1.add(EntityKind::Point { p: P2::new(-25.0, 0.0) }, false);
+    s1.add(EntityKind::Point { p: P2::new(-5.0, 0.0) }, false);
     let sk1 = add(&mut d, FeatureKind::Sketch(SketchFeature { plane: SketchPlane::Face { face: top.clone() }, sketch: s1 }));
 
     let mut iso_tap = HoleWizardSpec::new(HoleStandard::Iso, HoleType::StraightTap);
@@ -253,7 +256,7 @@ fn through_all_tapped_holes_with_cosmetic_thread_iso_and_ansi_inch() {
 
     // 2. ANSI Inch 1/4-20 UNC Through-All Straight Tap with cosmetic thread.
     let mut s2 = Sketch::new();
-    s2.add_entity(EntityKind::Point { p: P2::new(25.0, 0.0) });
+    s2.add(EntityKind::Point { p: P2::new(25.0, 0.0) }, false);
     let sk2 = add(&mut d, FeatureKind::Sketch(SketchFeature { plane: SketchPlane::Face { face: top.clone() }, sketch: s2 }));
 
     let mut inch_tap = HoleWizardSpec::new(HoleStandard::AnsiInch, HoleType::StraightTap);

@@ -566,7 +566,7 @@ impl HoleParams {
         if self.position_sketch.is_none() {
             let mut sk = sketch::Sketch::new();
             for p in &self.points {
-                sk.add_entity(sketch::EntityKind::Point { p: *p });
+                sk.add(sketch::EntityKind::Point { p: *p }, false);
             }
             sketch::solve::solve(&mut sk, None, true);
             self.position_sketch = Some(sk);
@@ -592,7 +592,7 @@ impl HoleParams {
     /// Adds a hole point to the position sketch (or `points` when no sketch is active).
     pub fn add_position_point(&mut self, p: sketch::P2) {
         if let Some(sk) = &mut self.position_sketch {
-            sk.add_entity(sketch::EntityKind::Point { p });
+            sk.add(sketch::EntityKind::Point { p }, false);
             sketch::solve::solve(sk, None, true);
             self.sync_points_from_sketch();
         } else {
@@ -612,7 +612,7 @@ impl HoleParams {
             if ids.len() > 1
                 && let Some(&eid) = ids.get(idx)
             {
-                let _ = sk.remove_entity(eid);
+                sk.remove_entity(eid);
                 sketch::solve::solve(sk, None, true);
                 self.sync_points_from_sketch();
             }
@@ -656,11 +656,19 @@ impl HoleParams {
             .rev()
             .find(|e| e.id != sketch::ORIGIN && !e.construction && matches!(e.kind, sketch::EntityKind::Point { .. }))
             .map(|e| e.id)
-            .unwrap_or_else(|| sk.add_entity(sketch::EntityKind::Point { p: sketch::P2::ZERO }));
+            .unwrap_or_else(|| sk.add(sketch::EntityKind::Point { p: sketch::P2::ZERO }, false));
         let second = (draft.count_y > 1)
             .then_some(sketch::tools::PatternDirection { step: sketch::P2::new(0.0, draft.spacing_y), count: draft.count_y });
-        sk.linear_pattern(&[seed_id], sketch::P2::new(draft.spacing_x, 0.0), draft.count_x, second)
-            .map_err(|e| e.to_string())?;
+        sk.apply_operation(&sketch::tools::Operation::Pattern {
+            entities: vec![seed_id],
+            spec: sketch::tools::PatternSpec::Linear {
+                step: sketch::P2::new(draft.spacing_x, 0.0),
+                count: draft.count_x,
+                second,
+            },
+            skipped: vec![],
+        })
+        .map_err(|e| e.to_string())?;
         sketch::solve::solve(sk, None, true);
         self.sync_points_from_sketch();
         Ok(())
@@ -676,8 +684,18 @@ impl HoleParams {
         let center = sketch::P2::new(draft.center_u, draft.center_v);
         let rad = draft.start_angle_deg.to_radians();
         let first = sketch::P2::new(center.u + draft.radius * rad.cos(), center.v + draft.radius * rad.sin());
-        let seed_id = sk.add_entity(sketch::EntityKind::Point { p: first });
-        sk.circular_pattern(&[seed_id], center, 360.0, draft.count, true).map_err(|e| e.to_string())?;
+        let seed_id = sk.add(sketch::EntityKind::Point { p: first }, false);
+        sk.apply_operation(&sketch::tools::Operation::Pattern {
+            entities: vec![seed_id],
+            spec: sketch::tools::PatternSpec::Circular {
+                center,
+                angle_degrees: 360.0,
+                count: draft.count,
+                total_angle: true,
+            },
+            skipped: vec![],
+        })
+        .map_err(|e| e.to_string())?;
         sketch::solve::solve(sk, None, true);
         self.sync_points_from_sketch();
         Ok(())

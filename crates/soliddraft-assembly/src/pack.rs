@@ -273,7 +273,13 @@ pub fn pack_and_go(request: &PackRequest, drawings: Option<Repoint>) -> Result<P
             dir = resolved;
         }
         let to = dir.join(f.to.file_name().expect("validated output path"));
-        soliddraft_document::save_atomic(&to, bytes).map_err(|e| io(&to, &e))?;
+        soliddraft_document::save_new(&to, bytes).map_err(|e| {
+            if e.kind() == std::io::ErrorKind::AlreadyExists {
+                PackError::Destination(format!("{} already exists; Pack and Go replaces nothing", to.display()))
+            } else {
+                io(&to, &e)
+            }
+        })?;
     }
     Ok(pack.report(&into))
 }

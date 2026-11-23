@@ -11,7 +11,8 @@ use soliddraft_assembly::{
     AssemblyDocument, Folders, Freshness, HeldFiles, KernelSource, LoadState, OpenOptions, PackError, PackRequest,
     Placement, gather, pack_and_go, pack_zip,
 };
-use soliddraft_document::{DocKind, DocRef, identify_file};
+use soliddraft_document::manifest::{Manifest, write_package};
+use soliddraft_document::{ContentHash, DocKind, DocRef, DocumentId, identify_file};
 use soliddraft_kernel_api::Kernel;
 use soliddraft_kernel_catallax::CatallaxKernel;
 use soliddraft_model::sketch::{P2, Sketch, solve::solve};
@@ -346,5 +347,34 @@ fn pack_folder_rejects_a_symlink_as_the_destination() {
     let result = pack_and_go(&PackRequest { root, into, ..Default::default() }, None);
     assert!(matches!(result, Err(PackError::Destination(_))), "{result:?}");
     assert!(std::fs::read_dir(other).unwrap().next().is_none());
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+fn drawing_manifest(path: &Path, model: DocRef) {
+    let mut manifest = Manifest::new(DocumentId::new(), DocKind::Drawing, ContentHash::of_bytes(b"drawing"));
+    manifest.references.push(model);
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(path, write_package(&manifest, &[]).unwrap()).unwrap();
+}
+
+#[test]
+fn a_second_pack_cannot_replace_a_file_written_after_preflight() {
+    let dir = folder("concurrent");
+    let root = dir.join("src/rig.dwasm");
+    AssemblyDocument::new("First").save(Some(&root)).unwrap();
+    let other = dir.join("other/rig.dwasm");
+    AssemblyDocument::new("Second").save(Some(&other)).unwrap();
+    let drawing = dir.join("src/rig.dwdrw");
+    drawing_manifest(&drawing, reference(&drawing, &root));
+    let into = dir.join("packed");
+    let complete_other_pack = |bytes: &[u8], _: &DocRef| {
+        pack_and_go(&PackRequest { root: other.clone(), into: into.clone(), ..Default::default() }, None).unwrap();
+        Ok(bytes.to_vec())
+    };
+    let result =
+        pack_and_go(&PackRequest { root, into: into.clone(), ..Default::default() }, Some(&complete_other_pack));
+    let winner = AssemblyDocument::open(into.join("rig.dwasm"), OpenOptions::default()).unwrap();
+    assert_eq!(winner.assembly().name, "Second", "the first file published wins");
+    assert!(matches!(result, Err(PackError::Destination(_))), "the pack that arrived late must report the collision");
     std::fs::remove_dir_all(dir).unwrap();
 }

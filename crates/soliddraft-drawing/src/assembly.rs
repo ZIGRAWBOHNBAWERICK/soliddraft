@@ -100,6 +100,32 @@ pub fn bom_table_size(rows: usize) -> (f64, f64) {
     (BOM_COLUMNS.iter().map(|(_, w)| w).sum(), ROW * (rows as f64 + 2.0))
 }
 
+/// A template's drawing frame, inside its margins and zone band: `[x0, y0, x1, y1]`.
+fn drawing_frame(t: &Template) -> [f64; 4] {
+    let band = crate::library::library().templates.iter().find(|f| f.id == t.id.as_str()).map_or(0.0, |f| f.zones.band);
+    [
+        t.margins.left + band,
+        t.margins.bottom + band,
+        t.size.width_mm - t.margins.right - band,
+        t.size.height_mm - t.margins.top - band,
+    ]
+}
+
+/// Refuses a BOM of `rows` rows hanging from `position`, its top-left corner, that would
+/// leave the drawing frame of template `t`.
+fn bom_fits(t: &Template, position: Point2, rows: usize) -> Result<(), DrawingError> {
+    let [x0, y0, x1, y1] = drawing_frame(t);
+    let (w, h) = bom_table_size(rows);
+    let e = 1e-9;
+    if position.u < x0 - e || position.u + w > x1 + e || position.v > y1 + e || position.v - h < y0 - e {
+        return Err(DrawingError::BadRequest(format!(
+            "a BOM of {rows} rows is {h:.0} mm tall and does not fit on the {} sheet; use a larger sheet",
+            t.size.name
+        )));
+    }
+    Ok(())
+}
+
 impl<'k> AssemblyModel<'k> {
     /// The parts as one body, placed as the assembly has them or, with `exploded` and an
     /// exploded view, where that view puts them.
@@ -271,10 +297,9 @@ pub fn make_assembly_drawing(model: &AssemblyModel<'_>, new: &NewAssemblyDrawing
     let mut drawing = Drawing::new(reference, &new.template);
     drawing.meta = new.meta.clone();
     let t = &new.template;
-    let band = crate::library::library().templates.iter().find(|f| f.id == t.id.as_str()).map_or(0.0, |f| f.zones.band);
-    let (x0, y0) = (t.margins.left + band, t.margins.bottom + band);
-    let (x1, y1) = (t.size.width_mm - t.margins.right - band, t.size.height_mm - t.margins.top - band);
+    let [x0, y0, x1, y1] = drawing_frame(t);
     let (bom_w, bom_h) = bom_table_size(model.bom.len());
+    bom_fits(t, Point2::new(x1 - bom_w, y1), model.bom.len())?;
     // The BOM in the top-right corner; the views left of it, above the title block.
     drawing.sheets[0].tables.push(Table {
         kind: TableKind::Bom,
@@ -287,6 +312,13 @@ pub fn make_assembly_drawing(model: &AssemblyModel<'_>, new: &NewAssemblyDrawing
     let region = (x0 + MARGIN, title_top.max(y0 + MARGIN), x1 - MARGIN, y1 - bom_h - MARGIN);
     let slot_w = (region.2 - region.0) / new.views.len() as f64;
     let slot_h = region.3 - region.1;
+    if slot_w <= 0.0 || slot_h <= 0.0 {
+        return Err(DrawingError::BadRequest(format!(
+            "a BOM of {} rows leaves no room for the views on the {} sheet; use a larger sheet",
+            model.bom.len(),
+            t.size.name
+        )));
+    }
     // Extents at full scale, with room for balloons around each view.
     let mut extents = Vec::new();
     for v in &new.views {
@@ -297,13 +329,15 @@ pub fn make_assembly_drawing(model: &AssemblyModel<'_>, new: &NewAssemblyDrawing
     let fits = |s: f64| extents.iter().all(|(w, h)| s * w + room <= slot_w && s * h + room <= slot_h);
     let mut scales = t.scales.clone();
     scales.sort_by(|a, b| b.factor().total_cmp(&a.factor()));
-    let scale = new.scale.unwrap_or_else(|| {
-        scales
-            .iter()
-            .copied()
-            .find(|s| fits(s.factor()))
-            .unwrap_or_else(|| scales.last().copied().unwrap_or(Scale::FULL))
-    });
+    let scale = match new.scale {
+        Some(s) => s,
+        None => scales.iter().copied().find(|s| fits(s.factor())).ok_or_else(|| {
+            DrawingError::BadRequest(format!(
+                "the views do not fit beside the BOM on the {} sheet at any of its scales; use a larger sheet",
+                t.size.name
+            ))
+        })?,
+    };
     drawing.sheets[0].scale = scale;
     for (i, v) in new.views.iter().enumerate() {
         let (geometry, _) = assembly_view(model, &ViewSpec::standard(*v), scale.factor(), new.exploded)?;
@@ -467,7 +501,9 @@ pub fn update_assembly_drawing(drawing: &Drawing, model: &AssemblyModel<'_>) -> 
     }
     let mut ballooned: Option<ViewId> = None;
     for si in 0..out.sheets.len() {
+        let template = crate::library::template(out.sheets[si].template.as_str()).template();
         for t in out.sheets[si].tables.iter_mut().filter(|t| t.kind == TableKind::Bom) {
+            bom_fits(&template, t.position, model.bom.len())?;
             t.bom = model.bom.clone();
         }
         let views: Vec<ViewId> = out.sheets[si].views.iter().map(|v| v.id).collect();
@@ -515,10 +551,9 @@ pub fn update_assembly_drawing(drawing: &Drawing, model: &AssemblyModel<'_>) -> 
         && let Some(sheet) = out.sheets.first_mut()
     {
         let t = crate::library::template(sheet.template.as_str()).template();
-        let band =
-            crate::library::library().templates.iter().find(|f| f.id == t.id.as_str()).map_or(0.0, |f| f.zones.band);
+        let [_, _, x1, y1] = drawing_frame(&t);
         let (w, _) = bom_table_size(model.bom.len());
-        let (x1, y1) = (t.size.width_mm - t.margins.right - band, t.size.height_mm - t.margins.top - band);
+        bom_fits(&t, Point2::new(x1 - w, y1), model.bom.len())?;
         sheet.tables.push(Table {
             kind: TableKind::Bom,
             position: Point2::new(x1 - w, y1),

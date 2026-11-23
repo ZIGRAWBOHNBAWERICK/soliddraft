@@ -232,6 +232,9 @@ placement that names the configuration its file was saved in shares the row of o
 names none. Hidden parts
 count; suppressed parts do not. A balloon carries its row's item number and a leader to a
 visible edge of one occurrence of that part, and sits outside the view clear of the others.
+The BOM sits in the sheet's top-right corner and the views beside it at the largest of the
+template's scales that fits. A BOM taller than the sheet, or views that fit at none of its
+scales, refuse the drawing; Rebuild refuses a BOM that would grow off the sheet.
 
 Rebuild brings the drawing to the saved assembly as one undo step: every base view's line
 work at its scale, the BOM's rows, each balloon moved onto its occurrence and renumbered

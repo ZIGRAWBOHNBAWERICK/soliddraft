@@ -427,3 +427,38 @@ fn a_balloon_leader_lands_on_a_visible_stretch_of_its_edge() {
         .fold(f64::INFINITY, f64::min);
     assert!(on_visible < 1e-6, "the leader lands {on_visible} mm from the base's visible line work, at {at:?}");
 }
+
+/// The base and a post, with `extra` more rows in the BOM.
+fn with_rows<'k>(k: &'k BoxKernel, revision: &[u8], extra: u32) -> AssemblyModel<'k> {
+    let mut m = model(revision, vec![base(k), post(k, "3", 10.0)]);
+    for item in 3..3 + extra {
+        m.bom.push(BomRow { item, name: format!("Spare {item}"), file: format!("parts/s{item}.dwprt"), quantity: 1 });
+    }
+    m
+}
+
+#[test]
+fn a_bom_too_tall_for_the_sheet_is_refused() {
+    let k = BoxKernel::new();
+    // Thirty rows make a 224 mm table; an A4 sheet is 210 mm tall.
+    let tall = with_rows(&k, b"r1", 28);
+    assert_eq!(tall.bom.len(), 30);
+    let new = NewAssemblyDrawing {
+        template: Template::by_id("iso-a4").unwrap(),
+        meta: DrawingMeta::default(),
+        views: vec![StandardView::Isometric],
+        scale: None,
+        balloons: true,
+        exploded: false,
+    };
+    let err = make_assembly_drawing(&tall, &new).expect_err("the BOM does not fit an A4 sheet");
+    assert!(err.to_string().contains("BOM"), "{err}");
+
+    // A rebuild that grows the BOM past the sheet is refused too, and changes nothing.
+    let first = with_rows(&k, b"r1", 0);
+    let drawing = drawing_of(&first, "iso-a3", vec![StandardView::Isometric], None);
+    let mut grown = with_rows(&k, b"r2", 45);
+    grown.reference.as_mut().unwrap().id = first.reference.as_ref().unwrap().id;
+    let err = update_assembly_drawing(&drawing, &grown).expect_err("47 rows do not fit an A3 sheet");
+    assert!(err.to_string().contains("BOM"), "{err}");
+}

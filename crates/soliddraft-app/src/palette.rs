@@ -131,8 +131,7 @@ pub fn show(ctx: &egui::Context, state: &mut AppState) {
             if shortcut.is_some() && results.is_empty() && palette.query.trim().is_empty() {
                 ui.label("No pinned commands");
             }
-            let results_height = if shortcut.is_some() { 250.0 } else { f32::INFINITY };
-            egui::ScrollArea::vertical().max_height(results_height).show(ui, |ui| {
+            let mut show_results = |ui: &mut egui::Ui| {
                 for (i, m) in results.iter().enumerate() {
                     let c = m.command;
                     let label = if shortcut.is_some() && !c.is_working() {
@@ -169,13 +168,16 @@ pub fn show(ctx: &egui::Context, state: &mut AppState) {
                         run = Some(c);
                     }
                 }
-            });
+            };
             if shortcut.is_some() {
+                egui::ScrollArea::vertical().max_height(250.0).show(ui, show_results);
                 ui.separator();
                 let response = ui.small_button("Customize shortcut menu");
                 #[cfg(target_arch = "wasm32")]
                 crate::web::show_control("Customize shortcut menu", response.rect);
                 customize = response.clicked();
+            } else {
+                show_results(ui);
             }
         });
     });

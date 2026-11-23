@@ -107,19 +107,19 @@ pub fn show_part(ui: &mut egui::Ui, state: &mut AppState) {
             });
             if ui.button("Delete display state").clicked() {
                 next.remove(&active.id);
-            } else if active != before {
-                change = change.and_then(|_| next.put(active));
+            } else if active != before && change.is_ok() {
+                change = next.put(active);
             }
         }
         let id = ui.id().with("new_display_state");
         let mut name = ui.data_mut(|d| d.get_temp::<String>(id).unwrap_or_default());
         ui.add(egui::TextEdit::singleline(&mut name).hint_text("New display state name"));
-        if ui.add_enabled(!name.trim().is_empty(), egui::Button::new("Add display state")).clicked() {
+        if ui.add_enabled(!name.trim().is_empty(), egui::Button::new("Add display state")).clicked() && change.is_ok() {
             let scope = DisplayScope::Only(vec![current.clone()]);
             let mode = next.selected(current.as_ref()).map_or(state.viewport.display, |d| d.mode);
             let display = DisplayState::new(name.clone(), scope, mode);
             let created = display.id.clone();
-            change = change.and_then(|_| next.put(display)).and_then(|_| next.select(current.as_ref(), Some(created)));
+            change = next.put(display).and_then(|_| next.select(current.as_ref(), Some(created)));
             if change.is_ok() {
                 name.clear();
             }
@@ -152,11 +152,11 @@ pub(crate) fn show_assembly(ui: &mut egui::Ui, session: &mut crate::assembly::As
         let id = ui.id().with("new_assembly_display_state");
         let mut name = ui.data_mut(|d| d.get_temp::<String>(id).unwrap_or_default());
         ui.add(egui::TextEdit::singleline(&mut name).hint_text("New display state name"));
-        if ui.add_enabled(!name.trim().is_empty(), egui::Button::new("Add display state")).clicked() {
+        if ui.add_enabled(!name.trim().is_empty(), egui::Button::new("Add display state")).clicked() && change.is_ok() {
             let mode = next.selected(None).map_or(session.viewport.display, |d| d.mode);
             let display = DisplayState::new(name.clone(), DisplayScope::All, mode);
             let created = display.id.clone();
-            change = change.and_then(|_| next.put(display)).and_then(|_| next.select(None, Some(created)));
+            change = next.put(display).and_then(|_| next.select(None, Some(created)));
             if change.is_ok() {
                 name.clear();
             }

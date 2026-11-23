@@ -2588,9 +2588,9 @@
         "mesh"
       ],
       "catallax_revision": "ccfb4e4bee95cbb42f7c1ea1dbdfe8874ed01c4a",
-      "route": "MCP assembly_make_drawing -> display meshes placed -> mesh hidden-line removal across parts -> BOM and balloons -> drawing save, PDF, rebuild, asm drawing, reopen",
-      "supported_limits": "Isometric and front views of three placed parts from display meshes (polygon accuracy), a parts-only BOM with quantities, one balloon per row; refusals while the assembly is unsaved; rebuild after a new part adds its row and balloon. No section or detail views of assemblies.",
-      "evidence": "result.json, protocol.json, command summaries, inspect output, work/rig.dwdrw, work/rig.pdf"
+      "route": "MCP assembly_make_drawing -> display meshes placed -> mesh hidden-line removal across parts -> BOM and balloons -> drawing save, refused PDF export, rebuild, asm drawing, reopen",
+      "supported_limits": "Isometric and front views of three placed parts from display meshes (polygon accuracy), a parts-only BOM with quantities, one balloon per row; refusals while the assembly is unsaved and for a PDF export, which draws Catallax line work only; rebuild after a new part adds its row and balloon. No section or detail views of assemblies.",
+      "evidence": "result.json, protocol.json, command summaries, inspect output, work/rig.dwdrw"
     },
     {
       "id": "assembly-pack-export",

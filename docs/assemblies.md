@@ -186,6 +186,8 @@ views draw every shown part from its display mesh, placed where the assembly put
 hidden lines removed across all the parts' triangles together, so one part hides another.
 Each curve keeps the occurrence it belongs to. The line work is as faithful as the display
 meshes, and says so: every curve is a polygon. A view can show the exploded view.
+Exports draw only Catallax's own line work and Catallax does not yet draw several placed
+parts in one view, so PDF, SVG and DXF exports refuse a drawing of an assembly by name.
 
 The bill of materials lists parts only: one row per part document, in the order the tree
 first places it, with its name, its file and how many times it is placed. Hidden parts
@@ -636,7 +638,7 @@ soliddraft asm rename <file.dwasm> <component> <name>
 soliddraft asm delete <file.dwasm> <component>...
 soliddraft asm config <file.dwasm> (list [--json] | add <name> | activate <name> | rename <name> <new> | delete <name>)
 soliddraft asm explode <file.dwasm> (list [--json] | add <path>... --direction x,y,z --distance <mm> | edit <step> ... | delete <step> | auto [--distance <mm>])
-soliddraft asm drawing <file.dwasm> <out.dwdrw> [--template <id>] [--exploded] [--pdf <out.pdf>] [--svg <out.svg>] [--json]
+soliddraft asm drawing <file.dwasm> <out.dwdrw> [--template <id>] [--exploded] [--json]
 soliddraft asm export <file.dwasm> <out.urdf | out.usda> [--json]
 soliddraft asm pack <file.dwasm> <folder> [--prefix <text>] [--suffix <text>] [--flatten] [--drawings] [--json]
 soliddraft asm rebuild <file.dwasm> [--search <folder>]... [--json]

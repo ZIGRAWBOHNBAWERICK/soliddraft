@@ -63,7 +63,7 @@ pub(crate) fn export(
     Ok(false)
 }
 
-/// `asm drawing <file.dwasm> <out.dwdrw> [--template ID] [--exploded] [--pdf OUT] [--svg OUT]`:
+/// `asm drawing <file.dwasm> <out.dwdrw> [--template ID] [--exploded]`:
 /// a drawing of the assembly with a BOM and balloons; an existing drawing of the same
 /// assembly is brought up to date instead, keeping its id and whatever was added to it.
 pub(crate) fn drawing(
@@ -114,15 +114,6 @@ pub(crate) fn drawing(
         drawing.model.set_path(out, at);
     }
     file::write(out, &drawing, &meta).map_err(|e| e.to_string())?;
-    let list = soliddraft_drawing::display::layout_sheet(&drawing, 0);
-    for (flag, format) in
-        [("--pdf", soliddraft_drawing::export::Format::Pdf), ("--svg", soliddraft_drawing::export::Format::Svg)]
-    {
-        if let Some(p) = a.value(flag) {
-            soliddraft_drawing::export::write(&list, format, &drawing.meta.title, Path::new(p))
-                .map_err(|e| e.to_string())?;
-        }
-    }
     let balloons = drawing
         .sheets
         .iter()

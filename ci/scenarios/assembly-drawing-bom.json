@@ -239,7 +239,8 @@
         "path": "{bundle}/work/rig.pdf"
       },
       "checks": [],
-      "files": [
+      "refused": "drawn from the assembly's display meshes",
+      "absent": [
         "{bundle}/work/rig.pdf"
       ]
     },

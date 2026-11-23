@@ -1,5 +1,5 @@
 //! Drawings of assemblies: two boxes, one standing in front of the other, drawn with a
-//! bill of materials and balloons, saved and read back, exported, and brought up to date
+//! bill of materials and balloons, saved and read back, refused by exports, and brought up to date
 //! after a part moves and another goes.
 
 use soliddraft_drawing::assembly::{
@@ -119,11 +119,14 @@ fn an_assembly_drawing_has_views_a_bom_and_balloons_that_follow_the_assembly() {
     }
     assert!(((ps[0].u - ps[1].u).powi(2) + (ps[0].v - ps[1].v).powi(2)).sqrt() > 9.0);
 
-    // Saved and read back, the drawing is the same; it exports with its table.
+    // Saved and read back, the drawing is the same. Exports draw Catallax line work only,
+    // so they refuse its mesh-drawn views by name; the sheet still lays out its table.
     let meta = FileMeta::new("display meshes", Units::Millimetre);
     let bytes = to_bytes(&drawing, &meta).unwrap();
     let (back, _) = from_bytes(&bytes).unwrap();
     assert_eq!(back, drawing);
+    let refused = soliddraft_drawing::export::check_sheet(&back, &back.sheets[0]).unwrap_err().to_string();
+    assert!(refused.contains("display meshes"), "{refused}");
     let svg = soliddraft_drawing::export::svg::svg(&layout_sheet(&back, 0));
     assert!(svg.contains("BILL OF MATERIALS"));
 

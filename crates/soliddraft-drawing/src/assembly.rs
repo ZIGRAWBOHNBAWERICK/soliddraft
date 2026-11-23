@@ -222,6 +222,8 @@ pub fn assembly_view(
         outline: None,
         bbox,
         unproved: false,
+        // Display meshes, not Catallax's drawing queries: exports refuse it.
+        catallax: false,
         coarse: false,
     };
     Ok((geometry, xf))
@@ -492,6 +494,11 @@ pub fn update_assembly_drawing(drawing: &Drawing, model: &AssemblyModel) -> Resu
     }
     Ok(out)
 }
+
+/// Why an export refuses a view of an assembly: exports draw Catallax line work, and
+/// Catallax does not yet draw several placed parts in one view.
+pub const NOT_EXPORTED: &str = "is drawn from the assembly's display meshes; exports draw Catallax line work, \
+                                and Catallax does not draw placed parts together yet";
 
 /// A drawing whose model is an assembly.
 pub fn is_assembly_drawing(drawing: &Drawing) -> bool {

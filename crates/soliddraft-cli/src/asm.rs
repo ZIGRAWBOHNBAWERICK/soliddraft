@@ -39,7 +39,7 @@ usage: soliddraft asm new <file.dwasm> [--name <name>]
        soliddraft asm config <file.dwasm> (list [--json] | add <name> | activate <name> | rename <name> <new> | delete <name>)
        soliddraft asm explode <file.dwasm> (list [--json] | add <path>... --direction x,y,z --distance <mm>
                  | edit <step> [--direction x,y,z] [--distance <mm>] | delete <step> | auto [--distance <mm>])
-       soliddraft asm drawing <file.dwasm> <out.dwdrw> [--template <id>] [--exploded] [--pdf <out.pdf>] [--svg <out.svg>] [--json]
+       soliddraft asm drawing <file.dwasm> <out.dwdrw> [--template <id>] [--exploded] [--json]
        soliddraft asm export <file.dwasm> <out.urdf | out.usda> [--json]
        soliddraft asm pack <file.dwasm> <folder> [--prefix <text>] [--suffix <text>] [--flatten] [--drawings] [--json]
        soliddraft asm rebuild <file.dwasm> [--search <folder>]... [--json]
@@ -106,7 +106,9 @@ drawing     Writes a drawing of the assembly: an isometric and a front view (or,
             across parts, a bill of materials listing every part with its
             quantity, and a balloon per row. When the drawing exists and shows
             this assembly it is brought up to date instead: views, BOM and
-            balloons move with the assembly. --pdf and --svg export the sheet.
+            balloons move with the assembly. Its views come from the parts'
+            display meshes, so PDF, SVG and DXF exports refuse them until Catallax
+            draws placed parts together.
 
 export      Writes the assembly for robotics and simulation tools: URDF (with
             its meshes as STL in a folder beside it) or OpenUSD text (.usda)

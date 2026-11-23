@@ -42,6 +42,9 @@
     "ci/browser-field-preview.mjs": [
       "web"
     ],
+    "ci/browser-import-fields.js": [
+      "web"
+    ],
     "ci/browser-manufacturing-information.mjs": [
       "web"
     ],

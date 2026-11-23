@@ -4,10 +4,10 @@
 //! Persistent face names and body keys keep assignments attached through rebuilds.
 //! The part stores copies of the materials and appearances it uses.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 
 use serde::{Deserialize, Serialize};
-use soliddraft_document::{ConfigScope, ConfigurationId};
+use soliddraft_document::{ConfigScope, ConfigurationId, display_state::DisplayStates};
 use soliddraft_kernel_api::FaceId;
 use soliddraft_materials::{Appearance, AppearanceId, Mass, Material, MaterialId, Snapshots, Unknown, scope};
 
@@ -91,6 +91,27 @@ pub struct MaterialAssignment {
     pub scope: ConfigScope,
 }
 
+/// Visibility and appearance overrides for a part display state.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct PartDisplay {
+    /// Stable keys of hidden bodies.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub hidden: BTreeSet<u32>,
+    /// Appearance overrides, stored by value.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub appearances: Vec<(AppearanceTarget, Appearance)>,
+}
+
+impl PartDisplay {
+    /// Overrides the appearance of a target in this state, or restores its inherited appearance.
+    pub fn paint(&mut self, target: AppearanceTarget, appearance: Option<Appearance>) {
+        self.appearances.retain(|(place, _)| !place.same_place(&target));
+        if let Some(appearance) = appearance {
+            self.appearances.push((target, appearance));
+        }
+    }
+}
+
 /// Everything about a part's materials and appearances that its file holds, as the
 /// `material`, `appearances` and `snapshots` keys of `part.json`.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -105,12 +126,18 @@ pub struct PartMaterials {
     /// The copies of every material and appearance the assignments name.
     #[serde(default, skip_serializing_if = "Snapshots::is_empty")]
     pub snapshots: Snapshots,
+    /// Named display states and each configuration's selection.
+    #[serde(default, skip_serializing_if = "DisplayStates::is_empty")]
+    pub display_states: DisplayStates<PartDisplay>,
 }
 
 impl PartMaterials {
     /// True when the part has no material and no appearance.
     pub fn is_empty(&self) -> bool {
-        self.material.is_empty() && self.appearances.is_empty() && self.snapshots.is_empty()
+        self.material.is_empty()
+            && self.appearances.is_empty()
+            && self.snapshots.is_empty()
+            && self.display_states.is_empty()
     }
 
     /// Applies an appearance at a place in these configurations, replacing the one
@@ -138,6 +165,17 @@ impl PartMaterials {
     /// Why the file's materials section is inconsistent, if it is: an assignment
     /// naming a material or appearance the file holds no copy of.
     pub(crate) fn check(&self) -> Result<(), String> {
+        self.display_states.check()?;
+        for state in self.display_states.states() {
+            for (i, (target, appearance)) in state.view.appearances.iter().enumerate() {
+                if let Some(problem) = appearance.problems().first() {
+                    return Err(problem.to_string());
+                }
+                if state.view.appearances[..i].iter().any(|(other, _)| target.same_place(other)) {
+                    return Err(format!("Duplicate appearance target in {}", state.name));
+                }
+            }
+        }
         for m in &self.material {
             if self.snapshots.material(&m.material).is_none() {
                 return Err(format!("the material {} has no copy in the file", m.material));
@@ -259,13 +297,13 @@ impl Document {
     /// What a face with no appearance of its own or its feature's shows: the part's
     /// appearance, else the material's default appearance, else SolidDraft's default.
     pub fn part_appearance(&self, configuration: Option<&ConfigurationId>) -> Appearance {
-        part_appearance_in(&self.materials, configuration)
+        part_appearance_in(&self.display_materials(configuration), configuration)
     }
 
     /// The appearance of every face of the part's body in a configuration, with the
     /// assignments that did not apply.
     pub fn appearance_table(&self, configuration: Option<&ConfigurationId>) -> AppearanceTable {
-        self.appearance_table_in(&self.materials, configuration)
+        self.appearance_table_in(&self.display_materials(configuration), configuration)
     }
 
     /// The appearance table as it would be with `appearance` applied at `target` in
@@ -279,8 +317,34 @@ impl Document {
         appearance: Option<&Appearance>,
     ) -> AppearanceTable {
         let mut m = self.materials.clone();
-        m.assign(target, appearance, &ConfigScope::All);
+        let active = m.display_states.selected(configuration).cloned();
+        if let Some(mut active) = active {
+            active.view.paint(target.clone(), appearance.cloned());
+            m.display_states.put(active).expect("the loaded display state is valid");
+            m = Self::overlay_display(&m, configuration).into_owned();
+        } else {
+            m.assign(target, appearance, &ConfigScope::All);
+        }
         self.appearance_table_in(&m, configuration)
+    }
+
+    fn display_materials(&self, configuration: Option<&ConfigurationId>) -> std::borrow::Cow<'_, PartMaterials> {
+        Self::overlay_display(&self.materials, configuration)
+    }
+
+    fn overlay_display<'a>(
+        base: &'a PartMaterials,
+        configuration: Option<&ConfigurationId>,
+    ) -> std::borrow::Cow<'a, PartMaterials> {
+        let Some(state) = base.display_states.selected(configuration).filter(|s| !s.view.appearances.is_empty()) else {
+            return std::borrow::Cow::Borrowed(base);
+        };
+        let mut resolved = base.clone();
+        for (target, appearance) in &state.view.appearances {
+            resolved.appearances.retain(|a| !a.target.same_place(target));
+            resolved.assign(target, Some(appearance), &ConfigScope::All);
+        }
+        std::borrow::Cow::Owned(resolved)
     }
 
     fn appearance_table_in(&self, m: &PartMaterials, configuration: Option<&ConfigurationId>) -> AppearanceTable {

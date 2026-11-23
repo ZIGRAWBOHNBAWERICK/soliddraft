@@ -283,6 +283,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
         ui.label(RichText::new("Values belong to the part. Switch to the part to see them.").color(theme::muted()));
         return;
     }
+    crate::display_states::show_part(ui, state);
     let table = table(state);
     let grid = state.doc.model().configuration_grid();
     let mut actions = Vec::new();

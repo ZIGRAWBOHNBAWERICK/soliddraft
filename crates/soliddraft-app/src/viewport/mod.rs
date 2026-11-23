@@ -494,7 +494,12 @@ impl ViewportState {
         // Sent every frame: egui may discard a pass before its paint callbacks run,
         // so the renderer decides what to upload by comparing versions.
         // A hidden body leaves the scene and the pick pass; the version changed with it.
-        let shown = if visible.body { doc.meshes.iter().map(|(id, m)| (*id, m.clone())).collect() } else { Vec::new() };
+        let hidden = doc.hidden_display_bodies();
+        let shown = if visible.body {
+            doc.meshes.iter().filter(|(id, _)| !hidden.contains(id)).map(|(id, m)| (*id, m.clone())).collect()
+        } else {
+            Vec::new()
+        };
         let meshes = (doc.mesh_version, shown);
         // The shader compares face pick ids; edges and vertices are highlighted by the painter.
         let hover_id = match self.hover {
@@ -512,6 +517,7 @@ impl ViewportState {
         };
         let mut input = self.frame_input(rect, ppp, cursor_px);
         input.meshes = meshes;
+        input.display = doc.display_state().map_or(self.display, |state| state.mode);
         input.hover_id = hover_id;
         input.selected_id = selected_id;
         input.selected_feature = selected_feature;

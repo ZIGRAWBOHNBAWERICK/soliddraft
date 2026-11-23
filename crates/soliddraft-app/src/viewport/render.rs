@@ -63,25 +63,7 @@ impl Picked {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
-pub enum DisplayMode {
-    #[default]
-    ShadedWithEdges,
-    Shaded,
-    Wireframe,
-}
-
-impl DisplayMode {
-    pub const ALL: [DisplayMode; 3] = [DisplayMode::ShadedWithEdges, DisplayMode::Shaded, DisplayMode::Wireframe];
-
-    pub fn label(&self) -> &'static str {
-        match self {
-            DisplayMode::ShadedWithEdges => "Shaded with edges",
-            DisplayMode::Shaded => "Shaded",
-            DisplayMode::Wireframe => "Wireframe",
-        }
-    }
-}
+pub use soliddraft_document::display_state::DisplayMode;
 
 /// Existing document identity, display version and retained body; never sent to the GPU.
 pub type PickRevision = (soliddraft_document::DocumentId, u64, Option<BodyId>);

@@ -224,3 +224,64 @@ fn body_materials_and_appearances_survive_rebuild_and_reopen() {
     assert_eq!(back.appearance_table(None).of_body(1), &brass_colour);
     assert!((back.mass(None).unwrap().mass_kg - 0.01805).abs() < 1e-9);
 }
+
+#[test]
+fn display_states_follow_the_configuration_and_keep_their_view_through_a_file() {
+    use soliddraft_document::{
+        ConfigScope,
+        display_state::{DisplayMode, DisplayScope, DisplayState},
+    };
+    use soliddraft_materials::{Appearance, Srgb};
+    use soliddraft_model::AppearanceTarget;
+
+    let (mut doc, _, second) = pair();
+    doc.execute(Command::AddConfiguration { name: "Service".into() }).unwrap();
+    let service = doc.named_configurations().next().unwrap().0.clone();
+    let mut states = doc.materials().display_states.clone();
+    let blue = Appearance::new("blue", "Blue", Srgb::new(21, 101, 192));
+    let red = Appearance::new("red", "Red", Srgb::new(198, 40, 40));
+    let target = AppearanceTarget::Body { body: 1 };
+    doc.execute(Command::SetAppearance {
+        target: target.clone(),
+        appearance: Some(blue.clone()),
+        scope: ConfigScope::All,
+    })
+    .unwrap();
+
+    let inspection =
+        DisplayState::new("Inspection".into(), DisplayScope::Only(vec![None]), DisplayMode::ShadedWithEdges);
+    let inspection_id = inspection.id.clone();
+    states.put(inspection).unwrap();
+    states.select(None, Some(inspection_id)).unwrap();
+    let mut working =
+        DisplayState::new("Working".into(), DisplayScope::Only(vec![Some(service.clone())]), DisplayMode::Shaded);
+    working.view.paint(target, Some(red.clone()));
+    working.view.hidden.insert(0);
+    let working_id = working.id.clone();
+    states.put(working).unwrap();
+    assert!(states.select(None, Some(working_id.clone())).is_err());
+    states.select(Some(&service), Some(working_id.clone())).unwrap();
+
+    let shape = doc.geometry_hash();
+    doc.execute(Command::SetDisplayStates { states: Box::new(states) }).unwrap();
+    assert_eq!(doc.geometry_hash(), shape);
+    assert_eq!(doc.appearance_table(None).of_body(1), &blue);
+    doc.execute(Command::ActivateConfiguration { name: "Service".into() }).unwrap();
+    assert_eq!(doc.appearance_table(Some(&service)).of_body(1), &red);
+
+    let mut back = Document::from_bytes(&doc.to_bytes().unwrap(), Arc::new(CatallaxKernel::new())).unwrap();
+    assert_eq!(back.part_json(), doc.part_json());
+    assert_eq!(back.active_configuration(), Some(&service));
+    let selected = back.materials().display_states.selected(back.active_configuration()).unwrap();
+    assert_eq!(selected.id, working_id);
+    assert_eq!(selected.mode, DisplayMode::Shaded);
+    assert_eq!(selected.view.hidden.iter().copied().collect::<Vec<_>>(), vec![0]);
+    assert_eq!(back.appearance_table(back.active_configuration()).of_body(1), &red);
+
+    back.execute(Command::ActivateConfiguration { name: "Default".into() }).unwrap();
+    assert_eq!(back.appearance_table(None).of_body(1), &blue);
+    assert!(back.materials().display_states.selected(None).unwrap().view.hidden.is_empty());
+    back.execute(Command::EditFeature { id: second, kind: block(20.0, 7.0) }).unwrap();
+    back.execute(Command::ActivateConfiguration { name: "Service".into() }).unwrap();
+    assert_eq!(back.appearance_table(back.active_configuration()).of_body(1), &red);
+}

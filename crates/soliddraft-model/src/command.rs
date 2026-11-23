@@ -253,6 +253,11 @@ pub enum Command {
         #[serde(default, skip_serializing_if = "is_all")]
         scope: ConfigScope,
     },
+    /// Replaces the named display states, as one undoable appearance edit.
+    SetDisplayStates {
+        /// The new display states.
+        states: Box<soliddraft_document::display_state::DisplayStates<crate::materials::PartDisplay>>,
+    },
     /// Replaces the part's copies of materials and appearances it uses with these
     /// values, as updating from a library does. Refused for one the part does not use.
     UpdateCopies {
@@ -1288,6 +1293,14 @@ impl Document {
                 };
                 self.materials.assign(&target, appearance.as_ref(), &scope);
                 Ok(self.materials_changed(old, Command::SetAppearance { target, appearance, scope }, label))
+            }
+            Command::SetDisplayStates { states } => {
+                let old = self.materials.clone();
+                let mut next = old.clone();
+                next.display_states = (*states).clone();
+                next.check().map_err(CommandError::Invalid)?;
+                self.materials = next;
+                Ok(self.materials_changed(old, Command::SetDisplayStates { states }, "Change display state".into()))
             }
             Command::UpdateCopies { materials, appearances } => {
                 let old = self.materials.clone();

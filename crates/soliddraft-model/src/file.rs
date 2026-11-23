@@ -65,7 +65,7 @@ use crate::view::{self, Visibility};
 pub const FORMAT: &str = "soliddraft-part/2";
 /// Parts with explicit body identities require this version.
 pub const MULTIBODY_FORMAT: &str = "soliddraft-part/3";
-/// Part format with body appearances and material assignments.
+/// Part format with body appearances, body materials and named display states.
 pub const BODY_STYLE_FORMAT: &str = "soliddraft-part/4";
 /// The format tag of part files from before the document envelope.
 pub const LEGACY_FORMAT: &str = "soliddraft-part/1";
@@ -150,6 +150,8 @@ struct Recipe {
     snapshots: Snapshots,
     #[serde(default, skip_serializing_if = "crate::pmi::PartPmi::is_empty")]
     pmi: crate::pmi::PartPmi,
+    #[serde(default, skip_serializing_if = "soliddraft_document::display_state::DisplayStates::is_empty")]
+    display_states: soliddraft_document::display_state::DisplayStates<crate::materials::PartDisplay>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -196,7 +198,8 @@ impl Document {
 
     fn recipe(&self) -> Recipe {
         Recipe {
-            format: if self.materials.material.iter().any(|a| a.body.is_some())
+            format: if !self.materials.display_states.is_empty()
+                || self.materials.material.iter().any(|a| a.body.is_some())
                 || self.materials.appearances.iter().any(|a| matches!(a.target, crate::AppearanceTarget::Body { .. }))
                 || self
                     .materials
@@ -238,6 +241,7 @@ impl Document {
             appearances: self.materials.appearances.clone(),
             snapshots: self.materials.snapshots.clone(),
             pmi: self.pmi.clone(),
+            display_states: self.materials.display_states.clone(),
         }
     }
 
@@ -430,8 +434,12 @@ impl Document {
                 return Err(FileError::Invalid(format!("{} holds a file that does not match its sha256", f.id)));
             }
         }
-        let mut materials =
-            PartMaterials { material: recipe.material, appearances: recipe.appearances, snapshots: recipe.snapshots };
+        let mut materials = PartMaterials {
+            material: recipe.material,
+            appearances: recipe.appearances,
+            snapshots: recipe.snapshots,
+            display_states: recipe.display_states,
+        };
         materials.snapshots.normalise();
         materials.check().map_err(FileError::Invalid)?;
         let mut doc = Document::new(recipe.name, kernel);
@@ -528,6 +536,7 @@ fn shape_hash(truth: &Value) -> ContentHash {
             "configurations",
             "properties",
             "next_body",
+            "display_states",
         ] {
             map.remove(key);
         }

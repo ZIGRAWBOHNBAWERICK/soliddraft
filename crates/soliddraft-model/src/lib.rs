@@ -60,7 +60,7 @@ pub use feature::{
 pub use file::FileError;
 pub use materials::{
     AppearanceAssignment, AppearanceTable, AppearanceTarget, LostAppearance, MassError, MaterialAssignment,
-    PartMaterials,
+    PartDisplay, PartMaterials,
 };
 pub use reference::{
     Candidate, EdgeFingerprint, EdgePiece, EdgeRef, FaceFingerprint, FaceRef, Generator, NamedFace, NamingError,

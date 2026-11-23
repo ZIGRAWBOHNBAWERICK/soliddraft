@@ -10,8 +10,10 @@ use soliddraft_assembly::{
     AssemblyDocument, DisplaySource, FileSource, KernelSource, LoadState, OccurrenceIndex, OpenOptions, Placement,
 };
 use soliddraft_document::{DocRef, identify_file};
+use soliddraft_document::manifest::{self, Entry, Package};
 use soliddraft_kernel_api::Kernel;
 use soliddraft_kernel_catallax::CatallaxKernel;
+use soliddraft_materials::{Catalog, MaterialId};
 use soliddraft_model::sketch::{P2, Sketch, solve::solve};
 use soliddraft_model::{
     Command, DatumPlane, Document, EndCondition, ExtrudeFeature, ExtrudeOp, FeatureKind, ProfileSource, SketchFeature,
@@ -144,6 +146,47 @@ fn an_assembly_without_copies_opens_from_part_files_without_a_kernel() {
     // Without any source the copy is missing and the part fails, as before.
     let doc = open(&root, None);
     assert_eq!(state(&doc, LoadState::Failed), 1);
+}
+
+#[test]
+fn legacy_styled_part_geometry_loads_with_or_without_a_kernel() {
+    let dir = folder("legacy-style");
+    let part = dir.join("pin.dwprt");
+    save_pin(&part, Settings::default());
+    let mut model = Document::open(&part, kernel()).unwrap();
+    let material = MaterialId("aluminium-6061-t6".into());
+    model.execute(Command::set_material_from(&Catalog::built_in(), &material).unwrap()).unwrap();
+    let styled = model.to_bytes().unwrap();
+    let mut package = Package::from_bytes(&styled).unwrap();
+    let manifest = package.manifest().unwrap().clone();
+    assert_eq!(manifest.format, "soliddraft-part/2");
+    let mut entries = vec![Entry::new("part.json", package.read("part.json").unwrap().unwrap())];
+    for level in display::SAVED {
+        let (mut mesh, made_by) = display::read(&styled, level).unwrap().unwrap();
+        assert!(mesh.faces.iter().all(|face| face.style.is_some()));
+        // Older writers stored the material in part.json and only geometry in the meshes.
+        for face in &mut mesh.faces {
+            face.style = None;
+        }
+        entries.push(Entry::new(display::entry(level), mesh.encode(&made_by)));
+    }
+    let legacy = manifest::write_package(&manifest, &entries).unwrap();
+    std::fs::write(&part, &legacy).unwrap();
+    let root = dir.join("rig.dwasm");
+    bare_assembly(&root, &part);
+
+    let assembly = open(&root, Some(Arc::new(FileSource)));
+    assert_eq!(state(&assembly, LoadState::DisplayReady), 1);
+    for level in display::SAVED {
+        let (expected, _) = display::read(&styled, level).unwrap().unwrap();
+        let (cached, _) = FileSource.part_mesh_level(&legacy, None, level).unwrap();
+        assert_eq!(cached.triangle_count(), expected.triangle_count());
+        assert_eq!(cached.positions, expected.positions);
+        assert_eq!(cached.indices, expected.indices);
+        let (rebuilt, _) = KernelSource::new(kernel()).part_mesh_level(&legacy, None, level).unwrap();
+        assert_eq!(rebuilt, expected);
+    }
+    std::fs::remove_dir_all(dir).unwrap();
 }
 
 #[test]

@@ -5,6 +5,7 @@ use soliddraft_app::app_tools::AppTools;
 use soliddraft_app::document::{Document, FeatureStatus};
 use soliddraft_app::state::AppState;
 use soliddraft_assistant::{Caller, tools::call_checked};
+use soliddraft_document::manifest::Package;
 
 fn call(state: &mut AppState, name: &str, args: Value) -> Result<(), String> {
     let output = call_checked(&mut AppTools { state }, name, args, &Caller::Mcp { client: "wall-thickness".into() });
@@ -120,26 +121,33 @@ fn saved_walls_keep_the_grade_or_legacy_number() {
 }
 
 #[test]
-fn a_saved_graded_wall_reopens_with_its_grade_and_a_named_refusal() {
+fn graded_walls_use_format_eight_in_saves_and_recovery_copies() {
     let kernel = soliddraft_app::kernel();
-    let part = soliddraft_model::Document::from_part_json(
-        include_str!("../../../ci/fixtures/graded-wall.json"),
-        kernel.clone(),
-    )
-    .unwrap();
-    let bytes = part.to_bytes().unwrap();
-    let reopened = Document::from_model(soliddraft_model::Document::from_bytes(&bytes, kernel).unwrap());
-    let error = &reopened.features.last().unwrap().status;
-    assert!(
-        matches!(error, FeatureStatus::Error(message) if message.contains("Field-driven thickness is unavailable")),
-        "{error:?}"
-    );
-    let saved: Value = serde_json::from_str(&reopened.model().part_json()).unwrap();
-    let fixture: Value = serde_json::from_str(include_str!("../../../ci/fixtures/graded-wall.json")).unwrap();
-    let thickness = |part: &Value| {
-        serde_json::from_value::<soliddraft_kernel_api::Grade>(part["features"][1]["kind"]["thickness"].clone())
-            .unwrap()
-    };
-    assert_eq!(thickness(&saved), thickness(&fixture));
-    assert_volume(&AppState::new(reopened), 480.0);
+    let mut fixture: Value = serde_json::from_str(include_str!("../../../ci/fixtures/graded-wall.json")).unwrap();
+    let shell = fixture["features"][1]["kind"].clone();
+    let thicken = json!({
+        "type": "thicken", "thickness": shell["thickness"], "faces": shell["open_faces"], "side": "front"
+    });
+    for wall in [shell, thicken] {
+        fixture["features"][1]["kind"] = wall.clone();
+        let part = soliddraft_model::Document::from_part_json(&fixture.to_string(), kernel.clone()).unwrap();
+        let (_, recovery) = part.snapshot().encode().unwrap();
+        for bytes in [part.to_bytes().unwrap(), recovery] {
+            let mut package = Package::from_bytes(&bytes).unwrap();
+            assert_eq!(package.manifest().unwrap().format, "soliddraft-part/8");
+            let truth: Value = serde_json::from_slice(&package.read("part.json").unwrap().unwrap()).unwrap();
+            assert_eq!(truth["format"], "soliddraft-part/8");
+
+            let reopened = Document::from_model(
+                soliddraft_model::Document::from_bytes(&bytes, kernel.clone()).unwrap(),
+            );
+            let error = &reopened.features.last().unwrap().status;
+            assert!(
+                matches!(error, FeatureStatus::Error(message) if message.contains("Field-driven thickness is unavailable")),
+                "{error:?}"
+            );
+            assert_eq!(reopened.model().part_json(), part.part_json());
+            assert_volume(&AppState::new(reopened), 480.0);
+        }
+    }
 }

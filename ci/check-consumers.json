@@ -216,7 +216,8 @@
       "lint",
       "kernel",
       "test-linux",
-      "application-loop"
+      "application-loop",
+      "web"
     ],
     "ci/fixtures/import/healed-and-tolerant.step": [
       "lint",

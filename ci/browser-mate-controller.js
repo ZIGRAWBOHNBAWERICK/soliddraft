@@ -10,13 +10,14 @@ await page.eval(() => {
   window.sdClick = async ({ x, y }) => {
     const at = { clientX: x, clientY: y, bubbles: true, cancelable: true, pointerId: 1,
       pointerType: 'mouse', isPrimary: true, button: 0 };
-    const frame = () => new Promise(resolve => requestAnimationFrame(() => resolve()));
+    const pause = () => new Promise(resolve => setTimeout(resolve, 150));
+    await pause();
     canvas.dispatchEvent(new PointerEvent('pointermove', { ...at, buttons: 0 }));
-    await frame();
+    await pause();
     canvas.dispatchEvent(new PointerEvent('pointerdown', { ...at, buttons: 1 }));
-    await frame();
+    await pause();
     canvas.dispatchEvent(new PointerEvent('pointerup', { ...at, buttons: 0 }));
-    await frame();
+    await pause();
     return true;
   };
   const inputClick = HTMLInputElement.prototype.click;

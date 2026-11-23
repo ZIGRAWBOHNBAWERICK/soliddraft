@@ -968,7 +968,7 @@ fn assembly_with_origin_block(dir: PathBuf) -> (Session, Value, u64) {
     s.dir = dir;
     std::fs::create_dir_all(&s.dir).unwrap();
     s.call("sketch", json!({"plane":"top","shapes":[{"shape":"rectangle","center":[0,0,0],"width":20,"height":10}]}));
-    s.call("extrude", json!({"sketch":"Sketch1","depth":6}));
+    s.call("extrude", json!({"sketch":"Sketch1","depth":6,"flip":false}));
     let part = s.path("controller-block.dwprt");
     s.call("save", json!({"path":part}));
     let made = s.call("make_assembly", json!({}));

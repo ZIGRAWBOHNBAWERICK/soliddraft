@@ -12,11 +12,12 @@ await page.eval(() => {
     const at = { clientX: x, clientY: y, bubbles: true, cancelable: true,
       pointerId: 1, pointerType: 'mouse', isPrimary: true, button: 0 };
     canvas.dispatchEvent(new PointerEvent('pointermove', { ...at, buttons: 0 }));
-    const frame = () => new Promise(resolve => requestAnimationFrame(() => resolve()));
+    const pause = () => new Promise(resolve => setTimeout(resolve, 150));
+    await pause();
     canvas.dispatchEvent(new PointerEvent('pointerdown', { ...at, buttons: 1 }));
-    await frame();
+    await pause();
     canvas.dispatchEvent(new PointerEvent('pointerup', { ...at, buttons: 0 }));
-    await frame();
+    await pause();
     return true;
   };
   const inputClick = HTMLInputElement.prototype.click;
@@ -46,7 +47,8 @@ const drawn = async name => {
 };
 async function until(read, accept, message) {
   let value;
-  for (let i = 0; i < 600; i++) {
+  const deadline = Date.now() + 60000;
+  while (Date.now() < deadline) {
     value = await read();
     if (accept(value)) return value;
     await page.wait(100);

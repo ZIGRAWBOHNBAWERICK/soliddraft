@@ -130,14 +130,14 @@ fn part_contexts(pending: &mut BTreeSet<&str>) {
     let sketch_id = state.doc.features[0].id;
     state.doc.selection = Some(Selection::Feature(sketch_id));
     find_and_dispatch(&mut state, pending);
-    tool(&mut state, "extrude", json!({"sketch":"Sketch1","depth":4}));
+    tool(&mut state, "extrude", json!({"sketch":"Sketch1","depth":4,"flip":false}));
     state.doc.new_body();
     tool(
         &mut state,
         "sketch",
         json!({"plane":"top","shapes":[{"shape":"rectangle","center":[0,0,0],"width":4,"height":4}]}),
     );
-    tool(&mut state, "extrude", json!({"sketch":"Sketch2","depth":4}));
+    tool(&mut state, "extrude", json!({"sketch":"Sketch2","depth":4,"flip":false}));
     find_and_dispatch(&mut state, pending);
     let boss = state.doc.features.last().unwrap().id;
     tool(

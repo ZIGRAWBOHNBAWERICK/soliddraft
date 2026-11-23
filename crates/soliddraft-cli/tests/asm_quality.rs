@@ -62,6 +62,7 @@ fn save_pin(dir: &Path) {
         operation: ExtrudeOp::Boss,
         end: EndCondition::Blind { depth: 40.0 },
         reverse: false,
+        options: Default::default(),
     }));
     doc.save(dir.join("pin.dwprt")).unwrap();
 }

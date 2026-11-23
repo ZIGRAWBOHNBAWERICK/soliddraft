@@ -100,7 +100,13 @@ fn sketch_on(plane: SketchPlane, sketch: Sketch) -> FeatureKind {
 }
 
 fn extrude(sketch: FeatureId, operation: ExtrudeOp, end: EndCondition, reverse: bool) -> FeatureKind {
-    FeatureKind::Extrude(ExtrudeFeature { profile: ProfileSource::Sketch { feature: sketch }, operation, end, reverse })
+    FeatureKind::Extrude(ExtrudeFeature {
+        profile: ProfileSource::Sketch { feature: sketch },
+        operation,
+        end,
+        reverse,
+        options: Default::default(),
+    })
 }
 
 fn blind(depth: f64) -> EndCondition {
@@ -665,6 +671,7 @@ mod rebuild {
             operation: ExtrudeOp::Boss,
             end: blind(10.0),
             reverse: false,
+            options: Default::default(),
         });
         let base = add(&mut doc, "Plate", original.clone());
         let mut cuts = BTreeSet::new();

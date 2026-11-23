@@ -168,6 +168,7 @@ impl Shape {
             operation: ExtrudeOp::Boss,
             end: EndCondition::Blind { depth: h },
             reverse: false,
+            options: Default::default(),
         }));
         doc
     }

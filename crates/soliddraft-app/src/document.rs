@@ -633,6 +633,7 @@ impl FeatureKind {
                 operation: model::ExtrudeOp::Boss,
                 end: p.end.to_model(p.depth),
                 reverse: p.flip,
+                options: Default::default(),
             }),
             FeatureKind::Cut(p) => model::FeatureKind::Extrude(model::ExtrudeFeature {
                 profile: model::ProfileSource::Sketch { feature: model_id(p.sketch) },
@@ -640,6 +641,7 @@ impl FeatureKind {
                 end: p.end().to_model(p.depth),
                 // The model sweeps along the sketch normal; a cut goes into the face.
                 reverse: !p.flip,
+                options: Default::default(),
             }),
             FeatureKind::Fillet(p) => model::FeatureKind::Fillet(p.blend()),
             FeatureKind::Chamfer(p) => model::FeatureKind::Chamfer(p.blend()),
@@ -5412,6 +5414,8 @@ fn view_status(
                             model::ReferenceSlot::SketchPlane
                             | model::ReferenceSlot::Plane
                             | model::ReferenceSlot::Limit
+                            | model::ReferenceSlot::Start
+                            | model::ReferenceSlot::SecondLimit
                             | model::ReferenceSlot::Pull,
                             _,
                         ) => (0, RefKind::Face, String::new()),

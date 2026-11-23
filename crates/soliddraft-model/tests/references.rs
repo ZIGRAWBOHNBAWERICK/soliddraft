@@ -36,7 +36,13 @@ fn top() -> SketchPlane {
 fn extrude(sketch: FeatureId, operation: ExtrudeOp, end: EndCondition) -> FeatureKind {
     // A cut goes into the face it is sketched on, against the sketch normal.
     let reverse = operation == ExtrudeOp::Cut;
-    FeatureKind::Extrude(ExtrudeFeature { profile: ProfileSource::Sketch { feature: sketch }, operation, end, reverse })
+    FeatureKind::Extrude(ExtrudeFeature {
+        profile: ProfileSource::Sketch { feature: sketch },
+        operation,
+        end,
+        reverse,
+        options: Default::default(),
+    })
 }
 
 fn blind(depth: f64) -> EndCondition {

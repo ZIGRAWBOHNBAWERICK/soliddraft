@@ -43,7 +43,13 @@ fn top(offset: f64) -> SketchPlane {
 }
 
 fn extrude(sketch: FeatureId, operation: ExtrudeOp, end: EndCondition, reverse: bool) -> FeatureKind {
-    FeatureKind::Extrude(ExtrudeFeature { profile: ProfileSource::Sketch { feature: sketch }, operation, end, reverse })
+    FeatureKind::Extrude(ExtrudeFeature {
+        profile: ProfileSource::Sketch { feature: sketch },
+        operation,
+        end,
+        reverse,
+        options: Default::default(),
+    })
 }
 
 /// A `w` by `h` block centred on the z axis from `z0` up by `depth`.

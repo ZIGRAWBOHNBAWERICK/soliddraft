@@ -110,6 +110,7 @@ fn valid_part() -> Vec<u8> {
         operation: ExtrudeOp::Boss,
         end: EndCondition::Blind { depth: 10.0 },
         reverse: false,
+        options: Default::default(),
     }));
     doc.to_bytes().unwrap()
 }

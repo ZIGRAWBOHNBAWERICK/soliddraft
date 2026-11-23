@@ -45,6 +45,7 @@ fn boss(sketch: FeatureId, depth: f64) -> FeatureKind {
         operation: ExtrudeOp::Boss,
         end: EndCondition::Blind { depth },
         reverse: false,
+        options: Default::default(),
     })
 }
 

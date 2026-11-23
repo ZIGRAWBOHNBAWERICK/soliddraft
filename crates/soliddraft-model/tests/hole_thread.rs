@@ -43,6 +43,7 @@ fn slab(doc: &mut Document, offset: f64, width: f64, height: f64, depth: f64, op
             operation,
             end: EndCondition::Blind { depth },
             reverse: false,
+            options: Default::default(),
         }),
     )
 }

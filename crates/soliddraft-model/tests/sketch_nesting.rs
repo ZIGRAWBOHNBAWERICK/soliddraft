@@ -30,6 +30,7 @@ fn extrude(doc: &mut Document, sketch: FeatureId, operation: ExtrudeOp) -> Featu
             operation,
             end: EndCondition::Blind { depth: 2.0 },
             reverse: false,
+            options: Default::default(),
         }),
         name: None,
         position: None,

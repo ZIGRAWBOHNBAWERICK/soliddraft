@@ -8,7 +8,7 @@ use sha2::{Digest, Sha256};
 use soliddraft_kernel_api::{Decision, Grade, HoleDepth, HoleHead, HoleTip, Plane, Vec3, question_index};
 use soliddraft_sketch::{P2, Sketch};
 
-use crate::reference::{EdgeRef, FaceRef, Generator};
+use crate::reference::{EdgeRef, FaceRef, Generator, VertexRef};
 
 /// Id of a feature. It never changes and is never reused within a document.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -179,6 +179,7 @@ impl FeatureKind {
                 if let EndCondition::UpToFace { face } = &e.end {
                     out.push(face.feature);
                 }
+                out.extend(e.options.dependencies());
             }
             FeatureKind::Fillet(b) | FeatureKind::Chamfer(b) => {
                 out.extend(b.edges.iter().flat_map(|e| e.faces.iter().map(|f| f.feature)));
@@ -490,6 +491,132 @@ pub struct ExtrudeFeature {
     /// the part usually needs this, since the face normal points out of the material.
     #[serde(default, skip_serializing_if = "is_false")]
     pub reverse: bool,
+    /// Where it starts, a second direction, a thin wall and the regions it uses. Each is
+    /// saved only when set, so an extrusion without them reads as it always did.
+    #[serde(flatten)]
+    pub options: ExtrudeOptions,
+}
+
+/// The less common choices of an extrusion or cut. All default to off: the extrusion
+/// starts on its sketch plane, goes one way, is solid and uses every closed region.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct ExtrudeOptions {
+    /// Where the extrusion starts. None starts on the sketch plane.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from: Option<ExtrudeStart>,
+    /// How far it also goes against its first direction, from the same start.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub direction2: Option<EndCondition>,
+    /// A wall of constant thickness along the profile instead of the solid region.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thin: Option<ThinFeature>,
+    /// The closed regions to extrude. Empty extrudes every region.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub contours: Vec<Contour>,
+}
+
+impl ExtrudeOptions {
+    /// True when no option is set.
+    pub fn is_default(&self) -> bool {
+        *self == ExtrudeOptions::default()
+    }
+
+    /// Features the options read: the start face or vertex, and Direction 2's face.
+    pub fn dependencies(&self) -> Vec<FeatureId> {
+        let mut out = match &self.from {
+            Some(ExtrudeStart::Surface { plane }) => plane.dependencies(),
+            Some(ExtrudeStart::Vertex { vertex }) => vertex.faces.iter().map(|f| f.feature).collect(),
+            Some(ExtrudeStart::Offset { .. }) | None => Vec::new(),
+        };
+        if let Some(EndCondition::UpToFace { face }) = &self.direction2 {
+            out.push(face.feature);
+        }
+        out
+    }
+}
+
+/// Where an extrusion starts when it does not start on its sketch plane. The profile
+/// keeps its shape and moves along the sketch plane's normal to the start.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ExtrudeStart {
+    /// A plane parallel to the sketch plane, `distance` millimetres from it in the
+    /// extrusion's first direction, or against it when `reverse`.
+    Offset {
+        /// Positive distance in millimetres.
+        distance: f64,
+        /// Measure the distance against the first direction.
+        #[serde(default, skip_serializing_if = "is_false")]
+        reverse: bool,
+    },
+    /// A reference plane or planar face parallel to the sketch plane.
+    Surface {
+        /// The plane or face.
+        plane: PlaneRef,
+    },
+    /// The plane through a vertex of the part, parallel to the sketch plane.
+    Vertex {
+        /// The vertex.
+        vertex: VertexRef,
+    },
+}
+
+/// A thin extrusion: a wall of constant thickness along the sketch's curves.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ThinFeature {
+    /// Wall thickness in millimetres, on the first side.
+    pub thickness: f64,
+    /// Which side of the curves the wall lies on.
+    pub side: ThinSide,
+}
+
+/// Which side of the sketch's curves a thin wall lies on.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ThinSide {
+    /// One side: outside a closed contour, or the default side of an open one, unless
+    /// `reverse`.
+    One {
+        /// Put the wall on the other side.
+        #[serde(default, skip_serializing_if = "is_false")]
+        reverse: bool,
+    },
+    /// Centred on the curves, half the thickness each way.
+    MidPlane,
+    /// Both sides: the thickness on the first and `other` on the second.
+    Two {
+        /// Thickness on the second side, in millimetres.
+        other: f64,
+    },
+}
+
+impl ThinSide {
+    /// The thickness on the first and the second side, in millimetres.
+    pub fn split(self, thickness: f64) -> (f64, f64) {
+        match self {
+            ThinSide::One { .. } => (thickness, 0.0),
+            ThinSide::MidPlane => (thickness / 2.0, thickness / 2.0),
+            ThinSide::Two { other } => (thickness, other),
+        }
+    }
+}
+
+/// One closed region of a sketch, named by every sketch entity on its boundary, in
+/// ascending order. Moving or resizing the entities keeps the name; deleting or
+/// splitting one of them loses it.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct Contour(pub Vec<soliddraft_sketch::EntityId>);
+
+impl Contour {
+    /// The name of `region`.
+    pub fn of(region: &soliddraft_sketch::Region) -> Contour {
+        let mut ids: Vec<_> =
+            region.outer.entities.iter().chain(region.holes.iter().flat_map(|h| &h.entities)).copied().collect();
+        ids.sort();
+        ids.dedup();
+        Contour(ids)
+    }
 }
 
 /// A fillet or chamfer.

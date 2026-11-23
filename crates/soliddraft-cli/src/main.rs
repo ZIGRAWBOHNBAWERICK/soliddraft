@@ -50,6 +50,8 @@
 //! keychain; `soliddraft key status` says which keys exist and which provider the assistant uses.
 
 mod asm;
+mod asm_config;
+mod asm_files;
 mod bench;
 mod commands;
 mod doc;

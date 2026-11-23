@@ -8,7 +8,6 @@
 use std::collections::BTreeMap;
 
 use crate::document::AssemblyDocument;
-use crate::mates::reference::check_endpoint;
 use crate::mates::solver::{self, Body};
 use crate::mates::{
     Alignment, Entity, FaceEndpoint, Mate, MateEntry, MateRefusal, RefusalCode, SlotConstraint, StoredSupport,
@@ -128,6 +127,12 @@ pub(crate) enum Rule {
         sign: i8,
         mode: solver::SlotMode,
         lock: Option<super::StoredTurn>,
+    },
+    /// The ends are the outline, then the point kept on it.
+    Path,
+    /// The ends are the cam's outline, then the follower; `outside` is the side it rides on.
+    Cam {
+        outside: bool,
     },
 }
 
@@ -281,13 +286,6 @@ impl<'a> Scope<'a> {
             .ok_or_else(|| invalid(format!("the assembly holding {path} is not loaded")))?;
         let c = holder.component(last.component).ok_or_else(|| invalid(format!("no occurrence at {path}")))?;
         let source = holder.source(c.source).ok_or_else(|| invalid(format!("occurrence {path} has no source")))?;
-        if let Some(configuration) = &source.document.configuration {
-            let message = format!(
-                "occurrence {path} names configuration {}; this version mates default configurations only",
-                configuration.0
-            );
-            return Err(MateRefusal::new(RefusalCode::UnsupportedConfiguration, message));
-        }
         if source.document.kind != DocKind::Part {
             return Err(invalid(format!("{path} is a sub-assembly; mates reach the parts inside it")));
         }
@@ -381,10 +379,14 @@ fn label(prefix: &OccurrencePath, name: &str) -> String {
 }
 
 impl AssemblyDocument {
+    /// Assemblies whose mates apply, keyed by the path of each assembly occurrence.
+    pub fn mate_holders(&self) -> Vec<(OccurrencePath, &Assembly)> {
+        Scope::new(self.assembly(), self.table(), self.store()).holders()
+    }
+
     /// The face `e` names, on the part at `body`, as a solve reads it.
     pub(crate) fn end_of(&self, scope: &Scope, body: Body, e: &FaceEndpoint, mate: &str) -> Result<End, MateRefusal> {
         let named = |r: MateRefusal| MateRefusal { mates: vec![mate.to_owned()], ..r };
-        check_endpoint(e).map_err(named)?;
         let source = scope.part_source(&body).map_err(named)?;
         if source.id != Some(e.document) {
             return Err(named(invalid(format!("{mate}: {body} places another document"))));
@@ -404,7 +406,6 @@ impl AssemblyDocument {
                     format!("this version cannot solve the mate {}", serde_json::to_string(future).unwrap_or_default()),
                 ));
             }
-            crate::mates::reference::check_configurations(holder)?;
             for mate in holder.mates.iter().filter_map(MateEntry::known) {
                 let name = label(&prefix, mate.name());
                 let mut place = |body: &Body| {
@@ -609,6 +610,8 @@ impl AssemblyDocument {
                                 };
                                 Rule::Slot { sign: sign(alignment), mode, lock: *lock_rotation }
                             }
+                            Mate::Path { .. } => Rule::Path,
+                            Mate::Cam { outside, .. } => Rule::Cam { outside: *outside },
                             Mate::Origin { .. } | Mate::Lock { .. } => unreachable!("handled above"),
                         };
                         let mut ends = Vec::new();
@@ -620,6 +623,23 @@ impl AssemblyDocument {
                         mates.push(Gathered::Between { mate: name, ends, rule });
                     }
                 }
+            }
+        }
+        // A part placed in a configuration it could not be shown in cannot be solved on.
+        for body in bodies.keys() {
+            let Ok(source) = scope.part_source(body) else { continue };
+            let (Some(c), Some(row)) = (&source.configuration, scope.table.find(body)) else { continue };
+            let d = scope.store.get(scope.table.definition(row));
+            if d.state == crate::store::LoadState::Failed {
+                let why = d.problem.clone().unwrap_or_default();
+                let message = format!("{} cannot be shown in configuration {}: {why}", source.path, c.0);
+                let named = mates.iter().filter(|g| g.bodies().contains(&body)).map(|g| match g {
+                    Gathered::Origin { mate, .. } | Gathered::Between { mate, .. } | Gathered::Lock { mate, .. } => {
+                        mate.clone()
+                    }
+                });
+                let refused = MateRefusal::new(RefusalCode::UnsupportedConfiguration, message);
+                return Err(MateRefusal { mates: named.collect(), ..refused });
             }
         }
         Ok(Problem { bodies, mates, parts: scope.parts() })

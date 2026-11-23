@@ -382,6 +382,8 @@ impl AssemblyDocument {
     /// every pair of parts in scope. Refines certified meshes with exact queries on
     /// solids rebuilt at their pinned revisions and changes nothing.
     pub fn check_interference(&mut self, request: &CheckRequest) -> Result<CheckReport, CheckRefusal> {
+        // Checks read the assembled positions, never the exploded view.
+        self.collapse();
         let (lo, hi) = CHORD_RANGE_MM;
         if !(request.chord.is_finite() && (lo..=hi).contains(&request.chord)) {
             return Err(invalid(format!("the chord bound is {lo} mm to {hi} mm")));

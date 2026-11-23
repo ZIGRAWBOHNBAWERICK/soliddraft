@@ -33,7 +33,7 @@ use serde_json::Value;
 use soliddraft_document::hash::without_format;
 use soliddraft_document::manifest::{self, Entry, Manifest, Package, Section};
 use soliddraft_document::{
-    ContentHash, DocKind, DocumentId, EnvelopeError,
+    ConfigurationId, ContentHash, DocKind, DocumentId, EnvelopeError,
     kind::{format_major, found_tag},
 };
 use soliddraft_materials::Snapshots;
@@ -81,12 +81,22 @@ pub enum FileError {
     },
 }
 
-/// The name, within a part's copy folder, of its display mesh at `quality`: the usual
-/// `display.bin` for the part's own quality (`None`), `display-<code>.bin` otherwise.
-pub fn display_entry(quality: Option<&Quality>) -> String {
-    match quality {
+/// The name, within a part's copy folder, of its display mesh at `quality` in
+/// `configuration`: the usual `display.bin` for the part's own quality (`None`) in the
+/// configuration its file was saved in, `display-<code>.bin` at another quality, and
+/// `@<configuration>` before `.bin` for a configuration a placement names.
+pub fn display_entry(quality: Option<&Quality>, configuration: Option<&ConfigurationId>) -> String {
+    let name = match quality {
         None => DISPLAY_MESH.to_owned(),
         Some(q) => format!("display-{}.bin", q.code()),
+    };
+    in_configuration(name, configuration)
+}
+
+fn in_configuration(name: String, configuration: Option<&ConfigurationId>) -> String {
+    match configuration {
+        None => name,
+        Some(c) => format!("{}@{}.bin", name.trim_end_matches(".bin"), c.0),
     }
 }
 
@@ -94,11 +104,11 @@ pub fn display_entry(quality: Option<&Quality>) -> String {
 /// standard level is [`display_entry`]; the coarse one `coarse.bin` (or
 /// `coarse-<code>.bin` at a quality of its own). Fine meshes are made on demand and
 /// never saved, but are named the same way (`fine.bin`).
-pub fn level_entry(quality: Option<&Quality>, level: Level) -> String {
+pub fn level_entry(quality: Option<&Quality>, configuration: Option<&ConfigurationId>, level: Level) -> String {
     match (level, quality) {
-        (Level::Standard, q) => display_entry(q),
-        (l, None) => format!("{l}.bin"),
-        (l, Some(q)) => format!("{l}-{}.bin", q.code()),
+        (Level::Standard, q) => display_entry(q, configuration),
+        (l, None) => in_configuration(format!("{l}.bin"), configuration),
+        (l, Some(q)) => in_configuration(format!("{l}-{}.bin", q.code()), configuration),
     }
 }
 
@@ -173,10 +183,12 @@ impl Assembly {
             appearances: &self.appearances,
             snapshots: &self.snapshots,
             configurations: &self.configurations,
+            explode: &self.explode,
             display_states: &self.display_states,
             mates: &self.mates,
             values: &self.values,
             next_id: self.next_id,
+            next_configured_id: self.next_configured_id,
         };
         let json = serde_json::to_value(&out).expect("an assembly always serialises");
         let bulk = (!bulk.is_empty()).then(|| bulk::encode(bulk.into_iter(), geometry));
@@ -192,19 +204,26 @@ impl Assembly {
     }
 
     /// The hash of what decides the assembly's shape: the truth without names, hidden
-    /// flags, colours, display states and reference paths. Hiding, colouring or
-    /// renaming a component changes the semantic hash and not this one.
+    /// flags, colours, display states, other configurations, the exploded view and its
+    /// id counter, and reference paths. Hiding, colouring or renaming a component, adding
+    /// a configuration or an explode step changes the semantic hash and not this one.
     pub fn geometry_hash(&self) -> ContentHash {
         let (mut json, bulk) = self.split_truth(true);
         json = without_format(&json);
         if let Value::Object(map) = &mut json {
             map.remove("name");
             map.remove("display_states");
+            // Other configurations' states and the exploded view do not shape this one.
+            map.remove("configurations");
+            map.remove("explode");
             map.remove("appearances");
             map.remove("snapshots");
             // Placements hold what mates decide: the same placements are the same shape.
             map.remove("mates");
             map.remove("values");
+            // Configurations and explode steps count their ids apart; that counter shapes
+            // nothing. The revision keeps it.
+            map.remove("next_configured_id");
             for list in ["components", "patterns"] {
                 if let Some(Value::Array(items)) = map.get_mut(list) {
                     for item in items.iter_mut().filter_map(Value::as_object_mut) {
@@ -348,8 +367,10 @@ struct TruthOut<'a> {
     appearances: &'a [OccurrenceAppearance],
     #[serde(skip_serializing_if = "Snapshots::is_empty")]
     snapshots: &'a Snapshots,
+    #[serde(skip_serializing_if = "no_configurations")]
+    configurations: &'a crate::configuration::Configurations,
     #[serde(skip_serializing_if = "<[_]>::is_empty")]
-    configurations: &'a [Value],
+    explode: &'a [crate::configuration::ExplodeStep],
     #[serde(skip_serializing_if = "<[_]>::is_empty")]
     display_states: &'a [Value],
     #[serde(skip_serializing_if = "<[_]>::is_empty")]
@@ -357,6 +378,16 @@ struct TruthOut<'a> {
     #[serde(skip_serializing_if = "ValueTable::is_empty")]
     values: &'a ValueTable,
     next_id: u32,
+    #[serde(skip_serializing_if = "is_first_id")]
+    next_configured_id: u32,
+}
+
+fn is_first_id(id: &u32) -> bool {
+    *id == 1
+}
+
+fn no_configurations(c: &&crate::configuration::Configurations) -> bool {
+    c.is_unused()
 }
 
 fn hash_truth(json: Value, bulk: Option<&[u8]>) -> ContentHash {
@@ -465,7 +496,7 @@ impl CopyReader {
         id: DocumentId,
         revision: &ContentHash,
     ) -> Result<Option<(DisplayMesh, String)>, FileError> {
-        self.display_mesh_at(id, revision, None)
+        self.display_mesh_at(id, revision, None, None)
     }
 
     /// The display mesh of part `id` at `revision` made at `quality` (`None` for the
@@ -475,8 +506,9 @@ impl CopyReader {
         id: DocumentId,
         revision: &ContentHash,
         quality: Option<&Quality>,
+        configuration: Option<&ConfigurationId>,
     ) -> Result<Option<(DisplayMesh, String)>, FileError> {
-        let name = format!("{}{}", copy_folder(id, revision), display_entry(quality));
+        let name = format!("{}{}", copy_folder(id, revision), display_entry(quality, configuration));
         match self.package.read(&name)? {
             Some(bytes) => Ok(Some(DisplayMesh::decode(&bytes)?)),
             None => Ok(None),
@@ -678,6 +710,25 @@ mod tests {
             moved.components[1].placement = Placement::translation(DVec3::new(1.0, 2.0, 3.0));
             assert_ne!(moved.geometry_hash(), a.geometry_hash());
         }
+    }
+
+    #[test]
+    fn configurations_and_explode_steps_leave_the_geometry_hash() {
+        let (mut a, ..) = sample(2);
+        let (geometry, revision) = (a.geometry_hash(), a.semantic_hash());
+        a.add_configuration("Open").unwrap();
+        assert_eq!(a.geometry_hash(), geometry, "an inactive configuration shapes nothing");
+        let id = a.take_configured_id();
+        let first = a.components[0].id;
+        a.explode.push(crate::configuration::ExplodeStep {
+            id,
+            occurrences: vec![crate::path::OccurrencePath::root().child(crate::path::Step::component(first))],
+            direction: [0.0, 0.0, 1.0],
+            distance: 30.0,
+        });
+        a.validate().unwrap();
+        assert_eq!(a.geometry_hash(), geometry, "an explode step shapes nothing");
+        assert_ne!(a.semantic_hash(), revision, "both are part of the revision");
     }
 
     #[test]

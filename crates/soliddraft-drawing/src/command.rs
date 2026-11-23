@@ -188,6 +188,12 @@ pub enum Command {
     },
     /// Regenerate the views from the current model and re-resolve every annotation.
     UpdateFromModel,
+    /// Take an assembly drawing as [`crate::assembly::update_assembly_drawing`] brought it
+    /// to its assembly: views, BOM, balloons and pin together.
+    UpdateFromAssembly {
+        /// The drawing brought up to date.
+        drawing: Box<Drawing>,
+    },
     /// Add a sheet at the end, made from a template.
     AddSheet {
         /// Its name, such as "Sheet2".
@@ -341,6 +347,7 @@ impl Command {
                 AnnotationKind::Datum { .. } => "Add datum",
                 AnnotationKind::SurfaceFinish { .. } => "Add surface finish",
                 AnnotationKind::RevisionSymbol { .. } => "Add revision symbol",
+                AnnotationKind::Balloon { .. } => "Add balloon",
                 _ => "Add annotation",
             },
             Command::MoveAnnotation { .. } => "Move annotation",
@@ -357,6 +364,7 @@ impl Command {
             Command::RenameView { .. } => "Rename view",
             Command::Align { .. } => "Align",
             Command::UpdateFromModel => "Update from model",
+            Command::UpdateFromAssembly { .. } => "Update from assembly",
             Command::AddSheet { .. } => "Add sheet",
             Command::DeleteSheet { .. } => "Delete sheet",
             Command::RenameSheet { .. } => "Rename sheet",
@@ -453,6 +461,7 @@ pub fn apply(drawing: &mut Drawing, command: &Command) -> Result<(), DrawingErro
                 | AnnotationKind::SurfaceFinish { text, .. } => text.clone(),
                 AnnotationKind::Datum { letter } => letter.clone(),
                 AnnotationKind::RevisionSymbol { revision } => revision.clone(),
+                AnnotationKind::Balloon { item, .. } => item.to_string(),
                 AnnotationKind::Gdt { .. } => crate::display::annotation_name(a, style),
                 AnnotationKind::DimensionSet(set) => set.values_text(),
                 AnnotationKind::CentreMark | AnnotationKind::Centreline => String::new(),
@@ -611,6 +620,13 @@ pub fn apply(drawing: &mut Drawing, command: &Command) -> Result<(), DrawingErro
             t.revisions.push(row.clone());
             crate::display::keep_above_title_block(s);
             drawing.meta.revision = row.revision.clone();
+            Ok(())
+        }
+        Command::UpdateFromAssembly { drawing: next } => {
+            if !crate::assembly::is_assembly_drawing(drawing) || next.model.id != drawing.model.id {
+                return Err(DrawingError::BadRequest("only the drawing's own assembly updates it".into()));
+            }
+            *drawing = (**next).clone();
             Ok(())
         }
         Command::Reattach { .. }

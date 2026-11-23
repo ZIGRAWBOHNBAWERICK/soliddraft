@@ -1127,8 +1127,9 @@ pub fn resolve_model(state: &AppState) -> Option<soliddraft_document::Resolution
         path: state.doc.path.clone(),
         revision: part::digest(&state.doc),
     };
+    let assembly = state.assembly.session.as_ref().map(|a| a.doc.as_open());
     let resolver = soliddraft_document::Resolver::new(session.doc.path.as_deref())
-        .with_open([part])
+        .with_open(std::iter::once(part).chain(assembly))
         .with_search_folders(crate::settings::file_locations().search_folders());
     Some(resolver.resolve(&session.doc.drawing.model))
 }
@@ -1138,6 +1139,10 @@ pub fn resolve_model(state: &AppState) -> Option<soliddraft_document::Resolution
 /// part was found. When the part is not open but its file is, the file is opened in
 /// the part tab first and the rebuild follows; a missing part asks for a repair.
 fn rebuild(state: &mut AppState) {
+    if crate::assembly_files::drawing::drawing_is_of_assembly(state) {
+        rebuild_assembly(state);
+        return;
+    }
     if !part_is_model(state) {
         if let Some(path) = state.drawing.session.as_ref().and_then(DrawingSession::model_file) {
             if state.doc.dirty {
@@ -1169,9 +1174,37 @@ fn rebuild(state: &mut AppState) {
     }
 }
 
+/// Rebuild for a drawing of an assembly: brings it to the open assembly, or opens the
+/// drawing's assembly first.
+fn rebuild_assembly(state: &mut AppState) {
+    let wanted = state.drawing.session.as_ref().and_then(|s| s.doc.drawing.model.id);
+    let open = state.assembly.session.as_ref().map(|a| a.doc.id());
+    if open.is_none() || open != wanted {
+        let said = match model_to_open(state) {
+            Ok(Some(path)) => {
+                state.push(crate::state::AppAction::Assembly(crate::assembly::AssemblyAction::Open(path.clone())));
+                format!("Opening {}; Rebuild again once it shows", path.display())
+            }
+            Ok(None) => "The drawing's assembly could not be found".to_owned(),
+            Err(e) => e,
+        };
+        if let Some(s) = state.drawing.session.as_mut() {
+            s.say(said);
+        }
+        return;
+    }
+    let said = crate::assembly_files::drawing::update(state).unwrap_or_else(|e| e);
+    if let Some(s) = state.drawing.session.as_mut() {
+        s.say(said);
+    }
+}
+
 /// The Rebuild itself, once the open part is the drawing's model: one undo step that
 /// brings the views to the part's revision. Says what it did.
 pub(crate) fn update_views(state: &mut AppState) -> Result<String, String> {
+    if crate::assembly_files::drawing::drawing_is_of_assembly(state) {
+        return crate::assembly_files::drawing::update(state);
+    }
     if let Some(reason) = part_wait_reason(state) {
         return Err(reason.into());
     }
@@ -1279,13 +1312,28 @@ fn open_model(state: &mut AppState) {
     }
 }
 
-/// The drawing's part file to open in the part tab: `None` when it is the open part
-/// or was not found, and an error when the open part has unsaved changes.
+/// The drawing's model file to open: `None` when it is the open part or assembly or was
+/// not found, and an error when the part or assembly it would replace has unsaved changes.
 pub(crate) fn model_to_open(state: &AppState) -> Result<Option<PathBuf>, String> {
     let Some(session) = state.drawing.session.as_ref() else { return Ok(None) };
     let Some(file) = session.model_file() else { return Ok(None) };
     if session.model_is(state.doc.model().id()) {
         return Ok(None);
+    }
+    // An assembly opens in its own tab, in place of the open assembly: the open part does
+    // not matter, but unsaved edits to the open assembly hold it back.
+    if session.doc.drawing.model.kind == DocKind::Assembly {
+        let Some(open) = state.assembly.session.as_ref() else { return Ok(Some(file)) };
+        if Some(open.doc.id()) == session.doc.drawing.model.id {
+            return Ok(None);
+        }
+        if open.doc.is_dirty() {
+            return Err(format!(
+                "{} has unsaved changes; the drawing's assembly was not opened",
+                open.doc.assembly().name
+            ));
+        }
+        return Ok(Some(file));
     }
     if state.doc.dirty {
         return Err(format!("{} has unsaved changes; the drawing's part was not opened", state.doc.name));

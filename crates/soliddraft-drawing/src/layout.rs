@@ -310,6 +310,7 @@ pub fn make_drawing(part: &Part, new: &NewDrawing) -> Result<MadeDrawing, Drawin
             label: None,
             crop: None,
             broken_out: Vec::new(),
+            exploded: false,
         });
     }
 

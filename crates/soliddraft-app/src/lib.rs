@@ -9,11 +9,13 @@
 pub mod app;
 pub mod app_tools;
 pub mod assembly;
+pub mod assembly_files;
 pub mod chat;
 pub mod command_line;
 #[macro_use]
 pub mod command_tools;
 pub mod commands;
+pub mod configurations;
 pub mod context_menu;
 pub mod dimension_edit;
 pub mod display_quality;

@@ -14,6 +14,7 @@
 
 use std::sync::Arc;
 
+use soliddraft_document::ConfigurationId;
 use soliddraft_kernel_api::Kernel;
 use soliddraft_model::{Document, display};
 use soliddraft_tessellation::{Level, Quality};
@@ -94,10 +95,32 @@ impl KernelSource {
         &self.kernel
     }
 
-    /// The part in `part_file`, rebuilt: the exact body that measure, mass and drawing
-    /// projection need.
-    pub fn exact(&self, part_file: &[u8]) -> Result<Document, String> {
-        Document::from_bytes(part_file, self.kernel.clone()).map_err(|e| e.to_string())
+    /// The part in `part_file`, rebuilt in `configuration` (`None` for the one the file
+    /// was saved in): the exact body that measure, mass and
+    /// drawing projection need. A configuration the part does not have is refused.
+    pub fn exact(&self, part_file: &[u8], configuration: Option<&ConfigurationId>) -> Result<Document, String> {
+        let mut doc = Document::from_bytes(part_file, self.kernel.clone()).map_err(|e| e.to_string())?;
+        if let Some(c) = configuration {
+            doc.show_configuration(c)?;
+        }
+        Ok(doc)
+    }
+
+    /// The part file as `configuration` of it shows: the file itself for `None`, else
+    /// the part rebuilt in that configuration and written again without display data, so
+    /// a display source makes the configuration's own meshes.
+    pub fn configured<'a>(
+        &self,
+        part_file: &'a [u8],
+        configuration: Option<&ConfigurationId>,
+    ) -> Result<std::borrow::Cow<'a, [u8]>, String> {
+        match configuration {
+            None => Ok(std::borrow::Cow::Borrowed(part_file)),
+            Some(c) => {
+                let doc = self.exact(part_file, Some(c))?;
+                doc.to_bytes().map(std::borrow::Cow::Owned).map_err(|e| e.to_string())
+            }
+        }
     }
 }
 
@@ -109,7 +132,7 @@ impl KernelSource {
         quality: Option<&Quality>,
         level: Level,
     ) -> Result<(DisplayMesh, String), String> {
-        let doc = self.exact(part_file)?;
+        let doc = self.exact(part_file, None)?;
         if doc.live_bodies().len() > 1 {
             return Err("Several-body parts in assemblies are coming soon. Combine the bodies first.".into());
         }

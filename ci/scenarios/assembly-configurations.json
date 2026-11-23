@@ -1,0 +1,538 @@
+{
+  "format": "soliddraft-scenario/1",
+  "name": "assembly-configurations",
+  "folders": [
+    "work"
+  ],
+  "max_work": 20000000,
+  "steps": [
+    {
+      "tool": "sketch",
+      "arguments": {
+        "plane": "top",
+        "shapes": [
+          {
+            "shape": "rectangle",
+            "center": [
+              0,
+              0,
+              0
+            ],
+            "width": 40,
+            "height": 30
+          }
+        ]
+      },
+      "checks": []
+    },
+    {
+      "tool": "extrude",
+      "arguments": {
+        "sketch": "Sketch1",
+        "depth": 14,
+        "flip": false
+      },
+      "checks": []
+    },
+    {
+      "tool": "save",
+      "arguments": {
+        "path": "{bundle}/work/a.dwprt"
+      },
+      "checks": [],
+      "files": [
+        "{bundle}/work/a.dwprt"
+      ]
+    },
+    {
+      "tool": "make_assembly",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/summary/assembly/components/0/path",
+          "equals": "2"
+        }
+      ]
+    },
+    {
+      "tool": "assembly_save",
+      "arguments": {
+        "path": "{bundle}/work/rig.dwasm"
+      },
+      "checks": [],
+      "files": [
+        "{bundle}/work/rig.dwasm"
+      ]
+    },
+    {
+      "tool": "new_part",
+      "arguments": {},
+      "checks": []
+    },
+    {
+      "tool": "sketch",
+      "arguments": {
+        "plane": "top",
+        "shapes": [
+          {
+            "shape": "rectangle",
+            "center": [
+              0,
+              0,
+              0
+            ],
+            "width": 20,
+            "height": 10
+          }
+        ]
+      },
+      "checks": []
+    },
+    {
+      "tool": "extrude",
+      "arguments": {
+        "sketch": "Sketch1",
+        "depth": 6,
+        "flip": false
+      },
+      "checks": []
+    },
+    {
+      "tool": "save",
+      "arguments": {
+        "path": "{bundle}/work/b.dwprt"
+      },
+      "checks": [],
+      "files": [
+        "{bundle}/work/b.dwprt"
+      ]
+    },
+    {
+      "tool": "show_assembly",
+      "arguments": {},
+      "checks": []
+    },
+    {
+      "tool": "insert_component",
+      "arguments": {
+        "paths": [
+          "{bundle}/work/b.dwprt"
+        ],
+        "placement": {
+          "translation": [
+            10,
+            10,
+            30
+          ],
+          "rotation": [
+            0,
+            0,
+            0,
+            1
+          ]
+        }
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/components/1/path",
+          "equals": "4"
+        }
+      ]
+    },
+    {
+      "tool": "assembly_mate_origin",
+      "arguments": {
+        "name": "O",
+        "component": 2,
+        "align_axes": true
+      },
+      "checks": []
+    },
+    {
+      "tool": "assembly_mate_coincident",
+      "arguments": {
+        "name": "X",
+        "a": {
+          "component": 2,
+          "feature": "Boss-Extrude1",
+          "generator": "side",
+          "normal": [
+            1,
+            0,
+            0
+          ]
+        },
+        "b": {
+          "component": 4,
+          "feature": "Boss-Extrude1",
+          "generator": "side",
+          "normal": [
+            1,
+            0,
+            0
+          ]
+        },
+        "alignment": "aligned"
+      },
+      "checks": []
+    },
+    {
+      "tool": "assembly_mate_coincident",
+      "arguments": {
+        "name": "Y",
+        "a": {
+          "component": 2,
+          "feature": "Boss-Extrude1",
+          "generator": "side",
+          "normal": [
+            0,
+            1,
+            0
+          ]
+        },
+        "b": {
+          "component": 4,
+          "feature": "Boss-Extrude1",
+          "generator": "side",
+          "normal": [
+            0,
+            1,
+            0
+          ]
+        },
+        "alignment": "aligned"
+      },
+      "checks": []
+    },
+    {
+      "tool": "assembly_mate_distance",
+      "arguments": {
+        "name": "Z",
+        "a": {
+          "component": 2,
+          "feature": "Boss-Extrude1",
+          "generator": "end_cap"
+        },
+        "b": {
+          "component": 4,
+          "feature": "Boss-Extrude1",
+          "generator": "start_cap"
+        },
+        "distance": "5 mm",
+        "alignment": "opposed"
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/components/1/translation/2",
+          "approx": 19.0,
+          "tolerance": 1e-06
+        }
+      ]
+    },
+    {
+      "tool": "assembly_set_value",
+      "arguments": {
+        "name": "gap",
+        "expression": "12 mm"
+      },
+      "checks": []
+    },
+    {
+      "tool": "assembly_drive_mate",
+      "arguments": {
+        "mate": "Z",
+        "parameter": "distance",
+        "expression": "gap"
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/components/1/translation/2",
+          "approx": 26.0,
+          "tolerance": 1e-06
+        },
+        {
+          "pointer": "/summary/assembly/solver/remaining_dof",
+          "equals": 0
+        }
+      ]
+    },
+    {
+      "tool": "assembly_add_configuration",
+      "arguments": {
+        "name": "Open"
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/configured/active_configuration",
+          "equals": "Default"
+        },
+        {
+          "pointer": "/summary/assembly/configured/configurations",
+          "length": 2
+        }
+      ]
+    },
+    {
+      "tool": "assembly_activate_configuration",
+      "arguments": {
+        "name": "Open"
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/configured/active_configuration",
+          "equals": "Open"
+        },
+        {
+          "pointer": "/summary/assembly/components/1/translation/2",
+          "approx": 26.0,
+          "tolerance": 1e-06
+        }
+      ]
+    },
+    {
+      "tool": "assembly_set_value",
+      "arguments": {
+        "name": "gap",
+        "expression": "30 mm"
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/components/1/translation/2",
+          "approx": 44.0,
+          "tolerance": 1e-06
+        }
+      ]
+    },
+    {
+      "tool": "assembly_activate_configuration",
+      "arguments": {
+        "name": "Closed"
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/accepted_state",
+          "same_as": {
+            "step": 20,
+            "pointer": "/summary/assembly/accepted_state"
+          }
+        }
+      ],
+      "refused": "there is no configuration called Closed"
+    },
+    {
+      "tool": "assembly_activate_configuration",
+      "arguments": {
+        "name": "Default"
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/configured/active_configuration",
+          "equals": "Default"
+        },
+        {
+          "pointer": "/summary/assembly/components/1/translation/2",
+          "approx": 26.0,
+          "tolerance": 1e-06
+        }
+      ]
+    },
+    {
+      "tool": "assembly_explode_step",
+      "arguments": {
+        "paths": [
+          "4"
+        ],
+        "direction": [
+          0,
+          0,
+          1
+        ],
+        "distance": 50
+      },
+      "checks": [
+        {
+          "pointer": "/result/exploded/4/2",
+          "approx": 76.0,
+          "tolerance": 1e-06
+        },
+        {
+          "pointer": "/summary/assembly/components/1/translation/2",
+          "approx": 26.0,
+          "tolerance": 1e-06
+        },
+        {
+          "pointer": "/summary/assembly/configured/explode/steps",
+          "length": 1
+        }
+      ]
+    },
+    {
+      "tool": "assembly_explode",
+      "arguments": {
+        "exploded": true
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/configured/explode/shown",
+          "equals": true
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/4/world/translation/2",
+          "approx": 76.0,
+          "tolerance": 1e-06
+        },
+        {
+          "pointer": "/summary/assembly/components/1/translation/2",
+          "approx": 26.0,
+          "tolerance": 1e-06
+        }
+      ]
+    },
+    {
+      "tool": "undo",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/summary/assembly/configured/explode/steps",
+          "length": 0
+        },
+        {
+          "pointer": "/summary/assembly/configured/explode/shown",
+          "equals": false
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/4/world/translation/2",
+          "approx": 26.0,
+          "tolerance": 1e-06
+        }
+      ]
+    },
+    {
+      "tool": "redo",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/summary/assembly/configured/explode/steps",
+          "length": 1
+        }
+      ]
+    },
+    {
+      "tool": "assembly_save",
+      "arguments": {
+        "path": "{bundle}/work/rig.dwasm"
+      },
+      "checks": [
+        {
+          "pointer": "/inspect/configurations/active",
+          "equals": "Default"
+        },
+        {
+          "pointer": "/inspect/configurations/configurations",
+          "length": 2
+        },
+        {
+          "pointer": "/inspect/explode/exploded/0/at/2",
+          "approx": 76.0,
+          "tolerance": 1e-06
+        }
+      ],
+      "files": [
+        "{bundle}/work/rig.dwasm"
+      ],
+      "inspect": {
+        "configurations": [
+          "asm",
+          "config",
+          "{bundle}/work/rig.dwasm",
+          "list",
+          "--json"
+        ],
+        "explode": [
+          "asm",
+          "explode",
+          "{bundle}/work/rig.dwasm",
+          "list",
+          "--json"
+        ]
+      }
+    },
+    {
+      "tool": "open",
+      "arguments": {
+        "path": "{bundle}/work/rig.dwasm"
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/configured/active_configuration",
+          "equals": "Default"
+        },
+        {
+          "pointer": "/summary/assembly/components/1/translation/2",
+          "approx": 26.0,
+          "tolerance": 1e-06
+        },
+        {
+          "pointer": "/summary/assembly/solver/remaining_dof",
+          "equals": 0
+        },
+        {
+          "pointer": "/summary/assembly/configured/explode/steps",
+          "length": 1
+        }
+      ]
+    },
+    {
+      "tool": "assembly_activate_configuration",
+      "arguments": {
+        "name": "Open"
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/components/1/translation/2",
+          "approx": 44.0,
+          "tolerance": 1e-06
+        },
+        {
+          "pointer": "/summary/assembly/solver/remaining_dof",
+          "equals": 0
+        },
+        {
+          "pointer": "/summary/assembly/configured/explode/steps",
+          "length": 0
+        }
+      ]
+    },
+    {
+      "tool": "assembly_auto_explode",
+      "arguments": {
+        "distance": 40
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/configured/explode/steps",
+          "length": 1
+        },
+        {
+          "pointer": "/result/exploded/4/2",
+          "minimum": 60.0
+        },
+        {
+          "pointer": "/summary/assembly/components/1/translation/2",
+          "approx": 44.0,
+          "tolerance": 1e-06
+        }
+      ]
+    },
+    {
+      "tool": "assembly_save",
+      "arguments": {
+        "path": "{bundle}/work/rig.dwasm"
+      },
+      "checks": [],
+      "files": [
+        "{bundle}/work/rig.dwasm"
+      ]
+    }
+  ]
+}

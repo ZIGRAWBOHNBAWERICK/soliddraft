@@ -17,12 +17,25 @@ use crate::*;
 /// The label format Catallax writes into a certified field STL's header.
 const STL_LABEL: &str = "catallax-print-stl/1";
 
+type SourceFiles = BTreeMap<String, Arc<[u8]>>;
+
+fn stage_from_source<S: TerminalField>(
+    recipe: &Recipe,
+    spec: S,
+    settings: Settings,
+    _files: &SourceFiles,
+    dec: &mut Decider,
+) -> Result<Stage<S>, Refusal> {
+    // Switch here to Catallax's file-aware stage when it reaches the pin.
+    Stage::new(recipe, spec, settings, dec)
+}
+
 /// The stage calls an active field needs, whichever field it holds.
 trait FieldStage: Send + Sync {
     fn recipe(&self) -> &Recipe;
     fn plan(&self) -> &Plan;
     fn settings(&self) -> &Settings;
-    fn export(&self, accuracy: Option<Rational>, dec: &mut Decider) -> Result<Output, Refusal>;
+    fn export(&self, accuracy: Option<Rational>, files: &SourceFiles, dec: &mut Decider) -> Result<Output, Refusal>;
 }
 
 impl<S: TerminalField + Clone + Send + Sync> FieldStage for Stage<S> {
@@ -35,11 +48,11 @@ impl<S: TerminalField + Clone + Send + Sync> FieldStage for Stage<S> {
     fn settings(&self) -> &Settings {
         Stage::settings(self)
     }
-    fn export(&self, accuracy: Option<Rational>, dec: &mut Decider) -> Result<Output, Refusal> {
+    fn export(&self, accuracy: Option<Rational>, files: &SourceFiles, dec: &mut Decider) -> Result<Output, Refusal> {
         if let Some(accuracy) = accuracy {
             let (body, spec, mut settings) = self.clone().return_before_lattice();
             settings.accuracy = accuracy;
-            Stage::new(&body, spec, settings, dec)?.export(dec)
+            stage_from_source(&body, spec, settings, files, dec)?.export(dec)
         } else {
             Stage::export(self, dec)
         }
@@ -48,16 +61,21 @@ impl<S: TerminalField + Clone + Send + Sync> FieldStage for Stage<S> {
 
 pub(super) struct Field {
     stage: Box<dyn FieldStage>,
+    files: SourceFiles,
     preview: Mesh,
     topology: Topology,
 }
 
-fn run<T>(operation: &str, action: impl FnOnce(&mut Decider) -> Result<T, Refusal>) -> KernelResult<T> {
+fn decide<T>(operation: &str, action: impl FnOnce(&mut Decider) -> Result<T, Refusal>) -> Result<T, Refusal> {
     let mut dec = Decider::default();
     let span = OperationSpan::begin("field", &operation, operation, &dec);
     let result = action(&mut dec);
     span.finish(&dec, result.as_ref().err(), None);
-    result.map_err(|e| query_error(operation, e))
+    result
+}
+
+fn run<T>(operation: &str, action: impl FnOnce(&mut Decider) -> Result<T, Refusal>) -> KernelResult<T> {
+    decide(operation, action).map_err(|e| query_error(operation, e))
 }
 
 /// Runs one action on its caller's allowance, or on the application's [`APP_REQUEST_WORK`]
@@ -169,6 +187,49 @@ impl CatallaxKernel {
         Ok(self.state()?.fields.get(&body).cloned())
     }
 
+    fn field_source(&self, body: BodyId, op: OpKind) -> KernelResult<(Recipe, SourceFiles)> {
+        let (legacy, files) = {
+            let state = self.state()?;
+            let stored = state.get(body)?;
+            (stored.legacy_recipe(), state.sources(&stored.steps)?)
+        };
+        Ok((converted_recipe(&legacy, op)?.recipe, files))
+    }
+
+    pub(super) fn check_field_source(&self, body: BodyId) -> KernelResult<bool> {
+        {
+            let state = self.state()?;
+            if let Some(supported) = state.field_source_support.get(&body) {
+                return Ok(*supported);
+            }
+            if !state
+                .get(body)?
+                .steps
+                .values()
+                .any(|step| matches!(step["op"].as_str(), Some("import_step" | "import_iges" | "import_mesh")))
+            {
+                return Ok(true);
+            }
+        }
+        // A valid constant lattice asks the stage compiler whether it can read this source.
+        let supported = allowance("field_source", || {
+            let (recipe, files) = self.field_source(body, OpKind::Lattice)?;
+            let spec = LatticeSpec {
+                cell: catallax_recipe::LatticeCell::Cubic,
+                size: native::number(5.0, "cell size")?,
+                frame: Pose::identity(),
+                radius: catallax_recipe::Grade::Constant(native::number(1.0, "density")?),
+            };
+            let settings = settings("lattice", 0.1, 0.5)?;
+            run("field_source", |dec| stage_from_source(&recipe, spec, settings, &files, dec)).map(drop)
+        })
+        .is_ok();
+        let mut state = self.state()?;
+        state.get(body)?;
+        state.field_source_support.insert(body, supported);
+        Ok(supported)
+    }
+
     pub(super) fn build_lattice(&self, tag: &OpTag, body: BodyId, params: &Lattice) -> KernelResult<OpResult> {
         let settings = settings("lattice", params.accuracy_mm, params.min_detail_mm)?;
         let spec = LatticeSpec {
@@ -223,30 +284,42 @@ impl CatallaxKernel {
             return run(op.name(), |dec| Stage::new(field.stage.recipe(), spec, settings, dec))
                 .and(Err(KernelError::InvalidInput(format!("the {} needs a CAD body", op.name()))));
         }
-        // The stage evaluates the part again and has no way to read an imported file.
-        if self
-            .state()?
-            .get(body)?
-            .steps
-            .values()
-            .any(|s| matches!(s["op"].as_str(), Some("import_step" | "import_iges" | "import_mesh")))
-        {
-            return Err(gap(&format!("A {} on an imported body", op.name())));
-        }
-        let recipe = converted_recipe(&self.body_recipe(body)?, op)?.recipe;
-        let solid = self.solid(body)?;
-        let built = solid.app.checkpoint.built();
-        let bounds = numerical("bounding_box", |dec| {
-            catallax_measure::bounding_box(&built.model, built.result, &catallax_measure::Accuracy::default(), dec)
-        })
-        .map_err(|e| query_error("bounding_box", e))?
-        .value
-        .ok_or_else(|| KernelError::InvalidInput(format!("the {} needs a nonempty body", op.name())))?;
-        let bbox = Aabb {
-            min: bounds.min.each_ref().map(Rational::to_f64_nearest).into(),
-            max: bounds.max.each_ref().map(Rational::to_f64_nearest).into(),
+        let (recipe, files) = self.field_source(body, op)?;
+        let cad_bounds = if files.is_empty() {
+            let solid = self.solid(body)?;
+            let built = solid.app.checkpoint.built();
+            let bounds = numerical("bounding_box", |dec| {
+                catallax_measure::bounding_box(&built.model, built.result, &catallax_measure::Accuracy::default(), dec)
+            })
+            .map_err(|e| query_error("bounding_box", e))?
+            .value
+            .ok_or_else(|| KernelError::InvalidInput(format!("the {} needs a nonempty body", op.name())))?;
+            Some(Aabb {
+                min: bounds.min.each_ref().map(Rational::to_f64_nearest).into(),
+                max: bounds.max.each_ref().map(Rational::to_f64_nearest).into(),
+            })
+        } else {
+            None
         };
-        let stage = run(op.name(), |dec| Stage::new(&recipe, spec, settings, dec))?;
+        let stage = decide(op.name(), |dec| stage_from_source(&recipe, spec, settings, &files, dec)).map_err(|e| {
+            if !files.is_empty()
+                && (e.code == "field.import-missing-source"
+                    || (e.code == "field.recipe" && e.detail.contains("missing mesh source")))
+            {
+                gap(&format!("A {} on an imported body", op.name()))
+            } else {
+                query_error(op.name(), e)
+            }
+        })?;
+        let bbox = if let Some(bounds) = cad_bounds {
+            bounds
+        } else {
+            let bounds = run("bounding_box", |dec| printing::bounds(stage.plan(), dec))?;
+            Aabb {
+                min: bounds.each_ref().map(|axis| axis[0].to_f64_nearest()).into(),
+                max: bounds.each_ref().map(|axis| axis[1].to_f64_nearest()).into(),
+            }
+        };
         // Keep the native question even when preview generation refuses.
         {
             let mut state = self.state()?;
@@ -307,7 +380,7 @@ impl CatallaxKernel {
             approximate: None,
         };
         state.bodies.insert(id, stored);
-        state.fields.insert(id, Arc::new(Field { stage: Box::new(stage), preview, topology }));
+        state.fields.insert(id, Arc::new(Field { stage: Box::new(stage), files, preview, topology }));
         Ok(OpResult { body: id, record })
     }
 }
@@ -335,7 +408,7 @@ impl Field {
             accuracy.map(|mm| native::number(mm, "print accuracy").map(|n| n.value().clone())).transpose()?;
         let operation = "export_field_stl";
         let ((bytes, output), work) = export_allowance(operation, || {
-            run(operation, |dec| self.stage.export(accuracy.clone(), dec)?.labelled_stl())
+            run(operation, |dec| self.stage.export(accuracy.clone(), &self.files, dec)?.labelled_stl())
         })?;
         // Read the encoded bound so the JSON report describes the file exactly.
         let bound = f64::from_le_bytes(bytes[68..76].try_into().expect("labelled header"));

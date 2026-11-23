@@ -19,8 +19,11 @@
 //! - **mates**: authored relationships that decide placements ([`crate::mates`]), and the
 //!   typed **values** that can drive them. A mate of a family this version does not know
 //!   is kept as read and never counted as solved;
-//! - reserved lists for configurations and display states, kept verbatim until those
-//!   formats are defined.
+//! - **configurations**: named states of the assembly, each with its own suppression,
+//!   placements, overrides, values and exploded view ([`crate::configuration`]); the
+//!   truth holds the active one's;
+//! - an **exploded view**: steps that move occurrences apart for display only;
+//! - a reserved list for display states, kept verbatim until that format is defined.
 //!
 //! Beside the truth, an assembly carries its display settings ([`Assembly::settings`]):
 //! a quality for every part, and components shown at their own quality. They are kept
@@ -39,6 +42,7 @@ use soliddraft_materials::{Appearance, AppearanceId, Snapshots, scope};
 use soliddraft_model::{Expression, ValueTable};
 use soliddraft_tessellation::Settings;
 
+use crate::configuration::{Configurations, ExplodeStep};
 use crate::mates::{Mate, MateEntry};
 use crate::path::{ComponentId, OccurrencePath, PatternId, SourceId, Step};
 use crate::placement::Placement;
@@ -74,10 +78,15 @@ pub struct Assembly {
     /// Copies of the appearances `appearances` uses, as parts keep theirs.
     #[serde(default, skip_serializing_if = "Snapshots::is_empty")]
     pub snapshots: Snapshots,
-    /// Reserved for configurations (named override sets). Kept as read.
+    /// The configurations, by creation order; the truth holds the active one's state.
+    /// Empty for an assembly with only its default state. Rows of another version are kept
+    /// as read ([`Configurations`]).
+    #[serde(default, skip_serializing_if = "Configurations::is_unused")]
+    pub configurations: Configurations,
+    /// The active configuration's exploded view, applied in order. Display only.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub configurations: Vec<Value>,
-    /// Reserved for display states (visibility, colours, exploded poses). Kept as read.
+    pub explode: Vec<ExplodeStep>,
+    /// Reserved for display states (visibility and colours). Kept as read.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub display_states: Vec<Value>,
     /// The mates: known ones by id, then those of a later version as read.
@@ -89,6 +98,11 @@ pub struct Assembly {
     /// The next free id for a component, pattern, source, mate or value. Ids are never
     /// reused.
     pub next_id: u32,
+    /// The next free id for a configuration or an explode step, from 1. These records shape
+    /// nothing, so they count apart from `next_id`, which the geometry hash keeps. Left
+    /// out of a file that has none.
+    #[serde(default = "first_id", skip_serializing_if = "is_first_id")]
+    pub next_configured_id: u32,
     /// Display settings, from `settings.json`: not part of the truth or its hashes.
     /// In an assembly, a viewport quality other than auto shows every part at it
     /// instead of at its own, and each override shows one component and everything
@@ -102,6 +116,14 @@ pub struct Assembly {
     /// the truth or its hashes; kept as read and written back on save.
     #[serde(skip)]
     pub import: Option<String>,
+}
+
+fn first_id() -> u32 {
+    1
+}
+
+fn is_first_id(id: &u32) -> bool {
+    *id == 1
 }
 
 /// The units of an assembly file.
@@ -353,11 +375,13 @@ impl Assembly {
             overrides: Vec::new(),
             appearances: Vec::new(),
             snapshots: Snapshots::default(),
-            configurations: Vec::new(),
+            configurations: Configurations::default(),
+            explode: Vec::new(),
             display_states: Vec::new(),
             mates: Vec::new(),
             values: ValueTable::default(),
             next_id: 1,
+            next_configured_id: 1,
             settings: Settings::default(),
             import: None,
         }
@@ -367,6 +391,13 @@ impl Assembly {
     pub fn take_id(&mut self) -> u32 {
         let id = self.next_id;
         self.next_id += 1;
+        id
+    }
+
+    /// Takes the next free id for a configuration or an explode step.
+    pub fn take_configured_id(&mut self) -> u32 {
+        let id = self.next_configured_id;
+        self.next_configured_id += 1;
         id
     }
 
@@ -451,6 +482,7 @@ impl Assembly {
         self.appearances.sort_by(|a, b| a.path.cmp(&b.path));
         self.mates.sort_by_key(MateEntry::order);
         self.snapshots.normalise();
+        self.normalize_configurations();
     }
 
     /// The mates this version understands.
@@ -569,6 +601,7 @@ impl Assembly {
             }
         }
         self.validate_mates()?;
+        self.validate_configurations()?;
         for o in &self.overrides {
             let Some(first) = o.path.steps().first() else {
                 return bad("an override has an empty path".into());
@@ -722,10 +755,23 @@ mod tests {
     }
 
     #[test]
+    fn configuration_rows_of_another_version_are_kept_as_read() {
+        let mut v = serde_json::to_value(sample()).unwrap();
+        v["configurations"] = json!([{"id": "long"}]);
+        let mut a: Assembly = serde_json::from_value(v.clone()).unwrap();
+        assert_eq!(serde_json::to_value(&a).unwrap(), v);
+        a.validate().unwrap();
+        // They are not this version's to change: adding a configuration is refused.
+        let refused = a.add_configuration("Open").unwrap_err();
+        assert!(refused.0.contains("another version"), "{}", refused.0);
+        assert_eq!(serde_json::to_value(&a).unwrap(), v, "the rows stay as read");
+    }
+
+    #[test]
     fn reserved_lists_are_kept() {
         let mut v = serde_json::to_value(sample()).unwrap();
         v["mates"] = json!([{"kind": "coincident", "future": true}]);
-        v["configurations"] = json!([{"id": "long"}]);
+        v["display_states"] = json!([{"id": "long"}]);
         let a: Assembly = serde_json::from_value(v.clone()).unwrap();
         assert_eq!(serde_json::to_value(&a).unwrap(), v);
     }

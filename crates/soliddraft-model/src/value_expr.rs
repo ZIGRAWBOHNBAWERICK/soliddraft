@@ -545,9 +545,49 @@ impl ValueTable {
         resolve(&self.entries).map(|_| ())
     }
 
+    /// This table with the expressions `saved` holds for the values both have, matched by
+    /// id, as a configuration puts back the values it saved. What each expression reads
+    /// stays bound to the ids it read when saved, and its text names them as this table
+    /// does now, so a value renamed since, or a new value given an old name, changes
+    /// nothing it reads. Values `saved` does not know keep theirs. The whole table is
+    /// checked once, so values may read each other the other way round from before.
+    pub fn restored(&self, saved: &ValueTable) -> Result<ValueTable, String> {
+        let mut out = self.clone();
+        for entry in &mut out.entries {
+            let Some(old) = saved.expression(entry.id) else { continue };
+            let mut text = String::new();
+            let mut at = 0;
+            for token in tokenize(&old.text)? {
+                let start = token.as_ptr() as usize - old.text.as_ptr() as usize;
+                text.push_str(&old.text[at..start]);
+                let first = token.as_bytes()[0];
+                let id = (first.is_ascii_alphabetic() || first == b'_').then(|| saved.id_of(token)).flatten();
+                match id {
+                    Some(id) => text.push_str(
+                        self.name_of(id).ok_or_else(|| format!("{} reads a value that is gone", entry.name))?,
+                    ),
+                    None => text.push_str(token),
+                }
+                at = start + token.len();
+            }
+            text.push_str(&old.text[at..]);
+            if self.parse(&text)?.tree != old.tree {
+                return Err(format!("{}: {text} no longer reads what it read", entry.name));
+            }
+            entry.expression = Expression { text, tree: old.tree.clone() };
+        }
+        resolve(&out.entries)?;
+        Ok(out)
+    }
+
     /// The ids in use.
     pub fn ids(&self) -> impl Iterator<Item = u32> + '_ {
         self.entries.iter().map(|v| v.id)
+    }
+
+    /// The expression of the value with id `id`, as written.
+    pub fn expression(&self, id: u32) -> Option<&Expression> {
+        self.entries.iter().find(|v| v.id == id).map(|v| &v.expression)
     }
 
     /// Every value in creation order, with its resolved document units.

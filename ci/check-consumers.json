@@ -42,6 +42,9 @@
     "ci/browser-field-preview.mjs": [
       "web"
     ],
+    "ci/browser-import-fields.js": [
+      "web"
+    ],
     "ci/browser-manufacturing-information.mjs": [
       "web"
     ],
@@ -213,7 +216,8 @@
       "lint",
       "kernel",
       "test-linux",
-      "application-loop"
+      "application-loop",
+      "web"
     ],
     "ci/fixtures/import/healed-and-tolerant.step": [
       "lint",

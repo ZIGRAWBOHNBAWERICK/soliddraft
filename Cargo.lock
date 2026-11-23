@@ -5443,6 +5443,7 @@ dependencies = [
  "soliddraft-materials",
  "soliddraft-model",
  "soliddraft-recipe",
+ "soliddraft-scene",
  "soliddraft-tessellation",
  "zip 9.0.5",
 ]
@@ -5589,7 +5590,10 @@ dependencies = [
  "sha2 0.10.9",
  "soliddraft-assembly",
  "soliddraft-document",
+ "soliddraft-kernel-api",
+ "soliddraft-kernel-catallax",
  "soliddraft-materials",
+ "soliddraft-model",
  "stl_io",
  "thiserror 2.0.21",
  "tobj",

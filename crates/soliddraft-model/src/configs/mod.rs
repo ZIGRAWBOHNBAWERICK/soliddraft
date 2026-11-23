@@ -195,6 +195,29 @@ impl Document {
         self.table_edits
     }
 
+    /// The configurations a placement can name, by stable id and name: Default, whose id
+    /// is `Default`, then each row in creation order.
+    pub fn configuration_names(&self) -> Vec<(ConfigurationId, String)> {
+        let rows = self.configurations.rows.iter().map(|r| (r.id.clone(), r.name.clone()));
+        std::iter::once((ConfigurationId(DEFAULT_ROW.to_owned()), DEFAULT_ROW.to_owned())).chain(rows).collect()
+    }
+
+    /// Shows the configuration with stable id `id` (`Default` for Default), as
+    /// activating it by name does. Refuses an id the part does not have.
+    pub fn show_configuration(&mut self, id: &ConfigurationId) -> Result<(), String> {
+        let (name, active) = if id.0 == DEFAULT_ROW {
+            (DEFAULT_ROW.to_owned(), None)
+        } else {
+            let row = self.configurations.rows.iter().find(|r| &r.id == id);
+            let row = row.ok_or_else(|| format!("the part has no configuration {}", id.0))?;
+            (row.name.clone(), Some(id))
+        };
+        if self.active_configuration() == active {
+            return Ok(());
+        }
+        self.execute(Command::ActivateConfiguration { name }).map(|_| ()).map_err(|e| e.to_string())
+    }
+
     /// Configuration names and authored overrides in creation order.
     pub fn configuration_summary(&self) -> serde_json::Value {
         let state = &self.configurations;

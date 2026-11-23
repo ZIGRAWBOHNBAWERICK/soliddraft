@@ -9,7 +9,7 @@ pub(crate) struct Drag {
     pub(crate) path: OccurrencePath,
     pub(crate) base: Assembly,
     pub(crate) candidate: Assembly,
-    shown: Vec<(OccurrencePath, Placement)>,
+    pub(crate) shown: Vec<(OccurrencePath, Placement)>,
 }
 impl AssemblyDocument {
     /// Whether a component preview is active.
@@ -19,6 +19,7 @@ impl AssemblyDocument {
 
     /// Starts one component drag. Targets passed to `preview_drag` use its parent's frame.
     pub fn begin_drag(&mut self, path: OccurrencePath) -> Result<(), EditError> {
+        self.collapse();
         self.finish_loading();
         if self.drag.is_some() {
             return Err(EditError::Invalid("a component drag is already active".into()));
@@ -101,6 +102,8 @@ impl AssemblyDocument {
 
     /// Restores the accepted pose and discards the preview, preserving undo and redo.
     pub fn cancel_drag(&mut self) {
+        // Every edit starts here, and edits act on the assembled positions.
+        self.collapse();
         self.motion = None;
         self.motion_report = None;
         let Some(drag) = self.drag.take() else { return };

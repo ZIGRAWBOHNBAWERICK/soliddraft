@@ -165,12 +165,23 @@ pub struct Table {
     /// current revision.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub revisions: Vec<RevisionRow>,
+    /// The rows of a bill of materials, as the assembly had them at the last update.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub bom: Vec<crate::assembly::BomRow>,
 }
 
 impl Table {
     /// An empty revision table with its top-left corner at `position`.
     pub fn revision(position: Point2) -> Table {
-        Table { kind: TableKind::Revision, position, revisions: Vec::new() }
+        Table { kind: TableKind::Revision, position, revisions: Vec::new(), bom: Vec::new() }
+    }
+
+    /// Width and height in sheet millimetres.
+    pub fn size(&self) -> (f64, f64) {
+        match self.kind {
+            TableKind::Bom => crate::assembly::bom_table_size(self.bom.len()),
+            _ => crate::display::revision_table_size(self.revisions.len()),
+        }
     }
 }
 

@@ -456,7 +456,9 @@ pub fn property(drawing: &Drawing, sheet: &Sheet, sheet_index: usize, sheet_coun
         },
         "sheet" => (sheet_index + 1).to_string(),
         "sheets" => sheet_count.to_string(),
-        "document_type" => "Part drawing".into(),
+        "document_type" => {
+            if crate::assembly::is_assembly_drawing(drawing) { "Assembly drawing" } else { "Part drawing" }.into()
+        }
         "material" => drawing.part_notes.material.clone().unwrap_or_default(),
         "general_tolerance" => drawing.part_notes.general_tolerance.clone().unwrap_or_default(),
         "units" => match drawing.meta.units {
@@ -1067,7 +1069,8 @@ fn annotation_items(sheet: &Sheet, a: &Annotation, ctx: &Context<'_>, list: &mut
         AnnotationKind::SurfaceFinish { .. }
         | AnnotationKind::Gdt { .. }
         | AnnotationKind::Datum { .. }
-        | AnnotationKind::RevisionSymbol { .. } => {
+        | AnnotationKind::RevisionSymbol { .. }
+        | AnnotationKind::Balloon { .. } => {
             symbols::symbol_items(a, place, &anchors, ctx, role, text_role, items);
         }
         AnnotationKind::DimensionSet(set) => {
@@ -1268,6 +1271,7 @@ pub fn annotation_name(a: &Annotation, style: &StyleFile) -> String {
         ),
         AnnotationKind::Datum { letter } => format!("Datum {letter}"),
         AnnotationKind::RevisionSymbol { revision } => format!("Rev {revision}"),
+        AnnotationKind::Balloon { item, .. } => format!("Balloon {item}"),
     }
 }
 

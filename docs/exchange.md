@@ -220,7 +220,7 @@ The import asks for the source file, then for the assembly to write. Beside that
 
 | Format | Tree | Units and up axis | Materials | Joints |
 |---|---|---|---|---|
-| OpenUSD | the composed stage under the default prim, with references, payloads, variants and instances resolved | the root layer's `metersPerUnit` and `upAxis`, or USD's fallbacks of centimetres and Y up | UsdPreviewSurface and OmniPBR constants | UsdPhysics revolute, prismatic, fixed and spherical joints |
+| OpenUSD | the composed stage under the default prim, with references, payloads, variants and instances resolved | the root layer's `metersPerUnit` and `upAxis`, or USD's fallbacks of centimetres and Y up | UsdPreviewSurface and OmniPBR constants | UsdPhysics revolute, prismatic, fixed, spherical and planar D6 joints |
 | glTF | the default scene's nodes; a mesh of several primitives gives a child per primitive | metres, Y up | metallic-roughness factors | sand3d's `s3d_joint` node extras |
 | URDF | the links nested by their joints, the root link merged into the robot, each visual a child of its link | metres, Z up | `<material>` colours, the robot's named ones included | every joint, with limits and mimics |
 | OBJ | one child per object | a header comment such as sand3d's "metres, Y up" or SolidDraft's "millimetres", else millimetres and Y up | MTL diffuse colours | none |

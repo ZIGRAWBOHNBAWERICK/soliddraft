@@ -36,6 +36,12 @@ usage: soliddraft asm new <file.dwasm> [--name <name>]
        soliddraft asm quality <file.dwasm> [<path>... (--set <quality> | --none)] [--every <quality>] [--json]
        soliddraft asm rename <file.dwasm> <component> <name>
        soliddraft asm delete <file.dwasm> <component>...
+       soliddraft asm config <file.dwasm> (list [--json] | add <name> | activate <name> | rename <name> <new> | delete <name>)
+       soliddraft asm explode <file.dwasm> (list [--json] | add <path>... --direction x,y,z --distance <mm>
+                 | edit <step> [--direction x,y,z] [--distance <mm>] | delete <step> | auto [--distance <mm>])
+       soliddraft asm drawing <file.dwasm> <out.dwdrw> [--template <id>] [--exploded] [--json]
+       soliddraft asm export <file.dwasm> <out.urdf | out.usda> [--json]
+       soliddraft asm pack <file.dwasm> <folder | out.zip> [--prefix <text>] [--suffix <text>] [--flatten] [--drawings] [--json]
        soliddraft asm rebuild <file.dwasm> [--search <folder>]... [--json]
        soliddraft asm generate <folder> [--unique <n>] [--placements <n>] [--modules <n>] [--no-part-files] [--seed <n>]
        soliddraft asm bench <file.dwasm> [--size <w>x<h>] [--frames <n>] [--json]
@@ -81,6 +87,48 @@ rename      Names one of the root's components.
 
 delete      Deletes components of the root, with patterns that only repeat them.
 
+config      Lists, adds, activates, renames or deletes configurations. Each
+            configuration keeps its own suppression, hidden flags, placements,
+            overrides, values and exploded view; the first one added also adds
+            Default, the state the assembly had. Adding keeps the active one.
+            Other commands change the active configuration.
+
+explode     Lists, adds, changes or deletes the steps of the active
+            configuration's exploded view. Each step moves occurrences along a
+            direction in the root's frame by a distance, after the steps before
+            it. auto replaces them with one step per shown component, straight
+            away from the middle (50 mm by default). An exploded view is for
+            display and drawings; it never changes a placement. list --json
+            also gives where each moved occurrence shows exploded.
+
+drawing     Writes a drawing of the assembly: an isometric and a front view (or,
+            with --exploded, the exploded isometric) with hidden lines removed
+            across parts, a bill of materials listing every part with its
+            quantity, and a balloon per row. When the drawing exists and shows
+            this assembly it is brought up to date instead: views, BOM and
+            balloons move with the assembly. Each part's line work is
+            Catallax's view of that part; where one part hides another the
+            hiding is measured on the parts' meshes and the view says so.
+            Exports of the drawing work as for a part drawing.
+
+export      Writes the assembly for robotics and simulation tools: URDF (with
+            its meshes as STL in a folder beside it) or OpenUSD text (.usda)
+            with UsdPhysics joints. Every part is a link; a Hinge becomes a
+            revolute joint (continuous without limits), a Concentric between
+            axes a continuous one, a Gear a mimic joint, and anything else a
+            fixed joint at the assembly's pose. It prints what it could not
+            carry. The assembly is not changed.
+
+pack        Pack and Go: copies the assembly and every document it references,
+            at any depth, into a new or empty folder, so it opens there on its own,
+            or into one zip when the destination ends in .zip.
+            Parts are copied as they are; assemblies are written again with their
+            references pointing at the copies. Ids are kept. --prefix and --suffix
+            rename every copied file; --flatten puts them all in the folder itself;
+            --drawings also brings the drawings in the assembly's folder whose model
+            is packed. Nothing is written unless every reference is found, and
+            nothing is replaced.
+
 rebuild     Re-pins every reference at its document's current revision, refreshes
             the display copies and saves. Exits 1 when a reference is missing.
 
@@ -105,15 +153,15 @@ pattern 9 of component 12); `asm tree` prints them.
   --json    print JSON
 ";
 
-struct Args {
+pub(crate) struct Args {
     files: Vec<String>,
-    json: bool,
+    pub(crate) json: bool,
     search: Vec<PathBuf>,
     values: Vec<(String, String)>,
 }
 
 impl Args {
-    fn value(&self, flag: &str) -> Option<&str> {
+    pub(crate) fn value(&self, flag: &str) -> Option<&str> {
         self.values.iter().find(|(f, _)| f == flag).map(|(_, v)| v.as_str())
     }
 }
@@ -125,11 +173,13 @@ fn parse(args: &[String]) -> Result<Args, String> {
         match arg.as_str() {
             "--json" => a.json = true,
             "--search" => a.search.push(PathBuf::from(it.next().ok_or("--search needs a folder")?)),
-            f @ ("--none" | "--no-part-files") => a.values.push((f.to_owned(), String::new())),
+            f @ ("--none" | "--no-part-files" | "--flatten" | "--drawings" | "--exploded") => {
+                a.values.push((f.to_owned(), String::new()))
+            }
             f @ ("--name" | "--depth" | "--at" | "--rotate" | "--linear" | "--spacing" | "--count" | "--second"
             | "--spacing2" | "--count2" | "--circular" | "--angle" | "--to" | "--by" | "--rgb" | "--metallic"
             | "--roughness" | "--unique" | "--placements" | "--modules" | "--seed" | "--size" | "--frames"
-            | "--set" | "--every") => {
+            | "--set" | "--every" | "--direction" | "--distance" | "--prefix" | "--suffix" | "--template") => {
                 let v = it.next().ok_or(format!("{f} needs a value"))?;
                 a.values.push((f.to_owned(), v.clone()));
             }
@@ -140,7 +190,7 @@ fn parse(args: &[String]) -> Result<Args, String> {
     Ok(a)
 }
 
-fn numbers<const N: usize>(flag: &str, text: &str) -> Result<[f64; N], String> {
+pub(crate) fn numbers<const N: usize>(flag: &str, text: &str) -> Result<[f64; N], String> {
     let v: Vec<f64> = text
         .split(',')
         .map(|t| t.trim().parse::<f64>())
@@ -217,6 +267,11 @@ pub(crate) fn run(args: &[String]) -> ExitCode {
             let ids = rest.iter().map(|c| component(c)).collect::<Result<Vec<_>, _>>()?;
             doc.delete(&ids).map_err(|e| e.to_string())
         }),
+        "config" => edit_if(&file, &a, |doc| crate::asm_config::config(doc, rest, &a)),
+        "explode" => edit_if(&file, &a, |doc| crate::asm_config::explode(doc, rest, &a)),
+        "drawing" => edit_if(&file, &a, |doc| crate::asm_files::drawing(doc, rest, &a)),
+        "export" => edit_if(&file, &a, |doc| crate::asm_files::export(doc, rest, &a)),
+        "pack" => crate::asm_files::pack(&file, rest, &a, search_folders(&a.search)),
         "rebuild" => rebuild(&file, &a),
         "generate" => generate(&file, &a),
         "bench" => bench(&file, &a),
@@ -235,7 +290,7 @@ pub(crate) fn run(args: &[String]) -> ExitCode {
     }
 }
 
-fn paths(texts: &[String]) -> Result<Vec<OccurrencePath>, String> {
+pub(crate) fn paths(texts: &[String]) -> Result<Vec<OccurrencePath>, String> {
     if texts.is_empty() {
         return Err("name at least one occurrence path".into());
     }
@@ -255,6 +310,22 @@ fn open(file: &Path, a: &Args) -> Result<AssemblyDocument, String> {
 fn edit(file: &Path, a: &Args, f: impl FnOnce(&mut AssemblyDocument) -> Result<(), String>) -> Result<bool, String> {
     let mut doc = open(file, a)?;
     f(&mut doc)?;
+    doc.finish_loading();
+    let saved = doc.save(None).map_err(|e| e.to_string())?;
+    println!("saved {} (revision {})", saved.display(), doc.revision().short());
+    Ok(true)
+}
+
+/// [`edit`] for a command that may only read: it saves when `f` says it changed something.
+fn edit_if(
+    file: &Path,
+    a: &Args,
+    f: impl FnOnce(&mut AssemblyDocument) -> Result<bool, String>,
+) -> Result<bool, String> {
+    let mut doc = open(file, a)?;
+    if !f(&mut doc)? {
+        return Ok(true);
+    }
     doc.finish_loading();
     let saved = doc.save(None).map_err(|e| e.to_string())?;
     println!("saved {} (revision {})", saved.display(), doc.revision().short());

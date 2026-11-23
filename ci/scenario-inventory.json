@@ -2570,6 +2570,115 @@
       "route": "MCP sketches and loft -> exact longitudinal rail selection -> native bounded fillet display -> history, reopen and independent certified STEP",
       "supported_limits": "Small-warp 2 mm ruled loft and radius 0.1 mm rail fillet. Native display answers within the stated 0.01 mm bound and unchanged 20M whole-request allowance. Measured deviation, method and retained boundary remain display evidence, never proof or an export certificate. Undo/redo and save/reopen preserve the fillet; exact STEP is certified independently.",
       "evidence": "result.json, protocol.json, command/kernel logs, work counters, viewport PNG and SVG; spline_display.rs checks native measured evidence, bounded status, history, independent certified-request refusal and exact STEP. spline_display_ui.rs renders the bounded proof light in both frames."
+    },
+    {
+      "id": "assembly-configurations",
+      "file": "ci/scenarios/assembly-configurations.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-assembly",
+        "soliddraft-model",
+        "soliddraft-kernel-catallax"
+      ],
+      "kernel_parts": [
+        "boolean",
+        "extrude",
+        "measure",
+        "mesh"
+      ],
+      "catallax_revision": "ccfb4e4bee95cbb42f7c1ea1dbdfe8874ed01c4a",
+      "route": "MCP configuration and explode tools -> assembly transaction -> mates solve -> save, asm config/explode list, reopen",
+      "supported_limits": "Two configurations of a mated assembly holding their own driven gap, suppression and exploded view; activation, a refused unknown name, explode and collapse as display only, undo/redo, save/reopen and auto explode on top. Part configurations of placed parts are not chosen per component.",
+      "evidence": "result.json, protocol.json, command summaries, inspect output, work/rig.dwasm and parts"
+    },
+    {
+      "id": "assembly-drawing-bom",
+      "file": "ci/scenarios/assembly-drawing-bom.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-assembly",
+        "soliddraft-drawing",
+        "soliddraft-model",
+        "soliddraft-kernel-catallax"
+      ],
+      "kernel_parts": [
+        "boolean",
+        "extrude",
+        "measure",
+        "mesh"
+      ],
+      "catallax_revision": "ccfb4e4bee95cbb42f7c1ea1dbdfe8874ed01c4a",
+      "route": "MCP assembly_make_drawing -> each part's exact body placed -> Catallax view curves per part, hidden lines across parts -> BOM and balloons -> drawing save, PDF export, section, projected and detail views, rebuild, asm drawing, reopen, DXF export",
+      "supported_limits": "Isometric and front views of three placed parts drawn by Catallax from their exact bodies, a parts-only BOM with quantities, one balloon per row; a section cut through every part, a projected view and a detail of the front view; PDF and DXF exports of Catallax line work; refusals while the assembly is unsaved and for a cut that meets no part; rebuild after a new part adds its row and balloon and recomputes the derived views.",
+      "evidence": "result.json, protocol.json, command summaries, inspect output, work/rig.dwdrw"
+    },
+    {
+      "id": "assembly-component-configurations",
+      "file": "ci/scenarios/assembly-component-configurations.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-assembly",
+        "soliddraft-drawing",
+        "soliddraft-model",
+        "soliddraft-kernel-catallax"
+      ],
+      "kernel_parts": [
+        "boolean",
+        "extrude",
+        "measure",
+        "mesh"
+      ],
+      "catallax_revision": "ccfb4e4bee95cbb42f7c1ea1dbdfe8874ed01c4a",
+      "route": "MCP part configurations -> make_assembly -> a second placement -> assembly_component_configuration (refused unknown name, then Tall) -> each placement's mesh and exact body in its configuration -> drawing with a BOM row per configuration -> save, reopen, the first placement Tall too -> drawing rebuild merges the rows -> PDF export",
+      "supported_limits": "One part with a Default and a Tall configuration placed twice; each placement shows its own configuration after save and reopen; an unknown configuration is refused with the names the part has; the BOM lists a part once per configuration placed. Sub-assembly configurations chosen from above are covered by crate tests.",
+      "evidence": "result.json, protocol.json, command summaries, work/rig.dwasm, work/rig.dwdrw, work/rig.pdf"
+    },
+    {
+      "id": "assembly-pack-export",
+      "file": "ci/scenarios/assembly-pack-export.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-assembly",
+        "soliddraft-scene",
+        "soliddraft-drawing",
+        "soliddraft-model",
+        "soliddraft-kernel-catallax"
+      ],
+      "kernel_parts": [
+        "boolean",
+        "extrude",
+        "measure",
+        "mesh"
+      ],
+      "catallax_revision": "ccfb4e4bee95cbb42f7c1ea1dbdfe8874ed01c4a",
+      "route": "MCP export and Pack and Go tools -> articulation from mates -> URDF and USDA writers; pack_and_go -> rewritten assemblies and drawings -> reopen the copy",
+      "supported_limits": "A limited Hinge exported as a revolute joint with its stops to URDF and OpenUSD, a refused extension, Pack and Go with a prefix carrying the assembly, two parts and its drawing, a refused non-empty destination, and the packed copy reopened current and extended. Prismatic and other joint kinds are carried as fixed with notes.",
+      "evidence": "result.json, protocol.json, command summaries, work/robot/rig.urdf, work/robot/rig.usda, work/packed"
+    },
+    {
+      "id": "mate-path-cam",
+      "file": "ci/scenarios/mate-path-cam.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-assembly",
+        "soliddraft-model",
+        "soliddraft-kernel-catallax"
+      ],
+      "kernel_parts": [
+        "boolean",
+        "extrude",
+        "measure",
+        "mesh"
+      ],
+      "catallax_revision": "ccfb4e4bee95cbb42f7c1ea1dbdfe8874ed01c4a",
+      "route": "MCP Path and Cam mate commands -> exact outline proof -> bounded residual checks",
+      "supported_limits": "A roller on a stadium cam's flat side, a refused flat follower, a drag round the cam's round end with undo/redo, save/reopen, and a block's corner on the same outline as a Path. Outlines of lines and circular arcs only; no position along a path.",
+      "evidence": "result.json, protocol.json, command summaries, work/rig.dwasm and parts"
     }
   ],
   "native_ui_scenarios": [

@@ -6,7 +6,9 @@
 //!
 //! - **The schema** ([`schema`]): sources, components with stable ids and rigid f64
 //!   placements, patterns stored as generators, sparse overrides by occurrence path,
-//!   and reserved configurations and display states.
+//!   and a reserved list of display states.
+//! - **Configurations and exploded views** ([`configuration`]): named states of the
+//!   assembly, and steps that move occurrences apart for display.
 //! - **Mates** ([`mates`]): driven relationships between components, solved from proven
 //!   plane equations through one transaction.
 //! - **Interference** ([`interference`]): Interference Detection and Clearance
@@ -37,6 +39,8 @@
 mod binary;
 pub mod bulk;
 pub mod bvh;
+pub mod configuration;
+mod configure;
 pub mod document;
 pub mod file;
 pub mod interference;
@@ -44,6 +48,7 @@ pub mod load;
 pub mod mates;
 pub mod mesh;
 pub mod occurrence;
+pub mod pack;
 pub mod path;
 pub mod placement;
 pub mod reference_mesh;
@@ -54,6 +59,8 @@ pub mod store;
 pub mod subassembly;
 
 pub use binary::BinaryError;
+pub use configuration::{ComponentState, ConfigState, Configuration, Configurations, ExplodeStep};
+pub use configure::component_path;
 pub use document::{AssemblyDocument, Changes, EditError, Opening, RebuildReport, RefChange, Selection, SourceReport};
 pub use file::{AssemblyPackage, CopyReader, FileError, RefCopy, TruthEntries};
 pub use interference::{
@@ -65,11 +72,14 @@ pub use load::{LoadError, LoadEvent, OpenOptions};
 pub use mates::{
     Alignment, BoundedProof, EndView, EndpointSelector, Entity, FaceEndpoint, FaceSelector, FreeMotion,
     GeneratorChoice, Mate, MateEdit, MateEntry, MateId, MateRefusal, PartEndpoint, PartPlane, PlaneMeasurement,
-    PlaneProof, ProofIdentity, RefusalCode, SlotConstraint, SlotInput, SolverState, SolverStatus, StoredSupport,
-    StoredTurn, SupportProof, WidthConstraint, WidthInput,
+    PlaneProof, ProofIdentity, RefusalCode, SlotConstraint, SlotInput, SolverState, SolverStatus, StoredPiece,
+    StoredSupport, StoredTurn, SupportProof, WidthConstraint, WidthInput,
 };
 pub use mesh::{DisplayMesh, MeshBounds, MeshFace, SharedMesh};
 pub use occurrence::{Counts, Flags, OccurrenceIndex, OccurrenceTable};
+pub use pack::{
+    Folders, HeldFiles, Pack, PackError, PackReport, PackRequest, PackSource, PackedFile, gather, pack_and_go, pack_zip,
+};
 pub use path::{ComponentId, OccurrencePath, PatternId, SourceId, Step};
 pub use placement::{Aabb, Placement};
 pub use scene::{Draw, Instance, Picked, Scene};

@@ -99,6 +99,17 @@ function at(have, want) {
   return have[0] === want[0] && [1, 2, 3].every(i => Math.abs(have[i] - want[i]) < 0.05);
 }
 
+// An item's faces, feature by feature: exactly the expected faces, none missing and
+// none more.
+function checkFaces(item, name, features, when) {
+  check(item.faces.length === features.length, `${when}: ${name} is on ${item.faces.length} features, not ${features.length}`);
+  features.forEach((feature, f) => {
+    const have = item.faces[f].map(place);
+    check(have.length === feature.length && feature.every(want => have.some(face => at(face, want))),
+      `${when}: ${name} is on ${JSON.stringify(item.faces[f])}, not on ${JSON.stringify(feature)}`);
+  });
+}
+
 function checkThread(shown, when) {
   check(shown.items.length === EXPECTED.length + 1, `${when}: ${shown.items.length} items, not ${EXPECTED.length + 1}: ${JSON.stringify(shown.items.map(i => i.name))}`);
   checkItems({ ...shown, items: shown.items.slice(0, EXPECTED.length) }, when, TAPPED_EXPECTED);
@@ -106,9 +117,7 @@ function checkThread(shown, when) {
   const item = shown.items[EXPECTED.length];
   check(item.name === name && item.callout === callout, `${when}: the last item is ${item.name} "${item.callout}", not ${name} "${callout}"`);
   check(!item.problem, `${when}: ${name} does not apply: ${item.problem}`);
-  const have = item.faces.map(feature => feature.map(place));
-  check(have.length === features.length && features.every((feature, f) => feature.every(want => have[f].some(face => at(face, want)))),
-    `${when}: ${name} is on ${JSON.stringify(item.faces)}, not on ${JSON.stringify(features)}`);
+  checkFaces(item, name, features, when);
 }
 
 function checkItems(shown, when, expected = EXPECTED) {
@@ -117,12 +126,7 @@ function checkItems(shown, when, expected = EXPECTED) {
     const item = shown.items[n];
     check(item.name === name && item.callout === callout, `${when}: item ${n + 1} is ${item.name} "${item.callout}", not ${name} "${callout}"`);
     check(!item.problem, `${when}: ${name} does not apply: ${item.problem}`);
-    check(item.faces.length === features.length, `${when}: ${name} is on ${item.faces.length} features, not ${features.length}`);
-    features.forEach((feature, f) => {
-      const have = item.faces[f].map(place);
-      check(have.length === feature.length && feature.every(want => have.some(face => at(face, want))),
-        `${when}: ${name} is on ${JSON.stringify(item.faces[f])}, not on ${JSON.stringify(feature)}`);
-    });
+    checkFaces(item, name, features, when);
   });
   check(JSON.stringify(shown.notes) === JSON.stringify(NOTES), `${when}: the notes are ${JSON.stringify(shown.notes)}`);
 }

@@ -19,14 +19,16 @@
 //! A threaded hole states its own thread: each hole feature with a thread adds an item,
 //! the diameter of its walls with the thread's designation ([`PmiRow::feature`]). The
 //! part does not store that item. It follows the hole: edit the thread and the item
-//! changes, take it out and the item goes. It reaches a STEP file and a drawing like
-//! any other.
+//! changes, take it out and the item goes. It states what is left of the thread on the
+//! body ([`ThreadedWall`](crate::thread::ThreadedWall)): the walls that still have
+//! thread, and how deep it goes from where the hole starts now. It reaches a STEP file
+//! and a drawing like any other.
 
 use serde::{Deserialize, Serialize};
 use soliddraft_kernel_api::pmi::{
     Anchor, At, Feature, GdtCharacteristic, PartNotes, Pmi, PmiItem, PmiKind, StepPmi, Tolerance,
 };
-use soliddraft_kernel_api::{FaceId, FaceRole, KernelError};
+use soliddraft_kernel_api::{BodyId, FaceId, FaceRole, KernelError, Topology};
 
 use crate::document::Document;
 use crate::feature::{FeatureId, FeatureKind};
@@ -53,9 +55,14 @@ pub struct PmiRow {
     /// The threaded hole that states the item, which the part does not store: change
     /// it through that hole.
     pub feature: Option<FeatureId>,
+    /// For an item a threaded hole states, which of the hole's holes it covers, from
+    /// zero. Empty for an item the part stores.
+    pub placements: Vec<usize>,
     /// How deep a thread goes from the face its hole starts on, for a thread that does
     /// not go through.
     pub depth: Option<f64>,
+    /// The body the item's faces are on, when they are on one.
+    pub body: Option<BodyId>,
 }
 
 impl PmiRow {
@@ -72,6 +79,32 @@ impl PmiRow {
     pub fn applies(&self) -> bool {
         self.problem.is_none()
     }
+}
+
+/// An item a threaded hole states.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ThreadItem {
+    /// The item: the diameter of the threaded walls, with the thread's designation.
+    pub item: PmiItem<FaceRef>,
+    /// The hole that states it.
+    pub feature: FeatureId,
+    /// Which of the hole's holes it covers, from zero, in order.
+    pub placements: Vec<usize>,
+    /// How deep the thread goes from the face the hole starts on now, for a thread that
+    /// does not run out through the hole.
+    pub depth: Option<f64>,
+    /// The body the walls are on.
+    pub body: Option<BodyId>,
+    /// Why the item does not apply, when a later feature took the hole's thread away.
+    pub problem: Option<String>,
+}
+
+/// Holes of one feature whose threads read the same.
+struct ThreadGroup {
+    through: bool,
+    depth: Option<f64>,
+    body: Option<BodyId>,
+    placements: Vec<usize>,
 }
 
 /// A basic distance that locates one feature of a position tolerance from one of its
@@ -154,9 +187,13 @@ impl Document {
     }
 
     /// The items the part's threaded holes state: the diameter of each hole feature's
-    /// walls with its thread's designation, the hole that states it, and how deep the
-    /// thread goes when it does not go through. A suppressed or failed hole states none.
-    pub fn thread_items(&self) -> Vec<(PmiItem<FaceRef>, FeatureId, Option<f64>)> {
+    /// threaded walls with its thread's designation. An item covers the holes whose
+    /// callout reads the same, so a later cut that leaves one hole of a pattern less
+    /// thread than the others gives that hole an item of its own. A hole whose thread a
+    /// later feature took away entirely states one item with the reason. A suppressed or
+    /// failed hole states none.
+    pub fn thread_items(&self) -> Vec<ThreadItem> {
+        let walls = self.threaded_walls();
         let mut taken = self.pmi.clone();
         let mut out = Vec::new();
         for feature in self.features() {
@@ -165,25 +202,51 @@ impl Document {
             if self.status(feature.id) != Some(&crate::FeatureStatus::Ok) {
                 continue;
             }
-            let through = matches!(hole.depth, soliddraft_kernel_api::HoleDepth::Through) && thread.length.is_none();
-            let depth = match (thread.length, hole.depth) {
-                (Some(length), _) => Some(length),
-                (None, soliddraft_kernel_api::HoleDepth::Blind { depth }) => Some(depth),
-                (None, soliddraft_kernel_api::HoleDepth::Through) => None,
-            };
-            let item = PmiItem {
-                id: taken.free_name(&format!("{} thread", feature.name.replace('/', " "))),
-                kind: PmiKind::Size {
-                    size: soliddraft_kernel_api::pmi::SizeKind::Diameter,
-                    features: (0..hole.points.len()).map(|i| vec![self.hole_wall(feature, i)]).collect(),
-                    tolerance: Tolerance::None,
-                    through,
-                    thread: Some(thread.designation()),
-                    nominal: None,
-                },
-            };
-            taken.items.push(item.clone());
-            out.push((item, feature.id, depth));
+            let mut groups: Vec<ThreadGroup> = Vec::new();
+            for wall in walls.iter().filter(|wall| wall.feature == feature.id) {
+                let (through, depth, body) = (wall.through, wall.depth(), Some(wall.body));
+                match groups.iter_mut().find(|g| g.through == through && g.depth == depth && g.body == body) {
+                    Some(group) => group.placements.push(wall.placement),
+                    None => groups.push(ThreadGroup { through, depth, body, placements: vec![wall.placement] }),
+                }
+            }
+            let problem = groups.is_empty().then(|| {
+                format!("No wall of {} is threaded any more: a later feature took the thread away.", feature.name)
+            });
+            if groups.is_empty() {
+                // Nothing is left to measure: the item says what the hole states.
+                let through =
+                    matches!(hole.depth, soliddraft_kernel_api::HoleDepth::Through) && thread.length.is_none();
+                let depth = match (thread.length, hole.depth) {
+                    (Some(length), _) => Some(length),
+                    (None, soliddraft_kernel_api::HoleDepth::Blind { depth }) => Some(depth),
+                    (None, soliddraft_kernel_api::HoleDepth::Through) => None,
+                };
+                groups.push(ThreadGroup { through, depth, body: None, placements: (0..hole.points.len()).collect() });
+            }
+            let name = format!("{} thread", feature.name.replace('/', " "));
+            for group in groups {
+                let item = PmiItem {
+                    id: taken.free_name(&name),
+                    kind: PmiKind::Size {
+                        size: soliddraft_kernel_api::pmi::SizeKind::Diameter,
+                        features: group.placements.iter().map(|i| vec![self.hole_wall(feature, *i)]).collect(),
+                        tolerance: Tolerance::None,
+                        through: group.through,
+                        thread: Some(thread.designation()),
+                        nominal: None,
+                    },
+                };
+                taken.items.push(item.clone());
+                out.push(ThreadItem {
+                    item,
+                    feature: feature.id,
+                    placements: group.placements,
+                    depth: group.depth,
+                    body: group.body,
+                    problem: problem.clone(),
+                });
+            }
         }
         out
     }
@@ -192,8 +255,15 @@ impl Document {
     /// what is wrong with it if it does not apply. The items the part stores come first,
     /// then those its threaded holes state.
     pub fn pmi_rows(&self) -> Vec<PmiRow> {
-        let body = self.body();
-        let topology = body.map(|body| self.view_of(body));
+        // The bodies an item can be on: the part's one body, or each of several.
+        let bodies: Vec<(BodyId, Result<Topology, String>)> = match self.body() {
+            Some(body) => vec![(body, self.view_of(body).map_err(|e| e.to_string()))],
+            None => self
+                .live_bodies()
+                .into_iter()
+                .map(|(_, body)| (body, self.view_of(body).map_err(|e| e.to_string())))
+                .collect(),
+        };
         let names = self.name_map();
         let stated = self.thread_items();
         let mut rows: Vec<PmiRow> = Vec::with_capacity(self.pmi.items.len() + stated.len());
@@ -201,63 +271,61 @@ impl Document {
             .pmi
             .items
             .iter()
-            .map(|item| (item, None, None))
-            .chain(stated.iter().map(|(item, feature, depth)| (item, Some(*feature), *depth)));
-        for (item, feature, depth) in items {
+            .map(|item| (item, None))
+            .chain(stated.iter().map(|stated| (&stated.item, Some(stated))));
+        for (item, stated) in items {
             let mut row = PmiRow {
                 item: item.clone(),
                 on_body: None,
                 measured: Vec::new(),
                 located: Vec::new(),
                 problem: None,
-                feature,
-                depth,
+                feature: stated.map(|s| s.feature),
+                placements: stated.map_or_else(Vec::new, |s| s.placements.clone()),
+                depth: stated.and_then(|s| s.depth),
+                body: None,
             };
-            let (Some(body), Some(topology)) = (body, topology.as_ref()) else {
-                row.problem = Some("The part has no body.".to_owned());
+            if let Some(problem) = stated.and_then(|s| s.problem.clone()) {
+                row.problem = Some(problem);
                 rows.push(row);
                 continue;
-            };
-            let topology = match topology {
-                Ok(topology) => topology,
-                Err(error) => {
-                    row.problem = Some(format!("The part's faces could not be read: {error}"));
-                    rows.push(row);
-                    continue;
-                }
-            };
-            let view = View { topology };
-            let resolved = item.try_map_features(|feature| {
-                let mut faces: Feature<FaceId> = Vec::new();
-                for face in feature {
-                    let found = reference::resolve_faces(face, &view, &names).map_err(|unresolved| {
-                        if face.label.is_empty() {
-                            unresolved.message
-                        } else {
-                            format!("{}: {}", face.label, unresolved.message)
-                        }
-                    })?;
-                    for id in found {
-                        if !faces.contains(&id) {
-                            faces.push(id);
-                        }
+            }
+            // A thread's walls name their body. Any other item is on the part's one body,
+            // or on the first of several bodies that has every face it names.
+            let wanted = stated.and_then(|s| s.body);
+            let mut problem = None;
+            for (body, topology) in bodies.iter().filter(|(body, _)| wanted.is_none_or(|wanted| wanted == *body)) {
+                let topology = match topology {
+                    Ok(topology) => topology,
+                    Err(error) => {
+                        problem.get_or_insert_with(|| format!("The part's faces could not be read: {error}"));
+                        continue;
                     }
-                }
-                Ok::<_, String>(faces)
-            });
-            match resolved {
-                Err(message) => row.problem = Some(message),
-                Ok(on_body) => {
-                    if on_body.is_dimension() {
-                        let alone = Pmi { items: vec![on_body.clone()], part: PartNotes::default() };
-                        match self.kernel.pmi_nominals(body, &alone) {
-                            Ok(values) => row.measured = values.into_iter().next().unwrap_or_default(),
-                            Err(error) => row.problem = Some(reason(error, &item.id)),
-                        }
+                };
+                match self.item_on(item, topology, &names) {
+                    Err(message) => {
+                        problem.get_or_insert(message);
                     }
-                    row.on_body = Some(on_body);
+                    Ok(on_body) => {
+                        problem = None;
+                        if on_body.is_dimension() {
+                            let alone = Pmi { items: vec![on_body.clone()], part: PartNotes::default() };
+                            match self.kernel.pmi_nominals(*body, &alone) {
+                                Ok(values) => row.measured = values.into_iter().next().unwrap_or_default(),
+                                Err(error) => problem = Some(reason(error, &item.id)),
+                            }
+                        }
+                        row.on_body = Some(on_body);
+                        row.body = Some(*body);
+                        break;
+                    }
                 }
             }
+            row.problem = match (&row.on_body, problem) {
+                (_, Some(problem)) => Some(problem),
+                (None, None) => Some("The part has no body.".to_owned()),
+                (Some(_), None) => None,
+            };
             rows.push(row);
         }
         // A tolerance leans on its datums: one whose datum does not apply does not either.
@@ -281,30 +349,29 @@ impl Document {
         // A feature under a position tolerance is located from each datum plane of the
         // tolerance that its axis runs along. The kernel decides which: a distance it
         // cannot measure, such as one to a plane the axis crosses, is not one.
-        if let Some(body) = body {
-            for row in &mut rows {
-                let Some(PmiItem {
-                    kind: PmiKind::Gdt { characteristic: GdtCharacteristic::Position, datums, features, .. },
-                    ..
-                }) = row.on_body.as_ref().filter(|_| row.problem.is_none())
-                else {
-                    continue;
-                };
-                for (index, feature) in features.iter().enumerate() {
-                    for datum in datums {
-                        let Some(from) = standing.get(datum.letter.as_str()) else { continue };
-                        let alone = Pmi {
-                            items: vec![PmiItem { id: row.item.id.clone(), kind: locating(from, feature) }],
-                            part: PartNotes::default(),
-                        };
-                        let value = self
-                            .kernel
-                            .pmi_nominals(body, &alone)
-                            .ok()
-                            .and_then(|values| values.first().and_then(|measured| measured.first().copied()));
-                        if let Some(value) = value.filter(|value| value.abs() > 1e-9) {
-                            row.located.push(Located { datum: datum.letter.clone(), feature: index, value });
-                        }
+        for row in &mut rows {
+            let Some(body) = row.body else { continue };
+            let Some(PmiItem {
+                kind: PmiKind::Gdt { characteristic: GdtCharacteristic::Position, datums, features, .. },
+                ..
+            }) = row.on_body.as_ref().filter(|_| row.problem.is_none())
+            else {
+                continue;
+            };
+            for (index, feature) in features.iter().enumerate() {
+                for datum in datums {
+                    let Some(from) = standing.get(datum.letter.as_str()) else { continue };
+                    let alone = Pmi {
+                        items: vec![PmiItem { id: row.item.id.clone(), kind: locating(from, feature) }],
+                        part: PartNotes::default(),
+                    };
+                    let value = self
+                        .kernel
+                        .pmi_nominals(body, &alone)
+                        .ok()
+                        .and_then(|values| values.first().and_then(|measured| measured.first().copied()));
+                    if let Some(value) = value.filter(|value| value.abs() > 1e-9) {
+                        row.located.push(Located { datum: datum.letter.clone(), feature: index, value });
                     }
                 }
             }
@@ -312,14 +379,49 @@ impl Document {
         rows
     }
 
+    /// An item on the faces of one body, or why it is not on that body.
+    fn item_on(
+        &self,
+        item: &PmiItem<FaceRef>,
+        topology: &Topology,
+        names: &reference::NameMap,
+    ) -> Result<PmiItem<FaceId>, String> {
+        let view = View { topology };
+        item.try_map_features(|feature| {
+            let mut faces: Feature<FaceId> = Vec::new();
+            for face in feature {
+                let found = reference::resolve_faces(face, &view, names).map_err(|unresolved| {
+                    if face.label.is_empty() {
+                        unresolved.message
+                    } else {
+                        format!("{}: {}", face.label, unresolved.message)
+                    }
+                })?;
+                for id in found {
+                    if !faces.contains(&id) {
+                        faces.push(id);
+                    }
+                }
+            }
+            Ok::<_, String>(faces)
+        })
+    }
+
     /// The part's manufacturing information for a STEP file: the items that apply, on
     /// the body's faces, and the names of the ones left out. The material note is the
     /// part's own, or else the name of the material assigned to the part.
     pub fn pmi_on_body(&self) -> PmiOnBody {
+        self.pmi_on(self.body())
+    }
+
+    /// The part's manufacturing information for a STEP file of `body`: an item on another
+    /// body of the part is left out.
+    pub(crate) fn pmi_on(&self, body: Option<BodyId>) -> PmiOnBody {
         let mut out = PmiOnBody::default();
         let mut locating_items = Vec::new();
         for row in self.pmi_rows() {
-            let problem = row.problem.clone().or_else(|| row.item.file_problem());
+            let elsewhere = (row.body.is_some() && row.body != body).then(|| "It is on another body.".to_owned());
+            let problem = row.problem.clone().or(elsewhere).or_else(|| row.item.file_problem());
             match (row.on_body, problem) {
                 (Some(item), None) => {
                     if let PmiKind::Gdt { datums, features, .. } = &item.kind {

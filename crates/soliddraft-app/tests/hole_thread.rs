@@ -159,7 +159,7 @@ fn a_tapped_hole_is_made_in_the_form_edited_milled_saved_and_reopened() {
         assert_eq!(thread_callouts(doc), ["M8x1-6H DEEP 9"]);
         let walls = doc.model().threaded_walls();
         assert_eq!(walls.len(), 1);
-        assert!((walls[0].span.1 - 9.0).abs() < 1e-6 && (walls[0].radius - 3.5).abs() < 1e-6, "{walls:?}");
+        assert!((walls[0].end() - 9.0).abs() < 1e-6 && (walls[0].radius - 3.5).abs() < 1e-6, "{walls:?}");
         ux_tools::pointer_to_chrome(app);
         let tapped_blue = { let image = case.frame(app, "tapped"); thread_blue(app, &image) };
         case.note(format!("thread-blue pixels: plate {before}, tapped {tapped_blue}"));
@@ -176,7 +176,8 @@ fn a_tapped_hole_is_made_in_the_form_edited_milled_saved_and_reopened() {
         ux_tools::rebuilt(app);
         assert_eq!(thread_callouts(&app.state().state.doc), ["M10x1.5-6H DEEP 9"]);
 
-        // A later cut mills 4 mm off the top: the thread stays on what is left of the wall.
+        // A later cut mills 4 mm off the top: the thread stays on what is left of the wall,
+        // and the callout measures from the new top.
         let state = &mut app.state_mut().state;
         for (tool, arguments) in [
             (
@@ -193,8 +194,8 @@ fn a_tapped_hole_is_made_in_the_form_edited_milled_saved_and_reopened() {
         assert!(doc.model().statuses().iter().all(|(_, s)| s.is_ok()), "{:?}", doc.model().statuses());
         let walls = doc.model().threaded_walls();
         assert_eq!(walls.len(), 1);
-        assert!((walls[0].span.0 - 4.0).abs() < 1e-6 && (walls[0].span.1 - 9.0).abs() < 1e-6, "{walls:?}");
-        assert_eq!(thread_callouts(doc), ["M10x1.5-6H DEEP 9"]);
+        assert!((walls[0].start() - 4.0).abs() < 1e-6 && (walls[0].end() - 9.0).abs() < 1e-6, "{walls:?}");
+        assert_eq!(thread_callouts(doc), ["M10x1.5-6H DEEP 5"]);
         ux_tools::pointer_to_chrome(app);
         assert!({ let image = case.frame(app, "milled"); thread_blue(app, &image) } > before + 50);
 
@@ -203,8 +204,17 @@ fn a_tapped_hole_is_made_in_the_form_edited_milled_saved_and_reopened() {
         let reopened = soliddraft_model::Document::from_bytes(&bytes, soliddraft_app::kernel()).unwrap();
         let reopened = Document::from_model(reopened);
         assert_eq!(hole(&reopened).1, hole(&app.state().state.doc).1);
-        assert_eq!(thread_callouts(&reopened), ["M10x1.5-6H DEEP 9"]);
-        assert_eq!(reopened.model().threaded_walls(), app.state().state.doc.model().threaded_walls());
+        assert_eq!(thread_callouts(&reopened), ["M10x1.5-6H DEEP 5"]);
+        // The same threads on the same walls; the kernel numbers the reopened faces afresh.
+        let threads = |doc: &Document| -> Vec<_> {
+            doc.model()
+                .threaded_walls()
+                .into_iter()
+                .map(|w| (w.feature, w.placement, w.thread, [w.entry.x, w.entry.y, w.entry.z, w.top], w.spans, w.through))
+                .collect()
+        };
+        assert_eq!(threads(&reopened), threads(&app.state().state.doc));
+        assert_eq!(threads(&reopened).len(), 1);
         let mut again = launch(reopened, STANDARD);
         ux_tools::rebuilt(&mut again);
         ux_tools::pointer_to_chrome(&mut again);
@@ -282,4 +292,54 @@ fn scripted_lines_tap_a_hole_and_the_drawing_calls_it_out() {
     let listed = call("pmi_list", json!({})).unwrap();
     assert_eq!(listed["items"], json!([]), "{listed}");
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A plate 60 x 40 x 10 made through the tools, with the tool caller.
+fn scripted_plate(name: &str) -> soliddraft_app::state::AppState {
+    let kernel = std::sync::Arc::new(soliddraft_kernel_catallax::CatallaxKernel::with_diagnostics(20_000_000));
+    let mut state = soliddraft_app::state::AppState::new(Document::new(name, kernel));
+    tool(
+        &mut state,
+        "sketch",
+        json!({"plane": "top", "shapes": [{"shape": "rectangle", "center": [30, 20, 0], "width": 60, "height": 40}]}),
+    );
+    tool(&mut state, "extrude", json!({"sketch": "Sketch1", "depth": 10, "flip": false}));
+    state
+}
+
+fn tool(state: &mut soliddraft_app::state::AppState, tool: &str, arguments: serde_json::Value) -> serde_json::Value {
+    let out = call_checked(&mut AppTools { state }, tool, arguments, &Caller::Mcp { client: "hole-thread".into() });
+    assert!(!out.is_error, "{tool}: {}", out.content);
+    serde_json::from_str(&out.content).unwrap_or_default()
+}
+
+#[test]
+fn the_thread_marks_leave_out_what_later_cuts_took_from_the_wall() {
+    let mut state = scripted_plate("Pocketed plate");
+    let face = "Boss-Extrude1 \u{b7} End cap";
+    tool(&mut state, "hole", json!({"face": face, "points": [[15, 20, 10]], "thread": {"size": 6}}));
+    // A pocket in from the plate's side takes the wall away all round from 4 to 6 mm up;
+    // another, 7 to 9 mm up, takes the half of the wall beyond y 20.
+    for (sketch, offset, centre, height) in [("Sketch2", 4, 32.0, 30.0), ("Sketch3", 7, 33.5, 27.0)] {
+        tool(
+            &mut state,
+            "sketch",
+            json!({"plane": "top", "offset": offset, "shapes": [{"shape": "rectangle", "center": [15, centre, offset], "width": 10, "height": height}]}),
+        );
+        tool(&mut state, "cut", json!({"sketch": sketch, "depth": 2, "through_all": false, "flip": true}));
+    }
+    let doc = &state.doc;
+    assert!(doc.model().statuses().iter().all(|(_, s)| s.is_ok()), "{:?}", doc.model().statuses());
+    let marks = soliddraft_app::viewport::threads::marks(doc).expect("the thread is marked");
+    let (mut above, mut below, mut beside) = (0, 0, 0);
+    for pair in marks.edges.iter().flat_map(|edge| edge.segments.as_chunks::<2>().0) {
+        let mid = (pair[0] + pair[1]) / 2.0;
+        let (z, y) = (mid.z, mid.y);
+        assert!(!(4.05..5.95).contains(&z), "a mark crosses the pocket at {mid}");
+        assert!(!((7.1..8.9).contains(&z) && y > 20.1), "a mark crosses the notch at {mid}");
+        above += usize::from(z > 6.0);
+        below += usize::from(z < 4.0);
+        beside += usize::from((7.1..8.9).contains(&z) && y < 19.9);
+    }
+    assert!(above > 0 && below > 0 && beside > 0, "{above} {below} {beside}");
 }

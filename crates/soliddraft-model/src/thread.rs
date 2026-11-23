@@ -7,7 +7,7 @@
 //! (`M6x1-6H`), and a STEP file carries the designation on the hole's diameter.
 
 use serde::{Deserialize, Serialize};
-use soliddraft_kernel_api::{FaceId, HoleDepth, HoleHead, HolePart, SurfaceKind, Vec3};
+use soliddraft_kernel_api::{BodyId, FaceId, HoleDepth, HoleHead, HolePart, SurfaceKind, Topology, Vec3};
 
 use crate::document::{Document, FeatureStatus};
 use crate::feature::{Feature, FeatureId, FeatureKind, PlaneRef};
@@ -209,12 +209,19 @@ impl HoleThread {
                     number(*depth)
                 ));
             }
+            // The straight wall starts under the head: a thread that ends in the head
+            // has no wall to be cut in.
             let start = match head {
-                Some(HoleHead::Counterbore { depth, .. }) => *depth,
-                _ => 0.0,
+                Some(HoleHead::Counterbore { depth, .. }) => Some(("counterbore", *depth)),
+                Some(HoleHead::Countersink { diameter: sink, angle_deg }) => {
+                    Some(("countersink", (sink - diameter) / 2.0 / (angle_deg.to_radians() / 2.0).tan()))
+                }
+                None => None,
             };
-            if length <= start + 1e-9 {
-                return Some(format!("The thread ends inside the {} mm counterbore.", number(start)));
+            if let Some((head, start)) = start
+                && length <= start + 1e-9
+            {
+                return Some(format!("The thread ends inside the {} mm {head}.", number(start)));
             }
         }
         None
@@ -222,7 +229,8 @@ impl HoleThread {
 }
 
 /// One wall of a threaded hole as the part's body has it now: where the thread runs,
-/// for a viewport to draw its mark.
+/// for a viewport to draw its mark and for the part's manufacturing information to
+/// state. Lengths are in millimetres along `direction` from `entry`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ThreadedWall {
     /// The hole feature.
@@ -237,32 +245,158 @@ pub struct ThreadedWall {
     pub direction: Vec3,
     /// The radius of the wall.
     pub radius: f64,
-    /// Where the thread starts and ends, in millimetres along `direction` from `entry`:
-    /// the part of the wall the thread covers, as later features left the wall.
-    pub span: (f64, f64),
+    /// The body that has the wall: in a part of several bodies, the one the hole is in.
+    pub body: BodyId,
+    /// The faces of the wall on that body.
+    pub faces: Vec<FaceId>,
+    /// Where the hole starts now: zero, or deeper where a later cut took material off
+    /// the face it was drilled from.
+    pub top: f64,
+    /// Where the thread runs on what is left of the wall, in order: one stretch, or
+    /// several where later cuts took the wall away all round between them. A cut that
+    /// takes away part of the way round leaves the stretch whole; the wall's faces say
+    /// which part is left.
+    pub spans: Vec<(f64, f64)>,
+    /// True when the thread runs out at the far end of a through hole.
+    pub through: bool,
+}
+
+impl ThreadedWall {
+    /// Where the thread starts on the wall.
+    pub fn start(&self) -> f64 {
+        self.spans.first().map_or(self.top, |span| span.0)
+    }
+
+    /// Where the thread ends on the wall.
+    pub fn end(&self) -> f64 {
+        self.spans.last().map_or(self.top, |span| span.1)
+    }
+
+    /// How deep the thread goes from the face the hole starts on now, to the micrometre,
+    /// for a thread that does not run out through the hole.
+    pub fn depth(&self) -> Option<f64> {
+        (!self.through).then(|| ((self.end() - self.top) * 1e6).round() / 1e6)
+    }
+}
+
+/// The stretch of the hole's axis a face covers, from its edges' ends and middles, in
+/// millimetres along `direction` from `entry`.
+fn reach(topology: &Topology, face: FaceId, entry: Vec3, direction: Vec3) -> Option<(f64, f64)> {
+    let info = topology.face(face)?;
+    let mut low = f64::INFINITY;
+    let mut high = f64::NEG_INFINITY;
+    for edge in info.edges.iter().filter_map(|e| topology.edge(*e)) {
+        let points = edge
+            .vertices
+            .iter()
+            .filter_map(|v| topology.vertices.iter().find(|x| x.id == *v))
+            .map(|v| v.position)
+            .chain([edge.midpoint]);
+        for p in points {
+            let along = (p - entry).dot(direction);
+            low = low.min(along);
+            high = high.max(along);
+        }
+    }
+    (low <= high).then_some((low, high))
+}
+
+/// Stretches that overlap or touch, as one.
+fn merged(mut spans: Vec<(f64, f64)>) -> Vec<(f64, f64)> {
+    spans.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let mut out: Vec<(f64, f64)> = Vec::new();
+    for (low, high) in spans {
+        match out.last_mut() {
+            Some(last) if low <= last.1 + 1e-6 => last.1 = last.1.max(high),
+            _ => out.push((low, high)),
+        }
+    }
+    out
 }
 
 impl Document {
-    /// The persistent name of the main wall of hole `placement` of feature `feature`.
-    pub(crate) fn hole_wall(&self, feature: &Feature, placement: usize) -> FaceRef {
-        let generator = Generator::Hole { placement: placement as u32, part: HolePart::Wall };
+    /// The persistent name of part `part` of hole `placement` of feature `feature`, a face
+    /// of the surface `surface`.
+    fn hole_face(&self, feature: &Feature, placement: usize, part: HolePart, surface: SurfaceKind) -> FaceRef {
+        let generator = Generator::Hole { placement: placement as u32, part };
         FaceRef {
             feature: feature.id,
             label: format!("{} \u{b7} {generator}", feature.name),
             generator,
             ordinal: 0,
-            fingerprint: FaceFingerprint {
-                surface: SurfaceKind::Cylinder,
-                normal: None,
-                centroid: Vec3::ZERO,
-                area: 0.0,
-            },
+            fingerprint: FaceFingerprint { surface, normal: None, centroid: Vec3::ZERO, area: 0.0 },
         }
     }
 
-    /// Every wall of the part's threaded holes that the body still has, with the span the
-    /// thread covers on it. A wall a later feature took away has none; one it shortened
-    /// has the span that is left.
+    /// The persistent name of the main wall of hole `placement` of feature `feature`.
+    pub(crate) fn hole_wall(&self, feature: &Feature, placement: usize) -> FaceRef {
+        self.hole_face(feature, placement, HolePart::Wall, SurfaceKind::Cylinder)
+    }
+
+    /// The point of each of a hole feature's holes in the face it starts on, with the
+    /// drilling direction, a unit vector, as the body the hole was drilled in had them.
+    fn hole_axes(&self, feature: &Feature, hole: &crate::feature::HoleFeature) -> Option<(Vec<Vec3>, Vec3)> {
+        let (_, drilled) = self.bodies_before(feature.id).into_iter().find(|(key, _)| *key == feature.body)?;
+        let plane = self.plane_of(&PlaneRef::Face { face: hole.face.clone() }, drilled).ok()?;
+        let entries = hole.points.iter().map(|p| plane.origin + plane.x_dir * p.u + plane.y_dir() * p.v).collect();
+        Some((entries, -plane.normal))
+    }
+
+    /// The part's bodies with their faces: the one body, or each of several.
+    fn body_views(&self) -> Vec<(BodyId, Topology)> {
+        self.live_bodies().into_iter().filter_map(|(_, body)| Some((body, self.view_of(body).ok()?))).collect()
+    }
+
+    /// What is left of the wall of hole `placement` of `feature`, on the body that has it.
+    fn drilled(
+        &self,
+        feature: &Feature,
+        placement: usize,
+        entry: Vec3,
+        direction: Vec3,
+        bodies: &[(BodyId, Topology)],
+        names: &reference::NameMap,
+    ) -> Option<Drilled> {
+        let wall = self.hole_wall(feature, placement);
+        let (body, topology, faces) = bodies.iter().find_map(|(body, topology)| {
+            let faces = reference::resolve_faces(&wall, &View { topology }, names).ok()?;
+            (!faces.is_empty()).then_some((*body, topology, faces))
+        })?;
+        let view = View { topology };
+        // Where the hole starts now: the top of what is left of its head and wall.
+        let head = [(HolePart::CounterboreWall, SurfaceKind::Cylinder), (HolePart::Countersink, SurfaceKind::Cone)]
+            .into_iter()
+            .filter_map(|(part, surface)| {
+                reference::resolve_faces(&self.hole_face(feature, placement, part, surface), &view, names).ok()
+            })
+            .flatten();
+        let reach_of_wall: Vec<(f64, f64)> =
+            faces.iter().filter_map(|face| reach(topology, *face, entry, direction)).collect();
+        let top = head
+            .filter_map(|face| reach(topology, face, entry, direction))
+            .chain(reach_of_wall.iter().copied())
+            .map(|(low, _)| low)
+            .fold(f64::INFINITY, f64::min)
+            .max(0.0);
+        let spans = merged(reach_of_wall);
+        (!spans.is_empty()).then_some(Drilled { body, faces, top, spans })
+    }
+
+    /// Where hole `placement` of hole feature `id` starts now, in millimetres along its
+    /// drilling direction from the face it was drilled from: zero, or deeper where a later
+    /// cut took material off that face. `None` when the hole's wall is gone.
+    pub fn hole_top(&self, id: FeatureId, placement: usize) -> Option<f64> {
+        let feature = self.feature(id)?;
+        let FeatureKind::Hole(hole) = &feature.kind else { return None };
+        let (entries, direction) = self.hole_axes(feature, hole)?;
+        let entry = *entries.get(placement)?;
+        self.drilled(feature, placement, entry, direction, &self.body_views(), &self.name_map()).map(|d| d.top)
+    }
+
+    /// Every wall of the part's threaded holes that the body still has, with the stretches
+    /// the thread covers on it. A wall a later feature took away has none, and neither has
+    /// one whose threaded part a later feature took away; one it shortened has what is
+    /// left. In a part of several bodies, each wall is on the body that has it.
     pub fn threaded_walls(&self) -> Vec<ThreadedWall> {
         let threaded_holes: Vec<_> = self
             .features()
@@ -276,53 +410,36 @@ impl Document {
         if threaded_holes.is_empty() {
             return Vec::new();
         }
-        let Some(body) = self.body() else { return Vec::new() };
-        let Ok(topology) = self.view_of(body) else { return Vec::new() };
-        let view = View { topology: &topology };
+        let bodies = self.body_views();
         let names = self.name_map();
-        let axes: std::collections::HashMap<FaceId, f64> = self
-            .kernel
-            .face_carriers(body)
-            .map(|carriers| carriers.into_iter().filter_map(|c| Some((c.id, c.axis?.radius))).collect())
-            .unwrap_or_default();
+        let mut radii: std::collections::HashMap<BodyId, std::collections::HashMap<FaceId, f64>> = Default::default();
         let mut out = Vec::new();
         for (feature, hole, thread) in threaded_holes {
-            let Some((_, drilled)) = self.bodies_before(feature.id).into_iter().find(|(key, _)| *key == feature.body)
-            else {
-                continue;
-            };
-            let Ok(plane) = self.plane_of(&PlaneRef::Face { face: hole.face.clone() }, drilled) else { continue };
-            let direction = -plane.normal;
-            for (placement, point) in hole.points.iter().enumerate() {
-                let entry = plane.origin + plane.x_dir * point.u + plane.y_dir() * point.v;
-                let Ok(faces) = reference::resolve_faces(&self.hole_wall(feature, placement), &view, &names) else {
+            let Some((entries, direction)) = self.hole_axes(feature, hole) else { continue };
+            for (placement, entry) in entries.into_iter().enumerate() {
+                let Some(Drilled { body, faces, top, spans: wall }) =
+                    self.drilled(feature, placement, entry, direction, &bodies, &names)
+                else {
                     continue;
                 };
-                let mut low = f64::INFINITY;
-                let mut high = f64::NEG_INFINITY;
-                let mut radius = None;
-                for face in &faces {
-                    radius = radius.or_else(|| axes.get(face).copied());
-                    let Some(info) = topology.face(*face) else { continue };
-                    for edge in info.edges.iter().filter_map(|e| topology.edge(*e)) {
-                        let points = edge
-                            .vertices
-                            .iter()
-                            .filter_map(|v| topology.vertices.iter().find(|x| x.id == *v))
-                            .map(|v| v.position)
-                            .chain([edge.midpoint]);
-                        for p in points {
-                            let along = (p - entry).dot(direction);
-                            low = low.min(along);
-                            high = high.max(along);
-                        }
-                    }
-                }
-                let start = low.max(0.0);
-                let end = thread.length.map_or(high, |length| high.min(length));
-                if end.is_nan() || end <= start + 1e-6 {
+                let bottom = wall.last().map_or(0.0, |span| span.1);
+                let length = thread.length.unwrap_or(f64::INFINITY);
+                let spans: Vec<(f64, f64)> = wall
+                    .iter()
+                    .map(|(low, high)| (low.max(0.0), high.min(length)))
+                    .filter(|(low, high)| *high > low + 1e-6)
+                    .collect();
+                if spans.is_empty() {
                     continue;
                 }
+                let through = matches!(hole.depth, HoleDepth::Through) && length >= bottom - 1e-6;
+                let radius = radii.entry(body).or_insert_with(|| {
+                    self.kernel
+                        .face_carriers(body)
+                        .map(|carriers| carriers.into_iter().filter_map(|c| Some((c.id, c.axis?.radius))).collect())
+                        .unwrap_or_default()
+                });
+                let radius = faces.iter().find_map(|face| radius.get(face).copied());
                 out.push(ThreadedWall {
                     feature: feature.id,
                     placement,
@@ -330,12 +447,26 @@ impl Document {
                     entry,
                     direction,
                     radius: radius.unwrap_or(hole.diameter / 2.0),
-                    span: (start, end),
+                    body,
+                    faces,
+                    top,
+                    spans,
+                    through,
                 });
             }
         }
         out
     }
+}
+
+/// What is left of a hole's wall on the body that has it.
+struct Drilled {
+    body: BodyId,
+    faces: Vec<FaceId>,
+    /// Where the hole starts now.
+    top: f64,
+    /// The stretches the wall covers, in order.
+    spans: Vec<(f64, f64)>,
 }
 
 #[cfg(test)]
@@ -407,6 +538,14 @@ mod tests {
         let short = HoleThread { length: Some(3.0), ..m6.clone() };
         let counterbore = HoleHead::Counterbore { diameter: 11.0, depth: 4.0 };
         assert!(short.problem(5.0, &through, Some(&counterbore)).unwrap().contains("counterbore"));
+        // A Ø12 90° countersink on a Ø5 drill reaches 3.5 mm down: a 3 mm thread ends in it.
+        let countersink = HoleHead::Countersink { diameter: 12.0, angle_deg: 90.0 };
+        assert_eq!(
+            short.problem(5.0, &through, Some(&countersink)).unwrap(),
+            "The thread ends inside the 3.5 mm countersink."
+        );
+        let past = HoleThread { length: Some(4.0), ..m6.clone() };
+        assert_eq!(past.problem(5.0, &through, Some(&countersink)), None);
         let class = HoleThread { class: "H".into(), ..m6 };
         assert!(class.problem(5.0, &through, None).is_some());
         let named = HoleThread { class: "99".into(), ..class.clone() };

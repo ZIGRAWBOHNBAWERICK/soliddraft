@@ -5632,8 +5632,8 @@ impl Document {
 
     /// Removes an item of manufacturing information, as one undo entry.
     pub fn remove_pmi(&mut self, id: &str) -> Result<(), String> {
-        if let Some((_, hole, _)) = self.model.thread_items().into_iter().find(|(item, _, _)| item.id == id) {
-            let hole = self.model.feature(hole).map_or_else(|| "its hole".to_owned(), |f| f.name.clone());
+        if let Some(stated) = self.model.thread_items().into_iter().find(|stated| stated.item.id == id) {
+            let hole = self.model.feature(stated.feature).map_or_else(|| "its hole".to_owned(), |f| f.name.clone());
             return Err(format!("{id} is the thread of {hole}: change the thread in {hole}."));
         }
         self.run_pmi("", vec![model::Command::RemovePmiItem { id: id.to_owned() }])

@@ -33,7 +33,7 @@ Manufacturing information is part of the part's revision and not of its shape: c
 
 ## Threads
 
-A threaded hole states its thread itself (see [threaded holes](modelling.md#threaded-holes)): each hole feature with a thread lists one item, the diameter of its walls with the designation and how deep the thread goes, such as `2× M6x1-6H DEEP 12` or `M8x1-6H THRU`, named after the hole (`Hole1 thread`). The panel says which hole states it and offers no Edit or Delete: change the thread in the hole. The diameter it measures is the drill's.
+A threaded hole states its thread itself (see [threaded holes](modelling.md#threaded-holes)): each hole feature with a thread lists one item, the diameter of its walls with the designation and how deep the thread goes from where the hole starts now, such as `2× M6x1-6H DEEP 12` or `M8x1-6H THRU`, named after the hole (`Hole1 thread`). Holes of one feature that a later cut left different threads list an item each (`Hole1 thread 2`). The panel says which hole states it and offers no Edit or Delete: change the thread in the hole. The diameter it measures is the drill's.
 
 A diameter added in the panel can carry a designation too, for a threaded hole the part did not drill, such as one of an imported part.
 

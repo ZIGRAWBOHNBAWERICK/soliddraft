@@ -153,19 +153,25 @@ The thread is cosmetic: the hole keeps the plain cylinder of its drill, and no t
 modelled. The viewport draws the thread on the wall, a helix at its pitch over the part
 of the wall it covers, a circle where it ends and a circle of its major diameter where
 it starts. The marks follow the body: a later feature that removes part of the wall
-leaves the thread on what is left of it.
+leaves the thread on what is left of it, and where a cut takes the wall away, all round
+or part of the way round, no mark is drawn. In a part of several bodies the thread
+stays on the body that has the hole.
 
 The hole states the thread as an item of the part's manufacturing information: the
 diameter of its walls with the designation, such as `2× M6x1-6H DEEP 12` (see
 [manufacturing information](manufacturing-information.md)). The part stores no item of
 its own for it; editing the thread changes the item and taking the thread out removes
-it.
+it. The item states the thread that is left: its depth counts from where the hole starts
+now, so a later cut that mills the top makes it shallower, and a thread that runs out of
+a through hole is THRU. Holes of one feature that a later cut left different threads get
+an item each. A hole whose thread a later feature took away states its item with the
+reason, and the item goes on no drawing and into no file.
 
 A thread that does not fit its hole stops the hole with the reason: a drill that is not
 between the thread's minor and major diameters (`A M6x1-6H thread is cut in a hole from
 Ø4.917 to under Ø6; this hole is Ø6.6.`), a thread deeper than a blind hole, a thread
-that ends inside the counterbore, a tolerance class no internal thread has, or a size or
-pitch that is not in the table. The
+that ends inside the counterbore or the countersink, a tolerance class no internal
+thread has, or a size or pitch that is not in the table. The
 scripted `hole` and `edit_hole` lines take a `thread` with `size`, and optionally
 `pitch`, `class` and `length`; `edit_hole` takes `plain: true` to take a thread out.
 

@@ -325,7 +325,7 @@ fn assigned_shortcuts_run_immediately_in_the_app_without_a_restart() {
     harness.get_by_label("Swap").click();
     harness.run_steps(3);
     assert_eq!(harness.state().state.shortcuts.shortcut_text("chamfer").as_deref(), Some("S"));
-    assert_eq!(harness.state().state.shortcuts.shortcut_text("sketch").as_deref(), Some("C"));
+    assert_eq!(harness.state().state.shortcuts.shortcut_text("shortcut_menu").as_deref(), Some("C"));
 
     // Close Preferences and press G: Extrude opens immediately without a restart.
     harness.get_by_label("Close window").click();

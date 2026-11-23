@@ -43,6 +43,7 @@ pub mod measure;
 pub mod navigation;
 pub mod options_bar;
 pub mod palette;
+mod shortcut_menu;
 pub mod panels;
 pub mod part_check;
 pub mod platform;

@@ -675,22 +675,22 @@ fn shortcuts_page_lists_registry_searches_assigns_clears_resets_swaps_and_preset
     click(&mut w, "Assign Extrude");
     w.key_press(Key::S);
     w.run_steps(3);
-    assert!(w.state().shortcut_conflict.is_some(), "conflict with Sketch is recorded");
-    assert!(has(&w, "already used by Sketch (Outside a sketch)"), "warning names Sketch and its scope");
+    assert!(w.state().shortcut_conflict.is_some(), "conflict with the shortcut menu is recorded");
+    assert!(has(&w, "already used by Shortcut menu (Everywhere)"), "warning names the shortcut menu and its scope");
     assert!(w.query_by_label("Extrude: E").is_some(), "not overwritten before swap");
-    assert_eq!(w.state().shortcuts.shortcut_text("sketch").as_deref(), Some("S"));
+    assert_eq!(w.state().shortcuts.shortcut_text("shortcut_menu").as_deref(), Some("S"));
     click(&mut w, "Swap");
     assert!(w.state().shortcut_conflict.is_none());
     assert!(w.query_by_label("Extrude: S").is_some());
-    assert_eq!(w.state().shortcuts.shortcut_text("sketch").as_deref(), Some("E"));
+    assert_eq!(w.state().shortcuts.shortcut_text("shortcut_menu").as_deref(), Some("E"));
     assert_eq!(file_json(&dir)["shortcuts"]["overrides"]["extrude"], "S");
-    assert_eq!(file_json(&dir)["shortcuts"]["overrides"]["sketch"], "E");
+    assert_eq!(file_json(&dir)["shortcuts"]["overrides"]["shortcut_menu"], "E");
 
     // Resetting a key that was swapped warns before changing either command.
     click(&mut w, "Reset Extrude");
     assert!(w.state().shortcut_conflict.is_some());
     assert!(w.query_by_label("Extrude: S").is_some());
-    assert_eq!(w.state().shortcuts.shortcut_text("sketch").as_deref(), Some("E"));
+    assert_eq!(w.state().shortcuts.shortcut_text("shortcut_menu").as_deref(), Some("E"));
     click(&mut w, "Cancel");
     assert!(w.query_by_label("Extrude: S").is_some(), "cancel preserves both assignments");
 

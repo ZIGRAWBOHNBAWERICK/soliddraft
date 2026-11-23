@@ -1552,7 +1552,6 @@ fn registry() -> Vec<CommandSpec> {
         cmd("sketch", "Sketch", Icon::Cad("sketch"), "Sketch on a plane or a planar face")
             .on(Solid, "Sketch", Large)
             .on(Sketch, "Sketch", Large)
-            .key(Scope::Model, none, Key::S)
             .run(|s| if s.in_sketch() { AppAction::ExitSketch } else { AppAction::StartSketch })
             .when(|s| s.in_sketch() || field_open(s))
             .lit(AppState::in_sketch)
@@ -1687,7 +1686,6 @@ fn registry() -> Vec<CommandSpec> {
             .app_only(SKETCHER),
         cmd("sketch_slot", "Slot", Icon::Cad("slot_sketch"), "Straight slot: two centres, then the width")
             .on(Sketch, "Draw", Small)
-            .key(Scope::Sketch, none, Key::S)
             .run(|_| AppAction::SketchTool(Tool::Slot))
             .when(can_sketch_tool)
             .lit(|s| tool_is(s, Tool::Slot))
@@ -2802,6 +2800,12 @@ fn registry() -> Vec<CommandSpec> {
             .key(Scope::App, ctrl_shift, Key::P)
             .run(|_| AppAction::TogglePalette)
             .app_only(WINDOW),
+        cmd("shortcut_menu", "Shortcut menu", Icon::Search, "Open the current workspace's shortcuts at the pointer")
+            .both()
+            .key(Scope::App, none, Key::S)
+            .when(|s| s.start.is_none() && s.shortcut_menu_editor.is_none())
+            .run(|_| AppAction::ToggleShortcutMenu)
+            .app_only(WINDOW),
         cmd("shortcuts", "Keyboard shortcuts", Icon::Config, "List the keyboard shortcuts")
             .key(Scope::Model, none, Key::Questionmark)
             .run(|_| AppAction::ShowShortcuts)
@@ -2875,7 +2879,6 @@ fn drawing_registry() -> Vec<CommandSpec> {
             DrawingTool::Section { replace: None } => DrawingTool::Section { replace: None }
         )
         .on(Views, "Derived", Large)
-        .key(Scope::Drawing, none, Key::S)
 .agents(
             Agents::Mcp,
             "A cutting line through a model point across the view, horizontal or vertical on the sheet. The section \
@@ -3561,19 +3564,19 @@ mod tests {
 
         let conflict = s.assign("extrude", KeyChord::plain(Key::S)).unwrap_err();
         assert_eq!(conflict.command, "extrude");
-        assert_eq!(conflict.with, ["sketch"]);
+        assert_eq!(conflict.with, ["shortcut_menu"]);
         assert_eq!(s.shortcut_text("extrude").as_deref(), Some("E"), "refused until swapped");
         s.swap(&conflict);
         assert_eq!(s.shortcut_text("extrude").as_deref(), Some("S"));
-        assert_eq!(s.shortcut_text("sketch").as_deref(), Some("E"));
+        assert_eq!(s.shortcut_text("shortcut_menu").as_deref(), Some("E"));
 
         s.clear("extrude");
         assert_eq!(s.shortcut_text("extrude"), None);
         s.reset("extrude");
         assert_eq!(s.shortcut_text("extrude").as_deref(), Some("E"));
-        assert_eq!(s.shortcut_text("sketch"), None, "the command that held E is cleared so E is not bound twice");
-        s.reset("sketch");
-        assert_eq!(s.shortcut_text("sketch").as_deref(), Some("S"));
+        assert_eq!(s.shortcut_text("shortcut_menu"), None, "the command that held E is cleared so E is not bound twice");
+        s.reset("shortcut_menu");
+        assert_eq!(s.shortcut_text("shortcut_menu").as_deref(), Some("S"));
         s.reset_all(ShortcutPreset::Solidworks);
         assert!(s.overrides.is_empty());
         assert_eq!(s.preset, ShortcutPreset::Solidworks);

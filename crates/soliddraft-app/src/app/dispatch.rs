@@ -1828,6 +1828,7 @@ impl SolidDraftApp {
             }
             AppAction::ShowShortcuts => self.state.show_shortcuts = true,
             AppAction::TogglePalette => crate::palette::toggle(&mut self.state),
+            AppAction::ToggleShortcutMenu => crate::shortcut_menu::toggle(ctx, &mut self.state),
             AppAction::ShowAbout => self.state.show_about = true,
             AppAction::ShowRecovery => {
                 if let Some(r) = self.state.recovery.as_mut() {

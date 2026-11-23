@@ -197,6 +197,7 @@ pub enum AppAction {
     ShowShortcuts,
     /// Opens the command palette, or closes it when it is open.
     TogglePalette,
+    ToggleShortcutMenu,
     ShowAbout,
     /// Opens the Recover documents window.
     ShowRecovery,
@@ -1265,6 +1266,8 @@ pub struct AppState {
     pub show_shortcuts: bool,
     /// The open command palette.
     pub palette: Option<crate::palette::Palette>,
+    pub(crate) shortcut_menu: crate::shortcut_menu::Preferences,
+    pub(crate) shortcut_menu_editor: Option<crate::shortcut_menu::Customize>,
     /// The open Provider dialog.
     pub import_dialog: Option<crate::import::Preview>,
     /// Import STEP asked the browser for a file: the next uploaded STEP file is reviewed
@@ -1471,6 +1474,8 @@ impl AppState {
             show_about: false,
             show_shortcuts: false,
             palette: None,
+            shortcut_menu: crate::settings::shortcut_menu(),
+            shortcut_menu_editor: None,
             import_dialog: None,
             step_upload: false,
             import_report: false,

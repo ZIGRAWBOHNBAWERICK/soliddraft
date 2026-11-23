@@ -87,10 +87,11 @@ const LEGACY_MENU_COMMANDS: &[&str] = &[
     "about",
 ];
 
-fn tool(state: &mut AppState, name: &str, args: Value) {
+fn tool(state: &mut AppState, name: &str, args: Value) -> Value {
     let caller = Caller::Mcp { client: "command-reachability".into() };
     let out = call_checked(&mut AppTools { state }, name, args, &caller);
     assert!(!out.is_error, "{name}: {}", out.content);
+    serde_json::from_str(&out.content).unwrap()
 }
 
 fn find_and_dispatch(state: &mut AppState, pending: &mut BTreeSet<&str>) {
@@ -175,7 +176,9 @@ fn part_contexts(pending: &mut BTreeSet<&str>) {
 fn file_contexts(dir: &std::path::Path, pending: &mut BTreeSet<&str>) {
     let mut state = AppState::new(soliddraft_app::new_document());
     let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../ci/fixtures/import");
-    tool(&mut state, "import_step", json!({"path":fixtures.join("block-closed.step")}));
+    let source = fixtures.join("block-closed.step");
+    let preview = tool(&mut state, "preview_import", json!({"path":source}));
+    tool(&mut state, "import_step", json!({"path":source,"preview_token":preview["token"],"decline":[]}));
     state.doc.selection = Some(Selection::Feature(state.doc.features[0].id));
     find_and_dispatch(&mut state, pending);
 

@@ -344,11 +344,14 @@ fn a_path_holds_a_position_and_steers_pitch_yaw_and_roll() {
     assert!((corner_at(&r) - at).length() < 1e-7);
     r.doc.edit_mates(&[("P".into(), MateEdit::Flipped(false))]).unwrap();
 
-    // Past the end of the path is refused by name and changes nothing.
+    // Edits beyond either end of the path are refused by name and change nothing.
     let before = r.doc.assembly().clone();
-    let refused = r.doc.edit_mates(&[("P".into(), MateEdit::Distance("400 mm".into()))]).unwrap_err();
-    assert!(refused.message.contains("path"), "{}", refused.message);
-    assert_eq!(r.doc.assembly(), &before);
+    for distance in ["-1 mm", "400 mm"] {
+        let refused = r.doc.edit_mates(&[("P".into(), MateEdit::Distance(distance.into()))]).unwrap_err();
+        assert_eq!(refused.code, RefusalCode::InvalidValue);
+        assert!(refused.message.contains("path"), "{}", refused.message);
+        assert_eq!(r.doc.assembly(), &before);
+    }
 
     // Saved and reopened it holds; a later mate goes on top: a second block halfway round.
     r.reopen();
@@ -446,7 +449,7 @@ fn a_pin_rides_an_arc_slot_in_each_position_mode() {
     let a = angle(&r);
     assert!(a > 0.1 && a < quarter - 0.1, "{a}");
 
-    // Edited to a distance, then refused past the slot's length; nothing changes.
+    // Edits beyond either end of the slot are refused without changing the assembly.
     let mut r = rig(
         "arc-slot-edit",
         &[(&arc_slotted, Placement::IDENTITY), (&pin, Placement::translation(DVec3::new(20.0, 22.0, 30.0)))],
@@ -458,7 +461,10 @@ fn a_pin_rides_an_arc_slot_in_each_position_mode() {
     r.doc.edit_mates(&[("S".into(), MateEdit::Distance("30 mm".into()))]).unwrap();
     assert!((angle(&r) - 30.0 / 25.0).abs() < 1e-7);
     let before = r.doc.assembly().clone();
-    assert!(r.doc.edit_mates(&[("S".into(), MateEdit::Distance("50 mm".into()))]).is_err());
+    for distance in ["-1 mm", "50 mm"] {
+        let refused = r.doc.edit_mates(&[("S".into(), MateEdit::Distance(distance.into()))]).unwrap_err();
+        assert_eq!(refused.code, RefusalCode::InvalidValue);
+    }
     assert_eq!(r.doc.assembly(), &before);
 
     // Saved and reopened it holds; a later Distance on top takes the pin's height.

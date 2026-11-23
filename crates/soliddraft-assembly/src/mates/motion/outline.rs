@@ -22,6 +22,7 @@ use super::{
     vector,
 };
 use crate::mates::{MateRefusal, RefusalCode, StoredSupport};
+use num_traits::Signed;
 use std::collections::BTreeMap;
 
 /// One piece placed in the world: a line from `from` to `to`, or an arc about `centre`.
@@ -548,17 +549,17 @@ fn run_length(read: &Read) -> Option<f64> {
     }
 }
 
-/// Refuses a distance that passes the end of a path or a slot, naming the mate.
+/// Refuses a distance outside the endpoints of a path or slot, naming the mate.
 pub(super) fn check_position(mate: &str, read: &Read, mode: &SlotMode, what: &str) -> Result<(), MateRefusal> {
     let SlotMode::Distance { distance, .. } = mode else { return Ok(()) };
     let Some(total) = run_length(read) else { return Ok(()) };
     let d = super::super::solver::nearest(distance);
-    if d > total {
+    if distance.is_negative() || d > total {
         return Err(MateRefusal {
             mates: vec![mate.to_owned()],
             ..MateRefusal::new(
                 RefusalCode::InvalidValue,
-                format!("{mate}: {d} mm passes the end of the {what}, {total:.3} mm long"),
+                format!("{mate}: {d} mm is outside the {what}'s 0 to {total:.3} mm range"),
             )
         });
     }

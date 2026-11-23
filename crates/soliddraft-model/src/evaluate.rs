@@ -1165,7 +1165,56 @@ impl Document {
                     ResolvedEnd::Blind(*depth)
                 }
                 HoleEndCondition::ThroughAll => ResolvedEnd::Through,
-                HoleEndCondition::UpToNext => ResolvedEnd::UpToNext,
+                HoleEndCondition::UpToNext => {
+                    // Resolve the nearest parallel planar face hit along drill_dir when every
+                    // hole placement lands on the same parallel wall (plates, flanges, ribs).
+                    let mut common_depth: Option<f64> = None;
+                    let mut all_same_planar = true;
+                    for pt in &points {
+                        let start_3d = plane.origin + plane.x_dir * pt.u + plane.y_dir() * pt.v;
+                        let mut best: Option<f64> = None;
+                        for cand in &topology.faces {
+                            if cand.id == face_id {
+                                continue;
+                            }
+                            let Some(cn) = cand.normal else { continue };
+                            if cn.dot(plane.normal).abs() < 1.0 - 1e-6 {
+                                continue;
+                            }
+                            let d = (cand.centroid - plane.origin).dot(drill_dir);
+                            if !(d.is_finite() && d > 1e-6) {
+                                continue;
+                            }
+                            let hit = start_3d + drill_dir * d;
+                            let eps = 1e-4;
+                            if hit.x >= cand.bbox.min.x - eps
+                                && hit.x <= cand.bbox.max.x + eps
+                                && hit.y >= cand.bbox.min.y - eps
+                                && hit.y <= cand.bbox.max.y + eps
+                                && hit.z >= cand.bbox.min.z - eps
+                                && hit.z <= cand.bbox.max.z + eps
+                            {
+                                best = Some(match best {
+                                    Some(prev) => prev.min(d),
+                                    None => d,
+                                });
+                            }
+                        }
+                        match (best, common_depth) {
+                            (Some(d), None) => common_depth = Some(d),
+                            (Some(d), Some(prev)) if (d - prev).abs() <= 1e-5 => {}
+                            _ => {
+                                all_same_planar = false;
+                                break;
+                            }
+                        }
+                    }
+                    if all_same_planar && let Some(depth) = common_depth {
+                        ResolvedEnd::Blind(depth)
+                    } else {
+                        ResolvedEnd::UpToNext
+                    }
+                }
                 HoleEndCondition::UpToVertex { vertex } => {
                     let vid = match self.resolve_vertex(vertex, body) {
                         Ok(v) => v,
@@ -1382,7 +1431,7 @@ impl Document {
                     let _ = k.release(sheet.body);
                     swept?
                 } else if !flip {
-                    let support = FaceSupport { body, face: face_id, offset: 0.0 };
+                    let support = FaceSupport { body: target, face: face_id, offset: 0.0 };
                     k.extrude_on_face(&tag("sweep"), &profile, support, -depth)?
                 } else {
                     let sheet = k.create_body_from_profile(&tag("profile"), &profile)?;
@@ -1403,7 +1452,7 @@ impl Document {
                     let cb_profile = stadium_profile(plane, pt.u, pt.v, cb_width, length, angle_deg);
                     let cb_tag = |step: &str| OpTag::new(format!("{}.slot{i}.cb.{step}", f.id));
                     let cb_tool = if !flip {
-                        let support = FaceSupport { body, face: face_id, offset: 0.0 };
+                        let support = FaceSupport { body: target, face: face_id, offset: 0.0 };
                         k.extrude_on_face(&cb_tag("sweep"), &cb_profile, support, -cb_depth)?
                     } else {
                         let sheet = k.create_body_from_profile(&cb_tag("profile"), &cb_profile)?;

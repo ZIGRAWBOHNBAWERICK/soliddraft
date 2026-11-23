@@ -455,7 +455,15 @@ fn old_v2_hole_file_opens_and_rebuilds_identically() {
     all_ok(&d);
     assert_eq!(d.truth()["format"], FORMAT, "legacy hole keeps soliddraft-part/2");
     let v2_json = d.part_json();
-    assert!(!v2_json.contains("\"wizard\"") && !v2_json.contains("\"sketch\""));
+    let parsed: serde_json::Value = serde_json::from_str(&v2_json).unwrap();
+    let hole_json = parsed["features"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|f| f["kind"]["type"] == "hole")
+        .expect("hole feature in json");
+    assert!(hole_json["kind"].get("wizard").is_none());
+    assert!(hole_json["kind"].get("sketch").is_none());
     let reopened = Document::from_part_json(&v2_json, Arc::new(CatallaxKernel::new())).unwrap();
     all_ok(&reopened);
     assert_eq!(reopened.part_json(), v2_json);

@@ -103,6 +103,9 @@ pub struct Assembly {
     /// Typed values that can drive mates.
     #[serde(default, skip_serializing_if = "ValueTable::is_empty")]
     pub values: ValueTable,
+    /// The Mate Controller: named positions of chosen mates' values.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mate_controller: Option<crate::mates::MateController>,
     /// The next free id for a component, pattern, source, mate or value. Ids are never
     /// reused.
     pub next_id: u32,
@@ -422,6 +425,7 @@ impl Assembly {
             viewport_states: DisplayStates::default(),
             mates: Vec::new(),
             values: ValueTable::default(),
+            mate_controller: None,
             next_id: 1,
             next_configured_id: 1,
             settings: Settings::default(),

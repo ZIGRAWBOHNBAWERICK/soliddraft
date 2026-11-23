@@ -249,6 +249,8 @@ pub(crate) fn show_with_error_action<K: Copy + Eq + Hash + std::fmt::Debug>(
                 vec2(MORE_WIDTH, FIELD_HEIGHT),
                 egui::Button::new(format!("More ({count})")).selected(state.expanded),
             );
+            #[cfg(target_arch = "wasm32")]
+            crate::web::show_control(format!("{} more", form.title), more.rect);
             anchor = more.rect;
             if more.clicked() {
                 state.expanded = !state.expanded;

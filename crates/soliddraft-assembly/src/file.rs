@@ -192,6 +192,7 @@ impl Assembly {
             viewport_states: &self.viewport_states,
             mates: &self.mates,
             values: &self.values,
+            mate_controller: self.mate_controller.as_ref(),
             next_id: self.next_id,
             next_configured_id: self.next_configured_id,
         };
@@ -230,6 +231,7 @@ impl Assembly {
             // Configurations and explode steps count their ids apart; that counter shapes
             // nothing. The revision keeps it.
             map.remove("next_configured_id");
+            map.remove("mate_controller");
             for list in ["components", "patterns"] {
                 if let Some(Value::Array(items)) = map.get_mut(list) {
                     for item in items.iter_mut().filter_map(Value::as_object_mut) {
@@ -386,6 +388,8 @@ struct TruthOut<'a> {
     mates: &'a [MateEntry],
     #[serde(skip_serializing_if = "ValueTable::is_empty")]
     values: &'a ValueTable,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    mate_controller: Option<&'a crate::mates::MateController>,
     next_id: u32,
     #[serde(skip_serializing_if = "is_first_id")]
     next_configured_id: u32,

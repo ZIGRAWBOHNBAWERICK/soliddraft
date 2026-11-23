@@ -30,8 +30,8 @@ are in `crates/soliddraft-app/src/mates/`.
 | Linear Coupler | One translation: how far one part slides along its plane's normal or axis is a ratio of how far another slides |
 | Limit Distance | The turns a Distance fixes; its translation stays free between a least and a greatest distance |
 | Profile Center | Two rectangles, regular polygons or circles centred on each other, their planes a distance apart: everything for polygons, everything but the spin for circles unless Lock rotation holds it |
-| Slot | A pin's axis in a straight slot: two turns and the translation across the slot, and along it a bound between the ends or a position |
-| Path | A point (a vertex or a sphere's centre) on the outline of a planar face: two translations, the point sliding along the outline's lines and arcs and its part turning freely about it |
+| Slot | A pin's axis in a straight or arc slot: two turns and the translation across the slot, and along it a bound between the ends or a position |
+| Path | A point (a vertex or a sphere's centre) on the outline of a planar face: two translations, the point sliding along the outline's lines, arcs and splines, or three when it holds a position along the path; its part turns freely about it unless the path steers its pitch, yaw and roll |
 | Cam | A follower touching a cam's profile, the outline of the cam's flat end face swept along its normal: one translation for a ball or a vertex, and for a roller also the two turns that keep its axis parallel to the cam's |
 
 Coincident and Distance also take a plane with an axis or a point: the axis lies parallel to
@@ -115,14 +115,30 @@ history unchanged.
 ## Path and Cam
 
 Both read an outline: the outer loop of a planar face, read exactly from the kernel as
-straight edges and circular arcs between exact corners. The face's plane must be
-axis-aligned in its part, as other exact supports are; splines, ellipses and other curves
-are refused by name. A loop of one whole circle is one piece. Which way each arc turns is
-read from a point the kernel samples on it, away from its ends.
+straight edges, circular arcs and splines between exact corners. The face's plane must be
+axis-aligned in its part, as other exact supports are; a spline's control points must lie
+in it. Ellipses and other curves are refused by name. A loop of one whole circle is one
+piece. Which way each arc turns is read from a point the kernel samples on it, away from
+its ends. A spline is stored with its degree, knots, control points and weights, running
+from one corner to the next.
 
 `assembly_mate_path` takes `path`, the planar face, and `point`, a vertex or a sphere.
-The point stays in the face's plane and on its outline. It slides freely along it and its
-part turns freely about it; a position along the path is not held yet.
+The point stays in the face's plane and on its outline. By default it slides freely along
+it and its part turns freely about it. Its options:
+
+- `mode` holds a position along the path, as a Slot's does: `center` halfway round,
+  `distance` a length and `percent` a share of the path's length, each measured from the
+  outline's first corner the way the outline runs, or the other way round with `flipped`.
+  A distance past the path's length is refused by name. `assembly_edit_mate` takes a new
+  `distance`, `percent` or `flipped`, and the distance can be driven by values.
+- `follow` (pitch and yaw) names a plane or axis of the point's part kept along the path's
+  tangent where the point is, the way the outline runs; `follow_alignment: "opposed"`
+  turns it against that way.
+- `up` (roll) names a plane or axis of the point's part kept along the path plane's
+  normal, with `up_alignment`.
+
+With a position, follow and up the part is fully placed. Where the first corner falls is the
+kernel's order of the outline's corners; it can change when the part is edited.
 
 `assembly_mate_cam` takes `cam`, the cam's flat end face, and `follower`: a cylinder whose
 axis is parallel to the face's normal (a roller), a sphere or a vertex. The profile is the
@@ -133,11 +149,66 @@ stays parallel to the cam's.
 
 The residual is the signed distance from the point or the follower's centre to the
 outline in its plane, positive outside: the least distance to any piece, less the
-follower's radius. Each piece's distance is enclosed in outward-rounded arithmetic, and
-the least of the enclosures encloses the least distance, so the certificate holds wherever
-the nearest piece changes. Which side the point lies on is decided once, in doubles: by
-the nearest piece away from a corner, and by the winding of a fine polygon round the
-outline at a corner.
+follower's radius. Each line's and arc's distance is enclosed in outward-rounded
+arithmetic, and the least of the enclosures encloses the least distance, so the
+certificate holds wherever the nearest piece changes. Which side the point lies on is
+decided once, in doubles: by the nearest piece away from a corner, and by the winding of a
+fine polygon round the outline at a corner.
+
+A spline's distance is the distance to its point at the foot parameter, found in doubles
+by sampling and Newton's method, and evaluated at that exact parameter by de Boor's
+algorithm in the same arithmetic. An outline with a spline adds one row: the follower's
+offset along the tangent at that foot, zero where the foot is a nearest point. The
+certificate then says the follower's centre is within the bound of the spline's normal
+through a point of it, at the follower's radius; that the foot is the spline's globally
+nearest point is decided in doubles, not certified. A position along a spline is measured
+by Gauss-Legendre quadrature of its length, eight pieces to a knot span, then found by
+bisection; the point sits exactly on the spline at that parameter.
+
+A position along a path is the point at that length round the outline, its tangent there
+the way the outline runs. Lines and arcs are measured exactly; the residual is the
+point's offset from it, three rows.
+
+## Arc slots
+
+A Slot reads an arc slot when the slot's faces are two round walls about one axis closed
+by two equal round ends: the walls' radii must be rational and two end radii apart, and
+the ends centred on the line halfway between them. The slot runs from the first end to
+the second anticlockwise about its depth direction, past the walls' middle. A pin's axis
+stays parallel to the slot's axes and crosses the slot's plane on the centre line. Free
+keeps it between the ends, as stops; Center, Distance and Percent measure along the centre
+line from the first end, or from the second with `flipped`. A distance past the run is
+refused by name. Lock rotation holds the pin's turn in the slot's part's frame. Arc slots
+solve with the bounded solver and report bounded proofs.
+
+## Mate Controller
+
+The Mate Controller drives chosen mates through named positions
+(`crates/soliddraft-assembly/src/mates/controller.rs`). It drives Distance and Angle mates,
+a Width by dimension or percentage, a Profile Center's distance, and a Slot's or a Path's
+distance or percentage. A mate driven by values is refused: drive the value instead.
+
+`assembly_mate_controller` takes an `action`:
+
+- `set` with `mates`: the driven mates, in order. Saved positions keep the values of
+  mates still driven and take the current value of a new one; no mates removes the
+  controller.
+- `save` with `position`: the driven mates' current values, replacing a position of that
+  name.
+- `apply` with `position`, or `values` (one per driven mate): sets the values as Edit mate
+  does, one undo step. A value that cannot be met is refused and changes nothing.
+- `delete` with `position`.
+- `frames` with `from`, `to` and `steps`: solves each of `steps + 1` evenly spaced frames
+  between two positions and returns the root components' placements. Nothing changes.
+- `show`: the controller, its positions and the driven values now.
+
+The controller is saved in `assembly.json` as `mate_controller`: the driven mates' ids and
+each position's values, in millimetres, degrees or percent. Deleting a driven mate takes it
+out of the controller and every position. The geometry hash leaves it out. The Mate panel's
+details have a Mate Controller section, on the desktop and in the browser: the driven
+mates' values to type and apply, and each position to apply, animate to or delete. An
+animation shows each frame as a drag preview does and applies the final position as one
+undo step.
 
 ## Move and rotate under mates
 
@@ -158,7 +229,7 @@ Drag targets are wishes. Mates correct constrained motions, while free translati
 turns follow the target. Limit Distance, Limit Angle, free Width and straight Slot bounds
 act as inclusive stops. Axis-aligned cases keep the exact solver and its refusals. General
 rotations and Hinge stops use the bounded solver and the same certified residual bounds.
-Collision detection and Dynamic Clearance are available on the desktop through the mesh-certified tier described below. Mate Controller remains deferred.
+Collision detection and Dynamic Clearance are available on the desktop through the mesh-certified tier described below, and so is Physical Dynamics. The Mate Controller is described above.
 
 Set a Hinge's stops with `assembly_edit_mate` and `angle_limits: [min,max]`, in signed degrees
 within [-180,180]. The angle runs about the first selected axis by the right-hand rule.
@@ -662,15 +733,14 @@ still shows, solves nothing and reports `proof_unavailable` per mate until Updat
 
 ## Limits for later batches
 
-Arc Slot and Physical Dynamics remain unsupported. A Path holds no position along the
-path and no pitch or yaw, and follows face outlines only, not sketch curves or splines; a
-Cam reads lines and circular arcs only. Collision
-uses the mesh-certified tier while dragging. Mate Controller is deferred. Mechanical relations add kinematics without
-contact simulation.
+A Path follows face outlines only, not sketch curves or open chains of edges. Collision
+uses the mesh-certified tier while dragging. Physical Dynamics is kinematic: it pushes, with
+no forces, masses or friction. Mechanical relations add kinematics without contact
+simulation.
 
 Nonparallel Width Free, angular Dimension and Percent; Distance limits across two points or
 two axes; the misaligned Concentric option; Parallel or Perpendicular between a plane and an
-axis; arc slots and a slot in a slot; profiles or slots whose local topology cannot yet be
+axis; a slot in a slot; profiles or slots whose local topology cannot yet be
 proved; rounded or chamfered profiles; panel picking of edges and vertices; new mates picked
 inside sub-assemblies; pattern members; configurations; torus and spline supports; and
 vertices defined only as intersections remain follow-up work.
@@ -736,7 +806,28 @@ nearest faces and highlights one nearest face per part in orange. These are near
 mesh faces, not a claim of exact B-rep contact. The default chord bound is 0.01 mm per
 part, so a stop normally leaves a small gap above the requested distance. Exact contact
 and exact threshold checks during motion remain follow-up work.
-Physical Dynamics, force transfer and sliding contact are outside this batch.
+
+## Physical Dynamics
+
+Physical Dynamics is a guarded drag in which the dragged component pushes what it meets
+instead of stopping (`AssemblyDocument::begin_dynamic_drag`; on the desktop the Placement
+panel's **Physical Dynamics** box; over MCP `assembly_drag` with `push: true`, or
+`assembly_physical_dynamics`). When a guarded step cannot be divided further short of
+contact, the root component met is carried: it moves by the dragged component's
+translation in every later step of that wish, as a wish its own mates still correct. A
+part held by its mates, such as one locked to the base, does not move, and the drag stops
+against it as a collision does. A pushed part can push another, up to 16 in one wish.
+
+The dragged component and the parts it pushes move as one group. Each step is still
+checked on certified meshes, except between members of the group whose relative placement
+changes by at most 1e-9 mm, since their translations agree up to rounding. The report
+names the pushed parts in `pushed`. Release commits the dragged and pushed components'
+placements as one undo step.
+
+It is kinematic: no forces, masses, friction, bounce or rotation of the pushed part. Only
+one of the root's own components is dragged this way, and what it pushes is a root
+component. It needs the desktop collision worker; the browser build refuses it as it
+refuses guarded drags.
 
 For MCP, set `collision: true` or `clearance: "2 mm"` on `assembly_drag` with
 `phase: "begin"` or `phase: "move"`. Updates return `pending: true` while the worker

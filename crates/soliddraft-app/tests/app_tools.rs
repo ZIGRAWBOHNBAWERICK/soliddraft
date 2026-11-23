@@ -78,17 +78,6 @@ struct Session {
 }
 
 impl Session {
-    fn refuse_motion(&mut self, name: &str) {
-        let before = depths(&self.state);
-        let caller = Caller::Mcp { client: "test".into() };
-        let out = call_checked(&mut AppTools { state: &mut self.state }, name, json!({}), &caller);
-        assert!(out.is_error, "{name}: {}", out.content);
-        let result: Value = serde_json::from_str(&out.content).unwrap();
-        assert_eq!(result["refused"], "unsupported_motion", "{result}");
-        assert_eq!(depths(&self.state), before);
-        self.ran.insert(name.to_owned());
-    }
-
     /// Calls a tool and checks it ran, and changed the undo stacks as its row says.
     fn call(&mut self, name: &str, arguments: Value) -> Value {
         let row = commands::get(name).unwrap_or_else(|| panic!("{name} is not a registry command"));
@@ -582,7 +571,7 @@ fn every_tool_runs_without_a_window_and_undoes_as_its_row_says() {
         json!({ "name": "LA", "a": top, "b": bottom, "reference": reference, "min_degrees": -180, "max_degrees": 180 }),
     );
     s.call("assembly_delete_mate", json!({ "mate": "LA" }));
-    s.refuse_motion("assembly_physical_dynamics");
+    s.call("assembly_physical_dynamics", json!({ "phase": "poll" }));
     // The B1 families, each added and taken away again.
     let cap = |c: u64, feature: &str, g: &str| json!({ "component": c, "feature": feature, "generator": g });
     let side = json!({ "component": parts[1], "feature": "Boss-Extrude1", "generator": "side", "normal": [1, 0, 0] });
@@ -723,6 +712,27 @@ fn every_tool_runs_without_a_window_and_undoes_as_its_row_says() {
     let row = pathed["assembly"]["mates"].as_array().unwrap().iter().find(|m| m["name"] == "PA").unwrap().clone();
     assert_eq!((row["kind"].as_str(), row["path"]["support"]["kind"].as_str()), (Some("path"), Some("outline")));
     s.call("assembly_delete_mate", json!({ "mate": "PA" }));
+    // A Path held halfway round, then driven by the Mate Controller between two positions.
+    let held = json!({ "name": "PH", "path": plate, "point": corner, "mode": "percent", "percent": 50 });
+    let held = s.call("assembly_mate_path", held);
+    let row = held["assembly"]["mates"].as_array().unwrap().iter().find(|m| m["name"] == "PH").unwrap().clone();
+    assert_eq!((row["position"]["mode"].as_str(), row["position"]["percent"].as_f64()), (Some("percent"), Some(50.0)));
+    s.call("assembly_mate_controller", json!({ "action": "set", "mates": ["PH"] }));
+    s.call("assembly_mate_controller", json!({ "action": "save", "position": "Half" }));
+    s.call("assembly_mate_controller", json!({ "action": "apply", "values": [25] }));
+    let saved = s.call("assembly_mate_controller", json!({ "action": "save", "position": "Quarter" }));
+    assert_eq!(saved["positions"][1]["values"], json!([25.0]));
+    let frames =
+        s.call("assembly_mate_controller", json!({ "action": "frames", "from": "Half", "to": "Quarter", "steps": 2 }));
+    assert_eq!(frames["frames"].as_array().unwrap().len(), 3);
+    s.call("assembly_mate_controller", json!({ "action": "apply", "position": "Half" }));
+    s.call("assembly_delete_mate", json!({ "mate": "PH" }));
+    let shown = s.call("assembly_mate_controller", json!({ "action": "show" }));
+    assert_eq!(shown["mates"], json!([]));
+    // Back to the pose before the held Path: its seven steps undone.
+    for _ in 0..7 {
+        s.call("undo", json!({}));
+    }
     let cammed = s.call("assembly_mate_cam", json!({ "name": "CM", "cam": plate, "follower": shaft(pins[1]) }));
     let row = cammed["assembly"]["mates"].as_array().unwrap().iter().find(|m| m["name"] == "CM").unwrap().clone();
     // The pin stands inside the plate's outline, so it rides the outline from inside.

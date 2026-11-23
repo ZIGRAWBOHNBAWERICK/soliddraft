@@ -192,6 +192,8 @@ pub(crate) struct OutlinePiece {
     /// For an arc: its centre, its radius squared and whether it turns anticlockwise about
     /// the outline's normal. A whole circle is an arc that starts where it ends.
     pub arc: Option<([BigRational; 3], BigRational, bool)>,
+    /// For a spline: its definition, from this corner to the next.
+    pub spline: Option<crate::mates::StoredSpline>,
 }
 
 /// The outline of a planar face read exactly, as a Path or a Cam reads it: its plane and
@@ -208,11 +210,30 @@ pub(crate) struct OutlineProof {
     pub label: String,
 }
 
+/// An arc slot read exactly: its walls' common axis, its centre line's radius and its round
+/// ends, the slot running anticlockwise about `depth` from the first end to the second.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct ArcSlotProof {
+    /// The axes' direction, each component -1, 0 or 1.
+    pub depth: [i8; 3],
+    /// A point on the walls' common axis.
+    pub centre: [BigRational; 3],
+    /// The centre line's radius.
+    pub radius: BigRational,
+    /// A point on each round end's axis.
+    pub ends: [[BigRational; 3]; 2],
+    /// The round ends' radius.
+    pub end_radius: BigRational,
+    /// The face's label at that revision.
+    pub label: String,
+}
+
 /// What a Profile Center, a Slot, a Path or a Cam reads of a face or edge.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum Shape {
     Profile(ProfileProof),
     Slot(SlotProof),
+    ArcSlot(Box<ArcSlotProof>),
     Outline(OutlineProof),
 }
 
@@ -229,7 +250,7 @@ impl StoredSupport {
     pub(crate) fn shape(&self) -> Option<ShapeKind> {
         match self {
             StoredSupport::Profile { .. } => Some(ShapeKind::Profile),
-            StoredSupport::Slot { .. } => Some(ShapeKind::Slot),
+            StoredSupport::Slot { .. } | StoredSupport::ArcSlot { .. } => Some(ShapeKind::Slot),
             StoredSupport::Outline { .. } => Some(ShapeKind::Outline),
             StoredSupport::Enclosed { .. } | StoredSupport::Axis { .. } | StoredSupport::Point { .. } => None,
         }
@@ -249,6 +270,13 @@ impl Shape {
                 ends: s.ends.each_ref().map(|e| e.each_ref().map(nearest)),
                 radius: nearest(&s.radius_squared).sqrt(),
             },
+            Shape::ArcSlot(s) => StoredSupport::ArcSlot {
+                depth: s.depth,
+                centre: s.centre.each_ref().map(nearest),
+                radius: nearest(&s.radius),
+                ends: s.ends.each_ref().map(|e| e.each_ref().map(nearest)),
+                end_radius: nearest(&s.end_radius),
+            },
             Shape::Outline(o) => StoredSupport::Outline {
                 normal: o.normal,
                 offset: nearest(&o.offset),
@@ -260,6 +288,7 @@ impl Shape {
                         centre: p.arc.as_ref().map(|(c, _, _)| c.each_ref().map(nearest)),
                         radius: p.arc.as_ref().map(|(_, r, _)| nearest(r).sqrt()),
                         anticlockwise: p.arc.as_ref().is_some_and(|(_, _, ccw)| *ccw),
+                        spline: p.spline.clone(),
                     })
                     .collect(),
             },
@@ -460,7 +489,7 @@ impl AssemblyDocument {
                 .map_err(repair_refusal)?;
                 let shape = match kind {
                     ShapeKind::Profile => Shape::Profile(profile_of(&part, r, found)?),
-                    ShapeKind::Slot => Shape::Slot(slot_of(&part, r, found)?),
+                    ShapeKind::Slot => slot_of(&part, r, found)?,
                     ShapeKind::Outline => Shape::Outline(outline_of(&part, r, found)?),
                 };
                 drop(part);
@@ -471,6 +500,7 @@ impl AssemblyDocument {
         let changed = match (stored, &shape) {
             (Some(StoredSupport::Profile { normal, .. }), Shape::Profile(p)) => p.normal != *normal,
             (Some(StoredSupport::Slot { depth, .. }), Shape::Slot(s)) => s.depth != *depth,
+            (Some(StoredSupport::ArcSlot { depth, .. }), Shape::ArcSlot(s)) => s.depth != *depth,
             (Some(StoredSupport::Outline { normal, .. }), Shape::Outline(o)) => o.normal != *normal,
             (None, _) => false,
             (Some(_), _) => true,
@@ -1000,7 +1030,7 @@ fn profile_of(part: &PartDocument, r: &DocRef, entity: SupportEntity) -> Result<
 
 /// The straight slot a wall or round end belongs to: walking from it across edges that run
 /// along the round ends' axes, two parallel walls and two round ends, read exactly.
-fn slot_of(part: &PartDocument, r: &DocRef, entity: SupportEntity) -> Result<SlotProof, MateRefusal> {
+fn slot_of(part: &PartDocument, r: &DocRef, entity: SupportEntity) -> Result<Shape, MateRefusal> {
     let body = part.body().ok_or_else(|| unavailable(format!("{} has no body", r.path)))?;
     let kernel = part.kernel();
     let SupportEntity::Face(face) = entity else {
@@ -1077,17 +1107,21 @@ fn slot_of(part: &PartDocument, r: &DocRef, entity: SupportEntity) -> Result<Slo
     }
     let mut walls = Vec::new();
     let mut ends = Vec::new();
+    let mut centroids = Vec::new();
     for f in &ring {
         match support(SupportEntity::Face(*f))? {
             ExactSupport::Plane(p) => walls.push((p.normal(), exact_of(&p.offset, &refuse)?)),
             s => match round(&s) {
-                Some(a) => ends.push(a),
+                Some(a) => {
+                    ends.push(a);
+                    centroids.push(t.face(*f).map(|i| [i.centroid.x, i.centroid.y, i.centroid.z]));
+                }
                 None => return Err(not_a_slot()),
             },
         }
     }
     if walls.is_empty() && ends.len() == 4 {
-        return Err(refuse("an arc slot, whose walls are round, is not supported in this version".into()));
+        return arc_slot(&ends, &centroids, k_depth, label, &refuse).map(|s| Shape::ArcSlot(Box::new(s)));
     }
     let ([(n0, o0), (n1, o1)], [e0, e1]) = (&walls[..], &ends[..]) else { return Err(not_a_slot()) };
     if n1.map(|c| -c) != *n0 || n0[k_depth] != 0 {
@@ -1116,7 +1150,141 @@ fn slot_of(part: &PartDocument, r: &DocRef, entity: SupportEntity) -> Result<Slo
         return Err(not_a_slot());
     }
     let (first, second, own) = if p0[k_along] < p1[k_along] { (p0, p1, e0) } else { (p1, p0, e1) };
-    Ok(SlotProof { depth: own.direction(), ends: [first, second], radius_squared: r0, label })
+    Ok(Shape::Slot(SlotProof { depth: own.direction(), ends: [first, second], radius_squared: r0, label }))
+}
+
+/// A spline edge of an outline, from the kernel's exact definition, running from corner
+/// `ends[0]` to `ends[1]`. Its control points must lie in the outline's plane.
+fn spline_piece(
+    kernel: &dyn soliddraft_kernel_api::Kernel,
+    body: soliddraft_kernel_api::BodyId,
+    edge: EdgeId,
+    ends: [&[BigRational; 3]; 2],
+    normal: [i8; 3],
+    offset: &BigRational,
+    refuse: &impl Fn(String) -> MateRefusal,
+) -> Result<crate::mates::StoredSpline, MateRefusal> {
+    use soliddraft_kernel_api::drawing::Curve3;
+    let curve = kernel.edge_curve(body, edge).map_err(|e| refuse(format!("a spline of the outline: {e}")))?;
+    let f = |p: &[BigRational; 3]| p.each_ref().map(crate::mates::solver::nearest);
+    let near = |a: soliddraft_kernel_api::Vec3, b: [f64; 3]| {
+        let d = [a.x - b[0], a.y - b[1], a.z - b[2]];
+        (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt() <= 1e-9 * (1.0 + b.iter().map(|x| x.abs()).fold(0.0, f64::max))
+    };
+    let (a, b) = (f(ends[0]), f(ends[1]));
+    let curve = if near(curve.start(), a) && near(curve.end(), b) {
+        curve
+    } else if near(curve.start(), b) && near(curve.end(), a) {
+        curve.reversed()
+    } else {
+        return Err(refuse("a spline of the outline does not run between its corners".into()));
+    };
+    let Curve3::Nurbs { degree, knots, points, weights } = curve else {
+        return Err(refuse("its outline has a curve that is neither a line, a circular arc nor a spline".into()));
+    };
+    let k = normal.iter().position(|c| *c != 0).expect("a signed axis");
+    let level = crate::mates::solver::nearest(offset) * f64::from(normal[k]);
+    if degree == 0
+        || points.len() < 2
+        || knots.len() != points.len() + degree as usize + 1
+        || (!weights.is_empty() && weights.len() != points.len())
+        || weights.iter().any(|w| !(*w > 0.0 && w.is_finite()))
+    {
+        return Err(refuse("a spline of the outline has no usable definition".into()));
+    }
+    let mut out = Vec::with_capacity(points.len());
+    for p in &points {
+        let mut q = [p.x, p.y, p.z];
+        if (q[k] - level).abs() > 1e-9 * (1.0 + level.abs()) {
+            return Err(refuse("a spline of the outline leaves the face's plane".into()));
+        }
+        q[k] = level;
+        out.push(q);
+    }
+    Ok(crate::mates::StoredSpline { degree, knots, points: out, weights })
+}
+
+/// The rational square root of `v`, when it has one.
+fn rational_sqrt(v: &BigRational) -> Option<BigRational> {
+    if v.is_negative() {
+        return None;
+    }
+    let (n, d) = (v.numer().sqrt(), v.denom().sqrt());
+    (&n * &n == *v.numer() && &d * &d == *v.denom()).then(|| BigRational::new(n, d))
+}
+
+/// An arc slot from its four round faces: two walls about one axis, their radii two end
+/// radii apart, and two equal round ends centred on the line halfway between the walls.
+/// `centroids` are the faces' centroids: a wall's lies away from the ends, and the slot runs
+/// from the first end to the second anticlockwise about `depth` past it.
+fn arc_slot(
+    faces: &[soliddraft_kernel_api::ExactAxis],
+    centroids: &[Option<[f64; 3]>],
+    k_depth: usize,
+    label: String,
+    refuse: &impl Fn(String) -> MateRefusal,
+) -> Result<ArcSlotProof, MateRefusal> {
+    let not_arc = || refuse("an arc slot is two round walls about one axis closed by two equal round ends".into());
+    let flat = |p: &[BigRational; 3]| {
+        let mut p = p.clone();
+        p[k_depth] = BigRational::zero();
+        p
+    };
+    let mut read = Vec::with_capacity(4);
+    for a in faces {
+        let radius = a.radius.as_ref().ok_or_else(not_arc)?;
+        let squared = exact_of(&radius.squared, refuse)?;
+        let root = rational_sqrt(&squared).ok_or_else(|| refuse("the arc slot's radii are not read exactly".into()))?;
+        if a.direction().map(i8::abs) != faces[0].direction().map(i8::abs) {
+            return Err(not_arc());
+        }
+        read.push((flat(&exact_point(&a.through, refuse)?), root, radius.outward));
+    }
+    // The walls share an axis; the ends each have their own.
+    let pair = (0..4).flat_map(|i| (i + 1..4).map(move |j| (i, j))).find(|(i, j)| read[*i].0 == read[*j].0);
+    let Some((i, j)) = pair else { return Err(not_arc()) };
+    let others: Vec<usize> = (0..4).filter(|k| *k != i && *k != j).collect();
+    let (wall_a, wall_b) = (&read[i], &read[j]);
+    let (outer, inner) = if wall_a.1 > wall_b.1 { (wall_a, wall_b) } else { (wall_b, wall_a) };
+    let (end_a, end_b) = (&read[others[0]], &read[others[1]]);
+    let two = BigRational::from_integer(2.into());
+    if end_a.1 != end_b.1
+        || end_a.2 != end_b.2
+        || outer.2 != end_a.2
+        || inner.2 == end_a.2
+        || end_a.0 == end_b.0
+        || &outer.1 - &inner.1 != &two * &end_a.1
+    {
+        return Err(not_arc());
+    }
+    let centre = outer.0.clone();
+    let radius = (&outer.1 + &inner.1) / &two;
+    let away = |p: &[BigRational; 3]| {
+        let d = [&p[0] - &centre[0], &p[1] - &centre[1], &p[2] - &centre[2]];
+        dot3(&d, &d)
+    };
+    if away(&end_a.0) != &radius * &radius || away(&end_b.0) != &radius * &radius {
+        return Err(refuse("the arc slot's round ends are not centred between its walls".into()));
+    }
+    let depth = faces[0].direction();
+    // Which way the slot runs: from the first end through the middle to the second.
+    let middle = centroids[i].ok_or_else(not_arc)?;
+    let f = |p: &[BigRational; 3]| glam::DVec3::from_array(p.each_ref().map(crate::mates::solver::nearest));
+    let n = glam::DVec3::new(depth[0] as f64, depth[1] as f64, depth[2] as f64);
+    let c = f(&centre);
+    let mut m = glam::DVec3::from_array(middle) - c;
+    m -= n * m.dot(n);
+    let angle = |p: glam::DVec3| {
+        let (u, v) = (f(&end_a.0) - c, p);
+        let a = u.cross(v).dot(n).atan2(u.dot(v));
+        if a < 0.0 { a + std::f64::consts::TAU } else { a }
+    };
+    let ends = if angle(m) < angle(f(&end_b.0) - c) {
+        [end_a.0.clone(), end_b.0.clone()]
+    } else {
+        [end_b.0.clone(), end_a.0.clone()]
+    };
+    Ok(ArcSlotProof { depth, centre, radius, ends, end_radius: end_a.1.clone(), label })
 }
 
 /// The outline of a planar face, read exactly: its plane, then its outer loop piece by
@@ -1166,7 +1334,7 @@ fn outline_of(part: &PartDocument, r: &DocRef, entity: SupportEntity) -> Result<
         && t.edge(edge).is_some_and(|e| e.curve == CurveKind::Circle)
     {
         let (centre, squared) = circle(edge)?;
-        let piece = OutlinePiece { from: centre.clone(), arc: Some((centre, squared, true)) };
+        let piece = OutlinePiece { from: centre.clone(), arc: Some((centre, squared, true)), spline: None };
         return Ok(OutlineProof { normal, offset, pieces: vec![piece], label });
     }
     let order = corners(&t, &outline).ok_or_else(|| refuse("its outline is not one closed chain of edges".into()))?;
@@ -1188,6 +1356,7 @@ fn outline_of(part: &PartDocument, r: &DocRef, entity: SupportEntity) -> Result<
     let mut read: Vec<EdgeId> = Vec::with_capacity(order.len());
     for i in 0..order.len() {
         let (a, b) = (order[i], order[(i + 1) % order.len()]);
+        // Two corners can share two edges: each piece takes one not taken yet.
         let edge = outline
             .iter()
             .copied()
@@ -1216,9 +1385,20 @@ fn outline_of(part: &PartDocument, r: &DocRef, entity: SupportEntity) -> Result<
                 let anticlockwise = angle(middle) < angle(f(&points[(i + 1) % points.len()]));
                 Some((centre, squared, anticlockwise))
             }
-            _ => return Err(refuse("its outline has a curve that is neither a line nor a circular arc".into())),
+            CurveKind::Ellipse => {
+                return Err(refuse("its outline has an ellipse, which a Path or a Cam does not read yet".into()));
+            }
+            CurveKind::Spline | CurveKind::Other => {
+                let next = &points[(i + 1) % points.len()];
+                pieces.push(OutlinePiece {
+                    from: points[i].clone(),
+                    arc: None,
+                    spline: Some(spline_piece(&**kernel, body, edge, [&points[i], next], normal, &offset, &refuse)?),
+                });
+                continue;
+            }
         };
-        pieces.push(OutlinePiece { from: points[i].clone(), arc });
+        pieces.push(OutlinePiece { from: points[i].clone(), arc, spline: None });
     }
     Ok(OutlineProof { normal, offset, pieces, label })
 }

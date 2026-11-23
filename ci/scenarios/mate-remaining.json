@@ -1,0 +1,825 @@
+{
+  "format": "soliddraft-scenario/1",
+  "name": "mate-remaining",
+  "folders": [
+    "work"
+  ],
+  "max_work": 20000000,
+  "steps": [
+    {
+      "tool": "sketch",
+      "arguments": {
+        "plane": "top",
+        "shapes": [
+          {
+            "shape": "circle",
+            "center": [
+              0,
+              0,
+              0
+            ],
+            "diameter": 8
+          }
+        ]
+      },
+      "checks": []
+    },
+    {
+      "tool": "extrude",
+      "arguments": {
+        "sketch": "Sketch1",
+        "depth": 20,
+        "flip": false
+      },
+      "checks": []
+    },
+    {
+      "tool": "save",
+      "arguments": {
+        "path": "{bundle}/work/pin.dwprt"
+      },
+      "checks": [],
+      "files": [
+        "{bundle}/work/pin.dwprt"
+      ]
+    },
+    {
+      "tool": "new_part",
+      "arguments": {},
+      "checks": []
+    },
+    {
+      "tool": "sketch",
+      "arguments": {
+        "plane": "top",
+        "shapes": [
+          {
+            "shape": "rectangle",
+            "center": [
+              0,
+              0,
+              0
+            ],
+            "width": 6,
+            "height": 6
+          }
+        ]
+      },
+      "checks": []
+    },
+    {
+      "tool": "extrude",
+      "arguments": {
+        "sketch": "Sketch1",
+        "depth": 6,
+        "flip": false
+      },
+      "checks": []
+    },
+    {
+      "tool": "save",
+      "arguments": {
+        "path": "{bundle}/work/block.dwprt"
+      },
+      "checks": [],
+      "files": [
+        "{bundle}/work/block.dwprt"
+      ]
+    },
+    {
+      "tool": "new_part",
+      "arguments": {},
+      "checks": []
+    },
+    {
+      "tool": "sketch_geometry",
+      "arguments": {
+        "plane": "top",
+        "operations": [
+          {
+            "tool": "add",
+            "construction": false,
+            "kind": {
+              "type": "spline",
+              "mode": "control",
+              "points": [
+                {
+                  "u": -20,
+                  "v": 0
+                },
+                {
+                  "u": -20,
+                  "v": 30
+                },
+                {
+                  "u": 20,
+                  "v": 30
+                },
+                {
+                  "u": 20,
+                  "v": 0
+                }
+              ]
+            }
+          },
+          {
+            "tool": "add",
+            "construction": false,
+            "kind": {
+              "type": "line",
+              "a": {
+                "u": 20,
+                "v": 0
+              },
+              "b": {
+                "u": -20,
+                "v": 0
+              }
+            }
+          }
+        ]
+      },
+      "checks": []
+    },
+    {
+      "tool": "extrude",
+      "arguments": {
+        "sketch": "Sketch1",
+        "depth": 10,
+        "flip": false
+      },
+      "checks": []
+    },
+    {
+      "tool": "save",
+      "arguments": {
+        "path": "{bundle}/work/arch.dwprt"
+      },
+      "checks": [],
+      "files": [
+        "{bundle}/work/arch.dwprt"
+      ]
+    },
+    {
+      "tool": "new_part",
+      "arguments": {},
+      "checks": []
+    },
+    {
+      "tool": "sketch",
+      "arguments": {
+        "plane": "top",
+        "shapes": [
+          {
+            "shape": "rectangle",
+            "center": [
+              0,
+              0,
+              0
+            ],
+            "width": 80,
+            "height": 80
+          }
+        ]
+      },
+      "checks": []
+    },
+    {
+      "tool": "extrude",
+      "arguments": {
+        "sketch": "Sketch1",
+        "depth": 10,
+        "flip": false
+      },
+      "checks": []
+    },
+    {
+      "tool": "sketch_geometry",
+      "arguments": {
+        "plane": "top",
+        "operations": [
+          {
+            "tool": "add",
+            "construction": false,
+            "kind": {
+              "type": "arc",
+              "center": {
+                "u": 0,
+                "v": 0
+              },
+              "start": {
+                "u": 29,
+                "v": 0
+              },
+              "end": {
+                "u": 0,
+                "v": 29
+              }
+            }
+          },
+          {
+            "tool": "add",
+            "construction": false,
+            "kind": {
+              "type": "arc",
+              "center": {
+                "u": 0,
+                "v": 25
+              },
+              "start": {
+                "u": 0,
+                "v": 29
+              },
+              "end": {
+                "u": 0,
+                "v": 21
+              }
+            }
+          },
+          {
+            "tool": "add",
+            "construction": false,
+            "kind": {
+              "type": "arc",
+              "center": {
+                "u": 0,
+                "v": 0
+              },
+              "start": {
+                "u": 21,
+                "v": 0
+              },
+              "end": {
+                "u": 0,
+                "v": 21
+              }
+            }
+          },
+          {
+            "tool": "add",
+            "construction": false,
+            "kind": {
+              "type": "arc",
+              "center": {
+                "u": 25,
+                "v": 0
+              },
+              "start": {
+                "u": 21,
+                "v": 0
+              },
+              "end": {
+                "u": 29,
+                "v": 0
+              }
+            }
+          }
+        ]
+      },
+      "checks": []
+    },
+    {
+      "tool": "cut",
+      "arguments": {
+        "sketch": "Sketch2",
+        "through_all": true,
+        "depth": 10,
+        "flip": true
+      },
+      "checks": []
+    },
+    {
+      "tool": "save",
+      "arguments": {
+        "path": "{bundle}/work/plate.dwprt"
+      },
+      "checks": [],
+      "files": [
+        "{bundle}/work/plate.dwprt"
+      ]
+    },
+    {
+      "tool": "make_assembly",
+      "arguments": {},
+      "checks": []
+    },
+    {
+      "tool": "assembly_save",
+      "arguments": {
+        "path": "{bundle}/work/rig.dwasm"
+      },
+      "checks": [],
+      "files": [
+        "{bundle}/work/rig.dwasm"
+      ]
+    },
+    {
+      "tool": "insert_component",
+      "arguments": {
+        "paths": [
+          "{bundle}/work/pin.dwprt"
+        ],
+        "placement": {
+          "translation": [
+            20,
+            22,
+            30
+          ],
+          "rotation": [
+            0,
+            0,
+            0,
+            1
+          ]
+        }
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/components/1/path",
+          "equals": "4"
+        }
+      ]
+    },
+    {
+      "tool": "assembly_mate_origin",
+      "arguments": {
+        "name": "O",
+        "component": 2,
+        "align_axes": true
+      },
+      "checks": []
+    },
+    {
+      "tool": "assembly_mate_slot",
+      "arguments": {
+        "name": "S",
+        "slot": {
+          "component": 2,
+          "face": "Cut-Extrude1 · Side of arc 4"
+        },
+        "pin": {
+          "component": 4,
+          "feature": "Boss-Extrude1",
+          "generator": "side"
+        },
+        "mode": "center"
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/mates/1/kind",
+          "equals": "slot"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/slot/support/kind",
+          "equals": "arc_slot"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/proof/certainty",
+          "equals": "bounded"
+        },
+        {
+          "pointer": "/summary/assembly/components/1/translation/0",
+          "approx": 17.67766952966369,
+          "tolerance": 0.000001
+        },
+        {
+          "pointer": "/summary/assembly/components/1/translation/1",
+          "approx": 17.67766952966369,
+          "tolerance": 0.000001
+        },
+        {
+          "pointer": "/summary/assembly/solver/diagnostics",
+          "equals": []
+        }
+      ]
+    },
+    {
+      "tool": "assembly_mate_distance",
+      "arguments": {
+        "name": "D",
+        "a": {
+          "component": 2,
+          "feature": "Boss-Extrude1",
+          "generator": "end_cap"
+        },
+        "b": {
+          "component": 4,
+          "feature": "Boss-Extrude1",
+          "generator": "start_cap"
+        },
+        "distance": "2 mm",
+        "alignment": "opposed"
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/components/1/translation/2",
+          "approx": 12,
+          "tolerance": 0.000001
+        }
+      ]
+    },
+    {
+      "tool": "assembly_mate_controller",
+      "arguments": {
+        "action": "set",
+        "mates": [
+          "D"
+        ]
+      },
+      "checks": [
+        {
+          "pointer": "/result/mates",
+          "equals": [
+            "D"
+          ]
+        }
+      ]
+    },
+    {
+      "tool": "assembly_mate_controller",
+      "arguments": {
+        "action": "save",
+        "position": "Low"
+      },
+      "checks": []
+    },
+    {
+      "tool": "assembly_mate_controller",
+      "arguments": {
+        "action": "apply",
+        "values": [
+          8
+        ]
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/components/1/translation/2",
+          "approx": 18,
+          "tolerance": 0.000001
+        }
+      ]
+    },
+    {
+      "tool": "assembly_mate_controller",
+      "arguments": {
+        "action": "save",
+        "position": "High"
+      },
+      "checks": [
+        {
+          "pointer": "/result/positions/1/values",
+          "equals": [
+            8
+          ]
+        }
+      ]
+    },
+    {
+      "tool": "assembly_mate_controller",
+      "arguments": {
+        "action": "frames",
+        "from": "Low",
+        "to": "High",
+        "steps": 2
+      },
+      "checks": [
+        {
+          "pointer": "/result/frames/1/1/placement/translation/2",
+          "approx": 15,
+          "tolerance": 0.000001
+        }
+      ]
+    },
+    {
+      "tool": "assembly_mate_controller",
+      "arguments": {
+        "action": "apply",
+        "position": "Low"
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/components/1/translation/2",
+          "approx": 12,
+          "tolerance": 0.000001
+        }
+      ]
+    },
+    {
+      "tool": "undo",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/summary/assembly/components/1/translation/2",
+          "approx": 18,
+          "tolerance": 0.000001
+        }
+      ]
+    },
+    {
+      "tool": "redo",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/summary/assembly/components/1/translation/2",
+          "approx": 12,
+          "tolerance": 0.000001
+        }
+      ]
+    },
+    {
+      "tool": "insert_component",
+      "arguments": {
+        "paths": [
+          "{bundle}/work/block.dwprt"
+        ],
+        "placement": {
+          "translation": [
+            0,
+            -50,
+            14
+          ],
+          "rotation": [
+            0,
+            0,
+            0,
+            1
+          ]
+        }
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/components/2/path",
+          "equals": "9"
+        }
+      ]
+    },
+    {
+      "tool": "assembly_mate_path",
+      "arguments": {
+        "name": "P",
+        "path": {
+          "component": 2,
+          "feature": "Boss-Extrude1",
+          "generator": "end_cap"
+        },
+        "point": {
+          "component": 9,
+          "vertex": [
+            "Boss-Extrude1 · Start cap",
+            "Boss-Extrude1 · Side of line 2",
+            "Boss-Extrude1 · Side of line 3"
+          ]
+        },
+        "mode": "percent",
+        "percent": 50,
+        "follow": {
+          "component": 9,
+          "face": "Boss-Extrude1 · Side of line 2"
+        },
+        "up": {
+          "component": 9,
+          "feature": "Boss-Extrude1",
+          "generator": "end_cap"
+        }
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/mates/3/kind",
+          "equals": "path"
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/position/percent",
+          "equals": 50
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/proof/certainty",
+          "equals": "bounded"
+        },
+        {
+          "pointer": "/summary/assembly/solver/diagnostics",
+          "equals": []
+        }
+      ]
+    },
+    {
+      "tool": "assembly_edit_mate",
+      "arguments": {
+        "mate": "P",
+        "distance": "5 mm"
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/accepted_state",
+          "same_as": {
+            "step": 33,
+            "pointer": "/summary/assembly/accepted_state"
+          }
+        }
+      ],
+      "refused": "P is a path mate; it has no distance"
+    },
+    {
+      "tool": "assembly_edit_mate",
+      "arguments": {
+        "mate": "P",
+        "percent": 25
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/mates/3/position/percent",
+          "equals": 25
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/proof/certainty",
+          "equals": "bounded"
+        }
+      ]
+    },
+    {
+      "tool": "insert_component",
+      "arguments": {
+        "paths": [
+          "{bundle}/work/arch.dwprt"
+        ],
+        "placement": {
+          "translation": [
+            0,
+            80,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0,
+            1
+          ]
+        }
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/components/3/path",
+          "equals": "12"
+        }
+      ]
+    },
+    {
+      "tool": "assembly_mate_lock",
+      "arguments": {
+        "name": "L",
+        "a": 2,
+        "b": 12
+      },
+      "checks": []
+    },
+    {
+      "tool": "insert_component",
+      "arguments": {
+        "paths": [
+          "{bundle}/work/pin.dwprt"
+        ],
+        "placement": {
+          "translation": [
+            3,
+            120,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0,
+            1
+          ]
+        }
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/components/4/path",
+          "equals": "14"
+        }
+      ]
+    },
+    {
+      "tool": "assembly_mate_cam",
+      "arguments": {
+        "name": "C",
+        "cam": {
+          "component": 12,
+          "feature": "Boss-Extrude1",
+          "generator": "end_cap"
+        },
+        "follower": {
+          "component": 14,
+          "feature": "Boss-Extrude1",
+          "generator": "side"
+        }
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/mates/5/kind",
+          "equals": "cam"
+        },
+        {
+          "pointer": "/summary/assembly/mates/5/outside",
+          "equals": true
+        },
+        {
+          "pointer": "/summary/assembly/mates/5/proof/certainty",
+          "equals": "bounded"
+        },
+        {
+          "pointer": "/summary/assembly/solver/diagnostics",
+          "equals": []
+        }
+      ]
+    },
+    {
+      "tool": "assembly_save",
+      "arguments": {
+        "path": "{bundle}/work/rig.dwasm"
+      },
+      "checks": [],
+      "files": [
+        "{bundle}/work/rig.dwasm"
+      ]
+    },
+    {
+      "tool": "open",
+      "arguments": {
+        "path": "{bundle}/work/rig.dwasm"
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/mates/1/slot/support/kind",
+          "equals": "arc_slot"
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/position/percent",
+          "equals": 25
+        },
+        {
+          "pointer": "/summary/assembly/mates/5/kind",
+          "equals": "cam"
+        },
+        {
+          "pointer": "/summary/assembly/solver/diagnostics",
+          "equals": []
+        }
+      ]
+    },
+    {
+      "tool": "assembly_mate_controller",
+      "arguments": {
+        "action": "show"
+      },
+      "checks": [
+        {
+          "pointer": "/result/mates",
+          "equals": [
+            "D"
+          ]
+        },
+        {
+          "pointer": "/result/positions/0/name",
+          "equals": "Low"
+        }
+      ]
+    },
+    {
+      "tool": "assembly_mate_coincident",
+      "arguments": {
+        "name": "Z",
+        "a": {
+          "component": 12,
+          "feature": "Boss-Extrude1",
+          "generator": "start_cap"
+        },
+        "b": {
+          "component": 14,
+          "feature": "Boss-Extrude1",
+          "generator": "start_cap"
+        },
+        "alignment": "aligned"
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/mates/6/kind",
+          "equals": "coincident"
+        },
+        {
+          "pointer": "/summary/assembly/solver/diagnostics",
+          "equals": []
+        }
+      ]
+    },
+    {
+      "tool": "assembly_save",
+      "arguments": {
+        "path": "{bundle}/work/rig.dwasm"
+      },
+      "checks": [],
+      "files": [
+        "{bundle}/work/rig.dwasm"
+      ]
+    }
+  ]
+}

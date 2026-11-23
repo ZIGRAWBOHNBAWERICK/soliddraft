@@ -123,6 +123,8 @@ pub struct AssemblyState {
     pub collision_drag: bool,
     pub dynamic_clearance: bool,
     pub clearance_mm: f64,
+    /// Physical Dynamics: a guarded drag pushes the parts it meets.
+    pub physical_dynamics: bool,
 }
 
 impl AssemblyState {
@@ -158,6 +160,17 @@ pub struct AssemblySession {
     outbox: Outbox,
     /// The camera frames the parts once the first meshes arrive.
     fit_pending: bool,
+    /// A Mate Controller animation under way.
+    pub animation: Option<ControllerAnimation>,
+}
+
+/// A Mate Controller animation: the driven values from `from` to `to` over `seconds`,
+/// each frame shown as a drag preview, the last applied as one undo step.
+pub struct ControllerAnimation {
+    pub from: Vec<f64>,
+    pub to: Vec<f64>,
+    pub seconds: f64,
+    pub started: web_time::Instant,
 }
 
 /// The selection's placement as the property panel edits it.
@@ -229,7 +242,28 @@ impl AssemblySession {
             shown: (None, None),
             outbox: Outbox::default(),
             fit_pending,
+            animation: None,
         }
+    }
+
+    /// Shows the animation's frame for now, and applies its end once it is over. Returns
+    /// whether it runs on.
+    pub fn animate(&mut self) -> Result<bool, soliddraft_assembly::MateRefusal> {
+        let Some(a) = self.animation.as_ref() else { return Ok(false) };
+        let t = a.started.elapsed().as_secs_f64() / a.seconds.max(1e-3);
+        if t >= 1.0 {
+            let to = self.animation.take().expect("checked").to;
+            self.doc.cancel_drag();
+            self.doc.apply_controller_values(&to)?;
+            return Ok(false);
+        }
+        let values: Vec<f64> = a.from.iter().zip(&a.to).map(|(f, e)| f + (e - f) * t).collect();
+        if let Err(e) = self.doc.preview_controller_values(&values) {
+            self.animation = None;
+            self.doc.cancel_drag();
+            return Err(e);
+        }
+        Ok(true)
     }
 
     /// The name the tab and the tree show, with a dot for unsaved edits.
@@ -654,6 +688,11 @@ pub fn shown(state: &AppState) -> serde_json::Value {
         "components": components,
         "selected": s.selected.as_ref().map(|p| p.to_string()),
         "mates": s.doc.assembly().mates.len(),
+        "controller": {
+            "mates": s.doc.controller_mates(),
+            "positions": s.doc.mate_controller().map(|c| c.positions.iter().map(|p| p.name.clone()).collect::<Vec<_>>()).unwrap_or_default(),
+            "animating": s.animation.is_some(),
+        },
         "mate_names": s.doc.assembly().mates.iter().map(|m| match m {
             soliddraft_assembly::MateEntry::Known(mate) => mate.name(),
             soliddraft_assembly::MateEntry::Future(kept) => kept["name"].as_str().unwrap_or_default(),
@@ -862,8 +901,11 @@ pub fn apply(state: &mut AppState, dock: &mut DockState<Tab>, action: AssemblyAc
         }
         AssemblyAction::Place(path, placement) => {
             let Some(s) = state.assembly.session.as_mut() else { return };
-            let begin = if state.assembly.collision_drag || state.assembly.dynamic_clearance {
-                s.doc.begin_guarded_drag(path, state.assembly.dynamic_clearance.then_some(state.assembly.clearance_mm))
+            let clearance = state.assembly.dynamic_clearance.then_some(state.assembly.clearance_mm);
+            let begin = if state.assembly.physical_dynamics {
+                s.doc.begin_dynamic_drag(path, clearance)
+            } else if state.assembly.collision_drag || state.assembly.dynamic_clearance {
+                s.doc.begin_guarded_drag(path, clearance)
             } else {
                 s.doc.begin_drag(path)
             };
@@ -1430,6 +1472,7 @@ pub fn properties(ui: &mut egui::Ui, state: &mut AppState) {
     let collision_drag = &mut state.assembly.collision_drag;
     let dynamic_clearance = &mut state.assembly.dynamic_clearance;
     let clearance_mm = &mut state.assembly.clearance_mm;
+    let physical_dynamics = &mut state.assembly.physical_dynamics;
     let Some(s) = state.assembly.session.as_mut() else { return };
     let (head, _) = ui.allocate_exact_size(vec2(ui.available_width(), 32.0), Sense::hover());
     let title = match s.selected_row() {
@@ -1495,6 +1538,7 @@ pub fn properties(ui: &mut egui::Ui, state: &mut AppState) {
             if *dynamic_clearance {
                 ui.add(egui::DragValue::new(clearance_mm).range(0.0..=1e9).suffix(" mm"));
             }
+            ui.checkbox(physical_dynamics, "Physical Dynamics: push what it meets");
         });
         if s.doc.drag_pending() {
             ui.label("Checking motion...");
@@ -1553,7 +1597,9 @@ pub fn properties(ui: &mut egui::Ui, state: &mut AppState) {
             return;
         }
         if started
-            && let Err(e) = if *collision_drag || *dynamic_clearance {
+            && let Err(e) = if *physical_dynamics {
+                s.doc.begin_dynamic_drag(draft.path.clone(), dynamic_clearance.then_some(*clearance_mm))
+            } else if *collision_drag || *dynamic_clearance {
                 s.doc.begin_guarded_drag(draft.path.clone(), dynamic_clearance.then_some(*clearance_mm))
             } else {
                 s.doc.begin_drag(draft.path.clone())

@@ -1192,6 +1192,7 @@ pub enum Command {
     ActivateConfiguration {
         name: String,
     },
+    /// Edits the part's parameters or configurations in one undo step.
     EditParameters(model::configs::Edit),
     /// Replaces the whole configuration table as one step.
     SetConfigurationGrid {

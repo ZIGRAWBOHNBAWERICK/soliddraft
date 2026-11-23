@@ -18,6 +18,7 @@ pub enum Field {
     Name(String),
     /// A text property's cell in a column.
     Property(String, usize),
+    /// A parameter's comment.
     Comment(String),
     /// The new global's name.
     NewGlobalName,
@@ -278,6 +279,7 @@ fn parameter_row(
     row: &ValueRow,
     table: &ValuesTable,
     width: f32,
+    compact: bool,
     actions: &mut Vec<ValuesAction>,
 ) {
     let column = table.active;
@@ -302,7 +304,7 @@ fn parameter_row(
             || result.zip(row.values[0]).is_some_and(|(current, default)| current != default)
             || row.logical[column] != row.logical[0]);
     ui.horizontal(|ui| {
-        name_cell(ui, tab, row, width * 0.25, actions);
+        name_cell(ui, tab, row, (width * 0.25).clamp(136.0, 300.0), actions);
         if row.input.is_none() {
             let delete = ui.small_button("×").on_hover_text(format!("Delete {}", row.name));
             delete.widget_info(|| {
@@ -313,12 +315,15 @@ fn parameter_row(
             }
         }
     });
-    ui.label(RichText::new(&row.unit).color(theme::muted()));
+    if !compact {
+        ui.label(RichText::new(&row.unit).color(theme::muted()));
+    }
     let key = Field::Cell(row.name.clone(), column);
     ui.vertical(|ui| {
         let label = format!("{configuration} {}", row.name);
         let edit = |ui: &mut egui::Ui, tab: &mut ValuesTab| {
-            field(ui, tab, key.clone(), Text { current: &current, hint: &hint, label: &label }, width * 0.24, true)
+            let width = if compact { 94.0 } else { width * 0.24 };
+            field(ui, tab, key.clone(), Text { current: &current, hint: &hint, label: &label }, width, true)
         };
         let commit = if differs {
             let marked = egui::Frame::new()
@@ -348,10 +353,13 @@ fn parameter_row(
     } else {
         ui.label("-");
     }
+    if compact {
+        ui.label(RichText::new(&row.unit).color(theme::muted()));
+    }
     let label = format!("Comment {}", row.name);
     let comment = Field::Comment(row.name.clone());
     if let Some(text) =
-        field(ui, tab, comment.clone(), Text { current: &row.comment, hint: "", label: &label }, width * 0.24, false)
+        field(ui, tab, comment.clone(), Text { current: &row.comment, hint: "", label: &label }, width * 0.24, true)
     {
         actions.push(ValuesAction::Commit(comment, text));
     }
@@ -396,21 +404,22 @@ fn section(ui: &mut egui::Ui, title: &str) {
 
 /// Mounts the panel in the part dock and opens its full-window view on request.
 pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
+    ui.set_min_width(ui.available_width());
     if state.assembly.is_active() || state.drawing.is_active() {
         ui.label("Switch to the part to edit parameters and configurations.");
         return;
     }
     if state.values.expanded {
         let ctx = ui.ctx().clone();
-        let mut open = true;
-        let screen = ctx.content_rect().shrink(12.0);
-        egui::Window::new("Parameters & configurations")
-            .open(&mut open)
-            .collapsible(false)
-            .resizable(false)
-            .fixed_rect(screen)
-            .show(&ctx, |ui| contents(ui, state));
-        state.values.expanded &= open;
+        let size = (ctx.content_rect().size() - egui::vec2(48.0, 48.0)).max(egui::Vec2::ZERO);
+        let modal = egui::Modal::new(egui::Id::new("expanded_parameters")).show(&ctx, |ui| {
+            ui.set_width(size.x);
+            ui.set_height(size.y);
+            contents(ui, state);
+        });
+        if modal.should_close() {
+            state.values.expanded = false;
+        }
     } else {
         contents(ui, state);
     }
@@ -467,7 +476,7 @@ fn tabs(ui: &mut egui::Ui, tab: &mut ValuesTab, table: &ValuesTable, actions: &m
                 tab.drafts.remove(&Field::NewConfiguration);
                 tab.errors.remove(&Field::NewConfiguration);
             }
-            ui.menu_button("⋯", |ui| tab_menu(ui, tab, table, table.active, actions))
+            ui.menu_button("...", |ui| tab_menu(ui, tab, table, table.active, actions))
                 .response
                 .on_hover_text("Configuration actions");
         });
@@ -538,9 +547,8 @@ fn contents(ui: &mut egui::Ui, state: &mut AppState) {
         tab.completions = completions(&table);
     }
     ui.horizontal_wrapped(|ui| {
-        if !tab.expanded {
-            ui.label(RichText::new("Parameters & configurations").family(theme::semibold()).size(12.5));
-        }
+        let title = if tab.expanded { 15.0 } else { 12.5 };
+        ui.label(RichText::new("Parameters & configurations").family(theme::semibold()).size(title));
         let expand = if tab.expanded { "Back to dock" } else { "Expand" };
         if ui.small_button(expand).clicked() {
             tab.expanded = !tab.expanded;
@@ -594,16 +602,22 @@ fn contents(ui: &mut egui::Ui, state: &mut AppState) {
             || matches(&row.comment)
             || row.cells[table.active].as_deref().is_some_and(matches)
     };
+    let compact = ui.available_width() < 480.0;
     let width = (ui.available_width() - 60.0).clamp(430.0, 1440.0);
     egui::ScrollArea::both().id_salt("parameters_scroll").auto_shrink([false, false]).show(ui, |ui| {
         egui::Grid::new("parameters_table").num_columns(5).striped(true).spacing([8.0, 5.0]).show(ui, |ui| {
-            for title in ["Name", "Unit", "Expression", "Evaluates to", "Comment"] {
+            let columns = if compact {
+                ["Name", "Expression", "Evaluates to", "Unit", "Comment"]
+            } else {
+                ["Name", "Unit", "Expression", "Evaluates to", "Comment"]
+            };
+            for title in columns {
                 ui.label(RichText::new(title).family(theme::semibold()).color(theme::muted()));
             }
             ui.end_row();
             section(ui, "Global parameters");
             for row in table.globals.iter().filter(|row| show_row(row)) {
-                parameter_row(ui, tab, row, &table, width, &mut actions);
+                parameter_row(ui, tab, row, &table, width, compact, &mut actions);
             }
             if !table.groups.is_empty() {
                 section(ui, "Model parameters");
@@ -614,7 +628,7 @@ fn contents(ui: &mut egui::Ui, state: &mut AppState) {
                 }
                 section(ui, &group.name);
                 for row in group.rows.iter().filter(|row| matches(&group.name) || show_row(row)) {
-                    parameter_row(ui, tab, row, &table, width, &mut actions);
+                    parameter_row(ui, tab, row, &table, width, compact, &mut actions);
                 }
             }
         });

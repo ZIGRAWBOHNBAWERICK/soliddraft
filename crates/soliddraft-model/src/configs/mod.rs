@@ -40,19 +40,56 @@ struct Row {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Edit {
     /// Rename a named configuration without changing its identity.
-    Rename { configuration: String, name: String },
+    Rename {
+        /// Current tab name.
+        configuration: String,
+        /// New tab name.
+        name: String,
+    },
     /// Copy a configuration and its overrides under a new identity.
-    Duplicate { configuration: String, name: String },
+    Duplicate {
+        /// Source tab, including Default.
+        configuration: String,
+        /// Name of the copy.
+        name: String,
+    },
     /// Delete a named configuration. Default is always present.
-    Delete { configuration: String },
-    /// Move one tab left or right among the named configurations.
-    Move { configuration: String, offset: i8 },
+    Delete {
+        /// Tab to delete.
+        configuration: String,
+    },
+    /// Move a tab among the named configurations.
+    Move {
+        /// Tab to move.
+        configuration: String,
+        /// Number of positions to move. Negative means left.
+        offset: i8,
+    },
     /// Set an explicit suppression state, or let the feature inherit again.
-    Suppress { configuration: String, feature: FeatureId, suppressed: Option<bool> },
+    Suppress {
+        /// Tab to edit, including Default.
+        configuration: String,
+        /// Feature in the tree.
+        feature: FeatureId,
+        /// Explicit flag, or None to use Default.
+        suppressed: Option<bool>,
+    },
     /// Set or clear a parameter's comment.
-    Comment { name: String, text: String },
+    Comment {
+        /// Parameter name.
+        name: String,
+        /// Comment text. An empty string clears the comment.
+        text: String,
+    },
     /// Set or clear a configuration's custom property.
-    Property { configuration: String, name: String, text: String },
+    Property {
+        /// Tab to edit, including Default.
+        configuration: String,
+        /// Property name.
+        name: String,
+        /// Property text. An empty string clears the authored value.
+        text: String,
+    },
     /// Use degrees for trigonometric functions.
     Degrees(bool),
 }

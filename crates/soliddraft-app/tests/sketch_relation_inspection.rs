@@ -80,11 +80,14 @@ fn filter_button(app: &mut App) -> (String, Rect) {
     ribbon::open_options(app);
     for _ in 0..6 {
         let painted = ribbon::painted(app);
-        let left = ribbon::options_region(app).right() + ribbon::TOLERANCE;
+        // The sheet's own filter: the bottom bar's selection filter also reads "All".
+        let sheet = ribbon::options_region(app);
+        let left = sheet.right() + ribbon::TOLERANCE;
         if let Some(head) = painted.iter().find(|p| p.text == "Existing relations" && p.rect.right() < left)
             && let Some(current) = painted.iter().find(|p| {
                 ["Selected", "All", "Conflicting", "Dangling"].contains(&p.text.as_str())
                     && p.full.top() >= head.full.bottom()
+                    && sheet.expand(ribbon::TOLERANCE).contains_rect(p.rect)
                     && p.rect.right() < left
                     && p.rect.contains_rect(p.full)
             })

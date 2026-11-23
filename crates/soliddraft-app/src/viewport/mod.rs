@@ -591,6 +591,8 @@ impl ViewportState {
         crate::web::show_viewport(serde_json::json!({
             "label": unproved.then_some("unproved preview"),
             "triangles": doc.display_body().and_then(|body| doc.meshes.get(&body)).map_or(0, |mesh| mesh.indices.len() / 3),
+            "chord_mm": doc.tess_params.chord_height,
+            "angle_deg": doc.tess_params.surface_angle_deg,
         }));
         if scene.axes.contains(&true) {
             self.paint_origin_axes(&painter, scene.reach, rect, scene.axes);
@@ -708,7 +710,7 @@ impl ViewportState {
             ui,
             rect,
             measurement.as_deref(),
-            self.graphics.show_frame_rate.then(|| doc.triangle_count()),
+            (self.graphics.show_frame_rate && self.graphics.frame_rate_details).then(|| doc.triangle_count()),
         );
         events
     }
@@ -1374,9 +1376,12 @@ impl ViewportState {
         if self.graphics.show_frame_rate {
             ui.ctx().request_repaint();
             if self.frame_ms > 0.0 {
-                let mut rate = format!("{:.0} FPS · {:.1} ms", 1000.0 / self.frame_ms, self.frame_ms);
-                if let Some(triangles) = triangles {
-                    rate.push_str(&format!(" · {triangles} triangles"));
+                let mut rate = format!("{:.0} FPS", 1000.0 / self.frame_ms);
+                if self.graphics.frame_rate_details {
+                    rate.push_str(&format!(" · {:.1} ms", self.frame_ms));
+                    if let Some(triangles) = triangles {
+                        rate.push_str(&format!(" · {triangles} triangles"));
+                    }
                 }
                 details.push(rate);
             }

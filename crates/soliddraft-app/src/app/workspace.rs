@@ -71,6 +71,28 @@ pub struct SolidDraftApp {
     /// Actions waiting while the page reads the exact geometry they need.
     #[cfg(target_arch = "wasm32")]
     pub(super) reading: Option<Reading>,
+    #[cfg(target_arch = "wasm32")]
+    curve_change: Option<CurveChange>,
+}
+
+#[cfg(target_arch = "wasm32")]
+type CurveTarget = (soliddraft_document::DocumentId, u64, Option<crate::graphics::CurvedSurfaces>);
+
+/// A change to display quality for the browser's open part.
+#[cfg(target_arch = "wasm32")]
+struct CurveChange {
+    target: CurveTarget,
+    reply: std::sync::mpsc::Receiver<Result<serde_json::Value, String>>,
+    arrived: bool,
+    failed: bool,
+    wanted: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+#[cfg(target_arch = "wasm32")]
+impl Drop for CurveChange {
+    fn drop(&mut self) {
+        self.wanted.store(false, std::sync::atomic::Ordering::Release);
+    }
 }
 
 /// Actions held until the part's bodies adopted from the kernel worker are read. An edit
@@ -139,6 +161,7 @@ impl SolidDraftApp {
         let mut state = AppState::new(doc);
         state.graphics_device = graphics_device;
         state.graphics = graphics;
+        #[cfg(not(target_arch = "wasm32"))]
         state.doc.set_curved_surfaces(state.graphics.curved_surfaces);
         state.viewport.camera.fit_framed(state.doc.bounds());
         let view = crate::settings::view();
@@ -196,6 +219,8 @@ impl SolidDraftApp {
             opening: None,
             #[cfg(target_arch = "wasm32")]
             reading: None,
+            #[cfg(target_arch = "wasm32")]
+            curve_change: None,
         }
     }
 
@@ -350,6 +375,86 @@ impl SolidDraftApp {
         }
         let opening = self.opening.take().expect("a part is opening");
         self.open_here(&opening.name, &opening.bytes);
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn update_curves(&mut self, ctx: &egui::Context) {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::{Arc, mpsc};
+
+        let doc = &mut self.state.doc;
+        let choice = self.state.graphics.curved_surfaces;
+        if doc.curved_surfaces() == choice {
+            self.curve_change = None;
+            return;
+        }
+        let target = (doc.instance(), doc.revision(), choice);
+        if self.curve_change.as_ref().is_some_and(|change| change.target != target) {
+            self.curve_change = None;
+        }
+        if doc.proof_pending() || self.opening.is_some() {
+            return;
+        }
+        if doc.display_body().is_none() {
+            doc.set_curved_surfaces(choice);
+            return;
+        }
+
+        if let Some(change) = self.curve_change.as_mut() {
+            if change.failed {
+                return;
+            }
+            if !change.arrived {
+                match change.reply.try_recv() {
+                    Ok(Ok(_)) => change.arrived = true,
+                    Err(mpsc::TryRecvError::Empty) => return,
+                    failed => {
+                        let error = match failed {
+                            Ok(Err(error)) => error,
+                            _ => "The kernel worker stopped.".into(),
+                        };
+                        change.failed = true;
+                        self.state.note(format!("Curved surfaces could not be updated: {error}"), NoteKind::Error);
+                        return;
+                    }
+                }
+            }
+            match doc.kernel().read_offers(1) {
+                Ok(0) => {
+                    doc.set_curved_surfaces(choice);
+                    self.curve_change = None;
+                }
+                Ok(_) => ctx.request_repaint(),
+                Err(error) => {
+                    change.failed = true;
+                    self.state.note(format!("Curved surfaces could not be updated: {error}"), NoteKind::Error);
+                }
+            }
+            return;
+        }
+
+        let (send, reply) = mpsc::channel();
+        let wanted = Arc::new(AtomicBool::new(true));
+        let live = wanted.clone();
+        let mut change = CurveChange { target, reply, arrived: false, failed: false, wanted };
+        let job = crate::kernel_worker::Job::Remesh { curved_surfaces: choice };
+        let result = doc.model().snapshot().encode().map_err(|error| error.to_string()).and_then(|(_, part)| {
+            crate::kernel_worker::submit(
+                part,
+                &job,
+                doc.kernel().clone(),
+                ctx,
+                move || live.load(Ordering::Acquire),
+                move |result| {
+                    let _ = send.send(result);
+                },
+            )
+        });
+        if let Err(error) = result {
+            change.failed = true;
+            self.state.note(format!("Curved surfaces could not be updated: {error}"), NoteKind::Error);
+        }
+        self.curve_change = Some(change);
     }
 
     /// Opens a part file on the page's kernel, taking any builds offered to it.
@@ -789,6 +894,7 @@ impl eframe::App for SolidDraftApp {
         let ctx = &root.ctx().clone();
         log::debug!("ui frame {}", self.frame);
         self.state.doc.set_repaint(ctx);
+        #[cfg(not(target_arch = "wasm32"))]
         self.state.doc.set_curved_surfaces(self.state.graphics.curved_surfaces);
         self.focus_tool_document();
         let dt = ctx.input(|i| i.unstable_dt) * 1000.0;
@@ -846,6 +952,8 @@ impl eframe::App for SolidDraftApp {
         self.poll_opening();
         #[cfg(target_arch = "wasm32")]
         self.poll_reading(ctx);
+        #[cfg(target_arch = "wasm32")]
+        self.update_curves(ctx);
 
         if let Some(e) = self.state.editor.as_mut() {
             e.refresh(&self.state.doc);

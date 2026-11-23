@@ -176,6 +176,7 @@ fn graphics_presets_remesh_curves_without_editing_the_saved_part() {
     reopened.apply(Command::EditExtrude { id, params: edited.clone() }).unwrap();
     assert_eq!(reopened.tess_params.surface_angle_deg, 7.5);
     edited.profile = ProfileKind::Circle { diameter: 40.0 };
+    edited.depth = 90.0;
     reopened.apply(Command::AddExtrude { params: edited, via_assistant: false }).unwrap();
     assert_eq!(reopened.tess_params.surface_angle_deg, 7.5);
 }

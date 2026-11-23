@@ -4078,6 +4078,11 @@ impl Document {
         }
     }
 
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn curved_surfaces(&self) -> Option<crate::graphics::CurvedSurfaces> {
+        self.quality.curved_surfaces()
+    }
+
     /// Sets the part's viewport quality, saved in its file. The part's revision does not
     /// change and nothing rebuilds: the worker makes the new meshes and the old one stays
     /// on screen until they arrive.

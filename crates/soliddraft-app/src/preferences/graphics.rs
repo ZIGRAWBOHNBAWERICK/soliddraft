@@ -21,6 +21,7 @@ pub(super) const CONTROLS: &[(&str, &str)] = &[
     ("vertices", "Vertex markers"),
     ("measurement", "Quick measurement"),
     ("fps", "Frame rate"),
+    ("fps_details", "Frame rate details"),
     ("threads", "Cosmetic thread markings"),
     ("halo", "Halo under sketch curves"),
     ("hatch", "Section hatch style"),
@@ -51,7 +52,10 @@ pub(super) fn show(p: &mut Preferences, ui: &mut egui::Ui) {
         ui.label("Graphics preset");
         ui.horizontal_wrapped(|ui| {
             for preset in GraphicsPreset::ALL {
-                if ui.selectable_label(graphics.preset == preset, preset.label()).clicked() {
+                let choice = ui.selectable_label(graphics.preset == preset, preset.label());
+                #[cfg(target_arch = "wasm32")]
+                crate::web::show_control(format!("Graphics preset: {}", preset.label()), choice.rect);
+                if choice.clicked() {
                     graphics.choose_preset(preset, device);
                 }
             }
@@ -124,7 +128,13 @@ pub(super) fn show(p: &mut Preferences, ui: &mut egui::Ui) {
     toggle(ui, highlight, "angles", "View angles", &mut graphics.show_view_angles);
     toggle(ui, highlight, "vertices", "Vertex markers", &mut graphics.show_vertex_markers);
     toggle(ui, highlight, "measurement", "Quick measurement", &mut graphics.quick_measurement);
-    toggle(ui, highlight, "fps", "Frame rate and details", &mut graphics.show_frame_rate);
+    toggle(ui, highlight, "fps", "Frame rate", &mut graphics.show_frame_rate);
+    row(ui, highlight, "fps_details", |ui| {
+        ui.add_enabled(
+            graphics.show_frame_rate,
+            egui::Checkbox::new(&mut graphics.frame_rate_details, "Frame rate details"),
+        );
+    });
 
     ui.separator();
     ui.heading("Display aids");
@@ -145,10 +155,17 @@ pub(super) fn show(p: &mut Preferences, ui: &mut egui::Ui) {
     toggle(ui, highlight, "hidden", "Hidden edges of selected bodies", &mut graphics.hidden_selected_edges);
     toggle(ui, highlight, "references", "Reference geometry through bodies", &mut graphics.xray_references);
     toggle(ui, highlight, "follow_grid", "Grid follows the view", &mut graphics.view_aligned_grid);
-    row(ui, highlight, "surface_analysis", |ui| {
-        ui.add_enabled(false, egui::Button::new("Single surface analysis · Coming soon"))
-            .on_disabled_hover_text("Single surface analysis needs certified curvature samples for the selected face.");
-    });
+    if row(ui, highlight, "surface_analysis", |ui| {
+        ui.button("Single surface analysis · Coming soon")
+            .on_hover_text("Single surface analysis needs certified curvature samples for the selected face.")
+            .clicked()
+    }) {
+        p.message = Some(super::Message {
+            text: "Single surface analysis is unavailable. The kernel does not provide certified curvature samples for a selected face."
+                .into(),
+            error: true,
+        });
+    }
 
     ui.separator();
     ui.heading("This computer");

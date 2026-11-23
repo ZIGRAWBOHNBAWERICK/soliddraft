@@ -1546,6 +1546,7 @@ impl AppState {
 
     pub fn set_graphics(&mut self, graphics: crate::graphics::Graphics) -> Result<(), crate::settings::NotKept> {
         self.graphics = graphics;
+        #[cfg(not(target_arch = "wasm32"))]
         self.doc.set_curved_surfaces(graphics.curved_surfaces);
         crate::settings::save_graphics(&graphics).inspect_err(|why| self.not_kept("Graphics settings", why))
     }

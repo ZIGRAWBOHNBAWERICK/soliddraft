@@ -62,6 +62,10 @@ fn window() -> Window {
                         SAVES.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                         let _ = settings::save_shortcuts(&s);
                     }
+                    Change::Graphics(graphics) => {
+                        SAVES.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                        settings::save_graphics(&graphics).unwrap();
+                    }
                     _ => {}
                 }
             }
@@ -211,6 +215,30 @@ fn search_finds_controls_presets_and_bindings() {
     assert_eq!(saves(), saves_before, "search changes nothing");
     assert_eq!(bytes(&dir), before);
     assert!(preferences::search("wheel").iter().all(|h| h.label.to_lowercase().contains("wheel")));
+}
+
+#[test]
+fn graphics_reports_unavailable_samples_and_keeps_the_preset() {
+    use soliddraft_app::graphics::{CurvedSurfaces, GraphicsPreset};
+
+    let (_guard, dir) = config_dir("graphics");
+    write(&dir, r#"{"appearance":{"theme":"dark"}}"#);
+    let mut w = window();
+    w.run_steps(2);
+    click(&mut w, "Graphics");
+    assert!(has(&w, "4× MSAA · Not available on this GPU"));
+    click(&mut w, "Performance");
+    let saved = settings::graphics();
+    assert_eq!(saved.preset, GraphicsPreset::Performance);
+    assert_eq!(saved.curved_surfaces, Some(CurvedSurfaces::Coarse));
+    assert_eq!(saved.samples, 1);
+    assert_eq!(file_json(&dir)["appearance"]["theme"], "dark");
+
+    click(&mut w, "Quality");
+    let saved = settings::graphics();
+    assert_eq!(saved.preset, GraphicsPreset::Quality);
+    assert_eq!(saved.curved_surfaces, Some(CurvedSurfaces::Fine));
+    assert_eq!(saved.samples, 1, "Quality respects the available samples");
 }
 
 /// Drags in the practice area with `button` held and `m` down.

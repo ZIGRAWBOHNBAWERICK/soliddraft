@@ -125,7 +125,10 @@ fn categories_list(p: &mut Preferences, ui: &mut egui::Ui) {
             Status::Available => {
                 ui.label(egui::RichText::new(c.label).strong());
                 for page in super::available_pages().iter().filter(|x| x.category == c.id) {
-                    if ui.selectable_label(p.page == page.id && p.search.trim().is_empty(), page.title).clicked() {
+                    let entry = ui.selectable_label(p.page == page.id && p.search.trim().is_empty(), page.title);
+                    #[cfg(target_arch = "wasm32")]
+                    crate::web::show_control(format!("Preferences: {}", page.title), entry.rect);
+                    if entry.clicked() {
                         p.open_page(page.id);
                     }
                 }

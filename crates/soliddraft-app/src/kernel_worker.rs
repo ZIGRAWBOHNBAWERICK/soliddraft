@@ -36,6 +36,8 @@ pub enum Job {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         curved_surfaces: Option<crate::graphics::CurvedSurfaces>,
     },
+    /// Warm the viewport meshes for a display setting while the open document stays usable.
+    Remesh { curved_surfaces: Option<crate::graphics::CurvedSurfaces> },
 }
 
 impl Job {
@@ -44,6 +46,7 @@ impl Job {
         match self {
             Job::MassProperties { .. } => "mass_properties",
             Job::Build { .. } => "build",
+            Job::Remesh { .. } => "remesh",
         }
     }
 }
@@ -106,6 +109,22 @@ impl Host {
                     "statuses": statuses,
                     "triangles": triangles,
                 }))
+            }
+            Job::Remesh { curved_surfaces } => {
+                for (_, body) in doc.live_bodies() {
+                    let kernel = doc.kernel();
+                    let topology = kernel.topology(body).map_err(|error| error.to_string())?;
+                    let levels = crate::graphics::mesh_levels(
+                        *curved_surfaces,
+                        &doc.settings().viewport,
+                        topology.bbox.diagonal(),
+                    );
+                    for params in levels.all() {
+                        kernel.preview(body, params).map_err(|error| error.to_string())?;
+                        kernel.preview_edges(body, params).map_err(|error| error.to_string())?;
+                    }
+                }
+                Ok(serde_json::Value::Null)
             }
         }
     }

@@ -361,7 +361,8 @@ fn the_complete_icon_catalogue_survives_real_size_rendering() {
 
     let mut report = String::new();
     for mode in MODES {
-        let dark = true;
+        // The catalogue's drawings follow the chrome, which is daylight in both modes.
+        let dark = theme::is_dark();
         for ppp in SCALES {
             // The sizes the ribbon ships.
             for side in [16.0, 22.0, 26.0] {

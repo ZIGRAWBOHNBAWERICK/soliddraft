@@ -1,4 +1,4 @@
-//! Edit Suite appearance settings through the real app and wgpu pipeline.
+//! Clear Bench appearance settings through the real app and wgpu pipeline.
 //! Bracket frames are written under the temporary directory for review.
 //!
 //! The mode is process-wide (`theme::set_mode`), so switches run light then dark
@@ -55,24 +55,28 @@ fn the_bracket_in_light_and_dark() {
         harness.state_mut().state.push(AppAction::SetTheme(mode));
         harness.run_steps(6);
         assert_eq!(theme::mode(), mode, "the appearance preference is retained");
-        assert_eq!(theme::palette(), &theme::edit_suite::PALETTE);
+        assert_eq!(theme::active_theme_id(), "clear_bench");
+        assert_eq!(theme::palette(), &theme::clear_bench::PALETTE);
         let style = harness.ctx.global_style();
-        assert!(style.visuals.dark_mode, "Edit Suite has dark chrome in either mode");
-        assert_eq!(style.visuals.panel_fill, egui::Color32::from_rgb(0x30, 0x33, 0x38));
-        assert_eq!(style.visuals.selection.stroke.color, egui::Color32::from_rgb(0xf5, 0xa5, 0x24));
+        assert!(!style.visuals.dark_mode, "Clear Bench has daylight chrome in either mode");
+        assert_eq!(style.visuals.panel_fill, egui::Color32::WHITE);
         assert_eq!(style.visuals.widgets.inactive.corner_radius, egui::CornerRadius::same(6));
-        let image = harness.render().expect("Edit Suite renders");
-        // The palette starts right of the workspace strip.
-        let x = soliddraft_app::left_bar::WIDTH as u32 + 2;
-        assert_eq!(image.get_pixel(x, 200).0, [0x30, 0x33, 0x38, 255], "the palette paints charcoal");
+        let image = harness.render().expect("Clear Bench renders");
+        // The tool strip's own ground shows in the gap between two of its cards.
         let start = harness.get_by_label("Start sketch").rect();
+        let gap = (start.right() + 2.0) as u32;
+        assert_eq!(
+            image.get_pixel(gap, start.center().y as u32).0,
+            [0xf5, 0xf7, 0xfa, 255],
+            "the strip paints its daylight ground"
+        );
         assert_eq!(
             image.get_pixel((start.left() + 6.0) as u32, start.center().y as u32).0,
-            [0xf5, 0xa5, 0x24, 255],
-            "Start sketch paints solid amber"
+            [0x1d, 0x52, 0xd6, 255],
+            "Start sketch paints solid cobalt"
         );
-        let path = out_dir().join(format!("edit-suite-{}.png", mode.label().to_lowercase()));
-        image.save(&path).expect("save Edit Suite png");
+        let path = out_dir().join(format!("clear-bench-{}.png", mode.label().to_lowercase()));
+        image.save(&path).expect("save Clear Bench png");
         eprintln!("wrote {}", path.display());
         harness.get_by_label("Start sketch").focus();
         harness.run_steps(2);
@@ -103,11 +107,11 @@ fn the_bracket_in_light_and_dark() {
     }
 
     harness.run_steps(6);
-    assert_eq!(theme::palette(), &theme::edit_suite::PALETTE);
+    assert_eq!(theme::palette(), &theme::clear_bench::PALETTE);
     harness.state_mut().state.push(AppAction::SetTheme(Mode::Light));
     harness.run_steps(2);
-    assert_eq!(theme::palette(), &theme::edit_suite::PALETTE);
-    assert!(harness.ctx.global_style().visuals.dark_mode);
+    assert_eq!(theme::palette(), &theme::clear_bench::PALETTE);
+    assert!(!harness.ctx.global_style().visuals.dark_mode);
     let saved = std::fs::read_to_string(config.join("settings.json")).expect("the choice was saved");
     assert!(saved.contains("\"theme\": \"light\""), "the last choice is in the file: {saved}");
     let _ = std::fs::remove_dir_all(config);

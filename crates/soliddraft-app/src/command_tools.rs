@@ -28,6 +28,7 @@ use soliddraft_assistant::tools::schema::{
 use soliddraft_assistant::{Caller, ToolHost, ToolOutput, ToolSpec};
 use soliddraft_kernel_api::{ArcTurn, FaceId, PathSegment, Plane, SurfaceKind, Sweep, SweepOrientation};
 use soliddraft_kernel_api::{HoleDepth, HoleHead, HoleTip};
+use soliddraft_model::thread::HoleThread;
 use soliddraft_model::{DatumPlane, PatternSpec, PlaneRef, ShellOpenings};
 
 /// A world point in a recipe line, in millimetres.
@@ -369,8 +370,9 @@ pub enum Line {
         face: String,
         /// Hole centres: world points on the face.
         points: Vec<Point>,
-        /// Diameter, mm.
-        diameter: f64,
+        /// Diameter, mm; absent with a thread drills the thread's tap drill.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        diameter: Option<f64>,
         /// Depth, mm; absent drills through.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         depth: Option<f64>,
@@ -383,6 +385,9 @@ pub enum Line {
         /// A countersink at the entry.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         countersink: Option<Countersink>,
+        /// A cosmetic thread tapped in the wall.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        thread: Option<ThreadLine>,
     },
     /// Repeats a feature or copies the body along a direction.
     LinearPattern {
@@ -537,14 +542,21 @@ pub enum Line {
     EditHole {
         /// The feature's name.
         feature: String,
-        /// New diameter, mm.
-        diameter: f64,
+        /// New diameter, mm; absent keeps it, or drills a new thread's tap drill.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        diameter: Option<f64>,
         /// New depth, mm; absent drills through.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         depth: Option<f64>,
         /// A new countersink at the entry; absent keeps the hole's head.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         countersink: Option<Countersink>,
+        /// A new thread; absent keeps the hole's thread.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        thread: Option<ThreadLine>,
+        /// `true` takes the thread out, leaving a plain hole.
+        #[serde(default, skip_serializing_if = "is_false")]
+        plain: bool,
     },
     /// Changes a pattern's copies and spacing or angle.
     EditPattern {
@@ -606,6 +618,47 @@ pub struct Counterbore {
     pub diameter: f64,
     /// Depth, mm.
     pub depth: f64,
+}
+
+/// A cosmetic thread in a hole line: an ISO metric size.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ThreadLine {
+    /// Nominal diameter, mm: 6 for M6.
+    pub size: f64,
+    /// Pitch, mm; absent takes the size's coarse pitch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pitch: Option<f64>,
+    /// Tolerance class; absent takes 6H.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub class: Option<String>,
+    /// Thread depth from the face the hole starts on, mm; absent threads the whole wall.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub length: Option<f64>,
+}
+
+impl ThreadLine {
+    /// The thread it states, or why it states none.
+    pub fn thread(&self) -> Result<HoleThread, String> {
+        let size = soliddraft_model::thread::metric(self.size)
+            .ok_or_else(|| format!("M{} is not an ISO metric thread size", fmt_mm(self.size)))?;
+        let mut thread = HoleThread::coarse(size);
+        if let Some(pitch) = self.pitch {
+            thread.pitch = pitch;
+        }
+        if let Some(class) = &self.class {
+            thread.class = class.trim().to_owned();
+        }
+        thread.length = self.length;
+        Ok(thread)
+    }
+
+    /// The line's thread for people: "M6x1-6H, 12 mm deep".
+    fn text(&self) -> String {
+        match self.thread() {
+            Ok(thread) => crate::document::hole_thread_text(&thread),
+            Err(why) => why,
+        }
+    }
 }
 
 /// A countersink in a hole line.
@@ -855,12 +908,22 @@ pub fn hole_params() -> Vec<(&'static str, Value)> {
     vec![
         ("face", string("The planar face the holes start on, such as Boss-Extrude1 · End cap")),
         ("points", non_empty_array(point("A hole centre"), "Hole centres on the face")),
-        ("diameter", number("Diameter, mm, greater than 0")),
+        ("diameter", optional(number("Diameter, mm, greater than 0; leave out with a thread to drill its tap drill"))),
         ("depth", optional(number("Depth, mm; leave out to drill through"))),
         ("tip_angle", optional(number("Drill-point angle of a blind hole, degrees, such as 118; leave out for flat"))),
         ("counterbore", optional(object(&[("diameter", number("Diameter, mm")), ("depth", number("Depth, mm"))]))),
         ("countersink", optional(countersink_param())),
+        ("thread", optional(thread_param())),
     ]
+}
+
+fn thread_param() -> Value {
+    object(&[
+        ("size", number("ISO metric nominal diameter, mm: 6 for M6, from M1.6 to M64")),
+        ("pitch", optional(number("Pitch, mm; leave out for the coarse pitch, such as 1 for M8x1 fine"))),
+        ("class", optional(string("Tolerance class; leave out for 6H"))),
+        ("length", optional(number("Thread depth from the face, mm; leave out to thread the whole wall"))),
+    ])
 }
 
 fn countersink_param() -> Value {
@@ -1021,9 +1084,14 @@ pub fn draft_params() -> Vec<(&'static str, Value)> {
 pub fn edit_hole_params() -> Vec<(&'static str, Value)> {
     vec![
         feature_param(),
-        ("diameter", number("Diameter, mm, greater than 0")),
+        (
+            "diameter",
+            optional(number("Diameter, mm, greater than 0; leave out to keep it or drill a new thread's tap drill")),
+        ),
         ("depth", optional(number("Depth, mm; leave out to drill through"))),
         ("countersink", optional(countersink_param())),
+        ("thread", optional(thread_param())),
+        ("plain", optional(boolean("true takes the thread out"))),
     ]
 }
 
@@ -1708,7 +1776,7 @@ impl Line {
                 };
                 run.apply(doc, Command::AddCut { params })?;
             }
-            Line::Hole { face, points, diameter, depth, tip_angle, counterbore, countersink } => {
+            Line::Hole { face, points, diameter, depth, tip_angle, counterbore, countersink, thread } => {
                 let id = face_by_name(doc, face).ok_or_else(|| format!("no face named `{face}`"))?;
                 let r =
                     doc.face_ref(id).ok_or_else(|| format!("`{face}` is not planar, so holes cannot start on it"))?;
@@ -1730,10 +1798,16 @@ impl Line {
                     }),
                     (None, None) => None,
                 };
+                let thread = thread.as_ref().map(ThreadLine::thread).transpose()?;
+                let diameter = match (diameter, &thread) {
+                    (Some(d), _) => positive("diameter", *d)?,
+                    (None, Some(thread)) => thread.tap_drill(),
+                    (None, None) => return Err("a plain hole needs its diameter".into()),
+                };
                 let hole = soliddraft_model::HoleFeature {
                     face: r,
                     points,
-                    diameter: positive("diameter", *diameter)?,
+                    diameter,
                     depth: match depth {
                         Some(d) => HoleDepth::Blind { depth: positive("depth", *d)? },
                         None => HoleDepth::Through,
@@ -1743,7 +1817,11 @@ impl Line {
                         None => HoleTip::Flat,
                     },
                     head,
+                    thread,
                 };
+                if let Some(problem) = hole.thread_problem() {
+                    return Err(problem);
+                }
                 run.apply(doc, Command::AddFeature(FeatureKind::Hole(hole)))?;
             }
             Line::LinearPattern { direction, spacing, count, source } => {
@@ -1960,12 +2038,24 @@ impl Line {
                 let params = CutParams { through_all: *through_all, depth, flip: *flip, up_to: None, ..p };
                 run.apply(doc, Command::EditCut { id, params })?;
             }
-            Line::EditHole { feature, diameter, depth, countersink } => {
+            Line::EditHole { feature, diameter, depth, countersink, thread, plain } => {
                 let id = feature_by_name(doc, feature)?;
                 let Some(FeatureKind::Hole(mut h)) = doc.feature(id).map(|f| f.kind.clone()) else {
                     return Err(format!("{feature} is not a hole"));
                 };
-                h.diameter = positive("diameter", *diameter)?;
+                match (thread, *plain) {
+                    (Some(_), true) => return Err("a hole is threaded or plain, not both".into()),
+                    (Some(line), false) => {
+                        let thread = line.thread()?;
+                        h.diameter = thread.tap_drill();
+                        h.thread = Some(thread);
+                    }
+                    (None, true) => h.thread = None,
+                    (None, false) => {}
+                }
+                if let Some(d) = diameter {
+                    h.diameter = positive("diameter", *d)?;
+                }
                 h.depth = match depth {
                     Some(d) => HoleDepth::Blind { depth: positive("depth", *d)? },
                     None => HoleDepth::Through,
@@ -1975,6 +2065,9 @@ impl Line {
                         diameter: positive("countersink diameter", c.diameter)?,
                         angle_deg: positive("countersink angle", c.angle)?,
                     });
+                }
+                if let Some(problem) = h.thread_problem() {
+                    return Err(problem);
                 }
                 run.apply(doc, Command::EditFeature { id, kind: FeatureKind::Hole(h) })?;
             }
@@ -2212,7 +2305,7 @@ impl Line {
                 "Cut".into(),
                 format!("{sketch}, {}", up_to(*up_to_next, up_to_face, end(*through_all, *depth, *flip))),
             ),
-            Line::Hole { face, points, diameter, depth, tip_angle, counterbore, countersink } => {
+            Line::Hole { face, points, diameter, depth, tip_angle, counterbore, countersink, thread } => {
                 let depth = match depth {
                     Some(d) => {
                         let tip = tip_angle.map(|a| HoleTip::Cone { angle_deg: a }).unwrap_or(HoleTip::Flat);
@@ -2230,7 +2323,12 @@ impl Line {
                     ),
                     _ => String::new(),
                 };
-                ("Hole".into(), format!("{} × Ø{} {depth}{head} on {face}", points.len(), fmt_mm(*diameter)))
+                let size = match (thread, diameter) {
+                    (Some(thread), Some(d)) => format!("{} in Ø{}", thread.text(), fmt_mm(*d)),
+                    (Some(thread), None) => thread.text(),
+                    (None, d) => format!("Ø{}", d.map_or("?".into(), fmt_mm)),
+                };
+                ("Hole".into(), format!("{} × {size} {depth}{head} on {face}", points.len()))
             }
             Line::LinearPattern { direction, spacing, count, source } => (
                 "Linear pattern".into(),
@@ -2294,16 +2392,21 @@ impl Line {
                     pull.as_ref().map_or(String::new(), |p| format!(", pulled along {p}"))
                 ),
             ),
-            Line::EditHole { feature, diameter, depth, countersink } => (
+            Line::EditHole { feature, diameter, depth, countersink, thread, plain } => (
                 format!("Edit {feature}"),
                 format!(
-                    "Ø{}, {}{}",
-                    fmt_mm(*diameter),
+                    "{}{}{}{}",
+                    diameter.map_or(String::new(), |d| format!("Ø{}, ", fmt_mm(d))),
                     depth.map_or("through".into(), |d| format!("{} mm", fmt_mm(d))),
                     countersink.map_or(String::new(), |c| format!(
                         ", {}",
                         hole_head_text(&HoleHead::Countersink { diameter: c.diameter, angle_deg: c.angle })
-                    ))
+                    )),
+                    match (thread, plain) {
+                        (Some(thread), _) => format!(", {}", thread.text()),
+                        (None, true) => ", plain".to_owned(),
+                        (None, false) => String::new(),
+                    }
                 ),
             ),
             Line::EditPattern { feature, count, step, source } => {
@@ -2973,6 +3076,12 @@ fn params_json(doc: &Document, kind: &FeatureKind) -> Value {
                     v["countersink"] = json!({ "diameter": diameter, "angle": angle_deg });
                 }
                 None => {}
+            }
+            if let Some(thread) = &h.thread {
+                v["thread"] = json!({
+                    "designation": thread.designation(), "size": thread.size, "pitch": thread.pitch,
+                    "class": thread.class, "length": thread.length,
+                });
             }
             v
         }

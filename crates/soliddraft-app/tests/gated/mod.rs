@@ -35,6 +35,10 @@ pub struct Rules {
     pub refuse_proof_reservation: bool,
     /// Delays the next drawing view to exercise native request handling.
     pub drawing_delay: std::time::Duration,
+    /// Lattices and gyroids wait until this is lifted.
+    pub hold_field: bool,
+    /// True while a lattice or gyroid waits on the hold.
+    pub holding_field: bool,
 }
 
 impl Gated {
@@ -58,6 +62,16 @@ impl Gated {
             });
         }
         Ok(())
+    }
+
+    fn check_field(&self) {
+        let mut rules = self.rules.lock().unwrap();
+        if rules.hold_field {
+            rules.holding_field = true;
+            self.changed.notify_all();
+            rules = self.changed.wait_while(rules, |r| r.hold_field).unwrap();
+            rules.holding_field = false;
+        }
     }
 
     fn display(&self, body: BodyId) -> KernelResult<()> {
@@ -129,6 +143,23 @@ impl Kernel for Gated {
     }
     fn shell(&self, tag: &OpTag, body: BodyId, open: &[FaceId], thickness: f64) -> KernelResult<OpResult> {
         self.inner.shell(tag, body, open, thickness)
+    }
+    fn lattice(&self, tag: &OpTag, body: BodyId, params: &Lattice) -> KernelResult<OpResult> {
+        self.check_field();
+        self.inner.lattice(tag, body, params)
+    }
+    fn gyroid(&self, tag: &OpTag, body: BodyId, params: &Gyroid) -> KernelResult<OpResult> {
+        self.check_field();
+        self.inner.gyroid(tag, body, params)
+    }
+    fn export_field_stl(&self, body: BodyId) -> KernelResult<FieldExport> {
+        self.inner.export_field_stl(body)
+    }
+    fn export_field_stl_at(&self, body: BodyId, accuracy_mm: f64) -> KernelResult<FieldExport> {
+        self.inner.export_field_stl_at(body, accuracy_mm)
+    }
+    fn print_mesh(&self, body: BodyId, params: &TessellationParams) -> KernelResult<Option<PrintMesh>> {
+        self.inner.print_mesh(body, params)
     }
     fn construction_edit(
         &self,

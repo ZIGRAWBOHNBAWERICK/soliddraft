@@ -12,6 +12,8 @@
 //!
 //! - a diameter or radius, on the round edge of its feature in a view that looks along
 //!   its axis, with the count of a pattern before it and THRU after a through hole;
+//! - a threaded hole, the same way, as a callout of its designation and how deep the
+//!   thread goes: `4× M6x1-6H THRU`, `M8x1-6H DEEP 12`;
 //! - a distance, between the edges of its two ends in a view that sees both end on,
 //!   stacked outside the view;
 //! - a slot, as one callout on a round end where the slot is seen in true shape;
@@ -208,6 +210,7 @@ struct Planner<'a> {
     shoulder: f64,
     times: String,
     through: String,
+    depth: String,
 }
 
 fn unit(p: Point2) -> Point2 {
@@ -536,6 +539,34 @@ impl Planner<'_> {
                     });
                 }
             },
+            PmiKind::Size { features, through, thread: Some(thread), .. } => {
+                let first = features.first().ok_or("it is on no feature")?;
+                let Shape::Round { axis, radius, .. } = self.body.feature(first)? else {
+                    return Err("a thread needs a round face".into());
+                };
+                let all: Vec<&[FaceId]> = features.iter().map(Vec::as_slice).collect();
+                // The leader reaches the wall on the side callouts go, as a slot's does.
+                let (view, edge, _, centre, placement, dir) = self.callout(&all, axis, radius)?;
+                let scale = self.views.iter().find(|v| v.id == view).map_or(1.0, |v| v.xf.scale);
+                let on = Point2::new(centre.u + dir.u * radius * scale, centre.v + dir.v * radius * scale);
+                let at = self.views.iter().find(|v| v.id == view).map(|v| v.xf.unproject(on));
+                let text =
+                    thread_text(features.len(), thread, *through, row.depth, &self.times, &self.through, &self.depth);
+                if let Some(face) = first.first() {
+                    self.sizes.insert(*face, self.plans.len());
+                }
+                self.plans.push(Plan {
+                    source,
+                    view,
+                    body: AnnotationKind::Note { text, leader: Vec::new() },
+                    anchors: vec![(edge, at.map_or(Attach::Mid, |at| Attach::Point { at }), on)],
+                    placement,
+                    slide: Slide { along: dir, step: 3.0 },
+                    host: None,
+                    stack: None,
+                    dropped: false,
+                });
+            }
             PmiKind::Size { size, features, tolerance, through, .. } => {
                 let first = features.first().ok_or("it is on no feature")?;
                 let Shape::Round { axis, radius, .. } = self.body.feature(first)? else {
@@ -779,6 +810,27 @@ fn size_text(count: usize, through: bool, times: &str, through_mark: &str) -> St
     format!("{count}{}{through}", Dimension::VALUE_TEXT)
 }
 
+/// What a threaded hole's callout says: the count of a pattern, the designation, then
+/// the through mark or how deep the thread goes, as in `4× M6x1-6H THRU` or
+/// `M8x1-6H DEEP 12`.
+fn thread_text(
+    count: usize,
+    designation: &str,
+    through: bool,
+    depth: Option<f64>,
+    times: &str,
+    through_mark: &str,
+    depth_mark: &str,
+) -> String {
+    let count = if count > 1 { format!("{count}{times} ") } else { String::new() };
+    let end = match (through, depth) {
+        (true, _) => format!(" {through_mark}"),
+        (false, Some(depth)) => format!(" {depth_mark} {}", soliddraft_kernel_api::pmi::length_text(depth)),
+        (false, None) => String::new(),
+    };
+    format!("{count}{designation}{end}")
+}
+
 /// The part's notes as the sheet writes them: the template's heading, then each note
 /// with its number.
 fn notes_text(heading: &str, notes: &[String]) -> String {
@@ -892,6 +944,17 @@ pub(crate) fn refresh(drawing: &mut Drawing, part: &Part, refresh_view: impl Fn(
 /// Copies what the part states about an item into the annotation that shows it.
 fn update(annotation: &mut Annotation, row: &PmiRow, symbols: &crate::library::Symbols) {
     match (&mut annotation.body, &row.item.kind) {
+        (AnnotationKind::Note { text, .. }, PmiKind::Size { features, through, thread: Some(thread), .. }) => {
+            *text = thread_text(
+                features.len(),
+                thread,
+                *through,
+                row.depth,
+                &symbols.times,
+                &symbols.through,
+                &symbols.depth,
+            );
+        }
         (AnnotationKind::Dimension(d), PmiKind::Size { features, tolerance, through, .. }) => {
             d.tolerance = *tolerance;
             d.requirement = true;
@@ -993,6 +1056,7 @@ pub fn import(
         shoulder: style.lines.leader_shoulder,
         times: style.symbols.times.clone(),
         through: style.symbols.through.clone(),
+        depth: style.symbols.depth.clone(),
     };
     let mut failed: BTreeMap<String, String> = BTreeMap::new();
     for pass in [Pass::Distances, Pass::Sizes, Pass::Rest] {

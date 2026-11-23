@@ -35,6 +35,12 @@ pub enum Key {
     HeadDiameter,
     HeadDepth,
     HeadAngle,
+    /// A hole's cosmetic thread: none or an ISO metric one.
+    Thread,
+    ThreadSize,
+    ThreadPitch,
+    ThreadClass,
+    ThreadLength,
     Layout,
     Count,
     Spacing,
@@ -190,10 +196,21 @@ pub fn spec(
             let mut fields = vec![
                 field(HoleFace, "Face", "Placement", 190.0),
                 field(Positions, "Positions", "Placement", 160.0),
-                field(Diameter, "Diameter", "Hole", 150.0),
+                field(Thread, "Thread", "Hole", 150.0),
+            ];
+            if h.thread.is_some() {
+                fields.push(field(ThreadSize, "Size", "Hole", 120.0));
+                fields.push(field(ThreadPitch, "Pitch", "Hole", 130.0));
+            }
+            fields.extend([
+                field(Diameter, if h.thread.is_some() { "Drill" } else { "Diameter" }, "Hole", 150.0),
                 field(HoleDepth, "Depth", "Hole", 170.0),
                 field(PositionList, "", "Positions", 280.0).sheet().count(h.points.len()),
-            ];
+            ]);
+            if h.thread.is_some() {
+                fields.push(field(ThreadClass, "Class", "Thread", 130.0).sheet());
+                fields.push(field(ThreadLength, "Thread depth", "Thread", 200.0).sheet());
+            }
             if matches!(h.depth, DrillDepth::Blind { .. }) {
                 fields.push(field(Depth, "Depth", "Blind depth", 150.0).sheet());
                 fields.push(field(TipKind, "Tip", "Tip", 150.0).sheet());
@@ -483,6 +500,25 @@ fn depth_field(ui: &mut egui::Ui, value: &mut f64, focus: bool) {
 
 fn mm(ui: &mut egui::Ui, label: &str, value: &mut f64) {
     number(ui, label, "mm", egui::DragValue::new(value).speed(0.5).range(0.01..=100_000.0).fixed_decimals(2));
+}
+
+/// A choice whose box and open entries a browser check can find: the box is noted as
+/// `label` and each entry of its open list as `label: entry` (see `web::shown_controls`).
+fn noted_choice<T: Clone + PartialEq>(ui: &mut egui::Ui, label: &str, value: &mut T, choices: &[(T, String)]) {
+    let text = choices.iter().find(|(v, _)| v == value).map_or_else(|| "Custom".to_owned(), |(_, s)| s.clone());
+    let shown = egui::ComboBox::from_id_salt(label).width(ui.available_width().max(40.0)).selected_text(text).show_ui(
+        ui,
+        |ui| {
+            for (v, entry) in choices {
+                let _response = ui.selectable_value(value, v.clone(), entry);
+                #[cfg(target_arch = "wasm32")]
+                crate::web::show_control(format!("{label}: {entry}"), _response.rect);
+            }
+        },
+    );
+    #[cfg(target_arch = "wasm32")]
+    crate::web::show_control(label, shown.response.rect);
+    shown.response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::ComboBox, true, label));
 }
 
 fn choice<T: Copy + PartialEq>(ui: &mut egui::Ui, name: &str, value: &mut T, choices: &[(T, &str)]) {
@@ -830,7 +866,95 @@ fn render(
                 p.points.push(crate::sketch::P2::new(next.u + 10.0, next.v));
             }
         }
-        (EditorParams::Hole(p), Key::Diameter) => mm(ui, "Diameter", &mut p.diameter),
+        (EditorParams::Hole(p), Key::Diameter) => {
+            mm(ui, if p.thread.is_some() { "Drill" } else { "Diameter" }, &mut p.diameter)
+        }
+        (EditorParams::Hole(p), Key::Thread) => {
+            let mut tapped = p.thread.is_some();
+            let was = tapped;
+            noted_choice(ui, "Hole thread", &mut tapped, &[(false, "Plain".into()), (true, "Tapped".into())]);
+            if tapped != was {
+                // The coarse thread whose tap drill is nearest the hole as drawn; the
+                // drill then becomes that tap drill.
+                let size = soliddraft_model::thread::METRIC
+                    .iter()
+                    .min_by(|a, b| (a.coarse_drill - p.diameter).abs().total_cmp(&(b.coarse_drill - p.diameter).abs()))
+                    .expect("the thread table has sizes");
+                p.set_thread(tapped.then(|| soliddraft_model::thread::HoleThread::coarse(size)));
+            }
+        }
+        (EditorParams::Hole(p), Key::ThreadSize) => {
+            if let Some(thread) = p.thread.clone() {
+                let mut nominal = thread.size;
+                let sizes: Vec<(f64, String)> = soliddraft_model::thread::METRIC
+                    .iter()
+                    .map(|size| (size.nominal, format!("M{}", crate::document::fmt_mm(size.nominal))))
+                    .collect();
+                noted_choice(ui, "Thread size", &mut nominal, &sizes);
+                if nominal != thread.size
+                    && let Some(size) = soliddraft_model::thread::metric(nominal)
+                {
+                    let class = thread.class.clone();
+                    p.set_thread(Some(soliddraft_model::thread::HoleThread {
+                        class,
+                        length: thread.length,
+                        ..soliddraft_model::thread::HoleThread::coarse(size)
+                    }));
+                }
+            }
+        }
+        (EditorParams::Hole(p), Key::ThreadPitch) => {
+            if let Some(thread) = p.thread.clone() {
+                let mut pitch = thread.pitch;
+                let label = |pitch: f64| {
+                    let coarse = thread.metric().is_some_and(|s| s.coarse == pitch);
+                    format!("{} mm{}", crate::document::fmt_mm(pitch), if coarse { " coarse" } else { " fine" })
+                };
+                let pitches: Vec<(f64, String)> = thread
+                    .metric()
+                    .into_iter()
+                    .flat_map(|s| s.pitches().collect::<Vec<_>>())
+                    .map(|p| (p, label(p)))
+                    .collect();
+                noted_choice(ui, "Thread pitch", &mut pitch, &pitches);
+                if pitch != thread.pitch {
+                    p.set_thread(Some(soliddraft_model::thread::HoleThread { pitch, ..thread }));
+                }
+            }
+        }
+        (EditorParams::Hole(p), Key::ThreadClass) => {
+            if let Some(thread) = &mut p.thread {
+                egui::ComboBox::from_id_salt("thread_class")
+                    .width(ui.available_width())
+                    .selected_text(thread.class.clone())
+                    .show_ui(ui, |ui| {
+                        for class in soliddraft_model::thread::INTERNAL_CLASSES {
+                            ui.selectable_value(&mut thread.class, (*class).to_owned(), *class);
+                        }
+                    })
+                    .response
+                    .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::ComboBox, true, "Tolerance class"));
+            }
+        }
+        (EditorParams::Hole(p), Key::ThreadLength) => {
+            let full_depth = match p.depth {
+                HoleDepth::Blind { depth } => depth,
+                HoleDepth::Through => 2.0 * p.diameter.max(1.0),
+            };
+            if let Some(thread) = &mut p.thread {
+                ui.horizontal(|ui| {
+                    let mut full = thread.length.is_none();
+                    if ui.checkbox(&mut full, "Full depth").changed() {
+                        // A part-depth thread starts at twice the nominal diameter, or the
+                        // hole's depth when that is less.
+                        thread.length = (!full).then(|| (2.0 * thread.size).min(full_depth));
+                    }
+                    if let Some(length) = &mut thread.length {
+                        mm(ui, "Thread depth", length);
+                    }
+                });
+            }
+        }
         (EditorParams::Hole(p), Key::HoleDepth) => {
             let mut through = matches!(p.depth, HoleDepth::Through);
             let was = through;

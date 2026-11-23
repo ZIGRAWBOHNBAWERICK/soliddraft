@@ -39,8 +39,8 @@ const viewport = () => page.eval(() => JSON.parse(window.wasmBindings.shown_view
 const settings = () => page.eval(() => JSON.parse(localStorage.getItem('soliddraft-settings'))?.graphics);
 async function click(label) {
   const control = await until(
-    () => page.eval(`JSON.parse(window.wasmBindings.shown_controls())[${JSON.stringify(label)}]`),
-    Boolean,
+    () => page.eval(`() => JSON.parse(window.wasmBindings.shown_controls())[${JSON.stringify(label)}] ?? null`),
+    value => Number.isFinite(value?.x) && Number.isFinite(value?.y),
     `Control ${label} was not drawn`,
   );
   await page.eval(`() => window.graphicsClick(${Math.round(control.x)}, ${Math.round(control.y)})`);

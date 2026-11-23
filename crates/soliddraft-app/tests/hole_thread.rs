@@ -518,7 +518,7 @@ fn a_drawing_calls_out_each_counterbore_after_one_opening_is_skimmed() {
     let sheet = &session.doc.drawing.sheets[0];
     let projected = session.doc.projected_of(sheet.views[0].id).unwrap();
     let ctx = soliddraft_app::drawing::part::PartContext::new(&state.doc).unwrap();
-    let symbols = soliddraft_drawing::library::template(sheet.template.as_str()).style_file().symbols;
+    let symbols = &soliddraft_drawing::library::template(sheet.template.as_str()).style_file().symbols;
     for radius in [2.5, 5.0] {
         let mut callouts = projected
             .circles

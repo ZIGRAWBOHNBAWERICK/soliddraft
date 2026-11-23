@@ -287,6 +287,17 @@ fn a_path_holds_a_position_and_steers_pitch_yaw_and_roll() {
         position: SlotInput::Distance { distance: "10 mm".into(), flipped: false },
         ..Default::default()
     };
+    let before = r.doc.assembly().clone();
+    for flipped in [false, true] {
+        let negative = PathOptions {
+            position: SlotInput::Distance { distance: "-1 mm".into(), flipped },
+            ..Default::default()
+        };
+        let result =
+            r.doc.mate_path_with("P", &r.generator(0, GeneratorChoice::EndCap), &corner(&r, 1), &negative, false);
+        assert_eq!(result.unwrap_err().code, RefusalCode::InvalidValue);
+        assert_eq!(r.doc.assembly(), &before);
+    }
     r.doc.mate_path_with("P", &r.generator(0, GeneratorChoice::EndCap), &corner(&r, 1), &on, false).unwrap();
     certified(&mut r.doc, "P");
     let Mate::Path { path, .. } = r.mate("P") else { panic!("a path") };
@@ -400,6 +411,13 @@ fn a_pin_rides_an_arc_slot_in_each_position_mode() {
         );
         let end = r.nearest(0, SurfaceKind::Cylinder, DVec3::new(25.0, -4.0, 5.0));
         let side = r.nearest(1, SurfaceKind::Cylinder, DVec3::ZERO);
+        if let SlotInput::Distance { flipped, .. } = mode {
+            let before = r.doc.assembly().clone();
+            let negative = SlotInput::Distance { distance: "-1 mm".into(), flipped };
+            let result = r.doc.mate_slot("S", &end, &side, Alignment::Aligned, &negative, false, false);
+            assert_eq!(result.unwrap_err().code, RefusalCode::InvalidValue);
+            assert_eq!(r.doc.assembly(), &before);
+        }
         r.doc.mate_slot("S", &end, &side, Alignment::Aligned, &mode, false, false).unwrap();
         certified(&mut r.doc, "S");
         let a = angle(&r);
@@ -609,6 +627,7 @@ fn physical_dynamics_pushes_what_the_dragged_part_meets() {
     wait_motion(&mut r.doc);
     let report = r.doc.drag_report().unwrap().clone();
     assert!(report.stopped, "{report:?}");
+    assert_eq!(report.pushed, [occurrence(r.ids[2])], "{report:?}");
     assert!(x(&r, 2) <= 34.0 && x(&r, 2) > 33.97, "{}", x(&r, 2));
     assert!((x(&r, 3) - 40.0).abs() < 1e-12);
     r.doc.commit_drag().unwrap();

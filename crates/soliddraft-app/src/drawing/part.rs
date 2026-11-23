@@ -87,6 +87,28 @@ impl<'a> PartContext<'a> {
             _ => Some((id, feature_name(entity), false)),
         }
     }
+
+    /// The feature a hole callout on a circle reads, and for a hole feature which of its
+    /// holes the circle is on. A circle between a face of a hole and a face of another
+    /// feature, such as the rim a later cut left on a countersink, belongs to the hole.
+    fn callout_feature(&self, circle: &CircleInfo) -> Option<(u64, Option<usize>)> {
+        if let Some(ModelEntity::Edge(edge)) = &circle.entity.model {
+            let hole = edge.faces.iter().find_map(|face| match face.generator {
+                soliddraft_model::Generator::Hole { placement, .. } => {
+                    let id = u64::from(face.feature.0);
+                    self.doc
+                        .feature(id)
+                        .is_some_and(|f| !f.suppressed && matches!(f.kind, FeatureKind::Hole(_)))
+                        .then_some((id, Some(placement as usize)))
+                }
+                _ => None,
+            });
+            if hole.is_some() {
+                return hole;
+            }
+        }
+        self.feature_of(&circle.entity).map(|(id, _, _)| (id, None))
+    }
 }
 
 impl Namer for PartContext<'_> {
@@ -144,14 +166,20 @@ impl Namer for PartContext<'_> {
     /// "4× Ø9 THRU", "Ø12 DEEP 20" or "Ø24": holes of the same cut and size are counted
     /// by centre, since the far end of a hole lies under its near end face-on. A
     /// threaded hole is called out by its thread, then by its drill where the drill goes
-    /// further: "4× M6x1-6H THRU", "M8x1-6H DEEP 12" over "Ø7 DEEP 16".
+    /// further: "4× M6x1-6H THRU", "M8x1-6H DEEP 12" over "Ø7 DEEP 16". A hole with a
+    /// counterbore or a countersink gets the head on a line of its own, whichever of the
+    /// hole's circles is picked: "⌴ Ø10 ↧ 3", "⌵ Ø12 × 90°". Depths count from where the
+    /// hole starts now, and a thread is called out as far as the wall still has it.
     fn hole_callout(&self, circle: &CircleInfo, projected: &Projected, symbols: &Symbols) -> Option<String> {
         let diameter = trim(format_value(circle.model_radius * 2.0, 2));
-        let feature = self.feature_of(&circle.entity).and_then(|(id, _, _)| self.doc.feature(id));
+        let found = self.callout_feature(circle);
+        let feature = found.and_then(|(id, _)| self.doc.feature(id));
+        let same = |c: &CircleInfo| match found {
+            Some((id, _)) => self.callout_feature(c).is_some_and(|(other, _)| other == id),
+            None => c.entity.feature == circle.entity.feature,
+        };
         let mut centres: Vec<Point2> = Vec::new();
-        for c in projected.circles.iter().filter(|c| {
-            c.entity.feature == circle.entity.feature && (c.model_radius - circle.model_radius).abs() < 1e-6
-        }) {
+        for c in projected.circles.iter().filter(|c| same(c) && (c.model_radius - circle.model_radius).abs() < 1e-6) {
             if !centres.iter().any(|k| (k.u - c.centre.u).abs() < 1e-3 && (k.v - c.centre.v).abs() < 1e-3) {
                 centres.push(c.centre);
             }
@@ -165,26 +193,65 @@ impl Namer for PartContext<'_> {
                 format!("{count}{}{diameter} {} {}", symbols.diameter, symbols.depth, trim(format_value(p.depth, 2)))
             }
             Some(FeatureKind::Hole(h)) => {
-                use soliddraft_kernel_api::HoleDepth;
+                use soliddraft_kernel_api::{HoleDepth, HoleHead};
                 let mm = |value: f64| trim(format_value(value, 2));
+                let (id, placement) = found.map_or((0, 0), |(id, placement)| (id, placement.unwrap_or(0)));
+                let id = soliddraft_model::FeatureId(id as u32);
+                let model = self.doc.model();
+                let wall = model.threaded_walls().into_iter().find(|w| w.feature == id && w.placement == placement);
+                let top = wall.as_ref().map(|w| w.top).or_else(|| model.hole_top(id, placement)).unwrap_or(0.0);
                 let drill = match h.depth {
                     HoleDepth::Through => symbols.through.clone(),
-                    HoleDepth::Blind { depth } => format!("{} {}", symbols.depth, mm(depth)),
+                    HoleDepth::Blind { depth } => format!("{} {}", symbols.depth, mm(depth - top)),
                 };
                 let drilled = format!("{}{} {drill}", symbols.diameter, mm(h.diameter));
-                match &h.thread {
-                    None => format!("{count}{drilled}"),
-                    Some(thread) => match (thread.length, h.depth) {
-                        (None, _) => format!("{count}{} {drill}", thread.designation()),
-                        (Some(length), depth) => {
-                            let tapped = format!("{count}{} {} {}", thread.designation(), symbols.depth, mm(length));
-                            let deeper = match depth {
-                                HoleDepth::Through => true,
-                                HoleDepth::Blind { depth } => depth > length + 1e-9,
-                            };
-                            if deeper { format!("{tapped}\n{drilled}") } else { tapped }
-                        }
-                    },
+                let main = match (&h.thread, &wall) {
+                    (Some(thread), Some(wall)) => {
+                        let tapped = match wall.depth() {
+                            None => format!("{} {}", thread.designation(), symbols.through),
+                            Some(depth) => format!("{} {} {}", thread.designation(), symbols.depth, mm(depth)),
+                        };
+                        let deeper = match h.depth {
+                            HoleDepth::Through => !wall.through,
+                            HoleDepth::Blind { depth } => depth > wall.end() + 1e-9,
+                        };
+                        if deeper { format!("{tapped}\n{drilled}") } else { tapped }
+                    }
+                    // A plain hole, or one whose thread a later cut took away.
+                    _ => drilled,
+                };
+                // The head as it is now: a cut off the top makes a counterbore shallower
+                // and a countersink narrower, and one that went deeper took the head away.
+                let head = match h.head {
+                    Some(HoleHead::Counterbore { diameter, depth }) => (depth > top + 1e-9).then(|| {
+                        format!(
+                            "{} {}{} {} {}",
+                            symbols.counterbore,
+                            symbols.diameter,
+                            mm(diameter),
+                            symbols.depth,
+                            mm(depth - top)
+                        )
+                    }),
+                    Some(HoleHead::Countersink { diameter, angle_deg }) => {
+                        let now = diameter - 2.0 * top * (angle_deg.to_radians() / 2.0).tan();
+                        (now > h.diameter + 1e-9).then(|| {
+                            format!(
+                                "{} {}{} {} {}{}",
+                                symbols.countersink,
+                                symbols.diameter,
+                                mm(now),
+                                symbols.times,
+                                mm(angle_deg),
+                                symbols.degree
+                            )
+                        })
+                    }
+                    None => None,
+                };
+                match head {
+                    Some(head) => format!("{count}{main}\n{head}"),
+                    None => format!("{count}{main}"),
                 }
             }
             _ => format!("{count}{}{diameter}", symbols.diameter),

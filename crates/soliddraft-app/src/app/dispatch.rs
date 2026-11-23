@@ -913,6 +913,9 @@ impl SolidDraftApp {
             },
             AppAction::Dimension(action) => self.state.dimension(action),
             AppAction::Select(sel) => {
+                // The point of the viewport click that made this selection, if one did.
+                let click_point =
+                    self.state.click_point.take().filter(|(clicked, _)| Some(*clicked) == sel).map(|(_, at)| at);
                 // A plain selection shows the dimensions it always did; only a double-click
                 // narrows them to one feature.
                 self.state.viewport.dimensions_of = None;
@@ -942,12 +945,11 @@ impl SolidDraftApp {
                             match self.state.doc.face_ref(f) {
                                 Some(r) => {
                                     // A new hole's first face click also places its first
-                                    // hole where the face was clicked, to a tenth of a mm.
+                                    // hole where that click met the face, to a tenth of a mm.
                                     let first = h.face.is_none() && h.points == [crate::sketch::P2::ZERO];
                                     h.face = Some(r);
                                     if first
-                                        && let (Some(at), Some(plane)) =
-                                            (self.state.hover_point, self.state.doc.face_plane(f))
+                                        && let (Some(at), Some(plane)) = (click_point, self.state.doc.face_plane(f))
                                     {
                                         let at = soliddraft_kernel_api::Vec3::new(
                                             f64::from(at.x),

@@ -166,7 +166,8 @@ pub fn update_from_model(drawing: &mut Drawing, part: &Part) -> Result<UpdateRep
     // its values, and which items there are.
     let made_from_part = drawing.sheets.iter().position(|sheet| sheet.annotations.iter().any(|a| a.source.is_some()));
     if let Some(sheet) = made_from_part {
-        crate::pmi_items::refresh(drawing, part, |id| !failed(id));
+        // An item now shown another way is taken off here and drawn again by the import.
+        crate::pmi_items::refresh(drawing, part, |id| !failed(id), true);
         let views: Vec<ViewContext> = drawing.sheets[sheet]
             .views
             .iter()
@@ -248,7 +249,7 @@ pub fn regenerate_view(drawing: &mut Drawing, part: &Part, id: ViewId) -> Result
             re_resolve(a, &index, context, symbols);
         }
     }
-    crate::pmi_items::refresh(drawing, part, |view| ids.contains(&view));
+    crate::pmi_items::refresh(drawing, part, |view| ids.contains(&view), false);
     Ok(())
 }
 

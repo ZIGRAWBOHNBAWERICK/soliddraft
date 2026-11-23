@@ -264,7 +264,7 @@ impl Document {
     /// not apply are left out and named in the result. A body the kernel cannot attach
     /// information to yet is written without any, and every item is named as left out.
     fn export_step_with_pmi(&self, body: BodyId) -> Result<soliddraft_exchange::Export, String> {
-        let on_body = self.pmi_on_body();
+        let on_body = self.pmi_on(Some(body));
         let kernel = self.kernel.as_ref();
         match soliddraft_exchange::export_step_with_pmi(kernel, body, &self.name, &on_body.pmi) {
             Ok(mut out) => {

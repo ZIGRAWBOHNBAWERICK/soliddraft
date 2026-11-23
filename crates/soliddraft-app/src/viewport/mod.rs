@@ -83,6 +83,8 @@ pub struct ViewportEvents {
     pub context_position: Option<Pos2>,
     /// Whether Shift was held at that secondary click, which asks for the ring.
     pub context_ring: bool,
+    /// Where the primary click met the model, in the same frame as `clicked`.
+    pub clicked_point: Option<Vec3>,
     /// With a click on no model: the reference it found.
     pub clicked_reference: Option<Reference>,
     /// A primary click on a curve of a shown sketch outside sketch editing.
@@ -467,6 +469,7 @@ impl ViewportState {
                 events.clicked_sketch = Some(id);
             } else {
                 events.clicked = Some(self.hover);
+                events.clicked_point = self.hover_point;
                 events.clicked_reference = self.hover_reference;
             }
         }

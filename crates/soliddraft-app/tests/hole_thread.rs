@@ -159,7 +159,7 @@ fn a_tapped_hole_is_made_in_the_form_edited_milled_saved_and_reopened() {
         assert_eq!(thread_callouts(doc), ["M8x1-6H DEEP 9"]);
         let walls = doc.model().threaded_walls();
         assert_eq!(walls.len(), 1);
-        assert!((walls[0].span.1 - 9.0).abs() < 1e-6 && (walls[0].radius - 3.5).abs() < 1e-6, "{walls:?}");
+        assert!((walls[0].end() - 9.0).abs() < 1e-6 && (walls[0].radius - 3.5).abs() < 1e-6, "{walls:?}");
         ux_tools::pointer_to_chrome(app);
         let tapped_blue = { let image = case.frame(app, "tapped"); thread_blue(app, &image) };
         case.note(format!("thread-blue pixels: plate {before}, tapped {tapped_blue}"));
@@ -176,7 +176,8 @@ fn a_tapped_hole_is_made_in_the_form_edited_milled_saved_and_reopened() {
         ux_tools::rebuilt(app);
         assert_eq!(thread_callouts(&app.state().state.doc), ["M10x1.5-6H DEEP 9"]);
 
-        // A later cut mills 4 mm off the top: the thread stays on what is left of the wall.
+        // A later cut mills 4 mm off the top: the thread stays on what is left of the wall,
+        // and the callout measures from the new top.
         let state = &mut app.state_mut().state;
         for (tool, arguments) in [
             (
@@ -193,8 +194,8 @@ fn a_tapped_hole_is_made_in_the_form_edited_milled_saved_and_reopened() {
         assert!(doc.model().statuses().iter().all(|(_, s)| s.is_ok()), "{:?}", doc.model().statuses());
         let walls = doc.model().threaded_walls();
         assert_eq!(walls.len(), 1);
-        assert!((walls[0].span.0 - 4.0).abs() < 1e-6 && (walls[0].span.1 - 9.0).abs() < 1e-6, "{walls:?}");
-        assert_eq!(thread_callouts(doc), ["M10x1.5-6H DEEP 9"]);
+        assert!((walls[0].start() - 4.0).abs() < 1e-6 && (walls[0].end() - 9.0).abs() < 1e-6, "{walls:?}");
+        assert_eq!(thread_callouts(doc), ["M10x1.5-6H DEEP 5"]);
         ux_tools::pointer_to_chrome(app);
         assert!({ let image = case.frame(app, "milled"); thread_blue(app, &image) } > before + 50);
 
@@ -203,13 +204,66 @@ fn a_tapped_hole_is_made_in_the_form_edited_milled_saved_and_reopened() {
         let reopened = soliddraft_model::Document::from_bytes(&bytes, soliddraft_app::kernel()).unwrap();
         let reopened = Document::from_model(reopened);
         assert_eq!(hole(&reopened).1, hole(&app.state().state.doc).1);
-        assert_eq!(thread_callouts(&reopened), ["M10x1.5-6H DEEP 9"]);
-        assert_eq!(reopened.model().threaded_walls(), app.state().state.doc.model().threaded_walls());
+        assert_eq!(thread_callouts(&reopened), ["M10x1.5-6H DEEP 5"]);
+        // The same threads on the same walls; the kernel numbers the reopened faces afresh.
+        let threads = |doc: &Document| -> Vec<_> {
+            doc.model()
+                .threaded_walls()
+                .into_iter()
+                .map(|w| (w.feature, w.placement, w.thread, [w.entry.x, w.entry.y, w.entry.z, w.top], w.spans, w.through))
+                .collect()
+        };
+        assert_eq!(threads(&reopened), threads(&app.state().state.doc));
+        assert_eq!(threads(&reopened).len(), 1);
         let mut again = launch(reopened, STANDARD);
         ux_tools::rebuilt(&mut again);
         ux_tools::pointer_to_chrome(&mut again);
         assert!({ let image = case.frame(&mut again, "reopened"); thread_blue(&again, &image) } > before + 50);
     });
+}
+
+/// A point of the face to the tenth of a millimetre, as Hole places its first hole: the
+/// plate's top face lies on the world's x and y.
+fn tenth(at: glam::Vec3) -> soliddraft_app::sketch::P2 {
+    let tenth = |v: f32| (f64::from(v) * 10.0).round() / 10.0 + 0.0;
+    soliddraft_app::sketch::P2::new(tenth(at.x), tenth(at.y))
+}
+
+#[test]
+fn the_first_hole_goes_where_the_click_that_picked_the_face_ended() {
+    let mut app = launch(ribbon::plate(), STANDARD);
+    settle(&mut app);
+    ribbon::run_command(&mut app, "hole");
+    settle(&mut app);
+    let a = {
+        let state = &app.state().state;
+        state.viewport.camera.project(glam::Vec3::new(10.0, 5.0, 20.0), state.viewport.rect).unwrap()
+    };
+    let b = a + egui::vec2(4.0, 3.0);
+    let button = |pos, pressed| egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::default(),
+    };
+    // The button goes down at A, and in the next frame the pointer moves a few points on to
+    // B and the button comes up there: one click on the face, which ends at B.
+    let (at_a, at_b) = ribbon::render_steps::rendered(&mut app, |app| {
+        ribbon::render_steps::await_pick(app, a);
+        app.step();
+        let at_a = app.state().state.viewport.hover_point.expect("the pointer is on the face at A");
+        app.event(button(a, true));
+        app.step();
+        // Both in one frame: the harness gives each queued event a frame of its own.
+        app.input_mut().events.extend([egui::Event::PointerMoved(b), button(b, false)]);
+        app.step();
+        (at_a, app.state().state.viewport.hover_point.expect("the pointer is on the face at B"))
+    });
+    app.run_steps(3);
+    assert_ne!(tenth(at_a), tenth(at_b), "A and B are different places on the face");
+    let editing = editing(&app);
+    assert!(editing.face.is_some(), "the click picked the top face");
+    assert_eq!(editing.points, [tenth(at_b)], "the hole is where the click ended, not where it was a frame before");
 }
 
 #[test]
@@ -236,8 +290,17 @@ fn scripted_lines_tap_a_hole_and_the_drawing_calls_it_out() {
     let refused = call("hole", json!({"face": face, "points": [[15, 20, 10]], "diameter": 6.6, "thread": {"size": 6}}))
         .unwrap_err();
     assert!(refused.contains("this hole is Ø6.6"), "{refused}");
+    // A tolerance class that no internal thread has is refused by name.
+    for class in ["99", "6NOPE"] {
+        let refused =
+            call("hole", json!({"face": face, "points": [[15, 20, 10]], "thread": {"size": 6, "class": class}}))
+                .unwrap_err();
+        assert!(refused.contains(&format!("{class} is not a tolerance class of an internal thread")), "{refused}");
+    }
     // Left out, the diameter is the tap drill.
     call("hole", json!({"face": face, "points": [[15, 20, 10], [45, 20, 10]], "thread": {"size": 6}})).unwrap();
+    let refused = call("edit_hole", json!({"feature": "Hole1", "thread": {"size": 6, "class": "99"}})).unwrap_err();
+    assert!(refused.contains("99 is not a tolerance class of an internal thread"), "{refused}");
     let listed = call("pmi_list", json!({})).unwrap();
     let item = &listed["items"][0];
     assert_eq!(item["callout"], "2\u{d7} M6x1-6H THRU", "{listed}");
@@ -273,4 +336,269 @@ fn scripted_lines_tap_a_hole_and_the_drawing_calls_it_out() {
     let listed = call("pmi_list", json!({})).unwrap();
     assert_eq!(listed["items"], json!([]), "{listed}");
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_hole_callout_names_the_head_of_the_hole_it_is_put_on() {
+    let kernel = std::sync::Arc::new(soliddraft_kernel_catallax::CatallaxKernel::with_diagnostics(20_000_000));
+    let mut state = soliddraft_app::state::AppState::new(Document::new("Headed holes", kernel));
+    let call = |state: &mut soliddraft_app::state::AppState, tool: &str, arguments: serde_json::Value| {
+        let out =
+            call_checked(&mut AppTools { state }, tool, arguments, &Caller::Mcp { client: "hole-callout".into() });
+        assert!(!out.is_error, "{tool}: {}", out.content);
+    };
+    call(
+        &mut state,
+        "sketch",
+        json!({"plane": "top", "shapes": [{"shape": "rectangle", "center": [30, 20, 0], "width": 60, "height": 40}]}),
+    );
+    call(&mut state, "extrude", json!({"sketch": "Sketch1", "depth": 10, "flip": false}));
+    let face = "Boss-Extrude1 \u{b7} End cap";
+    // Two Ø5 holes through, counterbored Ø10 for 3 mm; one tapped M6 through, countersunk
+    // Ø12 at 90°.
+    call(
+        &mut state,
+        "hole",
+        json!({"face": face, "points": [[12, 20, 10], [48, 20, 10]], "diameter": 5, "counterbore": {"diameter": 10, "depth": 3}}),
+    );
+    call(
+        &mut state,
+        "hole",
+        json!({"face": face, "points": [[30, 20, 10]], "thread": {"size": 6}, "countersink": {"diameter": 12, "angle": 90}}),
+    );
+    let callouts = |state: &soliddraft_app::state::AppState| -> Vec<(f64, String)> {
+        let mut top = soliddraft_app::drawing::NewDrawing::new();
+        for (view, on) in &mut top.views {
+            *on = *view == soliddraft_kernel_api::drawing::StandardView::Top;
+        }
+        let session = soliddraft_app::drawing::create_drawing(state, &top).unwrap();
+        let sheet = &session.doc.drawing.sheets[0];
+        let projected = session.doc.projected_of(sheet.views[0].id).expect("the top view is projected");
+        let ctx = soliddraft_app::drawing::part::PartContext::new(&state.doc).expect("the part is proved");
+        // Every circle the top view sees is a hole's: the plate and the cut are square.
+        let mut out: Vec<(f64, String)> = projected
+            .circles
+            .iter()
+            .map(|circle| {
+                let text =
+                    soliddraft_app::drawing::part::hole_callout(&ctx, circle, &projected, sheet.template.as_str());
+                ((circle.model_radius * 1000.0).round() / 1000.0, text)
+            })
+            .collect();
+        out.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
+        out.dedup();
+        out
+    };
+    let symbols = soliddraft_drawing::library::template("iso-a3").style_file().symbols.clone();
+    let (d, deep, cbore, csink, times, degree, thru) = (
+        symbols.diameter.as_str(),
+        symbols.depth.as_str(),
+        symbols.counterbore.as_str(),
+        symbols.countersink.as_str(),
+        symbols.times.as_str(),
+        symbols.degree.as_str(),
+        symbols.through.as_str(),
+    );
+    let counterbored = format!("2{times} {d}5 {thru}\n{cbore} {d}10 {deep} 3");
+    let countersunk = format!("M6x1-6H {thru}\n{csink} {d}12 {times} 90{degree}");
+    // Every circle of a hole, the head's as well as the drill's, calls out the whole hole
+    // with its head: the Ø10 circle is not called out as the Ø5 drill alone.
+    assert_eq!(
+        callouts(&state),
+        [(2.5, counterbored.clone()), (2.5, countersunk.clone()), (5.0, counterbored), (6.0, countersunk),]
+    );
+    // Milled 1 mm, the counterbore is 2 mm deep and the countersink Ø10 at the top.
+    call(
+        &mut state,
+        "sketch",
+        json!({"plane": "top", "offset": 9, "shapes": [{"shape": "rectangle", "center": [30, 20, 9], "width": 80, "height": 60}]}),
+    );
+    call(&mut state, "cut", json!({"sketch": "Sketch2", "depth": 5, "through_all": false, "flip": true}));
+    let counterbored = format!("2{times} {d}5 {thru}\n{cbore} {d}10 {deep} 2");
+    let countersunk = format!("M6x1-6H {thru}\n{csink} {d}10 {times} 90{degree}");
+    assert_eq!(
+        callouts(&state),
+        [(2.5, counterbored.clone()), (2.5, countersunk.clone()), (5.0, counterbored), (5.0, countersunk)]
+    );
+}
+
+/// A plate 60 x 40 x 10 made through the tools, with the tool caller.
+fn scripted_plate(name: &str) -> soliddraft_app::state::AppState {
+    let kernel = std::sync::Arc::new(soliddraft_kernel_catallax::CatallaxKernel::with_diagnostics(20_000_000));
+    let mut state = soliddraft_app::state::AppState::new(Document::new(name, kernel));
+    tool(
+        &mut state,
+        "sketch",
+        json!({"plane": "top", "shapes": [{"shape": "rectangle", "center": [30, 20, 0], "width": 60, "height": 40}]}),
+    );
+    tool(&mut state, "extrude", json!({"sketch": "Sketch1", "depth": 10, "flip": false}));
+    state
+}
+
+fn tool(state: &mut soliddraft_app::state::AppState, tool: &str, arguments: serde_json::Value) -> serde_json::Value {
+    let out = call_checked(&mut AppTools { state }, tool, arguments, &Caller::Mcp { client: "hole-thread".into() });
+    assert!(!out.is_error, "{tool}: {}", out.content);
+    serde_json::from_str(&out.content).unwrap_or_default()
+}
+
+/// The name of the one cylinder whose centroid is at (x, y, z).
+fn cylinder(state: &soliddraft_app::state::AppState, x: f64, y: f64, z: f64) -> String {
+    let found: Vec<_> = state
+        .doc
+        .faces
+        .iter()
+        .filter(|f| f.surface == soliddraft_kernel_api::SurfaceKind::Cylinder)
+        .filter(|f| {
+            [f.centroid.x, f.centroid.y, f.centroid.z]
+                .map(f64::from)
+                .iter()
+                .zip([x, y, z])
+                .all(|(a, b)| (a - b).abs() < 1e-3)
+        })
+        .collect();
+    assert_eq!(found.len(), 1, "one cylinder at ({x}, {y}, {z})");
+    format!("{} \u{b7} {}", state.doc.feature(found[0].feature).unwrap().name, found[0].label)
+}
+
+/// The drawing's annotations made from the part's items: the item's name, whether the
+/// annotation is a note or a dimension, and a note's text, in the drawing's order.
+fn drawn_items(state: &soliddraft_app::state::AppState) -> Vec<(String, &'static str, String)> {
+    let session = state.drawing.session.as_ref().expect("the drawing is open");
+    session
+        .doc
+        .drawing
+        .sheets
+        .iter()
+        .flat_map(|sheet| &sheet.annotations)
+        .filter_map(|a| {
+            let item = a.source.as_ref()?.item()?.to_owned();
+            Some(match &a.body {
+                soliddraft_drawing::AnnotationKind::Note { text, .. } => (item, "note", text.clone()),
+                soliddraft_drawing::AnnotationKind::Dimension(_) => (item, "dimension", String::new()),
+                _ => (item, "other", String::new()),
+            })
+        })
+        .collect()
+}
+
+#[test]
+fn a_drawing_redraws_a_size_that_became_a_thread_and_back() {
+    let mut state = scripted_plate("Bore plate");
+    let face = "Boss-Extrude1 \u{b7} End cap";
+    tool(&mut state, "hole", json!({"face": face, "points": [[30, 20, 10]], "diameter": 5}));
+    let wall = cylinder(&state, 30.0, 20.0, 5.0);
+    tool(&mut state, "pmi_add", json!({"kind": "diameter", "name": "Bore", "faces": [wall], "through": true}));
+    let dir = std::env::temp_dir().join(format!("soliddraft-thread-conversion-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    tool(&mut state, "manufacturing_package", json!({"path": dir.join("bore.step")}));
+    assert_eq!(drawn_items(&state), [("Bore".to_owned(), "dimension", String::new())]);
+
+    // The stored size is made a thread: the drawing calls it out as one, and keeps no
+    // dimension that says Ø5.
+    tool(
+        &mut state,
+        "pmi_add",
+        json!({"kind": "diameter", "name": "Bore", "faces": [wall], "through": true, "thread": "M6x1-6H", "replaces": "Bore"}),
+    );
+    tool(&mut state, "drawing_rebuild", json!({}));
+    let thru = soliddraft_drawing::library::template("iso-a3").style_file().symbols.through.clone();
+    assert_eq!(drawn_items(&state), [("Bore".to_owned(), "note", format!("M6x1-6H {thru}"))]);
+
+    // And back: a plain size is a dimension again, and the thread's note goes.
+    tool(
+        &mut state,
+        "pmi_add",
+        json!({"kind": "diameter", "name": "Bore", "faces": [wall], "through": true, "replaces": "Bore"}),
+    );
+    tool(&mut state, "drawing_rebuild", json!({}));
+    assert_eq!(drawn_items(&state), [("Bore".to_owned(), "dimension", String::new())]);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_drawing_keeps_a_thread_with_its_hole_through_a_rename_and_a_name_taken() {
+    let mut state = scripted_plate("Tapped plate");
+    let face = "Boss-Extrude1 \u{b7} End cap";
+    tool(&mut state, "hole", json!({"face": face, "points": [[15, 20, 10], [45, 20, 10]], "thread": {"size": 6}}));
+    let dir = std::env::temp_dir().join(format!("soliddraft-thread-identity-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    tool(&mut state, "manufacturing_package", json!({"path": dir.join("tapped.step")}));
+    let thru = soliddraft_drawing::library::template("iso-a3").style_file().symbols.through.clone();
+    let note = format!("2\u{d7} M6x1-6H {thru}");
+    assert_eq!(drawn_items(&state), [("Hole1 thread".to_owned(), "note", note.clone())]);
+    let placed = |state: &soliddraft_app::state::AppState| {
+        let session = state.drawing.session.as_ref().unwrap();
+        session.doc.drawing.sheets[0]
+            .annotations
+            .iter()
+            .find(|a| matches!(a.body, soliddraft_drawing::AnnotationKind::Note { .. }) && a.source.is_some())
+            .map(|a| (a.id, a.placement))
+            .unwrap()
+    };
+    // The note is moved off the place the drawing gave it, as a drafter moves one: a note
+    // drawn again would go back there.
+    let before = {
+        let session = state.drawing.session.as_mut().unwrap();
+        let note = session.doc.drawing.sheets[0]
+            .annotations
+            .iter_mut()
+            .find(|a| matches!(a.body, soliddraft_drawing::AnnotationKind::Note { .. }) && a.source.is_some())
+            .unwrap();
+        note.placement = soliddraft_kernel_api::Point2::new(note.placement.u + 6.0, note.placement.v + 4.0);
+        (note.id, note.placement)
+    };
+
+    // Renamed, the hole's thread is the same note in the same place, under the new name.
+    tool(&mut state, "rename", json!({"feature": "Hole1", "name": "Tapped holes"}));
+    tool(&mut state, "drawing_rebuild", json!({}));
+    assert_eq!(drawn_items(&state), [("Tapped holes thread".to_owned(), "note", note.clone())]);
+    assert_eq!(placed(&state), before, "the same note, not one drawn again");
+
+    // A stored item takes the thread's name: the note stays with the hole, and the stored
+    // item gets a dimension of its own.
+    let wall = cylinder(&state, 15.0, 20.0, 5.0);
+    tool(&mut state, "pmi_add", json!({"kind": "diameter", "name": "Tapped holes thread", "faces": [wall]}));
+    tool(&mut state, "drawing_rebuild", json!({}));
+    let mut drawn = drawn_items(&state);
+    drawn.sort();
+    assert_eq!(
+        drawn,
+        [
+            ("Tapped holes thread".to_owned(), "dimension", String::new()),
+            ("Tapped holes thread 2".to_owned(), "note", note),
+        ]
+    );
+    assert_eq!(placed(&state), before, "the thread's note did not move to the stored item");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn the_thread_marks_leave_out_what_later_cuts_took_from_the_wall() {
+    let mut state = scripted_plate("Pocketed plate");
+    let face = "Boss-Extrude1 \u{b7} End cap";
+    tool(&mut state, "hole", json!({"face": face, "points": [[15, 20, 10]], "thread": {"size": 6}}));
+    // A pocket in from the plate's side takes the wall away all round from 4 to 6 mm up;
+    // another, 7 to 9 mm up, takes the half of the wall beyond y 20.
+    for (sketch, offset, centre, height) in [("Sketch2", 4, 32.0, 30.0), ("Sketch3", 7, 33.5, 27.0)] {
+        tool(
+            &mut state,
+            "sketch",
+            json!({"plane": "top", "offset": offset, "shapes": [{"shape": "rectangle", "center": [15, centre, offset], "width": 10, "height": height}]}),
+        );
+        tool(&mut state, "cut", json!({"sketch": sketch, "depth": 2, "through_all": false, "flip": true}));
+    }
+    let doc = &state.doc;
+    assert!(doc.model().statuses().iter().all(|(_, s)| s.is_ok()), "{:?}", doc.model().statuses());
+    let marks = soliddraft_app::viewport::threads::marks(doc).expect("the thread is marked");
+    let (mut above, mut below, mut beside) = (0, 0, 0);
+    for pair in marks.edges.iter().flat_map(|edge| edge.segments.as_chunks::<2>().0) {
+        let mid = (pair[0] + pair[1]) / 2.0;
+        let (z, y) = (mid.z, mid.y);
+        assert!(!(4.05..5.95).contains(&z), "a mark crosses the pocket at {mid}");
+        assert!(!((7.1..8.9).contains(&z) && y > 20.1), "a mark crosses the notch at {mid}");
+        above += usize::from(z > 6.0);
+        below += usize::from(z < 4.0);
+        beside += usize::from((7.1..8.9).contains(&z) && y < 19.9);
+    }
+    assert!(above > 0 && below > 0 && beside > 0, "{above} {below} {beside}");
 }

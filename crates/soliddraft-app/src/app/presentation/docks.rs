@@ -80,6 +80,7 @@ pub(in crate::app) fn pane(ui: &mut egui::Ui, state: &mut AppState) {
         let pane_rect = ui.allocate_exact_size(vec2(full.width(), h), Sense::hover()).0;
         let mut child = ui.new_child(
             egui::UiBuilder::new()
+                .id_salt(("d1_pane", p))
                 .max_rect(pane_rect)
                 .layout(egui::Layout::top_down(egui::Align::Min)),
         );

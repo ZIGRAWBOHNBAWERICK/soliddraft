@@ -83,7 +83,7 @@ pub(super) fn show(p: &mut Preferences, ui: &mut egui::Ui) {
     ui.horizontal(|ui| {
         let (ir, _) = ui.allocate_exact_size(vec2(16.0, 16.0), Sense::hover());
         icons::paint(ui.painter(), Icon::Gear, ir, theme::accent());
-        ui.label(egui::RichText::new("Preferences").family(theme::semibold()).size(14.5).color(theme::ink()));
+        ui.label(egui::RichText::new("Preferences").strong().size(14.5).color(theme::ink()));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             egui::Frame::new()
                 .fill(theme::chip())
@@ -91,7 +91,7 @@ pub(super) fn show(p: &mut Preferences, ui: &mut egui::Ui) {
                 .corner_radius(CornerRadius::same(4))
                 .inner_margin(egui::Margin::symmetric(5, 2))
                 .show(ui, |ui| {
-                    ui.label(egui::RichText::new("Ctrl F").font(theme::mono(10.0)).color(theme::muted()));
+                    ui.label(egui::RichText::new("Ctrl F").monospace().size(10.0).color(theme::muted()));
                 });
             let edit = ui.add(
                 egui::TextEdit::singleline(&mut p.search)
@@ -210,7 +210,7 @@ pub(super) fn show(p: &mut Preferences, ui: &mut egui::Ui) {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.spacing_mut().item_spacing.x = 6.0;
                     let ok_btn = egui::Button::new(
-                        egui::RichText::new("OK").family(theme::semibold()).color(theme::on_accent()),
+                        egui::RichText::new("OK").strong().color(theme::on_accent()),
                     )
                     .fill(theme::accent())
                     .stroke(Stroke::NONE)
@@ -231,7 +231,7 @@ pub(super) fn show(p: &mut Preferences, ui: &mut egui::Ui) {
 
 fn nav_group_header(ui: &mut egui::Ui, label: &str) {
     ui.add_space(6.0);
-    ui.label(egui::RichText::new(label).family(theme::semibold()).size(9.5).color(theme::muted()));
+    ui.label(egui::RichText::new(label).strong().size(9.5).color(theme::muted()));
     ui.add_space(1.0);
 }
 
@@ -251,7 +251,7 @@ fn categories_list(p: &mut Preferences, ui: &mut egui::Ui) {
             let Some(c) = all_cats.iter().find(|x| x.id == *cat_id) else { continue };
             match c.status {
                 Status::Available => {
-                    ui.label(egui::RichText::new(c.label).family(theme::semibold()).size(11.5).color(theme::ink()));
+                    ui.label(egui::RichText::new(c.label).strong().size(11.5).color(theme::ink()));
                     for page in super::available_pages().iter().filter(|x| x.category == c.id) {
                         let selected = p.page == page.id && p.search.trim().is_empty();
                         let btn = egui::Button::selectable(selected, page.title)
@@ -292,14 +292,14 @@ fn profile_selector(ui: &mut egui::Ui) {
         egui::pos2(rect.left() + 10.0, rect.top() + 11.0),
         Align2::LEFT_CENTER,
         "PROFILE",
-        theme::font_semibold(9.0),
+        egui::FontId::proportional(9.0),
         theme::muted(),
     );
     ui.painter().text(
         egui::pos2(rect.left() + 10.0, rect.bottom() - 12.0),
         Align2::LEFT_CENTER,
         "Default",
-        theme::font_semibold(12.0),
+        egui::FontId::proportional(12.0),
         theme::ink(),
     );
     icons::paint(
@@ -561,7 +561,7 @@ fn paint_schematic(ui: &egui::Ui, rect: Rect, hovered: bool) {
         rect.left_bottom() + vec2(8.0, -8.0),
         Align2::LEFT_BOTTOM,
         "Drag or scroll here",
-        theme::font(11.0),
+        egui::FontId::proportional(11.0),
         theme::muted(),
     );
 }

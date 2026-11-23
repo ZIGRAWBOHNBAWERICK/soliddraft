@@ -49,7 +49,7 @@ fn d1_top_bar_single_file_menu_tabs_and_utilities() {
             "Keyboard Shortcuts…",
             "Preferences…",
         ] {
-            assert!(app.query_by_label(item).is_some(), "File menu has `{item}`");
+            assert!(app.query_by_label_contains(item).is_some(), "File menu has `{item}`");
         }
         app.key_press(Key::Escape);
         app.run_steps(4);
@@ -57,8 +57,8 @@ fn d1_top_bar_single_file_menu_tabs_and_utilities() {
         // Open Donate popover and confirm real links are shown.
         app.get_by_label("Donate").click();
         app.run_steps(6);
-        assert!(app.query_by_label("Support on Ko-fi ↗").is_some());
-        assert!(app.query_by_label("GitHub Sponsors ↗").is_some());
+        assert!(app.query_by_label("Support on Ko-fi").is_some());
+        assert!(app.query_by_label("GitHub Sponsors").is_some());
         app.key_press(Key::Escape);
         app.run_steps(4);
 

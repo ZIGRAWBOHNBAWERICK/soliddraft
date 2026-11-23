@@ -290,11 +290,13 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState, dock: &mut DockState<Tab>, 
             // Coral Donate pill with real donation links
             donate_button(ui);
 
-            // Center: Document tabs + `+` button
-            ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                ui.spacing_mut().item_spacing.x = 3.0;
-                document_tabs(ui, state, dock, open_parts);
-            });
+            // Center: Document tabs + `+` button (hidden while Start page is active)
+            if !on_start {
+                ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                    ui.spacing_mut().item_spacing.x = 3.0;
+                    document_tabs(ui, state, dock, open_parts);
+                });
+            }
         });
     });
 }
@@ -419,7 +421,7 @@ fn donate_button(ui: &mut egui::Ui) {
             ui.set_min_width(210.0);
             ui.label(egui::RichText::new("Support SolidDraft").family(theme::semibold()).size(12.5));
             ui.label(
-                egui::RichText::new("Free, open-source CAD on Catallax. Donations fund development.")
+                egui::RichText::new("Free, open-source parametric CAD. Donations fund development.")
                     .size(11.0)
                     .color(theme::muted()),
             );
@@ -880,7 +882,7 @@ pub fn dialogs(ctx: &egui::Context, state: &mut AppState) {
                     ui.label(format!("{}", state.doc.features.len()));
                     ui.end_row();
 
-                    ui.label(egui::RichText::new("Kernel").color(theme::muted()));
+                    ui.label(egui::RichText::new("Geometry engine").color(theme::muted()));
                     ui.label(state.doc.backend_name());
                     ui.end_row();
                 });

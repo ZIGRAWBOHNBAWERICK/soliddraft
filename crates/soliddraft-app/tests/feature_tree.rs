@@ -99,20 +99,18 @@ fn strip_icons_show_the_tree_or_values_and_hide_the_side_area() {
     case.run(&mut app, |app| {
         let bar = ribbon::left_bar(app);
         let tree = ribbon::control(app, "Feature tree", bar);
+        let history = ribbon::control(app, "History", bar);
         let values = ribbon::control(app, "Values", bar);
-        let solid = ribbon::control(app, "Solid tab", bar);
-        assert!(tree.rect.bottom() <= values.rect.top(), "the tree is the strip's first icon");
-        assert!(values.rect.bottom() < solid.rect.top(), "the panes come before the workspaces");
+        let props = ribbon::control(app, "Properties", bar);
+        assert!(tree.rect.bottom() <= history.rect.top(), "Tree sits above History on the rail");
+        assert!(history.rect.bottom() <= values.rect.top(), "History sits above Values on the rail");
+        assert!(values.rect.bottom() <= props.rect.top(), "Values sits above Props on the rail");
         assert!(app.state().state.pane_shown(Pane::Tree), "a part opens on its feature tree");
         assert!(tree.selected && !values.selected);
         assert!(
             egui::PanelState::load(&app.ctx, egui::Id::new("feature_timeline")).is_none(),
-            "no history strip is laid out"
+            "no legacy bottom history strip is laid out"
         );
-        let painted = ribbon::painted(app);
-        for gone in ["History", "Tree"] {
-            assert!(!painted.iter().any(|p| p.text == gone), "{gone} is not painted");
-        }
         assert!(pane(app).contains_rect(row(app, "Boss-Extrude1")), "the tree lists the feature");
         // The pointer rests on the icon before any click: egui hides a tooltip right after one.
         assert_eq!(ribbon::tooltip(app, tree.rect), "Feature tree (F9)");
@@ -122,33 +120,35 @@ fn strip_icons_show_the_tree_or_values_and_hide_the_side_area() {
         ribbon::click_at(app, values.rect.center());
         app.run_steps(12);
         assert!(app.state().state.pane_shown(Pane::Values));
+        assert!(app.state().state.pane_shown(Pane::Tree), "D1 stacks Values with Tree in the same column");
         assert!(app.query_all_by_label("New global name").next().is_some(), "the Values pane shows");
-        assert!(app.query_all_by_label("Rollback bar").next().is_none(), "Values replaces the tree");
         assert!(ribbon::control(app, "Values", bar).selected);
-        assert!(!ribbon::control(app, "Feature tree", bar).selected);
-        assert!((app.state().state.viewport.rect.width() - with_pane).abs() < 1.0, "both share one side area");
+        assert!(ribbon::control(app, "Feature tree", bar).selected);
+        assert!((app.state().state.viewport.rect.width() - with_pane).abs() < 1.0, "all stacked panes share one side area");
         case.frame(app, "values");
 
-        ribbon::click_at(app, values.rect.center());
+        // Toggle off all open panes via Clear -> side area disappears completely.
+        let clear = ribbon::control(app, "Clear panels", bar);
+        ribbon::click_at(app, clear.rect.center());
         app.run_steps(12);
-        assert!(!app.state().state.tree_shown(), "the shown pane's icon hides the side area");
+        assert!(!app.state().state.tree_shown(), "Clear hides the side area");
         assert!(!ribbon::control(app, "Values", bar).selected);
+        assert!(!ribbon::control(app, "Feature tree", bar).selected);
         let wide = app.state().state.viewport.rect.width();
         assert!(wide > with_pane + 200.0);
         case.frame(app, "hidden");
 
-        app.key_press(Key::F9);
-        app.run_steps(12);
-        assert!(app.state().state.pane_shown(Pane::Values), "F9 brings back the last pane");
-        ribbon::click_at(app, tree.rect.center());
-        app.run_steps(12);
-        assert!(app.state().state.pane_shown(Pane::Tree), "the tree icon swaps the pane back");
-        app.key_press(Key::F9);
-        app.run_steps(12);
-        assert!((app.state().state.viewport.rect.width() - wide).abs() < 1.0);
+        // Toggle Values on alone, verify F9 hides and restores it, and persists across reopen.
         ribbon::click_at(app, values.rect.center());
         app.run_steps(12);
         assert!(app.state().state.pane_shown(Pane::Values));
+        assert!(!app.state().state.pane_shown(Pane::Tree));
+        app.key_press(Key::F9);
+        app.run_steps(12);
+        assert!((app.state().state.viewport.rect.width() - wide).abs() < 1.0);
+        app.key_press(Key::F9);
+        app.run_steps(12);
+        assert!(app.state().state.pane_shown(Pane::Values), "F9 brings back the active pane set");
     });
     drop(app);
     let reopened = ribbon::app(ribbon::plate());

@@ -711,8 +711,6 @@ impl SolidDraftApp {
         } else {
             // D1 Clear Bench top tool strip (workspace tabs + icon-over-label tools).
             crate::tool_palette::panel(root, &mut self.state);
-            // Contextual inline form strip (feature editor, sketch guides, mate, drawing sheet).
-            crate::options_bar::panel(root, &mut self.state);
             // Bottom bar (Zoo model: chips, ai, command line, physical analysis, filter, units, status).
             crate::command_line::panel(root, &mut self.state, &status);
             // Slim left toggle rail (Tree, History, Values, Props + Clear).
@@ -721,6 +719,8 @@ impl SolidDraftApp {
             if self.state.tree_shown() {
                 self.side_panel(root, Side::Tree, window_width);
             }
+            // Contextual inline form strip sits over the viewport without shifting the side column.
+            crate::options_bar::panel(root, &mut self.state);
         }
         egui::CentralPanel::default().frame(egui::Frame::new().fill(theme::chrome())).show(root, |ui| {
             if start {

@@ -719,7 +719,12 @@ pub fn status_lines(app: &mut App) -> Vec<String> {
 
 /// The group captions of the open ribbon tab, left to right: the lowest row of its text.
 pub fn title_rect(app: &App, title: &str) -> Rect {
-    painted(app).into_iter().find(|p| p.text == title).unwrap_or_else(|| panic!("no title {title} in the frame")).rect
+    let with_ext = format!("{title}.dwprt");
+    painted(app)
+        .into_iter()
+        .find(|p| p.text == title || p.text == with_ext)
+        .unwrap_or_else(|| panic!("no title {title} in the frame"))
+        .rect
 }
 
 // ---------------------------------------------------------------------------

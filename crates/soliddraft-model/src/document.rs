@@ -591,6 +591,11 @@ impl Document {
         self.next_body
     }
 
+    /// The next unused feature identity.
+    pub fn next_feature_id(&self) -> FeatureId {
+        FeatureId(self.next_id)
+    }
+
     pub(crate) fn body_at(&self, key: u32, end: usize) -> Option<BodyId> {
         if self.next_body == 1 {
             if key != 0 {

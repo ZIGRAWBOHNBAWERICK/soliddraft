@@ -660,7 +660,7 @@ impl HoleWizardSpec {
         }
         self.standard = standard;
         let tables = fastener_tables(standard, self.hole_type);
-        let table = tables[0];
+        let table = &tables[0];
         let row = default_row(table, standard);
         self.fastener = table.id.to_owned();
         self.size = row.name.to_owned();
@@ -678,7 +678,7 @@ impl HoleWizardSpec {
         let prev_size = self.size.clone();
         self.hole_type = hole_type;
         let tables = fastener_tables(self.standard, hole_type);
-        let table = tables[0];
+        let table = &tables[0];
         let row = table.sizes.iter().find(|r| r.name == prev_size).unwrap_or_else(|| default_row(table, self.standard));
         self.fastener = table.id.to_owned();
         self.size = row.name.to_owned();

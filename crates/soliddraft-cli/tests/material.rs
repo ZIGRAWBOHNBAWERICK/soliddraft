@@ -45,6 +45,7 @@ fn save_block(dir: &Path) -> PathBuf {
             operation: ExtrudeOp::Boss,
             end: EndCondition::Blind { depth: 10.0 },
             reverse: false,
+            options: Default::default(),
         }),
     );
     let path = dir.join("block.dwprt");

@@ -36,6 +36,7 @@ fn boss(sketch: FeatureId, depth: f64) -> FeatureKind {
         operation: ExtrudeOp::Boss,
         end: EndCondition::Blind { depth },
         reverse: false,
+        options: Default::default(),
     })
 }
 
@@ -181,6 +182,7 @@ fn reorder_keeps_inputs_above_their_readers() {
             operation: ExtrudeOp::Cut,
             end: EndCondition::ThroughAll,
             reverse: false,
+            options: Default::default(),
         }),
     );
     assert!(d.status(cut).unwrap().is_ok(), "{:?}", d.status(cut));
@@ -341,7 +343,7 @@ fn files_round_trip_and_refuse_what_they_cannot_read() {
     assert_eq!(back.part_json(), d.part_json());
     assert_eq!(back.to_bytes().unwrap(), bytes);
 
-    let newer = d.part_json().replace("soliddraft-part/2", "soliddraft-part/4");
+    let newer = d.part_json().replace("soliddraft-part/2", "soliddraft-part/5");
     assert!(matches!(Document::from_part_json(&newer, kernel.clone()), Err(FileError::Format { .. })));
     // A truth without a format tag says so, rather than naming a blank one.
     let Err(untagged) = Document::from_part_json("[1, 2]", kernel.clone()) else { panic!("a list is not a part") };
@@ -351,7 +353,7 @@ fn files_round_trip_and_refuse_what_they_cannot_read() {
         Document::from_part_json(&newer, kernel.clone())
             .unwrap_err()
             .to_string()
-            .starts_with("the file is soliddraft-part/4,")
+            .starts_with("the file is soliddraft-part/5, this version reads soliddraft-part/4,")
     );
     let broken = d.part_json().replace("\"next_feature\": 4", "\"next_feature\": 2");
     assert!(matches!(Document::from_part_json(&broken, kernel.clone()), Err(FileError::Invalid(_))), "{broken}");
@@ -606,6 +608,7 @@ fn built_in_shapes_extrude_without_a_sketch() {
             operation: ExtrudeOp::Boss,
             end: EndCondition::Blind { depth },
             reverse: false,
+            options: Default::default(),
         })
     };
     let plate = add(&mut d, shape(DatumPlane::Top, BuiltinShape::Rectangle { width: 40.0, height: 30.0 }, 10.0));

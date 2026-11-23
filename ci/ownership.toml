@@ -365,6 +365,20 @@ paths = ["crates/soliddraft-app/src/feature_forms.rs"]
 module = ["feature_forms"]
 
 [[areas]]
+name = "app.create_menu"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/create_menu.rs"]
+module = ["create_menu"]
+
+[[areas]]
+name = "app.feature_panel"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/feature_panel.rs"]
+module = ["feature_panel"]
+
+[[areas]]
 name = "app.form_bar"
 owner = "core"
 crate = "soliddraft-app"
@@ -482,6 +496,13 @@ owner = "core"
 crate = "soliddraft-model"
 paths = ["crates/soliddraft-model/src/file.rs"]
 module = ["file"]
+
+[[areas]]
+name = "model.thin"
+owner = "core"
+crate = "soliddraft-model"
+paths = ["crates/soliddraft-model/src/thin.rs"]
+module = ["thin"]
 
 [[areas]]
 name = "model.view"

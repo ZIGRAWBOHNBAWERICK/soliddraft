@@ -63,6 +63,7 @@ fn bracket() -> document::Document {
                         operation: if cut { ExtrudeOp::Cut } else { ExtrudeOp::Boss },
                         end: EndCondition::Blind { depth: *distance },
                         reverse: false,
+                        options: Default::default(),
                     }),
                     name: Some(step.id.clone()),
                     position: None,

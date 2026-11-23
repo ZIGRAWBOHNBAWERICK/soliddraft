@@ -282,6 +282,7 @@ fn an_import_after_another_body_is_refused_and_keeps_that_body() {
         operation: ExtrudeOp::Boss,
         end: EndCondition::Blind { depth: 5.0 },
         reverse: false,
+        options: Default::default(),
     });
     let boss = add(&mut doc, boss).unwrap();
     let body = doc.body();

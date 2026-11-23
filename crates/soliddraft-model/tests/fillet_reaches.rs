@@ -93,6 +93,7 @@ fn a_fillet_that_reaches_a_face_names_it_in_its_status_and_its_preview() {
             operation: ExtrudeOp::Boss,
             end: EndCondition::Blind { depth: 10.0 },
             reverse: false,
+            options: Default::default(),
         }),
     );
     let body = d.body().unwrap();

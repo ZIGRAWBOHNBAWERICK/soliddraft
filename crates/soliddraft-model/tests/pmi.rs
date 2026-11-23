@@ -41,6 +41,7 @@ fn extrude(sketch: FeatureId, operation: ExtrudeOp, end: EndCondition) -> Featur
         operation,
         end,
         reverse: false,
+        options: Default::default(),
     })
 }
 

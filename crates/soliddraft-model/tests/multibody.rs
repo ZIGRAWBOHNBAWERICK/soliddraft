@@ -17,6 +17,7 @@ fn block(width: f64, depth: f64) -> FeatureKind {
         operation: ExtrudeOp::Boss,
         end: EndCondition::Blind { depth },
         reverse: false,
+        options: Default::default(),
     })
 }
 

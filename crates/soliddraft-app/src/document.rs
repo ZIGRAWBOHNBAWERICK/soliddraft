@@ -286,6 +286,148 @@ impl EndKind {
     }
 }
 
+/// Where an extrusion or cut starts, as its From choice offers it.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub enum StartKind {
+    /// On the sketch plane.
+    #[default]
+    SketchPlane,
+    /// On a reference plane or planar face parallel to the sketch, once one is picked.
+    Surface(Option<model::PlaneRef>),
+    /// On the plane through a vertex, once one is picked.
+    Vertex(Option<model::VertexRef>),
+    /// On a plane parallel to the sketch plane, `distance` along the first direction, or
+    /// against it when `reverse`.
+    Offset { distance: f64, reverse: bool },
+}
+
+impl StartKind {
+    pub fn label(&self) -> &'static str {
+        match self {
+            StartKind::SketchPlane => "Sketch plane",
+            StartKind::Surface(_) => "Surface/Face/Plane",
+            StartKind::Vertex(_) => "Vertex",
+            StartKind::Offset { .. } => "Offset",
+        }
+    }
+
+    /// The model's start, or why the form cannot apply yet.
+    pub fn to_model(&self) -> Result<Option<model::ExtrudeStart>, String> {
+        match self {
+            StartKind::SketchPlane => Ok(None),
+            StartKind::Surface(Some(plane)) => Ok(Some(model::ExtrudeStart::Surface { plane: plane.clone() })),
+            StartKind::Surface(None) => Err("Pick the face or plane the extrusion starts from".into()),
+            StartKind::Vertex(Some(vertex)) => Ok(Some(model::ExtrudeStart::Vertex { vertex: vertex.clone() })),
+            StartKind::Vertex(None) => Err("Pick the vertex the extrusion starts from".into()),
+            StartKind::Offset { distance, reverse } => {
+                Ok(Some(model::ExtrudeStart::Offset { distance: *distance, reverse: *reverse }))
+            }
+        }
+    }
+
+    fn from_model(start: Option<&model::ExtrudeStart>) -> StartKind {
+        match start {
+            None => StartKind::SketchPlane,
+            Some(model::ExtrudeStart::Surface { plane }) => StartKind::Surface(Some(plane.clone())),
+            Some(model::ExtrudeStart::Vertex { vertex }) => StartKind::Vertex(Some(vertex.clone())),
+            Some(model::ExtrudeStart::Offset { distance, reverse }) => {
+                StartKind::Offset { distance: *distance, reverse: *reverse }
+            }
+        }
+    }
+
+    /// True while the start waits for a pick in the viewport.
+    pub fn picking(&self) -> bool {
+        matches!(self, StartKind::Surface(None) | StartKind::Vertex(None))
+    }
+}
+
+/// An extrusion's or cut's Direction 2: how far it also goes against the first direction.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Direction2 {
+    pub end: EndKind,
+    pub depth: f64,
+}
+
+impl Default for Direction2 {
+    fn default() -> Self {
+        Direction2 { end: EndKind::Blind, depth: 10.0 }
+    }
+}
+
+/// The choices an extrusion and a cut share past their first direction: From,
+/// Direction 2, Thin feature and Selected contours.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct ExtrudeChoices {
+    #[serde(default, skip_serializing_if = "is_sketch_plane")]
+    pub from: StartKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub direction2: Option<Direction2>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thin: Option<model::ThinFeature>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub contours: Vec<model::Contour>,
+}
+
+fn is_sketch_plane(start: &StartKind) -> bool {
+    *start == StartKind::SketchPlane
+}
+
+fn yes() -> bool {
+    true
+}
+
+fn is_yes(value: &bool) -> bool {
+    *value
+}
+
+impl ExtrudeChoices {
+    /// True when none is set: the extrusion builds as it did before these choices.
+    pub fn is_default(&self) -> bool {
+        *self == ExtrudeChoices::default()
+    }
+
+    /// The model's options, or why the form cannot apply yet.
+    pub fn to_model(&self) -> Result<model::ExtrudeOptions, String> {
+        let direction2 = match &self.direction2 {
+            Some(d) if matches!(d.end, EndKind::UpToFace(None)) => {
+                return Err("Pick the face Direction 2 goes up to".into());
+            }
+            Some(d) => Some(d.end.to_model(d.depth)),
+            None => None,
+        };
+        Ok(model::ExtrudeOptions {
+            from: self.from.to_model()?,
+            direction2,
+            thin: self.thin,
+            contours: self.contours.clone(),
+        })
+    }
+
+    /// The options as the model reads, with a start still to pick kept as the
+    /// sketch plane, as a missing Up to face keeps the depth.
+    fn to_model_lenient(&self) -> model::ExtrudeOptions {
+        model::ExtrudeOptions {
+            from: self.from.to_model().ok().flatten(),
+            direction2: self.direction2.as_ref().map(|d| d.end.to_model(d.depth)),
+            thin: self.thin,
+            contours: self.contours.clone(),
+        }
+    }
+
+    fn from_model(options: &model::ExtrudeOptions) -> ExtrudeChoices {
+        ExtrudeChoices {
+            from: StartKind::from_model(options.from.as_ref()),
+            direction2: options.direction2.as_ref().map(|end| {
+                let (end, depth) = EndKind::from_model(end);
+                Direction2 { end, depth: depth.unwrap_or(10.0) }
+            }),
+            thin: options.thin,
+            contours: options.contours.clone(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ExtrudeParams {
     /// The sketch to extrude; when `None`, the built-in profile on `plane`.
@@ -300,6 +442,12 @@ pub struct ExtrudeParams {
     /// The Draft option: side faces tapered from the sketch plane.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub draft: Option<ExtrudeDraft>,
+    /// Merge result: join the body the extrusion grows from. Off starts a new body.
+    #[serde(default = "yes", skip_serializing_if = "is_yes")]
+    pub merge: bool,
+    /// From, Direction 2, Thin feature and Selected contours.
+    #[serde(default, skip_serializing_if = "ExtrudeChoices::is_default")]
+    pub choices: ExtrudeChoices,
 }
 
 impl Default for ExtrudeParams {
@@ -312,6 +460,8 @@ impl Default for ExtrudeParams {
             flip: false,
             end: EndKind::Blind,
             draft: None,
+            merge: true,
+            choices: ExtrudeChoices::default(),
         }
     }
 }
@@ -329,11 +479,22 @@ pub struct CutParams {
     /// The Draft option: the cut's walls tapered from the sketch plane.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub draft: Option<ExtrudeDraft>,
+    /// From, Direction 2, Thin feature and Selected contours.
+    #[serde(default, skip_serializing_if = "ExtrudeChoices::is_default")]
+    pub choices: ExtrudeChoices,
 }
 
 impl CutParams {
     pub fn new(sketch: FeatureId) -> Self {
-        CutParams { sketch, depth: 10.0, through_all: true, flip: false, up_to: None, draft: None }
+        CutParams {
+            sketch,
+            depth: 10.0,
+            through_all: true,
+            flip: false,
+            up_to: None,
+            draft: None,
+            choices: ExtrudeChoices::default(),
+        }
     }
 
     /// Where the cut stops.
@@ -510,6 +671,11 @@ impl Default for ExtrudeDraft {
     }
 }
 
+/// True for a feature that makes or changes a solid: not a sketch or a reference plane.
+fn makes_solid(kind: &model::FeatureKind) -> bool {
+    !matches!(kind, model::FeatureKind::Sketch(_) | model::FeatureKind::ReferencePlane(_))
+}
+
 /// A plane's label for people.
 pub fn plane_ref_label(plane: &model::PlaneRef) -> String {
     match plane {
@@ -633,6 +799,7 @@ impl FeatureKind {
                 operation: model::ExtrudeOp::Boss,
                 end: p.end.to_model(p.depth),
                 reverse: p.flip,
+                options: p.choices.to_model_lenient(),
             }),
             FeatureKind::Cut(p) => model::FeatureKind::Extrude(model::ExtrudeFeature {
                 profile: model::ProfileSource::Sketch { feature: model_id(p.sketch) },
@@ -640,6 +807,7 @@ impl FeatureKind {
                 end: p.end().to_model(p.depth),
                 // The model sweeps along the sketch normal; a cut goes into the face.
                 reverse: !p.flip,
+                options: p.choices.to_model_lenient(),
             }),
             FeatureKind::Fillet(p) => model::FeatureKind::Fillet(p.blend()),
             FeatureKind::Chamfer(p) => model::FeatureKind::Chamfer(p.blend()),
@@ -705,6 +873,7 @@ impl FeatureKind {
                             flip: !e.reverse,
                             up_to: None,
                             draft: None,
+                            choices: ExtrudeChoices::from_model(&e.options),
                         };
                         cut.set_end(end);
                         FeatureKind::Cut(cut)
@@ -715,6 +884,7 @@ impl FeatureKind {
                             depth,
                             flip: e.reverse,
                             end,
+                            choices: ExtrudeChoices::from_model(&e.options),
                             ..Default::default()
                         })
                     }
@@ -727,6 +897,8 @@ impl FeatureKind {
                             flip: e.reverse,
                             end,
                             draft: None,
+                            merge: true,
+                            choices: ExtrudeChoices::from_model(&e.options),
                         })
                     }
                 }
@@ -1241,6 +1413,17 @@ pub enum Command {
         params: ExtrudeParams,
         via_assistant: bool,
     },
+    /// Adds a revolve. One that does not merge its result starts a new body.
+    AddRevolve {
+        revolve: model::RevolveFeature,
+        merge: bool,
+    },
+    /// Replaces a revolve's definition and its Merge result.
+    EditRevolve {
+        id: FeatureId,
+        revolve: model::RevolveFeature,
+        merge: bool,
+    },
     EditExtrude {
         id: FeatureId,
         params: ExtrudeParams,
@@ -1325,6 +1508,8 @@ impl Command {
             Command::RemoveValue { .. } => "Delete global".into(),
             Command::AddExtrude { .. } => "Add extrude".into(),
             Command::EditExtrude { .. } => "Edit extrude".into(),
+            Command::AddRevolve { .. } => "Add revolve".into(),
+            Command::EditRevolve { .. } => "Edit revolve".into(),
             Command::AddCut { .. } => "Add cut".into(),
             Command::EditCut { .. } => "Edit cut".into(),
             Command::AddFillet { .. } => "Add fillet".into(),
@@ -2816,6 +3001,7 @@ impl Document {
         let edited = match &command {
             Command::EditFeature { id, .. }
             | Command::EditExtrude { id, .. }
+            | Command::EditRevolve { id, .. }
             | Command::EditCut { id, .. }
             | Command::EditFillet { id, .. }
             | Command::EditChamfer { id, .. } => Some(*id),
@@ -2937,7 +3123,9 @@ impl Document {
     }
 
     fn to_model(&self, command: Command) -> Result<Vec<model::Command>, String> {
-        let add = |kind: model::FeatureKind, via_assistant: bool| {
+        // A feature joins the body of its sketch, or the active body. One that does not
+        // merge its result starts a new body when that body already has a solid.
+        let add_merged = |kind: model::FeatureKind, via_assistant: bool, merge: bool| {
             let sketch = match &kind {
                 model::FeatureKind::Extrude(model::ExtrudeFeature {
                     profile: model::ProfileSource::Sketch { feature },
@@ -2947,7 +3135,10 @@ impl Document {
                 model::FeatureKind::Sweep(s) => Some(s.sketch),
                 _ => None,
             };
-            let body = sketch.and_then(|id| self.model.feature(id)).map_or(self.active_body, |f| f.body);
+            let mut body = sketch.and_then(|id| self.model.feature(id)).map_or(self.active_body, |f| f.body);
+            if !merge && self.model.features().iter().any(|f| f.body == body && makes_solid(&f.kind)) {
+                body = self.model.next_body();
+            }
             if body != 0 {
                 model::Command::AddFeatureInBody {
                     body,
@@ -2964,6 +3155,7 @@ impl Document {
                 }
             }
         };
+        let add = |kind: model::FeatureKind, via_assistant: bool| add_merged(kind, via_assistant, true);
         let edit =
             |id: FeatureId, kind: &FeatureKind| model::Command::EditFeature { id: model_id(id), kind: kind.to_model() };
         Ok(match command {
@@ -3000,19 +3192,39 @@ impl Document {
                 vec![edit(id, &FeatureKind::Sketch(SketchFeature { plane: s.plane.clone(), sketch }))]
             }
             Command::AddExtrude { params, via_assistant } => {
-                let draft = params.draft;
-                let base = vec![add(FeatureKind::Extrude(params).to_model(), via_assistant)];
+                params.choices.to_model()?;
+                let (draft, merge) = (params.draft, params.merge);
+                let base = vec![add_merged(FeatureKind::Extrude(params).to_model(), via_assistant, merge)];
                 self.with_draft_option(base, None, draft)?
             }
             Command::EditExtrude { id, params } => {
+                params.choices.to_model()?;
                 let draft = params.draft;
-                self.with_draft_option(vec![edit(id, &FeatureKind::Extrude(params))], Some(id), draft)?
+                // The Draft option moves with its extrusion, unless the edit removes it.
+                let mut base = self.merge_commands(id, params.merge);
+                if draft.is_none()
+                    && let Some(linked) = self.linked_draft(id)
+                {
+                    base.retain(|c| !matches!(c, model::Command::MoveToBody { id, .. } if *id == model_id(linked)));
+                }
+                base.push(edit(id, &FeatureKind::Extrude(params)));
+                self.with_draft_option(base, Some(id), draft)?
+            }
+            Command::AddRevolve { revolve, merge } => {
+                vec![add_merged(FeatureKind::Revolve(revolve).to_model(), false, merge)]
+            }
+            Command::EditRevolve { id, revolve, merge } => {
+                let mut commands = self.merge_commands(id, merge);
+                commands.push(edit(id, &FeatureKind::Revolve(revolve)));
+                commands
             }
             Command::AddCut { params } => {
+                params.choices.to_model()?;
                 let draft = params.draft;
                 self.with_draft_option(vec![add(FeatureKind::Cut(params).to_model(), false)], None, draft)?
             }
             Command::EditCut { id, params } => {
+                params.choices.to_model()?;
                 let draft = params.draft;
                 self.with_draft_option(vec![edit(id, &FeatureKind::Cut(params))], Some(id), draft)?
             }
@@ -3214,6 +3426,22 @@ impl Document {
                     }
                     (model::FeatureKind::Extrude(e), EntityRef::Face(face)) if index == 0 => {
                         e.end = model::EndCondition::UpToFace { face };
+                    }
+                    (model::FeatureKind::Extrude(e), EntityRef::Face(face)) if index == 1 => {
+                        e.options.from = Some(model::ExtrudeStart::Surface { plane: model::PlaneRef::Face { face } });
+                    }
+                    (model::FeatureKind::Extrude(e), EntityRef::Plane { plane, .. }) if index == 1 => {
+                        let plane = match plane {
+                            model::SketchPlane::Datum { datum, offset } => model::PlaneRef::Datum { datum, offset },
+                            model::SketchPlane::Feature { feature, offset: 0.0 } => {
+                                model::PlaneRef::Feature { feature }
+                            }
+                            _ => return Err("choose a reference plane or a planar face".into()),
+                        };
+                        e.options.from = Some(model::ExtrudeStart::Surface { plane });
+                    }
+                    (model::FeatureKind::Extrude(e), EntityRef::Face(face)) if index == 2 => {
+                        e.options.direction2 = Some(model::EndCondition::UpToFace { face });
                     }
                     _ => return Err("the replacement is the wrong kind of entity".into()),
                 }
@@ -3419,6 +3647,61 @@ impl Document {
                 _ => {}
             }
         }
+        // An extrusion reads its Merge result back from the body it is in.
+        let merged: Vec<(FeatureId, bool)> = self
+            .features
+            .iter()
+            .filter(|f| matches!(f.kind, FeatureKind::Extrude(_)))
+            .map(|f| (f.id, self.merges(f.id)))
+            .collect();
+        for (id, merge) in merged {
+            if let Some(FeatureKind::Extrude(p)) = self.features.iter_mut().find(|f| f.id == id).map(|f| &mut f.kind) {
+                p.merge = merge;
+            }
+        }
+    }
+
+    /// Whether feature `id` adds to a body that features before it made: the Merge
+    /// result of an extrusion or revolve. The first solid feature of a body starts it,
+    /// so it merges into nothing.
+    pub fn merges(&self, id: FeatureId) -> bool {
+        let features = self.model.features();
+        let Some(i) = features.iter().position(|f| f.id == model_id(id)) else { return false };
+        let body = features[i].body;
+        features[..i].iter().any(|f| f.body == body && makes_solid(&f.kind))
+    }
+
+    /// The body a feature at tree position `index` would merge into: the body of the
+    /// nearest solid feature above it, or none when no feature above made a solid.
+    fn merge_target(&self, index: usize) -> Option<u32> {
+        self.model.features()[..index.min(self.model.features().len())]
+            .iter()
+            .rev()
+            .find(|f| makes_solid(&f.kind))
+            .map(|f| f.body)
+    }
+
+    /// The commands that give feature `id` and its Draft option the Merge result
+    /// `merge`: none when it already has it, else a move to a new body, or into the
+    /// body the nearest solid feature above it is in.
+    fn merge_commands(&self, id: FeatureId, merge: bool) -> Vec<model::Command> {
+        if merge == self.merges(id) {
+            return Vec::new();
+        }
+        let Some(index) = self.model.index_of(model_id(id)) else { return Vec::new() };
+        let body = if merge {
+            match self.merge_target(index) {
+                Some(body) => body,
+                None => return Vec::new(),
+            }
+        } else {
+            self.model.next_body()
+        };
+        let mut moves = vec![model::Command::MoveToBody { id: model_id(id), body }];
+        if let Some(draft) = self.linked_draft(id) {
+            moves.push(model::Command::MoveToBody { id: model_id(draft), body });
+        }
+        moves
     }
 
     /// The draft that is feature `id`'s Draft option, if it has one.
@@ -4750,6 +5033,25 @@ impl Document {
         self.picks.iter().position(|p| matches!(p, PickEntry::Edge(_, e) if *e == edge)).map(|i| i as u32 + 1)
     }
 
+    /// A persistent name for a picked corner: the faces that meet at it. None when the
+    /// part on screen is not the exact body or the corner cannot be named.
+    pub fn vertex_ref(&self, key: VertexKey) -> Option<model::VertexRef> {
+        if !self.current_exact_display() {
+            return None;
+        }
+        let at = self.vertex_position(key)?;
+        let body = self.display_body()?;
+        let topology = self.model.kernel().topology(body).ok()?;
+        let distance = |v: &soliddraft_kernel_api::VertexInfo| {
+            Vec3::new(v.position.x as f32, v.position.y as f32, v.position.z as f32).distance(at)
+        };
+        let nearest = topology.vertices.iter().min_by(|a, b| distance(a).total_cmp(&distance(b)))?;
+        if distance(nearest) > 1e-3 {
+            return None;
+        }
+        self.model.vertex_ref(nearest.id).ok()
+    }
+
     pub fn vertex_position(&self, key: VertexKey) -> Option<Vec3> {
         if self.provisional.is_some() {
             return None;
@@ -5428,10 +5730,27 @@ fn view_status(
                             };
                             (0, RefKind::Face, label)
                         }
+                        (model::ReferenceSlot::Start, model::FeatureKind::Extrude(e)) => {
+                            let label = match &e.options.from {
+                                Some(model::ExtrudeStart::Surface { plane }) => plane_ref_label(plane),
+                                Some(model::ExtrudeStart::Vertex { vertex }) => vertex.label.clone(),
+                                _ => String::new(),
+                            };
+                            (1, RefKind::Face, label)
+                        }
+                        (model::ReferenceSlot::SecondLimit, model::FeatureKind::Extrude(e)) => {
+                            let label = match &e.options.direction2 {
+                                Some(model::EndCondition::UpToFace { face }) => face.label.clone(),
+                                _ => String::new(),
+                            };
+                            (2, RefKind::Face, label)
+                        }
                         (
                             model::ReferenceSlot::SketchPlane
                             | model::ReferenceSlot::Plane
                             | model::ReferenceSlot::Limit
+                            | model::ReferenceSlot::Start
+                            | model::ReferenceSlot::SecondLimit
                             | model::ReferenceSlot::Pull,
                             _,
                         ) => (0, RefKind::Face, String::new()),

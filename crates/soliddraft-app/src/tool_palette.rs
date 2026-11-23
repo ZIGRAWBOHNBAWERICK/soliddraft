@@ -115,6 +115,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
                         .map(|(command, _)| command)
                         .filter(|command| {
                             (command.shown)(state)
+                                && crate::create_menu::shows(state, command)
                                 && !(start && command.id == "sketch")
                                 && command.id != "smart_dimension"
                                 && !(state.in_sketch() && matches!(command.id, "sketch" | "exit_sketch"))
@@ -123,11 +124,15 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
                                     && command.id == "assembly_interference")
                         })
                         .collect();
-                    if !commands.is_empty() {
+                    // Every create command is a row of the Create menu, which leads its group,
+                    // so the group shows even when every create command is unpinned.
+                    if !commands.is_empty() || is_create_group(state, tab, group) {
                         groups.push((group, commands));
                     }
                 }
-                let lead_width: f32 = lead.iter().map(|(c, primary)| card_width(ui, state, c, *primary) + GAP).sum();
+                let create = groups.iter().any(|(group, _)| is_create_group(state, tab, group));
+                let lead_width: f32 = lead.iter().map(|(c, primary)| card_width(ui, state, c, *primary) + GAP).sum::<f32>()
+                    + if create { CREATE + GAP } else { 0.0 };
                 let widths: Vec<Vec<f32>> =
                     groups.iter().map(|(_, cs)| cs.iter().map(|c| card_width(ui, state, c, false)).collect()).collect();
                 let shown = fit(&widths, lead_width, !lead.is_empty(), ui.available_width() - 10.0);
@@ -149,6 +154,9 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
                             for ((group, commands), shown) in groups.iter().zip(&shown) {
                                 if drew_any {
                                     group_divider(ui);
+                                }
+                                if is_create_group(state, tab, group) {
+                                    crate::create_menu::button(ui, state, CREATE);
                                 }
                                 for command in commands[..*shown].iter().copied() {
                                     let resp = tool_card(ui, state, command, false);
@@ -231,6 +239,13 @@ const GAP: f32 = 4.0;
 const DIVIDER: f32 = 9.0 + GAP;
 /// The width of a group's More card, with the gap before it.
 const MORE: f32 = 40.0 + GAP;
+/// The width of the Create menu control that leads the Solid tab's Create group.
+const CREATE: f32 = 84.0;
+
+/// Whether `group` of `tab` is the part's Create group, which the Create menu leads.
+fn is_create_group(state: &AppState, tab: Tab, group: &str) -> bool {
+    tab == Tab::Part(RibbonTab::Solid) && group == "Create" && !state.in_sketch()
+}
 
 /// How many tools of each group stay on the strip as cards when the strip is `room` wide.
 /// `widths` holds each group's card widths in order. Every group keeps at least one card;

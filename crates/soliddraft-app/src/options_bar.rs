@@ -152,7 +152,7 @@ fn active_tool(state: &AppState) -> (Icon, String, String) {
     if let Some(editor) = &state.editor {
         let icon =
             commands::all().iter().find(|c| (c.active)(state) && c.outside_sketch).map_or(Icon::Config, |c| c.icon);
-        return (icon, editor.title(), "".into());
+        return (icon, editor.title(), "Set it up in the side panel. Enter applies it, Esc cancels".into());
     }
     if state.measure.open {
         return (Icon::Measure, "Measure".into(), "Pick edges or faces to measure".into());
@@ -181,10 +181,6 @@ fn show(ui: &mut egui::Ui, state: &mut AppState) {
         return;
     }
     let part = !state.assembly.is_active() && !state.drawing.is_active();
-    if part && state.editor.is_some() && !state.in_sketch() {
-        crate::feature_forms::show(ui, state);
-        return;
-    }
     state.form_bar.reset();
     follow_context(ui.ctx(), state);
     let mut sheet_anchor = ui.available_rect_before_wrap();
@@ -274,7 +270,8 @@ fn show(ui: &mut egui::Ui, state: &mut AppState) {
         response.on_hover_text(&label);
 
         let mut details_at = None;
-        if state.doc.selection.is_some() || state.measure.open || state.pmi.open {
+        let details = state.doc.selection.is_some() || state.measure.open || state.pmi.open;
+        if details && !crate::feature_panel::active(state) {
             let response = ui.button("Details");
             sheet_anchor = response.rect;
             details_at = Some(response.rect.center());
@@ -409,7 +406,9 @@ fn feature_dimensions(ui: &mut egui::Ui, state: &AppState, id: FeatureId, named:
 }
 
 fn details_sheet(ui: &mut egui::Ui, state: &mut AppState, anchor: egui::Rect) {
-    if !state.options_details {
+    // The feature panel shows the details while a feature is open. The sheet keeps its
+    // place and comes back when the feature closes.
+    if !state.options_details || crate::feature_panel::active(state) {
         return;
     }
     let screen = ui.ctx().input(|input| input.content_rect());

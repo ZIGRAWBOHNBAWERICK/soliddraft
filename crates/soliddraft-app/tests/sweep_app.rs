@@ -80,14 +80,9 @@ fn sweep_commands_edit_undo_reopen_and_export_the_saved_path() {
 #[test]
 fn sweep_ribbon_opens_property_page_commits_and_edits() {
     use egui_kittest::{Harness, kittest::Queryable};
-    let instance = egui_wgpu::wgpu::Instance::default();
-    assert!(
-        !pollster::block_on(instance.enumerate_adapters(egui_wgpu::wgpu::Backends::all())).is_empty(),
-        "Sweep UI requires a GPU adapter"
-    );
-    let config = std::env::temp_dir().join(format!("soliddraft-sweep-config-{}", std::process::id()));
-    std::fs::create_dir_all(&config).unwrap();
-    soliddraft_app::file::set_config_dir(Some(config));
+    // The case holds the GPU lock and points settings at its own folder, so a test running
+    // beside this one never swaps the folder under it.
+    let _case = ribbon::case("sweep-property-page");
     let mut doc = profile();
     let sketch = doc.features[0].id;
     doc.selection = Some(Selection::Feature(sketch));
@@ -365,14 +360,9 @@ fn a_path_is_an_end_or_segments_and_refusals_leave_the_part() {
 fn property_page_builds_a_chain_and_offers_only_what_works() {
     use egui_kittest::{Harness, kittest::Queryable};
     use soliddraft_kernel_api::{PathSegment, SweepOrientation};
-    let instance = egui_wgpu::wgpu::Instance::default();
-    assert!(
-        !pollster::block_on(instance.enumerate_adapters(egui_wgpu::wgpu::Backends::all())).is_empty(),
-        "Sweep UI requires a GPU adapter"
-    );
-    let config = std::env::temp_dir().join(format!("soliddraft-chain-config-{}", std::process::id()));
-    std::fs::create_dir_all(&config).unwrap();
-    soliddraft_app::file::set_config_dir(Some(config));
+    // The case holds the GPU lock and points settings at its own folder, so a test running
+    // beside this one never swaps the folder under it.
+    let _case = ribbon::case("sweep-chain-page");
     let mut doc = profile();
     let sketch = doc.features[0].id;
     doc.selection = Some(Selection::Feature(sketch));
@@ -560,11 +550,6 @@ fn spline_controls_build_through_the_registry_in_edit_suite() {
 
         app.run_steps(4);
         ribbon::run_command(&mut app, "sweep");
-
-        let bar = soliddraft_app::options_bar::shown_rect(&app.ctx).expect("the options bar is drawn");
-        let (_, rect) = ribbon::buttons_in(&app, bar).into_iter().find(|(name, _)| name.starts_with("More (")).unwrap();
-        ribbon::click_at(&mut app, rect.center());
-        app.run_steps(6);
 
         ribbon::open_options(&mut app);
         app.get_by_label("Use spline path").scroll_to_me();

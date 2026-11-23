@@ -37,6 +37,7 @@ fn block(kernel: Arc<dyn Kernel>) -> (Document, FeatureId) {
                 operation: ExtrudeOp::Boss,
                 end: EndCondition::Blind { depth: 10.0 },
                 reverse: false,
+                options: Default::default(),
             }),
             name: None,
             position: None,

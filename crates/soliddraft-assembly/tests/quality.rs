@@ -51,6 +51,7 @@ fn save_pin(path: &Path) {
             operation: ExtrudeOp::Boss,
             end: EndCondition::Blind { depth: 40.0 },
             reverse: false,
+            options: Default::default(),
         }),
     );
     doc.save(path).unwrap();

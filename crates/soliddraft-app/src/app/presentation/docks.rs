@@ -40,6 +40,13 @@ pub(in crate::app) fn center_dock() -> DockState<Tab> {
 /// `Values`, `Props`) vertically top-to-bottom with draggable 7px horizontal splitters and
 /// a close `×` per pane.
 pub(in crate::app) fn pane(ui: &mut egui::Ui, state: &mut AppState) {
+    // While a feature is created or edited the side column is its property panel, with the
+    // tree kept below it: planes, axes and features are still picked from the tree. The
+    // toggled panes come back when the feature closes.
+    if crate::feature_panel::active(state) {
+        feature_pane(ui, state);
+        return;
+    }
     ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
     let active = state.layout.panes.active_list();
     if active.is_empty() {
@@ -175,6 +182,29 @@ pub(in crate::app) fn pane(ui: &mut egui::Ui, state: &mut AppState) {
     }
 
     // Subtle right divider separating the side column from the viewport.
+    ui.painter().vline(full.right() - 0.5, full.y_range(), egui::Stroke::new(1.0, theme::line()));
+}
+
+/// The feature property panel over the feature tree, filling the side column. The panel
+/// takes what its open sections need, up to two thirds; the tree the rest.
+fn feature_pane(ui: &mut egui::Ui, state: &mut AppState) {
+    ui.spacing_mut().item_spacing = vec2(6.0, 4.0);
+    let full = ui.available_rect_before_wrap();
+    let most = (full.height() * 0.68).max(160.0).min(full.height());
+    let wanted = crate::feature_panel::needed_height(ui.ctx()).unwrap_or(most);
+    let split = full.top() + wanted.clamp(160.0_f32.min(most), most);
+    let top = Rect::from_min_max(full.min, pos2(full.right(), split));
+    let bottom = Rect::from_min_max(pos2(full.left(), split), full.max);
+    let layout = egui::Layout::top_down(egui::Align::Min);
+    let mut panel = ui.new_child(egui::UiBuilder::new().id_salt("feature_panel_area").max_rect(top).layout(layout));
+    panel.set_clip_rect(top.intersect(ui.clip_rect()));
+    crate::feature_panel::show(&mut panel, state);
+    ui.painter().hline(full.x_range(), split, egui::Stroke::new(1.0, theme::line_strong()));
+    let mut rows = ui.new_child(egui::UiBuilder::new().id_salt("feature_panel_tree").max_rect(bottom).layout(layout));
+    rows.set_clip_rect(bottom.intersect(ui.clip_rect()));
+    tree::show(&mut rows, state);
+    ui.allocate_rect(full, Sense::hover());
+    // The same right divider the toggled panes draw.
     ui.painter().vline(full.right() - 0.5, full.y_range(), egui::Stroke::new(1.0, theme::line()));
 }
 

@@ -38,6 +38,7 @@ fn extrude(sketch: FeatureId, operation: ExtrudeOp, depth: f64, reverse: bool) -
         operation,
         end: EndCondition::Blind { depth },
         reverse,
+        options: Default::default(),
     })
 }
 

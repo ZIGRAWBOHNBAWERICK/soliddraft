@@ -207,6 +207,15 @@ pub enum Command {
         /// Whether it is suppressed.
         suppressed: bool,
     },
+    /// Puts a feature in another body: an existing one, or a new one with the next free
+    /// identity, as an extrusion that does not merge its result. The features after it
+    /// stay in their bodies.
+    MoveToBody {
+        /// The feature.
+        id: FeatureId,
+        /// The body's stable identity.
+        body: u32,
+    },
     /// Moves the rollback bar above a feature, or to the end with `None`.
     RollTo {
         /// The first feature below the bar.
@@ -1172,6 +1181,24 @@ impl Document {
                 Ok(Applied {
                     inverse: Command::SetSuppressed { id, suppressed: old },
                     redo: Command::SetSuppressed { id, suppressed },
+                    created: None,
+                    label,
+                })
+            }
+            Command::MoveToBody { id, body } => {
+                let i = self.index(id)?;
+                if body > self.next_body {
+                    return Err(CommandError::Invalid(format!("there is no body {}", body.saturating_add(1))));
+                }
+                let old = std::mem::replace(&mut self.features[i].body, body);
+                self.next_body = self.next_body.max(body.saturating_add(1));
+                let label = format!("move {} to body {}", self.features[i].name, body.saturating_add(1));
+                if old != body {
+                    self.touch(i);
+                }
+                Ok(Applied {
+                    inverse: Command::MoveToBody { id, body: old },
+                    redo: Command::MoveToBody { id, body },
                     created: None,
                     label,
                 })

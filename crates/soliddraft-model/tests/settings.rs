@@ -26,6 +26,7 @@ fn cylinder() -> Document {
         operation: ExtrudeOp::Boss,
         end: EndCondition::Blind { depth: 20.0 },
         reverse: false,
+        options: Default::default(),
     });
     doc.execute(Command::AddFeature { kind, name: None, position: None, via_assistant: false }).unwrap();
     doc

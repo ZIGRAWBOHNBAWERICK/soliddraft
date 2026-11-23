@@ -23,8 +23,9 @@ use soliddraft_kernel_api::HoleDepth;
 use soliddraft_model::thread::HoleThread;
 use ux_tools::{Case, STANDARD, launch, settle};
 
+/// The feature property panel, where the form's OK is.
 fn bar(app: &App) -> Rect {
-    soliddraft_app::options_bar::shown_rect(&app.ctx).expect("the options bar is drawn")
+    ribbon::feature_panel(app)
 }
 
 fn click_bar(app: &mut App, label: &str) {
@@ -33,9 +34,10 @@ fn click_bar(app: &mut App, label: &str) {
     settle(app);
 }
 
+/// Unfolds the feature panel's folded sections.
 fn more(app: &mut App) {
-    let (name, _) = ribbon::buttons_in(app, bar(app)).into_iter().find(|(s, _)| s.starts_with("More (")).unwrap();
-    click_bar(app, &name);
+    ribbon::open_options(app);
+    settle(app);
 }
 
 fn click(app: &mut App, label: &str) {
@@ -64,6 +66,8 @@ fn choose(app: &mut App, shown: &str, entry: &str) {
 
 /// Opens a combo box of the form and picks the entry `entry`, scrolled into its list.
 fn pick(app: &mut App, combo: &str, entry: &str) {
+    app.get_by_label(combo).scroll_to_me();
+    app.run_steps(24);
     click(app, combo);
     app.get_by_label(entry).scroll_to_me();
     app.run_steps(24);
@@ -144,6 +148,8 @@ fn a_tapped_hole_is_made_in_the_form_edited_milled_saved_and_reopened() {
         // 12 mm deep, threaded for 9.
         more(app);
         choose(app, "Through", "Blind");
+        // Blind brings its depth in a section of its own, folded like the rest.
+        more(app);
         ribbon::type_field(app, "Depth value", "12");
         click(app, "Full depth");
         ribbon::type_field(app, "Thread depth value", "9");

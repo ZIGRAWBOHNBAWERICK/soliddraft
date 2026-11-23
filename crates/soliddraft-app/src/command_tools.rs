@@ -1773,6 +1773,7 @@ impl Line {
                     flip: *flip,
                     up_to: end,
                     draft: None,
+                    choices: Default::default(),
                 };
                 run.apply(doc, Command::AddCut { params })?;
             }

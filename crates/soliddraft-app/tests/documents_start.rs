@@ -34,6 +34,7 @@ fn block(depth: f64) -> Command {
             flip: false,
             end: Default::default(),
             draft: None,
+            ..Default::default()
         },
         via_assistant: false,
     }

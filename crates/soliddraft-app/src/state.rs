@@ -294,6 +294,12 @@ pub struct FeatureEditor {
     refused: Option<(EditorParams, String)>,
     /// The form's Depth takes the keyboard on the next frame.
     pub focus_depth: bool,
+    /// A revolve's Merge result: join the body it grows from. Off starts a new body. An
+    /// extrusion keeps its own in its parameters.
+    pub merge: bool,
+    /// The viewport shows the feature's preview. The panel's eye turns it off to see
+    /// the part as it is.
+    pub show_preview: bool,
 }
 
 /// A feature built from one sketch. Starting one with no sketch selected asks for it.
@@ -376,6 +382,8 @@ impl FeatureEditor {
             last: None,
             refused: None,
             focus_depth: false,
+            merge: true,
+            show_preview: true,
         }
     }
 
@@ -484,7 +492,9 @@ impl FeatureEditor {
         let arrow = |plain: Result<crate::document::Preview, String>| plain.ok().and_then(|p| p.guides.arrow);
         let result = match &self.params {
             // With its Draft option an extrusion previews as built, tapered.
-            EditorParams::Extrude(p) if p.draft.is_some() => doc
+            // With From, Direction 2, a thin wall or chosen contours an extrusion previews
+            // as built, so the picture is the kernel's own answer.
+            EditorParams::Extrude(p) if p.draft.is_some() || !p.choices.is_default() => doc
                 .preview_built(
                     match target {
                         Some(id) => Command::EditExtrude { id, params: p.clone() },
@@ -496,7 +506,7 @@ impl FeatureEditor {
                     built.guides.arrow = arrow(doc.preview_extrude(p));
                     built
                 }),
-            EditorParams::Cut(p) if p.draft.is_some() => doc
+            EditorParams::Cut(p) if p.draft.is_some() || !p.choices.is_default() => doc
                 .preview_built(
                     match target {
                         Some(id) => Command::EditCut { id, params: p.clone() },
@@ -1305,6 +1315,8 @@ pub struct AppState {
     pub viewport: ViewportState,
     pub pick_filter: crate::viewport::PickFilter,
     pub form_bar: crate::form_bar::State,
+    /// Which sections of the feature property panel are folded or open.
+    pub feature_panel: crate::feature_panel::State,
     pub options_details: bool,
     /// The selection's properties are drawing inside the options sheet, whose own X
     /// closes it: their Clear selection X would be a second close button.
@@ -1384,6 +1396,8 @@ pub struct AppState {
     pub revisions: Arc<dyn soliddraft_document::RevisionStore>,
     /// The commands run lately and the pinned ones, for the command search.
     pub commands: crate::commands::History,
+    /// The create commands pinned to the tool strip from the Create menu.
+    pub create_pins: crate::create_menu::Pins,
     /// The navigation preset, the wheel, the view keys and the camera settings.
     pub navigation: crate::navigation::NavigationSettings,
     /// The shortcut preset and per-command overrides.
@@ -1550,6 +1564,7 @@ impl AppState {
             viewport: ViewportState::default(),
             pick_filter: Default::default(),
             form_bar: Default::default(),
+            feature_panel: Default::default(),
             options_details: false,
             properties_in_sheet: false,
             editor: None,
@@ -1595,6 +1610,7 @@ impl AppState {
             command_line: crate::command_line::CommandLine::load(),
             revisions: Arc::new(soliddraft_document::CacheOnlyStore::new()),
             commands: crate::settings::command_history(),
+            create_pins: crate::settings::create_pins(),
             navigation: crate::settings::navigation(crate::settings::install_kind()),
             shortcuts: crate::settings::shortcuts(),
             recovery: None,
@@ -1758,10 +1774,13 @@ impl AppState {
 
     /// Ghost geometry the viewport shows this frame: added or removed material.
     pub fn ghost(&self) -> Option<(Arc<DisplayMesh>, bool)> {
-        if let Some(e) = &self.editor
-            && let Some(t) = &e.preview.tool
-        {
-            return Some((t.clone(), e.preview.removes));
+        if let Some(e) = &self.editor {
+            if !e.show_preview {
+                return None;
+            }
+            if let Some(t) = &e.preview.tool {
+                return Some((t.clone(), e.preview.removes));
+            }
         }
         let (_, p) = self.chat.preview.as_ref()?;
         p.tool.clone().map(|t| (t, p.removes))
@@ -1776,6 +1795,7 @@ impl AppState {
             return d.mesh();
         }
         match &self.editor {
+            Some(e) if !e.show_preview => None,
             Some(e) => e.preview.result.clone(),
             None => self.chat.preview.as_ref().and_then(|(_, p)| p.result.clone()),
         }

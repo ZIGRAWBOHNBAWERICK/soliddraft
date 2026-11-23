@@ -84,7 +84,10 @@
     "ci/browser-refusal-assistant.js": [
       "web"
     ],
-    "ci/browser-display-states.js": [
+    "ci/browser-display-states.mjs": [
+      "web"
+    ],
+    "ci/canvas-browser.mjs": [
       "web"
     ],
     "ci/browser-mate-controller.js": [

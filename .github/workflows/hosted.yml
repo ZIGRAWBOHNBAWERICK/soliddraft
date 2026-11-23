@@ -993,14 +993,14 @@ jobs:
           python3 -m http.server 8779 --bind 127.0.0.1 --directory target/web-dist > "$RUNNER_TEMP/display-states-server.log" 2>&1 &
           server=$!
           trap 'chrome-devtools-axi stop; kill "$server"' EXIT
+          export CHROME_ARGS="$CHROME_DEVTOOLS_AXI_CHROME_ARGS"
+          node ci/browser-display-states.mjs /usr/bin/google-chrome http://127.0.0.1:8779/ "$RUNNER_TEMP/browser-display-states" target/web-dist/fixtures/display-states-service.dwprt target/web-dist/fixtures/display-states.dwprt
           if ! chrome-devtools-axi open about:blank; then
             chrome-devtools-axi stop || true
             chrome-devtools-axi open about:blank
           fi
           chrome-devtools-axi emulate --viewport 1400x900x1
           chrome-devtools-axi open 'http://127.0.0.1:8779/'
-          chrome-devtools-axi run < ci/browser-display-states.js
-          chrome-devtools-axi open 'http://127.0.0.1:8779/?mate-controller'
           chrome-devtools-axi run < ci/browser-mate-controller.js
       - name: Keep preferences per browser in Chromium
         env:

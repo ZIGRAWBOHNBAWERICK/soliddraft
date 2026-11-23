@@ -113,9 +113,11 @@ fn filter(app: &mut App, wanted: &str) {
         return;
     }
     ribbon::click_at(app, rect.center());
+    // The popup's entry, not the bottom bar's selection filter, which also reads "All".
+    let band = ribbon::band(app);
     let choice = ribbon::painted(app)
         .into_iter()
-        .find(|p| p.text == wanted && p.rect.contains_rect(p.full))
+        .find(|p| p.text == wanted && p.rect.contains_rect(p.full) && !band.contains(p.rect.center()))
         .unwrap_or_else(|| panic!("relation filter must offer {wanted}"));
     ribbon::click_at(app, choice.rect.center());
 }

@@ -141,7 +141,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
                             ui.spacing_mut().item_spacing.x = GAP;
                             let mut drew_any = false;
                             for (command, primary) in &lead {
-                                if tool_card(ui, state, *command, *primary).clicked() {
+                                if tool_card(ui, state, command, *primary).clicked() {
                                     pending = Some(*command);
                                 }
                                 drew_any = true;

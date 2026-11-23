@@ -181,7 +181,7 @@ impl OpenParts {
             return false;
         }
         // Closing the currently active part tab.
-        if let Some(next) = self.after.first().is_some().then(|| self.after.remove(0)) {
+        if let Some(next) = (!self.after.is_empty()).then(|| self.after.remove(0)) {
             state.editor = None;
             state.sketch = None;
             state.doc = next.doc;

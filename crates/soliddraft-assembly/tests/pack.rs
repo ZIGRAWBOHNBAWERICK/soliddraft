@@ -378,3 +378,25 @@ fn a_second_pack_cannot_replace_a_file_written_after_preflight() {
     assert!(matches!(result, Err(PackError::Destination(_))), "the pack that arrived late must report the collision");
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn automatic_drawings_are_only_taken_from_beside_the_assembly() {
+    let dir = folder("drawing-scope");
+    let root = dir.join("src/rig.dwasm");
+    AssemblyDocument::new("Rig").save(Some(&root)).unwrap();
+    let local = dir.join("src/local.dwdrw");
+    let nested = dir.join("src/nested/nested.dwdrw");
+    let private = dir.join("private/private.dwdrw");
+    for drawing in [&local, &nested, &private] {
+        drawing_manifest(drawing, reference(drawing, &root));
+    }
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&private, dir.join("src/linked.dwdrw")).unwrap();
+    let request =
+        PackRequest { root, into: dir.join("packed.zip"), search: vec![dir.join("private")], ..Default::default() };
+    let report = pack_zip(&request, Some(&|bytes, _| Ok(bytes.to_vec()))).unwrap();
+    let bytes = std::fs::read(&request.into).unwrap();
+    assert_eq!(unzip(&bytes, &dir.join("unpacked")), ["local.dwdrw", "rig.dwasm"]);
+    assert_eq!(report.files.iter().filter(|file| file.kind == DocKind::Drawing).count(), 1);
+    std::fs::remove_dir_all(dir).unwrap();
+}

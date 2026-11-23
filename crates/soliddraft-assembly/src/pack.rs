@@ -23,7 +23,7 @@ use std::path::{Component, Path, PathBuf};
 
 use serde::Serialize;
 use soliddraft_document::resolve::Resolver;
-use soliddraft_document::{ContentHash, DocKind, DocRef, DocumentId, FolderIndex, Identity, identify};
+use soliddraft_document::{ContentHash, DocKind, DocRef, DocumentId, Identity, identify, identify_file};
 
 use crate::file::{AssemblyPackage, RefCopy};
 
@@ -106,8 +106,7 @@ pub trait PackSource {
 }
 
 /// Files on disk, found as the assembly finds them: the stored path, the assembly's
-/// folder and the search folders. Drawings come from the assembly's folder and the
-/// search folders, with their subfolders.
+/// folder and the search folders. Drawings come from beside the root assembly.
 #[derive(Clone, Copy, Debug)]
 pub struct Folders<'a> {
     /// Other folders to look in.
@@ -126,10 +125,21 @@ impl PackSource for Folders<'_> {
     }
 
     fn drawings(&self, base: &Path) -> Vec<(PathBuf, Identity)> {
-        let mut roots = vec![base.to_path_buf()];
-        roots.extend(self.search.iter().cloned());
-        let index = FolderIndex::scan(roots);
-        index.of_kind(DocKind::Drawing).map(|e| (e.path.clone(), e.identity.clone())).collect()
+        let Ok(entries) = std::fs::read_dir(base) else { return Vec::new() };
+        entries
+            .flatten()
+            .filter_map(|entry| {
+                let path = entry.path();
+                if DocKind::of_path(&path) != Some(DocKind::Drawing)
+                    || entry.file_name().to_string_lossy().starts_with('.')
+                    || !entry.file_type().ok()?.is_file()
+                {
+                    return None;
+                }
+                let identity = identify_file(&path).ok()?;
+                (identity.kind == DocKind::Drawing).then_some((path, identity))
+            })
+            .collect()
     }
 }
 

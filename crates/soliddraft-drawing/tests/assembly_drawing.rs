@@ -14,7 +14,7 @@ use soliddraft_drawing::placed::{PlacedPart, component_of};
 use soliddraft_drawing::project;
 use soliddraft_drawing::{
     AlignAxis, AnnotationKind, AnnotationState, Boundary, Command, ContentHash, CurveKind, DocKind, DocRef, DocumentId,
-    DrawingMeta, FoldDirection, Rigid, Scale, TableKind, Template, Units, ViewKind, apply,
+    Drawing, DrawingMeta, FoldDirection, Rigid, Scale, TableKind, Template, Units, ViewKind, apply,
 };
 use soliddraft_kernel_api::Vec3;
 use soliddraft_kernel_api::drawing::StandardView;
@@ -105,6 +105,7 @@ fn an_assembly_drawing_has_views_a_bom_and_balloons_that_follow_the_assembly() {
     // The BOM lists both parts with their quantities, and each row has a balloon.
     let bom = sheet.tables.iter().find(|t| t.kind == TableKind::Bom).unwrap();
     assert_eq!(bom.bom.iter().map(|r| (r.item, r.quantity)).collect::<Vec<_>>(), vec![(1, 1), (2, 2)]);
+    assert_eq!(bom.bom.iter().map(|r| r.file.as_str()).collect::<Vec<_>>(), ["base.dwprt", "post.dwprt"]);
     let balloons: Vec<(u32, String)> = sheet
         .annotations
         .iter()
@@ -132,6 +133,12 @@ fn an_assembly_drawing_has_views_a_bom_and_balloons_that_follow_the_assembly() {
     let bytes = to_bytes(&drawing, &meta).unwrap();
     let (back, _) = from_bytes(&bytes).unwrap();
     assert_eq!(back, drawing);
+
+    let mut older = serde_json::to_value(&drawing).unwrap();
+    older["sheets"][0]["tables"][0]["bom"][0]["file"] = serde_json::json!(r"C:\private\base.dwprt");
+    let loaded = Drawing::from_json(&older.to_string()).unwrap();
+    assert_eq!(loaded.sheets[0].tables[0].bom, bom.bom);
+
     soliddraft_drawing::export::check_sheet(&back, &back.sheets[0]).expect("the kernels' line work exports");
     let svg = soliddraft_drawing::export::svg::svg(&layout_sheet(&back, 0));
     assert!(svg.contains("BILL OF MATERIALS"));
@@ -156,6 +163,12 @@ fn an_assembly_drawing_has_views_a_bom_and_balloons_that_follow_the_assembly() {
     assert!(matches!(state_of("3"), Some(AnnotationState::Dangling { .. })), "the post it pointed at is gone");
     assert_eq!(state_of("5"), Some(AnnotationState::Ok), "the new part gets a balloon");
     assert_eq!(sheet.tables[0].bom.len(), 3);
+    assert_eq!(
+        sheet.tables[0].bom.iter().map(|row| row.file.as_str()).collect::<Vec<_>>(),
+        ["base.dwprt", "post.dwprt", "lid.dwprt"]
+    );
+    let (reopened, _) = from_bytes(&to_bytes(&drawing, &meta).unwrap()).unwrap();
+    assert_eq!(reopened.sheets[0].tables[0].bom, sheet.tables[0].bom);
     assert!(texts(&drawing).iter().any(|t| t == "Lid"));
 }
 

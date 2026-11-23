@@ -44,7 +44,7 @@ pub struct BomRow {
     /// The part's name.
     pub name: String,
     /// The part's filename in the shared bill of materials.
-    #[serde(serialize_with = "serialize_bom_filename")]
+    #[serde(serialize_with = "serialize_bom_filename", deserialize_with = "deserialize_bom_filename")]
     pub file: String,
     /// How many times the assembly places it.
     pub quantity: u32,
@@ -57,6 +57,14 @@ pub(crate) fn bom_filename(path: &str) -> &str {
 
 fn serialize_bom_filename<S: serde::Serializer>(path: &str, serializer: S) -> Result<S::Ok, S::Error> {
     serializer.serialize_str(bom_filename(path))
+}
+
+fn deserialize_bom_filename<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<String, D::Error> {
+    String::deserialize(deserializer).map(|path| bom_filename(&path).to_owned())
+}
+
+fn drawing_bom(rows: &[BomRow]) -> Vec<BomRow> {
+    rows.iter().map(|row| BomRow { file: bom_filename(&row.file).to_owned(), ..row.clone() }).collect()
 }
 
 /// An assembly as a drawing reads it.
@@ -314,7 +322,7 @@ pub fn make_assembly_drawing(model: &AssemblyModel<'_>, new: &NewAssemblyDrawing
         kind: TableKind::Bom,
         position: Point2::new(x1 - bom_w, y1),
         revisions: Vec::new(),
-        bom: model.bom.clone(),
+        bom: drawing_bom(&model.bom),
     });
     // The views use the drawing area below the BOM and above the title block.
     let title_top = t.title_block.position.v + t.title_block.height + MARGIN;
@@ -508,12 +516,13 @@ pub fn update_assembly_drawing(drawing: &Drawing, model: &AssemblyModel<'_>) -> 
             Ok(())
         })?;
     }
+    let bom = drawing_bom(&model.bom);
     let mut ballooned: Option<ViewId> = None;
     for si in 0..out.sheets.len() {
         let template = crate::library::template(out.sheets[si].template.as_str()).template();
         for t in out.sheets[si].tables.iter_mut().filter(|t| t.kind == TableKind::Bom) {
             bom_fits(&template, t.position, model.bom.len())?;
-            t.bom = model.bom.clone();
+            t.bom.clone_from(&bom);
         }
         let views: Vec<ViewId> = out.sheets[si].views.iter().map(|v| v.id).collect();
         for id in views.into_iter().filter(|id| included.contains(id)) {
@@ -567,7 +576,7 @@ pub fn update_assembly_drawing(drawing: &Drawing, model: &AssemblyModel<'_>) -> 
             kind: TableKind::Bom,
             position: Point2::new(x1 - w, y1),
             revisions: Vec::new(),
-            bom: model.bom.clone(),
+            bom,
         });
     }
     let first = out

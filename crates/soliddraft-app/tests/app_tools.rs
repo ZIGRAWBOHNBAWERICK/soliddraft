@@ -697,11 +697,18 @@ fn every_tool_runs_without_a_window_and_undoes_as_its_row_says() {
     let pdf = s.call("drawing_export_pdf", json!({ "path": s.path("rig.pdf") }));
     assert_eq!((pdf["views"].as_u64(), pdf["method"].as_str()), (Some(5), Some("catallax")), "{pdf}");
     s.call("show_assembly", json!({}));
+    let expected = BTreeSet::from(["linked.dwprt", "pin.dwprt", "rig.dwasm", "second.dwprt", "slotted.dwprt"]);
     let packed = s.call("assembly_pack_and_go", json!({ "folder": s.path("packed") }));
-    assert!(packed["packed"]["files"].as_array().unwrap().len() >= 3);
+    assert_eq!(packed["packed"]["files"].as_array().unwrap().len(), expected.len());
     let zipped = s.call("assembly_pack_and_go", json!({ "zip": s.path("packed.zip") }));
-    let count = |v: &serde_json::Value| v["packed"]["files"].as_array().map(Vec::len);
-    assert_eq!(count(&zipped), count(&packed), "the zip holds what the folder does");
+    let reported = zipped["packed"]["files"].as_array().unwrap();
+    assert_eq!(reported.len(), expected.len());
+    assert_eq!(reported.iter().map(|file| file["to"].as_str().unwrap()).collect::<BTreeSet<_>>(), expected);
+    let mut archive = zip::ZipArchive::new(std::fs::File::open(s.dir.join("packed.zip")).unwrap()).unwrap();
+    assert_eq!(archive.len(), expected.len());
+    for name in expected {
+        assert!(archive.by_name(name).is_ok(), "missing or invalid ZIP entry {name}");
+    }
 
     // The second part moves into a file of its own, placed where it was, in one undo step.
     let at = parts[1].to_string();

@@ -54,7 +54,7 @@ fn fields() -> [FieldCommands; 2] {
 }
 
 #[test]
-fn imported_fields_are_offered_only_when_the_kernel_can_build_them() {
+fn pinned_kernel_refuses_fields_on_imported_solids() {
     for format in [ImportFormat::Step, ImportFormat::Mesh] {
         for (tool, _, arguments, _, _) in fields() {
             let mut state = AppState::new(source(format));
@@ -65,15 +65,12 @@ fn imported_fields_are_offered_only_when_the_kernel_can_build_them() {
             let searchable = palette.results(&state).iter().any(|result| result.command.id == tool);
             let original = state.doc.model().part_json();
             let depth = state.doc.undo_depth();
-            match call(&mut state.doc, tool, arguments) {
-                Ok(()) => assert!(shown && enabled && searchable, "{format:?} supports {tool}"),
-                Err(message) => {
-                    assert!(message.ends_with(&format!("A {tool} on an imported body is coming soon.")), "{message}");
-                    assert!(!shown && !enabled && !searchable, "{format:?} refuses {tool}");
-                    assert_eq!(state.doc.model().part_json(), original);
-                    assert_eq!(state.doc.undo_depth(), depth);
-                }
-            }
+            let message = call(&mut state.doc, tool, arguments)
+                .expect_err("the pinned terminal stage requires a recipe without imports");
+            assert!(message.ends_with(&format!("A {tool} on an imported body is coming soon.")), "{message}");
+            assert!(!shown && !enabled && !searchable, "{format:?} should hide {tool}");
+            assert_eq!(state.doc.model().part_json(), original);
+            assert_eq!(state.doc.undo_depth(), depth);
         }
     }
 }

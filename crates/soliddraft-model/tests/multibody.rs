@@ -151,3 +151,76 @@ fn deferred_deletion_and_combination_keep_the_previous_body_membership_until_reb
     doc.rebuild();
     assert_eq!(doc.live_bodies().len(), 1);
 }
+
+#[test]
+fn body_materials_and_appearances_survive_rebuild_and_reopen() {
+    use soliddraft_document::ConfigScope;
+    use soliddraft_materials::{Appearance, Material, Srgb};
+    use soliddraft_model::AppearanceTarget;
+
+    let (mut doc, _, second) = pair();
+    let unstyled = doc.geometry_hash();
+    let steel_colour = Appearance::new("steel", "Steel", Srgb::new(100, 110, 120));
+    let brass_colour = Appearance::new("brass", "Brass", Srgb::new(200, 170, 90));
+    let mut steel = Material::new("steel", "Steel");
+    steel.density_kg_m3 = Some(7850.0);
+    steel.default_appearance = Some(steel_colour.id.clone());
+    let mut brass = Material::new("brass", "Brass");
+    brass.density_kg_m3 = Some(8500.0);
+    brass.damping_ratio = Some(0.03);
+    brass.default_appearance = Some(brass_colour.id.clone());
+    doc.execute(Command::SetMaterial {
+        material: Some(steel),
+        default_appearance: Some(steel_colour.clone()),
+        scope: ConfigScope::All,
+    })
+    .unwrap();
+    doc.execute(Command::SetBodyMaterial {
+        body: 1,
+        material: Some(brass),
+        default_appearance: Some(brass_colour.clone()),
+        scope: ConfigScope::All,
+    })
+    .unwrap();
+
+    let faces = |doc: &Document| {
+        let body = doc.body_after(second).unwrap();
+        doc.kernel().topology(body).unwrap().faces.into_iter().map(|face| face.id).collect::<Vec<_>>()
+    };
+    let paint = |target, appearance| Command::SetAppearance { target, appearance, scope: ConfigScope::All };
+    let part = Appearance::new("part", "Part paint", Srgb::WHITE);
+    let body = Appearance::new("body", "Body paint", Srgb::BLACK);
+    let face = Appearance::new("face", "Face paint", Srgb::new(255, 0, 0));
+    let ids = faces(&doc);
+    let face_target = AppearanceTarget::Face { face: doc.face_ref(ids[0]).unwrap() };
+    let body_target = AppearanceTarget::Body { body: 1 };
+
+    assert_eq!(doc.appearance_table(None).of(ids[0]), &brass_colour);
+    doc.execute(paint(AppearanceTarget::Part, Some(part.clone()))).unwrap();
+    assert_eq!(doc.appearance_table(None).of(ids[0]), &part);
+    doc.execute(paint(body_target.clone(), Some(body.clone()))).unwrap();
+    doc.execute(paint(face_target.clone(), Some(face.clone()))).unwrap();
+    let table = doc.appearance_table(None);
+    assert_eq!(table.of(ids[0]), &face);
+    assert_eq!(table.of(ids[1]), &body);
+    assert_eq!(table.of_body(0), &part);
+    assert_eq!(doc.geometry_hash(), unstyled);
+    assert!((doc.mass(None).unwrap().mass_kg - 0.01635).abs() < 1e-9);
+
+    let mut back = Document::from_bytes(&doc.to_bytes().unwrap(), Arc::new(CatallaxKernel::new())).unwrap();
+    assert_eq!(back.manifest().format, "soliddraft-part/4");
+    assert_eq!(back.part_json(), doc.part_json());
+    assert_eq!(back.body_material(1, None).unwrap().damping_ratio, Some(0.03));
+    let table = back.appearance_table(None);
+    assert_eq!(table.of_body(1), &body);
+    assert_eq!(faces(&back).iter().filter(|&&id| table.of(id) == &face).count(), 1);
+
+    back.execute(paint(face_target, None)).unwrap();
+    back.execute(paint(body_target, None)).unwrap();
+    back.execute(paint(AppearanceTarget::Part, None)).unwrap();
+    assert_eq!(back.appearance_table(None).of_body(1), &brass_colour);
+    back.execute(Command::EditFeature { id: second, kind: block(20.0, 6.0) }).unwrap();
+    assert_eq!(back.appearance_table(None).of_body(0), &steel_colour);
+    assert_eq!(back.appearance_table(None).of_body(1), &brass_colour);
+    assert!((back.mass(None).unwrap().mass_kg - 0.01805).abs() < 1e-9);
+}

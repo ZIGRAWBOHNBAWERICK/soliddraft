@@ -65,6 +65,8 @@ use crate::view::{self, Visibility};
 pub const FORMAT: &str = "soliddraft-part/2";
 /// Parts with explicit body identities require this version.
 pub const MULTIBODY_FORMAT: &str = "soliddraft-part/3";
+/// Part format with body appearances and material assignments.
+pub const BODY_STYLE_FORMAT: &str = "soliddraft-part/4";
 /// The format tag of part files from before the document envelope.
 pub const LEGACY_FORMAT: &str = "soliddraft-part/1";
 /// The file name extension parts are saved under.
@@ -194,7 +196,22 @@ impl Document {
 
     fn recipe(&self) -> Recipe {
         Recipe {
-            format: if self.next_body > 1 { MULTIBODY_FORMAT } else { FORMAT }.into(),
+            format: if self.materials.material.iter().any(|a| a.body.is_some())
+                || self.materials.appearances.iter().any(|a| matches!(a.target, crate::AppearanceTarget::Body { .. }))
+                || self
+                    .materials
+                    .snapshots
+                    .materials
+                    .iter()
+                    .any(|m| !m.description.is_empty() || m.damping_ratio.is_some())
+            {
+                BODY_STYLE_FORMAT
+            } else if self.next_body > 1 {
+                MULTIBODY_FORMAT
+            } else {
+                FORMAT
+            }
+            .into(),
             name: self.name.clone(),
             units: Units::Mm,
             features: self
@@ -341,7 +358,7 @@ impl Document {
         };
         m.check(DocKind::Part, &[PART])?;
         let text = package.read_text(PART)?.ok_or_else(|| FileError::Archive("no part.json".into()))?;
-        let mut doc = Self::read_truth(&text, kernel, 3)?;
+        let mut doc = Self::read_truth(&text, kernel, 4)?;
         doc.id = m.id;
         if let Ok(Some(text)) = package.read_text(settings::ENTRY) {
             doc.settings = Settings::from_json(&text).unwrap_or_default();
@@ -356,14 +373,14 @@ impl Document {
     /// rebuilds it on `kernel`. Without a manifest there is no recorded id, so the part
     /// gets the id derived from its content, as a pre-envelope file does.
     pub fn from_part_json(text: &str, kernel: Arc<dyn Kernel>) -> Result<Document, FileError> {
-        let mut doc = Self::read_truth(text, kernel, 3)?;
+        let mut doc = Self::read_truth(text, kernel, 4)?;
         doc.rebuild();
         Ok(doc)
     }
 
     /// Decodes authored truth without starting a kernel operation.
     pub(crate) fn from_part_json_unbuilt(text: &str, kernel: Arc<dyn Kernel>) -> Result<Document, FileError> {
-        Self::read_truth(text, kernel, 3)
+        Self::read_truth(text, kernel, 4)
     }
 
     /// Reads truth text whose format's major version is at most `newest`.

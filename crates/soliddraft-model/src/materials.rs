@@ -1,18 +1,8 @@
 //! A part's material and appearances.
 //!
-//! A part has a material (none until one is assigned) and appearances on the whole part,
-//! on the faces a feature made, or on single faces. The most specific wins: a face's
-//! own appearance, then its feature's, then the part's, then the material's default
-//! appearance, then SolidDraft's default grey. Faces are named persistently (see
-//! [`reference`](crate::reference)), so an appearance follows its face through edits;
-//! a face that splits keeps the appearance on every piece, and an assignment whose
-//! face is gone is reported as lost rather than moved to another face.
-//!
-//! Every assignment carries a configuration scope. Until configurations exist the
-//! scope is always "all", and the part is shown in its default configuration.
-//!
-//! The part keeps a copy of every material and appearance it uses, so its look and mass
-//! never depend on a library (see [`soliddraft_materials::Snapshots`]).
+//! Face colours take precedence over body, feature, part and material colours.
+//! Persistent face names and body keys keep assignments attached through rebuilds.
+//! The part stores copies of the materials and appearances it uses.
 
 use std::collections::HashMap;
 
@@ -31,6 +21,11 @@ use crate::reference::{self, Candidate, FaceRef, RepairReason, View};
 pub enum AppearanceTarget {
     /// The whole part.
     Part,
+    /// A solid body, by its stable model key.
+    Body {
+        /// The model body key.
+        body: u32,
+    },
     /// Every face a feature made, through later splits.
     Feature {
         /// The feature.
@@ -50,6 +45,7 @@ impl AppearanceTarget {
     pub fn same_place(&self, other: &AppearanceTarget) -> bool {
         match (self, other) {
             (AppearanceTarget::Part, AppearanceTarget::Part) => true,
+            (AppearanceTarget::Body { body: a }, AppearanceTarget::Body { body: b }) => a == b,
             (AppearanceTarget::Feature { feature: a }, AppearanceTarget::Feature { feature: b }) => a == b,
             (AppearanceTarget::Face { face: a }, AppearanceTarget::Face { face: b }) => {
                 a.feature == b.feature && a.generator == b.generator && a.ordinal == b.ordinal
@@ -58,12 +54,13 @@ impl AppearanceTarget {
         }
     }
 
-    /// How specific the target is: faces beat features, features beat the part.
+    /// How specific the target is.
     fn level(&self) -> u8 {
         match self {
             AppearanceTarget::Part => 0,
             AppearanceTarget::Feature { .. } => 1,
-            AppearanceTarget::Face { .. } => 2,
+            AppearanceTarget::Body { .. } => 2,
+            AppearanceTarget::Face { .. } => 3,
         }
     }
 }
@@ -81,9 +78,12 @@ pub struct AppearanceAssignment {
     pub scope: ConfigScope,
 }
 
-/// The part's material, in some configurations.
+/// A part or body material, in some configurations.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct MaterialAssignment {
+    /// The body key, or the whole part when unset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub body: Option<u32>,
     /// Which material; the part holds its copy.
     pub material: MaterialId,
     /// In which configurations.
@@ -176,29 +176,53 @@ pub struct AppearanceTable {
     pub appearances: Vec<Appearance>,
     /// The faces that show another appearance than index 0, and its index.
     pub faces: HashMap<FaceId, u32>,
+    /// The appearance a body's faces inherit before feature or face overrides.
+    pub bodies: HashMap<u32, u32>,
     /// Assignments that did not apply.
     pub lost: Vec<LostAppearance>,
 }
 
 impl AppearanceTable {
+    /// The inherited appearance of a body.
+    pub fn of_body(&self, body: u32) -> &Appearance {
+        &self.appearances[self.bodies.get(&body).copied().unwrap_or(0) as usize]
+    }
+
     /// The appearance a face shows.
     pub fn of(&self, face: FaceId) -> &Appearance {
         &self.appearances[self.faces.get(&face).copied().unwrap_or(0) as usize]
     }
 }
 
-fn material_in<'a>(m: &'a PartMaterials, configuration: Option<&ConfigurationId>) -> Option<&'a Material> {
-    scope::pick(&m.material, |a| &a.scope, configuration).and_then(|a| m.snapshots.material(&a.material))
+fn material_in<'a>(
+    m: &'a PartMaterials,
+    body: Option<u32>,
+    configuration: Option<&ConfigurationId>,
+) -> Option<&'a Material> {
+    scope::pick(m.material.iter().filter(|a| a.body == body), |a| &a.scope, configuration)
+        .and_then(|a| m.snapshots.material(&a.material))
+}
+
+fn part_override<'a>(m: &'a PartMaterials, configuration: Option<&ConfigurationId>) -> Option<&'a AppearanceId> {
+    scope::pick(m.appearances.iter().filter(|a| a.target == AppearanceTarget::Part), |a| &a.scope, configuration)
+        .map(|a| &a.appearance)
 }
 
 fn part_appearance_in(m: &PartMaterials, configuration: Option<&ConfigurationId>) -> Appearance {
-    let part = m.appearances.iter().filter(|a| a.target == AppearanceTarget::Part);
-    scope::pick(part, |a| &a.scope, configuration)
-        .map(|a| &a.appearance)
-        .or_else(|| material_in(m, configuration).and_then(|mat| mat.default_appearance.as_ref()))
+    part_override(m, configuration)
+        .or_else(|| material_in(m, None, configuration).and_then(|mat| mat.default_appearance.as_ref()))
         .and_then(|id| m.snapshots.appearance(id))
         .cloned()
         .unwrap_or_else(Appearance::default_part)
+}
+
+fn appearance_slot(table: &mut AppearanceTable, appearance: &Appearance) -> u32 {
+    if let Some(slot) = table.appearances.iter().position(|a| a == appearance) {
+        return slot as u32;
+    }
+    let slot = table.appearances.len() as u32;
+    table.appearances.push(appearance.clone());
+    slot
 }
 
 /// Why a part has no mass to show.
@@ -224,7 +248,12 @@ impl Document {
     /// The part's material in a configuration (`None` for the default one), from the
     /// copy the part holds.
     pub fn material(&self, configuration: Option<&ConfigurationId>) -> Option<&Material> {
-        material_in(&self.materials, configuration)
+        material_in(&self.materials, None, configuration)
+    }
+
+    /// The effective material of one solid body, inheriting the part material.
+    pub fn body_material(&self, body: u32, configuration: Option<&ConfigurationId>) -> Option<&Material> {
+        material_in(&self.materials, Some(body), configuration).or_else(|| self.material(configuration))
     }
 
     /// What a face with no appearance of its own or its feature's shows: the part's
@@ -258,6 +287,7 @@ impl Document {
         let mut table = AppearanceTable {
             appearances: vec![part_appearance_in(m, configuration)],
             faces: HashMap::new(),
+            bodies: HashMap::new(),
             lost: Vec::new(),
         };
         // The assignment that holds at each place, most specific place last so it wins.
@@ -273,17 +303,45 @@ impl Document {
             }
         }
         chosen.sort_by_key(|(i, a)| (a.target.level(), *i));
-        if chosen.is_empty() {
+        let has_body_materials =
+            part_override(m, configuration).is_none() && m.material.iter().any(|a| a.body.is_some());
+        if chosen.is_empty() && !has_body_materials {
             return table;
         }
-        let Some(body) = self.body() else { return table };
-        let Ok(topology) = self.view_of(body) else { return table };
-        let view = View { topology: &topology };
+        let topologies: Vec<_> = self
+            .live_bodies()
+            .into_iter()
+            .filter_map(|(key, id)| self.view_of(id).ok().map(|topology| (key, topology)))
+            .collect();
+        if has_body_materials {
+            for (key, topology) in &topologies {
+                let Some(material) = material_in(m, Some(*key), configuration) else { continue };
+                let appearance = material.default_appearance.as_ref().and_then(|id| m.snapshots.appearance(id));
+                let slot = appearance_slot(&mut table, &appearance.cloned().unwrap_or_else(Appearance::default_part));
+                table.bodies.insert(*key, slot);
+                table.faces.extend(topology.faces.iter().map(|face| (face.id, slot)));
+            }
+        }
         let names = self.name_map();
-        let mut index: HashMap<&AppearanceId, u32> = HashMap::new();
         for (i, a) in chosen {
+            let Some(appearance) = m.snapshots.appearance(&a.appearance) else { continue };
             let faces = match &a.target {
                 AppearanceTarget::Part => continue,
+                AppearanceTarget::Body { body } => {
+                    let Some((_, topology)) = topologies.iter().find(|(key, _)| key == body) else {
+                        table.lost.push(LostAppearance {
+                            index: i,
+                            reason: RepairReason::Missing,
+                            message: format!("Body {} is absent from this configuration", body + 1),
+                            candidates: Vec::new(),
+                        });
+                        continue;
+                    };
+                    let slot = appearance_slot(&mut table, appearance);
+                    table.bodies.insert(*body, slot);
+                    table.faces.extend(topology.faces.iter().map(|face| (face.id, slot)));
+                    continue;
+                }
                 AppearanceTarget::Feature { feature } => {
                     if self.feature(*feature).is_none() {
                         table.lost.push(LostAppearance {
@@ -294,41 +352,65 @@ impl Document {
                         });
                         continue;
                     }
-                    reference::faces_of_feature(*feature, &view, &names)
+                    topologies
+                        .iter()
+                        .flat_map(|(_, topology)| reference::faces_of_feature(*feature, &View { topology }, &names))
+                        .collect()
                 }
-                AppearanceTarget::Face { face } => match reference::resolve_faces(face, &view, &names) {
-                    Ok(faces) => faces,
-                    Err(u) => {
-                        let message =
-                            if face.label.is_empty() { u.message } else { format!("{}: {}", face.label, u.message) };
-                        table.lost.push(LostAppearance {
-                            index: i,
-                            reason: u.reason,
-                            message,
-                            candidates: u.candidates,
-                        });
+                AppearanceTarget::Face { face } => {
+                    let mut faces = Vec::new();
+                    let mut failure = None;
+                    for (_, topology) in &topologies {
+                        match reference::resolve_faces(face, &View { topology }, &names) {
+                            Ok(found) => faces.extend(found),
+                            Err(error)
+                                if failure.as_ref().is_none_or(|old: &reference::Unresolved| {
+                                    old.candidates.len() < error.candidates.len()
+                                }) =>
+                            {
+                                failure = Some(error)
+                            }
+                            Err(_) => {}
+                        }
+                    }
+                    if faces.is_empty() {
+                        if let Some(u) = failure {
+                            let message = if face.label.is_empty() {
+                                u.message
+                            } else {
+                                format!("{}: {}", face.label, u.message)
+                            };
+                            table.lost.push(LostAppearance {
+                                index: i,
+                                reason: u.reason,
+                                message,
+                                candidates: u.candidates,
+                            });
+                        }
                         continue;
                     }
-                },
+                    faces
+                }
             };
-            let Some(appearance) = m.snapshots.appearance(&a.appearance) else { continue };
-            let next = table.appearances.len() as u32;
-            let slot = *index.entry(&a.appearance).or_insert_with(|| {
-                table.appearances.push(appearance.clone());
-                next
-            });
-            for f in faces {
-                table.faces.insert(f, slot);
-            }
+            let slot = appearance_slot(&mut table, appearance);
+            table.faces.extend(faces.into_iter().map(|face| (face, slot)));
         }
         table
     }
 
-    /// The part's mass properties in a configuration, from its body and the density of
-    /// its material. Unknown without a material or a density; never guessed.
+    /// The part's mass properties in a configuration, using each live body's density.
     pub fn mass(&self, configuration: Option<&ConfigurationId>) -> Result<Mass, MassError> {
-        let body = self.body().ok_or(MassError::NoBody)?;
-        let props = self.kernel.mass_properties(body).map_err(|e| MassError::Kernel(e.to_string()))?;
-        soliddraft_materials::mass::of_body(&props, self.material(configuration)).map_err(MassError::Unknown)
+        let bodies = self.live_bodies();
+        if bodies.is_empty() {
+            return Err(MassError::NoBody);
+        }
+        let mut masses = Vec::with_capacity(bodies.len());
+        for (key, body) in bodies {
+            let props = self.kernel.mass_properties(body).map_err(|e| MassError::Kernel(e.to_string()))?;
+            let mass = soliddraft_materials::mass::of_body(&props, self.body_material(key, configuration))
+                .map_err(MassError::Unknown)?;
+            masses.push(mass);
+        }
+        Ok(soliddraft_materials::mass::combine_in_place(masses))
     }
 }

@@ -40,7 +40,7 @@ struct RowItem {
 
 pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
     // Header: part name and rebuild state.
-    let (head, _) = ui.allocate_exact_size(vec2(ui.available_width(), 30.0), Sense::hover());
+    let (head, part) = ui.allocate_exact_size(vec2(ui.available_width(), 30.0), Sense::click());
     let title = if state.doc.dirty { format!("{} •", state.doc.name) } else { state.doc.name.clone() };
     ui.painter().text(
         pos2(head.left() + 12.0, head.center().y),
@@ -70,6 +70,16 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
     ui.painter().hline(head.x_range(), head.bottom() - 0.5, Stroke::new(1.0, theme::line()));
 
     let mut actions = Vec::new();
+    part.context_menu(|ui| {
+        if ui.button("Part appearance").clicked() {
+            actions.push(AppAction::ShowPartAppearance);
+            ui.close();
+        }
+        if ui.button("Part material").clicked() {
+            actions.push(AppAction::ShowMaterialLibrary);
+            ui.close();
+        }
+    });
     egui::ScrollArea::vertical().id_salt("tree").auto_shrink([false, false]).show(ui, |ui| {
         ui.add_space(4.0);
         let selected_feature = state.selected_feature();
@@ -188,6 +198,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
                     indent: 0,
                     icon: Icon::Extrude,
                     name: &label,
+                    dim: state.doc.display_state().is_some_and(|s| s.view.hidden.contains(&key)),
                     selected: state.doc.selection == Some(Selection::Body) && state.doc.active_body == key,
                     ..RowSpec::plain()
                 },
@@ -512,6 +523,8 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
             actions.push(AppAction::Command(Command::Rollback(if t >= feature_count { None } else { Some(t) })));
         }
         ui.add_space(6.0);
+        crate::display_states::show_part(ui, state);
+        crate::properties::appearances(ui, state);
     });
     for a in actions {
         state.push(a);

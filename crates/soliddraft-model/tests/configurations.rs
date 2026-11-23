@@ -64,7 +64,11 @@ fn spreadsheet_parameters_round_trip_in_configurations() {
     override_value(&mut d, "Wide", "plate_w", "=MAX(150 mm, 6 in)");
     activate(&mut d, "Narrow");
     numbers(&d, 120.0, 60.0);
-    assert_eq!(d.truth()["format"], "soliddraft-part/4");
+    assert_eq!(d.truth()["format"], "soliddraft-part/5");
+    let previous = d.part_json().replace("soliddraft-part/5", "soliddraft-part/4");
+    let migrated = Document::from_part_json(&previous, kernel()).unwrap();
+    assert_eq!(migrated.part_json(), d.part_json());
+    assert_eq!(migrated.geometry_hash(), d.geometry_hash());
     let mut reopened = Document::from_bytes(&d.to_bytes().unwrap(), kernel()).unwrap();
     assert_eq!(reopened.geometry_hash(), d.geometry_hash());
     assert_eq!(reopened.configuration_summary(), d.configuration_summary());

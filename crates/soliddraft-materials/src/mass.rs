@@ -118,11 +118,19 @@ pub fn combine(items: impl IntoIterator<Item = Result<Placed, Unknown>>) -> Resu
             }
         })
         .collect();
-    let total: f64 = placed.iter().map(|p| p.mass_kg).sum();
-    let volume: f64 = placed.iter().map(|p| p.volume_mm3).sum();
+    Ok(combine_in_place(placed))
+}
+
+/// Combines masses already expressed in the same coordinate system.
+pub fn combine_in_place(masses: Vec<Mass>) -> Mass {
+    if let [mass] = masses.as_slice() {
+        return *mass;
+    }
+    let total: f64 = masses.iter().map(|p| p.mass_kg).sum();
+    let volume: f64 = masses.iter().map(|p| p.volume_mm3).sum();
     let centre = if total > 0.0 {
         let mut c = [0.0; 3];
-        for p in &placed {
+        for p in &masses {
             for (k, ck) in c.iter_mut().enumerate() {
                 *ck += p.mass_kg * p.centre_mm[k] / total;
             }
@@ -132,9 +140,9 @@ pub fn combine(items: impl IntoIterator<Item = Result<Placed, Unknown>>) -> Resu
         [0.0; 3]
     };
     let mut inertia = [[0.0; 3]; 3];
-    for p in &placed {
+    for p in &masses {
         let Some(tensor) = p.inertia_kg_mm2 else {
-            return Ok(Mass { mass_kg: total, volume_mm3: volume, centre_mm: centre, inertia_kg_mm2: None });
+            return Mass { mass_kg: total, volume_mm3: volume, centre_mm: centre, inertia_kg_mm2: None };
         };
         let d = [p.centre_mm[0] - centre[0], p.centre_mm[1] - centre[1], p.centre_mm[2] - centre[2]];
         let d2 = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
@@ -145,7 +153,7 @@ pub fn combine(items: impl IntoIterator<Item = Result<Placed, Unknown>>) -> Resu
             }
         }
     }
-    Ok(Mass { mass_kg: total, volume_mm3: volume, centre_mm: centre, inertia_kg_mm2: Some(inertia) })
+    Mass { mass_kg: total, volume_mm3: volume, centre_mm: centre, inertia_kg_mm2: Some(inertia) }
 }
 
 fn mul(a: [[f64; 3]; 3], b: [[f64; 3]; 3]) -> [[f64; 3]; 3] {

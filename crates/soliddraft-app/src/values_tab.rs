@@ -537,9 +537,6 @@ fn add_global(ui: &mut egui::Ui, tab: &mut ValuesTab, actions: &mut Vec<ValuesAc
 
 fn contents(ui: &mut egui::Ui, state: &mut AppState) {
     let table = table(state);
-    let model = state.doc.model();
-    let grid = model.configuration_grid();
-    let configuration = &table.columns[table.active];
     let mut actions = Vec::new();
     let mut history = None;
     let tab = &mut state.values;
@@ -555,6 +552,11 @@ fn contents(ui: &mut egui::Ui, state: &mut AppState) {
         }
     });
     tabs(ui, tab, &table, &mut actions);
+    crate::display_states::show_part(ui, state);
+    let model = state.doc.model();
+    let grid = model.configuration_grid();
+    let configuration = &table.columns[table.active];
+    let tab = &mut state.values;
     ui.separator();
     ui.horizontal_wrapped(|ui| {
         let filter =

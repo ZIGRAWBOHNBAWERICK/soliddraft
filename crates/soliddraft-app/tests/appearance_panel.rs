@@ -307,3 +307,212 @@ fn a_held_slider_after_undo_applies_nothing() {
     app.run_steps(4);
     assert_eq!(app.state().state.doc.model().undo_depth(), depth + 1);
 }
+
+#[test]
+fn named_state_renders_two_body_appearances_and_reopens_with_visibility() {
+    use soliddraft_app::document::{Command, Document, ExtrudeParams, PlaneKind, SketchPlane};
+    use soliddraft_document::display_state::{DisplayMode, DisplayScope, DisplayState};
+    use soliddraft_materials::{Catalog, MaterialId};
+    use soliddraft_sketch::{P2, Sketch};
+
+    fn block(doc: &mut Document, x: f64, depth: f64) {
+        let id = doc
+            .apply(Command::AddSketch { plane: SketchPlane::Reference { plane: PlaneKind::Top, offset: 0.0 } })
+            .unwrap()
+            .unwrap();
+        let mut sketch = Sketch::new();
+        sketch.rectangle(P2::new(x, 0.0), 20.0, 10.0).unwrap();
+        doc.apply(Command::EditSketch { id, sketch }).unwrap();
+        doc.apply(Command::AddExtrude {
+            params: ExtrudeParams { sketch: Some(id), depth, ..Default::default() },
+            via_assistant: false,
+        })
+        .unwrap();
+    }
+
+    let mut doc = Document::new("Painted parts", soliddraft_app::kernel());
+    block(&mut doc, -18.0, 10.0);
+    doc.new_body();
+    block(&mut doc, 18.0, 20.0);
+    let catalog = Catalog::built_in();
+    let steel = catalog.material(&MaterialId("steel-generic".into())).unwrap().1;
+    doc.set_material(Some(steel.clone()), catalog.default_appearance_of(steel).cloned()).unwrap();
+    assert!((doc.model().mass(None).unwrap().mass_kg - 0.0474).abs() < 1e-9);
+
+    let blue = Appearance::new("face-blue", "Blue", Srgb::new(21, 101, 192));
+    let red = Appearance::new("body-red", "Red", Srgb::new(198, 40, 40));
+    let right = doc.model().live_bodies().into_iter().find(|(key, _)| *key == 1).unwrap().1;
+    let face = doc
+        .kernel()
+        .topology(right)
+        .unwrap()
+        .faces
+        .into_iter()
+        .find(|face| face.normal.is_some_and(|n| n.dot(soliddraft_kernel_api::Vec3::Z) > 0.9999))
+        .unwrap()
+        .id;
+    let face = doc.model().face_ref(face).unwrap();
+    doc.set_appearance(AppearanceTarget::Body { body: 0 }, Some(red)).unwrap();
+    doc.set_appearance(AppearanceTarget::Face { face }, Some(blue)).unwrap();
+    doc.apply(Command::AddConfiguration { name: "Service".into() }).unwrap();
+    let config = doc.model().named_configurations().next().unwrap().0.clone();
+    let inspection = DisplayState::new("Inspection".into(), DisplayScope::All, DisplayMode::Shaded);
+    let mut working: DisplayState<soliddraft_model::PartDisplay> =
+        DisplayState::new("Working".into(), DisplayScope::Only(vec![Some(config.clone())]), DisplayMode::Shaded);
+    working.view.hidden.insert(0);
+    let mut states = doc.display_states().clone();
+    let inspection_id = inspection.id.clone();
+    let working_id = working.id.clone();
+    states.put(inspection).unwrap();
+    states.put(working).unwrap();
+    states.select(None, Some(inspection_id.clone())).unwrap();
+    states.select(Some(&config), Some(working_id.clone())).unwrap();
+    doc.change_display_states(states).unwrap();
+    let bytes = doc.model().to_bytes().unwrap();
+    std::fs::write(out_dir().join("display-states.dwprt"), &bytes).unwrap();
+
+    doc.apply(Command::ActivateConfiguration { name: "Service".into() }).unwrap();
+    std::fs::write(out_dir().join("display-states-service.dwprt"), doc.model().to_bytes().unwrap()).unwrap();
+
+    let back = soliddraft_model::Document::from_bytes(&bytes, soliddraft_app::kernel()).unwrap();
+    let mut doc = Document::from_model(back);
+    assert_eq!(doc.display_state().unwrap().id, inspection_id);
+    doc.new_body();
+    block(&mut doc, 50.0, 5.0);
+    assert_eq!(doc.model().live_bodies().len(), 3);
+
+    if !gpu_available() {
+        return;
+    }
+    let mut app = Harness::builder()
+        .with_size(vec2(1440.0, 900.0))
+        .with_pixels_per_point(1.0)
+        .with_step_dt(1.0 / 60.0)
+        .wgpu()
+        .build_eframe(|cc| SolidDraftApp::new(cc, doc, Automation::default()));
+    for action in [AppAction::Select(None), AppAction::SetView(StandardView::Top), AppAction::ZoomFit] {
+        app.state_mut().state.push(action);
+    }
+    app.run_steps(80);
+    let points = |app: &Harness<'_, SolidDraftApp>| {
+        let v = &app.state().state.viewport;
+        [(-18.0, 10.0), (18.0, 20.0)].map(|(x, z)| v.camera.project(glam::Vec3::new(x, 2.5, z), v.rect).unwrap())
+    };
+    let [left, right] = points(&app);
+    let image = app.render().unwrap();
+    image.save(out_dir().join("display-state-inspection.png")).unwrap();
+    let [red, _, blue] = colour(&image, left);
+    assert!(red > blue + 30.0, "the first body's red appearance is drawn");
+    let [red, _, blue] = colour(&image, right);
+    assert!(blue > red + 30.0, "the second body's blue face is drawn");
+
+    app.state_mut().state.doc.apply(Command::ActivateConfiguration { name: "Service".into() }).unwrap();
+    app.run_steps(30);
+    assert_eq!(app.state().state.doc.display_state().unwrap().id, working_id);
+    assert_eq!(app.state().state.doc.hidden_display_bodies().len(), 1);
+    let [left, right] = points(&app);
+    let image = app.render().unwrap();
+    image.save(out_dir().join("display-state-working.png")).unwrap();
+    let [red, _, blue] = colour(&image, left);
+    assert!(red < blue + 15.0, "the hidden red body leaves the viewport");
+    let [red, _, blue] = colour(&image, right);
+    assert!(blue > red + 30.0, "the blue face remains visible");
+}
+
+#[test]
+fn assembly_colour_replaces_and_reveals_the_part_finish_after_reopen() {
+    use glam::DVec3;
+    use soliddraft_app::assembly::AssemblyAction;
+    use soliddraft_assembly::{Assembly, DisplayMesh, OccurrencePath, Placement, RefCopy, Step};
+    use soliddraft_document::{ContentHash, DocKind, DocRef, DocumentId};
+
+    if !gpu_available() {
+        return;
+    }
+    let part = DocumentId::new();
+    let revision = ContentHash::of_bytes(b"painted blue block");
+    let mut mesh = DisplayMesh::cuboid(DVec3::ZERO, DVec3::splat(10.0));
+    for face in &mut mesh.faces {
+        face.style = Some([21, 101, 192, 0, 128]);
+    }
+    let mut assembly = Assembly::new("Painted assembly");
+    let source = assembly.add_source(DocRef::new(part, DocKind::Part, "Block.dwprt", revision.clone()));
+    let first = assembly.add_component(source, Placement::IDENTITY);
+    assembly.add_component(source, Placement::translation(DVec3::new(22.0, 0.0, 0.0)));
+    let id = DocumentId::new();
+    let copies = [RefCopy::part(part, revision, &mesh, "test")];
+    let file = out_dir().join("appearance-assembly.dwasm");
+    std::fs::write(&file, assembly.to_bytes(id, None, &copies).unwrap()).unwrap();
+
+    let adapter = std::cell::RefCell::new(None);
+    let mut app = Harness::builder()
+        .with_size(vec2(1440.0, 900.0))
+        .with_pixels_per_point(1.0)
+        .with_render_every_step(true)
+        .with_step_dt(1.0 / 60.0)
+        .wgpu()
+        .build_eframe(|cc| {
+            *adapter.borrow_mut() = cc.wgpu_render_state.clone();
+            SolidDraftApp::new(
+                cc,
+                soliddraft_app::document::Document::new("Part", soliddraft_app::kernel()),
+                Automation::default(),
+            )
+        });
+    let path = OccurrencePath::root().child(Step::component(first));
+    let open = |app: &mut Harness<'_, SolidDraftApp>| {
+        app.state_mut().state.push(AppAction::Assembly(AssemblyAction::Open(file.clone())));
+        let start = std::time::Instant::now();
+        loop {
+            app.run_steps(1);
+            let assembly = &app.state().state.assembly;
+            if assembly.opening.is_none()
+                && assembly.session.as_ref().is_some_and(|s| s.doc.id() == id && !s.doc.is_loading())
+            {
+                break;
+            }
+            assert!(start.elapsed().as_secs() < 20, "the saved assembly opened");
+        }
+        for action in [AppAction::SetView(StandardView::Top), AppAction::Assembly(AssemblyAction::ZoomFit)] {
+            app.state_mut().state.push(action);
+        }
+        app.run_steps(70);
+    };
+    let sample = |app: &mut Harness<'_, SolidDraftApp>, note: &str| {
+        let view = &app.state().state.assembly.session.as_ref().unwrap().viewport;
+        let points = [5.0, 27.0].map(|x| view.camera.project(glam::Vec3::new(x, 5.0, 10.0), view.rect).unwrap());
+        let image = app.render().unwrap();
+        image.save(out_dir().join(format!("appearance-assembly-{note}.png"))).unwrap();
+        points.map(|point| colour(&image, point))
+    };
+
+    open(&mut app);
+    let pixels = sample(&mut app, "part-finish");
+    let mut draws = 0;
+    if let Some(adapter) = &*adapter.borrow() {
+        let renderer = adapter.renderer.read();
+        if let Some(viewport) = renderer.callback_resources.get::<soliddraft_app::viewport::render::ViewportRenderer>()
+        {
+            draws = viewport.assembly_stats().draws;
+        }
+    }
+    assert!(
+        pixels.iter().all(|c| c[2] > c[0] + 30.0),
+        "expected two blue components, got {pixels:?} from {draws} draws"
+    );
+    let red = Appearance::new("override-red", "Red", Srgb::new(210, 33, 22));
+    app.state_mut().state.push(AppAction::Assembly(AssemblyAction::SetColour(path.clone(), Some(red))));
+    app.run_steps(10);
+    let [a, b] = sample(&mut app, "component-override");
+    assert!(a[0] > a[2] + 30.0 && b[2] > b[0] + 30.0);
+
+    app.state_mut().state.push(AppAction::Assembly(AssemblyAction::Save(Some(file.clone()))));
+    app.run_steps(10);
+    let reopened = soliddraft_assembly::AssemblyDocument::open(&file, Default::default()).unwrap();
+    let row = reopened.table().find(&path).unwrap();
+    assert_eq!(reopened.table().colour(row).unwrap().id.as_str(), "override-red");
+    open(&mut app);
+    app.state_mut().state.push(AppAction::Assembly(AssemblyAction::SetColour(path, None)));
+    app.run_steps(10);
+    assert!(sample(&mut app, "colour-removed").iter().all(|c| c[2] > c[0] + 30.0));
+}

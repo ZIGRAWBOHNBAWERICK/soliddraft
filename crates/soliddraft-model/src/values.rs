@@ -912,18 +912,23 @@ impl Document {
             }
             bodies
                 .into_iter()
-                .map(|(_, body)| self.kernel.mass_properties(body).map_err(|error| error.to_string()))
+                .map(|(key, body)| {
+                    self.kernel
+                        .mass_properties(body)
+                        .map(|properties| (key, properties))
+                        .map_err(|error| error.to_string())
+                })
                 .collect::<Result<Vec<_>, _>>()
         })();
         match built {
             Ok(properties) => {
-                let material = self.material(self.active_configuration());
-                let mass = properties.iter().try_fold(0.0, |mass, props| {
-                    soliddraft_materials::mass::of_body(props, material)
+                let configuration = self.active_configuration();
+                let mass = properties.iter().try_fold(0.0, |mass, (body, props)| {
+                    soliddraft_materials::mass::of_body(props, self.body_material(*body, configuration))
                         .map(|m| mass + m.mass_kg)
                         .map_err(|error| error.to_string())
                 });
-                let volume = Ok(properties.iter().map(|p| p.volume).sum());
+                let volume = Ok(properties.iter().map(|(_, props)| props.volume).sum());
                 PhysicalValues { mass, volume }
             }
             Err(error) => PhysicalValues { mass: Err(error.clone()), volume: Err(error) },

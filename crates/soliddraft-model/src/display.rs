@@ -61,29 +61,80 @@ impl Document {
     /// faces named by persistent reference and edges sampled along their curves. `None`
     /// without a body.
     pub fn display_data(&self, quality: &Quality, levels: &[Level]) -> Option<KernelResult<Vec<DisplayData>>> {
-        let body = self.body()?;
+        let bodies = self.live_bodies();
+        if bodies.is_empty() {
+            return None;
+        }
         Some((|| {
-            let diagonal = self.kernel.topology(body)?.bbox.diagonal();
+            let mut diagonal: f64 = 0.0;
+            for (_, body) in &bodies {
+                diagonal = diagonal.max(self.kernel.topology(*body)?.bbox.diagonal());
+            }
             let all = Levels::new(quality, diagonal);
             let params: Vec<_> = levels.iter().map(|l| *all.params(*l)).collect();
-            let meshes = self.kernel.preview_levels(body, &params)?;
             let backend = self.kernel.backend();
             let geometry = self.geometry_hash();
-            let mut out = Vec::with_capacity(levels.len());
-            for ((level, mesh), p) in levels.iter().zip(meshes).zip(&params) {
-                let edges = self.kernel.preview_edges(body, p).unwrap_or_default();
-                let polylines = edges
-                    .iter()
-                    .map(|e| e.points.iter().map(|q| [q.x as f32, q.y as f32, q.z as f32]).collect())
-                    .collect();
-                let made_by =
-                    format!("{} {} {level} {} {geometry}", backend.name, backend.version, all.key(*level).describe());
-                let mesh = display_mesh(&mesh, |f| self.face_name(f), polylines).canonical();
-                out.push(DisplayData { level: *level, mesh, made_by });
+            let styled = !self.materials().is_empty();
+            let styles = styled.then(|| self.appearance_table(self.active_configuration()));
+            let mut out: Vec<_> = levels
+                .iter()
+                .map(|level| DisplayData {
+                    level: *level,
+                    mesh: DisplayMesh::default(),
+                    made_by: format!(
+                        "{} {} {level} {} {geometry}",
+                        backend.name,
+                        backend.version,
+                        all.key(*level).describe()
+                    ),
+                })
+                .collect();
+            for (_, body) in bodies {
+                let meshes = self.kernel.preview_levels(body, &params)?;
+                for ((data, mesh), p) in out.iter_mut().zip(meshes).zip(&params) {
+                    let edges = self.kernel.preview_edges(body, p).unwrap_or_default();
+                    let polylines = edges
+                        .iter()
+                        .map(|e| e.points.iter().map(|q| [q.x as f32, q.y as f32, q.z as f32]).collect())
+                        .collect();
+                    let mut faces = Vec::new();
+                    let mut mesh = display_mesh(
+                        &mesh,
+                        |f| {
+                            if let Some(table) = &styles {
+                                let look = table.of(f);
+                                let c = look.base_color;
+                                faces.push([c.r, c.g, c.b, packed(look.metallic), packed(look.roughness)]);
+                            }
+                            self.face_name(f)
+                        },
+                        polylines,
+                    );
+                    for (face, style) in mesh.faces.iter_mut().zip(faces) {
+                        face.style = Some(style);
+                    }
+                    let first_vertex = data.mesh.positions.len() as u32;
+                    let first_triangle = data.mesh.triangle_count() as u32;
+                    data.mesh.positions.extend(mesh.positions);
+                    data.mesh.normals.extend(mesh.normals);
+                    data.mesh.indices.extend(mesh.indices.into_iter().map(|index| first_vertex + index));
+                    data.mesh.faces.extend(mesh.faces.into_iter().map(|mut face| {
+                        face.first += first_triangle;
+                        face
+                    }));
+                    data.mesh.edges.extend(mesh.edges);
+                }
+            }
+            for data in &mut out {
+                data.mesh = data.mesh.canonical();
             }
             Ok(out)
         })())
     }
+}
+
+fn packed(value: f32) -> u8 {
+    (value.clamp(0.0, 1.0) * 255.0).round() as u8
 }
 
 /// The display mesh of `level` in a part file's bytes, with what made it, when the file
@@ -95,5 +146,15 @@ pub fn read(part_file: &[u8], level: Level) -> Result<Option<(DisplayMesh, Strin
     let Some(bytes) = package.read(&entry(level))? else { return Ok(None) };
     let (mesh, made_by) = DisplayMesh::decode(&bytes).map_err(|e| FileError::Archive(e.to_string()))?;
     let current = made_by.rsplit(' ').next() == Some(geometry.as_str());
+    if current
+        && mesh.faces.iter().all(|face| face.style.is_none())
+        && let Some(truth) = package.read_text("part.json")?
+        && let Ok(recipe) = serde_json::from_str::<serde_json::Value>(&truth)
+        && (recipe.get("material").is_some()
+            || recipe.get("appearances").is_some()
+            || recipe.get("display_states").is_some())
+    {
+        return Ok(None);
+    }
     Ok(current.then_some((mesh, made_by)))
 }

@@ -425,6 +425,7 @@ fn info(part: &Path, a: &Args) -> Result<bool, String> {
     for x in &state.appearances {
         let place = match &x.target {
             AppearanceTarget::Part => "part".to_owned(),
+            AppearanceTarget::Body { body } => format!("Body {}", body + 1),
             AppearanceTarget::Feature { feature } => {
                 format!("feature {}", doc.feature(*feature).map(|f| f.name.as_str()).unwrap_or("(deleted)"))
             }

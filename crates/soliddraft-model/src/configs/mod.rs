@@ -410,6 +410,11 @@ impl Document {
         Some((default, override_value.copied()))
     }
 
+    /// Named configurations and their stable IDs.
+    pub fn named_configurations(&self) -> impl Iterator<Item = (&ConfigurationId, &str)> {
+        self.configurations.rows.iter().map(|row| (&row.id, row.name.as_str()))
+    }
+
     /// Counts accepted changes to the table, undo and redo included. A change that
     /// leaves the geometry alone still gives dependants a new source revision.
     pub fn table_edits(&self) -> u64 {

@@ -3865,34 +3865,77 @@ impl Document {
         }
     }
 
-    /// The assignment owned by the current configuration, or the part default.
-    /// None in a configuration means it inherits a broader assignment.
-    pub fn material_assignment(&self) -> Option<&soliddraft_materials::MaterialId> {
+    /// The assignment owned by the current configuration for a part or body.
+    pub fn material_assignment_for(&self, body: Option<u32>) -> Option<&soliddraft_materials::MaterialId> {
         let scope = self.material_scope();
-        self.model
-            .materials()
-            .material
-            .iter()
-            .find(|assignment| assignment.scope == scope)
-            .map(|assignment| &assignment.material)
+        self.model.materials().material.iter().find(|a| a.body == body && a.scope == scope).map(|a| &a.material)
+    }
+
+    /// The part assignment owned by the current configuration.
+    pub fn material_assignment(&self) -> Option<&soliddraft_materials::MaterialId> {
+        self.material_assignment_for(None)
     }
 
     /// Assigns a material to the current configuration, or sets the part default.
-    /// Clearing a configuration assignment restores its inherited material.
     pub fn set_material(
         &mut self,
         material: Option<soliddraft_materials::Material>,
         default_appearance: Option<Appearance>,
     ) -> Result<(), String> {
+        self.set_material_for(None, material, default_appearance)
+    }
+
+    /// Assigns or clears the material for the part or one body.
+    pub fn set_material_for(
+        &mut self,
+        body: Option<u32>,
+        material: Option<soliddraft_materials::Material>,
+        default_appearance: Option<Appearance>,
+    ) -> Result<(), String> {
         self.void_appearance_gesture();
         let scope = self.material_scope();
-        self.model
-            .execute(model::Command::SetMaterial { material, default_appearance, scope })
-            .map_err(|e| e.to_string())?;
+        let command = match body {
+            Some(body) => model::Command::SetBodyMaterial { body, material, default_appearance, scope },
+            None => model::Command::SetMaterial { material, default_appearance, scope },
+        };
+        self.model.execute(command).map_err(|e| e.to_string())?;
         self.touch();
         self.apply_appearances();
         self.mesh_version += 1;
         Ok(())
+    }
+
+    /// The part's named display states.
+    pub fn display_states(&self) -> &soliddraft_document::display_state::DisplayStates<model::PartDisplay> {
+        &self.model.materials().display_states
+    }
+
+    /// The state selected for the current configuration.
+    pub fn display_state(&self) -> Option<&soliddraft_document::display_state::DisplayState<model::PartDisplay>> {
+        self.display_states().selected(self.model.active_configuration())
+    }
+
+    /// Saves a display state edit and refreshes the viewport.
+    pub fn change_display_states(
+        &mut self,
+        states: soliddraft_document::display_state::DisplayStates<model::PartDisplay>,
+    ) -> Result<(), String> {
+        self.void_appearance_gesture();
+        self.model.execute(model::Command::SetDisplayStates { states: Box::new(states) }).map_err(|e| e.to_string())?;
+        self.touch();
+        self.apply_appearances();
+        self.mesh_version += 1;
+        Ok(())
+    }
+
+    /// The kernel handles of bodies the selected display state hides.
+    pub fn hidden_display_bodies(&self) -> Vec<BodyId> {
+        let Some(state) = self.display_state().filter(|s| !s.view.hidden.is_empty()) else { return Vec::new() };
+        self.model
+            .live_bodies()
+            .into_iter()
+            .filter_map(|(key, body)| state.view.hidden.contains(&key).then_some(body))
+            .collect()
     }
 
     /// Applies an appearance as one undo entry, and ends any preview.
@@ -3902,7 +3945,22 @@ impl Document {
         appearance: Option<Appearance>,
     ) -> Result<(), String> {
         self.appearance_preview = None;
-        let scope = soliddraft_document::ConfigScope::All;
+        if let Some(mut display) = self.display_state().cloned() {
+            display.view.paint(target, appearance);
+            let mut states = self.display_states().clone();
+            states.put(display)?;
+            return self.change_display_states(states);
+        }
+        self.set_base_appearance(target, appearance, soliddraft_document::ConfigScope::All)
+    }
+
+    pub(crate) fn set_base_appearance(
+        &mut self,
+        target: model::AppearanceTarget,
+        appearance: Option<Appearance>,
+        scope: soliddraft_document::ConfigScope,
+    ) -> Result<(), String> {
+        self.appearance_preview = None;
         let result =
             self.model.execute(model::Command::SetAppearance { target, appearance, scope }).map_err(|e| e.to_string());
         if result.is_ok() {
@@ -3970,6 +4028,11 @@ impl Document {
     /// The appearance shown now, preview included: on `face`, or with `None` what a
     /// face without an appearance of its own or its feature's shows.
     pub fn shown_appearance(&self, face: Option<FaceId>) -> Appearance {
+        self.shown_appearance_at(face, None)
+    }
+
+    /// The displayed appearance of a face, body or the whole part.
+    pub fn shown_appearance_at(&self, face: Option<FaceId>, body: Option<u32>) -> Appearance {
         let configuration = self.model.active_configuration();
         let mut table = match self.appearance_preview() {
             Some((target, appearance)) => self.model.appearance_table_previewing(configuration, target, appearance),
@@ -3977,13 +4040,21 @@ impl Document {
         };
         match face {
             Some(id) => table.of(id).clone(),
+            None if body.is_some() => table.of_body(body.unwrap()).clone(),
             None => table.appearances.swap_remove(0),
         }
     }
 
     /// True when `target` has an appearance of its own applied, not one it inherits.
     pub fn has_own_appearance(&self, target: &model::AppearanceTarget) -> bool {
-        self.model.materials().appearances.iter().any(|a| a.target.same_place(target))
+        if let Some(display) = self.display_state() {
+            return display.view.appearances.iter().any(|(place, _)| place.same_place(target));
+        }
+        self.model
+            .materials()
+            .appearances
+            .iter()
+            .any(|a| a.target.same_place(target) && a.scope == soliddraft_document::ConfigScope::All)
     }
 
     /// Fills each display mesh's appearance table and per-vertex index from the part's

@@ -7,8 +7,7 @@
 //!   wrote it, its semantic hash (the revision drawings and assemblies pin) and its
 //!   geometry hash, and its sections.
 //! - `part.json`: the truth. The format tag (`soliddraft-part/2`, `/3` for explicit
-//!   body identities, or `/4` for spreadsheet formulas, parameter comments or
-//!   configuration suppression), the part's name and
+//!   body identities, or `/5` for the new parameter, configuration and appearance data), the part's name and
 //!   units, every feature in tree order with its parameters, sketch and persistent
 //!   references, the rollback bar and the next free feature id, and when it has them
 //!   the part's text properties and its material and appearance assignments with copies
@@ -62,13 +61,16 @@ use crate::feature::{DatumPlane, Feature, FeatureId};
 use crate::materials::{AppearanceAssignment, MaterialAssignment, PartMaterials};
 use crate::view::{self, Visibility};
 
-/// The format tag of the current version.
+/// The format for a part using the original document envelope.
 pub const FORMAT: &str = "soliddraft-part/2";
 /// Parts with explicit body identities require this version.
 pub const MULTIBODY_FORMAT: &str = "soliddraft-part/3";
-/// Parts using spreadsheet formulas, parameter comments or configuration suppression require this version.
-pub const PARAMETERS_FORMAT: &str = "soliddraft-part/4";
-const NEWEST_FORMAT: u32 = 4;
+/// The shared format for formulas, parameter comments, configuration suppression,
+/// body materials and appearances, and display states.
+pub const PART_OPTIONS_FORMAT: &str = "soliddraft-part/5";
+const EARLY_OPTIONS_FORMAT: &str = "soliddraft-part/4";
+const EARLY_OPTIONS_VERSION: u32 = 4;
+const NEWEST_FORMAT: u32 = 5;
 /// The format tag of part files from before the document envelope.
 pub const LEGACY_FORMAT: &str = "soliddraft-part/1";
 /// The file name extension parts are saved under.
@@ -92,7 +94,7 @@ pub enum FileError {
     #[error("the part's recipe is not valid: {0}")]
     Json(#[from] serde_json::Error),
     /// The format tag is not one this version reads.
-    #[error("the file {}, this version reads {PARAMETERS_FORMAT}, {MULTIBODY_FORMAT}, {FORMAT} and {LEGACY_FORMAT}", found_tag(.found))]
+    #[error("the file {}, this version reads {PART_OPTIONS_FORMAT}, {EARLY_OPTIONS_FORMAT}, {MULTIBODY_FORMAT}, {FORMAT} and {LEGACY_FORMAT}", found_tag(.found))]
     Format {
         /// The tag in the file.
         found: String,
@@ -152,6 +154,8 @@ struct Recipe {
     snapshots: Snapshots,
     #[serde(default, skip_serializing_if = "crate::pmi::PartPmi::is_empty")]
     pmi: crate::pmi::PartPmi,
+    #[serde(default, skip_serializing_if = "soliddraft_document::display_state::DisplayStates::is_empty")]
+    display_states: soliddraft_document::display_state::DisplayStates<crate::materials::PartDisplay>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -198,8 +202,11 @@ impl Document {
 
     fn recipe(&self) -> Recipe {
         Recipe {
-            format: if self.values.uses_formula_settings() || self.configurations.uses_formula_settings() {
-                PARAMETERS_FORMAT
+            format: if self.values.uses_formula_settings()
+                || self.configurations.uses_formula_settings()
+                || has_extended_styles(&self.materials)
+            {
+                PART_OPTIONS_FORMAT
             } else if self.next_body > 1 {
                 MULTIBODY_FORMAT
             } else {
@@ -232,6 +239,7 @@ impl Document {
             appearances: self.materials.appearances.clone(),
             snapshots: self.materials.snapshots.clone(),
             pmi: self.pmi.clone(),
+            display_states: self.materials.display_states.clone(),
         }
     }
 
@@ -279,7 +287,7 @@ impl Document {
     /// True when saving writes display data: the settings ask for it, the save does not
     /// leave it out and the body's rebuild matches the current definitions.
     fn saves_display_data(&self, extras: &Extras<'_>) -> bool {
-        self.settings.save_display_data && !extras.no_display_data && !self.is_dirty() && self.body().is_some()
+        self.settings.save_display_data && !extras.no_display_data && !self.is_dirty() && !self.live_bodies().is_empty()
     }
 
     /// The part file's bytes. With display data on, the part is tessellated at its
@@ -381,15 +389,10 @@ impl Document {
     fn read_truth(text: &str, kernel: Arc<dyn Kernel>, newest: u32) -> Result<Document, FileError> {
         let probe: Value = serde_json::from_str(text)?;
         let found = probe.get("format").and_then(|f| f.as_str()).unwrap_or_default().to_string();
-        if !format_major(&found, "soliddraft-part").is_some_and(|m| (1..=newest).contains(&m)) {
+        let Some(version) = format_major(&found, "soliddraft-part").filter(|m| (1..=newest).contains(m)) else {
             return Err(FileError::Format { found });
-        }
+        };
         let mut recipe: Recipe = serde_json::from_str(text)?;
-        if found != PARAMETERS_FORMAT
-            && (recipe.values.uses_formula_settings() || recipe.configurations.uses_formula_settings())
-        {
-            return Err(FileError::Invalid(format!("parameter and configuration edits require {PARAMETERS_FORMAT}")));
-        }
         let mut ids: Vec<FeatureId> = recipe.features.iter().map(|f| f.id).collect();
         ids.sort();
         if ids.windows(2).any(|w| w[0] == w[1]) {
@@ -429,8 +432,19 @@ impl Document {
                 return Err(FileError::Invalid(format!("{} holds a file that does not match its sha256", f.id)));
             }
         }
-        let mut materials =
-            PartMaterials { material: recipe.material, appearances: recipe.appearances, snapshots: recipe.snapshots };
+        let mut materials = PartMaterials {
+            material: recipe.material,
+            appearances: recipe.appearances,
+            snapshots: recipe.snapshots,
+            display_states: recipe.display_states,
+        };
+        if version < EARLY_OPTIONS_VERSION
+            && (recipe.values.uses_formula_settings()
+                || recipe.configurations.uses_formula_settings()
+                || has_extended_styles(&materials))
+        {
+            return Err(FileError::Invalid(format!("the part options require {EARLY_OPTIONS_FORMAT} or later")));
+        }
         materials.snapshots.normalise();
         materials.check().map_err(FileError::Invalid)?;
         let mut doc = Document::new(recipe.name, kernel);
@@ -513,6 +527,20 @@ fn optional_entries<'a>(settings: &Settings, view: &Visibility) -> impl Iterator
     settings.into_iter().chain(view)
 }
 
+fn has_extended_styles(materials: &PartMaterials) -> bool {
+    !materials.display_states.is_empty()
+        || materials.material.iter().any(|assignment| assignment.body.is_some())
+        || materials
+            .appearances
+            .iter()
+            .any(|assignment| matches!(assignment.target, crate::AppearanceTarget::Body { .. }))
+        || materials
+            .snapshots
+            .materials
+            .iter()
+            .any(|material| !material.description.is_empty() || material.damping_ratio.is_some())
+}
+
 fn shape_hash(truth: &Value) -> ContentHash {
     let mut truth = soliddraft_document::hash::without_format(truth);
     if let Value::Object(map) = &mut truth {
@@ -527,6 +555,7 @@ fn shape_hash(truth: &Value) -> ContentHash {
             "configurations",
             "properties",
             "next_body",
+            "display_states",
         ] {
             map.remove(key);
         }

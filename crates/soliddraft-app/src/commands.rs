@@ -2215,6 +2215,12 @@ fn registry() -> Vec<CommandSpec> {
                     && !s.in_sketch()
             })
             .app_only("Part material"),
+        cmd("body_material", "Body material", Icon::Material, "Assign a solid body its own material")
+            .in_menu()
+            .outside_sketch()
+            .run(|_| AppAction::ShowBodyMaterial)
+            .when(|s| s.doc.display_body().is_some() && s.editor.is_none() && !s.in_sketch())
+            .app_only("Body material"),
         cmd("check", "Check", Icon::Cad("check"), "Build the part independently with the distance-field model")
             .run(|_| AppAction::CheckPart)
             .on(Inspect, "Check", Large)
@@ -2540,7 +2546,7 @@ fn registry() -> Vec<CommandSpec> {
             .hint(|s| s.selected_sketch().is_none().then(|| "This feature has no source sketch".into()))
             .outside_sketch().app_only(EDITOR),
         cmd("hide_body", "Hide body", Icon::Eye, "Show or hide the solid body")
-            .run(|s| AppAction::SetBodyVisible(!crate::tree_visibility::visible(s).body))
+            .run(|s| AppAction::SetBodyVisible(!crate::tree_visibility::active_body_shown(&s.doc)))
             .when(|s| s.doc.display_body().is_some())
             .label_now(|s| Some(if crate::tree_visibility::visible(s).body { "Hide body" } else { "Show body" }.into()))
             .outside_sketch().app_only(LOOK),
@@ -2596,12 +2602,18 @@ fn registry() -> Vec<CommandSpec> {
         cmd("select_loop", "Select loop", Icon::Views, COMING_SOON).in_menu().outside_sketch(),
         cmd("convert_entities", "Use in a sketch", Icon::Sketch, COMING_SOON).in_menu().outside_sketch(),
         cmd("isolate", "Isolate", Icon::Fit, COMING_SOON).in_menu().outside_sketch(),
-        cmd("appearance", "Appearance", Icon::Display, "Colour the part or the selected face, or make it transparent")
+        cmd("appearance", "Appearance", Icon::Display, "Set colour and transparency for the part, body or face")
             .in_menu()
             .outside_sketch()
             .run(|_| AppAction::ShowAppearance)
             .when(|s| s.doc.display_body().is_some() && s.editor.is_none() && !s.in_sketch())
             .app_only("It opens the appearance panel; agents change an appearance with document_command and SetAppearance"),
+        cmd("body_appearance", "Body appearance", Icon::Display, "Set colour and transparency for the body")
+            .in_menu()
+            .outside_sketch()
+            .run(|_| AppAction::ShowBodyAppearance)
+            .when(|s| s.doc.display_body().is_some() && s.editor.is_none() && !s.in_sketch())
+            .app_only("Body appearance"),
         // Features in the tree.
         cmd("edit_feature", "Edit feature", Icon::Props, "Edit the selected feature or sketch")
             .label_now(|s| selected_feature_is(s, |f| f.is_sketch()).then(|| "Edit sketch".into()))

@@ -218,7 +218,9 @@ impl egui_wgpu::CallbackTrait for ViewportCallback {
                 && r.targets.is_some()
             {
                 let triangles = if r.draws_faces() {
-                    r.scene_bodies().map(|body| (body.index_count / 3) as usize).sum()
+                    ViewportRenderer::scene_bodies(&r.preview, &r.bodies)
+                        .map(|body| (body.index_count / 3) as usize)
+                        .sum()
                 } else {
                     0_usize
                 };
@@ -1203,9 +1205,12 @@ impl ViewportRenderer {
         self.display != DisplayMode::Wireframe
     }
 
-    fn scene_bodies(&self) -> impl Iterator<Item = &GpuBody> {
-        let preview = self.preview.as_ref().map(|(_, body)| body);
-        preview.into_iter().chain(self.bodies.values().filter(move |_| preview.is_none()))
+    fn scene_bodies<'a>(
+        preview: &'a Option<(usize, GpuBody)>,
+        bodies: &'a HashMap<BodyId, GpuBody>,
+    ) -> impl Iterator<Item = &'a GpuBody> {
+        let preview = preview.as_ref().map(|(_, body)| body);
+        preview.into_iter().chain(bodies.values().filter(move |_| preview.is_none()))
     }
 
     // A construction preview stands in for the built part and its thread marks.
@@ -1268,7 +1273,7 @@ impl ViewportRenderer {
         let show_edges = self.display != DisplayMode::Shaded;
         let preview_key = self.preview.as_ref().map_or(0, |(p, _)| *p);
         // Construction previews replace the colour and revision-bound pick geometry.
-        let shown: Vec<_> = self.scene_bodies().collect();
+        let shown: Vec<_> = Self::scene_bodies(&self.preview, &self.bodies).collect();
         let bounds = shown.iter().filter_map(|b| b.bounds).reduce(|(lo, hi), (l, h)| (lo.min(l), hi.max(h)));
         let shadows = look.shadows && show_faces && bounds.is_some();
         let draw_shadow_map = shadows && self.shadow_key != Some((self.mesh_version, preview_key));

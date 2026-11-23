@@ -80,8 +80,12 @@ const EXPECTED = [
 const NOTES = { general_tolerance: 'ISO 2768-m', material: '6061-T6', notes: ['Break sharp edges'] };
 // The tapped hole: through the 5 mm plate at x 50, y 22, between two mounting holes. The
 // form's Tapped takes the coarse thread whose tap drill is nearest the drawn Ø6.6: M8.
-const TAPPED_AT = [50, 22, 5];
+const TAPPED_AT = [50.1, 22, 5];
 const THREAD = ['Hole1 thread', 'M8x1.25-6H THRU', [[C(50, 22, 2.5)]]];
+// The tapped hole removes material from the datum face, moving that face's centroid.
+const TAPPED_A = P(29.681, 19.812, 0);
+const TAPPED_EXPECTED = EXPECTED.map(([name, callout, features]) => [name, callout,
+  features.map(feature => feature.map(face => face === A ? TAPPED_A : face))]);
 
 // `<name> @ <Surface> (x, y, z)` as the panel export writes a face.
 function place(face) {
@@ -97,7 +101,7 @@ function at(have, want) {
 
 function checkThread(shown, when) {
   check(shown.items.length === EXPECTED.length + 1, `${when}: ${shown.items.length} items, not ${EXPECTED.length + 1}: ${JSON.stringify(shown.items.map(i => i.name))}`);
-  checkItems({ ...shown, items: shown.items.slice(0, EXPECTED.length) }, when);
+  checkItems({ ...shown, items: shown.items.slice(0, EXPECTED.length) }, when, TAPPED_EXPECTED);
   const [name, callout, features] = THREAD;
   const item = shown.items[EXPECTED.length];
   check(item.name === name && item.callout === callout, `${when}: the last item is ${item.name} "${item.callout}", not ${name} "${callout}"`);
@@ -107,9 +111,9 @@ function checkThread(shown, when) {
     `${when}: ${name} is on ${JSON.stringify(item.faces)}, not on ${JSON.stringify(features)}`);
 }
 
-function checkItems(shown, when) {
-  check(shown.items.length === EXPECTED.length, `${when}: ${shown.items.length} items, not ${EXPECTED.length}: ${JSON.stringify(shown.items.map(i => i.name))}`);
-  EXPECTED.forEach(([name, callout, features], n) => {
+function checkItems(shown, when, expected = EXPECTED) {
+  check(shown.items.length === expected.length, `${when}: ${shown.items.length} items, not ${expected.length}: ${JSON.stringify(shown.items.map(i => i.name))}`);
+  expected.forEach(([name, callout, features], n) => {
     const item = shown.items[n];
     check(item.name === name && item.callout === callout, `${when}: item ${n + 1} is ${item.name} "${item.callout}", not ${name} "${callout}"`);
     check(!item.problem, `${when}: ${name} does not apply: ${item.problem}`);

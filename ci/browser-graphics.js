@@ -18,12 +18,13 @@ async function load() {
   await page.eval(() => {
     const canvas = document.getElementById('soliddraft');
     canvas.focus();
-    window.graphicsClick = (x, y) => {
+    window.graphicsClick = async (x, y) => {
       const at = {
         clientX: x, clientY: y, bubbles: true, cancelable: true,
         pointerId: 1, pointerType: 'mouse', isPrimary: true, button: 0,
       };
       canvas.dispatchEvent(new PointerEvent('pointermove', { ...at, buttons: 0 }));
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
       canvas.dispatchEvent(new PointerEvent('pointerdown', { ...at, buttons: 1 }));
       return new Promise(resolve => setTimeout(() => {
         canvas.dispatchEvent(new PointerEvent('pointerup', { ...at, buttons: 0 }));
@@ -42,7 +43,7 @@ async function click(label) {
     Boolean,
     `Control ${label} was not drawn`,
   );
-  await page.eval(`window.graphicsClick(${control.x}, ${control.y})`);
+  await page.eval(`() => window.graphicsClick(${Math.round(control.x)}, ${Math.round(control.y)})`);
 }
 
 await load();

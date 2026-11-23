@@ -21,7 +21,6 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-use kurbo::BezPath;
 use serde::{Deserialize, Serialize};
 use soliddraft_kernel_api::drawing::{StandardView, ViewSpec};
 use soliddraft_kernel_api::{Point2, Vec3};
@@ -575,10 +574,4 @@ pub fn update_assembly_drawing(drawing: &Drawing, model: &AssemblyModel<'_>) -> 
 /// A drawing whose model is an assembly.
 pub fn is_assembly_drawing(drawing: &Drawing) -> bool {
     drawing.model.kind == crate::DocKind::Assembly
-}
-
-/// The path of a balloon's circle, for the canvas and exports: the circle at `centre`.
-pub fn balloon_circle(centre: Point2, radius: f64) -> BezPath {
-    let c = kurbo::Circle::new((centre.u, centre.v), radius);
-    kurbo::Shape::to_path(&c, 0.01)
 }

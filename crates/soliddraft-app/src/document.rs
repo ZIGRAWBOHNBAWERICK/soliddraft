@@ -1013,13 +1013,13 @@ impl Feature {
             },
             FeatureKind::Mirror(m) => plane_ref_label(&m.plane),
             FeatureKind::Draft(d) => format!("{}°", fmt_mm(d.angle)),
-            FeatureKind::Shell(s) => format!("{} mm wall", fmt_mm(s.thickness)),
+            FeatureKind::Shell(s) => format!("{} wall", wall_thickness_text(&s.thickness)),
             FeatureKind::Offset(s) => format!("{} mm", fmt_mm(s.distance)),
             FeatureKind::Thicken(s) => format!(
-                "{} {}, {} mm",
+                "{} {}, {}",
                 s.faces.len(),
                 if s.faces.len() == 1 { "face" } else { "faces" },
-                fmt_mm(s.thickness)
+                wall_thickness_text(&s.thickness)
             ),
             FeatureKind::ImportStep(i) => i.source_name.clone(),
             FeatureKind::Scan(s) => format!(
@@ -4535,8 +4535,10 @@ impl Document {
     /// Preview an analytic shell through the same kernel operation as a committed feature.
     pub fn preview_shell(&self, shell: &model::ShellFeature, before: Option<BodyId>) -> Result<Preview, String> {
         let body = before.ok_or("nothing to shell yet")?;
+        shell.check_thickness()?;
         if shell.open_faces.is_all() {
-            self.kernel().shell_all_faces(body, shell.thickness).map_err(|error| error.to_string())?;
+            let thickness = shell.thickness.constant().expect("validated all-faces thickness");
+            self.kernel().shell_all_faces(body, thickness).map_err(|error| error.to_string())?;
             return Ok(Preview {
                 result: Some(Arc::default()),
                 tool: None,
@@ -4556,7 +4558,7 @@ impl Document {
             .collect::<Result<Vec<_>, _>>()?;
         let result = self
             .kernel()
-            .shell(&OpTag::new("preview"), body, &faces, shell.thickness)
+            .shell_with_grade(&OpTag::new("preview"), body, &faces, shell.thickness)
             .map_err(|error| error.to_string())?;
         if let Some(refusal) = model::shell_refusal(&result) {
             let _ = self.kernel().release(result.body);
@@ -4582,8 +4584,11 @@ impl Document {
             .iter()
             .map(|f| self.model.resolve_face(f, body).map_err(|r| r.message))
             .collect::<Result<Vec<_>, _>>()?;
-        let params = soliddraft_kernel_api::Thicken { faces, thickness: thicken.thickness, side: thicken.side };
-        let result = self.kernel().thicken(&OpTag::new("preview"), body, &params).map_err(plain_kernel_error)?;
+        thicken.thickness.check_thickness()?;
+        let result = self
+            .kernel()
+            .thicken_with_grade(&OpTag::new("preview"), body, faces, thicken.thickness, thicken.side)
+            .map_err(plain_kernel_error)?;
         let mesh = self.mesh_of(result.body);
         let _ = self.kernel().release(result.body);
         Ok(Preview { result: Some(mesh?), tool: None, removes: false, guides: Default::default() })
@@ -5572,6 +5577,10 @@ pub fn grade_text(grade: &soliddraft_kernel_api::Grade, unit: &str) -> String {
             format!("{}{unit} to {}{unit} along {} from {} to {} mm", l.start, l.end, l.axis.name(), l.from, l.to)
         }
     }
+}
+
+pub(crate) fn wall_thickness_text(grade: &soliddraft_kernel_api::Grade) -> String {
+    grade.constant().map_or_else(|| grade_text(grade, " mm"), |value| format!("{} mm", fmt_mm(value)))
 }
 
 fn plain_kernel_error(error: soliddraft_kernel_api::KernelError) -> String {

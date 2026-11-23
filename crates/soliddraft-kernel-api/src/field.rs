@@ -78,7 +78,7 @@ impl LinearGrade {
     }
 }
 
-/// How a terminal field parameter varies over the part. A constant is written as a bare
+/// How a field parameter varies over the part. A constant is written as a bare
 /// number, as files always had it; a function is an object that names it, so a reader
 /// that does not know a function refuses the file instead of reading it as a constant.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -105,6 +105,17 @@ impl Grade {
             Grade::Constant(v) => vec![*v],
             Grade::Linear(l) => vec![l.start, l.end],
         }
+    }
+
+    /// Validates a wall thickness in millimetres over the whole part.
+    pub fn check_thickness(self) -> Result<(), &'static str> {
+        if self.values().iter().any(|v| !v.is_finite()) || self.endpoints().iter().any(|v| *v <= 0.0) {
+            return Err("Wall thickness must be finite and positive, with finite grade anchors.");
+        }
+        if matches!(self, Grade::Linear(l) if l.from == l.to) {
+            return Err("Thickness needs two distinct grade anchors.");
+        }
+        Ok(())
     }
 
     /// The constant, when the grade is one.

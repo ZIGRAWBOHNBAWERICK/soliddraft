@@ -389,6 +389,10 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
                 );
                 tree_visibility::eye(ui, state, resp.rect, ViewItem::Feature(item.id), &item.name);
                 if let Some(feature) = state.doc.feature(item.id) {
+                    #[cfg(target_arch = "wasm32")]
+                    if matches!(feature.kind, FeatureKind::Shell(_) | FeatureKind::Thicken(_)) {
+                        crate::web::show_control(format!("Wall feature: {}", item.name), resp.rect);
+                    }
                     status_mark(ui, state, feature, resp.rect);
                 }
                 resp

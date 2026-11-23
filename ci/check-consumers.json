@@ -54,6 +54,14 @@
     "ci/browser-part-check.js": [
       "web"
     ],
+    "ci/browser-wall-thickness.js": [
+      "web"
+    ],
+    "ci/fixtures/graded-wall.json": [
+      "test-linux",
+      "test-macos",
+      "web"
+    ],
     "ci/browser-preferences.mjs": [
       "web"
     ],

@@ -221,10 +221,10 @@ fn a_wall_too_thick_to_hollow_anything_is_refused() {
     let FeatureKind::Shell(mut shell) = state.doc.features.last().unwrap().kind.clone() else {
         panic!("shell feature")
     };
-    shell.thickness = 14.0;
+    shell.thickness = 14.0.into();
     let before = state.doc.body_before(state.doc.features.len() - 1);
     let refused = state.doc.preview_shell(&shell, before).err().unwrap_or_default();
     assert!(refused.contains("too thick"), "preview: {refused:?}");
-    shell.thickness = 1.5;
+    shell.thickness = 1.5.into();
     assert!(state.doc.preview_shell(&shell, before).is_ok());
 }

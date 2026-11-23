@@ -4,7 +4,7 @@ use crate::document::{EndKind, ProfileKind};
 use crate::form_bar::Field;
 use crate::icons::Icon;
 use crate::state::EditorParams;
-use soliddraft_kernel_api::{Grade, HoleDepth as DrillDepth, HoleHead, HoleTip};
+use soliddraft_kernel_api::{Grade, HoleDepth as DrillDepth, HoleHead, HoleTip, OpKind};
 use soliddraft_model::PatternSpec;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -58,6 +58,7 @@ pub enum Key {
     LevelGrade,
     OpenFaces,
     Thickness,
+    ThicknessGrade,
     DraftFaces,
     NeutralPlane,
     PullDirection,
@@ -358,13 +359,24 @@ struct Context {
     sweep_radius: f64,
     loft_choices: Vec<(soliddraft_model::LoftProfile, String)>,
     pattern_choices: Vec<(soliddraft_model::FeatureId, String)>,
+    graded_thickness: bool,
 }
 
 pub fn show(ui: &mut egui::Ui, state: &mut crate::state::AppState) {
     use crate::{form_bar, state::AppAction};
     let Some(editor) = &state.editor else { return };
     let target = editor.target.and_then(|id| state.doc.index_of(id)).unwrap_or(state.doc.features.len());
+    let wall = match &editor.params {
+        EditorParams::Shell(p) if !p.open_faces.is_all() => Some((OpKind::Shell, p.thickness)),
+        EditorParams::Thicken(p) => Some((OpKind::Thicken, p.thickness)),
+        _ => None,
+    };
+    let graded_thickness = wall.is_some_and(|(op, _)| {
+        let before = if editor.target.is_some() { state.doc.body_before(target) } else { state.doc.display_body() };
+        before.is_some_and(|body| state.doc.kernel().graded_thickness_available(op, body))
+    });
     let context = Context {
+        graded_thickness,
         pattern_choices: if matches!(editor.params, EditorParams::Pattern(_)) {
             crate::properties::pattern_sources(&state.doc, target)
         } else {
@@ -405,7 +417,15 @@ pub fn show(ui: &mut egui::Ui, state: &mut crate::state::AppState) {
             _ => 0.0,
         },
     };
-    let spec = spec(&editor.params, &context.planes, &context.free_sketches);
+    let mut spec = spec(&editor.params, &context.planes, &context.free_sketches);
+    if graded_thickness {
+        let linear = wall.is_some_and(|(_, grade)| matches!(grade, Grade::Linear(_)));
+        spec.fields.push(Field::new(Key::ThicknessGrade, "", "Thickness grade", 280.0).sheet().count(if linear {
+            5
+        } else {
+            1
+        }));
+    }
     let title = editor.title();
     let key = egui::Id::new(("feature_form", spec.kind, editor.target));
     let error = editor
@@ -464,9 +484,14 @@ fn draft_option(ui: &mut egui::Ui, key: Key, draft: &mut Option<crate::document:
 }
 
 fn number(ui: &mut egui::Ui, label: &str, unit: &str, widget: impl egui::Widget) {
+    number_field(ui, label, unit, widget);
+}
+
+fn number_field(ui: &mut egui::Ui, label: &str, unit: &str, widget: impl egui::Widget) -> egui::Response {
     let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width().max(36.0), 24.0), egui::Sense::hover());
     let response = crate::form_bar::value_cell(ui, rect, unit, |ui, inner| ui.put(inner, widget));
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::DragValue, true, format!("{label} value")));
+    response
 }
 
 /// An extrusion's Depth, which takes the keyboard when `focus`, as a double-click on the
@@ -537,6 +562,26 @@ fn end(ui: &mut egui::Ui, value: &mut crate::document::EndKind, cut: bool, linke
 /// A count with its noun: "1 face", "3 faces".
 fn counted(count: usize, noun: &str) -> String {
     format!("{count} {noun}{}", if count == 1 { "" } else { "s" })
+}
+
+fn thickness(ui: &mut egui::Ui, label: &str, grade: &mut Grade, available: bool) -> bool {
+    match grade {
+        Grade::Constant(value) => {
+            let _response = number_field(ui, label, "mm", egui::DragValue::new(value).speed(0.1));
+            #[cfg(target_arch = "wasm32")]
+            crate::web::show_control("Thickness value", _response.rect);
+        }
+        Grade::Linear(_) if available => return ui.button("Linear grade").clicked(),
+        Grade::Linear(linear) => {
+            let response = ui.button("Use constant");
+            #[cfg(target_arch = "wasm32")]
+            crate::web::show_control("Use constant", response.rect);
+            if response.clicked() {
+                *grade = Grade::Constant(linear.start);
+            }
+        }
+    }
+    false
 }
 
 fn picked_edges(ui: &mut egui::Ui, editor: &mut crate::state::FeatureEditor) {
@@ -614,7 +659,7 @@ fn render(
             number(ui, "Offset", "mm", egui::DragValue::new(&mut p.distance).speed(0.1));
         }
         (EditorParams::Thicken(p), Key::Thickness) => {
-            number(ui, "Thickness", "mm", egui::DragValue::new(&mut p.thickness).speed(0.1));
+            return thickness(ui, "Thickness", &mut p.thickness, context.graded_thickness);
         }
         (EditorParams::Thicken(p), Key::ThickenSide) => properties::thicken_side(ui, &mut p.side),
         (EditorParams::Thicken(p), Key::ThickenFaces) => {
@@ -1038,8 +1083,13 @@ fn render(
             });
         }
         (EditorParams::Shell(p), Key::Thickness) => {
-            number(ui, "Wall thickness", "mm", egui::DragValue::new(&mut p.thickness).speed(0.1))
+            return thickness(ui, "Wall thickness", &mut p.thickness, context.graded_thickness);
         }
+        (
+            EditorParams::Shell(soliddraft_model::ShellFeature { thickness, .. })
+            | EditorParams::Thicken(soliddraft_model::ThickenFeature { thickness, .. }),
+            Key::ThicknessGrade,
+        ) => properties::grade_options(ui, "Thickness", thickness, "mm", 0.1),
         (EditorParams::Lattice(p), Key::Cell) => {
             let cell = p.cell.get_or_insert(LatticeCell::Cubic);
             let response = egui::ComboBox::from_id_salt("cell_type")

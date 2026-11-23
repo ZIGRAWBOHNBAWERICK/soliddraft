@@ -632,7 +632,7 @@ impl SolidDraftApp {
                     None,
                     EditorParams::Thicken(soliddraft_model::ThickenFeature {
                         faces,
-                        thickness: 2.0,
+                        thickness: 2.0.into(),
                         side: soliddraft_kernel_api::ThickenSide::Front,
                     }),
                 );
@@ -647,7 +647,7 @@ impl SolidDraftApp {
                     None,
                     EditorParams::Shell(soliddraft_model::ShellFeature {
                         open_faces: soliddraft_model::ShellOpenings::Faces(open_faces),
-                        thickness: 2.0,
+                        thickness: 2.0.into(),
                     }),
                 );
                 self.state.doc.selection = None;

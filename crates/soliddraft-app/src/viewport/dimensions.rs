@@ -300,8 +300,10 @@ fn values(kind: &FeatureKind) -> Vec<(AnnotationValue, String)> {
         FeatureKind::Fillet(p) => vec![(Radius, format!("R{}", fmt_mm(p.radius)))],
         FeatureKind::Chamfer(p) => vec![(Distance, fmt_mm(p.distance))],
         FeatureKind::Draft(d) => vec![(Angle, format!("{}°", fmt_mm(d.angle)))],
-        FeatureKind::Shell(s) => vec![(Thickness, fmt_mm(s.thickness))],
-        FeatureKind::Thicken(s) => vec![(Thickness, fmt_mm(s.thickness))],
+        FeatureKind::Shell(soliddraft_model::ShellFeature { thickness, .. })
+        | FeatureKind::Thicken(soliddraft_model::ThickenFeature { thickness, .. }) => {
+            thickness.constant().map(|v| (Thickness, fmt_mm(v))).into_iter().collect()
+        }
         FeatureKind::Offset(s) => vec![(Distance, fmt_mm(s.distance))],
         FeatureKind::Hole(h) => {
             let mut v = vec![(Diameter, format!("Ø{}", fmt_mm(h.diameter)))];

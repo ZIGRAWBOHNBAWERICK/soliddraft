@@ -515,7 +515,7 @@ class BrowserStartup(unittest.TestCase):
                 self.assertEqual(result.returncode, expected, result.stderr)
                 self.assertEqual((root / 'calls').read_text().splitlines(), calls)
         for name in ('browser-edit-off-thread.js', 'browser-journal.js', 'browser-kernel-worker.js', 'browser-part-check.js',
-                     'browser-recovery-storage.js'):
+                     'browser-recovery-storage.js', 'browser-wall-thickness.js'):
             self.assertEqual(text.count(f'chrome-devtools-axi run < ci/{name}'), 1)
 
 

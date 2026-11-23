@@ -251,6 +251,10 @@ pub enum ThickenSide {
     Back,
 }
 
+fn graded_thickness_unavailable() -> KernelError {
+    KernelError::Unsupported("Field-driven thickness is unavailable in this kernel.".into())
+}
+
 /// A solid made from selected faces at a constant thickness.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Thicken {
@@ -1092,6 +1096,25 @@ pub trait Kernel: Send + Sync {
     /// Hollows a solid to wall `thickness`, leaving `open_faces` open.
     fn shell(&self, tag: &OpTag, body: BodyId, open_faces: &[FaceId], thickness: f64) -> KernelResult<OpResult>;
 
+    /// Whether the backend offers linear wall thickness for this operation and body.
+    /// This query does not build geometry.
+    /// Individual grades and face selections still need to pass the operation's proof.
+    fn graded_thickness_available(&self, _op: OpKind, _body: BodyId) -> bool {
+        false
+    }
+
+    /// Hollows a solid at a constant or part-axis linear thickness.
+    fn shell_with_grade(
+        &self,
+        tag: &OpTag,
+        body: BodyId,
+        open_faces: &[FaceId],
+        thickness: Grade,
+    ) -> KernelResult<OpResult> {
+        let thickness = thickness.constant().ok_or_else(graded_thickness_unavailable)?;
+        self.shell(tag, body, open_faces, thickness)
+    }
+
     /// Opens every face of `body`, an explicit choice rather than a list of picked faces.
     /// Nothing remains, so a success has no result body, and the part carries on without
     /// one. A refusal leaves `body` as it was.
@@ -1107,6 +1130,19 @@ pub trait Kernel: Send + Sync {
     /// Makes a solid from the selected faces at a constant thickness.
     fn thicken(&self, _tag: &OpTag, _body: BodyId, _params: &Thicken) -> KernelResult<OpResult> {
         Err(KernelError::Unsupported("Thicken is coming soon.".into()))
+    }
+
+    /// Makes a solid from selected faces at a constant or part-axis linear thickness.
+    fn thicken_with_grade(
+        &self,
+        tag: &OpTag,
+        body: BodyId,
+        faces: Vec<FaceId>,
+        thickness: Grade,
+        side: ThickenSide,
+    ) -> KernelResult<OpResult> {
+        let thickness = thickness.constant().ok_or_else(graded_thickness_unavailable)?;
+        self.thicken(tag, body, &Thicken { faces, thickness, side })
     }
 
     /// Repeats only the operation graph between a feature's input and result.

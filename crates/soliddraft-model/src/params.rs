@@ -62,8 +62,16 @@ pub enum Parameter {
     Spacing,
     /// How many copies a pattern makes, the original included.
     Count,
-    /// A shell's wall.
+    /// A shell or thicken feature's constant wall thickness.
     Thickness,
+    /// Wall thickness at the first grade anchor.
+    ThicknessStart,
+    /// Wall thickness at the second grade anchor.
+    ThicknessEnd,
+    /// Part coordinate of the first thickness anchor.
+    ThicknessStartAt,
+    /// Part coordinate of the second thickness anchor.
+    ThicknessEndAt,
     /// A plane's distance from what it is offset from.
     Offset,
     /// A lattice's cell edge.
@@ -101,6 +109,10 @@ impl Parameter {
             Parameter::Spacing => "Spacing",
             Parameter::Count => "Count",
             Parameter::Thickness => "Thickness",
+            Parameter::ThicknessStart => "ThicknessStart",
+            Parameter::ThicknessEnd => "ThicknessEnd",
+            Parameter::ThicknessStartAt => "ThicknessStartAt",
+            Parameter::ThicknessEndAt => "ThicknessEndAt",
             Parameter::Offset => "Offset",
             Parameter::CellSize => "CellSize",
             Parameter::Period => "Period",
@@ -250,8 +262,12 @@ pub fn parameters(feature: &Feature) -> Vec<Param> {
         },
         FeatureKind::Draft(d) => out.push(param(Parameter::Angle, Unit::Angle, d.angle)),
         FeatureKind::Offset(o) => out.push(param(Parameter::Distance, Unit::Length, o.distance)),
-        FeatureKind::Thicken(t) => out.push(param(Parameter::Thickness, Unit::Length, t.thickness)),
-        FeatureKind::Shell(s) => out.push(param(Parameter::Thickness, Unit::Length, s.thickness)),
+        FeatureKind::Thicken(crate::ThickenFeature { thickness, .. })
+        | FeatureKind::Shell(crate::ShellFeature { thickness, .. }) => {
+            for (parameter, value) in grade_values(thickness, THICKNESS) {
+                out.push(param(parameter, Unit::Length, value));
+            }
+        }
         FeatureKind::Lattice(l) => {
             if let Some(size) = l.cell_size_mm {
                 out.push(param(Parameter::CellSize, Unit::Length, size));
@@ -444,8 +460,17 @@ fn write_parameter(
             }
             o.distance = value;
         }
-        (FeatureKind::Thicken(t), Parameter::Thickness) => t.thickness = positive("thickness")?,
-        (FeatureKind::Shell(s), Parameter::Thickness) => s.thickness = positive("thickness")?,
+        (
+            FeatureKind::Thicken(crate::ThickenFeature { thickness, .. })
+            | FeatureKind::Shell(crate::ShellFeature { thickness, .. }),
+            p,
+        ) if THICKNESS.contains(&p) => {
+            let at = matches!(p, Parameter::ThicknessStartAt | Parameter::ThicknessEndAt);
+            let value = if at { value } else { positive("thickness")? };
+            if !write_grade(thickness, THICKNESS, p, value) {
+                return missing();
+            }
+        }
         (FeatureKind::Lattice(l), Parameter::CellSize) if l.cell_size_mm.is_some() => {
             l.cell_size_mm = Some(positive("cell size")?)
         }
@@ -471,6 +496,13 @@ pub(crate) fn name_part(feature: &Feature) -> String {
 type GradeNames = [Parameter; 5];
 const RADIUS: GradeNames =
     [Parameter::Radius, Parameter::RadiusStart, Parameter::RadiusEnd, Parameter::RadiusStartAt, Parameter::RadiusEndAt];
+const THICKNESS: GradeNames = [
+    Parameter::Thickness,
+    Parameter::ThicknessStart,
+    Parameter::ThicknessEnd,
+    Parameter::ThicknessStartAt,
+    Parameter::ThicknessEndAt,
+];
 const LEVEL: GradeNames =
     [Parameter::Level, Parameter::LevelStart, Parameter::LevelEnd, Parameter::LevelStartAt, Parameter::LevelEndAt];
 

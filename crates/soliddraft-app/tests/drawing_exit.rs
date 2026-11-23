@@ -98,7 +98,7 @@ fn click_at(harness: &mut App<'_>, pos: Pos2) {
 fn open_drawings(harness: &mut App<'_>) {
     let tab = harness
         .query_all_by_role(egui::accesskit::Role::Button)
-        .filter_map(|n| n.accesskit_node().label().map(|l| l.to_string()))
+        .filter_map(|n| egui_kittest::kittest::NodeT::accesskit_node(&n).label().map(|l| l.to_string()))
         .find(|l| l.ends_with(".dwdrw") && !l.starts_with("Close "))
         .expect("the drawing has a tab in the title bar");
     harness.get_by_label(&tab).click();
@@ -134,7 +134,7 @@ fn click_button(harness: &mut App<'_>, label: &str) {
         // The strip has no room for this tool's card: it is in its group's More menu.
         let menus: Vec<String> = harness
             .query_all_by_role(egui::accesskit::Role::Button)
-            .filter_map(|n| n.accesskit_node().label().map(|l| l.to_string()))
+            .filter_map(|n| egui_kittest::kittest::NodeT::accesskit_node(&n).label().map(|l| l.to_string()))
             .filter(|l| l.starts_with("More ") && l.ends_with(" tools"))
             .collect();
         for menu in menus {

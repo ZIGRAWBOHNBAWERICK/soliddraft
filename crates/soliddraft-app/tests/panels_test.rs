@@ -122,7 +122,7 @@ fn side_areas_toggle_resize_and_come_back_next_run() {
     settle(&mut harness);
     assert!(!layout(&harness).suite.part);
     let wide = viewport_rect(&harness);
-    assert!((wide.left() - soliddraft_app::left_bar::WIDTH - theme::edit_suite::PALETTE_WIDTH).abs() < 2.0);
+    assert!((wide.left() - soliddraft_app::left_bar::WIDTH).abs() < 2.0, "the viewport starts at the rail");
     assert!(wide.right() >= 1439.0);
     assert!((full.left() - wide.left() - Side::Tree.default_width()).abs() < 2.0);
     save(&mut harness, "p02-tree-hidden");

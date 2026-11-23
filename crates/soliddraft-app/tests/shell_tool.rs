@@ -25,6 +25,23 @@ fn button(app: &mut App, label: &str) {
         app.key_press(Key::F9);
         app.run_steps(8);
     }
+    if app.query_all_by_role_and_label(egui::accesskit::Role::Button, label).next().is_none() {
+        // The strip has no room for this tool's card: it is in its group's More menu.
+        let menus: Vec<String> = app
+            .query_all_by_role(egui::accesskit::Role::Button)
+            .filter_map(|n| n.accesskit_node().label().map(|l| l.to_string()))
+            .filter(|l| l.starts_with("More ") && l.ends_with(" tools"))
+            .collect();
+        for menu in menus {
+            app.get_by_label(&menu).click();
+            app.run_steps(8);
+            if app.query_all_by_role_and_label(egui::accesskit::Role::Button, label).next().is_some() {
+                break;
+            }
+            app.key_press(Key::Escape);
+            app.run_steps(8);
+        }
+    }
     app.get_all_by_role_and_label(egui::accesskit::Role::Button, label)
         .next()
         .unwrap_or_else(|| panic!("missing button {label}"))

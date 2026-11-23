@@ -39,6 +39,7 @@ fn more(app: &mut App) {
 }
 
 fn click(app: &mut App, label: &str) {
+    ribbon::open_form_sheet_for(app, label);
     let rect = app.get_by_label(label).rect();
     ribbon::click_at(app, rect.center());
     settle(app);

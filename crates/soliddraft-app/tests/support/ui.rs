@@ -612,6 +612,7 @@ pub fn click_world(app: &mut App, world: glam::Vec3) {
 
 /// Types a value into a numeric field: click, select all, type, Enter.
 pub fn type_field(app: &mut App, label: &str, value: &str) {
+    open_form_sheet_for(app, label);
     let rect = app.get_by_label(label).rect();
     click_at(app, rect.center());
     app.key_press_modifiers(Modifiers::COMMAND, Key::A);
@@ -619,6 +620,21 @@ pub fn type_field(app: &mut App, label: &str, value: &str) {
     app.run_steps(3);
     app.key_press(Key::Enter);
     app.run_steps(4);
+}
+
+/// Opens the form's More sheet when the bar has no room for the field named `label`.
+pub fn open_form_sheet_for(app: &mut App, label: &str) {
+    if app.query_all_by_label(label).next().is_some() {
+        return;
+    }
+    let more = app
+        .query_all(By::new().role(egui::accesskit::Role::Button))
+        .find(|n| n.accesskit_node().label().is_some_and(|l| l.starts_with("More (")))
+        .map(|n| n.rect());
+    if let Some(more) = more {
+        click_at(app, more.center());
+        app.run_steps(8);
+    }
 }
 
 /// The command line's field.

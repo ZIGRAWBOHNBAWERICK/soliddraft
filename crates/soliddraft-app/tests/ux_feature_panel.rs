@@ -35,6 +35,17 @@ fn plate_with_circle() -> (Document, u64) {
 fn open(app: &mut App, action: AppAction) {
     app.state_mut().state.push(action);
     settle(app);
+    // The bar keeps as many fields as fit beside the side column; the rest are in its sheet.
+    let more = app
+        .query_all(By::new().role(egui::accesskit::Role::Button))
+        .find(|n| {
+            n.accesskit_node().label().is_some_and(|l| l.starts_with("More (")) && !app.state().state.form_bar.expanded
+        })
+        .map(|n| n.rect());
+    if let Some(more) = more {
+        ribbon::click_at(app, more.center());
+        settle(app);
+    }
     pointer_to_chrome(app);
 }
 
@@ -375,11 +386,12 @@ fn fillet_preview_tints_new_faces_and_names_the_radius() {
         let round = long + Vec3::new(0.0, -long.y.signum() * (5.0 - r), -(5.0 - r));
         let flat = Vec3::new(0.0, 0.0, TOP);
         let (made, kept) = (pixel(&image, app, round), pixel(&image, app, flat));
-        let accent = theme::accent();
-        case.note(format!("rounded face {made:?}, top face {kept:?}, accent {accent:?}"));
+        // The faces a preview makes carry the preview colour, which is not the frame's accent.
+        let accent = theme::edit_suite::PREVIEW_EDGE;
+        case.note(format!("rounded face {made:?}, top face {kept:?}, preview colour {accent:?}"));
         assert!(
             color_distance(made, accent) + 20.0 < color_distance(kept, accent),
-            "the rounded face reads nearer the accent than the top face: {made:?} vs {kept:?}"
+            "the rounded face reads nearer the preview colour than the top face: {made:?} vs {kept:?}"
         );
 
         // A refused radius shows no body, so the picked edges themselves are marked.

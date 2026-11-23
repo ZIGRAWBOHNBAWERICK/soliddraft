@@ -76,8 +76,13 @@ fn saves() -> usize {
     SAVES.load(std::sync::atomic::Ordering::SeqCst)
 }
 
+/// Clicks the control of that name. The window's own Cancel is in its footer, below a
+/// page's control of the same name, so the upper one is the page's.
 fn click(w: &mut Window, label: &str) {
-    w.get_by_label(label).click();
+    w.get_all_by_label(label)
+        .min_by(|a, b| a.rect().top().total_cmp(&b.rect().top()))
+        .unwrap_or_else(|| panic!("no control named {label}"))
+        .click();
     w.run_steps(3);
 }
 

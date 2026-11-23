@@ -95,9 +95,17 @@ fn strip(app: &mut App, label: &str) {
     settle(app);
 }
 
-/// Turns a pick filter on or off in the bottom bar's Selection filter.
+/// Whether the bottom bar's Selection filter is open.
+fn filter_open(app: &App) -> bool {
+    app.query_all_by_label("Edges & vertices").next().is_some()
+}
+
+/// Turns a pick filter on or off in the bottom bar's Selection filter, and closes it again.
 fn toggle_filter(app: &mut App, label: &str) {
-    if app.query_all_by_label(label).next().is_none() {
+    for _ in 0..2 {
+        if filter_open(app) {
+            break;
+        }
         let filter = app.get_by_label("Selection filter").rect();
         ribbon::click_at(app, filter.center());
         settle(app);
@@ -105,8 +113,11 @@ fn toggle_filter(app: &mut App, label: &str) {
     let checkbox = app.get_by_label(label).rect();
     ribbon::click_at(app, checkbox.center());
     settle(app);
-    app.key_press(Key::Escape);
-    settle(app);
+    if filter_open(app) {
+        let filter = app.get_by_label("Selection filter").rect();
+        ribbon::click_at(app, filter.center());
+        settle(app);
+    }
 }
 
 #[test]
@@ -181,6 +192,8 @@ fn picked_geometry_shows_dimensions_and_starts_rounding_with_the_pick() {
     let mut case = Case::new("options-bar-selection");
     let mut app = launch(ribbon::plate(), STANDARD);
     edit_suite(&mut app);
+    // The bar's whole width, without the side column beside it, for every value of a selection.
+    ribbon::close_tree(&mut app);
     case.run(&mut app, |case, app| {
         ribbon::run_command(app, "zoom_fit");
         settle(app);

@@ -534,7 +534,7 @@ impl ViewportState {
         input.preview = preview;
         input.preview_pickable = preview_pickable;
         input.pick_revision = pick_revision;
-        input.planes = scene.frame(theme::accent(), self.hover_reference, selection);
+        input.planes = scene.frame(theme::reference_plane(), self.hover_reference, selection);
         if let Some(session) = &sketch {
             input.grid = self.grid(rect, &GridPlane::of_sketch(&session.plane));
         }

@@ -37,7 +37,7 @@ fn click_tree_row(app: &mut App, name: &str) {
     let row = app
         .get_all_by_label(name)
         .map(|n| n.rect())
-        .find(|r| !bar(app).intersects(*r))
+        .find(|r| soliddraft_app::options_bar::shown_rect(&app.ctx).is_none_or(|bar| !bar.intersects(*r)))
         .unwrap_or_else(|| panic!("a tree row for {name}"));
     ribbon::click_at(app, row.center());
     settle(app);

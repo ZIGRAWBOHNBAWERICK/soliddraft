@@ -106,6 +106,9 @@ pub struct Palette {
     pub axis_x: Color32,
     pub axis_y: Color32,
     pub axis_z: Color32,
+    /// The origin planes and reference planes. A hue of its own: in the accent's blue a
+    /// plane hid the Z axis that crosses it.
+    pub reference_plane: Color32,
 }
 
 /// Unified spacing and shell dimensions in logical pixels.
@@ -224,6 +227,7 @@ pub mod clear_bench {
         axis_x: rgb(0xd2, 0x3b, 0x3b),
         axis_y: rgb(0x2e, 0x9e, 0x5b),
         axis_z: rgb(0x1f, 0x5f, 0xd0),
+        reference_plane: rgb(0xf5, 0xa5, 0x24),
     };
 
     pub const SPACING: Spacing = Spacing {
@@ -501,6 +505,10 @@ pub fn axis_y() -> Color32 {
 }
 pub fn axis_z() -> Color32 {
     palette().axis_z
+}
+
+pub fn reference_plane() -> Color32 {
+    palette().reference_plane
 }
 /// The colour of an origin axis, in the viewport and the feature tree.
 pub fn axis_color(axis: crate::document::AxisKind) -> Color32 {

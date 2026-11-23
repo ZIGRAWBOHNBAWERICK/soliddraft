@@ -257,9 +257,9 @@ impl FaceFrame {
 
 /// A hole's centre and direction. One authored on a face is built from the local point and
 /// the face's exact frame, so literal inputs stay exact and the centre lies on the plane.
-fn hole_axis(solid: &Solid, body: BodyId, p: &crate::HolePlacement) -> KernelResult<(Point3, Vector3)> {
+fn hole_axis(drilled: &Drilled<'_>, body: BodyId, p: &crate::HolePlacement) -> KernelResult<(Point3, Vector3)> {
     let frame = match p.on_face {
-        Some(on) => FaceFrame::of(solid, body, on.face)?.map(|frame| (on, frame)),
+        Some(on) => drilled.frame(body, on.face)?.map(|frame| (on, frame)),
         None => None,
     };
     let Some((on, frame)) = frame else {
@@ -271,9 +271,28 @@ fn hole_axis(solid: &Solid, body: BodyId, p: &crate::HolePlacement) -> KernelRes
     Ok((Point3(numbers(centre)), Vector3(numbers(into))))
 }
 
+/// The body a hole is drilled in, which gives the frames of the faces its holes start on.
+pub(super) enum Drilled<'a> {
+    Exact(&'a Solid),
+    /// A numerical build. Catallax drills a through hole in a body with tolerant entities
+    /// by a construction of its own, square to the planar faces it crosses.
+    Approximate(&'a crate::approximate::Approximate),
+}
+
+impl Drilled<'_> {
+    fn frame(&self, body: BodyId, face: FaceId) -> KernelResult<Option<FaceFrame>> {
+        match self {
+            Drilled::Exact(solid) => FaceFrame::of(solid, body, face),
+            Drilled::Approximate(approximate) => Ok(approximate
+                .plane(body, face)?
+                .and_then(|(normal, origin, same_sense)| FaceFrame::on(&normal, &origin, same_sense))),
+        }
+    }
+}
+
 pub(super) fn hole(
     target: catallax_recipe::StepId,
-    solid: &Solid,
+    drilled: Drilled<'_>,
     body: BodyId,
     params: &Hole,
 ) -> KernelResult<catallax_recipe::Operation> {
@@ -282,7 +301,7 @@ pub(super) fn hole(
         .iter()
         .enumerate()
         .map(|(i, p)| {
-            let (point, direction) = hole_axis(solid, body, p)?;
+            let (point, direction) = hole_axis(&drilled, body, p)?;
             Ok(HolePlacement { id: ElementId::new(format!("h{i}")).expect("placement id"), point, direction })
         })
         .collect::<KernelResult<Vec<_>>>()?;

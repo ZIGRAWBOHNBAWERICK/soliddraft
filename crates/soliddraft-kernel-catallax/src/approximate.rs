@@ -42,6 +42,10 @@ pub(crate) struct Approximate {
     mass: OnceLock<MassProperties>,
 }
 
+/// A planar face's support plane in exact numbers: its normal, a point on it, and whether
+/// the face's material normal runs with the normal.
+pub(crate) type FacePlane = ([Rational; 3], [Rational; 3], bool);
+
 /// What an approximate body cannot do yet: anything that needs its exact model.
 pub(crate) fn not_yet() -> KernelError {
     // The app shows such a message as Coming soon, and nothing more.
@@ -113,6 +117,46 @@ impl Approximate {
             }
             Geometry::Imported { .. } => BodyAccuracy::Tolerant,
         }
+    }
+
+    /// Names the faces this body shares with `before`, the numerical body it was built
+    /// from, as `before` named them. Catallax keeps a face's key through a construction
+    /// that leaves the face in place, such as a hole drilled through it. Those names came
+    /// from the exact parents `before` was built from, which are not parents here.
+    pub(crate) fn keep_names_of(&mut self, before: &Approximate) {
+        for (key, face) in &self.faces {
+            let Some(origins) = before.faces.get(key).and_then(|old| before.face_origins.get(old)) else { continue };
+            let named = self.face_origins.entry(*face).or_default();
+            named.extend(origins.iter().cloned());
+            named.sort();
+            named.dedup();
+        }
+    }
+
+    /// Whether Catallax built this body numerically, as against a tolerant import.
+    pub(crate) fn numerical(&self) -> bool {
+        matches!(self.geometry, Geometry::Numerical(_))
+    }
+
+    /// The support plane of a planar face of a numerical build, in exact numbers: its
+    /// normal, a point on it, and whether the face's material normal runs with it. A face
+    /// on another surface, or one whose plane is not rational, has none.
+    pub(crate) fn plane(&self, body: BodyId, face: FaceId) -> KernelResult<Option<FacePlane>> {
+        let key = self
+            .faces
+            .iter()
+            .find_map(|(key, id)| (*id == face).then_some(key))
+            .ok_or(KernelError::UnknownFace { body, face })?;
+        let Geometry::Numerical(outcome) = &self.geometry else { return Ok(None) };
+        let Some(face) = outcome.body().definition().faces.iter().find(|f| &f.key == key) else { return Ok(None) };
+        let catallax_shapes::Surface::Plane(plane) = &face.surface else { return Ok(None) };
+        let exact = |x: &catallax_numbers::Real, y: &catallax_numbers::Real, z: &catallax_numbers::Real| {
+            Some([x.as_rational()?, y.as_rational()?, z.as_rational()?])
+        };
+        let normal = exact(&plane.normal.x, &plane.normal.y, &plane.normal.z);
+        let origin = exact(&plane.origin.x, &plane.origin.y, &plane.origin.z);
+        let (Some(normal), Some(origin)) = (normal, origin) else { return Ok(None) };
+        Ok(Some((normal, origin, face.sense == catallax_topology::Sense::Same)))
     }
 
     pub(crate) fn kind(&self) -> BodyKind {

@@ -527,6 +527,107 @@ fn owner_pocket_rim_takes_r2() {
     }
 }
 
+/// Catallax's one model (3.0B) drills a through hole in a body with fitted faces. The
+/// owner's pocket with its rim rounded at R2 by the rolling ball takes a 6 mm hole along
+/// its length, through the two planar end caps and clear of the pocket and the rounds.
+/// The part stays approximate, the rounds keep their names, the hole names its walls, and
+/// the part saves, reopens and exports to STEP. A blind hole there has no construction
+/// and is refused, leaving the part as it was.
+#[test]
+fn owner_pocket_rim_at_r2_takes_a_through_hole_along_its_length() {
+    use soliddraft_app::document::{APPROXIMATE_BODY_NAME, FeatureStatus};
+    fn made_by(doc: &Document, feature: &str) -> Vec<String> {
+        let id = doc.features.iter().find(|f| f.name == feature).expect("the feature is in the tree").id;
+        doc.faces.iter().filter(|face| face.feature == id).map(|face| face.label.clone()).collect()
+    }
+    /// Every feature built, the body is approximate and shown, with `faces` faces.
+    fn standing(part: &Part, faces: usize, stage: &str) {
+        let doc = part.doc();
+        assert!(doc.features.iter().all(|f| f.status == FeatureStatus::Ok), "{stage}: {:?}", doc.features);
+        assert_eq!(doc.body_name(0), APPROXIMATE_BODY_NAME, "{stage}");
+        assert!(doc.triangle_count() > 0, "{stage}: the part shows nothing");
+        assert_eq!(part.topology().faces.len(), faces, "{stage}");
+    }
+
+    let (mut part, rim) = owner_part();
+    let built = part.tool("fillet", json!({"edges": rim, "radius": 2.0}));
+    assert!(!built.is_error, "R2: {}", built.content);
+    let fillet = part.doc().features.last().unwrap().name.clone();
+    let rounds = made_by(part.doc(), &fillet);
+    assert_eq!(rounds.len(), 6, "one round for each rim edge: {rounds:?}");
+    standing(&part, OWNER_FACES + 6, "rounded at R2");
+    let rounded = {
+        let doc = part.doc();
+        doc.mass_properties(doc.features.last().unwrap().id).map(|mass| mass.volume)
+    };
+
+    // An end cap of the boss: one of the two planar faces square to its 76 mm extrusion.
+    let topology = part.topology();
+    let caps: Vec<_> = topology
+        .faces
+        .iter()
+        .filter(|f| part.feature_of(f.id) == "Boss-Extrude1" && f.normal.is_some_and(|n| n.y.abs() > 1.0 - 1e-9))
+        .collect();
+    assert_eq!(caps.len(), 2, "the boss has two planar end caps: {:?}", topology.faces);
+    let at = caps[0].centroid.y;
+    let named = part.doc().named_face(caps[0].id).expect("every face has a name");
+    let cap = format!("{} · {}", part.doc().feature(named.feature).unwrap().name, named.label);
+    // 25 mm left of the middle and 15 mm up: clear of the pocket and of both rounded sides.
+    let drill = |depth: Option<f64>| {
+        let mut hole = json!({"face": cap, "points": [[-25.0, at, 15.0]], "diameter": 6.0});
+        if let Some(depth) = depth {
+            hole["depth"] = json!(depth);
+        }
+        hole
+    };
+
+    // A blind hole has a floor, which the construction for tolerant bodies does not make.
+    let kept = part.doc().model().part_json();
+    let blind = part.tool("hole", drill(Some(10.0)));
+    assert!(blind.is_error, "a blind hole must not build in the rounded part: {}", blind.content);
+    assert_eq!(part.doc().model().part_json(), kept, "a refused hole changed the part");
+    standing(&part, OWNER_FACES + 6, "after the refused blind hole");
+
+    let drilled = part.tool("hole", drill(None));
+    assert!(!drilled.is_error, "through hole: {}", drilled.content);
+    let hole = part.doc().features.last().unwrap().name.clone();
+    assert_eq!(made_by(part.doc(), &hole).len(), 4, "the hole's wall is four quarter cylinders");
+    assert_eq!(made_by(part.doc(), &fillet), rounds, "the rounds keep their names through the hole");
+    standing(&part, OWNER_FACES + 6 + 4, "drilled");
+    let volume = |part: &Part| {
+        let doc = part.doc();
+        let feature = doc.features.iter().find(|f| f.name == hole).unwrap().id;
+        doc.mass_properties(feature).map(|mass| mass.volume)
+    };
+    let at_drilled = volume(&part);
+    // The display sample is faceted, so its volumes are estimates: the drop is the 6 mm
+    // hole's 76 mm length within 2%.
+    if let (Some(before), Some(after)) = (rounded, at_drilled) {
+        let hole = std::f64::consts::PI * 9.0 * 76.0;
+        assert!(((before - after) - hole).abs() < hole * 0.02, "the hole removed {} of {hole}", before - after);
+    }
+
+    let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("fillet-acceptance").join("saved");
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("owner-pocket-rim-r2-drilled.dwprt");
+    let path = path.to_str().unwrap();
+    let saved = part.tool("save", json!({ "path": path }));
+    assert!(!saved.is_error, "save: {}", saved.content);
+    let mut part = Part::new("Reopened");
+    let opened = part.tool("open", json!({ "path": path }));
+    assert!(!opened.is_error, "open: {}", opened.content);
+    standing(&part, OWNER_FACES + 6 + 4, "reopened");
+    assert_eq!(made_by(part.doc(), &fillet), rounds, "the rounds keep their names through save and reopen");
+    assert_eq!(made_by(part.doc(), &hole).len(), 4);
+    if let (Some(before), Some(after)) = (at_drilled, volume(&part)) {
+        assert!((before - after).abs() < before * 1e-9, "the reopened part is the saved one: {before} != {after}");
+    }
+
+    let step = part.export("owner-pocket-rim-r2-drilled");
+    assert!(step.starts_with("exported") && step.contains("23 faces"), "{step}");
+    eprintln!("owner rim drilled: volume {at_drilled:?}; {step}");
+}
+
 #[test]
 fn owner_pocket_rim_takes_the_largest_radius_that_fits() {
     owner_rim(OWNER_LARGEST);

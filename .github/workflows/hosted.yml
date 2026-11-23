@@ -956,6 +956,21 @@ jobs:
           name: browser-assemblies
           path: ${{ runner.temp }}/browser-assemblies
           if-no-files-found: ignore
+      - name: Show lattice and gyroid previews, export only through the certified routes, and refuse an export the preview cannot stand in for, in Chromium
+        timeout-minutes: 20
+        env:
+          CHROME_ARGS: --no-sandbox --enable-unsafe-swiftshader --use-angle=swiftshader
+        run: |
+          python3 -m http.server 8773 --bind 127.0.0.1 --directory target/web-dist > "$RUNNER_TEMP/field-preview-server.log" 2>&1 &
+          server=$!
+          trap 'kill "$server"' EXIT
+          node ci/browser-field-preview.mjs /usr/bin/google-chrome http://127.0.0.1:8773/ "$RUNNER_TEMP/browser-field-preview" site/parts/tray.dwprt ci/fixtures/field-preview/lattice.dwprt ci/fixtures/field-preview/gyroid.dwprt ci/fixtures/field-preview/gyroid-refused-export.dwprt ci/fixtures/field-preview/gyroid-graded-refused.dwprt
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-field-preview
+          path: ${{ runner.temp }}/browser-field-preview
+          if-no-files-found: ignore
 
   msrv:
     needs: select

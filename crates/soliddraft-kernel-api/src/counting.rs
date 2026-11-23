@@ -23,16 +23,56 @@ pub enum Work {
     Mesh(BodyId),
 }
 
+/// Which kind of mesh a request asked for. The screen's unproved display and the meshes
+/// exports are made from are separate routes, so a test can tell which one a window or a
+/// file came from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MeshRoute {
+    /// `preview`, `rendering` and their edges and levels: the screen's mesh.
+    Display,
+    /// `tessellate` and its edges and levels: a mesh within the requested controls.
+    Certified,
+    /// `print_mesh`: the checked mesh a mesh export writes.
+    Print,
+    /// `export_field_stl`, at the field's own or a chosen accuracy: a field's STL.
+    FieldExport,
+}
+
 /// `inner`, with the work asked of it written down.
 pub struct Counting {
     inner: Arc<dyn Kernel>,
     work: Mutex<Vec<(std::thread::ThreadId, Work)>>,
+    routes: Mutex<Vec<(std::thread::ThreadId, BodyId, MeshRoute)>>,
 }
 
 impl Counting {
     /// Wraps `inner`.
     pub fn new(inner: Arc<dyn Kernel>) -> Counting {
-        Counting { inner, work: Mutex::default() }
+        Counting { inner, work: Mutex::default(), routes: Mutex::default() }
+    }
+
+    /// The mesh routes asked for since the last call, oldest first, with their bodies.
+    pub fn take_routes(&self) -> Vec<(BodyId, MeshRoute)> {
+        self.drain_routes().into_iter().map(|(_, body, route)| (body, route)).collect()
+    }
+
+    /// Like [`take_routes`](Self::take_routes), keeping only this thread's requests: a
+    /// background display refinement on another thread is not part of an export made here.
+    pub fn take_routes_here(&self) -> Vec<(BodyId, MeshRoute)> {
+        let thread = std::thread::current().id();
+        self.drain_routes()
+            .into_iter()
+            .filter(|(id, _, _)| *id == thread)
+            .map(|(_, body, route)| (body, route))
+            .collect()
+    }
+
+    fn drain_routes(&self) -> Vec<(std::thread::ThreadId, BodyId, MeshRoute)> {
+        std::mem::take(&mut *self.routes.lock().expect("route log lock"))
+    }
+
+    fn route(&self, body: BodyId, route: MeshRoute) {
+        self.routes.lock().expect("route log lock").push((std::thread::current().id(), body, route));
     }
 
     /// The work asked for since the last call, oldest first.
@@ -311,6 +351,7 @@ impl Kernel for Counting {
     }
 
     fn export_field_stl(&self, body: BodyId) -> KernelResult<crate::FieldExport> {
+        self.route(body, MeshRoute::FieldExport);
         self.inner.export_field_stl(body)
     }
 
@@ -336,35 +377,42 @@ impl Kernel for Counting {
 
     fn print_mesh(&self, body: BodyId, params: &TessellationParams) -> KernelResult<Option<crate::PrintMesh>> {
         self.note(Work::Mesh(body));
+        self.route(body, MeshRoute::Print);
         self.inner.print_mesh(body, params)
     }
 
     fn export_field_stl_at(&self, body: BodyId, accuracy_mm: f64) -> KernelResult<crate::FieldExport> {
+        self.route(body, MeshRoute::FieldExport);
         self.inner.export_field_stl_at(body, accuracy_mm)
     }
 
     fn tessellate(&self, body: BodyId, params: &TessellationParams) -> KernelResult<Mesh> {
         self.note(Work::Mesh(body));
+        self.route(body, MeshRoute::Certified);
         self.inner.tessellate(body, params)
     }
 
     fn tessellate_levels(&self, body: BodyId, levels: &[TessellationParams]) -> KernelResult<Vec<Mesh>> {
         self.note(Work::Mesh(body));
+        self.route(body, MeshRoute::Certified);
         self.inner.tessellate_levels(body, levels)
     }
 
     fn tessellate_edges(&self, body: BodyId, params: &TessellationParams) -> KernelResult<Vec<EdgePolyline>> {
         self.note(Work::Mesh(body));
+        self.route(body, MeshRoute::Certified);
         self.inner.tessellate_edges(body, params)
     }
 
     fn rendering(&self, body: BodyId, params: &TessellationParams) -> KernelResult<Mesh> {
         self.note(Work::Mesh(body));
+        self.route(body, MeshRoute::Display);
         self.inner.rendering(body, params)
     }
 
     fn rendering_edges(&self, body: BodyId, params: &TessellationParams) -> KernelResult<Vec<EdgePolyline>> {
         self.note(Work::Mesh(body));
+        self.route(body, MeshRoute::Display);
         self.inner.rendering_edges(body, params)
     }
 
@@ -374,6 +422,7 @@ impl Kernel for Counting {
 
     fn preview(&self, body: BodyId, params: &TessellationParams) -> KernelResult<Mesh> {
         self.note(Work::Mesh(body));
+        self.route(body, MeshRoute::Display);
         self.inner.preview(body, params)
     }
 
@@ -396,11 +445,13 @@ impl Kernel for Counting {
 
     fn preview_levels(&self, body: BodyId, levels: &[TessellationParams]) -> KernelResult<Vec<Mesh>> {
         self.note(Work::Mesh(body));
+        self.route(body, MeshRoute::Display);
         self.inner.preview_levels(body, levels)
     }
 
     fn preview_edges(&self, body: BodyId, params: &TessellationParams) -> KernelResult<Vec<EdgePolyline>> {
         self.note(Work::Mesh(body));
+        self.route(body, MeshRoute::Display);
         self.inner.preview_edges(body, params)
     }
 

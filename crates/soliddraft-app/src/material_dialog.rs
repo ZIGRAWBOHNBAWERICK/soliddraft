@@ -116,7 +116,7 @@ pub(crate) fn show(ctx: &egui::Context, state: &mut AppState) {
                     ui.label("Default colour");
                     egui::color_picker::color_edit_button_srgb(ui, &mut draft.colour);
                 });
-                egui::ScrollArea::vertical().max_height(340.0).show(ui, |ui| {
+                egui::ScrollArea::vertical().id_salt("custom_material_fields").max_height(300.0).show(ui, |ui| {
                     egui::Grid::new("edit_material_properties").num_columns(2).show(ui, |ui| {
                         for (property, text) in Property::ALL.into_iter().zip(&mut draft.fields) {
                             let label = ui.label(property_label(property));
@@ -150,7 +150,7 @@ pub(crate) fn show(ctx: &egui::Context, state: &mut AppState) {
             } else {
                 ui.add(egui::TextEdit::singleline(&mut dialog.search).hint_text("Find a material"));
                 let search = dialog.search.to_lowercase();
-                egui::ScrollArea::vertical().max_height(150.0).show(ui, |ui| {
+                egui::ScrollArea::vertical().id_salt("material_catalog").max_height(130.0).show(ui, |ui| {
                     for (library, material) in dialog.catalog.materials() {
                         if !format!("{} {} {}", material.name, material.category, library.name)
                             .to_lowercase()
@@ -187,7 +187,7 @@ pub(crate) fn show(ctx: &egui::Context, state: &mut AppState) {
                         let c = appearance.base_color;
                         ui.colored_label(egui::Color32::from_rgb(c.r, c.g, c.b), format!("●  Default colour  {c}"));
                     }
-                    egui::ScrollArea::vertical().max_height(235.0).show(ui, |ui| {
+                    egui::ScrollArea::vertical().id_salt("material_properties").max_height(200.0).show(ui, |ui| {
                         egui::Grid::new("material_properties").num_columns(2).show(ui, |ui| {
                             for property in Property::ALL {
                                 ui.label(property_label(property));

@@ -13,11 +13,13 @@ await page.eval(() => {
     const at = { clientX: x, clientY: y, bubbles: true, cancelable: true, pointerId: 1,
       pointerType: 'mouse', isPrimary: true, button: 0 };
     canvas.dispatchEvent(new PointerEvent('pointermove', { ...at, buttons: 0 }));
-    canvas.dispatchEvent(new PointerEvent('pointerdown', { ...at, buttons: 1 }));
     return new Promise(resolve => setTimeout(() => {
-      canvas.dispatchEvent(new PointerEvent('pointerup', { ...at, buttons: 0 }));
-      resolve(true);
-    }, 50));
+      canvas.dispatchEvent(new PointerEvent('pointerdown', { ...at, buttons: 1 }));
+      setTimeout(() => {
+        canvas.dispatchEvent(new PointerEvent('pointerup', { ...at, buttons: 0 }));
+        resolve(true);
+      }, 150);
+    }, 150));
   };
 
   const click = HTMLInputElement.prototype.click;
@@ -84,8 +86,10 @@ async function selectState(name, bodies) {
   const item = `Display state: ${name ?? 'Default'}`;
   for (let attempt = 0; attempt < 2; attempt++) {
     if (!(await controls())[item]) await click('Display state');
-    if (await until(controls, value => Boolean(value[item]), `${item} did not open`)) await click(item);
+    await until(controls, value => Boolean(value[item]), `${item} did not open`);
     await page.wait(250);
+    await click(item);
+    await page.wait(400);
     const current = await viewport();
     if (current?.display_state === name && current.visible_meshes === bodies) return;
   }

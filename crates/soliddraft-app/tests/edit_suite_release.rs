@@ -644,7 +644,7 @@ fn status_marks_follow_the_changed_feature_and_unfinished_exports_leave_files_al
                 json!({"path": destination}),
                 &caller,
             );
-            assert!(output.is_error && output.content.contains("proof"), "{tool}: {}", output.content);
+            assert!(output.is_error && output.content.contains("still working"), "{tool}: {}", output.content);
             assert_eq!(std::fs::read(destination).unwrap(), b"existing export");
         }
         case.frame(app, "pending");
@@ -672,7 +672,7 @@ fn status_marks_follow_the_changed_feature_and_unfinished_exports_leave_files_al
             assert!(
                 output.is_error
                     && output.content.contains("Boss-Extrude2")
-                    && output.content.contains("requires a proved result"),
+                    && output.content.contains("Export needs every feature built."),
                 "{tool}: {}",
                 output.content
             );

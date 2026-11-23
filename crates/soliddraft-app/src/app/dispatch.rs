@@ -699,6 +699,7 @@ impl SolidDraftApp {
                         depth: h.depth,
                         tip: h.tip,
                         head: h.head,
+                        thread: h.thread.clone(),
                     }),
                     FeatureKind::Pattern(p) => EditorParams::Pattern(p.clone()),
                     FeatureKind::ReferencePlane(p) => EditorParams::ReferencePlane(p.clone()),
@@ -963,7 +964,28 @@ impl SolidDraftApp {
                         }
                         (EditorParams::Hole(h), Some(Selection::Face(f))) => {
                             match self.state.doc.face_ref(f) {
-                                Some(r) => h.face = Some(r),
+                                Some(r) => {
+                                    // A new hole's first face click also places its first
+                                    // hole where the face was clicked, to a tenth of a mm.
+                                    let first = h.face.is_none() && h.points == [crate::sketch::P2::ZERO];
+                                    h.face = Some(r);
+                                    if first
+                                        && let (Some(at), Some(plane)) =
+                                            (self.state.hover_point, self.state.doc.face_plane(f))
+                                    {
+                                        let at = soliddraft_kernel_api::Vec3::new(
+                                            f64::from(at.x),
+                                            f64::from(at.y),
+                                            f64::from(at.z),
+                                        );
+                                        let d = at - plane.origin;
+                                        let tenth = |v: f64| (v * 10.0).round() / 10.0 + 0.0;
+                                        h.points[0] = crate::sketch::P2::new(
+                                            tenth(d.dot(plane.x_dir)),
+                                            tenth(d.dot(plane.y_dir())),
+                                        );
+                                    }
+                                }
                                 None => e.error = Some("Holes start on a planar face".into()),
                             }
                             return;

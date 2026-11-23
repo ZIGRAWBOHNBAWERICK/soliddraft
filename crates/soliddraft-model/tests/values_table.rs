@@ -276,8 +276,15 @@ fn a_hole_head_takes_globals_and_formulas() {
     let face = doc.face_ref(top.id).unwrap();
     let head = Some(HoleHead::Counterbore { diameter: 8.0, depth: 2.0 });
     let points = vec![P2::new(0.0, 0.0)];
-    let hole =
-        HoleFeature { face, points, diameter: 4.0, depth: HoleDepth::Blind { depth: 6.0 }, tip: HoleTip::Flat, head };
+    let hole = HoleFeature {
+        face,
+        points,
+        diameter: 4.0,
+        depth: HoleDepth::Blind { depth: 6.0 },
+        tip: HoleTip::Flat,
+        head,
+        thread: None,
+    };
     add(&mut doc, FeatureKind::Hole(hole));
     let table = doc.values_table();
     assert_eq!(row(&table, "Hole1.HeadDiameter").values, [Some(8.0)]);

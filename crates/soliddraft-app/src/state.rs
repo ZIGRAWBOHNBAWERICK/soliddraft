@@ -1751,7 +1751,7 @@ impl AppState {
             return Err("This answer is within a stated bound. Export requires a proved result.".into());
         }
         if self.doc.proof_pending() {
-            return Err("Proof is pending for the current edit. Wait for proof before exporting.".into());
+            return Err("The current edit is still working. Export waits for it.".into());
         }
         if proof.failed {
             let reason = self
@@ -1769,10 +1769,10 @@ impl AppState {
                     })
                 })
                 .unwrap_or_else(|| "The current edit was refused".into());
-            return Err(format!("Export requires a proved result. {reason}"));
+            return Err(format!("Export needs every feature built. {reason}"));
         }
         if !proof.current_proved_model() {
-            return Err("The current result has not been proved. Wait for proof before exporting.".into());
+            return Err("The current edit is still working. Export waits for it.".into());
         }
         Ok(())
     }

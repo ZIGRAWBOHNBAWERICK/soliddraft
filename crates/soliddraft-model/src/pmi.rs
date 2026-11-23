@@ -15,6 +15,12 @@
 //! An item whose face is gone, or whose faces no longer fit it (a diameter on a face
 //! that became a plane), is not moved to another face and not dropped. It stays in the
 //! part with its problem, and applies again when the face comes back.
+//!
+//! A threaded hole states its own thread: each hole feature with a thread adds an item,
+//! the diameter of its walls with the thread's designation ([`PmiRow::feature`]). The
+//! part does not store that item. It follows the hole: edit the thread and the item
+//! changes, take it out and the item goes. It reaches a STEP file and a drawing like
+//! any other.
 
 use serde::{Deserialize, Serialize};
 use soliddraft_kernel_api::pmi::{
@@ -44,12 +50,22 @@ pub struct PmiRow {
     pub located: Vec<Located>,
     /// Why the item does not apply as it stands, for people.
     pub problem: Option<String>,
+    /// The threaded hole that states the item, which the part does not store: change
+    /// it through that hole.
+    pub feature: Option<FeatureId>,
+    /// How deep a thread goes from the face its hole starts on, for a thread that does
+    /// not go through.
+    pub depth: Option<f64>,
 }
 
 impl PmiRow {
-    /// The item as a drawing writes it, such as `Ø8 H7`.
+    /// The item as a drawing writes it, such as `Ø8 H7` or `M6x1-6H DEEP 12`.
     pub fn callout(&self) -> String {
-        self.item.callout(&self.measured)
+        let callout = self.item.callout(&self.measured);
+        match self.depth {
+            Some(depth) => format!("{callout} DEEP {}", soliddraft_kernel_api::pmi::length_text(depth)),
+            None => callout,
+        }
     }
 
     /// True when the item applies: its faces are there and, for a dimension, measure.
@@ -137,20 +153,78 @@ impl Document {
         faces.iter().map(|face| self.face_ref(*face)).collect()
     }
 
+    /// The items the part's threaded holes state: the diameter of each hole feature's
+    /// walls with its thread's designation, the hole that states it, and how deep the
+    /// thread goes when it does not go through. A suppressed or failed hole states none.
+    pub fn thread_items(&self) -> Vec<(PmiItem<FaceRef>, FeatureId, Option<f64>)> {
+        let mut taken = self.pmi.clone();
+        let mut out = Vec::new();
+        for feature in self.features() {
+            let FeatureKind::Hole(hole) = &feature.kind else { continue };
+            let Some(thread) = &hole.thread else { continue };
+            if self.status(feature.id) != Some(&crate::FeatureStatus::Ok) {
+                continue;
+            }
+            let through = matches!(hole.depth, soliddraft_kernel_api::HoleDepth::Through) && thread.length.is_none();
+            let depth = match (thread.length, hole.depth) {
+                (Some(length), _) => Some(length),
+                (None, soliddraft_kernel_api::HoleDepth::Blind { depth }) => Some(depth),
+                (None, soliddraft_kernel_api::HoleDepth::Through) => None,
+            };
+            let item = PmiItem {
+                id: taken.free_name(&format!("{} thread", feature.name.replace('/', " "))),
+                kind: PmiKind::Size {
+                    size: soliddraft_kernel_api::pmi::SizeKind::Diameter,
+                    features: (0..hole.points.len()).map(|i| vec![self.hole_wall(feature, i)]).collect(),
+                    tolerance: Tolerance::None,
+                    through,
+                    thread: Some(thread.designation()),
+                    nominal: None,
+                },
+            };
+            taken.items.push(item.clone());
+            out.push((item, feature.id, depth));
+        }
+        out
+    }
+
     /// Every item with the body faces it stands on, a dimension's measured value, and
-    /// what is wrong with it if it does not apply.
+    /// what is wrong with it if it does not apply. The items the part stores come first,
+    /// then those its threaded holes state.
     pub fn pmi_rows(&self) -> Vec<PmiRow> {
         let body = self.body();
-        let topology = body.and_then(|body| self.view_of(body).ok());
+        let topology = body.map(|body| self.view_of(body));
         let names = self.name_map();
-        let mut rows: Vec<PmiRow> = Vec::with_capacity(self.pmi.items.len());
-        for item in &self.pmi.items {
-            let mut row =
-                PmiRow { item: item.clone(), on_body: None, measured: Vec::new(), located: Vec::new(), problem: None };
+        let stated = self.thread_items();
+        let mut rows: Vec<PmiRow> = Vec::with_capacity(self.pmi.items.len() + stated.len());
+        let items = self
+            .pmi
+            .items
+            .iter()
+            .map(|item| (item, None, None))
+            .chain(stated.iter().map(|(item, feature, depth)| (item, Some(*feature), *depth)));
+        for (item, feature, depth) in items {
+            let mut row = PmiRow {
+                item: item.clone(),
+                on_body: None,
+                measured: Vec::new(),
+                located: Vec::new(),
+                problem: None,
+                feature,
+                depth,
+            };
             let (Some(body), Some(topology)) = (body, topology.as_ref()) else {
                 row.problem = Some("The part has no body.".to_owned());
                 rows.push(row);
                 continue;
+            };
+            let topology = match topology {
+                Ok(topology) => topology,
+                Err(error) => {
+                    row.problem = Some(format!("The part's faces could not be read: {error}"));
+                    rows.push(row);
+                    continue;
+                }
             };
             let view = View { topology };
             let resolved = item.try_map_features(|feature| {

@@ -1,0 +1,5 @@
+sketch {"plane":"top","offset":-5,"shapes":[{"shape":"rectangle","center":[0,0,-5],"width":20,"height":20}]}
+extrude {"sketch":"Sketch1","depth":10,"flip":false}
+gyroid {"kind":"network","period":10,"level":0,"accuracy":0.5,"min_detail":0.5}
+grade_field {"feature":"Gyroid1","axis":"z","from":-5,"to":5,"start":0,"end":0.9}
+save {"path":"gyroid-graded-refused.dwprt"}

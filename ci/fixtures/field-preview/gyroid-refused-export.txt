@@ -1,0 +1,4 @@
+sketch {"plane":"top","offset":-5,"shapes":[{"shape":"rectangle","center":[0,0,-5],"width":20,"height":20}]}
+extrude {"sketch":"Sketch1","depth":20,"flip":false}
+gyroid {"kind":"network","period":10,"level":0.5,"accuracy":2,"min_detail":2}
+save {"path":"gyroid-refused-export.dwprt"}

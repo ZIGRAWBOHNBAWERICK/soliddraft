@@ -868,7 +868,7 @@ jobs:
         run: |
           export PATH="$RUNNER_TEMP/browser-tools/node_modules/.bin:$PATH"
           export CHROME_DEVTOOLS_AXI_MCP_PATH="$RUNNER_TEMP/browser-tools/node_modules/chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js"
-          python3 -m http.server 8773 --bind 127.0.0.1 --directory target/web-dist > "$RUNNER_TEMP/refusal-assistant-server.log" 2>&1 &
+          python3 -m http.server 8774 --bind 127.0.0.1 --directory target/web-dist > "$RUNNER_TEMP/refusal-assistant-server.log" 2>&1 &
           server=$!
           trap 'chrome-devtools-axi stop; kill "$server"' EXIT
           if ! chrome-devtools-axi open about:blank; then
@@ -876,7 +876,7 @@ jobs:
             chrome-devtools-axi open about:blank
           fi
           chrome-devtools-axi emulate --viewport 1400x813x1
-          chrome-devtools-axi open 'http://127.0.0.1:8773/'
+          chrome-devtools-axi open 'http://127.0.0.1:8774/'
           chrome-devtools-axi run < ci/browser-refusal-assistant.js
       - name: Detect page-thread regressions in bracket edits in Chromium
         env:
@@ -973,6 +973,21 @@ jobs:
         with:
           name: browser-assemblies
           path: ${{ runner.temp }}/browser-assemblies
+          if-no-files-found: ignore
+      - name: Show lattice and gyroid previews, export only through the certified routes, and refuse an export the preview cannot stand in for, in Chromium
+        timeout-minutes: 20
+        env:
+          CHROME_ARGS: --no-sandbox --enable-unsafe-swiftshader --use-angle=swiftshader
+        run: |
+          python3 -m http.server 8773 --bind 127.0.0.1 --directory target/web-dist > "$RUNNER_TEMP/field-preview-server.log" 2>&1 &
+          server=$!
+          trap 'kill "$server"' EXIT
+          node ci/browser-field-preview.mjs /usr/bin/google-chrome http://127.0.0.1:8773/ "$RUNNER_TEMP/browser-field-preview" site/parts/tray.dwprt ci/fixtures/field-preview/lattice.dwprt ci/fixtures/field-preview/gyroid.dwprt ci/fixtures/field-preview/gyroid-refused-export.dwprt ci/fixtures/field-preview/gyroid-graded-refused.dwprt
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-field-preview
+          path: ${{ runner.temp }}/browser-field-preview
           if-no-files-found: ignore
 
   msrv:

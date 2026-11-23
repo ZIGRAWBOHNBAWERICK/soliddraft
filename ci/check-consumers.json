@@ -39,6 +39,9 @@
     "ci/browser-assemblies.mjs": [
       "web"
     ],
+    "ci/browser-field-preview.mjs": [
+      "web"
+    ],
     "ci/browser-manufacturing-information.mjs": [
       "web"
     ],
@@ -142,6 +145,33 @@
       "web"
     ],
     "ci/fixtures/universal-joint/shaft.dwprt": [
+      "web"
+    ],
+    "ci/fixtures/field-preview/README.md": [
+      "web"
+    ],
+    "ci/fixtures/field-preview/gyroid.dwprt": [
+      "web"
+    ],
+    "ci/fixtures/field-preview/gyroid.txt": [
+      "web"
+    ],
+    "ci/fixtures/field-preview/gyroid-graded-refused.dwprt": [
+      "web"
+    ],
+    "ci/fixtures/field-preview/gyroid-graded-refused.txt": [
+      "web"
+    ],
+    "ci/fixtures/field-preview/gyroid-refused-export.dwprt": [
+      "web"
+    ],
+    "ci/fixtures/field-preview/gyroid-refused-export.txt": [
+      "web"
+    ],
+    "ci/fixtures/field-preview/lattice.dwprt": [
+      "web"
+    ],
+    "ci/fixtures/field-preview/lattice.txt": [
       "web"
     ],
     "ci/check-same-file.py": [

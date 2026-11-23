@@ -334,7 +334,8 @@ impl Document {
             });
         }
 
-        let mut out = if format == soliddraft_exchange::Format::Step && !self.pmi.is_empty() {
+        let stated = !self.pmi.is_empty() || !self.thread_items().is_empty();
+        let mut out = if format == soliddraft_exchange::Format::Step && stated {
             self.export_step_with_pmi(body)?
         } else {
             soliddraft_exchange::export(self.kernel.as_ref(), body, &self.name, format, &tolerance)

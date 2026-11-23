@@ -258,14 +258,16 @@ pub(crate) fn show_with_error_action<K: Copy + Eq + Hash + std::fmt::Debug>(
             egui::Layout::right_to_left(Align::Center),
             |ui| {
                 if form.can_confirm {
-                    response.confirm = ui
+                    let ok = ui
                         .add_sized(
                             vec2(70.0, FIELD_HEIGHT),
                             egui::Button::new(egui::RichText::new("OK").color(theme::on_accent()))
                                 .fill(theme::accent()),
                         )
-                        .on_hover_text("OK (Enter)")
-                        .clicked();
+                        .on_hover_text("OK (Enter)");
+                    #[cfg(target_arch = "wasm32")]
+                    crate::web::show_control("Form OK", ok.rect);
+                    response.confirm = ok.clicked();
                 }
                 response.cancel = ui
                     .add_sized(vec2(70.0, FIELD_HEIGHT), egui::Button::new("Cancel"))

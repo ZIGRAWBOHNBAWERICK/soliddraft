@@ -107,6 +107,7 @@ fn annotate(doc: &mut Document) {
             features: vec![bore.clone()],
             tolerance: Tolerance::parse("H7").unwrap(),
             through: true,
+            thread: None,
             nominal: None,
         },
     );

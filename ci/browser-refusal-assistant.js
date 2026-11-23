@@ -4,7 +4,7 @@
 function check(value, message) { if (!value) throw new Error(message); }
 const NEW_PART = [124, 143], RECTANGLE = [630, 52], FILE = [122, 15], NEW_FROM_MENU = [138, 42];
 const TOP_EDGE = [923, 406], TOP_FACE = [950, 310], FILLET_ROW = [380, 229];
-const COMMAND_LINE = [920, 797], OK = [1355, 53], CLOSE_DETAILS = [347, 92];
+const COMMAND_LINE = [920, 797], CLOSE_DETAILS = [347, 92];
 check(await page.eval(() => location.search === '' && innerWidth === 1400 && innerHeight === 813),
   'Open a fresh 1400 x 813 SolidDraft page at /');
 await page.wait('#status.hidden', 60000);
@@ -77,6 +77,10 @@ const features = count => until(part, doc => doc?.extension === '.dwprt' && doc.
 const idle = () => until(() => shown('shown_build'), build => build && !build.pending && !build.reading, 'The build did not finish');
 const center = point => [point.x, point.y];
 const controls = () => shown('shown_controls');
+async function confirmForm() {
+  const form = await until(controls, drawn => drawn?.['Form OK'], 'The form did not draw its OK button');
+  await click(center(form['Form OK']));
+}
 async function pick(point, matches, what) {
   // The viewport reads the pick under the mouse back from the renderer.
   await page.eval(`sdMove(${point[0]}, ${point[1]})`);
@@ -145,7 +149,7 @@ await showRadius(radius);
 
 await command('edit_feature');
 await typeRadius('5');
-await click(OK);
+await confirmForm();
 await idle();
 await showRadius('5');
 await page.press('Control+s');
@@ -165,8 +169,7 @@ await page.press('z');
 await page.wait(500);
 const face = await pick(TOP_FACE, selected => selected === 'Boss-Extrude1 · End cap', 'Pick the top face');
 await command('reference_plane');
-await until(() => shown('shown_options'), options => options === null, 'Open the Reference Plane form');
-await click(OK);
+await confirmForm();
 await features(3);
 await idle();
 console.log(`Accepted R${radius}, edited it to R5, saved and reopened it, and added a plane on ${face}`);

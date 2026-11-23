@@ -1,0 +1,208 @@
+use super::{Change, GRAPHICS, Preferences, ui};
+use crate::graphics::{CurrentView, CurvedSurfaces, GraphicsPreset, SectionHatch};
+use crate::viewport::{
+    look::{Preset, Tier},
+    render::DisplayMode,
+};
+
+pub(super) const CONTROLS: &[(&str, &str)] = &[
+    ("preset", "Graphics preset: Performance, Quality, Custom"),
+    ("curves", "Curved surfaces: Coarse, Normal, Fine, Ultra"),
+    ("samples", "Anti-aliasing"),
+    ("supersampling", "Supersampling when the view is still"),
+    ("grid", "Show grid"),
+    ("shadow", "Ground shadow"),
+    ("perspective", "Perspective"),
+    ("occlusion", "Ambient occlusion"),
+    ("shadow_follows", "Ground shadow follows the model"),
+    ("display", "Visual style"),
+    ("fov", "Field of view"),
+    ("angles", "View angles"),
+    ("vertices", "Vertex markers"),
+    ("measurement", "Quick measurement"),
+    ("fps", "Frame rate"),
+    ("threads", "Cosmetic thread markings"),
+    ("halo", "Halo under sketch curves"),
+    ("hatch", "Section hatch style"),
+    ("tint", "Tint new surface in a preview"),
+    ("removal", "Show removed material in red"),
+    ("hidden", "Hidden edges of selected bodies"),
+    ("references", "Reference geometry through bodies"),
+    ("follow_grid", "Grid follows the view"),
+    ("surface_analysis", "Single surface analysis"),
+    ("gpu", "GPU and renderer"),
+];
+
+fn row<R>(ui: &mut egui::Ui, highlight: Option<&str>, id: &str, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
+    ui::control(highlight == Some(id), ui, add)
+}
+
+fn toggle(ui: &mut egui::Ui, highlight: Option<&str>, id: &str, label: &str, value: &mut bool) {
+    row(ui, highlight, id, |ui| ui.checkbox(value, label));
+}
+
+pub(super) fn show(p: &mut Preferences, ui: &mut egui::Ui) {
+    ui.heading(super::page(GRAPHICS).unwrap().path());
+    let highlight = p.highlight.as_deref();
+    let device = &p.graphics_device;
+    let mut graphics = p.graphics;
+    let mut view = p.current_view;
+    row(ui, highlight, "preset", |ui| {
+        ui.label("Graphics preset");
+        ui.horizontal_wrapped(|ui| {
+            for preset in GraphicsPreset::ALL {
+                if ui.selectable_label(graphics.preset == preset, preset.label()).clicked() {
+                    graphics.choose_preset(preset, device);
+                }
+            }
+        });
+    });
+    row(ui, highlight, "curves", |ui| {
+        let current = graphics.curved_surfaces;
+        ui.label("Curved surfaces");
+        ui.horizontal_wrapped(|ui| {
+            if ui.selectable_label(current.is_none(), "Use part setting").clicked() && current.is_some() {
+                graphics.curved_surfaces = None;
+                graphics.preset = GraphicsPreset::Custom;
+            }
+            for choice in CurvedSurfaces::ALL {
+                if ui.selectable_label(current == Some(choice), choice.label()).clicked() && current != Some(choice) {
+                    graphics.curved_surfaces = Some(choice);
+                    graphics.preset = GraphicsPreset::Custom;
+                }
+            }
+        });
+        ui.label(
+            current.map_or_else(|| "Follow the display quality saved with each part.".into(), |c| c.description()),
+        );
+    });
+
+    ui.separator();
+    ui.heading("Edges and shading");
+    row(ui, highlight, "samples", |ui| {
+        ui.label("Anti-aliasing");
+        for count in [1, 2, 4, 8, 16] {
+            let supported = device.samples.contains(&count);
+            let label = if count == 1 { "Off".into() } else { format!("{count}× MSAA") };
+            let text = if supported { label } else { format!("{label} · Not available on this GPU") };
+            if ui.add_enabled(supported, egui::Button::selectable(graphics.samples == count, text)).clicked()
+                && graphics.samples != count
+            {
+                graphics.samples = count;
+                graphics.preset = GraphicsPreset::Custom;
+            }
+        }
+        let active = device.active_samples;
+        if !device.samples.contains(&graphics.samples) {
+            ui.label(format!("Saved level is unavailable on this GPU. Using {active}×."));
+        } else if active != graphics.samples {
+            ui.label(format!("Restart SolidDraft to use this level. Active level is {active}×."));
+        }
+    });
+    row(ui, highlight, "supersampling", |ui| {
+        let caption = if cfg!(target_arch = "wasm32") {
+            "Supersampling when the view is still · Desktop only"
+        } else if !device.supersampling() {
+            "Supersampling when the view is still · Not available with this renderer"
+        } else {
+            "Supersampling when the view is still"
+        };
+        if ui
+            .add_enabled(device.supersampling(), egui::Checkbox::new(&mut graphics.still_supersampling, caption))
+            .changed()
+        {
+            graphics.preset = GraphicsPreset::Custom;
+        }
+    });
+
+    ui.separator();
+    ui.heading("Current view");
+    current_view_controls(ui, &mut view, p.view_preset, device.tier, p.camera_editable, highlight);
+
+    ui.separator();
+    ui.heading("In the view");
+    toggle(ui, highlight, "angles", "View angles", &mut graphics.show_view_angles);
+    toggle(ui, highlight, "vertices", "Vertex markers", &mut graphics.show_vertex_markers);
+    toggle(ui, highlight, "measurement", "Quick measurement", &mut graphics.quick_measurement);
+    toggle(ui, highlight, "fps", "Frame rate and details", &mut graphics.show_frame_rate);
+
+    ui.separator();
+    ui.heading("Display aids");
+    toggle(ui, highlight, "threads", "Cosmetic thread markings", &mut graphics.cosmetic_threads);
+    toggle(ui, highlight, "halo", "Halo under sketch curves", &mut graphics.sketch_halo);
+    row(ui, highlight, "hatch", |ui| {
+        egui::ComboBox::from_label("Section hatch style").selected_text(graphics.section_hatch.label()).show_ui(
+            ui,
+            |ui| {
+                for hatch in SectionHatch::ALL {
+                    ui.selectable_value(&mut graphics.section_hatch, hatch, hatch.label());
+                }
+            },
+        );
+    });
+    toggle(ui, highlight, "tint", "Tint new surface in a preview", &mut graphics.tint_preview);
+    toggle(ui, highlight, "removal", "Show removed material in red", &mut graphics.red_removal);
+    toggle(ui, highlight, "hidden", "Hidden edges of selected bodies", &mut graphics.hidden_selected_edges);
+    toggle(ui, highlight, "references", "Reference geometry through bodies", &mut graphics.xray_references);
+    toggle(ui, highlight, "follow_grid", "Grid follows the view", &mut graphics.view_aligned_grid);
+    row(ui, highlight, "surface_analysis", |ui| {
+        ui.add_enabled(false, egui::Button::new("Single surface analysis · Coming soon"))
+            .on_disabled_hover_text("Single surface analysis needs certified curvature samples for the selected face.");
+    });
+
+    ui.separator();
+    ui.heading("This computer");
+    row(ui, highlight, "gpu", |ui| {
+        ui.label(format!("GPU: {}", device.gpu));
+        ui.label(format!("Renderer: {}", device.renderer));
+    });
+    if graphics != p.graphics {
+        p.graphics = graphics;
+        p.changes.push(Change::Graphics(graphics));
+    }
+    if view != p.current_view {
+        p.current_view = view;
+        p.display = view.references;
+        p.changes.push(Change::CurrentView(view));
+    }
+}
+
+pub(crate) fn current_view_controls(
+    ui: &mut egui::Ui,
+    view: &mut CurrentView,
+    preset: Preset,
+    tier: Tier,
+    camera_editable: bool,
+    highlight: Option<&str>,
+) {
+    toggle(ui, highlight, "grid", "Show grid", &mut view.references.show_grid);
+    toggle(ui, highlight, "shadow", "Ground shadow", &mut view.references.show_floor);
+    row(ui, highlight, "perspective", |ui| {
+        ui.add_enabled(camera_editable, egui::Checkbox::new(&mut view.perspective, "Perspective"))
+            .on_disabled_hover_text("The sketch uses an orthographic view while you edit it.");
+    });
+    row(ui, highlight, "occlusion", |ui| {
+        let supported = tier.has_ambient_occlusion();
+        let mut enabled =
+            supported && view.lighting.ambient_occlusion.unwrap_or_else(|| preset.look(tier).ambient_occlusion > 0.0);
+        let label = if supported { "Ambient occlusion" } else { "Ambient occlusion · Not available on this GPU" };
+        if ui.add_enabled(supported, egui::Checkbox::new(&mut enabled, label)).changed() {
+            view.lighting.ambient_occlusion = Some(enabled);
+        }
+    });
+    toggle(ui, highlight, "shadow_follows", "Ground shadow follows the model", &mut view.lighting.shadow_follows_model);
+    row(ui, highlight, "display", |ui| {
+        egui::ComboBox::from_label("Visual style").selected_text(view.display.label()).show_ui(ui, |ui| {
+            for display in DisplayMode::ALL {
+                ui.selectable_value(&mut view.display, display, display.label());
+            }
+        });
+    });
+    row(ui, highlight, "fov", |ui| {
+        ui.add_enabled(
+            camera_editable && view.perspective,
+            egui::Slider::new(&mut view.field_of_view, 15.0..=90.0).suffix("°").text("Field of view"),
+        )
+        .on_disabled_hover_text("Turn on Perspective to change the field of view.");
+    });
+}

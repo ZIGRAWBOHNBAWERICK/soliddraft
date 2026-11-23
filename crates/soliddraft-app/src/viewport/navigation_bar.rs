@@ -1,6 +1,12 @@
 //! Edit Suite navigation and scene favourites over the viewport.
 
-use super::{ViewportEvents, camera::Camera, render::DisplayMode, scenes::Scene};
+use super::{
+    ViewportEvents,
+    camera::Camera,
+    look::{Preset, Tier},
+    scenes::Scene,
+};
+use crate::graphics::CurrentView;
 use crate::{
     icons::{self, Icon},
     settings::{self, ReferenceDisplay},
@@ -34,7 +40,9 @@ impl NavigationBar {
         parent: &mut egui::Ui,
         viewport: Rect,
         camera: &mut Camera,
-        display: DisplayMode,
+        view: CurrentView,
+        preset: Preset,
+        tier: Tier,
         scene: Scene,
         references: &mut ReferenceDisplay,
         all_dimensions: &mut bool,
@@ -76,14 +84,23 @@ impl NavigationBar {
                             }
                             ui.separator();
                             let display_button = button(ui, "Display style", Icon::Display, false, false, true);
-                            egui::Popup::menu(&display_button).align(RectAlign::TOP_END).show(|ui| {
-                                for style in DisplayMode::ALL {
-                                    if ui.selectable_label(display == style, style.label()).clicked() {
-                                        events.set_display = Some(style);
-                                        ui.close();
+                            egui::Popup::menu(&display_button)
+                                .align(RectAlign::TOP_END)
+                                .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+                                .show(|ui| {
+                                    let mut draft = view;
+                                    crate::preferences::current_view_controls(
+                                        ui,
+                                        &mut draft,
+                                        preset,
+                                        tier,
+                                        sketch_dimensions.is_none(),
+                                        None,
+                                    );
+                                    if draft != view {
+                                        events.actions.push(AppAction::SetCurrentView(draft));
                                     }
-                                }
-                            });
+                                });
                             let scene_button = if compact {
                                 button(ui, "Scene", Icon::Material, false, false, true)
                             } else {

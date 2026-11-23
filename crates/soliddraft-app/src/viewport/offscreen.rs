@@ -88,6 +88,7 @@ impl Offscreen {
             pixels_per_point: 1.0,
             display: Default::default(),
             preset: Default::default(),
+            controls: Default::default(),
             // Pictures are kept in files and shown in previews, so they take the
             // light backdrop whatever mode the window is in.
             backdrop: [egui::Color32::from_rgb(0xf2, 0xf4, 0xf7), egui::Color32::from_rgb(0xd8, 0xdf, 0xe8)].into(),

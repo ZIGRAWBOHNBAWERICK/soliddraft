@@ -1432,6 +1432,9 @@ impl SolidDraftApp {
                 self.state.viewport.camera.fit_framed(bounds);
             }
             AppAction::SetDisplay(d) => self.state.active_viewport_mut().display = d,
+            AppAction::SetCurrentView(view) => {
+                let _ = self.state.set_current_view(view);
+            }
             AppAction::SetPreset(p) => {
                 let viewport = self.state.active_viewport_mut();
                 // Realistic leaves edges off; switching to or from it moves the shaded

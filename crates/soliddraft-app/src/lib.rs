@@ -27,6 +27,7 @@ pub mod file;
 pub mod fillet_collect;
 pub mod form_bar;
 pub mod geometry_message;
+pub mod graphics;
 mod grid;
 pub mod icons;
 pub mod import;

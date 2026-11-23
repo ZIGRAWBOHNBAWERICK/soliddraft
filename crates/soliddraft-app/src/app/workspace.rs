@@ -120,15 +120,26 @@ impl SolidDraftApp {
     pub fn new(cc: &eframe::CreationContext<'_>, doc: Document, automation: Automation) -> Self {
         crate::settings::capture_install_kind();
         theme::install(&cc.egui_ctx, automation.theme.unwrap_or_else(|| crate::settings::appearance().theme));
-        if let Some(rs) = cc.wgpu_render_state.as_ref() {
-            let tier = Tier::of(rs.adapter.get_info().backend);
-            let renderer = ViewportRenderer::new(&rs.device, &rs.queue, rs.target_format, tier);
+        let graphics = crate::settings::graphics();
+        let graphics_device = cc.wgpu_render_state.as_ref().map_or_else(Default::default, |rs| {
+            let device = ViewportRenderer::graphics_device(&rs.adapter, &rs.device, graphics.samples);
+            let renderer = ViewportRenderer::with_samples(
+                &rs.device,
+                &rs.queue,
+                rs.target_format,
+                device.tier,
+                device.active_samples,
+            );
             rs.renderer.write().callback_resources.insert(renderer);
-        }
+            device
+        });
         log::debug!("renderer installed");
         #[cfg(target_arch = "wasm32")]
         crate::web::set_context(&cc.egui_ctx);
         let mut state = AppState::new(doc);
+        state.graphics_device = graphics_device;
+        state.graphics = graphics;
+        state.doc.set_curved_surfaces(state.graphics.curved_surfaces);
         state.viewport.camera.fit_framed(state.doc.bounds());
         let view = crate::settings::view();
         let preset = automation.preset.unwrap_or(view.preset);
@@ -295,7 +306,11 @@ impl SolidDraftApp {
     #[cfg(target_arch = "wasm32")]
     fn open_in_worker(&mut self, name: &str, bytes: &[u8]) {
         let (sender, answer) = std::sync::mpsc::channel();
-        let job = crate::kernel_worker::Job::Build { edit: None, level: Default::default() };
+        let job = crate::kernel_worker::Job::Build {
+            edit: None,
+            level: Default::default(),
+            curved_surfaces: self.state.graphics.curved_surfaces,
+        };
         let kernel = self.state.doc.kernel().clone();
         let ctx = crate::web::context().unwrap_or_default();
         let live = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
@@ -774,6 +789,7 @@ impl eframe::App for SolidDraftApp {
         let ctx = &root.ctx().clone();
         log::debug!("ui frame {}", self.frame);
         self.state.doc.set_repaint(ctx);
+        self.state.doc.set_curved_surfaces(self.state.graphics.curved_surfaces);
         self.focus_tool_document();
         let dt = ctx.input(|i| i.unstable_dt) * 1000.0;
         self.state.frame_ms = if self.state.frame_ms == 0.0 { dt } else { self.state.frame_ms * 0.9 + dt * 0.1 };
@@ -781,6 +797,17 @@ impl eframe::App for SolidDraftApp {
         self.shortcuts(ctx);
         crate::drawing::frame(&mut self.state, &mut self.dock);
         crate::assembly::frame(&mut self.state, &mut self.dock, ctx);
+        let graphics = self.state.graphics;
+        let tier = self.state.graphics_device.tier;
+        let frame_ms = self.state.frame_ms;
+        self.state.viewport.graphics = graphics;
+        self.state.viewport.graphics_tier = tier;
+        self.state.viewport.frame_ms = frame_ms;
+        if let Some(session) = self.state.assembly.session.as_mut() {
+            session.viewport.graphics = graphics;
+            session.viewport.graphics_tier = tier;
+            session.viewport.frame_ms = frame_ms;
+        }
         // The browser hands over a dropped file's name and bytes, not a path to read.
         #[cfg(not(target_arch = "wasm32"))]
         {

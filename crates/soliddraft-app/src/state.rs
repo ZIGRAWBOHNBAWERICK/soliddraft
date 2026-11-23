@@ -119,6 +119,7 @@ pub enum AppAction {
     NormalTo,
     ZoomFit,
     SetDisplay(DisplayMode),
+    SetCurrentView(crate::graphics::CurrentView),
     /// Switches the render look (Fast, Studio, Realistic).
     SetPreset(Preset),
     SetScene(crate::viewport::scenes::Scene),
@@ -1246,6 +1247,8 @@ pub struct AppState {
     pub section: crate::section::State,
     pub(crate) mass: crate::measure::mass::State,
     pub viewport: ViewportState,
+    pub graphics: crate::graphics::Graphics,
+    pub graphics_device: crate::graphics::GraphicsDevice,
     pub pick_filter: crate::viewport::PickFilter,
     pub form_bar: crate::form_bar::State,
     pub options_details: bool,
@@ -1455,6 +1458,8 @@ impl AppState {
             section: Default::default(),
             mass: Default::default(),
             viewport: ViewportState::default(),
+            graphics: Default::default(),
+            graphics_device: Default::default(),
             pick_filter: Default::default(),
             form_bar: Default::default(),
             options_details: false,
@@ -1528,6 +1533,21 @@ impl AppState {
             session.viewport.references = references;
         }
         crate::settings::save_reference_display(&references).inspect_err(|why| self.not_kept("Viewport settings", why))
+    }
+
+    pub fn set_current_view(&mut self, view: crate::graphics::CurrentView) -> Result<(), crate::settings::NotKept> {
+        let camera_editable = self.assembly.is_active() || self.sketch.is_none();
+        view.apply(self.active_viewport_mut(), camera_editable);
+        if self.viewport.references != view.references {
+            self.set_reference_display(view.references)?;
+        }
+        Ok(())
+    }
+
+    pub fn set_graphics(&mut self, graphics: crate::graphics::Graphics) -> Result<(), crate::settings::NotKept> {
+        self.graphics = graphics;
+        self.doc.set_curved_surfaces(graphics.curved_surfaces);
+        crate::settings::save_graphics(&graphics).inspect_err(|why| self.not_kept("Graphics settings", why))
     }
 
     /// Uses a new grid style and saves it, as [`AppState::set_reference_display`] does.

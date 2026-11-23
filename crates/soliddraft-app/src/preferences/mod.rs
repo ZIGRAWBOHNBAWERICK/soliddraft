@@ -11,7 +11,9 @@
 //! `AppState::set_autosave`) and the tests can do the same
 //! without a GPU.
 
+mod graphics;
 mod ui;
+pub(crate) use graphics::current_view_controls;
 
 use crate::commands::{self, KeyChord, ShortcutConflict, ShortcutPreset, Shortcuts};
 use crate::navigation::view_keys::{self, ViewKeys};
@@ -43,12 +45,15 @@ pub const GRID_AND_PLANES: &str = "viewport.grid_and_planes";
 pub const SHORTCUTS: &str = "interface.shortcuts";
 pub const AUTOSAVE: &str = "general_documents.autosave";
 
-const PAGES: [Page; 6] = [
+pub const GRAPHICS: &str = "appearance_graphics.graphics";
+
+const PAGES: [Page; 7] = [
     Page { id: MOUSE, category: "navigation", title: "Mouse" },
     Page { id: ORBIT_ZOOM, category: "navigation", title: "Orbit and zoom" },
     Page { id: VIEW_KEYS, category: "navigation", title: "View keys" },
     Page { id: GRID_AND_PLANES, category: "viewport", title: "Grid and planes" },
     Page { id: SHORTCUTS, category: "interface", title: "Shortcuts" },
+    Page { id: GRAPHICS, category: "appearance_graphics", title: "Graphics" },
     Page { id: AUTOSAVE, category: "general_documents", title: "Autosave and recovery" },
 ];
 
@@ -87,7 +92,7 @@ const CATEGORIES: [Category; 7] = [
     Category { id: "viewport", label: "Viewport", status: Status::Available },
     Category { id: "selection_editing", label: "Selection and editing", status: Status::Reserved },
     Category { id: "interface", label: "Interface", status: Status::Available },
-    Category { id: "appearance_graphics", label: "Appearance and graphics", status: Status::Reserved },
+    Category { id: "appearance_graphics", label: "Appearance and graphics", status: Status::Available },
     Category { id: "general_documents", label: "General and documents", status: Status::Available },
     Category { id: "assistant", label: "Assistant", status: Status::Reserved },
 ];
@@ -176,6 +181,9 @@ fn index() -> Vec<Hit> {
     for (control, label) in ui::AUTOSAVE_CONTROLS {
         all.push(hit(AUTOSAVE, Some(control.to_owned()), label.to_owned()));
     }
+    for (control, label) in graphics::CONTROLS {
+        all.push(hit(GRAPHICS, Some(control.to_owned()), label.to_owned()));
+    }
     all
 }
 
@@ -197,11 +205,16 @@ pub enum Change {
     Display(ReferenceDisplay),
     /// Use this grid style, and save it when `keep`. A slider being dragged shows its
     /// value at once and is saved when it is let go.
-    Grid { style: GridStyle, keep: bool },
+    Grid {
+        style: GridStyle,
+        keep: bool,
+    },
     /// Save and use these command shortcuts.
     Shortcuts(Shortcuts),
     /// Save and use these autosave settings.
     Autosave(AutosavePolicy),
+    Graphics(crate::graphics::Graphics),
+    CurrentView(crate::graphics::CurrentView),
 }
 
 /// A line the window shows under its page.
@@ -221,6 +234,11 @@ pub struct Preferences {
     pub draft: NavigationSettings,
     /// The display choices as the window shows them.
     pub display: ReferenceDisplay,
+    pub graphics: crate::graphics::Graphics,
+    pub graphics_device: crate::graphics::GraphicsDevice,
+    current_view: crate::graphics::CurrentView,
+    view_preset: crate::viewport::look::Preset,
+    camera_editable: bool,
     /// The grid style as the window shows it.
     pub grid: GridStyle,
     /// The grid style was changed and not saved yet.
@@ -257,6 +275,11 @@ impl Preferences {
             highlight: None,
             draft: settings.clone(),
             display,
+            graphics: Default::default(),
+            graphics_device: Default::default(),
+            current_view: crate::graphics::CurrentView::of(&crate::viewport::ViewportState::default()),
+            view_preset: Default::default(),
+            camera_editable: true,
             grid,
             grid_pending: false,
             shortcuts: crate::settings::shortcuts(),
@@ -577,6 +600,12 @@ impl Preferences {
 /// and drops it when closed.
 pub fn window(ctx: &egui::Context, prefs: &mut Option<Preferences>, state: &mut crate::state::AppState) {
     let Some(p) = prefs.as_mut() else { return };
+    p.graphics = state.graphics;
+    p.graphics_device = state.graphics_device.clone();
+    p.current_view = crate::graphics::CurrentView::of(state.active_viewport());
+    p.view_preset = state.active_viewport().preset;
+    p.display = state.viewport.references;
+    p.camera_editable = state.assembly.is_active() || state.sketch.is_none();
     let mut open = true;
     egui::Window::new("Preferences")
         .open(&mut open)
@@ -604,6 +633,16 @@ pub fn window(ctx: &egui::Context, prefs: &mut Option<Preferences>, state: &mut 
             }
             Change::Shortcuts(s) => {
                 if let Err(why) = state.set_shortcuts(s) {
+                    p.not_kept(&why);
+                }
+            }
+            Change::Graphics(graphics) => {
+                if let Err(why) = state.set_graphics(graphics) {
+                    p.not_kept(&why);
+                }
+            }
+            Change::CurrentView(view) => {
+                if let Err(why) = state.set_current_view(view) {
                     p.not_kept(&why);
                 }
             }

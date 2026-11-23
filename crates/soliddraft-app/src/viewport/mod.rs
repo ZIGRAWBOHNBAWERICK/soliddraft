@@ -177,6 +177,11 @@ pub struct ViewportState {
     pub display: DisplayMode,
     pub section_active: bool,
     pub preset: Preset,
+    pub lighting: crate::graphics::Lighting,
+    pub(crate) graphics: crate::graphics::Graphics,
+    pub(crate) graphics_tier: look::Tier,
+    pub(crate) frame_ms: f32,
+    still_view: Option<(PickView, f64)>,
     /// Named background; offscreen views can use the theme fade.
     pub scene: Option<scenes::Scene>,
     pub(crate) context_menus: bool,
@@ -225,6 +230,11 @@ impl Default for ViewportState {
             display: DisplayMode::default(),
             section_active: false,
             preset: Preset::default(),
+            lighting: Default::default(),
+            graphics: Default::default(),
+            graphics_tier: look::Tier::Basic,
+            frame_ms: 0.0,
+            still_view: None,
             scene: None,
             context_menus: false,
             context_pick: None,
@@ -511,6 +521,7 @@ impl ViewportState {
             _ => 0,
         };
         let mut input = self.frame_input(rect, ppp, cursor_px);
+        input.controls.supersample = self.supersample(ui, rect, ppp);
         input.meshes = meshes;
         input.hover_id = hover_id;
         input.selected_id = selected_id;
@@ -520,7 +531,7 @@ impl ViewportState {
             _ => None,
         };
         input.ghost = ghost;
-        input.threads = if visible.body { self.thread_marks(doc) } else { None };
+        input.threads = if visible.body && self.graphics.cosmetic_threads { self.thread_marks(doc) } else { None };
         #[cfg(target_arch = "wasm32")]
         crate::web::show_part_view(
             &self.camera,
@@ -537,10 +548,17 @@ impl ViewportState {
         ui.painter().add(egui_wgpu::Callback::new_paint_callback(rect, ViewportCallback(input)));
 
         let painter = ui.painter().with_clip_rect(rect);
+        let curve_halo = self.graphics.sketch_halo.then(|| {
+            if self.scene.is_some_and(scenes::Scene::is_dark) {
+                Color32::from_black_alpha(210)
+            } else {
+                Color32::from_white_alpha(220)
+            }
+        });
         for (id, plane, sk) in passive_sketches {
             let picked = self.hover_sketch == Some(id) || selection == Some(Selection::Feature(id));
             let color = if picked { theme::accent() } else { theme::muted().gamma_multiply(0.9) };
-            crate::sketcher::paint_passive(&painter, &self.camera, rect, plane, sk, color);
+            crate::sketcher::paint_passive(&painter, &self.camera, rect, plane, sk, color, curve_halo);
         }
         if let Some(session) = sketch {
             // A drag the navigation preset claimed (Shift+left pans in the legacy preset)
@@ -558,6 +576,7 @@ impl ViewportState {
                 &response,
                 spacing,
                 self.scene.is_some_and(scenes::Scene::is_dark),
+                curve_halo,
             );
             ui.ctx().request_repaint();
         }
@@ -667,6 +686,30 @@ impl ViewportState {
         self.paint_view_cube(ui, rect, &mut events);
         // An open sketch has its own status line; the model hint would be wrong there.
         self.paint_pills(ui, rect, hover_label.or((!sketching).then_some(MODEL_HINT)));
+        let measurement = if self.graphics.quick_measurement && !sketching && !self.section_active {
+            self.hover.and_then(|picked| pick_filter.selection(pick::selection(doc, picked))).and_then(|selection| {
+                match selection {
+                    Selection::Edge(id) => {
+                        doc.edges.iter().find(|e| e.id == id).map(|edge| format!("Length {:.3} mm", edge.length))
+                    }
+                    Selection::Face(id) => {
+                        doc.faces.iter().find(|f| f.id == id).map(|face| format!("Area {:.3} mm²", face.area))
+                    }
+                    Selection::Vertex(id) => {
+                        doc.vertex_position(id).map(|p| format!("X {:.3} · Y {:.3} · Z {:.3} mm", p.x, p.y, p.z))
+                    }
+                    _ => None,
+                }
+            })
+        } else {
+            None
+        };
+        self.paint_graphics_details(
+            ui,
+            rect,
+            measurement.as_deref(),
+            self.graphics.show_frame_rate.then(|| doc.triangle_count()),
+        );
         events
     }
 
@@ -704,6 +747,7 @@ impl ViewportState {
         frame.view_proj = (self.camera.projection(aspect) * self.camera.view()).as_dmat4();
         frame.eye = self.camera.eye().as_dvec3();
         let mut input = self.frame_input(rect, ppp, cursor_px);
+        input.controls.supersample = self.supersample(ui, rect, ppp);
         input.assembly = Some(frame);
         ui.painter().add(egui_wgpu::Callback::new_paint_callback(rect, ViewportCallback(input)));
         if self.references.always_show_origin_axes {
@@ -714,6 +758,7 @@ impl ViewportState {
         self.paint_view_cube(ui, rect, &mut events);
         let label = hover_label.unwrap_or("Hover a component");
         self.paint_pills(ui, rect, Some(label));
+        self.paint_graphics_details(ui, rect, None, None);
         events
     }
 
@@ -774,10 +819,48 @@ impl ViewportState {
         }
     }
 
+    fn supersample(&mut self, ui: &egui::Ui, rect: Rect, ppp: f32) -> bool {
+        if !self.graphics.still_supersampling
+            || cfg!(target_arch = "wasm32")
+            || !self.graphics_tier.has_ambient_occlusion()
+        {
+            self.still_view = None;
+            return false;
+        }
+        let view = self.pick_view(rect, ppp);
+        let (now, dragging) = ui.input(|i| (i.time, i.pointer.any_down()));
+        let (_, since) = *self.still_view.get_or_insert((view, now));
+        if dragging || self.still_view.is_some_and(|(last, _)| last != view) {
+            self.still_view = Some((view, now));
+            ui.ctx().request_repaint_after(std::time::Duration::from_millis(200));
+            return false;
+        }
+        let quiet = now - since;
+        if quiet < 0.2 {
+            ui.ctx().request_repaint_after(std::time::Duration::from_secs_f64(0.2 - quiet));
+            return false;
+        }
+        true
+    }
+
+    fn render_controls(&self) -> render::Controls {
+        render::Controls {
+            lighting: self.lighting,
+            vertex_markers: self.graphics.show_vertex_markers,
+            xray_references: self.graphics.xray_references,
+            hidden_selected_edges: self.graphics.hidden_selected_edges,
+            tint_preview: self.graphics.tint_preview,
+            red_removal: self.graphics.red_removal,
+            section_hatch: if self.section_active { self.graphics.section_hatch } else { Default::default() },
+            ..Default::default()
+        }
+    }
+
     /// What every frame hands the renderer from the camera and the look, with nothing in
     /// the scene yet. The grid lies on the ground until a sketch moves it.
     fn frame_input(&self, rect: Rect, ppp: f32, cursor_px: Option<[u32; 2]>) -> FrameInput {
         let PickView { view, proj, size: size_px } = self.pick_view(rect, ppp);
+        let plane = if self.graphics.view_aligned_grid { GridPlane::facing(&self.camera) } else { GridPlane::GROUND };
         FrameInput {
             view,
             proj,
@@ -789,6 +872,7 @@ impl ViewportState {
             pixels_per_point: ppp,
             display: self.display,
             preset: self.preset,
+            controls: self.render_controls(),
             backdrop: self.backdrop(),
             floor: self.references.show_floor,
             hover_id: 0,
@@ -804,7 +888,7 @@ impl ViewportState {
             pick_revision: None,
             pick_out: self.pick.clone(),
             assembly: None,
-            grid: self.grid(rect, &GridPlane::GROUND),
+            grid: self.grid(rect, &plane),
             planes: None,
         }
     }
@@ -1201,11 +1285,14 @@ impl ViewportState {
         sketch_dimensions: Option<bool>,
         allow_dimensions: bool,
     ) {
+        let current = crate::graphics::CurrentView::of(self);
         self.navigation_bar.show(
             ui,
             rect,
             &mut self.camera,
-            self.display,
+            current,
+            self.preset,
+            self.graphics_tier,
             self.scene.unwrap_or_default(),
             &mut self.references,
             &mut self.all_dimensions,
@@ -1268,6 +1355,48 @@ impl ViewportState {
             if resp.clicked() {
                 events.set_view = Some(sv);
             }
+        }
+    }
+
+    fn paint_graphics_details(
+        &self,
+        ui: &mut egui::Ui,
+        rect: Rect,
+        measurement: Option<&str>,
+        triangles: Option<usize>,
+    ) {
+        let mut details = Vec::new();
+        if self.graphics.show_view_angles {
+            let yaw = self.camera.yaw.to_degrees();
+            let pitch = self.camera.pitch.to_degrees();
+            details.push(format!("Yaw {yaw:.1}° · Pitch {pitch:.1}°"));
+        }
+        if self.graphics.show_frame_rate {
+            ui.ctx().request_repaint();
+            if self.frame_ms > 0.0 {
+                let mut rate = format!("{:.0} FPS · {:.1} ms", 1000.0 / self.frame_ms, self.frame_ms);
+                if let Some(triangles) = triangles {
+                    rate.push_str(&format!(" · {triangles} triangles"));
+                }
+                details.push(rate);
+            }
+        }
+        if let Some(measurement) = measurement {
+            details.push(measurement.to_owned());
+        }
+        if !details.is_empty() {
+            let painter = ui.painter().with_clip_rect(rect);
+            let galley = painter.layout_no_wrap(details.join("\n"), theme::font(11.0), theme::ink());
+            let size = galley.size() + vec2(16.0, 10.0);
+            let r = Rect::from_min_size(rect.right_bottom() - vec2(size.x + 14.0, size.y + HUD_BAND), size);
+            painter.rect(
+                r,
+                CornerRadius::same(6),
+                theme::hud_bg(),
+                Stroke::new(1.0, theme::line()),
+                StrokeKind::Inside,
+            );
+            painter.galley(r.min + vec2(8.0, 5.0), galley, theme::ink());
         }
     }
 

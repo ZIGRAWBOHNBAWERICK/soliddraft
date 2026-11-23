@@ -2221,6 +2221,7 @@ impl Document {
             baseline: self.last_proved.as_ref().map(|proved| proved.model.clone()),
             params: self.tess_params,
             level: self.quality.wanted(),
+            curved_surfaces: self.quality.curved_surfaces(),
         }
     }
 
@@ -3524,7 +3525,8 @@ impl Document {
             && proved.model.next_body() > 1
             && proved.model.live_bodies().len() > 1
         {
-            match ready_display(&proved.model, soliddraft_tessellation::Level::Standard) {
+            match ready_display(&proved.model, soliddraft_tessellation::Level::Standard, self.quality.curved_surfaces())
+            {
                 Ok(Some(display)) => {
                     self.tess_params = display.params;
                     self.meshes = if self.headless { HashMap::new() } else { display.meshes };
@@ -3661,8 +3663,12 @@ impl Document {
             }
         }
         let params = bodies.last().and_then(|(_, body)| self.kernel().topology(*body).ok()).map(|topology| {
-            *soliddraft_tessellation::Levels::new(&self.model.settings().viewport, topology.bbox.diagonal())
-                .params(soliddraft_tessellation::Level::Standard)
+            *crate::graphics::mesh_levels(
+                self.quality.curved_surfaces(),
+                &self.model.settings().viewport,
+                topology.bbox.diagonal(),
+            )
+            .params(soliddraft_tessellation::Level::Standard)
         });
         if params == Some(self.tess_params)
             && bodies.len() == self.meshes.len()
@@ -3675,7 +3681,7 @@ impl Document {
             }
             return;
         }
-        match ready_display(&self.model, soliddraft_tessellation::Level::Standard) {
+        match ready_display(&self.model, soliddraft_tessellation::Level::Standard, self.quality.curved_surfaces()) {
             Ok(Some(display)) => {
                 self.tess_params = display.params;
                 self.meshes = if self.headless { HashMap::new() } else { display.meshes };
@@ -4059,6 +4065,17 @@ impl Document {
     /// The display levels: the level shown and wanted, and each level's parameters.
     pub fn display_quality(&self) -> &DisplayQuality {
         &self.quality
+    }
+
+    /// Applies the application's curves setting without editing the part.
+    pub fn set_curved_surfaces(&mut self, choice: Option<crate::graphics::CurvedSurfaces>) {
+        if self.quality.curved_surfaces() == choice {
+            return;
+        }
+        self.quality.set_curved_surfaces(choice, &self.model.settings().viewport);
+        if !self.headless && !self.model.is_dirty() && !self.has_model_failure() && self.model.live_bodies().len() > 1 {
+            self.refresh_bodies();
+        }
     }
 
     /// Sets the part's viewport quality, saved in its file. The part's revision does not
@@ -5143,12 +5160,13 @@ fn named_entities(model: &model::Document, body: BodyId, topology: &Topology) ->
 pub(crate) fn ready_display(
     model: &model::Document,
     level: soliddraft_tessellation::Level,
+    curved_surfaces: Option<crate::graphics::CurvedSurfaces>,
 ) -> Result<Option<ReadyDisplay>, String> {
     let Some((_, body)) = model.live_bodies().last().copied() else { return Ok(None) };
     let kernel = model.kernel();
     let topology = kernel.topology(body).map_err(|error| error.to_string())?;
-    let params =
-        *soliddraft_tessellation::Levels::new(&model.settings().viewport, topology.bbox.diagonal()).params(level);
+    let params = *crate::graphics::mesh_levels(curved_surfaces, &model.settings().viewport, topology.bbox.diagonal())
+        .params(level);
     let kernel_mesh = kernel.rendering(body, &params).map_err(|error| error.to_string())?;
     let edges = edge_polylines(kernel.as_ref(), body, &params);
     let (faces, named_edges) = named_entities(model, body, &topology);
@@ -5185,7 +5203,8 @@ pub(crate) fn ready_display(
     for (key, other) in model.live_bodies().into_iter().filter(|(_, other)| *other != body) {
         let topology = kernel.topology(other).map_err(|error| error.to_string())?;
         let params =
-            *soliddraft_tessellation::Levels::new(&model.settings().viewport, topology.bbox.diagonal()).params(level);
+            *crate::graphics::mesh_levels(curved_surfaces, &model.settings().viewport, topology.bbox.diagonal())
+                .params(level);
         let kernel_mesh = kernel.rendering(other, &params).map_err(|error| error.to_string())?;
         let edges = edge_polylines(kernel.as_ref(), other, &params);
         let (faces, named_edges) = named_entities(model, other, &topology);

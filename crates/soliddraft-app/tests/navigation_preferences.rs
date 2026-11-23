@@ -127,13 +127,14 @@ fn reserved_categories_are_not_finished_pages() {
             "navigation.view_keys",
             "viewport.grid_and_planes",
             "interface.shortcuts",
+            "appearance_graphics.graphics",
             "general_documents.autosave"
         ]
     );
     let reserved = preferences::reserved_categories();
     let labels: Vec<&str> = reserved.iter().map(|c| c.label).collect();
     assert!(!labels.contains(&"General and documents"), "General and documents has its Autosave page");
-    for label in ["Selection and editing", "Appearance and graphics", "Assistant"] {
+    for label in ["Selection and editing", "Assistant"] {
         assert!(labels.contains(&label), "{label} is reserved: {labels:?}");
     }
     assert!(preferences::reserved_categories().iter().all(|c| c.status == preferences::Status::Reserved));
@@ -148,10 +149,10 @@ fn reserved_categories_are_not_finished_pages() {
         assert!(w.query_by_label("Navigation preset").is_none());
     }
     search_for(&mut w, "appearance");
-    click(&mut w, "Appearance and graphics settings · Coming soon");
-    assert_eq!(w.state().page, "appearance_graphics");
+    click(&mut w, "Appearance and graphics > Graphics");
+    assert_eq!(w.state().page, preferences::GRAPHICS);
     assert!(w.state().search.is_empty());
-    assert!(w.query_by_label("Coming soon").is_some());
+    assert!(w.query_by_label("Graphics preset").is_some());
     click(&mut w, "Mouse");
     assert_eq!(w.state().page, preferences::MOUSE);
     assert!(w.query_by_label("Navigation preset").is_some());

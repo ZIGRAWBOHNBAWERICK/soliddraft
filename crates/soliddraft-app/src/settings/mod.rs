@@ -295,6 +295,14 @@ fn save_view_keys_to(store: &Store, keys: impl serde::Serialize) -> Result<(), N
     save_section_to(store, "view", &view)
 }
 
+pub fn graphics() -> crate::graphics::Graphics {
+    serde_json::from_value(stored()["graphics"].clone()).unwrap_or_default()
+}
+
+pub fn save_graphics(graphics: &crate::graphics::Graphics) -> Result<(), NotKept> {
+    save_section("graphics", graphics)
+}
+
 /// Appearance: light or dark interface. The `appearance` key of the settings.
 #[derive(Clone, Copy, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(default)]

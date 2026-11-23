@@ -11,6 +11,7 @@
 //! The meshes of the last few bodies shown stay while the part keeps those bodies, so
 //! undo, redo and a value put back show their body's mesh again without tessellating.
 
+use crate::graphics::{CurvedSurfaces, mesh_levels};
 use std::collections::VecDeque;
 use std::sync::Arc;
 
@@ -27,6 +28,7 @@ pub struct DisplayQuality {
     thresholds: Thresholds,
     choice: Choice,
     levels: Levels,
+    curved_surfaces: Option<CurvedSurfaces>,
     cache: DisplayCache<BodyId, Mesh>,
     worker: Tessellator<BodyId>,
     /// The displayed body, its bounding sphere and the level its mesh was made at.
@@ -49,6 +51,7 @@ impl DisplayQuality {
             thresholds: Thresholds::default(),
             choice: Choice::default(),
             levels: Levels::new(&Quality::Auto, 0.0),
+            curved_surfaces: None,
             cache: DisplayCache::new(DeviceBudget::default()),
             worker: Tessellator::new(kernel),
             body: None,
@@ -65,6 +68,7 @@ impl DisplayQuality {
             thresholds: self.thresholds,
             choice: self.choice,
             levels: self.levels,
+            curved_surfaces: self.curved_surfaces,
             cache: self.cache.clone(),
             worker: Tessellator::new(kernel),
             body: self.body,
@@ -109,7 +113,7 @@ impl DisplayQuality {
         self.recent.retain(|b| *b != body);
         self.center = topology.bbox.center();
         self.radius = topology.bbox.diagonal() / 2.0;
-        self.levels = Levels::new(quality, topology.bbox.diagonal());
+        self.levels = mesh_levels(self.curved_surfaces, quality, topology.bbox.diagonal());
         self.shown = None;
         *self.levels.params(self.choice.level)
     }
@@ -165,15 +169,26 @@ impl DisplayQuality {
 
     /// A new quality for the same body: every level comes from the worker, and the
     /// shown mesh stays until its replacement arrives.
+    pub(crate) fn curved_surfaces(&self) -> Option<CurvedSurfaces> {
+        self.curved_surfaces
+    }
+
+    pub(crate) fn set_curved_surfaces(&mut self, choice: Option<CurvedSurfaces>, quality: &Quality) {
+        self.curved_surfaces = choice;
+        self.set_quality(quality);
+    }
+
     pub fn set_quality(&mut self, quality: &Quality) {
         let Some(body) = self.body else { return };
-        self.levels = Levels::new(quality, self.radius * 2.0);
+        self.levels = mesh_levels(self.curved_surfaces, quality, self.radius * 2.0);
         self.request_missing(body);
     }
 
     fn request_missing(&mut self, body: BodyId) {
         let missing = self.cache.missing(&body, &self.levels);
         if missing.is_empty() {
+            self.worker.cancel(&body);
+            self.asked.clear();
             return;
         }
         let params: Vec<TessellationParams> = missing.iter().map(|l| *self.levels.params(*l)).collect();

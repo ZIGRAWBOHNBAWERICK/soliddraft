@@ -495,6 +495,7 @@ pub(crate) struct Job {
     pub baseline: Option<Arc<model::Document>>,
     pub params: TessellationParams,
     pub level: soliddraft_tessellation::Level,
+    pub curved_surfaces: Option<crate::graphics::CurvedSurfaces>,
 }
 
 pub(crate) enum AnswerKind {
@@ -518,6 +519,7 @@ struct ProofTask {
     request: u64,
     model: model::Document,
     level: soliddraft_tessellation::Level,
+    curved_surfaces: Option<crate::graphics::CurvedSurfaces>,
     allowance: Box<dyn ProofWork>,
 }
 
@@ -552,7 +554,7 @@ impl Answered {
 /// Applies a request's edit and reserves its exact proof. Neither builds anything,
 /// so the proof starts without waiting for the early display.
 fn prepare(queued: Queued) -> Result<(ProofTask, Option<ConstructionTask>), Answer> {
-    let Queued { request, job: Job { source, edit, baseline, params, level } } = queued;
+    let Queued { request, job: Job { source, edit, baseline, params, level, curved_surfaces } } = queued;
     let refused = |message: String| Answer { request, kind: AnswerKind::Proved(Err(message)) };
     let mut model = Arc::try_unwrap(source).unwrap_or_else(|source| source.fork());
     if let Some(edit) = edit {
@@ -571,7 +573,7 @@ fn prepare(queued: Queued) -> Result<(ProofTask, Option<ConstructionTask>), Answ
         baseline.body()?;
         Some(ConstructionTask { request, baseline, edits, params, model: model.fork() })
     });
-    Ok((ProofTask { request, model, level, allowance }, construction))
+    Ok((ProofTask { request, model, level, curved_surfaces, allowance }, construction))
 }
 
 // The browser shows its kernel worker's proved part and has no early construction display.
@@ -599,8 +601,9 @@ pub(crate) fn prove_now(
     source: Arc<model::Document>,
     edit: Option<ScalarDraft>,
     level: soliddraft_tessellation::Level,
+    curved_surfaces: Option<crate::graphics::CurvedSurfaces>,
 ) -> Result<ProvedBuild, String> {
-    let job = Job { source, edit, baseline: None, params: TessellationParams::default(), level };
+    let job = Job { source, edit, baseline: None, params: TessellationParams::default(), level, curved_surfaces };
     let (task, _) = prepare(Queued { request: 1, job }).map_err(|answer| match answer.kind {
         AnswerKind::Proved(Err(error)) => error,
         _ => "The edit could not be prepared.".into(),
@@ -627,7 +630,7 @@ fn prove(
     protected: &AtomicU64,
     previous: Option<&model::Document>,
 ) -> ProvedBuild {
-    let ProofTask { request, mut model, level, allowance } = task;
+    let ProofTask { request, mut model, level, curved_surfaces, allowance } = task;
     if let Some(previous) = previous {
         model.reuse_builds_from(previous);
     }
@@ -638,7 +641,7 @@ fn prove(
         model.rebuild();
         failure = model_failure(&model);
         if failure.is_none() && wanted(request, newest, protected) {
-            match ready_display(&model, level) {
+            match ready_display(&model, level, curved_surfaces) {
                 Ok(view) => display = view.map(Arc::new),
                 Err(error) => display_error = Some(error),
             }
@@ -862,7 +865,11 @@ impl Worker {
         #[cfg(target_arch = "wasm32")]
         {
             let (_, part) = job.source.snapshot().encode().map_err(|error| error.to_string())?;
-            let build = crate::kernel_worker::Job::Build { edit: job.edit, level: job.level };
+            let build = crate::kernel_worker::Job::Build {
+                edit: job.edit,
+                level: job.level,
+                curved_surfaces: job.curved_surfaces,
+            };
             let kernel = job.source.kernel().clone();
             let ctx = self.answered.repaint.clone().unwrap_or_default();
             let built = self.built.clone();

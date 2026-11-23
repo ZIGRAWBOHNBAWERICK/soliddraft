@@ -1330,7 +1330,8 @@ pub fn request_features(config: &mut egui_wgpu::WgpuConfiguration) {
         let base = setup.device_descriptor.clone();
         setup.device_descriptor = Arc::new(move |adapter| {
             let mut d = base(adapter);
-            d.required_features |= adapter.features() & wgpu::Features::INDIRECT_FIRST_INSTANCE;
+            d.required_features |= adapter.features()
+                & (wgpu::Features::INDIRECT_FIRST_INSTANCE | wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES);
             // A large assembly's meshes and instances outgrow the default 256 MB buffer
             // and 128 MB storage binding; take what the adapter allows.
             let a = adapter.limits();

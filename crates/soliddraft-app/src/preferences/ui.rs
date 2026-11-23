@@ -97,6 +97,7 @@ pub(super) fn show(p: &mut Preferences, ui: &mut egui::Ui) {
                         VIEW_KEYS => view_keys_page(p, ui),
                         GRID_AND_PLANES => grid_and_planes_page(p, ui),
                         SHORTCUTS => shortcuts_page(p, ui),
+                        super::GRAPHICS => super::graphics::show(p, ui),
                         AUTOSAVE => autosave_page(p, ui),
                         id => {
                             if let Some(c) = super::reserved_category(id) {
@@ -168,12 +169,12 @@ fn results(p: &mut Preferences, ui: &mut egui::Ui) {
 }
 
 /// Whether a search pointed at `control`.
-fn lit(p: &Preferences, control: &str) -> bool {
+pub(super) fn lit(p: &Preferences, control: &str) -> bool {
     p.highlight.as_deref() == Some(control)
 }
 
 /// Draws `add`, inside an accent outline when `lit`.
-fn control<R>(lit: bool, ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
+pub(super) fn control<R>(lit: bool, ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
     let stroke = if lit { Stroke::new(1.5, theme::accent()) } else { Stroke::NONE };
     egui::Frame::new().stroke(stroke).inner_margin(2.0).corner_radius(3).show(ui, add).inner
 }

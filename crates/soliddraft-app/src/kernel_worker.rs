@@ -33,6 +33,8 @@ pub enum Job {
         edit: Option<crate::drag::ScalarDraft>,
         #[serde(default)]
         level: soliddraft_tessellation::Level,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        curved_surfaces: Option<crate::graphics::CurvedSurfaces>,
     },
 }
 
@@ -88,8 +90,8 @@ impl Host {
                 let properties = result.map_err(|error| error.to_string())?;
                 serde_json::to_value(properties).map_err(|error| error.to_string())
             }
-            Job::Build { edit, level } => {
-                let proved = crate::drag::prove_now(std::sync::Arc::new(doc.fork()), *edit, *level)?;
+            Job::Build { edit, level, curved_surfaces } => {
+                let proved = crate::drag::prove_now(std::sync::Arc::new(doc.fork()), *edit, *level, *curved_surfaces)?;
                 let model = &proved.model;
                 let statuses: Vec<_> = model
                     .features()
@@ -97,7 +99,7 @@ impl Host {
                     .map(|feature| serde_json::json!({ "feature": feature.id, "status": built(model, feature.id).err() }))
                     .collect();
                 let triangles = proved.display.as_ref().map(|display| display.mesh.indices.len() / 3);
-                sample_display_levels(model);
+                sample_display_levels(model, *curved_surfaces);
                 Ok(serde_json::json!({
                     "failure": proved.failure,
                     "display_error": proved.display_error,
@@ -124,12 +126,12 @@ impl Host {
 /// Samples the early display of the part's shown body at every display level, as the
 /// page's display quality asks for them, so the hand-over carries each and the page
 /// samples none.
-fn sample_display_levels(model: &model::Document) {
-    use soliddraft_tessellation::{Level, Levels};
+fn sample_display_levels(model: &model::Document, curved_surfaces: Option<crate::graphics::CurvedSurfaces>) {
+    use soliddraft_tessellation::Level;
     let Some((_, body)) = model.live_bodies().last().copied() else { return };
     let kernel = model.kernel();
     let Ok(topology) = kernel.topology(body) else { return };
-    let levels = Levels::new(&model.settings().viewport, topology.bbox.diagonal());
+    let levels = crate::graphics::mesh_levels(curved_surfaces, &model.settings().viewport, topology.bbox.diagonal());
     for level in [Level::Coarse, Level::Standard, Level::Fine] {
         let params = *levels.params(level);
         let _ = kernel.preview(body, &params);
@@ -550,8 +552,8 @@ mod tests {
         };
         let mut host = Host::new(crate::kernel());
         for job in [
-            Job::Build { edit: Some(edit), level: Default::default() },
-            Job::Build { edit: None, level: Default::default() },
+            Job::Build { edit: Some(edit), level: Default::default(), curved_surfaces: None },
+            Job::Build { edit: None, level: Default::default(), curved_surfaces: None },
         ] {
             let answer = host.run(&part, &job).unwrap();
             assert_eq!(answer["failure"], serde_json::Value::Null, "{answer}");
@@ -561,7 +563,8 @@ mod tests {
             assert!(statuses.iter().all(|status| status["status"].is_null()), "{answer}");
         }
         let too_deep = crate::drag::ScalarDraft { value: -5.0, ..edit };
-        let refused = host.run(&part, &Job::Build { edit: Some(too_deep), level: Default::default() });
+        let refused =
+            host.run(&part, &Job::Build { edit: Some(too_deep), level: Default::default(), curved_surfaces: None });
         assert!(refused.is_err() || !refused.as_ref().unwrap()["failure"].is_null(), "{refused:?}");
     }
 
@@ -577,7 +580,9 @@ mod tests {
         };
         let worker = Arc::new(soliddraft_kernel_catallax::CatallaxKernel::new());
         let mut host = Host::new(worker.clone());
-        let answer = host.run(&part, &Job::Build { edit: Some(edit), level: Default::default() }).unwrap();
+        let answer = host
+            .run(&part, &Job::Build { edit: Some(edit), level: Default::default(), curved_surfaces: None })
+            .unwrap();
         assert_eq!(answer["failure"], serde_json::Value::Null, "{answer}");
         let bytes = host.take_hand_over().unwrap();
 
@@ -602,14 +607,14 @@ mod tests {
         let worker = Arc::new(soliddraft_kernel_catallax::CatallaxKernel::new());
         let page = Arc::new(soliddraft_kernel_catallax::CatallaxKernel::new());
         let mut host = Host::new(worker.clone());
-        host.run(&part, &Job::Build { edit: None, level: Default::default() }).unwrap();
+        host.run(&part, &Job::Build { edit: None, level: Default::default(), curved_surfaces: None }).unwrap();
         page.offer_builds(1, &host.take_hand_over().unwrap()).unwrap();
         let opened = model::Document::from_bytes(&part, page.clone()).unwrap();
         assert_eq!(page.fresh_builds(), 0);
         let base = opened.features().iter().find(|f| matches!(f.kind, model::FeatureKind::Extrude(_))).unwrap().id;
         let (_, saved) = opened.snapshot().encode().unwrap();
         let edit = crate::drag::ScalarDraft { feature: base, dimension: crate::drag::Dimension::Depth, value: 12.0 };
-        host.run(&saved, &Job::Build { edit: Some(edit), level: Default::default() }).unwrap();
+        host.run(&saved, &Job::Build { edit: Some(edit), level: Default::default(), curved_surfaces: None }).unwrap();
         page.offer_builds(1, &host.take_hand_over().unwrap()).unwrap();
         let mut edited = opened.fork();
         edited.execute_deferred(crate::document::scalar_draft_command(&edited, edit).unwrap()).unwrap();
@@ -625,7 +630,7 @@ mod tests {
         }
         assert_eq!(page.fresh_builds(), 0, "every build was taken from the worker");
         // The page shows the edited part without reading any handed-over body.
-        crate::document::ready_display(&edited, soliddraft_tessellation::Level::Standard).unwrap();
+        crate::document::ready_display(&edited, soliddraft_tessellation::Level::Standard, None).unwrap();
         assert_eq!(page.bodies_read(), 0, "the edit and its display read no exact body");
     }
 
@@ -635,7 +640,7 @@ mod tests {
     #[test]
     fn a_second_workers_builds_take_none_of_the_firsts_ids() {
         let page = Arc::new(soliddraft_kernel_catallax::CatallaxKernel::new());
-        let build = Job::Build { edit: None, level: Default::default() };
+        let build = Job::Build { edit: None, level: Default::default(), curved_surfaces: None };
         let bracket = include_bytes!("../../../site/parts/bracket.dwprt").to_vec();
         let mut first = Host::new(Arc::new(soliddraft_kernel_catallax::CatallaxKernel::new()));
         first.run(&bracket, &build).unwrap();

@@ -43,7 +43,7 @@ pub const DEFAULT_NAME: &str = "Default";
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Configuration {
-    /// Stable id, from the assembly's counter.
+    /// Stable id, from the assembly's counter of configured ids.
     pub id: u32,
     /// The name; unique within the assembly.
     pub name: String,
@@ -105,7 +105,7 @@ fn is_false(b: &bool) -> bool {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ExplodeStep {
-    /// Stable id, from the assembly's counter.
+    /// Stable id, from the assembly's counter of configured ids.
     pub id: u32,
     /// What moves.
     pub occurrences: Vec<OccurrencePath>,
@@ -263,10 +263,10 @@ impl Assembly {
             if name == DEFAULT_NAME {
                 return Err(Invalid(format!("{DEFAULT_NAME} is the configuration the assembly has now")));
             }
-            let id = self.take_id();
+            let id = self.take_configured_id();
             self.configurations.push(Configuration { id, name: DEFAULT_NAME.into(), state: None });
         }
-        let id = self.take_id();
+        let id = self.take_configured_id();
         let state = Some(Box::new(ConfigState::capture(self)));
         self.configurations.push(Configuration { id, name: name.into(), state });
         Ok(id)
@@ -359,13 +359,23 @@ impl Assembly {
                 let mut steps = HashSet::new();
                 for step in &s.explode {
                     step.check(self).map_err(|m| Invalid(format!("configuration {}: {m}", c.name)))?;
-                    if !steps.insert(step.id) || step.id >= self.next_id {
+                    if !steps.insert(step.id) || step.id >= self.next_configured_id {
                         return bad(format!(
                             "configuration {} has explode step id {} twice or too high",
                             c.name, step.id
                         ));
                     }
                 }
+            }
+        }
+        // Configurations and the active exploded view take ids from their own counter.
+        let mut ids = HashSet::new();
+        for id in self.configured_ids() {
+            if !ids.insert(id) {
+                return bad(format!("configured id {id} is used twice"));
+            }
+            if id >= self.next_configured_id {
+                return bad(format!("configured id {id} is not below next_configured_id {}", self.next_configured_id));
             }
         }
         let active = self.configurations.iter().filter(|c| c.is_active()).count();
@@ -531,7 +541,7 @@ mod tests {
     fn explode_steps_are_checked() {
         let mut a = sample();
         let first = a.components[0].id;
-        let id = a.take_id();
+        let id = a.take_configured_id();
         a.explode.push(ExplodeStep {
             id,
             occurrences: vec![OccurrencePath::root().child(crate::path::Step::component(first))],

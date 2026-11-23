@@ -95,7 +95,7 @@ impl AssemblyDocument {
             self.table.find(p).ok_or_else(|| EditError::NoOccurrence(p.clone()))?;
         }
         self.configure("Explode step", false, |a| {
-            let id = a.take_id();
+            let id = a.take_configured_id();
             a.explode.push(ExplodeStep { id, occurrences, direction: direction.to_array(), distance });
             Ok(id)
         })
@@ -175,7 +175,7 @@ impl AssemblyDocument {
                 }
                 let away = b.center() - middle;
                 let direction = if away.length() > 1e-9 { away.normalize() } else { DVec3::Z };
-                let id = a.take_id();
+                let id = a.take_configured_id();
                 a.explode.push(ExplodeStep {
                     id,
                     occurrences: vec![path.clone()],

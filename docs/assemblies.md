@@ -69,7 +69,8 @@ level of detail.
 ```
 
 - **Ids.** Sources, components, patterns, mates and values take their ids from one
-  counter, `next_id`, and an id is never reused. Ids are stable for the life of the assembly; names are
+  counter, `next_id`, and an id is never reused. Configurations and explode steps shape
+  nothing and count apart, from `next_configured_id`, which a file without them leaves out. Ids are stable for the life of the assembly; names are
   labels. A component without a name shows as its source's file name and its id.
 - **Sources** are the documents the assembly places. Each is a `DocRef` (see
   [documents.md](documents.md#references)) with its pinned revision. A thousand
@@ -135,8 +136,9 @@ configuration keeps its own state in its row:
 - Names are unique. The active configuration cannot be deleted; with one row left the
   assembly goes back to having none. An assembly with more than 1,024 components, or one
   with 64 configurations, refuses another.
-- The geometry hash leaves out the other configurations and the exploded view, so the
-  active configuration decides the assembly's shape.
+- The geometry hash leaves out the other configurations, the exploded view and their id
+  counter, so the active configuration decides the assembly's shape, and adding a
+  configuration or an explode step leaves it as it was.
 
 Each component can also show one of its own document's configurations
 (`AssemblyDocument::set_configuration`, the `assembly_component_configuration` tool):

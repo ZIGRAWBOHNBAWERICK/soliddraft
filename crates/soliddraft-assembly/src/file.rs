@@ -188,6 +188,7 @@ impl Assembly {
             mates: &self.mates,
             values: &self.values,
             next_id: self.next_id,
+            next_configured_id: self.next_configured_id,
         };
         let json = serde_json::to_value(&out).expect("an assembly always serialises");
         let bulk = (!bulk.is_empty()).then(|| bulk::encode(bulk.into_iter(), geometry));
@@ -203,9 +204,9 @@ impl Assembly {
     }
 
     /// The hash of what decides the assembly's shape: the truth without names, hidden
-    /// flags, colours, display states, other configurations, the exploded view and
-    /// reference paths. Hiding, colouring or
-    /// renaming a component changes the semantic hash and not this one.
+    /// flags, colours, display states, other configurations, the exploded view and its
+    /// id counter, and reference paths. Hiding, colouring or renaming a component, adding
+    /// a configuration or an explode step changes the semantic hash and not this one.
     pub fn geometry_hash(&self) -> ContentHash {
         let (mut json, bulk) = self.split_truth(true);
         json = without_format(&json);
@@ -220,6 +221,9 @@ impl Assembly {
             // Placements hold what mates decide: the same placements are the same shape.
             map.remove("mates");
             map.remove("values");
+            // Configurations and explode steps count their ids apart; that counter shapes
+            // nothing. The revision keeps it.
+            map.remove("next_configured_id");
             for list in ["components", "patterns"] {
                 if let Some(Value::Array(items)) = map.get_mut(list) {
                     for item in items.iter_mut().filter_map(Value::as_object_mut) {
@@ -374,6 +378,12 @@ struct TruthOut<'a> {
     #[serde(skip_serializing_if = "ValueTable::is_empty")]
     values: &'a ValueTable,
     next_id: u32,
+    #[serde(skip_serializing_if = "is_first_id")]
+    next_configured_id: u32,
+}
+
+fn is_first_id(id: &u32) -> bool {
+    *id == 1
 }
 
 fn hash_truth(json: Value, bulk: Option<&[u8]>) -> ContentHash {
@@ -696,6 +706,25 @@ mod tests {
             moved.components[1].placement = Placement::translation(DVec3::new(1.0, 2.0, 3.0));
             assert_ne!(moved.geometry_hash(), a.geometry_hash());
         }
+    }
+
+    #[test]
+    fn configurations_and_explode_steps_leave_the_geometry_hash() {
+        let (mut a, ..) = sample(2);
+        let (geometry, revision) = (a.geometry_hash(), a.semantic_hash());
+        a.add_configuration("Open").unwrap();
+        assert_eq!(a.geometry_hash(), geometry, "an inactive configuration shapes nothing");
+        let id = a.take_configured_id();
+        let first = a.components[0].id;
+        a.explode.push(crate::configuration::ExplodeStep {
+            id,
+            occurrences: vec![crate::path::OccurrencePath::root().child(crate::path::Step::component(first))],
+            direction: [0.0, 0.0, 1.0],
+            distance: 30.0,
+        });
+        a.validate().unwrap();
+        assert_eq!(a.geometry_hash(), geometry, "an explode step shapes nothing");
+        assert_ne!(a.semantic_hash(), revision, "both are part of the revision");
     }
 
     #[test]

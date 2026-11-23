@@ -97,6 +97,11 @@ pub struct Assembly {
     /// The next free id for a component, pattern, source, mate or value. Ids are never
     /// reused.
     pub next_id: u32,
+    /// The next free id for a configuration or an explode step, from 1. These records shape
+    /// nothing, so they count apart from `next_id`, which the geometry hash keeps. Left
+    /// out of a file that has none.
+    #[serde(default = "first_id", skip_serializing_if = "is_first_id")]
+    pub next_configured_id: u32,
     /// Display settings, from `settings.json`: not part of the truth or its hashes.
     /// In an assembly, a viewport quality other than auto shows every part at it
     /// instead of at its own, and each override shows one component and everything
@@ -110,6 +115,14 @@ pub struct Assembly {
     /// the truth or its hashes; kept as read and written back on save.
     #[serde(skip)]
     pub import: Option<String>,
+}
+
+fn first_id() -> u32 {
+    1
+}
+
+fn is_first_id(id: &u32) -> bool {
+    *id == 1
 }
 
 /// The units of an assembly file.
@@ -367,6 +380,7 @@ impl Assembly {
             mates: Vec::new(),
             values: ValueTable::default(),
             next_id: 1,
+            next_configured_id: 1,
             settings: Settings::default(),
             import: None,
         }
@@ -376,6 +390,13 @@ impl Assembly {
     pub fn take_id(&mut self) -> u32 {
         let id = self.next_id;
         self.next_id += 1;
+        id
+    }
+
+    /// Takes the next free id for a configuration or an explode step.
+    pub fn take_configured_id(&mut self) -> u32 {
+        let id = self.next_configured_id;
+        self.next_configured_id += 1;
         id
     }
 
@@ -518,8 +539,7 @@ impl Assembly {
             .chain(self.components.iter().map(|c| c.id.0))
             .chain(self.patterns.iter().map(|p| p.id.0))
             .chain(self.known_mates().map(|m| m.id().0))
-            .chain(self.values.ids())
-            .chain(self.configured_ids());
+            .chain(self.values.ids());
         for id in all {
             if !ids.insert(id) {
                 return bad(format!("id {id} is used twice"));

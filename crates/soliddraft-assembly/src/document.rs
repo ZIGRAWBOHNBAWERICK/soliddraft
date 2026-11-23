@@ -135,6 +135,7 @@ pub(crate) struct Configured {
     values: ValueTable,
     configurations: Vec<crate::configuration::Configuration>,
     explode: Vec<crate::configuration::ExplodeStep>,
+    next_configured_id: u32,
 }
 
 impl Configured {
@@ -145,6 +146,7 @@ impl Configured {
             values: truth.values.clone(),
             configurations: truth.configurations.clone(),
             explode: truth.explode.clone(),
+            next_configured_id: truth.next_configured_id,
         }
     }
 
@@ -154,6 +156,7 @@ impl Configured {
         truth.values = self.values.clone();
         truth.configurations = self.configurations.clone();
         truth.explode = self.explode.clone();
+        truth.next_configured_id = self.next_configured_id;
     }
 }
 

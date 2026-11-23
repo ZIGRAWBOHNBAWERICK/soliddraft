@@ -30,7 +30,7 @@ fn click_bar(app: &mut App, label: &str) {
 
 /// The side area, which is the feature's property panel while a form is open.
 fn panel(app: &App) -> Rect {
-    egui::PanelState::load(&app.ctx, soliddraft_app::panels::Side::Tree.panel_id()).unwrap().outer_rect
+    ribbon::feature_panel(app)
 }
 
 fn click_panel(app: &mut App, label: &str) {

@@ -61,8 +61,9 @@ fn a_sketch_tool_asks_for_a_plane_then_arms_itself() {
     });
 }
 
+/// The feature panel, where the plane picker's choices are.
 fn plane_bar(app: &App) -> Rect {
-    egui::PanelState::load(&app.ctx, egui::Id::new("options_bar")).unwrap().outer_rect
+    ribbon::feature_panel(app)
 }
 
 #[test]
@@ -157,7 +158,8 @@ fn sketch_workspace_locks_and_smart_dimension_leads_the_palette() {
             app.run_steps(8);
             assert_eq!(app.state().state.ribbon_tab, RibbonTab::Sketch);
         }
-        let painted = ribbon::painted_in(app, plane_bar(app));
+        let bar = egui::PanelState::load(&app.ctx, egui::Id::new("options_bar")).unwrap().outer_rect;
+        let painted = ribbon::painted_in(app, bar);
         assert!(painted.iter().any(|p| p.text.contains("Sketch1") && p.text.contains("Top plane")));
         assert!(app.query_all_by_label("Extrude").next().is_none());
         case.frame(app, "locked-workspace");

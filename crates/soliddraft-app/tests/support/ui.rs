@@ -320,6 +320,14 @@ pub fn reveal_command(app: &mut App, id: &str) -> Control {
     control(app, &label, palette_region(app))
 }
 
+/// The feature property panel's area in the side area, above the tree.
+pub fn feature_panel(app: &App) -> Rect {
+    if !soliddraft_app::feature_panel::active(&app.state().state) {
+        return Rect::NOTHING;
+    }
+    soliddraft_app::feature_panel::area(&app.ctx).expect("the feature panel is drawn")
+}
+
 /// Opens the active tool's detailed controls using the options bar.
 pub fn open_options(app: &mut App) {
     if app.state().state.in_sketch() {
@@ -329,9 +337,16 @@ pub fn open_options(app: &mut App) {
         }
     } else if app.state().state.editor.is_some() {
         // The feature panel's folded sections hold the rest of the form: unfold them all.
+        // A section below the panel's fold takes a click once scrolled into view.
         for _ in 0..16 {
-            let Some(fold) = app.query_all_by_label_contains("Unfold ").next() else { break };
-            fold.click();
+            let Some(label) =
+                app.query_all_by_label_contains("Unfold ").next().and_then(|n| n.accesskit_node().label())
+            else {
+                break;
+            };
+            app.get_by_label(&label).scroll_to_me();
+            app.run_steps(24);
+            app.get_by_label(&label).click();
             app.run_steps(6);
         }
     } else if !app.state().state.options_details {

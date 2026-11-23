@@ -23,7 +23,7 @@
 // longer than any fixed pause.
 function check(value, message) { if (!value) throw new Error(message); }
 const PART = [19, 132], INSPECT = [19, 241], MASS = [220, 112], CLOSE = [347, 92];
-const RECTANGLE = [630, 52], FILE = [122, 15], NEW_PART = [138, 42];
+const RECTANGLE = [343, 304], FILE = [122, 15], NEW_PART = [138, 42];
 const ROW = { first: 203, second: 229, third: 255 };
 
 check(await page.eval(() => location.search === '?demo'), 'Open the application at /?demo first');

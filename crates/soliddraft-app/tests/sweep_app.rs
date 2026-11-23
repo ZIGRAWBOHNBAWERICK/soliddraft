@@ -561,11 +561,6 @@ fn spline_controls_build_through_the_registry_in_edit_suite() {
         app.run_steps(4);
         ribbon::run_command(&mut app, "sweep");
 
-        let bar = egui::PanelState::load(&app.ctx, egui::Id::new("options_bar")).unwrap().outer_rect;
-        let (_, rect) = ribbon::buttons_in(&app, bar).into_iter().find(|(name, _)| name.starts_with("More (")).unwrap();
-        ribbon::click_at(&mut app, rect.center());
-        app.run_steps(6);
-
         ribbon::open_options(&mut app);
         app.get_by_label("Use spline path").scroll_to_me();
         app.run_steps(24);

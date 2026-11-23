@@ -25,10 +25,25 @@ fn button(app: &mut App, label: &str) {
     app.run_steps(4);
 }
 
+/// Unfolds the feature panel's folded sections, scrolling each into view first.
+fn unfold(app: &mut App) {
+    use egui_kittest::kittest::NodeT;
+    for _ in 0..16 {
+        let Some(label) = app.query_all_by_label_contains("Unfold ").next().and_then(|n| n.accesskit_node().label())
+        else {
+            break;
+        };
+        app.get_by_label(&label).scroll_to_me();
+        app.run_steps(24);
+        app.get_by_label(&label).click();
+        app.run_steps(6);
+    }
+}
+
 fn field(app: &mut App, label: &str, text: &str) {
-    if app.query_by_label(label).is_none() && !app.state().state.form_bar.expanded {
-        app.get_by_label_contains("More (").click();
-        app.run_steps(8);
+    // A field in a folded section of the feature panel: unfold the sections.
+    if app.query_by_label(label).is_none() {
+        unfold(app);
     }
     // The property page scrolls; bring the field into view as a user would.
     app.get_by_label(label).scroll_to_me();
@@ -86,8 +101,7 @@ fn the_editor_grades_d0s_beam_radius_along_z() {
     button(&mut app, "Lattice");
     field(&mut app, "Cell size value", "100");
     assert!(app.query_by_label("Beam radius").is_some(), "the designed label");
-    app.get_by_label_contains("More (").click();
-    app.run_steps(8);
+    unfold(&mut app);
     button(&mut app, "Linear along an axis");
     button(&mut app, "z");
     for (name, value) in [("from", "20"), ("to", "30"), ("start", "1"), ("end", "2")] {

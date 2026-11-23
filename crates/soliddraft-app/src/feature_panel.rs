@@ -38,6 +38,19 @@ impl State {
     }
 }
 
+/// Where the panel was last drawn, for checks that look for its controls.
+pub fn area(ctx: &egui::Context) -> Option<egui::Rect> {
+    ctx.data(|d| d.get_temp(egui::Id::new(AREA)))
+}
+
+const AREA: &str = "feature_panel_area";
+const NEEDED: &str = "feature_panel_needed";
+
+/// The height the panel needed to show all its open sections when last drawn.
+pub fn needed_height(ctx: &egui::Context) -> Option<f32> {
+    ctx.data(|d| d.get_temp(egui::Id::new(NEEDED)))
+}
+
 /// True while a part feature is being created or edited outside a sketch.
 pub fn active(state: &AppState) -> bool {
     state.editor.is_some() && !state.in_sketch() && !state.assembly.is_active() && !state.drawing.is_active()
@@ -82,58 +95,75 @@ fn sections<'a>(fields: &'a [Field<Key>], params: &crate::state::EditorParams) -
 /// Draws the panel for the open feature form.
 pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
     let Some(context) = feature_forms::context(state) else { return };
+    let drawn = ui.max_rect();
+    ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new(AREA), drawn));
     let Some(editor) = state.editor.as_ref() else { return };
     let spec = feature_forms::spec(&editor.params, context.planes(), context.free_sketches());
     let title = editor.title();
     let message = feature_forms::message(editor);
+    // Each form, and each feature edited, opens scrolled to its top.
+    let target = editor.target;
     let mut actions = Vec::new();
     let mut open_all = false;
     ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
     egui::Frame::new().inner_margin(egui::Margin { left: 10, right: 10, top: 8, bottom: 6 }).show(ui, |ui| {
         header(ui, state, &title, spec.icon, spec.confirm, &mut actions);
-        if let Some(message) = &message {
-            egui::Frame::new()
-                .fill(theme::panel())
-                .stroke(egui::Stroke::new(1.0, theme::error()))
-                .corner_radius(theme::RADIUS)
-                .inner_margin(8)
-                .show(ui, |ui| {
-                    ui.set_width(ui.available_width());
-                    ui.colored_label(theme::error(), message);
-                });
-        }
-        ui.add_space(2.0);
-        egui::ScrollArea::vertical().id_salt("feature_panel_scroll").auto_shrink([false, false]).show(ui, |ui| {
-            let Some(editor) = state.editor.as_mut() else { return };
-            let sections = sections(&spec.fields, &editor.params);
-            #[cfg(target_arch = "wasm32")]
-            let mut drawn = Vec::new();
-            for section in sections {
-                let mut open = state.feature_panel.is_open(spec.kind, section.title, section.opens);
-                let mut on = section.toggle;
-                let changed = section_header(ui, section.title, &mut open, on.as_mut());
-                if let Some(on) = on.filter(|_| changed) {
-                    feature_forms::set_section(&mut editor.params, section.title, on);
-                    open = on;
-                }
-                state.feature_panel.set_open(spec.kind, section.title, open);
-                #[cfg(target_arch = "wasm32")]
-                drawn.push(serde_json::json!({ "title": section.title, "open": open, "on": on }));
-                if !open || section.toggle == Some(false) {
-                    continue;
-                }
-                egui::Frame::new().inner_margin(egui::Margin { left: 6, right: 0, top: 2, bottom: 8 }).show(ui, |ui| {
-                    for field in &section.fields {
-                        ui.push_id((spec.kind, field.id), |ui| {
-                            open_all |= row(ui, field, |ui| {
-                                feature_forms::render(ui, field.id, editor, &context, &mut actions)
-                            });
-                        });
-                    }
-                });
+        // The message box is drawn every frame, empty without a message, so the fields
+        // below keep their ids: a field being typed in keeps the keyboard when its value
+        // brings or clears a message. egui drops the focus of a widget whose id changes.
+        let (stroke, margin) = match message {
+            Some(_) => (egui::Stroke::new(1.0, theme::error()), 8),
+            None => (egui::Stroke::NONE, 0),
+        };
+        egui::Frame::new().stroke(stroke).corner_radius(theme::RADIUS).inner_margin(margin).show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            if let Some(message) = &message {
+                ui.colored_label(theme::error(), message);
             }
-            #[cfg(target_arch = "wasm32")]
-            crate::web::show_feature_panel(serde_json::json!({ "title": title, "sections": drawn }));
+        });
+        let above = ui.cursor().top() - drawn.top();
+        ui.push_id("feature_panel_body", |ui| {
+            let shown = egui::ScrollArea::vertical()
+                .id_salt(("feature_panel_scroll", spec.kind, target))
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    let Some(editor) = state.editor.as_mut() else { return };
+                    let sections = sections(&spec.fields, &editor.params);
+                    #[cfg(target_arch = "wasm32")]
+                    let mut drawn = Vec::new();
+                    for section in sections {
+                        let mut open = state.feature_panel.is_open(spec.kind, section.title, section.opens);
+                        let mut on = section.toggle;
+                        let changed = section_header(ui, section.title, &mut open, on.as_mut());
+                        if let Some(on) = on.filter(|_| changed) {
+                            feature_forms::set_section(&mut editor.params, section.title, on);
+                            open = on;
+                        }
+                        state.feature_panel.set_open(spec.kind, section.title, open);
+                        #[cfg(target_arch = "wasm32")]
+                        drawn.push(serde_json::json!({ "title": section.title, "open": open, "on": on }));
+                        if !open || section.toggle == Some(false) {
+                            continue;
+                        }
+                        egui::Frame::new().inner_margin(egui::Margin { left: 6, right: 0, top: 2, bottom: 8 }).show(
+                            ui,
+                            |ui| {
+                                for field in &section.fields {
+                                    ui.push_id((spec.kind, field.id), |ui| {
+                                        open_all |= row(ui, field, |ui| {
+                                            feature_forms::render(ui, field.id, editor, &context, &mut actions)
+                                        });
+                                    });
+                                }
+                            },
+                        );
+                    }
+                    #[cfg(target_arch = "wasm32")]
+                    crate::web::show_feature_panel(serde_json::json!({ "title": title, "sections": drawn }));
+                });
+            // What the panel needs to show everything, for a side area that shares its height.
+            let needed = above + shown.content_size.y + 16.0;
+            ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new(NEEDED), needed));
         });
     });
     if open_all {
@@ -241,8 +271,13 @@ fn section_header(ui: &mut egui::Ui, title: &'static str, open: &mut bool, toggl
                 pos2(rect.left() + 2.0, rect.top() + 2.0),
                 pos2(rect.right() - 28.0, rect.bottom() - 2.0),
             );
-            let checkbox =
-                ui.put(check, egui::Checkbox::new(on, egui::RichText::new(title).font(theme::font_semibold(12.0))));
+            // Left-aligned, where the other sections' titles start.
+            let checkbox = ui
+                .scope_builder(
+                    egui::UiBuilder::new().max_rect(check).layout(egui::Layout::left_to_right(egui::Align::Center)),
+                    |ui| ui.add(egui::Checkbox::new(on, egui::RichText::new(title).font(theme::font_semibold(12.0)))),
+                )
+                .inner;
             #[cfg(target_arch = "wasm32")]
             crate::web::show_control(title, checkbox.rect);
             changed = checkbox.changed();

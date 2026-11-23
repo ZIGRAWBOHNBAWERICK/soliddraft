@@ -40,9 +40,26 @@ pub(in crate::app) fn center_dock() -> DockState<Tab> {
 /// at the window's edge chooses between them, so the area has no tabs of its own.
 pub(in crate::app) fn pane(ui: &mut egui::Ui, state: &mut AppState) {
     ui.spacing_mut().item_spacing = vec2(6.0, 4.0);
-    // While a feature is created or edited the side area is its property panel.
+    // While a feature is created or edited the side area is its property panel, with the
+    // tree kept below it: planes, axes and features are still picked from the tree.
     if crate::feature_panel::active(state) {
-        crate::feature_panel::show(ui, state);
+        // The panel takes what its open sections need, up to two thirds; the tree the rest.
+        let full = ui.available_rect_before_wrap();
+        let most = (full.height() * 0.68).max(160.0).min(full.height());
+        let wanted = crate::feature_panel::needed_height(ui.ctx()).unwrap_or(most);
+        let split = full.top() + wanted.clamp(160.0_f32.min(most), most);
+        let top = Rect::from_min_max(full.min, pos2(full.right(), split));
+        let bottom = Rect::from_min_max(pos2(full.left(), split), full.max);
+        let layout = egui::Layout::top_down(egui::Align::Min);
+        let mut panel = ui.new_child(egui::UiBuilder::new().id_salt("feature_panel_area").max_rect(top).layout(layout));
+        panel.set_clip_rect(top.intersect(ui.clip_rect()));
+        crate::feature_panel::show(&mut panel, state);
+        ui.painter().hline(full.x_range(), split, egui::Stroke::new(1.0, theme::line_strong()));
+        let mut rows =
+            ui.new_child(egui::UiBuilder::new().id_salt("feature_panel_tree").max_rect(bottom).layout(layout));
+        rows.set_clip_rect(bottom.intersect(ui.clip_rect()));
+        tree::show(&mut rows, state);
+        ui.allocate_rect(full, Sense::hover());
         return;
     }
     match state.layout.pane {

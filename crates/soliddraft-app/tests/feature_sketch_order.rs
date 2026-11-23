@@ -13,8 +13,9 @@ use soliddraft_app::document::{FeatureKind, Selection};
 use soliddraft_app::state::{AppAction, EditorParams, ProfileFeature};
 use ux_tools::{Case, STANDARD, launch, settle};
 
+/// The feature panel, where the form's choices and actions are.
 fn bar(app: &App) -> Rect {
-    egui::PanelState::load(&app.ctx, egui::Id::new("options_bar")).unwrap().outer_rect
+    ribbon::feature_panel(app)
 }
 
 fn click_bar(app: &mut App, label: &str) {
@@ -116,7 +117,7 @@ fn feature_first_asks_for_a_sketch_and_continues_with_the_one_picked() {
         };
         assert!(shown(app, sketch), "the sketch it could use shows in the viewport");
         for label in ["New sketch", "Sketch1", "Cancel"] {
-            assert!(bar(app).contains_rect(ribbon::control(app, label, bar(app)).rect), "{label} is on the bar");
+            assert!(bar(app).contains_rect(ribbon::control(app, label, bar(app)).rect), "{label} is in the panel");
         }
         case.frame(app, "1-extrude-asks-for-sketch");
 

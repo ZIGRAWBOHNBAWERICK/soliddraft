@@ -194,8 +194,9 @@ impl ConfigState {
     }
 
     /// Puts this state into the truth. Components it does not know keep theirs; values are
-    /// matched by id and others keep theirs; overrides and explode steps that name an
-    /// occurrence the assembly no longer has are dropped.
+    /// matched by id, keep reading the ids they read when saved, and are checked together;
+    /// others keep theirs; overrides and explode steps that name an occurrence the assembly
+    /// no longer has are dropped.
     fn apply(&self, assembly: &mut Assembly) -> Result<(), Invalid> {
         for s in &self.components {
             if let Some(c) = assembly.component_mut(s.id) {
@@ -207,14 +208,7 @@ impl ConfigState {
         let overrides: Vec<Override> =
             self.overrides.iter().filter(|o| names_occurrence(assembly, &o.path)).cloned().collect();
         assembly.overrides = overrides;
-        let ids: Vec<u32> = assembly.values.ids().collect();
-        for id in ids {
-            let Some(text) = self.values.expression(id).map(|e| e.text().to_owned()) else { continue };
-            let name = assembly.values.name_of(id).expect("listed above").to_owned();
-            let mut next = assembly.values.clone();
-            next.set(&name, &text, || id).map_err(|e| Invalid(format!("value {name}: {e}")))?;
-            assembly.values = next;
-        }
+        assembly.values = assembly.values.restored(&self.values).map_err(|e| Invalid(format!("values: {e}")))?;
         let explode: Vec<ExplodeStep> = self
             .explode
             .iter()
@@ -484,6 +478,52 @@ mod tests {
         a.rename_configuration(b, "Open").unwrap();
         a.delete_configuration(b).unwrap();
         assert!(a.configurations.is_empty(), "one left goes back to none");
+        a.validate().unwrap();
+    }
+
+    #[test]
+    fn a_configuration_keeps_what_its_values_read_when_a_value_is_renamed() {
+        let mut a = sample();
+        let (x, y) = (a.take_id(), a.take_id());
+        a.values.set("a", "5 mm", || x).unwrap();
+        a.values.set("b", "a", || y).unwrap();
+        let saved = a.add_configuration("Saved").unwrap();
+        // In Default: a becomes c, a new value takes the name a, and b reads c twice.
+        a.values.rename("a", "c", std::iter::empty::<&mut soliddraft_model::Expression>()).unwrap();
+        let fresh = a.take_id();
+        a.values.set("a", "40 mm", || fresh).unwrap();
+        a.values.set("b", "c * 2", || unreachable!()).unwrap();
+        a.validate().unwrap();
+        a.activate_configuration(saved).unwrap();
+        a.validate().unwrap();
+        let b = a.values.expression(y).unwrap();
+        assert_eq!(b.references(), vec![x], "b still reads the value it read when saved");
+        assert_eq!(b.text(), "c", "under that value's name now");
+        assert_eq!(a.values.length(b).unwrap(), 5.0);
+        // And back: Default's b comes back as it was.
+        let default = a.configuration_named(DEFAULT_NAME).unwrap().id;
+        a.activate_configuration(default).unwrap();
+        assert_eq!(a.values.expression(y).unwrap().text(), "c * 2");
+        assert_eq!(a.values.expression(y).unwrap().references(), vec![x]);
+    }
+
+    #[test]
+    fn configurations_may_reverse_which_value_reads_which() {
+        let mut a = sample();
+        let (x, y) = (a.take_id(), a.take_id());
+        a.values.set("x", "5 mm", || x).unwrap();
+        a.values.set("y", "x", || y).unwrap();
+        let other = a.add_configuration("Other").unwrap();
+        a.activate_configuration(other).unwrap();
+        // In Other, x reads y instead.
+        a.values.set("y", "7 mm", || unreachable!()).unwrap();
+        a.values.set("x", "y", || unreachable!()).unwrap();
+        let default = a.configuration_named(DEFAULT_NAME).unwrap().id;
+        a.activate_configuration(default).unwrap();
+        assert_eq!(a.values.expression(y).unwrap().text(), "x");
+        a.activate_configuration(other).unwrap();
+        assert_eq!(a.values.expression(x).unwrap().text(), "y");
+        assert_eq!(a.values.length(a.values.expression(x).unwrap()).unwrap(), 7.0);
         a.validate().unwrap();
     }
 

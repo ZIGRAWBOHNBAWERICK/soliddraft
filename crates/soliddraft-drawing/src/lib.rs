@@ -58,7 +58,7 @@ pub use model_items::{ImportReport, ModelDimension, ModelMeasure};
 pub use part::{Entity, Namer, Part, PartIndex, PartSource, Requirements, Resolution, feature_name};
 pub use placed::{PART_VISIBILITY, PlacedBodies, Rigid};
 pub use pmi_items::{PmiReport, Unplaced};
-pub use sheet::{Projection, RevisionRow, Scale, Sheet, Table, TableKind};
+pub use sheet::{HoleRow, Projection, RevisionRow, Scale, Sheet, Table, TableKind};
 pub use soliddraft_document::{ContentHash, DocKind, DocRef, DocumentId};
 pub use template::{DimensionStyle, LineWidths, Margins, PaperSize, Template, TitleBlock, TitleField, ZoneGrid};
 pub use update::{

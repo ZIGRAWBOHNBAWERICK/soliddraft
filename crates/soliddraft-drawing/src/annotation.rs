@@ -111,6 +111,12 @@ pub enum AnnotationKind {
     CentreMark,
     /// A centreline of a cylindrical face or between two edges.
     Centreline,
+    /// A fillet weld with its reference line and leader on the arrow side.
+    Weld {
+        /// Leg size in millimetres. Empty when unspecified.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        size: Option<f64>,
+    },
     /// A surface finish symbol (ISO 1302, ASME Y14.36) on a surface or its extension
     /// line. Its anchor, when it has one, is the surface; the symbol stands on that
     /// point and its text sits at the placement.
@@ -300,6 +306,9 @@ pub struct Dimension {
     pub kind: DimensionKind,
     /// The value.
     pub value: DimValue,
+    /// The included acute angle of a chamfer against the picked adjacent edge, in degrees.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chamfer_angle: Option<f64>,
     /// The tolerance.
     #[serde(default)]
     pub tolerance: Tolerance,
@@ -330,6 +339,7 @@ impl Dimension {
         Dimension {
             kind,
             value: DimValue::Measured { value },
+            chamfer_angle: None,
             tolerance: Tolerance::None,
             precision,
             text: Dimension::default_text(),

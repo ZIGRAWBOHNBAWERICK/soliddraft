@@ -971,6 +971,16 @@ fn command_ids_shortcuts_agent_schemas_and_availability_stay_compatible() {
             current["workspace"] = row["workspace"].clone();
             current["availability"]["assembly"]["offered"] = row["availability"]["assembly"]["offered"].clone();
         }
+        if ["drawing_chamfer_dimension", "drawing_centreline", "drawing_weld", "drawing_hole_table"]
+            .contains(&id.as_str())
+        {
+            assert_eq!(current["agents"], "app");
+            assert!(matches!(
+                commands::get(id).unwrap().action.unwrap()(&part_entry),
+                AppAction::Drawing(soliddraft_app::drawing::DrawingAction::SetTool(_))
+            ));
+            current["agents"] = row["agents"].clone();
+        }
         if ["drawing_check_sheet", "drawing_propose_dimensions", "drawing_find_issues", "drawing_explain"]
             .contains(&id.as_str())
         {

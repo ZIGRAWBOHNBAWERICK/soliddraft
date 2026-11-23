@@ -416,6 +416,60 @@ pub fn assembly_screen_point(x: f32, y: f32, z: f32) -> Option<Vec<f32>> {
     })
 }
 
+struct DrawingFrame {
+    camera: crate::drawing::Camera2,
+    rect: egui::Rect,
+    views: Vec<(String, soliddraft_drawing::project::ViewTransform, soliddraft_kernel_api::Point2)>,
+    shown: serde_json::Value,
+}
+
+thread_local! {
+    static DRAWING_FRAME: RefCell<Option<DrawingFrame>> = const { RefCell::new(None) };
+}
+
+pub(crate) fn show_drawing(s: &crate::drawing::DrawingSession) {
+    use soliddraft_drawing::project::view_label_in;
+    let sheet = s.sheet();
+    let views = sheet
+        .views
+        .iter()
+        .filter_map(|view| {
+            let transform = *s.doc.transforms.get(&view.id)?;
+            Some((view_label_in(&s.doc.drawing, sheet, view), transform, view.position))
+        })
+        .collect();
+    let shown = serde_json::json!({
+        "tool": s.tool.label(),
+        "prompt": s.tool_prompt(),
+        "annotations": sheet.annotations.len(),
+        "tables": sheet.tables.len(),
+        "dangling": s.doc.dangling_count(),
+        "up_to_date": s.is_up_to_date(),
+    });
+    DRAWING_FRAME.with_borrow_mut(|current| {
+        *current = Some(DrawingFrame { camera: s.camera, rect: s.canvas_rect, views, shown });
+    });
+}
+
+/// The last drawn sheet's tool and item counts, for browser checks.
+#[wasm_bindgen]
+pub fn shown_drawing() -> String {
+    DRAWING_FRAME.with_borrow(|frame| frame.as_ref().map_or_else(|| "null".into(), |f| f.shown.to_string()))
+}
+
+/// Where a model point appears in a named view of the last drawn sheet, in page pixels.
+#[wasm_bindgen]
+pub fn drawing_screen_point(view: &str, x: f64, y: f64, z: f64) -> Option<Vec<f32>> {
+    use soliddraft_kernel_api::{Point2, Vec3};
+    DRAWING_FRAME.with_borrow(|frame| {
+        let frame = frame.as_ref()?;
+        let (_, xf, position) = frame.views.iter().find(|(name, _, _)| name == view)?;
+        let p = xf.point(Vec3::new(x, y, z));
+        let at = frame.camera.to_screen(frame.rect, Point2::new(p.u + position.u, p.v + position.v));
+        Some(vec![at.x, at.y])
+    })
+}
+
 /// Notes the assembly the last frame showed, for [`shown_assembly`].
 pub(crate) fn show_assembly(shown: serde_json::Value) {
     SHOWN_ASSEMBLY.with_borrow_mut(|assembly| *assembly = shown.to_string());
@@ -527,6 +581,7 @@ pub(crate) fn begin_frame() {
     SHOWN_FEATURE_REFUSAL.with_borrow_mut(String::clear);
     SHOWN_CONTROLS.with_borrow_mut(std::collections::BTreeMap::clear);
     SHOWN_PMI.with_borrow_mut(String::clear);
+    DRAWING_FRAME.with_borrow_mut(|frame| *frame = None);
     SHOWN_VIEWPORT.with_borrow_mut(String::clear);
     SHOWN_PART_VIEW.with_borrow_mut(|view| *view = None);
     SHOWN_PRINT_CHECK.with_borrow_mut(String::clear);

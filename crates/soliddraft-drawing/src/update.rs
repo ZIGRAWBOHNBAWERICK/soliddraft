@@ -152,6 +152,7 @@ pub fn update_from_model(drawing: &mut Drawing, part: &Part) -> Result<UpdateRep
     let failed = |id| report.dangling_views.iter().any(|failure| failure.view == id);
     for sheet in &mut drawing.sheets {
         let symbols = library::template(sheet.template.as_str()).style_file().symbols.clone();
+        refresh_hole_tables(sheet, &index, &contexts, |view| !failed(view));
         for a in &mut sheet.annotations {
             let Some(ctx) = contexts.get(&a.view) else { continue };
             if failed(a.view) || sheet.views.iter().any(|v| v.id == a.view && v.excluded_from_update) {
@@ -243,6 +244,7 @@ pub fn regenerate_view(drawing: &mut Drawing, part: &Part, id: ViewId) -> Result
         follow_parent(drawing, child, &contexts);
     }
     for sheet in &mut drawing.sheets {
+        refresh_hole_tables(sheet, &index, &contexts, |view| ids.contains(&view));
         let symbols = &library::template(sheet.template.as_str()).style_file().symbols;
         for a in sheet.annotations.iter_mut().filter(|a| ids.contains(&a.view)) {
             let context = &contexts[&a.view];
@@ -251,6 +253,23 @@ pub fn regenerate_view(drawing: &mut Drawing, part: &Part, id: ViewId) -> Result
     }
     crate::pmi_items::refresh(drawing, part, |view| ids.contains(&view), false);
     Ok(())
+}
+
+fn refresh_hole_tables(
+    sheet: &mut crate::Sheet,
+    index: &PartIndex,
+    contexts: &Contexts,
+    updated: impl Fn(ViewId) -> bool,
+) {
+    let Some(namer) = index.namer() else { return };
+    for table in &mut sheet.tables {
+        if let Some(view) = table.hole_view.filter(|&view| updated(view))
+            && let Some(ctx) = contexts.get(&view)
+            && sheet.views.iter().any(|v| v.id == view && !v.excluded_from_update)
+        {
+            table.holes = ctx.projected.hole_rows(namer);
+        }
+    }
 }
 
 fn collect(drawing: &Drawing, report: &mut UpdateReport) {
@@ -327,7 +346,15 @@ pub(crate) fn remeasure(
     let (before_state, mut change) = (a.state.clone(), None);
     match &mut a.body {
         AnnotationKind::Dimension(d) => {
-            let measured = measure(&d.kind, d.dim_type, &geometry, &ctx.xf);
+            let old = value_text(d);
+            let measured = if d.kind == crate::DimensionKind::Chamfer {
+                crate::measure::chamfer(&geometry, &ctx.xf).map(|(size, angle)| {
+                    d.chamfer_angle = Some(crate::model_items::round_value(angle));
+                    size
+                })
+            } else {
+                measure(&d.kind, d.dim_type, &geometry, &ctx.xf)
+            };
             if matches!(d.value, DimValue::Measured { .. }) && measured.is_none() {
                 a.state = AnnotationState::Dangling {
                     lost: (0..a.anchors.len()).collect(),
@@ -339,7 +366,6 @@ pub(crate) fn remeasure(
             for (anchor, g) in a.anchors.iter_mut().zip(&geometry) {
                 anchor.cached = ctx.xf.point(anchor_point(g, &ctx.xf, across));
             }
-            let old = value_text(d);
             if let (DimValue::Measured { value }, Some(new)) = (&mut d.value, measured) {
                 *value = crate::model_items::round_value(new);
             }
@@ -378,6 +404,18 @@ pub(crate) fn remeasure(
             }
         }
         body => {
+            if matches!(body, AnnotationKind::Centreline)
+                && a.anchors.len() == 4
+                && crate::measure::projected_edge_ends(&geometry, &ctx.xf)
+                    .and_then(crate::measure::centreline)
+                    .is_none()
+            {
+                a.state = AnnotationState::Dangling {
+                    lost: (0..a.anchors.len()).collect(),
+                    cause: "The centreline needs two distinct parallel edges with overlapping lengths".into(),
+                };
+                return None;
+            }
             for (anchor, g) in a.anchors.iter_mut().zip(&geometry) {
                 anchor.cached = ctx.xf.point(anchor_point(g, &ctx.xf, Default::default()));
             }

@@ -1026,6 +1026,21 @@ jobs:
           name: browser-hole-wizard
           path: ${{ runner.temp }}/browser-hole-wizard
           if-no-files-found: ignore
+      - name: Make, rebuild, save and reopen drawing annotations in Chromium
+        timeout-minutes: 10
+        env:
+          CHROME_ARGS: --no-sandbox --enable-unsafe-swiftshader --use-angle=swiftshader
+        run: |
+          python3 -m http.server 8777 --bind 127.0.0.1 --directory target/web-dist > "$RUNNER_TEMP/drawing-annotations-server.log" 2>&1 &
+          server=$!
+          trap 'kill "$server"' EXIT
+          node ci/browser-drawing-annotations.mjs /usr/bin/google-chrome http://127.0.0.1:8777/ "$RUNNER_TEMP/browser-drawing-annotations" ci/fixtures/drawing-annotations/bracket.dwprt
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-drawing-annotations
+          path: ${{ runner.temp }}/browser-drawing-annotations
+          if-no-files-found: ignore
       - name: Make, mate, save and reopen an assembly of uploaded parts, add a Universal Joint, refuse it a right angle, and choose between uploaded assemblies, in Chromium
         timeout-minutes: 30
         env:

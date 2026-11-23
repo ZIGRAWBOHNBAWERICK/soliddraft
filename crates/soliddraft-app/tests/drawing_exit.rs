@@ -213,6 +213,10 @@ fn circles(list: &[(P2, f64)]) -> Sketch {
 /// plate, a 10 x 90 x 60 flange on its -X end, a 24 mm boss with a 12 mm bore, four
 /// 9 mm holes on a 90 x 44 pattern and a 40 x 12 slot through the flange.
 fn bracket_document() -> Document {
+    bracket_with_plate(rectangle(P2::ZERO, P2::new(120.0, 90.0)))
+}
+
+fn bracket_with_plate(profile: Sketch) -> Document {
     let mut doc = soliddraft_app::document::Document::new(
         "Part1",
         std::sync::Arc::new(soliddraft_kernel_catallax::CatallaxKernel::new()),
@@ -224,7 +228,7 @@ fn bracket_document() -> Document {
         doc.apply(Command::EditSketch { id, sketch }).unwrap();
         id
     };
-    let plate = sketch_on(&mut doc, PlaneKind::Top, rectangle(P2::ZERO, P2::new(120.0, 90.0)));
+    let plate = sketch_on(&mut doc, PlaneKind::Top, profile);
     let plate = doc
         .apply(Command::AddExtrude {
             params: ExtrudeParams { sketch: Some(plate), depth: 10.0, ..Default::default() },
@@ -969,4 +973,143 @@ fn bracket_d3_sections_details_sheets_and_symbols() {
     harness.key_press_modifiers(Modifiers::COMMAND, Key::Y);
     harness.run_steps(3);
     assert_eq!(annotations_of_kind(&harness, |b| matches!(b, AnnotationKind::RevisionSymbol { .. })).len(), 1);
+}
+
+#[test]
+fn drawing_annotations_follow_the_part_through_save_and_reopen() {
+    use soliddraft_drawing::display::{Item, Owner, Role, layout_sheet};
+    use soliddraft_kernel_api::Point2;
+
+    if !gpu_available() {
+        eprintln!("no GPU adapter; skipping the drawing annotation exit test");
+        return;
+    }
+    let _gpu = gpu_lock();
+    let dir = out_dir().join("annotations");
+    std::fs::create_dir_all(&dir).unwrap();
+    soliddraft_app::file::set_config_dir(Some(dir.join("config")));
+    let mut profile = Sketch::new();
+    let corners = [[0., 0.], [114., 0.], [120., 6.], [120., 90.], [0., 90.]];
+    for ([u, v], [x, y]) in corners.into_iter().zip(corners.into_iter().cycle().skip(1)) {
+        profile.add(EntityKind::Line { a: P2::new(u, v), b: P2::new(x, y) }, false);
+    }
+    let mut app = harness(bracket_with_plate(profile));
+    settle(&mut app);
+    let part = dir.join("annotations.dwprt");
+    app.state_mut().state.push(AppAction::SaveAs(Some(part.clone())));
+    settle(&mut app);
+    assert!(part.exists());
+    make_drawing(&mut app);
+    click_button(&mut app, "Create drawing (Enter)");
+    settle(&mut app);
+    click_button(&mut app, "Annotate tab");
+    let top = view_named(&app, "Top view");
+    let front = view_named(&app, "Front view");
+    let pick = |app: &mut App<'_>, view, p: [f64; 3]| {
+        let at = screen_of(app, view, Vec3::new(p[0], p[1], p[2]));
+        click_at(app, at);
+    };
+
+    click_button(&mut app, "Chamfer");
+    pick(&mut app, top, [117., 3., 10.]);
+    pick(&mut app, top, [90., 0., 10.]);
+    pick(&mut app, top, [130., -13., 10.]);
+    let chamfer =
+        annotations_of_kind(&app, |b| matches!(b, AnnotationKind::Dimension(d) if d.kind == DimensionKind::Chamfer));
+    assert_eq!(chamfer.len(), 1, "the Chamfer ribbon tool adds a dimension");
+
+    click_button(&mut app, "Centreline");
+    pick(&mut app, front, [100., 0., 0.]);
+    pick(&mut app, front, [100., 0., 10.]);
+    let centreline = annotations_of_kind(&app, |b| matches!(b, AnnotationKind::Centreline));
+    assert_eq!(centreline.len(), 1);
+    let centre_id = centreline[0].id;
+
+    click_button(&mut app, "Weld");
+    pick(&mut app, front, [100., 0., 10.]);
+    pick(&mut app, front, [100., 0., 27.]);
+    type_field(&mut app, "Weld size field", "4");
+
+    click_button(&mut app, "Hole table");
+    pick(&mut app, top, [25., 23., 10.]);
+    let position = session(&app).sheet().view(top).unwrap().position;
+    let table_at = screen_of_sheet(&app, Point2::new(position.u + 80., position.v + 42.));
+    click_at(&mut app, table_at);
+
+    let check_sheet = |app: &App<'_>, vertical: f64| {
+        let s = session(app);
+        let list = layout_sheet(&s.doc.drawing, 0);
+        let texts: Vec<_> = list
+            .items
+            .iter()
+            .filter_map(|i| match i {
+                Item::Text(t) => Some(t.text.as_str()),
+                _ => None,
+            })
+            .collect();
+        for text in ["6 × 45°", "HOLE TABLE", "A1", "A5"] {
+            assert!(texts.iter().any(|actual| actual.contains(text)), "missing {text}: {texts:?}");
+        }
+        let centres: Vec<_> = list
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                Item::Path(p) if p.owner == Owner::Annotation(centre_id) && p.role == Role::Centre => Some(p),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(centres.len(), 1);
+        assert!(centres[0].dash.is_some());
+        let outline = centres[0].path.elements();
+        let [kurbo::PathEl::MoveTo(a), kurbo::PathEl::LineTo(b)] = outline else { panic!("{outline:?}") };
+        assert!((a.y - vertical).abs() < 1e-6 && (b.y - vertical).abs() < 1e-6, "{outline:?}");
+        assert_eq!(s.doc.dangling_count(), 0);
+        assert_eq!(s.sheet().tables.len(), 1);
+        let rows = &s.sheet().tables[0].holes;
+        assert_eq!(rows.iter().map(|r| r.diameter).collect::<Vec<_>>(), [9., 9., 12., 9., 9.]);
+        let welds = annotations_of_kind(app, |b| matches!(b, AnnotationKind::Weld { .. }));
+        assert_eq!(welds.len(), 1);
+        assert_eq!(welds[0].body, AnnotationKind::Weld { size: Some(4.0) });
+        assert!(
+            list.items
+                .iter()
+                .any(|i| matches!(i, Item::Text(t) if t.owner == Owner::Annotation(welds[0].id) && t.text == "4"))
+        );
+    };
+    let middle =
+        |app: &App<'_>, thickness| session(app).sheet_point(front, Vec3::new(100., 0., thickness / 2.0)).unwrap().v;
+    let before = middle(&app, 10.);
+    check_sheet(&app, before);
+
+    click_button(&mut app, "Views tab");
+    click_button(&mut app, "Show part");
+    click_row(&mut app, "Plate");
+    click_button(&mut app, "Edit feature");
+    set_field(&mut app, "Depth", "11");
+    app.key_press(Key::Enter);
+    settle(&mut app);
+    assert!(session(&app).is_up_to_date());
+    assert!(session(&app).doc.last_update.is_some());
+    app.state_mut().state.push(AppAction::SaveAs(Some(part)));
+    settle(&mut app);
+    open_drawings(&mut app);
+    let after = middle(&app, 11.);
+    let s = session(&app);
+    let scale = soliddraft_drawing::project::effective_scale(s.sheet(), s.sheet().view(front).unwrap());
+    assert!((after - before - 0.5 * scale).abs() < 1e-6);
+    check_sheet(&app, after);
+
+    let drawing = dir.join("annotations.dwdrw");
+    push(&mut app, DrawingAction::Save(Some(drawing.clone())));
+    push(&mut app, DrawingAction::CloseDrawing);
+    push(&mut app, DrawingAction::OpenFile(drawing));
+    settle(&mut app);
+    check_sheet(&app, after);
+    push(&mut app, DrawingAction::Rebuild);
+    settle(&mut app);
+    check_sheet(&app, after);
+
+    // Add a diameter dimension to a hole in the reopened drawing.
+    let id = smart_dimension(&mut app, top, &[Vec3::new(29.5, 23., 11.)], vec2(28., -20.));
+    assert_eq!(value_of(&app, id), (9.0, AnnotationState::Ok));
 }

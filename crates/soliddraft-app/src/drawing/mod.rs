@@ -101,6 +101,14 @@ pub enum DrawingTool {
     Note,
     HoleCallout,
     CentreMark,
+    /// The bevel and adjacent edge in a profile view, then a placement.
+    Chamfer,
+    /// Two parallel edges in one view.
+    Centreline,
+    /// The edge where a fillet weld goes, then a placement.
+    Weld,
+    /// A view showing the holes face-on, then a table position.
+    HoleTable,
     /// Picking a new entity for a lost end of an annotation.
     Reattach {
         annotation: AnnotationId,
@@ -142,6 +150,10 @@ impl DrawingTool {
             DrawingTool::Note => "Note",
             DrawingTool::HoleCallout => "Hole callout",
             DrawingTool::CentreMark => "Centre mark",
+            DrawingTool::Chamfer => "Chamfer dimension",
+            DrawingTool::Centreline => "Centreline",
+            DrawingTool::Weld => "Weld symbol",
+            DrawingTool::HoleTable => "Hole table",
             DrawingTool::Reattach { .. } => "Reattach",
             DrawingTool::Section { replace: None } => "Section view",
             DrawingTool::Section { replace: Some(_) } => "Redraw cutting line",
@@ -200,6 +212,32 @@ impl DrawingTool {
             DrawingTool::Note => "Note · click an edge for a leader, or anywhere for plain text".into(),
             DrawingTool::HoleCallout => "Hole callout · click a hole circle seen face-on".into(),
             DrawingTool::CentreMark => "Centre mark · click a circle seen face-on".into(),
+            DrawingTool::Chamfer => match picks {
+                0 => "Chamfer · pick the bevel edge in a profile view".into(),
+                1 | 2 => "Chamfer · pick the adjoining edge that defines the angle".into(),
+                _ => "Chamfer · click to place the dimension".into(),
+            },
+            DrawingTool::Centreline => {
+                if picks == 0 {
+                    "Centreline · pick one of two parallel edges".into()
+                } else {
+                    "Centreline · pick the other edge in the same view".into()
+                }
+            }
+            DrawingTool::Weld => {
+                if picks == 0 {
+                    "Weld · pick a joint edge".into()
+                } else {
+                    "Weld · click to place the fillet weld symbol".into()
+                }
+            }
+            DrawingTool::HoleTable => {
+                if picks > 0 {
+                    "Hole table · click to place the table".into()
+                } else {
+                    "Hole table · click a view that shows circular holes face-on".into()
+                }
+            }
             DrawingTool::Reattach { .. } => "Reattach · click a new edge or point for the lost end marked ×".into(),
             DrawingTool::Section { .. } if pending => {
                 "Section · click to place along the alignment. F flips the direction, Ctrl frees the view.".into()
@@ -260,6 +298,8 @@ pub enum DrawingSel {
     Format,
     /// The current sheet's revision table, made on the first revision.
     Revisions,
+    /// The index of a hole table on the current sheet.
+    HoleTable(usize),
     /// The model reference: the part the drawing shows.
     Model,
 }
@@ -408,6 +448,8 @@ pub struct ToolDraft {
     pub orientation: LinearOrientation,
     /// Picks so far: dimension set points, or a symbol's anchor.
     pub anchors: Vec<Anchor>,
+    /// Chamfer measurement after both profile edges have been picked.
+    pub chamfer: Option<soliddraft_drawing::Dimension>,
     /// The feature control frame being built.
     pub gdt: GdtDraft,
     /// The next datum's letter; empty for the drawing's next one.
@@ -436,6 +478,7 @@ impl Default for ToolDraft {
             depth: 10.0,
             orientation: LinearOrientation::Horizontal,
             anchors: Vec::new(),
+            chamfer: None,
             gdt: GdtDraft::default(),
             datum: String::new(),
             finish: FinishDraft::default(),
@@ -452,6 +495,7 @@ impl ToolDraft {
         self.view = None;
         self.points.clear();
         self.anchors.clear();
+        self.chamfer = None;
         self.pending = None;
         self.flip = false;
         self.target_sheet = None;
@@ -698,7 +742,15 @@ impl DrawingSession {
 
     /// The prompt of the current tool at its current stage.
     pub fn tool_prompt(&self) -> String {
-        if self.tool.is_derived() || self.tool.is_symbol() || matches!(self.tool, DrawingTool::DimensionSet(_)) {
+        if self.tool == DrawingTool::HoleTable {
+            self.tool.prompt(usize::from(self.draft.view.is_some()))
+        } else if self.tool.is_derived()
+            || self.tool.is_symbol()
+            || matches!(
+                self.tool,
+                DrawingTool::DimensionSet(_) | DrawingTool::Chamfer | DrawingTool::Centreline | DrawingTool::Weld
+            )
+        {
             self.tool.prompt_at(self.draft.stage(), self.draft.pending.is_some())
         } else {
             self.tool.prompt(self.picks.len())
@@ -1599,6 +1651,12 @@ pub fn apply(state: &mut AppState, dock: &mut DockState<Tab>, ctx: &egui::Contex
             match s.selection {
                 Some(DrawingSel::Annotation(id)) => {
                     let _ = s.doc.apply(Command::DeleteAnnotation { annotation: id }, None);
+                    s.selection = None;
+                }
+                Some(DrawingSel::HoleTable(table)) => {
+                    if s.sheet().tables.get(table).is_some_and(|t| t.kind == soliddraft_drawing::TableKind::Hole) {
+                        let _ = s.doc.apply(Command::DeleteTable { sheet: s.sheet, table }, None);
+                    }
                     s.selection = None;
                 }
                 Some(DrawingSel::View(id)) => match s.doc.apply(Command::DeleteView { view: id }, None) {

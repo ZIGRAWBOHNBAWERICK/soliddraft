@@ -288,6 +288,16 @@ async function exportStl(v, label) {
   return until(v, label, 'shown_print_check', shown => shown.state !== 'checking', 900);
 }
 
+async function withoutDownload(label, run) {
+  const from = browser.events.length;
+  const files = fs.readdirSync(downloads).sort();
+  const result = await run();
+  const started = browser.events.slice(from).filter(e => e.method === 'Browser.downloadWillBegin');
+  check(started.length === 0, `${label}: a refused export started a download: ${started.map(e => e.params.suggestedFilename)}`);
+  check(JSON.stringify(fs.readdirSync(downloads).sort()) === JSON.stringify(files), `${label}: a refused export changed the download directory`);
+  return result;
+}
+
 async function save(v, label) {
   const controls = await shown(v, 'shown_controls');
   const button = controls && controls['Save checked export'];
@@ -344,16 +354,17 @@ async function main() {
   // A preview on screen does not make an export: Catallax refuses this one.
   const split = await open(v, 'pieces', pieces);
   check(split.viewport.label === 'unproved preview', `pieces: the preview is labelled ${split.viewport.label}`);
-  const refused = await exportStl(v, 'pieces');
-  check(refused.state === 'refused' && refused.route === 'distance field', `pieces: the STL export shows ${JSON.stringify(refused)}, not a refusal`);
-  check(/could not be certified/.test(refused.message), `pieces: the refusal reads "${refused.message}"`);
-  const controls = await shown(v, 'shown_controls');
-  check(!controls['Save checked export'], 'pieces: a refused export offers Save checked export');
-  await v.shot('pieces-refused-export');
-  const before = fs.readdirSync(downloads).length;
-  await v.click([controls['Print check: Cancel'].x, controls['Print check: Cancel'].y]);
-  await v.settle(2000);
-  check(fs.readdirSync(downloads).length === before, 'pieces: a refused export wrote a file');
+  const refused = await withoutDownload('pieces', async () => {
+    const outcome = await exportStl(v, 'pieces');
+    check(outcome.state === 'refused' && outcome.route === 'distance field', `pieces: the STL export shows ${JSON.stringify(outcome)}, not a refusal`);
+    check(/could not be certified/.test(outcome.message), `pieces: the refusal reads "${outcome.message}"`);
+    const controls = await shown(v, 'shown_controls');
+    check(!controls['Save checked export'], 'pieces: a refused export offers Save checked export');
+    await v.shot('pieces-refused-export');
+    await v.click([controls['Print check: Cancel'].x, controls['Print check: Cancel'].y]);
+    await v.settle(2000);
+    return outcome;
+  });
   evidence.pieces = { first: split, exported: refused };
 
   // A refused field: marked, its label gone, no export opens.
@@ -361,9 +372,11 @@ async function main() {
   const mark = bad.marks.find(m => m.feature === 'Gyroid1');
   check(mark && mark.mark === 'Refused' && mark.reason, `graded: the tree marks ${JSON.stringify(bad.marks)}, not Gyroid1 Refused with a reason`);
   check(bad.viewport.label === null, `graded: a refused gyroid keeps the label ${bad.viewport.label}`);
-  await v.command('STL');
-  await v.settle(2000);
-  check(await shown(v, 'shown_print_check') === null, 'graded: the STL command opened an export over a refused feature');
+  await withoutDownload('graded', async () => {
+    await v.command('STL');
+    await v.settle(2000);
+    check(await shown(v, 'shown_print_check') === null, 'graded: the STL command opened an export over a refused feature');
+  });
   await v.shot('graded-refused');
   evidence.graded = { first: bad };
 

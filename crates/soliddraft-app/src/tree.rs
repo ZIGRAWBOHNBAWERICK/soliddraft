@@ -83,6 +83,17 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
             Some(EditorParams::Revolve(_) | EditorParams::Pattern(_))
         );
 
+        let part = row(ui, RowSpec { icon: Icon::Tree, name: &state.doc.name, ..RowSpec::plain() });
+        part.context_menu(|ui| {
+            if ui.button("Part appearance").clicked() {
+                actions.push(AppAction::ShowPartAppearance);
+                ui.close();
+            }
+            if ui.button("Part material").clicked() {
+                actions.push(AppAction::ShowMaterialLibrary);
+                ui.close();
+            }
+        });
         // Origin group.
         let open = state.origin_open || picking_plane || picking_axis;
         if row(
@@ -164,6 +175,8 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
                 actions.push(AppAction::Select(Some(reference)));
             }
         }
+        crate::display_states::show_part(ui, state);
+        crate::properties::appearances(ui, state);
         let material = state.doc.material();
         let can_assign = crate::commands::get("material").is_some_and(|command| command.is_enabled(state));
         let material_row = row(

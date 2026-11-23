@@ -1026,6 +1026,12 @@ fn selection(ui: &mut egui::Ui, state: &mut AppState) {
             ui.add_space(8.0);
             material_panel(ui, state);
             appearance_panel(ui, state, AppearanceTarget::Part, None);
+            if ui.button("Body appearance…").clicked() {
+                state.push(AppAction::ShowBodyAppearance);
+            }
+            if ui.button("Body material…").clicked() {
+                state.push(AppAction::ShowBodyMaterial);
+            }
         }
         if let Selection::Face(face) = sel
             && let Some(face_ref) = state.doc.face_ref(face)
@@ -1163,6 +1169,9 @@ fn material_panel(ui: &mut egui::Ui, state: &mut AppState) {
     let before = selected.clone();
     let mut error = None;
     section(ui, "Material", |ui| {
+        if ui.button("Material library…").clicked() {
+            state.material_dialog = Some(crate::material_dialog::Dialog::new(&state.doc, None));
+        }
         egui::ComboBox::from_label("Part material")
             .selected_text(current.map_or("Unassigned", |m| m.name.as_str()))
             .show_ui(ui, |ui| {
@@ -1202,7 +1211,9 @@ fn material_panel(ui: &mut egui::Ui, state: &mut AppState) {
                     hint(ui, &words);
                 }
                 ui.label(format!("Volume: {:.3} mm³", properties.volume));
-                match soliddraft_materials::mass::of_body(&properties, state.doc.material()) {
+                let material =
+                    state.doc.model().body_material(state.doc.active_body, state.doc.model().active_configuration());
+                match soliddraft_materials::mass::of_body(&properties, material) {
                     Ok(mass) => {
                         ui.label(format!("Mass: {:.6} kg", mass.mass_kg));
                     }
@@ -1289,7 +1300,8 @@ fn settle_appearance(ui: &egui::Ui, state: &mut AppState) {
 /// and the reset button apply at once; the colour picker and the slider show their
 /// value while dragged and apply it when the pointer lets go.
 fn appearance_panel(ui: &mut egui::Ui, state: &mut AppState, target: AppearanceTarget, face: Option<FaceId>) {
-    let shown = state.doc.shown_appearance(face);
+    let body = if let AppearanceTarget::Body { body } = &target { Some(*body) } else { None };
+    let shown = state.doc.shown_appearance_at(face, body);
     let own = state.doc.has_own_appearance(&target);
     let dragging = ui.ctx().input(|i| i.pointer.any_down());
     let mut apply: Option<Option<Appearance>> = None;
@@ -1371,4 +1383,114 @@ fn appearance_panel(ui: &mut egui::Ui, state: &mut AppState, target: AppearanceT
     } else if let Some(appearance) = preview {
         state.doc.preview_appearance(target, Some(appearance));
     }
+}
+
+pub(crate) fn show_appearance_editor(ctx: &egui::Context, state: &mut AppState) {
+    let Some((document, target)) = state.appearance_editor.take() else { return };
+    if state.doc.instance() != document {
+        return;
+    }
+    let face = match &target {
+        AppearanceTarget::Face { face } => {
+            let found = state
+                .doc
+                .model()
+                .live_bodies()
+                .into_iter()
+                .find_map(|(_, body)| state.doc.model().resolve_face(face, body).ok());
+            if found.is_none() {
+                return;
+            }
+            found
+        }
+        _ => None,
+    };
+    let title = format!("{} appearance", appearance_place(&state.doc, &target).0);
+    let mut open = true;
+    egui::Window::new(title).id(egui::Id::new("appearance_editor")).open(&mut open).default_width(300.0).show(
+        ctx,
+        |ui| {
+            if let Some(display) = state.doc.display_state() {
+                ui.label(format!("Display state: {}", display.name));
+            }
+            settle_appearance(ui, state);
+            appearance_panel(ui, state, target.clone(), face);
+            if !ctx.input(|i| i.pointer.any_down()) {
+                state.doc.release_appearance_gesture();
+            }
+        },
+    );
+    if open {
+        state.appearance_editor = Some((document, target));
+    }
+}
+
+fn appearance_place(doc: &crate::document::Document, target: &AppearanceTarget) -> (&'static str, String) {
+    match target {
+        AppearanceTarget::Part => ("Part", doc.name.clone()),
+        AppearanceTarget::Body { body } => ("Body", doc.body_name(*body)),
+        AppearanceTarget::Face { face } => ("Face", face.label.to_string()),
+        AppearanceTarget::Feature { feature } => {
+            ("Feature", doc.model().feature(*feature).map_or_else(|| feature.to_string(), |f| f.name.clone()))
+        }
+    }
+}
+
+pub fn appearances(ui: &mut egui::Ui, state: &mut AppState) {
+    ui.collapsing("Appearances", |ui| {
+        let data = state.doc.model().materials();
+        let active = state.doc.display_state();
+        let configuration = state.doc.model().active_configuration();
+        let mut rows = Vec::new();
+        for assignment in &data.appearances {
+            if !soliddraft_materials::scope::applies(&assignment.scope, configuration) {
+                continue;
+            }
+            if let Some(appearance) = data.snapshots.appearance(&assignment.appearance) {
+                rows.push((assignment.target.clone(), appearance.clone(), Some(assignment.scope.clone())));
+            }
+        }
+        if let Some(display) = active {
+            for (target, appearance) in &display.view.appearances {
+                rows.push((target.clone(), appearance.clone(), None));
+            }
+        }
+        rows.sort_by(|a, b| a.1.name.cmp(&b.1.name).then_with(|| a.1.id.cmp(&b.1.id)));
+        if rows.is_empty() {
+            ui.label("No appearance overrides");
+        }
+        let mut last = None;
+        let mut remove = None;
+        for (i, (target, appearance, scope)) in rows.iter().enumerate() {
+            if last != Some(&appearance.id) {
+                let c = appearance.base_color;
+                ui.horizontal(|ui| {
+                    let (rect, _) = ui.allocate_exact_size(vec2(12.0, 12.0), Sense::hover());
+                    ui.painter().rect_filled(rect, 2.0, egui::Color32::from_rgb(c.r, c.g, c.b));
+                    ui.strong(&appearance.name);
+                });
+                last = Some(&appearance.id);
+            }
+            let (level, name) = appearance_place(&state.doc, target);
+            let display = scope.is_none().then(|| active.map(|d| d.name.as_str())).flatten();
+            let label = display.map_or_else(|| format!("{level} · {name}"), |d| format!("{level} · {name} · {d}"));
+            ui.push_id(i, |ui| {
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(label);
+                    if ui.small_button("Remove colour").clicked() {
+                        remove = Some((target.clone(), scope.clone()));
+                    }
+                });
+            });
+        }
+        if let Some((target, scope)) = remove {
+            let result = match scope {
+                Some(scope) => state.doc.set_base_appearance(target, None, scope),
+                None => state.doc.set_appearance(target, None),
+            };
+            if let Err(error) = result {
+                state.note(error, crate::state::NoteKind::Error);
+            }
+        }
+    });
 }

@@ -17,6 +17,7 @@ pub mod commands;
 pub mod context_menu;
 pub mod dimension_edit;
 pub mod display_quality;
+pub mod display_states;
 pub mod document;
 #[cfg(target_arch = "wasm32")]
 pub mod documents_browser;
@@ -38,6 +39,7 @@ pub mod kernel_worker;
 pub mod left_bar;
 pub mod locations;
 mod loft_panel;
+pub mod material_dialog;
 pub mod mates;
 pub mod measure;
 pub mod navigation;

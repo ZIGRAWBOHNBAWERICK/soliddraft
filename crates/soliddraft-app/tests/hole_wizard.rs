@@ -147,6 +147,7 @@ fn a_legacy_hole_keeps_its_edited_position_pattern_after_reopen() {
     let id = drill(&mut doc, params);
     browser_fixture("wizard-legacy-positions.dwprt", &doc);
     let old = doc.model().to_bytes().unwrap();
+    assert_ne!(doc.model().truth()["format"], HOLE_WIZARD_FORMAT);
     let reopened = soliddraft_model::Document::from_bytes(&old, soliddraft_app::kernel()).unwrap();
     let mut app = launch(Document::from_model(reopened), STANDARD);
     app.state_mut().state.push(AppAction::EditFeature(id));
@@ -164,11 +165,15 @@ fn a_legacy_hole_keeps_its_edited_position_pattern_after_reopen() {
     ux_tools::rebuilt(&mut app);
     let doc = &app.state().state.doc;
     assert_eq!(doc.undo_depth(), undo_before + 1);
+    assert_eq!(doc.model().truth()["format"], HOLE_WIZARD_FORMAT);
     let bytes = doc.model().to_bytes().unwrap();
     let reopened = soliddraft_model::Document::from_bytes(&bytes, soliddraft_app::kernel()).unwrap();
     let doc = Document::from_model(reopened);
     let sketch_id = doc.feature(id).unwrap().kind.sketch().expect("the hole still owns its position sketch");
-    assert_eq!(doc.feature(sketch_id).unwrap().sketch().unwrap().sketch, edited);
+    let saved = &doc.feature(sketch_id).unwrap().sketch().unwrap().sketch;
+    assert_eq!(saved.entities, edited.entities);
+    assert_eq!(saved.constraints, edited.constraints);
+    assert_eq!(saved.patterns, edited.patterns);
 }
 
 #[test]

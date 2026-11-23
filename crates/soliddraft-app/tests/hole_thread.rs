@@ -554,7 +554,7 @@ fn updating_the_drawing_keeps_one_thread_note_when_two_groups_join() {
     assert!(before.iter().any(|(_, _, text)| text.ends_with(" 5")));
     assert!(before.iter().any(|(_, _, text)| text.ends_with(" 6")));
 
-    tool(&mut state, "suppress", json!({"feature": "CutExtrude1", "suppressed": true}));
+    tool(&mut state, "suppress", json!({"feature": "Cut-Extrude1", "suppressed": true}));
     tool(&mut state, "drawing_rebuild", json!({}));
     let merged = drawn_items(&state);
     std::fs::remove_dir_all(&dir).unwrap();

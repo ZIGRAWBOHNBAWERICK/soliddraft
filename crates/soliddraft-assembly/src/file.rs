@@ -33,7 +33,7 @@ use serde_json::Value;
 use soliddraft_document::hash::without_format;
 use soliddraft_document::manifest::{self, Entry, Manifest, Package, Section};
 use soliddraft_document::{
-    ContentHash, DocKind, DocumentId, EnvelopeError,
+    ConfigurationId, ContentHash, DocKind, DocumentId, EnvelopeError,
     kind::{format_major, found_tag},
 };
 use soliddraft_materials::Snapshots;
@@ -81,12 +81,22 @@ pub enum FileError {
     },
 }
 
-/// The name, within a part's copy folder, of its display mesh at `quality`: the usual
-/// `display.bin` for the part's own quality (`None`), `display-<code>.bin` otherwise.
-pub fn display_entry(quality: Option<&Quality>) -> String {
-    match quality {
+/// The name, within a part's copy folder, of its display mesh at `quality` in
+/// `configuration`: the usual `display.bin` for the part's own quality (`None`) in the
+/// configuration its file was saved in, `display-<code>.bin` at another quality, and
+/// `@<configuration>` before `.bin` for a configuration a placement names.
+pub fn display_entry(quality: Option<&Quality>, configuration: Option<&ConfigurationId>) -> String {
+    let name = match quality {
         None => DISPLAY_MESH.to_owned(),
         Some(q) => format!("display-{}.bin", q.code()),
+    };
+    in_configuration(name, configuration)
+}
+
+fn in_configuration(name: String, configuration: Option<&ConfigurationId>) -> String {
+    match configuration {
+        None => name,
+        Some(c) => format!("{}@{}.bin", name.trim_end_matches(".bin"), c.0),
     }
 }
 
@@ -94,11 +104,11 @@ pub fn display_entry(quality: Option<&Quality>) -> String {
 /// standard level is [`display_entry`]; the coarse one `coarse.bin` (or
 /// `coarse-<code>.bin` at a quality of its own). Fine meshes are made on demand and
 /// never saved, but are named the same way (`fine.bin`).
-pub fn level_entry(quality: Option<&Quality>, level: Level) -> String {
+pub fn level_entry(quality: Option<&Quality>, configuration: Option<&ConfigurationId>, level: Level) -> String {
     match (level, quality) {
-        (Level::Standard, q) => display_entry(q),
-        (l, None) => format!("{l}.bin"),
-        (l, Some(q)) => format!("{l}-{}.bin", q.code()),
+        (Level::Standard, q) => display_entry(q, configuration),
+        (l, None) => in_configuration(format!("{l}.bin"), configuration),
+        (l, Some(q)) => in_configuration(format!("{l}-{}.bin", q.code()), configuration),
     }
 }
 
@@ -476,7 +486,7 @@ impl CopyReader {
         id: DocumentId,
         revision: &ContentHash,
     ) -> Result<Option<(DisplayMesh, String)>, FileError> {
-        self.display_mesh_at(id, revision, None)
+        self.display_mesh_at(id, revision, None, None)
     }
 
     /// The display mesh of part `id` at `revision` made at `quality` (`None` for the
@@ -486,8 +496,9 @@ impl CopyReader {
         id: DocumentId,
         revision: &ContentHash,
         quality: Option<&Quality>,
+        configuration: Option<&ConfigurationId>,
     ) -> Result<Option<(DisplayMesh, String)>, FileError> {
-        let name = format!("{}{}", copy_folder(id, revision), display_entry(quality));
+        let name = format!("{}{}", copy_folder(id, revision), display_entry(quality, configuration));
         match self.package.read(&name)? {
             Some(bytes) => Ok(Some(DisplayMesh::decode(&bytes)?)),
             None => Ok(None),

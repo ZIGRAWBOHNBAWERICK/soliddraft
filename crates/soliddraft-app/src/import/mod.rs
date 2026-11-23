@@ -1014,7 +1014,12 @@ pub fn window(ctx: &egui::Context, state: &mut AppState) {
         let ready =
             asked().all(|p| approvable(p) && !approver.trim().is_empty() && covers_gap(allowed[&p.id].trim(), p));
         ui.horizontal(|ui| {
-            if ui.add_enabled(ready, egui::Button::new("Accept")).clicked() {
+            let accept = ui.add_enabled(ready, egui::Button::new("Accept"));
+            #[cfg(target_arch = "wasm32")]
+            if ready {
+                crate::web::show_control("Accept import", accept.rect);
+            }
+            if accept.clicked() {
                 choice = Some(false);
             }
             if ui.add_enabled(!proposals.proposals.is_empty(), egui::Button::new("Decline")).clicked() {

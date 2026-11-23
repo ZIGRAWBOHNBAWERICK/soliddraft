@@ -803,6 +803,28 @@
       "evidence": "result.json, protocol.json and command evidence; work/a.dwprt and work/rig.dwasm; unchanged accepted state and fresh-process reopen."
     },
     {
+      "id": "hole-thread",
+      "file": "ci/scenarios/hole-thread.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-model",
+        "soliddraft-kernel-catallax"
+      ],
+      "kernel_parts": [
+        "boolean",
+        "extrude",
+        "hole",
+        "measure",
+        "mesh",
+        "step"
+      ],
+      "catallax_revision": "ccfb4e4bee95cbb42f7c1ea1dbdfe8874ed01c4a",
+      "route": "MCP hole and edit_hole with a thread -> document rebuild -> native hole of the tap drill -> thread item in pmi_list -> viewport and checked STEP export",
+      "supported_limits": "ISO metric coarse and fine threads, M1.6 to M64, on a hole's main wall; a cosmetic thread, no modelled teeth; size, pitch and depth edits, undo/redo, a drill that does not take the thread refuses without changing the part, a later cut on top, save and fresh-process reopen. Pattern and mirror copies of a tapped hole are not threaded.",
+      "evidence": "result.json, protocol.json, commands/NNNN/{command.json,kernel.json,measurement.json,viewport.png,view.svg}; saved part; checked STEP and independent volume and point oracle"
+    },
+    {
       "id": "iges-export",
       "file": "ci/scenarios/iges-export.json",
       "acceptance": true,
@@ -2588,9 +2610,31 @@
         "mesh"
       ],
       "catallax_revision": "ccfb4e4bee95cbb42f7c1ea1dbdfe8874ed01c4a",
-      "route": "MCP assembly_make_drawing -> display meshes placed -> mesh hidden-line removal across parts -> BOM and balloons -> drawing save, refused PDF export, rebuild, asm drawing, reopen",
-      "supported_limits": "Isometric and front views of three placed parts from display meshes (polygon accuracy), a parts-only BOM with quantities, one balloon per row; refusals while the assembly is unsaved and for a PDF export, which draws Catallax line work only; rebuild after a new part adds its row and balloon. No section or detail views of assemblies.",
+      "route": "MCP assembly_make_drawing -> each part's exact body placed -> Catallax view curves per part, hidden lines across parts -> BOM and balloons -> drawing save, PDF export, section, projected and detail views, rebuild, asm drawing, reopen, DXF export",
+      "supported_limits": "Isometric and front views of three placed parts drawn by Catallax from their exact bodies, a parts-only BOM with quantities, one balloon per row; a section cut through every part, a projected view and a detail of the front view; PDF and DXF exports of Catallax line work; refusals while the assembly is unsaved and for a cut that meets no part; rebuild after a new part adds its row and balloon and recomputes the derived views.",
       "evidence": "result.json, protocol.json, command summaries, inspect output, work/rig.dwdrw"
+    },
+    {
+      "id": "assembly-component-configurations",
+      "file": "ci/scenarios/assembly-component-configurations.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-assembly",
+        "soliddraft-drawing",
+        "soliddraft-model",
+        "soliddraft-kernel-catallax"
+      ],
+      "kernel_parts": [
+        "boolean",
+        "extrude",
+        "measure",
+        "mesh"
+      ],
+      "catallax_revision": "ccfb4e4bee95cbb42f7c1ea1dbdfe8874ed01c4a",
+      "route": "MCP part configurations -> make_assembly -> a second placement -> assembly_component_configuration (refused unknown name, then Tall) -> each placement's mesh and exact body in its configuration -> drawing with a BOM row per configuration -> save, reopen, the first placement Tall too -> drawing rebuild merges the rows -> PDF export",
+      "supported_limits": "One part with a Default and a Tall configuration placed twice; each placement shows its own configuration after save and reopen; an unknown configuration is refused with the names the part has; the BOM lists a part once per configuration placed. Sub-assembly configurations chosen from above are covered by crate tests.",
+      "evidence": "result.json, protocol.json, command summaries, work/rig.dwasm, work/rig.dwdrw, work/rig.pdf"
     },
     {
       "id": "assembly-pack-export",

@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 
 use serde_json::json;
-use soliddraft_assembly::{PackRequest, pack_and_go};
+use soliddraft_assembly::{PackRequest, pack_and_go, pack_zip};
 use soliddraft_document::DocRef;
 
 use super::asm::Args;
@@ -13,9 +13,10 @@ pub(crate) fn repoint(bytes: &[u8], model: &DocRef) -> Result<Vec<u8>, String> {
     soliddraft_drawing::file::repoint(bytes, model).map_err(|e| e.to_string())
 }
 
-/// `asm pack <file.dwasm> <folder> [--prefix P] [--suffix S] [--flatten] [--drawings]`.
+/// `asm pack <file.dwasm> <folder | out.zip> [--prefix P] [--suffix S] [--flatten] [--drawings]`.
 pub(crate) fn pack(file: &Path, rest: &[String], a: &Args, search: Vec<PathBuf>) -> Result<bool, String> {
-    let [into] = rest else { return Err("pack takes the assembly and a destination folder".into()) };
+    let [into] = rest else { return Err("pack takes the assembly and a destination folder or .zip file".into()) };
+    let zip = Path::new(into).extension().is_some_and(|e| e.eq_ignore_ascii_case("zip"));
     let request = PackRequest {
         root: file.to_path_buf(),
         into: PathBuf::from(into),
@@ -26,7 +27,8 @@ pub(crate) fn pack(file: &Path, rest: &[String], a: &Args, search: Vec<PathBuf>)
     };
     let drawings: Option<soliddraft_assembly::pack::Repoint> =
         if a.value("--drawings").is_some() { Some(&repoint) } else { None };
-    let report = pack_and_go(&request, drawings).map_err(|e| e.to_string())?;
+    let report = if zip { pack_zip(&request, drawings) } else { pack_and_go(&request, drawings) };
+    let report = report.map_err(|e| e.to_string())?;
     if a.json {
         println!("{}", json!(report));
     } else {
@@ -76,14 +78,15 @@ pub(crate) fn drawing(
     use soliddraft_kernel_api::drawing::StandardView;
     let [out] = rest else { return Err("drawing takes the assembly and a .dwdrw file".into()) };
     let out = Path::new(out);
-    let model = soliddraft_app::assembly_files::drawing::assembly_model(doc)?;
+    let exact = soliddraft_app::assembly_files::drawing::exact_parts(doc)?;
+    let model = exact.model();
     let (drawing, meta, verb) = if out.exists() {
         let (old, meta) = file::read(out).map_err(|e| e.to_string())?;
         if old.model.id != Some(doc.id()) {
             return Err(format!("{} is a drawing of another document", out.display()));
         }
         let next = update_assembly_drawing(&old, &model).map_err(|e| e.to_string())?;
-        (next, meta.rewritten("display meshes", Default::default()), "updated")
+        (next, meta.rewritten("Catallax", Default::default()), "updated")
     } else {
         let exploded = a.value("--exploded").is_some();
         if exploded && model.exploded.is_empty() {
@@ -106,7 +109,7 @@ pub(crate) fn drawing(
             exploded,
         };
         let made = make_assembly_drawing(&model, &new).map_err(|e| e.to_string())?;
-        (made, FileMeta::new("display meshes", Default::default()), "wrote")
+        (made, FileMeta::new("Catallax", Default::default()), "wrote")
     };
     let mut drawing = drawing;
     // The reference is stored relative to the drawing.

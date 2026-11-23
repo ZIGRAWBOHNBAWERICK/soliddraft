@@ -1432,6 +1432,10 @@ fn field_open(s: &AppState) -> bool {
     after_field(s).is_none()
 }
 
+fn field_source_supported(s: &AppState) -> bool {
+    s.doc.display_body().is_none_or(|body| s.doc.kernel().supports_field_source(body))
+}
+
 fn can_export(s: &AppState) -> bool {
     s.drag_preview.is_none()
         && !s.doc.proof_pending()
@@ -1966,7 +1970,8 @@ fn registry() -> Vec<CommandSpec> {
         cmd("lattice", "Lattice", Icon::Cad("lattice"), "Make a terminal lattice")
             .on(Solid, "Modify", Small)
             .run(|_| AppAction::StartLattice)
-            .when(|s| has_body(s) && field_open(s))
+            .shown(field_source_supported)
+            .when(|s| has_body(s) && field_open(s) && field_source_supported(s))
             .lit(|s| editing(s, |p| matches!(p, EditorParams::Lattice(_))))
             .hint(|s| after_field(s).or_else(|| (!has_body(s)).then(|| "Lattice needs a body".into())))
             .agents(Agents::Verb, "Density is the constant beam radius. The preview is unproved; export certifies the mesh.", tools::lattice_params)
@@ -1977,7 +1982,8 @@ fn registry() -> Vec<CommandSpec> {
         cmd("gyroid", "Gyroid", Icon::Cad("lattice"), "Make a terminal network gyroid")
             .on(Solid, "Modify", Small)
             .run(|_| AppAction::StartGyroid)
-            .when(|s| has_body(s) && field_open(s))
+            .shown(field_source_supported)
+            .when(|s| has_body(s) && field_open(s) && field_source_supported(s))
             .lit(|s| editing(s, |p| matches!(p, EditorParams::Gyroid(_))))
             .hint(|s| after_field(s).or_else(|| (!has_body(s)).then(|| "Gyroid needs a body".into())))
             .agents(Agents::Verb, "The level is dimensionless, not a thickness, and may be zero or negative. The preview is unproved; export certifies the mesh.", tools::gyroid_params)
@@ -2870,7 +2876,14 @@ fn drawing_registry() -> Vec<CommandSpec> {
             .when(|s| sheet_view(s).is_some())
             .lit(|s| drawing_tool_is(s, |t| matches!(t, DrawingTool::PlaceView(PlaceKind::Projected { .. }))))
             .hint(|s| sheet_view(s).is_none().then(|| "Select a view first, then fold a new view off it".into()))
-            .app_only(CANVAS),
+            .agents(
+                Agents::Mcp,
+                "Folds a new view off a view on one of eight sides, at its scale: in line with it on a square side, a \
+                 pictorial view at a free place on a diagonal one. A part drawing needs the drawing's part open; an \
+                 assembly drawing draws every part from its kernel.",
+                app::projected_params,
+            )
+            .undo(Undo::Step),
         drawing_tool!(
             "drawing_section", "Section", Icon::Section,
             "Draw a cutting line on a view, pick the direction, place the section",
@@ -2882,7 +2895,7 @@ fn drawing_registry() -> Vec<CommandSpec> {
             Agents::Mcp,
             "A cutting line through a model point across the view, horizontal or vertical on the sheet. The section \
              is placed in line with the view on the side the sheet's projection angle puts it, with the drawing's \
-             next letter. The open part must be the drawing's.",
+             next letter. A part drawing needs the drawing's part open; an assembly drawing cuts every part with its kernel.",
             app::section_params,
         )
         .undo(Undo::Step),
@@ -2891,7 +2904,14 @@ fn drawing_registry() -> Vec<CommandSpec> {
             DrawingTool::Detail => DrawingTool::Detail
         )
         .on(Views, "Derived", Large)
-            .app_only(CANVAS),
+        .agents(
+            Agents::Mcp,
+            "Magnifies the region of a view inside a circle round a model point, with the drawing's next letter, \
+             placed at a free place near the view. A part drawing needs the drawing's part open; an assembly drawing \
+             draws every part from its kernel.",
+            app::detail_params,
+        )
+        .undo(Undo::Step),
         drawing_tool!(
             "drawing_auxiliary", "Auxiliary", Icon::Plane, "Pick an edge; the view unfolds square to it",
             DrawingTool::Auxiliary => DrawingTool::Auxiliary

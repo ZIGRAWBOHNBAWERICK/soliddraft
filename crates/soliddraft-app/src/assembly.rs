@@ -510,6 +510,10 @@ pub fn open_bytes(state: &mut AppState, name: &str, bytes: Vec<u8>) {
     #[cfg(target_arch = "wasm32")]
     crate::documents_browser::remember(name, DocKind::Assembly, &bytes);
     state.note(format!("Opening {name}…"), NoteKind::Info);
+    // Kept for Pack and Go, which packs the file as it was opened: the page has no folder.
+    if let Ok(identity) = soliddraft_document::identify(std::io::Cursor::new(&bytes)) {
+        state.revisions.record(identity.id, &identity.revision, &bytes);
+    }
     let path = PathBuf::from(name);
     let opening = AssemblyDocument::open_bytes_in_background(bytes, Some(path.clone()), options(state));
     state.assembly.opening = Some((path, opening));

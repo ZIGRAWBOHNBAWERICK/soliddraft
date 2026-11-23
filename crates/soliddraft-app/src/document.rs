@@ -390,6 +390,8 @@ pub struct HoleParams {
     pub depth: soliddraft_kernel_api::HoleDepth,
     pub tip: soliddraft_kernel_api::HoleTip,
     pub head: Option<soliddraft_kernel_api::HoleHead>,
+    /// A cosmetic thread in the main wall.
+    pub thread: Option<model::thread::HoleThread>,
 }
 
 impl Default for HoleParams {
@@ -401,20 +403,35 @@ impl Default for HoleParams {
             depth: soliddraft_kernel_api::HoleDepth::Through,
             tip: soliddraft_kernel_api::HoleTip::Cone { angle_deg: 118.0 },
             head: None,
+            thread: None,
         }
     }
 }
 
 impl HoleParams {
     pub fn to_model(&self) -> Result<model::HoleFeature, String> {
-        Ok(model::HoleFeature {
+        let hole = model::HoleFeature {
             face: self.face.clone().ok_or("pick the face the holes start on")?,
             points: self.points.clone(),
             diameter: self.diameter,
             depth: self.depth,
             tip: self.tip,
             head: self.head,
-        })
+            thread: self.thread.clone(),
+        };
+        match hole.thread_problem() {
+            Some(problem) => Err(problem),
+            None => Ok(hole),
+        }
+    }
+
+    /// Taps the holes with `thread`, or makes them plain, and drills them with the
+    /// thread's tap drill.
+    pub fn set_thread(&mut self, thread: Option<model::thread::HoleThread>) {
+        if let Some(thread) = &thread {
+            self.diameter = thread.tap_drill();
+        }
+        self.thread = thread;
     }
 }
 
@@ -1004,9 +1021,10 @@ impl Feature {
                 Some(other) => format!("{} × {} mm", fmt_mm(c.distance), fmt_mm(other)),
                 None => format!("{} mm", fmt_mm(c.distance)),
             },
-            FeatureKind::Hole(h) => {
-                format!("{} × Ø{}", h.points.len(), fmt_mm(h.diameter))
-            }
+            FeatureKind::Hole(h) => match &h.thread {
+                Some(thread) => format!("{} × {}", h.points.len(), thread.designation()),
+                None => format!("{} × Ø{}", h.points.len(), fmt_mm(h.diameter)),
+            },
             FeatureKind::Pattern(p) => match p.layout {
                 model::PatternSpec::Linear { spacing, count, .. } => format!("{count} × {} mm", fmt_mm(spacing)),
                 model::PatternSpec::Circular { count, angle, .. } => format!("{count} × {}°", fmt_mm(angle)),
@@ -1027,8 +1045,17 @@ impl Feature {
                 s.source.name,
                 if s.fit.is_some() { "Fitted part and scan reference" } else { "Scan reference" }
             ),
-            FeatureKind::Lattice(l) => format!("unproved preview · ±{} mm", fmt_mm(l.accuracy_mm)),
-            FeatureKind::Gyroid(g) => format!("unproved preview · ±{} mm", fmt_mm(g.accuracy_mm)),
+            FeatureKind::Lattice(l) => self.field_summary(l.accuracy_mm),
+            FeatureKind::Gyroid(g) => self.field_summary(g.accuracy_mm),
+        }
+    }
+
+    /// A field's accuracy, called an unproved preview only while the screen draws one: a
+    /// refused, suppressed or rolled-back field shows no preview.
+    fn field_summary(&self, accuracy_mm: f64) -> String {
+        match self.status {
+            FeatureStatus::Ok | FeatureStatus::Pending => format!("unproved preview · ±{} mm", fmt_mm(accuracy_mm)),
+            _ => format!("±{} mm", fmt_mm(accuracy_mm)),
         }
     }
 
@@ -4875,6 +4902,9 @@ impl Document {
                         if let Some(head) = &h.head {
                             details.push(("Head".to_owned(), hole_head_text(head)));
                         }
+                        if let Some(thread) = &h.thread {
+                            details.push(("Thread".to_owned(), hole_thread_text(thread)));
+                        }
                     }
                     FeatureKind::Offset(_) | FeatureKind::Thicken(_) => {
                         details.push(("Size".into(), f.summary()));
@@ -5225,6 +5255,14 @@ pub fn hole_depth_text(depth: &soliddraft_kernel_api::HoleDepth, tip: &soliddraf
         (HoleDepth::Blind { depth }, HoleTip::Cone { angle_deg }) => {
             format!("{} mm, {}° tip", fmt_mm(*depth), fmt_mm(*angle_deg))
         }
+    }
+}
+
+/// A hole's thread for people: "M6x1-6H, 12 mm", "M8x1-6H, full depth".
+pub fn hole_thread_text(thread: &model::thread::HoleThread) -> String {
+    match thread.length {
+        Some(length) => format!("{}, {} mm", thread.designation(), fmt_mm(length)),
+        None => format!("{}, full depth", thread.designation()),
     }
 }
 
@@ -5594,6 +5632,10 @@ impl Document {
 
     /// Removes an item of manufacturing information, as one undo entry.
     pub fn remove_pmi(&mut self, id: &str) -> Result<(), String> {
+        if let Some((_, hole, _)) = self.model.thread_items().into_iter().find(|(item, _, _)| item.id == id) {
+            let hole = self.model.feature(hole).map_or_else(|| "its hole".to_owned(), |f| f.name.clone());
+            return Err(format!("{id} is the thread of {hole}: change the thread in {hole}."));
+        }
         self.run_pmi("", vec![model::Command::RemovePmiItem { id: id.to_owned() }])
     }
 

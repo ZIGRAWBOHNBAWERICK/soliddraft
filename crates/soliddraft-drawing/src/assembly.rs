@@ -1,18 +1,18 @@
 //! Drawings of assemblies: views of every placed part, a bill of materials and balloons
 //! that number the parts.
 //!
-//! The caller hands over the assembly as an [`AssemblyModel`]: each part occurrence's
-//! display mesh and edge polylines already placed in the assembly's frame (exploded, when
-//! the drawing should show the exploded view), each with the BOM item it belongs to, and
-//! the BOM rows. Nothing here reads an assembly file or a kernel, so drawings of
-//! assemblies work wherever the assembly's display copies do.
+//! The caller hands over the assembly as an [`AssemblyModel`]: each shown part occurrence
+//! as a [`PlacedPart`], its body in its own kernel and where the assembly places it (and
+//! where its exploded view puts it), each with the BOM item it belongs to, and the BOM
+//! rows. Views go through the same code as a part drawing's, asked of
+//! [`PlacedBodies`]: each part's line work is its kernel's own drawing query in the part's
+//! frame, and a part the kernel refuses refuses the view by name. Base, projected,
+//! section and detail views all work; a section cuts each part through its kernel, so its
+//! hatch regions are the kernel's. Where one part hides another, the visibility is
+//! measured against the parts' meshes and the view says so (see [`crate::placed`]).
 //!
-//! A view's line work comes from hidden-line removal over all the parts' triangles
-//! together, so one part hides another: each part's edges and the silhouettes of its
-//! curved faces, split where any triangle in front covers them. The line work is as
-//! faithful as the display meshes, so every curve is labelled a polygon. Each curve
-//! remembers the occurrence it belongs to (its source's feature is the occurrence path),
-//! which is what a balloon attaches to.
+//! Each curve's source names its occurrence: its feature is the part's own tag behind the
+//! occurrence path, such as `4/f2` ([`component_of`]). A balloon attaches to it.
 //!
 //! The BOM lists parts only: one row per part document, in the order the tree first
 //! places it, with how many times it is placed. Hidden parts count; suppressed parts do
@@ -23,36 +23,19 @@ use std::collections::{BTreeMap, HashMap};
 
 use kurbo::BezPath;
 use serde::{Deserialize, Serialize};
-use soliddraft_kernel_api::drawing::mesh_hlr::{SourcedPolyline, hidden_lines, silhouettes};
-use soliddraft_kernel_api::drawing::{Curve3, CurveSource, StandardView, ViewSpec};
-use soliddraft_kernel_api::{EdgeId, FaceId, Mesh, Point2, Vec3};
+use soliddraft_kernel_api::drawing::{StandardView, ViewSpec};
+use soliddraft_kernel_api::{Point2, Vec3};
 
 use crate::annotation::{Anchor, Annotation, AnnotationKind, AnnotationState, Attach, StyleOverrides};
 use crate::entity::{EntityKind, EntityRef};
 use crate::ids::{AnnotationId, ViewId};
-use crate::part::round;
-use crate::project::{self, ViewTransform};
+use crate::part::{Part, PartIndex, PartSource, Requirements, round};
+use crate::placed::{PlacedBodies, PlacedPart, Rigid, component_of};
+use crate::project::{self, Contexts, ViewContext, ViewTransform};
 use crate::sheet::{Scale, Table, TableKind};
 use crate::template::Template;
-use crate::view::{Accuracy, Curve2, CurveKind, Orientation, View, ViewDisplay, ViewGeometry, ViewKind, ViewScale};
-use crate::{DocRef, Drawing, DrawingError, DrawingMeta};
-
-/// One part occurrence of an assembly, placed.
-#[derive(Clone, Debug, Default)]
-pub struct PlacedPart {
-    /// Its occurrence path in the assembly, such as "4/2".
-    pub path: String,
-    /// The BOM item it is counted under.
-    pub item: u32,
-    /// Vertex positions in the assembly's frame, millimetres.
-    pub positions: Vec<Vec3>,
-    /// Triangles, counter-clockwise seen from outside.
-    pub triangles: Vec<[u32; 3]>,
-    /// The face of each triangle, numbered within the part.
-    pub faces: Vec<u32>,
-    /// The part's edges as polylines in the assembly's frame.
-    pub edges: Vec<Vec<Vec3>>,
-}
+use crate::view::{FoldDirection, Orientation, View, ViewDisplay, ViewGeometry, ViewKind, ViewScale};
+use crate::{ContentHash, DocRef, Drawing, DrawingError, DrawingMeta};
 
 /// One row of a bill of materials.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -68,15 +51,18 @@ pub struct BomRow {
 }
 
 /// An assembly as a drawing reads it.
-#[derive(Clone, Debug, Default)]
-pub struct AssemblyModel {
+#[derive(Clone, Default)]
+pub struct AssemblyModel<'k> {
     /// The assembly, pinned at the revision the parts come from.
     pub reference: Option<DocRef>,
-    /// Every part occurrence that is shown, placed.
-    pub parts: Vec<PlacedPart>,
-    /// The same parts where the assembly's exploded view shows them; empty when it has
-    /// none.
-    pub exploded: Vec<PlacedPart>,
+    /// Every part occurrence that is shown, placed. Each part's component is its
+    /// occurrence path, such as "4/2".
+    pub parts: Vec<PlacedPart<'k>>,
+    /// The BOM item each part is counted under, in the order of `parts`.
+    pub items: Vec<u32>,
+    /// Where the assembly's exploded view puts each part, in the order of `parts`; empty
+    /// when it has none.
+    pub exploded: Vec<Rigid>,
     /// The bill of materials.
     pub bom: Vec<BomRow>,
 }
@@ -114,138 +100,139 @@ pub fn bom_table_size(rows: usize) -> (f64, f64) {
     (BOM_COLUMNS.iter().map(|(_, w)| w).sum(), ROW * (rows as f64 + 2.0))
 }
 
-/// The id of the edge or face `local` of the part numbered `part` in the merged mesh.
-fn packed(part: usize, local: usize) -> u64 {
-    ((part as u64) << 32) | local as u64
-}
-
-fn unpacked(raw: u64) -> (usize, usize) {
-    ((raw >> 32) as usize, (raw & 0xffff_ffff) as usize)
-}
-
-/// Every part's triangles in one mesh, and every part's edges as lines to split, with the
-/// accuracy hidden-line removal works to.
-fn merged(parts: &[PlacedPart], spec: &ViewSpec) -> Result<(Mesh, Vec<SourcedPolyline>, f64), DrawingError> {
-    let frame =
-        spec.frame().ok_or_else(|| DrawingError::BadRequest("the view direction is zero or parallel to up".into()))?;
-    let mut mesh = Mesh::default();
-    let mut lines = Vec::new();
-    let mut lo = [f64::INFINITY; 3];
-    let mut hi = [f64::NEG_INFINITY; 3];
-    for (k, p) in parts.iter().enumerate() {
-        let base = mesh.positions.len() as u32;
-        for v in &p.positions {
-            mesh.positions.push([v.x as f32, v.y as f32, v.z as f32]);
-            mesh.normals.push([0.0, 0.0, 1.0]);
-            for (k, c) in [v.x, v.y, v.z].into_iter().enumerate() {
-                lo[k] = lo[k].min(c);
-                hi[k] = hi[k].max(c);
+impl<'k> AssemblyModel<'k> {
+    /// The parts as one body, placed as the assembly has them or, with `exploded` and an
+    /// exploded view, where that view puts them.
+    pub fn bodies(&self, exploded: bool) -> Result<PlacedBodies<'k>, DrawingError> {
+        let mut parts = self.parts.clone();
+        if exploded && self.exploded.len() == parts.len() {
+            for (p, at) in parts.iter_mut().zip(&self.exploded) {
+                p.placement = *at;
             }
         }
-        for (t, tri) in p.triangles.iter().enumerate() {
-            mesh.indices.extend(tri.map(|i| i + base));
-            let face = p.faces.get(t).copied().unwrap_or(0) as usize;
-            mesh.triangle_faces.push(FaceId::from_raw(packed(k, face)));
-        }
-        for (e, points) in p.edges.iter().enumerate() {
-            if points.len() >= 2 {
-                lines.push(SourcedPolyline {
-                    source: CurveSource::Edge(EdgeId::from_raw(packed(k, e))),
-                    points: points.clone(),
-                });
-            }
-        }
+        Ok(PlacedBodies::new(parts)?)
     }
-    if mesh.indices.is_empty() {
-        return Err(DrawingError::BadRequest("the assembly shows no parts to draw".into()));
+
+    /// The revision the views are drawn from.
+    pub fn digest(&self) -> ContentHash {
+        self.reference.as_ref().map(|r| r.pinned.clone()).unwrap_or_else(|| ContentHash::of_bytes(b""))
     }
-    lines.extend(silhouettes(&mesh, &frame));
-    // Display meshes follow their parts to about a ten-thousandth of their size.
-    let tol = (Vec3::from(hi).distance(Vec3::from(lo)) * 1e-4).max(0.005);
-    Ok((mesh, lines, tol))
+
+    /// The occurrence paths of the parts counted under `item`.
+    fn paths_of(&self, item: u32) -> impl Iterator<Item = &str> {
+        self.parts.iter().zip(&self.items).filter(move |(_, i)| **i == item).map(|(p, _)| p.component.as_str())
+    }
 }
 
-impl AssemblyModel {
-    /// The parts as a view shows them: exploded when it asks and the assembly has an
-    /// exploded view.
-    pub fn shown(&self, exploded: bool) -> &[PlacedPart] {
-        if exploded && !self.exploded.is_empty() { &self.exploded } else { &self.parts }
+/// The assembly as the part the drawing code reads: the placed parts as one body.
+pub fn as_part<'a>(model: &AssemblyModel<'_>, bodies: &'a PlacedBodies<'_>) -> Part<'a> {
+    Part {
+        kernel: bodies,
+        body: PlacedBodies::BODY,
+        digest: model.digest(),
+        dimensions: Vec::new(),
+        namer: None,
+        preview: false,
+        source: PartSource::default(),
+        requirements: Requirements::default(),
     }
+}
+
+/// Runs `f` with the assembly as a part, placed as `exploded` asks, and its index.
+fn with_part<R>(
+    model: &AssemblyModel<'_>,
+    exploded: bool,
+    f: impl FnOnce(&Part<'_>, &PartIndex<'_>) -> Result<R, DrawingError>,
+) -> Result<R, DrawingError> {
+    let bodies = model.bodies(exploded)?;
+    let part = as_part(model, &bodies);
+    let index = PartIndex::build(&part)?;
+    f(&part, &index)
 }
 
 /// The line work of a view of the assembly at `scale`, and its transform.
 pub fn assembly_view(
-    model: &AssemblyModel,
+    model: &AssemblyModel<'_>,
     spec: &ViewSpec,
     scale: f64,
     exploded: bool,
 ) -> Result<(ViewGeometry, ViewTransform), DrawingError> {
-    let parts = model.shown(exploded);
-    let (mesh, lines, tol) = merged(parts, spec)?;
-    let frame = spec.frame().expect("checked in merged");
-    let curves = hidden_lines(&mesh, &lines, &frame, tol);
-    let xf = project::transform(&curves, spec, scale)?;
-    let mut out = Vec::with_capacity(curves.curves.len());
-    let mut counts: HashMap<(usize, usize), u32> = HashMap::new();
-    for c in &curves.curves {
-        let path = project::path_of(&c.curve, &xf);
-        if path.elements().len() < 2 {
-            continue;
-        }
-        let (kind, ek, raw) = match c.source {
-            CurveSource::Edge(e) => (CurveKind::Edge, EntityKind::Edge, e.raw()),
-            CurveSource::Silhouette(f) => (CurveKind::Silhouette, EntityKind::Face, f.raw()),
-            _ => continue,
-        };
-        let (part, local) = unpacked(raw);
-        let Some(p) = parts.get(part) else { continue };
-        let ordinal = counts.entry((part, local)).or_default();
-        *ordinal += 1;
-        let (point, size) = midpoint(&c.curve);
-        let role = if kind == CurveKind::Edge { "assembly_edge" } else { "assembly_silhouette" };
-        let mut source = EntityRef::new(ek, &p.path, role, local as u32, point, size);
-        source.kernel_hint = Some(raw);
-        out.push(Curve2 { path, source, visible: c.visible, kind, tangent: false, accuracy: Accuracy::Polygon });
-    }
-    let [x0, y0, x1, y1] = curves.bbox_2d;
-    let bbox = [
-        round(x0 * xf.scale - xf.centre.u),
-        round(y0 * xf.scale - xf.centre.v),
-        round(x1 * xf.scale - xf.centre.u),
-        round(y1 * xf.scale - xf.centre.v),
-    ];
-    let digest = model.reference.as_ref().map(|r| r.pinned.as_str().to_owned()).unwrap_or_default();
-    let geometry = ViewGeometry {
-        source_digest: digest,
-        curves: out,
-        hatch: Vec::new(),
-        outline: None,
-        bbox,
-        unproved: false,
-        // Display meshes, not Catallax's drawing queries: exports refuse it.
-        catallax: false,
-        coarse: false,
-    };
-    Ok((geometry, xf))
+    with_part(model, exploded, |part, index| {
+        let curves = project::view_curves(part, spec)?;
+        let xf = project::transform(&curves, spec, scale)?;
+        Ok((project::project(index, &curves, &xf, part.digest.as_str(), false).geometry, xf))
+    })
 }
 
-/// The point halfway along a curve, and its length.
-fn midpoint(curve: &Curve3) -> (Vec3, f64) {
-    let len = curve.length();
-    match curve {
-        Curve3::Polyline { points } if points.len() >= 2 => {
-            let mut left = len / 2.0;
-            for w in points.windows(2) {
-                let d = w[0].distance(w[1]);
-                if d >= left && d > 0.0 {
-                    return (w[0] + (w[1] - w[0]) * (left / d), len);
-                }
-                left -= d;
-            }
-            (*points.last().expect("two at least"), len)
-        }
-        c => (c.point_at(0.5), len),
+/// Whether a view shows the exploded view: its own flag, which a derived view takes from
+/// its parent when it is made.
+fn exploded_at(drawing: &Drawing, view: ViewId) -> bool {
+    drawing.view(view).is_some_and(|v| v.exploded)
+}
+
+/// What view `id` shows of the assembly now, computed fresh with its parents.
+pub fn context(drawing: &Drawing, model: &AssemblyModel<'_>, id: ViewId) -> Result<ViewContext, DrawingError> {
+    with_part(model, exploded_at(drawing, id), |part, index| ViewContext::compute(drawing, part, index, id))
+}
+
+/// A view folded off `parent` on `direction`'s side, at the parent's scale, placed in
+/// line with it.
+pub fn new_assembly_projected(
+    drawing: &Drawing,
+    model: &AssemblyModel<'_>,
+    sheet: usize,
+    parent: ViewId,
+    direction: FoldDirection,
+) -> Result<View, DrawingError> {
+    let exploded = exploded_at(drawing, parent);
+    let (mut view, _) = with_part(model, exploded, |part, index| {
+        crate::derived::new_projected(drawing, part, index, sheet, parent, direction)
+    })?;
+    view.exploded = exploded;
+    Ok(view)
+}
+
+/// A section of `parent` along a horizontal or vertical cutting line through the model
+/// point `through`, every part cut by its own kernel. A cut that meets no part is refused.
+pub fn new_assembly_section(
+    drawing: &Drawing,
+    model: &AssemblyModel<'_>,
+    sheet: usize,
+    parent: ViewId,
+    through: Vec3,
+    horizontal: bool,
+    flip: bool,
+) -> Result<View, DrawingError> {
+    let exploded = exploded_at(drawing, parent);
+    let (mut view, _) = with_part(model, exploded, |part, index| {
+        let line = crate::derived::cutting_line(drawing, part, index, parent, through, horizontal)?;
+        crate::derived::new_section(drawing, part, index, sheet, parent, line, flip, None)
+    })?;
+    if view.geometry.hatch.is_empty() {
+        return Err(DrawingError::BadRequest("the cutting line crosses no part of the assembly".into()));
     }
+    view.exploded = exploded;
+    Ok(view)
+}
+
+/// A detail of `parent` round the model point `center`, inside a circle of `radius`
+/// (the parent's view millimetres), magnified `factor` times.
+pub fn new_assembly_detail(
+    drawing: &Drawing,
+    model: &AssemblyModel<'_>,
+    sheet: usize,
+    parent: ViewId,
+    center: Vec3,
+    radius: f64,
+    factor: f64,
+) -> Result<View, DrawingError> {
+    let exploded = exploded_at(drawing, parent);
+    let (mut view, _) = with_part(model, exploded, |part, index| {
+        let at = crate::derived::context(drawing, part, index, parent)?.xf.point(center);
+        crate::derived::new_detail(drawing, part, index, sheet, parent, at, radius, Vec::new(), factor, None)
+    })?;
+    view.exploded = exploded;
+    Ok(view)
 }
 
 fn orientation(view: &View) -> Option<StandardView> {
@@ -258,7 +245,7 @@ fn orientation(view: &View) -> Option<StandardView> {
 /// Makes a drawing of an assembly: the views side by side at the largest of the
 /// template's scales that fits beside the BOM, the BOM in the top-right corner, and a
 /// balloon for every BOM row on the first view.
-pub fn make_assembly_drawing(model: &AssemblyModel, new: &NewAssemblyDrawing) -> Result<Drawing, DrawingError> {
+pub fn make_assembly_drawing(model: &AssemblyModel<'_>, new: &NewAssemblyDrawing) -> Result<Drawing, DrawingError> {
     let reference =
         model.reference.clone().ok_or_else(|| DrawingError::BadRequest("the assembly has no reference".into()))?;
     if new.views.is_empty() {
@@ -325,44 +312,42 @@ pub fn make_assembly_drawing(model: &AssemblyModel, new: &NewAssemblyDrawing) ->
     Ok(drawing)
 }
 
-/// Where a balloon for `item` attaches in a view: the middle of the longest visible curve
-/// of the first occurrence of the item that shows one, in model space and view
-/// millimetres, with that occurrence's path.
+/// Where a balloon for `item` attaches in a view: the middle of the longest visible edge
+/// of the first occurrence of the item that shows one (or of `occurrence`), in model
+/// space and view millimetres, with that occurrence's path.
 fn attach_point(
-    model: &AssemblyModel,
-    geometry: &ViewGeometry,
-    xf: &ViewTransform,
+    model: &AssemblyModel<'_>,
+    ctx: &ViewContext,
     item: u32,
     occurrence: Option<&str>,
 ) -> Option<(String, Vec3, Point2)> {
     let wanted: Vec<&str> = match occurrence {
         Some(p) => vec![p],
-        None => model.parts.iter().filter(|p| p.item == item).map(|p| p.path.as_str()).collect(),
+        None => model.paths_of(item).collect(),
     };
     for path in wanted {
-        let Some(best) = geometry
+        let Some(best) = ctx
+            .projected
+            .geometry
             .curves
             .iter()
-            .filter(|c| c.visible && c.source.feature == path)
+            .filter(|c| c.visible && c.source.kind == EntityKind::Edge && component_of(&c.source.feature) == Some(path))
             .max_by(|a, b| a.source.fingerprint.size.total_cmp(&b.source.fingerprint.size))
         else {
             continue;
         };
         let at = best.source.fingerprint.point;
-        return Some((path.to_owned(), at, xf.point(at)));
+        return Some((path.to_owned(), at, ctx.xf.point(at)));
     }
     None
 }
 
 /// Puts a balloon for every BOM row that has none on `view`, outside the view's box, on
 /// the line from the view's middle through its anchor.
-fn add_balloons(drawing: &mut Drawing, model: &AssemblyModel, view: ViewId) -> Result<(), DrawingError> {
+fn add_balloons(drawing: &mut Drawing, model: &AssemblyModel<'_>, view: ViewId) -> Result<(), DrawingError> {
     let sheet = crate::project::sheet_of(drawing, view).ok_or(DrawingError::UnknownView(view))?;
-    let v = drawing.view(view).ok_or(DrawingError::UnknownView(view))?.clone();
-    let spec = ViewSpec::standard(orientation(&v).unwrap_or(StandardView::Isometric));
-    let scale = project::scale_in(drawing, sheet, &v);
-    let (geometry, xf) = assembly_view(model, &spec, scale, v.exploded)?;
-    let [bx0, by0, bx1, by1] = geometry.bbox;
+    let ctx = context(drawing, model, view)?;
+    let [bx0, by0, bx1, by1] = ctx.projected.geometry.bbox;
     let half = Point2::new((bx1 - bx0) / 2.0, (by1 - by0) / 2.0);
     let taken: Vec<u32> = drawing.sheets[sheet]
         .annotations
@@ -382,7 +367,7 @@ fn add_balloons(drawing: &mut Drawing, model: &AssemblyModel, view: ViewId) -> R
     // View millimetres are sheet millimetres about the view's origin.
     let r = BALLOON_RADIUS;
     for row in model.bom.iter().filter(|r| !taken.contains(&r.item)) {
-        let Some((path, at, cached)) = attach_point(model, &geometry, &xf, row.item, None) else { continue };
+        let Some((path, at, cached)) = attach_point(model, &ctx, row.item, None) else { continue };
         // Out from the middle, past the box, then along until clear of the others.
         let d = Point2::new(cached.u, cached.v);
         let len = (d.u * d.u + d.v * d.v).sqrt().max(1e-9);
@@ -400,8 +385,7 @@ fn add_balloons(drawing: &mut Drawing, model: &AssemblyModel, view: ViewId) -> R
         }
         placed.push(p);
         let id = AnnotationId(drawing.next_annotation_id().0);
-        let mut entity = EntityRef::new(EntityKind::Edge, &path, "assembly_edge", 0, at, 0.0);
-        entity.kernel_hint = None;
+        let entity = EntityRef::new(EntityKind::Edge, &path, "assembly_edge", 0, at, 0.0);
         drawing.sheets[sheet].annotations.push(Annotation {
             id,
             view,
@@ -416,32 +400,51 @@ fn add_balloons(drawing: &mut Drawing, model: &AssemblyModel, view: ViewId) -> R
     Ok(())
 }
 
-/// The drawing brought to `model`: every base view's line work at its scale, the BOM
+/// The drawing brought to `model`: every view's line work, whatever its kind, the BOM
 /// rows, each balloon moved onto its occurrence (dangling when the occurrence is gone or
-/// hidden in the view, its number from the BOM row its occurrence is now counted under),
-/// and a balloon on the first ballooned view for every new row. Pins the new revision.
-pub fn update_assembly_drawing(drawing: &Drawing, model: &AssemblyModel) -> Result<Drawing, DrawingError> {
+/// shows no edge in the view, its number from the BOM row its occurrence is now counted
+/// under), and a balloon on the first ballooned view for every new row. Pins the new
+/// revision. A view excluded from update keeps its line work.
+pub fn update_assembly_drawing(drawing: &Drawing, model: &AssemblyModel<'_>) -> Result<Drawing, DrawingError> {
     let mut out = drawing.clone();
     if let Some(r) = &model.reference {
         out.model.pinned = r.pinned.clone();
     }
-    let item_of: BTreeMap<&str, u32> = model.parts.iter().map(|p| (p.path.as_str(), p.item)).collect();
+    let item_of: BTreeMap<&str, u32> =
+        model.parts.iter().zip(&model.items).map(|(p, i)| (p.component.as_str(), *i)).collect();
+    // Every view, parents first, once for each placement the views show.
+    let mut contexts: HashMap<ViewId, ViewContext> = HashMap::new();
+    for exploded in [false, true] {
+        let ids: Vec<ViewId> = drawing
+            .sheets
+            .iter()
+            .flat_map(|s| &s.views)
+            .filter(|v| v.exploded == exploded && !v.excluded_from_update)
+            .map(|v| v.id)
+            .collect();
+        if ids.is_empty() {
+            continue;
+        }
+        with_part(model, exploded, |part, index| {
+            let mut memo = Contexts::new();
+            for id in ids {
+                project::compute_in(drawing, part, index, id, &mut memo)?;
+            }
+            contexts.extend(memo);
+            Ok(())
+        })?;
+    }
     let mut ballooned: Option<ViewId> = None;
     for si in 0..out.sheets.len() {
         for t in out.sheets[si].tables.iter_mut().filter(|t| t.kind == TableKind::Bom) {
             t.bom = model.bom.clone();
         }
-        let views = out.sheets[si].views.clone();
-        for v in views {
-            let Some(o) = orientation(&v) else { continue };
-            if v.excluded_from_update {
-                continue;
-            }
-            let scale = project::scale_in(&out, si, &v);
-            let (geometry, xf) = assembly_view(model, &ViewSpec::standard(o), scale, v.exploded)?;
-            for a in out.sheets[si].annotations.iter_mut().filter(|a| a.view == v.id) {
+        let views: Vec<ViewId> = out.sheets[si].views.iter().map(|v| v.id).collect();
+        for id in views {
+            let Some(ctx) = contexts.get(&id) else { continue };
+            for a in out.sheets[si].annotations.iter_mut().filter(|a| a.view == id) {
                 let AnnotationKind::Balloon { item, occurrence } = &mut a.body else { continue };
-                ballooned.get_or_insert(v.id);
+                ballooned.get_or_insert(id);
                 let Some(now) = item_of.get(occurrence.as_str()) else {
                     a.state = AnnotationState::Dangling {
                         lost: vec![0],
@@ -450,7 +453,7 @@ pub fn update_assembly_drawing(drawing: &Drawing, model: &AssemblyModel) -> Resu
                     continue;
                 };
                 *item = *now;
-                match attach_point(model, &geometry, &xf, *now, Some(occurrence)) {
+                match attach_point(model, ctx, *now, Some(occurrence)) {
                     Some((_, at, cached)) => {
                         if let Some(anchor) = a.anchors.first_mut() {
                             anchor.attach = Attach::Point { at };
@@ -467,8 +470,12 @@ pub fn update_assembly_drawing(drawing: &Drawing, model: &AssemblyModel) -> Resu
                     }
                 }
             }
-            if let Some(view) = out.view_mut(v.id) {
-                view.geometry = geometry;
+            let parent_xf = out.view(id).and_then(|v| v.geometry_parent()).and_then(|p| contexts.get(&p)).map(|c| c.xf);
+            if let Some(view) = out.view_mut(id) {
+                view.geometry = ctx.projected.geometry.clone();
+                if let Some(xf) = parent_xf {
+                    project::reproject_parent_marks(&mut view.kind, &xf);
+                }
             }
         }
     }
@@ -494,11 +501,6 @@ pub fn update_assembly_drawing(drawing: &Drawing, model: &AssemblyModel) -> Resu
     }
     Ok(out)
 }
-
-/// Why an export refuses a view of an assembly: exports draw Catallax line work, and
-/// Catallax does not yet draw several placed parts in one view.
-pub const NOT_EXPORTED: &str = "is drawn from the assembly's display meshes; exports draw Catallax line work, \
-                                and Catallax does not draw placed parts together yet";
 
 /// A drawing whose model is an assembly.
 pub fn is_assembly_drawing(drawing: &Drawing) -> bool {

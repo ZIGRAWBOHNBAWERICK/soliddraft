@@ -712,6 +712,49 @@ fn before_ridealong_inputs(id: &str, current: &mut Value) {
     }
 }
 
+/// Hole and Edit hole gained an optional thread, Edit hole an optional `plain`, and the
+/// diameter of both became optional: a threaded hole's is its tap drill, and an edit
+/// keeps the one it has. A call that gives the diameter keeps its meaning.
+fn before_hole_thread(id: &str, current: &mut Value) {
+    fn restore(op: &str, schema: &mut Value) {
+        if !matches!(op, "hole" | "edit_hole") {
+            return;
+        }
+        let properties = schema["properties"].as_object_mut().expect("hole inputs");
+        assert_eq!(
+            properties.remove("thread"),
+            Some(json!({
+                "type": "object", "additionalProperties": false,
+                "properties": {"size": {"type": "number"}, "pitch": {"type": "number"},
+                    "class": {"type": "string"}, "length": {"type": "number"}},
+                "required": ["size"],
+            })),
+            "{op}: a thread is a size, and optionally its pitch, class and length"
+        );
+        if op == "edit_hole" {
+            assert_eq!(properties.remove("plain"), Some(json!({"type": "boolean"})), "plain is one optional boolean");
+        }
+        let required = schema["required"].as_array_mut().expect("required inputs");
+        assert!(
+            !required.iter().any(|field| ["thread", "plain", "diameter"].contains(&field.as_str().unwrap_or_default())),
+            "{op}: the thread, plain and the diameter stay optional"
+        );
+        required.push(json!("diameter"));
+    }
+    if id == "propose" {
+        let variants = current
+            .pointer_mut("/tool/input/properties/commands/items/anyOf")
+            .and_then(Value::as_array_mut)
+            .expect("proposal variants");
+        for schema in variants {
+            let op = schema["properties"]["op"]["const"].as_str().expect("operation").to_owned();
+            restore(&op, schema);
+        }
+    } else if let Some(schema) = current.pointer_mut("/tool/input") {
+        restore(id, schema);
+    }
+}
+
 fn before_print_accuracy(id: &str, current: &mut Value) {
     if !["export_stl", "export_3mf", "export_obj"].contains(&id) {
         return;
@@ -720,6 +763,24 @@ fn before_print_accuracy(id: &str, current: &mut Value) {
     assert!(!input["required"].as_array().unwrap().iter().any(|field| field == "accuracy_mm"));
     let added = input["properties"].as_object_mut().unwrap().remove("accuracy_mm").expect("mesh export accuracy");
     assert_eq!(added, json!({"type": "number"}), "print accuracy is one optional number");
+}
+
+/// Projected and Detail gained agent tools: the canvas tools are as they were.
+fn before_agent_derived_views(id: &str, current: &mut Value) {
+    let params: &[&str] = match id {
+        "drawing_projected" => &["direction", "view"],
+        "drawing_detail" => &["center", "factor", "radius", "view"],
+        _ => return,
+    };
+    assert_eq!((current["agents"].as_str(), current["undo"].as_str()), (Some("mcp"), Some("step")), "{id}");
+    assert_eq!(current["tool"]["name"], id);
+    let mut keys: Vec<&str> =
+        current["tool"]["input"]["properties"].as_object().expect("tool inputs").keys().map(String::as_str).collect();
+    keys.sort_unstable();
+    assert_eq!(keys, params, "{id}'s inputs");
+    current["agents"] = json!("app");
+    current["undo"] = json!("none");
+    current["tool"] = Value::Null;
 }
 
 fn baseline() -> Value {
@@ -871,7 +932,9 @@ fn command_ids_shortcuts_agent_schemas_and_availability_stay_compatible() {
         before_distance_verbs(id, &mut current);
         before_feature_pattern_source(id, &mut current);
         before_draft_pull(id, &mut current);
+        before_hole_thread(id, &mut current);
         before_print_accuracy(id, &mut current);
+        before_agent_derived_views(id, &mut current);
         if id == "check" {
             assert_eq!(current["agents"], "app", "Check opens its own report");
             current["agents"] = row["agents"].clone();

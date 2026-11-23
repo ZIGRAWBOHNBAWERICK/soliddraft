@@ -11,15 +11,19 @@
 //! itself. Drawings in the assembly's folder whose model is packed come along when asked,
 //! through the caller's `repoint`.
 //!
-//! Nothing is written unless every reference resolves, and nothing in the destination
-//! is replaced.
+//! The pack is made in memory first ([`gather`]) and then written: into a folder
+//! ([`pack_and_go`]), into one zip ([`pack_zip`], [`Pack::zip`]), or, in the browser,
+//! from the files the page holds ([`HeldFiles`]) into a zip the page downloads. Nothing
+//! is written unless every reference resolves, and nothing in the destination is
+//! replaced.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::io::Cursor;
 use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 use soliddraft_document::resolve::Resolver;
-use soliddraft_document::{ContentHash, DocKind, DocRef, DocumentId, FolderIndex, identify_file};
+use soliddraft_document::{ContentHash, DocKind, DocRef, DocumentId, FolderIndex, Identity, identify};
 
 use crate::file::{AssemblyPackage, RefCopy};
 
@@ -88,6 +92,141 @@ pub enum PackError {
 /// supplies it; Pack and Go only finds the drawings and works out the reference.
 pub type Repoint<'a> = &'a dyn Fn(&[u8], &DocRef) -> Result<Vec<u8>, String>;
 
+/// Where Pack and Go finds and reads the files it packs: folders on disk ([`Folders`]),
+/// or the files a browser page holds ([`HeldFiles`]).
+pub trait PackSource {
+    /// What `r`, held by the file at `from`, resolves to: the document's id, its file
+    /// and its revision now, or `None` when it cannot be found.
+    fn resolve(&self, from: &Path, r: &DocRef) -> Option<(DocumentId, PathBuf, Option<ContentHash>)>;
+    /// The bytes of the file at `path`: the root, or one `resolve` named.
+    fn read(&self, path: &Path) -> Result<Vec<u8>, String>;
+    /// The drawings to look through for ones whose model is packed, each with its path
+    /// and identity. `base` is the assembly's folder.
+    fn drawings(&self, base: &Path) -> Vec<(PathBuf, Identity)>;
+}
+
+/// Files on disk, found as the assembly finds them: the stored path, the assembly's
+/// folder and the search folders. Drawings come from the assembly's folder and the
+/// search folders, with their subfolders.
+#[derive(Clone, Copy, Debug)]
+pub struct Folders<'a> {
+    /// Other folders to look in.
+    pub search: &'a [PathBuf],
+}
+
+impl PackSource for Folders<'_> {
+    fn resolve(&self, from: &Path, r: &DocRef) -> Option<(DocumentId, PathBuf, Option<ContentHash>)> {
+        let resolution = Resolver::new(Some(from)).with_search_folders(self.search).resolve(r);
+        let t = resolution.target()?;
+        Some((t.id()?, t.path()?.to_path_buf(), t.revision().cloned()))
+    }
+
+    fn read(&self, path: &Path) -> Result<Vec<u8>, String> {
+        std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))
+    }
+
+    fn drawings(&self, base: &Path) -> Vec<(PathBuf, Identity)> {
+        let mut roots = vec![base.to_path_buf()];
+        roots.extend(self.search.iter().cloned());
+        let index = FolderIndex::scan(roots);
+        index.of_kind(DocKind::Drawing).map(|e| (e.path.clone(), e.identity.clone())).collect()
+    }
+}
+
+/// The files a browser page holds, which has no folders: each known by its name and
+/// bytes. A reference is found by its target's id, the file at the revision it pins
+/// first, and by its file name when it has no id.
+#[derive(Clone, Debug, Default)]
+pub struct HeldFiles {
+    files: Vec<(PathBuf, Vec<u8>, Identity)>,
+}
+
+impl HeldFiles {
+    /// The documents among `files`, each a name and its bytes. Files that are not
+    /// documents this version reads are left out.
+    pub fn new(files: impl IntoIterator<Item = (PathBuf, Vec<u8>)>) -> HeldFiles {
+        let files = files
+            .into_iter()
+            .filter_map(|(name, bytes)| identify(Cursor::new(&bytes)).ok().map(|i| (name, bytes, i)))
+            .collect();
+        HeldFiles { files }
+    }
+}
+
+impl PackSource for HeldFiles {
+    fn resolve(&self, _from: &Path, r: &DocRef) -> Option<(DocumentId, PathBuf, Option<ContentHash>)> {
+        let name = Path::new(&r.path).file_name();
+        let found = match r.id {
+            Some(id) => {
+                let same: Vec<_> = self.files.iter().filter(|(_, _, i)| i.id == id && i.kind == r.kind).collect();
+                same.iter().find(|(_, _, i)| i.revision == r.pinned).or(same.first()).copied()
+            }
+            None => self.files.iter().find(|(p, _, i)| i.kind == r.kind && p.file_name() == name),
+        }?;
+        Some((found.2.id, found.0.clone(), Some(found.2.revision.clone())))
+    }
+
+    fn read(&self, path: &Path) -> Result<Vec<u8>, String> {
+        self.files
+            .iter()
+            .find(|(p, _, _)| p == path)
+            .map(|(_, bytes, _)| bytes.clone())
+            .ok_or_else(|| format!("{} was not opened with the assembly", path.display()))
+    }
+
+    fn drawings(&self, _base: &Path) -> Vec<(PathBuf, Identity)> {
+        self.files
+            .iter()
+            .filter(|(_, _, i)| i.kind == DocKind::Drawing)
+            .map(|(p, _, i)| (p.clone(), i.clone()))
+            .collect()
+    }
+}
+
+/// A pack made in memory, before it is written: every file's report and bytes, the
+/// assembly last. Each file's `to` is relative to where the pack goes.
+#[derive(Clone, Debug)]
+pub struct Pack {
+    /// The packed assembly's place in the pack.
+    pub root: PathBuf,
+    /// Every file and its bytes.
+    pub files: Vec<(PackedFile, Vec<u8>)>,
+}
+
+impl Pack {
+    /// What writing the pack under `into` does: every file's `to` joined to it.
+    pub fn report(&self, into: &Path) -> PackReport {
+        let files = self.files.iter().map(|(f, _)| PackedFile { to: into.join(&f.to), ..f.clone() }).collect();
+        PackReport { root: into.join(&self.root), files }
+    }
+
+    /// The pack as one zip: every file at its place in the pack, stored as it is (the
+    /// documents are compressed already), with a fixed date, so a pack gives the same
+    /// bytes each time.
+    pub fn zip(&self) -> Result<Vec<u8>, PackError> {
+        use std::io::Write as _;
+        let io = |e: &dyn std::fmt::Display| PackError::Io(format!("cannot make the zip: {e}"));
+        let options = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Stored)
+            .last_modified_time(zip::DateTime::default());
+        let mut zip = zip::ZipWriter::new(Cursor::new(Vec::new()));
+        for (f, bytes) in &self.files {
+            zip.start_file(entry_name(&f.to), options).map_err(|e| io(&e))?;
+            zip.write_all(bytes).map_err(|e| io(&e))?;
+        }
+        Ok(zip.finish().map_err(|e| io(&e))?.into_inner())
+    }
+}
+
+/// A place in the pack as a zip entry's name: forward slashes.
+fn entry_name(path: &Path) -> String {
+    path.components().map(|c| c.as_os_str().to_string_lossy()).collect::<Vec<_>>().join("/")
+}
+
+/// The folder a pack is laid out in before it is written anywhere. References between
+/// packed files are worked out lexically inside it, so it need not exist.
+const LAYOUT: &str = "/soliddraft-pack";
+
 #[derive(Clone, Debug)]
 struct Doc {
     kind: DocKind,
@@ -99,17 +238,55 @@ struct Doc {
     sources: Vec<(DocumentId, PathBuf)>,
 }
 
-/// Packs `request.root` into `request.into`, with drawings of packed documents when
-/// `drawings` is given.
+/// Packs `request.root` into `request.into`, a new or empty folder, with drawings of
+/// packed documents when `drawings` is given.
 pub fn pack_and_go(request: &PackRequest, drawings: Option<Repoint>) -> Result<PackReport, PackError> {
     let io = |what: &Path, e: &dyn std::fmt::Display| PackError::Io(format!("{}: {e}", what.display()));
     let root = std::path::absolute(&request.root).map_err(|e| io(&request.root, &e))?;
     let into = std::path::absolute(&request.into).map_err(|e| io(&request.into, &e))?;
+    check_destination(&into, root.parent().unwrap_or(Path::new("")))?;
+    let pack = gather(&PackRequest { root, ..request.clone() }, &Folders { search: &request.search }, drawings)?;
+    for (f, bytes) in &pack.files {
+        let to = into.join(&f.to);
+        let dir = to.parent().unwrap_or(Path::new(""));
+        std::fs::create_dir_all(dir).map_err(|e| io(dir, &e))?;
+        soliddraft_document::save_atomic(&to, bytes).map_err(|e| io(&to, &e))?;
+    }
+    Ok(pack.report(&into))
+}
+
+/// Packs `request.root` into one zip file, `request.into`, which must not exist. Each
+/// file's `to` in the report is its place in the zip.
+pub fn pack_zip(request: &PackRequest, drawings: Option<Repoint>) -> Result<PackReport, PackError> {
+    let io = |what: &Path, e: &dyn std::fmt::Display| PackError::Io(format!("{}: {e}", what.display()));
+    let root = std::path::absolute(&request.root).map_err(|e| io(&request.root, &e))?;
+    if !request.into.extension().is_some_and(|e| e.eq_ignore_ascii_case("zip")) {
+        return Err(PackError::Destination(format!("{} does not end in .zip", request.into.display())));
+    }
+    if request.into.exists() {
+        return Err(PackError::Destination(format!(
+            "{} already exists; Pack and Go replaces nothing",
+            request.into.display()
+        )));
+    }
+    let pack = gather(&PackRequest { root, ..request.clone() }, &Folders { search: &request.search }, drawings)?;
+    let bytes = pack.zip()?;
+    soliddraft_document::save_new(&request.into, &bytes).map_err(|e| io(&request.into, &e))?;
+    Ok(pack.report(Path::new("")))
+}
+
+/// Gathers `request.root` and every document it reaches through `source`, and lays
+/// them out as `request` says, writing nothing. `request.into` is not used.
+pub fn gather(request: &PackRequest, source: &dyn PackSource, drawings: Option<Repoint>) -> Result<Pack, PackError> {
+    let io = |what: &Path, e: &dyn std::fmt::Display| PackError::Io(format!("{}: {e}", what.display()));
+    let layout = Path::new(LAYOUT);
+    let root = request.root.clone();
     let base = root.parent().unwrap_or(Path::new("")).to_path_buf();
-    check_destination(&into, &base)?;
+    let read = |path: &Path| source.read(path).map_err(PackError::Io);
+    let open = |path: &Path| AssemblyPackage::from_bytes(read(path)?).map_err(|e| io(path, &e));
 
     // 1. Every document the assembly reaches, by id.
-    let first = identify_file(&root).map_err(|e| io(&root, &e))?;
+    let first = identify(Cursor::new(read(&root)?)).map_err(|e| io(&root, &e))?;
     if first.kind != DocKind::Assembly {
         return Err(PackError::Destination(format!("{} is not an assembly", root.display())));
     }
@@ -121,86 +298,88 @@ pub fn pack_and_go(request: &PackRequest, drawings: Option<Repoint>) -> Result<P
         }
         let mut sources = Vec::new();
         if kind == DocKind::Assembly {
-            let package = AssemblyPackage::open(&path).map_err(|e| io(&path, &e))?;
-            let resolver = Resolver::new(Some(&path)).with_search_folders(&request.search);
+            let package = open(&path)?;
             for s in &package.assembly().sources {
-                let target = resolver.resolve(&s.document);
-                let t = target.target().ok_or_else(|| PackError::Missing(s.document.path.clone()))?;
-                let (Some(found), Some(at)) = (t.id(), t.path()) else {
-                    return Err(PackError::Missing(s.document.path.clone()));
-                };
-                let now = t.revision().cloned().unwrap_or_else(|| s.document.pinned.clone());
-                sources.push((found, at.to_path_buf()));
-                queue.push((found, at.to_path_buf(), s.document.kind, now));
+                let (found, at, now) =
+                    source.resolve(&path, &s.document).ok_or_else(|| PackError::Missing(s.document.path.clone()))?;
+                let now = now.unwrap_or_else(|| s.document.pinned.clone());
+                sources.push((found, at.clone()));
+                queue.push((found, at, s.document.kind, now));
             }
         }
         docs.insert(id, Doc { kind, from: path, to: PathBuf::new(), revision, sources });
     }
 
     // 2. Where each lands.
+    let place = |from: &Path| {
+        let relative = match from.strip_prefix(&base) {
+            Ok(r) if !request.flatten => r.to_path_buf(),
+            _ => PathBuf::from(from.file_name().unwrap_or_default()),
+        };
+        layout.join(renamed(&relative, &request.prefix, &request.suffix))
+    };
     let mut taken: HashMap<PathBuf, PathBuf> = HashMap::new();
     for doc in docs.values_mut() {
-        let relative = match doc.from.strip_prefix(&base) {
-            Ok(r) if !request.flatten => r.to_path_buf(),
-            _ => PathBuf::from(doc.from.file_name().unwrap_or_default()),
-        };
-        let to = into.join(renamed(&relative, &request.prefix, &request.suffix));
+        let to = place(&doc.from);
         if let Some(other) = taken.insert(to.clone(), doc.from.clone()) {
-            return Err(PackError::Clash(other, doc.from.clone(), to));
+            return Err(PackError::Clash(other, doc.from.clone(), unlaid(&to)));
         }
         doc.to = to;
     }
 
-    // 3. Drawings of packed documents, found before anything is written.
+    // 3. Drawings of packed documents, found before anything is made.
     let mut drawn: Vec<(PathBuf, PathBuf, DocRef)> = Vec::new();
     if drawings.is_some() {
-        let mut roots = vec![base.clone()];
-        roots.extend(request.search.iter().cloned());
-        let index = FolderIndex::scan(roots);
-        for e in index.of_kind(DocKind::Drawing) {
-            let Some(model) = e.identity.references.first() else { continue };
+        // One copy of each drawing: the one nearest the assembly's folder. Another, such as
+        // the copy an earlier pack put in a subfolder, is the same document.
+        let mut found: BTreeMap<DocumentId, (PathBuf, Identity)> = BTreeMap::new();
+        for (path, identity) in source.drawings(&base) {
+            let depth = |p: &Path| (p.components().count(), p.to_path_buf());
+            match found.get(&identity.id) {
+                Some((kept, _)) if depth(kept) <= depth(&path) => {}
+                _ => {
+                    found.insert(identity.id, (path, identity));
+                }
+            }
+        }
+        let mut found: Vec<(PathBuf, Identity)> = found.into_values().collect();
+        found.sort_by(|a, b| a.0.cmp(&b.0));
+        for (path, identity) in found {
+            let Some(model) = identity.references.first() else { continue };
             if !model.id.is_some_and(|m| docs.contains_key(&m)) {
                 continue;
             }
-            let relative = match e.path.strip_prefix(&base) {
-                Ok(r) if !request.flatten => r.to_path_buf(),
-                _ => PathBuf::from(e.path.file_name().unwrap_or_default()),
-            };
-            let to = into.join(renamed(&relative, &request.prefix, &request.suffix));
-            if let Some(other) = taken.insert(to.clone(), e.path.clone()) {
-                return Err(PackError::Clash(other, e.path.clone(), to));
+            let to = place(&path);
+            if let Some(other) = taken.insert(to.clone(), path.clone()) {
+                return Err(PackError::Clash(other, path.clone(), unlaid(&to)));
             }
-            drawn.push((e.path.clone(), to, model.clone()));
+            drawn.push((path, to, model.clone()));
         }
     }
 
     // 4. Parts and meshes as they are; assemblies deepest first, each with its references
     // moved and its sub-assemblies' new revisions.
-    let mut report = Vec::new();
+    let mut files: Vec<(PackedFile, Vec<u8>)> = Vec::new();
     let mut new_revision: HashMap<DocumentId, ContentHash> = HashMap::new();
-    let make_parent = |to: &Path| {
-        let dir = to.parent().unwrap_or(Path::new(""));
-        std::fs::create_dir_all(dir).map_err(|e| io(dir, &e))
-    };
+    let mut packed_bytes: HashMap<DocumentId, Vec<u8>> = HashMap::new();
     for (id, doc) in docs.iter().filter(|(_, d)| d.kind != DocKind::Assembly) {
-        make_parent(&doc.to)?;
-        std::fs::copy(&doc.from, &doc.to).map_err(|e| io(&doc.from, &e))?;
         new_revision.insert(*id, doc.revision.clone());
-        report.push(PackedFile {
+        let file = PackedFile {
             id: *id,
             kind: doc.kind,
             from: doc.from.clone(),
-            to: doc.to.clone(),
+            to: unlaid(&doc.to),
             revision: doc.revision.clone(),
             rewritten: false,
-        });
+        };
+        files.push((file, read(&doc.from)?));
     }
     // Every sub-assembly before each assembly that places it, however deep or shared.
     let assemblies = post_order(first.id, &docs);
     let mut packed_root = None;
     for id in &assemblies {
         let doc = &docs[id];
-        let package = AssemblyPackage::open(&doc.from).map_err(|e| io(&doc.from, &e))?;
+        let package = open(&doc.from)?;
         let mut truth = (**package.assembly()).clone();
         // Sub-assembly revisions that change, old to new, for this file's copies.
         let mut moved_revisions: HashMap<(DocumentId, ContentHash), ContentHash> = HashMap::new();
@@ -229,7 +408,9 @@ pub fn pack_and_go(request: &PackRequest, drawings: Option<Repoint>) -> Result<P
         for (cid, rev) in package.copies() {
             match moved_revisions.get(&(cid, rev.clone())) {
                 Some(now) => {
-                    let packed = AssemblyPackage::open(&docs[&cid].to).map_err(|e| io(&docs[&cid].to, &e))?;
+                    let to = &docs[&cid].to;
+                    let bytes = packed_bytes.get(&cid).cloned().ok_or_else(|| io(to, &"not packed yet"))?;
+                    let packed = AssemblyPackage::from_bytes(bytes).map_err(|e| io(to, &e))?;
                     copies.push(RefCopy::assembly(cid, now.clone(), &packed.assembly().truth_entries()));
                 }
                 None => {
@@ -242,20 +423,20 @@ pub fn pack_and_go(request: &PackRequest, drawings: Option<Repoint>) -> Result<P
         let kernel = package.manifest().kernel.clone();
         truth.normalize();
         let bytes = truth.to_bytes(*id, kernel, &copies).map_err(|e| io(&doc.to, &e))?;
-        make_parent(&doc.to)?;
-        soliddraft_document::save_atomic(&doc.to, &bytes).map_err(|e| io(&doc.to, &e))?;
         let revision = truth.semantic_hash();
         new_revision.insert(*id, revision.clone());
-        report.push(PackedFile {
+        packed_bytes.insert(*id, bytes.clone());
+        let file = PackedFile {
             id: *id,
             kind: DocKind::Assembly,
             from: doc.from.clone(),
-            to: doc.to.clone(),
+            to: unlaid(&doc.to),
             revision,
             rewritten: true,
-        });
+        };
+        files.push((file, bytes));
         if *id == first.id {
-            packed_root = Some(doc.to.clone());
+            packed_root = Some(unlaid(&doc.to));
         }
     }
 
@@ -270,24 +451,27 @@ pub fn pack_and_go(request: &PackRequest, drawings: Option<Repoint>) -> Result<P
             {
                 r.pinned = now.clone();
             }
-            let bytes = std::fs::read(&from).map_err(|e| io(&from, &e))?;
-            let out = repoint(&bytes, &r).map_err(|e| io(&from, &e))?;
-            make_parent(&to)?;
-            soliddraft_document::save_atomic(&to, &out).map_err(|e| io(&to, &e))?;
-            let identity = identify_file(&to).map_err(|e| io(&to, &e))?;
-            report.push(PackedFile {
+            let out = repoint(&read(&from)?, &r).map_err(|e| io(&from, &e))?;
+            let identity = identify(Cursor::new(&out)).map_err(|e| io(&to, &e))?;
+            let file = PackedFile {
                 id: identity.id,
                 kind: DocKind::Drawing,
                 from,
-                to,
+                to: unlaid(&to),
                 revision: identity.revision,
                 rewritten: true,
-            });
+            };
+            files.push((file, out));
         }
     }
     // The assembly last, as the report promises.
-    report.sort_by_key(|f| (f.id == first.id, f.kind == DocKind::Assembly));
-    Ok(PackReport { root: packed_root.expect("the root is an assembly"), files: report })
+    files.sort_by_key(|(f, _)| (f.id == first.id, f.kind == DocKind::Assembly));
+    Ok(Pack { root: packed_root.expect("the root is an assembly"), files })
+}
+
+/// A place in the layout folder as a path relative to the pack.
+fn unlaid(path: &Path) -> PathBuf {
+    path.strip_prefix(LAYOUT).map(Path::to_path_buf).unwrap_or_else(|_| path.to_path_buf())
 }
 
 /// The assemblies under `root`, each after every assembly it places.

@@ -1,0 +1,308 @@
+{
+  "format": "soliddraft-scenario/1",
+  "name": "assembly-component-configurations",
+  "folders": [
+    "work"
+  ],
+  "max_work": 20000000,
+  "steps": [
+    {
+      "tool": "sketch",
+      "arguments": {
+        "plane": "top",
+        "shapes": [
+          {
+            "shape": "rectangle",
+            "center": [
+              0,
+              0,
+              0
+            ],
+            "width": 40,
+            "height": 30
+          }
+        ]
+      },
+      "checks": []
+    },
+    {
+      "tool": "extrude",
+      "arguments": {
+        "sketch": "Sketch1",
+        "depth": 14,
+        "flip": false
+      },
+      "checks": []
+    },
+    {
+      "tool": "set_value",
+      "arguments": {
+        "name": "h",
+        "expression": "14"
+      },
+      "checks": []
+    },
+    {
+      "tool": "drive",
+      "arguments": {
+        "feature": "Boss-Extrude1",
+        "parameter": "depth",
+        "expression": "h"
+      },
+      "checks": []
+    },
+    {
+      "tool": "add_configuration",
+      "arguments": {
+        "name": "Tall"
+      },
+      "checks": []
+    },
+    {
+      "tool": "set_configuration_value",
+      "arguments": {
+        "configuration": "Tall",
+        "name": "h",
+        "expression": "28"
+      },
+      "checks": [
+        {
+          "pointer": "/summary/configurations/rows/1/overrides/h",
+          "equals": "28"
+        }
+      ]
+    },
+    {
+      "tool": "save",
+      "arguments": {
+        "path": "{bundle}/work/a.dwprt"
+      },
+      "checks": [],
+      "files": [
+        "{bundle}/work/a.dwprt"
+      ]
+    },
+    {
+      "tool": "make_assembly",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/summary/assembly/components/0/path",
+          "equals": "2"
+        }
+      ]
+    },
+    {
+      "tool": "assembly_save",
+      "arguments": {
+        "path": "{bundle}/work/rig.dwasm"
+      },
+      "checks": [],
+      "files": [
+        "{bundle}/work/rig.dwasm"
+      ]
+    },
+    {
+      "tool": "insert_component",
+      "arguments": {
+        "paths": [
+          "{bundle}/work/a.dwprt"
+        ],
+        "placement": {
+          "translation": [
+            60,
+            0,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0,
+            1
+          ]
+        }
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/components/1/path",
+          "equals": "3"
+        }
+      ]
+    },
+    {
+      "tool": "assembly_component_configuration",
+      "arguments": {
+        "component": 3,
+        "configuration": "Short"
+      },
+      "checks": [],
+      "refused": "Default, Tall"
+    },
+    {
+      "tool": "assembly_component_configuration",
+      "arguments": {
+        "component": 3,
+        "configuration": "Tall"
+      },
+      "checks": [
+        {
+          "pointer": "/result/component/configuration",
+          "equals": "Tall"
+        },
+        {
+          "pointer": "/result/component/configurations",
+          "length": 2
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/max/2",
+          "approx": 28,
+          "tolerance": 0.001
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/max/2",
+          "approx": 14,
+          "tolerance": 0.001
+        }
+      ]
+    },
+    {
+      "tool": "assembly_save",
+      "arguments": {
+        "path": "{bundle}/work/rig.dwasm"
+      },
+      "checks": [],
+      "files": [
+        "{bundle}/work/rig.dwasm"
+      ]
+    },
+    {
+      "tool": "assembly_make_drawing",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/result/drawing/sheets/0/tables/0/bom",
+          "length": 2
+        },
+        {
+          "pointer": "/result/drawing/sheets/0/tables/0/bom/0/name",
+          "equals": "a"
+        },
+        {
+          "pointer": "/result/drawing/sheets/0/tables/0/bom/1/name",
+          "equals": "a (Tall)"
+        }
+      ]
+    },
+    {
+      "tool": "drawing_save",
+      "arguments": {
+        "path": "{bundle}/work/rig.dwdrw"
+      },
+      "checks": [],
+      "files": [
+        "{bundle}/work/rig.dwdrw"
+      ]
+    },
+    {
+      "tool": "open",
+      "arguments": {
+        "path": "{bundle}/work/rig.dwasm"
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/components/1/bounds/max/2",
+          "approx": 28,
+          "tolerance": 0.001
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/max/2",
+          "approx": 14,
+          "tolerance": 0.001
+        }
+      ]
+    },
+    {
+      "tool": "assembly_component_configuration",
+      "arguments": {
+        "component": 2,
+        "configuration": "Tall"
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/components/0/bounds/max/2",
+          "approx": 28,
+          "tolerance": 0.001
+        }
+      ]
+    },
+    {
+      "tool": "assembly_save",
+      "arguments": {
+        "path": "{bundle}/work/rig.dwasm"
+      },
+      "checks": [],
+      "files": [
+        "{bundle}/work/rig.dwasm"
+      ]
+    },
+    {
+      "tool": "open",
+      "arguments": {
+        "path": "{bundle}/work/rig.dwdrw"
+      },
+      "checks": []
+    },
+    {
+      "tool": "drawing_rebuild",
+      "arguments": {},
+      "checks": []
+    },
+    {
+      "tool": "drawing_save",
+      "arguments": {
+        "path": "{bundle}/work/rig.dwdrw"
+      },
+      "checks": [
+        {
+          "pointer": "/inspect/drawing/bom",
+          "length": 1
+        },
+        {
+          "pointer": "/inspect/drawing/bom/0/name",
+          "equals": "a (Tall)"
+        },
+        {
+          "pointer": "/inspect/drawing/bom/0/quantity",
+          "equals": 2
+        }
+      ],
+      "files": [
+        "{bundle}/work/rig.dwdrw"
+      ],
+      "inspect": {
+        "drawing": [
+          "asm",
+          "drawing",
+          "{bundle}/work/rig.dwasm",
+          "{bundle}/work/rig.dwdrw",
+          "--json"
+        ]
+      }
+    },
+    {
+      "tool": "drawing_export_pdf",
+      "arguments": {
+        "path": "{bundle}/work/rig.pdf"
+      },
+      "checks": [
+        {
+          "pointer": "/result/method",
+          "equals": "catallax"
+        }
+      ],
+      "files": [
+        "{bundle}/work/rig.pdf"
+      ]
+    }
+  ]
+}

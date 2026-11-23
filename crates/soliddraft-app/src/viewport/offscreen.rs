@@ -100,6 +100,7 @@ impl Offscreen {
             meshes: (self.uploads, doc.meshes.iter().map(|(b, m)| (*b, m.clone())).collect()),
             ghost: None,
             preview: doc.provisional_mesh(),
+            threads: super::threads::marks(doc),
             preview_pickable: false,
             pick_revision: None,
             pick_out: Arc::new(Mutex::new(Default::default())),

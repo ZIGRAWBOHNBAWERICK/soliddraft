@@ -15,7 +15,7 @@ use soliddraft_model::ValueTable;
 use crate::document::{AssemblyDocument, EditError, key_of};
 use crate::mates::bodies::{End, Gathered, Problem, Rule, Scope};
 use crate::mates::motion::{self, DistanceEntity, Relation};
-use crate::mates::reference::{Shape, ShapeKind, check_endpoint};
+use crate::mates::reference::{Shape, ShapeKind};
 use crate::mates::solver::{
     self, Along, Body, Constraint, FreeMotion, LocalAxis, LocalPlane, LocalPoint, LocalSlot, Mirrored, Slide,
     SolverState, SolverStatus,
@@ -636,8 +636,6 @@ impl AssemblyDocument {
     }
 
     fn measure(&mut self, a: &FaceEndpoint, b: &FaceEndpoint) -> Result<PlaneMeasurement, MateRefusal> {
-        check_endpoint(a)?;
-        check_endpoint(b)?;
         let (ea, eb, placements) = {
             let scope = Scope::new(&self.assembly, &self.table, &self.store);
             let world = |e: &FaceEndpoint| {
@@ -722,7 +720,6 @@ impl AssemblyDocument {
             let scope = Scope::new(&self.assembly, &self.table, &self.store);
             let mut ends = Vec::new();
             for e in mate.faces() {
-                check_endpoint(e)?;
                 ends.push(self.end_of(&scope, e.path.clone(), e, mate.name())?);
             }
             ends

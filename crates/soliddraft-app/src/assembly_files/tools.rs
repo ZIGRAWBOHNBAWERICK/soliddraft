@@ -14,15 +14,20 @@ fn text<'a>(input: &'a Value, key: &str) -> Result<&'a str, String> {
 pub(crate) fn run(state: &mut AppState, name: &str, input: &Value) -> Option<Result<Value, String>> {
     Some(match name {
         "assembly_pack_and_go" => (|| {
+            let (into, zip) = match (input["folder"].as_str(), input["zip"].as_str()) {
+                (Some(folder), None) if !folder.trim().is_empty() => (folder, false),
+                (None, Some(zip)) if !zip.trim().is_empty() => (zip, true),
+                _ => return Err("give folder or zip, one of them".into()),
+            };
             let request = PackRequest {
-                into: PathBuf::from(text(input, "folder")?),
+                into: PathBuf::from(into),
                 prefix: input["prefix"].as_str().unwrap_or_default().to_owned(),
                 suffix: input["suffix"].as_str().unwrap_or_default().to_owned(),
                 flatten: input["flatten"].as_bool().unwrap_or(false),
                 ..PackRequest::default()
             };
             let drawings = input["drawings"].as_bool().unwrap_or(false);
-            let report = super::pack(state, request, drawings)?;
+            let report = super::pack(state, request, drawings, zip)?;
             Ok(json!({ "packed": report, "assembly": summary(state) }))
         })(),
         "assembly_make_drawing" => (|| {
@@ -46,9 +51,6 @@ pub(crate) fn run(state: &mut AppState, name: &str, input: &Value) -> Option<Res
             let d = state.drawing.session.as_ref().ok_or("no drawing")?;
             Ok(json!({ "done": said, "drawing": &d.doc.drawing }))
         })(),
-        #[cfg(target_arch = "wasm32")]
-        "assembly_export_urdf" | "assembly_export_usd" => Err(super::BROWSER_EXPORT.to_owned()),
-        #[cfg(not(target_arch = "wasm32"))]
         "assembly_export_urdf" | "assembly_export_usd" => (|| {
             let path = PathBuf::from(text(input, "path")?);
             let want = if name == "assembly_export_urdf" { "urdf" } else { "usda" };

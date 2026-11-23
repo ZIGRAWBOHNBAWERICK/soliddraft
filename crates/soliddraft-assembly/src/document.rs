@@ -19,7 +19,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use soliddraft_document::resolve::{Resolution, Resolver, repin};
-use soliddraft_document::{ContentHash, DocKind, DocRef, DocumentId, OpenDocument};
+use soliddraft_document::{ConfigurationId, ContentHash, DocKind, DocRef, DocumentId, OpenDocument};
 use soliddraft_materials::{Appearance, Snapshots};
 use soliddraft_model::{Document as PartDocument, ValueTable};
 use soliddraft_tessellation::{Level, Quality, Settings};
@@ -1087,6 +1087,115 @@ impl AssemblyDocument {
         self.redo.clear();
     }
 
+    /// The configurations root component `component` can show: a part's from its file at
+    /// the revision it is pinned at, Default first; a sub-assembly's from its truth.
+    pub fn configurations_for(&mut self, component: ComponentId) -> Result<Vec<String>, EditError> {
+        Ok(self.configuration_choices(component)?.into_iter().map(|(_, name)| name).collect())
+    }
+
+    /// The configuration root component `component` shows, by name; `None` for the one
+    /// its file was saved in.
+    pub fn configuration_of(&mut self, component: ComponentId) -> Result<Option<String>, EditError> {
+        let c = self.assembly.component(component).ok_or(EditError::NoComponent(component))?;
+        let Some(id) = self.assembly.source(c.source).and_then(|s| s.document.configuration.clone()) else {
+            return Ok(None);
+        };
+        let choices = self.configuration_choices(component)?;
+        Ok(Some(choices.into_iter().find(|(c, _)| *c == id).map_or(id.0, |(_, name)| name)))
+    }
+
+    fn configuration_choices(&mut self, component: ComponentId) -> Result<Vec<(ConfigurationId, String)>, EditError> {
+        self.finish_loading();
+        let c = self.assembly.component(component).ok_or(EditError::NoComponent(component))?;
+        let mut document =
+            self.assembly.source(c.source).map(|s| s.document.clone()).ok_or(EditError::NoComponent(component))?;
+        document.configuration = None;
+        match document.kind {
+            DocKind::Part => {
+                let source = self
+                    .options
+                    .display
+                    .as_deref()
+                    .and_then(|d| d.kernel_source())
+                    .ok_or_else(|| EditError::Invalid("reading a part's configurations needs the kernel".into()))?;
+                let bytes = self.revision_bytes(&document).map_err(EditError::Invalid)?;
+                let part = source.exact(&bytes, None).map_err(EditError::Invalid)?;
+                Ok(part.configuration_names())
+            }
+            DocKind::Assembly => {
+                let row = self.row(&crate::configure::component_path(component))?;
+                let sub = self.store.get(self.table.definition(row)).clone();
+                let truth = sub
+                    .original
+                    .or(sub.assembly)
+                    .ok_or_else(|| EditError::Invalid(format!("{} is not loaded", label_of(&document))))?;
+                Ok(truth.configurations.iter().map(|c| (ConfigurationId(c.id.to_string()), c.name.clone())).collect())
+            }
+            _ => Err(EditError::Invalid(format!("{} has no configurations", label_of(&document)))),
+        }
+    }
+
+    /// Shows root component `component` in its part's or sub-assembly's configuration
+    /// `name`, or in the one its file was saved in (`None`). The component keeps its
+    /// placement and its mates, which are solved again on the configuration's shape. A
+    /// name the part or sub-assembly does not have is refused with the names it has, and
+    /// nothing changes. One undo step.
+    pub fn set_configuration(&mut self, component: ComponentId, name: Option<&str>) -> Result<(), EditError> {
+        self.cancel_drag();
+        let choices = self.configuration_choices(component)?;
+        let wanted = match name {
+            None => None,
+            Some(name) => Some(choices.iter().find(|(_, n)| n == name).map(|(id, _)| id.clone()).ok_or_else(|| {
+                let known: Vec<&str> = choices.iter().map(|(_, n)| n.as_str()).collect();
+                let has = if known.is_empty() { "none".to_owned() } else { known.join(", ") };
+                EditError::Invalid(format!("no configuration {name}; it has {has}"))
+            })?),
+        };
+        let name = name.unwrap_or("the saved configuration");
+        let old = self.assembly.component(component).ok_or(EditError::NoComponent(component))?.source;
+        let mut document = self.assembly.source(old).ok_or(EditError::NoComponent(component))?.document.clone();
+        if document.configuration == wanted {
+            return Ok(());
+        }
+        document.configuration = wanted.clone();
+        let changed = document.id;
+        let mut proposed = self.assembly.clone();
+        let source = proposed.add_source(document);
+        proposed.component_mut(component).expect("checked above").source = source;
+        let mut candidate = AssemblyDocument::from_parts(
+            self.path.clone(),
+            self.id,
+            proposed,
+            self.packages.clone(),
+            self.options.clone(),
+        );
+        candidate.store = self.store.clone();
+        let mut lookup = Lookup::with_packages(self.packages.clone(), self.path.as_deref(), &self.options);
+        candidate.restructure(&mut lookup).map_err(|e| EditError::Invalid(e.to_string()))?;
+        candidate.start_loading(lookup);
+        candidate.finish_loading();
+        // A configuration that cannot be shown is refused, and nothing changes.
+        if let Some((_, d)) = candidate.store.iter().find(|(_, d)| {
+            Some(d.key.document) == changed && d.key.configuration == wanted && d.state == LoadState::Failed
+        }) {
+            return Err(EditError::Invalid(d.problem.clone().unwrap_or_else(|| format!("{name} cannot be shown"))));
+        }
+        // Its shape changed, so the mates are solved again on it.
+        let (mut components, overrides) =
+            self.solve_candidate(&mut candidate).map_err(|r| EditError::Invalid(r.to_string()))?;
+        if !components.contains(&component) {
+            components.push(component);
+        }
+        let mut before = self.image(&components, &overrides);
+        before.sources = self.assembly.sources.iter().map(|s| (s.id, Some(s.clone()))).collect();
+        if !self.assembly.sources.iter().any(|s| s.id == source) {
+            before.sources.push((source, None));
+        }
+        before.design = Some(Design::of(&self.assembly));
+        self.adopt("Configuration", candidate, before);
+        Ok(())
+    }
+
     /// Renames one of the root's components; `None` goes back to the source's name.
     pub fn rename(&mut self, component: ComponentId, name: Option<String>) -> Result<(), EditError> {
         self.cancel_drag();
@@ -1440,14 +1549,18 @@ impl AssemblyDocument {
             }
             let (id, rev) = (d.key.document, &d.key.revision);
             if let Some(a) = &d.assembly {
+                // A sub-assembly placed in several of its configurations has one copy.
+                if out.iter().any(|c| c.document == id && &c.revision == rev) {
+                    continue;
+                }
                 if let Some(c) = readers.iter_mut().find_map(|r| r.copy(id, rev).ok().flatten()) {
                     out.push(c);
                 } else {
-                    out.push(RefCopy::assembly(id, rev.clone(), &a.truth_entries()));
+                    out.push(RefCopy::assembly(id, rev.clone(), &d.original.as_ref().unwrap_or(a).truth_entries()));
                 }
                 continue;
             }
-            let name = display_entry(d.quality.as_ref());
+            let name = display_entry(d.quality.as_ref(), d.key.configuration.as_ref());
             let bytes: Option<Arc<[u8]>> = readers
                 .iter_mut()
                 .find_map(|r| r.entry(id, rev, &name).ok().flatten())
@@ -1461,7 +1574,7 @@ impl AssemblyDocument {
             out[slot].entries.push((name, bytes));
             // The coarse level too, when it was loaded or the file already has it, so a
             // reopened assembly can show far parts coarse without asking for them.
-            let coarse = level_entry(d.quality.as_ref(), Level::Coarse);
+            let coarse = level_entry(d.quality.as_ref(), d.key.configuration.as_ref(), Level::Coarse);
             let coarse_bytes: Option<Arc<[u8]>> =
                 d.coarse.as_ref().map(|m| m.encode("soliddraft coarse").into()).or_else(|| {
                     readers.iter_mut().find_map(|r| r.entry(id, rev, &coarse).ok().flatten()).map(Into::into)
@@ -1572,10 +1685,12 @@ impl AssemblyDocument {
         }
         let r = self.refs.get(&def).ok_or("the definition has no reference")?.clone();
         let bytes = self.revision_bytes(&r)?;
-        let part = Arc::new(Mutex::new(source.exact(&bytes)?));
+        let part = Arc::new(Mutex::new(source.exact(&bytes, r.configuration.as_ref())?));
         self.exact.insert(def, part.clone());
-        if self.store.get(def).state == LoadState::Stale {
-            self.display_at_pin(def, &bytes, source);
+        if self.store.get(def).state == LoadState::Stale
+            && let Ok(shown) = source.configured(&bytes, r.configuration.as_ref())
+        {
+            self.display_at_pin(def, &shown, source);
         }
         // Exact work does not make another revision's picture this one's.
         let d = self.store.get_mut(def);

@@ -41,7 +41,7 @@ usage: soliddraft asm new <file.dwasm> [--name <name>]
                  | edit <step> [--direction x,y,z] [--distance <mm>] | delete <step> | auto [--distance <mm>])
        soliddraft asm drawing <file.dwasm> <out.dwdrw> [--template <id>] [--exploded] [--json]
        soliddraft asm export <file.dwasm> <out.urdf | out.usda> [--json]
-       soliddraft asm pack <file.dwasm> <folder> [--prefix <text>] [--suffix <text>] [--flatten] [--drawings] [--json]
+       soliddraft asm pack <file.dwasm> <folder | out.zip> [--prefix <text>] [--suffix <text>] [--flatten] [--drawings] [--json]
        soliddraft asm rebuild <file.dwasm> [--search <folder>]... [--json]
        soliddraft asm generate <folder> [--unique <n>] [--placements <n>] [--modules <n>] [--no-part-files] [--seed <n>]
        soliddraft asm bench <file.dwasm> [--size <w>x<h>] [--frames <n>] [--json]
@@ -106,9 +106,10 @@ drawing     Writes a drawing of the assembly: an isometric and a front view (or,
             across parts, a bill of materials listing every part with its
             quantity, and a balloon per row. When the drawing exists and shows
             this assembly it is brought up to date instead: views, BOM and
-            balloons move with the assembly. Its views come from the parts'
-            display meshes, so PDF, SVG and DXF exports refuse them until Catallax
-            draws placed parts together.
+            balloons move with the assembly. Each part's line work is
+            Catallax's view of that part; where one part hides another the
+            hiding is measured on the parts' meshes and the view says so.
+            Exports of the drawing work as for a part drawing.
 
 export      Writes the assembly for robotics and simulation tools: URDF (with
             its meshes as STL in a folder beside it) or OpenUSD text (.usda)
@@ -119,7 +120,8 @@ export      Writes the assembly for robotics and simulation tools: URDF (with
             carry. The assembly is not changed.
 
 pack        Pack and Go: copies the assembly and every document it references,
-            at any depth, into a new or empty folder, so it opens there on its own.
+            at any depth, into a new or empty folder, so it opens there on its own,
+            or into one zip when the destination ends in .zip.
             Parts are copied as they are; assemblies are written again with their
             references pointing at the copies. Ids are kept. --prefix and --suffix
             rename every copied file; --flatten puts them all in the folder itself;

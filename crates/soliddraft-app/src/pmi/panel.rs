@@ -114,6 +114,8 @@ pub struct State {
     letter: String,
     tolerance: String,
     through: bool,
+    /// A diameter's thread designation, such as `M6x1-6H`; empty for a plain one.
+    thread: String,
     /// Several picked faces are one feature each, such as four equal holes.
     pattern: bool,
     from_at: At,
@@ -174,6 +176,7 @@ impl Default for State {
             letter: String::new(),
             tolerance: String::new(),
             through: false,
+            thread: String::new(),
             pattern: true,
             from_at: At::Feature,
             to_at: At::Feature,
@@ -214,10 +217,11 @@ impl State {
                 self.letter.clone_from(letter);
                 self.picks.clone_from(feature);
             }
-            PmiKind::Size { size, features, tolerance, through, .. } => {
+            PmiKind::Size { size, features, tolerance, through, thread, .. } => {
                 self.kind = if *size == SizeKind::Diameter { Kind::Diameter } else { Kind::Radius };
                 self.tolerance = tolerance.suffix().trim().to_owned();
                 self.through = *through;
+                self.thread = thread.clone().unwrap_or_default();
                 self.pattern = features.len() > 1;
                 self.picks = all(features);
             }
@@ -296,6 +300,7 @@ fn item(doc: &Document, form: &State) -> Result<PmiItem<FaceRef>, String> {
             features: features(doc, &form.picks, form.pattern)?,
             tolerance: typed_tolerance(&form.tolerance)?,
             through: form.kind == Kind::Diameter && form.through,
+            thread: Some(form.thread.trim().to_owned()).filter(|t| form.kind == Kind::Diameter && !t.is_empty()),
             nominal: None,
         },
         Kind::Distance => {
@@ -470,6 +475,13 @@ fn form(ui: &mut egui::Ui, state: &mut AppState) {
             );
             if form.kind == Kind::Diameter {
                 ui.checkbox(&mut form.through, "Through hole");
+                labelled(
+                    ui.add(
+                        egui::TextEdit::singleline(&mut form.thread)
+                            .hint_text("Thread: M6x1-6H, empty for a plain hole"),
+                    ),
+                    "Thread",
+                );
             }
             if matches!(form.kind, Kind::Diameter | Kind::Radius) && form.picks.len() > 1 {
                 ui.checkbox(&mut form.pattern, "Each picked face is one of a pattern");
@@ -556,6 +568,13 @@ fn list(ui: &mut egui::Ui, state: &mut AppState, rows: &[PmiRow]) {
         }
         if let Some(problem) = &row.problem {
             ui.colored_label(theme::error(), problem);
+        }
+        if let Some(feature) = row.feature {
+            // The hole states it: the thread is changed in the hole, not here.
+            let hole =
+                state.doc.feature(u64::from(feature.0)).map_or_else(|| "its hole".to_owned(), |f| f.name.clone());
+            ui.label(egui::RichText::new(format!("From {hole}; change the thread in the hole")).color(theme::muted()));
+            continue;
         }
         ui.horizontal(|ui| {
             if ui.small_button("Edit").on_hover_text(format!("Change {}", row.item.id)).clicked() {

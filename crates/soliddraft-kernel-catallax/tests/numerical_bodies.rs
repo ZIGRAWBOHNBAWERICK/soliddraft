@@ -125,6 +125,29 @@ fn work_on_a_numerical_body_that_needs_exact_geometry_says_it_is_coming() {
     assert!(matches!(k.topology(body), Err(KernelError::UnknownBody(_))));
 }
 
+/// A hole is drilled in a numerical build by rebuilding its recipe, where Catallax has a
+/// construction for bodies with tolerant entities. A stand-in body's recipe rebuilds
+/// exactly, so the hole is refused rather than passed off as exact.
+#[test]
+fn a_hole_never_turns_an_approximate_body_into_an_exact_one() {
+    let k = CatallaxKernel::with_numerical_stand_in(&[OpKind::Extrude]);
+    let body = numerical_block(&k).body;
+    let hole = Hole {
+        placements: vec![HolePlacement {
+            point: Vec3::new(5.0, 4.0, 6.0),
+            direction: Vec3::new(0.0, 0.0, -1.0),
+            on_face: None,
+        }],
+        diameter: 2.0,
+        depth: HoleDepth::Through,
+        tip: HoleTip::Flat,
+        head: None,
+    };
+    let error = k.hole(&OpTag::new("drilled"), body, &hole).unwrap_err().to_string();
+    assert!(error.ends_with("is coming soon."), "{error}");
+    assert!(matches!(k.body_accuracy(body).unwrap(), BodyAccuracy::Approximate { .. }));
+}
+
 /// A feature pattern reads its source and earlier bodies only as context, never through
 /// their exact solids. An approximate source must not replay as an exact build.
 #[test]

@@ -3,39 +3,99 @@
 
 use crate::drawing::{DrawingDoc, DrawingSession};
 use crate::state::AppState;
-use soliddraft_assembly::{AssemblyDocument, Flags, OccurrenceIndex, OccurrencePath, Placement};
-use soliddraft_document::{DocKind, DocRef, DocumentId};
-use soliddraft_drawing::assembly::{AssemblyModel, BomRow, NewAssemblyDrawing, PlacedPart};
-use soliddraft_drawing::{Command, DrawingMeta, library};
-use soliddraft_kernel_api::Vec3;
+use soliddraft_assembly::{AssemblyDocument, Flags, KernelSource, OccurrenceIndex, OccurrencePath, Placement};
+use soliddraft_document::{ConfigurationId, DocKind, DocRef, DocumentId};
+use soliddraft_drawing::assembly::{self, AssemblyModel, BomRow, NewAssemblyDrawing};
+use soliddraft_drawing::placed::{PlacedPart, Rigid};
+use soliddraft_drawing::{Command, Drawing, DrawingError, DrawingMeta, FoldDirection, View, ViewId, library, project};
 use soliddraft_kernel_api::drawing::StandardView;
+use soliddraft_kernel_api::{BodyId, Kernel, Vec3};
+use soliddraft_model::Document as PartDocument;
 use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
-/// The open assembly as a drawing reads it: every shown part occurrence with its display
-/// mesh placed where the assembly puts it, and again where its exploded view puts it when
-/// it has one, and the parts-only bill of materials.
-pub fn assembly_model(doc: &mut AssemblyDocument) -> Result<AssemblyModel, String> {
+/// One shown part occurrence with its exact body.
+struct ExactPart {
+    kernel: Arc<dyn Kernel>,
+    body: BodyId,
+    placement: Rigid,
+    exploded: Rigid,
+    path: String,
+    label: String,
+    item: u32,
+}
+
+/// The open assembly's shown parts rebuilt on the kernel, as a drawing reads them: kept
+/// alive while [`ExactParts::model`] lends them out.
+pub struct ExactParts {
+    reference: DocRef,
+    parts: Vec<ExactPart>,
+    exploded: bool,
+    bom: Vec<BomRow>,
+    /// The part documents that own the bodies.
+    _documents: Vec<Arc<Mutex<PartDocument>>>,
+}
+
+impl ExactParts {
+    /// The assembly as `soliddraft-drawing` reads it.
+    pub fn model(&self) -> AssemblyModel<'_> {
+        AssemblyModel {
+            reference: Some(self.reference.clone()),
+            parts: self
+                .parts
+                .iter()
+                .map(|p| PlacedPart {
+                    kernel: p.kernel.as_ref(),
+                    body: p.body,
+                    placement: p.placement,
+                    component: p.path.clone(),
+                    label: p.label.clone(),
+                })
+                .collect(),
+            items: self.parts.iter().map(|p| p.item).collect(),
+            exploded: if self.exploded { self.parts.iter().map(|p| p.exploded).collect() } else { Vec::new() },
+            bom: self.bom.clone(),
+        }
+    }
+
+    /// True when the assembly has an exploded view.
+    pub fn has_exploded(&self) -> bool {
+        self.exploded
+    }
+}
+
+fn rigid(p: Placement) -> Rigid {
+    Rigid { rotation: p.rotation.to_array(), translation: Vec3::new(p.translation.x, p.translation.y, p.translation.z) }
+}
+
+/// The open assembly's shown parts with their exact bodies, each rebuilt on the kernel at
+/// the revision the assembly pins, placed where the assembly puts it and where its
+/// exploded view does, and the parts-only bill of materials. A part with no exact body,
+/// such as a mesh reference, refuses the drawing by name.
+pub fn exact_parts(doc: &mut AssemblyDocument) -> Result<ExactParts, String> {
     doc.finish_loading();
     let exploded: HashMap<OccurrencePath, Placement> =
         if doc.assembly().explode.is_empty() { HashMap::new() } else { doc.exploded_worlds().into_iter().collect() };
     let path = doc.path().ok_or("save the assembly first: its drawing refers to its file")?;
     let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     let reference = DocRef::new(doc.id(), DocKind::Assembly, name, doc.revision());
-    let table = doc.table();
-    let mut items: Vec<(DocumentId, BomRow)> = Vec::new();
+    let source = KernelSource::new(crate::kernel());
+    let mut items: Vec<((DocumentId, Option<ConfigurationId>), BomRow)> = Vec::new();
     let mut parts = Vec::new();
-    let mut moved = Vec::new();
-    for row in (1..table.len() as u32).map(OccurrenceIndex) {
-        let f = table.flags(row);
+    let mut documents = Vec::new();
+    let rows = doc.table().len() as u32;
+    for row in (1..rows).map(OccurrenceIndex) {
+        let f = doc.table().flags(row);
         if f.has(Flags::ASSEMBLY) || f.has(Flags::SUPPRESSED) || f.has(Flags::REMOVED) {
             continue;
         }
-        let def_index = table.definition(row);
-        let def = doc.store().get(def_index);
+        let def_index = doc.table().definition(row);
+        let def = doc.store().get(def_index).clone();
         if def.kind != DocKind::Part {
             continue;
         }
-        let item = match items.iter_mut().position(|(d, _)| *d == def.key.document) {
+        let document = (def.key.document, def.key.configuration.clone());
+        let item = match items.iter_mut().position(|(d, _)| *d == document) {
             Some(i) => {
                 items[i].1.quantity += 1;
                 items[i].1.item
@@ -43,8 +103,16 @@ pub fn assembly_model(doc: &mut AssemblyDocument) -> Result<AssemblyModel, Strin
             None => {
                 let item = items.len() as u32 + 1;
                 let file = doc.reference(def_index).map(|r| r.path.clone()).unwrap_or_default();
-                let label = def.label.trim_end_matches(".dwprt").to_owned();
-                items.push((def.key.document, BomRow { item, name: label, file, quantity: 1 }));
+                let mut label = def.label.trim_end_matches(".dwprt").to_owned();
+                // A part placed in one of its configurations is a row of its own, named for it.
+                if let Some(c) = &document.1 {
+                    let part = doc.exact(def_index, &source)?;
+                    let part = part.lock().map_err(|_| format!("{label}: the part is unavailable"))?;
+                    let names = part.configuration_names();
+                    let shown = names.iter().find(|(id, _)| id == c).map_or(c.0.as_str(), |(_, n)| n.as_str());
+                    label = format!("{label} ({shown})");
+                }
+                items.push((document, BomRow { item, name: label, file, quantity: 1 }));
                 item
             }
         };
@@ -52,43 +120,32 @@ pub fn assembly_model(doc: &mut AssemblyDocument) -> Result<AssemblyModel, Strin
         if f.has(Flags::HIDDEN) {
             continue;
         }
-        let Some(mesh) = def.mesh.as_ref() else { continue };
-        let path = table.path(row);
-        let place = |world: Placement| {
-            move |p: &[f32; 3]| {
-                let w = world.apply(glam::DVec3::new(p[0] as f64, p[1] as f64, p[2] as f64));
-                Vec3::new(w.x, w.y, w.z)
-            }
+        let label = doc.label(row);
+        let exact = doc.exact(def_index, &source).map_err(|e| format!("{label}: {e}"))?;
+        let (kernel, body) = {
+            let part = exact.lock().map_err(|_| format!("{label}: the part is unavailable"))?;
+            let body = part.body().ok_or_else(|| format!("{label}: the part has no body"))?;
+            (part.kernel().clone(), body)
         };
-        let mut faces = vec![0u32; mesh.triangle_count()];
-        for (k, face) in mesh.faces.iter().enumerate() {
-            for t in face.first..face.first + face.count {
-                if let Some(slot) = faces.get_mut(t as usize) {
-                    *slot = k as u32;
-                }
-            }
-        }
-        let placed = |world: Placement| {
-            let at = place(world);
-            PlacedPart {
-                path: path.to_string(),
-                item,
-                positions: mesh.positions.iter().map(&at).collect(),
-                triangles: mesh.indices.as_chunks::<3>().0.to_vec(),
-                faces: faces.clone(),
-                edges: mesh.edges.iter().map(|e| e.iter().map(&at).collect()).collect(),
-            }
-        };
-        parts.push(placed(table.world(row)));
-        if !exploded.is_empty() {
-            moved.push(placed(exploded.get(&path).copied().unwrap_or_else(|| table.world(row))));
-        }
+        let occurrence = doc.table().path(row);
+        let world = doc.table().world(row);
+        parts.push(ExactPart {
+            kernel,
+            body,
+            placement: rigid(world),
+            exploded: rigid(exploded.get(&occurrence).copied().unwrap_or(world)),
+            path: occurrence.to_string(),
+            label,
+            item,
+        });
+        documents.push(exact);
     }
-    Ok(AssemblyModel {
-        reference: Some(reference),
+    Ok(ExactParts {
+        reference,
         parts,
-        exploded: moved,
+        exploded: !exploded.is_empty(),
         bom: items.into_iter().map(|(_, r)| r).collect(),
+        _documents: documents,
     })
 }
 
@@ -129,7 +186,8 @@ pub fn make_drawing(state: &mut AppState, request: &AssemblyDrawingRequest) -> R
     let views = request.views.clone().unwrap_or_else(|| {
         if exploded { vec![StandardView::Isometric] } else { vec![StandardView::Isometric, StandardView::Front] }
     });
-    let model = assembly_model(&mut s.doc)?;
+    let exact = exact_parts(&mut s.doc)?;
+    let model = exact.model();
     if model.parts.is_empty() {
         return Err("the assembly shows no parts to draw".into());
     }
@@ -184,7 +242,8 @@ pub fn update(state: &mut AppState) -> Result<String, String> {
     if a.doc.is_dirty() {
         return Err("save the assembly first: the drawing pins its saved revision".into());
     }
-    let model = assembly_model(&mut a.doc)?;
+    let exact = exact_parts(&mut a.doc)?;
+    let model = exact.model();
     let d = state.drawing.session.as_mut().expect("checked above");
     let next =
         soliddraft_drawing::assembly::update_assembly_drawing(&d.doc.drawing, &model).map_err(|e| e.to_string())?;
@@ -196,4 +255,73 @@ pub fn update(state: &mut AppState) -> Result<String, String> {
         model.bom.len(),
         if dangling == 1 { "" } else { "s" }
     ))
+}
+
+/// Places a view `make` derives from the assembly drawing's view `parent`, every part
+/// drawn by its kernel, as one undo step. The drawing's assembly must be the open one.
+/// Returns the new view's label and id.
+fn place_derived(
+    state: &mut AppState,
+    parent: ViewId,
+    what: &str,
+    make: impl FnOnce(&Drawing, &AssemblyModel<'_>, usize) -> Result<View, DrawingError>,
+) -> Result<(String, u32), String> {
+    let d = state.drawing.session.as_ref().ok_or("no drawing is open")?;
+    let wanted = d.doc.drawing.model.id;
+    let a = state.assembly.session.as_mut().ok_or("open the drawing's assembly first")?;
+    if Some(a.doc.id()) != wanted {
+        return Err("the open assembly is not the one this drawing shows; open it first".into());
+    }
+    let exact = exact_parts(&mut a.doc)?;
+    let model = exact.model();
+    let d = state.drawing.session.as_mut().expect("checked above");
+    let drawing = &d.doc.drawing;
+    let sheet = project::sheet_of(drawing, parent).ok_or("no such view")?;
+    let view = make(drawing, &model, sheet).map_err(|e| format!("{what}: {e}"))?;
+    let id = view.id;
+    d.doc.apply(Command::PlaceView { sheet, view }, None)?;
+    let drawing = &d.doc.drawing;
+    let label = drawing
+        .sheet_of(id)
+        .and_then(|s| s.view(id).map(|v| project::view_label_in(drawing, s, v)))
+        .unwrap_or_default();
+    Ok((label, id.0))
+}
+
+/// Section of an assembly drawing's view `parent` along a horizontal or vertical line
+/// through the model point `through`, every part cut by its kernel, placed in line with
+/// the view as one undo step. Returns the section's label and id.
+pub fn section(
+    state: &mut AppState,
+    parent: ViewId,
+    through: Vec3,
+    horizontal: bool,
+    flip: bool,
+) -> Result<(String, u32), String> {
+    place_derived(state, parent, "Section", |drawing, model, sheet| {
+        assembly::new_assembly_section(drawing, model, sheet, parent, through, horizontal, flip)
+    })
+}
+
+/// A view folded off an assembly drawing's view `parent` on `direction`'s side, placed
+/// as one undo step. Returns its label and id.
+pub fn projected(state: &mut AppState, parent: ViewId, direction: FoldDirection) -> Result<(String, u32), String> {
+    place_derived(state, parent, "Projected", |drawing, model, sheet| {
+        assembly::new_assembly_projected(drawing, model, sheet, parent, direction)
+    })
+}
+
+/// A detail of an assembly drawing's view `parent` round the model point `center`,
+/// inside a circle of `radius` view millimetres, magnified `factor` times, placed as one
+/// undo step. Returns its label and id.
+pub fn detail(
+    state: &mut AppState,
+    parent: ViewId,
+    center: Vec3,
+    radius: f64,
+    factor: f64,
+) -> Result<(String, u32), String> {
+    place_derived(state, parent, "Detail", |drawing, model, sheet| {
+        assembly::new_assembly_detail(drawing, model, sheet, parent, center, radius, factor)
+    })
 }

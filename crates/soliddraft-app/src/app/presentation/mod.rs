@@ -564,6 +564,10 @@ fn main_menus(ui: &mut egui::Ui, st: &mut AppState) {
             menu_command(ui, st, "assembly_save", "Save assembly");
             menu_command(ui, st, "assembly_save_as", "Save assembly as…");
             menu_command(ui, st, "insert_component", "Insert component…");
+            menu_command(ui, st, "assembly_pack_and_go", "Pack and Go…");
+            menu_command(ui, st, "assembly_pack_and_go_zip", "Pack and Go to zip…");
+            menu_command(ui, st, "assembly_export_urdf", "Export URDF…");
+            menu_command(ui, st, "assembly_export_usd", "Export USD…");
         } else {
             menu_command(ui, st, "save", "Save");
             menu_command(ui, st, "save_as", "Save as…");

@@ -410,6 +410,10 @@ def at(value, pointer):
     if not pointer.startswith("/"):
         raise ValueError(f"JSON pointer must start with /: {pointer}")
     for part in pointer[1:].split("/"):
+        # Tool results are retained as JSON text in command.json's `output` field.
+        # Decode it when a scenario pointer continues into that field.
+        if isinstance(value, str):
+            value = json.loads(value)
         part = part.replace("~1", "/").replace("~0", "~")
         value = value[int(part)] if isinstance(value, list) else value[part]
     return value

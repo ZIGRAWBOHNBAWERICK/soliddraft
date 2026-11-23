@@ -64,6 +64,7 @@ struct State {
     next: u64,
     bodies: BTreeMap<BodyId, Stored>,
     fields: BTreeMap<BodyId, Arc<lattice::Field>>,
+    field_source_support: BTreeMap<BodyId, bool>,
     capture: bool,
     questions: Vec<Value>,
     /// Imported STEP sources by SHA-256. Catallax reads them again for every build
@@ -108,6 +109,13 @@ struct Stored {
     solid: Option<Arc<Solid>>,
     /// A body Catallax built within a stated tolerance, which has no exact solid.
     approximate: Option<Arc<approximate::Approximate>>,
+}
+
+impl Stored {
+    fn legacy_recipe(&self) -> Value {
+        json!({"format":"soliddraft-recipe/1", "name":"SolidDraft",
+            "steps":self.steps.values().collect::<Vec<_>>(), "result":self.result})
+    }
 }
 
 struct Solid {
@@ -483,8 +491,7 @@ impl CatallaxKernel {
         }
         let state = self.state()?;
         let stored = state.get(body)?;
-        let recipe = json!({"format":"soliddraft-recipe/1", "name":"SolidDraft",
-            "steps":stored.steps.values().collect::<Vec<_>>(), "result":stored.result});
+        let recipe = stored.legacy_recipe();
         let swept = stored.steps.values().any(|s| s["op"] == "path_sweep");
         // Retained-prefix callers read ordinary native wrappers in the legacy envelope.
         if swept
@@ -582,8 +589,13 @@ impl CatallaxKernel {
                 if outcome.body().definition().faces.is_empty() {
                     return Err(KernelError::Unsupported(NOTHING_LEFT.into()));
                 }
-                let approximate =
+                let mut approximate =
                     approximate::Approximate::new(outcome, &parent_ids, &tags, selected_edges, &mut state.next);
+                // A numerical input, such as the body a hole is drilled in, named its faces.
+                let before = inputs.iter().find_map(|body| state.bodies.get(body)?.approximate.clone());
+                if let Some(before) = before {
+                    approximate.keep_names_of(&before);
+                }
                 let record = approximate.record(seq, tag, op, &parent_ids);
                 history.insert(seq, record.clone());
                 let body = BodyId::from_raw(state.id());
@@ -707,11 +719,17 @@ impl CatallaxKernel {
         if let Some(field) = inputs.iter().chain(context).find(|body| state.fields.contains_key(body)) {
             return Err(terminal_field(*field));
         }
-        // An approximate body's recipe would replay here as an exact build, so neither an
-        // input nor a context body may be one. Profiles store no body and pass.
-        if inputs.iter().chain(context).any(|body| state.bodies.get(body).is_some_and(|s| s.approximate.is_some())) {
+        // An approximate body's recipe could replay here as an exact build, so neither an
+        // input nor a context body may be one. Profiles store no body and pass. A hole in a
+        // numerical build is the exception: Catallax drills it through its construction for
+        // bodies with tolerant entities, and a replay that comes back exact is refused below.
+        let approximate_of = |body: &BodyId| state.bodies.get(body).and_then(|s| s.approximate.as_ref());
+        if context.iter().any(|body| approximate_of(body).is_some())
+            || inputs.iter().any(|body| approximate_of(body).is_some_and(|a| op != OpKind::Hole || !a.numerical()))
+        {
             return Err(approximate::not_yet());
         }
+        let reads_approximate = inputs.iter().any(|body| approximate_of(body).is_some());
         let mut steps = BTreeMap::new();
         let mut history = BTreeMap::new();
         let mut parents = Vec::new();
@@ -762,6 +780,11 @@ impl CatallaxKernel {
             &offered,
             &stand_in,
         );
+        // An approximate input never yields a body passed off as exact.
+        let built = built.and_then(|built| match built.0 {
+            Outcome::Exact(_) if reads_approximate => Err(approximate::not_yet()),
+            _ => Ok(built),
+        });
         // A build made here is kept for hand-over outside the lock; an offered one is not.
         let kept = match &built {
             Ok((Outcome::Exact(app), _, key, _)) if keeping && matches!(app.checkpoint, Exact::Checkpoint(_)) => {
@@ -1889,8 +1912,21 @@ impl Kernel for CatallaxKernel {
     fn hole(&self, tag: &OpTag, body: BodyId, params: &Hole) -> KernelResult<OpResult> {
         self.observe("hole", || {
             let state = self.state()?;
-            let solid = state.solid(body)?;
-            let native = native::hole(state.step(body)?, &solid, body, params)?;
+            // A field body is refused by `solid` as a terminal field.
+            let approximate = if state.fields.contains_key(&body) {
+                None
+            } else {
+                state.get(body)?.approximate.clone().filter(|approximate| approximate.numerical())
+            };
+            let native = match &approximate {
+                Some(approximate) => {
+                    native::hole(state.step(body)?, native::Drilled::Approximate(approximate), body, params)?
+                }
+                None => {
+                    let solid = state.solid(body)?;
+                    native::hole(state.step(body)?, native::Drilled::Exact(&solid), body, params)?
+                }
+            };
             self.native(state, tag, OpKind::Hole, body, &[body], native, None, &[])
         })
     }
@@ -2000,6 +2036,10 @@ impl Kernel for CatallaxKernel {
             };
             self.native(state, tag, OpKind::Draft, body, &[body], native, None, &[])
         })
+    }
+
+    fn supports_field_source(&self, body: BodyId) -> bool {
+        self.check_field_source(body).unwrap_or(false)
     }
 
     fn lattice(&self, tag: &OpTag, body: BodyId, params: &Lattice) -> KernelResult<OpResult> {
@@ -2410,6 +2450,7 @@ impl Kernel for CatallaxKernel {
         self.observe("release", || {
             let mut state = self.state()?;
             state.fields.remove(&body);
+            state.field_source_support.remove(&body);
             state.bodies.remove(&body).map(|_| ()).ok_or(KernelError::UnknownBody(body))
         })
     }

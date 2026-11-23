@@ -504,10 +504,6 @@ fn check_carried(
         if component.hidden || component.suppressed {
             return refuse(c, "is hidden or suppressed");
         }
-        let source = truth.source(component.source).expect("checked");
-        if source.document.configuration.is_some() {
-            return refuse(c, "places a configuration");
-        }
         if truth.patterns.iter().any(|p| p.seeds.contains(c)) {
             return refuse(c, "seeds a pattern");
         }

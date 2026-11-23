@@ -13,7 +13,6 @@
 //! which reads the native definition exactly or refuses.
 
 use std::collections::HashMap;
-use std::fmt;
 use std::sync::{Arc, Mutex};
 
 use num_rational::BigRational;
@@ -30,7 +29,7 @@ use soliddraft_model::{
 };
 
 use crate::document::AssemblyDocument;
-use crate::mates::{EndView, Entity, FaceEndpoint, MateRefusal, PartPlane, RefusalCode, StoredSupport, datum_normal};
+use crate::mates::{Entity, MateRefusal, PartPlane, RefusalCode, StoredSupport, datum_normal};
 use crate::path::ComponentId;
 use crate::schema::Assembly;
 
@@ -307,15 +306,15 @@ enum Proved {
     Named(String),
 }
 
-type PlaneKey = (DocumentId, ContentHash, Proved);
+type PlaneKey = (DocumentId, ContentHash, Option<ConfigurationId>, Proved);
 
 /// Proofs and the rebuilt parts behind them. All of it is derived: dropping it changes
 /// nothing but how soon the next proof comes.
 #[derive(Default)]
 pub(crate) struct Proofs {
-    parts: HashMap<(DocumentId, ContentHash), Arc<Mutex<PartDocument>>>,
+    parts: HashMap<(DocumentId, ContentHash, Option<ConfigurationId>), Arc<Mutex<PartDocument>>>,
     supports: HashMap<PlaneKey, SupportProof>,
-    shapes: HashMap<(DocumentId, ContentHash, ShapeKind, String), Shape>,
+    shapes: HashMap<(DocumentId, ContentHash, Option<ConfigurationId>, ShapeKind, String), Shape>,
     /// How many parts were rebuilt for proofs.
     pub built: usize,
 }
@@ -324,48 +323,10 @@ fn unavailable(message: String) -> MateRefusal {
     MateRefusal::new(RefusalCode::ProofUnavailable, message)
 }
 
-fn configuration_refusal(what: fmt::Arguments, configuration: &ConfigurationId) -> MateRefusal {
-    MateRefusal::new(
-        RefusalCode::UnsupportedConfiguration,
-        format!("{what} names configuration {}; this version mates default configurations only", configuration.0),
-    )
-}
-
-/// Refuses a mate that would have to ignore a configuration. A file keeps the field as
-/// read, so this runs before anything is proved or changed.
-pub(crate) fn check_configurations(truth: &Assembly) -> Result<(), MateRefusal> {
-    for mate in truth.known_mates() {
-        for end in mate.ends() {
-            check_end(&end).map_err(|r| MateRefusal { mates: vec![mate.name().to_owned()], ..r })?;
-        }
-        for c in mate.components() {
-            let source = truth.component(c).and_then(|c| truth.source(c.source));
-            if let Some(configuration) = source.and_then(|s| s.document.configuration.as_ref()) {
-                let refused = configuration_refusal(format_args!("component {c}"), configuration);
-                return Err(MateRefusal { mates: vec![mate.name().to_owned()], ..refused });
-            }
-        }
-    }
-    Ok(())
-}
-
-/// Refuses a stored face of a configuration other than the default.
-pub(crate) fn check_endpoint(end: &FaceEndpoint) -> Result<(), MateRefusal> {
-    check_end(&EndView { path: &end.path, document: end.document, configuration: end.configuration.as_ref() })
-}
-
-/// Refuses a stored part occurrence of a configuration other than the default.
-pub(crate) fn check_end(end: &EndView) -> Result<(), MateRefusal> {
-    match end.configuration {
-        Some(configuration) => Err(configuration_refusal(format_args!("occurrence {}", end.path), configuration)),
-        None => Ok(()),
-    }
-}
-
 impl AssemblyDocument {
     pub(crate) fn proof_part(&mut self, r: &DocRef) -> Result<Arc<Mutex<PartDocument>>, MateRefusal> {
         let id = r.id.ok_or_else(|| unavailable("the reference has no document id".into()))?;
-        let key = (id, r.pinned.clone());
+        let key = (id, r.pinned.clone(), r.configuration.clone());
         if let Some(part) = self.proofs.parts.get(&key) {
             return Ok(part.clone());
         }
@@ -375,7 +336,15 @@ impl AssemblyDocument {
             .as_deref()
             .and_then(|d| d.kernel_source())
             .ok_or_else(|| unavailable("this session has no kernel to prove planes on".into()))?;
-        let part = Arc::new(Mutex::new(source.exact(&bytes).map_err(unavailable)?));
+        let mut part = source.exact(&bytes, None).map_err(unavailable)?;
+        if let Some(c) = &r.configuration {
+            if !part.configuration_names().iter().any(|(id, _)| id == c) {
+                let message = format!("{} has no configuration {}; choose one it has", r.path, c.0);
+                return Err(MateRefusal::new(RefusalCode::UnsupportedConfiguration, message));
+            }
+            part.show_configuration(c).map_err(unavailable)?;
+        }
+        let part = Arc::new(Mutex::new(part));
         if self.proofs.parts.len() == PARTS_KEPT {
             self.proofs.parts.clear();
         }
@@ -420,7 +389,7 @@ impl AssemblyDocument {
             Entity::Edge(edge) => Proved::Named(serde_json::to_string(edge).unwrap_or_default()),
             Entity::Vertex(vertex) => Proved::Named(serde_json::to_string(vertex).unwrap_or_default()),
         };
-        let key = (id, r.pinned.clone(), what);
+        let key = (id, r.pinned.clone(), r.configuration.clone(), what);
         let proof = match self.proofs.supports.get(&key) {
             Some(proof) => proof.clone(),
             None => {
@@ -492,7 +461,7 @@ impl AssemblyDocument {
         stored: Option<&StoredSupport>,
     ) -> Result<Shape, MateRefusal> {
         let id = r.id.ok_or_else(|| unavailable("the reference has no document id".into()))?;
-        let key = (id, r.pinned.clone(), kind, format!("{entity:?}"));
+        let key = (id, r.pinned.clone(), r.configuration.clone(), kind, format!("{entity:?}"));
         let shape = match self.proofs.shapes.get(&key) {
             Some(shape) => shape.clone(),
             None => {
@@ -706,9 +675,6 @@ impl AssemblyDocument {
         let source = truth
             .source(c.source)
             .ok_or_else(|| MateRefusal::invalid(format!("component {component} has no source")))?;
-        if let Some(configuration) = &source.document.configuration {
-            return Err(configuration_refusal(format_args!("component {component}"), configuration));
-        }
         if source.document.kind != DocKind::Part {
             return Err(MateRefusal::invalid(format!(
                 "component {component} is a sub-assembly; mates reach the parts placed directly for now"

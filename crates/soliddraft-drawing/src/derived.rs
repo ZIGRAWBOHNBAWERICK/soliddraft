@@ -13,7 +13,9 @@ use crate::ids::ViewId;
 use crate::part::{Part, PartIndex, round};
 use crate::project::{self, Contexts, ViewContext, view_bounds};
 use crate::sheet::Projection;
-use crate::view::{AlignAxis, Alignment, HiddenLines, View, ViewDisplay, ViewGeometry, ViewKind, ViewScale};
+use crate::view::{
+    AlignAxis, Alignment, FoldDirection, HiddenLines, View, ViewDisplay, ViewGeometry, ViewKind, ViewScale,
+};
 use crate::{Drawing, DrawingError, library};
 
 /// Room kept between a derived view and the views around it, in sheet millimetres.
@@ -104,6 +106,39 @@ pub fn new_section(
         Projection::FirstAngle => arrow,
     };
     place_beside(drawing, sheet, &mut view, parent, side);
+    Ok((view, ctx))
+}
+
+/// A view folded off view `parent` on `direction`'s side, at the parent's scale: in line
+/// with it when the fold is square, a pictorial view at a free place near it when it is
+/// diagonal.
+pub fn new_projected(
+    drawing: &Drawing,
+    part: &Part,
+    index: &PartIndex,
+    sheet: usize,
+    parent: ViewId,
+    direction: FoldDirection,
+) -> Result<(View, ViewContext), DrawingError> {
+    let p = drawing.view(parent).ok_or(DrawingError::UnknownView(parent))?;
+    let projection = drawing.sheets.get(sheet).map(|s| s.projection);
+    let kind = ViewKind::Projected { parent, direction, projection };
+    let display = if direction.is_diagonal() { ViewDisplay::PICTORIAL } else { p.display };
+    let mut view = blank(drawing, kind, display);
+    let ctx = compute(drawing, part, index, &view, sheet)?;
+    view.geometry = ctx.projected.geometry.clone();
+    let (u, v) = match direction {
+        FoldDirection::Left => (-1.0, 0.0),
+        FoldDirection::Right => (1.0, 0.0),
+        FoldDirection::Up => (0.0, 1.0),
+        FoldDirection::Down => (0.0, -1.0),
+        FoldDirection::UpLeft => (-1.0, 1.0),
+        FoldDirection::UpRight => (1.0, 1.0),
+        FoldDirection::DownLeft => (-1.0, -1.0),
+        FoldDirection::DownRight => (1.0, -1.0),
+    };
+    let len = f64::hypot(u, v);
+    place_beside(drawing, sheet, &mut view, parent, Point2::new(u / len, v / len));
     Ok((view, ctx))
 }
 

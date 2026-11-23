@@ -436,6 +436,23 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
     // Tool overlays and clicks.
     let clicked = resp.clicked_by(egui::PointerButton::Primary) && !shift;
     let pointer = hover_pos.map(|p| s.camera.to_sheet(rect, p));
+    // The canvas view tools project the open part; an assembly drawing's views come from
+    // its parts' exact bodies, which the agent tools place for now.
+    let reads_part = matches!(
+        s.tool,
+        DrawingTool::PlaceView(_)
+            | DrawingTool::Section { .. }
+            | DrawingTool::Detail
+            | DrawingTool::Auxiliary
+            | DrawingTool::HoleCallout
+    );
+    if reads_part && s.doc.drawing.model.kind == soliddraft_document::DocKind::Assembly {
+        s.say(
+            "On an assembly drawing, ask the assistant for projected, section and detail views; the canvas tools \
+             draw part drawings only for now",
+        );
+        s.set_tool(DrawingTool::Select);
+    }
     match s.tool.clone() {
         DrawingTool::Select => {
             select_tool(s, &resp, hit, pointer, &mut push);

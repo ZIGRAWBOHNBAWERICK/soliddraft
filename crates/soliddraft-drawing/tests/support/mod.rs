@@ -8,13 +8,16 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 
 use soliddraft_drawing::{ContentHash, ModelDimension, ModelMeasure, Part};
-use soliddraft_kernel_api::drawing::{Curve3, CurveSource, ViewCurve, ViewCurves, ViewSpec, mesh_hlr};
+use soliddraft_kernel_api::drawing::{
+    Curve3, CurveSource, CutRegion, SectionSpec, SectionView, ViewCurve, ViewCurves, ViewSpec, mesh_hlr,
+};
 use soliddraft_kernel_api::{
     Aabb, BackendInfo, BodyId, BodyKind, BooleanOp, CurveKind, EdgeId, EdgeInfo, EdgePolyline, EntityChanges, Extrude,
     FaceId, FaceInfo, HistoryRecord, Kernel, KernelError, KernelResult, MassProperties, Mesh, OpKind, OpResult, OpTag,
     Profile, Revolve, SurfaceKind, TessellationParams, Topology, Validation, Vec3, VertexId, VertexInfo,
 };
 
+#[derive(Clone)]
 struct BoxBody {
     tag: String,
     min: Vec3,
@@ -31,6 +34,8 @@ pub struct BoxKernel {
     pub detail_strokes: bool,
     pub unsupported_view: bool,
     pub refuse_direction: Option<Vec3>,
+    /// Cuts sections square to an axis itself; without it sections take the trait's default.
+    pub sections: bool,
 }
 
 /// The faces of a box: outward normal, and in-plane axes u and v with u x v = normal.
@@ -161,6 +166,72 @@ impl Kernel for BoxKernel {
             unproved: view.unproved || spec.preview,
             ..ViewCurves::new(curves, &spec.frame().unwrap())
         })
+    }
+
+    /// With `sections` on, a box cut square to an axis is a shorter box: its view, with the face the cut
+    /// leaves drawn as section curves and hatched. Other cuts are unsupported.
+    fn section_view(&self, body: BodyId, spec: &SectionSpec) -> KernelResult<SectionView> {
+        if !self.sections {
+            return soliddraft_kernel_api::drawing::section::by_half_space(self, body, spec);
+        }
+        let frame = spec.view.frame().ok_or_else(|| KernelError::InvalidInput("view direction".into()))?;
+        let n = frame.direction;
+        let axis = [Vec3::X, Vec3::Y, Vec3::Z]
+            .into_iter()
+            .position(|a| n.dot(a).abs() > 1.0 - 1e-12)
+            .ok_or_else(|| KernelError::Unsupported("a box is cut square to an axis only".into()))?;
+        let get = |v: Vec3| [v.x, v.y, v.z][axis];
+        let set = |v: &mut Vec3, x: f64| match axis {
+            0 => v.x = x,
+            1 => v.y = x,
+            _ => v.z = x,
+        };
+        let b = self.with(body, BoxBody::clone)?;
+        let cut = get(spec.origin);
+        // The eye is towards n: the material on its side of the plane goes.
+        let towards = get(n) > 0.0;
+        let mut kept = b.clone();
+        if towards && get(b.max) > cut {
+            set(&mut kept.max, cut);
+        } else if !towards && get(b.min) < cut {
+            set(&mut kept.min, cut);
+        }
+        if get(kept.max) <= get(kept.min) {
+            return Err(KernelError::InvalidInput("the cutting plane is behind the whole body".into()));
+        }
+        let key = u64::MAX / 2 + body.raw();
+        self.bodies.lock().unwrap().insert(key, kept.clone());
+        let view = self.view_curves(BodyId::from_raw(key), &spec.view);
+        self.bodies.lock().unwrap().remove(&key);
+        let mut view = view?;
+        let through = get(kept.max) != get(b.max) || get(kept.min) != get(b.min);
+        if !through {
+            return Ok(SectionView { curves: view, regions: Vec::new() });
+        }
+        let cap = FaceId::from_raw(b.first_id + 2 * axis as u64 + u64::from(towards));
+        let on = |p: Vec3| (get(p) - cut).abs() < 1e-9;
+        for c in &mut view.curves {
+            if on(c.curve.start()) && on(c.curve.end()) {
+                c.source = CurveSource::Section(cap);
+            }
+        }
+        // The cap's corners in loop order.
+        let (u, w) = ((axis + 1) % 3, (axis + 2) % 3);
+        let corner = |a: bool, c: bool| {
+            let mut p = [0.0; 3];
+            p[axis] = cut;
+            p[u] = if a { [kept.max.x, kept.max.y, kept.max.z][u] } else { [kept.min.x, kept.min.y, kept.min.z][u] };
+            p[w] = if c { [kept.max.x, kept.max.y, kept.max.z][w] } else { [kept.min.x, kept.min.y, kept.min.z][w] };
+            Vec3::new(p[0], p[1], p[2])
+        };
+        let ring = [corner(false, false), corner(true, false), corner(true, true), corner(false, true)];
+        let outer = (0..4)
+            .map(|i| {
+                let line = Curve3::Line { a: ring[i], b: ring[(i + 1) % 4] };
+                ViewCurve::new(line, CurveSource::Section(cap), true)
+            })
+            .collect();
+        Ok(SectionView { curves: view, regions: vec![CutRegion { outer, holes: Vec::new() }] })
     }
 
     fn tessellate(&self, body: BodyId, _: &TessellationParams) -> KernelResult<Mesh> {

@@ -48,6 +48,8 @@ fn graphics_presets_change_the_drawn_part() {
             std::thread::sleep(std::time::Duration::from_millis(10));
             app.step();
         }
+        // The viewport takes the worker's reply after submitting that frame's mesh.
+        app.step();
         observed.push((app.state().state.doc.triangle_count(), case.frame(&mut app, preset)));
     }
     let [(coarse_count, coarse), (fine_count, fine)] = observed.as_slice() else { unreachable!() };

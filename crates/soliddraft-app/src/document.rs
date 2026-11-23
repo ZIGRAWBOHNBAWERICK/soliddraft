@@ -380,6 +380,56 @@ impl ChamferParams {
     }
 }
 
+/// Which tab is active in the Hole Wizard property panel.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum HoleWizardTab {
+    /// Hole type, standard, size, fit, end condition, options, tolerances.
+    #[default]
+    Type,
+    /// Placement face and inline editable position sketch.
+    Positions,
+}
+
+/// Which geometric pick the Hole Wizard is currently awaiting from the viewport.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HolePickTarget {
+    /// Pick a planar target face for Up To Surface / Offset From Surface.
+    Surface,
+    /// Pick a vertex for Up To Vertex.
+    Vertex,
+}
+
+/// Inline draft parameters for creating a linear point pattern in the position sketch.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct HoleLinearPatternDraft {
+    pub count_x: u32,
+    pub spacing_x: f64,
+    pub count_y: u32,
+    pub spacing_y: f64,
+}
+
+impl Default for HoleLinearPatternDraft {
+    fn default() -> Self {
+        Self { count_x: 2, spacing_x: 20.0, count_y: 2, spacing_y: 20.0 }
+    }
+}
+
+/// Inline draft parameters for creating a circular bolt-circle pattern in the position sketch.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct HoleCircularPatternDraft {
+    pub center_u: f64,
+    pub center_v: f64,
+    pub radius: f64,
+    pub count: u32,
+    pub start_angle_deg: f64,
+}
+
+impl Default for HoleCircularPatternDraft {
+    fn default() -> Self {
+        Self { center_u: 0.0, center_v: 0.0, radius: 15.0, count: 4, start_angle_deg: 0.0 }
+    }
+}
+
 /// A hole's parameters as its editor holds them: the face may not be picked yet.
 #[derive(Clone, Debug, PartialEq)]
 pub struct HoleParams {
@@ -392,6 +442,28 @@ pub struct HoleParams {
     pub head: Option<soliddraft_kernel_api::HoleHead>,
     /// A cosmetic thread in the main wall.
     pub thread: Option<model::thread::HoleThread>,
+    /// Hole Wizard specification (`None` for legacy quick-bar plain/tapped holes until
+    /// any Hole Wizard control is touched).
+    pub wizard: Option<model::hole_wizard::HoleWizardSpec>,
+    /// Active tab in the Hole Wizard panel.
+    pub wizard_tab: HoleWizardTab,
+    /// Existing absorbed position sketch id when editing a Hole Wizard feature.
+    pub sketch_feature: Option<FeatureId>,
+    /// Editable position sketch driving hole centre points (including dimensions,
+    /// relations, and linear/circular sketch patterns).
+    pub position_sketch: Option<sketch::Sketch>,
+    /// Active viewport pick target (surface/vertex end condition), if any.
+    pub picking_target: Option<HolePickTarget>,
+    /// Text field for naming a new favorite preset.
+    pub favorite_name: String,
+    /// Currently selected callout parameter in the Tolerance/Precision section.
+    pub selected_callout_param: model::hole_wizard::CalloutParam,
+    /// Show custom sizing override fields in the Hole Specifications section.
+    pub show_custom_sizing: bool,
+    /// Draft inputs for inline linear point pattern generator.
+    pub lin_pat: HoleLinearPatternDraft,
+    /// Draft inputs for inline circular point pattern generator.
+    pub circ_pat: HoleCircularPatternDraft,
 }
 
 impl Default for HoleParams {
@@ -404,27 +476,291 @@ impl Default for HoleParams {
             tip: soliddraft_kernel_api::HoleTip::Cone { angle_deg: 118.0 },
             head: None,
             thread: None,
+            wizard: None,
+            wizard_tab: HoleWizardTab::Type,
+            sketch_feature: None,
+            position_sketch: None,
+            picking_target: None,
+            favorite_name: String::new(),
+            selected_callout_param: model::hole_wizard::CalloutParam::Diameter,
+            show_custom_sizing: false,
+            lin_pat: HoleLinearPatternDraft::default(),
+            circ_pat: HoleCircularPatternDraft::default(),
         }
     }
 }
 
 impl HoleParams {
-    pub fn to_model(&self) -> Result<model::HoleFeature, String> {
+    /// Initializes `HoleParams` from an existing [`model::HoleFeature`] and optional
+    /// absorbed position sketch.
+    pub fn from_model(h: &model::HoleFeature, sketch_body: Option<sketch::Sketch>) -> Self {
+        let mut params = Self {
+            face: Some(h.face.clone()),
+            points: h.points.clone(),
+            diameter: h.diameter,
+            depth: h.depth,
+            tip: h.tip,
+            head: h.head,
+            thread: h.thread.clone(),
+            wizard: h.wizard.clone(),
+            sketch_feature: h.sketch.map(app_id),
+            position_sketch: sketch_body,
+            show_custom_sizing: h.wizard.as_ref().is_some_and(|w| w.custom_sizing),
+            ..Self::default()
+        };
+        if params.position_sketch.is_some() {
+            params.sync_points_from_sketch();
+        }
+        params
+    }
+
+    /// Ensures the Hole Wizard specification is populated, initializing from current
+    /// hole values (ISO Counterbore/Countersink/StraightTap/Simple) when absent.
+    pub fn ensure_wizard(&mut self) -> &mut model::hole_wizard::HoleWizardSpec {
+        if self.wizard.is_none() {
+            let hole_type = if self.thread.is_some() {
+                model::hole_wizard::HoleType::StraightTap
+            } else if matches!(self.head, Some(soliddraft_kernel_api::HoleHead::Counterbore { .. })) {
+                model::hole_wizard::HoleType::Counterbore
+            } else if matches!(self.head, Some(soliddraft_kernel_api::HoleHead::Countersink { .. })) {
+                model::hole_wizard::HoleType::Countersink
+            } else {
+                model::hole_wizard::HoleType::Simple
+            };
+            let mut spec = model::hole_wizard::HoleWizardSpec::new(model::hole_wizard::HoleStandard::Iso, hole_type);
+            spec.end_condition = match self.depth {
+                soliddraft_kernel_api::HoleDepth::Through => model::hole_wizard::HoleEndCondition::ThroughAll,
+                soliddraft_kernel_api::HoleDepth::Blind { depth } => {
+                    model::hole_wizard::HoleEndCondition::Blind { depth }
+                }
+            };
+            self.wizard = Some(spec);
+        }
+        self.wizard.as_mut().expect("wizard initialized")
+    }
+
+    /// Applies the active wizard table's default dimensions to `diameter`, `head`, `tip`,
+    /// `thread`, and `slot_length`.
+    pub fn apply_wizard_defaults(&mut self) {
+        let Some(wizard) = self.wizard.as_mut() else { return };
+        let resolved = wizard.resolve_defaults();
+        self.diameter = resolved.diameter;
+        self.tip = resolved.tip;
+        self.head = resolved.head;
+        let prev_len = self.thread.as_ref().and_then(|t| t.length);
+        self.thread = resolved.thread.map(|mut t| {
+            t.length = prev_len;
+            t
+        });
+        wizard.slot_length = resolved.slot_length;
+        wizard.custom_sizing = false;
+    }
+
+    /// Restores default table dimensions and clears custom sizing overrides.
+    pub fn restore_wizard_defaults(&mut self) {
+        self.apply_wizard_defaults();
+    }
+
+    /// Ensures an editable position sketch exists, seeded from `self.points`.
+    pub fn ensure_position_sketch(&mut self) -> &mut sketch::Sketch {
+        if self.position_sketch.is_none() {
+            let mut sk = sketch::Sketch::new();
+            for p in &self.points {
+                sk.add_entity(sketch::EntityKind::Point { p: *p });
+            }
+            sketch::solve::solve(&mut sk, None, true);
+            self.position_sketch = Some(sk);
+        }
+        self.position_sketch.as_mut().expect("position sketch initialized")
+    }
+
+    /// Extracts all non-construction `Point` entities from `position_sketch` into `points`.
+    pub fn sync_points_from_sketch(&mut self) {
+        let Some(sk) = &self.position_sketch else { return };
+        let pts: Vec<sketch::P2> = sk
+            .entities
+            .iter()
+            .filter(|e| e.id != sketch::ORIGIN && !e.construction)
+            .filter_map(|e| match e.kind {
+                sketch::EntityKind::Point { p } => Some(p),
+                _ => None,
+            })
+            .collect();
+        self.points = pts;
+    }
+
+    /// Adds a hole point to the position sketch (or `points` when no sketch is active).
+    pub fn add_position_point(&mut self, p: sketch::P2) {
+        if let Some(sk) = &mut self.position_sketch {
+            sk.add_entity(sketch::EntityKind::Point { p });
+            sketch::solve::solve(sk, None, true);
+            self.sync_points_from_sketch();
+        } else {
+            self.points.push(p);
+        }
+    }
+
+    /// Removes the `idx`-th hole point from the position sketch (or `points`).
+    pub fn remove_position_point(&mut self, idx: usize) {
+        if let Some(sk) = &mut self.position_sketch {
+            let ids: Vec<sketch::EntityId> = sk
+                .entities
+                .iter()
+                .filter(|e| e.id != sketch::ORIGIN && !e.construction)
+                .filter_map(|e| matches!(e.kind, sketch::EntityKind::Point { .. }).then_some(e.id))
+                .collect();
+            if ids.len() > 1
+                && let Some(&eid) = ids.get(idx)
+            {
+                let _ = sk.remove_entity(eid);
+                sketch::solve::solve(sk, None, true);
+                self.sync_points_from_sketch();
+            }
+        } else if self.points.len() > 1 && idx < self.points.len() {
+            self.points.remove(idx);
+        }
+    }
+
+    /// Updates coordinates of the `idx`-th point in the position sketch (or `points`).
+    pub fn set_position_point(&mut self, idx: usize, p: sketch::P2) {
+        if let Some(sk) = &mut self.position_sketch {
+            let ids: Vec<sketch::EntityId> = sk
+                .entities
+                .iter()
+                .filter(|e| e.id != sketch::ORIGIN && !e.construction)
+                .filter_map(|e| matches!(e.kind, sketch::EntityKind::Point { .. }).then_some(e.id))
+                .collect();
+            if let Some(&eid) = ids.get(idx)
+                && let Some(ent) = sk.entities.iter_mut().find(|e| e.id == eid)
+            {
+                ent.kind = sketch::EntityKind::Point { p };
+                sketch::solve::solve(sk, Some((sketch::PointRef::new(eid, 0), p)), true);
+                self.sync_points_from_sketch();
+            }
+        } else if let Some(slot) = self.points.get_mut(idx) {
+            *slot = p;
+        }
+    }
+
+    /// Generates an editable linear point pattern inside the position sketch, anchored on
+    /// the last point (or `(0, 0)`).
+    pub fn apply_linear_point_pattern(&mut self) -> Result<(), String> {
+        let draft = self.lin_pat;
+        if draft.count_x == 0 || draft.count_y == 0 || draft.count_x.saturating_mul(draft.count_y) < 2 {
+            return Err("Linear pattern needs at least 2 points".into());
+        }
+        let sk = self.ensure_position_sketch();
+        let seed_id = sk
+            .entities
+            .iter()
+            .rev()
+            .find(|e| e.id != sketch::ORIGIN && !e.construction && matches!(e.kind, sketch::EntityKind::Point { .. }))
+            .map(|e| e.id)
+            .unwrap_or_else(|| sk.add_entity(sketch::EntityKind::Point { p: sketch::P2::ZERO }));
+        let second = (draft.count_y > 1)
+            .then_some(sketch::tools::PatternDirection { step: sketch::P2::new(0.0, draft.spacing_y), count: draft.count_y });
+        sk.linear_pattern(&[seed_id], sketch::P2::new(draft.spacing_x, 0.0), draft.count_x, second)
+            .map_err(|e| e.to_string())?;
+        sketch::solve::solve(sk, None, true);
+        self.sync_points_from_sketch();
+        Ok(())
+    }
+
+    /// Generates an editable circular bolt-circle point pattern inside the position sketch.
+    pub fn apply_circular_point_pattern(&mut self) -> Result<(), String> {
+        let draft = self.circ_pat;
+        if draft.count < 2 || !(draft.radius.is_finite() && draft.radius > 0.0) {
+            return Err("Circular pattern needs a positive radius and at least 2 holes".into());
+        }
+        let sk = self.ensure_position_sketch();
+        let center = sketch::P2::new(draft.center_u, draft.center_v);
+        let rad = draft.start_angle_deg.to_radians();
+        let first = sketch::P2::new(center.u + draft.radius * rad.cos(), center.v + draft.radius * rad.sin());
+        let seed_id = sk.add_entity(sketch::EntityKind::Point { p: first });
+        sk.circular_pattern(&[seed_id], center, 360.0, draft.count, true).map_err(|e| e.to_string())?;
+        sketch::solve::solve(sk, None, true);
+        self.sync_points_from_sketch();
+        Ok(())
+    }
+
+    /// Applies a saved [`model::hole_wizard::HoleFavorite`] preset.
+    pub fn apply_favorite(&mut self, fav: &model::hole_wizard::HoleFavorite) {
+        self.wizard = Some(fav.spec.clone());
+        self.depth = fav.spec.legacy_depth();
+        self.apply_wizard_defaults();
+        if fav.spec.custom_sizing {
+            if let Some(d) = fav.custom_diameter {
+                self.diameter = d;
+            }
+            if let Some(h) = fav.custom_head {
+                self.head = Some(h);
+            }
+            if let Some(t) = fav.custom_tip {
+                self.tip = t;
+            }
+            if let Some(th) = &fav.custom_thread {
+                self.thread = Some(th.clone());
+            }
+            if let Some(w) = self.wizard.as_mut() {
+                w.custom_sizing = true;
+            }
+            self.show_custom_sizing = true;
+        }
+    }
+
+    /// Captures the current Hole Wizard setup as a named [`model::hole_wizard::HoleFavorite`].
+    pub fn to_favorite(&mut self, name: String) -> model::hole_wizard::HoleFavorite {
+        let spec = self.ensure_wizard().clone();
+        model::hole_wizard::HoleFavorite {
+            name,
+            custom_diameter: spec.custom_sizing.then_some(self.diameter),
+            custom_head: if spec.custom_sizing { self.head } else { None },
+            custom_tip: spec.custom_sizing.then_some(self.tip),
+            custom_thread: if spec.custom_sizing { self.thread.clone() } else { None },
+            spec,
+        }
+    }
+
+    /// Builds a model [`model::HoleFeature`] for preview (inline points without needing
+    /// an uncommitted sketch feature in the forked preview document).
+    pub fn to_preview_model(&self) -> Result<model::HoleFeature, String> {
+        let points = if let Some(sk) = &self.position_sketch {
+            sk.entities
+                .iter()
+                .filter(|e| e.id != sketch::ORIGIN && !e.construction)
+                .filter_map(|e| match e.kind {
+                    sketch::EntityKind::Point { p } => Some(p),
+                    _ => None,
+                })
+                .collect()
+        } else {
+            self.points.clone()
+        };
+        let depth = self.wizard.as_ref().map_or(self.depth, |w| w.legacy_depth());
         let hole = model::HoleFeature {
             face: self.face.clone().ok_or("pick the face the holes start on")?,
-            points: self.points.clone(),
+            points,
             diameter: self.diameter,
-            depth: self.depth,
+            depth,
             tip: self.tip,
             head: self.head,
             thread: self.thread.clone(),
             sketch: None,
-            wizard: None,
+            wizard: self.wizard.clone(),
         };
+        if let Some(reason) = hole.wizard.as_ref().and_then(|w| w.coming_soon_refusal()) {
+            return Err(reason.to_owned());
+        }
         match hole.thread_problem() {
             Some(problem) => Err(problem),
             None => Ok(hole),
         }
+    }
+
+    pub fn to_model(&self) -> Result<model::HoleFeature, String> {
+        let mut hole = self.to_preview_model()?;
+        hole.sketch = self.sketch_feature.map(model_id);
+        Ok(hole)
     }
 
     /// Taps the holes with `thread`, or makes them plain, and drills them with the
@@ -615,6 +951,7 @@ impl FeatureKind {
             FeatureKind::Revolve(r) => Some(app_id(r.sketch)),
             FeatureKind::Sweep(s) => Some(app_id(s.sketch)),
             FeatureKind::Cut(p) => Some(p.sketch),
+            FeatureKind::Hole(h) => h.sketch.map(app_id),
             _ => None,
         }
     }
@@ -1023,10 +1360,20 @@ impl Feature {
                 Some(other) => format!("{} × {} mm", fmt_mm(c.distance), fmt_mm(other)),
                 None => format!("{} mm", fmt_mm(c.distance)),
             },
-            FeatureKind::Hole(h) => match &h.thread {
-                Some(thread) => format!("{} × {}", h.points.len(), thread.designation()),
-                None => format!("{} × Ø{}", h.points.len(), fmt_mm(h.diameter)),
-            },
+            FeatureKind::Hole(h) => {
+                if let Some(w) = &h.wizard {
+                    let count = h.points.len().max(1);
+                    match &h.thread {
+                        Some(thread) => format!("{count} × {} ({})", thread.designation(), w.standard.label()),
+                        None => format!("{count} × {} {} {}", w.standard.label(), w.size, w.hole_type.short_label()),
+                    }
+                } else {
+                    match &h.thread {
+                        Some(thread) => format!("{} × {}", h.points.len(), thread.designation()),
+                        None => format!("{} × Ø{}", h.points.len(), fmt_mm(h.diameter)),
+                    }
+                }
+            }
             FeatureKind::Pattern(p) => match p.layout {
                 model::PatternSpec::Linear { spacing, count, .. } => format!("{count} × {} mm", fmt_mm(spacing)),
                 model::PatternSpec::Circular { count, angle, .. } => format!("{count} × {}°", fmt_mm(angle)),
@@ -1270,6 +1617,20 @@ pub enum Command {
     },
     /// Adds a hole, pattern, mirror or draft.
     AddFeature(FeatureKind),
+    /// Adds an absorbed position sketch and a Hole Wizard feature referencing it as one
+    /// undoable step.
+    AddHoleWithSketch {
+        sketch: Sketch,
+        hole: model::HoleFeature,
+    },
+    /// Edits an existing Hole Wizard feature and its absorbed position sketch as one
+    /// undoable step.
+    EditHoleWithSketch {
+        id: FeatureId,
+        sketch_id: FeatureId,
+        sketch: Sketch,
+        hole: model::HoleFeature,
+    },
     ImportBodies(Vec<model::ImportStepFeature>),
     /// Moves every import of one file to a replacement file and every reference into
     /// those imports to the new file's faces, as one step.
@@ -1334,6 +1695,8 @@ impl Command {
             Command::AddChamfer { .. } => "Add chamfer".into(),
             Command::EditChamfer { .. } => "Edit chamfer".into(),
             Command::AddFeature(kind) => format!("Add {}", kind.noun()),
+            Command::AddHoleWithSketch { .. } => "Add hole".into(),
+            Command::EditHoleWithSketch { .. } => "Edit hole".into(),
             Command::ImportBodies(_) => "Import bodies".into(),
             Command::ReplaceImportFile(_) => "Replace imported file".into(),
             Command::EditFeature { kind, .. } => format!("Edit {}", kind.noun()),
@@ -3023,6 +3386,28 @@ impl Document {
             Command::AddChamfer { params } => vec![add(FeatureKind::Chamfer(params).to_model(), false)],
             Command::EditChamfer { id, params } => vec![edit(id, &FeatureKind::Chamfer(params))],
             Command::AddFeature(kind) => vec![add(kind.to_model(), false)],
+            Command::AddHoleWithSketch { mut sketch, mut hole } => {
+                sketch::solve::solve(&mut sketch, None, true);
+                let sketch_id = self.model.next_feature_id();
+                hole.sketch = Some(sketch_id);
+                let sk_kind = model::FeatureKind::Sketch(model::SketchFeature {
+                    plane: model::SketchPlane::Face { face: hole.face.clone() },
+                    sketch,
+                });
+                vec![add(sk_kind, false), add(model::FeatureKind::Hole(hole), false)]
+            }
+            Command::EditHoleWithSketch { id, sketch_id, mut sketch, mut hole } => {
+                sketch::solve::solve(&mut sketch, None, true);
+                hole.sketch = Some(model_id(sketch_id));
+                let sk_kind = model::FeatureKind::Sketch(model::SketchFeature {
+                    plane: model::SketchPlane::Face { face: hole.face.clone() },
+                    sketch,
+                });
+                vec![
+                    model::Command::EditFeature { id: model_id(sketch_id), kind: sk_kind },
+                    model::Command::EditFeature { id: model_id(id), kind: model::FeatureKind::Hole(hole) },
+                ]
+            }
             Command::ImportBodies(imports) => {
                 if imports.is_empty() {
                     return Err("The file contains no solid bodies.".into());

@@ -28,6 +28,7 @@ pub mod fillet_collect;
 pub mod form_bar;
 pub mod geometry_message;
 mod grid;
+pub mod hole_wizard_panel;
 pub mod icons;
 pub mod import;
 pub mod interference;

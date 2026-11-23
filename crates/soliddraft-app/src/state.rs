@@ -59,6 +59,12 @@ pub enum AppAction {
     /// is selected.
     ShowAppearance,
     StartHole,
+    /// Opens the live inline position sketch inside an active Hole Wizard editor.
+    OpenHolePositionSketch,
+    /// Exits the live inline position sketch and syncs its points back to the Hole Wizard.
+    CloseHolePositionSketch,
+    /// Pushes panel-side point/pattern edits into an open inline position sketch session.
+    SyncHolePositionSketch,
     StartPattern {
         circular: bool,
     },
@@ -522,7 +528,9 @@ impl FeatureEditor {
             EditorParams::Draft(d) if !d.faces.is_empty() => built(FeatureKind::Draft(d.to_model())),
             EditorParams::Pattern(p) => built(FeatureKind::Pattern(p.clone())),
             EditorParams::Mirror(m) => built(FeatureKind::Mirror(m.clone())),
-            EditorParams::Hole(h) if h.face.is_some() => h.to_model().and_then(|h| built(FeatureKind::Hole(h))),
+            EditorParams::Hole(h) if h.face.is_some() => {
+                h.to_preview_model().and_then(|h| built(FeatureKind::Hole(h)))
+            }
             // These preview once applied. A hole without its face shows a ghost at the
             // pointer instead.
             EditorParams::Lattice(_)

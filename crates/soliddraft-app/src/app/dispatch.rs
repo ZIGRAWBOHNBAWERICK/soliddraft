@@ -56,6 +56,12 @@ impl SolidDraftApp {
 
     /// Closes the open editor, restoring the display the editor rolled back.
     pub(super) fn close_editor(&mut self) -> Option<FeatureEditor> {
+        if self.state.sketch.as_ref().is_some_and(|s| s.feature == crate::hole_wizard_panel::INLINE_POSITION_SKETCH_ID) {
+            if let Some(session) = self.state.sketch.take() {
+                self.state.viewport.camera.orthographic = session.was_orthographic;
+                self.state.ribbon_tab = crate::state::RibbonTab::Solid;
+            }
+        }
         let e = self.state.editor.take()?;
         if e.target.is_some() {
             if self.state.sketch.as_ref().is_none_or(|s| s.restore_rollback.is_none()) {
@@ -227,6 +233,18 @@ impl SolidDraftApp {
     pub(super) fn apply(&mut self, ctx: &egui::Context, action: AppAction) {
         match action {
             AppAction::Command(cmd) => {
+                if let Command::EditSketch { id, sketch } = &cmd
+                    && *id == crate::hole_wizard_panel::INLINE_POSITION_SKETCH_ID
+                {
+                    if let Some(editor) = self.state.editor.as_mut()
+                        && let EditorParams::Hole(h) = &mut editor.params
+                    {
+                        h.position_sketch = Some(sketch.clone());
+                        h.sync_points_from_sketch();
+                        editor.refresh_preview(&self.state.doc);
+                    }
+                    return;
+                }
                 if let Some(drag) = self.state.drag_preview.take() {
                     drag.cancel(&mut self.state.doc);
                 }
@@ -396,6 +414,15 @@ impl SolidDraftApp {
                 self.open_sketch(id);
             }
             AppAction::ExitSketch => {
+                if self
+                    .state
+                    .sketch
+                    .as_ref()
+                    .is_some_and(|s| s.feature == crate::hole_wizard_panel::INLINE_POSITION_SKETCH_ID)
+                {
+                    self.apply(ctx, AppAction::CloseHolePositionSketch);
+                    return;
+                }
                 let Some(session) = self.state.sketch.take() else { return };
                 self.restore_rollback(&session);
                 self.state.viewport.camera.orthographic = session.was_orthographic;
@@ -524,6 +551,57 @@ impl SolidDraftApp {
                 };
                 self.open_editor(None, EditorParams::Hole(HoleParams { face, ..Default::default() }));
                 self.state.doc.selection = None;
+            }
+            AppAction::OpenHolePositionSketch => {
+                let Some(editor) = self.state.editor.as_mut() else { return };
+                let EditorParams::Hole(h) = &mut editor.params else { return };
+                let Some(face_ref) = h.face.clone() else {
+                    self.state.note("Pick a planar face first", NoteKind::Info);
+                    return;
+                };
+                let Some(body) = self.state.doc.model().body() else { return };
+                let Ok(plane) = self
+                    .state
+                    .doc
+                    .model()
+                    .plane_of(&soliddraft_model::PlaneRef::Face { face: face_ref }, body)
+                else {
+                    self.state.note("The hole's start face is not planar", NoteKind::Error);
+                    return;
+                };
+                let sketch = h.ensure_position_sketch().clone();
+                let was_orthographic = self.state.viewport.camera.orthographic;
+                let mut session = SketchSession::new(
+                    crate::hole_wizard_panel::INLINE_POSITION_SKETCH_ID,
+                    plane,
+                    sketch,
+                    was_orthographic,
+                );
+                session.set_tool(crate::state::Tool::Point);
+                self.state.sketch = Some(session);
+                self.state.ribbon_tab = crate::state::RibbonTab::Sketch;
+            }
+            AppAction::CloseHolePositionSketch => {
+                let Some(session) = self.state.sketch.take() else { return };
+                self.state.viewport.camera.orthographic = session.was_orthographic;
+                self.state.ribbon_tab = crate::state::RibbonTab::Solid;
+                if let Some(editor) = self.state.editor.as_mut()
+                    && let EditorParams::Hole(h) = &mut editor.params
+                {
+                    h.position_sketch = Some(session.sketch);
+                    h.sync_points_from_sketch();
+                    editor.refresh_preview(&self.state.doc);
+                }
+            }
+            AppAction::SyncHolePositionSketch => {
+                if let Some(session) = self.state.sketch.as_mut()
+                    && session.feature == crate::hole_wizard_panel::INLINE_POSITION_SKETCH_ID
+                    && let Some(editor) = self.state.editor.as_ref()
+                    && let EditorParams::Hole(h) = &editor.params
+                    && let Some(sk) = &h.position_sketch
+                {
+                    session.sketch = sk.clone();
+                }
             }
             AppAction::StartPattern { circular } => {
                 let layout = if circular {
@@ -691,15 +769,14 @@ impl SolidDraftApp {
                     FeatureKind::Cut(p) => EditorParams::Cut(p.clone()),
                     FeatureKind::Fillet(p) => EditorParams::Fillet(p.clone()),
                     FeatureKind::Chamfer(p) => EditorParams::Chamfer(p.clone()),
-                    FeatureKind::Hole(h) => EditorParams::Hole(HoleParams {
-                        face: Some(h.face.clone()),
-                        points: h.points.clone(),
-                        diameter: h.diameter,
-                        depth: h.depth,
-                        tip: h.tip,
-                        head: h.head,
-                        thread: h.thread.clone(),
-                    }),
+                    FeatureKind::Hole(h) => {
+                        let sketch_body = h
+                            .sketch
+                            .and_then(|sid| self.state.doc.feature(u64::from(sid.0)))
+                            .and_then(|sf| sf.sketch())
+                            .map(|sf| sf.sketch.clone());
+                        EditorParams::Hole(HoleParams::from_model(h, sketch_body))
+                    }
                     FeatureKind::Pattern(p) => EditorParams::Pattern(p.clone()),
                     FeatureKind::ReferencePlane(p) => EditorParams::ReferencePlane(p.clone()),
                     FeatureKind::Mirror(m) => EditorParams::Mirror(m.clone()),
@@ -752,6 +829,20 @@ impl SolidDraftApp {
                     self.state.note(why, NoteKind::Error);
                     return;
                 }
+                if let Some(session) = self
+                    .state
+                    .sketch
+                    .take_if(|s| s.feature == crate::hole_wizard_panel::INLINE_POSITION_SKETCH_ID)
+                {
+                    self.state.viewport.camera.orthographic = session.was_orthographic;
+                    self.state.ribbon_tab = crate::state::RibbonTab::Solid;
+                    if let Some(editor) = self.state.editor.as_mut()
+                        && let EditorParams::Hole(h) = &mut editor.params
+                    {
+                        h.position_sketch = Some(session.sketch);
+                        h.sync_points_from_sketch();
+                    }
+                }
                 let Some(e) = self.close_editor() else { return };
                 let reopen = (e.target, e.params.clone(), e.then_feature);
                 let cmd = match (e.target, e.params) {
@@ -775,16 +866,30 @@ impl SolidDraftApp {
                     (None, EditorParams::Fillet(p)) => Command::AddFillet { params: p },
                     (Some(id), EditorParams::Chamfer(p)) => Command::EditChamfer { id, params: p },
                     (None, EditorParams::Chamfer(p)) => Command::AddChamfer { params: p },
-                    (target, EditorParams::Hole(h)) => match h.to_model() {
-                        Ok(h) => match target {
-                            Some(id) => Command::EditFeature { id, kind: FeatureKind::Hole(h) },
-                            None => Command::AddFeature(FeatureKind::Hole(h)),
-                        },
-                        Err(why) => {
-                            self.refuse(reopen, why);
-                            return;
+                    (target, EditorParams::Hole(mut h)) => {
+                        if let Some(session) = self.state.sketch.take()
+                            && session.feature == crate::hole_wizard_panel::INLINE_POSITION_SKETCH_ID
+                        {
+                            self.state.viewport.camera.orthographic = session.was_orthographic;
+                            self.state.ribbon_tab = crate::state::RibbonTab::Solid;
+                            h.position_sketch = Some(session.sketch);
+                            h.sync_points_from_sketch();
                         }
-                    },
+                        match h.to_model() {
+                            Ok(hole) => match (target, h.sketch_feature, h.position_sketch) {
+                                (Some(id), Some(sketch_id), Some(sketch)) => {
+                                    Command::EditHoleWithSketch { id, sketch_id, sketch, hole }
+                                }
+                                (None, None, Some(sketch)) => Command::AddHoleWithSketch { sketch, hole },
+                                (Some(id), _, _) => Command::EditFeature { id, kind: FeatureKind::Hole(hole) },
+                                (None, _, _) => Command::AddFeature(FeatureKind::Hole(hole)),
+                            },
+                            Err(why) => {
+                                self.refuse(reopen, why);
+                                return;
+                            }
+                        }
+                    }
                     (target, EditorParams::Pattern(p)) => match target {
                         Some(id) => Command::EditFeature { id, kind: FeatureKind::Pattern(p) },
                         None => Command::AddFeature(FeatureKind::Pattern(p)),
@@ -939,30 +1044,97 @@ impl SolidDraftApp {
                             return;
                         }
                         (EditorParams::Hole(h), Some(Selection::Face(f))) => {
+                            if h.picking_target == Some(crate::document::HolePickTarget::Surface) {
+                                match self.state.doc.face_ref(f) {
+                                    Some(target_face) => {
+                                        let w = h.ensure_wizard();
+                                        match &mut w.end_condition {
+                                            soliddraft_model::hole_wizard::HoleEndCondition::UpToSurface { face }
+                                            | soliddraft_model::hole_wizard::HoleEndCondition::OffsetFromSurface {
+                                                face,
+                                                ..
+                                            } => *face = target_face,
+                                            _ => {
+                                                w.end_condition =
+                                                    soliddraft_model::hole_wizard::HoleEndCondition::UpToSurface {
+                                                        face: target_face,
+                                                    };
+                                            }
+                                        }
+                                        h.picking_target = None;
+                                        e.refresh_preview(&self.state.doc);
+                                    }
+                                    None => {
+                                        e.error = Some(
+                                            "Up to surface on a non-parallel or curved face is coming soon.".into(),
+                                        );
+                                    }
+                                }
+                                return;
+                            }
                             match self.state.doc.face_ref(f) {
                                 Some(r) => {
+                                    let click_uv = self
+                                        .state
+                                        .hover_point
+                                        .zip(self.state.doc.face_plane(f))
+                                        .map(|(at, plane)| {
+                                            let at = soliddraft_kernel_api::Vec3::new(
+                                                f64::from(at.x),
+                                                f64::from(at.y),
+                                                f64::from(at.z),
+                                            );
+                                            let d = at - plane.origin;
+                                            let tenth = |v: f64| (v * 10.0).round() / 10.0 + 0.0;
+                                            crate::sketch::P2::new(
+                                                tenth(d.dot(plane.x_dir)),
+                                                tenth(d.dot(plane.y_dir())),
+                                            )
+                                        });
+                                    if h.face.as_ref() == Some(&r)
+                                        && h.wizard_tab == crate::document::HoleWizardTab::Positions
+                                        && let Some(uv) = click_uv
+                                    {
+                                        h.add_position_point(uv);
+                                        e.refresh_preview(&self.state.doc);
+                                        return;
+                                    }
                                     // A new hole's first face click also places its first
                                     // hole where the face was clicked, to a tenth of a mm.
                                     let first = h.face.is_none() && h.points == [crate::sketch::P2::ZERO];
                                     h.face = Some(r);
-                                    if first
-                                        && let (Some(at), Some(plane)) =
-                                            (self.state.hover_point, self.state.doc.face_plane(f))
-                                    {
-                                        let at = soliddraft_kernel_api::Vec3::new(
-                                            f64::from(at.x),
-                                            f64::from(at.y),
-                                            f64::from(at.z),
-                                        );
-                                        let d = at - plane.origin;
-                                        let tenth = |v: f64| (v * 10.0).round() / 10.0 + 0.0;
-                                        h.points[0] = crate::sketch::P2::new(
-                                            tenth(d.dot(plane.x_dir)),
-                                            tenth(d.dot(plane.y_dir())),
-                                        );
+                                    if first && let Some(uv) = click_uv {
+                                        h.set_position_point(0, uv);
                                     }
+                                    e.refresh_preview(&self.state.doc);
                                 }
-                                None => e.error = Some("Holes start on a planar face".into()),
+                                None => {
+                                    let label = self
+                                        .state
+                                        .doc
+                                        .faces
+                                        .iter()
+                                        .find(|face| face.id == f)
+                                        .map(|face| face.label.as_str())
+                                        .unwrap_or("selected face");
+                                    e.error = Some(format!(
+                                        "Holes can only be placed on a planar face; {label} is not planar."
+                                    ));
+                                }
+                            }
+                            return;
+                        }
+                        (EditorParams::Hole(h), Some(Selection::Vertex(v)))
+                            if h.picking_target == Some(crate::document::HolePickTarget::Vertex) =>
+                        {
+                            match self.state.doc.model().vertex_ref(v) {
+                                Ok(vertex) => {
+                                    h.ensure_wizard().end_condition =
+                                        soliddraft_model::hole_wizard::HoleEndCondition::UpToVertex { vertex };
+                                    h.picking_target = None;
+                                    e.refresh_preview(&self.state.doc);
+                                }
+                                Err(err) => e.error = Some(err.to_string()),
                             }
                             return;
                         }
@@ -1871,6 +2043,9 @@ impl SolidDraftApp {
     /// the session takes the document's copy so both agree.
     pub(super) fn sync_sketch_session(&mut self) {
         let Some(s) = self.state.sketch.as_mut() else { return };
+        if s.feature == crate::hole_wizard_panel::INLINE_POSITION_SKETCH_ID {
+            return;
+        }
         s.cancel_trim();
         if s.corner_first.take().is_some() {
             s.selection.clear();

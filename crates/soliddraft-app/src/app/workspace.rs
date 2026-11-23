@@ -717,6 +717,7 @@ impl SolidDraftApp {
             if self.state.tree_shown() {
                 self.side_panel(root, Side::Tree, window_width);
             }
+            crate::hole_wizard_panel::panel(root, &mut self.state);
         }
         egui::CentralPanel::default().frame(egui::Frame::new().fill(theme::chrome())).show(root, |ui| {
             if start {

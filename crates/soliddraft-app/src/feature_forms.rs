@@ -848,22 +848,31 @@ fn render(
         }
         (EditorParams::Hole(p), Key::PositionList) => {
             let mut remove = None;
-            for (i, point) in p.points.iter_mut().enumerate() {
+            let mut edits = Vec::new();
+            for (i, point) in p.points.iter().enumerate() {
+                let mut u = point.u;
+                let mut v = point.v;
                 ui.horizontal(|ui| {
                     ui.label(format!("{}", i + 1));
-                    properties::coord(ui, &format!("hole_u{i}"), "u", &mut point.u);
-                    properties::coord(ui, &format!("hole_v{i}"), "v", &mut point.v);
+                    properties::coord(ui, &format!("hole_u{i}"), "u", &mut u);
+                    properties::coord(ui, &format!("hole_v{i}"), "v", &mut v);
                     if ui.small_button("Remove").clicked() {
                         remove = Some(i);
                     }
                 });
+                if u != point.u || v != point.v {
+                    edits.push((i, crate::sketch::P2::new(u, v)));
+                }
+            }
+            for (i, pt) in edits {
+                p.set_position_point(i, pt);
             }
             if let Some(i) = remove.filter(|_| p.points.len() > 1) {
-                p.points.remove(i);
+                p.remove_position_point(i);
             }
             if ui.button("Add point").clicked() {
                 let next = p.points.last().copied().unwrap_or_default();
-                p.points.push(crate::sketch::P2::new(next.u + 10.0, next.v));
+                p.add_position_point(crate::sketch::P2::new(next.u + 10.0, next.v));
             }
         }
         (EditorParams::Hole(p), Key::Diameter) => {
@@ -961,11 +970,21 @@ fn render(
             choice(ui, "hole_depth", &mut through, &[(true, "Through"), (false, "Blind")]);
             if through != was {
                 p.depth = if through { HoleDepth::Through } else { HoleDepth::Blind { depth: 10.0 } };
+                if let Some(w) = p.wizard.as_mut() {
+                    w.end_condition = if through {
+                        soliddraft_model::hole_wizard::HoleEndCondition::ThroughAll
+                    } else {
+                        soliddraft_model::hole_wizard::HoleEndCondition::Blind { depth: 10.0 }
+                    };
+                }
             }
         }
         (EditorParams::Hole(p), Key::Depth) => {
             if let HoleDepth::Blind { depth } = &mut p.depth {
                 mm(ui, "Depth", depth);
+                if let Some(w) = p.wizard.as_mut() {
+                    w.end_condition = soliddraft_model::hole_wizard::HoleEndCondition::Blind { depth: *depth };
+                }
             }
         }
         (EditorParams::Hole(p), Key::TipKind) => {

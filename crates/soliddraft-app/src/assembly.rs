@@ -1266,25 +1266,30 @@ fn component_appearance(
 fn assembly_appearances(ui: &mut egui::Ui, session: &AssemblySession, actions: &mut Vec<AppAction>) {
     ui.collapsing("Appearances", |ui| {
         let assembly = session.doc.assembly();
-        let display = assembly.viewport_state();
-        let choices: Vec<_> = assembly
-            .appearances
-            .iter()
-            .filter_map(|a| assembly.appearance(&a.appearance).map(|look| (&a.path, look, false)))
-            .chain(display.into_iter().flat_map(|s| s.view.appearances.iter().map(|(path, look)| (path, look, true))))
-            .collect();
+        let display = assembly.viewport_state().map(|state| &state.id);
+        let choices: Vec<_> =
+            assembly
+                .appearances
+                .iter()
+                .filter_map(|a| assembly.appearance(&a.appearance).map(|look| (&a.path, look, None)))
+                .chain(
+                    assembly.viewport_states.states().iter().flat_map(|state| {
+                        state.view.appearances.iter().map(move |(path, look)| (path, look, Some(state)))
+                    }),
+                )
+                .collect();
         if choices.is_empty() {
             ui.label("No component appearance overrides");
         }
         for (i, (path, appearance, in_state)) in choices.into_iter().enumerate() {
             let name = session.doc.table().find(path).map_or_else(|| path.to_string(), |row| session.doc.label(row));
-            let scope = if in_state { display.map_or("", |s| s.name.as_str()) } else { "Default" };
+            let scope = in_state.map_or("Default", |state| state.name.as_str());
             ui.push_id(i, |ui| {
                 ui.horizontal_wrapped(|ui| {
                     let c = appearance.base_color;
                     ui.colored_label(egui::Color32::from_rgb(c.r, c.g, c.b), "●");
                     ui.label(format!("{} · Component · {name} · {scope}", appearance.name));
-                    if in_state == display.is_some() && ui.small_button("Remove colour").clicked() {
+                    if in_state.map(|state| &state.id) == display && ui.small_button("Remove colour").clicked() {
                         actions.push(AppAction::Assembly(AssemblyAction::SetColour(path.clone(), None)));
                     }
                 })

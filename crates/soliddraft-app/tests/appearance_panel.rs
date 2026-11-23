@@ -357,7 +357,7 @@ fn named_state_renders_two_body_appearances_and_reopens_with_visibility() {
     doc.apply(Command::AddConfiguration { name: "Service".into() }).unwrap();
     let config = doc.model().named_configurations().next().unwrap().0.clone();
     let inspection = DisplayState::new("Inspection".into(), DisplayScope::All, DisplayMode::Shaded);
-    let mut working =
+    let mut working: DisplayState<soliddraft_model::PartDisplay> =
         DisplayState::new("Working".into(), DisplayScope::Only(vec![Some(config.clone())]), DisplayMode::Shaded);
     working.view.hidden.insert(0);
     let mut states = doc.display_states().clone();

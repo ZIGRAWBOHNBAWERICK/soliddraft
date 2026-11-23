@@ -253,7 +253,7 @@ fn display_states_follow_the_configuration_and_keep_their_view_through_a_file() 
     let inspection_id = inspection.id.clone();
     states.put(inspection).unwrap();
     states.select(None, Some(inspection_id)).unwrap();
-    let mut working =
+    let mut working: DisplayState<soliddraft_model::PartDisplay> =
         DisplayState::new("Working".into(), DisplayScope::Only(vec![Some(service.clone())]), DisplayMode::Shaded);
     working.view.paint(target, Some(red.clone()));
     working.view.hidden.insert(0);

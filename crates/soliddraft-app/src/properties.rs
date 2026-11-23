@@ -1437,22 +1437,28 @@ fn appearance_place(doc: &crate::document::Document, target: &AppearanceTarget) 
 }
 
 pub(crate) fn appearances(ui: &mut egui::Ui, state: &mut AppState) {
+    use soliddraft_document::{ConfigScope, DisplayStateId};
+
+    enum Layer {
+        Base(ConfigScope),
+        Display(DisplayStateId, String),
+    }
+
     ui.collapsing("Appearances", |ui| {
         let data = state.doc.model().materials();
-        let active = state.doc.display_state();
-        let configuration = state.doc.model().active_configuration();
         let mut rows = Vec::new();
         for assignment in &data.appearances {
-            if !soliddraft_materials::scope::applies(&assignment.scope, configuration) {
-                continue;
-            }
             if let Some(appearance) = data.snapshots.appearance(&assignment.appearance) {
-                rows.push((assignment.target.clone(), appearance.clone(), Some(assignment.scope.clone())));
+                rows.push((assignment.target.clone(), appearance.clone(), Layer::Base(assignment.scope.clone())));
             }
         }
-        if let Some(display) = active {
+        for display in data.display_states.states() {
             for (target, appearance) in &display.view.appearances {
-                rows.push((target.clone(), appearance.clone(), None));
+                rows.push((
+                    target.clone(),
+                    appearance.clone(),
+                    Layer::Display(display.id.clone(), display.name.clone()),
+                ));
             }
         }
         rows.sort_by(|a, b| a.1.name.cmp(&b.1.name).then_with(|| a.1.id.cmp(&b.1.id)));
@@ -1461,7 +1467,7 @@ pub(crate) fn appearances(ui: &mut egui::Ui, state: &mut AppState) {
         }
         let mut last = None;
         let mut remove = None;
-        for (i, (target, appearance, scope)) in rows.iter().enumerate() {
+        for (i, (target, appearance, layer)) in rows.iter().enumerate() {
             if last != Some(&appearance.id) {
                 let c = appearance.base_color;
                 ui.horizontal(|ui| {
@@ -1472,21 +1478,41 @@ pub(crate) fn appearances(ui: &mut egui::Ui, state: &mut AppState) {
                 last = Some(&appearance.id);
             }
             let (level, name) = appearance_place(&state.doc, target);
-            let display = scope.is_none().then(|| active.map(|d| d.name.as_str())).flatten();
-            let label = display.map_or_else(|| format!("{level} · {name}"), |d| format!("{level} · {name} · {d}"));
+            let context = match layer {
+                Layer::Display(_, name) => name.clone(),
+                Layer::Base(ConfigScope::All) => "All configurations".to_owned(),
+                Layer::Base(ConfigScope::Only(configs)) => state
+                    .doc
+                    .model()
+                    .named_configurations()
+                    .filter_map(|(id, name)| configs.contains(id).then_some(name))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            };
             ui.push_id(i, |ui| {
                 ui.horizontal_wrapped(|ui| {
-                    ui.label(label);
+                    ui.label(format!("{level} · {name} · {context}"));
                     if ui.small_button("Remove colour").clicked() {
-                        remove = Some((target.clone(), scope.clone()));
+                        remove = Some(i);
                     }
                 });
             });
         }
-        if let Some((target, scope)) = remove {
-            let result = match scope {
-                Some(scope) => state.doc.set_base_appearance(target, None, scope),
-                None => state.doc.set_appearance(target, None),
+        if let Some(i) = remove {
+            let (target, _, layer) = rows.swap_remove(i);
+            let result = match layer {
+                Layer::Base(scope) => state.doc.set_base_appearance(target, None, scope),
+                Layer::Display(id, _) => {
+                    let mut states = state.doc.display_states().clone();
+                    let mut display = states
+                        .states()
+                        .iter()
+                        .find(|display| display.id == id)
+                        .expect("the state listed by this panel")
+                        .clone();
+                    display.view.paint(target, None);
+                    states.put(display).and_then(|_| state.doc.change_display_states(states))
+                }
             };
             if let Err(error) = result {
                 state.note(error, crate::state::NoteKind::Error);

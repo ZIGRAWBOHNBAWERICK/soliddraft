@@ -113,8 +113,7 @@ pub(crate) fn teach(state: &mut AppState) {
     if state.start.is_none() && !state.shortcut_menu.hint_seen {
         state.shortcut_menu.hint_seen = true;
         let _ = crate::settings::save_shortcut_menu(&state.shortcut_menu);
-        let key = state.shortcuts.shortcut_text("shortcut_menu").unwrap_or_else(|| "S".into());
-        state.note(format!("Press {key} to open your shortcut menu."), NoteKind::Info);
+        state.note("Press S to open your shortcut menu.", NoteKind::Info);
     }
 }
 

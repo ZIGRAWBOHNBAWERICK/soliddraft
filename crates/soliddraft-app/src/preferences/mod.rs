@@ -464,7 +464,7 @@ impl Preferences {
 
     /// Starts waiting for a key press to assign to command `id`.
     pub fn start_shortcut_capture(&mut self, id: &'static str) {
-        let Some(c) = commands::get(id).filter(|c| c.in_app() && c.is_working()) else { return };
+        let Some(c) = commands::get(id).filter(|c| c.can_rebind()) else { return };
         self.shortcut_capture = Some(c.id);
         self.shortcut_conflict = None;
         self.message = Some(Message {
@@ -483,7 +483,7 @@ impl Preferences {
     /// already holds `chord`, records the conflict and offers to swap instead of
     /// overwriting it.
     pub fn assign_shortcut(&mut self, id: &str, chord: KeyChord) -> Result<(), ShortcutConflict> {
-        let Some(c) = commands::get(id).filter(|c| c.in_app() && c.is_working()) else { return Ok(()) };
+        let Some(c) = commands::get(id).filter(|c| c.can_rebind()) else { return Ok(()) };
         self.shortcut_capture = None;
         match self.shortcuts.assign(c.id, chord) {
             Ok(()) => {
@@ -502,7 +502,10 @@ impl Preferences {
     /// Swaps the pending conflicting shortcut between the target command and the command
     /// that held it.
     pub fn swap_shortcut(&mut self) -> bool {
-        let Some(conflict) = self.shortcut_conflict.take() else { return false };
+        if !self.shortcut_conflict.as_ref().is_some_and(ShortcutConflict::can_swap) {
+            return false;
+        }
+        let conflict = self.shortcut_conflict.take().expect("a swappable shortcut conflict");
         self.shortcut_capture = None;
         self.shortcuts.swap(&conflict);
         let target = commands::get(conflict.command).map_or(conflict.command.to_owned(), |c| c.shortcut_row_label());
@@ -531,7 +534,7 @@ impl Preferences {
 
     /// Clears command `id`'s shortcut.
     pub fn clear_shortcut(&mut self, id: &str) {
-        let Some(c) = commands::get(id).filter(|c| c.in_app() && c.is_working()) else { return };
+        let Some(c) = commands::get(id).filter(|c| c.can_rebind()) else { return };
         self.shortcut_capture = None;
         self.shortcut_conflict = None;
         self.shortcuts.clear(c.id);
@@ -540,7 +543,7 @@ impl Preferences {
 
     /// Resets command `id`'s shortcut back to the active preset's default.
     pub fn reset_shortcut(&mut self, id: &str) {
-        let Some(c) = commands::get(id).filter(|c| c.in_app() && c.is_working()) else { return };
+        let Some(c) = commands::get(id).filter(|c| c.can_rebind()) else { return };
         self.shortcut_capture = None;
         self.shortcut_conflict = None;
         if let Some(conflict) = self.shortcuts.reset_conflict(c.id) {

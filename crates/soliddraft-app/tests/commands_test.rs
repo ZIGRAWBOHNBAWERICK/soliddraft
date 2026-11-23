@@ -317,15 +317,15 @@ fn assigned_shortcuts_run_immediately_in_the_app_without_a_restart() {
     harness.run_steps(3);
     harness.get_by_label("Assign Chamfer").click();
     harness.run_steps(2);
-    harness.key_press(Key::S);
+    harness.key_press(Key::F);
     harness.run_steps(3);
     if let Some(proof) = &proof {
         harness.render().unwrap().save(proof.join("shortcut-conflict.png")).unwrap();
     }
     harness.get_by_label("Swap").click();
     harness.run_steps(3);
-    assert_eq!(harness.state().state.shortcuts.shortcut_text("chamfer").as_deref(), Some("S"));
-    assert_eq!(harness.state().state.shortcuts.shortcut_text("shortcut_menu").as_deref(), Some("C"));
+    assert_eq!(harness.state().state.shortcuts.shortcut_text("chamfer").as_deref(), Some("F"));
+    assert_eq!(harness.state().state.shortcuts.shortcut_text("view_front").as_deref(), Some("C"));
 
     // Close Preferences and press G: Extrude opens immediately without a restart.
     harness.get_by_label("Close window").click();

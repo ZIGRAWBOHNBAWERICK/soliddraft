@@ -647,6 +647,11 @@ impl CommandSpec {
         self.action.is_some() && self.catallax_wait().is_none()
     }
 
+    /// Whether the keyboard shortcut can be changed in Preferences.
+    pub fn can_rebind(&self) -> bool {
+        self.id != "shortcut_menu" && self.in_app() && self.is_working()
+    }
+
     /// The scope an assigned shortcut uses for this command.
     pub fn default_scope(&self) -> Scope {
         if let Some(first) = self.keys.first() {
@@ -1063,8 +1068,18 @@ pub struct ShortcutConflict {
 }
 
 impl ShortcutConflict {
+    /// Whether every command in the conflict allows its shortcut to change.
+    pub fn can_swap(&self) -> bool {
+        std::iter::once(self.command)
+            .chain(self.with.iter().copied())
+            .all(|id| get(id).is_some_and(CommandSpec::can_rebind))
+    }
+
     /// A sentence naming the conflicting command and scope, and offering to swap.
     pub fn message(&self) -> String {
+        if !self.can_swap() {
+            return "S is reserved for the shortcut menu.".to_owned();
+        }
         let owners: Vec<String> = self
             .with
             .iter()
@@ -1101,7 +1116,7 @@ impl Shortcuts {
         let mut s = Self::for_preset(preset);
         if let Some(overrides) = obj.get("overrides").and_then(Value::as_object) {
             for (id, entry) in overrides {
-                let Some(c) = get(id).filter(|c| c.in_app() && c.is_working()) else { continue };
+                let Some(c) = get(id).filter(|c| c.can_rebind()) else { continue };
                 match entry {
                     Value::Null => s.set_raw(c.id, None),
                     Value::String(text) if text.trim().is_empty() => s.set_raw(c.id, None),
@@ -1148,6 +1163,9 @@ impl Shortcuts {
         if !c.is_working() {
             return Vec::new();
         }
+        if !c.can_rebind() {
+            return self.preset.keys_of(id);
+        }
         match self.overrides.get(id) {
             Some(None) => Vec::new(),
             Some(Some(chord)) => vec![chord.to_shortcut(c.default_scope(), c.id)],
@@ -1189,7 +1207,7 @@ impl Shortcuts {
     /// Assigns `chord` to `id`, or returns the conflicting commands without changing
     /// anything.
     pub fn assign(&mut self, id: &str, chord: KeyChord) -> Result<(), ShortcutConflict> {
-        let Some(target) = get(id).filter(|c| c.in_app() && c.is_working()) else { return Ok(()) };
+        let Some(target) = get(id).filter(|c| c.can_rebind()) else { return Ok(()) };
         let conflicts = self.conflicts_for(target.id, chord);
         if !conflicts.is_empty() {
             return Err(ShortcutConflict {
@@ -1207,6 +1225,9 @@ impl Shortcuts {
     /// conflicting command(s) `conflict.command`'s previous chord (or clearing them when
     /// `conflict.command` had none).
     pub fn swap(&mut self, conflict: &ShortcutConflict) {
+        if !conflict.can_swap() {
+            return;
+        }
         let previous = self.primary_chord(conflict.command);
         for &other in &conflict.with {
             self.set_raw(other, None);
@@ -1229,7 +1250,7 @@ impl Shortcuts {
 
     /// Conflicts with every preset alias, checked in that alias's actual workspace.
     pub fn reset_conflict(&self, id: &str) -> Option<ShortcutConflict> {
-        let target = get(id).filter(|c| c.in_app() && c.is_working())?;
+        let target = get(id).filter(|c| c.can_rebind())?;
         let defaults = self.preset.keys_of(target.id);
         let mut with = Vec::new();
         for key in &defaults {
@@ -1250,7 +1271,7 @@ impl Shortcuts {
     /// Puts `id` back to `self.preset`'s default, clearing any other override that had
     /// taken that key.
     pub fn reset(&mut self, id: &str) {
-        let Some(target) = get(id).filter(|c| c.in_app() && c.is_working()) else { return };
+        let Some(target) = get(id).filter(|c| c.can_rebind()) else { return };
         let defaults = self.preset.keys_of(target.id);
         for d in &defaults {
             let clashing: Vec<&'static str> = self.conflicts_for_key(target.id, *d).into_iter().map(|c| c.id).collect();
@@ -1280,7 +1301,7 @@ impl Shortcuts {
     }
 
     fn set_raw(&mut self, id: &str, value: Option<KeyChord>) {
-        let Some(c) = get(id).filter(|c| c.in_app() && c.is_working()) else { return };
+        let Some(c) = get(id).filter(|c| c.can_rebind()) else { return };
         let next = match value {
             Some(chord) => vec![chord.to_shortcut(c.default_scope(), c.id)],
             None => Vec::new(),
@@ -3566,21 +3587,21 @@ mod tests {
         assert_eq!(s.shortcut_text("revolve").as_deref(), Some("V"));
         assert!(s.is_modified("revolve"));
 
-        let conflict = s.assign("extrude", KeyChord::plain(Key::S)).unwrap_err();
+        let conflict = s.assign("extrude", KeyChord::plain(Key::C)).unwrap_err();
         assert_eq!(conflict.command, "extrude");
-        assert_eq!(conflict.with, ["shortcut_menu"]);
+        assert_eq!(conflict.with, ["chamfer"]);
         assert_eq!(s.shortcut_text("extrude").as_deref(), Some("E"), "refused until swapped");
         s.swap(&conflict);
-        assert_eq!(s.shortcut_text("extrude").as_deref(), Some("S"));
-        assert_eq!(s.shortcut_text("shortcut_menu").as_deref(), Some("E"));
+        assert_eq!(s.shortcut_text("extrude").as_deref(), Some("C"));
+        assert_eq!(s.shortcut_text("chamfer").as_deref(), Some("E"));
 
         s.clear("extrude");
         assert_eq!(s.shortcut_text("extrude"), None);
         s.reset("extrude");
         assert_eq!(s.shortcut_text("extrude").as_deref(), Some("E"));
-        assert_eq!(s.shortcut_text("shortcut_menu"), None, "the command that held E is cleared so E is not bound twice");
-        s.reset("shortcut_menu");
-        assert_eq!(s.shortcut_text("shortcut_menu").as_deref(), Some("S"));
+        assert_eq!(s.shortcut_text("chamfer"), None, "the command that held E is cleared so E is not bound twice");
+        s.reset("chamfer");
+        assert_eq!(s.shortcut_text("chamfer").as_deref(), Some("C"));
         s.reset_all(ShortcutPreset::Solidworks);
         assert!(s.overrides.is_empty());
         assert_eq!(s.preset, ShortcutPreset::Solidworks);
@@ -3589,7 +3610,7 @@ mod tests {
     #[test]
     fn swapped_and_reassigned_keys_survive_settings_reload() {
         let mut shortcuts = Shortcuts::default();
-        let conflict = shortcuts.assign("extrude", KeyChord::plain(Key::S)).unwrap_err();
+        let conflict = shortcuts.assign("extrude", KeyChord::plain(Key::F)).unwrap_err();
         shortcuts.swap(&conflict);
         shortcuts.clear("chamfer");
         shortcuts.assign("revolve", KeyChord::plain(Key::C)).unwrap();

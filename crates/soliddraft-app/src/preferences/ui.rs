@@ -780,7 +780,7 @@ fn shortcuts_page(p: &mut Preferences, ui: &mut egui::Ui) {
         egui::Frame::new().stroke(Stroke::new(1.5, theme::error())).inner_margin(6.0).corner_radius(4).show(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
                 ui.label(egui::RichText::new(conflict.message()).color(theme::error()));
-                if ui.button("Swap").clicked() {
+                if conflict.can_swap() && ui.button("Swap").clicked() {
                     p.swap_shortcut();
                 }
                 if ui.button("Cancel").clicked() {
@@ -841,6 +841,11 @@ fn shortcuts_page(p: &mut Preferences, ui: &mut egui::Ui) {
                     };
                     ui.label(rich).on_hover_text(c.doc);
                     ui.label(egui::RichText::new(c.default_scope().label()).color(theme::muted()));
+                    if !c.can_rebind() {
+                        ui.label(egui::RichText::new("Fixed").color(theme::muted()));
+                        ui.end_row();
+                        continue;
+                    }
                     ui.horizontal(|ui| {
                         ui.push_id(c.id, |ui| {
                             if p.shortcut_capture == Some(c.id) {

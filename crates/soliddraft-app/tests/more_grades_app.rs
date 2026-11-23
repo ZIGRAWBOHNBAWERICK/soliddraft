@@ -26,7 +26,7 @@ fn modelling_guide_names_the_grades_the_pinned_editors_offer() {
     let support_notes = include_str!("../../../docs/needs-catallax.md");
     let kernel = soliddraft_app::kernel();
     for field in [GradedField::LatticeRadius, GradedField::GyroidLevel] {
-        for kind in GradeKind::ALL {
+        for kind in NEW_GRADES {
             if kernel.field_grade(field, kind).is_ok() {
                 for doc in [grades, support_notes] {
                     assert!(doc.contains(kind.label()), "{field:?} offers {}", kind.label());

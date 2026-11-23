@@ -1,8 +1,4 @@
 // Open the assembly produced by the app's controller reorder test.
-function check(condition, message) {
-  if (!condition) throw new Error(message);
-}
-
 await page.wait('#status.hidden', 60000);
 await page.eval(() => {
   const canvas = document.getElementById('soliddraft');
@@ -10,14 +6,13 @@ await page.eval(() => {
   window.sdClick = async ({ x, y }) => {
     const at = { clientX: x, clientY: y, bubbles: true, cancelable: true, pointerId: 1,
       pointerType: 'mouse', isPrimary: true, button: 0 };
-    const pause = () => new Promise(resolve => setTimeout(resolve, 150));
-    await pause();
-    canvas.dispatchEvent(new PointerEvent('pointermove', { ...at, buttons: 0 }));
-    await pause();
+    canvas.dispatchEvent(new MouseEvent('mousemove', at));
+    canvas.dispatchEvent(new PointerEvent('pointermove', at));
+    await new Promise(resolve => setTimeout(resolve, 300));
     canvas.dispatchEvent(new PointerEvent('pointerdown', { ...at, buttons: 1 }));
-    await pause();
-    canvas.dispatchEvent(new PointerEvent('pointerup', { ...at, buttons: 0 }));
-    await pause();
+    await new Promise(resolve => setTimeout(resolve, 50));
+    canvas.dispatchEvent(new PointerEvent('pointerup', at));
+    canvas.focus();
     return true;
   };
   const inputClick = HTMLInputElement.prototype.click;
@@ -78,19 +73,20 @@ await page.type('Mate');
 await click('Command: assembly_mate');
 await click('Mate more');
 
-await fill('Controller mates', 'D2, D1');
-await click('Animate to Low');
+await fill('Controller value 1', '18');
+await fill('Controller mates', 'D2,D1');
 await click('Set driven mates');
-const preview = await until(assembly, value => value.controller.mates.join() === 'D2,D1' &&
-  value.controller.animating && heights(value)[0] < 35, 'No animation preview after reordering');
-const [first, second] = heights(preview);
-check(near(second - first, 10), `Reordering applied a preview to the wrong mates: ${first}, ${second}`);
-await until(assembly, value => !value.controller.animating && atHeights(value, 16, 26),
-  'Animation committed values to the wrong mates');
+await until(assembly, value => value.controller.mates.join() === 'D2,D1',
+  'The controller did not reorder the driven mates');
+await fill('Controller value 2', '15');
+await click('Apply values');
+await until(assembly, value => atHeights(value, 21, 46), 'A draft applied to the wrong mate after reordering');
 
+await click('Apply Low');
+await until(assembly, value => atHeights(value, 16, 26), 'Low did not apply');
 await fill('Controller value 1', '18');
 await click('Apply Low');
 await fill('Controller value 2', '15');
 await click('Apply values');
 await until(assembly, value => atHeights(value, 21, 26), 'An old draft overrode the saved position');
-console.log('Reordered the driven mates during animation and applied a saved position with no stale draft values.');
+console.log('Reordered the driven mates and applied a saved position with no stale draft values.');

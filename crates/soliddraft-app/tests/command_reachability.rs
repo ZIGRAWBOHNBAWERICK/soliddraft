@@ -124,13 +124,21 @@ fn part_contexts(pending: &mut BTreeSet<&str>) {
     find_and_dispatch(&mut state, pending);
 
     let mut state = AppState::new(soliddraft_app::new_document());
-    tool(&mut state, "sketch", json!({"plane":"top","shapes":[{"shape":"rectangle","center":[30,0,0],"width":4,"height":4}]}));
+    tool(
+        &mut state,
+        "sketch",
+        json!({"plane":"top","shapes":[{"shape":"rectangle","center":[30,0,0],"width":4,"height":4}]}),
+    );
     let sketch_id = state.doc.features[0].id;
     state.doc.selection = Some(Selection::Feature(sketch_id));
     find_and_dispatch(&mut state, pending);
     tool(&mut state, "extrude", json!({"sketch":"Sketch1","depth":4}));
     state.doc.new_body();
-    tool(&mut state, "sketch", json!({"plane":"top","shapes":[{"shape":"rectangle","center":[0,0,0],"width":4,"height":4}]}));
+    tool(
+        &mut state,
+        "sketch",
+        json!({"plane":"top","shapes":[{"shape":"rectangle","center":[0,0,0],"width":4,"height":4}]}),
+    );
     tool(&mut state, "extrude", json!({"sketch":"Sketch2","depth":4}));
     find_and_dispatch(&mut state, pending);
     state.doc.undo().unwrap();
@@ -169,7 +177,10 @@ fn file_contexts(dir: &std::path::Path, pending: &mut BTreeSet<&str>) {
         sha256: soliddraft_model::sha256_hex(&bytes),
         bytes,
     };
-    state.doc.apply(Command::AddFeature(FeatureKind::Scan(soliddraft_model::ScanFeature { source, fit: None }))).unwrap();
+    state
+        .doc
+        .apply(Command::AddFeature(FeatureKind::Scan(soliddraft_model::ScanFeature { source, fit: None })))
+        .unwrap();
     find_and_dispatch(&mut state, pending);
 
     let mut state = AppState::new(soliddraft_app::command_tools::board_bracket());
@@ -209,7 +220,8 @@ fn file_contexts(dir: &std::path::Path, pending: &mut BTreeSet<&str>) {
 
 #[test]
 fn every_app_command_is_reachable_without_legacy_menu_bar() {
-    let dir = std::env::temp_dir().join(format!("soliddraft-command-reachability-{}", soliddraft_document::DocumentId::new()));
+    let dir = std::env::temp_dir()
+        .join(format!("soliddraft-command-reachability-{}", soliddraft_document::DocumentId::new()));
     std::fs::create_dir_all(&dir).unwrap();
     soliddraft_app::file::set_config_dir(Some(dir.join("config")));
     for id in FILE_MENU_COMMANDS.iter().chain(TOP_BAR_COMMANDS.iter()).chain(LEGACY_MENU_COMMANDS) {

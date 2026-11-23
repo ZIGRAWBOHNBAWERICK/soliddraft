@@ -289,10 +289,8 @@ fn a_path_holds_a_position_and_steers_pitch_yaw_and_roll() {
     };
     let before = r.doc.assembly().clone();
     for flipped in [false, true] {
-        let negative = PathOptions {
-            position: SlotInput::Distance { distance: "-1 mm".into(), flipped },
-            ..Default::default()
-        };
+        let negative =
+            PathOptions { position: SlotInput::Distance { distance: "-1 mm".into(), flipped }, ..Default::default() };
         let result =
             r.doc.mate_path_with("P", &r.generator(0, GeneratorChoice::EndCap), &corner(&r, 1), &negative, false);
         assert_eq!(result.unwrap_err().code, RefusalCode::InvalidValue);

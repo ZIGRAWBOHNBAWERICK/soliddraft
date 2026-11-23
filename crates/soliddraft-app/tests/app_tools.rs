@@ -708,6 +708,17 @@ fn every_tool_runs_without_a_window_and_undoes_as_its_row_says() {
         "component": parts[1],
         "vertex": ["Boss-Extrude1 · Start cap", "Boss-Extrude1 · Side of line 2", "Boss-Extrude1 · Side of line 3"],
     });
+    let before = depths(&s.state);
+    for flipped in [false, true] {
+        let result = call_checked(
+            &mut AppTools { state: &mut s.state },
+            "assembly_mate_path",
+            json!({"name":"PA","path":plate,"point":corner,"mode":"distance","distance":"-1 mm","flipped":flipped}),
+            &Caller::Mcp { client: "path-distance".into() },
+        );
+        assert!(result.is_error && result.content.contains("-1 mm"), "{}", result.content);
+        assert_eq!(depths(&s.state), before);
+    }
     let pathed = s.call("assembly_mate_path", json!({ "name": "PA", "path": plate, "point": corner }));
     let row = pathed["assembly"]["mates"].as_array().unwrap().iter().find(|m| m["name"] == "PA").unwrap().clone();
     assert_eq!((row["kind"].as_str(), row["path"]["support"]["kind"].as_str()), (Some("path"), Some("outline")));
@@ -952,28 +963,61 @@ fn offset_session() -> Session {
     Session { state: AppState::new(soliddraft_app::new_document()), ran: BTreeSet::new(), dir: std::env::temp_dir() }
 }
 
-#[test]
-fn mate_controller_animation_keeps_driver_identity_when_reordered() {
-    use soliddraft_app::mates::{MateAction, apply};
-    use std::time::Duration;
-
+fn assembly_with_origin_block(dir: PathBuf) -> (Session, Value, u64) {
     let mut s = offset_session();
-    let browser_fixtures = std::env::var_os("SOLIDDRAFT_CONTROLLER_BROWSER_FIXTURES");
-    s.dir = browser_fixtures
-        .as_ref()
-        .map_or_else(|| s.dir.join(format!("soliddraft-controller-{}", DocumentId::new())), PathBuf::from);
+    s.dir = dir;
     std::fs::create_dir_all(&s.dir).unwrap();
-    s.call(
-        "sketch",
-        json!({"plane":"top","shapes":[{"shape":"rectangle","center":[0,0,0],"width":20,"height":10}]}),
-    );
+    s.call("sketch", json!({"plane":"top","shapes":[{"shape":"rectangle","center":[0,0,0],"width":20,"height":10}]}));
     s.call("extrude", json!({"sketch":"Sketch1","depth":6}));
     let part = s.path("controller-block.dwprt");
     s.call("save", json!({"path":part}));
     let made = s.call("make_assembly", json!({}));
     let base: u64 = made["assembly"]["components"][0]["path"].as_str().unwrap().parse().unwrap();
-    let top = json!({"component":base,"feature":"Boss-Extrude1","generator":"end_cap"});
     s.call("assembly_mate_origin", json!({"name":"Fixed","component":base,"align_axes":true}));
+    (s, part, base)
+}
+
+#[test]
+fn physical_dynamics_only_reports_an_accepted_push() {
+    let dir = std::env::temp_dir().join(format!("soliddraft-fixed-push-{}", DocumentId::new()));
+    let (mut s, part, _) = assembly_with_origin_block(dir);
+    let inserted =
+        s.call("insert_component", json!({"paths":[part],"placement":{"translation":[-30,0,0],"rotation":[0,0,0,1]}}));
+    s.call("assembly_physical_dynamics", json!({"phase":"begin","path":inserted["inserted"]}));
+    s.call(
+        "assembly_physical_dynamics",
+        json!({"phase":"update","placement":{"translation":[0,0,0],"rotation":[0,0,0,1]}}),
+    );
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    let reached = loop {
+        let report = s.call("assembly_physical_dynamics", json!({"phase":"poll"}));
+        if report["pending"] == false {
+            break report;
+        }
+        assert!(std::time::Instant::now() < deadline, "the collision worker did not finish");
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    };
+    assert_eq!(reached["motion"]["stopped"], true, "{reached}");
+    assert!(reached["motion"]["error"].is_null(), "{reached}");
+    assert!(reached["motion"]["pushed"].is_null(), "{reached}");
+    let shown = soliddraft_app::assembly::shown(&s.state);
+    assert_eq!(shown["components"][0]["translation"], json!([0.0, 0.0, 0.0]));
+    s.call("assembly_physical_dynamics", json!({"phase":"cancel"}));
+    std::fs::remove_dir_all(s.dir).unwrap();
+}
+
+#[test]
+fn mate_controller_animation_keeps_driver_identity_when_reordered() {
+    use soliddraft_app::mates::{MateAction, apply};
+    use std::time::Duration;
+
+    let browser_fixtures = std::env::var_os("SOLIDDRAFT_CONTROLLER_BROWSER_FIXTURES");
+    let dir = browser_fixtures.as_ref().map_or_else(
+        || std::env::temp_dir().join(format!("soliddraft-controller-{}", DocumentId::new())),
+        PathBuf::from,
+    );
+    let (mut s, part, base) = assembly_with_origin_block(dir);
+    let top = json!({"component":base,"feature":"Boss-Extrude1","generator":"end_cap"});
     for (name, distance) in [("D1", "10 mm"), ("D2", "20 mm")] {
         let inserted = s.call("insert_component", json!({"paths":[part]}));
         let id: u64 = inserted["inserted"].as_str().unwrap().parse().unwrap();
@@ -1006,6 +1050,14 @@ fn mate_controller_animation_keeps_driver_identity_when_reordered() {
     assert!(!session.animate().unwrap());
     let values = soliddraft_assembly::controller_values(&session.doc);
     assert_eq!((values["D1"], values["D2"]), (10.0, 20.0));
+
+    s.call("assembly_mate_controller", json!({"action":"apply","values":[40,30]}));
+    apply(&mut s.state, MateAction::ControllerAnimate("Low".into()));
+    s.call("assembly_mate_controller", json!({"action":"apply","values":[35,25]}));
+    let session = s.state.assembly.session.as_mut().unwrap();
+    assert!(!session.animate().unwrap());
+    let values = soliddraft_assembly::controller_values(&session.doc);
+    assert_eq!((values["D1"], values["D2"]), (25.0, 35.0));
     if browser_fixtures.is_none() {
         std::fs::remove_dir_all(s.dir).unwrap();
     }

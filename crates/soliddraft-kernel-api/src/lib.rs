@@ -1160,6 +1160,12 @@ pub trait Kernel: Send + Sync {
         Err(KernelError::Unsupported("draft".into()))
     }
 
+    /// Whether this body can be used as the source of a terminal field.
+    fn supports_field_source(&self, body: BodyId) -> bool {
+        let _ = body;
+        true
+    }
+
     /// Compiles a terminal lattice and its unproved display. Labelled export certifies
     /// closedness, connectivity and the requested two-sided distance bound.
     fn lattice(&self, tag: &OpTag, body: BodyId, params: &Lattice) -> KernelResult<OpResult> {

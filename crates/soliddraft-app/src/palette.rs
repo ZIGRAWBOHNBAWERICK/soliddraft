@@ -33,7 +33,11 @@ pub struct Palette {
 impl Palette {
     /// The commands the query finds in the context the app is in, best first.
     pub fn results(&self, state: &AppState) -> Vec<Match> {
-        find(&self.query, &state.commands, Context::of(state))
+        commands::search_here(&self.query, &state.commands, Context::of(state))
+            .into_iter()
+            .filter(|m| (m.command.shown)(state))
+            .take(SHOWN)
+            .collect()
     }
 
     /// Moves the choice up or down, stopping at the ends.
@@ -88,6 +92,8 @@ pub fn show(ctx: &egui::Context, state: &mut AppState) {
                         .desired_width(f32::INFINITY),
                 );
                 field.request_focus();
+                #[cfg(target_arch = "wasm32")]
+                crate::web::show_control("Command palette", field.rect);
                 if palette.query != query {
                     palette.selected = 0;
                 }
@@ -100,6 +106,8 @@ pub fn show(ctx: &egui::Context, state: &mut AppState) {
                     let button = egui::Button::selectable(i == palette.selected, c.label_in(state))
                         .shortcut_text(state.shortcuts.shortcut_text(c.id).unwrap_or_default());
                     let r = ui.add_enabled(c.is_enabled(state), button);
+                    #[cfg(target_arch = "wasm32")]
+                    crate::web::show_control(format!("Command: {}", c.id), r.rect);
                     let r = match c.path_in(state) {
                         Some(path) => r.on_hover_text(path),
                         None => r,

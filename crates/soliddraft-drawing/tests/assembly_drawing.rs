@@ -322,3 +322,31 @@ fn a_derived_view_refuses_an_assembly_revision_its_drawing_does_not_show() {
     // At the revision it shows, the same views come.
     new_assembly_projected(&drawing, &first, 0, front, FoldDirection::Right).unwrap();
 }
+
+#[test]
+fn a_rebuild_leaves_a_view_excluded_from_updates_as_it_was() {
+    let mut k = BoxKernel::new();
+    k.sections = true;
+    let first = model(b"r1", vec![base(&k), post(&k, "3", 10.0), post(&k, "4", 70.0)]);
+    let mut drawing = drawing_of(&first, "iso-a3", vec![StandardView::Front], Some(Scale::FULL));
+    let front = drawing.sheets[0].views[0].id;
+    // A section through the first post, cut from the front: computing it reads the front.
+    let at = Vec3::new(20.0, 30.0, 40.0);
+    let section = new_assembly_section(&drawing, &first, 0, front, at, false, false).unwrap();
+    let section_id = section.id;
+    apply(&mut drawing, &Command::PlaceView { sheet: 0, view: section }).unwrap();
+    drawing.sheets[0].views[0].excluded_from_update = true;
+    let kept = drawing.sheets[0].views[0].clone();
+    let balloons: Vec<_> = drawing.sheets[0].annotations.iter().filter(|a| a.view == front).cloned().collect();
+    assert!(!balloons.is_empty());
+
+    // The first post moves; the front keeps its line work and its balloons.
+    let second = later(&first, b"r2", vec![base(&k), post(&k, "3", 40.0), post(&k, "4", 70.0)]);
+    let updated = update_assembly_drawing(&drawing, &second).unwrap();
+    assert_eq!(updated.view(front).unwrap(), &kept, "the excluded view is not rewritten");
+    let after: Vec<_> = updated.sheets[0].annotations.iter().filter(|a| a.view == front).cloned().collect();
+    assert_eq!(after, balloons, "nor are its balloons");
+    // The section cut from it follows the assembly; the excluded view keeps the old revision.
+    assert_eq!(updated.view(section_id).unwrap().geometry.source_digest, second.digest().as_str());
+    assert_eq!(updated.view(front).unwrap().geometry.source_digest, first.digest().as_str());
+}

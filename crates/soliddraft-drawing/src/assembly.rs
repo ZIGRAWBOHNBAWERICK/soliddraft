@@ -19,7 +19,7 @@
 //! not. A balloon carries its row's item number, and points at a visible edge of one
 //! occurrence of that part.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use kurbo::BezPath;
 use serde::{Deserialize, Serialize};
@@ -421,7 +421,7 @@ fn add_balloons(drawing: &mut Drawing, model: &AssemblyModel<'_>, view: ViewId) 
 /// rows, each balloon moved onto its occurrence (dangling when the occurrence is gone or
 /// shows no edge in the view, its number from the BOM row its occurrence is now counted
 /// under), and a balloon on the first ballooned view for every new row. Pins the new
-/// revision. A view excluded from update keeps its line work.
+/// revision. A view excluded from update keeps its line work and its balloons.
 pub fn update_assembly_drawing(drawing: &Drawing, model: &AssemblyModel<'_>) -> Result<Drawing, DrawingError> {
     let mut out = drawing.clone();
     if let Some(r) = &model.reference {
@@ -429,6 +429,10 @@ pub fn update_assembly_drawing(drawing: &Drawing, model: &AssemblyModel<'_>) -> 
     }
     let item_of: BTreeMap<&str, u32> =
         model.parts.iter().zip(&model.items).map(|(p, i)| (p.component.as_str(), *i)).collect();
+    // Only these views are written. A view excluded from updates keeps its line work and
+    // its balloons, though a view derived from it is computed from it as it is now.
+    let included: HashSet<ViewId> =
+        drawing.sheets.iter().flat_map(|s| &s.views).filter(|v| !v.excluded_from_update).map(|v| v.id).collect();
     // Every view, parents first, once for each placement the views show.
     let mut contexts: HashMap<ViewId, ViewContext> = HashMap::new();
     for exploded in [false, true] {
@@ -457,7 +461,7 @@ pub fn update_assembly_drawing(drawing: &Drawing, model: &AssemblyModel<'_>) -> 
             t.bom = model.bom.clone();
         }
         let views: Vec<ViewId> = out.sheets[si].views.iter().map(|v| v.id).collect();
-        for id in views {
+        for id in views.into_iter().filter(|id| included.contains(id)) {
             let Some(ctx) = contexts.get(&id) else { continue };
             for a in out.sheets[si].annotations.iter_mut().filter(|a| a.view == id) {
                 let AnnotationKind::Balloon { item, occurrence } = &mut a.body else { continue };
@@ -512,7 +516,11 @@ pub fn update_assembly_drawing(drawing: &Drawing, model: &AssemblyModel<'_>) -> 
             bom: model.bom.clone(),
         });
     }
-    let first = out.sheets.first().and_then(|s| s.views.iter().find(|v| orientation(v).is_some())).map(|v| v.id);
+    let first = out
+        .sheets
+        .first()
+        .and_then(|s| s.views.iter().find(|v| orientation(v).is_some() && included.contains(&v.id)))
+        .map(|v| v.id);
     if let Some(view) = ballooned.or(first) {
         add_balloons(&mut out, model, view)?;
     }

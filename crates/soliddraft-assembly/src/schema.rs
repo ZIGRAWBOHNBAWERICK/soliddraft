@@ -42,7 +42,7 @@ use soliddraft_materials::{Appearance, AppearanceId, Snapshots, scope};
 use soliddraft_model::{Expression, ValueTable};
 use soliddraft_tessellation::Settings;
 
-use crate::configuration::{Configuration, ExplodeStep};
+use crate::configuration::{Configurations, ExplodeStep};
 use crate::mates::{Mate, MateEntry};
 use crate::path::{ComponentId, OccurrencePath, PatternId, SourceId, Step};
 use crate::placement::Placement;
@@ -79,9 +79,10 @@ pub struct Assembly {
     #[serde(default, skip_serializing_if = "Snapshots::is_empty")]
     pub snapshots: Snapshots,
     /// The configurations, by creation order; the truth holds the active one's state.
-    /// Empty for an assembly with only its default state.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub configurations: Vec<Configuration>,
+    /// Empty for an assembly with only its default state. Rows of another version are kept
+    /// as read ([`Configurations`]).
+    #[serde(default, skip_serializing_if = "Configurations::is_unused")]
+    pub configurations: Configurations,
     /// The active configuration's exploded view, applied in order. Display only.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub explode: Vec<ExplodeStep>,
@@ -374,7 +375,7 @@ impl Assembly {
             overrides: Vec::new(),
             appearances: Vec::new(),
             snapshots: Snapshots::default(),
-            configurations: Vec::new(),
+            configurations: Configurations::default(),
             explode: Vec::new(),
             display_states: Vec::new(),
             mates: Vec::new(),
@@ -751,6 +752,19 @@ mod tests {
         let s1 = a.add_source(r.clone());
         assert_eq!(a.add_source(r), s1, "the same document and configuration, one source");
         assert_ne!(a.add_source(part()), s1);
+    }
+
+    #[test]
+    fn configuration_rows_of_another_version_are_kept_as_read() {
+        let mut v = serde_json::to_value(sample()).unwrap();
+        v["configurations"] = json!([{"id": "long"}]);
+        let mut a: Assembly = serde_json::from_value(v.clone()).unwrap();
+        assert_eq!(serde_json::to_value(&a).unwrap(), v);
+        a.validate().unwrap();
+        // They are not this version's to change: adding a configuration is refused.
+        let refused = a.add_configuration("Open").unwrap_err();
+        assert!(refused.0.contains("another version"), "{}", refused.0);
+        assert_eq!(serde_json::to_value(&a).unwrap(), v, "the rows stay as read");
     }
 
     #[test]

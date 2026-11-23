@@ -23,6 +23,7 @@ pub(crate) fn describe(doc: &AssemblyDocument) -> Value {
         .collect();
     json!({
         "configurations": configurations,
+        "kept_from_another_version": truth.configurations.reserved().len(),
         "active_configuration": truth.active_configuration().map(|c| c.name.clone()),
         "explode": { "steps": steps, "shown": doc.is_exploded() },
     })

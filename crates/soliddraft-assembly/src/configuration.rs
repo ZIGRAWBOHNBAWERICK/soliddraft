@@ -19,9 +19,11 @@
 //! to the configuration, so each configuration has its own.
 
 use std::collections::HashSet;
+use std::ops::{Deref, DerefMut};
 
 use glam::DVec3;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde_json::Value;
 use soliddraft_document::ConfigurationId;
 use soliddraft_model::ValueTable;
 
@@ -57,6 +59,79 @@ impl Configuration {
     /// True for the active configuration.
     pub fn is_active(&self) -> bool {
         self.state.is_none()
+    }
+}
+
+/// An assembly's configurations, as its file lists them. Before configurations were
+/// defined the list was reserved and kept as read, so a file may hold rows this version
+/// cannot read. Then every row is kept as read, in order, and the assembly has no
+/// configurations of its own to show or change: adding one is refused, so a save writes
+/// the rows back as they came.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Configurations {
+    rows: Vec<Configuration>,
+    reserved: Vec<Value>,
+}
+
+impl Configurations {
+    /// The rows written by another version, kept as read; empty when every row is this
+    /// version's.
+    pub fn reserved(&self) -> &[Value] {
+        &self.reserved
+    }
+
+    /// True when the file lists no configuration rows of either kind.
+    pub fn is_unused(&self) -> bool {
+        self.rows.is_empty() && self.reserved.is_empty()
+    }
+}
+
+impl Deref for Configurations {
+    type Target = Vec<Configuration>;
+
+    fn deref(&self) -> &Vec<Configuration> {
+        &self.rows
+    }
+}
+
+impl DerefMut for Configurations {
+    fn deref_mut(&mut self) -> &mut Vec<Configuration> {
+        &mut self.rows
+    }
+}
+
+impl<'a> IntoIterator for &'a Configurations {
+    type Item = &'a Configuration;
+    type IntoIter = std::slice::Iter<'a, Configuration>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.rows.iter()
+    }
+}
+
+impl<'a> IntoIterator for &'a mut Configurations {
+    type Item = &'a mut Configuration;
+    type IntoIter = std::slice::IterMut<'a, Configuration>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.rows.iter_mut()
+    }
+}
+
+impl Serialize for Configurations {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        if self.reserved.is_empty() { self.rows.serialize(serializer) } else { self.reserved.serialize(serializer) }
+    }
+}
+
+impl<'de> Deserialize<'de> for Configurations {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let read = Vec::<Value>::deserialize(deserializer)?;
+        let rows: Result<Vec<Configuration>, _> = read.iter().cloned().map(serde_json::from_value).collect();
+        Ok(match rows {
+            Ok(rows) => Configurations { rows, reserved: Vec::new() },
+            Err(_) => Configurations { rows: Vec::new(), reserved: read },
+        })
     }
 }
 
@@ -249,6 +324,13 @@ impl Assembly {
     /// and returns its id. The first one added also adds [`DEFAULT_NAME`], active, for the
     /// state the assembly had before.
     pub fn add_configuration(&mut self, name: &str) -> Result<u32, Invalid> {
+        if !self.configurations.reserved().is_empty() {
+            return Err(Invalid(
+                "the file holds configurations written by another version of SolidDraft; they are kept as saved, \
+                 and none can be added beside them"
+                    .into(),
+            ));
+        }
         let name = name.trim();
         check_name(self, name, None)?;
         if self.components.len() > MAX_CONFIGURED_COMPONENTS {

@@ -367,8 +367,8 @@ struct TruthOut<'a> {
     appearances: &'a [OccurrenceAppearance],
     #[serde(skip_serializing_if = "Snapshots::is_empty")]
     snapshots: &'a Snapshots,
-    #[serde(skip_serializing_if = "<[_]>::is_empty")]
-    configurations: &'a [crate::configuration::Configuration],
+    #[serde(skip_serializing_if = "no_configurations")]
+    configurations: &'a crate::configuration::Configurations,
     #[serde(skip_serializing_if = "<[_]>::is_empty")]
     explode: &'a [crate::configuration::ExplodeStep],
     #[serde(skip_serializing_if = "<[_]>::is_empty")]
@@ -384,6 +384,10 @@ struct TruthOut<'a> {
 
 fn is_first_id(id: &u32) -> bool {
     *id == 1
+}
+
+fn no_configurations(c: &&crate::configuration::Configurations) -> bool {
+    c.is_unused()
 }
 
 fn hash_truth(json: Value, bulk: Option<&[u8]>) -> ContentHash {

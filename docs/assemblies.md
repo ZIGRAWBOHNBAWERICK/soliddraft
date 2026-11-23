@@ -130,7 +130,8 @@ configuration keeps its own state in its row:
   `Default`, active, for the state the assembly had; the new one starts as a copy of it.
 - Activating a configuration swaps: the truth's state goes into the row that was active
   and the chosen row's state into the truth, as one undo step. A component inserted while
-  another configuration was active keeps its state; a value is matched by id.
+  another configuration was active keeps its state; a value is matched by id, and its
+  expression keeps reading the values it read when saved, under their names now.
 - Every other edit changes the active configuration. Deleting a component takes it out of
   every configuration, and Undo brings it back.
 - Names are unique. The active configuration cannot be deleted; with one row left the
@@ -139,6 +140,9 @@ configuration keeps its own state in its row:
 - The geometry hash leaves out the other configurations, the exploded view and their id
   counter, so the active configuration decides the assembly's shape, and adding a
   configuration or an explode step leaves it as it was.
+- The list was reserved before configurations were defined. A file whose rows this version
+  cannot read keeps every row as read and shows no configurations; adding one is refused,
+  so saving writes the rows back unchanged.
 
 Each component can also show one of its own document's configurations
 (`AssemblyDocument::set_configuration`, the `assembly_component_configuration` tool):

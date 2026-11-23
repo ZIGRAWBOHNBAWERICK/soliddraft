@@ -133,7 +133,7 @@ pub(crate) struct Configured {
     components: Vec<Component>,
     overrides: Vec<Override>,
     values: ValueTable,
-    configurations: Vec<crate::configuration::Configuration>,
+    configurations: crate::configuration::Configurations,
     explode: Vec<crate::configuration::ExplodeStep>,
     next_configured_id: u32,
 }

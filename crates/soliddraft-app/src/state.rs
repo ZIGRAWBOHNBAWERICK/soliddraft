@@ -1395,16 +1395,20 @@ pub struct AppState {
 
 impl AppState {
     pub fn tree_shown(&self) -> bool {
-        if self.assembly.is_active() {
+        let doc_shown = if self.assembly.is_active() {
             self.layout.suite.assembly
         } else if self.drawing.is_active() || self.drawing.new.is_some() {
             self.layout.suite.drawing
         } else {
             self.layout.suite.part
-        }
+        };
+        doc_shown && self.layout.panes.any_open()
     }
 
     pub fn show_tree(&mut self, shown: bool) {
+        if shown && !self.layout.panes.any_open() {
+            self.layout.panes = crate::panels::SidePanes::default();
+        }
         if self.assembly.is_active() {
             self.layout.suite.assembly = shown;
         } else if self.drawing.is_active() || self.drawing.new.is_some() {
@@ -1414,22 +1418,42 @@ impl AppState {
         }
     }
 
-    /// Whether the side area is shown with `pane` in it.
+    /// Whether `pane` is currently open in the stacked side column.
     pub fn pane_shown(&self, pane: crate::panels::Pane) -> bool {
-        self.tree_shown() && self.layout.pane == pane
+        self.tree_shown() && self.layout.panes.is_open(pane)
     }
 
-    /// Shows the side area with `pane` in it.
+    /// Opens `pane` in the stacked side column (leaving other open panes stacked beside it).
     pub fn show_pane(&mut self, pane: crate::panels::Pane) {
+        self.layout.panes.set(pane, true);
         self.layout.pane = pane;
         self.show_tree(true);
     }
 
-    /// What clicking the strip icon of `pane` does: it hides the side area when that pane
-    /// already shows there, and shows the pane otherwise.
-    pub fn toggle_pane(&mut self, pane: crate::panels::Pane) {
-        if self.pane_shown(pane) {
+    /// Closes a single `pane` in the stacked side column; if none remain open, clears the column.
+    pub fn close_pane(&mut self, pane: crate::panels::Pane) {
+        self.layout.panes.set(pane, false);
+        if !self.layout.panes.any_open() {
             self.show_tree(false);
+        }
+    }
+
+    /// Closes every open pane, clearing the side column completely.
+    pub fn clear_panes(&mut self) {
+        self.layout.panes.clear();
+        self.show_tree(false);
+    }
+
+    /// Toggles `pane` on or off in the stacked side column. When the column is hidden
+    /// (e.g. after F9), clicking a rail button opens just that pane.
+    pub fn toggle_pane(&mut self, pane: crate::panels::Pane) {
+        if !self.tree_shown() {
+            self.layout.panes.clear();
+            self.layout.panes.set(pane, true);
+            self.layout.pane = pane;
+            self.show_tree(true);
+        } else if self.layout.panes.is_open(pane) {
+            self.close_pane(pane);
         } else {
             self.show_pane(pane);
         }

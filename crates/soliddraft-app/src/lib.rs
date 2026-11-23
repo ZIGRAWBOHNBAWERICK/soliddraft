@@ -29,6 +29,7 @@ pub mod form_bar;
 pub mod geometry_message;
 mod grid;
 pub mod icons;
+pub mod history_panel;
 pub mod import;
 pub mod interference;
 pub mod journal;

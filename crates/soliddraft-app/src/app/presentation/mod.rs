@@ -10,7 +10,7 @@ use crate::theme;
 use egui::Key;
 
 use super::workspace::SolidDraftApp;
-use docks::{pane, strip};
+use docks::pane;
 
 impl SolidDraftApp {
     /// Runs the commands whose shortcuts were pressed, as the command registry binds
@@ -117,35 +117,21 @@ impl SolidDraftApp {
         other.unwrap_or_else(|| part_status(st))
     }
 
-    /// The side area: a resizable panel while shown, a strip with its title while
-    /// hidden. Dragging the edge past the minimum hides it; clicking the strip,
-    /// dragging it outward or double-clicking the edge shows it again.
+    /// The D1 Clear Bench single side column: resizable horizontally while any pane is
+    /// toggled on, and completely absent (0px) when all panes are off.
     pub(super) fn side_panel(&mut self, root: &mut egui::Ui, side: Side, window_width: f32) {
+        if !self.state.tree_shown() {
+            return;
+        }
         let frame = egui::Frame::new().fill(theme::panel()).inner_margin(egui::Margin::ZERO);
-        let make = |id: egui::Id| match side {
-            Side::Tree => egui::Panel::left(id),
-        };
-        let collapsed = make(side.strip_id()).resizable(true).exact_size(panels::STRIP_WIDTH).frame(frame);
-        let expanded = make(side.panel_id())
-            .resizable(true)
-            .default_size(self.state.layout.panel(side).width)
-            .size_range(side.min_width()..=self.state.layout.max_width(side, window_width))
-            .frame(frame);
-        let title = match side {
-            Side::Tree if self.state.drawing.is_active() => "Drawing tree",
-            _ => side.title(),
-        };
-        let mut shown = self.state.tree_shown();
-        let mut open_requested = false;
         let state = &mut self.state;
-        egui::Panel::show_switched(root, &mut shown, collapsed, expanded, |ui, expanded| {
-            if expanded {
-                pane(ui, state);
-            } else if strip(ui, side, title, &state.shortcuts) {
-                open_requested = true;
-            }
-        });
-        self.state.show_tree(shown || open_requested);
+        egui::Panel::left(side.panel_id())
+            .resizable(true)
+            .default_size(state.layout.panel(side).width)
+            .size_range(side.min_width()..=state.layout.max_width(side, window_width))
+            .frame(frame)
+            .show_separator_line(false)
+            .show(root, |ui| pane(ui, state));
         let panel = self.state.layout.panel_mut(side);
         if let Some(s) = egui::PanelState::load(root.ctx(), side.panel_id()) {
             panel.width = s.outer_rect.width();

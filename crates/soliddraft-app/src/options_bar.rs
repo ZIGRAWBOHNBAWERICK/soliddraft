@@ -8,15 +8,36 @@ use crate::state::{AppAction, AppState};
 use crate::theme;
 use egui::{Sense, vec2};
 
-pub const HEIGHT: f32 = 46.0;
+pub const HEIGHT: f32 = theme::clear_bench::SPACING.options_height;
+
+/// Whether the contextual inline form / options bar needs to appear on this frame.
+/// In D1 Clear Bench idle part mode, the strip hides so the viewport gets maximum room.
+pub fn is_shown(state: &AppState) -> bool {
+    state.editor.is_some()
+        || state.in_sketch()
+        || state.measure.open
+        || state.pmi.open
+        || (state.assembly.is_active() && state.assembly.mate.open)
+        || state.drawing.is_active()
+        || state.drawing.new.is_some()
+}
 
 pub fn panel(root: &mut egui::Ui, state: &mut AppState) {
     // A face picked while the details sheet is closed is still a pick.
     crate::pmi::panel::follow_selection(state);
+    if !is_shown(state) {
+        state.form_bar.reset();
+        return;
+    }
+    let fill = if state.editor.is_some() || state.in_sketch() || state.assembly.mate.open {
+        theme::form_bg()
+    } else {
+        theme::ribbon()
+    };
     egui::Panel::top("options_bar")
         .exact_size(HEIGHT)
         .resizable(false)
-        .frame(egui::Frame::new().fill(theme::chrome()).inner_margin(egui::Margin::symmetric(8, 6)))
+        .frame(egui::Frame::new().fill(fill).inner_margin(egui::Margin::symmetric(8, 5)))
         .show(root, |ui| show(ui, state));
 }
 
@@ -90,29 +111,6 @@ fn show(ui: &mut egui::Ui, state: &mut AppState) {
             vec2(ui.available_width(), 30.0),
             egui::Layout::right_to_left(egui::Align::Center),
             |ui| {
-                if ui
-                    .add_sized(
-                        vec2(116.0, 30.0),
-                        egui::Button::new(egui::RichText::new("Close sketch").color(theme::edit_suite::ON_DANGER))
-                            .fill(theme::edit_suite::DANGER),
-                    )
-                    .on_hover_text("Close sketch (Enter)")
-                    .clicked()
-                {
-                    state.push(AppAction::ExitSketch);
-                }
-                if let Some(sketch) = &state.sketch {
-                    let (text, color) = match &sketch.sketch.status {
-                        crate::sketch::SolveStatus::Empty => ("Empty", theme::muted()),
-                        crate::sketch::SolveStatus::UnderDefined => {
-                            ("Under defined", theme::edit_suite::UNDER_DEFINED_LABEL)
-                        }
-                        crate::sketch::SolveStatus::FullyDefined => ("Fully defined", theme::ink()),
-                        crate::sketch::SolveStatus::OverDefined { .. } => ("Over defined", theme::error()),
-                        crate::sketch::SolveStatus::Failed(_) => ("Solver failed", theme::error()),
-                    };
-                    ui.colored_label(color, text);
-                }
                 let more = ui.button("Sketch options");
                 sheet_anchor = more.rect;
                 if more.clicked() {

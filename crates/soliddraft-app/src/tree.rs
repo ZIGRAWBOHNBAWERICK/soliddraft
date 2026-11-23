@@ -68,6 +68,11 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
         color,
     );
     ui.painter().hline(head.x_range(), head.bottom() - 0.5, Stroke::new(1.0, theme::line()));
+    show_contents(ui, state);
+}
+
+/// The feature tree body without the standalone header (used inside the D1 Browser pane).
+pub fn show_contents(ui: &mut egui::Ui, state: &mut AppState) {
 
     let mut actions = Vec::new();
     egui::ScrollArea::vertical().id_salt("tree").auto_shrink([false, false]).show(ui, |ui| {
@@ -179,6 +184,22 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
         );
         if can_assign && material_row.clicked() {
             actions.push(AppAction::ShowMaterial);
+        }
+        // Mount point for the Appearances lane in the Browser tree.
+        let can_appearance = crate::commands::get("appearance").is_some_and(|command| command.is_enabled(state));
+        let appearance_row = row(
+            ui,
+            RowSpec {
+                indent: 0,
+                icon: Icon::Display,
+                name: "Appearances",
+                sub: "Part / faces",
+                dim: !can_appearance,
+                ..RowSpec::plain()
+            },
+        );
+        if can_appearance && appearance_row.clicked() {
+            actions.push(AppAction::ShowAppearance);
         }
         for (key, _) in state.doc.model().live_bodies() {
             let label = state.doc.body_name(key);

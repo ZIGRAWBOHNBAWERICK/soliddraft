@@ -178,7 +178,7 @@ try {
   await tool('Hole table');
   await pick('Top view', 25, 23, 10);
   const [x, y] = await model('Top view', 25, 23, 10);
-  await click([x + 150, y - 70]);
+  await click([x + 174, y - 70]);
   await sheet('hole table', s => s.tables === 1);
   console.error('Placed all four annotations.');
   await key('z', 'KeyZ', 90, 2, 'z');
@@ -202,7 +202,7 @@ try {
   await sheet('smart dimension tool', s => s.tool === 'Smart dimension');
   const [hx, hy] = await model('Top view', 29.5, 23, 10);
   await click([hx, hy]);
-  await click([hx - 34, hy + 23]);
+  await click([hx + 28, hy - 20]);
   await sheet('diameter dimension', s => s.annotations === initial.annotations + 4);
   fs.renameSync(saved.file, path.join(out, 'before-reopen.dwdrw'));
   const final = await save();

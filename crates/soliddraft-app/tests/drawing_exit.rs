@@ -1058,6 +1058,6 @@ fn drawing_annotations_follow_the_part_through_save_and_reopen() {
     check_sheet(&app, 11.);
 
     // Add a diameter dimension to a hole in the reopened drawing.
-    let id = smart_dimension(&mut app, top, &[Vec3::new(29.5, 23., 11.)], vec2(-34., 23.));
+    let id = smart_dimension(&mut app, top, &[Vec3::new(29.5, 23., 11.)], vec2(28., -20.));
     assert_eq!(value_of(&app, id), (9.0, AnnotationState::Ok));
 }

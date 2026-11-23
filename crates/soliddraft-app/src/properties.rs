@@ -169,6 +169,8 @@ pub(crate) fn size_input(
         )
     });
     r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, format!("{label} value")));
+    #[cfg(target_arch = "wasm32")]
+    crate::web::show_control(format!("{label} value"), r.rect);
     if r.changed() {
         match crate::fillet_collect::parse_size(&text, &what) {
             Ok(v) => {

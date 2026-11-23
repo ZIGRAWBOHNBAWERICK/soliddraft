@@ -897,6 +897,24 @@ jobs:
           chrome-devtools-axi emulate --viewport 1400x813x1
           chrome-devtools-axi open 'http://127.0.0.1:8793/?demo'
           chrome-devtools-axi run < ci/browser-import-fields.js
+      - name: Apply a fillet refusal correction in Chromium
+        env:
+          CHROME_DEVTOOLS_AXI_SESSION: refusal-assistant
+          CHROME_DEVTOOLS_AXI_EXECUTABLE_PATH: /usr/bin/google-chrome
+          CHROME_DEVTOOLS_AXI_CHROME_ARGS: --no-sandbox --enable-unsafe-webgpu --enable-unsafe-swiftshader --use-angle=swiftshader
+        run: |
+          export PATH="$RUNNER_TEMP/browser-tools/node_modules/.bin:$PATH"
+          export CHROME_DEVTOOLS_AXI_MCP_PATH="$RUNNER_TEMP/browser-tools/node_modules/chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js"
+          python3 -m http.server 8776 --bind 127.0.0.1 --directory target/web-dist > "$RUNNER_TEMP/refusal-assistant-server.log" 2>&1 &
+          server=$!
+          trap 'chrome-devtools-axi stop; kill "$server"' EXIT
+          if ! chrome-devtools-axi open about:blank; then
+            chrome-devtools-axi stop || true
+            chrome-devtools-axi open about:blank
+          fi
+          chrome-devtools-axi emulate --viewport 1400x813x1
+          chrome-devtools-axi open 'http://127.0.0.1:8776/'
+          chrome-devtools-axi run < ci/browser-refusal-assistant.js
       - name: Detect page-thread regressions in bracket edits in Chromium
         env:
           CHROME_DEVTOOLS_AXI_SESSION: edit-off-thread

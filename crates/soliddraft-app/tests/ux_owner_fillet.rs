@@ -1,6 +1,7 @@
 //! The owner's fillet in the real app: the pocket rim's six edges picked in the viewport,
-//! previewed and built at R2, and R5, past the radius that fits, refused in plain words
-//! that name the face it reaches. Frames land under
+//! previewed and built at R2. R5 is refused in plain words that name the face it reaches.
+//! The user can apply the suggested radius, save, reopen and use a face in a later feature.
+//! Frames land under
 //! `target/ribbon-acceptance/ux-owner-fillet/`.
 
 use std::time::{Duration, Instant};
@@ -124,6 +125,31 @@ fn radius(app: &mut App, r: f64) {
     settle(app);
 }
 
+fn accept_radius(app: &mut App) -> f64 {
+    let shown = texts(app);
+    let label = shown
+        .iter()
+        .find(|t| t.starts_with("Apply ") && t.ends_with(" mm radius"))
+        .unwrap_or_else(|| panic!("the refusal offers one radius to apply: {shown:?}"));
+    let offered: f64 = label.trim_start_matches("Apply ").trim_end_matches(" mm radius").parse().unwrap();
+    assert!((3.9..=4.0).contains(&offered), "the rounded wall limits the radius to 4 mm: {offered}");
+    let button = ribbon::button_rect(app, label, ribbon::window(app));
+    ribbon::click_at(app, button.center());
+    settle(app);
+    assert!(app.state().state.editor.is_none(), "the accepted proposal closes the editor");
+    offered
+}
+
+fn fillet_radius(doc: &Document, id: u64) -> f64 {
+    let feature = doc.feature(id).expect("the fillet is in the tree");
+    assert_eq!(feature.status, FeatureStatus::Ok);
+    assert_eq!(doc.faces.iter().filter(|face| face.feature == id).count(), 6, "one round per picked edge");
+    match &feature.kind {
+        FeatureKind::Fillet(params) => params.radius,
+        kind => panic!("expected a fillet, got {kind:?}"),
+    }
+}
+
 #[test]
 fn the_owner_rims_his_pocket_at_r2_and_reads_why_r5_does_not_fit() {
     let case = ribbon::case("ux-owner-fillet");
@@ -137,6 +163,18 @@ fn the_owner_rims_his_pocket_at_r2_and_reads_why_r5_does_not_fit() {
         case.frame(app, "01-owner-part");
 
         pick_rim(app, &rim);
+        radius(app, 5.0);
+        let doc = &app.state().state.doc;
+        assert_eq!(doc.features.len(), 4, "the refused creation kept the base intact");
+        let offered = accept_radius(app);
+        let doc = &app.state().state.doc;
+        let fillet = doc.features.last().unwrap();
+        assert_eq!(fillet_radius(doc, fillet.id), offered);
+        assert!(fillet.via_assistant, "the applied change came from an assistant proposal");
+        app.state_mut().state.doc.undo().unwrap();
+        settle(app);
+
+        pick_rim(app, &rim);
         radius(app, 2.0);
         let editor = app.state().state.editor.as_ref().unwrap();
         assert!(editor.preview.result.is_some(), "R2 previews the rounded rim: {:?}", editor.error);
@@ -147,20 +185,67 @@ fn the_owner_rims_his_pocket_at_r2_and_reads_why_r5_does_not_fit() {
         let doc = &app.state().state.doc;
         let fillet = doc.features.last().unwrap();
         assert!(matches!(fillet.kind, FeatureKind::Fillet(_)) && fillet.status == FeatureStatus::Ok);
+        let id = fillet.id;
+        let kept = doc.model().part_json();
+        let depth = doc.undo_depth();
         case.frame(app, "03-rim-r2-built");
 
         // R5 is past the 4 mm the rounded side's thin wall leaves: the panel says which
         // face the fillet would reach and the radius that fits, and the part stays.
-        app.state_mut().state.doc.undo().unwrap();
+        ribbon::run_command(app, "edit_feature");
         settle(app);
-        pick_rim(app, &rim);
         radius(app, 5.0);
+        let confirm = ribbon::button_rect(app, "OK", ribbon::window(app));
+        ribbon::click_at(app, confirm.center());
+        settle(app);
         let shown = texts(app);
         let why = shown
             .iter()
             .find(|t| t.starts_with("This fillet runs into "))
             .unwrap_or_else(|| panic!("the panel names the face R5 reaches: {shown:?}"));
         assert!(why.contains("Try a radius under"), "{why}");
+        assert!(why.contains("Boss-Extrude1 ·"), "{why}");
+        assert_eq!(app.state().state.doc.undo_depth(), depth);
+        let original = app.state().state.doc.feature(id).unwrap();
+        assert!(matches!(&original.kind, FeatureKind::Fillet(params) if params.radius == 2.0));
         case.frame(app, "04-rim-r5-refused");
+
+        let offered = accept_radius(app);
+        let doc = &app.state().state.doc;
+        assert_eq!(fillet_radius(doc, id), offered);
+        assert_eq!(doc.undo_depth(), depth + 1);
+        assert_eq!(doc.features.len(), 5);
+        app.state_mut().state.doc.undo().unwrap();
+        assert_eq!(app.state().state.doc.model().part_json(), kept);
+        app.state_mut().state.doc.redo().unwrap();
+        settle(app);
+        assert_eq!(fillet_radius(&app.state().state.doc, id), offered);
+        case.frame(app, "05-rim-corrected");
+
+        let path = case.path("accepted-radius.dwprt");
+        let caller = Caller::Mcp { client: "ux-owner-fillet".into() };
+        let tool = |app: &mut App, tool, args| {
+            let out = call_checked(&mut AppTools { state: &mut app.state_mut().state }, tool, args, &caller);
+            assert!(!out.is_error, "{tool}: {}", out.content);
+        };
+        tool(app, "save", json!({"path": path}));
+        tool(app, "new_part", json!({}));
+        tool(app, "open", json!({"path": path}));
+        let doc = &app.state().state.doc;
+        assert_eq!(fillet_radius(doc, id), offered);
+        let cut = doc.features.iter().find(|f| f.name == "Cut-Extrude1").unwrap();
+        let floor = doc
+            .faces
+            .iter()
+            .filter(|f| f.feature == cut.id && f.surface == soliddraft_kernel_api::SurfaceKind::Plane)
+            .min_by(|a, b| a.centroid.z.total_cmp(&b.centroid.z))
+            .expect("the reopened pocket has its planar floor");
+        let source = format!("{} · {}", cut.name, floor.label);
+        tool(app, "reference_plane", json!({"plane": source, "offset": 2}));
+        let doc = &app.state().state.doc;
+        let plane = doc.features.last().unwrap();
+        assert!(matches!(plane.kind, FeatureKind::ReferencePlane(_)));
+        assert_eq!(plane.status, FeatureStatus::Ok);
+        assert_eq!(fillet_radius(doc, id), offered);
     });
 }

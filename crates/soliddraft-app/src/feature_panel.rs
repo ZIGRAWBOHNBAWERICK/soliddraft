@@ -101,6 +101,9 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
     let spec = feature_forms::spec(&editor.params, context.planes(), context.free_sketches());
     let title = editor.title();
     let message = feature_forms::message(editor);
+    // A refused fillet offers the largest radius the kernel would build.
+    let suggested = editor.suggested_fillet_radius();
+    let correction = suggested.map(|radius| format!("Apply {radius} mm radius"));
     // Each form, and each feature edited, opens scrolled to its top.
     let target = editor.target;
     let mut actions = Vec::new();
@@ -117,8 +120,11 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
         };
         egui::Frame::new().stroke(stroke).corner_radius(theme::RADIUS).inner_margin(margin).show(ui, |ui| {
             ui.set_width(ui.available_width());
-            if let Some(message) = &message {
-                ui.colored_label(theme::error(), message);
+            if let Some(message) = &message
+                && crate::form_bar::show_error(ui, message, correction.as_deref())
+                && let Some(radius) = suggested
+            {
+                actions.push(AppAction::ApplySuggestedFilletRadius(radius));
             }
         });
         let above = ui.cursor().top() - drawn.top();

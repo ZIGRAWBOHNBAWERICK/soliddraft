@@ -493,6 +493,9 @@ pub enum Line {
         /// Radius, mm.
         radius: f64,
     },
+    /// A radius correction for the editor's existing picks.
+    #[serde(skip)]
+    RefusedFillet { target: Option<FeatureId>, params: FilletParams },
     /// Bevels edges.
     Chamfer {
         /// Edge names.
@@ -2015,6 +2018,15 @@ impl Line {
                 let params = FilletParams { edges, radius: positive("radius", *radius)? };
                 run.apply(doc, Command::AddFillet { params })?;
             }
+            Line::RefusedFillet { target, params } => {
+                let mut params = params.clone();
+                params.radius = positive("radius", params.radius)?;
+                let command = match target {
+                    Some(id) => Command::EditFillet { id: *id, params },
+                    None => Command::AddFillet { params },
+                };
+                run.apply(doc, command)?;
+            }
             Line::Chamfer { edges, distance, other_distance } => {
                 let edges = edges.iter().map(|e| edge_ref(doc, e)).collect::<Result<Vec<_>, _>>()?;
                 let params = ChamferParams {
@@ -2170,6 +2182,7 @@ impl Line {
                 | Line::Sweep(_)
                 | Line::Cut { .. }
                 | Line::Fillet { .. }
+                | Line::RefusedFillet { target: None, .. }
                 | Line::Chamfer { .. }
                 | Line::Hole { .. }
                 | Line::LinearPattern { .. }
@@ -2204,6 +2217,8 @@ impl Line {
             Line::EditRevolve { .. } => "edit_revolve",
             Line::Cut { .. } => "cut",
             Line::Fillet { .. } => "fillet",
+            Line::RefusedFillet { target: None, .. } => "fillet",
+            Line::RefusedFillet { target: Some(_), .. } => "edit_fillet",
             Line::Chamfer { .. } => "chamfer",
             Line::EditExtrude { .. } => "edit_extrude",
             Line::EditCut { .. } => "edit_cut",
@@ -2447,6 +2462,7 @@ impl Line {
                 (format!("Edit {feature}"), end(*through_all, *depth, *flip))
             }
             Line::EditFillet { feature, radius } => (format!("Edit {feature}"), format!("R{}", fmt_mm(*radius))),
+            Line::RefusedFillet { params, .. } => ("Fillet radius".into(), format!("{} mm", params.radius)),
             Line::EditChamfer { feature, distance, other_distance } => {
                 (format!("Edit {feature}"), format!("{} mm", chamfer_size(*distance, *other_distance)))
             }
@@ -2625,8 +2641,8 @@ pub struct Proposal {
     pub summary: String,
     /// The recipe lines.
     pub lines: Vec<Line>,
-    /// Who proposed it: the user's prompt and the model, or the MCP client.
-    pub origin: Caller,
+    /// Tool caller, or the local refusal assistant.
+    origin: Option<Caller>,
     /// What it does to the part, as rows for the card.
     pub rows: Vec<(String, String)>,
     /// The part as it would be after the proposal.
@@ -2644,8 +2660,9 @@ impl Proposal {
 
     fn origin_text(&self) -> String {
         match &self.origin {
-            Caller::Assistant { prompt, model } => format!("assistant, model {model}, prompt {prompt:?}"),
-            Caller::Mcp { client } => format!("MCP client {client}"),
+            Some(Caller::Assistant { prompt, model }) => format!("assistant, model {model}, prompt {prompt:?}"),
+            Some(Caller::Mcp { client }) => format!("MCP client {client}"),
+            None => "refusal assistant".into(),
         }
     }
 }
@@ -2698,6 +2715,35 @@ impl ProposalBook {
         summary: &str,
         lines: Vec<Line>,
         origin: Caller,
+        preview: bool,
+    ) -> Result<(String, Value), String> {
+        self.propose_from(doc, summary, lines, Some(origin), preview)
+    }
+
+    /// Applies the radius selected in the refusal. The proposal first checks the
+    /// corrected feature and its downstream features on a scratch copy.
+    pub(crate) fn accept_fillet_radius(
+        &mut self,
+        doc: &mut Document,
+        target: Option<FeatureId>,
+        params: FilletParams,
+    ) -> Result<(), String> {
+        let summary = format!("Use {} mm fillet radius", params.radius);
+        let lines = vec![Line::RefusedFillet { target, params }];
+        let (id, _) = self.propose_from(doc, &summary, lines, None, false)?;
+        let result = self.apply(doc, &id).map(|_| ());
+        if result.is_err() {
+            let _ = self.discard(&id);
+        }
+        result
+    }
+
+    fn propose_from(
+        &mut self,
+        doc: &Document,
+        summary: &str,
+        lines: Vec<Line>,
+        origin: Option<Caller>,
         preview: bool,
     ) -> Result<(String, Value), String> {
         if lines.is_empty() {

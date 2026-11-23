@@ -303,7 +303,7 @@ fn more_card(
         .align(egui::RectAlign::BOTTOM_START)
         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
         .show(|ui| {
-            ui.set_min_width(230.0);
+            ui.set_width(240.0);
             ui.label(
                 egui::RichText::new(group.to_uppercase()).family(theme::semibold()).size(10.0).color(theme::muted()),
             );
@@ -322,7 +322,7 @@ fn menu_row(ui: &mut egui::Ui, state: &AppState, command: &'static CommandSpec) 
     let enabled = command.is_enabled(state);
     let active = (command.active)(state);
     let accessible = label(command, state);
-    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width().max(230.0), 26.0), Sense::hover());
+    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 26.0), Sense::hover());
     let response = ui.interact(
         rect,
         ui.id().with(("ribbon_tool", command.id)),

@@ -183,6 +183,13 @@ paths = ["crates/soliddraft-app/src/palette.rs"]
 module = ["palette"]
 
 [[areas]]
+name = "app.shortcut_menu"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/shortcut_menu.rs"]
+module = ["shortcut_menu"]
+
+[[areas]]
 name = "app.panels"
 owner = "core"
 crate = "soliddraft-app"

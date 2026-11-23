@@ -199,6 +199,8 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
         // Flatten features: absorbed sketches sit under their consumer.
         let absorbed: Vec<FeatureId> = state.doc.features.iter().filter_map(|f| f.kind.sketch()).collect();
         let mut items: Vec<RowItem> = Vec::new();
+        let mut body_names = BTreeMap::new();
+        let mut body_name = |key| body_names.entry(key).or_insert_with(|| state.doc.body_name(key)).clone();
         for (i, f) in state.doc.features.iter().enumerate() {
             if f.is_sketch() && absorbed.contains(&f.id) {
                 continue;
@@ -228,9 +230,9 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
             };
             let sub = if let FeatureKind::Combine { operation, tool } = &f.kind {
                 let op = crate::multibody::operation_name(*operation);
-                let target = state.doc.body_name(f.body_key);
-                let tool = state.doc.body_name(*tool);
-                let label = format!("{op}: {target} + {tool}");
+                let target = body_name(f.body_key);
+                let tool = body_name(*tool);
+                let label = format!("{op} · {target} with {tool}");
                 match status {
                     FeatureStatus::Ok => format!("{label} · consumed {tool}"),
                     FeatureStatus::Error(_) => format!("Failed · {label}"),
@@ -238,9 +240,9 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
                     _ => label,
                 }
             } else if origins.get(&f.body_key) == Some(&f.id) {
-                format!("Creates {} · {sub}", state.doc.body_name(f.body_key))
+                format!("Creates {} · {sub}", body_name(f.body_key))
             } else if !f.is_sketch() && f.body.is_some() && state.doc.model().next_body() > 1 {
-                format!("{} · {sub}", state.doc.body_name(f.body_key))
+                format!("{} · {sub}", body_name(f.body_key))
             } else {
                 sub
             };

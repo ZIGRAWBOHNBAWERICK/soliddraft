@@ -233,7 +233,8 @@ fn new_body_and_combine_are_available_in_the_application() {
         assert!(app.query_by_label("Show Body 1").is_some(), "undo restores the consumed body hidden");
         ribbon::run_command(app, "redo");
         ribbon::until(app, "redo rebuild", |app| !app.state().state.doc.proof_pending());
-        app.state_mut().state.push(AppAction::Save);
+        let path = path.with_file_name("combined.dwprt");
+        app.state_mut().state.push(AppAction::SaveAs(Some(path.clone())));
         app.run_steps(8);
         app.state_mut().state.push(AppAction::Open(Some(path)));
         app.run_steps(8);

@@ -3750,7 +3750,7 @@ impl Document {
     }
 
     pub fn set_body_name(&mut self, key: u32, name: &str) {
-        if !self.model.live_bodies().iter().any(|(body, _)| *body == key) {
+        if !self.display_bodies().iter().any(|(body, _)| *body == key) {
             return;
         }
         let name = name.trim();

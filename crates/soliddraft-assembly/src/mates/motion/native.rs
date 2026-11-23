@@ -91,6 +91,7 @@ enum Kind {
     Plane,
     Axis,
     Point,
+    Outline,
     Other,
 }
 fn kind(r: &Read) -> Kind {
@@ -98,6 +99,7 @@ fn kind(r: &Read) -> Kind {
         Local::Plane(_) => Kind::Plane,
         Local::Axis(_) => Kind::Axis,
         Local::Point(_) => Kind::Point,
+        Local::Outline(_) => Kind::Outline,
         Local::Native(s) => match s.as_ref() {
             EnclosedSupport::Plane { .. } => Kind::Plane,
             EnclosedSupport::Axis { .. } => Kind::Axis,
@@ -218,6 +220,13 @@ pub(in crate::mates) fn native_constraint(
                 && reads[0].body == reads[1].body
                 && reads[2].body == reads[3].body
                 && reads[0].body != reads[2].body
+        }
+        Rule::Path => kinds == [Kind::Outline, Kind::Point] && reads[0].body != reads[1].body,
+        Rule::Cam { .. } => {
+            kinds.len() == 2
+                && kinds[0] == Kind::Outline
+                && reads[0].body != reads[1].body
+                && (kinds[1] == Kind::Point || (kinds[1] == Kind::Axis && curved(&reads[1])))
         }
         Rule::Profile { .. } | Rule::Slot { .. } => false,
     };
@@ -406,6 +415,10 @@ pub(super) fn residual<N: Number>(
     poses: &BTreeMap<Body, Placement>,
     rank: bool,
 ) {
+    if matches!(rule, Rule::Path | Rule::Cam { .. }) {
+        super::outline::rows(out, reads, rule, poses);
+        return;
+    }
     let a = world::<N>(&reads[0], poses);
     let b = world::<N>(&reads[1], poses);
     match rule {
@@ -573,7 +586,7 @@ pub(super) fn residual<N: Number>(
             let sign = N::f(if *reverse { 1.0 } else { -1.0 });
             scalar(out, N::q(&ratio[0]) * slide(1, b) + sign * N::q(&ratio[1]) * slide(0, a) - N::q(offset), false);
         }
-        Rule::Profile { .. } | Rule::Slot { .. } => scalar(out, N::f(f64::NAN), false),
+        Rule::Profile { .. } | Rule::Slot { .. } | Rule::Path | Rule::Cam { .. } => scalar(out, N::f(f64::NAN), false),
     }
 }
 

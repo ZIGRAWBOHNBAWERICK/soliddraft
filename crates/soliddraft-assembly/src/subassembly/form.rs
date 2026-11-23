@@ -517,6 +517,12 @@ fn check_carried(
         if truth.appearances.iter().any(|a| under(&a.path)) {
             return refuse(c, "has a colour of the assembly's");
         }
+        if truth.explode.iter().any(|s| s.occurrences.iter().any(under)) {
+            return refuse(c, "is moved by the exploded view");
+        }
+        if !truth.configurations.is_empty() {
+            return refuse(c, "is in an assembly with configurations");
+        }
     }
     for p in paths {
         if doc

@@ -416,6 +416,7 @@ fn kind_words(a: &soliddraft_drawing::Annotation) -> String {
         AnnotationKind::Datum { .. } => "datum".into(),
         AnnotationKind::SurfaceFinish { .. } => "surface finish".into(),
         AnnotationKind::RevisionSymbol { .. } => "revision symbol".into(),
+        AnnotationKind::Balloon { .. } => "balloon".into(),
         AnnotationKind::DimensionSet(set) => match set.kind {
             soliddraft_drawing::SetKind::Ordinate => "ordinate".into(),
             soliddraft_drawing::SetKind::Baseline => "baseline".into(),

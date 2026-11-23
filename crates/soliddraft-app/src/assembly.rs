@@ -69,6 +69,10 @@ pub enum AssemblyAction {
     Mate(crate::mates::MateAction),
     Form(crate::subassembly::FormAction),
     Interference(crate::interference::InterferenceAction),
+    /// Configurations and the exploded view.
+    Configure(crate::configurations::ConfigureAction),
+    /// Pack and Go and the exports.
+    Files(crate::assembly_files::FilesAction),
 }
 
 /// The workspaces of an assembly document in Edit Suite.
@@ -109,6 +113,8 @@ pub struct AssemblyState {
     pub form: crate::subassembly::Draft,
     /// The Interference panel's fields and last report.
     pub interference: crate::interference::Draft,
+    /// The Configurations panel's fields.
+    pub configure: crate::configurations::Draft,
     pub collision_drag: bool,
     pub dynamic_clearance: bool,
     pub clearance_mm: f64,
@@ -470,6 +476,10 @@ pub fn open_bytes(state: &mut AppState, name: &str, bytes: Vec<u8>) {
     #[cfg(target_arch = "wasm32")]
     crate::documents_browser::remember(name, DocKind::Assembly, &bytes);
     state.note(format!("Opening {name}…"), NoteKind::Info);
+    // Kept for Pack and Go, which packs the file as it was opened: the page has no folder.
+    if let Ok(identity) = soliddraft_document::identify(std::io::Cursor::new(&bytes)) {
+        state.revisions.record(identity.id, &identity.revision, &bytes);
+    }
     let path = PathBuf::from(name);
     let opening = AssemblyDocument::open_bytes_in_background(bytes, Some(path.clone()), options(state));
     state.assembly.opening = Some((path, opening));
@@ -612,7 +622,10 @@ fn shown_component(s: &AssemblySession, r: OccurrenceIndex) -> serde_json::Value
 /// form), the `selected` component's path, the number of `mates` and their
 /// `mate_names`, the `undo` step's label and depth, the window's last `note` (`text`
 /// and `kind`), the Mate panel's picks and error, the `file` it came from, the names of
-/// the files `held` for it, and the assemblies of an upload it is `choosing` between.
+/// the files `held` for it, the assemblies of an upload it is `choosing` between, whether
+/// the Configurations panel is open (`configure_open`), the `configurations` by name and
+/// the `active_configuration`, how many `explode_steps` it has and whether it is shown
+/// `exploded` (a component's `translation` is then where the exploded view shows it).
 pub fn shown(state: &AppState) -> serde_json::Value {
     let held: Vec<String> =
         state.assembly.held.iter().filter_map(|d| d.path.as_ref().map(|p| p.display().to_string())).collect();
@@ -648,6 +661,11 @@ pub fn shown(state: &AppState) -> serde_json::Value {
         },
         "held": held,
         "choosing": choosing,
+        "configure_open": state.assembly.configure.open,
+        "configurations": s.doc.assembly().configurations.iter().map(|c| c.name.clone()).collect::<Vec<_>>(),
+        "active_configuration": s.doc.assembly().active_configuration().map(|c| c.name.clone()),
+        "explode_steps": s.doc.assembly().explode.len(),
+        "exploded": s.doc.is_exploded(),
     })
 }
 
@@ -768,6 +786,14 @@ pub fn apply(state: &mut AppState, dock: &mut DockState<Tab>, action: AssemblyAc
         AssemblyAction::Mate(action) => crate::mates::apply(state, action),
         AssemblyAction::Form(action) => crate::subassembly::apply(state, action),
         AssemblyAction::Interference(action) => crate::interference::apply(state, action),
+        AssemblyAction::Configure(action) => crate::configurations::apply(state, action),
+        AssemblyAction::Files(action) => {
+            let drawing = action == crate::assembly_files::FilesAction::MakeDrawing;
+            crate::assembly_files::apply(state, action);
+            if drawing && state.drawing.active {
+                crate::drawing::show_drawing_tab(dock);
+            }
+        }
         AssemblyAction::Open(path) => {
             state.note(format!("Opening {}…", path.display()), NoteKind::Info);
             let opening = AssemblyDocument::open_in_background(&path, options(state));
@@ -1198,6 +1224,7 @@ pub fn tree(ui: &mut egui::Ui, state: &mut AppState) {
 pub fn properties(ui: &mut egui::Ui, state: &mut AppState) {
     let forming = state.assembly.form.open;
     let checking = state.assembly.interference.open;
+    let configuring = state.assembly.configure.open;
     let collision_drag = &mut state.assembly.collision_drag;
     let dynamic_clearance = &mut state.assembly.dynamic_clearance;
     let clearance_mm = &mut state.assembly.clearance_mm;
@@ -1234,6 +1261,14 @@ pub fn properties(ui: &mut egui::Ui, state: &mut AppState) {
             egui::Frame::new()
                 .inner_margin(egui::Margin::symmetric(12, 0))
                 .show(ui, |ui| crate::interference::panel::show(ui, state));
+        });
+        return;
+    }
+    if configuring {
+        egui::ScrollArea::vertical().id_salt("assembly_configurations").auto_shrink([false, true]).show(ui, |ui| {
+            egui::Frame::new()
+                .inner_margin(egui::Margin::symmetric(12, 0))
+                .show(ui, |ui| crate::configurations::show(ui, state));
         });
         return;
     }

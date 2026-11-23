@@ -173,6 +173,7 @@ impl Assembly {
             appearances: &self.appearances,
             snapshots: &self.snapshots,
             configurations: &self.configurations,
+            explode: &self.explode,
             display_states: &self.display_states,
             mates: &self.mates,
             values: &self.values,
@@ -192,7 +193,8 @@ impl Assembly {
     }
 
     /// The hash of what decides the assembly's shape: the truth without names, hidden
-    /// flags, colours, display states and reference paths. Hiding, colouring or
+    /// flags, colours, display states, other configurations, the exploded view and
+    /// reference paths. Hiding, colouring or
     /// renaming a component changes the semantic hash and not this one.
     pub fn geometry_hash(&self) -> ContentHash {
         let (mut json, bulk) = self.split_truth(true);
@@ -200,6 +202,9 @@ impl Assembly {
         if let Value::Object(map) = &mut json {
             map.remove("name");
             map.remove("display_states");
+            // Other configurations' states and the exploded view do not shape this one.
+            map.remove("configurations");
+            map.remove("explode");
             map.remove("appearances");
             map.remove("snapshots");
             // Placements hold what mates decide: the same placements are the same shape.
@@ -349,7 +354,9 @@ struct TruthOut<'a> {
     #[serde(skip_serializing_if = "Snapshots::is_empty")]
     snapshots: &'a Snapshots,
     #[serde(skip_serializing_if = "<[_]>::is_empty")]
-    configurations: &'a [Value],
+    configurations: &'a [crate::configuration::Configuration],
+    #[serde(skip_serializing_if = "<[_]>::is_empty")]
+    explode: &'a [crate::configuration::ExplodeStep],
     #[serde(skip_serializing_if = "<[_]>::is_empty")]
     display_states: &'a [Value],
     #[serde(skip_serializing_if = "<[_]>::is_empty")]

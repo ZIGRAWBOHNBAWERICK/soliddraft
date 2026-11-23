@@ -201,7 +201,9 @@ impl DrawingDoc {
             Some(&failure.cause)
         } else if view.needs_inclusion_for_redraw() {
             Some(soliddraft_drawing::export::INCLUDE_FOR_REDRAW)
-        } else if !view.has_saved_catallax_linework() {
+        } else if !view.has_saved_catallax_linework()
+            && !soliddraft_drawing::assembly::is_assembly_drawing(&self.drawing)
+        {
             Some("Rebuild to replace the saved line work with Catallax line work")
         } else if !view.accepts_revision(self.seen_digest.as_str())
             || !view.accepts_revision(self.drawing.model.pinned.as_str())
@@ -405,6 +407,7 @@ impl DrawingDoc {
             label: None,
             crop: None,
             broken_out: Vec::new(),
+            exploded: false,
         };
         let mut with_view = s.clone();
         with_view.views.push(view.clone());

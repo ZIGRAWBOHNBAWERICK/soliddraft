@@ -132,7 +132,7 @@ pub(crate) fn run(state: &mut AppState, name: &str, input: &Value) -> Option<Res
         return Some(drag(state, input).map(|_| json!({"assembly": summary(state), "pending": state.assembly.session.as_ref().is_some_and(|s| s.doc.drag_pending()), "motion": state.assembly.session.as_ref().and_then(|s| s.doc.drag_report())})));
     }
 
-    if matches!(name, "assembly_mate_path" | "assembly_mate_cam" | "assembly_physical_dynamics") {
+    if matches!(name, "assembly_physical_dynamics") {
         return Some(Err(refused(MateRefusal::new(
             soliddraft_assembly::RefusalCode::UnsupportedMotion,
             format!("{name} is outside the static rigid-motion mate solver"),
@@ -144,6 +144,8 @@ pub(crate) fn run(state: &mut AppState, name: &str, input: &Value) -> Option<Res
             | "assembly_mate_rack_and_pinion"
             | "assembly_mate_screw"
             | "assembly_mate_universal_joint"
+            | "assembly_mate_path"
+            | "assembly_mate_cam"
             | "assembly_mate_angle"
             | "assembly_mate_limit_angle"
             | "assembly_measure_planes"
@@ -224,6 +226,12 @@ fn call(state: &mut AppState, name: &str, input: &Value) -> Result<Value, String
             )
             .map(|id| json!({"mate":id}))
         }
+        "assembly_mate_path" => doc
+            .mate_path(text(input, "name")?, &selector(&input["path"])?, &selector(&input["point"])?, strict)
+            .map(|id| json!({"mate":id})),
+        "assembly_mate_cam" => doc
+            .mate_cam(text(input, "name")?, &selector(&input["cam"])?, &selector(&input["follower"])?, strict)
+            .map(|id| json!({"mate":id})),
         "assembly_mate_universal_joint" => doc
             .mate_universal_joint(
                 text(input, "name")?,
@@ -568,6 +576,15 @@ pub(crate) fn rows(s: &mut AssemblySession) -> (Value, Value, Value) {
                     row["axes"] = json!(axes.iter().map(|e| endpoint(root, e)).collect::<Vec<_>>());
                     row["planes"] = json!(planes.iter().map(|e| endpoint(root, e)).collect::<Vec<_>>());
                     row["plane_alignment"] = json!(plane_alignment);
+                }
+                Mate::Path { path, point, .. } => {
+                    row["path"] = endpoint(root, path);
+                    row["point"] = endpoint(root, point);
+                }
+                Mate::Cam { cam, follower, outside, .. } => {
+                    row["cam"] = endpoint(root, cam);
+                    row["follower"] = endpoint(root, follower);
+                    row["outside"] = json!(outside);
                 }
                 Mate::Width { groove, tab, constraint, .. } => {
                     row["groove"] = json!(groove.iter().map(|e| endpoint(root, e)).collect::<Vec<_>>());

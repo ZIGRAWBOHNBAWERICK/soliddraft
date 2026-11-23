@@ -24,11 +24,11 @@ serde_json = { workspace = true, features = ["float_roundtrip"] }
 thiserror.workspace = true
 web-time.workspace = true
 libm = "0.2"
+zip.workspace = true
 
 [dev-dependencies]
 proptest.workspace = true
 soliddraft-kernel-catallax.workspace = true
-zip.workspace = true
 
 [lints]
 workspace = true

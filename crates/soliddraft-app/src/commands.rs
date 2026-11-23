@@ -2835,6 +2835,8 @@ fn registry() -> Vec<CommandSpec> {
     .chain(crate::interference::registry::commands())
     .chain(crate::pmi::registry::commands())
     .chain(crate::subassembly::registry::commands())
+    .chain(crate::configurations::registry::commands())
+    .chain(crate::assembly_files::registry::commands())
     .collect()
 }
 
@@ -3087,10 +3089,21 @@ fn drawing_registry() -> Vec<CommandSpec> {
         .on(Annotate, "Notes", Large)
         .key(Scope::Drawing, none, Key::H)
             .app_only(CANVAS),
-        CommandSpec::new("drawing_balloon", "Balloon", Icon::Circle, "Number an assembly component")
-            .drawing()
-            .on(Annotate, "Notes", Small)
-            .hint(|_| Some("Arrives with assemblies".into())),
+        CommandSpec::new(
+            "drawing_balloon",
+            "Balloon",
+            Icon::Circle,
+            "Number every part of the assembly the drawing shows that has no balloon yet",
+        )
+        .drawing()
+        .on(Annotate, "Notes", Small)
+        .when(crate::assembly_files::drawing::drawing_is_of_assembly)
+        .hint(|s| {
+            (!crate::assembly_files::drawing::drawing_is_of_assembly(s))
+                .then(|| "Needs a drawing of an assembly: Assembly tab, Make drawing".into())
+        })
+        .run(|_| AppAction::Drawing(DrawingAction::Rebuild))
+        .app_only("It rebuilds the drawing of the open assembly; assembly_make_drawing and drawing_rebuild do it for agents"),
         drawing_tool!(
             "drawing_revision_symbol", "Revision symbol", Icon::Rollback, "The revision in a triangle, at a changed place",
             DrawingTool::RevisionSymbol => DrawingTool::RevisionSymbol
@@ -3145,10 +3158,16 @@ fn drawing_registry() -> Vec<CommandSpec> {
         .lit(|s| session(s).is_some_and(|d| d.selection == Some(DrawingSel::Revisions)))
             .app_only(PANEL),
         cmd("drawing_hole_table", "Hole table", Icon::Hole, "Tabulate the holes of a view").on(Annotate, "Tables", Small),
-        CommandSpec::new("drawing_bom", "BOM", Icon::Mass, "A bill of materials")
+        CommandSpec::new("drawing_bom", "BOM", Icon::Mass, "The bill of materials of the assembly the drawing shows")
             .drawing()
             .on(Annotate, "Tables", Small)
-            .hint(|_| Some("Arrives with assemblies".into())),
+            .when(crate::assembly_files::drawing::drawing_is_of_assembly)
+            .hint(|s| {
+                (!crate::assembly_files::drawing::drawing_is_of_assembly(s))
+                    .then(|| "Needs a drawing of an assembly: Assembly tab, Make drawing".into())
+            })
+            .run(|_| AppAction::Drawing(DrawingAction::Rebuild))
+            .app_only("It rebuilds the drawing's BOM from the open assembly; drawing_rebuild does it for agents"),
         // Sheet.
         cmd("drawing_sheet_properties", "Sheet properties", Icon::Props, "Name, size, scale, projection angle and title block")
             .on(Sheet, "Sheet", Large)

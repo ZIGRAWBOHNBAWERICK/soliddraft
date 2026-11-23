@@ -20,11 +20,16 @@ serde_json.workspace = true
 sha2.workspace = true
 soliddraft-assembly.workspace = true
 soliddraft-document.workspace = true
+soliddraft-kernel-api.workspace = true
 soliddraft-materials.workspace = true
 stl_io = "0.11.0"
 thiserror.workspace = true
 tobj = { version = "4.0.5", default-features = false }
 urdf-rs = "0.10.0"
+
+[dev-dependencies]
+soliddraft-kernel-catallax.workspace = true
+soliddraft-model.workspace = true
 
 [lints]
 workspace = true

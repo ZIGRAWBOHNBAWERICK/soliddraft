@@ -18,6 +18,10 @@ pub(super) trait Number:
     fn positive(self) -> Self;
     /// Whether the value is proved to differ from zero.
     fn nonzero(self) -> bool;
+    /// The lesser of two values: for enclosures, an enclosure of the lesser.
+    fn min(self, other: Self) -> Self;
+    /// The value held to [0, 1].
+    fn clamp01(self) -> Self;
 }
 impl Number for f64 {
     fn f(v: f64) -> Self {
@@ -31,6 +35,12 @@ impl Number for f64 {
     }
     fn nonzero(self) -> bool {
         self != 0.0 && !self.is_nan()
+    }
+    fn min(self, other: Self) -> Self {
+        if self.is_nan() || other.is_nan() { f64::NAN } else { f64::min(self, other) }
+    }
+    fn clamp01(self) -> Self {
+        if self.is_nan() { self } else { self.clamp(0.0, 1.0) }
     }
     fn q(v: &BigRational) -> Self {
         nearest(v)
@@ -185,6 +195,18 @@ impl Div for Interval {
 impl Number for Interval {
     fn f(v: f64) -> Self {
         Self::new(v, v)
+    }
+    fn min(self, other: Self) -> Self {
+        if !self.finite() || !other.finite() {
+            return Self::whole();
+        }
+        Self::new(self.lo.min(other.lo), self.hi.min(other.hi))
+    }
+    fn clamp01(self) -> Self {
+        if !self.finite() {
+            return Self::whole();
+        }
+        Self::new(self.lo.clamp(0.0, 1.0), self.hi.clamp(0.0, 1.0))
     }
     fn pi() -> Self {
         pi()

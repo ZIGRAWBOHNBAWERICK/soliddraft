@@ -550,6 +550,11 @@ impl ValueTable {
         self.entries.iter().map(|v| v.id)
     }
 
+    /// The expression of the value with id `id`, as written.
+    pub fn expression(&self, id: u32) -> Option<&Expression> {
+        self.entries.iter().find(|v| v.id == id).map(|v| &v.expression)
+    }
+
     /// Every value in creation order, with its resolved document units.
     pub fn summary(&self) -> Value {
         let resolved = resolve(&self.entries).expect("committed values are checked");

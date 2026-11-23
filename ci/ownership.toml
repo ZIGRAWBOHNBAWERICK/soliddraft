@@ -15,6 +15,13 @@ paths = ["crates/soliddraft-app/src/assembly.rs", "crates/soliddraft-app/src/ass
 module = ["assembly"]
 
 [[areas]]
+name = "app.assembly_files"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/assembly_files/"]
+module = ["assembly_files"]
+
+[[areas]]
 name = "app.chat"
 owner = "core"
 crate = "soliddraft-app"
@@ -41,6 +48,13 @@ owner = "core"
 crate = "soliddraft-app"
 paths = ["crates/soliddraft-app/src/commands.rs"]
 module = ["commands"]
+
+[[areas]]
+name = "app.configurations"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/configurations/"]
+module = ["configurations"]
 
 [[areas]]
 name = "app.context_menu"

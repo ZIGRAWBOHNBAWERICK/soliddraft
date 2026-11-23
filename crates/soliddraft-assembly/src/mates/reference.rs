@@ -185,11 +185,36 @@ pub(crate) struct SlotProof {
     pub label: String,
 }
 
-/// What a Profile Center or a Slot reads of a face or edge.
+/// One piece of an outline: a line or an arc from `from` to the next piece's `from`.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct OutlinePiece {
+    /// Where it starts: a corner of the outline.
+    pub from: [BigRational; 3],
+    /// For an arc: its centre, its radius squared and whether it turns anticlockwise about
+    /// the outline's normal. A whole circle is an arc that starts where it ends.
+    pub arc: Option<([BigRational; 3], BigRational, bool)>,
+}
+
+/// The outline of a planar face read exactly, as a Path or a Cam reads it: its plane and
+/// its pieces in order round it.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct OutlineProof {
+    /// The plane's outward normal, each component -1, 0 or 1.
+    pub normal: [i8; 3],
+    /// The plane's offset along the normal.
+    pub offset: BigRational,
+    /// The pieces, round the outline.
+    pub pieces: Vec<OutlinePiece>,
+    /// The face's label at that revision.
+    pub label: String,
+}
+
+/// What a Profile Center, a Slot, a Path or a Cam reads of a face or edge.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum Shape {
     Profile(ProfileProof),
     Slot(SlotProof),
+    Outline(OutlineProof),
 }
 
 /// Which shape to read.
@@ -197,6 +222,7 @@ pub(crate) enum Shape {
 pub(crate) enum ShapeKind {
     Profile,
     Slot,
+    Outline,
 }
 
 impl StoredSupport {
@@ -205,6 +231,7 @@ impl StoredSupport {
         match self {
             StoredSupport::Profile { .. } => Some(ShapeKind::Profile),
             StoredSupport::Slot { .. } => Some(ShapeKind::Slot),
+            StoredSupport::Outline { .. } => Some(ShapeKind::Outline),
             StoredSupport::Enclosed { .. } | StoredSupport::Axis { .. } | StoredSupport::Point { .. } => None,
         }
     }
@@ -222,6 +249,20 @@ impl Shape {
                 depth: s.depth,
                 ends: s.ends.each_ref().map(|e| e.each_ref().map(nearest)),
                 radius: nearest(&s.radius_squared).sqrt(),
+            },
+            Shape::Outline(o) => StoredSupport::Outline {
+                normal: o.normal,
+                offset: nearest(&o.offset),
+                pieces: o
+                    .pieces
+                    .iter()
+                    .map(|p| crate::mates::StoredPiece {
+                        from: p.from.each_ref().map(nearest),
+                        centre: p.arc.as_ref().map(|(c, _, _)| c.each_ref().map(nearest)),
+                        radius: p.arc.as_ref().map(|(_, r, _)| nearest(r).sqrt()),
+                        anticlockwise: p.arc.as_ref().is_some_and(|(_, _, ccw)| *ccw),
+                    })
+                    .collect(),
             },
         }
     }
@@ -437,6 +478,9 @@ impl AssemblyDocument {
                         let what = match kind {
                             ShapeKind::Profile => "Profile Center reads a planar face or a circular edge",
                             ShapeKind::Slot => "Slot reads a wall or a round end of a straight slot",
+                            ShapeKind::Outline => {
+                                "Path and Cam read a planar face whose outline is the path or the cam"
+                            }
                         };
                         return Err(MateRefusal::new(
                             RefusalCode::UnsupportedReference,
@@ -448,6 +492,7 @@ impl AssemblyDocument {
                 let shape = match kind {
                     ShapeKind::Profile => Shape::Profile(profile_of(&part, r, found)?),
                     ShapeKind::Slot => Shape::Slot(slot_of(&part, r, found)?),
+                    ShapeKind::Outline => Shape::Outline(outline_of(&part, r, found)?),
                 };
                 drop(part);
                 self.proofs.shapes.insert(key, shape.clone());
@@ -457,6 +502,7 @@ impl AssemblyDocument {
         let changed = match (stored, &shape) {
             (Some(StoredSupport::Profile { normal, .. }), Shape::Profile(p)) => p.normal != *normal,
             (Some(StoredSupport::Slot { depth, .. }), Shape::Slot(s)) => s.depth != *depth,
+            (Some(StoredSupport::Outline { normal, .. }), Shape::Outline(o)) => o.normal != *normal,
             (None, _) => false,
             (Some(_), _) => true,
         };
@@ -1105,4 +1151,103 @@ fn slot_of(part: &PartDocument, r: &DocRef, entity: SupportEntity) -> Result<Slo
     }
     let (first, second, own) = if p0[k_along] < p1[k_along] { (p0, p1, e0) } else { (p1, p0, e1) };
     Ok(SlotProof { depth: own.direction(), ends: [first, second], radius_squared: r0, label })
+}
+
+/// The outline of a planar face, read exactly: its plane, then its outer loop piece by
+/// piece from corner to corner, each a straight edge or a circular arc. A loop of one whole
+/// circle is one piece. Which way an arc turns is read from a point the kernel samples on
+/// it, away from its ends; its ends, centre and radius are the kernel's exact ones.
+fn outline_of(part: &PartDocument, r: &DocRef, entity: SupportEntity) -> Result<OutlineProof, MateRefusal> {
+    let body = part.body().ok_or_else(|| unavailable(format!("{} has no body", r.path)))?;
+    let kernel = part.kernel();
+    let SupportEntity::Face(face) = entity else {
+        return Err(MateRefusal::new(
+            RefusalCode::UnsupportedReference,
+            format!("{}: Path and Cam read a planar face whose outline is the path or the cam", r.path),
+        ));
+    };
+    let label = part.face_label(face).map(|l| l.text).unwrap_or_default();
+    let named = if label.is_empty() { String::new() } else { format!(", {label}") };
+    let refuse = |m: String| MateRefusal::new(RefusalCode::UnsupportedReference, format!("{}{named}: {m}", r.path));
+    let support = |e: SupportEntity| {
+        kernel.entity_support(body, e).map_err(|err| match err {
+            KernelError::Unsupported(_) => refuse(format!("the outline is not read exactly: {err}")),
+            _ => unavailable(format!("{}{named}: {err}", r.path)),
+        })
+    };
+    let ExactSupport::Plane(plane) = support(entity)? else {
+        return Err(refuse("Path and Cam read a planar face; its outline is the path or the cam".into()));
+    };
+    let (normal, offset) = (plane.normal(), exact_of(&plane.offset, &refuse)?);
+    let t = kernel.topology(body).map_err(|e| unavailable(e.to_string()))?;
+    let edges = t.face(face).map(|f| f.edges.clone()).unwrap_or_default();
+    let outline = outer(&t, loops(&t, &edges)).ok_or_else(|| refuse("the face has no outline".into()))?;
+    if outline.len() > 256 {
+        return Err(refuse("the outline has more than 256 edges".into()));
+    }
+    let circle = |edge: EdgeId| -> Result<([BigRational; 3], BigRational), MateRefusal> {
+        let ExactSupport::Axis(a) = support(SupportEntity::Edge(edge))? else {
+            return Err(refuse("an arc of the outline is not read as a circle".into()));
+        };
+        if a.source != SupportSource::Circle || a.direction().map(i8::abs) != normal.map(i8::abs) {
+            return Err(refuse("an arc of the outline does not lie in the face's plane".into()));
+        }
+        let squared = a.radius.map(|r| r.squared).ok_or_else(|| refuse("a circle has no radius".into()))?;
+        Ok((exact_point(&a.through, &refuse)?, exact_of(&squared, &refuse)?))
+    };
+    // One whole circle.
+    if let [edge] = outline[..]
+        && t.edge(edge).is_some_and(|e| e.curve == CurveKind::Circle)
+    {
+        let (centre, squared) = circle(edge)?;
+        let piece = OutlinePiece { from: centre.clone(), arc: Some((centre, squared, true)) };
+        return Ok(OutlineProof { normal, offset, pieces: vec![piece], label });
+    }
+    let order = corners(&t, &outline).ok_or_else(|| refuse("its outline is not one closed chain of edges".into()))?;
+    let mut points = Vec::with_capacity(order.len());
+    for v in &order {
+        match support(SupportEntity::Vertex(*v))? {
+            ExactSupport::Point(p) => points.push(exact_point(&p.at, &refuse)?),
+            _ => return Err(refuse("a corner of the outline is not a point".into())),
+        }
+    }
+    let samples = kernel
+        .tessellate_edges(body, &soliddraft_kernel_api::TessellationParams::default())
+        .map_err(|e| unavailable(e.to_string()))?;
+    let n_axis = glam::DVec3::new(normal[0] as f64, normal[1] as f64, normal[2] as f64);
+    let f = |p: &[BigRational; 3]| glam::DVec3::from_array(p.each_ref().map(crate::mates::solver::nearest));
+    let mut pieces = Vec::with_capacity(order.len());
+    for i in 0..order.len() {
+        let (a, b) = (order[i], order[(i + 1) % order.len()]);
+        let edge = outline
+            .iter()
+            .copied()
+            .find(|e| t.edge(*e).is_some_and(|info| info.vertices.contains(&a) && info.vertices.contains(&b)))
+            .ok_or_else(|| refuse("its outline is not one closed chain of edges".into()))?;
+        let kind = t.edge(edge).map(|e| e.curve).unwrap_or(CurveKind::Other);
+        let arc = match kind {
+            CurveKind::Line => None,
+            CurveKind::Circle => {
+                let (centre, squared) = circle(edge)?;
+                // The way round: from this corner, the sampled middle comes before the next corner.
+                let middle = samples
+                    .iter()
+                    .find(|s| s.edge == edge)
+                    .and_then(|s| s.points.get(s.points.len() / 2))
+                    .map(|p| glam::DVec3::new(p.x, p.y, p.z))
+                    .ok_or_else(|| refuse("an arc of the outline has no sampled point".into()))?;
+                let c = f(&centre);
+                let angle = |p: glam::DVec3| {
+                    let (u, v) = (f(&points[i]) - c, p - c);
+                    let a = u.cross(v).dot(n_axis).atan2(u.dot(v));
+                    if a < 0.0 { a + std::f64::consts::TAU } else { a }
+                };
+                let anticlockwise = angle(middle) < angle(f(&points[(i + 1) % points.len()]));
+                Some((centre, squared, anticlockwise))
+            }
+            _ => return Err(refuse("its outline has a curve that is neither a line nor a circular arc".into())),
+        };
+        pieces.push(OutlinePiece { from: points[i].clone(), arc });
+    }
+    Ok(OutlineProof { normal, offset, pieces, label })
 }

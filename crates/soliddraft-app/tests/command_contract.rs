@@ -1039,6 +1039,11 @@ fn command_ids_shortcuts_agent_schemas_and_availability_stay_compatible() {
             assert_eq!(current["availability"][fixture]["enabled"], true, "{id} starts on {fixture}");
             current["availability"][fixture]["enabled"] = row["availability"][fixture]["enabled"].clone();
         }
+        // Balloon and BOM arrived with drawings of assemblies: the app runs them there.
+        if matches!(id.as_str(), "drawing_balloon" | "drawing_bom") {
+            assert_eq!((row["agents"].as_str(), current["agents"].as_str()), (Some("none"), Some("app")));
+            current["agents"] = row["agents"].clone();
+        }
         assert_eq!(&current, row, "{id} changed");
     }
     for list in ["agent_tools", "verbs"] {

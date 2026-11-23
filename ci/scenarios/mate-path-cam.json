@@ -1,0 +1,412 @@
+{
+  "format": "soliddraft-scenario/1",
+  "name": "mate-path-cam",
+  "folders": [
+    "work"
+  ],
+  "max_work": 20000000,
+  "steps": [
+    {
+      "tool": "sketch",
+      "arguments": {
+        "plane": "top",
+        "shapes": [
+          {
+            "shape": "slot",
+            "start": [
+              -20,
+              0,
+              0
+            ],
+            "end": [
+              20,
+              0,
+              0
+            ],
+            "width": 20
+          }
+        ]
+      },
+      "checks": []
+    },
+    {
+      "tool": "extrude",
+      "arguments": {
+        "sketch": "Sketch1",
+        "depth": 10,
+        "flip": false
+      },
+      "checks": []
+    },
+    {
+      "tool": "save",
+      "arguments": {
+        "path": "{bundle}/work/cam.dwprt"
+      },
+      "checks": [],
+      "files": [
+        "{bundle}/work/cam.dwprt"
+      ]
+    },
+    {
+      "tool": "make_assembly",
+      "arguments": {},
+      "checks": []
+    },
+    {
+      "tool": "assembly_save",
+      "arguments": {
+        "path": "{bundle}/work/rig.dwasm"
+      },
+      "checks": [],
+      "files": [
+        "{bundle}/work/rig.dwasm"
+      ]
+    },
+    {
+      "tool": "new_part",
+      "arguments": {},
+      "checks": []
+    },
+    {
+      "tool": "sketch",
+      "arguments": {
+        "plane": "top",
+        "shapes": [
+          {
+            "shape": "circle",
+            "center": [
+              0,
+              0,
+              0
+            ],
+            "diameter": 10
+          }
+        ]
+      },
+      "checks": []
+    },
+    {
+      "tool": "extrude",
+      "arguments": {
+        "sketch": "Sketch1",
+        "depth": 10,
+        "flip": false
+      },
+      "checks": []
+    },
+    {
+      "tool": "save",
+      "arguments": {
+        "path": "{bundle}/work/roller.dwprt"
+      },
+      "checks": [],
+      "files": [
+        "{bundle}/work/roller.dwprt"
+      ]
+    },
+    {
+      "tool": "show_assembly",
+      "arguments": {},
+      "checks": []
+    },
+    {
+      "tool": "insert_component",
+      "arguments": {
+        "paths": [
+          "{bundle}/work/roller.dwprt"
+        ],
+        "placement": {
+          "translation": [
+            4,
+            22,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0,
+            1
+          ]
+        }
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/components/1/path",
+          "equals": "4"
+        }
+      ]
+    },
+    {
+      "tool": "assembly_mate_origin",
+      "arguments": {
+        "name": "O",
+        "component": 2,
+        "align_axes": true
+      },
+      "checks": []
+    },
+    {
+      "tool": "assembly_mate_cam",
+      "arguments": {
+        "name": "C",
+        "cam": {
+          "component": 2,
+          "feature": "Boss-Extrude1",
+          "generator": "end_cap"
+        },
+        "follower": {
+          "component": 4,
+          "feature": "Boss-Extrude1",
+          "generator": "side"
+        }
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/mates/1/kind",
+          "equals": "cam"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/outside",
+          "equals": true
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/proof/certainty",
+          "equals": "bounded"
+        },
+        {
+          "pointer": "/summary/assembly/components/1/translation/1",
+          "approx": 15.0,
+          "tolerance": 1e-06
+        },
+        {
+          "pointer": "/summary/assembly/solver/diagnostics",
+          "equals": []
+        }
+      ]
+    },
+    {
+      "tool": "assembly_mate_cam",
+      "arguments": {
+        "name": "C2",
+        "cam": {
+          "component": 2,
+          "feature": "Boss-Extrude1",
+          "generator": "end_cap"
+        },
+        "follower": {
+          "component": 4,
+          "feature": "Boss-Extrude1",
+          "generator": "end_cap"
+        }
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/accepted_state",
+          "same_as": {
+            "step": 13,
+            "pointer": "/summary/assembly/accepted_state"
+          }
+        }
+      ],
+      "refused": "a Cam's follower is a cylinder, a sphere or a vertex"
+    },
+    {
+      "tool": "assembly_drag",
+      "arguments": {
+        "path": "4",
+        "placement": {
+          "translation": [
+            30,
+            5,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0,
+            1
+          ]
+        }
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/mates/1/proof/certainty",
+          "equals": "bounded"
+        },
+        {
+          "pointer": "/summary/assembly/components/1/translation/0",
+          "minimum": 20.0
+        },
+        {
+          "pointer": "/summary/assembly/solver/diagnostics",
+          "equals": []
+        }
+      ]
+    },
+    {
+      "tool": "undo",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/summary/assembly/components/1/translation/1",
+          "approx": 15.0,
+          "tolerance": 1e-06
+        }
+      ]
+    },
+    {
+      "tool": "redo",
+      "arguments": {},
+      "checks": []
+    },
+    {
+      "tool": "assembly_save",
+      "arguments": {
+        "path": "{bundle}/work/rig.dwasm"
+      },
+      "checks": [],
+      "files": [
+        "{bundle}/work/rig.dwasm"
+      ]
+    },
+    {
+      "tool": "open",
+      "arguments": {
+        "path": "{bundle}/work/rig.dwasm"
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/mates/1/kind",
+          "equals": "cam"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/proof/certainty",
+          "equals": "bounded"
+        },
+        {
+          "pointer": "/summary/assembly/solver/diagnostics",
+          "equals": []
+        }
+      ]
+    },
+    {
+      "tool": "new_part",
+      "arguments": {},
+      "checks": []
+    },
+    {
+      "tool": "sketch",
+      "arguments": {
+        "plane": "top",
+        "shapes": [
+          {
+            "shape": "rectangle",
+            "center": [
+              0,
+              0,
+              0
+            ],
+            "width": 6,
+            "height": 6
+          }
+        ]
+      },
+      "checks": []
+    },
+    {
+      "tool": "extrude",
+      "arguments": {
+        "sketch": "Sketch1",
+        "depth": 6,
+        "flip": false
+      },
+      "checks": []
+    },
+    {
+      "tool": "save",
+      "arguments": {
+        "path": "{bundle}/work/block.dwprt"
+      },
+      "checks": [],
+      "files": [
+        "{bundle}/work/block.dwprt"
+      ]
+    },
+    {
+      "tool": "show_assembly",
+      "arguments": {},
+      "checks": []
+    },
+    {
+      "tool": "insert_component",
+      "arguments": {
+        "paths": [
+          "{bundle}/work/block.dwprt"
+        ],
+        "placement": {
+          "translation": [
+            0,
+            -30,
+            14
+          ],
+          "rotation": [
+            0,
+            0,
+            0,
+            1
+          ]
+        }
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/components/2/path",
+          "equals": "8"
+        }
+      ]
+    },
+    {
+      "tool": "assembly_mate_path",
+      "arguments": {
+        "name": "P",
+        "path": {
+          "component": 2,
+          "feature": "Boss-Extrude1",
+          "generator": "end_cap"
+        },
+        "point": {
+          "component": 8,
+          "vertex": [
+            "Boss-Extrude1 \u00b7 Start cap",
+            "Boss-Extrude1 \u00b7 Side of line 2",
+            "Boss-Extrude1 \u00b7 Side of line 3"
+          ]
+        }
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/mates/2/kind",
+          "equals": "path"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/proof/certainty",
+          "equals": "bounded"
+        },
+        {
+          "pointer": "/summary/assembly/solver/diagnostics",
+          "equals": []
+        }
+      ]
+    },
+    {
+      "tool": "assembly_save",
+      "arguments": {
+        "path": "{bundle}/work/rig.dwasm"
+      },
+      "checks": [],
+      "files": [
+        "{bundle}/work/rig.dwasm"
+      ]
+    }
+  ]
+}

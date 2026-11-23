@@ -74,6 +74,7 @@ pub fn bracket_a3() -> Drawing {
             label: None,
             crop: None,
             broken_out: Vec::new(),
+            exploded: false,
         },
         View {
             id: TOP,
@@ -87,6 +88,7 @@ pub fn bracket_a3() -> Drawing {
             label: None,
             crop: None,
             broken_out: Vec::new(),
+            exploded: false,
         },
         View {
             id: LEFT,
@@ -100,6 +102,7 @@ pub fn bracket_a3() -> Drawing {
             label: None,
             crop: None,
             broken_out: Vec::new(),
+            exploded: false,
         },
         View {
             id: ISO,
@@ -113,6 +116,7 @@ pub fn bracket_a3() -> Drawing {
             label: None,
             crop: None,
             broken_out: Vec::new(),
+            exploded: false,
         },
     ];
 

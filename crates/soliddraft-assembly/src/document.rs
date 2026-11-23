@@ -126,6 +126,37 @@ impl Design {
     }
 }
 
+/// Everything a configuration holds, with the configurations themselves, whole: an
+/// activation swaps all of it.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct Configured {
+    components: Vec<Component>,
+    overrides: Vec<Override>,
+    values: ValueTable,
+    configurations: Vec<crate::configuration::Configuration>,
+    explode: Vec<crate::configuration::ExplodeStep>,
+}
+
+impl Configured {
+    pub(crate) fn of(truth: &Assembly) -> Configured {
+        Configured {
+            components: truth.components.clone(),
+            overrides: truth.overrides.clone(),
+            values: truth.values.clone(),
+            configurations: truth.configurations.clone(),
+            explode: truth.explode.clone(),
+        }
+    }
+
+    fn restore(&self, truth: &mut Assembly) {
+        truth.components = self.components.clone();
+        truth.overrides = self.overrides.clone();
+        truth.values = self.values.clone();
+        truth.configurations = self.configurations.clone();
+        truth.explode = self.explode.clone();
+    }
+}
+
 /// The records of the truth an edit touches.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct TruthImage {
@@ -140,7 +171,9 @@ pub(crate) struct TruthImage {
     settings: Option<Settings>,
     /// The mates and values, when the edit changed them.
     pub(crate) design: Option<Design>,
-    next_id: u32,
+    /// The configurations and what they hold, when the edit changed them.
+    pub(crate) configured: Option<Configured>,
+    pub(crate) next_id: u32,
 }
 
 /// An open assembly.
@@ -163,6 +196,10 @@ pub struct AssemblyDocument {
     levels: Option<LevelWorker>,
     exact: HashMap<DefinitionIndex, Arc<Mutex<PartDocument>>>,
     pub(crate) drag: Option<crate::mates::drag::Drag>,
+    /// True while the exploded view is shown.
+    pub(crate) exploded: bool,
+    /// The occurrences the shown exploded view moved, to put back on collapse.
+    pub(crate) explode_moved: Vec<OccurrencePath>,
     pub(crate) motion: Option<crate::interference::motion::Motion>,
     pub(crate) motion_report: Option<crate::interference::motion::MotionReport>,
     undo: Vec<Record>,
@@ -290,6 +327,8 @@ impl AssemblyDocument {
             levels: None,
             exact: HashMap::new(),
             drag: None,
+            exploded: false,
+            explode_moved: Vec::new(),
             motion: None,
             motion_report: None,
             undo: Vec::new(),
@@ -746,6 +785,7 @@ impl AssemblyDocument {
             colours: None,
             settings: None,
             design: None,
+            configured: None,
             next_id: self.assembly.next_id,
         }
     }
@@ -775,6 +815,22 @@ impl AssemblyDocument {
         self.redo.clear();
     }
 
+    /// Takes the truth now as the undo step `label` from `before`, with no rows to restore.
+    pub(crate) fn push_record(&mut self, label: &str, before: TruthImage) {
+        self.solver_status = None;
+        let after = self.reimage(&before);
+        self.undo.push(Record {
+            label: label.to_owned(),
+            before,
+            after,
+            rows_before: Vec::new(),
+            rows_after: Vec::new(),
+            added: Vec::new(),
+            removed: Vec::new(),
+        });
+        self.redo.clear();
+    }
+
     fn reimage(&self, like: &TruthImage) -> TruthImage {
         TruthImage {
             components: like.components.iter().map(|(c, _)| (*c, self.assembly.component(*c).cloned())).collect(),
@@ -786,6 +842,7 @@ impl AssemblyDocument {
             }),
             settings: like.settings.as_ref().map(|_| self.assembly.settings.clone()),
             design: like.design.as_ref().map(|_| Design::of(&self.assembly)),
+            configured: like.configured.as_ref().map(|_| Configured::of(&self.assembly)),
             next_id: self.assembly.next_id,
         }
     }
@@ -839,7 +896,7 @@ impl AssemblyDocument {
     }
 
     /// Moves table rows to new placements together, noting what moved for the display.
-    fn place_rows(&mut self, rows: &[(OccurrenceIndex, Placement)]) {
+    pub(crate) fn place_rows(&mut self, rows: &[(OccurrenceIndex, Placement)]) {
         if rows.is_empty() {
             return;
         }
@@ -1138,6 +1195,10 @@ impl AssemblyDocument {
             return Err(EditError::Invalid(format!("delete its mates first: {}", held.join(", "))));
         }
         let mut before = self.image(components, &[]);
+        if !self.assembly.configurations.is_empty() || !self.assembly.explode.is_empty() {
+            before.configured = Some(Configured::of(&self.assembly));
+            self.assembly.forget_configured(&gone);
+        }
         let overrides: Vec<OccurrencePath> = self
             .assembly
             .overrides
@@ -1209,6 +1270,12 @@ impl AssemblyDocument {
             log_problem(&e.to_string());
         }
         self.start_loading(lookup);
+        // The new rows sit where the truth puts them; show the exploded view again on them.
+        if self.exploded {
+            self.exploded = false;
+            self.explode_moved.clear();
+            self.show_explode();
+        }
     }
 
     /// How many accepted edits this assembly can undo.
@@ -1251,6 +1318,9 @@ impl AssemblyDocument {
 
     fn apply_record(&mut self, r: &Record, undo: bool) {
         let (image, rows) = if undo { (&r.before, &r.rows_before) } else { (&r.after, &r.rows_after) };
+        if let Some(configured) = &image.configured {
+            configured.restore(&mut self.assembly);
+        }
         for (id, c) in &image.components {
             self.assembly.components.retain(|x| x.id != *id);
             if let Some(c) = c {
@@ -1302,6 +1372,7 @@ impl AssemblyDocument {
                 .iter()
                 .any(|p| p.seeds.iter().any(|s| image.components.iter().any(|(c, _)| c == s)));
         let structural = !image.sources.is_empty()
+            || image.configured.is_some()
             || !image.patterns.is_empty()
             || !r.removed.is_empty()
             || !r.added.is_empty()

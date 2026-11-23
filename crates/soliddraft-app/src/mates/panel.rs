@@ -55,10 +55,14 @@ pub enum Family {
     ProfileCenter,
     /// A wall or round end of a slot, then the pin's cylinder.
     Slot,
+    /// A flat face whose outline is the path, then a ball whose centre runs along it.
+    Path,
+    /// The cam's flat end face, then the follower: a roller or a ball.
+    Cam,
 }
 
 impl Family {
-    pub const ALL: [Family; 20] = [
+    pub const ALL: [Family; 22] = [
         Family::Gear,
         Family::RackAndPinion,
         Family::Screw,
@@ -79,6 +83,8 @@ impl Family {
         Family::LimitDistance,
         Family::ProfileCenter,
         Family::Slot,
+        Family::Path,
+        Family::Cam,
     ];
 
     pub fn label(self) -> &'static str {
@@ -103,6 +109,8 @@ impl Family {
             Family::LimitDistance => "Limit Distance",
             Family::ProfileCenter => "Profile Center",
             Family::Slot => "Slot",
+            Family::Path => "Path",
+            Family::Cam => "Cam",
         }
     }
 
@@ -129,6 +137,8 @@ impl Family {
                 | Family::Perpendicular
                 | Family::Lock
                 | Family::LinearCoupler
+                | Family::Path
+                | Family::Cam
         )
     }
 }
@@ -354,6 +364,8 @@ fn add(state: &mut AppState) {
             Family::Symmetric => "Pick the face, its mirror image, then the symmetry plane",
             Family::Slot => "Pick a wall or round end of the slot, then the pin",
             Family::UniversalJoint => "Pick the input shaft, then the output shaft",
+            Family::Path => "Pick the flat face whose outline is the path, then a ball",
+            Family::Cam => "Pick the cam's flat end face, then the roller or ball",
             _ => "Pick two faces first",
         };
         state.assembly.mate.error = Some(wanted.into());
@@ -395,6 +407,8 @@ fn add(state: &mut AppState) {
         }
         Family::Lock => s.doc.mate_lock(&name, picked[0].component, picked[1].component, false),
         Family::UniversalJoint => s.doc.mate_universal_joint(&name, a, b, false),
+        Family::Path => s.doc.mate_path(&name, a, b, false),
+        Family::Cam => s.doc.mate_cam(&name, a, b, false),
         Family::Concentric => s.doc.mate_concentric(&name, a, b, alignment, lock_rotation, false),
         Family::Tangent => s.doc.mate_tangent(&name, a, b, alignment, false),
         Family::Hinge => {
@@ -434,6 +448,7 @@ pub fn apply(state: &mut AppState, action: MateAction) {
             state.assembly.mate.open = !state.assembly.mate.open;
             if state.assembly.mate.open {
                 state.assembly.interference.open = false;
+                state.assembly.configure.open = false;
             }
         }
         MateAction::Pick(path, name) => pick(state, &path, &name),
@@ -647,6 +662,8 @@ fn details(ui: &mut egui::Ui, state: &mut AppState) {
         Family::Symmetric => &["Face", "Mirror image", "Symmetry plane"],
         Family::Slot => &["Slot", "Pin"],
         Family::UniversalJoint => &["Input shaft", "Output shaft"],
+        Family::Path => &["Path face", "Ball"],
+        Family::Cam => &["Cam end face", "Follower"],
         _ => &["First face", "Second face"],
     };
     for (label, slot) in slots.iter().zip([&d.a, &d.b, &d.c, &d.d]) {

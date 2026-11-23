@@ -69,7 +69,7 @@ pub fn table_bounds(sheet: &Sheet) -> Vec<[f64; 4]> {
         .tables
         .iter()
         .map(|t| {
-            let (w, h) = revision_table_size(t.revisions.len());
+            let (w, h) = t.size();
             [t.position.u, t.position.v - h, t.position.u + w, t.position.v]
         })
         .collect()
@@ -91,8 +91,10 @@ fn symbol_zones(sheet: &Sheet, revision: &str, ctx: &Context<'_>) -> String {
 /// Every table of a sheet as items.
 pub(super) fn table_items(_drawing: &Drawing, sheet: &Sheet, ctx: &Context<'_>, items: &mut Vec<Item>) {
     for (i, table) in sheet.tables.iter().enumerate() {
-        if table.kind == TableKind::Revision {
-            revision_items(sheet, table, Owner::Table(i), ctx, items);
+        match table.kind {
+            TableKind::Revision => revision_items(sheet, table, Owner::Table(i), ctx, items),
+            TableKind::Bom => bom_items(table, Owner::Table(i), ctx, items),
+            TableKind::Hole => {}
         }
     }
 }
@@ -166,4 +168,88 @@ fn revision_items(sheet: &Sheet, table: &Table, owner: Owner, ctx: &Context<'_>,
             x += cw;
         }
     }
+}
+
+/// A bill of materials: a title row, a heading row, then one row per part, item numbers
+/// as the balloons carry them.
+fn bom_items(table: &Table, owner: Owner, ctx: &Context<'_>, items: &mut Vec<Item>) {
+    use crate::assembly::{BOM_COLUMNS, bom_table_size};
+    let lines = &ctx.format.lines;
+    let (w, h) = bom_table_size(table.bom.len());
+    let (x0, top) = (table.position.u, table.position.v);
+    let mut path = |p: kurbo::BezPath, width: f64, role: Role| {
+        items.push(Item::Path(PathItem { path: p, width, dash: None, role, owner, fill: false, accuracy: None }));
+    };
+    path(rect(x0, top - h, x0 + w, top), lines.border, Role::Border);
+    for r in 1..(table.bom.len() + 2) {
+        let y = top - ROW * r as f64;
+        path(line(Point2::new(x0, y), Point2::new(x0 + w, y)), lines.thin, Role::Thin);
+    }
+    let mut x = x0;
+    for (i, (_, cw)) in BOM_COLUMNS.iter().enumerate() {
+        if i > 0 {
+            path(line(Point2::new(x, top - ROW), Point2::new(x, top - h)), lines.thin, Role::Thin);
+        }
+        x += cw;
+    }
+    let mut text = |pos: Point2, t: String, height: f64, align: Align, weight: Weight, role: Role| {
+        items.push(Item::Text(TextItem {
+            pos,
+            height,
+            angle: 0.0,
+            text: t,
+            halign: align,
+            valign: VAlign::Centre,
+            weight,
+            role,
+            owner,
+        }));
+    };
+    text(
+        Point2::new(x0 + w / 2.0, top - ROW / 2.0),
+        "BILL OF MATERIALS".into(),
+        2.5,
+        Align::Centre,
+        Weight::Medium,
+        Role::Text,
+    );
+    let mut x = x0;
+    for (heading, cw) in BOM_COLUMNS {
+        text(
+            Point2::new(x + cw / 2.0, top - 1.5 * ROW),
+            heading.into(),
+            1.8,
+            Align::Centre,
+            Weight::Regular,
+            Role::Label,
+        );
+        x += cw;
+    }
+    for (r, row) in table.bom.iter().enumerate() {
+        let y = top - ROW * (r as f64 + 2.5);
+        let file = row.file.rsplit('/').next().unwrap_or(&row.file).to_owned();
+        let cells = [row.item.to_string(), row.name.clone(), file, row.quantity.to_string()];
+        let mut x = x0;
+        for (i, (cell, (_, cw))) in cells.into_iter().zip(BOM_COLUMNS).enumerate() {
+            let (pos, align) = if i == 1 || i == 2 {
+                (Point2::new(x + 1.5, y), Align::Left)
+            } else {
+                (Point2::new(x + cw / 2.0, y), Align::Centre)
+            };
+            text(pos, fitted(&cell, cw - 3.0, 2.5), 2.5, align, Weight::Regular, Role::Text);
+            x += cw;
+        }
+    }
+}
+
+/// `text` cut to fit `width` millimetres at `height`, ending in an ellipsis when cut.
+fn fitted(text: &str, width: f64, height: f64) -> String {
+    if crate::text::text_width(text, height) <= width {
+        return text.to_owned();
+    }
+    let mut out: String = text.to_owned();
+    while !out.is_empty() && crate::text::text_width(&format!("{out}…"), height) > width {
+        out.pop();
+    }
+    format!("{out}…")
 }

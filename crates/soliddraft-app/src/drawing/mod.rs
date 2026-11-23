@@ -1180,13 +1180,13 @@ fn rebuild_assembly(state: &mut AppState) {
     let wanted = state.drawing.session.as_ref().and_then(|s| s.doc.drawing.model.id);
     let open = state.assembly.session.as_ref().map(|a| a.doc.id());
     if open.is_none() || open != wanted {
-        let file = state.drawing.session.as_ref().and_then(DrawingSession::model_file);
-        let said = match file {
-            Some(path) => {
+        let said = match model_to_open(state) {
+            Ok(Some(path)) => {
                 state.push(crate::state::AppAction::Assembly(crate::assembly::AssemblyAction::Open(path.clone())));
                 format!("Opening {}; Rebuild again once it shows", path.display())
             }
-            None => "The drawing's assembly could not be found".to_owned(),
+            Ok(None) => "The drawing's assembly could not be found".to_owned(),
+            Err(e) => e,
         };
         if let Some(s) = state.drawing.session.as_mut() {
             s.say(said);
@@ -1312,18 +1312,28 @@ fn open_model(state: &mut AppState) {
     }
 }
 
-/// The drawing's part file to open in the part tab: `None` when it is the open part
-/// or was not found, and an error when the open part has unsaved changes.
+/// The drawing's model file to open: `None` when it is the open part or assembly or was
+/// not found, and an error when the part or assembly it would replace has unsaved changes.
 pub(crate) fn model_to_open(state: &AppState) -> Result<Option<PathBuf>, String> {
     let Some(session) = state.drawing.session.as_ref() else { return Ok(None) };
     let Some(file) = session.model_file() else { return Ok(None) };
     if session.model_is(state.doc.model().id()) {
         return Ok(None);
     }
-    // An assembly opens in its own tab; the open part does not matter.
+    // An assembly opens in its own tab, in place of the open assembly: the open part does
+    // not matter, but unsaved edits to the open assembly hold it back.
     if session.doc.drawing.model.kind == DocKind::Assembly {
-        let open = state.assembly.session.as_ref().map(|a| a.doc.id());
-        return Ok((open != session.doc.drawing.model.id).then_some(file));
+        let Some(open) = state.assembly.session.as_ref() else { return Ok(Some(file)) };
+        if Some(open.doc.id()) == session.doc.drawing.model.id {
+            return Ok(None);
+        }
+        if open.doc.is_dirty() {
+            return Err(format!(
+                "{} has unsaved changes; the drawing's assembly was not opened",
+                open.doc.assembly().name
+            ));
+        }
+        return Ok(Some(file));
     }
     if state.doc.dirty {
         return Err(format!("{} has unsaved changes; the drawing's part was not opened", state.doc.name));

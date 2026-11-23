@@ -414,7 +414,15 @@ fn details_sheet(ui: &mut egui::Ui, state: &mut AppState, anchor: egui::Rect) {
     }
     let screen = ui.ctx().input(|input| input.content_rect());
     let width = 380.0_f32.min(screen.width() - 16.0);
-    let left = anchor.left().clamp(screen.left() + 8.0, (screen.right() - width - 8.0).max(screen.left() + 8.0));
+    // A sheet opened from the bar's left half drops over the side column, not over the
+    // model: the bar starts at the viewport's edge, and a sheet under its button would
+    // cover the part the sheet is about.
+    let column = egui::PanelState::load(ui.ctx(), crate::panels::Side::Tree.panel_id())
+        .filter(|_| state.tree_shown() && anchor.center().x < screen.center().x)
+        .map(|panel| panel.outer_rect.left());
+    let left = column
+        .unwrap_or(anchor.left())
+        .clamp(screen.left() + 8.0, (screen.right() - width - 8.0).max(screen.left() + 8.0));
     let id = egui::Id::new("document_options_details");
     // The sheet's first pass only measures it: egui draws it invisible and takes no click
     // in it. Run the pass again at once, so the first frame that shows the sheet also

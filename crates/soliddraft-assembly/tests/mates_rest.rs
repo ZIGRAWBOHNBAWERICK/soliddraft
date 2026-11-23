@@ -287,6 +287,15 @@ fn a_path_holds_a_position_and_steers_pitch_yaw_and_roll() {
         position: SlotInput::Distance { distance: "10 mm".into(), flipped: false },
         ..Default::default()
     };
+    let before = r.doc.assembly().clone();
+    for flipped in [false, true] {
+        let negative =
+            PathOptions { position: SlotInput::Distance { distance: "-1 mm".into(), flipped }, ..Default::default() };
+        let result =
+            r.doc.mate_path_with("P", &r.generator(0, GeneratorChoice::EndCap), &corner(&r, 1), &negative, false);
+        assert_eq!(result.unwrap_err().code, RefusalCode::InvalidValue);
+        assert_eq!(r.doc.assembly(), &before);
+    }
     r.doc.mate_path_with("P", &r.generator(0, GeneratorChoice::EndCap), &corner(&r, 1), &on, false).unwrap();
     certified(&mut r.doc, "P");
     let Mate::Path { path, .. } = r.mate("P") else { panic!("a path") };
@@ -335,10 +344,17 @@ fn a_path_holds_a_position_and_steers_pitch_yaw_and_roll() {
     assert!((corner_at(&r) - at).length() < 1e-7);
     r.doc.edit_mates(&[("P".into(), MateEdit::Flipped(false))]).unwrap();
 
-    // Past the end of the path is refused by name and changes nothing.
+    // Edits beyond either end of the path are refused by name and change nothing.
     let before = r.doc.assembly().clone();
-    let refused = r.doc.edit_mates(&[("P".into(), MateEdit::Distance("400 mm".into()))]).unwrap_err();
-    assert!(refused.message.contains("path"), "{}", refused.message);
+    for distance in ["-1 mm", "400 mm"] {
+        let refused = r.doc.edit_mates(&[("P".into(), MateEdit::Distance(distance.into()))]).unwrap_err();
+        assert_eq!(refused.code, RefusalCode::InvalidValue);
+        assert!(refused.message.contains("path"), "{}", refused.message);
+        assert_eq!(r.doc.assembly(), &before);
+    }
+    r.doc.set_controller_mates(&["P".into()]).unwrap();
+    let before = r.doc.assembly().clone();
+    assert_eq!(r.doc.apply_controller_values(&[-1.0]).unwrap_err().code, RefusalCode::InvalidValue);
     assert_eq!(r.doc.assembly(), &before);
 
     // Saved and reopened it holds; a later mate goes on top: a second block halfway round.
@@ -400,6 +416,13 @@ fn a_pin_rides_an_arc_slot_in_each_position_mode() {
         );
         let end = r.nearest(0, SurfaceKind::Cylinder, DVec3::new(25.0, -4.0, 5.0));
         let side = r.nearest(1, SurfaceKind::Cylinder, DVec3::ZERO);
+        if let SlotInput::Distance { flipped, .. } = mode {
+            let before = r.doc.assembly().clone();
+            let negative = SlotInput::Distance { distance: "-1 mm".into(), flipped };
+            let result = r.doc.mate_slot("S", &end, &side, Alignment::Aligned, &negative, false, false);
+            assert_eq!(result.unwrap_err().code, RefusalCode::InvalidValue);
+            assert_eq!(r.doc.assembly(), &before);
+        }
         r.doc.mate_slot("S", &end, &side, Alignment::Aligned, &mode, false, false).unwrap();
         certified(&mut r.doc, "S");
         let a = angle(&r);
@@ -430,7 +453,7 @@ fn a_pin_rides_an_arc_slot_in_each_position_mode() {
     let a = angle(&r);
     assert!(a > 0.1 && a < quarter - 0.1, "{a}");
 
-    // Edited to a distance, then refused past the slot's length; nothing changes.
+    // Edits beyond either end of the slot are refused without changing the assembly.
     let mut r = rig(
         "arc-slot-edit",
         &[(&arc_slotted, Placement::IDENTITY), (&pin, Placement::translation(DVec3::new(20.0, 22.0, 30.0)))],
@@ -442,7 +465,14 @@ fn a_pin_rides_an_arc_slot_in_each_position_mode() {
     r.doc.edit_mates(&[("S".into(), MateEdit::Distance("30 mm".into()))]).unwrap();
     assert!((angle(&r) - 30.0 / 25.0).abs() < 1e-7);
     let before = r.doc.assembly().clone();
-    assert!(r.doc.edit_mates(&[("S".into(), MateEdit::Distance("50 mm".into()))]).is_err());
+    for distance in ["-1 mm", "50 mm"] {
+        let refused = r.doc.edit_mates(&[("S".into(), MateEdit::Distance(distance.into()))]).unwrap_err();
+        assert_eq!(refused.code, RefusalCode::InvalidValue);
+    }
+    assert_eq!(r.doc.assembly(), &before);
+    r.doc.set_controller_mates(&["S".into()]).unwrap();
+    let before = r.doc.assembly().clone();
+    assert_eq!(r.doc.apply_controller_values(&[-1.0]).unwrap_err().code, RefusalCode::InvalidValue);
     assert_eq!(r.doc.assembly(), &before);
 
     // Saved and reopened it holds; a later Distance on top takes the pin's height.
@@ -609,6 +639,7 @@ fn physical_dynamics_pushes_what_the_dragged_part_meets() {
     wait_motion(&mut r.doc);
     let report = r.doc.drag_report().unwrap().clone();
     assert!(report.stopped, "{report:?}");
+    assert_eq!(report.pushed, [occurrence(r.ids[2])], "{report:?}");
     assert!(x(&r, 2) <= 34.0 && x(&r, 2) > 33.97, "{}", x(&r, 2));
     assert!((x(&r, 3) - 40.0).abs() < 1e-12);
     r.doc.commit_drag().unwrap();
@@ -647,8 +678,8 @@ fn bezier_distance(c: [DVec3; 4], p: DVec3) -> f64 {
     d(best)
 }
 
-/// A cam whose top is a spline arch: a clamped cubic through (-20, 0), (-20, 30), (20, 30)
-/// and (20, 0), closed by a line along the bottom.
+/// A cam with a clamped cubic arch and a straight base. The cubic's control points are
+/// (-20, 0), (-20, 30), (20, 30) and (20, 0).
 fn arch(p: &Path) {
     prism(p, 10.0, |s| {
         let points = vec![P2::new(-20.0, 0.0), P2::new(-20.0, 30.0), P2::new(20.0, 30.0), P2::new(20.0, 0.0)];
@@ -708,8 +739,22 @@ fn a_roller_rides_a_spline_cam_and_a_corner_runs_a_spline_path() {
     let quarter = PathOptions { position: SlotInput::Percent { percent: 25.0, flipped: false }, ..Default::default() };
     r.doc.mate_path_with("P", &r.generator(0, GeneratorChoice::EndCap), &corner(&r, 1), &quarter, false).unwrap();
     certified(&mut r.doc, "P");
-    let p = r.placement(1).apply(DVec3::new(3.0, 3.0, 0.0));
-    let on = bezier_distance(curve, DVec3::new(p.x, p.y, 0.0)).min(if p.y.abs() < 1e-7 { 0.0 } else { f64::MAX });
-    assert!(on < 1e-7 && (p.z - 10.0).abs() < 1e-7, "on the arch's outline: {p}");
+    let Mate::Path { path, .. } = r.mate("P") else { panic!("a path") };
+    let Some(StoredSupport::Outline { pieces, .. }) = &path.support else { panic!("an outline") };
+    assert_eq!(pieces.len(), 2);
+    assert_eq!(pieces[0].from[0].abs(), 20.0);
+    let start_side = pieces[0].from[0].signum();
+    let starts_on_spline = pieces[0].spline.is_some();
+    // Integrating the Bezier's speed hypot(240t(1-t), 90(1-2t)) gives 67.443045184743 mm.
+    // The 40 mm closing line puts the quarter at 26.860761296186 mm, or t = 0.385931611690
+    // from the spline's start. The other direction runs along the line for all 26.86 mm.
+    let on_spline = DVec3::new(start_side * 6.725_366_344_737, 21.328_956_250_953, 10.0);
+    let on_line = DVec3::new(-start_side * 6.860_761_296_186, 0.0, 10.0);
+    let [forward, backward] = if starts_on_spline { [on_spline, on_line] } else { [on_line, on_spline] };
+    let corner_at = |r: &Rig| r.placement(1).apply(DVec3::new(3.0, 3.0, 0.0));
+    assert!(corner_at(&r).distance(forward) < 1e-7, "{} against {forward}", corner_at(&r));
+    r.doc.edit_mates(&[("P".into(), MateEdit::Flipped(true))]).unwrap();
+    certified(&mut r.doc, "P");
+    assert!(corner_at(&r).distance(backward) < 1e-7, "{} against {backward}", corner_at(&r));
     std::fs::remove_dir_all(r.dir).unwrap();
 }

@@ -46,15 +46,15 @@ async function click(label) {
 }
 
 await load();
-const initial = await until(viewport, view => view?.triangles > 0, 'The demo part did not draw');
+const initial = await until(viewport, view => view?.curves_settled && view.triangles > 0, 'The demo part did not draw');
 await page.press('Control+Alt+p');
 await page.type('Preferences');
 await page.press('Enter');
 await click('Preferences: Graphics');
 await click('Graphics preset: Performance');
 await until(settings, s => s?.preset === 'performance' && s.curved_surfaces === 'coarse', 'Performance did not save');
-const coarse = await until(viewport, v => v?.angle_deg === 15 && v.chord_mm > initial.chord_mm
-  && v.triangles > 0, 'Coarse mesh did not draw');
+const coarse = await until(viewport, v => v?.curves_settled && v.angle_deg === 15
+  && v.standard_chord_mm === initial.standard_chord_mm * 4 && v.triangles > 0, 'Coarse mesh did not draw');
 
 await click('Graphics preset: Quality');
 await until(settings, s => s?.preset === 'quality' && s.curved_surfaces === 'fine', 'Quality did not save');

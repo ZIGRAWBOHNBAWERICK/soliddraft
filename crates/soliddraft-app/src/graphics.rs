@@ -132,7 +132,7 @@ impl Graphics {
             }
             GraphicsPreset::Quality => {
                 self.curved_surfaces = Some(CurvedSurfaces::Fine);
-                self.samples = device.samples.iter().copied().max().unwrap_or(1);
+                self.samples = device.samples.iter().copied().filter(|n| *n <= 4).max().unwrap_or(1);
                 self.still_supersampling = device.supersampling();
             }
             GraphicsPreset::Custom => {}

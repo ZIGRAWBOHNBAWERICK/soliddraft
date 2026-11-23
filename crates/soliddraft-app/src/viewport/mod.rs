@@ -593,6 +593,9 @@ impl ViewportState {
             "triangles": doc.display_body().and_then(|body| doc.meshes.get(&body)).map_or(0, |mesh| mesh.indices.len() / 3),
             "chord_mm": doc.tess_params.chord_height,
             "angle_deg": doc.tess_params.surface_angle_deg,
+            "standard_chord_mm": doc.display_quality().levels().params(soliddraft_tessellation::Level::Standard).chord_height,
+            "curves_settled": !doc.display_quality().pending() && doc.display_quality().shown().is_some_and(|level|
+                doc.display_quality().levels().params(level) == &doc.tess_params),
         }));
         if scene.axes.contains(&true) {
             self.paint_origin_axes(&painter, scene.reach, rect, scene.axes);

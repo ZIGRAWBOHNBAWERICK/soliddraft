@@ -361,7 +361,7 @@ fn icon_button(
 }
 
 fn utility_text_button(ui: &mut egui::Ui, icon: Icon, text: &str, tip: &str) -> egui::Response {
-    let galley = ui.painter().layout_no_wrap(text.to_owned(), theme::font_medium(11.5), theme::muted());
+    let galley = ui.painter().layout_no_wrap(text.to_owned(), theme::font_medium(11.5), Color32::PLACEHOLDER);
     let size = vec2(galley.size().x + 28.0, 24.0);
     let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, text));
@@ -424,11 +424,11 @@ fn donate_button(ui: &mut egui::Ui) {
                     .color(theme::muted()),
             );
             ui.add_space(6.0);
-            if ui.button("Support on Ko-fi ↗").on_hover_text(KOFI_URL).clicked() {
+            if ui.button("Support on Ko-fi").on_hover_text(KOFI_URL).clicked() {
                 ui.ctx().open_url(egui::OpenUrl::new_tab(KOFI_URL));
                 ui.close();
             }
-            if ui.button("GitHub Sponsors ↗").on_hover_text(SPONSORS_URL).clicked() {
+            if ui.button("GitHub Sponsors").on_hover_text(SPONSORS_URL).clicked() {
                 ui.ctx().open_url(egui::OpenUrl::new_tab(SPONSORS_URL));
                 ui.close();
             }

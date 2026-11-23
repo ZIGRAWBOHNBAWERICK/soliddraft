@@ -207,14 +207,14 @@ fn d1_bottom_bar_popovers_floating_view_bar_preferences_and_sketch_mode() {
         assert!(app.query_by_label("Apply").is_some());
         assert!(app.query_by_label("OK").is_some());
 
-        let initial_preset = app.state().state.navigation.preset.clone();
+        let initial_preset = app.state().state.navigation.preset_id.clone();
         app.get_by_label("SOLIDWORKS").click();
         app.run_steps(4);
-        assert_eq!(app.state().state.navigation.preset, "solidworks");
+        assert_eq!(app.state().state.navigation.preset_id, "solidworks");
         app.get_by_label("Cancel").click();
         app.run_steps(6);
         assert!(app.state().preferences.is_none());
-        assert_eq!(app.state().state.navigation.preset, initial_preset, "Cancel reverts changes");
+        assert_eq!(app.state().state.navigation.preset_id, initial_preset, "Cancel reverts changes");
 
         // Sketch mode: top strip switches to Sketch with red Close sketch button.
         app.state_mut().state.doc.selection = Some(Selection::Reference(Reference::Plane(PlaneKind::Top)));

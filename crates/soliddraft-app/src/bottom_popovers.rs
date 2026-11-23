@@ -256,12 +256,20 @@ pub fn show_right_controls(ui: &mut egui::Ui, state: &mut AppState) {
     physical_analysis_control(ui, state);
 }
 
-fn bar_pill(ui: &mut egui::Ui, icon: Option<Icon>, text: &str, accessible: &str, active: bool) -> egui::Response {
+fn bar_pill(
+    ui: &mut egui::Ui,
+    icon: Option<Icon>,
+    text: &str,
+    accessible: &str,
+    active: bool,
+    caret: bool,
+) -> egui::Response {
     let font = theme::font_medium(11.5);
-    let galley = ui.painter().layout_no_wrap(text.to_owned(), font, theme::ink());
+    let galley = ui.painter().layout_no_wrap(text.to_owned(), font, egui::Color32::PLACEHOLDER);
     let icon_pad = if icon.is_some() { 18.0 } else { 0.0 };
-    let text_pad = if text.is_empty() { 0.0 } else { galley.size().x + 6.0 };
-    let width = (12.0 + icon_pad + text_pad).max(28.0);
+    let text_pad = if text.is_empty() { 0.0 } else { galley.size().x + 4.0 };
+    let caret_pad = if caret { 12.0 } else { 0.0 };
+    let width = (12.0 + icon_pad + text_pad + caret_pad).max(28.0);
     let (rect, resp) = ui.allocate_exact_size(vec2(width, 22.0), Sense::click());
     resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, active, accessible));
     let (fill, stroke, ink) = if active {
@@ -274,7 +282,7 @@ fn bar_pill(ui: &mut egui::Ui, icon: Option<Icon>, text: &str, accessible: &str,
     ui.painter().rect(rect, CornerRadius::same(theme::RADIUS), fill, Stroke::new(1.0, stroke), StrokeKind::Inside);
     let mut x = rect.left() + 7.0;
     if let Some(ic) = icon {
-        let ir = if text.is_empty() {
+        let ir = if text.is_empty() && !caret {
             Rect::from_center_size(rect.center(), vec2(14.0, 14.0))
         } else {
             Rect::from_center_size(pos2(x + 7.0, rect.center().y), vec2(13.0, 13.0))
@@ -284,6 +292,13 @@ fn bar_pill(ui: &mut egui::Ui, icon: Option<Icon>, text: &str, accessible: &str,
     }
     if !text.is_empty() {
         ui.painter().galley(pos2(x, rect.center().y - galley.size().y / 2.0), galley, ink);
+    }
+    if caret {
+        let cx = rect.right() - 9.0;
+        let cy = rect.center().y;
+        let s = Stroke::new(1.3, theme::muted());
+        ui.painter().line_segment([pos2(cx - 3.0, cy + 1.5), pos2(cx, cy - 1.5)], s);
+        ui.painter().line_segment([pos2(cx, cy - 1.5), pos2(cx + 3.0, cy + 1.5)], s);
     }
     resp
 }
@@ -299,7 +314,7 @@ fn physical_analysis_control(ui: &mut egui::Ui, state: &mut AppState) {
         phys.density = phys.density_unit.from_kg_m3(density);
     }
 
-    let resp = bar_pill(ui, Some(Icon::Mass), "", "Physical analysis", false)
+    let resp = bar_pill(ui, Some(Icon::Mass), "", "Physical analysis", false, false)
         .on_hover_text("Physical analysis (mass, volume, area, centre of mass)");
 
     egui::Popup::menu(&resp)
@@ -484,9 +499,8 @@ fn filter_summary(f: crate::viewport::PickFilter) -> &'static str {
 
 fn selection_filter_control(ui: &mut egui::Ui, state: &mut AppState) {
     let summary = filter_summary(state.pick_filter);
-    let label = format!("{summary} ▴");
     let custom = state.pick_filter != crate::viewport::PickFilter::default();
-    let resp = bar_pill(ui, Some(Icon::Filter), &label, "Selection filter", custom)
+    let resp = bar_pill(ui, Some(Icon::Filter), summary, "Selection filter", custom, true)
         .on_hover_text("Selection filter (faces, edges, bodies)");
 
     egui::Popup::menu(&resp)
@@ -511,7 +525,7 @@ fn selection_filter_control(ui: &mut egui::Ui, state: &mut AppState) {
 
 fn units_control(ui: &mut egui::Ui, state: &mut AppState) {
     let short = state.display_unit.short();
-    let resp = bar_pill(ui, None, short, "Default units", false).on_hover_text("Default units for current file");
+    let resp = bar_pill(ui, None, short, "Default units", false, true).on_hover_text("Default units for current file");
 
     egui::Popup::menu(&resp)
         .align(RectAlign::TOP_END)

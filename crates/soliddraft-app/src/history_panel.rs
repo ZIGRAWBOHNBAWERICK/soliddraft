@@ -112,18 +112,18 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
                 let group_w = 5.0 * 28.0 + 4.0 * 4.0;
                 ui.add_space(((avail - group_w) * 0.5).max(0.0));
 
-                if step_btn(ui, "|<", "Roll to start", can_edit && current > 0, false).clicked() {
+                if step_btn(ui, StepIcon::First, "Roll to start", can_edit && current > 0, false).clicked() {
                     pb.playing = false;
                     rollback_to = Some(0);
                 }
-                if step_btn(ui, "<", "Step back", can_edit && current > 0, false).clicked() {
+                if step_btn(ui, StepIcon::Prev, "Step back", can_edit && current > 0, false).clicked() {
                     pb.playing = false;
                     rollback_to = Some(current.saturating_sub(1));
                 }
-                let play_label = if pb.playing { "||" } else { ">" };
+                let play_icon = if pb.playing { StepIcon::Pause } else { StepIcon::Play };
                 let play_tip = if pb.playing { "Pause history playback" } else { "Play history forward" };
                 let play_enabled = can_edit && total > 0;
-                if step_btn(ui, play_label, play_tip, play_enabled, pb.playing).clicked() {
+                if step_btn(ui, play_icon, play_tip, play_enabled, pb.playing).clicked() {
                     if pb.playing {
                         pb.playing = false;
                     } else {
@@ -134,11 +134,11 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
                         }
                     }
                 }
-                if step_btn(ui, ">", "Step forward", can_edit && current < total, false).clicked() {
+                if step_btn(ui, StepIcon::Next, "Step forward", can_edit && current < total, false).clicked() {
                     pb.playing = false;
                     rollback_to = Some((current + 1).min(total));
                 }
-                if step_btn(ui, ">|", "Roll to end", can_edit && current < total, false).clicked() {
+                if step_btn(ui, StepIcon::Last, "Roll to end", can_edit && current < total, false).clicked() {
                     pb.playing = false;
                     rollback_to = Some(total);
                 }
@@ -147,7 +147,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
     theme::hline(ui);
 
     // 2. Scrubber footer height reserved so the list scrolls cleanly above it.
-    let footer_h = 30.0;
+    let footer_h = 36.0;
     let list_h = (ui.available_height() - footer_h).max(40.0);
 
     let selected_feature = state.selected_feature();
@@ -231,19 +231,23 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
     // 3. Rollback scrubber slider at bottom of History pane
     ui.add_space(2.0);
     theme::hline(ui);
-    egui::Frame::new().inner_margin(egui::Margin::symmetric(10, 4)).show(ui, |ui| {
-        let mut step = current;
-        ui.spacing_mut().slider_width = (ui.available_width() - 4.0).max(40.0);
-        let slider = ui.add_enabled(
-            can_edit && total > 0,
-            egui::Slider::new(&mut step, 0..=total.max(1)).show_value(false),
-        );
-        slider.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Slider, can_edit && total > 0, "History rollback scrubber"));
-        if slider.changed() && step != current {
-            pb.playing = false;
-            rollback_to = Some(step);
-        }
-    });
+    egui::Frame::new()
+        .inner_margin(egui::Margin { left: 10, right: 10, top: 6, bottom: 8 })
+        .show(ui, |ui| {
+            let mut step = current;
+            ui.spacing_mut().slider_width = (ui.available_width() - 4.0).max(40.0);
+            let slider = ui.add_enabled(
+                can_edit && total > 0,
+                egui::Slider::new(&mut step, 0..=total.max(1)).show_value(false),
+            );
+            slider.widget_info(|| {
+                egui::WidgetInfo::labeled(egui::WidgetType::Slider, can_edit && total > 0, "History rollback scrubber")
+            });
+            if slider.changed() && step != current {
+                pb.playing = false;
+                rollback_to = Some(step);
+            }
+        });
 
     ui.data_mut(|d| d.insert_temp(pb_id, pb));
 
@@ -256,7 +260,17 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
     }
 }
 
-fn step_btn(ui: &mut egui::Ui, glyph: &str, tip: &str, enabled: bool, active: bool) -> egui::Response {
+#[derive(Clone, Copy)]
+enum StepIcon {
+    First,
+    Prev,
+    Play,
+    Pause,
+    Next,
+    Last,
+}
+
+fn step_btn(ui: &mut egui::Ui, icon: StepIcon, tip: &str, enabled: bool, active: bool) -> egui::Response {
     let sense = if enabled { Sense::click() } else { Sense::hover() };
     let (rect, resp) = ui.allocate_exact_size(vec2(28.0, 22.0), sense);
     resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, enabled, active, tip));
@@ -274,6 +288,45 @@ fn step_btn(ui: &mut egui::Ui, glyph: &str, tip: &str, enabled: bool, active: bo
         Stroke::new(1.0, if active { theme::accent() } else { theme::line() }),
         StrokeKind::Inside,
     );
-    ui.painter().text(rect.center(), Align2::CENTER_CENTER, glyph, theme::font_semibold(10.5), ink);
+    let c = rect.center();
+    let p = ui.painter();
+    let s = Stroke::new(1.5, ink);
+    match icon {
+        StepIcon::First => {
+            p.line_segment([pos2(c.x - 4.0, c.y - 4.0), pos2(c.x - 4.0, c.y + 4.0)], s);
+            p.add(egui::Shape::convex_polygon(
+                vec![pos2(c.x - 2.0, c.y), pos2(c.x + 4.0, c.y - 4.0), pos2(c.x + 4.0, c.y + 4.0)],
+                ink,
+                Stroke::NONE,
+            ));
+        }
+        StepIcon::Prev => {
+            p.line_segment([pos2(c.x + 2.0, c.y - 4.0), pos2(c.x - 2.5, c.y)], s);
+            p.line_segment([pos2(c.x - 2.5, c.y), pos2(c.x + 2.0, c.y + 4.0)], s);
+        }
+        StepIcon::Play => {
+            p.add(egui::Shape::convex_polygon(
+                vec![pos2(c.x - 3.0, c.y - 4.5), pos2(c.x + 4.5, c.y), pos2(c.x - 3.0, c.y + 4.5)],
+                ink,
+                Stroke::NONE,
+            ));
+        }
+        StepIcon::Pause => {
+            p.rect_filled(Rect::from_center_size(pos2(c.x - 2.5, c.y), vec2(2.2, 8.0)), CornerRadius::same(1), ink);
+            p.rect_filled(Rect::from_center_size(pos2(c.x + 2.5, c.y), vec2(2.2, 8.0)), CornerRadius::same(1), ink);
+        }
+        StepIcon::Next => {
+            p.line_segment([pos2(c.x - 2.0, c.y - 4.0), pos2(c.x + 2.5, c.y)], s);
+            p.line_segment([pos2(c.x + 2.5, c.y), pos2(c.x - 2.0, c.y + 4.0)], s);
+        }
+        StepIcon::Last => {
+            p.add(egui::Shape::convex_polygon(
+                vec![pos2(c.x - 4.0, c.y - 4.0), pos2(c.x + 2.0, c.y), pos2(c.x - 4.0, c.y + 4.0)],
+                ink,
+                Stroke::NONE,
+            ));
+            p.line_segment([pos2(c.x + 4.0, c.y - 4.0), pos2(c.x + 4.0, c.y + 4.0)], s);
+        }
+    }
     resp.on_hover_text(tip)
 }

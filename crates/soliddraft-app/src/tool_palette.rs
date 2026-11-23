@@ -181,7 +181,7 @@ fn workspace_tab(
     selected: bool,
 ) -> egui::Response {
     let font = theme::font_semibold(12.0);
-    let galley = ui.painter().layout_no_wrap(text.to_owned(), font, theme::ink());
+    let galley = ui.painter().layout_no_wrap(text.to_owned(), font, Color32::PLACEHOLDER);
     let size = vec2((galley.size().x + 24.0).max(52.0), 24.0);
     let sense = if enabled { Sense::click() } else { Sense::hover() };
     let (rect, resp) = ui.allocate_exact_size(size, sense);
@@ -226,7 +226,7 @@ fn tool_card(
     let accessible = label(command, state);
 
     let font = if primary { theme::font_semibold(11.0) } else { theme::font_medium(11.0) };
-    let galley = ui.painter().layout_no_wrap(caption, font, theme::ink());
+    let galley = ui.painter().layout_no_wrap(caption, font, Color32::PLACEHOLDER);
     let min_w = if primary { 76.0 } else { 54.0 };
     let width = (galley.size().x + 16.0).max(min_w);
     let height = 48.0;

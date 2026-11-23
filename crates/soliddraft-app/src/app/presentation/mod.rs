@@ -328,7 +328,7 @@ fn part_status(st: &AppState) -> Status {
                 unit.short()
             )
         }
-        _ => unit.short().to_owned(),
+        _ => String::new(),
     };
     Status {
         headline,

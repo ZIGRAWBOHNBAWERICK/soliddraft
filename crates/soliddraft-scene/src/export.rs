@@ -10,7 +10,13 @@
 //! | Hinge with angle limits | revolute, between the limits |
 //! | Hinge without limits | continuous |
 //! | Concentric between axes, without Lock rotation | continuous about the axis |
+//! | Concentric between axes, with Lock rotation | prismatic along the axis |
+//! | Coincident or Distance between two planes | planar, normal to the planes |
+//! | Coincident or Concentric between two points | spherical, about the common point |
 //! | Anything else | fixed, at the pose the assembly holds |
+//!
+//! The prismatic, planar and spherical mappings apply to a pair held by that single
+//! mate. Other constraints between the same bodies can remove more freedoms.
 //!
 //! A Gear mate between two of those joints makes the second follow the first (URDF
 //! `mimic`). The joints form a tree from `base_link`: a mate that would close a loop is
@@ -30,8 +36,9 @@ use glam::{DMat4, DQuat, DVec3};
 use serde::Serialize;
 use soliddraft_assembly::mates::Mechanism;
 use soliddraft_assembly::{
-    AssemblyDocument, DisplayMesh, FaceEndpoint, Flags, Mate, OccurrenceIndex, OccurrencePath, StoredSupport,
+    AssemblyDocument, DisplayMesh, Entity, FaceEndpoint, Flags, Mate, OccurrenceIndex, OccurrencePath, StoredSupport,
 };
+use soliddraft_kernel_api::{EnclosedSupport, ExactRational, SupportBounds};
 
 use crate::JointKind;
 
@@ -72,7 +79,7 @@ pub struct Link {
 pub struct ExportJoint {
     /// A name unique in the file.
     pub name: String,
-    /// How it moves: revolute, continuous or fixed.
+    /// How the child can move relative to the parent.
     pub kind: JointKind,
     /// The parent link.
     pub parent: usize,
@@ -81,9 +88,9 @@ pub struct ExportJoint {
     /// The joint's frame in the parent link's, millimetres; the axis is its X.
     #[serde(skip)]
     pub frame: DMat4,
-    /// The axis in the assembly's frame, for the record.
+    /// The axis in the assembly's frame, for the record. X when the joint has no axis.
     pub axis: [f64; 3],
-    /// Lower and upper limits in degrees, for a revolute joint.
+    /// Lower and upper limits, in degrees for a revolute joint or millimetres for a slide.
     pub limits: Option<[f64; 2]>,
     /// The mates it comes from.
     pub mates: Vec<String>,
@@ -120,29 +127,61 @@ fn safe(name: &str) -> String {
     }
 }
 
+fn enclosed_vector(bounds: &[SupportBounds; 3]) -> DVec3 {
+    let f = |r: &ExactRational| {
+        r.numerator.parse::<f64>().unwrap_or(f64::NAN) / r.denominator.parse::<f64>().unwrap_or(f64::NAN)
+    };
+    DVec3::from_array(bounds.each_ref().map(|b| f(&b.lo) * 0.5 + f(&b.hi) * 0.5))
+}
+
 /// An endpoint's axis, placed: a point on it and its unit direction in the assembly's frame.
 fn axis_of(end: &FaceEndpoint, bodies: &HashMap<OccurrencePath, usize>, worlds: &[Body]) -> Option<(DVec3, DVec3)> {
     let body = &worlds[*bodies.get(&end.path)?];
     let (through, direction) = match end.support.as_ref()? {
         StoredSupport::Axis { direction, through, .. } => {
-            (DVec3::from_array(*through), DVec3::new(direction[0] as f64, direction[1] as f64, direction[2] as f64))
+            (DVec3::from_array(*through), DVec3::from_array(direction.map(f64::from)))
         }
         StoredSupport::Enclosed { support } => match support.as_ref() {
-            soliddraft_kernel_api::EnclosedSupport::Axis { direction, through, .. } => {
-                let f = |r: &soliddraft_kernel_api::ExactRational| {
-                    r.numerator.parse::<f64>().unwrap_or(f64::NAN) / r.denominator.parse::<f64>().unwrap_or(f64::NAN)
-                };
-                let mid = |b: &soliddraft_kernel_api::SupportBounds| (f(&b.lo) + f(&b.hi)) * 0.5;
-                (DVec3::new(mid(&through[0]), mid(&through[1]), mid(&through[2])), {
-                    DVec3::new(mid(&direction[0]), mid(&direction[1]), mid(&direction[2]))
-                })
-            }
+            EnclosedSupport::Axis { direction, through, .. } => (enclosed_vector(through), enclosed_vector(direction)),
             _ => return None,
         },
         _ => return None,
     };
-    let direction = direction.try_normalize()?;
-    Some((body.world.transform_point3(through), body.world.transform_vector3(direction).normalize()))
+    let point = body.world.transform_point3(through);
+    let direction = body.world.transform_vector3(direction).try_normalize()?;
+    point.is_finite().then_some((point, direction))
+}
+
+fn point_of(end: &FaceEndpoint, world: DMat4) -> Option<DVec3> {
+    let point = match end.support.as_ref()? {
+        StoredSupport::Point { at, .. } => DVec3::from_array(*at),
+        StoredSupport::Enclosed { support } => match support.as_ref() {
+            EnclosedSupport::Point { at, .. } => enclosed_vector(at),
+            _ => return None,
+        },
+        _ => return None,
+    };
+    let point = world.transform_point3(point);
+    point.is_finite().then_some(point)
+}
+
+fn plane_of(end: &FaceEndpoint, world: DMat4) -> Option<(DVec3, DVec3)> {
+    let (point, normal) = match (&end.entity, &end.support) {
+        (_, Some(StoredSupport::Enclosed { support })) => match support.as_ref() {
+            EnclosedSupport::Plane { normal, through } => (enclosed_vector(through), enclosed_vector(normal)),
+            _ => return None,
+        },
+        (Entity::Plane(plane), None) => (DVec3::ZERO, DVec3::from_array(plane.normal().map(f64::from))),
+        (Entity::Face(face), None) => {
+            let at = face.fingerprint.centroid;
+            let n = face.fingerprint.normal?;
+            (DVec3::new(at.x, at.y, at.z), DVec3::new(n.x, n.y, n.z))
+        }
+        _ => return None,
+    };
+    let point = world.transform_point3(point);
+    let normal = world.transform_vector3(normal).try_normalize()?;
+    point.is_finite().then_some((point, normal))
 }
 
 /// A frame at `at` whose X is `axis` and whose other axes follow `like` as closely as
@@ -226,6 +265,7 @@ pub fn articulate(doc: &mut AssemblyDocument) -> Result<Articulation, String> {
     struct Edge {
         kind: JointKind,
         axis: Option<(DVec3, DVec3)>,
+        pivot: Option<DVec3>,
         limits: Option<[f64; 2]>,
         mates: Vec<String>,
         joint_mates: Vec<soliddraft_assembly::MateId>,
@@ -235,6 +275,7 @@ pub fn articulate(doc: &mut AssemblyDocument) -> Result<Articulation, String> {
         let mut edge = Edge {
             kind: JointKind::Fixed,
             axis: None,
+            pivot: None,
             limits: None,
             mates: mates.iter().map(|m| m.name().to_owned()).collect(),
             joint_mates: mates.iter().map(|m| m.id()).collect(),
@@ -264,7 +305,31 @@ pub fn articulate(doc: &mut AssemblyDocument) -> Result<Articulation, String> {
                 ));
             }
         }
-        if edge.kind != JointKind::Fixed && edge.axis.is_none() {
+        if edge.kind == JointKind::Fixed
+            && let [mate] = mates.as_slice()
+        {
+            let world = |end: &FaceEndpoint| worlds[bodies[&end.path]].world;
+            match mate {
+                Mate::Concentric { a, lock_rotation: Some(_), alignment: Some(_), .. } => {
+                    edge.axis = axis_of(a, &bodies, &worlds);
+                    edge.kind = JointKind::Prismatic;
+                }
+                Mate::Coincident { a, b, .. } | Mate::Distance { a, b, .. }
+                    if let (Some(plane), Some(_)) = (plane_of(a, world(a)), plane_of(b, world(b))) =>
+                {
+                    edge.axis = Some(plane);
+                    edge.kind = JointKind::Planar;
+                }
+                Mate::Coincident { a, b, .. } | Mate::Concentric { a, b, lock_rotation: None, .. }
+                    if let (Some(point), Some(_)) = (point_of(a, world(a)), point_of(b, world(b))) =>
+                {
+                    edge.pivot = Some(point);
+                    edge.kind = JointKind::Spherical;
+                }
+                _ => {}
+            }
+        }
+        if !matches!(edge.kind, JointKind::Fixed | JointKind::Spherical) && edge.axis.is_none() {
             notes.push(format!("{}: the axis could not be read, so the joint is fixed", edge.mates.join(", ")));
             edge.kind = JointKind::Fixed;
         }
@@ -326,7 +391,7 @@ pub fn articulate(doc: &mut AssemblyDocument) -> Result<Articulation, String> {
             };
             let joint_world = match edge.axis {
                 Some((point, direction)) => axis_frame(point, direction, rotation),
-                None => child_world,
+                None => edge.pivot.map_or(child_world, |point| DMat4::from_rotation_translation(rotation, point)),
             };
             let parent_link = link_of(at);
             let child_link = link_of(next);
@@ -390,8 +455,8 @@ pub fn articulate(doc: &mut AssemblyDocument) -> Result<Articulation, String> {
 
 fn joint_word(kind: JointKind) -> &'static str {
     match kind {
-        JointKind::Revolute | JointKind::Continuous => "joint",
-        _ => "fixed",
+        JointKind::Fixed => "fixed",
+        _ => "joint",
     }
 }
 
@@ -482,6 +547,9 @@ pub fn urdf_files(a: &Articulation, path: &Path) -> Files {
         let kind = match j.kind {
             JointKind::Revolute => "revolute",
             JointKind::Continuous => "continuous",
+            JointKind::Prismatic => "prismatic",
+            JointKind::Planar => "planar",
+            JointKind::Spherical => "spherical",
             _ => "fixed",
         };
         let _ = writeln!(x, "  <joint name=\"{}\" type=\"{kind}\">", escape(&j.name));
@@ -491,16 +559,18 @@ pub fn urdf_files(a: &Articulation, path: &Path) -> Files {
         let _ = writeln!(x, "    <parent link=\"{}\"/>", escape(&a.links[j.parent].name));
         let _ = writeln!(x, "    <child link=\"{}\"/>", escape(&a.links[j.child].name));
         let _ = writeln!(x, "    {}", origin(&j.frame, 0.001));
-        if j.kind != JointKind::Fixed {
+        if matches!(j.kind, JointKind::Revolute | JointKind::Continuous | JointKind::Prismatic | JointKind::Planar) {
             let _ = writeln!(x, "    <axis xyz=\"1 0 0\"/>");
         }
-        if let (JointKind::Revolute, Some([lo, hi])) = (j.kind, j.limits) {
-            let _ = writeln!(
-                x,
-                "    <limit lower=\"{}\" upper=\"{}\" effort=\"0\" velocity=\"0\"/>",
-                num(lo.to_radians()),
-                num(hi.to_radians())
-            );
+        let limits = match j.kind {
+            JointKind::Revolute => j.limits.map(|limits| limits.map(f64::to_radians)),
+            JointKind::Prismatic => {
+                Some(j.limits.map_or([f64::NEG_INFINITY, f64::INFINITY], |limits| limits.map(|mm| mm * 0.001)))
+            }
+            _ => None,
+        };
+        if let Some([lo, hi]) = limits {
+            let _ = writeln!(x, "    <limit lower=\"{}\" upper=\"{}\" effort=\"0\" velocity=\"0\"/>", num(lo), num(hi));
         }
         if let Some((leader, k)) = &j.mimic {
             let _ = writeln!(x, "    <mimic joint=\"{}\" multiplier=\"{}\" offset=\"0\"/>", escape(leader), num(*k));
@@ -615,10 +685,20 @@ pub fn usda_text(a: &Articulation) -> String {
     for j in &a.joints {
         let kind = match j.kind {
             JointKind::Revolute | JointKind::Continuous => "PhysicsRevoluteJoint",
+            JointKind::Prismatic => "PhysicsPrismaticJoint",
+            JointKind::Planar => "PhysicsJoint",
+            JointKind::Spherical => "PhysicsSphericalJoint",
             _ => "PhysicsFixedJoint",
         };
         let (_, rot, pos) = j.frame.to_scale_rotation_translation();
-        let _ = writeln!(x, "        def {kind} \"{}\"\n        {{", j.name);
+        let _ = writeln!(x, "        def {kind} \"{}\"", j.name);
+        if j.kind == JointKind::Planar {
+            let _ = writeln!(
+                x,
+                "        (prepend apiSchemas = [\"PhysicsLimitAPI:transX\", \"PhysicsLimitAPI:rotY\", \"PhysicsLimitAPI:rotZ\"])"
+            );
+        }
+        let _ = writeln!(x, "        {{");
         let _ = writeln!(x, "            rel physics:body0 = <{}>", prim_path[j.parent]);
         let _ = writeln!(x, "            rel physics:body1 = <{}>", prim_path[j.child]);
         let _ = writeln!(x, "            point3f physics:localPos0 = ({}, {}, {})", num(pos.x), num(pos.y), num(pos.z));
@@ -632,11 +712,18 @@ pub fn usda_text(a: &Articulation) -> String {
         );
         let _ = writeln!(x, "            point3f physics:localPos1 = (0, 0, 0)");
         let _ = writeln!(x, "            quatf physics:localRot1 = (1, 0, 0, 0)");
-        if kind == "PhysicsRevoluteJoint" {
+        if matches!(j.kind, JointKind::Revolute | JointKind::Continuous | JointKind::Prismatic) {
             let _ = writeln!(x, "            uniform token physics:axis = \"X\"");
-            if let (JointKind::Revolute, Some([lo, hi])) = (j.kind, j.limits) {
+            if let Some([lo, hi]) = j.limits {
                 let _ = writeln!(x, "            float physics:lowerLimit = {}", num(lo));
                 let _ = writeln!(x, "            float physics:upperLimit = {}", num(hi));
+            }
+        }
+        if j.kind == JointKind::Planar {
+            // The normal is X. A low limit above the high limit locks the DOF in USD.
+            for axis in ["transX", "rotY", "rotZ"] {
+                let _ = writeln!(x, "            float limit:{axis}:physics:low = 1");
+                let _ = writeln!(x, "            float limit:{axis}:physics:high = -1");
             }
         }
         if let Some((leader, k)) = &j.mimic {

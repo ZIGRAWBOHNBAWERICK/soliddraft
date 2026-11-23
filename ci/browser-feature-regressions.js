@@ -87,6 +87,9 @@ async function until(read, accept, message) {
 }
 async function click(name, count = 1) {
   const at = (await until(controls, value => value?.[name], `Missing ${name}`))[name];
+  await clickAt(at, count);
+}
+async function clickAt(at, count = 1) {
   await page.eval(`featureClick(${JSON.stringify(at)}, ${count})`);
   await page.wait(300);
 }
@@ -104,6 +107,13 @@ async function replace(name, value) {
   await page.press('Control+a');
   await page.type(value);
   await page.press('Enter');
+}
+async function parameters(filter) {
+  await command('Parameters', 'configuration_grid');
+  await until(controls, value => value?.['Filter parameters'], 'The parameters pane did not open');
+  // Expand the pane so its rows have room below the new-global controls.
+  await clickAt({ x: 264, y: 759 });
+  await replace('Filter parameters', filter);
 }
 async function open(name) {
   if (name) {
@@ -143,8 +153,7 @@ async function makeDrawing() {
 switch (scenario) {
   case 'depth': {
     await open('wizard-blind-depth.dwprt');
-    await command('Parameters', 'configuration_grid');
-    await replace('Filter parameters', 'Hole1.Depth');
+    await parameters('Hole1.Depth');
     await replace('Default Hole1.Depth', '5 mm');
     await until(() => shown('shown_build'), value => value && !value.pending && !value.reading, 'Edited part is still building');
     const text = await callout();
@@ -159,7 +168,8 @@ switch (scenario) {
   }
   case 'positions': {
     await open('wizard-legacy-positions.dwprt');
-    await click('Tree: Hole1', 2);
+    await click('Tree: Hole1');
+    await command('Edit feature', 'edit_feature');
     await click('Hole Wizard Positions tab');
     await click('Point Patterns');
     await click('Apply linear hole pattern');
@@ -177,8 +187,7 @@ switch (scenario) {
   }
   case 'formula': {
     await open('formula-case-distinct.dwprt');
-    await command('Parameters', 'configuration_grid');
-    await replace('Filter parameters', 'Plate');
+    await parameters('Plate');
     await replace('Name Plate', 'Other');
     const stored = await save();
     const overrides = stored.configurations.rows.find(row => row.name === 'Thin').overrides;

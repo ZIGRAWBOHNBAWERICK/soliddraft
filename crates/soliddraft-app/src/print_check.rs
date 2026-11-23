@@ -103,6 +103,23 @@ pub fn show(ctx: &egui::Context, state: &mut AppState) {
     let mut coarser = None;
     let mut cancel = false;
     egui::Window::new("Print check").open(&mut open).default_width(540.0).show(ctx, |ui| {
+        #[cfg(target_arch = "wasm32")]
+        crate::web::show_print_check(serde_json::json!({
+            "format": dialog.format.name(),
+            "route": if dialog.field_route { "distance field" } else { "boundary model" },
+            "requested_mm": dialog.requested_mm,
+            "state": match &dialog.result {
+                _ if stale => "stale",
+                None => "checking",
+                Some(Err(_)) => "refused",
+                Some(Ok(_)) => "checked",
+            },
+            "message": match &dialog.result {
+                Some(Err(error)) => refusal_message(error),
+                Some(Ok(output)) => output.report.summary(),
+                None => String::new(),
+            },
+        }));
         ui.label(format!("{} export to {}", dialog.format.name(), dialog.path.display()));
         if stale {
             ui.label("The part changed. Close this report and export again.");
@@ -171,7 +188,10 @@ pub fn show(ctx: &egui::Context, state: &mut AppState) {
                     }
                     _ => {}
                 }
-                if ui.button("Save checked export").clicked() {
+                let button = ui.button("Save checked export");
+                #[cfg(target_arch = "wasm32")]
+                crate::web::show_control("Save checked export", button.rect);
+                if button.clicked() {
                     save = true;
                 }
             }
@@ -179,7 +199,10 @@ pub fn show(ctx: &egui::Context, state: &mut AppState) {
         if let Some(error) = &dialog.write_error {
             ui.label(error);
         }
-        if ui.button("Cancel").clicked() {
+        let button = ui.button("Cancel");
+        #[cfg(target_arch = "wasm32")]
+        crate::web::show_control("Print check: Cancel", button.rect);
+        if button.clicked() {
             cancel = true;
         }
     });

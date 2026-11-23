@@ -561,6 +561,13 @@ paths = ["crates/soliddraft-model/src/values.rs", "crates/soliddraft-model/src/p
 module = ["values", "params"]
 
 [[areas]]
+name = "model.thread"
+owner = "core"
+crate = "soliddraft-model"
+paths = ["crates/soliddraft-model/src/thread.rs"]
+module = ["thread"]
+
+[[areas]]
 name = "model.value_expr"
 owner = "core"
 crate = "soliddraft-model"

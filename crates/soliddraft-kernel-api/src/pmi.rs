@@ -554,11 +554,12 @@ impl<F> PmiItem<F> {
             PmiKind::Datum { letter, feature: faces } => {
                 PmiKind::Datum { letter: letter.clone(), feature: feature(faces)? }
             }
-            PmiKind::Size { size, features, tolerance, through, nominal } => PmiKind::Size {
+            PmiKind::Size { size, features, tolerance, through, thread, nominal } => PmiKind::Size {
                 size: *size,
                 features: features.iter().map(&mut feature).collect::<Result<_, _>>()?,
                 tolerance: *tolerance,
                 through: *through,
+                thread: thread.clone(),
                 nominal: *nominal,
             },
             PmiKind::Location { from, to, tolerance, nominal } => PmiKind::Location {
@@ -634,6 +635,11 @@ pub enum PmiKind<F> {
         /// The size is a hole's diameter and the hole goes through the part.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         through: bool,
+        /// The feature is threaded: its designation, such as `M6x1-6H`. The diameter is
+        /// then that of the hole the thread is cut in, and the designation states the
+        /// thread's own size and fit, so the item takes no tolerance.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        thread: Option<String>,
         /// The value a STEP file stated, in millimetres. `None` in a part: the size is
         /// measured on the body.
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -862,12 +868,23 @@ impl<F: PartialEq> Pmi<F> {
                 }
                 None
             }
-            PmiKind::Size { size, features, tolerance, through, .. } => {
+            PmiKind::Size { size, features, tolerance, through, thread, .. } => {
                 if features.is_empty() {
                     return Some("Pick the faces it applies to.".into());
                 }
                 if *through && *size != SizeKind::Diameter {
                     return Some("Only a hole's diameter goes through.".into());
+                }
+                if let Some(thread) = thread {
+                    if *size != SizeKind::Diameter {
+                        return Some("Only a diameter is threaded.".into());
+                    }
+                    if let Some(problem) = thread_problem(thread) {
+                        return Some(problem.into());
+                    }
+                    if !tolerance.is_none() {
+                        return Some("A thread's designation states its fit; it takes no tolerance.".into());
+                    }
                 }
                 range(tolerance)
             }
@@ -941,6 +958,18 @@ impl<F: PartialEq> Pmi<F> {
     }
 }
 
+/// Why `designation` cannot name a thread in a part and a STEP file, or `None` when it
+/// can: it is plain text a STEP string holds as it stands, such as `M6x1-6H`.
+pub fn thread_problem(designation: &str) -> Option<&'static str> {
+    if designation.trim().is_empty() {
+        return Some("The thread needs a designation, such as M6x1-6H.");
+    }
+    let plain = designation.len() <= 40
+        && designation.bytes().all(|b| b.is_ascii_graphic() || b == b' ')
+        && !designation.contains(['\'', '\\']);
+    (!plain).then_some("A thread's designation is plain text of at most 40 characters, such as M6x1-6H.")
+}
+
 /// A measured length as a drawing writes it: `8`, `7.5`, `0.125`.
 pub fn length_text(value: f64) -> String {
     Decimal::from_f64(value).map_or_else(|| "?".to_owned(), |d| d.to_string())
@@ -955,6 +984,11 @@ impl<F> PmiItem<F> {
         let value = |index: usize| measured.get(index).map_or_else(|| "?".to_owned(), |v| length_text(*v));
         match &self.kind {
             PmiKind::Datum { letter, .. } => format!("Datum {letter}"),
+            PmiKind::Size { features, through, thread: Some(thread), .. } => {
+                let count = if features.len() > 1 { format!("{}\u{d7} ", features.len()) } else { String::new() };
+                let thru = if *through { " THRU" } else { "" };
+                format!("{count}{thread}{thru}")
+            }
             PmiKind::Size { size, features, tolerance, through, .. } => {
                 let count = if features.len() > 1 { format!("{}\u{d7} ", features.len()) } else { String::new() };
                 let sign = match size {
@@ -1102,6 +1136,7 @@ mod tests {
                 features: vec![vec!["#17".to_owned()]],
                 tolerance: Tolerance::parse("H7").unwrap(),
                 through: false,
+                thread: None,
                 nominal: None,
             },
         };
@@ -1122,9 +1157,37 @@ mod tests {
             features: vec![face("a"), face("b"), face("c"), face("d")],
             tolerance: Tolerance::Deviation { upper: 0.1, lower: 0.0 },
             through: true,
+            thread: None,
             nominal: None,
         });
         assert_eq!(holes.callout(&[4.0]), "4\u{d7} \u{d8}4 +0.1/0 THRU");
+        let tapped = item(PmiKind::Size {
+            size: SizeKind::Diameter,
+            features: vec![face("a"), face("b")],
+            tolerance: Tolerance::None,
+            through: true,
+            thread: Some("M6x1-6H".to_owned()),
+            nominal: None,
+        });
+        assert_eq!(tapped.callout(&[5.0]), "2\u{d7} M6x1-6H THRU");
+        let part = Pmi { items: Vec::new(), part: PartNotes::default() };
+        assert_eq!(part.problem_with(&tapped, None), None);
+        let fitted = |kind: &PmiKind<String>| match kind {
+            PmiKind::Size { size, features, through, thread, nominal, .. } => PmiKind::Size {
+                size: *size,
+                features: features.clone(),
+                tolerance: Tolerance::parse("H7").unwrap(),
+                through: *through,
+                thread: thread.clone(),
+                nominal: *nominal,
+            },
+            other => other.clone(),
+        };
+        assert_eq!(
+            part.problem_with(&item(fitted(&tapped.kind)), None).as_deref(),
+            Some("A thread's designation states its fit; it takes no tolerance.")
+        );
+        assert!(thread_problem("M6x1 \u{2013} 6H").is_some() && thread_problem(" ").is_some());
         let slot = item(PmiKind::Slot {
             flats: [face("a"), face("b")],
             ends: [face("c"), face("d")],

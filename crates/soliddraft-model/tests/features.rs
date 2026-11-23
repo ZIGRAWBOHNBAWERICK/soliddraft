@@ -104,6 +104,7 @@ fn holes_build_edit_and_keep_later_references() {
             depth: HoleDepth::Through,
             tip: HoleTip::Flat,
             head: Some(HoleHead::Countersink { diameter: 8.0, angle_deg: 90.0 }),
+            thread: None,
         }),
     );
     all_ok(&d);

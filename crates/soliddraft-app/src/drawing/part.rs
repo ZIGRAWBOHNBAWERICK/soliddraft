@@ -148,7 +148,9 @@ impl Namer for PartContext<'_> {
     }
 
     /// "4× Ø9 THRU", "Ø12 DEEP 20" or "Ø24": holes of the same cut and size are counted
-    /// by centre, since the far end of a hole lies under its near end face-on.
+    /// by centre, since the far end of a hole lies under its near end face-on. A
+    /// threaded hole is called out by its thread, then by its drill where the drill goes
+    /// further: "4× M6x1-6H THRU", "M8x1-6H DEEP 12" over "Ø7 DEEP 16".
     fn hole_callout(&self, circle: &CircleInfo, projected: &Projected, symbols: &Symbols) -> Option<String> {
         let diameter = trim(format_value(circle.model_radius * 2.0, 2));
         let feature = self.feature_of(&circle.entity).and_then(|(id, _, _)| self.doc.feature(id));
@@ -167,6 +169,29 @@ impl Namer for PartContext<'_> {
             }
             Some(FeatureKind::Cut(p)) => {
                 format!("{count}{}{diameter} {} {}", symbols.diameter, symbols.depth, trim(format_value(p.depth, 2)))
+            }
+            Some(FeatureKind::Hole(h)) => {
+                use soliddraft_kernel_api::HoleDepth;
+                let mm = |value: f64| trim(format_value(value, 2));
+                let drill = match h.depth {
+                    HoleDepth::Through => symbols.through.clone(),
+                    HoleDepth::Blind { depth } => format!("{} {}", symbols.depth, mm(depth)),
+                };
+                let drilled = format!("{}{} {drill}", symbols.diameter, mm(h.diameter));
+                match &h.thread {
+                    None => format!("{count}{drilled}"),
+                    Some(thread) => match (thread.length, h.depth) {
+                        (None, _) => format!("{count}{} {drill}", thread.designation()),
+                        (Some(length), depth) => {
+                            let tapped = format!("{count}{} {} {}", thread.designation(), symbols.depth, mm(length));
+                            let deeper = match depth {
+                                HoleDepth::Through => true,
+                                HoleDepth::Blind { depth } => depth > length + 1e-9,
+                            };
+                            if deeper { format!("{tapped}\n{drilled}") } else { tapped }
+                        }
+                    },
+                }
             }
             _ => format!("{count}{}{diameter}", symbols.diameter),
         })

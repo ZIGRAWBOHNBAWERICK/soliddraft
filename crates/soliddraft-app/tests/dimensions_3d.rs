@@ -221,6 +221,7 @@ fn multi_value_document(hole: bool) -> (Document, FeatureId, usize) {
             depth: soliddraft_kernel_api::HoleDepth::Blind { depth: 8.0 },
             tip: soliddraft_kernel_api::HoleTip::Cone { angle_deg: 90.0 },
             head: Some(soliddraft_kernel_api::HoleHead::Counterbore { diameter: 10.0, depth: 3.0 }),
+            thread: None,
         })
     } else {
         FeatureKind::Pattern(soliddraft_model::PatternFeature {

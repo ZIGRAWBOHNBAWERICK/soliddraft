@@ -28,6 +28,8 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 pub const KIND_SHIFT: u32 = 30;
+/// Body flag of the line-only body that holds the thread marks (see `scene.wgsl`).
+const THREAD_MARKS: u32 = 16;
 pub const KIND_MASK: u32 = 0b11 << KIND_SHIFT;
 pub const ID_MASK: u32 = !KIND_MASK;
 
@@ -156,6 +158,9 @@ pub struct FrameInput {
     pub ghost: Option<(Arc<DisplayMesh>, bool)>,
     /// Drawn instead of the document bodies when set.
     pub preview: Option<Arc<DisplayMesh>>,
+    /// The marks of the part's cosmetic threads: lines only, drawn with the bodies and
+    /// never picked (see `threads`).
+    pub threads: Option<Arc<DisplayMesh>>,
     /// Only revision-bound application previews participate in picking.
     pub preview_pickable: bool,
     pub pick_revision: Option<PickRevision>,
@@ -539,6 +544,7 @@ pub struct ViewportRenderer {
     /// Keyed by the `Arc` address of the ghost mesh; never dereferenced.
     ghost: Option<(usize, bool, GpuBody)>,
     preview: Option<(usize, GpuBody)>,
+    threads: Option<(usize, GpuBody)>,
     pick_buffer: wgpu::Buffer,
     readback: Arc<Mutex<Readback>>,
     /// What the last pick read back showed. On WebGL reading a pick waits for the frame on
@@ -997,6 +1003,7 @@ impl ViewportRenderer {
             mesh_version: u64::MAX,
             ghost: None,
             preview: None,
+            threads: None,
             pick_buffer,
             readback: Arc::new(Mutex::new(Readback::default())),
             picks: PickCache::default(),
@@ -1199,6 +1206,15 @@ impl ViewportRenderer {
                 }
             }
             None => self.preview = None,
+        }
+        match &input.threads {
+            Some(t) => {
+                let ptr = Arc::as_ptr(t) as usize;
+                if self.threads.as_ref().map(|(q, _)| *q) != Some(ptr) {
+                    self.threads = Some((ptr, self.upload_body(device, t, THREAD_MARKS)));
+                }
+            }
+            None => self.threads = None,
         }
         for (id, body) in &self.bodies {
             // Only the flags change per frame; the appearance table stays as uploaded.
@@ -1500,6 +1516,13 @@ impl ViewportRenderer {
                 } else {
                     draw_lines(&mut pass, &mut ghost.into_iter());
                 }
+            }
+            // Thread marks belong to the part as built, so a construction preview,
+            // which stands in for it, hides them. They show without edges too: they say
+            // what the part is, not how it is drawn.
+            if let (Some((_, threads)), None) = (&self.threads, &self.preview) {
+                pass.set_pipeline(&self.edge_pipeline);
+                draw_lines(&mut pass, &mut std::iter::once(threads));
             }
         }
         {

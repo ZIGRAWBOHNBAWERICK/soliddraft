@@ -48,7 +48,14 @@ pub(in crate::app) fn pane(ui: &mut egui::Ui, state: &mut AppState) {
         return;
     }
     ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
-    let active = state.layout.panes.active_list();
+    let mut active = state.layout.panes.active_list();
+    // An assembly has no part parameters: its column leaves Values out and keeps its tree.
+    if state.assembly.is_active() && active.contains(&Pane::Values) {
+        active.retain(|p| *p != Pane::Values);
+        if active.is_empty() {
+            active.push(Pane::Tree);
+        }
+    }
     if active.is_empty() {
         return;
     }

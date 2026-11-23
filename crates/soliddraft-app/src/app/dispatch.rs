@@ -271,6 +271,26 @@ impl SolidDraftApp {
                 crate::assembly::apply(&mut self.state, &mut self.dock, crate::assembly::AssemblyAction::FromPart);
             }
             AppAction::Assembly(a) => crate::assembly::apply(&mut self.state, &mut self.dock, a),
+            AppAction::OpenComponentPart(path) => {
+                use crate::assembly::{AssemblyAction, ComponentPart};
+                match crate::assembly::component_part(&self.state, &path) {
+                    Ok(ComponentPart::Current) => self.apply(ctx, AppAction::Assembly(AssemblyAction::ShowPart)),
+                    #[cfg(not(target_arch = "wasm32"))]
+                    Ok(ComponentPart::File(path)) => {
+                        let opened = file::open(&path, self.state.doc.kernel().clone(), Some(self.state.doc.model()));
+                        if opened.is_ok() {
+                            self.apply(ctx, AppAction::Assembly(AssemblyAction::ShowPart));
+                        }
+                        self.opened(opened);
+                    }
+                    #[cfg(target_arch = "wasm32")]
+                    Ok(ComponentPart::Upload(name, bytes)) => {
+                        self.apply(ctx, AppAction::Assembly(AssemblyAction::ShowPart));
+                        self.open_bytes(&name, &bytes);
+                    }
+                    Err(why) => self.state.note(why, NoteKind::Info),
+                }
+            }
             AppAction::CancelBuild => {
                 if let Some(drag) = self.state.drag_preview.take() {
                     drag.cancel(&mut self.state.doc);
@@ -616,6 +636,7 @@ impl SolidDraftApp {
             }
             AppAction::NewBody => self.state.doc.new_body(),
             AppAction::SelectBody(key) => self.state.doc.select_body(key),
+            AppAction::RenameBody => crate::tree::rename_body(&mut self.state),
             AppAction::StartCombine => {
                 self.state.doc.combine_form = crate::multibody::CombineForm::new(&self.state.doc);
             }
@@ -1505,7 +1526,12 @@ impl SolidDraftApp {
                 }
             }
             AppAction::RenameSelected => {
-                if let Some(id) = self.state.selected_feature()
+                if !self.state.in_sketch()
+                    && self.state.doc.selection == Some(Selection::Body)
+                    && self.state.doc.display_body().is_some()
+                {
+                    crate::tree::rename_body(&mut self.state);
+                } else if let Some(id) = self.state.selected_feature()
                     && let Some(f) = self.state.doc.feature(id)
                 {
                     self.state.rename = Some(crate::state::Rename { feature: id, text: f.name.clone(), focus: true });
@@ -1546,16 +1572,16 @@ impl SolidDraftApp {
                 viewport.preset = p;
             }
             AppAction::SetBodyVisible(show) => {
-                if crate::tree_visibility::visible(&self.state).body != show {
-                    let feature = self
-                        .state
-                        .doc
-                        .features
-                        .iter()
-                        .find(|feature| !feature.is_sketch() && !matches!(feature.kind, FeatureKind::ReferencePlane(_)))
-                        .map(|feature| feature.id);
-                    if let Some(feature) = feature {
-                        crate::tree_visibility::toggle(&mut self.state, crate::document::ViewItem::Feature(feature));
+                let doc = &mut self.state.doc;
+                if crate::tree_visibility::body_shown(doc) != show {
+                    doc.set_view_choice(crate::document::ViewItem::Body(doc.active_body), Some(show));
+                }
+            }
+            AppAction::ShowAllBodies => {
+                let doc = &mut self.state.doc;
+                for (key, _) in doc.display_bodies() {
+                    if !crate::tree_visibility::body_shown_at(doc, key) {
+                        doc.set_view_choice(crate::document::ViewItem::Body(key), Some(true));
                     }
                 }
             }
@@ -1938,6 +1964,7 @@ impl SolidDraftApp {
             }
             AppAction::ShowShortcuts => self.state.show_shortcuts = true,
             AppAction::TogglePalette => crate::palette::toggle(&mut self.state),
+            AppAction::ToggleShortcutMenu => crate::shortcut_menu::toggle(ctx, &mut self.state),
             AppAction::ShowAbout => self.state.show_about = true,
             AppAction::ShowRecovery => {
                 if let Some(r) = self.state.recovery.as_mut() {

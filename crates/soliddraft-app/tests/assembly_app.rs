@@ -435,6 +435,8 @@ fn settle(harness: &mut App<'_>) {
 
 #[test]
 fn the_window_builds_an_assembly_from_dropped_parts() {
+    use egui_kittest::kittest::Queryable;
+
     let _turn = turn();
     if !gpu_available() {
         eprintln!("skipping: no GPU adapter");
@@ -465,6 +467,11 @@ fn the_window_builds_an_assembly_from_dropped_parts() {
     let names: Vec<String> = components(s).into_iter().map(|(l, _)| l).collect();
     assert_eq!(names.len(), 2, "{names:?}");
     assert!(names[0].starts_with("block<") && names[1].starts_with("pin<"), "{names:?}");
+    assert!(harness.query_by_label("Components (2)").is_some());
+    assert!(harness.query_by_label("Mates (0)").is_some());
+    assert!(harness.query_by_label("Assembly features (0)").is_some());
+    assert!(harness.query_by_label("Solid Bodies (1)").is_none());
+    assert!(harness.query_by_label("Origin, planes and axes").is_none());
     save_frame(&mut harness, "1-inserted");
 
     // A click on the block in the viewport selects it.
@@ -517,6 +524,33 @@ fn the_window_builds_an_assembly_from_dropped_parts() {
     assert!(close(back[0].1, lifted), "{back:?}");
     assert!(back[1].0.starts_with("pin<"));
     save_frame(&mut harness, "3-reopened");
+
+    // Open the source part separately and return to the same assembly.
+    let pin_row = harness.get_by_label(&back[1].0).rect().center();
+    harness.hover_at(pin_row);
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton {
+            pos: pin_row,
+            button: PointerButton::Secondary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        });
+        harness.run_steps(2);
+    }
+    assert!(harness.query_by_label("Configuration: Default").is_some());
+    assert!(harness.query_by_label("Display state: Default").is_some());
+    assert!(harness.query_by_label("Edit part in context (coming soon)").is_some());
+    harness.get_by_label("Open part").click();
+    harness.run_steps(8);
+    assert!(!harness.state().state.assembly.is_active());
+    assert_eq!(harness.state().state.doc.path.as_deref(), Some(pin.as_path()));
+    assert!(harness.query_by_label("Solid Bodies (1)").is_some());
+    assert!(harness.query_by_label("Mates (0)").is_none());
+    assert!(harness.query_by_label("Assembly tab").is_none());
+    harness.state_mut().state.push(AppAction::Assembly(AssemblyAction::Show));
+    harness.run_steps(8);
+    assert!(harness.state().state.assembly.is_active());
+    assert!(harness.query_by_label("Components (2)").is_some());
     drop(harness);
     let _ = std::fs::remove_dir_all(dir);
 }

@@ -1,5 +1,4 @@
-//! What the user chose to show or hide in a part: features, reference planes and origin
-//! axes, by stable identity.
+//! Body names and visibility choices for a part, keyed by stable identity.
 //!
 //! The choices are display data, not part of the model. A part file keeps them in
 //! `view.json`, an optional section outside both hashes, so hiding a feature never gives
@@ -19,8 +18,9 @@ use crate::feature::{DatumPlane, FeatureId};
 
 /// The entry a part keeps its view choices in.
 pub const ENTRY: &str = "view.json";
-/// The format tag of the view choices this version writes.
-pub const FORMAT: &str = "soliddraft-view/1";
+/// The format tag for a view with body names or per-body visibility.
+pub const FORMAT: &str = "soliddraft-view/2";
+const LEGACY_FORMAT: &str = "soliddraft-view/1";
 
 /// Something the user can show or hide.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
@@ -32,6 +32,8 @@ pub enum ViewItem {
     Plane(DatumPlane),
     /// An origin axis.
     Axis(DatumAxis),
+    /// A body, by its stable key in the feature history.
+    Body(u32),
 }
 
 /// Stable identity of a viewport dimension. It does not depend on formatted text or list order.
@@ -72,10 +74,11 @@ pub enum AnnotationValue {
     Spacing,
 }
 
-/// The part's explicit show and hide choices.
+/// The part's visibility choices and body names.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Visibility {
     choices: BTreeMap<ViewItem, bool>,
+    body_names: BTreeMap<u32, String>,
     // Free 3D label placement is session-local; view.json has no annotation schema.
     pub(crate) annotations: BTreeMap<AnnotationKey, [f32; 3]>,
 }
@@ -89,6 +92,8 @@ struct Entry {
     shown: Vec<ViewItem>,
     #[serde(default)]
     hidden: Vec<ViewItem>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    body_names: BTreeMap<u32, String>,
 }
 
 impl Visibility {
@@ -110,16 +115,37 @@ impl Visibility {
         };
     }
 
+    /// The custom name of body `key`, if one was set.
+    pub fn body_name(&self, key: u32) -> Option<&str> {
+        self.body_names.get(&key).map(String::as_str)
+    }
+
+    pub(crate) fn set_body_name(&mut self, key: u32, name: &str) {
+        let name = name.trim();
+        if name.is_empty() {
+            self.body_names.remove(&key);
+        } else {
+            self.body_names.insert(key, name.to_owned());
+        }
+    }
+
     /// True when nothing was chosen, so a file needs no `view.json`.
     pub fn is_empty(&self) -> bool {
-        self.choices.is_empty()
+        self.choices.is_empty() && self.body_names.is_empty()
     }
 
     /// The entry's text: pretty JSON with a final newline, the same bytes for the same
     /// choices.
     pub fn to_json(&self) -> String {
         let pick = |shown: bool| self.choices.iter().filter(|(_, s)| **s == shown).map(|(item, _)| *item).collect();
-        let entry = Entry { format: FORMAT.into(), shown: pick(true), hidden: pick(false) };
+        let legacy = self.body_names.is_empty() && !self.choices.keys().any(|item| matches!(item, ViewItem::Body(_)));
+        let format = if legacy { LEGACY_FORMAT } else { FORMAT };
+        let entry = Entry {
+            format: format.into(),
+            shown: pick(true),
+            hidden: pick(false),
+            body_names: self.body_names.clone(),
+        };
         serde_json::to_string_pretty(&entry).expect("view choices always serialise") + "\n"
     }
 
@@ -127,10 +153,19 @@ impl Visibility {
     /// hidden is refused rather than misread.
     pub fn from_json(text: &str) -> Result<Visibility, String> {
         let entry: Entry = serde_json::from_str(text).map_err(|e| e.to_string())?;
-        if entry.format != FORMAT {
+        if entry.format != FORMAT && entry.format != LEGACY_FORMAT {
             return Err(format!("the view choices are {:?}; this version reads {FORMAT}", entry.format));
         }
+        if entry.format == LEGACY_FORMAT
+            && (!entry.body_names.is_empty()
+                || entry.shown.iter().chain(&entry.hidden).any(|item| matches!(item, ViewItem::Body(_))))
+        {
+            return Err(format!("body names and visibility require {FORMAT}"));
+        }
         let mut view = Visibility::default();
+        for (key, name) in entry.body_names {
+            view.set_body_name(key, &name);
+        }
         for (items, shown) in [(entry.shown, true), (entry.hidden, false)] {
             for item in items {
                 if view.choices.insert(item, shown).is_some() {
@@ -159,7 +194,15 @@ mod tests {
         view.set(ViewItem::Axis(DatumAxis::Y), None);
         assert_eq!(view.choice(ViewItem::Axis(DatumAxis::Y)), None);
 
-        assert!(Visibility::from_json(&text.replace(FORMAT, "soliddraft-view/2")).is_err());
+        assert!(text.contains(LEGACY_FORMAT));
+        view.set(ViewItem::Body(8), Some(false));
+        view.set_body_name(8, "  Tool  ");
+        let text = view.to_json();
+        assert!(text.contains(FORMAT));
+        assert_eq!(Visibility::from_json(&text).unwrap(), view);
+        assert_eq!(view.body_name(8), Some("Tool"));
+        assert!(Visibility::from_json(&text.replace(FORMAT, "soliddraft-view/3")).is_err());
+        assert!(Visibility::from_json(&text.replace(FORMAT, LEGACY_FORMAT)).is_err());
         assert!(
             Visibility::from_json(r#"{"format":"soliddraft-view/1","shown":[{"axis":"x"}],"hidden":[{"axis":"x"}]}"#)
                 .is_err()

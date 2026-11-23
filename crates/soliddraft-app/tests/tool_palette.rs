@@ -149,7 +149,7 @@ fn sketch_workspace_locks_and_smart_dimension_leads_the_palette() {
         let dimension = ribbon::control(app, "Smart Dimension", palette(app)).rect;
         let line = ribbon::control(app, "Line", palette(app)).rect;
         assert!(dimension.right() <= line.left(), "Smart Dimension leads the strip");
-        for tab in ["Solid", "Assembly", "Inspect", "View"] {
+        for tab in ["Solid", "Inspect", "View"] {
             let control = ribbon::tab(app, tab);
             assert!(!control.enabled, "{tab} is locked during the sketch");
             ribbon::click_at(app, control.rect.center());

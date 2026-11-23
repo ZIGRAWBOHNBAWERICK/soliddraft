@@ -44,10 +44,10 @@ pub fn show(ctx: &egui::Context, state: &mut AppState) {
     egui::Window::new("Combine bodies").collapsible(false).resizable(false).open(&mut open).show(ctx, |ui| {
         ui.label("The result replaces the target and consumes the tool body.");
         for (label, selected) in [("Target body", &mut form.target), ("Tool body", &mut form.tool)] {
-            egui::ComboBox::from_label(label).selected_text(format!("Body {}", *selected + 1)).show_ui(ui, |ui| {
+            egui::ComboBox::from_label(label).selected_text(state.doc.body_name(*selected)).show_ui(ui, |ui| {
                 for &(key, _) in &bodies {
                     ui.add_enabled_ui(form.editing.is_none() || label != "Target body", |ui| {
-                        ui.selectable_value(selected, key, format!("Body {}", key + 1));
+                        ui.selectable_value(selected, key, state.doc.body_name(key));
                     });
                 }
             });

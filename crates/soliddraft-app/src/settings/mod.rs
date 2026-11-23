@@ -153,6 +153,25 @@ fn shortcuts_from(all: &Value) -> Shortcuts {
     Shortcuts::from_json(&all["shortcuts"])
 }
 
+pub(crate) fn shortcut_menu() -> crate::shortcut_menu::Preferences {
+    serde_json::from_value(stored()["shortcut_menu"].clone()).unwrap_or_default()
+}
+
+pub(crate) fn save_shortcut_menu(menu: &crate::shortcut_menu::Preferences) -> Result<(), NotKept> {
+    save_section("shortcut_menu", menu)
+}
+
+pub(crate) fn export_preferences(menu: &crate::shortcut_menu::Preferences) -> Result<(), String> {
+    let Some(path) = crate::platform::save_path("Export preferences", "JSON", "json", "soliddraft-preferences.json")
+    else {
+        return Ok(());
+    };
+    let mut prefs = stored();
+    prefs["shortcut_menu"] = serde_json::to_value(menu).map_err(|error| error.to_string())?;
+    let bytes = serde_json::to_vec_pretty(&prefs).map_err(|error| error.to_string())?;
+    crate::platform::write_file(&path, &bytes)
+}
+
 /// File locations, or none when there are none or they are unreadable.
 pub fn file_locations() -> FileLocations {
     file_locations_from(&stored())

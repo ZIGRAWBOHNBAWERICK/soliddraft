@@ -35,7 +35,7 @@ impl SolidDraftApp {
             .shortcuts
             .bindings(context)
             .into_iter()
-            .filter(|(_, k)| !(popup && k.key == Key::Escape))
+            .filter(|(_, k)| !(k.key == Key::Escape && (popup || state.palette.is_some())))
             .filter(|(_, k)| !(state.viewport.moving_dimension() && k.key == Key::Escape))
             .filter(|(c, k)| (!typing || k.fires_while_typing()) && (c.is_enabled(state) || (c.hint)(state).is_some()))
             .filter(|(c, k)| !superseded.contains(&(c.id, k.key)))
@@ -141,10 +141,12 @@ impl SolidDraftApp {
     }
 
     pub(super) fn dialogs(&mut self, ctx: &egui::Context) {
+        crate::shortcut_menu::teach(&mut self.state);
         crate::part_check::show(ctx, &mut self.state);
         crate::print_check::show(ctx, &mut self.state);
         crate::palette::show(ctx, &mut self.state);
         crate::top_bar::dialogs(ctx, &mut self.state);
+        crate::shortcut_menu::customize(ctx, &mut self.state);
         let st = &mut self.state;
         if st.show_shortcuts {
             let shortcuts = st.shortcuts.clone();

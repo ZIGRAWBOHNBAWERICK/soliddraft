@@ -543,8 +543,11 @@ fn menu_command(ui: &mut egui::Ui, st: &mut AppState, id: &str, label: &str) {
 fn file_menu_contents(ui: &mut egui::Ui, st: &mut AppState) {
     menu_command(ui, st, "new_part", "New part");
     menu_command(ui, st, "new_assembly", "New assembly");
-    menu_command(ui, st, "make_assembly", "Make assembly from part");
-    menu_command(ui, st, "make_drawing", "New drawing from part…");
+    // An assembly offers nothing that works on a single part.
+    if !st.assembly.is_active() {
+        menu_command(ui, st, "make_assembly", "Make assembly from part");
+        menu_command(ui, st, "make_drawing", "New drawing from part…");
+    }
     menu_command(ui, st, "open", "Open…");
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -570,13 +573,14 @@ fn file_menu_contents(ui: &mut egui::Ui, st: &mut AppState) {
     ui.label(egui::RichText::new("INSERT").family(theme::semibold()).size(10.0).color(theme::muted()));
     if st.assembly.is_active() {
         menu_command(ui, st, "insert_component", "Insert component…");
+    } else {
+        menu_command(ui, st, "import_step", "Import STEP…");
+        menu_command(ui, st, "import_iges", "Import IGES…");
+        menu_command(ui, st, "import_mesh", "Import mesh solid…");
+        menu_command(ui, st, "import_scan", "Import scan reference…");
+        menu_command(ui, st, "scan_workspace", "Scan workspace");
+        menu_command(ui, st, "import_report", "Import report");
     }
-    menu_command(ui, st, "import_step", "Import STEP…");
-    menu_command(ui, st, "import_iges", "Import IGES…");
-    menu_command(ui, st, "import_mesh", "Import mesh solid…");
-    menu_command(ui, st, "import_scan", "Import scan reference…");
-    menu_command(ui, st, "scan_workspace", "Scan workspace");
-    menu_command(ui, st, "import_report", "Import report");
 
     ui.separator();
     if st.assembly.is_active() {
@@ -595,11 +599,10 @@ fn file_menu_contents(ui: &mut egui::Ui, st: &mut AppState) {
         menu_command(ui, st, "drawing_export_svg", "Export drawing SVG…");
         menu_command(ui, st, "drawing_export_pdf", "Export drawing PDF…");
         menu_command(ui, st, "drawing_export_dxf", "Export drawing DXF…");
+    } else if st.assembly.is_active() {
+        menu_command(ui, st, "assembly_export_urdf", "Export URDF…");
+        menu_command(ui, st, "assembly_export_usd", "Export USD…");
     } else {
-        if st.assembly.is_active() {
-            menu_command(ui, st, "assembly_export_urdf", "Export URDF…");
-            menu_command(ui, st, "assembly_export_usd", "Export USD…");
-        }
         menu_command(ui, st, "export_step", "Export STEP AP242…");
         menu_command(ui, st, "export_stl", "Export STL…");
         menu_command(ui, st, "export_3mf", "Export 3MF…");

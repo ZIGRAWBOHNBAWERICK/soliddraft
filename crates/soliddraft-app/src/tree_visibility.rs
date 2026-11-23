@@ -11,19 +11,22 @@
 //! user keeps them on, and a sketch shows quietly while it is selected. A choice wins
 //! over its default, so selecting the origin cannot bring back an axis the user hid.
 //!
-//! The part has one body, so a hidden feature that shapes it hides all of it, and
-//! showing any of them shows it again. A hidden sketch hides its wires, not the
-//! extrusion made from it.
+//! A solid feature's eye controls its result body. Sketches and references have
+//! their own visibility.
 
-use crate::document::{AxisKind, Document, FeatureId, PlaneKind, Reference, Selection, ViewItem};
+use crate::document::{AxisKind, Document, Feature, FeatureId, FeatureKind, PlaneKind, Reference, Selection, ViewItem};
 use crate::state::{AppState, EditorParams};
 use crate::theme;
 use egui::{Rect, Sense, Stroke, pos2, vec2};
+use soliddraft_kernel_api::BodyId;
+use std::collections::HashSet;
 
 /// What the viewport draws of the part's items this frame.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Visible {
+    /// Whether the active body's overlays show.
     pub body: bool,
+    pub hidden_bodies: HashSet<BodyId>,
     /// In [`PlaneKind::ALL`] order.
     pub planes: [bool; 3],
     /// In [`AxisKind::ALL`] order.
@@ -38,6 +41,7 @@ pub fn shown(state: &AppState, item: ViewItem) -> bool {
     let choice = doc.view_choice(item);
     let references = &state.viewport.references;
     match item {
+        ViewItem::Body(key) => body_shown_at(doc, key),
         ViewItem::Plane(plane) => {
             state
                 .editor
@@ -64,7 +68,7 @@ pub fn shown(state: &AppState, item: ViewItem) -> bool {
                     || state.editor.as_ref().is_some_and(|e| matches!(e.params, EditorParams::PickSketch(_)))
                         && doc.consumer_of(id).is_none(),
             ),
-            Some(_) => body_shown(doc),
+            Some(f) => body_shown_at(doc, f.body_key),
             None => false,
         },
     }
@@ -75,13 +79,23 @@ fn tool_wants_an_axis(state: &AppState) -> bool {
     state.editor.as_ref().is_some_and(|e| matches!(e.params, EditorParams::Revolve(_) | EditorParams::Pattern(_)))
 }
 
-/// The body shows unless a feature that shapes it is hidden.
+/// Whether the active body shows.
 pub(crate) fn body_shown(doc: &Document) -> bool {
-    !doc.features.iter().any(|f| {
-        !f.is_sketch()
-            && !matches!(f.kind, crate::document::FeatureKind::ReferencePlane(_))
-            && !matches!(&f.kind, crate::document::FeatureKind::Scan(s) if s.fit.is_none())
-            && doc.view_choice(ViewItem::Feature(f.id)) == Some(false)
+    body_shown_at(doc, doc.active_body)
+}
+
+fn changes_body(f: &Feature) -> bool {
+    !f.is_sketch()
+        && !matches!(f.kind, FeatureKind::ReferencePlane(_))
+        && !matches!(&f.kind, FeatureKind::Scan(s) if s.fit.is_none())
+}
+
+pub(crate) fn body_shown_at(doc: &Document, key: u32) -> bool {
+    doc.view_choice(ViewItem::Body(key)).unwrap_or_else(|| {
+        // Older parts stored a solid body's visibility on one of its feature rows.
+        !doc.features
+            .iter()
+            .any(|f| f.body_key == key && changes_body(f) && doc.view_choice(ViewItem::Feature(f.id)) == Some(false))
     })
 }
 
@@ -89,6 +103,12 @@ pub(crate) fn body_shown(doc: &Document) -> bool {
 pub fn visible(state: &AppState) -> Visible {
     Visible {
         body: body_shown(&state.doc),
+        hidden_bodies: state
+            .doc
+            .display_bodies()
+            .into_iter()
+            .filter_map(|(key, body)| (!body_shown_at(&state.doc, key)).then_some(body))
+            .collect(),
         planes: PlaneKind::ALL.map(|p| shown(state, ViewItem::Plane(p))),
         axes: AxisKind::ALL.map(|a| shown(state, ViewItem::Axis(a))),
         sketches: state
@@ -101,32 +121,26 @@ pub fn visible(state: &AppState) -> Visible {
     }
 }
 
-/// Shows `item` when it is hidden and hides it when it shows. Showing a feature of the
-/// body shows the body, so every hidden feature of it goes back to its default.
+/// Shows `item` when hidden and hides it when shown.
 pub fn toggle(state: &mut AppState, item: ViewItem) {
     let show = !shown(state, item);
     let doc = &mut state.doc;
-    if show
-        && let ViewItem::Feature(id) = item
-        && doc.feature(id).is_some_and(|f| {
-            !f.is_sketch()
-                && !matches!(f.kind, crate::document::FeatureKind::ReferencePlane(_))
-                && !matches!(&f.kind, crate::document::FeatureKind::Scan(s) if s.fit.is_none())
-        })
+    if let ViewItem::Feature(id) = item
+        && let Some(key) = doc.feature(id).filter(|f| changes_body(f)).map(|f| f.body_key)
     {
-        let hidden: Vec<FeatureId> = doc
-            .features
-            .iter()
-            .filter(|f| {
-                !f.is_sketch()
-                    && !matches!(f.kind, crate::document::FeatureKind::ReferencePlane(_))
-                    && !matches!(&f.kind, crate::document::FeatureKind::Scan(s) if s.fit.is_none())
-                    && doc.view_choice(ViewItem::Feature(f.id)) == Some(false)
-            })
-            .map(|f| f.id)
-            .collect();
-        for other in hidden {
-            doc.set_view_choice(ViewItem::Feature(other), None);
+        doc.set_view_choice(ViewItem::Body(key), None);
+        if show {
+            let hidden: Vec<_> = doc
+                .features
+                .iter()
+                .filter(|f| {
+                    f.body_key == key && changes_body(f) && doc.view_choice(ViewItem::Feature(f.id)) == Some(false)
+                })
+                .map(|f| f.id)
+                .collect();
+            for feature in hidden {
+                doc.set_view_choice(ViewItem::Feature(feature), None);
+            }
         }
     }
     doc.set_view_choice(item, Some(show));
@@ -147,6 +161,8 @@ pub fn eye(ui: &mut egui::Ui, state: &mut AppState, row: Rect, item: ViewItem, n
     let resp = ui.interact(rect, ui.id().with(("eye", format!("{item:?}"))), Sense::click());
     let action = format!("{} {name}", if shown { "Hide" } else { "Show" });
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &action));
+    #[cfg(target_arch = "wasm32")]
+    crate::web::show_control(&action, resp.rect);
     ui.ctx().accesskit_node_builder(resp.id, |node| {
         node.set_state_description(if shown { "Shown" } else { "Hidden" });
     });

@@ -68,6 +68,7 @@ pub enum AppAction {
     StartShell,
     NewBody,
     SelectBody(u32),
+    RenameBody,
     StartCombine,
     StartOffset,
     StartThicken,
@@ -123,6 +124,7 @@ pub enum AppAction {
     SetPreset(Preset),
     SetScene(crate::viewport::scenes::Scene),
     SetBodyVisible(bool),
+    ShowAllBodies,
     SetReferenceDisplay(crate::settings::ReferenceDisplay),
     /// Switches the interface between light and dark, and saves the choice.
     SetTheme(crate::theme::Mode),
@@ -197,6 +199,7 @@ pub enum AppAction {
     ShowShortcuts,
     /// Opens the command palette, or closes it when it is open.
     TogglePalette,
+    ToggleShortcutMenu,
     ShowAbout,
     /// Opens the Recover documents window.
     ShowRecovery,
@@ -211,6 +214,7 @@ pub enum AppAction {
     Drawing(crate::drawing::DrawingAction),
     /// Everything the assembly tab does.
     Assembly(crate::assembly::AssemblyAction),
+    OpenComponentPart(soliddraft_assembly::OccurrencePath),
     /// A step of a drag of a feature's dimension.
     DragDimension(DragStep),
     /// Opens a dimension the selected body shows for editing.
@@ -1343,6 +1347,9 @@ pub struct AppState {
     pub display_unit: DisplayUnit,
     /// The open command palette.
     pub palette: Option<crate::palette::Palette>,
+    pub(crate) body_rename: Option<crate::tree::BodyRename>,
+    pub(crate) shortcut_menu: crate::shortcut_menu::Preferences,
+    pub(crate) shortcut_menu_editor: Option<crate::shortcut_menu::Customize>,
     /// The open Provider dialog.
     pub import_dialog: Option<crate::import::Preview>,
     /// Import STEP asked the browser for a file: the next uploaded STEP file is reviewed
@@ -1442,11 +1449,20 @@ impl AppState {
 
     /// Whether `pane` is currently open in the stacked side column.
     pub fn pane_shown(&self, pane: crate::panels::Pane) -> bool {
-        self.tree_shown() && self.layout.panes.is_open(pane)
+        // An assembly has no part parameters: its side column never shows Values.
+        self.tree_shown()
+            && self.layout.panes.is_open(pane)
+            && !(self.assembly.is_active() && pane == crate::panels::Pane::Values)
     }
 
     /// Opens `pane` in the stacked side column (leaving other open panes stacked beside it).
     pub fn show_pane(&mut self, pane: crate::panels::Pane) {
+        // An assembly has no part parameters: asking for Values there shows its tree.
+        let pane = if self.assembly.is_active() && pane == crate::panels::Pane::Values {
+            crate::panels::Pane::Tree
+        } else {
+            pane
+        };
         self.layout.panes.set(pane, true);
         self.layout.pane = pane;
         self.show_tree(true);
@@ -1488,7 +1504,7 @@ impl AppState {
         } else if self.assembly.is_active() {
             crate::assembly::Workspace::ALL.into_iter().map(Into::into).collect()
         } else {
-            RibbonTab::ALL.into_iter().map(Into::into).collect()
+            RibbonTab::ALL.into_iter().filter(|tab| *tab != RibbonTab::Assembly).map(Into::into).collect()
         }
     }
 
@@ -1583,6 +1599,9 @@ impl AppState {
             show_customize_bar: false,
             display_unit: DisplayUnit::default(),
             palette: None,
+            body_rename: None,
+            shortcut_menu: crate::settings::shortcut_menu(),
+            shortcut_menu_editor: None,
             import_dialog: None,
             step_upload: false,
             import_report: false,

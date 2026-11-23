@@ -441,6 +441,137 @@ fn tool(state: &mut soliddraft_app::state::AppState, tool: &str, arguments: serd
     serde_json::from_str(&out.content).unwrap_or_default()
 }
 
+/// The name of the one cylinder whose centroid is at (x, y, z).
+fn cylinder(state: &soliddraft_app::state::AppState, x: f64, y: f64, z: f64) -> String {
+    let found: Vec<_> = state
+        .doc
+        .faces
+        .iter()
+        .filter(|f| f.surface == soliddraft_kernel_api::SurfaceKind::Cylinder)
+        .filter(|f| {
+            [f.centroid.x, f.centroid.y, f.centroid.z]
+                .map(f64::from)
+                .iter()
+                .zip([x, y, z])
+                .all(|(a, b)| (a - b).abs() < 1e-3)
+        })
+        .collect();
+    assert_eq!(found.len(), 1, "one cylinder at ({x}, {y}, {z})");
+    format!("{} \u{b7} {}", state.doc.feature(found[0].feature).unwrap().name, found[0].label)
+}
+
+/// The drawing's annotations made from the part's items: the item's name, whether the
+/// annotation is a note or a dimension, and a note's text, in the drawing's order.
+fn drawn_items(state: &soliddraft_app::state::AppState) -> Vec<(String, &'static str, String)> {
+    let session = state.drawing.session.as_ref().expect("the drawing is open");
+    session
+        .doc
+        .drawing
+        .sheets
+        .iter()
+        .flat_map(|sheet| &sheet.annotations)
+        .filter_map(|a| {
+            let item = a.source.as_ref()?.item()?.to_owned();
+            Some(match &a.body {
+                soliddraft_drawing::AnnotationKind::Note { text, .. } => (item, "note", text.clone()),
+                soliddraft_drawing::AnnotationKind::Dimension(_) => (item, "dimension", String::new()),
+                _ => (item, "other", String::new()),
+            })
+        })
+        .collect()
+}
+
+#[test]
+fn a_drawing_redraws_a_size_that_became_a_thread_and_back() {
+    let mut state = scripted_plate("Bore plate");
+    let face = "Boss-Extrude1 \u{b7} End cap";
+    tool(&mut state, "hole", json!({"face": face, "points": [[30, 20, 10]], "diameter": 5}));
+    let wall = cylinder(&state, 30.0, 20.0, 5.0);
+    tool(&mut state, "pmi_add", json!({"kind": "diameter", "name": "Bore", "faces": [wall], "through": true}));
+    let dir = std::env::temp_dir().join(format!("soliddraft-thread-conversion-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    tool(&mut state, "manufacturing_package", json!({"path": dir.join("bore.step")}));
+    assert_eq!(drawn_items(&state), [("Bore".to_owned(), "dimension", String::new())]);
+
+    // The stored size is made a thread: the drawing calls it out as one, and keeps no
+    // dimension that says Ø5.
+    tool(
+        &mut state,
+        "pmi_add",
+        json!({"kind": "diameter", "name": "Bore", "faces": [wall], "through": true, "thread": "M6x1-6H", "replaces": "Bore"}),
+    );
+    tool(&mut state, "drawing_rebuild", json!({}));
+    let thru = soliddraft_drawing::library::template("iso-a3").style_file().symbols.through.clone();
+    assert_eq!(drawn_items(&state), [("Bore".to_owned(), "note", format!("M6x1-6H {thru}"))]);
+
+    // And back: a plain size is a dimension again, and the thread's note goes.
+    tool(
+        &mut state,
+        "pmi_add",
+        json!({"kind": "diameter", "name": "Bore", "faces": [wall], "through": true, "replaces": "Bore"}),
+    );
+    tool(&mut state, "drawing_rebuild", json!({}));
+    assert_eq!(drawn_items(&state), [("Bore".to_owned(), "dimension", String::new())]);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_drawing_keeps_a_thread_with_its_hole_through_a_rename_and_a_name_taken() {
+    let mut state = scripted_plate("Tapped plate");
+    let face = "Boss-Extrude1 \u{b7} End cap";
+    tool(&mut state, "hole", json!({"face": face, "points": [[15, 20, 10], [45, 20, 10]], "thread": {"size": 6}}));
+    let dir = std::env::temp_dir().join(format!("soliddraft-thread-identity-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    tool(&mut state, "manufacturing_package", json!({"path": dir.join("tapped.step")}));
+    let thru = soliddraft_drawing::library::template("iso-a3").style_file().symbols.through.clone();
+    let note = format!("2\u{d7} M6x1-6H {thru}");
+    assert_eq!(drawn_items(&state), [("Hole1 thread".to_owned(), "note", note.clone())]);
+    let placed = |state: &soliddraft_app::state::AppState| {
+        let session = state.drawing.session.as_ref().unwrap();
+        session.doc.drawing.sheets[0]
+            .annotations
+            .iter()
+            .find(|a| matches!(a.body, soliddraft_drawing::AnnotationKind::Note { .. }) && a.source.is_some())
+            .map(|a| (a.id, a.placement))
+            .unwrap()
+    };
+    // The note is moved off the place the drawing gave it, as a drafter moves one: a note
+    // drawn again would go back there.
+    let before = {
+        let session = state.drawing.session.as_mut().unwrap();
+        let note = session.doc.drawing.sheets[0]
+            .annotations
+            .iter_mut()
+            .find(|a| matches!(a.body, soliddraft_drawing::AnnotationKind::Note { .. }) && a.source.is_some())
+            .unwrap();
+        note.placement = soliddraft_kernel_api::Point2::new(note.placement.u + 6.0, note.placement.v + 4.0);
+        (note.id, note.placement)
+    };
+
+    // Renamed, the hole's thread is the same note in the same place, under the new name.
+    tool(&mut state, "rename", json!({"feature": "Hole1", "name": "Tapped holes"}));
+    tool(&mut state, "drawing_rebuild", json!({}));
+    assert_eq!(drawn_items(&state), [("Tapped holes thread".to_owned(), "note", note.clone())]);
+    assert_eq!(placed(&state), before, "the same note, not one drawn again");
+
+    // A stored item takes the thread's name: the note stays with the hole, and the stored
+    // item gets a dimension of its own.
+    let wall = cylinder(&state, 15.0, 20.0, 5.0);
+    tool(&mut state, "pmi_add", json!({"kind": "diameter", "name": "Tapped holes thread", "faces": [wall]}));
+    tool(&mut state, "drawing_rebuild", json!({}));
+    let mut drawn = drawn_items(&state);
+    drawn.sort();
+    assert_eq!(
+        drawn,
+        [
+            ("Tapped holes thread".to_owned(), "dimension", String::new()),
+            ("Tapped holes thread 2".to_owned(), "note", note),
+        ]
+    );
+    assert_eq!(placed(&state), before, "the thread's note did not move to the stored item");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn the_thread_marks_leave_out_what_later_cuts_took_from_the_wall() {
     let mut state = scripted_plate("Pocketed plate");

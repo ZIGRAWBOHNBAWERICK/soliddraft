@@ -86,7 +86,7 @@ The drawing also gets a section through the hole the part holds tightest: the on
 
 The drawing places everything itself. Stacked dimensions settle first, nearest their views; callouts and symbols then move along their leaders, or straight across or up, until no text lies over a line, another text or the frame.
 
-Each annotation made this way belongs to its item in the part. To change its tolerance, count or text, edit the item in the part and rebuild the drawing. Rebuild refreshes imported items and keeps the saved items on views that refused to redraw.
+Each annotation made this way belongs to its item in the part. A thread's callout belongs to the hole that states it, so renaming the hole keeps it in place. To change its tolerance, count or text, edit the item in the part and rebuild the drawing. Rebuild refreshes imported items and keeps the saved items on views that refused to redraw. An item edited so that the drawing shows it another way, such as a diameter given a thread's designation or a designation taken off, is drawn again the new way.
 
 An item no view can show is not drawn somewhere it does not belong. It is listed by name with the reason, such as a height on a drawing that has only the top view.
 

@@ -58,13 +58,23 @@ pub enum PmiSource {
     },
     /// The part's notes.
     Notes,
+    /// The thread a hole feature states, which the part does not store: the drawing
+    /// follows the hole, whatever the item is called.
+    Thread {
+        /// The hole feature's id in the part.
+        feature: u32,
+        /// The first of the feature's holes the item covers, from zero.
+        placement: u32,
+        /// The item's name in the part when the drawing was last brought up to it.
+        item: String,
+    },
 }
 
 impl PmiSource {
     /// The name of the part item behind the annotation, if it has one.
     pub fn item(&self) -> Option<&str> {
         match self {
-            PmiSource::Item { item } | PmiSource::Located { item, .. } => Some(item),
+            PmiSource::Item { item } | PmiSource::Located { item, .. } | PmiSource::Thread { item, .. } => Some(item),
             PmiSource::Notes => None,
         }
     }

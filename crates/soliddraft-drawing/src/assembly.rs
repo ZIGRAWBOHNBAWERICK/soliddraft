@@ -329,9 +329,11 @@ pub fn make_assembly_drawing(model: &AssemblyModel<'_>, new: &NewAssemblyDrawing
     Ok(drawing)
 }
 
-/// Where a balloon for `item` attaches in a view: the middle of the longest visible edge
-/// of the first occurrence of the item that shows one (or of `occurrence`), in model
-/// space and view millimetres, with that occurrence's path.
+/// Where a balloon for `item` attaches in a view: the middle of the longest visible
+/// stretch of an edge of the first occurrence of the item that shows one (or of
+/// `occurrence`), in model space and view millimetres, with that occurrence's path. A
+/// stretch is what is left of an edge where other parts hide the rest, so the leader
+/// lands on line work the view shows.
 fn attach_point(
     model: &AssemblyModel<'_>,
     ctx: &ViewContext,
@@ -342,18 +344,25 @@ fn attach_point(
         Some(p) => vec![p],
         None => model.paths_of(item).collect(),
     };
+    // The model curves the view was projected from, beside their projections: the
+    // projection keeps, in order, every curve that draws as a path.
+    let kept: Vec<_> =
+        ctx.curves.curves.iter().filter(|c| project::path_of(&c.curve, &ctx.xf).elements().len() >= 2).collect();
+    if kept.len() != ctx.projected.geometry.curves.len() {
+        return None;
+    }
+    let drawn: Vec<_> = kept.into_iter().zip(&ctx.projected.geometry.curves).collect();
     for path in wanted {
-        let Some(best) = ctx
-            .projected
-            .geometry
-            .curves
+        let Some((best, _)) = drawn
             .iter()
-            .filter(|c| c.visible && c.source.kind == EntityKind::Edge && component_of(&c.source.feature) == Some(path))
-            .max_by(|a, b| a.source.fingerprint.size.total_cmp(&b.source.fingerprint.size))
+            .filter(|(_, c)| {
+                c.visible && c.source.kind == EntityKind::Edge && component_of(&c.source.feature) == Some(path)
+            })
+            .max_by(|(a, _), (b, _)| a.curve.length().total_cmp(&b.curve.length()))
         else {
             continue;
         };
-        let at = best.source.fingerprint.point;
+        let at = best.curve.point_at(0.5);
         return Some((path.to_owned(), at, ctx.xf.point(at)));
     }
     None

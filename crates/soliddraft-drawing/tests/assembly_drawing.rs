@@ -390,3 +390,40 @@ fn a_balloon_whose_part_went_claims_no_item_and_the_new_row_gets_its_own() {
         .collect();
     assert_eq!(shown, ["?"], "the balloon of a part that went claims no BOM item");
 }
+
+/// The distance from `p` to the nearest point of `path`.
+fn distance_to(path: &kurbo::BezPath, p: soliddraft_kernel_api::Point2) -> f64 {
+    use kurbo::ParamCurveNearest;
+    path.segments()
+        .map(|s| s.nearest(kurbo::Point::new(p.u, p.v), 1e-9).distance_sq.sqrt())
+        .fold(f64::INFINITY, f64::min)
+}
+
+#[test]
+fn a_balloon_leader_lands_on_a_visible_stretch_of_its_edge() {
+    let k = BoxKernel::new();
+    // A narrow block in front of the base's middle hides the middle of its long front
+    // edges in the front view; their ends stay visible.
+    let cover = (cuboid(&k, "3", Vec3::new(40.0, -20.0, -5.0), Vec3::new(20.0, 10.0, 20.0)), 2);
+    let first = model(b"r1", vec![base(&k), cover]);
+    let drawing = drawing_of(&first, "iso-a3", vec![StandardView::Front], Some(Scale::FULL));
+    let view = &drawing.sheets[0].views[0];
+    assert!(
+        view.geometry.curves.iter().any(|c| !c.visible && component_of(&c.source.feature) == Some("2")),
+        "the cover hides part of the base"
+    );
+    let balloon = drawing.sheets[0]
+        .annotations
+        .iter()
+        .find(|a| matches!(&a.body, AnnotationKind::Balloon { occurrence, .. } if occurrence == "2"))
+        .unwrap();
+    let at = balloon.anchors[0].cached;
+    let on_visible = view
+        .geometry
+        .curves
+        .iter()
+        .filter(|c| c.visible && component_of(&c.source.feature) == Some("2"))
+        .map(|c| distance_to(&c.path, at))
+        .fold(f64::INFINITY, f64::min);
+    assert!(on_visible < 1e-6, "the leader lands {on_visible} mm from the base's visible line work, at {at:?}");
+}

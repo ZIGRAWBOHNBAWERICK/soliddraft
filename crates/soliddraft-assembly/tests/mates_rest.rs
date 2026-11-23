@@ -352,6 +352,10 @@ fn a_path_holds_a_position_and_steers_pitch_yaw_and_roll() {
         assert!(refused.message.contains("path"), "{}", refused.message);
         assert_eq!(r.doc.assembly(), &before);
     }
+    r.doc.set_controller_mates(&["P".into()]).unwrap();
+    let before = r.doc.assembly().clone();
+    assert_eq!(r.doc.apply_controller_values(&[-1.0]).unwrap_err().code, RefusalCode::InvalidValue);
+    assert_eq!(r.doc.assembly(), &before);
 
     // Saved and reopened it holds; a later mate goes on top: a second block halfway round.
     r.reopen();
@@ -465,6 +469,10 @@ fn a_pin_rides_an_arc_slot_in_each_position_mode() {
         let refused = r.doc.edit_mates(&[("S".into(), MateEdit::Distance(distance.into()))]).unwrap_err();
         assert_eq!(refused.code, RefusalCode::InvalidValue);
     }
+    assert_eq!(r.doc.assembly(), &before);
+    r.doc.set_controller_mates(&["S".into()]).unwrap();
+    let before = r.doc.assembly().clone();
+    assert_eq!(r.doc.apply_controller_values(&[-1.0]).unwrap_err().code, RefusalCode::InvalidValue);
     assert_eq!(r.doc.assembly(), &before);
 
     // Saved and reopened it holds; a later Distance on top takes the pin's height.
@@ -670,8 +678,8 @@ fn bezier_distance(c: [DVec3; 4], p: DVec3) -> f64 {
     d(best)
 }
 
-/// A cam whose top is a spline arch: a clamped cubic through (-20, 0), (-20, 30), (20, 30)
-/// and (20, 0), closed by a line along the bottom.
+/// A cam with a clamped cubic arch and a straight base. The cubic's control points are
+/// (-20, 0), (-20, 30), (20, 30) and (20, 0).
 fn arch(p: &Path) {
     prism(p, 10.0, |s| {
         let points = vec![P2::new(-20.0, 0.0), P2::new(-20.0, 30.0), P2::new(20.0, 30.0), P2::new(20.0, 0.0)];
@@ -734,6 +742,7 @@ fn a_roller_rides_a_spline_cam_and_a_corner_runs_a_spline_path() {
     let Mate::Path { path, .. } = r.mate("P") else { panic!("a path") };
     let Some(StoredSupport::Outline { pieces, .. }) = &path.support else { panic!("an outline") };
     assert_eq!(pieces.len(), 2);
+    assert_eq!(pieces[0].from[0].abs(), 20.0);
     let start_side = pieces[0].from[0].signum();
     let starts_on_spline = pieces[0].spline.is_some();
     // Integrating the Bezier's speed hypot(240t(1-t), 90(1-2t)) gives 67.443045184743 mm.

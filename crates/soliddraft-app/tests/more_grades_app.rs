@@ -23,11 +23,14 @@ fn modelling_guide_names_the_grades_the_pinned_editors_offer() {
     let guide = include_str!("../../../docs/modelling.md");
     let (_, grades) = guide.split_once("## Graded fields\n").unwrap();
     let grades = grades.split("\n## ").next().unwrap();
+    let support_notes = include_str!("../../../docs/needs-catallax.md");
     let kernel = soliddraft_app::kernel();
     for field in [GradedField::LatticeRadius, GradedField::GyroidLevel] {
         for kind in GradeKind::ALL {
             if kernel.field_grade(field, kind).is_ok() {
-                assert!(grades.contains(kind.label()), "{field:?} offers {}", kind.label());
+                for doc in [grades, support_notes] {
+                    assert!(doc.contains(kind.label()), "{field:?} offers {}", kind.label());
+                }
             }
         }
     }

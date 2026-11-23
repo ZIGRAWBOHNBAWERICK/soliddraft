@@ -120,8 +120,6 @@ fn part_contexts(pending: &mut BTreeSet<&str>) {
     let feature = state.doc.features.last().unwrap().id;
     state.doc.selection = Some(Selection::Feature(feature));
     find_and_dispatch(&mut state, pending);
-    state.doc.features.last_mut().unwrap().status = FeatureStatus::NeedsRepair(Vec::new());
-    find_and_dispatch(&mut state, pending);
 
     let mut state = AppState::new(soliddraft_app::new_document());
     tool(
@@ -140,6 +138,17 @@ fn part_contexts(pending: &mut BTreeSet<&str>) {
         json!({"plane":"top","shapes":[{"shape":"rectangle","center":[0,0,0],"width":4,"height":4}]}),
     );
     tool(&mut state, "extrude", json!({"sketch":"Sketch2","depth":4}));
+    find_and_dispatch(&mut state, pending);
+    let boss = state.doc.features.last().unwrap().id;
+    tool(
+        &mut state,
+        "sketch",
+        json!({"plane":"Boss-Extrude2 · End cap","shapes":[{"shape":"rectangle","center":[0,0,4],"width":2,"height":2}]}),
+    );
+    state.doc.apply(Command::Suppress { id: boss, suppressed: true }).unwrap();
+    let broken = state.doc.features.last().unwrap();
+    assert!(matches!(broken.status, FeatureStatus::NeedsRepair(_)));
+    state.doc.selection = Some(Selection::Feature(broken.id));
     find_and_dispatch(&mut state, pending);
     state.doc.undo().unwrap();
     find_and_dispatch(&mut state, pending);
@@ -216,6 +225,18 @@ fn file_contexts(dir: &std::path::Path, pending: &mut BTreeSet<&str>) {
     tool(&mut state, "open", json!({"path":sheet}));
     drawing::reference::refresh(&mut state);
     find_and_dispatch(&mut state, pending);
+}
+
+#[test]
+fn naming_a_command_outside_its_workspace_or_with_a_disabled_action_does_not_reach_it() {
+    let mut state = AppState::new(soliddraft_app::new_document());
+    let mut pending = BTreeSet::from(["assembly_mate", "make_assembly"]);
+    for id in &pending {
+        let named = soliddraft_app::command_line::named(id, commands::Context::of(&state));
+        assert_eq!(named.unwrap().id, *id);
+    }
+    find_and_dispatch(&mut state, &mut pending);
+    assert_eq!(pending, BTreeSet::from(["assembly_mate", "make_assembly"]));
 }
 
 #[test]

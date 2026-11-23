@@ -88,6 +88,7 @@ await page.press('Control+o');
 const refused = await details(rows => rows.Error?.includes('Field-driven thickness is unavailable'));
 check(refused['Wall thickness'] === '1 mm to 3 mm along x from -5 to 5 mm wall', 'The saved grade changed');
 
+// A tree double-click can show dimensions. Open the feature editor explicitly.
 await click(await wall());
 await command('Edit feature', 'edit_feature');
 await click(await control('Use constant'));

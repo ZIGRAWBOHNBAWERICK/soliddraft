@@ -981,7 +981,7 @@ jobs:
           mkdir -p target/web-dist/fixtures
           cp target/exit-test/display-states{,-service}.dwprt target/web-dist/fixtures/
           SOLIDDRAFT_CONTROLLER_BROWSER_FIXTURES="$PWD/target/web-dist/fixtures" cargo test --locked -p soliddraft-app --test app_tools mate_controller_animation_keeps_driver_identity_when_reordered -- --exact
-      - name: Switch, save and reopen part display states in Chromium
+      - name: Check display states and Mate Controller animation in Chromium
         timeout-minutes: 10
         env:
           CHROME_DEVTOOLS_AXI_SESSION: display-states
@@ -993,7 +993,10 @@ jobs:
           python3 -m http.server 8779 --bind 127.0.0.1 --directory target/web-dist > "$RUNNER_TEMP/display-states-server.log" 2>&1 &
           server=$!
           trap 'chrome-devtools-axi stop; kill "$server"' EXIT
-          chrome-devtools-axi open about:blank
+          if ! chrome-devtools-axi open about:blank; then
+            chrome-devtools-axi stop || true
+            chrome-devtools-axi open about:blank
+          fi
           chrome-devtools-axi emulate --viewport 1400x900x1
           chrome-devtools-axi open 'http://127.0.0.1:8779/'
           chrome-devtools-axi run < ci/browser-display-states.js

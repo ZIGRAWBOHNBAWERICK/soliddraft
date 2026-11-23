@@ -47,6 +47,7 @@ impl SolidDraftApp {
             | AppAction::ManufacturingPackage
             | AppAction::ToggleSection
             | AppAction::MeasureEntity
+            | AppAction::ApplySuggestedFilletRadius(_)
             | AppAction::ToggleManufacturingInformation => true,
             AppAction::StartSketchOn(SketchPlane::Face { .. }) => true,
             AppAction::Command(command) => !self.state.doc.edits_scalar(command),
@@ -865,6 +866,29 @@ impl SolidDraftApp {
             }
             AppAction::CancelEditor => {
                 self.close_editor();
+            }
+            AppAction::ApplySuggestedFilletRadius(radius) => {
+                let Some(editor) = self.state.editor.as_ref().filter(|e| e.suggested_fillet_radius() == Some(radius))
+                else {
+                    return;
+                };
+                let EditorParams::Fillet(mut params) = editor.params.clone() else { return };
+                let target = editor.target;
+                params.radius = radius;
+                let editor = self.close_editor().expect("the fillet editor is open");
+                match self.state.chat.book.accept_fillet_radius(&mut self.state.doc, target, params) {
+                    Ok(()) => self.state.note(format!("Applied {radius} mm fillet radius"), NoteKind::Ok),
+                    Err(why) => {
+                        self.refuse(
+                            (target, editor.params, editor.then_feature),
+                            format!(
+                                "The suggested radius could not build. {}",
+                                crate::geometry_message::for_user(&why)
+                            ),
+                        );
+                    }
+                }
+                self.sync_sketch_session();
             }
             AppAction::GiveFeedback => {
                 #[cfg(target_arch = "wasm32")]

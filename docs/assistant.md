@@ -40,6 +40,10 @@ Apply runs the same commands as the ribbon, as one step on the document's undo s
 
 The assistant can only propose. Its `apply` tool fails unless the user turned on Auto-apply (Tools, Assistant) for the session.
 
+## Fillet refusals
+
+When a fillet radius is too large and the kernel reports a limit, the Fillet form shows the limit, names any faces the kernel identified, and offers one smaller radius. Choose **Apply … mm radius** to check and apply the correction as one undo step. The assistant keeps the current edge picks and checks that the corrected fillet and its downstream features still build. This works for new fillets and edits, with or without a provider key.
+
 ## Tools
 
 The assistant gets `model_summary`, `feature`, `selection`, `measure`, `mass_properties`, `propose` and `apply`. The verbs are `sketch`, `extrude`, `cut`, `hole`, `linear_pattern`, `circular_pattern`, `mirror`, `draft`, `fillet`, `chamfer`, `edit_extrude`, `edit_cut`, `edit_hole`, `edit_pattern`, `edit_mirror`, `edit_draft`, `edit_fillet`, `edit_chamfer`, `suppress` and `delete_feature`; `extrude` and `cut` also take an up-to-next or up-to-face end; for the assistant they are the line types inside `propose`. Every tool's name, description and parameters come from the command registry in `commands.rs`, the table the ribbon, the keyboard shortcuts and `soliddraft commands` also read, so a new verb shows up everywhere at once. The parameter schemas sit beside the typed recipe lines in `command_tools.rs`.

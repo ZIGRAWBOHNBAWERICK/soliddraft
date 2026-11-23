@@ -415,9 +415,11 @@ pub fn show(ui: &mut egui::Ui, state: &mut crate::state::AppState) {
         .or(editor.feedback.pick.as_deref())
         .or(editor.error.as_deref())
         .map(crate::geometry_message::for_user);
+    let suggested = editor.suggested_fillet_radius();
+    let error_action = suggested.map(|radius| format!("Apply {radius} mm radius"));
     let mut actions = Vec::new();
     let editor = state.editor.as_mut().expect("open feature form");
-    let response = form_bar::show(
+    let response = form_bar::show_with_error_action(
         ui,
         &mut state.form_bar,
         form_bar::Form {
@@ -428,6 +430,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut crate::state::AppState) {
             can_confirm: spec.confirm,
             error: error.as_deref(),
         },
+        error_action.as_deref(),
         |ui, field| render(ui, field, editor, &context, &mut actions),
     );
     if response.confirm {
@@ -435,6 +438,11 @@ pub fn show(ui: &mut egui::Ui, state: &mut crate::state::AppState) {
     }
     if response.cancel {
         actions.push(AppAction::CancelEditor);
+    }
+    if response.chose_error_action
+        && let Some(radius) = suggested
+    {
+        actions.push(AppAction::ApplySuggestedFilletRadius(radius));
     }
     for action in actions {
         state.push(action);

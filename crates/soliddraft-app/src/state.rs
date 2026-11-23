@@ -131,6 +131,7 @@ pub enum AppAction {
     GiveFeedback,
     CancelEditor,
     CommitEditor,
+    ApplySuggestedFilletRadius(f64),
     /// The open Extrude's or Cut's depth, from its arrow on the preview.
     EditorDepth(f64),
     /// Opens the open form's Depth for typing.
@@ -389,6 +390,16 @@ impl FeatureEditor {
         self.refused.as_ref().filter(|(params, _)| *params == self.params).map(|(_, why)| why.as_str())
     }
 
+    pub(crate) fn suggested_fillet_radius(&self) -> Option<f64> {
+        let EditorParams::Fillet(params) = &self.params else { return None };
+        if self.feedback.size.is_some() || self.feedback.pick.is_some() {
+            return None;
+        }
+        let reason =
+            self.refusal().or_else(|| self.error.as_deref().filter(|_| self.last.as_ref() == Some(&self.params)))?;
+        crate::geometry_message::suggested_fillet_radius(reason, params.radius)
+    }
+
     pub fn title(&self) -> String {
         let edit = if self.target.is_some() { "Edit " } else { "" };
         match &self.params {
@@ -450,6 +461,10 @@ impl FeatureEditor {
             Some(i) => doc.body_before(i),
             None => doc.display_body(),
         };
+        if self.marked.1 != before && self.last.is_some() && matches!(self.params, EditorParams::Fillet(_)) {
+            self.last = None;
+            self.refused = None;
+        }
         if self.marked.0 != self.edges() || self.marked.1 != before {
             self.marked = (self.edges().to_vec(), before);
             self.marks = doc.edge_paths(&self.marked.0, before);

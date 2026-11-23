@@ -60,6 +60,9 @@
     "ci/browser-recovery-storage.js": [
       "web"
     ],
+    "ci/browser-refusal-assistant.js": [
+      "web"
+    ],
     "ci/cargo-cache.sh": [],
     "ci/bootstrap": "all",
     "ci/hooks/pre-push": [

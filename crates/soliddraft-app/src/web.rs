@@ -356,6 +356,7 @@ thread_local! {
     static SHOWN_DETAILS: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
     static SHOWN_PART_CHECK: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
     static SHOWN_OPTIONS: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
+    static SHOWN_FEATURE_REFUSAL: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
     static SHOWN_BUILD: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
     static SHOWN_PMI: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
     static SHOWN_ASSEMBLY: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
@@ -427,8 +428,8 @@ pub(crate) fn show_control(name: impl Into<String>, rect: egui::Rect) {
 /// `{"<name>": {"x", "y"}}`. The options bar notes `Assembly options` or `Drawing options`,
 /// the Mate panel its type list as `Mate type` and each entry of the open list as
 /// `Mate type: <family>`, and the assembly's options the component's placement fields as
-/// `Placement X` to `Placement Rotate Z`. Read only, for browser checks that click a
-/// control the canvas draws.
+/// `Placement X` to `Placement Rotate Z`. Feature forms note size fields like
+/// `Radius value` and any refusal correction by its button label. Read only.
 #[wasm_bindgen]
 pub fn shown_controls() -> String {
     SHOWN_CONTROLS.with_borrow(|controls| {
@@ -444,6 +445,17 @@ pub fn shown_controls() -> String {
 #[wasm_bindgen]
 pub fn shown_options() -> String {
     SHOWN_OPTIONS.with_borrow(|options| options.clone())
+}
+
+pub(crate) fn show_feature_refusal(error: &str) {
+    SHOWN_FEATURE_REFUSAL.with_borrow_mut(|shown| error.clone_into(shown));
+}
+
+/// The explanation the feature form drew with a proposed correction, or an empty string.
+/// Read only, for browser checks.
+#[wasm_bindgen]
+pub fn shown_feature_refusal() -> String {
+    SHOWN_FEATURE_REFUSAL.with_borrow(Clone::clone)
 }
 
 /// Notes whether a build is owed and where its Cancel button is, for [`shown_build`].
@@ -466,6 +478,7 @@ pub(crate) fn begin_frame() {
     SHOWN_DETAILS.with_borrow_mut(String::clear);
     SHOWN_PART_CHECK.with_borrow_mut(String::clear);
     SHOWN_OPTIONS.with_borrow_mut(String::clear);
+    SHOWN_FEATURE_REFUSAL.with_borrow_mut(String::clear);
     SHOWN_CONTROLS.with_borrow_mut(std::collections::BTreeMap::clear);
     SHOWN_PMI.with_borrow_mut(String::clear);
 }

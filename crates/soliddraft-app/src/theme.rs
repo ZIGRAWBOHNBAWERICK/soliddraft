@@ -256,14 +256,7 @@ pub mod clear_bench {
         value: 12.0,
     };
 
-    pub const RADII: Radii = Radii {
-        control: 6,
-        field: 5,
-        tool: 7,
-        window: 8,
-        floating: 10,
-        pill: 99,
-    };
+    pub const RADII: Radii = Radii { control: 6, field: 5, tool: 7, window: 8, floating: 10, pill: 99 };
 
     pub const TOKENS: Tokens = Tokens {
         id: "clear_bench",

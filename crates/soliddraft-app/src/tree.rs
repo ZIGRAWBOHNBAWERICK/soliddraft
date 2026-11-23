@@ -73,7 +73,6 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
 
 /// The feature tree body without the standalone header (used inside the D1 Browser pane).
 pub fn show_contents(ui: &mut egui::Ui, state: &mut AppState) {
-
     let mut actions = Vec::new();
     egui::ScrollArea::vertical().id_salt("tree").auto_shrink([false, false]).show(ui, |ui| {
         ui.add_space(4.0);

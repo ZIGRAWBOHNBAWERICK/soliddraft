@@ -337,59 +337,56 @@ fn physical_analysis_control(ui: &mut egui::Ui, state: &mut AppState) {
             egui::Grid::new("physical_analysis_units").num_columns(2).spacing([12.0, 6.0]).show(ui, |ui| {
                 ui.vertical(|ui| {
                     ui.label(egui::RichText::new("Length").size(11.0).color(theme::muted()));
-                    egui::ComboBox::from_id_salt("pa_length")
-                        .width(140.0)
-                        .selected_text(phys.length.label())
-                        .show_ui(ui, |ui| {
+                    egui::ComboBox::from_id_salt("pa_length").width(140.0).selected_text(phys.length.label()).show_ui(
+                        ui,
+                        |ui| {
                             for u in LengthUnit::ALL {
                                 ui.selectable_value(&mut phys.length, u, u.label());
                             }
-                        });
+                        },
+                    );
                 });
                 ui.vertical(|ui| {
                     ui.label(egui::RichText::new("Area").size(11.0).color(theme::muted()));
-                    egui::ComboBox::from_id_salt("pa_area")
-                        .width(140.0)
-                        .selected_text(phys.area.label())
-                        .show_ui(ui, |ui| {
+                    egui::ComboBox::from_id_salt("pa_area").width(140.0).selected_text(phys.area.label()).show_ui(
+                        ui,
+                        |ui| {
                             for u in AreaUnit::ALL {
                                 ui.selectable_value(&mut phys.area, u, u.label());
                             }
-                        });
+                        },
+                    );
                 });
                 ui.end_row();
 
                 ui.vertical(|ui| {
                     ui.label(egui::RichText::new("Volume").size(11.0).color(theme::muted()));
-                    egui::ComboBox::from_id_salt("pa_volume")
-                        .width(140.0)
-                        .selected_text(phys.volume.label())
-                        .show_ui(ui, |ui| {
+                    egui::ComboBox::from_id_salt("pa_volume").width(140.0).selected_text(phys.volume.label()).show_ui(
+                        ui,
+                        |ui| {
                             for u in VolumeUnit::ALL {
                                 ui.selectable_value(&mut phys.volume, u, u.label());
                             }
-                        });
+                        },
+                    );
                 });
                 ui.vertical(|ui| {
                     ui.label(egui::RichText::new("Mass").size(11.0).color(theme::muted()));
-                    egui::ComboBox::from_id_salt("pa_mass")
-                        .width(140.0)
-                        .selected_text(phys.mass.label())
-                        .show_ui(ui, |ui| {
+                    egui::ComboBox::from_id_salt("pa_mass").width(140.0).selected_text(phys.mass.label()).show_ui(
+                        ui,
+                        |ui| {
                             for u in MassUnit::ALL {
                                 ui.selectable_value(&mut phys.mass, u, u.label());
                             }
-                        });
+                        },
+                    );
                 });
                 ui.end_row();
 
                 ui.vertical(|ui| {
                     ui.label(egui::RichText::new("Material density").size(11.0).color(theme::muted()));
                     let dv = ui.add(
-                        egui::DragValue::new(&mut phys.density)
-                            .range(0.0001..=100_000.0)
-                            .speed(10.0)
-                            .max_decimals(4),
+                        egui::DragValue::new(&mut phys.density).range(0.0001..=100_000.0).speed(10.0).max_decimals(4),
                     );
                     if dv.changed() {
                         phys.user_overrode_density = true;
@@ -454,18 +451,14 @@ fn physical_analysis_control(ui: &mut egui::Ui, state: &mut AppState) {
 
                         ui.label(egui::RichText::new("Centre of mass").color(theme::muted()));
                         ui.label(
-                            egui::RichText::new(format!(
-                                "({cx:.2}, {cy:.2}, {cz:.2}) {}",
-                                phys.length.label()
-                            ))
-                            .font(theme::mono(11.5))
-                            .color(theme::ink()),
+                            egui::RichText::new(format!("({cx:.2}, {cy:.2}, {cz:.2}) {}", phys.length.label()))
+                                .font(theme::mono(11.5))
+                                .color(theme::ink()),
                         );
                         ui.end_row();
                     });
                 } else {
-                    let target_feature =
-                        state.doc.features.iter().rev().find(|f| f.body == Some(body)).map(|f| f.id);
+                    let target_feature = state.doc.features.iter().rev().find(|f| f.body == Some(body)).map(|f| f.id);
                     if phys.requested_body != Some(rev)
                         && state.doc.proof_state().current_proved_display()
                         && let Some(feat_id) = target_feature

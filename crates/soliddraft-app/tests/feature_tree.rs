@@ -124,7 +124,10 @@ fn strip_icons_show_the_tree_or_values_and_hide_the_side_area() {
         assert!(app.query_all_by_label("New global name").next().is_some(), "the Values pane shows");
         assert!(ribbon::control(app, "Values", bar).selected);
         assert!(ribbon::control(app, "Feature tree", bar).selected);
-        assert!((app.state().state.viewport.rect.width() - with_pane).abs() < 1.0, "all stacked panes share one side area");
+        assert!(
+            (app.state().state.viewport.rect.width() - with_pane).abs() < 1.0,
+            "all stacked panes share one side area"
+        );
         case.frame(app, "values");
 
         // Toggle off all open panes via Clear -> side area disappears completely.

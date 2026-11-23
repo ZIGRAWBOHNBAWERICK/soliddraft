@@ -15,6 +15,13 @@ paths = ["crates/soliddraft-app/src/assembly.rs", "crates/soliddraft-app/src/ass
 module = ["assembly"]
 
 [[areas]]
+name = "app.bottom_popovers"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/bottom_popovers.rs"]
+module = ["bottom_popovers"]
+
+[[areas]]
 name = "app.chat"
 owner = "core"
 crate = "soliddraft-app"
@@ -111,6 +118,13 @@ owner = "core"
 crate = "soliddraft-app"
 paths = ["crates/soliddraft-app/src/geometry_message.rs"]
 module = ["geometry_message"]
+
+[[areas]]
+name = "app.history_panel"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/history_panel.rs"]
+module = ["history_panel"]
 
 [[areas]]
 name = "app.icons"
@@ -363,6 +377,13 @@ owner = "core"
 crate = "soliddraft-app"
 paths = ["crates/soliddraft-app/src/tool_palette.rs"]
 module = ["tool_palette"]
+
+[[areas]]
+name = "app.top_bar"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/top_bar.rs"]
+module = ["top_bar"]
 
 [[areas]]
 name = "app.tree"

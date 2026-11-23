@@ -203,9 +203,10 @@ impl OpenParts {
 
 fn part_tab_title(doc: &Document) -> String {
     match &doc.path {
-        Some(path) => path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| {
-            format!("{}.{}", doc.name, file::EXTENSION)
-        }),
+        Some(path) => path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| format!("{}.{}", doc.name, file::EXTENSION)),
         None => format!("{}.{}", doc.name, file::EXTENSION),
     }
 }
@@ -319,14 +320,7 @@ fn brand_mark(ui: &mut egui::Ui) {
     );
 }
 
-fn icon_button(
-    ui: &mut egui::Ui,
-    icon: Icon,
-    label: &str,
-    tip: &str,
-    enabled: bool,
-    selected: bool,
-) -> egui::Response {
+fn icon_button(ui: &mut egui::Ui, icon: Icon, label: &str, tip: &str, enabled: bool, selected: bool) -> egui::Response {
     let sense = if enabled { Sense::click() } else { Sense::hover() };
     let (rect, resp) = ui.allocate_exact_size(vec2(26.0, 26.0), sense);
     resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, enabled, selected, label));
@@ -408,11 +402,7 @@ fn donate_button(ui: &mut egui::Ui) {
         Rect::from_center_size(pos2(rect.left() + 14.0, rect.center().y), vec2(12.0, 12.0)),
         theme::donate_ink(),
     );
-    ui.painter().galley(
-        pos2(rect.left() + 24.0, rect.center().y - galley.size().y / 2.0),
-        galley,
-        theme::donate_ink(),
-    );
+    ui.painter().galley(pos2(rect.left() + 24.0, rect.center().y - galley.size().y / 2.0), galley, theme::donate_ink());
     let resp = resp.on_hover_text("Support SolidDraft development");
     egui::Popup::menu(&resp)
         .align(RectAlign::BOTTOM_END)
@@ -481,7 +471,13 @@ fn file_menu_button(ui: &mut egui::Ui, st: &mut AppState) {
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "File"));
     let open = egui::Popup::is_id_open(ui.ctx(), resp.id.with("popup"));
     let stroke = if open || resp.hovered() { theme::accent() } else { theme::line() };
-    let fill = if open { theme::accent_soft() } else if resp.hovered() { theme::hover() } else { theme::panel() };
+    let fill = if open {
+        theme::accent_soft()
+    } else if resp.hovered() {
+        theme::hover()
+    } else {
+        theme::panel()
+    };
     ui.painter().rect(rect, CornerRadius::same(theme::RADIUS), fill, Stroke::new(1.0, stroke), StrokeKind::Inside);
     ui.painter().galley(pos2(rect.left() + 9.0, rect.center().y - galley.size().y / 2.0), galley, theme::ink());
     icons::paint(
@@ -615,12 +611,11 @@ fn file_menu_contents(ui: &mut egui::Ui, st: &mut AppState) {
             .corner_radius(CornerRadius::same(theme::RADIUS))
             .inner_margin(egui::Margin::symmetric(6, 3));
         frame.show(ui, |ui| {
-            let btn = egui::Button::new(
-                egui::RichText::new("Preferences…").family(theme::semibold()).color(theme::ink()),
-            )
-            .fill(Color32::TRANSPARENT)
-            .stroke(Stroke::NONE)
-            .shortcut_text(shortcut);
+            let btn =
+                egui::Button::new(egui::RichText::new("Preferences…").family(theme::semibold()).color(theme::ink()))
+                    .fill(Color32::TRANSPARENT)
+                    .stroke(Stroke::NONE)
+                    .shortcut_text(shortcut);
             if ui.add_sized(vec2(ui.available_width(), 22.0), btn).clicked() {
                 st.run_command(prefs_cmd);
                 ui.close();
@@ -790,9 +785,7 @@ fn tab_pill(ui: &mut egui::Ui, icon: Icon, title: &str, dirty: bool, active: boo
     main_resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, active, title));
 
     let close_resp = ui.interact(close_rect, ui.id().with(("doc_tab_close", title)), Sense::click());
-    close_resp.widget_info(|| {
-        egui::WidgetInfo::labeled(egui::WidgetType::Button, true, format!("Close {title}"))
-    });
+    close_resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, format!("Close {title}")));
 
     let hovered = main_resp.hovered() || close_resp.hovered();
     let (fill, stroke) = if active {
@@ -815,11 +808,7 @@ fn tab_pill(ui: &mut egui::Ui, icon: Icon, title: &str, dirty: bool, active: boo
     let text_x = rect.left() + 25.0;
     let text_max = close_rect.left() - 4.0 - dot_space;
     let clip = Rect::from_min_max(pos2(text_x, rect.top()), pos2(text_max.max(text_x), rect.bottom()));
-    ui.painter().with_clip_rect(clip).galley(
-        pos2(text_x, rect.center().y - galley.size().y / 2.0),
-        galley,
-        ink,
-    );
+    ui.painter().with_clip_rect(clip).galley(pos2(text_x, rect.center().y - galley.size().y / 2.0), galley, ink);
 
     if dirty {
         ui.painter().circle_filled(pos2(close_rect.left() - 6.0, rect.center().y), 3.0, theme::accent());
@@ -908,8 +897,10 @@ pub fn dialogs(ctx: &egui::Context, state: &mut AppState) {
             .open(&mut open)
             .show(ctx, |ui| {
                 ui.label(
-                    egui::RichText::new("Pinned quick tools on the bottom command bar. Drag any ribbon tool onto the bar to pin it.")
-                        .color(theme::muted()),
+                    egui::RichText::new(
+                        "Pinned quick tools on the bottom command bar. Drag any ribbon tool onto the bar to pin it.",
+                    )
+                    .color(theme::muted()),
                 );
                 ui.add_space(8.0);
                 let tools = state.command_line.settings.tools.clone();

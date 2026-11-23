@@ -131,13 +131,7 @@ fn rail_button(
     let hovered = response.hovered() || response.has_focus();
     let painter = ui.painter();
     if selected {
-        painter.rect(
-            rect,
-            CornerRadius::same(7),
-            theme::panel(),
-            Stroke::new(1.0, theme::line()),
-            StrokeKind::Inside,
-        );
+        painter.rect(rect, CornerRadius::same(7), theme::panel(), Stroke::new(1.0, theme::line()), StrokeKind::Inside);
         let mark = Rect::from_min_max(pos2(edge, rect.top() + 7.0), pos2(edge + MARK, rect.bottom() - 7.0));
         painter.rect_filled(mark, CornerRadius::same(1), theme::accent());
     } else if hovered {
@@ -160,12 +154,7 @@ fn rail_button(
         color,
     );
     if response.has_focus() {
-        painter.rect_stroke(
-            rect,
-            CornerRadius::same(7),
-            Stroke::new(1.5, theme::accent()),
-            StrokeKind::Inside,
-        );
+        painter.rect_stroke(rect, CornerRadius::same(7), Stroke::new(1.5, theme::accent()), StrokeKind::Inside);
     }
     let mut tip = egui::Tooltip::for_enabled(&response);
     tip.popup = tip.popup.align(egui::RectAlign::RIGHT);

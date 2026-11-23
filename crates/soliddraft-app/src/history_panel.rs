@@ -101,49 +101,46 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
     let mut rollback_to: Option<usize> = None;
 
     // 1. Playback toolbar (`|<  <  ▶/⏸  >  >|`)
-    egui::Frame::new()
-        .fill(theme::panel_header())
-        .inner_margin(egui::Margin::symmetric(8, 5))
-        .show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 4.0;
-                let avail = ui.available_width();
-                let group_w = 5.0 * 28.0 + 4.0 * 4.0;
-                ui.add_space(((avail - group_w) * 0.5).max(0.0));
+    egui::Frame::new().fill(theme::panel_header()).inner_margin(egui::Margin::symmetric(8, 5)).show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 4.0;
+            let avail = ui.available_width();
+            let group_w = 5.0 * 28.0 + 4.0 * 4.0;
+            ui.add_space(((avail - group_w) * 0.5).max(0.0));
 
-                if step_btn(ui, StepIcon::First, "Roll to start", can_edit && current > 0, false).clicked() {
+            if step_btn(ui, StepIcon::First, "Roll to start", can_edit && current > 0, false).clicked() {
+                pb.playing = false;
+                rollback_to = Some(0);
+            }
+            if step_btn(ui, StepIcon::Prev, "Step back", can_edit && current > 0, false).clicked() {
+                pb.playing = false;
+                rollback_to = Some(current.saturating_sub(1));
+            }
+            let play_icon = if pb.playing { StepIcon::Pause } else { StepIcon::Play };
+            let play_tip = if pb.playing { "Pause history playback" } else { "Play history forward" };
+            let play_enabled = can_edit && total > 0;
+            if step_btn(ui, play_icon, play_tip, play_enabled, pb.playing).clicked() {
+                if pb.playing {
                     pb.playing = false;
-                    rollback_to = Some(0);
-                }
-                if step_btn(ui, StepIcon::Prev, "Step back", can_edit && current > 0, false).clicked() {
-                    pb.playing = false;
-                    rollback_to = Some(current.saturating_sub(1));
-                }
-                let play_icon = if pb.playing { StepIcon::Pause } else { StepIcon::Play };
-                let play_tip = if pb.playing { "Pause history playback" } else { "Play history forward" };
-                let play_enabled = can_edit && total > 0;
-                if step_btn(ui, play_icon, play_tip, play_enabled, pb.playing).clicked() {
-                    if pb.playing {
-                        pb.playing = false;
-                    } else {
-                        pb.playing = true;
-                        pb.last_step_time = now;
-                        if current >= total {
-                            rollback_to = Some(0);
-                        }
+                } else {
+                    pb.playing = true;
+                    pb.last_step_time = now;
+                    if current >= total {
+                        rollback_to = Some(0);
                     }
                 }
-                if step_btn(ui, StepIcon::Next, "Step forward", can_edit && current < total, false).clicked() {
-                    pb.playing = false;
-                    rollback_to = Some((current + 1).min(total));
-                }
-                if step_btn(ui, StepIcon::Last, "Roll to end", can_edit && current < total, false).clicked() {
-                    pb.playing = false;
-                    rollback_to = Some(total);
-                }
-            });
+            }
+            if step_btn(ui, StepIcon::Next, "Step forward", can_edit && current < total, false).clicked() {
+                pb.playing = false;
+                rollback_to = Some((current + 1).min(total));
+            }
+            if step_btn(ui, StepIcon::Last, "Roll to end", can_edit && current < total, false).clicked() {
+                pb.playing = false;
+                rollback_to = Some(total);
+            }
         });
+    });
     theme::hline(ui);
 
     // 2. Scrubber footer height reserved so the list scrolls cleanly above it.
@@ -153,11 +150,9 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
     let selected_feature = state.selected_feature();
     let mut select_feature = None;
 
-    egui::ScrollArea::vertical()
-        .id_salt("d1_history_list")
-        .max_height(list_h)
-        .auto_shrink([false, false])
-        .show(ui, |ui| {
+    egui::ScrollArea::vertical().id_salt("d1_history_list").max_height(list_h).auto_shrink([false, false]).show(
+        ui,
+        |ui| {
             ui.add_space(3.0);
             if total == 0 {
                 ui.add_space(12.0);
@@ -226,28 +221,25 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
                 }
             }
             ui.add_space(4.0);
-        });
+        },
+    );
 
     // 3. Rollback scrubber slider at bottom of History pane
     ui.add_space(2.0);
     theme::hline(ui);
-    egui::Frame::new()
-        .inner_margin(egui::Margin { left: 10, right: 10, top: 6, bottom: 8 })
-        .show(ui, |ui| {
-            let mut step = current;
-            ui.spacing_mut().slider_width = (ui.available_width() - 4.0).max(40.0);
-            let slider = ui.add_enabled(
-                can_edit && total > 0,
-                egui::Slider::new(&mut step, 0..=total.max(1)).show_value(false),
-            );
-            slider.widget_info(|| {
-                egui::WidgetInfo::labeled(egui::WidgetType::Slider, can_edit && total > 0, "History rollback scrubber")
-            });
-            if slider.changed() && step != current {
-                pb.playing = false;
-                rollback_to = Some(step);
-            }
+    egui::Frame::new().inner_margin(egui::Margin { left: 10, right: 10, top: 6, bottom: 8 }).show(ui, |ui| {
+        let mut step = current;
+        ui.spacing_mut().slider_width = (ui.available_width() - 4.0).max(40.0);
+        let slider =
+            ui.add_enabled(can_edit && total > 0, egui::Slider::new(&mut step, 0..=total.max(1)).show_value(false));
+        slider.widget_info(|| {
+            egui::WidgetInfo::labeled(egui::WidgetType::Slider, can_edit && total > 0, "History rollback scrubber")
         });
+        if slider.changed() && step != current {
+            pb.playing = false;
+            rollback_to = Some(step);
+        }
+    });
 
     ui.data_mut(|d| d.insert_temp(pb_id, pb));
 

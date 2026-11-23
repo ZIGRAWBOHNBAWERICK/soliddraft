@@ -54,10 +54,8 @@ pub(in crate::app) fn pane(ui: &mut egui::Ui, state: &mut AppState) {
 
     // Compute pixel heights from stored weights.
     let weight_sum: f32 = active.iter().map(|p| state.layout.split_weights[p.index()].max(0.1)).sum();
-    let mut heights: Vec<f32> = active
-        .iter()
-        .map(|p| (state.layout.split_weights[p.index()].max(0.1) / weight_sum) * usable_h)
-        .collect();
+    let mut heights: Vec<f32> =
+        active.iter().map(|p| (state.layout.split_weights[p.index()].max(0.1) / weight_sum) * usable_h).collect();
     // Enforce minimum height per pane and re-normalize so total matches `usable_h`.
     for h in &mut heights {
         if *h < min_pane_h {
@@ -95,11 +93,8 @@ pub(in crate::app) fn pane(ui: &mut egui::Ui, state: &mut AppState) {
             pos2(pane_rect.left(), pane_rect.top() + theme::spacing().pane_header_height),
             pane_rect.max,
         );
-        let mut body = child.new_child(
-            egui::UiBuilder::new()
-                .max_rect(body_rect)
-                .layout(egui::Layout::top_down(egui::Align::Min)),
-        );
+        let mut body = child
+            .new_child(egui::UiBuilder::new().max_rect(body_rect).layout(egui::Layout::top_down(egui::Align::Min)));
         body.set_clip_rect(body_rect);
         match p {
             Pane::Tree if state.assembly.is_active() => crate::assembly::tree(&mut body, state),
@@ -130,7 +125,11 @@ pub(in crate::app) fn pane(ui: &mut egui::Ui, state: &mut AppState) {
                 )
             });
             let hot = sresp.hovered() || sresp.dragged();
-            ui.painter().rect_filled(srect, CornerRadius::ZERO, if hot { theme::accent_soft() } else { theme::panel_header() });
+            ui.painter().rect_filled(
+                srect,
+                CornerRadius::ZERO,
+                if hot { theme::accent_soft() } else { theme::panel_header() },
+            );
             ui.painter().hline(srect.x_range(), srect.top() + 0.5, egui::Stroke::new(1.0, theme::line()));
             ui.painter().hline(srect.x_range(), srect.bottom() - 0.5, egui::Stroke::new(1.0, theme::line()));
             let grip = Rect::from_center_size(srect.center(), vec2(30.0, 2.0));
@@ -196,21 +195,12 @@ fn pane_header(ui: &mut egui::Ui, state: &AppState, pane: Pane) -> bool {
             };
             (Icon::Tree, title, Some(b), fg, bg)
         }
-        Pane::History => (
-            Icon::History,
-            "History",
-            Some(crate::history_panel::badge(state)),
-            theme::muted(),
-            theme::chip(),
-        ),
+        Pane::History => {
+            (Icon::History, "History", Some(crate::history_panel::badge(state)), theme::muted(), theme::chip())
+        }
         Pane::Values => {
-            let active_cfg = state
-                .doc
-                .model()
-                .configuration_summary()["active"]
-                .as_str()
-                .unwrap_or("Default")
-                .to_owned();
+            let active_cfg =
+                state.doc.model().configuration_summary()["active"].as_str().unwrap_or("Default").to_owned();
             (Icon::Config, "Values", Some(active_cfg), theme::muted(), theme::chip())
         }
         Pane::Props => {
@@ -250,10 +240,8 @@ fn pane_header(ui: &mut egui::Ui, state: &AppState, pane: Pane) -> bool {
     if let Some(text) = badge_text {
         let galley = ui.painter().layout_no_wrap(text, theme::font_semibold(10.0), badge_fg);
         let pill_w = galley.size().x + 12.0;
-        let pill_rect = Rect::from_center_size(
-            pos2(close_rect.left() - 6.0 - pill_w / 2.0, head.center().y),
-            vec2(pill_w, 17.0),
-        );
+        let pill_rect =
+            Rect::from_center_size(pos2(close_rect.left() - 6.0 - pill_w / 2.0, head.center().y), vec2(pill_w, 17.0));
         ui.painter().rect_filled(pill_rect, CornerRadius::same(theme::radii().pill), badge_bg);
         ui.painter().galley(
             pos2(pill_rect.center().x - galley.size().x / 2.0, pill_rect.center().y - galley.size().y / 2.0),

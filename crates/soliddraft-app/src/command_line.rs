@@ -899,15 +899,10 @@ fn ai_chip(ui: &mut egui::Ui, state: &mut AppState) {
     } else {
         format!("ai · {turns} {}", if turns == 1 { "turn" } else { "turns" })
     };
-    let btn = egui::Button::new(
-        egui::RichText::new(&label).font(theme::mono(11.5)).color(theme::terminal_ink()),
-    )
-    .fill(theme::terminal_bg())
-    .stroke(Stroke::new(
-        1.0,
-        if state.command_line.session_open { theme::accent() } else { theme::terminal_bg() },
-    ))
-    .corner_radius(CornerRadius::same(theme::RADIUS));
+    let btn = egui::Button::new(egui::RichText::new(&label).font(theme::mono(11.5)).color(theme::terminal_ink()))
+        .fill(theme::terminal_bg())
+        .stroke(Stroke::new(1.0, if state.command_line.session_open { theme::accent() } else { theme::terminal_bg() }))
+        .corner_radius(CornerRadius::same(theme::RADIUS));
     if ui.add_sized(vec2(0.0, 22.0), btn).on_hover_text("Open the AI session").clicked() {
         state.command_line.open_session();
     }

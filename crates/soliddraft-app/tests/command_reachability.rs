@@ -112,7 +112,8 @@ fn every_app_command_is_reachable_without_legacy_menu_bar() {
     // 2. Every single app command in the registry is reachable through command search /
     // command line in at least one valid context.
     for cmd in commands::all().iter().filter(|c| c.in_app()) {
-        let by_name = Context::all().into_iter().any(|ctx| command_line::named(cmd.id, ctx).is_some_and(|c| c.id == cmd.id));
+        let by_name =
+            Context::all().into_iter().any(|ctx| command_line::named(cmd.id, ctx).is_some_and(|c| c.id == cmd.id));
         let by_search = Context::all()
             .into_iter()
             .any(|ctx| commands::search_here(cmd.id, &history, ctx).iter().any(|m| m.command.id == cmd.id));
@@ -129,9 +130,7 @@ fn every_app_command_is_reachable_without_legacy_menu_bar() {
     for id in LEGACY_MENU_COMMANDS {
         let cmd = commands::get(id).unwrap_or_else(|| panic!("legacy menu command `{id}` missing from registry"));
         assert!(cmd.in_app(), "legacy menu command `{id}` must remain an app command");
-        let in_search = Context::all()
-            .into_iter()
-            .any(|ctx| command_line::named(id, ctx).is_some_and(|c| c.id == *id));
+        let in_search = Context::all().into_iter().any(|ctx| command_line::named(id, ctx).is_some_and(|c| c.id == *id));
         assert!(
             ui_surfaces.contains(id) || in_search,
             "legacy menu command `{id}` became unreachable after removing the 7-item menu row"

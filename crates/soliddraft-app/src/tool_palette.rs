@@ -111,7 +111,8 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
                                 drew_any = true;
                             }
                             if tab == Tab::Part(RibbonTab::Sketch) {
-                                let command = commands::get("smart_dimension").expect("the registry has Smart Dimension");
+                                let command =
+                                    commands::get("smart_dimension").expect("the registry has Smart Dimension");
                                 let resp = tool_card(ui, state, command, false);
                                 if resp.clicked() {
                                     pending = Some(command);
@@ -205,7 +206,11 @@ fn workspace_tab(
     } else {
         theme::muted()
     };
-    ui.painter().galley(pos2(rect.center().x - galley.size().x / 2.0, rect.center().y - galley.size().y / 2.0), galley, ink);
+    ui.painter().galley(
+        pos2(rect.center().x - galley.size().x / 2.0, rect.center().y - galley.size().y / 2.0),
+        galley,
+        ink,
+    );
     resp.on_hover_text(hint)
 }
 
@@ -214,12 +219,7 @@ fn group_divider(ui: &mut egui::Ui) {
     ui.painter().vline(rect.center().x, rect.y_range().shrink(2.0), Stroke::new(1.0, theme::line()));
 }
 
-fn tool_card(
-    ui: &mut egui::Ui,
-    state: &AppState,
-    command: &'static CommandSpec,
-    primary: bool,
-) -> egui::Response {
+fn tool_card(ui: &mut egui::Ui, state: &AppState, command: &'static CommandSpec, primary: bool) -> egui::Response {
     let enabled = command.is_enabled(state);
     let active = (command.active)(state);
     let caption = card_caption(command, state);
@@ -232,8 +232,11 @@ fn tool_card(
     let height = 48.0;
 
     let (rect, _) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
-    let response =
-        ui.interact(rect, ui.id().with(("ribbon_tool", command.id)), if enabled { Sense::click_and_drag() } else { Sense::hover() });
+    let response = ui.interact(
+        rect,
+        ui.id().with(("ribbon_tool", command.id)),
+        if enabled { Sense::click_and_drag() } else { Sense::hover() },
+    );
     response.dnd_set_drag_payload(crate::command_line::ToolDrag { id: command.id });
     response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, enabled, active, accessible.clone()));
 

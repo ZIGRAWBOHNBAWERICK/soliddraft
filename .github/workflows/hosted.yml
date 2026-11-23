@@ -66,7 +66,9 @@ jobs:
           RUNNER_BOAT_OK_AT: ${{ vars.RUNNER_BOAT_OK_AT }}
           RUNNER_BOHN03_OK_AT: ${{ vars.RUNNER_BOHN03_OK_AT }}
         run: python3 ci/select-runner.py
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: ./.github/actions/rust-toolchain
+        with:
+          channel: stable
       - id: select
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before || github.sha }}
@@ -169,8 +171,9 @@ jobs:
       - name: Measure Blade disk usage
         if: startsWith(runner.name, 'blade-sd-')
         run: python3 ci/blade-disk.py start
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: ./.github/actions/rust-toolchain
         with:
+          channel: stable
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
         if: runner.environment == 'github-hosted'
@@ -248,7 +251,9 @@ jobs:
       - name: Measure Blade disk usage
         if: startsWith(runner.name, 'blade-sd-')
         run: python3 ci/blade-disk.py start
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: ./.github/actions/rust-toolchain
+        with:
+          channel: stable
       - uses: Swatinem/rust-cache@v2
         if: runner.environment == 'github-hosted'
         with:
@@ -352,7 +357,9 @@ jobs:
       - name: Measure Blade disk usage
         if: startsWith(runner.name, 'blade-sd-')
         run: python3 ci/blade-disk.py start
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: ./.github/actions/rust-toolchain
+        with:
+          channel: stable
       - uses: Swatinem/rust-cache@v2
         if: runner.environment == 'github-hosted'
         with:
@@ -482,7 +489,9 @@ jobs:
           fi
           # Cargo embeds CLI paths in tests; use the consumer's canonical mount.
           echo "CARGO_TARGET_DIR=$LINUX_ARCHIVE_WORKSPACE/target" >> "$GITHUB_ENV"
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: ./.github/actions/rust-toolchain
+        with:
+          channel: stable
       - uses: Swatinem/rust-cache@v2
         if: runner.environment == 'github-hosted'
         with:
@@ -580,7 +589,9 @@ jobs:
             fi
             test "$(git -C "$GITHUB_WORKSPACE" rev-parse HEAD)" = "$(git -C "$LINUX_ARCHIVE_WORKSPACE" rev-parse HEAD)"
           fi
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: ./.github/actions/rust-toolchain
+        with:
+          channel: stable
       - name: Install pinned test tools
         uses: ./.github/actions/pinned-tool
         with:
@@ -645,7 +656,9 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: ./.github/actions/rust-toolchain
+        with:
+          channel: stable
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: native-test-opt2
@@ -696,7 +709,9 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: ./.github/actions/rust-toolchain
+        with:
+          channel: stable
       - name: Install pinned test tools
         uses: ./.github/actions/pinned-tool
         with:
@@ -726,7 +741,9 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: ./.github/actions/rust-toolchain
+        with:
+          channel: stable
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: native-test-opt2
@@ -755,8 +772,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: ./.github/actions/rust-toolchain
         with:
+          channel: stable
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
         with:
@@ -1039,7 +1057,9 @@ jobs:
       - name: Measure Blade disk usage
         if: startsWith(runner.name, 'blade-sd-')
         run: python3 ci/blade-disk.py start
-      - uses: dtolnay/rust-toolchain@1.88
+      - uses: ./.github/actions/rust-toolchain
+        with:
+          channel: 1.88
       - uses: Swatinem/rust-cache@v2
         if: needs.select.outputs.plain_jobs != '1' && !startsWith(runner.name, 'blade-sd-')
         with:
@@ -1089,7 +1109,9 @@ jobs:
       XDG_RUNTIME_DIR: /tmp/soliddraft-runtime
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: ./.github/actions/rust-toolchain
+        with:
+          channel: stable
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: native-dev
@@ -1131,7 +1153,9 @@ jobs:
       XDG_RUNTIME_DIR: /tmp/soliddraft-runtime
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: ./.github/actions/rust-toolchain
+        with:
+          channel: stable
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: native-dev
@@ -1186,7 +1210,9 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: ./.github/actions/rust-toolchain
+        with:
+          channel: stable
       - uses: Swatinem/rust-cache@v2
         if: runner.environment == 'github-hosted'
         with:

@@ -71,6 +71,8 @@ pub fn show_contents(ui: &mut egui::Ui, state: &mut AppState) {
                 )
                 .on_hover_text("Commit Hole Wizard feature");
             apply_btn.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Apply Hole Wizard"));
+            #[cfg(target_arch = "wasm32")]
+            crate::web::show_control("Apply Hole Wizard", apply_btn.rect);
             if apply_btn.clicked() {
                 actions.push(AppAction::CommitEditor);
             }
@@ -86,6 +88,8 @@ pub fn show_contents(ui: &mut egui::Ui, state: &mut AppState) {
         let pos_selected = params.wizard_tab == HoleWizardTab::Positions;
         let type_btn = ui.selectable_label(type_selected, "Type");
         type_btn.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Hole Wizard Type tab"));
+        #[cfg(target_arch = "wasm32")]
+        crate::web::show_control("Hole Wizard Type tab", type_btn.rect);
         if type_btn.clicked() && !type_selected {
             params.wizard_tab = HoleWizardTab::Type;
             params.picking_target = None;
@@ -95,6 +99,8 @@ pub fn show_contents(ui: &mut egui::Ui, state: &mut AppState) {
         }
         let pos_btn = ui.selectable_label(pos_selected, format!("Positions ({point_count})"));
         pos_btn.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Hole Wizard Positions tab"));
+        #[cfg(target_arch = "wasm32")]
+        crate::web::show_control("Hole Wizard Positions tab", pos_btn.rect);
         if pos_btn.clicked() && !pos_selected {
             params.wizard_tab = HoleWizardTab::Positions;
             params.picking_target = None;
@@ -314,6 +320,8 @@ fn show_type_tab_fields(ui: &mut egui::Ui, params: &mut HoleParams, note: &mut O
                                 format!("Hole type: {}", ty.label()),
                             )
                         });
+                        #[cfg(target_arch = "wasm32")]
+                        crate::web::show_control(format!("Hole type: {}", ty.label()), btn.rect);
                         if btn.clicked() {
                             params.ensure_wizard().set_hole_type(ty);
                             params.apply_wizard_defaults();

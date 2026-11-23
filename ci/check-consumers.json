@@ -45,6 +45,9 @@
     "ci/browser-manufacturing-information.mjs": [
       "web"
     ],
+    "ci/browser-hole-wizard.mjs": [
+      "web"
+    ],
     "ci/browser-edit-off-thread.js": [
       "web"
     ],

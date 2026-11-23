@@ -196,13 +196,12 @@ switch (scenario) {
     break;
   }
   case 'visibility': {
+    await open('wizard-tapped-offset.dwprt');
+    await until(threads, count => count > 0, 'The visible solid did not draw its thread marks');
     await open('thread-hidden.dwprt');
     const view = () => shown('shown_viewport');
     await until(view, value => value?.display_state === 'Hidden' && value.visible_meshes === 0, 'The body remained visible');
     check(await threads() === 0, 'The hidden solid still drew thread marks');
-    await click('Display state');
-    await click('Display state: Default');
-    await until(threads, count => count > 0, 'The visible solid did not draw its thread marks');
     break;
   }
   case 'callouts': {

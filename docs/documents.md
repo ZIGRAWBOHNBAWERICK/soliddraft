@@ -9,10 +9,13 @@ crates write their files through it.
 
 | Kind | Saved as | Also opens | Truth entry | Format |
 |---|---|---|---|---|
-| Part | `.dwprt` | `.dwpart` | `part.json` | `soliddraft-part/2` |
+| Part | `.dwprt` | `.dwpart` | `part.json` | [`soliddraft-part/2` through `/8`](modelling.md#native-files) |
 | Assembly | `.dwasm` | | `assembly.json` | `soliddraft-assembly/1` |
-| Drawing | `.dwdrw` | `.dwdrawing` | `drawing.json` | `soliddraft-drawing/2` |
+| Drawing | `.dwdrw` | `.dwdrawing` | `drawing.json` | `soliddraft-drawing/3` |
 | Mesh reference | `.dwmsh` | | `mesh.json` | `soliddraft-mesh/1` |
+
+Drawing format 3 carries hole tables, chamfer angles, four-anchor centrelines, weld
+symbols and thread sources. Format 2 drawings still open and save as format 3.
 
 A file under an old extension opens, and saving it writes the current name beside it. The
 old file stays where it was. Assemblies and mesh references are described in
@@ -22,7 +25,7 @@ old file stays where it was. Assemblies and mesh references are described in
 Files with `draftwell-document`, `draftwell-part`, `draftwell-assembly` or
 `draftwell-drawing` format prefixes still open. Saving writes the SolidDraft prefixes
 and keeps the document id and revision. Document settings also accept the earlier
-`draftwell-settings/1` tag. The supported major versions have not changed.
+`draftwell-settings/1` tag.
 
 ## Damaged and newer files
 

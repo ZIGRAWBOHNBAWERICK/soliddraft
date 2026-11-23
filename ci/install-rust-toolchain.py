@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
-"""Install a rustup toolchain with a bounded, retrying download."""
+"""Install a rustup toolchain and retry stalled downloads."""
 import os
+from pathlib import Path
 import shutil
 import subprocess
 import sys
+import tempfile
+import time
 
 
 DEFAULT_TIMEOUT = 120
@@ -33,6 +36,56 @@ def installed_toolchain(rustup, channel, components, targets):
         return False
 
 
+def partial_download_sizes(downloads):
+    sizes = {}
+    for path in downloads.glob("*.partial"):
+        try:
+            sizes[path] = path.stat().st_size
+        except FileNotFoundError:
+            # Rustup renames completed downloads while we scan.
+            pass
+    return sizes
+
+
+def install_with_idle_timeout(command, timeout):
+    rustup_home = Path(os.environ.get("RUSTUP_HOME") or Path.home() / ".rustup")
+    downloads = rustup_home / "downloads"
+    sizes = partial_download_sizes(downloads)
+    with tempfile.TemporaryDirectory() as directory:
+        log = Path(directory) / "rustup.log"
+        # Poll a file to stream logs without relying on selectable pipes on Windows.
+        with log.open("wb") as writer, log.open("rb") as reader, subprocess.Popen(
+            command, stdout=writer, stderr=subprocess.STDOUT
+        ) as process:
+            deadline = time.monotonic() + timeout
+            try:
+                while True:
+                    returncode = process.poll()
+                    output = reader.read(8192)
+                    if output:
+                        sys.stdout.buffer.write(output)
+                        sys.stdout.buffer.flush()
+                        deadline = time.monotonic() + timeout
+                        continue
+                    if returncode is not None:
+                        if returncode:
+                            raise subprocess.CalledProcessError(returncode, command)
+                        return
+
+                    # Older Rustup releases download without progress output in CI.
+                    current_sizes = partial_download_sizes(downloads)
+                    if any(size > sizes.get(path, 0) for path, size in current_sizes.items()):
+                        deadline = time.monotonic() + timeout
+                    sizes = current_sizes
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise subprocess.TimeoutExpired(command, timeout)
+                    time.sleep(min(0.1, remaining))
+            finally:
+                if process.poll() is None:
+                    process.kill()
+
+
 def install(rustup, channel, components, targets, step_name):
     timeout = int(os.environ.get("RUSTUP_INSTALL_TIMEOUT_SECONDS", DEFAULT_TIMEOUT))
     attempts = int(os.environ.get("RUSTUP_INSTALL_ATTEMPTS", DEFAULT_ATTEMPTS))
@@ -51,15 +104,16 @@ def install(rustup, channel, components, targets, step_name):
         for attempt in range(1, attempts + 1):
             print(f"{step_name}: rustup install attempt {attempt}/{attempts}", flush=True)
             try:
-                subprocess.run(command, check=True, timeout=timeout)
+                install_with_idle_timeout(command, timeout)
                 break
             except subprocess.TimeoutExpired:
-                print(f"::warning::{step_name}: rustup install timed out after {timeout}s", flush=True)
+                print(f"::warning::{step_name}: rustup install timed out after {timeout}s "
+                      "without progress", flush=True)
             except subprocess.CalledProcessError as error:
                 print(f"{step_name}: rustup install exited with status {error.returncode}", flush=True)
             if attempt == attempts:
                 print(f"::error::{step_name}: Rust toolchain install failed after {attempts} attempts "
-                      f"({timeout}s per attempt)", file=sys.stderr, flush=True)
+                      f"({timeout}s inactivity timeout)", file=sys.stderr, flush=True)
                 return 1
 
     try:

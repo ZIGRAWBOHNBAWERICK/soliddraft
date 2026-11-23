@@ -61,7 +61,9 @@ pub enum ValuesAction {
 #[derive(Clone, Debug, Default)]
 pub struct ValuesTab {
     table: Option<((u64, u64), ValuesTable)>,
+    /// The open copy of the part the rows and drafts belong to.
     document: Option<soliddraft_document::DocumentId>,
+    /// The open copy and revision a table file was asked for.
     import_request: Option<(soliddraft_document::DocumentId, u64)>,
     expanded: bool,
     filter: String,
@@ -92,9 +94,10 @@ impl ValuesTab {
     }
 }
 
-/// The part's table, made again only when the part changes.
+/// The part's table, made again only when the part changes. Rows, drafts and refusals
+/// belong to one open copy of the part: a second tab of the same file starts clean.
 fn table(state: &mut AppState) -> ValuesTable {
-    let document = state.doc.model().id();
+    let document = state.doc.instance();
     if state.values.document != Some(document) {
         state.values.table = None;
         state.values.drafts.clear();
@@ -913,12 +916,18 @@ fn import(state: &mut AppState) -> Option<String> {
     if let Some(reason) = busy(state) {
         return Some(reason.into());
     }
-    state.values.import_request = Some((state.doc.model().id(), state.doc.revision()));
+    mark_import(state);
     let path = crate::platform::open_parameters(&["csv", "xlsx", "json"])?;
     state.values.import_request = None;
     let applied = crate::grid::tools::preview_file(state, &path).and_then(|_| apply_import(state));
     state.values.table = None;
     Some(import_message(applied))
+}
+
+/// Notes which open copy of the part, at which revision, asked for a table file: a file
+/// that arrives later applies only to it.
+fn mark_import(state: &mut AppState) {
+    state.values.import_request = Some((state.doc.instance(), state.doc.revision()));
 }
 
 fn apply_import(state: &mut AppState) -> Result<(), String> {
@@ -937,7 +946,7 @@ fn import_message(result: Result<(), String>) -> String {
 pub(crate) fn apply_upload(state: &mut AppState, files: Vec<(String, Vec<u8>)>) {
     let pending = state.values.import_request.take();
     let result = (|| {
-        if pending != Some((state.doc.model().id(), state.doc.revision())) {
+        if pending != Some((state.doc.instance(), state.doc.revision())) {
             return Err("the part changed while the table picker was open".into());
         }
         if let Some(reason) = busy(state) {
@@ -982,6 +991,43 @@ mod tests {
         assert_eq!(formula("  "), None);
         assert_eq!(number(12.5), "12.5");
         assert_eq!(number(10.0), "10");
+    }
+
+    /// Two tabs of one saved part have the same id and, freshly opened, the same revision.
+    /// Rows, typed drafts, refusals and a table file asked for in one must not show in,
+    /// or apply to, the other.
+    #[test]
+    fn rows_drafts_and_table_uploads_belong_to_one_open_copy_of_a_file() {
+        let dir = std::env::temp_dir().join(format!("soliddraft-values-instance-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("plate.dwprt");
+        let mut doc = crate::document::Document::new("Plate", crate::kernel());
+        doc.apply(crate::document::Command::AddExtrude { params: Default::default(), via_assistant: false }).unwrap();
+        crate::file::save(&mut doc, &path).unwrap();
+        let first = crate::file::open(&path, crate::kernel(), None).unwrap();
+        let second = crate::file::open(&path, crate::kernel(), None).unwrap();
+        assert_eq!(first.model().id(), second.model().id(), "one file, one document id");
+        assert_eq!(first.revision(), second.revision(), "both tabs at the same local revision");
+
+        let mut state = AppState::new(first);
+        table(&mut state);
+        state.values.drafts.insert(Field::NewGlobalName, "typed in the first tab".into());
+        state.values.errors.insert(Field::NewGlobalName, "refused in the first tab".into());
+        mark_import(&mut state);
+        let first = std::mem::replace(&mut state.doc, second);
+        table(&mut state);
+        assert!(state.values.drafts.is_empty(), "the second tab shows the first tab's draft");
+        assert!(state.values.errors.is_empty(), "the second tab shows the first tab's refusal");
+
+        let csv = b"name,Default\n".to_vec();
+        apply_upload(&mut state, vec![("table.csv".into(), csv)]);
+        assert_eq!(
+            state.values.message.as_deref(),
+            Some("The part changed while the table picker was open"),
+            "a table picked for the first tab applies to the second"
+        );
+        drop(first);
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

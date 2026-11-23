@@ -1446,6 +1446,9 @@ pub struct AppState {
     /// The + button asked for an existing file: a part that opens next takes a new tab
     /// and leaves the active part open beside it.
     pub open_in_new_tab: bool,
+    /// A document tab the user is closing with unsaved changes, while Save, Discard or
+    /// Cancel is asked.
+    pub closing: Option<crate::top_bar::Closing>,
     actions: Vec<AppAction>,
 }
 
@@ -1665,6 +1668,7 @@ impl AppState {
             start: None,
             drawing_after_open: false,
             open_in_new_tab: false,
+            closing: None,
             actions: Vec::new(),
         }
     }
@@ -1721,6 +1725,21 @@ impl AppState {
     /// Says that `what` applies but was not kept, and for how long it lasts.
     fn not_kept(&mut self, what: &str, why: &crate::settings::NotKept) {
         self.note(format!("{what} not saved: {why}. {}", crate::settings::store::lasts()), NoteKind::Error);
+    }
+
+    /// Ends the part's editor and sketch session before another part takes the active
+    /// tab, and puts back the rollback and the projection they set for their view: the
+    /// part waits in its tab as the user left it.
+    pub fn end_document_views(&mut self) {
+        let sketch = self.sketch.take();
+        let editor = self.editor.take();
+        if let Some(session) = &sketch {
+            self.viewport.camera.orthographic = session.was_orthographic;
+        }
+        if sketch.is_some() || editor.is_some() {
+            self.doc.end_rollback_view();
+            self.ribbon_tab = RibbonTab::Solid;
+        }
     }
 
     /// Hands the revision store the part as it is now, after it was opened or saved.

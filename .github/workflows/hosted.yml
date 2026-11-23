@@ -990,6 +990,21 @@ jobs:
           name: browser-preferences
           path: ${{ runner.temp }}/browser-preferences
           if-no-files-found: ignore
+      - name: Ask before closing unsaved tabs, save drawings and export shortcuts in Chromium
+        timeout-minutes: 10
+        env:
+          CHROME_ARGS: --no-sandbox --enable-unsafe-swiftshader --use-angle=swiftshader
+        run: |
+          python3 -m http.server 8794 --bind 127.0.0.1 --directory target/web-dist > "$RUNNER_TEMP/document-tabs-server.log" 2>&1 &
+          server=$!
+          trap 'kill "$server"' EXIT
+          node ci/browser-document-tabs.mjs /usr/bin/google-chrome http://127.0.0.1:8794/ "$RUNNER_TEMP/browser-document-tabs"
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-document-tabs
+          path: ${{ runner.temp }}/browser-document-tabs
+          if-no-files-found: ignore
       - name: Keep documents per browser and recover them after a kill in Chromium
         timeout-minutes: 10
         env:

@@ -12,6 +12,7 @@ use crate::theme;
 use crate::viewport::ViewportState;
 use egui::{Align2, Color32, CornerRadius, Rect, RectAlign, Sense, Stroke, StrokeKind, pos2, vec2};
 use egui_dock::DockState;
+use soliddraft_document::DocumentId;
 
 /// Real project donation and issue links (from `site/app/src/content.ts` & `design-brief.md`).
 pub const KOFI_URL: &str = "https://ko-fi.com/pedropaiva56920";
@@ -36,6 +37,7 @@ pub const FILE_MENU_COMMANDS: &[&str] = &[
     "save_as",
     "assembly_save",
     "assembly_save_as",
+    "drawing_save",
     "assembly_pack_and_go",
     "assembly_pack_and_go_zip",
     "export_step",
@@ -58,7 +60,7 @@ pub const FILE_MENU_COMMANDS: &[&str] = &[
 ];
 
 /// Every registry command id exposed on top-bar quick-access / utility buttons.
-pub const TOP_BAR_COMMANDS: &[&str] = &["save", "assembly_save", "undo", "redo", "settings", "about"];
+pub const TOP_BAR_COMMANDS: &[&str] = &["save", "assembly_save", "drawing_save", "undo", "redo", "settings", "about"];
 
 /// A parked part tab when multiple parts are open in the top tab strip.
 pub struct ParkedPart {
@@ -87,6 +89,28 @@ impl OpenParts {
         self.before.len()
     }
 
+    /// The tab index of the open part `instance`, the active one included.
+    fn index_of(&self, instance: DocumentId, active: &Document) -> Option<usize> {
+        if active.instance() == instance {
+            return Some(self.before.len());
+        }
+        let parked = |p: &ParkedPart| p.doc.instance() == instance;
+        self.before
+            .iter()
+            .position(parked)
+            .or_else(|| self.after.iter().position(parked).map(|j| self.before.len() + 1 + j))
+    }
+
+    /// The part in the tab at `index`, the active one included.
+    fn part<'a>(&'a self, index: usize, active: &'a Document) -> Option<&'a Document> {
+        let here = self.before.len();
+        match index.cmp(&here) {
+            std::cmp::Ordering::Less => self.before.get(index).map(|p| &p.doc),
+            std::cmp::Ordering::Equal => Some(active),
+            std::cmp::Ordering::Greater => self.after.get(index - here - 1).map(|p| &p.doc),
+        }
+    }
+
     /// Names of all open part tabs in display order: `(name, dirty, is_active, index)`.
     pub fn list(&self, active_doc: &Document) -> Vec<(String, bool, bool, usize)> {
         let mut out = Vec::with_capacity(self.total());
@@ -107,8 +131,6 @@ impl OpenParts {
         let name = format!("Part{}", self.next_number);
         let new_doc = Document::new(&name, crate::kernel());
         state.start = None;
-        state.editor = None;
-        state.sketch = None;
         state.chat.preview = None;
         state.import_dialog = None;
         state.scan = Default::default();
@@ -120,8 +142,10 @@ impl OpenParts {
     }
 
     /// Parks the active part and its view, and makes `new_doc` the active part in a new
-    /// tab at the end of the strip. The caller closes any editor or sketch first.
+    /// tab at the end of the strip. An open editor or sketch ends first, and puts back the
+    /// rollback it set for its view, so the parked part keeps the rollback the user left.
     pub fn park_active(&mut self, state: &mut AppState, new_doc: Document) {
+        state.end_document_views();
         let mut new_viewport = ViewportState::default();
         new_viewport.preset = state.viewport.preset;
         new_viewport.references = state.viewport.references;
@@ -148,8 +172,9 @@ impl OpenParts {
         if index == active || index >= self.total() {
             return;
         }
-        state.editor = None;
-        state.sketch = None;
+        // The part going back to its tab keeps the rollback the user left, not the one an
+        // editor or sketch set for its view.
+        state.end_document_views();
         state.chat.preview = None;
 
         // Flatten all parts into one ordered list, swap the chosen one into `state`.
@@ -325,6 +350,179 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState, dock: &mut DockState<Tab>, 
             }
         });
     });
+    close_question(ui.ctx(), state, dock, open_parts);
+}
+
+/// A document tab the user asked to close while it holds unsaved changes.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Closing {
+    pub target: CloseTarget,
+    /// The tab's title, as the question names it.
+    pub title: String,
+    /// Save was chosen: the tab closes once the save has left the document clean.
+    saving: bool,
+}
+
+/// Which document tab closes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CloseTarget {
+    /// One open copy of a part, by its instance: two tabs of one file are two copies.
+    Part(DocumentId),
+    Assembly,
+    Drawing,
+}
+
+/// The title of the assembly's or the drawing's tab when it is open with unsaved changes.
+fn unsaved_document(state: &AppState, target: CloseTarget) -> Option<String> {
+    match target {
+        CloseTarget::Part(_) => None,
+        CloseTarget::Assembly => state
+            .assembly
+            .session
+            .as_ref()
+            .filter(|s| s.doc.is_dirty())
+            .map(|s| format!("{}.dwasm", s.doc.assembly().name)),
+        CloseTarget::Drawing => {
+            state.drawing.session.as_ref().filter(|s| s.doc.dirty).map(|s| format!("{}.dwdrw", s.title()))
+        }
+    }
+}
+
+/// The title of `target`'s tab when it is open with unsaved changes.
+fn unsaved(state: &AppState, open_parts: &OpenParts, target: CloseTarget) -> Option<String> {
+    match target {
+        CloseTarget::Part(instance) => {
+            let doc = open_parts.part(open_parts.index_of(instance, &state.doc)?, &state.doc)?;
+            doc.dirty.then(|| part_tab_title(doc))
+        }
+        _ => unsaved_document(state, target),
+    }
+}
+
+/// Asks Save, Discard or Cancel before an assembly or drawing with unsaved changes
+/// closes. Returns true when it asked, and the tab stays open until the answer.
+pub(crate) fn ask_before_closing(state: &mut AppState, target: CloseTarget) -> bool {
+    match unsaved_document(state, target) {
+        Some(title) => {
+            state.closing = Some(Closing { target, title, saving: false });
+            true
+        }
+        None => false,
+    }
+}
+
+/// Closes a document tab, or asks first when it holds unsaved changes.
+fn request_close(target: CloseTarget, state: &mut AppState, dock: &mut DockState<Tab>, open_parts: &mut OpenParts) {
+    match unsaved(state, open_parts, target) {
+        Some(title) => state.closing = Some(Closing { target, title, saving: false }),
+        None => close_now(target, state, dock, open_parts),
+    }
+}
+
+/// Closes a document tab, dropping what it holds.
+fn close_now(target: CloseTarget, state: &mut AppState, dock: &mut DockState<Tab>, open_parts: &mut OpenParts) {
+    match target {
+        CloseTarget::Part(instance) => {
+            if let Some(index) = open_parts.index_of(instance, &state.doc)
+                && open_parts.close(index, state, dock)
+            {
+                state.push(AppAction::ShowStartPage);
+            }
+        }
+        CloseTarget::Assembly => {
+            state.assembly.session = None;
+            state.assembly.active = false;
+            if let Some(loc) = dock.find_tab(&Tab::Assembly) {
+                dock.remove_tab(loc);
+            }
+        }
+        CloseTarget::Drawing => {
+            state.drawing.session = None;
+            state.drawing.active = false;
+            if let Some(loc) = dock.find_tab(&Tab::Drawing) {
+                dock.remove_tab(loc);
+            }
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum CloseChoice {
+    Save,
+    Discard,
+    Cancel,
+}
+
+/// Asks whether to save a document whose tab the user is closing: Save saves it and
+/// closes the tab, Discard closes it without saving, Cancel leaves it open.
+fn close_question(ctx: &egui::Context, state: &mut AppState, dock: &mut DockState<Tab>, open_parts: &mut OpenParts) {
+    let Some(closing) = state.closing.clone() else { return };
+    if unsaved(state, open_parts, closing.target).is_none() {
+        // Saved, or saved and closed some other way: nothing is lost by closing.
+        state.closing = None;
+        close_now(closing.target, state, dock, open_parts);
+        return;
+    }
+    if closing.saving {
+        // The save ran with the last frame's actions and left changes unsaved: it was
+        // cancelled or refused, so the tab stays open. A refusal already says why.
+        state.closing = None;
+        if state.note.as_ref().is_none_or(|note| note.kind != NoteKind::Error) {
+            state.note(format!("{} was not saved, so its tab stays open", closing.title), NoteKind::Error);
+        }
+        return;
+    }
+    let mut choice = None;
+    let modal = egui::Modal::new(egui::Id::new("close_unsaved_document")).show(ctx, |ui| {
+        ui.set_width(380.0);
+        ui.label(
+            egui::RichText::new(format!("Save changes to {}?", closing.title)).family(theme::semibold()).size(13.5),
+        );
+        ui.add_space(4.0);
+        ui.label(
+            egui::RichText::new("Closing the tab without saving loses the changes made since it was last saved.")
+                .color(theme::muted()),
+        );
+        ui.add_space(10.0);
+        ui.horizontal(|ui| {
+            for (label, pick) in
+                [("Save", CloseChoice::Save), ("Discard", CloseChoice::Discard), ("Cancel", CloseChoice::Cancel)]
+            {
+                let button = ui.button(label);
+                #[cfg(target_arch = "wasm32")]
+                crate::web::show_control(format!("Close question: {label}"), button.rect);
+                if button.clicked() {
+                    choice = Some(pick);
+                }
+            }
+        });
+    });
+    if choice.is_none() && modal.should_close() {
+        choice = Some(CloseChoice::Cancel);
+    }
+    match choice {
+        None => {}
+        Some(CloseChoice::Cancel) => state.closing = None,
+        Some(CloseChoice::Discard) => {
+            state.closing = None;
+            close_now(closing.target, state, dock, open_parts);
+        }
+        Some(CloseChoice::Save) => {
+            let save = match closing.target {
+                CloseTarget::Part(instance) => {
+                    // Save writes the active part: a part waiting in its tab comes forward.
+                    if let Some(index) = open_parts.index_of(instance, &state.doc) {
+                        open_parts.activate(index, state, dock);
+                    }
+                    AppAction::Save
+                }
+                CloseTarget::Assembly => AppAction::Assembly(crate::assembly::AssemblyAction::Save(None)),
+                CloseTarget::Drawing => AppAction::Drawing(crate::drawing::DrawingAction::Save(None)),
+            };
+            state.push(save);
+            state.closing = Some(Closing { saving: true, ..closing });
+        }
+    }
 }
 
 fn brand_mark(ui: &mut egui::Ui) {
@@ -453,7 +651,15 @@ fn donate_button(ui: &mut egui::Ui) {
 }
 
 fn quick_access(ui: &mut egui::Ui, st: &mut AppState) {
-    let save_id = if st.assembly.is_active() { "assembly_save" } else { "save" };
+    // Save, Undo and Redo act on the active document, and say which step they take.
+    let save_id = if st.drawing.is_active() {
+        "drawing_save"
+    } else if st.assembly.is_active() {
+        "assembly_save"
+    } else {
+        "save"
+    };
+    let (undo_label, redo_label) = commands::undo_labels(st);
     for (id, icon) in [(save_id, Icon::Save), ("undo", Icon::Undo), ("redo", Icon::Redo)] {
         let Some(command) = commands::get(id) else {
             debug_assert!(false, "no command {id}");
@@ -461,29 +667,20 @@ fn quick_access(ui: &mut egui::Ui, st: &mut AppState) {
         };
         let enabled = command.is_enabled(st);
         let tip = match id {
-            "undo" => {
-                let label = match st.assembly.session.as_ref().filter(|_| st.assembly.is_active()) {
-                    Some(a) => a.doc.undo_label(),
-                    None => st.doc.undo_label(),
-                };
-                match label {
-                    Some(l) => format!("Undo {l} ({})", st.shortcuts.shortcut_text(id).unwrap_or_default()),
-                    None => command.tip(st),
-                }
-            }
-            "redo" => {
-                let label = match st.assembly.session.as_ref().filter(|_| st.assembly.is_active()) {
-                    Some(a) => a.doc.redo_label(),
-                    None => st.doc.redo_label(),
-                };
-                match label {
-                    Some(l) => format!("Redo {l} ({})", st.shortcuts.shortcut_text(id).unwrap_or_default()),
-                    None => command.tip(st),
-                }
-            }
+            "undo" => match &undo_label {
+                Some(l) => format!("Undo {l} ({})", st.shortcuts.shortcut_text(id).unwrap_or_default()),
+                None => command.tip(st),
+            },
+            "redo" => match &redo_label {
+                Some(l) => format!("Redo {l} ({})", st.shortcuts.shortcut_text(id).unwrap_or_default()),
+                None => command.tip(st),
+            },
             _ => command.tip(st),
         };
-        if icon_button(ui, icon, command.label, &tip, enabled, false).clicked() {
+        let button = icon_button(ui, icon, command.label, &tip, enabled, false);
+        #[cfg(target_arch = "wasm32")]
+        crate::web::show_control(format!("Quick {}", command.label), button.rect);
+        if button.clicked() {
             st.run_command(command);
         }
     }
@@ -583,7 +780,9 @@ fn file_menu_contents(ui: &mut egui::Ui, st: &mut AppState) {
     }
 
     ui.separator();
-    if st.assembly.is_active() {
+    if st.drawing.is_active() {
+        menu_command(ui, st, "drawing_save", "Save drawing");
+    } else if st.assembly.is_active() {
         menu_command(ui, st, "assembly_save", "Save assembly");
         menu_command(ui, st, "assembly_save_as", "Save assembly as…");
         menu_command(ui, st, "assembly_pack_and_go", "Pack and Go…");
@@ -709,6 +908,8 @@ fn document_tabs(ui: &mut egui::Ui, state: &mut AppState, dock: &mut DockState<T
     // `+` button to open a new or existing part, assembly, or drawing
     let (plus_rect, plus_resp) = ui.allocate_exact_size(vec2(26.0, 26.0), Sense::click());
     plus_resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "New tab"));
+    #[cfg(target_arch = "wasm32")]
+    crate::web::show_control("New tab", plus_rect);
     if plus_resp.hovered() {
         ui.painter().rect(
             plus_rect,
@@ -733,7 +934,10 @@ fn document_tabs(ui: &mut egui::Ui, state: &mut AppState, dock: &mut DockState<T
             ui.set_min_width(210.0);
             ui.label(egui::RichText::new("OPEN IN NEW TAB").family(theme::semibold()).size(10.0).color(theme::muted()));
             ui.add_space(2.0);
-            if ui.button("New part (.dwprt)").clicked() {
+            let new_part = ui.button("New part (.dwprt)");
+            #[cfg(target_arch = "wasm32")]
+            crate::web::show_control("New part (.dwprt)", new_part.rect);
+            if new_part.clicked() {
                 new_part_tab = true;
                 ui.close();
             }
@@ -743,7 +947,10 @@ fn document_tabs(ui: &mut egui::Ui, state: &mut AppState, dock: &mut DockState<T
                 }
                 ui.close();
             }
-            if ui.button("New drawing (.dwdrw)").clicked() {
+            let new_drawing = ui.button("New drawing (.dwdrw)");
+            #[cfg(target_arch = "wasm32")]
+            crate::web::show_control("New drawing (.dwdrw)", new_drawing.rect);
+            if new_drawing.clicked() {
                 state.push(AppAction::NewDrawing);
                 ui.close();
             }
@@ -766,8 +973,8 @@ fn document_tabs(ui: &mut egui::Ui, state: &mut AppState, dock: &mut DockState<T
         match act {
             TabAction::SelectPart(idx) => open_parts.activate(idx, state, dock),
             TabAction::ClosePart(idx) => {
-                if open_parts.close(idx, state, dock) {
-                    state.push(AppAction::ShowStartPage);
+                if let Some(instance) = open_parts.part(idx, &state.doc).map(Document::instance) {
+                    request_close(CloseTarget::Part(instance), state, dock, open_parts);
                 }
             }
             TabAction::SelectAssembly => {
@@ -776,26 +983,14 @@ fn document_tabs(ui: &mut egui::Ui, state: &mut AppState, dock: &mut DockState<T
                 state.assembly.active = true;
                 state.drawing.active = false;
             }
-            TabAction::CloseAssembly => {
-                state.assembly.session = None;
-                state.assembly.active = false;
-                if let Some(loc) = dock.find_tab(&Tab::Assembly) {
-                    dock.remove_tab(loc);
-                }
-            }
+            TabAction::CloseAssembly => request_close(CloseTarget::Assembly, state, dock, open_parts),
             TabAction::SelectDrawing => {
                 state.start = None;
                 crate::drawing::show_drawing_tab(dock);
                 state.drawing.active = true;
                 state.assembly.active = false;
             }
-            TabAction::CloseDrawing => {
-                state.drawing.session = None;
-                state.drawing.active = false;
-                if let Some(loc) = dock.find_tab(&Tab::Drawing) {
-                    dock.remove_tab(loc);
-                }
-            }
+            TabAction::CloseDrawing => request_close(CloseTarget::Drawing, state, dock, open_parts),
         }
     }
 }
@@ -823,6 +1018,11 @@ fn tab_pill(ui: &mut egui::Ui, slot: usize, icon: Icon, title: &str, dirty: bool
 
     let close_resp = ui.interact(close_rect, ui.id().with(("doc_tab_close", slot)), Sense::click());
     close_resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, format!("Close {title}")));
+    #[cfg(target_arch = "wasm32")]
+    {
+        crate::web::show_control(format!("Tab {title}"), main_rect);
+        crate::web::show_control(format!("Close {title}"), close_rect);
+    }
 
     let hovered = main_resp.hovered() || close_resp.hovered();
     let (fill, stroke) = if active {

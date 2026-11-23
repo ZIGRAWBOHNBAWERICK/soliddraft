@@ -1103,23 +1103,42 @@ impl SolidDraftApp {
                             return;
                         }
                         (EditorParams::Hole(h), Some(Selection::Face(f))) => {
-                            if h.picking_target == Some(crate::document::HolePickTarget::Surface) {
+                            use soliddraft_model::hole_wizard::HoleEndCondition;
+                            // A target face is taken only for an end condition that has one,
+                            // and only once the holes have a face to start on: until then the
+                            // first face picked is the face they start on, and the target pick
+                            // waits for the next one.
+                            let surface_end = h
+                                .unresolved_end
+                                .is_some_and(|end| end.pick() == crate::document::HolePickTarget::Surface)
+                                || matches!(
+                                    h.wizard.as_ref().map(|w| &w.end_condition),
+                                    Some(
+                                        HoleEndCondition::UpToSurface { .. }
+                                            | HoleEndCondition::OffsetFromSurface { .. }
+                                    )
+                                );
+                            if h.picking_target == Some(crate::document::HolePickTarget::Surface) && !surface_end {
+                                h.picking_target = None;
+                            }
+                            if h.picking_target == Some(crate::document::HolePickTarget::Surface) && h.face.is_some() {
                                 match self.state.doc.face_ref(f) {
                                     Some(target_face) => {
-                                        let w = h.ensure_wizard();
-                                        match &mut w.end_condition {
-                                            soliddraft_model::hole_wizard::HoleEndCondition::UpToSurface { face }
-                                            | soliddraft_model::hole_wizard::HoleEndCondition::OffsetFromSurface {
-                                                face,
-                                                ..
-                                            } => *face = target_face,
-                                            _ => {
-                                                w.end_condition =
-                                                    soliddraft_model::hole_wizard::HoleEndCondition::UpToSurface {
-                                                        face: target_face,
-                                                    };
+                                        match h.unresolved_end.and_then(|end| end.with_face(target_face.clone())) {
+                                            Some(end) => {
+                                                h.unresolved_end = None;
+                                                h.ensure_wizard().end_condition = end;
+                                            }
+                                            None => {
+                                                if let HoleEndCondition::UpToSurface { face }
+                                                | HoleEndCondition::OffsetFromSurface { face, .. } =
+                                                    &mut h.ensure_wizard().end_condition
+                                                {
+                                                    *face = target_face;
+                                                }
                                             }
                                         }
+                                        h.depth = soliddraft_kernel_api::HoleDepth::Through;
                                         h.picking_target = None;
                                         e.refresh(&self.state.doc);
                                     }
@@ -1201,6 +1220,8 @@ impl SolidDraftApp {
                                 Ok(vertex) => {
                                     h.ensure_wizard().end_condition =
                                         soliddraft_model::hole_wizard::HoleEndCondition::UpToVertex { vertex };
+                                    h.unresolved_end = None;
+                                    h.depth = soliddraft_kernel_api::HoleDepth::Through;
                                     h.picking_target = None;
                                     e.refresh(&self.state.doc);
                                 }
@@ -1815,7 +1836,8 @@ impl SolidDraftApp {
             }
             AppAction::SetBodyVisible(show) => {
                 // A display state keeps its own hidden bodies; without one the body's own view
-                // choice decides.
+                // choice decides. Show clears both: a body the base view hides stays hidden
+                // under every display state until its own choice shows it again.
                 if let Some(mut display) = self.state.doc.display_state().cloned() {
                     let key = self.state.doc.active_body;
                     let changed = if show { display.view.hidden.remove(&key) } else { display.view.hidden.insert(key) };
@@ -1825,6 +1847,10 @@ impl SolidDraftApp {
                         if let Err(error) = result {
                             self.state.note(error, NoteKind::Error);
                         }
+                    }
+                    let doc = &mut self.state.doc;
+                    if show && !crate::tree_visibility::body_shown(doc) {
+                        doc.set_view_choice(crate::document::ViewItem::Body(doc.active_body), Some(true));
                     }
                 } else {
                     let doc = &mut self.state.doc;

@@ -181,7 +181,7 @@ fn index() -> Vec<Hit> {
     for (control, label) in ui::AUTOSAVE_CONTROLS {
         all.push(hit(AUTOSAVE, Some(control.to_owned()), label.to_owned()));
     }
-    for (control, label) in graphics::CONTROLS {
+    for &(control, label) in graphics::CONTROLS {
         all.push(hit(GRAPHICS, Some(control.to_owned()), label.to_owned()));
     }
     all

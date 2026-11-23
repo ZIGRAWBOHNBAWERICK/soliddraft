@@ -200,7 +200,7 @@ fn new_body_and_combine_are_available_in_the_application() {
         app.get_by_role_and_label(Role::TextInput, "Body name").type_text("Flange");
         app.key_press(Key::Enter);
         app.run_steps(6);
-        assert!(app.query_by_label("Flange").is_some());
+        assert!(app.query_by_role_and_label(Role::Button, "Flange").is_some());
         app.get_by_label("Hide Body 1").click();
         app.run_steps(4);
         let visible = soliddraft_app::tree_visibility::visible(&app.state().state);
@@ -216,7 +216,7 @@ fn new_body_and_combine_are_available_in_the_application() {
         app.run_steps(8);
         assert!(app.query_by_label("Solid Bodies (2)").is_some());
         assert!(app.query_by_label("Show Body 1").is_some(), "the first body opens hidden");
-        app.get_by_label("Flange").click();
+        app.get_by_role_and_label(Role::Button, "Flange").click();
         app.run_steps(4);
         ribbon::run_command(app, "combine");
         app.run_steps(4);
@@ -225,7 +225,7 @@ fn new_body_and_combine_are_available_in_the_application() {
         assert_eq!(app.state().state.doc.model().live_bodies().len(), 1);
         assert!((volume(&app.state().state.doc, 1) - 1500.0).abs() < 1e-6);
         assert!(app.query_by_label("Solid Bodies (1)").is_some());
-        assert!(app.query_by_label("Flange").is_some());
+        assert!(app.query_by_role_and_label(Role::Button, "Flange").is_some());
         case.frame(app, "combined");
         ribbon::run_command(app, "undo");
         ribbon::until(app, "undo rebuild", |app| !app.state().state.doc.proof_pending());
@@ -239,8 +239,7 @@ fn new_body_and_combine_are_available_in_the_application() {
         app.state_mut().state.push(AppAction::Open(Some(path)));
         app.run_steps(8);
         assert!(app.query_by_label("Solid Bodies (1)").is_some());
-        assert!(app.query_by_label("Flange").is_some());
-        app.get_by_label("Flange").click();
+        app.get_by_role_and_label(Role::Button, "Flange").click();
         app.run_steps(4);
         let doc = &mut app.state_mut().state.doc;
         let later = block(doc, 10.0, 12.0);

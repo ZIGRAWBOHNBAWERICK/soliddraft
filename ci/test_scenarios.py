@@ -329,6 +329,19 @@ class Checks(unittest.TestCase):
     def test_json_pointer_escapes_and_arrays(self):
         self.assertEqual(scenarios.at({"a/b": [{"~": 2}]}, "/a~1b/0/~0"), 2)
 
+    def test_json_pointer_decodes_only_the_command_output(self):
+        # command.json keeps a tool's result as JSON text in its top-level `output`.
+        self.assertEqual(scenarios.at({"output": '{"items":[1]}'}, "/output/items/0"), 1)
+        self.assertEqual(scenarios.at({"output": '{"items":[1]}'}, "/output"), '{"items":[1]}')
+        # Any other text is text, even when it reads as JSON.
+        for value, pointer in (({"name": '{"items":[1]}'}, "/name/items/0"),
+                               ({"step": {"output": '{"items":[1]}'}}, "/step/output/items/0"),
+                               ({"output": '{"note":"{\\"items\\":[1]}"}'}, "/output/note/items/0")):
+            with self.subTest(pointer=pointer):
+                with self.assertRaises((TypeError, KeyError, ValueError)):
+                    scenarios.at(value, pointer)
+                self.assertFalse(scenarios.check(value, {"pointer": pointer, "equals": 1})["pass"])
+
 
 class ReviewedArguments(unittest.TestCase):
     def test_token_is_copied_from_the_preview_evidence(self):

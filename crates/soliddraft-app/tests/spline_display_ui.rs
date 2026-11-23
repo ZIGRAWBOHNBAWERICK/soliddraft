@@ -10,8 +10,13 @@ use soliddraft_assistant::{Caller, tools::call_checked};
 use soliddraft_kernel_catallax::{APP_WORK_TARGET, with_request_allowance};
 
 #[test]
-fn native_scaled_spline_fillet_shows_measured_refusal_and_proved_retry_in_edit_suite() {
-    check_display("scaled", include_str!("../../../ci/scenarios/loft-edge-fillet.json"), Some(9_600_000));
+fn native_scaled_spline_fillet_shows_a_proved_display_at_the_application_work_target() {
+    check_display("scaled", include_str!("../../../ci/scenarios/loft-edge-fillet.json"), None);
+}
+
+#[test]
+fn native_scaled_spline_fillet_shows_its_reduced_budget_refusal_in_edit_suite() {
+    check_display("scaled-refused", include_str!("../../../ci/scenarios/loft-edge-fillet.json"), Some(9_600_000));
 }
 
 #[test]
@@ -72,6 +77,8 @@ fn check_display(name: &str, source: &str, refusal_budget: Option<u64>) {
                         out.content
                     );
                 }
+                case.frame(app, "edit-suite-fillet-refused");
+                return;
             }
             let (out, work) = fillet(app, APP_WORK_TARGET);
             assert!(!out.is_error && !work.exhausted && work.used <= APP_WORK_TARGET, "{}; {work:?}", out.content);

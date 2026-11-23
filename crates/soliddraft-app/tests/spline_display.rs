@@ -25,7 +25,16 @@ fn edge_at(state: &AppState, wanted: soliddraft_kernel_api::Vec3) -> String {
 }
 
 #[test]
-fn native_scaled_fillet_display_certifies_and_preserves_the_part_on_budget_refusal() {
+fn native_scaled_fillet_display_certifies_at_the_application_work_target() {
+    check_fillet_display(
+        include_str!("../../../ci/scenarios/loft-edge-fillet.json"),
+        soliddraft_kernel_api::Vec3::new(0.1, -0.05, 0.1),
+        None,
+    );
+}
+
+#[test]
+fn native_scaled_fillet_display_preserves_the_part_on_reduced_budget_refusal() {
     check_fillet_display(
         include_str!("../../../ci/scenarios/loft-edge-fillet.json"),
         soliddraft_kernel_api::Vec3::new(0.1, -0.05, 0.1),
@@ -94,6 +103,8 @@ fn check_fillet_display(source: &str, rail: soliddraft_kernel_api::Vec3, refusal
         assert_eq!(state.doc.undo_depth(), undo);
         assert!(!state.doc.features.iter().any(|feature| feature.name == "Fillet1"));
         assert!(!state.doc.proof_state().answered_within_bound);
+        std::fs::remove_dir_all(dir).unwrap();
+        return;
     }
     let (out, work) = fillet(&mut state, APP_WORK_TARGET);
     assert!(!out.is_error && !work.exhausted && work.used <= APP_WORK_TARGET, "{}; {work:?}", out.content);

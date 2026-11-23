@@ -22,13 +22,13 @@ use egui::{Align2, Rect, Sense, Stroke, pos2, vec2};
 use egui_dock::DockState;
 use glam::{DMat4, DQuat, DVec3, EulerRot};
 use soliddraft_assembly::{
-    AssemblyDocument, DefinitionIndex, Flags, Freshness, KernelSource, LoadState, MeshBounds, OccurrenceIndex,
+    AssemblyDocument, DefinitionIndex, Flags, Freshness, KernelSource, LoadState, MateId, MeshBounds, OccurrenceIndex,
     OccurrencePath, OpenOptions, Opening, Placement, RebuildReport, Scene, SharedMesh,
 };
 use soliddraft_document::kind::ASSEMBLY_EXTENSION;
 use soliddraft_document::{DocKind, DocRef};
 use soliddraft_tessellation::{DeviceBudget, Level};
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -164,13 +164,21 @@ pub struct AssemblySession {
     pub animation: Option<ControllerAnimation>,
 }
 
-/// A Mate Controller animation: the driven values from `from` to `to` over `seconds`,
-/// each frame shown as a drag preview, the last applied as one undo step.
+/// A Mate Controller animation holds each driver's start and end values.
+/// Each frame previews a pose. The last frame applies one undo step.
 pub struct ControllerAnimation {
-    pub from: Vec<f64>,
-    pub to: Vec<f64>,
+    pub(crate) drivers: BTreeMap<MateId, (f64, f64)>,
     pub seconds: f64,
     pub started: web_time::Instant,
+}
+
+/// Active controller drivers in display order, keyed by stable mate identity.
+pub(crate) fn controller_drivers(doc: &AssemblyDocument) -> impl Iterator<Item = (MateId, &str, Option<f64>)> {
+    let values = soliddraft_assembly::controller_values(doc);
+    doc.mate_controller().into_iter().flat_map(|c| &c.mates).filter_map(move |&id| {
+        let mate = doc.assembly().known_mates().find(|m| m.id() == id)?;
+        Some((id, mate.name(), values.get(mate.name()).copied()))
+    })
 }
 
 /// The selection's placement as the property panel edits it.
@@ -251,13 +259,23 @@ impl AssemblySession {
     pub fn animate(&mut self) -> Result<bool, soliddraft_assembly::MateRefusal> {
         let Some(a) = self.animation.as_ref() else { return Ok(false) };
         let t = a.started.elapsed().as_secs_f64() / a.seconds.max(1e-3);
-        if t >= 1.0 {
-            let to = self.animation.take().expect("checked").to;
+        let values: Option<Vec<f64>> = controller_drivers(&self.doc)
+            .map(|(id, _, current)| {
+                let &(from, to) = a.drivers.get(&id)?;
+                (current == Some(from)).then_some(if t >= 1.0 { to } else { from + (to - from) * t })
+            })
+            .collect();
+        let Some(values) = values.filter(|v| v.len() == a.drivers.len()) else {
+            self.animation = None;
             self.doc.cancel_drag();
-            self.doc.apply_controller_values(&to)?;
+            return Ok(false);
+        };
+        if t >= 1.0 {
+            self.animation = None;
+            self.doc.cancel_drag();
+            self.doc.apply_controller_values(&values)?;
             return Ok(false);
         }
-        let values: Vec<f64> = a.from.iter().zip(&a.to).map(|(f, e)| f + (e - f) * t).collect();
         if let Err(e) = self.doc.preview_controller_values(&values) {
             self.animation = None;
             self.doc.cancel_drag();
@@ -758,6 +776,7 @@ fn install(state: &mut AppState, mut session: AssemblySession) {
     state.assembly.opening = None;
     state.assembly.form = crate::subassembly::Draft::default();
     state.assembly.last_part = None;
+    state.assembly.mate.clear_controller_values();
     state.assembly.session = Some(session);
     state.assembly.active = true;
     state.drawing.active = false;

@@ -450,6 +450,27 @@ fn spline_controls(end_z: f64) -> Value {
         "weights":[1,1,1,1], "knots":[0,0,0,0,1,1,1,1]}])
 }
 
+fn detailed_spline_controls() -> Value {
+    let mut segments = spline_controls(3.0);
+    segments[0]["control_points"][3] = json!([0, 1, 6]);
+    segments
+}
+
+#[test]
+fn detailed_spline_sweep_certified_mesh_refuses_with_no_work() {
+    let mut doc = profile();
+    call(
+        &mut doc,
+        "sweep",
+        json!({"sketch":"Sketch1", "start":[0,0,0], "orientation":"fixed", "segments":detailed_spline_controls()}),
+    );
+    assert!(doc.proof_state().current_proved_display());
+    let body = doc.display_body().unwrap();
+    let (export, work) =
+        soliddraft_kernel_catallax::with_request_allowance(0, || doc.kernel().tessellate(body, &Default::default()));
+    assert!(export.is_err() && work.exhausted, "{export:?}; {work:?}");
+}
+
 #[test]
 fn spline_sweep_edits_reopens_and_refuses_a_return_without_changing_the_part() {
     let mut doc = profile();
@@ -498,8 +519,7 @@ fn spline_sweep_edits_reopens_and_refuses_a_return_without_changing_the_part() {
         check_spline(&doc, 48.0);
     }
     // Owner decision 13 Nov: certified-first display now accepts this former display refusal as proved.
-    let mut detailed = spline_controls(3.0);
-    detailed[0]["control_points"][3] = json!([0, 1, 6]);
+    let detailed = detailed_spline_controls();
     let (accepted, work) =
         soliddraft_kernel_catallax::with_request_allowance(soliddraft_kernel_catallax::APP_REQUEST_WORK, || {
             call(&mut doc, "edit_sweep", json!({"feature":"Sweep1", "start":[0,0,0], "segments":detailed}))
@@ -516,12 +536,8 @@ fn spline_sweep_edits_reopens_and_refuses_a_return_without_changing_the_part() {
     assert!(!mesh.positions.is_empty() && !mesh.indices.is_empty());
     assert!(doc.proof_state().current_proved_display());
     assert!(doc.display_answer(doc.features[1].id).is_none());
-    let export_params = soliddraft_kernel_api::TessellationParams::default();
-    let (refused, refused_work) =
-        soliddraft_kernel_catallax::with_request_allowance(0, || doc.kernel().tessellate(body, &export_params));
-    assert!(refused.is_err() && refused_work.exhausted, "{refused:?}; {refused_work:?}");
     let (export, export_work) = soliddraft_kernel_catallax::with_request_allowance(20_000_000, || {
-        doc.kernel().tessellate(body, &export_params)
+        doc.kernel().tessellate(body, &Default::default())
     });
     let certified = export.unwrap_or_else(|error| panic!("{error}; {export_work:?}"));
     assert!(!export_work.exhausted && (1..=20_000_000).contains(&export_work.used), "{export_work:?}");

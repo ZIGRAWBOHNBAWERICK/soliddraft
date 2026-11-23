@@ -66,6 +66,7 @@ fn show_mode(ui: &mut egui::Ui, state: &mut AppState, compact: bool) {
                     .map(|(command, _)| command)
                     .filter(|command| {
                         (command.shown)(state)
+                            && crate::create_menu::shows(state, command)
                             && !(start && command.id == "sketch")
                             && command.id != "smart_dimension"
                             && !(state.in_sketch() && matches!(command.id, "sketch" | "exit_sketch"))
@@ -74,7 +75,9 @@ fn show_mode(ui: &mut egui::Ui, state: &mut AppState, compact: bool) {
                                 && command.id == "assembly_interference")
                     })
                     .collect();
-                if commands.is_empty() {
+                // Every create command is a row of the Create menu, which leads the group.
+                let create = tab == Tab::Part(RibbonTab::Solid) && group == "Create" && !state.in_sketch();
+                if commands.is_empty() && !create {
                     continue;
                 }
                 ui.add_space(6.0);
@@ -86,6 +89,10 @@ fn show_mode(ui: &mut egui::Ui, state: &mut AppState, compact: bool) {
                             .font(theme::font_medium(tokens::SMALL_SIZE))
                             .color(theme::muted()),
                     );
+                }
+                if create && !compact {
+                    let width = ui.available_width();
+                    crate::create_menu::button(ui, state, width);
                 }
                 let width =
                     if compact { ui.available_width() } else { (ui.available_width() - tokens::COLUMN_GAP) / 2.0 };

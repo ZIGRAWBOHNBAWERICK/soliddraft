@@ -15,6 +15,7 @@ pub mod command_line;
 pub mod command_tools;
 pub mod commands;
 pub mod context_menu;
+pub mod create_menu;
 pub mod dimension_edit;
 pub mod display_quality;
 pub mod document;

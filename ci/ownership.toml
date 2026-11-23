@@ -337,6 +337,13 @@ paths = ["crates/soliddraft-app/src/feature_forms.rs"]
 module = ["feature_forms"]
 
 [[areas]]
+name = "app.create_menu"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/create_menu.rs"]
+module = ["create_menu"]
+
+[[areas]]
 name = "app.feature_panel"
 owner = "core"
 crate = "soliddraft-app"

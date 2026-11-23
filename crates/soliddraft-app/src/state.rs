@@ -1330,6 +1330,8 @@ pub struct AppState {
     pub revisions: Arc<dyn soliddraft_document::RevisionStore>,
     /// The commands run lately and the pinned ones, for the command search.
     pub commands: crate::commands::History,
+    /// The create commands pinned to the tool strip from the Create menu.
+    pub create_pins: crate::create_menu::Pins,
     /// The navigation preset, the wheel, the view keys and the camera settings.
     pub navigation: crate::navigation::NavigationSettings,
     /// The shortcut preset and per-command overrides.
@@ -1511,6 +1513,7 @@ impl AppState {
             command_line: crate::command_line::CommandLine::load(),
             revisions: Arc::new(soliddraft_document::CacheOnlyStore::new()),
             commands: crate::settings::command_history(),
+            create_pins: crate::settings::create_pins(),
             navigation: crate::settings::navigation(crate::settings::install_kind()),
             shortcuts: crate::settings::shortcuts(),
             recovery: None,

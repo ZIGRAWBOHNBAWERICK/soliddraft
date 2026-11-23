@@ -34,6 +34,10 @@ open for that kind of feature until the app closes. Enter applies the feature an
 Escape cancels it. When the side area is hidden, it shows for the panel and hides again
 when the feature closes.
 
+The Create menu at the top of the palette's Create group lists every command that adds
+or removes material, with its shortcut. The pin on a row puts the command in the palette
+or takes it out. Every command starts pinned. The pins are kept in the settings file.
+
 ## Extrusion options
 
 An extrusion or cut has these choices besides its end and depth:

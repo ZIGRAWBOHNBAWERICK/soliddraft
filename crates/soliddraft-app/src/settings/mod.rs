@@ -120,6 +120,24 @@ fn command_history_from(all: &Value) -> History {
     history
 }
 
+/// The create commands pinned from the Create menu, or every one when there are none
+/// or they are unreadable. Ids the menu no longer lists are dropped.
+pub fn create_pins() -> crate::create_menu::Pins {
+    create_pins_from(&stored())
+}
+
+/// Saves the create commands pinned from the Create menu.
+pub fn save_create_pins(pins: &crate::create_menu::Pins) -> Result<(), NotKept> {
+    save_section("create_menu", pins)
+}
+
+fn create_pins_from(all: &Value) -> crate::create_menu::Pins {
+    if all["create_menu"].is_null() {
+        return Default::default();
+    }
+    serde_json::from_value::<crate::create_menu::Pins>(all["create_menu"].clone()).unwrap_or_default().retain_known()
+}
+
 /// The user's shortcut preset and overrides, or the defaults when there are none or
 /// they are unreadable.
 pub fn shortcuts() -> Shortcuts {
@@ -532,6 +550,26 @@ mod tests {
             .part,
             "an explicit pane choice wins over the legacy tree setting"
         );
+    }
+
+    #[test]
+    fn create_pins_persist_beside_other_keys() {
+        let dir = std::env::temp_dir().join(format!("soliddraft-create-pins-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("settings.json");
+        std::fs::write(&file, r#"{"theme":"dark"}"#).unwrap();
+        let store = file_store(&file);
+        let mut pins = create_pins_from(&store.load());
+        assert_eq!(pins, crate::create_menu::Pins::default(), "no pins saved: every command is pinned");
+        pins.toggle("sweep");
+        pins.toggle("loft");
+        save_section_to(&store, "create_menu", &pins).unwrap();
+        let back = create_pins_from(&store.load());
+        assert_eq!(back, pins);
+        assert!(!back.is_pinned("sweep") && !back.is_pinned("loft") && back.is_pinned("extrude"));
+        let all: Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+        assert_eq!(all["theme"], "dark", "the other keys survive");
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

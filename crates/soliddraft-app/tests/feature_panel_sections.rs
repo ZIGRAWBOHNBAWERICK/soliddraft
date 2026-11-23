@@ -1,14 +1,15 @@
 //! The feature property panel as a user drives it: sections fold and unfold, a ticked
 //! section stays ticked when the feature is edited again and after the part is saved
 //! and reopened, Enter applies and Escape cancels. Each extrude option is set in the
-//! panel, applied, saved, reopened and built on with a later feature.
+//! panel, applied, saved, reopened and built on with a later feature. The Create menu
+//! pins and unpins commands, and the pins outlive the app.
 
 use egui::Key;
 use egui_kittest::kittest::{NodeT, Queryable};
 use soliddraft_app::document::{
     Command, CutParams, Document, FeatureKind, FeatureStatus, PlaneKind, Selection, SketchPlane,
 };
-use soliddraft_app::state::AppAction;
+use soliddraft_app::state::{AppAction, EditorParams};
 use soliddraft_kernel_api::Vec3;
 
 #[path = "support/ui.rs"]
@@ -323,5 +324,38 @@ fn a_thin_feature_makes_a_tube() {
         let p = extrusion(app);
         assert!(p.choices.thin.is_some());
         later(case, app, 1);
+    });
+}
+
+#[test]
+fn the_create_menu_pins_commands_and_keeps_them() {
+    let mut case = Case::new("feature-panel/create-menu");
+    let mut app = launch(ribbon::plate(), STANDARD);
+    case.run(&mut app, |case, app| {
+        let palette = ribbon::palette_region(app);
+        let tile = |app: &App, label: &str| app.query_all_by_label(label).any(|n| palette.contains(n.rect().center()));
+        assert!(tile(app, "Sweep"), "every create command starts pinned");
+        click(app, "Create menu");
+        assert!(shows(app, "Unpin Sweep"), "the menu lists Sweep with its pin");
+        case.frame(app, "menu");
+        click(app, "Unpin Sweep");
+        assert!(shows(app, "Pin Sweep"), "the menu stays open and shows the pin to put it back");
+        click(app, "Create menu");
+        settle(app);
+        assert!(!shows(app, "Pin Sweep"), "the Create control closes its menu");
+        assert!(!tile(app, "Sweep"), "an unpinned command leaves the palette");
+        assert!(!app.state().state.create_pins.is_pinned("sweep"));
+        // The menu still runs it.
+        click(app, "Create menu");
+        let rect = app.query_all_by_label("Sweep").map(|n| n.rect()).next_back().expect("the menu lists Sweep");
+        ribbon::click_at(app, rect.center());
+        settle(app);
+        assert!(matches!(app.state().state.editor.as_ref().map(|e| &e.params), Some(EditorParams::PickSketch(_))));
+        app.key_press(Key::Escape);
+        settle(app);
+        // A new app reads the pins from the settings file.
+        let again = launch(ribbon::plate(), STANDARD);
+        assert!(!again.state().state.create_pins.is_pinned("sweep"), "the pin is kept");
+        assert!(again.state().state.create_pins.is_pinned("extrude"));
     });
 }

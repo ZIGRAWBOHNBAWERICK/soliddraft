@@ -50,6 +50,7 @@ pub struct SolidDraftApp {
     /// The command line's chips and session height as last written to disk.
     saved_bar: crate::command_line::BarSettings,
     saved_commands: crate::commands::History,
+    saved_create_pins: crate::create_menu::Pins,
     automation: Automation,
     frame: u64,
     bench: Option<Bench>,
@@ -166,6 +167,7 @@ impl SolidDraftApp {
             saved_layout: state.layout,
             saved_bar: state.command_line.settings.clone(),
             saved_commands: state.commands.clone(),
+            saved_create_pins: state.create_pins.clone(),
             state,
             dock: center_dock(),
             automation,
@@ -861,6 +863,12 @@ impl eframe::App for SolidDraftApp {
                 log::warn!("cannot save the command history: {e}");
             }
             self.saved_commands = self.state.commands.clone();
+        }
+        if self.state.create_pins != self.saved_create_pins {
+            if let Err(e) = crate::settings::save_create_pins(&self.state.create_pins) {
+                log::warn!("cannot save the pinned create commands: {e}");
+            }
+            self.saved_create_pins = self.state.create_pins.clone();
         }
         if self.state.layout != self.saved_layout && !ctx.input(|i| i.pointer.any_down()) {
             self.state.layout.save();

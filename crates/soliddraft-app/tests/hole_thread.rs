@@ -491,6 +491,110 @@ fn drawn_items(state: &soliddraft_app::state::AppState) -> Vec<(String, &'static
         .collect()
 }
 
+fn skim_first_hole(state: &mut soliddraft_app::state::AppState) {
+    tool(
+        state,
+        "sketch",
+        json!({"plane": "top", "offset": 9, "shapes": [{"shape": "rectangle", "center": [15, 20, 9], "width": 16, "height": 16}]}),
+    );
+    tool(state, "cut", json!({"sketch": "Sketch2", "depth": 5, "through_all": false, "flip": true}));
+}
+
+#[test]
+fn a_drawing_calls_out_each_counterbore_after_one_opening_is_skimmed() {
+    let mut state = scripted_plate("Counterbored plate");
+    tool(
+        &mut state,
+        "hole",
+        json!({"face": "Boss-Extrude1 · End cap", "points": [[15, 20, 10], [45, 20, 10]], "diameter": 5, "depth": 8,
+            "counterbore": {"diameter": 10, "depth": 3}}),
+    );
+    skim_first_hole(&mut state);
+    let mut top = soliddraft_app::drawing::NewDrawing::new();
+    for (view, on) in &mut top.views {
+        *on = *view == soliddraft_kernel_api::drawing::StandardView::Top;
+    }
+    let session = soliddraft_app::drawing::create_drawing(&state, &top).unwrap();
+    let sheet = &session.doc.drawing.sheets[0];
+    let projected = session.doc.projected_of(sheet.views[0].id).unwrap();
+    let ctx = soliddraft_app::drawing::part::PartContext::new(&state.doc).unwrap();
+    let symbols = soliddraft_drawing::library::template(sheet.template.as_str()).style_file().symbols;
+    for radius in [2.5, 5.0] {
+        let mut callouts = projected
+            .circles
+            .iter()
+            .filter(|c| (c.model_radius - radius).abs() < 1e-6)
+            .map(|c| soliddraft_app::drawing::part::hole_callout(&ctx, c, &projected, sheet.template.as_str()))
+            .collect::<Vec<_>>();
+        callouts.sort();
+        callouts.dedup();
+        let (d, deep, cb) = (&symbols.diameter, &symbols.depth, &symbols.counterbore);
+        assert_eq!(
+            callouts,
+            [format!("{d}5 {deep} 7\n{cb} {d}10 {deep} 2"), format!("{d}5 {deep} 8\n{cb} {d}10 {deep} 3")]
+        );
+    }
+}
+
+#[test]
+fn updating_the_drawing_keeps_one_thread_note_when_two_groups_join() {
+    let mut state = scripted_plate("Tapped plate");
+    tool(
+        &mut state,
+        "hole",
+        json!({"face": "Boss-Extrude1 · End cap", "points": [[15, 20, 10], [45, 20, 10]], "depth": 8,
+            "thread": {"size": 6, "length": 6}}),
+    );
+    skim_first_hole(&mut state);
+    let dir = std::env::temp_dir().join(format!("soliddraft-thread-groups-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    tool(&mut state, "manufacturing_package", json!({"path": dir.join("tapped.step")}));
+    let before = drawn_items(&state);
+    assert_eq!(before.len(), 2, "{before:?}");
+    assert!(before.iter().any(|(_, _, text)| text.ends_with(" 5")));
+    assert!(before.iter().any(|(_, _, text)| text.ends_with(" 6")));
+
+    tool(&mut state, "suppress", json!({"feature": "CutExtrude1", "suppressed": true}));
+    tool(&mut state, "drawing_rebuild", json!({}));
+    let merged = drawn_items(&state);
+    std::fs::remove_dir_all(&dir).unwrap();
+    assert_eq!(merged.len(), 1, "{merged:?}");
+    assert!(merged[0].2.starts_with("2× M6x1-6H") && merged[0].2.ends_with(" 6"), "{merged:?}");
+}
+
+#[test]
+fn hiding_a_body_in_a_display_state_hides_its_thread_marks() {
+    use soliddraft_document::display_state::{DisplayMode, DisplayScope, DisplayState};
+
+    let mut state = scripted_plate("Tapped plate");
+    tool(
+        &mut state,
+        "hole",
+        json!({"face": "Boss-Extrude1 · End cap", "points": [[30, 20, 10]], "thread": {"size": 6}}),
+    );
+    let mut app = launch(state.doc, STANDARD);
+    ux_tools::rebuilt(&mut app);
+    ux_tools::pointer_to_chrome(&mut app);
+    let mut case = Case::new("thread-display-state");
+    let image = case.frame(&mut app, "shown");
+    let before = thread_blue(&app, &image);
+    assert!(before > 50, "the shown thread draws {before} blue pixels");
+
+    let doc = &mut app.state_mut().state.doc;
+    let mut hidden =
+        DisplayState::<soliddraft_model::PartDisplay>::new("Hidden".into(), DisplayScope::All, DisplayMode::Shaded);
+    hidden.view.hidden.insert(0);
+    let id = hidden.id.clone();
+    let mut states = doc.display_states().clone();
+    states.put(hidden).unwrap();
+    states.select(None, Some(id)).unwrap();
+    doc.change_display_states(states).unwrap();
+    settle(&mut app);
+    let image = case.frame(&mut app, "hidden");
+    let after = thread_blue(&app, &image);
+    assert_eq!(after, 0, "the hidden thread still draws {after} blue pixels");
+}
+
 #[test]
 fn a_drawing_redraws_a_size_that_became_a_thread_and_back() {
     let mut state = scripted_plate("Bore plate");

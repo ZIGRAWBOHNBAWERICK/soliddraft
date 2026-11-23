@@ -79,6 +79,37 @@ fn resolved_thin(report: &Value, name: &str) -> Value {
 }
 
 #[test]
+fn renaming_a_global_keeps_case_distinct_configuration_bindings() {
+    use soliddraft_app::values_tab::{self, Field, ValuesAction};
+
+    let mut state = parameter_dependent_grid("Plate", "10 mm", "10 mm");
+    call(&mut state, "set_value", json!({ "name": "plate", "expression": "20 mm" }));
+    call(&mut state, "set_value", json!({ "name": "Width", "expression": "1 mm" }));
+    for (name, expression) in [("BossExtrude1.Depth", "=plate"), ("Width", "=Plate")] {
+        call(
+            &mut state,
+            "set_configuration_value",
+            json!({ "configuration": "Thin", "name": name, "expression": expression }),
+        );
+    }
+    let field = Field::Name("Plate".into());
+    values_tab::apply(&mut state, ValuesAction::Commit(field.clone(), "Other".into()));
+    assert!(state.values.error(&field).is_none(), "{:?}", state.values.error(&field));
+    let grid = state.doc.model().configuration_grid();
+    let thin = grid.rows.iter().find(|row| row.name == "Thin").unwrap();
+    assert_eq!(thin.values["BossExtrude1.Depth"], "=plate");
+    assert_eq!(thin.values["Width"], "=Other");
+    let read = call(&mut state, "configuration_grid", json!({}));
+    let values = read["resolved"].as_array().unwrap().iter().find(|r| r["name"] == "Thin").unwrap()["values"]
+        .as_array()
+        .unwrap();
+    for (name, expected) in [("BossExtrude1.Depth", 20.0), ("Width", 10.0)] {
+        let value = values.iter().find(|v| v["name"] == name).unwrap();
+        assert_eq!(value["value"], json!(expected));
+    }
+}
+
+#[test]
 fn grid_retained_parameter_overrides_do_not_block_values_tab_text_property_edits() {
     use soliddraft_app::values_tab::{self, Field, ValuesAction};
     let mut state = parameter_dependent_grid("Ratio", "1 mm / 1 mm", "10 mm / (BossExtrude1.Depth - 10 mm)");

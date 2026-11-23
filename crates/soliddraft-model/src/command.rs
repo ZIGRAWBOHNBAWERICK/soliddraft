@@ -784,12 +784,8 @@ impl Document {
             FeatureKind::Thicken(t) if t.faces.is_empty() => {
                 Err(CommandError::Invalid("select at least one face to thicken".into()))
             }
-            FeatureKind::Thicken(t) if !t.thickness.is_finite() || t.thickness <= 0.0 => {
-                Err(CommandError::Invalid("thickness must be finite and positive".into()))
-            }
-            FeatureKind::Shell(s) if !(s.thickness.is_finite() && s.thickness > 0.0) => {
-                Err(CommandError::Invalid("shell thickness must be finite and positive".into()))
-            }
+            FeatureKind::Thicken(t) => t.thickness.check_thickness().map_err(|e| CommandError::Invalid(e.into())),
+            FeatureKind::Shell(s) => s.check_thickness().map_err(|e| CommandError::Invalid(e.into())),
             FeatureKind::Draft(d) if d.faces.is_empty() => {
                 Err(CommandError::Invalid("a draft needs at least one face".into()))
             }

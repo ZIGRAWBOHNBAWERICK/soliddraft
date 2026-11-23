@@ -917,13 +917,24 @@ impl<'de> Deserialize<'de> for ShellOpenings {
     }
 }
 
-/// A constant-thickness shell with persistent references to its openings.
+/// A shell with persistent references to its openings.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ShellFeature {
     /// Faces removed to open the shell.
     pub open_faces: ShellOpenings,
-    /// Positive, finite wall thickness in millimetres.
-    pub thickness: f64,
+    /// Positive wall thickness in millimetres, constant or graded.
+    pub thickness: Grade,
+}
+
+impl ShellFeature {
+    /// Validates the wall and the all-faces opening, which only accepts a constant.
+    pub fn check_thickness(&self) -> Result<(), &'static str> {
+        self.thickness.check_thickness()?;
+        if self.open_faces.is_all() && self.thickness.constant().is_none() {
+            return Err("Opening every face requires a constant thickness.");
+        }
+        Ok(())
+    }
 }
 
 /// A signed offset of the complete body boundary.
@@ -938,8 +949,8 @@ pub struct OffsetFeature {
 pub struct ThickenFeature {
     /// Persistent names of the selected faces.
     pub faces: Vec<FaceRef>,
-    /// Positive thickness in millimetres.
-    pub thickness: f64,
+    /// Positive thickness in millimetres, constant or graded.
+    pub thickness: Grade,
     /// Which side of the selected faces receives material.
     pub side: soliddraft_kernel_api::ThickenSide,
 }

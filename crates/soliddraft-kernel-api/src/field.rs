@@ -223,7 +223,7 @@ pub enum GradedField {
     GyroidLevel,
 }
 
-/// How a terminal field parameter varies over the part. A constant is written as a bare
+/// How a field parameter varies over the part. A constant is written as a bare
 /// number, as files always had it; a function is an object that names it, so a reader
 /// that does not know a function refuses the file instead of reading it as a constant.
 /// `F` is how a distance grade names its faces: persistent references in a saved part,
@@ -268,6 +268,21 @@ impl<F> Grade<F> {
             Grade::Radial(r) => vec![r.start, r.end],
             Grade::Point(p) => vec![p.start, p.end],
         }
+    }
+
+    /// Validates a wall thickness in millimetres over the whole part: a constant or a
+    /// linear grade, the only ones a wall takes.
+    pub fn check_thickness(&self) -> Result<(), &'static str> {
+        if !matches!(self, Grade::Constant(_) | Grade::Linear(_)) {
+            return Err("Wall thickness is a constant or a linear grade.");
+        }
+        if self.values().iter().any(|v| !v.is_finite()) || self.endpoints().iter().any(|v| *v <= 0.0) {
+            return Err("Wall thickness must be finite and positive, with finite grade anchors.");
+        }
+        if matches!(self, Grade::Linear(l) if l.from == l.to) {
+            return Err("Thickness needs two distinct grade anchors.");
+        }
+        Ok(())
     }
 
     /// The constant, when the grade is one.

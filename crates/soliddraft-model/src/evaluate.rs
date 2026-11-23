@@ -1867,8 +1867,12 @@ impl Document {
 
     fn build_shell(&self, f: &Feature, s: &crate::ShellFeature, current: Option<BodyId>) -> Built {
         let Some(body) = current else { return Built::failed(current, "there is no body to shell") };
+        if let Err(error) = s.check_thickness() {
+            return Built::failed(current, error);
+        }
         if s.open_faces.is_all() {
-            return match self.kernel.shell_all_faces(body, s.thickness) {
+            let thickness = s.thickness.constant().expect("validated all-faces thickness");
+            return match self.kernel.shell_all_faces(body, thickness) {
                 Ok(()) => Built::pass(FeatureStatus::Ok, None),
                 Err(error) => Built::failed(current, feature_error(error)),
             };
@@ -1884,7 +1888,7 @@ impl Document {
         if !repairs.is_empty() {
             return Built::pass(FeatureStatus::RepairNeeded(repairs), current);
         }
-        let result = self.kernel.shell(&OpTag::new(format!("{}.shell", f.id)), body, &faces, s.thickness);
+        let result = self.kernel.shell_with_grade(&OpTag::new(format!("{}.shell", f.id)), body, &faces, s.thickness);
         if let Ok(r) = &result
             && let Some(refusal) = shell_refusal(r)
         {
@@ -1913,8 +1917,11 @@ impl Document {
         if !repairs.is_empty() {
             return Built::pass(FeatureStatus::RepairNeeded(repairs), current);
         }
-        let params = soliddraft_kernel_api::Thicken { faces, thickness: t.thickness, side: t.side };
-        let result = self.kernel.thicken(&OpTag::new(format!("{}.thicken", f.id)), body, &params);
+        if let Err(error) = t.thickness.check_thickness() {
+            return Built::failed(current, error);
+        }
+        let result =
+            self.kernel.thicken_with_grade(&OpTag::new(format!("{}.thicken", f.id)), body, faces, t.thickness, t.side);
         self.finish(result, current, |r| self.distance_names(r, body, false))
     }
 

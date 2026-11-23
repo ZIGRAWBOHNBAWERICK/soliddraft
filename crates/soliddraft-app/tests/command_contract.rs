@@ -557,6 +557,44 @@ fn before_retained_polygons(id: &str, current: &mut Value) {
     }
 }
 
+/// Wall thickness keeps numeric inputs and adds one clamped linear grade.
+fn before_wall_thickness(id: &str, current: &mut Value) {
+    const WALL_VERBS: [&str; 4] = ["shell", "edit_shell", "thicken", "edit_thicken"];
+
+    fn restore(schema: &mut Value) {
+        let thickness = schema.pointer_mut("/properties/thickness").expect("wall thickness input");
+        let number = json!({"type":"number"});
+        assert_eq!(
+            *thickness,
+            json!({"anyOf":[number, {
+                "type":"object", "additionalProperties":false, "required":["linear"],
+                "properties":{"linear":{
+                    "type":"object", "additionalProperties":false,
+                    "properties":{
+                        "axis":{"type":"string","enum":["x","y","z"]},
+                        "from":number, "to":number, "start":number, "end":number
+                    },
+                    "required":["axis","from","to","start","end"]
+                }}
+            }]}),
+        );
+        *thickness = number;
+    }
+
+    if id == "propose" {
+        let variants = current
+            .pointer_mut("/tool/input/properties/commands/items/anyOf")
+            .and_then(Value::as_array_mut)
+            .expect("proposal variants");
+        for op in WALL_VERBS {
+            let schema = variants.iter_mut().find(|v| v["properties"]["op"]["const"] == op).expect(op);
+            restore(schema);
+        }
+    } else if WALL_VERBS.contains(&id) {
+        restore(&mut current["tool"]["input"]);
+    }
+}
+
 fn before_distance_verbs(id: &str, current: &mut Value) {
     if id != "propose" {
         return;
@@ -929,6 +967,7 @@ fn command_ids_shortcuts_agent_schemas_and_availability_stay_compatible() {
         before_circular_placement(id, &mut current);
         before_loft_verbs(id, &mut current);
         before_ridealong_inputs(id, &mut current);
+        before_wall_thickness(id, &mut current);
         before_distance_verbs(id, &mut current);
         before_feature_pattern_source(id, &mut current);
         before_draft_pull(id, &mut current);

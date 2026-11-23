@@ -98,7 +98,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
     let drawn = ui.max_rect();
     ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new(AREA), drawn));
     let Some(editor) = state.editor.as_ref() else { return };
-    let spec = feature_forms::spec(&editor.params, context.planes(), context.free_sketches());
+    let spec = feature_forms::form_spec(&editor.params, &context);
     let title = editor.title();
     let message = feature_forms::message(editor);
     // A refused fillet offers the largest radius the kernel would build.

@@ -15,8 +15,8 @@ use crate::commands::{self, Agents, CommandSpec};
 use crate::document::EdgeRef;
 use crate::document::{
     ChamferParams, Command, CutParams, Document, EndKind, ExtrudeParams, FeatureId, FeatureKind, FeatureStatus,
-    FilletParams, PlaneKind, Preview, Selection, SketchPlane, VertexKey, fmt_mm, hole_depth_text, hole_head_text,
-    plane_ref_label,
+    FilletParams, PlaneKind, Preview, Selection, SketchPlane, VertexKey, fmt_mm, grade_text, hole_depth_text,
+    hole_head_text, plane_ref_label, wall_thickness_text,
 };
 use crate::sketch::{self, ConstraintKind, EntityKind, P2, PointRef, Sketch};
 use glam::Vec3;
@@ -27,7 +27,7 @@ use soliddraft_assistant::tools::schema::{
 };
 use soliddraft_assistant::{Caller, ToolHost, ToolOutput, ToolSpec};
 use soliddraft_kernel_api::{ArcTurn, FaceId, PathSegment, Plane, SurfaceKind, Sweep, SweepOrientation};
-use soliddraft_kernel_api::{HoleDepth, HoleHead, HoleTip};
+use soliddraft_kernel_api::{Grade, HoleDepth, HoleHead, HoleTip};
 use soliddraft_model::thread::HoleThread;
 use soliddraft_model::{DatumPlane, PatternSpec, PlaneRef, ShellOpenings};
 
@@ -456,11 +456,11 @@ pub enum Line {
     /// Offsets every face by a signed distance.
     Offset { distance: f64 },
     /// Builds a solid from selected faces.
-    Thicken { faces: Vec<String>, thickness: f64, side: soliddraft_kernel_api::ThickenSide },
+    Thicken { faces: Vec<String>, thickness: Grade, side: soliddraft_kernel_api::ThickenSide },
     /// Changes an offset distance.
     EditOffset { feature: String, distance: f64 },
     /// Changes thickness and side, retaining selected faces.
-    EditThicken { feature: String, thickness: f64, side: soliddraft_kernel_api::ThickenSide },
+    EditThicken { feature: String, thickness: Grade, side: soliddraft_kernel_api::ThickenSide },
     /// Hollows the part, leaving named faces open.
     Shell {
         /// Faces left open; empty requests a closed shell.
@@ -468,8 +468,8 @@ pub enum Line {
         /// Opens every face, in place of naming any.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         all_faces: bool,
-        /// Positive wall thickness, mm.
-        thickness: f64,
+        /// Positive constant or linear wall thickness, mm.
+        thickness: Grade,
     },
     /// Tilts faces about a neutral plane.
     Draft {
@@ -583,8 +583,8 @@ pub enum Line {
     EditShell {
         /// The shell feature's name.
         feature: String,
-        /// Positive wall thickness, mm.
-        thickness: f64,
+        /// Positive constant or linear wall thickness, mm.
+        thickness: Grade,
     },
     /// Changes a draft's angle, and optionally its pull direction.
     EditDraft {
@@ -1035,11 +1035,22 @@ pub fn edit_offset_params() -> Vec<(&'static str, Value)> {
     params.extend(offset_params());
     params
 }
+fn thickness_schema() -> Value {
+    let linear = object(&[
+        ("axis", one_of(&["x", "y", "z"], "Part axis")),
+        ("from", number("Start coordinate in mm")),
+        ("to", number("End coordinate in mm")),
+        ("start", number("Positive thickness at the start in mm")),
+        ("end", number("Positive thickness at the end in mm")),
+    ]);
+    any_of(vec![number("Positive thickness in mm"), object(&[("linear", linear)])])
+}
+
 pub fn thicken_params() -> Vec<(&'static str, Value)> {
     vec![
         // The model refuses empty selections so the command journal records the refusal.
         ("faces", array(string("Face name"), "Select at least one face")),
-        ("thickness", number("Thickness in mm, greater than zero")),
+        ("thickness", thickness_schema()),
         ("side", string("front or back")),
     ]
 }
@@ -1054,13 +1065,13 @@ pub fn shell_params() -> Vec<(&'static str, Value)> {
     vec![
         ("open_faces", array(string("A face name"), "Faces left open; empty for a closed shell")),
         ("all_faces", optional(boolean("true opens every face, which leaves nothing; open_faces must then be empty"))),
-        ("thickness", number("Wall thickness, mm, greater than 0")),
+        ("thickness", thickness_schema()),
     ]
 }
 
 /// The `edit_shell` verb's parameters.
 pub fn edit_shell_params() -> Vec<(&'static str, Value)> {
-    vec![feature_param(), ("thickness", number("Wall thickness, mm, greater than 0"))]
+    vec![feature_param(), ("thickness", thickness_schema())]
 }
 
 /// The `draft` verb's parameters.
@@ -1285,6 +1296,13 @@ fn positive(what: &str, v: f64) -> Result<f64, String> {
         return Err(format!("{what} must be at most {MAX_LENGTH_MM} mm, got {v}"));
     }
     Ok(v)
+}
+
+fn shell_thickness(grade: Grade) -> Result<Grade, String> {
+    for value in grade.endpoints() {
+        positive("wall thickness", value)?;
+    }
+    Ok(grade)
 }
 
 fn feature_names(doc: &Document) -> String {
@@ -1998,7 +2016,7 @@ impl Line {
                             open_faces.iter().map(|f| face_ref_by_name(doc, f)).collect::<Result<Vec<_>, _>>()?,
                         )
                     },
-                    thickness: positive("wall thickness", *thickness)?,
+                    thickness: shell_thickness(*thickness)?,
                 };
                 run.apply(doc, Command::AddFeature(FeatureKind::Shell(shell)))?;
             }
@@ -2119,7 +2137,7 @@ impl Line {
                 let Some(FeatureKind::Shell(mut shell)) = doc.feature(id).map(|f| f.kind.clone()) else {
                     return Err(format!("{feature} is not a shell"));
                 };
-                shell.thickness = positive("wall thickness", *thickness)?;
+                shell.thickness = shell_thickness(*thickness)?;
                 run.apply(doc, Command::EditFeature { id, kind: FeatureKind::Shell(shell) })?;
             }
             Line::EditDraft { feature, angle, pull, reverse } => {
@@ -2375,20 +2393,21 @@ impl Line {
             Line::Thicken { faces, thickness, side } => (
                 "Thicken".into(),
                 format!(
-                    "{} {}, {thickness} mm, {side:?}",
+                    "{} {}, {}, {side:?}",
                     faces.len(),
-                    if faces.len() == 1 { "face" } else { "faces" }
+                    if faces.len() == 1 { "face" } else { "faces" },
+                    grade_text(thickness, " mm"),
                 ),
             ),
             Line::EditOffset { feature, distance } => ("Edit offset".into(), format!("{feature}, {distance} mm")),
             Line::EditThicken { feature, thickness, side } => {
-                ("Edit thicken".into(), format!("{feature}, {thickness} mm, {side:?}"))
+                ("Edit thicken".into(), format!("{feature}, {}, {side:?}", grade_text(thickness, " mm")))
             }
             Line::Shell { open_faces, all_faces, thickness } => (
                 "Shell".into(),
                 format!(
-                    "{} mm wall, {}",
-                    fmt_mm(*thickness),
+                    "{} wall, {}",
+                    wall_thickness_text(thickness),
                     if *all_faces {
                         "every face open".into()
                     } else if open_faces.is_empty() {
@@ -2399,7 +2418,7 @@ impl Line {
                 ),
             ),
             Line::EditShell { feature, thickness } => {
-                (format!("Edit {feature}"), format!("{} mm wall", fmt_mm(*thickness)))
+                (format!("Edit {feature}"), format!("{} wall", wall_thickness_text(thickness)))
             }
             Line::Draft { faces, neutral, pull, angle, .. } => (
                 "Draft".into(),

@@ -281,6 +281,21 @@ impl Kernel for Counting {
         self.inner.shell(tag, body, open_faces, thickness)
     }
 
+    fn graded_thickness_available(&self, op: crate::OpKind, body: BodyId) -> bool {
+        self.inner.graded_thickness_available(op, body)
+    }
+
+    fn shell_with_grade(
+        &self,
+        tag: &OpTag,
+        body: BodyId,
+        open_faces: &[FaceId],
+        thickness: crate::Grade,
+    ) -> KernelResult<OpResult> {
+        self.op(tag);
+        self.inner.shell_with_grade(tag, body, open_faces, thickness)
+    }
+
     fn shell_all_faces(&self, body: BodyId, thickness: f64) -> KernelResult<()> {
         self.op(&OpTag::new("shell_all_faces"));
         self.inner.shell_all_faces(body, thickness)
@@ -311,6 +326,18 @@ impl Kernel for Counting {
     fn thicken(&self, tag: &OpTag, body: BodyId, params: &crate::Thicken) -> KernelResult<OpResult> {
         self.op(tag);
         self.inner.thicken(tag, body, params)
+    }
+
+    fn thicken_with_grade(
+        &self,
+        tag: &OpTag,
+        body: BodyId,
+        faces: Vec<FaceId>,
+        thickness: crate::Grade,
+        side: crate::ThickenSide,
+    ) -> KernelResult<OpResult> {
+        self.op(tag);
+        self.inner.thicken_with_grade(tag, body, faces, thickness, side)
     }
 
     fn pattern_feature(

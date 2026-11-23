@@ -1,3 +1,5 @@
+//! Opens and saves part and drawing files across format versions.
+
 use serde_json::{Value, json};
 use soliddraft_app::{drawing::DrawingDoc, file::open_bytes, kernel};
 use soliddraft_document::manifest::{self, Entry, Package};

@@ -70,15 +70,15 @@
       "arguments": {},
       "checks": [
         {
-          "pointer": "/items/0/callout",
+          "pointer": "/output/items/0/callout",
           "equals": "2\u00d7 M6x1-6H THRU"
         },
         {
-          "pointer": "/items/0/stated_by",
+          "pointer": "/output/items/0/stated_by",
           "equals": "Hole1"
         },
         {
-          "pointer": "/items/0/measured_mm/0",
+          "pointer": "/output/items/0/measured_mm/0",
           "approx": 5,
           "tolerance": 1e-06
         }
@@ -108,7 +108,7 @@
       "arguments": {},
       "checks": [
         {
-          "pointer": "/items/0/callout",
+          "pointer": "/output/items/0/callout",
           "equals": "2\u00d7 M8x1-6H DEEP 8"
         }
       ]
@@ -202,11 +202,11 @@
       "arguments": {},
       "checks": [
         {
-          "pointer": "/items/0/callout",
+          "pointer": "/output/items/0/callout",
           "equals": "2\u00d7 M8x1-6H DEEP 8"
         },
         {
-          "pointer": "/items/0/problem",
+          "pointer": "/output/items/0/problem",
           "absent": true
         }
       ]
@@ -274,7 +274,7 @@
       "arguments": {},
       "checks": [
         {
-          "pointer": "/items/0/callout",
+          "pointer": "/output/items/0/callout",
           "equals": "2\u00d7 M8x1-6H DEEP 8"
         }
       ]

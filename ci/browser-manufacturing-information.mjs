@@ -389,7 +389,7 @@ async function main() {
   step('Hole, click the plate top, Tapped, OK');
   await v.command('Hole');
   await v.settle(800);
-  const face = await v.eval(`window.wasmBindings.part_screen_point(${TAPPED_AT.join(', ')})`);
+  const face = await v.eval(`Array.from(window.wasmBindings.part_screen_point(${TAPPED_AT.join(', ')}))`);
   check(face, 'the plate top is on screen');
   await v.click(face);
   await v.click(await v.control('Hole thread'));

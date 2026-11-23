@@ -55,6 +55,10 @@ pub enum AppAction {
     StartFillet,
     StartChamfer,
     ShowMaterial,
+    ShowBodyMaterial,
+    ShowMaterialLibrary,
+    ShowBodyAppearance,
+    ShowPartAppearance,
     /// Shows the selected face's colour and transparency, or the part's when no face
     /// is selected.
     ShowAppearance,
@@ -1322,6 +1326,8 @@ pub struct AppState {
     /// Which sections of the feature property panel are folded or open.
     pub feature_panel: crate::feature_panel::State,
     pub options_details: bool,
+    pub(crate) material_dialog: Option<crate::material_dialog::Dialog>,
+    pub(crate) appearance_editor: Option<(soliddraft_document::DocumentId, soliddraft_model::AppearanceTarget)>,
     /// The selection's properties are drawing inside the options sheet, whose own X
     /// closes it: their Clear selection X would be a second close button.
     pub properties_in_sheet: bool,
@@ -1582,6 +1588,8 @@ impl AppState {
             form_bar: Default::default(),
             feature_panel: Default::default(),
             options_details: false,
+            material_dialog: None,
+            appearance_editor: None,
             properties_in_sheet: false,
             editor: None,
             sketch: None,

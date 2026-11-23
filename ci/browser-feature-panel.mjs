@@ -332,7 +332,7 @@ async function main() {
   step('save');
   const saved = await v.download('save', () => v.key('s', 'KeyS', 83, 2, 's'));
   const truth = partJson(saved);
-  check(truth.format === 'soliddraft-part/4', `the part saves as format 4, not ${truth.format}`);
+  check(truth.format === 'soliddraft-part/6', `the part saves as format 6, not ${truth.format}`);
   const extrusions = truth.features.filter(f => f.kind.type === 'extrude');
   check(extrusions.length === 2, `two extrusions are saved: ${JSON.stringify(truth.features)}`);
   check(extrusions[0].kind.direction2?.type === 'blind', `the first keeps Direction 2: ${JSON.stringify(extrusions[0])}`);

@@ -91,10 +91,10 @@ fn close(a: f64, b: f64, what: &str) {
     assert!((a - b).abs() <= 1e-6 * b.abs().max(1.0), "{what}: {a} is not {b}");
 }
 
-/// The part saved and opened again: it must say format 4, keep its truth and its shape.
+/// The part saved and opened again: it must say format 6, keep its truth and its shape.
 fn reopened(doc: &Document) -> Document {
-    assert_eq!(doc.truth()["format"], "soliddraft-part/4", "extrusion options need format 4");
-    assert_eq!(doc.manifest().format, "soliddraft-part/4");
+    assert_eq!(doc.truth()["format"], "soliddraft-part/6", "extrusion options need format 6");
+    assert_eq!(doc.manifest().format, "soliddraft-part/6");
     let back = Document::from_bytes(&doc.to_bytes().unwrap(), kernel()).unwrap();
     assert_eq!(back.part_json(), doc.part_json(), "the truth round-trips");
     assert_eq!(back.geometry_hash(), doc.geometry_hash());
@@ -404,7 +404,7 @@ fn a_start_on_a_plane_that_is_not_parallel_is_refused_by_name() {
 }
 
 #[test]
-fn format_4_is_written_only_for_options_and_older_files_still_open() {
+fn format_6_is_written_only_for_options_and_older_files_still_open() {
     // Plain parts keep format 2, and several bodies format 3.
     let mut d = doc();
     let s = add(
@@ -425,8 +425,8 @@ fn format_4_is_written_only_for_options_and_older_files_still_open() {
     assert!(d.part_json().contains("\"direction2\""));
     let back = reopened(&d);
     // A file from a later version is refused rather than misread.
-    let later = back.part_json().replace("soliddraft-part/4", "soliddraft-part/5");
-    assert!(Document::from_part_json(&later, kernel()).is_err(), "a format 5 part is refused");
+    let later = back.part_json().replace("soliddraft-part/6", "soliddraft-part/7");
+    assert!(Document::from_part_json(&later, kernel()).is_err(), "a format 7 part is refused");
     // A format 2 file from before the options reads as an extrusion without them.
     let legacy = serde_json::json!({
         "format":"soliddraft-part/2", "name":"Legacy part", "units":"mm", "next_feature":2,

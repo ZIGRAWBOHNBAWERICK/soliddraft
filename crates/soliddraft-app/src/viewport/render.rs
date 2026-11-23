@@ -63,25 +63,7 @@ impl Picked {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
-pub enum DisplayMode {
-    #[default]
-    ShadedWithEdges,
-    Shaded,
-    Wireframe,
-}
-
-impl DisplayMode {
-    pub const ALL: [DisplayMode; 3] = [DisplayMode::ShadedWithEdges, DisplayMode::Shaded, DisplayMode::Wireframe];
-
-    pub fn label(&self) -> &'static str {
-        match self {
-            DisplayMode::ShadedWithEdges => "Shaded with edges",
-            DisplayMode::Shaded => "Shaded",
-            DisplayMode::Wireframe => "Wireframe",
-        }
-    }
-}
+pub use soliddraft_document::display_state::DisplayMode;
 
 /// Existing document identity, display version and retained body; never sent to the GPU.
 pub type PickRevision = (soliddraft_document::DocumentId, u64, Option<BodyId>);
@@ -1508,6 +1490,10 @@ impl ViewportRenderer {
             if show_faces && let Some(g) = ghost {
                 pass.set_pipeline(&self.face_pipeline);
                 draw_faces(&mut pass, &mut std::iter::once(g), true);
+            }
+            if show_edges {
+                self.assembly.draw_edges(&mut pass);
+                pass.set_bind_group(0, &self.globals_bind_group, &[]);
             }
             if show_edges || ghost.is_some() {
                 pass.set_pipeline(&self.edge_pipeline);

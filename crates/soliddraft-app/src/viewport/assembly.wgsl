@@ -16,6 +16,7 @@ struct VertexIn {
     @location(0) position: vec3<f32>,
     @location(1) normal: vec3<f32>,
     @location(2) face: u32,
+    @location(7) style: vec2<u32>,
 };
 
 struct InstanceIn {
@@ -37,16 +38,18 @@ struct Out {
     @location(1) normal: vec3<f32>,
     @location(2) @interpolate(flat) info: vec4<u32>,
     @location(3) @interpolate(flat) face: u32,
+    @location(4) @interpolate(flat) style: vec2<u32>,
 };
 
 fn place(p: vec4<f32>, i: InstanceIn) -> vec3<f32> {
     return vec3<f32>(dot(i.row0, p), dot(i.row1, p), dot(i.row2, p));
 }
 
-fn shade_vertex(position: vec3<f32>, normal: vec3<f32>, face: u32, i: InstanceIn) -> Out {
+fn shade_vertex(position: vec3<f32>, normal: vec3<f32>, face: u32, style: vec2<u32>, i: InstanceIn) -> Out {
     var out: Out;
     out.info = i.info;
     out.face = face;
+    out.style = style;
     if ((i.info.y & HIDDEN) != 0u) {
         // Outside the clip volume: the triangle is dropped.
         out.clip = vec4<f32>(2.0, 2.0, 2.0, 1.0);
@@ -61,7 +64,7 @@ fn shade_vertex(position: vec3<f32>, normal: vec3<f32>, face: u32, i: InstanceIn
 
 @vertex
 fn vs_main(v: VertexIn, i: InstanceIn) -> Out {
-    return shade_vertex(v.position, v.normal, v.face, i);
+    return shade_vertex(v.position, v.normal, v.face, v.style, i);
 }
 
 // Culled drawing: instances come from storage through the lists the cull pass wrote.
@@ -95,7 +98,7 @@ fn instance_at(slot: u32) -> InstanceIn {
 
 @vertex
 fn vs_culled(v: VertexIn, @builtin(instance_index) n: u32) -> Out {
-    return shade_vertex(v.position, v.normal, v.face, instance_at(visible[n]));
+    return shade_vertex(v.position, v.normal, v.face, v.style, instance_at(visible[n]));
 }
 
 // A small instance drawn as its definition's bounding box: the unit cube stretched.
@@ -107,7 +110,7 @@ fn proxy_position(unit: vec3<f32>, slot: u32) -> vec3<f32> {
 @vertex
 fn vs_proxy(v: VertexIn, @builtin(instance_index) n: u32) -> Out {
     let slot = proxies[n];
-    return shade_vertex(proxy_position(v.position, slot), v.normal, 0u, instance_at(slot));
+    return shade_vertex(proxy_position(v.position, slot), v.normal, 0u, v.style, instance_at(slot));
 }
 
 fn srgb_to_linear(c: vec3<f32>) -> vec3<f32> {
@@ -132,6 +135,11 @@ fn fs_main(in: Out) -> @location(0) vec4<f32> {
     var metallic = 0.0;
     var base = srgb_to_linear(vec3<f32>(0.78, 0.80, 0.83));
     let flags = in.info.y;
+    if (in.style.x != 0u) {
+        base = unpack_srgb(in.style.x);
+        metallic = f32(in.style.y & 255u) / 255.0;
+        roughness = f32((in.style.y >> 8u) & 255u) / 255.0;
+    }
     if ((flags & COLOURED) != 0u) {
         // The assembly's colour replaces every colour of the part.
         base = unpack_srgb(in.info.z);
@@ -152,6 +160,31 @@ fn fs_main(in: Out) -> @location(0) vec4<f32> {
     }
     let shade = 0.36 + diffuse * (1.0 - 0.5 * metallic);
     return vec4<f32>(base * shade + vec3<f32>(spec) + vec3<f32>(fresnel), 1.0);
+}
+
+struct EdgeOut {
+    @builtin(position) clip: vec4<f32>,
+    @location(0) @interpolate(flat) flags: u32,
+};
+
+@vertex
+fn vs_edge(@location(0) p: vec3<f32>, i: InstanceIn) -> EdgeOut {
+    var out: EdgeOut;
+    out.flags = i.info.y;
+    if ((out.flags & HIDDEN) != 0u) {
+        out.clip = vec4<f32>(2.0, 2.0, 2.0, 1.0);
+    } else {
+        out.clip = globals.view_proj * vec4<f32>(place(vec4<f32>(p, 1.0), i), 1.0);
+        // Lift the line just above its face in the reversed depth buffer.
+        out.clip.z = min(out.clip.w, out.clip.z + out.clip.w * 0.00001);
+    }
+    return out;
+}
+
+@fragment
+fn fs_edge(in: EdgeOut) -> @location(0) vec4<f32> {
+    let base = select(vec3<f32>(0.06), vec3<f32>(0.04, 0.21, 0.60), (in.flags & (SELECTED | HOVERED)) != 0u);
+    return vec4<f32>(base, 1.0);
 }
 
 // Id buffer: the occurrence's row plus one, and the face code (kind 1, face plus one).

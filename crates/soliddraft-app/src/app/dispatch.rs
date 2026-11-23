@@ -1354,6 +1354,21 @@ impl SolidDraftApp {
                 self.state.doc.selection = Some(Selection::Body);
                 self.state.options_details = true;
             }
+            AppAction::ShowMaterialLibrary => {
+                self.state.material_dialog = Some(crate::material_dialog::Dialog::new(&self.state.doc, None));
+            }
+            AppAction::ShowBodyMaterial => {
+                let body = self.state.doc.active_body;
+                self.state.material_dialog = Some(crate::material_dialog::Dialog::new(&self.state.doc, Some(body)));
+            }
+            AppAction::ShowPartAppearance => {
+                self.state.appearance_editor =
+                    Some((self.state.doc.instance(), soliddraft_model::AppearanceTarget::Part));
+            }
+            AppAction::ShowBodyAppearance => {
+                let target = soliddraft_model::AppearanceTarget::Body { body: self.state.doc.active_body };
+                self.state.appearance_editor = Some((self.state.doc.instance(), target));
+            }
             AppAction::ShowAppearance => {
                 if !matches!(self.state.doc.selection, Some(Selection::Face(_))) {
                     self.state.doc.selection = Some(Selection::Body);
@@ -1561,7 +1576,31 @@ impl SolidDraftApp {
                 let bounds = self.fit_bounds();
                 self.state.viewport.camera.fit_framed(bounds);
             }
-            AppAction::SetDisplay(d) => self.state.active_viewport_mut().display = d,
+            AppAction::SetDisplay(d) => {
+                let assembly_active = self.state.assembly.is_active();
+                let result = if let Some(s) = self.state.assembly.session.as_mut().filter(|_| assembly_active) {
+                    if let Some(mut display) = s.doc.assembly().viewport_state().cloned() {
+                        display.mode = d;
+                        let mut states = s.doc.assembly().viewport_states.clone();
+                        states
+                            .put(display)
+                            .and_then(|_| s.doc.change_viewport_states(states).map_err(|e| e.to_string()))
+                    } else {
+                        s.viewport.display = d;
+                        Ok(())
+                    }
+                } else if let Some(mut display) = self.state.doc.display_state().cloned() {
+                    display.mode = d;
+                    let mut states = self.state.doc.display_states().clone();
+                    states.put(display).and_then(|_| self.state.doc.change_display_states(states))
+                } else {
+                    self.state.active_viewport_mut().display = d;
+                    Ok(())
+                };
+                if let Err(error) = result {
+                    self.state.note(error, NoteKind::Error);
+                }
+            }
             AppAction::SetPreset(p) => {
                 let viewport = self.state.active_viewport_mut();
                 // Realistic leaves edges off; switching to or from it moves the shaded
@@ -1572,12 +1611,37 @@ impl SolidDraftApp {
                 viewport.preset = p;
             }
             AppAction::SetBodyVisible(show) => {
-                let doc = &mut self.state.doc;
-                if crate::tree_visibility::body_shown(doc) != show {
-                    doc.set_view_choice(crate::document::ViewItem::Body(doc.active_body), Some(show));
+                // A display state keeps its own hidden bodies; without one the body's own view
+                // choice decides.
+                if let Some(mut display) = self.state.doc.display_state().cloned() {
+                    let key = self.state.doc.active_body;
+                    let changed = if show { display.view.hidden.remove(&key) } else { display.view.hidden.insert(key) };
+                    if changed {
+                        let mut states = self.state.doc.display_states().clone();
+                        let result = states.put(display).and_then(|_| self.state.doc.change_display_states(states));
+                        if let Err(error) = result {
+                            self.state.note(error, NoteKind::Error);
+                        }
+                    }
+                } else {
+                    let doc = &mut self.state.doc;
+                    if crate::tree_visibility::body_shown(doc) != show {
+                        doc.set_view_choice(crate::document::ViewItem::Body(doc.active_body), Some(show));
+                    }
                 }
             }
             AppAction::ShowAllBodies => {
+                // The active display state's hidden bodies show again too.
+                if let Some(mut display) = self.state.doc.display_state().cloned()
+                    && !display.view.hidden.is_empty()
+                {
+                    display.view.hidden.clear();
+                    let mut states = self.state.doc.display_states().clone();
+                    let result = states.put(display).and_then(|_| self.state.doc.change_display_states(states));
+                    if let Err(error) = result {
+                        self.state.note(error, NoteKind::Error);
+                    }
+                }
                 let doc = &mut self.state.doc;
                 for (key, _) in doc.display_bodies() {
                     if !crate::tree_visibility::body_shown_at(doc, key) {

@@ -205,12 +205,14 @@ pub fn user_library_path() -> Option<PathBuf> {
 
 /// Every material and appearance library: the built-in ones, the user's own library
 /// and those File locations lists.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn material_catalog() -> Catalog {
     Catalog::load(crate::file::config_read_file("libraries/my-library.toml").as_deref(), &file_locations())
 }
 
 /// The user's own library, loaded, or a new empty one at its path when it does not
 /// exist yet.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn user_library() -> Result<Library, String> {
     let path = user_library_path().ok_or("SolidDraft cannot find a folder to keep your library in")?;
     if let Some(source) = crate::file::config_read_file("libraries/my-library.toml")
@@ -223,6 +225,31 @@ pub fn user_library() -> Result<Library, String> {
     let mut lib = Library::new("My library", Origin::User);
     lib.path = Some(path);
     Ok(lib)
+}
+
+/// The built-in catalog and the browser profile's custom library.
+#[cfg(target_arch = "wasm32")]
+pub fn material_catalog() -> Catalog {
+    let mut libraries = Catalog::built_in_libraries();
+    libraries.extend(user_library().ok());
+    Catalog::from_libraries(libraries, Vec::new())
+}
+
+/// Loads the custom library saved in this browser profile.
+#[cfg(target_arch = "wasm32")]
+pub fn user_library() -> Result<Library, String> {
+    match stored()["material_library"].as_str() {
+        Some(text) => Library::parse(text, Origin::User, None).map_err(|e| e.to_string()),
+        None => Ok(Library::new("My library", Origin::User)),
+    }
+}
+
+/// Saves the user library in the platform's settings store.
+pub fn save_material_library(library: &Library) -> Result<(), String> {
+    #[cfg(target_arch = "wasm32")]
+    return save_section("material_library", &library.to_toml()).map_err(|e| e.to_string());
+    #[cfg(not(target_arch = "wasm32"))]
+    library.save().map_err(|e| e.to_string())
 }
 
 /// What the viewport shows of the part's reference geometry without being asked. Display

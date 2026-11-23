@@ -156,6 +156,11 @@ pub enum Command {
         /// Row to select, including Default.
         name: String,
     },
+    /// Applies an undoable parameters or configuration edit.
+    EditParameters {
+        /// The edit to apply to the current part.
+        edit: crate::configs::Edit,
+    },
     /// Replaces the authored table as one step: file defaults, row overrides, properties.
     SetConfigurationGrid {
         /// The whole candidate table.
@@ -238,6 +243,18 @@ pub enum Command {
         #[serde(default, skip_serializing_if = "is_all")]
         scope: ConfigScope,
     },
+    /// Sets or clears a material override on a solid body.
+    SetBodyMaterial {
+        /// The stable body key.
+        body: u32,
+        /// The assigned material, or none to inherit.
+        material: Option<Material>,
+        /// A copy of the material's default appearance.
+        default_appearance: Option<Appearance>,
+        /// The configurations with this assignment.
+        #[serde(default, skip_serializing_if = "is_all")]
+        scope: ConfigScope,
+    },
     /// Applies an appearance to the part, a feature's faces or a face, or removes the
     /// one there with `None`. The part keeps a copy of the appearance as given.
     SetAppearance {
@@ -249,6 +266,11 @@ pub enum Command {
         /// In which configurations; all of them by default.
         #[serde(default, skip_serializing_if = "is_all")]
         scope: ConfigScope,
+    },
+    /// Replaces the named display states, as one undoable appearance edit.
+    SetDisplayStates {
+        /// The new display states.
+        states: Box<soliddraft_document::display_state::DisplayStates<crate::materials::PartDisplay>>,
     },
     /// Replaces the part's copies of materials and appearances it uses with these
     /// values, as updating from a library does. Refused for one the part does not use.
@@ -630,6 +652,44 @@ impl Document {
         stack.last().is_some_and(|entry| matches!(entry.redo, Command::SetAnnotationPlacement { .. }))
     }
 
+    fn set_material_assignment(
+        &mut self,
+        body: Option<u32>,
+        material: Option<Material>,
+        default_appearance: Option<Appearance>,
+        scope: ConfigScope,
+    ) -> Result<Applied, CommandError> {
+        if let Some(m) = &material {
+            check_entry(m.problems())?;
+        }
+        if let Some(a) = &default_appearance {
+            if material.as_ref().and_then(|m| m.default_appearance.as_ref()) != Some(&a.id) {
+                return Err(CommandError::Invalid(format!("{} is not the material's default appearance", a.id)));
+            }
+            check_entry(a.problems())?;
+        }
+        let old = self.materials.clone();
+        let label = match &material {
+            Some(m) => format!("set material {}", m.name),
+            None => "remove material".to_owned(),
+        };
+        let state = &mut self.materials;
+        state.material.retain(|a| !(a.body == body && a.scope == scope));
+        if let Some(m) = &material {
+            state.material.push(MaterialAssignment { body, material: m.id.clone(), scope: scope.clone() });
+            state.snapshots.put_material(m.clone());
+            if let Some(a) = &default_appearance {
+                state.snapshots.put_appearance(a.clone());
+            }
+        }
+        state.prune();
+        let command = match body {
+            Some(body) => Command::SetBodyMaterial { body, material, default_appearance, scope },
+            None => Command::SetMaterial { material, default_appearance, scope },
+        };
+        Ok(self.materials_changed(old, command, label))
+    }
+
     /// What a command that changed only the materials state did: its inverse puts the
     /// old state back.
     fn materials_changed(&self, old: PartMaterials, redo: Command, label: String) -> Applied {
@@ -1007,6 +1067,7 @@ impl Document {
             command @ (Command::AddConfiguration { .. }
             | Command::SetConfigurationValue { .. }
             | Command::ActivateConfiguration { .. }
+            | Command::EditParameters { .. }
             | Command::SetConfigurationGrid { .. }
             | Command::RestoreConfigurations { .. }) => self.apply_configuration(command),
             command @ (Command::Track { .. }
@@ -1228,38 +1289,23 @@ impl Document {
                 })
             }
             Command::SetMaterial { material, default_appearance, scope } => {
-                if let Some(m) = &material {
-                    check_entry(m.problems())?;
+                self.set_material_assignment(None, material, default_appearance, scope)
+            }
+            Command::SetBodyMaterial { body, material, default_appearance, scope } => {
+                if material.is_some() && !self.live_bodies().iter().any(|(key, _)| *key == body) {
+                    return Err(CommandError::Invalid(format!("Body {} is absent from this configuration", body + 1)));
                 }
-                if let Some(a) = &default_appearance {
-                    if material.as_ref().and_then(|m| m.default_appearance.as_ref()) != Some(&a.id) {
-                        return Err(CommandError::Invalid(format!(
-                            "{} is not the material's default appearance",
-                            a.id
-                        )));
-                    }
-                    check_entry(a.problems())?;
-                }
-                let old = self.materials.clone();
-                let label = match &material {
-                    Some(m) => format!("set material {}", m.name),
-                    None => "remove material".to_owned(),
-                };
-                let state = &mut self.materials;
-                state.material.retain(|a| a.scope != scope);
-                if let Some(m) = &material {
-                    state.material.push(MaterialAssignment { material: m.id.clone(), scope: scope.clone() });
-                    state.snapshots.put_material(m.clone());
-                    if let Some(a) = &default_appearance {
-                        state.snapshots.put_appearance(a.clone());
-                    }
-                }
-                state.prune();
-                Ok(self.materials_changed(old, Command::SetMaterial { material, default_appearance, scope }, label))
+                self.set_material_assignment(Some(body), material, default_appearance, scope)
             }
             Command::SetAppearance { target, appearance, scope } => {
                 if let AppearanceTarget::Feature { feature } = &target {
                     self.index(*feature)?;
+                }
+                if let AppearanceTarget::Body { body } = &target
+                    && appearance.is_some()
+                    && !self.live_bodies().iter().any(|(key, _)| key == body)
+                {
+                    return Err(CommandError::Invalid(format!("Body {} is absent from this configuration", body + 1)));
                 }
                 if let Some(a) = &appearance {
                     check_entry(a.problems())?;
@@ -1267,6 +1313,7 @@ impl Document {
                 let old = self.materials.clone();
                 let place = match &target {
                     AppearanceTarget::Part => "the part".to_owned(),
+                    AppearanceTarget::Body { body } => format!("Body {}", body + 1),
                     AppearanceTarget::Feature { feature } => {
                         self.feature(*feature).map(|f| f.name.clone()).unwrap_or_else(|| feature.to_string())
                     }
@@ -1279,6 +1326,14 @@ impl Document {
                 };
                 self.materials.assign(&target, appearance.as_ref(), &scope);
                 Ok(self.materials_changed(old, Command::SetAppearance { target, appearance, scope }, label))
+            }
+            Command::SetDisplayStates { states } => {
+                let old = self.materials.clone();
+                let mut next = old.clone();
+                next.display_states = (*states).clone();
+                next.check().map_err(CommandError::Invalid)?;
+                self.materials = next;
+                Ok(self.materials_changed(old, Command::SetDisplayStates { states }, "Change display state".into()))
             }
             Command::UpdateCopies { materials, appearances } => {
                 let old = self.materials.clone();

@@ -152,3 +152,220 @@ fn deferred_deletion_and_combination_keep_the_previous_body_membership_until_reb
     doc.rebuild();
     assert_eq!(doc.live_bodies().len(), 1);
 }
+
+#[test]
+fn body_materials_and_appearances_survive_rebuild_and_reopen() {
+    use soliddraft_document::ConfigScope;
+    use soliddraft_materials::{Appearance, Material, Srgb};
+    use soliddraft_model::AppearanceTarget;
+
+    let (mut doc, _, second) = pair();
+    let unstyled = doc.geometry_hash();
+    let steel_colour = Appearance::new("steel", "Steel", Srgb::new(100, 110, 120));
+    let brass_colour = Appearance::new("brass", "Brass", Srgb::new(200, 170, 90));
+    let mut steel = Material::new("steel", "Steel");
+    steel.density_kg_m3 = Some(7850.0);
+    steel.default_appearance = Some(steel_colour.id.clone());
+    let mut brass = Material::new("brass", "Brass");
+    brass.density_kg_m3 = Some(8500.0);
+    brass.damping_ratio = Some(0.03);
+    brass.default_appearance = Some(brass_colour.id.clone());
+    doc.execute(Command::SetMaterial {
+        material: Some(steel),
+        default_appearance: Some(steel_colour.clone()),
+        scope: ConfigScope::All,
+    })
+    .unwrap();
+    doc.execute(Command::SetBodyMaterial {
+        body: 1,
+        material: Some(brass),
+        default_appearance: Some(brass_colour.clone()),
+        scope: ConfigScope::All,
+    })
+    .unwrap();
+
+    let faces = |doc: &Document| {
+        let body = doc.body_after(second).unwrap();
+        doc.kernel().topology(body).unwrap().faces.into_iter().map(|face| face.id).collect::<Vec<_>>()
+    };
+    let paint = |target, appearance| Command::SetAppearance { target, appearance, scope: ConfigScope::All };
+    let part = Appearance::new("part", "Part paint", Srgb::WHITE);
+    let body = Appearance::new("body", "Body paint", Srgb::BLACK);
+    let face = Appearance::new("face", "Face paint", Srgb::new(255, 0, 0));
+    let ids = faces(&doc);
+    let face_target = AppearanceTarget::Face { face: doc.face_ref(ids[0]).unwrap() };
+    let body_target = AppearanceTarget::Body { body: 1 };
+
+    assert_eq!(doc.appearance_table(None).of(ids[0]), &brass_colour);
+    doc.execute(paint(AppearanceTarget::Part, Some(part.clone()))).unwrap();
+    assert_eq!(doc.appearance_table(None).of(ids[0]), &part);
+    doc.execute(paint(body_target.clone(), Some(body.clone()))).unwrap();
+    doc.execute(paint(face_target.clone(), Some(face.clone()))).unwrap();
+    let table = doc.appearance_table(None);
+    assert_eq!(table.of(ids[0]), &face);
+    assert_eq!(table.of(ids[1]), &body);
+    assert_eq!(table.of_body(0), &part);
+    assert_eq!(doc.geometry_hash(), unstyled);
+    assert!((doc.mass(None).unwrap().mass_kg - 0.01635).abs() < 1e-9);
+
+    let mut back = Document::from_bytes(&doc.to_bytes().unwrap(), Arc::new(CatallaxKernel::new())).unwrap();
+    assert_eq!(back.manifest().format, "soliddraft-part/5");
+    assert_eq!(back.part_json(), doc.part_json());
+    assert_eq!(back.body_material(1, None).unwrap().damping_ratio, Some(0.03));
+    let table = back.appearance_table(None);
+    assert_eq!(table.of_body(1), &body);
+    assert_eq!(faces(&back).iter().filter(|&&id| table.of(id) == &face).count(), 1);
+
+    let previous = doc.part_json().replace("soliddraft-part/5", "soliddraft-part/4");
+    let migrated = Document::from_part_json(&previous, Arc::new(CatallaxKernel::new())).unwrap();
+    assert_eq!(migrated.part_json(), doc.part_json());
+    assert_eq!(migrated.appearance_table(None).of_body(1), &body);
+
+    back.execute(paint(face_target, None)).unwrap();
+    back.execute(paint(body_target, None)).unwrap();
+    back.execute(paint(AppearanceTarget::Part, None)).unwrap();
+    assert_eq!(back.appearance_table(None).of_body(1), &brass_colour);
+    back.execute(Command::EditFeature { id: second, kind: block(20.0, 6.0) }).unwrap();
+    assert_eq!(back.appearance_table(None).of_body(0), &steel_colour);
+    assert_eq!(back.appearance_table(None).of_body(1), &brass_colour);
+    assert!((back.mass(None).unwrap().mass_kg - 0.01805).abs() < 1e-9);
+}
+
+#[test]
+fn display_states_follow_the_configuration_and_keep_their_view_through_a_file() {
+    use soliddraft_document::{
+        ConfigScope,
+        display_state::{DisplayMode, DisplayScope, DisplayState},
+    };
+    use soliddraft_materials::{Appearance, Srgb};
+    use soliddraft_model::AppearanceTarget;
+
+    let (mut doc, _, second) = pair();
+    doc.execute(Command::AddConfiguration { name: "Service".into() }).unwrap();
+    let service = doc.named_configurations().next().unwrap().0.clone();
+    let mut states = doc.materials().display_states.clone();
+    let blue = Appearance::new("blue", "Blue", Srgb::new(21, 101, 192));
+    let red = Appearance::new("red", "Red", Srgb::new(198, 40, 40));
+    let target = AppearanceTarget::Body { body: 1 };
+    doc.execute(Command::SetAppearance {
+        target: target.clone(),
+        appearance: Some(blue.clone()),
+        scope: ConfigScope::All,
+    })
+    .unwrap();
+
+    let inspection =
+        DisplayState::new("Inspection".into(), DisplayScope::Only(vec![None]), DisplayMode::ShadedWithEdges);
+    let inspection_id = inspection.id.clone();
+    states.put(inspection).unwrap();
+    states.select(None, Some(inspection_id)).unwrap();
+    let mut working: DisplayState<soliddraft_model::PartDisplay> =
+        DisplayState::new("Working".into(), DisplayScope::Only(vec![Some(service.clone())]), DisplayMode::Shaded);
+    working.view.paint(target, Some(red.clone()));
+    working.view.hidden.insert(0);
+    let working_id = working.id.clone();
+    states.put(working).unwrap();
+    assert!(states.select(None, Some(working_id.clone())).is_err());
+    states.select(Some(&service), Some(working_id.clone())).unwrap();
+
+    let shape = doc.geometry_hash();
+    doc.execute(Command::SetDisplayStates { states: Box::new(states) }).unwrap();
+    assert_eq!(doc.geometry_hash(), shape);
+    assert_eq!(doc.appearance_table(None).of_body(1), &blue);
+    doc.execute(Command::ActivateConfiguration { name: "Service".into() }).unwrap();
+    assert_eq!(doc.appearance_table(Some(&service)).of_body(1), &red);
+
+    let mut back = Document::from_bytes(&doc.to_bytes().unwrap(), Arc::new(CatallaxKernel::new())).unwrap();
+    assert_eq!(back.part_json(), doc.part_json());
+    assert_eq!(back.active_configuration(), Some(&service));
+    let selected = back.materials().display_states.selected(back.active_configuration()).unwrap();
+    assert_eq!(selected.id, working_id);
+    assert_eq!(selected.mode, DisplayMode::Shaded);
+    assert_eq!(selected.view.hidden.iter().copied().collect::<Vec<_>>(), vec![0]);
+    assert_eq!(back.appearance_table(back.active_configuration()).of_body(1), &red);
+
+    back.execute(Command::ActivateConfiguration { name: "Default".into() }).unwrap();
+    assert_eq!(back.appearance_table(None).of_body(1), &blue);
+    assert!(back.materials().display_states.selected(None).unwrap().view.hidden.is_empty());
+    back.execute(Command::EditFeature { id: second, kind: block(20.0, 7.0) }).unwrap();
+    back.execute(Command::ActivateConfiguration { name: "Service".into() }).unwrap();
+    assert_eq!(back.appearance_table(back.active_configuration()).of_body(1), &red);
+}
+
+#[test]
+fn configured_formulas_materials_and_display_states_share_one_part_file() {
+    use soliddraft_document::{
+        ConfigScope,
+        display_state::{DisplayMode, DisplayScope, DisplayState},
+    };
+    use soliddraft_materials::{Appearance, Material, Srgb};
+    use soliddraft_model::{AppearanceTarget, values::Input};
+
+    let (mut doc, _, second) = pair();
+    doc.execute(Command::SetValue { name: "Stock".into(), expression: "=SUM(2 mm,3 mm)".into() }).unwrap();
+    doc.execute(Command::SetValue { name: "TotalMass".into(), expression: "=Mass".into() }).unwrap();
+    doc.execute(Command::Drive { input: Input::Depth { feature: second }, expression: "=Stock".into() }).unwrap();
+    doc.execute(Command::AddConfiguration { name: "Service".into() }).unwrap();
+    doc.execute(Command::SetConfigurationValue {
+        configuration: "Service".into(),
+        name: "Stock".into(),
+        expression: "=ROUND(7.4 mm,0)".into(),
+    })
+    .unwrap();
+    doc.execute(Command::ActivateConfiguration { name: "Service".into() }).unwrap();
+    let service = doc.active_configuration().unwrap().clone();
+
+    let mut steel = Material::new("steel", "Steel");
+    steel.density_kg_m3 = Some(7850.0);
+    doc.execute(Command::SetMaterial { material: Some(steel), default_appearance: None, scope: ConfigScope::All })
+        .unwrap();
+    let mut brass = Material::new("brass", "Brass");
+    brass.density_kg_m3 = Some(8500.0);
+    doc.execute(Command::SetBodyMaterial {
+        body: 1,
+        material: Some(brass),
+        default_appearance: None,
+        scope: ConfigScope::All,
+    })
+    .unwrap();
+    let blue = Appearance::new("blue", "Blue", Srgb::new(21, 101, 192));
+    let red = Appearance::new("red", "Red", Srgb::new(198, 40, 40));
+    let target = AppearanceTarget::Body { body: 1 };
+    doc.execute(Command::SetAppearance {
+        target: target.clone(),
+        appearance: Some(blue.clone()),
+        scope: ConfigScope::All,
+    })
+    .unwrap();
+    let mut state: DisplayState<soliddraft_model::PartDisplay> =
+        DisplayState::new("Working".into(), DisplayScope::Only(vec![Some(service.clone())]), DisplayMode::Shaded);
+    state.view.paint(target, Some(red.clone()));
+    state.view.hidden.insert(0);
+    let state_id = state.id.clone();
+    let mut states = doc.materials().display_states.clone();
+    states.put(state).unwrap();
+    states.select(Some(&service), Some(state_id.clone())).unwrap();
+    doc.execute(Command::SetDisplayStates { states: Box::new(states) }).unwrap();
+
+    let bytes = doc.to_bytes().unwrap();
+    let mut reopened = Document::from_bytes(&bytes, Arc::new(CatallaxKernel::new())).unwrap();
+    assert_eq!(reopened.manifest().format, "soliddraft-part/5");
+    assert_eq!(reopened.id(), doc.id());
+    assert_eq!(reopened.part_json(), doc.part_json());
+    assert_eq!(reopened.semantic_hash(), doc.semantic_hash());
+    assert_eq!(reopened.geometry_hash(), doc.geometry_hash());
+    assert_eq!(reopened.active_configuration(), Some(&service));
+    assert_eq!(reopened.body_material(1, Some(&service)).unwrap().name, "Brass");
+    assert_eq!(reopened.appearance_table(Some(&service)).of_body(1), &red);
+    assert_eq!(reopened.materials().display_states.selected(Some(&service)).unwrap().id, state_id);
+    assert_eq!(reopened.values().driver(&Input::Depth { feature: second }), Some("=Stock"));
+    assert!((volume(&reopened, 1) - 1400.0).abs() < 1e-6);
+    let table = reopened.values_table();
+    let mass = table.globals.iter().find(|row| row.name == "TotalMass").unwrap().values[table.active].unwrap();
+    assert!((mass - 0.01975).abs() < 1e-9);
+    assert_eq!(mass, reopened.mass(Some(&service)).unwrap().mass_kg);
+
+    reopened.execute(Command::ActivateConfiguration { name: "Default".into() }).unwrap();
+    assert!((volume(&reopened, 1) - 1000.0).abs() < 1e-6);
+    assert_eq!(reopened.appearance_table(None).of_body(1), &blue);
+}

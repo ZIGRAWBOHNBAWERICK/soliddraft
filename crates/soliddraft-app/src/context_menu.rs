@@ -90,8 +90,8 @@ const BODY: Group = Group {
         "show_dimensions",
         "mass_properties",
         "export_step",
-        "material",
-        "appearance",
+        "body_material",
+        "body_appearance",
     ],
 };
 const VIEW: Group = Group {
@@ -195,8 +195,8 @@ pub static MENUS: [(Target, MenuSpec); 8] = [
                 q(Target::Body, "show_dimensions", "Dimensions"),
                 q(Target::Body, "mass_properties", "Mass properties"),
                 q(Target::Body, "export_step", "Export STEP"),
-                q(Target::Body, "material", ""),
-                q(Target::Body, "appearance", ""),
+                q(Target::Body, "body_material", ""),
+                q(Target::Body, "body_appearance", ""),
                 q(Target::Body, "zoom_fit", "Zoom to fit"),
             ],
         },
@@ -385,7 +385,7 @@ fn item(
     state.doc.selection = selection_for(&state.doc, target, clicked);
     let command = commands::get(id).expect("context commands are registered");
     let label = if id == "hide_body" && !short.is_empty() {
-        if crate::tree_visibility::visible(state).body { "Hide".into() } else { "Show".into() }
+        if crate::tree_visibility::active_body_shown(&state.doc) { "Hide".into() } else { "Show".into() }
     } else if id == "export_step" && short.is_empty() {
         "Export STEP...".into()
     } else if short.is_empty() {

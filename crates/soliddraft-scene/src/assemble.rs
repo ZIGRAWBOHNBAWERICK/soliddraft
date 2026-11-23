@@ -419,7 +419,7 @@ pub fn display_mesh(mesh: &crate::Mesh, baked: &DMat4) -> Result<DisplayMesh, St
     if kept == 0 {
         return Err("it has no triangle with area".into());
     }
-    out.faces = vec![MeshFace { first: 0, count: kept, name: String::new() }];
+    out.faces = vec![MeshFace { first: 0, count: kept, name: String::new(), style: None }];
     out.edges = feature_edges(&out);
     out.check()?;
     Ok(out)

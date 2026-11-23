@@ -785,6 +785,8 @@ impl eframe::App for SolidDraftApp {
 
     fn ui(&mut self, root: &mut egui::Ui, frame: &mut eframe::Frame) {
         crate::multibody::show(root.ctx(), &mut self.state);
+        crate::material_dialog::show(root.ctx(), &mut self.state);
+        crate::properties::show_appearance_editor(root.ctx(), &mut self.state);
         let ctx = &root.ctx().clone();
         log::debug!("ui frame {}", self.frame);
         self.state.doc.set_repaint(ctx);
@@ -827,6 +829,9 @@ impl eframe::App for SolidDraftApp {
             match uploaded.purpose {
                 crate::platform::Purpose::Insert => crate::assembly::insert_bytes(&mut self.state, uploaded.files),
                 crate::platform::Purpose::Open => self.open_uploads(uploaded.files),
+                crate::platform::Purpose::Parameters => {
+                    crate::values_tab::apply_upload(&mut self.state, uploaded.files)
+                }
             }
         }
         #[cfg(target_arch = "wasm32")]

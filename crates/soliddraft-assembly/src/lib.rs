@@ -83,7 +83,10 @@ pub use pack::{
 pub use path::{ComponentId, OccurrencePath, PatternId, SourceId, Step};
 pub use placement::{Aabb, Placement};
 pub use scene::{Draw, Instance, Picked, Scene};
-pub use schema::{Assembly, Component, Direction, OccurrenceAppearance, Override, Pattern, PatternRule, Source, Units};
+pub use schema::{
+    Assembly, AssemblyDisplay, Component, Direction, OccurrenceAppearance, Override, Pattern, PatternRule, Source,
+    Units,
+};
 pub use source::{DisplaySource, FileSource, KernelSource};
 pub use store::{Definition, DefinitionIndex, DefinitionKey, DefinitionStore, Freshness, LoadState};
 pub use subassembly::{FormCode, FormPlan, FormRefusal, FormRequest, FormStatus, Formed, Migration};

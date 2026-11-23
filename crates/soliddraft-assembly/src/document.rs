@@ -170,6 +170,7 @@ pub(crate) struct TruthImage {
     /// The colour assignments and appearance copies, when the edit changed colours,
     /// with the paths whose rows to repaint.
     colours: Option<(Vec<OccurrenceAppearance>, Snapshots, Vec<OccurrencePath>)>,
+    viewport_states: Option<soliddraft_document::display_state::DisplayStates<crate::AssemblyDisplay>>,
     /// The display settings, when the edit changed a quality.
     settings: Option<Settings>,
     /// The mates and values, when the edit changed them.
@@ -786,6 +787,7 @@ impl AssemblyDocument {
             sources: Vec::new(),
             patterns: Vec::new(),
             colours: None,
+            viewport_states: None,
             settings: None,
             design: None,
             configured: None,
@@ -843,6 +845,7 @@ impl AssemblyDocument {
             colours: like.colours.as_ref().map(|(_, _, paths)| {
                 (self.assembly.appearances.clone(), self.assembly.snapshots.clone(), paths.clone())
             }),
+            viewport_states: like.viewport_states.as_ref().map(|_| self.assembly.viewport_states.clone()),
             settings: like.settings.as_ref().map(|_| self.assembly.settings.clone()),
             design: like.design.as_ref().map(|_| Design::of(&self.assembly)),
             configured: like.configured.as_ref().map(|_| Configured::of(&self.assembly)),
@@ -936,10 +939,35 @@ impl AssemblyDocument {
         self.move_to(&moves)
     }
 
+    /// Applies a display state edit and refreshes the occurrence view.
+    pub fn change_viewport_states(
+        &mut self,
+        states: soliddraft_document::display_state::DisplayStates<crate::AssemblyDisplay>,
+    ) -> Result<(), EditError> {
+        crate::schema::check_viewport_states(&states).map_err(EditError::Invalid)?;
+        if states == self.assembly.viewport_states {
+            return Ok(());
+        }
+        self.cancel_drag();
+        let mut before = self.image(&[], &[]);
+        before.viewport_states = Some(std::mem::replace(&mut self.assembly.viewport_states, states));
+        self.assembly.format = self.assembly.written_format().into();
+        self.reflatten();
+        self.record("Change display state", before, Vec::new());
+        Ok(())
+    }
+
     /// Hides or shows occurrences. One undo step.
     pub fn set_hidden(&mut self, paths: &[OccurrencePath], hidden: bool) -> Result<(), EditError> {
         self.cancel_drag();
         let rows: Vec<OccurrenceIndex> = paths.iter().map(|p| self.row(p)).collect::<Result<_, _>>()?;
+        if let Some(mut display) = self.assembly.viewport_state().cloned() {
+            display.view.hidden.retain(|(p, _)| !paths.contains(p));
+            display.view.hidden.extend(paths.iter().map(|p| (p.clone(), hidden)));
+            let mut states = self.assembly.viewport_states.clone();
+            states.put(display).map_err(EditError::Invalid)?;
+            return self.change_viewport_states(states);
+        }
         let (comps, ovs) = split_owners(paths.iter());
         let before = self.image(&comps, &ovs);
         let rows_before = rows.iter().map(|r| self.row_state(*r)).collect();
@@ -1007,6 +1035,15 @@ impl AssemblyDocument {
             && let Some(problem) = a.problems().first()
         {
             return Err(EditError::Invalid(format!("the appearance's {} {}", problem.field, problem.message)));
+        }
+        if let Some(mut display) = self.assembly.viewport_state().cloned() {
+            display.view.appearances.retain(|(p, _)| !paths.contains(p));
+            if let Some(appearance) = appearance {
+                display.view.appearances.extend(paths.iter().map(|p| (p.clone(), appearance.clone())));
+            }
+            let mut states = self.assembly.viewport_states.clone();
+            states.put(display).map_err(EditError::Invalid)?;
+            return self.change_viewport_states(states);
         }
         let mut before = self.image(&[], &[]);
         before.colours = Some((self.assembly.appearances.clone(), self.assembly.snapshots.clone(), paths.to_vec()));
@@ -1469,6 +1506,10 @@ impl AssemblyDocument {
                 }
             }
         }
+        if let Some(states) = &image.viewport_states {
+            self.assembly.viewport_states = states.clone();
+            self.assembly.format = self.assembly.written_format().into();
+        }
         if let Some(settings) = &image.settings {
             self.assembly.settings = settings.clone();
         }
@@ -1489,6 +1530,7 @@ impl AssemblyDocument {
             || !r.removed.is_empty()
             || !r.added.is_empty()
             || image.settings.is_some()
+            || image.viewport_states.is_some()
             || seed_moved;
         if structural {
             self.reflatten();

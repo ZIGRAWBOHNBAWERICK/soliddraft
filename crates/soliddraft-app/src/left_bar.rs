@@ -33,7 +33,7 @@ pub fn pane_icon(pane: Pane) -> Icon {
     match pane {
         Pane::Tree => Icon::Tree,
         Pane::History => Icon::History,
-        Pane::Values => Icon::Config,
+        Pane::Values => Icon::Formula,
         Pane::Props => Icon::Props,
     }
 }
@@ -43,7 +43,7 @@ pub fn short_label(pane: Pane) -> &'static str {
     match pane {
         Pane::Tree => "Tree",
         Pane::History => "History",
-        Pane::Values => "Values",
+        Pane::Values => "Params",
         Pane::Props => "Props",
     }
 }
@@ -55,7 +55,7 @@ pub fn pane_label(state: &AppState, pane: Pane) -> &'static str {
         Pane::Tree if state.drawing.is_active() => "Drawing tree",
         Pane::Tree => "Feature tree",
         Pane::History => "History",
-        Pane::Values => "Values",
+        Pane::Values => "Parameters & configurations",
         Pane::Props => "Props",
     }
 }

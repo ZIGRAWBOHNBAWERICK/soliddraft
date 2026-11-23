@@ -7,7 +7,7 @@ use crate::state::{AppAction, AppState};
 use crate::theme;
 use crate::tree;
 use crate::viewport::Overlay;
-use egui::{Align2, CornerRadius, Rect, Sense, pos2, vec2};
+use egui::{CornerRadius, Rect, Sense, pos2, vec2};
 use egui_dock::{DockArea, DockState, TabViewer};
 
 use crate::app::dispatch::selection_of;
@@ -250,7 +250,7 @@ fn pane_header(ui: &mut egui::Ui, state: &AppState, pane: Pane) -> bool {
         Pane::Values => {
             let active_cfg =
                 state.doc.model().configuration_summary()["active"].as_str().unwrap_or("Default").to_owned();
-            (Icon::Config, "Values", Some(active_cfg), theme::muted(), theme::chip())
+            (Icon::Formula, "Parameters", Some(active_cfg), theme::muted(), theme::chip())
         }
         Pane::Props => {
             let badge = if state.doc.selection.is_some() { "Selected" } else { "Part" };

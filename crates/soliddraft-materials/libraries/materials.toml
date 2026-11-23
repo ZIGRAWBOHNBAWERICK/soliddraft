@@ -834,6 +834,55 @@ specific_heat_j_kgk = 1000
 default_appearance = "plastic-grey"
 hatch = "ANSI34"
 
+# 3D printing
+
+[[material]]
+id = "polymaker-petg-fff"
+name = "Polymaker PETG"
+category = "3D printing"
+description = "PETG filament. Typical tensile data for X-Y specimens printed at 100% infill."
+source = "Polymaker PETG TDS v2.0 (2025-11-17), physical and mechanical properties. https://polymaker.com/wp-content/uploads/lana-downloads/TDS_Polymaker_PETG_V2.0_2025-11-17.pdf"
+density_kg_m3 = 1300
+youngs_modulus_pa = 2.31111e9
+tensile_pa = 4.796e7
+default_appearance = "plastic-clear"
+hatch = "ANSI34"
+
+[material.provenance.density_kg_m3]
+source = { kind = "reference", citation = "Polymaker PETG TDS v2.0, physical properties, ISO 1183" }
+conditions = { temperature_k = 296.15 }
+
+[material.provenance.youngs_modulus_pa]
+source = { kind = "reference", citation = "Polymaker PETG TDS v2.0, mechanical properties, ISO 527" }
+conditions = { form = "FFF, 100% infill", direction = "X-Y" }
+
+[material.provenance.tensile_pa]
+source = { kind = "reference", citation = "Polymaker PETG TDS v2.0, mechanical properties, ISO 527" }
+conditions = { form = "FFF, 100% infill", direction = "X-Y" }
+
+[[material]]
+id = "prusament-asa-fff"
+name = "Prusament ASA"
+category = "3D printing"
+description = "Acrylonitrile styrene acrylate filament. Typical tensile data for horizontally printed specimens at 100% infill."
+source = "Prusa Polymers, Prusament ASA TDS v1.1 (2024-05-20), p. 2. https://storage.googleapis.com/prusa3d-content-prod-14e8-wordpress-prusament-prod/2024/05/bc8551ef-tds_prusament-asa_2024_en.pdf"
+density_kg_m3 = 1070
+youngs_modulus_pa = 1.6e9
+yield_pa = 4.2e7
+default_appearance = "plastic-ivory"
+hatch = "ANSI34"
+
+[material.provenance.density_kg_m3]
+source = { kind = "reference", citation = "Prusament ASA TDS v1.1, p. 2, ISO 1183" }
+
+[material.provenance.youngs_modulus_pa]
+source = { kind = "reference", citation = "Prusament ASA TDS v1.1, p. 2, ISO 527-1" }
+conditions = { form = "FFF, 100% infill", direction = "horizontal" }
+
+[material.provenance.yield_pa]
+source = { kind = "reference", citation = "Prusament ASA TDS v1.1, p. 2, ISO 527-1" }
+conditions = { form = "FFF, 100% infill", direction = "horizontal" }
+
 # Glass
 
 [[material]]

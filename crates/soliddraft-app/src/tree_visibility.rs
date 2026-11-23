@@ -21,6 +21,10 @@ use egui::{Rect, Sense, Stroke, pos2, vec2};
 use soliddraft_kernel_api::BodyId;
 use std::collections::HashSet;
 
+pub(crate) fn active_body_shown(doc: &Document) -> bool {
+    body_shown(doc) && doc.display_state().is_none_or(|state| !state.view.hidden.contains(&doc.active_body))
+}
+
 /// What the viewport draws of the part's items this frame.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Visible {

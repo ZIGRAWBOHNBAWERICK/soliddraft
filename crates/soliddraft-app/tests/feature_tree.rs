@@ -100,7 +100,7 @@ fn strip_icons_show_the_tree_or_values_and_hide_the_side_area() {
         let bar = ribbon::left_bar(app);
         let tree = ribbon::control(app, "Feature tree", bar);
         let history = ribbon::control(app, "History", bar);
-        let values = ribbon::control(app, "Values", bar);
+        let values = ribbon::control(app, "Parameters & configurations", bar);
         let props = ribbon::control(app, "Props", bar);
         assert!(tree.rect.bottom() <= history.rect.top(), "Tree sits above History on the rail");
         assert!(history.rect.bottom() <= values.rect.top(), "History sits above Values on the rail");
@@ -122,7 +122,7 @@ fn strip_icons_show_the_tree_or_values_and_hide_the_side_area() {
         assert!(app.state().state.pane_shown(Pane::Values));
         assert!(app.state().state.pane_shown(Pane::Tree), "D1 stacks Values with Tree in the same column");
         assert!(app.query_all_by_label("New global name").next().is_some(), "the Values pane shows");
-        assert!(ribbon::control(app, "Values", bar).selected);
+        assert!(ribbon::control(app, "Parameters & configurations", bar).selected);
         assert!(ribbon::control(app, "Feature tree", bar).selected);
         assert!(
             (app.state().state.viewport.rect.width() - with_pane).abs() < 1.0,
@@ -135,7 +135,7 @@ fn strip_icons_show_the_tree_or_values_and_hide_the_side_area() {
         ribbon::click_at(app, clear.rect.center());
         app.run_steps(12);
         assert!(!app.state().state.tree_shown(), "Clear hides the side area");
-        assert!(!ribbon::control(app, "Values", bar).selected);
+        assert!(!ribbon::control(app, "Parameters & configurations", bar).selected);
         assert!(!ribbon::control(app, "Feature tree", bar).selected);
         let wide = app.state().state.viewport.rect.width();
         assert!(wide > with_pane + 200.0);

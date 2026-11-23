@@ -98,7 +98,7 @@ fn d1_stacked_side_column_history_rollback_and_all_off_clear() {
         let vp_two_stacked = app.state().state.viewport.rect;
 
         // Values and Props on: all four stack in the same column.
-        app.get_by_label("Values").click();
+        app.get_by_label("Parameters & configurations").click();
         app.run_steps(6);
         app.get_by_label("Props").click();
         app.run_steps(6);
@@ -113,7 +113,7 @@ fn d1_stacked_side_column_history_rollback_and_all_off_clear() {
         app.get_by_label("Close Props").click();
         app.run_steps(6);
         assert!(!app.state().state.pane_shown(Pane::Props));
-        app.get_by_label("Close Values").click();
+        app.get_by_label("Close Parameters").click();
         app.run_steps(6);
         assert!(!app.state().state.pane_shown(Pane::Values));
 

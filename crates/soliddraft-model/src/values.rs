@@ -6,16 +6,20 @@
 //! A parameter's name is stored only once something uses it or the user renames it;
 //! until then it follows its feature's name.
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 use soliddraft_sketch::ConstraintId;
 
 use crate::params::{self, Parameter, Unit};
 use crate::value_expr::{
-    self, Expr, Expression, NamedValue, Quantity, check_name, check_parameter_name, evaluate_tree, rename_tokens,
+    self, Expr, Expression, NamedValue, PhysicalProperty, Quantity, check_name, check_parameter_name, evaluate_tree,
+    evaluate_tree_with_angle, rename_tokens,
 };
 use crate::{Document, Feature, FeatureId, FeatureKind};
 
 const MAX_DEPENDENCY_DEPTH: usize = 32;
+const NEEDS_BODY: &str = "mass and volume require the built part";
 
 /// A driven feature input, identified independently of its display name.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -62,6 +66,10 @@ pub struct Values {
     /// Parameter names that no longer follow their feature's name.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     names: Vec<Pin>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub(crate) degrees: bool,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    comments: BTreeMap<String, String>,
     /// The stored numbers the expressions read, from the last check against features.
     #[serde(skip)]
     known: Known,
@@ -125,14 +133,37 @@ struct Resolver<'a> {
     features: Option<&'a [Feature]>,
     done: Vec<(Node, Quantity, usize)>,
     visiting: Vec<Node>,
+    physical: Option<&'a PhysicalValues>,
+}
+
+pub(crate) struct PhysicalValues {
+    mass: Result<f64, String>,
+    volume: Result<f64, String>,
+}
+
+impl PhysicalValues {
+    fn get(&self, property: PhysicalProperty) -> Result<Quantity, String> {
+        match property {
+            PhysicalProperty::Mass => {
+                Ok(Quantity { mass: 1, ..Quantity::number(*self.mass.as_ref().map_err(Clone::clone)?) })
+            }
+            PhysicalProperty::Volume => {
+                Ok(Quantity { length: 3, ..Quantity::number(*self.volume.as_ref().map_err(Clone::clone)?) })
+            }
+        }
+    }
 }
 
 impl Resolver<'_> {
+    fn new<'a>(values: &'a Values, features: Option<&'a [Feature]>) -> Resolver<'a> {
+        Resolver { values, features, done: Vec::new(), visiting: Vec::new(), physical: None }
+    }
+
     fn stored(&self, input: &Input) -> Result<(Quantity, Unit), String> {
         let found = match self.features {
             Some(features) => params::read(features, input).map(|(value, unit)| {
                 let (length, angle) = unit.dimensions();
-                (Quantity { value, length, angle }, unit)
+                (Quantity { length, angle, ..Quantity::number(value) }, unit)
             }),
             None => self.values.known.0.iter().find(|(i, ..)| i == input).map(|(_, q, u)| (*q, *u)),
         };
@@ -171,25 +202,45 @@ impl Resolver<'_> {
         let expression = expression.expect("set above");
         self.visiting.push(node.clone());
         let mut depth = 1;
-        let mut q = evaluate_tree(&expression.tree, &mut |atom| {
+        let quantity = evaluate_tree_with_angle(&expression.tree, self.values.degrees, &mut |atom| {
             let next = match atom {
                 Expr::Ref(id) => Node::Value(*id),
                 Expr::Param(input) => Node::Input(input.clone()),
+                Expr::Physical(property) => return self.physical.ok_or(NEEDS_BODY)?.get(*property),
                 _ => return Err("missing value reference".into()),
             };
             let (quantity, dependency_depth) = self.get(&next)?;
             depth = depth.max(dependency_depth + 1);
             Ok(quantity)
-        })?;
+        });
         self.visiting.pop();
+        let mut q = quantity.map_err(|error| {
+            if unit.is_some() && error == NEEDS_BODY {
+                "value cycle: a feature cannot depend on the mass or volume of its own part".into()
+            } else {
+                error
+            }
+        })?;
         if depth > MAX_DEPENDENCY_DEPTH {
             return Err("value graph is too deep".into());
         }
         if let Some(unit) = unit {
-            q = coerce(q, unit, expression.is_bare_literal())?;
+            let use_input_unit = expression.is_bare_literal() || expression.is_formula() && q.is_unitless();
+            q = coerce(q, unit, use_input_unit)?;
         }
         self.done.push((node.clone(), q, depth));
         Ok((q, depth))
+    }
+
+    fn validate_globals(&mut self) -> Result<(), String> {
+        for value in &self.values.entries {
+            if let Err(error) = self.get(&Node::Value(value.id))
+                && error != NEEDS_BODY
+            {
+                return Err(error);
+            }
+        }
+        Ok(())
     }
 
     /// The stored numbers this resolution read, for later reads without features.
@@ -213,7 +264,7 @@ fn coerce(mut q: Quantity, unit: Unit, bare: bool) -> Result<Quantity, String> {
     if bare || matches!(unit, Unit::Count | Unit::Number) && (q.length, q.angle) == (1, 0) {
         (q.length, q.angle) = wanted;
     }
-    if (q.length, q.angle) != wanted {
+    if (q.length, q.angle) != wanted || q.mass != 0 {
         return Err(match unit {
             Unit::Length => "the input needs a length".into(),
             Unit::Angle => "the input needs an angle".into(),
@@ -221,13 +272,19 @@ fn coerce(mut q: Quantity, unit: Unit, bare: bool) -> Result<Quantity, String> {
             Unit::Number => "the input needs a plain number".into(),
         });
     }
+    q.logical = false;
     Ok(q)
 }
 
 impl Values {
     /// Whether there is no value data to persist.
     pub fn is_empty(&self) -> bool {
-        self.entries.is_empty() && self.bindings.is_empty() && self.tracked.is_empty() && self.names.is_empty()
+        self.entries.is_empty()
+            && self.bindings.is_empty()
+            && self.tracked.is_empty()
+            && self.names.is_empty()
+            && !self.degrees
+            && self.comments.is_empty()
     }
 
     fn pinned(&self, input: &Input) -> Option<&str> {
@@ -241,6 +298,25 @@ impl Values {
     /// Whether `name` is a global, as opposed to a parameter or nothing.
     pub fn has_global(&self, name: &str) -> bool {
         self.is_global(name)
+    }
+
+    pub(crate) fn comment(&self, name: &str) -> &str {
+        self.comments.get(name).map_or("", String::as_str)
+    }
+
+    pub(crate) fn set_comment(&mut self, name: &str, text: &str, features: &[Feature]) -> Result<(), String> {
+        if text.is_empty() {
+            self.comments.remove(name);
+        } else {
+            if text.len() > 1024 {
+                return Err("a parameter comment holds up to 1024 bytes".into());
+            }
+            if !self.is_global(name) && self.parameter(name, features).is_none() {
+                return Err(format!("unknown value {name}"));
+            }
+            self.comments.insert(name.into(), text.into());
+        }
+        Ok(())
     }
 
     /// Every parameter of `features`, in tree order, with the name formulas use.
@@ -288,8 +364,16 @@ impl Values {
     /// Pins every parameter `text` names.
     fn pin_references(&mut self, text: &str, features: &[Feature]) {
         for name in value_expr::names(text) {
-            if !self.is_global(&name) && !self.tracked.iter().any(|r| r.name == name) {
-                self.parameter(&name, features);
+            let insensitive = text.starts_with('=');
+            if self.lookup(&name, insensitive).is_ok() {
+                continue;
+            }
+            if self.parameter(&name, features).is_none() && insensitive {
+                let mut matches =
+                    self.parameter_names(features).into_iter().filter(|p| p.name.eq_ignore_ascii_case(&name));
+                if let Some(parameter) = matches.next().filter(|_| matches.next().is_none()) {
+                    self.parameter(&parameter.name, features);
+                }
             }
         }
     }
@@ -311,6 +395,9 @@ impl Values {
             return Err(format!("the name {name} is already taken"));
         }
         if !self.is_global(name) {
+            if physical_property(name).is_some() || matches!(name.to_ascii_uppercase().as_str(), "TRUE" | "FALSE") {
+                return Err(format!("{name} is reserved for formulas"));
+            }
             if self.entries.len() + self.tracked.len() >= 256 {
                 return Err("at most 256 named values are supported".into());
             }
@@ -327,7 +414,7 @@ impl Values {
         self.pin_references(text, features);
         let expression = self.parse(text)?;
         self.entries.iter_mut().find(|v| v.name == name).expect("inserted above").expression = expression;
-        self.resolve_entries(Some(features))?;
+        Resolver::new(self, Some(features)).validate_globals()?;
         Ok(())
     }
 
@@ -368,6 +455,11 @@ impl Values {
         let lost: Vec<_> = lost.into_iter().map(|input| (self.pinned(&input).map(str::to_owned), input)).collect();
         self.bindings.retain(|b| !lost.iter().any(|(_, input)| *input == b.input));
         self.names.retain(|p| !lost.iter().any(|(_, input)| *input == p.input));
+        for (name, _) in &lost {
+            if let Some(name) = name {
+                self.comments.remove(name);
+            }
+        }
         Ok(lost.into_iter().map(|(name, input)| (input, name)).collect())
     }
 
@@ -392,6 +484,7 @@ impl Values {
             return Err(format!("{name} is used by {reader}"));
         }
         self.entries.remove(index);
+        self.comments.remove(name);
         Ok(())
     }
 
@@ -427,10 +520,8 @@ impl Values {
 
     /// Resolves every global against `features` and keeps the numbers it read.
     fn refresh(&mut self, features: &[Feature]) -> Result<(), String> {
-        let mut resolver = Resolver { values: self, features: Some(features), done: Vec::new(), visiting: Vec::new() };
-        for v in &self.entries {
-            resolver.get(&Node::Value(v.id))?;
-        }
+        let mut resolver = Resolver::new(self, Some(features));
+        resolver.validate_globals()?;
         let known = resolver.known();
         self.known = known;
         Ok(())
@@ -477,8 +568,7 @@ impl Values {
                 self.literal(&input, &expression, features)?
             }
             None => {
-                let mut resolver =
-                    Resolver { values: self, features: Some(features), done: Vec::new(), visiting: Vec::new() };
+                let mut resolver = Resolver::new(self, Some(features));
                 resolver.get(&Node::Input(input.clone()))?.0.value
             }
         };
@@ -510,6 +600,13 @@ impl Values {
         }
         if let Some(index) = self.entries.iter().position(|v| v.name == name) {
             check_name(to)?;
+            if name != to
+                && (physical_property(to).is_some()
+                    || to.eq_ignore_ascii_case("TRUE")
+                    || to.eq_ignore_ascii_case("FALSE"))
+            {
+                return Err(format!("{to} is reserved for formulas"));
+            }
             if to != name && taken(self, None) {
                 return Err(format!("the name {to} is already taken"));
             }
@@ -530,10 +627,13 @@ impl Values {
         {
             expression.text = rename_tokens(&expression.text, name, to);
         }
+        if let Some(comment) = self.comments.remove(name) {
+            self.comments.insert(to.into(), comment);
+        }
         Ok(())
     }
 
-    fn lookup(&self, token: &str) -> Result<Expr, String> {
+    fn lookup(&self, token: &str, insensitive: bool) -> Result<Expr, String> {
         if self.tracked.iter().any(|r| r.name == token) {
             return Err(format!("{token} is tracked and cannot drive an expression"));
         }
@@ -543,28 +643,111 @@ impl Values {
         if let Some(pin) = self.names.iter().find(|p| p.name == token) {
             return Ok(Expr::Param(pin.input.clone()));
         }
+        if insensitive {
+            let mut matches =
+                self.entries.iter().filter(|v| v.name.eq_ignore_ascii_case(token)).map(|v| Expr::Ref(v.id)).chain(
+                    self.names
+                        .iter()
+                        .filter(|p| p.name.eq_ignore_ascii_case(token))
+                        .map(|p| Expr::Param(p.input.clone())),
+                );
+            if let Some(reference) = matches.next().filter(|_| matches.next().is_none()) {
+                return Ok(reference);
+            }
+            if let Some(property) = physical_property(token) {
+                return Ok(Expr::Physical(property));
+            }
+        }
         Err(format!("unknown value {token}"))
     }
 
     fn parse(&self, text: &str) -> Result<Expression, String> {
-        value_expr::parse(text, &|token| self.lookup(token)).map(Expression::with_converted_literal)
+        value_expr::parse(text, &|token| self.lookup(token, text.starts_with('=')))
+            .map(Expression::with_converted_literal)
     }
 
-    /// Every global's quantity, reading stored numbers from `features` or, without
-    /// them, from the last check.
-    fn resolve_entries(&self, features: Option<&[Feature]>) -> Result<Vec<Quantity>, String> {
-        let mut resolver = Resolver { values: self, features, done: Vec::new(), visiting: Vec::new() };
-        self.entries.iter().map(|v| resolver.get(&Node::Value(v.id)).map(|(q, _)| q)).collect()
+    pub(crate) fn uses_formula_settings(&self) -> bool {
+        self.degrees
+            || !self.comments.is_empty()
+            || self.entries.iter().any(|v| v.expression.is_formula())
+            || self.bindings.iter().any(|b| b.expression.is_formula())
+    }
+
+    pub(crate) fn reads_physical_properties(&self) -> bool {
+        self.entries.iter().any(|v| v.expression.reads_physical_properties())
+    }
+
+    fn check_dependencies(&self) -> Result<(), String> {
+        fn visit(
+            values: &Values,
+            node: Node,
+            visiting: &mut Vec<Node>,
+            done: &mut Vec<(Node, bool, usize)>,
+        ) -> Result<(bool, usize), String> {
+            if let Some((_, physical, depth)) = done.iter().find(|(n, ..)| *n == node) {
+                return Ok((*physical, *depth));
+            }
+            if visiting.contains(&node) {
+                return Err("value cycle".into());
+            }
+            if visiting.len() >= MAX_DEPENDENCY_DEPTH {
+                return Err("value graph is too deep".into());
+            }
+            let expression = match &node {
+                Node::Value(id) => {
+                    Some(&values.entries.iter().find(|v| v.id == *id).ok_or("missing value reference")?.expression)
+                }
+                Node::Input(input) => {
+                    values.bindings.iter().find(|binding| binding.input == *input).map(|b| &b.expression)
+                }
+            };
+            visiting.push(node.clone());
+            let mut physical = false;
+            let mut depth = 1;
+            for dependency in expression.into_iter().flat_map(Expression::dependencies) {
+                let next = match dependency {
+                    Expr::Ref(id) => Node::Value(*id),
+                    Expr::Param(input) => Node::Input(input.clone()),
+                    Expr::Physical(_) => {
+                        physical = true;
+                        continue;
+                    }
+                    _ => unreachable!(),
+                };
+                let (reads_physical, nested_depth) = visit(values, next, visiting, done)?;
+                physical |= reads_physical;
+                depth = depth.max(nested_depth + 1);
+            }
+            visiting.pop();
+            if physical && matches!(node, Node::Input(_)) {
+                return Err("value cycle: a feature cannot depend on the mass or volume of its own part".into());
+            }
+            if depth > MAX_DEPENDENCY_DEPTH {
+                return Err("value graph is too deep".into());
+            }
+            done.push((node, physical, depth));
+            Ok((physical, depth))
+        }
+
+        let mut done = Vec::new();
+        let roots = self
+            .entries
+            .iter()
+            .map(|v| Node::Value(v.id))
+            .chain(self.bindings.iter().map(|b| Node::Input(b.input.clone())));
+        for root in roots {
+            visit(self, root, &mut Vec::new(), &mut done)?;
+        }
+        Ok(())
     }
 
     /// Globals in creation order, with resolved document units.
     pub fn summary(&self) -> serde_json::Value {
-        let resolved = self.resolve_entries(None).ok();
+        let mut resolver = Resolver::new(self, None);
         self.entries
             .iter()
-            .enumerate()
-            .map(|(i, v)| {
-                let q = resolved.as_ref().map(|r| r[i]);
+            .map(|v| {
+                let q = resolver.get(&Node::Value(v.id)).ok().map(|(quantity, _)| quantity);
                 serde_json::json!({"name":v.name,"expression":v.expression.text,"value":q.map(|q| q.value),
                 "unit": q.map_or("", value_expr::unit_name)})
             })
@@ -572,18 +755,24 @@ impl Values {
     }
 
     /// Each global's and each parameter's value and unit symbol, in `features`, by name.
-    pub(crate) fn column(&self, features: &[Feature]) -> Result<Vec<(String, f64, String)>, String> {
-        let mut resolver = Resolver { values: self, features: Some(features), done: Vec::new(), visiting: Vec::new() };
+    pub(crate) fn column(
+        &self,
+        features: &[Feature],
+        physical: Option<&PhysicalValues>,
+    ) -> Vec<(String, Result<Quantity, String>, String)> {
+        let mut resolver = Resolver::new(self, Some(features));
+        resolver.physical = physical;
         let mut out = Vec::new();
         for v in &self.entries {
-            let (q, _) = resolver.get(&Node::Value(v.id))?;
-            out.push((v.name.clone(), q.value, value_expr::unit_name(q).to_owned()));
+            let q = resolver.get(&Node::Value(v.id)).map(|(quantity, _)| quantity);
+            let unit = q.as_ref().map_or("", |q| value_expr::unit_name(*q));
+            out.push((v.name.clone(), q, unit.to_owned()));
         }
         for p in self.parameter_names(features) {
-            let (q, _) = resolver.get(&Node::Input(p.input.clone()))?;
-            out.push((p.name, q.value, p.unit.symbol().to_owned()));
+            let q = resolver.get(&Node::Input(p.input.clone())).map(|(quantity, _)| quantity);
+            out.push((p.name, q, p.unit.symbol().to_owned()));
         }
-        Ok(out)
+        out
     }
 
     /// The driver's text for `input`, if a formula drives it.
@@ -657,6 +846,13 @@ impl Values {
             names.push(&pin.name);
             pinned.push(&pin.input);
         }
+        if self
+            .comments
+            .iter()
+            .any(|(name, text)| !names.contains(&name.as_str()) || text.is_empty() || text.len() > 1024)
+        {
+            return Err("invalid parameter comment".into());
+        }
         let mut inputs = Vec::new();
         for b in &self.bindings {
             if inputs.contains(&b.input) {
@@ -669,10 +865,11 @@ impl Values {
                 return Err("expression text and references disagree".into());
             }
         }
-        let mut resolver = Resolver { values: self, features: Some(features), done: Vec::new(), visiting: Vec::new() };
-        for v in &self.entries {
-            resolver.get(&Node::Value(v.id))?;
+        if self.uses_formula_settings() {
+            self.check_dependencies()?;
         }
+        let mut resolver = Resolver::new(self, Some(features));
+        resolver.validate_globals()?;
         let mut next = features.to_vec();
         for b in &self.bindings {
             let (q, _) = resolver.get(&Node::Input(b.input.clone()))?;
@@ -690,7 +887,54 @@ impl Values {
     }
 }
 
+fn physical_property(token: &str) -> Option<PhysicalProperty> {
+    if token.eq_ignore_ascii_case("Mass") {
+        Some(PhysicalProperty::Mass)
+    } else if token.eq_ignore_ascii_case("Volume") {
+        Some(PhysicalProperty::Volume)
+    } else {
+        None
+    }
+}
+
 impl Document {
+    pub(crate) fn parameter_physical_values(&self) -> PhysicalValues {
+        let built = (|| {
+            let bodies = self.live_bodies();
+            let complete = self.built.iter().all(|b| {
+                matches!(
+                    b.status,
+                    crate::FeatureStatus::Ok | crate::FeatureStatus::Suppressed | crate::FeatureStatus::RolledBack
+                )
+            });
+            if self.built.len() != self.features.len() || !complete || bodies.is_empty() {
+                return Err("no built solid to measure".to_owned());
+            }
+            bodies
+                .into_iter()
+                .map(|(key, body)| {
+                    self.kernel
+                        .mass_properties(body)
+                        .map(|properties| (key, properties))
+                        .map_err(|error| error.to_string())
+                })
+                .collect::<Result<Vec<_>, _>>()
+        })();
+        match built {
+            Ok(properties) => {
+                let configuration = self.active_configuration();
+                let mass = properties.iter().try_fold(0.0, |mass, (body, props)| {
+                    soliddraft_materials::mass::of_body(props, self.body_material(*body, configuration))
+                        .map(|m| mass + m.mass_kg)
+                        .map_err(|error| error.to_string())
+                });
+                let volume = Ok(properties.iter().map(|(_, props)| props.volume).sum());
+                PhysicalValues { mass, volume }
+            }
+            Err(error) => PhysicalValues { mass: Err(error.clone()), volume: Err(error) },
+        }
+    }
+
     /// The document's named values and bindings.
     pub fn values(&self) -> &Values {
         self.configurations.lookup(&self.values)

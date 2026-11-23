@@ -211,7 +211,7 @@ fn prism(r: f64, h: f64, n: usize) -> DisplayMesh {
         }
         m.indices.extend([base, base + 1, base + 2, base, base + 2, base + 3]);
     }
-    m.faces.push(MeshFace { first: 0, count: 2 * n as u32, name: "side".into() });
+    m.faces.push(MeshFace { first: 0, count: 2 * n as u32, name: "side".into(), style: None });
     for (z, normal, name) in [(0.0f32, -1.0f32, "bottom"), (h as f32, 1.0, "top")] {
         let base = m.positions.len() as u32;
         let first = m.indices.len() as u32 / 3;
@@ -227,7 +227,7 @@ fn prism(r: f64, h: f64, n: usize) -> DisplayMesh {
                 m.indices.extend([base, base + i + 1, base + i]);
             }
         }
-        m.faces.push(MeshFace { first, count: n as u32 - 2, name: name.into() });
+        m.faces.push(MeshFace { first, count: n as u32 - 2, name: name.into(), style: None });
     }
     m
 }

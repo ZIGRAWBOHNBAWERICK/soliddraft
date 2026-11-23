@@ -217,16 +217,26 @@ impl Document {
                 // Nothing is left to measure: the item says what the hole states. A Hole
                 // Wizard hole states its depth through its end condition, and its points
                 // through its position sketch.
-                let effective_depth = hole.wizard.as_ref().map_or(hole.depth, |w| w.legacy_depth());
-                let through =
-                    matches!(effective_depth, soliddraft_kernel_api::HoleDepth::Through) && thread.length.is_none();
-                let depth = match (thread.length, effective_depth) {
-                    (Some(length), _) => Some(length),
-                    (None, soliddraft_kernel_api::HoleDepth::Blind { depth }) => Some(depth),
-                    (None, soliddraft_kernel_api::HoleDepth::Through) => None,
-                };
+                let original = self.original_hole_extents(feature.id);
                 let count = self.hole_points(hole).map(|pts| pts.len()).unwrap_or(hole.points.len());
-                groups.push(ThreadGroup { through, depth, body: None, placements: (0..count).collect() });
+                for placement in 0..count {
+                    let effective_depth = original
+                        .get(placement)
+                        .copied()
+                        .flatten()
+                        .map(|extent| extent.depth)
+                        .or_else(|| hole.specified_depth());
+                    let through = matches!(effective_depth, Some(soliddraft_kernel_api::HoleDepth::Through))
+                        && thread.length.is_none();
+                    let depth = thread.length.or(match effective_depth {
+                        Some(soliddraft_kernel_api::HoleDepth::Blind { depth }) => Some(depth),
+                        _ => None,
+                    });
+                    match groups.iter_mut().find(|group| group.through == through && group.depth == depth) {
+                        Some(group) => group.placements.push(placement),
+                        None => groups.push(ThreadGroup { through, depth, body: None, placements: vec![placement] }),
+                    }
+                }
             }
             let name = format!("{} thread", feature.name.replace('/', " "));
             for group in groups {

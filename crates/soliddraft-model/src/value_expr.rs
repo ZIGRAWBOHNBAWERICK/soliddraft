@@ -310,7 +310,7 @@ fn tokenize(text: &str) -> Result<Vec<&str>, String> {
     Ok(out)
 }
 
-pub(crate) fn rename_tokens(text: &str, from: &str, to: &str) -> String {
+pub(crate) fn rename_tokens<'a>(text: &str, replace: impl Fn(&str, bool) -> Option<&'a str>) -> String {
     let mut out = String::new();
     let mut at = 0;
     let tokens = tokenize(text).expect("accepted expression");
@@ -318,9 +318,8 @@ pub(crate) fn rename_tokens(text: &str, from: &str, to: &str) -> String {
     for (i, token) in tokens.iter().copied().enumerate() {
         let start = token.as_ptr() as usize - text.as_ptr() as usize;
         out.push_str(&text[at..start]);
-        let matches =
-            if formula { tokens.get(i + 1) != Some(&"(") && token.eq_ignore_ascii_case(from) } else { token == from };
-        out.push_str(if matches { to } else { token });
+        let name = unit(token).is_none() && (!formula || tokens.get(i + 1) != Some(&"("));
+        out.push_str(if name { replace(token, formula).unwrap_or(token) } else { token });
         at = start + token.len();
     }
     out.push_str(&text[at..]);
@@ -639,10 +638,10 @@ impl ValueTable {
             return Err(format!("the name {to} is already taken"));
         }
         for expression in self.entries.iter_mut().map(|v| &mut v.expression) {
-            expression.text = rename_tokens(&expression.text, name, to);
+            expression.text = rename_tokens(&expression.text, |token, _| (token == name).then_some(to));
         }
         for expression in others {
-            expression.text = rename_tokens(&expression.text, name, to);
+            expression.text = rename_tokens(&expression.text, |token, _| (token == name).then_some(to));
         }
         self.entries.iter_mut().find(|v| v.name == name).expect("checked above").name = to.into();
         Ok(())

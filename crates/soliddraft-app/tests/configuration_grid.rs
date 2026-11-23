@@ -99,18 +99,17 @@ fn renaming_a_global_keeps_case_distinct_configuration_bindings() {
     let field = Field::Name("Plate".into());
     values_tab::apply(&mut state, ValuesAction::Commit(field.clone(), "Other".into()));
     assert!(state.values.error(&field).is_none(), "{:?}", state.values.error(&field));
-    let grid = state.doc.model().configuration_grid();
-    let thin = grid.rows.iter().find(|row| row.name == "Thin").unwrap();
-    assert_eq!(thin.values["BossExtrude1.Depth"], "=plate");
-    assert_eq!(thin.values["Width"], "=Other");
+    let stored: Value = serde_json::from_str(&state.doc.model().part_json()).unwrap();
+    let thin = stored["configurations"]["rows"].as_array().unwrap().iter().find(|row| row["name"] == "Thin").unwrap();
+    assert_eq!(thin["overrides"]["BossExtrude1.Depth"], "=plate");
+    assert_eq!(thin["overrides"]["Width"], "=Other");
     let read = call(&mut state, "configuration_grid", json!({}));
     let values = read["resolved"].as_array().unwrap().iter().find(|r| r["name"] == "Thin").unwrap()["values"]
         .as_array()
         .unwrap();
-    for (name, expected) in [("BossExtrude1.Depth", 20.0), ("Width", 10.0)] {
-        let value = values.iter().find(|v| v["name"] == name).unwrap();
-        assert_eq!(value["value"], json!(expected));
-    }
+    assert_eq!(values.iter().find(|v| v["name"] == "Width").unwrap()["value"], json!(10.0));
+    call(&mut state, "activate_configuration", json!({ "name": "Thin" }));
+    assert_eq!(call(&mut state, "feature", json!({ "name": "Boss-Extrude1" }))["depth"], json!(20.0));
 }
 
 #[test]

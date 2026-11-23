@@ -33,7 +33,7 @@ use grid::{GridFrame, GridPlane, GridStyle, Spacing};
 use look::Preset;
 use planes::ReferenceScene;
 use render::{DisplayMode, FrameInput, PickSample, PickView, Picked, ViewportCallback};
-use soliddraft_kernel_api::Plane;
+use soliddraft_kernel_api::{BodyId, Plane};
 use std::sync::{Arc, Mutex};
 
 /// Entity kinds a free viewport click can select.
@@ -505,13 +505,12 @@ impl ViewportState {
         // A hidden body leaves the scene and the pick pass; the version changed with it.
         // A body is drawn unless its own view choice or the active display state hides it.
         let hidden = doc.hidden_display_bodies();
-        let shown = doc
+        let shown: Vec<_> = doc
             .meshes
             .iter()
             .filter(|(id, _)| !visible.hidden_bodies.contains(id) && !hidden.contains(id))
             .map(|(id, mesh)| (*id, mesh.clone()))
             .collect();
-        let meshes = (doc.mesh_version, shown);
         // The shader compares face pick ids; edges and vertices are highlighted by the painter.
         let hover_id = match self.hover {
             Some(Picked::Face(p)) if pick_filter.faces => p,
@@ -527,7 +526,8 @@ impl ViewportState {
             _ => 0,
         };
         let mut input = self.frame_input(rect, ppp, cursor_px);
-        input.meshes = meshes;
+        input.threads = self.thread_marks(doc, &shown);
+        input.meshes = (doc.mesh_version, shown);
         input.display = doc.display_state().map_or(self.display, |state| state.mode);
         input.hover_id = hover_id;
         input.selected_id = selected_id;
@@ -537,7 +537,6 @@ impl ViewportState {
             _ => None,
         };
         input.ghost = ghost;
-        input.threads = if visible.body { self.thread_marks(doc) } else { None };
         input.preview = preview;
         input.preview_pickable = preview_pickable;
         input.pick_revision = pick_revision;
@@ -740,12 +739,12 @@ impl ViewportState {
 
     /// The marks of the part's cosmetic threads, made again only when the part or its
     /// display changes.
-    fn thread_marks(&mut self, doc: &Document) -> Option<Arc<DisplayMesh>> {
+    fn thread_marks(&mut self, doc: &Document, shown: &[(BodyId, Arc<DisplayMesh>)]) -> Option<Arc<DisplayMesh>> {
         let key = (doc.model().id(), doc.mesh_version, doc.revision());
         match &self.threads {
             Some((made, marks)) if *made == key => marks.clone(),
             _ => {
-                let marks = threads::marks(doc);
+                let marks = threads::marks_on(doc, |body| shown.iter().any(|(id, _)| *id == body));
                 self.threads = Some((key, marks.clone()));
                 marks
             }

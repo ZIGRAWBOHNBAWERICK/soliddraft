@@ -63,7 +63,7 @@ pub enum PmiSource {
     Thread {
         /// The hole feature's id in the part.
         feature: u32,
-        /// The first of the feature's holes the item covers, from zero.
+        /// The hole this annotation follows, from zero.
         placement: u32,
         /// The item's name in the part when the drawing was last brought up to it.
         item: String,

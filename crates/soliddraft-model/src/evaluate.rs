@@ -1367,54 +1367,17 @@ impl Document {
                 }
                 HoleEndCondition::ThroughAll => ResolvedEnd::Through,
                 HoleEndCondition::UpToNext => {
-                    // Resolve the nearest parallel planar face hit along drill_dir when every
-                    // hole placement lands on the same parallel wall (plates, flanges, ribs).
-                    let mut common_depth: Option<f64> = None;
-                    let mut all_same_planar = true;
-                    for pt in &points {
-                        let start_3d = plane.origin + plane.x_dir * pt.u + plane.y_dir() * pt.v;
-                        let mut best: Option<f64> = None;
-                        for cand in &topology.faces {
-                            if cand.id == face_id {
-                                continue;
-                            }
-                            let Some(cn) = cand.normal else { continue };
-                            if cn.dot(plane.normal).abs() < 1.0 - 1e-6 {
-                                continue;
-                            }
-                            let d = (cand.centroid - plane.origin).dot(drill_dir);
-                            if !(d.is_finite() && d > 1e-6) {
-                                continue;
-                            }
-                            let hit = start_3d + drill_dir * d;
-                            let eps = 1e-4;
-                            if hit.x >= cand.bbox.min.x - eps
-                                && hit.x <= cand.bbox.max.x + eps
-                                && hit.y >= cand.bbox.min.y - eps
-                                && hit.y <= cand.bbox.max.y + eps
-                                && hit.z >= cand.bbox.min.z - eps
-                                && hit.z <= cand.bbox.max.z + eps
-                            {
-                                best = Some(match best {
-                                    Some(prev) => prev.min(d),
-                                    None => d,
-                                });
-                            }
+                    let profiles = points.iter().map(|pt| {
+                        if wizard.hole_type.is_slot() {
+                            let length =
+                                wizard.slot_length.unwrap_or_else(|| wizard.size_row().default_slot_length_mm());
+                            stadium_profile(plane, pt.u, pt.v, h.diameter, length, wizard.slot_angle_deg)
+                        } else {
+                            Profile::circle(plane, Point2::new(pt.u, pt.v), h.diameter / 2.0)
                         }
-                        match (best, common_depth) {
-                            (Some(d), None) => common_depth = Some(d),
-                            (Some(d), Some(prev)) if (d - prev).abs() <= 1e-5 => {}
-                            _ => {
-                                all_same_planar = false;
-                                break;
-                            }
-                        }
-                    }
-                    if all_same_planar && let Some(depth) = common_depth {
-                        ResolvedEnd::Blind(depth)
-                    } else {
-                        ResolvedEnd::UpToNext
-                    }
+                    });
+                    self.next_parallel_hole_depth(f.id, body, drill_dir, profiles)
+                        .map_or(ResolvedEnd::UpToNext, ResolvedEnd::Blind)
                 }
                 HoleEndCondition::UpToVertex { vertex } => {
                     let vid = match self.resolve_vertex(vertex, body) {
@@ -1611,6 +1574,40 @@ impl Document {
                 .collect();
             number(faces)
         })
+    }
+
+    /// Let the kernel find the first trimmed surface over each cutting profile. A shared
+    /// parallel end lets the native hole operation retain the drill and head's face names.
+    fn next_parallel_hole_depth(
+        &self,
+        id: FeatureId,
+        target: BodyId,
+        direction: Vec3,
+        profiles: impl Iterator<Item = Profile>,
+    ) -> Option<f64> {
+        let mut common: Option<f64> = None;
+        for (i, profile) in profiles.enumerate() {
+            let origin = profile.plane.origin;
+            let tag = |step: &str| OpTag::new(format!("{id}.hole_limit{i}.{step}"));
+            let sheet = self.kernel.create_body_from_profile(&tag("profile"), &profile).ok()?;
+            let swept =
+                self.kernel.extrude_to(&tag("sweep"), sheet.body, target, Some(direction), &ExtrudeLimit::UpToNext);
+            let _ = self.kernel.release(sheet.body);
+            let tool = swept.ok()?.body;
+            let topology = self.view_of(tool);
+            let _ = self.kernel.release(tool);
+            let topology = topology.ok()?;
+            let mut ends = topology.faces.iter().filter_map(|face| {
+                let outward = face.normal?;
+                (outward.dot(direction) >= 1.0 - 1e-6).then(|| (face.centroid - origin).dot(direction))
+            });
+            let depth = ends.next().filter(|depth| depth.is_finite() && *depth > 1e-6)?;
+            if ends.next().is_some() || common.is_some_and(|prior| (depth - prior).abs() > 1e-5) {
+                return None;
+            }
+            common = Some(depth);
+        }
+        common
     }
 
     #[allow(clippy::too_many_arguments)]

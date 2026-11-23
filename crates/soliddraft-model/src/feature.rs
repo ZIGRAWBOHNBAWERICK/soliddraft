@@ -674,6 +674,30 @@ pub struct HoleFeature {
 }
 
 impl HoleFeature {
+    /// The fixed depth or through condition in the definition. Geometry resolves the
+    /// conditions that depend on another surface or vertex.
+    pub fn specified_depth(&self) -> Option<HoleDepth> {
+        use crate::hole_wizard::HoleEndCondition;
+        match self.wizard.as_ref().map(|wizard| &wizard.end_condition) {
+            None => Some(self.depth),
+            Some(HoleEndCondition::Blind { depth }) => Some(HoleDepth::Blind { depth: *depth }),
+            Some(HoleEndCondition::ThroughAll) => Some(HoleDepth::Through),
+            Some(_) => None,
+        }
+    }
+
+    /// Sets a fixed hole depth in the definition and its legacy mirror.
+    pub fn set_depth(&mut self, depth: HoleDepth) {
+        use crate::hole_wizard::HoleEndCondition;
+        self.depth = depth;
+        if let Some(wizard) = &mut self.wizard {
+            wizard.end_condition = match depth {
+                HoleDepth::Blind { depth } => HoleEndCondition::Blind { depth },
+                HoleDepth::Through => HoleEndCondition::ThroughAll,
+            };
+        }
+    }
+
     /// True when this hole uses Hole Wizard fields that require `soliddraft-part/7`.
     pub fn uses_wizard_format(&self) -> bool {
         self.sketch.is_some() || self.wizard.is_some()
@@ -700,7 +724,7 @@ impl HoleFeature {
 
     /// Why the hole's thread cannot be cut in it, for people, or `None`.
     pub fn thread_problem(&self) -> Option<String> {
-        let depth = self.wizard.as_ref().map_or(self.depth, |w| w.legacy_depth());
+        let depth = self.specified_depth().unwrap_or(HoleDepth::Through);
         let head = self.effective_head();
         self.thread.as_ref()?.problem(self.diameter, &depth, head.as_ref())
     }

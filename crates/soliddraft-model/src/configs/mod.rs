@@ -544,13 +544,15 @@ impl Document {
                     "drive input".into()
                 }
                 Command::RenameValue { name, to } => {
-                    defaults.rename(name, to, &base)?;
+                    defaults.rename(
+                        name,
+                        to,
+                        &base,
+                        state.rows.iter_mut().flat_map(|row| row.overrides.values_mut()),
+                    )?;
                     for row in &mut state.rows {
                         if let Some(text) = row.overrides.remove(name) {
                             row.overrides.insert(to.clone(), text);
-                        }
-                        for text in row.overrides.values_mut() {
-                            *text = crate::value_expr::rename_tokens(text, name, to);
                         }
                     }
                     format!("rename value {name}")

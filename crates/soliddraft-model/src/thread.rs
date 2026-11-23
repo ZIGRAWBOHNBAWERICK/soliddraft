@@ -302,6 +302,15 @@ impl ThreadedWall {
     }
 }
 
+/// The surviving drilled wall measured from its original entry.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct HoleExtent {
+    /// Distance to the current opening, including a surviving head.
+    pub top: f64,
+    /// Whether the bore exits the body, or ends at a floor or drill point.
+    pub depth: HoleDepth,
+}
+
 /// The stretch of the hole's axis a face covers, from its edges' ends and middles, in
 /// millimetres along `direction` from `entry`.
 fn reach(topology: &Topology, face: FaceId, entry: Vec3, direction: Vec3) -> Option<(f64, f64)> {
@@ -407,18 +416,47 @@ impl Document {
             .fold(f64::INFINITY, f64::min)
             .max(0.0);
         let spans = merged(reach_of_wall);
-        (!spans.is_empty()).then_some(Drilled { body, faces, top, spans })
+        let bottom = spans.last()?.1;
+        let has_cap = [(HolePart::Floor, SurfaceKind::Plane), (HolePart::Tip, SurfaceKind::Cone)].into_iter().any(
+            |(part, surface)| {
+                reference::resolve_faces(&self.hole_face(feature, placement, part, surface), &view, names).is_ok()
+            },
+        );
+        let depth = if has_cap { HoleDepth::Blind { depth: bottom } } else { HoleDepth::Through };
+        Some(Drilled { body, faces, extent: HoleExtent { top, depth }, spans })
     }
 
     /// Where hole `placement` of hole feature `id` starts now, in millimetres along its
     /// drilling direction from the face it was drilled from: zero, or deeper where a later
     /// cut took material off that face. `None` when the hole's wall is gone.
     pub fn hole_top(&self, id: FeatureId, placement: usize) -> Option<f64> {
-        let feature = self.feature(id)?;
-        let FeatureKind::Hole(hole) = &feature.kind else { return None };
-        let (entries, direction) = self.hole_axes(feature, hole)?;
-        let entry = *entries.get(placement)?;
-        self.drilled(feature, placement, entry, direction, &self.body_views(), &self.name_map()).map(|d| d.top)
+        self.hole_extents(id).get(placement).copied().flatten().map(|extent| extent.top)
+    }
+
+    /// The bore depth and opening of each placement on the current bodies.
+    pub fn hole_extents(&self, id: FeatureId) -> Vec<Option<HoleExtent>> {
+        self.hole_extents_on(id, &self.body_views())
+    }
+
+    /// What the hole made before a later edit removed its walls.
+    pub(crate) fn original_hole_extents(&self, id: FeatureId) -> Vec<Option<HoleExtent>> {
+        self.body_after(id)
+            .and_then(|body| self.view_of(body).ok().map(|topology| (body, topology)))
+            .map_or_else(Vec::new, |body| self.hole_extents_on(id, &[body]))
+    }
+
+    fn hole_extents_on(&self, id: FeatureId, bodies: &[(BodyId, Topology)]) -> Vec<Option<HoleExtent>> {
+        let Some(feature) = self.feature(id) else { return Vec::new() };
+        let FeatureKind::Hole(hole) = &feature.kind else { return Vec::new() };
+        let Some((entries, direction)) = self.hole_axes(feature, hole) else { return Vec::new() };
+        let names = self.name_map();
+        entries
+            .into_iter()
+            .enumerate()
+            .map(|(placement, entry)| {
+                self.drilled(feature, placement, entry, direction, bodies, &names).map(|d| d.extent)
+            })
+            .collect()
     }
 
     /// Every wall of the part's threaded holes that the body still has, with the stretches
@@ -445,7 +483,7 @@ impl Document {
         for (feature, hole, thread) in threaded_holes {
             let Some((entries, direction)) = self.hole_axes(feature, hole) else { continue };
             for (placement, entry) in entries.into_iter().enumerate() {
-                let Some(Drilled { body, faces, top, spans: wall }) =
+                let Some(Drilled { body, faces, extent, spans: wall }) =
                     self.drilled(feature, placement, entry, direction, &bodies, &names)
                 else {
                     continue;
@@ -460,9 +498,7 @@ impl Document {
                 if spans.is_empty() {
                     continue;
                 }
-                // A Hole Wizard hole states its depth through its end condition.
-                let depth = hole.wizard.as_ref().map_or(hole.depth, |w| w.legacy_depth());
-                let through = matches!(depth, HoleDepth::Through) && length >= bottom - 1e-6;
+                let through = matches!(extent.depth, HoleDepth::Through) && length >= bottom - 1e-6;
                 let radius = radii.entry(body).or_insert_with(|| {
                     self.kernel
                         .face_carriers(body)
@@ -479,7 +515,7 @@ impl Document {
                     radius: radius.unwrap_or(hole.diameter / 2.0),
                     body,
                     faces,
-                    top,
+                    top: extent.top,
                     spans,
                     through,
                 });
@@ -493,8 +529,7 @@ impl Document {
 struct Drilled {
     body: BodyId,
     faces: Vec<FaceId>,
-    /// Where the hole starts now.
-    top: f64,
+    extent: HoleExtent,
     /// The stretches the wall covers, in order.
     spans: Vec<(f64, f64)>,
 }

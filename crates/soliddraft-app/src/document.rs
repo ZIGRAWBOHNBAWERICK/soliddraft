@@ -661,7 +661,7 @@ impl HoleParams {
             face: Some(h.face.clone()),
             points: h.points.clone(),
             diameter: h.diameter,
-            depth: h.depth,
+            depth: h.specified_depth().unwrap_or(h.depth),
             tip: h.tip,
             head: h.head,
             thread: h.thread.clone(),
@@ -1845,7 +1845,7 @@ pub enum Command {
     /// undoable step.
     EditHoleWithSketch {
         id: FeatureId,
-        sketch_id: FeatureId,
+        sketch_id: Option<FeatureId>,
         sketch: Sketch,
         hole: model::HoleFeature,
     },
@@ -3416,7 +3416,8 @@ impl Document {
             | Command::EditRevolve { id, .. }
             | Command::EditCut { id, .. }
             | Command::EditFillet { id, .. }
-            | Command::EditChamfer { id, .. } => Some(*id),
+            | Command::EditChamfer { id, .. }
+            | Command::EditHoleWithSketch { id, .. } => Some(*id),
             _ => None,
         };
         self.execute_command(command, false, Some(edited))
@@ -3658,15 +3659,26 @@ impl Document {
             }
             Command::EditHoleWithSketch { id, sketch_id, mut sketch, mut hole } => {
                 sketch::solve::solve(&mut sketch, None, true);
-                hole.sketch = Some(model_id(sketch_id));
                 let sk_kind = model::FeatureKind::Sketch(model::SketchFeature {
                     plane: model::SketchPlane::Face { face: hole.face.clone() },
                     sketch,
                 });
-                vec![
-                    model::Command::EditFeature { id: model_id(sketch_id), kind: sk_kind },
-                    model::Command::EditFeature { id: model_id(id), kind: model::FeatureKind::Hole(hole) },
-                ]
+                let id = model_id(id);
+                let position = self.model.index_of(id).ok_or("The hole no longer exists")?;
+                let sketch_command = if let Some(sketch_id) = sketch_id {
+                    let sketch_id = model_id(sketch_id);
+                    hole.sketch = Some(sketch_id);
+                    model::Command::EditFeature { id: sketch_id, kind: sk_kind }
+                } else {
+                    hole.sketch = Some(self.model.next_feature_id());
+                    model::Command::AddFeatureInBody {
+                        body: self.model.features()[position].body,
+                        via_assistant: false,
+                        kind: sk_kind,
+                        position: Some(position),
+                    }
+                };
+                vec![sketch_command, model::Command::EditFeature { id, kind: model::FeatureKind::Hole(hole) }]
             }
             Command::ImportBodies(imports) => {
                 if imports.is_empty() {
@@ -5733,7 +5745,11 @@ impl Document {
                         details.push(("Face".to_owned(), h.face.label.clone()));
                         details.push(("Holes".to_owned(), h.points.len().to_string()));
                         details.push(("Diameter".to_owned(), format!("{} mm", fmt_mm(h.diameter))));
-                        details.push(("Depth".to_owned(), hole_depth_text(&h.depth, &h.tip)));
+                        let depth = h.specified_depth().map_or_else(
+                            || h.wizard.as_ref().map_or_else(String::new, |w| w.end_condition.label().to_owned()),
+                            |depth| hole_depth_text(&depth, &h.tip),
+                        );
+                        details.push(("Depth".to_owned(), depth));
                         if let Some(head) = &h.head {
                             details.push(("Head".to_owned(), hole_head_text(head)));
                         }

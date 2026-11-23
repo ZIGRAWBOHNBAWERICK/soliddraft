@@ -203,6 +203,9 @@ pub struct ViewportState {
     pick: Arc<Mutex<PickSample>>,
     cube_hover: Option<StandardView>,
     navigation_bar: navigation_bar::NavigationBar,
+    /// The height the options bar covers at the viewport's top while it floats there.
+    /// The view cube sits below it.
+    pub top_inset: f32,
     /// Shows feature dimensions without selecting the body.
     pub all_dimensions: bool,
     /// The feature a double-click chose: while it stays selected, the viewport shows its
@@ -242,6 +245,7 @@ impl Default for ViewportState {
             pick: Arc::new(Mutex::new(PickSample::default())),
             cube_hover: None,
             navigation_bar: navigation_bar::NavigationBar::default(),
+            top_inset: 0.0,
             all_dimensions: false,
             dimensions_of: None,
             threads: None,
@@ -1218,7 +1222,7 @@ impl ViewportState {
 
     fn paint_view_cube(&mut self, ui: &mut egui::Ui, rect: Rect, events: &mut ViewportEvents) {
         let size = 84.0;
-        let center = pos2(rect.right() - 18.0 - size / 2.0, rect.top() + 20.0 + size / 2.0);
+        let center = pos2(rect.right() - 18.0 - size / 2.0, rect.top() + self.top_inset + 20.0 + size / 2.0);
         let area = Rect::from_center_size(center, Vec2::splat(size + 16.0));
         let resp = ui.interact(area, ui.id().with("view_cube"), Sense::click());
         let view = self.camera.view();

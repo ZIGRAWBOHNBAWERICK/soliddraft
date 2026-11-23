@@ -60,8 +60,8 @@ const SIZE = { width: 1400, height: 813 };
 const NEW_ASSEMBLY = [304, 145];
 const OPEN = [663, 147];
 // The File menu, and its Open item once the menu is open.
-const FILE_MENU = [122, 15];
-const FILE_OPEN = [132, 68];
+const FILE_MENU = [158, 18];
+const FILE_OPEN = [170, 153];
 // The tray is 60 x 40 x 20 mm, open at the top, with 2 mm walls: its floor is 2 mm up.
 const FLOOR = 2;
 

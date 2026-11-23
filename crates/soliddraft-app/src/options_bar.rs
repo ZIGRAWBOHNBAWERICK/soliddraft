@@ -10,24 +10,43 @@ use egui::{Sense, vec2};
 
 pub const HEIGHT: f32 = theme::clear_bench::SPACING.options_height;
 
-/// Whether the contextual inline form / options bar needs to appear on this frame.
-/// In D1 Clear Bench idle part mode, the strip hides so the viewport gets maximum room.
+/// Whether the options bar shows this frame. An idle part hides it, so the viewport has
+/// the room. An assembly and a drawing always show it: it holds their options button.
 pub fn is_shown(state: &AppState) -> bool {
     state.editor.is_some()
         || state.in_sketch()
         || state.doc.selection.is_some()
         || state.measure.open
         || state.pmi.open
-        || (state.assembly.is_active() && state.assembly.mate.open)
+        || state.assembly.is_active()
         || state.drawing.is_active()
         || state.drawing.new.is_some()
+}
+
+/// Whether the bar floats over the viewport's top edge instead of taking a row above it.
+/// In a part outside a sketch the bar comes and goes with every selection and feature
+/// form. A row of its own would resize the viewport each time, and the model would jump
+/// under the pointer that just clicked it.
+fn floats(state: &AppState) -> bool {
+    !state.in_sketch() && !state.assembly.is_active() && !state.drawing.is_active() && state.drawing.new.is_none()
+}
+
+fn rect_id() -> egui::Id {
+    egui::Id::new("options_bar_rect")
+}
+
+/// Where the bar was drawn in the last frame, or `None` when that frame hid it.
+pub fn shown_rect(ctx: &egui::Context) -> Option<egui::Rect> {
+    ctx.data(|data| data.get_temp::<Option<egui::Rect>>(rect_id())).flatten()
 }
 
 pub fn panel(root: &mut egui::Ui, state: &mut AppState) {
     // A face picked while the details sheet is closed is still a pick.
     crate::pmi::panel::follow_selection(state);
+    state.viewport.top_inset = 0.0;
     if !is_shown(state) {
         state.form_bar.reset();
+        root.ctx().data_mut(|data| data.insert_temp(rect_id(), None::<egui::Rect>));
         return;
     }
     let fill = if state.editor.is_some() || state.in_sketch() || state.assembly.mate.open {
@@ -35,11 +54,37 @@ pub fn panel(root: &mut egui::Ui, state: &mut AppState) {
     } else {
         theme::ribbon()
     };
-    egui::Panel::top("options_bar")
-        .exact_size(HEIGHT)
-        .resizable(false)
-        .frame(egui::Frame::new().fill(fill).inner_margin(egui::Margin::symmetric(8, 5)))
-        .show(root, |ui| show(ui, state));
+    let margin = egui::Margin::symmetric(8, 5);
+    let frame = egui::Frame::new().fill(fill).inner_margin(margin);
+    let rect = if floats(state) {
+        let room = root.available_rect_before_wrap();
+        let rect = egui::Rect::from_min_size(room.min, vec2(room.width(), HEIGHT));
+        // The view cube moves below the bar; the model stays where it is.
+        state.viewport.top_inset = HEIGHT;
+        egui::Area::new(egui::Id::new("options_bar_float"))
+            .order(egui::Order::Middle)
+            .fixed_pos(rect.min)
+            .constrain(false)
+            .show(root.ctx(), |ui| {
+                frame.show(ui, |ui| {
+                    let inner = rect.size() - margin.sum();
+                    ui.set_min_size(inner);
+                    ui.set_max_size(inner);
+                    show(ui, state);
+                });
+                ui.painter().hline(rect.x_range(), rect.bottom() - 0.5, egui::Stroke::new(1.0, theme::line()));
+            });
+        rect
+    } else {
+        egui::Panel::top("options_bar")
+            .exact_size(HEIGHT)
+            .resizable(false)
+            .frame(frame)
+            .show(root, |ui| show(ui, state))
+            .response
+            .rect
+    };
+    root.ctx().data_mut(|data| data.insert_temp(rect_id(), Some(rect)));
 }
 
 fn active_tool(state: &AppState) -> (Icon, String, String) {

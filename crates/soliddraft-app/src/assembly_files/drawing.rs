@@ -92,7 +92,16 @@ pub fn exact_parts(doc: &mut AssemblyDocument) -> Result<ExactParts, String> {
         let def_index = doc.table().definition(row);
         let def = doc.store().get(def_index).clone();
         if def.kind != DocKind::Part {
-            continue;
+            // Only a part has an exact body. A shown mesh reference refuses the drawing by
+            // name rather than leaving a hole where it stands; a hidden one is not drawn.
+            if f.has(Flags::HIDDEN) {
+                continue;
+            }
+            let what = if def.kind == DocKind::Mesh { "a mesh reference" } else { "not a part" };
+            return Err(format!(
+                "{} is {what} with no exact body to draw; hide it or take it out of the assembly to draw the rest",
+                doc.label(row)
+            ));
         }
         let document = (def.key.document, def.key.configuration.clone());
         let item = match items.iter_mut().position(|(d, _)| *d == document) {

@@ -97,3 +97,16 @@ fn opening_a_drawing_never_discards_unsaved_edits_to_another_assembly() {
     s.call("drawing_rebuild", json!({}));
     assert_eq!(s.assembly().id(), a);
 }
+
+#[test]
+fn a_drawing_of_an_assembly_that_shows_a_mesh_is_refused() {
+    let mut s = Session::new("mesh");
+    let block = s.block("block.dwprt", 40.0);
+    let stl = concat!(env!("CARGO_MANIFEST_DIR"), "/../../ci/fixtures/scene-import/sand3d-bracket/bracket.stl");
+    s.call("import_scene", json!({ "path": stl, "out": s.path("scene.dwasm") }));
+    s.call("insert_component", json!({ "paths": [block] }));
+    s.call("assembly_save", json!({ "path": s.path("scene.dwasm") }));
+    let refused = s.try_call("assembly_make_drawing", json!({})).unwrap_err();
+    assert!(refused.contains("mesh"), "{refused}");
+    assert!(s.state.drawing.session.is_none(), "no drawing leaves the mesh out");
+}

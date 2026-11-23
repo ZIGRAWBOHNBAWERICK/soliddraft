@@ -64,6 +64,7 @@ struct State {
     next: u64,
     bodies: BTreeMap<BodyId, Stored>,
     fields: BTreeMap<BodyId, Arc<lattice::Field>>,
+    field_source_support: BTreeMap<BodyId, bool>,
     capture: bool,
     questions: Vec<Value>,
     /// Imported STEP sources by SHA-256. Catallax reads them again for every build
@@ -108,6 +109,13 @@ struct Stored {
     solid: Option<Arc<Solid>>,
     /// A body Catallax built within a stated tolerance, which has no exact solid.
     approximate: Option<Arc<approximate::Approximate>>,
+}
+
+impl Stored {
+    fn legacy_recipe(&self) -> Value {
+        json!({"format":"soliddraft-recipe/1", "name":"SolidDraft",
+            "steps":self.steps.values().collect::<Vec<_>>(), "result":self.result})
+    }
 }
 
 struct Solid {
@@ -483,8 +491,7 @@ impl CatallaxKernel {
         }
         let state = self.state()?;
         let stored = state.get(body)?;
-        let recipe = json!({"format":"soliddraft-recipe/1", "name":"SolidDraft",
-            "steps":stored.steps.values().collect::<Vec<_>>(), "result":stored.result});
+        let recipe = stored.legacy_recipe();
         let swept = stored.steps.values().any(|s| s["op"] == "path_sweep");
         // Retained-prefix callers read ordinary native wrappers in the legacy envelope.
         if swept
@@ -2002,6 +2009,10 @@ impl Kernel for CatallaxKernel {
         })
     }
 
+    fn supports_field_source(&self, body: BodyId) -> bool {
+        self.check_field_source(body).unwrap_or(false)
+    }
+
     fn lattice(&self, tag: &OpTag, body: BodyId, params: &Lattice) -> KernelResult<OpResult> {
         self.observe("lattice", || self.build_lattice(tag, body, params))
     }
@@ -2410,6 +2421,7 @@ impl Kernel for CatallaxKernel {
         self.observe("release", || {
             let mut state = self.state()?;
             state.fields.remove(&body);
+            state.field_source_support.remove(&body);
             state.bodies.remove(&body).map(|_| ()).ok_or(KernelError::UnknownBody(body))
         })
     }

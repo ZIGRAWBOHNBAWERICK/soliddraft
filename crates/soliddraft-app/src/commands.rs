@@ -1432,6 +1432,10 @@ fn field_open(s: &AppState) -> bool {
     after_field(s).is_none()
 }
 
+fn field_source_supported(s: &AppState) -> bool {
+    s.doc.display_body().is_none_or(|body| s.doc.kernel().supports_field_source(body))
+}
+
 fn can_export(s: &AppState) -> bool {
     s.drag_preview.is_none()
         && !s.doc.proof_pending()
@@ -1966,7 +1970,8 @@ fn registry() -> Vec<CommandSpec> {
         cmd("lattice", "Lattice", Icon::Cad("lattice"), "Make a terminal lattice")
             .on(Solid, "Modify", Small)
             .run(|_| AppAction::StartLattice)
-            .when(|s| has_body(s) && field_open(s))
+            .shown(field_source_supported)
+            .when(|s| has_body(s) && field_open(s) && field_source_supported(s))
             .lit(|s| editing(s, |p| matches!(p, EditorParams::Lattice(_))))
             .hint(|s| after_field(s).or_else(|| (!has_body(s)).then(|| "Lattice needs a body".into())))
             .agents(Agents::Verb, "Density is the constant beam radius. The preview is unproved; export certifies the mesh.", tools::lattice_params)
@@ -1977,7 +1982,8 @@ fn registry() -> Vec<CommandSpec> {
         cmd("gyroid", "Gyroid", Icon::Cad("lattice"), "Make a terminal network gyroid")
             .on(Solid, "Modify", Small)
             .run(|_| AppAction::StartGyroid)
-            .when(|s| has_body(s) && field_open(s))
+            .shown(field_source_supported)
+            .when(|s| has_body(s) && field_open(s) && field_source_supported(s))
             .lit(|s| editing(s, |p| matches!(p, EditorParams::Gyroid(_))))
             .hint(|s| after_field(s).or_else(|| (!has_body(s)).then(|| "Gyroid needs a body".into())))
             .agents(Agents::Verb, "The level is dimensionless, not a thickness, and may be zero or negative. The preview is unproved; export certifies the mesh.", tools::gyroid_params)

@@ -300,6 +300,10 @@ impl Kernel for Counting {
         self.inner.draft(tag, body, faces, params)
     }
 
+    fn supports_field_source(&self, body: BodyId) -> bool {
+        self.inner.supports_field_source(body)
+    }
+
     fn lattice(&self, tag: &OpTag, body: BodyId, params: &crate::Lattice) -> KernelResult<OpResult> {
         self.op(tag);
         self.inner.lattice(tag, body, params)

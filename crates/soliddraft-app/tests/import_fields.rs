@@ -1,3 +1,5 @@
+//! Field command availability and the terminal field workflow on imported solids.
+
 use serde_json::{Value, json};
 use soliddraft_app::command_tools::{CommandTools, ProposalBook, Surface};
 use soliddraft_app::document::{Document, FeatureStatus};
@@ -59,14 +61,16 @@ fn imported_fields_are_offered_only_when_the_kernel_can_build_them() {
             let command = soliddraft_app::commands::get(tool).unwrap();
             let shown = (command.shown)(&state);
             let enabled = command.is_enabled(&state);
-            let original = state.doc.model().to_bytes().unwrap();
+            let palette = soliddraft_app::palette::Palette { query: tool.into(), selected: 0 };
+            let searchable = palette.results(&state).iter().any(|result| result.command.id == tool);
+            let original = state.doc.model().part_json();
             let depth = state.doc.undo_depth();
             match call(&mut state.doc, tool, arguments) {
-                Ok(()) => assert!(shown && enabled, "{format:?} supports {tool}"),
+                Ok(()) => assert!(shown && enabled && searchable, "{format:?} supports {tool}"),
                 Err(message) => {
-                    assert_eq!(message, format!("A {tool} on an imported body is coming soon."));
-                    assert!(!shown && !enabled, "{format:?} refuses {tool}");
-                    assert_eq!(state.doc.model().to_bytes().unwrap(), original);
+                    assert!(message.ends_with(&format!("A {tool} on an imported body is coming soon.")), "{message}");
+                    assert!(!shown && !enabled && !searchable, "{format:?} refuses {tool}");
+                    assert_eq!(state.doc.model().part_json(), original);
                     assert_eq!(state.doc.undo_depth(), depth);
                 }
             }
@@ -91,23 +95,33 @@ fn imported_fields_build_edit_reopen_and_rebuild_after_a_cad_feature() {
             let mut doc = source(format);
             call(&mut doc, tool, arguments).unwrap_or_else(|e| panic!("{format:?} {tool}: {e}"));
             displayed_field(&doc, name);
-            let initial = doc.model().to_bytes().unwrap();
+            let initial = doc.model().part_json();
             call(&mut doc, edit, changes).unwrap();
             displayed_field(&doc, name);
-            let edited = doc.model().to_bytes().unwrap();
+            let edited = doc.model().part_json();
             assert_ne!(edited, initial);
 
             let path = std::env::temp_dir()
                 .join(format!("soliddraft-imported-{format:?}-{tool}-{}.dwprt", std::process::id()));
-            soliddraft_app::file::save(&mut doc, &path).unwrap();
-            let mut doc = soliddraft_app::file::open(&path, soliddraft_app::kernel(), None).unwrap();
+            call(&mut doc, "save", json!({"path":path})).unwrap();
+            let mut doc = soliddraft_app::file::open_bytes(
+                "field.dwprt",
+                &std::fs::read(&path).unwrap(),
+                soliddraft_app::kernel(),
+                None,
+            )
+            .unwrap();
             std::fs::remove_file(path).unwrap();
             let field = displayed_field(&doc, name);
-            assert_eq!(doc.model().to_bytes().unwrap(), edited);
+            assert_eq!(doc.model().part_json(), edited);
 
-            let (x, y) = if format == ImportFormat::Mesh { (0, 0) } else { (2, 2) };
-            let sketch = json!({"plane":"top","shapes":[
-                {"shape":"rectangle","center":[x,y,0],"width":2,"height":2}
+            let (plane, center, expected_volume) = if format == ImportFormat::Mesh {
+                ("top", [0.0, 0.0, 0.0], 518.0 / 3.0)
+            } else {
+                ("Import1 · Face 6", [2.0, 2.0, 10.004], 10012.0)
+            };
+            let sketch = json!({"plane":plane,"shapes":[
+                {"shape":"rectangle","center":center,"width":2,"height":2}
             ]});
             assert!(call(&mut doc, "sketch", sketch.clone()).is_err());
             assert_eq!(doc.display_body(), Some(field));
@@ -115,6 +129,8 @@ fn imported_fields_build_edit_reopen_and_rebuild_after_a_cad_feature() {
             call(&mut doc, "rollback", json!({"before":name})).unwrap();
             call(&mut doc, "sketch", sketch).unwrap();
             call(&mut doc, "extrude", json!({"sketch":"Sketch1","depth":2,"flip":false})).unwrap();
+            let boss = doc.kernel().mass_properties(doc.display_body().unwrap()).unwrap();
+            assert!((boss.volume - expected_volume).abs() < 1e-6, "{format:?}: {}", boss.volume);
             call(&mut doc, "rollback", json!({})).unwrap();
 
             assert_ne!(displayed_field(&doc, name), field);

@@ -113,6 +113,13 @@ paths = ["crates/soliddraft-app/src/geometry_message.rs"]
 module = ["geometry_message"]
 
 [[areas]]
+name = "app.hole_wizard_panel"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/hole_wizard_panel.rs"]
+module = ["hole_wizard_panel"]
+
+[[areas]]
 name = "app.icons"
 owner = "core"
 crate = "soliddraft-app"
@@ -566,6 +573,13 @@ owner = "core"
 crate = "soliddraft-model"
 paths = ["crates/soliddraft-model/src/thread.rs"]
 module = ["thread"]
+
+[[areas]]
+name = "model.hole_wizard"
+owner = "core"
+crate = "soliddraft-model"
+paths = ["crates/soliddraft-model/src/hole_wizard.rs"]
+module = ["hole_wizard"]
 
 [[areas]]
 name = "model.value_expr"

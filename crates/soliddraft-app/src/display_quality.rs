@@ -29,6 +29,7 @@ pub struct DisplayQuality {
     choice: Choice,
     levels: Levels,
     curved_surfaces: Option<CurvedSurfaces>,
+    certified_spline: bool,
     cache: DisplayCache<BodyId, Mesh>,
     worker: Tessellator<BodyId>,
     /// The displayed body, its bounding sphere and the level its mesh was made at.
@@ -53,6 +54,7 @@ impl DisplayQuality {
             choice: Choice::default(),
             levels: Levels::new(&Quality::Auto, 0.0),
             curved_surfaces: None,
+            certified_spline: false,
             cache: DisplayCache::new(DeviceBudget::default()),
             worker: Tessellator::new(kernel),
             body: None,
@@ -71,6 +73,7 @@ impl DisplayQuality {
             choice: self.choice,
             levels: self.levels,
             curved_surfaces: self.curved_surfaces,
+            certified_spline: self.certified_spline,
             cache: self.cache.clone(),
             worker: Tessellator::new(kernel),
             body: self.body,
@@ -116,7 +119,8 @@ impl DisplayQuality {
         self.recent.retain(|b| *b != body);
         self.center = topology.bbox.center();
         self.radius = topology.bbox.diagonal() / 2.0;
-        self.levels = mesh_levels(self.curved_surfaces, quality, topology.bbox.diagonal());
+        self.certified_spline = !crate::graphics::topology_supports_curved_surfaces(topology);
+        self.levels = mesh_levels(self.app_choice(), quality, topology.bbox.diagonal());
         self.shown = None;
         *self.levels.params(self.choice.level)
     }
@@ -125,6 +129,9 @@ impl DisplayQuality {
     /// of `body`, the body [`retarget`](Self::retarget) just set. Shows it, and asks the
     /// worker for any level the cache lacks.
     pub fn reuse(&mut self, body: BodyId) -> Option<Arc<Mesh>> {
+        if self.holds_certified_spline() {
+            return None;
+        }
         let level = self.choice.level;
         let mesh = self.cache.get(&body, self.levels.key(level))?;
         self.shown = Some((level, self.levels.key(level)));
@@ -176,6 +183,14 @@ impl DisplayQuality {
         self.curved_surfaces
     }
 
+    fn app_choice(&self) -> Option<CurvedSurfaces> {
+        self.curved_surfaces.filter(|_| !self.certified_spline)
+    }
+
+    pub(crate) fn holds_certified_spline(&self) -> bool {
+        self.certified_spline && self.curved_surfaces.is_some()
+    }
+
     pub(crate) fn set_curved_surfaces(&mut self, choice: Option<CurvedSurfaces>, quality: &Quality) {
         self.curved_surfaces = choice;
         self.error = None;
@@ -188,11 +203,16 @@ impl DisplayQuality {
 
     pub fn set_quality(&mut self, quality: &Quality) {
         let Some(body) = self.body else { return };
-        self.levels = mesh_levels(self.curved_surfaces, quality, self.radius * 2.0);
+        self.levels = mesh_levels(self.app_choice(), quality, self.radius * 2.0);
         self.request_missing(body);
     }
 
     fn request_missing(&mut self, body: BodyId) {
+        if self.holds_certified_spline() {
+            self.worker.cancel(&body);
+            self.asked.clear();
+            return;
+        }
         let missing = self.cache.missing(&body, &self.levels);
         if missing.is_empty() {
             self.worker.cancel(&body);
@@ -210,6 +230,9 @@ impl DisplayQuality {
     /// the mesh to show and its level when the shown mesh should change.
     pub fn update(&mut self, projection: &Projection, dt_s: f32) -> Option<(Level, Arc<Mesh>)> {
         let body = self.body?;
+        if self.holds_certified_spline() {
+            return None;
+        }
         for done in self.worker.poll() {
             if done.key != body {
                 continue;

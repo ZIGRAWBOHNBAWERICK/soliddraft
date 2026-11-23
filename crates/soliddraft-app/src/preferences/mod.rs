@@ -239,6 +239,7 @@ pub struct Preferences {
     current_view: crate::graphics::CurrentView,
     view_preset: crate::viewport::look::Preset,
     camera_editable: bool,
+    spline_curves_unavailable: bool,
     /// The grid style as the window shows it.
     pub grid: GridStyle,
     /// The grid style was changed and not saved yet.
@@ -280,6 +281,7 @@ impl Preferences {
             current_view: crate::graphics::CurrentView::of(&crate::viewport::ViewportState::default()),
             view_preset: Default::default(),
             camera_editable: true,
+            spline_curves_unavailable: false,
             grid,
             grid_pending: false,
             shortcuts: crate::settings::shortcuts(),
@@ -606,6 +608,8 @@ pub fn window(ctx: &egui::Context, prefs: &mut Option<Preferences>, state: &mut 
     p.view_preset = state.active_viewport().preset;
     p.display = state.viewport.references;
     p.camera_editable = state.assembly.is_active() || state.sketch.is_none();
+    p.spline_curves_unavailable = !state.assembly.is_active()
+        && state.doc.faces.iter().any(|face| !crate::graphics::supports_curved_surfaces(face.surface));
     let mut open = true;
     egui::Window::new("Preferences")
         .open(&mut open)

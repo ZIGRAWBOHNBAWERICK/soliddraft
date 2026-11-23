@@ -3547,7 +3547,7 @@ impl Document {
             && !self.model.is_dirty()
             && !self.has_model_failure()
         {
-            self.refresh_bodies();
+            self.refresh_bodies(false);
             return;
         }
         let next = self.display_body().or_else(|| {
@@ -3654,7 +3654,7 @@ impl Document {
         self.mesh_version += 1;
     }
 
-    fn refresh_bodies(&mut self) {
+    fn refresh_bodies(&mut self, force: bool) {
         let bodies = self.model.live_bodies();
         for (_, body) in &bodies {
             if let Err(message) = self.capture_display_bound(*body) {
@@ -3663,14 +3663,15 @@ impl Document {
             }
         }
         let params = bodies.last().and_then(|(_, body)| self.kernel().topology(*body).ok()).map(|topology| {
-            *crate::graphics::mesh_levels(
+            *crate::graphics::body_mesh_levels(
                 self.quality.curved_surfaces(),
                 &self.model.settings().viewport,
-                topology.bbox.diagonal(),
+                &topology,
             )
             .params(soliddraft_tessellation::Level::Standard)
         });
-        if params == Some(self.tess_params)
+        if !force
+            && params == Some(self.tess_params)
             && bodies.len() == self.meshes.len()
             && bodies.iter().all(|(_, body)| self.meshes.contains_key(body))
         {
@@ -4077,8 +4078,12 @@ impl Document {
             return;
         }
         self.quality.set_curved_surfaces(choice, &self.model.settings().viewport);
-        if !self.headless && !self.model.is_dirty() && !self.has_model_failure() && self.model.live_bodies().len() > 1 {
-            self.refresh_bodies();
+        if !self.headless
+            && !self.model.is_dirty()
+            && !self.has_model_failure()
+            && (self.model.live_bodies().len() > 1 || self.quality.holds_certified_spline())
+        {
+            self.refresh_bodies(true);
         }
     }
 
@@ -5174,8 +5179,8 @@ pub(crate) fn ready_display(
     let Some((_, body)) = model.live_bodies().last().copied() else { return Ok(None) };
     let kernel = model.kernel();
     let topology = kernel.topology(body).map_err(|error| error.to_string())?;
-    let params = *crate::graphics::mesh_levels(curved_surfaces, &model.settings().viewport, topology.bbox.diagonal())
-        .params(level);
+    let params =
+        *crate::graphics::body_mesh_levels(curved_surfaces, &model.settings().viewport, &topology).params(level);
     let kernel_mesh = kernel.rendering(body, &params).map_err(|error| error.to_string())?;
     let edges = edge_polylines(kernel.as_ref(), body, &params);
     let (faces, named_edges) = named_entities(model, body, &topology);
@@ -5212,8 +5217,7 @@ pub(crate) fn ready_display(
     for (key, other) in model.live_bodies().into_iter().filter(|(_, other)| *other != body) {
         let topology = kernel.topology(other).map_err(|error| error.to_string())?;
         let params =
-            *crate::graphics::mesh_levels(curved_surfaces, &model.settings().viewport, topology.bbox.diagonal())
-                .params(level);
+            *crate::graphics::body_mesh_levels(curved_surfaces, &model.settings().viewport, &topology).params(level);
         let kernel_mesh = kernel.rendering(other, &params).map_err(|error| error.to_string())?;
         let edges = edge_polylines(kernel.as_ref(), other, &params);
         let (faces, named_edges) = named_entities(model, other, &topology);

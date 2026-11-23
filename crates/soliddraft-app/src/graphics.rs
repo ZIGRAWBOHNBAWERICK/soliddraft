@@ -75,6 +75,23 @@ pub(crate) fn mesh_levels(choice: Option<CurvedSurfaces>, part: &Quality, diagon
     Levels::new(&quality, diagonal)
 }
 
+/// The pinned kernel uses a separate certified display query for B-spline bodies.
+pub(crate) fn supports_curved_surfaces(surface: soliddraft_kernel_api::SurfaceKind) -> bool {
+    surface != soliddraft_kernel_api::SurfaceKind::Spline
+}
+
+pub(crate) fn topology_supports_curved_surfaces(topology: &soliddraft_kernel_api::Topology) -> bool {
+    topology.faces.iter().all(|face| supports_curved_surfaces(face.surface))
+}
+
+pub(crate) fn body_mesh_levels(
+    choice: Option<CurvedSurfaces>,
+    part: &Quality,
+    topology: &soliddraft_kernel_api::Topology,
+) -> Levels {
+    mesh_levels(choice.filter(|_| topology_supports_curved_surfaces(topology)), part, topology.bbox.diagonal())
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Graphics {

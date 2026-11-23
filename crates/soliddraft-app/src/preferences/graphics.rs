@@ -79,6 +79,10 @@ pub(super) fn show(p: &mut Preferences, ui: &mut egui::Ui) {
         ui.label(
             current.map_or_else(|| "Follow the display quality saved with each part.".into(), |c| c.description()),
         );
+        if p.spline_curves_unavailable {
+            ui.label("Spline mesh controls · Coming soon")
+                .on_hover_text("The current kernel keeps the certified spline mesh at its own tolerance.");
+        }
     });
 
     ui.separator();

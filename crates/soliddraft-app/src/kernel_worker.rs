@@ -114,11 +114,11 @@ impl Host {
                 for (_, body) in doc.live_bodies() {
                     let kernel = doc.kernel();
                     let topology = kernel.topology(body).map_err(|error| error.to_string())?;
-                    let levels = crate::graphics::mesh_levels(
-                        *curved_surfaces,
-                        &doc.settings().viewport,
-                        topology.bbox.diagonal(),
-                    );
+                    if curved_surfaces.is_some() && !crate::graphics::topology_supports_curved_surfaces(&topology) {
+                        continue;
+                    }
+                    let levels =
+                        crate::graphics::body_mesh_levels(*curved_surfaces, &doc.settings().viewport, &topology);
                     for params in levels.all() {
                         kernel.preview(body, params).map_err(|error| error.to_string())?;
                         kernel.preview_edges(body, params).map_err(|error| error.to_string())?;
@@ -150,7 +150,10 @@ fn sample_display_levels(model: &model::Document, curved_surfaces: Option<crate:
     let Some((_, body)) = model.live_bodies().last().copied() else { return };
     let kernel = model.kernel();
     let Ok(topology) = kernel.topology(body) else { return };
-    let levels = crate::graphics::mesh_levels(curved_surfaces, &model.settings().viewport, topology.bbox.diagonal());
+    if curved_surfaces.is_some() && !crate::graphics::topology_supports_curved_surfaces(&topology) {
+        return;
+    }
+    let levels = crate::graphics::body_mesh_levels(curved_surfaces, &model.settings().viewport, &topology);
     for level in [Level::Coarse, Level::Standard, Level::Fine] {
         let params = *levels.params(level);
         let _ = kernel.preview(body, &params);

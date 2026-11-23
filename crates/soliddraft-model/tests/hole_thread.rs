@@ -252,5 +252,18 @@ fn a_thread_that_does_not_fit_its_hole_is_refused_by_name() {
         d.status(deep),
         Some(&FeatureStatus::Failed("The thread is 9 mm long but the hole is 8 mm deep.".into()))
     );
+    // A class that is no tolerance class of an internal thread does not become a
+    // designation, from a script or from a saved part.
+    let class = add(&mut d, hole(5.0, HoleDepth::Through, HoleThread { class: "6NOPE".into(), ..m6(None) }));
+    assert_eq!(
+        d.status(class),
+        Some(&FeatureStatus::Failed(
+            "6NOPE is not a tolerance class of an internal thread: a grade from 4 to 8 and G or H, such as 6H, or the \
+             pitch and crest classes, such as 5H6H."
+                .into()
+        ))
+    );
+    let reopened = Document::from_bytes(&d.to_bytes().unwrap(), Arc::new(CatallaxKernel::new())).unwrap();
+    assert!(matches!(reopened.status(class), Some(FeatureStatus::Failed(why)) if why.starts_with("6NOPE is not")));
     assert!(d.threaded_walls().is_empty() && d.thread_items().is_empty());
 }

@@ -79,6 +79,19 @@ pub const METRIC: &[MetricSize] = &[
 /// Tolerance classes of an internal thread (ISO 965-1), the medium class first.
 pub const INTERNAL_CLASSES: &[&str] = &["6H", "4H", "5H", "7H", "6G"];
 
+/// True for a tolerance class of an internal thread as ISO 965-1 writes it: a grade from
+/// 4 to 8 and the position G or H (`6H`), or the pitch diameter's class and then the minor
+/// diameter's, in the same position (`5H6H`).
+pub fn is_internal_class(class: &str) -> bool {
+    let grade = |b: u8| (b'4'..=b'8').contains(&b);
+    let position = |b: u8| b == b'G' || b == b'H';
+    match *class.as_bytes() {
+        [g, p] => grade(g) && position(p),
+        [g, p, crest, q] => grade(g) && position(p) && grade(crest) && p == q,
+        _ => false,
+    }
+}
+
 fn same(a: f64, b: f64) -> bool {
     (a - b).abs() < 1e-9
 }
@@ -167,12 +180,12 @@ impl HoleThread {
                 pitches.join(", ")
             ));
         }
-        let class = self.class.trim();
-        let plain = (2..=6).contains(&class.len())
-            && class.bytes().next().is_some_and(|b| b.is_ascii_digit())
-            && class.bytes().all(|b| b.is_ascii_alphanumeric());
-        if !plain {
-            return Some("The tolerance class is a grade and a letter, such as 6H.".to_owned());
+        if !is_internal_class(self.class.trim()) {
+            return Some(format!(
+                "{} is not a tolerance class of an internal thread: a grade from 4 to 8 and G or H, such as 6H, or \
+                 the pitch and crest classes, such as 5H6H.",
+                self.class.trim()
+            ));
         }
         if diameter >= self.size - 1e-9 || diameter < self.minor() - 1e-6 {
             return Some(format!(
@@ -363,6 +376,22 @@ mod tests {
     }
 
     #[test]
+    fn only_internal_tolerance_classes_are_taken() {
+        let m6 = HoleThread::coarse(metric(6.0).unwrap());
+        for class in INTERNAL_CLASSES.iter().copied().chain(["4G", "8H", "5H6H", "4G6G", " 6H "]) {
+            let thread = HoleThread { class: class.into(), ..m6.clone() };
+            assert_eq!(thread.problem(5.0, &HoleDepth::Through, None), None, "{class}");
+        }
+        // A number, a word, an external class, a grade or position ISO 965-1 has not got
+        // for a nut, and two classes in different positions.
+        for class in ["99", "6NOPE", "6h", "6g", "3H", "9H", "6E", "6F", "H6", "5G6H", "6H6", "6H6H6H", ""] {
+            let thread = HoleThread { class: class.into(), ..m6.clone() };
+            assert!(thread.problem(5.0, &HoleDepth::Through, None).is_some(), "{class:?} is refused");
+            assert!(!is_internal_class(class), "{class:?}");
+        }
+    }
+
+    #[test]
     fn problems_are_named() {
         let m6 = HoleThread::coarse(metric(6.0).unwrap());
         let through = HoleDepth::Through;
@@ -380,6 +409,12 @@ mod tests {
         assert!(short.problem(5.0, &through, Some(&counterbore)).unwrap().contains("counterbore"));
         let class = HoleThread { class: "H".into(), ..m6 };
         assert!(class.problem(5.0, &through, None).is_some());
+        let named = HoleThread { class: "99".into(), ..class.clone() };
+        assert_eq!(
+            named.problem(5.0, &through, None).unwrap(),
+            "99 is not a tolerance class of an internal thread: a grade from 4 to 8 and G or H, such as 6H, or the \
+             pitch and crest classes, such as 5H6H."
+        );
         assert_eq!(
             HoleThread { size: 7.0, ..class }.problem(5.0, &through, None).unwrap(),
             "M7 is not an ISO metric thread size."

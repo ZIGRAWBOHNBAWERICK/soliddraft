@@ -236,8 +236,17 @@ fn scripted_lines_tap_a_hole_and_the_drawing_calls_it_out() {
     let refused = call("hole", json!({"face": face, "points": [[15, 20, 10]], "diameter": 6.6, "thread": {"size": 6}}))
         .unwrap_err();
     assert!(refused.contains("this hole is Ø6.6"), "{refused}");
+    // A tolerance class that no internal thread has is refused by name.
+    for class in ["99", "6NOPE"] {
+        let refused =
+            call("hole", json!({"face": face, "points": [[15, 20, 10]], "thread": {"size": 6, "class": class}}))
+                .unwrap_err();
+        assert!(refused.contains(&format!("{class} is not a tolerance class of an internal thread")), "{refused}");
+    }
     // Left out, the diameter is the tap drill.
     call("hole", json!({"face": face, "points": [[15, 20, 10], [45, 20, 10]], "thread": {"size": 6}})).unwrap();
+    let refused = call("edit_hole", json!({"feature": "Hole1", "thread": {"size": 6, "class": "99"}})).unwrap_err();
+    assert!(refused.contains("99 is not a tolerance class of an internal thread"), "{refused}");
     let listed = call("pmi_list", json!({})).unwrap();
     let item = &listed["items"][0];
     assert_eq!(item["callout"], "2\u{d7} M6x1-6H THRU", "{listed}");

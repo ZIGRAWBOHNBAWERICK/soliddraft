@@ -143,7 +143,9 @@ A hole can be tapped. Set Thread to Tapped in the hole's form and pick an ISO me
 size from M1.6 to M64 and its coarse or fine pitch (ISO 262). The drill becomes the
 tap drill: the ISO 2306 drill for a coarse thread, such as Ø5 for M6, and the nominal
 diameter less the pitch for a fine one, such as Ø7 for M8x1. The drill stays editable.
-The thread's tolerance class (6H unless chosen) and its depth are in the form's sheet;
+The thread's tolerance class (6H unless chosen) and its depth are in the form's sheet. A
+class is one ISO 965-1 gives an internal thread: a grade from 4 to 8 and G or H, such as
+6H, or the pitch and crest classes in the same position, such as 5H6H.
 Full depth threads the whole wall, or the thread stops at a depth measured from the face
 the hole starts on.
 
@@ -162,7 +164,8 @@ it.
 A thread that does not fit its hole stops the hole with the reason: a drill that is not
 between the thread's minor and major diameters (`A M6x1-6H thread is cut in a hole from
 Ø4.917 to under Ø6; this hole is Ø6.6.`), a thread deeper than a blind hole, a thread
-that ends inside the counterbore, or a size or pitch that is not in the table. The
+that ends inside the counterbore, a tolerance class no internal thread has, or a size or
+pitch that is not in the table. The
 scripted `hole` and `edit_hole` lines take a `thread` with `size`, and optionally
 `pitch`, `class` and `length`; `edit_hole` takes `plain: true` to take a thread out.
 

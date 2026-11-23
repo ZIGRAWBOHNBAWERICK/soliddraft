@@ -2538,13 +2538,17 @@ fn registry() -> Vec<CommandSpec> {
             .hint(|s| s.selected_sketch().is_none().then(|| "This feature has no source sketch".into()))
             .outside_sketch().app_only(EDITOR),
         cmd("hide_body", "Hide body", Icon::Eye, "Show or hide the solid body")
-            .run(|s| AppAction::SetBodyVisible(!crate::tree_visibility::visible(s).body))
+            .run(|s| AppAction::SetBodyVisible(!crate::tree_visibility::body_shown(&s.doc)))
             .when(|s| s.doc.display_body().is_some())
-            .label_now(|s| Some(if crate::tree_visibility::visible(s).body { "Hide body" } else { "Show body" }.into()))
+            .label_now(|s| Some(if crate::tree_visibility::body_shown(&s.doc) { "Hide body" } else { "Show body" }.into()))
             .outside_sketch().app_only(LOOK),
-        cmd("show_all_bodies", "Show all bodies", Icon::Eye, "Show the part's solid body")
-            .run(|_| AppAction::SetBodyVisible(true))
-            .when(|s| s.doc.display_body().is_some())
+        cmd("rename_body", "Rename body", Icon::Text, "Set the selected body's name in the tree")
+            .run(|_| AppAction::RenameBody)
+            .when(|s| s.doc.selection == Some(Selection::Body) && s.doc.display_body().is_some())
+            .outside_sketch().app_only(PANEL),
+        cmd("show_all_bodies", "Show all bodies", Icon::Eye, "Show every solid body in the part")
+            .run(|_| AppAction::ShowAllBodies)
+            .when(|s| !s.doc.display_bodies().is_empty())
             .outside_sketch().app_only(LOOK),
         cmd("show_dimensions", "Show all dimensions", Icon::SmartDim, "Select the body to show the dimensions that build it")
             .run(|_| AppAction::Select(Some(Selection::Body)))

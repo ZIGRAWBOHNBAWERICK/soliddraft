@@ -165,6 +165,9 @@ fn every_boolean_is_one_undo_step_and_its_operation_can_be_edited() {
 
 #[test]
 fn new_body_and_combine_are_available_in_the_application() {
+    use egui::{Key, Modifiers, accesskit::Role};
+    use soliddraft_app::state::AppAction;
+
     let case = ribbon::case("multibody-combine");
     let mut doc = Document::new("Several bodies", soliddraft_app::kernel());
     block(&mut doc, 10.0, 10.0);
@@ -178,6 +181,7 @@ fn new_body_and_combine_are_available_in_the_application() {
         assert_picks(&app.state().state.doc);
         app.state_mut().state.show_tree(true);
         app.run_steps(8);
+        assert!(app.query_by_label("Solid Bodies (2)").is_some());
         app.get_by_label("Body 1").click();
         app.run_steps(4);
         assert_eq!(app.state().state.doc.active_body, 0);
@@ -190,17 +194,58 @@ fn new_body_and_combine_are_available_in_the_application() {
             app.state().state.viewport.dimensions.iter().all(|dimension| dimension.target
                 == soliddraft_app::viewport::dimensions::DimensionTarget::Feature(selected))
         );
+        app.key_press(Key::F2);
+        app.run_steps(4);
+        app.key_press_modifiers(Modifiers::COMMAND, Key::A);
+        app.get_by_role_and_label(Role::TextInput, "Body name").type_text("Flange");
+        app.key_press(Key::Enter);
+        app.run_steps(6);
+        assert!(app.query_by_label("Flange").is_some());
+        app.get_by_label("Hide Body 1").click();
+        app.run_steps(4);
+        let visible = soliddraft_app::tree_visibility::visible(&app.state().state);
+        assert!(visible.body, "the selected flange stays visible");
+        assert_eq!(visible.hidden_bodies.len(), 1);
         case.frame(app, "two-bodies");
+
+        let path = case.path("several-bodies.dwprt");
+        app.state_mut().state.push(AppAction::SaveAs(Some(path.clone())));
+        app.run_steps(8);
+        assert!(path.is_file());
+        app.state_mut().state.push(AppAction::Open(Some(path.clone())));
+        app.run_steps(8);
+        assert!(app.query_by_label("Solid Bodies (2)").is_some());
+        assert!(app.query_by_label("Show Body 1").is_some(), "the first body opens hidden");
+        app.get_by_label("Flange").click();
+        app.run_steps(4);
         ribbon::run_command(app, "combine");
         app.run_steps(4);
         app.get_by_label("Combine bodies").get_by_label("Combine").click();
         app.run_steps(8);
         assert_eq!(app.state().state.doc.model().live_bodies().len(), 1);
         assert!((volume(&app.state().state.doc, 1) - 1500.0).abs() < 1e-6);
+        assert!(app.query_by_label("Solid Bodies (1)").is_some());
+        assert!(app.query_by_label("Flange").is_some());
         case.frame(app, "combined");
         ribbon::run_command(app, "undo");
         ribbon::until(app, "undo rebuild", |app| !app.state().state.doc.proof_pending());
         assert_eq!(app.state().state.doc.meshes.len(), 2);
+        assert!(app.query_by_label("Show Body 1").is_some(), "undo restores the consumed body hidden");
+        ribbon::run_command(app, "redo");
+        ribbon::until(app, "redo rebuild", |app| !app.state().state.doc.proof_pending());
+        app.state_mut().state.push(AppAction::Save);
+        app.run_steps(8);
+        app.state_mut().state.push(AppAction::Open(Some(path)));
+        app.run_steps(8);
+        assert!(app.query_by_label("Solid Bodies (1)").is_some());
+        assert!(app.query_by_label("Flange").is_some());
+        app.get_by_label("Flange").click();
+        app.run_steps(4);
+        let doc = &mut app.state_mut().state.doc;
+        let later = block(doc, 10.0, 12.0);
+        assert_eq!(doc.feature(later).unwrap().status, FeatureStatus::Ok);
+        assert_eq!(doc.feature(later).unwrap().body_key, 1);
+        assert!((volume(doc, 1) - 1700.0).abs() < 1e-6);
     });
 }
 

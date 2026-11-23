@@ -15,6 +15,7 @@ use crate::state::{AppAction, AppState, EditorParams, NoteKind, Rename};
 use crate::theme;
 use crate::tree_visibility;
 use egui::{Align2, Color32, CornerRadius, Rect, Sense, Stroke, StrokeKind, pos2, vec2};
+use std::collections::BTreeMap;
 
 /// A row the tree shows, flattened from the feature list.
 struct RowItem {
@@ -180,24 +181,19 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
         if can_assign && material_row.clicked() {
             actions.push(AppAction::ShowMaterial);
         }
-        for (key, _) in state.doc.model().live_bodies() {
-            let label = state.doc.body_name(key);
-            let r = row(
-                ui,
-                RowSpec {
-                    indent: 0,
-                    icon: Icon::Extrude,
-                    name: &label,
-                    selected: state.doc.selection == Some(Selection::Body) && state.doc.active_body == key,
-                    ..RowSpec::plain()
-                },
-            );
-            if r.clicked() || (!state.in_sketch() && r.secondary_clicked()) {
-                actions.push(AppAction::SelectBody(key));
-            }
-            if !state.in_sketch() {
-                crate::context_menu::show(state, &r, crate::context_menu::Target::Body, Some(Selection::Body));
-            }
+        let origins: BTreeMap<u32, FeatureId> = state
+            .doc
+            .features
+            .iter()
+            .filter(|f| f.body.is_some() && f.status == FeatureStatus::Ok && !f.suppressed)
+            .rev()
+            .map(|f| (f.body_key, f.id))
+            .collect();
+        let (surfaces, solids): (Vec<_>, Vec<_>) =
+            state.doc.display_bodies().into_iter().map(|(key, _)| key).partition(|key| state.doc.body_is_surface(*key));
+        body_folder(ui, state, "Solid Bodies", &solids, &origins, &mut actions);
+        if !surfaces.is_empty() {
+            body_folder(ui, state, "Surface Bodies", &surfaces, &origins, &mut actions);
         }
 
         // Flatten features: absorbed sketches sit under their consumer.
@@ -230,7 +226,24 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
                 (_, Some(status @ FeatureStatus::Error(_))) => (format!("Failed · {}", f.summary()), status),
                 _ => (f.summary(), f.status.clone()),
             };
-            let sub = if state.doc.model().next_body() > 1 { format!("Body {} · {sub}", f.body_key + 1) } else { sub };
+            let sub = if let FeatureKind::Combine { operation, tool } = &f.kind {
+                let op = crate::multibody::operation_name(*operation);
+                let target = state.doc.body_name(f.body_key);
+                let tool = state.doc.body_name(*tool);
+                let label = format!("{op}: {target} + {tool}");
+                match status {
+                    FeatureStatus::Ok => format!("{label} · consumed {tool}"),
+                    FeatureStatus::Error(_) => format!("Failed · {label}"),
+                    FeatureStatus::Pending => format!("{label} · working"),
+                    _ => label,
+                }
+            } else if origins.get(&f.body_key) == Some(&f.id) {
+                format!("Creates {} · {sub}", state.doc.body_name(f.body_key))
+            } else if !f.is_sketch() && f.body.is_some() && state.doc.model().next_body() > 1 {
+                format!("{} · {sub}", state.doc.body_name(f.body_key))
+            } else {
+                sub
+            };
             items.push(RowItem {
                 id: f.id,
                 index: i,
@@ -391,7 +404,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
                 if let Some(feature) = state.doc.feature(item.id) {
                     status_mark(ui, state, feature, resp.rect);
                 }
-                resp
+                resp.on_hover_text(&item.sub)
             };
             last_bottom = resp.rect.bottom();
             if item.indent == 0 {
@@ -515,6 +528,107 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
     });
     for a in actions {
         state.push(a);
+    }
+}
+
+pub(crate) struct BodyRename {
+    document: soliddraft_document::DocumentId,
+    key: u32,
+    label: String,
+    focus: bool,
+}
+
+pub(crate) fn rename_body(state: &mut AppState) {
+    state.show_pane(crate::panels::Pane::Tree);
+    state.body_rename = Some(BodyRename {
+        document: state.doc.model().id(),
+        key: state.doc.active_body,
+        label: state.doc.body_name(state.doc.active_body),
+        focus: true,
+    });
+}
+
+fn body_folder(
+    ui: &mut egui::Ui,
+    state: &mut AppState,
+    title: &str,
+    bodies: &[u32],
+    origins: &BTreeMap<u32, FeatureId>,
+    actions: &mut Vec<AppAction>,
+) {
+    let id = ui.make_persistent_id((state.doc.model().id(), title));
+    let open = ui.ctx().data(|data| data.get_temp::<bool>(id)).unwrap_or(true);
+    let label = format!("{title} ({})", bodies.len());
+    let header = row(ui, RowSpec { chevron: Some(open), icon: Icon::Tree, name: &label, ..RowSpec::plain() });
+    #[cfg(target_arch = "wasm32")]
+    crate::web::show_control(&label, header.rect);
+    if header.clicked() {
+        ui.ctx().data_mut(|data| data.insert_temp(id, !open));
+    }
+    // Rename reveals its body even if the folder was closed.
+    if state.body_rename.as_ref().is_some_and(|edit| edit.document != state.doc.model().id()) {
+        state.body_rename = None;
+    }
+    let renaming = state.body_rename.as_ref().is_some_and(|edit| bodies.contains(&edit.key));
+    if !open && !renaming {
+        return;
+    }
+    for &key in bodies {
+        ui.push_id(key, |ui| {
+            let label = state.doc.body_name(key);
+            if let Some(edit) = state.body_rename.as_mut().filter(|edit| edit.key == key) {
+                let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), theme::ROW_HEIGHT), Sense::hover());
+                let rect = Rect::from_min_max(rect.min + vec2(27.0, 1.0), rect.max - vec2(6.0, 1.0));
+                let field = ui.put(rect, egui::TextEdit::singleline(&mut edit.label));
+                field.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, "Body name"));
+                #[cfg(target_arch = "wasm32")]
+                crate::web::show_control("Body name", field.rect);
+                if edit.focus {
+                    field.request_focus();
+                    field.scroll_to_me(None);
+                    edit.focus = false;
+                }
+                let (cancel, enter) = ui.input(|i| (i.key_pressed(egui::Key::Escape), i.key_pressed(egui::Key::Enter)));
+                if cancel {
+                    state.body_rename = None;
+                } else if enter || field.lost_focus() {
+                    let edit = state.body_rename.take().expect("the body name is being edited");
+                    if edit.label.trim() != label {
+                        state.doc.set_body_name(key, &edit.label);
+                    }
+                }
+                return;
+            }
+            let item = ViewItem::Body(key);
+            let origin = origins
+                .get(&key)
+                .and_then(|id| state.doc.feature(*id))
+                .map(|feature| format!("Created by {}", feature.name));
+            let response = row(
+                ui,
+                RowSpec {
+                    indent: 1,
+                    icon: Icon::Extrude,
+                    name: &label,
+                    sub: origin.as_deref().unwrap_or_default(),
+                    shown: Some(tree_visibility::shown(state, item)),
+                    selected: state.doc.selection == Some(Selection::Body) && state.doc.active_body == key,
+                    ..RowSpec::plain()
+                },
+            );
+            #[cfg(target_arch = "wasm32")]
+            crate::web::show_control(&label, response.rect);
+            tree_visibility::eye(ui, state, response.rect, item, &label);
+            if response.clicked() {
+                actions.push(AppAction::SelectBody(key));
+            }
+            if !state.in_sketch() {
+                if response.secondary_clicked() {
+                    state.doc.select_body(key);
+                }
+                crate::context_menu::show(state, &response, crate::context_menu::Target::Body, Some(Selection::Body));
+            }
+        });
     }
 }
 

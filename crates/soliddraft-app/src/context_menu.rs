@@ -83,7 +83,16 @@ const FEATURE: Group = Group {
 const BODY: Group = Group {
     target: Target::Body,
     label: "Body",
-    commands: &["hide_body", "isolate", "show_dimensions", "mass_properties", "export_step", "material"],
+    commands: &[
+        "hide_body",
+        "rename_body",
+        "isolate",
+        "show_dimensions",
+        "mass_properties",
+        "export_step",
+        "material",
+        "appearance",
+    ],
 };
 const VIEW: Group = Group {
     target: Target::Empty,
@@ -354,7 +363,7 @@ fn caption(state: &AppState, target: Target, selection: Option<Selection>) -> St
     match target {
         Target::SketchSelection => selection_caption(state),
         Target::Empty => "Empty space".into(),
-        Target::Body => crate::document::BODY_NAME.into(),
+        Target::Body => state.doc.body_name(state.doc.active_body),
         Target::SketchLine => sketch_caption(state),
         Target::EmptySketch => state
             .sketch

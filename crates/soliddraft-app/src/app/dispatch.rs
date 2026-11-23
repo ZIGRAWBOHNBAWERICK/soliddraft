@@ -616,6 +616,7 @@ impl SolidDraftApp {
             }
             AppAction::NewBody => self.state.doc.new_body(),
             AppAction::SelectBody(key) => self.state.doc.select_body(key),
+            AppAction::RenameBody => crate::tree::rename_body(&mut self.state),
             AppAction::StartCombine => {
                 self.state.doc.combine_form = crate::multibody::CombineForm::new(&self.state.doc);
             }
@@ -1401,7 +1402,12 @@ impl SolidDraftApp {
                 }
             }
             AppAction::RenameSelected => {
-                if let Some(id) = self.state.selected_feature()
+                if !self.state.in_sketch()
+                    && self.state.doc.selection == Some(Selection::Body)
+                    && self.state.doc.display_body().is_some()
+                {
+                    crate::tree::rename_body(&mut self.state);
+                } else if let Some(id) = self.state.selected_feature()
                     && let Some(f) = self.state.doc.feature(id)
                 {
                     self.state.rename = Some(crate::state::Rename { feature: id, text: f.name.clone(), focus: true });
@@ -1442,16 +1448,16 @@ impl SolidDraftApp {
                 viewport.preset = p;
             }
             AppAction::SetBodyVisible(show) => {
-                if crate::tree_visibility::visible(&self.state).body != show {
-                    let feature = self
-                        .state
-                        .doc
-                        .features
-                        .iter()
-                        .find(|feature| !feature.is_sketch() && !matches!(feature.kind, FeatureKind::ReferencePlane(_)))
-                        .map(|feature| feature.id);
-                    if let Some(feature) = feature {
-                        crate::tree_visibility::toggle(&mut self.state, crate::document::ViewItem::Feature(feature));
+                let doc = &mut self.state.doc;
+                if crate::tree_visibility::body_shown(doc) != show {
+                    doc.set_view_choice(crate::document::ViewItem::Body(doc.active_body), Some(show));
+                }
+            }
+            AppAction::ShowAllBodies => {
+                let doc = &mut self.state.doc;
+                for (key, _) in doc.display_bodies() {
+                    if !crate::tree_visibility::body_shown_at(doc, key) {
+                        doc.set_view_choice(crate::document::ViewItem::Body(key), Some(true));
                     }
                 }
             }

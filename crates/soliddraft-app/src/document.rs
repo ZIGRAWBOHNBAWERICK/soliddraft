@@ -150,6 +150,7 @@ pub enum ViewItem {
     Feature(FeatureId),
     Plane(PlaneKind),
     Axis(AxisKind),
+    Body(u32),
 }
 
 impl ViewItem {
@@ -158,6 +159,7 @@ impl ViewItem {
             ViewItem::Feature(id) => model::view::ViewItem::Feature(model_id(id)),
             ViewItem::Plane(plane) => model::view::ViewItem::Plane(plane.to_model()),
             ViewItem::Axis(axis) => model::view::ViewItem::Axis(axis.to_model()),
+            ViewItem::Body(key) => model::view::ViewItem::Body(key),
         }
     }
 }
@@ -2655,6 +2657,17 @@ impl Document {
         self.model.live_bodies().into_iter().find(|(key, _)| *key == self.active_body).map(|(_, body)| body)
     }
 
+    /// Stable body keys and kernel ids of the geometry currently on screen.
+    pub(crate) fn display_bodies(&self) -> Vec<(u32, BodyId)> {
+        if (self.model.is_dirty() || self.has_model_failure() || self.proof_failure.is_some())
+            && let Some(proved) = &self.last_proved
+        {
+            proved.model.live_bodies()
+        } else {
+            self.model.live_bodies()
+        }
+    }
+
     /// The running body before feature `index`.
     pub fn body_before(&self, index: usize) -> Option<BodyId> {
         self.features.get(index).and_then(|f| self.model.body_before(model_id(f.id)))
@@ -3706,6 +3719,9 @@ impl Document {
     /// as a STEP surface model imported as it is, is named a surface body, and one built
     /// within a stated tolerance an approximate body.
     pub fn body_name(&self, key: u32) -> String {
+        if let Some(name) = self.model.visibility().body_name(key) {
+            return name.to_owned();
+        }
         if self
             .model
             .live_bodies()
@@ -3730,6 +3746,17 @@ impl Document {
             (false, true, false) => format!("Surface body {}", key + 1),
             (false, false, true) => format!("Approximate body {}", key + 1),
             (false, true, true) => format!("Approximate surface body {}", key + 1),
+        }
+    }
+
+    pub fn set_body_name(&mut self, key: u32, name: &str) {
+        if !self.model.live_bodies().iter().any(|(body, _)| *body == key) {
+            return;
+        }
+        let name = name.trim();
+        if self.model.visibility().body_name(key).unwrap_or_default() != name {
+            self.model.set_body_name(key, name);
+            self.touch();
         }
     }
 

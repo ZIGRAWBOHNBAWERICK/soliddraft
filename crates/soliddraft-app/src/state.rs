@@ -68,6 +68,7 @@ pub enum AppAction {
     StartShell,
     NewBody,
     SelectBody(u32),
+    RenameBody,
     StartCombine,
     StartOffset,
     StartThicken,
@@ -123,6 +124,7 @@ pub enum AppAction {
     SetPreset(Preset),
     SetScene(crate::viewport::scenes::Scene),
     SetBodyVisible(bool),
+    ShowAllBodies,
     SetReferenceDisplay(crate::settings::ReferenceDisplay),
     /// Switches the interface between light and dark, and saves the choice.
     SetTheme(crate::theme::Mode),
@@ -1266,6 +1268,7 @@ pub struct AppState {
     pub show_shortcuts: bool,
     /// The open command palette.
     pub palette: Option<crate::palette::Palette>,
+    pub(crate) body_rename: Option<crate::tree::BodyRename>,
     pub(crate) shortcut_menu: crate::shortcut_menu::Preferences,
     pub(crate) shortcut_menu_editor: Option<crate::shortcut_menu::Customize>,
     /// The open Provider dialog.
@@ -1474,6 +1477,7 @@ impl AppState {
             show_about: false,
             show_shortcuts: false,
             palette: None,
+            body_rename: None,
             shortcut_menu: crate::settings::shortcut_menu(),
             shortcut_menu_editor: None,
             import_dialog: None,

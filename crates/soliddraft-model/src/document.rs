@@ -245,6 +245,11 @@ impl Document {
         self.view.set(item, shown);
     }
 
+    /// Names a body in the browser tree. An empty name restores its generated label.
+    pub fn set_body_name(&mut self, key: u32, name: &str) {
+        self.view.set_body_name(key, name);
+    }
+
     /// What the part's viewport quality gives its body's certified mesh: each level's
     /// deviation bound in millimetres and triangle count. The screen shows previews at
     /// the same controls, which claim no bound. `None` without a body.

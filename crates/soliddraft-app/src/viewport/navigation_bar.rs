@@ -43,21 +43,21 @@ impl NavigationBar {
         section_active: bool,
         events: &mut ViewportEvents,
     ) {
-        let compact = viewport.width() < 350.0;
+        let compact = viewport.width() < 420.0;
         egui::Area::new(parent.id().with("viewport_navigation"))
             .order(egui::Order::Foreground)
             .pivot(Align2::CENTER_BOTTOM)
             .fixed_pos(pos2(viewport.center().x, viewport.bottom() - 12.0))
             .show(parent.ctx(), |ui| {
-                ui.set_max_width(if compact { 324.0 } else { 368.0 });
+                ui.set_max_width(if compact { 360.0 } else { 520.0 });
                 egui::Frame::new()
                     .fill(theme::hud_bg())
                     .stroke(Stroke::new(1.0, theme::line_strong()))
-                    .corner_radius(theme::edit_suite::FLOATING_RADIUS)
-                    .shadow(theme::edit_suite::NAV_SHADOW)
-                    .inner_margin(egui::Margin::symmetric(6, 4))
+                    .corner_radius(theme::radii().floating)
+                    .shadow(theme::tokens().nav_shadow)
+                    .inner_margin(egui::Margin::symmetric(8, 4))
                     .show(ui, |ui| {
-                        ui.spacing_mut().item_spacing = vec2(2.0, 0.0);
+                        ui.spacing_mut().item_spacing = vec2(3.0, 0.0);
                         ui.horizontal(|ui| {
                             for (label, icon) in [("Orbit", Icon::Orbit), ("Pan", Icon::Pan), ("Zoom", Icon::Search)] {
                                 let response = button(ui, label, icon, false, true, true);
@@ -75,21 +75,20 @@ impl NavigationBar {
                                 events.fit = true;
                             }
                             ui.separator();
-                            let display_button = button(ui, "Display style", Icon::Display, false, false, true);
+                            let display_button = if compact {
+                                button(ui, "Display style", Icon::Display, false, false, true)
+                            } else {
+                                labeled_button(ui, "Display", "Display style", Icon::Display)
+                            };
                             egui::Popup::menu(&display_button).align(RectAlign::TOP_END).show(|ui| {
-                                for style in DisplayMode::ALL {
-                                    if ui.selectable_label(display == style, style.label()).clicked() {
-                                        events.set_display = Some(style);
-                                        ui.close();
-                                    }
-                                }
+                                display_style_menu(ui, display, events);
                             });
                             let scene_button = if compact {
                                 button(ui, "Scene", Icon::Material, false, false, true)
                             } else {
-                                ui.add_sized(vec2(74.0, 28.0), egui::Button::new("Scene"))
+                                labeled_button(ui, scene.label(), "Scene", Icon::Material)
                             };
-                            scene_button.clone().on_hover_text("Scene");
+                            scene_button.clone().on_hover_text(format!("Scene: {}", scene.label()));
                             egui::Popup::menu(&scene_button)
                                 .align(RectAlign::TOP_END)
                                 .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
@@ -204,6 +203,95 @@ impl NavigationBar {
         });
         self.manage = open && !done;
     }
+}
+
+fn labeled_button(ui: &mut egui::Ui, caption: &str, accessible: &str, icon: Icon) -> egui::Response {
+    let galley = ui.painter().layout_no_wrap(caption.to_owned(), theme::font_medium(11.5), theme::ink());
+    let width = galley.size().x + 32.0;
+    let (rect, resp) = ui.allocate_exact_size(vec2(width, 28.0), Sense::click());
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, accessible));
+    if resp.hovered() || resp.has_focus() {
+        ui.painter().rect_filled(rect, CornerRadius::same(6), theme::hover());
+    }
+    icons::paint(
+        ui.painter(),
+        icon,
+        Rect::from_center_size(pos2(rect.left() + 14.0, rect.center().y), vec2(15.0, 15.0)),
+        theme::ink(),
+    );
+    ui.painter().galley(pos2(rect.left() + 25.0, rect.center().y - galley.size().y / 2.0), galley, theme::ink());
+    resp
+}
+
+/// Display style menu modeled on `captain-attachment.png`:
+/// Shaded with edges, Shaded, Wireframe, plus Coming soon slots for Hidden edges & Translucent.
+fn display_style_menu(ui: &mut egui::Ui, current: DisplayMode, events: &mut ViewportEvents) {
+    ui.set_min_width(228.0);
+    for (mode, icon) in [
+        (DisplayMode::ShadedWithEdges, Icon::Display),
+        (DisplayMode::Shaded, Icon::Extrude),
+        (DisplayMode::Wireframe, Icon::Wireframe),
+    ] {
+        let selected = current == mode;
+        let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 28.0), Sense::click());
+        resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, selected, mode.label()));
+        if selected {
+            ui.painter().rect_filled(rect, CornerRadius::same(6), theme::accent_soft());
+        } else if resp.hovered() {
+            ui.painter().rect_filled(rect, CornerRadius::same(6), theme::hover());
+        }
+        let ink = if selected { theme::accent() } else { theme::ink() };
+        icons::paint(
+            ui.painter(),
+            icon,
+            Rect::from_center_size(pos2(rect.left() + 15.0, rect.center().y), vec2(15.0, 15.0)),
+            ink,
+        );
+        ui.painter().text(
+            pos2(rect.left() + 30.0, rect.center().y),
+            Align2::LEFT_CENTER,
+            mode.label(),
+            if selected { theme::font_semibold(12.0) } else { theme::font(12.0) },
+            ink,
+        );
+        if selected {
+            ui.painter().text(
+                pos2(rect.right() - 10.0, rect.center().y),
+                Align2::RIGHT_CENTER,
+                "✓",
+                theme::font_semibold(12.0),
+                theme::accent(),
+            );
+        }
+        if resp.clicked() {
+            events.set_display = Some(mode);
+            ui.close();
+        }
+    }
+    coming_soon_display_row(ui, Icon::Wireframe, "Shaded with hidden edges");
+    ui.separator();
+    coming_soon_display_row(ui, Icon::Display, "Translucent");
+}
+
+fn coming_soon_display_row(ui: &mut egui::Ui, icon: Icon, label: &str) {
+    let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 26.0), Sense::hover());
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, false, label));
+    let muted = theme::muted().gamma_multiply(0.75);
+    icons::paint(
+        ui.painter(),
+        icon,
+        Rect::from_center_size(pos2(rect.left() + 15.0, rect.center().y), vec2(15.0, 15.0)),
+        muted,
+    );
+    ui.painter().text(pos2(rect.left() + 30.0, rect.center().y), Align2::LEFT_CENTER, label, theme::font(12.0), muted);
+    ui.painter().text(
+        pos2(rect.right() - 8.0, rect.center().y),
+        Align2::RIGHT_CENTER,
+        "Coming soon",
+        theme::font(10.5),
+        muted,
+    );
+    resp.on_hover_text(format!("{label} — coming soon"));
 }
 
 fn button(ui: &mut egui::Ui, label: &str, icon: Icon, active: bool, drag: bool, enabled: bool) -> egui::Response {

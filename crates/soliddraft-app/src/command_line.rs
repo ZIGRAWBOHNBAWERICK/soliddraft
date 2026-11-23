@@ -583,7 +583,7 @@ fn bar(ui: &mut egui::Ui, state: &mut AppState, status: &Status, session_open: b
         ui.add_space(8.0);
         egui::ScrollArea::horizontal()
             .id_salt("chip_row")
-            .max_width((ui.available_width() - PROMPT_MIN_WIDTH - STATUS_MIN_WIDTH - 100.0).max(24.0))
+            .max_width((ui.available_width() - PROMPT_MIN_WIDTH - STATUS_MIN_WIDTH - 220.0).max(24.0))
             .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
             .scroll_source(egui::scroll_area::ScrollSource::MOUSE_WHEEL)
             .show(ui, |ui| ui.horizontal_centered(|ui| chips(ui, state)));
@@ -595,8 +595,12 @@ fn bar(ui: &mut egui::Ui, state: &mut AppState, status: &Status, session_open: b
         ui.painter().vline(x, rect.y_range().shrink(7.0), Stroke::new(1.0, theme::line()));
         ui.add_space(10.0);
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.spacing_mut().item_spacing.x = 5.0;
             ui.add_space(6.0);
-            status_row(ui, status, ui.available_width() - PROMPT_MIN_WIDTH);
+            status_row(ui, status, (ui.available_width() - PROMPT_MIN_WIDTH - 200.0).max(STATUS_MIN_WIDTH));
+            if state.start.is_none() {
+                crate::bottom_popovers::show_right_controls(ui, state);
+            }
             ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
                 if session_open {
                     let text = format!("Typing goes to the session above · Esc or {} closes it", CLOSE_WORDS[0]);
@@ -605,7 +609,7 @@ fn bar(ui: &mut egui::Ui, state: &mut AppState, status: &Status, session_open: b
                             .truncate(),
                     );
                 } else {
-                    ui.label(egui::RichText::new("Command:").font(theme::mono(12.5)).color(theme::command_prompt()));
+                    ui.label(egui::RichText::new("Command:").font(theme::mono(12.0)).color(theme::command_prompt()));
                     prompt(ui, state, false);
                 }
             });
@@ -895,7 +899,16 @@ fn ai_chip(ui: &mut egui::Ui, state: &mut AppState) {
     } else {
         format!("ai · {turns} {}", if turns == 1 { "turn" } else { "turns" })
     };
-    if ui.button(label).on_hover_text("Open the AI session").clicked() {
+    let btn = egui::Button::new(
+        egui::RichText::new(&label).font(theme::mono(11.5)).color(theme::terminal_ink()),
+    )
+    .fill(theme::terminal_bg())
+    .stroke(Stroke::new(
+        1.0,
+        if state.command_line.session_open { theme::accent() } else { theme::terminal_bg() },
+    ))
+    .corner_radius(CornerRadius::same(theme::RADIUS));
+    if ui.add_sized(vec2(0.0, 22.0), btn).on_hover_text("Open the AI session").clicked() {
         state.command_line.open_session();
     }
 }

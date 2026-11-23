@@ -675,6 +675,9 @@ fn every_tool_runs_without_a_window_and_undoes_as_its_row_says() {
     s.call("show_assembly", json!({}));
     let packed = s.call("assembly_pack_and_go", json!({ "folder": s.path("packed") }));
     assert!(packed["packed"]["files"].as_array().unwrap().len() >= 3);
+    let zipped = s.call("assembly_pack_and_go", json!({ "zip": s.path("packed.zip") }));
+    let count = |v: &serde_json::Value| v["packed"]["files"].as_array().map(Vec::len);
+    assert_eq!(count(&zipped), count(&packed), "the zip holds what the folder does");
 
     // The second part moves into a file of its own, placed where it was, in one undo step.
     let at = parts[1].to_string();

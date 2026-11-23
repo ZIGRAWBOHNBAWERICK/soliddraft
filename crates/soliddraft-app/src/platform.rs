@@ -112,14 +112,26 @@ pub fn write_file(path: &Path, bytes: &[u8]) -> Result<(), String> {
 }
 
 /// Writes an export: the file at `path` and the files beside it, such as a STEP file's
-/// proof report. On the desktop each is a file. In the browser, where each would be its
-/// own download, they arrive as one zip named after the export.
+/// proof report or a URDF's folder of meshes. On the desktop each is a file. In the
+/// browser, where each would be its own download, they arrive as one zip named after the
+/// export, each at its place relative to the export's folder.
 pub fn write_export(path: &Path, files: Vec<(std::path::PathBuf, Vec<u8>)>) -> Result<(), String> {
     if cfg!(target_arch = "wasm32") && files.len() > 1 {
+        let folder = path.parent().unwrap_or(Path::new(""));
         let entries: Vec<(String, Vec<u8>)> = files
             .into_iter()
             .map(|(file, bytes)| {
-                (file.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(), bytes)
+                let name = match file.strip_prefix(folder) {
+                    // A folder written as "./meshes" is the export's own: no "./" in the zip.
+                    Ok(inside) => inside
+                        .components()
+                        .filter(|c| !matches!(c, std::path::Component::CurDir))
+                        .map(|c| c.as_os_str().to_string_lossy())
+                        .collect::<Vec<_>>()
+                        .join("/"),
+                    Err(_) => file.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
+                };
+                (name, bytes)
             })
             .collect();
         return write_file(&path.with_extension("zip"), &crate::zip::stored(&entries));

@@ -163,8 +163,9 @@ showing it, for drawings.
 ## Pack and Go
 
 Pack and Go copies an assembly and every document it references, at any depth, into a new
-or empty folder, so the folder opens anywhere on its own
-(`soliddraft_assembly::pack_and_go`).
+or empty folder, or into one zip, so the folder or the unpacked zip opens anywhere on its
+own (`soliddraft_assembly::pack_and_go` and `pack_zip`). Both make the pack in memory
+first (`gather`), then write it.
 
 - Parts and mesh references are copied byte for byte. Each assembly is written again with
   its references pointing at the copies.
@@ -177,7 +178,14 @@ or empty folder, so the folder opens anywhere on its own
 - Drawings in the assembly's folder whose model is packed come along when asked, pointed at
   their models' copies; their views stay current when only paths moved.
 - Nothing is written unless every reference resolves, and nothing in the destination is
-  replaced; two files that would land on one name are refused.
+  replaced; two files that would land on one name are refused. A zip that exists, or a
+  name that does not end in `.zip`, is refused.
+- A zip holds each file at its place in the pack, stored as it is (the documents are
+  compressed already), with a fixed date, so a pack gives the same bytes each time.
+- The browser has no folders. It packs the files the page holds (`HeldFiles`): the
+  assembly as it was opened or last saved, and the part and assembly files handed over
+  with it, each reference found by its target's id. The pack downloads as one zip with
+  every file at its top. The page does not hold drawings, so none come along.
 
 ## Drawings of assemblies
 
@@ -640,7 +648,7 @@ soliddraft asm config <file.dwasm> (list [--json] | add <name> | activate <name>
 soliddraft asm explode <file.dwasm> (list [--json] | add <path>... --direction x,y,z --distance <mm> | edit <step> ... | delete <step> | auto [--distance <mm>])
 soliddraft asm drawing <file.dwasm> <out.dwdrw> [--template <id>] [--exploded] [--json]
 soliddraft asm export <file.dwasm> <out.urdf | out.usda> [--json]
-soliddraft asm pack <file.dwasm> <folder> [--prefix <text>] [--suffix <text>] [--flatten] [--drawings] [--json]
+soliddraft asm pack <file.dwasm> <folder | out.zip> [--prefix <text>] [--suffix <text>] [--flatten] [--drawings] [--json]
 soliddraft asm rebuild <file.dwasm> [--search <folder>]... [--json]
 soliddraft asm generate <folder> [--unique <n>] [--placements <n>] [--modules <n>] [--no-part-files] [--seed <n>]
 soliddraft asm bench <file.dwasm> [--size <w>x<h>] [--frames <n>] [--json]
@@ -687,14 +695,17 @@ way with files handed to the page in place of a folder; see [web.md](web.md).
 - **Make drawing** makes a drawing of the saved assembly with a BOM and balloons and opens
   it; Rebuild in the drawing, and its BOM and Balloon tiles, bring it to the assembly.
 - **Pack and Go** asks for an empty folder and packs the saved assembly, its parts and the
-  drawings beside it there. **Export URDF** and **Export USD** ask where to write.
+  drawings beside it there; **Pack and Go to zip** (File menu) asks for a zip file
+  instead. **Export URDF** and **Export USD** ask where to write.
 - **Save assembly** (Ctrl+S) and **Save assembly as** (Ctrl+Shift+S) write the `.dwasm`
   with its display copies; **File > Open** and Open recent open one with
   `open_in_background`. Undo and redo follow the active tab.
 
 The browser app has these commands too, loading on the page's one thread and taking files
-handed to it in place of a folder ([web.md](web.md)). Form subassembly, Pack and Go and
-URDF and USD export write files beside the assembly's, so they stay in the desktop app.
+handed to it in place of a folder ([web.md](web.md)). What it writes downloads: Pack and Go
+downloads one zip, Export USD the `.usda` file, and Export URDF one zip of the URDF and its
+meshes folder. Form subassembly writes new files beside the assembly's, so it stays in the
+desktop app.
 
 ## For the interface
 

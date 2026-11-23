@@ -41,7 +41,7 @@ usage: soliddraft asm new <file.dwasm> [--name <name>]
                  | edit <step> [--direction x,y,z] [--distance <mm>] | delete <step> | auto [--distance <mm>])
        soliddraft asm drawing <file.dwasm> <out.dwdrw> [--template <id>] [--exploded] [--json]
        soliddraft asm export <file.dwasm> <out.urdf | out.usda> [--json]
-       soliddraft asm pack <file.dwasm> <folder> [--prefix <text>] [--suffix <text>] [--flatten] [--drawings] [--json]
+       soliddraft asm pack <file.dwasm> <folder | out.zip> [--prefix <text>] [--suffix <text>] [--flatten] [--drawings] [--json]
        soliddraft asm rebuild <file.dwasm> [--search <folder>]... [--json]
        soliddraft asm generate <folder> [--unique <n>] [--placements <n>] [--modules <n>] [--no-part-files] [--seed <n>]
        soliddraft asm bench <file.dwasm> [--size <w>x<h>] [--frames <n>] [--json]
@@ -119,7 +119,8 @@ export      Writes the assembly for robotics and simulation tools: URDF (with
             carry. The assembly is not changed.
 
 pack        Pack and Go: copies the assembly and every document it references,
-            at any depth, into a new or empty folder, so it opens there on its own.
+            at any depth, into a new or empty folder, so it opens there on its own,
+            or into one zip when the destination ends in .zip.
             Parts are copied as they are; assemblies are written again with their
             references pointing at the copies. Ids are kept. --prefix and --suffix
             rename every copied file; --flatten puts them all in the folder itself;

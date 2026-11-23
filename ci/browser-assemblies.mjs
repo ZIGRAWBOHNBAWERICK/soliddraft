@@ -42,6 +42,11 @@
 // parts, the assembly is in Lifted with its exploded view, and activating Default, made
 // before the view, shows none: each configuration keeps its own.
 //
+// Last, Pack and Go and the robot exports, which download: the rig packs into one zip,
+// whose files open again as the rig with every part found beside it and take a shaft
+// inserted on top; Export URDF downloads the URDF and its meshes as one zip, Export USD a
+// .usda file.
+//
 // The app draws into one canvas and takes only trusted input: keys and clicks sent as the
 // browser's own, through the DevTools protocol. The canvas has no text to read, so the
 // check reads the assembly through the read-only `shown_assembly` export, and finds a
@@ -362,6 +367,9 @@ async function main() {
   step('save');
   const saved = await v.download('save', () => v.key('s', 'KeyS', 83, 2, 's'));
   check(saved.endsWith('.dwasm'), `the assembly saves as a .dwasm file, not ${saved}`);
+  // Later downloads can take the same name, so the configurations section gets a copy.
+  const trayAssembly = path.join(downloads, 'tray-assembly.dwasm');
+  fs.copyFileSync(saved, trayAssembly);
   shown = await v.assembly('saved', s => !s.dirty);
   step('load the site again and open the saved assembly with its parts');
   await v.load();
@@ -389,10 +397,11 @@ async function main() {
   const joint = await universalJoint(v);
   const choice = await chosenAssembly(v, saved, [tray, collar], parts(mated));
   const bearingDrag = await refusedDrag(v);
-  const configured = await configuredExplode(v, saved, [tray, collar], mated);
+  const configured = await configuredExplode(v, trayAssembly, [tray, collar], mated);
+  const packAndGo = await packAndExport(v);
 
-  fs.writeFileSync(path.join(out, 'assemblies.json'), JSON.stringify({ mated, reopened, alone, saved: path.basename(saved), joint, choice, bearing: bearingDrag, configured }, null, 1));
-  console.log(`Assemblies in the browser: three components from two uploads, a mate picked in the viewport putting the second tray ${FLOOR} mm up on the first one's floor, saved as ${path.basename(saved)}, reopened with its parts at the same placements with the mate kept, and opened alone from the copies it keeps. A Universal Joint picked between two shafts meeting at ${BEND} degrees drove the output ${joint.follows.toFixed(6)} degrees for a ${TURN} degree input turn, and reopened with its parts. A parent and its child assembly uploaded child first opened the parent the visitor chose, with ${choice.chosen.held.length} files held for it, and took a tray inserted on top. Turning the joint's free output block to set the shafts at right angles was refused by name with nothing changed, and a 60 degree turn after it was taken and undone. A configuration added and activated in the panel took an auto exploded view that moved ${configured.moved} parts on screen and no placement, saved, reopened in that configuration, and showed no exploded view in Default.`);
+  fs.writeFileSync(path.join(out, 'assemblies.json'), JSON.stringify({ mated, reopened, alone, saved: path.basename(saved), joint, choice, bearing: bearingDrag, configured, packAndGo }, null, 1));
+  console.log(`Assemblies in the browser: three components from two uploads, a mate picked in the viewport putting the second tray ${FLOOR} mm up on the first one's floor, saved as ${path.basename(saved)}, reopened with its parts at the same placements with the mate kept, and opened alone from the copies it keeps. A Universal Joint picked between two shafts meeting at ${BEND} degrees drove the output ${joint.follows.toFixed(6)} degrees for a ${TURN} degree input turn, and reopened with its parts. A parent and its child assembly uploaded child first opened the parent the visitor chose, with ${choice.chosen.held.length} files held for it, and took a tray inserted on top. Turning the joint's free output block to set the shafts at right angles was refused by name with nothing changed, and a 60 degree turn after it was taken and undone. A configuration added and activated in the panel took an auto exploded view that moved ${configured.moved} parts on screen and no placement, saved, reopened in that configuration, and showed no exploded view in Default. Pack and Go downloaded the rig and its two parts as one zip, which opened again with every part found beside it and took the shaft inserted again; Export URDF downloaded the URDF with ${packAndGo.urdf.entries - 1} meshes as one zip, and Export USD a .usda file.`);
 }
 
 // The rig's shafts: the input (component 4) on a hinge at (10, 5, 0) along Z, the output
@@ -622,6 +631,92 @@ async function refusedDrag(v) {
 }
 
 // Types `text` into the focused field, a key at a time.
+// Reads a zip whose entries are stored as they are, as Pack and Go and the exports write
+// them, into `dir`; answers the entries' names in file order.
+function unzip(file, dir) {
+  const zip = fs.readFileSync(file);
+  let end = zip.length - 22;
+  while (end >= 0 && zip.readUInt32LE(end) !== 0x06054b50) end--;
+  check(end >= 0, `${file} is not a zip`);
+  const count = zip.readUInt16LE(end + 10);
+  let at = zip.readUInt32LE(end + 16);
+  const names = [];
+  for (let i = 0; i < count; i++) {
+    check(zip.readUInt32LE(at) === 0x02014b50, `${file}: entry ${i} has no directory record`);
+    check(zip.readUInt16LE(at + 10) === 0, `${file}: entry ${i} is compressed`);
+    const size = zip.readUInt32LE(at + 20);
+    const nameLength = zip.readUInt16LE(at + 28);
+    const skip = zip.readUInt16LE(at + 30) + zip.readUInt16LE(at + 32);
+    const local = zip.readUInt32LE(at + 42);
+    const name = zip.toString('utf8', at + 46, at + 46 + nameLength);
+    const data = local + 30 + zip.readUInt16LE(local + 26) + zip.readUInt16LE(local + 28);
+    const to = path.join(dir, name);
+    fs.mkdirSync(path.dirname(to), { recursive: true });
+    fs.writeFileSync(to, zip.subarray(data, data + size));
+    names.push(name);
+    at += 46 + nameLength + skip;
+  }
+  return names;
+}
+
+// Pack and Go and the robot exports, where the page has no folders: each arrives as a
+// download. The Universal Joint rig, opened with its two parts, packs into one zip of the
+// rig and both parts. Loaded afresh, the three unpacked files open as the rig did, every
+// part found beside it and current, and take a later feature on top: the shaft inserted
+// again. Export URDF downloads one zip of the URDF and its meshes folder, every mesh the
+// URDF names inside it; Export USD downloads one .usda file with its joints.
+async function packAndExport(v) {
+  step('load the site again and open the Universal Joint rig with its parts');
+  await v.load();
+  await v.choose([rig, block, shaft], () => v.click(OPEN));
+  const ready = s => loaded(s) && s.components.length === 4 && s.components.every(c => c.freshness !== 'unchecked');
+  const opened = await v.assembly('rig to pack', ready);
+
+  step('Pack and Go downloads one zip');
+  const zip = await v.download('pack', () => v.command('Pack and Go'));
+  check(path.basename(zip) === 'rig.zip', `Pack and Go downloads rig.zip, not ${path.basename(zip)}`);
+  const unpacked = path.join(downloads, 'unpacked');
+  const packed = unzip(zip, unpacked).sort();
+  check(JSON.stringify(packed) === '["block.dwprt","rig.dwasm","shaft.dwprt"]', `the zip holds ${packed}`);
+
+  step('load the site again and open the unpacked rig with its parts');
+  await v.load();
+  await v.choose(packed.map(n => path.join(unpacked, n)), () => v.click(OPEN));
+  let shown = await v.assembly('unpacked', ready);
+  check(JSON.stringify(parts(shown)) === JSON.stringify(parts(opened)), `the unpacked rig's components are ${parts(shown)}`);
+  check(near(placements(shown), placements(opened)), `the unpacked placements are ${JSON.stringify(placements(shown))}`);
+  check(shown.mates === opened.mates, `the unpacked rig has ${shown.mates} mates, not ${opened.mates}`);
+  check(shown.components.every(c => c.state === 'DisplayReady' && c.freshness === 'current' && !c.warning), `not every unpacked part is found: ${JSON.stringify(shown.components)}`);
+  await v.shot('16-unpacked');
+
+  step('insert the unpacked shaft again');
+  await v.choose(path.join(unpacked, 'shaft.dwprt'), () => v.command('Insert component'));
+  shown = await v.assembly('inserted in the unpacked rig', s => loaded(s) && s.components.length === 5);
+  check(parts(shown)[4] === 'shaft', `the fifth component is ${parts(shown)[4]}`);
+
+  step('Export URDF downloads the URDF and its meshes as one zip');
+  const urdfZip = await v.download('urdf', () => v.command('Export URDF'));
+  check(urdfZip.endsWith('.zip'), `Export URDF downloads a zip, not ${path.basename(urdfZip)}`);
+  const robot = path.join(downloads, 'robot');
+  const entries = unzip(urdfZip, robot);
+  const urdfName = entries.find(n => n.endsWith('.urdf'));
+  check(urdfName && !urdfName.includes('/'), `the zip has no URDF at its top: ${entries}`);
+  const urdf = fs.readFileSync(path.join(robot, urdfName), 'utf8');
+  const meshes = [...urdf.matchAll(/filename="([^"]+)"/g)].map(m => m[1]);
+  check(meshes.length >= 5, `the URDF names ${meshes.length} meshes`);
+  check(meshes.every(m => entries.includes(m)), `the zip lacks meshes the URDF names: ${meshes.filter(m => !entries.includes(m))}`);
+  const moving = [...urdf.matchAll(/<joint [^>]*type="(revolute|continuous)"/g)].length;
+  check(moving >= 1, 'the URDF has no moving joint');
+
+  step('Export USD downloads one .usda file');
+  const usd = await v.download('usd', () => v.command('Export USD'));
+  check(usd.endsWith('.usda'), `Export USD downloads a .usda file, not ${path.basename(usd)}`);
+  const usda = fs.readFileSync(usd, 'utf8');
+  check(usda.startsWith('#usda') && /Physics(Revolute|Fixed)Joint/.test(usda), 'the .usda file has no joints');
+  await v.stopped('after the exports');
+  return { packed, unpacked: placements(shown), urdf: { file: urdfName, entries: entries.length, moving }, usd: path.basename(usd) };
+}
+
 async function type(v, text) {
   for (const ch of text) {
     await v.key(ch, `Key${ch.toUpperCase()}`, ch.toUpperCase().charCodeAt(0), 0, ch);

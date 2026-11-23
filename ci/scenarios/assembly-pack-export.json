@@ -332,6 +332,38 @@
       "refused": "is not empty"
     },
     {
+      "tool": "assembly_pack_and_go",
+      "arguments": {
+        "zip": "{bundle}/work/rig.zip",
+        "drawings": true
+      },
+      "checks": [
+        {
+          "pointer": "/result/packed/files",
+          "length": 4
+        },
+        {
+          "pointer": "/result/packed/files/3/to",
+          "equals": "rig.dwasm"
+        },
+        {
+          "pointer": "/result/packed/root",
+          "equals": "rig.dwasm"
+        }
+      ],
+      "files": [
+        "{bundle}/work/rig.zip"
+      ]
+    },
+    {
+      "tool": "assembly_pack_and_go",
+      "arguments": {
+        "zip": "{bundle}/work/rig.zip"
+      },
+      "checks": [],
+      "refused": "already exists"
+    },
+    {
       "tool": "open",
       "arguments": {
         "path": "{bundle}/work/packed/P-rig.dwasm"

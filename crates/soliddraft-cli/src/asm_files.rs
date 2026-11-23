@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 
 use serde_json::json;
-use soliddraft_assembly::{PackRequest, pack_and_go};
+use soliddraft_assembly::{PackRequest, pack_and_go, pack_zip};
 use soliddraft_document::DocRef;
 
 use super::asm::Args;
@@ -13,9 +13,10 @@ pub(crate) fn repoint(bytes: &[u8], model: &DocRef) -> Result<Vec<u8>, String> {
     soliddraft_drawing::file::repoint(bytes, model).map_err(|e| e.to_string())
 }
 
-/// `asm pack <file.dwasm> <folder> [--prefix P] [--suffix S] [--flatten] [--drawings]`.
+/// `asm pack <file.dwasm> <folder | out.zip> [--prefix P] [--suffix S] [--flatten] [--drawings]`.
 pub(crate) fn pack(file: &Path, rest: &[String], a: &Args, search: Vec<PathBuf>) -> Result<bool, String> {
-    let [into] = rest else { return Err("pack takes the assembly and a destination folder".into()) };
+    let [into] = rest else { return Err("pack takes the assembly and a destination folder or .zip file".into()) };
+    let zip = Path::new(into).extension().is_some_and(|e| e.eq_ignore_ascii_case("zip"));
     let request = PackRequest {
         root: file.to_path_buf(),
         into: PathBuf::from(into),
@@ -26,7 +27,8 @@ pub(crate) fn pack(file: &Path, rest: &[String], a: &Args, search: Vec<PathBuf>)
     };
     let drawings: Option<soliddraft_assembly::pack::Repoint> =
         if a.value("--drawings").is_some() { Some(&repoint) } else { None };
-    let report = pack_and_go(&request, drawings).map_err(|e| e.to_string())?;
+    let report = if zip { pack_zip(&request, drawings) } else { pack_and_go(&request, drawings) };
+    let report = report.map_err(|e| e.to_string())?;
     if a.json {
         println!("{}", json!(report));
     } else {

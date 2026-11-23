@@ -1,13 +1,15 @@
 //! Pack and Go on real files: an assembly with a part, and a sub-assembly that places
 //! another part, packed into a new folder with a prefix, then opened on its own after
-//! the originals are gone, and worked on.
+//! the originals are gone, and worked on; the same pack as one zip; and the files a
+//! browser page holds, packed into a zip with no folder to look in.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use glam::DVec3;
 use soliddraft_assembly::{
-    AssemblyDocument, Freshness, KernelSource, LoadState, OpenOptions, PackError, PackRequest, Placement, pack_and_go,
+    AssemblyDocument, Folders, Freshness, HeldFiles, KernelSource, LoadState, OpenOptions, PackError, PackRequest,
+    Placement, gather, pack_and_go, pack_zip,
 };
 use soliddraft_document::{DocKind, DocRef, identify_file};
 use soliddraft_kernel_api::Kernel;
@@ -175,4 +177,120 @@ fn pack_and_go_refuses_what_it_cannot_do_and_writes_nothing() {
     let gone = PackRequest { root, into: dir.join("gone"), ..Default::default() };
     assert!(matches!(pack_and_go(&gone, None), Err(PackError::Missing(_))));
     assert!(!dir.join("gone").exists());
+}
+
+/// Unpacks the zip `bytes` into `dir`, its entries' names as paths.
+fn unzip(bytes: &[u8], dir: &Path) -> Vec<String> {
+    let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
+    let mut names = Vec::new();
+    for i in 0..archive.len() {
+        let mut entry = archive.by_index(i).unwrap();
+        let name = entry.name().unwrap().into_owned();
+        let to = dir.join(&name);
+        std::fs::create_dir_all(to.parent().unwrap()).unwrap();
+        let mut out = Vec::new();
+        std::io::Read::read_to_end(&mut entry, &mut out).unwrap();
+        std::fs::write(&to, out).unwrap();
+        names.push(name);
+    }
+    names.sort();
+    names
+}
+
+/// Opens the assembly at `path` and checks every part shows and every reference pins
+/// the copy beside it.
+fn opens_on_its_own(path: &Path, parts: usize) -> AssemblyDocument {
+    let mut doc = AssemblyDocument::open(path, OpenOptions { check_freshness: true, ..Default::default() }).unwrap();
+    doc.finish_loading();
+    assert_eq!(doc.table().counts().parts, parts);
+    let root_def = doc.root();
+    for (_, d) in doc.store().iter().filter(|(i, _)| *i != root_def) {
+        if d.kind == DocKind::Part {
+            assert_eq!(d.state, LoadState::DisplayReady, "{}", d.label);
+        }
+        assert_eq!(d.freshness, Freshness::Current, "{} pins its packed copy", d.label);
+    }
+    doc
+}
+
+#[test]
+fn a_zip_holds_the_folder_pack_and_opens_on_its_own() {
+    let dir = folder("zip");
+    let root = tree(&dir.join("src"));
+    let before = std::fs::read(&root).unwrap();
+    let zip = dir.join("rig.zip");
+    let request = PackRequest { root: root.clone(), into: zip.clone(), ..Default::default() };
+    let report = pack_zip(&request, None).unwrap();
+    assert_eq!(report.root, PathBuf::from("rig.dwasm"), "the assembly sits at the top of the zip");
+    let mut places: Vec<String> = report.files.iter().map(|f| f.to.display().to_string()).collect();
+    places.sort();
+    assert_eq!(places, ["parts/a.dwprt", "parts/b.dwprt", "rig.dwasm", "sub/sub.dwasm"]);
+
+    // The same documents, at the same revisions, as Pack and Go into a folder.
+    let folder_report =
+        pack_and_go(&PackRequest { root: root.clone(), into: dir.join("folder"), ..Default::default() }, None).unwrap();
+    let revisions = |r: &soliddraft_assembly::PackReport| {
+        let mut v: Vec<_> = r.files.iter().map(|f| (f.id, f.revision.clone())).collect();
+        v.sort();
+        v
+    };
+    assert_eq!(revisions(&report), revisions(&folder_report));
+    let bytes = std::fs::read(&zip).unwrap();
+    assert_eq!(bytes, gather(&request, &Folders { search: &[] }, None).unwrap().zip().unwrap(), "the same bytes again");
+
+    // Unpacked anywhere once the originals are gone, it opens on its own and keeps
+    // working: a part placed again, saved, reopened.
+    std::fs::rename(dir.join("src"), dir.join("gone")).unwrap();
+    let out = dir.join("unpacked");
+    assert_eq!(unzip(&bytes, &out), places);
+    let mut doc = opens_on_its_own(&out.join("rig.dwasm"), 3);
+    let a = out.join("parts/a.dwprt");
+    doc.insert(reference(&out.join("rig.dwasm"), &a), Placement::translation(DVec3::new(0.0, 0.0, 50.0))).unwrap();
+    doc.finish_loading();
+    doc.save(None).unwrap();
+    opens_on_its_own(&out.join("rig.dwasm"), 4);
+    assert_eq!(std::fs::read(dir.join("gone/rig.dwasm")).unwrap(), before, "the original is unchanged");
+
+    // A zip that exists, or a name that is not a zip, is refused and nothing changes.
+    std::fs::rename(dir.join("gone"), dir.join("src")).unwrap();
+    assert!(matches!(pack_zip(&request, None), Err(PackError::Destination(_))));
+    assert_eq!(std::fs::read(&zip).unwrap(), bytes);
+    let not_zip = PackRequest { into: dir.join("rig.tar"), ..request.clone() };
+    assert!(matches!(pack_zip(&not_zip, None), Err(PackError::Destination(_))));
+    assert!(!dir.join("rig.tar").exists());
+    // A part gone missing writes no zip.
+    std::fs::remove_file(dir.join("src/parts/b.dwprt")).unwrap();
+    let gone = PackRequest { into: dir.join("gone.zip"), ..request };
+    assert!(matches!(pack_zip(&gone, None), Err(PackError::Missing(_))));
+    assert!(!dir.join("gone.zip").exists());
+}
+
+/// The browser has no folders: the page holds each file by its name and bytes, as they
+/// were handed to it. Pack and Go finds every reference among them by id and makes one
+/// zip, which opens on its own once unpacked.
+#[test]
+fn files_a_page_holds_pack_into_a_zip_with_no_folder() {
+    let dir = folder("held");
+    tree(&dir.join("src"));
+    let held = |rel: &str| {
+        (PathBuf::from(Path::new(rel).file_name().unwrap()), std::fs::read(dir.join("src").join(rel)).unwrap())
+    };
+    let files = ["parts/a.dwprt", "parts/b.dwprt", "sub/sub.dwasm", "rig.dwasm"].map(held);
+    let source = HeldFiles::new(files.clone());
+    let request = PackRequest { root: PathBuf::from("rig.dwasm"), ..Default::default() };
+    let pack = gather(&request, &source, None).unwrap();
+    assert_eq!(pack.root, PathBuf::from("rig.dwasm"));
+    let mut names: Vec<String> = pack.files.iter().map(|(f, _)| f.to.display().to_string()).collect();
+    names.sort();
+    assert_eq!(names, ["a.dwprt", "b.dwprt", "rig.dwasm", "sub.dwasm"], "the page has no folders to keep");
+    let bytes = pack.zip().unwrap();
+    std::fs::remove_dir_all(dir.join("src")).unwrap();
+    let out = dir.join("unpacked");
+    assert_eq!(unzip(&bytes, &out), names);
+    let doc = opens_on_its_own(&out.join("rig.dwasm"), 3);
+    assert!(doc.assembly().sources.iter().all(|s| !s.document.path.contains('/')), "{:?}", doc.assembly().sources);
+
+    // A file the page was not handed is named, and nothing is packed.
+    let without = HeldFiles::new(files[1..].to_vec());
+    assert!(matches!(gather(&request, &without, None), Err(PackError::Missing(p)) if p == "parts/a.dwprt"));
 }

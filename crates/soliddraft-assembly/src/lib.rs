@@ -77,7 +77,9 @@ pub use mates::{
 };
 pub use mesh::{DisplayMesh, MeshBounds, MeshFace, SharedMesh};
 pub use occurrence::{Counts, Flags, OccurrenceIndex, OccurrenceTable};
-pub use pack::{PackError, PackReport, PackRequest, PackedFile, pack_and_go};
+pub use pack::{
+    Folders, HeldFiles, Pack, PackError, PackReport, PackRequest, PackSource, PackedFile, gather, pack_and_go, pack_zip,
+};
 pub use path::{ComponentId, OccurrencePath, PatternId, SourceId, Step};
 pub use placement::{Aabb, Placement};
 pub use scene::{Draw, Instance, Picked, Scene};

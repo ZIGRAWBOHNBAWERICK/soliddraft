@@ -14,8 +14,8 @@
 // read-only `shown_options` export reports the row selected and Details drawn, and clicks
 // Details once where that frame drew it.
 function check(value, message) { if (!value) throw new Error(message); }
-// Check sits under the Measure and Annotate groups of the Inspect tab.
-const INSPECT = [19, 241], CHECK = [87, 245], CLOSE_REPORT = [536, 35], BOSS = [380, 255];
+// Check sits after the Measure and Annotate groups on the Inspect tab's strip.
+const INSPECT = [247, 52], CHECK = [543, 97], CLOSE_REPORT = [534, 37], BOSS = [134, 323];
 
 check(await page.eval(() => location.search === '?demo'), 'Open the application at /?demo first');
 const size = await page.eval(() => [innerWidth, innerHeight]);

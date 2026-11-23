@@ -11,10 +11,10 @@
 // replaced is not shown, and a measured block's volume is not shown for an identical
 // block in another new part, whose kernel gives it the same body id.
 //
-// The clicks go to fixed points of a 1400 x 813 page: the strip's Part and Inspect
-// buttons, the feature tree's rows, Mass props, Details, Close options, File > New part
-// and Extrude's Rectangle button. A narrower page folds the menu bar into one Menu
-// button, so the check refuses any other size. New part is clicked, not typed: Chrome
+// The clicks go to fixed points of a 1400 x 813 page: the tool strip's Solid and Inspect
+// tabs, the feature tree's rows, Mass props, Details, Close options, File > New part
+// and Extrude's Rectangle button. Another width moves the strip's tools, so the check
+// refuses any other size. New part is clicked, not typed: Chrome
 // on Linux keeps Ctrl+N for a new window. Each step waits for the open part's feature
 // count, which the page reports in its own feedback events, or for what the last frame
 // drew, rather than a fixed time. The options panel covers the feature tree's rows, so
@@ -22,9 +22,10 @@
 // confirmed by the title Details draws for it. With software rendering a frame can take
 // longer than any fixed pause.
 function check(value, message) { if (!value) throw new Error(message); }
-const PART = [19, 132], INSPECT = [19, 241], MASS = [220, 112], CLOSE = [347, 92];
-const RECTANGLE = [630, 52], FILE = [122, 15], NEW_PART = [138, 42];
-const ROW = { first: 203, second: 229, third: 255 };
+const PART = [36, 52], INSPECT = [247, 52], MASS = [114, 97], CLOSE = [618, 184];
+const RECTANGLE = [892, 143], FILE = [158, 18], NEW_PART = [170, 49];
+// The feature tree's rows, in the side column.
+const TREE = 134, ROW = { first: 271, second: 297, third: 323 };
 
 check(await page.eval(() => location.search === '?demo'), 'Open the application at /?demo first');
 const size = await page.eval(() => [innerWidth, innerHeight]);
@@ -139,7 +140,7 @@ async function openDetails(title, what) {
 // Selects a feature tree row while the options panel is closed, and waits until Details
 // draws the feature `title` for it.
 async function select(row, title, what) {
-  await click([380, row]);
+  await click([TREE, row]);
   await openDetails(title, what);
   let drawn = null;
   for (let i = 0; i < 100; i++) {
@@ -255,7 +256,7 @@ async function block(what) {
   await page.wait(1000);
   await click(INSPECT);
   await page.wait(500);
-  await click([380, ROW.first]);
+  await click([TREE, ROW.first]);
   await openDetails('Boss-Extrude1', what);
   for (let i = 0; i < 100 && (await shown())?.title !== 'Boss-Extrude1'; i++) await page.wait(100);
   const rows = await details();

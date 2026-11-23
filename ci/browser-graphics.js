@@ -47,8 +47,10 @@ async function click(label) {
 
 await load();
 const initial = await until(viewport, view => view?.curves_settled && view.triangles > 0, 'The demo part did not draw');
-await page.press('Control+Alt+p');
+await page.press('Control+Shift+P');
+await page.wait(300);
 await page.type('Preferences');
+await page.wait(300);
 await page.press('Enter');
 await click('Preferences: Graphics');
 await click('Graphics preset: Performance');

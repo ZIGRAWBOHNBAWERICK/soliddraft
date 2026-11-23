@@ -849,6 +849,8 @@ fn status_mark(ui: &mut egui::Ui, state: &AppState, feature: &Feature, row: Rect
     response.widget_info(|| {
         egui::WidgetInfo::labeled(egui::WidgetType::Label, true, format!("{} status: {label}", feature.name))
     });
+    #[cfg(target_arch = "wasm32")]
+    crate::web::show_mark(&feature.name, label, &reason);
     response.on_hover_text(format!("{label}: {reason}"));
 }
 

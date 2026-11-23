@@ -171,7 +171,7 @@ fn a_first_feature_waiting_for_proof_explains_why_no_export_is_written() {
     assert!(state.doc.proof_pending());
     let path = dir.join("pending.step");
     let out = call(&mut state, "export_step", json!({"path":path}));
-    assert!(out.is_error && out.content.contains("pending"), "{}", out.content);
+    assert!(out.is_error && out.content.contains("still working"), "{}", out.content);
     for path in [&path, &sidecar_path(&path, "json"), &sidecar_path(&path, "txt")] {
         assert!(!path.exists());
     }

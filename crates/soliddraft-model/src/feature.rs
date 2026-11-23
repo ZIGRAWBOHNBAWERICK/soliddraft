@@ -522,6 +522,16 @@ pub struct HoleFeature {
     /// A counterbore or countersink at the entry.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub head: Option<HoleHead>,
+    /// A cosmetic thread tapped in the main wall. The wall stays the drill's cylinder.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thread: Option<crate::thread::HoleThread>,
+}
+
+impl HoleFeature {
+    /// Why the hole's thread cannot be cut in it, for people, or `None`.
+    pub fn thread_problem(&self) -> Option<String> {
+        self.thread.as_ref()?.problem(self.diameter, &self.depth, self.head.as_ref())
+    }
 }
 
 /// Where a pattern's copies go.

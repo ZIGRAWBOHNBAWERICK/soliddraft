@@ -155,7 +155,7 @@ fn file_items<F: Clone>(item: &PmiItem<F>) -> KernelResult<Vec<cx::Item<F>>> {
         PmiKind::Datum { letter, feature } => {
             one(cx::ItemKind::Datum(cx::Datum { letter: letter.clone(), feature: feature.clone() }))
         }
-        PmiKind::Size { size, features, tolerance, through, .. } => one(cx::ItemKind::Size(cx::Size {
+        PmiKind::Size { size, features, tolerance, through, thread, .. } => one(cx::ItemKind::Size(cx::Size {
             kind: match size {
                 SizeKind::Diameter => cx::SizeKind::Diameter,
                 SizeKind::Radius => cx::SizeKind::Radius,
@@ -163,8 +163,7 @@ fn file_items<F: Clone>(item: &PmiItem<F>) -> KernelResult<Vec<cx::Item<F>>> {
             features: features.clone(),
             limits: limits(id, *tolerance)?,
             through: *through,
-            // The app has no threads on the part yet.
-            thread: None,
+            thread: thread.clone(),
             nominal: None,
         })),
         PmiKind::Location { from, to, tolerance, .. } => one(location(id, from, to, *tolerance)?),
@@ -252,9 +251,6 @@ fn to_catallax<F: Clone>(pmi: &Pmi<F>) -> KernelResult<(cx::Pmi<F>, Vec<usize>)>
 fn app_item<F: Clone>(item: &cx::Item<F>) -> Option<PmiItem<F>> {
     let kind = match &item.kind {
         cx::ItemKind::Datum(datum) => PmiKind::Datum { letter: datum.letter.clone(), feature: datum.feature.clone() },
-        // A threaded size has no form in the app yet, so it is left out by name, not read
-        // as a plain diameter.
-        cx::ItemKind::Size(size) if size.thread.is_some() => return None,
         cx::ItemKind::Size(size) => PmiKind::Size {
             size: match size.kind {
                 cx::SizeKind::Diameter => SizeKind::Diameter,
@@ -263,6 +259,7 @@ fn app_item<F: Clone>(item: &cx::Item<F>) -> Option<PmiItem<F>> {
             features: size.features.clone(),
             tolerance: limits_back(&size.limits)?,
             through: size.through,
+            thread: size.thread.clone(),
             nominal: size.nominal.as_ref().map(number),
         },
         cx::ItemKind::Location(location) => PmiKind::Location {

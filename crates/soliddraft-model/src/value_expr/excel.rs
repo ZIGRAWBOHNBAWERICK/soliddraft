@@ -209,7 +209,7 @@ fn power(a: Quantity, b: Quantity) -> Result<Quantity, String> {
     if !value.is_finite() {
         return Err(numeric_error());
     }
-    let dimension = |base| {
+    let dimension = |base| -> Result<i32, String> {
         let raised = f64::from(base) * exponent;
         if raised.fract() != 0.0 || raised.abs() > f64::from(i32::MAX) {
             return Err("unit exponent must be a whole number".into());
@@ -340,6 +340,9 @@ pub(super) fn call(
         "CEILING" | "FLOOR" => {
             let unit = common_unit(a, b)?;
             if b.value == 0.0 {
+                if name == "FLOOR" && a.value != 0.0 {
+                    return Err("division by zero".into());
+                }
                 return Ok(result(unit, 0.0));
             }
             if a.value > 0.0 && b.value < 0.0 {
@@ -459,6 +462,7 @@ mod tests {
             ("=NOPE(1)", "#NAME?"),
             ("=1/0", "#DIV/0!"),
             ("=MOD(1,0)", "#DIV/0!"),
+            ("=FLOOR(2,0)", "#DIV/0!"),
             ("=ATAN2(0,0)", "#DIV/0!"),
             ("=#REF!", "#REF!"),
             ("=1 mm+1 deg", "#VALUE!"),

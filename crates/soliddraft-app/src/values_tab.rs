@@ -162,7 +162,7 @@ pub fn plain(message: &str) -> String {
     } else if message.contains("finite number") {
         "The result is not a usable number".into()
     } else if message.contains("unsupported character") {
-        "Use numbers, names, units and + - * / ( ) only".into()
+        "Check the characters in the formula".into()
     } else if message.contains("expected a value")
         || message.contains("missing )")
         || message.contains("unexpected token")

@@ -69,6 +69,7 @@ pub enum Icon {
     Tree,
     Props,
     Config,
+    Formula,
     Display,
     Origin,
     Material,
@@ -464,6 +465,12 @@ fn paint_drawn(painter: &Painter, icon: Icon, rect: Rect, color: Color32) {
             g.circle(p, 12.0, 8.0, 1.8);
             g.line(p, &[(5.6, 4.8), (10.4, 7.4)]);
             g.line(p, &[(5.6, 11.2), (10.4, 8.6)]);
+        }
+        Icon::Formula => {
+            g.line(p, &[(9.0, 2.0), (7.0, 2.0), (5.8, 3.4), (4.2, 12.7), (3.1, 14.0), (1.5, 14.0)]);
+            g.line(p, &[(2.7, 6.0), (8.5, 6.0)]);
+            g.line(p, &[(9.0, 8.0), (14.0, 13.0)]);
+            g.line(p, &[(14.0, 8.0), (9.0, 13.0)]);
         }
         Icon::Display => {
             g.circle(p, 8.0, 8.0, 5.5);

@@ -7,7 +7,7 @@ use crate::state::{AppAction, AppState};
 use crate::theme;
 use crate::tree;
 use crate::viewport::Overlay;
-use egui::{Align2, CornerRadius, Rect, Sense, pos2, vec2};
+use egui::{CornerRadius, Rect, Sense, pos2, vec2};
 use egui_dock::{DockArea, DockState, TabViewer};
 
 use crate::app::dispatch::selection_of;
@@ -42,29 +42,14 @@ pub(in crate::app) fn pane(ui: &mut egui::Ui, state: &mut AppState) {
     ui.spacing_mut().item_spacing = vec2(6.0, 4.0);
     match state.layout.pane {
         Pane::Values => {
-            title(ui, "Values");
             egui::Frame::new()
-                .inner_margin(egui::Margin { left: 12, right: 6, top: 2, bottom: 0 })
+                .inner_margin(egui::Margin { left: 12, right: 8, top: 8, bottom: 0 })
                 .show(ui, |ui| crate::values_tab::show(ui, state));
         }
         Pane::Tree if state.assembly.is_active() => crate::assembly::tree(ui, state),
         Pane::Tree if state.drawing.is_active() => crate::drawing::tree_drawing::show(ui, state),
         Pane::Tree => tree::show(ui, state),
     }
-}
-
-/// A pane's title row, as the tree's header row draws its part's name.
-fn title(ui: &mut egui::Ui, text: &str) {
-    let (head, _) = ui.allocate_exact_size(vec2(ui.available_width(), 30.0), Sense::hover());
-    let painter = ui.painter();
-    painter.text(
-        pos2(head.left() + 12.0, head.center().y),
-        Align2::LEFT_CENTER,
-        text,
-        theme::font_semibold(12.5),
-        theme::ink(),
-    );
-    painter.hline(head.x_range(), head.bottom() - 0.5, egui::Stroke::new(1.0, theme::line()));
 }
 
 /// A dock area in the app's style, without the buttons the shell does not use.

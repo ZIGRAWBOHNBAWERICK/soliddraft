@@ -30,10 +30,11 @@ pub(crate) fn commands() -> Vec<CommandSpec> {
             .undo(Undo::Step),
         cmd(
             "configuration_grid",
-            "Values",
-            Icon::Config,
-            "Show globals, feature values and configurations beside the tree",
+            "Parameters",
+            Icon::Formula,
+            "Show parameters and configurations beside the tree",
         )
+        .on(RibbonTab::Solid, "Parameters", Size::Small)
         .on(RibbonTab::View, "Panels", Size::Small)
         .run(|_| AppAction::Values(ValuesAction::Show))
         .agents(
@@ -50,7 +51,7 @@ pub(crate) fn commands() -> Vec<CommandSpec> {
         )
         .agents(
             Agents::Mcp,
-            "Takes a CSV or XLSX file, or columns and rows as configuration_grid lists them. Returns a preview_id \
+            "Takes a CSV, XLSX or JSON file, or columns and rows as configuration_grid lists them. Returns a preview_id \
              bound to this document and revision, the full candidate and its changes.",
             tools::preview_params,
         ),
@@ -73,7 +74,7 @@ pub(crate) fn commands() -> Vec<CommandSpec> {
             "export_configuration_grid",
             "Export configuration grid",
             Icon::Config,
-            "Write the accepted table as CSV or XLSX",
+            "Write the accepted table as CSV, XLSX or JSON",
         )
         .agents(
             Agents::Mcp,

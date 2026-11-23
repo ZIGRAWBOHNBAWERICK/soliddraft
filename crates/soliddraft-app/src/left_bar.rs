@@ -34,7 +34,7 @@ pub fn panel(root: &mut egui::Ui, state: &mut AppState) {
 pub fn pane_icon(pane: Pane) -> Icon {
     match pane {
         Pane::Tree => Icon::Tree,
-        Pane::Values => Icon::Config,
+        Pane::Values => Icon::Formula,
     }
 }
 
@@ -44,7 +44,7 @@ pub fn pane_label(state: &AppState, pane: Pane) -> &'static str {
         Pane::Tree if state.assembly.is_active() => "Assembly tree",
         Pane::Tree if state.drawing.is_active() => "Drawing tree",
         Pane::Tree => "Feature tree",
-        Pane::Values => "Values",
+        Pane::Values => "Parameters & configurations",
     }
 }
 

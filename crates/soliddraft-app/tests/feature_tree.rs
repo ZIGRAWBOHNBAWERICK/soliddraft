@@ -99,7 +99,7 @@ fn strip_icons_show_the_tree_or_values_and_hide_the_side_area() {
     case.run(&mut app, |app| {
         let bar = ribbon::left_bar(app);
         let tree = ribbon::control(app, "Feature tree", bar);
-        let values = ribbon::control(app, "Values", bar);
+        let values = ribbon::control(app, "Parameters & configurations", bar);
         let solid = ribbon::control(app, "Solid tab", bar);
         assert!(tree.rect.bottom() <= values.rect.top(), "the tree is the strip's first icon");
         assert!(values.rect.bottom() < solid.rect.top(), "the panes come before the workspaces");
@@ -124,7 +124,7 @@ fn strip_icons_show_the_tree_or_values_and_hide_the_side_area() {
         assert!(app.state().state.pane_shown(Pane::Values));
         assert!(app.query_all_by_label("New global name").next().is_some(), "the Values pane shows");
         assert!(app.query_all_by_label("Rollback bar").next().is_none(), "Values replaces the tree");
-        assert!(ribbon::control(app, "Values", bar).selected);
+        assert!(ribbon::control(app, "Parameters & configurations", bar).selected);
         assert!(!ribbon::control(app, "Feature tree", bar).selected);
         assert!((app.state().state.viewport.rect.width() - with_pane).abs() < 1.0, "both share one side area");
         case.frame(app, "values");
@@ -132,7 +132,7 @@ fn strip_icons_show_the_tree_or_values_and_hide_the_side_area() {
         ribbon::click_at(app, values.rect.center());
         app.run_steps(12);
         assert!(!app.state().state.tree_shown(), "the shown pane's icon hides the side area");
-        assert!(!ribbon::control(app, "Values", bar).selected);
+        assert!(!ribbon::control(app, "Parameters & configurations", bar).selected);
         let wide = app.state().state.viewport.rect.width();
         assert!(wide > with_pane + 200.0);
         case.frame(app, "hidden");

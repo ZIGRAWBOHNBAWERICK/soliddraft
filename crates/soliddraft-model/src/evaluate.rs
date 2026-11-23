@@ -1144,7 +1144,10 @@ impl Document {
         };
         let Some(normal) = face_info.normal else {
             let label = if h.face.label.is_empty() { "selected face" } else { h.face.label.as_str() };
-            return Built::failed(current, format!("Holes can only be placed on a planar face; {label} is not planar."));
+            return Built::failed(
+                current,
+                format!("Holes can only be placed on a planar face; {label} is not planar."),
+            );
         };
         let plane = plane_on_face(normal, face_info.centroid);
         let flip = h.wizard.as_ref().is_some_and(|w| w.flip_direction);
@@ -1228,7 +1231,10 @@ impl Document {
                     };
                     let depth = (vinfo.position - plane.origin).dot(drill_dir);
                     if !(depth.is_finite() && depth > 1e-6) {
-                        return Built::failed(current, "The target vertex does not lie ahead of the hole's start face.");
+                        return Built::failed(
+                            current,
+                            "The target vertex does not lie ahead of the hole's start face.",
+                        );
                     }
                     ResolvedEnd::Blind(depth)
                 }
@@ -1244,14 +1250,23 @@ impl Document {
                         return Built::failed(current, "the target surface is no longer in the body");
                     };
                     let Some(tnormal) = tinfo.normal else {
-                        return Built::failed(current, "Up to surface on a non-parallel or curved face is coming soon.");
+                        return Built::failed(
+                            current,
+                            "Up to surface on a non-parallel or curved face is coming soon.",
+                        );
                     };
                     if tnormal.dot(plane.normal).abs() < 1.0 - 1e-6 {
-                        return Built::failed(current, "Up to surface on a non-parallel or curved face is coming soon.");
+                        return Built::failed(
+                            current,
+                            "Up to surface on a non-parallel or curved face is coming soon.",
+                        );
                     }
                     let depth = (tinfo.centroid - plane.origin).dot(drill_dir);
                     if !(depth.is_finite() && depth > 1e-6) {
-                        return Built::failed(current, "The target surface does not lie ahead of the hole's start face.");
+                        return Built::failed(
+                            current,
+                            "The target surface does not lie ahead of the hole's start face.",
+                        );
                     }
                     ResolvedEnd::Blind(depth)
                 }
@@ -1426,8 +1441,7 @@ impl Document {
                 let tag = |step: &str| OpTag::new(format!("{}.slot{i}.{step}", f.id));
                 let tool = if up_to_next {
                     let sheet = k.create_body_from_profile(&tag("profile"), &profile)?;
-                    let swept =
-                        k.extrude_to(&tag("sweep"), sheet.body, body, Some(drill_dir), &ExtrudeLimit::UpToNext);
+                    let swept = k.extrude_to(&tag("sweep"), sheet.body, body, Some(drill_dir), &ExtrudeLimit::UpToNext);
                     let _ = k.release(sheet.body);
                     swept?
                 } else if !flip {

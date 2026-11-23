@@ -109,7 +109,9 @@ impl HoleStandard {
     pub const fn source_summary(self) -> &'static str {
         match self {
             Self::Iso => "ISO 273, ISO 4762, DIN 974-1, ISO 4014, ISO 10642, DIN 74, ISO 262, ISO 2306, ISO 7-1",
-            Self::AnsiMetric => "ASME B18.2.8, ASME B18.3.1M, ASME B18.2.3.5M, ASME B18.3.5M, ASME B1.13M, ASME B1.20.1",
+            Self::AnsiMetric => {
+                "ASME B18.2.8, ASME B18.3.1M, ASME B18.2.3.5M, ASME B18.3.5M, ASME B1.13M, ASME B1.20.1"
+            }
             Self::AnsiInch => "ASME B18.2.8, ASME B18.3, ASME B18.2.1, ASME B1.1, ASME B1.20.1",
             Self::Din => "DIN EN 20273, DIN 912, DIN 974-1, DIN 931, DIN 7991, DIN 74, DIN 13-1, DIN 336, DIN 2999",
             Self::Jis => "JIS B 1001, JIS B 1176, JIS B 1180, JIS B 1194, JIS B 0205, JIS B 0203",
@@ -715,16 +717,9 @@ impl HoleWizardSpec {
             }),
             HoleType::Simple | HoleType::StraightTap | HoleType::TaperedTap | HoleType::Slot => None,
         };
-        let thread = if self.hole_type.is_tapped() && self.options.cosmetic_thread {
-            row.hole_thread(None)
-        } else {
-            None
-        };
-        let tip = if self.hole_type.is_slot() {
-            HoleTip::Flat
-        } else {
-            HoleTip::Cone { angle_deg: row.tip_angle_deg }
-        };
+        let thread =
+            if self.hole_type.is_tapped() && self.options.cosmetic_thread { row.hole_thread(None) } else { None };
+        let tip = if self.hole_type.is_slot() { HoleTip::Flat } else { HoleTip::Cone { angle_deg: row.tip_angle_deg } };
         ResolvedHoleValues {
             diameter,
             tip,
@@ -1792,11 +1787,7 @@ mod tests {
             .iter()
             .find(|t| t.id == fastener)
             .unwrap_or_else(|| panic!("missing fastener {fastener} in {std:?}/{ty:?}"));
-        table
-            .sizes
-            .iter()
-            .find(|r| r.name == size)
-            .unwrap_or_else(|| panic!("missing size {size} in {fastener}"))
+        table.sizes.iter().find(|r| r.name == size).unwrap_or_else(|| panic!("missing size {size} in {fastener}"))
     }
 
     #[test]
@@ -1880,7 +1871,10 @@ mod tests {
 
         // JIS B 1176 SHCS counterbore: M5 -> Ø9.5, M8 -> Ø14.0, M10 -> Ø17.5
         assert_eq!(find(HoleStandard::Jis, HoleType::Counterbore, "jis_b1176_shcs", "M5").cbore_diameter_mm, Some(9.5));
-        assert_eq!(find(HoleStandard::Jis, HoleType::Counterbore, "jis_b1176_shcs", "M8").cbore_diameter_mm, Some(14.0));
+        assert_eq!(
+            find(HoleStandard::Jis, HoleType::Counterbore, "jis_b1176_shcs", "M8").cbore_diameter_mm,
+            Some(14.0)
+        );
         assert_eq!(
             find(HoleStandard::Jis, HoleType::Counterbore, "jis_b1176_shcs", "M10").cbore_diameter_mm,
             Some(17.5)

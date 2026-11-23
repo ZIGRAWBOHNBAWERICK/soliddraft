@@ -17,7 +17,7 @@ use ribbon::App;
 use soliddraft_app::document::{Document, FeatureKind, HoleParams, HoleWizardTab};
 use soliddraft_app::settings::{self, Store, store::Memory};
 use soliddraft_app::state::{AppAction, EditorParams};
-use soliddraft_kernel_api::{HoleHead, SurfaceKind, Vec3};
+use soliddraft_kernel_api::{HoleHead, SurfaceKind};
 use soliddraft_model::file::HOLE_WIZARD_FORMAT;
 use soliddraft_model::hole_wizard::{HoleEndCondition, HoleFit, HoleStandard, HoleType};
 use ux_tools::{STANDARD, launch, settle};
@@ -30,7 +30,7 @@ fn click(app: &mut App, label: &str) {
 
 fn hole_params(app: &App) -> HoleParams {
     match &app.state().state.editor.as_ref().expect("hole editor open").params {
-        EditorParams::Hole(h) => h.clone(),
+        EditorParams::Hole(h) => (**h).clone(),
         other => panic!("{other:?}"),
     }
 }
@@ -50,9 +50,24 @@ fn hole_wizard_iso_m6_four_holes_edit_positions_switch_ansi_inch_favorites_save_
     settle(&mut app);
     let plate_vol = volume(&app.state().state.doc);
 
-    // 1. Open Hole Wizard and pick the plate's top face.
+    // 1. Open Hole Wizard and pick the plate's top face. The panel takes the tree's place
+    // and keeps its width, so the view neither shrinks to a sliver nor keeps moving.
+    let view_before = app.state().state.viewport.rect;
     ribbon::run_command(&mut app, "hole");
     settle(&mut app);
+    let view = app.state().state.viewport.rect;
+    assert!(view.width() >= view_before.width() - 1.0, "the view keeps its width: {view_before:?} -> {view:?}");
+    settle(&mut app);
+    assert_eq!(app.state().state.viewport.rect, view, "the Hole Wizard panel keeps its width");
+    // A new hole shows the wizard size its values amount to: ISO M6 normal fit, 6.6 mm.
+    {
+        let p = hole_params(&app);
+        assert!(p.wizard.is_none());
+        let shown = p.derived_wizard();
+        assert_eq!((shown.standard, shown.hole_type, shown.size.as_str()), (HoleStandard::Iso, HoleType::Simple, "M6"));
+        assert!(!shown.custom_sizing);
+        assert_eq!(p.diameter, 6.6);
+    }
     ribbon::click_world(&mut app, glam::Vec3::new(-20.0, -10.0, 20.0));
     settle(&mut app);
     assert!(hole_params(&app).face.is_some());
@@ -147,12 +162,23 @@ fn hole_wizard_iso_m6_four_holes_edit_positions_switch_ansi_inch_favorites_save_
         let mut sk = app.state().state.doc.feature(sketch_id).unwrap().sketch().unwrap().sketch.clone();
         sk.add(soliddraft_sketch::EntityKind::Point { p: soliddraft_sketch::P2::new(0.0, 0.0) }, false);
         soliddraft_sketch::solve::solve(&mut sk, None, true);
-        app.state_mut().state.push(AppAction::Command(soliddraft_app::document::Command::EditSketch {
-            id: sketch_id,
-            sketch: sk,
-        }));
+        app.state_mut()
+            .state
+            .push(AppAction::Command(soliddraft_app::document::Command::EditSketch { id: sketch_id, sketch: sk }));
     }
+    // The queued edit runs on the next frame; `rebuilt` alone returns at once while
+    // nothing is pending yet.
+    settle(&mut app);
     ux_tools::rebuilt(&mut app);
+    {
+        let model = app.state().state.doc.model();
+        let soliddraft_model::FeatureKind::Hole(hole) =
+            &model.feature(soliddraft_model::FeatureId(hole_id as _)).unwrap().kind
+        else {
+            panic!("the hole is a hole")
+        };
+        assert_eq!(model.hole_points(hole).unwrap().len(), 5, "the hole follows its position sketch");
+    }
     let vol_iso_5 = volume(&app.state().state.doc);
     assert!(vol_iso_5 < vol_iso_4, "editing position sketch adds 5th hole and reduces volume");
 
@@ -214,12 +240,7 @@ fn hole_wizard_through_all_tapped_hole_with_cosmetic_thread_and_non_planar_refus
     assert_eq!(pmi[0].callout(), "M6x1-6H THRU");
 
     // Now test refusing a non-planar face (the cylindrical wall of the hole we just drilled!).
-    let cyl_face = doc
-        .faces
-        .iter()
-        .find(|f| f.surface == SurfaceKind::Cylinder)
-        .expect("cylindrical hole wall")
-        .id;
+    let cyl_face = doc.faces.iter().find(|f| f.surface == SurfaceKind::Cylinder).expect("cylindrical hole wall").id;
     ribbon::run_command(&mut app, "hole");
     settle(&mut app);
     app.state_mut().state.push(AppAction::Select(Some(soliddraft_app::document::Selection::Face(cyl_face))));

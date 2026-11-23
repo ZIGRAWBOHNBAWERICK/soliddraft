@@ -68,7 +68,7 @@ fn pick(app: &mut App, combo: &str, entry: &str) {
 
 fn editing(app: &App) -> soliddraft_app::document::HoleParams {
     match &app.state().state.editor.as_ref().expect("the hole form is open").params {
-        EditorParams::Hole(h) => h.clone(),
+        EditorParams::Hole(h) => (**h).clone(),
         other => panic!("{other:?}"),
     }
 }

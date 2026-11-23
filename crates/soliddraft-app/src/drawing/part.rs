@@ -164,9 +164,7 @@ impl Namer for PartContext<'_> {
             Some(FeatureKind::Cut(p)) => {
                 format!("{count}{}{diameter} {} {}", symbols.diameter, symbols.depth, trim(format_value(p.depth, 2)))
             }
-            Some(FeatureKind::Hole(h)) => {
-                format_hole_callout(h, &count, symbols)
-            }
+            Some(FeatureKind::Hole(h)) => format_hole_callout(h, &count, symbols),
             _ => format!("{count}{}{diameter}", symbols.diameter),
         })
     }
@@ -275,72 +273,6 @@ pub fn format_hole_callout(h: &soliddraft_model::HoleFeature, count: &str, symbo
     lines.join("\n")
 }
 
-#[cfg(test)]
-mod hole_callout_tests {
-    use super::*;
-    use soliddraft_kernel_api::{HoleDepth, HoleHead, HoleTip, SurfaceKind, Vec3};
-    use soliddraft_model::hole_wizard::{
-        CalloutParam, CalloutTolerance, HoleStandard, HoleType, HoleWizardSpec, ToleranceMode,
-    };
-    use soliddraft_model::{FaceFingerprint, FaceRef, FeatureId, Generator, HoleFeature};
-
-    fn dummy_face() -> FaceRef {
-        FaceRef {
-            feature: FeatureId(1),
-            label: "Top".into(),
-            generator: Generator::EndCap,
-            ordinal: 0,
-            fingerprint: FaceFingerprint {
-                surface: SurfaceKind::Plane,
-                normal: Some(Vec3::Z),
-                centroid: Vec3::ZERO,
-                area: 100.0,
-            },
-        }
-    }
-
-    #[test]
-    fn counterbore_slot_and_tapped_hole_wizard_callouts_include_head_and_tolerances() {
-        let symbols = &library::template("iso-a3").style_file().symbols;
-        let mut spec = HoleWizardSpec::new(HoleStandard::Iso, HoleType::Counterbore);
-        spec.set_tolerance(CalloutTolerance {
-            param: CalloutParam::CounterboreDepth,
-            mode: ToleranceMode::Bilateral { upper: 0.1, lower: -0.05 },
-            precision: 2,
-        });
-        let cb = HoleFeature {
-            face: dummy_face(),
-            points: vec![],
-            diameter: 6.6,
-            depth: HoleDepth::Through,
-            tip: HoleTip::Flat,
-            head: Some(HoleHead::Counterbore { diameter: 11.0, depth: 6.4 }),
-            thread: None,
-            sketch: None,
-            wizard: Some(spec),
-        };
-        let text = format_hole_callout(&cb, "4× ", symbols);
-        assert!(text.contains("4× Ø6.6 THRU"), "{text}");
-        assert!(text.contains("Ø11") && text.contains("6.40 +0.10/-0.05"), "{text}");
-
-        let tap_spec = HoleWizardSpec::new(HoleStandard::AnsiInch, HoleType::StraightTap);
-        let resolved = tap_spec.resolve_defaults();
-        let tapped = HoleFeature {
-            face: dummy_face(),
-            points: vec![],
-            diameter: resolved.diameter,
-            depth: HoleDepth::Through,
-            tip: resolved.tip,
-            head: None,
-            thread: resolved.thread,
-            sketch: None,
-            wizard: Some(tap_spec),
-        };
-        let tap_text = format_hole_callout(&tapped, "2× ", symbols);
-        assert_eq!(tap_text, "2× 1/4-20 UNC-2B THRU");
-    }
-}
-
 /// The hole callout of a circle in the drawing's own style.
 pub fn hole_callout(ctx: &PartContext<'_>, circle: &CircleInfo, projected: &Projected, template: &str) -> String {
     let symbols = &library::template(template).style_file().symbols;
@@ -415,4 +347,70 @@ fn sketch_circles(doc: &Document, sketch: u64) -> Vec<(Vec3, f64)> {
             _ => None,
         })
         .collect()
+}
+
+#[cfg(test)]
+mod hole_callout_tests {
+    use super::*;
+    use soliddraft_kernel_api::{HoleDepth, HoleHead, HoleTip, SurfaceKind, Vec3};
+    use soliddraft_model::hole_wizard::{
+        CalloutParam, CalloutTolerance, HoleStandard, HoleType, HoleWizardSpec, ToleranceMode,
+    };
+    use soliddraft_model::{FaceFingerprint, FaceRef, FeatureId, Generator, HoleFeature};
+
+    fn dummy_face() -> FaceRef {
+        FaceRef {
+            feature: FeatureId(1),
+            label: "Top".into(),
+            generator: Generator::EndCap,
+            ordinal: 0,
+            fingerprint: FaceFingerprint {
+                surface: SurfaceKind::Plane,
+                normal: Some(Vec3::Z),
+                centroid: Vec3::ZERO,
+                area: 100.0,
+            },
+        }
+    }
+
+    #[test]
+    fn counterbore_slot_and_tapped_hole_wizard_callouts_include_head_and_tolerances() {
+        let symbols = &library::template("iso-a3").style_file().symbols;
+        let mut spec = HoleWizardSpec::new(HoleStandard::Iso, HoleType::Counterbore);
+        spec.set_tolerance(CalloutTolerance {
+            param: CalloutParam::CounterboreDepth,
+            mode: ToleranceMode::Bilateral { upper: 0.1, lower: -0.05 },
+            precision: 2,
+        });
+        let cb = HoleFeature {
+            face: dummy_face(),
+            points: vec![],
+            diameter: 6.6,
+            depth: HoleDepth::Through,
+            tip: HoleTip::Flat,
+            head: Some(HoleHead::Counterbore { diameter: 11.0, depth: 6.4 }),
+            thread: None,
+            sketch: None,
+            wizard: Some(spec),
+        };
+        let text = format_hole_callout(&cb, "4× ", symbols);
+        assert!(text.contains("4× Ø6.6 THRU"), "{text}");
+        assert!(text.contains("Ø11") && text.contains("6.40 +0.10/-0.05"), "{text}");
+
+        let tap_spec = HoleWizardSpec::new(HoleStandard::AnsiInch, HoleType::StraightTap);
+        let resolved = tap_spec.resolve_defaults();
+        let tapped = HoleFeature {
+            face: dummy_face(),
+            points: vec![],
+            diameter: resolved.diameter,
+            depth: HoleDepth::Through,
+            tip: resolved.tip,
+            head: None,
+            thread: resolved.thread,
+            sketch: None,
+            wizard: Some(tap_spec),
+        };
+        let tap_text = format_hole_callout(&tapped, "2× ", symbols);
+        assert_eq!(tap_text, "2× 1/4-20 UNC-2B THRU");
+    }
 }

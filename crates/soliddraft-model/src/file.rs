@@ -196,9 +196,8 @@ impl Document {
     }
 
     fn recipe(&self) -> Recipe {
-        let uses_hole_wizard = self.features.iter().any(|f| {
-            matches!(&f.kind, crate::FeatureKind::Hole(h) if h.uses_wizard_format())
-        });
+        let uses_hole_wizard =
+            self.features.iter().any(|f| matches!(&f.kind, crate::FeatureKind::Hole(h) if h.uses_wizard_format()));
         let format = if uses_hole_wizard {
             HOLE_WIZARD_FORMAT
         } else if self.next_body > 1 {

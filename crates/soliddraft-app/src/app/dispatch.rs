@@ -56,11 +56,11 @@ impl SolidDraftApp {
 
     /// Closes the open editor, restoring the display the editor rolled back.
     pub(super) fn close_editor(&mut self) -> Option<FeatureEditor> {
-        if self.state.sketch.as_ref().is_some_and(|s| s.feature == crate::hole_wizard_panel::INLINE_POSITION_SKETCH_ID) {
-            if let Some(session) = self.state.sketch.take() {
-                self.state.viewport.camera.orthographic = session.was_orthographic;
-                self.state.ribbon_tab = crate::state::RibbonTab::Solid;
-            }
+        if let Some(session) =
+            self.state.sketch.take_if(|s| s.feature == crate::hole_wizard_panel::INLINE_POSITION_SKETCH_ID)
+        {
+            self.state.viewport.camera.orthographic = session.was_orthographic;
+            self.state.ribbon_tab = crate::state::RibbonTab::Solid;
         }
         let e = self.state.editor.take()?;
         if e.target.is_some() {
@@ -549,7 +549,7 @@ impl SolidDraftApp {
                     Some(Selection::Face(f)) => self.state.doc.face_ref(f),
                     _ => None,
                 };
-                self.open_editor(None, EditorParams::Hole(HoleParams { face, ..Default::default() }));
+                self.open_editor(None, EditorParams::Hole(Box::new(HoleParams { face, ..Default::default() })));
                 self.state.doc.selection = None;
             }
             AppAction::OpenHolePositionSketch => {
@@ -560,11 +560,8 @@ impl SolidDraftApp {
                     return;
                 };
                 let Some(body) = self.state.doc.model().body() else { return };
-                let Ok(plane) = self
-                    .state
-                    .doc
-                    .model()
-                    .plane_of(&soliddraft_model::PlaneRef::Face { face: face_ref }, body)
+                let Ok(plane) =
+                    self.state.doc.model().plane_of(&soliddraft_model::PlaneRef::Face { face: face_ref }, body)
                 else {
                     self.state.note("The hole's start face is not planar", NoteKind::Error);
                     return;
@@ -775,7 +772,7 @@ impl SolidDraftApp {
                             .and_then(|sid| self.state.doc.feature(u64::from(sid.0)))
                             .and_then(|sf| sf.sketch())
                             .map(|sf| sf.sketch.clone());
-                        EditorParams::Hole(HoleParams::from_model(h, sketch_body))
+                        EditorParams::Hole(Box::new(HoleParams::from_model(h, sketch_body)))
                     }
                     FeatureKind::Pattern(p) => EditorParams::Pattern(p.clone()),
                     FeatureKind::ReferencePlane(p) => EditorParams::ReferencePlane(p.clone()),
@@ -829,10 +826,8 @@ impl SolidDraftApp {
                     self.state.note(why, NoteKind::Error);
                     return;
                 }
-                if let Some(session) = self
-                    .state
-                    .sketch
-                    .take_if(|s| s.feature == crate::hole_wizard_panel::INLINE_POSITION_SKETCH_ID)
+                if let Some(session) =
+                    self.state.sketch.take_if(|s| s.feature == crate::hole_wizard_panel::INLINE_POSITION_SKETCH_ID)
                 {
                     self.state.viewport.camera.orthographic = session.was_orthographic;
                     self.state.ribbon_tab = crate::state::RibbonTab::Solid;
@@ -1074,11 +1069,8 @@ impl SolidDraftApp {
                             }
                             match self.state.doc.face_ref(f) {
                                 Some(r) => {
-                                    let click_uv = self
-                                        .state
-                                        .hover_point
-                                        .zip(self.state.doc.face_plane(f))
-                                        .map(|(at, plane)| {
+                                    let click_uv =
+                                        self.state.hover_point.zip(self.state.doc.face_plane(f)).map(|(at, plane)| {
                                             let at = soliddraft_kernel_api::Vec3::new(
                                                 f64::from(at.x),
                                                 f64::from(at.y),
@@ -1136,19 +1128,15 @@ impl SolidDraftApp {
                                 let model = self.state.doc.model();
                                 let body = model.body()?;
                                 let topo = model.kernel().topology(body).ok()?;
-                                let best = topo
-                                    .vertices
-                                    .iter()
-                                    .min_by(|a, b| {
-                                        (a.position - target)
-                                            .length()
-                                            .total_cmp(&(b.position - target).length())
-                                    })?;
+                                let best = topo.vertices.iter().min_by(|a, b| {
+                                    (a.position - target).length().total_cmp(&(b.position - target).length())
+                                })?;
                                 ((best.position - target).length() < 1e-2).then_some(best.id)
                             });
-                            match resolved.ok_or_else(|| "Selected vertex could not be resolved.".to_owned()).and_then(
-                                |vid| self.state.doc.model().vertex_ref(vid).map_err(|err| err.to_string()),
-                            ) {
+                            match resolved
+                                .ok_or_else(|| "Selected vertex could not be resolved.".to_owned())
+                                .and_then(|vid| self.state.doc.model().vertex_ref(vid).map_err(|err| err.to_string()))
+                            {
                                 Ok(vertex) => {
                                     h.ensure_wizard().end_condition =
                                         soliddraft_model::hole_wizard::HoleEndCondition::UpToVertex { vertex };

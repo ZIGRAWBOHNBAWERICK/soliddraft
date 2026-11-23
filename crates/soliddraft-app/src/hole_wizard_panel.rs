@@ -18,13 +18,18 @@ use soliddraft_model::hole_wizard::{
 /// viewport sketcher before the Hole Wizard is committed.
 pub const INLINE_POSITION_SKETCH_ID: u64 = u64::MAX - 17;
 
+/// Whether a Hole feature editor is open in the part, so the panel shows. Like the
+/// SOLIDWORKS PropertyManager, it then takes the feature tree's place.
+pub fn active(state: &AppState) -> bool {
+    !state.assembly.is_active()
+        && !state.drawing.is_active()
+        && matches!(state.editor.as_ref().map(|e| &e.params), Some(EditorParams::Hole(_)))
+}
+
 /// Mounts the Hole Wizard property panel in the current frame layout whenever a Hole
 /// feature editor is active.
 pub fn panel(root: &mut egui::Ui, state: &mut AppState) {
-    let active = !state.assembly.is_active()
-        && !state.drawing.is_active()
-        && matches!(state.editor.as_ref().map(|e| &e.params), Some(EditorParams::Hole(_)));
-    if !active {
+    if !active(state) {
         return;
     }
     egui::Panel::left("hole_wizard_panel")
@@ -89,8 +94,7 @@ pub fn show_contents(ui: &mut egui::Ui, state: &mut AppState) {
             }
         }
         let pos_btn = ui.selectable_label(pos_selected, format!("Positions ({point_count})"));
-        pos_btn
-            .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Hole Wizard Positions tab"));
+        pos_btn.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Hole Wizard Positions tab"));
         if pos_btn.clicked() && !pos_selected {
             params.wizard_tab = HoleWizardTab::Positions;
             params.picking_target = None;
@@ -111,21 +115,19 @@ pub fn show_contents(ui: &mut egui::Ui, state: &mut AppState) {
         ui.add_space(4.0);
     }
 
-    egui::ScrollArea::vertical().id_salt("hole_wizard_scroll").auto_shrink([false, false]).show(ui, |ui| {
-        match params.wizard_tab {
-            HoleWizardTab::Type => {
-                changed |= show_type_tab(ui, params, &mut note);
-            }
-            HoleWizardTab::Positions => {
-                changed |= show_positions_tab(ui, params, is_inline_sketch, &mut actions, &mut note);
-            }
+    egui::ScrollArea::vertical().id_salt("hole_wizard_scroll").auto_shrink([false, false]).show(ui, |ui| match params
+        .wizard_tab
+    {
+        HoleWizardTab::Type => {
+            changed |= show_type_tab(ui, params, &mut note);
+        }
+        HoleWizardTab::Positions => {
+            changed |= show_positions_tab(ui, params, is_inline_sketch, &mut actions, &mut note);
         }
     });
 
-    if changed {
-        if let Some(ed) = state.editor.as_mut() {
-            ed.refresh(&state.doc);
-        }
+    if changed && let Some(ed) = state.editor.as_mut() {
+        ed.refresh(&state.doc);
     }
     if let Some((msg, kind)) = note {
         state.note(msg, kind);
@@ -135,7 +137,25 @@ pub fn show_contents(ui: &mut egui::Ui, state: &mut AppState) {
     }
 }
 
+/// The Type tab. Before the person first touches the wizard, a hole has no wizard
+/// specification; the tab then shows the one its values amount to, which becomes the
+/// hole's own once anything in the tab changes.
 fn show_type_tab(ui: &mut egui::Ui, params: &mut HoleParams, note: &mut Option<(String, NoteKind)>) -> bool {
+    if params.wizard.is_some() {
+        return show_type_tab_fields(ui, params, note);
+    }
+    let derived = params.derived_wizard();
+    let mut shown = params.clone();
+    shown.wizard = Some(derived.clone());
+    let changed = show_type_tab_fields(ui, &mut shown, note);
+    if !changed && shown.wizard.as_ref() == Some(&derived) {
+        shown.wizard = None;
+    }
+    *params = shown;
+    changed
+}
+
+fn show_type_tab_fields(ui: &mut egui::Ui, params: &mut HoleParams, note: &mut Option<(String, NoteKind)>) -> bool {
     let mut changed = false;
 
     // -----------------------------------------------------------------------
@@ -149,11 +169,8 @@ fn show_type_tab(ui: &mut egui::Ui, params: &mut HoleParams, note: &mut Option<(
             let mut apply_idx: Option<usize> = None;
             let mut delete_idx: Option<usize> = None;
 
-            let selected_text = if favorites.is_empty() {
-                "No favorites saved".to_owned()
-            } else {
-                "Apply a favorite…".to_owned()
-            };
+            let selected_text =
+                if favorites.is_empty() { "No favorites saved".to_owned() } else { "Apply a favorite…".to_owned() };
             egui::ComboBox::from_id_salt("hw_fav_combo")
                 .width(ui.available_width())
                 .selected_text(selected_text)
@@ -183,42 +200,46 @@ fn show_type_tab(ui: &mut egui::Ui, params: &mut HoleParams, note: &mut Option<(
                 *note = Some((format!("Applied favorite \"{}\"", fav.name), NoteKind::Info));
             }
 
+            // The buttons take their own width first and the name field the rest, so the
+            // row never asks for more than the panel has (a wider row grows the panel).
             ui.horizontal(|ui| {
-                let edit = ui.add(
-                    egui::TextEdit::singleline(&mut params.favorite_name)
-                        .desired_width(ui.available_width() - 108.0)
-                        .hint_text("Preset name…"),
-                );
-                edit.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, "Favorite name"));
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let existing = favorites.iter().position(|f| f.name == params.favorite_name.trim());
+                    let del_btn = ui
+                        .add_enabled(existing.is_some(), egui::Button::new("Delete"))
+                        .on_hover_text("Delete the named favorite");
+                    del_btn
+                        .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Delete favorite"));
+                    if del_btn.clicked() {
+                        delete_idx = existing;
+                    }
 
-                let save_btn = ui.button("Save").on_hover_text("Save or update this hole preset");
-                save_btn.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Save favorite"));
-                if save_btn.clicked() {
-                    let name = params.favorite_name.trim().to_owned();
-                    if name.is_empty() {
-                        *note = Some(("Enter a favorite name first".into(), NoteKind::Error));
-                    } else {
-                        let fav = params.to_favorite(name.clone());
-                        if let Some(existing) = favorites.iter_mut().find(|f| f.name == name) {
-                            *existing = fav;
+                    let save_btn = ui.button("Save").on_hover_text("Save or update this hole preset");
+                    save_btn.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Save favorite"));
+                    if save_btn.clicked() {
+                        let name = params.favorite_name.trim().to_owned();
+                        if name.is_empty() {
+                            *note = Some(("Enter a favorite name first".into(), NoteKind::Error));
                         } else {
-                            favorites.push(fav);
-                        }
-                        match crate::settings::save_hole_favorites(&favorites) {
-                            Ok(()) => *note = Some((format!("Saved favorite \"{name}\""), NoteKind::Ok)),
-                            Err(e) => *note = Some((format!("Could not save favorite: {e}"), NoteKind::Error)),
+                            let fav = params.to_favorite(name.clone());
+                            if let Some(existing) = favorites.iter_mut().find(|f| f.name == name) {
+                                *existing = fav;
+                            } else {
+                                favorites.push(fav);
+                            }
+                            match crate::settings::save_hole_favorites(&favorites) {
+                                Ok(()) => *note = Some((format!("Saved favorite \"{name}\""), NoteKind::Ok)),
+                                Err(e) => *note = Some((format!("Could not save favorite: {e}"), NoteKind::Error)),
+                            }
                         }
                     }
-                }
 
-                let existing = favorites.iter().position(|f| f.name == params.favorite_name.trim());
-                let del_btn = ui
-                    .add_enabled(existing.is_some(), egui::Button::new("Delete"))
-                    .on_hover_text("Delete the named favorite");
-                del_btn.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Delete favorite"));
-                if del_btn.clicked() {
-                    delete_idx = existing;
-                }
+                    let edit = ui.add_sized(
+                        vec2(ui.available_width(), ui.spacing().interact_size.y),
+                        egui::TextEdit::singleline(&mut params.favorite_name).hint_text("Preset name…"),
+                    );
+                    edit.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, "Favorite name"));
+                });
             });
 
             if let Some(i) = delete_idx {
@@ -262,11 +283,8 @@ fn show_type_tab(ui: &mut egui::Ui, params: &mut HoleParams, note: &mut Option<(
                     for &ty in row {
                         let selected = params.wizard.is_some() && current_type == ty;
                         let soon = ty.coming_soon_reason().is_some();
-                        let label = if soon {
-                            format!("{}\n(soon)", ty.short_label())
-                        } else {
-                            ty.short_label().to_owned()
-                        };
+                        let label =
+                            if soon { format!("{}\n(soon)", ty.short_label()) } else { ty.short_label().to_owned() };
                         let fill = if selected { theme::accent_soft() } else { theme::field_bg() };
                         let stroke = if selected {
                             Stroke::new(1.5, theme::accent())
@@ -276,11 +294,11 @@ fn show_type_tab(ui: &mut egui::Ui, params: &mut HoleParams, note: &mut Option<(
                         let btn = ui
                             .add_sized(
                                 vec2(tile_w, 34.0),
-                                egui::Button::new(
-                                    RichText::new(label)
-                                        .size(10.5)
-                                        .color(if selected { theme::accent() } else { theme::ink() }),
-                                )
+                                egui::Button::new(RichText::new(label).size(10.5).color(if selected {
+                                    theme::accent()
+                                } else {
+                                    theme::ink()
+                                }))
                                 .fill(fill)
                                 .stroke(stroke)
                                 .corner_radius(CornerRadius::same(4)),
@@ -336,11 +354,8 @@ fn show_type_tab(ui: &mut egui::Ui, params: &mut HoleParams, note: &mut Option<(
             // Fastener type combo box.
             let active_type = params.wizard.as_ref().map(|w| w.hole_type).unwrap_or(current_type);
             let tables = fastener_tables(chosen_std, active_type);
-            let current_fastener = params
-                .wizard
-                .as_ref()
-                .map(|w| w.fastener.clone())
-                .unwrap_or_else(|| tables[0].id.to_owned());
+            let current_fastener =
+                params.wizard.as_ref().map(|w| w.fastener.clone()).unwrap_or_else(|| tables[0].id.to_owned());
             let current_table = tables.iter().find(|t| t.id == current_fastener).unwrap_or(&tables[0]);
             let mut chosen_fastener = current_table.id.to_owned();
             ui.label(RichText::new("Type").size(11.0).color(theme::muted()));
@@ -377,16 +392,10 @@ fn show_type_tab(ui: &mut egui::Ui, params: &mut HoleParams, note: &mut Option<(
                 .as_ref()
                 .map(|w| (w.standard, w.hole_type))
                 .unwrap_or((HoleStandard::Iso, HoleType::Simple));
-            let table = params
-                .wizard
-                .as_ref()
-                .map(|w| w.fastener_table())
-                .unwrap_or_else(|| &fastener_tables(std, htype)[0]);
-            let current_size = params
-                .wizard
-                .as_ref()
-                .map(|w| w.size.clone())
-                .unwrap_or_else(|| table.sizes[0].name.to_owned());
+            let table =
+                params.wizard.as_ref().map(|w| w.fastener_table()).unwrap_or_else(|| &fastener_tables(std, htype)[0]);
+            let current_size =
+                params.wizard.as_ref().map(|w| w.size.clone()).unwrap_or_else(|| table.sizes[0].name.to_owned());
             let mut chosen_size = current_size.clone();
 
             ui.label(RichText::new("Size").size(11.0).color(theme::muted()));
@@ -437,9 +446,7 @@ fn show_type_tab(ui: &mut egui::Ui, params: &mut HoleParams, note: &mut Option<(
                 let mut angle = params.wizard.as_ref().map(|w| w.slot_angle_deg).unwrap_or(0.0);
                 ui.horizontal(|ui| {
                     ui.label("Slot length");
-                    let r = ui.add(
-                        egui::DragValue::new(&mut length).speed(0.5).range(0.1..=1000.0).suffix(" mm"),
-                    );
+                    let r = ui.add(egui::DragValue::new(&mut length).speed(0.5).range(0.1..=1000.0).suffix(" mm"));
                     r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::DragValue, true, "Slot length"));
                     if r.changed() {
                         params.ensure_wizard().slot_length = Some(length);
@@ -514,11 +521,7 @@ fn show_type_tab(ui: &mut egui::Ui, params: &mut HoleParams, note: &mut Option<(
                                     .suffix(" mm"),
                             );
                             r.widget_info(|| {
-                                egui::WidgetInfo::labeled(
-                                    egui::WidgetType::DragValue,
-                                    true,
-                                    "Wizard counterbore depth",
-                                )
+                                egui::WidgetInfo::labeled(egui::WidgetType::DragValue, true, "Wizard counterbore depth")
                             });
                             if r.changed() {
                                 mark_custom = true;
@@ -550,15 +553,9 @@ fn show_type_tab(ui: &mut egui::Ui, params: &mut HoleParams, note: &mut Option<(
                         });
                         ui.horizontal(|ui| {
                             ui.label("CSink angle");
-                            let r = ui.add(
-                                egui::DragValue::new(angle_deg).speed(1.0).range(10.0..=175.0).suffix("°"),
-                            );
+                            let r = ui.add(egui::DragValue::new(angle_deg).speed(1.0).range(10.0..=175.0).suffix("°"));
                             r.widget_info(|| {
-                                egui::WidgetInfo::labeled(
-                                    egui::WidgetType::DragValue,
-                                    true,
-                                    "Wizard countersink angle",
-                                )
+                                egui::WidgetInfo::labeled(egui::WidgetType::DragValue, true, "Wizard countersink angle")
                             });
                             if r.changed() {
                                 mark_custom = true;
@@ -612,10 +609,11 @@ fn show_type_tab(ui: &mut egui::Ui, params: &mut HoleParams, note: &mut Option<(
         .id_salt("hw_end")
         .default_open(true)
         .show(ui, |ui| {
-            let current_end = params.wizard.as_ref().map(|w| w.end_condition.clone()).unwrap_or_else(|| match params.depth {
-                HoleDepth::Through => HoleEndCondition::ThroughAll,
-                HoleDepth::Blind { depth } => HoleEndCondition::Blind { depth },
-            });
+            let current_end =
+                params.wizard.as_ref().map(|w| w.end_condition.clone()).unwrap_or_else(|| match params.depth {
+                    HoleDepth::Through => HoleEndCondition::ThroughAll,
+                    HoleDepth::Blind { depth } => HoleEndCondition::Blind { depth },
+                });
             let end_kind = match &current_end {
                 HoleEndCondition::Blind { .. } => 0,
                 HoleEndCondition::ThroughAll => 1,
@@ -625,14 +623,7 @@ fn show_type_tab(ui: &mut egui::Ui, params: &mut HoleParams, note: &mut Option<(
                 HoleEndCondition::OffsetFromSurface { .. } => 5,
             };
             let mut chosen_kind = end_kind;
-            let labels = [
-                "Blind",
-                "Through All",
-                "Up To Next",
-                "Up To Vertex",
-                "Up To Surface",
-                "Offset From Surface",
-            ];
+            let labels = ["Blind", "Through All", "Up To Next", "Up To Vertex", "Up To Surface", "Offset From Surface"];
             egui::ComboBox::from_id_salt("hw_end_combo")
                 .width(ui.available_width())
                 .selected_text(labels[chosen_kind])
@@ -693,9 +684,7 @@ fn show_type_tab(ui: &mut egui::Ui, params: &mut HoleParams, note: &mut Option<(
                     HoleEndCondition::Blind { depth } => {
                         ui.horizontal(|ui| {
                             ui.label("Depth");
-                            let r = ui.add(
-                                egui::DragValue::new(depth).speed(0.5).range(0.1..=5000.0).suffix(" mm"),
-                            );
+                            let r = ui.add(egui::DragValue::new(depth).speed(0.5).range(0.1..=5000.0).suffix(" mm"));
                             r.widget_info(|| {
                                 egui::WidgetInfo::labeled(egui::WidgetType::DragValue, true, "Wizard Blind Depth")
                             });
@@ -710,11 +699,7 @@ fn show_type_tab(ui: &mut egui::Ui, params: &mut HoleParams, note: &mut Option<(
                         if ui
                             .selectable_label(
                                 picking,
-                                if vertex.label.is_empty() {
-                                    "Click a vertex in viewport…"
-                                } else {
-                                    &vertex.label
-                                },
+                                if vertex.label.is_empty() { "Click a vertex in viewport…" } else { &vertex.label },
                             )
                             .clicked()
                         {
@@ -724,10 +709,7 @@ fn show_type_tab(ui: &mut egui::Ui, params: &mut HoleParams, note: &mut Option<(
                     HoleEndCondition::UpToSurface { face } => {
                         let picking = params.picking_target == Some(HolePickTarget::Surface);
                         if ui
-                            .selectable_label(
-                                picking,
-                                if picking { "Click target planar face…" } else { &face.label },
-                            )
+                            .selectable_label(picking, if picking { "Click target planar face…" } else { &face.label })
                             .clicked()
                         {
                             params.picking_target = if picking { None } else { Some(HolePickTarget::Surface) };
@@ -736,10 +718,7 @@ fn show_type_tab(ui: &mut egui::Ui, params: &mut HoleParams, note: &mut Option<(
                     HoleEndCondition::OffsetFromSurface { face, offset, reverse_offset } => {
                         let picking = params.picking_target == Some(HolePickTarget::Surface);
                         if ui
-                            .selectable_label(
-                                picking,
-                                if picking { "Click target planar face…" } else { &face.label },
-                            )
+                            .selectable_label(picking, if picking { "Click target planar face…" } else { &face.label })
                             .clicked()
                         {
                             params.picking_target = if picking { None } else { Some(HolePickTarget::Surface) };
@@ -837,9 +816,7 @@ fn show_type_tab(ui: &mut egui::Ui, params: &mut HoleParams, note: &mut Option<(
                     && let Some(csk) = &mut w.options.under_head_csk
                 {
                     changed |= csk_fields(ui, "under", csk);
-                    ui.label(
-                        RichText::new("Under head countersink is coming soon.").size(10.5).color(theme::warn()),
-                    );
+                    ui.label(RichText::new("Under head countersink is coming soon.").size(10.5).color(theme::warn()));
                 }
             }
 
@@ -861,7 +838,7 @@ fn show_type_tab(ui: &mut egui::Ui, params: &mut HoleParams, note: &mut Option<(
             // Cosmetic thread controls for tapped holes.
             if htype.is_tapped() {
                 ui.separator();
-                let mut cos = params.wizard.as_ref().map_or(true, |w| w.options.cosmetic_thread);
+                let mut cos = params.wizard.as_ref().is_none_or(|w| w.options.cosmetic_thread);
                 if ui.checkbox(&mut cos, "Cosmetic thread").changed() {
                     params.ensure_wizard().options.cosmetic_thread = cos;
                     if cos {
@@ -874,9 +851,7 @@ fn show_type_tab(ui: &mut egui::Ui, params: &mut HoleParams, note: &mut Option<(
                 }
                 if let Some(thread) = &mut params.thread {
                     ui.label(
-                        RichText::new(format!("Thread: {}", thread.designation()))
-                            .size(11.5)
-                            .color(theme::accent()),
+                        RichText::new(format!("Thread: {}", thread.designation())).size(11.5).color(theme::accent()),
                     );
                     let mut full = thread.length.is_none();
                     let cb = ui.checkbox(&mut full, "Full thread depth");
@@ -1037,9 +1012,11 @@ fn csk_fields(ui: &mut egui::Ui, salt: &str, csk: &mut CountersinkOption) -> boo
     ui.push_id(salt, |ui| {
         ui.horizontal(|ui| {
             ui.label("Ø");
-            changed |= ui.add(egui::DragValue::new(&mut csk.diameter).speed(0.1).range(0.2..=600.0).suffix(" mm")).changed();
+            changed |=
+                ui.add(egui::DragValue::new(&mut csk.diameter).speed(0.1).range(0.2..=600.0).suffix(" mm")).changed();
             ui.label("∠");
-            changed |= ui.add(egui::DragValue::new(&mut csk.angle_deg).speed(1.0).range(10.0..=175.0).suffix("°")).changed();
+            changed |=
+                ui.add(egui::DragValue::new(&mut csk.angle_deg).speed(1.0).range(10.0..=175.0).suffix("°")).changed();
         });
     });
     changed
@@ -1060,9 +1037,11 @@ fn show_positions_tab(
         Some(f) => {
             ui.label(RichText::new(&f.label).color(theme::accent()));
             ui.label(
-                RichText::new("Click anywhere on the face in the viewport to place holes, or edit the position sketch.")
-                    .size(10.5)
-                    .color(theme::muted()),
+                RichText::new(
+                    "Click anywhere on the face in the viewport to place holes, or edit the position sketch.",
+                )
+                .size(10.5)
+                .color(theme::muted()),
             );
         }
         None => {
@@ -1154,9 +1133,8 @@ fn show_positions_tab(
                 ui.add(egui::DragValue::new(&mut params.lin_pat.spacing_y).speed(1.0).suffix(" mm"));
             });
             let lin_btn = ui.button("Apply linear pattern");
-            lin_btn.widget_info(|| {
-                egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Apply linear hole pattern")
-            });
+            lin_btn
+                .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Apply linear hole pattern"));
             if lin_btn.clicked() {
                 match params.apply_linear_point_pattern() {
                     Ok(()) => {
@@ -1199,51 +1177,51 @@ fn show_positions_tab(
     ui.add_space(6.0);
 
     // 4. Direct point coordinates list.
-    egui::CollapsingHeader::new(RichText::new(format!("Hole Points ({})", params.points.len())).family(theme::semibold()))
-        .id_salt("hw_pos_list")
-        .default_open(true)
-        .show(ui, |ui| {
-            let mut remove = None;
-            let mut edits: Vec<(usize, crate::sketch::P2)> = Vec::new();
-            for (i, pt) in params.points.iter().enumerate() {
-                let mut u = pt.u;
-                let mut v = pt.v;
-                ui.horizontal(|ui| {
-                    ui.label(format!("#{}", i + 1));
-                    let ru = ui.add(egui::DragValue::new(&mut u).speed(0.5).prefix("u ").suffix(" mm"));
-                    let rv = ui.add(egui::DragValue::new(&mut v).speed(0.5).prefix("v ").suffix(" mm"));
-                    if ru.changed() || rv.changed() {
-                        edits.push((i, crate::sketch::P2::new(u, v)));
-                    }
-                    if ui.add_enabled(params.points.len() > 1, egui::Button::new("×")).clicked() {
-                        remove = Some(i);
-                    }
-                });
-            }
-            for (i, p) in edits {
-                params.set_position_point(i, p);
-                changed = true;
-                actions.push(AppAction::SyncHolePositionSketch);
-            }
-            if let Some(i) = remove {
-                params.remove_position_point(i);
-                changed = true;
-                actions.push(AppAction::SyncHolePositionSketch);
-            }
-            let add_btn = ui.button("+ Add hole point");
-            add_btn.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Add hole point"));
-            if add_btn.clicked() {
-                let next = params.points.last().copied().unwrap_or_default();
-                params.add_position_point(crate::sketch::P2::new(next.u + 15.0, next.v));
-                changed = true;
-                actions.push(AppAction::SyncHolePositionSketch);
-            }
-            if !params.points.is_empty() {
-                ui.label(
-                    RichText::new(format!("Hole Ø{} mm", fmt_mm(params.diameter))).size(10.5).color(theme::muted()),
-                );
-            }
-        });
+    egui::CollapsingHeader::new(
+        RichText::new(format!("Hole Points ({})", params.points.len())).family(theme::semibold()),
+    )
+    .id_salt("hw_pos_list")
+    .default_open(true)
+    .show(ui, |ui| {
+        let mut remove = None;
+        let mut edits: Vec<(usize, crate::sketch::P2)> = Vec::new();
+        for (i, pt) in params.points.iter().enumerate() {
+            let mut u = pt.u;
+            let mut v = pt.v;
+            ui.horizontal(|ui| {
+                ui.label(format!("#{}", i + 1));
+                let ru = ui.add(egui::DragValue::new(&mut u).speed(0.5).prefix("u ").suffix(" mm"));
+                let rv = ui.add(egui::DragValue::new(&mut v).speed(0.5).prefix("v ").suffix(" mm"));
+                if ru.changed() || rv.changed() {
+                    edits.push((i, crate::sketch::P2::new(u, v)));
+                }
+                if ui.add_enabled(params.points.len() > 1, egui::Button::new("×")).clicked() {
+                    remove = Some(i);
+                }
+            });
+        }
+        for (i, p) in edits {
+            params.set_position_point(i, p);
+            changed = true;
+            actions.push(AppAction::SyncHolePositionSketch);
+        }
+        if let Some(i) = remove {
+            params.remove_position_point(i);
+            changed = true;
+            actions.push(AppAction::SyncHolePositionSketch);
+        }
+        let add_btn = ui.button("+ Add hole point");
+        add_btn.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Add hole point"));
+        if add_btn.clicked() {
+            let next = params.points.last().copied().unwrap_or_default();
+            params.add_position_point(crate::sketch::P2::new(next.u + 15.0, next.v));
+            changed = true;
+            actions.push(AppAction::SyncHolePositionSketch);
+        }
+        if !params.points.is_empty() {
+            ui.label(RichText::new(format!("Hole Ø{} mm", fmt_mm(params.diameter))).size(10.5).color(theme::muted()));
+        }
+    });
 
     changed
 }

@@ -20,7 +20,8 @@ use soliddraft_model::hole_wizard::{
     HoleWizardSpec, ToleranceMode,
 };
 use soliddraft_model::sketch::{
-    ConstraintKind, EntityId, EntityKind, P2, PointRef, Sketch, SolveStatus, solve::solve,
+    ConstraintKind, EntityId, EntityKind, P2, PointRef, Sketch, SolveStatus,
+    solve::solve,
     tools::{Operation, PatternDirection, PatternSpec},
 };
 use soliddraft_model::{
@@ -138,7 +139,10 @@ fn iso_m6_four_hole_counterbore_edit_positions_switch_to_ansi_inch_save_reopen_a
         "2x2 linear pattern yields 4 hole points"
     );
 
-    let sketch_id = add(&mut d, FeatureKind::Sketch(SketchFeature { plane: SketchPlane::Face { face: top.clone() }, sketch: pos_sketch }));
+    let sketch_id = add(
+        &mut d,
+        FeatureKind::Sketch(SketchFeature { plane: SketchPlane::Face { face: top.clone() }, sketch: pos_sketch }),
+    );
 
     // ISO M6 Socket Head Cap Screw counterbore, Through All.
     let mut spec = HoleWizardSpec::new(HoleStandard::Iso, HoleType::Counterbore);
@@ -155,8 +159,7 @@ fn iso_m6_four_hole_counterbore_edit_positions_switch_to_ansi_inch_save_reopen_a
 
     // Check exact removed volume for 4x ISO M6 SHCS counterbore (Ø6.6 thru 15mm, Ø11.0 x 6.4mm cbore).
     let expected_removed_iso = 4.0
-        * (std::f64::consts::PI * (3.3_f64).powi(2) * (15.0 - 6.4)
-            + std::f64::consts::PI * (5.5_f64).powi(2) * 6.4);
+        * (std::f64::consts::PI * (3.3_f64).powi(2) * (15.0 - 6.4) + std::f64::consts::PI * (5.5_f64).powi(2) * 6.4);
     let vol_iso = volume(&d);
     assert!(
         ((plate_vol - vol_iso) - expected_removed_iso).abs() < 1e-2,
@@ -231,7 +234,10 @@ fn iso_m6_four_hole_counterbore_edit_positions_switch_to_ansi_inch_save_reopen_a
         .expect("outer vertical edge")
         .id;
     let edge_ref = reopened.edge_ref(vertical_edge).unwrap();
-    let fillet = add(&mut reopened, FeatureKind::Fillet(BlendFeature { edges: vec![edge_ref], size: 2.0, other_distance: None }));
+    let fillet = add(
+        &mut reopened,
+        FeatureKind::Fillet(BlendFeature { edges: vec![edge_ref], size: 2.0, other_distance: None }),
+    );
     assert_eq!(reopened.status(fillet), Some(&FeatureStatus::Ok));
     assert!(volume(&reopened) < vol_inch);
 }
@@ -246,7 +252,8 @@ fn through_all_tapped_holes_with_cosmetic_thread_iso_and_ansi_inch() {
     let mut s1 = Sketch::new();
     s1.add(EntityKind::Point { p: P2::new(-25.0, 0.0) }, false);
     s1.add(EntityKind::Point { p: P2::new(-5.0, 0.0) }, false);
-    let sk1 = add(&mut d, FeatureKind::Sketch(SketchFeature { plane: SketchPlane::Face { face: top.clone() }, sketch: s1 }));
+    let sk1 =
+        add(&mut d, FeatureKind::Sketch(SketchFeature { plane: SketchPlane::Face { face: top.clone() }, sketch: s1 }));
 
     let mut iso_tap = HoleWizardSpec::new(HoleStandard::Iso, HoleType::StraightTap);
     iso_tap.size = "M6".into();
@@ -257,7 +264,8 @@ fn through_all_tapped_holes_with_cosmetic_thread_iso_and_ansi_inch() {
     // 2. ANSI Inch 1/4-20 UNC Through-All Straight Tap with cosmetic thread.
     let mut s2 = Sketch::new();
     s2.add(EntityKind::Point { p: P2::new(25.0, 0.0) }, false);
-    let sk2 = add(&mut d, FeatureKind::Sketch(SketchFeature { plane: SketchPlane::Face { face: top.clone() }, sketch: s2 }));
+    let sk2 =
+        add(&mut d, FeatureKind::Sketch(SketchFeature { plane: SketchPlane::Face { face: top.clone() }, sketch: s2 }));
 
     let mut inch_tap = HoleWizardSpec::new(HoleStandard::AnsiInch, HoleType::StraightTap);
     inch_tap.size = "1/4-20".into();
@@ -328,7 +336,8 @@ fn end_conditions_up_to_surface_offset_up_to_vertex_up_to_next_and_near_side_csk
     // 1. Offset from surface: 5 mm short of bottom => 15 mm deep blind hole.
     let mut offset_spec = HoleWizardSpec::new(HoleStandard::Iso, HoleType::Simple);
     offset_spec.size = "M6".into();
-    offset_spec.end_condition = HoleEndCondition::OffsetFromSurface { face: bottom.clone(), offset: 5.0, reverse_offset: false };
+    offset_spec.end_condition =
+        HoleEndCondition::OffsetFromSurface { face: bottom.clone(), offset: 5.0, reverse_offset: false };
     offset_spec.options.near_side_csk = Some(CountersinkOption { diameter: 8.6, angle_deg: 90.0 });
     let mut h_off = hole_from_spec(top.clone(), None, vec![P2::new(-35.0, 0.0)], offset_spec);
     h_off.tip = HoleTip::Flat;
@@ -371,7 +380,13 @@ fn non_planar_face_and_coming_soon_options_refuse_by_name() {
     let mut s = Sketch::new();
     s.circle_at(P2::ZERO, 40.0).unwrap();
     solve(&mut s, None, true);
-    let sk = add(&mut d, FeatureKind::Sketch(SketchFeature { plane: SketchPlane::Datum { datum: DatumPlane::Top, offset: 0.0 }, sketch: s }));
+    let sk = add(
+        &mut d,
+        FeatureKind::Sketch(SketchFeature {
+            plane: SketchPlane::Datum { datum: DatumPlane::Top, offset: 0.0 },
+            sketch: s,
+        }),
+    );
     add(
         &mut d,
         FeatureKind::Extrude(ExtrudeFeature {

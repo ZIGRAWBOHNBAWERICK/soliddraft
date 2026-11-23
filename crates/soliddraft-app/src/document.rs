@@ -514,27 +514,34 @@ impl HoleParams {
         params
     }
 
-    /// Ensures the Hole Wizard specification is populated, initializing from current
-    /// hole values (ISO Counterbore/Countersink/StraightTap/Simple) when absent.
+    /// The Hole Wizard specification these values amount to: an ISO hole of the type the
+    /// head and thread imply, marked as custom sizing when the values are not that size's
+    /// table values. The wizard panel shows it before the person first touches the wizard.
+    pub fn derived_wizard(&self) -> model::hole_wizard::HoleWizardSpec {
+        let hole_type = if self.thread.is_some() {
+            model::hole_wizard::HoleType::StraightTap
+        } else if matches!(self.head, Some(soliddraft_kernel_api::HoleHead::Counterbore { .. })) {
+            model::hole_wizard::HoleType::Counterbore
+        } else if matches!(self.head, Some(soliddraft_kernel_api::HoleHead::Countersink { .. })) {
+            model::hole_wizard::HoleType::Countersink
+        } else {
+            model::hole_wizard::HoleType::Simple
+        };
+        let mut spec = model::hole_wizard::HoleWizardSpec::new(model::hole_wizard::HoleStandard::Iso, hole_type);
+        spec.end_condition = match self.depth {
+            soliddraft_kernel_api::HoleDepth::Through => model::hole_wizard::HoleEndCondition::ThroughAll,
+            soliddraft_kernel_api::HoleDepth::Blind { depth } => model::hole_wizard::HoleEndCondition::Blind { depth },
+        };
+        let table = spec.resolve_defaults();
+        spec.custom_sizing = table.diameter != self.diameter || table.head != self.head;
+        spec
+    }
+
+    /// Ensures the Hole Wizard specification is populated, from [`Self::derived_wizard`]
+    /// when absent.
     pub fn ensure_wizard(&mut self) -> &mut model::hole_wizard::HoleWizardSpec {
         if self.wizard.is_none() {
-            let hole_type = if self.thread.is_some() {
-                model::hole_wizard::HoleType::StraightTap
-            } else if matches!(self.head, Some(soliddraft_kernel_api::HoleHead::Counterbore { .. })) {
-                model::hole_wizard::HoleType::Counterbore
-            } else if matches!(self.head, Some(soliddraft_kernel_api::HoleHead::Countersink { .. })) {
-                model::hole_wizard::HoleType::Countersink
-            } else {
-                model::hole_wizard::HoleType::Simple
-            };
-            let mut spec = model::hole_wizard::HoleWizardSpec::new(model::hole_wizard::HoleStandard::Iso, hole_type);
-            spec.end_condition = match self.depth {
-                soliddraft_kernel_api::HoleDepth::Through => model::hole_wizard::HoleEndCondition::ThroughAll,
-                soliddraft_kernel_api::HoleDepth::Blind { depth } => {
-                    model::hole_wizard::HoleEndCondition::Blind { depth }
-                }
-            };
-            self.wizard = Some(spec);
+            self.wizard = Some(self.derived_wizard());
         }
         self.wizard.as_mut().expect("wizard initialized")
     }
@@ -661,8 +668,10 @@ impl HoleParams {
             .find(|e| e.id != sketch::ORIGIN && !e.construction && matches!(e.kind, sketch::EntityKind::Point { .. }))
             .map(|e| e.id)
             .unwrap_or_else(|| sk.add(sketch::EntityKind::Point { p: sketch::P2::ZERO }, false));
-        let second = (draft.count_y > 1)
-            .then_some(sketch::tools::PatternDirection { step: sketch::P2::new(0.0, draft.spacing_y), count: draft.count_y });
+        let second = (draft.count_y > 1).then_some(sketch::tools::PatternDirection {
+            step: sketch::P2::new(0.0, draft.spacing_y),
+            count: draft.count_y,
+        });
         sk.apply_operation(&sketch::tools::Operation::Pattern {
             entities: vec![seed_id],
             spec: sketch::tools::PatternSpec::Linear {

@@ -564,10 +564,10 @@ impl HoleFeature {
                 Some(HoleHead::Counterbore { diameter, depth: depth + extra })
             }
             Some(other) => Some(other),
-            None => wizard.options.near_side_csk.map(|csk| HoleHead::Countersink {
-                diameter: csk.diameter,
-                angle_deg: csk.angle_deg,
-            }),
+            None => wizard
+                .options
+                .near_side_csk
+                .map(|csk| HoleHead::Countersink { diameter: csk.diameter, angle_deg: csk.angle_deg }),
         }
     }
 

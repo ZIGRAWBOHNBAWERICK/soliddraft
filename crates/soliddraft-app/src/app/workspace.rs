@@ -714,10 +714,13 @@ impl SolidDraftApp {
         if !start {
             crate::tool_palette::panel(root, &mut self.state);
             crate::command_line::panel(root, &mut self.state, &status);
-            if self.state.tree_shown() {
+            // The Hole Wizard takes the tree's place while a hole is edited, as the
+            // SOLIDWORKS PropertyManager does, so the view keeps its width.
+            if crate::hole_wizard_panel::active(&self.state) {
+                crate::hole_wizard_panel::panel(root, &mut self.state);
+            } else if self.state.tree_shown() {
                 self.side_panel(root, Side::Tree, window_width);
             }
-            crate::hole_wizard_panel::panel(root, &mut self.state);
         }
         egui::CentralPanel::default().frame(egui::Frame::new().fill(theme::chrome())).show(root, |ui| {
             if start {

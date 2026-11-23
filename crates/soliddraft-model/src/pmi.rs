@@ -166,7 +166,8 @@ impl Document {
                 continue;
             }
             let effective_depth = hole.wizard.as_ref().map_or(hole.depth, |w| w.legacy_depth());
-            let through = matches!(effective_depth, soliddraft_kernel_api::HoleDepth::Through) && thread.length.is_none();
+            let through =
+                matches!(effective_depth, soliddraft_kernel_api::HoleDepth::Through) && thread.length.is_none();
             let depth = match (thread.length, effective_depth) {
                 (Some(length), _) => Some(length),
                 (None, soliddraft_kernel_api::HoleDepth::Blind { depth }) => Some(depth),

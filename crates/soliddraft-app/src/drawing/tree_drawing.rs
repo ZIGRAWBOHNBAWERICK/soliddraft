@@ -510,7 +510,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
                 let name = table
                     .hole_view
                     .and_then(|id| sheet.view(id))
-                    .map(|v| view_label_in(&s.doc.drawing, &sheet, v))
+                    .map(|v| view_label_in(&s.doc.drawing, sheet, v))
                     .unwrap_or_default();
                 let r = row(
                     ui,

@@ -196,6 +196,7 @@ pub fn articulate(doc: &mut AssemblyDocument) -> Result<Articulation, String> {
     doc.finish_loading();
     let truth = doc.assembly().clone();
     let table = doc.table();
+    let accepted = doc.accepted_worlds();
     let mut notes = Vec::new();
 
     // Links: every part or mesh occurrence that is not suppressed.
@@ -231,7 +232,7 @@ pub fn articulate(doc: &mut AssemblyDocument) -> Result<Articulation, String> {
             [c.r as f64 / 255.0, c.g as f64 / 255.0, c.b as f64 / 255.0]
         });
         bodies.insert(path.clone(), worlds.len());
-        worlds.push(Body { world: mat(&table.world(row)) });
+        worlds.push(Body { world: mat(&accepted[row.0 as usize]) });
         links.push(Link { name, path: Some(path.to_string()), mesh: Some(m), visual: DMat4::IDENTITY, colour });
     }
     if worlds.is_empty() {

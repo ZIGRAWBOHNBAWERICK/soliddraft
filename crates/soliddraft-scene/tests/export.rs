@@ -8,7 +8,7 @@ use std::sync::Arc;
 use glam::{DQuat, DVec3};
 use soliddraft_assembly::{
     Alignment, AssemblyDocument, ComponentId, EndpointSelector, FaceSelector, GeneratorChoice, KernelSource,
-    OpenOptions, Placement,
+    OccurrencePath, OpenOptions, Placement, Step,
 };
 use soliddraft_document::{CacheOnlyStore, DocRef, identify_file};
 use soliddraft_kernel_api::Kernel;
@@ -83,17 +83,20 @@ fn datum(component: ComponentId, plane: &str) -> EndpointSelector {
     EndpointSelector { component, face: FaceSelector::Plane(plane.into()) }
 }
 
+fn options() -> OpenOptions {
+    OpenOptions {
+        display: Some(Arc::new(KernelSource::new(kernel()))),
+        revisions: Some(Arc::new(CacheOnlyStore::new())),
+        ..OpenOptions::default()
+    }
+}
+
 fn rig(dir: &Path) -> AssemblyDocument {
     let (shaft, block) = (dir.join("shaft.dwprt"), dir.join("block.dwprt"));
     part(&shaft, true);
     part(&block, false);
     let file = dir.join("rig.dwasm");
-    let options = OpenOptions {
-        display: Some(Arc::new(KernelSource::new(kernel()))),
-        revisions: Some(Arc::new(CacheOnlyStore::new())),
-        ..OpenOptions::default()
-    };
-    let mut doc = AssemblyDocument::new_with("Rig", options);
+    let mut doc = AssemblyDocument::new_with("Rig", options());
     doc.save(Some(&file)).unwrap();
     let a = doc.insert(reference(&file, &shaft), Placement::IDENTITY).unwrap();
     let b = doc
@@ -121,6 +124,22 @@ fn rig(dir: &Path) -> AssemblyDocument {
     doc.finish_loading();
     doc.save(None).unwrap();
     doc
+}
+
+fn shafts(dir: &Path, name: &str) -> (AssemblyDocument, [ComponentId; 2]) {
+    let shaft = dir.join("shaft.dwprt");
+    part(&shaft, true);
+    let file = dir.join("hinge.dwasm");
+    let mut doc = AssemblyDocument::new_with(name, options());
+    doc.save(Some(&file)).unwrap();
+    let a = doc.insert(reference(&file, &shaft), Placement::IDENTITY).unwrap();
+    let b = doc.insert(reference(&file, &shaft), Placement::IDENTITY).unwrap();
+    doc.finish_loading();
+    (doc, [a, b])
+}
+
+fn component(id: ComponentId) -> OccurrencePath {
+    OccurrencePath::root().child(Step::component(id))
 }
 
 fn check_joints(a: &Articulation) {
@@ -213,4 +232,43 @@ fn urdf_and_usd_carry_the_hinges_the_gear_and_the_placements() {
     assert!(!doc.is_dirty());
     assert!(export::export(&mut doc, &dir.join("out/rig.step")).is_err());
     let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn export_uses_saved_placements_while_exploded_or_dragging() {
+    let dir = folder("accepted");
+    let (mut doc, [a, b]) = shafts(&dir, "Rig");
+    doc.mate_origin("Ground", a, true, false).unwrap();
+    let loose = component(b);
+    doc.add_explode_step(vec![loose.clone()], DVec3::X, 75.0).unwrap();
+    doc.save(None).unwrap();
+    let mut doc = AssemblyDocument::open(dir.join("hinge.dwasm"), options()).unwrap();
+    doc.finish_loading();
+    let row = doc.table().find(&loose).unwrap();
+    let paths = [dir.join("rig.urdf"), dir.join("rig.usda")];
+    let files = |doc: &mut AssemblyDocument| paths.each_ref().map(|p| export::export_files(doc, p).unwrap().1);
+    let accepted = files(&mut doc);
+
+    doc.set_exploded(true).unwrap();
+    assert_eq!(doc.table().world(row).translation, DVec3::X * 75.0);
+    let exploded = files(&mut doc);
+    assert!(doc.is_exploded());
+    assert_eq!(doc.table().world(row).translation, DVec3::X * 75.0);
+
+    doc.begin_drag(loose).unwrap();
+    let later = DVec3::new(30.0, 20.0, 0.0);
+    doc.preview_drag(Placement::translation(later)).unwrap();
+    assert_eq!(doc.table().world(row).translation, later);
+    let preview = files(&mut doc);
+    assert!(doc.dragging());
+    assert_eq!(doc.table().world(row).translation, later);
+    doc.commit_drag().unwrap();
+    assert_ne!(files(&mut doc), accepted, "export includes the drag after committing it");
+    std::fs::remove_dir_all(dir).unwrap();
+    for (format, (expected, (exploded, preview))) in
+        ["URDF", "USD"].into_iter().zip(accepted.iter().zip(exploded.iter().zip(&preview)))
+    {
+        assert!(expected == exploded, "{format} changed with the exploded view");
+        assert!(expected == preview, "{format} changed during a drag preview");
+    }
 }

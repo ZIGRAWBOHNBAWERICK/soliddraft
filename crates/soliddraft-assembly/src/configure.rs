@@ -1,11 +1,13 @@
 //! Configurations and exploded views on an open assembly: each change is one undo step,
 //! and the exploded view is shown by moving rows of the occurrence table, never the truth.
 
+use std::borrow::Cow;
+use std::collections::{BTreeMap, HashMap};
+
 use glam::DVec3;
 
 use crate::configuration::ExplodeStep;
 use crate::document::{AssemblyDocument, Configured, EditError};
-use crate::mates::bodies::Scope;
 use crate::occurrence::{Flags, OccurrenceIndex};
 use crate::path::{OccurrencePath, Step};
 use crate::placement::{Aabb, Placement};
@@ -213,11 +215,11 @@ impl AssemblyDocument {
         self.exploded
     }
 
-    /// Moves the rows of every explode step's occurrences, step by step.
-    pub(crate) fn show_explode(&mut self) {
-        let steps = self.assembly.explode.clone();
-        for step in &steps {
-            let shift = Placement::translation(step.offset());
+    /// Each directly moved row's total shift in the root's frame.
+    fn explode_offsets(&self) -> BTreeMap<OccurrenceIndex, DVec3> {
+        let mut offsets = BTreeMap::new();
+        for step in &self.assembly.explode {
+            let shift = step.offset();
             let mut paths: Vec<&OccurrencePath> = step.occurrences.iter().collect();
             paths.sort();
             paths.dedup();
@@ -228,20 +230,35 @@ impl AssemblyDocument {
                     kept.push(p);
                 }
             }
-            let mut rows = Vec::new();
             for p in kept {
                 let Some(row) = self.table.find(p) else { continue };
+                if row == OccurrenceIndex::ROOT {
+                    continue;
+                }
                 let f = self.table.flags(row);
                 if f.has(Flags::SUPPRESSED) || f.has(Flags::REMOVED) {
                     continue;
                 }
-                let parent = self.table.parent(row).map(|r| self.table.world(r)).unwrap_or_default();
-                let world = shift.compose(&self.table.world(row));
-                rows.push((row, parent.inverse().compose(&world)));
-                self.explode_moved.push(p.clone());
+                *offsets.entry(row).or_insert(DVec3::ZERO) += shift;
             }
-            self.place_rows(&rows);
         }
+        offsets
+    }
+
+    /// Moves the occurrences in the exploded view and keeps their original placements.
+    pub(crate) fn show_explode(&mut self) {
+        let moves: Vec<_> = self
+            .explode_offsets()
+            .into_iter()
+            .map(|(row, offset)| {
+                let local = self.table.local(row);
+                self.explode_moved.push((row, local));
+                let parent = self.table.parent(row).expect("a moved occurrence has a parent");
+                let shift = self.table.world(parent).rotation.inverse() * offset;
+                (row, Placement { translation: local.translation + shift, ..local })
+            })
+            .collect();
+        self.place_rows(&moves);
         self.exploded = true;
     }
 
@@ -251,36 +268,50 @@ impl AssemblyDocument {
             return;
         }
         self.exploded = false;
-        let mut moved = std::mem::take(&mut self.explode_moved);
-        moved.sort();
-        moved.dedup();
-        let rows: Vec<(OccurrenceIndex, Placement)> = moved
-            .iter()
-            .filter_map(|p| {
-                let row = self.table.find(p)?;
-                let local =
-                    Scope::new(&self.assembly, &self.table, &self.store).local(p).unwrap_or(self.table.local(row));
-                Some((row, local))
-            })
-            .collect();
-        self.place_rows(&rows);
+        let moved = std::mem::take(&mut self.explode_moved);
+        self.place_rows(&moved);
+    }
+
+    /// World placements in occurrence-table order, including the root, without viewport previews.
+    pub fn accepted_worlds(&self) -> Cow<'_, [Placement]> {
+        let drag = self.drag.as_ref().map_or(&[][..], |d| d.shown.as_slice());
+        if self.explode_moved.is_empty() && drag.is_empty() {
+            return Cow::Borrowed(self.table.worlds());
+        }
+        let mut locals: HashMap<_, _> = self.explode_moved.iter().copied().collect();
+        locals.extend(drag.iter().filter_map(|(path, pose)| Some((self.table.find(path)?, *pose))));
+        let mut worlds: Vec<Placement> = Vec::with_capacity(self.table.len());
+        for row in (0..self.table.len() as u32).map(OccurrenceIndex) {
+            let local = locals.get(&row).copied().unwrap_or_else(|| self.table.local(row));
+            let world = self.table.parent(row).map_or(local, |p| worlds[p.0 as usize].compose(&local));
+            worlds.push(world);
+        }
+        Cow::Owned(worlds)
     }
 
     /// Where each occurrence of the root's components sits in the exploded view, in the
     /// root's frame, without showing it: the assembled placement for one no step moves.
     pub fn exploded_worlds(&mut self) -> Vec<(OccurrencePath, Placement)> {
-        let shown = self.exploded;
-        if !shown && !self.assembly.explode.is_empty() {
+        if !self.exploded && !self.assembly.explode.is_empty() {
             self.finish_loading();
-            self.show_explode();
         }
-        let out = (1..self.table.len())
-            .map(|r| OccurrenceIndex(r as u32))
-            .filter(|r| !self.table.flags(*r).has(Flags::REMOVED))
-            .map(|r| (self.table.path(r), self.table.world(r)))
-            .collect();
-        if !shown {
-            self.collapse();
+        let worlds = if self.exploded { Cow::Borrowed(self.table.worlds()) } else { self.accepted_worlds() };
+        let mut offsets = vec![DVec3::ZERO; self.table.len()];
+        if !self.exploded {
+            for (row, shift) in self.explode_offsets() {
+                offsets[row.0 as usize] = shift;
+            }
+        }
+        let mut out = Vec::new();
+        for row in (1..self.table.len() as u32).map(OccurrenceIndex) {
+            let i = row.0 as usize;
+            let parent = self.table.parent(row).expect("an occurrence has a parent");
+            let inherited = offsets[parent.0 as usize];
+            offsets[i] += inherited;
+            if !self.table.flags(row).has(Flags::REMOVED) {
+                let world = worlds[i];
+                out.push((self.table.path(row), Placement { translation: world.translation + offsets[i], ..world }));
+            }
         }
         out
     }

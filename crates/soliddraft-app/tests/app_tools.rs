@@ -120,6 +120,51 @@ impl Session {
 }
 
 #[test]
+fn assembly_drawing_uses_accepted_placements_while_exploded() {
+    let dir = std::env::temp_dir().join(format!("soliddraft-drawing-accepted-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut s = Session { state: AppState::new(board_bracket()), ran: BTreeSet::new(), dir: dir.clone() };
+    let part = s.path("bracket.dwprt");
+    let assembly = s.path("brackets.dwasm");
+    let drawing = s.path("brackets.dwdrw");
+    s.call("save", json!({ "path": part }));
+    let inserted = s.call("make_assembly", json!({}));
+    let mover = inserted["assembly"]["components"][0]["path"].as_str().unwrap();
+    s.call("assembly_explode_step", json!({ "paths": [mover], "direction": [1, 0, 0], "distance": 75 }));
+    s.call("assembly_save", json!({ "path": assembly }));
+    s.call("open", json!({ "path": assembly }));
+    s.call("assembly_explode", json!({ "exploded": true }));
+
+    let doc = &mut s.state.assembly.session.as_mut().unwrap().doc;
+    let exact = soliddraft_app::assembly_files::drawing::exact_parts(doc).unwrap();
+    assert!(doc.is_exploded());
+    let model = exact.model();
+    assert_eq!(model.parts.len(), 1);
+    assert_eq!(model.exploded[0].translation.x, 75.0);
+    assert_eq!(model.parts[0].placement.translation.x, 0.0);
+
+    doc.begin_drag(mover.parse().unwrap()).unwrap();
+    let preview = soliddraft_assembly::Placement::translation(glam::DVec3::X * 40.0);
+    doc.preview_drag(preview).unwrap();
+    let exact = soliddraft_app::assembly_files::drawing::exact_parts(doc).unwrap();
+    assert!(doc.dragging());
+    assert_eq!(exact.model().parts[0].placement.translation.x, 0.0);
+    assert_eq!(exact.model().exploded[0].translation.x, 75.0);
+    doc.cancel_drag();
+    doc.set_exploded(true).unwrap();
+
+    let made = s.call("assembly_make_drawing", json!({ "exploded": false }));
+    let front = made["drawing"]["sheets"][0]["views"][1]["id"].clone();
+    s.call("drawing_save", json!({ "path": drawing }));
+    s.call("drawing_close", json!({}));
+    s.call("open", json!({ "path": drawing }));
+    s.call("drawing_rebuild", json!({}));
+    let derived = s.call("drawing_projected", json!({ "view": front, "direction": "right" }));
+    assert!(derived["placed"].is_string(), "{derived}");
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
 fn every_tool_runs_without_a_window_and_undoes_as_its_row_says() {
     let dir = std::env::temp_dir().join(format!("soliddraft-app-tools-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);

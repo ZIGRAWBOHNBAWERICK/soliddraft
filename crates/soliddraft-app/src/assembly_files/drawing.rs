@@ -76,6 +76,7 @@ pub fn exact_parts(doc: &mut AssemblyDocument) -> Result<ExactParts, String> {
     doc.finish_loading();
     let exploded: HashMap<OccurrencePath, Placement> =
         if doc.assembly().explode.is_empty() { HashMap::new() } else { doc.exploded_worlds().into_iter().collect() };
+    let accepted = doc.accepted_worlds().into_owned();
     let path = doc.path().ok_or("save the assembly first: its drawing refers to its file")?;
     let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     let reference = DocRef::new(doc.id(), DocKind::Assembly, name, doc.revision());
@@ -128,7 +129,7 @@ pub fn exact_parts(doc: &mut AssemblyDocument) -> Result<ExactParts, String> {
             (part.kernel().clone(), body)
         };
         let occurrence = doc.table().path(row);
-        let world = doc.table().world(row);
+        let world = accepted[row.0 as usize];
         parts.push(ExactPart {
             kernel,
             body,

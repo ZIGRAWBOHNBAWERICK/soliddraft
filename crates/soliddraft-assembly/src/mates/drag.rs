@@ -9,7 +9,7 @@ pub(crate) struct Drag {
     pub(crate) path: OccurrencePath,
     pub(crate) base: Assembly,
     pub(crate) candidate: Assembly,
-    shown: Vec<(OccurrencePath, Placement)>,
+    pub(crate) shown: Vec<(OccurrencePath, Placement)>,
 }
 impl AssemblyDocument {
     /// Whether a component preview is active.

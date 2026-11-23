@@ -6,7 +6,7 @@
 use crate::icons::{self, Icon};
 use crate::state::{AppAction, AppState, DisplayUnit};
 use crate::theme;
-use egui::{Align2, Color32, CornerRadius, Rect, RectAlign, Sense, Stroke, StrokeKind, pos2, vec2};
+use egui::{Align2, CornerRadius, Rect, RectAlign, Sense, Stroke, StrokeKind, pos2, vec2};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum LengthUnit {
@@ -293,10 +293,10 @@ fn physical_analysis_control(ui: &mut egui::Ui, state: &mut AppState) {
     let mut phys = ui.data(|d| d.get_temp::<PhysicalState>(id).unwrap_or_default());
 
     if !phys.user_overrode_density
-        && let Some(mat) = state.doc.material()
-        && mat.density_kg_m3 > 0.0
+        && let Some(density) = state.doc.material().and_then(|m| m.density_kg_m3)
+        && density > 0.0
     {
-        phys.density = phys.density_unit.from_kg_m3(mat.density_kg_m3);
+        phys.density = phys.density_unit.from_kg_m3(density);
     }
 
     let resp = bar_pill(ui, Some(Icon::Mass), "", "Physical analysis", false)
@@ -408,10 +408,10 @@ fn physical_analysis_control(ui: &mut egui::Ui, state: &mut AppState) {
                 if let Some(mp) = crate::measure::mass::cached(&state.doc, body) {
                     let mass = compute_mass(mp.volume, phys.density, phys.density_unit, phys.mass);
                     let volume = phys.volume.from_mm3(mp.volume);
-                    let area = phys.area.from_mm2(mp.surface_area);
-                    let cx = phys.length.from_mm(mp.center_of_mass.x);
-                    let cy = phys.length.from_mm(mp.center_of_mass.y);
-                    let cz = phys.length.from_mm(mp.center_of_mass.z);
+                    let area = phys.area.from_mm2(mp.area);
+                    let cx = phys.length.from_mm(mp.centroid.x);
+                    let cy = phys.length.from_mm(mp.centroid.y);
+                    let cz = phys.length.from_mm(mp.centroid.z);
                     egui::Grid::new("pa_results").num_columns(2).spacing([14.0, 5.0]).show(ui, |ui| {
                         ui.label(egui::RichText::new("Mass").color(theme::muted()));
                         ui.label(

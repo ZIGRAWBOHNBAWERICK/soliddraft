@@ -38,7 +38,8 @@ fn feature_icon(kind: &FeatureKind) -> Icon {
         FeatureKind::Offset(_) | FeatureKind::Thicken(_) => Icon::Offset,
         FeatureKind::Lattice(_) | FeatureKind::Gyroid(_) => Icon::Extrude,
         FeatureKind::ImportStep(_) => Icon::Import,
-        FeatureKind::Combine(_) => Icon::Assembly,
+        FeatureKind::Combine { .. } => Icon::Assembly,
+        FeatureKind::Scan(_) => Icon::Import,
     }
 }
 

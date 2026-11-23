@@ -123,7 +123,7 @@ pub(in crate::app) fn pane(ui: &mut egui::Ui, state: &mut AppState) {
             let sresp = sresp.on_hover_cursor(egui::CursorIcon::ResizeVertical);
             sresp.widget_info(|| {
                 egui::WidgetInfo::labeled(
-                    egui::WidgetType::Splitter,
+                    egui::WidgetType::Other,
                     true,
                     format!("Resize {:?} and {:?}", p, active[i + 1]),
                 )
@@ -203,7 +203,13 @@ fn pane_header(ui: &mut egui::Ui, state: &AppState, pane: Pane) -> bool {
             theme::chip(),
         ),
         Pane::Values => {
-            let active_cfg = state.doc.model().active_configuration().to_owned();
+            let active_cfg = state
+                .doc
+                .model()
+                .configuration_summary()["active"]
+                .as_str()
+                .unwrap_or("Default")
+                .to_owned();
             (Icon::Config, "Values", Some(active_cfg), theme::muted(), theme::chip())
         }
         Pane::Props => {

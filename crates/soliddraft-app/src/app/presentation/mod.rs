@@ -4,7 +4,7 @@ pub(super) mod docks;
 
 use crate::command_line::{Status, StatusNote};
 use crate::commands;
-use crate::panels::{self, Side};
+use crate::panels::Side;
 use crate::state::{AppState, EditorParams, NoteKind};
 use crate::theme;
 use egui::Key;

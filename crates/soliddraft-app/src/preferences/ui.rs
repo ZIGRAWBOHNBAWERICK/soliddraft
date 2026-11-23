@@ -14,7 +14,7 @@ use crate::navigation::{
 };
 use crate::settings::GridStyle;
 use crate::theme;
-use egui::{Align2, Color32, CornerRadius, Rect, Sense, Stroke, StrokeKind, vec2};
+use egui::{Align2, CornerRadius, Rect, Sense, Stroke, StrokeKind, vec2};
 
 /// The Orbit and zoom page's controls, for search: id and label.
 pub(super) const ORBIT_ZOOM_CONTROLS: [(&str, &str); 9] = [

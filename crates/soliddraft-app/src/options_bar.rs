@@ -15,6 +15,7 @@ pub const HEIGHT: f32 = theme::clear_bench::SPACING.options_height;
 pub fn is_shown(state: &AppState) -> bool {
     state.editor.is_some()
         || state.in_sketch()
+        || state.doc.selection.is_some()
         || state.measure.open
         || state.pmi.open
         || (state.assembly.is_active() && state.assembly.mate.open)

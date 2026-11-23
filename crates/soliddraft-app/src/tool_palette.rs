@@ -7,7 +7,7 @@ use crate::commands::{self, CommandSpec, Tab};
 use crate::icons;
 use crate::state::{AppAction, AppState, RibbonTab};
 use crate::theme;
-use egui::{Align2, Color32, CornerRadius, Rect, Sense, Stroke, StrokeKind, pos2, vec2};
+use egui::{Color32, CornerRadius, Rect, Sense, Stroke, StrokeKind, pos2, vec2};
 
 /// Total height of the workspace tab strip + icon-over-label tool strip.
 pub const HEIGHT: f32 =

@@ -301,15 +301,17 @@ fn a_new_body_can_start_on_an_existing_bodys_face_without_joining_it() {
 }
 
 #[test]
-fn single_body_consumers_explain_the_multi_body_limit() {
+fn assemblies_show_both_bodies_and_drawings_explain_their_limit() {
     use soliddraft_assembly::source::{DisplaySource, KernelSource};
     let doc = pair();
     let bytes = doc.model().to_bytes().unwrap();
     let source = KernelSource::new(soliddraft_app::kernel());
-    assert_eq!(
-        source.part_mesh(&bytes).err().unwrap(),
-        "Several-body parts in assemblies are coming soon. Combine the bodies first."
-    );
+    let (mesh, _) = source.part_mesh(&bytes).unwrap();
+    assert_eq!(mesh.triangle_count(), 24, "both rectangular solids are tessellated");
+    assert_eq!(mesh.faces.len(), 12);
+    let (cached, _) =
+        soliddraft_model::display::read(&bytes, soliddraft_tessellation::Level::Standard).unwrap().unwrap();
+    assert_eq!(cached, mesh, "the assembly can also load both bodies from the part's cache");
     let state = soliddraft_app::state::AppState::new(doc);
     let make = soliddraft_app::commands::get("make_drawing").unwrap();
     assert!(!make.is_enabled(&state));

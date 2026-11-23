@@ -396,7 +396,7 @@ fn named_state_renders_two_body_appearances_and_reopens_with_visibility() {
     app.run_steps(80);
     let points = |app: &Harness<'_, SolidDraftApp>| {
         let v = &app.state().state.viewport;
-        [(-18.0, 10.0), (18.0, 20.0)].map(|(x, z)| v.camera.project(glam::Vec3::new(x, 0.0, z), v.rect).unwrap())
+        [(-18.0, 10.0), (18.0, 20.0)].map(|(x, z)| v.camera.project(glam::Vec3::new(x, 2.5, z), v.rect).unwrap())
     };
     let [left, right] = points(&app);
     let image = app.render().unwrap();

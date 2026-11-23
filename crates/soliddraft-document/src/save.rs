@@ -76,10 +76,11 @@ fn publish_new(
     }
     let tmp = temporary_name(path);
     let written = (|| {
-        let mut file = std::fs::File::create(&tmp)?;
-        write(&mut file, bytes)?;
-        file.sync_all()?;
-        drop(file);
+        {
+            let mut file = std::fs::File::create(&tmp)?;
+            write(&mut file, bytes)?;
+            file.sync_all()?;
+        }
         // A hard link never replaces its target, unlike a rename.
         std::fs::hard_link(&tmp, path)
     })();

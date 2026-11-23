@@ -1,5 +1,5 @@
 // Run with chrome-devtools-axi run on the packaged app. Serve the
-// display-states-service.dwprt produced by the appearance_panel test at /fixtures/.
+// display-states*.dwprt produced by the appearance_panel test at /fixtures/.
 function check(value, message) {
   if (!value) throw new Error(message);
 }
@@ -24,11 +24,11 @@ await page.eval(() => {
   HTMLInputElement.prototype.click = function () {
     if (this.type !== 'file' || !window.sdOpen) return click.call(this);
     const input = this;
-    const pending = window.sdOpen;
+    const [name, pending] = window.sdOpen;
     window.sdOpen = null;
     Promise.resolve(pending).then(blob => {
       const files = new DataTransfer();
-      files.items.add(new File([blob], 'display-states-service.dwprt'));
+      files.items.add(new File([blob], name));
       input.files = files.files;
       input.dispatchEvent(new Event('change'));
     });
@@ -46,16 +46,18 @@ await page.eval(() => {
     if (this.download.endsWith('.dwprt')) window.sdSaved = blobs.get(this.href);
     return download.call(this);
   };
-  window.sdOpen = fetch('/fixtures/display-states-service.dwprt').then(r => {
-    if (!r.ok) throw new Error('Display state fixture is missing');
+  window.sdFixture = name => [name, fetch(`/fixtures/${name}`).then(r => {
+    if (!r.ok) throw new Error(`Fixture ${name} is missing`);
     return r.blob();
-  });
+  })];
+  window.sdOpen = window.sdFixture('display-states-service.dwprt');
   return true;
 });
 
 async function until(read, predicate, message) {
   let value;
-  for (let i = 0; i < 300; i++) {
+  const deadline = Date.now() + 20000;
+  while (Date.now() < deadline) {
     value = await read();
     if (predicate(value)) return value;
     await page.wait(100);
@@ -78,21 +80,27 @@ await page.press('Control+o');
 const opened = await view('Working', 1);
 check(opened.display_mode === 'Shaded', 'The display mode did not reopen');
 
-await click('Display state');
-await click('Display state: Default');
-await view(null, 2);
-
-await click('Display state');
-await click('Display state: Working');
-await view('Working', 1);
+async function selectState(name, bodies) {
+  const item = `Display state: ${name ?? 'Default'}`;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    if (!(await controls())[item]) await click('Display state');
+    if (await until(controls, value => Boolean(value[item]), `${item} did not open`)) await click(item);
+    await page.wait(250);
+    const current = await viewport();
+    if (current?.display_state === name && current.visible_meshes === bodies) return;
+  }
+  await view(name, bodies);
+}
+await selectState(null, 2);
+await selectState('Working', 1);
 
 await page.press('Control+s');
 await until(() => page.eval(() => window.sdSaved?.size), size => size > 0, 'Save did not produce a part file');
-// Leave the saved part first, so the final frame can only come from a real reopen.
-await page.eval('sdClick(122, 15)');
-await page.eval('sdClick(138, 42)');
-await view(null, 0);
-await page.eval(() => { window.sdOpen = window.sdSaved; return true; });
+// Open the same part in its other configuration, then reopen the saved download.
+await page.eval(() => { window.sdOpen = window.sdFixture('display-states.dwprt'); return true; });
+await page.press('Control+o');
+await view('Inspection', 2);
+await page.eval(() => { window.sdOpen = ['browser-saved.dwprt', window.sdSaved]; return true; });
 await page.press('Control+o');
 await until(() => page.eval(() => window.sdOpen === null), Boolean, 'Reopen did not consume the saved file');
 await view('Working', 1);

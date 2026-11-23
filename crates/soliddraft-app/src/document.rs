@@ -641,8 +641,8 @@ impl FeatureKind {
             }
             FeatureKind::ImportStep(i) => model::FeatureKind::ImportStep(i.clone()),
             FeatureKind::Scan(s) => model::FeatureKind::Scan(s.clone()),
-            FeatureKind::Lattice(l) => model::FeatureKind::Lattice(*l),
-            FeatureKind::Gyroid(g) => model::FeatureKind::Gyroid(*g),
+            FeatureKind::Lattice(l) => model::FeatureKind::Lattice(l.clone()),
+            FeatureKind::Gyroid(g) => model::FeatureKind::Gyroid(g.clone()),
         }
     }
 
@@ -734,8 +734,8 @@ impl FeatureKind {
             }
             model::FeatureKind::ImportStep(i) => FeatureKind::ImportStep(i.clone()),
             model::FeatureKind::Scan(s) => FeatureKind::Scan(s.clone()),
-            model::FeatureKind::Lattice(l) => FeatureKind::Lattice(*l),
-            model::FeatureKind::Gyroid(g) => FeatureKind::Gyroid(*g),
+            model::FeatureKind::Lattice(l) => FeatureKind::Lattice(l.clone()),
+            model::FeatureKind::Gyroid(g) => FeatureKind::Gyroid(g.clone()),
         }
     }
 }
@@ -3159,6 +3159,14 @@ impl Document {
                     (model::FeatureKind::Thicken(s), EntityRef::Face(face)) => {
                         *s.faces.get_mut(index).ok_or("no such reference")? = face;
                     }
+                    (
+                        model::FeatureKind::Lattice(model::LatticeFeature { radius_mm: Some(grade), .. }),
+                        EntityRef::Face(face),
+                    )
+                    | (model::FeatureKind::Gyroid(model::GyroidFeature { level: grade, .. }), EntityRef::Face(face)) => {
+                        let faces = grade.picked_faces_mut().ok_or("no such reference")?;
+                        *faces.get_mut(index).ok_or("no such reference")? = face;
+                    }
                     (model::FeatureKind::Shell(s), EntityRef::Face(face)) => {
                         let model::ShellOpenings::Faces(faces) = &mut s.open_faces else {
                             return Err("no such reference".into());
@@ -4896,7 +4904,9 @@ impl Document {
                     }
                     FeatureKind::Lattice(l) => {
                         // A constant lattice keeps the rows it always had; a grade is shown.
-                        if let Some(radius @ soliddraft_kernel_api::Grade::Linear(_)) = &l.radius_mm {
+                        if let Some(radius) = &l.radius_mm
+                            && radius.constant().is_none()
+                        {
                             details.push(("Beam radius, controls density".to_owned(), grade_text(radius, " mm")));
                         }
                         details.push(("Accuracy".to_owned(), format!("{} mm", fmt_mm(l.accuracy_mm))));
@@ -4904,9 +4914,9 @@ impl Document {
                     }
                     FeatureKind::Gyroid(g) => {
                         details.push(("Period".to_owned(), format!("{} mm", fmt_mm(g.period_mm))));
-                        let level = match g.level {
-                            soliddraft_kernel_api::Grade::Constant(v) => fmt_mm(v),
-                            graded => grade_text(&graded, ""),
+                        let level = match &g.level {
+                            soliddraft_kernel_api::Grade::Constant(v) => fmt_mm(*v),
+                            graded => grade_text(graded, ""),
                         };
                         details.push(("Level".to_owned(), level));
                         details.push(("Accuracy".to_owned(), format!("{} mm", fmt_mm(g.accuracy_mm))));
@@ -5328,6 +5338,16 @@ fn view_status(
                             let label = d.faces.get(index as usize).map(|f| f.label.clone()).unwrap_or_default();
                             (index as usize, RefKind::Face, label)
                         }
+                        (model::ReferenceSlot::Face { index }, model::FeatureKind::Lattice(l)) => {
+                            let faces = l.radius_mm.as_ref().map_or(&[][..], |g| g.picked_faces());
+                            let label = faces.get(index as usize).map(|f| f.label.clone()).unwrap_or_default();
+                            (index as usize, RefKind::Face, label)
+                        }
+                        (model::ReferenceSlot::Face { index }, model::FeatureKind::Gyroid(g)) => {
+                            let label =
+                                g.level.picked_faces().get(index as usize).map(|f| f.label.clone()).unwrap_or_default();
+                            (index as usize, RefKind::Face, label)
+                        }
                         (model::ReferenceSlot::Plane, model::FeatureKind::Draft(d)) => {
                             (d.faces.len(), RefKind::Face, plane_ref_label(&d.neutral))
                         }
@@ -5565,11 +5585,33 @@ pub fn fmt_mm(v: f64) -> String {
 
 /// A field grade as the user entered it, each number exact: "1 mm", or
 /// "1 mm to 2 mm along z from 20 to 30 mm".
-pub fn grade_text(grade: &soliddraft_kernel_api::Grade, unit: &str) -> String {
+pub fn grade_text(grade: &model::FieldGrade, unit: &str) -> String {
+    use soliddraft_kernel_api::{Grade, GradeFaces};
+    let point = |p: &[f64; 3]| format!("({}, {}, {})", p[0], p[1], p[2]);
     match grade {
-        soliddraft_kernel_api::Grade::Constant(v) => format!("{v}{unit}"),
-        soliddraft_kernel_api::Grade::Linear(l) => {
+        Grade::Constant(v) => format!("{v}{unit}"),
+        Grade::Linear(l) => {
             format!("{}{unit} to {}{unit} along {} from {} to {} mm", l.start, l.end, l.axis.name(), l.from, l.to)
+        }
+        Grade::Distance(d) => {
+            let from = match &d.faces {
+                GradeFaces::Skin => "the skin".to_owned(),
+                GradeFaces::Picked(faces) if faces.len() == 1 => faces[0].label.clone(),
+                GradeFaces::Picked(faces) => format!("{} faces", faces.len()),
+            };
+            format!("{}{unit} at {from} to {}{unit} at {} mm from it", d.near, d.far, d.span)
+        }
+        Grade::Radial(r) => format!(
+            "{}{unit} to {}{unit} at {} to {} mm from the {} axis through {}",
+            r.start,
+            r.end,
+            r.from,
+            r.to,
+            r.axis.name(),
+            point(&r.through)
+        ),
+        Grade::Point(p) => {
+            format!("{}{unit} to {}{unit} at {} to {} mm from {}", p.start, p.end, p.from, p.to, point(&p.centre))
         }
     }
 }

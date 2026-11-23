@@ -2010,6 +2010,10 @@ impl Kernel for CatallaxKernel {
         self.observe("gyroid", || self.build_gyroid(tag, body, params))
     }
 
+    fn field_grade(&self, field: GradedField, kind: GradeKind) -> KernelResult<()> {
+        lattice::grade_support(field, kind)
+    }
+
     fn export_field_stl(&self, body: BodyId) -> KernelResult<FieldExport> {
         self.observe_export("export_field_stl", || self.field(body)?.ok_or(KernelError::UnknownBody(body))?.export())
     }

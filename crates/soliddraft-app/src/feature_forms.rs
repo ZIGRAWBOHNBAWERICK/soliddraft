@@ -3,6 +3,7 @@
 use crate::document::{EndKind, ProfileKind};
 use crate::form_bar::Field;
 use crate::icons::Icon;
+use crate::properties;
 use crate::state::EditorParams;
 use soliddraft_kernel_api::{Grade, HoleDepth as DrillDepth, HoleHead, HoleTip};
 use soliddraft_model::PatternSpec;
@@ -284,27 +285,23 @@ pub fn spec(
                 field(BeamRadius, "Beam radius", "Cell", 180.0),
                 field(BeamGrade, "", "Beam gradient", 280.0)
                     .sheet()
-                    .count(if matches!(l.radius_mm, Some(Grade::Linear(_))) { 5 } else { 1 }),
+                    .count(l.radius_mm.as_ref().map_or(1, properties::grade_rows)),
                 field(Accuracy, "Accuracy", "Accuracy", 170.0).sheet(),
                 field(MinimumDetail, "Minimum detail", "Accuracy", 180.0).sheet(),
             ],
         ),
-        EditorParams::Gyroid(g) => {
-            (
-                "gyroid",
-                Icon::Cad("lattice"),
-                vec![
-                    field(Body, "Body", "Body", 150.0),
-                    field(Period, "Period", "Network", 150.0),
-                    field(Level, "Level", "Network", 155.0),
-                    field(LevelGrade, "", "Level gradient", 280.0)
-                        .sheet()
-                        .count(if matches!(g.level, Grade::Linear(_)) { 5 } else { 1 }),
-                    field(Accuracy, "Accuracy", "Accuracy", 170.0).sheet(),
-                    field(MinimumDetail, "Minimum detail", "Accuracy", 180.0).sheet(),
-                ],
-            )
-        }
+        EditorParams::Gyroid(g) => (
+            "gyroid",
+            Icon::Cad("lattice"),
+            vec![
+                field(Body, "Body", "Body", 150.0),
+                field(Period, "Period", "Network", 150.0),
+                field(Level, "Level", "Network", 155.0),
+                field(LevelGrade, "", "Level gradient", 280.0).sheet().count(properties::grade_rows(&g.level)),
+                field(Accuracy, "Accuracy", "Accuracy", 170.0).sheet(),
+                field(MinimumDetail, "Minimum detail", "Accuracy", 180.0).sheet(),
+            ],
+        ),
         EditorParams::PickPlane => {
             let mut fields = vec![
                 field(PlaneDatum(0), "", "Origin planes", 130.0),
@@ -358,6 +355,8 @@ struct Context {
     sweep_radius: f64,
     loft_choices: Vec<(soliddraft_model::LoftProfile, String)>,
     pattern_choices: Vec<(soliddraft_model::FeatureId, String)>,
+    /// The grades the kernel builds for a lattice's or a gyroid's field.
+    grades: properties::GradeChoices,
 }
 
 pub fn show(ui: &mut egui::Ui, state: &mut crate::state::AppState) {
@@ -400,6 +399,19 @@ pub fn show(ui: &mut egui::Ui, state: &mut crate::state::AppState) {
             .into_iter()
             .map(|p| (p, state.doc.model().datum_name(p.to_model()).to_owned()))
             .collect(),
+        grades: match &editor.params {
+            EditorParams::Lattice(l) => properties::GradeChoices::ask(
+                state.doc.kernel().as_ref(),
+                soliddraft_kernel_api::GradedField::LatticeRadius,
+                l.radius_mm.as_ref(),
+            ),
+            EditorParams::Gyroid(g) => properties::GradeChoices::ask(
+                state.doc.kernel().as_ref(),
+                soliddraft_kernel_api::GradedField::GyroidLevel,
+                Some(&g.level),
+            ),
+            _ => properties::GradeChoices::default(),
+        },
         sweep_radius: match &editor.params {
             EditorParams::Sweep(s) => state.doc.sweep_anchor(s.sketch.0 as u64).map_or(10.0, |(_, radius)| radius),
             _ => 0.0,
@@ -1061,15 +1073,20 @@ fn render(
         }
         (EditorParams::Lattice(p), Key::BeamRadius) => match p.radius_mm.get_or_insert(Grade::Constant(0.0)) {
             Grade::Constant(v) => number(ui, "Beam radius", "mm", egui::DragValue::new(v).speed(0.1)),
-            Grade::Linear(_) => {
-                if ui.button("Linear along an axis").clicked() {
+            graded => {
+                if ui.button(graded.kind().label()).clicked() {
                     return true;
                 }
             }
         },
-        (EditorParams::Lattice(p), Key::BeamGrade) => {
-            properties::grade_options(ui, "Beam radius", p.radius_mm.get_or_insert(Grade::Constant(0.0)), "mm", 0.1)
-        }
+        (EditorParams::Lattice(p), Key::BeamGrade) => properties::grade_options(
+            ui,
+            "Beam radius",
+            p.radius_mm.get_or_insert(Grade::Constant(0.0)),
+            "mm",
+            0.1,
+            &context.grades,
+        ),
         (EditorParams::Lattice(p), Key::Accuracy) => {
             number(ui, "Accuracy", "mm", egui::DragValue::new(&mut p.accuracy_mm).speed(0.01))
         }
@@ -1081,14 +1098,14 @@ fn render(
         }
         (EditorParams::Gyroid(p), Key::Level) => match &mut p.level {
             Grade::Constant(v) => number(ui, "Level", "", egui::DragValue::new(v).speed(0.01)),
-            Grade::Linear(_) => {
-                if ui.button("Linear along an axis").clicked() {
+            graded => {
+                if ui.button(graded.kind().label()).clicked() {
                     return true;
                 }
             }
         },
         (EditorParams::Gyroid(p), Key::LevelGrade) => {
-            properties::grade_options(ui, "Network level", &mut p.level, "", 0.01)
+            properties::grade_options(ui, "Network level", &mut p.level, "", 0.01, &context.grades)
         }
         (EditorParams::Gyroid(p), Key::Accuracy) => {
             number(ui, "Accuracy", "mm", egui::DragValue::new(&mut p.accuracy_mm).speed(0.01))

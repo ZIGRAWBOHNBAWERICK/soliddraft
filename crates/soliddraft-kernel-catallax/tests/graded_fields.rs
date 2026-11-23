@@ -610,3 +610,74 @@ fn nothing_reads_a_terminal_field_after_it() {
     };
     after(k.gyroid(&OpTag::new("second"), field, &gyroid));
 }
+
+/// Grades beyond a linear one along a part axis: Catallax at this pin builds none of them.
+/// The application learns that from Catallax's own validation, and a build with each
+/// grade reaches Catallax and comes back with the same code, so the faces of a distance
+/// grade are spelled natively and nothing is refused before Catallax sees it.
+#[test]
+fn distance_radial_and_point_grades_are_refused_with_catallax_codes() {
+    let k = CatallaxKernel::new();
+    for field in [GradedField::LatticeRadius, GradedField::GyroidLevel] {
+        k.field_grade(field, GradeKind::Constant).unwrap();
+        k.field_grade(field, GradeKind::Linear).unwrap();
+    }
+    let refusal = |field, kind| k.field_grade(field, kind).unwrap_err().to_string();
+    let distance = refusal(GradedField::LatticeRadius, GradeKind::Distance);
+    assert!(distance.contains("lattice.unsupported-grade"), "{distance}");
+    let distance = refusal(GradedField::GyroidLevel, GradeKind::Distance);
+    assert!(distance.contains("gyroid.unsupported"), "{distance}");
+    for field in [GradedField::LatticeRadius, GradedField::GyroidLevel] {
+        for kind in [GradeKind::Radial, GradeKind::Point] {
+            let missing = refusal(field, kind);
+            assert!(missing.contains(&format!("Catallax has no {} grade function", kind.name())), "{missing}");
+        }
+    }
+
+    let region = Cycle(0).region(&k, "region", [6.0, 6.0], 20.0, 10.0);
+    let top = k.topology(region).unwrap().faces[0].id;
+    let tag = OpTag::new("graded");
+    let lattice = |radius_mm| Lattice {
+        cell: LatticeCell::Cubic,
+        cell_size_mm: 100.0,
+        radius_mm,
+        frame: FieldFrame::Part,
+        accuracy_mm: 0.1,
+        min_detail_mm: 0.1,
+    };
+    let gyroid = |level| Gyroid {
+        kind: GyroidKind::Network,
+        period_mm: 10.0,
+        level,
+        frame: FieldFrame::Part,
+        accuracy_mm: 0.1,
+        min_detail_mm: 0.1,
+    };
+    let skin = |near, far| Grade::Distance(DistanceGrade { faces: GradeFaces::Skin, near, far, span: 5.0 });
+    let picked =
+        |near, far| Grade::Distance(DistanceGrade { faces: GradeFaces::Picked(vec![top]), near, far, span: 5.0 });
+    let radial = |start, end| {
+        Grade::Radial(RadialGrade { axis: GradeAxis::Z, through: [0.0; 3], from: 0.0, to: 3.0, start, end })
+    };
+    let point = |start, end| Grade::Point(PointGrade { centre: [0.0, 0.0, 25.0], from: 0.0, to: 3.0, start, end });
+    for (grade, code) in [
+        (skin(1.0, 2.0), "lattice.unsupported-grade"),
+        (picked(1.0, 2.0), "lattice.unsupported-grade"),
+        (radial(1.0, 2.0), "Catallax has no radial grade function"),
+        (point(1.0, 2.0), "Catallax has no point grade function"),
+    ] {
+        let refused = k.lattice(&tag, region, &lattice(grade.clone())).unwrap_err().to_string();
+        assert!(refused.contains(code), "{grade:?}: {refused}");
+    }
+    for (grade, code) in [
+        (skin(0.0, 0.1), "gyroid.unsupported"),
+        (picked(0.0, 0.1), "gyroid.unsupported"),
+        (radial(0.0, 0.1), "Catallax has no radial grade function"),
+        (point(0.0, 0.1), "Catallax has no point grade function"),
+    ] {
+        let refused = k.gyroid(&tag, region, &gyroid(grade.clone())).unwrap_err().to_string();
+        assert!(refused.contains(code), "{grade:?}: {refused}");
+    }
+    // The refusals leave the region a CAD body that a constant lattice still fills.
+    k.lattice(&tag, region, &lattice(Grade::Constant(1.0))).unwrap();
+}

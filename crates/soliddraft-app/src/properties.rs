@@ -414,26 +414,110 @@ fn hint(ui: &mut egui::Ui, text: &str) {
     ui.label(egui::RichText::new(text).size(11.0).color(theme::muted()));
 }
 
-/// A field parameter: one value, or a linear grade between two anchors on a part axis.
-/// `unit` names the values, such as "mm"; the anchors are always millimetres.
+/// The grades the editor offers for one field, from the kernel's answer: constant and
+/// linear always, and each further kind only while the kernel builds it. `refusal` is
+/// the kernel's refusal of the grade the feature holds, when it refuses it.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(crate) struct GradeChoices {
+    pub offered: Vec<soliddraft_kernel_api::GradeKind>,
+    pub refusal: Option<String>,
+}
+
+impl GradeChoices {
+    /// Asks `kernel` about every kind for `field`, and about the kind `current` holds.
+    pub(crate) fn ask(
+        kernel: &dyn soliddraft_kernel_api::Kernel,
+        field: soliddraft_kernel_api::GradedField,
+        current: Option<&soliddraft_model::FieldGrade>,
+    ) -> Self {
+        use soliddraft_kernel_api::GradeKind;
+        let offered = GradeKind::ALL
+            .into_iter()
+            .filter(|kind| {
+                matches!(kind, GradeKind::Constant | GradeKind::Linear) || kernel.field_grade(field, *kind).is_ok()
+            })
+            .collect();
+        let refusal = current.and_then(|grade| kernel.field_grade(field, grade.kind()).err()).map(|e| e.to_string());
+        GradeChoices { offered, refusal }
+    }
+}
+
+/// The rows a grade's editor takes in the form's sheet.
+pub(crate) fn grade_rows(grade: &soliddraft_model::FieldGrade) -> usize {
+    use soliddraft_kernel_api::Grade;
+    match grade {
+        Grade::Constant(_) => 1,
+        Grade::Linear(_) => 5,
+        Grade::Distance(_) => 5,
+        Grade::Radial(_) => 9,
+        Grade::Point(_) => 8,
+    }
+}
+
+/// `grade` turned into another kind, starting flat at the value it has first.
+fn regrade(
+    grade: &soliddraft_model::FieldGrade,
+    kind: soliddraft_kernel_api::GradeKind,
+) -> soliddraft_model::FieldGrade {
+    use soliddraft_kernel_api::{
+        DistanceGrade, Grade, GradeAxis, GradeFaces, GradeKind, LinearGrade, PointGrade, RadialGrade,
+    };
+    let v = grade.endpoints()[0];
+    match kind {
+        GradeKind::Constant => Grade::Constant(v),
+        GradeKind::Linear => Grade::Linear(LinearGrade { axis: GradeAxis::Z, from: 0.0, to: 10.0, start: v, end: v }),
+        GradeKind::Distance => Grade::Distance(DistanceGrade { faces: GradeFaces::Skin, near: v, far: v, span: 10.0 }),
+        GradeKind::Radial => {
+            Grade::Radial(RadialGrade { axis: GradeAxis::Z, through: [0.0; 3], from: 0.0, to: 10.0, start: v, end: v })
+        }
+        GradeKind::Point => Grade::Point(PointGrade { centre: [0.0; 3], from: 0.0, to: 10.0, start: v, end: v }),
+    }
+}
+
+/// A field parameter: one value, or a grade over the part. `unit` names the values, such
+/// as "mm"; positions and distances are always millimetres. The editor offers the kinds
+/// in `choices`; a feature that holds a kind the kernel refuses shows that refusal.
 pub(crate) fn grade_options(
     ui: &mut egui::Ui,
     label: &str,
-    grade: &mut soliddraft_kernel_api::Grade,
+    grade: &mut soliddraft_model::FieldGrade,
     unit: &str,
     speed: f64,
+    choices: &GradeChoices,
 ) {
-    use soliddraft_kernel_api::{Grade, GradeAxis, LinearGrade};
+    use soliddraft_kernel_api::{Grade, GradeAxis, GradeFaces, GradeKind};
     ui.label(egui::RichText::new(label).size(12.0).color(theme::ink()));
-    let linear = matches!(grade, Grade::Linear(_));
-    if let Some(choice) = segmented(ui, label, &["Constant", "Linear along an axis"], linear as usize) {
-        match (choice, *grade) {
-            (0, Grade::Linear(l)) => *grade = Grade::Constant(l.start),
-            (1, Grade::Constant(v)) => {
-                *grade = Grade::Linear(LinearGrade { axis: GradeAxis::Z, from: 0.0, to: 10.0, start: v, end: v })
-            }
-            _ => {}
-        }
+    let mut kinds = choices.offered.clone();
+    if !kinds.contains(&grade.kind()) {
+        kinds.push(grade.kind());
+    }
+    let current = kinds.iter().position(|k| *k == grade.kind()).unwrap_or(0);
+    let picked = if kinds.len() <= 2 {
+        let labels: Vec<&str> = kinds.iter().map(|k| k.label()).collect();
+        segmented(ui, label, &labels, current)
+    } else {
+        let mut picked = None;
+        let response = egui::ComboBox::from_id_salt((label, "grade"))
+            .width(ui.available_width())
+            .selected_text(grade.kind().label())
+            .show_ui(ui, |ui| {
+                for (i, kind) in kinds.iter().enumerate() {
+                    if ui.selectable_label(i == current, kind.label()).clicked() {
+                        picked = Some(i);
+                    }
+                }
+            });
+        response.response.widget_info(|| {
+            let mut info = egui::WidgetInfo::labeled(egui::WidgetType::ComboBox, true, format!("{label} grade"));
+            info.current_text_value = Some(grade.kind().label().into());
+            info
+        });
+        picked
+    };
+    if let Some(i) = picked
+        && kinds[i] != grade.kind()
+    {
+        *grade = regrade(grade, kinds[i]);
     }
     let value = |ui: &mut egui::Ui, name: &str, v: &mut f64, unit: &str| {
         let response = row(ui, name, |ui, cell| {
@@ -442,22 +526,74 @@ pub(crate) fn grade_options(
         let info = if name.is_empty() { format!("{label} value") } else { format!("{label} {name} value") };
         response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::DragValue, true, info.clone()));
     };
+    let axis_row = |ui: &mut egui::Ui, axis: &mut GradeAxis| {
+        choice_row(ui, "Axis", |ui, _| {
+            ui.horizontal_centered(|ui| {
+                for each in GradeAxis::ALL {
+                    ui.selectable_value(axis, each, each.name());
+                }
+            });
+        });
+    };
     match grade {
         Grade::Constant(_) => {}
         Grade::Linear(l) => {
-            choice_row(ui, "Axis", |ui, _| {
-                ui.horizontal_centered(|ui| {
-                    for axis in GradeAxis::ALL {
-                        ui.selectable_value(&mut l.axis, axis, axis.name());
-                    }
-                });
-            });
+            axis_row(ui, &mut l.axis);
             value(ui, "from", &mut l.from, "mm");
             value(ui, "to", &mut l.to, "mm");
             value(ui, "start", &mut l.start, unit);
             value(ui, "end", &mut l.end, unit);
             hint(ui, "Start at the from coordinate, end at the to coordinate, held beyond them. Part coordinates.");
         }
+        Grade::Distance(d) => {
+            let picked = matches!(d.faces, GradeFaces::Picked(_));
+            choice_row(ui, "From", |ui, _| {
+                ui.horizontal_centered(|ui| {
+                    if ui.selectable_label(!picked, "The skin").clicked() && picked {
+                        d.faces = GradeFaces::Skin;
+                    }
+                    if ui.selectable_label(picked, "Picked faces").clicked() && !picked {
+                        d.faces = GradeFaces::Picked(Vec::new());
+                    }
+                });
+            });
+            if let GradeFaces::Picked(faces) = &mut d.faces
+                && let Some(index) =
+                    pick_list(ui, "Click faces to grade from", Icon::Plane, faces.iter().map(|f| f.label.as_str()))
+            {
+                faces.remove(index);
+            }
+            value(ui, "near", &mut d.near, unit);
+            value(ui, "far", &mut d.far, unit);
+            value(ui, "span", &mut d.span, "mm");
+            hint(ui, "Near on the faces, far at the span from them and beyond.");
+        }
+        Grade::Radial(r) => {
+            axis_row(ui, &mut r.axis);
+            for (i, name) in ["through x", "through y", "through z"].into_iter().enumerate() {
+                value(ui, name, &mut r.through[i], "mm");
+            }
+            value(ui, "from", &mut r.from, "mm");
+            value(ui, "to", &mut r.to, "mm");
+            value(ui, "start", &mut r.start, unit);
+            value(ui, "end", &mut r.end, unit);
+            hint(ui, "Start at the from radius about the axis line, end at the to radius, held beyond them.");
+        }
+        Grade::Point(p) => {
+            for (i, name) in ["centre x", "centre y", "centre z"].into_iter().enumerate() {
+                value(ui, name, &mut p.centre[i], "mm");
+            }
+            value(ui, "from", &mut p.from, "mm");
+            value(ui, "to", &mut p.to, "mm");
+            value(ui, "start", &mut p.start, unit);
+            value(ui, "end", &mut p.end, unit);
+            hint(ui, "Start at the from distance from the centre, end at the to distance, held beyond them.");
+        }
+    }
+    if let Some(refusal) = &choices.refusal
+        && !matches!(grade.kind(), GradeKind::Constant | GradeKind::Linear)
+    {
+        hint(ui, &format!("The kernel does not build this grade yet: {refusal}"));
     }
 }
 

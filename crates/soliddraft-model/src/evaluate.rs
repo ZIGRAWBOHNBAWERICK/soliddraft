@@ -1335,8 +1335,12 @@ impl Document {
 
     fn build_lattice(&self, f: &Feature, l: &LatticeFeature, current: Option<BodyId>) -> Built {
         let Some(body) = current else { return Built::failed(current, "there is no body to lattice") };
-        let (Some(cell), Some(cell_size_mm), Some(radius_mm)) = (l.cell, l.cell_size_mm, l.radius_mm) else {
+        let (Some(cell), Some(cell_size_mm), Some(radius_mm)) = (l.cell, l.cell_size_mm, &l.radius_mm) else {
             return Built::failed(current, "lattice is missing cell size and density; configure the cell");
+        };
+        let radius_mm = match self.resolve_grade(radius_mm, body) {
+            Ok(grade) => grade,
+            Err(repairs) => return Built::pass(FeatureStatus::RepairNeeded(repairs), current),
         };
         let params = Lattice {
             cell,
@@ -1352,16 +1356,41 @@ impl Document {
 
     fn build_gyroid(&self, f: &Feature, g: &GyroidFeature, current: Option<BodyId>) -> Built {
         let Some(body) = current else { return Built::failed(current, "there is no body for the gyroid") };
+        let level = match self.resolve_grade(&g.level, body) {
+            Ok(grade) => grade,
+            Err(repairs) => return Built::pass(FeatureStatus::RepairNeeded(repairs), current),
+        };
         let params = Gyroid {
             kind: g.kind,
             period_mm: g.period_mm,
-            level: g.level,
+            level,
             frame: g.frame,
             accuracy_mm: g.accuracy_mm,
             min_detail_mm: g.min_detail_mm,
         };
         let result = self.kernel.gyroid(&OpTag::new(format!("{}.gyroid", f.id)), body, &params);
         self.finish_field(result, current)
+    }
+
+    /// A field grade with its picked faces resolved on `body`, or a repair for each face
+    /// that no longer resolves.
+    fn resolve_grade(
+        &self,
+        grade: &crate::FieldGrade,
+        body: BodyId,
+    ) -> Result<soliddraft_kernel_api::Grade, Vec<RepairNeeded>> {
+        let mut ids = Vec::new();
+        let mut repairs = Vec::new();
+        for (i, face) in grade.picked_faces().iter().enumerate() {
+            match self.resolve_face(face, body) {
+                Ok(id) => ids.push(id),
+                Err(repair) => repairs.push(RepairNeeded { slot: ReferenceSlot::Face { index: i as u32 }, ..repair }),
+            }
+        }
+        if !repairs.is_empty() {
+            return Err(repairs);
+        }
+        Ok(grade.try_map_faces(|i, _| Ok::<_, std::convert::Infallible>(ids[i])).unwrap_or_else(|never| match never {}))
     }
 
     /// A terminal field names one display region and no analytic face.

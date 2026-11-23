@@ -186,11 +186,11 @@ impl FeatureKind {
             FeatureKind::Hole(h) => out.push(h.face.feature),
             FeatureKind::Pattern(p) => out.extend(p.source),
             FeatureKind::Thicken(t) => out.extend(t.faces.iter().map(|face| face.feature)),
-            FeatureKind::Scan(_)
-            | FeatureKind::Offset(_)
-            | FeatureKind::ImportStep(_)
-            | FeatureKind::Lattice(_)
-            | FeatureKind::Gyroid(_) => {}
+            FeatureKind::Scan(_) | FeatureKind::Offset(_) | FeatureKind::ImportStep(_) => {}
+            FeatureKind::Lattice(l) => {
+                out.extend(l.radius_mm.iter().flat_map(|g| g.picked_faces().iter().map(|f| f.feature)));
+            }
+            FeatureKind::Gyroid(g) => out.extend(g.level.picked_faces().iter().map(|f| f.feature)),
             FeatureKind::Mirror(m) => {
                 out.extend(m.plane.dependencies());
             }
@@ -762,10 +762,15 @@ pub struct ThickenFeature {
     pub side: soliddraft_kernel_api::ThickenSide,
 }
 
-/// The final lattice stage. It reads the whole finished body, so it references nothing.
-/// Cell, density and output settings are saved with the feature. Unknown keys are
-/// refused, so a file from a later version is not read as a different lattice.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+/// A terminal field's grade as a part saves it: a distance grade names its faces by
+/// persistent reference.
+pub type FieldGrade = Grade<FaceRef>;
+
+/// The final lattice stage. It reads the whole finished body; only a density graded by
+/// distance from picked faces references anything. Cell, density and output settings
+/// are saved with the feature. Unknown keys are refused, so a file from a later version
+/// is not read as a different lattice.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct LatticeFeature {
     /// Missing in legacy files, which keep their earlier body visible until configured.
@@ -774,10 +779,9 @@ pub struct LatticeFeature {
     /// Cell edge length, in millimetres.
     #[serde(default)]
     pub cell_size_mm: Option<f64>,
-    /// Density as the beam radius in millimetres: one value, or a linear grade along a
-    /// part axis.
+    /// Density as the beam radius in millimetres: one value, or a grade over the part.
     #[serde(default)]
-    pub radius_mm: Option<Grade>,
+    pub radius_mm: Option<FieldGrade>,
     /// Grid fixed to the part origin and axes.
     #[serde(default)]
     pub frame: soliddraft_kernel_api::FieldFrame,
@@ -800,19 +804,20 @@ impl Default for LatticeFeature {
     }
 }
 
-/// The final gyroid stage. It reads the whole finished body, so it references nothing.
-/// The level is the dimensionless value of the gyroid function, not a wall thickness.
-/// Unknown keys are refused, as for [`LatticeFeature`].
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+/// The final gyroid stage. It reads the whole finished body; only a level graded by
+/// distance from picked faces references anything. The level is the dimensionless value
+/// of the gyroid function, not a wall thickness. Unknown keys are refused, as for
+/// [`LatticeFeature`].
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct GyroidFeature {
     /// Only the network is supported.
     pub kind: soliddraft_kernel_api::GyroidKind,
     /// Length of one period, in millimetres.
     pub period_mm: f64,
-    /// Dimensionless level: one value, or a linear grade along a part axis. Zero and
-    /// negative levels are valid.
-    pub level: Grade,
+    /// Dimensionless level: one value, or a grade over the part. Zero and negative
+    /// levels are valid.
+    pub level: FieldGrade,
     /// Gyroid fixed to the part origin and axes.
     pub frame: soliddraft_kernel_api::FieldFrame,
     /// Accuracy the gyroid is proven to, in millimetres.

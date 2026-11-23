@@ -314,6 +314,10 @@ impl Kernel for Counting {
         self.inner.export_field_stl(body)
     }
 
+    fn field_grade(&self, field: crate::GradedField, kind: crate::GradeKind) -> KernelResult<()> {
+        self.inner.field_grade(field, kind)
+    }
+
     fn field_mass(&self, body: BodyId, accuracy: &crate::FieldMassAccuracy) -> KernelResult<crate::FieldMass> {
         self.inner.field_mass(body, accuracy)
     }

@@ -106,7 +106,10 @@ fn the_editor_grades_d0s_beam_radius_along_z() {
     assert_eq!(name, "Lattice1");
     let FeatureKind::Lattice(l) = kind else { panic!("last feature is a lattice") };
     let d0 = Grade::Linear(LinearGrade { axis: GradeAxis::Z, from: 20.0, to: 30.0, start: 1.0, end: 2.0 });
-    assert_eq!((l.cell_size_mm, l.radius_mm, l.accuracy_mm, l.min_detail_mm), (Some(100.0), Some(d0), 0.1, 0.1));
+    assert_eq!(
+        (l.cell_size_mm, l.radius_mm.clone(), l.accuracy_mm, l.min_detail_mm),
+        (Some(100.0), Some(d0), 0.1, 0.1)
+    );
     assert_eq!(status, FeatureStatus::Ok);
 
     // The summary states the grade as it was entered, and shows no measured property.

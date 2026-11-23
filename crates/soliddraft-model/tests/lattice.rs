@@ -240,7 +240,7 @@ fn old_two_setting_files_keep_the_body_and_missing_input_failure_on_reopen() {
     kind.retain(|key, _| ["type", "accuracy_mm", "min_detail_mm"].contains(&key.as_str()));
     let reopened = Document::from_part_json(&part.to_string(), kernel()).unwrap();
     for doc in [&reopened, &Document::from_bytes(&reopened.to_bytes().unwrap(), kernel()).unwrap()] {
-        let FeatureKind::Lattice(settings) = doc.feature(l).unwrap().kind else { panic!("lattice") };
+        let FeatureKind::Lattice(settings) = &doc.feature(l).unwrap().kind else { panic!("lattice") };
         assert_eq!(settings.accuracy_mm, 0.05);
         assert_eq!(settings.min_detail_mm, 0.8);
         let FeatureStatus::Failed(message) = status(doc, l) else { panic!("missing-input failure") };
@@ -473,35 +473,38 @@ fn gyroid_commands_preserve_terminal_document_contract() {
     assert_eq!(base.period_mm, 10.0);
     assert_eq!((base.accuracy_mm, base.min_detail_mm), (0.1, 0.5));
     let invalid = [
-        GyroidFeature { period_mm: 0.0, ..base },
-        GyroidFeature { period_mm: -10.0, ..base },
-        GyroidFeature { period_mm: f64::NAN, ..base },
-        GyroidFeature { level: f64::NAN.into(), ..base },
-        GyroidFeature { level: f64::INFINITY.into(), ..base },
-        GyroidFeature { accuracy_mm: 0.0, ..base },
-        GyroidFeature { min_detail_mm: 0.0, ..base },
+        GyroidFeature { period_mm: 0.0, ..base.clone() },
+        GyroidFeature { period_mm: -10.0, ..base.clone() },
+        GyroidFeature { period_mm: f64::NAN, ..base.clone() },
+        GyroidFeature { level: f64::NAN.into(), ..base.clone() },
+        GyroidFeature { level: f64::INFINITY.into(), ..base.clone() },
+        GyroidFeature { accuracy_mm: 0.0, ..base.clone() },
+        GyroidFeature { min_detail_mm: 0.0, ..base.clone() },
     ];
 
     // An invalid add or edit is a typed input error that changes nothing.
     let (mut d, _) = g0_body(kernel());
     let body = d.body();
     let (depth, saved) = (d.undo_depth(), d.part_json());
-    for settings in invalid {
-        assert!(matches!(try_add(&mut d, gyroid(settings), None), Err(CommandError::Invalid(_))), "{settings:?}");
+    for settings in invalid.clone() {
+        assert!(
+            matches!(try_add(&mut d, gyroid(settings.clone()), None), Err(CommandError::Invalid(_))),
+            "{settings:?}"
+        );
         assert_eq!((d.body(), d.undo_depth(), d.part_json()), (body, depth, saved.clone()), "{settings:?}");
     }
     let (mut d, b, g) = g0();
     let body = d.body();
     let (depth, saved) = (d.undo_depth(), d.part_json());
-    for settings in invalid {
-        let edit = Command::EditFeature { id: g, kind: gyroid(settings) };
+    for settings in invalid.clone() {
+        let edit = Command::EditFeature { id: g, kind: gyroid(settings.clone()) };
         assert!(matches!(d.execute(edit), Err(CommandError::Invalid(_))), "{settings:?}");
-        assert_eq!(d.feature(g).unwrap().kind, gyroid(base));
+        assert_eq!(d.feature(g).unwrap().kind, gyroid(base.clone()));
         assert_eq!((d.body(), d.undo_depth(), d.part_json()), (body, depth, saved.clone()), "{settings:?}");
     }
     // A network level is not a radius: zero and negative levels pass validation.
     for level in [0.0, -0.5] {
-        let kind = gyroid(GyroidFeature { level: level.into(), ..base });
+        let kind = gyroid(GyroidFeature { level: level.into(), ..base.clone() });
         d.execute(Command::EditFeature { id: g, kind }).unwrap();
         assert!(status(&d, g).is_ok(), "level {level}: {:?}", status(&d, g));
     }
@@ -511,13 +514,13 @@ fn gyroid_commands_preserve_terminal_document_contract() {
     // Exactly one terminal field, and nothing below it.
     let count = d.features().len();
     let depth = d.undo_depth();
-    for kind in [gyroid(base), FeatureKind::Lattice(LatticeFeature::default())] {
+    for kind in [gyroid(base.clone()), FeatureKind::Lattice(LatticeFeature::default())] {
         assert_eq!(try_add(&mut d, kind.clone(), None), Err(CommandError::LatticeNotLast));
         assert_eq!(try_add(&mut d, kind, Some(1)), Err(CommandError::LatticeNotLast));
     }
     let (mut latticed, _) = g0_body(kernel());
     add(&mut latticed, FeatureKind::Lattice(LatticeFeature::default()));
-    assert_eq!(try_add(&mut latticed, gyroid(base), None), Err(CommandError::LatticeNotLast));
+    assert_eq!(try_add(&mut latticed, gyroid(base.clone()), None), Err(CommandError::LatticeNotLast));
     assert_eq!(try_add(&mut d, rectangle(4.0), None), Err(CommandError::AfterGyroid(g)));
     assert_eq!(try_add(&mut d, rectangle(4.0), Some(count)), Err(CommandError::AfterGyroid(g)));
     let last = count - 1;
@@ -530,7 +533,10 @@ fn gyroid_commands_preserve_terminal_document_contract() {
         d.execute(Command::EditFeature { id: g, kind: FeatureKind::Lattice(LatticeFeature::default()) }),
         Err(CommandError::Invalid(_))
     ));
-    assert!(matches!(d.execute(Command::EditFeature { id: b, kind: gyroid(base) }), Err(CommandError::Invalid(_))));
+    assert!(matches!(
+        d.execute(Command::EditFeature { id: b, kind: gyroid(base.clone()) }),
+        Err(CommandError::Invalid(_))
+    ));
     assert_eq!((d.features().len(), d.undo_depth()), (count, depth));
 
     // A file with CAD or a second field after the gyroid is damaged, not a different part.
@@ -563,7 +569,7 @@ fn gyroid_commands_preserve_terminal_document_contract() {
     ));
     let mut reopened = Document::from_bytes(&d.to_bytes().unwrap(), kernel()).unwrap();
     assert_eq!(status(&reopened, g), FeatureStatus::RolledBack);
-    assert_eq!(reopened.feature(g).unwrap().kind, gyroid(base));
+    assert_eq!(reopened.feature(g).unwrap().kind, gyroid(base.clone()));
     reopened.execute(Command::RollTo { before: None }).unwrap();
     assert!(status(&reopened, g).is_ok());
     let refused = reopened.export(soliddraft_exchange::Format::Step).map(|_| ()).unwrap_err();
@@ -572,7 +578,7 @@ fn gyroid_commands_preserve_terminal_document_contract() {
     // A refused certified export escapes unchanged, with no stand-in and no coarser retry.
     let refusing = Arc::new(ExportRefusingKernel::default());
     let (mut d, _) = g0_body(refusing.clone());
-    let g = add(&mut d, gyroid(base));
+    let g = add(&mut d, gyroid(base.clone()));
     assert!(status(&d, g).is_ok());
     let undo = d.undo_label().map(str::to_owned);
     let tessellations = ExportRefusingKernel::count(&refusing.tessellations);
@@ -580,14 +586,14 @@ fn gyroid_commands_preserve_terminal_document_contract() {
     assert!(error.contains("field.print-budget"), "{error}");
     assert_eq!(ExportRefusingKernel::count(&refusing.field_exports), 1, "one certified attempt, no retry");
     assert_eq!(ExportRefusingKernel::count(&refusing.tessellations), tessellations, "no B-rep mesh stands in");
-    assert_eq!(d.feature(g).unwrap().kind, gyroid(base), "the accuracy is not relaxed");
+    assert_eq!(d.feature(g).unwrap().kind, gyroid(base.clone()), "the accuracy is not relaxed");
     assert!(status(&d, g).is_ok());
     assert_eq!(d.undo_label(), undo.as_deref());
 
     // A refused build leaves the previous body and blocks the export.
     let (mut d, b) = g0_body(Arc::new(RefusingKernel(CatallaxKernel::new())));
     let before = d.body();
-    let g = add(&mut d, gyroid(base));
+    let g = add(&mut d, gyroid(base.clone()));
     let FeatureStatus::Failed(message) = status(&d, g) else { panic!("{:?}", status(&d, g)) };
     assert!(message.contains("field.print-budget"), "{message}");
     assert!(status(&d, b).is_ok());

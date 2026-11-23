@@ -53,8 +53,8 @@ mod sweep;
 pub use checks::{IndependentCheck, IndependentStep, PrintMesh, PrintReport};
 pub use edit::{ConstructionEdit, ConstructionFace, ConstructionMesh, ProofWork, ScalarEdit, ScalarParameter};
 pub use field::{
-    ExactRange, ExchangedMoments, FieldMass, FieldMassAccuracy, Grade, GradeAxis, LinearGrade, ProxyMoments,
-    StandInExport, StandInReport,
+    DistanceGrade, ExactRange, ExchangedMoments, FieldMass, FieldMassAccuracy, Grade, GradeAxis, GradeFaces, GradeKind,
+    GradedField, LinearGrade, PointGrade, ProxyMoments, RadialGrade, StandInExport, StandInReport,
 };
 pub use geometry::{Aabb, Plane, Point2, Vec3};
 pub use history::{EntityChanges, FaceOrigin, FaceRole, HistoryRecord, HolePart, OpKind, Origin, Split};
@@ -380,7 +380,7 @@ pub struct FieldReport {
 }
 
 /// Parameters of the final lattice stage.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Lattice {
     /// Cell type.
     pub cell: LatticeCell,
@@ -397,7 +397,7 @@ pub struct Lattice {
 }
 
 /// Parameters of the final gyroid stage.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Gyroid {
     /// Gyroid kind.
     pub kind: GyroidKind,
@@ -1172,6 +1172,17 @@ pub trait Kernel: Send + Sync {
     fn gyroid(&self, tag: &OpTag, body: BodyId, params: &Gyroid) -> KernelResult<OpResult> {
         let _ = (tag, body, params);
         Err(KernelError::Unsupported("gyroid".into()))
+    }
+
+    /// Whether this kernel builds a terminal field driven by this kind of grade: `Ok`
+    /// when it does, otherwise the refusal it gives every such grade. The editor offers
+    /// only the kinds a kernel accepts, so a control that always refuses is never shown.
+    fn field_grade(&self, field: GradedField, kind: GradeKind) -> KernelResult<()> {
+        let _ = field;
+        match kind {
+            GradeKind::Constant | GradeKind::Linear => Ok(()),
+            other => Err(KernelError::Unsupported(format!("{} grades", other.name()))),
+        }
     }
 
     /// Certifies an active field and writes its labelled STL.

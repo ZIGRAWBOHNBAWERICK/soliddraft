@@ -2546,7 +2546,7 @@ fn registry() -> Vec<CommandSpec> {
             .hint(|s| s.selected_sketch().is_none().then(|| "This feature has no source sketch".into()))
             .outside_sketch().app_only(EDITOR),
         cmd("hide_body", "Hide body", Icon::Eye, "Show or hide the solid body")
-            .run(|s| AppAction::SetBodyVisible(!crate::tree_visibility::visible(s).body))
+            .run(|s| AppAction::SetBodyVisible(!crate::tree_visibility::active_body_shown(&s.doc)))
             .when(|s| s.doc.display_body().is_some())
             .label_now(|s| Some(if crate::tree_visibility::visible(s).body { "Hide body" } else { "Show body" }.into()))
             .outside_sketch().app_only(LOOK),

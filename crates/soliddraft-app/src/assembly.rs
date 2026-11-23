@@ -1152,8 +1152,6 @@ pub fn tree(ui: &mut egui::Ui, state: &mut AppState) {
         if r.clicked() {
             actions.push(AppAction::Assembly(AssemblyAction::Select(None)));
         }
-        error = crate::display_states::show_assembly(ui, s).err();
-        assembly_appearances(ui, s, &mut actions);
         let mut stack: Vec<(OccurrenceIndex, u8)> = s.components().into_iter().rev().map(|r| (r, 1)).collect();
         while let Some((r, indent)) = stack.pop() {
             let table = s.doc.table();
@@ -1219,6 +1217,8 @@ pub fn tree(ui: &mut egui::Ui, state: &mut AppState) {
                 stack.extend(children.into_iter().rev().map(|c| (c, indent + 1)));
             }
         }
+        error = crate::display_states::show_assembly(ui, s).err();
+        assembly_appearances(ui, s, &mut actions);
     });
     if let Some(error) = error {
         state.note(error, crate::state::NoteKind::Error);

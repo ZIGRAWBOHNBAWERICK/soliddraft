@@ -458,7 +458,10 @@ fn assembly_colour_replaces_and_reveals_the_part_finish_after_reopen() {
         let start = std::time::Instant::now();
         loop {
             app.run_steps(1);
-            if app.state().state.assembly.session.as_ref().is_some_and(|s| s.doc.id() == id && !s.doc.is_loading()) {
+            let assembly = &app.state().state.assembly;
+            if assembly.opening.is_none()
+                && assembly.session.as_ref().is_some_and(|s| s.doc.id() == id && !s.doc.is_loading())
+            {
                 break;
             }
             assert!(start.elapsed().as_secs() < 20, "the saved assembly opened");

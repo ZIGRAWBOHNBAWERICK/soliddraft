@@ -1481,7 +1481,17 @@ impl SolidDraftApp {
                 viewport.preset = p;
             }
             AppAction::SetBodyVisible(show) => {
-                if crate::tree_visibility::visible(&self.state).body != show {
+                if let Some(mut display) = self.state.doc.display_state().cloned() {
+                    let key = self.state.doc.active_body;
+                    let changed = if show { display.view.hidden.remove(&key) } else { display.view.hidden.insert(key) };
+                    if changed {
+                        let mut states = self.state.doc.display_states().clone();
+                        let result = states.put(display).and_then(|_| self.state.doc.change_display_states(states));
+                        if let Err(error) = result {
+                            self.state.note(error, NoteKind::Error);
+                        }
+                    }
+                } else if crate::tree_visibility::visible(&self.state).body != show {
                     let feature = self
                         .state
                         .doc

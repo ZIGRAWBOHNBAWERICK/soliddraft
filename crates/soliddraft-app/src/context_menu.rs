@@ -384,7 +384,7 @@ fn item(
     state.doc.selection = selection_for(&state.doc, target, clicked);
     let command = commands::get(id).expect("context commands are registered");
     let label = if id == "hide_body" && !short.is_empty() {
-        if crate::tree_visibility::visible(state).body { "Hide".into() } else { "Show".into() }
+        if crate::tree_visibility::active_body_shown(&state.doc) { "Hide".into() } else { "Show".into() }
     } else if id == "export_step" && short.is_empty() {
         "Export STEP...".into()
     } else if short.is_empty() {

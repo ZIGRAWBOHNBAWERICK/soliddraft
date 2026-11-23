@@ -666,11 +666,15 @@ function unzip(file, dir) {
 // again. Export URDF downloads one zip of the URDF and its meshes folder, every mesh the
 // URDF names inside it; Export USD downloads one .usda file with its joints.
 async function packAndExport(v) {
-  step('load the site again and open the Universal Joint rig with its parts');
+  step('open the Universal Joint rig with its parts and an unrelated upload named block.dwprt');
+  const duplicate = path.join(downloads, 'unrelated', 'block.dwprt');
+  fs.mkdirSync(path.dirname(duplicate), { recursive: true });
+  fs.copyFileSync(collar, duplicate);
   await v.load();
-  await v.choose([rig, block, shaft], () => v.click(OPEN));
+  await v.choose([rig, duplicate, block, shaft], () => v.click(OPEN));
   const ready = s => loaded(s) && s.components.length === 4 && s.components.every(c => c.freshness !== 'unchecked');
   const opened = await v.assembly('rig to pack', ready);
+  check(opened.held.filter(name => name === 'block.dwprt').length === 2, `the page holds ${opened.held}`);
 
   step('Pack and Go downloads one zip');
   const zip = await v.download('pack', () => v.command('Pack and Go'));
@@ -678,6 +682,7 @@ async function packAndExport(v) {
   const unpacked = path.join(downloads, 'unpacked');
   const packed = unzip(zip, unpacked).sort();
   check(JSON.stringify(packed) === '["block.dwprt","rig.dwasm","shaft.dwprt"]', `the zip holds ${packed}`);
+  check(fs.readFileSync(path.join(unpacked, 'block.dwprt')).equals(fs.readFileSync(block)), 'the zip holds the wrong block.dwprt upload');
 
   step('load the site again and open the unpacked rig with its parts');
   await v.load();

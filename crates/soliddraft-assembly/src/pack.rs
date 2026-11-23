@@ -100,6 +100,17 @@ pub trait PackSource {
     fn resolve(&self, from: &Path, r: &DocRef) -> Option<(DocumentId, PathBuf, Option<ContentHash>)>;
     /// The bytes of the file at `path`: the root, or one `resolve` named.
     fn read(&self, path: &Path) -> Result<Vec<u8>, String>;
+    /// Reads the document selected by `resolve`. A source with duplicate filenames
+    /// also uses the document's identity to select its bytes.
+    fn read_resolved(
+        &self,
+        path: &Path,
+        _id: DocumentId,
+        _kind: DocKind,
+        _revision: &ContentHash,
+    ) -> Result<Vec<u8>, String> {
+        self.read(path)
+    }
     /// The drawings to look through for ones whose model is packed, each with its path
     /// and identity. `base` is the assembly's folder.
     fn drawings(&self, base: &Path) -> Vec<(PathBuf, Identity)>;
@@ -182,6 +193,22 @@ impl PackSource for HeldFiles {
             .find(|(p, _, _)| p == path)
             .map(|(_, bytes, _)| bytes.clone())
             .ok_or_else(|| format!("{} was not opened with the assembly", path.display()))
+    }
+
+    fn read_resolved(
+        &self,
+        path: &Path,
+        id: DocumentId,
+        kind: DocKind,
+        revision: &ContentHash,
+    ) -> Result<Vec<u8>, String> {
+        self.files
+            .iter()
+            .find(|(p, _, i)| p == path && i.id == id && i.kind == kind && &i.revision == revision)
+            .map(|(_, bytes, _)| bytes.clone())
+            .ok_or_else(|| {
+                format!("{} at revision {} was not opened with the assembly", path.display(), revision.short())
+            })
     }
 
     fn drawings(&self, _base: &Path) -> Vec<(PathBuf, Identity)> {
@@ -324,11 +351,15 @@ pub fn gather(request: &PackRequest, source: &dyn PackSource, drawings: Option<R
     let layout = Path::new(LAYOUT);
     let root = request.root.clone();
     let base = root.parent().unwrap_or(Path::new("")).to_path_buf();
-    let read = |path: &Path| source.read(path).map_err(PackError::Io);
-    let open = |path: &Path| AssemblyPackage::from_bytes(read(path)?).map_err(|e| io(path, &e));
+    let read = |path: &Path, id, kind, revision: &ContentHash| {
+        source.read_resolved(path, id, kind, revision).map_err(PackError::Io)
+    };
+    let open = |path: &Path, id, revision: &ContentHash| {
+        AssemblyPackage::from_bytes(read(path, id, DocKind::Assembly, revision)?).map_err(|e| io(path, &e))
+    };
 
     // 1. Every document the assembly reaches, by id.
-    let first = identify(Cursor::new(read(&root)?)).map_err(|e| io(&root, &e))?;
+    let first = identify(Cursor::new(source.read(&root).map_err(PackError::Io)?)).map_err(|e| io(&root, &e))?;
     if first.kind != DocKind::Assembly {
         return Err(PackError::Destination(format!("{} is not an assembly", root.display())));
     }
@@ -340,7 +371,7 @@ pub fn gather(request: &PackRequest, source: &dyn PackSource, drawings: Option<R
         }
         let mut sources = Vec::new();
         if kind == DocKind::Assembly {
-            let package = open(&path)?;
+            let package = open(&path, id, &revision)?;
             for s in &package.assembly().sources {
                 let (found, at, now) =
                     source.resolve(&path, &s.document).ok_or_else(|| PackError::Missing(s.document.path.clone()))?;
@@ -372,7 +403,7 @@ pub fn gather(request: &PackRequest, source: &dyn PackSource, drawings: Option<R
     }
 
     // 3. Drawings of packed documents, found before anything is made.
-    let mut drawn: Vec<(PathBuf, PathBuf, DocRef)> = Vec::new();
+    let mut drawn = Vec::new();
     if drawings.is_some() {
         // One copy of each drawing: the one nearest the assembly's folder. Another, such as
         // the copy an earlier pack put in a subfolder, is the same document.
@@ -397,7 +428,7 @@ pub fn gather(request: &PackRequest, source: &dyn PackSource, drawings: Option<R
             if let Some(other) = taken.insert(to.clone(), path.clone()) {
                 return Err(PackError::Clash(other, path.clone(), unlaid(&to)));
             }
-            drawn.push((path, to, model.clone()));
+            drawn.push((path, to, model.clone(), identity));
         }
     }
 
@@ -416,14 +447,14 @@ pub fn gather(request: &PackRequest, source: &dyn PackSource, drawings: Option<R
             revision: doc.revision.clone(),
             rewritten: false,
         };
-        files.push((file, read(&doc.from)?));
+        files.push((file, read(&doc.from, *id, doc.kind, &doc.revision)?));
     }
     // Every sub-assembly before each assembly that places it, however deep or shared.
     let assemblies = post_order(first.id, &docs);
     let mut packed_root = None;
     for id in &assemblies {
         let doc = &docs[id];
-        let package = open(&doc.from)?;
+        let package = open(&doc.from, *id, &doc.revision)?;
         let mut truth = (**package.assembly()).clone();
         // Sub-assembly revisions that change, old to new, for this file's copies.
         let mut moved_revisions: HashMap<(DocumentId, ContentHash), ContentHash> = HashMap::new();
@@ -486,7 +517,7 @@ pub fn gather(request: &PackRequest, source: &dyn PackSource, drawings: Option<R
 
     // 5. Drawings, pointed at their models' copies.
     if let Some(repoint) = drawings {
-        for (from, to, model) in drawn {
+        for (from, to, model, identity) in drawn {
             let target = &docs[&model.id.expect("matched by id")];
             let mut r = model.clone();
             r.set_path(&to, &target.to);
@@ -495,7 +526,8 @@ pub fn gather(request: &PackRequest, source: &dyn PackSource, drawings: Option<R
             {
                 r.pinned = now.clone();
             }
-            let out = repoint(&read(&from)?, &r).map_err(|e| io(&from, &e))?;
+            let bytes = read(&from, identity.id, identity.kind, &identity.revision)?;
+            let out = repoint(&bytes, &r).map_err(|e| io(&from, &e))?;
             let identity = identify(Cursor::new(&out)).map_err(|e| io(&to, &e))?;
             let file = PackedFile {
                 id: identity.id,

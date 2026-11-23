@@ -400,3 +400,25 @@ fn automatic_drawings_are_only_taken_from_beside_the_assembly() {
     assert_eq!(report.files.iter().filter(|file| file.kind == DocKind::Drawing).count(), 1);
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn browser_zip_keeps_the_referenced_upload_when_names_match() {
+    let dir = folder("duplicate-uploads");
+    let root = tree(&dir.join("src"));
+    let unrelated = dir.join("unrelated/a.dwprt");
+    block(&unrelated, 73.0, 12.0);
+    let read = |file: &Path| (PathBuf::from(file.file_name().unwrap()), std::fs::read(file).unwrap());
+    let wanted = dir.join("src/parts/a.dwprt");
+    let files = [&unrelated, &wanted, &dir.join("src/parts/b.dwprt"), &dir.join("src/sub/sub.dwasm"), &root];
+    let held = HeldFiles::new(files.into_iter().map(|file| read(file)));
+    let request = PackRequest { root: "rig.dwasm".into(), ..Default::default() };
+    let zip = gather(&request, &held, None).unwrap().zip().unwrap();
+    let out = dir.join("unpacked");
+    assert_eq!(unzip(&zip, &out), ["a.dwprt", "b.dwprt", "rig.dwasm", "sub.dwasm"]);
+    assert!(
+        std::fs::read(out.join("a.dwprt")).unwrap() == std::fs::read(wanted).unwrap(),
+        "the zip must contain the bytes of the referenced upload"
+    );
+    opens_on_its_own(&out.join("rig.dwasm"), 3);
+    std::fs::remove_dir_all(dir).unwrap();
+}

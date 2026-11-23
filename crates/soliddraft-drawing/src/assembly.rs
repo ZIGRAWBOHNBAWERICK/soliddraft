@@ -19,9 +19,8 @@
 //! not. A balloon carries its row's item number, and points at a visible edge of one
 //! occurrence of that part.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
-use kurbo::BezPath;
 use serde::{Deserialize, Serialize};
 use soliddraft_kernel_api::drawing::{StandardView, ViewSpec};
 use soliddraft_kernel_api::{Point2, Vec3};
@@ -110,6 +109,32 @@ pub fn bom_table_size(rows: usize) -> (f64, f64) {
     (BOM_COLUMNS.iter().map(|(_, w)| w).sum(), ROW * (rows as f64 + 2.0))
 }
 
+/// A template's drawing frame, inside its margins and zone band: `[x0, y0, x1, y1]`.
+fn drawing_frame(t: &Template) -> [f64; 4] {
+    let band = crate::library::library().templates.iter().find(|f| f.id == t.id.as_str()).map_or(0.0, |f| f.zones.band);
+    [
+        t.margins.left + band,
+        t.margins.bottom + band,
+        t.size.width_mm - t.margins.right - band,
+        t.size.height_mm - t.margins.top - band,
+    ]
+}
+
+/// Refuses a BOM of `rows` rows hanging from `position`, its top-left corner, that would
+/// leave the drawing frame of template `t`.
+fn bom_fits(t: &Template, position: Point2, rows: usize) -> Result<(), DrawingError> {
+    let [x0, y0, x1, y1] = drawing_frame(t);
+    let (w, h) = bom_table_size(rows);
+    let e = 1e-9;
+    if position.u < x0 - e || position.u + w > x1 + e || position.v > y1 + e || position.v - h < y0 - e {
+        return Err(DrawingError::BadRequest(format!(
+            "a BOM of {rows} rows is {h:.0} mm tall and does not fit on the {} sheet; use a larger sheet",
+            t.size.name
+        )));
+    }
+    Ok(())
+}
+
 impl<'k> AssemblyModel<'k> {
     /// The parts as one body, placed as the assembly has them or, with `exploded` and an
     /// exploded view, where that view puts them.
@@ -185,8 +210,20 @@ pub fn context(drawing: &Drawing, model: &AssemblyModel<'_>, id: ViewId) -> Resu
     with_part(model, exploded_at(drawing, id), |part, index| ViewContext::compute(drawing, part, index, id))
 }
 
+/// Refuses `model` at another revision than the one the drawing's views show: a view
+/// derived from it would sit beside views of the old one, and the drawing would keep its
+/// old pin.
+fn at_pinned_revision(drawing: &Drawing, model: &AssemblyModel<'_>) -> Result<(), DrawingError> {
+    if drawing.model.pinned != model.digest() {
+        return Err(DrawingError::BadRequest(
+            "the assembly has changed since the drawing's views were made; Rebuild the drawing first".into(),
+        ));
+    }
+    Ok(())
+}
+
 /// A view folded off `parent` on `direction`'s side, at the parent's scale, placed in
-/// line with it.
+/// line with it. The model must be at the revision the drawing shows.
 pub fn new_assembly_projected(
     drawing: &Drawing,
     model: &AssemblyModel<'_>,
@@ -194,6 +231,7 @@ pub fn new_assembly_projected(
     parent: ViewId,
     direction: FoldDirection,
 ) -> Result<View, DrawingError> {
+    at_pinned_revision(drawing, model)?;
     let exploded = exploded_at(drawing, parent);
     let (mut view, _) = with_part(model, exploded, |part, index| {
         crate::derived::new_projected(drawing, part, index, sheet, parent, direction)
@@ -203,7 +241,8 @@ pub fn new_assembly_projected(
 }
 
 /// A section of `parent` along a horizontal or vertical cutting line through the model
-/// point `through`, every part cut by its own kernel. A cut that meets no part is refused.
+/// point `through`, every part cut by its own kernel. A cut that meets no part is refused,
+/// and so is a model at another revision than the one the drawing shows.
 pub fn new_assembly_section(
     drawing: &Drawing,
     model: &AssemblyModel<'_>,
@@ -213,6 +252,7 @@ pub fn new_assembly_section(
     horizontal: bool,
     flip: bool,
 ) -> Result<View, DrawingError> {
+    at_pinned_revision(drawing, model)?;
     let exploded = exploded_at(drawing, parent);
     let (mut view, _) = with_part(model, exploded, |part, index| {
         let line = crate::derived::cutting_line(drawing, part, index, parent, through, horizontal)?;
@@ -226,7 +266,8 @@ pub fn new_assembly_section(
 }
 
 /// A detail of `parent` round the model point `center`, inside a circle of `radius`
-/// (the parent's view millimetres), magnified `factor` times.
+/// (the parent's view millimetres), magnified `factor` times. The model must be at the
+/// revision the drawing shows.
 pub fn new_assembly_detail(
     drawing: &Drawing,
     model: &AssemblyModel<'_>,
@@ -236,6 +277,7 @@ pub fn new_assembly_detail(
     radius: f64,
     factor: f64,
 ) -> Result<View, DrawingError> {
+    at_pinned_revision(drawing, model)?;
     let exploded = exploded_at(drawing, parent);
     let (mut view, _) = with_part(model, exploded, |part, index| {
         let at = crate::derived::context(drawing, part, index, parent)?.xf.point(center);
@@ -264,10 +306,9 @@ pub fn make_assembly_drawing(model: &AssemblyModel<'_>, new: &NewAssemblyDrawing
     let mut drawing = Drawing::new(reference, &new.template);
     drawing.meta = new.meta.clone();
     let t = &new.template;
-    let band = crate::library::library().templates.iter().find(|f| f.id == t.id.as_str()).map_or(0.0, |f| f.zones.band);
-    let (x0, y0) = (t.margins.left + band, t.margins.bottom + band);
-    let (x1, y1) = (t.size.width_mm - t.margins.right - band, t.size.height_mm - t.margins.top - band);
+    let [x0, y0, x1, y1] = drawing_frame(t);
     let (bom_w, bom_h) = bom_table_size(model.bom.len());
+    bom_fits(t, Point2::new(x1 - bom_w, y1), model.bom.len())?;
     // The BOM in the top-right corner; the views left of it, above the title block.
     drawing.sheets[0].tables.push(Table {
         kind: TableKind::Bom,
@@ -280,6 +321,13 @@ pub fn make_assembly_drawing(model: &AssemblyModel<'_>, new: &NewAssemblyDrawing
     let region = (x0 + MARGIN, title_top.max(y0 + MARGIN), x1 - MARGIN, y1 - bom_h - MARGIN);
     let slot_w = (region.2 - region.0) / new.views.len() as f64;
     let slot_h = region.3 - region.1;
+    if slot_w <= 0.0 || slot_h <= 0.0 {
+        return Err(DrawingError::BadRequest(format!(
+            "a BOM of {} rows leaves no room for the views on the {} sheet; use a larger sheet",
+            model.bom.len(),
+            t.size.name
+        )));
+    }
     // Extents at full scale, with room for balloons around each view.
     let mut extents = Vec::new();
     for v in &new.views {
@@ -290,13 +338,15 @@ pub fn make_assembly_drawing(model: &AssemblyModel<'_>, new: &NewAssemblyDrawing
     let fits = |s: f64| extents.iter().all(|(w, h)| s * w + room <= slot_w && s * h + room <= slot_h);
     let mut scales = t.scales.clone();
     scales.sort_by(|a, b| b.factor().total_cmp(&a.factor()));
-    let scale = new.scale.unwrap_or_else(|| {
-        scales
-            .iter()
-            .copied()
-            .find(|s| fits(s.factor()))
-            .unwrap_or_else(|| scales.last().copied().unwrap_or(Scale::FULL))
-    });
+    let scale = match new.scale {
+        Some(s) => s,
+        None => scales.iter().copied().find(|s| fits(s.factor())).ok_or_else(|| {
+            DrawingError::BadRequest(format!(
+                "the views do not fit beside the BOM on the {} sheet at any of its scales; use a larger sheet",
+                t.size.name
+            ))
+        })?,
+    };
     drawing.sheets[0].scale = scale;
     for (i, v) in new.views.iter().enumerate() {
         let (geometry, _) = assembly_view(model, &ViewSpec::standard(*v), scale.factor(), new.exploded)?;
@@ -322,9 +372,11 @@ pub fn make_assembly_drawing(model: &AssemblyModel<'_>, new: &NewAssemblyDrawing
     Ok(drawing)
 }
 
-/// Where a balloon for `item` attaches in a view: the middle of the longest visible edge
-/// of the first occurrence of the item that shows one (or of `occurrence`), in model
-/// space and view millimetres, with that occurrence's path.
+/// Where a balloon for `item` attaches in a view: the middle of the longest visible
+/// stretch of an edge of the first occurrence of the item that shows one (or of
+/// `occurrence`), in model space and view millimetres, with that occurrence's path. A
+/// stretch is what is left of an edge where other parts hide the rest, so the leader
+/// lands on line work the view shows.
 fn attach_point(
     model: &AssemblyModel<'_>,
     ctx: &ViewContext,
@@ -335,34 +387,42 @@ fn attach_point(
         Some(p) => vec![p],
         None => model.paths_of(item).collect(),
     };
+    // The model curves the view was projected from, beside their projections: the
+    // projection keeps, in order, every curve that draws as a path.
+    let kept: Vec<_> =
+        ctx.curves.curves.iter().filter(|c| project::path_of(&c.curve, &ctx.xf).elements().len() >= 2).collect();
+    if kept.len() != ctx.projected.geometry.curves.len() {
+        return None;
+    }
+    let drawn: Vec<_> = kept.into_iter().zip(&ctx.projected.geometry.curves).collect();
     for path in wanted {
-        let Some(best) = ctx
-            .projected
-            .geometry
-            .curves
+        let Some((best, _)) = drawn
             .iter()
-            .filter(|c| c.visible && c.source.kind == EntityKind::Edge && component_of(&c.source.feature) == Some(path))
-            .max_by(|a, b| a.source.fingerprint.size.total_cmp(&b.source.fingerprint.size))
+            .filter(|(_, c)| {
+                c.visible && c.source.kind == EntityKind::Edge && component_of(&c.source.feature) == Some(path)
+            })
+            .max_by(|(a, _), (b, _)| a.curve.length().total_cmp(&b.curve.length()))
         else {
             continue;
         };
-        let at = best.source.fingerprint.point;
+        let at = best.curve.point_at(0.5);
         return Some((path.to_owned(), at, ctx.xf.point(at)));
     }
     None
 }
 
-/// Puts a balloon for every BOM row that has none on `view`, outside the view's box, on
-/// the line from the view's middle through its anchor.
+/// Puts a balloon for every BOM row that no balloon on `view` points at, outside the
+/// view's box, on the line from the view's middle through its anchor.
 fn add_balloons(drawing: &mut Drawing, model: &AssemblyModel<'_>, view: ViewId) -> Result<(), DrawingError> {
     let sheet = crate::project::sheet_of(drawing, view).ok_or(DrawingError::UnknownView(view))?;
     let ctx = context(drawing, model, view)?;
     let [bx0, by0, bx1, by1] = ctx.projected.geometry.bbox;
     let half = Point2::new((bx1 - bx0) / 2.0, (by1 - by0) / 2.0);
+    // Only a balloon that points at its part numbers a row: a dangling one claims none.
     let taken: Vec<u32> = drawing.sheets[sheet]
         .annotations
         .iter()
-        .filter(|a| a.view == view)
+        .filter(|a| a.view == view && !matches!(a.state, AnnotationState::Dangling { .. }))
         .filter_map(|a| match &a.body {
             AnnotationKind::Balloon { item, .. } => Some(*item),
             _ => None,
@@ -414,7 +474,7 @@ fn add_balloons(drawing: &mut Drawing, model: &AssemblyModel<'_>, view: ViewId) 
 /// rows, each balloon moved onto its occurrence (dangling when the occurrence is gone or
 /// shows no edge in the view, its number from the BOM row its occurrence is now counted
 /// under), and a balloon on the first ballooned view for every new row. Pins the new
-/// revision. A view excluded from update keeps its line work.
+/// revision. A view excluded from update keeps its line work and its balloons.
 pub fn update_assembly_drawing(drawing: &Drawing, model: &AssemblyModel<'_>) -> Result<Drawing, DrawingError> {
     let mut out = drawing.clone();
     if let Some(r) = &model.reference {
@@ -422,6 +482,10 @@ pub fn update_assembly_drawing(drawing: &Drawing, model: &AssemblyModel<'_>) -> 
     }
     let item_of: BTreeMap<&str, u32> =
         model.parts.iter().zip(&model.items).map(|(p, i)| (p.component.as_str(), *i)).collect();
+    // Only these views are written. A view excluded from updates keeps its line work and
+    // its balloons, though a view derived from it is computed from it as it is now.
+    let included: HashSet<ViewId> =
+        drawing.sheets.iter().flat_map(|s| &s.views).filter(|v| !v.excluded_from_update).map(|v| v.id).collect();
     // Every view, parents first, once for each placement the views show.
     let mut contexts: HashMap<ViewId, ViewContext> = HashMap::new();
     for exploded in [false, true] {
@@ -446,11 +510,13 @@ pub fn update_assembly_drawing(drawing: &Drawing, model: &AssemblyModel<'_>) -> 
     }
     let mut ballooned: Option<ViewId> = None;
     for si in 0..out.sheets.len() {
+        let template = crate::library::template(out.sheets[si].template.as_str()).template();
         for t in out.sheets[si].tables.iter_mut().filter(|t| t.kind == TableKind::Bom) {
+            bom_fits(&template, t.position, model.bom.len())?;
             t.bom = model.bom.clone();
         }
         let views: Vec<ViewId> = out.sheets[si].views.iter().map(|v| v.id).collect();
-        for id in views {
+        for id in views.into_iter().filter(|id| included.contains(id)) {
             let Some(ctx) = contexts.get(&id) else { continue };
             for a in out.sheets[si].annotations.iter_mut().filter(|a| a.view == id) {
                 let AnnotationKind::Balloon { item, occurrence } = &mut a.body else { continue };
@@ -494,10 +560,9 @@ pub fn update_assembly_drawing(drawing: &Drawing, model: &AssemblyModel<'_>) -> 
         && let Some(sheet) = out.sheets.first_mut()
     {
         let t = crate::library::template(sheet.template.as_str()).template();
-        let band =
-            crate::library::library().templates.iter().find(|f| f.id == t.id.as_str()).map_or(0.0, |f| f.zones.band);
+        let [_, _, x1, y1] = drawing_frame(&t);
         let (w, _) = bom_table_size(model.bom.len());
-        let (x1, y1) = (t.size.width_mm - t.margins.right - band, t.size.height_mm - t.margins.top - band);
+        bom_fits(&t, Point2::new(x1 - w, y1), model.bom.len())?;
         sheet.tables.push(Table {
             kind: TableKind::Bom,
             position: Point2::new(x1 - w, y1),
@@ -505,7 +570,11 @@ pub fn update_assembly_drawing(drawing: &Drawing, model: &AssemblyModel<'_>) -> 
             bom: model.bom.clone(),
         });
     }
-    let first = out.sheets.first().and_then(|s| s.views.iter().find(|v| orientation(v).is_some())).map(|v| v.id);
+    let first = out
+        .sheets
+        .first()
+        .and_then(|s| s.views.iter().find(|v| orientation(v).is_some() && included.contains(&v.id)))
+        .map(|v| v.id);
     if let Some(view) = ballooned.or(first) {
         add_balloons(&mut out, model, view)?;
     }
@@ -515,10 +584,4 @@ pub fn update_assembly_drawing(drawing: &Drawing, model: &AssemblyModel<'_>) -> 
 /// A drawing whose model is an assembly.
 pub fn is_assembly_drawing(drawing: &Drawing) -> bool {
     drawing.model.kind == crate::DocKind::Assembly
-}
-
-/// The path of a balloon's circle, for the canvas and exports: the circle at `centre`.
-pub fn balloon_circle(centre: Point2, radius: f64) -> BezPath {
-    let c = kurbo::Circle::new((centre.u, centre.v), radius);
-    kurbo::Shape::to_path(&c, 0.01)
 }

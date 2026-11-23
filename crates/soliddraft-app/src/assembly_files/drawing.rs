@@ -11,7 +11,8 @@ use soliddraft_drawing::{Command, Drawing, DrawingError, DrawingMeta, FoldDirect
 use soliddraft_kernel_api::drawing::StandardView;
 use soliddraft_kernel_api::{BodyId, Kernel, Vec3};
 use soliddraft_model::Document as PartDocument;
-use std::collections::HashMap;
+use soliddraft_model::configs::DEFAULT_ROW;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
 /// One shown part occurrence with its exact body.
@@ -57,11 +58,15 @@ impl ExactParts {
             bom: self.bom.clone(),
         }
     }
+}
 
-    /// True when the assembly has an exploded view.
-    pub fn has_exploded(&self) -> bool {
-        self.exploded
-    }
+/// The placements counted on one BOM row: a part document in the configuration it shows,
+/// `None` for the one its file was saved in when no placement of it names one.
+struct BomGroup {
+    key: (DocumentId, Option<ConfigurationId>),
+    row: BomRow,
+    /// The configuration's name, when a placement in the row names it.
+    named: Option<String>,
 }
 
 fn rigid(p: Placement) -> Rigid {
@@ -76,43 +81,77 @@ pub fn exact_parts(doc: &mut AssemblyDocument) -> Result<ExactParts, String> {
     doc.finish_loading();
     let exploded: HashMap<OccurrencePath, Placement> =
         if doc.assembly().explode.is_empty() { HashMap::new() } else { doc.exploded_worlds().into_iter().collect() };
+    let accepted = doc.accepted_worlds().into_owned();
     let path = doc.path().ok_or("save the assembly first: its drawing refers to its file")?;
     let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     let reference = DocRef::new(doc.id(), DocKind::Assembly, name, doc.revision());
     let source = KernelSource::new(crate::kernel());
-    let mut items: Vec<((DocumentId, Option<ConfigurationId>), BomRow)> = Vec::new();
+    // One BOM row per part document in the configuration it shows, by the order the tree
+    // first places it. A placement that names no configuration shows the one its file was
+    // saved in, so it shares a row with a placement that names that one. The row is named
+    // for its configuration when a placement in it names one.
+    let mut items: Vec<BomGroup> = Vec::new();
     let mut parts = Vec::new();
     let mut documents = Vec::new();
     let rows = doc.table().len() as u32;
+    let counted = |f: Flags| !(f.has(Flags::ASSEMBLY) || f.has(Flags::SUPPRESSED) || f.has(Flags::REMOVED));
+    let named_documents: HashSet<DocumentId> = (1..rows)
+        .map(OccurrenceIndex)
+        .filter(|row| counted(doc.table().flags(*row)))
+        .map(|row| doc.store().get(doc.table().definition(row)))
+        .filter(|def| def.kind == DocKind::Part && def.key.configuration.is_some())
+        .map(|def| def.key.document)
+        .collect();
     for row in (1..rows).map(OccurrenceIndex) {
         let f = doc.table().flags(row);
-        if f.has(Flags::ASSEMBLY) || f.has(Flags::SUPPRESSED) || f.has(Flags::REMOVED) {
+        if !counted(f) {
             continue;
         }
         let def_index = doc.table().definition(row);
         let def = doc.store().get(def_index).clone();
         if def.kind != DocKind::Part {
-            continue;
+            // Only a part has an exact body. A shown mesh reference refuses the drawing by
+            // name rather than leaving a hole where it stands; a hidden one is not drawn.
+            if f.has(Flags::HIDDEN) {
+                continue;
+            }
+            let what = if def.kind == DocKind::Mesh { "a mesh reference" } else { "not a part" };
+            return Err(format!(
+                "{} is {what} with no exact body to draw; hide it or take it out of the assembly to draw the rest",
+                doc.label(row)
+            ));
         }
-        let document = (def.key.document, def.key.configuration.clone());
-        let item = match items.iter_mut().position(|(d, _)| *d == document) {
-            Some(i) => {
-                items[i].1.quantity += 1;
-                items[i].1.item
+        let name = def.label.trim_end_matches(".dwprt").to_owned();
+        // A placement that names a configuration, or that may share a row with one, reads
+        // its part for which configuration it shows; the others of a document share a row.
+        let (shows, named) = if def.key.configuration.is_some() || named_documents.contains(&def.key.document) {
+            let part = doc.exact(def_index, &source).map_err(|e| format!("{name}: {e}"))?;
+            let part = part.lock().map_err(|_| format!("{name}: the part is unavailable"))?;
+            let shows = match &def.key.configuration {
+                Some(c) => c.clone(),
+                None => part.active_configuration().cloned().unwrap_or_else(|| ConfigurationId(DEFAULT_ROW.into())),
+            };
+            let named = def.key.configuration.as_ref().map(|c| {
+                let names = part.configuration_names();
+                names.iter().find(|(id, _)| id == c).map_or_else(|| c.0.clone(), |(_, n)| n.clone())
+            });
+            (Some(shows), named)
+        } else {
+            (None, None)
+        };
+        let key = (def.key.document, shows);
+        let item = match items.iter_mut().find(|g| g.key == key) {
+            Some(g) => {
+                g.row.quantity += 1;
+                if g.named.is_none() {
+                    g.named = named;
+                }
+                g.row.item
             }
             None => {
                 let item = items.len() as u32 + 1;
                 let file = doc.reference(def_index).map(|r| r.path.clone()).unwrap_or_default();
-                let mut label = def.label.trim_end_matches(".dwprt").to_owned();
-                // A part placed in one of its configurations is a row of its own, named for it.
-                if let Some(c) = &document.1 {
-                    let part = doc.exact(def_index, &source)?;
-                    let part = part.lock().map_err(|_| format!("{label}: the part is unavailable"))?;
-                    let names = part.configuration_names();
-                    let shown = names.iter().find(|(id, _)| id == c).map_or(c.0.as_str(), |(_, n)| n.as_str());
-                    label = format!("{label} ({shown})");
-                }
-                items.push((document, BomRow { item, name: label, file, quantity: 1 }));
+                items.push(BomGroup { key, row: BomRow { item, name, file, quantity: 1 }, named });
                 item
             }
         };
@@ -128,7 +167,7 @@ pub fn exact_parts(doc: &mut AssemblyDocument) -> Result<ExactParts, String> {
             (part.kernel().clone(), body)
         };
         let occurrence = doc.table().path(row);
-        let world = doc.table().world(row);
+        let world = accepted[row.0 as usize];
         parts.push(ExactPart {
             kernel,
             body,
@@ -144,7 +183,13 @@ pub fn exact_parts(doc: &mut AssemblyDocument) -> Result<ExactParts, String> {
         reference,
         parts,
         exploded: !exploded.is_empty(),
-        bom: items.into_iter().map(|(_, r)| r).collect(),
+        bom: items
+            .into_iter()
+            .map(|g| match g.named {
+                Some(shown) => BomRow { name: format!("{} ({shown})", g.row.name), ..g.row },
+                None => g.row,
+            })
+            .collect(),
         _documents: documents,
     })
 }
@@ -258,7 +303,8 @@ pub fn update(state: &mut AppState) -> Result<String, String> {
 }
 
 /// Places a view `make` derives from the assembly drawing's view `parent`, every part
-/// drawn by its kernel, as one undo step. The drawing's assembly must be the open one.
+/// drawn by its kernel, as one undo step. The drawing's assembly must be the open one, at
+/// the revision the drawing shows.
 /// Returns the new view's label and id.
 fn place_derived(
     state: &mut AppState,
@@ -268,9 +314,16 @@ fn place_derived(
 ) -> Result<(String, u32), String> {
     let d = state.drawing.session.as_ref().ok_or("no drawing is open")?;
     let wanted = d.doc.drawing.model.id;
+    let pinned = d.doc.drawing.model.pinned.clone();
     let a = state.assembly.session.as_mut().ok_or("open the drawing's assembly first")?;
     if Some(a.doc.id()) != wanted {
         return Err("the open assembly is not the one this drawing shows; open it first".into());
+    }
+    // A view of another revision would sit beside the drawing's views of this one.
+    if a.doc.revision() != pinned {
+        return Err(format!(
+            "{what}: the assembly has changed since the drawing's views were made; Rebuild the drawing first"
+        ));
     }
     let exact = exact_parts(&mut a.doc)?;
     let model = exact.model();

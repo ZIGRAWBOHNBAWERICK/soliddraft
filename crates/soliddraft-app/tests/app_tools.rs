@@ -151,6 +151,51 @@ fn assembly_drawing_bom_shares_only_the_part_filename() {
 }
 
 #[test]
+fn assembly_drawing_uses_accepted_placements_while_exploded() {
+    let dir = std::env::temp_dir().join(format!("soliddraft-drawing-accepted-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut s = Session { state: AppState::new(board_bracket()), ran: BTreeSet::new(), dir: dir.clone() };
+    let part = s.path("bracket.dwprt");
+    let assembly = s.path("brackets.dwasm");
+    let drawing = s.path("brackets.dwdrw");
+    s.call("save", json!({ "path": part }));
+    let inserted = s.call("make_assembly", json!({}));
+    let mover = inserted["assembly"]["components"][0]["path"].as_str().unwrap();
+    s.call("assembly_explode_step", json!({ "paths": [mover], "direction": [1, 0, 0], "distance": 75 }));
+    s.call("assembly_save", json!({ "path": assembly }));
+    s.call("open", json!({ "path": assembly }));
+    s.call("assembly_explode", json!({ "exploded": true }));
+
+    let doc = &mut s.state.assembly.session.as_mut().unwrap().doc;
+    let exact = soliddraft_app::assembly_files::drawing::exact_parts(doc).unwrap();
+    assert!(doc.is_exploded());
+    let model = exact.model();
+    assert_eq!(model.parts.len(), 1);
+    assert_eq!(model.exploded[0].translation.x, 75.0);
+    assert_eq!(model.parts[0].placement.translation.x, 0.0);
+
+    doc.begin_drag(mover.parse().unwrap()).unwrap();
+    let preview = soliddraft_assembly::Placement::translation(glam::DVec3::X * 40.0);
+    doc.preview_drag(preview).unwrap();
+    let exact = soliddraft_app::assembly_files::drawing::exact_parts(doc).unwrap();
+    assert!(doc.dragging());
+    assert_eq!(exact.model().parts[0].placement.translation.x, 0.0);
+    assert_eq!(exact.model().exploded[0].translation.x, 75.0);
+    doc.cancel_drag();
+    doc.set_exploded(true).unwrap();
+
+    let made = s.call("assembly_make_drawing", json!({ "exploded": false }));
+    let front = made["drawing"]["sheets"][0]["views"][1]["id"].clone();
+    s.call("drawing_save", json!({ "path": drawing }));
+    s.call("drawing_close", json!({}));
+    s.call("open", json!({ "path": drawing }));
+    s.call("drawing_rebuild", json!({}));
+    let derived = s.call("drawing_projected", json!({ "view": front, "direction": "right" }));
+    assert!(derived["placed"].is_string(), "{derived}");
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
 fn every_tool_runs_without_a_window_and_undoes_as_its_row_says() {
     let dir = std::env::temp_dir().join(format!("soliddraft-app-tools-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
@@ -728,11 +773,18 @@ fn every_tool_runs_without_a_window_and_undoes_as_its_row_says() {
     let pdf = s.call("drawing_export_pdf", json!({ "path": s.path("rig.pdf") }));
     assert_eq!((pdf["views"].as_u64(), pdf["method"].as_str()), (Some(5), Some("catallax")), "{pdf}");
     s.call("show_assembly", json!({}));
+    let expected = BTreeSet::from(["linked.dwprt", "pin.dwprt", "rig.dwasm", "second.dwprt", "slotted.dwprt"]);
     let packed = s.call("assembly_pack_and_go", json!({ "folder": s.path("packed") }));
-    assert!(packed["packed"]["files"].as_array().unwrap().len() >= 3);
+    assert_eq!(packed["packed"]["files"].as_array().unwrap().len(), expected.len());
     let zipped = s.call("assembly_pack_and_go", json!({ "zip": s.path("packed.zip") }));
-    let count = |v: &serde_json::Value| v["packed"]["files"].as_array().map(Vec::len);
-    assert_eq!(count(&zipped), count(&packed), "the zip holds what the folder does");
+    let reported = zipped["packed"]["files"].as_array().unwrap();
+    assert_eq!(reported.len(), expected.len());
+    assert_eq!(reported.iter().map(|file| file["to"].as_str().unwrap()).collect::<BTreeSet<_>>(), expected);
+    let mut archive = zip::ZipArchive::new(std::fs::File::open(s.dir.join("packed.zip")).unwrap()).unwrap();
+    assert_eq!(archive.len(), expected.len());
+    for name in expected {
+        assert!(archive.by_name(name).is_ok(), "missing or invalid ZIP entry {name}");
+    }
 
     // The second part moves into a file of its own, placed where it was, in one undo step.
     let at = parts[1].to_string();

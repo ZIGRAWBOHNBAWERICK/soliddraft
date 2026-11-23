@@ -136,7 +136,10 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
     let d = &mut state.assembly.configure;
     ui.add_space(8.0);
     theme::section_label(ui, "Configurations");
-    if truth.configurations.is_empty() {
+    if !truth.configurations.reserved().is_empty() {
+        let kept = "This file holds configurations from another SolidDraft version. They are kept as saved.";
+        ui.label(egui::RichText::new(kept).color(theme::muted()));
+    } else if truth.configurations.is_empty() {
         ui.label(egui::RichText::new("Only the default state. Add one to keep another.").color(theme::muted()));
     }
     for c in &truth.configurations {

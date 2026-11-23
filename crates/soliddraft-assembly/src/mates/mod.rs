@@ -22,6 +22,7 @@
 
 pub(crate) mod bodies;
 pub(crate) mod command;
+pub use command::hinge_angle_at;
 pub(crate) mod drag;
 mod mechanical;
 pub use mechanical::Mechanism;

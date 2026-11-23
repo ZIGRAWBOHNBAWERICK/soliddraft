@@ -266,3 +266,53 @@ fn a_roller_rides_an_eccentric_disc_and_a_stadium_cam() {
     certified(&mut back, "C");
     std::fs::remove_dir_all(r.dir).unwrap();
 }
+
+/// A D: the upper half of a 40 mm circle about the origin, closed by its diameter.
+fn d_shape(s: &mut Sketch) {
+    use soliddraft_model::sketch::{ConstraintKind, EntityKind, PointRef};
+    let line = s.add(EntityKind::Line { a: P2::new(-20.0, 0.0), b: P2::new(20.0, 0.0) }, false);
+    let arc = s
+        .add(EntityKind::Arc { center: P2::new(0.0, 0.0), start: P2::new(20.0, 0.0), end: P2::new(-20.0, 0.0) }, false);
+    s.constrain(ConstraintKind::Coincident { a: PointRef::new(line, 1), b: PointRef::new(arc, 1) });
+    s.constrain(ConstraintKind::Coincident { a: PointRef::new(arc, 2), b: PointRef::new(line, 0) });
+}
+
+#[test]
+fn a_corner_runs_round_both_edges_of_an_outline_with_two_corners() {
+    let mut r = rig(
+        "path-d",
+        |p| part(p, 5.0, d_shape),
+        |p| {
+            part(p, 6.0, |s| {
+                let _ = s.rectangle(P2::new(0.0, 0.0), 6.0, 6.0).unwrap();
+            })
+        },
+        Placement::new(DQuat::from_rotation_z(0.3), DVec3::new(5.0, 24.0, 9.0)),
+    );
+    r.doc.mate_path("P", &generator(r.base, GeneratorChoice::EndCap), &corner(r.mover), false).unwrap();
+    certified(&mut r.doc, "P");
+    let corners = |doc: &AssemblyDocument| -> Vec<DVec3> {
+        let at = placement(doc, r.mover);
+        [(-3.0, -3.0), (3.0, -3.0), (3.0, 3.0), (-3.0, 3.0)]
+            .iter()
+            .map(|(x, y)| at.apply(DVec3::new(*x, *y, 0.0)))
+            .collect()
+    };
+    let on_arc =
+        |p: &DVec3| (p.z - 5.0).abs() < 1e-7 && p.y > 0.5 && ((p.x * p.x + p.y * p.y).sqrt() - 20.0).abs() < 1e-7;
+    let on_line = |p: &DVec3| (p.z - 5.0).abs() < 1e-7 && p.y.abs() < 1e-7 && p.x.abs() < 19.0;
+    let path = OccurrencePath::root().child(Step::component(r.mover));
+    // Dragged over the curved side, a corner rides the arc.
+    r.doc.begin_drag(path.clone()).unwrap();
+    r.doc.preview_drag(Placement::new(DQuat::from_rotation_z(0.3), DVec3::new(0.0, 24.0, 7.0))).unwrap();
+    r.doc.commit_drag().unwrap();
+    certified(&mut r.doc, "P");
+    assert!(corners(&r.doc).iter().any(on_arc), "{:?}", corners(&r.doc));
+    // Dragged below the flat side, a corner rides the straight edge.
+    r.doc.begin_drag(path).unwrap();
+    r.doc.preview_drag(Placement::new(DQuat::from_rotation_z(0.3), DVec3::new(0.0, -4.0, 7.0))).unwrap();
+    r.doc.commit_drag().unwrap();
+    certified(&mut r.doc, "P");
+    assert!(corners(&r.doc).iter().any(on_line), "{:?}", corners(&r.doc));
+    std::fs::remove_dir_all(r.dir).unwrap();
+}

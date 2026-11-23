@@ -179,8 +179,7 @@ fn parse(args: &[String]) -> Result<Args, String> {
             f @ ("--name" | "--depth" | "--at" | "--rotate" | "--linear" | "--spacing" | "--count" | "--second"
             | "--spacing2" | "--count2" | "--circular" | "--angle" | "--to" | "--by" | "--rgb" | "--metallic"
             | "--roughness" | "--unique" | "--placements" | "--modules" | "--seed" | "--size" | "--frames"
-            | "--set" | "--every" | "--direction" | "--distance" | "--prefix" | "--suffix" | "--template"
-            | "--pdf" | "--svg" | "--configuration" | "--meshes") => {
+            | "--set" | "--every" | "--direction" | "--distance" | "--prefix" | "--suffix" | "--template") => {
                 let v = it.next().ok_or(format!("{f} needs a value"))?;
                 a.values.push((f.to_owned(), v.clone()));
             }

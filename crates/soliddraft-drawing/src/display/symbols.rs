@@ -223,7 +223,11 @@ pub(super) fn symbol_items(
         AnnotationKind::Balloon { item, .. } => {
             let r = crate::assembly::BALLOON_RADIUS;
             pen.circle(place, r);
-            pen.text(place, &item.to_string(), Align::Centre, VAlign::Centre, 0.0);
+            // A dangling balloon's part is gone or out of sight; its old number may be
+            // another row's now, so it shows none.
+            let dangling = matches!(a.state, crate::annotation::AnnotationState::Dangling { .. });
+            let number = if dangling { "?".to_owned() } else { item.to_string() };
+            pen.text(place, &number, Align::Centre, VAlign::Centre, 0.0);
             if let Some(to) = anchors.first() {
                 let d = sub(*to, place);
                 let len = d.length();

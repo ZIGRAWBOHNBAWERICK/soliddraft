@@ -52,6 +52,7 @@ pub(crate) fn configurations_json(doc: &AssemblyDocument) -> Value {
     json!({
         "active": doc.assembly().active_configuration().map(|c| c.name.clone()),
         "configurations": rows,
+        "kept_from_another_version": doc.assembly().configurations.reserved().len(),
     })
 }
 
@@ -61,7 +62,13 @@ fn print_configurations(doc: &AssemblyDocument, as_json: bool) {
         return;
     }
     let list = &doc.assembly().configurations;
-    if list.is_empty() {
+    if !list.reserved().is_empty() {
+        println!(
+            "{} keeps {} configuration rows of another SolidDraft version as saved",
+            doc.assembly().name,
+            list.reserved().len()
+        );
+    } else if list.is_empty() {
         println!("{} has no configurations", doc.assembly().name);
     }
     for c in list {

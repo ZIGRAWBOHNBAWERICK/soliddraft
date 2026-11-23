@@ -516,7 +516,7 @@ fn check_carried(
         if truth.explode.iter().any(|s| s.occurrences.iter().any(under)) {
             return refuse(c, "is moved by the exploded view");
         }
-        if !truth.configurations.is_empty() {
+        if !truth.configurations.is_unused() {
             return refuse(c, "is in an assembly with configurations");
         }
     }

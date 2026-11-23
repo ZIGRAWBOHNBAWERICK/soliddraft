@@ -19,9 +19,9 @@
 //! mate. Other constraints between the same bodies can remove more freedoms.
 //!
 //! A Gear mate between two of those joints makes the second follow the first (URDF
-//! `mimic`). The joints form a tree from `base_link`: a mate that would close a loop is
-//! left out, and a part no mate reaches is fixed to `base_link` where it stands. Every
-//! such choice is in [`Articulation::notes`], naming the mates. Lengths are written in
+//! `mimic`). A disconnected group starts with a fixed joint to `base_link` and keeps its
+//! internal joints, including mates authored in sub-assemblies. A mate that would close
+//! a loop is left out and named in [`Articulation::notes`]. Lengths are written in
 //! metres for URDF and millimetres for OpenUSD (`metersPerUnit = 0.001`, Z up). Each
 //! joint frame puts the joint's axis along its X, as UsdPhysics wants.
 //!
@@ -34,9 +34,10 @@ use std::path::{Path, PathBuf};
 
 use glam::{DMat4, DQuat, DVec3};
 use serde::Serialize;
-use soliddraft_assembly::mates::Mechanism;
+use soliddraft_assembly::mates::{Mechanism, hinge_angle_at};
 use soliddraft_assembly::{
-    AssemblyDocument, DisplayMesh, Entity, FaceEndpoint, Flags, Mate, OccurrenceIndex, OccurrencePath, StoredSupport,
+    AssemblyDocument, DisplayMesh, Entity, FaceEndpoint, Flags, Mate, OccurrenceIndex, OccurrencePath, Placement, Step,
+    StoredSupport,
 };
 use soliddraft_kernel_api::{EnclosedSupport, ExactRational, SupportBounds};
 
@@ -109,12 +110,7 @@ pub struct ExportMesh {
     pub triangles: Vec<[u32; 3]>,
 }
 
-/// A link's world frame and what the export knows about it while it builds.
-struct Body {
-    world: DMat4,
-}
-
-fn mat(p: &soliddraft_assembly::Placement) -> DMat4 {
+fn mat(p: &Placement) -> DMat4 {
     DMat4::from_rotation_translation(p.rotation, p.translation)
 }
 
@@ -135,8 +131,7 @@ fn enclosed_vector(bounds: &[SupportBounds; 3]) -> DVec3 {
 }
 
 /// An endpoint's axis, placed: a point on it and its unit direction in the assembly's frame.
-fn axis_of(end: &FaceEndpoint, bodies: &HashMap<OccurrencePath, usize>, worlds: &[Body]) -> Option<(DVec3, DVec3)> {
-    let body = &worlds[*bodies.get(&end.path)?];
+fn axis_of(end: &FaceEndpoint, world: Placement) -> Option<(DVec3, DVec3)> {
     let (through, direction) = match end.support.as_ref()? {
         StoredSupport::Axis { direction, through, .. } => {
             (DVec3::from_array(*through), DVec3::from_array(direction.map(f64::from)))
@@ -147,8 +142,8 @@ fn axis_of(end: &FaceEndpoint, bodies: &HashMap<OccurrencePath, usize>, worlds: 
         },
         _ => return None,
     };
-    let point = body.world.transform_point3(through);
-    let direction = body.world.transform_vector3(direction).try_normalize()?;
+    let point = world.apply(through);
+    let direction = world.rotate(direction).try_normalize()?;
     point.is_finite().then_some((point, direction))
 }
 
@@ -194,12 +189,12 @@ fn axis_frame(at: DVec3, axis: DVec3, like: DQuat) -> DMat4 {
 /// Builds the articulation of the open assembly at its accepted placements.
 pub fn articulate(doc: &mut AssemblyDocument) -> Result<Articulation, String> {
     doc.finish_loading();
-    let truth = doc.assembly().clone();
     let table = doc.table();
+    let accepted = doc.accepted_worlds();
     let mut notes = Vec::new();
 
     // Links: every part or mesh occurrence that is not suppressed.
-    let mut worlds: Vec<Body> = Vec::new();
+    let mut worlds = Vec::new();
     let mut bodies: HashMap<OccurrencePath, usize> = HashMap::new();
     let mut links =
         vec![Link { name: "base_link".into(), path: None, mesh: None, visual: DMat4::IDENTITY, colour: None }];
@@ -231,7 +226,7 @@ pub fn articulate(doc: &mut AssemblyDocument) -> Result<Articulation, String> {
             [c.r as f64 / 255.0, c.g as f64 / 255.0, c.b as f64 / 255.0]
         });
         bodies.insert(path.clone(), worlds.len());
-        worlds.push(Body { world: mat(&table.world(row)) });
+        worlds.push(accepted[row.0 as usize]);
         links.push(Link { name, path: Some(path.to_string()), mesh: Some(m), visual: DMat4::IDENTITY, colour });
     }
     if worlds.is_empty() {
@@ -239,36 +234,50 @@ pub fn articulate(doc: &mut AssemblyDocument) -> Result<Articulation, String> {
     }
 
     // What each pair of parts is held by.
-    let mut pairs: BTreeMap<(usize, usize), Vec<&Mate>> = BTreeMap::new();
-    let mut grounded: Option<usize> = None;
-    for mate in truth.known_mates() {
+    let holders = doc.mate_holders();
+    let scoped_mates: Vec<_> =
+        holders.iter().flat_map(|(path, assembly)| assembly.known_mates().map(move |mate| (path, mate))).collect();
+    let body_of = |prefix: &OccurrencePath, path: &OccurrencePath| {
+        bodies.get(&OccurrencePath([prefix.steps(), path.steps()].concat())).copied()
+    };
+    let placement = |prefix: &OccurrencePath, end: &FaceEndpoint| worlds[body_of(prefix, &end.path).unwrap()];
+    let mut pairs: BTreeMap<_, Vec<_>> = BTreeMap::new();
+    let mut origins = Vec::new();
+    let mut grounded = vec![false; worlds.len()];
+    for &(prefix, mate) in &scoped_mates {
         if let Mate::Origin { component, .. } = mate {
-            let p = OccurrencePath::root().child(soliddraft_assembly::Step::component(*component));
-            grounded = grounded.or(bodies.get(&p).copied());
+            let p = prefix.child(Step::component(*component));
+            if let Some(&body) = bodies.get(&p) {
+                grounded[body] = true;
+                origins.push(body);
+            }
             continue;
         }
         if matches!(mate, Mate::Mechanical { .. }) {
             continue;
         }
-        let mut ends: Vec<usize> = mate.ends().iter().filter_map(|e| bodies.get(e.path).copied()).collect();
+        let mut ends: Vec<_> = mate.ends().into_iter().map(|e| e.path).collect();
         ends.sort();
         ends.dedup();
         match ends[..] {
-            [a, b] => pairs.entry((a, b)).or_default().push(mate),
-            [_] => {}
-            _ => notes.push(format!("{} ties more than two parts and is carried as fixed", mate.name())),
+            [a, b] => {
+                if let (Some(a), Some(b)) = (body_of(prefix, a), body_of(prefix, b)) {
+                    pairs.entry((a.min(b), a.max(b))).or_default().push((prefix, mate));
+                }
+            }
+            [] | [_] => {}
+            _ => notes.push(format!("{} ties more than two parts and is left out", mate.name())),
         }
     }
-    let base = grounded.unwrap_or(0);
 
     // A joint per pair, as the mates say.
     struct Edge {
         kind: JointKind,
         axis: Option<(DVec3, DVec3)>,
         pivot: Option<DVec3>,
-        limits: Option<[f64; 2]>,
+        /// The first hinge endpoint and the remaining turn in the mate's direction.
+        limits: Option<(usize, [f64; 2])>,
         mates: Vec<String>,
-        joint_mates: Vec<soliddraft_assembly::MateId>,
     }
     let mut edges: BTreeMap<(usize, usize), Edge> = BTreeMap::new();
     for ((a, b), mates) in &pairs {
@@ -277,27 +286,44 @@ pub fn articulate(doc: &mut AssemblyDocument) -> Result<Articulation, String> {
             axis: None,
             pivot: None,
             limits: None,
-            mates: mates.iter().map(|m| m.name().to_owned()).collect(),
-            joint_mates: mates.iter().map(|m| m.id()).collect(),
+            mates: mates.iter().map(|(_, m)| m.name().to_owned()).collect(),
         };
-        let hinge = mates.iter().find_map(|m| match m {
-            Mate::Hinge { axes, angle_limits, .. } => Some((axes, *angle_limits)),
+        if mates.iter().any(|(_, mate)| matches!(mate, Mate::Lock { .. })) {
+            if mates.len() > 1 {
+                notes.push(format!("{} carried as a fixed joint because of the Lock mate", edge.mates.join(", ")));
+            }
+            edges.insert((*a, *b), edge);
+            continue;
+        }
+        let hinge = mates.iter().find_map(|&(prefix, m)| match m {
+            Mate::Hinge { axes, angle_limits, .. } => Some((prefix, axes, *angle_limits)),
             _ => None,
         });
-        let concentric = mates.iter().find_map(|m| match m {
-            Mate::Concentric { a, lock_rotation: None, alignment: Some(_), .. } => Some(a),
+        let concentric = mates.iter().find_map(|&(prefix, m)| match m {
+            Mate::Concentric { a, lock_rotation: None, alignment: Some(_), .. } => Some((prefix, a)),
             _ => None,
         });
-        if let Some((axes, limits)) = hinge {
-            edge.axis = axis_of(&axes[0], &bodies, &worlds).or_else(|| axis_of(&axes[1], &bodies, &worlds));
-            edge.kind = if limits.is_some() { JointKind::Revolute } else { JointKind::Continuous };
-            edge.limits = limits;
-        } else if let Some(end) = concentric {
-            edge.axis = axis_of(end, &bodies, &worlds);
+        if let Some((prefix, axes, limits)) = hinge {
+            let poses = axes.each_ref().map(|a| placement(prefix, a));
+            match limits {
+                Some(limits) if let Some(angle) = hinge_angle_at(axes, poses, limits) => {
+                    let first = body_of(prefix, &axes[0].path).expect("both mate endpoints were included");
+                    edge.limits = Some((first, limits.map(|stop| stop - angle)));
+                    edge.axis = axis_of(&axes[0], poses[0]);
+                    edge.kind = JointKind::Revolute;
+                }
+                Some(_) => notes.push(format!("{}: the hinge angle could not be read", edge.mates.join(", "))),
+                None => {
+                    edge.axis = axes.iter().zip(poses).find_map(|(a, pose)| axis_of(a, pose));
+                    edge.kind = JointKind::Continuous;
+                }
+            }
+        } else if let Some((prefix, end)) = concentric {
+            edge.axis = axis_of(end, placement(prefix, end));
             edge.kind = JointKind::Continuous;
             let planar = mates
                 .iter()
-                .any(|m| matches!(m, Mate::Coincident { .. } | Mate::Distance { .. } | Mate::Tangent { .. }));
+                .any(|(_, m)| matches!(m, Mate::Coincident { .. } | Mate::Distance { .. } | Mate::Tangent { .. }));
             if !planar {
                 notes.push(format!(
                     "{} leaves a slide along the axis that URDF has no joint for; it is carried as a turn only",
@@ -306,12 +332,12 @@ pub fn articulate(doc: &mut AssemblyDocument) -> Result<Articulation, String> {
             }
         }
         if edge.kind == JointKind::Fixed
-            && let [mate] = mates.as_slice()
+            && let [(prefix, mate)] = mates.as_slice()
         {
-            let world = |end: &FaceEndpoint| worlds[bodies[&end.path]].world;
+            let world = |end: &FaceEndpoint| mat(&placement(prefix, end));
             match mate {
                 Mate::Concentric { a, lock_rotation: Some(_), alignment: Some(_), .. } => {
-                    edge.axis = axis_of(a, &bodies, &worlds);
+                    edge.axis = axis_of(a, placement(prefix, a));
                     edge.kind = JointKind::Prismatic;
                 }
                 Mate::Coincident { a, b, .. } | Mate::Distance { a, b, .. }
@@ -332,125 +358,119 @@ pub fn articulate(doc: &mut AssemblyDocument) -> Result<Articulation, String> {
         if !matches!(edge.kind, JointKind::Fixed | JointKind::Spherical) && edge.axis.is_none() {
             notes.push(format!("{}: the axis could not be read, so the joint is fixed", edge.mates.join(", ")));
             edge.kind = JointKind::Fixed;
+            edge.limits = None;
         }
         if edge.kind == JointKind::Fixed {
-            let others: Vec<&str> =
-                mates.iter().filter(|m| !matches!(m, Mate::Lock { .. })).map(|m| m.name()).collect();
-            if !others.is_empty() {
-                notes.push(format!("{} carried as a fixed joint at the assembly's pose", others.join(", ")));
-            }
+            notes.push(format!("{} carried as a fixed joint at the assembly's pose", edge.mates.join(", ")));
         }
         edges.insert((*a, *b), edge);
     }
 
-    // The tree, from the grounded part out.
+    // Keep a spanning tree for each connected group, preferring an Origin mate as its root.
+    let mut adjacency = vec![Vec::new(); worlds.len()];
+    for (&(a, b), edge) in &edges {
+        adjacency[a].push((b, edge));
+        adjacency[b].push((a, edge));
+    }
     let mut joints: Vec<ExportJoint> = Vec::new();
     let link_of = |body: usize| body + 1;
-    let mut joint_of_mate: HashMap<soliddraft_assembly::MateId, usize> = HashMap::new();
+    let mut joint_of_mate = HashMap::new();
     let mut reached = vec![false; worlds.len()];
-    reached[base] = true;
-    let base_world = worlds[base].world;
-    joints.push(ExportJoint {
-        name: format!("{}_fixed", links[link_of(base)].name),
-        kind: JointKind::Fixed,
-        parent: 0,
-        child: link_of(base),
-        frame: base_world,
-        axis: [1.0, 0.0, 0.0],
-        limits: None,
-        mates: Vec::new(),
-        mimic: None,
-    });
-    // Each link's frame in the world, for frames relative to the parent.
-    let mut link_world: Vec<DMat4> = vec![DMat4::IDENTITY; links.len()];
-    link_world[link_of(base)] = base_world;
-    let mut queue = VecDeque::from([base]);
-    let mut used: HashSet<(usize, usize)> = HashSet::new();
-    while let Some(at) = queue.pop_front() {
-        for (&(a, b), edge) in &edges {
-            let next = if a == at {
-                b
-            } else if b == at {
-                a
-            } else {
-                continue;
-            };
-            if used.contains(&(a, b)) {
-                continue;
-            }
-            used.insert((a, b));
-            if reached[next] {
-                notes.push(format!("{} would close a loop and is left out", edge.mates.join(", ")));
-                continue;
-            }
-            reached[next] = true;
-            let child_world = worlds[next].world;
-            let (rotation, _) = {
-                let (_, r, t) = child_world.to_scale_rotation_translation();
-                (r, t)
-            };
-            let joint_world = match edge.axis {
-                Some((point, direction)) => axis_frame(point, direction, rotation),
-                None => edge.pivot.map_or(child_world, |point| DMat4::from_rotation_translation(rotation, point)),
-            };
-            let parent_link = link_of(at);
-            let child_link = link_of(next);
-            link_world[child_link] = joint_world;
-            let id = joints.len();
-            for m in &edge.joint_mates {
-                joint_of_mate.insert(*m, id);
-            }
-            joints.push(ExportJoint {
-                name: format!("{}_{}", links[child_link].name, joint_word(edge.kind)),
-                kind: edge.kind,
-                parent: parent_link,
-                child: child_link,
-                frame: link_world[parent_link].inverse() * joint_world,
-                axis: edge.axis.map(|(_, d)| d.to_array()).unwrap_or([1.0, 0.0, 0.0]),
-                limits: edge.limits,
-                mates: edge.mates.clone(),
-                mimic: None,
-            });
-            queue.push_back(next);
+    let mut link_world = vec![DMat4::IDENTITY; links.len()];
+    let mut used = HashSet::new();
+    for base in origins.into_iter().chain(0..worlds.len()) {
+        if reached[base] {
+            continue;
         }
-    }
-    for (i, r) in reached.iter().enumerate() {
-        if !r {
-            let child = link_of(i);
-            link_world[child] = worlds[i].world;
+        reached[base] = true;
+        let child = link_of(base);
+        link_world[child] = mat(&worlds[base]);
+        if !joints.is_empty() && !grounded[base] {
             notes.push(format!("{} is held by no mate to the rest and is fixed where it stands", links[child].name));
-            joints.push(ExportJoint {
-                name: format!("{}_fixed", links[child].name),
-                kind: JointKind::Fixed,
-                parent: 0,
-                child,
-                frame: worlds[i].world,
-                axis: [1.0, 0.0, 0.0],
-                limits: None,
-                mates: Vec::new(),
-                mimic: None,
-            });
+        }
+        joints.push(ExportJoint {
+            name: format!("{}_fixed", links[child].name),
+            kind: JointKind::Fixed,
+            parent: 0,
+            child,
+            frame: link_world[child],
+            axis: [1.0, 0.0, 0.0],
+            limits: None,
+            mates: Vec::new(),
+            mimic: None,
+        });
+        let mut queue = VecDeque::from([base]);
+        while let Some(at) = queue.pop_front() {
+            for &(next, edge) in &adjacency[at] {
+                let pair = (at.min(next), at.max(next));
+                if !used.insert(pair) {
+                    continue;
+                }
+                if reached[next] {
+                    notes.push(format!("{} would close a loop and is left out", edge.mates.join(", ")));
+                    continue;
+                }
+                reached[next] = true;
+                let child_world = worlds[next];
+                let joint_world = match edge.axis {
+                    Some((point, direction)) => axis_frame(point, direction, child_world.rotation),
+                    None => edge.pivot.map_or_else(
+                        || mat(&child_world),
+                        |point| DMat4::from_rotation_translation(child_world.rotation, point),
+                    ),
+                };
+                let parent_link = link_of(at);
+                let child_link = link_of(next);
+                link_world[child_link] = joint_world;
+                if matches!(edge.kind, JointKind::Revolute | JointKind::Continuous)
+                    && let Some((_, axis)) = edge.axis
+                {
+                    for &(prefix, mate) in &pairs[&pair] {
+                        let end = match mate {
+                            Mate::Hinge { axes, .. } => &axes[0],
+                            Mate::Concentric { a, lock_rotation: None, alignment: Some(_), .. } => a,
+                            _ => continue,
+                        };
+                        let Some((_, direction)) = axis_of(end, placement(prefix, end)) else { continue };
+                        let parent = body_of(prefix, &end.path) == Some(at);
+                        let sign = if parent == (axis.dot(direction) > 0.0) { 1.0 } else { -1.0 };
+                        joint_of_mate.insert((prefix, mate.id()), (joints.len(), sign));
+                    }
+                }
+                joints.push(ExportJoint {
+                    name: format!("{}_{}", links[child_link].name, joint_word(edge.kind)),
+                    kind: edge.kind,
+                    parent: parent_link,
+                    child: child_link,
+                    frame: link_world[parent_link].inverse() * joint_world,
+                    axis: edge.axis.map(|(_, d)| d.to_array()).unwrap_or([1.0, 0.0, 0.0]),
+                    limits: edge.limits.map(|(first, [lo, hi])| if first == at { [lo, hi] } else { [-hi, -lo] }),
+                    mates: edge.mates.clone(),
+                    mimic: None,
+                });
+                queue.push_back(next);
+            }
         }
     }
-    for (i, l) in links.iter_mut().enumerate().skip(1) {
-        l.visual = link_world[i].inverse() * worlds[i - 1].world;
+    for (i, link) in links.iter_mut().enumerate().skip(1) {
+        link.visual = link_world[i].inverse() * mat(&worlds[i - 1]);
     }
 
-    // Gears: the second joint follows the first.
-    for mate in truth.known_mates() {
+    // A gear's mate IDs are local to the assembly occurrence that holds it.
+    for (prefix, mate) in scoped_mates {
         let Mate::Mechanical { name, mechanism, joints: coupled, factor, reverse, .. } = mate else { continue };
-        let found: Vec<usize> = coupled.iter().filter_map(|m| joint_of_mate.get(m).copied()).collect();
+        let found: Vec<_> = coupled.iter().filter_map(|m| joint_of_mate.get(&(prefix, *m)).copied()).collect();
         match (mechanism, &found[..]) {
-            (Mechanism::Gear, [lead, follow]) if lead != follow && factor[0] != 0.0 => {
+            (Mechanism::Gear, &[(lead, lead_sign), (follow, follow_sign)]) if lead != follow && factor[0] != 0.0 => {
                 let sign = if *reverse { -1.0 } else { 1.0 };
-                let leader = joints[*lead].name.clone();
-                joints[*follow].mimic = Some((leader, -sign * factor[1] / factor[0]));
-                joints[*follow].mates.push(name.clone());
+                let leader = joints[lead].name.clone();
+                joints[follow].mimic = Some((leader, -sign * factor[1] / factor[0] * lead_sign * follow_sign));
+                joints[follow].mates.push(name.clone());
             }
             _ => notes.push(format!("{name} has no URDF joint coupling and is left out")),
         }
     }
-    Ok(Articulation { name: truth.name.clone(), links, joints, meshes, notes })
+    Ok(Articulation { name: doc.assembly().name.clone(), links, joints, meshes, notes })
 }
 
 fn joint_word(kind: JointKind) -> &'static str {
@@ -495,7 +515,31 @@ fn num(v: f64) -> String {
 }
 
 fn escape(s: &str) -> String {
-    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\t', "&#9;")
+        .replace('\n', "&#10;")
+        .replace('\r', "&#13;")
+}
+
+fn xml_char(ch: char) -> char {
+    match ch {
+        '\u{0}'..='\u{8}' | '\u{b}'..='\u{c}' | '\u{e}'..='\u{1f}' | '\u{fffe}' | '\u{ffff}' => '\u{fffd}',
+        _ => ch,
+    }
+}
+
+fn xml_comment(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for ch in s.chars().map(xml_char) {
+        if ch == '-' && out.ends_with('-') {
+            out.push(' ');
+        }
+        out.push(ch);
+    }
+    out
 }
 
 /// The articulation as a URDF at `path` and its meshes as binary STL in millimetres in a
@@ -504,7 +548,7 @@ fn escape(s: &str) -> String {
 pub fn urdf_files(a: &Articulation, path: &Path) -> Files {
     let dir = path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
     let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("robot");
-    let mesh_dir_name = format!("{stem}_meshes");
+    let mesh_dir_name = format!("{}_meshes", stem.chars().map(xml_char).collect::<String>());
     let mesh_dir = dir.join(&mesh_dir_name);
     let mut files = Vec::new();
     for m in &a.meshes {
@@ -512,7 +556,8 @@ pub fn urdf_files(a: &Articulation, path: &Path) -> Files {
     }
     let mut x = String::new();
     let _ = writeln!(x, "<?xml version=\"1.0\"?>");
-    let _ = writeln!(x, "<!-- Written by SolidDraft from the assembly {}. Lengths in metres. -->", escape(&a.name));
+    let _ =
+        writeln!(x, "<!-- Written by SolidDraft from the assembly {}. Lengths in metres. -->", xml_comment(&a.name));
     let _ = writeln!(x, "<robot name=\"{}\">", escape(&safe(&a.name)));
     for l in &a.links {
         let _ = writeln!(x, "  <link name=\"{}\">", escape(&l.name));
@@ -554,7 +599,7 @@ pub fn urdf_files(a: &Articulation, path: &Path) -> Files {
         };
         let _ = writeln!(x, "  <joint name=\"{}\" type=\"{kind}\">", escape(&j.name));
         if !j.mates.is_empty() {
-            let _ = writeln!(x, "    <!-- from the mates {} -->", escape(&j.mates.join(", ")).replace("--", "- -"));
+            let _ = writeln!(x, "    <!-- from the mates {} -->", xml_comment(&j.mates.join(", ")));
         }
         let _ = writeln!(x, "    <parent link=\"{}\"/>", escape(&a.links[j.parent].name));
         let _ = writeln!(x, "    <child link=\"{}\"/>", escape(&a.links[j.child].name));

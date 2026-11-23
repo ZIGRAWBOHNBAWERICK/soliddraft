@@ -69,7 +69,8 @@ level of detail.
 ```
 
 - **Ids.** Sources, components, patterns, mates and values take their ids from one
-  counter, `next_id`, and an id is never reused. Ids are stable for the life of the assembly; names are
+  counter, `next_id`, and an id is never reused. Configurations and explode steps shape
+  nothing and count apart, from `next_configured_id`, which a file without them leaves out. Ids are stable for the life of the assembly; names are
   labels. A component without a name shows as its source's file name and its id.
 - **Sources** are the documents the assembly places. Each is a `DocRef` (see
   [documents.md](documents.md#references)) with its pinned revision. A thousand
@@ -129,14 +130,19 @@ configuration keeps its own state in its row:
   `Default`, active, for the state the assembly had; the new one starts as a copy of it.
 - Activating a configuration swaps: the truth's state goes into the row that was active
   and the chosen row's state into the truth, as one undo step. A component inserted while
-  another configuration was active keeps its state; a value is matched by id.
+  another configuration was active keeps its state; a value is matched by id, and its
+  expression keeps reading the values it read when saved, under their names now.
 - Every other edit changes the active configuration. Deleting a component takes it out of
   every configuration, and Undo brings it back.
 - Names are unique. The active configuration cannot be deleted; with one row left the
   assembly goes back to having none. An assembly with more than 1,024 components, or one
   with 64 configurations, refuses another.
-- The geometry hash leaves out the other configurations and the exploded view, so the
-  active configuration decides the assembly's shape.
+- The geometry hash leaves out the other configurations, the exploded view and their id
+  counter, so the active configuration decides the assembly's shape, and adding a
+  configuration or an explode step leaves it as it was.
+- The list was reserved before configurations were defined. A file whose rows this version
+  cannot read keeps every row as read and shows no configurations; adding one is refused,
+  so saving writes the rows back unchanged.
 
 Each component can also show one of its own document's configurations
 (`AssemblyDocument::set_configuration`, the `assembly_component_configuration` tool):
@@ -220,16 +226,24 @@ cuts every part with its own kernel, so its hatch regions are the kernel's, and 
 line that meets no part is refused.
 
 The bill of materials lists parts only: one row per part document, in the order the tree
-first places it, with its name, its file and how many times it is placed. Hidden parts
+first places it, with its name, its file and how many times it is placed. A part placed in
+another of its configurations has a row of its own, named for that configuration; a
+placement that names the configuration its file was saved in shares the row of one that
+names none. Hidden parts
 count; suppressed parts do not. A balloon carries its row's item number and a leader to a
 visible edge of one occurrence of that part, and sits outside the view clear of the others.
+The BOM sits in the sheet's top-right corner and the views beside it at the largest of the
+template's scales that fits. A BOM taller than the sheet, or views that fit at none of its
+scales, refuse the drawing; Rebuild refuses a BOM that would grow off the sheet.
 
 Rebuild brings the drawing to the saved assembly as one undo step: every base view's line
 work at its scale, the BOM's rows, each balloon moved onto its occurrence and renumbered
 from its row, a balloon for every new row, and the new pin. A balloon whose occurrence is
-gone, or shows no edge in the view, is marked as needing attention. Rebuild recomputes the
-projected, section and detail views too, and moves each cutting line and detail circle
-with the model point it went through.
+gone, or shows no edge in the view, is marked as needing attention and shows `?`: its old
+number may be another row's now, so it numbers no row, and a row it numbered gets a new
+balloon. Rebuild recomputes the projected, section and detail views too, and moves each
+cutting line and detail circle with the model point it went through. A view excluded from
+updates keeps its line work and its balloons.
 
 ## Robotics export
 
@@ -241,7 +255,7 @@ at the assembly's origin. Mates become joints:
 
 | Mates between two parts | Joint |
 |---|---|
-| Hinge with angle limits | revolute, between the limits |
+| Hinge with angle limits | revolute, with limits measured from the accepted pose |
 | Hinge without limits | continuous |
 | Concentric between axes, without Lock rotation | continuous about the axis |
 | Concentric between axes, with Lock rotation | prismatic along the axis |
@@ -250,15 +264,17 @@ at the assembly's origin. Mates become joints:
 | anything else | fixed, at the pose the assembly holds |
 
 Prismatic, planar and spherical mappings require a single mate between the two
-parts. Additional mates on the same pair can restrict motion further. URDF writes
+parts. Additional mates can restrict motion further. A Lock mate keeps its pair fixed,
+including a pair with a Hinge. URDF writes
 an unlimited slide with infinite limits. It uses the `spherical` joint type read
 by SolidDraft's importer. ROS urdfdom supports its own list of joint types, which
 excludes `spherical`.
 
 A Gear between two of those joints makes the second follow the first (URDF `mimic`,
-`newton:mimicJoint` in OpenUSD). The joints form a tree from `base_link`: a mate that would
-close a loop is left out, and a part no mate reaches is fixed to `base_link` where it
-stands. Every choice like that is reported in words, naming the mates. Each joint frame
+`newton:mimicJoint` in OpenUSD). Each connected group of parts attaches to `base_link` by
+a fixed joint. It keeps its internal joints, including mates authored in sub-assemblies.
+An Origin mate picks the attachment part when the group has one. A mate that would close
+a loop is left out and named in the export report. Each joint frame
 puts the joint's axis along its X. URDF lengths are metres; the OpenUSD layer is in
 millimetres with Z up.
 

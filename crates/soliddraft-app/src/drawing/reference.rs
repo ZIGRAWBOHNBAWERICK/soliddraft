@@ -3,9 +3,10 @@
 //! repair dialog for a reference whose target cannot be found.
 //!
 //! The resolver's answer is kept on the session and refreshed when anything it was made
-//! from changed: the open part and its revision, either file's path, the stored
-//! reference, or the File locations setting. Nothing here touches the file system on a
-//! frame where none of those moved.
+//! from changed: the open part and its revision, for a drawing of an assembly the open
+//! assembly's revision and whether it is saved, either file's path, the stored reference
+//! and the revision it pins, or the File locations setting. Nothing here touches the file
+//! system on a frame where none of those moved.
 
 use super::{DrawingAction, DrawingSession};
 use crate::icons::{self, Icon};
@@ -25,6 +26,11 @@ struct LinkKey {
     drawing_path: Option<PathBuf>,
     model_id: Option<DocumentId>,
     model_path: String,
+    /// The revision the drawing is pinned at: a Rebuild moves it.
+    pinned: ContentHash,
+    /// For a drawing of an assembly, the open assembly: its id, revision, whether it has
+    /// unsaved edits and its file. Saving it at a new revision keeps its id and path.
+    assembly: Option<(DocumentId, ContentHash, bool, Option<PathBuf>)>,
     locations: u64,
 }
 
@@ -145,6 +151,16 @@ fn key(state: &AppState) -> Option<LinkKey> {
         drawing_path: s.doc.path.clone(),
         model_id: s.doc.drawing.model.id,
         model_path: s.doc.drawing.model.path.clone(),
+        pinned: s.doc.drawing.model.pinned.clone(),
+        assembly: if s.doc.drawing.model.kind == soliddraft_document::DocKind::Assembly {
+            state
+                .assembly
+                .session
+                .as_ref()
+                .map(|a| (a.doc.id(), a.doc.revision(), a.doc.is_dirty(), a.doc.path().map(Path::to_path_buf)))
+        } else {
+            None
+        },
         locations: state.locations_epoch,
     })
 }

@@ -42,7 +42,7 @@ use soliddraft_materials::{Appearance, AppearanceId, Snapshots, scope};
 use soliddraft_model::{Expression, ValueTable};
 use soliddraft_tessellation::Settings;
 
-use crate::configuration::{Configuration, ExplodeStep};
+use crate::configuration::{Configurations, ExplodeStep};
 use crate::mates::{Mate, MateEntry};
 use crate::path::{ComponentId, OccurrencePath, PatternId, SourceId, Step};
 use crate::placement::Placement;
@@ -79,9 +79,10 @@ pub struct Assembly {
     #[serde(default, skip_serializing_if = "Snapshots::is_empty")]
     pub snapshots: Snapshots,
     /// The configurations, by creation order; the truth holds the active one's state.
-    /// Empty for an assembly with only its default state.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub configurations: Vec<Configuration>,
+    /// Empty for an assembly with only its default state. Rows of another version are kept
+    /// as read ([`Configurations`]).
+    #[serde(default, skip_serializing_if = "Configurations::is_unused")]
+    pub configurations: Configurations,
     /// The active configuration's exploded view, applied in order. Display only.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub explode: Vec<ExplodeStep>,
@@ -97,6 +98,11 @@ pub struct Assembly {
     /// The next free id for a component, pattern, source, mate or value. Ids are never
     /// reused.
     pub next_id: u32,
+    /// The next free id for a configuration or an explode step, from 1. These records shape
+    /// nothing, so they count apart from `next_id`, which the geometry hash keeps. Left
+    /// out of a file that has none.
+    #[serde(default = "first_id", skip_serializing_if = "is_first_id")]
+    pub next_configured_id: u32,
     /// Display settings, from `settings.json`: not part of the truth or its hashes.
     /// In an assembly, a viewport quality other than auto shows every part at it
     /// instead of at its own, and each override shows one component and everything
@@ -110,6 +116,14 @@ pub struct Assembly {
     /// the truth or its hashes; kept as read and written back on save.
     #[serde(skip)]
     pub import: Option<String>,
+}
+
+fn first_id() -> u32 {
+    1
+}
+
+fn is_first_id(id: &u32) -> bool {
+    *id == 1
 }
 
 /// The units of an assembly file.
@@ -361,12 +375,13 @@ impl Assembly {
             overrides: Vec::new(),
             appearances: Vec::new(),
             snapshots: Snapshots::default(),
-            configurations: Vec::new(),
+            configurations: Configurations::default(),
             explode: Vec::new(),
             display_states: Vec::new(),
             mates: Vec::new(),
             values: ValueTable::default(),
             next_id: 1,
+            next_configured_id: 1,
             settings: Settings::default(),
             import: None,
         }
@@ -376,6 +391,13 @@ impl Assembly {
     pub fn take_id(&mut self) -> u32 {
         let id = self.next_id;
         self.next_id += 1;
+        id
+    }
+
+    /// Takes the next free id for a configuration or an explode step.
+    pub fn take_configured_id(&mut self) -> u32 {
+        let id = self.next_configured_id;
+        self.next_configured_id += 1;
         id
     }
 
@@ -518,8 +540,7 @@ impl Assembly {
             .chain(self.components.iter().map(|c| c.id.0))
             .chain(self.patterns.iter().map(|p| p.id.0))
             .chain(self.known_mates().map(|m| m.id().0))
-            .chain(self.values.ids())
-            .chain(self.configured_ids());
+            .chain(self.values.ids());
         for id in all {
             if !ids.insert(id) {
                 return bad(format!("id {id} is used twice"));
@@ -731,6 +752,19 @@ mod tests {
         let s1 = a.add_source(r.clone());
         assert_eq!(a.add_source(r), s1, "the same document and configuration, one source");
         assert_ne!(a.add_source(part()), s1);
+    }
+
+    #[test]
+    fn configuration_rows_of_another_version_are_kept_as_read() {
+        let mut v = serde_json::to_value(sample()).unwrap();
+        v["configurations"] = json!([{"id": "long"}]);
+        let mut a: Assembly = serde_json::from_value(v.clone()).unwrap();
+        assert_eq!(serde_json::to_value(&a).unwrap(), v);
+        a.validate().unwrap();
+        // They are not this version's to change: adding a configuration is refused.
+        let refused = a.add_configuration("Open").unwrap_err();
+        assert!(refused.0.contains("another version"), "{}", refused.0);
+        assert_eq!(serde_json::to_value(&a).unwrap(), v, "the rows stay as read");
     }
 
     #[test]

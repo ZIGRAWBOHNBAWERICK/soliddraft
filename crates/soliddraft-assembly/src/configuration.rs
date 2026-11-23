@@ -19,9 +19,11 @@
 //! to the configuration, so each configuration has its own.
 
 use std::collections::HashSet;
+use std::ops::{Deref, DerefMut};
 
 use glam::DVec3;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde_json::Value;
 use soliddraft_document::ConfigurationId;
 use soliddraft_model::ValueTable;
 
@@ -43,7 +45,7 @@ pub const DEFAULT_NAME: &str = "Default";
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Configuration {
-    /// Stable id, from the assembly's counter.
+    /// Stable id, from the assembly's counter of configured ids.
     pub id: u32,
     /// The name; unique within the assembly.
     pub name: String,
@@ -57,6 +59,79 @@ impl Configuration {
     /// True for the active configuration.
     pub fn is_active(&self) -> bool {
         self.state.is_none()
+    }
+}
+
+/// An assembly's configurations, as its file lists them. Before configurations were
+/// defined the list was reserved and kept as read, so a file may hold rows this version
+/// cannot read. Then every row is kept as read, in order, and the assembly has no
+/// configurations of its own to show or change: adding one is refused, so a save writes
+/// the rows back as they came.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Configurations {
+    rows: Vec<Configuration>,
+    reserved: Vec<Value>,
+}
+
+impl Configurations {
+    /// The rows written by another version, kept as read; empty when every row is this
+    /// version's.
+    pub fn reserved(&self) -> &[Value] {
+        &self.reserved
+    }
+
+    /// True when the file lists no configuration rows of either kind.
+    pub fn is_unused(&self) -> bool {
+        self.rows.is_empty() && self.reserved.is_empty()
+    }
+}
+
+impl Deref for Configurations {
+    type Target = Vec<Configuration>;
+
+    fn deref(&self) -> &Vec<Configuration> {
+        &self.rows
+    }
+}
+
+impl DerefMut for Configurations {
+    fn deref_mut(&mut self) -> &mut Vec<Configuration> {
+        &mut self.rows
+    }
+}
+
+impl<'a> IntoIterator for &'a Configurations {
+    type Item = &'a Configuration;
+    type IntoIter = std::slice::Iter<'a, Configuration>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.rows.iter()
+    }
+}
+
+impl<'a> IntoIterator for &'a mut Configurations {
+    type Item = &'a mut Configuration;
+    type IntoIter = std::slice::IterMut<'a, Configuration>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.rows.iter_mut()
+    }
+}
+
+impl Serialize for Configurations {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        if self.reserved.is_empty() { self.rows.serialize(serializer) } else { self.reserved.serialize(serializer) }
+    }
+}
+
+impl<'de> Deserialize<'de> for Configurations {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let read = Vec::<Value>::deserialize(deserializer)?;
+        let rows: Result<Vec<Configuration>, _> = read.iter().cloned().map(serde_json::from_value).collect();
+        Ok(match rows {
+            Ok(rows) => Configurations { rows, reserved: Vec::new() },
+            Err(_) => Configurations { rows: Vec::new(), reserved: read },
+        })
     }
 }
 
@@ -105,7 +180,7 @@ fn is_false(b: &bool) -> bool {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ExplodeStep {
-    /// Stable id, from the assembly's counter.
+    /// Stable id, from the assembly's counter of configured ids.
     pub id: u32,
     /// What moves.
     pub occurrences: Vec<OccurrencePath>,
@@ -194,8 +269,9 @@ impl ConfigState {
     }
 
     /// Puts this state into the truth. Components it does not know keep theirs; values are
-    /// matched by id and others keep theirs; overrides and explode steps that name an
-    /// occurrence the assembly no longer has are dropped.
+    /// matched by id, keep reading the ids they read when saved, and are checked together;
+    /// others keep theirs; overrides and explode steps that name an occurrence the assembly
+    /// no longer has are dropped.
     fn apply(&self, assembly: &mut Assembly) -> Result<(), Invalid> {
         for s in &self.components {
             if let Some(c) = assembly.component_mut(s.id) {
@@ -207,14 +283,7 @@ impl ConfigState {
         let overrides: Vec<Override> =
             self.overrides.iter().filter(|o| names_occurrence(assembly, &o.path)).cloned().collect();
         assembly.overrides = overrides;
-        let ids: Vec<u32> = assembly.values.ids().collect();
-        for id in ids {
-            let Some(text) = self.values.expression(id).map(|e| e.text().to_owned()) else { continue };
-            let name = assembly.values.name_of(id).expect("listed above").to_owned();
-            let mut next = assembly.values.clone();
-            next.set(&name, &text, || id).map_err(|e| Invalid(format!("value {name}: {e}")))?;
-            assembly.values = next;
-        }
+        assembly.values = assembly.values.restored(&self.values).map_err(|e| Invalid(format!("values: {e}")))?;
         let explode: Vec<ExplodeStep> = self
             .explode
             .iter()
@@ -255,6 +324,13 @@ impl Assembly {
     /// and returns its id. The first one added also adds [`DEFAULT_NAME`], active, for the
     /// state the assembly had before.
     pub fn add_configuration(&mut self, name: &str) -> Result<u32, Invalid> {
+        if !self.configurations.reserved().is_empty() {
+            return Err(Invalid(
+                "the file holds configurations written by another version of SolidDraft; they are kept as saved, \
+                 and none can be added beside them"
+                    .into(),
+            ));
+        }
         let name = name.trim();
         check_name(self, name, None)?;
         if self.components.len() > MAX_CONFIGURED_COMPONENTS {
@@ -269,10 +345,10 @@ impl Assembly {
             if name == DEFAULT_NAME {
                 return Err(Invalid(format!("{DEFAULT_NAME} is the configuration the assembly has now")));
             }
-            let id = self.take_id();
+            let id = self.take_configured_id();
             self.configurations.push(Configuration { id, name: DEFAULT_NAME.into(), state: None });
         }
-        let id = self.take_id();
+        let id = self.take_configured_id();
         let state = Some(Box::new(ConfigState::capture(self)));
         self.configurations.push(Configuration { id, name: name.into(), state });
         Ok(id)
@@ -365,13 +441,23 @@ impl Assembly {
                 let mut steps = HashSet::new();
                 for step in &s.explode {
                     step.check(self).map_err(|m| Invalid(format!("configuration {}: {m}", c.name)))?;
-                    if !steps.insert(step.id) || step.id >= self.next_id {
+                    if !steps.insert(step.id) || step.id >= self.next_configured_id {
                         return bad(format!(
                             "configuration {} has explode step id {} twice or too high",
                             c.name, step.id
                         ));
                     }
                 }
+            }
+        }
+        // Configurations and the active exploded view take ids from their own counter.
+        let mut ids = HashSet::new();
+        for id in self.configured_ids() {
+            if !ids.insert(id) {
+                return bad(format!("configured id {id} is used twice"));
+            }
+            if id >= self.next_configured_id {
+                return bad(format!("configured id {id} is not below next_configured_id {}", self.next_configured_id));
             }
         }
         let active = self.configurations.iter().filter(|c| c.is_active()).count();
@@ -488,10 +574,56 @@ mod tests {
     }
 
     #[test]
+    fn a_configuration_keeps_what_its_values_read_when_a_value_is_renamed() {
+        let mut a = sample();
+        let (x, y) = (a.take_id(), a.take_id());
+        a.values.set("a", "5 mm", || x).unwrap();
+        a.values.set("b", "a", || y).unwrap();
+        let saved = a.add_configuration("Saved").unwrap();
+        // In Default: a becomes c, a new value takes the name a, and b reads c twice.
+        a.values.rename("a", "c", std::iter::empty::<&mut soliddraft_model::Expression>()).unwrap();
+        let fresh = a.take_id();
+        a.values.set("a", "40 mm", || fresh).unwrap();
+        a.values.set("b", "c * 2", || unreachable!()).unwrap();
+        a.validate().unwrap();
+        a.activate_configuration(saved).unwrap();
+        a.validate().unwrap();
+        let b = a.values.expression(y).unwrap();
+        assert_eq!(b.references(), vec![x], "b still reads the value it read when saved");
+        assert_eq!(b.text(), "c", "under that value's name now");
+        assert_eq!(a.values.length(b).unwrap(), 5.0);
+        // And back: Default's b comes back as it was.
+        let default = a.configuration_named(DEFAULT_NAME).unwrap().id;
+        a.activate_configuration(default).unwrap();
+        assert_eq!(a.values.expression(y).unwrap().text(), "c * 2");
+        assert_eq!(a.values.expression(y).unwrap().references(), vec![x]);
+    }
+
+    #[test]
+    fn configurations_may_reverse_which_value_reads_which() {
+        let mut a = sample();
+        let (x, y) = (a.take_id(), a.take_id());
+        a.values.set("x", "5 mm", || x).unwrap();
+        a.values.set("y", "x", || y).unwrap();
+        let other = a.add_configuration("Other").unwrap();
+        a.activate_configuration(other).unwrap();
+        // In Other, x reads y instead.
+        a.values.set("y", "7 mm", || unreachable!()).unwrap();
+        a.values.set("x", "y", || unreachable!()).unwrap();
+        let default = a.configuration_named(DEFAULT_NAME).unwrap().id;
+        a.activate_configuration(default).unwrap();
+        assert_eq!(a.values.expression(y).unwrap().text(), "x");
+        a.activate_configuration(other).unwrap();
+        assert_eq!(a.values.expression(x).unwrap().text(), "y");
+        assert_eq!(a.values.length(a.values.expression(x).unwrap()).unwrap(), 7.0);
+        a.validate().unwrap();
+    }
+
+    #[test]
     fn explode_steps_are_checked() {
         let mut a = sample();
         let first = a.components[0].id;
-        let id = a.take_id();
+        let id = a.take_configured_id();
         a.explode.push(ExplodeStep {
             id,
             occurrences: vec![OccurrencePath::root().child(crate::path::Step::component(first))],

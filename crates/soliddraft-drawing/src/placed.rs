@@ -285,11 +285,6 @@ impl<'k> PlacedBodies<'k> {
         self.edges.get((edge.raw() as usize).checked_sub(1)?).copied()
     }
 
-    /// The edges of [`Self::BODY`] on part `i`.
-    pub fn edges_of_part(&self, i: usize) -> impl Iterator<Item = EdgeId> + '_ {
-        self.edges.iter().enumerate().filter(move |(_, (p, _))| *p == i).map(|(k, _)| EdgeId::from_raw(k as u64 + 1))
-    }
-
     fn check(&self, body: BodyId) -> KernelResult<()> {
         if body == Self::BODY { Ok(()) } else { Err(KernelError::UnknownBody(body)) }
     }

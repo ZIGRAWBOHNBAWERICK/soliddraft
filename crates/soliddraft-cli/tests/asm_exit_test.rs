@@ -146,3 +146,13 @@ fn the_generated_scale_assembly_opens_and_its_parts_rebuild() {
     let part = d.json(&["part", "--json", "big/parts/p000123.dwprt"]);
     assert!(part["body"]["valid"].as_bool().unwrap(), "{part}");
 }
+
+#[test]
+fn options_no_command_reads_are_refused_by_name() {
+    let dir = Dir::new("ignored-options");
+    for flag in ["--pdf", "--svg", "--configuration", "--meshes"] {
+        let (ok, _, stderr) = dir.run(&["asm", "drawing", "rig.dwasm", flag, "out"]);
+        assert!(!ok, "asm drawing {flag} must not succeed without doing what it says");
+        assert!(stderr.contains(&format!("unknown option {flag}")), "{flag}: {stderr}");
+    }
+}

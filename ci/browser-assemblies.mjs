@@ -45,7 +45,7 @@
 // Last, Pack and Go and the robot exports, which download: the rig packs into one zip,
 // whose files open again as the rig with every part found beside it and take a shaft
 // inserted on top; Export URDF downloads the URDF and its meshes as one zip, Export USD a
-// .usda file.
+// .usda file. Both still describe the assembled poses while the viewport is exploded.
 //
 // The app draws into one canvas and takes only trusted input: keys and clicks sent as the
 // browser's own, through the DevTools protocol. The canvas has no text to read, so the
@@ -699,6 +699,19 @@ async function packAndExport(v) {
   shown = await v.assembly('inserted in the unpacked rig', s => loaded(s) && s.components.length === 5);
   check(parts(shown)[4] === 'shaft', `the fifth component is ${parts(shown)[4]}`);
 
+  const assembled = placements(shown);
+  const assembledZip = await v.download('urdf-assembled', () => v.command('Export URDF'));
+  const assembledRobot = path.join(downloads, 'robot-assembled');
+  const assembledName = unzip(assembledZip, assembledRobot).find(n => n.endsWith('.urdf'));
+  check(assembledName, 'the assembled export contains a URDF');
+  const assembledUrdf = fs.readFileSync(path.join(assembledRobot, assembledName), 'utf8');
+  const assembledUsd = fs.readFileSync(await v.download('usd-assembled', () => v.command('Export USD')), 'utf8');
+  await v.command('Configurations');
+  await v.assembly('configurations panel', s => s.configure_open);
+  await v.click(await v.control('Auto explode'));
+  shown = await v.assembly('rig exploded', s => s.exploded || s.note?.kind === 'Error');
+  check(shown.exploded && !near(placements(shown), assembled), 'Auto explode leaves at least one part visibly displaced');
+
   step('Export URDF downloads the URDF and its meshes as one zip');
   const urdfZip = await v.download('urdf', () => v.command('Export URDF'));
   check(urdfZip.endsWith('.zip'), `Export URDF downloads a zip, not ${path.basename(urdfZip)}`);
@@ -707,17 +720,19 @@ async function packAndExport(v) {
   const urdfName = entries.find(n => n.endsWith('.urdf'));
   check(urdfName && !urdfName.includes('/'), `the zip has no URDF at its top: ${entries}`);
   const urdf = fs.readFileSync(path.join(robot, urdfName), 'utf8');
+  check(urdf === assembledUrdf, 'the URDF changes when the assembly is exploded');
   const meshes = [...urdf.matchAll(/filename="([^"]+)"/g)].map(m => m[1]);
   check(meshes.length >= 5, `the URDF names ${meshes.length} meshes`);
   check(meshes.every(m => entries.includes(m)), `the zip lacks meshes the URDF names: ${meshes.filter(m => !entries.includes(m))}`);
   const moving = [...urdf.matchAll(/<joint [^>]*type="(revolute|continuous)"/g)].length;
-  check(moving >= 1, 'the URDF has no moving joint');
+  check(moving === 2, `the URDF has ${moving} moving joints for the two hinges`);
 
   step('Export USD downloads one .usda file');
   const usd = await v.download('usd', () => v.command('Export USD'));
   check(usd.endsWith('.usda'), `Export USD downloads a .usda file, not ${path.basename(usd)}`);
   const usda = fs.readFileSync(usd, 'utf8');
   check(usda.startsWith('#usda') && /Physics(Revolute|Fixed)Joint/.test(usda), 'the .usda file has no joints');
+  check(usda === assembledUsd, 'the USD changes when the assembly is exploded');
   await v.stopped('after the exports');
   return { packed, unpacked: placements(shown), urdf: { file: urdfName, entries: entries.length, moving }, usd: path.basename(usd) };
 }

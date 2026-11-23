@@ -8,7 +8,6 @@ use soliddraft_app::document::Selection;
 use soliddraft_app::drawing::DrawingAction;
 use soliddraft_app::panels::{Layout, Side};
 use soliddraft_app::state::AppAction;
-use soliddraft_app::theme;
 use std::path::PathBuf;
 
 fn gpu_available() -> bool {

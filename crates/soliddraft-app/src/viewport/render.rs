@@ -1491,6 +1491,10 @@ impl ViewportRenderer {
                 pass.set_pipeline(&self.face_pipeline);
                 draw_faces(&mut pass, &mut std::iter::once(g), true);
             }
+            if show_edges {
+                self.assembly.draw_edges(&mut pass);
+                pass.set_bind_group(0, &self.globals_bind_group, &[]);
+            }
             if show_edges || ghost.is_some() {
                 pass.set_pipeline(&self.edge_pipeline);
                 if show_edges {

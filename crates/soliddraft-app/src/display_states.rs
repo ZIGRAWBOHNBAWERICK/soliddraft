@@ -123,3 +123,37 @@ pub fn show_part(ui: &mut egui::Ui, state: &mut AppState) {
         state.note(error, NoteKind::Error);
     }
 }
+
+pub(crate) fn show_assembly(ui: &mut egui::Ui, session: &mut crate::assembly::AssemblySession) -> Result<(), String> {
+    let mut next = session.doc.assembly().viewport_states.clone();
+    if let Some(id) = picker(ui, &next, None) {
+        next.select(None, id)?;
+    }
+    let mut change = Ok(());
+    ui.collapsing("Manage display states", |ui| {
+        if let Some(mut active) = next.selected(None).cloned() {
+            let before = active.clone();
+            mode_picker(ui, &mut active.mode);
+            if ui.button("Delete display state").clicked() {
+                next.remove(&active.id);
+            } else if active != before {
+                change = next.put(active);
+            }
+        }
+        let id = ui.id().with("new_assembly_display_state");
+        let mut name = ui.data_mut(|d| d.get_temp::<String>(id).unwrap_or_default());
+        ui.add(egui::TextEdit::singleline(&mut name).hint_text("New display state name"));
+        if ui.add_enabled(!name.trim().is_empty(), egui::Button::new("Add display state")).clicked() {
+            let mode = next.selected(None).map_or(session.viewport.display, |d| d.mode);
+            let display = DisplayState::new(name.clone(), DisplayScope::All, mode);
+            let created = display.id.clone();
+            change = change.and_then(|_| next.put(display)).and_then(|_| next.select(None, Some(created)));
+            if change.is_ok() {
+                name.clear();
+            }
+        }
+        ui.data_mut(|d| d.insert_temp(id, name));
+    });
+    change?;
+    session.doc.change_viewport_states(next).map_err(|e| e.to_string())
+}

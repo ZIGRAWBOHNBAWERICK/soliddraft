@@ -1261,7 +1261,7 @@ const MOST_TRANSPARENCY: f32 = 0.9;
 /// `from` in another colour and opacity, keeping its finish. The id names everything
 /// that differs from a plain opaque dielectric, so two different looks never share an
 /// id in the part's copies.
-fn painted(from: &Appearance, colour: Srgb, opacity: f32) -> Appearance {
+pub(crate) fn painted(from: &Appearance, colour: Srgb, opacity: f32) -> Appearance {
     let opacity = (opacity.clamp(1.0 - MOST_TRANSPARENCY, 1.0) * 100.0).round() / 100.0;
     let transparency = ((1.0 - opacity) * 100.0).round() as u32;
     let hex = colour.to_string();

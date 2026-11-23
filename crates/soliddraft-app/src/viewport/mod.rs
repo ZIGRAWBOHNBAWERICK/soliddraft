@@ -669,10 +669,11 @@ impl ViewportState {
             }
         }
         self.dimensions = dims;
-        self.paint_hud(ui, rect, &mut events, sketch_dimensions, true);
+        let display = doc.display_state().map_or(self.display, |state| state.mode);
+        self.paint_hud(ui, rect, &mut events, sketch_dimensions, true, display);
         self.paint_view_cube(ui, rect, &mut events);
         // An open sketch has its own status line; the model hint would be wrong there.
-        self.paint_pills(ui, rect, hover_label.or((!sketching).then_some(MODEL_HINT)));
+        self.paint_pills(ui, rect, hover_label.or((!sketching).then_some(MODEL_HINT)), display);
         events
     }
 
@@ -710,16 +711,18 @@ impl ViewportState {
         frame.view_proj = (self.camera.projection(aspect) * self.camera.view()).as_dmat4();
         frame.eye = self.camera.eye().as_dvec3();
         let mut input = self.frame_input(rect, ppp, cursor_px);
+        input.display = frame.display;
+        let display = frame.display;
         input.assembly = Some(frame);
         ui.painter().add(egui_wgpu::Callback::new_paint_callback(rect, ViewportCallback(input)));
         if self.references.always_show_origin_axes {
             let painter = ui.painter().with_clip_rect(rect);
             self.paint_origin_axes(&painter, self.camera.distance * 0.25, rect, [true; 3]);
         }
-        self.paint_hud(ui, rect, &mut events, None, false);
+        self.paint_hud(ui, rect, &mut events, None, false, display);
         self.paint_view_cube(ui, rect, &mut events);
         let label = hover_label.unwrap_or("Hover a component");
-        self.paint_pills(ui, rect, Some(label));
+        self.paint_pills(ui, rect, Some(label), display);
         events
     }
 
@@ -1206,12 +1209,13 @@ impl ViewportState {
         events: &mut ViewportEvents,
         sketch_dimensions: Option<bool>,
         allow_dimensions: bool,
+        display: DisplayMode,
     ) {
         self.navigation_bar.show(
             ui,
             rect,
             &mut self.camera,
-            self.display,
+            display,
             self.scene.unwrap_or_default(),
             &mut self.references,
             &mut self.all_dimensions,
@@ -1277,12 +1281,11 @@ impl ViewportState {
         }
     }
 
-    fn paint_pills(&self, ui: &mut egui::Ui, rect: Rect, hover_label: Option<&str>) {
+    fn paint_pills(&self, ui: &mut egui::Ui, rect: Rect, hover_label: Option<&str>, display: DisplayMode) {
         let grid_spacing = self.grid_spacing(rect);
         let rect = Rect::from_min_max(rect.min, rect.max - vec2(0.0, 44.0));
         let proj = if self.camera.orthographic { "Orthographic" } else { "Perspective" };
-        let text =
-            format!("mm · {} · {} · {} · {}", self.camera.view_name, self.display.label(), self.preset.label(), proj);
+        let text = format!("mm · {} · {} · {} · {}", self.camera.view_name, display.label(), self.preset.label(), proj);
         let painter = ui.painter();
         let galley = painter.layout_no_wrap(text, theme::font(11.0), theme::muted());
         let size = galley.size() + vec2(18.0, 7.0);

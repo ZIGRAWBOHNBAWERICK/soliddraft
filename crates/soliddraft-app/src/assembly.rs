@@ -66,6 +66,8 @@ pub enum AssemblyAction {
     Undo,
     Redo,
     ZoomFit,
+    SetColour(OccurrencePath, Option<soliddraft_materials::Appearance>),
+    SetHidden(OccurrencePath, bool),
     Mate(crate::mates::MateAction),
     Form(crate::subassembly::FormAction),
     Interference(crate::interference::InterferenceAction),
@@ -202,6 +204,7 @@ impl AssemblySession {
     fn new(mut doc: AssemblyDocument, scene: Scene) -> AssemblySession {
         let fit_pending = true;
         let mut viewport = ViewportState::default();
+        viewport.display = crate::viewport::render::DisplayMode::Shaded;
         viewport.camera.fit_framed(None);
         let scene = Arc::new(Mutex::new(scene));
         doc.poll(POLL_BUDGET);
@@ -332,6 +335,7 @@ impl AssemblySession {
             levels: self.outbox.levels.clone(),
             deviations: self.outbox.deviations.clone(),
             budget: DeviceBudget::default(),
+            display: self.doc.assembly().viewport_state().map_or(self.viewport.display, |s| s.mode),
         }
     }
 }
@@ -741,6 +745,20 @@ pub fn apply(state: &mut AppState, dock: &mut DockState<Tab>, action: AssemblyAc
             Ok(()) => show_tab(dock),
             Err(e) => state.note(e, NoteKind::Info),
         },
+        AssemblyAction::SetColour(path, appearance) => {
+            if let Some(s) = state.assembly.session.as_mut()
+                && let Err(error) = s.doc.set_colour(&[path], appearance)
+            {
+                state.note(error.to_string(), crate::state::NoteKind::Error);
+            }
+        }
+        AssemblyAction::SetHidden(path, hidden) => {
+            if let Some(s) = state.assembly.session.as_mut()
+                && let Err(error) = s.doc.set_hidden(&[path], hidden)
+            {
+                state.note(error.to_string(), crate::state::NoteKind::Error);
+            }
+        }
         AssemblyAction::Show => {
             if state.assembly.session.is_some() {
                 state.assembly.active = true;
@@ -1060,7 +1078,7 @@ pub fn viewport(ui: &mut egui::Ui, state: &mut AppState) {
         actions.push(AppAction::Assembly(AssemblyAction::ZoomFit));
     }
     if let Some(d) = events.set_display {
-        s.viewport.display = d;
+        actions.push(AppAction::SetDisplay(d));
     }
     if events.toggle_projection {
         s.viewport.camera.orthographic = !s.viewport.camera.orthographic;
@@ -1123,6 +1141,7 @@ pub fn tree(ui: &mut egui::Ui, state: &mut AppState) {
     );
     ui.painter().hline(head.x_range(), head.bottom() - 0.5, Stroke::new(1.0, theme::line()));
     let mut actions = Vec::new();
+    let mut error = None;
     egui::ScrollArea::vertical().id_salt("assembly_tree").auto_shrink([false, false]).show(ui, |ui| {
         ui.add_space(4.0);
         let selected = s.selected_row();
@@ -1131,6 +1150,8 @@ pub fn tree(ui: &mut egui::Ui, state: &mut AppState) {
         if r.clicked() {
             actions.push(AppAction::Assembly(AssemblyAction::Select(None)));
         }
+        error = crate::display_states::show_assembly(ui, s).err();
+        assembly_appearances(ui, s, &mut actions);
         let mut stack: Vec<(OccurrenceIndex, u8)> = s.components().into_iter().rev().map(|r| (r, 1)).collect();
         while let Some((r, indent)) = stack.pop() {
             let table = s.doc.table();
@@ -1180,7 +1201,16 @@ pub fn tree(ui: &mut egui::Ui, state: &mut AppState) {
                     actions.push(AppAction::Assembly(AssemblyAction::Select(Some(path.clone()))));
                 }
             }
-            resp.context_menu(|ui| crate::subassembly::panel::context_menu(ui, &mut actions));
+            resp.context_menu(|ui| {
+                component_appearance(ui, s, r, &path, &mut actions);
+                let hidden = flags.has(Flags::HIDDEN_SELF);
+                if ui.button(if hidden { "Show component" } else { "Hide component" }).clicked() {
+                    actions.push(AppAction::Assembly(AssemblyAction::SetHidden(path.clone(), !hidden)));
+                    ui.close();
+                }
+                ui.separator();
+                crate::subassembly::panel::context_menu(ui, &mut actions);
+            });
             if open {
                 let children: Vec<OccurrenceIndex> =
                     table.children(r).filter(|c| !table.flags(*c).has(Flags::REMOVED)).collect();
@@ -1188,9 +1218,77 @@ pub fn tree(ui: &mut egui::Ui, state: &mut AppState) {
             }
         }
     });
+    if let Some(error) = error {
+        state.note(error, crate::state::NoteKind::Error);
+    }
     for a in actions {
         state.push(a);
     }
+}
+
+fn component_appearance(
+    ui: &mut egui::Ui,
+    session: &AssemblySession,
+    row: OccurrenceIndex,
+    path: &OccurrencePath,
+    actions: &mut Vec<AppAction>,
+) {
+    use soliddraft_materials::{Appearance, Srgb};
+    ui.menu_button("Component appearance", |ui| {
+        let assembly = session.doc.assembly();
+        let existing = if let Some(display) = assembly.viewport_state() {
+            display.view.appearances.iter().any(|(p, _)| p == path)
+        } else {
+            assembly.appearances.iter().any(|a| &a.path == path && a.scope == soliddraft_document::ConfigScope::All)
+        };
+        let shown = session.doc.table().colour(row).cloned().unwrap_or_else(Appearance::default_part);
+        let id = ui.id().with(path);
+        let c = shown.base_color;
+        let mut rgb = ui.data_mut(|d| d.get_temp::<[u8; 3]>(id).unwrap_or([c.r, c.g, c.b]));
+        egui::color_picker::color_edit_button_srgb(ui, &mut rgb);
+        ui.data_mut(|d| d.insert_temp(id, rgb));
+        let colour = Srgb::new(rgb[0], rgb[1], rgb[2]);
+        if ui.button("Apply colour").clicked() {
+            let appearance = crate::properties::painted(&shown, colour, 1.0);
+            actions.push(AppAction::Assembly(AssemblyAction::SetColour(path.clone(), Some(appearance))));
+            ui.close();
+        }
+        if existing && ui.button("Remove colour").clicked() {
+            ui.data_mut(|d| d.remove::<[u8; 3]>(id));
+            actions.push(AppAction::Assembly(AssemblyAction::SetColour(path.clone(), None)));
+            ui.close();
+        }
+    });
+}
+
+fn assembly_appearances(ui: &mut egui::Ui, session: &AssemblySession, actions: &mut Vec<AppAction>) {
+    ui.collapsing("Appearances", |ui| {
+        let assembly = session.doc.assembly();
+        let display = assembly.viewport_state();
+        let choices: Vec<_> = assembly
+            .appearances
+            .iter()
+            .filter_map(|a| assembly.appearance(&a.appearance).map(|look| (&a.path, look, false)))
+            .chain(display.into_iter().flat_map(|s| s.view.appearances.iter().map(|(path, look)| (path, look, true))))
+            .collect();
+        if choices.is_empty() {
+            ui.label("No component appearance overrides");
+        }
+        for (i, (path, appearance, in_state)) in choices.into_iter().enumerate() {
+            let name = session.doc.table().find(path).map_or_else(|| path.to_string(), |row| session.doc.label(row));
+            let scope = if in_state { display.map_or("", |s| s.name.as_str()) } else { "Default" };
+            ui.push_id(i, |ui| {
+                ui.horizontal_wrapped(|ui| {
+                    let c = appearance.base_color;
+                    ui.colored_label(egui::Color32::from_rgb(c.r, c.g, c.b), "●");
+                    ui.label(format!("{} · Component · {name} · {scope}", appearance.name));
+                    if in_state == display.is_some() && ui.small_button("Remove colour").clicked() {
+                        actions.push(AppAction::Assembly(AssemblyAction::SetColour(path.clone(), None)));
+                    }
+                })
+            });
+        }
+    });
 }
 
 /// The property panel: the Mate panel while it is open, otherwise the selected component's

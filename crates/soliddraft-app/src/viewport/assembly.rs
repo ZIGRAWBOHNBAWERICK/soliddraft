@@ -74,6 +74,7 @@ pub struct AssemblyFrame {
     pub deviations: Vec<(DefinitionIndex, [f32; 3])>,
     /// How much display data the app lets the GPU hold: it caps the finest level drawn.
     pub budget: DeviceBudget,
+    pub display: super::render::DisplayMode,
 }
 
 /// What the last frame drew.
@@ -101,6 +102,7 @@ struct Vertex {
     position: [f32; 3],
     normal: [f32; 3],
     face: u32,
+    style: [u32; 2],
 }
 
 #[repr(C)]
@@ -280,6 +282,7 @@ struct Cull {
 /// Draws assemblies into the viewport's targets.
 pub struct AssemblyRenderer {
     color: wgpu::RenderPipeline,
+    edge: wgpu::RenderPipeline,
     id: wgpu::RenderPipeline,
     culled_color: Option<[wgpu::RenderPipeline; 4]>,
     cull_pipeline: Option<wgpu::ComputePipeline>,
@@ -296,6 +299,8 @@ pub struct AssemblyRenderer {
     deviations: Vec<Option<[f32; 3]>>,
     /// Each definition's standard mesh, whose face numbers every level's ids use.
     standard: Vec<Option<SharedMesh>>,
+    edge_geometry: Vec<Option<(wgpu::Buffer, u32)>>,
+    edge_draws: Vec<soliddraft_assembly::Draw>,
     /// What each index of `meshes`, `deviations`, `standard`, `wanted` and the
     /// deferred uploads names, and the scene generation those indices belong to.
     keys: Vec<DefinitionKey>,
@@ -380,13 +385,21 @@ impl AssemblyRenderer {
         let vertex_layout = wgpu::VertexBufferLayout {
             array_stride: std::mem::size_of::<Vertex>() as u64,
             step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Uint32],
+            attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Uint32, 7 => Uint32x2],
         };
         let instance_layout = wgpu::VertexBufferLayout {
             array_stride: INSTANCE_SIZE,
             step_mode: wgpu::VertexStepMode::Instance,
             attributes: &wgpu::vertex_attr_array![3 => Float32x4, 4 => Float32x4, 5 => Float32x4, 6 => Uint32x4],
         };
+        let edge_buffers = [
+            Some(wgpu::VertexBufferLayout {
+                array_stride: 12,
+                step_mode: wgpu::VertexStepMode::Vertex,
+                attributes: &wgpu::vertex_attr_array![0 => Float32x3],
+            }),
+            Some(instance_layout.clone()),
+        ];
         let direct_buffers = [Some(vertex_layout.clone()), Some(instance_layout)];
         let culled_buffers = [Some(vertex_layout)];
         let pipeline = |label: &str,
@@ -405,7 +418,11 @@ impl AssemblyRenderer {
                     compilation_options: Default::default(),
                     buffers,
                 },
-                primitive: wgpu::PrimitiveState { cull_mode: Some(wgpu::Face::Back), ..Default::default() },
+                primitive: if fs == "fs_edge" {
+                    wgpu::PrimitiveState { topology: wgpu::PrimitiveTopology::LineList, ..Default::default() }
+                } else {
+                    wgpu::PrimitiveState { cull_mode: Some(wgpu::Face::Back), ..Default::default() }
+                },
                 depth_stencil: Some(wgpu::DepthStencilState {
                     format: depth_format,
                     depth_write_enabled: Some(true),
@@ -431,6 +448,8 @@ impl AssemblyRenderer {
         };
         let color =
             pipeline("assembly faces", &pipeline_layout, &direct_buffers, "vs_main", "fs_main", color_format, samples);
+        let edge =
+            pipeline("assembly edges", &pipeline_layout, &edge_buffers, "vs_edge", "fs_edge", color_format, samples);
         let id = pipeline("assembly ids", &pipeline_layout, &direct_buffers, "vs_id", "fs_id", id_format, 1);
 
         let multi_draw = device.features().contains(wgpu::Features::INDIRECT_FIRST_INSTANCE);
@@ -535,6 +554,7 @@ impl AssemblyRenderer {
         });
         AssemblyRenderer {
             color,
+            edge,
             id,
             culled_color,
             cull_pipeline,
@@ -548,6 +568,8 @@ impl AssemblyRenderer {
             meshes: Vec::new(),
             deviations: Vec::new(),
             standard: Vec::new(),
+            edge_geometry: Vec::new(),
+            edge_draws: Vec::new(),
             keys: Vec::new(),
             keyed: 0,
             triangles: 0,
@@ -581,6 +603,8 @@ impl AssemblyRenderer {
         self.meshes.clear();
         self.deviations.clear();
         self.standard.clear();
+        self.edge_geometry.clear();
+        self.edge_draws.clear();
         self.keys.clear();
         self.keyed = 0;
         self.triangles = 0;
@@ -671,6 +695,9 @@ impl AssemblyRenderer {
             let i = def.0 as usize;
             if self.standard.len() <= i {
                 self.standard.resize(i + 1, None);
+            }
+            if let Some(edges) = self.edge_geometry.get_mut(i) {
+                *edges = None;
             }
             // Coarse and fine levels number their faces like the standard mesh they came
             // with: a new standard mesh leaves them wrong, and they are asked for again.
@@ -825,6 +852,36 @@ impl AssemblyRenderer {
                 uploaded += bytes.len() as u64;
             }
         }
+        if frame.display != super::render::DisplayMode::Shaded {
+            use wgpu::util::DeviceExt;
+            self.edge_geometry.resize(self.standard.len(), None);
+            self.edge_draws = scene.draws(|d| {
+                self.standard.get(d.0 as usize).and_then(Option::as_ref).is_some_and(|mesh| !mesh.edges.is_empty())
+            });
+            for draw in &self.edge_draws {
+                let i = draw.definition.0 as usize;
+                if self.edge_geometry[i].is_none() {
+                    let mesh = self.standard[i].as_ref().expect("the loaded standard mesh");
+                    let points: Vec<[f32; 3]> = mesh
+                        .edges
+                        .iter()
+                        .flat_map(|line| line.windows(2).flat_map(|pair| [pair[0], pair[1]]))
+                        .collect();
+                    if !points.is_empty() {
+                        let data = bytemuck::cast_slice(&points);
+                        let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some("assembly definition edges"),
+                            contents: data,
+                            usage: wgpu::BufferUsages::VERTEX,
+                        });
+                        uploaded += data.len() as u64;
+                        self.edge_geometry[i] = Some((buffer, points.len() as u32));
+                    }
+                }
+            }
+        } else {
+            self.edge_draws.clear();
+        }
         drop(scene);
         let relative = frame.view_proj * DMat4::from_translation(origin);
         let eye = frame.eye - origin;
@@ -888,6 +945,7 @@ impl AssemblyRenderer {
         }
         let gpu_bytes = self.vertices.buffer.size()
             + self.indices.buffer.size()
+            + self.edge_geometry.iter().flatten().map(|(buffer, _)| buffer.size()).sum::<u64>()
             + self.instances.as_ref().map_or(0, |b| b.size())
             + self.indirect.as_ref().map_or(0, |b| b.size())
             + self.cull.as_ref().map_or(0, |c| {
@@ -1169,6 +1227,7 @@ impl AssemblyRenderer {
         self.meshes = moved(&self.meshes, keys.len(), [None; LEVELS], to);
         self.deviations = moved(&self.deviations, keys.len(), None, to);
         self.standard = moved(&self.standard, keys.len(), None, to);
+        self.edge_geometry = moved(&self.edge_geometry, keys.len(), None, to);
         self.deferred = std::mem::take(&mut self.deferred).into_iter().filter_map(|(d, m)| Some((to(d)?, m))).collect();
         self.deferred_levels = std::mem::take(&mut self.deferred_levels)
             .into_iter()
@@ -1232,6 +1291,23 @@ impl AssemblyRenderer {
     /// Draws the shaded faces into the colour pass.
     pub fn draw(&self, pass: &mut wgpu::RenderPass<'_>) {
         self.submit(pass, false);
+    }
+
+    /// Draws the part boundaries through their assembly instance transforms.
+    pub fn draw_edges(&self, pass: &mut wgpu::RenderPass<'_>) {
+        let (true, Some(instances)) = (self.active, &self.instances) else { return };
+        if self.edge_draws.is_empty() {
+            return;
+        }
+        pass.set_pipeline(&self.edge);
+        pass.set_bind_group(0, &self.bind_group, &[]);
+        pass.set_vertex_buffer(1, instances.slice(..));
+        for draw in &self.edge_draws {
+            if let Some((buffer, count)) = &self.edge_geometry[draw.definition.0 as usize] {
+                pass.set_vertex_buffer(0, buffer.slice(..));
+                pass.draw(0..*count, draw.first_instance..draw.first_instance + draw.count);
+            }
+        }
     }
 
     /// Draws occurrence and face ids into the id pass.
@@ -1305,6 +1381,9 @@ fn split_by_face(mesh: &DisplayMesh) -> (Vec<Vertex>, Vec<u32>) {
             remap[old as usize] = u32::MAX;
         }
         touched.clear();
+        let style = face
+            .style
+            .map_or([0, 0], |[r, g, b, m, s]| [u32::from_le_bytes([r, g, b, 255]), u32::from_le_bytes([m, s, 0, 0])]);
         let tris = &mesh.indices[face.first as usize * 3..(face.first + face.count) as usize * 3];
         for &i in tris {
             if remap[i as usize] == u32::MAX {
@@ -1314,6 +1393,7 @@ fn split_by_face(mesh: &DisplayMesh) -> (Vec<Vertex>, Vec<u32>) {
                     position: mesh.positions[i as usize],
                     normal: mesh.normals[i as usize],
                     face: f as u32,
+                    style,
                 });
             }
             indices.push(remap[i as usize]);
@@ -1354,8 +1434,8 @@ mod tests {
             normals: vec![[0.0, 0.0, 1.0]; 4],
             indices: vec![0, 1, 2, 1, 3, 2],
             faces: vec![
-                soliddraft_assembly::MeshFace { first: 0, count: 1, name: "a".into() },
-                soliddraft_assembly::MeshFace { first: 1, count: 1, name: "b".into() },
+                soliddraft_assembly::MeshFace { first: 0, count: 1, name: "a".into(), style: None },
+                soliddraft_assembly::MeshFace { first: 1, count: 1, name: "b".into(), style: None },
             ],
             edges: Vec::new(),
         };

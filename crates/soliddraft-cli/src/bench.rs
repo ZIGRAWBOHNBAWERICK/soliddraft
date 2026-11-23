@@ -207,6 +207,7 @@ impl Bench {
                 levels,
                 deviations,
                 budget: DeviceBudget::default(),
+                display: soliddraft_document::display_state::DisplayMode::Shaded,
             }),
         };
         let serial = self.pick.lock().unwrap().serial;

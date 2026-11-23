@@ -131,10 +131,15 @@ pub fn show(ctx: &egui::Context, state: &mut AppState) {
             if shortcut.is_some() && results.is_empty() && palette.query.trim().is_empty() {
                 ui.label("No pinned commands");
             }
-            egui::ScrollArea::vertical().max_height(250.0).show(ui, |ui| {
+            let results_height = if shortcut.is_some() { 250.0 } else { f32::INFINITY };
+            egui::ScrollArea::vertical().max_height(results_height).show(ui, |ui| {
                 for (i, m) in results.iter().enumerate() {
                     let c = m.command;
-                    let label = if c.is_working() { c.label_in(state) } else { format!("{} (coming soon)", c.label) };
+                    let label = if shortcut.is_some() && !c.is_working() {
+                        format!("{} (coming soon)", c.label)
+                    } else {
+                        c.label_in(state)
+                    };
                     let button = egui::Button::selectable(i == palette.selected, &label)
                         .shortcut_text(state.shortcuts.shortcut_text(c.id).unwrap_or_default());
                     let enabled = c.is_enabled(state);
@@ -150,7 +155,12 @@ pub fn show(ctx: &egui::Context, state: &mut AppState) {
                     if i == palette.selected && (down || up) {
                         response.scroll_to_me(None);
                     }
-                    let response = if enabled {
+                    let response = if shortcut.is_none() {
+                        match c.path_in(state) {
+                            Some(path) => response.on_hover_text(path),
+                            None => response,
+                        }
+                    } else if enabled {
                         response.on_hover_text(c.tip(state))
                     } else {
                         response.on_disabled_hover_text(c.tip(state))

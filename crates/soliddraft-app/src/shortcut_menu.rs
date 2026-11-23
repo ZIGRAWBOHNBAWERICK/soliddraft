@@ -2,7 +2,7 @@
 
 use crate::commands::{self, CommandSpec, Context, History};
 use crate::state::{AppState, NoteKind};
-use egui::{Pos2, pos2};
+use egui::pos2;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 

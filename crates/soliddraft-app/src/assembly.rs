@@ -1277,7 +1277,6 @@ pub(crate) fn component_part(state: &AppState, path: &OccurrencePath) -> Result<
     }
     #[cfg(target_arch = "wasm32")]
     {
-        use soliddraft_document::RevisionStore;
         let held = state.assembly.held.iter().find(|doc| Some(doc.id) == reference.id);
         let id = reference.id.ok_or("Upload the source part with the assembly first.")?;
         let revision = held.map_or(&reference.pinned, |doc| &doc.revision);

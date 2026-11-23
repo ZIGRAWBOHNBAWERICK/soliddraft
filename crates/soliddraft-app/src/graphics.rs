@@ -206,11 +206,12 @@ pub struct Lighting {
     /// Leave the existing lighting preset in control until explicitly overridden.
     pub ambient_occlusion: Option<bool>,
     pub shadow_follows_model: bool,
+    pub force_ground_shadow: bool,
 }
 
 impl Default for Lighting {
     fn default() -> Self {
-        Self { ambient_occlusion: None, shadow_follows_model: true }
+        Self { ambient_occlusion: None, shadow_follows_model: true, force_ground_shadow: false }
     }
 }
 

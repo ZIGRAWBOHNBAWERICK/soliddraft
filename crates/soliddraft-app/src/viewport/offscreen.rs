@@ -50,6 +50,14 @@ impl Offscreen {
         Offscreen { renderer: ViewportRenderer::new(device, queue, FORMAT, tier), uploads: 0, meshes: HashMap::new() }
     }
 
+    pub(crate) fn with_samples(device: &wgpu::Device, queue: &wgpu::Queue, tier: Tier, samples: u32) -> Offscreen {
+        Offscreen {
+            renderer: ViewportRenderer::with_samples(device, queue, FORMAT, tier, samples),
+            uploads: 0,
+            meshes: HashMap::new(),
+        }
+    }
+
     /// The version of the meshes sent to the renderer, independent of document versions.
     pub fn mesh_version(&self) -> u64 {
         self.uploads

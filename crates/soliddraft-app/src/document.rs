@@ -4067,6 +4067,10 @@ impl Document {
         &self.quality
     }
 
+    pub(crate) fn take_display_quality_error(&mut self) -> Option<String> {
+        self.quality.take_error()
+    }
+
     /// Applies the application's curves setting without editing the part.
     pub fn set_curved_surfaces(&mut self, choice: Option<crate::graphics::CurvedSurfaces>) {
         if self.quality.curved_surfaces() == choice {

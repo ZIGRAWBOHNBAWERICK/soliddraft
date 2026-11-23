@@ -1385,6 +1385,12 @@ impl ViewportRenderer {
         }
 
         let mut look = input.preset.look(self.tier);
+        if !look.shadows && input.floor && input.controls.lighting.force_ground_shadow {
+            look.shadows = true;
+            let studio = Preset::Studio.look(self.tier);
+            look.shadow_strength = studio.shadow_strength;
+            look.shadow_softness = studio.shadow_softness;
+        }
         if let Some(ao) = input.controls.lighting.ambient_occlusion {
             look.ambient_occlusion = if ao && self.tier.has_ambient_occlusion() {
                 look.ambient_occlusion.max(Preset::Studio.look(self.tier).ambient_occlusion)

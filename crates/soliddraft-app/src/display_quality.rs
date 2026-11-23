@@ -40,6 +40,7 @@ pub struct DisplayQuality {
     /// The levels the worker's latest request for the body asked for, in order, with the
     /// parameters they were asked at: the levels may change before the answer arrives.
     asked: Vec<(Level, ParamsKey)>,
+    error: Option<String>,
     /// Bodies shown before this one whose meshes are kept, latest last.
     recent: VecDeque<BodyId>,
 }
@@ -59,6 +60,7 @@ impl DisplayQuality {
             radius: 0.0,
             shown: None,
             asked: Vec::new(),
+            error: None,
             recent: VecDeque::new(),
         }
     }
@@ -76,6 +78,7 @@ impl DisplayQuality {
             radius: self.radius,
             shown: self.shown,
             asked: Vec::new(),
+            error: None,
             recent: self.recent.clone(),
         }
     }
@@ -175,7 +178,12 @@ impl DisplayQuality {
 
     pub(crate) fn set_curved_surfaces(&mut self, choice: Option<CurvedSurfaces>, quality: &Quality) {
         self.curved_surfaces = choice;
+        self.error = None;
         self.set_quality(quality);
+    }
+
+    pub(crate) fn take_error(&mut self) -> Option<String> {
+        self.error.take()
     }
 
     pub fn set_quality(&mut self, quality: &Quality) {
@@ -212,7 +220,12 @@ impl DisplayQuality {
                         self.cache.insert(body, level, key, mesh);
                     }
                 }
-                Err(e) => log::warn!("tessellating body {body:?}: {e}"),
+                Err(e) => {
+                    log::warn!("tessellating body {body:?}: {e}");
+                    if let Some(choice) = self.curved_surfaces {
+                        self.error = Some(format!("Curved surfaces ({}) could not be displayed: {e}", choice.label()));
+                    }
+                }
             }
         }
         self.cache.tick();

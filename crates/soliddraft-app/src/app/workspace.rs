@@ -5,7 +5,7 @@ use crate::file;
 use crate::panels::{Layout, Side};
 use crate::state::{AppAction, AppState, NoteKind};
 use crate::theme;
-use crate::viewport::look::{Preset, Tier};
+use crate::viewport::look::Preset;
 use crate::viewport::render::{DisplayMode, ViewportRenderer};
 use egui_dock::DockState;
 use std::path::PathBuf;
@@ -476,8 +476,9 @@ impl SolidDraftApp {
             return None;
         }
         let offscreen = self.offscreen.get_or_insert_with(|| {
-            let tier = Tier::of(rs.adapter.get_info().backend);
-            crate::viewport::offscreen::Offscreen::new(&rs.device, &rs.queue, tier)
+            let device = &self.state.graphics_device;
+            let samples = if device.samples.contains(&4) { 4 } else { 1 };
+            crate::viewport::offscreen::Offscreen::with_samples(&rs.device, &rs.queue, device.tier, samples)
         });
         let picture = offscreen.capture(&rs.device, &rs.queue, doc, crate::viewport::offscreen::THUMBNAIL);
         match picture.and_then(|p| p.png()) {

@@ -100,7 +100,8 @@ pub(super) fn show(p: &mut Preferences, ui: &mut egui::Ui) {
         if !device.samples.contains(&graphics.samples) {
             ui.label(format!("Saved level is unavailable on this GPU. Using {active}×."));
         } else if active != graphics.samples {
-            ui.label(format!("Restart SolidDraft to use this level. Active level is {active}×."));
+            let restart = if cfg!(target_arch = "wasm32") { "Reload this tab" } else { "Restart SolidDraft" };
+            ui.label(format!("{restart} to use this level. Active level is {active}×."));
         }
     });
     row(ui, highlight, "supersampling", |ui| {
@@ -193,7 +194,14 @@ pub(crate) fn current_view_controls(
     highlight: Option<&str>,
 ) {
     toggle(ui, highlight, "grid", "Show grid", &mut view.references.show_grid);
-    toggle(ui, highlight, "shadow", "Ground shadow", &mut view.references.show_floor);
+    row(ui, highlight, "shadow", |ui| {
+        let preset_casts_shadows = preset.look(tier).shadows;
+        let mut shown = view.references.show_floor && (preset_casts_shadows || view.lighting.force_ground_shadow);
+        if ui.checkbox(&mut shown, "Ground shadow").changed() {
+            view.references.show_floor = shown;
+            view.lighting.force_ground_shadow = shown && !preset_casts_shadows;
+        }
+    });
     row(ui, highlight, "perspective", |ui| {
         ui.add_enabled(camera_editable, egui::Checkbox::new(&mut view.perspective, "Perspective"))
             .on_disabled_hover_text("The sketch uses an orthographic view while you edit it.");

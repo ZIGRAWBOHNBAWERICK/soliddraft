@@ -65,6 +65,9 @@ use crate::view::{self, Visibility};
 pub const FORMAT: &str = "soliddraft-part/2";
 /// Parts with explicit body identities require this version.
 pub const MULTIBODY_FORMAT: &str = "soliddraft-part/3";
+/// Parts with Hole Wizard features (position sketches, standards, end conditions, options)
+/// require this version.
+pub const HOLE_WIZARD_FORMAT: &str = "soliddraft-part/4";
 /// The format tag of part files from before the document envelope.
 pub const LEGACY_FORMAT: &str = "soliddraft-part/1";
 /// The file name extension parts are saved under.
@@ -88,7 +91,7 @@ pub enum FileError {
     #[error("the part's recipe is not valid: {0}")]
     Json(#[from] serde_json::Error),
     /// The format tag is not one this version reads.
-    #[error("the file {}, this version reads {MULTIBODY_FORMAT}, {FORMAT} and {LEGACY_FORMAT}", found_tag(.found))]
+    #[error("the file {}, this version reads {HOLE_WIZARD_FORMAT}, {MULTIBODY_FORMAT}, {FORMAT} and {LEGACY_FORMAT}", found_tag(.found))]
     Format {
         /// The tag in the file.
         found: String,
@@ -193,8 +196,18 @@ impl Document {
     }
 
     fn recipe(&self) -> Recipe {
+        let uses_hole_wizard = self.features.iter().any(|f| {
+            matches!(&f.kind, crate::FeatureKind::Hole(h) if h.uses_wizard_format())
+        });
+        let format = if uses_hole_wizard {
+            HOLE_WIZARD_FORMAT
+        } else if self.next_body > 1 {
+            MULTIBODY_FORMAT
+        } else {
+            FORMAT
+        };
         Recipe {
-            format: if self.next_body > 1 { MULTIBODY_FORMAT } else { FORMAT }.into(),
+            format: format.into(),
             name: self.name.clone(),
             units: Units::Mm,
             features: self
@@ -341,7 +354,7 @@ impl Document {
         };
         m.check(DocKind::Part, &[PART])?;
         let text = package.read_text(PART)?.ok_or_else(|| FileError::Archive("no part.json".into()))?;
-        let mut doc = Self::read_truth(&text, kernel, 3)?;
+        let mut doc = Self::read_truth(&text, kernel, 4)?;
         doc.id = m.id;
         if let Ok(Some(text)) = package.read_text(settings::ENTRY) {
             doc.settings = Settings::from_json(&text).unwrap_or_default();
@@ -356,14 +369,14 @@ impl Document {
     /// rebuilds it on `kernel`. Without a manifest there is no recorded id, so the part
     /// gets the id derived from its content, as a pre-envelope file does.
     pub fn from_part_json(text: &str, kernel: Arc<dyn Kernel>) -> Result<Document, FileError> {
-        let mut doc = Self::read_truth(text, kernel, 3)?;
+        let mut doc = Self::read_truth(text, kernel, 4)?;
         doc.rebuild();
         Ok(doc)
     }
 
     /// Decodes authored truth without starting a kernel operation.
     pub(crate) fn from_part_json_unbuilt(text: &str, kernel: Arc<dyn Kernel>) -> Result<Document, FileError> {
-        Self::read_truth(text, kernel, 3)
+        Self::read_truth(text, kernel, 4)
     }
 
     /// Reads truth text whose format's major version is at most `newest`.

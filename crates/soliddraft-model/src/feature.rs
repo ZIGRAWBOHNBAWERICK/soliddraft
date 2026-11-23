@@ -183,7 +183,15 @@ impl FeatureKind {
             FeatureKind::Fillet(b) | FeatureKind::Chamfer(b) => {
                 out.extend(b.edges.iter().flat_map(|e| e.faces.iter().map(|f| f.feature)));
             }
-            FeatureKind::Hole(h) => out.push(h.face.feature),
+            FeatureKind::Hole(h) => {
+                out.push(h.face.feature);
+                if let Some(sketch) = h.sketch {
+                    out.push(sketch);
+                }
+                if let Some(wizard) = &h.wizard {
+                    out.extend(wizard.end_condition.dependencies());
+                }
+            }
             FeatureKind::Pattern(p) => out.extend(p.source),
             FeatureKind::Thicken(t) => out.extend(t.faces.iter().map(|face| face.feature)),
             FeatureKind::Scan(_)
@@ -505,17 +513,20 @@ pub struct BlendFeature {
     pub other_distance: Option<f64>,
 }
 
-/// Holes drilled into a planar face, one per point.
+/// Holes drilled into a planar face, one per point (or per point in an absorbed
+/// position sketch).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct HoleFeature {
-    /// The planar face the holes start on. They drill against its outward normal.
+    /// The planar face the holes start on. They drill against its outward normal
+    /// (or along it when `wizard.flip_direction` is true).
     pub face: FaceRef,
     /// Hole centres in the face's sketch frame (see
-    /// [`plane_on_face`](crate::plane_on_face)), in millimetres.
+    /// [`plane_on_face`](crate::plane_on_face)), in millimetres. Used when `sketch`
+    /// is `None`, or as a cached mirror of the position sketch's points.
     pub points: Vec<P2>,
-    /// Diameter of the main wall.
+    /// Diameter of the main wall (or slot width).
     pub diameter: f64,
-    /// How deep the main wall goes.
+    /// How deep the main wall goes (legacy / fallback when `wizard` is absent).
     pub depth: HoleDepth,
     /// The bottom of a blind hole.
     pub tip: HoleTip,
@@ -525,12 +536,46 @@ pub struct HoleFeature {
     /// A cosmetic thread tapped in the main wall. The wall stays the drill's cylinder.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thread: Option<crate::thread::HoleThread>,
+    /// Optional absorbed position sketch whose non-construction `Point` entities
+    /// drive hole placements (including dimensions, relations, and sketch patterns).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sketch: Option<FeatureId>,
+    /// Optional Hole Wizard specification (standard, hole type, fastener, size, fit,
+    /// end condition, options, and callout tolerances).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wizard: Option<crate::hole_wizard::HoleWizardSpec>,
 }
 
 impl HoleFeature {
+    /// True when this hole uses Hole Wizard fields that require `soliddraft-part/4`.
+    pub fn uses_wizard_format(&self) -> bool {
+        self.sketch.is_some() || self.wizard.is_some()
+    }
+
+    /// The effective entry head, accounting for Hole Wizard head clearance and
+    /// near-side countersink options.
+    pub fn effective_head(&self) -> Option<HoleHead> {
+        let Some(wizard) = &self.wizard else {
+            return self.head;
+        };
+        match self.head {
+            Some(HoleHead::Counterbore { diameter, depth }) => {
+                let extra = wizard.options.head_clearance.unwrap_or(0.0).max(0.0);
+                Some(HoleHead::Counterbore { diameter, depth: depth + extra })
+            }
+            Some(other) => Some(other),
+            None => wizard.options.near_side_csk.map(|csk| HoleHead::Countersink {
+                diameter: csk.diameter,
+                angle_deg: csk.angle_deg,
+            }),
+        }
+    }
+
     /// Why the hole's thread cannot be cut in it, for people, or `None`.
     pub fn thread_problem(&self) -> Option<String> {
-        self.thread.as_ref()?.problem(self.diameter, &self.depth, self.head.as_ref())
+        let depth = self.wizard.as_ref().map_or(self.depth, |w| w.legacy_depth());
+        let head = self.effective_head();
+        self.thread.as_ref()?.problem(self.diameter, &depth, head.as_ref())
     }
 }
 

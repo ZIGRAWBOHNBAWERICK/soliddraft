@@ -418,6 +418,8 @@ impl HoleParams {
             tip: self.tip,
             head: self.head,
             thread: self.thread.clone(),
+            sketch: None,
+            wizard: None,
         };
         match hole.thread_problem() {
             Some(problem) => Err(problem),

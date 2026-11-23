@@ -4,9 +4,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use soliddraft_kernel_api::{
-    BodyId, BooleanOp, CurveKind, Draft, EdgeId, Extrude, ExtrudeLimit, FaceId, FacePoint, FaceRole, FaceSupport,
-    Gyroid, HistoryRecord, Hole, HolePlacement, ImportOptions, ImportStepRequest, ImportStepResult, KernelError,
-    KernelResult, Lattice, Mirror, OpResult, OpTag, Origin, PatternLayout, Plane, SurfaceKind, Vec3, drawing::Curve3,
+    Aabb, BodyId, BooleanOp, CurveKind, Draft, EdgeId, Extrude, ExtrudeLimit, FaceId, FacePoint, FaceRole, FaceSupport,
+    Gyroid, HistoryRecord, Hole, HoleDepth, HoleHead, HolePlacement, HoleTip, ImportOptions, ImportStepRequest,
+    ImportStepResult, KernelError, KernelResult, Lattice, Mirror, OpResult, OpTag, Origin, PatternLayout, Plane,
+    Point2, Profile, SurfaceKind, Vec3, drawing::Curve3,
 };
 
 use crate::feature::{
@@ -310,6 +311,17 @@ impl Document {
             if let Some(owner) = body.and_then(|body| self.built.iter().find(|b| b.owned == Some(body))) {
                 profiles.push(owner.version);
             }
+        }
+        if let FeatureKind::Hole(h) = &f.kind
+            && let Some(sketch_id) = h.sketch
+        {
+            let Some(index) = self.built_index(sketch_id) else {
+                return Built::failed(current, format!("its position sketch {sketch_id} is missing"));
+            };
+            if !self.built[index].status.is_ok() {
+                return Built::pass(FeatureStatus::Blocked(sketch_id), current);
+            }
+            profiles.push(self.built[index].version);
         }
         if let FeatureKind::Combine { tool, .. } = f.kind {
             let end = self.index_of(f.id).unwrap_or(self.built.len());
@@ -1075,29 +1087,251 @@ impl Document {
         }
     }
 
-    fn build_hole(&self, f: &Feature, h: &HoleFeature, current: Option<BodyId>) -> Built {
-        let Some(body) = current else { return Built::failed(current, "there is no body to drill") };
-        if h.points.is_empty() {
-            return Built::failed(current, "the hole has no points");
+    /// Resolves the 2D placement points of a hole feature: from its position sketch's
+    /// non-construction `Point` entities when `h.sketch` is set, else from `h.points`.
+    pub fn hole_points(&self, h: &HoleFeature) -> Result<Vec<soliddraft_sketch::P2>, String> {
+        if let Some(sketch_id) = h.sketch {
+            let Some(feature) = self.feature(sketch_id) else {
+                return Err(format!("the hole position sketch {sketch_id} is missing"));
+            };
+            let FeatureKind::Sketch(sf) = &feature.kind else {
+                return Err(format!("{} is not a sketch", feature.name));
+            };
+            let pts: Vec<soliddraft_sketch::P2> = sf
+                .sketch
+                .entities
+                .iter()
+                .filter(|e| e.id != soliddraft_sketch::ORIGIN && !e.construction)
+                .filter_map(|e| match e.kind {
+                    soliddraft_sketch::EntityKind::Point { p } => Some(p),
+                    _ => None,
+                })
+                .collect();
+            if pts.is_empty() {
+                return Err("the hole position sketch has no points".into());
+            }
+            Ok(pts)
+        } else if h.points.is_empty() {
+            Err("the hole has no points".into())
+        } else {
+            Ok(h.points.clone())
         }
-        if let Some(problem) = h.thread_problem() {
+    }
+
+    fn build_hole(&self, f: &Feature, h: &HoleFeature, current: Option<BodyId>) -> Built {
+        use crate::hole_wizard::HoleEndCondition;
+        let Some(body) = current else { return Built::failed(current, "there is no body to drill") };
+        if let Some(reason) = h.wizard.as_ref().and_then(|w| w.coming_soon_refusal()) {
+            return Built::failed(current, reason);
+        }
+        let points = match self.hole_points(h) {
+            Ok(pts) => pts,
+            Err(why) => return Built::failed(current, why),
+        };
+        let face_id = match self.resolve_face(&h.face, body) {
+            Ok(id) => id,
+            Err(r) => {
+                let r = RepairNeeded { slot: ReferenceSlot::Plane, ..r };
+                return Built::pass(FeatureStatus::RepairNeeded(vec![r]), current);
+            }
+        };
+        let topology = match self.view_of(body) {
+            Ok(t) => t,
+            Err(err) => return Built::failed(current, feature_error(err)),
+        };
+        let Some(face_info) = topology.face(face_id) else {
+            return Built::failed(current, "the selected hole face is no longer in the body");
+        };
+        let Some(normal) = face_info.normal else {
+            let label = if h.face.label.is_empty() { "selected face" } else { h.face.label.as_str() };
+            return Built::failed(current, format!("Holes can only be placed on a planar face; {label} is not planar."));
+        };
+        let plane = plane_on_face(normal, face_info.centroid);
+        let flip = h.wizard.as_ref().is_some_and(|w| w.flip_direction);
+        let drill_dir = if flip { plane.normal } else { -plane.normal };
+
+        enum ResolvedEnd {
+            Blind(f64),
+            Through,
+            UpToNext,
+        }
+
+        let resolved_end = if let Some(wizard) = &h.wizard {
+            match &wizard.end_condition {
+                HoleEndCondition::Blind { depth } => {
+                    if !(depth.is_finite() && *depth > 0.0) {
+                        return Built::failed(current, format!("hole depth must be positive, got {depth}"));
+                    }
+                    ResolvedEnd::Blind(*depth)
+                }
+                HoleEndCondition::ThroughAll => ResolvedEnd::Through,
+                HoleEndCondition::UpToNext => ResolvedEnd::UpToNext,
+                HoleEndCondition::UpToVertex { vertex } => {
+                    let vid = match self.resolve_vertex(vertex, body) {
+                        Ok(v) => v,
+                        Err(r) => {
+                            let r = RepairNeeded { slot: ReferenceSlot::Limit, ..r };
+                            return Built::pass(FeatureStatus::RepairNeeded(vec![r]), current);
+                        }
+                    };
+                    let Some(vinfo) = topology.vertex(vid) else {
+                        return Built::failed(current, "the target vertex is no longer in the body");
+                    };
+                    let depth = (vinfo.position - plane.origin).dot(drill_dir);
+                    if !(depth.is_finite() && depth > 1e-6) {
+                        return Built::failed(current, "The target vertex does not lie ahead of the hole's start face.");
+                    }
+                    ResolvedEnd::Blind(depth)
+                }
+                HoleEndCondition::UpToSurface { face: target } => {
+                    let tid = match self.resolve_face(target, body) {
+                        Ok(id) => id,
+                        Err(r) => {
+                            let r = RepairNeeded { slot: ReferenceSlot::Limit, ..r };
+                            return Built::pass(FeatureStatus::RepairNeeded(vec![r]), current);
+                        }
+                    };
+                    let Some(tinfo) = topology.face(tid) else {
+                        return Built::failed(current, "the target surface is no longer in the body");
+                    };
+                    let Some(tnormal) = tinfo.normal else {
+                        return Built::failed(current, "Up to surface on a non-parallel or curved face is coming soon.");
+                    };
+                    if tnormal.dot(plane.normal).abs() < 1.0 - 1e-6 {
+                        return Built::failed(current, "Up to surface on a non-parallel or curved face is coming soon.");
+                    }
+                    let depth = (tinfo.centroid - plane.origin).dot(drill_dir);
+                    if !(depth.is_finite() && depth > 1e-6) {
+                        return Built::failed(current, "The target surface does not lie ahead of the hole's start face.");
+                    }
+                    ResolvedEnd::Blind(depth)
+                }
+                HoleEndCondition::OffsetFromSurface { face: target, offset, reverse_offset } => {
+                    if !offset.is_finite() {
+                        return Built::failed(current, "surface offset must be finite");
+                    }
+                    let tid = match self.resolve_face(target, body) {
+                        Ok(id) => id,
+                        Err(r) => {
+                            let r = RepairNeeded { slot: ReferenceSlot::Limit, ..r };
+                            return Built::pass(FeatureStatus::RepairNeeded(vec![r]), current);
+                        }
+                    };
+                    let Some(tinfo) = topology.face(tid) else {
+                        return Built::failed(current, "the target surface is no longer in the body");
+                    };
+                    let Some(tnormal) = tinfo.normal else {
+                        return Built::failed(
+                            current,
+                            "Offset from surface on a non-parallel or curved face is coming soon.",
+                        );
+                    };
+                    if tnormal.dot(plane.normal).abs() < 1.0 - 1e-6 {
+                        return Built::failed(
+                            current,
+                            "Offset from surface on a non-parallel or curved face is coming soon.",
+                        );
+                    }
+                    let dist = (tinfo.centroid - plane.origin).dot(drill_dir);
+                    let signed = if *reverse_offset { *offset } else { -*offset };
+                    let depth = dist + signed;
+                    if !(depth.is_finite() && depth > 1e-6) {
+                        return Built::failed(current, "The offset from surface leaves no positive hole depth.");
+                    }
+                    ResolvedEnd::Blind(depth)
+                }
+            }
+        } else {
+            match h.depth {
+                HoleDepth::Blind { depth } => ResolvedEnd::Blind(depth),
+                HoleDepth::Through => ResolvedEnd::Through,
+            }
+        };
+
+        let effective_head = h.effective_head();
+
+        // Slot and CounterboreSlot build via exact stadium profile extrusion + boolean subtraction.
+        if let Some(wizard) = &h.wizard
+            && wizard.hole_type.is_slot()
+        {
+            let length = wizard.slot_length.unwrap_or_else(|| wizard.size_row().default_slot_length_mm());
+            if !(length.is_finite() && length > 0.0) {
+                return Built::failed(current, "slot length must be positive and finite");
+            }
+            let (through_depth, up_to_next) = match resolved_end {
+                ResolvedEnd::Blind(d) => (d, false),
+                ResolvedEnd::Through => {
+                    let reach = through_reach(&topology.bbox, plane.origin, drill_dir);
+                    if reach <= 1e-9 {
+                        return Built::failed(current, "the body lies entirely behind the hole's start face");
+                    }
+                    (reach, false)
+                }
+                ResolvedEnd::UpToNext => {
+                    if effective_head.is_some() {
+                        return Built::failed(
+                            current,
+                            "Up to next on counterbored, countersunk or drill-point holes is coming soon.",
+                        );
+                    }
+                    (0.0, true)
+                }
+            };
+            let cbore = match effective_head {
+                Some(HoleHead::Counterbore { diameter, depth }) => Some((diameter, depth)),
+                _ => None,
+            };
+            return self.build_slot_cuts(
+                f,
+                body,
+                face_id,
+                plane,
+                drill_dir,
+                flip,
+                &points,
+                h.diameter,
+                length,
+                wizard.slot_angle_deg,
+                through_depth,
+                up_to_next,
+                cbore,
+            );
+        }
+
+        // Circular UpToNext: supported for plain flat holes via Catallax's exact ExtrudeNext.
+        if matches!(resolved_end, ResolvedEnd::UpToNext) {
+            if effective_head.is_some() || !matches!(h.tip, HoleTip::Flat) {
+                return Built::failed(
+                    current,
+                    "Up to next on counterbored, countersunk or drill-point holes is coming soon.",
+                );
+            }
+            if let Some(thread) = &h.thread
+                && let Some(problem) = thread.problem(h.diameter, &HoleDepth::Through, None)
+            {
+                return Built::failed(current, problem);
+            }
+            return self.build_circular_up_to_next(f, body, plane, drill_dir, &points, h.diameter);
+        }
+
+        let depth = match resolved_end {
+            ResolvedEnd::Blind(depth) => HoleDepth::Blind { depth },
+            ResolvedEnd::Through | ResolvedEnd::UpToNext => HoleDepth::Through,
+        };
+        if let Some(thread) = &h.thread
+            && let Some(problem) = thread.problem(h.diameter, &depth, effective_head.as_ref())
+        {
             return Built::failed(current, problem);
         }
-        let plane = match self.plane_of(&PlaneRef::Face { face: h.face.clone() }, body) {
-            Ok(p) => p,
-            Err(r) => return Built::pass(FeatureStatus::RepairNeeded(vec![*r]), current),
-        };
-        let face = self.resolve_face(&h.face, body).ok();
-        let placements = h
-            .points
+        let placements = points
             .iter()
             .map(|p| HolePlacement {
                 point: plane.origin + plane.x_dir * p.u + plane.y_dir() * p.v,
-                direction: -plane.normal,
-                on_face: face.map(|face| FacePoint { face, u: p.u, v: p.v }),
+                direction: drill_dir,
+                on_face: (!flip).then_some(FacePoint { face: face_id, u: p.u, v: p.v }),
             })
             .collect();
-        let params = Hole { placements, diameter: h.diameter, depth: h.depth, tip: h.tip, head: h.head };
+        let params = Hole { placements, diameter: h.diameter, depth, tip: h.tip, head: effective_head };
         let result = self.kernel.hole(&OpTag::new(format!("{}.hole", f.id)), body, &params);
         self.finish(result, current, |r| {
             let faces = r
@@ -1115,6 +1349,164 @@ impl Document {
                 .collect();
             number(faces)
         })
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn build_slot_cuts(
+        &self,
+        f: &Feature,
+        target: BodyId,
+        face_id: FaceId,
+        plane: Plane,
+        drill_dir: Vec3,
+        flip: bool,
+        points: &[soliddraft_sketch::P2],
+        width: f64,
+        length: f64,
+        angle_deg: f64,
+        depth: f64,
+        up_to_next: bool,
+        cbore: Option<(f64, f64)>,
+    ) -> Built {
+        let mut mine: Option<BodyId> = None;
+        let run = (|| -> KernelResult<BodyId> {
+            let k = &self.kernel;
+            let mut body = target;
+            for (i, pt) in points.iter().enumerate() {
+                let profile = stadium_profile(plane, pt.u, pt.v, width, length, angle_deg);
+                let tag = |step: &str| OpTag::new(format!("{}.slot{i}.{step}", f.id));
+                let tool = if up_to_next {
+                    let sheet = k.create_body_from_profile(&tag("profile"), &profile)?;
+                    let swept =
+                        k.extrude_to(&tag("sweep"), sheet.body, body, Some(drill_dir), &ExtrudeLimit::UpToNext);
+                    let _ = k.release(sheet.body);
+                    swept?
+                } else if !flip {
+                    let support = FaceSupport { body, face: face_id, offset: 0.0 };
+                    k.extrude_on_face(&tag("sweep"), &profile, support, -depth)?
+                } else {
+                    let sheet = k.create_body_from_profile(&tag("profile"), &profile)?;
+                    let swept =
+                        k.extrude(&tag("sweep"), sheet.body, &Extrude { distance: depth, direction: Some(drill_dir) });
+                    let _ = k.release(sheet.body);
+                    swept?
+                };
+                let cut = k.boolean(&tag("cut"), BooleanOp::Subtract, body, tool.body);
+                let _ = k.release(tool.body);
+                let next = cut?.body;
+                if let Some(prev) = mine.replace(next) {
+                    let _ = k.release(prev);
+                }
+                body = next;
+
+                if let Some((cb_width, cb_depth)) = cbore {
+                    let cb_profile = stadium_profile(plane, pt.u, pt.v, cb_width, length, angle_deg);
+                    let cb_tag = |step: &str| OpTag::new(format!("{}.slot{i}.cb.{step}", f.id));
+                    let cb_tool = if !flip {
+                        let support = FaceSupport { body, face: face_id, offset: 0.0 };
+                        k.extrude_on_face(&cb_tag("sweep"), &cb_profile, support, -cb_depth)?
+                    } else {
+                        let sheet = k.create_body_from_profile(&cb_tag("profile"), &cb_profile)?;
+                        let swept = k.extrude(
+                            &cb_tag("sweep"),
+                            sheet.body,
+                            &Extrude { distance: cb_depth, direction: Some(drill_dir) },
+                        );
+                        let _ = k.release(sheet.body);
+                        swept?
+                    };
+                    let cut = k.boolean(&cb_tag("cut"), BooleanOp::Subtract, body, cb_tool.body);
+                    let _ = k.release(cb_tool.body);
+                    let next = cut?.body;
+                    if let Some(prev) = mine.replace(next) {
+                        let _ = k.release(prev);
+                    }
+                    body = next;
+                }
+            }
+            Ok(body)
+        })();
+        match run {
+            Ok(body) => Built {
+                body_key: 0,
+                consumed_tool: None,
+                status: FeatureStatus::Ok,
+                output: Some(body),
+                owned: mine,
+                names: Vec::new(),
+                sketch: None,
+                plane: None,
+                version: 0,
+                work_used: None,
+                import_record: None,
+            },
+            Err(err) => {
+                if let Some(b) = mine {
+                    let _ = self.kernel.release(b);
+                }
+                Built::failed(Some(target), feature_error(err))
+            }
+        }
+    }
+
+    fn build_circular_up_to_next(
+        &self,
+        f: &Feature,
+        target: BodyId,
+        plane: Plane,
+        drill_dir: Vec3,
+        points: &[soliddraft_sketch::P2],
+        diameter: f64,
+    ) -> Built {
+        let mut mine: Option<BodyId> = None;
+        let run = (|| -> KernelResult<BodyId> {
+            let k = &self.kernel;
+            let mut body = target;
+            for (i, pt) in points.iter().enumerate() {
+                let profile = Profile {
+                    plane,
+                    outer: soliddraft_kernel_api::Loop(vec![soliddraft_kernel_api::Segment::Circle {
+                        center: Point2::new(pt.u, pt.v),
+                        radius: diameter / 2.0,
+                    }]),
+                    holes: Vec::new(),
+                };
+                let tag = |step: &str| OpTag::new(format!("{}.h{i}.{step}", f.id));
+                let sheet = k.create_body_from_profile(&tag("profile"), &profile)?;
+                let swept = k.extrude_to(&tag("sweep"), sheet.body, body, Some(drill_dir), &ExtrudeLimit::UpToNext);
+                let _ = k.release(sheet.body);
+                let tool = swept?;
+                let cut = k.boolean(&tag("cut"), BooleanOp::Subtract, body, tool.body);
+                let _ = k.release(tool.body);
+                let next = cut?.body;
+                if let Some(prev) = mine.replace(next) {
+                    let _ = k.release(prev);
+                }
+                body = next;
+            }
+            Ok(body)
+        })();
+        match run {
+            Ok(body) => Built {
+                body_key: 0,
+                consumed_tool: None,
+                status: FeatureStatus::Ok,
+                output: Some(body),
+                owned: mine,
+                names: Vec::new(),
+                sketch: None,
+                plane: None,
+                version: 0,
+                work_used: None,
+                import_record: None,
+            },
+            Err(err) => {
+                if let Some(b) = mine {
+                    let _ = self.kernel.release(b);
+                }
+                Built::failed(Some(target), feature_error(err))
+            }
+        }
     }
 
     fn build_pattern(&self, f: &Feature, p: &PatternFeature, current: Option<BodyId>) -> Built {
@@ -1571,6 +1963,62 @@ fn imported_names(record: &HistoryRecord, import: &ImportStepFeature) -> Vec<Nam
 pub fn shell_refusal(r: &OpResult) -> Option<&'static str> {
     let walls = r.record.face_roles.iter().any(|o| matches!(o.role, FaceRole::Offset { .. }));
     (!walls).then_some("The wall is too thick to hollow this part. Use a thinner wall.")
+}
+
+/// Distance along `dir` from `origin` to reach cleanly past `bbox`.
+fn through_reach(bbox: &Aabb, origin: Vec3, dir: Vec3) -> f64 {
+    let (lo, hi) = (bbox.min, bbox.max);
+    let reach = (0..8)
+        .map(|c| {
+            let corner = Vec3::new(
+                if c & 1 == 0 { lo.x } else { hi.x },
+                if c & 2 == 0 { lo.y } else { hi.y },
+                if c & 4 == 0 { lo.z } else { hi.z },
+            );
+            (corner - origin).dot(dir)
+        })
+        .fold(f64::NEG_INFINITY, f64::max);
+    if reach <= 1e-9 { 0.0 } else { reach + 1.0 + 0.01 * bbox.diagonal() }
+}
+
+/// Exact stadium (oblong slot) closed CCW profile centred at `(cu, cv)` on `plane`,
+/// with width `width` (diameter of end semicircles), centre-to-centre `length`, rotated
+/// counter-clockwise by `angle_deg` degrees.
+fn stadium_profile(plane: Plane, cu: f64, cv: f64, width: f64, length: f64, angle_deg: f64) -> Profile {
+    let norm = angle_deg.rem_euclid(360.0);
+    let (cos, sin) = if (norm - 0.0).abs() < 1e-12 || (norm - 360.0).abs() < 1e-12 {
+        (1.0, 0.0)
+    } else if (norm - 90.0).abs() < 1e-12 {
+        (0.0, 1.0)
+    } else if (norm - 180.0).abs() < 1e-12 {
+        (-1.0, 0.0)
+    } else if (norm - 270.0).abs() < 1e-12 {
+        (0.0, -1.0)
+    } else {
+        let rad = angle_deg.to_radians();
+        (rad.cos(), rad.sin())
+    };
+    let r = width * 0.5;
+    let half = length * 0.5;
+    let c1 = Point2::new(cu - cos * half, cv - sin * half);
+    let c2 = Point2::new(cu + cos * half, cv + sin * half);
+    let perp_u = -sin * r;
+    let perp_v = cos * r;
+    let p1 = Point2::new(c1.u - perp_u, c1.v - perp_v);
+    let p2 = Point2::new(c2.u - perp_u, c2.v - perp_v);
+    let p3 = Point2::new(c2.u + perp_u, c2.v + perp_v);
+    let p4 = Point2::new(c1.u + perp_u, c1.v + perp_v);
+    use soliddraft_kernel_api::{Loop, Segment};
+    Profile {
+        plane,
+        outer: Loop(vec![
+            Segment::Line { from: p1, to: p2 },
+            Segment::Arc { center: c2, from: p2, to: p3, clockwise: false },
+            Segment::Line { from: p3, to: p4 },
+            Segment::Arc { center: c1, from: p4, to: p1, clockwise: false },
+        ]),
+        holes: Vec::new(),
+    }
 }
 
 /// The sketch plane on a planar face: origin at the world origin projected onto the

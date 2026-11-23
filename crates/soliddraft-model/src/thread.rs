@@ -300,8 +300,10 @@ impl Document {
                 continue;
             };
             let Ok(plane) = self.plane_of(&PlaneRef::Face { face: hole.face.clone() }, drilled) else { continue };
-            let direction = -plane.normal;
-            for (placement, point) in hole.points.iter().enumerate() {
+            let flip = hole.wizard.as_ref().is_some_and(|w| w.flip_direction);
+            let direction = if flip { plane.normal } else { -plane.normal };
+            let Ok(points) = self.hole_points(hole) else { continue };
+            for (placement, point) in points.iter().enumerate() {
                 let entry = plane.origin + plane.x_dir * point.u + plane.y_dir() * point.v;
                 let Ok(faces) = reference::resolve_faces(&self.hole_wall(feature, placement), &view, &names) else {
                     continue;

@@ -165,17 +165,19 @@ impl Document {
             if self.status(feature.id) != Some(&crate::FeatureStatus::Ok) {
                 continue;
             }
-            let through = matches!(hole.depth, soliddraft_kernel_api::HoleDepth::Through) && thread.length.is_none();
-            let depth = match (thread.length, hole.depth) {
+            let effective_depth = hole.wizard.as_ref().map_or(hole.depth, |w| w.legacy_depth());
+            let through = matches!(effective_depth, soliddraft_kernel_api::HoleDepth::Through) && thread.length.is_none();
+            let depth = match (thread.length, effective_depth) {
                 (Some(length), _) => Some(length),
                 (None, soliddraft_kernel_api::HoleDepth::Blind { depth }) => Some(depth),
                 (None, soliddraft_kernel_api::HoleDepth::Through) => None,
             };
+            let count = self.hole_points(hole).map(|pts| pts.len()).unwrap_or(hole.points.len());
             let item = PmiItem {
                 id: taken.free_name(&format!("{} thread", feature.name.replace('/', " "))),
                 kind: PmiKind::Size {
                     size: soliddraft_kernel_api::pmi::SizeKind::Diameter,
-                    features: (0..hole.points.len()).map(|i| vec![self.hole_wall(feature, i)]).collect(),
+                    features: (0..count).map(|i| vec![self.hole_wall(feature, i)]).collect(),
                     tolerance: Tolerance::None,
                     through,
                     thread: Some(thread.designation()),

@@ -70,10 +70,18 @@ try {
   await send('Browser.setDownloadBehavior', { behavior: 'allow', downloadPath: downloads, eventsEnabled: true });
   await call('Page.navigate', { url });
 
-  const evaluate = async expression => {
-    const result = await call('Runtime.evaluate', { expression, returnByValue: true });
+  const evaluate = async (expression, awaitPromise = false) => {
+    const result = await call('Runtime.evaluate', { expression, awaitPromise, returnByValue: true });
     if (result.exceptionDetails) throw new Error(result.exceptionDetails.exception?.description || result.exceptionDetails.text);
     return result.result.value;
+  };
+  const settle = async ms => {
+    await sleep(ms);
+    await evaluate(`new Promise(done => {
+      let frames = 3;
+      const next = () => --frames ? requestAnimationFrame(next) : done();
+      requestAnimationFrame(next);
+    })`, true);
   };
   const shown = () => evaluate("JSON.parse(window.wasmBindings?.shown_drawing?.() || 'null')");
   const sheet = (label, check) => until(label, async () => {
@@ -82,16 +90,16 @@ try {
   }, 25_000);
   const click = async ([x, y]) => {
     await call('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y });
-    await sleep(240);
+    await settle(240);
     await call('Input.dispatchMouseEvent', { type: 'mousePressed', button: 'left', buttons: 1, clickCount: 1, x, y });
     await call('Input.dispatchMouseEvent', { type: 'mouseReleased', button: 'left', buttons: 0, clickCount: 1, x, y });
-    await sleep(400);
+    await settle(400);
   };
   const key = async (key, code, windowsVirtualKeyCode, modifiers = 0, text) => {
     const params = { key, code, windowsVirtualKeyCode, modifiers };
     await call('Input.dispatchKeyEvent', { ...params, type: text ? 'keyDown' : 'rawKeyDown', text });
     await call('Input.dispatchKeyEvent', { ...params, type: 'keyUp' });
-    await sleep(400);
+    await settle(400);
   };
   const enter = () => key('Enter', 'Enter', 13, 0, '\r');
   const moveToCanvas = () => call('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 1000, y: 450 });
@@ -102,7 +110,7 @@ try {
       await call('Input.dispatchKeyEvent', { type: 'char', text: ch });
       await sleep(30);
     }
-    await sleep(400);
+    await settle(400);
     await enter();
   };
   const open = async (file, action) => {

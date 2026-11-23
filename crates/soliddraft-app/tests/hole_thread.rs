@@ -601,7 +601,12 @@ fn hiding_a_body_in_a_display_state_hides_its_thread_marks() {
     settle(&mut app);
     let image = case.frame(&mut app, "hidden");
     let after = thread_blue(&app, &image);
-    assert_eq!(after, 0, "the hidden thread still draws {after} blue pixels");
+
+    tool(&mut app.state_mut().state, "edit_hole", json!({"feature": "Hole1", "plain": true}));
+    settle(&mut app);
+    ux_tools::rebuilt(&mut app);
+    let image = case.frame(&mut app, "hidden-without-thread");
+    assert_eq!(after, thread_blue(&app, &image), "the hidden thread must add zero blue pixels");
 }
 
 #[test]

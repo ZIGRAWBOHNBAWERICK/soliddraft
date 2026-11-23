@@ -1183,13 +1183,18 @@ fn outline_of(part: &PartDocument, r: &DocRef, entity: SupportEntity) -> Result<
     let n_axis = glam::DVec3::new(normal[0] as f64, normal[1] as f64, normal[2] as f64);
     let f = |p: &[BigRational; 3]| glam::DVec3::from_array(p.each_ref().map(crate::mates::solver::nearest));
     let mut pieces = Vec::with_capacity(order.len());
+    // Each edge is one piece. Two edges can join the same two corners, as the arc and the
+    // straight side of a D do, so an edge already read is not read again.
+    let mut read: Vec<EdgeId> = Vec::with_capacity(order.len());
     for i in 0..order.len() {
         let (a, b) = (order[i], order[(i + 1) % order.len()]);
         let edge = outline
             .iter()
             .copied()
+            .filter(|e| !read.contains(e))
             .find(|e| t.edge(*e).is_some_and(|info| info.vertices.contains(&a) && info.vertices.contains(&b)))
             .ok_or_else(|| refuse("its outline is not one closed chain of edges".into()))?;
+        read.push(edge);
         let kind = t.edge(edge).map(|e| e.curve).unwrap_or(CurveKind::Other);
         let arc = match kind {
             CurveKind::Line => None,

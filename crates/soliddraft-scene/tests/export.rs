@@ -21,6 +21,9 @@ use soliddraft_model::{
 use soliddraft_scene::export::{self, Articulation};
 use soliddraft_scene::{JointKind, Options, Scene, read};
 
+const LID_TURN: f64 = 0.2;
+const LID_STOPS_FROM_REST: [f64; 2] = [-30.0 - LID_TURN.to_degrees(), 45.0 - LID_TURN.to_degrees()];
+
 fn kernel() -> Arc<dyn Kernel> {
     Arc::new(CatallaxKernel::new())
 }
@@ -91,7 +94,7 @@ fn options() -> OpenOptions {
     }
 }
 
-fn rig(dir: &Path) -> AssemblyDocument {
+fn rig(dir: &Path, reverse_lid: bool) -> AssemblyDocument {
     let (shaft, block) = (dir.join("shaft.dwprt"), dir.join("block.dwprt"));
     part(&shaft, true);
     part(&block, false);
@@ -100,14 +103,15 @@ fn rig(dir: &Path) -> AssemblyDocument {
     doc.save(Some(&file)).unwrap();
     let a = doc.insert(reference(&file, &shaft), Placement::IDENTITY).unwrap();
     let b = doc
-        .insert(reference(&file, &shaft), Placement::new(DQuat::from_rotation_z(0.2), DVec3::new(2.0, 1.0, 20.0)))
+        .insert(reference(&file, &shaft), Placement::new(DQuat::from_rotation_z(LID_TURN), DVec3::new(2.0, 1.0, 20.0)))
         .unwrap();
     let c = doc.insert(reference(&file, &shaft), Placement::translation(DVec3::new(0.0, 0.0, 40.0))).unwrap();
     doc.insert(reference(&file, &block), Placement::translation(DVec3::new(50.0, 0.0, 0.0))).unwrap();
     doc.finish_loading();
     doc.mate_origin("O", a, true, false).unwrap();
     let planes = |x: ComponentId| [datum(a, "Top plane"), datum(x, "Top plane")];
-    add_hinge(&mut doc, "Lid", [a, b], Some([-30.0, 45.0]));
+    let (lid, limits) = if reverse_lid { ([b, a], [-45.0, 30.0]) } else { ([a, b], [-30.0, 45.0]) };
+    add_hinge(&mut doc, "Lid", lid, Some(limits));
     let [pa, pc] = planes(c);
     doc.mate_hinge("Spin", [&cylinder(a), &cylinder(c)], [&pa, &pc], Alignment::Aligned, Alignment::Aligned, false)
         .unwrap();
@@ -159,7 +163,7 @@ fn check_joints(a: &Articulation) {
         "the grounded shaft and the loose block: {kinds:?}"
     );
     let lid = a.joints.iter().find(|j| j.mates.contains(&"Lid".into())).unwrap();
-    assert_eq!((lid.kind, lid.limits), (JointKind::Revolute, Some([-30.0, 45.0])));
+    assert_eq!((lid.kind, lid.limits), (JointKind::Revolute, Some(LID_STOPS_FROM_REST)));
     assert!((DVec3::from_array(lid.axis).z.abs() - 1.0).abs() < 1e-9, "{:?}", lid.axis);
     let spin = a.joints.iter().find(|j| j.mates.contains(&"Spin".into())).unwrap();
     assert_eq!(spin.kind, JointKind::Continuous);
@@ -192,7 +196,8 @@ fn check_read(scene: &Scene, what: &str) {
         assert!((axis.z.abs() - 1.0).abs() < 1e-6, "{what}: a joint turns about Z, not {axis}");
         if *kind == JointKind::Revolute {
             let [lo, hi] = limits.unwrap();
-            assert!((lo + 30.0).abs() < 1e-6 && (hi - 45.0).abs() < 1e-6, "{what}: {lo} {hi}");
+            let [expected_lo, expected_hi] = LID_STOPS_FROM_REST;
+            assert!((lo - expected_lo).abs() < 1e-6 && (hi - expected_hi).abs() < 1e-6, "{what}: {lo} {hi}");
         }
     }
     assert!(joints.iter().any(|j| j.3), "{what}: the mimic joint comes back");
@@ -221,7 +226,7 @@ fn check_read(scene: &Scene, what: &str) {
 #[test]
 fn urdf_and_usd_carry_the_hinges_the_gear_and_the_placements() {
     let dir = folder("robot");
-    let mut doc = rig(&dir);
+    let mut doc = rig(&dir, false);
     let articulation = export::articulate(&mut doc).unwrap();
     check_joints(&articulation);
 
@@ -305,7 +310,7 @@ fn export_keeps_disconnected_hinges() {
 #[test]
 fn export_keeps_mates_in_each_subassembly_occurrence() {
     let dir = folder("nested");
-    let mut child = rig(&dir);
+    let mut child = rig(&dir, false);
     child.save(None).unwrap();
     let file = dir.join("parent.dwasm");
     let mut doc = AssemblyDocument::new_with("Parent", options());
@@ -336,5 +341,45 @@ fn export_keeps_mates_in_each_subassembly_occurrence() {
         assert_eq!(scene.joints.iter().filter(|j| j.kind == JointKind::Revolute).count(), 2, "{extension}");
         assert_eq!(scene.joints.iter().filter(|j| j.mimic.is_some()).count(), 2, "{extension}");
     }
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn exported_hinge_stops_start_at_the_accepted_turn_in_either_order() {
+    check_hinge_stops(false);
+    check_hinge_stops(true);
+}
+
+fn check_hinge_stops(reversed: bool) {
+    let dir = folder("stops");
+    let (mut doc, [a, b]) = shafts(&dir, "Rig");
+    doc.mate_origin("Ground", a, true, false).unwrap();
+    let (ends, limits) = if reversed { ([b, a], [-45.0, 30.0]) } else { ([a, b], [-30.0, 45.0]) };
+    add_hinge(&mut doc, "Hinge", ends, Some(limits));
+    doc.begin_drag(component(b)).unwrap();
+    let turn = DQuat::from_rotation_z(30_f64.to_radians());
+    doc.preview_drag(Placement::new(turn, DVec3::ZERO)).unwrap();
+    doc.commit_drag().unwrap();
+    doc.save(None).unwrap();
+    let mut doc = AssemblyDocument::open(dir.join("hinge.dwasm"), options()).unwrap();
+    assert!(doc.assembly().component(b).unwrap().placement.rotation.angle_between(turn) < 1e-7);
+    for extension in ["urdf", "usda"] {
+        let scene = exported_scene(&mut doc, &dir.join(format!("rig.{extension}")));
+        let (_, limits, axis, _) = read_back(&scene).into_iter().find(|j| j.0 == JointKind::Revolute).unwrap();
+        assert!((axis - DVec3::Z).length() < 1e-6, "{extension}: {axis}");
+        let [lo, hi] = limits.unwrap();
+        assert!((lo + 60.0).abs() < 1e-6 && (hi - 15.0).abs() < 1e-6, "{extension}: {lo} {hi}");
+    }
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn gear_multiplier_uses_the_exported_direction_of_each_hinge() {
+    let dir = folder("reverse-gear");
+    let mut doc = rig(&dir, true);
+    let a = export::articulate(&mut doc).unwrap();
+    let lid = a.joints.iter().find(|j| j.mates.iter().any(|m| m == "Lid")).unwrap();
+    let spin = a.joints.iter().find(|j| j.mates.iter().any(|m| m == "Spin")).unwrap();
+    assert_eq!(spin.mimic, Some((lid.name.clone(), 2.0)));
     std::fs::remove_dir_all(dir).unwrap();
 }

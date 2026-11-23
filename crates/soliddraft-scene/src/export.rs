@@ -34,10 +34,10 @@ use std::path::{Path, PathBuf};
 
 use glam::{DMat4, DQuat, DVec3};
 use serde::Serialize;
-use soliddraft_assembly::mates::Mechanism;
+use soliddraft_assembly::mates::{Mechanism, hinge_angle_at};
 use soliddraft_assembly::{
-    AssemblyDocument, DisplayMesh, Entity, FaceEndpoint, Flags, Mate, MateId, OccurrenceIndex, OccurrencePath,
-    Placement, Step, StoredSupport,
+    AssemblyDocument, DisplayMesh, Entity, FaceEndpoint, Flags, Mate, OccurrenceIndex, OccurrencePath, Placement, Step,
+    StoredSupport,
 };
 use soliddraft_kernel_api::{EnclosedSupport, ExactRational, SupportBounds};
 
@@ -271,13 +271,13 @@ pub fn articulate(doc: &mut AssemblyDocument) -> Result<Articulation, String> {
     }
 
     // A joint per pair, as the mates say.
-    struct Edge<'a> {
+    struct Edge {
         kind: JointKind,
         axis: Option<(DVec3, DVec3)>,
         pivot: Option<DVec3>,
-        limits: Option<[f64; 2]>,
+        /// The first hinge endpoint and the remaining turn in the mate's direction.
+        limits: Option<(usize, [f64; 2])>,
         mates: Vec<String>,
-        joint_mates: Vec<(&'a OccurrencePath, MateId)>,
     }
     let mut edges: BTreeMap<(usize, usize), Edge> = BTreeMap::new();
     for ((a, b), mates) in &pairs {
@@ -287,7 +287,6 @@ pub fn articulate(doc: &mut AssemblyDocument) -> Result<Articulation, String> {
             pivot: None,
             limits: None,
             mates: mates.iter().map(|(_, m)| m.name().to_owned()).collect(),
-            joint_mates: mates.iter().map(|&(prefix, m)| (prefix, m.id())).collect(),
         };
         let hinge = mates.iter().find_map(|&(prefix, m)| match m {
             Mate::Hinge { axes, angle_limits, .. } => Some((prefix, axes, *angle_limits)),
@@ -298,9 +297,20 @@ pub fn articulate(doc: &mut AssemblyDocument) -> Result<Articulation, String> {
             _ => None,
         });
         if let Some((prefix, axes, limits)) = hinge {
-            edge.axis = axes.iter().find_map(|a| axis_of(a, placement(prefix, a)));
-            edge.kind = if limits.is_some() { JointKind::Revolute } else { JointKind::Continuous };
-            edge.limits = limits;
+            let poses = axes.each_ref().map(|a| placement(prefix, a));
+            match limits {
+                Some(limits) if let Some(angle) = hinge_angle_at(axes, poses, limits) => {
+                    let first = body_of(prefix, &axes[0].path).expect("both mate endpoints were included");
+                    edge.limits = Some((first, limits.map(|stop| stop - angle)));
+                    edge.axis = axis_of(&axes[0], poses[0]);
+                    edge.kind = JointKind::Revolute;
+                }
+                Some(_) => notes.push(format!("{}: the hinge angle could not be read", edge.mates.join(", "))),
+                None => {
+                    edge.axis = axes.iter().zip(poses).find_map(|(a, pose)| axis_of(a, pose));
+                    edge.kind = JointKind::Continuous;
+                }
+            }
         } else if let Some((prefix, end)) = concentric {
             edge.axis = axis_of(end, placement(prefix, end));
             edge.kind = JointKind::Continuous;
@@ -341,6 +351,7 @@ pub fn articulate(doc: &mut AssemblyDocument) -> Result<Articulation, String> {
         if !matches!(edge.kind, JointKind::Fixed | JointKind::Spherical) && edge.axis.is_none() {
             notes.push(format!("{}: the axis could not be read, so the joint is fixed", edge.mates.join(", ")));
             edge.kind = JointKind::Fixed;
+            edge.limits = None;
         }
         if edge.kind == JointKind::Fixed {
             let others: Vec<&str> =
@@ -388,7 +399,8 @@ pub fn articulate(doc: &mut AssemblyDocument) -> Result<Articulation, String> {
         let mut queue = VecDeque::from([base]);
         while let Some(at) = queue.pop_front() {
             for &(next, edge) in &adjacency[at] {
-                if !used.insert((at.min(next), at.max(next))) {
+                let pair = (at.min(next), at.max(next));
+                if !used.insert(pair) {
                     continue;
                 }
                 if reached[next] {
@@ -407,8 +419,20 @@ pub fn articulate(doc: &mut AssemblyDocument) -> Result<Articulation, String> {
                 let parent_link = link_of(at);
                 let child_link = link_of(next);
                 link_world[child_link] = joint_world;
-                for m in &edge.joint_mates {
-                    joint_of_mate.insert(*m, joints.len());
+                if matches!(edge.kind, JointKind::Revolute | JointKind::Continuous)
+                    && let Some((_, axis)) = edge.axis
+                {
+                    for &(prefix, mate) in &pairs[&pair] {
+                        let end = match mate {
+                            Mate::Hinge { axes, .. } => &axes[0],
+                            Mate::Concentric { a, lock_rotation: None, alignment: Some(_), .. } => a,
+                            _ => continue,
+                        };
+                        let Some((_, direction)) = axis_of(end, placement(prefix, end)) else { continue };
+                        let parent = body_of(prefix, &end.path) == Some(at);
+                        let sign = if parent == (axis.dot(direction) > 0.0) { 1.0 } else { -1.0 };
+                        joint_of_mate.insert((prefix, mate.id()), (joints.len(), sign));
+                    }
                 }
                 joints.push(ExportJoint {
                     name: format!("{}_{}", links[child_link].name, joint_word(edge.kind)),
@@ -417,7 +441,7 @@ pub fn articulate(doc: &mut AssemblyDocument) -> Result<Articulation, String> {
                     child: child_link,
                     frame: link_world[parent_link].inverse() * joint_world,
                     axis: edge.axis.map(|(_, d)| d.to_array()).unwrap_or([1.0, 0.0, 0.0]),
-                    limits: edge.limits,
+                    limits: edge.limits.map(|(first, [lo, hi])| if first == at { [lo, hi] } else { [-hi, -lo] }),
                     mates: edge.mates.clone(),
                     mimic: None,
                 });
@@ -432,13 +456,13 @@ pub fn articulate(doc: &mut AssemblyDocument) -> Result<Articulation, String> {
     // A gear's mate IDs are local to the assembly occurrence that holds it.
     for (prefix, mate) in scoped_mates {
         let Mate::Mechanical { name, mechanism, joints: coupled, factor, reverse, .. } = mate else { continue };
-        let found: Vec<usize> = coupled.iter().filter_map(|m| joint_of_mate.get(&(prefix, *m)).copied()).collect();
+        let found: Vec<_> = coupled.iter().filter_map(|m| joint_of_mate.get(&(prefix, *m)).copied()).collect();
         match (mechanism, &found[..]) {
-            (Mechanism::Gear, [lead, follow]) if lead != follow && factor[0] != 0.0 => {
+            (Mechanism::Gear, &[(lead, lead_sign), (follow, follow_sign)]) if lead != follow && factor[0] != 0.0 => {
                 let sign = if *reverse { -1.0 } else { 1.0 };
-                let leader = joints[*lead].name.clone();
-                joints[*follow].mimic = Some((leader, -sign * factor[1] / factor[0]));
-                joints[*follow].mates.push(name.clone());
+                let leader = joints[lead].name.clone();
+                joints[follow].mimic = Some((leader, -sign * factor[1] / factor[0] * lead_sign * follow_sign));
+                joints[follow].mates.push(name.clone());
             }
             _ => notes.push(format!("{name} has no URDF joint coupling and is left out")),
         }

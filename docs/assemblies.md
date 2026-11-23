@@ -241,7 +241,7 @@ at the assembly's origin. Mates become joints:
 
 | Mates between two parts | Joint |
 |---|---|
-| Hinge with angle limits | revolute, between the limits |
+| Hinge with angle limits | revolute, with limits measured from the accepted pose |
 | Hinge without limits | continuous |
 | Concentric between axes, without Lock rotation | continuous about the axis |
 | Concentric between axes, with Lock rotation | prismatic along the axis |

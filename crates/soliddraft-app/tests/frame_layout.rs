@@ -25,10 +25,10 @@ fn old_and_current_frame_settings_open_edit_suite_and_the_command_palette() {
             assert!(app.state().state.viewport.rect.is_positive());
             assert!(app.query_all_by_label("Extrude").next().is_some());
             assert!(app.query_all_by_label("Edit Suite").next().is_none(), "no layout switch is offered");
-            for tab in ["Solid tab", "Sketch tab", "Assembly tab", "Inspect tab", "View tab"] {
+            for tab in ["Solid tab", "Sketch tab", "Inspect tab", "View tab"] {
                 assert!(app.query_all_by_label(tab).next().is_some(), "{setting}: {tab} remains available");
             }
-            for tab in ["Surface tab", "Point cloud tab"] {
+            for tab in ["Surface tab", "Point cloud tab", "Assembly tab"] {
                 assert!(app.query_all_by_label(tab).next().is_none(), "{setting}: {tab} is removed");
             }
             let painted = ribbon::painted(app);
@@ -76,7 +76,7 @@ fn left_bar_workspaces_select_the_palette_and_leave_the_title_bar() {
                 assert_eq!(ribbon::tooltip(app, inspect), "Inspect", "the icon is named on hover");
 
                 let mut previous = bar.top();
-                for tab in RibbonTab::ALL {
+                for tab in RibbonTab::ALL.into_iter().filter(|tab| *tab != RibbonTab::Assembly) {
                     let label = format!("{} tab", tab.label());
                     assert_eq!(app.query_all_by_label(&label).count(), 1, "one {label}");
                     let control = ribbon::control(app, &label, bar);
@@ -91,7 +91,9 @@ fn left_bar_workspaces_select_the_palette_and_leave_the_title_bar() {
                     app.run_steps(8);
                     assert_eq!(app.state().state.ribbon_tab, tab);
                     assert!(ribbon::control(app, &label, bar).selected);
-                    for other in RibbonTab::ALL.into_iter().filter(|other| *other != tab) {
+                    for other in
+                        RibbonTab::ALL.into_iter().filter(|other| *other != tab && *other != RibbonTab::Assembly)
+                    {
                         let other = format!("{} tab", other.label());
                         assert!(!ribbon::control(app, &other, bar).selected, "only {label} is marked");
                     }
@@ -219,7 +221,7 @@ fn assembly_workspaces_route_named_tools_and_keep_the_part_camera() {
         case.frame(app, "assembly-view");
         app.state_mut().state.push(AppAction::Assembly(AssemblyAction::ShowPart));
         app.run_steps(8);
-        assert_eq!(app.state().state.workspaces().len(), 5);
+        assert_eq!(app.state().state.workspaces().len(), 4);
         app.state_mut().state.push(AppAction::Assembly(AssemblyAction::Show));
         app.run_steps(8);
         assert!(ribbon::control(app, "View tab", ribbon::left_bar(app)).selected);

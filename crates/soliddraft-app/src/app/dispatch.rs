@@ -271,6 +271,26 @@ impl SolidDraftApp {
                 crate::assembly::apply(&mut self.state, &mut self.dock, crate::assembly::AssemblyAction::FromPart);
             }
             AppAction::Assembly(a) => crate::assembly::apply(&mut self.state, &mut self.dock, a),
+            AppAction::OpenComponentPart(path) => {
+                use crate::assembly::{AssemblyAction, ComponentPart};
+                match crate::assembly::component_part(&self.state, &path) {
+                    Ok(ComponentPart::Current) => self.apply(ctx, AppAction::Assembly(AssemblyAction::ShowPart)),
+                    #[cfg(not(target_arch = "wasm32"))]
+                    Ok(ComponentPart::File(path)) => {
+                        let opened = file::open(&path, self.state.doc.kernel().clone(), Some(self.state.doc.model()));
+                        if opened.is_ok() {
+                            self.apply(ctx, AppAction::Assembly(AssemblyAction::ShowPart));
+                        }
+                        self.opened(opened);
+                    }
+                    #[cfg(target_arch = "wasm32")]
+                    Ok(ComponentPart::Upload(name, bytes)) => {
+                        self.apply(ctx, AppAction::Assembly(AssemblyAction::ShowPart));
+                        self.open_bytes(&name, &bytes);
+                    }
+                    Err(why) => self.state.note(why, NoteKind::Info),
+                }
+            }
             AppAction::CancelBuild => {
                 if let Some(drag) = self.state.drag_preview.take() {
                     drag.cancel(&mut self.state.doc);

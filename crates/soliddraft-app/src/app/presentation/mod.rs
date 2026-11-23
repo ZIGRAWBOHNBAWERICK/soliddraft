@@ -528,15 +528,17 @@ fn main_menus(ui: &mut egui::Ui, st: &mut AppState) {
     ui.menu_button("File", |ui| {
         menu_command(ui, st, "new_part", "New part");
         menu_command(ui, st, "open", "Open…");
-        menu_command(ui, st, "import_step", "Import STEP…");
-        menu_command(ui, st, "import_iges", "Import IGES…");
-        menu_command(ui, st, "import_mesh", "Import mesh solid…");
-        menu_command(ui, st, "import_report", "Import report");
-        menu_command(ui, st, "import_scan", "Import scan reference…");
-        menu_command(ui, st, "scan_workspace", "Scan workspace");
-        menu_command(ui, st, "make_drawing", "New drawing from part…");
+        if !st.assembly.is_active() {
+            menu_command(ui, st, "import_step", "Import STEP…");
+            menu_command(ui, st, "import_iges", "Import IGES…");
+            menu_command(ui, st, "import_mesh", "Import mesh solid…");
+            menu_command(ui, st, "import_report", "Import report");
+            menu_command(ui, st, "import_scan", "Import scan reference…");
+            menu_command(ui, st, "scan_workspace", "Scan workspace");
+            menu_command(ui, st, "make_drawing", "New drawing from part…");
+            menu_command(ui, st, "make_assembly", "Make assembly from part");
+        }
         menu_command(ui, st, "new_assembly", "New assembly");
-        menu_command(ui, st, "make_assembly", "Make assembly from part");
         if ui.add_enabled(st.start.is_none(), egui::Button::new("Start page")).clicked() {
             st.push(AppAction::ShowStartPage);
             ui.close();
@@ -569,14 +571,14 @@ fn main_menus(ui: &mut egui::Ui, st: &mut AppState) {
         } else {
             menu_command(ui, st, "save", "Save");
             menu_command(ui, st, "save_as", "Save as…");
+            ui.menu_button("Export", |ui| {
+                menu_command(ui, st, "export_step", "STEP AP242…");
+                menu_command(ui, st, "export_iges", "IGES 5.3…");
+                menu_command(ui, st, "export_stl", "STL…");
+                menu_command(ui, st, "export_3mf", "3MF…");
+                menu_command(ui, st, "export_obj", "OBJ…");
+            });
         }
-        ui.menu_button("Export", |ui| {
-            menu_command(ui, st, "export_step", "STEP AP242…");
-            menu_command(ui, st, "export_iges", "IGES 5.3…");
-            menu_command(ui, st, "export_stl", "STL…");
-            menu_command(ui, st, "export_3mf", "3MF…");
-            menu_command(ui, st, "export_obj", "OBJ…");
-        });
         #[cfg(target_arch = "wasm32")]
         if crate::journal_browser::has_offers() && ui.button("Crash report journals…").clicked() {
             st.push(AppAction::ShowRecovery);
@@ -608,6 +610,9 @@ fn main_menus(ui: &mut egui::Ui, st: &mut AppState) {
         let redo = labels.1.map(|l| format!("Redo {l}")).unwrap_or("Redo".into());
         menu_command(ui, st, "undo", &undo);
         menu_command(ui, st, "redo", &redo);
+        if st.assembly.is_active() {
+            return;
+        }
         ui.separator();
         let feature = st.selected_feature().and_then(|id| st.doc.feature(id));
         let is_sketch = feature.is_some_and(|f| f.is_sketch());
@@ -658,6 +663,11 @@ fn main_menus(ui: &mut egui::Ui, st: &mut AppState) {
         }
     });
     ui.menu_button("Insert", |ui| {
+        if st.assembly.is_active() {
+            menu_command(ui, st, "insert_component", "Insert component…");
+            menu_command(ui, st, "assembly_mate", "Mate");
+            return;
+        }
         // The part's features, grouped as the palette groups them, from the registry.
         let tab = commands::Tab::Part(crate::state::RibbonTab::Solid);
         for (group, items) in commands::ribbon(tab) {
@@ -674,8 +684,10 @@ fn main_menus(ui: &mut egui::Ui, st: &mut AppState) {
         }
     });
     ui.menu_button("Tools", |ui| {
-        menu_command(ui, st, "measure", "Measure");
-        menu_command(ui, st, "check", "Check");
+        if !st.assembly.is_active() {
+            menu_command(ui, st, "measure", "Measure");
+            menu_command(ui, st, "check", "Check");
+        }
         if !st.drawing.is_active() && !st.assembly.is_active() {
             ui.menu_button("Assistant", |ui| {
                 menu_command(ui, st, "ask", "Ask");

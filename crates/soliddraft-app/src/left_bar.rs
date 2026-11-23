@@ -71,6 +71,9 @@ fn show(ui: &mut egui::Ui, state: &mut AppState) {
     let edge = ui.max_rect().left() - 4.0;
     ui.spacing_mut().item_spacing = vec2(0.0, 4.0);
     for pane in Pane::ALL {
+        if pane == Pane::Values && state.assembly.is_active() {
+            continue;
+        }
         let label = pane_label(state, pane);
         let hint = match (pane, state.shortcuts.shortcut_text("toggle_tree")) {
             (Pane::Tree, Some(key)) => format!("{label} ({key})"),

@@ -40,6 +40,10 @@ pub(in crate::app) fn center_dock() -> DockState<Tab> {
 /// at the window's edge chooses between them, so the area has no tabs of its own.
 pub(in crate::app) fn pane(ui: &mut egui::Ui, state: &mut AppState) {
     ui.spacing_mut().item_spacing = vec2(6.0, 4.0);
+    if state.assembly.is_active() {
+        crate::assembly::tree(ui, state);
+        return;
+    }
     match state.layout.pane {
         Pane::Values => {
             title(ui, "Values");
@@ -47,7 +51,6 @@ pub(in crate::app) fn pane(ui: &mut egui::Ui, state: &mut AppState) {
                 .inner_margin(egui::Margin { left: 12, right: 6, top: 2, bottom: 0 })
                 .show(ui, |ui| crate::values_tab::show(ui, state));
         }
-        Pane::Tree if state.assembly.is_active() => crate::assembly::tree(ui, state),
         Pane::Tree if state.drawing.is_active() => crate::drawing::tree_drawing::show(ui, state),
         Pane::Tree => tree::show(ui, state),
     }

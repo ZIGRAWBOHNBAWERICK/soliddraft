@@ -214,6 +214,7 @@ pub enum AppAction {
     Drawing(crate::drawing::DrawingAction),
     /// Everything the assembly tab does.
     Assembly(crate::assembly::AssemblyAction),
+    OpenComponentPart(soliddraft_assembly::OccurrencePath),
     /// A step of a drag of a feature's dimension.
     DragDimension(DragStep),
     /// Opens a dimension the selected body shows for editing.
@@ -1361,12 +1362,15 @@ impl AppState {
 
     /// Whether the side area is shown with `pane` in it.
     pub fn pane_shown(&self, pane: crate::panels::Pane) -> bool {
-        self.tree_shown() && self.layout.pane == pane
+        self.tree_shown()
+            && if self.assembly.is_active() { pane == crate::panels::Pane::Tree } else { self.layout.pane == pane }
     }
 
     /// Shows the side area with `pane` in it.
     pub fn show_pane(&mut self, pane: crate::panels::Pane) {
-        self.layout.pane = pane;
+        if !self.assembly.is_active() {
+            self.layout.pane = pane;
+        }
         self.show_tree(true);
     }
 
@@ -1387,7 +1391,7 @@ impl AppState {
         } else if self.assembly.is_active() {
             crate::assembly::Workspace::ALL.into_iter().map(Into::into).collect()
         } else {
-            RibbonTab::ALL.into_iter().map(Into::into).collect()
+            RibbonTab::ALL.into_iter().filter(|tab| *tab != RibbonTab::Assembly).map(Into::into).collect()
         }
     }
 

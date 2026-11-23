@@ -27,7 +27,7 @@ use soliddraft_assistant::{Caller, tools::call_checked};
 use soliddraft_exchange::{Format, Report};
 use soliddraft_kernel_api::BodyId;
 use soliddraft_kernel_api::counting::{Counting, MeshRoute};
-use soliddraft_kernel_catallax::CatallaxKernel;
+use soliddraft_kernel_catallax::{APP_REQUEST_WORK, CatallaxKernel};
 use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -41,7 +41,7 @@ fn counted() -> (Arc<Counting>, Document) {
 }
 
 fn observed_display() -> (Arc<CatallaxKernel>, Arc<Counting>, Document) {
-    let catallax = Arc::new(CatallaxKernel::with_operation_log());
+    let catallax = Arc::new(CatallaxKernel::with_diagnostics(APP_REQUEST_WORK));
     let kernel = Arc::new(Counting::new(catallax.clone()));
     let doc = Document::new("First display", kernel.clone());
     (catallax, kernel, doc)

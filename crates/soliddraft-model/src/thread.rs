@@ -101,24 +101,37 @@ pub struct HoleThread {
     pub size: f64,
     /// Pitch in millimetres.
     pub pitch: f64,
-    /// Tolerance class, such as `6H`.
+    /// Tolerance class, such as `6H` or `2B`.
     pub class: String,
     /// How deep the thread goes from the face the hole starts on, in millimetres. `None`
     /// threads the whole wall.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub length: Option<f64>,
+    /// Explicit callout designation for non-ISO threads (e.g. `1/4-20 UNC-2B`, `1/4-18 NPT`).
+    /// `None` formats as ISO metric `M{size}x{pitch}-{class}`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub designation_override: Option<String>,
 }
 
 impl HoleThread {
     /// The coarse thread of a size, in the medium class, along the whole wall.
     pub fn coarse(size: &MetricSize) -> HoleThread {
-        HoleThread { size: size.nominal, pitch: size.coarse, class: INTERNAL_CLASSES[0].to_owned(), length: None }
+        HoleThread {
+            size: size.nominal,
+            pitch: size.coarse,
+            class: INTERNAL_CLASSES[0].to_owned(),
+            length: None,
+            designation_override: None,
+        }
     }
 
-    /// The designation as a drawing and a STEP file write it, such as `M6x1-6H` or
-    /// `M8x1-6H`. The pitch is always written, coarse or fine, so nobody has to know
-    /// which pitch is the coarse one.
+    /// The designation as a drawing and a STEP file write it, such as `M6x1-6H`,
+    /// `M8x1-6H`, or `1/4-20 UNC-2B`. For ISO metric threads the pitch is always
+    /// written, coarse or fine, so nobody has to know which pitch is the coarse one.
     pub fn designation(&self) -> String {
+        if let Some(custom) = self.designation_override.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+            return custom.to_owned();
+        }
         let class = self.class.trim();
         let mut text = format!("M{}x{}", number(self.size), number(self.pitch));
         if !class.is_empty() {
@@ -155,30 +168,38 @@ impl HoleThread {
 
     /// Why the thread cannot be cut in this hole, for people, or `None` when it can.
     pub fn problem(&self, diameter: f64, depth: &HoleDepth, head: Option<&HoleHead>) -> Option<String> {
-        let Some(size) = self.metric() else {
-            return Some(format!("M{} is not an ISO metric thread size.", number(self.size)));
-        };
-        if !size.has_pitch(self.pitch) {
-            let pitches: Vec<String> = size.pitches().map(number).collect();
-            return Some(format!(
-                "M{} has no {} mm pitch; its pitches are {}.",
-                number(self.size),
-                number(self.pitch),
-                pitches.join(", ")
-            ));
+        if self.designation_override.is_some() {
+            if !(self.size.is_finite() && self.size > 0.0 && self.pitch.is_finite() && self.pitch > 0.0) {
+                return Some("Thread major diameter and pitch must be positive.".to_owned());
+            }
+        } else {
+            let Some(size) = self.metric() else {
+                return Some(format!("M{} is not an ISO metric thread size.", number(self.size)));
+            };
+            if !size.has_pitch(self.pitch) {
+                let pitches: Vec<String> = size.pitches().map(number).collect();
+                return Some(format!(
+                    "M{} has no {} mm pitch; its pitches are {}.",
+                    number(self.size),
+                    number(self.pitch),
+                    pitches.join(", ")
+                ));
+            }
+            let class = self.class.trim();
+            let plain = (2..=6).contains(&class.len())
+                && class.bytes().next().is_some_and(|b| b.is_ascii_digit())
+                && class.bytes().all(|b| b.is_ascii_alphanumeric());
+            if !plain {
+                return Some("The tolerance class is a grade and a letter, such as 6H.".to_owned());
+            }
         }
-        let class = self.class.trim();
-        let plain = (2..=6).contains(&class.len())
-            && class.bytes().next().is_some_and(|b| b.is_ascii_digit())
-            && class.bytes().all(|b| b.is_ascii_alphanumeric());
-        if !plain {
-            return Some("The tolerance class is a grade and a letter, such as 6H.".to_owned());
-        }
-        if diameter >= self.size - 1e-9 || diameter < self.minor() - 1e-6 {
+        let tapered_pipe = matches!(self.class.trim(), "NPT" | "Rc" | "PT");
+        let min_drill = if tapered_pipe { 0.0 } else { self.minor() - 1e-6 };
+        if diameter >= self.size - 1e-9 || diameter <= 0.0 || diameter < min_drill {
             return Some(format!(
                 "A {} thread is cut in a hole from Ø{} to under Ø{}; this hole is Ø{}.",
                 self.designation(),
-                number(self.minor()),
+                number(if tapered_pipe { 0.0 } else { self.minor() }),
                 number(self.size),
                 number(diameter)
             ));

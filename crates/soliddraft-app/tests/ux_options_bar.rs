@@ -49,7 +49,7 @@ fn empty_selection_has_pick_filters_and_views_with_display_on_navigation() {
         let before = ribbon::fingerprint(app);
         // The pick filters are in the bottom bar's Selection filter.
         assert_eq!(app.state().state.pick_filter, PickFilter::default());
-        let filter = app.get_by_label("Selection filter").rect();
+        let filter = app.get_by_role_and_label(egui::accesskit::Role::Button, "Selection filter").rect();
         ribbon::click_at(app, filter.center());
         settle(app);
         for label in ["All", "Faces", "Edges & vertices", "Bodies"] {
@@ -106,7 +106,7 @@ fn toggle_filter(app: &mut App, label: &str) {
         if filter_open(app) {
             break;
         }
-        let filter = app.get_by_label("Selection filter").rect();
+        let filter = app.get_by_role_and_label(egui::accesskit::Role::Button, "Selection filter").rect();
         ribbon::click_at(app, filter.center());
         settle(app);
     }
@@ -114,7 +114,7 @@ fn toggle_filter(app: &mut App, label: &str) {
     ribbon::click_at(app, checkbox.center());
     settle(app);
     if filter_open(app) {
-        let filter = app.get_by_label("Selection filter").rect();
+        let filter = app.get_by_role_and_label(egui::accesskit::Role::Button, "Selection filter").rect();
         ribbon::click_at(app, filter.center());
         settle(app);
     }

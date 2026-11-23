@@ -90,7 +90,7 @@ fn gv(v: soliddraft_kernel_api::Vec3) -> Vec3 {
 }
 
 fn line_color(hover: bool, dark: bool) -> Color32 {
-    if hover { theme::accent() } else { theme::dimension_line(dark) }
+    if hover { theme::highlight() } else { theme::dimension_line(dark) }
 }
 
 /// Paints body dimensions and dimensions of every visible closed sketch.
@@ -371,7 +371,7 @@ fn body_centre(doc: &Document) -> Option<Vec3> {
 /// Paints a laid-out value above the complete set of dimension lines.
 fn pill(painter: &egui::Painter, rect: Rect, text: String, pointer: Option<Pos2>) {
     let hover = pointer.is_some_and(|p| rect.contains(p));
-    let (bg, stroke) = if hover { (theme::hover(), theme::accent()) } else { (theme::hud_bg(), theme::line()) };
+    let (bg, stroke) = if hover { (theme::hover(), theme::highlight()) } else { (theme::hud_bg(), theme::line()) };
     value_pill(painter, rect.center(), text, theme::ink(), bg, Stroke::new(1.0, stroke));
 }
 
@@ -470,7 +470,7 @@ pub fn value_editor(
         .show(ui.ctx(), |ui| {
             egui::Frame::new()
                 .fill(theme::panel())
-                .stroke(Stroke::new(1.0, theme::accent()))
+                .stroke(Stroke::new(1.0, theme::highlight()))
                 .corner_radius(CornerRadius::same(7))
                 .shadow(ui.style().visuals.popup_shadow)
                 .inner_margin(egui::Margin::symmetric(8, 5))
@@ -520,6 +520,6 @@ pub fn value_editor(
     }
     if !area.response.rect.contains(at.center()) {
         let end = area.response.rect.clamp(at.center());
-        painter.line_segment([at.center(), end], Stroke::new(1.0, theme::accent()));
+        painter.line_segment([at.center(), end], Stroke::new(1.0, theme::highlight()));
     }
 }

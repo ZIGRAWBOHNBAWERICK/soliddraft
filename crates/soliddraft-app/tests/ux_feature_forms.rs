@@ -72,6 +72,8 @@ fn feature_fields_and_finish_actions_stay_on_the_bar_and_spill_into_the_sheet() 
         }
         let mut app = launch(doc, STANDARD);
         suite(&mut app);
+        // The bar's whole width: with the side column beside it more forms need their sheet.
+        ribbon::close_tree(&mut app);
         case.run(&mut app, |case, app| {
             if sketch {
                 let id = app.state().state.doc.features[0].id;
@@ -202,7 +204,8 @@ fn tree_and_values_are_one_optional_pane_and_sketch_closes_from_the_bar() {
         }
         settle(app);
         assert!(app.state().state.sketch.as_ref().unwrap().sketch.drawn().count() > 0);
-        let status = ribbon::painted_in(app, bar(app)).into_iter().find(|p| p.text == "Under defined").unwrap();
+        // The sketch's status is beside Close sketch on the tool strip.
+        let status = ribbon::painted_in(app, palette).into_iter().find(|p| p.text == "Under defined").unwrap();
         assert_eq!(status.color, soliddraft_app::theme::edit_suite::UNDER_DEFINED_LABEL);
         let image = case.frame(app, "close-sketch");
         let close = app.get_by_label("Close sketch").rect();

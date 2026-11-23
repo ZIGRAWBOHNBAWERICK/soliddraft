@@ -171,6 +171,15 @@ pub struct FrameInput {
     pub grid: Option<GridFrame>,
     /// The origin planes, when any shows.
     pub planes: Option<PlaneFrame>,
+    #[cfg(target_arch = "wasm32")]
+    pub(super) part_probe: Option<PartProbe>,
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(super) struct PartProbe {
+    pub camera: super::camera::Camera,
+    pub unproved: bool,
+    pub pending: bool,
 }
 
 impl FrameInput {
@@ -204,6 +213,24 @@ impl egui_wgpu::CallbackTrait for ViewportCallback {
     ) {
         if let Some(r) = resources.get::<ViewportRenderer>() {
             r.paint(pass);
+            #[cfg(target_arch = "wasm32")]
+            if let Some(probe) = &self.0.part_probe
+                && r.targets.is_some()
+            {
+                let triangles = if r.draws_faces() {
+                    r.scene_bodies().map(|body| (body.index_count / 3) as usize).sum()
+                } else {
+                    0_usize
+                };
+                let threads = r.scene_threads().map_or(0, |threads| threads.line_count as usize);
+                crate::web::show_part_view(&probe.camera, _info.viewport, threads);
+                crate::web::show_viewport(serde_json::json!({
+                    "label": probe.unproved.then_some("unproved preview"),
+                    "triangles": triangles,
+                    "pending": probe.pending,
+                    "preview": r.preview.is_some(),
+                }));
+            }
         }
     }
 }
@@ -1172,6 +1199,20 @@ impl ViewportRenderer {
         }
     }
 
+    fn draws_faces(&self) -> bool {
+        self.display != DisplayMode::Wireframe
+    }
+
+    fn scene_bodies(&self) -> impl Iterator<Item = &GpuBody> {
+        let preview = self.preview.as_ref().map(|(_, body)| body);
+        preview.into_iter().chain(self.bodies.values().filter(move |_| preview.is_none()))
+    }
+
+    // A construction preview stands in for the built part and its thread marks.
+    fn scene_threads(&self) -> Option<&GpuBody> {
+        self.threads.as_ref().filter(|_| self.preview.is_none()).map(|(_, body)| body)
+    }
+
     /// Draws a frame into the offscreen targets and reads back the pick window. The
     /// paint callback calls it; headless tests and benchmarks call it directly.
     pub fn prepare(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, input: &FrameInput) {
@@ -1223,14 +1264,11 @@ impl ViewportRenderer {
         }
 
         let look = input.preset.look(self.tier);
-        let show_faces = self.display != DisplayMode::Wireframe;
+        let show_faces = self.draws_faces();
         let show_edges = self.display != DisplayMode::Shaded;
         let preview_key = self.preview.as_ref().map_or(0, |(p, _)| *p);
         // Construction previews replace the colour and revision-bound pick geometry.
-        let shown: Vec<&GpuBody> = match self.preview.as_ref().map(|(_, b)| b) {
-            Some(p) => vec![p],
-            None => self.bodies.values().collect(),
-        };
+        let shown: Vec<_> = self.scene_bodies().collect();
         let bounds = shown.iter().filter_map(|b| b.bounds).reduce(|(lo, hi), (l, h)| (lo.min(l), hi.max(h)));
         let shadows = look.shadows && show_faces && bounds.is_some();
         let draw_shadow_map = shadows && self.shadow_key != Some((self.mesh_version, preview_key));
@@ -1517,10 +1555,7 @@ impl ViewportRenderer {
                     draw_lines(&mut pass, &mut ghost.into_iter());
                 }
             }
-            // Thread marks belong to the part as built, so a construction preview,
-            // which stands in for it, hides them. They show without edges too: they say
-            // what the part is, not how it is drawn.
-            if let (Some((_, threads)), None) = (&self.threads, &self.preview) {
+            if let Some(threads) = self.scene_threads() {
                 pass.set_pipeline(&self.edge_pipeline);
                 draw_lines(&mut pass, &mut std::iter::once(threads));
             }

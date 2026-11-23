@@ -502,6 +502,7 @@ pub(crate) fn begin_frame() {
     SHOWN_CONTROLS.with_borrow_mut(std::collections::BTreeMap::clear);
     SHOWN_PMI.with_borrow_mut(String::clear);
     SHOWN_VIEWPORT.with_borrow_mut(String::clear);
+    SHOWN_PART_VIEW.with_borrow_mut(|view| *view = None);
     SHOWN_PRINT_CHECK.with_borrow_mut(String::clear);
     SHOWN_MARKS.with_borrow_mut(Vec::clear);
 }
@@ -518,10 +519,10 @@ pub(crate) fn show_viewport(shown: serde_json::Value) {
     SHOWN_VIEWPORT.with_borrow_mut(|viewport| *viewport = shown.to_string());
 }
 
-/// What the part viewport drew in the last frame, as JSON: `{"label", "triangles", "pending"}`. The
-/// label is `"unproved preview"` when the viewport drew that label over a lattice or gyroid,
-/// and null otherwise; `triangles` counts the triangles of the part's display mesh. Empty
-/// when that frame drew no part viewport. Read only, for browser checks.
+/// The part viewport's label, triangle count, pending build state and whether a
+/// construction preview took the body's place in the last frame. The label is
+/// `"unproved preview"` for a labelled lattice or gyroid and null otherwise.
+/// Empty when that frame drew no part viewport. Read only, for browser checks.
 #[wasm_bindgen]
 pub fn shown_viewport() -> String {
     SHOWN_VIEWPORT.with_borrow(|viewport| viewport.clone())

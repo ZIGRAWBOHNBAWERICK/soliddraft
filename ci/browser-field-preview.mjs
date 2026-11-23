@@ -328,7 +328,7 @@ async function main() {
   const v = await browser.visitor();
   step('load the site');
   await v.load();
-  for (const name of ['shown_first_part_frame', 'shown_print_check', 'shown_controls']) {
+  for (const name of ['shown_first_part_frame', 'shown_viewport', 'shown_marks', 'shown_print_check', 'shown_controls']) {
     check(await v.eval(`typeof window.wasmBindings.${name} === 'function'`), `the build has no ${name} export`);
   }
 
@@ -336,6 +336,14 @@ async function main() {
   const plain = await open(v, 'tray', tray);
   check(plain.viewport.label === null, `tray: a boundary-model part is labelled ${plain.viewport.label}`);
   check(plain.marks.length === 0, `tray: a built part shows marks ${JSON.stringify(plain.marks)}`);
+  await v.command('Hide body');
+  check((await shown(v, 'shown_viewport'))?.triangles === 0, 'tray: the hidden body still reports triangles');
+  await v.command('Show all bodies');
+  check((await shown(v, 'shown_viewport'))?.triangles > 0, 'tray: the restored body reports no triangles');
+  await v.command('Wireframe');
+  check((await shown(v, 'shown_viewport'))?.triangles === 0, 'tray: wireframe still reports triangles');
+  await v.command('Shaded, edges');
+  check((await shown(v, 'shown_viewport'))?.triangles > 0, 'tray: the shaded body reports no triangles');
   const plainExport = await exportStl(v, 'tray');
   check(plainExport.route === 'boundary model' && plainExport.state === 'checked',
     `tray: the STL export shows ${JSON.stringify(plainExport)}, not a checked boundary-model route`);

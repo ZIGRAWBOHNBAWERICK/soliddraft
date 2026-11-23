@@ -895,6 +895,25 @@ pub(super) fn symbol_tool(
     }
 }
 
+// A projected outline can show two model edges at the same place. A chamfer
+// may share its vertex with the farther edge, even when the nearer edge won the pick.
+fn overlaps_picked_line(picked: &soliddraft_drawing::Curve2, other: &soliddraft_drawing::Curve2, at: Point2) -> bool {
+    use kurbo::{PathEl, Point};
+
+    let [PathEl::MoveTo(a), PathEl::LineTo(b)] = picked.path.elements() else { return false };
+    let [PathEl::MoveTo(c), PathEl::LineTo(d)] = other.path.elements() else { return false };
+    let direction = *b - *a;
+    let length = direction.length();
+    if length <= 1e-6 {
+        return false;
+    }
+    let axis = direction / length;
+    let (from, to) = (*c - *a, *d - *a);
+    let along = axis.dot(Point::new(at.u, at.v) - *a).clamp(0.0, length);
+    let (start, end) = (axis.dot(from), axis.dot(to));
+    axis.cross(from).abs() <= 1e-6 && axis.cross(to).abs() <= 1e-6 && (start.min(end)..=start.max(end)).contains(&along)
+}
+
 /// Picks both ends of each straight edge so rebuilds can move the lines with the part.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn line_annotation_tool(
@@ -961,23 +980,30 @@ pub(super) fn line_annotation_tool(
     };
     let part = ctx.part();
     let Ok(index) = PartIndex::build(&part) else { return };
-    let edge = match index.resolve(&curve.source) {
+    let edge = |entity: &EntityRef| match index.resolve(entity) {
         Resolution::Found(Entity::Edge(id)) => index.edge_curve(id),
         _ => None,
     };
-    let Some(Curve3::Line { a, b }) = edge else {
+    let straight_ends = |curve: &soliddraft_drawing::Curve2| {
+        let Some(Curve3::Line { a, b }) = edge(&curve.source) else { return None };
+        Some([*a, *b])
+    };
+    let anchors_of = |curve: &soliddraft_drawing::Curve2, [a, b]| {
+        [(Attach::Start, a), (Attach::End, b)].map(|(attach, at)| Anchor {
+            entity: curve.source.clone(),
+            attach,
+            cached: xf.point(at),
+        })
+    };
+    let Some([a, b]) = straight_ends(curve) else {
         s.say("Pick a visible straight model edge");
         return;
     };
-    if is_chamfer && (*b - *a).dot(xf.frame.direction).abs() > 1e-6 {
+    if is_chamfer && (b - a).dot(xf.frame.direction).abs() > 1e-6 {
         s.say("Use a profile view where the chamfer and adjoining edge are seen at full length");
         return;
     }
-    let ends = [(Attach::Start, *a), (Attach::End, *b)].map(|(attach, at)| Anchor {
-        entity: curve.source.clone(),
-        attach,
-        cached: xf.point(at),
-    });
+    let ends = anchors_of(curve, [a, b]);
     let [first, second] = s.draft.anchors.as_slice() else {
         s.draft.view = Some(view);
         s.draft.anchors.extend(ends);
@@ -985,21 +1011,24 @@ pub(super) fn line_annotation_tool(
     };
     let points = [first.cached, second.cached, ends[0].cached, ends[1].cached];
     if is_chamfer {
-        let geometry: Vec<_> = s
-            .draft
-            .anchors
-            .iter()
-            .chain(&ends)
-            .map(|anchor| AnchorGeometry {
-                curve: match index.resolve(&anchor.entity) {
-                    Resolution::Found(Entity::Edge(id)) => index.edge_curve(id),
-                    _ => None,
-                },
+        let dimension = |ends: [Anchor; 2]| {
+            let geometry = [first, second, &ends[0], &ends[1]].map(|anchor| AnchorGeometry {
+                curve: edge(&anchor.entity),
                 point: anchor.entity.fingerprint.point,
                 attach: anchor.attach,
-            })
-            .collect();
-        let Some((size, angle)) = chamfer(&geometry, xf) else {
+            });
+            chamfer(&geometry, xf).map(|(size, angle)| (ends, size, angle))
+        };
+        let at = to_view(s, view, p);
+        let selected = dimension(ends).or_else(|| {
+            v.geometry
+                .curves
+                .iter()
+                .filter(|other| other.visible && other.kind == CurveKind::Edge && other.source != curve.source)
+                .filter(|other| overlaps_picked_line(curve, other, at))
+                .find_map(|other| dimension(anchors_of(other, straight_ends(other)?)))
+        });
+        let Some((ends, size, angle)) = selected else {
             s.say("Pick a straight adjoining edge that meets the bevel at an acute angle");
             return;
         };

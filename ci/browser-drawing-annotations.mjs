@@ -111,8 +111,10 @@ try {
     const backendNodeId = await until('file picker', () => chooser);
     await call('DOM.setFileInputFiles', { files: [path.resolve(file)], backendNodeId });
   };
-  const model = (view, x, y, z) => until(`${view} model point`, () =>
-    evaluate(`window.wasmBindings.drawing_screen_point(${JSON.stringify(view)}, ${x}, ${y}, ${z})`), 25_000);
+  const model = (view, x, y, z) => until(`${view} model point`, () => evaluate(`(() => {
+    const point = window.wasmBindings.drawing_screen_point(${JSON.stringify(view)}, ${x}, ${y}, ${z});
+    return point && Array.from(point);
+  })()`), 25_000);
   const pick = async (...args) => click(await model(...args));
   const tool = async (commandName, label = commandName) => {
     await command(commandName);
@@ -137,13 +139,26 @@ try {
   };
 
   await until('start page', () => evaluate("document.querySelector('#status.hidden') !== null"));
-  // File > Open also works on the start page after the app has loaded.
+  // The upload returns before the worker opens the part. Wait for the opened
+  // document and its proof before sending the drawing shortcut.
+  await evaluate(`document.addEventListener('soliddraft-feedback', event => {
+    const detail = JSON.parse(event.detail);
+    if (detail.type === 'document') window.annotationTestDocument = detail;
+  })`);
   await open(part, () => key('o', 'KeyO', 79, 2, 'o'));
-  await sleep(4000);
-  await moveToCanvas();
-  await key('D', 'KeyD', 68, 2 | 8, 'D');
+  await until('proved bracket', () => evaluate(`(() => {
+    const build = JSON.parse(window.wasmBindings.shown_build() || 'null');
+    return window.annotationTestDocument?.extension === '.dwprt'
+      && window.annotationTestDocument?.count === 12 && build && !build.pending;
+  })()`), 25_000);
+  await click([122, 15]); // File
+  await click([190, 250]); // New drawing from part
+  await until('drawing options', () => evaluate(`Boolean(
+    JSON.parse(window.wasmBindings.shown_controls())['Drawing options']
+  )`), 25_000);
   await key('Enter', 'Enter', 13);
   const initial = await sheet('new drawing', s => s.up_to_date);
+  console.error('Created a drawing of the proved bracket.');
   await tool('Chamfer', 'Chamfer dimension');
   await pick('Top view', 117, 3, 10);
   await pick('Top view', 90, 0, 10);
@@ -165,6 +180,7 @@ try {
   const [x, y] = await model('Top view', 25, 23, 10);
   await click([x + 150, y - 70]);
   await sheet('hole table', s => s.tables === 1);
+  console.error('Placed all four annotations.');
   await key('z', 'KeyZ', 90, 2, 'z');
   await sheet('undone table', s => s.tables === 0);
   await key('y', 'KeyY', 89, 2, 'y');
@@ -181,7 +197,9 @@ try {
   await command('Rebuild');
   await sheet('reopened rebuild', s => s.up_to_date && s.dangling === 0);
 
-  await tool('Smart dimension');
+  await moveToCanvas();
+  await key('d', 'KeyD', 68, 0, 'd');
+  await sheet('smart dimension tool', s => s.tool === 'Smart dimension');
   const [hx, hy] = await model('Top view', 29.5, 23, 10);
   await click([hx, hy]);
   await click([hx - 34, hy + 23]);

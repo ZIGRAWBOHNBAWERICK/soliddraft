@@ -553,7 +553,6 @@ fn updating_the_drawing_keeps_one_thread_note_when_two_groups_join() {
             "thread": {"size": 6, "length": 6}}),
     );
     skim_first_hole(&mut state);
-    browser_fixture("drawing-skimmed-threads.dwprt", &state.doc);
     let dir = std::env::temp_dir().join(format!("soliddraft-thread-groups-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     tool(&mut state, "manufacturing_package", json!({"path": dir.join("tapped.step")}));

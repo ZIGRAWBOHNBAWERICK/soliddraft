@@ -8,17 +8,15 @@ await page.eval(() => {
   const canvas = document.getElementById('soliddraft');
   canvas.focus();
   const frame = () => new Promise(resolve => setTimeout(resolve, 90));
-  window.featureClick = async ({ x, y }, count) => {
+  window.featureClick = async ({ x, y }) => {
     const at = { clientX: x, clientY: y, bubbles: true, cancelable: true,
       pointerId: 1, pointerType: 'mouse', isPrimary: true, button: 0 };
     canvas.dispatchEvent(new PointerEvent('pointermove', at));
     await frame();
-    for (let i = 0; i < count; i++) {
-      canvas.dispatchEvent(new PointerEvent('pointerdown', { ...at, buttons: 1 }));
-      await frame();
-      canvas.dispatchEvent(new PointerEvent('pointerup', at));
-      await frame();
-    }
+    canvas.dispatchEvent(new PointerEvent('pointerdown', { ...at, buttons: 1 }));
+    await frame();
+    canvas.dispatchEvent(new PointerEvent('pointerup', at));
+    await frame();
     return true;
   };
 
@@ -85,12 +83,12 @@ async function until(read, accept, message) {
   } while (Date.now() < end);
   throw new Error(`${message}. Last value ${JSON.stringify(last)}`);
 }
-async function click(name, count = 1) {
+async function click(name) {
   const at = (await until(controls, value => value?.[name], `Missing ${name}`))[name];
-  await clickAt(at, count);
+  await clickAt(at);
 }
-async function clickAt(at, count = 1) {
-  await page.eval(`featureClick(${JSON.stringify(at)}, ${count})`);
+async function clickAt(at) {
+  await page.eval(`featureClick(${JSON.stringify(at)})`);
   await page.wait(300);
 }
 async function command(label, id) {
@@ -118,19 +116,17 @@ async function parameters(filter) {
   await replace('Filter parameters', filter);
 }
 async function open(name) {
-  if (name) {
-    await page.eval(`(async () => {
-      const response = await fetch('/fixtures/' + ${JSON.stringify(name)});
-      if (!response.ok) throw new Error('Fixture is missing');
-      window.featureUpload = new File([await response.blob()], ${JSON.stringify(name)});
-      return true;
-    })()`);
-  } else {
-    await page.eval(() => { window.featureUpload = window.featureSaved; return true; });
-  }
+  await page.eval(`(async () => {
+    const response = await fetch('/fixtures/' + ${JSON.stringify(name)});
+    if (!response.ok) throw new Error('Fixture is missing');
+    window.featureUpload = new File([await response.blob()], ${JSON.stringify(name)});
+    return true;
+  })()`);
   await page.press('Control+o');
   await until(() => page.eval(() => window.featureUpload === null), Boolean, 'Open did not consume the selected file');
-  await until(() => shown('shown_build'), value => value && !value.pending && !value.reading, 'Part is still building');
+  if (name.endsWith('.dwprt')) {
+    await until(() => shown('shown_build'), value => value && !value.pending && !value.reading, 'Part is still building');
+  }
   await page.wait(500);
 }
 async function save(drawing = false) {
@@ -203,7 +199,7 @@ switch (scenario) {
     for (const [x, z] of [[20, 9], [50, 10]]) {
       await command('Hole callout', 'drawing_hole_callout');
       const [sx, sy] = await page.eval(`Array.from(window.wasmBindings.drawing_screen_point('Top view', ${x}, 20, ${z}))`);
-      await page.eval(`featureClick({x: ${sx}, y: ${sy}}, 1)`);
+      await clickAt({ x: sx, y: sy });
     }
     await until(drawing, value => value?.annotations === initial.annotations + 2, 'The drawing did not place both callouts');
     const stored = await save(true);

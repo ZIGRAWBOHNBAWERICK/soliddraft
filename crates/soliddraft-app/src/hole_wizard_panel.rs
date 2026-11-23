@@ -1123,7 +1123,7 @@ fn show_positions_tab(
     ui.add_space(6.0);
 
     // 3. Quick editable linear & circular point patterns (real sketch PatternDefinitions).
-    let patterns = egui::CollapsingHeader::new(RichText::new("Point Patterns").family(theme::semibold()))
+    egui::CollapsingHeader::new(RichText::new("Point Patterns").family(theme::semibold()))
         .id_salt("hw_pos_patterns")
         .default_open(false)
         .show(ui, |ui| {
@@ -1143,8 +1143,6 @@ fn show_positions_tab(
             let lin_btn = ui.button("Apply linear pattern");
             lin_btn
                 .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Apply linear hole pattern"));
-            #[cfg(target_arch = "wasm32")]
-            crate::web::show_visible_control(ui, "Apply linear hole pattern", lin_btn.rect);
             if lin_btn.clicked() {
                 match params.apply_linear_point_pattern() {
                     Ok(()) => {
@@ -1185,11 +1183,6 @@ fn show_positions_tab(
         });
 
     ui.add_space(6.0);
-
-    #[cfg(target_arch = "wasm32")]
-    crate::web::show_visible_control(ui, "Point Patterns", patterns.header_response.rect);
-    #[cfg(not(target_arch = "wasm32"))]
-    let _ = patterns;
 
     // 4. Direct point coordinates list.
     egui::CollapsingHeader::new(

@@ -162,7 +162,6 @@ fn a_legacy_hole_keeps_its_edited_position_pattern_after_reopen() {
     let params =
         HoleParams { face: Some(plate_face(&doc, Vec3::Z)), points: vec![P2::new(-10.0, -10.0)], ..Default::default() };
     let id = drill(&mut doc, params);
-    browser_fixture("wizard-legacy-positions.dwprt", &doc);
     let old = doc.model().to_bytes().unwrap();
     assert_ne!(doc.model().truth()["format"], HOLE_WIZARD_FORMAT);
     let reopened = soliddraft_model::Document::from_bytes(&old, soliddraft_app::kernel()).unwrap();

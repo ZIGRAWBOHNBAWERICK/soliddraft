@@ -953,6 +953,65 @@ fn offset_session() -> Session {
 }
 
 #[test]
+fn mate_controller_animation_keeps_driver_identity_when_reordered() {
+    use soliddraft_app::mates::{MateAction, apply};
+    use std::time::Duration;
+
+    let mut s = offset_session();
+    let browser_fixtures = std::env::var_os("SOLIDDRAFT_CONTROLLER_BROWSER_FIXTURES");
+    s.dir = browser_fixtures
+        .as_ref()
+        .map_or_else(|| s.dir.join(format!("soliddraft-controller-{}", DocumentId::new())), PathBuf::from);
+    std::fs::create_dir_all(&s.dir).unwrap();
+    s.call(
+        "sketch",
+        json!({"plane":"top","shapes":[{"shape":"rectangle","center":[0,0,0],"width":20,"height":10}]}),
+    );
+    s.call("extrude", json!({"sketch":"Sketch1","depth":6}));
+    let part = s.path("controller-block.dwprt");
+    s.call("save", json!({"path":part}));
+    let made = s.call("make_assembly", json!({}));
+    let base: u64 = made["assembly"]["components"][0]["path"].as_str().unwrap().parse().unwrap();
+    let top = json!({"component":base,"feature":"Boss-Extrude1","generator":"end_cap"});
+    s.call("assembly_mate_origin", json!({"name":"Fixed","component":base,"align_axes":true}));
+    for (name, distance) in [("D1", "10 mm"), ("D2", "20 mm")] {
+        let inserted = s.call("insert_component", json!({"paths":[part]}));
+        let id: u64 = inserted["inserted"].as_str().unwrap().parse().unwrap();
+        let bottom = json!({"component":id,"feature":"Boss-Extrude1","generator":"start_cap"});
+        s.call(
+            "assembly_mate_distance",
+            json!({"name":name,"a":top,"b":bottom,"distance":distance,"alignment":"opposed"}),
+        );
+    }
+    s.call("assembly_mate_controller", json!({"action":"set","mates":["D1","D2"]}));
+    s.call("assembly_mate_controller", json!({"action":"save","position":"Low"}));
+    s.call("assembly_mate_controller", json!({"action":"apply","values":[30,40]}));
+    if browser_fixtures.is_some() {
+        s.call("assembly_save", json!({"path":s.path("controller-rig.dwasm")}));
+    }
+    apply(&mut s.state, MateAction::ControllerAnimate("Low".into()));
+    assert!(s.state.assembly.session.as_mut().unwrap().animate().unwrap());
+    s.state.assembly.mate.controller_mates = "D2, D1".into();
+    apply(&mut s.state, MateAction::ControllerSet);
+    let session = s.state.assembly.session.as_mut().unwrap();
+    let animation = session.animation.as_mut().unwrap();
+    animation.seconds = 100.0;
+    animation.started = web_time::Instant::now() - Duration::from_secs(50);
+    assert!(session.animate().unwrap());
+    let shown = soliddraft_app::assembly::shown(&s.state);
+    assert!((shown["components"][1]["translation"][2].as_f64().unwrap() - 26.0).abs() < 0.1, "{shown}");
+    assert!((shown["components"][2]["translation"][2].as_f64().unwrap() - 36.0).abs() < 0.1, "{shown}");
+    let session = s.state.assembly.session.as_mut().unwrap();
+    session.animation.as_mut().unwrap().started = web_time::Instant::now() - Duration::from_secs(101);
+    assert!(!session.animate().unwrap());
+    let values = soliddraft_assembly::controller_values(&session.doc);
+    assert_eq!((values["D1"], values["D2"]), (10.0, 20.0));
+    if browser_fixtures.is_none() {
+        std::fs::remove_dir_all(s.dir).unwrap();
+    }
+}
+
+#[test]
 fn datum_offset_survives_dimension_edits_and_save_reopen() {
     let mut s = offset_session();
     s.dir = s.dir.join(format!("soliddraft-datum-offset-{}", std::process::id()));

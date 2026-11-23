@@ -727,8 +727,21 @@ fn a_roller_rides_a_spline_cam_and_a_corner_runs_a_spline_path() {
     let quarter = PathOptions { position: SlotInput::Percent { percent: 25.0, flipped: false }, ..Default::default() };
     r.doc.mate_path_with("P", &r.generator(0, GeneratorChoice::EndCap), &corner(&r, 1), &quarter, false).unwrap();
     certified(&mut r.doc, "P");
-    let p = r.placement(1).apply(DVec3::new(3.0, 3.0, 0.0));
-    let on = bezier_distance(curve, DVec3::new(p.x, p.y, 0.0)).min(if p.y.abs() < 1e-7 { 0.0 } else { f64::MAX });
-    assert!(on < 1e-7 && (p.z - 10.0).abs() < 1e-7, "on the arch's outline: {p}");
+    let Mate::Path { path, .. } = r.mate("P") else { panic!("a path") };
+    let Some(StoredSupport::Outline { pieces, .. }) = &path.support else { panic!("an outline") };
+    assert_eq!(pieces.len(), 2);
+    let start_side = pieces[0].from[0].signum();
+    let starts_on_spline = pieces[0].spline.is_some();
+    // Integrating the Bezier's speed hypot(240t(1-t), 90(1-2t)) gives 67.443045184743 mm.
+    // The 40 mm closing line puts the quarter at 26.860761296186 mm, or t = 0.385931611690
+    // from the spline's start. The other direction runs along the line for all 26.86 mm.
+    let on_spline = DVec3::new(start_side * 6.725_366_344_737, 21.328_956_250_953, 10.0);
+    let on_line = DVec3::new(-start_side * 6.860_761_296_186, 0.0, 10.0);
+    let [forward, backward] = if starts_on_spline { [on_spline, on_line] } else { [on_line, on_spline] };
+    let corner_at = |r: &Rig| r.placement(1).apply(DVec3::new(3.0, 3.0, 0.0));
+    assert!(corner_at(&r).distance(forward) < 1e-7, "{} against {forward}", corner_at(&r));
+    r.doc.edit_mates(&[("P".into(), MateEdit::Flipped(true))]).unwrap();
+    certified(&mut r.doc, "P");
+    assert!(corner_at(&r).distance(backward) < 1e-7, "{} against {backward}", corner_at(&r));
     std::fs::remove_dir_all(r.dir).unwrap();
 }

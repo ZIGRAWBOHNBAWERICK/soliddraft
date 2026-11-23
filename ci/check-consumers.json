@@ -87,6 +87,9 @@
     "ci/browser-display-states.js": [
       "web"
     ],
+    "ci/browser-mate-controller.js": [
+      "web"
+    ],
     "ci/browser-drawing-annotations.mjs": [
       "web"
     ],

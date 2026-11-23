@@ -16,6 +16,23 @@ type App = Harness<'static, SolidDraftApp>;
 
 const NEW_GRADES: [GradeKind; 3] = [GradeKind::Distance, GradeKind::Radial, GradeKind::Point];
 
+#[test]
+fn modelling_guide_names_the_grades_the_pinned_editors_offer() {
+    use soliddraft_kernel_api::GradedField;
+
+    let guide = include_str!("../../../docs/modelling.md");
+    let (_, grades) = guide.split_once("## Graded fields\n").unwrap();
+    let grades = grades.split("\n## ").next().unwrap();
+    let kernel = soliddraft_app::kernel();
+    for field in [GradedField::LatticeRadius, GradedField::GyroidLevel] {
+        for kind in GradeKind::ALL {
+            if kernel.field_grade(field, kind).is_ok() {
+                assert!(grades.contains(kind.label()), "{field:?} offers {}", kind.label());
+            }
+        }
+    }
+}
+
 fn button(app: &mut App, label: &str) {
     app.get_all_by_role_and_label(egui::accesskit::Role::Button, label)
         .next()

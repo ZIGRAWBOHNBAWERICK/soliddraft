@@ -1,12 +1,18 @@
 //! Proves that removing the legacy 7-item top menu row (File/Edit/View/Insert/Tools/Window/Help)
-//! leaves every single app command reachable via the D1 Clear Bench surfaces:
-//! the single File menu, top bar, top ribbon, context menus, or command search/palette.
+//! leaves app commands reachable through command search in the workspace where they run.
 
-use soliddraft_app::command_line;
-use soliddraft_app::commands::{self, Context, History, Tab};
-use soliddraft_app::context_menu;
+use serde_json::{Value, json};
+use soliddraft_app::app_tools::AppTools;
+use soliddraft_app::commands;
+use soliddraft_app::document::{Command, FeatureKind, FeatureStatus, Selection};
+use soliddraft_app::drawing::{self, DrawingSel, DrawingTool};
+use soliddraft_app::palette::Palette;
+use soliddraft_app::state::{AppState, SketchSel, SketchSession};
 use soliddraft_app::top_bar::{FILE_MENU_COMMANDS, TOP_BAR_COMMANDS};
-use std::collections::HashSet;
+use soliddraft_assistant::{Caller, tools::call_checked};
+use soliddraft_kernel_api::{Plane, Point2};
+use soliddraft_sketch::{ConstraintKind, DistanceKind, EntityKind, P2, PointRef, Sketch};
+use std::collections::BTreeSet;
 
 /// Every command id that the removed 7-item `File / Edit / View / Insert / Tools / Window / Help`
 /// menu bar reached before D1 Clear Bench.
@@ -81,63 +87,141 @@ const LEGACY_MENU_COMMANDS: &[&str] = &[
     "about",
 ];
 
-fn all_surface_commands() -> HashSet<&'static str> {
-    let mut set = HashSet::new();
-    set.extend(FILE_MENU_COMMANDS.iter().copied());
-    set.extend(TOP_BAR_COMMANDS.iter().copied());
-    for tab in Tab::all() {
-        for (_, items) in commands::ribbon(tab) {
-            for (cmd, _) in items {
-                set.insert(cmd.id);
-            }
+fn tool(state: &mut AppState, name: &str, args: Value) {
+    let caller = Caller::Mcp { client: "command-reachability".into() };
+    let out = call_checked(&mut AppTools { state }, name, args, &caller);
+    assert!(!out.is_error, "{name}: {}", out.content);
+}
+
+fn find_and_dispatch(state: &mut AppState, pending: &mut BTreeSet<&str>) {
+    let _ = state.take_actions();
+    pending.retain(|id| {
+        let mut palette = Palette::default();
+        palette.query = (*id).to_owned();
+        let Some(found) = palette.results(state).into_iter().find(|result| result.command.id == *id) else {
+            return true;
+        };
+        let command = found.command;
+        if !command.is_working() {
+            return false;
         }
-    }
-    for (_, spec) in &context_menu::MENUS {
-        for group in spec.groups {
-            set.extend(group.commands.iter().copied());
-        }
-        for quick in &spec.quick {
-            set.insert(quick.command);
-        }
-    }
-    set
+        state.run_command(command);
+        state.take_actions().is_empty()
+    });
+}
+
+fn part_contexts(pending: &mut BTreeSet<&str>) {
+    let mut state = AppState::new(soliddraft_app::command_tools::board_bracket());
+    find_and_dispatch(&mut state, pending);
+    state.doc.selection = Some(Selection::Body);
+    find_and_dispatch(&mut state, pending);
+    state.doc.selection = Some(Selection::Edge(state.doc.edges[0].id));
+    find_and_dispatch(&mut state, pending);
+    let feature = state.doc.features.last().unwrap().id;
+    state.doc.selection = Some(Selection::Feature(feature));
+    find_and_dispatch(&mut state, pending);
+    state.doc.features.last_mut().unwrap().status = FeatureStatus::NeedsRepair(Vec::new());
+    find_and_dispatch(&mut state, pending);
+
+    let mut state = AppState::new(soliddraft_app::new_document());
+    tool(&mut state, "sketch", json!({"plane":"top","shapes":[{"shape":"rectangle","center":[30,0,0],"width":4,"height":4}]}));
+    let sketch_id = state.doc.features[0].id;
+    state.doc.selection = Some(Selection::Feature(sketch_id));
+    find_and_dispatch(&mut state, pending);
+    tool(&mut state, "extrude", json!({"sketch":"Sketch1","depth":4}));
+    state.doc.new_body();
+    tool(&mut state, "sketch", json!({"plane":"top","shapes":[{"shape":"rectangle","center":[0,0,0],"width":4,"height":4}]}));
+    tool(&mut state, "extrude", json!({"sketch":"Sketch2","depth":4}));
+    find_and_dispatch(&mut state, pending);
+    state.doc.undo().unwrap();
+    find_and_dispatch(&mut state, pending);
+    state.doc.rollback = Some(1);
+    find_and_dispatch(&mut state, pending);
+
+    let mut sketch = Sketch::new();
+    let line = sketch.add(EntityKind::Line { a: P2::ZERO, b: P2::new(10.0, 5.0) }, false);
+    let length = sketch.constrain(ConstraintKind::Distance {
+        a: PointRef::new(line, 0),
+        b: PointRef::new(line, 1),
+        kind: DistanceKind::Aligned,
+        value: 125.0_f64.sqrt(),
+        label: P2::new(5.0, 8.0),
+    });
+    let mut edit = SketchSession::new(sketch_id, Plane::XY, sketch, false);
+    edit.selection.push(SketchSel::Entity(line));
+    state.sketch = Some(edit);
+    find_and_dispatch(&mut state, pending);
+    state.sketch.as_mut().unwrap().selection = vec![SketchSel::Constraint(length)];
+    find_and_dispatch(&mut state, pending);
+}
+
+fn file_contexts(dir: &std::path::Path, pending: &mut BTreeSet<&str>) {
+    let mut state = AppState::new(soliddraft_app::new_document());
+    let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../ci/fixtures/import");
+    tool(&mut state, "import_step", json!({"path":fixtures.join("block-closed.step")}));
+    state.doc.selection = Some(Selection::Feature(state.doc.features[0].id));
+    find_and_dispatch(&mut state, pending);
+
+    let mut state = AppState::new(soliddraft_app::new_document());
+    let bytes = std::fs::read(fixtures.join("tetrahedron.obj")).unwrap();
+    let source = soliddraft_kernel_api::scan::ScanSource {
+        name: "tetrahedron.obj".into(),
+        sha256: soliddraft_model::sha256_hex(&bytes),
+        bytes,
+    };
+    state.doc.apply(Command::AddFeature(FeatureKind::Scan(soliddraft_model::ScanFeature { source, fit: None }))).unwrap();
+    find_and_dispatch(&mut state, pending);
+
+    let mut state = AppState::new(soliddraft_app::command_tools::board_bracket());
+    tool(&mut state, "lattice", json!({"cell":"cubic","cell_size":100,"radius":1,"accuracy":0.5,"min_detail":0.1}));
+    find_and_dispatch(&mut state, pending);
+
+    let mut state = AppState::new(soliddraft_app::command_tools::board_bracket());
+    let part = dir.join("bracket.dwprt");
+    tool(&mut state, "save", json!({"path":part}));
+    tool(&mut state, "make_drawing", json!({"template":"iso-a3"}));
+    let session = state.drawing.session.as_mut().unwrap();
+    let child = session.doc.drawing.sheets[0].views.iter().find(|view| view.alignment.is_some()).unwrap();
+    let child_id = child.id.0;
+    session.selection = Some(DrawingSel::View(child.id));
+    find_and_dispatch(&mut state, pending);
+    tool(&mut state, "drawing_break_alignment", json!({"view":child_id}));
+    let session = state.drawing.session.as_mut().unwrap();
+    session.tool = DrawingTool::Detail;
+    session.draft.profile = true;
+    session.draft.points = vec![Point2::new(0.0, 0.0), Point2::new(4.0, 0.0), Point2::new(2.0, 3.0)];
+    find_and_dispatch(&mut state, pending);
+    let sheet = dir.join("bracket.dwdrw");
+    tool(&mut state, "drawing_save", json!({"path":sheet}));
+    tool(&mut state, "drawing_show_part", json!({}));
+    find_and_dispatch(&mut state, pending);
+    tool(&mut state, "make_assembly", json!({}));
+    find_and_dispatch(&mut state, pending);
+    tool(&mut state, "assembly_make_drawing", json!({}));
+    find_and_dispatch(&mut state, pending);
+
+    std::fs::remove_file(part).unwrap();
+    let mut state = AppState::new(soliddraft_app::new_document());
+    tool(&mut state, "open", json!({"path":sheet}));
+    drawing::reference::refresh(&mut state);
+    find_and_dispatch(&mut state, pending);
 }
 
 #[test]
 fn every_app_command_is_reachable_without_legacy_menu_bar() {
-    let ui_surfaces = all_surface_commands();
-    let history = History::default();
-
-    // 1. Every command listed in the new File menu and top bar exists in the registry.
-    for id in FILE_MENU_COMMANDS.iter().chain(TOP_BAR_COMMANDS.iter()) {
-        assert!(commands::get(id).is_some(), "top bar / File menu references unknown command {id}");
+    let dir = std::env::temp_dir().join(format!("soliddraft-command-reachability-{}", soliddraft_document::DocumentId::new()));
+    std::fs::create_dir_all(&dir).unwrap();
+    soliddraft_app::file::set_config_dir(Some(dir.join("config")));
+    for id in FILE_MENU_COMMANDS.iter().chain(TOP_BAR_COMMANDS.iter()).chain(LEGACY_MENU_COMMANDS) {
+        let command = commands::get(id).unwrap_or_else(|| panic!("missing app command {id}"));
+        assert!(command.in_app(), "{id} must remain an app command");
     }
-
-    // 2. Every single app command in the registry is reachable through command search /
-    // command line in at least one valid context.
-    for cmd in commands::all().iter().filter(|c| c.in_app()) {
-        let by_name =
-            Context::all().into_iter().any(|ctx| command_line::named(cmd.id, ctx).is_some_and(|c| c.id == cmd.id));
-        let by_search = Context::all()
-            .into_iter()
-            .any(|ctx| commands::search_here(cmd.id, &history, ctx).iter().any(|m| m.command.id == cmd.id));
-        assert!(
-            by_name || by_search || ui_surfaces.contains(cmd.id),
-            "app command `{}` ({}) is unreachable without the legacy menu bar",
-            cmd.id,
-            cmd.label
-        );
-    }
-
-    // 3. Every command from the removed 7-item File/Edit/View/Insert/Tools/Window/Help row
-    // stays reachable via File menu, top bar, ribbon, context menus, or command search.
-    for id in LEGACY_MENU_COMMANDS {
-        let cmd = commands::get(id).unwrap_or_else(|| panic!("legacy menu command `{id}` missing from registry"));
-        assert!(cmd.in_app(), "legacy menu command `{id}` must remain an app command");
-        let in_search = Context::all().into_iter().any(|ctx| command_line::named(id, ctx).is_some_and(|c| c.id == *id));
-        assert!(
-            ui_surfaces.contains(id) || in_search,
-            "legacy menu command `{id}` became unreachable after removing the 7-item menu row"
-        );
-    }
+    let mut pending: BTreeSet<_> = commands::all().iter().filter(|c| c.in_app()).map(|c| c.id).collect();
+    // The feedback form belongs to the web page and is covered in the browser.
+    assert!(pending.remove("give_feedback"));
+    part_contexts(&mut pending);
+    file_contexts(&dir, &mut pending);
+    soliddraft_app::file::set_config_dir(None);
+    std::fs::remove_dir_all(dir).unwrap();
+    assert!(pending.is_empty(), "commands never reached and dispatched: {pending:?}");
 }

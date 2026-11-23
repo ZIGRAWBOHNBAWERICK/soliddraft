@@ -644,7 +644,7 @@ fn bracket_by_hand_saved_reopened_rebuilt_and_repaired() {
     }
     harness.key_press(Key::S);
     harness.run_steps(3);
-    harness.get_by_label("Slot").click();
+    harness.get_by_label("Run Slot").click();
     harness.run_steps(2);
     sketch_click(&mut harness, P2::new(26.0, 38.0));
     sketch_click(&mut harness, P2::new(54.0, 38.0));

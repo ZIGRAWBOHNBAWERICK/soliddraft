@@ -175,7 +175,10 @@ pub(crate) fn customize(ctx: &egui::Context, state: &mut AppState) {
                 editor.draft.replace(workspace, &pinned);
             }
             ui.separator();
-            ui.add(egui::TextEdit::singleline(&mut editor.query).hint_text("Find a command to add"));
+            let field = ui.add(egui::TextEdit::singleline(&mut editor.query).hint_text("Find a command to add"));
+            field.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, "Find a command to add"));
+            #[cfg(target_arch = "wasm32")]
+            crate::web::show_control("Find a command to add", field.rect);
             let candidates =
                 commands::all().iter().filter(|c| workspace.offers(c) && !pinned.iter().any(|p| p.id == c.id));
             let available = if editor.query.trim().is_empty() {
@@ -194,7 +197,12 @@ pub(crate) fn customize(ctx: &egui::Context, state: &mut AppState) {
                 }
                 for command in available {
                     let label = format!("Add {}", command.shortcut_row_label());
-                    if ui.button(label).on_hover_text(command.doc).clicked() {
+                    let response = ui.button(&label).on_hover_text(command.doc);
+                    #[cfg(target_arch = "wasm32")]
+                    if ui.is_rect_visible(response.rect) {
+                        crate::web::show_control(label, response.rect);
+                    }
+                    if response.clicked() {
                         pinned.push(command);
                         editor.draft.replace(workspace, &pinned);
                     }
@@ -202,7 +210,10 @@ pub(crate) fn customize(ctx: &egui::Context, state: &mut AppState) {
             });
             ui.separator();
             ui.horizontal_wrapped(|ui| {
-                save = ui.button("Save").clicked();
+                let response = ui.button("Save shortcut menu");
+                #[cfg(target_arch = "wasm32")]
+                crate::web::show_control("Save shortcut menu", response.rect);
+                save = response.clicked();
                 if ui.button("Reset this workspace").clicked() {
                     editor.draft.pinned.remove(&workspace);
                 }
@@ -225,6 +236,8 @@ pub(crate) fn customize(ctx: &egui::Context, state: &mut AppState) {
 fn pin_button(ui: &mut egui::Ui, enabled: bool, icon: &str, label: String) -> bool {
     let response = ui.add_enabled(enabled, egui::Button::new(icon).small());
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, &label));
+    #[cfg(target_arch = "wasm32")]
+    crate::web::show_control(&label, response.rect);
     response.on_hover_text(label).clicked()
 }
 

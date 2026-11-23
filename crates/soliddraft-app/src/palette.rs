@@ -116,6 +116,10 @@ pub fn show(ctx: &egui::Context, state: &mut AppState) {
                     .desired_width(f32::INFINITY),
             );
             field.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, "Search commands"));
+            #[cfg(target_arch = "wasm32")]
+            if shortcut.is_some() {
+                crate::web::show_control("Shortcut search", field.rect);
+            }
             field.request_focus();
             if palette.query != query {
                 palette.selected = 0;
@@ -131,10 +135,18 @@ pub fn show(ctx: &egui::Context, state: &mut AppState) {
                 for (i, m) in results.iter().enumerate() {
                     let c = m.command;
                     let label = if c.is_working() { c.label_in(state) } else { format!("{} (coming soon)", c.label) };
-                    let button = egui::Button::selectable(i == palette.selected, label)
+                    let button = egui::Button::selectable(i == palette.selected, &label)
                         .shortcut_text(state.shortcuts.shortcut_text(c.id).unwrap_or_default());
                     let enabled = c.is_enabled(state);
                     let response = ui.add_enabled(enabled, button);
+                    if shortcut.is_some() {
+                        let name = format!("Run {label}");
+                        response.widget_info(|| {
+                            egui::WidgetInfo::selected(egui::WidgetType::Button, enabled, i == palette.selected, &name)
+                        });
+                        #[cfg(target_arch = "wasm32")]
+                        crate::web::show_control(name, response.rect);
+                    }
                     if i == palette.selected && (down || up) {
                         response.scroll_to_me(None);
                     }
@@ -150,7 +162,10 @@ pub fn show(ctx: &egui::Context, state: &mut AppState) {
             });
             if shortcut.is_some() {
                 ui.separator();
-                customize = ui.small_button("Customize shortcut menu").clicked();
+                let response = ui.small_button("Customize shortcut menu");
+                #[cfg(target_arch = "wasm32")]
+                crate::web::show_control("Customize shortcut menu", response.rect);
+                customize = response.clicked();
             }
         });
     });

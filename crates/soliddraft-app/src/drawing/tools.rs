@@ -20,7 +20,7 @@ use soliddraft_drawing::{
     DimType, DimensionSet, DrawingError, EntityRef, LinearOrientation, Part, PartIndex, SetKind, StyleOverrides,
     ViewId, ViewKind, derived,
 };
-use soliddraft_kernel_api::Point2;
+use soliddraft_kernel_api::{Point2, Vec3};
 
 /// Sheet millimetres a click snaps to a circle's centre from, at the current zoom.
 fn snap_mm(s: &DrawingSession) -> f64 {
@@ -988,7 +988,7 @@ pub(super) fn line_annotation_tool(
         let Some(Curve3::Line { a, b }) = edge(&curve.source) else { return None };
         Some([*a, *b])
     };
-    let anchors_of = |curve: &soliddraft_drawing::Curve2, [a, b]| {
+    let anchors_of = |curve: &soliddraft_drawing::Curve2, [a, b]: [Vec3; 2]| {
         [(Attach::Start, a), (Attach::End, b)].map(|(attach, at)| Anchor {
             entity: curve.source.clone(),
             attach,

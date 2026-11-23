@@ -153,6 +153,9 @@ pub struct Definition {
     pub bounds: Aabb,
     /// The sub-assembly's structure at the pinned revision, once read.
     pub assembly: Option<Arc<Assembly>>,
+    /// The sub-assembly's truth as its file holds it, when the configuration a placement
+    /// names made `assembly` differ from it: what a display copy of it keeps.
+    pub original: Option<Arc<Assembly>>,
     /// The quality a part is shown at instead of its own, as in its key.
     pub quality: Option<Quality>,
     /// The part's coarse and fine meshes, once loaded; `mesh` is its standard one. The
@@ -194,6 +197,7 @@ impl Definition {
             mesh: None,
             bounds: Aabb::EMPTY,
             assembly: None,
+            original: None,
             quality: None,
             coarse: None,
             fine: None,

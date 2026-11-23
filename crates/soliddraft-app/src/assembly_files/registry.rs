@@ -58,8 +58,8 @@ pub(crate) fn commands() -> Vec<CommandSpec> {
         .run(|_| AppAction::Assembly(AssemblyAction::Files(FilesAction::MakeDrawing)))
         .agents(
             Agents::Mcp,
-            "The assembly must be saved. Views come from the parts' display meshes with hidden lines removed across \
-             parts; the BOM lists parts with quantities; each row gets a balloon on the first view. The drawing \
+            "The assembly must be saved. Each part's line work is Catallax's view of that part, placed; hiding \
+             between parts is measured on their meshes and labelled approximate; the BOM lists parts with quantities; each row gets a balloon on the first view. The drawing \
              opens; Rebuild brings it to the assembly later.",
             drawing_params,
         )

@@ -78,14 +78,15 @@ pub(crate) fn drawing(
     use soliddraft_kernel_api::drawing::StandardView;
     let [out] = rest else { return Err("drawing takes the assembly and a .dwdrw file".into()) };
     let out = Path::new(out);
-    let model = soliddraft_app::assembly_files::drawing::assembly_model(doc)?;
+    let exact = soliddraft_app::assembly_files::drawing::exact_parts(doc)?;
+    let model = exact.model();
     let (drawing, meta, verb) = if out.exists() {
         let (old, meta) = file::read(out).map_err(|e| e.to_string())?;
         if old.model.id != Some(doc.id()) {
             return Err(format!("{} is a drawing of another document", out.display()));
         }
         let next = update_assembly_drawing(&old, &model).map_err(|e| e.to_string())?;
-        (next, meta.rewritten("display meshes", Default::default()), "updated")
+        (next, meta.rewritten("Catallax", Default::default()), "updated")
     } else {
         let exploded = a.value("--exploded").is_some();
         if exploded && model.exploded.is_empty() {
@@ -108,7 +109,7 @@ pub(crate) fn drawing(
             exploded,
         };
         let made = make_assembly_drawing(&model, &new).map_err(|e| e.to_string())?;
-        (made, FileMeta::new("display meshes", Default::default()), "wrote")
+        (made, FileMeta::new("Catallax", Default::default()), "wrote")
     };
     let mut drawing = drawing;
     // The reference is stored relative to the drawing.

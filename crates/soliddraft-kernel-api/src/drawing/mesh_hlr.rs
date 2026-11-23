@@ -260,8 +260,9 @@ impl Occluders {
         Occluders { tris, lo, cell, nx, ny, cells, depth_tol: (DEPTH_TOL_CHORDS * tol).max(1e-6 * size) }
     }
 
-    /// True when some triangle covers `p` in the view and lies in front of it.
-    fn hides(&self, frame: &ViewFrame, p: Vec3) -> bool {
+    /// True when some triangle covers `p` in the view and lies in front of it, no nearer
+    /// the eye than `limit` when there is one.
+    fn hides(&self, frame: &ViewFrame, p: Vec3, limit: Option<f64>) -> bool {
         let q = frame.project(p);
         let d = frame.depth(p);
         let x = ((q.u - self.lo.u) / self.cell).floor();
@@ -282,8 +283,28 @@ impl Occluders {
                 }
             }
             let depth = w[0] * t.depth[0] + w[1] * t.depth[1] + w[2] * t.depth[2];
-            depth > d + self.depth_tol
+            depth > d + self.depth_tol && limit.is_none_or(|l| depth <= l)
         })
+    }
+}
+
+/// A mesh's triangles as they cover a view, for a caller that classifies its own curves:
+/// an assembly drawing asks whether one part hides a point of another.
+pub struct MeshOccluder(Occluders);
+
+impl MeshOccluder {
+    /// The triangles of `mesh` seen in `frame`. `tol` is the mesh's accuracy in
+    /// millimetres: a triangle must be more than a few times that in front of a point to
+    /// hide it.
+    pub fn new(mesh: &Mesh, frame: &ViewFrame, tol: f64) -> MeshOccluder {
+        MeshOccluder(Occluders::new(mesh, frame, tol))
+    }
+
+    /// True when a triangle covers `p` in `frame` and lies in front of it. With a
+    /// `limit`, a triangle nearer the eye than that depth hides nothing, as material
+    /// a section removed.
+    pub fn hides(&self, frame: &ViewFrame, p: Vec3, limit: Option<f64>) -> bool {
+        self.0.hides(frame, p, limit)
     }
 }
 
@@ -307,7 +328,7 @@ pub fn hidden_lines_with(
     let size = occluders.cell * occluders.nx as f64;
     let step = (size / 400.0).max(tol);
     let mut curves = Vec::new();
-    let hides = |p: Vec3| occluders.hides(frame, p) || also_hides(p);
+    let hides = |p: Vec3| occluders.hides(frame, p, None) || also_hides(p);
     for line in lines {
         let Some(&first) = line.points.first() else { continue };
         // The current stretch and its visibility, which is that of the last sample.

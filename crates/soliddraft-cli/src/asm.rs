@@ -106,9 +106,10 @@ drawing     Writes a drawing of the assembly: an isometric and a front view (or,
             across parts, a bill of materials listing every part with its
             quantity, and a balloon per row. When the drawing exists and shows
             this assembly it is brought up to date instead: views, BOM and
-            balloons move with the assembly. Its views come from the parts'
-            display meshes, so PDF, SVG and DXF exports refuse them until Catallax
-            draws placed parts together.
+            balloons move with the assembly. Each part's line work is
+            Catallax's view of that part; where one part hides another the
+            hiding is measured on the parts' meshes and the view says so.
+            Exports of the drawing work as for a part drawing.
 
 export      Writes the assembly for robotics and simulation tools: URDF (with
             its meshes as STL in a folder beside it) or OpenUSD text (.usda)

@@ -235,16 +235,22 @@ impl Lookup {
     ) -> Result<(DisplayMesh, Option<String>), String> {
         let id = r.id.ok_or("the reference has no document id")?;
         for reader in readers.iter_mut() {
-            if let Some((m, _)) = reader.display_mesh_at(id, &r.pinned, quality).map_err(|e| e.to_string())? {
+            let configuration = r.configuration.as_ref();
+            if let Some((m, _)) =
+                reader.display_mesh_at(id, &r.pinned, quality, configuration).map_err(|e| e.to_string())?
+            {
                 return Ok((m, None));
             }
         }
         if r.kind == DocKind::Mesh {
             return self.reference_mesh(r);
         }
-        let made = |display: &dyn DisplaySource, bytes: &[u8]| match quality {
-            None => display.part_mesh(bytes),
-            Some(q) => display.part_mesh_at(bytes, q),
+        let made = |display: &dyn DisplaySource, bytes: &[u8]| {
+            let bytes = configured(display, bytes, r)?;
+            match quality {
+                None => display.part_mesh(&bytes),
+                Some(q) => display.part_mesh_at(&bytes, q),
+            }
         };
         let display = self.display.as_ref().ok_or_else(|| {
             format!("the file has no display copy of revision {}; Rebuild to make one", r.pinned.short())
@@ -315,7 +321,7 @@ impl Lookup {
         readers: &mut [crate::file::CopyReader],
     ) -> Result<DisplayMesh, String> {
         let id = r.id.ok_or("the reference has no document id")?;
-        let name = crate::file::level_entry(quality, level);
+        let name = crate::file::level_entry(quality, r.configuration.as_ref(), level);
         for reader in readers.iter_mut() {
             if let Some(bytes) = reader.entry(id, &r.pinned, &name).map_err(|e| e.to_string())? {
                 return DisplayMesh::decode(&bytes).map(|(m, _)| m).map_err(|e| e.to_string());
@@ -326,16 +332,32 @@ impl Lookup {
         if let Ok(Some((bytes, now))) = &found
             && *now == r.pinned
         {
-            return display.part_mesh_level(bytes, quality, level).map(|(m, _)| m);
+            let bytes = configured(display.as_ref(), bytes, r)?;
+            return display.part_mesh_level(&bytes, quality, level).map(|(m, _)| m);
         }
         if let Some(store) = &self.revisions
             && let Ok(bytes) = store.fetch(id, &r.pinned)
             && matches_reference(&bytes, r)
         {
+            let bytes = configured(display.as_ref(), &bytes, r)?;
             return display.part_mesh_level(&bytes, quality, level).map(|(m, _)| m);
         }
         found?;
         Err(format!("revision {} of {} is not available", r.pinned.short(), r.path))
+    }
+}
+
+/// The part file as the configuration `r` names shows it. Only a kernel can rebuild a
+/// part in another configuration, so a display source without one refuses it.
+fn configured<'a>(
+    display: &dyn DisplaySource,
+    bytes: &'a [u8],
+    r: &DocRef,
+) -> Result<std::borrow::Cow<'a, [u8]>, String> {
+    match (&r.configuration, display.kernel_source()) {
+        (None, _) => Ok(std::borrow::Cow::Borrowed(bytes)),
+        (Some(_), Some(kernel)) => kernel.configured(bytes, r.configuration.as_ref()),
+        (Some(c), None) => Err(format!("showing configuration {} of {} needs the kernel", c.0, r.path)),
     }
 }
 
@@ -497,7 +519,21 @@ pub(crate) fn structure(
                         .map(|(path, _)| path)
                         .or_else(|| (!reference.path.is_empty()).then(|| PathBuf::from(&reference.path)));
                     locations.insert(i, location);
-                    store.set_assembly(i, f.assembly);
+                    // A sub-assembly placed in one of its configurations shows that one.
+                    let assembly = match &reference.configuration {
+                        None => f.assembly,
+                        Some(c) => match crate::configuration::configured_truth(&f.assembly, c) {
+                            Ok(a) => {
+                                store.get_mut(i).original = Some(f.assembly.clone());
+                                Arc::new(a)
+                            }
+                            Err(e) => {
+                                store.fail(i, e);
+                                continue;
+                            }
+                        },
+                    };
+                    store.set_assembly(i, assembly);
                     if let Some(p) = f.stale {
                         let d = store.get_mut(i);
                         d.state = crate::store::LoadState::Stale;

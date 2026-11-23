@@ -549,6 +549,22 @@ fn owner_pocket_rim_at_r2_takes_a_through_hole_along_its_length() {
         assert_eq!(part.topology().faces.len(), faces, "{stage}");
     }
 
+    fn volume(part: &Part, feature: &str) -> f64 {
+        let doc = part.doc();
+        let id = doc.features.iter().find(|f| f.name == feature).expect("the feature is in the tree").id;
+        doc.mass_properties(id).unwrap_or_else(|| panic!("{feature}: volume measurement unavailable")).volume
+    }
+
+    fn check_bore(before: f64, after: f64, diameter: f64) {
+        // The faceted volume must agree with a straight bore through the 76 mm boss.
+        let expected = std::f64::consts::PI * (diameter / 2.0).powi(2) * 76.0;
+        assert!(
+            ((before - after) - expected).abs() < expected * 0.02,
+            "the hole removed {} of {expected}",
+            before - after
+        );
+    }
+
     let (mut part, rim) = owner_part();
     let built = part.tool("fillet", json!({"edges": rim, "radius": 2.0}));
     assert!(!built.is_error, "R2: {}", built.content);
@@ -556,10 +572,7 @@ fn owner_pocket_rim_at_r2_takes_a_through_hole_along_its_length() {
     let rounds = made_by(part.doc(), &fillet);
     assert_eq!(rounds.len(), 6, "one round for each rim edge: {rounds:?}");
     standing(&part, OWNER_FACES + 6, "rounded at R2");
-    let rounded = {
-        let doc = part.doc();
-        doc.mass_properties(doc.features.last().unwrap().id).map(|mass| mass.volume)
-    };
+    let rounded = volume(&part, &fillet);
 
     // An end cap of the boss: one of the two planar faces square to its 76 mm extrusion.
     let topology = part.topology();
@@ -622,18 +635,8 @@ fn owner_pocket_rim_at_r2_takes_a_through_hole_along_its_length() {
     let modified: BTreeSet<_> = hole_history.faces.modified.into_iter().collect();
     assert_eq!(modified, caps.iter().map(|cap| cap.id).collect(), "only the end caps get new trims");
     assert!(hole_history.faces.deleted.is_empty() && hole_history.faces.split.is_empty());
-    let volume = |part: &Part| {
-        let doc = part.doc();
-        let feature = doc.features.iter().find(|f| f.name == hole).unwrap().id;
-        doc.mass_properties(feature).map(|mass| mass.volume)
-    };
-    let at_drilled = volume(&part);
-    // The display sample is faceted, so its volumes are estimates: the drop is the 6 mm
-    // hole's 76 mm length within 2%.
-    if let (Some(before), Some(after)) = (rounded, at_drilled) {
-        let hole = std::f64::consts::PI * 9.0 * 76.0;
-        assert!(((before - after) - hole).abs() < hole * 0.02, "the hole removed {} of {hole}", before - after);
-    }
+    let at_drilled = volume(&part, &hole);
+    check_bore(rounded, at_drilled, 6.0);
 
     let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("fillet-acceptance").join("saved");
     std::fs::create_dir_all(&dir).unwrap();
@@ -658,13 +661,28 @@ fn owner_pocket_rim_at_r2_takes_a_through_hole_along_its_length() {
         edge_names.iter().filter(|name| name.starts_with(&fillet_prefix)).cloned().collect::<Vec<_>>(),
         "the reopened viewport still assigns the rim edges to the fillet"
     );
-    if let (Some(before), Some(after)) = (at_drilled, volume(&part)) {
-        assert!((before - after).abs() < before * 1e-9, "the reopened part is the saved one: {before} != {after}");
-    }
+    let reopened = volume(&part, &hole);
+    assert!(
+        (at_drilled - reopened).abs() < at_drilled * 1e-9,
+        "the reopened part is the saved one: {at_drilled} != {reopened}"
+    );
 
     let step = part.export("owner-pocket-rim-r2-drilled");
     assert!(step.starts_with("exported") && step.contains("23 faces"), "{step}");
-    eprintln!("owner rim drilled: volume {at_drilled:?}; {step}");
+    eprintln!("owner rim drilled: volume {rounded} to {at_drilled}, reopened {reopened}; {step}");
+
+    let edited = part.tool("edit_hole", json!({"feature": hole, "diameter": 8.0}));
+    assert!(!edited.is_error, "edit the reopened hole: {}", edited.content);
+    standing(&part, OWNER_FACES + 6 + 4, "edited");
+    let at_edited = volume(&part, &hole);
+    check_bore(rounded, at_edited, 8.0);
+
+    let later = part.tool("hole", json!({"face":cap, "points":[[25.0, at, 15.0]], "diameter":6.0}));
+    assert!(!later.is_error, "second through hole: {}", later.content);
+    standing(&part, OWNER_FACES + 6 + 8, "drilled again");
+    let second = &part.doc().features.last().unwrap().name;
+    assert_eq!(made_by(part.doc(), second).len(), 4, "the second hole has its own wall");
+    check_bore(at_edited, volume(&part, second), 6.0);
 }
 
 #[test]

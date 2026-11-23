@@ -78,11 +78,10 @@ fn publish_new(
     let written = (|| {
         let mut file = std::fs::File::create(&tmp)?;
         write(&mut file, bytes)?;
-        file.sync_all()?;
-        drop(file);
-        // A hard link never replaces its target, unlike a rename.
-        std::fs::hard_link(&tmp, path)
-    })();
+        file.sync_all()
+    })()
+    // A hard link never replaces its target, unlike a rename.
+    .and_then(|()| std::fs::hard_link(&tmp, path));
     let _ = std::fs::remove_file(&tmp);
     written?;
     #[cfg(unix)]

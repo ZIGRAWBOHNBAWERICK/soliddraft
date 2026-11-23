@@ -652,8 +652,10 @@ impl Values {
             .iter_mut()
             .map(|v| &mut v.expression.text)
             .chain(self.bindings.iter_mut().map(|b| &mut b.expression.text))
-            .chain(overrides)
         {
+            *text = rename_tokens(text, replacement);
+        }
+        for text in overrides {
             *text = rename_tokens(text, replacement);
         }
         if let Some(comment) = self.comments.remove(name) {

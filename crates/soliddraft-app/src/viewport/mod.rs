@@ -540,6 +540,8 @@ impl ViewportState {
         if let Some(session) = &sketch {
             input.grid = self.grid(rect, &GridPlane::of_sketch(&session.plane));
         }
+        #[cfg(target_arch = "wasm32")]
+        let (visible_meshes, display_mode) = (input.meshes.1.len(), input.display.label());
         ui.painter().add(egui_wgpu::Callback::new_paint_callback(rect, ViewportCallback(input)));
 
         let painter = ui.painter().with_clip_rect(rect);
@@ -577,6 +579,9 @@ impl ViewportState {
         #[cfg(target_arch = "wasm32")]
         crate::web::show_viewport(serde_json::json!({
             "label": unproved.then_some("unproved preview"),
+            "display_state": doc.display_state().map(|state| &state.name),
+            "display_mode": display_mode,
+            "visible_meshes": visible_meshes,
             "triangles": doc.display_body().and_then(|body| doc.meshes.get(&body)).map_or(0, |mesh| mesh.indices.len() / 3),
         }));
         if scene.axes.contains(&true) {

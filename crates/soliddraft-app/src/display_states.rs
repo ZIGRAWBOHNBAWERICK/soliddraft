@@ -14,19 +14,28 @@ pub(crate) fn picker<T>(
 ) -> Option<Option<DisplayStateId>> {
     let current = states.selected(config);
     let mut change = None;
-    egui::ComboBox::from_label("Display state").selected_text(current.map_or("Default", |s| s.name.as_str())).show_ui(
-        ui,
-        |ui| {
-            if ui.selectable_label(current.is_none(), "Default").clicked() {
+    let picker = egui::ComboBox::from_label("Display state")
+        .selected_text(current.map_or("Default", |s| s.name.as_str()))
+        .show_ui(ui, |ui| {
+            let default = ui.selectable_label(current.is_none(), "Default");
+            #[cfg(target_arch = "wasm32")]
+            crate::web::show_control("Display state: Default", default.rect);
+            if default.clicked() {
                 change = Some(None);
             }
             for display in states.states().iter().filter(|s| s.scope.includes(config)) {
-                if ui.selectable_label(current.is_some_and(|s| s.id == display.id), &display.name).clicked() {
+                let item = ui.selectable_label(current.is_some_and(|s| s.id == display.id), &display.name);
+                #[cfg(target_arch = "wasm32")]
+                crate::web::show_control(format!("Display state: {}", display.name), item.rect);
+                if item.clicked() {
                     change = Some(Some(display.id.clone()));
                 }
             }
-        },
-    );
+        });
+    #[cfg(target_arch = "wasm32")]
+    crate::web::show_control("Display state", picker.response.rect);
+    #[cfg(not(target_arch = "wasm32"))]
+    let _ = picker;
     change
 }
 

@@ -58,6 +58,7 @@ impl<'a> Evidence<'a> {
         // Opening a part is not a command's work.
         if let Some(w) = &work {
             w.take();
+            w.take_routes();
         }
         Ok(Self { host, kernel, work, directory, sequence: 0, max_work, failed: false, renderer: None, pending: None })
     }
@@ -71,7 +72,14 @@ impl<'a> Evidence<'a> {
         output: &ToolOutput,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let (Some(root), Some(kernel)) = (&self.directory, &self.kernel) else { return Ok(()) };
-        let (work, background_work) = self.work.as_ref().map(|w| w.take_scoped()).unwrap_or_default();
+        let (work, background_work) = self
+            .work
+            .as_ref()
+            .map(|w| {
+                w.take_routes();
+                w.take_scoped()
+            })
+            .unwrap_or_default();
         self.sequence += 1;
         std::fs::create_dir(root.join(format!("{:04}", self.sequence)))?;
         let diagnostics = kernel.take_diagnostics()?;
@@ -94,6 +102,7 @@ impl<'a> Evidence<'a> {
         // Writing the evidence is not the next command's work.
         if let Some(w) = &self.work {
             w.take();
+            w.take_routes();
         }
         result
     }
@@ -514,6 +523,7 @@ impl ToolHost for Evidence<'_> {
             // Evidence rendering is not the next command's rebuild work.
             if let Some(work) = &self.work {
                 work.take();
+                work.take_routes();
             }
             return match capture {
                 Ok(result) => ToolOutput::json(&result),
@@ -540,7 +550,51 @@ impl Drop for Evidence<'_> {
 
 #[cfg(test)]
 mod tests {
-    use super::pickable;
+    use super::{AppTools, Arc, Caller, CatallaxKernel, Counting, Evidence, ToolHost, Work, json, pickable};
+    use soliddraft_app::state::AppState;
+    use soliddraft_kernel_catallax::APP_REQUEST_WORK;
+
+    #[test]
+    fn mcp_bundle_drains_mesh_routes_at_each_request() {
+        let dir =
+            std::env::temp_dir().join(format!("soliddraft-mesh-routes-{}", soliddraft_document::DocumentId::new()));
+        let kernel = Arc::new(CatallaxKernel::with_diagnostics(APP_REQUEST_WORK));
+        let counting = Arc::new(Counting::new(kernel.clone()));
+        let doc = soliddraft_app::document::Document::new("Mesh route evidence", counting.clone());
+        let mut state = AppState::new(doc);
+        let mut bundle = Evidence::new(
+            AppTools { state: &mut state },
+            Some(kernel),
+            Some(counting.clone()),
+            Some(dir.clone()),
+            APP_REQUEST_WORK,
+        )
+        .unwrap();
+        let caller = Caller::Mcp { client: "mesh-route-evidence".into() };
+        let sketch = bundle.call(
+            "sketch",
+            json!({"plane":"top","shapes":[{"shape":"rectangle","center":[0,0,0],"width":20,"height":20}]}),
+            &caller,
+        );
+        assert!(!sketch.is_error, "{}", sketch.content);
+        let commands = [
+            ("extrude", json!({"sketch":"Sketch1","depth":10,"flip":false})),
+            ("edit_extrude", json!({"feature":"Boss-Extrude1","depth":11})),
+            ("edit_extrude", json!({"feature":"Boss-Extrude1","depth":12})),
+        ];
+        for (tool, input) in commands {
+            let built = bundle.call(tool, input, &caller);
+            assert!(!built.is_error, "{}", built.content);
+            let pending = bundle.pending.as_ref().unwrap();
+            assert!(pending.work.iter().any(|w| matches!(w, Work::Mesh(_))), "the command requested a mesh");
+            assert!(counting.take_routes().is_empty(), "the evidence host retained command mesh routes");
+            let view = bundle.call("scenario_view", json!({}), &caller);
+            assert!(!view.is_error, "{}", view.content);
+            assert!(counting.take_routes().is_empty(), "the evidence host retained view mesh routes");
+        }
+        drop(bundle);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 
     #[test]
     fn a_mesh_is_selectable_only_if_some_vertex_belongs_to_a_face() {

@@ -104,9 +104,12 @@ async function replace(name, value) {
   await click(name);
   await page.press('Control+a');
   await page.press('Backspace');
+  await page.wait(250);
   if (value.length === 1) await page.press(value);
   else await page.type(value);
+  await page.wait(550);
   await page.press('Enter');
+  await page.wait(300);
 }
 async function parameters(filter) {
   await command('Parameters', 'configuration_grid');
@@ -154,6 +157,9 @@ switch (scenario) {
     await parameters('Hole1.Depth');
     await replace('Default Hole1.Depth', '5');
     await until(() => shown('shown_build'), value => value && !value.pending && !value.reading, 'Edited part is still building');
+    const stored = await save();
+    const hole = stored.features.find(f => f.kind.type === 'hole');
+    check(hole.kind.depth.depth === 5, 'The Parameters edit did not commit the 5 mm depth');
     const text = await callout();
     check(text === 'M6x1-6H DEEP 5', `The edited hole reads ${text}`);
     break;
@@ -179,6 +185,7 @@ switch (scenario) {
     await parameters('Plate');
     await replace('Name Plate', 'Other');
     const stored = await save();
+    check(stored.values.entries.some(entry => entry.name === 'Other'), 'The global rename did not commit');
     const overrides = stored.configurations.rows.find(row => row.name === 'Thin').overrides;
     check(overrides['BossExtrude1.Depth'] === '=plate', `The depth now refers to ${overrides['BossExtrude1.Depth']}`);
     check(overrides.Width === '=Other', `The width now refers to ${overrides.Width}`);

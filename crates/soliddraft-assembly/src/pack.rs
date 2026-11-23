@@ -105,11 +105,16 @@ pub trait PackSource {
     fn read_resolved(
         &self,
         path: &Path,
-        _id: DocumentId,
-        _kind: DocKind,
-        _revision: &ContentHash,
+        id: DocumentId,
+        kind: DocKind,
+        revision: &ContentHash,
     ) -> Result<Vec<u8>, String> {
-        self.read(path)
+        let bytes = self.read(path)?;
+        let identity = identify(Cursor::new(&bytes)).map_err(|e| format!("{}: {e}", path.display()))?;
+        if identity.id != id || identity.kind != kind || &identity.revision != revision {
+            return Err(format!("{} changed while Pack and Go was reading it", path.display()));
+        }
+        Ok(bytes)
     }
     /// The drawings to look through for ones whose model is packed, each with its path
     /// and identity. `base` is the assembly's folder.
@@ -265,15 +270,23 @@ fn entry_name(path: &Path) -> String {
 /// packed files are worked out lexically inside it, so it need not exist.
 const LAYOUT: &str = "/soliddraft-pack";
 
+type DocRevision = (DocumentId, ContentHash);
+
 #[derive(Clone, Debug)]
 struct Doc {
     kind: DocKind,
     from: PathBuf,
     to: PathBuf,
-    /// The file's revision when packing started.
-    revision: ContentHash,
     /// For an assembly, the documents its sources name, resolved.
-    sources: Vec<(DocumentId, PathBuf)>,
+    sources: Vec<DocRevision>,
+}
+
+struct RewrittenAssembly {
+    copy: RefCopy,
+    /// Child assemblies whose resolved revision matched the original pin.
+    current_children: Vec<DocRevision>,
+    /// A stale assembly below this one can still use the original cache entries.
+    has_stale_child: bool,
 }
 
 /// Packs `request.root` into `request.into`, a new or empty folder, with drawings of
@@ -358,29 +371,30 @@ pub fn gather(request: &PackRequest, source: &dyn PackSource, drawings: Option<R
         AssemblyPackage::from_bytes(read(path, id, DocKind::Assembly, revision)?).map_err(|e| io(path, &e))
     };
 
-    // 1. Every document the assembly reaches, by id.
+    // 1. Every document the assembly reaches, at the revision each source resolved to.
     let first = identify(Cursor::new(source.read(&root).map_err(PackError::Io)?)).map_err(|e| io(&root, &e))?;
     if first.kind != DocKind::Assembly {
         return Err(PackError::Destination(format!("{} is not an assembly", root.display())));
     }
-    let mut docs: BTreeMap<DocumentId, Doc> = BTreeMap::new();
-    let mut queue = vec![(first.id, root.clone(), first.kind, first.revision)];
-    while let Some((id, path, kind, revision)) = queue.pop() {
-        if docs.contains_key(&id) {
+    let root_revision = (first.id, first.revision);
+    let mut docs: BTreeMap<DocRevision, Doc> = BTreeMap::new();
+    let mut queue = vec![(root_revision.clone(), root, first.kind)];
+    while let Some((key, path, kind)) = queue.pop() {
+        if docs.contains_key(&key) {
             continue;
         }
         let mut sources = Vec::new();
         if kind == DocKind::Assembly {
-            let package = open(&path, id, &revision)?;
+            let package = open(&path, key.0, &key.1)?;
             for s in &package.assembly().sources {
                 let (found, at, now) =
                     source.resolve(&path, &s.document).ok_or_else(|| PackError::Missing(s.document.path.clone()))?;
-                let now = now.unwrap_or_else(|| s.document.pinned.clone());
-                sources.push((found, at.clone()));
-                queue.push((found, at, s.document.kind, now));
+                let target = (found, now.unwrap_or_else(|| s.document.pinned.clone()));
+                sources.push(target.clone());
+                queue.push((target, at, s.document.kind));
             }
         }
-        docs.insert(id, Doc { kind, from: path, to: PathBuf::new(), revision, sources });
+        docs.insert(key, Doc { kind, from: path, to: PathBuf::new(), sources });
     }
 
     // 2. Where each lands.
@@ -421,110 +435,107 @@ pub fn gather(request: &PackRequest, source: &dyn PackSource, drawings: Option<R
         found.sort_by(|a, b| a.0.cmp(&b.0));
         for (path, identity) in found {
             let Some(model) = identity.references.first() else { continue };
-            if !model.id.is_some_and(|m| docs.contains_key(&m)) {
+            let Some(id) = model.id else { continue };
+            let revision = source
+                .resolve(&path, model)
+                .and_then(|(_, _, revision)| revision)
+                .unwrap_or_else(|| model.pinned.clone());
+            let target = (id, revision);
+            if !docs.contains_key(&target) {
                 continue;
             }
             let to = place(&path)?;
             if let Some(other) = taken.insert(to.clone(), path.clone()) {
                 return Err(PackError::Clash(other, path.clone(), unlaid(&to)));
             }
-            drawn.push((path, to, model.clone(), identity));
+            drawn.push((path, to, model.clone(), identity, target));
         }
     }
 
     // 4. Parts and meshes as they are; assemblies deepest first, each with its references
     // moved and its sub-assemblies' new revisions.
     let mut files: Vec<(PackedFile, Vec<u8>)> = Vec::new();
-    let mut new_revision: HashMap<DocumentId, ContentHash> = HashMap::new();
-    let mut packed_bytes: HashMap<DocumentId, Vec<u8>> = HashMap::new();
-    for (id, doc) in docs.iter().filter(|(_, d)| d.kind != DocKind::Assembly) {
-        new_revision.insert(*id, doc.revision.clone());
+    let mut rewritten: HashMap<DocRevision, RewrittenAssembly> = HashMap::new();
+    for ((id, revision), doc) in docs.iter().filter(|(_, d)| d.kind != DocKind::Assembly) {
         let file = PackedFile {
             id: *id,
             kind: doc.kind,
             from: doc.from.clone(),
             to: unlaid(&doc.to),
-            revision: doc.revision.clone(),
+            revision: revision.clone(),
             rewritten: false,
         };
-        files.push((file, read(&doc.from, *id, doc.kind, &doc.revision)?));
+        files.push((file, read(&doc.from, *id, doc.kind, revision)?));
     }
     // Every sub-assembly before each assembly that places it, however deep or shared.
-    let assemblies = post_order(first.id, &docs);
-    let mut packed_root = None;
-    for id in &assemblies {
-        let doc = &docs[id];
-        let package = open(&doc.from, *id, &doc.revision)?;
+    for key in post_order(&root_revision, &docs) {
+        let doc = &docs[key];
+        let package = open(&doc.from, key.0, &key.1)?;
         let mut truth = (**package.assembly()).clone();
-        // Sub-assembly revisions that change, old to new, for this file's copies.
-        let mut moved_revisions: HashMap<(DocumentId, ContentHash), ContentHash> = HashMap::new();
-        for (source, (found, _)) in truth.sources.iter_mut().zip(&doc.sources) {
+        let mut current_children = Vec::new();
+        let mut has_stale_child = false;
+        for (source, found) in truth.sources.iter_mut().zip(&doc.sources) {
             let target = &docs[found];
             source.document.set_path(&doc.to, &target.to);
-            if source.document.kind == DocKind::Assembly
-                && source.document.pinned == target.revision
-                && let Some(now) = new_revision.get(found)
-            {
-                moved_revisions.insert((*found, source.document.pinned.clone()), now.clone());
-                source.document.pinned = now.clone();
+            if target.kind != DocKind::Assembly {
+                continue;
+            }
+            if source.document.pinned != found.1 {
+                has_stale_child = true;
+            } else if let Some(child) = rewritten.get(found) {
+                source.document.pinned = child.copy.revision.clone();
+                current_children.push(found.clone());
+                has_stale_child |= child.has_stale_child;
             }
         }
-        // Nested sub-assemblies' copies sit in this file's cache too, at the pins their
-        // own assemblies held; those move the same way.
-        for (sub, sub_doc) in docs.iter().filter(|(_, d)| d.kind == DocKind::Assembly) {
-            if let Some(now) = new_revision.get(sub)
-                && *now != sub_doc.revision
-            {
-                moved_revisions.entry((*sub, sub_doc.revision.clone())).or_insert_with(|| now.clone());
+        // Follow current pins only. A stale sub-assembly keeps its old display copies.
+        let mut pending: Vec<_> = current_children.iter().collect();
+        let mut moved = HashSet::new();
+        while let Some(child) = pending.pop() {
+            if moved.insert(child) {
+                pending.extend(&rewritten[child].current_children);
             }
         }
         let mut reader = package.reader();
         let mut copies: Vec<RefCopy> = Vec::new();
-        for (cid, rev) in package.copies() {
-            match moved_revisions.get(&(cid, rev.clone())) {
-                Some(now) => {
-                    let to = &docs[&cid].to;
-                    let bytes = packed_bytes.get(&cid).cloned().ok_or_else(|| io(to, &"not packed yet"))?;
-                    let packed = AssemblyPackage::from_bytes(bytes).map_err(|e| io(to, &e))?;
-                    copies.push(RefCopy::assembly(cid, now.clone(), &packed.assembly().truth_entries()));
+        for original in package.copies() {
+            if moved.contains(&original) {
+                let copy = &rewritten[&original].copy;
+                copies.push(copy.clone());
+                if !has_stale_child || copy.revision == original.1 {
+                    continue;
                 }
-                None => {
-                    if let Some(c) = reader.copy(cid, &rev).map_err(|e| io(&doc.from, &e))? {
-                        copies.push(c);
-                    }
-                }
+            }
+            if let Some(copy) = reader.copy(original.0, &original.1).map_err(|e| io(&doc.from, &e))? {
+                copies.push(copy);
             }
         }
         let kernel = package.manifest().kernel.clone();
         truth.normalize();
-        let bytes = truth.to_bytes(*id, kernel, &copies).map_err(|e| io(&doc.to, &e))?;
+        let bytes = truth.to_bytes(key.0, kernel, &copies).map_err(|e| io(&doc.to, &e))?;
         let revision = truth.semantic_hash();
-        new_revision.insert(*id, revision.clone());
-        packed_bytes.insert(*id, bytes.clone());
         let file = PackedFile {
-            id: *id,
+            id: key.0,
             kind: DocKind::Assembly,
             from: doc.from.clone(),
             to: unlaid(&doc.to),
-            revision,
+            revision: revision.clone(),
             rewritten: true,
         };
         files.push((file, bytes));
-        if *id == first.id {
-            packed_root = Some(unlaid(&doc.to));
-        }
+        let copy = RefCopy::assembly(key.0, revision, &truth.truth_entries());
+        rewritten.insert(key.clone(), RewrittenAssembly { copy, current_children, has_stale_child });
     }
 
     // 5. Drawings, pointed at their models' copies.
     if let Some(repoint) = drawings {
-        for (from, to, model, identity) in drawn {
-            let target = &docs[&model.id.expect("matched by id")];
+        for (from, to, model, identity, target) in drawn {
             let mut r = model.clone();
-            r.set_path(&to, &target.to);
-            if r.pinned == target.revision
-                && let Some(now) = new_revision.get(&model.id.expect("matched by id"))
+            r.set_path(&to, &docs[&target].to);
+            if r.pinned == target.1
+                && let Some(now) = rewritten.get(&target)
             {
-                r.pinned = now.clone();
+                r.pinned = now.copy.revision.clone();
             }
             let bytes = read(&from, identity.id, identity.kind, &identity.revision)?;
             let out = repoint(&bytes, &r).map_err(|e| io(&from, &e))?;
@@ -541,8 +552,9 @@ pub fn gather(request: &PackRequest, source: &dyn PackSource, drawings: Option<R
         }
     }
     // The assembly last, as the report promises.
-    files.sort_by_key(|(f, _)| (f.id == first.id, f.kind == DocKind::Assembly));
-    Ok(Pack { root: packed_root.expect("the root is an assembly"), files })
+    let root = unlaid(&docs[&root_revision].to);
+    files.sort_by_key(|(f, _)| (f.to == root, f.kind == DocKind::Assembly));
+    Ok(Pack { root, files })
 }
 
 /// A place in the layout folder as a path relative to the pack.
@@ -551,20 +563,21 @@ fn unlaid(path: &Path) -> PathBuf {
 }
 
 /// The assemblies under `root`, each after every assembly it places.
-fn post_order(root: DocumentId, docs: &BTreeMap<DocumentId, Doc>) -> Vec<DocumentId> {
-    fn visit(
-        id: DocumentId,
-        docs: &BTreeMap<DocumentId, Doc>,
-        seen: &mut HashSet<DocumentId>,
-        out: &mut Vec<DocumentId>,
+fn post_order<'a>(root: &'a DocRevision, docs: &'a BTreeMap<DocRevision, Doc>) -> Vec<&'a DocRevision> {
+    fn visit<'a>(
+        key: &'a DocRevision,
+        docs: &'a BTreeMap<DocRevision, Doc>,
+        seen: &mut HashSet<&'a DocRevision>,
+        out: &mut Vec<&'a DocRevision>,
     ) {
-        if docs[&id].kind != DocKind::Assembly || !seen.insert(id) {
+        let doc = &docs[key];
+        if doc.kind != DocKind::Assembly || !seen.insert(key) {
             return;
         }
-        for (child, _) in &docs[&id].sources {
-            visit(*child, docs, seen, out);
+        for child in &doc.sources {
+            visit(child, docs, seen, out);
         }
-        out.push(id);
+        out.push(key);
     }
     let mut out = Vec::new();
     visit(root, docs, &mut HashSet::new(), &mut out);

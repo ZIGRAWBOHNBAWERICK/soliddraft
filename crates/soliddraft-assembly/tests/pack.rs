@@ -8,8 +8,8 @@ use std::sync::Arc;
 
 use glam::DVec3;
 use soliddraft_assembly::{
-    AssemblyDocument, Folders, Freshness, HeldFiles, KernelSource, LoadState, OpenOptions, PackError, PackRequest,
-    Placement, gather, pack_and_go, pack_zip,
+    AssemblyDocument, AssemblyPackage, Folders, Freshness, HeldFiles, KernelSource, LoadState, OpenOptions, PackError,
+    PackRequest, Placement, gather, pack_and_go, pack_zip,
 };
 use soliddraft_document::manifest::{Manifest, write_package};
 use soliddraft_document::{ContentHash, DocKind, DocRef, DocumentId, identify_file};
@@ -420,5 +420,92 @@ fn browser_zip_keeps_the_referenced_upload_when_names_match() {
         "the zip must contain the bytes of the referenced upload"
     );
     opens_on_its_own(&out.join("rig.dwasm"), 3);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn root_and_child_keep_their_resolved_revisions_of_the_same_part() {
+    let dir = folder("resolved-revisions");
+    let first = dir.join("src/block.dwprt");
+    let second = dir.join("src/child/block.dwprt");
+    block(&first, 40.0, 10.0);
+    let mut variant = Document::open(&first, kernel()).unwrap();
+    variant.set_name("Block for the child");
+    std::fs::create_dir_all(second.parent().unwrap()).unwrap();
+    variant.save(&second).unwrap();
+    let (one, two) = (identify_file(&first).unwrap(), identify_file(&second).unwrap());
+    assert_eq!(one.id, two.id);
+    assert_ne!(one.revision, two.revision);
+
+    let child = dir.join("src/child/child.dwasm");
+    AssemblyDocument::new("Child").save(Some(&child)).unwrap();
+    let mut nested = AssemblyDocument::open(&child, with_kernel()).unwrap();
+    nested.insert(reference(&child, &second), Placement::IDENTITY).unwrap();
+    nested.save(None).unwrap();
+    let root = dir.join("src/rig.dwasm");
+    AssemblyDocument::new("Rig").save(Some(&root)).unwrap();
+    let mut rig = AssemblyDocument::open(&root, with_kernel()).unwrap();
+    rig.insert(reference(&root, &first), Placement::IDENTITY).unwrap();
+    rig.insert(reference(&root, &child), Placement::translation(DVec3::new(60.0, 0.0, 0.0))).unwrap();
+    rig.save(None).unwrap();
+
+    let into = dir.join("packed");
+    let report =
+        pack_and_go(&PackRequest { root, into: into.clone(), prefix: "P-".into(), ..Default::default() }, None)
+            .unwrap();
+    assert_eq!(report.files.len(), 4, "{report:#?}");
+    for (path, revision) in [("P-block.dwprt", one.revision), ("child/P-block.dwprt", two.revision)] {
+        let identity = identify_file(&into.join(path)).unwrap();
+        assert_eq!((identity.id, identity.revision), (one.id, revision));
+    }
+    std::fs::remove_dir_all(dir.join("src")).unwrap();
+    let mut reopened = opens_on_its_own(&report.root, 2);
+    let defs: Vec<_> = reopened.store().iter().filter_map(|(at, d)| (d.kind == DocKind::Part).then_some(at)).collect();
+    let source = KernelSource::new(kernel());
+    let mut names: Vec<_> =
+        defs.into_iter().map(|at| reopened.exact(at, &source).unwrap().lock().unwrap().name().to_owned()).collect();
+    names.sort();
+    assert_eq!(names, ["Block", "Block for the child"]);
+    reopened
+        .insert(
+            reference(&report.root, &into.join("P-block.dwprt")),
+            Placement::translation(DVec3::new(0.0, 60.0, 0.0)),
+        )
+        .unwrap();
+    reopened.save(None).unwrap();
+    opens_on_its_own(&report.root, 3);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn a_current_and_a_stale_branch_keep_both_subassembly_copies() {
+    let dir = folder("stale-branch");
+    let src = dir.join("src");
+    let root = tree(&src);
+    let shared = src.join("sub/sub.dwasm");
+    let original = identify_file(&shared).unwrap();
+    let middle = src.join("middle.dwasm");
+    AssemblyDocument::new("Middle").save(Some(&middle)).unwrap();
+    let mut branch = AssemblyDocument::open(&middle, with_kernel()).unwrap();
+    let shared_component = branch.insert(reference(&middle, &shared), Placement::IDENTITY).unwrap();
+    branch.save(None).unwrap();
+    let mut rig = AssemblyDocument::open(&root, with_kernel()).unwrap();
+    rig.insert(reference(&root, &middle), Placement::translation(DVec3::new(60.0, 60.0, 0.0))).unwrap();
+    rig.save(None).unwrap();
+    branch.rename(shared_component, Some("New label".into())).unwrap();
+    branch.save(None).unwrap();
+
+    let into = dir.join("packed");
+    let request = PackRequest { root, into: into.clone(), prefix: "P-".into(), ..Default::default() };
+    let report = pack_and_go(&request, None).unwrap();
+    let packed_shared = identify_file(&into.join("sub/P-sub.dwasm")).unwrap();
+    assert_ne!(packed_shared.revision, original.revision);
+    let copies = AssemblyPackage::open(&report.root).unwrap().copies();
+    assert!(copies.contains(&(original.id, original.revision)), "the stale branch still pins the original copy");
+    assert!(copies.contains(&(packed_shared.id, packed_shared.revision)), "the current branch pins the packed copy");
+    std::fs::remove_dir_all(src).unwrap();
+    let mut reopened = AssemblyDocument::open(&report.root, OpenOptions::default()).unwrap();
+    reopened.finish_loading();
+    assert_eq!(reopened.table().counts().parts, 4);
     std::fs::remove_dir_all(dir).unwrap();
 }

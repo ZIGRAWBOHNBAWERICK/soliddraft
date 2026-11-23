@@ -742,11 +742,13 @@ fn assembly_freshness(
     batch
 }
 
-/// Resolves parts' references from the files that hold them, each document once.
+type PartReference = (DefinitionIndex, soliddraft_document::DocumentId, DocKind, String, ContentHash);
+
+/// Resolves each distinct part reference from the file that holds it.
 #[derive(Default)]
 struct PartFreshness {
     resolvers: HashMap<Option<PathBuf>, Resolver>,
-    seen: HashMap<soliddraft_document::DocumentId, Option<(PathBuf, Option<ContentHash>)>>,
+    seen: HashMap<PartReference, Option<(PathBuf, Option<ContentHash>)>>,
 }
 
 impl PartFreshness {
@@ -759,7 +761,8 @@ impl PartFreshness {
         let mut batch = Vec::with_capacity(parts.len());
         for (i, r, parent) in parts {
             let Some(id) = r.id else { continue };
-            let hit = self.seen.entry(id).or_insert_with(|| {
+            let key = (*parent, id, r.kind, r.path.clone(), r.pinned.clone());
+            let hit = self.seen.entry(key).or_insert_with(|| {
                 let referencing = path_of.get(parent).cloned();
                 let resolver = self
                     .resolvers
@@ -818,7 +821,7 @@ fn run(
     let started = Instant::now();
     // Every reference is resolved from the file that holds it: sub-assemblies first,
     // parents before children, so their files are known when their parts are resolved;
-    // then the parts, on every worker. Each document is resolved once.
+    // then the parts, on every worker. Each distinct part reference is resolved once.
     let root = freshness.root;
     let (assemblies, parts) = freshness.split();
     let mut path_of: HashMap<DefinitionIndex, PathBuf> = HashMap::new();

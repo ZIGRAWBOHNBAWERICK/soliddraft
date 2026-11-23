@@ -222,6 +222,50 @@ fn a_tapped_hole_is_made_in_the_form_edited_milled_saved_and_reopened() {
     });
 }
 
+/// A point of the face to the tenth of a millimetre, as Hole places its first hole: the
+/// plate's top face lies on the world's x and y.
+fn tenth(at: glam::Vec3) -> soliddraft_app::sketch::P2 {
+    let tenth = |v: f32| (f64::from(v) * 10.0).round() / 10.0 + 0.0;
+    soliddraft_app::sketch::P2::new(tenth(at.x), tenth(at.y))
+}
+
+#[test]
+fn the_first_hole_goes_where_the_click_that_picked_the_face_ended() {
+    let mut app = launch(ribbon::plate(), STANDARD);
+    settle(&mut app);
+    ribbon::run_command(&mut app, "hole");
+    settle(&mut app);
+    let a = {
+        let state = &app.state().state;
+        state.viewport.camera.project(glam::Vec3::new(10.0, 5.0, 20.0), state.viewport.rect).unwrap()
+    };
+    let b = a + egui::vec2(4.0, 3.0);
+    let button = |pos, pressed| egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::default(),
+    };
+    // The button goes down at A, and in the next frame the pointer moves a few points on to
+    // B and the button comes up there: one click on the face, which ends at B.
+    let (at_a, at_b) = ribbon::render_steps::rendered(&mut app, |app| {
+        ribbon::render_steps::await_pick(app, a);
+        app.step();
+        let at_a = app.state().state.viewport.hover_point.expect("the pointer is on the face at A");
+        app.event(button(a, true));
+        app.step();
+        // Both in one frame: the harness gives each queued event a frame of its own.
+        app.input_mut().events.extend([egui::Event::PointerMoved(b), button(b, false)]);
+        app.step();
+        (at_a, app.state().state.viewport.hover_point.expect("the pointer is on the face at B"))
+    });
+    app.run_steps(3);
+    assert_ne!(tenth(at_a), tenth(at_b), "A and B are different places on the face");
+    let editing = editing(&app);
+    assert!(editing.face.is_some(), "the click picked the top face");
+    assert_eq!(editing.points, [tenth(at_b)], "the hole is where the click ended, not where it was a frame before");
+}
+
 #[test]
 fn scripted_lines_tap_a_hole_and_the_drawing_calls_it_out() {
     let kernel = std::sync::Arc::new(soliddraft_kernel_catallax::CatallaxKernel::with_diagnostics(20_000_000));

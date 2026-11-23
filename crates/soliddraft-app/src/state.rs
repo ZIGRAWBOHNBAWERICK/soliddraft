@@ -1261,6 +1261,10 @@ pub struct AppState {
     pub origin_open: bool,
     pub hover_info: Option<EntityInfo>,
     pub hover_point: Option<Vec3>,
+    /// Where the viewport click behind the selection waiting to be applied met the
+    /// model, with that selection: a tool that places at the click, as Hole does, takes
+    /// the point of the same click that picked the face.
+    pub click_point: Option<(Selection, Vec3)>,
     pub show_about: bool,
     pub show_shortcuts: bool,
     /// The open command palette.
@@ -1468,6 +1472,7 @@ impl AppState {
             origin_open: false,
             hover_info: None,
             hover_point: None,
+            click_point: None,
             show_about: false,
             show_shortcuts: false,
             palette: None,

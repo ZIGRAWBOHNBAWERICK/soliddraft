@@ -660,6 +660,14 @@ fn every_tool_runs_without_a_window_and_undoes_as_its_row_says() {
     s.call("assembly_activate_configuration", json!({ "name": "Wide" }));
     s.call("assembly_activate_configuration", json!({ "name": "Default" }));
     s.call("assembly_delete_configuration", json!({ "name": "Wide" }));
+    // A placement names its part's configuration, and goes back to the saved one.
+    let shown =
+        s.call("assembly_component_configuration", json!({ "component": parts[1], "configuration": "Default" }));
+    assert_eq!(
+        shown["component"],
+        json!({ "id": parts[1], "configuration": "Default", "configurations": ["Default"] })
+    );
+    s.call("assembly_component_configuration", json!({ "component": parts[1] }));
     let mover = parts[1].to_string();
     let step = s.call("assembly_explode_step", json!({ "paths": [mover], "direction": [0, 0, 1], "distance": 30 }));
     let step = step["added"].as_u64().unwrap();

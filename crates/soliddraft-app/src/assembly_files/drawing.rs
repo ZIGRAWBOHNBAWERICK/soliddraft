@@ -4,7 +4,7 @@
 use crate::drawing::{DrawingDoc, DrawingSession};
 use crate::state::AppState;
 use soliddraft_assembly::{AssemblyDocument, Flags, KernelSource, OccurrenceIndex, OccurrencePath, Placement};
-use soliddraft_document::{DocKind, DocRef, DocumentId};
+use soliddraft_document::{ConfigurationId, DocKind, DocRef, DocumentId};
 use soliddraft_drawing::assembly::{self, AssemblyModel, BomRow, NewAssemblyDrawing};
 use soliddraft_drawing::placed::{PlacedPart, Rigid};
 use soliddraft_drawing::{Command, Drawing, DrawingError, DrawingMeta, FoldDirection, View, ViewId, library, project};
@@ -80,7 +80,7 @@ pub fn exact_parts(doc: &mut AssemblyDocument) -> Result<ExactParts, String> {
     let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     let reference = DocRef::new(doc.id(), DocKind::Assembly, name, doc.revision());
     let source = KernelSource::new(crate::kernel());
-    let mut items: Vec<(DocumentId, BomRow)> = Vec::new();
+    let mut items: Vec<((DocumentId, Option<ConfigurationId>), BomRow)> = Vec::new();
     let mut parts = Vec::new();
     let mut documents = Vec::new();
     let rows = doc.table().len() as u32;
@@ -90,11 +90,11 @@ pub fn exact_parts(doc: &mut AssemblyDocument) -> Result<ExactParts, String> {
             continue;
         }
         let def_index = doc.table().definition(row);
-        let def = doc.store().get(def_index);
+        let def = doc.store().get(def_index).clone();
         if def.kind != DocKind::Part {
             continue;
         }
-        let document = def.key.document;
+        let document = (def.key.document, def.key.configuration.clone());
         let item = match items.iter_mut().position(|(d, _)| *d == document) {
             Some(i) => {
                 items[i].1.quantity += 1;
@@ -103,7 +103,15 @@ pub fn exact_parts(doc: &mut AssemblyDocument) -> Result<ExactParts, String> {
             None => {
                 let item = items.len() as u32 + 1;
                 let file = doc.reference(def_index).map(|r| r.path.clone()).unwrap_or_default();
-                let label = def.label.trim_end_matches(".dwprt").to_owned();
+                let mut label = def.label.trim_end_matches(".dwprt").to_owned();
+                // A part placed in one of its configurations is a row of its own, named for it.
+                if let Some(c) = &document.1 {
+                    let part = doc.exact(def_index, &source)?;
+                    let part = part.lock().map_err(|_| format!("{label}: the part is unavailable"))?;
+                    let names = part.configuration_names();
+                    let shown = names.iter().find(|(id, _)| id == c).map_or(c.0.as_str(), |(_, n)| n.as_str());
+                    label = format!("{label} ({shown})");
+                }
                 items.push((document, BomRow { item, name: label, file, quantity: 1 }));
                 item
             }

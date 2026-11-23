@@ -13,8 +13,9 @@ path, and which of the parts gives the new file its frame. This version forms:
 
 - part components of the root, not sub-assemblies or pattern members;
 - in their default state: not hidden or suppressed, without an assembly colour, a display
-  quality of their own, overrides, configurations, an explode step or a pattern seeded on
-  them, in an assembly without configurations;
+  quality of their own, overrides, an explode step or a pattern seeded on them, in an
+  assembly without configurations of its own. A part placed in one of its configurations
+  moves with that choice: its source keeps the configuration;
 - with mates the new file can hold whole: a Coincident between two chosen parts moves, and
   a distance between them moves only when its distance is a literal. One that reads a root
   value, an Origin mate on a chosen part, or a mate of a later version is refused, never

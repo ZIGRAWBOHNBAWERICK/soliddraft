@@ -2593,6 +2593,28 @@
       "evidence": "result.json, protocol.json, command summaries, inspect output, work/rig.dwdrw"
     },
     {
+      "id": "assembly-component-configurations",
+      "file": "ci/scenarios/assembly-component-configurations.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-assembly",
+        "soliddraft-drawing",
+        "soliddraft-model",
+        "soliddraft-kernel-catallax"
+      ],
+      "kernel_parts": [
+        "boolean",
+        "extrude",
+        "measure",
+        "mesh"
+      ],
+      "catallax_revision": "ccfb4e4bee95cbb42f7c1ea1dbdfe8874ed01c4a",
+      "route": "MCP part configurations -> make_assembly -> a second placement -> assembly_component_configuration (refused unknown name, then Tall) -> each placement's mesh and exact body in its configuration -> drawing with a BOM row per configuration -> save, reopen, the first placement Tall too -> drawing rebuild merges the rows -> PDF export",
+      "supported_limits": "One part with a Default and a Tall configuration placed twice; each placement shows its own configuration after save and reopen; an unknown configuration is refused with the names the part has; the BOM lists a part once per configuration placed. Sub-assembly configurations chosen from above are covered by crate tests.",
+      "evidence": "result.json, protocol.json, command summaries, work/rig.dwasm, work/rig.dwdrw, work/rig.pdf"
+    },
+    {
       "id": "assembly-pack-export",
       "file": "ci/scenarios/assembly-pack-export.json",
       "acceptance": true,

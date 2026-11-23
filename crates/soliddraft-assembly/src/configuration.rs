@@ -22,6 +22,7 @@ use std::collections::HashSet;
 
 use glam::DVec3;
 use serde::{Deserialize, Serialize};
+use soliddraft_document::ConfigurationId;
 use soliddraft_model::ValueTable;
 
 use crate::path::{ComponentId, OccurrencePath};
@@ -153,6 +154,23 @@ pub(crate) fn names_occurrence(assembly: &Assembly, path: &OccurrencePath) -> bo
             assembly.pattern(pid).is_some_and(|p| p.seeds.contains(&first.component) && index < p.rule.len())
         }
     }
+}
+
+/// The truth of `assembly` as its configuration `id` (the configuration's number, as a
+/// placement above names it) shows it: the truth itself for the active one, else with
+/// that configuration's state put in. Refuses a configuration the assembly does not have.
+pub(crate) fn configured_truth(assembly: &Assembly, id: &ConfigurationId) -> Result<Assembly, String> {
+    let wanted = id.0.parse::<u32>().ok();
+    let found = assembly
+        .configurations
+        .iter()
+        .find(|c| Some(c.id) == wanted)
+        .ok_or_else(|| format!("{} has no configuration {}", assembly.name, id.0))?;
+    let mut out = assembly.clone();
+    if let Some(state) = &found.state {
+        state.apply(&mut out).map_err(|e| e.0)?;
+    }
+    Ok(out)
 }
 
 impl ConfigState {

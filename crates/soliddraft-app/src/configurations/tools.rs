@@ -73,6 +73,7 @@ pub(crate) fn run(state: &mut AppState, tool: &str, input: &Value) -> Option<Res
             | "assembly_edit_explode_step"
             | "assembly_delete_explode_step"
             | "assembly_auto_explode"
+            | "assembly_component_configuration"
     ) {
         return None;
     }
@@ -133,6 +134,15 @@ fn run_one(state: &mut AppState, tool: &str, input: &Value) -> Result<Value, Str
             let mm = input["distance"].as_f64().unwrap_or(50.0);
             let ids = doc.auto_explode(mm).map_err(|e| e.to_string())?;
             extra = json!({ "added": ids, "exploded": exploded(doc) });
+        }
+        "assembly_component_configuration" => {
+            let id = input["component"].as_u64().ok_or("component is the component's id")? as u32;
+            let component = soliddraft_assembly::ComponentId(id);
+            edit(doc.set_configuration(component, input["configuration"].as_str()))?;
+            doc.finish_loading();
+            let choices = doc.configurations_for(component).map_err(|e| e.to_string())?;
+            let shown = doc.configuration_of(component).map_err(|e| e.to_string())?;
+            extra = json!({ "component": { "id": id, "configuration": shown, "configurations": choices } });
         }
         _ => unreachable!("listed in run"),
     }

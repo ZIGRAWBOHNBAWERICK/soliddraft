@@ -50,6 +50,18 @@ fn auto_params() -> Vec<(&'static str, Value)> {
     vec![("distance", optional(number("How far each component moves, in millimetres; 50 when left out")))]
 }
 
+fn component_configuration_params() -> Vec<(&'static str, Value)> {
+    vec![
+        ("component", integer("The root component, by its id as model_summary lists it")),
+        (
+            "configuration",
+            optional(string(
+                "The part's or sub-assembly's configuration to show, by name; left out, the one its file was saved in",
+            )),
+        ),
+    ]
+}
+
 fn explode_params() -> Vec<(&'static str, Value)> {
     vec![("exploded", boolean("true shows the exploded view, false the assembled positions"))]
 }
@@ -113,6 +125,20 @@ pub(crate) fn commands() -> Vec<CommandSpec> {
         row("assembly_delete_configuration", "Delete configuration", Icon::Config, "Delete an inactive configuration")
             .agents(Agents::Mcp, "The active one cannot be deleted; with one left the assembly has none.", name_params)
             .undo(Undo::Step),
+        row(
+            "assembly_component_configuration",
+            "Component configuration",
+            Icon::Config,
+            "Show a component in one of its part's or sub-assembly's configurations",
+        )
+        .agents(
+            Agents::Mcp,
+            "Each placement of a part or sub-assembly can show its own configuration. The component keeps its \
+             placement; its mates are solved again on the new shape. Answers with the names it can take; an unknown \
+             name is refused with them.",
+            component_configuration_params,
+        )
+        .undo(Undo::Step),
         row(
             "assembly_explode_step",
             "Explode step",

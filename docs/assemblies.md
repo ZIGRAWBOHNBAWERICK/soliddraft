@@ -76,8 +76,10 @@ level of detail.
   placements of one bolt share one source. A source lives as long as a component places
   it: deleting its last component removes it, and Undo brings both back. A hidden or
   suppressed component still places its source. A source's `configuration` picks the
-  configuration placed; it is reserved and always the default for now. A placed
-  sub-assembly shows the configuration its file was saved in.
+  configuration placed, and left out it is the one the file was saved in. For a part it is
+  the configuration's stable id from the part file (`Default` for its Default); for a
+  sub-assembly it is the number of one of its configurations. One document placed in two
+  configurations is two sources.
 - **Components** place a source. `placement` is rigid: `translation` in millimetres and
   `rotation` as a unit quaternion `[x, y, z, w]`, each left out when it is the identity's.
   There is no scale and no mirror: scale would change dimensions and mass, and a mirrored
@@ -136,8 +138,20 @@ configuration keeps its own state in its row:
 - The geometry hash leaves out the other configurations and the exploded view, so the
   active configuration decides the assembly's shape.
 
-Part configurations placed per component, and choosing a sub-assembly's configuration from
-the assembly above it, are follow-ups.
+Each component can also show one of its own document's configurations
+(`AssemblyDocument::set_configuration`, the `assembly_component_configuration` tool):
+
+- A part placed in a configuration is rebuilt in it. Its display mesh, its exact body for
+  mates, measure and drawings, and the proofs mates read are all of that configuration.
+  Display copies keep each configuration's mesh under its own name in the copy folder
+  (`display@<id>.bin`), so the assembly opens without the part files.
+- A sub-assembly placed in a configuration shows that configuration's placements,
+  suppression, hiding and overrides. Its copy in the file stays the sub-assembly's own
+  truth.
+- The component keeps its placement, and its mates are solved again on the new shape. A
+  name the document does not have is refused with the names it has, and nothing changes.
+  One undo step; the assembly's own configurations do not record the choice.
+- The bill of materials lists a part once per configuration placed, as `name (configuration)`.
 
 ## Exploded views
 

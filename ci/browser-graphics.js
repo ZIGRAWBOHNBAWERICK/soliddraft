@@ -49,9 +49,13 @@ async function click(label) {
 await load();
 const initial = await until(viewport, view => view?.curves_settled && view.triangles > 0, 'The demo part did not draw');
 await page.press('Control+Shift+P');
-await page.wait(300);
+await until(
+  () => page.eval(() => document.activeElement instanceof HTMLInputElement),
+  value => value === true,
+  'The command palette did not take keyboard focus',
+);
 await page.type('Preferences');
-await page.wait(300);
+await page.eval(() => new Promise(done => requestAnimationFrame(() => requestAnimationFrame(() => done(true)))));
 await page.press('Enter');
 await click('Preferences: Graphics');
 await click('Graphics preset: Performance');

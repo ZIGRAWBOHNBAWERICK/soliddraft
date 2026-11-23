@@ -432,6 +432,9 @@ impl SolidDraftApp {
     pub(super) fn opened_from(&mut self, opened: Result<Document, String>, saved: Option<&[u8]>) {
         match opened {
             Ok(doc) => {
+                // An editor or sketch puts back the rollback it set for its view first: the
+                // part may stay open in its tab.
+                self.state.end_document_views();
                 self.close_editor();
                 self.state.sketch = None;
                 self.state.chat.preview = None;

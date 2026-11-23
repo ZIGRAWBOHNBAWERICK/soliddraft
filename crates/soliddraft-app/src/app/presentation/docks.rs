@@ -593,6 +593,15 @@ impl TabViewer for Panels<'_> {
     }
 
     fn on_close(&mut self, tab: &mut Tab) -> egui_dock::tab_viewer::OnCloseResponse {
+        // A document with unsaved changes stays open until Save, Discard or Cancel.
+        let target = match tab {
+            Tab::Drawing => Some(crate::top_bar::CloseTarget::Drawing),
+            Tab::Assembly => Some(crate::top_bar::CloseTarget::Assembly),
+            _ => None,
+        };
+        if target.is_some_and(|target| crate::top_bar::ask_before_closing(&mut *self.state, target)) {
+            return egui_dock::tab_viewer::OnCloseResponse::Ignore;
+        }
         if matches!(tab, Tab::Drawing) {
             self.state.drawing.session = None;
             self.state.drawing.active = false;

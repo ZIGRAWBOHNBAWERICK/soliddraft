@@ -1410,7 +1410,7 @@ fn drawing_tool_is(s: &AppState, f: fn(&DrawingTool) -> bool) -> bool {
 }
 
 /// The active document's undo and redo labels.
-fn undo_labels(s: &AppState) -> (Option<String>, Option<String>) {
+pub(crate) fn undo_labels(s: &AppState) -> (Option<String>, Option<String>) {
     if let Some(a) = s.assembly.session.as_ref().filter(|_| s.assembly.is_active()) {
         return (a.doc.undo_label().map(str::to_owned), a.doc.redo_label().map(str::to_owned));
     }

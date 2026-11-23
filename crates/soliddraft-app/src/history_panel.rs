@@ -17,6 +17,8 @@ const PLAY_STEP_SECS: f64 = 0.65;
 struct Playback {
     playing: bool,
     last_step_time: f64,
+    /// The open part that is playing: playback stops when another part takes the tab.
+    document: Option<soliddraft_document::DocumentId>,
 }
 
 fn feature_icon(kind: &FeatureKind) -> Icon {
@@ -83,6 +85,10 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
     let pb_id = egui::Id::new("d1_history_playback");
     let mut pb = ui.data(|d| d.get_temp::<Playback>(pb_id).unwrap_or_default());
     let now = ui.input(|i| i.time);
+    if pb.document != Some(state.doc.instance()) {
+        pb.playing = false;
+        pb.document = Some(state.doc.instance());
+    }
 
     if pb.playing {
         if !can_edit || total == 0 || current >= total {

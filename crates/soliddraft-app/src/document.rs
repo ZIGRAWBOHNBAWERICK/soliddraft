@@ -562,6 +562,45 @@ pub enum HolePickTarget {
     Vertex,
 }
 
+/// A target end condition chosen before its target was picked. The panel keeps showing
+/// the chosen mode, and OK is refused, until a pick in the viewport resolves it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum UnresolvedEnd {
+    UpToVertex,
+    UpToSurface,
+    OffsetFromSurface { offset: f64, reverse_offset: bool },
+}
+
+impl UnresolvedEnd {
+    /// The pick that resolves it.
+    pub fn pick(self) -> HolePickTarget {
+        match self {
+            Self::UpToVertex => HolePickTarget::Vertex,
+            Self::UpToSurface | Self::OffsetFromSurface { .. } => HolePickTarget::Surface,
+        }
+    }
+
+    /// Why OK is refused until the target is picked.
+    pub fn refusal(self) -> &'static str {
+        match self {
+            Self::UpToVertex => "pick the vertex Up To Vertex ends at",
+            Self::UpToSurface => "pick the face Up To Surface ends at",
+            Self::OffsetFromSurface { .. } => "pick the face Offset From Surface is measured from",
+        }
+    }
+
+    /// The end condition with its picked target face, for the face modes.
+    pub fn with_face(self, face: FaceRef) -> Option<model::hole_wizard::HoleEndCondition> {
+        match self {
+            Self::UpToVertex => None,
+            Self::UpToSurface => Some(model::hole_wizard::HoleEndCondition::UpToSurface { face }),
+            Self::OffsetFromSurface { offset, reverse_offset } => {
+                Some(model::hole_wizard::HoleEndCondition::OffsetFromSurface { face, offset, reverse_offset })
+            }
+        }
+    }
+}
+
 /// Inline draft parameters for creating a linear point pattern in the position sketch.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct HoleLinearPatternDraft {
@@ -617,6 +656,8 @@ pub struct HoleParams {
     pub position_sketch: Option<sketch::Sketch>,
     /// Active viewport pick target (surface/vertex end condition), if any.
     pub picking_target: Option<HolePickTarget>,
+    /// A target end condition chosen before its target was picked.
+    pub unresolved_end: Option<UnresolvedEnd>,
     /// Text field for naming a new favorite preset.
     pub favorite_name: String,
     /// Currently selected callout parameter in the Tolerance/Precision section.
@@ -644,6 +685,7 @@ impl Default for HoleParams {
             sketch_feature: None,
             position_sketch: None,
             picking_target: None,
+            unresolved_end: None,
             favorite_name: String::new(),
             selected_callout_param: model::hole_wizard::CalloutParam::Diameter,
             show_custom_sizing: false,
@@ -918,6 +960,9 @@ impl HoleParams {
     /// Builds a model [`model::HoleFeature`] for preview (inline points without needing
     /// an uncommitted sketch feature in the forked preview document).
     pub fn to_preview_model(&self) -> Result<model::HoleFeature, String> {
+        if let Some(end) = self.unresolved_end {
+            return Err(end.refusal().to_owned());
+        }
         let points = if let Some(sk) = &self.position_sketch {
             sk.entities
                 .iter()
@@ -4606,6 +4651,12 @@ impl Document {
     /// The effective material of the configuration shown by the app.
     pub fn material(&self) -> Option<&soliddraft_materials::Material> {
         self.model.material(self.model.active_configuration())
+    }
+
+    /// The effective material of one solid body in the configuration shown: its own, or
+    /// the part's when it has none.
+    pub fn body_material(&self, body: u32) -> Option<&soliddraft_materials::Material> {
+        self.model.body_material(body, self.model.active_configuration())
     }
 
     fn material_scope(&self) -> soliddraft_document::ConfigScope {

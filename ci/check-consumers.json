@@ -52,6 +52,9 @@
     "ci/browser-feature-panel.mjs": [
       "web"
     ],
+    "ci/browser-feature-regressions.js": [
+      "web"
+    ],
     "ci/browser-hole-wizard.mjs": [
       "web"
     ],

@@ -1002,6 +1002,33 @@ jobs:
           chrome-devtools-axi emulate --viewport 1400x900x1
           chrome-devtools-axi open 'http://127.0.0.1:8779/'
           chrome-devtools-axi run < ci/browser-mate-controller.js
+      - name: Generate feature regression fixtures
+        env:
+          SOLIDDRAFT_BROWSER_FIXTURES: ${{ github.workspace }}/target/web-dist/fixtures
+        run: |
+          mkdir -p "$SOLIDDRAFT_BROWSER_FIXTURES"
+          cargo test --locked -p soliddraft-app --test configuration_grid --test hole_thread --test hole_wizard -- --test-threads=1
+      - name: Check hole, drawing, and parameter regressions in Chromium
+        env:
+          CHROME_DEVTOOLS_AXI_EXECUTABLE_PATH: /usr/bin/google-chrome
+          CHROME_DEVTOOLS_AXI_CHROME_ARGS: --no-sandbox --enable-unsafe-webgpu --enable-unsafe-swiftshader --use-angle=swiftshader
+        run: |
+          export PATH="$RUNNER_TEMP/browser-tools/node_modules/.bin:$PATH"
+          export CHROME_DEVTOOLS_AXI_MCP_PATH="$RUNNER_TEMP/browser-tools/node_modules/chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js"
+          python3 -m http.server 8796 --bind 127.0.0.1 --directory target/web-dist > "$RUNNER_TEMP/feature-regressions-server.log" 2>&1 &
+          server=$!
+          trap 'chrome-devtools-axi stop; kill "$server"' EXIT
+          for scenario in depth offset positions formula visibility callouts notes; do
+            export CHROME_DEVTOOLS_AXI_SESSION="feature-regressions-$scenario"
+            if ! chrome-devtools-axi open about:blank; then
+              chrome-devtools-axi stop || true
+              chrome-devtools-axi open about:blank
+            fi
+            chrome-devtools-axi emulate --viewport 1600x1000x1
+            chrome-devtools-axi open "http://127.0.0.1:8796/#$scenario"
+            chrome-devtools-axi run < ci/browser-feature-regressions.js
+            chrome-devtools-axi stop
+          done
       - name: Keep preferences per browser in Chromium
         env:
           # WebGL: a headless screenshot cannot read a WebGPU canvas.

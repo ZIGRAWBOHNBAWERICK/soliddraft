@@ -1322,7 +1322,8 @@ pub struct AppState {
     pub show_shortcuts: bool,
     pub show_design_properties: bool,
     pub show_customize_bar: bool,
-    /// Display length unit for the current file (shown in the bottom bar).
+    /// The length unit the active part's readouts use, chosen in the bottom bar. Each
+    /// part tab keeps its own; it is not saved in the file.
     pub display_unit: DisplayUnit,
     /// The open command palette.
     pub palette: Option<crate::palette::Palette>,

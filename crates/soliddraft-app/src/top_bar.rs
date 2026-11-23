@@ -60,6 +60,8 @@ pub const TOP_BAR_COMMANDS: &[&str] = &["save", "assembly_save", "undo", "redo",
 pub struct ParkedPart {
     pub doc: Document,
     pub viewport: ViewportState,
+    /// The units this part's readouts use.
+    pub unit: crate::state::DisplayUnit,
 }
 
 /// Manages open part tabs alongside the active part in `AppState::doc`.
@@ -126,7 +128,8 @@ impl OpenParts {
 
         let old_doc = std::mem::replace(&mut state.doc, new_doc);
         let old_vp = std::mem::replace(&mut state.viewport, new_viewport);
-        self.before.push(ParkedPart { doc: old_doc, viewport: old_vp });
+        let unit = std::mem::take(&mut state.display_unit);
+        self.before.push(ParkedPart { doc: old_doc, viewport: old_vp, unit });
         self.before.append(&mut self.after);
     }
 
@@ -150,12 +153,13 @@ impl OpenParts {
         all.append(&mut self.before);
         let current_doc = std::mem::replace(&mut state.doc, Document::new("_swap", crate::kernel()));
         let current_vp = std::mem::take(&mut state.viewport);
-        all.push(ParkedPart { doc: current_doc, viewport: current_vp });
+        all.push(ParkedPart { doc: current_doc, viewport: current_vp, unit: state.display_unit });
         all.append(&mut self.after);
 
         let chosen = all.remove(index);
         state.doc = chosen.doc;
         state.viewport = chosen.viewport;
+        state.display_unit = chosen.unit;
         let rest = all.split_off(index);
         self.before = all;
         self.after = rest;
@@ -182,6 +186,7 @@ impl OpenParts {
             state.sketch = None;
             state.doc = next.doc;
             state.viewport = next.viewport;
+            state.display_unit = next.unit;
             return false;
         }
         if let Some(prev) = self.before.pop() {
@@ -189,6 +194,7 @@ impl OpenParts {
             state.sketch = None;
             state.doc = prev.doc;
             state.viewport = prev.viewport;
+            state.display_unit = prev.unit;
             return false;
         }
         // Last part tab closed: switch to Assembly or Drawing if open, else Start page.

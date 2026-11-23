@@ -222,7 +222,6 @@ pub struct PhysicalState {
     pub density: f64,
     pub density_unit: DensityUnit,
     pub user_overrode_density: bool,
-    pub requested_body: Option<u64>,
 }
 
 impl Default for PhysicalState {
@@ -235,7 +234,6 @@ impl Default for PhysicalState {
             density: 7850.0,
             density_unit: DensityUnit::KgM3,
             user_overrode_density: false,
-            requested_body: None,
         }
     }
 }
@@ -321,7 +319,7 @@ fn physical_analysis_control(ui: &mut egui::Ui, state: &mut AppState) {
         .align(RectAlign::TOP_END)
         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
         .show(|ui| {
-            ui.set_min_width(330.0);
+            ui.set_width(316.0);
             ui.horizontal(|ui| {
                 let (ir, _) = ui.allocate_exact_size(vec2(15.0, 15.0), Sense::hover());
                 icons::paint(ui.painter(), Icon::Mass, ir, theme::accent());
@@ -337,7 +335,7 @@ fn physical_analysis_control(ui: &mut egui::Ui, state: &mut AppState) {
             egui::Grid::new("physical_analysis_units").num_columns(2).spacing([12.0, 6.0]).show(ui, |ui| {
                 ui.vertical(|ui| {
                     ui.label(egui::RichText::new("Length").size(11.0).color(theme::muted()));
-                    egui::ComboBox::from_id_salt("pa_length").width(140.0).selected_text(phys.length.label()).show_ui(
+                    egui::ComboBox::from_id_salt("pa_length").width(134.0).selected_text(phys.length.label()).show_ui(
                         ui,
                         |ui| {
                             for u in LengthUnit::ALL {
@@ -348,7 +346,7 @@ fn physical_analysis_control(ui: &mut egui::Ui, state: &mut AppState) {
                 });
                 ui.vertical(|ui| {
                     ui.label(egui::RichText::new("Area").size(11.0).color(theme::muted()));
-                    egui::ComboBox::from_id_salt("pa_area").width(140.0).selected_text(phys.area.label()).show_ui(
+                    egui::ComboBox::from_id_salt("pa_area").width(134.0).selected_text(phys.area.label()).show_ui(
                         ui,
                         |ui| {
                             for u in AreaUnit::ALL {
@@ -361,7 +359,7 @@ fn physical_analysis_control(ui: &mut egui::Ui, state: &mut AppState) {
 
                 ui.vertical(|ui| {
                     ui.label(egui::RichText::new("Volume").size(11.0).color(theme::muted()));
-                    egui::ComboBox::from_id_salt("pa_volume").width(140.0).selected_text(phys.volume.label()).show_ui(
+                    egui::ComboBox::from_id_salt("pa_volume").width(134.0).selected_text(phys.volume.label()).show_ui(
                         ui,
                         |ui| {
                             for u in VolumeUnit::ALL {
@@ -372,7 +370,7 @@ fn physical_analysis_control(ui: &mut egui::Ui, state: &mut AppState) {
                 });
                 ui.vertical(|ui| {
                     ui.label(egui::RichText::new("Mass").size(11.0).color(theme::muted()));
-                    egui::ComboBox::from_id_salt("pa_mass").width(140.0).selected_text(phys.mass.label()).show_ui(
+                    egui::ComboBox::from_id_salt("pa_mass").width(134.0).selected_text(phys.mass.label()).show_ui(
                         ui,
                         |ui| {
                             for u in MassUnit::ALL {
@@ -396,7 +394,7 @@ fn physical_analysis_control(ui: &mut egui::Ui, state: &mut AppState) {
                     ui.label(egui::RichText::new("Density unit").size(11.0).color(theme::muted()));
                     let prev_unit = phys.density_unit;
                     egui::ComboBox::from_id_salt("pa_density_unit")
-                        .width(140.0)
+                        .width(134.0)
                         .selected_text(phys.density_unit.label())
                         .show_ui(ui, |ui| {
                             for u in DensityUnit::ALL {
@@ -411,12 +409,19 @@ fn physical_analysis_control(ui: &mut egui::Ui, state: &mut AppState) {
                 ui.end_row();
             });
 
-            ui.add_space(6.0);
+            let source = match state.doc.material() {
+                Some(material) if !phys.user_overrode_density && material.density_kg_m3.is_some_and(|d| d > 0.0) => {
+                    format!("Density from the material, {}.", material.name)
+                }
+                Some(material) => format!("Material {}: mass uses the density entered here.", material.name),
+                None => "No material assigned: mass uses the density entered here.".to_owned(),
+            };
+            ui.label(egui::RichText::new(source).size(11.0).color(theme::muted()));
+            ui.add_space(4.0);
             ui.separator();
             ui.add_space(4.0);
 
             if let Some(body) = state.doc.display_body() {
-                let rev = state.doc.revision();
                 if let Some(mp) = crate::measure::mass::cached(&state.doc, body) {
                     let mass = compute_mass(mp.volume, phys.density, phys.density_unit, phys.mass);
                     let volume = phys.volume.from_mm3(mp.volume);
@@ -458,22 +463,45 @@ fn physical_analysis_control(ui: &mut egui::Ui, state: &mut AppState) {
                         ui.end_row();
                     });
                 } else {
-                    let target_feature = state.doc.features.iter().rev().find(|f| f.body == Some(body)).map(|f| f.id);
-                    if phys.requested_body != Some(rev)
-                        && state.doc.proof_state().current_proved_display()
-                        && let Some(feat_id) = target_feature
-                    {
-                        phys.requested_body = Some(rev);
-                        let _ = state.mass.request(&state.doc, feat_id, ui.ctx());
+                    // The measurement runs off the interface thread. Asking again while one
+                    // is pending or refused does nothing, so this asks on every frame until
+                    // an answer or a refusal is there to show.
+                    let feature = state.doc.features.iter().rev().find(|f| f.body == Some(body)).map(|f| f.id);
+                    let waiting = "Calculating mass properties...";
+                    let mut refusal = None;
+                    let mut pending = false;
+                    match feature {
+                        None => refusal = Some("This body has no feature to measure.".to_owned()),
+                        Some(_) if !state.doc.proof_state().current_proved_display() => pending = true,
+                        Some(id) => match state.mass.message(&state.doc, id) {
+                            Some(message) if message == waiting => pending = true,
+                            Some(message) => refusal = Some(message.to_owned()),
+                            None => match state.mass.request(&state.doc, id, ui.ctx()) {
+                                Ok(()) => pending = true,
+                                Err(error) => refusal = Some(error),
+                            },
+                        },
                     }
-                    ui.horizontal(|ui| {
-                        ui.spinner();
-                        ui.label(egui::RichText::new("Computing exact physical properties…").color(theme::muted()));
-                    });
-                    if let Some(feat_id) = target_feature
-                        && ui.small_button("Compute now").clicked()
-                    {
-                        let _ = state.mass.request(&state.doc, feat_id, ui.ctx());
+                    if pending {
+                        ui.horizontal(|ui| {
+                            ui.spinner();
+                            let text = if state.doc.proof_state().current_proved_display() {
+                                "Computing exact physical properties…"
+                            } else {
+                                "Waiting for the rebuild to finish…"
+                            };
+                            ui.label(egui::RichText::new(text).color(theme::muted()));
+                        });
+                    }
+                    if let Some(refusal) = refusal {
+                        ui.label(egui::RichText::new("Not measured").family(theme::semibold()).color(theme::error()));
+                        ui.label(egui::RichText::new(refusal).color(theme::muted()));
+                        if let Some(id) = feature
+                            && ui.small_button("Try again").clicked()
+                            && let Err(error) = state.mass.request(&state.doc, id, ui.ctx())
+                        {
+                            state.note(error, crate::state::NoteKind::Error);
+                        }
                     }
                 }
             } else {
@@ -525,7 +553,8 @@ fn selection_filter_control(ui: &mut egui::Ui, state: &mut AppState) {
 
 fn units_control(ui: &mut egui::Ui, state: &mut AppState) {
     let short = state.display_unit.short();
-    let resp = bar_pill(ui, None, short, "Default units", false, true).on_hover_text("Default units for current file");
+    let resp =
+        bar_pill(ui, None, short, "Default units", false, true).on_hover_text("Units the readouts of this part use");
 
     egui::Popup::menu(&resp)
         .align(RectAlign::TOP_END)
@@ -533,7 +562,7 @@ fn units_control(ui: &mut egui::Ui, state: &mut AppState) {
         .show(|ui| {
             let row_w = 196.0;
             ui.set_width(row_w);
-            ui.label(egui::RichText::new("Default units for current file").size(11.0).color(theme::muted()));
+            ui.label(egui::RichText::new("Units for this part").size(11.0).color(theme::muted()));
             ui.separator();
             for unit in DisplayUnit::ALL {
                 let is_current = state.display_unit == unit;

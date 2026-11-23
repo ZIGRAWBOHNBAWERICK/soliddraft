@@ -85,6 +85,18 @@ pub(super) fn show(p: &mut Preferences, ui: &mut egui::Ui) {
         icons::paint(ui.painter(), Icon::Gear, ir, theme::accent());
         ui.label(egui::RichText::new("Preferences").strong().size(14.5).color(theme::ink()));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            // The header is the window's only title, so it carries the close button too.
+            // Closing keeps what was changed; Cancel is the way back.
+            let (rect, close) = ui.allocate_exact_size(vec2(22.0, 22.0), Sense::click());
+            close.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Close window"));
+            if close.hovered() {
+                ui.painter().rect_filled(rect, CornerRadius::same(4), theme::hover());
+            }
+            let ink = if close.hovered() { theme::ink() } else { theme::muted() };
+            icons::paint(ui.painter(), Icon::Close, rect.shrink(5.0), ink);
+            if close.on_hover_text("Close").clicked() {
+                p.close_requested = true;
+            }
             egui::Frame::new()
                 .fill(theme::chip())
                 .stroke(Stroke::new(1.0, theme::line()))

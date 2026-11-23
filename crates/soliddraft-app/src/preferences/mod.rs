@@ -676,9 +676,11 @@ pub fn window(ctx: &egui::Context, prefs: &mut Option<Preferences>, state: &mut 
     {
         p.cancel_and_close();
     }
-    let mut open = true;
+    // The D1 header inside the window is its title and holds its close button.
     egui::Window::new("Preferences")
-        .open(&mut open)
+        .title_bar(false)
+        .pivot(egui::Align2::CENTER_CENTER)
+        .default_pos(ctx.content_rect().center())
         .default_size([960.0, 620.0])
         .min_size([700.0, 440.0])
         .max_size([1120.0, 760.0])
@@ -714,7 +716,7 @@ pub fn window(ctx: &egui::Context, prefs: &mut Option<Preferences>, state: &mut 
             }
         }
     }
-    if !open || p.close_requested {
+    if p.close_requested {
         *prefs = None;
     }
 }

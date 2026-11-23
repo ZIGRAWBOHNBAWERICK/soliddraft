@@ -66,8 +66,11 @@ fn browser_fixture(name: &str, doc: &Document) {
 
 #[test]
 fn parameter_grid_edits_rebuild_a_blind_wizard_hole() {
+    use serde_json::{Value, json};
+    use soliddraft_app::app_tools::AppTools;
     use soliddraft_app::state::AppState;
     use soliddraft_app::values_tab::{self, Field, ValuesAction};
+    use soliddraft_assistant::{Caller, tools::call_checked};
 
     let mut doc = ribbon::plate();
     let before = volume(&doc);
@@ -92,6 +95,17 @@ fn parameter_grid_edits_rebuild_a_blind_wizard_hole() {
         let expected = std::f64::consts::PI * 2.5_f64.powi(2) * depth;
         assert!((removed - expected).abs() < 1e-4, "{input} removed {removed} mm³, expected {expected}");
     }
+
+    values_tab::apply(&mut state, ValuesAction::Commit(field, String::new()));
+    let mut call = |tool, arguments| {
+        let caller = Caller::Mcp { client: "wizard-depth-test".into() };
+        let result = call_checked(&mut AppTools { state: &mut state }, tool, arguments, &caller);
+        assert!(!result.is_error, "{tool}: {}", result.content);
+        serde_json::from_str::<Value>(&result.content).unwrap()
+    };
+    call("edit_hole", json!({ "feature": "Hole1", "depth": 9 }));
+    assert_eq!(call("feature", json!({ "name": "Hole1" }))["depth"], json!(9.0));
+    assert_eq!(state.doc.model().threaded_walls()[0].depth(), Some(9.0));
 }
 
 #[test]

@@ -626,6 +626,10 @@ fn hiding_the_active_body_keeps_thread_marks_on_a_visible_body() {
     assert_ne!(active, 0);
     let mut app = launch(state.doc, STANDARD);
     ux_tools::rebuilt(&mut app);
+    app.state_mut().state.push(AppAction::SelectBody(active));
+    app.state_mut().state.push(AppAction::Select(None));
+    settle(&mut app);
+    assert_eq!(app.state().state.doc.active_body, active);
     ux_tools::pointer_to_chrome(&mut app);
     let mut case = Case::new("thread-visible-other-body");
     let before = case.frame(&mut app, "both-bodies");

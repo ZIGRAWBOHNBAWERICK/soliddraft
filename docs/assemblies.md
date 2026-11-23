@@ -255,7 +255,7 @@ at the assembly's origin. Mates become joints:
 
 | Mates between two parts | Joint |
 |---|---|
-| Hinge with angle limits | revolute, between the limits |
+| Hinge with angle limits | revolute, with limits measured from the accepted pose |
 | Hinge without limits | continuous |
 | Concentric between axes, without Lock rotation | continuous about the axis |
 | Concentric between axes, with Lock rotation | prismatic along the axis |
@@ -264,15 +264,17 @@ at the assembly's origin. Mates become joints:
 | anything else | fixed, at the pose the assembly holds |
 
 Prismatic, planar and spherical mappings require a single mate between the two
-parts. Additional mates on the same pair can restrict motion further. URDF writes
+parts. Additional mates can restrict motion further. A Lock mate keeps its pair fixed,
+including a pair with a Hinge. URDF writes
 an unlimited slide with infinite limits. It uses the `spherical` joint type read
 by SolidDraft's importer. ROS urdfdom supports its own list of joint types, which
 excludes `spherical`.
 
 A Gear between two of those joints makes the second follow the first (URDF `mimic`,
-`newton:mimicJoint` in OpenUSD). The joints form a tree from `base_link`: a mate that would
-close a loop is left out, and a part no mate reaches is fixed to `base_link` where it
-stands. Every choice like that is reported in words, naming the mates. Each joint frame
+`newton:mimicJoint` in OpenUSD). Each connected group of parts attaches to `base_link` by
+a fixed joint. It keeps its internal joints, including mates authored in sub-assemblies.
+An Origin mate picks the attachment part when the group has one. A mate that would close
+a loop is left out and named in the export report. Each joint frame
 puts the joint's axis along its X. URDF lengths are metres; the OpenUSD layer is in
 millimetres with Z up.
 

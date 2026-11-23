@@ -9,7 +9,7 @@ use num_rational::BigRational;
 use num_traits::{Signed, Zero};
 use serde::Serialize;
 use soliddraft_document::{ContentHash, DocRef, DocumentId};
-use soliddraft_kernel_api::{Certainty, ExactRadius, ExactRational, ExactSupport};
+use soliddraft_kernel_api::{Certainty, EnclosedSupport, ExactRadius, ExactRational, ExactSupport};
 use soliddraft_model::ValueTable;
 
 use crate::document::{AssemblyDocument, EditError, key_of};
@@ -2127,9 +2127,13 @@ fn read_of(mate: &str, body: Body, proof: &SupportProof) -> Result<Read, MateRef
 /// What an end reads from what its mate stored, for the status: the stored axis or point,
 /// or the stored normal of a plane with offset zero.
 fn stored_read(end: &End) -> Option<Read> {
+    read_stored_support(&end.body, &end.entity, end.support.as_ref())
+}
+
+fn read_stored_support(body: &Body, entity: &Entity, support: Option<&StoredSupport>) -> Option<Read> {
     let exact = |v: f64| solver::exact(v).unwrap_or_default();
     let radius = |r: &Option<f64>, outward: &Option<bool>| r.map(|r| Radius { value: Ok(exact(r)), outward: *outward });
-    let (local, radius) = match &end.support {
+    let (local, radius) = match support {
         Some(StoredSupport::Enclosed { support }) => (Local::Native(support.clone()), None),
         Some(StoredSupport::Axis { direction, through, radius: r, outward }) => {
             (Local::Axis(LocalAxis { direction: *direction, through: through.map(exact) }), radius(r, outward))
@@ -2154,11 +2158,35 @@ fn stored_read(end: &End) -> Option<Read> {
             (Local::Outline(LocalOutline { plane, pieces }), None)
         }
         None => {
-            let normal = end.entity.stored_normal()?;
+            let normal = entity.stored_normal()?;
             (Local::Plane(LocalPlane { normal, offset: BigRational::zero() }), None)
         }
     };
-    Some(Read { body: end.body.clone(), local, radius })
+    Some(Read { body: body.clone(), local, radius })
+}
+
+/// The signed degrees a hinge has turned at the supplied poses, measured from the
+/// same transverse frames and unwrapped about the same interval as its CAD stops.
+pub fn hinge_angle_at(axes: &[FaceEndpoint; 2], poses: [Placement; 2], limits: [f64; 2]) -> Option<f64> {
+    let [a, b] = axes;
+    check_angle_limits(limits).ok()?;
+    if a.path == b.path {
+        return None;
+    }
+    let read = |axis: &FaceEndpoint| {
+        let support = axis.support.as_ref()?;
+        match support {
+            StoredSupport::Axis { .. } => {}
+            StoredSupport::Enclosed { support } if matches!(support.as_ref(), EnclosedSupport::Axis { .. }) => {}
+            _ => return None,
+        }
+        read_stored_support(&axis.path, &axis.entity, Some(support))
+    };
+    let reads = [read(a)?, read(b)?];
+    let poses = BTreeMap::from([(a.path.clone(), poses[0]), (b.path.clone(), poses[1])]);
+    let near = ((limits[0] + limits[1]) * 0.5).to_radians();
+    let angle = motion::hinge_angle(&reads, &poses, near).to_degrees();
+    angle.is_finite().then_some(angle)
 }
 
 /// The solver's constraints for a mate between faces, edges or vertices, from what its

@@ -17,6 +17,10 @@ pub(super) use outline::outline_side;
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
 
+pub(super) fn hinge_angle(reads: &[super::command::Read; 2], poses: &BTreeMap<Body, Placement>, near: f64) -> f64 {
+    native::joint_angle(reads, poses, near)
+}
+
 const MM: f64 = 1e-9;
 const RAD: f64 = 1e-9;
 const ITERATIONS: usize = 120;

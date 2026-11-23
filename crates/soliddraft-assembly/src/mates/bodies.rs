@@ -379,6 +379,11 @@ fn label(prefix: &OccurrencePath, name: &str) -> String {
 }
 
 impl AssemblyDocument {
+    /// Assemblies whose mates apply, keyed by the path of each assembly occurrence.
+    pub fn mate_holders(&self) -> Vec<(OccurrencePath, &Assembly)> {
+        Scope::new(self.assembly(), self.table(), self.store()).holders()
+    }
+
     /// The face `e` names, on the part at `body`, as a solve reads it.
     pub(crate) fn end_of(&self, scope: &Scope, body: Body, e: &FaceEndpoint, mate: &str) -> Result<End, MateRefusal> {
         let named = |r: MateRefusal| MateRefusal { mates: vec![mate.to_owned()], ..r };

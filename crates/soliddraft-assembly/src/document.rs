@@ -201,8 +201,8 @@ pub struct AssemblyDocument {
     pub(crate) drag: Option<crate::mates::drag::Drag>,
     /// True while the exploded view is shown.
     pub(crate) exploded: bool,
-    /// The occurrences the shown exploded view moved, to put back on collapse.
-    pub(crate) explode_moved: Vec<OccurrencePath>,
+    /// The accepted local placements of rows moved directly by the exploded view.
+    pub(crate) explode_moved: Vec<(OccurrenceIndex, Placement)>,
     pub(crate) motion: Option<crate::interference::motion::Motion>,
     pub(crate) motion_report: Option<crate::interference::motion::MotionReport>,
     undo: Vec<Record>,

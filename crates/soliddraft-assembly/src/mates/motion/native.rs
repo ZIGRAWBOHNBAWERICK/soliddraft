@@ -247,7 +247,7 @@ fn clock<N: Number>(read: &Read, poses: &BTreeMap<Body, Placement>) -> V<N> {
     let basis = std::array::from_fn(|k| N::f(if k == index { 1.0 } else { 0.0 }));
     rotate(&poses[&read.body], unit(cross(local, basis)))
 }
-fn joint_angle<N: Number>(reads: &[Read], poses: &BTreeMap<Body, Placement>, center: f64) -> N {
+pub(super) fn joint_angle<N: Number>(reads: &[Read], poses: &BTreeMap<Body, Placement>, center: f64) -> N {
     let (u, v) = (clock(&reads[0], poses), clock(&reads[1], poses));
     let n = world::<N>(&reads[0], poses).direction();
     dot(n, cross(u, v)).atan2(dot(u, v), center)
@@ -520,24 +520,8 @@ pub(super) fn residual<N: Number>(
         Rule::Hinge { sign, plane_sign, limits } => {
             coincident(out, a, b, *sign);
             if let Some([lo, hi]) = limits {
-                let clock = |read: &Read| {
-                    let local =
-                        world::<N>(read, &BTreeMap::from([(read.body.clone(), Placement::IDENTITY)])).direction();
-                    let index =
-                        (0..3).min_by(|i, j| local[*i].middle().abs().total_cmp(&local[*j].middle().abs())).unwrap();
-                    let basis = std::array::from_fn(|k| N::f(if k == index { 1.0 } else { 0.0 }));
-                    rotate(&poses[&read.body], unit(cross(local, basis)))
-                };
-                let (u, v) = (clock(&reads[0]), clock(&reads[1]));
-                let n = a.direction();
-                range(
-                    out,
-                    dot(n, cross(u, v)).atan2(dot(u, v), ((*lo + *hi) * 0.5).to_radians()),
-                    radians(*lo),
-                    radians(*hi),
-                    true,
-                    rank,
-                );
+                let angle = joint_angle(reads, poses, ((*lo + *hi) * 0.5).to_radians());
+                range(out, angle, radians(*lo), radians(*hi), true, rank);
             }
             from_plane(out, world(&reads[2], poses), world(&reads[3], poses), *plane_sign, N::f(0.0), None, rank);
         }
@@ -622,16 +606,9 @@ pub(super) fn seed_hinge(reads: &[Read], rule: &Rule, poses: &mut BTreeMap<Body,
         p.rotation = crate::placement::canonical((q * p.rotation).normalize());
     }
     if let Some([lo, hi]) = limits {
-        let clock = |read: &Read| {
-            let local = world::<f64>(read, &BTreeMap::from([(read.body.clone(), Placement::IDENTITY)])).direction();
-            let index = (0..3).min_by(|i, j| local[*i].abs().total_cmp(&local[*j].abs())).unwrap();
-            let basis = std::array::from_fn(|k| if k == index { 1.0 } else { 0.0 });
-            rotate(&poses[&read.body], unit(cross(local, basis)))
-        };
-        let (u, v) = (clock(&reads[0]), clock(&reads[1]));
         let n = world::<f64>(&reads[0], poses).direction();
         let near = ((*lo + *hi) * 0.5).to_radians();
-        let angle = <f64 as Number>::atan2(dot(n, cross(u, v)), dot(u, v), near);
+        let angle = joint_angle::<f64>(reads, poses, near);
         let target = angle.clamp(lo.to_radians(), hi.to_radians());
         let half = (target - angle) * if moving == b { 0.5 } else { -0.5 };
         let sine = libm::sin(half);

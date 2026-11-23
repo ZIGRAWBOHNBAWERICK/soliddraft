@@ -48,6 +48,7 @@ fn part(path: &Path, w: f64, d: f64, h: f64) -> PathBuf {
         flip: false,
         end: Default::default(),
         draft: None,
+        ..Default::default()
     };
     doc.apply(Command::AddExtrude { params, via_assistant: false }).unwrap();
     file::save(&mut doc, path).unwrap();

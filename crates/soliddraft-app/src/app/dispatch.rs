@@ -728,7 +728,11 @@ impl SolidDraftApp {
                 if self.state.in_sketch() {
                     self.apply(ctx, AppAction::ExitSketch);
                 }
+                let merge = self.state.doc.merges(id);
                 self.open_editor(Some(id), params);
+                if let Some(editor) = self.state.editor.as_mut() {
+                    editor.merge = merge;
+                }
                 self.state.doc.selection = Some(Selection::Feature(id));
             }
             AppAction::CommitEditor => {
@@ -752,6 +756,18 @@ impl SolidDraftApp {
                     self.state.note(why, NoteKind::Error);
                     return;
                 }
+                // A From or Direction 2 still waiting for its pick keeps the form open.
+                if let Some(editor) = self.state.editor.as_mut() {
+                    let choices = match &editor.params {
+                        EditorParams::Extrude(p) => Some(&p.choices),
+                        EditorParams::Cut(p) => Some(&p.choices),
+                        _ => None,
+                    };
+                    if let Some(Err(why)) = choices.map(|c| c.to_model()) {
+                        editor.refuse(why);
+                        return;
+                    }
+                }
                 let Some(e) = self.close_editor() else { return };
                 let reopen = (e.target, e.params.clone(), e.then_feature);
                 let cmd = match (e.target, e.params) {
@@ -764,8 +780,8 @@ impl SolidDraftApp {
                         None => Command::AddFeature(FeatureKind::Sweep(s)),
                     },
                     (target, EditorParams::Revolve(r)) => match target {
-                        Some(id) => Command::EditFeature { id, kind: FeatureKind::Revolve(r) },
-                        None => Command::AddFeature(FeatureKind::Revolve(r)),
+                        Some(id) => Command::EditRevolve { id, revolve: r, merge: e.merge },
+                        None => Command::AddRevolve { revolve: r, merge: e.merge },
                     },
                     (Some(id), EditorParams::Extrude(p)) => Command::EditExtrude { id, params: p },
                     (None, EditorParams::Extrude(p)) => Command::AddExtrude { params: p, via_assistant: false },
@@ -1105,6 +1121,74 @@ impl SolidDraftApp {
                                 } else {
                                     d.faces.push(r);
                                 }
+                            }
+                            return;
+                        }
+                        // A From or Direction 2 field waiting for its pick takes the click first.
+                        (
+                            EditorParams::Extrude(ExtrudeParams { choices, .. })
+                            | EditorParams::Cut(CutParams { choices, .. }),
+                            Some(pick),
+                        ) if choices.from.picking()
+                            || matches!(
+                                choices.direction2,
+                                Some(crate::document::Direction2 { end: EndKind::UpToFace(None), .. })
+                            ) =>
+                        {
+                            let doc = &self.state.doc;
+                            let plane = |pick: Selection| match pick {
+                                Selection::Face(f) => {
+                                    doc.face_ref(f).map(|face| soliddraft_model::PlaneRef::Face { face })
+                                }
+                                Selection::Reference(Reference::Plane(p)) => {
+                                    Some(soliddraft_model::PlaneRef::Datum { datum: p.to_model(), offset: 0.0 })
+                                }
+                                Selection::Feature(id)
+                                    if doc
+                                        .model()
+                                        .reference_plane(soliddraft_model::FeatureId(id as u32))
+                                        .is_some() =>
+                                {
+                                    Some(soliddraft_model::PlaneRef::Feature {
+                                        feature: soliddraft_model::FeatureId(id as u32),
+                                    })
+                                }
+                                _ => None,
+                            };
+                            match (&mut choices.from, pick) {
+                                (crate::document::StartKind::Surface(slot @ None), pick) => match plane(pick) {
+                                    Some(p) => {
+                                        *slot = Some(p);
+                                        e.error = None;
+                                    }
+                                    None if matches!(pick, Selection::Face(_)) => {
+                                        e.error = Some(
+                                            "Starting on a curved face is coming soon. Pick a planar face or a plane"
+                                                .into(),
+                                        );
+                                    }
+                                    None => e.error = Some("Pick a planar face or a plane to start from".into()),
+                                },
+                                (crate::document::StartKind::Vertex(slot @ None), Selection::Vertex(v)) => {
+                                    match doc.vertex_ref(v) {
+                                        Some(r) => {
+                                            *slot = Some(r);
+                                            e.error = None;
+                                        }
+                                        None => e.error = Some("This vertex cannot be named. Pick another".into()),
+                                    }
+                                }
+                                (crate::document::StartKind::Vertex(None), _) => {
+                                    e.error = Some("Pick a vertex to start from".into());
+                                }
+                                (_, Selection::Face(f)) => {
+                                    if let Some(crate::document::Direction2 { end: EndKind::UpToFace(face), .. }) =
+                                        &mut choices.direction2
+                                    {
+                                        *face = doc.any_face_ref(f);
+                                    }
+                                }
+                                _ => {}
                             }
                             return;
                         }

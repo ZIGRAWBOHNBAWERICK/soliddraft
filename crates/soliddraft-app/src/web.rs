@@ -354,6 +354,7 @@ pub fn take_upload() -> Option<crate::platform::Uploaded> {
 
 thread_local! {
     static SHOWN_DETAILS: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
+    static SHOWN_FEATURE_PANEL: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
     static SHOWN_PART_CHECK: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
     static SHOWN_OPTIONS: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
     static SHOWN_BUILD: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
@@ -496,6 +497,7 @@ pub fn shown_build() -> String {
 /// Starts a frame with no Details panel drawn, until [`show_details`] notes one.
 pub(crate) fn begin_frame() {
     SHOWN_DETAILS.with_borrow_mut(String::clear);
+    SHOWN_FEATURE_PANEL.with_borrow_mut(String::clear);
     SHOWN_PART_CHECK.with_borrow_mut(String::clear);
     SHOWN_OPTIONS.with_borrow_mut(String::clear);
     SHOWN_CONTROLS.with_borrow_mut(std::collections::BTreeMap::clear);
@@ -561,6 +563,19 @@ pub(crate) fn show_part_check(shown: serde_json::Value) {
 #[wasm_bindgen]
 pub fn shown_part_check() -> String {
     SHOWN_PART_CHECK.with_borrow(|check| check.clone())
+}
+
+/// Notes what the feature property panel is drawing, for [`shown_feature_panel`].
+pub(crate) fn show_feature_panel(shown: serde_json::Value) {
+    SHOWN_FEATURE_PANEL.with_borrow_mut(|panel| *panel = shown.to_string());
+}
+
+/// The feature property panel in the last frame drawn, as JSON: `{"title", "sections":
+/// [{"title", "open", "on"}]}`, with `on` null for a section without a tick box. Empty
+/// when that frame drew no panel. Read only, for browser checks.
+#[wasm_bindgen]
+pub fn shown_feature_panel() -> String {
+    SHOWN_FEATURE_PANEL.with_borrow(|panel| panel.clone())
 }
 
 /// Notes the rows the Details panel is drawing, for [`shown_details`].

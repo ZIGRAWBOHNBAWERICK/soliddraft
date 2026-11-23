@@ -24,6 +24,47 @@ export is coming soon. Combine the bodies into one solid before exporting, makin
 drawing, or inserting the part into an assembly. Several-solid STEP and IGES import
 is a separate follow-up and currently reports that it is coming soon.
 
+## Feature property panel
+
+While a feature is created or edited, the side area turns into its property panel. OK,
+Cancel and Preview sit at the top. The fields below come in sections that fold. The
+common choices start open and the rest start folded. Direction 2 and Thin feature have a
+tick box. Ticking one opens it, and untick it to drop the choice. A section you open stays
+open for that kind of feature until the app closes. Enter applies the feature and
+Escape cancels it. When the side area is hidden, it shows for the panel and hides again
+when the feature closes.
+
+## Extrusion options
+
+An extrusion or cut has these choices besides its end and depth:
+
+- From starts it on the sketch plane, on a plane or planar face parallel to the sketch,
+  on the plane through a vertex, or at an offset from the sketch plane. The offset is
+  measured along the first direction, and Reverse offset measures it the other way.
+  Starting on a plane or face that is not parallel to the sketch, or on a curved face,
+  is coming soon and is refused by name.
+- Flip direction turns the first direction round. An offset start turns with it.
+- Merge result joins an extrusion or revolve to the body it grows from. Off makes it the
+  first feature of a new body. Turning it on again moves it back into the body of the
+  nearest solid feature above it.
+- Direction 2 also goes against the first direction from the same start, blind, through
+  all, up to the next face or up to a face. With a length both ways the extrusion is one
+  sweep through its start. With a face limit it is one sweep each way.
+- Thin feature sweeps a wall along the sketch's lines, arcs and circles instead of the
+  closed regions: on one side (outside a closed contour unless reversed), centred, or on
+  both sides with two thicknesses. An open chain's wall gets a straight end at each end.
+  A wall along a spline or an ellipse is coming soon.
+- Selected contours extrudes only the ticked closed regions. None ticked extrudes every
+  region. A contour is named by the sketch curves around it, so moving them keeps it and
+  deleting one loses it.
+
+The Draft option works without Direction 2 and Thin feature. A draft with either is
+coming soon.
+
+Parts whose extrusions use From, Direction 2, Thin feature or Selected contours are
+saved as `soliddraft-part/4`, so an older application refuses them instead of building
+a different part. Other parts keep format 2, or 3 with several bodies.
+
 ## Loft
 
 Loft joins two or more closed sketch regions or planar faces, in the order shown in

@@ -941,6 +941,21 @@ jobs:
           name: browser-manufacturing-information
           path: ${{ runner.temp }}/browser-manufacturing-information
           if-no-files-found: ignore
+      - name: Extrude in the feature panel with Direction 2 and Merge result off, save, reopen and edit it in Chromium
+        timeout-minutes: 15
+        env:
+          CHROME_ARGS: --no-sandbox --enable-unsafe-swiftshader --use-angle=swiftshader
+        run: |
+          python3 -m http.server 8774 --bind 127.0.0.1 --directory target/web-dist > "$RUNNER_TEMP/feature-panel-server.log" 2>&1 &
+          server=$!
+          trap 'kill "$server"' EXIT
+          node ci/browser-feature-panel.mjs /usr/bin/google-chrome http://127.0.0.1:8774/ "$RUNNER_TEMP/browser-feature-panel"
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-feature-panel
+          path: ${{ runner.temp }}/browser-feature-panel
+          if-no-files-found: ignore
       - name: Make, mate, save and reopen an assembly of uploaded parts, add a Universal Joint, refuse it a right angle, and choose between uploaded assemblies, in Chromium
         timeout-minutes: 30
         env:

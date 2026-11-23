@@ -328,11 +328,11 @@ pub fn open_options(app: &mut App) {
             app.run_steps(8);
         }
     } else if app.state().state.editor.is_some() {
-        if !app.state().state.form_bar.expanded
-            && let Some(more) = app.query_by_label_contains("More (")
-        {
-            more.click();
-            app.run_steps(8);
+        // The feature panel's folded sections hold the rest of the form: unfold them all.
+        for _ in 0..16 {
+            let Some(fold) = app.query_all_by_label_contains("Unfold ").next() else { break };
+            fold.click();
+            app.run_steps(6);
         }
     } else if !app.state().state.options_details {
         let label = if app.state().state.assembly.is_active() {
@@ -351,13 +351,7 @@ pub fn open_options(app: &mut App) {
 
 /// Closes the details sheet before interacting with geometry beneath it.
 pub fn close_options(app: &mut App) {
-    if app.state().state.editor.is_some()
-        && app.state().state.form_bar.expanded
-        && let Some(more) = app.query_by_label_contains("More (")
-    {
-        more.click();
-        app.run_steps(8);
-    }
+    // The feature panel sits beside the viewport and covers none of it.
     if app.query_by_label("Close options").is_some() {
         app.get_by_label("Close options").click();
         app.run_steps(8);

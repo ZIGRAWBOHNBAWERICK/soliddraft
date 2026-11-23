@@ -714,7 +714,7 @@ impl SolidDraftApp {
         if !start {
             crate::tool_palette::panel(root, &mut self.state);
             crate::command_line::panel(root, &mut self.state, &status);
-            if self.state.tree_shown() {
+            if self.state.tree_shown() || crate::feature_panel::active(&self.state) {
                 self.side_panel(root, Side::Tree, window_width);
             }
         }

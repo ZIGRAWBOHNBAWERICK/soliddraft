@@ -204,7 +204,10 @@ impl SolidDraftApp {
             Side::Tree if self.state.drawing.is_active() => "Drawing tree",
             _ => side.title(),
         };
-        let mut shown = self.state.tree_shown();
+        // The feature property panel shows even when the user hid the side area; the
+        // area hides again when the feature closes.
+        let forced = crate::feature_panel::active(&self.state) && !self.state.tree_shown();
+        let mut shown = self.state.tree_shown() || forced;
         let mut open_requested = false;
         let state = &mut self.state;
         egui::Panel::show_switched(root, &mut shown, collapsed, expanded, |ui, expanded| {
@@ -214,7 +217,9 @@ impl SolidDraftApp {
                 open_requested = true;
             }
         });
-        self.state.show_tree(shown || open_requested);
+        if !forced {
+            self.state.show_tree(shown || open_requested);
+        }
         let panel = self.state.layout.panel_mut(side);
         if let Some(s) = egui::PanelState::load(root.ctx(), side.panel_id()) {
             panel.width = s.outer_rect.width();

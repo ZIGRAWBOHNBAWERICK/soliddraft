@@ -655,6 +655,8 @@ impl RowSpec<'static> {
 pub(crate) fn row(ui: &mut egui::Ui, spec: RowSpec<'_>) -> egui::Response {
     let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), theme::ROW_HEIGHT), Sense::click_and_drag());
     resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, spec.selected, spec.name));
+    #[cfg(target_arch = "wasm32")]
+    crate::web::show_control(format!("Tree: {}", spec.name), rect);
     if let Some(shown) = spec.shown {
         ui.ctx().accesskit_node_builder(resp.id, |node| {
             node.set_state_description(if shown { "Shown" } else { "Hidden" });

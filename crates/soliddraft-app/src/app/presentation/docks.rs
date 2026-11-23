@@ -40,6 +40,11 @@ pub(in crate::app) fn center_dock() -> DockState<Tab> {
 /// at the window's edge chooses between them, so the area has no tabs of its own.
 pub(in crate::app) fn pane(ui: &mut egui::Ui, state: &mut AppState) {
     ui.spacing_mut().item_spacing = vec2(6.0, 4.0);
+    // While a feature is created or edited the side area is its property panel.
+    if crate::feature_panel::active(state) {
+        crate::feature_panel::show(ui, state);
+        return;
+    }
     match state.layout.pane {
         Pane::Values => {
             title(ui, "Values");

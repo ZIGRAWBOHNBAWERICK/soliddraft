@@ -36,7 +36,7 @@ fn active_tool(state: &AppState) -> (Icon, String, String) {
     if let Some(editor) = &state.editor {
         let icon =
             commands::all().iter().find(|c| (c.active)(state) && c.outside_sketch).map_or(Icon::Config, |c| c.icon);
-        return (icon, editor.title(), "".into());
+        return (icon, editor.title(), "Set it up in the side panel. Enter applies it, Esc cancels".into());
     }
     if state.measure.open {
         return (Icon::Measure, "Measure".into(), "Pick edges or faces to measure".into());
@@ -65,10 +65,6 @@ fn show(ui: &mut egui::Ui, state: &mut AppState) {
         return;
     }
     let part = !state.assembly.is_active() && !state.drawing.is_active();
-    if part && state.editor.is_some() && !state.in_sketch() {
-        crate::feature_forms::show(ui, state);
-        return;
-    }
     state.form_bar.reset();
     let context = (state.in_sketch(), state.assembly.is_active(), state.drawing.is_active());
     ui.data_mut(|data| {

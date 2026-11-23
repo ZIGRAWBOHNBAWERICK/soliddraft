@@ -23,6 +23,7 @@ pub mod documents_browser;
 pub mod drag;
 pub mod drawing;
 pub mod feature_forms;
+pub mod feature_panel;
 pub mod file;
 pub mod fillet_collect;
 pub mod form_bar;
@@ -125,6 +126,7 @@ pub fn populate_demo(doc: &mut Document) {
             flip: false,
             end: Default::default(),
             draft: None,
+            ..Default::default()
         },
         ExtrudeParams {
             sketch: None,
@@ -134,6 +136,7 @@ pub fn populate_demo(doc: &mut Document) {
             flip: true,
             end: Default::default(),
             draft: None,
+            ..Default::default()
         },
         ExtrudeParams {
             sketch: None,
@@ -143,6 +146,7 @@ pub fn populate_demo(doc: &mut Document) {
             flip: false,
             end: Default::default(),
             draft: None,
+            ..Default::default()
         },
     ] {
         doc.apply(Command::AddExtrude { params, via_assistant: false }).ok();
@@ -165,6 +169,7 @@ pub fn bench_document() -> Document {
             flip: false,
             end: Default::default(),
             draft: None,
+            ..Default::default()
         },
         via_assistant: false,
     })

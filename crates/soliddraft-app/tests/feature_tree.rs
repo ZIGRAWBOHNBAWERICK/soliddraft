@@ -304,7 +304,15 @@ fn a_nested_sketch_drags_out_of_its_feature_to_a_legal_place() {
     doc.apply(Command::EditSketch { id: hole, sketch: circle }).unwrap();
     let cut = doc
         .apply(Command::AddCut {
-            params: CutParams { sketch: hole, depth: 20.0, through_all: true, flip: true, up_to: None, draft: None },
+            params: CutParams {
+                sketch: hole,
+                depth: 20.0,
+                through_all: true,
+                flip: true,
+                up_to: None,
+                draft: None,
+                choices: Default::default(),
+            },
         })
         .unwrap()
         .unwrap();

@@ -444,8 +444,15 @@ fn assembly_colour_replaces_and_reveals_the_part_finish_after_reopen() {
     let file = out_dir().join("appearance-assembly.dwasm");
     std::fs::write(&file, assembly.to_bytes(id, None, &copies).unwrap()).unwrap();
 
-    let mut app =
-        Harness::builder().with_size(vec2(1440.0, 900.0)).with_pixels_per_point(1.0).wgpu().build_eframe(|cc| {
+    let adapter = std::cell::RefCell::new(None);
+    let mut app = Harness::builder()
+        .with_size(vec2(1440.0, 900.0))
+        .with_pixels_per_point(1.0)
+        .with_render_every_step(true)
+        .with_step_dt(1.0 / 60.0)
+        .wgpu()
+        .build_eframe(|cc| {
+            *adapter.borrow_mut() = cc.wgpu_render_state.clone();
             SolidDraftApp::new(
                 cc,
                 soliddraft_app::document::Document::new("Part", soliddraft_app::kernel()),
@@ -480,7 +487,19 @@ fn assembly_colour_replaces_and_reveals_the_part_finish_after_reopen() {
     };
 
     open(&mut app);
-    assert!(sample(&mut app, "part-finish").iter().all(|c| c[2] > c[0] + 30.0));
+    let pixels = sample(&mut app, "part-finish");
+    let mut draws = 0;
+    if let Some(adapter) = &*adapter.borrow() {
+        let renderer = adapter.renderer.read();
+        if let Some(viewport) = renderer.callback_resources.get::<soliddraft_app::viewport::render::ViewportRenderer>()
+        {
+            draws = viewport.assembly_stats().draws;
+        }
+    }
+    assert!(
+        pixels.iter().all(|c| c[2] > c[0] + 30.0),
+        "expected two blue components, got {pixels:?} from {draws} draws"
+    );
     let red = Appearance::new("override-red", "Red", Srgb::new(210, 33, 22));
     app.state_mut().state.push(AppAction::Assembly(AssemblyAction::SetColour(path.clone(), Some(red))));
     app.run_steps(10);

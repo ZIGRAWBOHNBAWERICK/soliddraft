@@ -515,7 +515,31 @@ fn num(v: f64) -> String {
 }
 
 fn escape(s: &str) -> String {
-    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\t', "&#9;")
+        .replace('\n', "&#10;")
+        .replace('\r', "&#13;")
+}
+
+fn xml_char(ch: char) -> char {
+    match ch {
+        '\u{0}'..='\u{8}' | '\u{b}'..='\u{c}' | '\u{e}'..='\u{1f}' | '\u{fffe}' | '\u{ffff}' => '\u{fffd}',
+        _ => ch,
+    }
+}
+
+fn xml_comment(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for ch in s.chars().map(xml_char) {
+        if ch == '-' && out.ends_with('-') {
+            out.push(' ');
+        }
+        out.push(ch);
+    }
+    out
 }
 
 /// The articulation as a URDF at `path` and its meshes as binary STL in millimetres in a
@@ -524,7 +548,7 @@ fn escape(s: &str) -> String {
 pub fn urdf_files(a: &Articulation, path: &Path) -> Files {
     let dir = path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
     let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("robot");
-    let mesh_dir_name = format!("{stem}_meshes");
+    let mesh_dir_name = format!("{}_meshes", stem.chars().map(xml_char).collect::<String>());
     let mesh_dir = dir.join(&mesh_dir_name);
     let mut files = Vec::new();
     for m in &a.meshes {
@@ -532,7 +556,8 @@ pub fn urdf_files(a: &Articulation, path: &Path) -> Files {
     }
     let mut x = String::new();
     let _ = writeln!(x, "<?xml version=\"1.0\"?>");
-    let _ = writeln!(x, "<!-- Written by SolidDraft from the assembly {}. Lengths in metres. -->", escape(&a.name));
+    let _ =
+        writeln!(x, "<!-- Written by SolidDraft from the assembly {}. Lengths in metres. -->", xml_comment(&a.name));
     let _ = writeln!(x, "<robot name=\"{}\">", escape(&safe(&a.name)));
     for l in &a.links {
         let _ = writeln!(x, "  <link name=\"{}\">", escape(&l.name));
@@ -574,7 +599,7 @@ pub fn urdf_files(a: &Articulation, path: &Path) -> Files {
         };
         let _ = writeln!(x, "  <joint name=\"{}\" type=\"{kind}\">", escape(&j.name));
         if !j.mates.is_empty() {
-            let _ = writeln!(x, "    <!-- from the mates {} -->", escape(&j.mates.join(", ")).replace("--", "- -"));
+            let _ = writeln!(x, "    <!-- from the mates {} -->", xml_comment(&j.mates.join(", ")));
         }
         let _ = writeln!(x, "    <parent link=\"{}\"/>", escape(&a.links[j.parent].name));
         let _ = writeln!(x, "    <child link=\"{}\"/>", escape(&a.links[j.child].name));

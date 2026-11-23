@@ -400,3 +400,23 @@ fn lock_holds_an_existing_hinge_fixed_in_both_exports() {
     }
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn urdf_accepts_hyphen_runs_and_xml_characters_in_names() {
+    let dir = folder("xml");
+    let (mut doc, [a, b]) = shafts(&dir, "Robot --- & <fixture>\u{1}");
+    doc.mate_origin("Ground", a, true, false).unwrap();
+    add_hinge(&mut doc, "Spin --- & <fixture>-", [a, b], None);
+    let path = dir.join("rig & fixture.urdf");
+    let scene = exported_scene(&mut doc, &path);
+    assert!(scene.joints.iter().any(|j| j.kind == JointKind::Continuous));
+    assert_eq!(scene.nodes.iter().filter(|n| n.body.is_some()).count(), 2);
+    let xml = std::fs::read_to_string(path).unwrap();
+    assert!(xml.contains("filename=\"rig &amp; fixture_meshes/"));
+    for after in xml.split("<!--").skip(1) {
+        let comment = after.split_once("-->").unwrap().0;
+        assert!(!comment.contains("--") && !comment.ends_with('-'), "{comment:?}");
+    }
+    assert!(!xml.contains('\u{1}'), "XML 1.0 excludes this control character");
+    std::fs::remove_dir_all(dir).unwrap();
+}

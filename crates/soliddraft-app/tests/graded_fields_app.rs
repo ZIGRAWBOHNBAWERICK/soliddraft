@@ -18,6 +18,23 @@ use soliddraft_kernel_api::{Grade, GradeAxis, LinearGrade};
 type App = Harness<'static, SolidDraftApp>;
 
 fn button(app: &mut App, label: &str) {
+    if app.query_all_by_role_and_label(egui::accesskit::Role::Button, label).next().is_none() {
+        // The strip has no room for this tool's card: it is in its group's More menu.
+        let menus: Vec<String> = app
+            .query_all_by_role(egui::accesskit::Role::Button)
+            .filter_map(|n| egui_kittest::kittest::NodeT::accesskit_node(&n).label().map(|l| l.to_string()))
+            .filter(|l| l.starts_with("More ") && l.ends_with(" tools"))
+            .collect();
+        for menu in menus {
+            app.get_by_label(&menu).click();
+            app.run_steps(8);
+            if app.query_all_by_role_and_label(egui::accesskit::Role::Button, label).next().is_some() {
+                break;
+            }
+            app.key_press(egui::Key::Escape);
+            app.run_steps(8);
+        }
+    }
     app.get_all_by_role_and_label(egui::accesskit::Role::Button, label)
         .next()
         .unwrap_or_else(|| panic!("missing button {label}"))
@@ -25,10 +42,25 @@ fn button(app: &mut App, label: &str) {
     app.run_steps(4);
 }
 
+/// Unfolds the feature panel's folded sections, scrolling each into view first.
+fn unfold(app: &mut App) {
+    use egui_kittest::kittest::NodeT;
+    for _ in 0..16 {
+        let Some(label) = app.query_all_by_label_contains("Unfold ").next().and_then(|n| n.accesskit_node().label())
+        else {
+            break;
+        };
+        app.get_by_label(&label).scroll_to_me();
+        app.run_steps(24);
+        app.get_by_label(&label).click();
+        app.run_steps(6);
+    }
+}
+
 fn field(app: &mut App, label: &str, text: &str) {
-    if app.query_by_label(label).is_none() && !app.state().state.form_bar.expanded {
-        app.get_by_label_contains("More (").click();
-        app.run_steps(8);
+    // A field in a folded section of the feature panel: unfold the sections.
+    if app.query_by_label(label).is_none() {
+        unfold(app);
     }
     // The property page scrolls; bring the field into view as a user would.
     app.get_by_label(label).scroll_to_me();
@@ -86,9 +118,13 @@ fn the_editor_grades_d0s_beam_radius_along_z() {
     button(&mut app, "Lattice");
     field(&mut app, "Cell size value", "100");
     assert!(app.query_by_label("Beam radius").is_some(), "the designed label");
-    app.get_by_label_contains("More (").click();
-    app.run_steps(8);
-    button(&mut app, "Linear along an axis");
+    unfold(&mut app);
+    app.get_by_label("Beam radius grade").scroll_to_me();
+    app.run_steps(24);
+    app.get_by_label("Beam radius grade").click();
+    app.run_steps(4);
+    app.get_by_label("Linear along an axis").click();
+    app.run_steps(4);
     button(&mut app, "z");
     for (name, value) in [("from", "20"), ("to", "30"), ("start", "1"), ("end", "2")] {
         field(&mut app, &format!("Beam radius {name} value"), value);
@@ -106,7 +142,10 @@ fn the_editor_grades_d0s_beam_radius_along_z() {
     assert_eq!(name, "Lattice1");
     let FeatureKind::Lattice(l) = kind else { panic!("last feature is a lattice") };
     let d0 = Grade::Linear(LinearGrade { axis: GradeAxis::Z, from: 20.0, to: 30.0, start: 1.0, end: 2.0 });
-    assert_eq!((l.cell_size_mm, l.radius_mm, l.accuracy_mm, l.min_detail_mm), (Some(100.0), Some(d0), 0.1, 0.1));
+    assert_eq!(
+        (l.cell_size_mm, l.radius_mm.clone(), l.accuracy_mm, l.min_detail_mm),
+        (Some(100.0), Some(d0), 0.1, 0.1)
+    );
     assert_eq!(status, FeatureStatus::Ok);
 
     // The summary states the grade as it was entered, and shows no measured property.

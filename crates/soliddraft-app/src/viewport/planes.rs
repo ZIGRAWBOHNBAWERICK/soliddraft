@@ -233,7 +233,7 @@ mod tests {
     }
 
     fn visible(planes: [bool; 3], axes: [bool; 3]) -> Visible {
-        Visible { body: true, planes, axes, sketches: Vec::new() }
+        Visible { body: true, hidden_bodies: Default::default(), planes, axes, sketches: Vec::new() }
     }
 
     fn scene(planes: [bool; 3], axes: [bool; 3], camera: &Camera) -> ReferenceScene {

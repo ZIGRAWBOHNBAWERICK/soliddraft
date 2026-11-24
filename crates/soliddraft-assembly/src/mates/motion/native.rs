@@ -5,13 +5,13 @@ use super::*;
 use soliddraft_kernel_api::EnclosedSupport;
 
 #[derive(Clone, Copy)]
-enum World<N: Number> {
+pub(super) enum World<N: Number> {
     Plane { normal: V<N>, offset: N },
     Axis { direction: V<N>, through: V<N>, radius: Option<(N, bool)> },
     Point { at: V<N>, radius: Option<(N, bool)> },
 }
 impl<N: Number> World<N> {
-    fn direction(self) -> V<N> {
+    pub(super) fn direction(self) -> V<N> {
         match self {
             Self::Plane { normal, .. } => normal,
             Self::Axis { direction, .. } => direction,
@@ -32,7 +32,7 @@ impl<N: Number> World<N> {
         }
     }
 }
-fn world<N: Number>(read: &Read, poses: &BTreeMap<Body, Placement>) -> World<N> {
+pub(super) fn world<N: Number>(read: &Read, poses: &BTreeMap<Body, Placement>) -> World<N> {
     let p = &poses[&read.body];
     let radius = read.radius.as_ref().and_then(|r| {
         r.outward.map(|o| {
@@ -92,6 +92,7 @@ enum Kind {
     Axis,
     Point,
     Outline,
+    ArcSlot,
     Other,
 }
 fn kind(r: &Read) -> Kind {
@@ -100,6 +101,7 @@ fn kind(r: &Read) -> Kind {
         Local::Axis(_) => Kind::Axis,
         Local::Point(_) => Kind::Point,
         Local::Outline(_) => Kind::Outline,
+        Local::ArcSlot(_) => Kind::ArcSlot,
         Local::Native(s) => match s.as_ref() {
             EnclosedSupport::Plane { .. } => Kind::Plane,
             EnclosedSupport::Axis { .. } => Kind::Axis,
@@ -221,14 +223,29 @@ pub(in crate::mates) fn native_constraint(
                 && reads[2].body == reads[3].body
                 && reads[0].body != reads[2].body
         }
-        Rule::Path => kinds == [Kind::Outline, Kind::Point] && reads[0].body != reads[1].body,
+        Rule::Path { mode, follow, up } => {
+            super::outline::check_position(&mate, &reads[0], mode, "path")?;
+            let steered = 2 + usize::from(follow.is_some()) + usize::from(up.is_some());
+            kinds.len() == steered
+                && kinds[..2] == [Kind::Outline, Kind::Point]
+                && reads[0].body != reads[1].body
+                && kinds[2..].iter().all(|k| directed(*k))
+                && reads[2..].iter().all(|r| r.body == reads[1].body)
+        }
         Rule::Cam { .. } => {
             kinds.len() == 2
                 && kinds[0] == Kind::Outline
                 && reads[0].body != reads[1].body
                 && (kinds[1] == Kind::Point || (kinds[1] == Kind::Axis && curved(&reads[1])))
         }
-        Rule::Profile { .. } | Rule::Slot { .. } => false,
+        Rule::Slot { mode, .. } => {
+            let arc = kinds == [Kind::ArcSlot, Kind::Axis] && reads[0].body != reads[1].body;
+            if arc {
+                super::outline::check_position(&mate, &reads[0], mode, "slot")?;
+            }
+            arc
+        }
+        Rule::Profile { .. } => false,
     };
     if !valid {
         return Err(MateRefusal {
@@ -415,8 +432,12 @@ pub(super) fn residual<N: Number>(
     poses: &BTreeMap<Body, Placement>,
     rank: bool,
 ) {
-    if matches!(rule, Rule::Path | Rule::Cam { .. }) {
+    if matches!(rule, Rule::Path { .. } | Rule::Cam { .. }) {
         super::outline::rows(out, reads, rule, poses);
+        return;
+    }
+    if matches!(rule, Rule::Slot { .. }) {
+        super::outline::arc_slot_rows(out, reads, rule, poses, rank);
         return;
     }
     let a = world::<N>(&reads[0], poses);
@@ -570,7 +591,9 @@ pub(super) fn residual<N: Number>(
             let sign = N::f(if *reverse { 1.0 } else { -1.0 });
             scalar(out, N::q(&ratio[0]) * slide(1, b) + sign * N::q(&ratio[1]) * slide(0, a) - N::q(offset), false);
         }
-        Rule::Profile { .. } | Rule::Slot { .. } | Rule::Path | Rule::Cam { .. } => scalar(out, N::f(f64::NAN), false),
+        Rule::Profile { .. } | Rule::Slot { .. } | Rule::Path { .. } | Rule::Cam { .. } => {
+            scalar(out, N::f(f64::NAN), false)
+        }
     }
 }
 

@@ -757,7 +757,9 @@ fn difference_near(a: &image::RgbaImage, b: &image::RgbaImage, point: Pos2, ppp:
 /// The part of the view clear of the toolbar, the cube, the pills and the view's border.
 pub fn grid_crop(app: &App) -> Rect {
     let rect = viewport(app);
-    Rect::from_min_max(pos2(rect.left() + 24.0, rect.top() + 110.0), pos2(rect.right() - 120.0, rect.bottom() - 60.0))
+    // Clear of the view cube at the top right and of the whole band the heads-up pills and
+    // the navigation bar take at the bottom: a line under a pill is hidden in both frames.
+    Rect::from_min_max(pos2(rect.left() + 24.0, rect.top() + 110.0), pos2(rect.right() - 120.0, rect.bottom() - 88.0))
 }
 
 /// One line found in the difference of two frames: where it runs across the view, in

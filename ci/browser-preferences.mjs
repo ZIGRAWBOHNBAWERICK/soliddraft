@@ -29,9 +29,9 @@ const KEY = 'soliddraft-settings';
 const SIZE = { width: 1400, height: 813 };
 // Where the controls are, in CSS pixels.
 const AT = {
-  solidworks: [468, 152], onshape: [575, 152],
-  orbitAndZoom: [80, 156], gridAndPlanes: [80, 227],
-  showGrid: [245, 133], wheelInvert: [244, 242], close: [977, 35],
+  solidworks: [750, 213], onshape: [850, 213],
+  orbitAndZoom: [290, 230], gridAndPlanes: [291, 373],
+  showGrid: [482, 194], wheelInvert: [482, 306], close: [1152, 120],
   // The start page's New part tile; tests/documents_start.rs checks it is there.
   newPart: [124, 143],
 };

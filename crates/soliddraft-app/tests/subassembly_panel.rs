@@ -358,8 +358,9 @@ fn form_pick_and_move_the_floating_child_in_the_window() {
 
     // The free nested F moves 2 mm along x through its placement fields; nothing else moves.
     let mates = session(&h).doc.assembly().mates.clone();
+    // A top-level component's chevron sits 14 px into its row, under the Components heading.
     let chevron = tree_row(&h, "pack<16>").rect();
-    click_at(&mut h, egui::pos2(chevron.left() + 30.0, chevron.center().y));
+    click_at(&mut h, egui::pos2(chevron.left() + 14.0, chevron.center().y));
     assert!(session(&h).expanded.contains(&path("16")), "the reopened root's sub-assembly opens in the tree");
     tree_row(&h, "pin<6>").click();
     h.run_steps(6);

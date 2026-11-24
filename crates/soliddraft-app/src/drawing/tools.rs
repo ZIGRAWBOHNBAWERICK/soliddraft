@@ -20,7 +20,7 @@ use soliddraft_drawing::{
     DimType, DimensionSet, DrawingError, EntityRef, LinearOrientation, Part, PartIndex, SetKind, StyleOverrides,
     ViewId, ViewKind, derived,
 };
-use soliddraft_kernel_api::Point2;
+use soliddraft_kernel_api::{Point2, Vec3};
 
 /// Sheet millimetres a click snaps to a circle's centre from, at the current zoom.
 fn snap_mm(s: &DrawingSession) -> f64 {
@@ -807,6 +807,7 @@ pub(super) fn set_tool(
 /// The body of the symbol a tool places, from the draft and the drawing's counters.
 fn symbol_body(s: &DrawingSession) -> AnnotationKind {
     match s.tool {
+        DrawingTool::Weld => AnnotationKind::Weld { size: None },
         DrawingTool::Datum => AnnotationKind::Datum {
             letter: if s.draft.datum.trim().is_empty() {
                 s.doc.drawing.next_datum_label.clone()
@@ -892,4 +893,201 @@ pub(super) fn symbol_tool(
         }
         None => s.say("Click an edge of the feature first"),
     }
+}
+
+// A projected outline can show two model edges at the same place. A chamfer
+// may share its vertex with the farther edge, even when the nearer edge won the pick.
+fn overlaps_picked_line(picked: &soliddraft_drawing::Curve2, other: &soliddraft_drawing::Curve2, at: Point2) -> bool {
+    use kurbo::{PathEl, Point};
+
+    let [PathEl::MoveTo(a), PathEl::LineTo(b)] = picked.path.elements() else { return false };
+    let [PathEl::MoveTo(c), PathEl::LineTo(d)] = other.path.elements() else { return false };
+    let direction = *b - *a;
+    let length = direction.length();
+    if length <= 1e-6 {
+        return false;
+    }
+    let axis = direction / length;
+    let (from, to) = (*c - *a, *d - *a);
+    let along = axis.dot(Point::new(at.u, at.v) - *a).clamp(0.0, length);
+    let (start, end) = (axis.dot(from), axis.dot(to));
+    axis.cross(from).abs() <= 1e-6 && axis.cross(to).abs() <= 1e-6 && (start.min(end)..=start.max(end)).contains(&along)
+}
+
+/// Picks both ends of each straight edge so rebuilds can move the lines with the part.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn line_annotation_tool(
+    s: &mut DrawingSession,
+    doc: &Document,
+    sheet2: &Sheet2<'_>,
+    lctx: &layout::Context<'_>,
+    hit: Option<Hit>,
+    pointer: Option<Point2>,
+    clicked: bool,
+    push: &mut impl FnMut(DrawingAction),
+) {
+    use soliddraft_drawing::measure::{AnchorGeometry, centreline, chamfer};
+    use soliddraft_drawing::{Dimension, DimensionKind, Entity, Resolution};
+    use soliddraft_kernel_api::drawing::Curve3;
+
+    let Some(p) = pointer else { return };
+    let is_chamfer = s.tool == DrawingTool::Chamfer;
+    let mut place = |s: &DrawingSession, view, body, placement, anchors: Vec<Anchor>| {
+        let id = s.doc.next_annotation_id();
+        let annotation = Annotation {
+            id,
+            view,
+            body,
+            anchors,
+            placement,
+            style: StyleOverrides::default(),
+            state: AnnotationState::Ok,
+            source: None,
+        };
+        ghost_annotation(s, sheet2, lctx, &annotation);
+        if clicked {
+            push(DrawingAction::Command(Command::AddAnnotation { annotation }));
+            push(DrawingAction::SetTool(DrawingTool::Select));
+            push(DrawingAction::Select(Some(DrawingSel::Annotation(id))));
+        }
+    };
+    if let (Some(view), Some(dim)) = (s.draft.view, &s.draft.chamfer) {
+        place(s, view, AnnotationKind::Dimension(dim.clone()), to_view(s, view, p), s.draft.anchors.clone());
+        return;
+    }
+    if !clicked {
+        return;
+    }
+    let Some(Hit { owner: Owner::Curve(view, curve), .. }) = hit else {
+        s.say("Pick a visible straight model edge");
+        return;
+    };
+    if s.draft.view.is_some_and(|picked| picked != view) {
+        s.say("Pick both edges in the same view");
+        return;
+    }
+    let Some(v) = s.sheet().view(view) else { return };
+    let Some(curve) = v.geometry.curves.get(curve).filter(|c| c.visible && c.kind == CurveKind::Edge) else {
+        s.say("Pick a visible straight model edge");
+        return;
+    };
+    let Some(xf) = s.doc.transforms.get(&view) else { return };
+    let Some(ctx) =
+        PartContext::new(doc).filter(|ctx| s.model_is(ctx.id) && ctx.digest.as_str() == v.geometry.source_digest)
+    else {
+        s.say("Rebuild the drawing with its part before picking an edge");
+        return;
+    };
+    let part = ctx.part();
+    let Ok(index) = PartIndex::build(&part) else { return };
+    let edge = |entity: &EntityRef| match index.resolve(entity) {
+        Resolution::Found(Entity::Edge(id)) => index.edge_curve(id),
+        _ => None,
+    };
+    let straight_ends = |curve: &soliddraft_drawing::Curve2| {
+        let Some(Curve3::Line { a, b }) = edge(&curve.source) else { return None };
+        Some([*a, *b])
+    };
+    let anchors_of = |curve: &soliddraft_drawing::Curve2, [a, b]: [Vec3; 2]| {
+        [(Attach::Start, a), (Attach::End, b)].map(|(attach, at)| Anchor {
+            entity: curve.source.clone(),
+            attach,
+            cached: xf.point(at),
+        })
+    };
+    let Some([a, b]) = straight_ends(curve) else {
+        s.say("Pick a visible straight model edge");
+        return;
+    };
+    if is_chamfer && (b - a).dot(xf.frame.direction).abs() > 1e-6 {
+        s.say("Use a profile view where the chamfer and adjoining edge are seen at full length");
+        return;
+    }
+    let ends = anchors_of(curve, [a, b]);
+    let [first, second] = s.draft.anchors.as_slice() else {
+        s.draft.view = Some(view);
+        s.draft.anchors.extend(ends);
+        return;
+    };
+    let points = [first.cached, second.cached, ends[0].cached, ends[1].cached];
+    if is_chamfer {
+        let dimension = |ends: [Anchor; 2]| {
+            let geometry = [first, second, &ends[0], &ends[1]].map(|anchor| AnchorGeometry {
+                curve: edge(&anchor.entity),
+                point: anchor.entity.fingerprint.point,
+                attach: anchor.attach,
+            });
+            chamfer(&geometry, xf).map(|(size, angle)| (ends, size, angle))
+        };
+        let at = to_view(s, view, p);
+        let selected = dimension(ends).or_else(|| {
+            v.geometry
+                .curves
+                .iter()
+                .filter(|other| other.visible && other.kind == CurveKind::Edge && other.source != curve.source)
+                .filter(|other| overlaps_picked_line(curve, other, at))
+                .find_map(|other| dimension(anchors_of(other, straight_ends(other)?)))
+        });
+        let Some((ends, size, angle)) = selected else {
+            s.say("Pick a straight adjoining edge that meets the bevel at an acute angle");
+            return;
+        };
+        let mut dim = Dimension::measured(DimensionKind::Chamfer, size, precision_for(size));
+        dim.chamfer_angle = Some(angle);
+        s.draft.chamfer = Some(dim);
+        s.draft.anchors.extend(ends);
+    } else if let Some([a, b]) = centreline(points) {
+        let middle = Point2::new((a.u + b.u) / 2.0, (a.v + b.v) / 2.0);
+        let anchors = s.draft.anchors.iter().cloned().chain(ends).collect();
+        place(s, view, AnnotationKind::Centreline, middle, anchors);
+    } else {
+        s.say("Pick a distinct parallel edge with overlapping length");
+    }
+}
+
+/// Choose a source view, then place the table on the sheet.
+pub(super) fn hole_table_tool(
+    s: &mut DrawingSession,
+    doc: &Document,
+    hit: Option<Hit>,
+    p: Point2,
+    push: &mut impl FnMut(DrawingAction),
+) {
+    let chosen = s.draft.view;
+    let view = chosen.or_else(|| match hit.map(|h| h.owner) {
+        Some(Owner::Curve(id, _) | Owner::View(id)) => Some(id),
+        _ => view_at(s, p),
+    });
+    let Some(view) = view else {
+        s.say("Click a view showing holes face-on");
+        return;
+    };
+    if s.sheet().tables.iter().any(|t| t.hole_view == Some(view)) {
+        s.say("This view already has a hole table");
+        return;
+    }
+    let Some(projected) = s.doc.projected_of(view) else {
+        s.say("Rebuild the drawing with its part before making a hole table");
+        return;
+    };
+    let Some(ctx) = PartContext::new(doc)
+        .filter(|part| s.model_is(part.id) && part.digest.as_str() == projected.geometry.source_digest)
+    else {
+        s.say("Rebuild the drawing with its part before making a hole table");
+        return;
+    };
+    let holes = projected.hole_rows(&ctx);
+    if holes.is_empty() {
+        s.say("This view has no visible circular holes");
+        return;
+    }
+    if chosen.is_none() {
+        s.draft.view = Some(view);
+        return;
+    }
+    let table = soliddraft_drawing::Table::hole(p, view, holes);
+    let index = s.sheet().tables.len();
+    push(DrawingAction::Command(Command::AddTable { sheet: s.sheet, table }));
+    push(DrawingAction::SetTool(DrawingTool::Select));
+    push(DrawingAction::Select(Some(DrawingSel::HoleTable(index))));
 }

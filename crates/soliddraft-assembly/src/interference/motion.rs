@@ -1,6 +1,7 @@
 //! Drag checks run on owned snapshots. Only certified prefixes reach the live document.
 use super::*;
 use crate::mates::MateRefusal;
+use crate::path::ComponentId;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     mpsc,
@@ -32,10 +33,14 @@ pub struct MotionReport {
     pub faces: Vec<MotionFace>,
     /// A refusal leaves the previous preview in place.
     pub error: Option<String>,
+    /// The parts Physical Dynamics pushed out of the way, by occurrence path.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub pushed: Vec<OccurrencePath>,
 }
 
 pub(crate) struct Motion {
     clearance: f64,
+    push: bool,
     pending: Option<Placement>,
     job: Option<mpsc::Receiver<Result<(AssemblyDocument, MotionReport), String>>>,
     cancelled: Arc<AtomicBool>,
@@ -51,6 +56,27 @@ impl AssemblyDocument {
     /// Starts collision detection, or dynamic clearance when a minimum distance is given.
     /// Includes hidden parts and refuses unchecked geometry. Suppressed parts are omitted.
     pub fn begin_guarded_drag(&mut self, path: OccurrencePath, clearance: Option<f64>) -> Result<(), crate::EditError> {
+        self.begin_motion(path, clearance, false)
+    }
+
+    /// Starts Physical Dynamics: a guarded drag in which the dragged component pushes the
+    /// parts it meets instead of stopping. A pushed part moves by the dragged component's
+    /// translation, as its own mates allow; one its mates hold stops the drag as a collision
+    /// does. Kinematic only: no forces, masses, friction or bounce. The dragged component is
+    /// one of the root's own; what it pushes is a root component.
+    pub fn begin_dynamic_drag(&mut self, path: OccurrencePath, clearance: Option<f64>) -> Result<(), crate::EditError> {
+        if path.steps().len() != 1 || path.steps()[0].member.is_some() {
+            return Err(crate::EditError::Invalid("Physical Dynamics drags one of the root's own components".into()));
+        }
+        self.begin_motion(path, clearance, true)
+    }
+
+    fn begin_motion(
+        &mut self,
+        path: OccurrencePath,
+        clearance: Option<f64>,
+        push: bool,
+    ) -> Result<(), crate::EditError> {
         if cfg!(target_arch = "wasm32") {
             return Err(crate::EditError::Invalid("guarded dragging needs the desktop collision worker".into()));
         }
@@ -62,6 +88,7 @@ impl AssemblyDocument {
         self.motion_report = None;
         self.motion = Some(Motion {
             clearance,
+            push,
             pending: None,
             job: None,
             cancelled: Arc::new(AtomicBool::new(false)),
@@ -128,6 +155,7 @@ impl AssemblyDocument {
                             distance: None,
                             faces: Vec::new(),
                             error: Some(error),
+                            pushed: Vec::new(),
                         })
                     }
                 }
@@ -136,12 +164,13 @@ impl AssemblyDocument {
         if motion.job.is_none() {
             if let Some(target) = motion.pending.take() {
                 let mut worker = self.drag_snapshot();
-                let clearance = motion.clearance;
+                let (clearance, push) = (motion.clearance, motion.push);
                 let cancelled = motion.cancelled.clone();
                 let (tx, rx) = mpsc::channel();
                 motion.job = Some(rx);
                 std::thread::spawn(move || {
-                    let result = advance(&mut worker, target, clearance, &cancelled).map(|report| (worker, report));
+                    let result =
+                        advance(&mut worker, target, clearance, push, &cancelled).map(|report| (worker, report));
                     let _ = tx.send(result);
                 });
             } else if motion.release {
@@ -153,6 +182,7 @@ impl AssemblyDocument {
                         distance: None,
                         faces: Vec::new(),
                         error: Some(e.to_string()),
+                        pushed: Vec::new(),
                     });
                 }
                 return;
@@ -238,12 +268,21 @@ fn changing(a: &[Placement], b: &[Placement], i: usize, j: usize) -> bool {
         }))
 }
 
+/// Whether two parts keep their relative placement, to 1e-9 mm, from `a` to `b`: a pushed
+/// part and what pushes it, whose translations agree up to rounding.
+fn together(a: &[Placement], b: &[Placement], i: usize, j: usize) -> bool {
+    a[i].rotation == b[i].rotation
+        && a[j].rotation == b[j].rotation
+        && ((b[i].translation - a[i].translation) - (b[j].translation - a[j].translation)).length() <= 1e-9
+}
+
 fn measure(
     parts: &[Part],
     at: &[Placement],
     end: &[Placement],
     clearance: f64,
     swept: bool,
+    group: &[bool],
 ) -> (bool, Option<DistanceBounds>, Vec<MotionFace>) {
     let solids: Vec<_> = parts.iter().zip(at).map(|(p, at)| p.solid(*at)).collect();
     let mut safe = true;
@@ -251,7 +290,7 @@ fn measure(
     let mut faces = Vec::new();
     for i in 0..parts.len() {
         for j in i + 1..parts.len() {
-            if !changing(at, end, i, j) {
+            if !changing(at, end, i, j) || (group[i] && group[j] && together(at, end, i, j)) {
                 continue;
             }
             let movement = if swept {
@@ -312,15 +351,27 @@ fn short_joint_steps(before: &[[f64; 2]], after: &[[f64; 2]]) -> bool {
             .all(|(a, b)| (a - b).abs() <= std::f64::consts::FRAC_PI_4)
 }
 
+/// The root component a guarded step met and did not move: what Physical Dynamics pushes.
+fn obstacle(parts: &[Part], faces: &[MotionFace], before: &[Placement], after: &[Placement]) -> Option<ComponentId> {
+    faces.iter().find_map(|f| {
+        let i = parts.iter().position(|p| p.path == f.path)?;
+        (before[i] == after[i]).then(|| crate::mates::holder(&f.path)).flatten()
+    })
+}
+
 fn advance(
     doc: &mut AssemblyDocument,
     target: Placement,
     clearance: f64,
+    push: bool,
     cancelled: &AtomicBool,
 ) -> Result<MotionReport, String> {
     let parts = parts(doc, cancelled)?;
     let path = doc.drag.as_ref().ok_or("no drag is active")?.path.clone();
+    let dragged = crate::mates::holder(&path);
     let mut work = vec![(target, 0_u32)];
+    // What this wish pushes, once met: it moves with every later step of the wish.
+    let mut carried: Vec<ComponentId> = Vec::new();
     let mut report = MotionReport {
         tier: "certified_mesh",
         clearance_mm: clearance,
@@ -328,6 +379,7 @@ fn advance(
         distance: None,
         faces: Vec::new(),
         error: None,
+        pushed: Vec::new(),
     };
     for _ in 0..256 {
         if cancelled.load(Ordering::Relaxed) {
@@ -339,34 +391,64 @@ fn advance(
         let old_table = doc.table.clone();
         let old_drag = doc.drag.clone();
         let start = doc.table.local(doc.table.find(&path).ok_or("the dragged occurrence disappeared")?);
-        if let Err(e) = doc.preview_drag(wish) {
+        if let Err(e) = doc.preview_carrying(wish, &carried) {
             doc.table = old_table;
             doc.drag = old_drag;
             return Err(e.to_string());
         }
         let after = poses(doc, &parts);
-        let (safe, distance, faces) = measure(&parts, &before, &after, clearance, true);
+        // The dragged component and what it pushes move as one group.
+        let group: Vec<bool> = parts
+            .iter()
+            .map(|p| {
+                let holder = crate::mates::holder(&p.path);
+                holder.is_some() && (holder == dragged || holder.is_some_and(|h| carried.contains(&h)))
+            })
+            .collect();
+        let (safe, distance, faces) = measure(&parts, &before, &after, clearance, true, &group);
         if safe && short_joint_steps(&phases, &joint_phases(doc)?) {
+            for &id in &carried {
+                let path = OccurrencePath::root().child(crate::path::Step::component(id));
+                if !report.pushed.contains(&path)
+                    && let Some((previous, current)) = old_table.find(&path).zip(doc.table.find(&path))
+                    && old_table.local(previous) != doc.table.local(current)
+                {
+                    report.pushed.push(path);
+                }
+            }
             // Use the same set of moving pairs when reporting their accepted separation.
-            let (_, distance, faces) = measure(&parts, &after, &before, clearance, false);
+            let (_, distance, faces) = measure(&parts, &after, &before, clearance, false, &group);
             report.distance = distance;
             report.faces = faces;
             continue;
         }
         doc.table = old_table;
         doc.drag = old_drag;
+        let met = obstacle(&parts, &faces, &before, &after);
         report.distance = distance;
         report.faces = faces;
         let mid = mixed(start, wish, 0.5);
-        if depth >= 32
+        let stuck = depth >= 32
             || mid == start
             || before
                 .iter()
                 .zip(&after)
                 .map(|(a, b)| a.translation.distance(b.translation) + (a.rotation - b.rotation).length())
                 .fold(0.0, f64::max)
-                < 1e-6
+                < 1e-6;
+        // Physical Dynamics pushes what it met instead of stopping, and tries the step again.
+        if stuck
+            && push
+            && let Some(id) = met
+            && Some(id) != dragged
+            && !carried.contains(&id)
+            && carried.len() < 16
         {
+            carried.push(id);
+            work.push((wish, depth));
+            continue;
+        }
+        if stuck {
             report.stopped = true;
             return Ok(report);
         }

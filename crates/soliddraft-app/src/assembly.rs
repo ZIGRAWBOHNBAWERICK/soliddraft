@@ -22,13 +22,13 @@ use egui::{Align2, Rect, Sense, Stroke, pos2, vec2};
 use egui_dock::DockState;
 use glam::{DMat4, DQuat, DVec3, EulerRot};
 use soliddraft_assembly::{
-    AssemblyDocument, DefinitionIndex, Flags, Freshness, KernelSource, LoadState, MeshBounds, OccurrenceIndex,
+    AssemblyDocument, DefinitionIndex, Flags, Freshness, KernelSource, LoadState, MateId, MeshBounds, OccurrenceIndex,
     OccurrencePath, OpenOptions, Opening, Placement, RebuildReport, Scene, SharedMesh,
 };
 use soliddraft_document::kind::ASSEMBLY_EXTENSION;
 use soliddraft_document::{DocKind, DocRef};
 use soliddraft_tessellation::{DeviceBudget, Level};
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -62,10 +62,15 @@ pub enum AssemblyAction {
     Place(OccurrencePath, Placement),
     Show,
     ShowPart,
+    EditPartInContext,
     Update,
     Undo,
     Redo,
     ZoomFit,
+    /// Edits the appearance of a component.
+    SetColour(OccurrencePath, Option<soliddraft_materials::Appearance>),
+    /// Hides or shows a component.
+    SetHidden(OccurrencePath, bool),
     Mate(crate::mates::MateAction),
     Form(crate::subassembly::FormAction),
     Interference(crate::interference::InterferenceAction),
@@ -118,6 +123,8 @@ pub struct AssemblyState {
     pub collision_drag: bool,
     pub dynamic_clearance: bool,
     pub clearance_mm: f64,
+    /// Physical Dynamics: a guarded drag pushes the parts it meets.
+    pub physical_dynamics: bool,
 }
 
 impl AssemblyState {
@@ -153,6 +160,25 @@ pub struct AssemblySession {
     outbox: Outbox,
     /// The camera frames the parts once the first meshes arrive.
     fit_pending: bool,
+    /// A Mate Controller animation under way.
+    pub animation: Option<ControllerAnimation>,
+}
+
+/// A Mate Controller animation holds each driver's start and end values.
+/// Each frame previews a pose. The last frame applies one undo step.
+pub struct ControllerAnimation {
+    pub(crate) drivers: BTreeMap<MateId, (f64, f64)>,
+    pub seconds: f64,
+    pub started: web_time::Instant,
+}
+
+/// Active controller drivers in display order, keyed by stable mate identity.
+pub(crate) fn controller_drivers(doc: &AssemblyDocument) -> impl Iterator<Item = (MateId, &str, Option<f64>)> {
+    let values = soliddraft_assembly::controller_values(doc);
+    doc.mate_controller().into_iter().flat_map(|c| &c.mates).filter_map(move |&id| {
+        let mate = doc.assembly().known_mates().find(|m| m.id() == id)?;
+        Some((id, mate.name(), values.get(mate.name()).copied()))
+    })
 }
 
 /// The selection's placement as the property panel edits it.
@@ -208,6 +234,7 @@ impl AssemblySession {
     fn new(mut doc: AssemblyDocument, scene: Scene) -> AssemblySession {
         let fit_pending = true;
         let mut viewport = ViewportState::default();
+        viewport.display = crate::viewport::render::DisplayMode::Shaded;
         viewport.camera.fit_framed(None);
         let scene = Arc::new(Mutex::new(scene));
         doc.poll(POLL_BUDGET);
@@ -223,7 +250,38 @@ impl AssemblySession {
             shown: (None, None),
             outbox: Outbox::default(),
             fit_pending,
+            animation: None,
         }
+    }
+
+    /// Shows the animation's frame for now, and applies its end once it is over. Returns
+    /// whether it runs on.
+    pub fn animate(&mut self) -> Result<bool, soliddraft_assembly::MateRefusal> {
+        let Some(a) = self.animation.as_ref() else { return Ok(false) };
+        let t = a.started.elapsed().as_secs_f64() / a.seconds.max(1e-3);
+        let values: Option<Vec<f64>> = controller_drivers(&self.doc)
+            .map(|(id, _, current)| {
+                let &(from, to) = a.drivers.get(&id)?;
+                (current == Some(from)).then_some(if t >= 1.0 { to } else { from + (to - from) * t })
+            })
+            .collect();
+        let Some(values) = values.filter(|v| v.len() == a.drivers.len()) else {
+            self.animation = None;
+            self.doc.cancel_drag();
+            return Ok(false);
+        };
+        if t >= 1.0 {
+            self.animation = None;
+            self.doc.cancel_drag();
+            self.doc.apply_controller_values(&values)?;
+            return Ok(false);
+        }
+        if let Err(e) = self.doc.preview_controller_values(&values) {
+            self.animation = None;
+            self.doc.cancel_drag();
+            return Err(e);
+        }
+        Ok(true)
     }
 
     /// The name the tab and the tree show, with a dot for unsaved edits.
@@ -338,6 +396,7 @@ impl AssemblySession {
             levels: self.outbox.levels.clone(),
             deviations: self.outbox.deviations.clone(),
             budget: DeviceBudget::default(),
+            display: self.doc.assembly().viewport_state().map_or(self.viewport.display, |s| s.mode),
         }
     }
 }
@@ -647,6 +706,11 @@ pub fn shown(state: &AppState) -> serde_json::Value {
         "components": components,
         "selected": s.selected.as_ref().map(|p| p.to_string()),
         "mates": s.doc.assembly().mates.len(),
+        "controller": {
+            "mates": s.doc.controller_mates(),
+            "positions": s.doc.mate_controller().map(|c| c.positions.iter().map(|p| p.name.clone()).collect::<Vec<_>>()).unwrap_or_default(),
+            "animating": s.animation.is_some(),
+        },
         "mate_names": s.doc.assembly().mates.iter().map(|m| match m {
             soliddraft_assembly::MateEntry::Known(mate) => mate.name(),
             soliddraft_assembly::MateEntry::Future(kept) => kept["name"].as_str().unwrap_or_default(),
@@ -712,6 +776,7 @@ fn install(state: &mut AppState, mut session: AssemblySession) {
     state.assembly.opening = None;
     state.assembly.form = crate::subassembly::Draft::default();
     state.assembly.last_part = None;
+    state.assembly.mate.clear_controller_values();
     state.assembly.session = Some(session);
     state.assembly.active = true;
     state.drawing.active = false;
@@ -759,6 +824,20 @@ pub fn apply(state: &mut AppState, dock: &mut DockState<Tab>, action: AssemblyAc
             Ok(()) => show_tab(dock),
             Err(e) => state.note(e, NoteKind::Info),
         },
+        AssemblyAction::SetColour(path, appearance) => {
+            if let Some(s) = state.assembly.session.as_mut()
+                && let Err(error) = s.doc.set_colour(&[path], appearance)
+            {
+                state.note(error.to_string(), crate::state::NoteKind::Error);
+            }
+        }
+        AssemblyAction::SetHidden(path, hidden) => {
+            if let Some(s) = state.assembly.session.as_mut()
+                && let Err(error) = s.doc.set_hidden(&[path], hidden)
+            {
+                state.note(error.to_string(), crate::state::NoteKind::Error);
+            }
+        }
         AssemblyAction::Show => {
             if state.assembly.session.is_some() {
                 state.assembly.active = true;
@@ -774,6 +853,7 @@ pub fn apply(state: &mut AppState, dock: &mut DockState<Tab>, action: AssemblyAc
                 dock.set_focused_node_and_surface(egui_dock::NodePath { surface: path.surface, node: path.node });
             }
         }
+        AssemblyAction::EditPartInContext => state.note("Edit part in context is coming soon.", NoteKind::Info),
         AssemblyAction::Update => match update(state) {
             Ok(report) => state.note(format!("Updated {} sources", report.updated()), NoteKind::Ok),
             Err(report) => {
@@ -840,8 +920,11 @@ pub fn apply(state: &mut AppState, dock: &mut DockState<Tab>, action: AssemblyAc
         }
         AssemblyAction::Place(path, placement) => {
             let Some(s) = state.assembly.session.as_mut() else { return };
-            let begin = if state.assembly.collision_drag || state.assembly.dynamic_clearance {
-                s.doc.begin_guarded_drag(path, state.assembly.dynamic_clearance.then_some(state.assembly.clearance_mm))
+            let clearance = state.assembly.dynamic_clearance.then_some(state.assembly.clearance_mm);
+            let begin = if state.assembly.physical_dynamics {
+                s.doc.begin_dynamic_drag(path, clearance)
+            } else if state.assembly.collision_drag || state.assembly.dynamic_clearance {
+                s.doc.begin_guarded_drag(path, clearance)
             } else {
                 s.doc.begin_drag(path)
             };
@@ -1086,7 +1169,7 @@ pub fn viewport(ui: &mut egui::Ui, state: &mut AppState) {
         actions.push(AppAction::Assembly(AssemblyAction::ZoomFit));
     }
     if let Some(d) = events.set_display {
-        s.viewport.display = d;
+        actions.push(AppAction::SetDisplay(d));
     }
     if events.toggle_projection {
         s.viewport.camera.orthographic = !s.viewport.camera.orthographic;
@@ -1149,6 +1232,7 @@ pub fn tree(ui: &mut egui::Ui, state: &mut AppState) {
     );
     ui.painter().hline(head.x_range(), head.bottom() - 0.5, Stroke::new(1.0, theme::line()));
     let mut actions = Vec::new();
+    let mut error = None;
     egui::ScrollArea::vertical().id_salt("assembly_tree").auto_shrink([false, false]).show(ui, |ui| {
         ui.add_space(4.0);
         let selected = s.selected_row();
@@ -1157,66 +1241,245 @@ pub fn tree(ui: &mut egui::Ui, state: &mut AppState) {
         if r.clicked() {
             actions.push(AppAction::Assembly(AssemblyAction::Select(None)));
         }
-        let mut stack: Vec<(OccurrenceIndex, u8)> = s.components().into_iter().rev().map(|r| (r, 1)).collect();
-        while let Some((r, indent)) = stack.pop() {
-            let table = s.doc.table();
-            let flags = table.flags(r);
-            let path = table.path(r);
-            let def = s.doc.store().get(table.definition(r));
-            let sub = flags.has(Flags::ASSEMBLY);
-            let open = sub && s.expanded.contains(&path);
-            let name = s.doc.label(r);
-            let problem = match (&def.state, &def.freshness) {
-                (LoadState::Failed, _) => Some(def.problem.clone().unwrap_or_else(|| "Not loaded".into())),
-                _ => None,
-            };
-            let warn = warning(def);
-            let sub_text = if flags.has(Flags::HIDDEN_SELF) { "hidden" } else { "" };
-            let chosen = s.chosen.contains(&path);
-            let resp = row(
-                ui,
-                RowSpec {
-                    indent,
-                    chevron: sub.then_some(open),
-                    icon: if sub { Icon::Tree } else { Icon::Extrude },
-                    name: &name,
-                    sub: sub_text,
-                    selected: Some(r) == selected || chosen,
-                    dim: flags.has(Flags::HIDDEN) || flags.has(Flags::SUPPRESSED),
-                    error: problem.as_deref(),
-                    warn: warn.as_deref(),
-                    suppressed: flags.has(Flags::SUPPRESSED_SELF),
-                    ..RowSpec::plain()
-                },
-            );
-            let resp = match problem.as_deref().or(warn.as_deref()) {
-                Some(why) => resp.on_hover_text(why),
-                None => resp,
-            };
-            if resp.clicked() {
-                if sub
-                    && resp.interact_pointer_pos().is_some_and(|p| p.x < resp.rect.left() + 18.0 + indent as f32 * 20.0)
-                {
-                    if !s.expanded.remove(&path) {
-                        s.expanded.insert(path.clone());
+        let components = s.components();
+        egui::CollapsingHeader::new(format!("Components ({})", components.len())).default_open(true).show(ui, |ui| {
+            let mut stack: Vec<(OccurrenceIndex, u8)> = components.into_iter().rev().map(|r| (r, 0)).collect();
+            while let Some((r, indent)) = stack.pop() {
+                let table = s.doc.table();
+                let flags = table.flags(r);
+                let path = table.path(r);
+                let def = s.doc.store().get(table.definition(r));
+                let sub = flags.has(Flags::ASSEMBLY);
+                let open = sub && s.expanded.contains(&path);
+                let name = s.doc.label(r);
+                let problem = match (&def.state, &def.freshness) {
+                    (LoadState::Failed, _) => Some(def.problem.clone().unwrap_or_else(|| "Not loaded".into())),
+                    _ => None,
+                };
+                let warn = warning(def);
+                let sub_text = if flags.has(Flags::HIDDEN_SELF) { "hidden" } else { "" };
+                let chosen = s.chosen.contains(&path);
+                let resp = row(
+                    ui,
+                    RowSpec {
+                        indent,
+                        chevron: sub.then_some(open),
+                        icon: if sub { Icon::Tree } else { Icon::Extrude },
+                        name: &name,
+                        sub: sub_text,
+                        selected: Some(r) == selected || chosen,
+                        dim: flags.has(Flags::HIDDEN) || flags.has(Flags::SUPPRESSED),
+                        error: problem.as_deref(),
+                        warn: warn.as_deref(),
+                        suppressed: flags.has(Flags::SUPPRESSED_SELF),
+                        ..RowSpec::plain()
+                    },
+                );
+                #[cfg(target_arch = "wasm32")]
+                crate::web::show_control(&name, resp.rect);
+                let resp = match problem.as_deref().or(warn.as_deref()) {
+                    Some(why) => resp.on_hover_text(why),
+                    None => resp,
+                };
+                if !sub && resp.double_clicked() {
+                    actions.push(AppAction::OpenComponentPart(path.clone()));
+                } else if resp.clicked() {
+                    if sub
+                        && resp
+                            .interact_pointer_pos()
+                            .is_some_and(|p| p.x < resp.rect.left() + 18.0 + indent as f32 * 20.0)
+                    {
+                        if !s.expanded.remove(&path) {
+                            s.expanded.insert(path.clone());
+                        }
+                    } else if ui.input(|i| i.modifiers.command) {
+                        actions.push(AppAction::Assembly(AssemblyAction::Choose(path.clone())));
+                    } else {
+                        actions.push(AppAction::Assembly(AssemblyAction::Select(Some(path.clone()))));
                     }
-                } else if ui.input(|i| i.modifiers.command) {
-                    actions.push(AppAction::Assembly(AssemblyAction::Choose(path.clone())));
-                } else {
-                    actions.push(AppAction::Assembly(AssemblyAction::Select(Some(path.clone()))));
+                }
+                resp.context_menu(|ui| {
+                    if !sub {
+                        let config = def.key.configuration.as_ref().map_or("Default", |id| id.0.as_str());
+                        let display = s
+                            .doc
+                            .reference(table.definition(r))
+                            .and_then(|reference| reference.display_state.as_ref())
+                            .map_or("Default", |id| id.0.as_str());
+                        ui.label(format!("Configuration: {config}"));
+                        ui.label(format!("Display state: {display}"));
+                        ui.separator();
+                        if ui.button("Open part").clicked() {
+                            actions.push(AppAction::OpenComponentPart(path.clone()));
+                            ui.close();
+                        }
+                        if ui.button("Edit part in context (coming soon)").clicked() {
+                            actions.push(AppAction::Assembly(AssemblyAction::EditPartInContext));
+                            ui.close();
+                        }
+                        ui.separator();
+                    }
+                    component_appearance(ui, s, r, &path, &mut actions);
+                    let hidden = flags.has(Flags::HIDDEN_SELF);
+                    if ui.button(if hidden { "Show component" } else { "Hide component" }).clicked() {
+                        actions.push(AppAction::Assembly(AssemblyAction::SetHidden(path.clone(), !hidden)));
+                        ui.close();
+                    }
+                    ui.separator();
+                    crate::subassembly::panel::context_menu(ui, &mut actions);
+                });
+                if open {
+                    let children: Vec<OccurrenceIndex> =
+                        table.children(r).filter(|c| !table.flags(*c).has(Flags::REMOVED)).collect();
+                    stack.extend(children.into_iter().rev().map(|c| (c, indent + 1)));
                 }
             }
-            resp.context_menu(|ui| crate::subassembly::panel::context_menu(ui, &mut actions));
-            if open {
-                let children: Vec<OccurrenceIndex> =
-                    table.children(r).filter(|c| !table.flags(*c).has(Flags::REMOVED)).collect();
-                stack.extend(children.into_iter().rev().map(|c| (c, indent + 1)));
+        });
+        let assembly = s.doc.assembly();
+        egui::CollapsingHeader::new(format!("Mates ({})", assembly.mates.len())).default_open(true).show(ui, |ui| {
+            for entry in &assembly.mates {
+                ui.label(entry.known().map_or("Unsupported mate", |mate| mate.name()));
             }
-        }
+        });
+        egui::CollapsingHeader::new(format!("Assembly features ({})", assembly.patterns.len()))
+            .default_open(true)
+            .show(ui, |ui| {
+                for pattern in &assembly.patterns {
+                    ui.label(pattern.name.clone().unwrap_or_else(|| format!("Pattern {}", pattern.id.0)));
+                }
+            });
+        error = crate::display_states::show_assembly(ui, s).err();
+        assembly_appearances(ui, s, &mut actions);
     });
+    if let Some(error) = error {
+        state.note(error, crate::state::NoteKind::Error);
+    }
     for a in actions {
         state.push(a);
     }
+}
+
+pub(crate) enum ComponentPart {
+    Current,
+    #[cfg(not(target_arch = "wasm32"))]
+    File(PathBuf),
+    #[cfg(target_arch = "wasm32")]
+    Upload(String, Vec<u8>),
+}
+
+pub(crate) fn component_part(state: &AppState, path: &OccurrencePath) -> Result<ComponentPart, String> {
+    let session = state.assembly.session.as_ref().ok_or("Open an assembly first.")?;
+    let table = session.doc.table();
+    let row = table.find(path).ok_or("The component is no longer in the assembly.")?;
+    let def = table.definition(row);
+    let reference =
+        session.doc.reference(def).filter(|r| r.kind == DocKind::Part).ok_or("The component has no source part.")?;
+    if reference.id == Some(state.doc.model().id()) {
+        return Ok(ComponentPart::Current);
+    }
+    if state.doc.dirty {
+        return Err("Save the open part before opening a different component.".into());
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let settings = crate::settings::file_locations();
+        let source_path = Path::new(&reference.path);
+        let referencing = session.doc.path().or_else(|| source_path.is_absolute().then_some(source_path));
+        let resolution = soliddraft_document::Resolver::new(referencing)
+            .with_open(documents(state))
+            .with_search_folders(settings.search_folders())
+            .resolve(reference);
+        resolution
+            .target()
+            .and_then(|target| target.path())
+            .map(|path| ComponentPart::File(path.to_owned()))
+            .ok_or_else(|| format!("Could not find source part {}", reference.path))
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let held = state.assembly.held.iter().find(|doc| Some(doc.id) == reference.id);
+        let id = reference.id.ok_or("Upload the source part with the assembly first.")?;
+        let revision = held.map_or(&reference.pinned, |doc| &doc.revision);
+        let bytes = state
+            .revisions
+            .fetch(id, revision)
+            .map_err(|_| format!("Upload {} to open the source part.", reference.path))?;
+        let name = held
+            .and_then(|doc| doc.path.as_ref())
+            .and_then(|path| path.file_name())
+            .map_or_else(|| reference.path.clone(), |name| name.to_string_lossy().into_owned());
+        Ok(ComponentPart::Upload(name, bytes))
+    }
+}
+
+fn component_appearance(
+    ui: &mut egui::Ui,
+    session: &AssemblySession,
+    row: OccurrenceIndex,
+    path: &OccurrencePath,
+    actions: &mut Vec<AppAction>,
+) {
+    use soliddraft_materials::{Appearance, Srgb};
+    ui.menu_button("Component appearance", |ui| {
+        let assembly = session.doc.assembly();
+        let existing = if let Some(display) = assembly.viewport_state() {
+            display.view.appearances.iter().any(|(p, _)| p == path)
+        } else {
+            assembly.appearances.iter().any(|a| &a.path == path && a.scope == soliddraft_document::ConfigScope::All)
+        };
+        let shown = session.doc.table().colour(row).cloned().unwrap_or_else(Appearance::default_part);
+        let id = ui.id().with(path);
+        let c = shown.base_color;
+        let mut rgb = ui.data_mut(|d| d.get_temp::<[u8; 3]>(id).unwrap_or([c.r, c.g, c.b]));
+        egui::color_picker::color_edit_button_srgb(ui, &mut rgb);
+        ui.data_mut(|d| d.insert_temp(id, rgb));
+        let colour = Srgb::new(rgb[0], rgb[1], rgb[2]);
+        if ui.button("Apply colour").clicked() {
+            let appearance = crate::properties::painted(&shown, colour, 1.0);
+            actions.push(AppAction::Assembly(AssemblyAction::SetColour(path.clone(), Some(appearance))));
+            ui.close();
+        }
+        if existing && ui.button("Remove colour").clicked() {
+            ui.data_mut(|d| d.remove::<[u8; 3]>(id));
+            actions.push(AppAction::Assembly(AssemblyAction::SetColour(path.clone(), None)));
+            ui.close();
+        }
+    });
+}
+
+fn assembly_appearances(ui: &mut egui::Ui, session: &AssemblySession, actions: &mut Vec<AppAction>) {
+    ui.collapsing("Appearances", |ui| {
+        let assembly = session.doc.assembly();
+        let display = assembly.viewport_state().map(|state| &state.id);
+        let choices: Vec<_> =
+            assembly
+                .appearances
+                .iter()
+                .filter_map(|a| assembly.appearance(&a.appearance).map(|look| (&a.path, look, None)))
+                .chain(
+                    assembly.viewport_states.states().iter().flat_map(|state| {
+                        state.view.appearances.iter().map(move |(path, look)| (path, look, Some(state)))
+                    }),
+                )
+                .collect();
+        if choices.is_empty() {
+            ui.label("No component appearance overrides");
+        }
+        for (i, (path, appearance, in_state)) in choices.into_iter().enumerate() {
+            let name = session.doc.table().find(path).map_or_else(|| path.to_string(), |row| session.doc.label(row));
+            let scope = in_state.map_or("Default", |state| state.name.as_str());
+            ui.push_id(i, |ui| {
+                ui.horizontal_wrapped(|ui| {
+                    let c = appearance.base_color;
+                    ui.colored_label(egui::Color32::from_rgb(c.r, c.g, c.b), "●");
+                    ui.label(format!("{} · Component · {name} · {scope}", appearance.name));
+                    if in_state.map(|state| &state.id) == display && ui.small_button("Remove colour").clicked() {
+                        actions.push(AppAction::Assembly(AssemblyAction::SetColour(path.clone(), None)));
+                    }
+                })
+            });
+        }
+    });
 }
 
 /// The property panel: the Mate panel while it is open, otherwise the selected component's
@@ -1228,6 +1491,7 @@ pub fn properties(ui: &mut egui::Ui, state: &mut AppState) {
     let collision_drag = &mut state.assembly.collision_drag;
     let dynamic_clearance = &mut state.assembly.dynamic_clearance;
     let clearance_mm = &mut state.assembly.clearance_mm;
+    let physical_dynamics = &mut state.assembly.physical_dynamics;
     let Some(s) = state.assembly.session.as_mut() else { return };
     let (head, _) = ui.allocate_exact_size(vec2(ui.available_width(), 32.0), Sense::hover());
     let title = match s.selected_row() {
@@ -1293,6 +1557,7 @@ pub fn properties(ui: &mut egui::Ui, state: &mut AppState) {
             if *dynamic_clearance {
                 ui.add(egui::DragValue::new(clearance_mm).range(0.0..=1e9).suffix(" mm"));
             }
+            ui.checkbox(physical_dynamics, "Physical Dynamics: push what it meets");
         });
         if s.doc.drag_pending() {
             ui.label("Checking motion...");
@@ -1351,7 +1616,9 @@ pub fn properties(ui: &mut egui::Ui, state: &mut AppState) {
             return;
         }
         if started
-            && let Err(e) = if *collision_drag || *dynamic_clearance {
+            && let Err(e) = if *physical_dynamics {
+                s.doc.begin_dynamic_drag(draft.path.clone(), dynamic_clearance.then_some(*clearance_mm))
+            } else if *collision_drag || *dynamic_clearance {
                 s.doc.begin_guarded_drag(draft.path.clone(), dynamic_clearance.then_some(*clearance_mm))
             } else {
                 s.doc.begin_drag(draft.path.clone())

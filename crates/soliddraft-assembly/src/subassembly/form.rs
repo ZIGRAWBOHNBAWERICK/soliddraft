@@ -256,6 +256,7 @@ impl AssemblyDocument {
         root.sources.push(crate::schema::Source { id: source, document: child_ref });
         root.components.push(crate::schema::Component::new(component, source, frame));
         root.mates = kept_mates;
+        crate::mates::controller::prune(&mut root);
         root.normalize();
         root.validate().map_err(|e| invalid(e.0))?;
 

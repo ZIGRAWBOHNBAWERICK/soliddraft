@@ -125,8 +125,13 @@ fn settings(name: &str, accuracy_mm: f64, min_detail_mm: f64) -> KernelResult<Se
     })
 }
 
-/// The native spelling of a grade: a linear grade's anchors are part points on its axis.
-fn grade(grade: &Grade, what: &str) -> KernelResult<catallax_recipe::Grade> {
+/// The native spelling of a grade: a linear grade's anchors are part points on its axis,
+/// and a distance grade names its faces through `face` (the skin is every face).
+fn grade(
+    grade: &Grade,
+    what: &str,
+    mut face: impl FnMut(FaceId) -> KernelResult<catallax_recipe::FaceRef>,
+) -> KernelResult<catallax_recipe::Grade> {
     Ok(match grade {
         Grade::Constant(value) => catallax_recipe::Grade::Constant(native::number(*value, what)?),
         Grade::Linear(linear) => {
@@ -139,7 +144,84 @@ fn grade(grade: &Grade, what: &str) -> KernelResult<catallax_recipe::Grade> {
                 end: native::number(linear.end, what)?,
             }
         }
+        Grade::Distance(distance) => catallax_recipe::Grade::Distance {
+            faces: match &distance.faces {
+                GradeFaces::Skin => vec![catallax_recipe::FaceRef::all()],
+                GradeFaces::Picked(faces) => faces.iter().map(|f| face(*f)).collect::<KernelResult<_>>()?,
+            },
+            near: native::number(distance.near, what)?,
+            far: native::number(distance.far, what)?,
+            span: native::number(distance.span, &format!("{what} grade span"))?,
+        },
+        Grade::Radial(radial) => {
+            let mut direction = [0.0; 3];
+            direction[radial.axis.index()] = 1.0;
+            catallax_recipe::Grade::Radial {
+                origin: native::point(Vec3::from(radial.through), "grade axis origin")?,
+                direction: native::vector(Vec3::from(direction), "grade axis direction")?,
+                r0: native::number(radial.from, "grade start radius")?,
+                r1: native::number(radial.to, "grade end radius")?,
+                start: native::number(radial.start, what)?,
+                end: native::number(radial.end, what)?,
+            }
+        }
+        Grade::Point(point) => catallax_recipe::Grade::Point {
+            centre: native::point(Vec3::from(point.centre), "grade centre")?,
+            r0: native::number(point.from, "grade start radius")?,
+            r1: native::number(point.to, "grade end radius")?,
+            start: native::number(point.start, what)?,
+            end: native::number(point.end, what)?,
+        },
     })
+}
+
+/// Whether Catallax builds a field driven by this kind of grade, answered by Catallax's
+/// own validation of a sample field: a cubic lattice of 10 mm cells or a 10 mm gyroid,
+/// graded inside the certified ranges. A refusal carries Catallax's code.
+pub(super) fn grade_support(field: GradedField, kind: GradeKind) -> KernelResult<()> {
+    let (near, far) = match field {
+        GradedField::LatticeRadius => (1.0, 2.0),
+        GradedField::GyroidLevel => (0.0, 0.1),
+    };
+    let sample = match kind {
+        GradeKind::Constant => Grade::Constant(near),
+        GradeKind::Linear => {
+            Grade::Linear(LinearGrade { axis: GradeAxis::Z, from: 0.0, to: 10.0, start: near, end: far })
+        }
+        GradeKind::Distance => Grade::Distance(DistanceGrade { faces: GradeFaces::Skin, near, far, span: 10.0 }),
+        GradeKind::Radial => Grade::Radial(RadialGrade {
+            axis: GradeAxis::Z,
+            through: [0.0; 3],
+            from: 0.0,
+            to: 10.0,
+            start: near,
+            end: far,
+        }),
+        GradeKind::Point => Grade::Point(PointGrade { centre: [0.0; 3], from: 0.0, to: 10.0, start: near, end: far }),
+    };
+    let what = match field {
+        GradedField::LatticeRadius => "density",
+        GradedField::GyroidLevel => "gyroid level",
+    };
+    let native = grade(&sample, what, |_| unreachable!("the sample grade picks no faces"))?;
+    let ten = native::number(10.0, "sample size")?;
+    let checked = match field {
+        GradedField::LatticeRadius => LatticeSpec {
+            cell: catallax_recipe::LatticeCell::Cubic,
+            size: ten,
+            frame: Pose::identity(),
+            radius: native,
+        }
+        .validate(),
+        GradedField::GyroidLevel => GyroidSpec {
+            period: ten,
+            level: native,
+            kind: catallax_recipe::GyroidKind::Network,
+            frame: Pose::identity(),
+        }
+        .validate(),
+    };
+    checked.map_err(|e| query_error(what, e))
 }
 
 fn quantity(width: f64, what: &str) -> KernelResult<QuantityAccuracy> {
@@ -243,11 +325,15 @@ impl CatallaxKernel {
             frame: match params.frame {
                 FieldFrame::Part => Pose::identity(),
             },
-            radius: grade(&params.radius_mm, "density")?,
+            radius: grade(&params.radius_mm, "density", |face| self.solid(body)?.face_ref(face, body))?,
         };
         let sampling_radius = (params.cell != LatticeCell::Cubic).then_some(match &params.radius_mm {
             Grade::Constant(radius) => *radius,
             Grade::Linear(grade) => grade.start.min(grade.end),
+            Grade::Distance(grade) => grade.near.min(grade.far),
+            Grade::Radial(RadialGrade { start, end, .. }) | Grade::Point(PointGrade { start, end, .. }) => {
+                start.min(*end)
+            }
         });
         self.build_field(tag, body, OpKind::Lattice, spec, settings, sampling_radius)
     }
@@ -256,7 +342,7 @@ impl CatallaxKernel {
         let settings = settings("gyroid", params.accuracy_mm, params.min_detail_mm)?;
         let spec = GyroidSpec {
             period: native::number(params.period_mm, "gyroid period")?,
-            level: grade(&params.level, "gyroid level")?,
+            level: grade(&params.level, "gyroid level", |face| self.solid(body)?.face_ref(face, body))?,
             kind: match params.kind {
                 GyroidKind::Network => catallax_recipe::GyroidKind::Network,
             },

@@ -39,6 +39,7 @@ fn a_refused_cancel_of_a_first_proof_stops_saying_cancelling() {
                 operation: soliddraft_model::ExtrudeOp::Boss,
                 end: soliddraft_model::EndCondition::Blind { depth: 10.0 },
                 reverse: false,
+                options: Default::default(),
             }),
             name: None,
             position: None,

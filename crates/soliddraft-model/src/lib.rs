@@ -35,12 +35,14 @@ mod evaluate;
 mod exact;
 mod feature;
 pub mod file;
+pub mod hole_wizard;
 pub mod interview;
 pub mod materials;
 pub mod params;
 pub mod pmi;
 pub mod rebuild;
 pub mod reference;
+mod thin;
 pub mod thread;
 pub mod tracked;
 mod value_expr;
@@ -51,22 +53,22 @@ pub use command::{Command, CommandError, Executed};
 pub use document::{BuiltSketch, Document, FITS_BETWEEN, FaceLabel, FeatureStatus, RUNS_INTO, feature_of_tag};
 pub use evaluate::{plane_on_face, shell_refusal};
 pub use feature::{
-    BlendFeature, BuiltinShape, DatumAxis, DatumPlane, DraftFeature, EndCondition, ExtrudeFeature, ExtrudeOp, Feature,
-    FeatureId, FeatureKind, GyroidFeature, HoleFeature, ImportStepFeature, InheritedName, LatticeFeature, LoftFeature,
-    LoftProfile, MirrorFeature, OffsetFeature, PatternFeature, PatternSpec, PlaneRef, ProfileSource, PullRef,
-    RevolveFeature, ScanFeature, ShellFeature, ShellOpenings, SketchFeature, SketchPlane, SweepFeature, ThickenFeature,
-    sha256_hex,
+    BlendFeature, BuiltinShape, Contour, DatumAxis, DatumPlane, DraftFeature, EndCondition, ExtrudeFeature, ExtrudeOp,
+    ExtrudeOptions, ExtrudeStart, Feature, FeatureId, FeatureKind, FieldGrade, GyroidFeature, HoleFeature,
+    ImportStepFeature, InheritedName, LatticeFeature, LoftFeature, LoftProfile, MirrorFeature, OffsetFeature,
+    PatternFeature, PatternSpec, PlaneRef, ProfileSource, PullRef, RevolveFeature, ScanFeature, ShellFeature,
+    ShellOpenings, SketchFeature, SketchPlane, SweepFeature, ThickenFeature, ThinFeature, ThinSide, sha256_hex,
 };
 pub use file::FileError;
 pub use materials::{
     AppearanceAssignment, AppearanceTable, AppearanceTarget, LostAppearance, MassError, MaterialAssignment,
-    PartMaterials,
+    PartDisplay, PartMaterials,
 };
 pub use reference::{
     Candidate, EdgeFingerprint, EdgePiece, EdgeRef, FaceFingerprint, FaceRef, Generator, NamedFace, NamingError,
     ReferenceSlot, RepairNeeded, RepairReason, VertexRef, face_refs,
 };
-pub use value_expr::{Expression, ValueTable};
+pub use value_expr::{Expression, FORMULA_FUNCTIONS, ValueTable, formula_error_code};
 
 /// The sketch types features are built from.
 pub use soliddraft_sketch as sketch;

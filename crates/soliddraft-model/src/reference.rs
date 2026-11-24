@@ -97,6 +97,23 @@ pub enum Generator {
         /// The saved path piece at that join.
         path: Box<str>,
     },
+    /// A wall of a thin extrusion, offset from a sketch curve. The curve's own side of
+    /// the wall keeps the ordinary [`Generator::Side`] name.
+    ThinWall {
+        /// The sketch line, arc or circle the wall follows.
+        entity: EntityId,
+        /// The wall offset the second way, for a wall on both sides of the curve.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        second: bool,
+    },
+    /// A flat end closing an open thin wall, at the start or end of its chain.
+    ThinEnd {
+        /// The chain's first or last sketch curve.
+        entity: EntityId,
+        /// The end at the chain's last curve.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        last: bool,
+    },
 }
 
 impl fmt::Display for Generator {
@@ -118,6 +135,10 @@ impl fmt::Display for Generator {
             Generator::ShellRound => f.write_str("Inner round"),
             Generator::ShellCorner => f.write_str("Inner corner"),
             Generator::PathJoin { path } => write!(f, "Path join at {path}"),
+            Generator::ThinWall { entity, second: false } => write!(f, "Thin wall of {entity}"),
+            Generator::ThinWall { entity, second: true } => write!(f, "Second thin wall of {entity}"),
+            Generator::ThinEnd { entity, last: false } => write!(f, "Thin end at {entity}"),
+            Generator::ThinEnd { entity, last: true } => write!(f, "Thin end after {entity}"),
         }
     }
 }
@@ -292,6 +313,10 @@ pub enum ReferenceSlot {
     Plane,
     /// The face an extrusion goes up to.
     Limit,
+    /// The face, plane or vertex an extrusion starts at.
+    Start,
+    /// The face an extrusion's second direction goes up to.
+    SecondLimit,
     /// The edge or face a draft reads its pull direction from.
     Pull,
 }
@@ -304,6 +329,8 @@ impl fmt::Display for ReferenceSlot {
             ReferenceSlot::Face { index } => write!(f, "face {}", index + 1),
             ReferenceSlot::Plane => f.write_str("plane"),
             ReferenceSlot::Limit => f.write_str("end face"),
+            ReferenceSlot::Start => f.write_str("start"),
+            ReferenceSlot::SecondLimit => f.write_str("Direction 2 end face"),
             ReferenceSlot::Pull => f.write_str("pull direction"),
         }
     }

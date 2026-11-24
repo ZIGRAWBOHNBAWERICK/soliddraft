@@ -430,3 +430,52 @@ fn contact_face_highlights_survive_moves_and_clear_without_editing_appearance() 
     scene.set_contact_faces(doc.table(), &[]);
     assert_eq!(contact(&scene), 0);
 }
+
+#[test]
+fn a_display_state_saves_occurrence_colours_and_visibility_without_changing_geometry() {
+    use soliddraft_document::display_state::{DisplayMode, DisplayScope, DisplayState};
+
+    let mut doc = sample();
+    let original = doc.assembly().geometry_hash();
+    let left = "3".parse::<OccurrencePath>().unwrap();
+    let right = "4".parse::<OccurrencePath>().unwrap();
+    let base = Appearance::new("blue", "Blue", Srgb::new(20, 40, 210));
+    let red = Appearance::new("red", "Red", Srgb::new(210, 40, 20));
+    doc.set_colour(std::slice::from_ref(&left), Some(base.clone())).unwrap();
+
+    let state = DisplayState::new("Inspection".into(), DisplayScope::All, DisplayMode::Wireframe);
+    let id = state.id.clone();
+    let mut states = doc.assembly().viewport_states.clone();
+    states.put(state).unwrap();
+    states.select(None, Some(id.clone())).unwrap();
+    doc.change_viewport_states(states).unwrap();
+    doc.set_colour(std::slice::from_ref(&left), Some(red.clone())).unwrap();
+    doc.set_hidden(std::slice::from_ref(&right), true).unwrap();
+    let scene = Scene::new(&mut doc);
+    let left_index = doc.table().find(&left).unwrap();
+    let right_index = doc.table().find(&right).unwrap();
+    assert_eq!(doc.table().colour(left_index), Some(&red));
+    assert_ne!(scene.instances()[scene.slot(right_index).unwrap() as usize].flags & Instance::HIDDEN, 0);
+    assert_eq!(doc.assembly().geometry_hash(), original);
+
+    let bytes = doc.assembly().to_bytes(doc.id(), None, &doc.copies()).unwrap();
+    let package = AssemblyPackage::from_bytes(bytes).unwrap();
+    assert_eq!(package.manifest().format, "soliddraft-assembly/2");
+    let mut back = AssemblyDocument::open_package(package, None, OpenOptions::default()).unwrap();
+    back.finish_loading();
+    assert_eq!(back.assembly().viewport_state().unwrap().id, id);
+    assert_eq!(back.table().colour(back.table().find(&left).unwrap()), Some(&red));
+    assert!(back.table().flags(back.table().find(&right).unwrap()).has(soliddraft_assembly::Flags::HIDDEN));
+    back.set_colour(std::slice::from_ref(&left), None).unwrap();
+    assert_eq!(back.table().colour(back.table().find(&left).unwrap()), Some(&base));
+    assert!(back.undo());
+    assert_eq!(back.table().colour(back.table().find(&left).unwrap()), Some(&red));
+
+    let mut states = back.assembly().viewport_states.clone();
+    states.select(None, None).unwrap();
+    back.change_viewport_states(states).unwrap();
+    assert_eq!(back.table().colour(back.table().find(&left).unwrap()), Some(&base));
+    assert!(!back.table().flags(back.table().find(&right).unwrap()).has(soliddraft_assembly::Flags::HIDDEN));
+    back.move_to(&[(left, Placement::translation(DVec3::splat(10.0)))]).unwrap();
+    assert_ne!(back.assembly().geometry_hash(), original);
+}

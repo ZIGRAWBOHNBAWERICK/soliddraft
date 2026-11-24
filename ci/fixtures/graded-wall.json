@@ -1,0 +1,33 @@
+{
+  "format": "soliddraft-part/1",
+  "name": "Graded wall",
+  "units": "mm",
+  "features": [
+    {
+      "id": 1,
+      "name": "Boss-Extrude1",
+      "kind": {
+        "type": "extrude",
+        "profile": {
+          "from": "shape",
+          "datum": "top",
+          "shape": { "type": "rectangle", "width": 10, "height": 8 }
+        },
+        "operation": "boss",
+        "end": { "type": "blind", "depth": 6 }
+      }
+    },
+    {
+      "id": 2,
+      "name": "Shell1",
+      "kind": {
+        "type": "shell",
+        "open_faces": [],
+        "thickness": {
+          "linear": { "axis": "x", "from": -5, "to": 5, "start": 1, "end": 3 }
+        }
+      }
+    }
+  ],
+  "next_feature": 3
+}

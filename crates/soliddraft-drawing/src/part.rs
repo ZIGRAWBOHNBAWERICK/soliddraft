@@ -77,6 +77,11 @@ pub trait Namer {
     /// `None` when the reference is not one of this document's.
     fn resolve(&self, r: &EntityRef) -> Option<Resolution>;
 
+    /// Whether this circular model edge comes from a hole or cut feature.
+    fn is_hole(&self, _circle: &crate::project::CircleInfo) -> bool {
+        false
+    }
+
     /// The callout of a hole whose edge a view sees face-on, such as "4× Ø9 THRU", in
     /// the drawing's symbols, or `None` when the circle is not a hole.
     fn hole_callout(

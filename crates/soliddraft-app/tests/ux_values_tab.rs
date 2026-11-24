@@ -135,7 +135,7 @@ fn the_values_tab_drives_the_bracket_from_globals_and_formulas() {
         assert_eq!(value(app, "Default BossExtrude1.Depth").as_deref(), Some("=Plate"));
 
         // The flange's height follows the plate: a formula on the first dimension.
-        type_in(app, "Default BossExtrude2.Depth", "=BossExtrude1.Depth*5");
+        type_in(app, "Default BossExtrude2.Depth", "=ROUND(BossExtrude1.Depth*5,0)");
         rebuilt(app);
         assert_eq!(depth(app, "Boss-Extrude2"), 60.0);
         case.frame(app, "03-formulas");
@@ -148,21 +148,35 @@ fn the_values_tab_drives_the_bracket_from_globals_and_formulas() {
             app.state().state.values.error(&soliddraft_app::values_tab::Field::Cell("BossExtrude2.Depth".into(), 0));
         assert_eq!(error, Some("Nothing is named Plat"));
         assert!(texts(app).iter().any(|t| t == "Nothing is named Plat"));
+        assert!(texts(app).iter().any(|t| t == "#NAME?"));
         assert_eq!((app.state().state.doc.model().semantic_hash(), volume(app)), before);
         case.frame(app, "04-error-on-cell");
         app.key_press(Key::Escape);
-        type_in(app, "Default BossExtrude2.Depth", "=BossExtrude1.Depth*5");
+        type_in(app, "Default BossExtrude2.Depth", "=ROUND(BossExtrude1.Depth*5,0)");
         settle(app);
 
-        // A configuration column: Thin overrides the global, and the part follows it.
+        // The selected tab edits its own values and suppression state.
+        press(app, "New configuration");
         type_in(app, "New configuration name", "Thin");
         settle(app);
-        type_in(app, "Thin Plate", "6");
-        settle(app);
         press(app, "Column Thin");
+        type_in(app, "Thin Plate", "6");
         rebuilt(app);
         assert_eq!((depth(app, "Boss-Extrude1"), depth(app, "Boss-Extrude2")), (6.0, 30.0));
+        let cut_volume = volume(app);
+        press(app, "Feature suppression");
+        press(app, "Suppress Cut-Extrude1");
+        rebuilt(app);
+        let thin_volume = volume(app);
+        assert!(thin_volume > cut_volume);
         case.frame(app, "05-thin-configuration");
+        press(app, "New configuration");
+        type_in(app, "New configuration name", "Tall");
+        press(app, "Column Tall");
+        type_in(app, "Tall Plate", "14");
+        rebuilt(app);
+        let tall_volume = volume(app);
+        assert_eq!(depth(app, "Boss-Extrude2"), 70.0);
         press(app, "Column Default");
         rebuilt(app);
         assert_eq!(depth(app, "Boss-Extrude1"), 12.0);
@@ -175,8 +189,20 @@ fn the_values_tab_drives_the_bracket_from_globals_and_formulas() {
         call(&mut app.state_mut().state, "open", json!({ "path": path }));
         rebuilt(app);
         assert_eq!(app.state().state.doc.model().values_table(), table);
-        assert_eq!(value(app, "Default BossExtrude2.Depth").as_deref(), Some("=BossExtrude1.Depth*5"));
+        assert_eq!(value(app, "Default BossExtrude2.Depth").as_deref(), Some("=ROUND(BossExtrude1.Depth*5,0)"));
+        press(app, "Column Thin");
+        rebuilt(app);
         assert_eq!(value(app, "Thin Plate").as_deref(), Some("6"));
+        assert_eq!(depth(app, "Boss-Extrude2"), 30.0);
+        assert_eq!(volume(app), thin_volume);
+        press(app, "Column Tall");
+        rebuilt(app);
+        assert_eq!(value(app, "Tall Plate").as_deref(), Some("14"));
+        assert_eq!(volume(app), tall_volume);
+        call(&mut app.state_mut().state, "sketch", json!({ "plane": "top", "shapes": [{ "shape": "rectangle", "center": [30, 30, 0], "width": 10, "height": 10 }] }));
+        call(&mut app.state_mut().state, "extrude", json!({ "sketch": "Sketch4", "depth": 22, "flip": false }));
+        rebuilt(app);
+        assert!(volume(app) > tall_volume);
         case.frame(app, "06-reopened");
     });
 }

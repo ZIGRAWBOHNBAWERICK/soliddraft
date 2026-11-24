@@ -241,6 +241,7 @@ impl OccurrenceTable {
                         coloured = true;
                     }
                     Effect::Quality(q) => quality = *q,
+                    Effect::Visibility(h) => hidden = *h,
                 }
             }
             let is_assembly = store.get(def).kind == DocKind::Assembly;
@@ -293,6 +294,18 @@ impl OccurrenceTable {
             if let Some(a) = assembly.appearance(&c.appearance) {
                 out.push((c.path.steps().to_vec(), Effect::Colour(self.palette_index(a))));
             }
+        }
+        if let Some(state) = assembly.viewport_state() {
+            out.extend(
+                state.view.hidden.iter().map(|(path, hidden)| (path.steps().to_vec(), Effect::Visibility(*hidden))),
+            );
+            out.extend(
+                state
+                    .view
+                    .appearances
+                    .iter()
+                    .map(|(path, appearance)| (path.steps().to_vec(), Effect::Colour(self.palette_index(appearance)))),
+            );
         }
         out
     }
@@ -983,6 +996,8 @@ enum Effect {
     /// Show it and everything under it at a quality: an index into the qualities,
     /// plus one.
     Quality(u32),
+    /// Show or hide it in the selected display state.
+    Visibility(bool),
 }
 
 /// An effect on its way down the tree: the rest of its path, and the effect.

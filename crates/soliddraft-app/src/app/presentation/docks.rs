@@ -2,7 +2,7 @@
 
 use crate::document::Selection;
 use crate::icons::{self, Icon};
-use crate::panels::{Pane, Side};
+use crate::panels::Pane;
 use crate::state::{AppAction, AppState};
 use crate::theme;
 use crate::tree;
@@ -36,35 +36,355 @@ pub(in crate::app) fn center_dock() -> DockState<Tab> {
     DockState::new(vec![Tab::Viewport])
 }
 
-/// The side area's content: the active document's tree, or the part's Values. The strip
-/// at the window's edge chooses between them, so the area has no tabs of its own.
+/// The D1 Clear Bench single side column: stacks every toggled pane (`Tree`, `History`,
+/// `Values`, `Props`) vertically top-to-bottom with draggable 7px horizontal splitters and
+/// a close `×` per pane.
 pub(in crate::app) fn pane(ui: &mut egui::Ui, state: &mut AppState) {
-    ui.spacing_mut().item_spacing = vec2(6.0, 4.0);
-    match state.layout.pane {
-        Pane::Values => {
-            title(ui, "Values");
-            egui::Frame::new()
-                .inner_margin(egui::Margin { left: 12, right: 6, top: 2, bottom: 0 })
-                .show(ui, |ui| crate::values_tab::show(ui, state));
-        }
-        Pane::Tree if state.assembly.is_active() => crate::assembly::tree(ui, state),
-        Pane::Tree if state.drawing.is_active() => crate::drawing::tree_drawing::show(ui, state),
-        Pane::Tree => tree::show(ui, state),
+    // While a feature is created or edited the side column is its property panel, with the
+    // tree kept below it: planes, axes and features are still picked from the tree. The
+    // toggled panes come back when the feature closes.
+    if crate::feature_panel::active(state) || crate::hole_wizard_panel::active(state) {
+        feature_pane(ui, state);
+        return;
     }
+    ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
+    let mut active = state.layout.panes.active_list();
+    // An assembly has no part parameters: its column leaves Values out and keeps its tree.
+    if state.assembly.is_active() && active.contains(&Pane::Values) {
+        active.retain(|p| *p != Pane::Values);
+        if active.is_empty() {
+            active.push(Pane::Tree);
+        }
+    }
+    if active.is_empty() {
+        return;
+    }
+
+    let full = ui.available_rect_before_wrap();
+    let splitter_h = theme::spacing().splitter_height;
+    let total_splitters = (active.len().saturating_sub(1)) as f32 * splitter_h;
+    let usable_h = (full.height() - total_splitters).max(64.0 * active.len() as f32);
+    let min_pane_h = (usable_h / active.len() as f32).min(96.0);
+
+    // Compute pixel heights from stored weights.
+    let weight_sum: f32 = active.iter().map(|p| state.layout.split_weights[p.index()].max(0.1)).sum();
+    let mut heights: Vec<f32> =
+        active.iter().map(|p| (state.layout.split_weights[p.index()].max(0.1) / weight_sum) * usable_h).collect();
+    // Enforce minimum height per pane and re-normalize so total matches `usable_h`.
+    for h in &mut heights {
+        if *h < min_pane_h {
+            *h = min_pane_h;
+        }
+    }
+    let h_sum: f32 = heights.iter().sum();
+    if h_sum > 0.0 {
+        let scale = usable_h / h_sum;
+        for h in &mut heights {
+            *h *= scale;
+        }
+    }
+
+    // An assembly and a drawing have no history steps yet. Their History pane only says
+    // so, and takes the height of that note instead of its share of the column.
+    let note_only = state.assembly.is_active() || state.drawing.is_active();
+    if let Some(history) = active.iter().position(|p| *p == Pane::History).filter(|_| note_only && active.len() > 1) {
+        let note = (theme::spacing().pane_header_height + 76.0).min(heights[history]);
+        let others: f32 = heights.iter().sum::<f32>() - heights[history];
+        let scale = if others > 0.0 { (usable_h - note) / others } else { 1.0 };
+        for (i, h) in heights.iter_mut().enumerate() {
+            *h = if i == history { note } else { *h * scale };
+        }
+    }
+
+    let mut close_request: Option<Pane> = None;
+    let mut split_drag: Option<(Pane, Pane, f32)> = None;
+
+    for (i, &p) in active.iter().enumerate() {
+        let h = heights[i];
+        let pane_rect = ui.allocate_exact_size(vec2(full.width(), h), Sense::hover()).0;
+        let mut child = ui.new_child(
+            egui::UiBuilder::new()
+                .id_salt(("d1_pane", p))
+                .max_rect(pane_rect)
+                .layout(egui::Layout::top_down(egui::Align::Min)),
+        );
+        child.set_clip_rect(pane_rect);
+        child.spacing_mut().item_spacing = vec2(6.0, 4.0);
+
+        if pane_header(&mut child, state, p) {
+            close_request = Some(p);
+        }
+        // A part's Browser header offers the part's appearance and material, as the
+        // tree's own header does. The close button keeps its clicks.
+        if p == Pane::Tree && !state.assembly.is_active() && !state.drawing.is_active() {
+            let head =
+                Rect::from_min_size(pane_rect.min, vec2(pane_rect.width() - 34.0, theme::spacing().pane_header_height));
+            let response = child.interact(head, child.id().with("part_header_menu"), Sense::click());
+            tree::part_menu(&response, state);
+        }
+
+        let body_rect = Rect::from_min_max(
+            pos2(pane_rect.left(), pane_rect.top() + theme::spacing().pane_header_height),
+            pane_rect.max,
+        );
+        let mut body = child
+            .new_child(egui::UiBuilder::new().max_rect(body_rect).layout(egui::Layout::top_down(egui::Align::Min)));
+        body.set_clip_rect(body_rect);
+        match p {
+            Pane::Tree if state.assembly.is_active() => crate::assembly::tree(&mut body, state),
+            Pane::Tree if state.drawing.is_active() => crate::drawing::tree_drawing::show(&mut body, state),
+            Pane::Tree => tree::show_contents(&mut body, state),
+            Pane::History => crate::history_panel::show(&mut body, state),
+            Pane::Values => {
+                // Mount point for the Parameters lane.
+                egui::Frame::new()
+                    .inner_margin(egui::Margin { left: 10, right: 6, top: 4, bottom: 4 })
+                    .show(&mut body, |ui| crate::values_tab::show(ui, state));
+            }
+            Pane::Props => {
+                // Mount point for the Feature Panel lane.
+                props_pane(&mut body, state);
+            }
+        }
+
+        // Draggable splitter between pane `i` and pane `i + 1`.
+        if i + 1 < active.len() {
+            let (srect, sresp) = ui.allocate_exact_size(vec2(full.width(), splitter_h), Sense::drag());
+            let sresp = sresp.on_hover_cursor(egui::CursorIcon::ResizeVertical);
+            sresp.widget_info(|| {
+                egui::WidgetInfo::labeled(
+                    egui::WidgetType::Other,
+                    true,
+                    format!("Resize {:?} and {:?}", p, active[i + 1]),
+                )
+            });
+            let hot = sresp.hovered() || sresp.dragged();
+            ui.painter().rect_filled(
+                srect,
+                CornerRadius::ZERO,
+                if hot { theme::accent_soft() } else { theme::panel_header() },
+            );
+            ui.painter().hline(srect.x_range(), srect.top() + 0.5, egui::Stroke::new(1.0, theme::line()));
+            ui.painter().hline(srect.x_range(), srect.bottom() - 0.5, egui::Stroke::new(1.0, theme::line()));
+            let grip = Rect::from_center_size(srect.center(), vec2(30.0, 2.0));
+            ui.painter().rect_filled(
+                grip,
+                CornerRadius::same(2),
+                if hot { theme::accent() } else { theme::line_strong() },
+            );
+            if sresp.dragged() {
+                let dy = ui.input(|inp| inp.pointer.delta().y);
+                if dy.abs() > 0.0 {
+                    split_drag = Some((p, active[i + 1], dy));
+                }
+            }
+        }
+    }
+
+    if let Some((upper, lower, dy)) = split_drag {
+        let delta_w = (dy / usable_h) * weight_sum;
+        let min_w = (min_pane_h / usable_h) * weight_sum;
+        let u_idx = upper.index();
+        let l_idx = lower.index();
+        let pair_sum = state.layout.split_weights[u_idx] + state.layout.split_weights[l_idx];
+        let next_u = (state.layout.split_weights[u_idx] + delta_w).clamp(min_w, (pair_sum - min_w).max(min_w));
+        state.layout.split_weights[u_idx] = next_u;
+        state.layout.split_weights[l_idx] = (pair_sum - next_u).max(min_w);
+    }
+
+    if let Some(p) = close_request {
+        state.close_pane(p);
+    }
+
+    // Subtle right divider separating the side column from the viewport.
+    ui.painter().vline(full.right() - 0.5, full.y_range(), egui::Stroke::new(1.0, theme::line()));
 }
 
-/// A pane's title row, as the tree's header row draws its part's name.
-fn title(ui: &mut egui::Ui, text: &str) {
-    let (head, _) = ui.allocate_exact_size(vec2(ui.available_width(), 30.0), Sense::hover());
+/// The feature property panel over the feature tree, filling the side column. The panel
+/// takes what its open sections need, up to two thirds; the tree the rest.
+fn feature_pane(ui: &mut egui::Ui, state: &mut AppState) {
+    ui.spacing_mut().item_spacing = vec2(6.0, 4.0);
+    let full = ui.available_rect_before_wrap();
+    let layout = egui::Layout::top_down(egui::Align::Min);
+    // A hole is set up in the Hole Wizard, which takes the tree's place as the SOLIDWORKS
+    // PropertyManager does. The hole's own form (OK, depths, thread) sits under it and
+    // takes what its open sections need, up to half the column.
+    // While its position sketch is open the hole's form steps aside and the wizard,
+    // which closes the sketch, takes the whole column.
+    if crate::hole_wizard_panel::active(state) && !crate::feature_panel::active(state) {
+        let mut wizard = ui.new_child(
+            egui::UiBuilder::new().id_salt("hole_wizard_panel").max_rect(full.shrink2(vec2(10.0, 8.0))).layout(layout),
+        );
+        wizard.set_clip_rect(full.intersect(ui.clip_rect()));
+        crate::hole_wizard_panel::show_contents(&mut wizard, state);
+        ui.allocate_rect(full, Sense::hover());
+        ui.painter().vline(full.right() - 0.5, full.y_range(), egui::Stroke::new(1.0, theme::line()));
+        return;
+    }
+    if crate::hole_wizard_panel::active(state) {
+        let most = (full.height() * 0.5).max(160.0).min(full.height());
+        let wanted = crate::feature_panel::needed_height(ui.ctx()).unwrap_or(most);
+        let split = full.bottom() - wanted.clamp(160.0_f32.min(most), most);
+        let top = Rect::from_min_max(full.min, pos2(full.right(), split));
+        let bottom = Rect::from_min_max(pos2(full.left(), split), full.max);
+        let mut wizard = ui.new_child(
+            egui::UiBuilder::new().id_salt("hole_wizard_panel").max_rect(top.shrink2(vec2(10.0, 8.0))).layout(layout),
+        );
+        wizard.set_clip_rect(top.intersect(ui.clip_rect()));
+        crate::hole_wizard_panel::show_contents(&mut wizard, state);
+        ui.painter().hline(full.x_range(), split, egui::Stroke::new(1.0, theme::line_strong()));
+        let mut panel =
+            ui.new_child(egui::UiBuilder::new().id_salt("feature_panel_area").max_rect(bottom).layout(layout));
+        panel.set_clip_rect(bottom.intersect(ui.clip_rect()));
+        crate::feature_panel::show(&mut panel, state);
+        ui.allocate_rect(full, Sense::hover());
+        ui.painter().vline(full.right() - 0.5, full.y_range(), egui::Stroke::new(1.0, theme::line()));
+        return;
+    }
+    let most = (full.height() * 0.68).max(160.0).min(full.height());
+    let wanted = crate::feature_panel::needed_height(ui.ctx()).unwrap_or(most);
+    let split = full.top() + wanted.clamp(160.0_f32.min(most), most);
+    let top = Rect::from_min_max(full.min, pos2(full.right(), split));
+    let bottom = Rect::from_min_max(pos2(full.left(), split), full.max);
+    let mut panel = ui.new_child(egui::UiBuilder::new().id_salt("feature_panel_area").max_rect(top).layout(layout));
+    panel.set_clip_rect(top.intersect(ui.clip_rect()));
+    crate::feature_panel::show(&mut panel, state);
+    ui.painter().hline(full.x_range(), split, egui::Stroke::new(1.0, theme::line_strong()));
+    let mut rows = ui.new_child(egui::UiBuilder::new().id_salt("feature_panel_tree").max_rect(bottom).layout(layout));
+    rows.set_clip_rect(bottom.intersect(ui.clip_rect()));
+    tree::show(&mut rows, state);
+    ui.allocate_rect(full, Sense::hover());
+    // The same right divider the toggled panes draw.
+    ui.painter().vline(full.right() - 0.5, full.y_range(), egui::Stroke::new(1.0, theme::line()));
+}
+
+/// Renders a 30px D1 pane header with icon, title, status badge, and close `×` button.
+/// Returns true if the close `×` button was clicked.
+fn pane_header(ui: &mut egui::Ui, state: &AppState, pane: Pane) -> bool {
+    let h = theme::spacing().pane_header_height;
+    let (head, _) = ui.allocate_exact_size(vec2(ui.available_width(), h), Sense::hover());
     let painter = ui.painter();
+    painter.rect_filled(head, CornerRadius::ZERO, theme::panel_header());
+    painter.hline(head.x_range(), head.bottom() - 0.5, egui::Stroke::new(1.0, theme::line()));
+
+    let (icon, title, badge_text, badge_fg, badge_bg) = match pane {
+        Pane::Tree => {
+            let title = if state.assembly.is_active() {
+                "Assembly"
+            } else if state.drawing.is_active() {
+                "Drawing"
+            } else {
+                "Browser"
+            };
+            let errors = state.doc.error_count();
+            let repairs = state.doc.repair_count();
+            let (b, fg, bg) = if errors > 0 {
+                (format!("{errors} err"), theme::error(), theme::error_soft())
+            } else if repairs > 0 {
+                (format!("{repairs} fix"), theme::warn(), theme::warn_soft())
+            } else {
+                ("OK".to_owned(), theme::ok(), theme::ok_soft())
+            };
+            (Icon::Tree, title, Some(b), fg, bg)
+        }
+        Pane::History => {
+            (Icon::History, "History", Some(crate::history_panel::badge(state)), theme::muted(), theme::chip())
+        }
+        Pane::Values => {
+            let active_cfg =
+                state.doc.model().configuration_summary()["active"].as_str().unwrap_or("Default").to_owned();
+            (Icon::Formula, "Parameters", Some(active_cfg), theme::muted(), theme::chip())
+        }
+        Pane::Props => {
+            let badge = if state.doc.selection.is_some() { "Selected" } else { "Part" };
+            (Icon::Props, "Props", Some(badge.to_owned()), theme::muted(), theme::chip())
+        }
+    };
+
+    icons::paint(
+        painter,
+        icon,
+        Rect::from_center_size(pos2(head.left() + 16.0, head.center().y), vec2(14.0, 14.0)),
+        theme::muted(),
+    );
     painter.text(
-        pos2(head.left() + 12.0, head.center().y),
+        pos2(head.left() + 28.0, head.center().y),
         Align2::LEFT_CENTER,
-        text,
-        theme::font_semibold(12.5),
+        title,
+        theme::font_semibold(12.0),
         theme::ink(),
     );
-    painter.hline(head.x_range(), head.bottom() - 0.5, egui::Stroke::new(1.0, theme::line()));
+
+    // Close `×` button at far right of the pane header
+    let close_rect = Rect::from_center_size(pos2(head.right() - 15.0, head.center().y), vec2(20.0, 20.0));
+    let close_resp = ui.interact(close_rect, ui.id().with(("close_pane", pane)), Sense::click());
+    close_resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, format!("Close {title}")));
+    if close_resp.hovered() {
+        ui.painter().rect_filled(close_rect, CornerRadius::same(4), theme::hover());
+    }
+    icons::paint(
+        ui.painter(),
+        Icon::Close,
+        close_rect.shrink(4.5),
+        if close_resp.hovered() { theme::ink() } else { theme::muted() },
+    );
+
+    if let Some(text) = badge_text {
+        let galley = ui.painter().layout_no_wrap(text, theme::font_semibold(10.0), badge_fg);
+        let pill_w = galley.size().x + 12.0;
+        let pill_rect =
+            Rect::from_center_size(pos2(close_rect.left() - 6.0 - pill_w / 2.0, head.center().y), vec2(pill_w, 17.0));
+        ui.painter().rect_filled(pill_rect, CornerRadius::same(theme::radii().pill), badge_bg);
+        ui.painter().galley(
+            pos2(pill_rect.center().x - galley.size().x / 2.0, pill_rect.center().y - galley.size().y / 2.0),
+            galley,
+            badge_fg,
+        );
+    }
+
+    close_resp.on_hover_text(format!("Close {title}")).clicked()
+}
+
+/// Mount point for the Feature Panel & Appearance controls inside the `Props` stacked pane.
+fn props_pane(ui: &mut egui::Ui, state: &mut AppState) {
+    egui::ScrollArea::vertical().id_salt("d1_props_scroll").auto_shrink([false, false]).show(ui, |ui| {
+        egui::Frame::new().inner_margin(egui::Margin::symmetric(10, 8)).show(ui, |ui| {
+            if state.assembly.is_active() {
+                crate::assembly::properties(ui, state);
+                return;
+            }
+            if state.drawing.is_active() {
+                crate::drawing::properties_drawing::show(ui, state);
+                return;
+            }
+            if state.doc.selection.is_some() || state.sketch.is_some() || state.measure.open || state.pmi.open {
+                crate::properties::show(ui, state);
+            } else {
+                ui.label(
+                    egui::RichText::new("Select a face, edge, body or feature to inspect its properties.")
+                        .size(11.5)
+                        .color(theme::muted()),
+                );
+                ui.add_space(10.0);
+                theme::section_label(ui, "PART APPEARANCE & MATERIAL");
+                ui.add_space(4.0);
+                let mat = state.doc.material().map_or("Unassigned", |m| m.name.as_str());
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("Material:").color(theme::muted()));
+                    ui.label(egui::RichText::new(mat).family(theme::medium()));
+                });
+                ui.add_space(4.0);
+                ui.horizontal_wrapped(|ui| {
+                    if ui.button("Material…").clicked() {
+                        state.push(AppAction::ShowMaterial);
+                    }
+                    if ui.button("Appearances…").clicked() {
+                        state.push(AppAction::ShowAppearance);
+                    }
+                });
+            }
+        });
+    });
 }
 
 /// A dock area in the app's style, without the buttons the shell does not use.
@@ -78,38 +398,6 @@ pub(in crate::app) fn show_dock(ui: &mut egui::Ui, dock: &mut DockState<Tab>, id
         .show_leaf_close_all_buttons(false)
         .show_leaf_collapse_buttons(false)
         .show_inside(ui, panels);
-}
-
-/// The strip a hidden side area leaves at its edge: a chevron pointing into the
-/// window and the title set on end, reading bottom to top like the tab of a collapsed
-/// task pane. Returns true when clicked.
-pub(in crate::app) fn strip(
-    ui: &mut egui::Ui,
-    side: Side,
-    title: &str,
-    shortcuts: &crate::commands::Shortcuts,
-) -> bool {
-    let (rect, resp) = ui.allocate_exact_size(ui.available_size(), Sense::click());
-    let label = format!("Show the {}", side.name());
-    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, label.clone()));
-    let hint = match shortcuts.shortcut_text(side.command()) {
-        Some(key) => format!("{label} ({key})"),
-        None => label,
-    };
-    let resp = resp.on_hover_text(hint);
-    let painter = ui.painter();
-    if resp.hovered() {
-        painter.rect_filled(rect, CornerRadius::ZERO, theme::hover());
-    }
-    let color = if resp.hovered() { theme::ink() } else { theme::muted() };
-    let icon_rect = Rect::from_center_size(pos2(rect.center().x, rect.top() + 16.0), vec2(14.0, 14.0));
-    icons::paint(painter, Icon::ChevronRight, icon_rect, color);
-    let galley = painter.layout_no_wrap(title.to_owned(), theme::font_medium(12.0), color);
-    let (w, h) = (galley.size().x, galley.size().y);
-    // The text turns about its top-left corner.
-    let pos = pos2(rect.center().x - h / 2.0, rect.top() + 34.0 + w);
-    painter.add(egui::epaint::TextShape::new(pos, galley, color).with_angle(-std::f32::consts::FRAC_PI_2));
-    resp.clicked()
 }
 
 pub(in crate::app) struct Panels<'a> {
@@ -280,7 +568,9 @@ impl TabViewer for Panels<'_> {
                     let reference = events.clicked_reference.map(Selection::Reference);
                     let sel = picked.and_then(|p| selection_of(&st.doc, p)).or(reference);
                     st.doc.target_selection(sel);
-                    st.push(AppAction::Select(pick_filter.selection(sel)));
+                    let sel = pick_filter.selection(sel);
+                    st.click_point = sel.zip(events.clicked_point);
+                    st.push(AppAction::Select(sel));
                 }
                 if let Some(v) = events.set_view {
                     st.push(AppAction::SetView(v));
@@ -303,6 +593,15 @@ impl TabViewer for Panels<'_> {
     }
 
     fn on_close(&mut self, tab: &mut Tab) -> egui_dock::tab_viewer::OnCloseResponse {
+        // A document with unsaved changes stays open until Save, Discard or Cancel.
+        let target = match tab {
+            Tab::Drawing => Some(crate::top_bar::CloseTarget::Drawing),
+            Tab::Assembly => Some(crate::top_bar::CloseTarget::Assembly),
+            _ => None,
+        };
+        if target.is_some_and(|target| crate::top_bar::ask_before_closing(&mut *self.state, target)) {
+            return egui_dock::tab_viewer::OnCloseResponse::Ignore;
+        }
         if matches!(tab, Tab::Drawing) {
             self.state.drawing.session = None;
             self.state.drawing.active = false;

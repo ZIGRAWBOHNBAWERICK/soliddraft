@@ -482,7 +482,47 @@ class BladeCleanup(unittest.TestCase):
                 self.assertFalse((root / 'prune.log').exists())
 
 
+def browser_launches(text):
+    """Read browser commands from the hosted web job's shell steps."""
+    web = text.split('\n  web:\n', 1)[1].split('\n  msrv:\n', 1)[0]
+    launches = []
+    for run in re.finditer(r'^        run: (.*)\n((?:^          .*\n|^\n)*)', web, re.MULTILINE):
+        inline, block = run.groups()
+        for line in [inline, *block.splitlines()]:
+            launch = re.match(
+                r'^\s*(?:chrome-devtools-axi run\s*<\s*|node\s+)ci/(browser-[\w-]+\.(?:mjs|js))(?=\s|$)',
+                line,
+            )
+            if launch:
+                launches.append(launch[1])
+    return launches
+
+
 class BrowserStartup(unittest.TestCase):
+    def test_each_routed_web_browser_script_runs_once(self):
+        hosted = next(p for p in WORKFLOWS if p.name == 'hosted.yml')
+        routes = json.loads(hosted.parents[2].joinpath('ci', 'check-consumers.json').read_text())['files']
+        expected = [path.removeprefix('ci/') for path, jobs in routes.items()
+                    if path.startswith('ci/browser-') and (jobs == 'all' or 'web' in jobs)]
+        text = hosted.read_text()
+        self.assertCountEqual(browser_launches(text), expected)
+
+    def test_a_commented_out_browser_launch_does_not_count(self):
+        text = next(p for p in WORKFLOWS if p.name == 'hosted.yml').read_text()
+        for launch, name in [
+            ('chrome-devtools-axi run < ci/browser-journal.js', 'browser-journal.js'),
+            ('node ci/browser-assemblies.mjs', 'browser-assemblies.mjs'),
+        ]:
+            with self.subTest(name=name):
+                self.assertIn(name, browser_launches(text))
+                self.assertNotIn(name, browser_launches(text.replace(launch, '# ' + launch)))
+
+    def test_duplicate_launches_count_twice(self):
+        text = next(p for p in WORKFLOWS if p.name == 'hosted.yml').read_text()
+        launch = 'chrome-devtools-axi run < ci/browser-journal.js'
+        text = text.replace(launch, f'{launch}\n\n          {launch}')
+        self.assertEqual(browser_launches(text).count('browser-journal.js'), 2)
+
     def test_only_a_lost_bridge_retries_open_once(self):
         text = next(p for p in WORKFLOWS if p.name == 'hosted.yml').read_text()
         start = text.index('          open_browser() {')
@@ -514,9 +554,6 @@ class BrowserStartup(unittest.TestCase):
                 result = subprocess.run(['bash', '-e', '-c', script], env=env, capture_output=True, text=True)
                 self.assertEqual(result.returncode, expected, result.stderr)
                 self.assertEqual((root / 'calls').read_text().splitlines(), calls)
-        for name in ('browser-edit-off-thread.js', 'browser-journal.js', 'browser-kernel-worker.js', 'browser-part-check.js',
-                     'browser-recovery-storage.js'):
-            self.assertEqual(text.count(f'chrome-devtools-axi run < ci/{name}'), 1)
 
 
 class ArchiveWorkspace(unittest.TestCase):

@@ -70,6 +70,7 @@ fn save_block(path: &std::path::Path, w: f64) {
         operation: ExtrudeOp::Boss,
         end: EndCondition::Blind { depth: 10.0 },
         reverse: false,
+        options: Default::default(),
     }));
     doc.save(path).unwrap();
 }

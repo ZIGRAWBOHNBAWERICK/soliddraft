@@ -37,6 +37,7 @@
 
 pub mod autosave;
 pub mod backup;
+pub mod display_state;
 pub mod hash;
 pub mod id;
 pub mod index;

@@ -156,6 +156,11 @@ pub enum Command {
         /// Row to select, including Default.
         name: String,
     },
+    /// Applies an undoable parameters or configuration edit.
+    EditParameters {
+        /// The edit to apply to the current part.
+        edit: crate::configs::Edit,
+    },
     /// Replaces the authored table as one step: file defaults, row overrides, properties.
     SetConfigurationGrid {
         /// The whole candidate table.
@@ -207,6 +212,15 @@ pub enum Command {
         /// Whether it is suppressed.
         suppressed: bool,
     },
+    /// Puts a feature in another body: an existing one, or a new one with the next free
+    /// identity, as an extrusion that does not merge its result. The features after it
+    /// stay in their bodies.
+    MoveToBody {
+        /// The feature.
+        id: FeatureId,
+        /// The body's stable identity.
+        body: u32,
+    },
     /// Moves the rollback bar above a feature, or to the end with `None`.
     RollTo {
         /// The first feature below the bar.
@@ -229,6 +243,18 @@ pub enum Command {
         #[serde(default, skip_serializing_if = "is_all")]
         scope: ConfigScope,
     },
+    /// Sets or clears a material override on a solid body.
+    SetBodyMaterial {
+        /// The stable body key.
+        body: u32,
+        /// The assigned material, or none to inherit.
+        material: Option<Material>,
+        /// A copy of the material's default appearance.
+        default_appearance: Option<Appearance>,
+        /// The configurations with this assignment.
+        #[serde(default, skip_serializing_if = "is_all")]
+        scope: ConfigScope,
+    },
     /// Applies an appearance to the part, a feature's faces or a face, or removes the
     /// one there with `None`. The part keeps a copy of the appearance as given.
     SetAppearance {
@@ -240,6 +266,11 @@ pub enum Command {
         /// In which configurations; all of them by default.
         #[serde(default, skip_serializing_if = "is_all")]
         scope: ConfigScope,
+    },
+    /// Replaces the named display states, as one undoable appearance edit.
+    SetDisplayStates {
+        /// The new display states.
+        states: Box<soliddraft_document::display_state::DisplayStates<crate::materials::PartDisplay>>,
     },
     /// Replaces the part's copies of materials and appearances it uses with these
     /// values, as updating from a library does. Refused for one the part does not use.
@@ -621,6 +652,44 @@ impl Document {
         stack.last().is_some_and(|entry| matches!(entry.redo, Command::SetAnnotationPlacement { .. }))
     }
 
+    fn set_material_assignment(
+        &mut self,
+        body: Option<u32>,
+        material: Option<Material>,
+        default_appearance: Option<Appearance>,
+        scope: ConfigScope,
+    ) -> Result<Applied, CommandError> {
+        if let Some(m) = &material {
+            check_entry(m.problems())?;
+        }
+        if let Some(a) = &default_appearance {
+            if material.as_ref().and_then(|m| m.default_appearance.as_ref()) != Some(&a.id) {
+                return Err(CommandError::Invalid(format!("{} is not the material's default appearance", a.id)));
+            }
+            check_entry(a.problems())?;
+        }
+        let old = self.materials.clone();
+        let label = match &material {
+            Some(m) => format!("set material {}", m.name),
+            None => "remove material".to_owned(),
+        };
+        let state = &mut self.materials;
+        state.material.retain(|a| !(a.body == body && a.scope == scope));
+        if let Some(m) = &material {
+            state.material.push(MaterialAssignment { body, material: m.id.clone(), scope: scope.clone() });
+            state.snapshots.put_material(m.clone());
+            if let Some(a) = &default_appearance {
+                state.snapshots.put_appearance(a.clone());
+            }
+        }
+        state.prune();
+        let command = match body {
+            Some(body) => Command::SetBodyMaterial { body, material, default_appearance, scope },
+            None => Command::SetMaterial { material, default_appearance, scope },
+        };
+        Ok(self.materials_changed(old, command, label))
+    }
+
     /// What a command that changed only the materials state did: its inverse puts the
     /// old state back.
     fn materials_changed(&self, old: PartMaterials, redo: Command, label: String) -> Applied {
@@ -690,8 +759,15 @@ impl Document {
             FeatureKind::Hole(h) if !(h.diameter.is_finite() && h.diameter > 0.0) => {
                 Err(CommandError::Invalid(format!("hole diameter must be positive, got {}", h.diameter)))
             }
-            FeatureKind::Hole(h) if h.points.is_empty() => {
+            FeatureKind::Hole(h) if h.sketch.is_none() && h.points.is_empty() => {
                 Err(CommandError::Invalid("a hole needs at least one point".into()))
+            }
+            FeatureKind::Hole(h)
+                if h.wizard.as_ref().is_some_and(|w| {
+                    w.hole_type.is_slot() && w.slot_length.is_some_and(|l| !l.is_finite() || l <= 0.0)
+                }) =>
+            {
+                Err(CommandError::Invalid("slot length must be positive and finite".into()))
             }
             FeatureKind::Pattern(p) => match p.layout {
                 PatternSpec::Linear { count, .. } | PatternSpec::Circular { count, .. } if count < 2 => {
@@ -708,12 +784,8 @@ impl Document {
             FeatureKind::Thicken(t) if t.faces.is_empty() => {
                 Err(CommandError::Invalid("select at least one face to thicken".into()))
             }
-            FeatureKind::Thicken(t) if !t.thickness.is_finite() || t.thickness <= 0.0 => {
-                Err(CommandError::Invalid("thickness must be finite and positive".into()))
-            }
-            FeatureKind::Shell(s) if !(s.thickness.is_finite() && s.thickness > 0.0) => {
-                Err(CommandError::Invalid("shell thickness must be finite and positive".into()))
-            }
+            FeatureKind::Thicken(t) => t.thickness.check_thickness().map_err(|e| CommandError::Invalid(e.into())),
+            FeatureKind::Shell(s) => s.check_thickness().map_err(|e| CommandError::Invalid(e.into())),
             FeatureKind::Draft(d) if d.faces.is_empty() => {
                 Err(CommandError::Invalid("a draft needs at least one face".into()))
             }
@@ -722,34 +794,38 @@ impl Document {
             }
             FeatureKind::Lattice(l)
                 if l.cell_size_mm.is_some_and(|v| !v.is_finite() || v <= 0.0)
-                    || l.radius_mm.is_some_and(|g| !finite(&g) || g.endpoints().iter().any(|v| *v <= 0.0)) =>
+                    || l.radius_mm.as_ref().is_some_and(|g| !finite(g) || g.endpoints().iter().any(|v| *v <= 0.0)) =>
             {
                 Err(CommandError::Invalid("lattice cell size and density must be finite and positive".into()))
             }
-            FeatureKind::Lattice(l) if l.radius_mm.is_some_and(|g| !anchors_differ(&g)) => {
-                Err(CommandError::Invalid("a graded density needs two different anchors on its axis".into()))
-            }
-            FeatureKind::Lattice(l)
-                if !(l.accuracy_mm.is_finite()
+            FeatureKind::Lattice(l) => {
+                if let Some(why) = l.radius_mm.as_ref().and_then(|g| g.impossible()) {
+                    Err(CommandError::Invalid(format!("graded density: {why}")))
+                } else if !(l.accuracy_mm.is_finite()
                     && l.accuracy_mm > 0.0
                     && l.min_detail_mm.is_finite()
-                    && l.min_detail_mm > 0.0) =>
-            {
-                Err(CommandError::Invalid("lattice accuracy and minimum detail must be positive".into()))
+                    && l.min_detail_mm > 0.0)
+                {
+                    Err(CommandError::Invalid("lattice accuracy and minimum detail must be positive".into()))
+                } else {
+                    Ok(())
+                }
             }
             FeatureKind::Gyroid(g) if !(g.period_mm.is_finite() && g.period_mm > 0.0) || !finite(&g.level) => {
                 Err(CommandError::Invalid("gyroid period must be positive and its level finite".into()))
             }
-            FeatureKind::Gyroid(g) if !anchors_differ(&g.level) => {
-                Err(CommandError::Invalid("a graded level needs two different anchors on its axis".into()))
-            }
-            FeatureKind::Gyroid(g)
-                if !(g.accuracy_mm.is_finite()
+            FeatureKind::Gyroid(g) => {
+                if let Some(why) = g.level.impossible() {
+                    Err(CommandError::Invalid(format!("graded level: {why}")))
+                } else if !(g.accuracy_mm.is_finite()
                     && g.accuracy_mm > 0.0
                     && g.min_detail_mm.is_finite()
-                    && g.min_detail_mm > 0.0) =>
-            {
-                Err(CommandError::Invalid("gyroid accuracy and minimum detail must be positive".into()))
+                    && g.min_detail_mm > 0.0)
+                {
+                    Err(CommandError::Invalid("gyroid accuracy and minimum detail must be positive".into()))
+                } else {
+                    Ok(())
+                }
             }
             FeatureKind::Scan(s)
                 if s.source.bytes.is_empty() || crate::sha256_hex(&s.source.bytes) != s.source.sha256 =>
@@ -852,7 +928,7 @@ impl Document {
                 "drive input".into()
             }
             Command::RenameValue { name, to } => {
-                state.rename(name, to, &features).map_err(CommandError::Invalid)?;
+                state.rename(name, to, &features, std::iter::empty()).map_err(CommandError::Invalid)?;
                 format!("rename value {name}")
             }
             Command::SetValueCell { configuration, name, expression } => {
@@ -998,6 +1074,7 @@ impl Document {
             command @ (Command::AddConfiguration { .. }
             | Command::SetConfigurationValue { .. }
             | Command::ActivateConfiguration { .. }
+            | Command::EditParameters { .. }
             | Command::SetConfigurationGrid { .. }
             | Command::RestoreConfigurations { .. }) => self.apply_configuration(command),
             command @ (Command::Track { .. }
@@ -1176,6 +1253,24 @@ impl Document {
                     label,
                 })
             }
+            Command::MoveToBody { id, body } => {
+                let i = self.index(id)?;
+                if body > self.next_body {
+                    return Err(CommandError::Invalid(format!("there is no body {}", body.saturating_add(1))));
+                }
+                let old = std::mem::replace(&mut self.features[i].body, body);
+                self.next_body = self.next_body.max(body.saturating_add(1));
+                let label = format!("move {} to body {}", self.features[i].name, body.saturating_add(1));
+                if old != body {
+                    self.touch(i);
+                }
+                Ok(Applied {
+                    inverse: Command::MoveToBody { id, body: old },
+                    redo: Command::MoveToBody { id, body },
+                    created: None,
+                    label,
+                })
+            }
             Command::RollTo { before } => {
                 if let Some(id) = before {
                     self.index(id)?;
@@ -1201,38 +1296,23 @@ impl Document {
                 })
             }
             Command::SetMaterial { material, default_appearance, scope } => {
-                if let Some(m) = &material {
-                    check_entry(m.problems())?;
+                self.set_material_assignment(None, material, default_appearance, scope)
+            }
+            Command::SetBodyMaterial { body, material, default_appearance, scope } => {
+                if material.is_some() && !self.live_bodies().iter().any(|(key, _)| *key == body) {
+                    return Err(CommandError::Invalid(format!("Body {} is absent from this configuration", body + 1)));
                 }
-                if let Some(a) = &default_appearance {
-                    if material.as_ref().and_then(|m| m.default_appearance.as_ref()) != Some(&a.id) {
-                        return Err(CommandError::Invalid(format!(
-                            "{} is not the material's default appearance",
-                            a.id
-                        )));
-                    }
-                    check_entry(a.problems())?;
-                }
-                let old = self.materials.clone();
-                let label = match &material {
-                    Some(m) => format!("set material {}", m.name),
-                    None => "remove material".to_owned(),
-                };
-                let state = &mut self.materials;
-                state.material.retain(|a| a.scope != scope);
-                if let Some(m) = &material {
-                    state.material.push(MaterialAssignment { material: m.id.clone(), scope: scope.clone() });
-                    state.snapshots.put_material(m.clone());
-                    if let Some(a) = &default_appearance {
-                        state.snapshots.put_appearance(a.clone());
-                    }
-                }
-                state.prune();
-                Ok(self.materials_changed(old, Command::SetMaterial { material, default_appearance, scope }, label))
+                self.set_material_assignment(Some(body), material, default_appearance, scope)
             }
             Command::SetAppearance { target, appearance, scope } => {
                 if let AppearanceTarget::Feature { feature } = &target {
                     self.index(*feature)?;
+                }
+                if let AppearanceTarget::Body { body } = &target
+                    && appearance.is_some()
+                    && !self.live_bodies().iter().any(|(key, _)| key == body)
+                {
+                    return Err(CommandError::Invalid(format!("Body {} is absent from this configuration", body + 1)));
                 }
                 if let Some(a) = &appearance {
                     check_entry(a.problems())?;
@@ -1240,6 +1320,7 @@ impl Document {
                 let old = self.materials.clone();
                 let place = match &target {
                     AppearanceTarget::Part => "the part".to_owned(),
+                    AppearanceTarget::Body { body } => format!("Body {}", body + 1),
                     AppearanceTarget::Feature { feature } => {
                         self.feature(*feature).map(|f| f.name.clone()).unwrap_or_else(|| feature.to_string())
                     }
@@ -1252,6 +1333,14 @@ impl Document {
                 };
                 self.materials.assign(&target, appearance.as_ref(), &scope);
                 Ok(self.materials_changed(old, Command::SetAppearance { target, appearance, scope }, label))
+            }
+            Command::SetDisplayStates { states } => {
+                let old = self.materials.clone();
+                let mut next = old.clone();
+                next.display_states = (*states).clone();
+                next.check().map_err(CommandError::Invalid)?;
+                self.materials = next;
+                Ok(self.materials_changed(old, Command::SetDisplayStates { states }, "Change display state".into()))
             }
             Command::UpdateCopies { materials, appearances } => {
                 let old = self.materials.clone();
@@ -1383,16 +1472,8 @@ impl Document {
 
 /// Refuses a material or appearance with values out of range.
 /// Every number a field grade is built from is finite.
-fn finite(grade: &soliddraft_kernel_api::Grade) -> bool {
+fn finite(grade: &crate::FieldGrade) -> bool {
     grade.values().iter().all(|v| v.is_finite())
-}
-
-/// A linear grade's anchors are two different places on its axis.
-fn anchors_differ(grade: &soliddraft_kernel_api::Grade) -> bool {
-    match grade {
-        soliddraft_kernel_api::Grade::Linear(l) => l.from != l.to,
-        soliddraft_kernel_api::Grade::Constant(_) => true,
-    }
 }
 
 fn check_entry(problems: Vec<soliddraft_materials::Problem>) -> Result<(), CommandError> {

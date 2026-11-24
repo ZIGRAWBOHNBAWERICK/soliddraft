@@ -133,9 +133,6 @@ impl KernelSource {
         level: Level,
     ) -> Result<(DisplayMesh, String), String> {
         let doc = self.exact(part_file, None)?;
-        if doc.live_bodies().len() > 1 {
-            return Err("Several-body parts in assemblies are coming soon. Combine the bodies first.".into());
-        }
         let quality = quality.copied().unwrap_or(doc.settings().viewport);
         let mut data =
             doc.display_data(&quality, &[level]).ok_or("the part has no body")?.map_err(|e| e.to_string())?;
@@ -152,12 +149,7 @@ impl DisplaySource for KernelSource {
     /// The part file's own standard level when it has one for its current shape and no
     /// other quality was asked for; otherwise the part rebuilt and tessellated.
     fn part_mesh(&self, part_file: &[u8]) -> Result<(DisplayMesh, String), String> {
-        if self.quality.is_none()
-            && let Ok(Some(found)) = display::read(part_file, Level::Standard)
-        {
-            return Ok(found);
-        }
-        self.rebuilt(part_file, self.quality.as_ref(), Level::Standard)
+        self.part_mesh_level(part_file, None, Level::Standard)
     }
 
     fn part_mesh_at(&self, part_file: &[u8], quality: &Quality) -> Result<(DisplayMesh, String), String> {
@@ -175,7 +167,7 @@ impl DisplaySource for KernelSource {
         let quality = quality.or(self.quality.as_ref());
         if quality.is_none()
             && level != Level::Fine
-            && let Ok(Some(found)) = display::read(part_file, level)
+            && let Ok(Some(found)) = display::read_for_styling(part_file, level)
         {
             return Ok(found);
         }

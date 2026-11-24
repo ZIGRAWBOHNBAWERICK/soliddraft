@@ -76,6 +76,7 @@ fn new_extrusion(path: &Path, datum: DatumPlane, mut sketch: Sketch, h: f64) {
             operation: ExtrudeOp::Boss,
             end: EndCondition::Blind { depth: h },
             reverse: false,
+            options: Default::default(),
         }),
     );
     doc.save(path).unwrap();

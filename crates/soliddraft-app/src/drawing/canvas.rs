@@ -395,12 +395,14 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
         (Some(DrawingSel::Annotation(a)), Owner::Annotation(b))
         | (Some(DrawingSel::Annotation(a)), Owner::AnnotationEnd(b, _)) => a == b,
         (Some(DrawingSel::Format), Owner::Sheet) => true,
-        (Some(DrawingSel::Revisions), Owner::Table(..)) => true,
+        (Some(DrawingSel::Revisions), Owner::Table(i)) => s.revision_table_index() == Some(i),
+        (Some(DrawingSel::HoleTable(i)), Owner::Table(j)) => i == j,
         _ => false,
     };
     let hovered_owner = |o: Owner| match (hit.map(|h| h.owner), o) {
         (Some(Owner::Curve(v, i)), Owner::Curve(w, j)) => v == w && i == j,
         (Some(Owner::View(v)), Owner::View(w)) => v == w,
+        (Some(Owner::Table(i)), Owner::Table(j)) => i == j,
         (Some(Owner::Annotation(a)), Owner::Annotation(b))
         | (Some(Owner::AnnotationEnd(a, _)), Owner::Annotation(b))
         | (Some(Owner::Annotation(a)), Owner::AnnotationEnd(b, _)) => a == b,
@@ -487,6 +489,14 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
                 }
             }
         }
+        DrawingTool::Chamfer | DrawingTool::Centreline => {
+            tools::line_annotation_tool(s, doc, &sheet2, &lctx, hit, pointer, clicked, &mut push);
+        }
+        DrawingTool::HoleTable => {
+            if clicked && let Some(p) = pointer {
+                tools::hole_table_tool(s, doc, hit, p, &mut push);
+            }
+        }
         DrawingTool::Section { .. }
         | DrawingTool::Detail
         | DrawingTool::Auxiliary
@@ -497,7 +507,11 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
         DrawingTool::DimensionSet(kind) => {
             tools::set_tool(s, kind, &sheet2, &lctx, hit, pointer, clicked, &mut push);
         }
-        DrawingTool::Gdt | DrawingTool::Datum | DrawingTool::SurfaceFinish | DrawingTool::RevisionSymbol => {
+        DrawingTool::Gdt
+        | DrawingTool::Datum
+        | DrawingTool::SurfaceFinish
+        | DrawingTool::RevisionSymbol
+        | DrawingTool::Weld => {
             tools::symbol_tool(s, &sheet2, &lctx, hit, pointer, clicked, &mut push);
         }
     }
@@ -570,6 +584,9 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
 
     // The sheet tabs under the canvas.
     sheets::strip(ui, s, strip, &mut push);
+
+    #[cfg(target_arch = "wasm32")]
+    crate::web::show_drawing(s);
 
     for a in actions {
         state.push(a);
@@ -647,7 +664,11 @@ fn hover_label(s: &DrawingSession, owner: Owner) -> Option<String> {
             let a = s.doc.drawing.annotation(id)?;
             Some(layout::annotation_name(a, s.doc.style()))
         }
-        Owner::Table(_) => Some("Revision table".into()),
+        Owner::Table(i) => match sheet.tables.get(i)?.kind {
+            soliddraft_drawing::TableKind::Revision => Some("Revision table".into()),
+            soliddraft_drawing::TableKind::Hole => Some("Hole table".into()),
+            soliddraft_drawing::TableKind::Bom => None,
+        },
         Owner::Sheet => None,
     }
 }
@@ -659,6 +680,10 @@ fn pill(painter: &egui::Painter, at: Pos2, text: &str, anchor: Align2) -> Rect {
     painter.rect(r, CornerRadius::same(99), theme::hud_bg(), Stroke::new(1.0, theme::line()), StrokeKind::Inside);
     painter.galley(r.center() - galley.size() / 2.0, galley, theme::ink());
     r
+}
+
+fn is_hole_table(s: &DrawingSession, index: usize) -> bool {
+    s.sheet().tables.get(index).is_some_and(|t| t.kind == soliddraft_drawing::TableKind::Hole)
 }
 
 fn select_tool(
@@ -673,12 +698,14 @@ fn select_tool(
         let target = match hit.map(|h| h.owner) {
             Some(Owner::Annotation(id)) | Some(Owner::AnnotationEnd(id, _)) => Some(DrawingSel::Annotation(id)),
             Some(Owner::Curve(v, _)) | Some(Owner::View(v)) => Some(DrawingSel::View(v)),
+            Some(Owner::Table(i)) if is_hole_table(s, i) => Some(DrawingSel::HoleTable(i)),
             _ => None,
         };
         if let (Some(t), Some(p)) = (target, pointer) {
             let origin = match t {
                 DrawingSel::View(v) => s.doc.drawing.view(v).map(|v| v.position),
                 DrawingSel::Annotation(a) => s.doc.drawing.annotation(a).map(|a| a.placement),
+                DrawingSel::HoleTable(i) => s.sheet().tables.get(i).map(|t| t.position),
                 DrawingSel::Format | DrawingSel::Revisions | DrawingSel::Model => None,
             };
             if let Some(origin) = origin {
@@ -707,6 +734,11 @@ fn select_tool(
                         an.placement = placement;
                     }
                 }
+                DrawingSel::HoleTable(i) => {
+                    if let Some(table) = s.doc.drawing.sheets[s.sheet].tables.get_mut(i) {
+                        table.position = to;
+                    }
+                }
                 DrawingSel::Format | DrawingSel::Revisions | DrawingSel::Model => {}
             }
             if let Some(d) = s.drag.as_mut() {
@@ -733,6 +765,12 @@ fn select_tool(
                 }
                 push(DrawingAction::Command(Command::MoveAnnotation { annotation: a, to }));
             }
+            DrawingSel::HoleTable(i) => {
+                if let Some(table) = s.doc.drawing.sheets[s.sheet].tables.get_mut(i) {
+                    let to = std::mem::replace(&mut table.position, d.origin);
+                    push(DrawingAction::Command(Command::MoveTable { sheet: s.sheet, table: i, to }));
+                }
+            }
             DrawingSel::Format | DrawingSel::Revisions | DrawingSel::Model => {}
         }
         return;
@@ -742,6 +780,7 @@ fn select_tool(
             Some(Owner::Annotation(id)) | Some(Owner::AnnotationEnd(id, _)) => Some(DrawingSel::Annotation(id)),
             Some(Owner::Curve(v, _)) | Some(Owner::View(v)) => Some(DrawingSel::View(v)),
             Some(Owner::Sheet) => Some(DrawingSel::Format),
+            Some(Owner::Table(i)) if is_hole_table(s, i) => Some(DrawingSel::HoleTable(i)),
             Some(Owner::Table(_)) => Some(DrawingSel::Revisions),
             None => None,
         };

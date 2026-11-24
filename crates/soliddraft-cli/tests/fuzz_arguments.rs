@@ -76,6 +76,7 @@ fn fixtures() -> &'static Fixtures {
             operation: ExtrudeOp::Boss,
             end: EndCondition::Blind { depth: 10.0 },
             reverse: false,
+            options: Default::default(),
         }));
         let part = part.to_bytes().unwrap();
         let recipe = std::fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../recipes/box.json")).unwrap();

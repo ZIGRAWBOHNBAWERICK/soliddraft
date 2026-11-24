@@ -34,6 +34,7 @@ use soliddraft_document::hash::without_format;
 use soliddraft_document::manifest::{self, Entry, Manifest, Package, Section};
 use soliddraft_document::{
     ConfigurationId, ContentHash, DocKind, DocumentId, EnvelopeError,
+    display_state::DisplayStates,
     kind::{format_major, found_tag},
 };
 use soliddraft_materials::Snapshots;
@@ -44,7 +45,10 @@ use crate::binary::BinaryError;
 use crate::bulk::{self, PLACEMENTS};
 use crate::mates::MateEntry;
 use crate::mesh::{DISPLAY_MESH, DisplayMesh};
-use crate::schema::{Assembly, Component, FORMAT, Invalid, OccurrenceAppearance, Override, Pattern, Source, Units};
+use crate::schema::{
+    Assembly, AssemblyDisplay, Component, DISPLAY_FORMAT, Invalid, OccurrenceAppearance, Override, Pattern, Source,
+    Units,
+};
 
 /// The truth entry.
 pub const ASSEMBLY: &str = "assembly.json";
@@ -74,7 +78,7 @@ pub enum FileError {
     #[error("{0}")]
     Invalid(#[from] Invalid),
     /// The format tag is not one this version reads.
-    #[error("the file {}, this version reads {FORMAT}", found_tag(.found))]
+    #[error("the file {}, this version reads through {DISPLAY_FORMAT}", found_tag(.found))]
     Format {
         /// The tag in the file.
         found: String,
@@ -173,7 +177,7 @@ impl Assembly {
         let (bulk, named): (Vec<&Component>, Vec<&Component>) =
             self.components.iter().partition(|c| bulk::goes_to_bulk(c, total));
         let out = TruthOut {
-            format: &self.format,
+            format: self.written_format(),
             name: &self.name,
             units: self.units,
             sources: &self.sources,
@@ -185,8 +189,10 @@ impl Assembly {
             configurations: &self.configurations,
             explode: &self.explode,
             display_states: &self.display_states,
+            viewport_states: &self.viewport_states,
             mates: &self.mates,
             values: &self.values,
+            mate_controller: self.mate_controller.as_ref(),
             next_id: self.next_id,
             next_configured_id: self.next_configured_id,
         };
@@ -216,6 +222,7 @@ impl Assembly {
             // Other configurations' states and the exploded view do not shape this one.
             map.remove("configurations");
             map.remove("explode");
+            map.remove("viewport_states");
             map.remove("appearances");
             map.remove("snapshots");
             // Placements hold what mates decide: the same placements are the same shape.
@@ -224,6 +231,7 @@ impl Assembly {
             // Configurations and explode steps count their ids apart; that counter shapes
             // nothing. The revision keeps it.
             map.remove("next_configured_id");
+            map.remove("mate_controller");
             for list in ["components", "patterns"] {
                 if let Some(Value::Array(items)) = map.get_mut(list) {
                     for item in items.iter_mut().filter_map(Value::as_object_mut) {
@@ -252,6 +260,7 @@ impl Assembly {
     /// made the display copies.
     pub fn manifest(&self, id: DocumentId, kernel: Option<String>, has_copies: bool) -> Manifest {
         let mut m = Manifest::new(id, DocKind::Assembly, self.semantic_hash());
+        m.format = self.written_format().to_owned();
         m.kernel = kernel;
         m.geometry_hash = Some(self.geometry_hash());
         m.sections = vec![Section::required(ASSEMBLY)];
@@ -329,16 +338,16 @@ impl Assembly {
                 let Ok(Probe { format: found }) = serde_json::from_slice::<Probe>(json) else {
                     return Err(e.into());
                 };
-                if format_major(&found, "soliddraft-assembly") != Some(1) {
+                if !matches!(format_major(&found, "soliddraft-assembly"), Some(1..=crate::schema::NEWEST_FORMAT)) {
                     return Err(FileError::Format { found });
                 }
                 return Err(e.into());
             }
         };
-        if format_major(&a.format, "soliddraft-assembly") != Some(1) {
+        if !matches!(format_major(&a.format, "soliddraft-assembly"), Some(1..=crate::schema::NEWEST_FORMAT)) {
             return Err(FileError::Format { found: a.format });
         }
-        a.format = FORMAT.into();
+        a.format = a.written_format().into();
         if let Some(b) = bulk {
             a.components.extend(bulk::decode(b)?);
             a.components.sort_by_key(|c| c.id);
@@ -373,10 +382,14 @@ struct TruthOut<'a> {
     explode: &'a [crate::configuration::ExplodeStep],
     #[serde(skip_serializing_if = "<[_]>::is_empty")]
     display_states: &'a [Value],
+    #[serde(skip_serializing_if = "DisplayStates::is_empty")]
+    viewport_states: &'a DisplayStates<AssemblyDisplay>,
     #[serde(skip_serializing_if = "<[_]>::is_empty")]
     mates: &'a [MateEntry],
     #[serde(skip_serializing_if = "ValueTable::is_empty")]
     values: &'a ValueTable,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    mate_controller: Option<&'a crate::mates::MateController>,
     next_id: u32,
     #[serde(skip_serializing_if = "is_first_id")]
     next_configured_id: u32,
@@ -559,6 +572,7 @@ mod tests {
     use super::*;
     use crate::path::{ComponentId, SourceId};
     use crate::placement::Placement;
+    use crate::schema::FORMAT;
     use crate::schema::PatternRule;
     use glam::DVec3;
     use soliddraft_document::DocRef;
@@ -624,7 +638,8 @@ mod tests {
         assert_eq!(saved.manifest().unwrap().format, FORMAT);
         let truth: Value = serde_json::from_slice(&saved.read(ASSEMBLY).unwrap().unwrap()).unwrap();
         assert_eq!(truth["format"], FORMAT);
-        let newer = truth.to_string().replace(FORMAT, "draftwell-assembly/2");
+        let tag = format!("draftwell-assembly/{}", crate::schema::NEWEST_FORMAT + 1);
+        let newer = truth.to_string().replace(FORMAT, &tag);
         assert!(matches!(Assembly::from_truth(newer.as_bytes(), None), Err(FileError::Format { .. })));
     }
 
@@ -638,8 +653,10 @@ mod tests {
         let untagged = Assembly::from_truth(br#"{"name": "x"}"#, None).unwrap_err();
         assert!(matches!(untagged, FileError::Format { .. }), "{untagged}");
         assert!(untagged.to_string().contains("the file has no format tag"), "{untagged}");
-        let newer = Assembly::from_truth(br#"{"format": "soliddraft-assembly/2"}"#, None).unwrap_err();
-        assert!(newer.to_string().starts_with("the file is soliddraft-assembly/2, this version reads"), "{newer}");
+        let tag = format!("soliddraft-assembly/{}", crate::schema::NEWEST_FORMAT + 1);
+        let truth = serde_json::json!({"format": tag});
+        let newer = Assembly::from_truth(truth.to_string().as_bytes(), None).unwrap_err();
+        assert!(newer.to_string().starts_with(&format!("the file is {tag}, this version reads")), "{newer}");
     }
 
     #[test]
@@ -738,7 +755,7 @@ mod tests {
         v["format"] = "soliddraft-assembly/1.1".into();
         let b = Assembly::from_truth(serde_json::to_string(&v).unwrap().as_bytes(), None).unwrap();
         assert_eq!(b.semantic_hash(), a.semantic_hash());
-        v["format"] = "soliddraft-assembly/2".into();
+        v["format"] = format!("soliddraft-assembly/{}", crate::schema::NEWEST_FORMAT + 1).into();
         assert!(matches!(
             Assembly::from_truth(serde_json::to_string(&v).unwrap().as_bytes(), None),
             Err(FileError::Format { .. })

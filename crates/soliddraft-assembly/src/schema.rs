@@ -37,7 +37,10 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use glam::{DQuat, DVec3};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use soliddraft_document::{ConfigScope, ConfigurationId, DocKind, DocRef};
+use soliddraft_document::{
+    ConfigScope, ConfigurationId, DocKind, DocRef,
+    display_state::{DisplayState, DisplayStates},
+};
 use soliddraft_materials::{Appearance, AppearanceId, Snapshots, scope};
 use soliddraft_model::{Expression, ValueTable};
 use soliddraft_tessellation::Settings;
@@ -49,6 +52,10 @@ use crate::placement::Placement;
 
 /// The format tag this version writes.
 pub const FORMAT: &str = "soliddraft-assembly/1";
+/// Assembly truth with authored display states.
+pub const DISPLAY_FORMAT: &str = "soliddraft-assembly/2";
+/// The newest assembly major version this reader accepts.
+pub const NEWEST_FORMAT: u32 = 2;
 
 /// An assembly's truth.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -89,12 +96,18 @@ pub struct Assembly {
     /// Reserved for display states (visibility and colours). Kept as read.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub display_states: Vec<Value>,
+    /// Named display states and the selected state.
+    #[serde(default, skip_serializing_if = "DisplayStates::is_empty")]
+    pub viewport_states: DisplayStates<AssemblyDisplay>,
     /// The mates: known ones by id, then those of a later version as read.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub mates: Vec<MateEntry>,
     /// Typed values that can drive mates.
     #[serde(default, skip_serializing_if = "ValueTable::is_empty")]
     pub values: ValueTable,
+    /// The Mate Controller: named positions of chosen mates' values.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mate_controller: Option<crate::mates::MateController>,
     /// The next free id for a component, pattern, source, mate or value. Ids are never
     /// reused.
     pub next_id: u32,
@@ -357,6 +370,39 @@ pub struct OccurrenceAppearance {
     pub scope: ConfigScope,
 }
 
+/// Overrides that apply only in a named assembly display state.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct AssemblyDisplay {
+    /// The component visibility overrides, by occurrence path.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub hidden: Vec<(OccurrencePath, bool)>,
+    /// The component colour overrides, by occurrence path.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub appearances: Vec<(OccurrencePath, Appearance)>,
+}
+
+pub(crate) fn check_viewport_states(states: &DisplayStates<AssemblyDisplay>) -> Result<(), String> {
+    states.check()?;
+    for state in states.states() {
+        let mut hidden = HashSet::new();
+        let mut appearances = HashSet::new();
+        for (path, _) in &state.view.hidden {
+            if path.steps().is_empty() || !hidden.insert(path) {
+                return Err(format!("Invalid visibility path in {}", state.name));
+            }
+        }
+        for (path, appearance) in &state.view.appearances {
+            if path.steps().is_empty() || !appearances.insert(path) {
+                return Err(format!("Invalid appearance path in {}", state.name));
+            }
+            if let Some(problem) = appearance.problems().first() {
+                return Err(problem.to_string());
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Why an assembly's truth is not consistent.
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
 #[error("the assembly is inconsistent: {0}")]
@@ -378,13 +424,24 @@ impl Assembly {
             configurations: Configurations::default(),
             explode: Vec::new(),
             display_states: Vec::new(),
+            viewport_states: DisplayStates::default(),
             mates: Vec::new(),
             values: ValueTable::default(),
+            mate_controller: None,
             next_id: 1,
             next_configured_id: 1,
             settings: Settings::default(),
             import: None,
         }
+    }
+
+    /// The selected display state of the assembly.
+    pub fn viewport_state(&self) -> Option<&DisplayState<AssemblyDisplay>> {
+        self.viewport_states.selected(None)
+    }
+
+    pub(crate) fn written_format(&self) -> &'static str {
+        if self.viewport_states.is_empty() { FORMAT } else { DISPLAY_FORMAT }
     }
 
     /// Takes the next free id.
@@ -494,6 +551,13 @@ impl Assembly {
     /// (`None` for the default): an assignment for named
     /// configurations wins over one for all of them, and of equals the later one.
     pub fn colour_at(&self, path: &OccurrencePath, configuration: Option<&ConfigurationId>) -> Option<&Appearance> {
+        if let Some(appearance) = self
+            .viewport_states
+            .selected(configuration)
+            .and_then(|state| state.view.appearances.iter().find(|(p, _)| p == path))
+        {
+            return Some(&appearance.1);
+        }
         let a = scope::pick(self.appearances.iter().filter(|c| c.path == *path), |c| &c.scope, configuration)?;
         self.appearance(&a.appearance)
     }
@@ -532,6 +596,7 @@ impl Assembly {
     /// Lists must be in canonical order ([`Assembly::normalize`]).
     pub fn validate(&self) -> Result<(), Invalid> {
         let bad = |m: String| Err(Invalid(m));
+        check_viewport_states(&self.viewport_states).map_err(Invalid)?;
         let mut ids = HashSet::new();
         let all = self
             .sources

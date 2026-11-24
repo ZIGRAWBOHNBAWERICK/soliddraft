@@ -44,11 +44,14 @@ pub enum Property {
     /// Specific heat capacity, J/(kg·K).
     #[serde(rename = "specific_heat_j_kgk")]
     SpecificHeat,
+    /// Fraction of critical damping.
+    #[serde(rename = "damping_ratio")]
+    DampingRatio,
 }
 
 impl Property {
     /// Every property, in the order the material's fields are written.
-    pub const ALL: [Property; 10] = [
+    pub const ALL: [Property; 11] = [
         Property::Density,
         Property::YoungsModulus,
         Property::Poisson,
@@ -59,6 +62,7 @@ impl Property {
         Property::ThermalExpansion,
         Property::Conductivity,
         Property::SpecificHeat,
+        Property::DampingRatio,
     ];
 
     /// The field's name as written in files: "density_kg_m3".
@@ -74,6 +78,7 @@ impl Property {
             Property::ThermalExpansion => "thermal_expansion_per_k",
             Property::Conductivity => "conductivity_w_mk",
             Property::SpecificHeat => "specific_heat_j_kgk",
+            Property::DampingRatio => "damping_ratio",
         }
     }
 
@@ -90,6 +95,7 @@ impl Property {
             Property::ThermalExpansion => "Thermal expansion",
             Property::Conductivity => "Thermal conductivity",
             Property::SpecificHeat => "Specific heat",
+            Property::DampingRatio => "Damping ratio",
         }
     }
 
@@ -106,6 +112,7 @@ impl Property {
             Property::ThermalExpansion => "1/K",
             Property::Conductivity => "W/(m·K)",
             Property::SpecificHeat => "J/(kg·K)",
+            Property::DampingRatio => "fraction",
         }
     }
 }

@@ -25,7 +25,8 @@ if (!chrome || !url || !out) throw new Error('usage: browser-documents.mjs CHROM
 fs.mkdirSync(out, { recursive: true });
 const SIZE = { width: 1400, height: 813 };
 const NEW_PART = [124, 143];
-const RECTANGLE = [630, 52];
+// Extrude's Rectangle button, in the options bar over the viewport.
+const RECTANGLE = [99, 355];
 // A copy after every edit, so the test does not wait out the two-minute default.
 const FAST_AUTOSAVE = JSON.stringify({ documents: { autosave: { enabled: true, interval_seconds: 1, edits: 1 } } });
 

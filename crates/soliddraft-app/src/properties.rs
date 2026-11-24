@@ -169,6 +169,8 @@ pub(crate) fn size_input(
         )
     });
     r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, format!("{label} value")));
+    #[cfg(target_arch = "wasm32")]
+    crate::web::show_control(format!("{label} value"), r.rect);
     if r.changed() {
         match crate::fillet_collect::parse_size(&text, &what) {
             Ok(v) => {
@@ -414,26 +416,110 @@ fn hint(ui: &mut egui::Ui, text: &str) {
     ui.label(egui::RichText::new(text).size(11.0).color(theme::muted()));
 }
 
-/// A field parameter: one value, or a linear grade between two anchors on a part axis.
-/// `unit` names the values, such as "mm"; the anchors are always millimetres.
+/// The grades the editor offers for one field, from the kernel's answer: constant and
+/// linear always, and each further kind only while the kernel builds it. `refusal` is
+/// the kernel's refusal of the grade the feature holds, when it refuses it.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(crate) struct GradeChoices {
+    pub offered: Vec<soliddraft_kernel_api::GradeKind>,
+    pub refusal: Option<String>,
+}
+
+impl GradeChoices {
+    /// Asks `kernel` about every kind for `field`, and about the kind `current` holds.
+    pub(crate) fn ask(
+        kernel: &dyn soliddraft_kernel_api::Kernel,
+        field: soliddraft_kernel_api::GradedField,
+        current: Option<&soliddraft_model::FieldGrade>,
+    ) -> Self {
+        use soliddraft_kernel_api::GradeKind;
+        let offered = GradeKind::ALL
+            .into_iter()
+            .filter(|kind| {
+                matches!(kind, GradeKind::Constant | GradeKind::Linear) || kernel.field_grade(field, *kind).is_ok()
+            })
+            .collect();
+        let refusal = current.and_then(|grade| kernel.field_grade(field, grade.kind()).err()).map(|e| e.to_string());
+        GradeChoices { offered, refusal }
+    }
+}
+
+/// The rows a grade's editor takes in the form's sheet.
+pub(crate) fn grade_rows(grade: &soliddraft_model::FieldGrade) -> usize {
+    use soliddraft_kernel_api::Grade;
+    match grade {
+        Grade::Constant(_) => 1,
+        Grade::Linear(_) => 5,
+        Grade::Distance(_) => 5,
+        Grade::Radial(_) => 9,
+        Grade::Point(_) => 8,
+    }
+}
+
+/// `grade` turned into another kind, starting flat at the value it has first.
+fn regrade(
+    grade: &soliddraft_model::FieldGrade,
+    kind: soliddraft_kernel_api::GradeKind,
+) -> soliddraft_model::FieldGrade {
+    use soliddraft_kernel_api::{
+        DistanceGrade, Grade, GradeAxis, GradeFaces, GradeKind, LinearGrade, PointGrade, RadialGrade,
+    };
+    let v = grade.endpoints()[0];
+    match kind {
+        GradeKind::Constant => Grade::Constant(v),
+        GradeKind::Linear => Grade::Linear(LinearGrade { axis: GradeAxis::Z, from: 0.0, to: 10.0, start: v, end: v }),
+        GradeKind::Distance => Grade::Distance(DistanceGrade { faces: GradeFaces::Skin, near: v, far: v, span: 10.0 }),
+        GradeKind::Radial => {
+            Grade::Radial(RadialGrade { axis: GradeAxis::Z, through: [0.0; 3], from: 0.0, to: 10.0, start: v, end: v })
+        }
+        GradeKind::Point => Grade::Point(PointGrade { centre: [0.0; 3], from: 0.0, to: 10.0, start: v, end: v }),
+    }
+}
+
+/// A field parameter: one value, or a grade over the part. `unit` names the values, such
+/// as "mm"; positions and distances are always millimetres. The editor offers the kinds
+/// in `choices`; a feature that holds a kind the kernel refuses shows that refusal.
 pub(crate) fn grade_options(
     ui: &mut egui::Ui,
     label: &str,
-    grade: &mut soliddraft_kernel_api::Grade,
+    grade: &mut soliddraft_model::FieldGrade,
     unit: &str,
     speed: f64,
+    choices: &GradeChoices,
 ) {
-    use soliddraft_kernel_api::{Grade, GradeAxis, LinearGrade};
+    use soliddraft_kernel_api::{Grade, GradeAxis, GradeFaces, GradeKind};
     ui.label(egui::RichText::new(label).size(12.0).color(theme::ink()));
-    let linear = matches!(grade, Grade::Linear(_));
-    if let Some(choice) = segmented(ui, label, &["Constant", "Linear along an axis"], linear as usize) {
-        match (choice, *grade) {
-            (0, Grade::Linear(l)) => *grade = Grade::Constant(l.start),
-            (1, Grade::Constant(v)) => {
-                *grade = Grade::Linear(LinearGrade { axis: GradeAxis::Z, from: 0.0, to: 10.0, start: v, end: v })
-            }
-            _ => {}
-        }
+    let mut kinds = choices.offered.clone();
+    if !kinds.contains(&grade.kind()) {
+        kinds.push(grade.kind());
+    }
+    let current = kinds.iter().position(|k| *k == grade.kind()).unwrap_or(0);
+    let picked = if kinds.len() <= 2 {
+        let labels: Vec<&str> = kinds.iter().map(|k| k.label()).collect();
+        segmented(ui, label, &labels, current)
+    } else {
+        let mut picked = None;
+        let response = egui::ComboBox::from_id_salt((label, "grade"))
+            .width(ui.available_width())
+            .selected_text(grade.kind().label())
+            .show_ui(ui, |ui| {
+                for (i, kind) in kinds.iter().enumerate() {
+                    if ui.selectable_label(i == current, kind.label()).clicked() {
+                        picked = Some(i);
+                    }
+                }
+            });
+        response.response.widget_info(|| {
+            let mut info = egui::WidgetInfo::labeled(egui::WidgetType::ComboBox, true, format!("{label} grade"));
+            info.current_text_value = Some(grade.kind().label().into());
+            info
+        });
+        picked
+    };
+    if let Some(i) = picked
+        && kinds[i] != grade.kind()
+    {
+        *grade = regrade(grade, kinds[i]);
     }
     let value = |ui: &mut egui::Ui, name: &str, v: &mut f64, unit: &str| {
         let response = row(ui, name, |ui, cell| {
@@ -442,22 +528,74 @@ pub(crate) fn grade_options(
         let info = if name.is_empty() { format!("{label} value") } else { format!("{label} {name} value") };
         response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::DragValue, true, info.clone()));
     };
+    let axis_row = |ui: &mut egui::Ui, axis: &mut GradeAxis| {
+        choice_row(ui, "Axis", |ui, _| {
+            ui.horizontal_centered(|ui| {
+                for each in GradeAxis::ALL {
+                    ui.selectable_value(axis, each, each.name());
+                }
+            });
+        });
+    };
     match grade {
         Grade::Constant(_) => {}
         Grade::Linear(l) => {
-            choice_row(ui, "Axis", |ui, _| {
-                ui.horizontal_centered(|ui| {
-                    for axis in GradeAxis::ALL {
-                        ui.selectable_value(&mut l.axis, axis, axis.name());
-                    }
-                });
-            });
+            axis_row(ui, &mut l.axis);
             value(ui, "from", &mut l.from, "mm");
             value(ui, "to", &mut l.to, "mm");
             value(ui, "start", &mut l.start, unit);
             value(ui, "end", &mut l.end, unit);
             hint(ui, "Start at the from coordinate, end at the to coordinate, held beyond them. Part coordinates.");
         }
+        Grade::Distance(d) => {
+            let picked = matches!(d.faces, GradeFaces::Picked(_));
+            choice_row(ui, "From", |ui, _| {
+                ui.horizontal_centered(|ui| {
+                    if ui.selectable_label(!picked, "The skin").clicked() && picked {
+                        d.faces = GradeFaces::Skin;
+                    }
+                    if ui.selectable_label(picked, "Picked faces").clicked() && !picked {
+                        d.faces = GradeFaces::Picked(Vec::new());
+                    }
+                });
+            });
+            if let GradeFaces::Picked(faces) = &mut d.faces
+                && let Some(index) =
+                    pick_list(ui, "Click faces to grade from", Icon::Plane, faces.iter().map(|f| f.label.as_str()))
+            {
+                faces.remove(index);
+            }
+            value(ui, "near", &mut d.near, unit);
+            value(ui, "far", &mut d.far, unit);
+            value(ui, "span", &mut d.span, "mm");
+            hint(ui, "Near on the faces, far at the span from them and beyond.");
+        }
+        Grade::Radial(r) => {
+            axis_row(ui, &mut r.axis);
+            for (i, name) in ["through x", "through y", "through z"].into_iter().enumerate() {
+                value(ui, name, &mut r.through[i], "mm");
+            }
+            value(ui, "from", &mut r.from, "mm");
+            value(ui, "to", &mut r.to, "mm");
+            value(ui, "start", &mut r.start, unit);
+            value(ui, "end", &mut r.end, unit);
+            hint(ui, "Start at the from radius about the axis line, end at the to radius, held beyond them.");
+        }
+        Grade::Point(p) => {
+            for (i, name) in ["centre x", "centre y", "centre z"].into_iter().enumerate() {
+                value(ui, name, &mut p.centre[i], "mm");
+            }
+            value(ui, "from", &mut p.from, "mm");
+            value(ui, "to", &mut p.to, "mm");
+            value(ui, "start", &mut p.start, unit);
+            value(ui, "end", &mut p.end, unit);
+            hint(ui, "Start at the from distance from the centre, end at the to distance, held beyond them.");
+        }
+    }
+    if let Some(refusal) = &choices.refusal
+        && !matches!(grade.kind(), GradeKind::Constant | GradeKind::Linear)
+    {
+        hint(ui, &format!("The kernel does not build this grade yet: {refusal}"));
     }
 }
 
@@ -1026,6 +1164,12 @@ fn selection(ui: &mut egui::Ui, state: &mut AppState) {
             ui.add_space(8.0);
             material_panel(ui, state);
             appearance_panel(ui, state, AppearanceTarget::Part, None);
+            if ui.button("Body appearance…").clicked() {
+                state.push(AppAction::ShowBodyAppearance);
+            }
+            if ui.button("Body material…").clicked() {
+                state.push(AppAction::ShowBodyMaterial);
+            }
         }
         if let Selection::Face(face) = sel
             && let Some(face_ref) = state.doc.face_ref(face)
@@ -1163,6 +1307,9 @@ fn material_panel(ui: &mut egui::Ui, state: &mut AppState) {
     let before = selected.clone();
     let mut error = None;
     section(ui, "Material", |ui| {
+        if ui.button("Material library…").clicked() {
+            state.material_dialog = Some(crate::material_dialog::Dialog::new(&state.doc, None));
+        }
         egui::ComboBox::from_label("Part material")
             .selected_text(current.map_or("Unassigned", |m| m.name.as_str()))
             .show_ui(ui, |ui| {
@@ -1202,7 +1349,9 @@ fn material_panel(ui: &mut egui::Ui, state: &mut AppState) {
                     hint(ui, &words);
                 }
                 ui.label(format!("Volume: {:.3} mm³", properties.volume));
-                match soliddraft_materials::mass::of_body(&properties, state.doc.material()) {
+                let material =
+                    state.doc.model().body_material(state.doc.active_body, state.doc.model().active_configuration());
+                match soliddraft_materials::mass::of_body(&properties, material) {
                     Ok(mass) => {
                         ui.label(format!("Mass: {:.6} kg", mass.mass_kg));
                     }
@@ -1250,7 +1399,7 @@ const MOST_TRANSPARENCY: f32 = 0.9;
 /// `from` in another colour and opacity, keeping its finish. The id names everything
 /// that differs from a plain opaque dielectric, so two different looks never share an
 /// id in the part's copies.
-fn painted(from: &Appearance, colour: Srgb, opacity: f32) -> Appearance {
+pub(crate) fn painted(from: &Appearance, colour: Srgb, opacity: f32) -> Appearance {
     let opacity = (opacity.clamp(1.0 - MOST_TRANSPARENCY, 1.0) * 100.0).round() / 100.0;
     let transparency = ((1.0 - opacity) * 100.0).round() as u32;
     let hex = colour.to_string();
@@ -1289,7 +1438,8 @@ fn settle_appearance(ui: &egui::Ui, state: &mut AppState) {
 /// and the reset button apply at once; the colour picker and the slider show their
 /// value while dragged and apply it when the pointer lets go.
 fn appearance_panel(ui: &mut egui::Ui, state: &mut AppState, target: AppearanceTarget, face: Option<FaceId>) {
-    let shown = state.doc.shown_appearance(face);
+    let body = if let AppearanceTarget::Body { body } = &target { Some(*body) } else { None };
+    let shown = state.doc.shown_appearance_at(face, body);
     let own = state.doc.has_own_appearance(&target);
     let dragging = ui.ctx().input(|i| i.pointer.any_down());
     let mut apply: Option<Option<Appearance>> = None;
@@ -1371,4 +1521,140 @@ fn appearance_panel(ui: &mut egui::Ui, state: &mut AppState, target: AppearanceT
     } else if let Some(appearance) = preview {
         state.doc.preview_appearance(target, Some(appearance));
     }
+}
+
+pub(crate) fn show_appearance_editor(ctx: &egui::Context, state: &mut AppState) {
+    let Some((document, target)) = state.appearance_editor.take() else { return };
+    if state.doc.instance() != document {
+        return;
+    }
+    let face = match &target {
+        AppearanceTarget::Face { face } => {
+            let found = state
+                .doc
+                .model()
+                .live_bodies()
+                .into_iter()
+                .find_map(|(_, body)| state.doc.model().resolve_face(face, body).ok());
+            if found.is_none() {
+                return;
+            }
+            found
+        }
+        _ => None,
+    };
+    let title = format!("{} appearance", appearance_place(&state.doc, &target).0);
+    let mut open = true;
+    egui::Window::new(title).id(egui::Id::new("appearance_editor")).open(&mut open).default_width(300.0).show(
+        ctx,
+        |ui| {
+            if let Some(display) = state.doc.display_state() {
+                ui.label(format!("Display state: {}", display.name));
+            }
+            settle_appearance(ui, state);
+            appearance_panel(ui, state, target.clone(), face);
+            if !ctx.input(|i| i.pointer.any_down()) {
+                state.doc.release_appearance_gesture();
+            }
+        },
+    );
+    if open {
+        state.appearance_editor = Some((document, target));
+    }
+}
+
+fn appearance_place(doc: &crate::document::Document, target: &AppearanceTarget) -> (&'static str, String) {
+    match target {
+        AppearanceTarget::Part => ("Part", doc.name.clone()),
+        AppearanceTarget::Body { body } => ("Body", doc.body_name(*body)),
+        AppearanceTarget::Face { face } => ("Face", face.label.to_string()),
+        AppearanceTarget::Feature { feature } => {
+            ("Feature", doc.model().feature(*feature).map_or_else(|| feature.to_string(), |f| f.name.clone()))
+        }
+    }
+}
+
+pub(crate) fn appearances(ui: &mut egui::Ui, state: &mut AppState) {
+    use soliddraft_document::{ConfigScope, DisplayStateId};
+
+    enum Layer {
+        Base(ConfigScope),
+        Display(DisplayStateId, String),
+    }
+
+    ui.collapsing("Appearances", |ui| {
+        let data = state.doc.model().materials();
+        let mut rows = Vec::new();
+        for assignment in &data.appearances {
+            if let Some(appearance) = data.snapshots.appearance(&assignment.appearance) {
+                rows.push((assignment.target.clone(), appearance.clone(), Layer::Base(assignment.scope.clone())));
+            }
+        }
+        for display in data.display_states.states() {
+            for (target, appearance) in &display.view.appearances {
+                rows.push((
+                    target.clone(),
+                    appearance.clone(),
+                    Layer::Display(display.id.clone(), display.name.clone()),
+                ));
+            }
+        }
+        rows.sort_by(|a, b| a.1.name.cmp(&b.1.name).then_with(|| a.1.id.cmp(&b.1.id)));
+        if rows.is_empty() {
+            ui.label("No appearance overrides");
+        }
+        let mut last = None;
+        let mut remove = None;
+        for (i, (target, appearance, layer)) in rows.iter().enumerate() {
+            if last != Some(&appearance.id) {
+                let c = appearance.base_color;
+                ui.horizontal(|ui| {
+                    let (rect, _) = ui.allocate_exact_size(vec2(12.0, 12.0), Sense::hover());
+                    ui.painter().rect_filled(rect, 2.0, egui::Color32::from_rgb(c.r, c.g, c.b));
+                    ui.strong(&appearance.name);
+                });
+                last = Some(&appearance.id);
+            }
+            let (level, name) = appearance_place(&state.doc, target);
+            let context = match layer {
+                Layer::Display(_, name) => name.clone(),
+                Layer::Base(ConfigScope::All) => "All configurations".to_owned(),
+                Layer::Base(ConfigScope::Only(configs)) => state
+                    .doc
+                    .model()
+                    .named_configurations()
+                    .filter_map(|(id, name)| configs.contains(id).then_some(name))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            };
+            ui.push_id(i, |ui| {
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(format!("{level} · {name} · {context}"));
+                    if ui.small_button("Remove colour").clicked() {
+                        remove = Some(i);
+                    }
+                });
+            });
+        }
+        if let Some(i) = remove {
+            let (target, _, layer) = rows.swap_remove(i);
+            let result = match layer {
+                Layer::Base(scope) => state.doc.set_base_appearance(target, None, scope),
+                Layer::Display(id, _) => {
+                    let mut states = state.doc.display_states().clone();
+                    let mut display = states
+                        .states()
+                        .iter()
+                        .find(|display| display.id == id)
+                        .expect("the state listed by this panel")
+                        .clone();
+                    display.view.paint(target, None);
+                    states.put(display).and_then(|_| state.doc.change_display_states(states))
+                }
+            };
+            if let Err(error) = result {
+                state.note(error, crate::state::NoteKind::Error);
+            }
+        }
+    });
 }

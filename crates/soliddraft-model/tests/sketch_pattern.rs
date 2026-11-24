@@ -48,6 +48,7 @@ fn right_angle_arc_patterns_extrude_through_catallax() {
                     operation: ExtrudeOp::Boss,
                     end: EndCondition::Blind { depth: 2.0 },
                     reverse: false,
+                    options: Default::default(),
                 }),
                 name: None,
                 position: None,

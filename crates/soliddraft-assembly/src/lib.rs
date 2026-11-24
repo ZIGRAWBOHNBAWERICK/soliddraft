@@ -70,10 +70,11 @@ pub use interference::{
 };
 pub use load::{LoadError, LoadEvent, OpenOptions};
 pub use mates::{
-    Alignment, BoundedProof, EndView, EndpointSelector, Entity, FaceEndpoint, FaceSelector, FreeMotion,
-    GeneratorChoice, Mate, MateEdit, MateEntry, MateId, MateRefusal, PartEndpoint, PartPlane, PlaneMeasurement,
-    PlaneProof, ProofIdentity, RefusalCode, SlotConstraint, SlotInput, SolverState, SolverStatus, StoredPiece,
-    StoredSupport, StoredTurn, SupportProof, WidthConstraint, WidthInput,
+    Alignment, BoundedProof, ControllerPosition, EndView, EndpointSelector, Entity, FaceEndpoint, FaceSelector,
+    FreeMotion, GeneratorChoice, Mate, MateController, MateEdit, MateEntry, MateId, MateRefusal, PartEndpoint,
+    PartPlane, PathOptions, PlaneMeasurement, PlaneProof, ProofIdentity, RefusalCode, SlotConstraint, SlotInput,
+    SolverState, SolverStatus, Steer, StoredPiece, StoredSpline, StoredSupport, StoredTurn, SupportProof,
+    WidthConstraint, WidthInput, controller_values,
 };
 pub use mesh::{DisplayMesh, MeshBounds, MeshFace, SharedMesh};
 pub use occurrence::{Counts, Flags, OccurrenceIndex, OccurrenceTable};
@@ -83,7 +84,10 @@ pub use pack::{
 pub use path::{ComponentId, OccurrencePath, PatternId, SourceId, Step};
 pub use placement::{Aabb, Placement};
 pub use scene::{Draw, Instance, Picked, Scene};
-pub use schema::{Assembly, Component, Direction, OccurrenceAppearance, Override, Pattern, PatternRule, Source, Units};
+pub use schema::{
+    Assembly, AssemblyDisplay, Component, Direction, OccurrenceAppearance, Override, Pattern, PatternRule, Source,
+    Units,
+};
 pub use source::{DisplaySource, FileSource, KernelSource};
 pub use store::{Definition, DefinitionIndex, DefinitionKey, DefinitionStore, Freshness, LoadState};
 pub use subassembly::{FormCode, FormPlan, FormRefusal, FormRequest, FormStatus, Formed, Migration};

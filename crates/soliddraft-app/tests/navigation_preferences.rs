@@ -76,8 +76,13 @@ fn saves() -> usize {
     SAVES.load(std::sync::atomic::Ordering::SeqCst)
 }
 
+/// Clicks the control of that name. The window's own Cancel is in its footer, below a
+/// page's control of the same name, so the upper one is the page's.
 fn click(w: &mut Window, label: &str) {
-    w.get_by_label(label).click();
+    w.get_all_by_label(label)
+        .min_by(|a, b| a.rect().top().total_cmp(&b.rect().top()))
+        .unwrap_or_else(|| panic!("no control named {label}"))
+        .click();
     w.run_steps(3);
 }
 
@@ -671,28 +676,37 @@ fn shortcuts_page_lists_registry_searches_assigns_clears_resets_swaps_and_preset
     click(&mut w, "Reset Extrude");
     assert!(w.query_by_label("Extrude: E").is_some());
 
-    // Conflict warning and swap.
+    // S opens the menu in every workspace.
     click(&mut w, "Assign Extrude");
     w.key_press(Key::S);
     w.run_steps(3);
-    assert!(w.state().shortcut_conflict.is_some(), "conflict with Sketch is recorded");
-    assert!(has(&w, "already used by Sketch (Outside a sketch)"), "warning names Sketch and its scope");
+    assert!(has(&w, "S is reserved for the shortcut menu."));
+    assert!(w.query_by_label("Swap").is_none());
+    click(&mut w, "Cancel");
+    assert_eq!(w.state().shortcuts.shortcut_text("shortcut_menu").as_deref(), Some("S"));
+
+    // Conflict warning and swap.
+    click(&mut w, "Assign Extrude");
+    w.key_press(Key::C);
+    w.run_steps(3);
+    assert!(w.state().shortcut_conflict.is_some(), "conflict with Chamfer is recorded");
+    assert!(has(&w, "already used by Chamfer (Outside a sketch)"), "warning names Chamfer and its scope");
     assert!(w.query_by_label("Extrude: E").is_some(), "not overwritten before swap");
-    assert_eq!(w.state().shortcuts.shortcut_text("sketch").as_deref(), Some("S"));
+    assert_eq!(w.state().shortcuts.shortcut_text("chamfer").as_deref(), Some("C"));
     click(&mut w, "Swap");
     assert!(w.state().shortcut_conflict.is_none());
-    assert!(w.query_by_label("Extrude: S").is_some());
-    assert_eq!(w.state().shortcuts.shortcut_text("sketch").as_deref(), Some("E"));
-    assert_eq!(file_json(&dir)["shortcuts"]["overrides"]["extrude"], "S");
-    assert_eq!(file_json(&dir)["shortcuts"]["overrides"]["sketch"], "E");
+    assert!(w.query_by_label("Extrude: C").is_some());
+    assert_eq!(w.state().shortcuts.shortcut_text("chamfer").as_deref(), Some("E"));
+    assert_eq!(file_json(&dir)["shortcuts"]["overrides"]["extrude"], "C");
+    assert_eq!(file_json(&dir)["shortcuts"]["overrides"]["chamfer"], "E");
 
     // Resetting a key that was swapped warns before changing either command.
     click(&mut w, "Reset Extrude");
     assert!(w.state().shortcut_conflict.is_some());
-    assert!(w.query_by_label("Extrude: S").is_some());
-    assert_eq!(w.state().shortcuts.shortcut_text("sketch").as_deref(), Some("E"));
+    assert!(w.query_by_label("Extrude: C").is_some());
+    assert_eq!(w.state().shortcuts.shortcut_text("chamfer").as_deref(), Some("E"));
     click(&mut w, "Cancel");
-    assert!(w.query_by_label("Extrude: S").is_some(), "cancel preserves both assignments");
+    assert!(w.query_by_label("Extrude: C").is_some(), "cancel preserves both assignments");
 
     // Reset all to the chosen preset (SolidDraft, SolidWorks, Fusion).
     w.get_by_role_and_label(Role::RadioButton, "SolidWorks").click();

@@ -70,6 +70,7 @@ fn part(path: &Path, profile: Profile) {
             operation: ExtrudeOp::Boss,
             end: EndCondition::Blind { depth: 10.0 },
             reverse: false,
+            options: Default::default(),
         }),
         name: None,
         position: None,

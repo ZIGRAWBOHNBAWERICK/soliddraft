@@ -6,8 +6,11 @@
 //! - `manifest.json`: the part's id, kind and format, the application and kernel that
 //!   wrote it, its semantic hash (the revision drawings and assemblies pin) and its
 //!   geometry hash, and its sections.
-//! - `part.json`: the truth. The format tag (`soliddraft-part/2`, or `/3` for explicit
-//!   body identities), the part's name and
+//! - `part.json`: the truth. The format tag (`soliddraft-part/2`, `/3` for explicit
+//!   body identities, `/4` from development builds that wrote extrusion options or the
+//!   first part options or Hole Wizard features, `/5` for parameter, configuration and
+//!   appearance data, `/6` for extrusion options, `/7` for Hole Wizard features, or
+//!   `/8` for graded wall thickness), the part's name and
 //!   units, every feature in tree order with its parameters, sketch and persistent
 //!   references, the rollback bar and the next free feature id, and when it has them
 //!   the part's text properties and its material and appearance assignments with copies
@@ -61,10 +64,31 @@ use crate::feature::{DatumPlane, Feature, FeatureId};
 use crate::materials::{AppearanceAssignment, MaterialAssignment, PartMaterials};
 use crate::view::{self, Visibility};
 
-/// The format tag of the current version.
+/// The format for a part using the original document envelope.
 pub const FORMAT: &str = "soliddraft-part/2";
 /// Parts with explicit body identities require this version.
 pub const MULTIBODY_FORMAT: &str = "soliddraft-part/3";
+/// Parts that hold formulas, parameter comments, configuration suppression, body
+/// materials and appearances, or display states require this version.
+pub const PART_OPTIONS_FORMAT: &str = "soliddraft-part/5";
+/// Parts whose extrusions start off their sketch plane, go a second direction, are thin
+/// or use chosen contours require this version, which also reads everything before it.
+/// An older reader would drop those choices and build a different part, so it must refuse.
+pub const OPTIONS_FORMAT: &str = "soliddraft-part/6";
+const OPTIONS_VERSION: u32 = 6;
+/// Parts with Hole Wizard features (position sketches, standards, end conditions, options)
+/// require this version, which also reads everything before it.
+pub const HOLE_WIZARD_FORMAT: &str = "soliddraft-part/7";
+const HOLE_WIZARD_VERSION: u32 = 7;
+/// Parts with a graded thickness in Shell or Thicken require this version.
+pub const GRADED_WALL_FORMAT: &str = "soliddraft-part/8";
+const GRADED_WALL_VERSION: u32 = 8;
+/// Development builds wrote extrusion options, the first part options or Hole Wizard
+/// features under this tag. All still open: each is read by what it holds.
+const EARLY_OPTIONS_FORMAT: &str = "soliddraft-part/4";
+const EARLY_OPTIONS_VERSION: u32 = 4;
+/// The newest part major version this reader accepts.
+pub const NEWEST_FORMAT: u32 = GRADED_WALL_VERSION;
 /// The format tag of part files from before the document envelope.
 pub const LEGACY_FORMAT: &str = "soliddraft-part/1";
 /// The file name extension parts are saved under.
@@ -88,7 +112,10 @@ pub enum FileError {
     #[error("the part's recipe is not valid: {0}")]
     Json(#[from] serde_json::Error),
     /// The format tag is not one this version reads.
-    #[error("the file {}, this version reads {MULTIBODY_FORMAT}, {FORMAT} and {LEGACY_FORMAT}", found_tag(.found))]
+    #[error(
+        "the file {}, this version reads {GRADED_WALL_FORMAT}, {HOLE_WIZARD_FORMAT}, {OPTIONS_FORMAT}, {PART_OPTIONS_FORMAT}, {EARLY_OPTIONS_FORMAT}, {MULTIBODY_FORMAT}, {FORMAT} and {LEGACY_FORMAT}",
+        found_tag(.found)
+    )]
     Format {
         /// The tag in the file.
         found: String,
@@ -148,6 +175,8 @@ struct Recipe {
     snapshots: Snapshots,
     #[serde(default, skip_serializing_if = "crate::pmi::PartPmi::is_empty")]
     pmi: crate::pmi::PartPmi,
+    #[serde(default, skip_serializing_if = "soliddraft_document::display_state::DisplayStates::is_empty")]
+    display_states: soliddraft_document::display_state::DisplayStates<crate::materials::PartDisplay>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -193,8 +222,22 @@ impl Document {
     }
 
     fn recipe(&self) -> Recipe {
+        let format = if uses_graded_walls(&self.features) {
+            GRADED_WALL_FORMAT
+        } else if let Some(tag) = feature_options_after(&self.features, EARLY_OPTIONS_VERSION) {
+            tag
+        } else if self.values.uses_formula_settings()
+            || self.configurations.uses_formula_settings()
+            || has_extended_styles(&self.materials)
+        {
+            PART_OPTIONS_FORMAT
+        } else if self.next_body > 1 {
+            MULTIBODY_FORMAT
+        } else {
+            FORMAT
+        };
         Recipe {
-            format: if self.next_body > 1 { MULTIBODY_FORMAT } else { FORMAT }.into(),
+            format: format.into(),
             name: self.name.clone(),
             units: Units::Mm,
             features: self
@@ -221,6 +264,7 @@ impl Document {
             appearances: self.materials.appearances.clone(),
             snapshots: self.materials.snapshots.clone(),
             pmi: self.pmi.clone(),
+            display_states: self.materials.display_states.clone(),
         }
     }
 
@@ -268,7 +312,7 @@ impl Document {
     /// True when saving writes display data: the settings ask for it, the save does not
     /// leave it out and the body's rebuild matches the current definitions.
     fn saves_display_data(&self, extras: &Extras<'_>) -> bool {
-        self.settings.save_display_data && !extras.no_display_data && !self.is_dirty() && self.body().is_some()
+        self.settings.save_display_data && !extras.no_display_data && !self.is_dirty() && !self.live_bodies().is_empty()
     }
 
     /// The part file's bytes. With display data on, the part is tessellated at its
@@ -337,11 +381,11 @@ impl Document {
             let text = package
                 .read_text(LEGACY_PART_TRUTH)?
                 .ok_or_else(|| FileError::Archive("no manifest.json or recipe.json".into()))?;
-            return Self::read_truth(&text, kernel, 1);
+            return Self::read_truth(&text, kernel, 1, None);
         };
         m.check(DocKind::Part, &[PART])?;
         let text = package.read_text(PART)?.ok_or_else(|| FileError::Archive("no part.json".into()))?;
-        let mut doc = Self::read_truth(&text, kernel, 3)?;
+        let mut doc = Self::read_truth(&text, kernel, NEWEST_FORMAT, Some(&m.format))?;
         doc.id = m.id;
         if let Ok(Some(text)) = package.read_text(settings::ENTRY) {
             doc.settings = Settings::from_json(&text).unwrap_or_default();
@@ -356,22 +400,32 @@ impl Document {
     /// rebuilds it on `kernel`. Without a manifest there is no recorded id, so the part
     /// gets the id derived from its content, as a pre-envelope file does.
     pub fn from_part_json(text: &str, kernel: Arc<dyn Kernel>) -> Result<Document, FileError> {
-        let mut doc = Self::read_truth(text, kernel, 3)?;
+        let mut doc = Self::read_truth(text, kernel, NEWEST_FORMAT, None)?;
         doc.rebuild();
         Ok(doc)
     }
 
     /// Decodes authored truth without starting a kernel operation.
     pub(crate) fn from_part_json_unbuilt(text: &str, kernel: Arc<dyn Kernel>) -> Result<Document, FileError> {
-        Self::read_truth(text, kernel, 3)
+        Self::read_truth(text, kernel, NEWEST_FORMAT, None)
     }
 
     /// Reads truth text whose format's major version is at most `newest`.
-    fn read_truth(text: &str, kernel: Arc<dyn Kernel>, newest: u32) -> Result<Document, FileError> {
+    fn read_truth(
+        text: &str,
+        kernel: Arc<dyn Kernel>,
+        newest: u32,
+        manifest_format: Option<&str>,
+    ) -> Result<Document, FileError> {
         let probe: Value = serde_json::from_str(text)?;
         let found = probe.get("format").and_then(|f| f.as_str()).unwrap_or_default().to_string();
-        if !format_major(&found, "soliddraft-part").is_some_and(|m| (1..=newest).contains(&m)) {
+        let Some(version) = format_major(&found, "soliddraft-part").filter(|m| (1..=newest).contains(m)) else {
             return Err(FileError::Format { found });
+        };
+        if let Some(tag) = manifest_format
+            && format_major(tag, "soliddraft-part") != Some(version)
+        {
+            return Err(FileError::Invalid(format!("manifest format {tag} does not match part.json format {found}")));
         }
         let mut recipe: Recipe = serde_json::from_str(text)?;
         let mut ids: Vec<FeatureId> = recipe.features.iter().map(|f| f.id).collect();
@@ -413,8 +467,28 @@ impl Document {
                 return Err(FileError::Invalid(format!("{} holds a file that does not match its sha256", f.id)));
             }
         }
-        let mut materials =
-            PartMaterials { material: recipe.material, appearances: recipe.appearances, snapshots: recipe.snapshots };
+        let mut materials = PartMaterials {
+            material: recipe.material,
+            appearances: recipe.appearances,
+            snapshots: recipe.snapshots,
+            display_states: recipe.display_states,
+        };
+        if version < EARLY_OPTIONS_VERSION
+            && (recipe.values.uses_formula_settings()
+                || recipe.configurations.uses_formula_settings()
+                || has_extended_styles(&materials))
+        {
+            return Err(FileError::Invalid(format!("the part options require {PART_OPTIONS_FORMAT} or later")));
+        }
+        if version != EARLY_OPTIONS_VERSION
+            && let Some(tag) = feature_options_after(&recipe.features, version)
+        {
+            return Err(FileError::Invalid(format!("the feature options require {tag} or later")));
+        }
+        // Pre-canonical files could carry graded walls under their original tags.
+        if version > EARLY_OPTIONS_VERSION && version < GRADED_WALL_VERSION && uses_graded_walls(&recipe.features) {
+            return Err(FileError::Invalid(format!("graded walls require {GRADED_WALL_FORMAT} or later")));
+        }
         materials.snapshots.normalise();
         materials.check().map_err(FileError::Invalid)?;
         let mut doc = Document::new(recipe.name, kernel);
@@ -459,6 +533,51 @@ impl Document {
     }
 }
 
+fn uses_graded_walls(features: &[Feature]) -> bool {
+    features.iter().any(|f| match &f.kind {
+        crate::FeatureKind::Shell(wall) => wall.thickness.constant().is_none(),
+        crate::FeatureKind::Thicken(wall) => wall.thickness.constant().is_none(),
+        _ => false,
+    })
+}
+
+fn feature_options_after(features: &[Feature], version: u32) -> Option<&'static str> {
+    if version < HOLE_WIZARD_VERSION
+        && features.iter().any(|f| matches!(&f.kind, crate::FeatureKind::Hole(h) if h.uses_wizard_format()))
+    {
+        Some(HOLE_WIZARD_FORMAT)
+    } else if version < OPTIONS_VERSION && uses_options(features) {
+        Some(OPTIONS_FORMAT)
+    } else {
+        None
+    }
+}
+
+/// True when a feature uses what only [`OPTIONS_FORMAT`] carries: an extrusion's options,
+/// or a reference to a thin extrusion's wall or end, which can outlive the extrusion.
+fn uses_options(features: &[Feature]) -> bool {
+    fn thin_name(v: &Value) -> bool {
+        match v {
+            Value::Object(map) => {
+                matches!(map.get("kind").and_then(Value::as_str), Some("thin_wall" | "thin_end"))
+                    || map.values().any(thin_name)
+            }
+            Value::Array(items) => items.iter().any(thin_name),
+            _ => false,
+        }
+    }
+    features.iter().any(|f| match &f.kind {
+        crate::FeatureKind::Extrude(e) if !e.options.is_default() => true,
+        // Large sources and fields hold no face names; a sketch holds one, for its plane.
+        crate::FeatureKind::ImportStep(_)
+        | crate::FeatureKind::Scan(_)
+        | crate::FeatureKind::Lattice(_)
+        | crate::FeatureKind::Gyroid(_) => false,
+        crate::FeatureKind::Sketch(s) => serde_json::to_value(&s.plane).is_ok_and(|v| thin_name(&v)),
+        kind => serde_json::to_value(kind).is_ok_and(|v| thin_name(&v)),
+    })
+}
+
 /// What a save adds to the part file or leaves out of it, beyond the truth.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Extras<'a> {
@@ -497,6 +616,20 @@ fn optional_entries<'a>(settings: &Settings, view: &Visibility) -> impl Iterator
     settings.into_iter().chain(view)
 }
 
+fn has_extended_styles(materials: &PartMaterials) -> bool {
+    !materials.display_states.is_empty()
+        || materials.material.iter().any(|assignment| assignment.body.is_some())
+        || materials
+            .appearances
+            .iter()
+            .any(|assignment| matches!(assignment.target, crate::AppearanceTarget::Body { .. }))
+        || materials
+            .snapshots
+            .materials
+            .iter()
+            .any(|material| !material.description.is_empty() || material.damping_ratio.is_some())
+}
+
 fn shape_hash(truth: &Value) -> ContentHash {
     let mut truth = soliddraft_document::hash::without_format(truth);
     if let Value::Object(map) = &mut truth {
@@ -511,6 +644,7 @@ fn shape_hash(truth: &Value) -> ContentHash {
             "configurations",
             "properties",
             "next_body",
+            "display_states",
         ] {
             map.remove(key);
         }

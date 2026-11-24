@@ -200,10 +200,12 @@ fn the_drawing_ribbon_and_keys_come_from_the_registry() {
             if panel == "Assistant" {
                 continue;
             }
-            for (command, _) in items.into_iter().filter(|(c, _)| (c.shown)(&harness.state().state)) {
+            let shown: Vec<_> = items.into_iter().filter(|(c, _)| (c.shown)(&harness.state().state)).collect();
+            for (command, _) in shown {
                 let label = command.label_in(&harness.state().state);
+                // A tool the strip has no room for is in its group's More menu.
                 assert!(
-                    harness.query_all_by_label(&label).next().is_some(),
+                    harness.query_all_by_label(&label).next().is_some() || ribbon::open_more_menu(&mut harness, &label),
                     "drawing {} › {panel}: no button labelled {label}",
                     tab.label()
                 );
@@ -317,15 +319,15 @@ fn assigned_shortcuts_run_immediately_in_the_app_without_a_restart() {
     harness.run_steps(3);
     harness.get_by_label("Assign Chamfer").click();
     harness.run_steps(2);
-    harness.key_press(Key::S);
+    harness.key_press(Key::F);
     harness.run_steps(3);
     if let Some(proof) = &proof {
         harness.render().unwrap().save(proof.join("shortcut-conflict.png")).unwrap();
     }
     harness.get_by_label("Swap").click();
     harness.run_steps(3);
-    assert_eq!(harness.state().state.shortcuts.shortcut_text("chamfer").as_deref(), Some("S"));
-    assert_eq!(harness.state().state.shortcuts.shortcut_text("sketch").as_deref(), Some("C"));
+    assert_eq!(harness.state().state.shortcuts.shortcut_text("chamfer").as_deref(), Some("F"));
+    assert_eq!(harness.state().state.shortcuts.shortcut_text("view_front").as_deref(), Some("C"));
 
     // Close Preferences and press G: Extrude opens immediately without a restart.
     harness.get_by_label("Close window").click();

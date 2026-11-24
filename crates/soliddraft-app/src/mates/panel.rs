@@ -4,15 +4,16 @@
 //! assembly's values, what the solver says, and the conflicts a refusal named. Everything
 //! goes through the same commands as the MCP tools.
 
-use crate::assembly::AssemblyState;
+use crate::assembly::{AssemblyState, ControllerAnimation, controller_drivers};
 use crate::mates::tools::rows;
 use crate::state::{AppState, NoteKind};
 use crate::theme;
 use soliddraft_assembly::{
-    Alignment, ComponentId, EndpointSelector, FaceSelector, MateEdit, MateRefusal, OccurrencePath, SlotInput,
-    WidthInput,
+    Alignment, AssemblyDocument, ComponentId, EndpointSelector, FaceSelector, MateEdit, MateId, MateRefusal,
+    OccurrencePath, SlotInput, WidthInput,
 };
 use soliddraft_model::FaceRef;
+use std::collections::BTreeMap;
 
 /// A picked face.
 #[derive(Clone, Debug, PartialEq)]
@@ -200,6 +201,17 @@ pub struct Draft {
     pub error: Option<String>,
     /// The last refusal that named mates or freedoms, for the Conflicts list.
     pub conflict: Option<MateRefusal>,
+    /// The Mate Controller's driven mates as typed, by name, comma separated.
+    pub controller_mates: String,
+    /// The name of the position to save.
+    pub position: String,
+    controller_values: BTreeMap<MateId, ControllerValueDraft>,
+}
+
+#[derive(Default)]
+struct ControllerValueDraft {
+    source: Option<f64>,
+    text: String,
 }
 
 impl Default for Draft {
@@ -233,11 +245,31 @@ impl Default for Draft {
             value_expression: String::new(),
             error: None,
             conflict: None,
+            controller_mates: String::new(),
+            position: String::new(),
+            controller_values: BTreeMap::new(),
         }
     }
 }
 
 impl Draft {
+    pub(crate) fn clear_controller_values(&mut self) {
+        self.controller_values.clear();
+    }
+
+    fn sync_controller_values<'a>(&mut self, doc: &'a AssemblyDocument) -> Vec<(MateId, &'a str, Option<f64>)> {
+        let drivers: Vec<_> = controller_drivers(doc).collect();
+        self.controller_values.retain(|id, _| drivers.iter().any(|(current, _, _)| current == id));
+        for &(id, _, value) in &drivers {
+            let draft = self.controller_values.entry(id).or_default();
+            if draft.source != value {
+                draft.source = value;
+                draft.text = value.map(|v| v.to_string()).unwrap_or_default();
+            }
+        }
+        drivers
+    }
+
     fn slots(&mut self) -> [&mut Option<PickedFace>; 4] {
         [&mut self.a, &mut self.b, &mut self.c, &mut self.d]
     }
@@ -261,6 +293,18 @@ pub enum MateAction {
     Flip(String, Alignment),
     /// Hides the Conflicts list.
     Dismiss,
+    /// Sets the Mate Controller's driven mates from the typed names.
+    ControllerSet,
+    /// Saves the driven mates' values under the typed position name.
+    ControllerSave,
+    /// Puts the driven mates at the typed values.
+    ControllerValues,
+    /// Applies a saved position.
+    ControllerApply(String),
+    /// Animates from the driven mates' values now to a saved position.
+    ControllerAnimate(String),
+    /// Removes a saved position.
+    ControllerDelete(String),
 }
 
 fn next_name(state: &AssemblyState, prefix: &str) -> String {
@@ -354,7 +398,7 @@ fn add(state: &mut AppState) {
     let (limits, width, slot, ratio) = (
         [d.min.clone(), d.max.clone()],
         (family == Family::Width).then(|| width_input(d)),
-        (family == Family::Slot).then(|| slot_input(d)),
+        matches!(family, Family::Slot | Family::Path).then(|| slot_input(d)),
         (family == Family::LinearCoupler).then(|| ratio(d)),
     );
     if picked.len() < family.picks() {
@@ -407,7 +451,13 @@ fn add(state: &mut AppState) {
         }
         Family::Lock => s.doc.mate_lock(&name, picked[0].component, picked[1].component, false),
         Family::UniversalJoint => s.doc.mate_universal_joint(&name, a, b, false),
-        Family::Path => s.doc.mate_path(&name, a, b, false),
+        Family::Path => {
+            let steer = |p: &Option<PickedFace>| p.as_ref().map(|p| (end(p), Alignment::Aligned));
+            let d = &state.assembly.mate;
+            let position = slot.clone().expect("made above");
+            let options = soliddraft_assembly::PathOptions { position, follow: steer(&d.c), up: steer(&d.d) };
+            s.doc.mate_path_with(&name, a, b, &options, false)
+        }
         Family::Cam => s.doc.mate_cam(&name, a, b, false),
         Family::Concentric => s.doc.mate_concentric(&name, a, b, alignment, lock_rotation, false),
         Family::Tangent => s.doc.mate_tangent(&name, a, b, alignment, false),
@@ -483,6 +533,72 @@ pub fn apply(state: &mut AppState, action: MateAction) {
             report(state, done, "Mate flipped");
         }
         MateAction::Dismiss => state.assembly.mate.conflict = None,
+        MateAction::ControllerSet => {
+            let names: Vec<String> = state
+                .assembly
+                .mate
+                .controller_mates
+                .split(',')
+                .map(|n| n.trim().to_owned())
+                .filter(|n| !n.is_empty())
+                .collect();
+            let Some(s) = state.assembly.session.as_mut() else { return };
+            let done = s.doc.set_controller_mates(&names);
+            report(state, done, "Mate Controller set");
+        }
+        MateAction::ControllerValues => {
+            let Some(s) = state.assembly.session.as_mut() else { return };
+            let draft = &mut state.assembly.mate;
+            let drivers = draft.sync_controller_values(&s.doc);
+            let values: Result<Vec<f64>, _> =
+                drivers.iter().map(|(id, _, _)| draft.controller_values[id].text.trim().parse::<f64>()).collect();
+            let Ok(values) = values else {
+                draft.error = Some("Each value is a number: millimetres, degrees or percent".into());
+                return;
+            };
+            let done = s.doc.apply_controller_values(&values);
+            if done.is_ok() {
+                s.animation = None;
+                draft.clear_controller_values();
+            }
+            report(state, done, "Values applied");
+        }
+        MateAction::ControllerSave => {
+            let name = state.assembly.mate.position.trim().to_owned();
+            let Some(s) = state.assembly.session.as_mut() else { return };
+            let done = s.doc.save_controller_position(&name);
+            report(state, done, "Position saved");
+        }
+        MateAction::ControllerApply(name) => {
+            let Some(s) = state.assembly.session.as_mut() else { return };
+            let done = s.doc.apply_controller_position(&name);
+            if done.is_ok() {
+                s.animation = None;
+                state.assembly.mate.clear_controller_values();
+            }
+            report(state, done, "Position applied");
+        }
+        MateAction::ControllerAnimate(name) => {
+            let Some(s) = state.assembly.session.as_mut() else { return };
+            let position = s.doc.mate_controller().and_then(|c| c.positions.iter().find(|p| p.name == name));
+            let drivers: Vec<_> = controller_drivers(&s.doc).collect();
+            let Some(to) = position.map(|p| &p.values).filter(|to| to.len() == drivers.len()) else {
+                state.assembly.mate.error = Some(format!("No position named {name} to animate to"));
+                return;
+            };
+            let values = drivers.iter().zip(to).map(|(&(id, _, from), &to)| Some((id, (from?, to)))).collect();
+            let Some(drivers) = values else {
+                state.assembly.mate.error = Some("A driven mate has no value to animate from".into());
+                return;
+            };
+            s.doc.cancel_drag();
+            s.animation = Some(ControllerAnimation { drivers, seconds: 2.0, started: web_time::Instant::now() });
+        }
+        MateAction::ControllerDelete(name) => {
+            let Some(s) = state.assembly.session.as_mut() else { return };
+            let done = s.doc.delete_controller_position(&name);
+            report(state, done, "Position deleted");
+        }
     }
 }
 
@@ -497,6 +613,28 @@ fn headline(r: &MateRefusal) -> &'static str {
         C::UnsupportedPlane | C::NotParallel => "A face cannot be proved for this mate",
         C::UnsupportedReference => "An axis, point, profile or slot cannot be proved for this mate",
         _ => "Refused",
+    }
+}
+
+/// A text field the browser checks can find by `name`.
+fn named_field(ui: &mut egui::Ui, value: &mut String, hint: &str, name: &str) {
+    let field = ui.add(egui::TextEdit::singleline(value).hint_text(hint));
+    field.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, name));
+    #[cfg(target_arch = "wasm32")]
+    crate::web::show_control(name, field.rect);
+    #[cfg(not(target_arch = "wasm32"))]
+    let _ = field;
+}
+
+/// A button the browser checks can find by `name`.
+fn named_button(ui: &mut egui::Ui, text: &str, name: &str, clicked: impl FnOnce()) {
+    let button = ui.button(text);
+    #[cfg(target_arch = "wasm32")]
+    crate::web::show_control(name, button.rect);
+    #[cfg(not(target_arch = "wasm32"))]
+    let _ = name;
+    if button.clicked() {
+        clicked();
     }
 }
 
@@ -662,7 +800,7 @@ fn details(ui: &mut egui::Ui, state: &mut AppState) {
         Family::Symmetric => &["Face", "Mirror image", "Symmetry plane"],
         Family::Slot => &["Slot", "Pin"],
         Family::UniversalJoint => &["Input shaft", "Output shaft"],
-        Family::Path => &["Path face", "Ball"],
+        Family::Path => &["Path face", "Ball", "Follows the path (optional)", "Up (optional)"],
         Family::Cam => &["Cam end face", "Follower"],
         _ => &["First face", "Second face"],
     };
@@ -698,12 +836,13 @@ fn details(ui: &mut egui::Ui, state: &mut AppState) {
             ui.checkbox(&mut d.flipped, "From the second groove face");
         }
     }
-    if d.family == Family::Slot {
+    if matches!(d.family, Family::Slot | Family::Path) {
+        let along = if d.family == Family::Path { "path" } else { "slot" };
         ui.horizontal(|ui| {
             ui.selectable_value(&mut d.slot_mode, SlotMode::Free, "Free");
-            ui.selectable_value(&mut d.slot_mode, SlotMode::Center, "Centre in slot");
-            ui.selectable_value(&mut d.slot_mode, SlotMode::Distance, "Distance along slot");
-            ui.selectable_value(&mut d.slot_mode, SlotMode::Percent, "Percent along slot");
+            ui.selectable_value(&mut d.slot_mode, SlotMode::Center, format!("Centre of {along}"));
+            ui.selectable_value(&mut d.slot_mode, SlotMode::Distance, format!("Distance along {along}"));
+            ui.selectable_value(&mut d.slot_mode, SlotMode::Percent, format!("Percent along {along}"));
         });
         match d.slot_mode {
             SlotMode::Free | SlotMode::Center => {}
@@ -711,7 +850,8 @@ fn details(ui: &mut egui::Ui, state: &mut AppState) {
             SlotMode::Percent => labelled(ui, &mut d.percent, "Percent of the run", "Mate percent"),
         }
         if matches!(d.slot_mode, SlotMode::Distance | SlotMode::Percent) {
-            ui.checkbox(&mut d.flipped, "From the second end");
+            let from = if d.family == Family::Path { "The other way round" } else { "From the second end" };
+            ui.checkbox(&mut d.flipped, from);
         }
     }
 
@@ -754,6 +894,57 @@ fn details(ui: &mut egui::Ui, state: &mut AppState) {
             actions.push(MateAction::AddOrigin(c));
         }
     });
+    ui.add_space(6.0);
+    theme::section_label(ui, "Mate Controller");
+    let drivers = d.sync_controller_values(&s.doc);
+    if drivers.is_empty() {
+        ui.small("Drives Distance and Angle mates and positions along a slot or path.");
+    } else {
+        let names: Vec<_> = drivers.iter().map(|(_, name, _)| *name).collect();
+        ui.label(format!("Drives {}", names.join(", ")));
+    }
+    named_field(ui, &mut d.controller_mates, "Mates, such as D1, A1", "Controller mates");
+    named_button(ui, "Set driven mates", "Set driven mates", || actions.push(MateAction::ControllerSet));
+    if !drivers.is_empty() {
+        for (i, (id, mate, _)) in drivers.into_iter().enumerate() {
+            ui.push_id(id, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(mate);
+                    named_field(
+                        ui,
+                        &mut d.controller_values.get_mut(&id).expect("synced draft").text,
+                        "mm, degrees or percent",
+                        &format!("Controller value {}", i + 1),
+                    );
+                });
+            });
+        }
+        named_button(ui, "Apply values", "Apply values", || actions.push(MateAction::ControllerValues));
+        ui.horizontal(|ui| {
+            named_field(ui, &mut d.position, "Position name", "Position name");
+            named_button(ui, "Save position", "Save position", || actions.push(MateAction::ControllerSave));
+        });
+        let positions: Vec<(String, Vec<f64>)> = s
+            .doc
+            .mate_controller()
+            .map(|c| c.positions.iter().map(|p| (p.name.clone(), p.values.clone())).collect())
+            .unwrap_or_default();
+        for (name, values) in positions {
+            ui.horizontal(|ui| {
+                let shown: Vec<String> = values.iter().map(|v| crate::document::fmt_mm(*v)).collect();
+                ui.label(format!("{name}: {}", shown.join(", ")));
+                named_button(ui, "Apply", &format!("Apply {name}"), || {
+                    actions.push(MateAction::ControllerApply(name.clone()))
+                });
+                named_button(ui, "Animate to", &format!("Animate to {name}"), || {
+                    actions.push(MateAction::ControllerAnimate(name.clone()))
+                });
+                named_button(ui, "Delete", &format!("Delete position {name}"), || {
+                    actions.push(MateAction::ControllerDelete(name.clone()))
+                });
+            });
+        }
+    }
     if let Some(c) = &d.conflict {
         conflicts(ui, c, &mates, &mut actions);
     }
@@ -864,6 +1055,20 @@ fn details(ui: &mut egui::Ui, state: &mut AppState) {
                 let locked = if m["lock_rotation"].as_bool() == Some(true) { ", rotation locked" } else { "" };
                 format!("{name}: in the slot, {how}{locked}")
             }
+            Some("path") => {
+                let how = match m["position"]["mode"].as_str() {
+                    Some("center") => "halfway round".to_owned(),
+                    Some("distance") => shown(m["position"]["distance"]["value"].as_f64(), " along"),
+                    Some("percent") => format!("{}% along", m["position"]["percent"].as_f64().unwrap_or(f64::NAN)),
+                    _ => "free".to_owned(),
+                };
+                let steered = if m["follow"].is_null() { "" } else { ", steered" };
+                format!("{name}: on the path, {how}{steered}")
+            }
+            Some("cam") => {
+                let side = if m["outside"].as_bool() == Some(true) { "outside" } else { "inside" };
+                format!("{name}: cam follower, {side}")
+            }
             Some("origin") => format!("{name}: on the origin"),
             _ => {
                 ui.colored_label(theme::error(), format!("{name}: this version cannot solve it"));
@@ -871,6 +1076,14 @@ fn details(ui: &mut egui::Ui, state: &mut AppState) {
             }
         };
         show_row(ui, &named, &name, line);
+    }
+    if s.animation.is_some() {
+        ui.ctx().request_repaint();
+        match s.animate() {
+            Ok(true) => {}
+            Ok(false) => d.error = None,
+            Err(e) => d.error = Some(e.message),
+        }
     }
     ui.label(match solver["state"].as_str() {
         Some("solved") => "Fully constrained".to_owned(),

@@ -7,6 +7,7 @@ use super::{
     page, search,
 };
 use crate::commands::{self, KeyChord, ShortcutPreset};
+use crate::icons::{self, Icon};
 use crate::navigation::view_keys::{self, RowState};
 use crate::navigation::{
     Action, Binding, Capability, EventKind, LimitKind, Outcome, Pivot, ZoomAnchor, gather, presets,
@@ -75,73 +76,234 @@ pub(super) const AUTOSAVE_CONTROLS: [(&str, &str); 4] = [
 ];
 
 pub(super) fn show(p: &mut Preferences, ui: &mut egui::Ui) {
+    let search_id = ui.id().with("prefs_search_input");
+    let ctrl_f = ui.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::F));
+
+    // 1. D1 modal header: icon + title on left, Search preferences (`Ctrl F`) on right (14.png).
     ui.horizontal(|ui| {
-        ui.label("Search");
-        ui.add(egui::TextEdit::singleline(&mut p.search).hint_text("Search settings").desired_width(320.0))
-            .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, "Search settings"));
-    });
-    ui.separator();
-    ui.horizontal_top(|ui| {
-        ui.vertical(|ui| {
-            ui.set_width(190.0);
-            egui::ScrollArea::vertical().id_salt("settings_categories").show(ui, |ui| categories_list(p, ui));
+        let (ir, _) = ui.allocate_exact_size(vec2(16.0, 16.0), Sense::hover());
+        icons::paint(ui.painter(), Icon::Gear, ir, theme::accent());
+        ui.label(egui::RichText::new("Preferences").strong().size(14.5).color(theme::ink()));
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            // The header is the window's only title, so it carries the close button too.
+            // Closing keeps what was changed; Cancel is the way back.
+            let (rect, close) = ui.allocate_exact_size(vec2(22.0, 22.0), Sense::click());
+            close.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Close window"));
+            if close.hovered() {
+                ui.painter().rect_filled(rect, CornerRadius::same(4), theme::hover());
+            }
+            let ink = if close.hovered() { theme::ink() } else { theme::muted() };
+            icons::paint(ui.painter(), Icon::Close, rect.shrink(5.0), ink);
+            if close.on_hover_text("Close").clicked() {
+                p.close_requested = true;
+            }
+            egui::Frame::new()
+                .fill(theme::chip())
+                .stroke(Stroke::new(1.0, theme::line()))
+                .corner_radius(CornerRadius::same(4))
+                .inner_margin(egui::Margin::symmetric(5, 2))
+                .show(ui, |ui| {
+                    ui.label(egui::RichText::new("Ctrl F").monospace().size(10.0).color(theme::muted()));
+                });
+            let edit = ui.add(
+                egui::TextEdit::singleline(&mut p.search)
+                    .id(search_id)
+                    .hint_text("Search preferences")
+                    .desired_width(240.0),
+            );
+            edit.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, "Search settings"));
+            if ctrl_f {
+                edit.request_focus();
+            }
         });
+    });
+    ui.add_space(4.0);
+    theme::hline(ui);
+
+    // 2. Main 2-column body (grouped left nav + Profile footer | right content page).
+    let footer_h = 46.0;
+    let body_h = (ui.available_height() - footer_h).max(240.0);
+    let total_w = ui.available_width();
+    let nav_w = 212.0;
+    let content_w = (total_w - nav_w - 10.0).max(320.0);
+    ui.allocate_ui_with_layout(vec2(total_w, body_h), egui::Layout::left_to_right(egui::Align::Min), |ui| {
+        // Left grouped navigation rail (`212px`, `--pane-head` fill)
+        ui.allocate_ui_with_layout(vec2(nav_w, body_h), egui::Layout::top_down(egui::Align::Min), |ui| {
+            egui::Frame::new().fill(theme::panel_header()).inner_margin(egui::Margin::symmetric(8, 8)).show(ui, |ui| {
+                ui.set_width(nav_w - 16.0);
+                ui.set_height((body_h - 16.0).max(180.0));
+                ui.vertical(|ui| {
+                    let profile_h = 54.0;
+                    let nav_h = (body_h - 16.0 - profile_h).max(100.0);
+                    egui::ScrollArea::vertical()
+                        .id_salt("settings_categories")
+                        .max_height(nav_h)
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| categories_list(p, ui));
+                    ui.add_space(4.0);
+                    theme::hline(ui);
+                    ui.add_space(4.0);
+                    profile_selector(ui);
+                });
+            });
+        });
+
         ui.separator();
-        ui.vertical(|ui| {
-            ui.set_min_width(0.0);
-            egui::ScrollArea::vertical().id_salt("settings_page").auto_shrink([false, false]).show(ui, |ui| {
-                if p.search.trim().is_empty() {
-                    match p.page {
-                        MOUSE => mouse_page(p, ui),
-                        ORBIT_ZOOM => orbit_zoom_page(p, ui),
-                        VIEW_KEYS => view_keys_page(p, ui),
-                        GRID_AND_PLANES => grid_and_planes_page(p, ui),
-                        SHORTCUTS => shortcuts_page(p, ui),
-                        AUTOSAVE => autosave_page(p, ui),
-                        id => {
-                            if let Some(c) = super::reserved_category(id) {
-                                ui.heading(c.label);
-                                ui.label("Coming soon");
+
+        // Right content surface (`#FFFFFF`)
+        ui.allocate_ui_with_layout(vec2(content_w, body_h), egui::Layout::top_down(egui::Align::Min), |ui| {
+            egui::Frame::new().fill(theme::panel()).inner_margin(egui::Margin::symmetric(14, 10)).show(ui, |ui| {
+                ui.set_width((content_w - 28.0).max(280.0));
+                ui.set_height((body_h - 20.0).max(180.0));
+                ui.vertical(|ui| {
+                    egui::ScrollArea::vertical().id_salt("settings_page").auto_shrink([false, false]).show(ui, |ui| {
+                        if p.search.trim().is_empty() {
+                            match p.page {
+                                MOUSE => mouse_page(p, ui),
+                                ORBIT_ZOOM => orbit_zoom_page(p, ui),
+                                VIEW_KEYS => view_keys_page(p, ui),
+                                GRID_AND_PLANES => grid_and_planes_page(p, ui),
+                                SHORTCUTS => shortcuts_page(p, ui),
+                                AUTOSAVE => autosave_page(p, ui),
+                                id => {
+                                    if let Some(c) = super::reserved_category(id) {
+                                        ui.heading(c.label);
+                                        ui.add_space(4.0);
+                                        ui.label("Coming soon");
+                                    }
+                                }
                             }
+                        } else {
+                            results(p, ui);
                         }
-                    }
-                } else {
-                    results(p, ui);
+                        if let Some(Message { text, error }) = &p.message {
+                            ui.add_space(8.0);
+                            let color = if *error { theme::error() } else { theme::ok() };
+                            ui.label(egui::RichText::new(text).color(color));
+                        }
+                    });
+                });
+            });
+        });
+    });
+
+    // 3. Footer bar: Restore page defaults | Cancel · Apply · OK (14.png model).
+    theme::hline(ui);
+    egui::Frame::new().fill(theme::ribbon()).inner_margin(egui::Margin::symmetric(10, 8)).show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        ui.horizontal(|ui| {
+            if ui.button("Restore page defaults").clicked() {
+                p.restore_page_defaults();
+            }
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.spacing_mut().item_spacing.x = 6.0;
+                let ok_btn = egui::Button::new(egui::RichText::new("OK").strong().color(theme::on_accent()))
+                    .fill(theme::accent())
+                    .stroke(Stroke::NONE)
+                    .min_size(vec2(64.0, 26.0));
+                if ui.add(ok_btn).clicked() {
+                    p.confirm_and_close();
                 }
-                if let Some(Message { text, error }) = &p.message {
-                    ui.add_space(8.0);
-                    let color = if *error { theme::error() } else { theme::muted() };
-                    ui.label(egui::RichText::new(text).color(color));
+                if ui.add(egui::Button::new("Apply").min_size(vec2(64.0, 26.0))).clicked() {
+                    p.apply_now();
+                }
+                if ui.add(egui::Button::new("Cancel").min_size(vec2(64.0, 26.0))).clicked() {
+                    p.cancel_and_close();
                 }
             });
         });
     });
 }
 
+fn nav_group_header(ui: &mut egui::Ui, label: &str) {
+    ui.add_space(6.0);
+    ui.label(egui::RichText::new(label).strong().size(9.5).color(theme::muted()));
+    ui.add_space(1.0);
+}
+
 fn categories_list(p: &mut Preferences, ui: &mut egui::Ui) {
-    for c in categories() {
-        match c.status {
-            Status::Available => {
-                ui.label(egui::RichText::new(c.label).strong());
-                for page in super::available_pages().iter().filter(|x| x.category == c.id) {
-                    if ui.selectable_label(p.page == page.id && p.search.trim().is_empty(), page.title).clicked() {
-                        p.open_page(page.id);
+    // 14.png grouped hierarchy: LOOK / WORK / INPUT / EXTEND while preserving every
+    // existing category & page label for navigation_preferences tests.
+    let groups: [(&str, &[&str]); 4] = [
+        ("INPUT", &["navigation", "interface"]),
+        ("LOOK", &["viewport", "appearance_graphics"]),
+        ("WORK", &["general_documents", "selection_editing"]),
+        ("EXTEND", &["assistant"]),
+    ];
+    let all_cats = categories();
+    for (group_name, cat_ids) in groups {
+        nav_group_header(ui, group_name);
+        for cat_id in cat_ids {
+            let Some(c) = all_cats.iter().find(|x| x.id == *cat_id) else { continue };
+            match c.status {
+                Status::Available => {
+                    ui.label(egui::RichText::new(c.label).strong().size(11.5).color(theme::ink()));
+                    for page in super::available_pages().iter().filter(|x| x.category == c.id) {
+                        let selected = p.page == page.id && p.search.trim().is_empty();
+                        let btn =
+                            egui::Button::selectable(selected, page.title).min_size(vec2(ui.available_width(), 24.0));
+                        if ui.add(btn).clicked() {
+                            p.open_page(page.id);
+                        }
                     }
                 }
-            }
-            Status::Reserved => {
-                if ui
-                    .selectable_label(
-                        p.page == c.id && p.search.trim().is_empty(),
-                        format!("{} · Coming soon", c.label),
+                Status::Reserved => {
+                    let selected = p.page == c.id && p.search.trim().is_empty();
+                    let label = format!("{} · Coming soon", c.label);
+                    let btn = egui::Button::selectable(
+                        selected,
+                        egui::RichText::new(&label).color(if selected { theme::accent() } else { theme::muted() }),
                     )
-                    .clicked()
-                {
-                    p.open_page(c.id);
+                    .min_size(vec2(ui.available_width(), 24.0));
+                    if ui.add(btn).clicked() {
+                        p.open_page(c.id);
+                    }
                 }
             }
         }
     }
+}
+
+fn profile_selector(ui: &mut egui::Ui) {
+    let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 38.0), Sense::click());
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Profile: Default"));
+    ui.painter().rect(
+        rect,
+        CornerRadius::same(theme::RADIUS),
+        if resp.hovered() { theme::hover() } else { theme::panel() },
+        Stroke::new(1.0, theme::line()),
+        StrokeKind::Inside,
+    );
+    ui.painter().text(
+        egui::pos2(rect.left() + 10.0, rect.top() + 11.0),
+        Align2::LEFT_CENTER,
+        "PROFILE",
+        egui::FontId::proportional(9.0),
+        theme::muted(),
+    );
+    ui.painter().text(
+        egui::pos2(rect.left() + 10.0, rect.bottom() - 12.0),
+        Align2::LEFT_CENTER,
+        "Default",
+        egui::FontId::proportional(12.0),
+        theme::ink(),
+    );
+    icons::paint(
+        ui.painter(),
+        Icon::ChevronDown,
+        Rect::from_center_size(egui::pos2(rect.right() - 14.0, rect.center().y), vec2(12.0, 12.0)),
+        theme::muted(),
+    );
+    egui::Popup::menu(&resp)
+        .align(egui::RectAlign::TOP_START)
+        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+        .show(|ui| {
+            ui.set_min_width(180.0);
+            let _ = ui.selectable_label(true, "Default (active)");
+            ui.separator();
+            ui.add_enabled(false, egui::Button::new("Save profile as… · Coming soon"));
+            ui.add_enabled(false, egui::Button::new("Import profile… · Coming soon"));
+        });
 }
 
 fn results(p: &mut Preferences, ui: &mut egui::Ui) {
@@ -180,7 +342,20 @@ fn control<R>(lit: bool, ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui) -> R
 
 fn heading(ui: &mut egui::Ui, id: &str) {
     if let Some(p) = page(id) {
-        ui.heading(p.path());
+        ui.horizontal(|ui| {
+            ui.heading(p.path());
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                egui::Frame::new()
+                    .fill(theme::chip())
+                    .stroke(Stroke::new(1.0, theme::line()))
+                    .corner_radius(CornerRadius::same(theme::radii().pill))
+                    .inner_margin(egui::Margin::symmetric(8, 2))
+                    .show(ui, |ui| {
+                        ui.label(egui::RichText::new("In profile").size(10.5).color(theme::muted()));
+                    });
+            });
+        });
+        ui.add_space(4.0);
     }
 }
 
@@ -372,7 +547,7 @@ fn paint_schematic(ui: &egui::Ui, rect: Rect, hovered: bool) {
         rect.left_bottom() + vec2(8.0, -8.0),
         Align2::LEFT_BOTTOM,
         "Drag or scroll here",
-        theme::font(11.0),
+        egui::FontId::proportional(11.0),
         theme::muted(),
     );
 }
@@ -780,7 +955,7 @@ fn shortcuts_page(p: &mut Preferences, ui: &mut egui::Ui) {
         egui::Frame::new().stroke(Stroke::new(1.5, theme::error())).inner_margin(6.0).corner_radius(4).show(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
                 ui.label(egui::RichText::new(conflict.message()).color(theme::error()));
-                if ui.button("Swap").clicked() {
+                if conflict.can_swap() && ui.button("Swap").clicked() {
                     p.swap_shortcut();
                 }
                 if ui.button("Cancel").clicked() {
@@ -841,6 +1016,11 @@ fn shortcuts_page(p: &mut Preferences, ui: &mut egui::Ui) {
                     };
                     ui.label(rich).on_hover_text(c.doc);
                     ui.label(egui::RichText::new(c.default_scope().label()).color(theme::muted()));
+                    if !c.can_rebind() {
+                        ui.label(egui::RichText::new("Fixed").color(theme::muted()));
+                        ui.end_row();
+                        continue;
+                    }
                     ui.horizontal(|ui| {
                         ui.push_id(c.id, |ui| {
                             if p.shortcut_capture == Some(c.id) {

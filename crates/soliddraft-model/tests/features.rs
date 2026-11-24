@@ -43,7 +43,13 @@ fn top(offset: f64) -> SketchPlane {
 }
 
 fn extrude(sketch: FeatureId, operation: ExtrudeOp, end: EndCondition, reverse: bool) -> FeatureKind {
-    FeatureKind::Extrude(ExtrudeFeature { profile: ProfileSource::Sketch { feature: sketch }, operation, end, reverse })
+    FeatureKind::Extrude(ExtrudeFeature {
+        profile: ProfileSource::Sketch { feature: sketch },
+        operation,
+        end,
+        reverse,
+        options: Default::default(),
+    })
 }
 
 /// A `w` by `h` block centred on the z axis from `z0` up by `depth`.
@@ -105,6 +111,8 @@ fn holes_build_edit_and_keep_later_references() {
             tip: HoleTip::Flat,
             head: Some(HoleHead::Countersink { diameter: 8.0, angle_deg: 90.0 }),
             thread: None,
+            sketch: None,
+            wizard: None,
         }),
     );
     all_ok(&d);

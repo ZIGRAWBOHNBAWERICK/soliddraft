@@ -323,6 +323,8 @@ pub fn make_assembly_drawing(model: &AssemblyModel<'_>, new: &NewAssemblyDrawing
         position: Point2::new(x1 - bom_w, y1),
         revisions: Vec::new(),
         bom: drawing_bom(&model.bom),
+        hole_view: None,
+        holes: Vec::new(),
     });
     // The views use the drawing area below the BOM and above the title block.
     let title_top = t.title_block.position.v + t.title_block.height + MARGIN;
@@ -577,6 +579,8 @@ pub fn update_assembly_drawing(drawing: &Drawing, model: &AssemblyModel<'_>) -> 
             position: Point2::new(x1 - w, y1),
             revisions: Vec::new(),
             bom,
+            hole_view: None,
+            holes: Vec::new(),
         });
     }
     let first = out

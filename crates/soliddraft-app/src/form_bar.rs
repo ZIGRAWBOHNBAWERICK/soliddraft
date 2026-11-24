@@ -135,6 +135,21 @@ pub struct Form<'a, K> {
 pub struct Response {
     pub confirm: bool,
     pub cancel: bool,
+    pub chose_error_action: bool,
+}
+
+/// Draws a form's error, with the button of the correction it offers if any; true when
+/// that button was clicked.
+pub(crate) fn show_error(ui: &mut egui::Ui, error: &str, action: Option<&str>) -> bool {
+    ui.colored_label(theme::error(), error);
+    let Some(label) = action else { return false };
+    let button = ui.button(label);
+    #[cfg(target_arch = "wasm32")]
+    {
+        crate::web::show_feature_refusal(error);
+        crate::web::show_control(label, button.rect);
+    }
+    button.clicked()
 }
 
 /// The field renderer returns true when a summary field asks to open its details sheet.
@@ -142,6 +157,16 @@ pub fn show<K: Copy + Eq + Hash + std::fmt::Debug>(
     ui: &mut egui::Ui,
     state: &mut State,
     form: Form<'_, K>,
+    render: impl FnMut(&mut egui::Ui, K) -> bool,
+) -> Response {
+    show_with_error_action(ui, state, form, None, render)
+}
+
+pub(crate) fn show_with_error_action<K: Copy + Eq + Hash + std::fmt::Debug>(
+    ui: &mut egui::Ui,
+    state: &mut State,
+    form: Form<'_, K>,
+    error_action: Option<&str>,
     mut render: impl FnMut(&mut egui::Ui, K) -> bool,
 ) -> Response {
     if state.key != Some(form.key) {
@@ -224,6 +249,8 @@ pub fn show<K: Copy + Eq + Hash + std::fmt::Debug>(
                 vec2(MORE_WIDTH, FIELD_HEIGHT),
                 egui::Button::new(format!("More ({count})")).selected(state.expanded),
             );
+            #[cfg(target_arch = "wasm32")]
+            crate::web::show_control(format!("{} more", form.title), more.rect);
             anchor = more.rect;
             if more.clicked() {
                 state.expanded = !state.expanded;
@@ -291,7 +318,7 @@ pub fn show<K: Copy + Eq + Hash + std::fmt::Debug>(
                             .min_scrolled_height(room)
                             .show(ui, |ui| {
                                 if let Some(error) = form.error {
-                                    ui.colored_label(theme::error(), error);
+                                    response.chose_error_action = show_error(ui, error, error_action);
                                 }
                                 ui.columns(columns, |uis| {
                                     for (group_index, group) in groups.iter().enumerate() {
@@ -330,10 +357,8 @@ pub fn show<K: Copy + Eq + Hash + std::fmt::Debug>(
                     });
             });
     } else if let Some(error) = form.error {
-        // The form's one message area, under the bar and right of the tool palette, so it
-        // never covers a palette button.
-        let palette = egui::PanelState::load(ui.ctx(), egui::Id::new("tool_palette")).map(|p| p.outer_rect.right());
-        let left = palette.map_or(available.left() + title_width, |right| right.max(available.left())) + GAP;
+        // The form's one message area, under the bar and right of its title.
+        let left = available.left() + title_width + GAP;
         egui::Area::new(form.key.with("error"))
             .order(egui::Order::Foreground)
             .fixed_pos(egui::pos2(left, available.bottom() + 4.0))
@@ -344,8 +369,8 @@ pub fn show<K: Copy + Eq + Hash + std::fmt::Debug>(
                     .corner_radius(theme::RADIUS)
                     .inner_margin(8)
                     .show(ui, |ui| {
-                        ui.set_max_width((available.right() - left - 24.0).min(680.0));
-                        ui.colored_label(theme::error(), error);
+                        ui.set_max_width((available.right() - left - 24.0).clamp(160.0, 680.0));
+                        response.chose_error_action = show_error(ui, error, error_action);
                     });
             });
     }

@@ -59,6 +59,7 @@ fn part(path: &Path, circle: bool) {
             operation: ExtrudeOp::Boss,
             end: EndCondition::Blind { depth: 10.0 },
             reverse: false,
+            options: Default::default(),
         }),
     );
     doc.save(path).unwrap();

@@ -241,7 +241,16 @@ fn block() -> Document {
     let sketch = add(&mut doc, FeatureKind::Sketch(SketchFeature { plane, sketch: s }));
     let profile = ProfileSource::Sketch { feature: sketch };
     let end = EndCondition::Blind { depth: 10.0 };
-    add(&mut doc, FeatureKind::Extrude(ExtrudeFeature { profile, operation: ExtrudeOp::Boss, end, reverse: false }));
+    add(
+        &mut doc,
+        FeatureKind::Extrude(ExtrudeFeature {
+            profile,
+            operation: ExtrudeOp::Boss,
+            end,
+            reverse: false,
+            options: Default::default(),
+        }),
+    );
     doc
 }
 
@@ -284,6 +293,8 @@ fn a_hole_head_takes_globals_and_formulas() {
         tip: HoleTip::Flat,
         head,
         thread: None,
+        sketch: None,
+        wizard: None,
     };
     add(&mut doc, FeatureKind::Hole(hole));
     let table = doc.values_table();

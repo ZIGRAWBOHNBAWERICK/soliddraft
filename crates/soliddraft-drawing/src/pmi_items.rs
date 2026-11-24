@@ -500,7 +500,7 @@ impl Planner<'_> {
         if !wanted {
             return Ok(());
         }
-        let source = PmiSource::Item { item: item.id.clone() };
+        let source = source_of(row);
         let no_slide = Slide { along: Point2::new(0.0, 1.0), step: 3.0 };
         match &item.kind {
             PmiKind::Datum { letter, feature } => match self.body.feature(feature)? {
@@ -555,6 +555,11 @@ impl Planner<'_> {
                 if let Some(face) = first.first() {
                     self.sizes.insert(*face, self.plans.len());
                 }
+                let placement_on_wall = row.feature.and_then(|feature| {
+                    thread_placement(&self.body.index.edge_ref(edge)?, feature)
+                        .filter(|placement| row.placements.contains(placement))
+                });
+                let source = source_on(row, placement_on_wall);
                 self.plans.push(Plan {
                     source,
                     view,
@@ -892,14 +897,119 @@ pub fn place_notes(drawing: &mut Drawing, sheet: usize, part: &Part) {
     put(drawing, &[id], &planned);
 }
 
+/// What an annotation made from `row` names: an item the part stores by its name, the
+/// thread a hole states by the hole, so renaming the hole or giving another item the
+/// thread's name does not part the annotation from its thread.
+fn source_of(row: &PmiRow) -> PmiSource {
+    source_on(row, None)
+}
+
+fn source_on(row: &PmiRow, placement: Option<usize>) -> PmiSource {
+    match row.feature {
+        Some(feature) => PmiSource::Thread {
+            feature: feature.0,
+            placement: placement.or_else(|| row.placements.first().copied()).unwrap_or(0) as u32,
+            item: row.item.id.clone(),
+        },
+        None => PmiSource::Item { item: row.item.id.clone() },
+    }
+}
+
+fn thread_placement(entity: &crate::EntityRef, feature: soliddraft_model::FeatureId) -> Option<usize> {
+    let Some(crate::ModelEntity::Edge(edge)) = &entity.model else { return None };
+    edge.faces.iter().find_map(|face| match face.generator {
+        soliddraft_model::Generator::Hole { placement, .. } if face.feature == feature => Some(placement as usize),
+        _ => None,
+    })
+}
+
+fn annotation_row<'a>(
+    annotation: &Annotation,
+    source: &PmiSource,
+    rows: &'a [PmiRow],
+) -> Option<(&'a PmiRow, Option<usize>)> {
+    let PmiSource::Thread { feature, placement, .. } = source else {
+        return row_of(source, rows).map(|row| (row, None));
+    };
+    let feature = soliddraft_model::FeatureId(*feature);
+    let anchored = annotation.anchors.iter().find_map(|anchor| thread_placement(&anchor.entity, feature));
+    for placement in anchored.into_iter().chain([*placement as usize]) {
+        if let Some(row) = rows.iter().find(|row| row.feature == Some(feature) && row.placements.contains(&placement)) {
+            return Some((row, Some(placement)));
+        }
+    }
+    None
+}
+
+/// The row an annotation made from the part shows: an item the part stores by its name,
+/// a hole's thread by the hole and one of its holes. An annotation made before threads
+/// were followed by their holes names a thread by its name, when no stored item has it.
+fn row_of<'r>(source: &PmiSource, rows: &'r [PmiRow]) -> Option<&'r PmiRow> {
+    match source {
+        PmiSource::Item { item } => rows
+            .iter()
+            .find(|row| row.feature.is_none() && row.item.id == *item)
+            .or_else(|| rows.iter().find(|row| row.feature.is_some() && row.item.id == *item)),
+        PmiSource::Thread { feature, placement, .. } => rows.iter().find(|row| {
+            row.feature.is_some_and(|f| f.0 == *feature) && row.placements.contains(&(*placement as usize))
+        }),
+        PmiSource::Located { .. } | PmiSource::Notes => None,
+    }
+}
+
+/// True when an annotation of kind `body` is how the drawing shows an item of kind
+/// `kind`: a thread as a note, a plain size as a dimension, and so on.
+fn shows<F>(body: &AnnotationKind, kind: &PmiKind<F>) -> bool {
+    matches!(
+        (body, kind),
+        (AnnotationKind::Note { .. }, PmiKind::Size { thread: Some(_), .. } | PmiKind::Slot { .. })
+            | (AnnotationKind::Dimension(_), PmiKind::Size { thread: None, .. } | PmiKind::Location { .. })
+            | (AnnotationKind::Gdt { .. }, PmiKind::Gdt { .. })
+            | (AnnotationKind::Datum { .. }, PmiKind::Datum { .. })
+            | (AnnotationKind::SurfaceFinish { .. }, PmiKind::SurfaceFinish { .. })
+    )
+}
+
 /// Brings every annotation made from the part's items up to the part as it is now: its
 /// tolerance, its count, its letter, its text. An annotation whose item the part no
-/// longer has, or that no longer applies, is taken off the drawing. Returns the names of
-/// the items taken off.
-pub(crate) fn refresh(drawing: &mut Drawing, part: &Part, refresh_view: impl Fn(ViewId) -> bool) -> Vec<String> {
-    let rows: BTreeMap<&str, &PmiRow> = part.requirements.rows.iter().map(|row| (row.item.id.as_str(), row)).collect();
+/// longer has, or that no longer applies, is taken off the drawing. One whose item is now
+/// shown another way, as a size that became a thread or a thread that became a plain
+/// size, is taken off too when `redraw` says [`import`] runs next to draw the item again
+/// as it is; otherwise it stays as it was until then. Returns the names of the items
+/// taken off for good.
+pub(crate) fn refresh(
+    drawing: &mut Drawing,
+    part: &Part,
+    refresh_view: impl Fn(ViewId) -> bool,
+    redraw: bool,
+) -> Vec<String> {
+    let all = &part.requirements.rows;
+    let rows: BTreeMap<&str, &PmiRow> =
+        all.iter().filter(|row| row.feature.is_none()).map(|row| (row.item.id.as_str(), row)).collect();
     let notes = &part.requirements.notes.notes;
     let mut removed = Vec::new();
+    let mut thread_notes = BTreeMap::new();
+    if redraw {
+        for annotation in drawing.sheets.iter().flat_map(|sheet| &sheet.annotations) {
+            let Some((row, _)) = annotation.source.as_ref().and_then(|source| annotation_row(annotation, source, all))
+            else {
+                continue;
+            };
+            if row.feature.is_none()
+                || !row.applies()
+                || !shows(&annotation.body, &row.item.kind)
+                || !refresh_view(annotation.view)
+            {
+                continue;
+            }
+            let resolved = !matches!(annotation.state, AnnotationState::Dangling { .. });
+            // A merged group keeps a note whose leader still reaches a hole, when it has one.
+            let kept = thread_notes.entry(row.item.id.as_str()).or_insert((annotation.id, resolved));
+            if resolved && !kept.1 {
+                *kept = (annotation.id, resolved);
+            }
+        }
+    }
     for sheet in &mut drawing.sheets {
         let style = crate::library::template(sheet.template.as_str()).style_file();
         let heading = notes_heading(sheet.template.as_str());
@@ -908,6 +1018,7 @@ pub(crate) fn refresh(drawing: &mut Drawing, part: &Part, refresh_view: impl Fn(
                 return true;
             }
             let Some(source) = annotation.source.clone() else { return true };
+            let mut redrawn = false;
             let keep = match &source {
                 PmiSource::Notes => {
                     if let AnnotationKind::Note { text, .. } = &mut annotation.body {
@@ -922,15 +1033,28 @@ pub(crate) fn refresh(drawing: &mut Drawing, part: &Part, refresh_view: impl Fn(
                             .iter()
                             .any(|l| l.datum == *datum && (l.value * 1000.0).round() as i64 == *micrometres)
                 }),
-                PmiSource::Item { item } => match rows.get(item.as_str()).filter(|row| row.applies()) {
-                    Some(row) => {
-                        update(annotation, row, &style.symbols);
-                        true
+                PmiSource::Item { .. } | PmiSource::Thread { .. } => {
+                    match annotation_row(annotation, &source, all).filter(|(row, _)| row.applies()) {
+                        Some((row, placement)) if shows(&annotation.body, &row.item.kind) => {
+                            if thread_notes.get(row.item.id.as_str()).is_some_and(|(kept, _)| *kept != annotation.id) {
+                                return false;
+                            }
+                            update(annotation, row, &style.symbols);
+                            annotation.source = Some(source_on(row, placement));
+                            true
+                        }
+                        Some(_) => {
+                            redrawn = true;
+                            !redraw
+                        }
+                        None => false,
                     }
-                    None => false,
-                },
+                }
             };
-            if !keep && let Some(item) = source.item() {
+            if !keep
+                && !redrawn
+                && let Some(item) = source.item()
+            {
                 removed.push(item.to_owned());
             }
             keep
@@ -1011,7 +1135,13 @@ pub fn import(
     let template = drawing.sheets.get(sheet).map(|s| s.template.as_str()).unwrap_or("");
     let style = crate::library::template(template).style_file();
     // Items already on the drawing stay where they are and are not drawn twice.
-    let present = shown(drawing);
+    let present: BTreeSet<&str> = drawing
+        .sheets
+        .iter()
+        .flat_map(|sheet| &sheet.annotations)
+        .filter_map(|annotation| row_of(annotation.source.as_ref()?, rows))
+        .map(|row| row.item.id.as_str())
+        .collect();
     let candidates: Vec<&ViewContext> = views
         .iter()
         .filter(|v| !v.pictorial)
@@ -1062,7 +1192,7 @@ pub fn import(
     for pass in [Pass::Distances, Pass::Sizes, Pass::Rest] {
         planner.pass = pass;
         for row in rows {
-            if present.contains_key(&row.item.id) || failed.contains_key(&row.item.id) {
+            if present.contains(row.item.id.as_str()) || failed.contains_key(&row.item.id) {
                 continue;
             }
             if let Err(reason) = planner.row(row, rows) {
@@ -1082,7 +1212,7 @@ pub fn import(
     for row in rows {
         match failed.remove(&row.item.id) {
             Some(reason) => report.unplaced.push(Unplaced { name: row.item.id.clone(), reason }),
-            None if !present.contains_key(&row.item.id) => report.placed.push(row.item.id.clone()),
+            None if !present.contains(row.item.id.as_str()) => report.placed.push(row.item.id.clone()),
             None => {}
         }
     }
@@ -1407,7 +1537,7 @@ pub fn shown(drawing: &Drawing) -> BTreeMap<String, usize> {
     let mut count = BTreeMap::new();
     for annotation in drawing.sheets.iter().flat_map(|s| &s.annotations) {
         let key = match &annotation.source {
-            Some(PmiSource::Item { item }) => item.clone(),
+            Some(PmiSource::Item { item } | PmiSource::Thread { item, .. }) => item.clone(),
             Some(PmiSource::Located { item, datum, micrometres }) => {
                 format!(
                     "{item}: {} from {datum}",

@@ -35,10 +35,6 @@ pub struct Rules {
     pub refuse_proof_reservation: bool,
     /// Delays the next drawing view to exercise native request handling.
     pub drawing_delay: std::time::Duration,
-    /// Lattices and gyroids wait until this is lifted.
-    pub hold_field: bool,
-    /// True while a lattice or gyroid waits on the hold.
-    pub holding_field: bool,
 }
 
 impl Gated {
@@ -64,16 +60,6 @@ impl Gated {
         Ok(())
     }
 
-    fn check_field(&self) {
-        let mut rules = self.rules.lock().unwrap();
-        if rules.hold_field {
-            rules.holding_field = true;
-            self.changed.notify_all();
-            rules = self.changed.wait_while(rules, |r| r.hold_field).unwrap();
-            rules.holding_field = false;
-        }
-    }
-
     fn display(&self, body: BodyId) -> KernelResult<()> {
         let (all, above) = {
             let rules = self.rules.lock().unwrap();
@@ -90,6 +76,9 @@ impl Gated {
     }
 }
 impl Kernel for Gated {
+    fn field_grade(&self, field: GradedField, kind: GradeKind) -> KernelResult<()> {
+        self.inner.field_grade(field, kind)
+    }
     fn edge_drawing(&self, body: BodyId, edge: EdgeId) -> KernelResult<drawing::ViewCurve> {
         self.inner.edge_drawing(body, edge)
     }
@@ -145,11 +134,9 @@ impl Kernel for Gated {
         self.inner.shell(tag, body, open, thickness)
     }
     fn lattice(&self, tag: &OpTag, body: BodyId, params: &Lattice) -> KernelResult<OpResult> {
-        self.check_field();
         self.inner.lattice(tag, body, params)
     }
     fn gyroid(&self, tag: &OpTag, body: BodyId, params: &Gyroid) -> KernelResult<OpResult> {
-        self.check_field();
         self.inner.gyroid(tag, body, params)
     }
     fn export_field_stl(&self, body: BodyId) -> KernelResult<FieldExport> {

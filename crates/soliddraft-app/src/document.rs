@@ -150,6 +150,7 @@ pub enum ViewItem {
     Feature(FeatureId),
     Plane(PlaneKind),
     Axis(AxisKind),
+    Body(u32),
 }
 
 impl ViewItem {
@@ -158,6 +159,7 @@ impl ViewItem {
             ViewItem::Feature(id) => model::view::ViewItem::Feature(model_id(id)),
             ViewItem::Plane(plane) => model::view::ViewItem::Plane(plane.to_model()),
             ViewItem::Axis(axis) => model::view::ViewItem::Axis(axis.to_model()),
+            ViewItem::Body(key) => model::view::ViewItem::Body(key),
         }
     }
 }
@@ -286,6 +288,148 @@ impl EndKind {
     }
 }
 
+/// Where an extrusion or cut starts, as its From choice offers it.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub enum StartKind {
+    /// On the sketch plane.
+    #[default]
+    SketchPlane,
+    /// On a reference plane or planar face parallel to the sketch, once one is picked.
+    Surface(Option<model::PlaneRef>),
+    /// On the plane through a vertex, once one is picked.
+    Vertex(Option<model::VertexRef>),
+    /// On a plane parallel to the sketch plane, `distance` along the first direction, or
+    /// against it when `reverse`.
+    Offset { distance: f64, reverse: bool },
+}
+
+impl StartKind {
+    pub fn label(&self) -> &'static str {
+        match self {
+            StartKind::SketchPlane => "Sketch plane",
+            StartKind::Surface(_) => "Surface/Face/Plane",
+            StartKind::Vertex(_) => "Vertex",
+            StartKind::Offset { .. } => "Offset",
+        }
+    }
+
+    /// The model's start, or why the form cannot apply yet.
+    pub fn to_model(&self) -> Result<Option<model::ExtrudeStart>, String> {
+        match self {
+            StartKind::SketchPlane => Ok(None),
+            StartKind::Surface(Some(plane)) => Ok(Some(model::ExtrudeStart::Surface { plane: plane.clone() })),
+            StartKind::Surface(None) => Err("Pick the face or plane the extrusion starts from".into()),
+            StartKind::Vertex(Some(vertex)) => Ok(Some(model::ExtrudeStart::Vertex { vertex: vertex.clone() })),
+            StartKind::Vertex(None) => Err("Pick the vertex the extrusion starts from".into()),
+            StartKind::Offset { distance, reverse } => {
+                Ok(Some(model::ExtrudeStart::Offset { distance: *distance, reverse: *reverse }))
+            }
+        }
+    }
+
+    fn from_model(start: Option<&model::ExtrudeStart>) -> StartKind {
+        match start {
+            None => StartKind::SketchPlane,
+            Some(model::ExtrudeStart::Surface { plane }) => StartKind::Surface(Some(plane.clone())),
+            Some(model::ExtrudeStart::Vertex { vertex }) => StartKind::Vertex(Some(vertex.clone())),
+            Some(model::ExtrudeStart::Offset { distance, reverse }) => {
+                StartKind::Offset { distance: *distance, reverse: *reverse }
+            }
+        }
+    }
+
+    /// True while the start waits for a pick in the viewport.
+    pub fn picking(&self) -> bool {
+        matches!(self, StartKind::Surface(None) | StartKind::Vertex(None))
+    }
+}
+
+/// An extrusion's or cut's Direction 2: how far it also goes against the first direction.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Direction2 {
+    pub end: EndKind,
+    pub depth: f64,
+}
+
+impl Default for Direction2 {
+    fn default() -> Self {
+        Direction2 { end: EndKind::Blind, depth: 10.0 }
+    }
+}
+
+/// The choices an extrusion and a cut share past their first direction: From,
+/// Direction 2, Thin feature and Selected contours.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct ExtrudeChoices {
+    #[serde(default, skip_serializing_if = "is_sketch_plane")]
+    pub from: StartKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub direction2: Option<Direction2>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thin: Option<model::ThinFeature>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub contours: Vec<model::Contour>,
+}
+
+fn is_sketch_plane(start: &StartKind) -> bool {
+    *start == StartKind::SketchPlane
+}
+
+fn yes() -> bool {
+    true
+}
+
+fn is_yes(value: &bool) -> bool {
+    *value
+}
+
+impl ExtrudeChoices {
+    /// True when none is set: the extrusion builds as it did before these choices.
+    pub fn is_default(&self) -> bool {
+        *self == ExtrudeChoices::default()
+    }
+
+    /// The model's options, or why the form cannot apply yet.
+    pub fn to_model(&self) -> Result<model::ExtrudeOptions, String> {
+        let direction2 = match &self.direction2 {
+            Some(d) if matches!(d.end, EndKind::UpToFace(None)) => {
+                return Err("Pick the face Direction 2 goes up to".into());
+            }
+            Some(d) => Some(d.end.to_model(d.depth)),
+            None => None,
+        };
+        Ok(model::ExtrudeOptions {
+            from: self.from.to_model()?,
+            direction2,
+            thin: self.thin,
+            contours: self.contours.clone(),
+        })
+    }
+
+    /// The options as the model reads, with a start still to pick kept as the
+    /// sketch plane, as a missing Up to face keeps the depth.
+    fn to_model_lenient(&self) -> model::ExtrudeOptions {
+        model::ExtrudeOptions {
+            from: self.from.to_model().ok().flatten(),
+            direction2: self.direction2.as_ref().map(|d| d.end.to_model(d.depth)),
+            thin: self.thin,
+            contours: self.contours.clone(),
+        }
+    }
+
+    fn from_model(options: &model::ExtrudeOptions) -> ExtrudeChoices {
+        ExtrudeChoices {
+            from: StartKind::from_model(options.from.as_ref()),
+            direction2: options.direction2.as_ref().map(|end| {
+                let (end, depth) = EndKind::from_model(end);
+                Direction2 { end, depth: depth.unwrap_or(10.0) }
+            }),
+            thin: options.thin,
+            contours: options.contours.clone(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ExtrudeParams {
     /// The sketch to extrude; when `None`, the built-in profile on `plane`.
@@ -300,6 +444,12 @@ pub struct ExtrudeParams {
     /// The Draft option: side faces tapered from the sketch plane.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub draft: Option<ExtrudeDraft>,
+    /// Merge result: join the body the extrusion grows from. Off starts a new body.
+    #[serde(default = "yes", skip_serializing_if = "is_yes")]
+    pub merge: bool,
+    /// From, Direction 2, Thin feature and Selected contours.
+    #[serde(default, skip_serializing_if = "ExtrudeChoices::is_default")]
+    pub choices: ExtrudeChoices,
 }
 
 impl Default for ExtrudeParams {
@@ -312,6 +462,8 @@ impl Default for ExtrudeParams {
             flip: false,
             end: EndKind::Blind,
             draft: None,
+            merge: true,
+            choices: ExtrudeChoices::default(),
         }
     }
 }
@@ -329,11 +481,22 @@ pub struct CutParams {
     /// The Draft option: the cut's walls tapered from the sketch plane.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub draft: Option<ExtrudeDraft>,
+    /// From, Direction 2, Thin feature and Selected contours.
+    #[serde(default, skip_serializing_if = "ExtrudeChoices::is_default")]
+    pub choices: ExtrudeChoices,
 }
 
 impl CutParams {
     pub fn new(sketch: FeatureId) -> Self {
-        CutParams { sketch, depth: 10.0, through_all: true, flip: false, up_to: None, draft: None }
+        CutParams {
+            sketch,
+            depth: 10.0,
+            through_all: true,
+            flip: false,
+            up_to: None,
+            draft: None,
+            choices: ExtrudeChoices::default(),
+        }
     }
 
     /// Where the cut stops.
@@ -380,6 +543,95 @@ impl ChamferParams {
     }
 }
 
+/// Which tab is active in the Hole Wizard property panel.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum HoleWizardTab {
+    /// Hole type, standard, size, fit, end condition, options, tolerances.
+    #[default]
+    Type,
+    /// Placement face and inline editable position sketch.
+    Positions,
+}
+
+/// Which geometric pick the Hole Wizard is currently awaiting from the viewport.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HolePickTarget {
+    /// Pick a planar target face for Up To Surface / Offset From Surface.
+    Surface,
+    /// Pick a vertex for Up To Vertex.
+    Vertex,
+}
+
+/// A target end condition chosen before its target was picked. The panel keeps showing
+/// the chosen mode, and OK is refused, until a pick in the viewport resolves it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum UnresolvedEnd {
+    UpToVertex,
+    UpToSurface,
+    OffsetFromSurface { offset: f64, reverse_offset: bool },
+}
+
+impl UnresolvedEnd {
+    /// The pick that resolves it.
+    pub fn pick(self) -> HolePickTarget {
+        match self {
+            Self::UpToVertex => HolePickTarget::Vertex,
+            Self::UpToSurface | Self::OffsetFromSurface { .. } => HolePickTarget::Surface,
+        }
+    }
+
+    /// Why OK is refused until the target is picked.
+    pub fn refusal(self) -> &'static str {
+        match self {
+            Self::UpToVertex => "pick the vertex Up To Vertex ends at",
+            Self::UpToSurface => "pick the face Up To Surface ends at",
+            Self::OffsetFromSurface { .. } => "pick the face Offset From Surface is measured from",
+        }
+    }
+
+    /// The end condition with its picked target face, for the face modes.
+    pub fn with_face(self, face: FaceRef) -> Option<model::hole_wizard::HoleEndCondition> {
+        match self {
+            Self::UpToVertex => None,
+            Self::UpToSurface => Some(model::hole_wizard::HoleEndCondition::UpToSurface { face }),
+            Self::OffsetFromSurface { offset, reverse_offset } => {
+                Some(model::hole_wizard::HoleEndCondition::OffsetFromSurface { face, offset, reverse_offset })
+            }
+        }
+    }
+}
+
+/// Inline draft parameters for creating a linear point pattern in the position sketch.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct HoleLinearPatternDraft {
+    pub count_x: u32,
+    pub spacing_x: f64,
+    pub count_y: u32,
+    pub spacing_y: f64,
+}
+
+impl Default for HoleLinearPatternDraft {
+    fn default() -> Self {
+        Self { count_x: 2, spacing_x: 20.0, count_y: 2, spacing_y: 20.0 }
+    }
+}
+
+/// Inline draft parameters for creating a circular bolt-circle pattern in the position sketch.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct HoleCircularPatternDraft {
+    pub center_u: f64,
+    pub center_v: f64,
+    pub radius: f64,
+    pub count: u32,
+    pub start_angle_deg: f64,
+}
+
+impl Default for HoleCircularPatternDraft {
+    fn default() -> Self {
+        Self { center_u: 0.0, center_v: 0.0, radius: 15.0, count: 4, start_angle_deg: 0.0 }
+    }
+}
+
 /// A hole's parameters as its editor holds them: the face may not be picked yet.
 #[derive(Clone, Debug, PartialEq)]
 pub struct HoleParams {
@@ -392,6 +644,30 @@ pub struct HoleParams {
     pub head: Option<soliddraft_kernel_api::HoleHead>,
     /// A cosmetic thread in the main wall.
     pub thread: Option<model::thread::HoleThread>,
+    /// Hole Wizard specification (`None` for legacy quick-bar plain/tapped holes until
+    /// any Hole Wizard control is touched).
+    pub wizard: Option<model::hole_wizard::HoleWizardSpec>,
+    /// Active tab in the Hole Wizard panel.
+    pub wizard_tab: HoleWizardTab,
+    /// Existing absorbed position sketch id when editing a Hole Wizard feature.
+    pub sketch_feature: Option<FeatureId>,
+    /// Editable position sketch driving hole centre points (including dimensions,
+    /// relations, and linear/circular sketch patterns).
+    pub position_sketch: Option<sketch::Sketch>,
+    /// Active viewport pick target (surface/vertex end condition), if any.
+    pub picking_target: Option<HolePickTarget>,
+    /// A target end condition chosen before its target was picked.
+    pub unresolved_end: Option<UnresolvedEnd>,
+    /// Text field for naming a new favorite preset.
+    pub favorite_name: String,
+    /// Currently selected callout parameter in the Tolerance/Precision section.
+    pub selected_callout_param: model::hole_wizard::CalloutParam,
+    /// Show custom sizing override fields in the Hole Specifications section.
+    pub show_custom_sizing: bool,
+    /// Draft inputs for inline linear point pattern generator.
+    pub lin_pat: HoleLinearPatternDraft,
+    /// Draft inputs for inline circular point pattern generator.
+    pub circ_pat: HoleCircularPatternDraft,
 }
 
 impl Default for HoleParams {
@@ -404,25 +680,326 @@ impl Default for HoleParams {
             tip: soliddraft_kernel_api::HoleTip::Cone { angle_deg: 118.0 },
             head: None,
             thread: None,
+            wizard: None,
+            wizard_tab: HoleWizardTab::Type,
+            sketch_feature: None,
+            position_sketch: None,
+            picking_target: None,
+            unresolved_end: None,
+            favorite_name: String::new(),
+            selected_callout_param: model::hole_wizard::CalloutParam::Diameter,
+            show_custom_sizing: false,
+            lin_pat: HoleLinearPatternDraft::default(),
+            circ_pat: HoleCircularPatternDraft::default(),
         }
     }
 }
 
 impl HoleParams {
-    pub fn to_model(&self) -> Result<model::HoleFeature, String> {
+    /// Initializes `HoleParams` from an existing [`model::HoleFeature`] and optional
+    /// absorbed position sketch.
+    pub fn from_model(h: &model::HoleFeature, sketch_body: Option<sketch::Sketch>) -> Self {
+        let mut params = Self {
+            face: Some(h.face.clone()),
+            points: h.points.clone(),
+            diameter: h.diameter,
+            depth: h.specified_depth().unwrap_or(h.depth),
+            tip: h.tip,
+            head: h.head,
+            thread: h.thread.clone(),
+            wizard: h.wizard.clone(),
+            sketch_feature: h.sketch.map(app_id),
+            position_sketch: sketch_body,
+            show_custom_sizing: h.wizard.as_ref().is_some_and(|w| w.custom_sizing),
+            ..Self::default()
+        };
+        if params.position_sketch.is_some() {
+            params.sync_points_from_sketch();
+        }
+        params
+    }
+
+    /// The Hole Wizard specification these values amount to: an ISO hole of the type the
+    /// head and thread imply, marked as custom sizing when the values are not that size's
+    /// table values. The wizard panel shows it before the person first touches the wizard.
+    pub fn derived_wizard(&self) -> model::hole_wizard::HoleWizardSpec {
+        let hole_type = if self.thread.is_some() {
+            model::hole_wizard::HoleType::StraightTap
+        } else if matches!(self.head, Some(soliddraft_kernel_api::HoleHead::Counterbore { .. })) {
+            model::hole_wizard::HoleType::Counterbore
+        } else if matches!(self.head, Some(soliddraft_kernel_api::HoleHead::Countersink { .. })) {
+            model::hole_wizard::HoleType::Countersink
+        } else {
+            model::hole_wizard::HoleType::Simple
+        };
+        let mut spec = model::hole_wizard::HoleWizardSpec::new(model::hole_wizard::HoleStandard::Iso, hole_type);
+        spec.end_condition = match self.depth {
+            soliddraft_kernel_api::HoleDepth::Through => model::hole_wizard::HoleEndCondition::ThroughAll,
+            soliddraft_kernel_api::HoleDepth::Blind { depth } => model::hole_wizard::HoleEndCondition::Blind { depth },
+        };
+        let table = spec.resolve_defaults();
+        spec.custom_sizing = table.diameter != self.diameter || table.head != self.head;
+        spec
+    }
+
+    /// Ensures the Hole Wizard specification is populated, from [`Self::derived_wizard`]
+    /// when absent.
+    pub fn ensure_wizard(&mut self) -> &mut model::hole_wizard::HoleWizardSpec {
+        if self.wizard.is_none() {
+            self.wizard = Some(self.derived_wizard());
+        }
+        self.wizard.as_mut().expect("wizard initialized")
+    }
+
+    /// Applies the active wizard table's default dimensions to `diameter`, `head`, `tip`,
+    /// `thread`, and `slot_length`.
+    pub fn apply_wizard_defaults(&mut self) {
+        let Some(wizard) = self.wizard.as_mut() else { return };
+        let resolved = wizard.resolve_defaults();
+        self.diameter = resolved.diameter;
+        self.tip = resolved.tip;
+        self.head = resolved.head;
+        let prev_len = self.thread.as_ref().and_then(|t| t.length);
+        self.thread = resolved.thread.map(|mut t| {
+            t.length = prev_len;
+            t
+        });
+        wizard.slot_length = resolved.slot_length;
+        wizard.custom_sizing = false;
+    }
+
+    /// Restores default table dimensions and clears custom sizing overrides.
+    pub fn restore_wizard_defaults(&mut self) {
+        self.apply_wizard_defaults();
+    }
+
+    /// Ensures an editable position sketch exists, seeded from `self.points`.
+    pub fn ensure_position_sketch(&mut self) -> &mut sketch::Sketch {
+        if self.position_sketch.is_none() {
+            let mut sk = sketch::Sketch::new();
+            for p in &self.points {
+                sk.add(sketch::EntityKind::Point { p: *p }, false);
+            }
+            sketch::solve::solve(&mut sk, None, true);
+            self.position_sketch = Some(sk);
+        }
+        self.position_sketch.as_mut().expect("position sketch initialized")
+    }
+
+    /// Extracts all non-construction `Point` entities from `position_sketch` into `points`.
+    pub fn sync_points_from_sketch(&mut self) {
+        let Some(sk) = &self.position_sketch else { return };
+        let pts: Vec<sketch::P2> = sk
+            .entities
+            .iter()
+            .filter(|e| e.id != sketch::ORIGIN && !e.construction)
+            .filter_map(|e| match e.kind {
+                sketch::EntityKind::Point { p } => Some(p),
+                _ => None,
+            })
+            .collect();
+        self.points = pts;
+    }
+
+    /// Adds a hole point to the position sketch (or `points` when no sketch is active).
+    pub fn add_position_point(&mut self, p: sketch::P2) {
+        if let Some(sk) = &mut self.position_sketch {
+            sk.add(sketch::EntityKind::Point { p }, false);
+            sketch::solve::solve(sk, None, true);
+            self.sync_points_from_sketch();
+        } else {
+            self.points.push(p);
+        }
+    }
+
+    /// Removes the `idx`-th hole point from the position sketch (or `points`).
+    pub fn remove_position_point(&mut self, idx: usize) {
+        if let Some(sk) = &mut self.position_sketch {
+            let ids: Vec<sketch::EntityId> = sk
+                .entities
+                .iter()
+                .filter(|e| e.id != sketch::ORIGIN && !e.construction)
+                .filter_map(|e| matches!(e.kind, sketch::EntityKind::Point { .. }).then_some(e.id))
+                .collect();
+            if ids.len() > 1
+                && let Some(&eid) = ids.get(idx)
+            {
+                sk.remove_entity(eid);
+                sketch::solve::solve(sk, None, true);
+                self.sync_points_from_sketch();
+            }
+        } else if self.points.len() > 1 && idx < self.points.len() {
+            self.points.remove(idx);
+        }
+    }
+
+    /// Updates coordinates of the `idx`-th point in the position sketch (or `points`).
+    pub fn set_position_point(&mut self, idx: usize, p: sketch::P2) {
+        if let Some(sk) = &mut self.position_sketch {
+            let ids: Vec<sketch::EntityId> = sk
+                .entities
+                .iter()
+                .filter(|e| e.id != sketch::ORIGIN && !e.construction)
+                .filter_map(|e| matches!(e.kind, sketch::EntityKind::Point { .. }).then_some(e.id))
+                .collect();
+            if let Some(&eid) = ids.get(idx)
+                && let Some(ent) = sk.entities.iter_mut().find(|e| e.id == eid)
+            {
+                ent.kind = sketch::EntityKind::Point { p };
+                sketch::solve::solve(
+                    sk,
+                    Some(sketch::solve::Drag { point: sketch::PointRef::new(eid, 0), to: p }),
+                    true,
+                );
+                self.sync_points_from_sketch();
+            }
+        } else if let Some(slot) = self.points.get_mut(idx) {
+            *slot = p;
+        }
+    }
+
+    /// Generates an editable linear point pattern inside the position sketch, anchored on
+    /// the last point (or `(0, 0)`).
+    pub fn apply_linear_point_pattern(&mut self) -> Result<(), String> {
+        let draft = self.lin_pat;
+        if draft.count_x == 0 || draft.count_y == 0 || draft.count_x.saturating_mul(draft.count_y) < 2 {
+            return Err("Linear pattern needs at least 2 points".into());
+        }
+        let sk = self.ensure_position_sketch();
+        let seed_id = sk
+            .entities
+            .iter()
+            .rev()
+            .find(|e| e.id != sketch::ORIGIN && !e.construction && matches!(e.kind, sketch::EntityKind::Point { .. }))
+            .map(|e| e.id)
+            .unwrap_or_else(|| sk.add(sketch::EntityKind::Point { p: sketch::P2::ZERO }, false));
+        let second = (draft.count_y > 1).then_some(sketch::tools::PatternDirection {
+            step: sketch::P2::new(0.0, draft.spacing_y),
+            count: draft.count_y,
+        });
+        sk.apply_operation(&sketch::tools::Operation::Pattern {
+            entities: vec![seed_id],
+            spec: sketch::tools::PatternSpec::Linear {
+                step: sketch::P2::new(draft.spacing_x, 0.0),
+                count: draft.count_x,
+                second,
+            },
+            skipped: vec![],
+        })
+        .map_err(|e| e.to_string())?;
+        sketch::solve::solve(sk, None, true);
+        self.sync_points_from_sketch();
+        Ok(())
+    }
+
+    /// Generates an editable circular bolt-circle point pattern inside the position sketch.
+    pub fn apply_circular_point_pattern(&mut self) -> Result<(), String> {
+        let draft = self.circ_pat;
+        if draft.count < 2 || !(draft.radius.is_finite() && draft.radius > 0.0) {
+            return Err("Circular pattern needs a positive radius and at least 2 holes".into());
+        }
+        let sk = self.ensure_position_sketch();
+        let center = sketch::P2::new(draft.center_u, draft.center_v);
+        let rad = draft.start_angle_deg.to_radians();
+        let first = sketch::P2::new(center.u + draft.radius * rad.cos(), center.v + draft.radius * rad.sin());
+        let seed_id = sk.add(sketch::EntityKind::Point { p: first }, false);
+        sk.apply_operation(&sketch::tools::Operation::Pattern {
+            entities: vec![seed_id],
+            spec: sketch::tools::PatternSpec::Circular {
+                center,
+                angle_degrees: 360.0,
+                count: draft.count,
+                total_angle: true,
+            },
+            skipped: vec![],
+        })
+        .map_err(|e| e.to_string())?;
+        sketch::solve::solve(sk, None, true);
+        self.sync_points_from_sketch();
+        Ok(())
+    }
+
+    /// Applies a saved [`model::hole_wizard::HoleFavorite`] preset.
+    pub fn apply_favorite(&mut self, fav: &model::hole_wizard::HoleFavorite) {
+        self.wizard = Some(fav.spec.clone());
+        self.depth = fav.spec.legacy_depth();
+        self.apply_wizard_defaults();
+        if fav.spec.custom_sizing {
+            if let Some(d) = fav.custom_diameter {
+                self.diameter = d;
+            }
+            if let Some(h) = fav.custom_head {
+                self.head = Some(h);
+            }
+            if let Some(t) = fav.custom_tip {
+                self.tip = t;
+            }
+            if let Some(th) = &fav.custom_thread {
+                self.thread = Some(th.clone());
+            }
+            if let Some(w) = self.wizard.as_mut() {
+                w.custom_sizing = true;
+            }
+            self.show_custom_sizing = true;
+        }
+    }
+
+    /// Captures the current Hole Wizard setup as a named [`model::hole_wizard::HoleFavorite`].
+    pub fn to_favorite(&mut self, name: String) -> model::hole_wizard::HoleFavorite {
+        let spec = self.ensure_wizard().clone();
+        model::hole_wizard::HoleFavorite {
+            name,
+            custom_diameter: spec.custom_sizing.then_some(self.diameter),
+            custom_head: if spec.custom_sizing { self.head } else { None },
+            custom_tip: spec.custom_sizing.then_some(self.tip),
+            custom_thread: if spec.custom_sizing { self.thread.clone() } else { None },
+            spec,
+        }
+    }
+
+    /// Builds a model [`model::HoleFeature`] for preview (inline points without needing
+    /// an uncommitted sketch feature in the forked preview document).
+    pub fn to_preview_model(&self) -> Result<model::HoleFeature, String> {
+        if let Some(end) = self.unresolved_end {
+            return Err(end.refusal().to_owned());
+        }
+        let points = if let Some(sk) = &self.position_sketch {
+            sk.entities
+                .iter()
+                .filter(|e| e.id != sketch::ORIGIN && !e.construction)
+                .filter_map(|e| match e.kind {
+                    sketch::EntityKind::Point { p } => Some(p),
+                    _ => None,
+                })
+                .collect()
+        } else {
+            self.points.clone()
+        };
+        let depth = self.wizard.as_ref().map_or(self.depth, |w| w.legacy_depth());
         let hole = model::HoleFeature {
             face: self.face.clone().ok_or("pick the face the holes start on")?,
-            points: self.points.clone(),
+            points,
             diameter: self.diameter,
-            depth: self.depth,
+            depth,
             tip: self.tip,
             head: self.head,
             thread: self.thread.clone(),
+            sketch: None,
+            wizard: self.wizard.clone(),
         };
+        if let Some(reason) = hole.wizard.as_ref().and_then(|w| w.coming_soon_refusal()) {
+            return Err(reason.to_owned());
+        }
         match hole.thread_problem() {
             Some(problem) => Err(problem),
             None => Ok(hole),
         }
+    }
+
+    pub fn to_model(&self) -> Result<model::HoleFeature, String> {
+        let mut hole = self.to_preview_model()?;
+        hole.sketch = self.sketch_feature.map(model_id);
+        Ok(hole)
     }
 
     /// Taps the holes with `thread`, or makes them plain, and drills them with the
@@ -508,6 +1085,11 @@ impl Default for ExtrudeDraft {
     fn default() -> Self {
         ExtrudeDraft { angle: 3.0, outward: false }
     }
+}
+
+/// True for a feature that makes or changes a solid: not a sketch or a reference plane.
+fn makes_solid(kind: &model::FeatureKind) -> bool {
+    !matches!(kind, model::FeatureKind::Sketch(_) | model::FeatureKind::ReferencePlane(_))
 }
 
 /// A plane's label for people.
@@ -613,6 +1195,7 @@ impl FeatureKind {
             FeatureKind::Revolve(r) => Some(app_id(r.sketch)),
             FeatureKind::Sweep(s) => Some(app_id(s.sketch)),
             FeatureKind::Cut(p) => Some(p.sketch),
+            FeatureKind::Hole(h) => h.sketch.map(app_id),
             _ => None,
         }
     }
@@ -633,6 +1216,7 @@ impl FeatureKind {
                 operation: model::ExtrudeOp::Boss,
                 end: p.end.to_model(p.depth),
                 reverse: p.flip,
+                options: p.choices.to_model_lenient(),
             }),
             FeatureKind::Cut(p) => model::FeatureKind::Extrude(model::ExtrudeFeature {
                 profile: model::ProfileSource::Sketch { feature: model_id(p.sketch) },
@@ -640,6 +1224,7 @@ impl FeatureKind {
                 end: p.end().to_model(p.depth),
                 // The model sweeps along the sketch normal; a cut goes into the face.
                 reverse: !p.flip,
+                options: p.choices.to_model_lenient(),
             }),
             FeatureKind::Fillet(p) => model::FeatureKind::Fillet(p.blend()),
             FeatureKind::Chamfer(p) => model::FeatureKind::Chamfer(p.blend()),
@@ -658,8 +1243,8 @@ impl FeatureKind {
             }
             FeatureKind::ImportStep(i) => model::FeatureKind::ImportStep(i.clone()),
             FeatureKind::Scan(s) => model::FeatureKind::Scan(s.clone()),
-            FeatureKind::Lattice(l) => model::FeatureKind::Lattice(*l),
-            FeatureKind::Gyroid(g) => model::FeatureKind::Gyroid(*g),
+            FeatureKind::Lattice(l) => model::FeatureKind::Lattice(l.clone()),
+            FeatureKind::Gyroid(g) => model::FeatureKind::Gyroid(g.clone()),
         }
     }
 
@@ -705,6 +1290,7 @@ impl FeatureKind {
                             flip: !e.reverse,
                             up_to: None,
                             draft: None,
+                            choices: ExtrudeChoices::from_model(&e.options),
                         };
                         cut.set_end(end);
                         FeatureKind::Cut(cut)
@@ -715,6 +1301,7 @@ impl FeatureKind {
                             depth,
                             flip: e.reverse,
                             end,
+                            choices: ExtrudeChoices::from_model(&e.options),
                             ..Default::default()
                         })
                     }
@@ -727,6 +1314,8 @@ impl FeatureKind {
                             flip: e.reverse,
                             end,
                             draft: None,
+                            merge: true,
+                            choices: ExtrudeChoices::from_model(&e.options),
                         })
                     }
                 }
@@ -751,8 +1340,8 @@ impl FeatureKind {
             }
             model::FeatureKind::ImportStep(i) => FeatureKind::ImportStep(i.clone()),
             model::FeatureKind::Scan(s) => FeatureKind::Scan(s.clone()),
-            model::FeatureKind::Lattice(l) => FeatureKind::Lattice(*l),
-            model::FeatureKind::Gyroid(g) => FeatureKind::Gyroid(*g),
+            model::FeatureKind::Lattice(l) => FeatureKind::Lattice(l.clone()),
+            model::FeatureKind::Gyroid(g) => FeatureKind::Gyroid(g.clone()),
         }
     }
 }
@@ -1021,23 +1610,33 @@ impl Feature {
                 Some(other) => format!("{} × {} mm", fmt_mm(c.distance), fmt_mm(other)),
                 None => format!("{} mm", fmt_mm(c.distance)),
             },
-            FeatureKind::Hole(h) => match &h.thread {
-                Some(thread) => format!("{} × {}", h.points.len(), thread.designation()),
-                None => format!("{} × Ø{}", h.points.len(), fmt_mm(h.diameter)),
-            },
+            FeatureKind::Hole(h) => {
+                if let Some(w) = &h.wizard {
+                    let count = h.points.len().max(1);
+                    match &h.thread {
+                        Some(thread) => format!("{count} × {} ({})", thread.designation(), w.standard.label()),
+                        None => format!("{count} × {} {} {}", w.standard.label(), w.size, w.hole_type.short_label()),
+                    }
+                } else {
+                    match &h.thread {
+                        Some(thread) => format!("{} × {}", h.points.len(), thread.designation()),
+                        None => format!("{} × Ø{}", h.points.len(), fmt_mm(h.diameter)),
+                    }
+                }
+            }
             FeatureKind::Pattern(p) => match p.layout {
                 model::PatternSpec::Linear { spacing, count, .. } => format!("{count} × {} mm", fmt_mm(spacing)),
                 model::PatternSpec::Circular { count, angle, .. } => format!("{count} × {}°", fmt_mm(angle)),
             },
             FeatureKind::Mirror(m) => plane_ref_label(&m.plane),
             FeatureKind::Draft(d) => format!("{}°", fmt_mm(d.angle)),
-            FeatureKind::Shell(s) => format!("{} mm wall", fmt_mm(s.thickness)),
+            FeatureKind::Shell(s) => format!("{} wall", wall_thickness_text(&s.thickness)),
             FeatureKind::Offset(s) => format!("{} mm", fmt_mm(s.distance)),
             FeatureKind::Thicken(s) => format!(
-                "{} {}, {} mm",
+                "{} {}, {}",
                 s.faces.len(),
                 if s.faces.len() == 1 { "face" } else { "faces" },
-                fmt_mm(s.thickness)
+                wall_thickness_text(&s.thickness)
             ),
             FeatureKind::ImportStep(i) => i.source_name.clone(),
             FeatureKind::Scan(s) => format!(
@@ -1192,6 +1791,8 @@ pub enum Command {
     ActivateConfiguration {
         name: String,
     },
+    /// Edits the part's parameters or configurations in one undo step.
+    EditParameters(model::configs::Edit),
     /// Replaces the whole configuration table as one step.
     SetConfigurationGrid {
         grid: Box<model::configs::Grid>,
@@ -1241,6 +1842,17 @@ pub enum Command {
         params: ExtrudeParams,
         via_assistant: bool,
     },
+    /// Adds a revolve. One that does not merge its result starts a new body.
+    AddRevolve {
+        revolve: model::RevolveFeature,
+        merge: bool,
+    },
+    /// Replaces a revolve's definition and its Merge result.
+    EditRevolve {
+        id: FeatureId,
+        revolve: model::RevolveFeature,
+        merge: bool,
+    },
     EditExtrude {
         id: FeatureId,
         params: ExtrudeParams,
@@ -1268,6 +1880,19 @@ pub enum Command {
     },
     /// Adds a hole, pattern, mirror or draft.
     AddFeature(FeatureKind),
+    /// Adds an absorbed position sketch and a Hole Wizard feature referencing it as one
+    /// undoable step.
+    AddHoleWithSketch {
+        sketch: Sketch,
+        hole: model::HoleFeature,
+    },
+    /// Edits a hole and stores its position sketch in one undoable step.
+    EditHoleWithSketch {
+        id: FeatureId,
+        sketch_id: FeatureId,
+        sketch: Sketch,
+        hole: model::HoleFeature,
+    },
     ImportBodies(Vec<model::ImportStepFeature>),
     /// Moves every import of one file to a replacement file and every reference into
     /// those imports to the new file's faces, as one step.
@@ -1315,6 +1940,7 @@ impl Command {
             Command::AddConfiguration { .. }
             | Command::SetConfigurationValue { .. }
             | Command::ActivateConfiguration { .. } => "Configuration".into(),
+            Command::EditParameters(_) => "Edit parameters".into(),
             Command::SetConfigurationGrid { .. } => "Configuration grid".into(),
             Command::SetValue { .. } => "Set value".into(),
             Command::LinkSketchValues { .. } => "Link values".into(),
@@ -1325,6 +1951,8 @@ impl Command {
             Command::RemoveValue { .. } => "Delete global".into(),
             Command::AddExtrude { .. } => "Add extrude".into(),
             Command::EditExtrude { .. } => "Edit extrude".into(),
+            Command::AddRevolve { .. } => "Add revolve".into(),
+            Command::EditRevolve { .. } => "Edit revolve".into(),
             Command::AddCut { .. } => "Add cut".into(),
             Command::EditCut { .. } => "Edit cut".into(),
             Command::AddFillet { .. } => "Add fillet".into(),
@@ -1332,6 +1960,8 @@ impl Command {
             Command::AddChamfer { .. } => "Add chamfer".into(),
             Command::EditChamfer { .. } => "Edit chamfer".into(),
             Command::AddFeature(kind) => format!("Add {}", kind.noun()),
+            Command::AddHoleWithSketch { .. } => "Add hole".into(),
+            Command::EditHoleWithSketch { .. } => "Edit hole".into(),
             Command::ImportBodies(_) => "Import bodies".into(),
             Command::ReplaceImportFile(_) => "Replace imported file".into(),
             Command::EditFeature { kind, .. } => format!("Edit {}", kind.noun()),
@@ -2655,6 +3285,17 @@ impl Document {
         self.model.live_bodies().into_iter().find(|(key, _)| *key == self.active_body).map(|(_, body)| body)
     }
 
+    /// Stable body keys and kernel ids of the geometry currently on screen.
+    pub(crate) fn display_bodies(&self) -> Vec<(u32, BodyId)> {
+        if (self.model.is_dirty() || self.has_model_failure() || self.proof_failure.is_some())
+            && let Some(proved) = &self.last_proved
+        {
+            proved.model.live_bodies()
+        } else {
+            self.model.live_bodies()
+        }
+    }
+
     /// The running body before feature `index`.
     pub fn body_before(&self, index: usize) -> Option<BodyId> {
         self.features.get(index).and_then(|f| self.model.body_before(model_id(f.id)))
@@ -2816,9 +3457,11 @@ impl Document {
         let edited = match &command {
             Command::EditFeature { id, .. }
             | Command::EditExtrude { id, .. }
+            | Command::EditRevolve { id, .. }
             | Command::EditCut { id, .. }
             | Command::EditFillet { id, .. }
-            | Command::EditChamfer { id, .. } => Some(*id),
+            | Command::EditChamfer { id, .. }
+            | Command::EditHoleWithSketch { id, .. } => Some(*id),
             _ => None,
         };
         self.execute_command(command, false, Some(edited))
@@ -2937,7 +3580,9 @@ impl Document {
     }
 
     fn to_model(&self, command: Command) -> Result<Vec<model::Command>, String> {
-        let add = |kind: model::FeatureKind, via_assistant: bool| {
+        // A feature joins the body of its sketch, or the active body. One that does not
+        // merge its result starts a new body when that body already has a solid.
+        let add_merged = |kind: model::FeatureKind, via_assistant: bool, merge: bool| {
             let sketch = match &kind {
                 model::FeatureKind::Extrude(model::ExtrudeFeature {
                     profile: model::ProfileSource::Sketch { feature },
@@ -2947,7 +3592,10 @@ impl Document {
                 model::FeatureKind::Sweep(s) => Some(s.sketch),
                 _ => None,
             };
-            let body = sketch.and_then(|id| self.model.feature(id)).map_or(self.active_body, |f| f.body);
+            let mut body = sketch.and_then(|id| self.model.feature(id)).map_or(self.active_body, |f| f.body);
+            if !merge && self.model.features().iter().any(|f| f.body == body && makes_solid(&f.kind)) {
+                body = self.model.next_body();
+            }
             if body != 0 {
                 model::Command::AddFeatureInBody {
                     body,
@@ -2964,6 +3612,7 @@ impl Document {
                 }
             }
         };
+        let add = |kind: model::FeatureKind, via_assistant: bool| add_merged(kind, via_assistant, true);
         let edit =
             |id: FeatureId, kind: &FeatureKind| model::Command::EditFeature { id: model_id(id), kind: kind.to_model() };
         Ok(match command {
@@ -2973,6 +3622,7 @@ impl Document {
                 vec![model::Command::SetConfigurationValue { configuration, name, expression }]
             }
             Command::ActivateConfiguration { name } => vec![model::Command::ActivateConfiguration { name }],
+            Command::EditParameters(edit) => vec![model::Command::EditParameters { edit }],
             Command::SetConfigurationGrid { grid } => vec![model::Command::SetConfigurationGrid { grid }],
             Command::SetValue { name, expression } => vec![model::Command::SetValue { name, expression }],
             Command::LinkSketchValues { id, constraints, name, value } => {
@@ -3000,19 +3650,39 @@ impl Document {
                 vec![edit(id, &FeatureKind::Sketch(SketchFeature { plane: s.plane.clone(), sketch }))]
             }
             Command::AddExtrude { params, via_assistant } => {
-                let draft = params.draft;
-                let base = vec![add(FeatureKind::Extrude(params).to_model(), via_assistant)];
+                params.choices.to_model()?;
+                let (draft, merge) = (params.draft, params.merge);
+                let base = vec![add_merged(FeatureKind::Extrude(params).to_model(), via_assistant, merge)];
                 self.with_draft_option(base, None, draft)?
             }
             Command::EditExtrude { id, params } => {
+                params.choices.to_model()?;
                 let draft = params.draft;
-                self.with_draft_option(vec![edit(id, &FeatureKind::Extrude(params))], Some(id), draft)?
+                // The Draft option moves with its extrusion, unless the edit removes it.
+                let mut base = self.merge_commands(id, params.merge);
+                if draft.is_none()
+                    && let Some(linked) = self.linked_draft(id)
+                {
+                    base.retain(|c| !matches!(c, model::Command::MoveToBody { id, .. } if *id == model_id(linked)));
+                }
+                base.push(edit(id, &FeatureKind::Extrude(params)));
+                self.with_draft_option(base, Some(id), draft)?
+            }
+            Command::AddRevolve { revolve, merge } => {
+                vec![add_merged(FeatureKind::Revolve(revolve).to_model(), false, merge)]
+            }
+            Command::EditRevolve { id, revolve, merge } => {
+                let mut commands = self.merge_commands(id, merge);
+                commands.push(edit(id, &FeatureKind::Revolve(revolve)));
+                commands
             }
             Command::AddCut { params } => {
+                params.choices.to_model()?;
                 let draft = params.draft;
                 self.with_draft_option(vec![add(FeatureKind::Cut(params).to_model(), false)], None, draft)?
             }
             Command::EditCut { id, params } => {
+                params.choices.to_model()?;
                 let draft = params.draft;
                 self.with_draft_option(vec![edit(id, &FeatureKind::Cut(params))], Some(id), draft)?
             }
@@ -3021,6 +3691,42 @@ impl Document {
             Command::AddChamfer { params } => vec![add(FeatureKind::Chamfer(params).to_model(), false)],
             Command::EditChamfer { id, params } => vec![edit(id, &FeatureKind::Chamfer(params))],
             Command::AddFeature(kind) => vec![add(kind.to_model(), false)],
+            Command::AddHoleWithSketch { mut sketch, mut hole } => {
+                sketch::solve::solve(&mut sketch, None, true);
+                let sketch_id = self.model.next_feature_id();
+                hole.sketch = Some(sketch_id);
+                let sk_kind = model::FeatureKind::Sketch(model::SketchFeature {
+                    plane: model::SketchPlane::Face { face: hole.face.clone() },
+                    sketch,
+                });
+                vec![add(sk_kind, false), add(model::FeatureKind::Hole(hole), false)]
+            }
+            Command::EditHoleWithSketch { id, sketch_id, mut sketch, mut hole } => {
+                sketch::solve::solve(&mut sketch, None, true);
+                let sk_kind = model::FeatureKind::Sketch(model::SketchFeature {
+                    plane: model::SketchPlane::Face { face: hole.face.clone() },
+                    sketch,
+                });
+                let id = model_id(id);
+                let sketch_id = model_id(sketch_id);
+                let position = self.model.index_of(id).ok_or("The hole no longer exists")?;
+                let feature = &self.model.features()[position];
+                let model::FeatureKind::Hole(previous) = &feature.kind else {
+                    return Err("The feature is no longer a hole".into());
+                };
+                let sketch_command = match previous.sketch {
+                    Some(saved) if saved == sketch_id => model::Command::EditFeature { id: sketch_id, kind: sk_kind },
+                    None if sketch_id == self.model.next_feature_id() => model::Command::AddFeatureInBody {
+                        body: feature.body,
+                        via_assistant: false,
+                        kind: sk_kind,
+                        position: Some(position),
+                    },
+                    _ => return Err("The hole's position sketch has changed".into()),
+                };
+                hole.sketch = Some(sketch_id);
+                vec![sketch_command, model::Command::EditFeature { id, kind: model::FeatureKind::Hole(hole) }]
+            }
             Command::ImportBodies(imports) => {
                 if imports.is_empty() {
                     return Err("The file contains no solid bodies.".into());
@@ -3186,6 +3892,14 @@ impl Document {
                     (model::FeatureKind::Thicken(s), EntityRef::Face(face)) => {
                         *s.faces.get_mut(index).ok_or("no such reference")? = face;
                     }
+                    (
+                        model::FeatureKind::Lattice(model::LatticeFeature { radius_mm: Some(grade), .. }),
+                        EntityRef::Face(face),
+                    )
+                    | (model::FeatureKind::Gyroid(model::GyroidFeature { level: grade, .. }), EntityRef::Face(face)) => {
+                        let faces = grade.picked_faces_mut().ok_or("no such reference")?;
+                        *faces.get_mut(index).ok_or("no such reference")? = face;
+                    }
                     (model::FeatureKind::Shell(s), EntityRef::Face(face)) => {
                         let model::ShellOpenings::Faces(faces) = &mut s.open_faces else {
                             return Err("no such reference".into());
@@ -3206,6 +3920,22 @@ impl Document {
                     }
                     (model::FeatureKind::Extrude(e), EntityRef::Face(face)) if index == 0 => {
                         e.end = model::EndCondition::UpToFace { face };
+                    }
+                    (model::FeatureKind::Extrude(e), EntityRef::Face(face)) if index == 1 => {
+                        e.options.from = Some(model::ExtrudeStart::Surface { plane: model::PlaneRef::Face { face } });
+                    }
+                    (model::FeatureKind::Extrude(e), EntityRef::Plane { plane, .. }) if index == 1 => {
+                        let plane = match plane {
+                            model::SketchPlane::Datum { datum, offset } => model::PlaneRef::Datum { datum, offset },
+                            model::SketchPlane::Feature { feature, offset: 0.0 } => {
+                                model::PlaneRef::Feature { feature }
+                            }
+                            _ => return Err("choose a reference plane or a planar face".into()),
+                        };
+                        e.options.from = Some(model::ExtrudeStart::Surface { plane });
+                    }
+                    (model::FeatureKind::Extrude(e), EntityRef::Face(face)) if index == 2 => {
+                        e.options.direction2 = Some(model::EndCondition::UpToFace { face });
                     }
                     _ => return Err("the replacement is the wrong kind of entity".into()),
                 }
@@ -3411,6 +4141,61 @@ impl Document {
                 _ => {}
             }
         }
+        // An extrusion reads its Merge result back from the body it is in.
+        let merged: Vec<(FeatureId, bool)> = self
+            .features
+            .iter()
+            .filter(|f| matches!(f.kind, FeatureKind::Extrude(_)))
+            .map(|f| (f.id, self.merges(f.id)))
+            .collect();
+        for (id, merge) in merged {
+            if let Some(FeatureKind::Extrude(p)) = self.features.iter_mut().find(|f| f.id == id).map(|f| &mut f.kind) {
+                p.merge = merge;
+            }
+        }
+    }
+
+    /// Whether feature `id` adds to a body that features before it made: the Merge
+    /// result of an extrusion or revolve. The first solid feature of a body starts it,
+    /// so it merges into nothing.
+    pub fn merges(&self, id: FeatureId) -> bool {
+        let features = self.model.features();
+        let Some(i) = features.iter().position(|f| f.id == model_id(id)) else { return false };
+        let body = features[i].body;
+        features[..i].iter().any(|f| f.body == body && makes_solid(&f.kind))
+    }
+
+    /// The body a feature at tree position `index` would merge into: the body of the
+    /// nearest solid feature above it, or none when no feature above made a solid.
+    fn merge_target(&self, index: usize) -> Option<u32> {
+        self.model.features()[..index.min(self.model.features().len())]
+            .iter()
+            .rev()
+            .find(|f| makes_solid(&f.kind))
+            .map(|f| f.body)
+    }
+
+    /// The commands that give feature `id` and its Draft option the Merge result
+    /// `merge`: none when it already has it, else a move to a new body, or into the
+    /// body the nearest solid feature above it is in.
+    fn merge_commands(&self, id: FeatureId, merge: bool) -> Vec<model::Command> {
+        if merge == self.merges(id) {
+            return Vec::new();
+        }
+        let Some(index) = self.model.index_of(model_id(id)) else { return Vec::new() };
+        let body = if merge {
+            match self.merge_target(index) {
+                Some(body) => body,
+                None => return Vec::new(),
+            }
+        } else {
+            self.model.next_body()
+        };
+        let mut moves = vec![model::Command::MoveToBody { id: model_id(id), body }];
+        if let Some(draft) = self.linked_draft(id) {
+            moves.push(model::Command::MoveToBody { id: model_id(draft), body });
+        }
+        moves
     }
 
     /// The draft that is feature `id`'s Draft option, if it has one.
@@ -3706,6 +4491,9 @@ impl Document {
     /// as a STEP surface model imported as it is, is named a surface body, and one built
     /// within a stated tolerance an approximate body.
     pub fn body_name(&self, key: u32) -> String {
+        if let Some(name) = self.model.visibility().body_name(key) {
+            return name.to_owned();
+        }
         if self
             .model
             .live_bodies()
@@ -3730,6 +4518,17 @@ impl Document {
             (false, true, false) => format!("Surface body {}", key + 1),
             (false, false, true) => format!("Approximate body {}", key + 1),
             (false, true, true) => format!("Approximate surface body {}", key + 1),
+        }
+    }
+
+    pub fn set_body_name(&mut self, key: u32, name: &str) {
+        if !self.display_bodies().iter().any(|(body, _)| *body == key) {
+            return;
+        }
+        let name = name.trim();
+        if self.model.visibility().body_name(key).unwrap_or_default() != name {
+            self.model.set_body_name(key, name);
+            self.touch();
         }
     }
 
@@ -3854,6 +4653,12 @@ impl Document {
         self.model.material(self.model.active_configuration())
     }
 
+    /// The effective material of one solid body in the configuration shown: its own, or
+    /// the part's when it has none.
+    pub fn body_material(&self, body: u32) -> Option<&soliddraft_materials::Material> {
+        self.model.body_material(body, self.model.active_configuration())
+    }
+
     fn material_scope(&self) -> soliddraft_document::ConfigScope {
         match self.model.active_configuration() {
             Some(id) => soliddraft_document::ConfigScope::Only(vec![id.clone()]),
@@ -3861,34 +4666,77 @@ impl Document {
         }
     }
 
-    /// The assignment owned by the current configuration, or the part default.
-    /// None in a configuration means it inherits a broader assignment.
-    pub fn material_assignment(&self) -> Option<&soliddraft_materials::MaterialId> {
+    /// The assignment owned by the current configuration for a part or body.
+    pub fn material_assignment_for(&self, body: Option<u32>) -> Option<&soliddraft_materials::MaterialId> {
         let scope = self.material_scope();
-        self.model
-            .materials()
-            .material
-            .iter()
-            .find(|assignment| assignment.scope == scope)
-            .map(|assignment| &assignment.material)
+        self.model.materials().material.iter().find(|a| a.body == body && a.scope == scope).map(|a| &a.material)
+    }
+
+    /// The part assignment owned by the current configuration.
+    pub fn material_assignment(&self) -> Option<&soliddraft_materials::MaterialId> {
+        self.material_assignment_for(None)
     }
 
     /// Assigns a material to the current configuration, or sets the part default.
-    /// Clearing a configuration assignment restores its inherited material.
     pub fn set_material(
         &mut self,
         material: Option<soliddraft_materials::Material>,
         default_appearance: Option<Appearance>,
     ) -> Result<(), String> {
+        self.set_material_for(None, material, default_appearance)
+    }
+
+    /// Assigns or clears the material for the part or one body.
+    pub fn set_material_for(
+        &mut self,
+        body: Option<u32>,
+        material: Option<soliddraft_materials::Material>,
+        default_appearance: Option<Appearance>,
+    ) -> Result<(), String> {
         self.void_appearance_gesture();
         let scope = self.material_scope();
-        self.model
-            .execute(model::Command::SetMaterial { material, default_appearance, scope })
-            .map_err(|e| e.to_string())?;
+        let command = match body {
+            Some(body) => model::Command::SetBodyMaterial { body, material, default_appearance, scope },
+            None => model::Command::SetMaterial { material, default_appearance, scope },
+        };
+        self.model.execute(command).map_err(|e| e.to_string())?;
         self.touch();
         self.apply_appearances();
         self.mesh_version += 1;
         Ok(())
+    }
+
+    /// The part's named display states.
+    pub fn display_states(&self) -> &soliddraft_document::display_state::DisplayStates<model::PartDisplay> {
+        &self.model.materials().display_states
+    }
+
+    /// The state selected for the current configuration.
+    pub fn display_state(&self) -> Option<&soliddraft_document::display_state::DisplayState<model::PartDisplay>> {
+        self.display_states().selected(self.model.active_configuration())
+    }
+
+    /// Saves a display state edit and refreshes the viewport.
+    pub fn change_display_states(
+        &mut self,
+        states: soliddraft_document::display_state::DisplayStates<model::PartDisplay>,
+    ) -> Result<(), String> {
+        self.void_appearance_gesture();
+        self.model.execute(model::Command::SetDisplayStates { states: Box::new(states) }).map_err(|e| e.to_string())?;
+        self.touch();
+        self.apply_appearances();
+        self.mesh_version += 1;
+        Ok(())
+    }
+
+    /// The kernel handles of bodies the selected display state hides.
+    pub fn hidden_display_bodies(&self) -> Vec<BodyId> {
+        let Some(state) = self.display_state().filter(|s| !s.view.hidden.is_empty()) else { return Vec::new() };
+        self.model
+            .live_bodies()
+            .into_iter()
+            .filter_map(|(key, body)| state.view.hidden.contains(&key).then_some(body))
+            .collect()
     }
 
     /// Applies an appearance as one undo entry, and ends any preview.
@@ -3898,7 +4746,22 @@ impl Document {
         appearance: Option<Appearance>,
     ) -> Result<(), String> {
         self.appearance_preview = None;
-        let scope = soliddraft_document::ConfigScope::All;
+        if let Some(mut display) = self.display_state().cloned() {
+            display.view.paint(target, appearance);
+            let mut states = self.display_states().clone();
+            states.put(display)?;
+            return self.change_display_states(states);
+        }
+        self.set_base_appearance(target, appearance, soliddraft_document::ConfigScope::All)
+    }
+
+    pub(crate) fn set_base_appearance(
+        &mut self,
+        target: model::AppearanceTarget,
+        appearance: Option<Appearance>,
+        scope: soliddraft_document::ConfigScope,
+    ) -> Result<(), String> {
+        self.appearance_preview = None;
         let result =
             self.model.execute(model::Command::SetAppearance { target, appearance, scope }).map_err(|e| e.to_string());
         if result.is_ok() {
@@ -3966,6 +4829,11 @@ impl Document {
     /// The appearance shown now, preview included: on `face`, or with `None` what a
     /// face without an appearance of its own or its feature's shows.
     pub fn shown_appearance(&self, face: Option<FaceId>) -> Appearance {
+        self.shown_appearance_at(face, None)
+    }
+
+    /// The displayed appearance of a face, body or the whole part.
+    pub fn shown_appearance_at(&self, face: Option<FaceId>, body: Option<u32>) -> Appearance {
         let configuration = self.model.active_configuration();
         let mut table = match self.appearance_preview() {
             Some((target, appearance)) => self.model.appearance_table_previewing(configuration, target, appearance),
@@ -3973,13 +4841,21 @@ impl Document {
         };
         match face {
             Some(id) => table.of(id).clone(),
+            None if body.is_some() => table.of_body(body.unwrap()).clone(),
             None => table.appearances.swap_remove(0),
         }
     }
 
     /// True when `target` has an appearance of its own applied, not one it inherits.
     pub fn has_own_appearance(&self, target: &model::AppearanceTarget) -> bool {
-        self.model.materials().appearances.iter().any(|a| a.target.same_place(target))
+        if let Some(display) = self.display_state() {
+            return display.view.appearances.iter().any(|(place, _)| place.same_place(target));
+        }
+        self.model
+            .materials()
+            .appearances
+            .iter()
+            .any(|a| a.target.same_place(target) && a.scope == soliddraft_document::ConfigScope::All)
     }
 
     /// Fills each display mesh's appearance table and per-vertex index from the part's
@@ -4562,8 +5438,10 @@ impl Document {
     /// Preview an analytic shell through the same kernel operation as a committed feature.
     pub fn preview_shell(&self, shell: &model::ShellFeature, before: Option<BodyId>) -> Result<Preview, String> {
         let body = before.ok_or("nothing to shell yet")?;
+        shell.check_thickness()?;
         if shell.open_faces.is_all() {
-            self.kernel().shell_all_faces(body, shell.thickness).map_err(|error| error.to_string())?;
+            let thickness = shell.thickness.constant().expect("validated all-faces thickness");
+            self.kernel().shell_all_faces(body, thickness).map_err(|error| error.to_string())?;
             return Ok(Preview {
                 result: Some(Arc::default()),
                 tool: None,
@@ -4583,7 +5461,7 @@ impl Document {
             .collect::<Result<Vec<_>, _>>()?;
         let result = self
             .kernel()
-            .shell(&OpTag::new("preview"), body, &faces, shell.thickness)
+            .shell_with_grade(&OpTag::new("preview"), body, &faces, wall_grade(&shell.thickness)?)
             .map_err(|error| error.to_string())?;
         if let Some(refusal) = model::shell_refusal(&result) {
             let _ = self.kernel().release(result.body);
@@ -4609,8 +5487,11 @@ impl Document {
             .iter()
             .map(|f| self.model.resolve_face(f, body).map_err(|r| r.message))
             .collect::<Result<Vec<_>, _>>()?;
-        let params = soliddraft_kernel_api::Thicken { faces, thickness: thicken.thickness, side: thicken.side };
-        let result = self.kernel().thicken(&OpTag::new("preview"), body, &params).map_err(plain_kernel_error)?;
+        thicken.thickness.check_thickness()?;
+        let result = self
+            .kernel()
+            .thicken_with_grade(&OpTag::new("preview"), body, faces, wall_grade(&thicken.thickness)?, thicken.side)
+            .map_err(plain_kernel_error)?;
         let mesh = self.mesh_of(result.body);
         let _ = self.kernel().release(result.body);
         Ok(Preview { result: Some(mesh?), tool: None, removes: false, guides: Default::default() })
@@ -4740,6 +5621,25 @@ impl Document {
             return None;
         }
         self.picks.iter().position(|p| matches!(p, PickEntry::Edge(_, e) if *e == edge)).map(|i| i as u32 + 1)
+    }
+
+    /// A persistent name for a picked corner: the faces that meet at it. None when the
+    /// part on screen is not the exact body or the corner cannot be named.
+    pub fn vertex_ref(&self, key: VertexKey) -> Option<model::VertexRef> {
+        if !self.current_exact_display() {
+            return None;
+        }
+        let at = self.vertex_position(key)?;
+        let body = self.display_body()?;
+        let topology = self.model.kernel().topology(body).ok()?;
+        let distance = |v: &soliddraft_kernel_api::VertexInfo| {
+            Vec3::new(v.position.x as f32, v.position.y as f32, v.position.z as f32).distance(at)
+        };
+        let nearest = topology.vertices.iter().min_by(|a, b| distance(a).total_cmp(&distance(b)))?;
+        if distance(nearest) > 1e-3 {
+            return None;
+        }
+        self.model.vertex_ref(nearest.id).ok()
     }
 
     pub fn vertex_position(&self, key: VertexKey) -> Option<Vec3> {
@@ -4898,7 +5798,11 @@ impl Document {
                         details.push(("Face".to_owned(), h.face.label.clone()));
                         details.push(("Holes".to_owned(), h.points.len().to_string()));
                         details.push(("Diameter".to_owned(), format!("{} mm", fmt_mm(h.diameter))));
-                        details.push(("Depth".to_owned(), hole_depth_text(&h.depth, &h.tip)));
+                        let depth = h.specified_depth().map_or_else(
+                            || h.wizard.as_ref().map_or_else(String::new, |w| w.end_condition.label().to_owned()),
+                            |depth| hole_depth_text(&depth, &h.tip),
+                        );
+                        details.push(("Depth".to_owned(), depth));
                         if let Some(head) = &h.head {
                             details.push(("Head".to_owned(), hole_head_text(head)));
                         }
@@ -4926,7 +5830,9 @@ impl Document {
                     }
                     FeatureKind::Lattice(l) => {
                         // A constant lattice keeps the rows it always had; a grade is shown.
-                        if let Some(radius @ soliddraft_kernel_api::Grade::Linear(_)) = &l.radius_mm {
+                        if let Some(radius) = &l.radius_mm
+                            && radius.constant().is_none()
+                        {
                             details.push(("Beam radius, controls density".to_owned(), grade_text(radius, " mm")));
                         }
                         details.push(("Accuracy".to_owned(), format!("{} mm", fmt_mm(l.accuracy_mm))));
@@ -4934,9 +5840,9 @@ impl Document {
                     }
                     FeatureKind::Gyroid(g) => {
                         details.push(("Period".to_owned(), format!("{} mm", fmt_mm(g.period_mm))));
-                        let level = match g.level {
-                            soliddraft_kernel_api::Grade::Constant(v) => fmt_mm(v),
-                            graded => grade_text(&graded, ""),
+                        let level = match &g.level {
+                            soliddraft_kernel_api::Grade::Constant(v) => fmt_mm(*v),
+                            graded => grade_text(graded, ""),
                         };
                         details.push(("Level".to_owned(), level));
                         details.push(("Accuracy".to_owned(), format!("{} mm", fmt_mm(g.accuracy_mm))));
@@ -5366,6 +6272,16 @@ fn view_status(
                             let label = d.faces.get(index as usize).map(|f| f.label.clone()).unwrap_or_default();
                             (index as usize, RefKind::Face, label)
                         }
+                        (model::ReferenceSlot::Face { index }, model::FeatureKind::Lattice(l)) => {
+                            let faces = l.radius_mm.as_ref().map_or(&[][..], |g| g.picked_faces());
+                            let label = faces.get(index as usize).map(|f| f.label.clone()).unwrap_or_default();
+                            (index as usize, RefKind::Face, label)
+                        }
+                        (model::ReferenceSlot::Face { index }, model::FeatureKind::Gyroid(g)) => {
+                            let label =
+                                g.level.picked_faces().get(index as usize).map(|f| f.label.clone()).unwrap_or_default();
+                            (index as usize, RefKind::Face, label)
+                        }
                         (model::ReferenceSlot::Plane, model::FeatureKind::Draft(d)) => {
                             (d.faces.len(), RefKind::Face, plane_ref_label(&d.neutral))
                         }
@@ -5408,10 +6324,27 @@ fn view_status(
                             };
                             (0, RefKind::Face, label)
                         }
+                        (model::ReferenceSlot::Start, model::FeatureKind::Extrude(e)) => {
+                            let label = match &e.options.from {
+                                Some(model::ExtrudeStart::Surface { plane }) => plane_ref_label(plane),
+                                Some(model::ExtrudeStart::Vertex { vertex }) => vertex.label.clone(),
+                                _ => String::new(),
+                            };
+                            (1, RefKind::Face, label)
+                        }
+                        (model::ReferenceSlot::SecondLimit, model::FeatureKind::Extrude(e)) => {
+                            let label = match &e.options.direction2 {
+                                Some(model::EndCondition::UpToFace { face }) => face.label.clone(),
+                                _ => String::new(),
+                            };
+                            (2, RefKind::Face, label)
+                        }
                         (
                             model::ReferenceSlot::SketchPlane
                             | model::ReferenceSlot::Plane
                             | model::ReferenceSlot::Limit
+                            | model::ReferenceSlot::Start
+                            | model::ReferenceSlot::SecondLimit
                             | model::ReferenceSlot::Pull,
                             _,
                         ) => (0, RefKind::Face, String::new()),
@@ -5603,13 +6536,44 @@ pub fn fmt_mm(v: f64) -> String {
 
 /// A field grade as the user entered it, each number exact: "1 mm", or
 /// "1 mm to 2 mm along z from 20 to 30 mm".
-pub fn grade_text(grade: &soliddraft_kernel_api::Grade, unit: &str) -> String {
+pub fn grade_text(grade: &model::FieldGrade, unit: &str) -> String {
+    use soliddraft_kernel_api::{Grade, GradeFaces};
+    let point = |p: &[f64; 3]| format!("({}, {}, {})", p[0], p[1], p[2]);
     match grade {
-        soliddraft_kernel_api::Grade::Constant(v) => format!("{v}{unit}"),
-        soliddraft_kernel_api::Grade::Linear(l) => {
+        Grade::Constant(v) => format!("{v}{unit}"),
+        Grade::Linear(l) => {
             format!("{}{unit} to {}{unit} along {} from {} to {} mm", l.start, l.end, l.axis.name(), l.from, l.to)
         }
+        Grade::Distance(d) => {
+            let from = match &d.faces {
+                GradeFaces::Skin => "the skin".to_owned(),
+                GradeFaces::Picked(faces) if faces.len() == 1 => faces[0].label.clone(),
+                GradeFaces::Picked(faces) => format!("{} faces", faces.len()),
+            };
+            format!("{}{unit} at {from} to {}{unit} at {} mm from it", d.near, d.far, d.span)
+        }
+        Grade::Radial(r) => format!(
+            "{}{unit} to {}{unit} at {} to {} mm from the {} axis through {}",
+            r.start,
+            r.end,
+            r.from,
+            r.to,
+            r.axis.name(),
+            point(&r.through)
+        ),
+        Grade::Point(p) => {
+            format!("{}{unit} to {}{unit} at {} to {} mm from {}", p.start, p.end, p.from, p.to, point(&p.centre))
+        }
     }
+}
+
+/// A wall thickness for a kernel request: it names no faces.
+fn wall_grade(grade: &model::FieldGrade) -> Result<soliddraft_kernel_api::Grade, String> {
+    grade.faceless().ok_or_else(|| "Wall thickness is a constant or a linear grade.".to_owned())
+}
+
+pub(crate) fn wall_thickness_text(grade: &model::FieldGrade) -> String {
+    grade.constant().map_or_else(|| grade_text(grade, " mm"), |value| format!("{} mm", fmt_mm(value)))
 }
 
 fn plain_kernel_error(error: soliddraft_kernel_api::KernelError) -> String {
@@ -5632,8 +6596,8 @@ impl Document {
 
     /// Removes an item of manufacturing information, as one undo entry.
     pub fn remove_pmi(&mut self, id: &str) -> Result<(), String> {
-        if let Some((_, hole, _)) = self.model.thread_items().into_iter().find(|(item, _, _)| item.id == id) {
-            let hole = self.model.feature(hole).map_or_else(|| "its hole".to_owned(), |f| f.name.clone());
+        if let Some(stated) = self.model.thread_items().into_iter().find(|stated| stated.item.id == id) {
+            let hole = self.model.feature(stated.feature).map_or_else(|| "its hole".to_owned(), |f| f.name.clone());
             return Err(format!("{id} is the thread of {hole}: change the thread in {hole}."));
         }
         self.run_pmi("", vec![model::Command::RemovePmiItem { id: id.to_owned() }])

@@ -165,23 +165,77 @@
         ],
         "radius": 0.01
       },
-      "refused": "Spline display limit (SD-DISPLAY-01)",
-      "same_geometry_as_step": 3,
       "checks": [
         {
           "pointer": "/summary/body/faces",
-          "equals": 6
+          "equals": 7
+        },
+        {
+          "pointer": "/summary/features/3/name",
+          "equals": "Fillet1"
+        },
+        {
+          "pointer": "/summary/edit_state/display_ready",
+          "equals": true
+        },
+        {
+          "pointer": "/summary/edit_state/proved_revision",
+          "same_as": {
+            "pointer": "/summary/edit_state/requested_revision"
+          }
+        },
+        {
+          "pointer": "/summary/edit_state/displayed_revision",
+          "same_as": {
+            "pointer": "/summary/edit_state/requested_revision"
+          }
+        },
+        {
+          "pointer": "/summary/edit_state/answered_within_bound",
+          "absent": true
+        },
+        {
+          "pointer": "/summary/edit_state/display_only_bound",
+          "absent": true
+        },
+        {
+          "pointer": "/summary/features/3/display_answer",
+          "absent": true
+        },
+        {
+          "pointer": "/summary/features/3/status",
+          "equals": "ok"
+        }
+      ]
+    },
+    {
+      "tool": "edit_fillet",
+      "arguments": {
+        "feature": "Fillet1",
+        "radius": 0
+      },
+      "refused": "radius must be greater than 0",
+      "same_geometry_as_step": 4,
+      "checks": [
+        {
+          "pointer": "/summary/features",
+          "same_as_step": 4
+        },
+        {
+          "pointer": "/summary/undo",
+          "same_as_step": 4
         }
       ]
     },
     {
       "tool": "undo",
-      "arguments": {}
+      "arguments": {},
+      "same_geometry_as_step": 3
     },
     {
       "tool": "redo",
       "arguments": {},
-      "same_geometry_as_step": 3
+      "same_geometry_as_step": 4
     },
     {
       "tool": "save",
@@ -198,7 +252,7 @@
         "path": "{bundle}/loft-fillet.dwprt"
       },
       "fresh_process": true,
-      "same_geometry_as_step": 3,
+      "same_geometry_as_step": 4,
       "exports": [
         {
           "format": "step",

@@ -274,6 +274,23 @@ fn click_button(harness: &mut App<'_>, label: &str) {
         "Exit" if harness.state().state.in_sketch() => "Close sketch",
         _ => label,
     };
+    if harness.query_all_by_role_and_label(egui::accesskit::Role::Button, label).next().is_none() {
+        // The strip has no room for this tool's card: it is in its group's More menu.
+        let menus: Vec<String> = harness
+            .query_all_by_role(egui::accesskit::Role::Button)
+            .filter_map(|n| egui_kittest::kittest::NodeT::accesskit_node(&n).label().map(|l| l.to_string()))
+            .filter(|l| l.starts_with("More ") && l.ends_with(" tools"))
+            .collect();
+        for menu in menus {
+            harness.get_by_label(&menu).click();
+            harness.run_steps(8);
+            if harness.query_all_by_role_and_label(egui::accesskit::Role::Button, label).next().is_some() {
+                break;
+            }
+            harness.key_press(egui::Key::Escape);
+            harness.run_steps(8);
+        }
+    }
     harness
         .get_all_by_role_and_label(egui::accesskit::Role::Button, label)
         .next()
@@ -643,6 +660,8 @@ fn bracket_by_hand_saved_reopened_rebuilt_and_repaired() {
         assert_eq!(plane.origin, soliddraft_kernel_api::Vec3::ZERO, "slot starts coplanar with the flange");
     }
     harness.key_press(Key::S);
+    harness.run_steps(3);
+    harness.get_by_label("Run Slot").click();
     harness.run_steps(2);
     sketch_click(&mut harness, P2::new(26.0, 38.0));
     sketch_click(&mut harness, P2::new(54.0, 38.0));

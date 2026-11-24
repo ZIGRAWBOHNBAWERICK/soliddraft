@@ -15,8 +15,8 @@ use crate::commands::{self, Agents, CommandSpec};
 use crate::document::EdgeRef;
 use crate::document::{
     ChamferParams, Command, CutParams, Document, EndKind, ExtrudeParams, FeatureId, FeatureKind, FeatureStatus,
-    FilletParams, PlaneKind, Preview, Selection, SketchPlane, VertexKey, fmt_mm, hole_depth_text, hole_head_text,
-    plane_ref_label,
+    FilletParams, PlaneKind, Preview, Selection, SketchPlane, VertexKey, fmt_mm, grade_text, hole_depth_text,
+    hole_head_text, plane_ref_label, wall_thickness_text,
 };
 use crate::sketch::{self, ConstraintKind, EntityKind, P2, PointRef, Sketch};
 use glam::Vec3;
@@ -456,11 +456,11 @@ pub enum Line {
     /// Offsets every face by a signed distance.
     Offset { distance: f64 },
     /// Builds a solid from selected faces.
-    Thicken { faces: Vec<String>, thickness: f64, side: soliddraft_kernel_api::ThickenSide },
+    Thicken { faces: Vec<String>, thickness: soliddraft_model::FieldGrade, side: soliddraft_kernel_api::ThickenSide },
     /// Changes an offset distance.
     EditOffset { feature: String, distance: f64 },
     /// Changes thickness and side, retaining selected faces.
-    EditThicken { feature: String, thickness: f64, side: soliddraft_kernel_api::ThickenSide },
+    EditThicken { feature: String, thickness: soliddraft_model::FieldGrade, side: soliddraft_kernel_api::ThickenSide },
     /// Hollows the part, leaving named faces open.
     Shell {
         /// Faces left open; empty requests a closed shell.
@@ -468,8 +468,8 @@ pub enum Line {
         /// Opens every face, in place of naming any.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         all_faces: bool,
-        /// Positive wall thickness, mm.
-        thickness: f64,
+        /// Positive constant or linear wall thickness, mm.
+        thickness: soliddraft_model::FieldGrade,
     },
     /// Tilts faces about a neutral plane.
     Draft {
@@ -493,6 +493,9 @@ pub enum Line {
         /// Radius, mm.
         radius: f64,
     },
+    /// A radius correction for the editor's existing picks.
+    #[serde(skip)]
+    RefusedFillet { target: Option<FeatureId>, params: FilletParams },
     /// Bevels edges.
     Chamfer {
         /// Edge names.
@@ -580,8 +583,8 @@ pub enum Line {
     EditShell {
         /// The shell feature's name.
         feature: String,
-        /// Positive wall thickness, mm.
-        thickness: f64,
+        /// Positive constant or linear wall thickness, mm.
+        thickness: soliddraft_model::FieldGrade,
     },
     /// Changes a draft's angle, and optionally its pull direction.
     EditDraft {
@@ -1032,11 +1035,22 @@ pub fn edit_offset_params() -> Vec<(&'static str, Value)> {
     params.extend(offset_params());
     params
 }
+fn thickness_schema() -> Value {
+    let linear = object(&[
+        ("axis", one_of(&["x", "y", "z"], "Part axis")),
+        ("from", number("Start coordinate in mm")),
+        ("to", number("End coordinate in mm")),
+        ("start", number("Positive thickness at the start in mm")),
+        ("end", number("Positive thickness at the end in mm")),
+    ]);
+    any_of(vec![number("Positive thickness in mm"), object(&[("linear", linear)])])
+}
+
 pub fn thicken_params() -> Vec<(&'static str, Value)> {
     vec![
         // The model refuses empty selections so the command journal records the refusal.
         ("faces", array(string("Face name"), "Select at least one face")),
-        ("thickness", number("Thickness in mm, greater than zero")),
+        ("thickness", thickness_schema()),
         ("side", string("front or back")),
     ]
 }
@@ -1051,13 +1065,13 @@ pub fn shell_params() -> Vec<(&'static str, Value)> {
     vec![
         ("open_faces", array(string("A face name"), "Faces left open; empty for a closed shell")),
         ("all_faces", optional(boolean("true opens every face, which leaves nothing; open_faces must then be empty"))),
-        ("thickness", number("Wall thickness, mm, greater than 0")),
+        ("thickness", thickness_schema()),
     ]
 }
 
 /// The `edit_shell` verb's parameters.
 pub fn edit_shell_params() -> Vec<(&'static str, Value)> {
-    vec![feature_param(), ("thickness", number("Wall thickness, mm, greater than 0"))]
+    vec![feature_param(), ("thickness", thickness_schema())]
 }
 
 /// The `draft` verb's parameters.
@@ -1282,6 +1296,13 @@ fn positive(what: &str, v: f64) -> Result<f64, String> {
         return Err(format!("{what} must be at most {MAX_LENGTH_MM} mm, got {v}"));
     }
     Ok(v)
+}
+
+fn shell_thickness(grade: soliddraft_model::FieldGrade) -> Result<soliddraft_model::FieldGrade, String> {
+    for value in grade.endpoints() {
+        positive("wall thickness", value)?;
+    }
+    Ok(grade)
 }
 
 fn feature_names(doc: &Document) -> String {
@@ -1773,6 +1794,7 @@ impl Line {
                     flip: *flip,
                     up_to: end,
                     draft: None,
+                    choices: Default::default(),
                 };
                 run.apply(doc, Command::AddCut { params })?;
             }
@@ -1818,6 +1840,8 @@ impl Line {
                     },
                     head,
                     thread,
+                    sketch: None,
+                    wizard: None,
                 };
                 if let Some(problem) = hole.thread_problem() {
                     return Err(problem);
@@ -1953,7 +1977,7 @@ impl Line {
                     doc,
                     Command::AddFeature(FeatureKind::Thicken(soliddraft_model::ThickenFeature {
                         faces,
-                        thickness: *thickness,
+                        thickness: thickness.clone(),
                         side: *side,
                     })),
                 )?;
@@ -1976,7 +2000,7 @@ impl Line {
                 let Some(FeatureKind::Thicken(mut s)) = doc.feature(id).map(|f| f.kind.clone()) else {
                     return Err(format!("{feature} is not a thicken feature"));
                 };
-                s.thickness = *thickness;
+                s.thickness = thickness.clone();
                 s.side = *side;
                 run.apply(doc, Command::EditFeature { id, kind: FeatureKind::Thicken(s) })?;
             }
@@ -1992,7 +2016,7 @@ impl Line {
                             open_faces.iter().map(|f| face_ref_by_name(doc, f)).collect::<Result<Vec<_>, _>>()?,
                         )
                     },
-                    thickness: positive("wall thickness", *thickness)?,
+                    thickness: shell_thickness(thickness.clone())?,
                 };
                 run.apply(doc, Command::AddFeature(FeatureKind::Shell(shell)))?;
             }
@@ -2011,6 +2035,15 @@ impl Line {
                 let edges = edges.iter().map(|e| edge_ref(doc, e)).collect::<Result<Vec<_>, _>>()?;
                 let params = FilletParams { edges, radius: positive("radius", *radius)? };
                 run.apply(doc, Command::AddFillet { params })?;
+            }
+            Line::RefusedFillet { target, params } => {
+                let mut params = params.clone();
+                params.radius = positive("radius", params.radius)?;
+                let command = match target {
+                    Some(id) => Command::EditFillet { id: *id, params },
+                    None => Command::AddFillet { params },
+                };
+                run.apply(doc, command)?;
             }
             Line::Chamfer { edges, distance, other_distance } => {
                 let edges = edges.iter().map(|e| edge_ref(doc, e)).collect::<Result<Vec<_>, _>>()?;
@@ -2056,10 +2089,10 @@ impl Line {
                 if let Some(d) = diameter {
                     h.diameter = positive("diameter", *d)?;
                 }
-                h.depth = match depth {
+                h.set_depth(match depth {
                     Some(d) => HoleDepth::Blind { depth: positive("depth", *d)? },
                     None => HoleDepth::Through,
-                };
+                });
                 if let Some(c) = countersink {
                     h.head = Some(HoleHead::Countersink {
                         diameter: positive("countersink diameter", c.diameter)?,
@@ -2104,7 +2137,7 @@ impl Line {
                 let Some(FeatureKind::Shell(mut shell)) = doc.feature(id).map(|f| f.kind.clone()) else {
                     return Err(format!("{feature} is not a shell"));
                 };
-                shell.thickness = positive("wall thickness", *thickness)?;
+                shell.thickness = shell_thickness(thickness.clone())?;
                 run.apply(doc, Command::EditFeature { id, kind: FeatureKind::Shell(shell) })?;
             }
             Line::EditDraft { feature, angle, pull, reverse } => {
@@ -2167,6 +2200,7 @@ impl Line {
                 | Line::Sweep(_)
                 | Line::Cut { .. }
                 | Line::Fillet { .. }
+                | Line::RefusedFillet { target: None, .. }
                 | Line::Chamfer { .. }
                 | Line::Hole { .. }
                 | Line::LinearPattern { .. }
@@ -2201,6 +2235,8 @@ impl Line {
             Line::EditRevolve { .. } => "edit_revolve",
             Line::Cut { .. } => "cut",
             Line::Fillet { .. } => "fillet",
+            Line::RefusedFillet { target: None, .. } => "fillet",
+            Line::RefusedFillet { target: Some(_), .. } => "edit_fillet",
             Line::Chamfer { .. } => "chamfer",
             Line::EditExtrude { .. } => "edit_extrude",
             Line::EditCut { .. } => "edit_cut",
@@ -2357,20 +2393,21 @@ impl Line {
             Line::Thicken { faces, thickness, side } => (
                 "Thicken".into(),
                 format!(
-                    "{} {}, {thickness} mm, {side:?}",
+                    "{} {}, {}, {side:?}",
                     faces.len(),
-                    if faces.len() == 1 { "face" } else { "faces" }
+                    if faces.len() == 1 { "face" } else { "faces" },
+                    grade_text(thickness, " mm"),
                 ),
             ),
             Line::EditOffset { feature, distance } => ("Edit offset".into(), format!("{feature}, {distance} mm")),
             Line::EditThicken { feature, thickness, side } => {
-                ("Edit thicken".into(), format!("{feature}, {thickness} mm, {side:?}"))
+                ("Edit thicken".into(), format!("{feature}, {}, {side:?}", grade_text(thickness, " mm")))
             }
             Line::Shell { open_faces, all_faces, thickness } => (
                 "Shell".into(),
                 format!(
-                    "{} mm wall, {}",
-                    fmt_mm(*thickness),
+                    "{} wall, {}",
+                    wall_thickness_text(thickness),
                     if *all_faces {
                         "every face open".into()
                     } else if open_faces.is_empty() {
@@ -2381,7 +2418,7 @@ impl Line {
                 ),
             ),
             Line::EditShell { feature, thickness } => {
-                (format!("Edit {feature}"), format!("{} mm wall", fmt_mm(*thickness)))
+                (format!("Edit {feature}"), format!("{} wall", wall_thickness_text(thickness)))
             }
             Line::Draft { faces, neutral, pull, angle, .. } => (
                 "Draft".into(),
@@ -2444,6 +2481,7 @@ impl Line {
                 (format!("Edit {feature}"), end(*through_all, *depth, *flip))
             }
             Line::EditFillet { feature, radius } => (format!("Edit {feature}"), format!("R{}", fmt_mm(*radius))),
+            Line::RefusedFillet { params, .. } => ("Fillet radius".into(), format!("{} mm", params.radius)),
             Line::EditChamfer { feature, distance, other_distance } => {
                 (format!("Edit {feature}"), format!("{} mm", chamfer_size(*distance, *other_distance)))
             }
@@ -2622,8 +2660,8 @@ pub struct Proposal {
     pub summary: String,
     /// The recipe lines.
     pub lines: Vec<Line>,
-    /// Who proposed it: the user's prompt and the model, or the MCP client.
-    pub origin: Caller,
+    /// Tool caller, or the local refusal assistant.
+    origin: Option<Caller>,
     /// What it does to the part, as rows for the card.
     pub rows: Vec<(String, String)>,
     /// The part as it would be after the proposal.
@@ -2641,8 +2679,9 @@ impl Proposal {
 
     fn origin_text(&self) -> String {
         match &self.origin {
-            Caller::Assistant { prompt, model } => format!("assistant, model {model}, prompt {prompt:?}"),
-            Caller::Mcp { client } => format!("MCP client {client}"),
+            Some(Caller::Assistant { prompt, model }) => format!("assistant, model {model}, prompt {prompt:?}"),
+            Some(Caller::Mcp { client }) => format!("MCP client {client}"),
+            None => "refusal assistant".into(),
         }
     }
 }
@@ -2695,6 +2734,35 @@ impl ProposalBook {
         summary: &str,
         lines: Vec<Line>,
         origin: Caller,
+        preview: bool,
+    ) -> Result<(String, Value), String> {
+        self.propose_from(doc, summary, lines, Some(origin), preview)
+    }
+
+    /// Applies the radius selected in the refusal. The proposal first checks the
+    /// corrected feature and its downstream features on a scratch copy.
+    pub(crate) fn accept_fillet_radius(
+        &mut self,
+        doc: &mut Document,
+        target: Option<FeatureId>,
+        params: FilletParams,
+    ) -> Result<(), String> {
+        let summary = format!("Use {} mm fillet radius", params.radius);
+        let lines = vec![Line::RefusedFillet { target, params }];
+        let (id, _) = self.propose_from(doc, &summary, lines, None, false)?;
+        let result = self.apply(doc, &id).map(|_| ());
+        if result.is_err() {
+            let _ = self.discard(&id);
+        }
+        result
+    }
+
+    fn propose_from(
+        &mut self,
+        doc: &Document,
+        summary: &str,
+        lines: Vec<Line>,
+        origin: Option<Caller>,
         preview: bool,
     ) -> Result<(String, Value), String> {
         if lines.is_empty() {
@@ -3063,7 +3131,11 @@ fn params_json(doc: &Document, kind: &FeatureKind) -> Value {
         FeatureKind::Hole(h) => {
             let mut v = json!({
                 "type": "hole", "face": h.face.label, "holes": h.points.len(), "diameter": h.diameter,
-                "depth": match h.depth { HoleDepth::Blind { depth } => json!(depth), HoleDepth::Through => json!("through") },
+                "depth": match h.specified_depth() {
+                    Some(HoleDepth::Blind { depth }) => json!(depth),
+                    Some(HoleDepth::Through) => json!("through"),
+                    None => json!(h.wizard.as_ref().map(|wizard| wizard.end_condition.label())),
+                },
             });
             if let HoleTip::Cone { angle_deg } = h.tip {
                 v["tip_angle"] = angle_deg.into();

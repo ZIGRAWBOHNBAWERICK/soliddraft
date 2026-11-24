@@ -30,6 +30,7 @@ fn boss_document(name: &str, sketch: Sketch) -> (Document, FeatureId, FeatureId)
                 operation: ExtrudeOp::Boss,
                 end: EndCondition::Blind { depth: 2.0 },
                 reverse: false,
+                options: Default::default(),
             }),
             name: None,
             position: None,

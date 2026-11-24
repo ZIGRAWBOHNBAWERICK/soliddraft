@@ -25,7 +25,7 @@
 //
 // The app draws into one canvas and takes only trusted input: keys and clicks sent as the
 // browser's own, through the DevTools protocol. The canvas has no text to read, so the check
-// reads what the frame drew through the read-only `shown_viewport`, `shown_marks`,
+// reads what the frame drew through the read-only `shown_first_part_frame`,
 // `shown_print_check` and `shown_controls` exports. The Open tile sits at a fixed point of
 // a 1400 x 813 page; commands run through the command palette by name. The fixtures are saved
 // without display data, so each first display is made in the page.
@@ -275,10 +275,15 @@ async function open(v, label, file) {
   await v.load();
   await v.choose(file, () => v.click(OPEN));
   await v.ready(label);
-  const viewport = await until(v, label, 'shown_viewport', shown => shown.triangles > 0);
+  const first = await shown(v, 'shown_first_part_frame');
+  check(first?.viewport.triangles > 0, `${label}: the first viewport frame drew no triangles: ${JSON.stringify(first)}`);
+  check(first.viewport.pending === false, `${label}: the first viewport frame still owed a build`);
+  const settled = await until(v, label, 'shown_viewport', frame => frame.triangles > 0);
+  check(settled.label === first.viewport.label, `${label}: the preview label changed after the first frame`);
   const marks = await shown(v, 'shown_marks');
-  await v.shot(`${label}-first-display`);
-  return { viewport, marks };
+  check(JSON.stringify(marks) === JSON.stringify(first.marks), `${label}: the tree marks changed after the first frame`);
+  await v.shot(`${label}-opened`);
+  return first;
 }
 
 // Runs the STL command and waits for the Print check window's outcome.
@@ -286,6 +291,16 @@ async function exportStl(v, label) {
   step(`${label}: export STL`);
   await v.command('STL');
   return until(v, label, 'shown_print_check', shown => shown.state !== 'checking', 900);
+}
+
+async function withoutDownload(label, run) {
+  const from = browser.events.length;
+  const files = fs.readdirSync(downloads).sort();
+  const result = await run();
+  const started = browser.events.slice(from).filter(e => e.method === 'Browser.downloadWillBegin');
+  check(started.length === 0, `${label}: a refused export started a download: ${started.map(e => e.params.suggestedFilename)}`);
+  check(JSON.stringify(fs.readdirSync(downloads).sort()) === JSON.stringify(files), `${label}: a refused export changed the download directory`);
+  return result;
 }
 
 async function save(v, label) {
@@ -317,7 +332,7 @@ async function main() {
   const v = await browser.visitor();
   step('load the site');
   await v.load();
-  for (const name of ['shown_viewport', 'shown_marks', 'shown_print_check', 'shown_controls']) {
+  for (const name of ['shown_first_part_frame', 'shown_viewport', 'shown_marks', 'shown_print_check', 'shown_controls']) {
     check(await v.eval(`typeof window.wasmBindings.${name} === 'function'`), `the build has no ${name} export`);
   }
 
@@ -325,12 +340,26 @@ async function main() {
   const plain = await open(v, 'tray', tray);
   check(plain.viewport.label === null, `tray: a boundary-model part is labelled ${plain.viewport.label}`);
   check(plain.marks.length === 0, `tray: a built part shows marks ${JSON.stringify(plain.marks)}`);
+  await v.command('Hide body');
+  check((await shown(v, 'shown_viewport'))?.triangles === 0, 'tray: the hidden body still reports triangles');
+  await v.command('Show all bodies');
+  check((await shown(v, 'shown_viewport'))?.triangles > 0, 'tray: the restored body reports no triangles');
+  await v.command('Wireframe');
+  check((await shown(v, 'shown_viewport'))?.triangles === 0, 'tray: wireframe still reports triangles');
+  await v.command('Shaded, edges');
+  check((await shown(v, 'shown_viewport'))?.triangles > 0, 'tray: the shaded body reports no triangles');
   const plainExport = await exportStl(v, 'tray');
   check(plainExport.route === 'boundary model' && plainExport.state === 'checked',
     `tray: the STL export shows ${JSON.stringify(plainExport)}, not a checked boundary-model route`);
   const plainFile = await save(v, 'tray');
   check(plainFile.magic === 'CXPRINT1' && plainFile.route === 1, `tray: the saved STL is ${JSON.stringify(plainFile)}, not the checked print mesh`);
   evidence.tray = { first: plain, exported: plainExport, saved: plainFile };
+
+  await v.command('New assembly');
+  check((await shown(v, 'shown_assembly'))?.active === true, 'the new assembly did not take the viewport');
+  check(await shown(v, 'shown_viewport') === null, 'the assembly still reports a part viewport');
+  check(await v.eval(`window.wasmBindings.part_screen_point(0, 0, 0) == null`), 'the assembly still reports a part camera');
+  check(await v.eval(`window.wasmBindings.shown_threads()`) === 0, 'the assembly still reports part thread marks');
 
   // A lattice: the field sample on screen, the certified field mesh in the file.
   await field(v, 'lattice', lattice);
@@ -344,16 +373,17 @@ async function main() {
   // A preview on screen does not make an export: Catallax refuses this one.
   const split = await open(v, 'pieces', pieces);
   check(split.viewport.label === 'unproved preview', `pieces: the preview is labelled ${split.viewport.label}`);
-  const refused = await exportStl(v, 'pieces');
-  check(refused.state === 'refused' && refused.route === 'distance field', `pieces: the STL export shows ${JSON.stringify(refused)}, not a refusal`);
-  check(/could not be certified/.test(refused.message), `pieces: the refusal reads "${refused.message}"`);
-  const controls = await shown(v, 'shown_controls');
-  check(!controls['Save checked export'], 'pieces: a refused export offers Save checked export');
-  await v.shot('pieces-refused-export');
-  const before = fs.readdirSync(downloads).length;
-  await v.click([controls['Print check: Cancel'].x, controls['Print check: Cancel'].y]);
-  await v.settle(2000);
-  check(fs.readdirSync(downloads).length === before, 'pieces: a refused export wrote a file');
+  const refused = await withoutDownload('pieces', async () => {
+    const outcome = await exportStl(v, 'pieces');
+    check(outcome.state === 'refused' && outcome.route === 'distance field', `pieces: the STL export shows ${JSON.stringify(outcome)}, not a refusal`);
+    check(/could not be certified/.test(outcome.message), `pieces: the refusal reads "${outcome.message}"`);
+    const controls = await shown(v, 'shown_controls');
+    check(!controls['Save checked export'], 'pieces: a refused export offers Save checked export');
+    await v.shot('pieces-refused-export');
+    await v.click([controls['Print check: Cancel'].x, controls['Print check: Cancel'].y]);
+    await v.settle(2000);
+    return outcome;
+  });
   evidence.pieces = { first: split, exported: refused };
 
   // A refused field: marked, its label gone, no export opens.
@@ -361,9 +391,11 @@ async function main() {
   const mark = bad.marks.find(m => m.feature === 'Gyroid1');
   check(mark && mark.mark === 'Refused' && mark.reason, `graded: the tree marks ${JSON.stringify(bad.marks)}, not Gyroid1 Refused with a reason`);
   check(bad.viewport.label === null, `graded: a refused gyroid keeps the label ${bad.viewport.label}`);
-  await v.command('STL');
-  await v.settle(2000);
-  check(await shown(v, 'shown_print_check') === null, 'graded: the STL command opened an export over a refused feature');
+  await withoutDownload('graded', async () => {
+    await v.command('STL');
+    await v.settle(2000);
+    check(await shown(v, 'shown_print_check') === null, 'graded: the STL command opened an export over a refused feature');
+  });
   await v.shot('graded-refused');
   evidence.graded = { first: bad };
 

@@ -1302,7 +1302,9 @@ fn view_choices_survive_undo_and_native_reopen() {
         assert!(!app.state().state.doc.dirty, "File > Save wrote the part");
 
         // 2. Undo past the extrusion; the datum choices hold, and redo brings it back hidden.
-        menu(case, app, &["Edit", "Undo"]);
+        // Undo and Redo are the title bar's own buttons.
+        case.note("title bar Undo");
+        click_at(app, bounds(app, "Undo").center());
         until(app, "the undo", |app| app.state().state.doc.features.is_empty());
         settle(app);
         assert!(app.state().state.doc.model().body().is_none(), "no solid after the undo");
@@ -1313,7 +1315,8 @@ fn view_choices_survive_undo_and_native_reopen() {
         click_eye(case, app, "Z axis");
         click_eye(case, app, "Z axis");
         assert_eq!(app.state().state.doc.redo_depth(), before.redo + 1, "the eyes kept the redo entry");
-        menu(case, app, &["Edit", "Redo"]);
+        case.note("title bar Redo");
+        click_at(app, bounds(app, "Redo").center());
         until(app, "the redo", |app| !app.state().state.doc.features.is_empty());
         settle(app);
         assert_eq!(extrusion(app).0, solid, "the redo restores the same feature id");
@@ -1481,12 +1484,17 @@ fn view_choices_serialize_outside_the_part_truth() {
     let m = package.manifest().cloned().unwrap();
     let part = package.read_text("part.json").unwrap().unwrap();
     let view = package.read_text(soliddraft_model::view::ENTRY).unwrap().unwrap();
-    let newer = view.replace(soliddraft_model::view::FORMAT, "soliddraft-view/9");
+    let mut newer: serde_json::Value = serde_json::from_str(&view).unwrap();
+    let major = soliddraft_document::kind::format_major(soliddraft_model::view::FORMAT, "soliddraft-view").unwrap();
+    newer["format"] = format!("soliddraft-view/{}", major + 1).into();
     let rewritten = soliddraft_document::manifest::write_package(
         &m,
         &[
             soliddraft_document::manifest::Entry::new("part.json", part.into_bytes()),
-            soliddraft_document::manifest::Entry::new(soliddraft_model::view::ENTRY, newer.into_bytes()),
+            soliddraft_document::manifest::Entry::new(
+                soliddraft_model::view::ENTRY,
+                serde_json::to_vec(&newer).unwrap(),
+            ),
         ],
     )
     .unwrap();

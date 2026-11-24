@@ -339,6 +339,8 @@ impl Command {
             Command::AcceptChange { .. } => "Accept change",
             Command::AddAnnotation { annotation } => match annotation.body {
                 AnnotationKind::CentreMark => "Add centre mark",
+                AnnotationKind::Centreline => "Add centreline",
+                AnnotationKind::Weld { .. } => "Add weld symbol",
                 AnnotationKind::HoleCallout { .. } => "Add hole callout",
                 AnnotationKind::Note { .. } => "Add note",
                 AnnotationKind::Dimension(_) => "Add dimension",
@@ -348,7 +350,6 @@ impl Command {
                 AnnotationKind::SurfaceFinish { .. } => "Add surface finish",
                 AnnotationKind::RevisionSymbol { .. } => "Add revision symbol",
                 AnnotationKind::Balloon { .. } => "Add balloon",
-                _ => "Add annotation",
             },
             Command::MoveAnnotation { .. } => "Move annotation",
             Command::EditNote { .. } => "Edit note",
@@ -464,6 +465,7 @@ pub fn apply(drawing: &mut Drawing, command: &Command) -> Result<(), DrawingErro
                 AnnotationKind::Balloon { item, .. } => item.to_string(),
                 AnnotationKind::Gdt { .. } => crate::display::annotation_name(a, style),
                 AnnotationKind::DimensionSet(set) => set.values_text(),
+                AnnotationKind::Weld { .. } => "Fillet weld".into(),
                 AnnotationKind::CentreMark | AnnotationKind::Centreline => String::new(),
             };
             // The reference mark says the text no longer follows the part.
@@ -591,7 +593,21 @@ pub fn apply(drawing: &mut Drawing, command: &Command) -> Result<(), DrawingErro
             Ok(())
         }
         Command::AddTable { sheet, table } => {
-            sheet_mut(drawing, *sheet)?.tables.push(table.clone());
+            let target = sheet_mut(drawing, *sheet)?;
+            if table.kind == TableKind::Hole {
+                let view = table
+                    .hole_view
+                    .ok_or_else(|| DrawingError::BadRequest("A hole table needs a source view".into()))?;
+                if target.view(view).is_none() {
+                    return Err(DrawingError::UnknownView(view));
+                }
+                if table.holes.is_empty() || target.tables.iter().any(|existing| existing.hole_view == Some(view)) {
+                    return Err(DrawingError::BadRequest(
+                        "A view must have visible holes and can have only one hole table".into(),
+                    ));
+                }
+            }
+            target.tables.push(table.clone());
             Ok(())
         }
         Command::DeleteTable { sheet, table } => {
@@ -708,6 +724,15 @@ fn move_view_to_sheet(drawing: &mut Drawing, view: ViewId, to_sheet: usize, to: 
     }
     let annotations: Vec<Annotation> = s.annotations.iter().filter(|a| a.view == view).cloned().collect();
     s.annotations.retain(|a| a.view != view);
+    let mut tables = Vec::new();
+    s.tables.retain(|table| {
+        if table.hole_view == Some(view) {
+            tables.push(table.clone());
+            false
+        } else {
+            true
+        }
+    });
     for other in &mut s.views {
         if other.alignment.is_some_and(|a| a.parent == view) {
             other.alignment = None;
@@ -718,6 +743,7 @@ fn move_view_to_sheet(drawing: &mut Drawing, view: ViewId, to_sheet: usize, to: 
     let target = &mut drawing.sheets[to_sheet];
     target.views.push(v);
     target.annotations.extend(annotations);
+    target.tables.extend(tables);
     rescale_changed(drawing, before)
 }
 
@@ -823,6 +849,7 @@ fn delete_view(drawing: &mut Drawing, view: ViewId) -> Result<(), DrawingError> 
         }
     }
     s.views.retain(|v| v.id != view);
+    s.tables.retain(|table| table.hole_view != Some(view));
     s.annotations.retain(|a| a.view != view);
     Ok(())
 }

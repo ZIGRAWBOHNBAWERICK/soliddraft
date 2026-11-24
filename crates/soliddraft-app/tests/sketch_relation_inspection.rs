@@ -80,11 +80,14 @@ fn filter_button(app: &mut App) -> (String, Rect) {
     ribbon::open_options(app);
     for _ in 0..6 {
         let painted = ribbon::painted(app);
-        let left = ribbon::options_region(app).right() + ribbon::TOLERANCE;
+        // The sheet's own filter: the bottom bar's selection filter also reads "All".
+        let sheet = ribbon::options_region(app);
+        let left = sheet.right() + ribbon::TOLERANCE;
         if let Some(head) = painted.iter().find(|p| p.text == "Existing relations" && p.rect.right() < left)
             && let Some(current) = painted.iter().find(|p| {
                 ["Selected", "All", "Conflicting", "Dangling"].contains(&p.text.as_str())
                     && p.full.top() >= head.full.bottom()
+                    && sheet.expand(ribbon::TOLERANCE).contains_rect(p.rect)
                     && p.rect.right() < left
                     && p.rect.contains_rect(p.full)
             })
@@ -110,9 +113,12 @@ fn filter(app: &mut App, wanted: &str) {
         return;
     }
     ribbon::click_at(app, rect.center());
+    // The popup's entry, not the bottom bar's selection filter, which also reads "All".
+    let band = ribbon::band(app);
+    // The popup is the topmost layer, so its entry is the last one painted.
     let choice = ribbon::painted(app)
         .into_iter()
-        .find(|p| p.text == wanted && p.rect.contains_rect(p.full))
+        .rfind(|p| p.text == wanted && p.rect.contains_rect(p.full) && !band.contains(p.rect.center()))
         .unwrap_or_else(|| panic!("relation filter must offer {wanted}"));
     ribbon::click_at(app, choice.rect.center());
 }

@@ -228,7 +228,7 @@ impl CatallaxKernel {
             KernelError::InvalidInput(reason.into())
         })?;
         let mut state = self.state()?;
-        let history = approximate.record(seq, tag, OpKind::ImportStep, &[]);
+        let history = approximate.record(seq, tag, OpKind::ImportStep, &[], None);
         let body = BodyId::from_raw(state.id());
         let mut step = json!({"id": result, "op": "import_step", "file": {"name": request.name, "sha256": request.sha256},
             "pose": {"rotation": ["1", "0", "0", "0"], "translation": ["0", "0", "0"]}, "decisions": {}});

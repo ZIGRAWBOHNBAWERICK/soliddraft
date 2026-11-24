@@ -13,6 +13,21 @@ pub enum Purpose {
     Open,
     /// To place in the open assembly.
     Insert,
+    /// To import cells into the part's configuration table.
+    Parameters,
+}
+
+/// Opens a table file, with uploaded bytes delivered on a later browser frame.
+pub fn open_parameters(extensions: &[&str]) -> Option<PathBuf> {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        open_path("Import configuration table", "Configuration table", extensions)
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        crate::web::upload(extensions, false, Purpose::Parameters);
+        None
+    }
 }
 
 /// Files the browser handed over, each with its name, and what they are for.

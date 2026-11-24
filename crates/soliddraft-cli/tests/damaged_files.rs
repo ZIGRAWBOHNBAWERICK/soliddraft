@@ -110,6 +110,7 @@ fn valid_part() -> Vec<u8> {
         operation: ExtrudeOp::Boss,
         end: EndCondition::Blind { depth: 10.0 },
         reverse: false,
+        options: Default::default(),
     }));
     doc.to_bytes().unwrap()
 }
@@ -215,6 +216,11 @@ fn stored_range(bytes: &[u8], name: &str) -> (usize, usize) {
     (file.data_start().expect("a stored entry") as usize, file.compressed_size() as usize)
 }
 
+fn tag_major(tag: &str) -> u32 {
+    let (prefix, _) = tag.rsplit_once('/').unwrap();
+    soliddraft_document::kind::format_major(tag, prefix).unwrap()
+}
+
 fn cases(kind: DocKind, valid: &[u8]) -> Vec<Case> {
     let truth = kind.truth_entry();
     let manifest = "manifest.json";
@@ -290,10 +296,11 @@ fn cases(kind: DocKind, valid: &[u8]) -> Vec<Case> {
     ));
 
     // Wrong version or kind: intact files this version must refuse as such.
-    let major = kind.format().rsplit_once('/').unwrap().0.to_owned();
+    let (prefix, _) = kind.format().rsplit_once('/').unwrap();
+    let envelope = tag_major(soliddraft_document::manifest::ENVELOPE);
     all.push(case(
         "envelope from a newer version",
-        with_json(valid, manifest, |m| m["envelope"] = json!("soliddraft-document/2")),
+        with_json(valid, manifest, |m| m["envelope"] = json!(format!("soliddraft-document/{}", envelope + 1))),
         Refusal::Version,
     ));
     all.push(case(
@@ -314,8 +321,14 @@ fn cases(kind: DocKind, valid: &[u8]) -> Vec<Case> {
         with_json(valid, manifest, |m| m["kind"] = json!(other)),
         Refusal::Version,
     ));
-    let newer = if kind == DocKind::Part { 4 } else { 3 };
-    for tag in [format!("{major}/{newer}"), format!("{major}/99"), format!("{major}/0"), "other-format/1".to_owned()] {
+    let newest = match kind {
+        DocKind::Part => soliddraft_model::file::NEWEST_FORMAT,
+        DocKind::Assembly => soliddraft_assembly::schema::NEWEST_FORMAT,
+        DocKind::Drawing => tag_major(soliddraft_drawing::file::FORMAT),
+        DocKind::Mesh => tag_major(soliddraft_assembly::reference_mesh::FORMAT),
+    };
+    let next = format!("{prefix}/{}", newest + 1);
+    for tag in [next.clone(), format!("{prefix}/{}", newest + 98), format!("{prefix}/0"), "other-format/1".to_owned()] {
         all.push(case(
             &format!("{truth} and manifest.json say {tag}"),
             with_json(&with_json(valid, truth, |t| t["format"] = json!(tag)), manifest, |m| m["format"] = json!(tag)),
@@ -338,22 +351,21 @@ fn cases(kind: DocKind, valid: &[u8]) -> Vec<Case> {
     }
     let half = format!("truncated to {} of {len} bytes", len / 2);
     for c in &mut all {
-        c.commands = [
-            half.as_str(),
-            "truncated to 0 ",
-            "truncated to 1 ",
-            "end record",
-            "middle of",
-            "is not JSON",
-            "is missing",
-            "newer version",
-            "required section",
-            "/3",
-            "/4",
-            "/0",
-        ]
-        .iter()
-        .any(|k| c.label.contains(k));
+        c.commands = c.label.ends_with(&next)
+            || [
+                half.as_str(),
+                "truncated to 0 ",
+                "truncated to 1 ",
+                "end record",
+                "middle of",
+                "is not JSON",
+                "is missing",
+                "newer version",
+                "required section",
+                "/0",
+            ]
+            .iter()
+            .any(|k| c.label.contains(k));
     }
     all
 }

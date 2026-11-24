@@ -60,6 +60,21 @@ fn radius_limit(message: &str) -> Option<&str> {
         .min_by(|a, b| a.parse::<f64>().unwrap().total_cmp(&b.parse::<f64>().unwrap()))
 }
 
+/// An edit to offer when the fillet refusal gives a size limit.
+pub(crate) fn suggested_fillet_radius(message: &str, requested: f64) -> Option<f64> {
+    let (reason, _) = message.split_once(soliddraft_model::FITS_BETWEEN).unwrap_or((message, ""));
+    let (reason, _) = reason.split_once(soliddraft_model::RUNS_INTO).unwrap_or((reason, ""));
+    let limit = radius_limit(reason)?.parse::<f64>().ok()?;
+    if limit >= requested {
+        return None;
+    }
+    // Stay below face contact. At such small sizes that a hundredth would leave
+    // no radius, try half the limit.
+    let below = ((limit - 0.01) * 100.0).round() / 100.0;
+    let radius = if below > 0.0 { below } else { limit / 2.0 };
+    (radius > 0.0 && radius < limit).then_some(radius)
+}
+
 fn plain_message(message: &str) -> &str {
     if message.trim_end().ends_with("is coming soon.") {
         // Unfinished work says only Coming soon, not which part of it is unfinished.
@@ -172,7 +187,7 @@ fn has_code(message: &str, family: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::for_user;
+    use super::{for_user, suggested_fillet_radius};
 
     /// The real-use pass read "Catallax drafts planar faces ..." under the Draft editor and
     /// "... through the kernel" under a drawing view. Hints, labels, tooltips and buttons
@@ -277,6 +292,17 @@ mod tests {
             ),
             "The radius is too large for this edge. Try a radius under 4.5 mm."
         );
+    }
+
+    #[test]
+    fn a_radius_correction_needs_a_positive_limit_below_the_request() {
+        let reason = |limit| format!("fillet.radius-too-large: a face; radius limit {limit} mm");
+        assert_eq!(suggested_fillet_radius(&reason("4"), 5.0), Some(3.99));
+        assert_eq!(suggested_fillet_radius(&reason("0.005"), 5.0), Some(0.0025));
+        for limit in ["5", "NaN", "0", "-1"] {
+            assert_eq!(suggested_fillet_radius(&reason(limit), 5.0), None, "{limit}");
+        }
+        assert_eq!(suggested_fillet_radius("numbers.operation-budget: work allowance exhausted", 5.0), None);
     }
 
     /// When the exact construction and the general one both refuse, the user reads the

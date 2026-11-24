@@ -55,6 +55,7 @@ fn bounded_line_and_wrapping_arc_profiles_extrude_through_catallax() {
                     operation: ExtrudeOp::Boss,
                     end: EndCondition::Blind { depth: 2.0 },
                     reverse: false,
+                    options: Default::default(),
                 }),
                 name: None,
                 position: None,

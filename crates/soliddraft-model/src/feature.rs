@@ -571,7 +571,8 @@ pub enum ExtrudeStart {
         #[serde(default, skip_serializing_if = "is_false")]
         reverse: bool,
     },
-    /// A reference plane or planar face parallel to the sketch plane.
+    /// A reference plane or a face, planar or curved, where the profile's lines along
+    /// the first direction first cross it.
     Surface {
         /// The plane or face.
         plane: PlaneRef,

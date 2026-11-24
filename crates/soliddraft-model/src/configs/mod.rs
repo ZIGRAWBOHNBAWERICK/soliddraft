@@ -100,6 +100,11 @@ impl Configurations {
         self.rows.is_empty()
     }
 
+    /// Whether a configuration overrides a value with a spreadsheet formula.
+    pub(crate) fn holds_formulas(&self) -> bool {
+        self.rows.iter().any(|row| row.overrides.values().any(|text| text.starts_with('=')))
+    }
+
     pub(crate) fn uses_formula_settings(&self) -> bool {
         self.rows
             .iter()

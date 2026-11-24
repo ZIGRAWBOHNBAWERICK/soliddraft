@@ -50,6 +50,11 @@ pub(crate) enum Expr {
     Missing,
     /// An error value typed as a literal, such as `#N/A`, by its code.
     Error(String),
+    /// A name in a formula that no value or parameter had when it was read. It reads as
+    /// `#NAME?`, which IFERROR catches, until a value takes the name.
+    Name(String),
+    /// A function this version does not know, by its name. It reads as `#NAME?`.
+    UnknownFunction(String),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -113,7 +118,7 @@ pub(crate) fn resolve(entries: &[NamedValue]) -> Result<BTreeMap<u32, Quantity>,
         visiting.push(id);
         let mut depth = 1;
         let q = evaluate_tree(&v.expression.tree, &mut |atom| {
-            let Expr::Ref(other) = atom else { return Err("missing value reference".into()) };
+            let Expr::Ref(other) = atom else { return Err(unresolved(atom)) };
             let (quantity, dependency_depth) = visit(entries, *other, visiting, done)?;
             depth = depth.max(dependency_depth + 1);
             Ok(quantity)
@@ -144,7 +149,7 @@ fn bare_literal(tree: &Expr) -> bool {
 pub(crate) fn evaluate(expression: &Expression, resolved: &BTreeMap<u32, Quantity>) -> Result<Quantity, String> {
     evaluate_tree(&expression.tree, &mut |atom| match atom {
         Expr::Ref(id) => resolved.get(id).copied().ok_or("missing value".into()),
-        _ => Err("missing value".into()),
+        _ => Err(unresolved(atom)),
     })
 }
 
@@ -153,39 +158,53 @@ pub(crate) fn evaluate_tree(
     tree: &Expr,
     reference: &mut impl FnMut(&Expr) -> Result<Quantity, String>,
 ) -> Result<Quantity, String> {
-    evaluate_tree_with_angle(tree, false, reference)
+    evaluate_tree_with(tree, false, true, reference)
 }
 
-pub(crate) fn evaluate_tree_with_angle(
+/// What a tree comes to with plain angle arguments in degrees or radians, and numbers
+/// compared as Excel compares them (`excel`) or exactly, as parts saved before formulas
+/// followed Excel were computed.
+pub(crate) fn evaluate_tree_with(
     tree: &Expr,
     degrees: bool,
+    excel: bool,
     reference: &mut impl FnMut(&Expr) -> Result<Quantity, String>,
 ) -> Result<Quantity, String> {
-    let q = eval(tree, degrees, reference)?;
+    let q = eval(tree, degrees, excel, reference)?;
     Ok(if bare_literal(tree) { q.document_units() } else { q })
+}
+
+/// Why a reference reader could not answer `atom`.
+pub(crate) fn unresolved(atom: &Expr) -> String {
+    match atom {
+        Expr::Name(name) => format!("unknown value {name}"),
+        _ => "missing value reference".into(),
+    }
 }
 
 fn eval(
     tree: &Expr,
     degrees: bool,
+    excel: bool,
     reference: &mut impl FnMut(&Expr) -> Result<Quantity, String>,
 ) -> Result<Quantity, String> {
-    let mut eval = |e: &Expr| eval(e, degrees, reference);
+    let mut eval = |e: &Expr| eval(e, degrees, excel, reference);
     let q = match tree {
         Expr::Number(value, length, angle) => {
             Quantity { value: *value, length: *length, angle: *angle, ..Quantity::number(0.0) }
         }
-        Expr::Ref(_) | Expr::Param(_) | Expr::Physical(_) => reference(tree)?,
+        Expr::Ref(_) | Expr::Param(_) | Expr::Physical(_) | Expr::Name(_) => reference(tree)?,
+        Expr::UnknownFunction(name) => return Err(format!("unknown function {name}")),
         Expr::Formula(inner) => match inner.as_ref() {
-            Expr::Binary(op, a, b) => op.apply_last(a, b, &mut eval)?,
+            Expr::Binary(op, a, b) if excel => op.apply_last(a, b, &mut eval)?,
             other => eval(other)?,
         },
         Expr::Logical(value) => Quantity::logical(*value),
         Expr::InvalidReference => return Err("missing value reference".into()),
         Expr::Missing => Quantity::number(0.0),
         Expr::Error(code) => return Err(excel::error_value(code)),
-        Expr::Binary(op, a, b) => op.apply(a, b, &mut eval)?,
-        Expr::Call(name, args) => excel::call(name, args, degrees, &mut eval)?,
+        Expr::Binary(op, a, b) => op.apply(a, b, excel, &mut eval)?,
+        Expr::Call(name, args) => excel::call(name, args, degrees, excel, &mut eval)?,
         Expr::Percent(e) => {
             let q = eval(e)?;
             Quantity { value: q.value / 100.0, logical: false, ..q }
@@ -405,7 +424,14 @@ impl Parser<'_> {
                             return Ok(Expr::Logical(token.eq_ignore_ascii_case("TRUE")));
                         }
                     }
-                    (self.lookup)(token)
+                    match (self.lookup)(token) {
+                        // As in a spreadsheet, a formula may name what does not exist yet:
+                        // it reads as #NAME?, which IFERROR can catch.
+                        Err(reason) if self.formula && reason.starts_with("unknown value ") => {
+                            Ok(Expr::Name(token.to_owned()))
+                        }
+                        found => found,
+                    }
                 }
             }
         }
@@ -532,7 +558,9 @@ impl Expression {
                 | Expr::InvalidReference
                 | Expr::Physical(_)
                 | Expr::Missing
-                | Expr::Error(_) => {}
+                | Expr::Error(_)
+                | Expr::Name(_)
+                | Expr::UnknownFunction(_) => {}
                 Expr::Ref(id) if out.contains(id) => {}
                 Expr::Ref(id) => out.push(*id),
                 Expr::Neg(inner) | Expr::Formula(inner) | Expr::Percent(inner) => walk(inner, out),
@@ -548,6 +576,20 @@ impl Expression {
         out
     }
 
+    /// Whether a formula names something that no value or parameter had when it was read.
+    pub(crate) fn names_missing(&self) -> bool {
+        fn walk(tree: &Expr) -> bool {
+            match tree {
+                Expr::Name(_) => true,
+                Expr::Neg(inner) | Expr::Formula(inner) | Expr::Percent(inner) => walk(inner),
+                Expr::Op(_, a, b) | Expr::Binary(_, a, b) => walk(a) || walk(b),
+                Expr::Call(_, args) => args.iter().any(walk),
+                _ => false,
+            }
+        }
+        walk(&self.tree)
+    }
+
     /// Whether it reads the feature input `input`.
     pub(crate) fn reads(&self, input: &crate::values::Input) -> bool {
         fn walk(tree: &Expr, input: &crate::values::Input) -> bool {
@@ -559,7 +601,9 @@ impl Expression {
                 | Expr::InvalidReference
                 | Expr::Physical(_)
                 | Expr::Missing
-                | Expr::Error(_) => false,
+                | Expr::Error(_)
+                | Expr::Name(_)
+                | Expr::UnknownFunction(_) => false,
                 Expr::Neg(inner) | Expr::Formula(inner) | Expr::Percent(inner) => walk(inner, input),
                 Expr::Op(_, a, b) | Expr::Binary(_, a, b) => walk(a, input) || walk(b, input),
                 Expr::Call(_, args) => args.iter().any(|e| walk(e, input)),

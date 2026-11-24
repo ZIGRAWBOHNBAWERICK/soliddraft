@@ -25,6 +25,8 @@ pub enum OpKind {
     Extrude,
     /// `extrude_to`.
     ExtrudeTo,
+    /// `extrude_from`.
+    ExtrudeFrom,
     /// `revolve`.
     Revolve,
     /// `sweep`.
@@ -76,6 +78,7 @@ impl OpKind {
             OpKind::Profile => "profile",
             OpKind::Extrude => "extrude",
             OpKind::ExtrudeTo => "extrude_to",
+            OpKind::ExtrudeFrom => "extrude_from",
             OpKind::Revolve => "revolve",
             OpKind::Sweep => "sweep",
             OpKind::Loft => "loft",

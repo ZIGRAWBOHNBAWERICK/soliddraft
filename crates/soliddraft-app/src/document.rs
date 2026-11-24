@@ -1367,7 +1367,10 @@ impl FeatureKind {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RefKind {
     Plane,
+    /// A planar face.
     Face,
+    /// A face of any shape: an extrusion starts or stops on a curved one too.
+    AnyFace,
     Edge,
 }
 
@@ -6403,7 +6406,7 @@ fn view_status(
                                 model::EndCondition::UpToFace { face } => face.label.clone(),
                                 _ => String::new(),
                             };
-                            (0, RefKind::Face, label)
+                            (0, RefKind::AnyFace, label)
                         }
                         (model::ReferenceSlot::Start, model::FeatureKind::Extrude(e)) => {
                             let label = match &e.options.from {
@@ -6411,14 +6414,14 @@ fn view_status(
                                 Some(model::ExtrudeStart::Vertex { vertex }) => vertex.label.clone(),
                                 _ => String::new(),
                             };
-                            (1, RefKind::Face, label)
+                            (1, RefKind::AnyFace, label)
                         }
                         (model::ReferenceSlot::SecondLimit, model::FeatureKind::Extrude(e)) => {
                             let label = match &e.options.direction2 {
                                 Some(model::EndCondition::UpToFace { face }) => face.label.clone(),
                                 _ => String::new(),
                             };
-                            (2, RefKind::Face, label)
+                            (2, RefKind::AnyFace, label)
                         }
                         (
                             model::ReferenceSlot::SketchPlane

@@ -787,10 +787,8 @@ impl SolidDraftApp {
                 };
                 let n = items.len();
                 self.open_editor(Some(id), EditorParams::Repair { items, chosen: vec![None; n], active: 0 });
-                self.state.note(
-                    "Choose a replacement plane in the tree, or an edge or planar face in the viewport",
-                    NoteKind::Info,
-                );
+                self.state
+                    .note("Choose a replacement plane in the tree, or an edge or face in the viewport", NoteKind::Info);
             }
             AppAction::EditFeature(id) => {
                 let Some(f) = self.state.doc.feature(id) else { return };
@@ -1426,8 +1424,7 @@ impl SolidDraftApp {
                             ) =>
                         {
                             let doc = &self.state.doc;
-                            // A curved face is kept too: the part refuses it by name until the
-                            // kernel can start an extrusion on a curved surface.
+                            // A curved face is kept too: an extrusion can start on it.
                             let plane = |pick: Selection| match pick {
                                 Selection::Face(f) => doc
                                     .face_ref(f)
@@ -1544,6 +1541,10 @@ impl SolidDraftApp {
                                     Some(crate::document::RefKind::Face | crate::document::RefKind::Plane),
                                     Selection::Face(face),
                                 ) => self.state.doc.face_ref(face).map(crate::document::EntityRef::Face),
+                                // An extrusion's start and limits take curved faces as well.
+                                (Some(crate::document::RefKind::AnyFace), Selection::Face(face)) => {
+                                    self.state.doc.any_face_ref(face).map(crate::document::EntityRef::Face)
+                                }
                                 _ => None,
                             };
                             match r {
@@ -1563,6 +1564,9 @@ impl SolidDraftApp {
                                         }
                                         Some(crate::document::RefKind::Plane) => {
                                             "Choose a reference plane or planar face".into()
+                                        }
+                                        Some(crate::document::RefKind::AnyFace) => {
+                                            "Pick a face for this reference".into()
                                         }
                                         _ => "Pick a planar face for this reference".into(),
                                     })

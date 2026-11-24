@@ -47,11 +47,21 @@ An extrusion or cut has these choices besides its end and depth:
   direction, and Reverse offset measures it the other way. A plane or face at an angle
   to the sketch starts each point of the profile where the line along the first
   direction meets it, so the start and a blind end lean with it. Blind, Through all, Up
-  to face and Direction 2 work from it. A face or vertex of another body works as a
-  start when Merge result is off.
+  to face and Direction 2 work from it. A curved face starts each line of the profile
+  where it first crosses the face along the first direction, and the end is the face
+  moved the depth along that direction. This works on the round face of a rod made from
+  one circle, and on spline faces with Merge result off: joining the new solid along the
+  spline face is refused with the reason. Flip turns
+  the direction, so the crossing may change. Blind, Through all and Direction 2 work from
+  a curved face. A face or vertex of another body works as a start when Merge result is
+  off.
 - Some starts are refused by name: a plane that contains the extrusion direction, Up to
-  next from a plane at an angle, and a curved face. The last two need a Catallax
-  capability this version does not have yet.
+  next from a plane at an angle, and Up to next or Up to face from a curved face. A
+  curved face that the sketch reaches past, and curved faces of other bodies, such as a
+  revolved sphere, cone or torus, or a cylinder with other features on it, are refused
+  with the reason.
+- Up to face also stops on a spline face or on the round face of a rod made from one
+  circle.
 - Flip direction turns the first direction round. An offset start turns with it.
 - Merge result joins an extrusion or revolve to the body it grows from. Off makes it the
   first feature of a new body. Turning it on again moves it back into the body of the

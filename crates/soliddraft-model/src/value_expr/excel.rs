@@ -181,11 +181,12 @@ impl Binary {
         self,
         lhs: &Expr,
         rhs: &Expr,
+        excel: bool,
         eval: &mut impl FnMut(&Expr) -> Result<Quantity, String>,
     ) -> Result<Quantity, String> {
         let a = eval(lhs)?;
         let b = eval(rhs)?;
-        self.combine(a, b, false)
+        self.combine(a, b, false, excel)
     }
 
     /// The operation a formula ends with. As in Excel, a sum or difference whose two
@@ -199,10 +200,12 @@ impl Binary {
     ) -> Result<Quantity, String> {
         let a = eval(lhs)?;
         let b = eval(rhs)?;
-        self.combine(a, b, true)
+        self.combine(a, b, true, true)
     }
 
-    fn combine(self, a: Quantity, b: Quantity, last: bool) -> Result<Quantity, String> {
+    /// `excel` compares numbers by their 15 significant digits; otherwise exactly, as
+    /// formulas did before they followed Excel.
+    fn combine(self, a: Quantity, b: Quantity, last: bool, excel: bool) -> Result<Quantity, String> {
         use Binary::*;
         Ok(match self {
             Mul | Div => {
@@ -227,12 +230,12 @@ impl Binary {
                     Add | Sub if cancels => result(unit, 0.0),
                     Add => result(unit, a.value + b.value),
                     Sub => result(unit, a.value - b.value),
-                    Eq => Quantity::logical(compare(a, b).is_eq()),
-                    Ne => Quantity::logical(compare(a, b).is_ne()),
-                    Lt => Quantity::logical(compare(a, b).is_lt()),
-                    Le => Quantity::logical(compare(a, b).is_le()),
-                    Gt => Quantity::logical(compare(a, b).is_gt()),
-                    Ge => Quantity::logical(compare(a, b).is_ge()),
+                    Eq => Quantity::logical(compare(a, b, excel).is_eq()),
+                    Ne => Quantity::logical(compare(a, b, excel).is_ne()),
+                    Lt => Quantity::logical(compare(a, b, excel).is_lt()),
+                    Le => Quantity::logical(compare(a, b, excel).is_le()),
+                    Gt => Quantity::logical(compare(a, b, excel).is_gt()),
+                    Ge => Quantity::logical(compare(a, b, excel).is_ge()),
                     _ => unreachable!(),
                 }
             }
@@ -259,9 +262,7 @@ impl Parser<'_> {
 
     pub(super) fn call(&mut self, name: &str) -> Result<Expr, String> {
         let name = name.to_ascii_uppercase();
-        if !FORMULA_FUNCTIONS.contains(&name.as_str()) {
-            return Err(format!("unknown function {name}"));
-        }
+        let known = FORMULA_FUNCTIONS.contains(&name.as_str());
         self.at += 1;
         let mut args = Vec::new();
         if self.tokens.get(self.at) != Some(&")") {
@@ -282,15 +283,16 @@ impl Parser<'_> {
             return Err("missing )".into());
         }
         self.at += 1;
-        Ok(Expr::Call(name, args))
+        // As in a spreadsheet, an unknown function reads as #NAME?, which IFERROR catches.
+        Ok(if known { Expr::Call(name, args) } else { Expr::UnknownFunction(name) })
     }
 }
 
-/// Excel's order: numbers before logical values, numbers by their 15 significant digits.
-fn compare(a: Quantity, b: Quantity) -> std::cmp::Ordering {
-    a.logical
-        .cmp(&b.logical)
-        .then_with(|| significant(a.value).partial_cmp(&significant(b.value)).expect("finite numbers"))
+/// Excel's order: numbers before logical values, numbers by their 15 significant digits,
+/// or exactly when `excel` is off.
+fn compare(a: Quantity, b: Quantity, excel: bool) -> std::cmp::Ordering {
+    let number = |v: f64| if excel { significant(v) } else { v };
+    a.logical.cmp(&b.logical).then_with(|| number(a.value).partial_cmp(&number(b.value)).expect("finite numbers"))
 }
 
 fn combine(a: i32, b: i32, sign: i32) -> Result<i32, String> {
@@ -425,6 +427,7 @@ fn arity(name: &str) -> std::ops::RangeInclusive<usize> {
 fn call_lazy(
     name: &str,
     args: &[Expr],
+    excel: bool,
     eval: &mut impl FnMut(&Expr) -> Result<Quantity, String>,
 ) -> Option<Result<Quantity, String>> {
     let not_available = || -> Result<Quantity, String> { Err(error_value("#N/A")) };
@@ -456,7 +459,7 @@ fn call_lazy(
             let (cases, default) = args[1..].as_chunks::<2>();
             for [case, value] in cases {
                 let case = eval(case)?;
-                if common_unit(target, case).is_ok() && compare(target, case).is_eq() {
+                if common_unit(target, case).is_ok() && compare(target, case, excel).is_eq() {
                     return eval(value);
                 }
             }
@@ -493,12 +496,13 @@ pub(super) fn call(
     name: &str,
     args: &[Expr],
     degrees: bool,
+    excel: bool,
     eval: &mut impl FnMut(&Expr) -> Result<Quantity, String>,
 ) -> Result<Quantity, String> {
     if !arity(name).contains(&args.len()) || name == "IFS" && args.len() % 2 == 1 {
         return Err(format!("{name} has the wrong number of arguments"));
     }
-    if let Some(answer) = call_lazy(name, args, eval) {
+    if let Some(answer) = call_lazy(name, args, excel, eval) {
         return answer;
     }
     let values = args.iter().map(eval).collect::<Result<Vec<_>, _>>()?;
@@ -563,13 +567,13 @@ pub(super) fn call(
         "PRODUCT" => {
             let mut product = Quantity::number(1.0);
             for q in &values {
-                product = Binary::Mul.combine(product, *q, false)?;
+                product = Binary::Mul.combine(product, *q, false, true)?;
             }
             product
         }
         "SUMSQ" => {
             let unit = same_unit(&values)?;
-            let squared = Binary::Mul.combine(unit, unit, false)?;
+            let squared = Binary::Mul.combine(unit, unit, false, true)?;
             result(squared, values.iter().map(|q| q.value * q.value).sum())
         }
         "ROUND" | "ROUNDUP" | "ROUNDDOWN" => result(a, round(name, a.value, scalar(b)?)),
@@ -659,7 +663,7 @@ pub(super) fn call(
             if b.value == 0.0 {
                 return Err("division by zero".into());
             }
-            let ratio = Binary::Div.combine(a, b, false)?;
+            let ratio = Binary::Div.combine(a, b, false, true)?;
             result(ratio, ratio.value.trunc())
         }
         "MOD" => {
@@ -734,11 +738,32 @@ pub(super) fn call(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::value_expr::{evaluate_tree_with_angle, parse};
+    use crate::value_expr::{evaluate_tree_with, parse, unresolved};
 
     fn formula(text: &str, degrees: bool) -> Result<Quantity, String> {
         let expression = parse(text, &|token| Err(format!("unknown value {token}")))?;
-        evaluate_tree_with_angle(&expression.tree, degrees, &mut |_| Err("missing value reference".into()))
+        evaluate_tree_with(&expression.tree, degrees, true, &mut |atom| Err(unresolved(atom)))
+    }
+
+    /// A formula as parts saved before formulas followed Excel computed it.
+    fn exact(text: &str) -> Result<Quantity, String> {
+        let expression = parse(text, &|token| Err(format!("unknown value {token}")))?;
+        evaluate_tree_with(&expression.tree, false, false, &mut |atom| Err(unresolved(atom)))
+    }
+
+    #[test]
+    fn older_parts_keep_exact_binary_comparison() {
+        for (text, value) in [
+            ("=0.1+0.2=0.3", 0.0),
+            ("=IF(0.1+0.2=0.3,20,10)", 10.0),
+            ("=0.1+0.2<>0.3", 1.0),
+            ("=SWITCH(0.1+0.2,0.3,1,2)", 2.0),
+            ("=1=1", 1.0),
+        ] {
+            assert_eq!(exact(text).unwrap().value, value, "{text}");
+        }
+        assert_ne!(exact("=0.5-0.4-0.1").unwrap().value, 0.0, "no 15-digit cancellation");
+        assert_eq!(formula("=IF(0.1+0.2=0.3,20,10)", false).unwrap().value, 20.0, "Excel's rule");
     }
 
     #[test]
@@ -1012,6 +1037,12 @@ mod tests {
         ("=#NAME?", Excel::Error("#NAME?")),
         ("=Nope", Excel::Error("#NAME?")),
         ("=NOPE(1)", Excel::Error("#NAME?")),
+        ("=IFERROR(Unknown,5)", Excel::Number(5.0)),
+        ("=IFERROR(NOPE(1),5)", Excel::Number(5.0)),
+        ("=IFERROR(Unknown+1,5)", Excel::Number(5.0)),
+        ("=ISERROR(Unknown)", Excel::Logical(true)),
+        ("=IFNA(Unknown,5)", Excel::Error("#NAME?")),
+        ("=IF(TRUE,1,Unknown)", Excel::Number(1.0)),
         ("=1/0+NA()", Excel::Error("#DIV/0!")),
         ("=NA()+1/0", Excel::Error("#N/A")),
         ("=pi()", Excel::Number(std::f64::consts::PI)),
@@ -1087,6 +1118,6 @@ mod tests {
     fn a_cycle_is_not_an_error_value_iferror_can_hide() {
         let mut eval = |_: &Expr| -> Result<Quantity, String> { Err("value cycle".into()) };
         let tree = parse("=IFERROR(x,1)", &|_| Ok(Expr::Ref(1))).unwrap().tree;
-        assert_eq!(evaluate_tree_with_angle(&tree, false, &mut eval).err().as_deref(), Some("value cycle"));
+        assert_eq!(evaluate_tree_with(&tree, false, true, &mut eval).err().as_deref(), Some("value cycle"));
     }
 }

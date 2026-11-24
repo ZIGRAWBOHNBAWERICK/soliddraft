@@ -1,7 +1,7 @@
 //! Application preferences for viewport meshes and rendering.
 
-use serde::{Deserialize, Serialize};
 use crate::viewport::look::{Look, Preset, Tier};
+use serde::{Deserialize, Serialize};
 use soliddraft_tessellation::{Advanced, Levels, Quality, policy};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]

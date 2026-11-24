@@ -1531,9 +1531,7 @@ impl Kernel for CatallaxKernel {
                     }
                     if let Some(offer) = state.offered.get_mut(&key) {
                         match &mut offer.topology {
-                            Some(earlier) => {
-                                Arc::make_mut(earlier).previews.extend(topology.previews.iter().cloned())
-                            }
+                            Some(earlier) => Arc::make_mut(earlier).previews.extend(topology.previews.iter().cloned()),
                             None => offer.topology = Some(topology),
                         }
                     }

@@ -490,7 +490,11 @@ fn current_view_controls_change_only_the_view_on_screen() {
     let enabled = |app: &support::App, label: &str| {
         let boxes: Vec<_> = app
             .get_all_by_role(egui::accesskit::Role::CheckBox)
-            .filter(|node| node.accesskit_node().label().is_some_and(|text| text.starts_with(label)))
+            .filter(|node| {
+                node.accesskit_node()
+                    .label()
+                    .is_some_and(|text| text == label || text.starts_with(&format!("{label} ·")))
+            })
             .collect();
         assert_eq!(boxes.len(), 1, "one box is {label}");
         !boxes[0].accesskit_node().is_disabled()

@@ -230,6 +230,24 @@ impl<T> MeshCache<T> {
     }
 }
 
+fn screen_deviation(display: &catallax_mesh::DisplayMesh) -> Option<Rational> {
+    if display.geometry.positions.iter().flatten().any(|value| !(*value as f32).is_finite()) {
+        return None;
+    }
+    let rounding = display
+        .geometry
+        .positions
+        .iter()
+        .map(|point| {
+            point
+                .iter()
+                .fold(0.0_f64, |sum, value| (sum + (*value - f64::from(*value as f32)).abs().next_up()).next_up())
+        })
+        .fold(0.0_f64, f64::max);
+    let rounding = Rational::from_f64_exact(rounding)?;
+    Some(&display.measurement.maximum_deviation + &rounding)
+}
+
 impl Solid {
     /// The early display meshes another kernel handed over for this build.
     fn handed_previews(&self) -> MutexGuard<'_, handover::Previews> {
@@ -246,10 +264,35 @@ impl Solid {
         })
     }
 
+    fn rendering_answer(
+        &self,
+        dec: &mut Decider,
+    ) -> Result<catallax_numbers::OperationResult<catallax_mesh::DisplayMesh>, Error> {
+        use catallax_numbers::OperationResult;
+        let mut options = MeshOptions::default();
+        let answer = self.app.display_result(&options, dec)?;
+        let OperationResult::Proven(proven) = &answer else { return Ok(answer) };
+        if screen_deviation(&proven.value).is_none_or(|bound| bound <= options.chord_tolerance) {
+            return Ok(answer);
+        }
+
+        let extent = proven.value.geometry.positions.iter().flatten().fold(0.0_f64, |max, p| max.max(p.abs()));
+        let extent = Rational::from_f64_exact(extent).expect("screen deviation requires finite coordinates");
+        // Allow one chord on either side of the first mesh. The L1 rounding error
+        // of a vertex uses at most three binary32 half ulps at that extent.
+        let reserve = (&extent + &options.chord_tolerance.mul_pow2(1)).mul_pow2(-22);
+        let chord = &options.chord_tolerance - &reserve;
+        if chord <= Rational::zero() {
+            return Ok(answer);
+        }
+        options.chord_tolerance = chord;
+        self.app.display_result(&options, dec)
+    }
+
     fn rendering(&self) -> KernelResult<Arc<catallax_numbers::OperationResult<catallax_mesh::DisplayMesh>>> {
         use catallax_numbers::{Answer, OperationResult, Refusal};
         self.rendering.get(display_key(&MeshOptions::default()), || {
-            let run = || numerical("display_result", |dec| match self.app.display_result(&MeshOptions::default(), dec) {
+            let run = || numerical("display_result", |dec| match self.rendering_answer(dec) {
                 Ok(OperationResult::Refused(refusal)) => Err(refusal),
                 Ok(answer) => Ok(Answer::exact(answer)),
                 Err(Error::Display(refusal)) => Err(refusal),
@@ -280,30 +323,16 @@ impl Solid {
             OperationResult::Bounded(answer) => (answer.value(), Some(answer.evidence())),
             OperationResult::Refused(refusal) => return Err(query_error("display_result", refusal.clone())),
         };
-        if display.geometry.positions.iter().flatten().any(|value| !(*value as f32).is_finite()) {
-            return Err(KernelError::Unsupported("The display coordinates cannot be represented on screen".into()));
-        }
-        let mut mesh = convert::preview(&display.geometry, &self.ids);
-        let rounding = display
-            .geometry
-            .positions
-            .iter()
-            .map(|point| {
-                point
-                    .iter()
-                    .fold(0.0_f64, |sum, value| (sum + (*value - f64::from(*value as f32)).abs().next_up()).next_up())
-            })
-            .fold(0.0_f64, f64::max);
-        let rounding = Rational::from_f64_exact(rounding).ok_or_else(|| {
+        let bound = screen_deviation(display).ok_or_else(|| {
             KernelError::Unsupported("The display coordinates cannot be represented on screen".into())
         })?;
-        let bound = &display.measurement.maximum_deviation + &rounding;
         let level = MeshOptions::default().chord_tolerance;
         if bound > level {
             return Err(KernelError::Unsupported(
                 "Spline display bound (SD-DISPLAY-03): The measured deviation exceeds 0.01 mm after screen-coordinate rounding. The existing part is retained".into(),
             ));
         }
+        let mut mesh = convert::preview(&display.geometry, &self.ids);
         if let Some(evidence) = evidence {
             let mut measured = bound.to_f64_nearest();
             if Rational::from_f64_exact(measured).is_some_and(|value| value < bound) {

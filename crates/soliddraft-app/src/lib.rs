@@ -38,6 +38,7 @@ pub mod history_panel;
 pub mod hole_wizard_panel;
 pub mod icons;
 pub mod import;
+pub mod in_context;
 pub mod interference;
 pub mod journal;
 #[cfg(target_arch = "wasm32")]

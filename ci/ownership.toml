@@ -162,6 +162,13 @@ paths = ["crates/soliddraft-app/src/icons.rs"]
 module = ["icons"]
 
 [[areas]]
+name = "app.in_context"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/in_context.rs"]
+module = ["in_context"]
+
+[[areas]]
 name = "app.journal"
 owner = "core"
 crate = "soliddraft-app"

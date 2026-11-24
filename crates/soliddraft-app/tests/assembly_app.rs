@@ -539,7 +539,7 @@ fn the_window_builds_an_assembly_from_dropped_parts() {
     }
     assert!(harness.query_by_label("Configuration: Default").is_some());
     assert!(harness.query_by_label("Display state: Default").is_some());
-    assert!(harness.query_by_label("Edit part in context (coming soon)").is_some());
+    assert!(harness.query_by_label("Edit part in context").is_some());
     harness.get_by_label("Open part").click();
     harness.run_steps(8);
     assert!(!harness.state().state.assembly.is_active());

@@ -1,0 +1,587 @@
+//! Editing a part in context: a component of the open assembly opened for editing in
+//! place, as SolidWorks' Edit Part does.
+//!
+//! The part's own tab shows the part where the assembly places it, with the rest of the
+//! assembly drawn dimmed around it. The dimmed components are never the part's own
+//! geometry and are never edited; a click on one picks its face as a face of another
+//! component, and a sketch started then lies on that face's plane as an in-context
+//! reference ([`soliddraft_model::ContextFace`]). The tree shows the part's features
+//! while the editing lasts, and the assembly's again once it ends.
+//!
+//! The references follow the assembly. Whenever the assembly or the open part changes
+//! they are read afresh and, where a face moved, updated as one undoable step; a face
+//! that cannot be found any more marks its reference broken and leaves its plane as it
+//! was. A part opened on its own keeps the planes it last read.
+
+use std::str::FromStr;
+use std::sync::Arc;
+
+use egui::{Align2, Stroke, pos2};
+use glam::DVec3;
+use soliddraft_assembly::{Flags, KernelSource, OccurrenceIndex, OccurrencePath};
+use soliddraft_kernel_api::{Kernel, Plane, Vec3};
+use soliddraft_model::ContextFace;
+use soliddraft_tessellation::mesh::{DisplayMesh, MeshFace};
+
+use crate::assembly::{AssemblyAction, AssemblySession};
+use crate::document::SketchPlane;
+use crate::state::{AppAction, AppState, NoteKind};
+use crate::theme;
+
+/// A component of the open assembly opened for editing in place.
+pub struct InContext {
+    /// The component, by path.
+    pub path: OccurrencePath,
+    /// Its name in the assembly tree.
+    pub name: String,
+    /// The assembly's name.
+    pub assembly: String,
+    /// The other components in the part's frame, drawn dimmed.
+    context: Option<ContextMesh>,
+    /// The scene generation the dimmed mesh was made for.
+    built: Option<u64>,
+    /// A face of another component the last click picked.
+    pub picked: Option<ContextPick>,
+}
+
+/// The other components as one mesh, with the component each of its faces belongs to,
+/// and the same mesh as the part's renderer draws it.
+struct ContextMesh {
+    mesh: Arc<DisplayMesh>,
+    owners: Vec<(OccurrencePath, String)>,
+    drawn: Arc<crate::document::DisplayMesh>,
+}
+
+impl ContextMesh {
+    fn new(mesh: DisplayMesh, owners: Vec<(OccurrencePath, String)>) -> ContextMesh {
+        let n = mesh.positions.len();
+        let point = |p: &[f32; 3]| glam::Vec3::from_array(*p);
+        let drawn = crate::document::DisplayMesh {
+            positions: mesh.positions.iter().map(point).collect(),
+            normals: mesh.normals.iter().map(point).collect(),
+            // Pick id 0 is no entity: the dimmed faces are never hovered or selected as
+            // the part's.
+            face_picks: vec![0; n],
+            face_features: vec![0; n],
+            face_appearances: vec![0; n],
+            appearances: Vec::new(),
+            indices: mesh.indices.clone(),
+            edges: mesh
+                .edges
+                .iter()
+                .map(|line| crate::document::DisplayEdge {
+                    pick: 0,
+                    segments: line.windows(2).flat_map(|w| [point(&w[0]), point(&w[1])]).collect(),
+                })
+                .collect(),
+            corners: Vec::new(),
+        };
+        ContextMesh { mesh: Arc::new(mesh), owners, drawn: Arc::new(drawn) }
+    }
+}
+
+/// A face of another component, picked in the part's tab.
+#[derive(Clone, Debug)]
+pub struct ContextPick {
+    /// The component.
+    pub path: OccurrencePath,
+    /// Its name in the assembly tree.
+    pub component: String,
+    /// The face's persistent name on its part.
+    pub face: String,
+    /// The face's label, such as "Boss-Extrude1 · End cap".
+    pub face_label: String,
+    /// The face's triangles in the part's frame, for drawing it picked.
+    triangles: Vec<[glam::Vec3; 3]>,
+}
+
+fn live_row(s: &AssemblySession, path: &OccurrencePath) -> Option<OccurrenceIndex> {
+    let table = s.doc.table();
+    table.find(path).filter(|r| !table.flags(*r).has(Flags::REMOVED))
+}
+
+/// Starts editing the component at `path`, whose part is the open part.
+pub fn enter(state: &mut AppState, path: &OccurrencePath) -> Result<(), String> {
+    let s = state.assembly.session.as_ref().ok_or("Open an assembly first.")?;
+    let row = live_row(s, path).ok_or("The component is no longer in the assembly.")?;
+    let name = s.doc.label(row);
+    let assembly = s.doc.assembly().name.clone();
+    // The part opens seen as the assembly was, when the component is not turned.
+    let world = s.doc.table().world(row);
+    if world.rotation.abs_diff_eq(glam::DQuat::IDENTITY, 1e-12) {
+        let mut camera = s.viewport.camera.clone();
+        camera.target = world.inverse().apply(camera.target.as_dvec3()).as_vec3();
+        state.viewport.camera = camera;
+    }
+    state.assembly.in_context = Some(InContext {
+        path: path.clone(),
+        name: name.clone(),
+        assembly: assembly.clone(),
+        context: None,
+        built: None,
+        picked: None,
+    });
+    state.assembly.context_check = true;
+    state
+        .note(format!("Editing {name} in the context of {assembly} · the other components are dimmed"), NoteKind::Info);
+    Ok(())
+}
+
+/// Ends the editing. Returns the component that was edited.
+pub fn leave(state: &mut AppState) -> Option<OccurrencePath> {
+    let was = state.assembly.in_context.take()?;
+    crate::assembly::refresh(state);
+    if state.doc.dirty {
+        state.note(
+            format!("Stopped editing {} · save the part to bring its edits into {}", was.name, was.assembly),
+            NoteKind::Info,
+        );
+    } else {
+        state.note(format!("Stopped editing {} in context", was.name), NoteKind::Info);
+    }
+    Some(was.path)
+}
+
+/// The dimmed assembly to draw with the part, while a part is edited in context.
+pub fn mesh(state: &AppState) -> Option<Arc<crate::document::DisplayMesh>> {
+    let ic = state.assembly.in_context.as_ref()?;
+    ic.context.as_ref().map(|c| c.drawn.clone()).filter(|m| !m.indices.is_empty())
+}
+
+/// Runs once a frame after the assembly took in what changed: ends the editing when the
+/// assembly became the active document or lost the component, or another part opened,
+/// and remakes the dimmed mesh when the assembly's scene changed.
+pub(crate) fn frame(state: &mut AppState) {
+    let Some(ic) = state.assembly.in_context.as_ref() else { return };
+    let gone = state.assembly.session.as_ref().is_none_or(|s| live_row(s, &ic.path).is_none());
+    if gone {
+        state.assembly.in_context = None;
+        state.note("Stopped editing in context: the component is no longer in the assembly", NoteKind::Info);
+        return;
+    }
+    let path = ic.path.clone();
+    let same_part =
+        matches!(crate::assembly::component_part(state, &path), Ok(crate::assembly::ComponentPart::Current));
+    if !same_part || state.assembly.is_active() {
+        leave(state);
+        return;
+    }
+    let assembly = &mut state.assembly;
+    let (Some(s), Some(ic)) = (assembly.session.as_ref(), assembly.in_context.as_mut()) else { return };
+    let generation = s.scene.lock().expect("the scene lock").generation();
+    if ic.built != Some(generation) && !s.doc.is_loading() {
+        ic.context = Some(context_mesh(s, &ic.path));
+        ic.built = Some(generation);
+        ic.picked = None;
+    }
+}
+
+/// Every component but `own`, shown and not suppressed, in `own`'s frame.
+fn context_mesh(s: &AssemblySession, own: &OccurrencePath) -> ContextMesh {
+    let mut out = DisplayMesh::default();
+    let mut owners = Vec::new();
+    let table = s.doc.table();
+    let Some(own_row) = live_row(s, own) else {
+        return ContextMesh::new(out, owners);
+    };
+    let into_part = table.world(own_row).inverse();
+    let mut stack = vec![OccurrenceIndex::ROOT];
+    while let Some(r) = stack.pop() {
+        for c in table.children(r) {
+            let flags = table.flags(c);
+            if c == own_row || flags.has(Flags::REMOVED) || flags.has(Flags::HIDDEN) || flags.has(Flags::SUPPRESSED) {
+                continue;
+            }
+            if flags.has(Flags::ASSEMBLY) {
+                stack.push(c);
+                continue;
+            }
+            let Some(mesh) = s.doc.store().get(table.definition(c)).mesh.as_ref() else { continue };
+            append(&mut out, mesh, &into_part.compose(&table.world(c)));
+            let owner = (table.path(c), s.doc.label(c));
+            owners.extend(mesh.faces.iter().map(|_| owner.clone()));
+        }
+    }
+    ContextMesh::new(out, owners)
+}
+
+fn append(out: &mut DisplayMesh, mesh: &DisplayMesh, place: &soliddraft_assembly::Placement) {
+    let base = out.positions.len() as u32;
+    let first = (out.indices.len() / 3) as u32;
+    let point = |p: &[f32; 3]| {
+        let q = place.apply(DVec3::new(p[0] as f64, p[1] as f64, p[2] as f64));
+        [q.x as f32, q.y as f32, q.z as f32]
+    };
+    out.positions.extend(mesh.positions.iter().map(point));
+    out.normals.extend(mesh.normals.iter().map(|n| {
+        let q = place.rotate(DVec3::new(n[0] as f64, n[1] as f64, n[2] as f64));
+        [q.x as f32, q.y as f32, q.z as f32]
+    }));
+    out.indices.extend(mesh.indices.iter().map(|i| i + base));
+    out.faces.extend(mesh.faces.iter().map(|f| MeshFace {
+        first: f.first + first,
+        count: f.count,
+        name: f.name.clone(),
+        style: None,
+    }));
+    out.edges.extend(mesh.edges.iter().map(|e| e.iter().map(point).collect()));
+}
+
+/// The nearest triangle the ray from `origin` along `dir` meets, by its distance.
+fn hit(mesh: &DisplayMesh, origin: glam::Vec3, dir: glam::Vec3) -> Option<u32> {
+    let at = |i: u32| glam::Vec3::from_array(mesh.positions[i as usize]);
+    let mut best: Option<(f32, u32)> = None;
+    for (t, tri) in mesh.indices.chunks_exact(3).enumerate() {
+        let (a, b, c) = (at(tri[0]), at(tri[1]), at(tri[2]));
+        let (e1, e2) = (b - a, c - a);
+        let p = dir.cross(e2);
+        let det = e1.dot(p);
+        if det.abs() < 1e-12 {
+            continue;
+        }
+        let s = origin - a;
+        let u = s.dot(p) / det;
+        let q = s.cross(e1);
+        let v = dir.dot(q) / det;
+        let d = e2.dot(q) / det;
+        if u < 0.0 || v < 0.0 || u + v > 1.0 || d <= 0.0 {
+            continue;
+        }
+        if best.is_none_or(|(near, _)| d < near) {
+            best = Some((d, t as u32));
+        }
+    }
+    best.map(|(_, t)| t)
+}
+
+/// The face of another component the ray meets first, if any.
+fn pick(context: &ContextMesh, origin: glam::Vec3, dir: glam::Vec3) -> Option<ContextPick> {
+    let mesh = &context.mesh;
+    let face = mesh.face_of_triangle(hit(mesh, origin, dir)?)?;
+    let f = &mesh.faces[face];
+    if f.name.is_empty() {
+        return None;
+    }
+    let (path, component) = context.owners.get(face)?.clone();
+    let at = |i: u32| glam::Vec3::from_array(mesh.positions[i as usize]);
+    let triangles = (f.first..f.first + f.count)
+        .map(|t| {
+            let i = &mesh.indices[t as usize * 3..t as usize * 3 + 3];
+            [at(i[0]), at(i[1]), at(i[2])]
+        })
+        .collect();
+    Some(ContextPick { path, component, face: f.name.clone(), face_label: face_label(&f.name), triangles })
+}
+
+/// The label a face's persistent name carries, or the name itself.
+fn face_label(name: &str) -> String {
+    serde_json::from_str::<soliddraft_model::FaceRef>(name)
+        .ok()
+        .map(|r| r.label.to_string())
+        .filter(|l| !l.is_empty())
+        .unwrap_or_else(|| name.to_owned())
+}
+
+/// The plane of `face` of the component at `row`, in the frame of the occurrence at
+/// `own`, read from the part's exact body.
+fn face_plane(
+    s: &mut AssemblySession,
+    kernel: &Arc<dyn Kernel>,
+    own: OccurrenceIndex,
+    row: OccurrenceIndex,
+    face: &str,
+) -> Result<Plane, String> {
+    let table = s.doc.table();
+    let into_own = table.world(own).inverse().compose(&table.world(row));
+    let def = table.definition(row);
+    let name = s.doc.label(row);
+    let part = s.doc.exact(def, &KernelSource::new(kernel.clone()))?;
+    let part = part.lock().map_err(|_| format!("{name} is busy"))?;
+    let body = part.body().ok_or_else(|| format!("{name} has no body"))?;
+    let label = face_label(face);
+    // A part's faces carry their persistent names; a name that is not one is a label.
+    let id = match serde_json::from_str::<soliddraft_model::FaceRef>(face) {
+        Ok(r) => part.resolve_face(&r, body).map_err(|e| format!("{label} of {name}: {}", e.message))?,
+        Err(_) => {
+            let found: Vec<_> = part
+                .face_labels(body)
+                .into_iter()
+                .filter(|(_, l)| l.as_ref().is_some_and(|l| l.text == face))
+                .map(|(f, _)| f)
+                .collect();
+            match found[..] {
+                [id] => id,
+                [] => return Err(format!("{name} has no face {label}")),
+                _ => return Err(format!("{name} has several faces named {label}")),
+            }
+        }
+    };
+    let topology = part.kernel().topology(body).map_err(|e| e.to_string())?;
+    let info = topology.face(id).ok_or_else(|| format!("{name} has no face {label}"))?;
+    let normal = info.normal.ok_or_else(|| format!("{label} of {name} is not flat"))?;
+    let n = into_own.rotate(DVec3::new(normal.x, normal.y, normal.z)).normalize();
+    let p = into_own.apply(DVec3::new(info.centroid.x, info.centroid.y, info.centroid.z));
+    Ok(soliddraft_model::plane_on_face(Vec3::new(n.x, n.y, n.z), Vec3::new(p.x, p.y, p.z)))
+}
+
+/// The sketch plane on the picked face of another component, taking the pick. `None`
+/// when nothing is picked.
+pub(crate) fn picked_plane(state: &mut AppState) -> Option<Result<SketchPlane, String>> {
+    let kernel = state.doc.kernel().clone();
+    let assembly = &mut state.assembly;
+    let ic = assembly.in_context.as_mut()?;
+    let pick = ic.picked.take()?;
+    let own = ic.path.clone();
+    let s = assembly.session.as_mut()?;
+    let own_row = live_row(s, &own);
+    let row = live_row(s, &pick.path);
+    let (Some(own_row), Some(row)) = (own_row, row) else {
+        return Some(Err(format!("{} is no longer in the assembly", pick.component)));
+    };
+    Some(face_plane(s, &kernel, own_row, row, &pick.face).map(|plane| {
+        let context = ContextFace::new(
+            (s.doc.id().to_string(), s.doc.assembly().name.clone()),
+            own.to_string(),
+            (pick.path.to_string(), pick.component.clone()),
+            (pick.face.clone(), pick.face_label.clone()),
+            plane,
+        );
+        SketchPlane::Context { context, offset: 0.0 }
+    }))
+}
+
+/// `c` read afresh from the open assembly.
+fn read(s: &mut AssemblySession, kernel: &Arc<dyn Kernel>, c: &ContextFace) -> Result<ContextFace, String> {
+    let own = OccurrencePath::from_str(&c.own).ok().and_then(|p| live_row(s, &p));
+    let own = own.ok_or("the part is no longer placed where the reference was made")?;
+    let row = OccurrencePath::from_str(&c.component).ok().and_then(|p| live_row(s, &p));
+    let row = row.ok_or_else(|| format!("{} is no longer in the assembly", c.component_name))?;
+    let plane = face_plane(s, kernel, own, row, &c.face)?;
+    Ok(c.followed(&s.doc.assembly().name, &s.doc.label(row), plane))
+}
+
+/// Within this many millimetres two readings of a plane are the same.
+const SAME_PLANE: f64 = 1e-9;
+
+fn same(a: &ContextFace, b: &ContextFace) -> bool {
+    let close = |x: &[f64; 3], y: &[f64; 3]| x.iter().zip(y).all(|(p, q)| (p - q).abs() <= SAME_PLANE);
+    a.broken == b.broken
+        && a.assembly_name == b.assembly_name
+        && a.component_name == b.component_name
+        && close(&a.origin, &b.origin)
+        && close(&a.normal, &b.normal)
+        && close(&a.x_dir, &b.x_dir)
+}
+
+/// Reads the open part's references to the open assembly afresh, and updates those that
+/// changed as one undoable step.
+pub(crate) fn follow(state: &mut AppState) {
+    // An open sketch or form edits a draft of the part; the check waits for it to close.
+    if state.sketch.is_some() || state.editor.is_some() {
+        return;
+    }
+    state.assembly.context_check = false;
+    let kernel = state.doc.kernel().clone();
+    let Some(s) = state.assembly.session.as_mut() else { return };
+    if s.doc.is_loading() {
+        state.assembly.context_check = true;
+        return;
+    }
+    let id = s.doc.id().to_string();
+    let model = state.doc.model();
+    let mut edits = Vec::new();
+    let mut broken = Vec::new();
+    for (feature, c) in soliddraft_model::context::references(model.features()) {
+        if c.assembly != id {
+            continue;
+        }
+        let now = read(s, &kernel, c).unwrap_or_else(|why| c.broken(why));
+        if same(&now, c) {
+            continue;
+        }
+        if let Some(why) = &now.broken {
+            broken.push(format!("{}: {why}", c.label()));
+        }
+        let kind = model.feature(feature).and_then(|f| soliddraft_model::context::with_reference(&f.kind, now));
+        if let Some(kind) = kind {
+            edits.push((crate::document::app_id(feature), kind));
+        }
+    }
+    if edits.is_empty() {
+        return;
+    }
+    let n = edits.len();
+    state.push(AppAction::Command(crate::document::Command::FollowContext(edits)));
+    // Said after the rebuild's own note, at the next frame.
+    state.assembly.context_note = Some(if broken.is_empty() {
+        (format!("Updated {n} in-context reference{}", if n == 1 { "" } else { "s" }), NoteKind::Ok)
+    } else {
+        (format!("In-context reference broken · {}", broken.join(" · ")), NoteKind::Error)
+    });
+}
+
+/// The in-context reference a feature holds, for the tree.
+pub fn reference_of(kind: &crate::document::FeatureKind) -> Option<&ContextFace> {
+    match kind {
+        crate::document::FeatureKind::Sketch(s) => match &s.plane {
+            SketchPlane::Context { context, .. } => Some(context),
+            _ => None,
+        },
+        crate::document::FeatureKind::ReferencePlane(soliddraft_model::SketchPlane::Context { context, .. }) => {
+            Some(context)
+        }
+        _ => None,
+    }
+}
+
+/// The warning a feature's broken in-context reference puts on its tree row.
+pub fn broken(kind: &crate::document::FeatureKind) -> Option<String> {
+    let c = reference_of(kind)?;
+    let why = c.broken.as_ref()?;
+    Some(format!("In-context reference to {} broken: {why}. The sketch keeps the plane it last read.", c.label()))
+}
+
+/// What the tree adds to a feature's line for its in-context reference.
+pub fn tree_note(kind: &crate::document::FeatureKind) -> Option<String> {
+    let c = reference_of(kind)?;
+    Some(match &c.broken {
+        None => format!("in context: {}", c.label()),
+        Some(why) => format!("in-context reference broken: {why}"),
+    })
+}
+
+/// The line above the part's tree while it is edited in context.
+pub fn tree_banner(ui: &mut egui::Ui, state: &AppState) {
+    let Some(ic) = state.assembly.in_context.as_ref() else { return };
+    egui::Frame::new()
+        .fill(theme::accent().gamma_multiply(0.14))
+        .corner_radius(egui::CornerRadius::same(6))
+        .inner_margin(egui::Margin::symmetric(8, 4))
+        .outer_margin(egui::Margin::symmetric(6, 2))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.label(egui::RichText::new(format!("Editing {} in {}", ic.name, ic.assembly)).color(theme::ink()));
+        });
+}
+
+/// After the part's viewport: picks a face of another component on a click that met no
+/// part geometry, and draws the picked face and the bar that ends the editing.
+pub(crate) fn after_viewport(ui: &mut egui::Ui, state: &mut AppState, events: &crate::viewport::ViewportEvents) {
+    let rect = state.viewport.rect;
+    let camera = state.viewport.camera.clone();
+    let sketching = state.sketch.is_some() || state.editor.is_some();
+    let Some(ic) = state.assembly.in_context.as_mut() else { return };
+    match events.clicked {
+        Some(Some(_)) => ic.picked = None,
+        Some(None) if !sketching => {
+            let pos = ui.input(|i| i.pointer.interact_pos());
+            ic.picked = pos.zip(ic.context.as_ref()).and_then(|(pos, context)| {
+                let (origin, dir) = camera.ray(pos, rect);
+                pick(context, origin, dir)
+            });
+        }
+        _ => {}
+    }
+    let painter = ui.painter().with_clip_rect(rect);
+    if let Some(p) = &ic.picked {
+        let fill = theme::accent().gamma_multiply(0.45);
+        for t in &p.triangles {
+            let corners: Option<Vec<_>> = t.iter().map(|v| camera.project(*v, rect)).collect();
+            if let Some(corners) = corners {
+                painter.add(egui::Shape::convex_polygon(corners, fill, Stroke::NONE));
+            }
+        }
+    }
+    let text = match &ic.picked {
+        Some(p) => format!(
+            "Editing {} in {} · picked {} · {} · Sketch draws on it",
+            ic.name, ic.assembly, p.component, p.face_label
+        ),
+        None => format!("Editing {} in {}", ic.name, ic.assembly),
+    };
+    let mut exit = false;
+    egui::Area::new(egui::Id::new("in_context_bar"))
+        .order(egui::Order::Foreground)
+        .fixed_pos(pos2(rect.center().x, rect.top() + 52.0))
+        .pivot(Align2::CENTER_TOP)
+        .show(ui.ctx(), |ui| {
+            egui::Frame::new()
+                .fill(theme::hud_bg())
+                .stroke(Stroke::new(1.0, theme::line()))
+                .corner_radius(egui::CornerRadius::same(99))
+                .inner_margin(egui::Margin::symmetric(12, 4))
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new(text).color(theme::ink()));
+                        let button = ui.button("Exit in context");
+                        #[cfg(target_arch = "wasm32")]
+                        crate::web::show_control("Exit in context", button.rect);
+                        exit = button.clicked();
+                    });
+                });
+        });
+    if exit {
+        state.push(AppAction::Assembly(AssemblyAction::ExitInContext));
+    }
+}
+
+/// The editing as JSON for browser checks: `null` when no part is edited in context,
+/// else the `component` path and `name`, the `assembly`, how many triangles the
+/// dimmed `context` has, the `picked` face, and the open part's `references`.
+pub fn shown(state: &AppState) -> serde_json::Value {
+    let Some(ic) = state.assembly.in_context.as_ref() else { return serde_json::Value::Null };
+    let references: Vec<serde_json::Value> = soliddraft_model::context::references(state.doc.model().features())
+        .into_iter()
+        .map(|(f, c)| serde_json::json!({ "feature": f.0, "label": c.label(), "broken": c.broken }))
+        .collect();
+    serde_json::json!({
+        "component": ic.path.to_string(),
+        "name": ic.name,
+        "assembly": ic.assembly,
+        "context": ic.context.as_ref().map_or(0, |c| c.mesh.triangle_count()),
+        "picked": ic.picked.as_ref().map(|p| serde_json::json!({ "component": p.path.to_string(), "face": p.face_label })),
+        "references": references,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn square(z: f32) -> DisplayMesh {
+        DisplayMesh {
+            positions: vec![[0.0, 0.0, z], [10.0, 0.0, z], [10.0, 10.0, z], [0.0, 10.0, z]],
+            normals: vec![[0.0, 0.0, 1.0]; 4],
+            indices: vec![0, 1, 2, 0, 2, 3],
+            faces: vec![MeshFace { first: 0, count: 2, name: "Top".into(), style: None }],
+            edges: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn a_ray_picks_the_nearest_face_of_another_component() {
+        let mut mesh = DisplayMesh::default();
+        let place = soliddraft_assembly::Placement::translation(DVec3::ZERO);
+        append(&mut mesh, &square(5.0), &place);
+        append(&mut mesh, &square(9.0), &place);
+        let owners = vec![("1".parse().unwrap(), "Low<1>".into()), ("2".parse().unwrap(), "High<1>".into())];
+        let context = ContextMesh::new(mesh, owners);
+        let down = glam::Vec3::new(0.0, 0.0, -1.0);
+        let p = pick(&context, glam::Vec3::new(5.0, 4.0, 50.0), down).unwrap();
+        assert_eq!((p.component.as_str(), p.face.as_str(), p.triangles.len()), ("High<1>", "Top", 2));
+        assert!(pick(&context, glam::Vec3::new(50.0, 4.0, 50.0), down).is_none());
+        let up = pick(&context, glam::Vec3::new(5.0, 4.0, 7.0), down).unwrap();
+        assert_eq!(up.component, "Low<1>");
+    }
+
+    #[test]
+    fn appending_moves_each_component_into_the_part_frame() {
+        let mut mesh = DisplayMesh::default();
+        let place = soliddraft_assembly::Placement::translation(DVec3::new(0.0, 0.0, -5.0));
+        append(&mut mesh, &square(5.0), &place);
+        append(&mut mesh, &square(5.0), &place);
+        assert_eq!(mesh.positions[0], [0.0, 0.0, 0.0]);
+        assert_eq!(mesh.indices[6..], [4, 5, 6, 4, 6, 7]);
+        assert_eq!((mesh.faces[1].first, mesh.faces[1].count), (2, 2));
+    }
+}

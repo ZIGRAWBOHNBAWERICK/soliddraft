@@ -289,6 +289,20 @@ impl SolidDraftApp {
                 }
                 crate::assembly::apply(&mut self.state, &mut self.dock, crate::assembly::AssemblyAction::FromPart);
             }
+            AppAction::Assembly(crate::assembly::AssemblyAction::EditPartInContext(path)) => {
+                use crate::assembly::{AssemblyAction, ComponentPart};
+                let path = path.or_else(|| self.state.assembly.session.as_ref().and_then(|s| s.selected.clone()));
+                let Some(path) = path else {
+                    return self.state.note("Select a component to edit its part in context", NoteKind::Info);
+                };
+                self.apply(ctx, AppAction::OpenComponentPart(path.clone()));
+                if matches!(crate::assembly::component_part(&self.state, &path), Ok(ComponentPart::Current)) {
+                    if let Err(e) = crate::in_context::enter(&mut self.state, &path) {
+                        self.state.note(e, NoteKind::Error);
+                        self.apply(ctx, AppAction::Assembly(AssemblyAction::Show));
+                    }
+                }
+            }
             AppAction::Assembly(a) => crate::assembly::apply(&mut self.state, &mut self.dock, a),
             AppAction::OpenComponentPart(path) => {
                 use crate::assembly::{AssemblyAction, ComponentPart};
@@ -386,6 +400,12 @@ impl SolidDraftApp {
                     Some(Selection::Reference(Reference::Plane(plane))) => {
                         Some(SketchPlane::Reference { plane, offset: 0.0 })
                     }
+                    // Editing in context, a face of another component picked in the view.
+                    None => match crate::in_context::picked_plane(&mut self.state) {
+                        Some(Ok(plane)) => Some(plane),
+                        Some(Err(why)) => return self.state.note(why, NoteKind::Error),
+                        None => None,
+                    },
                     _ => None,
                 };
                 match plane {
@@ -2166,6 +2186,18 @@ impl SolidDraftApp {
                         match warning {
                             Some(w) => self.state.note(format!("Saved {} · {w}", path.display()), NoteKind::Error),
                             None => self.state.note(format!("Saved {}", path.display()), NoteKind::Ok),
+                        }
+                        // Editing in context, saving writes the part and then the assembly
+                        // that now shows it.
+                        if self.state.assembly.in_context.is_some() {
+                            use crate::assembly::AssemblyAction;
+                            self.apply(ctx, AppAction::Assembly(AssemblyAction::Update));
+                            self.apply(ctx, AppAction::Assembly(AssemblyAction::Save(None)));
+                            let assembly = self.state.assembly.session.as_ref();
+                            if let Some(saved) = assembly.filter(|s| !s.doc.is_dirty()).and_then(|s| s.doc.path()) {
+                                let text = format!("Saved {} and {}", path.display(), saved.display());
+                                self.state.note(text, NoteKind::Ok);
+                            }
                         }
                     }
                     Err(e) => self.state.note(e, NoteKind::Error),

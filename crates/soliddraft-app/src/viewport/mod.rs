@@ -113,6 +113,8 @@ pub struct Overlay<'a> {
     pub ghost: Option<(Arc<DisplayMesh>, bool)>,
     /// A body drawn in place of the document's while a feature is previewed.
     pub preview: Option<Arc<DisplayMesh>>,
+    /// The rest of an assembly, dimmed, while the part is edited in its context.
+    pub context: Option<Arc<DisplayMesh>>,
     /// The open sketch, which takes the pointer.
     pub sketch: Option<&'a mut SketchSession>,
     /// Closed sketches to show quietly on their planes, with their features.
@@ -355,6 +357,7 @@ impl ViewportState {
             dimensions_on_geometry,
             ghost,
             preview,
+            context,
             sketch,
             passive_sketches,
             dimension_edit,
@@ -537,6 +540,7 @@ impl ViewportState {
             _ => None,
         };
         input.ghost = ghost;
+        input.context = context;
         input.preview = preview;
         input.preview_pickable = preview_pickable;
         input.pick_revision = pick_revision;
@@ -823,6 +827,7 @@ impl ViewportState {
             cursor_px,
             meshes: (NO_PART, Vec::new()),
             ghost: None,
+            context: None,
             preview: None,
             threads: None,
             preview_pickable: false,

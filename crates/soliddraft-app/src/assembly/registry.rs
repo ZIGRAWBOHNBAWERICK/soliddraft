@@ -79,6 +79,17 @@ pub(super) fn registry() -> Vec<CommandSpec> {
             .assembly()
             .run(|_| AppAction::Assembly(AssemblyAction::ShowPart))
             .agents(Agents::Mcp, "Makes the part active.", Vec::new),
+        cmd(
+            "assembly_edit_part",
+            "Edit part",
+            Icon::Extrude,
+            "Edit the selected component's part in place, the rest of the assembly dimmed around it",
+        )
+        .assembly()
+        .on(Tab::Assembly, "Component", Large)
+        .run(|_| AppAction::Assembly(AssemblyAction::EditPartInContext(None)))
+        .when(|s| s.assembly.session.as_ref().is_some_and(|s| s.selected.is_some()))
+        .app_only("It opens the part for editing inside the assembly's window; agents edit the part file itself"),
         cmd("assembly_update", "Update", Icon::Tree, "Accept the current revisions of every source together and solve the mates on them")
             .assembly()
             .on(Tab::Assembly, "Component", Large)

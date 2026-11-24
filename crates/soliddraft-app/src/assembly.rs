@@ -62,7 +62,10 @@ pub enum AssemblyAction {
     Place(OccurrencePath, Placement),
     Show,
     ShowPart,
-    EditPartInContext,
+    /// Opens a component's part for editing in place: the given one, or the selected one.
+    EditPartInContext(Option<OccurrencePath>),
+    /// Ends editing a part in context and shows the assembly.
+    ExitInContext,
     Update,
     Undo,
     Redo,
@@ -125,6 +128,12 @@ pub struct AssemblyState {
     pub clearance_mm: f64,
     /// Physical Dynamics: a guarded drag pushes the parts it meets.
     pub physical_dynamics: bool,
+    /// The component whose part is being edited in context.
+    pub in_context: Option<crate::in_context::InContext>,
+    /// The open part's in-context references are read afresh at the next frame.
+    pub context_check: bool,
+    /// What the last update of the in-context references found, said at the next frame.
+    pub context_note: Option<(String, NoteKind)>,
 }
 
 impl AssemblyState {
@@ -641,7 +650,19 @@ pub fn frame(state: &mut AppState, dock: &mut DockState<Tab>, ctx: &egui::Contex
     }
     let part = open_part(state);
     if loaded || state.assembly.last_part.as_ref() != Some(&part) {
+        // Another part opened: its in-context references are read afresh. Edits of the
+        // same part do not ask, so undoing an update of its references stays undone.
+        if state.assembly.last_part.as_ref().is_none_or(|p| p.id != part.id) {
+            state.assembly.context_check = true;
+        }
         refresh(state);
+    }
+    crate::in_context::frame(state);
+    if let Some((text, kind)) = state.assembly.context_note.take() {
+        state.note(text, kind);
+    }
+    if state.assembly.context_check {
+        crate::in_context::follow(state);
     }
     #[cfg(target_arch = "wasm32")]
     crate::web::show_assembly(shown(state));
@@ -730,6 +751,7 @@ pub fn shown(state: &AppState) -> serde_json::Value {
         "active_configuration": s.doc.assembly().active_configuration().map(|c| c.name.clone()),
         "explode_steps": s.doc.assembly().explode.len(),
         "exploded": s.doc.is_exploded(),
+        "in_context": crate::in_context::shown(state),
     })
 }
 
@@ -777,6 +799,7 @@ fn install(state: &mut AppState, mut session: AssemblySession) {
     state.assembly.form = crate::subassembly::Draft::default();
     state.assembly.last_part = None;
     state.assembly.mate.clear_controller_values();
+    state.assembly.in_context = None;
     state.assembly.session = Some(session);
     state.assembly.active = true;
     state.drawing.active = false;
@@ -813,6 +836,8 @@ fn new_session(state: &AppState, name: String) -> AssemblySession {
 }
 
 pub fn apply(state: &mut AppState, dock: &mut DockState<Tab>, action: AssemblyAction) {
+    // Any assembly change may move a face an in-context reference follows.
+    state.assembly.context_check = true;
     match action {
         AssemblyAction::New => {
             let session = new_session(state, new_name(state));
@@ -853,7 +878,32 @@ pub fn apply(state: &mut AppState, dock: &mut DockState<Tab>, action: AssemblyAc
                 dock.set_focused_node_and_surface(egui_dock::NodePath { surface: path.surface, node: path.node });
             }
         }
-        AssemblyAction::EditPartInContext => state.note("Edit part in context is coming soon.", NoteKind::Info),
+        // The window opens the part first (see app::dispatch), then starts the editing.
+        AssemblyAction::EditPartInContext(_) => {}
+        AssemblyAction::ExitInContext => {
+            if let Some(path) = crate::in_context::leave(state) {
+                let newer = state.assembly.session.as_ref().is_some_and(|s| {
+                    s.doc.table().find(&path).is_some_and(|r| {
+                        matches!(
+                            s.doc.store().get(s.doc.table().definition(r)).freshness,
+                            Freshness::NewerAvailable { .. }
+                        )
+                    })
+                });
+                // Saved edits come into the assembly at once, as SolidWorks shows them.
+                if newer && !state.doc.dirty {
+                    match update(state) {
+                        Ok(_) => state.note("Updated the assembly with the edited part", NoteKind::Ok),
+                        Err(report) => state.note(report.refusal.unwrap_or_default(), NoteKind::Error),
+                    }
+                }
+            }
+            if state.assembly.session.is_some() {
+                state.assembly.active = true;
+                state.drawing.active = false;
+                show_tab(dock);
+            }
+        }
         AssemblyAction::Update => match update(state) {
             Ok(report) => state.note(format!("Updated {} sources", report.updated()), NoteKind::Ok),
             Err(report) => {
@@ -1313,8 +1363,8 @@ pub fn tree(ui: &mut egui::Ui, state: &mut AppState) {
                             actions.push(AppAction::OpenComponentPart(path.clone()));
                             ui.close();
                         }
-                        if ui.button("Edit part in context (coming soon)").clicked() {
-                            actions.push(AppAction::Assembly(AssemblyAction::EditPartInContext));
+                        if ui.button("Edit part in context").clicked() {
+                            actions.push(AppAction::Assembly(AssemblyAction::EditPartInContext(Some(path.clone()))));
                             ui.close();
                         }
                         ui.separator();

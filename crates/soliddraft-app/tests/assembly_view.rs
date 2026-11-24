@@ -111,6 +111,7 @@ impl View {
             cursor_px: Some([SIZE[0] / 2, SIZE[1] / 2]),
             meshes: (0, Vec::new()),
             ghost: None,
+            context: None,
             preview: None,
             threads: None,
             preview_pickable: false,

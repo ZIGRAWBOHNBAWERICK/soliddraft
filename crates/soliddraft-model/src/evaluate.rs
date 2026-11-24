@@ -46,9 +46,15 @@ const PARALLEL: f64 = 1e-9;
 
 /// Why an extrusion cannot start on a curved face. The pinned Catallax caps a straight
 /// sweep only on planes; a start on a curved face connects here once the kernel can
-/// sweep a profile from a curved face to the face moved along the direction.
-const CURVED_START: &str = "starting on a curved face needs a kernel capability this version does not have: \
-     Catallax cannot yet cap an extrusion on a curved surface. Pick a planar face or a plane";
+/// sweep a profile from a curved face to the face moved along the direction. The words
+/// name no kernel, so the form shows them as they are rather than a generic refusal.
+const CURVED_START: &str = "an extrusion cannot start on a curved face yet: it starts only on a planar face \
+     or a plane. Pick a planar face or a plane";
+
+/// Why an extrusion from a tilted start cannot end at a face that crosses the start.
+const LIMIT_CROSSES_START: &str = "the face the extrusion ends at crosses the start, so part of the profile \
+     would begin past that face and not be extruded. Choose a face that lies beyond the whole start, or a \
+     start parallel to the sketch";
 
 /// Why an extrusion cannot start on a plane that holds its direction.
 const START_HOLDS_DIRECTION: &str =
@@ -357,6 +363,14 @@ impl Document {
             && let Some(owner) = self.built.iter().find(|b| b.owned == Some(body))
         {
             profiles.push(owner.version);
+        }
+        // One that starts on a named plane reads the plane, which can move while the
+        // sketch, the extrusion and its input body stay as they were.
+        if let FeatureKind::Extrude(e) = &f.kind
+            && let Some(ExtrudeStart::Surface { plane: PlaneRef::Feature { feature } }) = &e.options.from
+            && let Some(index) = self.built_index(*feature)
+        {
+            profiles.push(self.built[index].version);
         }
         if let FeatureKind::Hole(h) = &f.kind
             && let Some(sketch_id) = h.sketch
@@ -900,7 +914,7 @@ impl Document {
             }
             Some(ExtrudeStart::Surface { plane }) => {
                 if let (PlaneRef::Face { face }, Some(body)) = (plane, start_body)
-                    && let Ok(id) = self.resolve_face(face, body)
+                    && let Ok(id) = self.resolve_plane_face(face, body)
                     && self.kernel.topology(body).ok().is_some_and(|t| t.face(id).is_some_and(|f| f.normal.is_none()))
                 {
                     return Built::failed(current, CURVED_START);
@@ -1256,10 +1270,16 @@ impl Document {
             Some(ExtrudeStart::Vertex { vertex }) => vertex.faces.first().map(|face| face.feature),
             _ => None,
         };
-        let Some(key) = owner.and_then(|id| self.feature(id)).map(|g| g.body).filter(|key| *key != f.body) else {
+        let Some(key) = owner.and_then(|id| self.feature(id)).map(|g| g.body) else {
             return current;
         };
-        self.body_at(key, self.index_of(f.id).unwrap_or(self.built.len())).or(current)
+        let end = self.index_of(f.id).unwrap_or(self.built.len());
+        // A Combine may have joined that body to another, which holds the face now.
+        let key = self.surviving_key(key, end);
+        if key == f.body {
+            return current;
+        }
+        self.body_at(key, end).or(current)
     }
 
     /// Joins an extrusion's tool to `body` or cuts it away, or makes it the body when
@@ -1309,6 +1329,11 @@ impl Document {
         let Some(span) = crate::tilted_start::span(&region.to_profile(sketch), &start, along) else {
             return Err(KernelError::InvalidInput(START_HOLDS_DIRECTION.into()));
         };
+        if let (Extent::Limit(ExtrudeLimit::UpToFace { face }), Some(body)) = (reach, target)
+            && !self.limit_clears_start(body, *face, &region.to_profile(sketch), &start, along, &span)?
+        {
+            return Err(KernelError::InvalidInput(LIMIT_CROSSES_START.into()));
+        }
         let margin = crate::tilted_start::margin(&span);
         // How far the slab goes from the start: the length, or past the body for a limit.
         let length = match (reach, target) {
@@ -1398,6 +1423,53 @@ impl Document {
         Ok((clipped.body, named))
     }
 
+    /// Whether the face an extrusion ends at lies ahead of a tilted start over the whole
+    /// profile, so the sweep from every point of the start reaches it. A planar face is
+    /// checked at the corners of the profile's bounding box, where the gap between the
+    /// two planes is least. A curved face must lie wholly beyond the start's farthest
+    /// point. A face parallel to the direction is left to the kernel to refuse.
+    fn limit_clears_start(
+        &self,
+        body: BodyId,
+        face: FaceId,
+        profile: &Profile,
+        start: &Plane,
+        along: Vec3,
+        span: &crate::tilted_start::Span,
+    ) -> KernelResult<bool> {
+        let t = self.kernel.topology(body)?;
+        let Some(limit) = t.face(face) else {
+            return Err(KernelError::InvalidInput("the face the extrusion ends at is missing".into()));
+        };
+        let Some((lo, hi)) = crate::tilted_start::bounds(profile) else {
+            return Ok(false);
+        };
+        let corners = [(lo.u, lo.v), (hi.u, lo.v), (lo.u, hi.v), (hi.u, hi.v)]
+            .map(|(u, v)| profile.plane.to_world(Point2::new(u, v)));
+        // How far along the direction a point of the sketch plane meets a plane.
+        let reach = |on: Vec3, normal: Vec3, from: Vec3| (on - from).dot(normal) / along.dot(normal);
+        match limit.normal {
+            Some(n) if along.dot(n).abs() > PARALLEL => {
+                Ok(corners.iter().all(|c| reach(limit.centroid, n, *c) > reach(start.origin, start.normal, *c)))
+            }
+            Some(_) => Ok(true),
+            None => {
+                let (lo, hi) = (limit.bbox.min, limit.bbox.max);
+                let nearest = (0..8)
+                    .map(|c| {
+                        let corner = Vec3::new(
+                            if c & 1 == 0 { lo.x } else { hi.x },
+                            if c & 2 == 0 { lo.y } else { hi.y },
+                            if c & 4 == 0 { lo.z } else { hi.z },
+                        );
+                        (corner - profile.plane.origin).dot(along)
+                    })
+                    .fold(f64::INFINITY, f64::min);
+                Ok(nearest > span.far)
+            }
+        }
+    }
+
     /// Resolves a feature's plane: a reference plane, or a planar face of `body` with
     /// its outward normal.
     pub fn plane_of(&self, r: &PlaneRef, body: BodyId) -> Result<Plane, Box<RepairNeeded>> {
@@ -1411,7 +1483,7 @@ impl Document {
             }
             PlaneRef::Face { face } => {
                 let id = self
-                    .resolve_face(face, body)
+                    .resolve_plane_face(face, body)
                     .map_err(|r| Box::new(RepairNeeded { slot: ReferenceSlot::Plane, ..r }))?;
                 let info = self.kernel.topology(body).ok().and_then(|t| t.face(id).cloned());
                 match info.and_then(|f| f.normal.map(|n| (n, f.centroid))) {

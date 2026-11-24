@@ -184,7 +184,8 @@ pub struct ViewportState {
     pub(crate) graphics_tier: look::Tier,
     pub(crate) frame_ms: f32,
     still_view: Option<(PickView, f64)>,
-    /// Named background; offscreen views can use the theme fade.
+    pub(crate) appearance: Arc<theme::Appearance>,
+    /// The last named background chosen in the view bar.
     pub scene: Option<scenes::Scene>,
     pub(crate) context_menus: bool,
     context_pick: Option<ContextPick>,
@@ -240,6 +241,11 @@ impl Default for ViewportState {
             graphics_tier: look::Tier::Basic,
             frame_ms: 0.0,
             still_view: None,
+            appearance: {
+                let mut appearance = theme::Appearance::default();
+                appearance.background = theme::Background::Scene;
+                Arc::new(appearance)
+            },
             scene: None,
             context_menus: false,
             context_pick: None,
@@ -610,7 +616,15 @@ impl ViewportState {
                 rect,
                 &response,
                 spacing,
-                self.scene.is_some_and(scenes::Scene::is_dark),
+                match self.appearance.background {
+            theme::Background::Scene if self.scene.is_some() => self.scene.is_some_and(scenes::Scene::is_dark),
+            theme::Background::Picture => self.appearance.picture_is_dark(),
+            theme::Background::Color => theme::luminance(self.appearance.background_color.into()) < 0.25,
+            _ => {
+                let [top, bottom] = theme::viewport_backdrop();
+                theme::luminance(top.lerp_to_gamma(bottom, 0.5)) < 0.25
+            }
+        },
                 curve_halo,
             );
             ui.ctx().request_repaint();
@@ -658,7 +672,15 @@ impl ViewportState {
                 only.filter(|_| !self.all_dimensions),
                 &visible.sketches,
                 self.annotation_drag.as_ref().map(|d| (d.key, d.position)),
-                self.scene.is_some_and(scenes::Scene::is_dark),
+                match self.appearance.background {
+            theme::Background::Scene if self.scene.is_some() => self.scene.is_some_and(scenes::Scene::is_dark),
+            theme::Background::Picture => self.appearance.picture_is_dark(),
+            theme::Background::Color => theme::luminance(self.appearance.background_color.into()) < 0.25,
+            _ => {
+                let [top, bottom] = theme::viewport_backdrop();
+                theme::luminance(top.lerp_to_gamma(bottom, 0.5)) < 0.25
+            }
+        },
             )
         } else {
             Vec::new()
@@ -810,7 +832,11 @@ impl ViewportState {
 
     /// The scene behind the model, without its screen grid while the grid is hidden.
     fn backdrop(&self) -> scenes::Backdrop {
-        let mut backdrop = self.scene.map_or_else(|| theme::viewport_backdrop().into(), scenes::Scene::backdrop);
+        let mut backdrop = match self.appearance.background {
+            theme::Background::Scene => self.scene.map_or_else(|| theme::viewport_backdrop().into(), scenes::Scene::backdrop),
+            theme::Background::Color => [self.appearance.background_color.into(); 2].into(),
+            theme::Background::Gradient | theme::Background::Picture => theme::viewport_backdrop().into(),
+        };
         if !self.references.show_grid {
             backdrop.grid = [0.0; 2];
         }
@@ -825,14 +851,23 @@ impl ViewportState {
 
     /// Whether the scene behind the model is a dark one.
     fn dark_scene(&self) -> bool {
-        self.scene.is_some_and(scenes::Scene::is_dark)
+        match self.appearance.background {
+            theme::Background::Scene if self.scene.is_some() => self.scene.is_some_and(scenes::Scene::is_dark),
+            theme::Background::Picture => self.appearance.picture_is_dark(),
+            theme::Background::Color => theme::luminance(self.appearance.background_color.into()) < 0.25,
+            _ => {
+                let [top, bottom] = theme::viewport_backdrop();
+                theme::luminance(top.lerp_to_gamma(bottom, 0.5)) < 0.25
+            }
+        }
     }
 
     fn grid(&self, rect: Rect, plane: &GridPlane) -> Option<GridFrame> {
-        let ink = self.grid_style.color.unwrap_or_else(|| {
+        let override_ink = self.appearance.colors.grid.map(Into::into).or(self.grid_style.color);
+        let ink = override_ink.unwrap_or_else(|| {
             if self.dark_scene() { theme::scene_ink(true) } else { theme::edit_suite::FULLY_DEFINED }
         });
-        let opacity = self.grid_style.opacity_in(theme::mode().is_dark());
+        let opacity = self.grid_style.opacity_in(self.dark_scene());
         GridFrame::new(plane, self.grid_spacing(rect)?, &self.camera, ink, opacity)
     }
 
@@ -889,6 +924,8 @@ impl ViewportState {
             tint_preview: self.graphics.tint_preview,
             red_removal: self.graphics.red_removal,
             section_hatch: if self.section_active { self.graphics.section_hatch } else { Default::default() },
+            edge_color: self.appearance.colors.edges,
+            selection_color: self.appearance.colors.selection,
             ..Default::default()
         }
     }
@@ -911,6 +948,9 @@ impl ViewportState {
             preset: self.preset,
             controls: self.render_controls(),
             backdrop: self.backdrop(),
+            backdrop_picture: (self.appearance.background == theme::Background::Picture)
+                .then(|| self.appearance.picture())
+                .flatten(),
             floor: self.references.show_floor,
             hover_id: 0,
             selected_id: 0,

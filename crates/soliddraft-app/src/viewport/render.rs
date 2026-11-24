@@ -128,6 +128,7 @@ pub struct FrameInput {
     pub controls: Controls,
     /// The gradient and optional screen grid composited behind the model.
     pub backdrop: super::scenes::Backdrop,
+    pub backdrop_picture: Option<Arc<image::RgbaImage>>,
     /// Whether the ground under the model shows the model's shadow.
     pub floor: bool,
     pub hover_id: u32,
@@ -185,6 +186,8 @@ pub struct Controls {
     pub tint_preview: bool,
     pub red_removal: bool,
     pub section_hatch: crate::graphics::SectionHatch,
+    pub edge_color: Option<crate::theme::Rgb>,
+    pub selection_color: Option<crate::theme::Rgb>,
 }
 
 impl Default for Controls {
@@ -198,7 +201,18 @@ impl Default for Controls {
             tint_preview: true,
             red_removal: true,
             section_hatch: Default::default(),
+            edge_color: None,
+            selection_color: None,
         }
+    }
+}
+
+pub(crate) const DEFAULT_EDGE: egui::Color32 = egui::Color32::from_rgb(41, 48, 64);
+pub(crate) const DEFAULT_SELECTION: egui::Color32 = egui::Color32::from_rgb(31, 94, 209);
+
+impl Controls {
+    pub(super) fn color_uniform(color: Option<crate::theme::Rgb>) -> [f32; 4] {
+        color.map_or([0.0; 4], |c| egui::Rgba::from(egui::Color32::from(c)).to_array())
     }
 }
 
@@ -290,6 +304,8 @@ struct Globals {
     grid_lines: [f32; 4],
     plane_size: [f32; 4],
     planes: [[f32; 4]; 3],
+    edge_color: [f32; 4],
+    selection_color: [f32; 4],
     sh: [[f32; 4]; 9],
     hover_id: u32,
     selected_id: u32,
@@ -305,10 +321,23 @@ struct Backdrop {
     stops: [[f32; 4]; 5],
     radial: [f32; 4],
     grid: [f32; 4],
+    picture_uv: [f32; 4],
 }
 
 impl Backdrop {
-    fn from_srgb(bg: super::scenes::Backdrop, size: [u32; 2], ppp: f32) -> Self {
+    fn from_srgb(
+        bg: super::scenes::Backdrop,
+        size: [u32; 2],
+        ppp: f32,
+        picture: Option<&image::RgbaImage>,
+    ) -> Self {
+        let picture_uv = picture.map_or([1.0, 1.0, 0.0, 0.0], |image| {
+            let viewport_aspect = size[0].max(1) as f32 / size[1].max(1) as f32;
+            let image_aspect = image.width() as f32 / image.height() as f32;
+            let x = (viewport_aspect / image_aspect).min(1.0);
+            let y = (image_aspect / viewport_aspect).min(1.0);
+            [x, y, (1.0 - x) * 0.5, (1.0 - y) * 0.5]
+        });
         Self {
             stops: bg.stops.map(|(color, at)| {
                 let [r, g, b, _] = egui::Rgba::from(color).to_array();
@@ -316,6 +345,7 @@ impl Backdrop {
             }),
             radial: bg.radial,
             grid: [bg.grid[0], bg.grid[1], size[0] as f32 / ppp, size[1] as f32 / ppp],
+            picture_uv,
         }
     }
 }
@@ -606,6 +636,8 @@ pub struct ViewportRenderer {
     /// What the shadow map was last drawn from: mesh version and preview.
     shadow_key: Option<(u64, usize, bool)>,
     white: wgpu::TextureView,
+    transparent: wgpu::TextureView,
+    backdrop_picture: Option<(Arc<image::RgbaImage>, wgpu::TextureView)>,
     sh: [[f32; 4]; 9],
     targets: Option<Targets>,
     bodies: HashMap<BodyId, GpuBody>,
@@ -624,6 +656,29 @@ pub struct ViewportRenderer {
     display: DisplayMode,
     frame: u64,
     assembly: AssemblyRenderer,
+}
+
+fn picture_view(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    [width, height]: [u32; 2],
+    rgba: &[u8],
+) -> wgpu::TextureView {
+    device.create_texture_with_data(
+        queue,
+        &wgpu::TextureDescriptor {
+            label: Some("viewport background picture"),
+            size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        },
+        wgpu::util::TextureDataOrder::LayerMajor,
+        rgba,
+    ).create_view(&Default::default())
 }
 
 impl ViewportRenderer {
@@ -740,6 +795,7 @@ impl ViewportRenderer {
                     texture_entry(0, wgpu::TextureSampleType::Float { filterable: true }, d2),
                     sampler_entry(1, wgpu::SamplerBindingType::Filtering),
                     uniform_entry(2),
+                    texture_entry(3, wgpu::TextureSampleType::Float { filterable: true }, d2),
                 ],
             }),
         };
@@ -1168,6 +1224,8 @@ impl ViewportRenderer {
             sun: None,
             shadow_key: None,
             white,
+            transparent: picture_view(device, queue, [1, 1], &[0; 4]),
+            backdrop_picture: None,
             sh: env.irradiance,
             targets: None,
             bodies: HashMap::new(),
@@ -1239,6 +1297,12 @@ impl ViewportRenderer {
                 wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&color) },
                 wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&self.sampler) },
                 wgpu::BindGroupEntry { binding: 2, resource: self.backdrop.as_entire_binding() },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::TextureView(
+                        self.backdrop_picture.as_ref().map_or(&self.transparent, |(_, view)| view),
+                    ),
+                },
             ],
         });
         let ao = self.ao_pipelines.is_some().then(|| {
@@ -1378,6 +1442,18 @@ impl ViewportRenderer {
         } else {
             1
         };
+        let same_picture = match (&self.backdrop_picture, &input.backdrop_picture) {
+            (None, None) => true,
+            (Some((cached, _)), Some(current)) => Arc::ptr_eq(cached, current),
+            _ => false,
+        };
+        if !same_picture {
+            self.backdrop_picture = input.backdrop_picture.as_ref().map(|picture| {
+                let view = picture_view(device, queue, [picture.width(), picture.height()], picture.as_raw());
+                (picture.clone(), view)
+            });
+            self.targets = None;
+        }
         self.ensure_targets(device, input.size_px, scale);
 
         let (version, meshes) = &input.meshes;
@@ -1477,7 +1553,9 @@ impl ViewportRenderer {
         queue.write_buffer(
             &self.backdrop,
             0,
-            bytemuck::bytes_of(&Backdrop::from_srgb(input.backdrop, input.size_px, input.pixels_per_point)),
+            bytemuck::bytes_of(&Backdrop::from_srgb(
+                input.backdrop, input.size_px, input.pixels_per_point, input.backdrop_picture.as_deref(),
+            )),
         );
         let model_radius = bounds.map_or(100.0, |(lo, hi)| ((hi - lo).length() / 2.0).max(1.0));
         let grid = input.grid.unwrap_or(GridFrame {
@@ -1534,6 +1612,8 @@ impl ViewportRenderer {
                 planes::OUTLINE_POINTS * input.pixels_per_point,
             ],
             planes: [plane_ink(0), plane_ink(1), plane_ink(2)],
+            edge_color: Controls::color_uniform(input.controls.edge_color),
+            selection_color: Controls::color_uniform(input.controls.selection_color),
             sh: self.sh,
             hover_id: input.hover_id,
             selected_id: input.selected_id,
@@ -1585,7 +1665,7 @@ impl ViewportRenderer {
         };
 
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("viewport") });
-        self.assembly.prepare(device, queue, &mut encoder, input.assembly.as_ref(), input.size_px, input.cursor_px);
+        self.assembly.prepare(device, queue, &mut encoder, input);
         let targets = self.targets.as_ref().expect("targets");
         let draw_faces = |pass: &mut wgpu::RenderPass<'_>, bodies: &mut dyn Iterator<Item = &GpuBody>, groups: bool| {
             for body in bodies {
@@ -2010,9 +2090,9 @@ mod tests {
 
     #[test]
     fn globals_match_the_shader_layout() {
-        // Five matrices, nineteen vectors, nine harmonics and four ids.
-        assert_eq!(std::mem::size_of::<Globals>(), 5 * 64 + 19 * 16 + 9 * 16 + 16);
-        assert_eq!(std::mem::size_of::<Backdrop>(), 7 * 16);
+        // Five matrices, twenty-one vectors, nine harmonics and four ids.
+        assert_eq!(std::mem::size_of::<Globals>(), 5 * 64 + 21 * 16 + 9 * 16 + 16);
+        assert_eq!(std::mem::size_of::<Backdrop>(), 8 * 16);
         assert_eq!(std::mem::size_of::<LineInstance>(), 28);
         assert_eq!(std::mem::size_of::<BodyUniform>(), 32 + 48 * MAX_APPEARANCES);
     }

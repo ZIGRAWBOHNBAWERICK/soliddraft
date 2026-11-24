@@ -1,9 +1,6 @@
 //! Clear Bench appearance settings through the real app and wgpu pipeline.
 //! Bracket frames are written under the temporary directory for review.
 //!
-//! The mode is process-wide (`theme::set_mode`), so switches run light then dark
-//! serially in one test.
-//!
 //! Skips itself when no GPU adapter is available (plain CI runners).
 
 use egui::{Key, Modifiers, vec2};
@@ -55,11 +52,12 @@ fn the_bracket_in_light_and_dark() {
         harness.state_mut().state.push(AppAction::SetTheme(mode));
         harness.run_steps(6);
         assert_eq!(theme::mode(), mode, "the appearance preference is retained");
-        assert_eq!(theme::active_theme_id(), "clear_bench");
-        assert_eq!(theme::palette(), &theme::clear_bench::PALETTE);
+        let tokens = theme::BuiltIn::for_mode(mode).tokens();
+        assert_eq!(theme::active_theme_id(), tokens.id);
+        assert_eq!(theme::palette(), tokens.palette);
         let style = harness.ctx.global_style();
-        assert!(!style.visuals.dark_mode, "Clear Bench has daylight chrome in either mode");
-        assert_eq!(style.visuals.panel_fill, egui::Color32::WHITE);
+        assert_eq!(style.visuals.dark_mode, mode.is_dark());
+        assert_eq!(style.visuals.panel_fill, tokens.palette.panel);
         assert_eq!(style.visuals.widgets.inactive.corner_radius, egui::CornerRadius::same(6));
         let image = harness.render().expect("Clear Bench renders");
         // The tool strip's own ground shows in the gap between two of its cards.
@@ -67,13 +65,13 @@ fn the_bracket_in_light_and_dark() {
         let gap = (start.right() + 2.0) as u32;
         assert_eq!(
             image.get_pixel(gap, start.center().y as u32).0,
-            [0xf5, 0xf7, 0xfa, 255],
-            "the strip paints its daylight ground"
+            tokens.palette.ribbon.to_array(),
+            "the strip paints the active theme's ribbon ground"
         );
         assert_eq!(
             image.get_pixel((start.left() + 6.0) as u32, start.center().y as u32).0,
-            [0x1d, 0x52, 0xd6, 255],
-            "Start sketch paints solid cobalt"
+            tokens.palette.accent.to_array(),
+            "Start sketch paints the active theme's accent"
         );
         let path = out_dir().join(format!("clear-bench-{}.png", mode.label().to_lowercase()));
         image.save(&path).expect("save Clear Bench png");
@@ -106,13 +104,37 @@ fn the_bracket_in_light_and_dark() {
         assert!(contrast >= 3.0, "{}: keyboard focus contrast is {contrast:.2}:1 ({ring:?} / {fill:?})", mode.label());
     }
 
+    harness.state_mut().state.push(AppAction::ShowPreferences);
     harness.run_steps(6);
-    assert_eq!(theme::palette(), &theme::clear_bench::PALETTE);
-    harness.state_mut().state.push(AppAction::SetTheme(Mode::Light));
-    harness.run_steps(2);
-    assert_eq!(theme::palette(), &theme::clear_bench::PALETTE);
-    assert!(!harness.ctx.global_style().visuals.dark_mode);
-    let saved = std::fs::read_to_string(config.join("settings.json")).expect("the choice was saved");
-    assert!(saved.contains("\"theme\": \"light\""), "the last choice is in the file: {saved}");
+    harness.get_by_label("Appearance").click();
+    harness.run_steps(3);
+    harness.get_by_label("Gruvbox Light").click();
+    harness.run_steps(3);
+    assert_eq!(theme::active_theme_id(), "gruvbox-light");
+
+    harness.get_by_label("Cancel").click();
+    harness.run_steps(4);
+    assert_eq!(theme::active_theme_id(), "clear-bench-dark");
+    let saved = soliddraft_app::settings::theme_preferences();
+    assert_eq!(saved.selected, theme::Selection::BuiltIn(theme::BuiltIn::ClearBenchDark));
+
+    harness.state_mut().state.push(AppAction::ShowPreferences);
+    harness.run_steps(4);
+    harness.get_by_label("Appearance").click();
+    harness.run_steps(3);
+    harness.get_by_label("Gruvbox Light").click();
+    harness.run_steps(3);
+    harness.get_by_label("OK").click();
+    harness.run_steps(4);
+    drop(harness);
+
+    let resumed = Harness::builder()
+        .with_size(vec2(1440.0, 900.0))
+        .wgpu()
+        .build_eframe(|cc| {
+            SolidDraftApp::new(cc, soliddraft_app::command_tools::board_bracket(), Automation::default())
+        });
+    assert_eq!(theme::active_theme_id(), "gruvbox-light");
+    assert_eq!(resumed.ctx.global_style().visuals.panel_fill, theme::BuiltIn::GruvboxLight.tokens().palette.panel);
     let _ = std::fs::remove_dir_all(config);
 }

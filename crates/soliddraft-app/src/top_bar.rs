@@ -528,11 +528,13 @@ fn close_question(ctx: &egui::Context, state: &mut AppState, dock: &mut DockStat
 fn brand_mark(ui: &mut egui::Ui) {
     let (brand, _) = ui.allocate_exact_size(vec2(92.0, 26.0), Sense::hover());
     let sq = Rect::from_center_size(pos2(brand.left() + 10.0, brand.center().y), vec2(16.0, 16.0));
-    ui.painter().rect_filled(sq, CornerRadius::same(4), theme::accent());
+    let logo = theme::logo();
+    let glint = if theme::view_uses_custom_logo() { Color32::WHITE } else { Color32::from_rgb(0x60, 0xa5, 0xfa) };
+    ui.painter().rect_filled(sq, CornerRadius::same(4), logo);
     ui.painter().rect_filled(
         Rect::from_min_max(sq.min + vec2(6.0, 6.0), sq.max),
         CornerRadius { nw: 0, ne: 0, sw: 0, se: 4 },
-        theme::accent().lerp_to_gamma(Color32::from_rgb(0x60, 0xa5, 0xfa), 0.72),
+        logo.lerp_to_gamma(glint, 0.72),
     );
     ui.painter().text(
         pos2(brand.left() + 24.0, brand.center().y),

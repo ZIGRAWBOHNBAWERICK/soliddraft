@@ -1877,15 +1877,17 @@ impl SolidDraftApp {
                 if let Some(session) = self.state.assembly.session.as_mut() {
                     session.viewport.scene = Some(scene);
                 }
-                if let Err(e) = crate::settings::save_scene(scene) {
+                let mut appearance = self.state.viewport.appearance.clone();
+                std::sync::Arc::make_mut(&mut appearance).background = theme::Background::Scene;
+                if let Err(e) = crate::settings::save_appearance_and_view(&appearance, Some(scene)) {
                     self.state.note(format!("Scene changed, but could not be saved: {e}"), NoteKind::Error);
                 }
+                let _ = self.state.set_appearance(ctx, appearance, false);
             }
             AppAction::SetTheme(mode) => {
-                theme::set_mode(ctx, mode);
-                if let Err(e) = crate::settings::save_appearance(&crate::settings::Appearance { theme: mode }) {
-                    log::warn!("cannot save the appearance: {e}");
-                }
+                let mut appearance = self.state.viewport.appearance.clone();
+                std::sync::Arc::make_mut(&mut appearance).selected = theme::Selection::BuiltIn(theme::BuiltIn::for_mode(mode));
+                let _ = self.state.set_appearance(ctx, appearance, true);
             }
             AppAction::ToggleProjection => {
                 let camera = &mut self.state.active_viewport_mut().camera;
@@ -2236,6 +2238,7 @@ impl SolidDraftApp {
                         self.state.viewport.references,
                         self.state.viewport.grid_style,
                     )
+                    .with_appearance(self.state.viewport.appearance.clone())
                     .with_shortcuts(&self.state.shortcuts)
                     .with_autosave(self.state.autosave_policy())
                 });

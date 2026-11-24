@@ -136,6 +136,7 @@ fn reserved_categories_are_not_finished_pages() {
             "navigation.view_keys",
             "viewport.grid_and_planes",
             "interface.shortcuts",
+            "appearance_graphics.appearance",
             "appearance_graphics.graphics",
             "general_documents.autosave"
         ]

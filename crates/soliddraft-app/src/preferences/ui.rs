@@ -95,7 +95,7 @@ pub(super) fn show(p: &mut Preferences, ui: &mut egui::Ui) {
             let ink = if close.hovered() { theme::ink() } else { theme::muted() };
             icons::paint(ui.painter(), Icon::Close, rect.shrink(5.0), ink);
             if close.on_hover_text("Close").clicked() {
-                p.close_requested = true;
+                p.confirm_and_close();
             }
             egui::Frame::new()
                 .fill(theme::chip())
@@ -164,6 +164,7 @@ pub(super) fn show(p: &mut Preferences, ui: &mut egui::Ui) {
                                 VIEW_KEYS => view_keys_page(p, ui),
                                 GRID_AND_PLANES => grid_and_planes_page(p, ui),
                                 SHORTCUTS => shortcuts_page(p, ui),
+                                super::APPEARANCE => super::appearance::show(p, ui),
                                 super::GRAPHICS => super::graphics::show(p, ui),
                                 AUTOSAVE => autosave_page(p, ui),
                                 id => {

@@ -11,6 +11,7 @@
 //! `AppState::set_autosave`) and the tests can do the same
 //! without a GPU.
 
+mod appearance;
 mod graphics;
 mod ui;
 pub(crate) use graphics::current_view_controls;
@@ -45,14 +46,17 @@ pub const GRID_AND_PLANES: &str = "viewport.grid_and_planes";
 pub const SHORTCUTS: &str = "interface.shortcuts";
 pub const AUTOSAVE: &str = "general_documents.autosave";
 
+pub const APPEARANCE: &str = "appearance_graphics.appearance";
+
 pub const GRAPHICS: &str = "appearance_graphics.graphics";
 
-const PAGES: [Page; 7] = [
+const PAGES: [Page; 8] = [
     Page { id: MOUSE, category: "navigation", title: "Mouse" },
     Page { id: ORBIT_ZOOM, category: "navigation", title: "Orbit and zoom" },
     Page { id: VIEW_KEYS, category: "navigation", title: "View keys" },
     Page { id: GRID_AND_PLANES, category: "viewport", title: "Grid and planes" },
     Page { id: SHORTCUTS, category: "interface", title: "Shortcuts" },
+    Page { id: APPEARANCE, category: "appearance_graphics", title: "Appearance" },
     Page { id: GRAPHICS, category: "appearance_graphics", title: "Graphics" },
     Page { id: AUTOSAVE, category: "general_documents", title: "Autosave and recovery" },
 ];
@@ -181,6 +185,9 @@ fn index() -> Vec<Hit> {
     for (control, label) in ui::AUTOSAVE_CONTROLS {
         all.push(hit(AUTOSAVE, Some(control.to_owned()), label.to_owned()));
     }
+    for &(control, label) in appearance::CONTROLS {
+        all.push(hit(APPEARANCE, Some(control.to_owned()), label.to_owned()));
+    }
     for &(control, label) in graphics::CONTROLS {
         all.push(hit(GRAPHICS, Some(control.to_owned()), label.to_owned()));
     }
@@ -213,6 +220,7 @@ pub enum Change {
     Shortcuts(Shortcuts),
     /// Save and use these autosave settings.
     Autosave(AutosavePolicy),
+    Appearance { appearance: std::sync::Arc<crate::theme::Appearance>, keep: bool },
     Graphics(crate::graphics::Graphics),
     CurrentView(crate::graphics::CurrentView),
 }
@@ -234,6 +242,10 @@ pub struct Preferences {
     pub draft: NavigationSettings,
     /// The display choices as the window shows them.
     pub display: ReferenceDisplay,
+    appearance: std::sync::Arc<crate::theme::Appearance>,
+    initial_appearance: std::sync::Arc<crate::theme::Appearance>,
+    theme_filter: appearance::Filter,
+    appearance_picker: Option<crate::platform::Purpose>,
     pub graphics: crate::graphics::Graphics,
     pub graphics_device: crate::graphics::GraphicsDevice,
     current_view: crate::graphics::CurrentView,
@@ -286,6 +298,10 @@ impl Preferences {
             highlight: None,
             draft: settings.clone(),
             display,
+            appearance: Default::default(),
+            initial_appearance: Default::default(),
+            theme_filter: Default::default(),
+            appearance_picker: None,
             graphics: Default::default(),
             graphics_device: Default::default(),
             current_view: crate::graphics::CurrentView::of(&crate::viewport::ViewportState::default()),
@@ -349,6 +365,12 @@ impl Preferences {
                 let preset = self.shortcuts.preset;
                 self.reset_all_shortcuts(preset);
             }
+            APPEARANCE => {
+                self.appearance_picker = None;
+                self.theme_filter = appearance::Filter::All;
+                self.edit_appearance(Default::default());
+                self.message = Some(Message { text: "Appearance restored to defaults.".into(), error: false });
+            }
             AUTOSAVE => {
                 self.edit_autosave(AutosavePolicy::default(), true);
                 self.message = Some(Message { text: "Autosave restored to defaults.".into(), error: false });
@@ -367,6 +389,9 @@ impl Preferences {
             self.changes.push(Change::Autosave(self.autosave));
             self.autosave_pending = false;
         }
+        if self.initial_appearance != self.appearance {
+            self.changes.push(Change::Appearance { appearance: self.appearance.clone(), keep: true });
+        }
         self.initial_draft = self.draft.clone();
         self.initial_display = self.display;
         self.initial_grid = self.grid;
@@ -377,6 +402,7 @@ impl Preferences {
 
     /// Reverts any edits made since the dialog opened (or last Apply) and requests close.
     pub fn cancel_and_close(&mut self) {
+        self.edit_appearance(self.initial_appearance.clone());
         if self.draft != self.initial_draft {
             self.draft = self.initial_draft.clone();
             self.changes.push(Change::Navigation(self.draft.clone()));
@@ -745,6 +771,14 @@ pub fn window(ctx: &egui::Context, prefs: &mut Option<Preferences>, state: &mut 
                     p.not_kept(&why);
                 }
             }
+            Change::Appearance { appearance, keep } => match state.set_appearance(ctx, appearance.clone(), keep) {
+                Ok(()) if keep => p.initial_appearance = appearance,
+                Ok(()) => {}
+                Err(why) => {
+                    p.not_kept(&why);
+                    p.close_requested = false;
+                }
+            },
             Change::Graphics(graphics) => {
                 if let Err(why) = state.set_graphics(graphics) {
                     p.not_kept(&why);

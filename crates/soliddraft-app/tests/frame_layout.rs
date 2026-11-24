@@ -19,7 +19,7 @@ fn old_and_current_frame_settings_open_edit_suite_and_the_command_palette() {
         let mut app = ribbon::app(ribbon::plate());
         case.run(&mut app, |app| {
             assert!(app.state().state.tree_shown(), "{setting}: the part's tree starts shown");
-            let palette = &theme::edit_suite::PALETTE;
+            let palette = theme::edit_suite::PALETTE;
             assert_eq!(theme::palette(), palette, "{setting}: startup installs the frame's tokens");
             assert_eq!(app.ctx.global_style().visuals.panel_fill, palette.panel);
             assert!(app.state().state.viewport.rect.is_positive());

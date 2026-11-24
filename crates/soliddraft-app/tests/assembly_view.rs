@@ -104,6 +104,7 @@ impl View {
             preset: Preset::default(),
             controls: Default::default(),
             backdrop: soliddraft_app::theme::viewport_backdrop().into(),
+            backdrop_picture: None,
             floor: true,
             hover_id: 0,
             selected_id: 0,

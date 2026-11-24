@@ -48,6 +48,8 @@ struct Globals {
     plane_size: vec4<f32>,
     // Top, Front and Right. rgb: their colour. a: their strength, 0 when hidden.
     planes: array<vec4<f32>, 3>,
+    edge_color: vec4<f32>,
+    selection_color: vec4<f32>,
     // Diffuse environment light as nine spherical-harmonic coefficients (environment.rs).
     sh: array<vec4<f32>, 9>,
     hover_id: u32,
@@ -64,6 +66,10 @@ struct Shade {
     // x: metallic. y: roughness.
     params: vec4<f32>,
 };
+
+fn selection_color() -> vec3<f32> {
+    return mix(srgb_to_linear(vec3<f32>(0.12, 0.37, 0.82)), globals.selection_color.rgb, globals.selection_color.a);
+}
 
 struct Body {
     // bit 0: whole body selected, bit 1: ghost preview, bit 2: preview result, bit 3: ghost removes material
@@ -265,7 +271,7 @@ fn face_colour(in: FaceOut) -> vec4<f32> {
     if (dot(n, v) < 0.0) {
         n = -n;
     }
-    let accent = srgb_to_linear(vec3<f32>(0.12, 0.37, 0.82));
+    let accent = selection_color();
     let red = srgb_to_linear(vec3<f32>(0.80, 0.24, 0.24));
     let selected_body = (body.flags & 1u) != 0u;
     let ghost = (body.flags & 2u) != 0u;
@@ -573,7 +579,7 @@ fn fs_edge(in: LineOut) -> @location(0) vec4<f32> {
     let ghost = (body.flags & 2u) != 0u;
     let removes = (body.flags & 8u) != 0u;
     let thread = (body.flags & 16u) != 0u;
-    var color = srgb_to_linear(vec3<f32>(0.16, 0.19, 0.25));
+    var color = mix(srgb_to_linear(vec3<f32>(0.16, 0.19, 0.25)), globals.edge_color.rgb, globals.edge_color.a);
     var alpha = 0.9;
     if (thread) {
         // Cosmetic thread marks (render.rs THREAD_MARKS), in a blue apart from the edges.
@@ -592,7 +598,7 @@ fn fs_edge(in: LineOut) -> @location(0) vec4<f32> {
 
 @fragment
 fn fs_hidden_edge() -> @location(0) vec4<f32> {
-    let color = srgb_to_linear(vec3<f32>(0.12, 0.37, 0.82));
+    let color = selection_color();
     return vec4<f32>(color * 0.5, 0.5);
 }
 
@@ -668,7 +674,7 @@ fn vs_marker(in: IdVertexIn) -> MarkerOut {
 fn fs_marker(in: MarkerOut) -> @location(0) vec4<f32> {
     let d = length(in.offset);
     let a = 1.0 - smoothstep(0.75, 1.0, d);
-    let color = mix(srgb_to_linear(vec3<f32>(0.12, 0.37, 0.82)), vec3<f32>(1.0), smoothstep(0.45, 0.75, d));
+    let color = mix(selection_color(), vec3<f32>(1.0), smoothstep(0.45, 0.75, d));
     return vec4<f32>(color * a, a);
 }
 
@@ -792,8 +798,10 @@ struct Backdrop {
     stops: array<vec4<f32>, 5>,
     radial: vec4<f32>,
     grid: vec4<f32>,
+    picture_uv: vec4<f32>,
 };
 @group(0) @binding(2) var<uniform> backdrop: Backdrop;
+@group(0) @binding(3) var backdrop_picture: texture_2d<f32>;
 
 struct BlitOut {
     @builtin(position) clip: vec4<f32>,
@@ -824,6 +832,8 @@ fn composite(uv: vec2<f32>) -> vec3<f32> {
             bg = mix(bg, b.rgb, clamp((t - a.w) / (b.w - a.w), 0.0, 1.0));
         }
     }
+    let picture = textureSample(backdrop_picture, scene_sampler, uv * backdrop.picture_uv.xy + backdrop.picture_uv.zw);
+    bg = mix(bg, picture.rgb, picture.a);
     if backdrop.grid.x > 0.0 {
         let pixel = uv * backdrop.grid.zw;
         let cell = fract(pixel / backdrop.grid.x) * backdrop.grid.x;

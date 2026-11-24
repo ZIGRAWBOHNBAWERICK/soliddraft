@@ -144,7 +144,12 @@ impl SolidDraftApp {
 
     pub fn new(cc: &eframe::CreationContext<'_>, doc: Document, automation: Automation) -> Self {
         crate::settings::capture_install_kind();
-        theme::install(&cc.egui_ctx, automation.theme.unwrap_or_else(|| crate::settings::appearance().theme));
+        let mut appearance = crate::settings::theme_preferences();
+        if let Some(mode) = automation.theme {
+            appearance.selected = theme::Selection::BuiltIn(theme::BuiltIn::for_mode(mode));
+        }
+        theme::install(&cc.egui_ctx, theme::Mode::Light);
+        theme::apply_appearance(&cc.egui_ctx, &appearance);
         let graphics = crate::settings::graphics();
         let graphics_device = cc.wgpu_render_state.as_ref().map_or_else(Default::default, |rs| {
             let device = ViewportRenderer::graphics_device(&rs.adapter, &rs.device, graphics.samples);
@@ -162,6 +167,7 @@ impl SolidDraftApp {
         #[cfg(target_arch = "wasm32")]
         crate::web::set_context(&cc.egui_ctx);
         let mut state = AppState::new(doc);
+        state.viewport.appearance = std::sync::Arc::new(appearance);
         state.graphics_device = graphics_device;
         state.graphics = graphics;
         #[cfg(not(target_arch = "wasm32"))]
@@ -911,6 +917,9 @@ impl eframe::App for SolidDraftApp {
     }
 
     fn ui(&mut self, root: &mut egui::Ui, frame: &mut eframe::Frame) {
+        if self.state.viewport.appearance.selected == theme::Selection::System {
+            theme::apply_appearance(root.ctx(), &self.state.viewport.appearance);
+        }
         crate::multibody::show(root.ctx(), &mut self.state);
         crate::material_dialog::show(root.ctx(), &mut self.state);
         crate::properties::show_appearance_editor(root.ctx(), &mut self.state);
@@ -933,6 +942,7 @@ impl eframe::App for SolidDraftApp {
         self.state.viewport.graphics_tier = tier;
         self.state.viewport.frame_ms = frame_ms;
         if let Some(session) = self.state.assembly.session.as_mut() {
+            session.viewport.appearance = self.state.viewport.appearance.clone();
             session.viewport.graphics = graphics;
             session.viewport.graphics_tier = tier;
             session.viewport.frame_ms = frame_ms;
@@ -971,6 +981,11 @@ impl eframe::App for SolidDraftApp {
                 crate::platform::Purpose::Open => self.open_uploads(uploaded.files),
                 crate::platform::Purpose::Parameters => {
                     crate::values_tab::apply_upload(&mut self.state, uploaded.files)
+                }
+                crate::platform::Purpose::Theme(_) | crate::platform::Purpose::ViewportPicture(_) => {
+                    if let Some(preferences) = &mut self.preferences {
+                        preferences.appearance_upload(uploaded);
+                    }
                 }
             }
         }

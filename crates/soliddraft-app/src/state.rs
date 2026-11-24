@@ -1744,6 +1744,24 @@ impl AppState {
         Ok(())
     }
 
+    pub fn set_appearance(
+        &mut self,
+        ctx: &egui::Context,
+        appearance: std::sync::Arc<crate::theme::Appearance>,
+        keep: bool,
+    ) -> Result<(), crate::settings::NotKept> {
+        crate::theme::apply_appearance(ctx, &appearance);
+        self.viewport.appearance = appearance.clone();
+        if let Some(session) = self.assembly.session.as_mut() {
+            session.viewport.appearance = appearance.clone();
+        }
+        ctx.request_repaint();
+        if keep {
+            crate::settings::save_theme_preferences(&appearance).inspect_err(|why| self.not_kept("Appearance", why))?;
+        }
+        Ok(())
+    }
+
     pub fn set_graphics(&mut self, graphics: crate::graphics::Graphics) -> Result<(), crate::settings::NotKept> {
         self.graphics = graphics;
         #[cfg(not(target_arch = "wasm32"))]

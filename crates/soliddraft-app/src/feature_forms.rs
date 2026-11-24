@@ -1049,6 +1049,9 @@ fn source_plane(source: &soliddraft_model::SketchPlane) -> soliddraft_model::Pla
         SketchPlane::Datum { datum, .. } => PlaneRef::Datum { datum: *datum, offset: 0.0 },
         SketchPlane::Feature { feature, .. } => PlaneRef::Feature { feature: *feature },
         SketchPlane::Face { face } | SketchPlane::FaceOffset { face, .. } => PlaneRef::Face { face: face.clone() },
+        // Only a sketch takes another component's face; the model refuses a reference
+        // plane that does, so Top stands in should a file hold one.
+        SketchPlane::Context { .. } => PlaneRef::Datum { datum: soliddraft_model::DatumPlane::Top, offset: 0.0 },
     }
 }
 

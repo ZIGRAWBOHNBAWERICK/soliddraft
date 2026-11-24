@@ -1172,6 +1172,24 @@ pub trait Kernel: Send + Sync {
         Err(KernelError::Unsupported("extrude_to".into()))
     }
 
+    /// Sweeps a profile from where its lines along `direction` first cross `start`, a
+    /// face of `target` that may be curved, to that face moved `distance` along the
+    /// direction; a negative distance goes the other way from the same start. Returns
+    /// the swept solid alone; the caller joins or cuts it. `direction` `None` uses the
+    /// profile plane's normal.
+    fn extrude_from(
+        &self,
+        tag: &OpTag,
+        profile: BodyId,
+        target: BodyId,
+        direction: Option<Vec3>,
+        start: FaceId,
+        distance: f64,
+    ) -> KernelResult<OpResult> {
+        let _ = (tag, profile, target, direction, start, distance);
+        Err(KernelError::Unsupported("extrude_from".into()))
+    }
+
     /// Drills holes into a solid and returns the drilled solid.
     fn hole(&self, tag: &OpTag, body: BodyId, params: &Hole) -> KernelResult<OpResult> {
         let _ = (tag, body, params);

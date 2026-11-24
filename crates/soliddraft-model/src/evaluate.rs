@@ -44,12 +44,10 @@ enum Caps {
 /// How far from parallel a start plane may be, as the sine of the angle between normals.
 const PARALLEL: f64 = 1e-9;
 
-/// Why an extrusion cannot start on a curved face. The pinned Catallax caps a straight
-/// sweep only on planes; a start on a curved face connects here once the kernel can
-/// sweep a profile from a curved face to the face moved along the direction. The words
-/// name no kernel, so the form shows them as they are rather than a generic refusal.
-const CURVED_START: &str = "an extrusion cannot start on a curved face yet: it starts only on a planar face \
-     or a plane. Pick a planar face or a plane";
+/// Why an extrusion from a curved face cannot stop at a face or the next face: a sweep
+/// from a curved start ends only at that face moved along the direction.
+const CURVED_START_LIMIT: &str = "an extrusion from a curved face goes a set length or through all for now; \
+     Up to next and Up to face cannot start on a curved face yet";
 
 /// Why an extrusion from a tilted start cannot end at a face that crosses the start.
 const LIMIT_CROSSES_START: &str = "the face the extrusion ends at crosses the start, so part of the profile \
@@ -420,6 +418,11 @@ impl Document {
                         _ => Built::failed(current, "Combine needs two available solid bodies."),
                     }
                 }
+                // Only a sketch takes a face of another component (see Command::check_kind);
+                // a file that says otherwise builds no plane.
+                FeatureKind::ReferencePlane(SketchPlane::Context { .. }) => {
+                    Built::failed(current, "a reference plane cannot take its plane from another component")
+                }
                 FeatureKind::ReferencePlane(p) => match self.sketch_plane_of(p, current) {
                     Ok((plane, _)) => {
                         let mut built = Built::pass(FeatureStatus::Ok, current);
@@ -551,6 +554,15 @@ impl Document {
             }
             SketchPlane::Datum { datum, offset } => {
                 let p = datum.plane();
+                (p.with_origin(p.origin + p.normal * *offset), None)
+            }
+            SketchPlane::Context { context, offset } => {
+                let p = context.plane().map_err(|why| {
+                    Box::new(Built::failed(
+                        current,
+                        format!("the plane taken from {} is unusable: {why}", context.label()),
+                    ))
+                })?;
                 (p.with_origin(p.origin + p.normal * *offset), None)
             }
             SketchPlane::Face { face } | SketchPlane::FaceOffset { face, .. } => {
@@ -903,9 +915,13 @@ impl Document {
         // The body the start face or vertex lies on, which may be another body when
         // Merge result is off.
         let start_body = self.start_body(f, e.options.from.as_ref(), current);
+        // A curved start face: each sweep starts where its lines along the first direction
+        // first cross the face, and ends at the face moved along that direction.
+        let curved = self.curved_start(e.options.from.as_ref(), start_body);
         // Where the extrusion starts, along the sketch normal from the sketch plane.
         let shift = match &e.options.from {
             None => 0.0,
+            Some(ExtrudeStart::Surface { .. }) if curved.is_some() => 0.0,
             Some(ExtrudeStart::Offset { distance, reverse }) => {
                 if !(distance.is_finite() && *distance > 0.0 && *distance <= 100_000.0) {
                     return Built::failed(current, "the start offset must be a positive length");
@@ -913,12 +929,6 @@ impl Document {
                 if *reverse { -distance * sense } else { distance * sense }
             }
             Some(ExtrudeStart::Surface { plane }) => {
-                if let (PlaneRef::Face { face }, Some(body)) = (plane, start_body)
-                    && let Ok(id) = self.resolve_plane_face(face, body)
-                    && self.kernel.topology(body).ok().is_some_and(|t| t.face(id).is_some_and(|f| f.normal.is_none()))
-                {
-                    return Built::failed(current, CURVED_START);
-                }
                 let resolved = match (plane, start_body) {
                     (_, Some(body)) => self.plane_of(plane, body),
                     (PlaneRef::Datum { datum, offset }, None) => {
@@ -971,10 +981,26 @@ impl Document {
             }
         };
         let start = sk.plane.with_origin(sk.plane.origin + normal * shift);
+        // The box of the body a curved start face lies on: no point of the face lies
+        // behind it.
+        let start_box = curved.and_then(|(body, _)| self.kernel.topology(body).ok()).map(|t| t.bbox);
         // How far a point lies ahead of the start along a direction.
-        let ahead = |point: Vec3, along: Vec3| match tilted {
-            Some(p) => (point - p.origin).dot(p.normal) / along.dot(p.normal),
-            None => (point - start.origin).dot(along),
+        let ahead = |point: Vec3, along: Vec3| match (tilted, start_box) {
+            (Some(p), _) => (point - p.origin).dot(p.normal) / along.dot(p.normal),
+            (None, Some(b)) => {
+                let behind = (0..8)
+                    .map(|c| {
+                        let corner = Vec3::new(
+                            if c & 1 == 0 { b.min.x } else { b.max.x },
+                            if c & 2 == 0 { b.min.y } else { b.max.y },
+                            if c & 4 == 0 { b.min.z } else { b.max.z },
+                        );
+                        corner.dot(along)
+                    })
+                    .fold(f64::INFINITY, f64::min);
+                point.dot(along) - behind
+            }
+            (None, None) => (point - start.origin).dot(along),
         };
         // How far each direction goes: a length, or a limit the kernel finds on the body.
         let extent = |end: &EndCondition, along: Vec3, slot: ReferenceSlot| -> Result<Extent, Box<Built>> {
@@ -1006,6 +1032,9 @@ impl Document {
                         return Ok(Extent::Length(0.0));
                     }
                     Ok(Extent::Length(reach + 1.0 + 0.01 * bbox.diagonal()))
+                }
+                EndCondition::UpToNext | EndCondition::UpToFace { .. } if curved.is_some() => {
+                    failed(CURVED_START_LIMIT.into())
                 }
                 EndCondition::UpToNext if tilted.is_some() => failed(
                     "Up to next cannot start on a plane or face that is not parallel to the sketch: \
@@ -1049,7 +1078,8 @@ impl Document {
         // Each is (start offset along the normal, direction sense, extent, which names).
         let sweeps: Vec<(f64, f64, Extent, Caps)> = match (&first, &second) {
             (_, None) => vec![(shift, sense, first.clone(), Caps::Both)],
-            (Extent::Length(d1), Some(Extent::Length(d2))) => {
+            // From a curved start each direction is its own sweep from the face.
+            (Extent::Length(d1), Some(Extent::Length(d2))) if curved.is_none() => {
                 vec![(shift - d2 * sense, sense, Extent::Length(d1 + d2), Caps::Both)]
             }
             (_, Some(other)) => {
@@ -1089,6 +1119,22 @@ impl Document {
                     let plane = sk.plane.with_origin(sk.plane.origin + normal * *offset);
                     let profile = region.to_profile(plane);
                     let tool = match (reach, sk.support) {
+                        (Extent::Length(distance), _) if curved.is_some() => {
+                            let Some((start_body, face)) = curved else { unreachable!("checked by the guard") };
+                            // Both directions sweep along the first one from the same crossing
+                            // of the face; the second goes a negative distance.
+                            let sheet = k.create_body_from_profile(&tag("profile"), &region.to_profile(sk.plane))?;
+                            let tool = k.extrude_from(
+                                &tag("sweep"),
+                                sheet.body,
+                                start_body,
+                                Some(dir),
+                                face,
+                                distance * way * sense,
+                            );
+                            let _ = k.release(sheet.body);
+                            tool?
+                        }
                         (Extent::Length(distance), Some(support)) => {
                             let support = FaceSupport { offset: support.offset + offset, ..support };
                             k.extrude_on_face(&tag("sweep"), &profile, support, distance * way)?
@@ -1280,6 +1326,16 @@ impl Document {
             return current;
         }
         self.body_at(key, end).or(current)
+    }
+
+    /// The body and face an extrusion starts on when its From face is curved.
+    fn curved_start(&self, from: Option<&ExtrudeStart>, body: Option<BodyId>) -> Option<(BodyId, FaceId)> {
+        let (Some(ExtrudeStart::Surface { plane: PlaneRef::Face { face } }), Some(body)) = (from, body) else {
+            return None;
+        };
+        let id = self.resolve_face(face, body).ok()?;
+        let curved = self.kernel.topology(body).ok()?.face(id).is_some_and(|f| f.normal.is_none());
+        curved.then_some((body, id))
     }
 
     /// Joins an extrusion's tool to `body` or cuts it away, or makes it the body when

@@ -16,7 +16,7 @@ use soliddraft_model::hole_wizard::{HoleStandard, HoleType, HoleWizardSpec};
 use soliddraft_model::sketch::{P2, Sketch, solve::solve};
 use soliddraft_model::{
     Command, DatumPlane, Document, EndCondition, ExtrudeFeature, ExtrudeOp, ExtrudeOptions, FeatureId, FeatureKind,
-    FileError, HoleFeature, ProfileSource, SketchFeature, SketchPlane,
+    FileError, HoleFeature, ProfileSource, SketchFeature, SketchPlane, values::Input,
 };
 
 fn kernel() -> Arc<dyn Kernel> {
@@ -203,4 +203,63 @@ fn each_new_kind_alone_needs_format_4_or_later() {
     }
     let wrong_tag = extruded.part_json().replace(OPTIONS_FORMAT, PART_OPTIONS_FORMAT);
     assert!(matches!(Document::from_part_json(&wrong_tag, kernel()), Err(FileError::Invalid(_))));
+}
+/// Collects every `depth` number in a part's truth.
+fn depths(value: &serde_json::Value, out: &mut Vec<f64>) {
+    match value {
+        serde_json::Value::Object(map) => {
+            for (key, v) in map {
+                match v.as_f64() {
+                    Some(depth) if key == "depth" => out.push(depth),
+                    _ => depths(v, out),
+                }
+            }
+        }
+        serde_json::Value::Array(items) => items.iter().for_each(|v| depths(v, out)),
+        _ => {}
+    }
+}
+
+/// Formulas compare numbers as Excel does (`0.1+0.2=0.3` is true), but a part saved before
+/// that compared them exactly and stored the answer. Such a file still opens with the
+/// values it saved, and keeps them through another save.
+#[test]
+fn formulas_saved_before_excel_comparison_keep_their_values() {
+    let mut d = Document::new("Older", kernel());
+    let (_, extrusion) = plate(&mut d);
+    let rule = "=IF(0.1+0.2=0.3,20 mm,10 mm)";
+    d.execute(Command::Drive { input: Input::Depth { feature: extrusion }, expression: rule.into() }).unwrap();
+    let mut found = Vec::new();
+    depths(&d.truth(), &mut found);
+    assert_eq!(found, [20.0], "a new part follows Excel");
+    assert_eq!(round_trip(&d).truth(), d.truth());
+
+    // The same part as the release before Excel comparison wrote it.
+    let mut older = d.truth();
+    older["values"].as_object_mut().unwrap().remove("excel_numbers");
+    let text = older.to_string().replace("\"depth\":20.0", "\"depth\":10.0");
+    let opened = Document::from_part_json(&text, kernel()).expect("an older part with a formula opens");
+    all_ok(&opened);
+    let mut found = Vec::new();
+    depths(&opened.truth(), &mut found);
+    assert_eq!(found, [10.0], "the saved value holds");
+    let again = round_trip(&opened);
+    assert_eq!(again.truth()["values"].get("excel_numbers"), None);
+    assert_eq!(again.values().driver(&Input::Depth { feature: extrusion }), Some(rule));
+}
+
+/// A part without formulas saves as it did before the number rule existed.
+#[test]
+fn parts_without_formulas_write_no_number_rule() {
+    let mut d = Document::new("Plain", kernel());
+    plate(&mut d);
+    d.execute(Command::SetValue { name: "edge".into(), expression: "10 mm".into() }).unwrap();
+    assert_eq!(d.truth()["values"].get("excel_numbers"), None);
+    let mut back = round_trip(&d);
+    let extrusion = back.features().iter().find(|f| matches!(f.kind, FeatureKind::Extrude(_))).unwrap().id;
+    let rule = "=IF(0.1+0.2=0.3,20 mm,10 mm)";
+    back.execute(Command::Drive { input: Input::Depth { feature: extrusion }, expression: rule.into() }).unwrap();
+    let mut found = Vec::new();
+    depths(&back.truth(), &mut found);
+    assert_eq!(found, [20.0], "a formula added after opening follows Excel");
 }

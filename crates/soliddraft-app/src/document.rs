@@ -195,11 +195,19 @@ pub enum SketchPlane {
         /// Signed distance along the face normal, in millimetres.
         offset: f64,
     },
+    /// A planar face of another component, taken while editing the part in an assembly.
+    Context {
+        context: Box<model::ContextFace>,
+        /// Signed distance along the face normal, in millimetres.
+        offset: f64,
+    },
 }
 
 impl SketchPlane {
     pub fn label(&self) -> String {
         match self {
+            SketchPlane::Context { context, offset } if *offset == 0.0 => context.label(),
+            SketchPlane::Context { context, offset } => format!("{} (offset {} mm)", context.label(), fmt_mm(*offset)),
             SketchPlane::Feature { offset, .. } => format!("Reference plane (offset {} mm)", fmt_mm(*offset)),
             SketchPlane::Reference { plane, offset } if *offset == 0.0 => plane.label().to_owned(),
             SketchPlane::Reference { plane, offset } => {
@@ -216,7 +224,10 @@ impl SketchPlane {
     /// Signed distance from the datum or face plane, in millimetres.
     pub fn offset(&self) -> f64 {
         match self {
-            Self::Reference { offset, .. } | Self::FaceOffset { offset, .. } | Self::Feature { offset, .. } => *offset,
+            Self::Reference { offset, .. }
+            | Self::FaceOffset { offset, .. }
+            | Self::Feature { offset, .. }
+            | Self::Context { offset, .. } => *offset,
             Self::Face { .. } => 0.0,
         }
     }
@@ -232,6 +243,9 @@ impl SketchPlane {
             SketchPlane::Face { face } => model::SketchPlane::Face { face: face.clone() },
             SketchPlane::FaceOffset { face, offset } => {
                 model::SketchPlane::FaceOffset { face: face.clone(), offset: *offset }
+            }
+            SketchPlane::Context { context, offset } => {
+                model::SketchPlane::Context { context: (**context).clone(), offset: *offset }
             }
         }
     }
@@ -1263,6 +1277,9 @@ impl FeatureKind {
                     model::SketchPlane::FaceOffset { face, offset } => {
                         SketchPlane::FaceOffset { face: face.clone(), offset: *offset }
                     }
+                    model::SketchPlane::Context { context, offset } => {
+                        SketchPlane::Context { context: Box::new(context.clone()), offset: *offset }
+                    }
                 };
                 let mut sketch = s.sketch.clone();
                 if sketch.status == sketch::SolveStatus::Empty {
@@ -1350,7 +1367,10 @@ impl FeatureKind {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RefKind {
     Plane,
+    /// A planar face.
     Face,
+    /// A face of any shape: an extrusion starts or stops on a curved one too.
+    AnyFace,
     Edge,
 }
 
@@ -1897,6 +1917,14 @@ pub enum Command {
     /// Moves every import of one file to a replacement file and every reference into
     /// those imports to the new file's faces, as one step.
     ReplaceImportFile(Vec<(FeatureId, model::FeatureKind)>),
+    /// Updates the in-context references of a part's sketches, as one step: each
+    /// feature's definition as it was read and as it now is. Any other part refuses it,
+    /// and so does this one when a feature changed since it was read, so an update queued
+    /// for one part never lands on another.
+    FollowContext {
+        part: soliddraft_document::DocumentId,
+        edits: Vec<(FeatureId, model::FeatureKind, model::FeatureKind)>,
+    },
     /// Replaces a hole's, pattern's, mirror's or draft's definition.
     EditFeature {
         id: FeatureId,
@@ -1964,6 +1992,7 @@ impl Command {
             Command::EditHoleWithSketch { .. } => "Edit hole".into(),
             Command::ImportBodies(_) => "Import bodies".into(),
             Command::ReplaceImportFile(_) => "Replace imported file".into(),
+            Command::FollowContext { .. } => "Update in-context references".into(),
             Command::EditFeature { kind, .. } => format!("Edit {}", kind.noun()),
             Command::DeleteFeature(_) => "Delete feature".into(),
             Command::Rename { .. } => "Rename".into(),
@@ -3761,6 +3790,19 @@ impl Document {
             Command::ReplaceImportFile(edits) => {
                 edits.into_iter().map(|(id, kind)| model::Command::EditFeature { id: model_id(id), kind }).collect()
             }
+            Command::FollowContext { part, edits } => {
+                if part != self.model.id() {
+                    return Err("This in-context update was read for another part; it is not applied here.".into());
+                }
+                let mut out = Vec::with_capacity(edits.len());
+                for (id, before, after) in edits {
+                    if self.model.feature(model_id(id)).map(|f| &f.kind) != Some(&before) {
+                        return Err("A sketch changed after its in-context reference was read; it is read again when the assembly changes.".into());
+                    }
+                    out.push(model::Command::EditFeature { id: model_id(id), kind: after });
+                }
+                out
+            }
             Command::EditFeature { id, kind } => {
                 if let FeatureKind::ReferencePlane(source) = &kind {
                     let target = self.index_of(id).ok_or("no such reference plane")?;
@@ -3856,7 +3898,8 @@ impl Document {
                         match &mut plane {
                             model::SketchPlane::Datum { offset, .. }
                             | model::SketchPlane::Feature { offset, .. }
-                            | model::SketchPlane::FaceOffset { offset, .. } => *offset = p.offset(),
+                            | model::SketchPlane::FaceOffset { offset, .. }
+                            | model::SketchPlane::Context { offset, .. } => *offset = p.offset(),
                             _ => {}
                         }
                         *p = plane;
@@ -3868,7 +3911,8 @@ impl Document {
                         match &mut plane {
                             model::SketchPlane::Datum { offset, .. }
                             | model::SketchPlane::Feature { offset, .. }
-                            | model::SketchPlane::FaceOffset { offset, .. } => *offset = s.plane.offset(),
+                            | model::SketchPlane::FaceOffset { offset, .. }
+                            | model::SketchPlane::Context { offset, .. } => *offset = s.plane.offset(),
                             _ => {}
                         }
                         s.plane = plane;
@@ -5767,6 +5811,7 @@ impl Document {
                             model::SketchPlane::Face { face } | model::SketchPlane::FaceOffset { face, .. } => {
                                 face.label.clone()
                             }
+                            model::SketchPlane::Context { context, .. } => context.label(),
                         };
                         details.push(("Source".into(), source));
                         details.push(("Offset".into(), format!("{} mm", fmt_mm(p.offset()))));
@@ -6286,6 +6331,7 @@ fn view_status(
                                     names.get(feature).cloned().unwrap_or_else(|| "Reference plane".into())
                                 }
                                 model::SketchPlane::Datum { .. } => String::new(),
+                                model::SketchPlane::Context { context, .. } => context.label(),
                             };
                             (0, RefKind::Plane, label)
                         }
@@ -6348,6 +6394,7 @@ fn view_status(
                                     }
                                 }
                                 model::SketchPlane::Datum { datum, .. } => datum.label().to_owned(),
+                                model::SketchPlane::Context { context, .. } => context.label(),
                             };
                             (0, RefKind::Plane, label)
                         }
@@ -6359,7 +6406,7 @@ fn view_status(
                                 model::EndCondition::UpToFace { face } => face.label.clone(),
                                 _ => String::new(),
                             };
-                            (0, RefKind::Face, label)
+                            (0, RefKind::AnyFace, label)
                         }
                         (model::ReferenceSlot::Start, model::FeatureKind::Extrude(e)) => {
                             let label = match &e.options.from {
@@ -6367,14 +6414,14 @@ fn view_status(
                                 Some(model::ExtrudeStart::Vertex { vertex }) => vertex.label.clone(),
                                 _ => String::new(),
                             };
-                            (1, RefKind::Face, label)
+                            (1, RefKind::AnyFace, label)
                         }
                         (model::ReferenceSlot::SecondLimit, model::FeatureKind::Extrude(e)) => {
                             let label = match &e.options.direction2 {
                                 Some(model::EndCondition::UpToFace { face }) => face.label.clone(),
                                 _ => String::new(),
                             };
-                            (2, RefKind::Face, label)
+                            (2, RefKind::AnyFace, label)
                         }
                         (
                             model::ReferenceSlot::SketchPlane

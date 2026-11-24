@@ -366,3 +366,50 @@ fn excel_formulas_and_browser_tabs_drive_the_bracket() {
         case.frame(app, "04-reopened-later-feature");
     });
 }
+/// Escape throws a half-typed formula away: nothing is applied and the cell shows its value
+/// again (the Functions menu side is in the values_tab unit tests). Duplicate makes its copy at once, as a browser duplicates a
+/// tab: leaving the copy's name untouched keeps the copy, and nothing more is made.
+#[test]
+fn escape_discards_a_formula_and_duplicate_makes_one_copy() {
+    let mut case = Case::new("values-escape-duplicate");
+    let mut app = launch(bracket(), STANDARD);
+    case.run(&mut app, |case, app| {
+        ribbon::document_tab(app, "Values");
+        settle(app);
+        press(app, "Expand");
+        settle(app);
+        let cell = "Default BossExtrude1.Depth";
+        app.get_by_label(cell).focus();
+        app.run_steps(2);
+        app.key_press_modifiers(Modifiers::COMMAND, Key::A);
+        app.get_by_label(cell).type_text("=1234+");
+        app.run_steps(2);
+        app.key_press(Key::Escape);
+        app.run_steps(4);
+        let field = soliddraft_app::values_tab::Field::Cell("BossExtrude1.Depth".into(), 0);
+        assert_eq!(app.state().state.values.error(&field), None, "Escape applies nothing");
+        assert_eq!(value(app, cell).as_deref(), Some("10"), "Escape restores the cell");
+        assert!(texts(app).iter().all(|t| !t.contains("1234")), "the thrown-away formula still shows");
+        assert_eq!(depth(app, "Boss-Extrude1"), 10.0, "the part is as it was");
+        case.frame(app, "01-escape");
+
+        press(app, "New configuration");
+        type_in(app, "New configuration name", "Long");
+        settle(app);
+        tab_menu(app, "Long", "Duplicate");
+        settle(app);
+        assert_eq!(columns(app), ["Default", "Long", "Long copy"], "Duplicate makes the copy");
+        assert_eq!(value(app, "Configuration name").as_deref(), Some("Long copy"), "its name is open to change");
+        case.frame(app, "02-duplicated");
+        // Clicking away leaves the name as it is.
+        app.get_by_label("New global name").focus();
+        app.run_steps(4);
+        settle(app);
+        assert_eq!(columns(app), ["Default", "Long", "Long copy"], "nothing more is made");
+        tab_menu(app, "Long copy", "Rename");
+        type_in(app, "Configuration name", "Wide");
+        settle(app);
+        assert_eq!(columns(app), ["Default", "Long", "Wide"]);
+        case.frame(app, "03-renamed-copy");
+    });
+}

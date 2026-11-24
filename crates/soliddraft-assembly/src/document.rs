@@ -2024,6 +2024,19 @@ impl AssemblyDocument {
     /// shown and its mates solve on it. A refusal keeps the accepted truth, display and
     /// undo history.
     pub fn rebuild(&mut self) -> RebuildReport {
+        self.rebuild_sources(None)
+    }
+
+    /// Accepts the current revision of the root's sources for the documents in `ids`
+    /// only, as [`AssemblyDocument::rebuild`] does for every source: what saving a part
+    /// edited in place asks of the assembly that shows it. The other sources keep their
+    /// pins and are not looked for, and a definition that could not be shown before
+    /// does not stop it.
+    pub fn update_documents(&mut self, ids: &[DocumentId]) -> RebuildReport {
+        self.rebuild_sources(Some(ids))
+    }
+
+    fn rebuild_sources(&mut self, only: Option<&[DocumentId]>) -> RebuildReport {
         self.cancel_drag();
         let started = web_time::Instant::now();
         self.finish_loading();
@@ -2039,6 +2052,18 @@ impl AssemblyDocument {
             let r = &mut source.document;
             let before = r.pinned.clone();
             let label = label_of(r);
+            if only.is_some_and(|ids| !r.id.is_some_and(|id| ids.contains(&id))) {
+                let after = before.clone();
+                report.sources.push(SourceReport {
+                    source: source.id,
+                    label,
+                    before,
+                    after,
+                    status: RefChange::Unchanged,
+                    moved: None,
+                });
+                continue;
+            }
             let (status, moved) = match resolver.resolve(r) {
                 Resolution::Found(t) => {
                     let moved = t.new_path.clone();
@@ -2059,6 +2084,17 @@ impl AssemblyDocument {
                 moved,
             });
         }
+        // Updating chosen documents only, a definition that could not be shown before is
+        // not theirs to fix.
+        let unshown_before: HashSet<(DocumentId, ContentHash)> = match only {
+            Some(_) => self
+                .store
+                .iter()
+                .filter(|(i, d)| *i != self.root && !showable(d))
+                .map(|(_, d)| (d.key.document, d.key.revision.clone()))
+                .collect(),
+            None => HashSet::new(),
+        };
         if problems.is_empty() {
             let mut candidate = AssemblyDocument::from_parts(
                 self.path.clone(),
@@ -2081,13 +2117,8 @@ impl AssemblyDocument {
                         if i == candidate.root {
                             continue;
                         }
-                        let showable = match definition.kind {
-                            DocKind::Part | DocKind::Mesh => {
-                                matches!(definition.state, LoadState::DisplayReady | LoadState::ExactReady)
-                            }
-                            _ => !matches!(definition.state, LoadState::Failed | LoadState::Stale),
-                        };
-                        if !showable {
+                        let key = (definition.key.document, definition.key.revision.clone());
+                        if !showable(definition) && !unshown_before.contains(&key) {
                             let label = candidate.refs.get(&i).map(|r| r.path.as_str()).unwrap_or(&definition.label);
                             problems.push(format!("{label}: cannot be shown at the proposed revision"));
                         }
@@ -2128,6 +2159,14 @@ impl AssemblyDocument {
         self.refresh_references(open);
         report.elapsed = started.elapsed();
         report
+    }
+}
+
+/// Whether a definition can be shown at its revision.
+fn showable(definition: &crate::store::Definition) -> bool {
+    match definition.kind {
+        DocKind::Part | DocKind::Mesh => matches!(definition.state, LoadState::DisplayReady | LoadState::ExactReady),
+        _ => !matches!(definition.state, LoadState::Failed | LoadState::Stale),
     }
 }
 

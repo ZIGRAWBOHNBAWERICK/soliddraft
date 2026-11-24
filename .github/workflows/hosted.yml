@@ -1019,6 +1019,7 @@ jobs:
           fixture hole_wizard parameter_grid_edits_rebuild_a_blind_wizard_hole
           fixture hole_wizard tapped_surface_offset_is_called_out_as_blind
           fixture hole_wizard a_headless_legacy_hole_position_edit_produces_the_browser_fixture
+          fixture extrude_from_faces a_headless_curved_start_part_produces_the_browser_fixture
       - name: Check hole, drawing, and parameter regressions in Chromium
         env:
           CHROME_DEVTOOLS_AXI_EXECUTABLE_PATH: /usr/bin/google-chrome
@@ -1029,7 +1030,7 @@ jobs:
           python3 -m http.server 8796 --bind 127.0.0.1 --directory target/web-dist > "$RUNNER_TEMP/feature-regressions-server.log" 2>&1 &
           server=$!
           trap 'chrome-devtools-axi stop; kill "$server"' EXIT
-          for scenario in depth offset positions formula visibility callouts notes; do
+          for scenario in depth offset positions formula visibility callouts notes curved-from; do
             export CHROME_DEVTOOLS_AXI_SESSION="feature-regressions-$scenario"
             if ! chrome-devtools-axi open about:blank; then
               chrome-devtools-axi stop || true

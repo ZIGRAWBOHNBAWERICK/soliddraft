@@ -469,6 +469,7 @@ impl TabViewer for Panels<'_> {
                     dimensions_on_geometry: true,
                     ghost,
                     preview,
+                    context: crate::in_context::mesh(st),
                     sketch: st.sketch.as_mut(),
                     passive_sketches: passive,
                     dimension_edit: st.dimension_edit.as_mut(),
@@ -489,6 +490,7 @@ impl TabViewer for Panels<'_> {
                 let events = st.viewport.show(ui, &st.doc, overlay, selection, hover_label.as_deref(), &st.navigation);
                 crate::scan::paint(ui, st);
                 st.after_viewport(ui, &events);
+                crate::in_context::after_viewport(ui, st, &events);
                 if let Some(response) = &events.context_response {
                     let picked =
                         events.secondary_clicked.flatten().and_then(|p| crate::viewport::pick::selection(&st.doc, p));

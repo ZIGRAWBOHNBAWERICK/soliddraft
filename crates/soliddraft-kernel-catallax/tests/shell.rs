@@ -245,7 +245,7 @@ fn all_faces_after_a_boolean_and_a_finish_saves_version_five_and_leaves_inputs_a
         let before = k.mass_properties(body).unwrap();
         k.shell_all_faces(body, 2.0).unwrap();
         let recipe = last_question(&k);
-        assert_eq!(recipe["format"], "catallax-recipe/5");
+        assert_eq!(recipe["format"], "catallax-recipe/6");
         let shell = recipe["steps"].as_array().unwrap().last().unwrap().clone();
         assert_eq!(shell["open"], json!([{}]), "not a list of surviving origins");
         catallax_recipe::Recipe::parse(&recipe.to_string()).expect("the saved request reads back");

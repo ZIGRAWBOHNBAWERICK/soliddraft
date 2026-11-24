@@ -14,7 +14,7 @@ use soliddraft_sketch::ConstraintId;
 use crate::params::{self, Parameter, Unit};
 use crate::value_expr::{
     self, Expr, Expression, NamedValue, PhysicalProperty, Quantity, check_name, check_parameter_name, evaluate_tree,
-    evaluate_tree_with_angle, rename_tokens,
+    evaluate_tree_with, rename_tokens, unresolved,
 };
 use crate::{Document, Feature, FeatureId, FeatureKind};
 
@@ -56,7 +56,7 @@ impl Input {
 }
 
 /// Authored values and bindings. Empty state is omitted from old-format truth.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Values {
     entries: Vec<NamedValue>,
@@ -68,6 +68,11 @@ pub struct Values {
     names: Vec<Pin>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub(crate) degrees: bool,
+    /// Formulas compare numbers to 15 significant digits, and a final sum whose two sides
+    /// agree there comes to zero, as in Excel. Parts saved before formulas followed Excel
+    /// lack it and keep exact binary arithmetic, so the values they saved still hold.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub(crate) excel_numbers: bool,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     comments: BTreeMap<String, String>,
     /// The stored numbers the expressions read, from the last check against features.
@@ -90,6 +95,21 @@ struct Pin {
 }
 
 /// Stored numbers by input. A cache: it never makes two states differ.
+impl Default for Values {
+    fn default() -> Self {
+        Values {
+            entries: Vec::new(),
+            bindings: Vec::new(),
+            tracked: Vec::new(),
+            names: Vec::new(),
+            degrees: false,
+            excel_numbers: true,
+            comments: BTreeMap::new(),
+            known: Known::default(),
+        }
+    }
+}
+
 #[derive(Clone, Default)]
 struct Known(Vec<(Input, Quantity, Unit)>);
 
@@ -202,12 +222,22 @@ impl Resolver<'_> {
         let expression = expression.expect("set above");
         self.visiting.push(node.clone());
         let mut depth = 1;
-        let quantity = evaluate_tree_with_angle(&expression.tree, self.values.degrees, &mut |atom| {
+        let (degrees, excel) = (self.values.degrees, self.values.excel_numbers);
+        let quantity = evaluate_tree_with(&expression.tree, degrees, excel, &mut |atom| {
+            // A name nothing had when the formula was read reads what has it now.
+            let named;
+            let atom = match atom {
+                Expr::Name(token) => {
+                    named = self.values.lookup(token, true)?;
+                    &named
+                }
+                other => other,
+            };
             let next = match atom {
                 Expr::Ref(id) => Node::Value(*id),
                 Expr::Param(input) => Node::Input(input.clone()),
                 Expr::Physical(property) => return self.physical.ok_or(NEEDS_BODY)?.get(*property),
-                _ => return Err("missing value reference".into()),
+                _ => return Err(unresolved(atom)),
             };
             let (quantity, dependency_depth) = self.get(&next)?;
             depth = depth.max(dependency_depth + 1);
@@ -697,6 +727,28 @@ impl Values {
             .map(Expression::with_converted_literal)
     }
 
+    /// Whether a value or a driven input is a spreadsheet formula.
+    pub(crate) fn holds_formulas(&self) -> bool {
+        self.entries.iter().any(|v| v.expression.is_formula())
+            || self.bindings.iter().any(|b| b.expression.is_formula())
+    }
+
+    /// The values as a file stores them. The number rule is written only beside formulas,
+    /// so a part without one saves as it did before the rule existed.
+    pub(crate) fn for_file(&self, configuration_formulas: bool) -> Values {
+        let mut saved = self.clone();
+        saved.excel_numbers &= configuration_formulas || self.holds_formulas();
+        saved
+    }
+
+    /// Values read from a file. A file without formulas has no saved formula result to keep,
+    /// so it takes Excel's rule; one with formulas keeps the rule it was saved under.
+    pub(crate) fn keep_file_rule(&mut self, configuration_formulas: bool) {
+        if !configuration_formulas && !self.holds_formulas() {
+            self.excel_numbers = true;
+        }
+    }
+
     pub(crate) fn uses_formula_settings(&self) -> bool {
         self.degrees
             || !self.comments.is_empty()
@@ -890,6 +942,24 @@ impl Values {
                 return Err("an input has two drivers".into());
             }
             inputs.push(b.input.clone());
+        }
+        // A formula that named what did not exist reads its text again: the name may be taken now.
+        let reread = self
+            .entries
+            .iter()
+            .map(|v| &v.expression)
+            .chain(self.bindings.iter().map(|b| &b.expression))
+            .map(|e| e.names_missing().then(|| self.parse(&e.text).map(|p| p.tree)).transpose())
+            .collect::<Result<Vec<_>, _>>()?;
+        let expressions = self
+            .entries
+            .iter_mut()
+            .map(|v| &mut v.expression)
+            .chain(self.bindings.iter_mut().map(|b| &mut b.expression));
+        for (e, tree) in expressions.zip(reread) {
+            if let Some(tree) = tree {
+                e.tree = tree;
+            }
         }
         for e in self.entries.iter().map(|v| &v.expression).chain(self.bindings.iter().map(|b| &b.expression)) {
             if self.parse(&e.text)?.tree != e.tree {

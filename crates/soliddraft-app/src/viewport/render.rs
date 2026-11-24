@@ -30,6 +30,9 @@ use std::sync::{Arc, Mutex};
 pub const KIND_SHIFT: u32 = 30;
 /// Body flag of the line-only body that holds the thread marks (see `scene.wgsl`).
 const THREAD_MARKS: u32 = 16;
+/// The rest of an assembly around a part edited in context: drawn as a ghost, with its
+/// own opacity, in a dimmed grey (scene.wgsl `context`).
+const CONTEXT: u32 = 2 | 256;
 pub const KIND_MASK: u32 = 0b11 << KIND_SHIFT;
 pub const ID_MASK: u32 = !KIND_MASK;
 
@@ -140,6 +143,9 @@ pub struct FrameInput {
     pub meshes: (u64, Vec<(BodyId, Arc<DisplayMesh>)>),
     /// Added or removed material, with whether it removes.
     pub ghost: Option<(Arc<DisplayMesh>, bool)>,
+    /// The rest of an assembly, dimmed, while the part is edited in its context. Never
+    /// picked: the part's tab picks it on the CPU (see `in_context`).
+    pub context: Option<Arc<DisplayMesh>>,
     /// Drawn instead of the document bodies when set.
     pub preview: Option<Arc<DisplayMesh>>,
     /// The marks of the part's cosmetic threads: lines only, drawn with the bodies and
@@ -641,6 +647,8 @@ pub struct ViewportRenderer {
     mesh_version: u64,
     /// Keyed by the `Arc` address of the ghost mesh; never dereferenced.
     ghost: Option<(usize, u32, GpuBody)>,
+    /// Keyed like `ghost`.
+    context: Option<(usize, GpuBody)>,
     preview: Option<(usize, u32, GpuBody)>,
     threads: Option<(usize, GpuBody)>,
     pick_buffer: wgpu::Buffer,
@@ -1229,6 +1237,7 @@ impl ViewportRenderer {
             bodies: HashMap::new(),
             mesh_version: u64::MAX,
             ghost: None,
+            context: None,
             preview: None,
             threads: None,
             pick_buffer,
@@ -1472,6 +1481,15 @@ impl ViewportRenderer {
                 }
             }
             None => self.ghost = None,
+        }
+        match &input.context {
+            Some(c) => {
+                let ptr = Arc::as_ptr(c) as usize;
+                if self.context.as_ref().map(|(q, _)| *q) != Some(ptr) {
+                    self.context = Some((ptr, self.upload_body(device, c, CONTEXT)));
+                }
+            }
+            None => self.context = None,
         }
         match &input.preview {
             Some(p) => {
@@ -1770,6 +1788,7 @@ impl ViewportRenderer {
             pass.set_bind_group(0, &self.globals_bind_group, &[]);
             pass.set_bind_group(2, &targets.frame_bind_group, &[]);
             let ghost = self.ghost.as_ref().map(|(_, _, b)| b);
+            let context = self.context.as_ref().map(|(_, b)| b);
             if show_faces {
                 pass.set_pipeline(&self.face_pipeline);
                 draw_faces(&mut pass, &mut shown.iter().copied(), true);
@@ -1801,9 +1820,18 @@ impl ViewportRenderer {
                 pass.set_pipeline(&self.see_through_pipeline);
                 draw_faces(&mut pass, &mut shown.iter().copied().filter(|b| b.see_through), true);
             }
+            if show_faces && let Some(c) = context {
+                // Over the part's opaque faces, so the part shows through it.
+                pass.set_pipeline(&self.face_pipeline);
+                draw_faces(&mut pass, &mut std::iter::once(c), true);
+            }
             if show_faces && let Some(g) = ghost {
                 pass.set_pipeline(&self.face_pipeline);
                 draw_faces(&mut pass, &mut std::iter::once(g), true);
+            }
+            if let Some(c) = context {
+                pass.set_pipeline(&self.edge_pipeline);
+                draw_lines(&mut pass, &mut std::iter::once(c));
             }
             if show_faces
                 && input.controls.hidden_selected_edges

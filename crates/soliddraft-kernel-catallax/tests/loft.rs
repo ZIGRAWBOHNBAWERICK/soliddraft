@@ -45,7 +45,7 @@ fn coplanar_loft_is_refused_plainly_and_retained_lofts_export_as_native_recipes(
     let body = k.loft(&OpTag::new("loft"), &[a.body, b.body], LoftShape::Ruled).unwrap();
     assert!((k.mass_properties(body.body).unwrap().volume - 28.0).abs() < 1e-7);
     let retained = k.body_recipe(body.body).unwrap();
-    assert_eq!(retained["format"], "catallax-recipe/5");
+    assert_eq!(retained["format"], "catallax-recipe/6");
     assert!(retained["steps"].as_array().unwrap().iter().any(|s| s["op"] == "loft"));
     catallax_recipe::Recipe::parse(&retained.to_string()).unwrap();
     for body in [a.body, b.body, body.body] {

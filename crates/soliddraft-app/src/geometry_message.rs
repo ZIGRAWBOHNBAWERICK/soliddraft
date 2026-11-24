@@ -136,6 +136,20 @@ fn plain_message(message: &str) -> &str {
         "This operation reached its calculation limit. Try a simpler shape or suppress a feature."
     } else if message.contains("mass_properties") {
         "These properties could not be calculated. Try again or choose another feature."
+    } else if message.contains("intersect.bezier-plane-oblique") {
+        "Joining or cutting along this spline face is not supported yet. For a boss, turn Merge result off so the \
+         new solid is a body of its own. For a cut, pick another face."
+    } else if message.contains("features.limit-missed") {
+        "The sketch reaches past the start or limit face along the extrusion. Keep the sketch inside the face, or \
+         pick a larger face."
+    } else if message.contains("features.limit-parallel") {
+        "The extrusion runs along the limit face and never reaches it. Pick another face."
+    } else if message.contains("features.unsupported-curved-limit")
+        || message.contains("features.unsupported-limit-surface")
+    {
+        "An extrusion cannot start or stop on this curved face yet. Of curved faces, the round face of a rod made \
+         from one circle with no feature after it works, and a spline face works when Merge result is off, so the \
+         new solid is a body of its own."
     } else if message.contains("Catallax")
         || message.contains("kernel")
         || message.contains("intersect.")
@@ -188,6 +202,39 @@ fn has_code(message: &str, family: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{for_user, suggested_fillet_radius};
+
+    /// Refusals of an extrusion's start or limit face read as plain reasons, never as the
+    /// generic line or a code.
+    #[test]
+    fn face_limit_refusals_give_their_reason() {
+        for (code, says) in [
+            ("features.limit-missed: the selected start face does not cover the profile", "Keep the sketch inside"),
+            ("features.limit-parallel: direction lies in the limiting plane", "never reaches it"),
+            (
+                "Catallax refused features.unsupported-curved-limit: torus start",
+                "cannot start or stop on this curved face",
+            ),
+            ("kernel: features.unsupported-limit-surface: curved wall", "cannot start or stop on this curved face"),
+            ("union failed: intersect.bezier-plane-oblique: step op_61", "For a boss, turn Merge result off"),
+            ("cut failed: intersect.bezier-plane-oblique: step op_61", "For a cut, pick another face"),
+        ] {
+            let plain = for_user(code);
+            assert!(plain.contains(says), "{code} reads {plain}");
+            assert!(!plain.contains("features.") && !plain.contains("Catallax"), "{plain}");
+        }
+    }
+
+    /// A refusal names only what the user can do: a cut has no Merge result choice, and a
+    /// spline face works only as a body of its own, a rod's face only with nothing after it.
+    #[test]
+    fn curved_face_refusals_state_where_curved_faces_work() {
+        let spline = for_user("cut failed: intersect.bezier-plane-oblique: step op_61");
+        assert!(!spline.contains("Try Merge result off"), "a cut has no Merge result: {spline}");
+        let curved = for_user("Catallax refused features.unsupported-curved-limit: cylinder start");
+        assert!(curved.contains("no feature after it"), "{curved}");
+        assert!(curved.contains("spline face works when Merge result is off"), "{curved}");
+        assert!(!curved.contains("Planar faces, spline faces"), "{curved}");
+    }
 
     /// The real-use pass read "Catallax drafts planar faces ..." under the Draft editor and
     /// "... through the kernel" under a drawing view. Hints, labels, tooltips and buttons

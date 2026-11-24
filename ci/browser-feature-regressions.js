@@ -1,5 +1,6 @@
 // Run with chrome-devtools-axi run in a fresh 1600 x 1000 page on the packaged app.
-// Set the URL fragment to depth, offset, positions, formula, visibility, callouts, or notes.
+// Set the URL fragment to depth, offset, positions, formula, visibility, callouts, notes, or
+// curved-from.
 // Serve the application test fixtures written to SOLIDDRAFT_BROWSER_FIXTURES at /fixtures/.
 await page.wait('#status.hidden', 60000);
 const scenario = await page.eval(() => location.hash.slice(1));
@@ -73,9 +74,9 @@ function check(condition, message) {
 const shown = name => page.eval(`JSON.parse(window.wasmBindings.${name}() || 'null')`);
 const controls = () => shown('shown_controls');
 const threads = () => page.eval(() => window.wasmBindings.shown_threads());
-async function until(read, accept, message) {
+async function until(read, accept, message, limit = 25000) {
   let last;
-  const end = Date.now() + 25000;
+  const end = Date.now() + limit;
   do {
     last = await read();
     if (accept(last)) return last;
@@ -127,7 +128,7 @@ async function closeParameters() {
   await clickAt(expanded['Back to dock']);
   await until(controls, value => value?.Expand, 'The expanded parameters pane stayed open');
 }
-async function open(name) {
+async function open(name, building = 25000) {
   await page.eval(`(async () => {
     const response = await fetch('/fixtures/' + ${JSON.stringify(name)});
     if (!response.ok) throw new Error('Fixture is missing');
@@ -137,7 +138,8 @@ async function open(name) {
   await page.press('Control+o');
   await until(() => page.eval(() => window.featureUpload === null), Boolean, 'Open did not consume the selected file');
   if (name.endsWith('.dwprt')) {
-    await until(() => shown('shown_build'), value => value && !value.pending && !value.reading, 'Part is still building');
+    await until(() => shown('shown_build'), value => value && !value.pending && !value.reading, 'Part is still building',
+      building);
   }
   await page.wait(500);
 }
@@ -237,6 +239,35 @@ switch (scenario) {
     const after = notes(await save(true));
     check(after.length === 1 && after[0].startsWith('2× M6x1-6H') &&
       after[0].endsWith(' 6'), `Rebuilt thread notes read ${JSON.stringify(after)}`);
+    break;
+  }
+  case 'curved-from': {
+    // The headless application test builds a boss from the rod's curved top, then a later post.
+    // The web build takes about two minutes to build this part (seconds natively); the
+    // longer wait keeps the check on the result until that is fixed.
+    await open('extrude-from-curved.dwprt', 240000);
+    const view = () => shown('shown_viewport');
+    await until(view, value => value?.visible_meshes > 0, 'The part with a curved start did not draw');
+    // The rod alone draws too: the boss itself must be in the tree with no Refused or
+    // Working mark, which a built feature never has.
+    const bossBuilt = async () => {
+      const [tree, marks] = [await controls(), await shown('shown_marks')];
+      return Boolean(tree?.['Tree: Boss-Extrude2']) && Array.isArray(marks) &&
+        !marks.some(mark => mark.feature === 'Boss-Extrude2' || mark.mark === 'Refused');
+    };
+    await until(bossBuilt, built => built, 'The boss on the curved face did not build');
+    await parameters();
+    await replace('Default BossExtrude2.Depth', '9');
+    await closeParameters();
+    await until(() => shown('shown_build'), value => value && !value.pending && !value.reading, 'Edited part is still building',
+      240000);
+    await until(view, value => value?.visible_meshes > 0, 'The rebuilt part did not draw');
+    await until(bossBuilt, built => built, 'The edited boss on the curved face did not build');
+    const stored = await save();
+    const boss = stored.features.find(f => f.kind.type === 'extrude' && f.kind.from);
+    check(boss?.kind.from.type === 'surface' && boss.kind.from.plane.on === 'face',
+      `The curved start did not survive: ${JSON.stringify(boss?.kind.from)}`);
+    check(boss.kind.end.depth === 9, `The Parameters edit left depth ${JSON.stringify(boss.kind.end)}`);
     break;
   }
   default:

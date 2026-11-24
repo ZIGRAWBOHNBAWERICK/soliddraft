@@ -825,6 +825,10 @@ fn feature_plane(part: &PartDocument, id: FeatureId, depth: usize) -> Result<([i
             let (normal, base) = feature_plane(part, *under, depth + 1)?;
             Ok((normal, base + exact(*offset)?))
         }
+        SketchPlane::Context { .. } => Err(MateRefusal::new(
+            RefusalCode::UnsupportedPlane,
+            format!("{} is taken from another component in an assembly; mate that component's face", feature.name),
+        )),
         SketchPlane::Face { .. } | SketchPlane::FaceOffset { .. } => Err(MateRefusal::new(
             RefusalCode::UnsupportedPlane,
             format!(

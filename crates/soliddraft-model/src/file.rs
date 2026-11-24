@@ -253,7 +253,7 @@ impl Document {
                     saved
                 })
                 .collect(),
-            values: self.values.clone(),
+            values: self.values.for_file(self.configurations.holds_formulas()),
             configurations: self.configurations.clone(),
             properties: self.properties.clone(),
             datum_names: self.datum_names.clone(),
@@ -506,6 +506,7 @@ impl Document {
             doc.rename_datum(datum, &name).map_err(|e| FileError::Invalid(e.to_string()))?;
         }
         crate::configs::check_properties(&recipe.properties).map_err(FileError::Invalid)?;
+        recipe.values.keep_file_rule(recipe.configurations.holds_formulas());
         let resolved =
             recipe.configurations.validate(&mut recipe.values, &recipe.features).map_err(FileError::Invalid)?;
         // Solving a variant also fills solver caches that saved sketches omit.

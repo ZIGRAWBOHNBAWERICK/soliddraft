@@ -109,6 +109,7 @@ impl Offscreen {
             cursor_px: None,
             meshes: (self.uploads, doc.meshes.iter().map(|(b, m)| (*b, m.clone())).collect()),
             ghost: None,
+            context: None,
             preview: doc.provisional_mesh(),
             threads: super::threads::marks(doc),
             preview_pickable: false,

@@ -1429,6 +1429,7 @@ fn plane_ref(doc: &Document, plane: &str) -> Result<PlaneRef, String> {
             offset,
         },
         SketchPlane::Face { face } | SketchPlane::FaceOffset { face, .. } => PlaneRef::Face { face },
+        SketchPlane::Context { .. } => return Err(format!("`{plane}` is a face of another component")),
     })
 }
 

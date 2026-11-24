@@ -50,7 +50,7 @@ use soliddraft_kernel_api::*;
 pub use diagnostics::{APP_REQUEST_WORK, APP_WORK_TARGET, RequestWork, with_request_allowance};
 
 /// The pinned Catallax application entry revision.
-pub const CATALLAX_REVISION: &str = "e3ef8f8fce7c20acf1d6dd5a2d19dbd9d7640b45";
+pub const CATALLAX_REVISION: &str = "ccae79ab5b39f5b2adbbd0d6827a4f9b3ed0bfc3";
 
 /// An in-process Catallax backend. There is no global kernel state or kernel thread.
 #[derive(Default)]
@@ -1056,7 +1056,7 @@ fn converted_recipe(input: &Value, op: OpKind) -> KernelResult<catallax_app::sol
     }
     // Start in the newest format so adding a limited sweep or an all-faces shell does not
     // discard an otherwise identical target checkpoint merely to upgrade its recipe version.
-    catallax_recipe::FORMAT_V5.clone_into(&mut converted.recipe.format);
+    catallax_recipe::FORMAT_V6.clone_into(&mut converted.recipe.format);
     let sources = input["steps"].as_array().expect("generated recipe steps");
     let mut planes = BTreeMap::new();
     for source in sources {
@@ -1103,6 +1103,7 @@ fn converted_recipe(input: &Value, op: OpKind) -> KernelResult<catallax_app::sol
             && !stored_sweep["direction"].is_null()
             && let Some(direction) = sweep(profile, &stored_sweep["direction"])?
             && let catallax_recipe::Operation::ExtrudeTo { direction: d, .. }
+            | catallax_recipe::Operation::ExtrudeFrom { direction: d, .. }
             | catallax_recipe::Operation::ExtrudeNext { direction: d, .. } = &mut native
         {
             *d = Some(direction);
@@ -1965,6 +1966,38 @@ impl Kernel for CatallaxKernel {
             let step = json!({"op":"native","base":base,"native":native,"sweep":sweep});
             // The swept solid's history starts at the profile: the target is only read.
             self.operation_reading(state, tag, OpKind::ExtrudeTo, &[profile], &[target], &[], step)
+        })
+    }
+
+    fn extrude_from(
+        &self,
+        tag: &OpTag,
+        profile: BodyId,
+        target: BodyId,
+        direction: Option<Vec3>,
+        start: FaceId,
+        distance: f64,
+    ) -> KernelResult<OpResult> {
+        self.observe("extrude_from", || {
+            let state = self.state()?;
+            if state.get(profile)?.solid.is_some() {
+                return Err(KernelError::InvalidInput("extrude_from needs a profile".into()));
+            }
+            let solid = state.solid(target)?;
+            let (target_step, profile_step) = (state.step(target)?, state.step(profile)?);
+            let exact = direction.map(|d| native::vector(d, "sweep direction")).transpose()?;
+            let native = catallax_recipe::Operation::ExtrudeFrom {
+                target: target_step,
+                profile: profile_step,
+                direction: exact,
+                start: solid.face_ref(start, target)?,
+                distance: native::number(distance, "extrusion distance")?,
+            };
+            let sweep = json!({"profile": state.get(profile)?.result, "direction": direction});
+            let base = state.get(target)?.result.clone();
+            let step = json!({"op":"native","base":base,"native":native,"sweep":sweep});
+            // As for a limited sweep, the start face's body is only read.
+            self.operation_reading(state, tag, OpKind::ExtrudeFrom, &[profile], &[target], &[], step)
         })
     }
 
@@ -2920,5 +2953,22 @@ mod tests {
             assert!(swept.record.faces.deleted.is_empty());
             assert_eq!(kernel.export_step(target, &StepOptions::default()).unwrap(), original);
         }
+    }
+}
+
+#[cfg(test)]
+mod format_doc {
+    /// docs/needs-catallax.md says which recipe format the adapter writes; it must name the
+    /// format the adapter really writes.
+    #[test]
+    fn the_doc_names_the_recipe_format_the_adapter_writes() {
+        let doc = include_str!("../../../docs/needs-catallax.md");
+        let written = catallax_recipe::FORMAT_V6.rsplit('/').next().expect("a numbered format");
+        let claim = doc.split("The adapter emits recipe format ").nth(1).expect("the doc names the adapter's format");
+        assert!(
+            claim.starts_with(&format!("{written} ")),
+            "the doc says format {}, the adapter writes {written}",
+            claim.split_whitespace().next().unwrap_or_default()
+        );
     }
 }

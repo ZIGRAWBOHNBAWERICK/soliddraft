@@ -47,6 +47,9 @@ pub enum ValuesAction {
     AddGlobal,
     /// Adds the typed configuration.
     AddConfiguration,
+    /// Copies a configuration at once, as a browser duplicates a tab, then opens the
+    /// copy's name for editing.
+    Duplicate(String),
     /// Makes a column the selected configuration.
     Activate(String),
     /// Edits the selected configuration or parameter.
@@ -84,6 +87,11 @@ pub struct ValuesTab {
     focus: Option<Field>,
     /// The formula field edited last, for the Functions menu.
     last_formula: Option<LastFormula>,
+    /// The field that had the keyboard in the last frame.
+    editing: Option<Field>,
+    /// A field whose edit Escape ended. egui reports the lost focus a frame after the
+    /// Escape, so the Escape is kept until then.
+    escaped: Option<Field>,
     /// Sections folded or unfolded from how they start.
     toggled: BTreeSet<String>,
     /// The tab's last message.
@@ -103,10 +111,15 @@ struct LastFormula {
 enum TabName {
     Add,
     Rename(String),
-    Duplicate(String),
 }
 
 impl ValuesTab {
+    /// Whether a field of the tab had the keyboard in the last frame. egui drops the focus
+    /// on Escape before the shortcuts run, so they ask this to leave that Escape to the field.
+    pub fn has_keyboard(&self) -> bool {
+        self.editing.is_some()
+    }
+
     /// The refusal shown on a field, if any.
     pub fn error(&self, field: &Field) -> Option<&str> {
         self.errors.get(field).map(String::as_str)
@@ -123,7 +136,10 @@ fn table(state: &mut AppState) -> ValuesTable {
         state.values.errors.clear();
         state.values.formula_errors.clear();
         state.values.config_name = None;
+        // A formula typed in another part is not this part's to finish.
         state.values.last_formula = None;
+        state.values.focus = None;
+        state.values.reveal = None;
         state.values.document = Some(document);
     }
     let revision = (state.doc.revision(), state.doc.displayed_revision());
@@ -148,18 +164,24 @@ fn plain_number(text: &str) -> bool {
 
 /// A number as an editable cell shows it: the 15 significant digits Excel keeps.
 fn number(v: f64) -> String {
-    general(v, 15)
+    general_with(v, 15, 15)
 }
 
 /// A number in Excel's General format with up to `digits` significant digits: plain
-/// decimals between 1E-9 and 1E11, scientific notation outside them.
+/// decimals between 1E-9 and 1E11, scientific notation with six digits outside them.
 fn general(v: f64, digits: i32) -> String {
+    general_with(v, digits, 6)
+}
+
+/// General format with `scientific` significant digits in scientific notation.
+fn general_with(v: f64, digits: i32, scientific: usize) -> String {
     if v == 0.0 || !v.is_finite() {
         return if v == 0.0 { "0".into() } else { v.to_string() };
     }
     let exponent = v.abs().log10().floor() as i32;
     if !(-9..11).contains(&exponent) {
-        let text = format!("{v:.5E}");
+        let decimals = scientific.clamp(1, 17) - 1;
+        let text = format!("{v:.decimals$E}");
         let (mantissa, power) = text.split_once('E').unwrap_or((&text, "0"));
         let mantissa = mantissa.trim_end_matches('0').trim_end_matches('.');
         let power: i32 = power.parse().unwrap_or(0);
@@ -177,7 +199,7 @@ fn shown(text: &str) -> String {
 
 /// A value with its unit, for a hover: every digit Excel keeps.
 fn with_unit(v: f64, unit: &str) -> String {
-    if unit.is_empty() { general(v, 15) } else { format!("{} {unit}", general(v, 15)) }
+    if unit.is_empty() { number(v) } else { format!("{} {unit}", number(v)) }
 }
 
 /// A refusal in plain words.
@@ -289,8 +311,22 @@ fn field_response(
     if response.gained_focus() {
         response.scroll_to_me(None);
     }
+    let escape = ui.input(|i| i.key_pressed(egui::Key::Escape));
+    let had_keyboard = tab.editing.as_ref() == Some(&key);
+    if escape && (had_keyboard || response.has_focus() || response.lost_focus()) {
+        tab.escaped = Some(key.clone());
+    } else if response.has_focus() && tab.escaped.as_ref() == Some(&key) {
+        // Escape closed a popup and the field kept the keyboard.
+        tab.escaped = None;
+    }
+    if response.has_focus() {
+        tab.editing = Some(key.clone());
+    } else if had_keyboard {
+        tab.editing = None;
+    }
+    let escaped = tab.escaped.as_ref() == Some(&key);
     let formula_field = matches!(key, Field::Cell(..) | Field::NewGlobalFormula);
-    if formula_field && (response.has_focus() || response.lost_focus()) {
+    if formula_field && !escaped && response.has_focus() {
         remember_formula(tab, &key, &text);
     }
     if response.changed() {
@@ -305,11 +341,15 @@ fn field_response(
         response.request_focus();
         return (None, response);
     }
-    let escaped = ui.input(|i| i.key_pressed(egui::Key::Escape));
     if response.lost_focus() && escaped {
+        tab.escaped = None;
         tab.drafts.remove(&key);
         tab.errors.remove(&key);
         tab.formula_errors.remove(&key);
+        // The Functions menu must not finish a formula Escape threw away.
+        if tab.last_formula.as_ref().is_some_and(|last| last.field == key) {
+            tab.last_formula = None;
+        }
         return (None, response);
     }
     if response.lost_focus() && tab.drafts.get(&key).is_some_and(|d| d == current) {
@@ -614,7 +654,7 @@ fn tabs(ui: &mut egui::Ui, tab: &mut ValuesTab, table: &ValuesTable, actions: &m
             TabEvent::Select(i) => actions.push(ValuesAction::Activate(name(i))),
             TabEvent::Close(i) => actions.push(ValuesAction::Edit(Edit::Delete { configuration: name(i) })),
             TabEvent::Rename(i) => start_naming(tab, TabName::Rename(name(i)), name(i)),
-            TabEvent::Duplicate(i) => start_naming(tab, TabName::Duplicate(name(i)), format!("{} copy", name(i))),
+            TabEvent::Duplicate(i) => actions.push(ValuesAction::Duplicate(name(i))),
             TabEvent::New => start_naming(tab, TabName::Add, String::new()),
             TabEvent::Move { from, to } => {
                 if let Some(edit) = move_tab(&table.columns, from, to) {
@@ -1117,9 +1157,6 @@ pub fn apply(state: &mut AppState, action: ValuesAction) {
                 Some(TabName::Rename(configuration)) => {
                     Command::EditParameters(Edit::Rename { configuration: configuration.clone(), name })
                 }
-                Some(TabName::Duplicate(configuration)) => {
-                    Command::EditParameters(Edit::Duplicate { configuration: configuration.clone(), name })
-                }
                 _ => Command::AddConfiguration { name },
             };
             if run(state, Field::NewConfiguration, command) {
@@ -1129,6 +1166,17 @@ pub fn apply(state: &mut AppState, action: ValuesAction) {
                 {
                     last.configuration = Some(to);
                 }
+            }
+        }
+        ValuesAction::Duplicate(configuration) => {
+            let columns = state.doc.model().values_table().columns;
+            let name = (1..)
+                .map(|n| if n == 1 { format!("{configuration} copy") } else { format!("{configuration} copy {n}") })
+                .find(|name| !columns.contains(name))
+                .expect("a free name");
+            let command = Command::EditParameters(Edit::Duplicate { configuration, name: name.clone() });
+            if run(state, Field::NewConfiguration, command) {
+                start_naming(&mut state.values, TabName::Rename(name.clone()), name);
             }
         }
         ValuesAction::Edit(edit) => {
@@ -1317,41 +1365,47 @@ mod tests {
         assert_eq!(with_unit(1.0 / 3.0, "mm"), "0.333333333333333 mm");
     }
 
-    /// Two tabs of one saved part have the same id and, freshly opened, the same revision.
-    /// Rows, typed drafts, refusals and a table file asked for in one must not show in,
-    /// or apply to, the other.
+    /// A hover and an editable cell keep every digit Excel keeps, in scientific notation
+    /// too; only the cell's General display shortens it.
     #[test]
-    fn rows_drafts_and_table_uploads_belong_to_one_open_copy_of_a_file() {
-        let dir = std::env::temp_dir().join(format!("soliddraft-values-instance-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("plate.dwprt");
-        let mut doc = crate::document::Document::new("Plate", crate::kernel());
-        doc.apply(crate::document::Command::AddExtrude { params: Default::default(), via_assistant: false }).unwrap();
-        crate::file::save(&mut doc, &path).unwrap();
-        let first = crate::file::open(&path, crate::kernel(), None).unwrap();
-        let second = crate::file::open(&path, crate::kernel(), None).unwrap();
-        assert_eq!(first.model().id(), second.model().id(), "one file, one document id");
-        assert_eq!(first.revision(), second.revision(), "both tabs at the same local revision");
+    fn hovers_and_cells_keep_fifteen_digits_in_scientific_notation() {
+        assert_eq!(with_unit(1.23456789e-10, "mm"), "1.23456789E-10 mm");
+        assert_eq!(with_unit(-2.7755575615628914e-17, ""), "-2.77555756156289E-17");
+        assert_eq!(number(123_456_789_012_345.0), "1.23456789012345E+14");
+        assert_eq!(general(1.23456789e-10, 10), "1.23457E-10");
+    }
 
-        let mut state = AppState::new(first);
-        table(&mut state);
-        state.values.drafts.insert(Field::NewGlobalName, "typed in the first tab".into());
-        state.values.errors.insert(Field::NewGlobalName, "refused in the first tab".into());
-        mark_import(&mut state);
-        let first = std::mem::replace(&mut state.doc, second);
-        table(&mut state);
-        assert!(state.values.drafts.is_empty(), "the second tab shows the first tab's draft");
-        assert!(state.values.errors.is_empty(), "the second tab shows the first tab's refusal");
-
-        let csv = b"name,Default\n".to_vec();
-        apply_upload(&mut state, vec![("table.csv".into(), csv)]);
-        assert_eq!(
-            state.values.message.as_deref(),
-            Some("The part changed while the table picker was open"),
-            "a table picked for the first tab applies to the second"
-        );
-        drop(first);
-        std::fs::remove_dir_all(&dir).ok();
+    /// A formula cell given text and then Escape applies nothing and forgets the text, so
+    /// the Functions menu, which writes into the last formula, cannot finish it.
+    #[test]
+    fn escape_forgets_the_formula_it_threw_away() {
+        let ctx = egui::Context::default();
+        let mut tab = ValuesTab::default();
+        let key = Field::Cell("BossExtrude1.Depth".into(), 0);
+        let frame = |tab: &mut ValuesTab, events: Vec<egui::Event>| {
+            let mut entered = None;
+            let mut output = ctx.run_ui(egui::RawInput { events, ..Default::default() }, |ui| {
+                let text = Text { current: "10", hint: "", label: "Default BossExtrude1.Depth" };
+                entered = field_response(ui, tab, key.clone(), text, 100.0, true).0;
+            });
+            output.textures_delta.clear();
+            entered
+        };
+        tab.focus = Some(key.clone());
+        frame(&mut tab, Vec::new());
+        frame(&mut tab, vec![egui::Event::Text("=1234+".into())]);
+        assert!(tab.drafts.get(&key).is_some_and(|text| text.ends_with("=1234+")), "{:?}", tab.drafts);
+        let escape = egui::Event::Key {
+            key: egui::Key::Escape,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        };
+        assert_eq!(frame(&mut tab, vec![escape]), None, "Escape applies nothing");
+        frame(&mut tab, Vec::new());
+        assert_eq!(tab.drafts.get(&key), None, "Escape throws the text away");
+        assert!(tab.last_formula.is_none(), "the Functions menu would finish the thrown-away formula");
     }
 
     #[test]

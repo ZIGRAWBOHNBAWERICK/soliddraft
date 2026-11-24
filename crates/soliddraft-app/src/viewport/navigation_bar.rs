@@ -4,6 +4,7 @@ use super::{
     ViewportEvents,
     camera::Camera,
     look::{Preset, Tier},
+    render::DisplayMode,
     scenes::Scene,
 };
 use crate::graphics::CurrentView;

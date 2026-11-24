@@ -529,7 +529,7 @@ fn starts_that_cannot_be_built_are_refused_by_name() {
     let slope = from_surface(PlaneRef::Face { face });
     edit(&mut d, e, extrude(s, ExtrudeOp::Boss, EndCondition::UpToNext, false, slope.clone()));
     refused(&d, e, "Up to next");
-    // A curved face is kept and refused by name: the kernel cannot cap on it yet.
+    // A curved face starts a set length, but not Up to next or Up to face.
     let mut c = doc();
     let round = add(
         &mut c,
@@ -542,16 +542,281 @@ fn starts_that_cannot_be_built_are_refused_by_name() {
     let t = c.kernel().topology(c.body().unwrap()).unwrap();
     let curved = c.face_ref(t.faces.iter().find(|f| f.normal.is_none()).unwrap().id).unwrap();
     let s2 = top_square(&mut c);
-    let on_curve =
-        add(&mut c, extrude(s2, ExtrudeOp::Boss, blind(5.0), false, from_surface(PlaneRef::Face { face: curved })));
-    refused(&c, on_curve, "curved face");
+    let on_curve = add(
+        &mut c,
+        extrude(
+            s2,
+            ExtrudeOp::Boss,
+            EndCondition::UpToNext,
+            false,
+            from_surface(PlaneRef::Face { face: curved.clone() }),
+        ),
+    );
+    refused(&c, on_curve, "Up to next and Up to face cannot start on a curved face");
     let back = Document::from_bytes(&c.to_bytes().unwrap(), kernel()).unwrap();
-    assert_eq!(back.part_json(), c.part_json(), "the curved start is saved for when the kernel can build it");
+    assert_eq!(back.part_json(), c.part_json(), "the refused start is saved as it was");
+    // A torus takes only a ring-shaped profile around its axis: the reason is the kernel's.
+    let mut r = doc();
+    let ring = add(
+        &mut r,
+        sketch(SketchPlane::Datum { datum: DatumPlane::Front, offset: 0.0 }, |s| {
+            s.circle_at(P2::new(30.0, 0.0), 10.0).unwrap();
+        }),
+    );
+    add(&mut r, revolve(ring));
+    let torus = r.face_ref(curved_faces(&r)[0]).unwrap();
+    let s3 = add(
+        &mut r,
+        sketch(top(-20.0), |s| {
+            s.rectangle(P2::new(30.0, 0.0), 4.0, 4.0).unwrap();
+        }),
+    );
+    let on_torus =
+        add(&mut r, extrude(s3, ExtrudeOp::Boss, blind(2.0), false, from_surface(PlaneRef::Face { face: torus })));
+    refused(&r, on_torus, "features.");
     // A parallel plane still starts it as before.
     let parallel = from_surface(PlaneRef::Datum { datum: DatumPlane::Top, offset: 31.0 });
     edit(&mut d, e, extrude(s, ExtrudeOp::Boss, blind(5.0), false, parallel));
     all_ok(&d);
     close(bounds(&d).1.z, 36.0, "a parallel plane 31 mm up is the start");
+}
+
+/// A rod of radius 20 along y from 0 to -40, made from one circle: Catallax proves a
+/// start or limit on its round face.
+fn rod(doc: &mut Document) -> FeatureId {
+    let s = add(
+        doc,
+        sketch(SketchPlane::Datum { datum: DatumPlane::Front, offset: 0.0 }, |s| {
+            s.circle_at(P2::new(0.0, 0.0), 40.0).unwrap();
+        }),
+    );
+    add(doc, extrude(s, ExtrudeOp::Boss, blind(40.0), false, ExtrudeOptions::default()))
+}
+
+const ROD: f64 = 16000.0 * std::f64::consts::PI;
+
+/// The area under the rod's top over 2 <= x <= 8, above its axis.
+fn under_rod() -> f64 {
+    let f = |x: f64| (x * (400.0 - x * x).sqrt() + 400.0 * (x / 20.0).asin()) / 2.0;
+    f(8.0) - f(2.0)
+}
+
+fn curved_faces(doc: &Document) -> Vec<FaceId> {
+    let t = doc.kernel().topology(doc.body().unwrap()).unwrap();
+    t.faces.iter().filter(|f| f.normal.is_none()).map(|f| f.id).collect()
+}
+
+/// A 6 mm square on a plane `z` above the Top plane, 2 to 8 mm along x, over the rod.
+fn square_over(doc: &mut Document, z: f64) -> FeatureId {
+    add(
+        doc,
+        sketch(top(z), |s| {
+            s.rectangle(P2::new(5.0, -20.0), 6.0, 6.0).unwrap();
+        }),
+    )
+}
+
+fn revolve(sketch: FeatureId) -> FeatureKind {
+    FeatureKind::Revolve(soliddraft_model::RevolveFeature {
+        sketch,
+        axis_origin: [0.0, 0.0, 0.0],
+        axis_direction: [0.0, 0.0, 1.0],
+        angle_deg: 360.0,
+    })
+}
+
+fn top_z(doc: &Document) -> f64 {
+    doc.kernel().topology(doc.body().unwrap()).unwrap().bbox.max.z
+}
+
+#[test]
+fn a_start_on_a_curved_face_follows_it_flips_merges_and_carries_a_later_feature() {
+    let mut d = doc();
+    rod(&mut d);
+    close(volume(&d), ROD, "the rod");
+    let face = d.face_ref(curved_faces(&d)[0]).unwrap();
+    let s = square_over(&mut d, 30.0);
+    let from = from_surface(PlaneRef::Face { face: face.clone() });
+    // Flipped, the lines go down and first cross the rod's top; Direction 2 goes up from it.
+    let out = ExtrudeOptions { direction2: Some(blind(5.0)), ..from.clone() };
+    let e = add(&mut d, extrude(s, ExtrudeOp::Boss, blind(5.0), true, out.clone()));
+    all_ok(&d);
+    // Between the face and the face moved 5 mm lie 36 x 5; the downward half is inside.
+    close(volume(&d), ROD + 180.0, "a 6 x 6 boss 5 mm out of the rod's top");
+    let peak = 396f64.sqrt() + 5.0;
+    assert!((top_z(&d) - peak).abs() <= 0.011, "the boss top follows the rod: {}", top_z(&d));
+    // As a cut the flipped sweep takes a 5 mm layer under the top.
+    edit(&mut d, e, extrude(s, ExtrudeOp::Cut, blind(5.0), true, from.clone()));
+    all_ok(&d);
+    close(volume(&d), ROD - 180.0, "a flipped cut 5 mm under the top");
+    // Unflipped, the lines go up and first cross the rod's underside.
+    edit(&mut d, e, extrude(s, ExtrudeOp::Cut, blind(5.0), false, from.clone()));
+    all_ok(&d);
+    close(volume(&d), ROD - 180.0, "a cut 5 mm above the underside");
+    // Through all from the top goes down through the whole rod.
+    edit(&mut d, e, extrude(s, ExtrudeOp::Cut, EndCondition::ThroughAll, true, from.clone()));
+    all_ok(&d);
+    close(volume(&d), ROD - 12.0 * under_rod(), "the column through the rod");
+    // Up to next and Up to face from a curved face are refused by name.
+    edit(&mut d, e, extrude(s, ExtrudeOp::Boss, EndCondition::UpToNext, true, from.clone()));
+    match d.status(e) {
+        Some(FeatureStatus::Failed(message)) => {
+            assert!(message.contains("cannot start on a curved face"), "{message}");
+            assert!(!message.contains("Catallax") && !message.contains("kernel"), "plain words: {message}");
+        }
+        other => panic!("refused: {other:?}"),
+    }
+    // Back to the boss, then a later cut through the part, then a deeper boss under it.
+    edit(&mut d, e, extrude(s, ExtrudeOp::Boss, blind(5.0), true, out.clone()));
+    let c = add(
+        &mut d,
+        sketch(top(0.0), |s| {
+            s.circle_at(P2::new(-10.0, -20.0), 2.0).unwrap();
+        }),
+    );
+    let both = ExtrudeOptions { direction2: Some(EndCondition::ThroughAll), ..Default::default() };
+    let later = add(&mut d, extrude(c, ExtrudeOp::Cut, EndCondition::ThroughAll, false, both));
+    all_ok(&d);
+    // The hole at x = -10 is 33.4 to 35.7 mm long across its 2 mm.
+    let removed = ROD + 180.0 - volume(&d);
+    let pi = std::f64::consts::PI;
+    assert!(removed > pi * 33.0 && removed < pi * 36.0, "the later cut takes a 2 mm hole: {removed}");
+    let deeper = ExtrudeOptions { direction2: Some(blind(7.0)), ..from.clone() };
+    edit(&mut d, e, extrude(s, ExtrudeOp::Boss, blind(5.0), true, deeper));
+    all_ok(&d);
+    close(volume(&d), ROD + 252.0 - removed, "the deeper boss beside the later cut");
+    let back = reopened(&d);
+    assert_eq!(back.status(later), Some(&FeatureStatus::Ok));
+}
+
+#[test]
+fn a_curved_start_on_another_body_makes_a_new_body() {
+    let mut d = doc();
+    rod(&mut d);
+    let face = d.face_ref(curved_faces(&d)[0]).unwrap();
+    let s = square_over(&mut d, 30.0);
+    let out = ExtrudeOptions { direction2: Some(blind(5.0)), ..from_surface(PlaneRef::Face { face }) };
+    // Merge result off: the extrusion is the first feature of body 1.
+    let e = d
+        .execute(Command::AddFeatureInBody {
+            body: 1,
+            kind: extrude(s, ExtrudeOp::Boss, blind(5.0), true, out),
+            via_assistant: false,
+            position: None,
+        })
+        .unwrap()
+        .created
+        .unwrap();
+    all_ok(&d);
+    let in_body = |d: &Document, key: u32| {
+        let body = d.live_bodies().into_iter().find(|(body, _)| *body == key).unwrap().1;
+        d.kernel().mass_properties(body).unwrap().volume
+    };
+    close(in_body(&d, 1), 360.0, "a new body 5 mm each side of the rod's top");
+    close(in_body(&d, 0), ROD, "the rod is untouched");
+    let back = Document::from_bytes(&d.to_bytes().unwrap(), kernel()).unwrap();
+    assert_eq!(back.part_json(), d.part_json(), "the truth round-trips");
+    assert_eq!(back.geometry_hash(), d.geometry_hash());
+    assert_eq!(back.status(e), Some(&FeatureStatus::Ok));
+    close(in_body(&back, 1), 360.0, "the reopened new body");
+}
+
+#[test]
+fn up_to_a_curved_face_stops_on_it() {
+    let mut d = doc();
+    rod(&mut d);
+    let face = d.face_ref(curved_faces(&d)[0]).unwrap();
+    let s = square_over(&mut d, 30.0);
+    add(&mut d, extrude(s, ExtrudeOp::Boss, EndCondition::UpToFace { face }, true, ExtrudeOptions::default()));
+    all_ok(&d);
+    close(volume(&d), ROD + 6.0 * (6.0 * 30.0 - under_rod()), "the column from 30 mm down to the rod");
+    let back = Document::from_bytes(&d.to_bytes().unwrap(), kernel()).unwrap();
+    assert_eq!(back.part_json(), d.part_json(), "the truth round-trips");
+    assert_eq!(back.geometry_hash(), d.geometry_hash());
+    all_ok(&back);
+}
+
+#[test]
+fn spline_faces_start_extrusions_and_revolved_faces_are_refused_with_the_reason() {
+    // A roof whose top is a quadratic spline from (10, 10) over (0, 20) to (-10, 10).
+    let mut d = doc();
+    let roof = add(
+        &mut d,
+        sketch(SketchPlane::Datum { datum: DatumPlane::Front, offset: 0.0 }, |s| {
+            s.add(EntityKind::Line { a: P2::new(-10.0, 10.0), b: P2::new(-10.0, 0.0) }, false);
+            s.add(EntityKind::Line { a: P2::new(-10.0, 0.0), b: P2::new(10.0, 0.0) }, false);
+            s.add(EntityKind::Line { a: P2::new(10.0, 0.0), b: P2::new(10.0, 10.0) }, false);
+            let points = vec![P2::new(10.0, 10.0), P2::new(0.0, 20.0), P2::new(-10.0, 10.0)];
+            s.add(EntityKind::Spline { mode: soliddraft_model::sketch::SplineMode::Control, points }, false);
+        }),
+    );
+    add(&mut d, extrude(roof, ExtrudeOp::Boss, blind(20.0), false, ExtrudeOptions::default()));
+    let before = volume(&d);
+    let face = d.face_ref(curved_faces(&d)[0]).unwrap();
+    let s = add(
+        &mut d,
+        sketch(top(0.0), |s| {
+            s.rectangle(P2::new(0.0, -10.0), 4.0, 4.0).unwrap();
+        }),
+    );
+    let from = from_surface(PlaneRef::Face { face });
+    // Merge result off: the boss is a body of its own on the spline face.
+    d.execute(Command::AddFeatureInBody {
+        body: 1,
+        kind: extrude(s, ExtrudeOp::Boss, blind(4.0), false, from.clone()),
+        via_assistant: false,
+        position: None,
+    })
+    .unwrap();
+    all_ok(&d);
+    let in_body = |d: &Document, key: u32| {
+        let body = d.live_bodies().into_iter().find(|(body, _)| *body == key).unwrap().1;
+        d.kernel().mass_properties(body).unwrap().volume
+    };
+    close(in_body(&d, 1), 64.0, "a 4 x 4 boss 4 mm out of the spline roof");
+    close(in_body(&d, 0), before, "the roof is untouched");
+    let back = Document::from_bytes(&d.to_bytes().unwrap(), kernel()).unwrap();
+    assert_eq!(back.part_json(), d.part_json(), "the truth round-trips");
+    assert_eq!(back.geometry_hash(), d.geometry_hash());
+    all_ok(&back);
+    // Joined to the roof, the union along the spline face is refused with its reason.
+    let merged = add(&mut d, extrude(s, ExtrudeOp::Boss, blind(4.0), false, from));
+    match d.status(merged) {
+        Some(FeatureStatus::Failed(message)) => {
+            assert!(message.contains("intersect.bezier-plane-oblique"), "{message}")
+        }
+        other => panic!("refused with the reason: {other:?}"),
+    }
+    // A dome and a cone turned about z: Catallax has no proof for their faces yet.
+    let dome = |s: &mut Sketch| {
+        s.add(EntityKind::Line { a: P2::new(0.0, 20.0), b: P2::new(0.0, 0.0) }, false);
+        s.add(EntityKind::Line { a: P2::new(0.0, 0.0), b: P2::new(20.0, 0.0) }, false);
+        s.add(EntityKind::Arc { center: P2::new(0.0, 0.0), start: P2::new(20.0, 0.0), end: P2::new(0.0, 20.0) }, false);
+    };
+    let cone = |s: &mut Sketch| {
+        s.polyline_loop(&[P2::new(0.0, 0.0), P2::new(20.0, 0.0), P2::new(0.0, 20.0)]).unwrap();
+    };
+    for (what, shape) in [("dome", &dome as &dyn Fn(&mut Sketch)), ("cone", &cone)] {
+        let mut d = doc();
+        let m = add(&mut d, sketch(SketchPlane::Datum { datum: DatumPlane::Front, offset: 0.0 }, shape));
+        add(&mut d, revolve(m));
+        let face = d.face_ref(curved_faces(&d)[0]).unwrap();
+        let s = add(
+            &mut d,
+            sketch(top(0.0), |s| {
+                s.rectangle(P2::new(5.0, 0.0), 6.0, 6.0).unwrap();
+            }),
+        );
+        let e = add(&mut d, extrude(s, ExtrudeOp::Boss, blind(5.0), false, from_surface(PlaneRef::Face { face })));
+        match d.status(e) {
+            Some(FeatureStatus::Failed(message)) => {
+                assert!(message.contains("features.unsupported-curved-limit"), "{what}: {message}")
+            }
+            other => panic!("{what}: refused with the reason: {other:?}"),
+        }
+        let back = Document::from_bytes(&d.to_bytes().unwrap(), kernel()).unwrap();
+        assert_eq!(back.part_json(), d.part_json(), "{what}: the refused start is kept");
+    }
 }
 
 #[test]

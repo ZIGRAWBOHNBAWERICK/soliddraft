@@ -1403,8 +1403,7 @@ impl SolidDraftApp {
                             ) =>
                         {
                             let doc = &self.state.doc;
-                            // A curved face is kept too: the part refuses it by name until the
-                            // kernel can start an extrusion on a curved surface.
+                            // A curved face is kept too: an extrusion can start on it.
                             let plane = |pick: Selection| match pick {
                                 Selection::Face(f) => doc
                                     .face_ref(f)

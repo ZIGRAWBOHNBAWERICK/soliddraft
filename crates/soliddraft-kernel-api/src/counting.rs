@@ -313,6 +313,19 @@ impl Kernel for Counting {
         self.inner.extrude_to(tag, profile, target, direction, limit)
     }
 
+    fn extrude_from(
+        &self,
+        tag: &OpTag,
+        profile: BodyId,
+        target: BodyId,
+        direction: Option<Vec3>,
+        start: FaceId,
+        distance: f64,
+    ) -> KernelResult<OpResult> {
+        self.op(tag);
+        self.inner.extrude_from(tag, profile, target, direction, start, distance)
+    }
+
     fn hole(&self, tag: &OpTag, body: BodyId, params: &Hole) -> KernelResult<OpResult> {
         self.op(tag);
         self.inner.hole(tag, body, params)

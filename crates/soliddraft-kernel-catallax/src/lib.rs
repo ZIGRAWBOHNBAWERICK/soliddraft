@@ -2955,3 +2955,20 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+mod format_doc {
+    /// docs/needs-catallax.md says which recipe format the adapter writes; it must name the
+    /// format the adapter really writes.
+    #[test]
+    fn the_doc_names_the_recipe_format_the_adapter_writes() {
+        let doc = include_str!("../../../docs/needs-catallax.md");
+        let written = catallax_recipe::FORMAT_V6.rsplit('/').next().expect("a numbered format");
+        let claim = doc.split("The adapter emits recipe format ").nth(1).expect("the doc names the adapter's format");
+        assert!(
+            claim.starts_with(&format!("{written} ")),
+            "the doc says format {}, the adapter writes {written}",
+            claim.split_whitespace().next().unwrap_or_default()
+        );
+    }
+}

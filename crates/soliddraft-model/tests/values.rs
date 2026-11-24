@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use soliddraft_kernel_catallax::CatallaxKernel;
-use soliddraft_model::{Command, Document, values::Input};
+use soliddraft_model::{Command, Document, EndCondition, FeatureKind, values::Input};
 
 fn empty() -> Document {
     Document::new("Values", Arc::new(CatallaxKernel::new()))
@@ -122,4 +122,31 @@ fn dependency_depth_boundary_in_creation_order_is_atomic() {
 #[test]
 fn dependency_depth_boundary_in_reverse_creation_order_is_atomic() {
     check_dependency_depth(true);
+}
+/// As in Excel, IFERROR catches a name nothing has yet and a function this version does
+/// not know, and the formula reads the value once one takes that name.
+#[test]
+fn iferror_catches_an_unknown_name_until_a_value_takes_it() {
+    let mut doc = old_bracket();
+    let id = doc.features().iter().find(|f| f.name == "Boss-Extrude2").unwrap().id;
+    let depth = |doc: &Document| match &doc.feature(id).unwrap().kind {
+        FeatureKind::Extrude(e) => match e.end {
+            EndCondition::Blind { depth } => depth,
+            ref other => panic!("{other:?}"),
+        },
+        other => panic!("{other:?}"),
+    };
+    let drive = |doc: &mut Document, text: &str| {
+        doc.execute(Command::Drive { input: Input::Depth { feature: id }, expression: text.into() }).unwrap();
+    };
+    drive(&mut doc, "=IFERROR(NOPE(1),11 mm)");
+    assert_eq!(depth(&doc), 11.0);
+    refused(&mut doc, Command::SetValue { name: "w".into(), expression: "=Lip".into() }, "unknown value Lip");
+    drive(&mut doc, "=IFERROR(Lip,12 mm)");
+    assert_eq!(depth(&doc), 12.0);
+    set(&mut doc, "Lip", "7 mm");
+    assert_eq!(depth(&doc), 7.0, "the formula reads Lip once it exists");
+    let back = Document::from_bytes(&doc.to_bytes().unwrap(), Arc::new(CatallaxKernel::new())).unwrap();
+    assert_eq!(depth(&back), 7.0);
+    assert_eq!(back.part_json(), doc.part_json());
 }

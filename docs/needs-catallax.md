@@ -16,7 +16,7 @@ for undo, branches and concurrent queries. Catallax shares that checkpoint and c
 with persistent geometry, topology and fact storage rather than copying all history.
 It validates native step definitions and numerical policy before resuming; a mismatch
 restarts evaluation rather than accepting stale geometry.
-The adapter emits recipe format 5 from the first solid, so adding an end condition or
+The adapter emits recipe format 6 from the first solid, so adding an end condition or
 an all-faces shell does not discard an otherwise matching checkpoint through a format
 upgrade. Formats 3 and 4 stay readable and are never relabelled: a captured question and
 an imported STEP body keep format 3 until a reviewed migration.

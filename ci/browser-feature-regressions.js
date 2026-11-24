@@ -248,12 +248,21 @@ switch (scenario) {
     await open('extrude-from-curved.dwprt', 240000);
     const view = () => shown('shown_viewport');
     await until(view, value => value?.visible_meshes > 0, 'The part with a curved start did not draw');
+    // The rod alone draws too: the boss itself must be in the tree with no Refused or
+    // Working mark, which a built feature never has.
+    const bossBuilt = async () => {
+      const [tree, marks] = [await controls(), await shown('shown_marks')];
+      return Boolean(tree?.['Tree: Boss-Extrude2']) && Array.isArray(marks) &&
+        !marks.some(mark => mark.feature === 'Boss-Extrude2' || mark.mark === 'Refused');
+    };
+    await until(bossBuilt, built => built, 'The boss on the curved face did not build');
     await parameters();
     await replace('Default BossExtrude2.Depth', '9');
     await closeParameters();
     await until(() => shown('shown_build'), value => value && !value.pending && !value.reading, 'Edited part is still building',
       240000);
     await until(view, value => value?.visible_meshes > 0, 'The rebuilt part did not draw');
+    await until(bossBuilt, built => built, 'The edited boss on the curved face did not build');
     const stored = await save();
     const boss = stored.features.find(f => f.kind.type === 'extrude' && f.kind.from);
     check(boss?.kind.from.type === 'surface' && boss.kind.from.plane.on === 'face',

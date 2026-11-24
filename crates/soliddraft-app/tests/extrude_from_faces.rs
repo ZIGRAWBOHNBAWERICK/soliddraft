@@ -1,11 +1,12 @@
 //! Extrude From on a sloping face, picked in the viewport the way a user picks it: the
 //! extrusion starts on the slope, Merge result off makes it a new body, Flip turns it
 //! round, and the part saves and opens again. A curved face starts one the same way, and
-//! Up to next from it is refused in plain words. Frames land under
-//! `target/ux-tools/extrude-from/` and `target/ux-tools/extrude-from-curved/`.
+//! Up to next from it is refused in plain words. Up to face stops on the same curved face,
+//! and a curved start that no longer resolves is repaired by picking the face again. Frames
+//! land under `target/ux-tools/<case>/`.
 
 use soliddraft_app::document::{
-    Command, Document, ExtrudeParams, FeatureStatus, PlaneKind, Selection, SketchPlane, StartKind,
+    Command, Document, EndKind, ExtrudeParams, FeatureStatus, PlaneKind, Selection, SketchPlane, StartKind,
 };
 use soliddraft_app::state::{AppAction, EditorParams};
 use soliddraft_sketch::P2;
@@ -290,5 +291,129 @@ fn extrude_from_a_curved_face_picked_in_the_viewport() {
             std::fs::write(std::path::PathBuf::from(dir).join("extrude-from-curved.dwprt"), &bytes).unwrap();
         }
         case.note("saved and reopened with the same truth and geometry");
+    });
+}
+
+/// The rod's round top in a part's truth: every face fingerprint of the last feature that
+/// names a cylinder now names a sphere, so the reference no longer resolves, as when the
+/// face it named is gone.
+fn lose_curved_reference(value: &mut serde_json::Value) -> usize {
+    match value {
+        serde_json::Value::Object(map) => {
+            let mut lost = 0;
+            if let Some(surface) = map.get_mut("surface")
+                && surface == "cylinder"
+            {
+                *surface = "sphere".into();
+                lost += 1;
+            }
+            lost + map.values_mut().map(lose_curved_reference).sum::<usize>()
+        }
+        serde_json::Value::Array(items) => items.iter_mut().map(lose_curved_reference).sum(),
+        _ => 0,
+    }
+}
+
+/// The area under the rod's top between x = 2 and x = 8, per millimetre along y.
+fn under_rod() -> f64 {
+    let f = |x: f64| (x * (400.0 - x * x).sqrt() + 400.0 * (x / 20.0).asin()) / 2.0;
+    f(8.0) - f(2.0)
+}
+
+#[test]
+fn up_to_a_curved_face_picked_in_the_viewport() {
+    let mut case = Case::new("extrude-up-to-curved");
+    let (mut doc, square) = rod_and_square();
+    doc.selection = Some(Selection::Feature(square));
+    let mut app = launch(doc, STANDARD);
+    case.run(&mut app, |case, app| {
+        rebuilt(app);
+        run(app, AppAction::StartExtrude);
+        // Down from 30 mm, Up to face, then a click on the rod's top at x = -10.
+        extrude_params(app).flip = true;
+        extrude_params(app).end = EndKind::UpToFace(None);
+        settle(app);
+        let point = ux_tools::screen(app, glam::Vec3::new(-10.0, -20.0, 300f32.sqrt()));
+        ribbon::render_steps::await_pick(app, point);
+        ribbon::render_steps::rendered(app, |app| ribbon::click_at(app, point));
+        settle(app);
+        let end = extrude_params(app).end.clone();
+        assert!(matches!(&end, EndKind::UpToFace(Some(_))), "the click names the curved top as the limit: {end:?}");
+        pointer_to_chrome(app);
+        case.frame(app, "curved-limit-picked");
+        run(app, AppAction::CommitEditor);
+        assert!(app.state().state.editor.is_none(), "the form closes on OK");
+        let column = app.state().state.doc.features.last().unwrap().id;
+        assert_eq!(app.state().state.doc.feature(column).unwrap().status, FeatureStatus::Ok);
+        close(volume_of(app, 0), ROD + 6.0 * (6.0 * 30.0 - under_rod()), "the column from 30 mm down to the rod");
+        pointer_to_chrome(app);
+        case.frame(app, "column-on-curved-top");
+        let model = app.state().state.doc.model();
+        let back = soliddraft_model::Document::from_bytes(&model.to_bytes().unwrap(), model.kernel().clone()).unwrap();
+        assert_eq!(back.part_json(), model.part_json());
+        assert_eq!(back.geometry_hash(), model.geometry_hash());
+        case.note("Up to face on the rod's top: the column stops on the curve, saved and reopened the same");
+    });
+}
+
+#[test]
+fn a_lost_curved_start_is_repaired_by_picking_the_face_again() {
+    let mut case = Case::new("extrude-from-curved-repair");
+    let (mut doc, square) = rod_and_square();
+    doc.selection = Some(Selection::Feature(square));
+    let mut app = launch(doc, STANDARD);
+    case.run(&mut app, |case, app| {
+        rebuilt(app);
+        run(app, AppAction::StartExtrude);
+        extrude_params(app).choices.from = StartKind::Surface(None);
+        extrude_params(app).depth = 5.0;
+        extrude_params(app).flip = true;
+        extrude_params(app).choices.direction2 =
+            Some(soliddraft_app::document::Direction2 { end: EndKind::Blind, depth: 5.0 });
+        settle(app);
+        let point = ux_tools::screen(app, glam::Vec3::new(-10.0, -20.0, 300f32.sqrt()));
+        ribbon::render_steps::await_pick(app, point);
+        ribbon::render_steps::rendered(app, |app| ribbon::click_at(app, point));
+        settle(app);
+        run(app, AppAction::CommitEditor);
+        let boss = app.state().state.doc.features.last().unwrap().id;
+        assert_eq!(app.state().state.doc.feature(boss).unwrap().status, FeatureStatus::Ok);
+
+        // The saved part's start face no longer resolves; it opens needing repair.
+        let mut truth = app.state().state.doc.model().truth();
+        let features = truth["features"].as_array_mut().unwrap();
+        assert_eq!(lose_curved_reference(features.last_mut().unwrap()), 1, "the boss names one curved face");
+        let model = app.state().state.doc.model();
+        let lost = soliddraft_model::Document::from_part_json(&truth.to_string(), model.kernel().clone()).unwrap();
+        let file = case.dir.join("lost-curved-start.dwprt");
+        std::fs::write(&file, lost.to_bytes().unwrap()).unwrap();
+        run(app, AppAction::Open(Some(file)));
+        let status = app.state().state.doc.feature(boss).unwrap().status.clone();
+        let FeatureStatus::NeedsRepair(items) = status else { panic!("the boss needs repair: {status:?}") };
+        assert_eq!(items.len(), 1, "{items:?}");
+        run(app, AppAction::StartRepair(boss));
+        pointer_to_chrome(app);
+        case.frame(app, "repair-open");
+
+        // The same curved face, picked in the viewport, is taken as the replacement.
+        let point = ux_tools::screen(app, glam::Vec3::new(-10.0, -20.0, 300f32.sqrt()));
+        ribbon::render_steps::await_pick(app, point);
+        ribbon::render_steps::rendered(app, |app| ribbon::click_at(app, point));
+        settle(app);
+        let editor = app.state().state.editor.as_ref().expect("the repair form is open");
+        assert_eq!(editor.error, None, "the curved face is accepted");
+        let EditorParams::Repair { chosen, .. } = &editor.params else { panic!("repairing: {:?}", editor.params) };
+        assert!(
+            matches!(chosen.as_slice(), [Some(soliddraft_app::document::EntityRef::Face(_))]),
+            "the curved face is the replacement: {chosen:?}"
+        );
+        pointer_to_chrome(app);
+        case.frame(app, "curved-replacement-picked");
+        run(app, AppAction::CommitEditor);
+        assert_eq!(app.state().state.doc.feature(boss).unwrap().status, FeatureStatus::Ok);
+        close(volume_of(app, 0), ROD + 180.0, "the repaired boss stands on the rod's top again");
+        pointer_to_chrome(app);
+        case.frame(app, "repaired");
+        case.note("a lost curved From face repaired by picking it in the viewport");
     });
 }

@@ -21,7 +21,9 @@ impl SolidDraftApp {
             return;
         }
         // The open palette takes the plain keys, as a focused text field does.
-        let typing = ctx.egui_wants_keyboard_input() || self.state.palette.is_some();
+        // A Parameters cell that had the keyboard keeps the Escape that ended its edit.
+        let typing =
+            ctx.egui_wants_keyboard_input() || self.state.palette.is_some() || self.state.values.has_keyboard();
         let state = &self.state;
         let context = commands::Context::of(state);
         // The view-key profile's rows run first. A row that took over a command's key

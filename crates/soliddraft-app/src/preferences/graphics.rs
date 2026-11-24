@@ -236,7 +236,7 @@ pub(crate) fn current_view_controls(
         ui.add_enabled(lit, follows);
     });
     if !lit {
-        ui.weak("Ground shadow and ambient occlusion · Not available in assemblies");
+        ui.colored_label(crate::theme::muted(), "Ground shadow and ambient occlusion · Not available in assemblies");
     }
     if show_style {
         row(ui, highlight, "display", |ui| {

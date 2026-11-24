@@ -81,6 +81,8 @@ pub struct Palette {
     pub form_bg: Color32,
     /// Text fields and value pills.
     pub field_bg: Color32,
+    /// Opaque hint text for an empty text field.
+    pub field_hint: Color32,
     /// Tool chips and raised buttons.
     pub chip: Color32,
     /// Text and icons on an accent-filled button.
@@ -215,6 +217,7 @@ pub mod clear_bench {
         donate_line: rgb(0xf7, 0xb8, 0xb2),
         form_bg: rgb(0xf0, 0xf5, 0xff),
         field_bg: Color32::WHITE,
+        field_hint: rgb(0x4c, 0x58, 0x6a),
         chip: rgb(0xee, 0xf2, 0xf7),
         on_accent: Color32::WHITE,
         hud_bg: rgba(255, 255, 255, 242),
@@ -687,7 +690,9 @@ fn visuals() -> egui::Visuals {
     v.window_shadow = t.popup_shadow;
     v.popup_shadow = t.nav_shadow;
     v.menu_corner_radius = CornerRadius::same(t.radii.window);
-    v.extreme_bg_color = p.field_bg;
+    // Keep the shared fallback surface and give editors their own themed fill.
+    v.extreme_bg_color = clear_bench::PALETTE.field_bg;
+    v.text_edit_bg_color = Some(p.field_bg);
     v.faint_bg_color = p.panel_header;
     v.code_bg_color = p.chip;
     v.hyperlink_color = p.accent;
@@ -705,8 +710,7 @@ fn visuals() -> egui::Visuals {
     v.resize_corner_size = 10.0;
     v.weak_text_alpha = 0.7;
 
-    // Hints and secondary labels need opaque ink, not an alpha wash over the field.
-    v.weak_text_color = Some(p.muted);
+    v.weak_text_color = Some(p.field_hint);
 
     let w = &mut v.widgets;
     w.noninteractive = egui::style::WidgetVisuals {
@@ -811,6 +815,15 @@ pub fn dock_style(ctx: &egui::Context) -> egui_dock::Style {
     s.buttons.add_tab_bg_fill = p.hover;
     s.buttons.add_tab_border_color = p.line;
     s
+}
+
+/// Uses the hint colour of the surface behind a frameless editor.
+pub(crate) fn add_text_edit_with_hint(ui: &mut egui::Ui, edit: egui::TextEdit<'_>, hint: Color32) -> egui::Response {
+    let previous = ui.visuals().weak_text_color;
+    ui.visuals_mut().weak_text_color = Some(hint);
+    let response = ui.add(edit);
+    ui.visuals_mut().weak_text_color = previous;
+    response
 }
 
 /// A 1-pixel separator line across the full width of `ui`.

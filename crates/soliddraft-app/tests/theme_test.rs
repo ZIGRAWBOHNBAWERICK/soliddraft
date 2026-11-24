@@ -147,6 +147,13 @@ fn the_bracket_in_light_and_dark() {
         .unwrap();
     appearance.set_picture("teal.png".into(), png.get_ref()).unwrap();
     soliddraft_app::settings::save_theme_preferences(&appearance).unwrap();
+    soliddraft_app::settings::save_reference_display(&soliddraft_app::settings::ReferenceDisplay {
+        show_grid: false,
+        show_origin_planes: false,
+        always_show_origin_axes: false,
+        ..Default::default()
+    })
+    .unwrap();
 
     let mut custom = Harness::builder().with_size(vec2(1440.0, 900.0)).wgpu().build_eframe(|cc| {
         SolidDraftApp::new(cc, soliddraft_app::command_tools::board_bracket(), Automation::default())

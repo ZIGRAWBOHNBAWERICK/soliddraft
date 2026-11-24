@@ -918,10 +918,12 @@ jobs:
       - name: Recover a graded wall at the current kernel pin in Chromium
         env:
           CHROME_DEVTOOLS_AXI_SESSION: wall-thickness
+          SOLIDDRAFT_BROWSER_CDP_PORT: "9223"
           CHROME_DEVTOOLS_AXI_EXECUTABLE_PATH: /usr/bin/google-chrome
           CHROME_DEVTOOLS_AXI_CHROME_ARGS: --no-sandbox --enable-unsafe-webgpu --enable-unsafe-swiftshader --use-angle=swiftshader
         run: |
           export PATH="$RUNNER_TEMP/browser-tools/node_modules/.bin:$PATH"
+          export CHROME_DEVTOOLS_AXI_CHROME_ARGS="$CHROME_DEVTOOLS_AXI_CHROME_ARGS --remote-debugging-port=$SOLIDDRAFT_BROWSER_CDP_PORT"
           export CHROME_DEVTOOLS_AXI_MCP_PATH="$RUNNER_TEMP/browser-tools/node_modules/chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js"
           mkdir -p target/web-dist/fixtures
           python3 - <<'PYTHON'

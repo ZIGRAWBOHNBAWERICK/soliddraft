@@ -6,6 +6,74 @@ import { startChrome, stopChrome } from './chrome.mjs';
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 function check(value, message) { if (!value) throw new Error(message); }
 
+// The second callback runs after the app has had a frame to apply the input.
+function canvasFrames(evaluate, n = 2) {
+  return evaluate(`new Promise(done => { let left = ${n}; const tick = () => --left ? requestAnimationFrame(tick) : done(true); requestAnimationFrame(tick); })`);
+}
+
+function moveOnCanvas(call, [x, y]) {
+  return call('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y });
+}
+
+async function clickOnCanvas(call, at, afterMove) {
+  const [x, y] = at;
+  await moveOnCanvas(call, at);
+  await afterMove();
+  // Queue both events before a slow frame can delay the release past egui's click limit.
+  await Promise.all([
+    call('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount: 1 }),
+    call('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', buttons: 0, clickCount: 1 }),
+  ]);
+}
+
+// The CLI still owns the page and its keyboard input. Use its Chromium target for
+// mouse input so hover produces the mousemove event eframe listens for.
+export function axiCanvas(page) {
+  const frames = () => canvasFrames(expression => page.eval(expression));
+  async function onTarget(action) {
+    const port = process.env.SOLIDDRAFT_BROWSER_CDP_PORT;
+    check(/^\d+$/.test(port ?? ''), 'Set SOLIDDRAFT_BROWSER_CDP_PORT to the Chrome remote-debugging port');
+    const url = await page.eval(() => location.href);
+    const response = await fetch(`http://127.0.0.1:${port}/json/list`);
+    check(response.ok, `Could not list Chromium targets: ${response.status}`);
+    const targets = (await response.json()).filter(target => target.type === 'page' && target.url === url);
+    check(targets.length === 1, `Expected one Chromium page at ${url}, found ${targets.length}`);
+    const socket = new WebSocket(targets[0].webSocketDebuggerUrl);
+    try {
+      await new Promise((resolve, reject) => {
+        socket.addEventListener('open', resolve, { once: true });
+        socket.addEventListener('error', () => reject(new Error('Could not connect to Chromium')), { once: true });
+      });
+      let nextId = 0;
+      const call = (method, params) => new Promise((resolve, reject) => {
+        const id = ++nextId;
+        function receive(event) {
+          const reply = JSON.parse(event.data);
+          if (reply.id !== id) return;
+          socket.removeEventListener('message', receive);
+          socket.removeEventListener('close', closed);
+          if (reply.error) reject(new Error(reply.error.message));
+          else resolve(reply.result);
+        }
+        function closed() {
+          reject(new Error(`Chromium disconnected during ${method}`));
+        }
+        socket.addEventListener('message', receive);
+        socket.addEventListener('close', closed, { once: true });
+        socket.send(JSON.stringify({ id, method, params }));
+      });
+      return await action(call);
+    } finally {
+      socket.close();
+    }
+  }
+  async function click(at, afterMove = frames) {
+    await onTarget(call => clickOnCanvas(call, at, afterMove));
+    await frames();
+  }
+  return { frames, click };
+}
+
 export class CanvasBrowser {
   constructor({ chrome, profile, size, url, out, downloads, extra }) {
     this.site = { size, url, out, downloads };

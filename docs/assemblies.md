@@ -749,6 +749,37 @@ way with files handed to the page in place of a folder; see [web.md](web.md).
   with its display copies; **File > Open** and Open recent open one with
   `open_in_background`. Undo and redo follow the active tab.
 
+### Editing a part in context
+
+**Edit part** on the Assembly ribbon, or **Edit part in context** on a component's menu
+in the tree, opens the component's part for editing where the assembly places it
+(`crates/soliddraft-app/src/in_context.rs`). The part's own tab comes to the front with
+the part's tree, ribbon and undo, and a bar over the view names the part and the assembly.
+The other components show dimmed around the part, in the part's frame; they are never
+picked as the part's geometry and never edited. A part with unsaved changes elsewhere asks
+to be saved first, as Open part does.
+
+- **Referencing another component.** A click on a dimmed face picks it. **Sketch** then
+  draws on that face's plane. The sketch's plane is an in-context reference
+  (`soliddraft_model::ContextFace`): the assembly's id, the part's own occurrence, the
+  other component's occurrence and the face's persistent name, with the plane as last
+  read in the part's frame. A reference plane can hold one too. The part builds on the
+  plane it keeps, so it rebuilds anywhere, also without the assembly.
+- **Following the assembly.** While the assembly is open, any change to it, and opening
+  another part, reads the part's references to it afresh from the other parts' exact
+  bodies. A moved face updates the references as one undo step, **Update in-context
+  references**; undoing it keeps the old plane until the assembly changes again. A face
+  that cannot be found any more marks its reference broken: the plane stays as it was,
+  and the tree warns on the sketch.
+- **Saving.** Save (Ctrl+S) writes the part, then updates the assembly to the part's new
+  revision and saves the assembly too.
+- **Leaving.** **Exit in context** returns to the assembly; a saved part's edits come into
+  the assembly at once. Making the assembly tab active, opening another part or losing
+  the component also ends the editing.
+
+A part on its own shows nothing of the assembly: its tree notes only where a sketch's
+plane came from, such as "in context: base<1> · Boss-Extrude1 · End cap".
+
 The browser app has these commands too, loading on the page's one thread and taking files
 handed to it in place of a folder ([web.md](web.md)). What it writes downloads: Pack and Go
 downloads one zip, Export USD the `.usda` file, and Export URDF one zip of the URDF and its

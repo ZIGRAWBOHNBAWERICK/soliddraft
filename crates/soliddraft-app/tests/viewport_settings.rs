@@ -14,20 +14,12 @@ use support::{ALWAYS_SHOW_AXES, Case, empty, launch, set_preference};
 #[test]
 fn graphics_presets_change_the_drawn_part() {
     use egui_kittest::kittest::Queryable;
-    use soliddraft_app::document::{Command, ExtrudeParams, PlaneKind, ProfileKind};
+    use soliddraft_app::document::{Command, ExtrudeParams, ProfileKind};
     use std::time::Instant;
 
     let mut case = Case::gpu("graphics_presets");
     let mut doc = empty();
-    let params = ExtrudeParams {
-        sketch: None,
-        profile: ProfileKind::Circle { diameter: 200.0 },
-        plane: PlaneKind::Top,
-        depth: 50.0,
-        flip: false,
-        end: Default::default(),
-        draft: None,
-    };
+    let params = ExtrudeParams { profile: ProfileKind::Circle { diameter: 200.0 }, depth: 50.0, ..Default::default() };
     doc.apply(Command::AddExtrude { params, via_assistant: false }).unwrap();
     let mut app = launch(doc);
     let mut observed = Vec::new();

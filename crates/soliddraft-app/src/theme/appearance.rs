@@ -7,6 +7,7 @@ use std::{io::Cursor, sync::Arc};
 pub const THEME_LIMIT: usize = 64 * 1024;
 pub const PICTURE_LIMIT: usize = 16 * 1024 * 1024;
 const STORED_PICTURE_LIMIT: usize = 768 * 1024;
+const MIN_TEXT_CONTRAST: f32 = 4.5;
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -94,7 +95,15 @@ fn restyle(tokens: &mut Tokens, chrome: Color32, panel: Color32, ink: Color32, a
     p.hover = mix(ink, 0.13);
     p.on_accent = contrasting_ink(accent);
     p.form_bg = mix(accent, 0.09);
-    p.field_bg = mix(chrome, 0.35);
+    let fallback = contrasting_ink(ink);
+    // This neutral meets AA on both a black editor and the shared white fallback.
+    p.field_hint = if fallback == Color32::BLACK { Color32::from_gray(118) } else { clear_bench::PALETTE.field_hint };
+    let tint = mix(chrome, 0.35);
+    p.field_bg = if contrast(ink, tint) >= MIN_TEXT_CONTRAST && contrast(p.field_hint, tint) >= MIN_TEXT_CONTRAST {
+        tint
+    } else {
+        fallback
+    };
     p.chip = mix(ink, 0.09);
     p.hud_bg = panel;
     p.command_line = p.ribbon;
@@ -123,6 +132,11 @@ pub(super) fn contrasting_ink(color: Color32) -> Color32 {
 pub fn luminance(color: Color32) -> f32 {
     let c = Rgba::from(color);
     0.2126 * c.r() + 0.7152 * c.g() + 0.0722 * c.b()
+}
+
+fn contrast(a: Color32, b: Color32) -> f32 {
+    let (a, b) = (luminance(a), luminance(b));
+    (a.max(b) + 0.05) / (a.min(b) + 0.05)
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -177,11 +191,7 @@ impl ThemeFile {
             return Err("Use a theme name of 1 to 52 characters without control characters.".into());
         }
         let p = self.tokens().palette;
-        let contrast = |a, b| {
-            let (a, b) = (luminance(a), luminance(b));
-            (a.max(b) + 0.05) / (a.min(b) + 0.05)
-        };
-        if [p.panel, p.chrome, p.ribbon].into_iter().any(|surface| contrast(p.ink, surface) < 4.5)
+        if [p.panel, p.chrome, p.ribbon].into_iter().any(|surface| contrast(p.ink, surface) < MIN_TEXT_CONTRAST)
             || contrast(p.accent, p.panel) < 3.0
         {
             return Err("Increase the contrast of ink and accent against the theme backgrounds.".into());

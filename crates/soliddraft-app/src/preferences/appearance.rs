@@ -81,7 +81,7 @@ fn gallery(preferences: &mut Preferences, ui: &mut Ui, appearance: &mut Arc<Appe
             Some(egui::Theme::Dark) => "System theme is dark.",
             None => "System theme unavailable. Using Clear Bench Daylight.",
         };
-        ui.weak(status);
+        ui.colored_label(theme::muted(), status);
     }
     ui.add_space(3.0);
     ui.horizontal_wrapped(|ui| {
@@ -189,7 +189,7 @@ fn background(preferences: &mut Preferences, ui: &mut Ui, appearance: &mut Arc<A
     }
     if let Some(name) = appearance.picture_name() {
         let remove = ui.horizontal(|ui| {
-            ui.label(egui::RichText::new(name).weak());
+            ui.colored_label(theme::muted(), name);
             ui.button("Remove picture").clicked()
         });
         if remove.inner {

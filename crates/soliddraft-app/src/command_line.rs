@@ -716,18 +716,17 @@ fn prompt(ui: &mut egui::Ui, state: &mut AppState, session: bool) {
     if tab {
         state.command_line.complete(context);
     }
-    let (ink, hint) = if session {
-        (
-            theme::terminal_ink(),
-            egui::RichText::new("Ask the assistant, or type a command").color(theme::terminal_muted()),
-        )
+    let (ink, hint, hint_ink) = if session {
+        let ink = theme::terminal_ink();
+        let hint_ink = ink.lerp_to_gamma(theme::terminal_bg(), 0.4);
+        (ink, "Ask the assistant, or type a command".to_owned(), hint_ink)
     } else {
         let hint = if cfg!(target_arch = "wasm32") {
             "Type a command, Tab completes".to_owned()
         } else {
             format!("Type a command, Tab completes · {AI_COMMAND} opens the assistant")
         };
-        (theme::ink(), egui::RichText::new(hint).color(theme::muted()))
+        (theme::ink(), hint, theme::muted())
     };
     let cl = &mut state.command_line;
     let edit = egui::TextEdit::singleline(&mut cl.input)
@@ -739,7 +738,7 @@ fn prompt(ui: &mut egui::Ui, state: &mut AppState, session: bool) {
         .desired_width(ui.available_width() - 12.0)
         .return_key(None)
         .event_filter(egui::EventFilter { tab: true, horizontal_arrows: true, vertical_arrows: true, escape: true });
-    let resp = ui.add(edit);
+    let resp = theme::add_text_edit_with_hint(ui, edit, hint_ink);
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, "Command line"));
     if resp.changed() {
         cl.completion = None;

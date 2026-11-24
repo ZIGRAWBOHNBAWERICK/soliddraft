@@ -211,7 +211,7 @@ fn field(
     if error.is_some() {
         edit = edit.text_color(theme::error());
     }
-    let response = ui.add(edit);
+    let response = if frame { ui.add(edit) } else { theme::add_text_edit_with_hint(ui, edit, theme::muted()) };
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, label));
     #[cfg(target_arch = "wasm32")]
     crate::web::show_visible_control(ui, label, response.rect);

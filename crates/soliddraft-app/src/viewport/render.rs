@@ -325,12 +325,7 @@ struct Backdrop {
 }
 
 impl Backdrop {
-    fn from_srgb(
-        bg: super::scenes::Backdrop,
-        size: [u32; 2],
-        ppp: f32,
-        picture: Option<&image::RgbaImage>,
-    ) -> Self {
+    fn from_srgb(bg: super::scenes::Backdrop, size: [u32; 2], ppp: f32, picture: Option<&image::RgbaImage>) -> Self {
         let picture_uv = picture.map_or([1.0, 1.0, 0.0, 0.0], |image| {
             let viewport_aspect = size[0].max(1) as f32 / size[1].max(1) as f32;
             let image_aspect = image.width() as f32 / image.height() as f32;
@@ -664,21 +659,23 @@ fn picture_view(
     [width, height]: [u32; 2],
     rgba: &[u8],
 ) -> wgpu::TextureView {
-    device.create_texture_with_data(
-        queue,
-        &wgpu::TextureDescriptor {
-            label: Some("viewport background picture"),
-            size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8UnormSrgb,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
-        },
-        wgpu::util::TextureDataOrder::LayerMajor,
-        rgba,
-    ).create_view(&Default::default())
+    device
+        .create_texture_with_data(
+            queue,
+            &wgpu::TextureDescriptor {
+                label: Some("viewport background picture"),
+                size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            },
+            wgpu::util::TextureDataOrder::LayerMajor,
+            rgba,
+        )
+        .create_view(&Default::default())
 }
 
 impl ViewportRenderer {
@@ -1554,7 +1551,10 @@ impl ViewportRenderer {
             &self.backdrop,
             0,
             bytemuck::bytes_of(&Backdrop::from_srgb(
-                input.backdrop, input.size_px, input.pixels_per_point, input.backdrop_picture.as_deref(),
+                input.backdrop,
+                input.size_px,
+                input.pixels_per_point,
+                input.backdrop_picture.as_deref(),
             )),
         );
         let model_radius = bounds.map_or(100.0, |(lo, hi)| ((hi - lo).length() / 2.0).max(1.0));

@@ -24,6 +24,37 @@ fn out_dir() -> PathBuf {
     dir
 }
 
+/// Clear Bench as the test expects to see it, written out here rather than read from the
+/// theme code, so a wrong token fails the test even when the app paints it faithfully.
+struct ClearBench {
+    id: &'static str,
+    dark_chrome: bool,
+    panel: [u8; 4],
+    ribbon: [u8; 4],
+    accent: [u8; 4],
+}
+
+fn clear_bench(mode: Mode) -> ClearBench {
+    match mode {
+        // The D1 Clear Bench daylight frame: white panels, a pale strip and cobalt.
+        Mode::Light => ClearBench {
+            id: "clear_bench",
+            dark_chrome: false,
+            panel: [0xff, 0xff, 0xff, 255],
+            ribbon: [0xf5, 0xf7, 0xfa, 255],
+            accent: [0x1d, 0x52, 0xd6, 255],
+        },
+        // Clear Bench Dark: slate panels, a darker strip and a pale blue accent.
+        Mode::Dark => ClearBench {
+            id: "clear-bench-dark",
+            dark_chrome: true,
+            panel: [0x22, 0x2b, 0x39, 255],
+            ribbon: [0x1e, 0x25, 0x31, 255],
+            accent: [0x91, 0xba, 0xff, 255],
+        },
+    }
+}
+
 #[test]
 fn the_bracket_in_light_and_dark() {
     if !gpu_available() {
@@ -52,12 +83,11 @@ fn the_bracket_in_light_and_dark() {
         harness.state_mut().state.push(AppAction::SetTheme(mode));
         harness.run_steps(6);
         assert_eq!(theme::mode(), mode, "the appearance preference is retained");
-        let tokens = theme::BuiltIn::for_mode(mode).tokens();
-        assert_eq!(theme::active_theme_id(), tokens.id);
-        assert_eq!(theme::palette(), tokens.palette);
+        let expected = clear_bench(mode);
+        assert_eq!(theme::active_theme_id(), expected.id);
         let style = harness.ctx.global_style();
-        assert_eq!(style.visuals.dark_mode, mode.is_dark());
-        assert_eq!(style.visuals.panel_fill, tokens.palette.panel);
+        assert_eq!(style.visuals.dark_mode, expected.dark_chrome);
+        assert_eq!(style.visuals.panel_fill.to_array(), expected.panel);
         assert_eq!(style.visuals.widgets.inactive.corner_radius, egui::CornerRadius::same(6));
         let image = harness.render().expect("Clear Bench renders");
         // The tool strip's own ground shows in the gap between two of its cards.
@@ -65,13 +95,13 @@ fn the_bracket_in_light_and_dark() {
         let gap = (start.right() + 2.0) as u32;
         assert_eq!(
             image.get_pixel(gap, start.center().y as u32).0,
-            tokens.palette.ribbon.to_array(),
-            "the strip paints the active theme's ribbon ground"
+            expected.ribbon,
+            "the strip paints the theme's ribbon ground"
         );
         assert_eq!(
             image.get_pixel((start.left() + 6.0) as u32, start.center().y as u32).0,
-            tokens.palette.accent.to_array(),
-            "Start sketch paints the active theme's accent"
+            expected.accent,
+            "Start sketch paints the theme's accent"
         );
         let path = out_dir().join(format!("clear-bench-{}.png", mode.label().to_lowercase()));
         image.save(&path).expect("save Clear Bench png");

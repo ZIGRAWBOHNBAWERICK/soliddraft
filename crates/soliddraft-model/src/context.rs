@@ -122,15 +122,14 @@ impl ContextFace {
     }
 }
 
-/// The in-context references of a feature: a sketch or a reference plane on another
-/// component's face.
+/// The in-context reference of a feature: a sketch on another component's face. A
+/// reference plane never takes one (see [`crate::Command`]).
 pub fn of_feature(kind: &FeatureKind) -> Option<&ContextFace> {
     match kind {
         FeatureKind::Sketch(s) => match &s.plane {
             SketchPlane::Context { context, .. } => Some(context),
             _ => None,
         },
-        FeatureKind::ReferencePlane(SketchPlane::Context { context, .. }) => Some(context),
         _ => None,
     }
 }
@@ -148,7 +147,6 @@ pub fn with_reference(kind: &FeatureKind, context: ContextFace) -> Option<Featur
             SketchPlane::Context { context, .. } => context,
             _ => return None,
         },
-        FeatureKind::ReferencePlane(SketchPlane::Context { context, .. }) => context,
         _ => return None,
     };
     *slot = context;

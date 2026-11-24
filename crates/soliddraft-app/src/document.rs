@@ -1914,9 +1914,14 @@ pub enum Command {
     /// Moves every import of one file to a replacement file and every reference into
     /// those imports to the new file's faces, as one step.
     ReplaceImportFile(Vec<(FeatureId, model::FeatureKind)>),
-    /// Updates the in-context references of features made while the part was edited in
-    /// an assembly, as one step: each feature's new definition.
-    FollowContext(Vec<(FeatureId, model::FeatureKind)>),
+    /// Updates the in-context references of a part's sketches, as one step: each
+    /// feature's definition as it was read and as it now is. Any other part refuses it,
+    /// and so does this one when a feature changed since it was read, so an update queued
+    /// for one part never lands on another.
+    FollowContext {
+        part: soliddraft_document::DocumentId,
+        edits: Vec<(FeatureId, model::FeatureKind, model::FeatureKind)>,
+    },
     /// Replaces a hole's, pattern's, mirror's or draft's definition.
     EditFeature {
         id: FeatureId,
@@ -1984,7 +1989,7 @@ impl Command {
             Command::EditHoleWithSketch { .. } => "Edit hole".into(),
             Command::ImportBodies(_) => "Import bodies".into(),
             Command::ReplaceImportFile(_) => "Replace imported file".into(),
-            Command::FollowContext(_) => "Update in-context references".into(),
+            Command::FollowContext { .. } => "Update in-context references".into(),
             Command::EditFeature { kind, .. } => format!("Edit {}", kind.noun()),
             Command::DeleteFeature(_) => "Delete feature".into(),
             Command::Rename { .. } => "Rename".into(),
@@ -3779,8 +3784,21 @@ impl Document {
                     })
                     .collect()
             }
-            Command::ReplaceImportFile(edits) | Command::FollowContext(edits) => {
+            Command::ReplaceImportFile(edits) => {
                 edits.into_iter().map(|(id, kind)| model::Command::EditFeature { id: model_id(id), kind }).collect()
+            }
+            Command::FollowContext { part, edits } => {
+                if part != self.model.id() {
+                    return Err("This in-context update was read for another part; it is not applied here.".into());
+                }
+                let mut out = Vec::with_capacity(edits.len());
+                for (id, before, after) in edits {
+                    if self.model.feature(model_id(id)).map(|f| &f.kind) != Some(&before) {
+                        return Err("A sketch changed after its in-context reference was read; it is read again when the assembly changes.".into());
+                    }
+                    out.push(model::Command::EditFeature { id: model_id(id), kind: after });
+                }
+                out
             }
             Command::EditFeature { id, kind } => {
                 if let FeatureKind::ReferencePlane(source) = &kind {

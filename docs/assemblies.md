@@ -763,16 +763,26 @@ to be saved first, as Open part does.
   draws on that face's plane. The sketch's plane is an in-context reference
   (`soliddraft_model::ContextFace`): the assembly's id, the part's own occurrence, the
   other component's occurrence and the face's persistent name, with the plane as last
-  read in the part's frame. A reference plane can hold one too. The part builds on the
-  plane it keeps, so it rebuilds anywhere, also without the assembly.
-- **Following the assembly.** While the assembly is open, any change to it, and opening
-  another part, reads the part's references to it afresh from the other parts' exact
-  bodies. A moved face updates the references as one undo step, **Update in-context
-  references**; undoing it keeps the old plane until the assembly changes again. A face
-  that cannot be found any more marks its reference broken: the plane stays as it was,
-  and the tree warns on the sketch.
-- **Saving.** Save (Ctrl+S) writes the part, then updates the assembly to the part's new
-  revision and saves the assembly too.
+  read in the part's frame. Only a sketch takes one; the model refuses a reference plane on
+  another component's face. The part builds on the plane it keeps, so it rebuilds
+  anywhere, also without the assembly. A face without a persistent name cannot be picked.
+  Faces on any solid body of the other part can be.
+- **Following the assembly.** While the assembly is open, each new revision of it, and
+  opening another part, reads the part's references to it afresh from the other parts'
+  exact bodies, where the assembly's design places them: the exploded view and a drag
+  being previewed move only what is shown. A moved face updates the references as one
+  undo step, **Update in-context references**; undoing it keeps the old plane until the
+  assembly changes again, whatever the user selects or leaves and enters meanwhile. The
+  update is queued for that part only. A face that cannot be found any more marks its
+  reference broken: the plane stays as it was, and the tree warns on the sketch.
+- **Saving.** Save (Ctrl+S) reads the references afresh, writes the part, then brings the
+  new revision up the assembly: a sub-assembly holding the part takes it and is saved,
+  then the next one up, then the open assembly. Each takes only the revision of the
+  document below it; other components keep the revisions they show, newer or missing.
+  The note names every file written. A refusal or a failed write is said as an error,
+  naming what was saved before it. The browser cannot write a sub-assembly back yet, so
+  there a part inside one is saved alone, with an error that says so.
+- **Configurations.** Edit part shows the part in the configuration the assembly places.
 - **Leaving.** **Exit in context** returns to the assembly; a saved part's edits come into
   the assembly at once. Making the assembly tab active, opening another part or losing
   the component also ends the editing.

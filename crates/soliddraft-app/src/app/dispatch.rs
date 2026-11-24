@@ -291,7 +291,7 @@ impl SolidDraftApp {
             }
             AppAction::Assembly(crate::assembly::AssemblyAction::EditPartInContext(path)) => {
                 use crate::assembly::{AssemblyAction, ComponentPart};
-                let path = path.or_else(|| self.state.assembly.session.as_ref().and_then(|s| s.selected.clone()));
+                let path = path.or_else(|| self.state.assembly.session.as_ref().and_then(crate::assembly::edit_target));
                 let Some(path) = path else {
                     return self.state.note("Select a component to edit its part in context", NoteKind::Info);
                 };
@@ -2161,33 +2161,35 @@ impl SolidDraftApp {
                 let Some(path) = path else { return };
                 let path = file::with_extension(&path);
                 let thumbnail = self.thumbnail();
-                let extras = file::Extras { thumbnail: thumbnail.as_deref(), ..Default::default() };
-                match file::save_with(&mut self.state.doc, &path, &extras) {
-                    Ok(warning) => {
+                let saved = if self.state.assembly.in_context.is_some() {
+                    // Editing in context: the part, then the assemblies that show it.
+                    crate::in_context::save(&mut self.state, &path, thumbnail.as_deref())
+                } else {
+                    let extras = file::Extras { thumbnail: thumbnail.as_deref(), ..Default::default() };
+                    file::save_with(&mut self.state.doc, &path, &extras).map(|warning| {
                         self.state.remember_revision();
                         self.state.recent = file::recent();
+                        match warning {
+                            Some(w) => (format!("Saved {} · {w}", path.display()), NoteKind::Error),
+                            None => (format!("Saved {}", path.display()), NoteKind::Ok),
+                        }
+                    })
+                };
+                match saved {
+                    Ok((text, kind)) => {
                         #[cfg(target_arch = "wasm32")]
                         {
                             let id = self.state.doc.model().id();
                             let key = crate::documents_browser::key(id, soliddraft_document::DocKind::Part);
-                            self.picture_for_recent(ctx, key);
-                        }
-                        match warning {
-                            Some(w) => self.state.note(format!("Saved {} · {w}", path.display()), NoteKind::Error),
-                            None => self.state.note(format!("Saved {}", path.display()), NoteKind::Ok),
-                        }
-                        // Editing in context, saving writes the part and then the assembly
-                        // that now shows it.
-                        if self.state.assembly.in_context.is_some() {
-                            use crate::assembly::AssemblyAction;
-                            self.apply(ctx, AppAction::Assembly(AssemblyAction::Update));
-                            self.apply(ctx, AppAction::Assembly(AssemblyAction::Save(None)));
-                            let assembly = self.state.assembly.session.as_ref();
-                            if let Some(saved) = assembly.filter(|s| !s.doc.is_dirty()).and_then(|s| s.doc.path()) {
-                                let text = format!("Saved {} and {}", path.display(), saved.display());
-                                self.state.note(text, NoteKind::Ok);
+                            if crate::in_context::screen_shows_part_alone(&self.state) {
+                                self.picture_for_recent(ctx, key);
+                            } else if let Some(png) = &thumbnail {
+                                // The screen holds the dimmed assembly too: the part's own
+                                // picture goes to the recent list instead.
+                                crate::documents_browser::set_thumbnail(&key, png);
                             }
                         }
+                        self.state.note(text, kind);
                     }
                     Err(e) => self.state.note(e, NoteKind::Error),
                 }

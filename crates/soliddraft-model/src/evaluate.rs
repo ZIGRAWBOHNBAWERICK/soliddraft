@@ -389,6 +389,11 @@ impl Document {
                         _ => Built::failed(current, "Combine needs two available solid bodies."),
                     }
                 }
+                // Only a sketch takes a face of another component (see Command::check_kind);
+                // a file that says otherwise builds no plane.
+                FeatureKind::ReferencePlane(SketchPlane::Context { .. }) => {
+                    Built::failed(current, "a reference plane cannot take its plane from another component")
+                }
                 FeatureKind::ReferencePlane(p) => match self.sketch_plane_of(p, current) {
                     Ok((plane, _)) => {
                         let mut built = Built::pass(FeatureStatus::Ok, current);

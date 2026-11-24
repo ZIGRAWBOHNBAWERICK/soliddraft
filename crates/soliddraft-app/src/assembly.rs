@@ -130,8 +130,11 @@ pub struct AssemblyState {
     pub physical_dynamics: bool,
     /// The component whose part is being edited in context.
     pub in_context: Option<crate::in_context::InContext>,
-    /// The open part's in-context references are read afresh at the next frame.
+    /// The open part's in-context references are checked at the next frame.
     pub context_check: bool,
+    /// What they were last read against: they are read again only against another part
+    /// or another revision of the assembly (see `in_context::follow`).
+    pub context_seen: Option<crate::in_context::Seen>,
     /// A component whose part is opening to be edited in context, in the browser.
     pub entering: Option<OccurrencePath>,
     /// What the last update of the in-context references found, said at the next frame.
@@ -596,12 +599,24 @@ fn from_part(state: &mut AppState) -> Result<(), String> {
 
 /// Runs Update. A refusal comes back as the report that says why.
 fn update(state: &mut AppState) -> Result<RebuildReport, Box<RebuildReport>> {
+    update_sources(state, None)
+}
+
+/// Runs Update for the documents in `only`, or for every source; the others keep the
+/// revisions they show.
+fn update_sources(
+    state: &mut AppState,
+    only: Option<&[soliddraft_document::DocumentId]>,
+) -> Result<RebuildReport, Box<RebuildReport>> {
     refresh(state);
     let Some(session) = state.assembly.session.as_mut() else {
         let refusal = Some("no assembly is open".into());
         return Err(Box::new(RebuildReport { refusal, ..RebuildReport::default() }));
     };
-    let report = session.doc.rebuild();
+    let report = match only {
+        Some(ids) => session.doc.update_documents(ids),
+        None => session.doc.rebuild(),
+    };
     if report.refusal.is_some() {
         return Err(Box::new(report));
     }
@@ -884,17 +899,16 @@ pub fn apply(state: &mut AppState, dock: &mut DockState<Tab>, action: AssemblyAc
         AssemblyAction::EditPartInContext(_) => {}
         AssemblyAction::ExitInContext => {
             if let Some(path) = crate::in_context::leave(state) {
-                let newer = state.assembly.session.as_ref().is_some_and(|s| {
-                    s.doc.table().find(&path).is_some_and(|r| {
-                        matches!(
-                            s.doc.store().get(s.doc.table().definition(r)).freshness,
-                            Freshness::NewerAvailable { .. }
-                        )
-                    })
+                let newer = state.assembly.session.as_ref().and_then(|s| {
+                    let r = s.doc.table().find(&path)?;
+                    let def = s.doc.table().definition(r);
+                    let fresh = matches!(s.doc.store().get(def).freshness, Freshness::NewerAvailable { .. });
+                    s.doc.reference(def).and_then(|r| r.id).filter(|_| fresh)
                 });
-                // Saved edits come into the assembly at once, as SolidWorks shows them.
-                if newer && !state.doc.dirty {
-                    match update(state) {
+                // Saved edits come into the assembly at once, as SolidWorks shows them; the
+                // other components keep the revisions they show.
+                if let Some(id) = newer.filter(|_| !state.doc.dirty) {
+                    match update_sources(state, Some(&[id])) {
                         Ok(_) => state.note("Updated the assembly with the edited part", NoteKind::Ok),
                         Err(report) => state.note(report.refusal.unwrap_or_default(), NoteKind::Error),
                     }
@@ -1128,9 +1142,20 @@ fn readable(refusal: &str) -> String {
 }
 
 fn save(state: &mut AppState, path: Option<PathBuf>) {
-    let Some(s) = state.assembly.session.as_mut() else { return };
+    match save_file(state, path) {
+        Ok(Some(saved)) => state.note(format!("Saved {}", saved.display()), NoteKind::Ok),
+        Ok(None) => {}
+        Err(e) => state.note(e, NoteKind::Error),
+    }
+}
+
+/// Saves the open assembly to `path`, or to its own file. `None` when there is nothing
+/// to save, or no file yet and Save As was asked for instead.
+fn save_file(state: &mut AppState, path: Option<PathBuf>) -> Result<Option<PathBuf>, String> {
+    let Some(s) = state.assembly.session.as_mut() else { return Ok(None) };
     if path.is_none() && s.doc.path().is_none() {
-        return apply_save_as(state);
+        apply_save_as(state);
+        return Ok(None);
     }
     // The browser downloads the file and keeps it for the recent list.
     let mut written = None;
@@ -1156,10 +1181,119 @@ fn save(state: &mut AppState, path: Option<PathBuf>) {
             }
             crate::file::remember(&saved);
             state.recent = crate::file::recent();
-            state.note(format!("Saved {}", saved.display()), NoteKind::Ok);
+            Ok(Some(saved))
         }
-        Err(e) => state.note(format!("cannot save the assembly: {e}"), NoteKind::Error),
+        Err(e) => Err(format!("cannot save the assembly: {e}")),
     }
+}
+
+/// The component Edit part opens when none is named: the part the last click in the
+/// view met, when it lies in the selected component (a click selects the root's
+/// component, a sub-assembly for a part inside one), or else the selected component.
+pub(crate) fn edit_target(s: &AssemblySession) -> Option<OccurrencePath> {
+    let selected = s.selected.as_ref()?;
+    match s.picked.as_ref() {
+        Some(p) if p.path.starts_with(selected) => Some(p.path.clone()),
+        _ => Some(selected.clone()),
+    }
+}
+
+/// Brings what saving a part edited in context changed up the assembly that shows it:
+/// each sub-assembly from the one holding the part up to the open assembly takes the
+/// new revision of the document below it, and only that one, and is saved. Returns the
+/// files written, innermost first. A refusal or a failed write stops it and says why.
+pub(crate) fn save_chain(state: &mut AppState, own: &OccurrencePath) -> Result<Vec<PathBuf>, String> {
+    refresh(state);
+    let s = state.assembly.session.as_ref().ok_or("no assembly is open")?;
+    let table = s.doc.table();
+    let mut row = table.find(own).ok_or("the part is no longer in the assembly")?;
+    // The sub-assemblies between the open assembly and the part, outermost first.
+    let mut subs = Vec::new();
+    while let Some(parent) = table.parent(row).filter(|p| *p != OccurrenceIndex::ROOT) {
+        subs.push(parent);
+        row = parent;
+    }
+    subs.reverse();
+    let (mut written, child) = save_subassemblies(state, &subs)?;
+    let session = state.assembly.session.as_mut().ok_or("no assembly is open")?;
+    let report = session.doc.update_documents(&[child]);
+    if let Some(why) = report.refusal {
+        if let Some(r) = report.mate_refusal.filter(|r| !r.mates.is_empty() || !r.free.is_empty()) {
+            state.assembly.mate.conflict = Some(r);
+        }
+        return Err(why);
+    }
+    session.update();
+    refresh(state);
+    match save_file(state, None)? {
+        Some(saved) => written.push(saved),
+        None => return Err("the assembly has no file yet; choose where to save it".into()),
+    }
+    Ok(written)
+}
+
+/// Updates and saves each sub-assembly in `subs`, innermost first, each taking only the
+/// new revision of the document below it. Returns the files written and the document the
+/// open assembly takes next: the outermost sub-assembly, or the part itself.
+#[cfg(not(target_arch = "wasm32"))]
+fn save_subassemblies(
+    state: &mut AppState,
+    subs: &[OccurrenceIndex],
+) -> Result<(Vec<PathBuf>, soliddraft_document::DocumentId), String> {
+    let mut child = state.doc.model().id();
+    let mut written = Vec::new();
+    if subs.is_empty() {
+        return Ok((written, child));
+    }
+    // Each sub-assembly's file, found from the file that holds it.
+    let mut files = Vec::new();
+    {
+        let s = state.assembly.session.as_ref().ok_or("no assembly is open")?;
+        let settings = crate::settings::file_locations();
+        let mut holder = s.doc.path().map(Path::to_path_buf);
+        for &sub in subs {
+            let reference = s.doc.reference(s.doc.table().definition(sub)).ok_or("a sub-assembly has no file")?;
+            let found = soliddraft_document::Resolver::new(holder.as_deref())
+                .with_open(documents(state))
+                .with_search_folders(settings.search_folders())
+                .resolve(reference);
+            let file = found
+                .target()
+                .and_then(|t| t.path())
+                .map(Path::to_path_buf)
+                .ok_or_else(|| format!("could not find the sub-assembly {}", reference.path))?;
+            let id = reference.id.ok_or_else(|| format!("{} has no document id", reference.path))?;
+            files.push((file.clone(), id));
+            holder = Some(file);
+        }
+    }
+    for (file, id) in files.into_iter().rev() {
+        let mut doc = AssemblyDocument::open(&file, options(state)).map_err(|e| format!("{}: {e}", file.display()))?;
+        let report = doc.update_documents(&[child]);
+        if let Some(why) = report.refusal {
+            return Err(format!("{}: {why}", file.display()));
+        }
+        let saved = doc.save(None).map_err(|e| format!("cannot save {}: {e}", file.display()))?;
+        if let Ok(bytes) = std::fs::read(&saved) {
+            state.revisions.record(id, &doc.revision(), &bytes);
+        }
+        written.push(saved);
+        child = id;
+    }
+    refresh(state);
+    Ok((written, child))
+}
+
+/// The browser holds sub-assemblies as uploads with no file to write back.
+#[cfg(target_arch = "wasm32")]
+fn save_subassemblies(
+    state: &mut AppState,
+    subs: &[OccurrenceIndex],
+) -> Result<(Vec<PathBuf>, soliddraft_document::DocumentId), String> {
+    if subs.is_empty() {
+        return Ok((Vec::new(), state.doc.model().id()));
+    }
+    Err("the browser cannot save a sub-assembly from here yet; open the sub-assembly, Update it and save it".into())
 }
 
 fn apply_save_as(state: &mut AppState) {

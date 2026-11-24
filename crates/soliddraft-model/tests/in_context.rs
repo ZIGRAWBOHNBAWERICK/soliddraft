@@ -167,3 +167,16 @@ fn an_offset_from_the_kept_plane_moves_the_sketch_along_its_normal() {
     assert!(close(heights(&d), (-16.0, -10.0)), "{:?}", heights(&d));
     assert_eq!(plane_z(&d, sketch), -16.0);
 }
+
+#[test]
+fn a_reference_plane_never_takes_a_face_of_another_component() {
+    let mut d = doc();
+    let taken = FeatureKind::ReferencePlane(SketchPlane::Context { context: base_top(-20.0), offset: 0.0 });
+    let adding = Command::AddFeature { kind: taken.clone(), name: None, position: None, via_assistant: false };
+    assert!(d.execute(adding).is_err(), "only a sketch takes another component's face");
+    assert!(d.features().is_empty());
+    let own = add(&mut d, FeatureKind::ReferencePlane(SketchPlane::Datum { datum: DatumPlane::Top, offset: 5.0 }));
+    assert!(d.execute(Command::EditFeature { id: own, kind: taken.clone() }).is_err());
+    assert!(context::references(d.features()).is_empty());
+    assert!(context::of_feature(&taken).is_none());
+}

@@ -741,6 +741,9 @@ impl Document {
 
     pub(crate) fn check_kind(kind: &FeatureKind) -> Result<(), CommandError> {
         match kind {
+            FeatureKind::ReferencePlane(crate::SketchPlane::Context { .. }) => Err(CommandError::Invalid(
+                "a reference plane cannot take its plane from another component; sketch on that face while editing the part in its assembly".into(),
+            )),
             FeatureKind::ReferencePlane(p) if !p.offset().is_finite() || p.offset().abs() > 100_000.0 => {
                 Err(CommandError::Invalid("plane offset must be finite and within 100000 mm of zero".into()))
             }

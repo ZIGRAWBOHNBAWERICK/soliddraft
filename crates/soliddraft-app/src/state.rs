@@ -130,6 +130,7 @@ pub enum AppAction {
     NormalTo,
     ZoomFit,
     SetDisplay(DisplayMode),
+    SetCurrentView(crate::graphics::CurrentView),
     /// Switches the render look (Fast, Studio, Realistic).
     SetPreset(Preset),
     SetScene(crate::viewport::scenes::Scene),
@@ -1342,6 +1343,12 @@ pub struct AppState {
     pub section: crate::section::State,
     pub(crate) mass: crate::measure::mass::State,
     pub viewport: ViewportState,
+    /// The appearance on screen, which an open Preferences window may be previewing.
+    pub(crate) appearance: std::sync::Arc<crate::theme::Appearance>,
+    /// The appearance as saved: what a preview leaves when it is cancelled.
+    pub(crate) saved_appearance: std::sync::Arc<crate::theme::Appearance>,
+    pub graphics: crate::graphics::Graphics,
+    pub graphics_device: crate::graphics::GraphicsDevice,
     pub pick_filter: crate::viewport::PickFilter,
     pub form_bar: crate::form_bar::State,
     /// Which sections of the feature property panel are folded or open.
@@ -1608,6 +1615,10 @@ impl AppState {
             section: Default::default(),
             mass: Default::default(),
             viewport: ViewportState::default(),
+            appearance: Default::default(),
+            saved_appearance: Default::default(),
+            graphics: Default::default(),
+            graphics_device: Default::default(),
             pick_filter: Default::default(),
             form_bar: Default::default(),
             feature_panel: Default::default(),
@@ -1689,11 +1700,129 @@ impl AppState {
         &mut self,
         references: crate::settings::ReferenceDisplay,
     ) -> Result<(), crate::settings::NotKept> {
-        self.viewport.references = references;
+        // A floor command chooses each view's ground shadow, as the Current view box does,
+        // so the two never disagree and a look change keeps the choice.
+        let take = |view: &mut ViewportState| {
+            if view.references.show_floor != references.show_floor {
+                view.lighting.ground_shadow = Some(references.show_floor);
+            }
+            view.references = references;
+        };
+        take(&mut self.viewport);
         if let Some(session) = self.assembly.session.as_mut() {
-            session.viewport.references = references;
+            take(&mut session.viewport);
         }
         crate::settings::save_reference_display(&references).inspect_err(|why| self.not_kept("Viewport settings", why))
+    }
+
+    pub fn display_mode(&self) -> DisplayMode {
+        if let Some(session) = self.assembly.session.as_ref().filter(|_| self.assembly.is_active()) {
+            session.doc.assembly().viewport_state().map_or(session.viewport.display, |s| s.mode)
+        } else {
+            self.doc.display_state().map_or(self.viewport.display, |s| s.mode)
+        }
+    }
+
+    pub fn set_display_mode(&mut self, d: DisplayMode) -> Result<(), String> {
+        let assembly_active = self.assembly.is_active();
+        if let Some(s) = self.assembly.session.as_mut().filter(|_| assembly_active) {
+            if let Some(mut display) = s.doc.assembly().viewport_state().cloned() {
+                display.mode = d;
+                let mut states = s.doc.assembly().viewport_states.clone();
+                states.put(display).and_then(|_| s.doc.change_viewport_states(states).map_err(|e| e.to_string()))
+            } else {
+                s.viewport.display = d;
+                Ok(())
+            }
+        } else if let Some(mut display) = self.doc.display_state().cloned() {
+            display.mode = d;
+            let mut states = self.doc.display_states().clone();
+            states.put(display).and_then(|_| self.doc.change_display_states(states))
+        } else {
+            self.active_viewport_mut().display = d;
+            Ok(())
+        }
+    }
+
+    /// The 3D view the Current view controls change, or `None` while the start page or a
+    /// drawing shows instead of one.
+    pub fn current_view_target(&self) -> Option<crate::graphics::ViewTarget> {
+        if self.start.is_some() || self.drawing.is_active() || self.drawing.new.is_some() {
+            return None;
+        }
+        Some(if self.assembly.is_active() {
+            crate::graphics::ViewTarget::Assembly
+        } else {
+            crate::graphics::ViewTarget::Part
+        })
+    }
+
+    /// Applies the Current view controls to the 3D view on screen. They are that view's
+    /// own: no default changes and nothing is saved. With no 3D view on screen they change
+    /// nothing.
+    pub fn set_current_view(&mut self, view: crate::graphics::CurrentView) {
+        let Some(target) = self.current_view_target() else { return };
+        if view.display != self.display_mode()
+            && let Err(error) = self.set_display_mode(view.display)
+        {
+            self.note(error, NoteKind::Error);
+        }
+        let camera_editable = target == crate::graphics::ViewTarget::Assembly || self.sketch.is_none();
+        let active = self.active_viewport_mut();
+        let lighting = active.lighting;
+        view.apply(active, camera_editable);
+        if !target.lit() {
+            active.lighting = lighting;
+        }
+        active.references = view.references;
+    }
+
+    pub fn set_appearance(
+        &mut self,
+        ctx: &egui::Context,
+        appearance: std::sync::Arc<crate::theme::Appearance>,
+        keep: bool,
+    ) -> Result<(), crate::settings::NotKept> {
+        crate::theme::apply_appearance(ctx, &appearance);
+        if keep {
+            self.saved_appearance = appearance.clone();
+        }
+        self.appearance = appearance.clone();
+        self.viewport.appearance = appearance.clone();
+        if let Some(session) = self.assembly.session.as_mut() {
+            session.viewport.appearance = appearance.clone();
+        }
+        ctx.request_repaint();
+        if keep {
+            crate::settings::save_theme_preferences(&appearance).inspect_err(|why| self.not_kept("Appearance", why))?;
+        }
+        Ok(())
+    }
+
+    /// Changes the saved appearance from outside Preferences, as the scene bar and the
+    /// light and dark switch do, and saves it with `scene` when there is one. A theme an
+    /// open Preferences window previews stays on screen with the same change, unsaved.
+    pub(crate) fn change_saved_appearance(
+        &mut self,
+        ctx: &egui::Context,
+        scene: Option<crate::viewport::scenes::Scene>,
+        change: impl Fn(&mut crate::theme::Appearance),
+    ) -> Result<(), crate::settings::NotKept> {
+        let mut saved = self.saved_appearance.clone();
+        change(std::sync::Arc::make_mut(&mut saved));
+        let mut shown = self.appearance.clone();
+        change(std::sync::Arc::make_mut(&mut shown));
+        self.saved_appearance = saved;
+        let kept = crate::settings::save_appearance_and_view(&self.saved_appearance, scene);
+        let _ = self.set_appearance(ctx, shown, false);
+        kept
+    }
+
+    pub fn set_graphics(&mut self, graphics: crate::graphics::Graphics) -> Result<(), crate::settings::NotKept> {
+        self.graphics = graphics;
+        #[cfg(not(target_arch = "wasm32"))]
+        self.doc.set_curved_surfaces(graphics.curved_surfaces);
+        crate::settings::save_graphics(&graphics).inspect_err(|why| self.not_kept("Graphics settings", why))
     }
 
     /// Uses a new grid style and saves it, as [`AppState::set_reference_display`] does.

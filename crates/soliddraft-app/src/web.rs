@@ -334,14 +334,26 @@ pub fn read(files: Vec<web_sys::File>, purpose: crate::platform::Purpose) {
     }
     wasm_bindgen_futures::spawn_local(async move {
         let mut read = Vec::with_capacity(files.len());
+        let mut error = None;
         for file in files {
+            let name = file.name();
+            if let Some(limit) = purpose.appearance_limit()
+                && file.size() > limit as f64
+            {
+                let limit = if limit == crate::theme::THEME_LIMIT { "64 KB" } else { "16 MB" };
+                error = Some(format!("{name} exceeds the {limit} file limit."));
+                break;
+            }
             match JsFuture::from(file.array_buffer()).await {
-                Ok(buffer) => read.push((file.name(), js_sys::Uint8Array::new(&buffer).to_vec())),
-                Err(e) => log::error!("reading {}: {}", file.name(), js_error(e)),
+                Ok(buffer) => read.push((name, js_sys::Uint8Array::new(&buffer).to_vec())),
+                Err(e) if purpose.appearance_limit().is_some() => {
+                    error = Some(format!("Cannot read {name}: {}", js_error(e)));
+                }
+                Err(e) => log::error!("reading {name}: {}", js_error(e)),
             }
         }
-        if !read.is_empty() {
-            UPLOAD.with(|u| *u.borrow_mut() = Some(crate::platform::Uploaded { purpose, files: read }));
+        if !read.is_empty() || error.is_some() {
+            UPLOAD.with(|u| *u.borrow_mut() = Some(crate::platform::Uploaded { purpose, files: read, error }));
             repaint();
         }
     });

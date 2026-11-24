@@ -11,7 +11,10 @@
 //! `AppState::set_autosave`) and the tests can do the same
 //! without a GPU.
 
+mod appearance;
+mod graphics;
 mod ui;
+pub(crate) use graphics::current_view_controls;
 
 use crate::commands::{self, KeyChord, ShortcutConflict, ShortcutPreset, Shortcuts};
 use crate::navigation::view_keys::{self, ViewKeys};
@@ -43,12 +46,18 @@ pub const GRID_AND_PLANES: &str = "viewport.grid_and_planes";
 pub const SHORTCUTS: &str = "interface.shortcuts";
 pub const AUTOSAVE: &str = "general_documents.autosave";
 
-const PAGES: [Page; 6] = [
+pub const APPEARANCE: &str = "appearance_graphics.appearance";
+
+pub const GRAPHICS: &str = "appearance_graphics.graphics";
+
+const PAGES: [Page; 8] = [
     Page { id: MOUSE, category: "navigation", title: "Mouse" },
     Page { id: ORBIT_ZOOM, category: "navigation", title: "Orbit and zoom" },
     Page { id: VIEW_KEYS, category: "navigation", title: "View keys" },
     Page { id: GRID_AND_PLANES, category: "viewport", title: "Grid and planes" },
     Page { id: SHORTCUTS, category: "interface", title: "Shortcuts" },
+    Page { id: APPEARANCE, category: "appearance_graphics", title: "Appearance" },
+    Page { id: GRAPHICS, category: "appearance_graphics", title: "Graphics" },
     Page { id: AUTOSAVE, category: "general_documents", title: "Autosave and recovery" },
 ];
 
@@ -87,7 +96,7 @@ const CATEGORIES: [Category; 7] = [
     Category { id: "viewport", label: "Viewport", status: Status::Available },
     Category { id: "selection_editing", label: "Selection and editing", status: Status::Reserved },
     Category { id: "interface", label: "Interface", status: Status::Available },
-    Category { id: "appearance_graphics", label: "Appearance and graphics", status: Status::Reserved },
+    Category { id: "appearance_graphics", label: "Appearance and graphics", status: Status::Available },
     Category { id: "general_documents", label: "General and documents", status: Status::Available },
     Category { id: "assistant", label: "Assistant", status: Status::Reserved },
 ];
@@ -176,6 +185,12 @@ fn index() -> Vec<Hit> {
     for (control, label) in ui::AUTOSAVE_CONTROLS {
         all.push(hit(AUTOSAVE, Some(control.to_owned()), label.to_owned()));
     }
+    for &(control, label) in appearance::CONTROLS {
+        all.push(hit(APPEARANCE, Some(control.to_owned()), label.to_owned()));
+    }
+    for &(control, label) in graphics::CONTROLS {
+        all.push(hit(GRAPHICS, Some(control.to_owned()), label.to_owned()));
+    }
     all
 }
 
@@ -197,11 +212,20 @@ pub enum Change {
     Display(ReferenceDisplay),
     /// Use this grid style, and save it when `keep`. A slider being dragged shows its
     /// value at once and is saved when it is let go.
-    Grid { style: GridStyle, keep: bool },
+    Grid {
+        style: GridStyle,
+        keep: bool,
+    },
     /// Save and use these command shortcuts.
     Shortcuts(Shortcuts),
     /// Save and use these autosave settings.
     Autosave(AutosavePolicy),
+    Appearance {
+        appearance: std::sync::Arc<crate::theme::Appearance>,
+        keep: bool,
+    },
+    Graphics(crate::graphics::Graphics),
+    CurrentView(crate::graphics::CurrentView),
 }
 
 /// A line the window shows under its page.
@@ -221,6 +245,21 @@ pub struct Preferences {
     pub draft: NavigationSettings,
     /// The display choices as the window shows them.
     pub display: ReferenceDisplay,
+    appearance: std::sync::Arc<crate::theme::Appearance>,
+    initial_appearance: std::sync::Arc<crate::theme::Appearance>,
+    theme_filter: appearance::Filter,
+    appearance_picker: Option<crate::platform::Purpose>,
+    pub graphics: crate::graphics::Graphics,
+    initial_graphics: Option<crate::graphics::Graphics>,
+    pub graphics_device: crate::graphics::GraphicsDevice,
+    current_view: crate::graphics::CurrentView,
+    /// The current view when the window opened or was last applied, for Cancel.
+    initial_current_view: Option<crate::graphics::CurrentView>,
+    /// The 3D view the Current view controls change, if one is on screen.
+    view_target: Option<crate::graphics::ViewTarget>,
+    view_preset: crate::viewport::look::Preset,
+    camera_editable: bool,
+    spline_curves_unavailable: bool,
     /// The grid style as the window shows it.
     pub grid: GridStyle,
     /// The grid style was changed and not saved yet.
@@ -267,6 +306,19 @@ impl Preferences {
             highlight: None,
             draft: settings.clone(),
             display,
+            appearance: Default::default(),
+            initial_appearance: Default::default(),
+            theme_filter: Default::default(),
+            appearance_picker: None,
+            graphics: Default::default(),
+            initial_graphics: None,
+            graphics_device: Default::default(),
+            current_view: crate::graphics::CurrentView::of(&crate::viewport::ViewportState::default()),
+            initial_current_view: None,
+            view_target: Some(crate::graphics::ViewTarget::Part),
+            view_preset: Default::default(),
+            camera_editable: true,
+            spline_curves_unavailable: false,
             grid,
             grid_pending: false,
             shortcuts: shortcuts.clone(),
@@ -324,6 +376,17 @@ impl Preferences {
                 let preset = self.shortcuts.preset;
                 self.reset_all_shortcuts(preset);
             }
+            GRAPHICS => {
+                self.graphics = Default::default();
+                self.changes.push(Change::Graphics(self.graphics));
+                self.message = Some(Message { text: "Graphics settings restored to defaults.".into(), error: false });
+            }
+            APPEARANCE => {
+                self.appearance_picker = None;
+                self.theme_filter = appearance::Filter::All;
+                self.edit_appearance(Default::default());
+                self.message = Some(Message { text: "Appearance restored to defaults.".into(), error: false });
+            }
             AUTOSAVE => {
                 self.edit_autosave(AutosavePolicy::default(), true);
                 self.message = Some(Message { text: "Autosave restored to defaults.".into(), error: false });
@@ -342,6 +405,11 @@ impl Preferences {
             self.changes.push(Change::Autosave(self.autosave));
             self.autosave_pending = false;
         }
+        if self.initial_appearance != self.appearance {
+            self.changes.push(Change::Appearance { appearance: self.appearance.clone(), keep: true });
+        }
+        self.initial_graphics = Some(self.graphics);
+        self.initial_current_view = Some(self.current_view);
         self.initial_draft = self.draft.clone();
         self.initial_display = self.display;
         self.initial_grid = self.grid;
@@ -352,6 +420,19 @@ impl Preferences {
 
     /// Reverts any edits made since the dialog opened (or last Apply) and requests close.
     pub fn cancel_and_close(&mut self) {
+        self.edit_appearance(self.initial_appearance.clone());
+        if let Some(initial_graphics) = self.initial_graphics
+            && self.graphics != initial_graphics
+        {
+            self.graphics = initial_graphics;
+            self.changes.push(Change::Graphics(initial_graphics));
+        }
+        if let Some(initial_view) = self.initial_current_view
+            && self.current_view != initial_view
+        {
+            self.current_view = initial_view;
+            self.changes.push(Change::CurrentView(initial_view));
+        }
         if self.draft != self.initial_draft {
             self.draft = self.initial_draft.clone();
             self.changes.push(Change::Navigation(self.draft.clone()));
@@ -672,6 +753,18 @@ impl Preferences {
 /// and drops it when closed.
 pub fn window(ctx: &egui::Context, prefs: &mut Option<Preferences>, state: &mut crate::state::AppState) {
     let Some(p) = prefs.as_mut() else { return };
+    p.follow_saved_appearance(&state.saved_appearance);
+    p.initial_graphics.get_or_insert(state.graphics);
+    p.graphics = state.graphics;
+    p.graphics_device = state.graphics_device.clone();
+    p.current_view = crate::graphics::CurrentView::of(state.active_viewport());
+    p.view_preset = state.active_viewport().preset;
+    p.current_view.display = state.display_mode();
+    p.initial_current_view.get_or_insert(p.current_view);
+    p.view_target = state.current_view_target();
+    p.camera_editable = state.assembly.is_active() || state.sketch.is_none();
+    p.spline_curves_unavailable = !state.assembly.is_active()
+        && state.doc.faces.iter().any(|face| !crate::graphics::supports_curved_surfaces(face.surface));
     if !p.is_capturing_key()
         && p.capture.is_none()
         && !egui::Popup::is_any_open(ctx)
@@ -712,6 +805,20 @@ pub fn window(ctx: &egui::Context, prefs: &mut Option<Preferences>, state: &mut 
                     p.not_kept(&why);
                 }
             }
+            Change::Appearance { appearance, keep } => match state.set_appearance(ctx, appearance.clone(), keep) {
+                Ok(()) if keep => p.initial_appearance = appearance,
+                Ok(()) => {}
+                Err(why) => {
+                    p.not_kept(&why);
+                    p.close_requested = false;
+                }
+            },
+            Change::Graphics(graphics) => {
+                if let Err(why) = state.set_graphics(graphics) {
+                    p.not_kept(&why);
+                }
+            }
+            Change::CurrentView(view) => state.set_current_view(view),
             Change::Autosave(policy) => {
                 if let Err(why) = state.set_autosave(policy) {
                     p.not_kept(&why);

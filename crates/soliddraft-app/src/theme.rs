@@ -1,14 +1,11 @@
-//! Shared D1 Clear Bench theme tokens: colours, spacing, radii and typography in one
-//! structured token set so a later themes lane can register additional themes cleanly.
-//! D1 Clear Bench daylight is the default. Viewport scenes remain a separate choice.
-//!
-//! The mode is process-wide: [`set_mode`] switches it and restyles the context, and the
-//! accessors ([`ink`], [`panel`], ...) read the active token set each call, so a widget
-//! painted on the next frame is already in the new mode.
+//! Clear Bench tokens and the active appearance on the UI thread.
 
 use egui::{Color32, CornerRadius, FontFamily, FontId, Margin, Stroke, TextStyle, Vec2};
+use std::cell::Cell;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU8, Ordering};
+
+mod appearance;
+pub use appearance::*;
 
 /// The saved appearance preference.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -331,56 +328,69 @@ pub mod edit_suite {
     pub const NAV_SHADOW: egui::Shadow = clear_bench::TOKENS.nav_shadow;
 }
 
-static MODE: AtomicU8 = AtomicU8::new(0);
+thread_local! {
+    static ACTIVE: Cell<Tokens> = const { Cell::new(clear_bench::TOKENS) };
+    static VIEW_COLORS: Cell<ViewColors> = Cell::new(ViewColors::default());
+}
 
-/// The mode the interface is in.
 pub fn mode() -> Mode {
-    match MODE.load(Ordering::Relaxed) {
-        1 => Mode::Dark,
-        _ => Mode::Light,
-    }
+    if is_dark() { Mode::Dark } else { Mode::Light }
 }
 
-/// The active token set. A future themes lane can swap this to any registered `Tokens`.
-pub fn tokens() -> &'static Tokens {
-    &clear_bench::TOKENS
+pub fn tokens() -> Tokens {
+    ACTIVE.get()
 }
 
-/// Stable id of the active theme token set.
 pub fn active_theme_id() -> &'static str {
     tokens().id
 }
 
-/// Whether the active UI chrome is dark.
 pub fn is_dark() -> bool {
     tokens().is_dark
 }
 
-/// The active palette.
-pub fn palette() -> &'static Palette {
-    &tokens().palette
+pub fn palette() -> Palette {
+    tokens().palette
 }
 
-/// The active spacing metrics.
 pub fn spacing() -> &'static Spacing {
-    &tokens().spacing
+    &clear_bench::SPACING
 }
 
-/// The active typography sizes.
 pub fn typography() -> &'static Typography {
-    &tokens().typography
+    &clear_bench::TYPOGRAPHY
 }
 
-/// The active corner radii.
 pub fn radii() -> &'static Radii {
-    &tokens().radii
+    &clear_bench::RADII
 }
 
-/// Switches the mode and restyles `ctx`, so the next frame is drawn in it.
 pub fn set_mode(ctx: &egui::Context, mode: Mode) {
-    MODE.store(mode as u8, Ordering::Relaxed);
+    VIEW_COLORS.set(ViewColors::default());
+    set_tokens(ctx, BuiltIn::for_mode(mode).tokens());
+}
+
+pub fn apply_appearance(ctx: &egui::Context, appearance: &Appearance) {
+    VIEW_COLORS.set(appearance.colors);
+    let next = appearance.tokens(ctx.system_theme());
+    if next != tokens() {
+        set_tokens(ctx, next);
+    }
+}
+
+fn set_tokens(ctx: &egui::Context, next: Tokens) {
+    ACTIVE.set(next);
     ctx.set_theme(if is_dark() { egui::Theme::Dark } else { egui::Theme::Light });
     ctx.all_styles_mut(apply_style);
+    ctx.request_repaint();
+}
+
+pub fn logo() -> Color32 {
+    VIEW_COLORS.get().logo.map_or_else(accent, Into::into)
+}
+
+pub fn view_uses_custom_logo() -> bool {
+    VIEW_COLORS.get().logo.is_some()
 }
 
 pub fn chrome() -> Color32 {
@@ -515,26 +525,26 @@ pub fn axis_z() -> Color32 {
 }
 
 pub fn reference_plane() -> Color32 {
-    palette().reference_plane
+    VIEW_COLORS.get().references.map_or_else(|| palette().reference_plane, Into::into)
 }
 
 pub fn highlight() -> Color32 {
-    palette().highlight
+    VIEW_COLORS.get().selection.map_or_else(|| palette().highlight, Into::into)
 }
 
 /// Ink for marks drawn straight on the modelling space, with no ground of their own: the
 /// grid, a plane's name, a guide's value. A dark scene needs light ink whatever the frame.
 pub fn scene_ink(dark_scene: bool) -> Color32 {
-    if dark_scene { Color32::from_rgb(0xe6, 0xe8, 0xec) } else { ink() }
+    if dark_scene { rgb(0xe6, 0xe8, 0xec) } else { clear_bench::PALETTE.ink }
 }
 
 /// The quiet ink on the modelling space, by how dark its scene is.
 pub fn scene_muted(dark_scene: bool) -> Color32 {
-    if dark_scene { Color32::from_rgb(0xa3, 0xa8, 0xb1) } else { muted() }
+    if dark_scene { rgb(0xa3, 0xa8, 0xb1) } else { clear_bench::PALETTE.muted }
 }
 
 pub fn on_highlight() -> Color32 {
-    palette().on_highlight
+    VIEW_COLORS.get().selection.map_or_else(|| palette().on_highlight, |c| appearance::contrasting_ink(c.into()))
 }
 /// The colour of an origin axis, in the viewport and the feature tree.
 pub fn axis_color(axis: crate::document::AxisKind) -> Color32 {

@@ -95,7 +95,7 @@ pub(super) fn show(p: &mut Preferences, ui: &mut egui::Ui) {
             let ink = if close.hovered() { theme::ink() } else { theme::muted() };
             icons::paint(ui.painter(), Icon::Close, rect.shrink(5.0), ink);
             if close.on_hover_text("Close").clicked() {
-                p.close_requested = true;
+                p.confirm_and_close();
             }
             egui::Frame::new()
                 .fill(theme::chip())
@@ -164,6 +164,8 @@ pub(super) fn show(p: &mut Preferences, ui: &mut egui::Ui) {
                                 VIEW_KEYS => view_keys_page(p, ui),
                                 GRID_AND_PLANES => grid_and_planes_page(p, ui),
                                 SHORTCUTS => shortcuts_page(p, ui),
+                                super::APPEARANCE => super::appearance::show(p, ui),
+                                super::GRAPHICS => super::graphics::show(p, ui),
                                 AUTOSAVE => autosave_page(p, ui),
                                 id => {
                                     if let Some(c) = super::reserved_category(id) {
@@ -201,13 +203,20 @@ pub(super) fn show(p: &mut Preferences, ui: &mut egui::Ui) {
                     .fill(theme::accent())
                     .stroke(Stroke::NONE)
                     .min_size(vec2(64.0, 26.0));
-                if ui.add(ok_btn).clicked() {
+                let ok = ui.add(ok_btn);
+                let apply = ui.add(egui::Button::new("Apply").min_size(vec2(64.0, 26.0)));
+                let cancel = ui.add(egui::Button::new("Cancel").min_size(vec2(64.0, 26.0)));
+                #[cfg(target_arch = "wasm32")]
+                for (name, response) in [("OK", &ok), ("Apply", &apply), ("Cancel", &cancel)] {
+                    crate::web::show_control(format!("Preferences: {name}"), response.rect);
+                }
+                if ok.clicked() {
                     p.confirm_and_close();
                 }
-                if ui.add(egui::Button::new("Apply").min_size(vec2(64.0, 26.0))).clicked() {
+                if apply.clicked() {
                     p.apply_now();
                 }
-                if ui.add(egui::Button::new("Cancel").min_size(vec2(64.0, 26.0))).clicked() {
+                if cancel.clicked() {
                     p.cancel_and_close();
                 }
             });
@@ -242,7 +251,10 @@ fn categories_list(p: &mut Preferences, ui: &mut egui::Ui) {
                         let selected = p.page == page.id && p.search.trim().is_empty();
                         let btn =
                             egui::Button::selectable(selected, page.title).min_size(vec2(ui.available_width(), 24.0));
-                        if ui.add(btn).clicked() {
+                        let entry = ui.add(btn);
+                        #[cfg(target_arch = "wasm32")]
+                        crate::web::show_control(format!("Preferences: {}", page.title), entry.rect);
+                        if entry.clicked() {
                             p.open_page(page.id);
                         }
                     }
@@ -330,12 +342,12 @@ fn results(p: &mut Preferences, ui: &mut egui::Ui) {
 }
 
 /// Whether a search pointed at `control`.
-fn lit(p: &Preferences, control: &str) -> bool {
+pub(super) fn lit(p: &Preferences, control: &str) -> bool {
     p.highlight.as_deref() == Some(control)
 }
 
 /// Draws `add`, inside an accent outline when `lit`.
-fn control<R>(lit: bool, ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
+pub(super) fn control<R>(lit: bool, ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
     let stroke = if lit { Stroke::new(1.5, theme::accent()) } else { Stroke::NONE };
     egui::Frame::new().stroke(stroke).inner_margin(2.0).corner_radius(3).show(ui, add).inner
 }

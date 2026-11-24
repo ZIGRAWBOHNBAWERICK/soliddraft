@@ -8,6 +8,8 @@ struct Globals {
     view_proj: mat4x4<f32>,
     // The eye relative to the scene origin.
     eye: vec4<f32>,
+    edge_color: vec4<f32>,
+    selection_color: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> globals: Globals;
@@ -149,14 +151,14 @@ fn fs_main(in: Out) -> @location(0) vec4<f32> {
     let shininess = mix(96.0, 8.0, roughness);
     let spec = mix(0.18, 0.45, metallic) * pow(max(dot(n, h), 0.0), shininess);
     let fresnel = 0.08 * pow(1.0 - max(dot(n, v), 0.0), 3.0);
-    let accent = srgb_to_linear(vec3<f32>(0.12, 0.37, 0.82));
+    let accent = mix(srgb_to_linear(vec3<f32>(0.12, 0.37, 0.82)), globals.selection_color.rgb, globals.selection_color.a);
     if ((flags & SELECTED) != 0u) {
         base = mix(base, accent, 0.55);
     } else if ((flags & HOVERED) != 0u) {
         base = mix(base, accent, 0.22);
     }
     if ((in.info.y >> 4u) == in.face + 1u) {
-        base = srgb_to_linear(vec3<f32>(1.0, 0.28, 0.06));
+        base = mix(srgb_to_linear(vec3<f32>(1.0, 0.28, 0.06)), globals.selection_color.rgb, globals.selection_color.a);
     }
     let shade = 0.36 + diffuse * (1.0 - 0.5 * metallic);
     return vec4<f32>(base * shade + vec3<f32>(spec) + vec3<f32>(fresnel), 1.0);
@@ -183,7 +185,9 @@ fn vs_edge(@location(0) p: vec3<f32>, i: InstanceIn) -> EdgeOut {
 
 @fragment
 fn fs_edge(in: EdgeOut) -> @location(0) vec4<f32> {
-    let base = select(vec3<f32>(0.06), vec3<f32>(0.04, 0.21, 0.60), (in.flags & (SELECTED | HOVERED)) != 0u);
+    let edge = mix(vec3<f32>(0.06), globals.edge_color.rgb, globals.edge_color.a);
+    let selected = mix(vec3<f32>(0.04, 0.21, 0.60), globals.selection_color.rgb, globals.selection_color.a);
+    let base = select(edge, selected, (in.flags & (SELECTED | HOVERED)) != 0u);
     return vec4<f32>(base, 1.0);
 }
 

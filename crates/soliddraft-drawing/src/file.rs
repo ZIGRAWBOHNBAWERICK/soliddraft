@@ -19,6 +19,8 @@
 //! digest) still open. They get an id derived from their content, and their model
 //! reference becomes unbound and older than any part revision, so the first Rebuild
 //! binds it to the part's id and regenerates the views.
+//! The first envelope format, `soliddraft-drawing/2`, also opens. Format 3 covers
+//! hole tables, chamfer angles, four-anchor centrelines, welds and thread sources.
 
 use std::io::Cursor;
 use std::path::Path;
@@ -31,7 +33,8 @@ use soliddraft_document::{DocKind, DocRef, DocumentId, EnvelopeError, kind::form
 use crate::{Drawing, DrawingError, Units, display, export};
 
 /// The format of `drawing.json` this version writes.
-pub const FORMAT: &str = "soliddraft-drawing/2";
+pub const FORMAT: &str = DocKind::Drawing.format();
+const FIRST_ENVELOPE_FORMAT: &str = "soliddraft-drawing/2";
 /// The format of drawing files from before the envelope.
 pub const LEGACY_FORMAT: &str = "soliddraft-drawing/1";
 
@@ -154,14 +157,17 @@ pub fn repoint(bytes: &[u8], model: &soliddraft_document::DocRef) -> Result<Vec<
     to_bytes(&drawing, &meta)
 }
 
-/// Reads a drawing from a file's bytes, in this version's format or the one before.
+/// Reads a drawing from a file's bytes, including both older drawing formats.
 pub fn from_bytes(bytes: &[u8]) -> Result<(Drawing, FileMeta), DrawingError> {
     let mut package = Package::from_bytes(bytes).map_err(envelope)?;
     let (mut drawing, meta) = match package.manifest().cloned() {
         Some(m) => {
             m.check(DocKind::Drawing, &[DRAWING]).map_err(envelope)?;
-            if format_major(&m.format, "soliddraft-drawing") != Some(2) {
-                return Err(DrawingError::Format(format!("format is {}, expected {FORMAT}", m.format)));
+            if !matches!(format_major(&m.format, "soliddraft-drawing"), Some(2 | 3)) {
+                return Err(DrawingError::Format(format!(
+                    "format is {}, expected {FIRST_ENVELOPE_FORMAT} or {FORMAT}",
+                    m.format
+                )));
             }
             let drawing = Drawing::from_json(&text(&mut package, DRAWING)?.ok_or(missing(DRAWING))?)?;
             let units = drawing.meta.units;
@@ -264,7 +270,7 @@ mod tests {
         assert_eq!(saved.manifest().unwrap().envelope, manifest::ENVELOPE);
         assert_eq!(saved.manifest().unwrap().format, FORMAT);
         assert_eq!(from_bytes(&bytes).unwrap().0, d);
-        m.format = "draftwell-drawing/3".into();
+        m.format = "draftwell-drawing/4".into();
         let newer = manifest::write_package(&m, &[Entry::new(DRAWING, d.to_json().unwrap().into_bytes())]).unwrap();
         assert!(matches!(from_bytes(&newer), Err(DrawingError::Format(_))));
     }
@@ -338,7 +344,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
 
         let mut m = manifest(&d, &meta).unwrap();
-        m.format = "soliddraft-drawing/3".into();
+        m.format = "soliddraft-drawing/4".into();
         let bytes = manifest::write_package(&m, &[Entry::new(DRAWING, d.to_json().unwrap().into_bytes())]).unwrap();
         assert!(matches!(from_bytes(&bytes), Err(DrawingError::Format(_))));
     }

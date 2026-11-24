@@ -527,8 +527,13 @@ pub(crate) fn show_visible_control(ui: &egui::Ui, name: impl Into<String>, rect:
 /// notes `Hole thread`, `Thread size` and `Thread pitch`, with open entries as
 /// `<choice>: <entry>`. The Hole Wizard panel notes its tabs as `Hole Wizard Type tab`
 /// and `Hole Wizard Positions tab`, its type tiles as `Hole type: <type>` and its commit
-/// button as `Apply Hole Wizard`. Read only, for browser checks that click a control the
-/// canvas draws.
+/// button as `Apply Hole Wizard`, and a target still to pick as `Wizard Target`. The
+/// top bar notes its document tabs as `Tab <title>` and `Close <title>`, the `New tab`
+/// button with its `New part (.dwprt)` and `New drawing (.dwdrw)` entries, and its Save,
+/// Undo and Redo as `Quick <label>`; the question a closed unsaved tab asks notes
+/// `Close question: Save`, `Close question: Discard` and `Close question: Cancel`. The
+/// shortcut menu's editor notes `Export preferences`. Read only, for browser checks that
+/// click a control the canvas draws.
 #[wasm_bindgen]
 pub fn shown_controls() -> String {
     SHOWN_CONTROLS.with_borrow(|controls| {

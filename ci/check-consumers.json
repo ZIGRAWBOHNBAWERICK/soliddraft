@@ -81,6 +81,9 @@
     "ci/browser-preferences.mjs": [
       "web"
     ],
+    "ci/browser-document-tabs.mjs": [
+      "web"
+    ],
     "ci/browser-recovery-storage.js": [
       "web"
     ],

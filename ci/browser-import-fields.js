@@ -16,6 +16,11 @@ async function until(read, matches, label) {
 async function search(name) {
   await page.press('Control+Shift+P');
   await until(controls, shown => shown['Command palette'], 'The command palette did not open');
+  await until(
+    () => page.eval(() => document.activeElement instanceof HTMLInputElement && document.activeElement.type === 'text'),
+    Boolean,
+    'The command palette did not focus its browser text input',
+  );
   await page.type(name);
 }
 async function dismiss() {
@@ -43,10 +48,11 @@ await page.eval(async () => {
     if (detail.type === 'document') window.importFields.counts.push(detail.count);
     if (detail.type === 'action') window.importFields.actions.push(detail.command);
   });
-  window.clickImportFields = (x, y) => {
+  window.clickImportFields = async (x, y) => {
     const canvas = document.getElementById('soliddraft');
     const at = { clientX: x, clientY: y, bubbles: true, pointerId: 1, pointerType: 'mouse', isPrimary: true };
     canvas.dispatchEvent(new PointerEvent('pointermove', at));
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     canvas.dispatchEvent(new PointerEvent('pointerdown', { ...at, buttons: 1 }));
     return new Promise(resolve => setTimeout(() => {
       canvas.dispatchEvent(new PointerEvent('pointerup', at));

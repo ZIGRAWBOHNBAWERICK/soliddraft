@@ -4,7 +4,7 @@
 //! mounts cleanly in the current Edit Suite layout and can be re-homed into the D1
 //! Clear Bench feature panel without untangling from the top options bar.
 
-use crate::document::{HoleParams, HolePickTarget, HoleWizardTab, fmt_mm};
+use crate::document::{HoleParams, HolePickTarget, HoleWizardTab, UnresolvedEnd, fmt_mm};
 use crate::state::{AppAction, AppState, EditorParams, NoteKind, Tool};
 use crate::theme;
 use egui::{CornerRadius, RichText, Stroke, vec2};
@@ -622,13 +622,17 @@ fn show_type_tab_fields(ui: &mut egui::Ui, params: &mut HoleParams, note: &mut O
                     HoleDepth::Through => HoleEndCondition::ThroughAll,
                     HoleDepth::Blind { depth } => HoleEndCondition::Blind { depth },
                 });
-            let end_kind = match &current_end {
-                HoleEndCondition::Blind { .. } => 0,
-                HoleEndCondition::ThroughAll => 1,
-                HoleEndCondition::UpToNext => 2,
-                HoleEndCondition::UpToVertex { .. } => 3,
-                HoleEndCondition::UpToSurface { .. } => 4,
-                HoleEndCondition::OffsetFromSurface { .. } => 5,
+            // A target mode chosen before its target was picked shows as chosen.
+            let end_kind = match (params.unresolved_end, &current_end) {
+                (Some(UnresolvedEnd::UpToVertex), _) => 3,
+                (Some(UnresolvedEnd::UpToSurface), _) => 4,
+                (Some(UnresolvedEnd::OffsetFromSurface { .. }), _) => 5,
+                (None, HoleEndCondition::Blind { .. }) => 0,
+                (None, HoleEndCondition::ThroughAll) => 1,
+                (None, HoleEndCondition::UpToNext) => 2,
+                (None, HoleEndCondition::UpToVertex { .. }) => 3,
+                (None, HoleEndCondition::UpToSurface { .. }) => 4,
+                (None, HoleEndCondition::OffsetFromSurface { .. }) => 5,
             };
             let mut chosen_kind = end_kind;
             let labels = ["Blind", "Through All", "Up To Next", "Up To Vertex", "Up To Surface", "Offset From Surface"];
@@ -644,50 +648,74 @@ fn show_type_tab_fields(ui: &mut egui::Ui, params: &mut HoleParams, note: &mut O
                 .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::ComboBox, true, "Wizard End Condition"));
 
             if chosen_kind != end_kind {
+                // A new mode drops the last mode's pending pick. A target mode keeps the
+                // target face it already has; otherwise it waits for its target, and the
+                // next pick of a face or vertex is that target.
+                params.picking_target = None;
+                params.unresolved_end = None;
+                let target_face = match &current_end {
+                    HoleEndCondition::UpToSurface { face } | HoleEndCondition::OffsetFromSurface { face, .. } => {
+                        Some(face.clone())
+                    }
+                    _ => None,
+                };
+                let wait = |params: &mut HoleParams, end: UnresolvedEnd| {
+                    params.picking_target = Some(end.pick());
+                    params.unresolved_end = Some(end);
+                    None
+                };
                 let next_end = match chosen_kind {
-                    0 => HoleEndCondition::Blind { depth: 10.0 },
-                    1 => HoleEndCondition::ThroughAll,
-                    2 => HoleEndCondition::UpToNext,
-                    3 => {
-                        params.picking_target = Some(HolePickTarget::Vertex);
-                        if let Some(f) = params.face.clone() {
-                            HoleEndCondition::UpToVertex {
-                                vertex: soliddraft_model::VertexRef {
-                                    faces: vec![f],
-                                    position: soliddraft_kernel_api::Vec3::ZERO,
-                                    label: String::new(),
-                                },
-                            }
-                        } else {
-                            HoleEndCondition::ThroughAll
+                    0 => Some(HoleEndCondition::Blind { depth: 10.0 }),
+                    1 => Some(HoleEndCondition::ThroughAll),
+                    2 => Some(HoleEndCondition::UpToNext),
+                    3 => wait(params, UnresolvedEnd::UpToVertex),
+                    4 => match target_face {
+                        Some(face) => Some(HoleEndCondition::UpToSurface { face }),
+                        None => wait(params, UnresolvedEnd::UpToSurface),
+                    },
+                    _ => match target_face {
+                        Some(face) => {
+                            Some(HoleEndCondition::OffsetFromSurface { face, offset: 5.0, reverse_offset: false })
                         }
-                    }
-                    4 => {
-                        params.picking_target = Some(HolePickTarget::Surface);
-                        if let Some(f) = params.face.clone() {
-                            HoleEndCondition::UpToSurface { face: f }
-                        } else {
-                            HoleEndCondition::ThroughAll
-                        }
-                    }
-                    _ => {
-                        params.picking_target = Some(HolePickTarget::Surface);
-                        if let Some(f) = params.face.clone() {
-                            HoleEndCondition::OffsetFromSurface { face: f, offset: 5.0, reverse_offset: false }
-                        } else {
-                            HoleEndCondition::ThroughAll
-                        }
-                    }
+                        None => wait(params, UnresolvedEnd::OffsetFromSurface { offset: 5.0, reverse_offset: false }),
+                    },
                 };
-                params.depth = match &next_end {
-                    HoleEndCondition::Blind { depth } => HoleDepth::Blind { depth: *depth },
-                    _ => HoleDepth::Through,
-                };
-                params.ensure_wizard().end_condition = next_end;
+                if let Some(next_end) = next_end {
+                    params.depth = match &next_end {
+                        HoleEndCondition::Blind { depth } => HoleDepth::Blind { depth: *depth },
+                        _ => HoleDepth::Through,
+                    };
+                    params.ensure_wizard().end_condition = next_end;
+                }
                 changed = true;
             }
 
-            if let Some(w) = params.wizard.as_mut() {
+            if let Some(end) = params.unresolved_end.as_mut() {
+                // The target is still to be picked: the hole is not built until it is.
+                let target = end.pick();
+                let picking = params.picking_target == Some(target);
+                let prompt = match target {
+                    HolePickTarget::Vertex => "Click a vertex in viewport…",
+                    HolePickTarget::Surface => "Click target planar face…",
+                };
+                let pick = ui.selectable_label(picking, prompt);
+                pick.widget_info(|| {
+                    egui::WidgetInfo::selected(egui::WidgetType::Button, true, picking, "Wizard Target")
+                });
+                #[cfg(target_arch = "wasm32")]
+                crate::web::show_control("Wizard Target", pick.rect);
+                if pick.clicked() {
+                    params.picking_target = if picking { None } else { Some(target) };
+                }
+                if let UnresolvedEnd::OffsetFromSurface { offset, reverse_offset } = end {
+                    ui.horizontal(|ui| {
+                        ui.label("Offset");
+                        ui.add(egui::DragValue::new(offset).speed(0.5).range(0.0..=5000.0).suffix(" mm"));
+                    });
+                    ui.checkbox(reverse_offset, "Reverse offset");
+                }
+                ui.label(RichText::new(end.refusal()).size(11.0).color(theme::muted()));
+            } else if let Some(w) = params.wizard.as_mut() {
                 match &mut w.end_condition {
                     HoleEndCondition::Blind { depth } => {
                         ui.horizontal(|ui| {
@@ -746,10 +774,11 @@ fn show_type_tab_fields(ui: &mut egui::Ui, params: &mut HoleParams, note: &mut O
                     }
                     HoleEndCondition::ThroughAll | HoleEndCondition::UpToNext => {}
                 }
-
-                if ui.checkbox(&mut w.flip_direction, "Flip direction").changed() {
-                    changed = true;
-                }
+            }
+            if let Some(w) = params.wizard.as_mut()
+                && ui.checkbox(&mut w.flip_direction, "Flip direction").changed()
+            {
+                changed = true;
             }
         });
 

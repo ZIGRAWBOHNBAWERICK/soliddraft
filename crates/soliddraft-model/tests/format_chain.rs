@@ -4,10 +4,11 @@
 //!
 //! Tags: `/2` plain, `/3` several bodies, `/4` development files of the extrusion-option,
 //! part-option and Hole Wizard work (read only), `/5` parameter, configuration and
-//! appearance data, `/6` extrusion options, `/7` Hole Wizard features.
+//! appearance data, `/6` extrusion options, `/7` Hole Wizard features, `/8` graded walls.
 
 use std::sync::Arc;
 
+use soliddraft_document::manifest::{self, Entry};
 use soliddraft_kernel_api::{FaceId, Kernel, Vec3};
 use soliddraft_kernel_catallax::CatallaxKernel;
 use soliddraft_model::file::{FORMAT, HOLE_WIZARD_FORMAT, OPTIONS_FORMAT, PART_OPTIONS_FORMAT};
@@ -139,35 +140,40 @@ fn each_kind_of_data_writes_the_newest_tag_it_needs_and_round_trips() {
 }
 
 #[test]
-fn every_older_tag_opens_and_a_newer_one_is_refused() {
+fn historical_format_four_opens_and_incompatible_tags_are_refused() {
     let d = everything();
     let json = d.part_json();
-    // A development file of any of the joined branches says 4; 5 and 6 are the tags in
-    // between. Each opens with all it holds and is written back in the tag it needs.
-    for tag in ["soliddraft-part/4", "soliddraft-part/5", "soliddraft-part/6"] {
-        let older = json.replace(HOLE_WIZARD_FORMAT, tag);
-        let opened = Document::from_part_json(&older, kernel()).unwrap_or_else(|e| panic!("{tag}: {e}"));
-        all_ok(&opened);
-        assert_eq!(opened.part_json(), json, "{tag} is written back as format 7");
-        assert_eq!(opened.geometry_hash(), d.geometry_hash(), "{tag} builds the same part");
-    }
-    // A tag from before the options cannot carry them: the file is damaged, not read
-    // as a different part.
-    for tag in ["soliddraft-part/2", "soliddraft-part/3"] {
+    let historical = json.replace(HOLE_WIZARD_FORMAT, "soliddraft-part/4");
+    let opened = Document::from_part_json(&historical, kernel()).unwrap();
+    all_ok(&opened);
+    assert_eq!(opened.part_json(), json);
+    assert_eq!(opened.geometry_hash(), d.geometry_hash());
+    for tag in ["soliddraft-part/2", "soliddraft-part/3", PART_OPTIONS_FORMAT, OPTIONS_FORMAT] {
         let old = json.replace(HOLE_WIZARD_FORMAT, tag);
         assert!(matches!(Document::from_part_json(&old, kernel()), Err(FileError::Invalid(_))), "{tag}");
     }
-    // A later version is refused, naming every tag this one reads.
-    let later = json.replace(HOLE_WIZARD_FORMAT, "soliddraft-part/8");
-    let Err(error) = Document::from_part_json(&later, kernel()) else { panic!("format 8 opened") };
+    let later = json.replace(HOLE_WIZARD_FORMAT, "soliddraft-part/9");
+    let Err(error) = Document::from_part_json(&later, kernel()) else { panic!("format 9 opened") };
     assert!(matches!(error, FileError::Format { .. }), "{error}");
     assert!(
         error.to_string().ends_with(
-            "this version reads soliddraft-part/7, soliddraft-part/6, soliddraft-part/5, soliddraft-part/4, \
-             soliddraft-part/3, soliddraft-part/2 and soliddraft-part/1"
+            "this version reads soliddraft-part/8, soliddraft-part/7, soliddraft-part/6, soliddraft-part/5, \
+             soliddraft-part/4, soliddraft-part/3, soliddraft-part/2 and soliddraft-part/1"
         ),
         "{error}"
     );
+}
+
+#[test]
+fn part_manifest_and_truth_must_agree_on_the_major_version() {
+    let d = everything();
+    let mut manifest = d.manifest();
+    manifest.format = OPTIONS_FORMAT.into();
+    let truth = d.part_json();
+    let bytes = manifest::write_package(&manifest, &[Entry::new("part.json", truth.as_bytes())]).unwrap();
+    let error = Document::from_bytes(&bytes, kernel()).unwrap_err();
+    assert!(matches!(error, FileError::Invalid(_)), "{error}");
+    assert!(error.to_string().contains("does not match part.json"), "{error}");
 }
 
 #[test]
@@ -189,4 +195,6 @@ fn each_new_kind_alone_needs_format_4_or_later() {
         let old = json.replace(tag, "soliddraft-part/3");
         assert!(matches!(Document::from_part_json(&old, kernel()), Err(FileError::Invalid(_))), "{tag} as format 3");
     }
+    let wrong_tag = extruded.part_json().replace(OPTIONS_FORMAT, PART_OPTIONS_FORMAT);
+    assert!(matches!(Document::from_part_json(&wrong_tag, kernel()), Err(FileError::Invalid(_))));
 }

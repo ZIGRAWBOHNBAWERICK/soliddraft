@@ -5,7 +5,7 @@
 // into the extrusion's property panel, which asks for a sketch or a built-in shape. The
 // visitor takes the Rectangle, ticks Direction 2 (the section opens), and applies with
 // OK. A second Extrude takes the Circle with Merge result off, so it is a second body. The
-// visitor saves the part (a download): the file must be format 4, keep Direction 2 on
+// visitor saves the part (a download): the file must be format 6, keep Direction 2 on
 // the first extrusion and put the second in its own body. The visitor loads the site
 // again, opens the saved file, selects Boss-Extrude1 in the tree and runs Edit feature:
 // the panel must open with Direction 2 ticked and open. Escape cancels. Last, a later

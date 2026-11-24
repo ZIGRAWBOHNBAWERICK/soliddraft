@@ -242,7 +242,7 @@ switch (scenario) {
     break;
   }
   case 'curved-from': {
-    // The application test builds a boss from the rod's curved top, then a later post.
+    // The headless application test builds a boss from the rod's curved top, then a later post.
     // The web build takes about two minutes to build this part (seconds natively); the
     // longer wait keeps the check on the result until that is fixed.
     await open('extrude-from-curved.dwprt', 240000);

@@ -1,7 +1,6 @@
 // Run through chrome-devtools-axi on a fresh 1400 x 813 browser session at /?demo.
 // Serve ci/fixtures/import/block-closed.step as /import-field-block.step.
-// The pinned stage cannot read import bytes. Lattice and Gyroid should disappear
-// from command search after a reviewed STEP import, while CAD commands still run.
+// Lattice, Gyroid and CAD commands are available on a reviewed STEP solid.
 function check(value, message) { if (!value) throw new Error(message); }
 const controls = () => page.eval(() => JSON.parse(window.wasmBindings.shown_controls()));
 async function until(read, matches, label) {
@@ -85,12 +84,13 @@ await click(await until(controls, shown => shown['Accept import'], 'Import revie
 await until(() => page.eval(() => window.importFields.counts.at(-1)), count => count === 1, 'The STEP solid was not imported');
 
 for (const field of ['Lattice', 'Gyroid']) {
-  await search(field);
-  await page.wait(250);
-  check(!(await controls())[`Command: ${field.toLowerCase()}`], `Command search still offers ${field} on the imported solid`);
-  await dismiss();
+  const id = field.toLowerCase();
+  await command(field, id);
+  await until(controls, shown => shown['Form OK'], `${field} did not open its editor on the imported solid`);
+  await page.press('Escape');
+  await until(controls, shown => !shown['Form OK'], `${field} editor did not close`);
 }
 await command('Chamfer', 'chamfer');
 await until(() => page.eval(() => window.importFields.actions.includes('chamfer')), Boolean,
   'Chamfer did not start on the imported solid');
-console.log('The browser offers CAD on the imported solid and hides both unavailable field commands');
+console.log('The imported STEP solid offers Lattice, Gyroid and Chamfer');

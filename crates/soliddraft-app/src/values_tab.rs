@@ -552,7 +552,10 @@ fn contents(ui: &mut egui::Ui, state: &mut AppState) {
         let title = if tab.expanded { 15.0 } else { 12.5 };
         ui.label(RichText::new("Parameters & configurations").family(theme::semibold()).size(title));
         let expand = if tab.expanded { "Back to dock" } else { "Expand" };
-        if ui.small_button(expand).clicked() {
+        let button = ui.small_button(expand);
+        #[cfg(target_arch = "wasm32")]
+        crate::web::show_control(expand, button.rect);
+        if button.clicked() {
             tab.expanded = !tab.expanded;
         }
     });
@@ -567,8 +570,6 @@ fn contents(ui: &mut egui::Ui, state: &mut AppState) {
         let filter =
             ui.add(egui::TextEdit::singleline(&mut tab.filter).hint_text("Filter parameters").desired_width(122.0));
         filter.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, "Filter parameters"));
-        #[cfg(target_arch = "wasm32")]
-        crate::web::show_control("Filter parameters", filter.rect);
         if ui.add_enabled(state.doc.undo_label().is_some(), egui::Button::new("Undo")).clicked() {
             history = Some(AppAction::Undo);
         }

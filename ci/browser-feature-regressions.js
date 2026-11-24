@@ -117,14 +117,15 @@ async function replace(name, value) {
 }
 async function parameters() {
   await command('Parameters', 'configuration_grid');
-  await until(controls, value => value?.['Filter parameters'], 'The parameters pane did not open');
   // Expand the pane so its rows have room below the new-global controls.
-  await clickAt({ x: 264, y: 759 });
-  await until(controls, value => value?.['Filter parameters']?.y < 300, 'The expanded parameters pane did not open');
+  const docked = await until(controls, value => value?.Expand, 'The parameters pane did not open');
+  await clickAt(docked.Expand);
+  await until(controls, value => value?.['Back to dock'], 'The expanded parameters pane did not open');
 }
 async function closeParameters() {
-  await clickAt({ x: 282, y: 35 });
-  await until(controls, value => !(value?.['Filter parameters']?.y < 300), 'The expanded parameters pane stayed open');
+  const expanded = await until(controls, value => value?.['Back to dock'], 'The expanded parameters pane did not open');
+  await clickAt(expanded['Back to dock']);
+  await until(controls, value => value?.Expand, 'The expanded parameters pane stayed open');
 }
 async function open(name) {
   await page.eval(`(async () => {

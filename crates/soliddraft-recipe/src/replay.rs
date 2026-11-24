@@ -682,10 +682,13 @@ mod tests {
         assert!(matches!(parse(&minimal(SKETCH, "nope")), Err(RecipeError::Invalid(_))));
         let failing = r#"{"id": "s", "op": "profile", "plane": "XY", "circle": {"center": [0, 0], "radius": 1}, "expect": "error"}"#;
         assert!(matches!(parse(&minimal(failing, "s")), Err(RecipeError::Invalid(_))), "result must succeed");
-        let wrong = minimal(SKETCH, "s").replace("soliddraft-recipe/1", "soliddraft-recipe/9");
+        let (prefix, major) = FORMAT.rsplit_once('/').unwrap();
+        let next = format!("{prefix}/{}", major.parse::<u32>().unwrap() + 1);
+        let wrong = minimal(SKETCH, "s").replace(FORMAT, &next);
         let legacy = minimal(SKETCH, "s").replace(FORMAT, "draftwell-recipe/1");
         assert_eq!(parse(&legacy).unwrap().format, FORMAT);
-        assert!(parse(&legacy.replace("draftwell-recipe/1", "draftwell-recipe/9")).is_err());
+        let next_draftwell = next.replacen("soliddraft-", "draftwell-", 1);
+        assert!(parse(&legacy.replace("draftwell-recipe/1", &next_draftwell)).is_err());
         assert!(matches!(parse(&wrong), Err(RecipeError::Invalid(_))));
         assert!(matches!(parse("{"), Err(RecipeError::Parse(_))));
     }

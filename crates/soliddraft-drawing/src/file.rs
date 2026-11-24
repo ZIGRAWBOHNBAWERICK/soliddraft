@@ -225,6 +225,11 @@ mod tests {
     use zip::ZipWriter;
     use zip::write::SimpleFileOptions;
 
+    fn next_format() -> String {
+        let major = format_major(FORMAT, "soliddraft-drawing").unwrap();
+        format!("soliddraft-drawing/{}", major + 1)
+    }
+
     #[test]
     fn files_round_trip_and_are_repeatable() {
         let d = bracket_a3();
@@ -270,7 +275,7 @@ mod tests {
         assert_eq!(saved.manifest().unwrap().envelope, manifest::ENVELOPE);
         assert_eq!(saved.manifest().unwrap().format, FORMAT);
         assert_eq!(from_bytes(&bytes).unwrap().0, d);
-        m.format = "draftwell-drawing/4".into();
+        m.format = next_format().replacen("soliddraft-", "draftwell-", 1);
         let newer = manifest::write_package(&m, &[Entry::new(DRAWING, d.to_json().unwrap().into_bytes())]).unwrap();
         assert!(matches!(from_bytes(&newer), Err(DrawingError::Format(_))));
     }
@@ -344,7 +349,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
 
         let mut m = manifest(&d, &meta).unwrap();
-        m.format = "soliddraft-drawing/4".into();
+        m.format = next_format();
         let bytes = manifest::write_package(&m, &[Entry::new(DRAWING, d.to_json().unwrap().into_bytes())]).unwrap();
         assert!(matches!(from_bytes(&bytes), Err(DrawingError::Format(_))));
     }

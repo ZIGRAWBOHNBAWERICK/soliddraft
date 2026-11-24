@@ -113,7 +113,16 @@ fn unreadable_settings_open_with_the_defaults() {
         let mut data = Vec::new();
         std::io::Read::read_to_end(&mut entry, &mut data).unwrap();
         if name == "settings.json" {
-            data = br#"{"format": "soliddraft-settings/9", "hologram": true}"#.to_vec();
+            let major = soliddraft_document::kind::format_major(
+                soliddraft_tessellation::settings::FORMAT,
+                "soliddraft-settings",
+            )
+            .unwrap();
+            data = serde_json::to_vec(&serde_json::json!({
+                "format": format!("soliddraft-settings/{}", major + 1),
+                "hologram": true
+            }))
+            .unwrap();
         }
         out.start_file(name, zip::write::SimpleFileOptions::default()).unwrap();
         std::io::Write::write_all(&mut out, &data).unwrap();

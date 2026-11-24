@@ -197,7 +197,7 @@ pub enum SketchPlane {
     },
     /// A planar face of another component, taken while editing the part in an assembly.
     Context {
-        context: model::ContextFace,
+        context: Box<model::ContextFace>,
         /// Signed distance along the face normal, in millimetres.
         offset: f64,
     },
@@ -245,7 +245,7 @@ impl SketchPlane {
                 model::SketchPlane::FaceOffset { face: face.clone(), offset: *offset }
             }
             SketchPlane::Context { context, offset } => {
-                model::SketchPlane::Context { context: context.clone(), offset: *offset }
+                model::SketchPlane::Context { context: (**context).clone(), offset: *offset }
             }
         }
     }
@@ -1278,7 +1278,7 @@ impl FeatureKind {
                         SketchPlane::FaceOffset { face: face.clone(), offset: *offset }
                     }
                     model::SketchPlane::Context { context, offset } => {
-                        SketchPlane::Context { context: context.clone(), offset: *offset }
+                        SketchPlane::Context { context: Box::new(context.clone()), offset: *offset }
                     }
                 };
                 let mut sketch = s.sketch.clone();

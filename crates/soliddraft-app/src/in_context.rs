@@ -152,6 +152,17 @@ pub fn mesh(state: &AppState) -> Option<Arc<crate::document::DisplayMesh>> {
 /// assembly became the active document or lost the component, or another part opened,
 /// and remakes the dimmed mesh when the assembly's scene changed.
 pub(crate) fn frame(state: &mut AppState) {
+    // The browser opens the component's part a frame or more after Edit part asked.
+    if let Some(path) = state.assembly.entering.clone() {
+        if state.assembly.is_active() || state.assembly.session.is_none() {
+            state.assembly.entering = None;
+        } else if matches!(crate::assembly::component_part(state, &path), Ok(crate::assembly::ComponentPart::Current)) {
+            state.assembly.entering = None;
+            if let Err(e) = enter(state, &path) {
+                state.note(e, NoteKind::Error);
+            }
+        }
+    }
     let Some(ic) = state.assembly.in_context.as_ref() else { return };
     let gone = state.assembly.session.as_ref().is_none_or(|s| live_row(s, &ic.path).is_none());
     if gone {
@@ -231,7 +242,7 @@ fn append(out: &mut DisplayMesh, mesh: &DisplayMesh, place: &soliddraft_assembly
 fn hit(mesh: &DisplayMesh, origin: glam::Vec3, dir: glam::Vec3) -> Option<u32> {
     let at = |i: u32| glam::Vec3::from_array(mesh.positions[i as usize]);
     let mut best: Option<(f32, u32)> = None;
-    for (t, tri) in mesh.indices.chunks_exact(3).enumerate() {
+    for (t, tri) in mesh.indices.as_chunks::<3>().0.iter().enumerate() {
         let (a, b, c) = (at(tri[0]), at(tri[1]), at(tri[2]));
         let (e1, e2) = (b - a, c - a);
         let p = dir.cross(e2);
@@ -346,7 +357,7 @@ pub(crate) fn picked_plane(state: &mut AppState) -> Option<Result<SketchPlane, S
             (pick.face.clone(), pick.face_label.clone()),
             plane,
         );
-        SketchPlane::Context { context, offset: 0.0 }
+        SketchPlane::Context { context: Box::new(context), offset: 0.0 }
     }))
 }
 
@@ -424,7 +435,7 @@ pub(crate) fn follow(state: &mut AppState) {
 pub fn reference_of(kind: &crate::document::FeatureKind) -> Option<&ContextFace> {
     match kind {
         crate::document::FeatureKind::Sketch(s) => match &s.plane {
-            SketchPlane::Context { context, .. } => Some(context),
+            SketchPlane::Context { context, .. } => Some(context.as_ref()),
             _ => None,
         },
         crate::document::FeatureKind::ReferencePlane(soliddraft_model::SketchPlane::Context { context, .. }) => {

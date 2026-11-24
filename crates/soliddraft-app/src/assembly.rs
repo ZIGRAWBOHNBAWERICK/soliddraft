@@ -132,6 +132,8 @@ pub struct AssemblyState {
     pub in_context: Option<crate::in_context::InContext>,
     /// The open part's in-context references are read afresh at the next frame.
     pub context_check: bool,
+    /// A component whose part is opening to be edited in context, in the browser.
+    pub entering: Option<OccurrencePath>,
     /// What the last update of the in-context references found, said at the next frame.
     pub context_note: Option<(String, NoteKind)>,
 }

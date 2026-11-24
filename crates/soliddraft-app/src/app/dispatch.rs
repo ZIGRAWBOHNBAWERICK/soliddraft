@@ -301,6 +301,9 @@ impl SolidDraftApp {
                         self.state.note(e, NoteKind::Error);
                         self.apply(ctx, AppAction::Assembly(AssemblyAction::Show));
                     }
+                } else if cfg!(target_arch = "wasm32") {
+                    // The page opens the part's bytes a frame or more later.
+                    self.state.assembly.entering = Some(path);
                 }
             }
             AppAction::Assembly(a) => crate::assembly::apply(&mut self.state, &mut self.dock, a),

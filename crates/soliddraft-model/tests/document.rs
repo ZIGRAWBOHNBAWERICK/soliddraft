@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use soliddraft_kernel_api::{Kernel, Vec3};
 use soliddraft_kernel_catallax::CatallaxKernel;
+use soliddraft_model::file::{FORMAT, LEGACY_FORMAT, NEWEST_FORMAT};
 use soliddraft_model::sketch::{P2, Sketch, SolveStatus, solve::solve};
 use soliddraft_model::{
     BlendFeature, BuiltinShape, Command, CommandError, DatumPlane, Document, EndCondition, ExtrudeFeature, ExtrudeOp,
@@ -343,7 +344,8 @@ fn files_round_trip_and_refuse_what_they_cannot_read() {
     assert_eq!(back.part_json(), d.part_json());
     assert_eq!(back.to_bytes().unwrap(), bytes);
 
-    let newer = d.part_json().replace("soliddraft-part/2", "soliddraft-part/9");
+    let next = format!("soliddraft-part/{}", NEWEST_FORMAT + 1);
+    let newer = d.part_json().replace(FORMAT, &next);
     assert!(matches!(Document::from_part_json(&newer, kernel.clone()), Err(FileError::Format { .. })));
     // A truth without a format tag says so, rather than naming a blank one.
     let Err(untagged) = Document::from_part_json("[1, 2]", kernel.clone()) else { panic!("a list is not a part") };
@@ -353,7 +355,7 @@ fn files_round_trip_and_refuse_what_they_cannot_read() {
         Document::from_part_json(&newer, kernel.clone())
             .unwrap_err()
             .to_string()
-            .starts_with("the file is soliddraft-part/9, this version reads soliddraft-part/8,")
+            .starts_with(&format!("the file is {next}, this version reads soliddraft-part/{NEWEST_FORMAT},"))
     );
     let broken = d.part_json().replace("\"next_feature\": 4", "\"next_feature\": 2");
     assert!(matches!(Document::from_part_json(&broken, kernel.clone()), Err(FileError::Invalid(_))), "{broken}");
@@ -361,9 +363,9 @@ fn files_round_trip_and_refuse_what_they_cannot_read() {
 }
 
 /// A part file as phase D2 wrote it: `recipe.json` (format 1) and `meta.json`.
-fn legacy_part_file(d: &Document) -> Vec<u8> {
+fn legacy_part_file(d: &Document, tag: &str) -> Vec<u8> {
     use std::io::Write;
-    let recipe = d.part_json().replace("soliddraft-part/2", "draftwell-part/1");
+    let recipe = d.part_json().replace(FORMAT, tag);
     let mut zip = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
     let o = zip::write::SimpleFileOptions::default();
     zip.start_file("recipe.json", o).unwrap();
@@ -420,7 +422,7 @@ fn format_1_parts_open_with_a_stable_id_and_migrate_on_save() {
     let kernel: Arc<dyn Kernel> = Arc::new(CatallaxKernel::new());
     let mut d = Document::new("Block", kernel.clone());
     block(&mut d);
-    let old = legacy_part_file(&d);
+    let old = legacy_part_file(&d, &LEGACY_FORMAT.replacen("soliddraft-", "draftwell-", 1));
     let a = Document::from_bytes(&old, kernel.clone()).unwrap();
     let b = Document::from_bytes(&old, kernel.clone()).unwrap();
     assert_eq!(a.id(), b.id(), "every open of the same old file agrees on its id");
@@ -441,10 +443,9 @@ fn format_1_parts_open_with_a_stable_id_and_migrate_on_save() {
     assert_eq!(reopened.id(), a.id());
     assert_eq!(reopened.semantic_hash(), a.semantic_hash());
 
-    // A format 1 recipe inside the envelope is not a thing; a newer part is refused.
-    let newer = legacy_part_file(&d);
-    let newer = String::from_utf8_lossy(&newer).replace("soliddraft-part/1", "soliddraft-part/3");
-    assert!(Document::from_bytes(newer.as_bytes(), kernel).is_err());
+    // Enveloped formats require a manifest.
+    let newer = legacy_part_file(&d, FORMAT);
+    assert!(matches!(Document::from_bytes(&newer, kernel), Err(FileError::Format { found }) if found == FORMAT));
 }
 
 #[test]

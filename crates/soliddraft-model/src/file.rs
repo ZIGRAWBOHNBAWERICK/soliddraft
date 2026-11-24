@@ -87,7 +87,8 @@ const GRADED_WALL_VERSION: u32 = 8;
 /// features under this tag. All still open: each is read by what it holds.
 const EARLY_OPTIONS_FORMAT: &str = "soliddraft-part/4";
 const EARLY_OPTIONS_VERSION: u32 = 4;
-const NEWEST_FORMAT: u32 = GRADED_WALL_VERSION;
+/// The newest part major version this reader accepts.
+pub const NEWEST_FORMAT: u32 = GRADED_WALL_VERSION;
 /// The format tag of part files from before the document envelope.
 pub const LEGACY_FORMAT: &str = "soliddraft-part/1";
 /// The file name extension parts are saved under.

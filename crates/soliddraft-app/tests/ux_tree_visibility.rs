@@ -1485,7 +1485,8 @@ fn view_choices_serialize_outside_the_part_truth() {
     let part = package.read_text("part.json").unwrap().unwrap();
     let view = package.read_text(soliddraft_model::view::ENTRY).unwrap().unwrap();
     let mut newer: serde_json::Value = serde_json::from_str(&view).unwrap();
-    newer["format"] = "soliddraft-view/9".into();
+    let major = soliddraft_document::kind::format_major(soliddraft_model::view::FORMAT, "soliddraft-view").unwrap();
+    newer["format"] = format!("soliddraft-view/{}", major + 1).into();
     let rewritten = soliddraft_document::manifest::write_package(
         &m,
         &[

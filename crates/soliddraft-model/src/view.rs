@@ -201,7 +201,9 @@ mod tests {
         assert!(text.contains(FORMAT));
         assert_eq!(Visibility::from_json(&text).unwrap(), view);
         assert_eq!(view.body_name(8), Some("Tool"));
-        assert!(Visibility::from_json(&text.replace(FORMAT, "soliddraft-view/3")).is_err());
+        let major = soliddraft_document::kind::format_major(FORMAT, "soliddraft-view").unwrap();
+        let next = format!("soliddraft-view/{}", major + 1);
+        assert!(Visibility::from_json(&text.replace(FORMAT, &next)).is_err());
         assert!(Visibility::from_json(&text.replace(FORMAT, LEGACY_FORMAT)).is_err());
         assert!(
             Visibility::from_json(r#"{"format":"soliddraft-view/1","shown":[{"axis":"x"}],"hidden":[{"axis":"x"}]}"#)

@@ -11,7 +11,7 @@ use std::sync::Arc;
 use soliddraft_document::manifest::{self, Entry};
 use soliddraft_kernel_api::{FaceId, Kernel, Vec3};
 use soliddraft_kernel_catallax::CatallaxKernel;
-use soliddraft_model::file::{FORMAT, HOLE_WIZARD_FORMAT, OPTIONS_FORMAT, PART_OPTIONS_FORMAT};
+use soliddraft_model::file::{FORMAT, HOLE_WIZARD_FORMAT, NEWEST_FORMAT, OPTIONS_FORMAT, PART_OPTIONS_FORMAT};
 use soliddraft_model::hole_wizard::{HoleStandard, HoleType, HoleWizardSpec};
 use soliddraft_model::sketch::{P2, Sketch, solve::solve};
 use soliddraft_model::{
@@ -152,12 +152,18 @@ fn historical_format_four_opens_and_incompatible_tags_are_refused() {
         let old = json.replace(HOLE_WIZARD_FORMAT, tag);
         assert!(matches!(Document::from_part_json(&old, kernel()), Err(FileError::Invalid(_))), "{tag}");
     }
-    let later = json.replace(HOLE_WIZARD_FORMAT, "soliddraft-part/9");
-    let Err(error) = Document::from_part_json(&later, kernel()) else { panic!("format 9 opened") };
+    let next = format!("soliddraft-part/{}", NEWEST_FORMAT + 1);
+    let later = json.replace(HOLE_WIZARD_FORMAT, &next);
+    let Err(error) = Document::from_part_json(&later, kernel()) else { panic!("{next} opened") };
     assert!(matches!(error, FileError::Format { .. }), "{error}");
     assert!(
+        error
+            .to_string()
+            .starts_with(&format!("the file is {next}, this version reads soliddraft-part/{NEWEST_FORMAT},"))
+    );
+    assert!(
         error.to_string().ends_with(
-            "this version reads soliddraft-part/8, soliddraft-part/7, soliddraft-part/6, soliddraft-part/5, \
+            "soliddraft-part/8, soliddraft-part/7, soliddraft-part/6, soliddraft-part/5, \
              soliddraft-part/4, soliddraft-part/3, soliddraft-part/2 and soliddraft-part/1"
         ),
         "{error}"

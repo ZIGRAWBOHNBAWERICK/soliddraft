@@ -338,13 +338,13 @@ impl Assembly {
                 let Ok(Probe { format: found }) = serde_json::from_slice::<Probe>(json) else {
                     return Err(e.into());
                 };
-                if !matches!(format_major(&found, "soliddraft-assembly"), Some(1 | 2)) {
+                if !matches!(format_major(&found, "soliddraft-assembly"), Some(1..=crate::schema::NEWEST_FORMAT)) {
                     return Err(FileError::Format { found });
                 }
                 return Err(e.into());
             }
         };
-        if !matches!(format_major(&a.format, "soliddraft-assembly"), Some(1 | 2)) {
+        if !matches!(format_major(&a.format, "soliddraft-assembly"), Some(1..=crate::schema::NEWEST_FORMAT)) {
             return Err(FileError::Format { found: a.format });
         }
         a.format = a.written_format().into();
@@ -638,7 +638,8 @@ mod tests {
         assert_eq!(saved.manifest().unwrap().format, FORMAT);
         let truth: Value = serde_json::from_slice(&saved.read(ASSEMBLY).unwrap().unwrap()).unwrap();
         assert_eq!(truth["format"], FORMAT);
-        let newer = truth.to_string().replace(FORMAT, "draftwell-assembly/3");
+        let tag = format!("draftwell-assembly/{}", crate::schema::NEWEST_FORMAT + 1);
+        let newer = truth.to_string().replace(FORMAT, &tag);
         assert!(matches!(Assembly::from_truth(newer.as_bytes(), None), Err(FileError::Format { .. })));
     }
 
@@ -652,8 +653,10 @@ mod tests {
         let untagged = Assembly::from_truth(br#"{"name": "x"}"#, None).unwrap_err();
         assert!(matches!(untagged, FileError::Format { .. }), "{untagged}");
         assert!(untagged.to_string().contains("the file has no format tag"), "{untagged}");
-        let newer = Assembly::from_truth(br#"{"format": "soliddraft-assembly/3"}"#, None).unwrap_err();
-        assert!(newer.to_string().starts_with("the file is soliddraft-assembly/3, this version reads"), "{newer}");
+        let tag = format!("soliddraft-assembly/{}", crate::schema::NEWEST_FORMAT + 1);
+        let truth = serde_json::json!({"format": tag});
+        let newer = Assembly::from_truth(truth.to_string().as_bytes(), None).unwrap_err();
+        assert!(newer.to_string().starts_with(&format!("the file is {tag}, this version reads")), "{newer}");
     }
 
     #[test]
@@ -752,7 +755,7 @@ mod tests {
         v["format"] = "soliddraft-assembly/1.1".into();
         let b = Assembly::from_truth(serde_json::to_string(&v).unwrap().as_bytes(), None).unwrap();
         assert_eq!(b.semantic_hash(), a.semantic_hash());
-        v["format"] = "soliddraft-assembly/3".into();
+        v["format"] = format!("soliddraft-assembly/{}", crate::schema::NEWEST_FORMAT + 1).into();
         assert!(matches!(
             Assembly::from_truth(serde_json::to_string(&v).unwrap().as_bytes(), None),
             Err(FileError::Format { .. })

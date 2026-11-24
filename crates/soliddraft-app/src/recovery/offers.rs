@@ -75,7 +75,8 @@ mod tests {
         manifest.sections = vec![Section::required("part.json")];
         let document = write_package(&manifest, &[Entry::new("part.json", b"unsaved")]).unwrap();
         let mut record = recovery::Record::new(id, DocKind::Part, "Future work", None, revision);
-        record.format = "soliddraft-recovery/999".into();
+        let major = soliddraft_document::kind::format_major(recovery::FORMAT, "soliddraft-recovery").unwrap();
+        record.format = format!("soliddraft-recovery/{}", major + 1);
         let copy = recovery::encode(&record, &document).unwrap();
         let found = read([("future".into(), copy.clone())]);
         assert_eq!(found.bytes.get("future"), Some(&copy));

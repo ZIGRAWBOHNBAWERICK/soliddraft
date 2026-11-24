@@ -239,8 +239,11 @@ mod tests {
         assert_eq!(custom.to_json(), custom.clone().to_json(), "same bytes");
         let old = custom.to_json().replace(FORMAT, "draftwell-settings/1");
         assert_eq!(Settings::from_json(&old).unwrap(), custom);
-        assert!(Settings::from_json(&old.replace("draftwell-settings/1", "draftwell-settings/2")).is_err());
-        assert!(Settings::from_json(r#"{"format": "soliddraft-settings/2"}"#).is_err());
+        let major = FORMAT.rsplit_once('/').unwrap().1.parse::<u32>().unwrap();
+        let next = format!("soliddraft-settings/{}", major + 1);
+        let next_draftwell = next.replacen("soliddraft-", "draftwell-", 1);
+        assert!(Settings::from_json(&old.replace("draftwell-settings/1", &next_draftwell)).is_err());
+        assert!(Settings::from_json(&format!(r#"{{"format": "{next}"}}"#)).is_err());
         assert!(Settings::from_json(r#"{"format": "soliddraft-settings/1", "sparkle": 1}"#).is_err());
         assert!(
             Settings::from_json(

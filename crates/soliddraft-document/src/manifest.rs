@@ -375,7 +375,8 @@ mod tests {
         assert!(err.to_string().contains("mates.json"), "{err}");
         assert!(manifest().check(DocKind::Drawing, &["part.json"]).is_err(), "wrong kind");
         let mut newer = manifest();
-        newer.envelope = "soliddraft-document/2".into();
+        let major = format_major(ENVELOPE, "soliddraft-document").unwrap();
+        newer.envelope = format!("soliddraft-document/{}", major + 1);
         assert!(newer.check(DocKind::Part, &["part.json"]).is_err(), "newer envelope");
     }
 

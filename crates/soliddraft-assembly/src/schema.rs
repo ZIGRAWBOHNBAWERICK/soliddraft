@@ -54,6 +54,8 @@ use crate::placement::Placement;
 pub const FORMAT: &str = "soliddraft-assembly/1";
 /// Assembly truth with authored display states.
 pub const DISPLAY_FORMAT: &str = "soliddraft-assembly/2";
+/// The newest assembly major version this reader accepts.
+pub const NEWEST_FORMAT: u32 = 2;
 
 /// An assembly's truth.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

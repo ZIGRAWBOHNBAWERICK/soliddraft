@@ -1343,6 +1343,7 @@ pub struct AppState {
     pub section: crate::section::State,
     pub(crate) mass: crate::measure::mass::State,
     pub viewport: ViewportState,
+    pub(crate) appearance: std::sync::Arc<crate::theme::Appearance>,
     pub graphics: crate::graphics::Graphics,
     pub graphics_device: crate::graphics::GraphicsDevice,
     pub pick_filter: crate::viewport::PickFilter,
@@ -1611,6 +1612,7 @@ impl AppState {
             section: Default::default(),
             mass: Default::default(),
             viewport: ViewportState::default(),
+            appearance: Default::default(),
             graphics: Default::default(),
             graphics_device: Default::default(),
             pick_filter: Default::default(),
@@ -1751,6 +1753,7 @@ impl AppState {
         keep: bool,
     ) -> Result<(), crate::settings::NotKept> {
         crate::theme::apply_appearance(ctx, &appearance);
+        self.appearance = appearance.clone();
         self.viewport.appearance = appearance.clone();
         if let Some(session) = self.assembly.session.as_mut() {
             session.viewport.appearance = appearance.clone();

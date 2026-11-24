@@ -167,7 +167,8 @@ impl SolidDraftApp {
         #[cfg(target_arch = "wasm32")]
         crate::web::set_context(&cc.egui_ctx);
         let mut state = AppState::new(doc);
-        state.viewport.appearance = std::sync::Arc::new(appearance);
+        state.appearance = std::sync::Arc::new(appearance);
+        state.viewport.appearance = state.appearance.clone();
         state.graphics_device = graphics_device;
         state.graphics = graphics;
         #[cfg(not(target_arch = "wasm32"))]
@@ -917,8 +918,8 @@ impl eframe::App for SolidDraftApp {
     }
 
     fn ui(&mut self, root: &mut egui::Ui, frame: &mut eframe::Frame) {
-        if self.state.viewport.appearance.selected == theme::Selection::System {
-            theme::apply_appearance(root.ctx(), &self.state.viewport.appearance);
+        if self.state.appearance.selected == theme::Selection::System {
+            theme::apply_appearance(root.ctx(), &self.state.appearance);
         }
         crate::multibody::show(root.ctx(), &mut self.state);
         crate::material_dialog::show(root.ctx(), &mut self.state);
@@ -942,7 +943,7 @@ impl eframe::App for SolidDraftApp {
         self.state.viewport.graphics_tier = tier;
         self.state.viewport.frame_ms = frame_ms;
         if let Some(session) = self.state.assembly.session.as_mut() {
-            session.viewport.appearance = self.state.viewport.appearance.clone();
+            session.viewport.appearance = self.state.appearance.clone();
             session.viewport.graphics = graphics;
             session.viewport.graphics_tier = tier;
             session.viewport.frame_ms = frame_ms;

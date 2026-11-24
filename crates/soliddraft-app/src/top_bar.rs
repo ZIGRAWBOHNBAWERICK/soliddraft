@@ -147,6 +147,7 @@ impl OpenParts {
     pub fn park_active(&mut self, state: &mut AppState, new_doc: Document) {
         state.end_document_views();
         let mut new_viewport = ViewportState::default();
+        new_viewport.appearance = state.appearance.clone();
         new_viewport.preset = state.viewport.preset;
         new_viewport.references = state.viewport.references;
         new_viewport.grid_style = state.viewport.grid_style;
@@ -188,6 +189,7 @@ impl OpenParts {
         let chosen = all.remove(index);
         state.doc = chosen.doc;
         state.viewport = chosen.viewport;
+        state.viewport.appearance = state.appearance.clone();
         state.display_unit = chosen.unit;
         let rest = all.split_off(index);
         self.before = all;
@@ -215,6 +217,7 @@ impl OpenParts {
             state.sketch = None;
             state.doc = next.doc;
             state.viewport = next.viewport;
+            state.viewport.appearance = state.appearance.clone();
             state.display_unit = next.unit;
             return false;
         }
@@ -223,6 +226,7 @@ impl OpenParts {
             state.sketch = None;
             state.doc = prev.doc;
             state.viewport = prev.viewport;
+            state.viewport.appearance = state.appearance.clone();
             state.display_unit = prev.unit;
             return false;
         }

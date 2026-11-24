@@ -1,8 +1,8 @@
 //! Clear Bench tokens and the active appearance on the UI thread.
 
 use egui::{Color32, CornerRadius, FontFamily, FontId, Margin, Stroke, TextStyle, Vec2};
-use std::sync::Arc;
 use std::cell::Cell;
+use std::sync::Arc;
 
 mod appearance;
 pub use appearance::*;

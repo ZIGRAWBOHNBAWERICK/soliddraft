@@ -1038,6 +1038,43 @@ jobs:
             chrome-devtools-axi run < ci/browser-feature-regressions.js
             chrome-devtools-axi stop
           done
+      - name: Check graphics and appearance preferences in Chromium
+        env:
+          CHROME_DEVTOOLS_AXI_SESSION: graphics-appearance
+          CHROME_DEVTOOLS_AXI_EXECUTABLE_PATH: /usr/bin/google-chrome
+          CHROME_DEVTOOLS_AXI_CHROME_ARGS: --no-sandbox --enable-unsafe-swiftshader --use-angle=swiftshader
+        run: |
+          export PATH="$RUNNER_TEMP/browser-tools/node_modules/.bin:$PATH"
+          export CHROME_DEVTOOLS_AXI_MCP_PATH="$RUNNER_TEMP/browser-tools/node_modules/chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js"
+          python3 -m http.server 8798 --bind 127.0.0.1 --directory target/web-dist > "$RUNNER_TEMP/graphics-appearance-server.log" 2>&1 &
+          server=$!
+          trap 'chrome-devtools-axi stop; kill "$server"' EXIT
+          if ! chrome-devtools-axi open about:blank; then
+            chrome-devtools-axi stop || true
+            chrome-devtools-axi open about:blank
+          fi
+          chrome-devtools-axi emulate --viewport 1440x900x1
+          open_demo() {
+            local shown
+            chrome-devtools-axi open "http://127.0.0.1:8798/?$1"
+            for attempt in $(seq 1 60); do
+              if shown=$(chrome-devtools-axi eval '() => Boolean(document.querySelector("#status.hidden") && window.wasmBindings?.shown_viewport())') &&
+                grep -Eq '^result: "?true"?$' <<< "$shown"; then
+                return 0
+              fi
+              sleep 1
+            done
+            echo "SolidDraft did not draw the demo viewport for $1" >&2
+            return 1
+          }
+          for query in 'demo' 'demo&graphics=restart'; do
+            open_demo "$query"
+            chrome-devtools-axi run < ci/browser-graphics.js
+          done
+          for query in 'demo' 'demo&appearance=import' 'demo&appearance=restart'; do
+            open_demo "$query"
+            chrome-devtools-axi run < ci/browser-appearance.js
+          done
       - name: Keep preferences per browser in Chromium
         env:
           # WebGL: a headless screenshot cannot read a WebGPU canvas.

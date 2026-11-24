@@ -46,6 +46,10 @@ pub(crate) enum Expr {
     Logical(bool),
     InvalidReference,
     Physical(PhysicalProperty),
+    /// A function argument left empty, as in `=ROUND(2.5,)`: zero, as in a spreadsheet.
+    Missing,
+    /// An error value typed as a literal, such as `#N/A`, by its code.
+    Error(String),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -172,9 +176,14 @@ fn eval(
             Quantity { value: *value, length: *length, angle: *angle, ..Quantity::number(0.0) }
         }
         Expr::Ref(_) | Expr::Param(_) | Expr::Physical(_) => reference(tree)?,
-        Expr::Formula(inner) => eval(inner)?,
+        Expr::Formula(inner) => match inner.as_ref() {
+            Expr::Binary(op, a, b) => op.apply_last(a, b, &mut eval)?,
+            other => eval(other)?,
+        },
         Expr::Logical(value) => Quantity::logical(*value),
         Expr::InvalidReference => return Err("missing value reference".into()),
+        Expr::Missing => Quantity::number(0.0),
+        Expr::Error(code) => return Err(excel::error_value(code)),
         Expr::Binary(op, a, b) => op.apply(a, b, &mut eval)?,
         Expr::Call(name, args) => excel::call(name, args, degrees, &mut eval)?,
         Expr::Percent(e) => {
@@ -292,8 +301,10 @@ fn tokenize(text: &str) -> Result<Vec<&str>, String> {
             {
                 at += 1;
             }
-        } else if formula && text[at..].starts_with("#REF!") {
-            at += "#REF!".len();
+        } else if formula && bytes[at] == b'#' {
+            at += excel::error_literal(&text[at..]).ok_or("unsupported character in expression")?.len();
+        } else if formula && b"\"&:;{}[]'$!".contains(&bytes[at]) {
+            return Err(excel::unsupported(bytes[at]).into());
         } else if formula && matches!(bytes[at], b'<' | b'>') {
             let op = bytes[at];
             at += 1;
@@ -365,7 +376,10 @@ impl Parser<'_> {
                 self.at += 1;
                 Ok(a)
             }
-            "#REF!" if self.formula => Ok(Expr::InvalidReference),
+            _ if self.formula && token.starts_with('#') => {
+                let code = token.to_ascii_uppercase();
+                Ok(if code == "#REF!" { Expr::InvalidReference } else { Expr::Error(code) })
+            }
             _ => {
                 if token.as_bytes()[0].is_ascii_digit() || token.starts_with('.') {
                     let value: f64 = token.parse().map_err(|_| "invalid numeric literal")?;
@@ -512,7 +526,13 @@ impl Expression {
     pub fn references(&self) -> Vec<u32> {
         fn walk(tree: &Expr, out: &mut Vec<u32>) {
             match tree {
-                Expr::Number(..) | Expr::Param(_) | Expr::Logical(_) | Expr::InvalidReference | Expr::Physical(_) => {}
+                Expr::Number(..)
+                | Expr::Param(_)
+                | Expr::Logical(_)
+                | Expr::InvalidReference
+                | Expr::Physical(_)
+                | Expr::Missing
+                | Expr::Error(_) => {}
                 Expr::Ref(id) if out.contains(id) => {}
                 Expr::Ref(id) => out.push(*id),
                 Expr::Neg(inner) | Expr::Formula(inner) | Expr::Percent(inner) => walk(inner, out),
@@ -533,9 +553,13 @@ impl Expression {
         fn walk(tree: &Expr, input: &crate::values::Input) -> bool {
             match tree {
                 Expr::Param(found) => found == input,
-                Expr::Number(..) | Expr::Ref(_) | Expr::Logical(_) | Expr::InvalidReference | Expr::Physical(_) => {
-                    false
-                }
+                Expr::Number(..)
+                | Expr::Ref(_)
+                | Expr::Logical(_)
+                | Expr::InvalidReference
+                | Expr::Physical(_)
+                | Expr::Missing
+                | Expr::Error(_) => false,
                 Expr::Neg(inner) | Expr::Formula(inner) | Expr::Percent(inner) => walk(inner, input),
                 Expr::Op(_, a, b) | Expr::Binary(_, a, b) => walk(a, input) || walk(b, input),
                 Expr::Call(_, args) => args.iter().any(|e| walk(e, input)),

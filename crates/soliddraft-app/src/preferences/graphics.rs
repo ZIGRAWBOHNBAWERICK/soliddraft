@@ -80,8 +80,9 @@ pub(super) fn show(p: &mut Preferences, ui: &mut egui::Ui) {
             current.map_or_else(|| "Follow the display quality saved with each part.".into(), |c| c.description()),
         );
         if p.spline_curves_unavailable {
-            ui.label("Spline mesh controls · Coming soon")
-                .on_hover_text("The current kernel keeps the certified spline mesh at its own tolerance.");
+            ui.label("Spline mesh controls · Coming soon").on_hover_text(
+                "Spline faces use their certified precision. The curved-surface setting applies to other bodies.",
+            );
         }
     });
 
@@ -166,7 +167,7 @@ pub(super) fn show(p: &mut Preferences, ui: &mut egui::Ui) {
             .clicked()
     }) {
         p.message = Some(super::Message {
-            text: "Single surface analysis is unavailable. The kernel does not provide certified curvature samples for a selected face."
+            text: "Single surface analysis is coming soon. Certified curvature samples for the selected face are unavailable in this version."
                 .into(),
             error: true,
         });

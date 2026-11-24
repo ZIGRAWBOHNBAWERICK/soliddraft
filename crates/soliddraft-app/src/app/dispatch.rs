@@ -1426,10 +1426,13 @@ impl SolidDraftApp {
                             ) =>
                         {
                             let doc = &self.state.doc;
+                            // A curved face is kept too: the part refuses it by name until the
+                            // kernel can start an extrusion on a curved surface.
                             let plane = |pick: Selection| match pick {
-                                Selection::Face(f) => {
-                                    doc.face_ref(f).map(|face| soliddraft_model::PlaneRef::Face { face })
-                                }
+                                Selection::Face(f) => doc
+                                    .face_ref(f)
+                                    .or_else(|| doc.any_face_ref(f))
+                                    .map(|face| soliddraft_model::PlaneRef::Face { face }),
                                 Selection::Reference(Reference::Plane(p)) => {
                                     Some(soliddraft_model::PlaneRef::Datum { datum: p.to_model(), offset: 0.0 })
                                 }
@@ -1452,10 +1455,7 @@ impl SolidDraftApp {
                                         e.error = None;
                                     }
                                     None if matches!(pick, Selection::Face(_)) => {
-                                        e.error = Some(
-                                            "Starting on a curved face is coming soon. Pick a planar face or a plane"
-                                                .into(),
-                                        );
+                                        e.error = Some("This face cannot be named. Pick another".into());
                                     }
                                     None => e.error = Some("Pick a planar face or a plane to start from".into()),
                                 },

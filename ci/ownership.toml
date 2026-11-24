@@ -554,6 +554,13 @@ paths = ["crates/soliddraft-model/src/thin.rs"]
 module = ["thin"]
 
 [[areas]]
+name = "model.tilted_start"
+owner = "core"
+crate = "soliddraft-model"
+paths = ["crates/soliddraft-model/src/tilted_start.rs"]
+module = ["tilted_start"]
+
+[[areas]]
 name = "model.view"
 owner = "core"
 crate = "soliddraft-model"
@@ -648,8 +655,13 @@ module = ["configs"]
 name = "v3.grid"
 owner = "V3"
 crate = "soliddraft-app"
-paths = ["crates/soliddraft-app/src/grid/", "crates/soliddraft-app/src/values_tab.rs"]
-module = ["grid", "values_tab"]
+paths = [
+    "crates/soliddraft-app/src/config_tabs.rs",
+    "crates/soliddraft-app/src/formula_help.rs",
+    "crates/soliddraft-app/src/grid/",
+    "crates/soliddraft-app/src/values_tab.rs",
+]
+module = ["config_tabs", "formula_help", "grid", "values_tab"]
 
 [[areas]]
 name = "v4.tabs"

@@ -42,11 +42,16 @@ or takes it out. Every command starts pinned. The pins are kept in the settings 
 
 An extrusion or cut has these choices besides its end and depth:
 
-- From starts it on the sketch plane, on a plane or planar face parallel to the sketch,
-  on the plane through a vertex, or at an offset from the sketch plane. The offset is
-  measured along the first direction, and Reverse offset measures it the other way.
-  Starting on a plane or face that is not parallel to the sketch, or on a curved face,
-  is coming soon and is refused by name.
+- From starts it on the sketch plane, on a plane or planar face, on the plane through a
+  vertex, or at an offset from the sketch plane. The offset is measured along the first
+  direction, and Reverse offset measures it the other way. A plane or face at an angle
+  to the sketch starts each point of the profile where the line along the first
+  direction meets it, so the start and a blind end lean with it. Blind, Through all, Up
+  to face and Direction 2 work from it. A face or vertex of another body works as a
+  start when Merge result is off.
+- Some starts are refused by name: a plane that contains the extrusion direction, Up to
+  next from a plane at an angle, and a curved face. The last two need a Catallax
+  capability this version does not have yet.
 - Flip direction turns the first direction round. An offset start turns with it.
 - Merge result joins an extrusion or revolve to the body it grows from. Off makes it the
   first feature of a new body. Turning it on again moves it back into the body of the

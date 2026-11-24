@@ -16,6 +16,7 @@ pub mod command_line;
 #[macro_use]
 pub mod command_tools;
 pub mod commands;
+pub mod config_tabs;
 pub mod configurations;
 pub mod context_menu;
 pub mod create_menu;
@@ -32,6 +33,7 @@ pub mod feature_panel;
 pub mod file;
 pub mod fillet_collect;
 pub mod form_bar;
+pub mod formula_help;
 pub mod geometry_message;
 pub mod graphics;
 mod grid;

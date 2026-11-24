@@ -63,7 +63,7 @@ pub enum Edit {
         /// Tab to move.
         configuration: String,
         /// Number of positions to move. Negative means left.
-        offset: i8,
+        offset: i32,
     },
     /// Set an explicit suppression state, or let the feature inherit again.
     Suppress {
@@ -329,8 +329,9 @@ impl Configurations {
             }
             Edit::Move { configuration, offset } => {
                 let from = self.row(configuration)?;
-                let to = from
-                    .checked_add_signed(isize::from(*offset))
+                let to = isize::try_from(*offset)
+                    .ok()
+                    .and_then(|offset| from.checked_add_signed(offset))
                     .filter(|i| *i < self.rows.len())
                     .ok_or("the configuration cannot move farther")?;
                 let row = self.rows.remove(from);

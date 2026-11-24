@@ -140,6 +140,8 @@ fn up_to_next_skips_the_empty_corner_of_an_underside_recess() {
 
 #[test]
 fn tapped_surface_offset_is_called_out_as_blind() {
+    use soliddraft_document::display_state::{DisplayMode, DisplayScope, DisplayState};
+
     let mut doc = ribbon::plate();
     let mut wizard = HoleWizardSpec::new(HoleStandard::Iso, HoleType::StraightTap);
     wizard.end_condition =
@@ -154,10 +156,35 @@ fn tapped_surface_offset_is_called_out_as_blind() {
     assert_eq!(walls[0].depth(), Some(15.0));
     let rows = doc.model().pmi_rows();
     assert_eq!(rows[0].callout(), "M6x1-6H DEEP 15");
+
+    let mut hidden = DisplayState::new("Hidden".into(), DisplayScope::All, DisplayMode::Shaded);
+    hidden.view.hidden.insert(0);
+    let id = hidden.id.clone();
+    let mut states = doc.display_states().clone();
+    states.put(hidden).unwrap();
+    states.select(None, Some(id)).unwrap();
+    doc.change_display_states(states).unwrap();
+    browser_fixture("thread-hidden.dwprt", &doc);
 }
 
 #[test]
 fn a_legacy_hole_keeps_its_edited_position_pattern_after_reopen() {
+    legacy_hole_position_round_trip(|doc| launch(doc, STANDARD));
+}
+
+#[test]
+fn a_headless_legacy_hole_position_edit_produces_the_browser_fixture() {
+    let doc = legacy_hole_position_round_trip(|doc| {
+        egui_kittest::Harness::builder()
+            .with_size(STANDARD.size)
+            .with_pixels_per_point(STANDARD.pixels_per_point)
+            .with_step_dt(1.0 / 60.0)
+            .build_eframe(move |cc| soliddraft_app::app::SolidDraftApp::new(cc, doc, Default::default()))
+    });
+    browser_fixture("wizard-edited-positions.dwprt", &doc);
+}
+
+fn legacy_hole_position_round_trip(open: impl FnOnce(Document) -> App) -> Document {
     let mut doc = ribbon::plate();
     let params =
         HoleParams { face: Some(plate_face(&doc, Vec3::Z)), points: vec![P2::new(-10.0, -10.0)], ..Default::default() };
@@ -165,7 +192,8 @@ fn a_legacy_hole_keeps_its_edited_position_pattern_after_reopen() {
     let old = doc.model().to_bytes().unwrap();
     assert_ne!(doc.model().truth()["format"], HOLE_WIZARD_FORMAT);
     let reopened = soliddraft_model::Document::from_bytes(&old, soliddraft_app::kernel()).unwrap();
-    let mut app = launch(Document::from_model(reopened), STANDARD);
+    let mut app = open(Document::from_model(reopened));
+    settle(&mut app);
     app.state_mut().state.push(AppAction::EditFeature(id));
     settle(&mut app);
     click(&mut app, "Hole Wizard Positions tab");
@@ -183,7 +211,6 @@ fn a_legacy_hole_keeps_its_edited_position_pattern_after_reopen() {
     click(&mut app, "Apply Hole Wizard");
     ux_tools::rebuilt(&mut app);
     let doc = &app.state().state.doc;
-    browser_fixture("wizard-edited-positions.dwprt", doc);
     assert_eq!(doc.undo_depth(), undo_before + 1);
     assert_eq!(doc.model().truth()["format"], HOLE_WIZARD_FORMAT);
     let bytes = doc.model().to_bytes().unwrap();
@@ -194,6 +221,7 @@ fn a_legacy_hole_keeps_its_edited_position_pattern_after_reopen() {
     assert_eq!(saved.entities, edited.entities);
     assert_eq!(saved.constraints, edited.constraints);
     assert_eq!(saved.patterns, edited.patterns);
+    doc
 }
 
 #[test]

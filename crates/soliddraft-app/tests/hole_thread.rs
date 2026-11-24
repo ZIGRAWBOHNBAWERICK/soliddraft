@@ -601,7 +601,6 @@ fn hiding_a_body_in_a_display_state_hides_its_thread_marks() {
     states.put(hidden).unwrap();
     states.select(None, Some(id)).unwrap();
     doc.change_display_states(states).unwrap();
-    browser_fixture("thread-hidden.dwprt", doc);
     settle(&mut app);
     let image = case.frame(&mut app, "hidden");
     let after = thread_blue(&app, &image);

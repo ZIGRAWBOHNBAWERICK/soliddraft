@@ -1007,7 +1007,16 @@ jobs:
           SOLIDDRAFT_BROWSER_FIXTURES: ${{ github.workspace }}/target/web-dist/fixtures
         run: |
           mkdir -p "$SOLIDDRAFT_BROWSER_FIXTURES"
-          cargo test --locked -p soliddraft-app --test configuration_grid --test hole_thread --test hole_wizard -- --test-threads=1
+          # Run only fixture producers here. Native renderer tests run in the workspace jobs.
+          fixture() {
+            cargo test --locked -p soliddraft-app --test "$1" "$2" -- --exact
+          }
+          fixture configuration_grid renaming_a_global_keeps_case_distinct_configuration_bindings
+          fixture hole_thread a_drawing_calls_out_each_counterbore_after_one_opening_is_skimmed
+          fixture hole_thread updating_the_drawing_keeps_one_thread_note_when_two_groups_join
+          fixture hole_wizard parameter_grid_edits_rebuild_a_blind_wizard_hole
+          fixture hole_wizard tapped_surface_offset_is_called_out_as_blind
+          fixture hole_wizard a_headless_legacy_hole_position_edit_produces_the_browser_fixture
       - name: Check hole, drawing, and parameter regressions in Chromium
         env:
           CHROME_DEVTOOLS_AXI_EXECUTABLE_PATH: /usr/bin/google-chrome

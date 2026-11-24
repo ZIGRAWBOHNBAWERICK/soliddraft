@@ -220,7 +220,10 @@ pub enum Change {
     Shortcuts(Shortcuts),
     /// Save and use these autosave settings.
     Autosave(AutosavePolicy),
-    Appearance { appearance: std::sync::Arc<crate::theme::Appearance>, keep: bool },
+    Appearance {
+        appearance: std::sync::Arc<crate::theme::Appearance>,
+        keep: bool,
+    },
     Graphics(crate::graphics::Graphics),
     CurrentView(crate::graphics::CurrentView),
 }
@@ -247,6 +250,7 @@ pub struct Preferences {
     theme_filter: appearance::Filter,
     appearance_picker: Option<crate::platform::Purpose>,
     pub graphics: crate::graphics::Graphics,
+    initial_graphics: Option<crate::graphics::Graphics>,
     pub graphics_device: crate::graphics::GraphicsDevice,
     current_view: crate::graphics::CurrentView,
     view_preset: crate::viewport::look::Preset,
@@ -303,6 +307,7 @@ impl Preferences {
             theme_filter: Default::default(),
             appearance_picker: None,
             graphics: Default::default(),
+            initial_graphics: None,
             graphics_device: Default::default(),
             current_view: crate::graphics::CurrentView::of(&crate::viewport::ViewportState::default()),
             view_preset: Default::default(),
@@ -365,6 +370,11 @@ impl Preferences {
                 let preset = self.shortcuts.preset;
                 self.reset_all_shortcuts(preset);
             }
+            GRAPHICS => {
+                self.graphics = Default::default();
+                self.changes.push(Change::Graphics(self.graphics));
+                self.message = Some(Message { text: "Graphics settings restored to defaults.".into(), error: false });
+            }
             APPEARANCE => {
                 self.appearance_picker = None;
                 self.theme_filter = appearance::Filter::All;
@@ -392,6 +402,7 @@ impl Preferences {
         if self.initial_appearance != self.appearance {
             self.changes.push(Change::Appearance { appearance: self.appearance.clone(), keep: true });
         }
+        self.initial_graphics = Some(self.graphics);
         self.initial_draft = self.draft.clone();
         self.initial_display = self.display;
         self.initial_grid = self.grid;
@@ -403,6 +414,12 @@ impl Preferences {
     /// Reverts any edits made since the dialog opened (or last Apply) and requests close.
     pub fn cancel_and_close(&mut self) {
         self.edit_appearance(self.initial_appearance.clone());
+        if let Some(initial_graphics) = self.initial_graphics
+            && self.graphics != initial_graphics
+        {
+            self.graphics = initial_graphics;
+            self.changes.push(Change::Graphics(initial_graphics));
+        }
         if self.draft != self.initial_draft {
             self.draft = self.initial_draft.clone();
             self.changes.push(Change::Navigation(self.draft.clone()));
@@ -723,6 +740,7 @@ impl Preferences {
 /// and drops it when closed.
 pub fn window(ctx: &egui::Context, prefs: &mut Option<Preferences>, state: &mut crate::state::AppState) {
     let Some(p) = prefs.as_mut() else { return };
+    p.initial_graphics.get_or_insert(state.graphics);
     p.graphics = state.graphics;
     p.graphics_device = state.graphics_device.clone();
     p.current_view = crate::graphics::CurrentView::of(state.active_viewport());

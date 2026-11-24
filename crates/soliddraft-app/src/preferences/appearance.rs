@@ -68,9 +68,7 @@ fn gallery(preferences: &mut Preferences, ui: &mut Ui, appearance: &mut Arc<Appe
         if follow.clicked() {
             Arc::make_mut(appearance).selected = Selection::System;
         }
-        let import = ui.button("Import theme…").on_hover_text(
-            r#"JSON format example: {"format":"soliddraft-theme/1","name":"My theme","base":"clear_bench","accent":[25,80,170]}"#,
-        );
+        let import = ui.button("Import theme…");
         register(&import, "theme-import");
         if import.clicked() {
             pick(preferences, appearance, true);
@@ -104,39 +102,56 @@ fn gallery(preferences: &mut Preferences, ui: &mut Ui, appearance: &mut Arc<Appe
             }
         }
     });
+    ui.collapsing("Theme file format", |ui| {
+        ui.label("Use a JSON file. Set a name and choose a built-in base.");
+        ui.add(
+            egui::Label::new(
+                RichText::new(
+                    r#"{"format":"soliddraft-theme/1","name":"My theme","base":"clear_bench","accent":[25,80,170]}"#,
+                )
+                .monospace(),
+            )
+            .selectable(true),
+        );
+        ui.label("Bases: clear_bench, clear_bench_dark, gruvbox_light, gruvbox_dark, high_contrast.");
+        ui.label("Optional RGB fields: chrome, panel, ink, accent, viewport_top, viewport_bottom.");
+    });
 }
 
 fn card(ui: &mut Ui, label: &str, tokens: Tokens, selected: bool) -> bool {
-    ui.push_id(tokens.id, |ui| {
-        let response = egui::Frame::new()
-            .fill(tokens.palette.panel)
-            .stroke(if selected { Stroke::new(2.0, theme::accent()) } else { Stroke::new(1.0, theme::line()) })
-            .corner_radius(theme::radii().control)
-            .inner_margin(egui::Margin::same(7))
-            .show(ui, |ui| {
-                ui.vertical(|ui| {
-                    ui.set_width(121.0);
-                    ui.set_max_width(121.0);
-                    ui.horizontal(|ui| {
-                        for color in [tokens.palette.chrome, tokens.palette.panel_header, tokens.palette.accent] {
-                            let (rect, _) = ui.allocate_exact_size(vec2(24.0, 12.0), egui::Sense::hover());
-                            ui.painter().rect_filled(rect, 2.0, color);
-                        }
-                        if selected {
-                            ui.label(RichText::new("✓").color(tokens.palette.ink));
-                        }
-                    });
-                    ui.add(egui::Label::new(RichText::new(label).color(tokens.palette.ink)).truncate());
-                });
-            })
-            .response
-            .interact(egui::Sense::click())
-            .on_hover_text(label);
-        response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, true, selected, label));
-        register(&response, &format!("theme-{}", tokens.id));
-        response.clicked()
-    })
-    .inner
+    let (rect, response) = ui.allocate_exact_size(vec2(136.0, 53.0), egui::Sense::click());
+    let p = tokens.palette;
+    let border = if response.has_focus() {
+        Stroke::new(2.0, p.ink)
+    } else if selected {
+        Stroke::new(2.0, p.accent)
+    } else if response.hovered() {
+        Stroke::new(1.0, p.line_strong)
+    } else {
+        Stroke::new(1.0, p.line)
+    };
+    let painter = ui.painter();
+    painter.rect(rect, theme::radii().control, p.panel, border, egui::StrokeKind::Inside);
+    for (i, color) in [p.chrome, p.panel_header, p.accent].into_iter().enumerate() {
+        let swatch = egui::Rect::from_min_size(rect.min + vec2(8.0 + 29.0 * i as f32, 8.0), vec2(25.0, 12.0));
+        painter.rect_filled(swatch, 2.0, color);
+    }
+    if selected {
+        painter.text(rect.min + vec2(116.0, 14.0), egui::Align2::CENTER_CENTER, "✓", theme::font(12.0), p.ink);
+    }
+    painter.with_clip_rect(rect.shrink(7.0)).text(
+        rect.min + vec2(8.0, 29.0),
+        egui::Align2::LEFT_TOP,
+        label,
+        theme::font_medium(12.0),
+        p.ink,
+    );
+    response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, selected, label));
+    register(&response, &format!("theme-{}", tokens.id));
+    if selected {
+        register(&response, &format!("theme-selected-{}", tokens.id));
+    }
+    response.on_hover_text(label).clicked()
 }
 
 fn background(preferences: &mut Preferences, ui: &mut Ui, appearance: &mut Arc<Appearance>) {

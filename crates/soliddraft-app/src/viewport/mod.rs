@@ -617,14 +617,14 @@ impl ViewportState {
                 &response,
                 spacing,
                 match self.appearance.background {
-            theme::Background::Scene if self.scene.is_some() => self.scene.is_some_and(scenes::Scene::is_dark),
-            theme::Background::Picture => self.appearance.picture_is_dark(),
-            theme::Background::Color => theme::luminance(self.appearance.background_color.into()) < 0.25,
-            _ => {
-                let [top, bottom] = theme::viewport_backdrop();
-                theme::luminance(top.lerp_to_gamma(bottom, 0.5)) < 0.25
-            }
-        },
+                    theme::Background::Scene if self.scene.is_some() => self.scene.is_some_and(scenes::Scene::is_dark),
+                    theme::Background::Picture => self.appearance.picture_is_dark(),
+                    theme::Background::Color => theme::luminance(self.appearance.background_color.into()) < 0.25,
+                    _ => {
+                        let [top, bottom] = theme::viewport_backdrop();
+                        theme::luminance(top.lerp_to_gamma(bottom, 0.5)) < 0.25
+                    }
+                },
                 curve_halo,
             );
             ui.ctx().request_repaint();
@@ -673,14 +673,14 @@ impl ViewportState {
                 &visible.sketches,
                 self.annotation_drag.as_ref().map(|d| (d.key, d.position)),
                 match self.appearance.background {
-            theme::Background::Scene if self.scene.is_some() => self.scene.is_some_and(scenes::Scene::is_dark),
-            theme::Background::Picture => self.appearance.picture_is_dark(),
-            theme::Background::Color => theme::luminance(self.appearance.background_color.into()) < 0.25,
-            _ => {
-                let [top, bottom] = theme::viewport_backdrop();
-                theme::luminance(top.lerp_to_gamma(bottom, 0.5)) < 0.25
-            }
-        },
+                    theme::Background::Scene if self.scene.is_some() => self.scene.is_some_and(scenes::Scene::is_dark),
+                    theme::Background::Picture => self.appearance.picture_is_dark(),
+                    theme::Background::Color => theme::luminance(self.appearance.background_color.into()) < 0.25,
+                    _ => {
+                        let [top, bottom] = theme::viewport_backdrop();
+                        theme::luminance(top.lerp_to_gamma(bottom, 0.5)) < 0.25
+                    }
+                },
             )
         } else {
             Vec::new()
@@ -833,7 +833,9 @@ impl ViewportState {
     /// The scene behind the model, without its screen grid while the grid is hidden.
     fn backdrop(&self) -> scenes::Backdrop {
         let mut backdrop = match self.appearance.background {
-            theme::Background::Scene => self.scene.map_or_else(|| theme::viewport_backdrop().into(), scenes::Scene::backdrop),
+            theme::Background::Scene => {
+                self.scene.map_or_else(|| theme::viewport_backdrop().into(), scenes::Scene::backdrop)
+            }
             theme::Background::Color => [self.appearance.background_color.into(); 2].into(),
             theme::Background::Gradient | theme::Background::Picture => theme::viewport_backdrop().into(),
         };
@@ -1377,7 +1379,7 @@ impl ViewportState {
             current,
             self.preset,
             self.graphics_tier,
-            self.scene.unwrap_or_default(),
+            (self.appearance.background, self.scene.unwrap_or_default()),
             &mut self.references,
             &mut self.all_dimensions,
             sketch_dimensions,

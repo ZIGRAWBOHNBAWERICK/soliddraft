@@ -203,13 +203,20 @@ pub(super) fn show(p: &mut Preferences, ui: &mut egui::Ui) {
                     .fill(theme::accent())
                     .stroke(Stroke::NONE)
                     .min_size(vec2(64.0, 26.0));
-                if ui.add(ok_btn).clicked() {
+                let ok = ui.add(ok_btn);
+                let apply = ui.add(egui::Button::new("Apply").min_size(vec2(64.0, 26.0)));
+                let cancel = ui.add(egui::Button::new("Cancel").min_size(vec2(64.0, 26.0)));
+                #[cfg(target_arch = "wasm32")]
+                for (name, response) in [("OK", &ok), ("Apply", &apply), ("Cancel", &cancel)] {
+                    crate::web::show_control(format!("Preferences: {name}"), response.rect);
+                }
+                if ok.clicked() {
                     p.confirm_and_close();
                 }
-                if ui.add(egui::Button::new("Apply").min_size(vec2(64.0, 26.0))).clicked() {
+                if apply.clicked() {
                     p.apply_now();
                 }
-                if ui.add(egui::Button::new("Cancel").min_size(vec2(64.0, 26.0))).clicked() {
+                if cancel.clicked() {
                     p.cancel_and_close();
                 }
             });

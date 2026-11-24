@@ -66,8 +66,16 @@ if (query.get('graphics') === 'restart') {
   await page.type('Preferences');
   await page.eval(() => new Promise(done => requestAnimationFrame(() => requestAnimationFrame(() => done(true)))));
   await page.press('Enter');
-  await page.wait(240);
-  await click('Preferences: Graphics');
+  for (let attempt = 0; attempt < 3; attempt++) {
+    await page.wait(350);
+    await click('Preferences: Graphics');
+    await page.wait(350);
+    const opened = await page.eval(() => Boolean(
+      JSON.parse(window.wasmBindings.shown_controls())['Graphics preset: Performance'],
+    ));
+    if (opened) break;
+    if (attempt === 2) throw new Error('The Graphics page did not open');
+  }
   await click('Graphics preset: Performance');
   await until(settings, s => s?.preset === 'performance' && s.curved_surfaces === 'coarse', 'Performance did not save');
   const coarse = await until(viewport, v => v?.curves_settled && v.angle_deg === 15

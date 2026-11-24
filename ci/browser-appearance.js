@@ -53,17 +53,24 @@ async function selected(id) {
 }
 
 async function openAppearance() {
-  await page.press('Control+Shift+P');
-  await until(
-    () => page.eval(() => document.activeElement instanceof HTMLInputElement),
-    value => value === true,
-    'The command palette did not take keyboard focus',
-  );
-  await page.type('Preferences');
-  await page.eval(() => new Promise(done => requestAnimationFrame(() => requestAnimationFrame(() => done(true)))));
-  await page.press('Enter');
-  await page.wait(240);
-  await click('Preferences: Appearance');
+  if (!await control('Preferences: Appearance')) {
+    await page.press('Control+Shift+P');
+    await until(
+      () => page.eval(() => document.activeElement instanceof HTMLInputElement),
+      value => value === true,
+      'The command palette did not take keyboard focus',
+    );
+    await page.type('Preferences');
+    await page.eval(() => new Promise(done => requestAnimationFrame(() => requestAnimationFrame(() => done(true)))));
+    await page.press('Enter');
+  }
+  for (let attempt = 0; attempt < 3; attempt++) {
+    await page.wait(350);
+    await click('Preferences: Appearance');
+    await page.wait(350);
+    if (await control('theme-follow-system')) return;
+  }
+  throw new Error('The Appearance page did not open');
 }
 
 async function provideFile(kind) {
@@ -112,6 +119,7 @@ if (phase === 'choose') {
   await click('theme-gruvbox-dark');
   await selected('gruvbox-dark');
   await click('Preferences: Cancel');
+  await until(() => control('Preferences: Appearance'), value => value === null, 'Cancel did not close Preferences');
   await openAppearance();
   await selected('clear_bench');
 

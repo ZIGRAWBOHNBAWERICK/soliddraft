@@ -168,8 +168,10 @@ fn assert_stl_clipped_to_source(bytes: &[u8], lo: [f64; 3], hi: [f64; 3], accura
 
     // The fixtures' half-spaces are convex, so checking the vertices covers every triangle.
     let mut clips_at_source_plane = false;
-    for facet in bytes[84..].chunks_exact(50) {
-        for vertex in facet[12..48].chunks_exact(12) {
+    let (facets, _) = bytes[84..].as_chunks::<50>();
+    for facet in facets {
+        let (vertices, _) = facet[12..48].as_chunks::<12>();
+        for vertex in vertices {
             let point: [f64; 3] = std::array::from_fn(|axis| {
                 let start = 4 * axis;
                 f64::from(f32::from_le_bytes(vertex[start..start + 4].try_into().unwrap()))

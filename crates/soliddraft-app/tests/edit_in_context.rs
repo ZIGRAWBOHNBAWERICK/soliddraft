@@ -313,7 +313,7 @@ fn a_part_edited_in_its_assembly_takes_and_follows_a_face_of_another_component()
     // The open plate followed the base as soon as it moved; Edit part shows it so.
     until(&mut harness, "the reference to follow the base", |st| near(heights(st), (-15.0, 10.0)));
     assert_eq!(reference_z(&harness.state().state), Some(-15.0));
-    assert_eq!(harness.state().state.doc.undo_label().as_deref(), Some("Update in-context references"));
+    assert_eq!(harness.state().state.doc.undo_label(), Some("Update in-context references"));
     save_frame(&mut harness, "6-followed-the-base");
     harness.state_mut().state.push(AppAction::Undo);
     until(&mut harness, "the update to undo", |st| near(heights(st), (-20.0, 5.0)));

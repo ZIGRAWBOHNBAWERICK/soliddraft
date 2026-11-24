@@ -157,7 +157,8 @@ fn tapped_surface_offset_is_called_out_as_blind() {
     let rows = doc.model().pmi_rows();
     assert_eq!(rows[0].callout(), "M6x1-6H DEEP 15");
 
-    let mut hidden = DisplayState::new("Hidden".into(), DisplayScope::All, DisplayMode::Shaded);
+    let mut hidden =
+        DisplayState::<soliddraft_model::PartDisplay>::new("Hidden".into(), DisplayScope::All, DisplayMode::Shaded);
     hidden.view.hidden.insert(0);
     let id = hidden.id.clone();
     let mut states = doc.display_states().clone();

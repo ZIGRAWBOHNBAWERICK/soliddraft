@@ -50,6 +50,14 @@ impl Offscreen {
         Offscreen { renderer: ViewportRenderer::new(device, queue, FORMAT, tier), uploads: 0, meshes: HashMap::new() }
     }
 
+    pub(crate) fn with_samples(device: &wgpu::Device, queue: &wgpu::Queue, tier: Tier, samples: u32) -> Offscreen {
+        Offscreen {
+            renderer: ViewportRenderer::with_samples(device, queue, FORMAT, tier, samples),
+            uploads: 0,
+            meshes: HashMap::new(),
+        }
+    }
+
     /// The version of the meshes sent to the renderer, independent of document versions.
     pub fn mesh_version(&self) -> u64 {
         self.uploads
@@ -88,9 +96,11 @@ impl Offscreen {
             pixels_per_point: 1.0,
             display: Default::default(),
             preset: Default::default(),
+            controls: Default::default(),
             // Pictures are kept in files and shown in previews, so they take the
             // light backdrop whatever mode the window is in.
             backdrop: [egui::Color32::from_rgb(0xf2, 0xf4, 0xf7), egui::Color32::from_rgb(0xd8, 0xdf, 0xe8)].into(),
+            backdrop_picture: None,
             floor: true,
             hover_id: 0,
             selected_id: 0,

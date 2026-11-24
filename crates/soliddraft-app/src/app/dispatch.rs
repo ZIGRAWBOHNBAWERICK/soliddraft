@@ -1803,29 +1803,12 @@ impl SolidDraftApp {
                 self.state.viewport.camera.fit_framed(bounds);
             }
             AppAction::SetDisplay(d) => {
-                let assembly_active = self.state.assembly.is_active();
-                let result = if let Some(s) = self.state.assembly.session.as_mut().filter(|_| assembly_active) {
-                    if let Some(mut display) = s.doc.assembly().viewport_state().cloned() {
-                        display.mode = d;
-                        let mut states = s.doc.assembly().viewport_states.clone();
-                        states
-                            .put(display)
-                            .and_then(|_| s.doc.change_viewport_states(states).map_err(|e| e.to_string()))
-                    } else {
-                        s.viewport.display = d;
-                        Ok(())
-                    }
-                } else if let Some(mut display) = self.state.doc.display_state().cloned() {
-                    display.mode = d;
-                    let mut states = self.state.doc.display_states().clone();
-                    states.put(display).and_then(|_| self.state.doc.change_display_states(states))
-                } else {
-                    self.state.active_viewport_mut().display = d;
-                    Ok(())
-                };
-                if let Err(error) = result {
+                if let Err(error) = self.state.set_display_mode(d) {
                     self.state.note(error, NoteKind::Error);
                 }
+            }
+            AppAction::SetCurrentView(view) => {
+                let _ = self.state.set_current_view(view);
             }
             AppAction::SetPreset(p) => {
                 let viewport = self.state.active_viewport_mut();
@@ -1894,15 +1877,18 @@ impl SolidDraftApp {
                 if let Some(session) = self.state.assembly.session.as_mut() {
                     session.viewport.scene = Some(scene);
                 }
-                if let Err(e) = crate::settings::save_scene(scene) {
+                let mut appearance = self.state.appearance.clone();
+                std::sync::Arc::make_mut(&mut appearance).background = theme::Background::Scene;
+                if let Err(e) = crate::settings::save_appearance_and_view(&appearance, Some(scene)) {
                     self.state.note(format!("Scene changed, but could not be saved: {e}"), NoteKind::Error);
                 }
+                let _ = self.state.set_appearance(ctx, appearance, false);
             }
             AppAction::SetTheme(mode) => {
-                theme::set_mode(ctx, mode);
-                if let Err(e) = crate::settings::save_appearance(&crate::settings::Appearance { theme: mode }) {
-                    log::warn!("cannot save the appearance: {e}");
-                }
+                let mut appearance = self.state.appearance.clone();
+                std::sync::Arc::make_mut(&mut appearance).selected =
+                    theme::Selection::BuiltIn(theme::BuiltIn::for_mode(mode));
+                let _ = self.state.set_appearance(ctx, appearance, true);
             }
             AppAction::ToggleProjection => {
                 let camera = &mut self.state.active_viewport_mut().camera;
@@ -2253,6 +2239,7 @@ impl SolidDraftApp {
                         self.state.viewport.references,
                         self.state.viewport.grid_style,
                     )
+                    .with_appearance(self.state.appearance.clone())
                     .with_shortcuts(&self.state.shortcuts)
                     .with_autosave(self.state.autosave_policy())
                 });

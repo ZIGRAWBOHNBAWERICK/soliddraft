@@ -131,6 +131,59 @@ fn a_quality_change_swaps_the_mesh_without_a_rebuild() {
 }
 
 #[test]
+fn graphics_presets_remesh_curves_without_editing_the_saved_part() {
+    use soliddraft_app::graphics::{CurvedSurfaces, Graphics, GraphicsDevice, GraphicsPreset};
+
+    let mut doc = disc();
+    let projection = Projection::Orthographic { pixels_per_mm: 1.0 };
+    let revision = doc.revision();
+    let bytes = doc.model().to_bytes().unwrap();
+    let mut graphics = Graphics::default();
+    let device = GraphicsDevice::default();
+    let mut results = Vec::new();
+    for (preset, expected, angle) in [
+        (GraphicsPreset::Performance, CurvedSurfaces::Coarse, 15.0),
+        (GraphicsPreset::Quality, CurvedSurfaces::Fine, 10.0),
+    ] {
+        graphics.choose_preset(preset, &device);
+        assert_eq!(graphics.curved_surfaces, Some(expected));
+        doc.set_curved_surfaces(graphics.curved_surfaces);
+        settle(&mut doc, &projection);
+        let params = doc.tess_params;
+        assert_eq!(params.curve_angle_deg, angle);
+        assert_eq!(params.surface_angle_deg, angle);
+        results.push((params.chord_height, triangles(&doc)));
+    }
+    assert!(results[1].0 < results[0].0, "{results:?}");
+    assert!(results[1].1 > results[0].1, "{results:?}");
+    assert_eq!(doc.revision(), revision);
+    assert_eq!(doc.model().to_bytes().unwrap(), bytes);
+
+    graphics.choose_preset(GraphicsPreset::Custom, &device);
+    assert_eq!(graphics.curved_surfaces, Some(CurvedSurfaces::Fine));
+    graphics.curved_surfaces = Some(CurvedSurfaces::Ultra);
+    let saved = doc.model().to_bytes().unwrap();
+    let reopened = soliddraft_model::Document::from_bytes(&saved, doc.kernel().clone()).unwrap();
+    let mut reopened = Document::from_model(reopened);
+    reopened.set_curved_surfaces(graphics.curved_surfaces);
+    settle(&mut reopened, &projection);
+    assert_eq!(reopened.tess_params.surface_angle_deg, 7.5);
+
+    let id = reopened.features.last().unwrap().id;
+    let mut edited = match &reopened.feature(id).unwrap().kind {
+        soliddraft_app::document::FeatureKind::Extrude(params) => params.clone(),
+        _ => panic!("the reopened part should have its extrusion"),
+    };
+    edited.depth = 65.0;
+    reopened.apply(Command::EditExtrude { id, params: edited.clone() }).unwrap();
+    assert_eq!(reopened.tess_params.surface_angle_deg, 7.5);
+    edited.profile = ProfileKind::Circle { diameter: 40.0 };
+    edited.depth = 90.0;
+    reopened.apply(Command::AddExtrude { params: edited, via_assistant: false }).unwrap();
+    assert_eq!(reopened.tess_params.surface_angle_deg, 7.5);
+}
+
+#[test]
 fn an_unchanged_body_keeps_its_mesh_and_undo_shows_the_earlier_one_again() {
     use soliddraft_kernel_api::counting::{Counting, Work};
 

@@ -125,8 +125,10 @@ pub struct FrameInput {
     pub pixels_per_point: f32,
     pub display: DisplayMode,
     pub preset: Preset,
+    pub controls: Controls,
     /// The gradient and optional screen grid composited behind the model.
     pub backdrop: super::scenes::Backdrop,
+    pub backdrop_picture: Option<Arc<image::RgbaImage>>,
     /// Whether the ground under the model shows the model's shadow.
     pub floor: bool,
     pub hover_id: u32,
@@ -168,6 +170,50 @@ pub(super) struct PartProbe {
     pub display_mode: String,
     /// How many body meshes the frame was given to draw.
     pub visible_meshes: usize,
+    pub chord_mm: f64,
+    pub angle_deg: f64,
+    pub standard_chord_mm: f64,
+    pub curves_settled: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Controls {
+    pub lighting: crate::graphics::Lighting,
+    pub supersample: bool,
+    pub vertex_markers: bool,
+    pub xray_references: bool,
+    pub hidden_selected_edges: bool,
+    pub tint_preview: bool,
+    pub red_removal: bool,
+    pub section_hatch: crate::graphics::SectionHatch,
+    pub edge_color: Option<crate::theme::Rgb>,
+    pub selection_color: Option<crate::theme::Rgb>,
+}
+
+impl Default for Controls {
+    fn default() -> Self {
+        Self {
+            lighting: Default::default(),
+            supersample: false,
+            vertex_markers: false,
+            xray_references: false,
+            hidden_selected_edges: false,
+            tint_preview: true,
+            red_removal: true,
+            section_hatch: Default::default(),
+            edge_color: None,
+            selection_color: None,
+        }
+    }
+}
+
+pub(crate) const DEFAULT_EDGE: egui::Color32 = egui::Color32::from_rgb(41, 48, 64);
+pub(crate) const DEFAULT_SELECTION: egui::Color32 = egui::Color32::from_rgb(31, 94, 209);
+
+impl Controls {
+    pub(super) fn color_uniform(color: Option<crate::theme::Rgb>) -> [f32; 4] {
+        color.map_or([0.0; 4], |c| egui::Rgba::from(egui::Color32::from(c)).to_array())
+    }
 }
 
 impl FrameInput {
@@ -222,6 +268,10 @@ impl egui_wgpu::CallbackTrait for ViewportCallback {
                     "display_state": probe.display_state,
                     "display_mode": probe.display_mode,
                     "visible_meshes": probe.visible_meshes,
+                    "chord_mm": probe.chord_mm,
+                    "angle_deg": probe.angle_deg,
+                    "standard_chord_mm": probe.standard_chord_mm,
+                    "curves_settled": probe.curves_settled,
                 }));
             }
         }
@@ -254,6 +304,8 @@ struct Globals {
     grid_lines: [f32; 4],
     plane_size: [f32; 4],
     planes: [[f32; 4]; 3],
+    edge_color: [f32; 4],
+    selection_color: [f32; 4],
     sh: [[f32; 4]; 9],
     hover_id: u32,
     selected_id: u32,
@@ -269,10 +321,23 @@ struct Backdrop {
     stops: [[f32; 4]; 5],
     radial: [f32; 4],
     grid: [f32; 4],
+    picture_uv: [f32; 4],
 }
 
 impl Backdrop {
-    fn from_srgb(bg: super::scenes::Backdrop, size: [u32; 2], ppp: f32) -> Self {
+    fn from_srgb(
+        bg: super::scenes::Backdrop,
+        size: [u32; 2],
+        ppp: f32,
+        picture: Option<&image::RgbaImage>,
+    ) -> Self {
+        let picture_uv = picture.map_or([1.0, 1.0, 0.0, 0.0], |image| {
+            let viewport_aspect = size[0].max(1) as f32 / size[1].max(1) as f32;
+            let image_aspect = image.width() as f32 / image.height() as f32;
+            let x = (viewport_aspect / image_aspect).min(1.0);
+            let y = (image_aspect / viewport_aspect).min(1.0);
+            [x, y, (1.0 - x) * 0.5, (1.0 - y) * 0.5]
+        });
         Self {
             stops: bg.stops.map(|(color, at)| {
                 let [r, g, b, _] = egui::Rgba::from(color).to_array();
@@ -280,6 +345,7 @@ impl Backdrop {
             }),
             radial: bg.radial,
             grid: [bg.grid[0], bg.grid[1], size[0] as f32 / ppp, size[1] as f32 / ppp],
+            picture_uv,
         }
     }
 }
@@ -373,7 +439,8 @@ struct AoTargets {
 
 struct Targets {
     size: [u32; 2],
-    color_msaa: wgpu::TextureView,
+    color_msaa: Option<wgpu::TextureView>,
+    scale: u32,
     color: wgpu::TextureView,
     depth_msaa: wgpu::TextureView,
     id: wgpu::Texture,
@@ -403,6 +470,10 @@ pub struct SunFrame {
 /// shadow falls beside the part and not only under it. It is fixed to the model, not
 /// the camera, so the map is redrawn only when the geometry changes.
 pub fn sun_frame(lo: Vec3, hi: Vec3) -> SunFrame {
+    sun_frame_with_ground(lo, hi, true)
+}
+
+fn sun_frame_with_ground(lo: Vec3, hi: Vec3, follows_model: bool) -> SunFrame {
     let center = (lo + hi) / 2.0;
     let radius = ((hi - lo).length() / 2.0).max(1.0);
     let toward = environment::softbox_direction();
@@ -412,15 +483,18 @@ pub fn sun_frame(lo: Vec3, hi: Vec3) -> SunFrame {
     let view = glam::camera::rh::view::look_at_mat4(eye, center, up);
     let half = radius * 1.05;
     // Deep enough to reach the far rim of the ground disc behind the model.
-    let far = radius * 3.0 + (ground_radius * ground_radius + (hi.z - lo.z).powi(2)).sqrt() + radius;
+    let (ground, reach) = if follows_model {
+        let height = lo.z - radius * 1e-3;
+        (Vec3::new(center.x, center.y, height), (ground_radius * ground_radius + (hi.z - lo.z).powi(2)).sqrt())
+    } else {
+        let drift = center.z / toward.z;
+        let mut projected = center - toward * drift;
+        projected.z = 0.0;
+        (projected, ground_radius + drift.abs())
+    };
+    let far = radius * 3.0 + reach + radius;
     let proj = glam::camera::rh::proj::directx::orthographic(-half, half, -half, half, radius, far);
-    SunFrame {
-        view_proj: proj * view,
-        ground: Vec3::new(center.x, center.y, lo.z - radius * 1e-3),
-        ground_radius,
-        radius,
-        texel: 2.0 * half / SHADOW_SIZE as f32,
-    }
+    SunFrame { view_proj: proj * view, ground, ground_radius, radius, texel: 2.0 * half / SHADOW_SIZE as f32 }
 }
 
 const MSAA: u32 = 4;
@@ -530,6 +604,7 @@ struct Layouts {
 
 pub struct ViewportRenderer {
     tier: Tier,
+    samples: u32,
     face_pipeline: wgpu::RenderPipeline,
     /// The faces whose appearance is not opaque: blended over everything opaque,
     /// both sides, writing no depth, so what is behind or inside them shows.
@@ -537,6 +612,9 @@ pub struct ViewportRenderer {
     ground_pipeline: wgpu::RenderPipeline,
     grid_pipeline: wgpu::RenderPipeline,
     plane_pipeline: wgpu::RenderPipeline,
+    xray_planes_pipeline: wgpu::RenderPipeline,
+    hidden_edges_pipeline: wgpu::RenderPipeline,
+    markers_pipeline: wgpu::RenderPipeline,
     edge_pipeline: wgpu::RenderPipeline,
     shadow_pipeline: wgpu::RenderPipeline,
     id_face_pipeline: wgpu::RenderPipeline,
@@ -546,6 +624,8 @@ pub struct ViewportRenderer {
     ao_pipelines: Option<[wgpu::RenderPipeline; 3]>,
     blit_pipeline: wgpu::RenderPipeline,
     globals: wgpu::Buffer,
+    pick_globals: wgpu::Buffer,
+    pick_globals_bind_group: wgpu::BindGroup,
     backdrop: wgpu::Buffer,
     globals_bind_group: wgpu::BindGroup,
     uniforms_bind_group: wgpu::BindGroup,
@@ -554,16 +634,18 @@ pub struct ViewportRenderer {
     shadow_view: wgpu::TextureView,
     sun: Option<SunFrame>,
     /// What the shadow map was last drawn from: mesh version and preview.
-    shadow_key: Option<(u64, usize)>,
+    shadow_key: Option<(u64, usize, bool)>,
     white: wgpu::TextureView,
+    transparent: wgpu::TextureView,
+    backdrop_picture: Option<(Arc<image::RgbaImage>, wgpu::TextureView)>,
     sh: [[f32; 4]; 9],
     targets: Option<Targets>,
     bodies: HashMap<BodyId, GpuBody>,
     /// `u64::MAX` means nothing uploaded yet, so version 0 (an empty document) still uploads.
     mesh_version: u64,
     /// Keyed by the `Arc` address of the ghost mesh; never dereferenced.
-    ghost: Option<(usize, bool, GpuBody)>,
-    preview: Option<(usize, GpuBody)>,
+    ghost: Option<(usize, u32, GpuBody)>,
+    preview: Option<(usize, u32, GpuBody)>,
     threads: Option<(usize, GpuBody)>,
     pick_buffer: wgpu::Buffer,
     readback: Arc<Mutex<Readback>>,
@@ -576,8 +658,80 @@ pub struct ViewportRenderer {
     assembly: AssemblyRenderer,
 }
 
+fn picture_view(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    [width, height]: [u32; 2],
+    rgba: &[u8],
+) -> wgpu::TextureView {
+    device.create_texture_with_data(
+        queue,
+        &wgpu::TextureDescriptor {
+            label: Some("viewport background picture"),
+            size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        },
+        wgpu::util::TextureDataOrder::LayerMajor,
+        rgba,
+    ).create_view(&Default::default())
+}
+
 impl ViewportRenderer {
+    pub fn graphics_device(
+        adapter: &wgpu::Adapter,
+        device: &wgpu::Device,
+        requested: u32,
+    ) -> crate::graphics::GraphicsDevice {
+        let info = adapter.get_info();
+        let flags = |format: wgpu::TextureFormat| {
+            if device.features().contains(wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES) {
+                adapter.get_texture_format_features(format).flags
+            } else {
+                format.guaranteed_format_features(device.features()).flags
+            }
+        };
+        let color = flags(COLOR_FORMAT);
+        let depth = flags(DEPTH_FORMAT);
+        let mut samples = vec![1];
+        if color.contains(wgpu::TextureFormatFeatureFlags::MULTISAMPLE_RESOLVE) {
+            samples.extend(
+                [2, 4, 8, 16]
+                    .into_iter()
+                    .filter(|&n| color.sample_count_supported(n) && depth.sample_count_supported(n)),
+            );
+        }
+        let active_samples = if samples.contains(&requested) {
+            requested
+        } else if samples.contains(&MSAA) {
+            MSAA
+        } else {
+            1
+        };
+        crate::graphics::GraphicsDevice {
+            gpu: if info.name.is_empty() { "Name unavailable".into() } else { info.name },
+            renderer: format!("{:?}", info.backend),
+            samples,
+            active_samples,
+            tier: Tier::of(info.backend),
+        }
+    }
+
     pub fn new(device: &wgpu::Device, queue: &wgpu::Queue, target_format: wgpu::TextureFormat, tier: Tier) -> Self {
+        Self::with_samples(device, queue, target_format, tier, MSAA)
+    }
+
+    pub fn with_samples(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        target_format: wgpu::TextureFormat,
+        tier: Tier,
+        samples: u32,
+    ) -> Self {
         log::info!("viewport renderer: {} tier", tier.label());
         let shader = device.create_shader_module(wgpu::include_wgsl!("scene.wgsl"));
 
@@ -641,6 +795,7 @@ impl ViewportRenderer {
                     texture_entry(0, wgpu::TextureSampleType::Float { filterable: true }, d2),
                     sampler_entry(1, wgpu::SamplerBindingType::Filtering),
                     uniform_entry(2),
+                    texture_entry(3, wgpu::TextureSampleType::Float { filterable: true }, d2),
                 ],
             }),
         };
@@ -721,19 +876,21 @@ impl ViewportRenderer {
                 cache: None,
             })
         };
-        let depth = |write: bool| {
+        let depth_compare = |write: bool, compare| {
             Some(wgpu::DepthStencilState {
                 format: DEPTH_FORMAT,
                 depth_write_enabled: Some(write),
-                depth_compare: Some(DEPTH_COMPARE),
+                depth_compare: Some(compare),
                 stencil: Default::default(),
                 bias: Default::default(),
             })
         };
+        let depth = |write| depth_compare(write, DEPTH_COMPARE);
         let premul = Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING);
         let back = Some(wgpu::Face::Back);
         let faces = [Some(face_layout.clone())];
         let lines = [Some(line_layout)];
+        let points = [Some(point_layout)];
         let face_pipeline = pipeline(Desc {
             label: "faces",
             layout: &scene_layout,
@@ -742,7 +899,7 @@ impl ViewportRenderer {
             buffers: &faces,
             format: Some(COLOR_FORMAT),
             blend: premul,
-            samples: MSAA,
+            samples,
             cull: back,
             depth: depth(true),
         });
@@ -754,7 +911,7 @@ impl ViewportRenderer {
             buffers: &faces,
             format: Some(COLOR_FORMAT),
             blend: premul,
-            samples: MSAA,
+            samples,
             cull: None,
             depth: depth(false),
         });
@@ -766,7 +923,7 @@ impl ViewportRenderer {
             buffers: &[],
             format: Some(COLOR_FORMAT),
             blend: premul,
-            samples: MSAA,
+            samples,
             cull: None,
             depth: depth(false),
         });
@@ -778,7 +935,7 @@ impl ViewportRenderer {
             buffers: &[],
             format: Some(COLOR_FORMAT),
             blend: premul,
-            samples: MSAA,
+            samples,
             cull: None,
             depth: depth(false),
         });
@@ -790,7 +947,43 @@ impl ViewportRenderer {
             buffers: &[],
             format: Some(COLOR_FORMAT),
             blend: premul,
-            samples: MSAA,
+            samples,
+            cull: None,
+            depth: depth(false),
+        });
+        let xray_planes_pipeline = pipeline(Desc {
+            label: "planes through solid",
+            layout: &grid_layout,
+            vs: "vs_plane",
+            fs: Some("fs_plane"),
+            buffers: &[],
+            format: Some(COLOR_FORMAT),
+            blend: premul,
+            samples,
+            cull: None,
+            depth: depth_compare(false, wgpu::CompareFunction::Always),
+        });
+        let hidden_edges_pipeline = pipeline(Desc {
+            label: "selected hidden edges",
+            layout: &scene_layout,
+            vs: "vs_edge",
+            fs: Some("fs_hidden_edge"),
+            buffers: &lines,
+            format: Some(COLOR_FORMAT),
+            blend: premul,
+            samples,
+            cull: None,
+            depth: depth_compare(false, wgpu::CompareFunction::Less),
+        });
+        let markers_pipeline = pipeline(Desc {
+            label: "vertex markers",
+            layout: &scene_layout,
+            vs: "vs_marker",
+            fs: Some("fs_marker"),
+            buffers: &points,
+            format: Some(COLOR_FORMAT),
+            blend: premul,
+            samples,
             cull: None,
             depth: depth(false),
         });
@@ -802,7 +995,7 @@ impl ViewportRenderer {
             buffers: &lines,
             format: Some(COLOR_FORMAT),
             blend: premul,
-            samples: MSAA,
+            samples,
             cull: None,
             depth: depth(true),
         });
@@ -853,7 +1046,7 @@ impl ViewportRenderer {
             layout: &scene_layout,
             vs: "vs_id_vertex",
             fs: Some("fs_id"),
-            buffers: &[Some(point_layout)],
+            buffers: &points,
             format: Some(ID_FORMAT),
             blend: None,
             samples: 1,
@@ -907,12 +1100,16 @@ impl ViewportRenderer {
             depth: None,
         });
 
-        let globals = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("globals"),
-            size: std::mem::size_of::<Globals>() as u64,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let global_buffer = |label| {
+            device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some(label),
+                size: std::mem::size_of::<Globals>() as u64,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            })
+        };
+        let globals = global_buffer("scene globals");
+        let pick_globals = global_buffer("pick globals");
         let backdrop = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("backdrop"),
             size: std::mem::size_of::<Backdrop>() as u64,
@@ -953,17 +1150,21 @@ impl ViewportRenderer {
             mipmap_filter: wgpu::MipmapFilterMode::Linear,
             ..Default::default()
         });
-        let globals_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("globals"),
-            layout: &globals_layout,
-            entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: globals.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&shadow_view) },
-                wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::Sampler(&shadow_sampler) },
-                wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::TextureView(&env_view) },
-                wgpu::BindGroupEntry { binding: 4, resource: wgpu::BindingResource::Sampler(&env_sampler) },
-            ],
-        });
+        let global_bind_group = |buffer: &wgpu::Buffer| {
+            device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("globals"),
+                layout: &globals_layout,
+                entries: &[
+                    wgpu::BindGroupEntry { binding: 0, resource: buffer.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&shadow_view) },
+                    wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::Sampler(&shadow_sampler) },
+                    wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::TextureView(&env_view) },
+                    wgpu::BindGroupEntry { binding: 4, resource: wgpu::BindingResource::Sampler(&env_sampler) },
+                ],
+            })
+        };
+        let globals_bind_group = global_bind_group(&globals);
+        let pick_globals_bind_group = global_bind_group(&pick_globals);
         let uniforms_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("uniforms"),
             layout: &layouts.uniforms,
@@ -995,11 +1196,15 @@ impl ViewportRenderer {
 
         Self {
             tier,
+            samples,
             face_pipeline,
             see_through_pipeline,
             ground_pipeline,
             grid_pipeline,
             plane_pipeline,
+            xray_planes_pipeline,
+            hidden_edges_pipeline,
+            markers_pipeline,
             edge_pipeline,
             shadow_pipeline,
             id_face_pipeline,
@@ -1008,6 +1213,8 @@ impl ViewportRenderer {
             ao_pipelines,
             blit_pipeline,
             globals,
+            pick_globals,
+            pick_globals_bind_group,
             backdrop,
             globals_bind_group,
             uniforms_bind_group,
@@ -1017,6 +1224,8 @@ impl ViewportRenderer {
             sun: None,
             shadow_key: None,
             white,
+            transparent: picture_view(device, queue, [1, 1], &[0; 4]),
+            backdrop_picture: None,
             sh: env.irradiance,
             targets: None,
             bodies: HashMap::new(),
@@ -1029,7 +1238,7 @@ impl ViewportRenderer {
             picks: PickCache::default(),
             display: DisplayMode::default(),
             frame: 0,
-            assembly: AssemblyRenderer::new(device, COLOR_FORMAT, DEPTH_FORMAT, MSAA, ID_FORMAT),
+            assembly: AssemblyRenderer::new(device, COLOR_FORMAT, DEPTH_FORMAT, samples, ID_FORMAT),
         }
     }
 
@@ -1055,15 +1264,15 @@ impl ViewportRenderer {
         self.assembly.take_wanted()
     }
 
-    fn ensure_targets(&mut self, device: &wgpu::Device, size: [u32; 2]) {
+    fn ensure_targets(&mut self, device: &wgpu::Device, size: [u32; 2], scale: u32) {
         let size = [size[0].max(1), size[1].max(1)];
-        if self.targets.as_ref().map(|t| t.size) == Some(size) {
+        if self.targets.as_ref().map(|t| (t.size, t.scale)) == Some((size, scale)) {
             return;
         }
-        let tex = |label: &str, format, samples, usage| {
+        let tex = |label: &str, format, samples, usage, scale| {
             device.create_texture(&wgpu::TextureDescriptor {
                 label: Some(label),
-                size: wgpu::Extent3d { width: size[0], height: size[1], depth_or_array_layers: 1 },
+                size: wgpu::Extent3d { width: size[0] * scale, height: size[1] * scale, depth_or_array_layers: 1 },
                 mip_level_count: 1,
                 sample_count: samples,
                 dimension: wgpu::TextureDimension::D2,
@@ -1074,12 +1283,13 @@ impl ViewportRenderer {
         };
         let ra = wgpu::TextureUsages::RENDER_ATTACHMENT;
         let sampled = ra | wgpu::TextureUsages::TEXTURE_BINDING;
-        let color_msaa = tex("color msaa", COLOR_FORMAT, MSAA, ra).create_view(&Default::default());
-        let color = tex("color", COLOR_FORMAT, 1, sampled).create_view(&Default::default());
-        let depth_msaa = tex("depth msaa", DEPTH_FORMAT, MSAA, ra).create_view(&Default::default());
-        let id = tex("id", ID_FORMAT, 1, ra | wgpu::TextureUsages::COPY_SRC);
+        let color_msaa = (self.samples > 1)
+            .then(|| tex("color msaa", COLOR_FORMAT, self.samples, ra, scale).create_view(&Default::default()));
+        let color = tex("color", COLOR_FORMAT, 1, sampled, scale).create_view(&Default::default());
+        let depth_msaa = tex("scene depth", DEPTH_FORMAT, self.samples, ra, scale).create_view(&Default::default());
+        let id = tex("id", ID_FORMAT, 1, ra | wgpu::TextureUsages::COPY_SRC, 1);
         let id_view = id.create_view(&Default::default());
-        let id_depth = tex("id depth", DEPTH_FORMAT, 1, ra).create_view(&Default::default());
+        let id_depth = tex("id depth", DEPTH_FORMAT, 1, ra, 1).create_view(&Default::default());
         let blit_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("blit"),
             layout: &self.layouts.blit,
@@ -1087,13 +1297,19 @@ impl ViewportRenderer {
                 wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&color) },
                 wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&self.sampler) },
                 wgpu::BindGroupEntry { binding: 2, resource: self.backdrop.as_entire_binding() },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::TextureView(
+                        self.backdrop_picture.as_ref().map_or(&self.transparent, |(_, view)| view),
+                    ),
+                },
             ],
         });
         let ao = self.ao_pipelines.is_some().then(|| {
-            let depth = tex("occlusion depth", DEPTH_FORMAT, 1, sampled).create_view(&Default::default());
-            let normals = tex("occlusion normals", NORMAL_FORMAT, 1, sampled).create_view(&Default::default());
-            let raw = tex("occlusion raw", AO_FORMAT, 1, sampled).create_view(&Default::default());
-            let blurred = tex("occlusion", AO_FORMAT, 1, sampled).create_view(&Default::default());
+            let depth = tex("occlusion depth", DEPTH_FORMAT, 1, sampled, scale).create_view(&Default::default());
+            let normals = tex("occlusion normals", NORMAL_FORMAT, 1, sampled, scale).create_view(&Default::default());
+            let raw = tex("occlusion raw", AO_FORMAT, 1, sampled, scale).create_view(&Default::default());
+            let blurred = tex("occlusion", AO_FORMAT, 1, sampled, scale).create_view(&Default::default());
             let inputs = |label, second: &wgpu::TextureView| {
                 device.create_bind_group(&wgpu::BindGroupDescriptor {
                     label: Some(label),
@@ -1119,6 +1335,7 @@ impl ViewportRenderer {
         self.targets = Some(Targets {
             size,
             color_msaa,
+            scale,
             color,
             depth_msaa,
             id,
@@ -1197,10 +1414,10 @@ impl ViewportRenderer {
     }
 
     fn scene_bodies<'a>(
-        preview: &'a Option<(usize, GpuBody)>,
+        preview: &'a Option<(usize, u32, GpuBody)>,
         bodies: &'a HashMap<BodyId, GpuBody>,
     ) -> impl Iterator<Item = &'a GpuBody> {
-        let preview = preview.as_ref().map(|(_, body)| body);
+        let preview = preview.as_ref().map(|(_, _, body)| body);
         preview.into_iter().chain(bodies.values().filter(move |_| preview.is_none()))
     }
 
@@ -1215,7 +1432,29 @@ impl ViewportRenderer {
         self.frame += 1;
         log::debug!("prepare frame {} size {:?}", self.frame, input.size_px);
         self.display = input.display;
-        self.ensure_targets(device, input.size_px);
+        let limit = device.limits().max_texture_dimension_2d / 2;
+        let pixels = u64::from(input.size_px[0]) * u64::from(input.size_px[1]);
+        let scale = if input.controls.supersample
+            && input.size_px.iter().all(|&side| side <= limit)
+            && pixels * u64::from(self.samples) <= 12_000_000
+        {
+            2
+        } else {
+            1
+        };
+        let same_picture = match (&self.backdrop_picture, &input.backdrop_picture) {
+            (None, None) => true,
+            (Some((cached, _)), Some(current)) => Arc::ptr_eq(cached, current),
+            _ => false,
+        };
+        if !same_picture {
+            self.backdrop_picture = input.backdrop_picture.as_ref().map(|picture| {
+                let view = picture_view(device, queue, [picture.width(), picture.height()], picture.as_raw());
+                (picture.clone(), view)
+            });
+            self.targets = None;
+        }
+        self.ensure_targets(device, input.size_px, scale);
 
         let (version, meshes) = &input.meshes;
         if *version != self.mesh_version
@@ -1228,9 +1467,10 @@ impl ViewportRenderer {
         match &input.ghost {
             Some((g, removes)) => {
                 let ptr = Arc::as_ptr(g) as usize;
-                if self.ghost.as_ref().map(|(p, r, _)| (*p, *r)) != Some((ptr, *removes)) {
-                    let flags = if *removes { 2 | 8 } else { 2 };
-                    self.ghost = Some((ptr, *removes, self.upload_body(device, g, flags)));
+                let tint = if *removes { input.controls.red_removal } else { input.controls.tint_preview };
+                let flags = 2 | if *removes { 8 } else { 0 } | if tint { 0 } else { 32 };
+                if self.ghost.as_ref().map(|(p, flags, _)| (*p, *flags)) != Some((ptr, flags)) {
+                    self.ghost = Some((ptr, flags, self.upload_body(device, g, flags)));
                 }
             }
             None => self.ghost = None,
@@ -1238,8 +1478,14 @@ impl ViewportRenderer {
         match &input.preview {
             Some(p) => {
                 let ptr = Arc::as_ptr(p) as usize;
-                if self.preview.as_ref().map(|(q, _)| *q) != Some(ptr) {
-                    self.preview = Some((ptr, self.upload_body(device, p, 4)));
+                let hatch = match input.controls.section_hatch {
+                    crate::graphics::SectionHatch::Solid => 0,
+                    crate::graphics::SectionHatch::Diagonal => 64,
+                    crate::graphics::SectionHatch::Crosshatch => 64 | 128,
+                };
+                let flags = 4 | hatch | if input.controls.tint_preview { 0 } else { 32 };
+                if self.preview.as_ref().map(|(q, flags, _)| (*q, *flags)) != Some((ptr, flags)) {
+                    self.preview = Some((ptr, flags, self.upload_body(device, p, flags)));
                 }
             }
             None => self.preview = None,
@@ -1259,17 +1505,32 @@ impl ViewportRenderer {
             queue.write_buffer(&body.uniform, 0, bytemuck::bytes_of(&flags));
         }
 
-        let look = input.preset.look(self.tier);
+        let mut look = input.preset.look(self.tier);
+        if !look.shadows && input.floor && input.controls.lighting.force_ground_shadow {
+            look.shadows = true;
+            let studio = Preset::Studio.look(self.tier);
+            look.shadow_strength = studio.shadow_strength;
+            look.shadow_softness = studio.shadow_softness;
+        }
+        if let Some(ao) = input.controls.lighting.ambient_occlusion {
+            look.ambient_occlusion = if ao && self.tier.has_ambient_occlusion() {
+                look.ambient_occlusion.max(Preset::Studio.look(self.tier).ambient_occlusion)
+            } else {
+                0.0
+            };
+        }
         let show_faces = self.draws_faces();
         let show_edges = self.display != DisplayMode::Shaded;
-        let preview_key = self.preview.as_ref().map_or(0, |(p, _)| *p);
+        let preview_key = self.preview.as_ref().map_or(0, |(p, _, _)| *p);
         // Construction previews replace the colour and revision-bound pick geometry.
         let shown: Vec<_> = Self::scene_bodies(&self.preview, &self.bodies).collect();
         let bounds = shown.iter().filter_map(|b| b.bounds).reduce(|(lo, hi), (l, h)| (lo.min(l), hi.max(h)));
         let shadows = look.shadows && show_faces && bounds.is_some();
-        let draw_shadow_map = shadows && self.shadow_key != Some((self.mesh_version, preview_key));
+        let follows_model = input.controls.lighting.shadow_follows_model;
+        let shadow_key = (self.mesh_version, preview_key, follows_model);
+        let draw_shadow_map = shadows && self.shadow_key != Some(shadow_key);
         if draw_shadow_map && let Some((lo, hi)) = bounds {
-            self.sun = Some(sun_frame(lo, hi));
+            self.sun = Some(sun_frame_with_ground(lo, hi, follows_model));
         }
         let ao = look.ambient_occlusion > 0.0 && show_faces && self.ao_pipelines.is_some();
         let ground = shadows && input.floor && self.sun.is_some_and(|s| input.eye.z > s.ground.z);
@@ -1292,7 +1553,9 @@ impl ViewportRenderer {
         queue.write_buffer(
             &self.backdrop,
             0,
-            bytemuck::bytes_of(&Backdrop::from_srgb(input.backdrop, input.size_px, input.pixels_per_point)),
+            bytemuck::bytes_of(&Backdrop::from_srgb(
+                input.backdrop, input.size_px, input.pixels_per_point, input.backdrop_picture.as_deref(),
+            )),
         );
         let model_radius = bounds.map_or(100.0, |(lo, hi)| ((hi - lo).length() / 2.0).max(1.0));
         let grid = input.grid.unwrap_or(GridFrame {
@@ -1311,59 +1574,62 @@ impl ViewportRenderer {
                 [r, g, b, p.planes[plane].1]
             })
         };
-        queue.write_buffer(
-            &self.globals,
-            0,
-            bytemuck::bytes_of(&Globals {
-                view_proj: view_proj.to_cols_array_2d(),
-                view: input.view.to_cols_array_2d(),
-                proj: input.proj.to_cols_array_2d(),
-                inv_proj: input.proj.inverse().to_cols_array_2d(),
-                sun_view_proj: sun.view_proj.to_cols_array_2d(),
-                eye: [input.eye.x, input.eye.y, input.eye.z, if input.orthographic { 1.0 } else { 0.0 }],
-                viewport: [size[0] as f32, size[1] as f32, EDGE_WIDTH * input.pixels_per_point, input.pixels_per_point],
-                pull: [EDGE_PULL, EDGE_PULL * input.distance, model_radius * 0.06, model_radius * 0.002],
-                key: rig(-0.45, 0.3, 0.85, 0.8),
-                fill: rig(0.85, 0.1, 0.5, 0.3),
-                rim: rig(0.2, 0.6, -0.75, 0.15),
-                sun: [toward_sun.x, toward_sun.y, toward_sun.z, if shadows { look.sun } else { 0.0 }],
-                ground: [sun.ground.x, sun.ground.y, sun.ground.z, sun.ground_radius],
-                shadow: [
-                    look.shadow_strength,
-                    0.007 * look.shadow_softness,
-                    if shadows { 1.0 } else { 0.0 },
-                    sun.texel,
-                ],
-                look: [
-                    look.environment,
-                    look.reflections,
-                    if ao { look.ambient_occlusion } else { 0.0 },
-                    (environment::LEVELS - 1) as f32,
-                ],
-                grid_anchor: [grid.anchor.x, grid.anchor.y, grid.anchor.z, grid.pull],
-                grid_u: [grid.u.x, grid.u.y, grid.u.z, grid.minor],
-                grid_v: [grid.v.x, grid.v.y, grid.v.z, grid.major],
-                grid_ink: egui::Rgba::from(grid.ink).to_array(),
-                grid_lines: [
-                    grid.opacity.0,
-                    grid.opacity.1,
-                    grid::LINE_WIDTH.0 * input.pixels_per_point,
-                    grid::LINE_WIDTH.1 * input.pixels_per_point,
-                ],
-                plane_size: [
-                    input.planes.map_or(0.0, |p| p.half),
-                    planes::FILL,
-                    planes::OUTLINE,
-                    planes::OUTLINE_POINTS * input.pixels_per_point,
-                ],
-                planes: [plane_ink(0), plane_ink(1), plane_ink(2)],
-                sh: self.sh,
-                hover_id: input.hover_id,
-                selected_id: input.selected_id,
-                selected_feature: input.selected_feature,
-                _pad: 0,
-            }),
-        );
+        let mut globals = Globals {
+            view_proj: view_proj.to_cols_array_2d(),
+            view: input.view.to_cols_array_2d(),
+            proj: input.proj.to_cols_array_2d(),
+            inv_proj: input.proj.inverse().to_cols_array_2d(),
+            sun_view_proj: sun.view_proj.to_cols_array_2d(),
+            eye: [input.eye.x, input.eye.y, input.eye.z, if input.orthographic { 1.0 } else { 0.0 }],
+            viewport: [size[0] as f32, size[1] as f32, EDGE_WIDTH * input.pixels_per_point, input.pixels_per_point],
+            pull: [EDGE_PULL, EDGE_PULL * input.distance, model_radius * 0.06, model_radius * 0.002],
+            key: rig(-0.45, 0.3, 0.85, 0.8),
+            fill: rig(0.85, 0.1, 0.5, 0.3),
+            rim: rig(0.2, 0.6, -0.75, 0.15),
+            sun: [toward_sun.x, toward_sun.y, toward_sun.z, if shadows { look.sun } else { 0.0 }],
+            ground: [sun.ground.x, sun.ground.y, sun.ground.z, sun.ground_radius],
+            shadow: [look.shadow_strength, 0.007 * look.shadow_softness, if shadows { 1.0 } else { 0.0 }, sun.texel],
+            look: [
+                look.environment,
+                look.reflections,
+                if ao { look.ambient_occlusion } else { 0.0 },
+                (environment::LEVELS - 1) as f32,
+            ],
+            grid_anchor: [grid.anchor.x, grid.anchor.y, grid.anchor.z, grid.pull],
+            grid_u: [grid.u.x, grid.u.y, grid.u.z, grid.minor],
+            grid_v: [grid.v.x, grid.v.y, grid.v.z, grid.major],
+            grid_ink: egui::Rgba::from(grid.ink).to_array(),
+            grid_lines: [
+                grid.opacity.0,
+                grid.opacity.1,
+                grid::LINE_WIDTH.0 * input.pixels_per_point,
+                grid::LINE_WIDTH.1 * input.pixels_per_point,
+            ],
+            plane_size: [
+                input.planes.map_or(0.0, |p| p.half),
+                planes::FILL,
+                planes::OUTLINE,
+                planes::OUTLINE_POINTS * input.pixels_per_point,
+            ],
+            planes: [plane_ink(0), plane_ink(1), plane_ink(2)],
+            edge_color: Controls::color_uniform(input.controls.edge_color),
+            selection_color: Controls::color_uniform(input.controls.selection_color),
+            sh: self.sh,
+            hover_id: input.hover_id,
+            selected_id: input.selected_id,
+            selected_feature: input.selected_feature,
+            _pad: 0,
+        };
+        if scale > 1 {
+            queue.write_buffer(&self.pick_globals, 0, bytemuck::bytes_of(&globals));
+            for value in &mut globals.viewport {
+                *value *= scale as f32;
+            }
+            globals.grid_lines[2] *= scale as f32;
+            globals.grid_lines[3] *= scale as f32;
+            globals.plane_size[3] *= scale as f32;
+        }
+        queue.write_buffer(&self.globals, 0, bytemuck::bytes_of(&globals));
 
         // Pump map callbacks and publish a finished readback before issuing a new one.
         let _ = device.poll(wgpu::PollType::Poll);
@@ -1394,12 +1660,12 @@ impl ViewportRenderer {
             self.picks.failed();
         }
         let pick_bodies = || {
-            let preview = self.preview.as_ref().filter(|_| input.preview_pickable).map(|(_, body)| body);
+            let preview = self.preview.as_ref().filter(|_| input.preview_pickable).map(|(_, _, body)| body);
             preview.into_iter().chain(self.bodies.values().filter(move |_| preview.is_none()))
         };
 
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("viewport") });
-        self.assembly.prepare(device, queue, &mut encoder, input.assembly.as_ref(), input.size_px, input.cursor_px);
+        self.assembly.prepare(device, queue, &mut encoder, input);
         let targets = self.targets.as_ref().expect("targets");
         let draw_faces = |pass: &mut wgpu::RenderPass<'_>, bodies: &mut dyn Iterator<Item = &GpuBody>, groups: bool| {
             for body in bodies {
@@ -1449,7 +1715,7 @@ impl ViewportRenderer {
             pass.set_bind_group(0, &self.uniforms_bind_group, &[]);
             draw_faces(&mut pass, &mut shown.iter().copied(), false);
             drop(pass);
-            self.shadow_key = Some((self.mesh_version, preview_key));
+            self.shadow_key = Some(shadow_key);
         }
 
         if ao && let (Some([normals, sample, blur]), Some(t)) = (&self.ao_pipelines, &targets.ao) {
@@ -1489,12 +1755,12 @@ impl ViewportRenderer {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("scene"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &targets.color_msaa,
+                    view: targets.color_msaa.as_ref().unwrap_or(&targets.color),
                     depth_slice: None,
-                    resolve_target: Some(&targets.color),
+                    resolve_target: targets.color_msaa.as_ref().map(|_| &targets.color),
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
-                        store: wgpu::StoreOp::Discard,
+                        store: if targets.color_msaa.is_some() { wgpu::StoreOp::Discard } else { wgpu::StoreOp::Store },
                     },
                 })],
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
@@ -1526,7 +1792,11 @@ impl ViewportRenderer {
             }
             if input.planes.is_some() {
                 // Only where no face drew, and over the ground's shadow.
-                pass.set_pipeline(&self.plane_pipeline);
+                pass.set_pipeline(if input.controls.xray_references {
+                    &self.xray_planes_pipeline
+                } else {
+                    &self.plane_pipeline
+                });
                 pass.draw(0..18, 0..1);
             }
             if input.grid.is_some() {
@@ -1543,6 +1813,14 @@ impl ViewportRenderer {
                 pass.set_pipeline(&self.face_pipeline);
                 draw_faces(&mut pass, &mut std::iter::once(g), true);
             }
+            if show_faces
+                && input.controls.hidden_selected_edges
+                && self.preview.is_none()
+                && let Some(body) = input.selected_body.and_then(|id| self.bodies.get(&id))
+            {
+                pass.set_pipeline(&self.hidden_edges_pipeline);
+                draw_lines(&mut pass, &mut std::iter::once(body));
+            }
             if show_edges {
                 self.assembly.draw_edges(&mut pass);
                 pass.set_bind_group(0, &self.globals_bind_group, &[]);
@@ -1553,6 +1831,16 @@ impl ViewportRenderer {
                     draw_lines(&mut pass, &mut shown.iter().copied().chain(ghost));
                 } else {
                     draw_lines(&mut pass, &mut ghost.into_iter());
+                }
+            }
+            if input.controls.vertex_markers && self.preview.is_none() {
+                pass.set_pipeline(&self.markers_pipeline);
+                for body in &shown {
+                    if body.point_count > 0 {
+                        pass.set_bind_group(1, &body.bind_group, &[]);
+                        pass.set_vertex_buffer(0, body.points.slice(..));
+                        pass.draw(0..6, 0..body.point_count);
+                    }
                 }
             }
             if let Some(threads) = self.scene_threads() {
@@ -1584,8 +1872,12 @@ impl ViewportRenderer {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
-            pass.set_bind_group(0, &self.globals_bind_group, &[]);
             pass.set_bind_group(2, &targets.frame_bind_group, &[]);
+            pass.set_bind_group(
+                0,
+                if scale > 1 { &self.pick_globals_bind_group } else { &self.globals_bind_group },
+                &[],
+            );
             pass.set_pipeline(&self.id_face_pipeline);
             draw_faces(&mut pass, &mut pick_bodies(), true);
             if !input.preview_pickable || self.preview.is_none() {
@@ -1798,9 +2090,9 @@ mod tests {
 
     #[test]
     fn globals_match_the_shader_layout() {
-        // Five matrices, nineteen vectors, nine harmonics and four ids.
-        assert_eq!(std::mem::size_of::<Globals>(), 5 * 64 + 19 * 16 + 9 * 16 + 16);
-        assert_eq!(std::mem::size_of::<Backdrop>(), 7 * 16);
+        // Five matrices, twenty-one vectors, nine harmonics and four ids.
+        assert_eq!(std::mem::size_of::<Globals>(), 5 * 64 + 21 * 16 + 9 * 16 + 16);
+        assert_eq!(std::mem::size_of::<Backdrop>(), 8 * 16);
         assert_eq!(std::mem::size_of::<LineInstance>(), 28);
         assert_eq!(std::mem::size_of::<BodyUniform>(), 32 + 48 * MAX_APPEARANCES);
     }

@@ -1,6 +1,13 @@
 //! Edit Suite navigation and scene favourites over the viewport.
 
-use super::{ViewportEvents, camera::Camera, render::DisplayMode, scenes::Scene};
+use super::{
+    ViewportEvents,
+    camera::Camera,
+    look::{Preset, Tier},
+    render::DisplayMode,
+    scenes::Scene,
+};
+use crate::graphics::CurrentView;
 use crate::{
     icons::{self, Icon},
     settings::{self, ReferenceDisplay},
@@ -34,8 +41,10 @@ impl NavigationBar {
         parent: &mut egui::Ui,
         viewport: Rect,
         camera: &mut Camera,
-        display: DisplayMode,
-        scene: Scene,
+        view: CurrentView,
+        preset: Preset,
+        tier: Tier,
+        backdrop: (theme::Background, Scene),
         references: &mut ReferenceDisplay,
         all_dimensions: &mut bool,
         sketch_dimensions: Option<bool>,
@@ -43,6 +52,14 @@ impl NavigationBar {
         section_active: bool,
         events: &mut ViewportEvents,
     ) {
+        let (background, scene) = backdrop;
+        let active_scene = (background == theme::Background::Scene).then_some(scene);
+        let backdrop_label = match background {
+            theme::Background::Gradient => "Theme",
+            theme::Background::Color => "Colour",
+            theme::Background::Picture => "Picture",
+            theme::Background::Scene => scene.label(),
+        };
         let compact = viewport.width() < 420.0;
         egui::Area::new(parent.id().with("viewport_navigation"))
             .order(egui::Order::Foreground)
@@ -80,19 +97,36 @@ impl NavigationBar {
                             } else {
                                 labeled_button(ui, "Display", "Display style", Icon::Display)
                             };
-                            egui::Popup::menu(&display_button).align(RectAlign::TOP_END).show(|ui| {
-                                display_style_menu(ui, display, events);
-                            });
+                            egui::Popup::menu(&display_button)
+                                .align(RectAlign::TOP_END)
+                                .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+                                .show(|ui| {
+                                    display_style_menu(ui, view.display, events);
+                                    ui.separator();
+                                    let mut draft = view;
+                                    crate::preferences::current_view_controls(
+                                        ui,
+                                        &mut draft,
+                                        preset,
+                                        tier,
+                                        sketch_dimensions.is_none(),
+                                        None,
+                                        false,
+                                    );
+                                    if draft != view {
+                                        events.actions.push(AppAction::SetCurrentView(draft));
+                                    }
+                                });
                             let scene_button = if compact {
                                 button(ui, "Scene", Icon::Material, false, false, true)
                             } else {
-                                labeled_button(ui, scene.label(), "Scene", Icon::Material)
+                                labeled_button(ui, backdrop_label, "Scene", Icon::Material)
                             };
-                            scene_button.clone().on_hover_text(format!("Scene: {}", scene.label()));
+                            scene_button.clone().on_hover_text(format!("Viewport background: {backdrop_label}"));
                             egui::Popup::menu(&scene_button)
                                 .align(RectAlign::TOP_END)
                                 .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
-                                .show(|ui| self.gallery(ui, scene, *references, events));
+                                .show(|ui| self.gallery(ui, active_scene, *references, events));
                             ui.separator();
                             if button(ui, "Section view", Icon::Section, section_active, false, allow_dimensions)
                                 .clicked()
@@ -132,7 +166,7 @@ impl NavigationBar {
     fn gallery(
         &mut self,
         ui: &mut egui::Ui,
-        current: Scene,
+        current: Option<Scene>,
         references: ReferenceDisplay,
         events: &mut ViewportEvents,
     ) {
@@ -146,7 +180,7 @@ impl NavigationBar {
             |ui| {
                 egui::Grid::new("scene_thumbnails").num_columns(3).spacing(vec2(8.0, 8.0)).show(ui, |ui| {
                     for (i, scene) in self.favourites.iter().enumerate() {
-                        if thumbnail(ui, *scene, current == *scene).clicked() {
+                        if thumbnail(ui, *scene, current == Some(*scene)).clicked() {
                             events.actions.push(AppAction::SetScene(*scene));
                             ui.close();
                         }

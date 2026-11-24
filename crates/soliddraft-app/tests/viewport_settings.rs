@@ -11,6 +11,57 @@ use soliddraft_app::settings::{self, InstallKind, ReferenceDisplay};
 use soliddraft_app::viewport::look::Preset;
 use support::{ALWAYS_SHOW_AXES, Case, empty, launch, set_preference};
 
+#[test]
+fn graphics_presets_change_the_drawn_part() {
+    use egui_kittest::kittest::Queryable;
+    use soliddraft_app::document::{Command, ExtrudeParams, ProfileKind};
+    use std::time::Instant;
+
+    let mut case = Case::gpu("graphics_presets");
+    let mut doc = empty();
+    let params = ExtrudeParams { profile: ProfileKind::Circle { diameter: 200.0 }, depth: 50.0, ..Default::default() };
+    doc.apply(Command::AddExtrude { params, via_assistant: false }).unwrap();
+    let mut app = launch(doc);
+    let mut observed = Vec::new();
+    for (preset, angle) in [("Performance", 15.0), ("Quality", 10.0)] {
+        support::run_command(&mut app, "settings");
+        app.get_by_label("Graphics").click();
+        app.run_steps(3);
+        app.get_by_label(preset).click();
+        app.run_steps(3);
+        support::close_preferences(&mut app);
+        let start = Instant::now();
+        loop {
+            let doc = &app.state().state.doc;
+            if doc.tess_params.surface_angle_deg == angle && !doc.display_quality().pending() {
+                break;
+            }
+            assert!(start.elapsed() < support::render_steps::HANG_GUARD, "{preset} did not draw");
+            std::thread::sleep(std::time::Duration::from_millis(10));
+            app.step();
+        }
+        // The viewport takes the worker's reply after submitting that frame's mesh.
+        app.step();
+        observed.push((app.state().state.doc.triangle_count(), case.frame(&mut app, preset)));
+    }
+    let [(coarse_count, coarse), (fine_count, fine)] = observed.as_slice() else { unreachable!() };
+    assert!(fine_count > coarse_count, "Quality drew {fine_count} triangles, Performance drew {coarse_count}");
+    let rect = support::viewport(&app);
+    let at = rect.center() - rect.size() / 4.0;
+    let image = |frame| {
+        image::imageops::crop_imm(
+            frame,
+            at.x as u32,
+            at.y as u32,
+            (rect.width() / 2.0) as u32,
+            (rect.height() / 2.0) as u32,
+        )
+        .to_image()
+    };
+    assert!(image(coarse) != image(fine), "the rendered model changed");
+    case.note(format!("Performance drew {coarse_count} triangles. Quality drew {fine_count} triangles."));
+}
+
 const DEFAULTS: ReferenceDisplay =
     ReferenceDisplay { show_grid: true, show_floor: true, show_origin_planes: true, always_show_origin_axes: true };
 

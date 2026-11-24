@@ -374,6 +374,59 @@ fn save_view_keys_to(store: &Store, keys: impl serde::Serialize) -> Result<(), N
     save_section_to(store, "view", &view)
 }
 
+pub fn graphics() -> crate::graphics::Graphics {
+    serde_json::from_value(stored()["graphics"].clone()).unwrap_or_default()
+}
+
+pub fn save_graphics(graphics: &crate::graphics::Graphics) -> Result<(), NotKept> {
+    save_section("graphics", graphics)
+}
+
+pub fn theme_preferences() -> crate::theme::Appearance {
+    theme_preferences_from(&stored())
+}
+
+fn theme_preferences_from(all: &Value) -> crate::theme::Appearance {
+    use crate::theme::{Appearance, Background, BuiltIn, Selection};
+    if let Ok(mut appearance) = serde_json::from_value::<Appearance>(all["theme_preferences"].clone()) {
+        appearance.restore_resources();
+        return appearance;
+    }
+    let mut appearance = Appearance::default();
+    appearance.selected = Selection::BuiltIn(BuiltIn::for_mode(appearance_from(all).theme));
+    if all["view"]["scene"].is_string() {
+        appearance.background = Background::Scene;
+    }
+    appearance
+}
+
+pub fn save_theme_preferences(appearance: &crate::theme::Appearance) -> Result<(), NotKept> {
+    save_appearance_and_view(appearance, None)
+}
+
+pub(crate) fn save_appearance_and_view(
+    appearance: &crate::theme::Appearance,
+    scene: Option<Scene>,
+) -> Result<(), NotKept> {
+    let store = store::current()?;
+    let mut all = store.load();
+    let value = |e: serde_json::Error| NotKept::Write(e.to_string());
+    all["theme_preferences"] = serde_json::to_value(appearance).map_err(value)?;
+    let theme = if appearance.tokens(None).is_dark { crate::theme::Mode::Dark } else { crate::theme::Mode::Light };
+    if !all["appearance"].is_object() {
+        all["appearance"] = serde_json::json!({});
+    }
+    all["appearance"]["theme"] = serde_json::to_value(theme).map_err(value)?;
+    if let Some(scene) = scene {
+        if !all["view"].is_object() {
+            all["view"] = serde_json::json!({});
+        }
+        all["view"]["scene"] = serde_json::to_value(scene).map_err(value)?;
+    }
+    record_install_preset(&mut all);
+    store.save(&all)
+}
+
 /// Appearance: light or dark interface. The `appearance` key of the settings.
 #[derive(Clone, Copy, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
@@ -726,6 +779,53 @@ mod tests {
         assert_eq!(all["view"]["preset"], "realistic");
         assert_eq!(all["theme"], "dark");
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn appearance_reads_the_old_mode_and_restores_a_theme_and_picture() {
+        use crate::theme::{Background, BuiltIn, Rgb, Selection, ThemeFile};
+        let old = serde_json::json!({"appearance": {"theme": "dark"}, "view": {"scene": "night"}});
+        let mut appearance = theme_preferences_from(&old);
+        assert_eq!(appearance.selected, Selection::BuiltIn(BuiltIn::ClearBenchDark));
+        assert_eq!(appearance.background, Background::Scene);
+        assert_eq!(theme_preferences_from(&serde_json::json!({})).background, Background::Gradient);
+
+        let imported =
+            br#"{"format":"soliddraft-theme/1","name":"Night work","base":"clear_bench_dark","accent":[255,198,48]}"#;
+        let file = ThemeFile::read(imported).unwrap();
+        appearance.imported = Some(file);
+        appearance.selected = Selection::Imported;
+        appearance.colors.logo = Some(Rgb([220, 30, 96]));
+        let mut png = std::io::Cursor::new(Vec::new());
+        let source = image::RgbaImage::from_pixel(12, 10, image::Rgba([32, 80, 92, 255]));
+        source.write_to(&mut png, image::ImageFormat::Png).unwrap();
+        appearance.set_picture("teal.png".into(), png.get_ref()).unwrap();
+
+        let json = serde_json::to_value(&appearance).unwrap();
+        assert_eq!(json["format"], "soliddraft-appearance/1");
+        let restored = theme_preferences_from(&serde_json::json!({"theme_preferences": json}));
+        assert_eq!(restored, appearance);
+        assert_eq!(restored.picture().as_deref(), Some(&source));
+        assert_eq!(restored.picture_name(), Some("teal.png"));
+        assert_eq!(restored.tokens(None).palette.accent, egui::Color32::from_rgb(255, 198, 48));
+
+        appearance.selected = Selection::System;
+        assert!(appearance.tokens(Some(egui::Theme::Dark)).is_dark);
+        assert!(!appearance.tokens(Some(egui::Theme::Light)).is_dark);
+        assert!(!appearance.tokens(None).is_dark);
+    }
+
+    #[test]
+    fn imported_theme_refuses_wrong_version_and_unreadable_colours() {
+        use crate::theme::ThemeFile;
+        for invalid in [
+            br#"{"format":"soliddraft-theme/2","name":"Wrong version"}"#.as_slice(),
+            br#"{"format":"soliddraft-theme/1","name":" ","ink":[255,255,255]}"#,
+            br#"{"format":"soliddraft-theme/1","name":"White ink","ink":[255,255,255]}"#,
+            br#"{"format":"soliddraft-theme/1","name":"Invalid number","accent":[500,0,0]}"#,
+        ] {
+            assert!(ThemeFile::read(invalid).is_err());
+        }
     }
 
     #[test]

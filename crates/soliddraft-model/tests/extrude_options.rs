@@ -3,12 +3,13 @@
 
 use std::sync::Arc;
 
-use soliddraft_kernel_api::{FaceId, Kernel, Vec3};
+use soliddraft_kernel_api::{BooleanOp, FaceId, Kernel, Vec3};
 use soliddraft_kernel_catallax::CatallaxKernel;
 use soliddraft_model::sketch::{EntityKind, P2, Sketch, solve::solve};
 use soliddraft_model::{
     Command, Contour, DatumPlane, Document, EndCondition, ExtrudeFeature, ExtrudeOp, ExtrudeOptions, ExtrudeStart,
-    FeatureId, FeatureKind, FeatureStatus, Generator, ProfileSource, SketchFeature, SketchPlane, ThinFeature, ThinSide,
+    FeatureId, FeatureKind, FeatureStatus, Generator, PlaneRef, ProfileSource, SketchFeature, SketchPlane, ThinFeature,
+    ThinSide,
 };
 
 fn kernel() -> Arc<dyn Kernel> {
@@ -380,27 +381,177 @@ fn selected_contours_extrude_only_the_chosen_regions() {
     reopened(&back);
 }
 
-#[test]
-fn a_start_on_a_plane_that_is_not_parallel_is_refused_by_name() {
-    let mut d = doc();
+/// A wedge 40 mm wide and 40 mm deep whose top falls from 30 mm at x = -20 to 10 mm
+/// at x = 20: 32000 cubic millimetres.
+fn wedge(doc: &mut Document) -> FeatureId {
     let s = add(
-        &mut d,
-        sketch(top(0.0), |s| {
-            s.rectangle(P2::new(0.0, 0.0), 20.0, 10.0).unwrap();
+        doc,
+        sketch(SketchPlane::Datum { datum: DatumPlane::Front, offset: 0.0 }, |s| {
+            s.polyline_loop(&[P2::new(-20.0, 0.0), P2::new(20.0, 0.0), P2::new(20.0, 10.0), P2::new(-20.0, 30.0)])
+                .unwrap();
         }),
     );
-    let start = |datum| ExtrudeOptions {
-        from: Some(ExtrudeStart::Surface { plane: soliddraft_model::PlaneRef::Datum { datum, offset: 3.0 } }),
-        ..Default::default()
-    };
-    let e = add(&mut d, extrude(s, ExtrudeOp::Boss, blind(10.0), false, start(DatumPlane::Top)));
+    let both = ExtrudeOptions { direction2: Some(blind(20.0)), ..Default::default() };
+    add(doc, extrude(s, ExtrudeOp::Boss, blind(20.0), false, both))
+}
+
+const WEDGE: f64 = 32000.0;
+
+/// A face leaning like the wedge's top, its centroid above or below `z`.
+fn sloping(doc: &Document, above: bool, z: f64) -> FaceId {
+    let t = doc.kernel().topology(doc.body().unwrap()).unwrap();
+    t.faces
+        .iter()
+        .find(|f| {
+            f.normal.is_some_and(|n| (n.x - 0.5 / 1.25f64.sqrt()).abs() < 1e-9 && n.z > 0.0)
+                && (f.centroid.z > z) == above
+        })
+        .unwrap()
+        .id
+}
+
+fn from_surface(plane: PlaneRef) -> ExtrudeOptions {
+    ExtrudeOptions { from: Some(ExtrudeStart::Surface { plane }), ..Default::default() }
+}
+
+fn top_square(doc: &mut Document) -> FeatureId {
+    add(
+        doc,
+        sketch(top(0.0), |s| {
+            s.rectangle(P2::new(0.0, 0.0), 6.0, 6.0).unwrap();
+        }),
+    )
+}
+
+#[test]
+fn a_start_on_a_sloping_face_follows_it_flips_and_carries_a_later_feature() {
+    let mut d = doc();
+    wedge(&mut d);
+    close(volume(&d), WEDGE, "the wedge");
+    let face = d.face_ref(sloping(&d, false, 22.0)).unwrap();
+    let s = top_square(&mut d);
+    let from = from_surface(PlaneRef::Face { face });
+    let e = add(&mut d, extrude(s, ExtrudeOp::Boss, blind(5.0), false, from.clone()));
     all_ok(&d);
-    close(bounds(&d).0.z, 3.0, "a parallel plane 3 mm up is the start");
-    edit(&mut d, e, extrude(s, ExtrudeOp::Boss, blind(10.0), false, start(DatumPlane::Front)));
-    match d.status(e) {
-        Some(FeatureStatus::Failed(message)) => assert!(message.contains("coming soon"), "{message}"),
-        other => panic!("a tilted start is refused: {other:?}"),
-    }
+    // Whatever the slope, a sweep 5 mm along the direction from it holds area x depth.
+    close(volume(&d), WEDGE + 180.0, "a 6 x 6 boss 5 mm from the slope");
+    let t = d.kernel().topology(d.body().unwrap()).unwrap();
+    let cap = t.face(sloping(&d, true, 22.0)).unwrap().centroid;
+    close(cap.z, 25.0, "the end cap leans with the slope, 5 mm above it");
+    close(cap.x, 0.0, "over the square");
+    edit(&mut d, e, extrude(s, ExtrudeOp::Boss, blind(8.0), false, from.clone()));
+    close(volume(&d), WEDGE + 288.0, "an 8 mm boss");
+    // Flipped as a cut, it goes into the wedge from the slope.
+    edit(&mut d, e, extrude(s, ExtrudeOp::Cut, blind(8.0), true, from.clone()));
+    all_ok(&d);
+    close(volume(&d), WEDGE - 288.0, "an 8 mm pocket under the slope");
+    // Through all from the slope down: the wedge is 20 mm tall on average under the square.
+    edit(&mut d, e, extrude(s, ExtrudeOp::Cut, EndCondition::ThroughAll, true, from.clone()));
+    all_ok(&d);
+    close(volume(&d), WEDGE - 720.0, "a pocket from the slope to the bottom");
+    edit(&mut d, e, extrude(s, ExtrudeOp::Boss, blind(5.0), false, from));
+    let mut back = reopened(&d);
+    let cap = back.face_ref(sloping(&back, true, 22.0)).unwrap();
+    assert_eq!(cap.feature, e, "the end cap is the boss's");
+    // A later hole through all of it: 20 mm of wedge and 5 mm of boss on average.
+    let cut = later_cut(&mut back, 4.0);
+    assert_eq!(back.status(cut), Some(&FeatureStatus::Ok));
+    close(volume(&back), WEDGE + 180.0 - std::f64::consts::PI * 4.0 * 25.0, "the later hole");
+    reopened(&back);
+}
+
+#[test]
+fn a_tilted_plane_or_another_bodys_face_starts_a_new_body() {
+    let mut d = doc();
+    wedge(&mut d);
+    let face = d.face_ref(sloping(&d, false, 22.0)).unwrap();
+    let plane = add(&mut d, FeatureKind::ReferencePlane(SketchPlane::FaceOffset { face: face.clone(), offset: 3.0 }));
+    let s = top_square(&mut d);
+    // Merge result off: the extrusion is the first feature of body 1.
+    let own = |d: &mut Document, kind| {
+        d.execute(Command::AddFeatureInBody { body: 1, kind, via_assistant: false, position: None })
+            .unwrap()
+            .created
+            .unwrap()
+    };
+    let in_body = |d: &Document, key: u32| {
+        let body = d.live_bodies().into_iter().find(|(body, _)| *body == key).unwrap().1;
+        d.kernel().mass_properties(body).unwrap().volume
+    };
+    let e =
+        own(&mut d, extrude(s, ExtrudeOp::Boss, blind(5.0), false, from_surface(PlaneRef::Feature { feature: plane })));
+    all_ok(&d);
+    close(in_body(&d, 1), 180.0, "a new body 5 mm from the tilted plane");
+    close(in_body(&d, 0), WEDGE, "the wedge is untouched");
+    // Direction 2 and Flip keep working from a tilted start.
+    let both = ExtrudeOptions { direction2: Some(blind(2.0)), ..from_surface(PlaneRef::Feature { feature: plane }) };
+    edit(&mut d, e, extrude(s, ExtrudeOp::Boss, blind(5.0), true, both));
+    all_ok(&d);
+    close(in_body(&d, 1), 252.0, "5 mm one way and 2 mm the other");
+    // A face of the other body starts it too.
+    edit(&mut d, e, extrude(s, ExtrudeOp::Boss, blind(5.0), false, from_surface(PlaneRef::Face { face })));
+    all_ok(&d);
+    close(in_body(&d, 1), 180.0, "a new body on the wedge's slope");
+    // So does a vertex of the other body: the wedge's highest corner, 30 mm up.
+    let t = d.kernel().topology(d.body_after(plane).unwrap()).unwrap();
+    let top = t.vertices.iter().find(|v| (v.position.z - 30.0).abs() < 1e-9).unwrap().id;
+    let vertex = d.vertex_ref(top).unwrap();
+    let at_vertex = ExtrudeOptions { from: Some(ExtrudeStart::Vertex { vertex }), ..Default::default() };
+    edit(&mut d, e, extrude(s, ExtrudeOp::Boss, blind(5.0), false, at_vertex));
+    all_ok(&d);
+    close(in_body(&d, 1), 180.0, "a new body from the corner's height");
+    let lowest = d.kernel().topology(d.body_after(e).unwrap()).unwrap();
+    let floor = lowest.faces.iter().find(|f| f.normal.is_some_and(|n| n.z < -1.0 + 1e-9)).unwrap();
+    close(floor.centroid.z, 30.0, "the new body starts at the corner's height");
+    let back = Document::from_bytes(&d.to_bytes().unwrap(), kernel()).unwrap();
+    assert_eq!(back.part_json(), d.part_json(), "the truth round-trips");
+    assert_eq!(back.geometry_hash(), d.geometry_hash());
+    all_ok(&back);
+    close(in_body(&back, 1), 180.0, "the reopened new body");
+    close(in_body(&back, 0), WEDGE, "the reopened wedge");
+}
+
+#[test]
+fn starts_that_cannot_be_built_are_refused_by_name() {
+    let mut d = doc();
+    wedge(&mut d);
+    let face = d.face_ref(sloping(&d, false, 22.0)).unwrap();
+    let s = top_square(&mut d);
+    let refused = |d: &Document, id: FeatureId, says: &str| match d.status(id) {
+        Some(FeatureStatus::Failed(message)) => assert!(message.contains(says), "{message}"),
+        other => panic!("refused, saying {says}: {other:?}"),
+    };
+    // The Front plane holds the Top sketch's normal, so the extrusion never leaves it.
+    let front = from_surface(PlaneRef::Datum { datum: DatumPlane::Front, offset: 3.0 });
+    let e = add(&mut d, extrude(s, ExtrudeOp::Boss, blind(5.0), false, front));
+    refused(&d, e, "contains the extrusion direction");
+    // Up to next is found only from a parallel start.
+    let slope = from_surface(PlaneRef::Face { face });
+    edit(&mut d, e, extrude(s, ExtrudeOp::Boss, EndCondition::UpToNext, false, slope.clone()));
+    refused(&d, e, "Up to next");
+    // A curved face is kept and refused by name: the kernel cannot cap on it yet.
+    let mut c = doc();
+    let round = add(
+        &mut c,
+        sketch(SketchPlane::Datum { datum: DatumPlane::Front, offset: 0.0 }, |s| {
+            s.circle_at(P2::new(0.0, 0.0), 20.0).unwrap();
+        }),
+    );
+    let both = ExtrudeOptions { direction2: Some(blind(20.0)), ..Default::default() };
+    add(&mut c, extrude(round, ExtrudeOp::Boss, blind(20.0), false, both));
+    let t = c.kernel().topology(c.body().unwrap()).unwrap();
+    let curved = c.face_ref(t.faces.iter().find(|f| f.normal.is_none()).unwrap().id).unwrap();
+    let s2 = top_square(&mut c);
+    let on_curve =
+        add(&mut c, extrude(s2, ExtrudeOp::Boss, blind(5.0), false, from_surface(PlaneRef::Face { face: curved })));
+    refused(&c, on_curve, "curved face");
+    let back = Document::from_bytes(&c.to_bytes().unwrap(), kernel()).unwrap();
+    assert_eq!(back.part_json(), c.part_json(), "the curved start is saved for when the kernel can build it");
+    // A parallel plane still starts it as before.
+    let parallel = from_surface(PlaneRef::Datum { datum: DatumPlane::Top, offset: 31.0 });
+    edit(&mut d, e, extrude(s, ExtrudeOp::Boss, blind(5.0), false, parallel));
+    all_ok(&d);
+    close(bounds(&d).1.z, 36.0, "a parallel plane 31 mm up is the start");
 }
 
 #[test]
@@ -440,4 +591,195 @@ fn format_6_is_written_only_for_options_and_older_files_still_open() {
     assert!(x.options.is_default());
     assert_eq!(serde_json::from_str::<serde_json::Value>(&old.part_json()).unwrap(), legacy, "written back unchanged");
     close(volume(&old), 1000.0, "the legacy block");
+}
+
+/// Adds a feature to body `key`: a body of its own when no feature has used the key.
+fn own(doc: &mut Document, key: u32, kind: FeatureKind) -> FeatureId {
+    doc.execute(Command::AddFeatureInBody { body: key, kind, via_assistant: false, position: None })
+        .unwrap()
+        .created
+        .unwrap()
+}
+
+fn live(doc: &Document, key: u32) -> soliddraft_kernel_api::BodyId {
+    doc.live_bodies().into_iter().find(|(body, _)| *body == key).expect("the body is live").1
+}
+
+/// The volume and centre of mass of body `key`.
+fn mass(doc: &Document, key: u32) -> (f64, Vec3) {
+    let m = doc.kernel().mass_properties(live(doc, key)).unwrap();
+    (m.volume, m.centroid)
+}
+
+/// How far above the slope, measured straight up, a plane `offset` mm off it lies: the
+/// slope's normal leans 1 in 2 from the vertical.
+fn above_slope(offset: f64) -> f64 {
+    offset * 1.25f64.sqrt()
+}
+
+#[test]
+fn editing_a_named_start_plane_moves_the_extrusion_before_the_part_is_saved() {
+    let mut d = doc();
+    wedge(&mut d);
+    let face = d.face_ref(sloping(&d, false, 22.0)).unwrap();
+    let plane_at = |offset| FeatureKind::ReferencePlane(SketchPlane::FaceOffset { face: face.clone(), offset });
+    let plane = add(&mut d, plane_at(3.0));
+    let s = top_square(&mut d);
+    let from = from_surface(PlaneRef::Feature { feature: plane });
+    let e = own(&mut d, 1, extrude(s, ExtrudeOp::Boss, blind(5.0), false, from.clone()));
+    all_ok(&d);
+    // Over the square the plane averages 20 mm plus its rise; the boss goes 5 mm up from it.
+    let (v, c) = mass(&d, 1);
+    close(v, 180.0, "a 6 x 6 boss 5 mm long");
+    close(c.z, 20.0 + above_slope(3.0) + 2.5, "the boss starts on the plane 3 mm off the slope");
+    // Only the plane changes. The sketch, the extrusion and its input stay as they were.
+    edit(&mut d, plane, plane_at(5.0));
+    all_ok(&d);
+    let (v, c) = mass(&d, 1);
+    close(v, 180.0, "the same boss");
+    close(c.z, 20.0 + above_slope(5.0) + 2.5, "the boss follows the plane to 5 mm");
+    let back = Document::from_bytes(&d.to_bytes().unwrap(), kernel()).unwrap();
+    assert_eq!(back.geometry_hash(), d.geometry_hash(), "the part on screen is the part saved");
+    close(mass(&back, 1).1.z, c.z, "the reopened boss");
+    // Flip sends it down from the same plane: the centre moves 5 mm, through save and reopen.
+    edit(&mut d, e, extrude(s, ExtrudeOp::Boss, blind(5.0), true, from));
+    all_ok(&d);
+    let (v, c) = mass(&d, 1);
+    close(v, 180.0, "the flipped boss");
+    close(c.z, 20.0 + above_slope(5.0) - 2.5, "the flipped boss hangs under the plane");
+    let back = Document::from_bytes(&d.to_bytes().unwrap(), kernel()).unwrap();
+    assert_eq!(back.part_json(), d.part_json(), "the truth round-trips");
+    assert_eq!(back.geometry_hash(), d.geometry_hash());
+    all_ok(&back);
+    close(mass(&back, 1).1.z, c.z, "the reopened flipped boss");
+}
+
+#[test]
+fn up_to_a_face_that_crosses_a_tilted_start_is_refused_by_name() {
+    let mut d = doc();
+    wedge(&mut d);
+    let face = d.face_ref(sloping(&d, false, 22.0)).unwrap();
+    // On the slope: 18.5 to 21.5 mm up over the square. 5 mm under it: wholly below 20 mm.
+    let on = add(&mut d, FeatureKind::ReferencePlane(SketchPlane::FaceOffset { face: face.clone(), offset: 0.0 }));
+    let under = add(&mut d, FeatureKind::ReferencePlane(SketchPlane::FaceOffset { face, offset: -5.0 }));
+    // A block 50 x 50 mm from 5 mm below the Top plane, cut off flat at 20 mm.
+    let block = add(
+        &mut d,
+        sketch(top(-5.0), |s| {
+            s.rectangle(P2::new(0.0, 0.0), 50.0, 50.0).unwrap();
+        }),
+    );
+    add(&mut d, extrude(block, ExtrudeOp::Boss, blind(30.0), false, Default::default()));
+    let lid = add(
+        &mut d,
+        sketch(top(20.0), |s| {
+            s.rectangle(P2::new(0.0, 0.0), 60.0, 60.0).unwrap();
+        }),
+    );
+    add(&mut d, extrude(lid, ExtrudeOp::Cut, blind(20.0), false, Default::default()));
+    all_ok(&d);
+    const BLOCK: f64 = 50.0 * 50.0 * 25.0;
+    close(volume(&d), BLOCK, "the block cut flat at 20 mm");
+    let flat = d.face_ref(face_facing(&d, Vec3::Z, 20.0)).unwrap();
+    let up_to = EndCondition::UpToFace { face: flat };
+    let s = top_square(&mut d);
+    // From the plane under the slope up to the flat top: a pocket 5 mm deep across the
+    // slope's normal, so area times the plane's rise below 20 mm.
+    let below = from_surface(PlaneRef::Feature { feature: under });
+    let e = add(&mut d, extrude(s, ExtrudeOp::Cut, up_to.clone(), false, below));
+    all_ok(&d);
+    close(volume(&d), BLOCK - 36.0 * above_slope(5.0), "a pocket from the tilted plane up to the top");
+    // From the slope itself the top crosses the start: half the square starts above it.
+    let refused = |d: &Document| match d.status(e) {
+        Some(FeatureStatus::Failed(message)) => {
+            assert!(message.contains("crosses the start"), "{message}");
+            close(volume(d), BLOCK, "nothing is built");
+        }
+        other => panic!("refused by name: {other:?}"),
+    };
+    let crossing = from_surface(PlaneRef::Feature { feature: on });
+    edit(&mut d, e, extrude(s, ExtrudeOp::Boss, up_to.clone(), false, crossing.clone()));
+    refused(&d);
+    // Direction 2 meets the same limit the other way round.
+    let second = ExtrudeOptions { direction2: Some(up_to), ..crossing };
+    edit(&mut d, e, extrude(s, ExtrudeOp::Boss, blind(2.0), true, second));
+    refused(&d);
+    let back = Document::from_bytes(&d.to_bytes().unwrap(), kernel()).unwrap();
+    assert_eq!(back.part_json(), d.part_json(), "the refused extrusion is kept");
+    refused(&back);
+}
+
+#[test]
+fn a_start_on_a_face_split_into_coplanar_pieces_uses_their_plane() {
+    let mut d = doc();
+    wedge(&mut d);
+    let whole = d.face_ref(sloping(&d, false, 22.0)).unwrap();
+    // A slot 2 mm wide across the slope at x = 10, from 14 mm up, splits it in two
+    // pieces in one plane: 80 cubic millimetres.
+    let slot = add(
+        &mut d,
+        sketch(top(14.0), |s| {
+            s.rectangle(P2::new(10.0, 0.0), 2.0, 60.0).unwrap();
+        }),
+    );
+    add(&mut d, extrude(slot, ExtrudeOp::Cut, blind(20.0), false, Default::default()));
+    all_ok(&d);
+    close(volume(&d), WEDGE - 80.0, "the slot");
+    // A piece is named as the viewport names a pick to start from: by the plane it shares.
+    let left = d.plane_ref(sloping(&d, true, 14.0)).unwrap();
+    let right = d.plane_ref(sloping(&d, false, 14.0)).unwrap();
+    // The slope picked before the split, or either piece picked after it, starts the boss.
+    let s = top_square(&mut d);
+    let e = add(&mut d, extrude(s, ExtrudeOp::Boss, blind(5.0), false, from_surface(PlaneRef::Face { face: whole })));
+    for face in [None, Some(left), Some(right)] {
+        if let Some(face) = face {
+            edit(&mut d, e, extrude(s, ExtrudeOp::Boss, blind(5.0), false, from_surface(PlaneRef::Face { face })));
+        }
+        all_ok(&d);
+        close(volume(&d), WEDGE - 80.0 + 180.0, "a 6 x 6 boss 5 mm from the slope");
+        let t = d.kernel().topology(d.body().unwrap()).unwrap();
+        let leaning = |n: Vec3| (n.x - 0.5 / 1.25f64.sqrt()).abs() < 1e-9 && n.z > 0.0;
+        let cap = t.faces.iter().find(|f| f.normal.is_some_and(leaning) && f.centroid.x.abs() < 1e-6).unwrap();
+        close(cap.centroid.z, 25.0, "the end cap leans with the slope, 5 mm above it");
+    }
+    reopened(&d);
+}
+
+#[test]
+fn a_face_that_a_combine_carried_onto_another_body_starts_a_new_body() {
+    let mut d = doc();
+    wedge(&mut d);
+    // A block 20 x 20 x 8 mm as body 1, half in the wedge, then joined to it.
+    let block = add(
+        &mut d,
+        sketch(top(0.0), |s| {
+            s.rectangle(P2::new(25.0, 0.0), 20.0, 20.0).unwrap();
+        }),
+    );
+    own(&mut d, 1, extrude(block, ExtrudeOp::Boss, blind(8.0), false, Default::default()));
+    let combine = own(&mut d, 0, FeatureKind::Combine { operation: BooleanOp::Union, tool: 1 });
+    all_ok(&d);
+    assert_eq!(d.live_bodies().len(), 1, "the block is part of the wedge");
+    close(mass(&d, 0).0, WEDGE + 15.0 * 20.0 * 8.0, "the wedge and the block outside it");
+    // The block's top, on the joined body, starts a new body 8 mm up.
+    let t = d.kernel().topology(live(&d, 0)).unwrap();
+    let top_face = t
+        .faces
+        .iter()
+        .find(|f| f.normal.is_some_and(|n| n.z > 1.0 - 1e-9) && (f.centroid.z - 8.0).abs() < 1e-9)
+        .unwrap();
+    let face = d.face_ref(top_face.id).unwrap();
+    let s = top_square(&mut d);
+    let e = own(&mut d, 2, extrude(s, ExtrudeOp::Boss, blind(5.0), false, from_surface(PlaneRef::Face { face })));
+    assert_eq!(d.status(e), Some(&FeatureStatus::Ok), "the start face is on the joined body");
+    let (v, c) = mass(&d, 2);
+    close(v, 180.0, "a new body 5 mm long");
+    close(c.z, 10.5, "from the block's top at 8 mm");
+    close(mass(&d, 0).0, WEDGE + 2400.0, "the joined body is untouched");
+    assert!(d.body_features(0).contains(&combine));
+    let back = Document::from_bytes(&d.to_bytes().unwrap(), kernel()).unwrap();
+    assert_eq!(back.part_json(), d.part_json(), "the truth round-trips");
+    assert_eq!(back.geometry_hash(), d.geometry_hash());
+    all_ok(&back);
+    close(mass(&back, 2).1.z, 10.5, "the reopened new body");
 }

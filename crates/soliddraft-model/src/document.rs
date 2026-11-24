@@ -611,6 +611,12 @@ impl Document {
         self.body_states(end).get(&key).copied()
     }
 
+    /// The body key that holds what body `key` became by `end`: `key`, or the target of
+    /// each Combine that took it as its tool.
+    pub(crate) fn surviving_key(&self, key: u32, end: usize) -> u32 {
+        self.built.iter().take(end).fold(key, |key, b| if b.consumed_tool == Some(key) { b.body_key } else { key })
+    }
+
     fn body_states(&self, end: usize) -> BTreeMap<u32, BodyId> {
         let mut bodies = BTreeMap::new();
         for b in self.built.iter().take(end) {
@@ -735,6 +741,15 @@ impl Document {
     pub fn resolve_face(&self, r: &FaceRef, body: BodyId) -> Result<FaceId, RepairNeeded> {
         let t = self.view_of(body).map_err(|e| kernel_repair(ReferenceSlot::SketchPlane, e))?;
         reference::resolve_face(r, &View { topology: &t }, &self.name_map())
+            .map_err(|u| u.into_repair(ReferenceSlot::SketchPlane))
+    }
+
+    /// Finds the plane a face reference names in a body: the one face, or the first of
+    /// the pieces a later feature split it into when they all lie in one plane, since
+    /// any of them gives the same plane.
+    pub fn resolve_plane_face(&self, r: &FaceRef, body: BodyId) -> Result<FaceId, RepairNeeded> {
+        let t = self.view_of(body).map_err(|e| kernel_repair(ReferenceSlot::SketchPlane, e))?;
+        reference::resolve_plane(r, &View { topology: &t }, &self.name_map())
             .map_err(|u| u.into_repair(ReferenceSlot::SketchPlane))
     }
 

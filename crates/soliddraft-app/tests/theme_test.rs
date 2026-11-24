@@ -155,6 +155,20 @@ fn the_bracket_in_light_and_dark() {
     assert_eq!(theme::active_theme_id(), "imported");
     assert_eq!(theme::accent(), egui::Color32::from_rgb(255, 201, 78));
     assert_eq!(theme::logo(), egui::Color32::from_rgb(190, 36, 79));
+    capture_picture(&mut custom, "workshop.png");
+    let original = custom.state().state.doc.name.clone();
+    custom.get_by_label("New tab").click();
+    custom.run_steps(4);
+    custom.get_by_label("New part (.dwprt)").click();
+    custom.run_steps(6);
+    capture_picture(&mut custom, "workshop-new-part.png");
+    custom.get_by_label(&format!("{original}.dwprt")).click();
+    custom.run_steps(6);
+    capture_picture(&mut custom, "workshop-returned.png");
+    let _ = std::fs::remove_dir_all(config);
+}
+
+fn capture_picture(custom: &mut Harness<'_, SolidDraftApp>, file: &str) {
     let view = custom.state().state.viewport.rect;
     let image = custom.render().expect("the imported theme and background render");
     let x = view.left() as u32 + 20;
@@ -167,6 +181,5 @@ fn the_bracket_in_light_and_dark() {
         })
         .count();
     assert!(painted > 4000, "the saved PNG painted {painted} background pixels");
-    image.save(out_dir().join("workshop.png")).unwrap();
-    let _ = std::fs::remove_dir_all(config);
+    image.save(out_dir().join(file)).unwrap();
 }

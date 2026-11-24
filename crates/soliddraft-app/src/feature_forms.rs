@@ -990,11 +990,10 @@ fn shared(
                     }
                 }
             }
-            ui.colored_label(crate::theme::muted(), if choices.contours.is_empty() {
-                "None ticked: every contour"
-            } else {
-                "Only the ticked contours"
-            });
+            ui.colored_label(
+                crate::theme::muted(),
+                if choices.contours.is_empty() { "None ticked: every contour" } else { "Only the ticked contours" },
+            );
         }
         _ => {}
     }

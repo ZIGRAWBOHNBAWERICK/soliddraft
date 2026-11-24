@@ -268,7 +268,8 @@ pub fn window(ctx: &egui::Context, state: &mut AppState) {
                     ui.vertical(|ui| {
                         ui.add(egui::Label::new(&row.why).wrap());
                         if let Some(note) = &row.not_checked {
-                            let message = egui::RichText::new(format!("Not checked: {note}")).color(crate::theme::muted());
+                            let message =
+                                egui::RichText::new(format!("Not checked: {note}")).color(crate::theme::muted());
                             ui.add(egui::Label::new(message).wrap());
                         }
                     });

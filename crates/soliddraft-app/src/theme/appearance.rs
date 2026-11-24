@@ -251,7 +251,7 @@ pub struct Appearance {
     pub imported: Option<ThemeFile>,
     pub background: Background,
     pub background_color: Rgb,
-    picture: Option<Picture>,
+    picture: Option<Arc<Picture>>,
     pub colors: ViewColors,
 }
 
@@ -289,10 +289,11 @@ impl Appearance {
             self.selected = Self::default().selected;
         }
         if let Some(picture) = &mut self.picture {
-            if picture.png.len() <= STORED_PICTURE_LIMIT {
-                picture.image = decode_png(&picture.png, 1280).ok().map(Arc::new);
-            }
-            if picture.image.is_none() {
+            let picture = Arc::make_mut(picture);
+            picture.image = parse_png_hex(&picture.png).and_then(|bytes| decode_png(&bytes, 1280).ok()).map(Arc::new);
+            if let Some(image) = &picture.image {
+                picture.dark = dark_picture(image);
+            } else {
                 self.picture = None;
             }
         }
@@ -320,7 +321,7 @@ impl Appearance {
             image = resize(&image, max * 3 / 4, max);
         };
         let dark = dark_picture(&image);
-        self.picture = Some(Picture { name, png, dark, image: Some(Arc::new(image)) });
+        self.picture = Some(Arc::new(Picture { name, png: png_hex(&png), dark, image: Some(Arc::new(image)) }));
         self.background = Background::Picture;
         Ok(())
     }
@@ -348,7 +349,8 @@ impl Appearance {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 struct Picture {
     name: String,
-    png: Vec<u8>,
+    png: String,
+    #[serde(skip)]
     dark: bool,
     #[serde(skip)]
     image: Option<Arc<RgbaImage>>,
@@ -358,6 +360,32 @@ impl PartialEq for Picture {
     fn eq(&self, other: &Self) -> bool {
         self.name == other.name && self.png == other.png
     }
+}
+
+// A string keeps a picture within the browser settings quota even with pretty JSON.
+fn png_hex(png: &[u8]) -> String {
+    const DIGITS: &[u8; 16] = b"0123456789abcdef";
+    let mut encoded = String::with_capacity(2 * png.len());
+    for &byte in png {
+        encoded.push(char::from(DIGITS[usize::from(byte >> 4)]));
+        encoded.push(char::from(DIGITS[usize::from(byte & 0x0f)]));
+    }
+    encoded
+}
+
+fn parse_png_hex(encoded: &str) -> Option<Vec<u8>> {
+    if encoded.len() > 2 * STORED_PICTURE_LIMIT || !encoded.len().is_multiple_of(2) {
+        return None;
+    }
+    encoded
+        .as_bytes()
+        .chunks_exact(2)
+        .map(|pair| {
+            let hi = char::from(pair[0]).to_digit(16)?;
+            let lo = char::from(pair[1]).to_digit(16)?;
+            Some(((hi << 4) | lo) as u8)
+        })
+        .collect()
 }
 
 fn decode_png(bytes: &[u8], max_dimension: u32) -> Result<RgbaImage, String> {

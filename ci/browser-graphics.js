@@ -51,11 +51,11 @@ const initial = await until(viewport, view => view?.curves_settled && view.trian
 if (query.get('graphics') === 'restart') {
   await until(settings, s => s?.preset === 'quality' && s.curved_surfaces === 'fine', 'Reload lost the graphics preset');
   const baseline = await page.eval(() => JSON.parse(sessionStorage.getItem('graphics-check-baseline')));
-  if (!baseline || initial.angle_deg !== 10 || initial.triangles <= baseline.coarse
-      || initial.triangles !== baseline.fine) {
-    throw new Error(`Reload did not draw the restored quality: ${JSON.stringify(initial)}`);
-  }
-  console.log(`PASS restart restored Quality and drew ${initial.triangles} triangles`);
+  if (!baseline) throw new Error('Run the graphics presets before the restart check');
+  const restored = await until(viewport, view => view?.curves_settled && view.angle_deg === 10
+    && view.triangles > baseline.coarse && view.triangles === baseline.fine,
+  'Reload did not draw the restored quality');
+  console.log(`PASS restart restored Quality and drew ${restored.triangles} triangles`);
 } else {
   await page.press('Control+Shift+P');
   await until(

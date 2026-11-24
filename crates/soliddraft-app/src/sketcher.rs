@@ -202,6 +202,7 @@ pub fn run(
     resp: &egui::Response,
     grid: Option<crate::viewport::grid::Spacing>,
     light_sheet: bool,
+    curve_halo: Option<Color32>,
 ) -> Vec<AppAction> {
     let mut actions = Vec::new();
     let frame = Frame { plane: s.plane, camera, rect };
@@ -393,7 +394,7 @@ pub fn run(
     // Drawing.
     paint_plane(&painter, &frame, doc, &s.sketch, light_sheet);
     paint_regions(&painter, &frame, s);
-    paint_entities(&painter, &frame, s);
+    paint_entities(&painter, &frame, s, curve_halo);
     paint_glyphs(&painter, s, &glyphs);
     paint_dimensions(&painter, &frame, s);
     paint_dimension_placing(&painter, &frame, s, hover_pos.and_then(|p| frame.plane_at(p)));
@@ -1533,7 +1534,7 @@ fn dashed(painter: &egui::Painter, pts: &[Pos2], stroke: Stroke) {
     painter.add(egui::Shape::dashed_line(pts, stroke, 5.0, 4.0));
 }
 
-fn paint_entities(painter: &egui::Painter, frame: &Frame<'_>, s: &SketchSession) {
+fn paint_entities(painter: &egui::Painter, frame: &Frame<'_>, s: &SketchSession, curve_halo: Option<Color32>) {
     let selected = |sel: SketchSel| s.selection.contains(&sel);
     let joined_points: std::collections::HashSet<_> =
         s.sketch.constraints.iter().flat_map(Constraint::points).collect();
@@ -1592,6 +1593,9 @@ fn paint_entities(painter: &egui::Painter, frame: &Frame<'_>, s: &SketchSession)
             || s.selection_box.as_ref().is_some_and(|b| b.picks.contains(&SketchSel::Entity(e.id)));
         for path in e.polylines(96) {
             let pts: Vec<Pos2> = path.into_iter().filter_map(|p| frame.screen(p)).collect();
+            if let Some(halo) = curve_halo.filter(|_| pts.len() >= 2 && !e.is_point()) {
+                painter.add(egui::Shape::line(pts.clone(), Stroke::new(4.5, halo)));
+            }
             if is_sel || is_related || is_hover {
                 // The hover halo is the accent at a strength that reads on light and dark
                 // sheets; the selection wash alone vanished under a thin line.
@@ -2808,6 +2812,7 @@ pub fn paint_passive(
     plane: Plane,
     sketch: &Sketch,
     color: Color32,
+    curve_halo: Option<Color32>,
 ) {
     let frame = Frame { plane, camera, rect };
     for e in sketch.drawn() {
@@ -2819,6 +2824,9 @@ pub fn paint_passive(
                     painter.rect_filled(Rect::from_center_size(*p, vec2(4.0, 4.0)), CornerRadius::ZERO, color);
                 }
             } else if pts.len() >= 2 {
+                if let Some(halo) = curve_halo {
+                    painter.add(egui::Shape::line(pts.clone(), Stroke::new(4.5, halo)));
+                }
                 if e.construction {
                     dashed(painter, &pts, stroke);
                 } else {

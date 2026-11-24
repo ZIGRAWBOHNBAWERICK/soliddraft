@@ -181,6 +181,10 @@ pub struct GridPlane {
 impl GridPlane {
     pub const GROUND: GridPlane = GridPlane { origin: DVec3::ZERO, u: DVec3::X, v: DVec3::Y, pull: -0.5 };
 
+    pub fn facing(camera: &Camera) -> GridPlane {
+        GridPlane { origin: DVec3::ZERO, u: camera.right().as_dvec3(), v: camera.up().as_dvec3(), pull: -0.5 }
+    }
+
     pub fn of_sketch(plane: &Plane) -> GridPlane {
         let dvec = |v: soliddraft_kernel_api::Vec3| dvec3(v.x, v.y, v.z);
         GridPlane { origin: dvec(plane.origin), u: dvec(plane.x_dir), v: dvec(plane.y_dir()), pull: 0.5 }

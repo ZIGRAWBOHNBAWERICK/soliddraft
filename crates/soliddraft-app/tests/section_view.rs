@@ -262,3 +262,34 @@ fn inspect_and_navigation_section_drag_flip_face_and_close() {
         assert_eq!(state.export_part(soliddraft_exchange::Format::Stl).unwrap().bytes, export_before);
     });
 }
+
+#[test]
+fn turning_off_the_preview_tint_keeps_the_section_cap_fill() {
+    let case = ribbon::case("section-cap-tint");
+    let mut app = ribbon::app(ribbon::plate());
+    case.run(&mut app, |app| {
+        click(app, "Inspect tab");
+        click(app, "Section");
+        ready(app);
+        let view = app.state().state.viewport.rect;
+        app.hover_at(pos2(view.center().x, 4.0));
+        app.run_steps(4);
+        let viewport = |path: std::path::PathBuf| {
+            let image = image::open(path).unwrap().to_rgba8();
+            image::imageops::crop_imm(
+                &image,
+                view.left() as u32,
+                view.top() as u32,
+                view.width() as u32,
+                view.height() as u32,
+            )
+            .to_image()
+        };
+        let tinted = viewport(case.frame(app, "cap-with-preview-tint"));
+        app.state_mut().state.graphics.tint_preview = false;
+        app.run_steps(4);
+        let plain = viewport(case.frame(app, "cap-without-preview-tint"));
+        let changed = tinted.pixels().zip(plain.pixels()).filter(|(a, b)| a != b).count();
+        assert_eq!(changed, 0, "the preview tint setting changed {changed} pixels of the section view");
+    });
+}

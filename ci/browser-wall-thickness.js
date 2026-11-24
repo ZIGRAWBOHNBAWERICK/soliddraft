@@ -1,25 +1,14 @@
 // Run through chrome-devtools-axi run at the packaged app's root in a 1400 x 813 page.
 // Serve graded-wall.json as recipe.json inside /fixtures/graded-wall.dwprt.
+const { axiCanvas } = await import(`${process.cwd()}/ci/canvas-browser.mjs`);
+const canvas = axiCanvas(page);
 function check(condition, message) {
   if (!condition) throw new Error(message);
 }
 
 await page.wait('#status.hidden', 60000);
 await page.eval(() => {
-  const canvas = document.getElementById('soliddraft');
-  canvas.focus();
-  window.sdClick = async ({ x, y }) => {
-    const at = { clientX: x, clientY: y, bubbles: true, cancelable: true,
-      pointerId: 1, pointerType: 'mouse', isPrimary: true, button: 0 };
-    canvas.dispatchEvent(new PointerEvent('pointermove', { ...at, buttons: 0 }));
-    const pause = () => new Promise(resolve => setTimeout(resolve, 150));
-    await pause();
-    canvas.dispatchEvent(new PointerEvent('pointerdown', { ...at, buttons: 1 }));
-    await pause();
-    canvas.dispatchEvent(new PointerEvent('pointerup', { ...at, buttons: 0 }));
-    await pause();
-    return true;
-  };
+  document.getElementById('soliddraft').focus();
   const inputClick = HTMLInputElement.prototype.click;
   HTMLInputElement.prototype.click = function () {
     if (this.type !== 'file' || !window.sdUpload) return inputClick.call(this);
@@ -55,7 +44,7 @@ async function until(read, accept, message) {
   }
   throw new Error(`${message}. Last state: ${JSON.stringify(value)}`);
 }
-const click = at => page.eval(`sdClick(${JSON.stringify(at)})`);
+const click = ({ x, y }) => canvas.click([x, y]);
 const control = async name => {
   const controls = await until(() => drawn('shown_controls'), shown => shown[name], `Missing ${name}`);
   return controls[name];
@@ -65,6 +54,8 @@ async function command(label, id) {
   await page.press('Control+Shift+P');
   await control('Command palette');
   await page.type(label);
+  // The unfiltered palette can already contain this command in a different row.
+  await canvas.frames();
   await click(await control(`Command: ${id}`));
 }
 const builtWall = rows => !rows.Error && rows['Wall thickness'] === '1 mm wall' && Number(rows['Faces made']) > 0;
@@ -75,7 +66,7 @@ async function details(accept) {
   await click(options.details);
   const detail = await until(() => drawn('shown_details'),
     shown => shown.title === 'Shell1' && accept(Object.fromEntries(shown.rows ?? [])), 'Shell1 Details did not update');
-  await click(options.details);
+  await click((await drawn('shown_options')).details);
   await until(() => drawn('shown_details'), shown => !shown.title, 'Details stayed open');
   return Object.fromEntries(detail.rows);
 }

@@ -62,6 +62,10 @@ fn window() -> Window {
                         SAVES.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                         let _ = settings::save_shortcuts(&s);
                     }
+                    Change::Graphics(graphics) => {
+                        SAVES.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                        settings::save_graphics(&graphics).unwrap();
+                    }
                     _ => {}
                 }
             }
@@ -132,13 +136,15 @@ fn reserved_categories_are_not_finished_pages() {
             "navigation.view_keys",
             "viewport.grid_and_planes",
             "interface.shortcuts",
+            "appearance_graphics.appearance",
+            "appearance_graphics.graphics",
             "general_documents.autosave"
         ]
     );
     let reserved = preferences::reserved_categories();
     let labels: Vec<&str> = reserved.iter().map(|c| c.label).collect();
     assert!(!labels.contains(&"General and documents"), "General and documents has its Autosave page");
-    for label in ["Selection and editing", "Appearance and graphics", "Assistant"] {
+    for label in ["Selection and editing", "Assistant"] {
         assert!(labels.contains(&label), "{label} is reserved: {labels:?}");
     }
     assert!(preferences::reserved_categories().iter().all(|c| c.status == preferences::Status::Reserved));
@@ -153,10 +159,10 @@ fn reserved_categories_are_not_finished_pages() {
         assert!(w.query_by_label("Navigation preset").is_none());
     }
     search_for(&mut w, "appearance");
-    click(&mut w, "Appearance and graphics settings · Coming soon");
-    assert_eq!(w.state().page, "appearance_graphics");
+    click(&mut w, "Appearance and graphics > Graphics");
+    assert_eq!(w.state().page, preferences::GRAPHICS);
     assert!(w.state().search.is_empty());
-    assert!(w.query_by_label("Coming soon").is_some());
+    assert!(w.query_by_label("Graphics preset").is_some());
     click(&mut w, "Mouse");
     assert_eq!(w.state().page, preferences::MOUSE);
     assert!(w.query_by_label("Navigation preset").is_some());
@@ -215,6 +221,30 @@ fn search_finds_controls_presets_and_bindings() {
     assert_eq!(saves(), saves_before, "search changes nothing");
     assert_eq!(bytes(&dir), before);
     assert!(preferences::search("wheel").iter().all(|h| h.label.to_lowercase().contains("wheel")));
+}
+
+#[test]
+fn graphics_reports_unavailable_samples_and_keeps_the_preset() {
+    use soliddraft_app::graphics::{CurvedSurfaces, GraphicsPreset};
+
+    let (_guard, dir) = config_dir("graphics");
+    write(&dir, r#"{"appearance":{"theme":"dark"}}"#);
+    let mut w = window();
+    w.run_steps(2);
+    click(&mut w, "Graphics");
+    assert!(has(&w, "4× MSAA · Not available on this GPU"));
+    click(&mut w, "Performance");
+    let saved = settings::graphics();
+    assert_eq!(saved.preset, GraphicsPreset::Performance);
+    assert_eq!(saved.curved_surfaces, Some(CurvedSurfaces::Coarse));
+    assert_eq!(saved.samples, 1);
+    assert_eq!(file_json(&dir)["appearance"]["theme"], "dark");
+
+    click(&mut w, "Quality");
+    let saved = settings::graphics();
+    assert_eq!(saved.preset, GraphicsPreset::Quality);
+    assert_eq!(saved.curved_surfaces, Some(CurvedSurfaces::Fine));
+    assert_eq!(saved.samples, 1, "Quality respects the available samples");
 }
 
 /// Drags in the practice area with `button` held and `m` down.

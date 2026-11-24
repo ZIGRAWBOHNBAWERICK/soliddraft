@@ -1,9 +1,6 @@
 //! Clear Bench appearance settings through the real app and wgpu pipeline.
 //! Bracket frames are written under the temporary directory for review.
 //!
-//! The mode is process-wide (`theme::set_mode`), so switches run light then dark
-//! serially in one test.
-//!
 //! Skips itself when no GPU adapter is available (plain CI runners).
 
 use egui::{Key, Modifiers, vec2};
@@ -25,6 +22,37 @@ fn out_dir() -> PathBuf {
     let dir = std::env::temp_dir().join(format!("soliddraft-theme-frames-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     dir
+}
+
+/// Clear Bench as the test expects to see it, written out here rather than read from the
+/// theme code, so a wrong token fails the test even when the app paints it faithfully.
+struct ClearBench {
+    id: &'static str,
+    dark_chrome: bool,
+    panel: [u8; 4],
+    ribbon: [u8; 4],
+    accent: [u8; 4],
+}
+
+fn clear_bench(mode: Mode) -> ClearBench {
+    match mode {
+        // The D1 Clear Bench daylight frame: white panels, a pale strip and cobalt.
+        Mode::Light => ClearBench {
+            id: "clear_bench",
+            dark_chrome: false,
+            panel: [0xff, 0xff, 0xff, 255],
+            ribbon: [0xf5, 0xf7, 0xfa, 255],
+            accent: [0x1d, 0x52, 0xd6, 255],
+        },
+        // Clear Bench Dark: slate panels, a darker strip and a pale blue accent.
+        Mode::Dark => ClearBench {
+            id: "clear-bench-dark",
+            dark_chrome: true,
+            panel: [0x22, 0x2b, 0x39, 255],
+            ribbon: [0x1e, 0x25, 0x31, 255],
+            accent: [0x91, 0xba, 0xff, 255],
+        },
+    }
 }
 
 #[test]
@@ -55,11 +83,11 @@ fn the_bracket_in_light_and_dark() {
         harness.state_mut().state.push(AppAction::SetTheme(mode));
         harness.run_steps(6);
         assert_eq!(theme::mode(), mode, "the appearance preference is retained");
-        assert_eq!(theme::active_theme_id(), "clear_bench");
-        assert_eq!(theme::palette(), &theme::clear_bench::PALETTE);
+        let expected = clear_bench(mode);
+        assert_eq!(theme::active_theme_id(), expected.id);
         let style = harness.ctx.global_style();
-        assert!(!style.visuals.dark_mode, "Clear Bench has daylight chrome in either mode");
-        assert_eq!(style.visuals.panel_fill, egui::Color32::WHITE);
+        assert_eq!(style.visuals.dark_mode, expected.dark_chrome);
+        assert_eq!(style.visuals.panel_fill.to_array(), expected.panel);
         assert_eq!(style.visuals.widgets.inactive.corner_radius, egui::CornerRadius::same(6));
         let image = harness.render().expect("Clear Bench renders");
         // The tool strip's own ground shows in the gap between two of its cards.
@@ -67,13 +95,13 @@ fn the_bracket_in_light_and_dark() {
         let gap = (start.right() + 2.0) as u32;
         assert_eq!(
             image.get_pixel(gap, start.center().y as u32).0,
-            [0xf5, 0xf7, 0xfa, 255],
-            "the strip paints its daylight ground"
+            expected.ribbon,
+            "the strip paints the theme's ribbon ground"
         );
         assert_eq!(
             image.get_pixel((start.left() + 6.0) as u32, start.center().y as u32).0,
-            [0x1d, 0x52, 0xd6, 255],
-            "Start sketch paints solid cobalt"
+            expected.accent,
+            "Start sketch paints the theme's accent"
         );
         let path = out_dir().join(format!("clear-bench-{}.png", mode.label().to_lowercase()));
         image.save(&path).expect("save Clear Bench png");
@@ -106,13 +134,94 @@ fn the_bracket_in_light_and_dark() {
         assert!(contrast >= 3.0, "{}: keyboard focus contrast is {contrast:.2}:1 ({ring:?} / {fill:?})", mode.label());
     }
 
+    harness.state_mut().state.push(AppAction::ShowPreferences);
     harness.run_steps(6);
-    assert_eq!(theme::palette(), &theme::clear_bench::PALETTE);
-    harness.state_mut().state.push(AppAction::SetTheme(Mode::Light));
-    harness.run_steps(2);
-    assert_eq!(theme::palette(), &theme::clear_bench::PALETTE);
-    assert!(!harness.ctx.global_style().visuals.dark_mode);
-    let saved = std::fs::read_to_string(config.join("settings.json")).expect("the choice was saved");
-    assert!(saved.contains("\"theme\": \"light\""), "the last choice is in the file: {saved}");
+    harness.get_by_label("Appearance").click();
+    harness.run_steps(3);
+    harness.get_by_label("Gruvbox Light").click();
+    harness.run_steps(3);
+    assert_eq!(theme::active_theme_id(), "gruvbox-light");
+
+    harness.get_by_label("Cancel").click();
+    harness.run_steps(4);
+    assert_eq!(theme::active_theme_id(), "clear-bench-dark");
+    let saved = soliddraft_app::settings::theme_preferences();
+    assert_eq!(saved.selected, theme::Selection::BuiltIn(theme::BuiltIn::ClearBenchDark));
+
+    harness.state_mut().state.push(AppAction::ShowPreferences);
+    harness.run_steps(4);
+    harness.get_by_label("Appearance").click();
+    harness.run_steps(3);
+    harness.get_by_label("Gruvbox Light").click();
+    harness.run_steps(3);
+    harness.get_by_label("OK").click();
+    harness.run_steps(4);
+    drop(harness);
+
+    let resumed = Harness::builder().with_size(vec2(1440.0, 900.0)).wgpu().build_eframe(|cc| {
+        SolidDraftApp::new(cc, soliddraft_app::command_tools::board_bracket(), Automation::default())
+    });
+    assert_eq!(theme::active_theme_id(), "gruvbox-light");
+    assert_eq!(resumed.ctx.global_style().visuals.panel_fill, theme::BuiltIn::GruvboxLight.tokens().palette.panel);
+    drop(resumed);
+
+    let mut appearance = soliddraft_app::settings::theme_preferences();
+    let theme_file =
+        br#"{"format":"soliddraft-theme/1","name":"Workshop","base":"clear_bench_dark","accent":[255,201,78]}"#;
+    appearance.imported = Some(theme::ThemeFile::read(theme_file).unwrap());
+    appearance.selected = theme::Selection::Imported;
+    appearance.colors.logo = Some(theme::Rgb([190, 36, 79]));
+    let mut png = std::io::Cursor::new(Vec::new());
+    image::RgbaImage::from_pixel(8, 4, image::Rgba([32, 106, 120, 255]))
+        .write_to(&mut png, image::ImageFormat::Png)
+        .unwrap();
+    appearance.set_picture("teal.png".into(), png.get_ref()).unwrap();
+    soliddraft_app::settings::save_theme_preferences(&appearance).unwrap();
+    soliddraft_app::settings::save_reference_display(&soliddraft_app::settings::ReferenceDisplay {
+        show_grid: false,
+        show_origin_planes: false,
+        always_show_origin_axes: false,
+        ..Default::default()
+    })
+    .unwrap();
+
+    let mut custom = Harness::builder().with_size(vec2(1440.0, 900.0)).wgpu().build_eframe(|cc| {
+        SolidDraftApp::new(cc, soliddraft_app::command_tools::board_bracket(), Automation::default())
+    });
+    custom.run_steps(6);
+    assert_eq!(theme::active_theme_id(), "imported");
+    assert_eq!(theme::accent(), egui::Color32::from_rgb(255, 201, 78));
+    assert_eq!(theme::logo(), egui::Color32::from_rgb(190, 36, 79));
+    capture_picture(&mut custom, "workshop.png");
+    let original = custom.state().state.doc.name.clone();
+    custom.get_by_label("New tab").click();
+    custom.run_steps(4);
+    custom.get_by_label("New part (.dwprt)").click();
+    custom.run_steps(6);
+    capture_picture(&mut custom, "workshop-new-part.png");
+    custom.get_by_label(&format!("{original}.dwprt")).click();
+    custom.run_steps(6);
+    capture_picture(&mut custom, "workshop-returned.png");
     let _ = std::fs::remove_dir_all(config);
+}
+
+fn capture_picture(custom: &mut Harness<'_, SolidDraftApp>, file: &str) {
+    let view = custom.state().state.viewport.rect;
+    let image = custom.render().expect("the imported theme and background render");
+    let ppp = custom.ctx.pixels_per_point();
+    let x = ((view.left() + 20.0) * ppp) as u32;
+    let y = ((view.top() + 64.0) * ppp) as u32;
+    image.save(out_dir().join(file)).unwrap();
+    let painted = (x..x + 200)
+        .flat_map(|x| (y..y + 100).map(move |y| (x, y)))
+        .filter(|&(x, y)| {
+            let [red, green, blue, _] = image.get_pixel(x, y).0;
+            red.abs_diff(32) <= 9 && green.abs_diff(106) <= 9 && blue.abs_diff(120) <= 9
+        })
+        .count();
+    assert!(
+        painted > 4000,
+        "{file}: the saved PNG painted {painted} background pixels, sample {:?} at ({x}, {y})",
+        image.get_pixel(x, y).0
+    );
 }

@@ -5,7 +5,7 @@ use crate::file;
 use crate::panels::{Layout, Side};
 use crate::state::{AppAction, AppState, NoteKind};
 use crate::theme;
-use crate::viewport::look::{Preset, Tier};
+use crate::viewport::look::Preset;
 use crate::viewport::render::{DisplayMode, ViewportRenderer};
 use egui_dock::DockState;
 use std::path::PathBuf;
@@ -74,6 +74,28 @@ pub struct SolidDraftApp {
     /// Actions waiting while the page reads the exact geometry they need.
     #[cfg(target_arch = "wasm32")]
     pub(super) reading: Option<Reading>,
+    #[cfg(target_arch = "wasm32")]
+    curve_change: Option<CurveChange>,
+}
+
+#[cfg(target_arch = "wasm32")]
+type CurveTarget = (soliddraft_document::DocumentId, u64, Option<crate::graphics::CurvedSurfaces>);
+
+/// A change to display quality for the browser's open part.
+#[cfg(target_arch = "wasm32")]
+struct CurveChange {
+    target: CurveTarget,
+    reply: std::sync::mpsc::Receiver<Result<serde_json::Value, String>>,
+    arrived: bool,
+    failed: bool,
+    wanted: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+#[cfg(target_arch = "wasm32")]
+impl Drop for CurveChange {
+    fn drop(&mut self) {
+        self.wanted.store(false, std::sync::atomic::Ordering::Release);
+    }
 }
 
 /// Actions held until the part's bodies adopted from the kernel worker are read. An edit
@@ -122,16 +144,36 @@ impl SolidDraftApp {
 
     pub fn new(cc: &eframe::CreationContext<'_>, doc: Document, automation: Automation) -> Self {
         crate::settings::capture_install_kind();
-        theme::install(&cc.egui_ctx, automation.theme.unwrap_or_else(|| crate::settings::appearance().theme));
-        if let Some(rs) = cc.wgpu_render_state.as_ref() {
-            let tier = Tier::of(rs.adapter.get_info().backend);
-            let renderer = ViewportRenderer::new(&rs.device, &rs.queue, rs.target_format, tier);
-            rs.renderer.write().callback_resources.insert(renderer);
+        let mut appearance = crate::settings::theme_preferences();
+        if let Some(mode) = automation.theme {
+            appearance.selected = theme::Selection::BuiltIn(theme::BuiltIn::for_mode(mode));
         }
+        theme::install(&cc.egui_ctx, theme::Mode::Light);
+        theme::apply_appearance(&cc.egui_ctx, &appearance);
+        let graphics = crate::settings::graphics();
+        let graphics_device = cc.wgpu_render_state.as_ref().map_or_else(Default::default, |rs| {
+            let device = ViewportRenderer::graphics_device(&rs.adapter, &rs.device, graphics.samples);
+            let renderer = ViewportRenderer::with_samples(
+                &rs.device,
+                &rs.queue,
+                rs.target_format,
+                device.tier,
+                device.active_samples,
+            );
+            rs.renderer.write().callback_resources.insert(renderer);
+            device
+        });
         log::debug!("renderer installed");
         #[cfg(target_arch = "wasm32")]
         crate::web::set_context(&cc.egui_ctx);
         let mut state = AppState::new(doc);
+        state.appearance = std::sync::Arc::new(appearance);
+        state.saved_appearance = state.appearance.clone();
+        state.viewport.appearance = state.appearance.clone();
+        state.graphics_device = graphics_device;
+        state.graphics = graphics;
+        #[cfg(not(target_arch = "wasm32"))]
+        state.doc.set_curved_surfaces(state.graphics.curved_surfaces);
         state.viewport.camera.fit_framed(state.doc.bounds());
         let view = crate::settings::view();
         let preset = automation.preset.unwrap_or(view.preset);
@@ -190,6 +232,8 @@ impl SolidDraftApp {
             opening: None,
             #[cfg(target_arch = "wasm32")]
             reading: None,
+            #[cfg(target_arch = "wasm32")]
+            curve_change: None,
         }
     }
 
@@ -300,7 +344,11 @@ impl SolidDraftApp {
     #[cfg(target_arch = "wasm32")]
     fn open_in_worker(&mut self, name: &str, bytes: &[u8]) {
         let (sender, answer) = std::sync::mpsc::channel();
-        let job = crate::kernel_worker::Job::Build { edit: None, level: Default::default() };
+        let job = crate::kernel_worker::Job::Build {
+            edit: None,
+            level: Default::default(),
+            curved_surfaces: self.state.graphics.curved_surfaces,
+        };
         let kernel = self.state.doc.kernel().clone();
         let ctx = crate::web::context().unwrap_or_default();
         let live = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
@@ -342,6 +390,86 @@ impl SolidDraftApp {
         self.open_here(&opening.name, &opening.bytes);
     }
 
+    #[cfg(target_arch = "wasm32")]
+    fn update_curves(&mut self, ctx: &egui::Context) {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::{Arc, mpsc};
+
+        let doc = &mut self.state.doc;
+        let choice = self.state.graphics.curved_surfaces;
+        if doc.curved_surfaces() == choice {
+            self.curve_change = None;
+            return;
+        }
+        let target = (doc.instance(), doc.revision(), choice);
+        if self.curve_change.as_ref().is_some_and(|change| change.target != target) {
+            self.curve_change = None;
+        }
+        if doc.proof_pending() || self.opening.is_some() {
+            return;
+        }
+        if doc.display_body().is_none() {
+            doc.set_curved_surfaces(choice);
+            return;
+        }
+
+        if let Some(change) = self.curve_change.as_mut() {
+            if change.failed {
+                return;
+            }
+            if !change.arrived {
+                match change.reply.try_recv() {
+                    Ok(Ok(_)) => change.arrived = true,
+                    Err(mpsc::TryRecvError::Empty) => return,
+                    failed => {
+                        let error = match failed {
+                            Ok(Err(error)) => error,
+                            _ => "The kernel worker stopped.".into(),
+                        };
+                        change.failed = true;
+                        self.state.note(format!("Curved surfaces could not be updated: {error}"), NoteKind::Error);
+                        return;
+                    }
+                }
+            }
+            match doc.kernel().read_offers(1) {
+                Ok(0) => {
+                    doc.set_curved_surfaces(choice);
+                    self.curve_change = None;
+                }
+                Ok(_) => ctx.request_repaint(),
+                Err(error) => {
+                    change.failed = true;
+                    self.state.note(format!("Curved surfaces could not be updated: {error}"), NoteKind::Error);
+                }
+            }
+            return;
+        }
+
+        let (send, reply) = mpsc::channel();
+        let wanted = Arc::new(AtomicBool::new(true));
+        let live = wanted.clone();
+        let mut change = CurveChange { target, reply, arrived: false, failed: false, wanted };
+        let job = crate::kernel_worker::Job::Remesh { curved_surfaces: choice };
+        let result = doc.model().snapshot().encode().map_err(|error| error.to_string()).and_then(|(_, part)| {
+            crate::kernel_worker::submit(
+                part,
+                &job,
+                doc.kernel().clone(),
+                ctx,
+                move || live.load(Ordering::Acquire),
+                move |result| {
+                    let _ = send.send(result);
+                },
+            )
+        });
+        if let Err(error) = result {
+            change.failed = true;
+            self.state.note(format!("Curved surfaces could not be updated: {error}"), NoteKind::Error);
+        }
+        self.curve_change = Some(change);
+    }
+
     /// Opens a part file on the page's kernel, taking any builds offered to it.
     #[cfg(target_arch = "wasm32")]
     fn open_here(&mut self, name: &str, bytes: &[u8]) {
@@ -361,8 +489,9 @@ impl SolidDraftApp {
             return None;
         }
         let offscreen = self.offscreen.get_or_insert_with(|| {
-            let tier = Tier::of(rs.adapter.get_info().backend);
-            crate::viewport::offscreen::Offscreen::new(&rs.device, &rs.queue, tier)
+            let device = &self.state.graphics_device;
+            let samples = if device.samples.contains(&4) { 4 } else { 1 };
+            crate::viewport::offscreen::Offscreen::with_samples(&rs.device, &rs.queue, device.tier, samples)
         });
         let picture = offscreen.capture(&rs.device, &rs.queue, doc, crate::viewport::offscreen::THUMBNAIL);
         match picture.and_then(|p| p.png()) {
@@ -790,12 +919,17 @@ impl eframe::App for SolidDraftApp {
     }
 
     fn ui(&mut self, root: &mut egui::Ui, frame: &mut eframe::Frame) {
+        if self.state.appearance.selected == theme::Selection::System {
+            theme::apply_appearance(root.ctx(), &self.state.appearance);
+        }
         crate::multibody::show(root.ctx(), &mut self.state);
         crate::material_dialog::show(root.ctx(), &mut self.state);
         crate::properties::show_appearance_editor(root.ctx(), &mut self.state);
         let ctx = &root.ctx().clone();
         log::debug!("ui frame {}", self.frame);
         self.state.doc.set_repaint(ctx);
+        #[cfg(not(target_arch = "wasm32"))]
+        self.state.doc.set_curved_surfaces(self.state.graphics.curved_surfaces);
         self.focus_tool_document();
         let dt = ctx.input(|i| i.unstable_dt) * 1000.0;
         self.state.frame_ms = if self.state.frame_ms == 0.0 { dt } else { self.state.frame_ms * 0.9 + dt * 0.1 };
@@ -803,6 +937,18 @@ impl eframe::App for SolidDraftApp {
         self.shortcuts(ctx);
         crate::drawing::frame(&mut self.state, &mut self.dock);
         crate::assembly::frame(&mut self.state, &mut self.dock, ctx);
+        let graphics = self.state.graphics;
+        let tier = self.state.graphics_device.tier;
+        let frame_ms = self.state.frame_ms;
+        self.state.viewport.graphics = graphics;
+        self.state.viewport.graphics_tier = tier;
+        self.state.viewport.frame_ms = frame_ms;
+        if let Some(session) = self.state.assembly.session.as_mut() {
+            session.viewport.appearance = self.state.appearance.clone();
+            session.viewport.graphics = graphics;
+            session.viewport.graphics_tier = tier;
+            session.viewport.frame_ms = frame_ms;
+        }
         // The browser hands over a dropped file's name and bytes, not a path to read.
         #[cfg(not(target_arch = "wasm32"))]
         {
@@ -838,12 +984,19 @@ impl eframe::App for SolidDraftApp {
                 crate::platform::Purpose::Parameters => {
                     crate::values_tab::apply_upload(&mut self.state, uploaded.files)
                 }
+                crate::platform::Purpose::Theme(_) | crate::platform::Purpose::ViewportPicture(_) => {
+                    if let Some(preferences) = &mut self.preferences {
+                        preferences.appearance_upload(uploaded);
+                    }
+                }
             }
         }
         #[cfg(target_arch = "wasm32")]
         self.poll_opening();
         #[cfg(target_arch = "wasm32")]
         self.poll_reading(ctx);
+        #[cfg(target_arch = "wasm32")]
+        self.update_curves(ctx);
 
         if let Some(e) = self.state.editor.as_mut() {
             e.refresh(&self.state.doc);

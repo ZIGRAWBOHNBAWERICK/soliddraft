@@ -6,10 +6,62 @@
 #[path = "support/viewport_acceptance.rs"]
 mod support;
 
+use egui_kittest::kittest::Queryable;
 use serde_json::json;
 use soliddraft_app::settings::{self, InstallKind, ReferenceDisplay};
 use soliddraft_app::viewport::look::Preset;
 use support::{ALWAYS_SHOW_AXES, Case, empty, launch, set_preference};
+
+#[test]
+fn graphics_presets_change_the_drawn_part() {
+    use egui_kittest::kittest::Queryable;
+    use soliddraft_app::document::{Command, ExtrudeParams, ProfileKind};
+    use std::time::Instant;
+
+    let mut case = Case::gpu("graphics_presets");
+    let mut doc = empty();
+    let params = ExtrudeParams { profile: ProfileKind::Circle { diameter: 200.0 }, depth: 50.0, ..Default::default() };
+    doc.apply(Command::AddExtrude { params, via_assistant: false }).unwrap();
+    let mut app = launch(doc);
+    let mut observed = Vec::new();
+    for (preset, angle) in [("Performance", 15.0), ("Quality", 10.0)] {
+        support::run_command(&mut app, "settings");
+        app.get_by_label("Graphics").click();
+        app.run_steps(3);
+        app.get_by_label(preset).click();
+        app.run_steps(3);
+        support::close_preferences(&mut app);
+        let start = Instant::now();
+        loop {
+            let doc = &app.state().state.doc;
+            if doc.tess_params.surface_angle_deg == angle && !doc.display_quality().pending() {
+                break;
+            }
+            assert!(start.elapsed() < support::render_steps::HANG_GUARD, "{preset} did not draw");
+            std::thread::sleep(std::time::Duration::from_millis(10));
+            app.step();
+        }
+        // The viewport takes the worker's reply after submitting that frame's mesh.
+        app.step();
+        observed.push((app.state().state.doc.triangle_count(), case.frame(&mut app, preset)));
+    }
+    let [(coarse_count, coarse), (fine_count, fine)] = observed.as_slice() else { unreachable!() };
+    assert!(fine_count > coarse_count, "Quality drew {fine_count} triangles, Performance drew {coarse_count}");
+    let rect = support::viewport(&app);
+    let at = rect.center() - rect.size() / 4.0;
+    let image = |frame| {
+        image::imageops::crop_imm(
+            frame,
+            at.x as u32,
+            at.y as u32,
+            (rect.width() / 2.0) as u32,
+            (rect.height() / 2.0) as u32,
+        )
+        .to_image()
+    };
+    assert!(image(coarse) != image(fine), "the rendered model changed");
+    case.note(format!("Performance drew {coarse_count} triangles. Quality drew {fine_count} triangles."));
+}
 
 const DEFAULTS: ReferenceDisplay =
     ReferenceDisplay { show_grid: true, show_floor: true, show_origin_planes: true, always_show_origin_axes: true };
@@ -280,4 +332,200 @@ fn edit_suite_starts_with_origin_axes_and_keeps_an_explicit_choice() {
     assert!(!view_unchanged(&case).references.always_show_origin_axes);
     case.seed_settings(r#"{"frame_layout":"classic"}"#);
     assert!(view_unchanged(&case).references.always_show_origin_axes);
+}
+
+/// Toggles a checkbox of the open Preferences window.
+fn toggle(app: &mut support::App, label: &str) {
+    app.get_by_role_and_label(egui::accesskit::Role::CheckBox, label).click();
+    app.run_steps(3);
+}
+
+/// Opens Preferences at Appearance and graphics > Graphics.
+fn open_graphics(app: &mut support::App) {
+    app.state_mut().state.push(soliddraft_app::state::AppAction::ShowPreferences);
+    app.run_steps(4);
+    app.get_by_label("Graphics").click();
+    app.run_steps(3);
+}
+
+/// The view the Current view controls change, as the window shows it.
+fn current_view(app: &support::App) -> soliddraft_app::graphics::CurrentView {
+    let state = &app.state().state;
+    soliddraft_app::graphics::CurrentView {
+        display: state.display_mode(),
+        ..soliddraft_app::graphics::CurrentView::of(state.active_viewport())
+    }
+}
+
+#[test]
+fn graphics_settings_carry_their_format_and_read_older_records() {
+    use soliddraft_app::graphics::{CurvedSurfaces, Graphics, GraphicsPreset};
+
+    let case = Case::settings("graphics_format");
+    // A record saved before the format existed keeps its choices.
+    case.seed_settings(r#"{"graphics":{"preset":"performance","curved_surfaces":"coarse","samples":1}}"#);
+    let old = settings::graphics();
+    assert_eq!(
+        (old.preset, old.curved_surfaces, old.samples),
+        (GraphicsPreset::Performance, Some(CurvedSurfaces::Coarse), 1)
+    );
+    settings::save_graphics(&old).unwrap();
+    assert_eq!(case.settings_json()["graphics"]["format"], "soliddraft-graphics/1");
+    assert_eq!(settings::graphics(), old, "the saved record reads back");
+
+    // A later format this build cannot read is not taken for its own.
+    case.seed_settings(r#"{"graphics":{"format":"soliddraft-graphics/2","preset":"performance","samples":1}}"#);
+    assert_eq!(settings::graphics(), Graphics::default());
+}
+
+#[test]
+fn appearance_changes_outside_preferences_keep_the_preview_unsaved() {
+    use soliddraft_app::state::AppAction;
+    use soliddraft_app::theme::{self, Background, BuiltIn, Mode, Selection};
+    use soliddraft_app::viewport::scenes::Scene;
+
+    let _case = Case::gpu("appearance_preview_unsaved");
+    let mut app = launch(empty());
+    let preview = |app: &mut support::App| {
+        app.state_mut().state.push(AppAction::ShowPreferences);
+        app.run_steps(4);
+        app.get_by_label("Appearance").click();
+        app.run_steps(3);
+        app.get_by_label("Gruvbox Light").click();
+        app.run_steps(3);
+        assert_eq!(theme::active_theme_id(), "gruvbox-light", "the window previews the theme");
+    };
+
+    // A scene chosen in the viewport while the window previews a theme.
+    preview(&mut app);
+    app.state_mut().state.push(AppAction::SetScene(Scene::Night));
+    app.run_steps(3);
+    let saved = settings::theme_preferences();
+    assert_eq!(saved.selected, Selection::BuiltIn(BuiltIn::ClearBench), "the previewed theme is not saved");
+    assert_eq!(saved.background, Background::Scene);
+    assert_eq!(settings::view().scene, Scene::Night, "the scene is saved");
+    app.get_by_label("Cancel").click();
+    app.run_steps(4);
+    assert!(app.state().preferences.is_none());
+    assert_eq!(theme::active_theme_id(), "clear_bench", "Cancel shows the saved theme");
+    assert_eq!(settings::theme_preferences().selected, Selection::BuiltIn(BuiltIn::ClearBench));
+
+    // Light or dark from the top bar while the window previews a theme saves only that choice.
+    preview(&mut app);
+    app.state_mut().state.push(AppAction::SetTheme(Mode::Dark));
+    app.run_steps(3);
+    assert_eq!(settings::theme_preferences().selected, Selection::BuiltIn(BuiltIn::ClearBenchDark));
+    app.get_by_label("Cancel").click();
+    app.run_steps(4);
+    assert_eq!(theme::active_theme_id(), "clear-bench-dark");
+    assert_eq!(settings::theme_preferences().selected, Selection::BuiltIn(BuiltIn::ClearBenchDark));
+}
+
+#[test]
+fn cancel_in_graphics_restores_the_current_view() {
+    let _case = Case::gpu("graphics_cancel");
+    let mut app = launch(support::box_part());
+    let before = current_view(&app);
+    for close in ["Cancel", "Escape"] {
+        open_graphics(&mut app);
+        toggle(&mut app, "Perspective");
+        toggle(&mut app, "Ground shadow follows the model");
+        toggle(&mut app, "Show grid");
+        assert_ne!(current_view(&app), before, "the window shows each edit at once");
+        if close == "Cancel" {
+            app.get_by_label("Cancel").click();
+        } else {
+            app.key_press(egui::Key::Escape);
+        }
+        app.run_steps(4);
+        assert!(app.state().preferences.is_none(), "{close} closed the window");
+        assert_eq!(current_view(&app), before, "{close} restored the current view");
+    }
+}
+
+#[test]
+fn the_ground_shadow_box_follows_the_floor_commands_and_survives_a_look_change() {
+    use soliddraft_app::state::AppAction;
+
+    let _case = Case::gpu("ground_shadow_box");
+    let mut app = launch(support::box_part());
+    let shadow_box = |app: &mut support::App| {
+        open_graphics(app);
+        let shown = support::checked(app, "Ground shadow");
+        support::close_preferences(app);
+        shown
+    };
+
+    // Under Fast, turning the floor off and on again shows its shadow.
+    app.state_mut().state.push(AppAction::SetPreset(Preset::Fast));
+    support::settle(&mut app);
+    set_preference(&mut app, support::SHOW_FLOOR, false);
+    set_preference(&mut app, support::SHOW_FLOOR, true);
+    assert!(shadow_box(&mut app), "Show floor turned the ground shadow on under Fast");
+
+    // Turned on under Studio, the shadow stays on under Fast.
+    app.state_mut().state.push(AppAction::SetPreset(Preset::Studio));
+    support::settle(&mut app);
+    open_graphics(&mut app);
+    if support::checked(&app, "Ground shadow") {
+        toggle(&mut app, "Ground shadow");
+    }
+    toggle(&mut app, "Ground shadow");
+    assert!(support::checked(&app, "Ground shadow"));
+    support::close_preferences(&mut app);
+    app.state_mut().state.push(AppAction::SetPreset(Preset::Fast));
+    support::settle(&mut app);
+    assert!(shadow_box(&mut app), "the ground shadow chosen under Studio stays on under Fast");
+}
+
+#[test]
+fn current_view_controls_change_only_the_view_on_screen() {
+    use egui_kittest::kittest::NodeT;
+    use soliddraft_app::assembly::AssemblyAction;
+    use soliddraft_app::state::AppAction;
+
+    let _case = Case::gpu("current_view_scope");
+    let mut app = launch(support::box_part());
+    // The occlusion box names the GPU when the adapter has no occlusion pass.
+    let enabled = |app: &support::App, label: &str| {
+        let boxes: Vec<_> = app
+            .get_all_by_role(egui::accesskit::Role::CheckBox)
+            .filter(|node| {
+                node.accesskit_node()
+                    .label()
+                    .is_some_and(|text| text == label || text.starts_with(&format!("{label} ·")))
+            })
+            .collect();
+        assert_eq!(boxes.len(), 1, "one box is {label}");
+        !boxes[0].accesskit_node().is_disabled()
+    };
+    app.state_mut().state.push(AppAction::Assembly(AssemblyAction::New));
+    support::settle(&mut app);
+    assert!(app.state().state.assembly.is_active());
+
+    // The assembly view draws no ground shadow or occlusion, so it offers neither.
+    open_graphics(&mut app);
+    for label in ["Ground shadow", "Ground shadow follows the model", "Ambient occlusion"] {
+        assert!(!enabled(&app, label), "{label} is offered for an assembly");
+    }
+    assert!(enabled(&app, "Show grid"));
+
+    // Its grid switch changes the assembly's view and no default.
+    toggle(&mut app, "Show grid");
+    support::close_preferences(&mut app);
+    let state = &app.state().state;
+    assert!(!state.assembly.session.as_ref().unwrap().viewport.references.show_grid, "the assembly hid its grid");
+    assert!(state.viewport.references.show_grid, "the part keeps its grid");
+    assert!(settings::view().references.show_grid, "the saved default keeps the grid");
+
+    // With no 3D view on screen there is no current view to change.
+    app.state_mut().state.push(AppAction::ShowStartPage);
+    support::settle(&mut app);
+    assert!(app.state().state.start.is_some());
+    let camera = app.state().state.viewport.camera.orthographic;
+    open_graphics(&mut app);
+    assert!(app.query_by_label("Open a part or an assembly to change its view.").is_some());
+    assert!(app.query_by_role_and_label(egui::accesskit::Role::CheckBox, "Perspective").is_none());
+    support::close_preferences(&mut app);
+    assert_eq!(app.state().state.viewport.camera.orthographic, camera);
 }

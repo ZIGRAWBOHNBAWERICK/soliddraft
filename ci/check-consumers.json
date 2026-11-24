@@ -81,6 +81,12 @@
     "ci/browser-preferences.mjs": [
       "web"
     ],
+    "ci/browser-appearance.js": [
+      "web"
+    ],
+    "ci/browser-graphics.js": [
+      "web"
+    ],
     "ci/browser-document-tabs.mjs": [
       "web"
     ],

@@ -486,8 +486,14 @@ fn current_view_controls_change_only_the_view_on_screen() {
 
     let _case = Case::gpu("current_view_scope");
     let mut app = launch(support::box_part());
+    // The occlusion box names the GPU when the adapter has no occlusion pass.
     let enabled = |app: &support::App, label: &str| {
-        !app.get_by_role_and_label(egui::accesskit::Role::CheckBox, label).accesskit_node().is_disabled()
+        let boxes: Vec<_> = app
+            .get_all_by_role(egui::accesskit::Role::CheckBox)
+            .filter(|node| node.accesskit_node().label().is_some_and(|text| text.starts_with(label)))
+            .collect();
+        assert_eq!(boxes.len(), 1, "one box is {label}");
+        !boxes[0].accesskit_node().is_disabled()
     };
     app.state_mut().state.push(AppAction::Assembly(AssemblyAction::New));
     support::settle(&mut app);

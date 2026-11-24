@@ -168,6 +168,7 @@ impl SolidDraftApp {
         crate::web::set_context(&cc.egui_ctx);
         let mut state = AppState::new(doc);
         state.appearance = std::sync::Arc::new(appearance);
+        state.saved_appearance = state.appearance.clone();
         state.viewport.appearance = state.appearance.clone();
         state.graphics_device = graphics_device;
         state.graphics = graphics;

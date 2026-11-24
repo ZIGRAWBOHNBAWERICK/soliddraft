@@ -361,8 +361,13 @@ fn the_complete_icon_catalogue_survives_real_size_rendering() {
 
     let mut report = String::new();
     for mode in MODES {
-        // The catalogue's drawings follow the chrome, which is daylight in both modes.
-        let dark = theme::is_dark();
+        // The catalogue's drawings follow the chrome: Clear Bench Dark draws the dark set.
+        let dark = {
+            let probe = Harness::builder().with_size(vec2(8.0, 8.0)).build_ui(|_| {});
+            theme::set_mode(&probe.ctx.clone(), mode);
+            theme::is_dark()
+        };
+        assert_eq!(dark, mode.is_dark(), "{mode:?} chrome");
         for ppp in SCALES {
             // The sizes the ribbon ships.
             for side in [16.0, 22.0, 26.0] {

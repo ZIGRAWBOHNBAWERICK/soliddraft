@@ -261,6 +261,24 @@ impl Preferences {
         self
     }
 
+    /// Takes a saved appearance changed outside the window, by the scene bar or the light
+    /// and dark switch. Cancel returns to it, and the window's own choices keep the change
+    /// unless they make the same choice differently.
+    pub(super) fn follow_saved_appearance(&mut self, saved: &Arc<Appearance>) {
+        if Arc::ptr_eq(&self.initial_appearance, saved) || *self.initial_appearance == **saved {
+            self.initial_appearance = saved.clone();
+            return;
+        }
+        let before = std::mem::replace(&mut self.initial_appearance, saved.clone());
+        let draft = Arc::make_mut(&mut self.appearance);
+        if before.selected != saved.selected {
+            draft.selected = saved.selected;
+        }
+        if before.background != saved.background {
+            draft.background = saved.background;
+        }
+    }
+
     pub(super) fn edit_appearance(&mut self, appearance: Arc<Appearance>) {
         if !Arc::ptr_eq(&self.appearance, &appearance) && *self.appearance != *appearance {
             self.appearance = appearance.clone();

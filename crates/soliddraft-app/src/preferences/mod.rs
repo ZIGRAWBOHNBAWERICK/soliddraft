@@ -253,6 +253,10 @@ pub struct Preferences {
     initial_graphics: Option<crate::graphics::Graphics>,
     pub graphics_device: crate::graphics::GraphicsDevice,
     current_view: crate::graphics::CurrentView,
+    /// The current view when the window opened or was last applied, for Cancel.
+    initial_current_view: Option<crate::graphics::CurrentView>,
+    /// The 3D view the Current view controls change, if one is on screen.
+    view_target: Option<crate::graphics::ViewTarget>,
     view_preset: crate::viewport::look::Preset,
     camera_editable: bool,
     spline_curves_unavailable: bool,
@@ -310,6 +314,8 @@ impl Preferences {
             initial_graphics: None,
             graphics_device: Default::default(),
             current_view: crate::graphics::CurrentView::of(&crate::viewport::ViewportState::default()),
+            initial_current_view: None,
+            view_target: Some(crate::graphics::ViewTarget::Part),
             view_preset: Default::default(),
             camera_editable: true,
             spline_curves_unavailable: false,
@@ -403,6 +409,7 @@ impl Preferences {
             self.changes.push(Change::Appearance { appearance: self.appearance.clone(), keep: true });
         }
         self.initial_graphics = Some(self.graphics);
+        self.initial_current_view = Some(self.current_view);
         self.initial_draft = self.draft.clone();
         self.initial_display = self.display;
         self.initial_grid = self.grid;
@@ -419,6 +426,12 @@ impl Preferences {
         {
             self.graphics = initial_graphics;
             self.changes.push(Change::Graphics(initial_graphics));
+        }
+        if let Some(initial_view) = self.initial_current_view
+            && self.current_view != initial_view
+        {
+            self.current_view = initial_view;
+            self.changes.push(Change::CurrentView(initial_view));
         }
         if self.draft != self.initial_draft {
             self.draft = self.initial_draft.clone();
@@ -740,12 +753,15 @@ impl Preferences {
 /// and drops it when closed.
 pub fn window(ctx: &egui::Context, prefs: &mut Option<Preferences>, state: &mut crate::state::AppState) {
     let Some(p) = prefs.as_mut() else { return };
+    p.follow_saved_appearance(&state.saved_appearance);
     p.initial_graphics.get_or_insert(state.graphics);
     p.graphics = state.graphics;
     p.graphics_device = state.graphics_device.clone();
     p.current_view = crate::graphics::CurrentView::of(state.active_viewport());
     p.view_preset = state.active_viewport().preset;
     p.current_view.display = state.display_mode();
+    p.initial_current_view.get_or_insert(p.current_view);
+    p.view_target = state.current_view_target();
     p.camera_editable = state.assembly.is_active() || state.sketch.is_none();
     p.spline_curves_unavailable = !state.assembly.is_active()
         && state.doc.faces.iter().any(|face| !crate::graphics::supports_curved_surfaces(face.surface));
@@ -802,11 +818,7 @@ pub fn window(ctx: &egui::Context, prefs: &mut Option<Preferences>, state: &mut 
                     p.not_kept(&why);
                 }
             }
-            Change::CurrentView(view) => {
-                if let Err(why) = state.set_current_view(view) {
-                    p.not_kept(&why);
-                }
-            }
+            Change::CurrentView(view) => state.set_current_view(view),
             Change::Autosave(policy) => {
                 if let Err(why) = state.set_autosave(policy) {
                     p.not_kept(&why);

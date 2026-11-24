@@ -3034,6 +3034,11 @@ impl Document {
             self.apply_appearances();
             self.shown_revision = self.revision;
             self.mesh_version += 1;
+            // The proof meshed its bodies at the curved-surface setting it was asked
+            // with. A setting chosen while it ran meshes the other bodies again.
+            if self.model.live_bodies().len() > 1 {
+                self.refresh_bodies(false);
+            }
         } else if self.model.body().is_none() {
             self.refresh_display();
             self.shown_revision = self.revision;

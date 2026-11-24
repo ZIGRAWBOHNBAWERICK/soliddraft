@@ -48,10 +48,12 @@ impl NavigationBar {
         references: &mut ReferenceDisplay,
         all_dimensions: &mut bool,
         sketch_dimensions: Option<bool>,
-        allow_dimensions: bool,
+        target: crate::graphics::ViewTarget,
         section_active: bool,
         events: &mut ViewportEvents,
     ) {
+        // The part view offers dimensions and a section; the assembly view neither.
+        let allow_dimensions = target == crate::graphics::ViewTarget::Part;
         let (background, scene) = backdrop;
         let active_scene = (background == theme::Background::Scene).then_some(scene);
         let backdrop_label = match background {
@@ -110,6 +112,7 @@ impl NavigationBar {
                                         preset,
                                         tier,
                                         sketch_dimensions.is_none(),
+                                        target,
                                         None,
                                         false,
                                     );

@@ -395,12 +395,12 @@ fn parse_png_hex(encoded: &str) -> Option<Vec<u8>> {
     if encoded.len() > 2 * STORED_PICTURE_LIMIT || !encoded.len().is_multiple_of(2) {
         return None;
     }
-    encoded
-        .as_bytes()
-        .chunks_exact(2)
-        .map(|pair| {
-            let hi = char::from(pair[0]).to_digit(16)?;
-            let lo = char::from(pair[1]).to_digit(16)?;
+    let (pairs, _) = encoded.as_bytes().as_chunks::<2>();
+    pairs
+        .iter()
+        .map(|&[hi, lo]| {
+            let hi = char::from(hi).to_digit(16)?;
+            let lo = char::from(lo).to_digit(16)?;
             Some(((hi << 4) | lo) as u8)
         })
         .collect()

@@ -1,5 +1,5 @@
 use super::{Change, GRAPHICS, Preferences, ui};
-use crate::graphics::{CurrentView, CurvedSurfaces, GraphicsPreset, SectionHatch};
+use crate::graphics::{CurrentView, CurvedSurfaces, GraphicsPreset, SectionHatch, ViewTarget};
 use crate::viewport::{
     look::{Preset, Tier},
     render::DisplayMode,
@@ -127,7 +127,14 @@ pub(super) fn show(p: &mut Preferences, ui: &mut egui::Ui) {
 
     ui.separator();
     ui.heading("Current view");
-    current_view_controls(ui, &mut view, p.view_preset, device.tier, p.camera_editable, highlight, true);
+    match p.view_target {
+        Some(target) => {
+            current_view_controls(ui, &mut view, p.view_preset, device.tier, p.camera_editable, target, highlight, true)
+        }
+        None => {
+            ui.label("Open a part or an assembly to change its view.");
+        }
+    }
 
     ui.separator();
     ui.heading("In the view");
@@ -185,27 +192,31 @@ pub(super) fn show(p: &mut Preferences, ui: &mut egui::Ui) {
     }
     if view != p.current_view {
         p.current_view = view;
-        p.display = view.references;
         p.changes.push(Change::CurrentView(view));
     }
 }
 
+/// The Current view controls of `target`. The ground shadow and ambient occlusion boxes
+/// show what the renderer draws, from the same [`crate::graphics::Lighting::look`].
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn current_view_controls(
     ui: &mut egui::Ui,
     view: &mut CurrentView,
     preset: Preset,
     tier: Tier,
     camera_editable: bool,
+    target: ViewTarget,
     highlight: Option<&str>,
     show_style: bool,
 ) {
+    let lit = target.lit();
+    let (look, ground_shadow) = view.lighting.look(preset, tier, view.references.show_floor);
     toggle(ui, highlight, "grid", "Show grid", &mut view.references.show_grid);
     row(ui, highlight, "shadow", |ui| {
-        let preset_casts_shadows = preset.look(tier).shadows;
-        let mut shown = view.references.show_floor && (preset_casts_shadows || view.lighting.force_ground_shadow);
-        if ui.checkbox(&mut shown, "Ground shadow").changed() {
+        let mut shown = lit && ground_shadow;
+        if ui.add_enabled(lit, egui::Checkbox::new(&mut shown, "Ground shadow")).changed() {
             view.references.show_floor = shown;
-            view.lighting.force_ground_shadow = shown && !preset_casts_shadows;
+            view.lighting.ground_shadow = Some(shown);
         }
     });
     row(ui, highlight, "perspective", |ui| {
@@ -214,14 +225,19 @@ pub(crate) fn current_view_controls(
     });
     row(ui, highlight, "occlusion", |ui| {
         let supported = tier.has_ambient_occlusion();
-        let mut enabled =
-            supported && view.lighting.ambient_occlusion.unwrap_or_else(|| preset.look(tier).ambient_occlusion > 0.0);
+        let mut enabled = lit && supported && look.ambient_occlusion > 0.0;
         let label = if supported { "Ambient occlusion" } else { "Ambient occlusion · Not available on this GPU" };
-        if ui.add_enabled(supported, egui::Checkbox::new(&mut enabled, label)).changed() {
+        if ui.add_enabled(lit && supported, egui::Checkbox::new(&mut enabled, label)).changed() {
             view.lighting.ambient_occlusion = Some(enabled);
         }
     });
-    toggle(ui, highlight, "shadow_follows", "Ground shadow follows the model", &mut view.lighting.shadow_follows_model);
+    row(ui, highlight, "shadow_follows", |ui| {
+        let follows = egui::Checkbox::new(&mut view.lighting.shadow_follows_model, "Ground shadow follows the model");
+        ui.add_enabled(lit, follows);
+    });
+    if !lit {
+        ui.weak("Ground shadow and ambient occlusion · Not available in assemblies");
+    }
     if show_style {
         row(ui, highlight, "display", |ui| {
             egui::ComboBox::from_label("Visual style").selected_text(view.display.label()).show_ui(ui, |ui| {

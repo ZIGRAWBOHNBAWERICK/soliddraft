@@ -713,4 +713,35 @@ mod tests {
         assert_eq!(header, r#"{"job":"mass_properties","feature":3}"#);
         assert_eq!(serde_json::from_str::<Job>(&header).unwrap(), job);
     }
+
+    /// A curve change in the browser: the worker samples the bodies the page already
+    /// holds at the new setting, and the page shows them without sampling them again.
+    #[test]
+    fn a_remesh_hands_its_meshes_to_bodies_the_page_already_holds() {
+        use crate::graphics::{CurvedSurfaces, body_mesh_levels};
+
+        let part = include_bytes!("../../../site/parts/bracket.dwprt").to_vec();
+        let worker = Arc::new(soliddraft_kernel_catallax::CatallaxKernel::new());
+        let page = Arc::new(soliddraft_kernel_catallax::CatallaxKernel::new());
+        let mut host = Host::new(worker.clone());
+        host.run(&part, &Job::Build { edit: None, level: Default::default(), curved_surfaces: None }).unwrap();
+        page.offer_builds(1, &host.take_hand_over().unwrap()).unwrap();
+        let opened = model::Document::from_bytes(&part, page.clone()).unwrap();
+
+        let choice = Some(CurvedSurfaces::Ultra);
+        host.run(&part, &Job::Remesh { curved_surfaces: choice }).unwrap();
+        page.offer_builds(1, &host.take_hand_over().unwrap()).unwrap();
+        let sampled = page.fresh_previews();
+        let mut levels = 0;
+        for (_, body) in opened.live_bodies() {
+            let topology = page.topology(body).unwrap();
+            for params in body_mesh_levels(choice, &opened.settings().viewport, &topology).all() {
+                page.preview(body, params).unwrap();
+                page.preview_edges(body, params).unwrap();
+                levels += 1;
+            }
+        }
+        assert!(levels > 0);
+        assert_eq!(page.fresh_previews(), sampled, "the page sampled no level the worker had made");
+    }
 }

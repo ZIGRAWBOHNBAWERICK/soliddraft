@@ -734,7 +734,7 @@ impl ViewportState {
         }
         self.dimensions = dims;
         let display = doc.display_state().map_or(self.display, |state| state.mode);
-        self.paint_hud(ui, rect, &mut events, sketch_dimensions, true, display);
+        self.paint_hud(ui, rect, &mut events, sketch_dimensions, crate::graphics::ViewTarget::Part, display);
         self.paint_view_cube(ui, rect, &mut events);
         // An open sketch has its own status line; the model hint would be wrong there.
         self.paint_pills(ui, rect, hover_label.or((!sketching).then_some(MODEL_HINT)), display);
@@ -808,7 +808,7 @@ impl ViewportState {
             let painter = ui.painter().with_clip_rect(rect);
             self.paint_origin_axes(&painter, self.camera.distance * 0.25, rect, [true; 3]);
         }
-        self.paint_hud(ui, rect, &mut events, None, false, display);
+        self.paint_hud(ui, rect, &mut events, None, crate::graphics::ViewTarget::Assembly, display);
         self.paint_view_cube(ui, rect, &mut events);
         let label = hover_label.unwrap_or("Hover a component");
         self.paint_pills(ui, rect, Some(label), display);
@@ -925,7 +925,7 @@ impl ViewportState {
             hidden_selected_edges: self.graphics.hidden_selected_edges,
             tint_preview: self.graphics.tint_preview,
             red_removal: self.graphics.red_removal,
-            section_hatch: if self.section_active { self.graphics.section_hatch } else { Default::default() },
+            section: self.section_active.then_some(self.graphics.section_hatch),
             edge_color: self.appearance.colors.edges,
             selection_color: self.appearance.colors.selection,
             ..Default::default()
@@ -1368,7 +1368,7 @@ impl ViewportState {
         rect: Rect,
         events: &mut ViewportEvents,
         sketch_dimensions: Option<bool>,
-        allow_dimensions: bool,
+        target: crate::graphics::ViewTarget,
         display: DisplayMode,
     ) {
         let current = crate::graphics::CurrentView { display, ..crate::graphics::CurrentView::of(self) };
@@ -1383,7 +1383,7 @@ impl ViewportState {
             &mut self.references,
             &mut self.all_dimensions,
             sketch_dimensions,
-            allow_dimensions,
+            target,
             self.section_active,
             events,
         );

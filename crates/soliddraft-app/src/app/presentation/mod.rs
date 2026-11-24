@@ -29,8 +29,9 @@ impl SolidDraftApp {
         let view_keys = (context.part() && !typing)
             .then(|| crate::navigation::view_keys::in_use(&state.navigation).with_shortcuts(&state.shortcuts));
         let superseded: Vec<(&str, Key)> = view_keys.iter().flat_map(|v| v.superseded()).collect();
-        // Escape closes an open menu or ribbon row, not what is underneath it.
-        let popup = egui::Popup::is_any_open(ctx);
+        // Escape closes an open menu, ribbon row or the Preferences window, not what is
+        // underneath it. The window takes it as Cancel.
+        let popup = egui::Popup::is_any_open(ctx) || self.preferences.is_some();
         let bindings: Vec<_> = state
             .shortcuts
             .bindings(context)

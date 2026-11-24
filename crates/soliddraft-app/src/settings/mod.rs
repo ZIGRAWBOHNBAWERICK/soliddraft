@@ -374,12 +374,30 @@ fn save_view_keys_to(store: &Store, keys: impl serde::Serialize) -> Result<(), N
     save_section_to(store, "view", &view)
 }
 
+/// The format the `graphics` record is saved in.
+const GRAPHICS_FORMAT: &str = "soliddraft-graphics/1";
+
+/// The graphics settings, or the defaults when there are none or this build cannot read
+/// them.
 pub fn graphics() -> crate::graphics::Graphics {
-    serde_json::from_value(stored()["graphics"].clone()).unwrap_or_default()
+    graphics_from(&stored())
 }
 
+fn graphics_from(all: &Value) -> crate::graphics::Graphics {
+    let record = &all["graphics"];
+    let readable = match record.get("format") {
+        Some(format) => format == GRAPHICS_FORMAT,
+        // A record saved before the format was named holds the same fields.
+        None => record.is_object(),
+    };
+    if readable { serde_json::from_value(record.clone()).unwrap_or_default() } else { Default::default() }
+}
+
+/// Saves the graphics settings, with their format.
 pub fn save_graphics(graphics: &crate::graphics::Graphics) -> Result<(), NotKept> {
-    save_section("graphics", graphics)
+    let mut record = serde_json::to_value(graphics).map_err(|e| NotKept::Write(e.to_string()))?;
+    record["format"] = Value::String(GRAPHICS_FORMAT.into());
+    save_section("graphics", &record)
 }
 
 pub fn theme_preferences() -> crate::theme::Appearance {

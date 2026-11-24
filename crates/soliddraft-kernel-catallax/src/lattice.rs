@@ -23,11 +23,11 @@ fn stage_from_source<S: TerminalField>(
     recipe: &Recipe,
     spec: S,
     settings: Settings,
-    _files: &SourceFiles,
+    files: &SourceFiles,
     dec: &mut Decider,
 ) -> Result<Stage<S>, Refusal> {
-    // Switch here to Catallax's file-aware stage when it reaches the pin.
-    Stage::new(recipe, spec, settings, dec)
+    let sources = files.iter().map(|(sha, bytes)| (sha.clone(), bytes.as_ref())).collect();
+    Stage::new_with_files(recipe, &sources, spec, settings, dec)
 }
 
 /// The stage calls an active field needs, whichever field it holds.
@@ -367,7 +367,7 @@ impl CatallaxKernel {
     {
         if let Some(field) = self.field(body)? {
             // Catallax refuses a stage over a body that already ends in a terminal field.
-            return run(op.name(), |dec| Stage::new(field.stage.recipe(), spec, settings, dec))
+            return run(op.name(), |dec| stage_from_source(field.stage.recipe(), spec, settings, &field.files, dec))
                 .and(Err(KernelError::InvalidInput(format!("the {} needs a CAD body", op.name()))));
         }
         let (recipe, files) = self.field_source(body, op)?;
@@ -387,16 +387,7 @@ impl CatallaxKernel {
         } else {
             None
         };
-        let stage = decide(op.name(), |dec| stage_from_source(&recipe, spec, settings, &files, dec)).map_err(|e| {
-            if !files.is_empty()
-                && (e.code == "field.import-missing-source"
-                    || (e.code == "field.recipe" && e.detail.contains("missing mesh source")))
-            {
-                gap(&format!("A {} on an imported body", op.name()))
-            } else {
-                query_error(op.name(), e)
-            }
-        })?;
+        let stage = run(op.name(), |dec| stage_from_source(&recipe, spec, settings, &files, dec))?;
         let bbox = if let Some(bounds) = cad_bounds {
             bounds
         } else {

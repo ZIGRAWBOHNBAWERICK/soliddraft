@@ -1807,9 +1807,7 @@ impl SolidDraftApp {
                     self.state.note(error, NoteKind::Error);
                 }
             }
-            AppAction::SetCurrentView(view) => {
-                let _ = self.state.set_current_view(view);
-            }
+            AppAction::SetCurrentView(view) => self.state.set_current_view(view),
             AppAction::SetPreset(p) => {
                 let viewport = self.state.active_viewport_mut();
                 // Realistic leaves edges off; switching to or from it moves the shaded
@@ -1877,18 +1875,20 @@ impl SolidDraftApp {
                 if let Some(session) = self.state.assembly.session.as_mut() {
                     session.viewport.scene = Some(scene);
                 }
-                let mut appearance = self.state.appearance.clone();
-                std::sync::Arc::make_mut(&mut appearance).background = theme::Background::Scene;
-                if let Err(e) = crate::settings::save_appearance_and_view(&appearance, Some(scene)) {
+                let saved = self.state.change_saved_appearance(ctx, Some(scene), |appearance| {
+                    appearance.background = theme::Background::Scene;
+                });
+                if let Err(e) = saved {
                     self.state.note(format!("Scene changed, but could not be saved: {e}"), NoteKind::Error);
                 }
-                let _ = self.state.set_appearance(ctx, appearance, false);
             }
             AppAction::SetTheme(mode) => {
-                let mut appearance = self.state.appearance.clone();
-                std::sync::Arc::make_mut(&mut appearance).selected =
-                    theme::Selection::BuiltIn(theme::BuiltIn::for_mode(mode));
-                let _ = self.state.set_appearance(ctx, appearance, true);
+                let saved = self.state.change_saved_appearance(ctx, None, |appearance| {
+                    appearance.selected = theme::Selection::BuiltIn(theme::BuiltIn::for_mode(mode));
+                });
+                if let Err(e) = saved {
+                    self.state.note(format!("Appearance not saved: {e}"), NoteKind::Error);
+                }
             }
             AppAction::ToggleProjection => {
                 let camera = &mut self.state.active_viewport_mut().camera;
@@ -2239,7 +2239,7 @@ impl SolidDraftApp {
                         self.state.viewport.references,
                         self.state.viewport.grid_style,
                     )
-                    .with_appearance(self.state.appearance.clone())
+                    .with_appearance(self.state.saved_appearance.clone())
                     .with_shortcuts(&self.state.shortcuts)
                     .with_autosave(self.state.autosave_policy())
                 });

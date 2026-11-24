@@ -391,3 +391,64 @@ fn a_snapped_flange_can_use_an_early_display() {
     assert!(!shown.indices.is_empty());
     assert!(!kernel.preview_edges(body, &params).unwrap().is_empty());
 }
+
+/// Two discs side by side, each its own body.
+fn two_discs() -> Document {
+    let mut doc = disc();
+    doc.new_body();
+    let params = ExtrudeParams {
+        profile: ProfileKind::Circle { diameter: 120.0 },
+        plane: PlaneKind::Top,
+        depth: 30.0,
+        ..Default::default()
+    };
+    doc.apply(Command::AddExtrude { params, via_assistant: false }).unwrap();
+    assert_eq!(doc.meshes.len(), 2);
+    doc
+}
+
+/// Polls the background proof until the document has adopted it.
+fn wait_proof(doc: &mut Document) {
+    let start = Instant::now();
+    while doc.proof_pending() {
+        assert!(start.elapsed() < HANG, "the background proof did not answer");
+        doc.poll_proof();
+        std::thread::sleep(Duration::from_millis(2));
+    }
+}
+
+#[test]
+fn a_proof_adopted_after_a_curve_change_meshes_every_body_at_the_new_setting() {
+    use soliddraft_app::graphics::CurvedSurfaces;
+
+    let deepen = |doc: &mut Document| {
+        let id = doc.features.last().unwrap().id;
+        let mut params = match &doc.feature(id).unwrap().kind {
+            soliddraft_app::document::FeatureKind::Extrude(params) => params.clone(),
+            _ => panic!("the second disc is an extrusion"),
+        };
+        params.depth = 45.0;
+        doc.apply_interactive(Command::EditExtrude { id, params }).unwrap();
+    };
+    let triangles_by_body = |doc: &Document| {
+        let mut counts: Vec<usize> = doc.meshes.values().map(|mesh| mesh.indices.len() / 3).collect();
+        counts.sort_unstable();
+        counts
+    };
+
+    // The same edit made with Ultra already chosen.
+    let mut expected = two_discs();
+    expected.set_curved_surfaces(Some(CurvedSurfaces::Ultra));
+    deepen(&mut expected);
+    wait_proof(&mut expected);
+
+    // Ultra chosen while the edit's proof runs.
+    let mut doc = two_discs();
+    deepen(&mut doc);
+    doc.set_curved_surfaces(Some(CurvedSurfaces::Ultra));
+    wait_proof(&mut doc);
+
+    assert_eq!(doc.meshes.len(), 2);
+    assert_eq!(doc.tess_params, expected.tess_params, "the adopted bodies use the current setting");
+    assert_eq!(triangles_by_body(&doc), triangles_by_body(&expected), "every body is meshed at Ultra");
+}

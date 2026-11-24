@@ -185,7 +185,8 @@ pub struct Controls {
     pub hidden_selected_edges: bool,
     pub tint_preview: bool,
     pub red_removal: bool,
-    pub section_hatch: crate::graphics::SectionHatch,
+    /// The hatch of a section view's cap, while a section view is shown.
+    pub section: Option<crate::graphics::SectionHatch>,
     pub edge_color: Option<crate::theme::Rgb>,
     pub selection_color: Option<crate::theme::Rgb>,
 }
@@ -200,7 +201,7 @@ impl Default for Controls {
             hidden_selected_edges: false,
             tint_preview: true,
             red_removal: true,
-            section_hatch: Default::default(),
+            section: None,
             edge_color: None,
             selection_color: None,
         }
@@ -1475,12 +1476,16 @@ impl ViewportRenderer {
         match &input.preview {
             Some(p) => {
                 let ptr = Arc::as_ptr(p) as usize;
-                let hatch = match input.controls.section_hatch {
-                    crate::graphics::SectionHatch::Solid => 0,
-                    crate::graphics::SectionHatch::Diagonal => 64,
-                    crate::graphics::SectionHatch::Crosshatch => 64 | 128,
+                let flags = 4 | match input.controls.section {
+                    // A section's cap keeps its fill: the preview tint is a feature preview's.
+                    Some(hatch) => match hatch {
+                        crate::graphics::SectionHatch::Solid => 0,
+                        crate::graphics::SectionHatch::Diagonal => 64,
+                        crate::graphics::SectionHatch::Crosshatch => 64 | 128,
+                    },
+                    None if input.controls.tint_preview => 0,
+                    None => 32,
                 };
-                let flags = 4 | hatch | if input.controls.tint_preview { 0 } else { 32 };
                 if self.preview.as_ref().map(|(q, flags, _)| (*q, *flags)) != Some((ptr, flags)) {
                     self.preview = Some((ptr, flags, self.upload_body(device, p, flags)));
                 }
@@ -1502,20 +1507,7 @@ impl ViewportRenderer {
             queue.write_buffer(&body.uniform, 0, bytemuck::bytes_of(&flags));
         }
 
-        let mut look = input.preset.look(self.tier);
-        if !look.shadows && input.floor && input.controls.lighting.force_ground_shadow {
-            look.shadows = true;
-            let studio = Preset::Studio.look(self.tier);
-            look.shadow_strength = studio.shadow_strength;
-            look.shadow_softness = studio.shadow_softness;
-        }
-        if let Some(ao) = input.controls.lighting.ambient_occlusion {
-            look.ambient_occlusion = if ao && self.tier.has_ambient_occlusion() {
-                look.ambient_occlusion.max(Preset::Studio.look(self.tier).ambient_occlusion)
-            } else {
-                0.0
-            };
-        }
+        let (look, ground_shadow) = input.controls.lighting.look(input.preset, self.tier, input.floor);
         let show_faces = self.draws_faces();
         let show_edges = self.display != DisplayMode::Shaded;
         let preview_key = self.preview.as_ref().map_or(0, |(p, _, _)| *p);
@@ -1530,7 +1522,7 @@ impl ViewportRenderer {
             self.sun = Some(sun_frame_with_ground(lo, hi, follows_model));
         }
         let ao = look.ambient_occlusion > 0.0 && show_faces && self.ao_pipelines.is_some();
-        let ground = shadows && input.floor && self.sun.is_some_and(|s| input.eye.z > s.ground.z);
+        let ground = shadows && ground_shadow && self.sun.is_some_and(|s| input.eye.z > s.ground.z);
 
         let size = self.targets.as_ref().map(|t| t.size).unwrap_or([1, 1]);
         let view_proj = input.proj * input.view;

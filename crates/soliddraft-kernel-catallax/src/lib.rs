@@ -50,7 +50,7 @@ use soliddraft_kernel_api::*;
 pub use diagnostics::{APP_REQUEST_WORK, APP_WORK_TARGET, RequestWork, with_request_allowance};
 
 /// The pinned Catallax application entry revision.
-pub const CATALLAX_REVISION: &str = "801cb656751d463237c116437c78a03cd873e434";
+pub const CATALLAX_REVISION: &str = "e3ef8f8fce7c20acf1d6dd5a2d19dbd9d7640b45";
 
 /// An in-process Catallax backend. There is no global kernel state or kernel thread.
 #[derive(Default)]
@@ -86,6 +86,8 @@ struct State {
     fresh_topologies: u64,
     /// Recipe keys whose topology has been handed over already.
     sent_topologies: std::collections::BTreeSet<String>,
+    /// The early display meshes handed over already, by recipe key and display key.
+    sent_previews: std::collections::BTreeSet<(String, String)>,
     /// Early display requests answered by sampling here rather than from an offer.
     fresh_previews: u64,
     /// The interface id this kernel gave each entity another kernel's id named, for
@@ -122,8 +124,9 @@ struct Solid {
     app: AppBody,
     /// The recipe key of this build, for a hand-over of its topology.
     key: String,
-    /// Early display meshes another kernel sampled for this build, by display key.
-    handed_previews: handover::Previews,
+    /// Early display meshes another kernel sampled for this build, by display key. More
+    /// arrive when that kernel samples the build at other display settings.
+    handed_previews: Mutex<handover::Previews>,
     /// The kernel instance that handed this build over, if one did.
     source: Option<u64>,
     ids: convert::Ids,
@@ -228,6 +231,11 @@ impl<T> MeshCache<T> {
 }
 
 impl Solid {
+    /// The early display meshes another kernel handed over for this build.
+    fn handed_previews(&self) -> MutexGuard<'_, handover::Previews> {
+        self.handed_previews.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
     fn has_splines(&self) -> bool {
         if let Some(handed) = self.app.unread() {
             return handed.splines;
@@ -677,7 +685,7 @@ impl CatallaxKernel {
             source: app.handed_source(),
             app,
             key,
-            handed_previews,
+            handed_previews: Mutex::new(handed_previews),
             ids,
             display,
             print: MeshCache::new(),
@@ -1434,26 +1442,33 @@ impl Kernel for CatallaxKernel {
         let solids = state.bodies.values().filter_map(|stored| stored.solid.as_deref());
         for solid in solids.chain(kept_solids.iter().map(|solid| solid.as_ref())) {
             let Some(Ok(topology)) = solid.topology.get() else { continue };
-            if solid.key.is_empty() || state.sent_topologies.contains(&solid.key) || topologies.contains_key(&solid.key)
-            {
+            if solid.key.is_empty() || topologies.contains_key(&solid.key) {
                 continue;
             }
-            let (faces, edges, vertices) = solid.ids.by_index();
-            let pairs = |ids: Vec<(u32, u64)>| ids.into_iter().map(|(index, raw)| (raw, index)).collect();
-            // The early display meshes sampled so far travel with the topology.
-            let previews = solid
+            // The early display meshes sampled so far travel with the topology. Once it
+            // has gone, the ones sampled since go with it again, as a display change asks.
+            let previews: Vec<_> = solid
                 .previews
                 .computed()
                 .into_iter()
                 .filter_map(|(key, preview)| {
+                    let key = preview_key(&key);
+                    if state.sent_previews.contains(&(solid.key.clone(), key.clone())) {
+                        return None;
+                    }
                     let mesh = preview.as_ref().as_ref()?;
                     Some(handover::HandedPreview {
-                        key: preview_key(&key),
+                        key,
                         mesh: convert::preview(mesh, &solid.ids),
                         edges: preview_edges(mesh, &solid.ids),
                     })
                 })
                 .collect();
+            if state.sent_topologies.contains(&solid.key) && previews.is_empty() {
+                continue;
+            }
+            let (faces, edges, vertices) = solid.ids.by_index();
+            let pairs = |ids: Vec<(u32, u64)>| ids.into_iter().map(|(index, raw)| (raw, index)).collect();
             topologies.insert(
                 solid.key.clone(),
                 handover::HandedTopology {
@@ -1479,8 +1494,11 @@ impl Kernel for CatallaxKernel {
             identity: None,
         }));
         for entry in &handed {
-            if entry.topology.is_some() {
+            if let Some(topology) = &entry.topology {
                 state.sent_topologies.insert(entry.key.clone());
+                for preview in &topology.previews {
+                    state.sent_previews.insert((entry.key.clone(), preview.key.clone()));
+                }
             }
         }
         drop(state);
@@ -1499,9 +1517,23 @@ impl Kernel for CatallaxKernel {
                     state.offered.insert(key, offer);
                 }
                 // A topology for a build offered before: the body built from it next takes it.
+                // One sent again carries early display meshes sampled since, which join the
+                // offer's and those of every body already built from the same recipe.
                 handover::Received::Topology(topology) => {
+                    for solid in state.bodies.values().filter_map(|stored| stored.solid.as_deref()) {
+                        if solid.key != key {
+                            continue;
+                        }
+                        let (faces, edges, _) = solid.ids.by_index();
+                        if let Some(previews) = topology.renamed_previews(&faces, &edges) {
+                            solid.handed_previews().extend(previews);
+                        }
+                    }
                     if let Some(offer) = state.offered.get_mut(&key) {
-                        offer.topology = Some(topology);
+                        match &mut offer.topology {
+                            Some(earlier) => Arc::make_mut(earlier).previews.extend(topology.previews.iter().cloned()),
+                            None => offer.topology = Some(topology),
+                        }
                     }
                 }
             }
@@ -2229,7 +2261,7 @@ impl Kernel for CatallaxKernel {
             }
             let solid = self.solid(body)?;
             let options = options(params)?;
-            if let Some((mesh, _)) = solid.handed_previews.get(&preview_key(&display_key(&options))) {
+            if let Some((mesh, _)) = solid.handed_previews().get(&preview_key(&display_key(&options))) {
                 return Ok(mesh.clone());
             }
             self.state()?.fresh_previews += 1;
@@ -2258,7 +2290,7 @@ impl Kernel for CatallaxKernel {
             }
             let solid = self.solid(body)?;
             let options = options(params)?;
-            if let Some((_, edges)) = solid.handed_previews.get(&preview_key(&display_key(&options))) {
+            if let Some((_, edges)) = solid.handed_previews().get(&preview_key(&display_key(&options))) {
                 return Ok(edges.clone());
             }
             let preview = solid.preview(&options, "preview_edges")?;

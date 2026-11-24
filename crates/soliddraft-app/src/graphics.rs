@@ -1,5 +1,6 @@
 //! Application preferences for viewport meshes and rendering.
 
+use crate::viewport::look::{Look, Preset, Tier};
 use serde::{Deserialize, Serialize};
 use soliddraft_tessellation::{Advanced, Levels, Quality, policy};
 
@@ -187,6 +188,21 @@ pub struct GraphicsDevice {
     pub tier: crate::viewport::look::Tier,
 }
 
+/// The 3D view on screen, which the Current view controls change.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ViewTarget {
+    Part,
+    /// The assembly view draws no ground shadow and no ambient occlusion.
+    Assembly,
+}
+
+impl ViewTarget {
+    /// Whether the view draws the ground shadow and ambient occlusion.
+    pub fn lit(self) -> bool {
+        self == Self::Part
+    }
+}
+
 /// Controls shared by Preferences and the viewport's own menu.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct CurrentView {
@@ -222,12 +238,39 @@ pub struct Lighting {
     /// Leave the existing lighting preset in control until explicitly overridden.
     pub ambient_occlusion: Option<bool>,
     pub shadow_follows_model: bool,
-    pub force_ground_shadow: bool,
+    /// The ground shadow as chosen for this view. Until one is chosen, the floor setting
+    /// shows it where the look casts shadows. Every floor and ground shadow command
+    /// chooses it, so a look change keeps it.
+    pub ground_shadow: Option<bool>,
 }
 
 impl Default for Lighting {
     fn default() -> Self {
-        Self { ambient_occlusion: None, shadow_follows_model: true, force_ground_shadow: false }
+        Self { ambient_occlusion: None, shadow_follows_model: true, ground_shadow: None }
+    }
+}
+
+impl Lighting {
+    /// What a view with these choices draws: `preset`'s look on `tier` and whether it
+    /// shows the ground shadow. A ground shadow chosen under a look without shadows takes
+    /// Studio's. The Current view controls and the renderer both read this.
+    pub fn look(&self, preset: Preset, tier: Tier, floor: bool) -> (Look, bool) {
+        let mut look = preset.look(tier);
+        let ground = self.ground_shadow.unwrap_or(floor && look.shadows);
+        if ground && !look.shadows {
+            let studio = Preset::Studio.look(tier);
+            look.shadows = true;
+            look.shadow_strength = studio.shadow_strength;
+            look.shadow_softness = studio.shadow_softness;
+        }
+        if let Some(ao) = self.ambient_occlusion {
+            look.ambient_occlusion = if ao && tier.has_ambient_occlusion() {
+                look.ambient_occlusion.max(Preset::Studio.look(tier).ambient_occlusion)
+            } else {
+                0.0
+            };
+        }
+        (look, ground)
     }
 }
 
@@ -246,5 +289,26 @@ impl Default for GraphicsDevice {
 impl GraphicsDevice {
     pub fn supersampling(&self) -> bool {
         !cfg!(target_arch = "wasm32") && self.tier.has_ambient_occlusion()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_chosen_ground_shadow_holds_under_every_look() {
+        let chosen = |on| Lighting { ground_shadow: Some(on), ..Default::default() };
+        for tier in [Tier::Basic, Tier::Full] {
+            for preset in Preset::ALL {
+                let (look, ground) = chosen(true).look(preset, tier, true);
+                assert!(ground && look.shadows, "{preset:?} on {tier:?} drops a chosen ground shadow");
+                assert!(!chosen(false).look(preset, tier, true).1, "{preset:?} on {tier:?} shows a refused one");
+            }
+            // Until one is chosen, the floor shows the shadow where the look casts one.
+            assert!(!Lighting::default().look(Preset::Fast, tier, true).1);
+            assert!(Lighting::default().look(Preset::Studio, tier, true).1);
+            assert!(!Lighting::default().look(Preset::Studio, tier, false).1);
+        }
     }
 }

@@ -128,13 +128,45 @@ fn the_bracket_in_light_and_dark() {
     harness.run_steps(4);
     drop(harness);
 
-    let resumed = Harness::builder()
-        .with_size(vec2(1440.0, 900.0))
-        .wgpu()
-        .build_eframe(|cc| {
-            SolidDraftApp::new(cc, soliddraft_app::command_tools::board_bracket(), Automation::default())
-        });
+    let resumed = Harness::builder().with_size(vec2(1440.0, 900.0)).wgpu().build_eframe(|cc| {
+        SolidDraftApp::new(cc, soliddraft_app::command_tools::board_bracket(), Automation::default())
+    });
     assert_eq!(theme::active_theme_id(), "gruvbox-light");
     assert_eq!(resumed.ctx.global_style().visuals.panel_fill, theme::BuiltIn::GruvboxLight.tokens().palette.panel);
+    drop(resumed);
+
+    let mut appearance = soliddraft_app::settings::theme_preferences();
+    let theme_file =
+        br#"{"format":"soliddraft-theme/1","name":"Workshop","base":"clear_bench_dark","accent":[255,201,78]}"#;
+    appearance.imported = Some(theme::ThemeFile::read(theme_file).unwrap());
+    appearance.selected = theme::Selection::Imported;
+    appearance.colors.logo = Some(theme::Rgb([190, 36, 79]));
+    let mut png = std::io::Cursor::new(Vec::new());
+    image::RgbaImage::from_pixel(8, 4, image::Rgba([32, 106, 120, 255]))
+        .write_to(&mut png, image::ImageFormat::Png)
+        .unwrap();
+    appearance.set_picture("teal.png".into(), png.get_ref()).unwrap();
+    soliddraft_app::settings::save_theme_preferences(&appearance).unwrap();
+
+    let mut custom = Harness::builder().with_size(vec2(1440.0, 900.0)).wgpu().build_eframe(|cc| {
+        SolidDraftApp::new(cc, soliddraft_app::command_tools::board_bracket(), Automation::default())
+    });
+    custom.run_steps(6);
+    assert_eq!(theme::active_theme_id(), "imported");
+    assert_eq!(theme::accent(), egui::Color32::from_rgb(255, 201, 78));
+    assert_eq!(theme::logo(), egui::Color32::from_rgb(190, 36, 79));
+    let view = custom.state().state.viewport.rect;
+    let image = custom.render().expect("the imported theme and background render");
+    let x = view.left() as u32 + 20;
+    let y = view.top() as u32 + 64;
+    let painted = (x..x + 200)
+        .flat_map(|x| (y..y + 100).map(move |y| (x, y)))
+        .filter(|&(x, y)| {
+            let [red, green, blue, _] = image.get_pixel(x, y).0;
+            red.abs_diff(32) <= 9 && green.abs_diff(106) <= 9 && blue.abs_diff(120) <= 9
+        })
+        .count();
+    assert!(painted > 4000, "the saved PNG painted {painted} background pixels");
+    image.save(out_dir().join("workshop.png")).unwrap();
     let _ = std::fs::remove_dir_all(config);
 }

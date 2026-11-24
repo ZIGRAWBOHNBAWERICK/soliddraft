@@ -251,6 +251,7 @@ pub struct Appearance {
     pub imported: Option<ThemeFile>,
     pub background: Background,
     pub background_color: Rgb,
+    #[serde(with = "picture_storage")]
     picture: Option<Arc<Picture>>,
     pub colors: ViewColors,
 }
@@ -354,6 +355,23 @@ struct Picture {
     dark: bool,
     #[serde(skip)]
     image: Option<Arc<RgbaImage>>,
+}
+
+mod picture_storage {
+    use super::{Arc, Deserialize, Picture, Serialize};
+
+    pub(super) fn serialize<S: serde::Serializer>(
+        picture: &Option<Arc<Picture>>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        picture.as_deref().serialize(serializer)
+    }
+
+    pub(super) fn deserialize<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Option<Arc<Picture>>, D::Error> {
+        Option::<Picture>::deserialize(deserializer).map(|picture| picture.map(Arc::new))
+    }
 }
 
 impl PartialEq for Picture {

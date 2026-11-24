@@ -30,7 +30,7 @@ soliddraft-drawing.workspace = true
 soliddraft-exchange.workspace = true
 kurbo.workspace = true
 toml.workspace = true
-serde = { workspace = true, features = ["rc"] }
+serde.workspace = true
 soliddraft-assistant.workspace = true
 egui.workspace = true
 eframe.workspace = true

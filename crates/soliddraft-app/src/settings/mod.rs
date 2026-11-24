@@ -413,7 +413,10 @@ pub(crate) fn save_appearance_and_view(
     let value = |e: serde_json::Error| NotKept::Write(e.to_string());
     all["theme_preferences"] = serde_json::to_value(appearance).map_err(value)?;
     let theme = if appearance.tokens(None).is_dark { crate::theme::Mode::Dark } else { crate::theme::Mode::Light };
-    all["appearance"] = serde_json::to_value(Appearance { theme }).map_err(value)?;
+    if !all["appearance"].is_object() {
+        all["appearance"] = serde_json::json!({});
+    }
+    all["appearance"]["theme"] = serde_json::to_value(theme).map_err(value)?;
     if let Some(scene) = scene {
         if !all["view"].is_object() {
             all["view"] = serde_json::json!({});
@@ -787,7 +790,8 @@ mod tests {
         assert_eq!(appearance.background, Background::Scene);
         assert_eq!(theme_preferences_from(&serde_json::json!({})).background, Background::Gradient);
 
-        let imported = br#"{"format":"soliddraft-theme/1","name":"Night work","base":"clear_bench_dark","accent":[255,198,48]}"#;
+        let imported =
+            br#"{"format":"soliddraft-theme/1","name":"Night work","base":"clear_bench_dark","accent":[255,198,48]}"#;
         let file = ThemeFile::read(imported).unwrap();
         appearance.imported = Some(file);
         appearance.selected = Selection::Imported;

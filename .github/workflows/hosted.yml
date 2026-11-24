@@ -975,6 +975,60 @@ jobs:
           name: edit-off-thread-trace
           path: ${{ runner.temp }}/edit-off-thread-trace.json.gz
           if-no-files-found: warn
+      - name: Generate the display-state and Mate Controller fixtures
+        run: |
+          cargo test --locked -p soliddraft-app --test appearance_panel named_state_renders_two_body_appearances_and_reopens_with_visibility -- --exact
+          mkdir -p target/web-dist/fixtures
+          cp target/exit-test/display-states{,-service}.dwprt target/web-dist/fixtures/
+          SOLIDDRAFT_CONTROLLER_BROWSER_FIXTURES="$PWD/target/web-dist/fixtures" cargo test --locked -p soliddraft-app --test app_tools mate_controller_animation_keeps_driver_identity_when_reordered -- --exact
+      - name: Check display states and Mate Controller drafts in Chromium
+        timeout-minutes: 10
+        env:
+          CHROME_DEVTOOLS_AXI_SESSION: display-states
+          CHROME_DEVTOOLS_AXI_EXECUTABLE_PATH: /usr/bin/google-chrome
+          CHROME_DEVTOOLS_AXI_CHROME_ARGS: --no-sandbox --enable-unsafe-webgpu --enable-unsafe-swiftshader --use-angle=swiftshader
+        run: |
+          export PATH="$RUNNER_TEMP/browser-tools/node_modules/.bin:$PATH"
+          export CHROME_DEVTOOLS_AXI_MCP_PATH="$RUNNER_TEMP/browser-tools/node_modules/chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js"
+          python3 -m http.server 8779 --bind 127.0.0.1 --directory target/web-dist > "$RUNNER_TEMP/display-states-server.log" 2>&1 &
+          server=$!
+          trap 'chrome-devtools-axi stop; kill "$server"' EXIT
+          export CHROME_ARGS="$CHROME_DEVTOOLS_AXI_CHROME_ARGS"
+          node ci/browser-display-states.mjs /usr/bin/google-chrome http://127.0.0.1:8779/ "$RUNNER_TEMP/browser-display-states" target/web-dist/fixtures/display-states-service.dwprt target/web-dist/fixtures/display-states.dwprt
+          if ! chrome-devtools-axi open about:blank; then
+            chrome-devtools-axi stop || true
+            chrome-devtools-axi open about:blank
+          fi
+          chrome-devtools-axi emulate --viewport 1400x900x1
+          chrome-devtools-axi open 'http://127.0.0.1:8779/'
+          chrome-devtools-axi run < ci/browser-mate-controller.js
+      - name: Generate feature regression fixtures
+        env:
+          SOLIDDRAFT_BROWSER_FIXTURES: ${{ github.workspace }}/target/web-dist/fixtures
+        run: |
+          mkdir -p "$SOLIDDRAFT_BROWSER_FIXTURES"
+          cargo test --locked -p soliddraft-app --test configuration_grid --test hole_thread --test hole_wizard -- --test-threads=1
+      - name: Check hole, drawing, and parameter regressions in Chromium
+        env:
+          CHROME_DEVTOOLS_AXI_EXECUTABLE_PATH: /usr/bin/google-chrome
+          CHROME_DEVTOOLS_AXI_CHROME_ARGS: --no-sandbox --enable-unsafe-webgpu --enable-unsafe-swiftshader --use-angle=swiftshader
+        run: |
+          export PATH="$RUNNER_TEMP/browser-tools/node_modules/.bin:$PATH"
+          export CHROME_DEVTOOLS_AXI_MCP_PATH="$RUNNER_TEMP/browser-tools/node_modules/chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js"
+          python3 -m http.server 8796 --bind 127.0.0.1 --directory target/web-dist > "$RUNNER_TEMP/feature-regressions-server.log" 2>&1 &
+          server=$!
+          trap 'chrome-devtools-axi stop; kill "$server"' EXIT
+          for scenario in depth offset positions formula visibility callouts notes; do
+            export CHROME_DEVTOOLS_AXI_SESSION="feature-regressions-$scenario"
+            if ! chrome-devtools-axi open about:blank; then
+              chrome-devtools-axi stop || true
+              chrome-devtools-axi open about:blank
+            fi
+            chrome-devtools-axi emulate --viewport 1600x1000x1
+            chrome-devtools-axi open "http://127.0.0.1:8796/#$scenario"
+            chrome-devtools-axi run < ci/browser-feature-regressions.js
+            chrome-devtools-axi stop
+          done
       - name: Keep preferences per browser in Chromium
         env:
           # WebGL: a headless screenshot cannot read a WebGPU canvas.
@@ -989,6 +1043,21 @@ jobs:
         with:
           name: browser-preferences
           path: ${{ runner.temp }}/browser-preferences
+          if-no-files-found: ignore
+      - name: Ask before closing unsaved tabs, save drawings and export shortcuts in Chromium
+        timeout-minutes: 10
+        env:
+          CHROME_ARGS: --no-sandbox --enable-unsafe-swiftshader --use-angle=swiftshader
+        run: |
+          python3 -m http.server 8794 --bind 127.0.0.1 --directory target/web-dist > "$RUNNER_TEMP/document-tabs-server.log" 2>&1 &
+          server=$!
+          trap 'kill "$server"' EXIT
+          node ci/browser-document-tabs.mjs /usr/bin/google-chrome http://127.0.0.1:8794/ "$RUNNER_TEMP/browser-document-tabs"
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-document-tabs
+          path: ${{ runner.temp }}/browser-document-tabs
           if-no-files-found: ignore
       - name: Keep documents per browser and recover them after a kill in Chromium
         timeout-minutes: 10

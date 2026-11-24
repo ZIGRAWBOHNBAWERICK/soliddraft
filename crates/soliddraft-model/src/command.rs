@@ -928,7 +928,7 @@ impl Document {
                 "drive input".into()
             }
             Command::RenameValue { name, to } => {
-                state.rename(name, to, &features).map_err(CommandError::Invalid)?;
+                state.rename(name, to, &features, std::iter::empty()).map_err(CommandError::Invalid)?;
                 format!("rename value {name}")
             }
             Command::SetValueCell { configuration, name, expression } => {

@@ -584,7 +584,13 @@ impl Values {
         Ok(coerce(q, unit, expression.is_bare_literal())?.value)
     }
 
-    pub(crate) fn rename(&mut self, name: &str, to: &str, features: &[Feature]) -> Result<(), String> {
+    pub(crate) fn rename<'a>(
+        &mut self,
+        name: &str,
+        to: &str,
+        features: &[Feature],
+        overrides: impl Iterator<Item = &'a mut String>,
+    ) -> Result<(), String> {
         let taken = |values: &Values, input: Option<&Input>| {
             values.is_global(to)
                 || values.tracked.iter().any(|r| r.name == to)
@@ -598,7 +604,8 @@ impl Values {
             self.tracked[row].name = to.into();
             return Ok(());
         }
-        if let Some(index) = self.entries.iter().position(|v| v.name == name) {
+        let before = self.clone();
+        let renamed = if let Some(index) = self.entries.iter().position(|v| v.name == name) {
             check_name(to)?;
             if name != to
                 && (physical_property(to).is_some()
@@ -611,6 +618,7 @@ impl Values {
                 return Err(format!("the name {to} is already taken"));
             }
             self.entries[index].name = to.into();
+            Expr::Ref(self.entries[index].id)
         } else {
             check_parameter_name(to)?;
             let input = self.parameter(name, features).ok_or_else(|| format!("no value named {name}"))?;
@@ -618,14 +626,37 @@ impl Values {
                 return Err(format!("the name {to} is already taken"));
             }
             self.names.iter_mut().find(|p| p.input == input).expect("pinned above").name = to.into();
-        }
-        for expression in self
+            Expr::Param(input)
+        };
+        let replacement = |token: &str, formula| {
+            if !token.eq_ignore_ascii_case(name) && !token.eq_ignore_ascii_case(to) {
+                return None;
+            }
+            let reference = before.lookup(token, formula).ok()?;
+            if reference == renamed {
+                return Some(to);
+            }
+            // A new spelling can shadow a case-insensitive reference. Keep it bound
+            // by spelling the other reference exactly as its value or parameter.
+            if formula && token.eq_ignore_ascii_case(to) {
+                return match reference {
+                    Expr::Ref(id) => before.entries.iter().find(|v| v.id == id).map(|v| v.name.as_str()),
+                    Expr::Param(input) => before.names.iter().find(|p| p.input == input).map(|p| p.name.as_str()),
+                    _ => None,
+                };
+            }
+            None
+        };
+        for text in self
             .entries
             .iter_mut()
-            .map(|v| &mut v.expression)
-            .chain(self.bindings.iter_mut().map(|b| &mut b.expression))
+            .map(|v| &mut v.expression.text)
+            .chain(self.bindings.iter_mut().map(|b| &mut b.expression.text))
         {
-            expression.text = rename_tokens(&expression.text, name, to);
+            *text = rename_tokens(text, replacement);
+        }
+        for text in overrides {
+            *text = rename_tokens(text, replacement);
         }
         if let Some(comment) = self.comments.remove(name) {
             self.comments.insert(to.into(), comment);

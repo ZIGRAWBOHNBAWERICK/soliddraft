@@ -222,7 +222,10 @@ pub(crate) fn customize(ctx: &egui::Context, state: &mut AppState) {
                 if ui.button("Reset this workspace").clicked() {
                     editor.draft.pinned.remove(&workspace);
                 }
-                export = ui.button("Export preferences").clicked();
+                let response = ui.button("Export preferences");
+                #[cfg(target_arch = "wasm32")]
+                crate::web::show_control("Export preferences", response.rect);
+                export = response.clicked();
             });
         });
     if export && let Err(error) = crate::settings::export_preferences(&editor.draft) {

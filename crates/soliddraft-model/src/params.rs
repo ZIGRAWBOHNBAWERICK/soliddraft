@@ -235,7 +235,7 @@ pub fn parameters(feature: &Feature) -> Vec<Param> {
         }
         FeatureKind::Hole(h) => {
             out.push(param(Parameter::Diameter, Unit::Length, h.diameter));
-            if let HoleDepth::Blind { depth } = h.depth {
+            if let Some(HoleDepth::Blind { depth }) = h.specified_depth() {
                 out.push(param(Parameter::Depth, Unit::Length, depth));
             }
             match h.head {
@@ -383,10 +383,9 @@ fn write_parameter(
             b.other_distance = Some(positive("second distance")?);
         }
         (FeatureKind::Hole(h), Parameter::Diameter) => h.diameter = positive("diameter")?,
-        (FeatureKind::Hole(h), Parameter::Depth) => match &mut h.depth {
-            HoleDepth::Blind { depth } => *depth = positive("depth")?,
-            HoleDepth::Through => return missing(),
-        },
+        (FeatureKind::Hole(h), Parameter::Depth) if matches!(h.specified_depth(), Some(HoleDepth::Blind { .. })) => {
+            h.set_depth(HoleDepth::Blind { depth: positive("depth")? });
+        }
         (FeatureKind::Hole(h), Parameter::HeadDiameter) => match &mut h.head {
             Some(HoleHead::Counterbore { diameter, .. } | HoleHead::Countersink { diameter, .. }) => {
                 *diameter = positive("head diameter")?

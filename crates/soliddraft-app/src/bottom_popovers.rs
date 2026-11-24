@@ -8,135 +8,31 @@ use crate::state::{AppState, DisplayUnit};
 use crate::theme;
 use egui::{Align2, CornerRadius, Rect, RectAlign, Sense, Stroke, StrokeKind, pos2, vec2};
 
+/// An area unit: the square of a length unit, so it converts as that unit does.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum LengthUnit {
-    #[default]
-    Mm,
-    Cm,
-    M,
-    In,
-    Ft,
-}
-
-impl LengthUnit {
-    pub const ALL: [Self; 5] = [Self::Mm, Self::Cm, Self::M, Self::In, Self::Ft];
-
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Mm => "mm",
-            Self::Cm => "cm",
-            Self::M => "m",
-            Self::In => "in",
-            Self::Ft => "ft",
-        }
-    }
-
-    pub fn from_mm(self, mm: f64) -> f64 {
-        match self {
-            Self::Mm => mm,
-            Self::Cm => mm / 10.0,
-            Self::M => mm / 1000.0,
-            Self::In => mm / 25.4,
-            Self::Ft => mm / 304.8,
-        }
-    }
-
-    pub fn from_display(unit: DisplayUnit) -> Self {
-        match unit {
-            DisplayUnit::Mm => Self::Mm,
-            DisplayUnit::Cm => Self::Cm,
-            DisplayUnit::M => Self::M,
-            DisplayUnit::In => Self::In,
-            DisplayUnit::Ft | DisplayUnit::Yd => Self::Ft,
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum AreaUnit {
-    #[default]
-    Mm2,
-    Cm2,
-    M2,
-    In2,
-    Ft2,
-}
+pub struct AreaUnit(pub DisplayUnit);
 
 impl AreaUnit {
-    pub const ALL: [Self; 5] = [Self::Mm2, Self::Cm2, Self::M2, Self::In2, Self::Ft2];
-
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Mm2 => "mm²",
-            Self::Cm2 => "cm²",
-            Self::M2 => "m²",
-            Self::In2 => "in²",
-            Self::Ft2 => "ft²",
-        }
+    pub fn label(self) -> String {
+        format!("{}²", self.0.short())
     }
 
     pub fn from_mm2(self, mm2: f64) -> f64 {
-        match self {
-            Self::Mm2 => mm2,
-            Self::Cm2 => mm2 / 100.0,
-            Self::M2 => mm2 / 1_000_000.0,
-            Self::In2 => mm2 / (25.4 * 25.4),
-            Self::Ft2 => mm2 / (304.8 * 304.8),
-        }
-    }
-
-    pub fn from_display(unit: DisplayUnit) -> Self {
-        match unit {
-            DisplayUnit::Mm => Self::Mm2,
-            DisplayUnit::Cm => Self::Cm2,
-            DisplayUnit::M => Self::M2,
-            DisplayUnit::In => Self::In2,
-            DisplayUnit::Ft | DisplayUnit::Yd => Self::Ft2,
-        }
+        mm2 / self.0.mm_per_unit().powi(2)
     }
 }
 
+/// A volume unit: the cube of a length unit, so it converts as that unit does.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum VolumeUnit {
-    #[default]
-    Mm3,
-    Cm3,
-    M3,
-    In3,
-    Ft3,
-}
+pub struct VolumeUnit(pub DisplayUnit);
 
 impl VolumeUnit {
-    pub const ALL: [Self; 5] = [Self::Mm3, Self::Cm3, Self::M3, Self::In3, Self::Ft3];
-
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Mm3 => "mm³",
-            Self::Cm3 => "cm³",
-            Self::M3 => "m³",
-            Self::In3 => "in³",
-            Self::Ft3 => "ft³",
-        }
+    pub fn label(self) -> String {
+        format!("{}³", self.0.short())
     }
 
     pub fn from_mm3(self, mm3: f64) -> f64 {
-        match self {
-            Self::Mm3 => mm3,
-            Self::Cm3 => mm3 / 1_000.0,
-            Self::M3 => mm3 / 1_000_000_000.0,
-            Self::In3 => mm3 / (25.4 * 25.4 * 25.4),
-            Self::Ft3 => mm3 / (304.8 * 304.8 * 304.8),
-        }
-    }
-
-    pub fn from_display(unit: DisplayUnit) -> Self {
-        match unit {
-            DisplayUnit::Mm => Self::Mm3,
-            DisplayUnit::Cm => Self::Cm3,
-            DisplayUnit::M => Self::M3,
-            DisplayUnit::In => Self::In3,
-            DisplayUnit::Ft | DisplayUnit::Yd => Self::Ft3,
-        }
+        mm3 / self.0.mm_per_unit().powi(3)
     }
 }
 
@@ -212,13 +108,15 @@ impl DensityUnit {
     }
 }
 
-/// Persistent session state for the Physical Analysis popover (`28.png`).
+/// Session state for the Physical Analysis popover (`28.png`), kept for each open part:
+/// a density typed for one part never shows for another.
 #[derive(Clone, Copy, Debug)]
 pub struct PhysicalState {
-    pub length: LengthUnit,
+    pub length: DisplayUnit,
     pub area: AreaUnit,
     pub volume: VolumeUnit,
     pub mass: MassUnit,
+    /// The density typed by the user, used only while `user_overrode_density` is set.
     pub density: f64,
     pub density_unit: DensityUnit,
     pub user_overrode_density: bool,
@@ -227,15 +125,49 @@ pub struct PhysicalState {
 impl Default for PhysicalState {
     fn default() -> Self {
         Self {
-            length: LengthUnit::Mm,
-            area: AreaUnit::Mm2,
-            volume: VolumeUnit::Mm3,
+            length: DisplayUnit::Mm,
+            area: AreaUnit(DisplayUnit::Mm),
+            volume: VolumeUnit(DisplayUnit::Mm),
             mass: MassUnit::G,
             density: 7850.0,
             density_unit: DensityUnit::KgM3,
             user_overrode_density: false,
         }
     }
+}
+
+impl PhysicalState {
+    /// Length, area and volume in one length unit.
+    fn use_unit(&mut self, unit: DisplayUnit) {
+        self.length = unit;
+        self.area = AreaUnit(unit);
+        self.volume = VolumeUnit(unit);
+    }
+}
+
+/// Where the open part's Physical Analysis state is kept.
+fn physical_id(state: &AppState) -> egui::Id {
+    egui::Id::new("d1_physical_analysis_state").with(state.doc.instance())
+}
+
+/// Why the body shown cannot be measured once nothing more is building, or `None` while
+/// a rebuild or the display can still bring a proved body.
+fn not_measurable(proof: &crate::document::ProofState) -> Option<&'static str> {
+    let settled = !proof.pending
+        && !proof.transient
+        && proof.display_ready
+        && proof.displayed_edit.is_none()
+        && proof.displayed_revision == proof.requested_revision;
+    if !settled || proof.current_proved_display() {
+        return None;
+    }
+    Some(if proof.failed {
+        "The last change did not build, so the body shown is not its result and is not measured."
+    } else if proof.answered_within_bound {
+        "The body shown is a preview within a stated bound, not a proved solid, so it has no exact mass."
+    } else {
+        "The body shown is not proved, so its mass is not measured."
+    })
 }
 
 /// Computes mass (in `mass_unit`) from volume in `mm³` and density in `density_unit`.
@@ -302,12 +234,18 @@ fn bar_pill(
 }
 
 fn physical_analysis_control(ui: &mut egui::Ui, state: &mut AppState) {
-    let id = egui::Id::new("d1_physical_analysis_state");
-    let mut phys = ui.data(|d| d.get_temp::<PhysicalState>(id).unwrap_or_default());
+    let id = physical_id(state);
+    let mut phys = ui.data(|d| d.get_temp::<PhysicalState>(id)).unwrap_or_else(|| {
+        let mut phys = PhysicalState::default();
+        phys.use_unit(state.display_unit);
+        phys
+    });
 
+    // Mass is the measured body's: its own material, else the part's.
+    let material = state.doc.body_material(state.doc.active_body).cloned();
+    let material_density = material.as_ref().and_then(|m| m.density_kg_m3).filter(|d| *d > 0.0);
     if !phys.user_overrode_density
-        && let Some(density) = state.doc.material().and_then(|m| m.density_kg_m3)
-        && density > 0.0
+        && let Some(density) = material_density
     {
         phys.density = phys.density_unit.from_kg_m3(density);
     }
@@ -335,11 +273,11 @@ fn physical_analysis_control(ui: &mut egui::Ui, state: &mut AppState) {
             egui::Grid::new("physical_analysis_units").num_columns(2).spacing([12.0, 6.0]).show(ui, |ui| {
                 ui.vertical(|ui| {
                     ui.label(egui::RichText::new("Length").size(11.0).color(theme::muted()));
-                    egui::ComboBox::from_id_salt("pa_length").width(134.0).selected_text(phys.length.label()).show_ui(
+                    egui::ComboBox::from_id_salt("pa_length").width(134.0).selected_text(phys.length.short()).show_ui(
                         ui,
                         |ui| {
-                            for u in LengthUnit::ALL {
-                                ui.selectable_value(&mut phys.length, u, u.label());
+                            for u in DisplayUnit::ALL {
+                                ui.selectable_value(&mut phys.length, u, u.short());
                             }
                         },
                     );
@@ -349,7 +287,7 @@ fn physical_analysis_control(ui: &mut egui::Ui, state: &mut AppState) {
                     egui::ComboBox::from_id_salt("pa_area").width(134.0).selected_text(phys.area.label()).show_ui(
                         ui,
                         |ui| {
-                            for u in AreaUnit::ALL {
+                            for u in DisplayUnit::ALL.map(AreaUnit) {
                                 ui.selectable_value(&mut phys.area, u, u.label());
                             }
                         },
@@ -362,7 +300,7 @@ fn physical_analysis_control(ui: &mut egui::Ui, state: &mut AppState) {
                     egui::ComboBox::from_id_salt("pa_volume").width(134.0).selected_text(phys.volume.label()).show_ui(
                         ui,
                         |ui| {
-                            for u in VolumeUnit::ALL {
+                            for u in DisplayUnit::ALL.map(VolumeUnit) {
                                 ui.selectable_value(&mut phys.volume, u, u.label());
                             }
                         },
@@ -409,8 +347,8 @@ fn physical_analysis_control(ui: &mut egui::Ui, state: &mut AppState) {
                 ui.end_row();
             });
 
-            let source = match state.doc.material() {
-                Some(material) if !phys.user_overrode_density && material.density_kg_m3.is_some_and(|d| d > 0.0) => {
+            let source = match &material {
+                Some(material) if !phys.user_overrode_density && material_density.is_some() => {
                     format!("Density from the material, {}.", material.name)
                 }
                 Some(material) => format!("Material {}: mass uses the density entered here.", material.name),
@@ -456,7 +394,7 @@ fn physical_analysis_control(ui: &mut egui::Ui, state: &mut AppState) {
 
                         ui.label(egui::RichText::new("Centre of mass").color(theme::muted()));
                         ui.label(
-                            egui::RichText::new(format!("({cx:.2}, {cy:.2}, {cz:.2}) {}", phys.length.label()))
+                            egui::RichText::new(format!("({cx:.2}, {cy:.2}, {cz:.2}) {}", phys.length.short()))
                                 .font(theme::mono(11.5))
                                 .color(theme::ink()),
                         );
@@ -470,9 +408,15 @@ fn physical_analysis_control(ui: &mut egui::Ui, state: &mut AppState) {
                     let waiting = "Calculating mass properties...";
                     let mut refusal = None;
                     let mut pending = false;
+                    let proof = state.doc.proof_state();
                     match feature {
                         None => refusal = Some("This body has no feature to measure.".to_owned()),
-                        Some(_) if !state.doc.proof_state().current_proved_display() => pending = true,
+                        // A finished preview that is not a proved solid is refused by name;
+                        // only a rebuild still running is waited for.
+                        Some(_) if !proof.current_proved_display() => match not_measurable(&proof) {
+                            Some(why) => refusal = Some(why.to_owned()),
+                            None => pending = true,
+                        },
                         Some(id) => match state.mass.message(&state.doc, id) {
                             Some(message) if message == waiting => pending = true,
                             Some(message) => refusal = Some(message.to_owned()),
@@ -496,7 +440,7 @@ fn physical_analysis_control(ui: &mut egui::Ui, state: &mut AppState) {
                     if let Some(refusal) = refusal {
                         ui.label(egui::RichText::new("Not measured").family(theme::semibold()).color(theme::error()));
                         ui.label(egui::RichText::new(refusal).color(theme::muted()));
-                        if let Some(id) = feature
+                        if let Some(id) = feature.filter(|_| proof.current_proved_display())
                             && ui.small_button("Try again").clicked()
                             && let Err(error) = state.mass.request(&state.doc, id, ui.ctx())
                         {
@@ -593,13 +537,12 @@ fn units_control(ui: &mut egui::Ui, state: &mut AppState) {
                 }
                 if item.clicked() {
                     state.display_unit = unit;
-                    // Sync Physical Analysis default length/area/volume units to match.
-                    let id = egui::Id::new("d1_physical_analysis_state");
+                    // Physical Analysis follows the part's length unit for length, area and
+                    // volume.
+                    let id = physical_id(state);
                     ui.data_mut(|d| {
                         let mut phys = d.get_temp::<PhysicalState>(id).unwrap_or_default();
-                        phys.length = LengthUnit::from_display(unit);
-                        phys.area = AreaUnit::from_display(unit);
-                        phys.volume = VolumeUnit::from_display(unit);
+                        phys.use_unit(unit);
                         d.insert_temp(id, phys);
                     });
                     ui.close();
@@ -619,9 +562,9 @@ mod tests {
         assert!((mass_g - 7.85).abs() < 1e-9);
         let mass_kg = compute_mass(1000.0, 7.85, DensityUnit::GCm3, MassUnit::Kg);
         assert!((mass_kg - 0.00785).abs() < 1e-9);
-        assert!((LengthUnit::In.from_mm(25.4) - 1.0).abs() < 1e-12);
-        assert!((AreaUnit::In2.from_mm2(645.16) - 1.0).abs() < 1e-9);
-        assert!((VolumeUnit::Cm3.from_mm3(1000.0) - 1.0).abs() < 1e-12);
+        assert!((DisplayUnit::In.from_mm(25.4) - 1.0).abs() < 1e-12);
+        assert!((AreaUnit(DisplayUnit::In).from_mm2(645.16) - 1.0).abs() < 1e-9);
+        assert!((VolumeUnit(DisplayUnit::Cm).from_mm3(1000.0) - 1.0).abs() < 1e-12);
         assert!((DensityUnit::GCm3.to_kg_m3(2.7) - 2700.0).abs() < 1e-9);
     }
 }

@@ -176,10 +176,15 @@ pub(crate) fn export_preferences(menu: &crate::shortcut_menu::Preferences) -> Re
     else {
         return Ok(());
     };
-    let mut prefs = stored();
-    prefs["shortcut_menu"] = serde_json::to_value(menu).map_err(|error| error.to_string())?;
-    let bytes = serde_json::to_vec_pretty(&prefs).map_err(|error| error.to_string())?;
-    crate::platform::write_file(&path, &bytes)
+    crate::platform::write_file(&path, &shortcut_menu_export(menu)?)
+}
+
+/// The file Export preferences writes: the shortcut menu's settings and nothing else.
+/// Other settings hold private paths, history and provider choices the user did not ask
+/// to export.
+pub(crate) fn shortcut_menu_export(menu: &crate::shortcut_menu::Preferences) -> Result<Vec<u8>, String> {
+    let menu = serde_json::to_value(menu).map_err(|error| error.to_string())?;
+    serde_json::to_vec_pretty(&serde_json::json!({ "shortcut_menu": menu })).map_err(|error| error.to_string())
 }
 
 /// File locations, or none when there are none or they are unreadable.
@@ -550,6 +555,27 @@ mod tests {
 
     fn file_store(file: &Path) -> Store {
         Store::File(file.to_owned())
+    }
+
+    /// Export preferences in the shortcut menu writes the shortcut menu's settings only:
+    /// never the folders, history, favorites, provider or library kept beside them.
+    #[test]
+    fn shortcut_export_holds_only_the_shortcut_menu() {
+        let shelf = store::Memory::new();
+        store::use_store(Some(Store::Shelf(shelf)));
+        let mut locations = FileLocations::default();
+        locations.add(soliddraft_document::LocationKind::ReferencedDocuments, PathBuf::from("/home/private/projects"));
+        save_file_locations(&locations).unwrap();
+        let mut history = History::default();
+        history.record("extrude");
+        save_command_history(&history).unwrap();
+        save_assistant(&AssistantSettings::default()).unwrap();
+        let exported = shortcut_menu_export(&crate::shortcut_menu::Preferences::default());
+        store::use_store(None);
+        let exported: Value = serde_json::from_slice(&exported.unwrap()).unwrap();
+        let keys: Vec<&String> = exported.as_object().unwrap().keys().collect();
+        assert_eq!(keys, ["shortcut_menu"], "the export holds other settings: {exported}");
+        assert!(!exported.to_string().contains("/home/private/projects"));
     }
 
     #[test]

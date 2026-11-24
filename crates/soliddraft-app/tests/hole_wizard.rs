@@ -14,12 +14,13 @@ mod ux_tools;
 
 use egui_kittest::kittest::Queryable;
 use ribbon::App;
-use soliddraft_app::document::{Document, FeatureKind, HoleParams, HoleWizardTab};
+use soliddraft_app::document::{Command, Document, FeatureKind, HoleParams, HoleWizardTab};
 use soliddraft_app::settings::{self, Store, store::Memory};
 use soliddraft_app::state::{AppAction, EditorParams};
-use soliddraft_kernel_api::{HoleHead, SurfaceKind};
+use soliddraft_kernel_api::{HoleDepth, HoleHead, HoleTip, SurfaceKind, Vec3};
 use soliddraft_model::file::HOLE_WIZARD_FORMAT;
-use soliddraft_model::hole_wizard::{HoleEndCondition, HoleFit, HoleStandard, HoleType};
+use soliddraft_model::hole_wizard::{HoleEndCondition, HoleFit, HoleStandard, HoleType, HoleWizardSpec};
+use soliddraft_sketch::P2;
 use ux_tools::{STANDARD, launch, settle};
 
 fn click(app: &mut App, label: &str) {
@@ -42,6 +43,157 @@ fn hole_params(app: &App) -> HoleParams {
 fn volume(doc: &Document) -> f64 {
     let model = doc.model();
     model.kernel().mass_properties(model.body().unwrap()).unwrap().volume
+}
+
+fn plate_face(doc: &Document, normal: Vec3) -> soliddraft_model::FaceRef {
+    let model = doc.model();
+    let topology = model.kernel().topology(model.body().unwrap()).unwrap();
+    let face = topology.faces.iter().find(|f| f.normal.is_some_and(|n| n.dot(normal) > 0.9999)).unwrap();
+    model.face_ref(face.id).unwrap()
+}
+
+fn drill(doc: &mut Document, params: HoleParams) -> u64 {
+    let id = doc.apply(Command::AddFeature(FeatureKind::Hole(params.to_model().unwrap()))).unwrap().unwrap();
+    assert!(doc.model().status(soliddraft_model::FeatureId(id as u32)).unwrap().is_ok());
+    id
+}
+
+fn browser_fixture(name: &str, doc: &Document) {
+    if let Some(dir) = std::env::var_os("SOLIDDRAFT_BROWSER_FIXTURES") {
+        std::fs::write(std::path::PathBuf::from(dir).join(name), doc.model().to_bytes().unwrap()).unwrap();
+    }
+}
+
+#[test]
+fn parameter_grid_edits_rebuild_a_blind_wizard_hole() {
+    use serde_json::{Value, json};
+    use soliddraft_app::app_tools::AppTools;
+    use soliddraft_app::state::AppState;
+    use soliddraft_app::values_tab::{self, Field, ValuesAction};
+    use soliddraft_assistant::{Caller, tools::call_checked};
+
+    let mut doc = ribbon::plate();
+    let before = volume(&doc);
+    let mut wizard = HoleWizardSpec::new(HoleStandard::Iso, HoleType::StraightTap);
+    wizard.end_condition = HoleEndCondition::Blind { depth: 10.0 };
+    let mut params = HoleParams {
+        face: Some(plate_face(&doc, Vec3::Z)),
+        tip: HoleTip::Flat,
+        wizard: Some(wizard),
+        ..Default::default()
+    };
+    params.apply_wizard_defaults();
+    params.tip = HoleTip::Flat;
+    let name = drill(&mut doc, params);
+    browser_fixture("wizard-blind-depth.dwprt", &doc);
+    let field = Field::Cell(format!("{}.Depth", doc.feature(name).unwrap().name), 0);
+    let mut state = AppState::new(doc);
+    for (input, depth) in [("5 mm", 5.0), ("=3 mm + 4 mm", 7.0)] {
+        values_tab::apply(&mut state, ValuesAction::Commit(field.clone(), input.into()));
+        assert!(state.values.error(&field).is_none(), "{:?}", state.values.error(&field));
+        let removed = before - volume(&state.doc);
+        let expected = std::f64::consts::PI * 2.5_f64.powi(2) * depth;
+        assert!((removed - expected).abs() < 1e-4, "{input} removed {removed} mm³, expected {expected}");
+    }
+
+    values_tab::apply(&mut state, ValuesAction::Commit(field, String::new()));
+    let mut call = |tool, arguments| {
+        let caller = Caller::Mcp { client: "wizard-depth-test".into() };
+        let result = call_checked(&mut AppTools { state: &mut state }, tool, arguments, &caller);
+        assert!(!result.is_error, "{tool}: {}", result.content);
+        serde_json::from_str::<Value>(&result.content).unwrap()
+    };
+    call("edit_hole", json!({ "feature": "Hole1", "depth": 9 }));
+    assert_eq!(call("feature", json!({ "name": "Hole1" }))["depth"], json!(9.0));
+    assert_eq!(state.doc.model().threaded_walls()[0].depth(), Some(9.0));
+}
+
+#[test]
+fn up_to_next_skips_the_empty_corner_of_an_underside_recess() {
+    let results = [(HoleType::Simple, 0.0), (HoleType::Slot, 0.4)].map(|(hole_type, slot_length)| {
+        let mut doc = ribbon::plate();
+        let underside = HoleParams {
+            face: Some(plate_face(&doc, -Vec3::Z)),
+            diameter: 10.0,
+            depth: HoleDepth::Blind { depth: 10.0 },
+            tip: HoleTip::Flat,
+            ..Default::default()
+        };
+        drill(&mut doc, underside);
+        let before = volume(&doc);
+        let mut wizard = HoleWizardSpec::new(HoleStandard::Iso, hole_type);
+        wizard.end_condition = HoleEndCondition::UpToNext;
+        wizard.slot_length = (slot_length > 0.0).then_some(slot_length);
+        let params = HoleParams {
+            face: Some(plate_face(&doc, Vec3::Z)),
+            points: vec![P2::new(4.0, 4.0)],
+            diameter: 1.0,
+            tip: HoleTip::Flat,
+            wizard: Some(wizard),
+            ..Default::default()
+        };
+        drill(&mut doc, params);
+        (before - volume(&doc), (std::f64::consts::PI * 0.25 + slot_length) * 20.0)
+    });
+    assert!(results.iter().all(|(actual, expected)| (actual - expected).abs() < 1e-4), "{results:?}");
+}
+
+#[test]
+fn tapped_surface_offset_is_called_out_as_blind() {
+    let mut doc = ribbon::plate();
+    let mut wizard = HoleWizardSpec::new(HoleStandard::Iso, HoleType::StraightTap);
+    wizard.end_condition =
+        HoleEndCondition::OffsetFromSurface { face: plate_face(&doc, -Vec3::Z), offset: 5.0, reverse_offset: false };
+    let mut params = HoleParams { face: Some(plate_face(&doc, Vec3::Z)), wizard: Some(wizard), ..Default::default() };
+    params.apply_wizard_defaults();
+    params.tip = HoleTip::Flat;
+    drill(&mut doc, params);
+    browser_fixture("wizard-tapped-offset.dwprt", &doc);
+    let walls = doc.model().threaded_walls();
+    assert_eq!(walls.len(), 1);
+    assert_eq!(walls[0].depth(), Some(15.0));
+    let rows = doc.model().pmi_rows();
+    assert_eq!(rows[0].callout(), "M6x1-6H DEEP 15");
+}
+
+#[test]
+fn a_legacy_hole_keeps_its_edited_position_pattern_after_reopen() {
+    let mut doc = ribbon::plate();
+    let params =
+        HoleParams { face: Some(plate_face(&doc, Vec3::Z)), points: vec![P2::new(-10.0, -10.0)], ..Default::default() };
+    let id = drill(&mut doc, params);
+    let old = doc.model().to_bytes().unwrap();
+    assert_ne!(doc.model().truth()["format"], HOLE_WIZARD_FORMAT);
+    let reopened = soliddraft_model::Document::from_bytes(&old, soliddraft_app::kernel()).unwrap();
+    let mut app = launch(Document::from_model(reopened), STANDARD);
+    app.state_mut().state.push(AppAction::EditFeature(id));
+    settle(&mut app);
+    click(&mut app, "Hole Wizard Positions tab");
+    let EditorParams::Hole(h) = &mut app.state_mut().state.editor.as_mut().unwrap().params else { panic!() };
+    let sketch = h.ensure_position_sketch();
+    let point = soliddraft_sketch::PointRef::new(sketch.entities[1].id, 0);
+    sketch.constrain(soliddraft_sketch::ConstraintKind::Fix { point, at: P2::new(-10.0, -10.0) });
+    h.lin_pat.count_x = 2;
+    h.lin_pat.spacing_x = 12.0;
+    h.lin_pat.count_y = 1;
+    h.apply_linear_point_pattern().unwrap();
+    let edited = h.position_sketch.clone().unwrap();
+    settle(&mut app);
+    let undo_before = app.state().state.doc.undo_depth();
+    click(&mut app, "Apply Hole Wizard");
+    ux_tools::rebuilt(&mut app);
+    let doc = &app.state().state.doc;
+    browser_fixture("wizard-edited-positions.dwprt", doc);
+    assert_eq!(doc.undo_depth(), undo_before + 1);
+    assert_eq!(doc.model().truth()["format"], HOLE_WIZARD_FORMAT);
+    let bytes = doc.model().to_bytes().unwrap();
+    let reopened = soliddraft_model::Document::from_bytes(&bytes, soliddraft_app::kernel()).unwrap();
+    let doc = Document::from_model(reopened);
+    let sketch_id = doc.feature(id).unwrap().kind.sketch().expect("the hole still owns its position sketch");
+    let saved = &doc.feature(sketch_id).unwrap().sketch().unwrap().sketch;
+    assert_eq!(saved.entities, edited.entities);
+    assert_eq!(saved.constraints, edited.constraints);
+    assert_eq!(saved.patterns, edited.patterns);
 }
 
 #[test]

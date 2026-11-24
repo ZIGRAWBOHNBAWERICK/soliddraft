@@ -4,15 +4,16 @@
 //! assembly's values, what the solver says, and the conflicts a refusal named. Everything
 //! goes through the same commands as the MCP tools.
 
-use crate::assembly::AssemblyState;
+use crate::assembly::{AssemblyState, ControllerAnimation, controller_drivers};
 use crate::mates::tools::rows;
 use crate::state::{AppState, NoteKind};
 use crate::theme;
 use soliddraft_assembly::{
-    Alignment, ComponentId, EndpointSelector, FaceSelector, MateEdit, MateRefusal, OccurrencePath, SlotInput,
-    WidthInput,
+    Alignment, AssemblyDocument, ComponentId, EndpointSelector, FaceSelector, MateEdit, MateId, MateRefusal,
+    OccurrencePath, SlotInput, WidthInput,
 };
 use soliddraft_model::FaceRef;
+use std::collections::BTreeMap;
 
 /// A picked face.
 #[derive(Clone, Debug, PartialEq)]
@@ -204,8 +205,13 @@ pub struct Draft {
     pub controller_mates: String,
     /// The name of the position to save.
     pub position: String,
-    /// The driven mates' values as typed, one per driven mate.
-    pub controller_values: Vec<String>,
+    controller_values: BTreeMap<MateId, ControllerValueDraft>,
+}
+
+#[derive(Default)]
+struct ControllerValueDraft {
+    source: Option<f64>,
+    text: String,
 }
 
 impl Default for Draft {
@@ -241,12 +247,29 @@ impl Default for Draft {
             conflict: None,
             controller_mates: String::new(),
             position: String::new(),
-            controller_values: Vec::new(),
+            controller_values: BTreeMap::new(),
         }
     }
 }
 
 impl Draft {
+    pub(crate) fn clear_controller_values(&mut self) {
+        self.controller_values.clear();
+    }
+
+    fn sync_controller_values<'a>(&mut self, doc: &'a AssemblyDocument) -> Vec<(MateId, &'a str, Option<f64>)> {
+        let drivers: Vec<_> = controller_drivers(doc).collect();
+        self.controller_values.retain(|id, _| drivers.iter().any(|(current, _, _)| current == id));
+        for &(id, _, value) in &drivers {
+            let draft = self.controller_values.entry(id).or_default();
+            if draft.source != value {
+                draft.source = value;
+                draft.text = value.map(|v| v.to_string()).unwrap_or_default();
+            }
+        }
+        drivers
+    }
+
     fn slots(&mut self) -> [&mut Option<PickedFace>; 4] {
         [&mut self.a, &mut self.b, &mut self.c, &mut self.d]
     }
@@ -524,16 +547,21 @@ pub fn apply(state: &mut AppState, action: MateAction) {
             report(state, done, "Mate Controller set");
         }
         MateAction::ControllerValues => {
+            let Some(s) = state.assembly.session.as_mut() else { return };
+            let draft = &mut state.assembly.mate;
+            let drivers = draft.sync_controller_values(&s.doc);
             let values: Result<Vec<f64>, _> =
-                state.assembly.mate.controller_values.iter().map(|v| v.trim().parse::<f64>()).collect();
+                drivers.iter().map(|(id, _, _)| draft.controller_values[id].text.trim().parse::<f64>()).collect();
             let Ok(values) = values else {
-                state.assembly.mate.error = Some("Each value is a number: millimetres, degrees or percent".into());
+                draft.error = Some("Each value is a number: millimetres, degrees or percent".into());
                 return;
             };
-            let Some(s) = state.assembly.session.as_mut() else { return };
             let done = s.doc.apply_controller_values(&values);
+            if done.is_ok() {
+                s.animation = None;
+                draft.clear_controller_values();
+            }
             report(state, done, "Values applied");
-            state.assembly.mate.controller_values.clear();
         }
         MateAction::ControllerSave => {
             let name = state.assembly.mate.position.trim().to_owned();
@@ -544,27 +572,27 @@ pub fn apply(state: &mut AppState, action: MateAction) {
         MateAction::ControllerApply(name) => {
             let Some(s) = state.assembly.session.as_mut() else { return };
             let done = s.doc.apply_controller_position(&name);
+            if done.is_ok() {
+                s.animation = None;
+                state.assembly.mate.clear_controller_values();
+            }
             report(state, done, "Position applied");
         }
         MateAction::ControllerAnimate(name) => {
             let Some(s) = state.assembly.session.as_mut() else { return };
-            let now: Vec<f64> = s.doc.controller_mates().iter().filter_map(|m| controller_value(&s.doc, m)).collect();
-            let to = s
-                .doc
-                .mate_controller()
-                .and_then(|c| c.positions.iter().find(|p| p.name == name))
-                .map(|p| p.values.clone());
-            match to {
-                Some(to) if to.len() == now.len() => {
-                    s.animation = Some(crate::assembly::ControllerAnimation {
-                        from: now,
-                        to,
-                        seconds: 2.0,
-                        started: web_time::Instant::now(),
-                    });
-                }
-                _ => state.assembly.mate.error = Some(format!("No position named {name} to animate to")),
-            }
+            let position = s.doc.mate_controller().and_then(|c| c.positions.iter().find(|p| p.name == name));
+            let drivers: Vec<_> = controller_drivers(&s.doc).collect();
+            let Some(to) = position.map(|p| &p.values).filter(|to| to.len() == drivers.len()) else {
+                state.assembly.mate.error = Some(format!("No position named {name} to animate to"));
+                return;
+            };
+            let values = drivers.iter().zip(to).map(|(&(id, _, from), &to)| Some((id, (from?, to)))).collect();
+            let Some(drivers) = values else {
+                state.assembly.mate.error = Some("A driven mate has no value to animate from".into());
+                return;
+            };
+            s.doc.cancel_drag();
+            s.animation = Some(ControllerAnimation { drivers, seconds: 2.0, started: web_time::Instant::now() });
         }
         MateAction::ControllerDelete(name) => {
             let Some(s) = state.assembly.session.as_mut() else { return };
@@ -572,11 +600,6 @@ pub fn apply(state: &mut AppState, action: MateAction) {
             report(state, done, "Position deleted");
         }
     }
-}
-
-/// A driven mate's value now.
-fn controller_value(doc: &soliddraft_assembly::AssemblyDocument, mate: &str) -> Option<f64> {
-    soliddraft_assembly::controller_values(doc).get(mate).copied()
 }
 
 /// The refusal's code in words.
@@ -873,29 +896,27 @@ fn details(ui: &mut egui::Ui, state: &mut AppState) {
     });
     ui.add_space(6.0);
     theme::section_label(ui, "Mate Controller");
-    let driven = s.doc.controller_mates();
-    if driven.is_empty() {
+    let drivers = d.sync_controller_values(&s.doc);
+    if drivers.is_empty() {
         ui.small("Drives Distance and Angle mates and positions along a slot or path.");
     } else {
-        ui.label(format!("Drives {}", driven.join(", ")));
+        let names: Vec<_> = drivers.iter().map(|(_, name, _)| *name).collect();
+        ui.label(format!("Drives {}", names.join(", ")));
     }
     named_field(ui, &mut d.controller_mates, "Mates, such as D1, A1", "Controller mates");
     named_button(ui, "Set driven mates", "Set driven mates", || actions.push(MateAction::ControllerSet));
-    if !driven.is_empty() {
-        let now = soliddraft_assembly::controller_values(&s.doc);
-        if d.controller_values.len() != driven.len() {
-            d.controller_values =
-                driven.iter().map(|m| now.get(m).map(|v| v.to_string()).unwrap_or_default()).collect();
-        }
-        for (i, mate) in driven.iter().enumerate() {
-            ui.horizontal(|ui| {
-                ui.label(mate);
-                named_field(
-                    ui,
-                    &mut d.controller_values[i],
-                    "mm, degrees or percent",
-                    &format!("Controller value {}", i + 1),
-                );
+    if !drivers.is_empty() {
+        for (i, (id, mate, _)) in drivers.into_iter().enumerate() {
+            ui.push_id(id, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(mate);
+                    named_field(
+                        ui,
+                        &mut d.controller_values.get_mut(&id).expect("synced draft").text,
+                        "mm, degrees or percent",
+                        &format!("Controller value {}", i + 1),
+                    );
+                });
             });
         }
         named_button(ui, "Apply values", "Apply values", || actions.push(MateAction::ControllerValues));

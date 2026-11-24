@@ -555,6 +555,11 @@ impl Planner<'_> {
                 if let Some(face) = first.first() {
                     self.sizes.insert(*face, self.plans.len());
                 }
+                let placement_on_wall = row.feature.and_then(|feature| {
+                    thread_placement(&self.body.index.edge_ref(edge)?, feature)
+                        .filter(|placement| row.placements.contains(placement))
+                });
+                let source = source_on(row, placement_on_wall);
                 self.plans.push(Plan {
                     source,
                     view,
@@ -896,14 +901,44 @@ pub fn place_notes(drawing: &mut Drawing, sheet: usize, part: &Part) {
 /// thread a hole states by the hole, so renaming the hole or giving another item the
 /// thread's name does not part the annotation from its thread.
 fn source_of(row: &PmiRow) -> PmiSource {
+    source_on(row, None)
+}
+
+fn source_on(row: &PmiRow, placement: Option<usize>) -> PmiSource {
     match row.feature {
         Some(feature) => PmiSource::Thread {
             feature: feature.0,
-            placement: row.placements.first().map_or(0, |placement| *placement as u32),
+            placement: placement.or_else(|| row.placements.first().copied()).unwrap_or(0) as u32,
             item: row.item.id.clone(),
         },
         None => PmiSource::Item { item: row.item.id.clone() },
     }
+}
+
+fn thread_placement(entity: &crate::EntityRef, feature: soliddraft_model::FeatureId) -> Option<usize> {
+    let Some(crate::ModelEntity::Edge(edge)) = &entity.model else { return None };
+    edge.faces.iter().find_map(|face| match face.generator {
+        soliddraft_model::Generator::Hole { placement, .. } if face.feature == feature => Some(placement as usize),
+        _ => None,
+    })
+}
+
+fn annotation_row<'a>(
+    annotation: &Annotation,
+    source: &PmiSource,
+    rows: &'a [PmiRow],
+) -> Option<(&'a PmiRow, Option<usize>)> {
+    let PmiSource::Thread { feature, placement, .. } = source else {
+        return row_of(source, rows).map(|row| (row, None));
+    };
+    let feature = soliddraft_model::FeatureId(*feature);
+    let anchored = annotation.anchors.iter().find_map(|anchor| thread_placement(&anchor.entity, feature));
+    for placement in anchored.into_iter().chain([*placement as usize]) {
+        if let Some(row) = rows.iter().find(|row| row.feature == Some(feature) && row.placements.contains(&placement)) {
+            return Some((row, Some(placement)));
+        }
+    }
+    None
 }
 
 /// The row an annotation made from the part shows: an item the part stores by its name,
@@ -953,6 +988,28 @@ pub(crate) fn refresh(
         all.iter().filter(|row| row.feature.is_none()).map(|row| (row.item.id.as_str(), row)).collect();
     let notes = &part.requirements.notes.notes;
     let mut removed = Vec::new();
+    let mut thread_notes = BTreeMap::new();
+    if redraw {
+        for annotation in drawing.sheets.iter().flat_map(|sheet| &sheet.annotations) {
+            let Some((row, _)) = annotation.source.as_ref().and_then(|source| annotation_row(annotation, source, all))
+            else {
+                continue;
+            };
+            if row.feature.is_none()
+                || !row.applies()
+                || !shows(&annotation.body, &row.item.kind)
+                || !refresh_view(annotation.view)
+            {
+                continue;
+            }
+            let resolved = !matches!(annotation.state, AnnotationState::Dangling { .. });
+            // A merged group keeps a note whose leader still reaches a hole, when it has one.
+            let kept = thread_notes.entry(row.item.id.as_str()).or_insert((annotation.id, resolved));
+            if resolved && !kept.1 {
+                *kept = (annotation.id, resolved);
+            }
+        }
+    }
     for sheet in &mut drawing.sheets {
         let style = crate::library::template(sheet.template.as_str()).style_file();
         let heading = notes_heading(sheet.template.as_str());
@@ -977,10 +1034,13 @@ pub(crate) fn refresh(
                             .any(|l| l.datum == *datum && (l.value * 1000.0).round() as i64 == *micrometres)
                 }),
                 PmiSource::Item { .. } | PmiSource::Thread { .. } => {
-                    match row_of(&source, all).filter(|row| row.applies()) {
-                        Some(row) if shows(&annotation.body, &row.item.kind) => {
+                    match annotation_row(annotation, &source, all).filter(|(row, _)| row.applies()) {
+                        Some((row, placement)) if shows(&annotation.body, &row.item.kind) => {
+                            if thread_notes.get(row.item.id.as_str()).is_some_and(|(kept, _)| *kept != annotation.id) {
+                                return false;
+                            }
                             update(annotation, row, &style.symbols);
-                            annotation.source = Some(source_of(row));
+                            annotation.source = Some(source_on(row, placement));
                             true
                         }
                         Some(_) => {

@@ -180,6 +180,34 @@ impl Namer for PartContext<'_> {
         let diameter = trim(format_value(circle.model_radius * 2.0, 2));
         let found = self.callout_feature(circle);
         let feature = found.and_then(|(id, _)| self.doc.feature(id));
+        if let (Some((id, placement)), Some(FeatureKind::Hole(hole))) = (found, feature.map(|f| &f.kind)) {
+            let feature = soliddraft_model::FeatureId(id as u32);
+            let model = self.doc.model();
+            let extents = model.hole_extents(feature);
+            let walls = model.threaded_walls();
+            let callout = |placement: usize| {
+                let extent = extents.get(placement).copied().flatten();
+                let wall = walls.iter().find(|wall| wall.feature == feature && wall.placement == placement).cloned();
+                let top = extent.map_or_else(|| wall.as_ref().map_or(0.0, |wall| wall.top), |extent| extent.top);
+                format_built_hole_callout(
+                    hole,
+                    "",
+                    symbols,
+                    Some(&BuiltHole { top, depth: extent.map(|extent| extent.depth), wall }),
+                )
+            };
+            let text = callout(placement.unwrap_or(0));
+            let placements: std::collections::BTreeSet<_> = projected
+                .circles
+                .iter()
+                .filter_map(|circle| match self.callout_feature(circle) {
+                    Some((owner, Some(placement))) if owner == id => Some(placement),
+                    _ => None,
+                })
+                .collect();
+            let count = placements.into_iter().filter(|&placement| callout(placement) == text).count();
+            return Some(if count > 1 { format!("{count}{} {text}", symbols.times) } else { text });
+        }
         let same = |c: &CircleInfo| match found {
             Some((id, _)) => self.callout_feature(c).is_some_and(|(other, _)| other == id),
             None => c.entity.feature == circle.entity.feature,
@@ -198,14 +226,6 @@ impl Namer for PartContext<'_> {
             Some(FeatureKind::Cut(p)) => {
                 format!("{count}{}{diameter} {} {}", symbols.diameter, symbols.depth, trim(format_value(p.depth, 2)))
             }
-            Some(FeatureKind::Hole(h)) => {
-                let (id, placement) = found.map_or((0, 0), |(id, placement)| (id, placement.unwrap_or(0)));
-                let id = soliddraft_model::FeatureId(id as u32);
-                let model = self.doc.model();
-                let wall = model.threaded_walls().into_iter().find(|w| w.feature == id && w.placement == placement);
-                let top = wall.as_ref().map(|w| w.top).or_else(|| model.hole_top(id, placement)).unwrap_or(0.0);
-                format_built_hole_callout(h, &count, symbols, Some(&BuiltHole { top, wall }))
-            }
             _ => format!("{count}{}{diameter}", symbols.diameter),
         })
     }
@@ -220,6 +240,8 @@ pub struct BuiltHole {
     /// Where the hole starts now: zero, or deeper where a later cut took material off the
     /// face it was drilled from.
     pub top: f64,
+    /// The surviving bore's termination, measured from the original opening.
+    pub depth: Option<soliddraft_kernel_api::HoleDepth>,
     /// The hole's threaded wall as the body has it, or `None` when a later cut took the
     /// thread away (or the hole has none).
     pub wall: Option<soliddraft_model::thread::ThreadedWall>,
@@ -254,24 +276,30 @@ pub fn format_built_hole_callout(
     };
     let top = built.map_or(0.0, |b| b.top);
 
-    let depth_text = match h.wizard.as_ref().map(|w| &w.end_condition) {
-        Some(HoleEndCondition::ThroughAll) => symbols.through.clone(),
-        Some(HoleEndCondition::Blind { depth }) => {
-            format!("{} {}", symbols.depth, fmt(CalloutParam::Depth, *depth - top))
+    let fixed_depth = |depth| match depth {
+        HoleDepth::Through => symbols.through.clone(),
+        HoleDepth::Blind { depth } => format!("{} {}", symbols.depth, fmt(CalloutParam::Depth, depth - top)),
+    };
+    let built_depth = built.and_then(|b| b.depth);
+    let depth_text = if let Some(depth) = built_depth {
+        fixed_depth(depth)
+    } else {
+        match h.wizard.as_ref().map(|w| &w.end_condition) {
+            Some(HoleEndCondition::ThroughAll) => symbols.through.clone(),
+            Some(HoleEndCondition::Blind { depth }) => {
+                format!("{} {}", symbols.depth, fmt(CalloutParam::Depth, *depth - top))
+            }
+            Some(HoleEndCondition::UpToNext) => "UP TO NEXT".to_owned(),
+            Some(HoleEndCondition::UpToVertex { .. }) => "UP TO VERTEX".to_owned(),
+            Some(HoleEndCondition::UpToSurface { .. }) => "UP TO SURFACE".to_owned(),
+            Some(HoleEndCondition::OffsetFromSurface { offset, .. }) => {
+                format!("OFFSET {}", fmt(CalloutParam::Depth, *offset))
+            }
+            None => fixed_depth(h.depth),
         }
-        Some(HoleEndCondition::UpToNext) => "UP TO NEXT".to_owned(),
-        Some(HoleEndCondition::UpToVertex { .. }) => "UP TO VERTEX".to_owned(),
-        Some(HoleEndCondition::UpToSurface { .. }) => "UP TO SURFACE".to_owned(),
-        Some(HoleEndCondition::OffsetFromSurface { offset, .. }) => {
-            format!("OFFSET {}", fmt(CalloutParam::Depth, *offset))
-        }
-        None => match h.depth {
-            HoleDepth::Through => symbols.through.clone(),
-            HoleDepth::Blind { depth } => format!("{} {}", symbols.depth, fmt(CalloutParam::Depth, depth - top)),
-        },
     };
 
-    let effective_depth = h.wizard.as_ref().map_or(h.depth, |w| w.legacy_depth());
+    let effective_depth = built_depth.or_else(|| h.specified_depth());
     let is_slot = h.wizard.as_ref().is_some_and(|w| w.hole_type.is_slot());
     let drilled = format!("{}{} {depth_text}", symbols.diameter, fmt(CalloutParam::Diameter, h.diameter));
 
@@ -291,8 +319,8 @@ pub fn format_built_hole_callout(
                     ),
                 });
                 let deeper = match effective_depth {
-                    HoleDepth::Through => !wall.through,
-                    HoleDepth::Blind { depth } => depth > wall.end() + 1e-9,
+                    Some(HoleDepth::Blind { depth }) => depth > wall.end() + 1e-9,
+                    _ => !wall.through,
                 };
                 if deeper {
                     lines.push(drilled);
@@ -311,8 +339,8 @@ pub fn format_built_hole_callout(
                     fmt(CalloutParam::ThreadDepth, length)
                 ));
                 let deeper = match depth {
-                    HoleDepth::Through => true,
-                    HoleDepth::Blind { depth } => depth > length + 1e-9,
+                    Some(HoleDepth::Blind { depth }) => depth > length + 1e-9,
+                    _ => true,
                 };
                 if deeper {
                     lines.push(drilled);

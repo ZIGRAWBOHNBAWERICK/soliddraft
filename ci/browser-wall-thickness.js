@@ -8,19 +8,16 @@ await page.wait('#status.hidden', 60000);
 await page.eval(() => {
   const canvas = document.getElementById('soliddraft');
   canvas.focus();
-  window.sdClick = async ({ x, y }, count) => {
+  window.sdClick = async ({ x, y }) => {
     const at = { clientX: x, clientY: y, bubbles: true, cancelable: true,
       pointerId: 1, pointerType: 'mouse', isPrimary: true, button: 0 };
     canvas.dispatchEvent(new PointerEvent('pointermove', { ...at, buttons: 0 }));
-    // Each press and release reaches the app in a frame of its own; a double-click's two
-    // clicks still fall well inside its time.
-    const frame = () => new Promise(resolve => requestAnimationFrame(() => resolve()));
-    for (let i = 0; i < count; i++) {
-      canvas.dispatchEvent(new PointerEvent('pointerdown', { ...at, buttons: 1 }));
-      await frame();
-      canvas.dispatchEvent(new PointerEvent('pointerup', { ...at, buttons: 0 }));
-      await frame();
-    }
+    const pause = () => new Promise(resolve => setTimeout(resolve, 150));
+    await pause();
+    canvas.dispatchEvent(new PointerEvent('pointerdown', { ...at, buttons: 1 }));
+    await pause();
+    canvas.dispatchEvent(new PointerEvent('pointerup', { ...at, buttons: 0 }));
+    await pause();
     return true;
   };
   const inputClick = HTMLInputElement.prototype.click;
@@ -50,19 +47,26 @@ const drawn = async name => {
 };
 async function until(read, accept, message) {
   let value;
-  for (let i = 0; i < 600; i++) {
+  const deadline = Date.now() + 60000;
+  while (Date.now() < deadline) {
     value = await read();
     if (accept(value)) return value;
     await page.wait(100);
   }
   throw new Error(`${message}. Last state: ${JSON.stringify(value)}`);
 }
-const click = (at, count = 1) => page.eval(`sdClick(${JSON.stringify(at)}, ${count})`);
+const click = at => page.eval(`sdClick(${JSON.stringify(at)})`);
 const control = async name => {
   const controls = await until(() => drawn('shown_controls'), shown => shown[name], `Missing ${name}`);
   return controls[name];
 };
 const wall = () => control('Wall feature: Shell1');
+async function command(label, id) {
+  await page.press('Control+Shift+P');
+  await control('Command palette');
+  await page.type(label);
+  await click(await control(`Command: ${id}`));
+}
 const builtWall = rows => !rows.Error && rows['Wall thickness'] === '1 mm wall' && Number(rows['Faces made']) > 0;
 async function details(accept) {
   await click(await wall());
@@ -86,7 +90,9 @@ await page.press('Control+o');
 const refused = await details(rows => rows.Error?.includes('Field-driven thickness is unavailable'));
 check(refused['Wall thickness'] === '1 mm to 3 mm along x from -5 to 5 mm wall', 'The saved grade changed');
 
-await click(await wall(), 2);
+// A tree double-click can show dimensions. Open the feature editor explicitly.
+await click(await wall());
+await command('Edit feature', 'edit_feature');
 await click(await control('Use constant'));
 await control('Thickness value');
 await page.press('Enter');
@@ -101,3 +107,11 @@ await page.eval(() => { window.sdUpload = window.sdSaved; return true; });
 await page.press('Control+o');
 await details(builtWall);
 console.log('The browser refused the saved grade and reopened the repaired constant shell');
+
+// The desktop command-reachability test covers the native commands.
+await page.eval(() => {
+  document.addEventListener('soliddraft-feedback-open', () => { window.sdFeedbackOpened = true; }, { once: true });
+  return true;
+});
+await command('Give feedback', 'give_feedback');
+await until(() => page.eval(() => window.sdFeedbackOpened === true), Boolean, 'Give feedback did not dispatch');

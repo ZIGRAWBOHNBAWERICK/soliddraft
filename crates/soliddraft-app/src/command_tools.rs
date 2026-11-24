@@ -2089,10 +2089,10 @@ impl Line {
                 if let Some(d) = diameter {
                     h.diameter = positive("diameter", *d)?;
                 }
-                h.depth = match depth {
+                h.set_depth(match depth {
                     Some(d) => HoleDepth::Blind { depth: positive("depth", *d)? },
                     None => HoleDepth::Through,
-                };
+                });
                 if let Some(c) = countersink {
                     h.head = Some(HoleHead::Countersink {
                         diameter: positive("countersink diameter", c.diameter)?,
@@ -3131,7 +3131,11 @@ fn params_json(doc: &Document, kind: &FeatureKind) -> Value {
         FeatureKind::Hole(h) => {
             let mut v = json!({
                 "type": "hole", "face": h.face.label, "holes": h.points.len(), "diameter": h.diameter,
-                "depth": match h.depth { HoleDepth::Blind { depth } => json!(depth), HoleDepth::Through => json!("through") },
+                "depth": match h.specified_depth() {
+                    Some(HoleDepth::Blind { depth }) => json!(depth),
+                    Some(HoleDepth::Through) => json!("through"),
+                    None => json!(h.wizard.as_ref().map(|wizard| wizard.end_condition.label())),
+                },
             });
             if let HoleTip::Cone { angle_deg } = h.tip {
                 v["tip_angle"] = angle_deg.into();

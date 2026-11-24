@@ -176,10 +176,18 @@ pub fn wall_segments(wall: &ThreadedWall, holds: impl Fn(f32, f32) -> bool) -> V
 /// The marks of every threaded wall of the part as one line-only mesh, or `None` when
 /// the part has no thread to show. A wall is marked where its body's display mesh has it.
 pub fn marks(doc: &Document) -> Option<Arc<DisplayMesh>> {
+    marks_on(doc, |_| true)
+}
+
+pub(super) fn marks_on(
+    doc: &Document,
+    visible: impl Fn(soliddraft_kernel_api::BodyId) -> bool,
+) -> Option<Arc<DisplayMesh>> {
     let edges: Vec<DisplayEdge> = doc
         .model()
         .threaded_walls()
         .iter()
+        .filter(|wall| visible(wall.body))
         .filter_map(|wall| {
             let axis = Axis::of(wall)?;
             let mesh = doc.meshes.get(&wall.body)?;

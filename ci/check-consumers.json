@@ -52,6 +52,9 @@
     "ci/browser-feature-panel.mjs": [
       "web"
     ],
+    "ci/browser-feature-regressions.js": [
+      "web"
+    ],
     "ci/browser-hole-wizard.mjs": [
       "web"
     ],
@@ -78,13 +81,22 @@
     "ci/browser-preferences.mjs": [
       "web"
     ],
+    "ci/browser-document-tabs.mjs": [
+      "web"
+    ],
     "ci/browser-recovery-storage.js": [
       "web"
     ],
     "ci/browser-refusal-assistant.js": [
       "web"
     ],
-    "ci/browser-display-states.js": [
+    "ci/browser-display-states.mjs": [
+      "web"
+    ],
+    "ci/canvas-browser.mjs": [
+      "web"
+    ],
+    "ci/browser-mate-controller.js": [
       "web"
     ],
     "ci/browser-drawing-annotations.mjs": [

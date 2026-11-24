@@ -407,6 +407,15 @@ fn advance(
             .collect();
         let (safe, distance, faces) = measure(&parts, &before, &after, clearance, true, &group);
         if safe && short_joint_steps(&phases, &joint_phases(doc)?) {
+            for &id in &carried {
+                let path = OccurrencePath::root().child(crate::path::Step::component(id));
+                if !report.pushed.contains(&path)
+                    && let Some((previous, current)) = old_table.find(&path).zip(doc.table.find(&path))
+                    && old_table.local(previous) != doc.table.local(current)
+                {
+                    report.pushed.push(path);
+                }
+            }
             // Use the same set of moving pairs when reporting their accepted separation.
             let (_, distance, faces) = measure(&parts, &after, &before, clearance, false, &group);
             report.distance = distance;
@@ -436,10 +445,6 @@ fn advance(
             && carried.len() < 16
         {
             carried.push(id);
-            let pushed = OccurrencePath::root().child(crate::path::Step::component(id));
-            if !report.pushed.contains(&pushed) {
-                report.pushed.push(pushed);
-            }
             work.push((wish, depth));
             continue;
         }

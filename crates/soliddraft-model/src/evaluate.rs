@@ -44,6 +44,16 @@ enum Caps {
 /// How far from parallel a start plane may be, as the sine of the angle between normals.
 const PARALLEL: f64 = 1e-9;
 
+/// Why an extrusion cannot start on a curved face. The pinned Catallax caps a straight
+/// sweep only on planes; a start on a curved face connects here once the kernel can
+/// sweep a profile from a curved face to the face moved along the direction.
+const CURVED_START: &str = "starting on a curved face needs a kernel capability this version does not have: \
+     Catallax cannot yet cap an extrusion on a curved surface. Pick a planar face or a plane";
+
+/// Why an extrusion cannot start on a plane that holds its direction.
+const START_HOLDS_DIRECTION: &str =
+    "the start plane contains the extrusion direction, so the extrusion would never leave it";
+
 /// One feature's rebuild result.
 #[derive(Clone, Debug)]
 pub(crate) struct Built {
@@ -340,6 +350,13 @@ impl Document {
             if let Some(owner) = body.and_then(|body| self.built.iter().find(|b| b.owned == Some(body))) {
                 profiles.push(owner.version);
             }
+        }
+        // An extrusion that starts on another body's face or vertex reads that body.
+        if let FeatureKind::Extrude(e) = &f.kind
+            && let Some(body) = self.start_body(f, e.options.from.as_ref(), None)
+            && let Some(owner) = self.built.iter().find(|b| b.owned == Some(body))
+        {
+            profiles.push(owner.version);
         }
         if let FeatureKind::Hole(h) = &f.kind
             && let Some(sketch_id) = h.sketch
@@ -866,6 +883,12 @@ impl Document {
         let normal = sk.plane.normal;
         let sense = if e.reverse { -1.0 } else { 1.0 };
         let dir = normal * sense;
+        // A start plane that is not parallel to the sketch. The extrusion starts on it
+        // over the whole profile, and `shift` stays at the sketch plane.
+        let mut tilted: Option<Plane> = None;
+        // The body the start face or vertex lies on, which may be another body when
+        // Merge result is off.
+        let start_body = self.start_body(f, e.options.from.as_ref(), current);
         // Where the extrusion starts, along the sketch normal from the sketch plane.
         let shift = match &e.options.from {
             None => 0.0,
@@ -876,7 +899,13 @@ impl Document {
                 if *reverse { -distance * sense } else { distance * sense }
             }
             Some(ExtrudeStart::Surface { plane }) => {
-                let resolved = match (plane, current) {
+                if let (PlaneRef::Face { face }, Some(body)) = (plane, start_body)
+                    && let Ok(id) = self.resolve_face(face, body)
+                    && self.kernel.topology(body).ok().is_some_and(|t| t.face(id).is_some_and(|f| f.normal.is_none()))
+                {
+                    return Built::failed(current, CURVED_START);
+                }
+                let resolved = match (plane, start_body) {
                     (_, Some(body)) => self.plane_of(plane, body),
                     (PlaneRef::Datum { datum, offset }, None) => {
                         let p = datum.plane();
@@ -897,15 +926,17 @@ impl Document {
                     }
                 };
                 if p.normal.cross(normal).length() > PARALLEL {
-                    return Built::failed(
-                        current,
-                        "starting on a plane or face that is not parallel to the sketch is coming soon",
-                    );
+                    if p.normal.dot(normal).abs() <= PARALLEL {
+                        return Built::failed(current, START_HOLDS_DIRECTION);
+                    }
+                    tilted = Some(p);
+                    0.0
+                } else {
+                    (p.origin - sk.plane.origin).dot(normal)
                 }
-                (p.origin - sk.plane.origin).dot(normal)
             }
             Some(ExtrudeStart::Vertex { vertex }) => {
-                let Some(body) = current else {
+                let Some(body) = start_body else {
                     return Built::failed(current, "starting at a vertex needs a body");
                 };
                 let position = self
@@ -926,6 +957,11 @@ impl Document {
             }
         };
         let start = sk.plane.with_origin(sk.plane.origin + normal * shift);
+        // How far a point lies ahead of the start along a direction.
+        let ahead = |point: Vec3, along: Vec3| match tilted {
+            Some(p) => (point - p.origin).dot(p.normal) / along.dot(p.normal),
+            None => (point - start.origin).dot(along),
+        };
         // How far each direction goes: a length, or a limit the kernel finds on the body.
         let extent = |end: &EndCondition, along: Vec3, slot: ReferenceSlot| -> Result<Extent, Box<Built>> {
             let failed = |message: String| Err(Box::new(Built::failed(current, message)));
@@ -948,7 +984,7 @@ impl Document {
                                 if c & 2 == 0 { lo.y } else { hi.y },
                                 if c & 4 == 0 { lo.z } else { hi.z },
                             );
-                            (corner - start.origin).dot(along)
+                            ahead(corner, along)
                         })
                         .fold(f64::NEG_INFINITY, f64::max);
                     if reach <= 1e-9 {
@@ -957,6 +993,12 @@ impl Document {
                     }
                     Ok(Extent::Length(reach + 1.0 + 0.01 * bbox.diagonal()))
                 }
+                EndCondition::UpToNext if tilted.is_some() => failed(
+                    "Up to next cannot start on a plane or face that is not parallel to the sketch: \
+                     the kernel finds the next face only from a parallel start. Choose Up to face, Blind or \
+                     Through all"
+                        .into(),
+                ),
                 EndCondition::UpToNext if current.is_some() => Ok(Extent::Limit(ExtrudeLimit::UpToNext)),
                 EndCondition::UpToNext => failed("an extrusion up to the next face needs a body".into()),
                 EndCondition::UpToFace { face } => {
@@ -1017,8 +1059,20 @@ impl Document {
                             OpTag::new(format!("{}.r{i}.d{}.{step}", f.id, j + 1))
                         }
                     };
-                    let plane = sk.plane.with_origin(sk.plane.origin + normal * *offset);
                     let along = normal * *way;
+                    if let Some(p) = tilted {
+                        let start = p.with_origin(p.origin + normal * *offset);
+                        let (tool, named) =
+                            self.tilted_sweep(&tag, region, names, sk.plane, start, along, reach, *caps, current)?;
+                        faces.extend(named.into_iter().map(|(origin, generator)| (origin, generator, i)));
+                        let next = self.join_tool(e.operation, body, tool, &tag)?;
+                        if let Some(old) = mine.replace(next) {
+                            let _ = k.release(old);
+                        }
+                        body = Some(next);
+                        continue;
+                    }
+                    let plane = sk.plane.with_origin(sk.plane.origin + normal * *offset);
                     let profile = region.to_profile(plane);
                     let tool = match (reach, sk.support) {
                         (Extent::Length(distance), Some(support)) => {
@@ -1191,6 +1245,157 @@ impl Document {
             work_used: None,
             import_record: None,
         }
+    }
+
+    /// The body an extrusion's start face or vertex lies on, as it stands before the
+    /// extrusion: the body of the feature that made the face, or `current` when that is
+    /// the extrusion's own body or the start names no face.
+    fn start_body(&self, f: &Feature, from: Option<&ExtrudeStart>, current: Option<BodyId>) -> Option<BodyId> {
+        let owner = match from {
+            Some(ExtrudeStart::Surface { plane: PlaneRef::Face { face } }) => Some(face.feature),
+            Some(ExtrudeStart::Vertex { vertex }) => vertex.faces.first().map(|face| face.feature),
+            _ => None,
+        };
+        let Some(key) = owner.and_then(|id| self.feature(id)).map(|g| g.body).filter(|key| *key != f.body) else {
+            return current;
+        };
+        self.body_at(key, self.index_of(f.id).unwrap_or(self.built.len())).or(current)
+    }
+
+    /// Joins an extrusion's tool to `body` or cuts it away, or makes it the body when
+    /// there is none yet. Releases the tool.
+    fn join_tool(
+        &self,
+        operation: ExtrudeOp,
+        body: Option<BodyId>,
+        tool: BodyId,
+        tag: &dyn Fn(&str) -> OpTag,
+    ) -> KernelResult<BodyId> {
+        let k = &self.kernel;
+        match (operation, body) {
+            (ExtrudeOp::Boss, None) => Ok(tool),
+            (ExtrudeOp::Cut, None) => {
+                let _ = k.release(tool);
+                Err(KernelError::InvalidInput("there is no body to cut".into()))
+            }
+            (op, Some(b)) => {
+                let (kind, step) =
+                    if op == ExtrudeOp::Boss { (BooleanOp::Union, "union") } else { (BooleanOp::Subtract, "cut") };
+                let joined = k.boolean(&tag(step), kind, b, tool);
+                let _ = k.release(tool);
+                Ok(joined?.body)
+            }
+        }
+    }
+
+    /// One sweep of an extrusion that starts on `start`, a plane not parallel to its
+    /// sketch: a prism of the region along `along`, clipped by a slab, a rectangle on
+    /// the start plane swept the same way as far as `reach` says. Returns the tool
+    /// and the names of its faces.
+    #[allow(clippy::too_many_arguments)]
+    fn tilted_sweep(
+        &self,
+        tag: &dyn Fn(&str) -> OpTag,
+        region: &Region,
+        names: &HashMap<EntityId, Generator>,
+        sketch: Plane,
+        start: Plane,
+        along: Vec3,
+        reach: &Extent,
+        caps: Caps,
+        target: Option<BodyId>,
+    ) -> KernelResult<(BodyId, Vec<(Origin, Generator)>)> {
+        let k = &self.kernel;
+        let Some(span) = crate::tilted_start::span(&region.to_profile(sketch), &start, along) else {
+            return Err(KernelError::InvalidInput(START_HOLDS_DIRECTION.into()));
+        };
+        let margin = crate::tilted_start::margin(&span);
+        // How far the slab goes from the start: the length, or past the body for a limit.
+        let length = match (reach, target) {
+            (Extent::Length(d), _) => *d,
+            (Extent::Limit(_), Some(body)) => {
+                let bbox = k.topology(body)?.bbox;
+                let (lo, hi) = (bbox.min, bbox.max);
+                let rate = along.dot(start.normal);
+                let past = (0..8)
+                    .map(|c| {
+                        let corner = Vec3::new(
+                            if c & 1 == 0 { lo.x } else { hi.x },
+                            if c & 2 == 0 { lo.y } else { hi.y },
+                            if c & 4 == 0 { lo.z } else { hi.z },
+                        );
+                        (corner - start.origin).dot(start.normal) / rate
+                    })
+                    .fold(f64::NEG_INFINITY, f64::max);
+                past.max(span.far - span.near) + margin + 0.01 * bbox.diagonal()
+            }
+            (Extent::Limit(_), None) => {
+                return Err(KernelError::InvalidInput("an extrusion up to a face needs a body".into()));
+            }
+        };
+        if !(length.is_finite() && length > 0.0) {
+            return Err(KernelError::InvalidInput("the body lies entirely behind the start plane".into()));
+        }
+        // The prism starts behind the nearest point of the start plane over the profile.
+        let base = sketch.with_origin(sketch.origin + along * (span.near - margin));
+        let sheet = k.create_body_from_profile(&tag("profile"), &region.to_profile(base))?;
+        let prism = match (reach, target) {
+            (Extent::Length(d), _) => k.extrude(
+                &tag("sweep"),
+                sheet.body,
+                &Extrude { distance: span.far - span.near + d + 2.0 * margin, direction: Some(along) },
+            ),
+            (Extent::Limit(limit), Some(body)) => k.extrude_to(&tag("sweep"), sheet.body, body, Some(along), limit),
+            (Extent::Limit(_), None) => unreachable!("a limit without a body is refused above"),
+        };
+        let _ = k.release(sheet.body);
+        let prism = prism?;
+        let rectangle = Profile::rectangle(span.slab, Point2::new(0.0, 0.0), span.width, span.height);
+        let slab = k.create_body_from_profile(&tag("start"), &rectangle).and_then(|sheet| {
+            let slab = k.extrude(&tag("slab"), sheet.body, &Extrude { distance: length, direction: Some(along) });
+            let _ = k.release(sheet.body);
+            slab
+        });
+        let slab = match slab {
+            Ok(slab) => slab,
+            Err(err) => {
+                let _ = k.release(prism.body);
+                return Err(err);
+            }
+        };
+        let clipped = k.boolean(&tag("clip"), BooleanOp::Intersect, prism.body, slab.body);
+        let _ = k.release(prism.body);
+        let _ = k.release(slab.body);
+        let clipped = clipped?;
+        // The sides come from the prism. The start cap is the slab's near face; the end
+        // cap is the slab's far face, or the prism's for a limit.
+        let limited = matches!(reach, Extent::Limit(_));
+        let mut named = Vec::new();
+        for o in &prism.record.face_roles {
+            let generator = match (&o.role, caps) {
+                (FaceRole::Side { loop_index, segment, .. }, _) => region
+                    .entity(*loop_index as usize, *segment as usize)
+                    .map(|entity| names.get(&entity).cloned().unwrap_or(Generator::Side { entity, path: None })),
+                (FaceRole::EndCap, Caps::Both | Caps::End) if limited => Some(Generator::EndCap),
+                (FaceRole::EndCap, Caps::Second) if limited => Some(Generator::StartCap),
+                _ => None,
+            };
+            if let Some(generator) = generator {
+                named.push((Origin { tag: prism.record.tag.clone(), role: o.role.clone() }, generator));
+            }
+        }
+        for o in &slab.record.face_roles {
+            let generator = match (&o.role, caps) {
+                (FaceRole::StartCap, Caps::Both) => Some(Generator::StartCap),
+                (FaceRole::EndCap, Caps::Both | Caps::End) if !limited => Some(Generator::EndCap),
+                (FaceRole::EndCap, Caps::Second) if !limited => Some(Generator::StartCap),
+                _ => None,
+            };
+            if let Some(generator) = generator {
+                named.push((Origin { tag: slab.record.tag.clone(), role: o.role.clone() }, generator));
+            }
+        }
+        Ok((clipped.body, named))
     }
 
     /// Resolves a feature's plane: a reference plane, or a planar face of `body` with

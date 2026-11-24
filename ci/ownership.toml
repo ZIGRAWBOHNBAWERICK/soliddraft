@@ -533,6 +533,13 @@ paths = ["crates/soliddraft-model/src/thin.rs"]
 module = ["thin"]
 
 [[areas]]
+name = "model.tilted_start"
+owner = "core"
+crate = "soliddraft-model"
+paths = ["crates/soliddraft-model/src/tilted_start.rs"]
+module = ["tilted_start"]
+
+[[areas]]
 name = "model.view"
 owner = "core"
 crate = "soliddraft-model"

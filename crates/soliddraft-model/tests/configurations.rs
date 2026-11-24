@@ -124,6 +124,22 @@ fn tabs_keep_suppression_and_properties_through_edits_and_reopen() {
 }
 
 #[test]
+fn a_tab_moves_past_127_others() {
+    use soliddraft_model::configs::Edit;
+    let mut d = part();
+    for i in 0..130 {
+        add(&mut d, &format!("C{i}"));
+    }
+    d.execute(Command::EditParameters { edit: Edit::Move { configuration: "C0".into(), offset: 129 } }).unwrap();
+    let grid = d.configuration_grid();
+    assert_eq!(grid.rows.len(), 131);
+    assert_eq!(grid.rows[1].name, "C1");
+    assert_eq!(grid.rows[130].name, "C0", "the first tab dragged to the end");
+    d.undo().unwrap();
+    assert_eq!(d.configuration_grid().rows[1].name, "C0");
+}
+
+#[test]
 fn physical_formulas_measure_the_active_build_and_refuse_geometry_cycles() {
     let mut d = part();
     set(&mut d, "PartVolume", "=Volume");

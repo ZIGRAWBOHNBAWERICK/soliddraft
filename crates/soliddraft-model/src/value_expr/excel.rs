@@ -383,17 +383,21 @@ fn round(name: &str, value: f64, digits: f64) -> f64 {
     (integer / power).copysign(value)
 }
 
-/// A whole number argument of GCD, LCM or FACT: truncated, at least zero, exact in f64.
-fn whole(q: Quantity) -> Result<f64, String> {
+/// Excel's bound for a GCD or LCM argument and an LCM result: 2^53, where f64 stops
+/// holding every whole number.
+const WHOLE_LIMIT: u64 = 1 << 53;
+
+/// A whole number argument of GCD, LCM or FACT: truncated, at least zero, below 2^53.
+fn whole(q: Quantity) -> Result<u64, String> {
     let n = scalar(q)?.trunc();
-    if !(0.0..=9_007_199_254_740_992.0).contains(&n) {
+    if !(0.0..WHOLE_LIMIT as f64).contains(&n) {
         return Err(numeric_error());
     }
-    Ok(n)
+    Ok(n as u64)
 }
 
-fn gcd(mut a: f64, mut b: f64) -> f64 {
-    while b != 0.0 {
+fn gcd(mut a: u64, mut b: u64) -> u64 {
+    while b != 0 {
         (a, b) = (b, a % b);
     }
     a
@@ -630,24 +634,26 @@ pub(super) fn call(
         }
         "FACT" => {
             let n = whole(a)?;
-            if n > 170.0 {
+            if n > 170 {
                 return Err(numeric_error());
             }
             Quantity::number((1..=n as u32).map(f64::from).product())
         }
         "GCD" | "LCM" => {
-            let mut answer = if name == "GCD" { 0.0 } else { 1.0 };
+            // Whole numbers, so every remainder and product is exact; an LCM of 2^53 or
+            // more is Excel's #NUM!.
+            let mut answer = u64::from(name == "LCM");
             for q in &values {
                 let n = whole(*q)?;
                 answer = if name == "GCD" {
                     gcd(answer, n)
-                } else if n == 0.0 || answer == 0.0 {
-                    0.0
+                } else if n == 0 || answer == 0 {
+                    0
                 } else {
-                    answer / gcd(answer, n) * n
+                    (answer / gcd(answer, n)).checked_mul(n).filter(|m| *m < WHOLE_LIMIT).ok_or_else(numeric_error)?
                 };
             }
-            Quantity::number(answer)
+            Quantity::number(answer as f64)
         }
         "QUOTIENT" => {
             if b.value == 0.0 {
@@ -963,6 +969,14 @@ mod tests {
         ("=FACT(-1)", Excel::Error("#NUM!")),
         ("=GCD(24,36)", Excel::Number(12.0)),
         ("=LCM(4,6)", Excel::Number(12.0)),
+        // Excel refuses a GCD argument or an LCM result of 2^53 or more.
+        ("=LCM(1000000007,1000000009)", Excel::Error("#NUM!")),
+        ("=LCM(2^52,2)", Excel::Number(4_503_599_627_370_496.0)),
+        ("=LCM(2^52,3)", Excel::Error("#NUM!")),
+        // Twenty-one arguments once grew the product past f64 and never finished.
+        ("=LCM(4503599627370497,4503599627370495,4503599627370497,4503599627370495,4503599627370497,4503599627370495,4503599627370497,4503599627370495,4503599627370497,4503599627370495,4503599627370497,4503599627370495,4503599627370497,4503599627370495,4503599627370497,4503599627370495,4503599627370497,4503599627370495,4503599627370497,4503599627370495,4503599627370497)", Excel::Error("#NUM!")),
+        ("=GCD(2^53,2)", Excel::Error("#NUM!")),
+        ("=GCD(2^53-2,6)", Excel::Number(6.0)),
         ("=0^0", Excel::Error("#NUM!")),
         ("=(-8)^(1/3)", Excel::Error("#NUM!")),
         ("=0^-1", Excel::Error("#DIV/0!")),

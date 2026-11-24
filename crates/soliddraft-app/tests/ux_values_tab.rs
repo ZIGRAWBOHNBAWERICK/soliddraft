@@ -218,6 +218,30 @@ fn columns(app: &App) -> Vec<String> {
     app.state().state.doc.model().values_table().columns
 }
 
+/// Long's own Gap formula, from the part.
+fn long_gap(app: &App) -> Option<String> {
+    let table = app.state().state.doc.model().values_table();
+    let column = table.columns.iter().position(|c| c == "Long")?;
+    table.globals.iter().find(|row| row.name == "Gap")?.cells[column].clone()
+}
+
+/// A middle click on a control, the press and the release in separate frames.
+fn middle_click(app: &mut App, label: &str) {
+    let at = app.get_by_label(label).rect().center();
+    app.hover_at(at);
+    app.run_steps(3);
+    for pressed in [true, false] {
+        app.event(egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Middle,
+            pressed,
+            modifiers: Modifiers::default(),
+        });
+        app.step();
+    }
+    app.run_steps(3);
+}
+
 /// Opens a tab's menu with the right button and picks an entry.
 fn tab_menu(app: &mut App, tab: &str, entry: &str) {
     app.get_by_label(&format!("Configuration {tab}")).click_secondary();
@@ -289,6 +313,24 @@ fn excel_formulas_and_browser_tabs_drive_the_bracket() {
         ux_tools::undo(app);
         settle(app);
         assert_eq!(columns(app), ["Default", "Long", "Spare"]);
+
+        // A middle click closes a tab as a browser's does, and Undo brings it back with
+        // its values; so does its Close button.
+        let table = app.state().state.doc.model().values_table();
+        assert_eq!(long_gap(app).as_deref(), Some("=MROUND(11,4)"));
+        middle_click(app, "Configuration Long");
+        settle(app);
+        assert_eq!(columns(app), ["Default", "Spare"]);
+        ux_tools::undo(app);
+        rebuilt(app);
+        assert_eq!(app.state().state.doc.model().values_table(), table);
+        press(app, "Close Long");
+        settle(app);
+        assert_eq!(columns(app), ["Default", "Spare"]);
+        ux_tools::undo(app);
+        rebuilt(app);
+        assert_eq!(app.state().state.doc.model().values_table(), table);
+        assert_eq!(long_gap(app).as_deref(), Some("=MROUND(11,4)"));
 
         // The tab's menu renames it in place and moves it.
         tab_menu(app, "Spare", "Rename");

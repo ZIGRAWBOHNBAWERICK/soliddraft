@@ -51,6 +51,8 @@ pub enum ValuesAction {
     Activate(String),
     /// Edits the selected configuration or parameter.
     Edit(Edit),
+    /// Puts a function into the formula last edited.
+    InsertFunction(String),
     /// Adds the typed text property.
     AddProperty,
     /// Asks for a table file and applies it.
@@ -80,12 +82,21 @@ pub struct ValuesTab {
     reveal: Option<Field>,
     /// A field to give the keyboard to when it next shows.
     focus: Option<Field>,
-    /// The formula field edited last and its text, for the Functions menu.
-    last_formula: Option<(Field, String)>,
+    /// The formula field edited last, for the Functions menu.
+    last_formula: Option<LastFormula>,
     /// Sections folded or unfolded from how they start.
     toggled: BTreeSet<String>,
     /// The tab's last message.
     pub message: Option<String>,
+}
+
+/// The formula field edited last and its text. A cell keeps its configuration by name:
+/// its column moves when a tab moves.
+#[derive(Clone, Debug)]
+struct LastFormula {
+    field: Field,
+    configuration: Option<String>,
+    text: String,
 }
 
 #[derive(Clone, Debug)]
@@ -112,6 +123,7 @@ fn table(state: &mut AppState) -> ValuesTable {
         state.values.errors.clear();
         state.values.formula_errors.clear();
         state.values.config_name = None;
+        state.values.last_formula = None;
         state.values.document = Some(document);
     }
     let revision = (state.doc.revision(), state.doc.displayed_revision());
@@ -279,7 +291,7 @@ fn field_response(
     }
     let formula_field = matches!(key, Field::Cell(..) | Field::NewGlobalFormula);
     if formula_field && (response.has_focus() || response.lost_focus()) {
-        tab.last_formula = Some((key.clone(), text.clone()));
+        remember_formula(tab, &key, &text);
     }
     if response.changed() {
         tab.drafts.insert(key.clone(), text.clone());
@@ -605,15 +617,21 @@ fn tabs(ui: &mut egui::Ui, tab: &mut ValuesTab, table: &ValuesTable, actions: &m
             TabEvent::Duplicate(i) => start_naming(tab, TabName::Duplicate(name(i)), format!("{} copy", name(i))),
             TabEvent::New => start_naming(tab, TabName::Add, String::new()),
             TabEvent::Move { from, to } => {
-                let to = to.clamp(1, table.columns.len().saturating_sub(1).max(1));
-                if from > 0 && to != from {
-                    let offset = (to as i64 - from as i64).clamp(i64::from(i8::MIN), i64::from(i8::MAX)) as i8;
-                    actions.push(ValuesAction::Edit(Edit::Move { configuration: name(from), offset }));
+                if let Some(edit) = move_tab(&table.columns, from, to) {
+                    actions.push(ValuesAction::Edit(edit));
                 }
             }
         }
     }
     error_line(ui, tab, &Field::NewConfiguration);
+}
+
+/// The edit that moves named tab `from` to place `to` among the named tabs.
+fn move_tab(columns: &[String], from: usize, to: usize) -> Option<Edit> {
+    let to = to.clamp(1, columns.len().saturating_sub(1).max(1));
+    let offset = i32::try_from(to).ok()? - i32::try_from(from).ok()?;
+    let configuration = columns.get(from).filter(|_| from > 0 && offset != 0)?.clone();
+    Some(Edit::Move { configuration, offset })
 }
 
 /// The add row at the foot of the globals, as a spreadsheet's empty last row.
@@ -675,13 +693,35 @@ fn tool(ui: &mut egui::Ui, icon: Icon, text: &str, tip: &str, enabled: bool) -> 
     response.on_hover_text(tip)
 }
 
-/// Puts a function into the formula last edited, as Excel's Insert Function does.
-fn insert_function(tab: &mut ValuesTab, name: &str) {
-    let (key, text) = tab.last_formula.clone().unwrap_or((Field::NewGlobalFormula, String::new()));
+/// Notes the formula field being edited and the configuration a cell belongs to.
+fn remember_formula(tab: &mut ValuesTab, key: &Field, text: &str) {
+    let configuration = match key {
+        Field::Cell(_, column) => tab.table.as_ref().and_then(|(_, t)| t.columns.get(*column).cloned()),
+        _ => None,
+    };
+    tab.last_formula = Some(LastFormula { field: key.clone(), configuration, text: text.to_owned() });
+}
+
+/// Puts a function into the formula last edited, as Excel's Insert Function does. A cell
+/// is found again by its configuration; one whose configuration is gone gives way to the
+/// new global's formula.
+fn insert_function(state: &mut AppState, name: &str) {
+    let columns = table(state).columns;
+    let tab = &mut state.values;
+    let last = tab.last_formula.take().and_then(|last| {
+        let field = match last.field {
+            Field::Cell(row, _) => {
+                Field::Cell(row, columns.iter().position(|c| Some(c) == last.configuration.as_ref())?)
+            }
+            field => field,
+        };
+        Some((field, last.text))
+    });
+    let (key, text) = last.unwrap_or((Field::NewGlobalFormula, String::new()));
     let text = text.trim_end();
     let text = if text.is_empty() || !text.starts_with('=') { format!("={name}(") } else { format!("{text}{name}(") };
     tab.drafts.insert(key.clone(), text.clone());
-    tab.last_formula = Some((key.clone(), text));
+    remember_formula(tab, &key, &text);
     tab.focus = Some(key);
 }
 
@@ -721,7 +761,7 @@ fn toolbar(ui: &mut egui::Ui, state: &mut AppState, actions: &mut Vec<ValuesActi
                 ui.menu_button(*group, |ui| {
                     for help in *functions {
                         if ui.button(help.syntax).on_hover_text(help.about).clicked() {
-                            insert_function(tab, help.name);
+                            actions.push(ValuesAction::InsertFunction(help.name.to_owned()));
                             ui.close();
                         }
                     }
@@ -977,6 +1017,18 @@ fn properties(
     ui.end_row();
 }
 
+/// A refusal without the configuration it names first. The part reports a configuration
+/// that fails as `name: cause`, and a name is free text: `#N/A` or `division by zero` would
+/// otherwise read as the formula's error.
+fn cause<'a>(message: &'a str, columns: &[String]) -> &'a str {
+    columns
+        .iter()
+        .skip(1)
+        .filter_map(|name| message.strip_prefix(name.as_str())?.strip_prefix(": "))
+        .min_by_key(|rest| rest.len())
+        .unwrap_or(message)
+}
+
 /// Why the part cannot take a value now.
 fn busy(state: &AppState) -> Option<&'static str> {
     (state.drag_preview.is_some() || state.editor.is_some() || state.sketch.is_some())
@@ -989,6 +1041,7 @@ fn run(state: &mut AppState, key: Field, command: Command) -> bool {
         state.values.errors.insert(key, reason.to_owned());
         return false;
     }
+    let columns = table(state).columns;
     match state.doc.apply(command) {
         Ok(_) => {
             state.values.drafts.remove(&key);
@@ -998,10 +1051,11 @@ fn run(state: &mut AppState, key: Field, command: Command) -> bool {
             true
         }
         Err(e) => {
+            let e = cause(&e, &columns);
             if matches!(&key, Field::Cell(..) | Field::NewGlobalFormula) {
-                state.values.formula_errors.insert(key.clone(), soliddraft_model::formula_error_code(&e));
+                state.values.formula_errors.insert(key.clone(), soliddraft_model::formula_error_code(e));
             }
-            state.values.errors.insert(key.clone(), plain(&e));
+            state.values.errors.insert(key.clone(), plain(e));
             state.values.reveal = Some(key);
             false
         }
@@ -1055,6 +1109,10 @@ pub fn apply(state: &mut AppState, action: ValuesAction) {
                 state.values.errors.insert(Field::NewConfiguration, "Type a name for the configuration".into());
                 return;
             }
+            let renamed = match &state.values.config_name {
+                Some(TabName::Rename(configuration)) => Some((configuration.clone(), name.clone())),
+                _ => None,
+            };
             let command = match &state.values.config_name {
                 Some(TabName::Rename(configuration)) => {
                     Command::EditParameters(Edit::Rename { configuration: configuration.clone(), name })
@@ -1066,16 +1124,31 @@ pub fn apply(state: &mut AppState, action: ValuesAction) {
             };
             if run(state, Field::NewConfiguration, command) {
                 state.values.config_name = None;
+                if let (Some((from, to)), Some(last)) = (renamed, state.values.last_formula.as_mut())
+                    && last.configuration.as_ref() == Some(&from)
+                {
+                    last.configuration = Some(to);
+                }
             }
         }
         ValuesAction::Edit(edit) => {
             let changed_order = matches!(edit, Edit::Move { .. } | Edit::Delete { .. });
+            let deleted = match &edit {
+                Edit::Delete { configuration } => Some(configuration.clone()),
+                _ => None,
+            };
+            let columns = table(state).columns;
             state.values.message = if let Some(reason) = busy(state) {
                 Some(reason.into())
             } else {
                 match state.doc.apply(Command::EditParameters(edit)) {
                     Ok(_) => {
                         state.values.table = None;
+                        if deleted.is_some()
+                            && state.values.last_formula.as_ref().is_some_and(|last| last.configuration == deleted)
+                        {
+                            state.values.last_formula = None;
+                        }
                         if changed_order {
                             let is_current = |field: &Field| !matches!(field, Field::Cell(..) | Field::Property(..));
                             state.values.drafts.retain(|key, _| is_current(key));
@@ -1084,10 +1157,11 @@ pub fn apply(state: &mut AppState, action: ValuesAction) {
                         }
                         None
                     }
-                    Err(error) => Some(plain(&error)),
+                    Err(error) => Some(plain(cause(&error, &columns))),
                 }
             };
         }
+        ValuesAction::InsertFunction(name) => insert_function(state, &name),
         ValuesAction::Activate(name) => {
             if let Some(reason) = busy(state) {
                 state.values.message = Some(reason.to_owned());
@@ -1282,14 +1356,106 @@ mod tests {
 
     #[test]
     fn the_functions_menu_writes_into_the_formula_last_edited() {
-        let mut tab = ValuesTab::default();
-        insert_function(&mut tab, "ROUND");
-        assert_eq!(tab.drafts.get(&Field::NewGlobalFormula).map(String::as_str), Some("=ROUND("));
-        let cell = Field::Cell("Plate".into(), 0);
-        tab.last_formula = Some((cell.clone(), "=Width*2+".into()));
-        insert_function(&mut tab, "PI");
-        assert_eq!(tab.drafts.get(&cell).map(String::as_str), Some("=Width*2+PI("));
-        assert_eq!(tab.focus, Some(cell));
+        let mut state = configured(&[]);
+        insert_function(&mut state, "ROUND");
+        assert_eq!(state.values.drafts.get(&Field::NewGlobalFormula).map(String::as_str), Some("=ROUND("));
+        let cell = Field::Cell("Gap".into(), 0);
+        remember_formula(&mut state.values, &cell, "=Width*2+");
+        insert_function(&mut state, "PI");
+        assert_eq!(state.values.drafts.get(&cell).map(String::as_str), Some("=Width*2+PI("));
+        assert_eq!(state.values.focus, Some(cell));
+    }
+
+    /// A part with globals Gap and Bore and the named configurations.
+    fn configured(names: &[&str]) -> AppState {
+        let mut doc = crate::document::Document::new("Plate", crate::kernel());
+        doc.apply(Command::AddExtrude { params: Default::default(), via_assistant: false }).unwrap();
+        for (name, expression) in [("Gap", "5"), ("Bore", "1")] {
+            doc.apply(Command::SetValue { name: name.into(), expression: expression.into() }).unwrap();
+        }
+        for name in names {
+            doc.apply(Command::AddConfiguration { name: (*name).into() }).unwrap();
+        }
+        let mut state = AppState::new(doc);
+        table(&mut state);
+        state
+    }
+
+    /// A Default formula that fails in one configuration is refused with that
+    /// configuration's name in front; the cell shows the formula's own error.
+    #[test]
+    fn a_configuration_name_does_not_change_a_cell_s_error_code() {
+        let mut state = configured(&["#N/A", "division by zero"]);
+        commit(&mut state, Field::Cell("Gap".into(), 1), "0".into());
+        commit(&mut state, Field::Cell("Gap".into(), 2), "-1".into());
+        let bore = Field::Cell("Bore".into(), 0);
+        for (formula, configuration, code, words) in [
+            ("=1/Gap", "#N/A", "#DIV/0!", "This divides by zero"),
+            (
+                "=SQRTPI(Gap/1 mm)",
+                "division by zero",
+                "#NUM!",
+                "This has no numeric answer, such as the square root of a negative number",
+            ),
+        ] {
+            let command = Command::SetValueCell {
+                configuration: DEFAULT_ROW.into(),
+                name: "Bore".into(),
+                expression: Some(formula.into()),
+            };
+            let refusal = state.doc.apply(command).unwrap_err();
+            assert!(refusal.starts_with(&format!("{configuration}: ")), "{formula}: {refusal}");
+            commit(&mut state, bore.clone(), formula.into());
+            assert_eq!(state.values.formula_errors.get(&bore), Some(&code), "{formula}");
+            assert_eq!(state.values.error(&bore), Some(words), "{formula}");
+        }
+    }
+
+    #[test]
+    fn the_functions_menu_keeps_to_its_cell_s_configuration_and_part() {
+        let mut state = configured(&["A", "B"]);
+        remember_formula(&mut state.values, &Field::Cell("Gap".into(), 1), "=Gap*2+");
+        apply(&mut state, ValuesAction::Edit(Edit::Move { configuration: "B".into(), offset: -1 }));
+        assert_eq!(table(&mut state).columns, ["Default", "B", "A"]);
+        apply(&mut state, ValuesAction::InsertFunction("PI".into()));
+        assert_eq!(state.values.drafts.get(&Field::Cell("Gap".into(), 2)).map(String::as_str), Some("=Gap*2+PI("));
+        assert!(!state.values.drafts.contains_key(&Field::Cell("Gap".into(), 1)), "B's cell took A's formula");
+
+        // A renamed tab keeps its cell; a deleted one gives way to the new global.
+        state.values.config_name = Some(TabName::Rename("A".into()));
+        state.values.drafts.insert(Field::NewConfiguration, "Wide".into());
+        apply(&mut state, ValuesAction::AddConfiguration);
+        assert_eq!(table(&mut state).columns, ["Default", "B", "Wide"]);
+        state.values.drafts.clear();
+        apply(&mut state, ValuesAction::InsertFunction("ROUND".into()));
+        assert_eq!(
+            state.values.drafts.get(&Field::Cell("Gap".into(), 2)).map(String::as_str),
+            Some("=Gap*2+PI(ROUND(")
+        );
+        apply(&mut state, ValuesAction::Edit(Edit::Delete { configuration: "Wide".into() }));
+        state.values.drafts.clear();
+        apply(&mut state, ValuesAction::InsertFunction("PI".into()));
+        assert_eq!(state.values.drafts.get(&Field::NewGlobalFormula).map(String::as_str), Some("=PI("));
+        assert_eq!(state.values.drafts.len(), 1);
+
+        // Another part's Values tab has no formula last edited.
+        remember_formula(&mut state.values, &Field::Cell("Gap".into(), 0), "=Gap+");
+        state.values.drafts.clear();
+        state.doc = crate::document::Document::new("Other", crate::kernel());
+        apply(&mut state, ValuesAction::InsertFunction("ROUND".into()));
+        assert_eq!(state.values.drafts.get(&Field::NewGlobalFormula).map(String::as_str), Some("=ROUND("));
+        assert_eq!(state.values.drafts.len(), 1, "the other part's cell took the formula");
+    }
+
+    /// A tab dragged past 127 others lands where it was dropped.
+    #[test]
+    fn a_long_drag_moves_a_tab_all_the_way() {
+        let columns: Vec<String> =
+            std::iter::once(DEFAULT_ROW.to_owned()).chain((0..130).map(|i| format!("C{i}"))).collect();
+        assert_eq!(move_tab(&columns, 1, 130), Some(Edit::Move { configuration: "C0".into(), offset: 129 }));
+        assert_eq!(move_tab(&columns, 130, 1), Some(Edit::Move { configuration: "C129".into(), offset: -129 }));
+        assert_eq!(move_tab(&columns, 3, 3), None);
+        assert_eq!(move_tab(&columns, 0, 3), None, "Default stays first");
     }
 
     #[test]

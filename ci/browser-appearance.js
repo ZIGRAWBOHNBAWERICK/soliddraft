@@ -1,6 +1,7 @@
-// Run with chrome-devtools-axi run < ci/browser-appearance.js on a fresh /?demo origin.
-const url = await page.eval(() => location.href);
-if (!new URL(url).searchParams.has('demo')) throw new Error('Open the app at /?demo');
+// Run with chrome-devtools-axi run < ci/browser-appearance.js at /?demo on a fresh
+// origin, then at /?demo&appearance=import and /?demo&appearance=restart on the same origin.
+const query = new URL(await page.eval(() => location.href)).searchParams;
+if (!query.has('demo')) throw new Error('Open the app at /?demo');
 
 async function until(read, accept, description) {
   let value;
@@ -100,44 +101,51 @@ async function provideFile(kind) {
 
 await load();
 await openAppearance();
-await selected('clear_bench');
-await click('theme-filter-Light');
-await until(() => control('theme-gruvbox-dark'), v => v === null, 'Light filter showed Gruvbox Dark');
-await click('theme-filter-Dark');
-await until(() => control('theme-gruvbox-light'), v => v === null, 'Dark filter showed Gruvbox Light');
-await click('theme-gruvbox-dark');
-await selected('gruvbox-dark');
-await click('Preferences: Cancel');
-await openAppearance();
-await selected('clear_bench');
+const phase = query.get('appearance') ?? 'choose';
+if (phase === 'choose') {
+  await selected('clear_bench');
+  await click('theme-filter-Light');
+  await until(() => control('theme-gruvbox-dark'), v => v === null, 'Light filter showed Gruvbox Dark');
+  await click('theme-filter-Dark');
+  await until(() => control('theme-gruvbox-light'), v => v === null, 'Dark filter showed Gruvbox Light');
+  await click('theme-gruvbox-dark');
+  await selected('gruvbox-dark');
+  await click('Preferences: Cancel');
+  await openAppearance();
+  await selected('clear_bench');
 
-await click('theme-gruvbox-dark');
-await selected('gruvbox-dark');
-await click('Preferences: OK');
-await until(saved, appearance => appearance?.selected?.built_in === 'gruvbox_dark', 'The chosen theme was not saved');
-await page.open(url);
-await load();
-await openAppearance();
-await selected('gruvbox-dark');
+  await click('theme-gruvbox-dark');
+  await selected('gruvbox-dark');
+  await click('Preferences: OK');
+  await until(saved, appearance => appearance?.selected?.built_in === 'gruvbox_dark', 'The chosen theme was not saved');
+  console.log('PASS light and dark filters, live preview, Cancel and save');
+} else if (phase === 'import') {
+  await selected('gruvbox-dark');
 
-await provideFile('theme');
-await click('theme-import');
-await selected('imported');
-await provideFile('picture');
-await click('theme-picture-import');
-await until(() => control('theme-background-Picture'), Boolean, 'The imported picture did not become available');
-await click('Preferences: OK');
-const imported = await until(saved, appearance => appearance?.format === 'soliddraft-appearance/1'
-  && appearance.selected === 'imported' && appearance.imported?.name === 'Workshop'
-  && appearance.background === 'picture' && appearance.picture?.png?.length > 0,
-'Theme and picture were not saved');
-
-await page.open(url);
-await load();
-await openAppearance();
-await selected('imported');
-await until(() => control('theme-background-Picture'), Boolean, 'Reload lost the imported picture');
-const reopened = await saved();
-if (JSON.stringify(reopened) !== JSON.stringify(imported)) throw new Error('Reload changed the saved appearance');
-await click('Preferences: OK');
-console.log('PASS Appearance filters, live preview, Cancel, theme restart, JSON import and PNG background restart');
+  await provideFile('theme');
+  await click('theme-import');
+  await selected('imported');
+  await provideFile('picture');
+  await click('theme-picture-import');
+  await until(() => control('theme-background-Picture'), Boolean, 'The imported picture did not become available');
+  await click('Preferences: OK');
+  const imported = await until(saved, appearance => appearance?.format === 'soliddraft-appearance/1'
+    && appearance.selected === 'imported' && appearance.imported?.name === 'Workshop'
+    && appearance.background === 'picture' && appearance.picture?.png?.length > 0,
+  'Theme and picture were not saved');
+  await page.eval(`() => {
+    sessionStorage.setItem('appearance-check-baseline', ${JSON.stringify(JSON.stringify(imported))});
+    return true;
+  }`);
+  console.log('PASS restart restored Gruvbox Dark, JSON theme and PNG picture imported and saved');
+} else if (phase === 'restart') {
+  await selected('imported');
+  await until(() => control('theme-background-Picture'), Boolean, 'Reload lost the imported picture');
+  const expected = await page.eval(() => sessionStorage.getItem('appearance-check-baseline'));
+  const reopened = await saved();
+  if (!expected || JSON.stringify(reopened) !== expected) throw new Error('Reload changed the saved appearance');
+  await click('Preferences: OK');
+  console.log('PASS restart restored the imported theme and PNG background');
+} else {
+  throw new Error(`Unknown Appearance phase: ${phase}`);
+}

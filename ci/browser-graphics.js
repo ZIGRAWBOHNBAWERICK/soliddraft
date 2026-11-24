@@ -1,7 +1,7 @@
-// Run with chrome-devtools-axi run < ci/browser-graphics.js after opening /?demo
-// on a fresh origin. The demo has a cylindrical extrusion.
-const url = await page.eval(() => location.href);
-if (!new URL(url).searchParams.has('demo')) throw new Error('Open the app at /?demo');
+// Run with chrome-devtools-axi run < ci/browser-graphics.js at /?demo on a fresh
+// origin, then open /?demo&graphics=restart on the same origin and run it again.
+const query = new URL(await page.eval(() => location.href)).searchParams;
+if (!query.has('demo')) throw new Error('Open the app at /?demo');
 
 async function until(read, accept, description) {
   let value;
@@ -48,29 +48,38 @@ async function click(label) {
 
 await load();
 const initial = await until(viewport, view => view?.curves_settled && view.triangles > 0, 'The demo part did not draw');
-await page.press('Control+Shift+P');
-await until(
-  () => page.eval(() => document.activeElement instanceof HTMLInputElement),
-  value => value === true,
-  'The command palette did not take keyboard focus',
-);
-await page.type('Preferences');
-await page.eval(() => new Promise(done => requestAnimationFrame(() => requestAnimationFrame(() => done(true)))));
-await page.press('Enter');
-await click('Preferences: Graphics');
-await click('Graphics preset: Performance');
-await until(settings, s => s?.preset === 'performance' && s.curved_surfaces === 'coarse', 'Performance did not save');
-const coarse = await until(viewport, v => v?.curves_settled && v.angle_deg === 15
-  && v.standard_chord_mm === initial.standard_chord_mm * 4 && v.triangles > 0, 'Coarse mesh did not draw');
+if (query.get('graphics') === 'restart') {
+  await until(settings, s => s?.preset === 'quality' && s.curved_surfaces === 'fine', 'Reload lost the graphics preset');
+  const baseline = await page.eval(() => JSON.parse(sessionStorage.getItem('graphics-check-baseline')));
+  if (!baseline || initial.angle_deg !== 10 || initial.triangles <= baseline.coarse
+      || initial.triangles !== baseline.fine) {
+    throw new Error(`Reload did not draw the restored quality: ${JSON.stringify(initial)}`);
+  }
+  console.log(`PASS restart restored Quality and drew ${initial.triangles} triangles`);
+} else {
+  await page.press('Control+Shift+P');
+  await until(
+    () => page.eval(() => document.activeElement instanceof HTMLInputElement),
+    value => value === true,
+    'The command palette did not take keyboard focus',
+  );
+  await page.type('Preferences');
+  await page.eval(() => new Promise(done => requestAnimationFrame(() => requestAnimationFrame(() => done(true)))));
+  await page.press('Enter');
+  await click('Preferences: Graphics');
+  await click('Graphics preset: Performance');
+  await until(settings, s => s?.preset === 'performance' && s.curved_surfaces === 'coarse', 'Performance did not save');
+  const coarse = await until(viewport, v => v?.curves_settled && v.angle_deg === 15
+    && v.standard_chord_mm === initial.standard_chord_mm * 4 && v.triangles > 0, 'Coarse mesh did not draw');
 
-await click('Graphics preset: Quality');
-await until(settings, s => s?.preset === 'quality' && s.curved_surfaces === 'fine', 'Quality did not save');
-const fine = await until(viewport, v => v?.angle_deg === 10 && v.chord_mm < coarse.chord_mm
-  && v.triangles > coarse.triangles, 'Fine mesh did not replace the coarse mesh');
-console.log(`Performance drew ${coarse.triangles} triangles. Quality drew ${fine.triangles} triangles.`);
-
-await page.open(url);
-await load();
-await until(settings, s => s?.preset === 'quality' && s.curved_surfaces === 'fine', 'Reload lost the graphics preset');
-await until(viewport, v => v?.angle_deg === 10 && v.triangles > coarse.triangles, 'Reload did not draw the restored quality');
-console.log('PASS graphics presets change the live mesh and the browser restores the selected preset');
+  await click('Graphics preset: Quality');
+  await until(settings, s => s?.preset === 'quality' && s.curved_surfaces === 'fine', 'Quality did not save');
+  const fine = await until(viewport, v => v?.angle_deg === 10 && v.chord_mm < coarse.chord_mm
+    && v.triangles > coarse.triangles, 'Fine mesh did not replace the coarse mesh');
+  await page.eval(`() => {
+    sessionStorage.setItem('graphics-check-baseline', JSON.stringify({ coarse: ${coarse.triangles}, fine: ${fine.triangles} }));
+    return true;
+  }`);
+  console.log(`Performance drew ${coarse.triangles} triangles. Quality drew ${fine.triangles} triangles.`);
+  console.log('PASS graphics presets change the live mesh');
+}

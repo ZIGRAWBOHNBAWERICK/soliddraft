@@ -287,6 +287,9 @@ fn references(doc: &soliddraft_model::Document) -> Value {
                 SketchPlane::Feature { feature, .. } => {
                     vec![(ReferenceSlot::Plane, format!("plane:{feature}"), Vec::new())]
                 }
+                SketchPlane::Context { context, .. } => {
+                    vec![(ReferenceSlot::Plane, format!("context:{}", context.label()), Vec::new())]
+                }
             },
             FeatureKind::Sketch(s) => match &s.plane {
                 SketchPlane::Feature { feature, .. } => {
@@ -297,6 +300,9 @@ fn references(doc: &soliddraft_model::Document) -> Value {
                 }
                 SketchPlane::Datum { datum, .. } => {
                     vec![(ReferenceSlot::SketchPlane, format!("datum:{datum:?}"), Vec::new())]
+                }
+                SketchPlane::Context { context, .. } => {
+                    vec![(ReferenceSlot::SketchPlane, format!("context:{}", context.label()), Vec::new())]
                 }
             },
             FeatureKind::Fillet(b) | FeatureKind::Chamfer(b) => b
@@ -406,6 +412,9 @@ fn references(doc: &soliddraft_model::Document) -> Value {
                             let p = datum.plane();
                             built.plane == p.with_origin(p.origin + p.normal * *offset)
                         }
+                        SketchPlane::Context { context, offset } => {
+                            context.plane().is_ok_and(|p| built.plane == p.with_origin(p.origin + p.normal * *offset))
+                        }
                         SketchPlane::Face { .. } | SketchPlane::FaceOffset { .. } => carriers.iter().all(|set| {
                             !set.is_empty()
                                 && set.iter().all(|f| {
@@ -426,6 +435,9 @@ fn references(doc: &soliddraft_model::Document) -> Value {
                             SketchPlane::Feature { feature, offset } => doc
                                 .reference_plane(*feature)
                                 .is_some_and(|p| plane == p.with_origin(p.origin + p.normal * *offset)),
+                            SketchPlane::Context { context, offset } => {
+                                context.plane().is_ok_and(|p| plane == p.with_origin(p.origin + p.normal * *offset))
+                            }
                             SketchPlane::Face { .. } | SketchPlane::FaceOffset { .. } => carriers.iter().all(|set| {
                                 !set.is_empty()
                                     && set.iter().all(|face| {

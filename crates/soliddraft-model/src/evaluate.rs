@@ -522,6 +522,15 @@ impl Document {
                 let p = datum.plane();
                 (p.with_origin(p.origin + p.normal * *offset), None)
             }
+            SketchPlane::Context { context, offset } => {
+                let p = context.plane().map_err(|why| {
+                    Box::new(Built::failed(
+                        current,
+                        format!("the plane taken from {} is unusable: {why}", context.label()),
+                    ))
+                })?;
+                (p.with_origin(p.origin + p.normal * *offset), None)
+            }
             SketchPlane::Face { face } | SketchPlane::FaceOffset { face, .. } => {
                 let offset = source.offset();
                 let repair = |reason, message: String, candidates| {

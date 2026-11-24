@@ -1050,6 +1050,9 @@ fn source_plane(source: &soliddraft_model::SketchPlane) -> soliddraft_model::Pla
         SketchPlane::Datum { datum, .. } => PlaneRef::Datum { datum: *datum, offset: 0.0 },
         SketchPlane::Feature { feature, .. } => PlaneRef::Feature { feature: *feature },
         SketchPlane::Face { face } | SketchPlane::FaceOffset { face, .. } => PlaneRef::Face { face: face.clone() },
+        // The form never offers a choice for a plane taken from another component (see
+        // Key::PlaneSource); Top stands in should anything ask.
+        SketchPlane::Context { .. } => PlaneRef::Datum { datum: soliddraft_model::DatumPlane::Top, offset: 0.0 },
     }
 }
 
@@ -1546,6 +1549,10 @@ pub(crate) fn render(
                 });
             }
         }
+        (EditorParams::ReferencePlane(soliddraft_model::SketchPlane::Context { context, .. }), Key::PlaneSource) => {
+            // A face of another component is chosen by editing the part in its assembly.
+            ui.label(format!("{} (in context)", context.label()));
+        }
         (EditorParams::ReferencePlane(source), Key::PlaneSource) => {
             let mut plane = source_plane(source);
             let offset = source.offset();
@@ -1554,9 +1561,13 @@ pub(crate) fn render(
         }
         (EditorParams::ReferencePlane(source), Key::Offset) => {
             let mut offset = source.offset();
-            let plane = source_plane(source);
             number(ui, "Offset", "mm", egui::DragValue::new(&mut offset).speed(0.5).range(-100_000.0..=100_000.0));
-            set_source(source, plane, offset);
+            if let soliddraft_model::SketchPlane::Context { offset: kept, .. } = source {
+                *kept = offset;
+            } else {
+                let plane = source_plane(source);
+                set_source(source, plane, offset);
+            }
         }
         (EditorParams::Mirror(p), Key::PlaneSource) => {
             properties::plane_combo(ui, "mirror_plane", &mut p.plane, &context.planes)

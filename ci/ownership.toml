@@ -491,6 +491,13 @@ paths = ["crates/soliddraft-model/src/command.rs"]
 module = ["command"]
 
 [[areas]]
+name = "model.context"
+owner = "core"
+crate = "soliddraft-model"
+paths = ["crates/soliddraft-model/src/context.rs"]
+module = ["context"]
+
+[[areas]]
 name = "model.display"
 owner = "core"
 crate = "soliddraft-model"

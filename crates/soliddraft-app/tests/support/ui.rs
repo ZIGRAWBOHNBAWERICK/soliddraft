@@ -213,8 +213,39 @@ pub fn click_button(app: &mut App, label: &str, within: Rect) {
             app.run_steps(8);
         }
     }
+    let shown =
+        app.query_all_by_role_and_label(egui::accesskit::Role::Button, label).any(|n| within.intersects(n.rect()));
+    if !shown && open_more_menu(app, label) {
+        let rect = button_rect(app, label, window(app));
+        click_at(app, rect.center());
+        return;
+    }
     let rect = button_rect(app, label, within);
     click_at(app, rect.center());
+}
+
+/// Opens the tool strip's More menu that lists the tool named `label`, when the strip had
+/// no room for its card. Returns whether a menu now shows it.
+pub fn open_more_menu(app: &mut App, label: &str) -> bool {
+    if app.query_all_by_role_and_label(egui::accesskit::Role::Button, label).next().is_some() {
+        // A menu opened for an earlier tool still shows this one.
+        return true;
+    }
+    let menus: Vec<Rect> = app
+        .query_all(By::new().role(egui::accesskit::Role::Button))
+        .filter(|n| n.accesskit_node().label().is_some_and(|l| l.starts_with("More ") && l.ends_with(" tools")))
+        .map(|n| n.rect())
+        .collect();
+    for menu in menus {
+        click_at(app, menu.center());
+        app.run_steps(8);
+        if app.query_all_by_role_and_label(egui::accesskit::Role::Button, label).next().is_some() {
+            return true;
+        }
+        app.key_press(Key::Escape);
+        app.run_steps(8);
+    }
+    false
 }
 
 /// The bounds of the one button of that name in a region.
@@ -312,12 +343,28 @@ pub fn reveal_command(app: &mut App, id: &str) -> Control {
         _ => command.label_in(&app.state().state),
     };
     let palette = palette_region(app);
+    let on_strip = app
+        .query_all_by_role_and_label(egui::accesskit::Role::Button, &label)
+        .any(|node| palette.contains(node.rect().center()));
+    if !on_strip {
+        // The strip had no room for this tool's card: it is in its group's More menu.
+        assert!(open_more_menu(app, &label), "missing palette command {id}");
+        return control(app, &label, window(app));
+    }
     app.get_all_by_role_and_label(egui::accesskit::Role::Button, &label)
-        .find(|node| palette.x_range().contains(node.rect().center().x))
+        .find(|node| palette.contains(node.rect().center()))
         .unwrap_or_else(|| panic!("missing palette command {id}"))
         .scroll_to_me();
     app.run_steps(24);
     control(app, &label, palette_region(app))
+}
+
+/// The feature property panel's area in the side area, above the tree.
+pub fn feature_panel(app: &App) -> Rect {
+    if !soliddraft_app::feature_panel::active(&app.state().state) {
+        return Rect::NOTHING;
+    }
+    soliddraft_app::feature_panel::area(&app.ctx).expect("the feature panel is drawn")
 }
 
 /// Opens the active tool's detailed controls using the options bar.
@@ -328,11 +375,18 @@ pub fn open_options(app: &mut App) {
             app.run_steps(8);
         }
     } else if app.state().state.editor.is_some() {
-        if !app.state().state.form_bar.expanded
-            && let Some(more) = app.query_by_label_contains("More (")
-        {
-            more.click();
-            app.run_steps(8);
+        // The feature panel's folded sections hold the rest of the form: unfold them all.
+        // A section below the panel's fold takes a click once scrolled into view.
+        for _ in 0..16 {
+            let Some(label) =
+                app.query_all_by_label_contains("Unfold ").next().and_then(|n| n.accesskit_node().label())
+            else {
+                break;
+            };
+            app.get_by_label(&label).scroll_to_me();
+            app.run_steps(24);
+            app.get_by_label(&label).click();
+            app.run_steps(6);
         }
     } else if !app.state().state.options_details {
         let label = if app.state().state.assembly.is_active() {
@@ -351,13 +405,7 @@ pub fn open_options(app: &mut App) {
 
 /// Closes the details sheet before interacting with geometry beneath it.
 pub fn close_options(app: &mut App) {
-    if app.state().state.editor.is_some()
-        && app.state().state.form_bar.expanded
-        && let Some(more) = app.query_by_label_contains("More (")
-    {
-        more.click();
-        app.run_steps(8);
-    }
+    // The feature panel sits beside the viewport and covers none of it.
     if app.query_by_label("Close options").is_some() {
         app.get_by_label("Close options").click();
         app.run_steps(8);
@@ -573,6 +621,7 @@ pub fn click_world(app: &mut App, world: glam::Vec3) {
 
 /// Types a value into a numeric field: click, select all, type, Enter.
 pub fn type_field(app: &mut App, label: &str, value: &str) {
+    open_form_sheet_for(app, label);
     let rect = app.get_by_label(label).rect();
     click_at(app, rect.center());
     app.key_press_modifiers(Modifiers::COMMAND, Key::A);
@@ -580,6 +629,26 @@ pub fn type_field(app: &mut App, label: &str, value: &str) {
     app.run_steps(3);
     app.key_press(Key::Enter);
     app.run_steps(4);
+}
+
+/// A node's accessible name, or nothing.
+pub fn label_of(node: &egui_kittest::Node<'_>) -> String {
+    node.accesskit_node().label().map(|l| l.to_string()).unwrap_or_default()
+}
+
+/// Opens the form's More sheet when the bar has no room for the field named `label`.
+pub fn open_form_sheet_for(app: &mut App, label: &str) {
+    if app.query_all_by_label(label).next().is_some() {
+        return;
+    }
+    let more = app
+        .query_all(By::new().role(egui::accesskit::Role::Button))
+        .find(|n| n.accesskit_node().label().is_some_and(|l| l.starts_with("More (")))
+        .map(|n| n.rect());
+    if let Some(more) = more {
+        click_at(app, more.center());
+        app.run_steps(8);
+    }
 }
 
 /// The command line's field.
@@ -719,7 +788,12 @@ pub fn status_lines(app: &mut App) -> Vec<String> {
 
 /// The group captions of the open ribbon tab, left to right: the lowest row of its text.
 pub fn title_rect(app: &App, title: &str) -> Rect {
-    painted(app).into_iter().find(|p| p.text == title).unwrap_or_else(|| panic!("no title {title} in the frame")).rect
+    let with_ext = format!("{title}.dwprt");
+    painted(app)
+        .into_iter()
+        .find(|p| p.text == title || p.text == with_ext)
+        .unwrap_or_else(|| panic!("no title {title} in the frame"))
+        .rect
 }
 
 // ---------------------------------------------------------------------------

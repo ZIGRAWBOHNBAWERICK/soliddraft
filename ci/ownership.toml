@@ -15,6 +15,20 @@ paths = ["crates/soliddraft-app/src/assembly.rs", "crates/soliddraft-app/src/ass
 module = ["assembly"]
 
 [[areas]]
+name = "app.assembly_files"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/assembly_files/"]
+module = ["assembly_files"]
+
+[[areas]]
+name = "app.bottom_popovers"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/bottom_popovers.rs"]
+module = ["bottom_popovers"]
+
+[[areas]]
 name = "app.chat"
 owner = "core"
 crate = "soliddraft-app"
@@ -43,6 +57,13 @@ paths = ["crates/soliddraft-app/src/commands.rs"]
 module = ["commands"]
 
 [[areas]]
+name = "app.configurations"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/configurations/"]
+module = ["configurations"]
+
+[[areas]]
 name = "app.context_menu"
 owner = "core"
 crate = "soliddraft-app"
@@ -62,6 +83,13 @@ owner = "core"
 crate = "soliddraft-app"
 paths = ["crates/soliddraft-app/src/display_quality.rs"]
 module = ["display_quality"]
+
+[[areas]]
+name = "app.display_states"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/display_states.rs"]
+module = ["display_states"]
 
 [[areas]]
 name = "app.document"
@@ -113,6 +141,20 @@ paths = ["crates/soliddraft-app/src/geometry_message.rs"]
 module = ["geometry_message"]
 
 [[areas]]
+name = "app.history_panel"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/history_panel.rs"]
+module = ["history_panel"]
+
+[[areas]]
+name = "app.hole_wizard_panel"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/hole_wizard_panel.rs"]
+module = ["hole_wizard_panel"]
+
+[[areas]]
 name = "app.icons"
 owner = "core"
 crate = "soliddraft-app"
@@ -162,6 +204,13 @@ paths = ["crates/soliddraft-app/src/main.rs"]
 module = ["main"]
 
 [[areas]]
+name = "app.material_dialog"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/material_dialog.rs"]
+module = ["material_dialog"]
+
+[[areas]]
 name = "app.multibody"
 owner = "core"
 crate = "soliddraft-app"
@@ -181,6 +230,13 @@ owner = "core"
 crate = "soliddraft-app"
 paths = ["crates/soliddraft-app/src/palette.rs"]
 module = ["palette"]
+
+[[areas]]
+name = "app.shortcut_menu"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/shortcut_menu.rs"]
+module = ["shortcut_menu"]
 
 [[areas]]
 name = "app.panels"
@@ -337,6 +393,20 @@ paths = ["crates/soliddraft-app/src/feature_forms.rs"]
 module = ["feature_forms"]
 
 [[areas]]
+name = "app.create_menu"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/create_menu.rs"]
+module = ["create_menu"]
+
+[[areas]]
+name = "app.feature_panel"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/feature_panel.rs"]
+module = ["feature_panel"]
+
+[[areas]]
 name = "app.form_bar"
 owner = "core"
 crate = "soliddraft-app"
@@ -363,6 +433,13 @@ owner = "core"
 crate = "soliddraft-app"
 paths = ["crates/soliddraft-app/src/tool_palette.rs"]
 module = ["tool_palette"]
+
+[[areas]]
+name = "app.top_bar"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/top_bar.rs"]
+module = ["top_bar"]
 
 [[areas]]
 name = "app.tree"
@@ -447,6 +524,13 @@ owner = "core"
 crate = "soliddraft-model"
 paths = ["crates/soliddraft-model/src/file.rs"]
 module = ["file"]
+
+[[areas]]
+name = "model.thin"
+owner = "core"
+crate = "soliddraft-model"
+paths = ["crates/soliddraft-model/src/thin.rs"]
+module = ["thin"]
 
 [[areas]]
 name = "model.view"
@@ -568,10 +652,17 @@ paths = ["crates/soliddraft-model/src/thread.rs"]
 module = ["thread"]
 
 [[areas]]
+name = "model.hole_wizard"
+owner = "core"
+crate = "soliddraft-model"
+paths = ["crates/soliddraft-model/src/hole_wizard.rs"]
+module = ["hole_wizard"]
+
+[[areas]]
 name = "model.value_expr"
 owner = "core"
 crate = "soliddraft-model"
-paths = ["crates/soliddraft-model/src/value_expr.rs"]
+paths = ["crates/soliddraft-model/src/value_expr.rs", "crates/soliddraft-model/src/value_expr/"]
 module = ["value_expr"]
 
 [[areas]]

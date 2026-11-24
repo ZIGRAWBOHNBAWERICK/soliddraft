@@ -4,7 +4,7 @@ mod gated;
 #[path = "support/ui.rs"]
 mod ribbon;
 
-use egui::{Key, Rect, pos2, vec2};
+use egui::{Key, vec2};
 use egui_kittest::kittest::Queryable;
 use ribbon::App;
 use serde_json::json;
@@ -451,19 +451,20 @@ fn narrow_palette_keeps_tools_named_for_accessibility_and_the_ai_chip_visible() 
         assert!(!app.state().state.tree_shown());
         app.set_size(vec2(1280.0, 800.0));
         app.run_steps(8);
-        let start = ribbon::control(app, "Start sketch", ribbon::window(app));
-        assert!(start.rect.width() > 200.0);
+        let start = ribbon::control(app, "Start sketch", ribbon::palette_region(app));
+        assert!(start.rect.width() >= 76.0, "the starter is a named card");
         app.set_size(vec2(960.0, 640.0));
         app.run_steps(8);
-        let start = ribbon::control(app, "Start sketch", ribbon::window(app));
-        assert!(start.rect.width() <= 48.0);
+        // A narrow strip keeps its cards named and moves the tools it has no room for
+        // into More menus.
+        let start = ribbon::control(app, "Start sketch", ribbon::palette_region(app));
+        assert!(start.rect.width() >= 76.0, "the starter stays a named card");
         assert!(app.state().state.viewport.rect.width() > 800.0);
         app.state_mut().state.doc.selection = Some(Selection::Reference(Reference::Plane(PlaneKind::Top)));
         ribbon::click_at(app, start.rect.center());
         app.run_steps(8);
         assert!(app.state().state.in_sketch());
-        let line = ribbon::control(app, "Line", Rect::from_min_max(pos2(0.0, 56.0), pos2(48.0, 600.0)));
-        assert!(line.rect.width() <= 48.0);
+        let line = ribbon::control(app, "Line", ribbon::palette_region(app));
         ribbon::click_at(app, line.rect.center());
         app.run_steps(8);
         assert_eq!(app.state().state.sketch.as_ref().unwrap().tool, Tool::Line);

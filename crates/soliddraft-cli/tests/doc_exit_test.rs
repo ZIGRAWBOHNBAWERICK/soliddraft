@@ -93,6 +93,7 @@ fn extrude(sketch: FeatureId, depth: f64) -> ExtrudeFeature {
         operation: ExtrudeOp::Boss,
         end: EndCondition::Blind { depth },
         reverse: false,
+        options: Default::default(),
     }
 }
 

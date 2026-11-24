@@ -63,25 +63,7 @@ impl Picked {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
-pub enum DisplayMode {
-    #[default]
-    ShadedWithEdges,
-    Shaded,
-    Wireframe,
-}
-
-impl DisplayMode {
-    pub const ALL: [DisplayMode; 3] = [DisplayMode::ShadedWithEdges, DisplayMode::Shaded, DisplayMode::Wireframe];
-
-    pub fn label(&self) -> &'static str {
-        match self {
-            DisplayMode::ShadedWithEdges => "Shaded with edges",
-            DisplayMode::Shaded => "Shaded",
-            DisplayMode::Wireframe => "Wireframe",
-        }
-    }
-}
+pub use soliddraft_document::display_state::DisplayMode;
 
 /// Existing document identity, display version and retained body; never sent to the GPU.
 pub type PickRevision = (soliddraft_document::DocumentId, u64, Option<BodyId>);
@@ -172,6 +154,25 @@ pub struct FrameInput {
     pub grid: Option<GridFrame>,
     /// The origin planes, when any shows.
     pub planes: Option<PlaneFrame>,
+    #[cfg(target_arch = "wasm32")]
+    pub(super) part_probe: Option<PartProbe>,
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(super) struct PartProbe {
+    pub camera: super::camera::Camera,
+    pub unproved: bool,
+    pub pending: bool,
+    /// The part's active display state, by name.
+    pub display_state: Option<String>,
+    /// The display mode the frame is drawn in.
+    pub display_mode: String,
+    /// How many body meshes the frame was given to draw.
+    pub visible_meshes: usize,
+    pub chord_mm: f64,
+    pub angle_deg: f64,
+    pub standard_chord_mm: f64,
+    pub curves_settled: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -232,6 +233,33 @@ impl egui_wgpu::CallbackTrait for ViewportCallback {
     ) {
         if let Some(r) = resources.get::<ViewportRenderer>() {
             r.paint(pass);
+            #[cfg(target_arch = "wasm32")]
+            if let Some(probe) = &self.0.part_probe
+                && r.targets.is_some()
+            {
+                let triangles = if r.draws_faces() {
+                    ViewportRenderer::scene_bodies(&r.preview, &r.bodies)
+                        .map(|body| (body.index_count / 3) as usize)
+                        .sum()
+                } else {
+                    0_usize
+                };
+                let threads = r.scene_threads().map_or(0, |threads| threads.line_count as usize);
+                crate::web::show_part_view(&probe.camera, _info.viewport, threads);
+                crate::web::show_viewport(serde_json::json!({
+                    "label": probe.unproved.then_some("unproved preview"),
+                    "triangles": triangles,
+                    "pending": probe.pending,
+                    "preview": r.preview.is_some(),
+                    "display_state": probe.display_state,
+                    "display_mode": probe.display_mode,
+                    "visible_meshes": probe.visible_meshes,
+                    "chord_mm": probe.chord_mm,
+                    "angle_deg": probe.angle_deg,
+                    "standard_chord_mm": probe.standard_chord_mm,
+                    "curves_settled": probe.curves_settled,
+                }));
+            }
         }
     }
 }
@@ -1317,6 +1345,23 @@ impl ViewportRenderer {
         }
     }
 
+    fn draws_faces(&self) -> bool {
+        self.display != DisplayMode::Wireframe
+    }
+
+    fn scene_bodies<'a>(
+        preview: &'a Option<(usize, u32, GpuBody)>,
+        bodies: &'a HashMap<BodyId, GpuBody>,
+    ) -> impl Iterator<Item = &'a GpuBody> {
+        let preview = preview.as_ref().map(|(_, _, body)| body);
+        preview.into_iter().chain(bodies.values().filter(move |_| preview.is_none()))
+    }
+
+    // A construction preview stands in for the built part and its thread marks.
+    fn scene_threads(&self) -> Option<&GpuBody> {
+        self.threads.as_ref().filter(|_| self.preview.is_none()).map(|(_, body)| body)
+    }
+
     /// Draws a frame into the offscreen targets and reads back the pick window. The
     /// paint callback calls it; headless tests and benchmarks call it directly.
     pub fn prepare(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, input: &FrameInput) {
@@ -1398,14 +1443,11 @@ impl ViewportRenderer {
                 0.0
             };
         }
-        let show_faces = self.display != DisplayMode::Wireframe;
+        let show_faces = self.draws_faces();
         let show_edges = self.display != DisplayMode::Shaded;
         let preview_key = self.preview.as_ref().map_or(0, |(p, _, _)| *p);
         // Construction previews replace the colour and revision-bound pick geometry.
-        let shown: Vec<&GpuBody> = match self.preview.as_ref().map(|(_, _, b)| b) {
-            Some(p) => vec![p],
-            None => self.bodies.values().collect(),
-        };
+        let shown: Vec<_> = Self::scene_bodies(&self.preview, &self.bodies).collect();
         let bounds = shown.iter().filter_map(|b| b.bounds).reduce(|(lo, hi), (l, h)| (lo.min(l), hi.max(h)));
         let shadows = look.shadows && show_faces && bounds.is_some();
         let follows_model = input.controls.lighting.shadow_follows_model;
@@ -1699,6 +1741,10 @@ impl ViewportRenderer {
                 pass.set_pipeline(&self.hidden_edges_pipeline);
                 draw_lines(&mut pass, &mut std::iter::once(body));
             }
+            if show_edges {
+                self.assembly.draw_edges(&mut pass);
+                pass.set_bind_group(0, &self.globals_bind_group, &[]);
+            }
             if show_edges || ghost.is_some() {
                 pass.set_pipeline(&self.edge_pipeline);
                 if show_edges {
@@ -1717,10 +1763,7 @@ impl ViewportRenderer {
                     }
                 }
             }
-            // Thread marks belong to the part as built, so a construction preview,
-            // which stands in for it, hides them. They show without edges too: they say
-            // what the part is, not how it is drawn.
-            if let (Some((_, threads)), None) = (&self.threads, &self.preview) {
+            if let Some(threads) = self.scene_threads() {
                 pass.set_pipeline(&self.edge_pipeline);
                 draw_lines(&mut pass, &mut std::iter::once(threads));
             }

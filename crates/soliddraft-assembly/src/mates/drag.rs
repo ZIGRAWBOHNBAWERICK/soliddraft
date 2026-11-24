@@ -2,14 +2,14 @@
 use crate::mates::bodies::{self, Scope};
 use crate::mates::{MateRefusal, RefusalCode};
 use crate::schema::Assembly;
-use crate::{AssemblyDocument, EditError, OccurrencePath, Placement};
+use crate::{AssemblyDocument, ComponentId, EditError, OccurrencePath, Placement};
 
 #[derive(Clone)]
 pub(crate) struct Drag {
     pub(crate) path: OccurrencePath,
     pub(crate) base: Assembly,
     pub(crate) candidate: Assembly,
-    shown: Vec<(OccurrencePath, Placement)>,
+    pub(crate) shown: Vec<(OccurrencePath, Placement)>,
 }
 impl AssemblyDocument {
     /// Whether a component preview is active.
@@ -19,6 +19,7 @@ impl AssemblyDocument {
 
     /// Starts one component drag. Targets passed to `preview_drag` use its parent's frame.
     pub fn begin_drag(&mut self, path: OccurrencePath) -> Result<(), EditError> {
+        self.collapse();
         self.finish_loading();
         if self.drag.is_some() {
             return Err(EditError::Invalid("a component drag is already active".into()));
@@ -41,6 +42,13 @@ impl AssemblyDocument {
         if self.motion.is_some() {
             return self.queue_motion(target);
         }
+        self.preview_carrying(target, &[])
+    }
+
+    /// A drag preview in which the root components `carried` move by the dragged root
+    /// component's translation as well, as wishes the mates still correct: what Physical
+    /// Dynamics pushes.
+    pub(crate) fn preview_carrying(&mut self, target: Placement, carried: &[ComponentId]) -> Result<(), MateRefusal> {
         if !target.translation.is_finite()
             || !target.rotation.is_finite()
             || (target.rotation.length_squared() - 1.0).abs() > 1e-8
@@ -57,6 +65,12 @@ impl AssemblyDocument {
         let path = drag.path.clone();
         let mut candidate = drag.candidate.clone();
         let previous = Scope::new(&candidate, &self.table, &self.store).world(&path).unwrap_or(target);
+        let shift = target.translation - previous.translation;
+        for id in carried {
+            if let Some(c) = candidate.component_mut(*id) {
+                c.placement = Placement::new(c.placement.rotation, c.placement.translation + shift);
+            }
+        }
         match Self::owner(&path) {
             Ok(id) => {
                 candidate
@@ -101,6 +115,8 @@ impl AssemblyDocument {
 
     /// Restores the accepted pose and discards the preview, preserving undo and redo.
     pub fn cancel_drag(&mut self) {
+        // Every edit starts here, and edits act on the assembled positions.
+        self.collapse();
         self.motion = None;
         self.motion_report = None;
         let Some(drag) = self.drag.take() else { return };

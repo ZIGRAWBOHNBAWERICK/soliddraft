@@ -220,6 +220,25 @@ pub(super) fn symbol_items(
                 pen.text(Point2::new(left.u - th * 0.3, left.v), allowance, Align::Right, VAlign::Centre, 0.0);
             }
         }
+        AnnotationKind::Balloon { item, .. } => {
+            let r = crate::assembly::BALLOON_RADIUS;
+            pen.circle(place, r);
+            // A dangling balloon's part is gone or out of sight; its old number may be
+            // another row's now, so it shows none.
+            let dangling = matches!(a.state, crate::annotation::AnnotationState::Dangling { .. });
+            let number = if dangling { "?".to_owned() } else { item.to_string() };
+            pen.text(place, &number, Align::Centre, VAlign::Centre, 0.0);
+            if let Some(to) = anchors.first() {
+                let d = sub(*to, place);
+                let len = d.length();
+                if len > r + 1e-6 {
+                    let from = Point2::new(place.u + d.x / len * r, place.v + d.y / len * r);
+                    pen.path(line(from, *to));
+                    // A dot where the leader lands on the part (ISO 6433).
+                    pen.fill(kurbo::Circle::new((to.u, to.v), 0.5).to_path(0.01));
+                }
+            }
+        }
         AnnotationKind::RevisionSymbol { revision } => {
             let side = (2.6 * th).max(text_width(revision, th) * 1.9);
             let h = side * 0.866;

@@ -7,9 +7,10 @@
 //! pinned and recent commands.
 
 use crate::commands::{self, CommandSpec, Context, History, Match};
+use crate::shortcut_menu::Workspace;
 use crate::state::AppState;
 use crate::theme;
-use egui::{Align2, Key, Modifiers, vec2};
+use egui::{Align2, Key, Modifiers, Pos2, vec2};
 
 /// How many results the palette lists.
 pub const SHOWN: usize = 10;
@@ -22,18 +23,41 @@ pub fn find(query: &str, history: &History, context: Context) -> Vec<Match> {
 }
 
 /// An open palette.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct Palette {
     /// What has been typed.
     pub query: String,
     /// The chosen result, counted from the top.
     pub selected: usize,
+    pub(crate) shortcut: Option<(Workspace, Pos2)>,
 }
 
 impl Palette {
+    pub(crate) fn for_shortcut(workspace: Workspace, position: Pos2) -> Self {
+        Self { shortcut: Some((workspace, position)), ..Self::default() }
+    }
+
     /// The commands the query finds in the context the app is in, best first.
     pub fn results(&self, state: &AppState) -> Vec<Match> {
-        find(&self.query, &state.commands, Context::of(state))
+        if let Some((workspace, _)) = self.shortcut {
+            if self.query.trim().is_empty() {
+                return state
+                    .shortcut_menu
+                    .commands(workspace)
+                    .into_iter()
+                    .map(|command| Match { command, pinned: true, recent: None, score: 0 })
+                    .collect();
+            }
+            let mut found = commands::search_here(&self.query, &state.commands, Context::of(state));
+            found.retain(|m| m.command.id != "shortcut_menu");
+            found.truncate(SHOWN);
+            return found;
+        }
+        commands::search_here(&self.query, &state.commands, Context::of(state))
+            .into_iter()
+            .filter(|m| (m.command.shown)(state))
+            .take(SHOWN)
+            .collect()
     }
 
     /// Moves the choice up or down, stopping at the ends.
@@ -59,6 +83,10 @@ pub fn toggle(state: &mut AppState) {
 /// Draws the palette when it is open, and runs the command chosen with Enter or a click.
 pub fn show(ctx: &egui::Context, state: &mut AppState) {
     let Some(mut palette) = state.palette.take() else { return };
+    let shortcut = palette.shortcut.map(|(workspace, _)| workspace);
+    if shortcut.is_some_and(|workspace| state.start.is_some() || Workspace::of(state) != workspace) {
+        return;
+    }
     let (escape, down, up, enter) = ctx.input_mut(|i| {
         (
             i.consume_key(Modifiers::NONE, Key::Escape),
@@ -76,40 +104,99 @@ pub fn show(ctx: &egui::Context, state: &mut AppState) {
         palette.step(down, len);
     }
     let mut run = enter.then(|| palette.chosen(state)).flatten();
-    egui::Area::new(egui::Id::new("command_palette"))
-        .order(egui::Order::Foreground)
-        .anchor(Align2::CENTER_TOP, vec2(0.0, 80.0))
-        .show(ctx, |ui| {
-            egui::Frame::popup(ui.style()).show(ui, |ui| {
-                ui.set_width(460.0);
-                let field = ui.add(
-                    egui::TextEdit::singleline(&mut palette.query)
-                        .hint_text("Type a command")
-                        .desired_width(f32::INFINITY),
-                );
-                field.request_focus();
-                if palette.query != query {
-                    palette.selected = 0;
-                }
-                let results = palette.results(state);
-                if results.is_empty() && !palette.query.trim().is_empty() {
-                    ui.label(egui::RichText::new("No matching command").color(theme::muted()));
-                }
+    let mut customize = false;
+    let area = egui::Area::new(egui::Id::new(if shortcut.is_some() { "shortcut_menu" } else { "command_palette" }))
+        .order(egui::Order::Foreground);
+    let area = match palette.shortcut {
+        Some((_, position)) => area.fixed_pos(position + vec2(8.0, 8.0)),
+        None => area.anchor(Align2::CENTER_TOP, vec2(0.0, 80.0)),
+    };
+    let popup = area.show(ctx, |ui| {
+        egui::Frame::popup(ui.style()).show(ui, |ui| {
+            ui.set_width(if shortcut.is_some() { 284.0 } else { 460.0 });
+            let field = ui.add(
+                egui::TextEdit::singleline(&mut palette.query)
+                    .hint_text(if shortcut.is_some() { "Search commands" } else { "Type a command" })
+                    .desired_width(f32::INFINITY),
+            );
+            field.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, "Search commands"));
+            #[cfg(target_arch = "wasm32")]
+            if shortcut.is_some() {
+                crate::web::show_control("Shortcut search", field.rect);
+            } else {
+                crate::web::show_control("Command palette", field.rect);
+            }
+            field.request_focus();
+            if palette.query != query {
+                palette.selected = 0;
+            }
+            let results = palette.results(state);
+            if results.is_empty() && !palette.query.trim().is_empty() {
+                ui.label(egui::RichText::new("No matching command").color(theme::muted()));
+            }
+            if shortcut.is_some() && results.is_empty() && palette.query.trim().is_empty() {
+                ui.label("No pinned commands");
+            }
+            let mut show_results = |ui: &mut egui::Ui| {
                 for (i, m) in results.iter().enumerate() {
                     let c = m.command;
-                    let button = egui::Button::selectable(i == palette.selected, c.label_in(state))
-                        .shortcut_text(state.shortcuts.shortcut_text(c.id).unwrap_or_default());
-                    let r = ui.add_enabled(c.is_enabled(state), button);
-                    let r = match c.path_in(state) {
-                        Some(path) => r.on_hover_text(path),
-                        None => r,
+                    let label = if shortcut.is_some() && !c.is_working() {
+                        format!("{} (coming soon)", c.label)
+                    } else {
+                        c.label_in(state)
                     };
-                    if r.clicked() {
+                    let button = egui::Button::selectable(i == palette.selected, &label)
+                        .shortcut_text(state.shortcuts.shortcut_text(c.id).unwrap_or_default());
+                    let enabled = c.is_enabled(state);
+                    let response = ui.add_enabled(enabled, button);
+                    if shortcut.is_some() {
+                        let name = format!("Run {label}");
+                        response.widget_info(|| {
+                            egui::WidgetInfo::selected(egui::WidgetType::Button, enabled, i == palette.selected, &name)
+                        });
+                        #[cfg(target_arch = "wasm32")]
+                        crate::web::show_control(name, response.rect);
+                    } else {
+                        #[cfg(target_arch = "wasm32")]
+                        crate::web::show_control(format!("Command: {}", c.id), response.rect);
+                    }
+                    if i == palette.selected && (down || up) {
+                        response.scroll_to_me(None);
+                    }
+                    let response = if shortcut.is_none() {
+                        match c.path_in(state) {
+                            Some(path) => response.on_hover_text(path),
+                            None => response,
+                        }
+                    } else if enabled {
+                        response.on_hover_text(c.tip(state))
+                    } else {
+                        response.on_disabled_hover_text(c.tip(state))
+                    };
+                    if response.clicked() {
                         run = Some(c);
                     }
                 }
-            });
+            };
+            if shortcut.is_some() {
+                egui::ScrollArea::vertical().max_height(250.0).show(ui, show_results);
+                ui.separator();
+                let response = ui.small_button("Customize shortcut menu");
+                #[cfg(target_arch = "wasm32")]
+                crate::web::show_control("Customize shortcut menu", response.rect);
+                customize = response.clicked();
+            } else {
+                show_results(ui);
+            }
         });
+    });
+    if let Some(workspace) = shortcut.filter(|_| customize) {
+        crate::shortcut_menu::edit(state, workspace);
+        return;
+    }
+    if popup.response.clicked_elsewhere() && shortcut.is_some() {
+        return;
+    }
     match run {
         Some(command) => state.run_command(command),
         None => state.palette = Some(palette),

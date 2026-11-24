@@ -57,7 +57,16 @@ fn a_refused_export_leaves_its_destination_alone() {
 }
 
 #[test]
-fn smooth_rendering_cannot_satisfy_an_independent_certified_export() {
+fn smooth_loft_exports_a_certified_mesh_at_the_application_work_target() {
+    check_smooth_export(APP_WORK_TARGET);
+}
+
+#[test]
+fn smooth_loft_export_with_no_work_leaves_its_destination_alone() {
+    check_smooth_export(0);
+}
+
+fn check_smooth_export(limit: u64) {
     let _config = CONFIG.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     assert_eq!(APP_WORK_TARGET, 20_000_000);
     let dir = std::env::temp_dir().join(format!("soliddraft-smooth-export-{}", soliddraft_document::DocumentId::new()));
@@ -78,16 +87,32 @@ fn smooth_rendering_cannot_satisfy_an_independent_certified_export() {
     let sentinel = b"previous STL";
     std::fs::write(&path, sentinel).unwrap();
     let arguments = json!({"path":path});
-    let (refused, work) = with_request_allowance(0, || call(&mut state, "export_stl", arguments.clone()));
-    assert!(refused.is_error && work.exhausted, "{}; {work:?}", refused.content);
-    assert!(refused.content.contains("numbers.operation-budget"), "{}", refused.content);
-    assert_eq!(std::fs::read(&path).unwrap(), sentinel);
-    let (refused, work) = with_request_allowance(APP_WORK_TARGET, || call(&mut state, "export_stl", arguments));
-    eprintln!("three-section Smooth certified export: {work:?}; {}", refused.content);
-    assert!(refused.is_error && work.exhausted, "{}; {work:?}", refused.content);
-    assert!(refused.content.contains("numbers.operation-budget"), "{}", refused.content);
-    assert_eq!(std::fs::read(&path).unwrap(), sentinel, "a screen result cannot replace certified export");
+    let (exported, work) = with_request_allowance(limit, || call(&mut state, "export_stl", arguments));
     assert_eq!(state.doc.model().to_bytes().unwrap(), before);
     assert_eq!(state.doc.undo_depth(), undo);
+    if limit == 0 {
+        assert!(exported.is_error && work.exhausted, "{}; {work:?}", exported.content);
+        assert!(exported.content.contains("numbers.operation-budget"), "{}", exported.content);
+        assert_eq!(std::fs::read(&path).unwrap(), sentinel);
+        std::fs::remove_dir_all(dir).unwrap();
+        return;
+    }
+    assert!(
+        !exported.is_error && !work.exhausted && work.used > 0 && work.used <= APP_WORK_TARGET,
+        "{}; {work:?}",
+        exported.content
+    );
+    let result: Value = serde_json::from_str(&exported.content).unwrap();
+    let evidence = &result["evidence"];
+    assert_eq!(evidence["closed"], true);
+    let print = &evidence["print_check"];
+    assert_eq!(print["route"], "brep");
+    assert_eq!(print["requested_accuracy_mm"], 0.01);
+    assert!((0.0..=0.01).contains(&print["certified_accuracy_mm"].as_f64().unwrap()));
+    let written = std::fs::read(&path).unwrap();
+    let triangles = u32::from_le_bytes(written[80..84].try_into().unwrap());
+    assert!(triangles > 0);
+    assert_eq!(evidence["triangles"], triangles);
+    assert_eq!(written.len(), 84 + 50 * triangles as usize);
     std::fs::remove_dir_all(dir).unwrap();
 }

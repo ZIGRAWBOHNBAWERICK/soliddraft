@@ -43,7 +43,7 @@ fs.mkdirSync(downloads, { recursive: true });
 const SIZE = { width: 1400, height: 813 };
 const NEW_PART = [124, 143];
 const OPEN = [663, 147];
-const ACCEPT_IMPORT = [56, 147];
+const ACCEPT_IMPORT = [57, 154];
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 function check(value, message) { if (!value) throw new Error(message); }
@@ -81,7 +81,7 @@ const NOTES = { general_tolerance: 'ISO 2768-m', material: '6061-T6', notes: ['B
 // The tapped hole: through the 5 mm plate at x 50, y 22, between two mounting holes. The
 // form's Tapped takes the coarse thread whose tap drill is nearest the drawn Ø6.6: M8.
 const TAPPED_AT = [50, 22, 5];
-const THREAD = ['Hole1 thread', 'M8x1.25-6H THRU', [[C(49.9, 22, 2.5)]]];
+const THREAD = ['Hole1 thread', 'M8x1.25-6H THRU', [[C(49.8, 22.1, 2.5)]]];
 // The tapped hole removes material from the datum face, moving that face's centroid.
 const TAPPED_A = P(29.681, 19.812, 0);
 const TAPPED_EXPECTED = EXPECTED.map(([name, callout, features]) => [name, callout,
@@ -99,6 +99,17 @@ function at(have, want) {
   return have[0] === want[0] && [1, 2, 3].every(i => Math.abs(have[i] - want[i]) < 0.05);
 }
 
+// An item's faces, feature by feature: exactly the expected faces, none missing and
+// none more.
+function checkFaces(item, name, features, when) {
+  check(item.faces.length === features.length, `${when}: ${name} is on ${item.faces.length} features, not ${features.length}`);
+  features.forEach((feature, f) => {
+    const have = item.faces[f].map(place);
+    check(have.length === feature.length && feature.every(want => have.some(face => at(face, want))),
+      `${when}: ${name} is on ${JSON.stringify(item.faces[f])}, not on ${JSON.stringify(feature)}`);
+  });
+}
+
 function checkThread(shown, when) {
   check(shown.items.length === EXPECTED.length + 1, `${when}: ${shown.items.length} items, not ${EXPECTED.length + 1}: ${JSON.stringify(shown.items.map(i => i.name))}`);
   checkItems({ ...shown, items: shown.items.slice(0, EXPECTED.length) }, when, TAPPED_EXPECTED);
@@ -106,9 +117,7 @@ function checkThread(shown, when) {
   const item = shown.items[EXPECTED.length];
   check(item.name === name && item.callout === callout, `${when}: the last item is ${item.name} "${item.callout}", not ${name} "${callout}"`);
   check(!item.problem, `${when}: ${name} does not apply: ${item.problem}`);
-  const have = item.faces.map(feature => feature.map(place));
-  check(have.length === features.length && features.every((feature, f) => feature.every(want => have[f].some(face => at(face, want)))),
-    `${when}: ${name} is on ${JSON.stringify(item.faces)}, not on ${JSON.stringify(features)}`);
+  checkFaces(item, name, features, when);
 }
 
 function checkItems(shown, when, expected = EXPECTED) {
@@ -117,12 +126,7 @@ function checkItems(shown, when, expected = EXPECTED) {
     const item = shown.items[n];
     check(item.name === name && item.callout === callout, `${when}: item ${n + 1} is ${item.name} "${item.callout}", not ${name} "${callout}"`);
     check(!item.problem, `${when}: ${name} does not apply: ${item.problem}`);
-    check(item.faces.length === features.length, `${when}: ${name} is on ${item.faces.length} features, not ${features.length}`);
-    features.forEach((feature, f) => {
-      const have = item.faces[f].map(place);
-      check(have.length === feature.length && feature.every(want => have.some(face => at(face, want))),
-        `${when}: ${name} is on ${JSON.stringify(item.faces[f])}, not on ${JSON.stringify(feature)}`);
-    });
+    checkFaces(item, name, features, when);
   });
   check(JSON.stringify(shown.notes) === JSON.stringify(NOTES), `${when}: the notes are ${JSON.stringify(shown.notes)}`);
 }
@@ -425,6 +429,13 @@ async function main() {
   const marksAgain = await v.threads('after reopening the tapped part');
   check(marksAgain === marks, `the reopened part draws ${marksAgain} thread mark segments, not ${marks}`);
   await v.shot('3c-tapped-reopened');
+
+  await v.command('Section');
+  const section = await v.eval(`JSON.parse(window.wasmBindings.shown_viewport())`);
+  check(section.preview && section.triangles > 0, 'the section did not replace the tapped part on screen');
+  check(await v.eval(`window.wasmBindings.shown_threads()`) === 0, 'the section reports undrawn thread marks');
+  await v.command('Section');
+  check(await v.threads('after closing the section') === marks, 'the part did not restore its thread marks');
 
   // One action: the STEP file and a drawing of it as PDF and DXF, in one download.
   step('Drawing and files');

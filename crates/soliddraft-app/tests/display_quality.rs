@@ -28,6 +28,7 @@ fn disc() -> Document {
         flip: false,
         end: Default::default(),
         draft: None,
+        ..Default::default()
     };
     doc.apply(Command::AddExtrude { params, via_assistant: false }).unwrap();
     doc
@@ -88,6 +89,7 @@ fn the_camera_moves_the_part_between_levels() {
         flip: false,
         end: Default::default(),
         draft: None,
+        ..Default::default()
     };
     doc.apply(Command::AddExtrude { params, via_assistant: false }).unwrap();
     assert_eq!(doc.display_quality().shown(), Some(Level::Coarse));
@@ -196,6 +198,7 @@ fn an_unchanged_body_keeps_its_mesh_and_undo_shows_the_earlier_one_again() {
         flip: false,
         end: Default::default(),
         draft: None,
+        ..Default::default()
     };
     let id = doc.apply(Command::AddExtrude { params: params.clone(), via_assistant: false }).unwrap().unwrap();
     let middle = Projection::Orthographic { pixels_per_mm: 1.0 };

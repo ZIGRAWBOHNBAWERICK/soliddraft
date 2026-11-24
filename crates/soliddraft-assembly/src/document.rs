@@ -19,7 +19,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use soliddraft_document::resolve::{Resolution, Resolver, repin};
-use soliddraft_document::{ContentHash, DocKind, DocRef, DocumentId, OpenDocument};
+use soliddraft_document::{ConfigurationId, ContentHash, DocKind, DocRef, DocumentId, OpenDocument};
 use soliddraft_materials::{Appearance, Snapshots};
 use soliddraft_model::{Document as PartDocument, ValueTable};
 use soliddraft_tessellation::{Level, Quality, Settings};
@@ -113,16 +113,52 @@ struct Record {
 pub(crate) struct Design {
     mates: Vec<MateEntry>,
     values: ValueTable,
+    controller: Option<crate::mates::MateController>,
 }
 
 impl Design {
     pub(crate) fn of(truth: &Assembly) -> Design {
-        Design { mates: truth.mates.clone(), values: truth.values.clone() }
+        Design { mates: truth.mates.clone(), values: truth.values.clone(), controller: truth.mate_controller.clone() }
     }
 
     pub(crate) fn restore(&self, truth: &mut Assembly) {
         truth.mates = self.mates.clone();
         truth.values = self.values.clone();
+        truth.mate_controller = self.controller.clone();
+    }
+}
+
+/// Everything a configuration holds, with the configurations themselves, whole: an
+/// activation swaps all of it.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct Configured {
+    components: Vec<Component>,
+    overrides: Vec<Override>,
+    values: ValueTable,
+    configurations: crate::configuration::Configurations,
+    explode: Vec<crate::configuration::ExplodeStep>,
+    next_configured_id: u32,
+}
+
+impl Configured {
+    pub(crate) fn of(truth: &Assembly) -> Configured {
+        Configured {
+            components: truth.components.clone(),
+            overrides: truth.overrides.clone(),
+            values: truth.values.clone(),
+            configurations: truth.configurations.clone(),
+            explode: truth.explode.clone(),
+            next_configured_id: truth.next_configured_id,
+        }
+    }
+
+    fn restore(&self, truth: &mut Assembly) {
+        truth.components = self.components.clone();
+        truth.overrides = self.overrides.clone();
+        truth.values = self.values.clone();
+        truth.configurations = self.configurations.clone();
+        truth.explode = self.explode.clone();
+        truth.next_configured_id = self.next_configured_id;
     }
 }
 
@@ -136,11 +172,14 @@ pub(crate) struct TruthImage {
     /// The colour assignments and appearance copies, when the edit changed colours,
     /// with the paths whose rows to repaint.
     colours: Option<(Vec<OccurrenceAppearance>, Snapshots, Vec<OccurrencePath>)>,
+    viewport_states: Option<soliddraft_document::display_state::DisplayStates<crate::AssemblyDisplay>>,
     /// The display settings, when the edit changed a quality.
     settings: Option<Settings>,
     /// The mates and values, when the edit changed them.
     pub(crate) design: Option<Design>,
-    next_id: u32,
+    /// The configurations and what they hold, when the edit changed them.
+    pub(crate) configured: Option<Configured>,
+    pub(crate) next_id: u32,
 }
 
 /// An open assembly.
@@ -163,6 +202,10 @@ pub struct AssemblyDocument {
     levels: Option<LevelWorker>,
     exact: HashMap<DefinitionIndex, Arc<Mutex<PartDocument>>>,
     pub(crate) drag: Option<crate::mates::drag::Drag>,
+    /// True while the exploded view is shown.
+    pub(crate) exploded: bool,
+    /// The accepted local placements of rows moved directly by the exploded view.
+    pub(crate) explode_moved: Vec<(OccurrenceIndex, Placement)>,
     pub(crate) motion: Option<crate::interference::motion::Motion>,
     pub(crate) motion_report: Option<crate::interference::motion::MotionReport>,
     undo: Vec<Record>,
@@ -290,6 +333,8 @@ impl AssemblyDocument {
             levels: None,
             exact: HashMap::new(),
             drag: None,
+            exploded: false,
+            explode_moved: Vec::new(),
             motion: None,
             motion_report: None,
             undo: Vec::new(),
@@ -744,8 +789,10 @@ impl AssemblyDocument {
             sources: Vec::new(),
             patterns: Vec::new(),
             colours: None,
+            viewport_states: None,
             settings: None,
             design: None,
+            configured: None,
             next_id: self.assembly.next_id,
         }
     }
@@ -775,6 +822,22 @@ impl AssemblyDocument {
         self.redo.clear();
     }
 
+    /// Takes the truth now as the undo step `label` from `before`, with no rows to restore.
+    pub(crate) fn push_record(&mut self, label: &str, before: TruthImage) {
+        self.solver_status = None;
+        let after = self.reimage(&before);
+        self.undo.push(Record {
+            label: label.to_owned(),
+            before,
+            after,
+            rows_before: Vec::new(),
+            rows_after: Vec::new(),
+            added: Vec::new(),
+            removed: Vec::new(),
+        });
+        self.redo.clear();
+    }
+
     fn reimage(&self, like: &TruthImage) -> TruthImage {
         TruthImage {
             components: like.components.iter().map(|(c, _)| (*c, self.assembly.component(*c).cloned())).collect(),
@@ -784,8 +847,10 @@ impl AssemblyDocument {
             colours: like.colours.as_ref().map(|(_, _, paths)| {
                 (self.assembly.appearances.clone(), self.assembly.snapshots.clone(), paths.clone())
             }),
+            viewport_states: like.viewport_states.as_ref().map(|_| self.assembly.viewport_states.clone()),
             settings: like.settings.as_ref().map(|_| self.assembly.settings.clone()),
             design: like.design.as_ref().map(|_| Design::of(&self.assembly)),
+            configured: like.configured.as_ref().map(|_| Configured::of(&self.assembly)),
             next_id: self.assembly.next_id,
         }
     }
@@ -839,7 +904,7 @@ impl AssemblyDocument {
     }
 
     /// Moves table rows to new placements together, noting what moved for the display.
-    fn place_rows(&mut self, rows: &[(OccurrenceIndex, Placement)]) {
+    pub(crate) fn place_rows(&mut self, rows: &[(OccurrenceIndex, Placement)]) {
         if rows.is_empty() {
             return;
         }
@@ -876,10 +941,35 @@ impl AssemblyDocument {
         self.move_to(&moves)
     }
 
+    /// Applies a display state edit and refreshes the occurrence view.
+    pub fn change_viewport_states(
+        &mut self,
+        states: soliddraft_document::display_state::DisplayStates<crate::AssemblyDisplay>,
+    ) -> Result<(), EditError> {
+        crate::schema::check_viewport_states(&states).map_err(EditError::Invalid)?;
+        if states == self.assembly.viewport_states {
+            return Ok(());
+        }
+        self.cancel_drag();
+        let mut before = self.image(&[], &[]);
+        before.viewport_states = Some(std::mem::replace(&mut self.assembly.viewport_states, states));
+        self.assembly.format = self.assembly.written_format().into();
+        self.reflatten();
+        self.record("Change display state", before, Vec::new());
+        Ok(())
+    }
+
     /// Hides or shows occurrences. One undo step.
     pub fn set_hidden(&mut self, paths: &[OccurrencePath], hidden: bool) -> Result<(), EditError> {
         self.cancel_drag();
         let rows: Vec<OccurrenceIndex> = paths.iter().map(|p| self.row(p)).collect::<Result<_, _>>()?;
+        if let Some(mut display) = self.assembly.viewport_state().cloned() {
+            display.view.hidden.retain(|(p, _)| !paths.contains(p));
+            display.view.hidden.extend(paths.iter().map(|p| (p.clone(), hidden)));
+            let mut states = self.assembly.viewport_states.clone();
+            states.put(display).map_err(EditError::Invalid)?;
+            return self.change_viewport_states(states);
+        }
         let (comps, ovs) = split_owners(paths.iter());
         let before = self.image(&comps, &ovs);
         let rows_before = rows.iter().map(|r| self.row_state(*r)).collect();
@@ -947,6 +1037,15 @@ impl AssemblyDocument {
             && let Some(problem) = a.problems().first()
         {
             return Err(EditError::Invalid(format!("the appearance's {} {}", problem.field, problem.message)));
+        }
+        if let Some(mut display) = self.assembly.viewport_state().cloned() {
+            display.view.appearances.retain(|(p, _)| !paths.contains(p));
+            if let Some(appearance) = appearance {
+                display.view.appearances.extend(paths.iter().map(|p| (p.clone(), appearance.clone())));
+            }
+            let mut states = self.assembly.viewport_states.clone();
+            states.put(display).map_err(EditError::Invalid)?;
+            return self.change_viewport_states(states);
         }
         let mut before = self.image(&[], &[]);
         before.colours = Some((self.assembly.appearances.clone(), self.assembly.snapshots.clone(), paths.to_vec()));
@@ -1026,6 +1125,115 @@ impl AssemblyDocument {
             removed: Vec::new(),
         });
         self.redo.clear();
+    }
+
+    /// The configurations root component `component` can show: a part's from its file at
+    /// the revision it is pinned at, Default first; a sub-assembly's from its truth.
+    pub fn configurations_for(&mut self, component: ComponentId) -> Result<Vec<String>, EditError> {
+        Ok(self.configuration_choices(component)?.into_iter().map(|(_, name)| name).collect())
+    }
+
+    /// The configuration root component `component` shows, by name; `None` for the one
+    /// its file was saved in.
+    pub fn configuration_of(&mut self, component: ComponentId) -> Result<Option<String>, EditError> {
+        let c = self.assembly.component(component).ok_or(EditError::NoComponent(component))?;
+        let Some(id) = self.assembly.source(c.source).and_then(|s| s.document.configuration.clone()) else {
+            return Ok(None);
+        };
+        let choices = self.configuration_choices(component)?;
+        Ok(Some(choices.into_iter().find(|(c, _)| *c == id).map_or(id.0, |(_, name)| name)))
+    }
+
+    fn configuration_choices(&mut self, component: ComponentId) -> Result<Vec<(ConfigurationId, String)>, EditError> {
+        self.finish_loading();
+        let c = self.assembly.component(component).ok_or(EditError::NoComponent(component))?;
+        let mut document =
+            self.assembly.source(c.source).map(|s| s.document.clone()).ok_or(EditError::NoComponent(component))?;
+        document.configuration = None;
+        match document.kind {
+            DocKind::Part => {
+                let source = self
+                    .options
+                    .display
+                    .as_deref()
+                    .and_then(|d| d.kernel_source())
+                    .ok_or_else(|| EditError::Invalid("reading a part's configurations needs the kernel".into()))?;
+                let bytes = self.revision_bytes(&document).map_err(EditError::Invalid)?;
+                let part = source.exact(&bytes, None).map_err(EditError::Invalid)?;
+                Ok(part.configuration_names())
+            }
+            DocKind::Assembly => {
+                let row = self.row(&crate::configure::component_path(component))?;
+                let sub = self.store.get(self.table.definition(row)).clone();
+                let truth = sub
+                    .original
+                    .or(sub.assembly)
+                    .ok_or_else(|| EditError::Invalid(format!("{} is not loaded", label_of(&document))))?;
+                Ok(truth.configurations.iter().map(|c| (ConfigurationId(c.id.to_string()), c.name.clone())).collect())
+            }
+            _ => Err(EditError::Invalid(format!("{} has no configurations", label_of(&document)))),
+        }
+    }
+
+    /// Shows root component `component` in its part's or sub-assembly's configuration
+    /// `name`, or in the one its file was saved in (`None`). The component keeps its
+    /// placement and its mates, which are solved again on the configuration's shape. A
+    /// name the part or sub-assembly does not have is refused with the names it has, and
+    /// nothing changes. One undo step.
+    pub fn set_configuration(&mut self, component: ComponentId, name: Option<&str>) -> Result<(), EditError> {
+        self.cancel_drag();
+        let choices = self.configuration_choices(component)?;
+        let wanted = match name {
+            None => None,
+            Some(name) => Some(choices.iter().find(|(_, n)| n == name).map(|(id, _)| id.clone()).ok_or_else(|| {
+                let known: Vec<&str> = choices.iter().map(|(_, n)| n.as_str()).collect();
+                let has = if known.is_empty() { "none".to_owned() } else { known.join(", ") };
+                EditError::Invalid(format!("no configuration {name}; it has {has}"))
+            })?),
+        };
+        let name = name.unwrap_or("the saved configuration");
+        let old = self.assembly.component(component).ok_or(EditError::NoComponent(component))?.source;
+        let mut document = self.assembly.source(old).ok_or(EditError::NoComponent(component))?.document.clone();
+        if document.configuration == wanted {
+            return Ok(());
+        }
+        document.configuration = wanted.clone();
+        let changed = document.id;
+        let mut proposed = self.assembly.clone();
+        let source = proposed.add_source(document);
+        proposed.component_mut(component).expect("checked above").source = source;
+        let mut candidate = AssemblyDocument::from_parts(
+            self.path.clone(),
+            self.id,
+            proposed,
+            self.packages.clone(),
+            self.options.clone(),
+        );
+        candidate.store = self.store.clone();
+        let mut lookup = Lookup::with_packages(self.packages.clone(), self.path.as_deref(), &self.options);
+        candidate.restructure(&mut lookup).map_err(|e| EditError::Invalid(e.to_string()))?;
+        candidate.start_loading(lookup);
+        candidate.finish_loading();
+        // A configuration that cannot be shown is refused, and nothing changes.
+        if let Some((_, d)) = candidate.store.iter().find(|(_, d)| {
+            Some(d.key.document) == changed && d.key.configuration == wanted && d.state == LoadState::Failed
+        }) {
+            return Err(EditError::Invalid(d.problem.clone().unwrap_or_else(|| format!("{name} cannot be shown"))));
+        }
+        // Its shape changed, so the mates are solved again on it.
+        let (mut components, overrides) =
+            self.solve_candidate(&mut candidate).map_err(|r| EditError::Invalid(r.to_string()))?;
+        if !components.contains(&component) {
+            components.push(component);
+        }
+        let mut before = self.image(&components, &overrides);
+        before.sources = self.assembly.sources.iter().map(|s| (s.id, Some(s.clone()))).collect();
+        if !self.assembly.sources.iter().any(|s| s.id == source) {
+            before.sources.push((source, None));
+        }
+        before.design = Some(Design::of(&self.assembly));
+        self.adopt("Configuration", candidate, before);
+        Ok(())
     }
 
     /// Renames one of the root's components; `None` goes back to the source's name.
@@ -1138,6 +1346,10 @@ impl AssemblyDocument {
             return Err(EditError::Invalid(format!("delete its mates first: {}", held.join(", "))));
         }
         let mut before = self.image(components, &[]);
+        if !self.assembly.configurations.is_empty() || !self.assembly.explode.is_empty() {
+            before.configured = Some(Configured::of(&self.assembly));
+            self.assembly.forget_configured(&gone);
+        }
         let overrides: Vec<OccurrencePath> = self
             .assembly
             .overrides
@@ -1209,6 +1421,12 @@ impl AssemblyDocument {
             log_problem(&e.to_string());
         }
         self.start_loading(lookup);
+        // The new rows sit where the truth puts them; show the exploded view again on them.
+        if self.exploded {
+            self.exploded = false;
+            self.explode_moved.clear();
+            self.show_explode();
+        }
     }
 
     /// How many accepted edits this assembly can undo.
@@ -1251,6 +1469,9 @@ impl AssemblyDocument {
 
     fn apply_record(&mut self, r: &Record, undo: bool) {
         let (image, rows) = if undo { (&r.before, &r.rows_before) } else { (&r.after, &r.rows_after) };
+        if let Some(configured) = &image.configured {
+            configured.restore(&mut self.assembly);
+        }
         for (id, c) in &image.components {
             self.assembly.components.retain(|x| x.id != *id);
             if let Some(c) = c {
@@ -1287,6 +1508,10 @@ impl AssemblyDocument {
                 }
             }
         }
+        if let Some(states) = &image.viewport_states {
+            self.assembly.viewport_states = states.clone();
+            self.assembly.format = self.assembly.written_format().into();
+        }
         if let Some(settings) = &image.settings {
             self.assembly.settings = settings.clone();
         }
@@ -1302,10 +1527,12 @@ impl AssemblyDocument {
                 .iter()
                 .any(|p| p.seeds.iter().any(|s| image.components.iter().any(|(c, _)| c == s)));
         let structural = !image.sources.is_empty()
+            || image.configured.is_some()
             || !image.patterns.is_empty()
             || !r.removed.is_empty()
             || !r.added.is_empty()
             || image.settings.is_some()
+            || image.viewport_states.is_some()
             || seed_moved;
         if structural {
             self.reflatten();
@@ -1367,14 +1594,18 @@ impl AssemblyDocument {
             }
             let (id, rev) = (d.key.document, &d.key.revision);
             if let Some(a) = &d.assembly {
+                // A sub-assembly placed in several of its configurations has one copy.
+                if out.iter().any(|c| c.document == id && &c.revision == rev) {
+                    continue;
+                }
                 if let Some(c) = readers.iter_mut().find_map(|r| r.copy(id, rev).ok().flatten()) {
                     out.push(c);
                 } else {
-                    out.push(RefCopy::assembly(id, rev.clone(), &a.truth_entries()));
+                    out.push(RefCopy::assembly(id, rev.clone(), &d.original.as_ref().unwrap_or(a).truth_entries()));
                 }
                 continue;
             }
-            let name = display_entry(d.quality.as_ref());
+            let name = display_entry(d.quality.as_ref(), d.key.configuration.as_ref());
             let bytes: Option<Arc<[u8]>> = readers
                 .iter_mut()
                 .find_map(|r| r.entry(id, rev, &name).ok().flatten())
@@ -1388,7 +1619,7 @@ impl AssemblyDocument {
             out[slot].entries.push((name, bytes));
             // The coarse level too, when it was loaded or the file already has it, so a
             // reopened assembly can show far parts coarse without asking for them.
-            let coarse = level_entry(d.quality.as_ref(), Level::Coarse);
+            let coarse = level_entry(d.quality.as_ref(), d.key.configuration.as_ref(), Level::Coarse);
             let coarse_bytes: Option<Arc<[u8]>> =
                 d.coarse.as_ref().map(|m| m.encode("soliddraft coarse").into()).or_else(|| {
                     readers.iter_mut().find_map(|r| r.entry(id, rev, &coarse).ok().flatten()).map(Into::into)
@@ -1499,10 +1730,12 @@ impl AssemblyDocument {
         }
         let r = self.refs.get(&def).ok_or("the definition has no reference")?.clone();
         let bytes = self.revision_bytes(&r)?;
-        let part = Arc::new(Mutex::new(source.exact(&bytes)?));
+        let part = Arc::new(Mutex::new(source.exact(&bytes, r.configuration.as_ref())?));
         self.exact.insert(def, part.clone());
-        if self.store.get(def).state == LoadState::Stale {
-            self.display_at_pin(def, &bytes, source);
+        if self.store.get(def).state == LoadState::Stale
+            && let Ok(shown) = source.configured(&bytes, r.configuration.as_ref())
+        {
+            self.display_at_pin(def, &shown, source);
         }
         // Exact work does not make another revision's picture this one's.
         let d = self.store.get_mut(def);

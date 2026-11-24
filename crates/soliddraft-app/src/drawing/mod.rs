@@ -101,6 +101,14 @@ pub enum DrawingTool {
     Note,
     HoleCallout,
     CentreMark,
+    /// The bevel and adjacent edge in a profile view, then a placement.
+    Chamfer,
+    /// Two parallel edges in one view.
+    Centreline,
+    /// The edge where a fillet weld goes, then a placement.
+    Weld,
+    /// A view showing the holes face-on, then a table position.
+    HoleTable,
     /// Picking a new entity for a lost end of an annotation.
     Reattach {
         annotation: AnnotationId,
@@ -142,6 +150,10 @@ impl DrawingTool {
             DrawingTool::Note => "Note",
             DrawingTool::HoleCallout => "Hole callout",
             DrawingTool::CentreMark => "Centre mark",
+            DrawingTool::Chamfer => "Chamfer dimension",
+            DrawingTool::Centreline => "Centreline",
+            DrawingTool::Weld => "Weld symbol",
+            DrawingTool::HoleTable => "Hole table",
             DrawingTool::Reattach { .. } => "Reattach",
             DrawingTool::Section { replace: None } => "Section view",
             DrawingTool::Section { replace: Some(_) } => "Redraw cutting line",
@@ -200,6 +212,32 @@ impl DrawingTool {
             DrawingTool::Note => "Note · click an edge for a leader, or anywhere for plain text".into(),
             DrawingTool::HoleCallout => "Hole callout · click a hole circle seen face-on".into(),
             DrawingTool::CentreMark => "Centre mark · click a circle seen face-on".into(),
+            DrawingTool::Chamfer => match picks {
+                0 => "Chamfer · pick the bevel edge in a profile view".into(),
+                1 | 2 => "Chamfer · pick the adjoining edge that defines the angle".into(),
+                _ => "Chamfer · click to place the dimension".into(),
+            },
+            DrawingTool::Centreline => {
+                if picks == 0 {
+                    "Centreline · pick one of two parallel edges".into()
+                } else {
+                    "Centreline · pick the other edge in the same view".into()
+                }
+            }
+            DrawingTool::Weld => {
+                if picks == 0 {
+                    "Weld · pick a joint edge".into()
+                } else {
+                    "Weld · click to place the fillet weld symbol".into()
+                }
+            }
+            DrawingTool::HoleTable => {
+                if picks > 0 {
+                    "Hole table · click to place the table".into()
+                } else {
+                    "Hole table · click a view that shows circular holes face-on".into()
+                }
+            }
             DrawingTool::Reattach { .. } => "Reattach · click a new edge or point for the lost end marked ×".into(),
             DrawingTool::Section { .. } if pending => {
                 "Section · click to place along the alignment. F flips the direction, Ctrl frees the view.".into()
@@ -260,6 +298,8 @@ pub enum DrawingSel {
     Format,
     /// The current sheet's revision table, made on the first revision.
     Revisions,
+    /// The index of a hole table on the current sheet.
+    HoleTable(usize),
     /// The model reference: the part the drawing shows.
     Model,
 }
@@ -408,6 +448,8 @@ pub struct ToolDraft {
     pub orientation: LinearOrientation,
     /// Picks so far: dimension set points, or a symbol's anchor.
     pub anchors: Vec<Anchor>,
+    /// Chamfer measurement after both profile edges have been picked.
+    pub chamfer: Option<soliddraft_drawing::Dimension>,
     /// The feature control frame being built.
     pub gdt: GdtDraft,
     /// The next datum's letter; empty for the drawing's next one.
@@ -436,6 +478,7 @@ impl Default for ToolDraft {
             depth: 10.0,
             orientation: LinearOrientation::Horizontal,
             anchors: Vec::new(),
+            chamfer: None,
             gdt: GdtDraft::default(),
             datum: String::new(),
             finish: FinishDraft::default(),
@@ -452,6 +495,7 @@ impl ToolDraft {
         self.view = None;
         self.points.clear();
         self.anchors.clear();
+        self.chamfer = None;
         self.pending = None;
         self.flip = false;
         self.target_sheet = None;
@@ -698,7 +742,15 @@ impl DrawingSession {
 
     /// The prompt of the current tool at its current stage.
     pub fn tool_prompt(&self) -> String {
-        if self.tool.is_derived() || self.tool.is_symbol() || matches!(self.tool, DrawingTool::DimensionSet(_)) {
+        if self.tool == DrawingTool::HoleTable {
+            self.tool.prompt(usize::from(self.draft.view.is_some()))
+        } else if self.tool.is_derived()
+            || self.tool.is_symbol()
+            || matches!(
+                self.tool,
+                DrawingTool::DimensionSet(_) | DrawingTool::Chamfer | DrawingTool::Centreline | DrawingTool::Weld
+            )
+        {
             self.tool.prompt_at(self.draft.stage(), self.draft.pending.is_some())
         } else {
             self.tool.prompt(self.picks.len())
@@ -1127,8 +1179,9 @@ pub fn resolve_model(state: &AppState) -> Option<soliddraft_document::Resolution
         path: state.doc.path.clone(),
         revision: part::digest(&state.doc),
     };
+    let assembly = state.assembly.session.as_ref().map(|a| a.doc.as_open());
     let resolver = soliddraft_document::Resolver::new(session.doc.path.as_deref())
-        .with_open([part])
+        .with_open(std::iter::once(part).chain(assembly))
         .with_search_folders(crate::settings::file_locations().search_folders());
     Some(resolver.resolve(&session.doc.drawing.model))
 }
@@ -1138,6 +1191,10 @@ pub fn resolve_model(state: &AppState) -> Option<soliddraft_document::Resolution
 /// part was found. When the part is not open but its file is, the file is opened in
 /// the part tab first and the rebuild follows; a missing part asks for a repair.
 fn rebuild(state: &mut AppState) {
+    if crate::assembly_files::drawing::drawing_is_of_assembly(state) {
+        rebuild_assembly(state);
+        return;
+    }
     if !part_is_model(state) {
         if let Some(path) = state.drawing.session.as_ref().and_then(DrawingSession::model_file) {
             if state.doc.dirty {
@@ -1169,9 +1226,37 @@ fn rebuild(state: &mut AppState) {
     }
 }
 
+/// Rebuild for a drawing of an assembly: brings it to the open assembly, or opens the
+/// drawing's assembly first.
+fn rebuild_assembly(state: &mut AppState) {
+    let wanted = state.drawing.session.as_ref().and_then(|s| s.doc.drawing.model.id);
+    let open = state.assembly.session.as_ref().map(|a| a.doc.id());
+    if open.is_none() || open != wanted {
+        let said = match model_to_open(state) {
+            Ok(Some(path)) => {
+                state.push(crate::state::AppAction::Assembly(crate::assembly::AssemblyAction::Open(path.clone())));
+                format!("Opening {}; Rebuild again once it shows", path.display())
+            }
+            Ok(None) => "The drawing's assembly could not be found".to_owned(),
+            Err(e) => e,
+        };
+        if let Some(s) = state.drawing.session.as_mut() {
+            s.say(said);
+        }
+        return;
+    }
+    let said = crate::assembly_files::drawing::update(state).unwrap_or_else(|e| e);
+    if let Some(s) = state.drawing.session.as_mut() {
+        s.say(said);
+    }
+}
+
 /// The Rebuild itself, once the open part is the drawing's model: one undo step that
 /// brings the views to the part's revision. Says what it did.
 pub(crate) fn update_views(state: &mut AppState) -> Result<String, String> {
+    if crate::assembly_files::drawing::drawing_is_of_assembly(state) {
+        return crate::assembly_files::drawing::update(state);
+    }
     if let Some(reason) = part_wait_reason(state) {
         return Err(reason.into());
     }
@@ -1279,13 +1364,28 @@ fn open_model(state: &mut AppState) {
     }
 }
 
-/// The drawing's part file to open in the part tab: `None` when it is the open part
-/// or was not found, and an error when the open part has unsaved changes.
+/// The drawing's model file to open: `None` when it is the open part or assembly or was
+/// not found, and an error when the part or assembly it would replace has unsaved changes.
 pub(crate) fn model_to_open(state: &AppState) -> Result<Option<PathBuf>, String> {
     let Some(session) = state.drawing.session.as_ref() else { return Ok(None) };
     let Some(file) = session.model_file() else { return Ok(None) };
     if session.model_is(state.doc.model().id()) {
         return Ok(None);
+    }
+    // An assembly opens in its own tab, in place of the open assembly: the open part does
+    // not matter, but unsaved edits to the open assembly hold it back.
+    if session.doc.drawing.model.kind == DocKind::Assembly {
+        let Some(open) = state.assembly.session.as_ref() else { return Ok(Some(file)) };
+        if Some(open.doc.id()) == session.doc.drawing.model.id {
+            return Ok(None);
+        }
+        if open.doc.is_dirty() {
+            return Err(format!(
+                "{} has unsaved changes; the drawing's assembly was not opened",
+                open.doc.assembly().name
+            ));
+        }
+        return Ok(Some(file));
     }
     if state.doc.dirty {
         return Err(format!("{} has unsaved changes; the drawing's part was not opened", state.doc.name));
@@ -1551,6 +1651,12 @@ pub fn apply(state: &mut AppState, dock: &mut DockState<Tab>, ctx: &egui::Contex
             match s.selection {
                 Some(DrawingSel::Annotation(id)) => {
                     let _ = s.doc.apply(Command::DeleteAnnotation { annotation: id }, None);
+                    s.selection = None;
+                }
+                Some(DrawingSel::HoleTable(table)) => {
+                    if s.sheet().tables.get(table).is_some_and(|t| t.kind == soliddraft_drawing::TableKind::Hole) {
+                        let _ = s.doc.apply(Command::DeleteTable { sheet: s.sheet, table }, None);
+                    }
                     s.selection = None;
                 }
                 Some(DrawingSel::View(id)) => match s.doc.apply(Command::DeleteView { view: id }, None) {

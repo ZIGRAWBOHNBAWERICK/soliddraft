@@ -35,7 +35,24 @@ fn plate_with_circle() -> (Document, u64) {
 fn open(app: &mut App, action: AppAction) {
     app.state_mut().state.push(action);
     settle(app);
+    open_sheet(app);
     pointer_to_chrome(app);
+}
+
+/// Opens the form's More sheet when it has one: the bar keeps as many fields as fit beside
+/// the side column, and the rest are there.
+fn open_sheet(app: &mut App) {
+    if app.state().state.form_bar.expanded {
+        return;
+    }
+    let more = app
+        .query_all(By::new().role(egui::accesskit::Role::Button))
+        .find(|n| n.accesskit_node().label().is_some_and(|l| l.starts_with("More (")))
+        .map(|n| n.rect());
+    if let Some(more) = more {
+        ribbon::click_at(app, more.center());
+        settle(app);
+    }
 }
 
 fn editor_title(app: &App) -> String {
@@ -53,8 +70,9 @@ fn value_fields(app: &App) -> Vec<(String, Rect)> {
     fields
 }
 
-/// The active form exposes each expected field inside the window.
-fn assert_fields(app: &App, what: &str, wanted: &[&str]) {
+/// The active form exposes each expected field inside the window, on its bar or in its sheet.
+fn assert_fields(app: &mut App, what: &str, wanted: &[&str]) {
+    open_sheet(app);
     let fields = value_fields(app);
     let names: Vec<&str> = fields.iter().map(|(n, _)| n.as_str()).collect();
     for w in wanted {
@@ -115,7 +133,10 @@ fn extrude_numbers_accept_keyboard_input() {
         assert!(app.query_by_label("Flip direction").is_some(), "the flip stays a labelled checkbox");
         assert!(app.query_by_label("OK").is_some() && app.query_by_label("Cancel").is_some());
 
-        // Keyboard: Tab walks the numbers in reading order.
+        // Keyboard: Tab walks the numbers in reading order. The unfolded panel scrolls in
+        // the side column, so the field comes into view first.
+        app.get_by_label("Width value").scroll_to_me();
+        app.run_steps(24);
         let width = app.get_by_label("Width value").rect();
         ribbon::click_at(app, width.center());
         app.run_steps(2);
@@ -184,7 +205,7 @@ fn cut_shell_draft_and_pattern_forms_expose_their_fields() {
         assert!(!shows(app, "1 faces"));
         case.frame(app, "draft-one-face");
         // The top face lies across the pull, so OK is refused. The form stays open with
-        // the reason in its message area, right of the palette, and the tree gains no
+        // the reason in its message area, under the bar, and the tree gains no
         // failed row.
         let count = app.state().state.doc.features.len();
         open(app, AppAction::CommitEditor);
@@ -198,8 +219,9 @@ fn cut_shell_draft_and_pattern_forms_expose_their_fields() {
             .into_iter()
             .find(|p| p.text.starts_with("Draft cannot"))
             .expect("the form says why Draft refused");
-        let palette = egui::PanelState::load(&app.ctx, egui::Id::new("tool_palette")).unwrap().outer_rect;
-        assert!(message.rect.left() >= palette.right(), "the message clears the palette: {message:?}");
+        let bar = soliddraft_app::options_bar::shown_rect(&app.ctx).expect("the form's bar is drawn");
+        assert!(message.rect.top() >= bar.bottom(), "the message sits under the bar: {message:?}");
+        assert!(ribbon::window(app).contains_rect(message.full), "the whole message is in the window: {message:?}");
         assert!(
             app.state().state.note.as_ref().is_none_or(|n| n.kind != soliddraft_app::state::NoteKind::Error),
             "a refusal is no error note"
@@ -375,11 +397,12 @@ fn fillet_preview_tints_new_faces_and_names_the_radius() {
         let round = long + Vec3::new(0.0, -long.y.signum() * (5.0 - r), -(5.0 - r));
         let flat = Vec3::new(0.0, 0.0, TOP);
         let (made, kept) = (pixel(&image, app, round), pixel(&image, app, flat));
-        let accent = theme::accent();
-        case.note(format!("rounded face {made:?}, top face {kept:?}, accent {accent:?}"));
+        // The faces a preview makes carry the preview colour, which is not the frame's accent.
+        let accent = theme::edit_suite::PREVIEW_EDGE;
+        case.note(format!("rounded face {made:?}, top face {kept:?}, preview colour {accent:?}"));
         assert!(
             color_distance(made, accent) + 20.0 < color_distance(kept, accent),
-            "the rounded face reads nearer the accent than the top face: {made:?} vs {kept:?}"
+            "the rounded face reads nearer the preview colour than the top face: {made:?} vs {kept:?}"
         );
 
         // A refused radius shows no body, so the picked edges themselves are marked.
@@ -390,7 +413,10 @@ fn fillet_preview_tints_new_faces_and_names_the_radius() {
         let image = case.frame(app, "fillet-refused");
         let mark = pixel(&image, app, long);
         case.note(format!("picked edge without a preview {mark:?}"));
-        assert!(color_distance(mark, accent) < 60.0, "the picked edge is drawn in the accent: {mark:?}");
+        assert!(
+            color_distance(mark, theme::highlight()) < 60.0,
+            "the picked edge is drawn in the canvas highlight: {mark:?}"
+        );
         let hud = app.get_by_label("Fillet preview").accesskit_node().value().unwrap_or_default();
         assert_eq!(hud, "No preview · 2 edges", "the label says the preview is off");
 

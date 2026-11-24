@@ -209,7 +209,6 @@ impl CurrentView {
     }
 
     pub fn apply(self, view: &mut crate::viewport::ViewportState, camera_editable: bool) {
-        view.display = self.display;
         view.lighting = self.lighting;
         if camera_editable {
             view.camera.orthographic = !self.perspective;

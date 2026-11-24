@@ -42,6 +42,7 @@ fn aligned_offset_far_and_unsupported_holes_on_pinned_parts() {
             operation,
             end: EndCondition::Blind { depth: 5.0 },
             reverse: false,
+            options: Default::default(),
         });
         part.execute(Command::AddFeature { kind, name: None, position: None, via_assistant: false }).unwrap();
     }

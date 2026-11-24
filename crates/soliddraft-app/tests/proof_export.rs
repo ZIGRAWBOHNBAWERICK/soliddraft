@@ -161,6 +161,7 @@ fn a_first_feature_waiting_for_proof_explains_why_no_export_is_written() {
                 operation: soliddraft_model::ExtrudeOp::Boss,
                 end: soliddraft_model::EndCondition::Blind { depth: 10.0 },
                 reverse: false,
+                options: Default::default(),
             }),
             name: None,
             position: None,

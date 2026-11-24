@@ -80,14 +80,9 @@ fn sweep_commands_edit_undo_reopen_and_export_the_saved_path() {
 #[test]
 fn sweep_ribbon_opens_property_page_commits_and_edits() {
     use egui_kittest::{Harness, kittest::Queryable};
-    let instance = egui_wgpu::wgpu::Instance::default();
-    assert!(
-        !pollster::block_on(instance.enumerate_adapters(egui_wgpu::wgpu::Backends::all())).is_empty(),
-        "Sweep UI requires a GPU adapter"
-    );
-    let config = std::env::temp_dir().join(format!("soliddraft-sweep-config-{}", std::process::id()));
-    std::fs::create_dir_all(&config).unwrap();
-    soliddraft_app::file::set_config_dir(Some(config));
+    // The case holds the GPU lock and points settings at its own folder, so a test running
+    // beside this one never swaps the folder under it.
+    let _case = ribbon::case("sweep-property-page");
     let mut doc = profile();
     let sketch = doc.features[0].id;
     doc.selection = Some(Selection::Feature(sketch));
@@ -365,14 +360,9 @@ fn a_path_is_an_end_or_segments_and_refusals_leave_the_part() {
 fn property_page_builds_a_chain_and_offers_only_what_works() {
     use egui_kittest::{Harness, kittest::Queryable};
     use soliddraft_kernel_api::{PathSegment, SweepOrientation};
-    let instance = egui_wgpu::wgpu::Instance::default();
-    assert!(
-        !pollster::block_on(instance.enumerate_adapters(egui_wgpu::wgpu::Backends::all())).is_empty(),
-        "Sweep UI requires a GPU adapter"
-    );
-    let config = std::env::temp_dir().join(format!("soliddraft-chain-config-{}", std::process::id()));
-    std::fs::create_dir_all(&config).unwrap();
-    soliddraft_app::file::set_config_dir(Some(config));
+    // The case holds the GPU lock and points settings at its own folder, so a test running
+    // beside this one never swaps the folder under it.
+    let _case = ribbon::case("sweep-chain-page");
     let mut doc = profile();
     let sketch = doc.features[0].id;
     doc.selection = Some(Selection::Feature(sketch));
@@ -460,6 +450,27 @@ fn spline_controls(end_z: f64) -> Value {
         "weights":[1,1,1,1], "knots":[0,0,0,0,1,1,1,1]}])
 }
 
+fn detailed_spline_controls() -> Value {
+    let mut segments = spline_controls(3.0);
+    segments[0]["control_points"][3] = json!([0, 1, 6]);
+    segments
+}
+
+#[test]
+fn detailed_spline_sweep_certified_mesh_refuses_with_no_work() {
+    let mut doc = profile();
+    call(
+        &mut doc,
+        "sweep",
+        json!({"sketch":"Sketch1", "start":[0,0,0], "orientation":"fixed", "segments":detailed_spline_controls()}),
+    );
+    assert!(doc.proof_state().current_proved_display());
+    let body = doc.display_body().unwrap();
+    let (export, work) =
+        soliddraft_kernel_catallax::with_request_allowance(0, || doc.kernel().tessellate(body, &Default::default()));
+    assert!(export.is_err() && work.exhausted, "{export:?}; {work:?}");
+}
+
 #[test]
 fn spline_sweep_edits_reopens_and_refuses_a_return_without_changing_the_part() {
     let mut doc = profile();
@@ -508,8 +519,7 @@ fn spline_sweep_edits_reopens_and_refuses_a_return_without_changing_the_part() {
         check_spline(&doc, 48.0);
     }
     // Owner decision 13 Nov: certified-first display now accepts this former display refusal as proved.
-    let mut detailed = spline_controls(3.0);
-    detailed[0]["control_points"][3] = json!([0, 1, 6]);
+    let detailed = detailed_spline_controls();
     let (accepted, work) =
         soliddraft_kernel_catallax::with_request_allowance(soliddraft_kernel_catallax::APP_REQUEST_WORK, || {
             call(&mut doc, "edit_sweep", json!({"feature":"Sweep1", "start":[0,0,0], "segments":detailed}))
@@ -526,10 +536,12 @@ fn spline_sweep_edits_reopens_and_refuses_a_return_without_changing_the_part() {
     assert!(!mesh.positions.is_empty() && !mesh.indices.is_empty());
     assert!(doc.proof_state().current_proved_display());
     assert!(doc.display_answer(doc.features[1].id).is_none());
-    let (export, _) = soliddraft_kernel_catallax::with_request_allowance(20_000_000, || {
+    let (export, export_work) = soliddraft_kernel_catallax::with_request_allowance(20_000_000, || {
         doc.kernel().tessellate(body, &Default::default())
     });
-    assert!(export.is_err(), "a named screen result cannot replace an independent certified request");
+    let certified = export.unwrap_or_else(|error| panic!("{error}; {export_work:?}"));
+    assert!(!export_work.exhausted && (1..=20_000_000).contains(&export_work.used), "{export_work:?}");
+    assert!(!certified.unproved && certified.bounded.is_none() && !certified.indices.is_empty());
     call(&mut doc, "undo", json!({}));
     assert_eq!(doc.features[1].kind, before);
     check_spline(&doc, 48.0);
@@ -560,11 +572,6 @@ fn spline_controls_build_through_the_registry_in_edit_suite() {
 
         app.run_steps(4);
         ribbon::run_command(&mut app, "sweep");
-
-        let bar = egui::PanelState::load(&app.ctx, egui::Id::new("options_bar")).unwrap().outer_rect;
-        let (_, rect) = ribbon::buttons_in(&app, bar).into_iter().find(|(name, _)| name.starts_with("More (")).unwrap();
-        ribbon::click_at(&mut app, rect.center());
-        app.run_steps(6);
 
         ribbon::open_options(&mut app);
         app.get_by_label("Use spline path").scroll_to_me();

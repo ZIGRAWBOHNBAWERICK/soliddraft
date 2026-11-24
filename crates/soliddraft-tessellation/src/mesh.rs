@@ -37,6 +37,7 @@ pub const DISPLAY_MESH: &str = "display.bin";
 
 const MAGIC: &[u8; 4] = b"DWDM";
 const VERSION: u32 = 1;
+const STYLED_VERSION: u32 = 2;
 
 /// One face's triangles.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -47,6 +48,8 @@ pub struct MeshFace {
     pub count: u32,
     /// The part's persistent name for the face, or empty.
     pub name: String,
+    /// sRGB, metallic and roughness, packed for an assembly viewer.
+    pub style: Option<[u8; 5]>,
 }
 
 /// A part's display mesh.
@@ -116,7 +119,8 @@ impl DisplayMesh {
     pub fn encode(&self, made_by: &str) -> Vec<u8> {
         let mut w = Writer::with_capacity(32 + self.heap_bytes());
         w.raw(MAGIC);
-        w.u32(VERSION);
+        let styled = self.faces.iter().any(|face| face.style.is_some());
+        w.u32(if styled { STYLED_VERSION } else { VERSION });
         w.str(made_by);
         w.u32(self.positions.len() as u32);
         w.u32(self.indices.len() as u32);
@@ -132,6 +136,14 @@ impl DisplayMesh {
             w.u32(f.first);
             w.u32(f.count);
             w.str(&f.name);
+            if styled {
+                if let Some(style) = f.style {
+                    w.raw(&[1]);
+                    w.raw(&style);
+                } else {
+                    w.raw(&[0]);
+                }
+            }
         }
         for e in &self.edges {
             w.u32(e.len() as u32);
@@ -150,11 +162,12 @@ impl DisplayMesh {
         if r.take(4) != Some(MAGIC.as_slice()) {
             return Err(bad("it does not start with DWDM"));
         }
-        match r.u32() {
-            Some(VERSION) => {}
+        let styled = match r.u32() {
+            Some(VERSION) => false,
+            Some(STYLED_VERSION) => true,
             Some(v) => return Err(bad(&format!("version {v} needs a newer SolidDraft"))),
             None => return Err(short()),
-        }
+        };
         let made_by = r.str().ok_or_else(short)?.to_owned();
         let counts = [r.u32(), r.u32(), r.u32(), r.u32()];
         let [Some(nv), Some(ni), Some(nf), Some(ne)] = counts.map(|c| c.map(|c| c as usize)) else {
@@ -173,7 +186,17 @@ impl DisplayMesh {
         let mut faces = Vec::with_capacity(nf);
         for _ in 0..nf {
             let (first, count) = (r.u32().ok_or_else(short)?, r.u32().ok_or_else(short)?);
-            faces.push(MeshFace { first, count, name: r.str().ok_or_else(short)?.to_owned() });
+            let name = r.str().ok_or_else(short)?.to_owned();
+            let style = if styled {
+                match r.take(1).ok_or_else(short)?[0] {
+                    0 => None,
+                    1 => Some(r.take(5).ok_or_else(short)?.try_into().expect("five bytes")),
+                    _ => return Err(bad("invalid face style flag")),
+                }
+            } else {
+                None
+            };
+            faces.push(MeshFace { first, count, name, style });
         }
         let mut edges = Vec::with_capacity(ne.min(r.remaining() / 4));
         for _ in 0..ne {
@@ -239,7 +262,7 @@ impl DisplayMesh {
                     out.indices.push(new);
                 }
             }
-            out.faces.push(MeshFace { first, count: tris.len() as u32, name: f.name.clone() });
+            out.faces.push(MeshFace { first, count: tris.len() as u32, name: f.name.clone(), style: f.style });
         }
         out.edges.sort_by_cached_key(|e| e.iter().map(|p| p.map(f32::to_bits)).collect::<Vec<_>>());
         out
@@ -317,7 +340,7 @@ impl DisplayMesh {
             m.positions.extend(quad.map(|p| p.to_array()));
             m.normals.extend([n.to_array(); 4]);
             m.indices.extend([base, base + 1, base + 2, base, base + 2, base + 3]);
-            m.faces.push(MeshFace { first: m.faces.len() as u32 * 2, count: 2, name: name.to_owned() });
+            m.faces.push(MeshFace { first: m.faces.len() as u32 * 2, count: 2, name: name.to_owned(), style: None });
         }
         m
     }
@@ -359,7 +382,7 @@ pub fn display_mesh(mesh: &Mesh, mut name: impl FnMut(FaceId) -> String, edges: 
         for &t in list {
             out.indices.extend_from_slice(&mesh.indices[t * 3..t * 3 + 3]);
         }
-        out.faces.push(MeshFace { first, count: list.len() as u32, name: name(f) });
+        out.faces.push(MeshFace { first, count: list.len() as u32, name: name(f), style: None });
     }
     out
 }
@@ -414,8 +437,8 @@ mod tests {
         let d = display_mesh(&mesh, |f| format!("face {}", f.raw()), Vec::new());
         d.check().unwrap();
         assert_eq!(d.indices, vec![0, 1, 2, 0, 2, 1, 1, 3, 2]);
-        assert_eq!(d.faces[0], MeshFace { first: 0, count: 2, name: "face 7".into() });
-        assert_eq!(d.faces[1], MeshFace { first: 2, count: 1, name: "face 9".into() });
+        assert_eq!(d.faces[0], MeshFace { first: 0, count: 2, name: "face 7".into(), style: None });
+        assert_eq!(d.faces[1], MeshFace { first: 2, count: 1, name: "face 9".into(), style: None });
     }
 
     #[test]
@@ -436,7 +459,7 @@ mod tests {
             for t in m.indices[f.first as usize * 3..(f.first + f.count) as usize * 3].chunks(3).rev() {
                 shuffled.indices.extend([place(t[1]), place(t[2]), place(t[0])]);
             }
-            shuffled.faces.push(MeshFace { first, count: f.count, name: f.name.clone() });
+            shuffled.faces.push(MeshFace { first, count: f.count, name: f.name.clone(), style: f.style });
         }
         shuffled.check().unwrap();
         assert_ne!(shuffled, m);

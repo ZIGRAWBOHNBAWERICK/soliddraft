@@ -1,6 +1,7 @@
 {
   "format": "soliddraft-check-consumers/1",
   "files": {
+    "ci/install-rust-toolchain.py": "all",
     "ci/install-tool.py": "all",
     "ci/balance.py": [
       "lint",
@@ -42,7 +43,19 @@
     "ci/browser-field-preview.mjs": [
       "web"
     ],
+    "ci/browser-import-fields.js": [
+      "web"
+    ],
     "ci/browser-manufacturing-information.mjs": [
+      "web"
+    ],
+    "ci/browser-feature-panel.mjs": [
+      "web"
+    ],
+    "ci/browser-feature-regressions.js": [
+      "web"
+    ],
+    "ci/browser-hole-wizard.mjs": [
       "web"
     ],
     "ci/browser-edit-off-thread.js": [
@@ -57,10 +70,36 @@
     "ci/browser-part-check.js": [
       "web"
     ],
+    "ci/browser-wall-thickness.js": [
+      "web"
+    ],
+    "ci/fixtures/graded-wall.json": [
+      "test-linux",
+      "test-macos",
+      "web"
+    ],
     "ci/browser-preferences.mjs": [
       "web"
     ],
+    "ci/browser-document-tabs.mjs": [
+      "web"
+    ],
     "ci/browser-recovery-storage.js": [
+      "web"
+    ],
+    "ci/browser-refusal-assistant.js": [
+      "web"
+    ],
+    "ci/browser-display-states.mjs": [
+      "web"
+    ],
+    "ci/canvas-browser.mjs": [
+      "web"
+    ],
+    "ci/browser-mate-controller.js": [
+      "web"
+    ],
+    "ci/browser-drawing-annotations.mjs": [
       "web"
     ],
     "ci/cargo-cache.sh": [],
@@ -124,6 +163,9 @@
       "step-opencascade"
     ],
     "ci/fixtures/pmi/p1-bracket-pmi.step": [
+      "web"
+    ],
+    "ci/fixtures/drawing-annotations/bracket.dwprt": [
       "web"
     ],
     "ci/fixtures/universal-joint/bearing.dwasm": [
@@ -213,7 +255,8 @@
       "lint",
       "kernel",
       "test-linux",
-      "application-loop"
+      "application-loop",
+      "web"
     ],
     "ci/fixtures/import/healed-and-tolerant.step": [
       "lint",
@@ -409,6 +452,9 @@
       "lint"
     ],
     "ci/test_icons.py": [
+      "lint"
+    ],
+    "ci/test_install_rust_toolchain.py": [
       "lint"
     ],
     "ci/test_ownership.py": [

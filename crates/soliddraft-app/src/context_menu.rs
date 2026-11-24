@@ -83,7 +83,16 @@ const FEATURE: Group = Group {
 const BODY: Group = Group {
     target: Target::Body,
     label: "Body",
-    commands: &["hide_body", "isolate", "show_dimensions", "mass_properties", "export_step", "material"],
+    commands: &[
+        "hide_body",
+        "rename_body",
+        "isolate",
+        "show_dimensions",
+        "mass_properties",
+        "export_step",
+        "body_material",
+        "body_appearance",
+    ],
 };
 const VIEW: Group = Group {
     target: Target::Empty,
@@ -186,8 +195,8 @@ pub static MENUS: [(Target, MenuSpec); 8] = [
                 q(Target::Body, "show_dimensions", "Dimensions"),
                 q(Target::Body, "mass_properties", "Mass properties"),
                 q(Target::Body, "export_step", "Export STEP"),
-                q(Target::Body, "material", ""),
-                q(Target::Body, "appearance", ""),
+                q(Target::Body, "body_material", ""),
+                q(Target::Body, "body_appearance", ""),
                 q(Target::Body, "zoom_fit", "Zoom to fit"),
             ],
         },
@@ -354,7 +363,7 @@ fn caption(state: &AppState, target: Target, selection: Option<Selection>) -> St
     match target {
         Target::SketchSelection => selection_caption(state),
         Target::Empty => "Empty space".into(),
-        Target::Body => crate::document::BODY_NAME.into(),
+        Target::Body => state.doc.body_name(state.doc.active_body),
         Target::SketchLine => sketch_caption(state),
         Target::EmptySketch => state
             .sketch
@@ -376,7 +385,7 @@ fn item(
     state.doc.selection = selection_for(&state.doc, target, clicked);
     let command = commands::get(id).expect("context commands are registered");
     let label = if id == "hide_body" && !short.is_empty() {
-        if crate::tree_visibility::visible(state).body { "Hide".into() } else { "Show".into() }
+        if crate::tree_visibility::active_body_shown(&state.doc) { "Hide".into() } else { "Show".into() }
     } else if id == "export_step" && short.is_empty() {
         "Export STEP...".into()
     } else if short.is_empty() {

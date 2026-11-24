@@ -245,6 +245,11 @@ impl Document {
         self.view.set(item, shown);
     }
 
+    /// Names a body in the browser tree. An empty name restores its generated label.
+    pub fn set_body_name(&mut self, key: u32, name: &str) {
+        self.view.set_body_name(key, name);
+    }
+
     /// What the part's viewport quality gives its body's certified mesh: each level's
     /// deviation bound in millimetres and triangle count. The screen shows previews at
     /// the same controls, which claim no bound. `None` without a body.
@@ -264,7 +269,7 @@ impl Document {
     /// not apply are left out and named in the result. A body the kernel cannot attach
     /// information to yet is written without any, and every item is named as left out.
     fn export_step_with_pmi(&self, body: BodyId) -> Result<soliddraft_exchange::Export, String> {
-        let on_body = self.pmi_on_body();
+        let on_body = self.pmi_on(Some(body));
         let kernel = self.kernel.as_ref();
         match soliddraft_exchange::export_step_with_pmi(kernel, body, &self.name, &on_body.pmi) {
             Ok(mut out) => {
@@ -589,6 +594,11 @@ impl Document {
     /// The next unused body identity.
     pub fn next_body(&self) -> u32 {
         self.next_body
+    }
+
+    /// The next unused feature identity.
+    pub fn next_feature_id(&self) -> FeatureId {
+        FeatureId(self.next_id)
     }
 
     pub(crate) fn body_at(&self, key: u32, end: usize) -> Option<BodyId> {

@@ -3,7 +3,7 @@
 #[path = "support/ui.rs"]
 mod ribbon;
 
-use egui::{Key, Modifiers, Rect, pos2, vec2};
+use egui::{Key, Rect, vec2};
 use egui_kittest::kittest::Queryable;
 use ribbon::App;
 use soliddraft_app::commands::{self, KeyChord, ShortcutPreset, Shortcuts};
@@ -16,10 +16,9 @@ fn palette(app: &App) -> Rect {
     egui::PanelState::load(&app.ctx, egui::Id::new("tool_palette")).expect("the palette is laid out").outer_rect
 }
 
+/// Clicks a tool of the strip, in its group's More menu when the strip has no room for it.
 fn click(app: &mut App, label: &str) {
-    let control = ribbon::control(app, label, palette(app));
-    assert!(control.enabled, "{label} is enabled");
-    ribbon::click_at(app, control.rect.center());
+    ribbon::click_button(app, label, palette(app));
     app.run_steps(8);
 }
 
@@ -61,8 +60,9 @@ fn a_sketch_tool_asks_for_a_plane_then_arms_itself() {
     });
 }
 
+/// The feature panel, where the plane picker's choices are.
 fn plane_bar(app: &App) -> Rect {
-    egui::PanelState::load(&app.ctx, egui::Id::new("options_bar")).unwrap().outer_rect
+    ribbon::feature_panel(app)
 }
 
 #[test]
@@ -148,16 +148,16 @@ fn sketch_workspace_locks_and_smart_dimension_leads_the_palette() {
         start_sketch(app);
         let dimension = ribbon::control(app, "Smart Dimension", palette(app)).rect;
         let line = ribbon::control(app, "Line", palette(app)).rect;
-        assert!(dimension.width() > 220.0);
-        assert!(dimension.bottom() < line.top());
-        for tab in ["Solid", "Assembly", "Inspect", "View"] {
+        assert!(dimension.right() <= line.left(), "Smart Dimension leads the strip");
+        for tab in ["Solid", "Inspect", "View"] {
             let control = ribbon::tab(app, tab);
             assert!(!control.enabled, "{tab} is locked during the sketch");
             ribbon::click_at(app, control.rect.center());
             app.run_steps(8);
             assert_eq!(app.state().state.ribbon_tab, RibbonTab::Sketch);
         }
-        let painted = ribbon::painted_in(app, plane_bar(app));
+        let bar = egui::PanelState::load(&app.ctx, egui::Id::new("options_bar")).unwrap().outer_rect;
+        let painted = ribbon::painted_in(app, bar);
         assert!(painted.iter().any(|p| p.text.contains("Sketch1") && p.text.contains("Top plane")));
         assert!(app.query_all_by_label("Extrude").next().is_none());
         case.frame(app, "locked-workspace");
@@ -210,42 +210,51 @@ fn sketch_keys_follow_every_preset_and_keep_custom_bindings() {
     });
 }
 
+/// The label a tool carries for assistive technology, on the strip and in a More menu.
+fn tool_label(app: &App, command: &commands::CommandSpec) -> String {
+    if command.id == "smart_dimension" { "Smart Dimension".to_owned() } else { command.label_in(&app.state().state) }
+}
+
+/// The Sketch tab's tools as the registry lists them, without the two the strip leaves out.
+fn sketch_tools(app: &App) -> Vec<&'static commands::CommandSpec> {
+    commands::ribbon(RibbonTab::Sketch)
+        .into_iter()
+        .flat_map(|(_, items)| items)
+        .map(|(command, _)| command)
+        .filter(|command| (command.shown)(&app.state().state) && !matches!(command.id, "sketch" | "exit_sketch"))
+        .collect()
+}
+
 #[test]
-fn registry_tools_are_named_in_two_columns_and_run_from_the_palette() {
+fn registry_tools_are_named_on_the_strip_or_in_a_more_menu_and_run_from_there() {
     let case = ribbon::case("tool-palette-registry");
-    let mut app = ribbon::app_at(ribbon::blank(), vec2(1440.0, 1800.0), 1.0);
+    let mut app = ribbon::app_at(ribbon::blank(), vec2(1440.0, 900.0), 1.0);
 
     app.run_steps(8);
     case.run(&mut app, |app| {
         let start = ribbon::control(app, "Start sketch", palette(app));
-        assert!(start.rect.width() > 220.0, "the starter spans both columns");
+        assert!(start.rect.left() < palette(app).left() + 24.0, "the starter begins the strip");
         start_sketch(app);
         let bounds = palette(app);
-        let mut columns = Vec::new();
-        for (_, items) in commands::ribbon(RibbonTab::Sketch) {
-            for (command, _) in items {
-                if !(command.shown)(&app.state().state) || matches!(command.id, "sketch" | "exit_sketch") {
-                    continue;
-                }
-                let label = if command.id == "smart_dimension" {
-                    "Smart Dimension".to_owned()
-                } else {
-                    command.label_in(&app.state().state)
-                };
-                let control = ribbon::control(app, &label, bounds);
-                assert!(bounds.contains_rect(control.rect), "{label} is inside the palette");
-                assert_eq!(control.enabled, command.is_enabled(&app.state().state), "{label} follows the registry");
-                columns.push(control.rect.left().round() as i32);
-                let text = ribbon::painted_in(app, control.rect)
-                    .into_iter()
-                    .find(|p| p.text == label)
-                    .expect("the full tool name is painted");
-                assert!(control.rect.expand(1.0).contains_rect(text.full), "{label} wraps inside its tile");
+        let mut on_strip = 0;
+        for command in sketch_tools(app) {
+            let label = tool_label(app, command);
+            // On the strip, or in its group's More menu, which this opens.
+            let control = ribbon::reveal_command(app, command.id);
+            assert_eq!(control.enabled, command.is_enabled(&app.state().state), "{label} follows the registry");
+            if bounds.contains_rect(control.rect) {
+                on_strip += 1;
+            } else {
+                let text = ribbon::painted_in(app, control.rect).into_iter().find(|p| p.text == label);
+                assert!(text.is_some(), "the More menu names {label} in full");
             }
         }
-        columns.sort();
-        columns.dedup();
-        assert_eq!(columns.len(), 2, "exactly two tile columns");
+        assert!(on_strip >= 8, "the strip keeps cards from every group: {on_strip}");
+        app.key_press(Key::Escape);
+        app.run_steps(8);
+        if !app.state().state.in_sketch() {
+            start_sketch(app);
+        }
         let painted = ribbon::painted_in(app, bounds);
         for forbidden in ["Modify", "Transform"] {
             assert!(!painted.iter().any(|p| p.text == forbidden));
@@ -265,8 +274,6 @@ fn registry_tools_are_named_in_two_columns_and_run_from_the_palette() {
         app.run_steps(8);
         assert!(!app.state().state.sketch.as_ref().unwrap().relations_open);
         assert!(app.query_all_by_label("Show all relations").next().is_none());
-        app.set_size(vec2(1440.0, 900.0));
-        app.run_steps(8);
         case.frame(app, "sketch-palette");
     });
 }
@@ -274,7 +281,9 @@ fn registry_tools_are_named_in_two_columns_and_run_from_the_palette() {
 #[test]
 fn palette_tiles_pin_command_chips_by_id() {
     let case = ribbon::case("tool-palette-chips");
-    let mut app = ribbon::app(ribbon::plate());
+    // Wide enough for Shell's card beside the Create menu: a tool is dragged from the
+    // strip, not from a More menu.
+    let mut app = ribbon::app_at(ribbon::plate(), vec2(1700.0, 900.0), 1.0);
 
     app.run_steps(8);
     case.run(&mut app, |app| {
@@ -304,7 +313,7 @@ fn palette_tiles_pin_command_chips_by_id() {
 }
 
 #[test]
-fn short_windows_scroll_without_collapsing_tools_in_both_themes() {
+fn short_windows_keep_every_tool_in_reach_without_scrolling_in_both_themes() {
     let case = ribbon::case("tool-palette-short");
     for mode in [Mode::Light, Mode::Dark] {
         for scale in [1.0, 2.0] {
@@ -316,35 +325,17 @@ fn short_windows_scroll_without_collapsing_tools_in_both_themes() {
                 start_sketch(app);
                 assert!(app.state().state.viewport.rect.width() >= 300.0);
                 case.frame(app, &format!("{mode:?}-{scale}x-top"));
-                let mut seen = std::collections::BTreeSet::new();
-                for _ in 0..20 {
-                    for text in ribbon::painted_in(app, palette(app)) {
-                        if text.rect.contains_rect(text.full) {
-                            seen.insert(text.text);
-                        }
-                    }
-                    app.hover_at(pos2(125.0, 300.0));
-                    app.event(egui::Event::MouseWheel {
-                        unit: egui::MouseWheelUnit::Point,
-                        delta: vec2(0.0, -120.0),
-                        phase: egui::TouchPhase::Move,
-                        modifiers: Modifiers::NONE,
-                    });
-                    app.run_steps(12);
+                let window = ribbon::window(app);
+                for command in sketch_tools(app) {
+                    let label = tool_label(app, command);
+                    // A card on the strip, or a row of its group's More menu.
+                    let control = ribbon::reveal_command(app, command.id);
+                    assert!(
+                        window.intersects(control.rect),
+                        "{label} can be reached at {scale}x in {mode:?}: {:?}",
+                        control.rect
+                    );
                 }
-                for (_, items) in commands::ribbon(RibbonTab::Sketch) {
-                    for (command, _) in items {
-                        if (command.shown)(&app.state().state) && !matches!(command.id, "sketch" | "exit_sketch") {
-                            let label = if command.id == "smart_dimension" {
-                                "Smart Dimension".to_owned()
-                            } else {
-                                command.label_in(&app.state().state)
-                            };
-                            assert!(seen.contains(&label), "{label} can be read at {scale}x in {mode:?}");
-                        }
-                    }
-                }
-                assert!(!egui::Popup::is_any_open(&app.ctx));
                 case.frame(app, &format!("{mode:?}-{scale}x"));
             });
         }

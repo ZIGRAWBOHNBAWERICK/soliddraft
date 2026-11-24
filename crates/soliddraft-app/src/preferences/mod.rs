@@ -256,6 +256,14 @@ pub struct Preferences {
     pub autosave: AutosavePolicy,
     /// The autosave settings were changed and not saved yet.
     autosave_pending: bool,
+    /// Snapshot captured when the dialog opened, so Cancel restores cleanly.
+    initial_draft: NavigationSettings,
+    initial_display: ReferenceDisplay,
+    initial_grid: GridStyle,
+    initial_shortcuts: Shortcuts,
+    initial_autosave: AutosavePolicy,
+    /// Set by Cancel or OK so the hosting window closes.
+    pub close_requested: bool,
     pub message: Option<Message>,
     /// The row waiting for a new gesture from the practice area.
     pub capture: Option<&'static str>,
@@ -270,6 +278,8 @@ impl Preferences {
     /// The window on Navigation > Mouse with `settings`, `display` and `grid`.
     pub fn new(settings: &NavigationSettings, display: ReferenceDisplay, grid: GridStyle) -> Self {
         let mac = cfg!(target_os = "macos");
+        let shortcuts = crate::settings::shortcuts();
+        let autosave = AutosavePolicy::default();
         Self {
             page: MOUSE,
             search: String::new(),
@@ -284,12 +294,18 @@ impl Preferences {
             spline_curves_unavailable: false,
             grid,
             grid_pending: false,
-            shortcuts: crate::settings::shortcuts(),
+            shortcuts: shortcuts.clone(),
             shortcut_search: String::new(),
             shortcut_capture: None,
             shortcut_conflict: None,
-            autosave: AutosavePolicy::default(),
+            autosave,
             autosave_pending: false,
+            initial_draft: settings.clone(),
+            initial_display: display,
+            initial_grid: grid,
+            initial_shortcuts: shortcuts,
+            initial_autosave: autosave,
+            close_requested: false,
             message: None,
             capture: None,
             practice_label: "Try a gesture here".to_owned(),
@@ -302,6 +318,7 @@ impl Preferences {
     /// Sets the command shortcuts the window starts with.
     pub fn with_shortcuts(mut self, shortcuts: &Shortcuts) -> Self {
         self.shortcuts = shortcuts.clone();
+        self.initial_shortcuts = shortcuts.clone();
         self
     }
 
@@ -313,7 +330,82 @@ impl Preferences {
     /// The window showing `policy` as the autosave settings.
     pub fn with_autosave(mut self, policy: AutosavePolicy) -> Self {
         self.autosave = policy;
+        self.initial_autosave = policy;
         self
+    }
+
+    /// Restores the currently open Preferences page to its defaults.
+    pub fn restore_page_defaults(&mut self) {
+        match self.page {
+            MOUSE => self.reset_preset(),
+            ORBIT_ZOOM => self.reset_orbit_and_zoom(),
+            VIEW_KEYS => self.reset_view_keys(),
+            GRID_AND_PLANES => {
+                self.edit_display(|d| *d = ReferenceDisplay::default());
+                self.edit_grid(GridStyle::default(), true);
+                self.message = Some(Message { text: "Grid and planes restored to defaults.".into(), error: false });
+            }
+            SHORTCUTS => {
+                let preset = self.shortcuts.preset;
+                self.reset_all_shortcuts(preset);
+            }
+            AUTOSAVE => {
+                self.edit_autosave(AutosavePolicy::default(), true);
+                self.message = Some(Message { text: "Autosave restored to defaults.".into(), error: false });
+            }
+            _ => {}
+        }
+    }
+
+    /// Flushes any unsettled edits and refreshes the Cancel baseline.
+    pub fn apply_now(&mut self) {
+        if self.grid_pending {
+            self.changes.push(Change::Grid { style: self.grid, keep: true });
+            self.grid_pending = false;
+        }
+        if self.autosave_pending {
+            self.changes.push(Change::Autosave(self.autosave));
+            self.autosave_pending = false;
+        }
+        self.initial_draft = self.draft.clone();
+        self.initial_display = self.display;
+        self.initial_grid = self.grid;
+        self.initial_shortcuts = self.shortcuts.clone();
+        self.initial_autosave = self.autosave;
+        self.message = Some(Message { text: "Preferences applied.".into(), error: false });
+    }
+
+    /// Reverts any edits made since the dialog opened (or last Apply) and requests close.
+    pub fn cancel_and_close(&mut self) {
+        if self.draft != self.initial_draft {
+            self.draft = self.initial_draft.clone();
+            self.changes.push(Change::Navigation(self.draft.clone()));
+        }
+        if self.display != self.initial_display {
+            self.display = self.initial_display;
+            self.changes.push(Change::Display(self.display));
+        }
+        if self.grid != self.initial_grid {
+            self.grid = self.initial_grid;
+            self.grid_pending = false;
+            self.changes.push(Change::Grid { style: self.grid, keep: true });
+        }
+        if self.shortcuts != self.initial_shortcuts {
+            self.shortcuts = self.initial_shortcuts.clone();
+            self.changes.push(Change::Shortcuts(self.shortcuts.clone()));
+        }
+        if self.autosave != self.initial_autosave {
+            self.autosave = self.initial_autosave;
+            self.autosave_pending = false;
+            self.changes.push(Change::Autosave(self.autosave));
+        }
+        self.close_requested = true;
+    }
+
+    /// Commits pending edits and requests close.
+    pub fn confirm_and_close(&mut self) {
+        self.apply_now();
+        self.close_requested = true;
     }
 
     /// Shows `policy` as the autosave settings, and hands it to the app to save once
@@ -489,7 +581,7 @@ impl Preferences {
 
     /// Starts waiting for a key press to assign to command `id`.
     pub fn start_shortcut_capture(&mut self, id: &'static str) {
-        let Some(c) = commands::get(id).filter(|c| c.in_app() && c.is_working()) else { return };
+        let Some(c) = commands::get(id).filter(|c| c.can_rebind()) else { return };
         self.shortcut_capture = Some(c.id);
         self.shortcut_conflict = None;
         self.message = Some(Message {
@@ -508,7 +600,7 @@ impl Preferences {
     /// already holds `chord`, records the conflict and offers to swap instead of
     /// overwriting it.
     pub fn assign_shortcut(&mut self, id: &str, chord: KeyChord) -> Result<(), ShortcutConflict> {
-        let Some(c) = commands::get(id).filter(|c| c.in_app() && c.is_working()) else { return Ok(()) };
+        let Some(c) = commands::get(id).filter(|c| c.can_rebind()) else { return Ok(()) };
         self.shortcut_capture = None;
         match self.shortcuts.assign(c.id, chord) {
             Ok(()) => {
@@ -527,7 +619,10 @@ impl Preferences {
     /// Swaps the pending conflicting shortcut between the target command and the command
     /// that held it.
     pub fn swap_shortcut(&mut self) -> bool {
-        let Some(conflict) = self.shortcut_conflict.take() else { return false };
+        if !self.shortcut_conflict.as_ref().is_some_and(ShortcutConflict::can_swap) {
+            return false;
+        }
+        let conflict = self.shortcut_conflict.take().expect("a swappable shortcut conflict");
         self.shortcut_capture = None;
         self.shortcuts.swap(&conflict);
         let target = commands::get(conflict.command).map_or(conflict.command.to_owned(), |c| c.shortcut_row_label());
@@ -556,7 +651,7 @@ impl Preferences {
 
     /// Clears command `id`'s shortcut.
     pub fn clear_shortcut(&mut self, id: &str) {
-        let Some(c) = commands::get(id).filter(|c| c.in_app() && c.is_working()) else { return };
+        let Some(c) = commands::get(id).filter(|c| c.can_rebind()) else { return };
         self.shortcut_capture = None;
         self.shortcut_conflict = None;
         self.shortcuts.clear(c.id);
@@ -565,7 +660,7 @@ impl Preferences {
 
     /// Resets command `id`'s shortcut back to the active preset's default.
     pub fn reset_shortcut(&mut self, id: &str) {
-        let Some(c) = commands::get(id).filter(|c| c.in_app() && c.is_working()) else { return };
+        let Some(c) = commands::get(id).filter(|c| c.can_rebind()) else { return };
         self.shortcut_capture = None;
         self.shortcut_conflict = None;
         if let Some(conflict) = self.shortcuts.reset_conflict(c.id) {
@@ -606,15 +701,25 @@ pub fn window(ctx: &egui::Context, prefs: &mut Option<Preferences>, state: &mut 
     p.graphics_device = state.graphics_device.clone();
     p.current_view = crate::graphics::CurrentView::of(state.active_viewport());
     p.view_preset = state.active_viewport().preset;
-    p.display = state.viewport.references;
+    p.current_view.display = state.display_mode();
     p.camera_editable = state.assembly.is_active() || state.sketch.is_none();
     p.spline_curves_unavailable = !state.assembly.is_active()
         && state.doc.faces.iter().any(|face| !crate::graphics::supports_curved_surfaces(face.surface));
-    let mut open = true;
+    if !p.is_capturing_key()
+        && p.capture.is_none()
+        && !egui::Popup::is_any_open(ctx)
+        && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
+    {
+        p.cancel_and_close();
+    }
+    // The D1 header inside the window is its title and holds its close button.
     egui::Window::new("Preferences")
-        .open(&mut open)
-        .default_size([980.0, 640.0])
-        .min_size([700.0, 420.0])
+        .title_bar(false)
+        .pivot(egui::Align2::CENTER_CENTER)
+        .default_pos(ctx.content_rect().center())
+        // One size for every page: a window that fits its content changes width from
+        // page to page and moves under the pointer.
+        .fixed_size((ctx.content_rect().size() - egui::vec2(48.0, 48.0)).min(egui::vec2(960.0, 620.0)))
         .collapsible(false)
         .show(ctx, |ui| p.ui(ui));
     for change in p.take_changes() {
@@ -657,7 +762,7 @@ pub fn window(ctx: &egui::Context, prefs: &mut Option<Preferences>, state: &mut 
             }
         }
     }
-    if !open {
+    if p.close_requested {
         *prefs = None;
     }
 }

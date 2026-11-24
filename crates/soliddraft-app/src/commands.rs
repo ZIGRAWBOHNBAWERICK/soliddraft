@@ -647,6 +647,11 @@ impl CommandSpec {
         self.action.is_some() && self.catallax_wait().is_none()
     }
 
+    /// Whether the keyboard shortcut can be changed in Preferences.
+    pub fn can_rebind(&self) -> bool {
+        self.id != "shortcut_menu" && self.in_app() && self.is_working()
+    }
+
     /// The scope an assigned shortcut uses for this command.
     pub fn default_scope(&self) -> Scope {
         if let Some(first) = self.keys.first() {
@@ -1063,8 +1068,18 @@ pub struct ShortcutConflict {
 }
 
 impl ShortcutConflict {
+    /// Whether every command in the conflict allows its shortcut to change.
+    pub fn can_swap(&self) -> bool {
+        std::iter::once(self.command)
+            .chain(self.with.iter().copied())
+            .all(|id| get(id).is_some_and(CommandSpec::can_rebind))
+    }
+
     /// A sentence naming the conflicting command and scope, and offering to swap.
     pub fn message(&self) -> String {
+        if !self.can_swap() {
+            return "S is reserved for the shortcut menu.".to_owned();
+        }
         let owners: Vec<String> = self
             .with
             .iter()
@@ -1101,7 +1116,7 @@ impl Shortcuts {
         let mut s = Self::for_preset(preset);
         if let Some(overrides) = obj.get("overrides").and_then(Value::as_object) {
             for (id, entry) in overrides {
-                let Some(c) = get(id).filter(|c| c.in_app() && c.is_working()) else { continue };
+                let Some(c) = get(id).filter(|c| c.can_rebind()) else { continue };
                 match entry {
                     Value::Null => s.set_raw(c.id, None),
                     Value::String(text) if text.trim().is_empty() => s.set_raw(c.id, None),
@@ -1148,6 +1163,9 @@ impl Shortcuts {
         if !c.is_working() {
             return Vec::new();
         }
+        if !c.can_rebind() {
+            return self.preset.keys_of(id);
+        }
         match self.overrides.get(id) {
             Some(None) => Vec::new(),
             Some(Some(chord)) => vec![chord.to_shortcut(c.default_scope(), c.id)],
@@ -1189,7 +1207,7 @@ impl Shortcuts {
     /// Assigns `chord` to `id`, or returns the conflicting commands without changing
     /// anything.
     pub fn assign(&mut self, id: &str, chord: KeyChord) -> Result<(), ShortcutConflict> {
-        let Some(target) = get(id).filter(|c| c.in_app() && c.is_working()) else { return Ok(()) };
+        let Some(target) = get(id).filter(|c| c.can_rebind()) else { return Ok(()) };
         let conflicts = self.conflicts_for(target.id, chord);
         if !conflicts.is_empty() {
             return Err(ShortcutConflict {
@@ -1207,6 +1225,9 @@ impl Shortcuts {
     /// conflicting command(s) `conflict.command`'s previous chord (or clearing them when
     /// `conflict.command` had none).
     pub fn swap(&mut self, conflict: &ShortcutConflict) {
+        if !conflict.can_swap() {
+            return;
+        }
         let previous = self.primary_chord(conflict.command);
         for &other in &conflict.with {
             self.set_raw(other, None);
@@ -1229,7 +1250,7 @@ impl Shortcuts {
 
     /// Conflicts with every preset alias, checked in that alias's actual workspace.
     pub fn reset_conflict(&self, id: &str) -> Option<ShortcutConflict> {
-        let target = get(id).filter(|c| c.in_app() && c.is_working())?;
+        let target = get(id).filter(|c| c.can_rebind())?;
         let defaults = self.preset.keys_of(target.id);
         let mut with = Vec::new();
         for key in &defaults {
@@ -1250,7 +1271,7 @@ impl Shortcuts {
     /// Puts `id` back to `self.preset`'s default, clearing any other override that had
     /// taken that key.
     pub fn reset(&mut self, id: &str) {
-        let Some(target) = get(id).filter(|c| c.in_app() && c.is_working()) else { return };
+        let Some(target) = get(id).filter(|c| c.can_rebind()) else { return };
         let defaults = self.preset.keys_of(target.id);
         for d in &defaults {
             let clashing: Vec<&'static str> = self.conflicts_for_key(target.id, *d).into_iter().map(|c| c.id).collect();
@@ -1280,7 +1301,7 @@ impl Shortcuts {
     }
 
     fn set_raw(&mut self, id: &str, value: Option<KeyChord>) {
-        let Some(c) = get(id).filter(|c| c.in_app() && c.is_working()) else { return };
+        let Some(c) = get(id).filter(|c| c.can_rebind()) else { return };
         let next = match value {
             Some(chord) => vec![chord.to_shortcut(c.default_scope(), c.id)],
             None => Vec::new(),
@@ -1389,7 +1410,7 @@ fn drawing_tool_is(s: &AppState, f: fn(&DrawingTool) -> bool) -> bool {
 }
 
 /// The active document's undo and redo labels.
-fn undo_labels(s: &AppState) -> (Option<String>, Option<String>) {
+pub(crate) fn undo_labels(s: &AppState) -> (Option<String>, Option<String>) {
     if let Some(a) = s.assembly.session.as_ref().filter(|_| s.assembly.is_active()) {
         return (a.doc.undo_label().map(str::to_owned), a.doc.redo_label().map(str::to_owned));
     }
@@ -1430,6 +1451,10 @@ fn after_field(s: &AppState) -> Option<String> {
 /// No terminal field stands in the way of adding a CAD feature.
 fn field_open(s: &AppState) -> bool {
     after_field(s).is_none()
+}
+
+fn field_source_supported(s: &AppState) -> bool {
+    s.doc.display_body().is_none_or(|body| s.doc.kernel().supports_field_source(body))
 }
 
 fn can_export(s: &AppState) -> bool {
@@ -1552,7 +1577,6 @@ fn registry() -> Vec<CommandSpec> {
         cmd("sketch", "Sketch", Icon::Cad("sketch"), "Sketch on a plane or a planar face")
             .on(Solid, "Sketch", Large)
             .on(Sketch, "Sketch", Large)
-            .key(Scope::Model, none, Key::S)
             .run(|s| if s.in_sketch() { AppAction::ExitSketch } else { AppAction::StartSketch })
             .when(|s| s.in_sketch() || field_open(s))
             .lit(AppState::in_sketch)
@@ -1687,7 +1711,6 @@ fn registry() -> Vec<CommandSpec> {
             .app_only(SKETCHER),
         cmd("sketch_slot", "Slot", Icon::Cad("slot_sketch"), "Straight slot: two centres, then the width")
             .on(Sketch, "Draw", Small)
-            .key(Scope::Sketch, none, Key::S)
             .run(|_| AppAction::SketchTool(Tool::Slot))
             .when(can_sketch_tool)
             .lit(|s| tool_is(s, Tool::Slot))
@@ -1966,7 +1989,8 @@ fn registry() -> Vec<CommandSpec> {
         cmd("lattice", "Lattice", Icon::Cad("lattice"), "Make a terminal lattice")
             .on(Solid, "Modify", Small)
             .run(|_| AppAction::StartLattice)
-            .when(|s| has_body(s) && field_open(s))
+            .shown(field_source_supported)
+            .when(|s| has_body(s) && field_open(s) && field_source_supported(s))
             .lit(|s| editing(s, |p| matches!(p, EditorParams::Lattice(_))))
             .hint(|s| after_field(s).or_else(|| (!has_body(s)).then(|| "Lattice needs a body".into())))
             .agents(Agents::Verb, "Density is the constant beam radius. The preview is unproved; export certifies the mesh.", tools::lattice_params)
@@ -1977,7 +2001,8 @@ fn registry() -> Vec<CommandSpec> {
         cmd("gyroid", "Gyroid", Icon::Cad("lattice"), "Make a terminal network gyroid")
             .on(Solid, "Modify", Small)
             .run(|_| AppAction::StartGyroid)
-            .when(|s| has_body(s) && field_open(s))
+            .shown(field_source_supported)
+            .when(|s| has_body(s) && field_open(s) && field_source_supported(s))
             .lit(|s| editing(s, |p| matches!(p, EditorParams::Gyroid(_))))
             .hint(|s| after_field(s).or_else(|| (!has_body(s)).then(|| "Gyroid needs a body".into())))
             .agents(Agents::Verb, "The level is dimensionless, not a thickness, and may be zero or negative. The preview is unproved; export certifies the mesh.", tools::gyroid_params)
@@ -2215,6 +2240,12 @@ fn registry() -> Vec<CommandSpec> {
                     && !s.in_sketch()
             })
             .app_only("Part material"),
+        cmd("body_material", "Body material", Icon::Material, "Assign a solid body its own material")
+            .in_menu()
+            .outside_sketch()
+            .run(|_| AppAction::ShowBodyMaterial)
+            .when(|s| s.doc.display_body().is_some() && s.editor.is_none() && !s.in_sketch())
+            .app_only("Body material"),
         cmd("check", "Check", Icon::Cad("check"), "Build the part independently with the distance-field model")
             .run(|_| AppAction::CheckPart)
             .on(Inspect, "Check", Large)
@@ -2540,13 +2571,17 @@ fn registry() -> Vec<CommandSpec> {
             .hint(|s| s.selected_sketch().is_none().then(|| "This feature has no source sketch".into()))
             .outside_sketch().app_only(EDITOR),
         cmd("hide_body", "Hide body", Icon::Eye, "Show or hide the solid body")
-            .run(|s| AppAction::SetBodyVisible(!crate::tree_visibility::visible(s).body))
+            .run(|s| AppAction::SetBodyVisible(!crate::tree_visibility::active_body_shown(&s.doc)))
             .when(|s| s.doc.display_body().is_some())
-            .label_now(|s| Some(if crate::tree_visibility::visible(s).body { "Hide body" } else { "Show body" }.into()))
+            .label_now(|s| Some(if crate::tree_visibility::body_shown(&s.doc) { "Hide body" } else { "Show body" }.into()))
             .outside_sketch().app_only(LOOK),
-        cmd("show_all_bodies", "Show all bodies", Icon::Eye, "Show the part's solid body")
-            .run(|_| AppAction::SetBodyVisible(true))
-            .when(|s| s.doc.display_body().is_some())
+        cmd("rename_body", "Rename body", Icon::Text, "Set the selected body's name in the tree")
+            .run(|_| AppAction::RenameBody)
+            .when(|s| s.doc.selection == Some(Selection::Body) && s.doc.display_body().is_some())
+            .outside_sketch().app_only(PANEL),
+        cmd("show_all_bodies", "Show all bodies", Icon::Eye, "Show every solid body in the part")
+            .run(|_| AppAction::ShowAllBodies)
+            .when(|s| !s.doc.display_bodies().is_empty())
             .outside_sketch().app_only(LOOK),
         cmd("show_dimensions", "Show all dimensions", Icon::SmartDim, "Select the body to show the dimensions that build it")
             .run(|_| AppAction::Select(Some(Selection::Body)))
@@ -2596,12 +2631,18 @@ fn registry() -> Vec<CommandSpec> {
         cmd("select_loop", "Select loop", Icon::Views, COMING_SOON).in_menu().outside_sketch(),
         cmd("convert_entities", "Use in a sketch", Icon::Sketch, COMING_SOON).in_menu().outside_sketch(),
         cmd("isolate", "Isolate", Icon::Fit, COMING_SOON).in_menu().outside_sketch(),
-        cmd("appearance", "Appearance", Icon::Display, "Colour the part or the selected face, or make it transparent")
+        cmd("appearance", "Appearance", Icon::Display, "Set colour and transparency for the part, body or face")
             .in_menu()
             .outside_sketch()
             .run(|_| AppAction::ShowAppearance)
             .when(|s| s.doc.display_body().is_some() && s.editor.is_none() && !s.in_sketch())
             .app_only("It opens the appearance panel; agents change an appearance with document_command and SetAppearance"),
+        cmd("body_appearance", "Body appearance", Icon::Display, "Set colour and transparency for the body")
+            .in_menu()
+            .outside_sketch()
+            .run(|_| AppAction::ShowBodyAppearance)
+            .when(|s| s.doc.display_body().is_some() && s.editor.is_none() && !s.in_sketch())
+            .app_only("Body appearance"),
         // Features in the tree.
         cmd("edit_feature", "Edit feature", Icon::Props, "Edit the selected feature or sketch")
             .label_now(|s| selected_feature_is(s, |f| f.is_sketch()).then(|| "Edit sketch".into()))
@@ -2802,6 +2843,12 @@ fn registry() -> Vec<CommandSpec> {
             .key(Scope::App, ctrl_shift, Key::P)
             .run(|_| AppAction::TogglePalette)
             .app_only(WINDOW),
+        cmd("shortcut_menu", "Shortcut menu", Icon::Search, "Open the current workspace's shortcuts at the pointer")
+            .both()
+            .key(Scope::App, none, Key::S)
+            .when(|s| s.start.is_none() && s.shortcut_menu_editor.is_none())
+            .run(|_| AppAction::ToggleShortcutMenu)
+            .app_only(WINDOW),
         cmd("shortcuts", "Keyboard shortcuts", Icon::Config, "List the keyboard shortcuts")
             .key(Scope::Model, none, Key::Questionmark)
             .run(|_| AppAction::ShowShortcuts)
@@ -2829,6 +2876,8 @@ fn registry() -> Vec<CommandSpec> {
     .chain(crate::interference::registry::commands())
     .chain(crate::pmi::registry::commands())
     .chain(crate::subassembly::registry::commands())
+    .chain(crate::configurations::registry::commands())
+    .chain(crate::assembly_files::registry::commands())
     .collect()
 }
 
@@ -2868,19 +2917,25 @@ fn drawing_registry() -> Vec<CommandSpec> {
             .when(|s| sheet_view(s).is_some())
             .lit(|s| drawing_tool_is(s, |t| matches!(t, DrawingTool::PlaceView(PlaceKind::Projected { .. }))))
             .hint(|s| sheet_view(s).is_none().then(|| "Select a view first, then fold a new view off it".into()))
-            .app_only(CANVAS),
+            .agents(
+                Agents::Mcp,
+                "Folds a new view off a view on one of eight sides, at its scale: in line with it on a square side, a \
+                 pictorial view at a free place on a diagonal one. A part drawing needs the drawing's part open; an \
+                 assembly drawing draws every part from its kernel.",
+                app::projected_params,
+            )
+            .undo(Undo::Step),
         drawing_tool!(
             "drawing_section", "Section", Icon::Section,
             "Draw a cutting line on a view, pick the direction, place the section",
             DrawingTool::Section { replace: None } => DrawingTool::Section { replace: None }
         )
         .on(Views, "Derived", Large)
-        .key(Scope::Drawing, none, Key::S)
 .agents(
             Agents::Mcp,
             "A cutting line through a model point across the view, horizontal or vertical on the sheet. The section \
              is placed in line with the view on the side the sheet's projection angle puts it, with the drawing's \
-             next letter. The open part must be the drawing's.",
+             next letter. A part drawing needs the drawing's part open; an assembly drawing cuts every part with its kernel.",
             app::section_params,
         )
         .undo(Undo::Step),
@@ -2889,7 +2944,14 @@ fn drawing_registry() -> Vec<CommandSpec> {
             DrawingTool::Detail => DrawingTool::Detail
         )
         .on(Views, "Derived", Large)
-            .app_only(CANVAS),
+        .agents(
+            Agents::Mcp,
+            "Magnifies the region of a view inside a circle round a model point, with the drawing's next letter, \
+             placed at a free place near the view. A part drawing needs the drawing's part open; an assembly drawing \
+             draws every part from its kernel.",
+            app::detail_params,
+        )
+        .undo(Undo::Step),
         drawing_tool!(
             "drawing_auxiliary", "Auxiliary", Icon::Plane, "Pick an edge; the view unfolds square to it",
             DrawingTool::Auxiliary => DrawingTool::Auxiliary
@@ -3081,25 +3143,45 @@ fn drawing_registry() -> Vec<CommandSpec> {
         .on(Annotate, "Notes", Large)
         .key(Scope::Drawing, none, Key::H)
             .app_only(CANVAS),
-        CommandSpec::new("drawing_balloon", "Balloon", Icon::Circle, "Number an assembly component")
-            .drawing()
-            .on(Annotate, "Notes", Small)
-            .hint(|_| Some("Arrives with assemblies".into())),
+        CommandSpec::new(
+            "drawing_balloon",
+            "Balloon",
+            Icon::Circle,
+            "Number every part of the assembly the drawing shows that has no balloon yet",
+        )
+        .drawing()
+        .on(Annotate, "Notes", Small)
+        .when(crate::assembly_files::drawing::drawing_is_of_assembly)
+        .hint(|s| {
+            (!crate::assembly_files::drawing::drawing_is_of_assembly(s))
+                .then(|| "Needs a drawing of an assembly: Assembly tab, Make drawing".into())
+        })
+        .run(|_| AppAction::Drawing(DrawingAction::Rebuild))
+        .app_only("It rebuilds the drawing of the open assembly; assembly_make_drawing and drawing_rebuild do it for agents"),
         drawing_tool!(
             "drawing_revision_symbol", "Revision symbol", Icon::Rollback, "The revision in a triangle, at a changed place",
             DrawingTool::RevisionSymbol => DrawingTool::RevisionSymbol
         )
         .on(Annotate, "Notes", Small)
             .app_only(CANVAS),
-        cmd("drawing_chamfer_dimension", "Chamfer", Icon::Chamfer, "Dimension a chamfer").on(Annotate, "Notes", Small),
+        drawing_tool!(
+            "drawing_chamfer_dimension", "Chamfer", Icon::Chamfer, "Dimension a chamfer in profile",
+            DrawingTool::Chamfer => DrawingTool::Chamfer
+        )
+        .on(Annotate, "Notes", Small)
+        .app_only(CANVAS),
         drawing_tool!(
             "drawing_centre_mark", "Centre mark", Icon::Point, "Mark the centre of a circle seen face-on",
             DrawingTool::CentreMark => DrawingTool::CentreMark
         )
         .on(Annotate, "Centre", Large)
             .app_only(CANVAS),
-        cmd("drawing_centreline", "Centreline", Icon::Axis, "Draw a centreline between two edges")
-            .on(Annotate, "Centre", Large),
+        drawing_tool!(
+            "drawing_centreline", "Centreline", Icon::Axis, "Draw a centreline between two parallel edges",
+            DrawingTool::Centreline => DrawingTool::Centreline
+        )
+        .on(Annotate, "Centre", Large)
+        .app_only(CANVAS),
         cmd(
             "drawing_auto_centre_marks",
             "Auto centre marks",
@@ -3127,7 +3209,12 @@ fn drawing_registry() -> Vec<CommandSpec> {
         )
         .on(Annotate, "Symbols", Small)
             .app_only(CANVAS),
-        cmd("drawing_weld", "Weld", Icon::Construction, "A weld symbol").on(Annotate, "Symbols", Small),
+        drawing_tool!(
+            "drawing_weld", "Weld", Icon::Construction, "An arrow-side fillet weld symbol",
+            DrawingTool::Weld => DrawingTool::Weld
+        )
+        .on(Annotate, "Symbols", Small)
+        .app_only(CANVAS),
         cmd(
             "drawing_revision_table",
             "Revision table",
@@ -3138,11 +3225,22 @@ fn drawing_registry() -> Vec<CommandSpec> {
         .run(|_| AppAction::Drawing(DrawingAction::Select(Some(DrawingSel::Revisions))))
         .lit(|s| session(s).is_some_and(|d| d.selection == Some(DrawingSel::Revisions)))
             .app_only(PANEL),
-        cmd("drawing_hole_table", "Hole table", Icon::Hole, "Tabulate the holes of a view").on(Annotate, "Tables", Small),
-        CommandSpec::new("drawing_bom", "BOM", Icon::Mass, "A bill of materials")
+        drawing_tool!(
+            "drawing_hole_table", "Hole table", Icon::Hole, "Tabulate the holes of a view",
+            DrawingTool::HoleTable => DrawingTool::HoleTable
+        )
+        .on(Annotate, "Tables", Small)
+        .app_only(CANVAS),
+        CommandSpec::new("drawing_bom", "BOM", Icon::Mass, "The bill of materials of the assembly the drawing shows")
             .drawing()
             .on(Annotate, "Tables", Small)
-            .hint(|_| Some("Arrives with assemblies".into())),
+            .when(crate::assembly_files::drawing::drawing_is_of_assembly)
+            .hint(|s| {
+                (!crate::assembly_files::drawing::drawing_is_of_assembly(s))
+                    .then(|| "Needs a drawing of an assembly: Assembly tab, Make drawing".into())
+            })
+            .run(|_| AppAction::Drawing(DrawingAction::Rebuild))
+            .app_only("It rebuilds the drawing's BOM from the open assembly; drawing_rebuild does it for agents"),
         // Sheet.
         cmd("drawing_sheet_properties", "Sheet properties", Icon::Props, "Name, size, scale, projection angle and title block")
             .on(Sheet, "Sheet", Large)
@@ -3559,21 +3657,21 @@ mod tests {
         assert_eq!(s.shortcut_text("revolve").as_deref(), Some("V"));
         assert!(s.is_modified("revolve"));
 
-        let conflict = s.assign("extrude", KeyChord::plain(Key::S)).unwrap_err();
+        let conflict = s.assign("extrude", KeyChord::plain(Key::C)).unwrap_err();
         assert_eq!(conflict.command, "extrude");
-        assert_eq!(conflict.with, ["sketch"]);
+        assert_eq!(conflict.with, ["chamfer"]);
         assert_eq!(s.shortcut_text("extrude").as_deref(), Some("E"), "refused until swapped");
         s.swap(&conflict);
-        assert_eq!(s.shortcut_text("extrude").as_deref(), Some("S"));
-        assert_eq!(s.shortcut_text("sketch").as_deref(), Some("E"));
+        assert_eq!(s.shortcut_text("extrude").as_deref(), Some("C"));
+        assert_eq!(s.shortcut_text("chamfer").as_deref(), Some("E"));
 
         s.clear("extrude");
         assert_eq!(s.shortcut_text("extrude"), None);
         s.reset("extrude");
         assert_eq!(s.shortcut_text("extrude").as_deref(), Some("E"));
-        assert_eq!(s.shortcut_text("sketch"), None, "the command that held E is cleared so E is not bound twice");
-        s.reset("sketch");
-        assert_eq!(s.shortcut_text("sketch").as_deref(), Some("S"));
+        assert_eq!(s.shortcut_text("chamfer"), None, "the command that held E is cleared so E is not bound twice");
+        s.reset("chamfer");
+        assert_eq!(s.shortcut_text("chamfer").as_deref(), Some("C"));
         s.reset_all(ShortcutPreset::Solidworks);
         assert!(s.overrides.is_empty());
         assert_eq!(s.preset, ShortcutPreset::Solidworks);
@@ -3582,7 +3680,7 @@ mod tests {
     #[test]
     fn swapped_and_reassigned_keys_survive_settings_reload() {
         let mut shortcuts = Shortcuts::default();
-        let conflict = shortcuts.assign("extrude", KeyChord::plain(Key::S)).unwrap_err();
+        let conflict = shortcuts.assign("extrude", KeyChord::plain(Key::F)).unwrap_err();
         shortcuts.swap(&conflict);
         shortcuts.clear("chamfer");
         shortcuts.assign("revolve", KeyChord::plain(Key::C)).unwrap();

@@ -46,6 +46,9 @@ pub struct Material {
     /// The group a library lists it under: "Aluminium alloys".
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub category: String,
+    /// A description of the material and its supplied form.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub description: String,
     /// Where the values come from, precise enough to check them: a handbook and table.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
@@ -82,6 +85,9 @@ pub struct Material {
     /// Specific heat capacity, J/(kg·K).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub specific_heat_j_kgk: Option<f64>,
+    /// Damping ratio as a fraction of critical damping.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub damping_ratio: Option<f64>,
     /// The appearance a part made of this material gets when it has none of its own.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_appearance: Option<AppearanceId>,
@@ -114,6 +120,7 @@ impl Material {
             Property::ThermalExpansion => self.thermal_expansion_per_k,
             Property::Conductivity => self.conductivity_w_mk,
             Property::SpecificHeat => self.specific_heat_j_kgk,
+            Property::DampingRatio => self.damping_ratio,
         }
     }
 
@@ -130,6 +137,7 @@ impl Material {
             Property::ThermalExpansion => &mut self.thermal_expansion_per_k,
             Property::Conductivity => &mut self.conductivity_w_mk,
             Property::SpecificHeat => &mut self.specific_heat_j_kgk,
+            Property::DampingRatio => &mut self.damping_ratio,
         }
     }
 
@@ -202,6 +210,11 @@ impl Material {
             && !v.is_finite()
         {
             out.push(Problem::new("thermal_expansion_per_k", format!("is {v}; it must be a number")));
+        }
+        if let Some(v) = self.damping_ratio
+            && !(v.is_finite() && v >= 0.0)
+        {
+            out.push(Problem::new("damping_ratio", format!("is {v}; it must be a nonnegative number")));
         }
         for (property, p) in &self.provenance {
             if self.value(*property).is_none() {

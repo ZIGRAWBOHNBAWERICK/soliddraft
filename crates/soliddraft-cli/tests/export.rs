@@ -65,6 +65,7 @@ fn obj_from_recipe_and_saved_part_records_the_mesh_and_export_tolerance() {
             operation: ExtrudeOp::Boss,
             end: EndCondition::Blind { depth: 30.0 },
             reverse: false,
+            options: Default::default(),
         }),
         name: None,
         position: None,

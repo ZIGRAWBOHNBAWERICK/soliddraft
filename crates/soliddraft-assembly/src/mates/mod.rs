@@ -22,6 +22,8 @@
 
 pub(crate) mod bodies;
 pub(crate) mod command;
+pub use command::hinge_angle_at;
+pub(crate) mod controller;
 pub(crate) mod drag;
 mod mechanical;
 pub use mechanical::Mechanism;
@@ -39,7 +41,8 @@ use soliddraft_model::{DatumPlane, EdgeRef, Expression, FaceRef, FeatureId, Vert
 use crate::path::{ComponentId, OccurrencePath};
 use crate::placement::Placement;
 
-pub use command::{MateEdit, PlaneMeasurement, ProofIdentity, SlotInput, WidthInput};
+pub use command::{MateEdit, PathOptions, PlaneMeasurement, ProofIdentity, SlotInput, WidthInput};
+pub use controller::{ControllerPosition, MateController, controller_values};
 pub use motion::BoundedProof;
 pub use reference::{EndpointSelector, FaceSelector, GeneratorChoice, PlaneProof, SupportProof};
 pub use solver::{FreeMotion, SolverState, SolverStatus};
@@ -211,6 +214,76 @@ pub enum StoredSupport {
         /// The round ends' radius.
         radius: f64,
     },
+    /// An arc slot: two round walls about one axis closed by two round ends. The slot runs
+    /// anticlockwise about `depth` from the first end to the second.
+    ArcSlot {
+        /// The direction the axes run, each component -1, 0 or 1.
+        depth: [i8; 3],
+        /// A point on the walls' common axis.
+        centre: [f64; 3],
+        /// The radius of the slot's centre line, halfway between its walls.
+        radius: f64,
+        /// A point on each round end's axis.
+        ends: [[f64; 3]; 2],
+        /// The round ends' radius.
+        end_radius: f64,
+    },
+    /// The outline of a planar face, as a Path or a Cam reads it.
+    Outline {
+        /// The plane's outward normal, each component -1, 0 or 1.
+        normal: [i8; 3],
+        /// The plane's offset along the normal.
+        offset: f64,
+        /// The pieces round the outline.
+        pieces: Vec<StoredPiece>,
+    },
+}
+
+/// A direction of a Path's moving part that the path steers: a plane's normal or an axis.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Steer {
+    /// The plane or axis, on the point's part.
+    pub direction: FaceEndpoint,
+    /// Whether it runs with the path's direction, or against it.
+    pub alignment: Alignment,
+}
+
+/// One piece of a stored outline: a line or an arc from `from` to the next piece's `from`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StoredPiece {
+    /// Where it starts.
+    pub from: [f64; 3],
+    /// An arc's centre; absent for a line.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub centre: Option<[f64; 3]>,
+    /// An arc's radius.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub radius: Option<f64>,
+    /// An arc turns anticlockwise about the outline's normal.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub anticlockwise: bool,
+    /// A spline's definition, running from `from` to the next piece's `from`; absent for a
+    /// line or an arc.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spline: Option<StoredSpline>,
+}
+
+/// A spline piece of an outline: a non-uniform rational B-spline in the part's frame, its
+/// control points in the outline's plane.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StoredSpline {
+    /// The polynomial degree, at least 1.
+    pub degree: u32,
+    /// The full knot vector, `points.len() + degree + 1` entries.
+    pub knots: Vec<f64>,
+    /// The control points.
+    pub points: Vec<[f64; 3]>,
+    /// The weights, one per point; empty when every weight is 1.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub weights: Vec<f64>,
 }
 
 /// One side of a mate between planes: a face or a reference plane of one placed part.
@@ -329,11 +402,12 @@ pub enum WidthConstraint {
     },
 }
 
-/// Where a Slot mate puts the pin along the slot.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+/// Where a Slot mate puts the pin along the slot, or a Path its point along the path.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "mode", rename_all = "snake_case", deny_unknown_fields)]
 pub enum SlotConstraint {
     /// Anywhere between the round ends' centres.
+    #[default]
     Free,
     /// Halfway between them.
     Center,
@@ -353,6 +427,13 @@ pub enum SlotConstraint {
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         flipped: bool,
     },
+}
+
+impl SlotConstraint {
+    /// Whether it leaves the position free.
+    pub fn is_free(&self) -> bool {
+        *self == SlotConstraint::Free
+    }
 }
 
 /// A part occurrence a mate reads, whatever it names on the part.
@@ -709,6 +790,46 @@ pub enum Mate {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         lock_rotation: Option<StoredTurn>,
     },
+    /// A point of one part kept on a path of another: the outline of a planar face, its
+    /// straight edges, circular arcs and splines in turn. The point slides along the path,
+    /// or sits where `constraint` puts it, and its part turns freely about it unless
+    /// `follow` and `up` steer it.
+    Path {
+        /// The mate's id.
+        id: MateId,
+        /// A label; commands find a mate by it.
+        name: String,
+        /// The planar face whose outline is the path.
+        path: FaceEndpoint,
+        /// The point: a vertex or a sphere's centre.
+        point: FaceEndpoint,
+        /// Where along the path the point sits, measured from the outline's first corner the
+        /// way the outline runs, or the other way with `flipped`. Free when absent.
+        #[serde(default, skip_serializing_if = "SlotConstraint::is_free")]
+        constraint: SlotConstraint,
+        /// Pitch and yaw: a direction of the point's part kept along the path's tangent.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        follow: Option<Steer>,
+        /// Roll: a direction of the point's part kept along the path's plane normal.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        up: Option<Steer>,
+    },
+    /// A follower of one part kept touching a cam of another: the cam's profile is the
+    /// outline of its flat end face, swept along the face's normal. A round follower's axis
+    /// stays parallel to that normal and its surface touches the profile; a point follower
+    /// touches it with the point. The follower stays on the side of the profile it was on.
+    Cam {
+        /// The mate's id.
+        id: MateId,
+        /// A label; commands find a mate by it.
+        name: String,
+        /// The cam's flat end face, whose outline is its profile.
+        cam: FaceEndpoint,
+        /// The follower: a cylinder, a sphere or a vertex.
+        follower: FaceEndpoint,
+        /// The follower rides outside the profile rather than inside it.
+        outside: bool,
+    },
 }
 
 impl Mate {
@@ -732,7 +853,9 @@ impl Mate {
             | Mate::LinearCoupler { id, .. }
             | Mate::LimitDistance { id, .. }
             | Mate::ProfileCenter { id, .. }
-            | Mate::Slot { id, .. } => *id,
+            | Mate::Slot { id, .. }
+            | Mate::Path { id, .. }
+            | Mate::Cam { id, .. } => *id,
         }
     }
 
@@ -756,7 +879,9 @@ impl Mate {
             | Mate::LinearCoupler { name, .. }
             | Mate::LimitDistance { name, .. }
             | Mate::ProfileCenter { name, .. }
-            | Mate::Slot { name, .. } => name,
+            | Mate::Slot { name, .. }
+            | Mate::Path { name, .. }
+            | Mate::Cam { name, .. } => name,
         }
     }
 
@@ -781,6 +906,8 @@ impl Mate {
             Mate::LimitDistance { .. } => "limit_distance",
             Mate::ProfileCenter { .. } => "profile_center",
             Mate::Slot { .. } => "slot",
+            Mate::Path { .. } => "path",
+            Mate::Cam { .. } => "cam",
         }
     }
 
@@ -799,7 +926,8 @@ impl Mate {
             Mate::Distance { distance, .. }
             | Mate::Width { constraint: WidthConstraint::Dimension { distance, .. }, .. }
             | Mate::ProfileCenter { distance, .. }
-            | Mate::Slot { constraint: SlotConstraint::Distance { distance, .. }, .. } => Some(distance),
+            | Mate::Slot { constraint: SlotConstraint::Distance { distance, .. }, .. }
+            | Mate::Path { constraint: SlotConstraint::Distance { distance, .. }, .. } => Some(distance),
             _ => None,
         }
     }
@@ -810,7 +938,8 @@ impl Mate {
             Mate::Distance { distance, .. }
             | Mate::Width { constraint: WidthConstraint::Dimension { distance, .. }, .. }
             | Mate::ProfileCenter { distance, .. }
-            | Mate::Slot { constraint: SlotConstraint::Distance { distance, .. }, .. } => Some(distance),
+            | Mate::Slot { constraint: SlotConstraint::Distance { distance, .. }, .. }
+            | Mate::Path { constraint: SlotConstraint::Distance { distance, .. }, .. } => Some(distance),
             _ => None,
         }
     }
@@ -831,6 +960,10 @@ impl Mate {
             Mate::Angle { a, b, reference, .. } | Mate::LimitAngle { a, b, reference, .. } => vec![a, b, reference],
             Mate::Symmetric { a, b, plane, .. } => vec![a, b, plane],
             Mate::Slot { slot, pin, .. } => vec![slot, pin],
+            Mate::Path { path, point, follow, up, .. } => {
+                [path, point].into_iter().chain(follow.iter().chain(up).map(|s| &s.direction)).collect()
+            }
+            Mate::Cam { cam, follower, .. } => vec![cam, follower],
             Mate::Width { groove, tab, .. } => groove.iter().chain(tab).collect(),
             Mate::Hinge { axes, planes, .. } => axes.iter().chain(planes).collect(),
             Mate::Origin { .. } | Mate::Lock { .. } => Vec::new(),
@@ -853,6 +986,10 @@ impl Mate {
             Mate::Angle { a, b, reference, .. } | Mate::LimitAngle { a, b, reference, .. } => vec![a, b, reference],
             Mate::Symmetric { a, b, plane, .. } => vec![a, b, plane],
             Mate::Slot { slot, pin, .. } => vec![slot, pin],
+            Mate::Path { path, point, follow, up, .. } => {
+                [path, point].into_iter().chain(follow.iter_mut().chain(up).map(|s| &mut s.direction)).collect()
+            }
+            Mate::Cam { cam, follower, .. } => vec![cam, follower],
             Mate::Width { groove, tab, .. } => groove.iter_mut().chain(tab).collect(),
             Mate::Hinge { axes, planes, .. } => axes.iter_mut().chain(planes).collect(),
             Mate::Origin { .. } | Mate::Lock { .. } => Vec::new(),
@@ -896,7 +1033,9 @@ impl Mate {
             | Mate::Symmetric { .. }
             | Mate::LinearCoupler { .. }
             | Mate::ProfileCenter { .. }
-            | Mate::Slot { .. } => None,
+            | Mate::Slot { .. }
+            | Mate::Path { .. }
+            | Mate::Cam { .. } => None,
         }
     }
 
@@ -919,7 +1058,9 @@ impl Mate {
             | Mate::Origin { .. }
             | Mate::Perpendicular { .. }
             | Mate::Lock { .. }
-            | Mate::LinearCoupler { .. } => None,
+            | Mate::LinearCoupler { .. }
+            | Mate::Path { .. }
+            | Mate::Cam { .. } => None,
         }
     }
 
@@ -959,6 +1100,11 @@ impl Mate {
             }
             Mate::Symmetric { a, b, plane, .. } => vec![&mut a.path, &mut b.path, &mut plane.path],
             Mate::Slot { slot, pin, .. } => vec![&mut slot.path, &mut pin.path],
+            Mate::Path { path, point, follow, up, .. } => [&mut path.path, &mut point.path]
+                .into_iter()
+                .chain(follow.iter_mut().chain(up).map(|s| &mut s.direction.path))
+                .collect(),
+            Mate::Cam { cam, follower, .. } => vec![&mut cam.path, &mut follower.path],
             Mate::LinearCoupler { a, b, reference_a, reference_b, .. } => [&mut a.path, &mut b.path]
                 .into_iter()
                 .chain(reference_a.iter_mut().map(|r| &mut r.path))

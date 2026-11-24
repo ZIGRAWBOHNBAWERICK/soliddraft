@@ -55,10 +55,20 @@ pub enum AppAction {
     StartFillet,
     StartChamfer,
     ShowMaterial,
+    ShowBodyMaterial,
+    ShowMaterialLibrary,
+    ShowBodyAppearance,
+    ShowPartAppearance,
     /// Shows the selected face's colour and transparency, or the part's when no face
     /// is selected.
     ShowAppearance,
     StartHole,
+    /// Opens the live inline position sketch inside an active Hole Wizard editor.
+    OpenHolePositionSketch,
+    /// Exits the live inline position sketch and syncs its points back to the Hole Wizard.
+    CloseHolePositionSketch,
+    /// Pushes panel-side point/pattern edits into an open inline position sketch session.
+    SyncHolePositionSketch,
     StartPattern {
         circular: bool,
     },
@@ -68,6 +78,7 @@ pub enum AppAction {
     StartShell,
     NewBody,
     SelectBody(u32),
+    RenameBody,
     StartCombine,
     StartOffset,
     StartThicken,
@@ -124,6 +135,7 @@ pub enum AppAction {
     SetPreset(Preset),
     SetScene(crate::viewport::scenes::Scene),
     SetBodyVisible(bool),
+    ShowAllBodies,
     SetReferenceDisplay(crate::settings::ReferenceDisplay),
     /// Switches the interface between light and dark, and saves the choice.
     SetTheme(crate::theme::Mode),
@@ -132,6 +144,7 @@ pub enum AppAction {
     GiveFeedback,
     CancelEditor,
     CommitEditor,
+    ApplySuggestedFilletRadius(f64),
     /// The open Extrude's or Cut's depth, from its arrow on the preview.
     EditorDepth(f64),
     /// Opens the open form's Depth for typing.
@@ -198,6 +211,7 @@ pub enum AppAction {
     ShowShortcuts,
     /// Opens the command palette, or closes it when it is open.
     TogglePalette,
+    ToggleShortcutMenu,
     ShowAbout,
     /// Opens the Recover documents window.
     ShowRecovery,
@@ -212,6 +226,7 @@ pub enum AppAction {
     Drawing(crate::drawing::DrawingAction),
     /// Everything the assembly tab does.
     Assembly(crate::assembly::AssemblyAction),
+    OpenComponentPart(soliddraft_assembly::OccurrencePath),
     /// A step of a drag of a feature's dimension.
     DragDimension(DragStep),
     /// Opens a dimension the selected body shows for editing.
@@ -295,6 +310,12 @@ pub struct FeatureEditor {
     refused: Option<(EditorParams, String)>,
     /// The form's Depth takes the keyboard on the next frame.
     pub focus_depth: bool,
+    /// A revolve's Merge result: join the body it grows from. Off starts a new body. An
+    /// extrusion keeps its own in its parameters.
+    pub merge: bool,
+    /// The viewport shows the feature's preview. The panel's eye turns it off to see
+    /// the part as it is.
+    pub show_preview: bool,
 }
 
 /// A feature built from one sketch. Starting one with no sketch selected asks for it.
@@ -338,7 +359,7 @@ pub enum EditorParams {
     Cut(CutParams),
     Fillet(FilletParams),
     Chamfer(ChamferParams),
-    Hole(HoleParams),
+    Hole(Box<HoleParams>),
     Pattern(soliddraft_model::PatternFeature),
     Mirror(soliddraft_model::MirrorFeature),
     ReferencePlane(soliddraft_model::SketchPlane),
@@ -377,6 +398,8 @@ impl FeatureEditor {
             last: None,
             refused: None,
             focus_depth: false,
+            merge: true,
+            show_preview: true,
         }
     }
 
@@ -388,6 +411,16 @@ impl FeatureEditor {
     /// Why OK was refused for the values in the form now.
     pub fn refusal(&self) -> Option<&str> {
         self.refused.as_ref().filter(|(params, _)| *params == self.params).map(|(_, why)| why.as_str())
+    }
+
+    pub(crate) fn suggested_fillet_radius(&self) -> Option<f64> {
+        let EditorParams::Fillet(params) = &self.params else { return None };
+        if self.feedback.size.is_some() || self.feedback.pick.is_some() {
+            return None;
+        }
+        let reason =
+            self.refusal().or_else(|| self.error.as_deref().filter(|_| self.last.as_ref() == Some(&self.params)))?;
+        crate::geometry_message::suggested_fillet_radius(reason, params.radius)
     }
 
     pub fn title(&self) -> String {
@@ -451,6 +484,10 @@ impl FeatureEditor {
             Some(i) => doc.body_before(i),
             None => doc.display_body(),
         };
+        if self.marked.1 != before && self.last.is_some() && matches!(self.params, EditorParams::Fillet(_)) {
+            self.last = None;
+            self.refused = None;
+        }
         if self.marked.0 != self.edges() || self.marked.1 != before {
             self.marked = (self.edges().to_vec(), before);
             self.marks = doc.edge_paths(&self.marked.0, before);
@@ -485,7 +522,9 @@ impl FeatureEditor {
         let arrow = |plain: Result<crate::document::Preview, String>| plain.ok().and_then(|p| p.guides.arrow);
         let result = match &self.params {
             // With its Draft option an extrusion previews as built, tapered.
-            EditorParams::Extrude(p) if p.draft.is_some() => doc
+            // With From, Direction 2, a thin wall or chosen contours an extrusion previews
+            // as built, so the picture is the kernel's own answer.
+            EditorParams::Extrude(p) if p.draft.is_some() || !p.choices.is_default() => doc
                 .preview_built(
                     match target {
                         Some(id) => Command::EditExtrude { id, params: p.clone() },
@@ -497,7 +536,7 @@ impl FeatureEditor {
                     built.guides.arrow = arrow(doc.preview_extrude(p));
                     built
                 }),
-            EditorParams::Cut(p) if p.draft.is_some() => doc
+            EditorParams::Cut(p) if p.draft.is_some() || !p.choices.is_default() => doc
                 .preview_built(
                     match target {
                         Some(id) => Command::EditCut { id, params: p.clone() },
@@ -523,7 +562,7 @@ impl FeatureEditor {
             EditorParams::Draft(d) if !d.faces.is_empty() => built(FeatureKind::Draft(d.to_model())),
             EditorParams::Pattern(p) => built(FeatureKind::Pattern(p.clone())),
             EditorParams::Mirror(m) => built(FeatureKind::Mirror(m.clone())),
-            EditorParams::Hole(h) if h.face.is_some() => h.to_model().and_then(|h| built(FeatureKind::Hole(h))),
+            EditorParams::Hole(h) if h.face.is_some() => h.to_preview_model().and_then(|h| built(FeatureKind::Hole(h))),
             // These preview once applied. A hole without its face shows a ghost at the
             // pointer instead.
             EditorParams::Lattice(_)
@@ -1238,6 +1277,63 @@ pub struct Rename {
     pub focus: bool,
 }
 
+/// Display length unit for the current file (Zoo bottom-bar model).
+/// Internal model and kernel coordinates always stay in millimetres.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DisplayUnit {
+    #[default]
+    Mm,
+    Cm,
+    M,
+    In,
+    Ft,
+    Yd,
+}
+
+impl DisplayUnit {
+    pub const ALL: [Self; 6] = [Self::In, Self::Ft, Self::Yd, Self::Mm, Self::Cm, Self::M];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Mm => "Millimeters",
+            Self::Cm => "Centimeters",
+            Self::M => "Meters",
+            Self::In => "Inches",
+            Self::Ft => "Feet",
+            Self::Yd => "Yards",
+        }
+    }
+
+    pub fn short(self) -> &'static str {
+        match self {
+            Self::Mm => "mm",
+            Self::Cm => "cm",
+            Self::M => "m",
+            Self::In => "in",
+            Self::Ft => "ft",
+            Self::Yd => "yd",
+        }
+    }
+
+    /// Millimetres per 1 unit.
+    pub fn mm_per_unit(self) -> f64 {
+        match self {
+            Self::Mm => 1.0,
+            Self::Cm => 10.0,
+            Self::M => 1000.0,
+            Self::In => 25.4,
+            Self::Ft => 304.8,
+            Self::Yd => 914.4,
+        }
+    }
+
+    /// Converts a length in millimetres to this unit.
+    pub fn from_mm(self, mm: f64) -> f64 {
+        mm / self.mm_per_unit()
+    }
+}
+
 pub struct AppState {
     pub doc: Document,
     pub measure: crate::measure::panel::State,
@@ -1251,7 +1347,11 @@ pub struct AppState {
     pub graphics_device: crate::graphics::GraphicsDevice,
     pub pick_filter: crate::viewport::PickFilter,
     pub form_bar: crate::form_bar::State,
+    /// Which sections of the feature property panel are folded or open.
+    pub feature_panel: crate::feature_panel::State,
     pub options_details: bool,
+    pub(crate) material_dialog: Option<crate::material_dialog::Dialog>,
+    pub(crate) appearance_editor: Option<(soliddraft_document::DocumentId, soliddraft_model::AppearanceTarget)>,
     /// The selection's properties are drawing inside the options sheet, whose own X
     /// closes it: their Clear selection X would be a second close button.
     pub properties_in_sheet: bool,
@@ -1264,10 +1364,22 @@ pub struct AppState {
     pub origin_open: bool,
     pub hover_info: Option<EntityInfo>,
     pub hover_point: Option<Vec3>,
+    /// Where the viewport click behind the selection waiting to be applied met the
+    /// model, with that selection: a tool that places at the click, as Hole does, takes
+    /// the point of the same click that picked the face.
+    pub click_point: Option<(Selection, Vec3)>,
     pub show_about: bool,
     pub show_shortcuts: bool,
+    pub show_design_properties: bool,
+    pub show_customize_bar: bool,
+    /// The length unit the active part's readouts use, chosen in the bottom bar. Each
+    /// part tab keeps its own; it is not saved in the file.
+    pub display_unit: DisplayUnit,
     /// The open command palette.
     pub palette: Option<crate::palette::Palette>,
+    pub(crate) body_rename: Option<crate::tree::BodyRename>,
+    pub(crate) shortcut_menu: crate::shortcut_menu::Preferences,
+    pub(crate) shortcut_menu_editor: Option<crate::shortcut_menu::Customize>,
     /// The open Provider dialog.
     pub import_dialog: Option<crate::import::Preview>,
     /// Import STEP asked the browser for a file: the next uploaded STEP file is reviewed
@@ -1321,6 +1433,8 @@ pub struct AppState {
     pub revisions: Arc<dyn soliddraft_document::RevisionStore>,
     /// The commands run lately and the pinned ones, for the command search.
     pub commands: crate::commands::History,
+    /// The create commands pinned to the tool strip from the Create menu.
+    pub create_pins: crate::create_menu::Pins,
     /// The navigation preset, the wheel, the view keys and the camera settings.
     pub navigation: crate::navigation::NavigationSettings,
     /// The shortcut preset and per-command overrides.
@@ -1332,21 +1446,31 @@ pub struct AppState {
     pub start: Option<crate::start_page::StartPage>,
     /// New drawing asked for a part file: once it opens, the drawing setup starts.
     pub drawing_after_open: bool,
+    /// The + button asked for an existing file: a part that opens next takes a new tab
+    /// and leaves the active part open beside it.
+    pub open_in_new_tab: bool,
+    /// A document tab the user is closing with unsaved changes, while Save, Discard or
+    /// Cancel is asked.
+    pub closing: Option<crate::top_bar::Closing>,
     actions: Vec<AppAction>,
 }
 
 impl AppState {
     pub fn tree_shown(&self) -> bool {
-        if self.assembly.is_active() {
+        let doc_shown = if self.assembly.is_active() {
             self.layout.suite.assembly
         } else if self.drawing.is_active() || self.drawing.new.is_some() {
             self.layout.suite.drawing
         } else {
             self.layout.suite.part
-        }
+        };
+        doc_shown && self.layout.panes.any_open()
     }
 
     pub fn show_tree(&mut self, shown: bool) {
+        if shown && !self.layout.panes.any_open() {
+            self.layout.panes = crate::panels::SidePanes::default();
+        }
         if self.assembly.is_active() {
             self.layout.suite.assembly = shown;
         } else if self.drawing.is_active() || self.drawing.new.is_some() {
@@ -1356,22 +1480,51 @@ impl AppState {
         }
     }
 
-    /// Whether the side area is shown with `pane` in it.
+    /// Whether `pane` is currently open in the stacked side column.
     pub fn pane_shown(&self, pane: crate::panels::Pane) -> bool {
-        self.tree_shown() && self.layout.pane == pane
+        // An assembly has no part parameters: its side column never shows Values.
+        self.tree_shown()
+            && self.layout.panes.is_open(pane)
+            && !(self.assembly.is_active() && pane == crate::panels::Pane::Values)
     }
 
-    /// Shows the side area with `pane` in it.
+    /// Opens `pane` in the stacked side column (leaving other open panes stacked beside it).
     pub fn show_pane(&mut self, pane: crate::panels::Pane) {
+        // An assembly has no part parameters: asking for Values there shows its tree.
+        let pane = if self.assembly.is_active() && pane == crate::panels::Pane::Values {
+            crate::panels::Pane::Tree
+        } else {
+            pane
+        };
+        self.layout.panes.set(pane, true);
         self.layout.pane = pane;
         self.show_tree(true);
     }
 
-    /// What clicking the strip icon of `pane` does: it hides the side area when that pane
-    /// already shows there, and shows the pane otherwise.
-    pub fn toggle_pane(&mut self, pane: crate::panels::Pane) {
-        if self.pane_shown(pane) {
+    /// Closes a single `pane` in the stacked side column; if none remain open, clears the column.
+    pub fn close_pane(&mut self, pane: crate::panels::Pane) {
+        self.layout.panes.set(pane, false);
+        if !self.layout.panes.any_open() {
             self.show_tree(false);
+        }
+    }
+
+    /// Closes every open pane, clearing the side column completely.
+    pub fn clear_panes(&mut self) {
+        self.layout.panes.clear();
+        self.show_tree(false);
+    }
+
+    /// Toggles `pane` on or off in the stacked side column. When the column is hidden
+    /// (e.g. after F9), clicking a rail button opens just that pane.
+    pub fn toggle_pane(&mut self, pane: crate::panels::Pane) {
+        if !self.tree_shown() {
+            self.layout.panes.clear();
+            self.layout.panes.set(pane, true);
+            self.layout.pane = pane;
+            self.show_tree(true);
+        } else if self.layout.panes.is_open(pane) {
+            self.close_pane(pane);
         } else {
             self.show_pane(pane);
         }
@@ -1384,7 +1537,7 @@ impl AppState {
         } else if self.assembly.is_active() {
             crate::assembly::Workspace::ALL.into_iter().map(Into::into).collect()
         } else {
-            RibbonTab::ALL.into_iter().map(Into::into).collect()
+            RibbonTab::ALL.into_iter().filter(|tab| *tab != RibbonTab::Assembly).map(Into::into).collect()
         }
     }
 
@@ -1462,7 +1615,10 @@ impl AppState {
             graphics_device: Default::default(),
             pick_filter: Default::default(),
             form_bar: Default::default(),
+            feature_panel: Default::default(),
             options_details: false,
+            material_dialog: None,
+            appearance_editor: None,
             properties_in_sheet: false,
             editor: None,
             sketch: None,
@@ -1473,9 +1629,16 @@ impl AppState {
             origin_open: false,
             hover_info: None,
             hover_point: None,
+            click_point: None,
             show_about: false,
             show_shortcuts: false,
+            show_design_properties: false,
+            show_customize_bar: false,
+            display_unit: DisplayUnit::default(),
             palette: None,
+            body_rename: None,
+            shortcut_menu: crate::settings::shortcut_menu(),
+            shortcut_menu_editor: None,
             import_dialog: None,
             step_upload: false,
             import_report: false,
@@ -1503,11 +1666,14 @@ impl AppState {
             command_line: crate::command_line::CommandLine::load(),
             revisions: Arc::new(soliddraft_document::CacheOnlyStore::new()),
             commands: crate::settings::command_history(),
+            create_pins: crate::settings::create_pins(),
             navigation: crate::settings::navigation(crate::settings::install_kind()),
             shortcuts: crate::settings::shortcuts(),
             recovery: None,
             start: None,
             drawing_after_open: false,
+            open_in_new_tab: false,
+            closing: None,
             actions: Vec::new(),
         }
     }
@@ -1535,7 +1701,41 @@ impl AppState {
         crate::settings::save_reference_display(&references).inspect_err(|why| self.not_kept("Viewport settings", why))
     }
 
+    pub fn display_mode(&self) -> DisplayMode {
+        if let Some(session) = self.assembly.session.as_ref().filter(|_| self.assembly.is_active()) {
+            session.doc.assembly().viewport_state().map_or(session.viewport.display, |s| s.mode)
+        } else {
+            self.doc.display_state().map_or(self.viewport.display, |s| s.mode)
+        }
+    }
+
+    pub fn set_display_mode(&mut self, d: DisplayMode) -> Result<(), String> {
+        let assembly_active = self.assembly.is_active();
+        if let Some(s) = self.assembly.session.as_mut().filter(|_| assembly_active) {
+            if let Some(mut display) = s.doc.assembly().viewport_state().cloned() {
+                display.mode = d;
+                let mut states = s.doc.assembly().viewport_states.clone();
+                states.put(display).and_then(|_| s.doc.change_viewport_states(states).map_err(|e| e.to_string()))
+            } else {
+                s.viewport.display = d;
+                Ok(())
+            }
+        } else if let Some(mut display) = self.doc.display_state().cloned() {
+            display.mode = d;
+            let mut states = self.doc.display_states().clone();
+            states.put(display).and_then(|_| self.doc.change_display_states(states))
+        } else {
+            self.active_viewport_mut().display = d;
+            Ok(())
+        }
+    }
+
     pub fn set_current_view(&mut self, view: crate::graphics::CurrentView) -> Result<(), crate::settings::NotKept> {
+        if view.display != self.display_mode()
+            && let Err(error) = self.set_display_mode(view.display)
+        {
+            self.note(error, NoteKind::Error);
+        }
         let camera_editable = self.assembly.is_active() || self.sketch.is_none();
         view.apply(self.active_viewport_mut(), camera_editable);
         if self.viewport.references != view.references {
@@ -1580,6 +1780,21 @@ impl AppState {
     /// Says that `what` applies but was not kept, and for how long it lasts.
     fn not_kept(&mut self, what: &str, why: &crate::settings::NotKept) {
         self.note(format!("{what} not saved: {why}. {}", crate::settings::store::lasts()), NoteKind::Error);
+    }
+
+    /// Ends the part's editor and sketch session before another part takes the active
+    /// tab, and puts back the rollback and the projection they set for their view: the
+    /// part waits in its tab as the user left it.
+    pub fn end_document_views(&mut self) {
+        let sketch = self.sketch.take();
+        let editor = self.editor.take();
+        if let Some(session) = &sketch {
+            self.viewport.camera.orthographic = session.was_orthographic;
+        }
+        if sketch.is_some() || editor.is_some() {
+            self.doc.end_rollback_view();
+            self.ribbon_tab = RibbonTab::Solid;
+        }
     }
 
     /// Hands the revision store the part as it is now, after it was opened or saved.
@@ -1681,10 +1896,13 @@ impl AppState {
 
     /// Ghost geometry the viewport shows this frame: added or removed material.
     pub fn ghost(&self) -> Option<(Arc<DisplayMesh>, bool)> {
-        if let Some(e) = &self.editor
-            && let Some(t) = &e.preview.tool
-        {
-            return Some((t.clone(), e.preview.removes));
+        if let Some(e) = &self.editor {
+            if !e.show_preview {
+                return None;
+            }
+            if let Some(t) = &e.preview.tool {
+                return Some((t.clone(), e.preview.removes));
+            }
         }
         let (_, p) = self.chat.preview.as_ref()?;
         p.tool.clone().map(|t| (t, p.removes))
@@ -1699,6 +1917,7 @@ impl AppState {
             return d.mesh();
         }
         match &self.editor {
+            Some(e) if !e.show_preview => None,
             Some(e) => e.preview.result.clone(),
             None => self.chat.preview.as_ref().and_then(|(_, p)| p.result.clone()),
         }

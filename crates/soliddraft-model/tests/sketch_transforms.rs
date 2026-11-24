@@ -57,6 +57,7 @@ fn moved_copied_rotated_and_scaled_arcs_extrude_and_reopen() {
                 operation: ExtrudeOp::Boss,
                 end: EndCondition::Blind { depth: 2.0 },
                 reverse: false,
+                options: Default::default(),
             }),
             name: None,
             position: None,

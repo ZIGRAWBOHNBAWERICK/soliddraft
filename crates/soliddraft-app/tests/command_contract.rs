@@ -557,6 +557,44 @@ fn before_retained_polygons(id: &str, current: &mut Value) {
     }
 }
 
+/// Wall thickness keeps numeric inputs and adds one clamped linear grade.
+fn before_wall_thickness(id: &str, current: &mut Value) {
+    const WALL_VERBS: [&str; 4] = ["shell", "edit_shell", "thicken", "edit_thicken"];
+
+    fn restore(schema: &mut Value) {
+        let thickness = schema.pointer_mut("/properties/thickness").expect("wall thickness input");
+        let number = json!({"type":"number"});
+        assert_eq!(
+            *thickness,
+            json!({"anyOf":[number, {
+                "type":"object", "additionalProperties":false, "required":["linear"],
+                "properties":{"linear":{
+                    "type":"object", "additionalProperties":false,
+                    "properties":{
+                        "axis":{"type":"string","enum":["x","y","z"]},
+                        "from":number, "to":number, "start":number, "end":number
+                    },
+                    "required":["axis","from","to","start","end"]
+                }}
+            }]}),
+        );
+        *thickness = number;
+    }
+
+    if id == "propose" {
+        let variants = current
+            .pointer_mut("/tool/input/properties/commands/items/anyOf")
+            .and_then(Value::as_array_mut)
+            .expect("proposal variants");
+        for op in WALL_VERBS {
+            let schema = variants.iter_mut().find(|v| v["properties"]["op"]["const"] == op).expect(op);
+            restore(schema);
+        }
+    } else if WALL_VERBS.contains(&id) {
+        restore(&mut current["tool"]["input"]);
+    }
+}
+
 fn before_distance_verbs(id: &str, current: &mut Value) {
     if id != "propose" {
         return;
@@ -765,6 +803,24 @@ fn before_print_accuracy(id: &str, current: &mut Value) {
     assert_eq!(added, json!({"type": "number"}), "print accuracy is one optional number");
 }
 
+/// Projected and Detail gained agent tools: the canvas tools are as they were.
+fn before_agent_derived_views(id: &str, current: &mut Value) {
+    let params: &[&str] = match id {
+        "drawing_projected" => &["direction", "view"],
+        "drawing_detail" => &["center", "factor", "radius", "view"],
+        _ => return,
+    };
+    assert_eq!((current["agents"].as_str(), current["undo"].as_str()), (Some("mcp"), Some("step")), "{id}");
+    assert_eq!(current["tool"]["name"], id);
+    let mut keys: Vec<&str> =
+        current["tool"]["input"]["properties"].as_object().expect("tool inputs").keys().map(String::as_str).collect();
+    keys.sort_unstable();
+    assert_eq!(keys, params, "{id}'s inputs");
+    current["agents"] = json!("app");
+    current["undo"] = json!("none");
+    current["tool"] = Value::Null;
+}
+
 fn baseline() -> Value {
     serde_json::from_str(include_str!("fixtures/ribbon_registry/baseline.json")).expect("the frozen contract")
 }
@@ -911,11 +967,13 @@ fn command_ids_shortcuts_agent_schemas_and_availability_stay_compatible() {
         before_circular_placement(id, &mut current);
         before_loft_verbs(id, &mut current);
         before_ridealong_inputs(id, &mut current);
+        before_wall_thickness(id, &mut current);
         before_distance_verbs(id, &mut current);
         before_feature_pattern_source(id, &mut current);
         before_draft_pull(id, &mut current);
         before_hole_thread(id, &mut current);
         before_print_accuracy(id, &mut current);
+        before_agent_derived_views(id, &mut current);
         if id == "check" {
             assert_eq!(current["agents"], "app", "Check opens its own report");
             current["agents"] = row["agents"].clone();
@@ -951,6 +1009,16 @@ fn command_ids_shortcuts_agent_schemas_and_availability_stay_compatible() {
             assert_eq!(current["workspace"], "Model");
             current["workspace"] = row["workspace"].clone();
             current["availability"]["assembly"]["offered"] = row["availability"]["assembly"]["offered"].clone();
+        }
+        if ["drawing_chamfer_dimension", "drawing_centreline", "drawing_weld", "drawing_hole_table"]
+            .contains(&id.as_str())
+        {
+            assert_eq!(current["agents"], "app");
+            assert!(matches!(
+                commands::get(id).unwrap().action.unwrap()(&part_entry),
+                AppAction::Drawing(soliddraft_app::drawing::DrawingAction::SetTool(_))
+            ));
+            current["agents"] = row["agents"].clone();
         }
         if ["drawing_check_sheet", "drawing_propose_dimensions", "drawing_find_issues", "drawing_explain"]
             .contains(&id.as_str())
@@ -1038,6 +1106,19 @@ fn command_ids_shortcuts_agent_schemas_and_availability_stay_compatible() {
         for fixture in asks_for_sketch {
             assert_eq!(current["availability"][fixture]["enabled"], true, "{id} starts on {fixture}");
             current["availability"][fixture]["enabled"] = row["availability"][fixture]["enabled"].clone();
+        }
+        // Balloon and BOM arrived with drawings of assemblies: the app runs them there.
+        if matches!(id.as_str(), "drawing_balloon" | "drawing_bom") {
+            assert_eq!((row["agents"].as_str(), current["agents"].as_str()), (Some("none"), Some("app")));
+            current["agents"] = row["agents"].clone();
+        }
+        // S opens the shortcut menu in every workspace: a command that had S gives it up
+        // and keeps every other key.
+        if let (Some(was), Some(now)) = (row["keys"].as_array(), current["keys"].as_array()) {
+            let without_s: Vec<_> = was.iter().filter(|key| key["chord"] != "S").cloned().collect();
+            if without_s.len() < was.len() && *now == without_s {
+                current["keys"] = row["keys"].clone();
+            }
         }
         assert_eq!(&current, row, "{id} changed");
     }

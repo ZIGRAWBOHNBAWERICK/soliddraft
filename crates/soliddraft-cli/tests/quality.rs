@@ -40,6 +40,7 @@ fn save_pin(name: &str) -> PathBuf {
             operation: ExtrudeOp::Boss,
             end: EndCondition::Blind { depth: 30.0 },
             reverse: false,
+            options: Default::default(),
         }),
     );
     let path = dir.join("pin.dwprt");

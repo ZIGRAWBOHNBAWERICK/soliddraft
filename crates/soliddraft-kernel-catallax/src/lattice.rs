@@ -17,12 +17,25 @@ use crate::*;
 /// The label format Catallax writes into a certified field STL's header.
 const STL_LABEL: &str = "catallax-print-stl/1";
 
+type SourceFiles = BTreeMap<String, Arc<[u8]>>;
+
+fn stage_from_source<S: TerminalField>(
+    recipe: &Recipe,
+    spec: S,
+    settings: Settings,
+    _files: &SourceFiles,
+    dec: &mut Decider,
+) -> Result<Stage<S>, Refusal> {
+    // Switch here to Catallax's file-aware stage when it reaches the pin.
+    Stage::new(recipe, spec, settings, dec)
+}
+
 /// The stage calls an active field needs, whichever field it holds.
 trait FieldStage: Send + Sync {
     fn recipe(&self) -> &Recipe;
     fn plan(&self) -> &Plan;
     fn settings(&self) -> &Settings;
-    fn export(&self, accuracy: Option<Rational>, dec: &mut Decider) -> Result<Output, Refusal>;
+    fn export(&self, accuracy: Option<Rational>, files: &SourceFiles, dec: &mut Decider) -> Result<Output, Refusal>;
 }
 
 impl<S: TerminalField + Clone + Send + Sync> FieldStage for Stage<S> {
@@ -35,11 +48,11 @@ impl<S: TerminalField + Clone + Send + Sync> FieldStage for Stage<S> {
     fn settings(&self) -> &Settings {
         Stage::settings(self)
     }
-    fn export(&self, accuracy: Option<Rational>, dec: &mut Decider) -> Result<Output, Refusal> {
+    fn export(&self, accuracy: Option<Rational>, files: &SourceFiles, dec: &mut Decider) -> Result<Output, Refusal> {
         if let Some(accuracy) = accuracy {
             let (body, spec, mut settings) = self.clone().return_before_lattice();
             settings.accuracy = accuracy;
-            Stage::new(&body, spec, settings, dec)?.export(dec)
+            stage_from_source(&body, spec, settings, files, dec)?.export(dec)
         } else {
             Stage::export(self, dec)
         }
@@ -48,16 +61,21 @@ impl<S: TerminalField + Clone + Send + Sync> FieldStage for Stage<S> {
 
 pub(super) struct Field {
     stage: Box<dyn FieldStage>,
+    files: SourceFiles,
     preview: Mesh,
     topology: Topology,
 }
 
-fn run<T>(operation: &str, action: impl FnOnce(&mut Decider) -> Result<T, Refusal>) -> KernelResult<T> {
+fn decide<T>(operation: &str, action: impl FnOnce(&mut Decider) -> Result<T, Refusal>) -> Result<T, Refusal> {
     let mut dec = Decider::default();
     let span = OperationSpan::begin("field", &operation, operation, &dec);
     let result = action(&mut dec);
     span.finish(&dec, result.as_ref().err(), None);
-    result.map_err(|e| query_error(operation, e))
+    result
+}
+
+fn run<T>(operation: &str, action: impl FnOnce(&mut Decider) -> Result<T, Refusal>) -> KernelResult<T> {
+    decide(operation, action).map_err(|e| query_error(operation, e))
 }
 
 /// Runs one action on its caller's allowance, or on the application's [`APP_REQUEST_WORK`]
@@ -107,8 +125,13 @@ fn settings(name: &str, accuracy_mm: f64, min_detail_mm: f64) -> KernelResult<Se
     })
 }
 
-/// The native spelling of a grade: a linear grade's anchors are part points on its axis.
-fn grade(grade: &Grade, what: &str) -> KernelResult<catallax_recipe::Grade> {
+/// The native spelling of a grade: a linear grade's anchors are part points on its axis,
+/// and a distance grade names its faces through `face` (the skin is every face).
+fn grade(
+    grade: &Grade,
+    what: &str,
+    mut face: impl FnMut(FaceId) -> KernelResult<catallax_recipe::FaceRef>,
+) -> KernelResult<catallax_recipe::Grade> {
     Ok(match grade {
         Grade::Constant(value) => catallax_recipe::Grade::Constant(native::number(*value, what)?),
         Grade::Linear(linear) => {
@@ -121,7 +144,84 @@ fn grade(grade: &Grade, what: &str) -> KernelResult<catallax_recipe::Grade> {
                 end: native::number(linear.end, what)?,
             }
         }
+        Grade::Distance(distance) => catallax_recipe::Grade::Distance {
+            faces: match &distance.faces {
+                GradeFaces::Skin => vec![catallax_recipe::FaceRef::all()],
+                GradeFaces::Picked(faces) => faces.iter().map(|f| face(*f)).collect::<KernelResult<_>>()?,
+            },
+            near: native::number(distance.near, what)?,
+            far: native::number(distance.far, what)?,
+            span: native::number(distance.span, &format!("{what} grade span"))?,
+        },
+        Grade::Radial(radial) => {
+            let mut direction = [0.0; 3];
+            direction[radial.axis.index()] = 1.0;
+            catallax_recipe::Grade::Radial {
+                origin: native::point(Vec3::from(radial.through), "grade axis origin")?,
+                direction: native::vector(Vec3::from(direction), "grade axis direction")?,
+                r0: native::number(radial.from, "grade start radius")?,
+                r1: native::number(radial.to, "grade end radius")?,
+                start: native::number(radial.start, what)?,
+                end: native::number(radial.end, what)?,
+            }
+        }
+        Grade::Point(point) => catallax_recipe::Grade::Point {
+            centre: native::point(Vec3::from(point.centre), "grade centre")?,
+            r0: native::number(point.from, "grade start radius")?,
+            r1: native::number(point.to, "grade end radius")?,
+            start: native::number(point.start, what)?,
+            end: native::number(point.end, what)?,
+        },
     })
+}
+
+/// Whether Catallax builds a field driven by this kind of grade, answered by Catallax's
+/// own validation of a sample field: a cubic lattice of 10 mm cells or a 10 mm gyroid,
+/// graded inside the certified ranges. A refusal carries Catallax's code.
+pub(super) fn grade_support(field: GradedField, kind: GradeKind) -> KernelResult<()> {
+    let (near, far) = match field {
+        GradedField::LatticeRadius => (1.0, 2.0),
+        GradedField::GyroidLevel => (0.0, 0.1),
+    };
+    let sample = match kind {
+        GradeKind::Constant => Grade::Constant(near),
+        GradeKind::Linear => {
+            Grade::Linear(LinearGrade { axis: GradeAxis::Z, from: 0.0, to: 10.0, start: near, end: far })
+        }
+        GradeKind::Distance => Grade::Distance(DistanceGrade { faces: GradeFaces::Skin, near, far, span: 10.0 }),
+        GradeKind::Radial => Grade::Radial(RadialGrade {
+            axis: GradeAxis::Z,
+            through: [0.0; 3],
+            from: 0.0,
+            to: 10.0,
+            start: near,
+            end: far,
+        }),
+        GradeKind::Point => Grade::Point(PointGrade { centre: [0.0; 3], from: 0.0, to: 10.0, start: near, end: far }),
+    };
+    let what = match field {
+        GradedField::LatticeRadius => "density",
+        GradedField::GyroidLevel => "gyroid level",
+    };
+    let native = grade(&sample, what, |_| unreachable!("the sample grade picks no faces"))?;
+    let ten = native::number(10.0, "sample size")?;
+    let checked = match field {
+        GradedField::LatticeRadius => LatticeSpec {
+            cell: catallax_recipe::LatticeCell::Cubic,
+            size: ten,
+            frame: Pose::identity(),
+            radius: native,
+        }
+        .validate(),
+        GradedField::GyroidLevel => GyroidSpec {
+            period: ten,
+            level: native,
+            kind: catallax_recipe::GyroidKind::Network,
+            frame: Pose::identity(),
+        }
+        .validate(),
+    };
+    checked.map_err(|e| query_error(what, e))
 }
 
 fn quantity(width: f64, what: &str) -> KernelResult<QuantityAccuracy> {
@@ -169,6 +269,49 @@ impl CatallaxKernel {
         Ok(self.state()?.fields.get(&body).cloned())
     }
 
+    fn field_source(&self, body: BodyId, op: OpKind) -> KernelResult<(Recipe, SourceFiles)> {
+        let (legacy, files) = {
+            let state = self.state()?;
+            let stored = state.get(body)?;
+            (stored.legacy_recipe(), state.sources(&stored.steps)?)
+        };
+        Ok((converted_recipe(&legacy, op)?.recipe, files))
+    }
+
+    pub(super) fn check_field_source(&self, body: BodyId) -> KernelResult<bool> {
+        {
+            let state = self.state()?;
+            if let Some(supported) = state.field_source_support.get(&body) {
+                return Ok(*supported);
+            }
+            if !state
+                .get(body)?
+                .steps
+                .values()
+                .any(|step| matches!(step["op"].as_str(), Some("import_step" | "import_iges" | "import_mesh")))
+            {
+                return Ok(true);
+            }
+        }
+        // A valid constant lattice asks the stage compiler whether it can read this source.
+        let supported = allowance("field_source", || {
+            let (recipe, files) = self.field_source(body, OpKind::Lattice)?;
+            let spec = LatticeSpec {
+                cell: catallax_recipe::LatticeCell::Cubic,
+                size: native::number(5.0, "cell size")?,
+                frame: Pose::identity(),
+                radius: catallax_recipe::Grade::Constant(native::number(1.0, "density")?),
+            };
+            let settings = settings("lattice", 0.1, 0.5)?;
+            run("field_source", |dec| stage_from_source(&recipe, spec, settings, &files, dec)).map(drop)
+        })
+        .is_ok();
+        let mut state = self.state()?;
+        state.get(body)?;
+        state.field_source_support.insert(body, supported);
+        Ok(supported)
+    }
+
     pub(super) fn build_lattice(&self, tag: &OpTag, body: BodyId, params: &Lattice) -> KernelResult<OpResult> {
         let settings = settings("lattice", params.accuracy_mm, params.min_detail_mm)?;
         let spec = LatticeSpec {
@@ -182,11 +325,15 @@ impl CatallaxKernel {
             frame: match params.frame {
                 FieldFrame::Part => Pose::identity(),
             },
-            radius: grade(&params.radius_mm, "density")?,
+            radius: grade(&params.radius_mm, "density", |face| self.solid(body)?.face_ref(face, body))?,
         };
         let sampling_radius = (params.cell != LatticeCell::Cubic).then_some(match &params.radius_mm {
             Grade::Constant(radius) => *radius,
             Grade::Linear(grade) => grade.start.min(grade.end),
+            Grade::Distance(grade) => grade.near.min(grade.far),
+            Grade::Radial(RadialGrade { start, end, .. }) | Grade::Point(PointGrade { start, end, .. }) => {
+                start.min(*end)
+            }
         });
         self.build_field(tag, body, OpKind::Lattice, spec, settings, sampling_radius)
     }
@@ -195,7 +342,7 @@ impl CatallaxKernel {
         let settings = settings("gyroid", params.accuracy_mm, params.min_detail_mm)?;
         let spec = GyroidSpec {
             period: native::number(params.period_mm, "gyroid period")?,
-            level: grade(&params.level, "gyroid level")?,
+            level: grade(&params.level, "gyroid level", |face| self.solid(body)?.face_ref(face, body))?,
             kind: match params.kind {
                 GyroidKind::Network => catallax_recipe::GyroidKind::Network,
             },
@@ -223,30 +370,42 @@ impl CatallaxKernel {
             return run(op.name(), |dec| Stage::new(field.stage.recipe(), spec, settings, dec))
                 .and(Err(KernelError::InvalidInput(format!("the {} needs a CAD body", op.name()))));
         }
-        // The stage evaluates the part again and has no way to read an imported file.
-        if self
-            .state()?
-            .get(body)?
-            .steps
-            .values()
-            .any(|s| matches!(s["op"].as_str(), Some("import_step" | "import_iges" | "import_mesh")))
-        {
-            return Err(gap(&format!("A {} on an imported body", op.name())));
-        }
-        let recipe = converted_recipe(&self.body_recipe(body)?, op)?.recipe;
-        let solid = self.solid(body)?;
-        let built = solid.app.checkpoint.built();
-        let bounds = numerical("bounding_box", |dec| {
-            catallax_measure::bounding_box(&built.model, built.result, &catallax_measure::Accuracy::default(), dec)
-        })
-        .map_err(|e| query_error("bounding_box", e))?
-        .value
-        .ok_or_else(|| KernelError::InvalidInput(format!("the {} needs a nonempty body", op.name())))?;
-        let bbox = Aabb {
-            min: bounds.min.each_ref().map(Rational::to_f64_nearest).into(),
-            max: bounds.max.each_ref().map(Rational::to_f64_nearest).into(),
+        let (recipe, files) = self.field_source(body, op)?;
+        let cad_bounds = if files.is_empty() {
+            let solid = self.solid(body)?;
+            let built = solid.app.checkpoint.built();
+            let bounds = numerical("bounding_box", |dec| {
+                catallax_measure::bounding_box(&built.model, built.result, &catallax_measure::Accuracy::default(), dec)
+            })
+            .map_err(|e| query_error("bounding_box", e))?
+            .value
+            .ok_or_else(|| KernelError::InvalidInput(format!("the {} needs a nonempty body", op.name())))?;
+            Some(Aabb {
+                min: bounds.min.each_ref().map(Rational::to_f64_nearest).into(),
+                max: bounds.max.each_ref().map(Rational::to_f64_nearest).into(),
+            })
+        } else {
+            None
         };
-        let stage = run(op.name(), |dec| Stage::new(&recipe, spec, settings, dec))?;
+        let stage = decide(op.name(), |dec| stage_from_source(&recipe, spec, settings, &files, dec)).map_err(|e| {
+            if !files.is_empty()
+                && (e.code == "field.import-missing-source"
+                    || (e.code == "field.recipe" && e.detail.contains("missing mesh source")))
+            {
+                gap(&format!("A {} on an imported body", op.name()))
+            } else {
+                query_error(op.name(), e)
+            }
+        })?;
+        let bbox = if let Some(bounds) = cad_bounds {
+            bounds
+        } else {
+            let bounds = run("bounding_box", |dec| printing::bounds(stage.plan(), dec))?;
+            Aabb {
+                min: bounds.each_ref().map(|axis| axis[0].to_f64_nearest()).into(),
+                max: bounds.each_ref().map(|axis| axis[1].to_f64_nearest()).into(),
+            }
+        };
         // Keep the native question even when preview generation refuses.
         {
             let mut state = self.state()?;
@@ -307,7 +466,7 @@ impl CatallaxKernel {
             approximate: None,
         };
         state.bodies.insert(id, stored);
-        state.fields.insert(id, Arc::new(Field { stage: Box::new(stage), preview, topology }));
+        state.fields.insert(id, Arc::new(Field { stage: Box::new(stage), files, preview, topology }));
         Ok(OpResult { body: id, record })
     }
 }
@@ -335,7 +494,7 @@ impl Field {
             accuracy.map(|mm| native::number(mm, "print accuracy").map(|n| n.value().clone())).transpose()?;
         let operation = "export_field_stl";
         let ((bytes, output), work) = export_allowance(operation, || {
-            run(operation, |dec| self.stage.export(accuracy.clone(), dec)?.labelled_stl())
+            run(operation, |dec| self.stage.export(accuracy.clone(), &self.files, dec)?.labelled_stl())
         })?;
         // Read the encoded bound so the JSON report describes the file exactly.
         let bound = f64::from_le_bytes(bytes[68..76].try_into().expect("labelled header"));

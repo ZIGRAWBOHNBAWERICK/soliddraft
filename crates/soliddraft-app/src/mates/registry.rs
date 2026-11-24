@@ -32,8 +32,63 @@ fn face(what: &str) -> Value {
     )
 }
 
-fn unsupported_motion_params() -> Vec<(&'static str, Value)> {
-    Vec::new()
+fn path_params() -> Vec<(&'static str, Value)> {
+    vec![
+        ("name", string("A name for the mate")),
+        ("path", face("A planar face whose outline, its lines, arcs and splines, is the path")),
+        ("point", face("The point kept on it: a vertex, or a sphere's face for its centre")),
+        (
+            "mode",
+            optional(one_of(
+                &["free", "center", "distance", "percent"],
+                "Where the point sits: anywhere along the path (the default), halfway round, at a distance or a percentage from the outline's first corner",
+            )),
+        ),
+        ("distance", optional(string("With distance: along the path, such as 15 mm"))),
+        ("percent", optional(number("With percent: of the path's length, 0 to 100"))),
+        ("flipped", optional(boolean("true measures the other way round"))),
+        ("follow", optional(face("Pitch and yaw: a plane or axis of the point's part kept along the path's tangent"))),
+        (
+            "follow_alignment",
+            optional(one_of(&["aligned", "opposed"], "With follow: along the way the path runs, or against it")),
+        ),
+        ("up", optional(face("Roll: a plane or axis of the point's part kept along the path's plane normal"))),
+        ("up_alignment", optional(one_of(&["aligned", "opposed"], "With up: along the normal, or against it"))),
+        ("require_fully_constrained", optional(boolean("Refuse remaining freedom"))),
+    ]
+}
+
+fn controller_params() -> Vec<(&'static str, Value)> {
+    vec![
+        (
+            "action",
+            one_of(
+                &["show", "set", "save", "apply", "delete", "frames"],
+                "show the controller; set its mates; save, apply or delete a position; or solve the frames between two positions",
+            ),
+        ),
+        (
+            "mates",
+            optional(array(string("A mate's name"), "With set: the mates it drives, in order; empty removes it")),
+        ),
+        ("position", optional(string("With save, apply or delete: the position's name"))),
+        (
+            "values",
+            optional(array(number("mm, degrees or percent"), "With apply and no position: one value per driven mate")),
+        ),
+        ("from", optional(string("With frames: the starting position"))),
+        ("to", optional(string("With frames: the final position"))),
+        ("steps", optional(integer("With frames: how many steps, 1 to 600"))),
+    ]
+}
+
+fn cam_params() -> Vec<(&'static str, Value)> {
+    vec![
+        ("name", string("A name for the mate")),
+        ("cam", face("The cam's flat end face, whose outline is the cam's profile")),
+        ("follower", face("The follower: a cylinder parallel to the cam's axis, a sphere or a vertex")),
+        ("require_fully_constrained", optional(boolean("Refuse remaining freedom"))),
+    ]
 }
 
 fn angle_params() -> Vec<(&'static str, Value)> {
@@ -241,7 +296,7 @@ fn profile_center_params() -> Vec<(&'static str, Value)> {
 fn slot_params() -> Vec<(&'static str, Value)> {
     vec![
         ("name", string("A name for the mate")),
-        ("slot", face("A wall or a round end of a straight slot")),
+        ("slot", face("A wall or a round end of a straight or arc slot")),
         ("pin", face("The pin's cylinder, or a circular or straight edge, on another component")),
         (
             "alignment",
@@ -348,10 +403,19 @@ pub(crate) fn commands() -> Vec<CommandSpec> {
         row("assembly_mate_gear", "Gear mate", "Couple rotations of two Hinge or Concentric joints").agents(Agents::Mcp, "Saves a motion relation with continuous angles and certified residuals; does not model collisions.", gear_params).undo(Undo::Step),
         row("assembly_mate_rack_and_pinion", "Rack and Pinion mate", "Couple a joint rotation to a signed rack slide").agents(Agents::Mcp, "Saves a motion relation with continuous angles and certified residuals; does not model collisions.", rack_params).undo(Undo::Step),
         row("assembly_mate_screw", "Screw mate", "Couple axial travel and rotation of a Concentric joint").agents(Agents::Mcp, "Saves a motion relation with continuous angles and certified residuals; does not model collisions.", screw_params).undo(Undo::Step),
-        row("assembly_mate_path", "Path mate", "Unavailable in the static mate solver").agents(Agents::Mcp, "Returns a named unsupported_motion refusal.", unsupported_motion_params),
-        row("assembly_mate_cam", "Cam mate", "Unavailable in the static mate solver").agents(Agents::Mcp, "Returns a named unsupported_motion refusal.", unsupported_motion_params),
+        row("assembly_mate_path", "Path mate", "Keep a point of one part on the outline of a planar face of another")
+            .agents(Agents::Mcp, "The outline's straight edges and circular arcs are read exactly, splines from their control points; the point slides along them or holds a distance or percentage along the path, and follow and up steer its part's pitch, yaw and roll. Solved with certified residuals.", path_params)
+            .undo(Undo::Step),
+        row("assembly_mate_controller", "Mate Controller", "Save, apply and animate named positions of chosen mates")
+            .agents(Agents::Mcp, "Drives Distance and Angle mates and positions along a slot or path. Set, save, apply and delete are each one undo step; show and frames change nothing.", controller_params)
+            .undo(Undo::Carried),
+        row("assembly_mate_cam", "Cam mate", "Keep a roller, a ball or a point touching a cam's profile")
+            .agents(Agents::Mcp, "The cam's profile is the outline of its flat end face, lines and circular arcs read exactly, swept along the face's normal. A roller's axis stays parallel to that normal; the follower keeps to the side it is on. Solved with certified residuals; no contact forces.", cam_params)
+            .undo(Undo::Step),
         row("assembly_mate_universal_joint", "Universal Joint mate", "Couple two shafts' rotations through a universal joint").agents(Agents::Mcp, "Saves a motion relation with certified residuals: the shafts turn together, unevenly when they meet at an angle. Does not model collisions.", universal_joint_params).undo(Undo::Step),
-        row("assembly_physical_dynamics", "Physical Dynamics", "Unavailable in the static mate solver").agents(Agents::Mcp, "Returns a named unsupported_motion refusal.", unsupported_motion_params),
+        row("assembly_physical_dynamics", "Physical Dynamics", "Drag a component that pushes the parts it meets")
+            .agents(Agents::Mcp, "assembly_drag with push: the dragged root component moves the parts it meets by its own translation, as their mates allow, checked on certified meshes. Kinematic: no forces, masses or friction. Desktop only. Poll until pending is false.", drag_params)
+            .undo(Undo::Carried),
         row("assembly_mate_angle", "Angle mate", "Set a signed angle about an explicit reference direction")
             .agents(Agents::Mcp, "Rotates projected directions about the reference; certified bounds are reported per mate.", angle_params).undo(Undo::Step),
         row("assembly_mate_limit_angle", "Limit angle mate", "Bound a signed angle about an explicit reference direction")
@@ -479,6 +543,12 @@ fn drag_params() -> Vec<(&'static str, Value)> {
     vec![
         ("collision", optional(boolean("Stop before contact using certified meshes; set at begin or move"))),
         ("clearance", optional(string("Dynamic clearance, such as 2 mm; set at begin or move"))),
+        (
+            "push",
+            optional(boolean(
+                "Physical Dynamics: push the parts the dragged root component meets instead of stopping; set at begin or move",
+            )),
+        ),
         (
             "phase",
             optional(one_of(&["move", "begin", "update", "poll", "commit", "cancel"], "Drag phase; defaults to move")),

@@ -63,6 +63,7 @@ fn trimmed_line_and_arc_corners_extrude_through_catallax() {
                     operation: ExtrudeOp::Boss,
                     end: EndCondition::Blind { depth: 2.0 },
                     reverse: false,
+                    options: Default::default(),
                 }),
                 name: None,
                 position: None,

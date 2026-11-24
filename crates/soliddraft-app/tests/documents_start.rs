@@ -34,6 +34,7 @@ fn block(depth: f64) -> Command {
             flip: false,
             end: Default::default(),
             draft: None,
+            ..Default::default()
         },
         via_assistant: false,
     }
@@ -169,7 +170,7 @@ fn the_browser_checks_find_extrude_rectangle_where_they_click() {
     app.state_mut().state.push(AppAction::StartExtrude);
     app.run_steps(4);
     let button = app.get_by_role_and_label(egui::accesskit::Role::Button, "Rectangle").rect();
-    assert!(button.shrink(4.0).contains(egui::pos2(630.0, 52.0)), "Rectangle is at {button:?}");
+    assert!(button.shrink(4.0).contains(egui::pos2(99.0, 355.0)), "Rectangle is at {button:?}");
 }
 
 /// The app this test kills: edits a part called Bracket without saving, and keeps editing

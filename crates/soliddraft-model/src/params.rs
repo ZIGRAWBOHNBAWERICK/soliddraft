@@ -4,7 +4,7 @@
 //! `Depth` or `D2`. The table names it after its feature, as in `BossExtrude1.Depth`.
 
 use serde::{Deserialize, Serialize};
-use soliddraft_kernel_api::{Grade, HoleDepth, HoleHead};
+use soliddraft_kernel_api::{Grade, HoleDepth, HoleHead, PointGrade, RadialGrade};
 use soliddraft_sketch::ConstraintKind;
 
 use crate::values::Input;
@@ -62,8 +62,16 @@ pub enum Parameter {
     Spacing,
     /// How many copies a pattern makes, the original included.
     Count,
-    /// A shell's wall.
+    /// A shell or thicken feature's constant wall thickness.
     Thickness,
+    /// Wall thickness at the first grade anchor.
+    ThicknessStart,
+    /// Wall thickness at the second grade anchor.
+    ThicknessEnd,
+    /// Part coordinate of the first thickness anchor.
+    ThicknessStartAt,
+    /// Part coordinate of the second thickness anchor.
+    ThicknessEndAt,
     /// A plane's distance from what it is offset from.
     Offset,
     /// A lattice's cell edge.
@@ -101,6 +109,10 @@ impl Parameter {
             Parameter::Spacing => "Spacing",
             Parameter::Count => "Count",
             Parameter::Thickness => "Thickness",
+            Parameter::ThicknessStart => "ThicknessStart",
+            Parameter::ThicknessEnd => "ThicknessEnd",
+            Parameter::ThicknessStartAt => "ThicknessStartAt",
+            Parameter::ThicknessEndAt => "ThicknessEndAt",
             Parameter::Offset => "Offset",
             Parameter::CellSize => "CellSize",
             Parameter::Period => "Period",
@@ -223,7 +235,7 @@ pub fn parameters(feature: &Feature) -> Vec<Param> {
         }
         FeatureKind::Hole(h) => {
             out.push(param(Parameter::Diameter, Unit::Length, h.diameter));
-            if let HoleDepth::Blind { depth } = h.depth {
+            if let Some(HoleDepth::Blind { depth }) = h.specified_depth() {
                 out.push(param(Parameter::Depth, Unit::Length, depth));
             }
             match h.head {
@@ -250,8 +262,12 @@ pub fn parameters(feature: &Feature) -> Vec<Param> {
         },
         FeatureKind::Draft(d) => out.push(param(Parameter::Angle, Unit::Angle, d.angle)),
         FeatureKind::Offset(o) => out.push(param(Parameter::Distance, Unit::Length, o.distance)),
-        FeatureKind::Thicken(t) => out.push(param(Parameter::Thickness, Unit::Length, t.thickness)),
-        FeatureKind::Shell(s) => out.push(param(Parameter::Thickness, Unit::Length, s.thickness)),
+        FeatureKind::Thicken(crate::ThickenFeature { thickness, .. })
+        | FeatureKind::Shell(crate::ShellFeature { thickness, .. }) => {
+            for (parameter, value) in grade_values(thickness, THICKNESS) {
+                out.push(param(parameter, Unit::Length, value));
+            }
+        }
         FeatureKind::Lattice(l) => {
             if let Some(size) = l.cell_size_mm {
                 out.push(param(Parameter::CellSize, Unit::Length, size));
@@ -367,10 +383,9 @@ fn write_parameter(
             b.other_distance = Some(positive("second distance")?);
         }
         (FeatureKind::Hole(h), Parameter::Diameter) => h.diameter = positive("diameter")?,
-        (FeatureKind::Hole(h), Parameter::Depth) => match &mut h.depth {
-            HoleDepth::Blind { depth } => *depth = positive("depth")?,
-            HoleDepth::Through => return missing(),
-        },
+        (FeatureKind::Hole(h), Parameter::Depth) if matches!(h.specified_depth(), Some(HoleDepth::Blind { .. })) => {
+            h.set_depth(HoleDepth::Blind { depth: positive("depth")? });
+        }
         (FeatureKind::Hole(h), Parameter::HeadDiameter) => match &mut h.head {
             Some(HoleHead::Counterbore { diameter, .. } | HoleHead::Countersink { diameter, .. }) => {
                 *diameter = positive("head diameter")?
@@ -444,8 +459,17 @@ fn write_parameter(
             }
             o.distance = value;
         }
-        (FeatureKind::Thicken(t), Parameter::Thickness) => t.thickness = positive("thickness")?,
-        (FeatureKind::Shell(s), Parameter::Thickness) => s.thickness = positive("thickness")?,
+        (
+            FeatureKind::Thicken(crate::ThickenFeature { thickness, .. })
+            | FeatureKind::Shell(crate::ShellFeature { thickness, .. }),
+            p,
+        ) if THICKNESS.contains(&p) => {
+            let at = matches!(p, Parameter::ThicknessStartAt | Parameter::ThicknessEndAt);
+            let value = if at { value } else { positive("thickness")? };
+            if !write_grade(thickness, THICKNESS, p, value) {
+                return missing();
+            }
+        }
         (FeatureKind::Lattice(l), Parameter::CellSize) if l.cell_size_mm.is_some() => {
             l.cell_size_mm = Some(positive("cell size")?)
         }
@@ -468,27 +492,52 @@ pub(crate) fn name_part(feature: &Feature) -> String {
 }
 
 /// A grade's parameters: the constant, or the start and end values and where they apply.
+/// A distance grade's near and far values are its start and end, and its span is where
+/// the end applies; a radial or point grade's distances are where its values apply.
 type GradeNames = [Parameter; 5];
 const RADIUS: GradeNames =
     [Parameter::Radius, Parameter::RadiusStart, Parameter::RadiusEnd, Parameter::RadiusStartAt, Parameter::RadiusEndAt];
+const THICKNESS: GradeNames = [
+    Parameter::Thickness,
+    Parameter::ThicknessStart,
+    Parameter::ThicknessEnd,
+    Parameter::ThicknessStartAt,
+    Parameter::ThicknessEndAt,
+];
 const LEVEL: GradeNames =
     [Parameter::Level, Parameter::LevelStart, Parameter::LevelEnd, Parameter::LevelStartAt, Parameter::LevelEndAt];
 
-fn grade_values(grade: &Grade, names: GradeNames) -> Vec<(Parameter, f64)> {
+fn grade_values<F>(grade: &Grade<F>, names: GradeNames) -> Vec<(Parameter, f64)> {
     match grade {
         Grade::Constant(v) => vec![(names[0], *v)],
         Grade::Linear(l) => vec![(names[1], l.start), (names[2], l.end), (names[3], l.from), (names[4], l.to)],
+        Grade::Distance(d) => vec![(names[1], d.near), (names[2], d.far), (names[4], d.span)],
+        Grade::Radial(RadialGrade { from, to, start, end, .. })
+        | Grade::Point(PointGrade { from, to, start, end, .. }) => {
+            vec![(names[1], *start), (names[2], *end), (names[3], *from), (names[4], *to)]
+        }
     }
 }
 
 /// Sets one of a grade's numbers; false when the grade has no such number.
-fn write_grade(grade: &mut Grade, names: GradeNames, parameter: Parameter, value: f64) -> bool {
+fn write_grade<F>(grade: &mut Grade<F>, names: GradeNames, parameter: Parameter, value: f64) -> bool {
     let slot = match grade {
         Grade::Constant(v) if parameter == names[0] => v,
         Grade::Linear(l) if parameter == names[1] => &mut l.start,
         Grade::Linear(l) if parameter == names[2] => &mut l.end,
         Grade::Linear(l) if parameter == names[3] => &mut l.from,
         Grade::Linear(l) if parameter == names[4] => &mut l.to,
+        Grade::Distance(d) if parameter == names[1] => &mut d.near,
+        Grade::Distance(d) if parameter == names[2] => &mut d.far,
+        Grade::Distance(d) if parameter == names[4] => &mut d.span,
+        Grade::Radial(RadialGrade { start, .. }) | Grade::Point(PointGrade { start, .. }) if parameter == names[1] => {
+            start
+        }
+        Grade::Radial(RadialGrade { end, .. }) | Grade::Point(PointGrade { end, .. }) if parameter == names[2] => end,
+        Grade::Radial(RadialGrade { from, .. }) | Grade::Point(PointGrade { from, .. }) if parameter == names[3] => {
+            from
+        }
+        Grade::Radial(RadialGrade { to, .. }) | Grade::Point(PointGrade { to, .. }) if parameter == names[4] => to,
         _ => return false,
     };
     *slot = value;

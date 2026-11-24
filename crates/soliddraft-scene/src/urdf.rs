@@ -162,7 +162,10 @@ pub(crate) fn read(path: &Path) -> Result<Scene, ImportError> {
         };
         let limits = match kind {
             JointKind::Revolute => Some([joint.limit.lower.to_degrees(), joint.limit.upper.to_degrees()]),
-            JointKind::Prismatic => Some([joint.limit.lower, joint.limit.upper]),
+            JointKind::Prismatic => {
+                let limits = [joint.limit.lower, joint.limit.upper];
+                (limits != [f64::NEG_INFINITY, f64::INFINITY]).then_some(limits)
+            }
             _ => None,
         };
         let mimic = joint.mimic.as_ref().map(|m| {

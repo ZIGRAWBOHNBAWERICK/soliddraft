@@ -316,7 +316,7 @@ fn polygon_extend_and_trim_by_pointer_make_a_profile_that_extrudes() {
 }
 
 fn options_bar(app: &App) -> egui::Rect {
-    egui::PanelState::load(&app.ctx, egui::Id::new("options_bar")).unwrap().outer_rect
+    soliddraft_app::options_bar::shown_rect(&app.ctx).expect("the options bar is drawn")
 }
 
 /// The sketch walk-over's fixes, as a user meets them. The Polygon tool shows its sides
@@ -402,7 +402,7 @@ fn sketch_options_escape_and_smart_dimension_preview() {
         ribbon::close_options(app);
 
         // Close sketch leaves.
-        let close = ribbon::control(app, "Close sketch", options_bar(app)).rect.center();
+        let close = ribbon::control(app, "Close sketch", ribbon::palette_region(app)).rect.center();
         ribbon::click_at(app, close);
         settle(app);
         assert!(app.state().state.sketch.is_none(), "Close sketch leaves the sketch");

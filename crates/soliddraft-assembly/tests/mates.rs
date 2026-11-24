@@ -66,6 +66,7 @@ fn new_block(path: &Path, w: f64, d: f64, h: f64) {
             operation: ExtrudeOp::Boss,
             end: EndCondition::Blind { depth: h },
             reverse: false,
+            options: Default::default(),
         }),
     );
     doc.save(path).unwrap();
@@ -598,10 +599,11 @@ fn old_and_future_assembly_truth_survives() {
     assert!(matches!(Assembly::from_truth(v.to_string().as_bytes(), None), Err(FileError::Invalid(_))));
 }
 
-/// A configuration a file carries on a mate's endpoint or source is kept and refused, never
-/// solved on the default. A save and a load bring it back, as the reserved field always did.
+/// A source naming a configuration its part does not have is kept and refused, never solved
+/// on the default. A mate's end only records the configuration it was picked in: the
+/// source decides the shape. A save and a load bring both back.
 #[test]
-fn a_configuration_is_refused_not_ignored() {
+fn a_configuration_the_part_lacks_is_refused_not_ignored() {
     fn nondefault() -> Option<ConfigurationId> {
         Some(ConfigurationId("nondefault".into()))
     }
@@ -652,6 +654,11 @@ fn a_configuration_is_refused_not_ignored() {
         let mut r = rig(&format!("configuration-{name}"), 10.0);
         r.graph_with(coincident);
         reload(&mut r, change);
+        if name.ends_with("endpoint") {
+            r.doc.set_value("gap", "5 mm").unwrap();
+            assert_ne!(r.doc.solver().state, SolverState::Error, "{name}");
+            continue;
+        }
         let before = r.state();
         let refused = r.doc.set_value("gap", "5 mm").unwrap_err();
         assert_eq!((refused.code, refused.mates.is_empty()), (code, false), "{name}: {refused:?}");
@@ -663,7 +670,7 @@ fn a_configuration_is_refused_not_ignored() {
         let measured = r.doc.mate_measurements();
         assert!(measured.iter().any(|(_, m)| m.as_ref().is_err_and(|e| e.code == code)), "{name}: {measured:?}");
         set_height(&r.a_file, 14.0);
-        assert_eq!(r.doc.rebuild().mate_refusal.unwrap().code, code, "{name}: Update refuses as a whole");
+        assert!(r.doc.rebuild().refusal.is_some(), "{name}: Update refuses as a whole");
         assert_eq!(r.state(), before, "{name}: a refusal changes nothing");
     }
 

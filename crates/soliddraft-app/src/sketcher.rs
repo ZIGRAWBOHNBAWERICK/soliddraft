@@ -407,11 +407,11 @@ pub fn run(
         for path in entity.polylines(64) {
             let points: Vec<_> = path.into_iter().filter_map(|p| frame.screen(p)).collect();
             if points.len() == 1 {
-                painter.circle_stroke(points[0], 4.0, Stroke::new(1.5, theme::accent()));
+                painter.circle_stroke(points[0], 4.0, Stroke::new(1.5, theme::highlight()));
             } else if *construction {
-                painter.extend(egui::Shape::dashed_line(&points, Stroke::new(1.5, theme::accent()), 6.0, 4.0));
+                painter.extend(egui::Shape::dashed_line(&points, Stroke::new(1.5, theme::highlight()), 6.0, 4.0));
             } else if points.len() > 1 {
-                painter.add(egui::Shape::line(points, Stroke::new(1.5, theme::accent())));
+                painter.add(egui::Shape::line(points, Stroke::new(1.5, theme::highlight())));
             }
         }
     }
@@ -421,7 +421,7 @@ pub fn run(
             Align2::LEFT_BOTTOM,
             format!("Dynamic mirror · Line {axis} · Esc stops"),
             theme::font_semibold(11.0),
-            theme::accent(),
+            theme::highlight(),
         );
     }
     paint_tool_preview(&painter, &frame, s);
@@ -431,7 +431,7 @@ pub fn run(
     {
         let trail: Vec<Pos2> = drag.path.iter().filter_map(|p| frame.screen(*p)).collect();
         if trail.len() > 1 {
-            painter.add(egui::Shape::line(trail, Stroke::new(1.5, theme::accent())));
+            painter.add(egui::Shape::line(trail, Stroke::new(1.5, theme::highlight())));
         }
         for cut in &drag.checkpoints {
             if let Some(at) = frame.screen(cut.at) {
@@ -1481,7 +1481,7 @@ fn paint_plane(painter: &egui::Painter, frame: &Frame<'_>, doc: &Document, sketc
         painter.add(egui::Shape::convex_polygon(
             pts.clone(),
             if light_sheet { theme::edit_suite::SKETCH_SHEET } else { theme::accent_alpha(10) },
-            if light_sheet { Stroke::NONE } else { Stroke::new(1.0, theme::accent().gamma_multiply(0.35)) },
+            if light_sheet { Stroke::NONE } else { Stroke::new(1.0, theme::highlight().gamma_multiply(0.35)) },
         ));
     }
     // Axes of the sketch frame through the origin.
@@ -1602,14 +1602,14 @@ fn paint_entities(painter: &egui::Painter, frame: &Frame<'_>, s: &SketchSession,
                 let halo = if is_sel || is_related {
                     Stroke::new(6.0, theme::selection_bg())
                 } else {
-                    Stroke::new(6.0, theme::accent().gamma_multiply(HOVER_HALO))
+                    Stroke::new(6.0, theme::highlight().gamma_multiply(HOVER_HALO))
                 };
                 if pts.len() >= 2 {
                     painter.add(egui::Shape::line(pts.clone(), halo));
                 }
             }
             let stroke =
-                Stroke::new(if e.construction { 1.0 } else { 1.8 }, if is_sel { theme::accent() } else { color });
+                Stroke::new(if e.construction { 1.0 } else { 1.8 }, if is_sel { theme::highlight() } else { color });
             if e.is_point() {
                 continue;
             }
@@ -1657,13 +1657,13 @@ fn paint_entities(painter: &egui::Painter, frame: &Frame<'_>, s: &SketchSession,
                 painter.circle_filled(sp, 7.0, theme::selection_bg());
             }
             if e.id == crate::sketch::ORIGIN {
-                let stroke = Stroke::new(1.2, if is_sel { theme::accent() } else { theme::muted() });
+                let stroke = Stroke::new(1.2, if is_sel { theme::highlight() } else { theme::muted() });
                 painter.line_segment([sp + vec2(-6.0, 0.0), sp + vec2(6.0, 0.0)], stroke);
                 painter.line_segment([sp + vec2(0.0, -6.0), sp + vec2(0.0, 6.0)], stroke);
                 painter.circle_stroke(sp, 3.0, stroke);
                 continue;
             }
-            let fill = if is_sel { theme::accent() } else { color };
+            let fill = if is_sel { theme::highlight() } else { color };
             if is_center {
                 painter.line_segment([sp + vec2(-4.0, 0.0), sp + vec2(4.0, 0.0)], Stroke::new(1.2, fill));
                 painter.line_segment([sp + vec2(0.0, -4.0), sp + vec2(0.0, 4.0)], Stroke::new(1.2, fill));
@@ -1834,8 +1834,8 @@ pub(crate) enum GlyphLook {
 /// Paints the glyph of a relation in the box `r`, as the sketch shows it.
 pub(crate) fn paint_glyph(painter: &egui::Painter, kind: &ConstraintKind, r: Rect, look: GlyphLook) {
     let (bg, fg) = match look {
-        GlyphLook::Selected => (theme::accent(), theme::on_accent()),
-        GlyphLook::Broken => (theme::error(), theme::on_accent()),
+        GlyphLook::Selected => (theme::highlight(), theme::on_highlight()),
+        GlyphLook::Broken => (theme::error(), theme::on_highlight()),
         GlyphLook::Hovered => (theme::selection_bg(), theme::selection_ink()),
         GlyphLook::Plain => (theme::hud_bg(), theme::muted()),
     };
@@ -1981,7 +1981,7 @@ fn paint_dimensions(painter: &egui::Painter, frame: &Frame<'_>, s: &SketchSessio
         let color = if bad {
             theme::error()
         } else if sel {
-            theme::accent()
+            theme::highlight()
         } else {
             theme::edit_suite::DIMENSION
         };
@@ -1999,7 +1999,7 @@ fn paint_dimensions(painter: &egui::Painter, frame: &Frame<'_>, s: &SketchSessio
         };
         let ink = if bad { theme::error() } else { theme::ink() };
         let edge = if sel {
-            theme::accent()
+            theme::highlight()
         } else if bad {
             theme::error()
         } else {
@@ -2016,7 +2016,7 @@ fn paint_dimension_placing(painter: &egui::Painter, frame: &Frame<'_>, s: &Sketc
         return;
     }
     let Some(first) = s.dim_first else { return };
-    let picked = Stroke::new(3.0, theme::accent());
+    let picked = Stroke::new(3.0, theme::highlight());
     for sel in std::iter::once(first).chain(s.dim_second) {
         match sel {
             SketchSel::Entity(id) => {
@@ -2024,7 +2024,7 @@ fn paint_dimension_placing(painter: &egui::Painter, frame: &Frame<'_>, s: &Sketc
                 for path in entity.polylines(64) {
                     let points: Vec<Pos2> = path.into_iter().filter_map(|p| frame.screen(p)).collect();
                     if points.len() == 1 {
-                        painter.circle(points[0], 4.5, theme::accent(), Stroke::new(1.5, theme::hud_bg()));
+                        painter.circle(points[0], 4.5, theme::highlight(), Stroke::new(1.5, theme::hud_bg()));
                     } else if points.len() > 1 {
                         painter.add(egui::Shape::line(points, picked));
                     }
@@ -2032,7 +2032,7 @@ fn paint_dimension_placing(painter: &egui::Painter, frame: &Frame<'_>, s: &Sketc
             }
             SketchSel::Point(point) => {
                 if let Some(at) = s.sketch.point(point).and_then(|p| frame.screen(p)) {
-                    painter.circle(at, 4.5, theme::accent(), Stroke::new(1.5, theme::hud_bg()));
+                    painter.circle(at, 4.5, theme::highlight(), Stroke::new(1.5, theme::hud_bg()));
                 }
             }
             SketchSel::Constraint(_) => {}
@@ -2043,14 +2043,14 @@ fn paint_dimension_placing(painter: &egui::Painter, frame: &Frame<'_>, s: &Sketc
     let c = Constraint { id: 0, kind };
     let Some(label) = c.label() else { return };
     let Some(lp) = frame.screen(label) else { return };
-    paint_dimension_lines(painter, frame, &s.sketch, &c, label, lp, theme::accent());
+    paint_dimension_lines(painter, frame, &s.sketch, &c, label, lp, theme::highlight());
     value_pill(
         painter,
         lp,
         dim_text(&c, &s.sketch),
         theme::ink(),
         theme::selection_bg(),
-        Stroke::new(1.0, theme::accent()),
+        Stroke::new(1.0, theme::highlight()),
     );
 }
 
@@ -2258,7 +2258,7 @@ pub fn paint_closed_dimensions(
             let label = P2::new(relative.dot(gv(plane.x_dir)) as f64, relative.dot(gv(plane.y_dir())) as f64);
             let Some(lp) = frame.screen(label) else { continue };
             let hover = pointer.is_some_and(|p| Rect::from_center_size(at, size).contains(p));
-            let color = if hover { theme::accent() } else { theme::dimension_line(dark) };
+            let color = if hover { theme::highlight() } else { theme::dimension_line(dark) };
             paint_dimension_lines(painter, &frame, sketch, c, label, lp, color);
             if at.distance_sq(lp) > 0.01 {
                 painter.line_segment([lp, at], Stroke::new(1.0, color));
@@ -2286,7 +2286,7 @@ fn clear_dimension_spot(mut at: Pos2, size: egui::Vec2, taken: &[Rect]) -> Pos2 
 
 fn paint_rubber_band(painter: &egui::Painter, frame: &Frame<'_>, s: &SketchSession, snapped: Option<P2>) {
     let Some(p) = snapped else { return };
-    let st = Stroke::new(1.5, theme::accent().gamma_multiply(0.8));
+    let st = Stroke::new(1.5, theme::highlight().gamma_multiply(0.8));
     let seg = |a: P2, b: P2| {
         if let (Some(sa), Some(sb)) = (frame.screen(a), frame.screen(b)) {
             painter.line_segment([sa, sb], st);
@@ -2409,7 +2409,7 @@ fn paint_tool_preview(painter: &egui::Painter, frame: &Frame<'_>, s: &SketchSess
     if let Some((a, b)) = guide
         && let (Some(a), Some(b)) = (frame.screen(a), frame.screen(b))
     {
-        let stroke = Stroke::new(1.5, theme::accent());
+        let stroke = Stroke::new(1.5, theme::highlight());
         painter.add(egui::Shape::dashed_line(&[a, b], stroke, 5.0, 4.0));
         for p in [a, b] {
             painter.circle_stroke(p, 4.0, stroke);
@@ -2434,8 +2434,11 @@ fn paint_tool_preview(painter: &egui::Painter, frame: &Frame<'_>, s: &SketchSess
     };
     for kind in &preview.removed {
         let keep = s.tool.trims() && s.trim_options.keep_as_construction;
-        let stroke =
-            if keep { Stroke::new(1.5, theme::accent()) } else { Stroke::new(4.0, theme::error().gamma_multiply(0.9)) };
+        let stroke = if keep {
+            Stroke::new(1.5, theme::highlight())
+        } else {
+            Stroke::new(4.0, theme::error().gamma_multiply(0.9))
+        };
         curve(kind.clone(), stroke, keep);
     }
     for (index, kind) in preview.added.iter().enumerate() {
@@ -2449,7 +2452,7 @@ fn paint_tool_preview(painter: &egui::Painter, frame: &Frame<'_>, s: &SketchSess
             Some(Operation::Split { entity, .. }) => s.sketch.entity(*entity).is_some_and(|e| e.construction),
             _ => false,
         });
-        curve(kind.clone(), Stroke::new(2.0, theme::accent()), guide);
+        curve(kind.clone(), Stroke::new(2.0, theme::highlight()), guide);
     }
     if s.tool == Tool::Split {
         let points: Vec<_> = match &preview.operation {
@@ -2462,7 +2465,7 @@ fn paint_tool_preview(painter: &egui::Painter, frame: &Frame<'_>, s: &SketchSess
         };
         for point in points {
             if let Some(at) = frame.screen(point) {
-                painter.circle_stroke(at, 4.5, Stroke::new(2.0, theme::accent()));
+                painter.circle_stroke(at, 4.5, Stroke::new(2.0, theme::highlight()));
             }
         }
     }
@@ -2496,7 +2499,7 @@ fn paint_snaps(
     if hover.is_none() {
         return;
     }
-    let accent = theme::accent();
+    let accent = theme::highlight();
     // Construction line previews already show this path. A second dash period
     // would fill their gaps; keep the inference badges below without the overlay.
     if let Some((prev, _)) = s.pending.last()
@@ -2673,7 +2676,7 @@ fn paint_status(ui: &mut egui::Ui, s: &mut SketchSession, rect: Rect) {
     let painter = ui.painter().with_clip_rect(rect);
     let (status_color, status) = match &s.sketch.status {
         SolveStatus::Empty => (theme::muted(), "Empty sketch".to_owned()),
-        SolveStatus::UnderDefined => (theme::accent(), "Under defined".to_owned()),
+        SolveStatus::UnderDefined => (theme::highlight(), "Under defined".to_owned()),
         SolveStatus::FullyDefined => (theme::ok(), "Fully defined".to_owned()),
         SolveStatus::OverDefined { conflicting } => {
             (theme::error(), format!("Over defined · {} conflicting", conflicting.len()))

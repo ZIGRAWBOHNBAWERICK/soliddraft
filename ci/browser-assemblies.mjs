@@ -25,7 +25,7 @@
 // the page asks which one to open, the visitor chooses the parent, and it opens with the
 // child and its parts found. Then one later feature on top: the tray inserted in the
 // parent the choice opened. Then the same upload again with the choice left unanswered,
-// and the child opened alone through File > Open: the old choice is gone, so it cannot
+// and the child opened alone through the start page's Open tile, which the choice window leaves uncovered: the old choice is gone, so it cannot
 // open over the child.
 //
 // BEARING is ci/fixtures/universal-joint/bearing.dwasm: the rig with its Universal Joint
@@ -34,6 +34,22 @@
 // which would set the shafts at right angles. The drag is refused by name and leaves the
 // placements, the mates and undo as they were. Then one later feature on top: 60 degrees
 // in the same field is taken, the output shaft follows its bore, and Undo puts it back.
+//
+// Then configurations and the exploded view on the saved tray assembly, opened with its
+// parts: the visitor opens the Configurations panel, names a configuration Lifted and adds
+// it, activates it, and explodes it with Auto explode. The parts move apart on screen and
+// their placements do not; Explode collapses them back. Saved and opened again with its
+// parts, the assembly is in Lifted with its exploded view, and activating Default, made
+// before the view, shows none: each configuration keeps its own.
+//
+// Then the Mate Controller on the saved tray assembly: the floor mate is set as the driven
+// mate, its value saved as position low, raised 12 mm through the controller's value field
+// and saved as high, animated back to low, saved, opened again with both positions, and
+// high applied.
+// Last, Pack and Go and the robot exports, which download: the rig packs into one zip,
+// whose files open again as the rig with every part found beside it and take a shaft
+// inserted on top; Export URDF downloads the URDF and its meshes as one zip, Export USD a
+// .usda file. Both still describe the assembled poses while the viewport is exploded.
 //
 // The app draws into one canvas and takes only trusted input: keys and clicks sent as the
 // browser's own, through the DevTools protocol. The canvas has no text to read, so the
@@ -46,7 +62,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { startChrome, stopChrome } from './chrome.mjs';
+import { CanvasBrowser } from './canvas-browser.mjs';
 
 const [chrome, url, out, tray, collar, rig, block, shaft, bearing] = process.argv.slice(2);
 if (!chrome || !url || !out || !tray || !collar || !rig || !block || !shaft || !bearing) {
@@ -59,9 +75,6 @@ fs.mkdirSync(downloads, { recursive: true });
 const SIZE = { width: 1400, height: 813 };
 const NEW_ASSEMBLY = [304, 145];
 const OPEN = [663, 147];
-// The File menu, and its Open item once the menu is open.
-const FILE_MENU = [122, 15];
-const FILE_OPEN = [132, 68];
 // The tray is 60 x 40 x 20 mm, open at the top, with 2 mm walls: its floor is 2 mm up.
 const FLOOR = 2;
 
@@ -89,222 +102,12 @@ function sameTurn(p, q, tolerance) {
   return [[1, 0, 0], [0, 1, 0]].every(axis => rotate(p, axis).every((x, i) => Math.abs(x - rotate(q, axis)[i]) < tolerance));
 }
 
-class Browser {
-  constructor(profile) {
-    this.profile = profile;
-    this.process = startChrome(chrome, [
-      '--headless=new', '--remote-debugging-port=0', `--user-data-dir=${profile}`,
-      '--no-first-run', '--no-default-browser-check', `--window-size=${SIZE.width},${SIZE.height}`, ...extra, 'about:blank',
-    ]);
-    this.stderr = '';
-    this.process.stderr.on('data', d => { this.stderr += d; });
-    this.events = [];
-  }
-
-  async connect() {
-    const file = path.join(this.profile, 'DevToolsActivePort');
-    let port;
-    for (let t = 0; t < 100 && !port; t++) {
-      if (fs.existsSync(file)) [port] = fs.readFileSync(file, 'utf8').split('\n');
-      if (!port) await sleep(100);
-    }
-    check(port, 'Chrome did not open its DevTools port');
-    const version = await (await fetch(`http://127.0.0.1:${port}/json/version`)).json();
-    this.ws = new WebSocket(version.webSocketDebuggerUrl);
-    await new Promise((resolve, reject) => { this.ws.onopen = resolve; this.ws.onerror = reject; });
-    this.id = 0;
-    this.waiting = new Map();
-    this.ws.onmessage = event => {
-      const m = JSON.parse(event.data);
-      if (m.id && this.waiting.has(m.id)) {
-        const { resolve, reject } = this.waiting.get(m.id);
-        this.waiting.delete(m.id);
-        if (m.error) reject(new Error(`${m.error.message} ${m.error.data || ''}`)); else resolve(m.result);
-      } else if (m.method) {
-        this.events.push(m);
-      }
-    };
-    return this;
-  }
-
-  send(method, params = {}, sessionId) {
-    return new Promise((resolve, reject) => {
-      const n = ++this.id;
-      this.waiting.set(n, { resolve, reject });
-      this.ws.send(JSON.stringify({ id: n, method, params, sessionId }));
-    });
-  }
-
-  async visitor() {
-    const { targetId } = await this.send('Target.createTarget', { url: 'about:blank' });
-    const { sessionId } = await this.send('Target.attachToTarget', { targetId, flatten: true });
-    const call = (method, params) => this.send(method, params, sessionId);
-    const events = this.events;
-    await call('Page.enable');
-    await call('Emulation.setDeviceMetricsOverride', { ...SIZE, deviceScaleFactor: 1, mobile: false });
-    // The app draws on animation frames, which a page in the background does not get.
-    await call('Emulation.setFocusEmulationEnabled', { enabled: true });
-    await call('Page.bringToFront');
-    await this.send('Browser.setDownloadBehavior', { behavior: 'allow', downloadPath: downloads, eventsEnabled: true });
-    const v = {
-      async eval(expression) {
-        const r = await call('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true });
-        if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description || r.exceptionDetails.text);
-        return r.result.value;
-      },
-      async load() {
-        await call('Page.bringToFront');
-        await call('Page.navigate', { url });
-        for (let t = 0; t < 240; t++) {
-          await sleep(500);
-          const ready = await v.eval(`document.readyState === 'complete' && !!document.querySelector('#status.hidden')`).catch(() => false);
-          if (ready) {
-            await sleep(3000);
-            return;
-          }
-        }
-        await v.shot('not-started');
-        throw new Error('the app did not start');
-      },
-      async frames(n = 3) {
-        await v.eval(`new Promise(done => { let left = ${n}; const tick = () => --left ? requestAnimationFrame(tick) : done(); requestAnimationFrame(tick); })`);
-      },
-      async settle(ms) {
-        await sleep(ms);
-        await v.frames();
-      },
-      async click([x, y]) {
-        await call('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y });
-        await v.settle(300);
-        await call('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount: 1 });
-        await sleep(80);
-        await call('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', buttons: 0, clickCount: 1 });
-        await v.settle(600);
-      },
-      // A click on a face in the viewport. The pointer rests on it first, so the id
-      // buffer read back around it is current, and the press and release go together:
-      // a software renderer can take a second a frame, and a press held across frames
-      // reads as the start of a drag.
-      async pick([x, y]) {
-        await call('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y });
-        await v.settle(1500);
-        await call('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount: 1 });
-        await call('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', buttons: 0, clickCount: 1 });
-        await v.settle(1000);
-      },
-      async key(key, code, keyCode, modifiers = 0, text) {
-        const base = { key, code, windowsVirtualKeyCode: keyCode, nativeVirtualKeyCode: keyCode, modifiers };
-        await call('Input.dispatchKeyEvent', { type: text ? 'keyDown' : 'rawKeyDown', ...base, text });
-        await call('Input.dispatchKeyEvent', { type: 'keyUp', ...base });
-        await v.settle(600);
-      },
-      // Ctrl+Shift+P, the command's name, Enter.
-      async command(name, enter = () => v.key('Enter', 'Enter', 13, 0, '\r')) {
-        await call('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 1000, y: 450 });
-        await v.key('P', 'KeyP', 80, 2 | 8, 'P');
-        for (const ch of name) {
-          await call('Input.dispatchKeyEvent', { type: 'char', text: ch });
-          await sleep(30);
-        }
-        await v.settle(500);
-        await enter();
-      },
-      // Runs `trigger`, which opens a file dialog, and answers the dialog with `files`.
-      async choose(files, trigger) {
-        await call('Page.setInterceptFileChooserDialog', { enabled: true });
-        const from = events.length;
-        await trigger();
-        for (let t = 0; t < 100; t++) {
-          const opened = events.slice(from).find(e => e.method === 'Page.fileChooserOpened');
-          if (opened) {
-            await call('DOM.setFileInputFiles', { files: [files].flat().map(f => path.resolve(f)), backendNodeId: opened.params.backendNodeId });
-            await call('Page.setInterceptFileChooserDialog', { enabled: false });
-            await v.settle(1500);
-            return;
-          }
-          await sleep(100);
-        }
-        await v.shot('no-file-dialog');
-        throw new Error('no file dialog opened');
-      },
-      // Runs `trigger` and waits for the download it starts; answers the file's path.
-      async download(label, trigger) {
-        const from = events.length;
-        await trigger();
-        for (let t = 0; t < 600; t++) {
-          const mine = events.slice(from);
-          const begun = mine.find(e => e.method === 'Browser.downloadWillBegin');
-          const done = begun && mine.find(e => e.method === 'Browser.downloadProgress' && e.params.guid === begun.params.guid && e.params.state === 'completed');
-          if (done) {
-            // Chrome keeps the file under its download id.
-            const kept = path.join(downloads, begun.params.guid);
-            const named = path.join(downloads, begun.params.suggestedFilename);
-            if (fs.existsSync(kept)) fs.renameSync(kept, named);
-            check(fs.existsSync(named), `${label}: ${begun.params.suggestedFilename} is not in ${downloads}`);
-            return named;
-          }
-          await v.stopped(label);
-          await sleep(200);
-        }
-        await v.shot(`no-download-${label}`);
-        throw new Error(`${label}: no download arrived`);
-      },
-      // The page shows its status element again when it stops.
-      async stopped(label) {
-        const status = await v.eval(`(() => { const s = document.getElementById('status'); return s.classList.contains('hidden') ? null : s.textContent; })()`);
-        check(status === null, `${label}: the page stopped: ${status}`);
-      },
-      // The assembly as the last frame showed it, once `done` says it is what the step
-      // waits for.
-      async assembly(label, done) {
-        let shown = null;
-        for (let t = 0; t < 900; t++) {
-          await v.stopped(label);
-          const text = await v.eval(`window.wasmBindings.shown_assembly()`);
-          shown = text ? JSON.parse(text) : null;
-          if (shown && done(shown)) return shown;
-          await sleep(200);
-        }
-        await v.shot(`assembly-${label}`);
-        throw new Error(`${label}: the assembly is ${JSON.stringify(shown)}`);
-      },
-      // The centre of the control `name` in the last frame, once it is drawn.
-      async control(name) {
-        for (let t = 0; t < 100; t++) {
-          const text = await v.eval(`window.wasmBindings.shown_controls()`);
-          const at = text ? JSON.parse(text)[name] : null;
-          if (at) return [at.x, at.y];
-          await sleep(100);
-        }
-        await v.shot(`no-control-${name.replace(/\W+/g, '-')}`);
-        throw new Error(`no control named ${name} is drawn`);
-      },
-      // Where a point of the assembly was drawn, in the page's pixels.
-      async screen(x, y, z) {
-        const at = await v.eval(`(() => { const p = window.wasmBindings.assembly_screen_point(${x}, ${y}, ${z}); return p ? Array.from(p) : null; })()`);
-        check(at, `the point (${x}, ${y}, ${z}) is not on screen`);
-        return at;
-      },
-      async shot(label) {
-        const { data } = await call('Page.captureScreenshot', { format: 'png' });
-        fs.writeFileSync(path.join(out, `${label}.png`), Buffer.from(data, 'base64'));
-      },
-    };
-    return v;
-  }
-
-  async close() {
-    const connected = this.ws?.readyState === WebSocket.OPEN;
-    await stopChrome(this.process, connected ? () => this.send('Browser.close') : null);
-    this.ws?.close();
-  }
-}
-
 const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'soliddraft-assemblies-'));
 let browser;
 
 async function main() {
-  browser = await new Browser(profile).connect();
+  browser = new CanvasBrowser({ chrome, profile, size: SIZE, url, out, downloads, extra });
+  await browser.connect();
   const v = await browser.visitor();
   step('load the site');
   await v.load();
@@ -355,6 +158,10 @@ async function main() {
   step('save');
   const saved = await v.download('save', () => v.key('s', 'KeyS', 83, 2, 's'));
   check(saved.endsWith('.dwasm'), `the assembly saves as a .dwasm file, not ${saved}`);
+  // Later downloads can take the same name, so the configurations and Mate Controller
+  // sections get a copy.
+  const trayAssembly = path.join(downloads, 'tray-assembly.dwasm');
+  fs.copyFileSync(saved, trayAssembly);
   shown = await v.assembly('saved', s => !s.dirty);
   step('load the site again and open the saved assembly with its parts');
   await v.load();
@@ -382,9 +189,12 @@ async function main() {
   const joint = await universalJoint(v);
   const choice = await chosenAssembly(v, saved, [tray, collar], parts(mated));
   const bearingDrag = await refusedDrag(v);
+  const configured = await configuredExplode(v, trayAssembly, [tray, collar], mated);
+  const controller = await mateController(v, trayAssembly, [tray, collar], mated);
+  const packAndGo = await packAndExport(v);
 
-  fs.writeFileSync(path.join(out, 'assemblies.json'), JSON.stringify({ mated, reopened, alone, saved: path.basename(saved), joint, choice, bearing: bearingDrag }, null, 1));
-  console.log(`Assemblies in the browser: three components from two uploads, a mate picked in the viewport putting the second tray ${FLOOR} mm up on the first one's floor, saved as ${path.basename(saved)}, reopened with its parts at the same placements with the mate kept, and opened alone from the copies it keeps. A Universal Joint picked between two shafts meeting at ${BEND} degrees drove the output ${joint.follows.toFixed(6)} degrees for a ${TURN} degree input turn, and reopened with its parts. A parent and its child assembly uploaded child first opened the parent the visitor chose, with ${choice.chosen.held.length} files held for it, and took a tray inserted on top. Turning the joint's free output block to set the shafts at right angles was refused by name with nothing changed, and a 60 degree turn after it was taken and undone.`);
+  fs.writeFileSync(path.join(out, 'assemblies.json'), JSON.stringify({ mated, reopened, alone, saved: path.basename(saved), joint, choice, bearing: bearingDrag, configured, controller, packAndGo }, null, 1));
+  console.log(`Assemblies in the browser: three components from two uploads, a mate picked in the viewport putting the second tray ${FLOOR} mm up on the first one's floor, saved as ${path.basename(saved)}, reopened with its parts at the same placements with the mate kept, and opened alone from the copies it keeps. A Universal Joint picked between two shafts meeting at ${BEND} degrees drove the output ${joint.follows.toFixed(6)} degrees for a ${TURN} degree input turn, and reopened with its parts. A parent and its child assembly uploaded child first opened the parent the visitor chose, with ${choice.chosen.held.length} files held for it, and took a tray inserted on top. Turning the joint's free output block to set the shafts at right angles was refused by name with nothing changed, and a 60 degree turn after it was taken and undone. A configuration added and activated in the panel took an auto exploded view that moved ${configured.moved} parts on screen and no placement, saved, reopened in that configuration, and showed no exploded view in Default. The floor mate, driven from the Mate Controller, saved low and 12 mm higher positions, animated back to low, and reopened with both, high applying again. Pack and Go downloaded the rig and its two parts as one zip, which opened again with every part found beside it and took the shaft inserted again; Export URDF downloaded the URDF with ${packAndGo.urdf.entries - 1} meshes as one zip, and Export USD a .usda file.`);
 }
 
 // The rig's shafts: the input (component 4) on a hinge at (10, 5, 0) along Z, the output
@@ -530,7 +340,7 @@ async function chosenAssembly(v, saved, files, placed) {
   await v.load();
   await v.choose([child, parent, ...files], () => v.click(OPEN));
   await v.assembly('choosing again', s => !s.open && !s.opening && s.choosing?.length === 2);
-  await v.choose([child, ...files], async () => { await v.click(FILE_MENU); await v.click(FILE_OPEN); });
+  await v.choose([child, ...files], () => v.click(OPEN));
   await v.assembly('child alone', s => loaded(s) && s.file === 'child.dwasm' && s.components.every(c => c.freshness !== 'unchecked'));
   await v.settle(1000);
   const replaced = JSON.parse(await v.eval(`window.wasmBindings.shown_assembly()`));
@@ -611,6 +421,232 @@ async function refusedDrag(v) {
   check(JSON.stringify(shown.mate_names) === JSON.stringify(before.mate_names), `after Undo the mates are ${shown.mate_names}`);
   await v.stopped('bearing at the end');
   return { refused, turned, undone: shown };
+}
+
+// Types `text` into the focused field, a key at a time.
+// Reads a zip whose entries are stored as they are, as Pack and Go and the exports write
+// them, into `dir`; answers the entries' names in file order.
+function unzip(file, dir) {
+  const zip = fs.readFileSync(file);
+  let end = zip.length - 22;
+  while (end >= 0 && zip.readUInt32LE(end) !== 0x06054b50) end--;
+  check(end >= 0, `${file} is not a zip`);
+  const count = zip.readUInt16LE(end + 10);
+  let at = zip.readUInt32LE(end + 16);
+  const names = [];
+  for (let i = 0; i < count; i++) {
+    check(zip.readUInt32LE(at) === 0x02014b50, `${file}: entry ${i} has no directory record`);
+    check(zip.readUInt16LE(at + 10) === 0, `${file}: entry ${i} is compressed`);
+    const size = zip.readUInt32LE(at + 20);
+    const nameLength = zip.readUInt16LE(at + 28);
+    const skip = zip.readUInt16LE(at + 30) + zip.readUInt16LE(at + 32);
+    const local = zip.readUInt32LE(at + 42);
+    const name = zip.toString('utf8', at + 46, at + 46 + nameLength);
+    const data = local + 30 + zip.readUInt16LE(local + 26) + zip.readUInt16LE(local + 28);
+    const to = path.join(dir, name);
+    fs.mkdirSync(path.dirname(to), { recursive: true });
+    fs.writeFileSync(to, zip.subarray(data, data + size));
+    names.push(name);
+    at += 46 + nameLength + skip;
+  }
+  return names;
+}
+
+// Pack and Go and the robot exports, where the page has no folders: each arrives as a
+// download. The Universal Joint rig, opened with its two parts, packs into one zip of the
+// rig and both parts. Loaded afresh, the three unpacked files open as the rig did, every
+// part found beside it and current, and take a later feature on top: the shaft inserted
+// again. Export URDF downloads one zip of the URDF and its meshes folder, every mesh the
+// URDF names inside it; Export USD downloads one .usda file with its joints.
+async function packAndExport(v) {
+  step('open the Universal Joint rig with its parts and an unrelated upload named block.dwprt');
+  const duplicate = path.join(downloads, 'unrelated', 'block.dwprt');
+  fs.mkdirSync(path.dirname(duplicate), { recursive: true });
+  fs.copyFileSync(collar, duplicate);
+  await v.load();
+  await v.choose([rig, duplicate, block, shaft], () => v.click(OPEN));
+  const ready = s => loaded(s) && s.components.length === 4 && s.components.every(c => c.freshness !== 'unchecked');
+  const opened = await v.assembly('rig to pack', ready);
+  check(opened.held.filter(name => name === 'block.dwprt').length === 2, `the page holds ${opened.held}`);
+
+  step('Pack and Go downloads one zip');
+  const zip = await v.download('pack', () => v.command('Pack and Go'));
+  check(path.basename(zip) === 'rig.zip', `Pack and Go downloads rig.zip, not ${path.basename(zip)}`);
+  const unpacked = path.join(downloads, 'unpacked');
+  const packed = unzip(zip, unpacked).sort();
+  check(JSON.stringify(packed) === '["block.dwprt","rig.dwasm","shaft.dwprt"]', `the zip holds ${packed}`);
+  check(fs.readFileSync(path.join(unpacked, 'block.dwprt')).equals(fs.readFileSync(block)), 'the zip holds the wrong block.dwprt upload');
+
+  step('load the site again and open the unpacked rig with its parts');
+  await v.load();
+  await v.choose(packed.map(n => path.join(unpacked, n)), () => v.click(OPEN));
+  let shown = await v.assembly('unpacked', ready);
+  check(JSON.stringify(parts(shown)) === JSON.stringify(parts(opened)), `the unpacked rig's components are ${parts(shown)}`);
+  check(near(placements(shown), placements(opened)), `the unpacked placements are ${JSON.stringify(placements(shown))}`);
+  check(shown.mates === opened.mates, `the unpacked rig has ${shown.mates} mates, not ${opened.mates}`);
+  check(shown.components.every(c => c.state === 'DisplayReady' && c.freshness === 'current' && !c.warning), `not every unpacked part is found: ${JSON.stringify(shown.components)}`);
+  await v.shot('16-unpacked');
+
+  step('insert the unpacked shaft again');
+  await v.choose(path.join(unpacked, 'shaft.dwprt'), () => v.command('Insert component'));
+  shown = await v.assembly('inserted in the unpacked rig', s => loaded(s) && s.components.length === 5);
+  check(parts(shown)[4] === 'shaft', `the fifth component is ${parts(shown)[4]}`);
+
+  const assembled = placements(shown);
+  const assembledZip = await v.download('urdf-assembled', () => v.command('Export URDF'));
+  const assembledRobot = path.join(downloads, 'robot-assembled');
+  const assembledName = unzip(assembledZip, assembledRobot).find(n => n.endsWith('.urdf'));
+  check(assembledName, 'the assembled export contains a URDF');
+  const assembledUrdf = fs.readFileSync(path.join(assembledRobot, assembledName), 'utf8');
+  const assembledUsd = fs.readFileSync(await v.download('usd-assembled', () => v.command('Export USD')), 'utf8');
+  await v.command('Configurations');
+  await v.assembly('configurations panel', s => s.configure_open);
+  await v.click(await v.control('Auto explode'));
+  shown = await v.assembly('rig exploded', s => s.exploded || s.note?.kind === 'Error');
+  check(shown.exploded && !near(placements(shown), assembled), 'Auto explode leaves at least one part visibly displaced');
+
+  step('Export URDF downloads the URDF and its meshes as one zip');
+  const urdfZip = await v.download('urdf', () => v.command('Export URDF'));
+  check(urdfZip.endsWith('.zip'), `Export URDF downloads a zip, not ${path.basename(urdfZip)}`);
+  const robot = path.join(downloads, 'robot');
+  const entries = unzip(urdfZip, robot);
+  const urdfName = entries.find(n => n.endsWith('.urdf'));
+  check(urdfName && !urdfName.includes('/'), `the zip has no URDF at its top: ${entries}`);
+  const urdf = fs.readFileSync(path.join(robot, urdfName), 'utf8');
+  check(urdf === assembledUrdf, 'the URDF changes when the assembly is exploded');
+  const meshes = [...urdf.matchAll(/filename="([^"]+)"/g)].map(m => m[1]);
+  check(meshes.length >= 5, `the URDF names ${meshes.length} meshes`);
+  check(meshes.every(m => entries.includes(m)), `the zip lacks meshes the URDF names: ${meshes.filter(m => !entries.includes(m))}`);
+  const moving = [...urdf.matchAll(/<joint [^>]*type="(revolute|continuous)"/g)].length;
+  check(moving === 2, `the URDF has ${moving} moving joints for the two hinges`);
+
+  step('Export USD downloads one .usda file');
+  const usd = await v.download('usd', () => v.command('Export USD'));
+  check(usd.endsWith('.usda'), `Export USD downloads a .usda file, not ${path.basename(usd)}`);
+  const usda = fs.readFileSync(usd, 'utf8');
+  check(usda.startsWith('#usda') && /Physics(Revolute|Fixed)Joint/.test(usda), 'the .usda file has no joints');
+  check(usda === assembledUsd, 'the USD changes when the assembly is exploded');
+  await v.stopped('after the exports');
+  return { packed, unpacked: placements(shown), urdf: { file: urdfName, entries: entries.length, moving }, usd: path.basename(usd) };
+}
+
+async function type(v, text) {
+  for (const ch of text) {
+    const code = /[0-9]/.test(ch) ? `Digit${ch}` : `Key${ch.toUpperCase()}`;
+    await v.key(ch, code, ch.toUpperCase().charCodeAt(0), 0, ch);
+  }
+}
+
+async function configuredExplode(v, saved, files, mated) {
+  step('load the site again and open the saved assembly with its parts');
+  await v.load();
+  await v.choose([saved, ...files], () => v.click(OPEN));
+  let shown = await v.assembly('configurations', s => loaded(s) && s.components.length === 3 && s.components.every(c => c.freshness !== 'unchecked'));
+  check(shown.configurations.length === 0 && shown.explode_steps === 0, `the tray assembly starts with ${JSON.stringify(shown.configurations)} and ${shown.explode_steps} steps`);
+  const assembled = placements(shown);
+
+  step('add a configuration called Lifted in the Configurations panel');
+  await v.command('Configurations');
+  await v.assembly('configurations panel', s => s.configure_open);
+  await v.click(await v.control('Configuration name'));
+  await type(v, 'Lifted');
+  await v.click(await v.control('Add configuration'));
+  shown = await v.assembly('added', s => s.configurations.length === 2 || s.note?.kind === 'Error');
+  check(JSON.stringify(shown.configurations) === '["Default","Lifted"]', `the configurations are ${JSON.stringify(shown.configurations)}: ${JSON.stringify(shown.note)}`);
+  check(shown.active_configuration === 'Default', `${shown.active_configuration} is active after Add`);
+
+  step('activate Lifted and explode it');
+  await v.click(await v.control('Activate Lifted'));
+  shown = await v.assembly('lifted', s => s.active_configuration === 'Lifted');
+  await v.click(await v.control('Auto explode'));
+  shown = await v.assembly('exploded', s => s.exploded || s.note?.kind === 'Error');
+  check(shown.exploded && shown.explode_steps >= 1, `Auto explode did not explode: ${JSON.stringify(shown.note)}`);
+  const moved = shown.components.filter((c, i) => !near([c.translation], [assembled[i][0]])).length;
+  check(moved >= 1, `no part moved on screen: ${JSON.stringify(placements(shown))}`);
+  await v.command('Isometric');
+  await v.command('Fit');
+  await v.shot('16-exploded');
+
+  step('collapse the exploded view');
+  await v.click(await v.control('Explode or collapse'));
+  shown = await v.assembly('collapsed', s => !s.exploded);
+  check(near(placements(shown), assembled), `collapsed, the placements are ${JSON.stringify(placements(shown))}, not ${JSON.stringify(assembled)}`);
+  check(near(placements(shown), placements(mated)), 'the exploded view moved a placement');
+
+  step('save, open again and switch back to Default');
+  const again = await v.download('save configured', () => v.key('s', 'KeyS', 83, 2, 's'));
+  await v.load();
+  await v.choose([again, ...files], () => v.click(OPEN));
+  shown = await v.assembly('configured reopened', s => loaded(s) && s.components.length === 3 && s.components.every(c => c.freshness !== 'unchecked'));
+  check(shown.active_configuration === 'Lifted' && shown.explode_steps >= 1, `reopened in ${shown.active_configuration} with ${shown.explode_steps} steps`);
+  await v.command('Configurations');
+  await v.assembly('configurations panel again', s => s.configure_open);
+  await v.click(await v.control('Activate Default'));
+  shown = await v.assembly('default', s => s.active_configuration === 'Default');
+  check(shown.explode_steps === 0, `Default has ${shown.explode_steps} explode steps of Lifted's`);
+  check(near(placements(shown), assembled), `Default's placements are ${JSON.stringify(placements(shown))}`);
+  await v.stopped('configured at the end');
+  return { moved, reopened: shown.configurations };
+}
+
+
+// The Mate Controller on the saved tray assembly: the floor mate driven between two named
+// positions, an animation back to the first, saved and opened again with both positions.
+async function mateController(v, saved, files, mated) {
+  step('open the saved tray assembly and drive its floor mate from the Mate Controller');
+  await v.load();
+  await v.choose([saved, ...files], () => v.click(OPEN));
+  let shown = await v.assembly('controller opened', s => loaded(s) && s.components.length === 3 && s.components.every(c => c.freshness !== 'unchecked'));
+  const floor = mated.mate_names[0];
+  const height = s => { const [a, , b] = s.components.map(c => c.translation); return b[2] - a[2]; };
+  const start = height(shown);
+  await v.command('Mate');
+  await v.assembly('mate panel', s => s.mate_panel.open);
+  await v.click(await v.control('Mate more'));
+  await v.click(await v.control('Controller mates'));
+  await type(v, floor);
+  await v.click(await v.control('Set driven mates'));
+  shown = await v.assembly('driven', s => s.controller.mates.length === 1 || s.mate_panel.error);
+  check(JSON.stringify(shown.controller.mates) === JSON.stringify([floor]), `the controller drives ${JSON.stringify(shown.controller.mates)}: ${shown.mate_panel.error}`);
+  await v.click(await v.control('Position name'));
+  await type(v, 'low');
+  await v.click(await v.control('Save position'));
+  shown = await v.assembly('low saved', s => s.controller.positions.length === 1);
+
+  step('raise the second tray 12 mm through the controller and save that too');
+  await v.click(await v.control('Controller value 1'));
+  await v.key('a', 'KeyA', 65, 2, 'a');
+  await type(v, '12');
+  await v.click(await v.control('Apply values'));
+  shown = await v.assembly('raised', s => Math.abs(height(s) - start - 12) < 1e-9 || s.mate_panel.error);
+  check(Math.abs(height(shown) - start - 12) < 1e-9, `the tray stands ${height(shown)} mm up, not ${start + 12}: ${shown.mate_panel.error}`);
+  await v.click(await v.control('Position name'));
+  await v.key('a', 'KeyA', 65, 2, 'a');
+  await type(v, 'high');
+  await v.click(await v.control('Save position'));
+  shown = await v.assembly('high saved', s => s.controller.positions.length === 2);
+  check(JSON.stringify(shown.controller.positions) === '["low","high"]', `the positions are ${JSON.stringify(shown.controller.positions)}`);
+  await v.shot('17-controller-high');
+
+  step('animate back to low');
+  await v.click(await v.control('Animate to low'));
+  shown = await v.assembly('animated', s => !s.controller.animating && Math.abs(height(s) - start) < 1e-9);
+
+  step('save, open again and apply high');
+  const again = await v.download('save controller', () => v.key('s', 'KeyS', 83, 2, 's'));
+  await v.load();
+  await v.choose([again, ...files], () => v.click(OPEN));
+  shown = await v.assembly('controller reopened', s => loaded(s) && s.components.length === 3 && s.components.every(c => c.freshness !== 'unchecked'));
+  check(JSON.stringify(shown.controller.positions) === '["low","high"]', `reopened with ${JSON.stringify(shown.controller.positions)}`);
+  check(Math.abs(height(shown) - start) < 1e-9, `reopened ${height(shown)} mm up`);
+  await v.command('Mate');
+  await v.assembly('mate panel again', s => s.mate_panel.open);
+  await v.click(await v.control('Mate more'));
+  await v.click(await v.control('Apply high'));
+  shown = await v.assembly('high applied', s => Math.abs(height(s) - start - 12) < 1e-9 || s.mate_panel.error);
+  check(Math.abs(height(shown) - start - 12) < 1e-9, `Apply high left the tray ${height(shown)} mm up: ${shown.mate_panel.error}`);
+  await v.stopped('controller at the end');
+  return { floor, positions: shown.controller.positions };
 }
 
 try {

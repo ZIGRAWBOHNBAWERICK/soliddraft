@@ -11,7 +11,8 @@
 //!
 //! The kernel is wrapped in [`Counting`], which logs the mesh route of every request:
 //! the screen's display, a certified mesh, the print route of a mesh export or a field's
-//! certified STL. [`Gated`] holds a rebuild so its working state can be seen.
+//! certified STL. Catallax's own log also records certified work nested inside a
+//! display request. [`Gated`] holds a rebuild so its working state can be seen.
 
 mod gated;
 #[path = "support/ui.rs"]
@@ -26,6 +27,7 @@ use soliddraft_assistant::{Caller, tools::call_checked};
 use soliddraft_exchange::{Format, Report};
 use soliddraft_kernel_api::BodyId;
 use soliddraft_kernel_api::counting::{Counting, MeshRoute};
+use soliddraft_kernel_catallax::{APP_REQUEST_WORK, CatallaxKernel};
 use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -36,6 +38,29 @@ const UNPROVED: &str = "unproved preview";
 fn counted() -> (Arc<Counting>, Document) {
     let kernel = Arc::new(Counting::new(soliddraft_app::kernel()));
     (kernel.clone(), Document::new("Field preview", kernel))
+}
+
+fn observed_display() -> (Arc<CatallaxKernel>, Arc<Counting>, Document) {
+    let catallax = Arc::new(CatallaxKernel::with_diagnostics(APP_REQUEST_WORK));
+    let kernel = Arc::new(Counting::new(catallax.clone()));
+    let doc = Document::new("First display", kernel.clone());
+    (catallax, kernel, doc)
+}
+
+fn assert_first_display_used_no_certified_mesh(catallax: &CatallaxKernel, feature: &str) {
+    let diagnostics = catallax.take_diagnostics().unwrap();
+    let calls = diagnostics["calls"].as_array().unwrap();
+    let requests: Vec<_> = calls.iter().map(|call| call["operation"].as_str().unwrap()).collect();
+    let operations: Vec<_> = calls
+        .iter()
+        .flat_map(|call| call["operation_log"]["operations"].as_array().unwrap())
+        .map(|op| op["operation"].as_str().unwrap())
+        .collect();
+    assert!(requests.contains(&"preview"), "{feature}: Catallax did not observe the preview");
+    assert!(
+        !requests.iter().chain(&operations).any(|op| matches!(*op, "tessellate" | "tessellate_edges")),
+        "{feature}: Catallax asked for a certified mesh: requests {requests:?}, operations {operations:?}"
+    );
 }
 
 fn tool(app: &mut ribbon::App, name: &str, input: serde_json::Value) {
@@ -95,7 +120,7 @@ fn marks(app: &ribbon::App) -> Vec<String> {
 #[test]
 fn boundary_model_features_show_at_once_from_their_own_faces() {
     let case = ribbon::case("field-preview-brep");
-    let (kernel, doc) = counted();
+    let (catallax, kernel, doc) = observed_display();
     let mut app = ribbon::app(doc);
     case.run(&mut app, |app| {
         tool(
@@ -109,12 +134,14 @@ fn boundary_model_features_show_at_once_from_their_own_faces() {
             ("chamfer", json!({"edges":["Revolve1 · Edge 1","Revolve1 · Edge 3"],"distance":1})),
         ];
         for (verb, input) in steps {
+            catallax.take_diagnostics().unwrap();
             tool(app, verb, input);
             // Before any frame: the feature is built and drawn, nothing is owed.
             assert!(!app.state().state.doc.proof_pending(), "{verb} owes no build");
             let (body, mesh) = shown(app);
             let routes = routes_of(&kernel.take_routes(), body);
             assert!(!routes.is_empty() && routes.iter().all(|r| *r == MeshRoute::Display), "{verb}: {routes:?}");
+            assert_first_display_used_no_certified_mesh(&catallax, verb);
             // Drawn from the boundary model: one pick per face, every face drawn.
             let faces = app.state().state.doc.kernel().topology(body).unwrap().faces.len();
             let drawn: BTreeSet<u32> = mesh.face_picks.iter().copied().filter(|p| *p != 0).collect();
@@ -155,11 +182,12 @@ fn lattices_and_gyroids_show_at_once_from_their_field_sample() {
         ),
     ];
     for (name, verb, input, grade) in cases {
-        let (kernel, doc) = counted();
+        let (catallax, kernel, doc) = observed_display();
         let mut app = ribbon::app(doc);
         case.run(&mut app, |app| {
             block(app);
             let (before, _) = shown(app);
+            catallax.take_diagnostics().unwrap();
             tool(app, verb, input);
             if let Some(grade) = grade {
                 tool(app, "grade_field", grade);
@@ -169,6 +197,7 @@ fn lattices_and_gyroids_show_at_once_from_their_field_sample() {
             assert_ne!(body, before, "{name} replaces the block on screen");
             let routes = routes_of(&kernel.take_routes(), body);
             assert!(!routes.is_empty() && routes.iter().all(|r| *r == MeshRoute::Display), "{name}: {routes:?}");
+            assert_first_display_used_no_certified_mesh(&catallax, name);
             // The screen draws the field's own sample, which has no faces to pick.
             let sample = app.state().state.doc.kernel().preview(body, &Default::default()).unwrap();
             let drawn: Vec<[f32; 3]> = mesh.positions.iter().map(|p| p.to_array()).collect();

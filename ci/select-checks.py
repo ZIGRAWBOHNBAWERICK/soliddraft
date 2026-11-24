@@ -368,8 +368,15 @@ def ci_only_selection(changes, event, ref, read_sources):
     if not all(path.startswith(('ci/', '.github/workflows/')) or path == 'docs/ci.md' for path in paths):
         return None
     # Inventory validation still runs before selection in main().
-    parse_consumers(read_sources(POLICY)[1])
+    base_map, head_map = read_sources(POLICY)
+    mapped = parse_consumers(head_map)
     reasons = {'lint': ['CI-only change: formatting, lint and CI tooling tests']}
+    for change in changes:
+        for path in change[1:]:
+            if path.startswith('ci/fixtures/'):
+                removed = change[0][0] in 'DR' and path == change[1]
+                for unit in sorted(ci_consumers(path, removed, mapped, base_map) - {'lint'}):
+                    reasons.setdefault(unit, []).append(f'CI consumers: {path}')
     registries = [json.loads(text)['jobs'] for text in read_sources('ci/check-registry.json') if text]
     for path in sorted(paths):
         if re.fullmatch(r'ci/scenarios/[^/]+\.json', path):

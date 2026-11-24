@@ -58,13 +58,23 @@ pub enum PmiSource {
     },
     /// The part's notes.
     Notes,
+    /// The thread a hole feature states, which the part does not store: the drawing
+    /// follows the hole, whatever the item is called.
+    Thread {
+        /// The hole feature's id in the part.
+        feature: u32,
+        /// The hole this annotation follows, from zero.
+        placement: u32,
+        /// The item's name in the part when the drawing was last brought up to it.
+        item: String,
+    },
 }
 
 impl PmiSource {
     /// The name of the part item behind the annotation, if it has one.
     pub fn item(&self) -> Option<&str> {
         match self {
-            PmiSource::Item { item } | PmiSource::Located { item, .. } => Some(item),
+            PmiSource::Item { item } | PmiSource::Located { item, .. } | PmiSource::Thread { item, .. } => Some(item),
             PmiSource::Notes => None,
         }
     }
@@ -101,6 +111,12 @@ pub enum AnnotationKind {
     CentreMark,
     /// A centreline of a cylindrical face or between two edges.
     Centreline,
+    /// A fillet weld with its reference line and leader on the arrow side.
+    Weld {
+        /// Leg size in millimetres. Empty when unspecified.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        size: Option<f64>,
+    },
     /// A surface finish symbol (ISO 1302, ASME Y14.36) on a surface or its extension
     /// line. Its anchor, when it has one, is the surface; the symbol stands on that
     /// point and its text sits at the placement.
@@ -155,6 +171,14 @@ pub enum AnnotationKind {
     /// Ordinate, baseline or chain dimensions: several distances along one direction
     /// measured from the first anchor or from one anchor to the next.
     DimensionSet(DimensionSet),
+    /// A balloon on an assembly drawing: the BOM item number in a circle, with a leader
+    /// to its anchor on the occurrence it numbers.
+    Balloon {
+        /// The BOM item.
+        item: u32,
+        /// The occurrence the leader points at, by its path in the assembly.
+        occurrence: String,
+    },
 }
 
 /// Ordinate, baseline or chain dimensions as one annotation. Anchor 0 is the origin (for
@@ -282,6 +306,9 @@ pub struct Dimension {
     pub kind: DimensionKind,
     /// The value.
     pub value: DimValue,
+    /// The included acute angle of a chamfer against the picked adjacent edge, in degrees.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chamfer_angle: Option<f64>,
     /// The tolerance.
     #[serde(default)]
     pub tolerance: Tolerance,
@@ -312,6 +339,7 @@ impl Dimension {
         Dimension {
             kind,
             value: DimValue::Measured { value },
+            chamfer_angle: None,
             tolerance: Tolerance::None,
             precision,
             text: Dimension::default_text(),

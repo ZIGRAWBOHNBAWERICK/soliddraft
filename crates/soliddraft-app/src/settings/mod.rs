@@ -114,10 +114,38 @@ pub fn save_command_history(history: &History) -> Result<(), NotKept> {
     save_section("commands", history)
 }
 
+/// Saved Hole Wizard favorite presets, or empty when none are stored.
+pub fn hole_favorites() -> Vec<soliddraft_model::hole_wizard::HoleFavorite> {
+    serde_json::from_value(stored()["hole_favorites"].clone()).unwrap_or_default()
+}
+
+/// Persists the Hole Wizard favorite presets to desktop settings or browser storage.
+pub fn save_hole_favorites(favorites: &[soliddraft_model::hole_wizard::HoleFavorite]) -> Result<(), NotKept> {
+    save_section("hole_favorites", &favorites.to_vec())
+}
+
 fn command_history_from(all: &Value) -> History {
     let mut history: History = serde_json::from_value(all["commands"].clone()).unwrap_or_default();
     history.retain_known();
     history
+}
+
+/// The create commands pinned from the Create menu, or every one when there are none
+/// or they are unreadable. Ids the menu no longer lists are dropped.
+pub fn create_pins() -> crate::create_menu::Pins {
+    create_pins_from(&stored())
+}
+
+/// Saves the create commands pinned from the Create menu.
+pub fn save_create_pins(pins: &crate::create_menu::Pins) -> Result<(), NotKept> {
+    save_section("create_menu", pins)
+}
+
+fn create_pins_from(all: &Value) -> crate::create_menu::Pins {
+    if all["create_menu"].is_null() {
+        return Default::default();
+    }
+    serde_json::from_value::<crate::create_menu::Pins>(all["create_menu"].clone()).unwrap_or_default().retain_known()
 }
 
 /// The user's shortcut preset and overrides, or the defaults when there are none or
@@ -133,6 +161,30 @@ pub fn save_shortcuts(shortcuts: &Shortcuts) -> Result<(), NotKept> {
 
 fn shortcuts_from(all: &Value) -> Shortcuts {
     Shortcuts::from_json(&all["shortcuts"])
+}
+
+pub(crate) fn shortcut_menu() -> crate::shortcut_menu::Preferences {
+    serde_json::from_value(stored()["shortcut_menu"].clone()).unwrap_or_default()
+}
+
+pub(crate) fn save_shortcut_menu(menu: &crate::shortcut_menu::Preferences) -> Result<(), NotKept> {
+    save_section("shortcut_menu", menu)
+}
+
+pub(crate) fn export_preferences(menu: &crate::shortcut_menu::Preferences) -> Result<(), String> {
+    let Some(path) = crate::platform::save_path("Export preferences", "JSON", "json", "soliddraft-preferences.json")
+    else {
+        return Ok(());
+    };
+    crate::platform::write_file(&path, &shortcut_menu_export(menu)?)
+}
+
+/// The file Export preferences writes: the shortcut menu's settings and nothing else.
+/// Other settings hold private paths, history and provider choices the user did not ask
+/// to export.
+pub(crate) fn shortcut_menu_export(menu: &crate::shortcut_menu::Preferences) -> Result<Vec<u8>, String> {
+    let menu = serde_json::to_value(menu).map_err(|error| error.to_string())?;
+    serde_json::to_vec_pretty(&serde_json::json!({ "shortcut_menu": menu })).map_err(|error| error.to_string())
 }
 
 /// File locations, or none when there are none or they are unreadable.
@@ -168,12 +220,14 @@ pub fn user_library_path() -> Option<PathBuf> {
 
 /// Every material and appearance library: the built-in ones, the user's own library
 /// and those File locations lists.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn material_catalog() -> Catalog {
     Catalog::load(crate::file::config_read_file("libraries/my-library.toml").as_deref(), &file_locations())
 }
 
 /// The user's own library, loaded, or a new empty one at its path when it does not
 /// exist yet.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn user_library() -> Result<Library, String> {
     let path = user_library_path().ok_or("SolidDraft cannot find a folder to keep your library in")?;
     if let Some(source) = crate::file::config_read_file("libraries/my-library.toml")
@@ -186,6 +240,31 @@ pub fn user_library() -> Result<Library, String> {
     let mut lib = Library::new("My library", Origin::User);
     lib.path = Some(path);
     Ok(lib)
+}
+
+/// The built-in catalog and the browser profile's custom library.
+#[cfg(target_arch = "wasm32")]
+pub fn material_catalog() -> Catalog {
+    let mut libraries = Catalog::built_in_libraries();
+    libraries.extend(user_library().ok());
+    Catalog::from_libraries(libraries, Vec::new())
+}
+
+/// Loads the custom library saved in this browser profile.
+#[cfg(target_arch = "wasm32")]
+pub fn user_library() -> Result<Library, String> {
+    match stored()["material_library"].as_str() {
+        Some(text) => Library::parse(text, Origin::User, None).map_err(|e| e.to_string()),
+        None => Ok(Library::new("My library", Origin::User)),
+    }
+}
+
+/// Saves the user library in the platform's settings store.
+pub fn save_material_library(library: &Library) -> Result<(), String> {
+    #[cfg(target_arch = "wasm32")]
+    return save_section("material_library", &library.to_toml()).map_err(|e| e.to_string());
+    #[cfg(not(target_arch = "wasm32"))]
+    library.save().map_err(|e| e.to_string())
 }
 
 /// What the viewport shows of the part's reference geometry without being asked. Display
@@ -486,6 +565,27 @@ mod tests {
         Store::File(file.to_owned())
     }
 
+    /// Export preferences in the shortcut menu writes the shortcut menu's settings only:
+    /// never the folders, history, favorites, provider or library kept beside them.
+    #[test]
+    fn shortcut_export_holds_only_the_shortcut_menu() {
+        let shelf = store::Memory::new();
+        store::use_store(Some(Store::Shelf(shelf)));
+        let mut locations = FileLocations::default();
+        locations.add(soliddraft_document::LocationKind::ReferencedDocuments, PathBuf::from("/home/private/projects"));
+        save_file_locations(&locations).unwrap();
+        let mut history = History::default();
+        history.record("extrude");
+        save_command_history(&history).unwrap();
+        save_assistant(&AssistantSettings::default()).unwrap();
+        let exported = shortcut_menu_export(&crate::shortcut_menu::Preferences::default());
+        store::use_store(None);
+        let exported: Value = serde_json::from_slice(&exported.unwrap()).unwrap();
+        let keys: Vec<&String> = exported.as_object().unwrap().keys().collect();
+        assert_eq!(keys, ["shortcut_menu"], "the export holds other settings: {exported}");
+        assert!(!exported.to_string().contains("/home/private/projects"));
+    }
+
     #[test]
     fn scenes_fall_back_without_costing_other_view_settings() {
         for scene in [serde_json::json!(null), serde_json::json!("future"), serde_json::json!(7)] {
@@ -540,6 +640,26 @@ mod tests {
             .part,
             "an explicit pane choice wins over the legacy tree setting"
         );
+    }
+
+    #[test]
+    fn create_pins_persist_beside_other_keys() {
+        let dir = std::env::temp_dir().join(format!("soliddraft-create-pins-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("settings.json");
+        std::fs::write(&file, r#"{"theme":"dark"}"#).unwrap();
+        let store = file_store(&file);
+        let mut pins = create_pins_from(&store.load());
+        assert_eq!(pins, crate::create_menu::Pins::default(), "no pins saved: every command is pinned");
+        pins.toggle("sweep");
+        pins.toggle("loft");
+        save_section_to(&store, "create_menu", &pins).unwrap();
+        let back = create_pins_from(&store.load());
+        assert_eq!(back, pins);
+        assert!(!back.is_pinned("sweep") && !back.is_pinned("loft") && back.is_pinned("extrude"));
+        let all: Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+        assert_eq!(all["theme"], "dark", "the other keys survive");
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

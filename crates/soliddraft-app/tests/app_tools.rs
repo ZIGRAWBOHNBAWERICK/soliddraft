@@ -78,17 +78,6 @@ struct Session {
 }
 
 impl Session {
-    fn refuse_motion(&mut self, name: &str) {
-        let before = depths(&self.state);
-        let caller = Caller::Mcp { client: "test".into() };
-        let out = call_checked(&mut AppTools { state: &mut self.state }, name, json!({}), &caller);
-        assert!(out.is_error, "{name}: {}", out.content);
-        let result: Value = serde_json::from_str(&out.content).unwrap();
-        assert_eq!(result["refused"], "unsupported_motion", "{result}");
-        assert_eq!(depths(&self.state), before);
-        self.ran.insert(name.to_owned());
-    }
-
     /// Calls a tool and checks it ran, and changed the undo stacks as its row says.
     fn call(&mut self, name: &str, arguments: Value) -> Value {
         let row = commands::get(name).unwrap_or_else(|| panic!("{name} is not a registry command"));
@@ -117,6 +106,82 @@ impl Session {
     fn drawing(&mut self) -> Value {
         self.call("model_summary", json!({}))["drawing"].clone()
     }
+}
+
+#[test]
+fn assembly_drawing_bom_shares_only_the_part_filename() {
+    let dir = std::env::temp_dir().join(format!("soliddraft-drawing-bom-{}", std::process::id()));
+    std::fs::create_dir_all(dir.join("private")).unwrap();
+    let mut s = Session { state: AppState::new(board_bracket()), ran: BTreeSet::new(), dir: dir.clone() };
+    let part = dir.join("private/bracket.dwprt");
+    s.call("save", json!({ "path": part }));
+    let id = soliddraft_document::identify_file(&part).unwrap();
+    let root = dir.join("rig.dwasm");
+    soliddraft_assembly::AssemblyDocument::new("Rig").save(Some(&root)).unwrap();
+    let mut rig = soliddraft_assembly::AssemblyDocument::open(&root, Default::default()).unwrap();
+    let reference = soliddraft_document::DocRef::new(id.id, id.kind, part.to_str().unwrap(), id.revision);
+    rig.insert(reference, soliddraft_assembly::Placement::IDENTITY).unwrap();
+    rig.save(None).unwrap();
+    s.call("open", json!({ "path": root }));
+
+    let drawn = s.call("assembly_make_drawing", json!({}));
+    let path = dir.join("rig.dwdrw");
+    s.call("drawing_save", json!({ "path": path }));
+    let (mut reopened, _) = soliddraft_drawing::file::read(&path).unwrap();
+    let saved = &reopened.sheets[0].tables[0].bom[0].file;
+    let reported = &drawn["drawing"]["sheets"][0]["tables"][0]["bom"][0]["file"];
+    assert_eq!((saved.as_str(), reported.as_str()), ("bracket.dwprt", Some("bracket.dwprt")));
+    assert!(!drawn.to_string().contains(part.to_str().unwrap()));
+
+    reopened.sheets[0].tables[0].bom[0].file = r"C:\Users\example\bracket.dwprt".into();
+    let shared = serde_json::to_value(&reopened).unwrap();
+    assert_eq!(shared["sheets"][0]["tables"][0]["bom"][0]["file"], "bracket.dwprt");
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn assembly_drawing_uses_accepted_placements_while_exploded() {
+    let dir = std::env::temp_dir().join(format!("soliddraft-drawing-accepted-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut s = Session { state: AppState::new(board_bracket()), ran: BTreeSet::new(), dir: dir.clone() };
+    let part = s.path("bracket.dwprt");
+    let assembly = s.path("brackets.dwasm");
+    let drawing = s.path("brackets.dwdrw");
+    s.call("save", json!({ "path": part }));
+    let inserted = s.call("make_assembly", json!({}));
+    let mover = inserted["assembly"]["components"][0]["path"].as_str().unwrap();
+    s.call("assembly_explode_step", json!({ "paths": [mover], "direction": [1, 0, 0], "distance": 75 }));
+    s.call("assembly_save", json!({ "path": assembly }));
+    s.call("open", json!({ "path": assembly }));
+    s.call("assembly_explode", json!({ "exploded": true }));
+
+    let doc = &mut s.state.assembly.session.as_mut().unwrap().doc;
+    let exact = soliddraft_app::assembly_files::drawing::exact_parts(doc).unwrap();
+    assert!(doc.is_exploded());
+    let model = exact.model();
+    assert_eq!(model.parts.len(), 1);
+    assert_eq!(model.exploded[0].translation.x, 75.0);
+    assert_eq!(model.parts[0].placement.translation.x, 0.0);
+
+    doc.begin_drag(mover.parse().unwrap()).unwrap();
+    let preview = soliddraft_assembly::Placement::translation(glam::DVec3::X * 40.0);
+    doc.preview_drag(preview).unwrap();
+    let exact = soliddraft_app::assembly_files::drawing::exact_parts(doc).unwrap();
+    assert!(doc.dragging());
+    assert_eq!(exact.model().parts[0].placement.translation.x, 0.0);
+    assert_eq!(exact.model().exploded[0].translation.x, 75.0);
+    doc.cancel_drag();
+    doc.set_exploded(true).unwrap();
+
+    let made = s.call("assembly_make_drawing", json!({ "exploded": false }));
+    let front = made["drawing"]["sheets"][0]["views"][1]["id"].clone();
+    s.call("drawing_save", json!({ "path": drawing }));
+    s.call("drawing_close", json!({}));
+    s.call("open", json!({ "path": drawing }));
+    s.call("drawing_rebuild", json!({}));
+    let derived = s.call("drawing_projected", json!({ "view": front, "direction": "right" }));
+    assert!(derived["placed"].is_string(), "{derived}");
+    std::fs::remove_dir_all(dir).unwrap();
 }
 
 #[test]
@@ -266,6 +331,11 @@ fn every_tool_runs_without_a_window_and_undoes_as_its_row_says() {
         (Some(first.as_str()), Some(false), Some(true)),
         "{placed}"
     );
+    let folded = s.call("drawing_projected", json!({ "view": first, "direction": "down_right" }));
+    let made = &folded["drawing"]["sheets"][0]["views"][views.len() + 1];
+    assert_eq!((made["kind"].as_str(), made["parent"].as_str()), (Some("projected"), Some(first.as_str())), "{made}");
+    let detail = s.call("drawing_detail", json!({ "view": first, "center": [70, 45, 0], "radius": 8, "factor": 2 }));
+    assert_eq!(detail["placed"], "Detail B", "{detail}");
     s.call("drawing_hidden_lines", json!({ "view": first, "shown": false }));
     s.call("drawing_tangent_edges", json!({ "view": first, "tangent": "visible" }));
     s.call("drawing_crop", json!({ "view": first, "crop": [-30, -30, 30, 30] }));
@@ -501,9 +571,7 @@ fn every_tool_runs_without_a_window_and_undoes_as_its_row_says() {
         json!({ "name": "LA", "a": top, "b": bottom, "reference": reference, "min_degrees": -180, "max_degrees": 180 }),
     );
     s.call("assembly_delete_mate", json!({ "mate": "LA" }));
-    for command in ["assembly_mate_path", "assembly_mate_cam", "assembly_physical_dynamics"] {
-        s.refuse_motion(command);
-    }
+    s.call("assembly_physical_dynamics", json!({ "phase": "poll" }));
     // The B1 families, each added and taken away again.
     let cap = |c: u64, feature: &str, g: &str| json!({ "component": c, "feature": feature, "generator": g });
     let side = json!({ "component": parts[1], "feature": "Boss-Extrude1", "generator": "side", "normal": [1, 0, 0] });
@@ -626,7 +694,7 @@ fn every_tool_runs_without_a_window_and_undoes_as_its_row_says() {
         "generator": "side",
         "normal": [0, 1, 0],
     });
-    let slot = json!({ "name": "SL", "slot": wall, "pin": shaft(pins[1]), "mode": "center" });
+    let slot = json!({ "name": "SL", "slot": wall.clone(), "pin": shaft(pins[1]), "mode": "center" });
     let slotted = s.call("assembly_mate_slot", slot);
     let row = slotted["assembly"]["mates"].as_array().unwrap().iter().find(|m| m["name"] == "SL").unwrap().clone();
     assert_eq!(
@@ -634,6 +702,110 @@ fn every_tool_runs_without_a_window_and_undoes_as_its_row_says() {
         (Some("slot"), Some("center"))
     );
     s.call("assembly_delete_mate", json!({ "mate": "SL" }));
+    // Path and Cam on the slotted plate's outline: a corner runs along it, a pin rides it.
+    let plate = json!({ "component": wall["component"], "feature": "Boss-Extrude1", "generator": "end_cap" });
+    let corner = json!({
+        "component": parts[1],
+        "vertex": ["Boss-Extrude1 · Start cap", "Boss-Extrude1 · Side of line 2", "Boss-Extrude1 · Side of line 3"],
+    });
+    let before = depths(&s.state);
+    for flipped in [false, true] {
+        let result = call_checked(
+            &mut AppTools { state: &mut s.state },
+            "assembly_mate_path",
+            json!({"name":"PA","path":plate,"point":corner,"mode":"distance","distance":"-1 mm","flipped":flipped}),
+            &Caller::Mcp { client: "path-distance".into() },
+        );
+        assert!(result.is_error && result.content.contains("-1 mm"), "{}", result.content);
+        assert_eq!(depths(&s.state), before);
+    }
+    let pathed = s.call("assembly_mate_path", json!({ "name": "PA", "path": plate, "point": corner }));
+    let row = pathed["assembly"]["mates"].as_array().unwrap().iter().find(|m| m["name"] == "PA").unwrap().clone();
+    assert_eq!((row["kind"].as_str(), row["path"]["support"]["kind"].as_str()), (Some("path"), Some("outline")));
+    s.call("assembly_delete_mate", json!({ "mate": "PA" }));
+    // A Path held halfway round, then driven by the Mate Controller between two positions.
+    let held = json!({ "name": "PH", "path": plate, "point": corner, "mode": "percent", "percent": 50 });
+    let held = s.call("assembly_mate_path", held);
+    let row = held["assembly"]["mates"].as_array().unwrap().iter().find(|m| m["name"] == "PH").unwrap().clone();
+    assert_eq!((row["position"]["mode"].as_str(), row["position"]["percent"].as_f64()), (Some("percent"), Some(50.0)));
+    s.call("assembly_mate_controller", json!({ "action": "set", "mates": ["PH"] }));
+    s.call("assembly_mate_controller", json!({ "action": "save", "position": "Half" }));
+    s.call("assembly_mate_controller", json!({ "action": "apply", "values": [25] }));
+    let saved = s.call("assembly_mate_controller", json!({ "action": "save", "position": "Quarter" }));
+    assert_eq!(saved["positions"][1]["values"], json!([25.0]));
+    let frames =
+        s.call("assembly_mate_controller", json!({ "action": "frames", "from": "Half", "to": "Quarter", "steps": 2 }));
+    assert_eq!(frames["frames"].as_array().unwrap().len(), 3);
+    s.call("assembly_mate_controller", json!({ "action": "apply", "position": "Half" }));
+    s.call("assembly_delete_mate", json!({ "mate": "PH" }));
+    let shown = s.call("assembly_mate_controller", json!({ "action": "show" }));
+    assert_eq!(shown["mates"], json!([]));
+    // Back to the pose before the held Path: its seven steps undone.
+    for _ in 0..7 {
+        s.call("undo", json!({}));
+    }
+    let cammed = s.call("assembly_mate_cam", json!({ "name": "CM", "cam": plate, "follower": shaft(pins[1]) }));
+    let row = cammed["assembly"]["mates"].as_array().unwrap().iter().find(|m| m["name"] == "CM").unwrap().clone();
+    // The pin stands inside the plate's outline, so it rides the outline from inside.
+    assert_eq!((row["kind"].as_str(), row["outside"].as_bool()), (Some("cam"), Some(false)));
+    s.call("assembly_delete_mate", json!({ "mate": "CM" }));
+
+    // Configurations and the exploded view: each change one step, the display none.
+    s.call("assembly_configurations", json!({}));
+    s.call("assembly_add_configuration", json!({ "name": "Open" }));
+    s.call("assembly_rename_configuration", json!({ "name": "Open", "to": "Wide" }));
+    s.call("assembly_activate_configuration", json!({ "name": "Wide" }));
+    s.call("assembly_activate_configuration", json!({ "name": "Default" }));
+    s.call("assembly_delete_configuration", json!({ "name": "Wide" }));
+    // A placement names its part's configuration, and goes back to the saved one.
+    let shown =
+        s.call("assembly_component_configuration", json!({ "component": parts[1], "configuration": "Default" }));
+    assert_eq!(
+        shown["component"],
+        json!({ "id": parts[1], "configuration": "Default", "configurations": ["Default"] })
+    );
+    s.call("assembly_component_configuration", json!({ "component": parts[1] }));
+    let mover = parts[1].to_string();
+    let step = s.call("assembly_explode_step", json!({ "paths": [mover], "direction": [0, 0, 1], "distance": 30 }));
+    let step = step["added"].as_u64().unwrap();
+    s.call("assembly_edit_explode_step", json!({ "step": step, "distance": 40 }));
+    let shown = s.call("assembly_explode", json!({ "exploded": true }));
+    assert_eq!(shown["configurations"]["explode"]["shown"], true);
+    s.call("assembly_explode", json!({ "exploded": false }));
+    s.call("assembly_delete_explode_step", json!({ "step": step }));
+    s.call("assembly_auto_explode", json!({ "distance": 20 }));
+    s.call("undo", json!({}));
+    s.call("assembly_save", json!({ "path": assembly_file }));
+    // The files it writes: robots, a drawing with its BOM, and a packed copy.
+    let urdf = s.call("assembly_export_urdf", json!({ "path": s.path("robot/rig.urdf") }));
+    assert!(urdf["exported"]["links"].as_array().unwrap().len() >= 3);
+    s.call("assembly_export_usd", json!({ "path": s.path("robot/rig.usda") }));
+    let at = s.call("model_summary", json!({}))["assembly"]["components"][1]["translation"].clone();
+    let drawn = s.call("assembly_make_drawing", json!({}));
+    assert!(!drawn["drawing"]["sheets"][0]["tables"][0]["bom"].as_array().unwrap().is_empty());
+    // Views derived from its front view, every part drawn by its kernel, and a PDF of them.
+    let front = drawn["drawing"]["sheets"][0]["views"][1]["id"].clone();
+    let cut =
+        s.call("drawing_section", json!({ "view": front, "through": at, "direction": "vertical", "flip": false }));
+    assert_eq!(cut["placed"], "Section A-A", "{cut}");
+    s.call("drawing_projected", json!({ "view": front, "direction": "right" }));
+    let detail = s.call("drawing_detail", json!({ "view": front, "center": at, "radius": 10, "factor": 2 }));
+    assert_eq!(detail["placed"], "Detail B", "{detail}");
+    let pdf = s.call("drawing_export_pdf", json!({ "path": s.path("rig.pdf") }));
+    assert_eq!((pdf["views"].as_u64(), pdf["method"].as_str()), (Some(5), Some("catallax")), "{pdf}");
+    s.call("show_assembly", json!({}));
+    let expected = BTreeSet::from(["linked.dwprt", "pin.dwprt", "rig.dwasm", "second.dwprt", "slotted.dwprt"]);
+    let packed = s.call("assembly_pack_and_go", json!({ "folder": s.path("packed") }));
+    assert_eq!(packed["packed"]["files"].as_array().unwrap().len(), expected.len());
+    let zipped = s.call("assembly_pack_and_go", json!({ "zip": s.path("packed.zip") }));
+    let reported = zipped["packed"]["files"].as_array().unwrap();
+    assert_eq!(reported.len(), expected.len());
+    assert_eq!(reported.iter().map(|file| file["to"].as_str().unwrap()).collect::<BTreeSet<_>>(), expected);
+    let mut archive = zip::ZipArchive::new(std::fs::File::open(s.dir.join("packed.zip")).unwrap()).unwrap();
+    assert_eq!(archive.len(), expected.len());
+    for name in expected {
+        assert!(archive.by_name(name).is_ok(), "missing or invalid ZIP entry {name}");
+    }
 
     // The second part moves into a file of its own, placed where it was, in one undo step.
     let at = parts[1].to_string();
@@ -789,6 +961,106 @@ fn editing_and_inspection_measure_only_on_request_and_keep_body_results_separate
 
 fn offset_session() -> Session {
     Session { state: AppState::new(soliddraft_app::new_document()), ran: BTreeSet::new(), dir: std::env::temp_dir() }
+}
+
+fn assembly_with_origin_block(dir: PathBuf) -> (Session, Value, u64) {
+    let mut s = offset_session();
+    s.dir = dir;
+    std::fs::create_dir_all(&s.dir).unwrap();
+    s.call("sketch", json!({"plane":"top","shapes":[{"shape":"rectangle","center":[0,0,0],"width":20,"height":10}]}));
+    s.call("extrude", json!({"sketch":"Sketch1","depth":6,"flip":false}));
+    let part = s.path("controller-block.dwprt");
+    s.call("save", json!({"path":part}));
+    let made = s.call("make_assembly", json!({}));
+    let base: u64 = made["assembly"]["components"][0]["path"].as_str().unwrap().parse().unwrap();
+    s.call("assembly_mate_origin", json!({"name":"Fixed","component":base,"align_axes":true}));
+    (s, part, base)
+}
+
+#[test]
+fn physical_dynamics_only_reports_an_accepted_push() {
+    let dir = std::env::temp_dir().join(format!("soliddraft-fixed-push-{}", DocumentId::new()));
+    let (mut s, part, _) = assembly_with_origin_block(dir);
+    let inserted =
+        s.call("insert_component", json!({"paths":[part],"placement":{"translation":[-30,0,0],"rotation":[0,0,0,1]}}));
+    s.call("assembly_physical_dynamics", json!({"phase":"begin","path":inserted["inserted"]}));
+    s.call(
+        "assembly_physical_dynamics",
+        json!({"phase":"update","placement":{"translation":[0,0,0],"rotation":[0,0,0,1]}}),
+    );
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    let reached = loop {
+        let report = s.call("assembly_physical_dynamics", json!({"phase":"poll"}));
+        if report["pending"] == false {
+            break report;
+        }
+        assert!(std::time::Instant::now() < deadline, "the collision worker did not finish");
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    };
+    assert_eq!(reached["motion"]["stopped"], true, "{reached}");
+    assert!(reached["motion"]["error"].is_null(), "{reached}");
+    assert!(reached["motion"]["pushed"].is_null(), "{reached}");
+    let shown = soliddraft_app::assembly::shown(&s.state);
+    assert_eq!(shown["components"][0]["translation"], json!([0.0, 0.0, 0.0]));
+    s.call("assembly_physical_dynamics", json!({"phase":"cancel"}));
+    std::fs::remove_dir_all(s.dir).unwrap();
+}
+
+#[test]
+fn mate_controller_animation_keeps_driver_identity_when_reordered() {
+    use soliddraft_app::mates::{MateAction, apply};
+    use std::time::Duration;
+
+    let browser_fixtures = std::env::var_os("SOLIDDRAFT_CONTROLLER_BROWSER_FIXTURES");
+    let dir = browser_fixtures.as_ref().map_or_else(
+        || std::env::temp_dir().join(format!("soliddraft-controller-{}", DocumentId::new())),
+        PathBuf::from,
+    );
+    let (mut s, part, base) = assembly_with_origin_block(dir);
+    let top = json!({"component":base,"feature":"Boss-Extrude1","generator":"end_cap"});
+    for (name, distance) in [("D1", "10 mm"), ("D2", "20 mm")] {
+        let inserted = s.call("insert_component", json!({"paths":[part]}));
+        let id: u64 = inserted["inserted"].as_str().unwrap().parse().unwrap();
+        let bottom = json!({"component":id,"feature":"Boss-Extrude1","generator":"start_cap"});
+        s.call(
+            "assembly_mate_distance",
+            json!({"name":name,"a":top,"b":bottom,"distance":distance,"alignment":"opposed"}),
+        );
+    }
+    s.call("assembly_mate_controller", json!({"action":"set","mates":["D1","D2"]}));
+    s.call("assembly_mate_controller", json!({"action":"save","position":"Low"}));
+    s.call("assembly_mate_controller", json!({"action":"apply","values":[30,40]}));
+    if browser_fixtures.is_some() {
+        s.call("assembly_save", json!({"path":s.path("controller-rig.dwasm")}));
+    }
+    apply(&mut s.state, MateAction::ControllerAnimate("Low".into()));
+    assert!(s.state.assembly.session.as_mut().unwrap().animate().unwrap());
+    s.state.assembly.mate.controller_mates = "D2, D1".into();
+    apply(&mut s.state, MateAction::ControllerSet);
+    let session = s.state.assembly.session.as_mut().unwrap();
+    let animation = session.animation.as_mut().unwrap();
+    animation.seconds = 100.0;
+    animation.started = web_time::Instant::now() - Duration::from_secs(50);
+    assert!(session.animate().unwrap());
+    let shown = soliddraft_app::assembly::shown(&s.state);
+    assert!((shown["components"][1]["translation"][2].as_f64().unwrap() - 26.0).abs() < 0.1, "{shown}");
+    assert!((shown["components"][2]["translation"][2].as_f64().unwrap() - 36.0).abs() < 0.1, "{shown}");
+    let session = s.state.assembly.session.as_mut().unwrap();
+    session.animation.as_mut().unwrap().started = web_time::Instant::now() - Duration::from_secs(101);
+    assert!(!session.animate().unwrap());
+    let values = soliddraft_assembly::controller_values(&session.doc);
+    assert_eq!((values["D1"], values["D2"]), (10.0, 20.0));
+
+    s.call("assembly_mate_controller", json!({"action":"apply","values":[40,30]}));
+    apply(&mut s.state, MateAction::ControllerAnimate("Low".into()));
+    s.call("assembly_mate_controller", json!({"action":"apply","values":[35,25]}));
+    let session = s.state.assembly.session.as_mut().unwrap();
+    assert!(!session.animate().unwrap());
+    let values = soliddraft_assembly::controller_values(&session.doc);
+    assert_eq!((values["D1"], values["D2"]), (25.0, 35.0));
+    if browser_fixtures.is_none() {
+        std::fs::remove_dir_all(s.dir).unwrap();
+    }
 }
 
 #[test]

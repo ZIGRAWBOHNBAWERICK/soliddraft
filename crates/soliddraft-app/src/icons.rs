@@ -69,6 +69,7 @@ pub enum Icon {
     Tree,
     Props,
     Config,
+    Formula,
     Display,
     Origin,
     Material,
@@ -109,6 +110,18 @@ pub enum Icon {
     Assembly,
     /// A drawing sheet with its title block, for the drawing's Sheet workspace.
     Sheet,
+    /// Clock face for the History side pane.
+    History,
+    /// Preferences gear.
+    Gear,
+    /// Heart for the Donate pill.
+    Heart,
+    /// Bug for Report a bug.
+    Bug,
+    /// Plus for adding a document tab.
+    Plus,
+    /// Funnel for the bottom bar selection filter.
+    Filter,
     /// A CAD drawing of the catalogue, by its key, in its own colours.
     Cad(&'static str),
     /// A line glyph of the catalogue, by its key, in the colour it is painted with.
@@ -130,6 +143,7 @@ struct Raster {
     glyph: bool,
     px: u32,
     treatment: Treatment,
+    dark: bool,
 }
 
 static SVG_OPTIONS: LazyLock<usvg::Options<'static>> = LazyLock::new(|| {
@@ -148,8 +162,10 @@ impl Raster {
     fn image(&self, source: &str) -> ColorImage {
         let svg = if self.glyph {
             source.replace("currentColor", "#ffffff")
-        } else {
+        } else if self.dark {
             DARK.iter().fold(source.to_owned(), |svg, (light, dark)| svg.replace(light, dark))
+        } else {
+            source.to_owned()
         };
         let tree = usvg::Tree::from_str(&svg, &SVG_OPTIONS).expect("a catalogue icon parses");
         let mut pixmap = tiny_skia::Pixmap::new(self.px, self.px).expect("an icon has a size");
@@ -190,7 +206,7 @@ impl Raster {
 fn paint_raster(painter: &Painter, key: &'static str, glyph: bool, rect: Rect, tint: Color32, treatment: Treatment) {
     let ppp = painter.pixels_per_point();
     let px = (rect.width().min(rect.height()) * ppp).round().max(1.0);
-    let raster = Raster { key, glyph, px: px as u32, treatment };
+    let raster = Raster { key, glyph, px: px as u32, treatment, dark: crate::theme::is_dark() };
     let Some(source) = raster.source() else {
         debug_assert!(false, "no icon {key}");
         return;
@@ -465,6 +481,12 @@ fn paint_drawn(painter: &Painter, icon: Icon, rect: Rect, color: Color32) {
             g.line(p, &[(5.6, 4.8), (10.4, 7.4)]);
             g.line(p, &[(5.6, 11.2), (10.4, 8.6)]);
         }
+        Icon::Formula => {
+            g.line(p, &[(9.0, 2.0), (7.0, 2.0), (5.8, 3.4), (4.2, 12.7), (3.1, 14.0), (1.5, 14.0)]);
+            g.line(p, &[(2.7, 6.0), (8.5, 6.0)]);
+            g.line(p, &[(9.0, 8.0), (14.0, 13.0)]);
+            g.line(p, &[(14.0, 8.0), (9.0, 13.0)]);
+        }
         Icon::Display => {
             g.circle(p, 8.0, 8.0, 5.5);
             let pts: Vec<Pos2> = (0..=16)
@@ -665,6 +687,52 @@ fn paint_drawn(painter: &Painter, icon: Icon, rect: Rect, color: Color32) {
             g.line(p, &[(7.5, 13.5), (7.5, 9.0), (12.0, 9.0)]);
             g.arrow_head(p, (12.0, 5.5), vec2(1.0, 0.0), 1.8);
             g.arrow_head(p, (12.0, 9.0), vec2(1.0, 0.0), 1.8);
+        }
+        Icon::History => {
+            g.circle(p, 8.0, 8.0, 5.8);
+            g.line(p, &[(8.0, 4.6), (8.0, 8.2), (10.8, 9.8)]);
+        }
+        Icon::Gear => {
+            g.circle(p, 8.0, 8.0, 2.4);
+            g.circle(p, 8.0, 8.0, 5.0);
+            for i in 0..8 {
+                let a = (i as f32) * TAU / 8.0;
+                g.line(p, &[(8.0 + 4.8 * a.cos(), 8.0 + 4.8 * a.sin()), (8.0 + 6.6 * a.cos(), 8.0 + 6.6 * a.sin())]);
+            }
+        }
+        Icon::Heart => {
+            g.closed(
+                p,
+                &[
+                    (8.0, 13.5),
+                    (2.8, 8.5),
+                    (2.2, 5.6),
+                    (4.4, 3.4),
+                    (6.8, 3.8),
+                    (8.0, 5.4),
+                    (9.2, 3.8),
+                    (11.6, 3.4),
+                    (13.8, 5.6),
+                    (13.2, 8.5),
+                ],
+            );
+        }
+        Icon::Bug => {
+            g.circle(p, 8.0, 9.2, 3.8);
+            g.arc(p, 8.0, 5.0, 2.2, 180.0, 360.0);
+            g.line(p, &[(6.5, 3.2), (5.2, 2.0)]);
+            g.line(p, &[(9.5, 3.2), (10.8, 2.0)]);
+            g.line(p, &[(4.2, 8.2), (1.8, 7.6)]);
+            g.line(p, &[(4.2, 10.6), (1.8, 11.4)]);
+            g.line(p, &[(11.8, 8.2), (14.2, 7.6)]);
+            g.line(p, &[(11.8, 10.6), (14.2, 11.4)]);
+        }
+        Icon::Plus => {
+            g.line(p, &[(3.2, 8.0), (12.8, 8.0)]);
+            g.line(p, &[(8.0, 3.2), (8.0, 12.8)]);
+        }
+        Icon::Filter => {
+            g.closed(p, &[(2.5, 3.2), (13.5, 3.2), (9.3, 8.2), (9.3, 13.2), (6.7, 11.8), (6.7, 8.2)]);
         }
     }
 }

@@ -87,6 +87,28 @@ impl<'a> PartContext<'a> {
             _ => Some((id, feature_name(entity), false)),
         }
     }
+
+    /// The feature a hole callout on a circle reads, and for a hole feature which of its
+    /// holes the circle is on. A circle between a face of a hole and a face of another
+    /// feature, such as the rim a later cut left on a countersink, belongs to the hole.
+    fn callout_feature(&self, circle: &CircleInfo) -> Option<(u64, Option<usize>)> {
+        if let Some(ModelEntity::Edge(edge)) = &circle.entity.model {
+            let hole = edge.faces.iter().find_map(|face| match face.generator {
+                soliddraft_model::Generator::Hole { placement, .. } => {
+                    let id = u64::from(face.feature.0);
+                    self.doc
+                        .feature(id)
+                        .is_some_and(|f| !f.suppressed && matches!(f.kind, FeatureKind::Hole(_)))
+                        .then_some((id, Some(placement as usize)))
+                }
+                _ => None,
+            });
+            if hole.is_some() {
+                return hole;
+            }
+        }
+        self.feature_of(&circle.entity).map(|(id, _, _)| (id, None))
+    }
 }
 
 impl Namer for PartContext<'_> {
@@ -141,17 +163,57 @@ impl Namer for PartContext<'_> {
         })
     }
 
+    fn is_hole(&self, circle: &CircleInfo) -> bool {
+        self.feature_of(&circle.entity)
+            .and_then(|(id, _, _)| self.doc.feature(id))
+            .is_some_and(|f| matches!(f.kind, FeatureKind::Cut(_) | FeatureKind::Hole(_)))
+    }
+
     /// "4× Ø9 THRU", "Ø12 DEEP 20" or "Ø24": holes of the same cut and size are counted
     /// by centre, since the far end of a hole lies under its near end face-on. A
     /// threaded hole is called out by its thread, then by its drill where the drill goes
-    /// further: "4× M6x1-6H THRU", "M8x1-6H DEEP 12" over "Ø7 DEEP 16".
+    /// further: "4× M6x1-6H THRU", "M8x1-6H DEEP 12" over "Ø7 DEEP 16". A hole with a
+    /// counterbore or a countersink gets the head on a line of its own, whichever of the
+    /// hole's circles is picked: "⌴ Ø10 ↧ 3", "⌵ Ø12 × 90°". Depths count from where the
+    /// hole starts now, and a thread is called out as far as the wall still has it.
     fn hole_callout(&self, circle: &CircleInfo, projected: &Projected, symbols: &Symbols) -> Option<String> {
         let diameter = trim(format_value(circle.model_radius * 2.0, 2));
-        let feature = self.feature_of(&circle.entity).and_then(|(id, _, _)| self.doc.feature(id));
+        let found = self.callout_feature(circle);
+        let feature = found.and_then(|(id, _)| self.doc.feature(id));
+        if let (Some((id, placement)), Some(FeatureKind::Hole(hole))) = (found, feature.map(|f| &f.kind)) {
+            let feature = soliddraft_model::FeatureId(id as u32);
+            let model = self.doc.model();
+            let extents = model.hole_extents(feature);
+            let walls = model.threaded_walls();
+            let callout = |placement: usize| {
+                let extent = extents.get(placement).copied().flatten();
+                let wall = walls.iter().find(|wall| wall.feature == feature && wall.placement == placement).cloned();
+                let top = extent.map_or_else(|| wall.as_ref().map_or(0.0, |wall| wall.top), |extent| extent.top);
+                format_built_hole_callout(
+                    hole,
+                    "",
+                    symbols,
+                    Some(&BuiltHole { top, depth: extent.map(|extent| extent.depth), wall }),
+                )
+            };
+            let text = callout(placement.unwrap_or(0));
+            let placements: std::collections::BTreeSet<_> = projected
+                .circles
+                .iter()
+                .filter_map(|circle| match self.callout_feature(circle) {
+                    Some((owner, Some(placement))) if owner == id => Some(placement),
+                    _ => None,
+                })
+                .collect();
+            let count = placements.into_iter().filter(|&placement| callout(placement) == text).count();
+            return Some(if count > 1 { format!("{count}{} {text}", symbols.times) } else { text });
+        }
+        let same = |c: &CircleInfo| match found {
+            Some((id, _)) => self.callout_feature(c).is_some_and(|(other, _)| other == id),
+            None => c.entity.feature == circle.entity.feature,
+        };
         let mut centres: Vec<Point2> = Vec::new();
-        for c in projected.circles.iter().filter(|c| {
-            c.entity.feature == circle.entity.feature && (c.model_radius - circle.model_radius).abs() < 1e-6
-        }) {
+        for c in projected.circles.iter().filter(|c| same(c) && (c.model_radius - circle.model_radius).abs() < 1e-6) {
             if !centres.iter().any(|k| (k.u - c.centre.u).abs() < 1e-3 && (k.v - c.centre.v).abs() < 1e-3) {
                 centres.push(c.centre);
             }
@@ -164,29 +226,6 @@ impl Namer for PartContext<'_> {
             Some(FeatureKind::Cut(p)) => {
                 format!("{count}{}{diameter} {} {}", symbols.diameter, symbols.depth, trim(format_value(p.depth, 2)))
             }
-            Some(FeatureKind::Hole(h)) => {
-                use soliddraft_kernel_api::HoleDepth;
-                let mm = |value: f64| trim(format_value(value, 2));
-                let drill = match h.depth {
-                    HoleDepth::Through => symbols.through.clone(),
-                    HoleDepth::Blind { depth } => format!("{} {}", symbols.depth, mm(depth)),
-                };
-                let drilled = format!("{}{} {drill}", symbols.diameter, mm(h.diameter));
-                match &h.thread {
-                    None => format!("{count}{drilled}"),
-                    Some(thread) => match (thread.length, h.depth) {
-                        (None, _) => format!("{count}{} {drill}", thread.designation()),
-                        (Some(length), depth) => {
-                            let tapped = format!("{count}{} {} {}", thread.designation(), symbols.depth, mm(length));
-                            let deeper = match depth {
-                                HoleDepth::Through => true,
-                                HoleDepth::Blind { depth } => depth > length + 1e-9,
-                            };
-                            if deeper { format!("{tapped}\n{drilled}") } else { tapped }
-                        }
-                    },
-                }
-            }
             _ => format!("{count}{}{diameter}", symbols.diameter),
         })
     }
@@ -194,6 +233,168 @@ impl Namer for PartContext<'_> {
 
 fn trim(s: String) -> String {
     if s.contains('.') { s.trim_end_matches('0').trim_end_matches('.').to_owned() } else { s }
+}
+
+/// What a hole is like in the part as built: a callout states the hole as it is now.
+pub struct BuiltHole {
+    /// Where the hole starts now: zero, or deeper where a later cut took material off the
+    /// face it was drilled from.
+    pub top: f64,
+    /// The surviving bore's termination, measured from the original opening.
+    pub depth: Option<soliddraft_kernel_api::HoleDepth>,
+    /// The hole's threaded wall as the body has it, or `None` when a later cut took the
+    /// thread away (or the hole has none).
+    pub wall: Option<soliddraft_model::thread::ThreadedWall>,
+}
+
+/// Formats a drawing hole callout from a [`soliddraft_model::HoleFeature`], including
+/// Hole Wizard counterbore, countersink, slot, thread, end-condition, and callout
+/// tolerance/precision data, as the feature states it.
+pub fn format_hole_callout(h: &soliddraft_model::HoleFeature, count: &str, symbols: &Symbols) -> String {
+    format_built_hole_callout(h, count, symbols, None)
+}
+
+/// The hole callout of [`format_hole_callout`], stated as `built` has the hole when given:
+/// a cut off the top makes a blind hole and a counterbore shallower and a countersink
+/// narrower, one that went deeper takes the head away, and the thread is the one the
+/// wall still has.
+pub fn format_built_hole_callout(
+    h: &soliddraft_model::HoleFeature,
+    count: &str,
+    symbols: &Symbols,
+    built: Option<&BuiltHole>,
+) -> String {
+    use soliddraft_kernel_api::{HoleDepth, HoleHead};
+    use soliddraft_model::hole_wizard::{CalloutParam, HoleEndCondition};
+
+    let fmt = |param: CalloutParam, value: f64| -> String {
+        if let Some(tol) = h.wizard.as_ref().and_then(|w| w.tolerance_for(param)) {
+            tol.format_value(value)
+        } else {
+            trim(format_value(value, 2))
+        }
+    };
+    let top = built.map_or(0.0, |b| b.top);
+
+    let fixed_depth = |depth| match depth {
+        HoleDepth::Through => symbols.through.clone(),
+        HoleDepth::Blind { depth } => format!("{} {}", symbols.depth, fmt(CalloutParam::Depth, depth - top)),
+    };
+    let built_depth = built.and_then(|b| b.depth);
+    let depth_text = if let Some(depth) = built_depth {
+        fixed_depth(depth)
+    } else {
+        match h.wizard.as_ref().map(|w| &w.end_condition) {
+            Some(HoleEndCondition::ThroughAll) => symbols.through.clone(),
+            Some(HoleEndCondition::Blind { depth }) => {
+                format!("{} {}", symbols.depth, fmt(CalloutParam::Depth, *depth - top))
+            }
+            Some(HoleEndCondition::UpToNext) => "UP TO NEXT".to_owned(),
+            Some(HoleEndCondition::UpToVertex { .. }) => "UP TO VERTEX".to_owned(),
+            Some(HoleEndCondition::UpToSurface { .. }) => "UP TO SURFACE".to_owned(),
+            Some(HoleEndCondition::OffsetFromSurface { offset, .. }) => {
+                format!("OFFSET {}", fmt(CalloutParam::Depth, *offset))
+            }
+            None => fixed_depth(h.depth),
+        }
+    };
+
+    let effective_depth = built_depth.or_else(|| h.specified_depth());
+    let is_slot = h.wizard.as_ref().is_some_and(|w| w.hole_type.is_slot());
+    let drilled = format!("{}{} {depth_text}", symbols.diameter, fmt(CalloutParam::Diameter, h.diameter));
+
+    let mut lines = Vec::new();
+    match (&h.thread, built) {
+        // As built: the thread the wall still has, and the drill under it when the hole
+        // goes deeper than the thread.
+        (Some(thread), Some(built)) => match &built.wall {
+            Some(wall) => {
+                lines.push(match wall.depth() {
+                    None => format!("{count}{} {}", thread.designation(), symbols.through),
+                    Some(depth) => format!(
+                        "{count}{} {} {}",
+                        thread.designation(),
+                        symbols.depth,
+                        fmt(CalloutParam::ThreadDepth, depth)
+                    ),
+                });
+                let deeper = match effective_depth {
+                    Some(HoleDepth::Blind { depth }) => depth > wall.end() + 1e-9,
+                    _ => !wall.through,
+                };
+                if deeper {
+                    lines.push(drilled);
+                }
+            }
+            // A later cut took the thread away: the hole is a plain one now.
+            None => lines.push(format!("{count}{drilled}")),
+        },
+        (Some(thread), None) => match (thread.length, effective_depth) {
+            (None, _) => lines.push(format!("{count}{} {depth_text}", thread.designation())),
+            (Some(length), depth) => {
+                lines.push(format!(
+                    "{count}{} {} {}",
+                    thread.designation(),
+                    symbols.depth,
+                    fmt(CalloutParam::ThreadDepth, length)
+                ));
+                let deeper = match depth {
+                    Some(HoleDepth::Blind { depth }) => depth > length + 1e-9,
+                    _ => true,
+                };
+                if deeper {
+                    lines.push(drilled);
+                }
+            }
+        },
+        (None, _) if is_slot => {
+            let slot_len = h
+                .wizard
+                .as_ref()
+                .and_then(|w| w.slot_length.or_else(|| Some(w.size_row().default_slot_length_mm())))
+                .unwrap_or(h.diameter * 2.0);
+            lines.push(format!(
+                "{count}{}{} {} {} SLOT {depth_text}",
+                symbols.diameter,
+                fmt(CalloutParam::Diameter, h.diameter),
+                symbols.times,
+                fmt(CalloutParam::SlotLength, slot_len)
+            ));
+        }
+        (None, _) => lines.push(format!("{count}{drilled}")),
+    }
+
+    // The head as it is now: a cut off the top makes a counterbore shallower and a
+    // countersink narrower, and one that went deeper took the head away.
+    match h.effective_head() {
+        Some(HoleHead::Counterbore { diameter, depth }) if depth > top + 1e-9 => {
+            lines.push(format!(
+                "{} {}{} {} {}",
+                symbols.counterbore,
+                symbols.diameter,
+                fmt(CalloutParam::CounterboreDiameter, diameter),
+                symbols.depth,
+                fmt(CalloutParam::CounterboreDepth, depth - top)
+            ));
+        }
+        Some(HoleHead::Countersink { diameter, angle_deg }) => {
+            let now = diameter - 2.0 * top * (angle_deg.to_radians() / 2.0).tan();
+            if now > h.diameter + 1e-9 {
+                lines.push(format!(
+                    "{} {}{} {} {}{}",
+                    symbols.countersink,
+                    symbols.diameter,
+                    fmt(CalloutParam::CountersinkDiameter, now),
+                    symbols.times,
+                    fmt(CalloutParam::CountersinkAngle, angle_deg),
+                    symbols.degree
+                ));
+            }
+        }
+        _ => {}
+    }
+
+    lines.join("\n")
 }
 
 /// The hole callout of a circle in the drawing's own style.
@@ -270,4 +471,70 @@ fn sketch_circles(doc: &Document, sketch: u64) -> Vec<(Vec3, f64)> {
             _ => None,
         })
         .collect()
+}
+
+#[cfg(test)]
+mod hole_callout_tests {
+    use super::*;
+    use soliddraft_kernel_api::{HoleDepth, HoleHead, HoleTip, SurfaceKind, Vec3};
+    use soliddraft_model::hole_wizard::{
+        CalloutParam, CalloutTolerance, HoleStandard, HoleType, HoleWizardSpec, ToleranceMode,
+    };
+    use soliddraft_model::{FaceFingerprint, FaceRef, FeatureId, Generator, HoleFeature};
+
+    fn dummy_face() -> FaceRef {
+        FaceRef {
+            feature: FeatureId(1),
+            label: "Top".into(),
+            generator: Generator::EndCap,
+            ordinal: 0,
+            fingerprint: FaceFingerprint {
+                surface: SurfaceKind::Plane,
+                normal: Some(Vec3::Z),
+                centroid: Vec3::ZERO,
+                area: 100.0,
+            },
+        }
+    }
+
+    #[test]
+    fn counterbore_slot_and_tapped_hole_wizard_callouts_include_head_and_tolerances() {
+        let symbols = &library::template("iso-a3").style_file().symbols;
+        let mut spec = HoleWizardSpec::new(HoleStandard::Iso, HoleType::Counterbore);
+        spec.set_tolerance(CalloutTolerance {
+            param: CalloutParam::CounterboreDepth,
+            mode: ToleranceMode::Bilateral { upper: 0.1, lower: -0.05 },
+            precision: 2,
+        });
+        let cb = HoleFeature {
+            face: dummy_face(),
+            points: vec![],
+            diameter: 6.6,
+            depth: HoleDepth::Through,
+            tip: HoleTip::Flat,
+            head: Some(HoleHead::Counterbore { diameter: 11.0, depth: 6.4 }),
+            thread: None,
+            sketch: None,
+            wizard: Some(spec),
+        };
+        let text = format_hole_callout(&cb, "4× ", symbols);
+        assert!(text.contains("4× Ø6.6 THRU"), "{text}");
+        assert!(text.contains("Ø11") && text.contains("6.40 +0.10/-0.05"), "{text}");
+
+        let tap_spec = HoleWizardSpec::new(HoleStandard::AnsiInch, HoleType::StraightTap);
+        let resolved = tap_spec.resolve_defaults();
+        let tapped = HoleFeature {
+            face: dummy_face(),
+            points: vec![],
+            diameter: resolved.diameter,
+            depth: HoleDepth::Through,
+            tip: resolved.tip,
+            head: None,
+            thread: resolved.thread,
+            sketch: None,
+            wizard: Some(tap_spec),
+        };
+        let tap_text = format_hole_callout(&tapped, "2× ", symbols);
+        assert_eq!(tap_text, "2× 1/4-20 UNC-2B THRU");
+    }
 }

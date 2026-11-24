@@ -101,13 +101,13 @@ impl DocKind {
         DocKind::from_extension(path.extension()?.to_str()?)
     }
 
-    /// The format tag of the truth entry this version writes, such as
+    /// The default format tag this version writes, such as
     /// "soliddraft-part/2".
-    pub fn format(self) -> &'static str {
+    pub const fn format(self) -> &'static str {
         match self {
             DocKind::Part => "soliddraft-part/2",
             DocKind::Assembly => "soliddraft-assembly/1",
-            DocKind::Drawing => "soliddraft-drawing/2",
+            DocKind::Drawing => "soliddraft-drawing/3",
             DocKind::Mesh => "soliddraft-mesh/1",
         }
     }

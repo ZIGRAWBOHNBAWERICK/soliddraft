@@ -79,6 +79,69 @@ fn resolved_thin(report: &Value, name: &str) -> Value {
 }
 
 #[test]
+fn renaming_a_global_keeps_case_distinct_configuration_bindings() {
+    use soliddraft_app::values_tab::{self, Field, ValuesAction};
+
+    let doc = Document::new("Case-distinct formula references", soliddraft_app::kernel());
+    let mut state = AppState::new(doc);
+    call(
+        &mut state,
+        "sketch",
+        json!({ "plane": "top", "shapes": [{ "shape": "rectangle", "center": [0, 0, 0], "width": 60, "height": 40 }] }),
+    );
+    call(&mut state, "extrude", json!({ "sketch": "Sketch1", "depth": 10, "flip": false }));
+    call(&mut state, "set_value", json!({ "name": "Plate", "expression": "10 mm" }));
+    call(&mut state, "set_value", json!({ "name": "plate", "expression": "20 mm" }));
+    call(&mut state, "set_value", json!({ "name": "Width", "expression": "1 mm" }));
+    call(&mut state, "add_configuration", json!({ "name": "Thin" }));
+    for (name, expression) in [("BossExtrude1.Depth", "=plate"), ("Width", "=Plate")] {
+        call(
+            &mut state,
+            "set_configuration_value",
+            json!({ "configuration": "Thin", "name": name, "expression": expression }),
+        );
+    }
+    if let Some(dir) = std::env::var_os("SOLIDDRAFT_BROWSER_FIXTURES") {
+        std::fs::write(PathBuf::from(dir).join("formula-case-distinct.dwprt"), state.doc.model().to_bytes().unwrap())
+            .unwrap();
+    }
+    let field = Field::Name("Plate".into());
+    values_tab::apply(&mut state, ValuesAction::Commit(field.clone(), "Other".into()));
+    assert!(state.values.error(&field).is_none(), "{:?}", state.values.error(&field));
+    let stored: Value = serde_json::from_str(&state.doc.model().part_json()).unwrap();
+    let thin = stored["configurations"]["rows"].as_array().unwrap().iter().find(|row| row["name"] == "Thin").unwrap();
+    assert_eq!(thin["overrides"]["BossExtrude1.Depth"], "=plate");
+    assert_eq!(thin["overrides"]["Width"], "=Other");
+    let read = call(&mut state, "configuration_grid", json!({}));
+    let values = read["resolved"].as_array().unwrap().iter().find(|r| r["name"] == "Thin").unwrap()["values"]
+        .as_array()
+        .unwrap();
+    assert_eq!(values.iter().find(|v| v["name"] == "Width").unwrap()["value"], json!(10.0));
+    call(&mut state, "activate_configuration", json!({ "name": "Thin" }));
+    assert_eq!(call(&mut state, "feature", json!({ "name": "Boss-Extrude1" }))["depth"], json!(20.0));
+}
+
+#[test]
+fn renaming_a_global_keeps_an_existing_case_insensitive_alias() {
+    use soliddraft_app::values_tab::{self, Field, ValuesAction};
+
+    let mut state = parameter_dependent_grid("Width", "10 mm", "10 mm");
+    call(&mut state, "set_value", json!({ "name": "Plate", "expression": "20 mm" }));
+    call(&mut state, "set_value", json!({ "name": "Stock", "expression": "30 mm" }));
+    call(
+        &mut state,
+        "set_configuration_value",
+        json!({ "configuration": "Thin", "name": "Width", "expression": "=plate" }),
+    );
+    let field = Field::Name("Stock".into());
+    values_tab::apply(&mut state, ValuesAction::Commit(field.clone(), "plate".into()));
+    assert!(state.values.error(&field).is_none(), "{:?}", state.values.error(&field));
+    let grid = state.doc.model().configuration_grid();
+    let thin = grid.rows.iter().find(|row| row.name == "Thin").unwrap();
+    assert_eq!(thin.values["Width"], "=Plate");
+}
+
+#[test]
 fn grid_retained_parameter_overrides_do_not_block_values_tab_text_property_edits() {
     use soliddraft_app::values_tab::{self, Field, ValuesAction};
     let mut state = parameter_dependent_grid("Ratio", "1 mm / 1 mm", "10 mm / (BossExtrude1.Depth - 10 mm)");

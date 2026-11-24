@@ -90,8 +90,8 @@ pub fn frame(ui: &mut egui::Ui, st: &mut AppState, events: &ViewportEvents) {
 
 fn mark(ui: &mut egui::Ui, at: Pos2, point: [f64; 3]) {
     let painter = ui.painter();
-    painter.circle(at, 5.0, theme::hud_bg(), Stroke::new(2.0, theme::accent()));
-    painter.circle_filled(at, 1.8, theme::accent());
+    painter.circle(at, 5.0, theme::hud_bg(), Stroke::new(2.0, theme::highlight()));
+    painter.circle_filled(at, 1.8, theme::highlight());
     let text = format!("Midpoint {}", format(point));
     let size = egui::vec2(text.len() as f32 * 7.0 + 12.0, 22.0);
     ui.put(

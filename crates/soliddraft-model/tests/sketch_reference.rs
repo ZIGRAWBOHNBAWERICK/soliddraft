@@ -92,6 +92,7 @@ fn reference_only_profiles_follow_authored_geometry_through_catallax() {
                 operation: ExtrudeOp::Boss,
                 end: EndCondition::Blind { depth: 2.0 },
                 reverse: false,
+                options: Default::default(),
             }),
             name: None,
             position: None,

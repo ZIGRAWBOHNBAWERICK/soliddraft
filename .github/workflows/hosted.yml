@@ -66,7 +66,9 @@ jobs:
           RUNNER_BOAT_OK_AT: ${{ vars.RUNNER_BOAT_OK_AT }}
           RUNNER_BOHN03_OK_AT: ${{ vars.RUNNER_BOHN03_OK_AT }}
         run: python3 ci/select-runner.py
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: ./.github/actions/rust-toolchain
+        with:
+          channel: stable
       - id: select
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before || github.sha }}
@@ -169,8 +171,9 @@ jobs:
       - name: Measure Blade disk usage
         if: startsWith(runner.name, 'blade-sd-')
         run: python3 ci/blade-disk.py start
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: ./.github/actions/rust-toolchain
         with:
+          channel: stable
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
         if: runner.environment == 'github-hosted'
@@ -248,7 +251,9 @@ jobs:
       - name: Measure Blade disk usage
         if: startsWith(runner.name, 'blade-sd-')
         run: python3 ci/blade-disk.py start
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: ./.github/actions/rust-toolchain
+        with:
+          channel: stable
       - uses: Swatinem/rust-cache@v2
         if: runner.environment == 'github-hosted'
         with:
@@ -352,7 +357,9 @@ jobs:
       - name: Measure Blade disk usage
         if: startsWith(runner.name, 'blade-sd-')
         run: python3 ci/blade-disk.py start
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: ./.github/actions/rust-toolchain
+        with:
+          channel: stable
       - uses: Swatinem/rust-cache@v2
         if: runner.environment == 'github-hosted'
         with:
@@ -482,7 +489,9 @@ jobs:
           fi
           # Cargo embeds CLI paths in tests; use the consumer's canonical mount.
           echo "CARGO_TARGET_DIR=$LINUX_ARCHIVE_WORKSPACE/target" >> "$GITHUB_ENV"
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: ./.github/actions/rust-toolchain
+        with:
+          channel: stable
       - uses: Swatinem/rust-cache@v2
         if: runner.environment == 'github-hosted'
         with:
@@ -580,7 +589,9 @@ jobs:
             fi
             test "$(git -C "$GITHUB_WORKSPACE" rev-parse HEAD)" = "$(git -C "$LINUX_ARCHIVE_WORKSPACE" rev-parse HEAD)"
           fi
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: ./.github/actions/rust-toolchain
+        with:
+          channel: stable
       - name: Install pinned test tools
         uses: ./.github/actions/pinned-tool
         with:
@@ -645,7 +656,9 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: ./.github/actions/rust-toolchain
+        with:
+          channel: stable
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: native-test-opt2
@@ -696,7 +709,9 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: ./.github/actions/rust-toolchain
+        with:
+          channel: stable
       - name: Install pinned test tools
         uses: ./.github/actions/pinned-tool
         with:
@@ -726,7 +741,9 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: ./.github/actions/rust-toolchain
+        with:
+          channel: stable
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: native-test-opt2
@@ -755,8 +772,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: ./.github/actions/rust-toolchain
         with:
+          channel: stable
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
         with:
@@ -860,6 +878,67 @@ jobs:
           chrome-devtools-axi emulate --viewport 1400x813x1
           chrome-devtools-axi open 'http://127.0.0.1:8770/?demo'
           chrome-devtools-axi run < ci/browser-part-check.js
+      - name: Check field command availability on an imported STEP body
+        env:
+          CHROME_DEVTOOLS_AXI_SESSION: import-fields
+          CHROME_DEVTOOLS_AXI_EXECUTABLE_PATH: /usr/bin/google-chrome
+          CHROME_DEVTOOLS_AXI_CHROME_ARGS: --no-sandbox --enable-unsafe-webgpu --enable-unsafe-swiftshader --use-angle=swiftshader
+        run: |
+          export PATH="$RUNNER_TEMP/browser-tools/node_modules/.bin:$PATH"
+          export CHROME_DEVTOOLS_AXI_MCP_PATH="$RUNNER_TEMP/browser-tools/node_modules/chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js"
+          cp ci/fixtures/import/block-closed.step target/web-dist/import-field-block.step
+          python3 -m http.server 8793 --bind 127.0.0.1 --directory target/web-dist > "$RUNNER_TEMP/import-fields-server.log" 2>&1 &
+          server=$!
+          trap 'chrome-devtools-axi stop; kill "$server"' EXIT
+          if ! chrome-devtools-axi open about:blank; then
+            chrome-devtools-axi stop || true
+            chrome-devtools-axi open about:blank
+          fi
+          chrome-devtools-axi emulate --viewport 1400x813x1
+          chrome-devtools-axi open 'http://127.0.0.1:8793/?demo'
+          chrome-devtools-axi run < ci/browser-import-fields.js
+      - name: Apply a fillet refusal correction in Chromium
+        env:
+          CHROME_DEVTOOLS_AXI_SESSION: refusal-assistant
+          CHROME_DEVTOOLS_AXI_EXECUTABLE_PATH: /usr/bin/google-chrome
+          CHROME_DEVTOOLS_AXI_CHROME_ARGS: --no-sandbox --enable-unsafe-webgpu --enable-unsafe-swiftshader --use-angle=swiftshader
+        run: |
+          export PATH="$RUNNER_TEMP/browser-tools/node_modules/.bin:$PATH"
+          export CHROME_DEVTOOLS_AXI_MCP_PATH="$RUNNER_TEMP/browser-tools/node_modules/chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js"
+          python3 -m http.server 8776 --bind 127.0.0.1 --directory target/web-dist > "$RUNNER_TEMP/refusal-assistant-server.log" 2>&1 &
+          server=$!
+          trap 'chrome-devtools-axi stop; kill "$server"' EXIT
+          if ! chrome-devtools-axi open about:blank; then
+            chrome-devtools-axi stop || true
+            chrome-devtools-axi open about:blank
+          fi
+          chrome-devtools-axi emulate --viewport 1400x813x1
+          chrome-devtools-axi open 'http://127.0.0.1:8776/'
+          chrome-devtools-axi run < ci/browser-refusal-assistant.js
+      - name: Recover a graded wall at the current kernel pin in Chromium
+        env:
+          CHROME_DEVTOOLS_AXI_SESSION: wall-thickness
+          CHROME_DEVTOOLS_AXI_EXECUTABLE_PATH: /usr/bin/google-chrome
+          CHROME_DEVTOOLS_AXI_CHROME_ARGS: --no-sandbox --enable-unsafe-webgpu --enable-unsafe-swiftshader --use-angle=swiftshader
+        run: |
+          export PATH="$RUNNER_TEMP/browser-tools/node_modules/.bin:$PATH"
+          export CHROME_DEVTOOLS_AXI_MCP_PATH="$RUNNER_TEMP/browser-tools/node_modules/chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js"
+          mkdir -p target/web-dist/fixtures
+          python3 - <<'PYTHON'
+          from zipfile import ZipFile
+          with ZipFile("target/web-dist/fixtures/graded-wall.dwprt", "w") as part:
+              part.write("ci/fixtures/graded-wall.json", "recipe.json")
+          PYTHON
+          python3 -m http.server 8778 --bind 127.0.0.1 --directory target/web-dist > "$RUNNER_TEMP/wall-thickness-server.log" 2>&1 &
+          server=$!
+          trap 'chrome-devtools-axi stop; kill "$server"' EXIT
+          if ! chrome-devtools-axi open about:blank; then
+            chrome-devtools-axi stop || true
+            chrome-devtools-axi open about:blank
+          fi
+          chrome-devtools-axi emulate --viewport 1400x813x1
+          chrome-devtools-axi open http://127.0.0.1:8778/
+          chrome-devtools-axi run < ci/browser-wall-thickness.js
       - name: Detect page-thread regressions in bracket edits in Chromium
         env:
           CHROME_DEVTOOLS_AXI_SESSION: edit-off-thread
@@ -896,6 +975,69 @@ jobs:
           name: edit-off-thread-trace
           path: ${{ runner.temp }}/edit-off-thread-trace.json.gz
           if-no-files-found: warn
+      - name: Generate the display-state and Mate Controller fixtures
+        run: |
+          cargo test --locked -p soliddraft-app --test appearance_panel named_state_renders_two_body_appearances_and_reopens_with_visibility -- --exact
+          mkdir -p target/web-dist/fixtures
+          cp target/exit-test/display-states{,-service}.dwprt target/web-dist/fixtures/
+          SOLIDDRAFT_CONTROLLER_BROWSER_FIXTURES="$PWD/target/web-dist/fixtures" cargo test --locked -p soliddraft-app --test app_tools mate_controller_animation_keeps_driver_identity_when_reordered -- --exact
+      - name: Check display states and Mate Controller drafts in Chromium
+        timeout-minutes: 10
+        env:
+          CHROME_DEVTOOLS_AXI_SESSION: display-states
+          CHROME_DEVTOOLS_AXI_EXECUTABLE_PATH: /usr/bin/google-chrome
+          CHROME_DEVTOOLS_AXI_CHROME_ARGS: --no-sandbox --enable-unsafe-webgpu --enable-unsafe-swiftshader --use-angle=swiftshader
+        run: |
+          export PATH="$RUNNER_TEMP/browser-tools/node_modules/.bin:$PATH"
+          export CHROME_DEVTOOLS_AXI_MCP_PATH="$RUNNER_TEMP/browser-tools/node_modules/chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js"
+          python3 -m http.server 8779 --bind 127.0.0.1 --directory target/web-dist > "$RUNNER_TEMP/display-states-server.log" 2>&1 &
+          server=$!
+          trap 'chrome-devtools-axi stop; kill "$server"' EXIT
+          export CHROME_ARGS="$CHROME_DEVTOOLS_AXI_CHROME_ARGS"
+          node ci/browser-display-states.mjs /usr/bin/google-chrome http://127.0.0.1:8779/ "$RUNNER_TEMP/browser-display-states" target/web-dist/fixtures/display-states-service.dwprt target/web-dist/fixtures/display-states.dwprt
+          if ! chrome-devtools-axi open about:blank; then
+            chrome-devtools-axi stop || true
+            chrome-devtools-axi open about:blank
+          fi
+          chrome-devtools-axi emulate --viewport 1400x900x1
+          chrome-devtools-axi open 'http://127.0.0.1:8779/'
+          chrome-devtools-axi run < ci/browser-mate-controller.js
+      - name: Generate feature regression fixtures
+        env:
+          SOLIDDRAFT_BROWSER_FIXTURES: ${{ github.workspace }}/target/web-dist/fixtures
+        run: |
+          mkdir -p "$SOLIDDRAFT_BROWSER_FIXTURES"
+          # Run only fixture producers here. Native renderer tests run in the workspace jobs.
+          fixture() {
+            cargo test --locked -p soliddraft-app --test "$1" "$2" -- --exact
+          }
+          fixture configuration_grid renaming_a_global_keeps_case_distinct_configuration_bindings
+          fixture hole_thread a_drawing_calls_out_each_counterbore_after_one_opening_is_skimmed
+          fixture hole_thread updating_the_drawing_keeps_one_thread_note_when_two_groups_join
+          fixture hole_wizard parameter_grid_edits_rebuild_a_blind_wizard_hole
+          fixture hole_wizard tapped_surface_offset_is_called_out_as_blind
+          fixture hole_wizard a_headless_legacy_hole_position_edit_produces_the_browser_fixture
+      - name: Check hole, drawing, and parameter regressions in Chromium
+        env:
+          CHROME_DEVTOOLS_AXI_EXECUTABLE_PATH: /usr/bin/google-chrome
+          CHROME_DEVTOOLS_AXI_CHROME_ARGS: --no-sandbox --enable-unsafe-webgpu --enable-unsafe-swiftshader --use-angle=swiftshader
+        run: |
+          export PATH="$RUNNER_TEMP/browser-tools/node_modules/.bin:$PATH"
+          export CHROME_DEVTOOLS_AXI_MCP_PATH="$RUNNER_TEMP/browser-tools/node_modules/chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js"
+          python3 -m http.server 8796 --bind 127.0.0.1 --directory target/web-dist > "$RUNNER_TEMP/feature-regressions-server.log" 2>&1 &
+          server=$!
+          trap 'chrome-devtools-axi stop; kill "$server"' EXIT
+          for scenario in depth offset positions formula visibility callouts notes; do
+            export CHROME_DEVTOOLS_AXI_SESSION="feature-regressions-$scenario"
+            if ! chrome-devtools-axi open about:blank; then
+              chrome-devtools-axi stop || true
+              chrome-devtools-axi open about:blank
+            fi
+            chrome-devtools-axi emulate --viewport 1600x1000x1
+            chrome-devtools-axi open "http://127.0.0.1:8796/#$scenario"
+            chrome-devtools-axi run < ci/browser-feature-regressions.js
+            chrome-devtools-axi stop
+          done
       - name: Keep preferences per browser in Chromium
         env:
           # WebGL: a headless screenshot cannot read a WebGPU canvas.
@@ -910,6 +1052,21 @@ jobs:
         with:
           name: browser-preferences
           path: ${{ runner.temp }}/browser-preferences
+          if-no-files-found: ignore
+      - name: Ask before closing unsaved tabs, save drawings and export shortcuts in Chromium
+        timeout-minutes: 10
+        env:
+          CHROME_ARGS: --no-sandbox --enable-unsafe-swiftshader --use-angle=swiftshader
+        run: |
+          python3 -m http.server 8794 --bind 127.0.0.1 --directory target/web-dist > "$RUNNER_TEMP/document-tabs-server.log" 2>&1 &
+          server=$!
+          trap 'kill "$server"' EXIT
+          node ci/browser-document-tabs.mjs /usr/bin/google-chrome http://127.0.0.1:8794/ "$RUNNER_TEMP/browser-document-tabs"
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-document-tabs
+          path: ${{ runner.temp }}/browser-document-tabs
           if-no-files-found: ignore
       - name: Keep documents per browser and recover them after a kill in Chromium
         timeout-minutes: 10
@@ -940,6 +1097,51 @@ jobs:
         with:
           name: browser-manufacturing-information
           path: ${{ runner.temp }}/browser-manufacturing-information
+          if-no-files-found: ignore
+      - name: Extrude in the feature panel with Direction 2 and Merge result off, save, reopen and edit it in Chromium
+        timeout-minutes: 15
+        env:
+          CHROME_ARGS: --no-sandbox --enable-unsafe-swiftshader --use-angle=swiftshader
+        run: |
+          python3 -m http.server 8774 --bind 127.0.0.1 --directory target/web-dist > "$RUNNER_TEMP/feature-panel-server.log" 2>&1 &
+          server=$!
+          trap 'kill "$server"' EXIT
+          node ci/browser-feature-panel.mjs /usr/bin/google-chrome http://127.0.0.1:8774/ "$RUNNER_TEMP/browser-feature-panel"
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-feature-panel
+          path: ${{ runner.temp }}/browser-feature-panel
+          if-no-files-found: ignore
+      - name: Place a tapped Hole Wizard pattern by clicks, save and reopen it in Chromium
+        timeout-minutes: 15
+        env:
+          CHROME_ARGS: --no-sandbox --enable-unsafe-swiftshader --use-angle=swiftshader
+        run: |
+          python3 -m http.server 8775 --bind 127.0.0.1 --directory target/web-dist > "$RUNNER_TEMP/hole-wizard-server.log" 2>&1 &
+          server=$!
+          trap 'kill "$server"' EXIT
+          node ci/browser-hole-wizard.mjs /usr/bin/google-chrome http://127.0.0.1:8775/ "$RUNNER_TEMP/browser-hole-wizard" ci/fixtures/pmi/p1-bracket-pmi.step
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-hole-wizard
+          path: ${{ runner.temp }}/browser-hole-wizard
+          if-no-files-found: ignore
+      - name: Make, rebuild, save and reopen drawing annotations in Chromium
+        timeout-minutes: 10
+        env:
+          CHROME_ARGS: --no-sandbox --enable-unsafe-swiftshader --use-angle=swiftshader
+        run: |
+          python3 -m http.server 8777 --bind 127.0.0.1 --directory target/web-dist > "$RUNNER_TEMP/drawing-annotations-server.log" 2>&1 &
+          server=$!
+          trap 'kill "$server"' EXIT
+          node ci/browser-drawing-annotations.mjs /usr/bin/google-chrome http://127.0.0.1:8777/ "$RUNNER_TEMP/browser-drawing-annotations" ci/fixtures/drawing-annotations/bracket.dwprt
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-drawing-annotations
+          path: ${{ runner.temp }}/browser-drawing-annotations
           if-no-files-found: ignore
       - name: Make, mate, save and reopen an assembly of uploaded parts, add a Universal Joint, refuse it a right angle, and choose between uploaded assemblies, in Chromium
         timeout-minutes: 30
@@ -1020,7 +1222,9 @@ jobs:
       - name: Measure Blade disk usage
         if: startsWith(runner.name, 'blade-sd-')
         run: python3 ci/blade-disk.py start
-      - uses: dtolnay/rust-toolchain@1.88
+      - uses: ./.github/actions/rust-toolchain
+        with:
+          channel: 1.88
       - uses: Swatinem/rust-cache@v2
         if: needs.select.outputs.plain_jobs != '1' && !startsWith(runner.name, 'blade-sd-')
         with:
@@ -1070,7 +1274,9 @@ jobs:
       XDG_RUNTIME_DIR: /tmp/soliddraft-runtime
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: ./.github/actions/rust-toolchain
+        with:
+          channel: stable
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: native-dev
@@ -1112,7 +1318,9 @@ jobs:
       XDG_RUNTIME_DIR: /tmp/soliddraft-runtime
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: ./.github/actions/rust-toolchain
+        with:
+          channel: stable
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: native-dev
@@ -1167,7 +1375,9 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: ./.github/actions/rust-toolchain
+        with:
+          channel: stable
       - uses: Swatinem/rust-cache@v2
         if: runner.environment == 'github-hosted'
         with:

@@ -23,7 +23,7 @@ pub(crate) fn preview_params() -> Vec<(&'static str, Value)> {
     let cells = array(array(string("A cell"), "A row's cells"), "The rows, with columns");
     vec![
         ("path", optional(string("Table file to read, with format"))),
-        ("format", optional(one_of(&["csv", "xlsx"], "The file's format"))),
+        ("format", optional(one_of(&["csv", "xlsx", "json"], "The file's format"))),
         ("columns", optional(array(string("A header"), "The header cells, instead of a file"))),
         ("rows", optional(cells)),
     ]
@@ -34,7 +34,7 @@ pub(crate) fn preview_id_params() -> Vec<(&'static str, Value)> {
 }
 
 pub(crate) fn export_params() -> Vec<(&'static str, Value)> {
-    vec![("path", string("The file to write")), ("format", one_of(&["csv", "xlsx"], "The file's format"))]
+    vec![("path", string("The file to write")), ("format", one_of(&["csv", "xlsx", "json"], "The file's format"))]
 }
 
 /// Runs the table's tools. `None` hands the call on.

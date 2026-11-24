@@ -148,11 +148,10 @@ mod ux_tools;
 fn open_profiles(app: &mut ribbon::App) {
     use egui_kittest::kittest::Queryable;
 
-    let bar = egui::PanelState::load(&app.ctx, egui::Id::new("options_bar")).unwrap().outer_rect;
-    let (_, rect) = ribbon::buttons_in(app, bar).into_iter().find(|(name, _)| name.starts_with("More (")).unwrap();
-    ribbon::click_at(app, rect.center());
+    let ok = app.get_by_label("OK").rect();
+    ribbon::open_options(app);
     ux_tools::settle(app);
-    assert!(bar.contains_rect(app.get_by_label("OK").rect()), "finish stays on the bar above the profile list");
+    assert_eq!(app.get_by_label("OK").rect(), ok, "OK stays above the profile list");
 }
 
 #[test]

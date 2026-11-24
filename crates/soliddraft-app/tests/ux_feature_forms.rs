@@ -15,22 +15,22 @@ use soliddraft_app::{
 use ux_tools::{Case, Look, STANDARD, launch, settle};
 
 fn bar(app: &App) -> Rect {
-    egui::PanelState::load(&app.ctx, egui::Id::new("options_bar")).unwrap().outer_rect
+    soliddraft_app::options_bar::shown_rect(&app.ctx).expect("the options bar is drawn")
 }
 
 fn suite(app: &mut App) {
     settle(app);
 }
 
-fn click_bar(app: &mut App, label: &str) {
-    let rect = ribbon::control(app, label, bar(app)).rect;
-    ribbon::click_at(app, rect.center());
-    settle(app);
+/// The side area, which is the feature's property panel while a form is open.
+fn panel(app: &App) -> Rect {
+    ribbon::feature_panel(app)
 }
 
-fn more(app: &mut App) {
-    let (name, _) = ribbon::buttons_in(app, bar(app)).into_iter().find(|(s, _)| s.starts_with("More (")).unwrap();
-    click_bar(app, &name);
+fn click_panel(app: &mut App, label: &str) {
+    let rect = ribbon::control(app, label, panel(app)).rect;
+    ribbon::click_at(app, rect.center());
+    settle(app);
 }
 
 fn click(app: &mut App, label: &str) {
@@ -40,27 +40,27 @@ fn click(app: &mut App, label: &str) {
 }
 
 #[test]
-fn feature_fields_and_finish_actions_stay_on_the_bar_and_spill_into_the_sheet() {
+fn every_feature_form_opens_in_the_panel_with_its_actions_on_top() {
     let mut case = Case::new("feature-forms");
-    for (id, sketch, sheet) in [
-        ("extrude", true, false),
-        ("revolve", true, false),
-        ("sweep", true, true),
-        ("loft", true, true),
-        ("cut", true, false),
-        ("fillet", false, false),
-        ("chamfer", false, false),
-        ("hole", false, true),
-        ("linear_pattern", false, true),
-        ("circular_pattern", false, true),
-        ("reference_plane", false, false),
-        ("mirror", false, false),
-        ("draft", false, false),
-        ("shell", false, false),
-        ("offset", false, false),
-        ("thicken", false, false),
-        ("lattice", false, true),
-        ("gyroid", false, true),
+    for (id, sketch) in [
+        ("extrude", true),
+        ("revolve", true),
+        ("sweep", true),
+        ("loft", true),
+        ("cut", true),
+        ("fillet", false),
+        ("chamfer", false),
+        ("hole", false),
+        ("linear_pattern", false),
+        ("circular_pattern", false),
+        ("reference_plane", false),
+        ("mirror", false),
+        ("draft", false),
+        ("shell", false),
+        ("offset", false),
+        ("thicken", false),
+        ("lattice", false),
+        ("gyroid", false),
     ] {
         let mut doc = if sketch { ribbon::sketch() } else { ribbon::plate() };
         if id == "cut" {
@@ -72,6 +72,8 @@ fn feature_fields_and_finish_actions_stay_on_the_bar_and_spill_into_the_sheet() 
         }
         let mut app = launch(doc, STANDARD);
         suite(&mut app);
+        // The bar's whole width: with the side column beside it more forms need their sheet.
+        ribbon::close_tree(&mut app);
         case.run(&mut app, |case, app| {
             if sketch {
                 let id = app.state().state.doc.features[0].id;
@@ -82,22 +84,24 @@ fn feature_fields_and_finish_actions_stay_on_the_bar_and_spill_into_the_sheet() 
             assert!(app.state().state.editor.is_some(), "{id} opens a form");
             let title = app.state().state.editor.as_ref().unwrap().title();
             assert!(app.query_all_by_label(&format!("Active tool: {title}")).next().is_some());
-            for label in ["OK", "Cancel"] {
-                let button = ribbon::control(app, label, bar(app));
-                assert!(bar(app).contains_rect(button.rect), "{id}: {label} stays on the bar");
-            }
+            assert!(app.query_all_by_label(&format!("Feature panel: {title}")).next().is_some(), "{id}: the panel");
+            let top = |app: &App| {
+                ["OK", "Cancel"].map(|label| {
+                    let button = ribbon::control(app, label, panel(app)).rect;
+                    assert!(panel(app).contains_rect(button), "{id}: {label} is in the panel");
+                    button
+                })
+            };
+            let before_unfold = top(app);
+            assert!(before_unfold.iter().all(|r| r.top() < panel(app).top() + 80.0), "{id}: OK and Cancel lead");
             assert!(!ribbon::painted(app).iter().any(|p| p.text == "Properties"));
-            let has_sheet = ribbon::buttons_in(app, bar(app)).iter().any(|(s, _)| s.starts_with("More ("));
-            assert_eq!(has_sheet, sheet, "{id}: only extra fields need a sheet at 1440 px");
             case.frame(app, id);
-            if sheet {
-                more(app);
-                assert!(app.state().state.form_bar.expanded);
-                assert!(bar(app).contains_rect(app.get_by_label("OK").rect()));
-                case.frame(app, &format!("{id}-sheet"));
-            }
+            // Unfolding every section keeps OK and Cancel where they were.
+            ribbon::open_options(app);
+            assert_eq!(top(app), before_unfold, "{id}: unfolding moves no action");
+            case.frame(app, &format!("{id}-unfolded"));
             let before = ribbon::fingerprint(app);
-            click_bar(app, "Cancel");
+            click_panel(app, "Cancel");
             assert!(app.state().state.editor.is_none());
             assert_eq!(ribbon::fingerprint(app).features, before.features);
         });
@@ -117,7 +121,7 @@ fn typed_feature_edits_commit_once_and_refused_sizes_survive_resizing() {
         ribbon::type_field(app, "Depth value", "24");
         settle(app);
         if app.state().state.editor.is_some() {
-            click_bar(app, "OK");
+            click_panel(app, "OK");
         }
         assert!(app.state().state.editor.is_none());
         assert!(matches!(&app.state().state.doc.features[0].kind, FeatureKind::Extrude(p) if p.depth == 24.0));
@@ -140,11 +144,11 @@ fn typed_feature_edits_commit_once_and_refused_sizes_survive_resizing() {
         case.frame(app, "refused-radius");
         app.set_size(vec2(640.0, 600.0));
         settle(app);
-        more(app);
+        ribbon::open_options(app);
         assert!(app.get_by_label("Radius value").value().is_some_and(|v| v.contains("-2")));
-        assert!(bar(app).contains_rect(app.get_by_label("OK").rect()));
+        assert!(panel(app).contains_rect(app.get_by_label("OK").rect()));
         case.frame(app, "refused-radius-small");
-        click_bar(app, "Cancel");
+        click_panel(app, "Cancel");
     });
 }
 
@@ -156,14 +160,16 @@ fn hole_positions_and_blind_depth_are_in_the_sheet_without_moving_ok() {
     case.run(&mut app, |case, app| {
         ribbon::run_command(app, "hole");
         settle(app);
-        more(app);
+        let ok = app.get_by_label("OK").rect();
+        ribbon::open_options(app);
         click(app, "Add point");
         assert!(
             matches!(&app.state().state.editor.as_ref().unwrap().params, EditorParams::Hole(p) if p.points.len() == 2)
         );
-        assert!(bar(app).contains_rect(app.get_by_label("OK").rect()));
+        assert_eq!(app.get_by_label("OK").rect(), ok, "the positions open below OK without moving it");
+        assert!(panel(app).contains_rect(ok));
         case.frame(app, "positions");
-        click_bar(app, "Cancel");
+        click_panel(app, "Cancel");
         assert!(app.state().state.editor.is_none());
     });
 }
@@ -189,8 +195,8 @@ fn tree_and_values_are_one_optional_pane_and_sketch_closes_from_the_bar() {
         ribbon::run_command(app, "sketch");
         settle(app);
         assert!(app.state().state.in_sketch());
-        assert!(bar(app).contains_rect(app.get_by_label("Close sketch").rect()));
         let palette = egui::PanelState::load(&app.ctx, egui::Id::new("tool_palette")).unwrap().outer_rect;
+        assert!(palette.contains_rect(app.get_by_label("Close sketch").rect()), "Close sketch is on the tool strip");
         assert!(!ribbon::painted_in(app, palette).iter().any(|p| p.text == "Exit"));
         let actions = ribbon::buttons_in(app, bar(app));
         assert!(!actions.iter().any(|(label, _)| matches!(label.as_str(), "OK" | "Cancel")));
@@ -202,7 +208,8 @@ fn tree_and_values_are_one_optional_pane_and_sketch_closes_from_the_bar() {
         }
         settle(app);
         assert!(app.state().state.sketch.as_ref().unwrap().sketch.drawn().count() > 0);
-        let status = ribbon::painted_in(app, bar(app)).into_iter().find(|p| p.text == "Under defined").unwrap();
+        // The sketch's status is beside Close sketch on the tool strip.
+        let status = ribbon::painted_in(app, palette).into_iter().find(|p| p.text == "Under defined").unwrap();
         assert_eq!(status.color, soliddraft_app::theme::edit_suite::UNDER_DEFINED_LABEL);
         let image = case.frame(app, "close-sketch");
         let close = app.get_by_label("Close sketch").rect();
@@ -212,7 +219,8 @@ fn tree_and_values_are_one_optional_pane_and_sketch_closes_from_the_bar() {
             soliddraft_app::theme::edit_suite::DANGER.to_array(),
             "Close sketch keeps the approved red fill on charcoal chrome"
         );
-        click_bar(app, "Close sketch");
+        ribbon::click_button(app, "Close sketch", palette);
+        settle(app);
         assert!(!app.state().state.in_sketch());
         assert!(app.state().state.editor.is_none());
         assert_eq!(app.state().state.doc.features.len(), 1, "closing saves the sketch without adding a feature");
@@ -285,16 +293,16 @@ fn plane_picker_and_repair_use_the_same_bar_and_sheet() {
         settle(app);
         assert!(matches!(app.state().state.editor.as_ref().map(|e| &e.params), Some(EditorParams::PickPlane)));
         assert!(app.query_all_by_label("OK").next().is_none());
-        let options = bar(app);
+        let options = panel(app);
         assert_eq!(
             app.get_all_by_role_and_label(egui::accesskit::Role::Button, "Top plane")
                 .filter(|n| options.intersects(n.rect()))
                 .count(),
             1,
-            "plane selection has one set of controls on the options bar"
+            "plane selection has one set of controls in the panel"
         );
         case.frame(app, "plane-picker");
-        click_bar(app, "Cancel");
+        click_panel(app, "Cancel");
         app.state_mut().state.editor = Some(FeatureEditor::new(
             None,
             EditorParams::Repair {
@@ -308,14 +316,14 @@ fn plane_picker_and_repair_use_the_same_bar_and_sheet() {
             None,
         ));
         settle(app);
-        click_bar(app, "Next");
+        click_panel(app, "Next");
         assert!(matches!(
             app.state().state.editor.as_ref().map(|e| &e.params),
             Some(EditorParams::Repair { active: 1, .. })
         ));
-        more(app);
+        ribbon::open_options(app);
         case.frame(app, "repair-list");
-        click_bar(app, "Cancel");
+        click_panel(app, "Cancel");
         assert!(app.state().state.editor.is_none());
     });
 }

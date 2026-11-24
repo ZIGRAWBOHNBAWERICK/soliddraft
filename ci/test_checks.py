@@ -703,6 +703,13 @@ class Cli(unittest.TestCase):
         self.commit({'.github/workflows/hosted.yml': workflow, 'docs/ci.md': 'CI documentation edit\n'})
         self.assertEqual(set(self.selection(self.base)['selected']), {'lint', 'kernel'})
 
+    def test_import_field_step_fixture_selects_browser_check(self):
+        path = 'ci/fixtures/import/block-closed.step'
+        self.commit({path: (self.root / path).read_text() + '\n'})
+        selection = self.selection(self.base)
+        self.assertEqual(set(selection['selected']), {'lint', 'kernel', 'test-linux', 'application-loop', 'web'})
+        self.assertIn(f'CI consumers: {path}', selection['reasons']['web'])
+
     def test_only_a_manual_input_selects_windows(self):
         for name, options, expected in (
                 ('manual, on', {'event': 'workflow_dispatch', 'windows': 'true'}, everything()),

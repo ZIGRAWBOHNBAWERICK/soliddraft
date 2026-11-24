@@ -36,6 +36,7 @@ fn save_block(name: &str, with_fillet: bool) -> (PathBuf, Document) {
             operation: ExtrudeOp::Boss,
             end,
             reverse: false,
+            options: Default::default(),
         }),
     );
     let t = doc.kernel().topology(doc.body().unwrap()).unwrap();

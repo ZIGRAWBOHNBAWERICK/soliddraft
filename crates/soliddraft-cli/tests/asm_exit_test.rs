@@ -1,5 +1,6 @@
 //! `soliddraft asm` end to end, as separate processes: make an assembly of a saved part,
-//! insert, pattern, move, hide, list the tree, report, then change the part and Rebuild.
+//! insert, pattern, move, hide, list the tree, report, then change the part and Rebuild,
+//! and Pack and Go into a zip.
 
 use std::path::PathBuf;
 use std::process::Command as Process;
@@ -69,6 +70,7 @@ fn save_block(path: &std::path::Path, w: f64) {
         operation: ExtrudeOp::Boss,
         end: EndCondition::Blind { depth: 10.0 },
         reverse: false,
+        options: Default::default(),
     }));
     doc.save(path).unwrap();
 }
@@ -116,6 +118,17 @@ fn assemblies_are_built_edited_and_rebuilt_from_the_command_line() {
     assert!(info["newer"].as_array().unwrap().is_empty());
     let refs = d.json(&["doc", "refs", "rig.dwasm", "--json"]);
     assert!(refs.to_string().contains("current"), "{refs}");
+
+    // Pack and Go into one zip: the part, then the assembly at the zip's top. The same
+    // zip again is refused and left as it was.
+    let packed = d.json(&["asm", "pack", "rig.dwasm", "rig.zip", "--json"]);
+    assert_eq!(packed["root"], "rig.dwasm");
+    let places: Vec<&str> = packed["files"].as_array().unwrap().iter().map(|f| f["to"].as_str().unwrap()).collect();
+    assert_eq!(places, ["parts/block.dwprt", "rig.dwasm"]);
+    let zip = std::fs::read(d.0.join("rig.zip")).unwrap();
+    let (ok, _, stderr) = d.run(&["asm", "pack", "rig.dwasm", "rig.zip"]);
+    assert!(!ok && stderr.contains("already exists"), "{stderr}");
+    assert_eq!(std::fs::read(d.0.join("rig.zip")).unwrap(), zip);
 }
 
 #[test]
@@ -133,4 +146,14 @@ fn the_generated_scale_assembly_opens_and_its_parts_rebuild() {
     assert_eq!(module["occurrences"]["parts"], 500);
     let part = d.json(&["part", "--json", "big/parts/p000123.dwprt"]);
     assert!(part["body"]["valid"].as_bool().unwrap(), "{part}");
+}
+
+#[test]
+fn options_no_command_reads_are_refused_by_name() {
+    let dir = Dir::new("ignored-options");
+    for flag in ["--pdf", "--svg", "--configuration", "--meshes"] {
+        let (ok, _, stderr) = dir.run(&["asm", "drawing", "rig.dwasm", flag, "out"]);
+        assert!(!ok, "asm drawing {flag} must not succeed without doing what it says");
+        assert!(stderr.contains(&format!("unknown option {flag}")), "{flag}: {stderr}");
+    }
 }

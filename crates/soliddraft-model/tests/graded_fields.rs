@@ -9,7 +9,7 @@ use soliddraft_kernel_catallax::CatallaxKernel;
 use soliddraft_model::sketch::{P2, Sketch, solve::solve};
 use soliddraft_model::{
     Command, CommandError, DatumPlane, Document, EndCondition, ExtrudeFeature, ExtrudeOp, FeatureId, FeatureKind,
-    FeatureStatus, GyroidFeature, LatticeFeature, ProfileSource, SketchFeature, SketchPlane,
+    FeatureStatus, FieldGrade, GyroidFeature, LatticeFeature, ProfileSource, SketchFeature, SketchPlane,
 };
 
 fn kernel() -> Arc<CatallaxKernel> {
@@ -45,14 +45,15 @@ fn boss(sketch: FeatureId, depth: f64) -> FeatureKind {
         operation: ExtrudeOp::Boss,
         end: EndCondition::Blind { depth },
         reverse: false,
+        options: Default::default(),
     })
 }
 
-fn linear(from: f64, to: f64, start: f64, end: f64) -> Grade {
+fn linear(from: f64, to: f64, start: f64, end: f64) -> FieldGrade {
     Grade::Linear(LinearGrade { axis: GradeAxis::Z, from, to, start, end })
 }
 
-fn lattice(radius: Grade) -> FeatureKind {
+fn lattice(radius: FieldGrade) -> FeatureKind {
     FeatureKind::Lattice(LatticeFeature {
         cell_size_mm: Some(100.0),
         radius_mm: Some(radius),
@@ -62,7 +63,7 @@ fn lattice(radius: Grade) -> FeatureKind {
     })
 }
 
-fn gyroid(level: Grade) -> FeatureKind {
+fn gyroid(level: FieldGrade) -> FeatureKind {
     FeatureKind::Gyroid(GyroidFeature { level, accuracy_mm: 0.1, min_detail_mm: 0.1, ..Default::default() })
 }
 
@@ -147,6 +148,7 @@ fn unknown_grade_data_refuses_the_file_instead_of_becoming_a_constant() {
         part.to_string()
     };
     let future = [
+        replaced(&|k| k["radius_mm"] = serde_json::json!({"spline":{"axis":"z","from":0,"to":1,"start":1,"end":2}})),
         replaced(&|k| k["radius_mm"] = serde_json::json!({"radial":{"axis":"z","from":0,"to":1,"start":1,"end":2}})),
         replaced(&|k| k["radius_mm"]["linear"]["span"] = serde_json::json!(1)),
         replaced(&|k| k["radius_mm"] = serde_json::json!("sin(z)")),
@@ -163,7 +165,7 @@ fn unknown_grade_data_refuses_the_file_instead_of_becoming_a_constant() {
         k.as_object_mut().unwrap().retain(|key, _| ["type", "accuracy_mm", "min_detail_mm"].contains(&key.as_str()))
     });
     let opened = Document::from_part_json(&legacy, kernel()).unwrap();
-    let FeatureKind::Lattice(l) = opened.features().last().unwrap().kind else { panic!("lattice") };
+    let FeatureKind::Lattice(l) = &opened.features().last().unwrap().kind else { panic!("lattice") };
     assert_eq!(l.radius_mm, None);
 }
 
@@ -178,12 +180,12 @@ fn grade_values_are_checked_before_the_document_changes() {
         linear(20.0, f64::NAN, 1.0, 2.0),
         linear(20.0, 30.0, f64::INFINITY, 2.0),
     ] {
-        assert!(matches!(edit(&mut d, l, lattice(radius)), Err(CommandError::Invalid(_))), "{radius:?}");
+        assert!(matches!(edit(&mut d, l, lattice(radius.clone())), Err(CommandError::Invalid(_))), "{radius:?}");
         assert_eq!((d.body(), d.part_json(), d.undo_depth()), (body, saved.clone(), depth));
     }
     let (mut g, _, gid) = g0();
     for level in [linear(1.0, 1.0, -0.1, 0.1), linear(-1.0, 1.0, f64::NAN, 0.1)] {
-        assert!(matches!(edit(&mut g, gid, gyroid(level)), Err(CommandError::Invalid(_))), "{level:?}");
+        assert!(matches!(edit(&mut g, gid, gyroid(level.clone())), Err(CommandError::Invalid(_))), "{level:?}");
     }
     // Negative and zero levels are valid; the kernel decides what it can certify.
     edit(&mut g, gid, gyroid(linear(-1.0, 1.0, -0.1, 0.0))).unwrap();
@@ -297,4 +299,121 @@ fn no_cad_follows_an_active_field() {
     features.insert(features.iter().position(|f| f["id"] == serde_json::json!(b.0)).unwrap(), field);
     let error = Document::from_part_json(&part.to_string(), kernel()).map(|_| ()).unwrap_err().to_string();
     assert!(error.contains("must stay last"), "{error}");
+}
+
+/// The top face of the document's body: the face whose centroid is highest.
+fn top_face(d: &Document) -> FaceId {
+    let topology = d.kernel().topology(d.body().unwrap()).unwrap();
+    topology.faces.iter().max_by(|a, b| a.centroid.z.total_cmp(&b.centroid.z)).unwrap().id
+}
+
+fn refused_by_catallax(d: &Document, id: FeatureId, code: &str) {
+    let FeatureStatus::Failed(message) = status(d, id) else { panic!("{:?}", status(d, id)) };
+    assert!(message.contains(code), "{message}");
+}
+
+/// A distance grade keeps its picked face and builds after an upstream edit, reopen and undo.
+#[test]
+fn a_distance_grade_keeps_its_face_and_builds_through_edits_and_reopen() {
+    let mut d = Document::new("Distance", kernel());
+    let s = add(&mut d, sketch(6.0, 6.0, 20.0));
+    let b = add(&mut d, boss(s, 10.0));
+    let face = d.face_ref(top_face(&d)).unwrap();
+    let grade: FieldGrade = Grade::Distance(DistanceGrade {
+        faces: GradeFaces::Picked(vec![face.clone()]),
+        near: 2.0,
+        far: 1.0,
+        span: 5.0,
+    });
+    let l = add(&mut d, lattice(grade.clone()));
+    assert!(status(&d, l).is_ok(), "{:?}", status(&d, l));
+    assert!(d.feature(l).unwrap().kind.dependencies().contains(&b), "the grade reads the boss's face");
+    let part: serde_json::Value = serde_json::from_str(&d.part_json()).unwrap();
+    let saved = &part["features"].as_array().unwrap().last().unwrap()["kind"]["radius_mm"]["distance"];
+    assert_eq!(
+        (saved["near"].clone(), saved["far"].clone(), saved["span"].clone()),
+        (2.0.into(), 1.0.into(), 5.0.into())
+    );
+    assert_eq!(saved["faces"]["picked"].as_array().unwrap().len(), 1, "{saved}");
+
+    // An upstream edit moves the face and the grade follows it.
+    edit(&mut d, b, boss(s, 12.0)).unwrap();
+    assert!(status(&d, l).is_ok(), "{:?}", status(&d, l));
+    assert_eq!(d.feature(l).unwrap().kind, lattice(grade.clone()), "the grade does not change");
+
+    // Reopening on a fresh kernel rebuilds the same grade.
+    let mut reopened = Document::from_bytes(&d.to_bytes().unwrap(), kernel()).unwrap();
+    assert_eq!(reopened.feature(l).unwrap().kind, lattice(grade.clone()));
+    assert!(status(&reopened, l).is_ok(), "{:?}", status(&reopened, l));
+    assert_eq!(reopened.part_json(), d.part_json(), "saving an opened file reproduces it");
+
+    // Undoing a switch to a linear grade restores the picked face.
+    edit(&mut reopened, l, lattice(linear(20.0, 32.0, 1.0, 2.0))).unwrap();
+    assert!(status(&reopened, l).is_ok(), "{:?}", status(&reopened, l));
+    reopened.undo().unwrap();
+    assert_eq!(reopened.feature(l).unwrap().kind, lattice(grade));
+    assert!(status(&reopened, l).is_ok(), "{:?}", status(&reopened, l));
+}
+
+#[test]
+fn skin_radial_and_point_grades_build_save_and_reopen() {
+    let skin: FieldGrade = Grade::Distance(DistanceGrade { faces: GradeFaces::Skin, near: 2.0, far: 1.0, span: 2.0 });
+    let radial: FieldGrade =
+        Grade::Radial(RadialGrade { axis: GradeAxis::Z, through: [0.0; 3], from: 0.0, to: 3.0, start: 1.0, end: 2.0 });
+    let point: FieldGrade =
+        Grade::Point(PointGrade { centre: [0.0, 0.0, 25.0], from: 0.0, to: 3.0, start: 1.0, end: 2.0 });
+    for (grade, saved) in [
+        (skin, serde_json::json!({"distance":{"faces":"skin","near":2.0,"far":1.0,"span":2.0}})),
+        (
+            radial,
+            serde_json::json!({"radial":{"axis":"z","through":[0.0,0.0,0.0],"from":0.0,"to":3.0,"start":1.0,"end":2.0}}),
+        ),
+        (point, serde_json::json!({"point":{"centre":[0.0,0.0,25.0],"from":0.0,"to":3.0,"start":1.0,"end":2.0}})),
+    ] {
+        let (mut d, _, l) = d0();
+        edit(&mut d, l, lattice(grade.clone())).unwrap();
+        assert!(status(&d, l).is_ok(), "{:?}", status(&d, l));
+        let part: serde_json::Value = serde_json::from_str(&d.part_json()).unwrap();
+        assert_eq!(part["features"].as_array().unwrap().last().unwrap()["kind"]["radius_mm"], saved);
+        let reopened = Document::from_bytes(&d.to_bytes().unwrap(), kernel()).unwrap();
+        assert_eq!(reopened.feature(l).unwrap().kind, lattice(grade));
+        assert!(status(&reopened, l).is_ok(), "{:?}", status(&reopened, l));
+    }
+    let (mut g, _, gid) = g0();
+    let level: FieldGrade = Grade::Distance(DistanceGrade { faces: GradeFaces::Skin, near: 0.0, far: 0.1, span: 1.0 });
+    edit(&mut g, gid, gyroid(level)).unwrap();
+    assert!(status(&g, gid).is_ok(), "{:?}", status(&g, gid));
+}
+
+#[test]
+fn an_out_of_range_grade_reopens_with_the_same_catallax_refusal() {
+    let (mut d, _, l) = d0();
+    let grade =
+        lattice(Grade::Point(PointGrade { centre: [0.0, 0.0, 25.0], from: 0.0, to: 1.0, start: 1.0, end: 2.0 }));
+    edit(&mut d, l, grade.clone()).unwrap();
+    refused_by_catallax(&d, l, "lattice.grade-range-unsupported");
+    let reopened = Document::from_bytes(&d.to_bytes().unwrap(), kernel()).unwrap();
+    assert_eq!(reopened.feature(l).unwrap().kind, grade);
+    refused_by_catallax(&reopened, l, "lattice.grade-range-unsupported");
+}
+
+/// Impossible grade definitions are refused before the document changes, whatever the
+/// kernel supports: no span, no faces, a negative or a zero-length distance.
+#[test]
+fn impossible_new_grades_are_refused_before_the_document_changes() {
+    let (mut d, _, l) = d0();
+    let (body, saved, depth) = (d.body(), d.part_json(), d.undo_depth());
+    let distance = |faces, span| Grade::Distance(DistanceGrade { faces, near: 1.0, far: 2.0, span });
+    let point = |from, to| Grade::Point(PointGrade { centre: [0.0; 3], from, to, start: 1.0, end: 2.0 });
+    for radius in [
+        distance(GradeFaces::Skin, 0.0),
+        distance(GradeFaces::Picked(Vec::new()), 1.0),
+        distance(GradeFaces::Skin, f64::NAN),
+        point(-1.0, 2.0),
+        point(2.0, 2.0),
+        Grade::Point(PointGrade { centre: [0.0; 3], from: 0.0, to: 2.0, start: 0.0, end: 2.0 }),
+    ] {
+        assert!(matches!(edit(&mut d, l, lattice(radius.clone())), Err(CommandError::Invalid(_))), "{radius:?}");
+        assert_eq!((d.body(), d.part_json(), d.undo_depth()), (body, saved.clone(), depth));
+    }
 }

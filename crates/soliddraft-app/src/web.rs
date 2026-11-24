@@ -354,12 +354,15 @@ pub fn take_upload() -> Option<crate::platform::Uploaded> {
 
 thread_local! {
     static SHOWN_DETAILS: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
+    static SHOWN_FEATURE_PANEL: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
     static SHOWN_PART_CHECK: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
     static SHOWN_OPTIONS: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
+    static SHOWN_FEATURE_REFUSAL: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
     static SHOWN_BUILD: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
     static SHOWN_PMI: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
     static SHOWN_ASSEMBLY: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
     static SHOWN_VIEWPORT: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
+    static FIRST_PART_FRAME: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
     static SHOWN_PRINT_CHECK: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
     static SHOWN_MARKS: std::cell::RefCell<Vec<serde_json::Value>> = const { std::cell::RefCell::new(Vec::new()) };
     static SHOWN_CONTROLS: std::cell::RefCell<std::collections::BTreeMap<String, egui::Pos2>> =
@@ -413,6 +416,60 @@ pub fn assembly_screen_point(x: f32, y: f32, z: f32) -> Option<Vec<f32>> {
     })
 }
 
+struct DrawingFrame {
+    camera: crate::drawing::Camera2,
+    rect: egui::Rect,
+    views: Vec<(String, soliddraft_drawing::project::ViewTransform, soliddraft_kernel_api::Point2)>,
+    shown: serde_json::Value,
+}
+
+thread_local! {
+    static DRAWING_FRAME: RefCell<Option<DrawingFrame>> = const { RefCell::new(None) };
+}
+
+pub(crate) fn show_drawing(s: &crate::drawing::DrawingSession) {
+    use soliddraft_drawing::project::view_label_in;
+    let sheet = s.sheet();
+    let views = sheet
+        .views
+        .iter()
+        .filter_map(|view| {
+            let transform = *s.doc.transforms.get(&view.id)?;
+            Some((view_label_in(&s.doc.drawing, sheet, view), transform, view.position))
+        })
+        .collect();
+    let shown = serde_json::json!({
+        "tool": s.tool.label(),
+        "prompt": s.tool_prompt(),
+        "annotations": sheet.annotations.len(),
+        "tables": sheet.tables.len(),
+        "dangling": s.doc.dangling_count(),
+        "up_to_date": s.is_up_to_date(),
+    });
+    DRAWING_FRAME.with_borrow_mut(|current| {
+        *current = Some(DrawingFrame { camera: s.camera, rect: s.canvas_rect, views, shown });
+    });
+}
+
+/// The last drawn sheet's tool and item counts, for browser checks.
+#[wasm_bindgen]
+pub fn shown_drawing() -> String {
+    DRAWING_FRAME.with_borrow(|frame| frame.as_ref().map_or_else(|| "null".into(), |f| f.shown.to_string()))
+}
+
+/// Where a model point appears in a named view of the last drawn sheet, in page pixels.
+#[wasm_bindgen]
+pub fn drawing_screen_point(view: &str, x: f64, y: f64, z: f64) -> Option<Vec<f32>> {
+    use soliddraft_kernel_api::{Point2, Vec3};
+    DRAWING_FRAME.with_borrow(|frame| {
+        let frame = frame.as_ref()?;
+        let (_, xf, position) = frame.views.iter().find(|(name, _, _)| name == view)?;
+        let p = xf.point(Vec3::new(x, y, z));
+        let at = frame.camera.to_screen(frame.rect, Point2::new(p.u + position.u, p.v + position.v));
+        Some(vec![at.x, at.y])
+    })
+}
+
 /// Notes the assembly the last frame showed, for [`shown_assembly`].
 pub(crate) fn show_assembly(shown: serde_json::Value) {
     SHOWN_ASSEMBLY.with_borrow_mut(|assembly| *assembly = shown.to_string());
@@ -453,14 +510,30 @@ pub(crate) fn show_control(name: impl Into<String>, rect: egui::Rect) {
     SHOWN_CONTROLS.with_borrow_mut(|controls| controls.insert(name.into(), rect.center()));
 }
 
+/// Notes a control drawn inside a scroll area only where its centre shows, so a check
+/// scrolls to it, as a visitor would, and never clicks what lies under a hidden one.
+pub(crate) fn show_visible_control(ui: &egui::Ui, name: impl Into<String>, rect: egui::Rect) {
+    if ui.clip_rect().contains(rect.center()) {
+        show_control(name, rect);
+    }
+}
+
 /// The centres of the named controls the last frame drew, in the page's pixels, as JSON:
 /// `{"<name>": {"x", "y"}}`. The options bar notes `Assembly options` or `Drawing options`,
 /// the Mate panel its type list as `Mate type` and each entry of the open list as
 /// `Mate type: <family>`, and the assembly's options the component's placement fields as
-/// `Placement X` to `Placement Rotate Z`, a feature form its OK button as `Form OK`, and
-/// the Hole form its `Hole thread`, `Thread size` and `Thread pitch` choices with each
-/// entry of an open list as `<choice>: <entry>`. Read only, for browser checks that click
-/// a control the canvas draws.
+/// `Placement X` to `Placement Rotate Z`. Feature forms note `Form OK`, size fields
+/// like `Radius value`, and any refusal correction by its button label. The Hole form
+/// notes `Hole thread`, `Thread size` and `Thread pitch`, with open entries as
+/// `<choice>: <entry>`. The Hole Wizard panel notes its tabs as `Hole Wizard Type tab`
+/// and `Hole Wizard Positions tab`, its type tiles as `Hole type: <type>` and its commit
+/// button as `Apply Hole Wizard`, and a target still to pick as `Wizard Target`. The
+/// top bar notes its document tabs as `Tab <title>` and `Close <title>`, the `New tab`
+/// button with its `New part (.dwprt)` and `New drawing (.dwdrw)` entries, and its Save,
+/// Undo and Redo as `Quick <label>`; the question a closed unsaved tab asks notes
+/// `Close question: Save`, `Close question: Discard` and `Close question: Cancel`. The
+/// shortcut menu's editor notes `Export preferences`. Read only, for browser checks that
+/// click a control the canvas draws.
 #[wasm_bindgen]
 pub fn shown_controls() -> String {
     SHOWN_CONTROLS.with_borrow(|controls| {
@@ -476,6 +549,17 @@ pub fn shown_controls() -> String {
 #[wasm_bindgen]
 pub fn shown_options() -> String {
     SHOWN_OPTIONS.with_borrow(|options| options.clone())
+}
+
+pub(crate) fn show_feature_refusal(error: &str) {
+    SHOWN_FEATURE_REFUSAL.with_borrow_mut(|shown| error.clone_into(shown));
+}
+
+/// The explanation the feature form drew with a proposed correction, or an empty string.
+/// Read only, for browser checks.
+#[wasm_bindgen]
+pub fn shown_feature_refusal() -> String {
+    SHOWN_FEATURE_REFUSAL.with_borrow(Clone::clone)
 }
 
 /// Notes whether a build is owed and where its Cancel button is, for [`shown_build`].
@@ -496,27 +580,45 @@ pub fn shown_build() -> String {
 /// Starts a frame with no Details panel drawn, until [`show_details`] notes one.
 pub(crate) fn begin_frame() {
     SHOWN_DETAILS.with_borrow_mut(String::clear);
+    SHOWN_FEATURE_PANEL.with_borrow_mut(String::clear);
     SHOWN_PART_CHECK.with_borrow_mut(String::clear);
     SHOWN_OPTIONS.with_borrow_mut(String::clear);
+    SHOWN_FEATURE_REFUSAL.with_borrow_mut(String::clear);
     SHOWN_CONTROLS.with_borrow_mut(std::collections::BTreeMap::clear);
     SHOWN_PMI.with_borrow_mut(String::clear);
+    DRAWING_FRAME.with_borrow_mut(|frame| *frame = None);
     SHOWN_VIEWPORT.with_borrow_mut(String::clear);
+    SHOWN_PART_VIEW.with_borrow_mut(|view| *view = None);
     SHOWN_PRINT_CHECK.with_borrow_mut(String::clear);
     SHOWN_MARKS.with_borrow_mut(Vec::clear);
 }
 
 /// Notes what the part viewport drew, for [`shown_viewport`].
 pub(crate) fn show_viewport(shown: serde_json::Value) {
+    FIRST_PART_FRAME.with_borrow_mut(|first| {
+        if first.is_empty() {
+            SHOWN_MARKS.with_borrow(|marks| {
+                *first = serde_json::json!({ "viewport": shown, "marks": marks }).to_string();
+            });
+        }
+    });
     SHOWN_VIEWPORT.with_borrow_mut(|viewport| *viewport = shown.to_string());
 }
 
-/// What the part viewport drew in the last frame, as JSON: `{"label", "triangles"}`. The
-/// label is `"unproved preview"` when the viewport drew that label over a lattice or gyroid,
-/// and null otherwise; `triangles` counts the triangles of the part's display mesh. Empty
-/// when that frame drew no part viewport. Read only, for browser checks.
+/// The part viewport's label, triangle count, pending build state and whether a
+/// construction preview took the body's place in the last frame. The label is
+/// `"unproved preview"` for a labelled lattice or gyroid and null otherwise.
+/// Empty when that frame drew no part viewport. Read only, for browser checks.
 #[wasm_bindgen]
 pub fn shown_viewport() -> String {
     SHOWN_VIEWPORT.with_borrow(|viewport| viewport.clone())
+}
+
+/// The first part viewport frame and the tree marks drawn with it since page load.
+/// Empty until that frame. Read only, for browser checks.
+#[wasm_bindgen]
+pub fn shown_first_part_frame() -> String {
+    FIRST_PART_FRAME.with_borrow(|first| first.clone())
 }
 
 /// Notes the outcome the Print check window is drawing, for [`shown_print_check`].
@@ -561,6 +663,19 @@ pub(crate) fn show_part_check(shown: serde_json::Value) {
 #[wasm_bindgen]
 pub fn shown_part_check() -> String {
     SHOWN_PART_CHECK.with_borrow(|check| check.clone())
+}
+
+/// Notes what the feature property panel is drawing, for [`shown_feature_panel`].
+pub(crate) fn show_feature_panel(shown: serde_json::Value) {
+    SHOWN_FEATURE_PANEL.with_borrow_mut(|panel| *panel = shown.to_string());
+}
+
+/// The feature property panel in the last frame drawn, as JSON: `{"title", "sections":
+/// [{"title", "open", "on"}]}`, with `on` null for a section without a tick box. Empty
+/// when that frame drew no panel. Read only, for browser checks.
+#[wasm_bindgen]
+pub fn shown_feature_panel() -> String {
+    SHOWN_FEATURE_PANEL.with_borrow(|panel| panel.clone())
 }
 
 /// Notes the rows the Details panel is drawing, for [`shown_details`].

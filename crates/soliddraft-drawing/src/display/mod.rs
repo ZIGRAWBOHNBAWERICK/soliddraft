@@ -29,7 +29,7 @@ use crate::view::{HiddenLines, TangentEdges, View, ViewKind, ViewScale};
 use crate::{Drawing, library};
 pub use symbols::tolerance_text;
 pub(crate) use tables::keep_above_title_block;
-pub use tables::{REVISION_COLUMNS, revision_table_home, revision_table_size, table_bounds};
+pub use tables::{REVISION_COLUMNS, hole_table_size, revision_table_home, revision_table_size, table_bounds};
 pub use views::{LocationLabel, clip_polygon, hatch_lines, location_labels, zone_at};
 
 /// What a path or text is for; the canvas and the writers map roles to colours, layers
@@ -456,7 +456,9 @@ pub fn property(drawing: &Drawing, sheet: &Sheet, sheet_index: usize, sheet_coun
         },
         "sheet" => (sheet_index + 1).to_string(),
         "sheets" => sheet_count.to_string(),
-        "document_type" => "Part drawing".into(),
+        "document_type" => {
+            if crate::assembly::is_assembly_drawing(drawing) { "Assembly drawing" } else { "Part drawing" }.into()
+        }
         "material" => drawing.part_notes.material.clone().unwrap_or_default(),
         "general_tolerance" => drawing.part_notes.general_tolerance.clone().unwrap_or_default(),
         "units" => match drawing.meta.units {
@@ -961,6 +963,21 @@ fn annotation_items(sheet: &Sheet, a: &Annotation, ctx: &Context<'_>, list: &mut
                     });
                     text_at = Some((pos, 0.0, text, halign, VAlign::Centre));
                 }
+                DimensionKind::Chamfer if anchors.len() >= 2 => {
+                    let start = Point2::new((anchors[0].u + anchors[1].u) / 2.0, (anchors[0].v + anchors[1].v) / 2.0);
+                    let right = place.u >= start.u;
+                    let dir = if right { 1.0 } else { -1.0 };
+                    let end = add(place, Vec2::new(dir * style.lines.leader_shoulder, 0.0));
+                    push(items, polyline(&[start, place, end]), None, role);
+                    items.push(arrow(start, sub(start, place), style, role, owner));
+                    text_at = Some((
+                        add(end, Vec2::new(dir, 0.0)),
+                        0.0,
+                        text,
+                        if right { Align::Left } else { Align::Right },
+                        VAlign::Centre,
+                    ));
+                }
                 DimensionKind::Angular if anchors.len() >= 2 => {
                     push(items, line(anchors[0], place), None, role);
                     items.push(arrow(anchors[0], sub(anchors[0], place), style, role, owner));
@@ -1060,14 +1077,38 @@ fn annotation_items(sheet: &Sheet, a: &Annotation, ctx: &Context<'_>, list: &mut
             }
         }
         AnnotationKind::Centreline => {
-            if anchors.len() >= 2 {
-                push(items, line(anchors[0], anchors[1]), Some(CENTRE_DASH.to_vec()), Role::Centre);
+            let ends = match anchors.as_slice() {
+                [a, b] => Some([*a, *b]),
+                [a, b, c, d] => crate::measure::centreline([*a, *b, *c, *d]),
+                _ => None,
+            };
+            if let Some([start, end]) = ends {
+                let role = if matches!(a.state, AnnotationState::Dangling { .. }) { role } else { Role::Centre };
+                push(items, line(start, end), Some(CENTRE_DASH.to_vec()), role);
+            }
+        }
+        AnnotationKind::Weld { size } => {
+            if let Some(start) = anchors.first() {
+                let dir = if place.u >= start.u { 1.0 } else { -1.0 };
+                let end = add(place, Vec2::new(20.0 * dir, 0.0));
+                push(items, polyline(&[*start, place, end]), None, role);
+                items.push(arrow(*start, sub(*start, place), style, role, owner));
+                let heel = add(place, Vec2::new(9.0 * dir, 0.0));
+                let toe = add(heel, Vec2::new(4.0 * dir, 0.0));
+                push(items, polyline(&[heel, add(heel, Vec2::new(0.0, -4.0)), toe]), None, role);
+                if let Some(size) = size {
+                    let pos = add(heel, Vec2::new(-dir, -2.0));
+                    let text = crate::measure::format_value(*size, crate::measure::precision_for(*size));
+                    text_at =
+                        Some((pos, 0.0, text, if dir > 0.0 { Align::Right } else { Align::Left }, VAlign::Centre));
+                }
             }
         }
         AnnotationKind::SurfaceFinish { .. }
         | AnnotationKind::Gdt { .. }
         | AnnotationKind::Datum { .. }
-        | AnnotationKind::RevisionSymbol { .. } => {
+        | AnnotationKind::RevisionSymbol { .. }
+        | AnnotationKind::Balloon { .. } => {
             symbols::symbol_items(a, place, &anchors, ctx, role, text_role, items);
         }
         AnnotationKind::DimensionSet(set) => {
@@ -1250,6 +1291,7 @@ pub fn annotation_name(a: &Annotation, style: &StyleFile) -> String {
         AnnotationKind::HoleCallout { text } => text.clone(),
         AnnotationKind::CentreMark => "Centre mark".into(),
         AnnotationKind::Centreline => "Centreline".into(),
+        AnnotationKind::Weld { .. } => "Fillet weld".into(),
         AnnotationKind::SurfaceFinish { text, .. } => format!("Surface finish {text}"),
         AnnotationKind::Gdt { characteristic, tolerance, diameter, .. } => format!(
             "{} {}{}",
@@ -1268,6 +1310,7 @@ pub fn annotation_name(a: &Annotation, style: &StyleFile) -> String {
         ),
         AnnotationKind::Datum { letter } => format!("Datum {letter}"),
         AnnotationKind::RevisionSymbol { revision } => format!("Rev {revision}"),
+        AnnotationKind::Balloon { item, .. } => format!("Balloon {item}"),
     }
 }
 

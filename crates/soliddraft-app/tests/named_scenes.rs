@@ -335,8 +335,10 @@ fn sketch_definition_colours_keep_contrast_on_every_scene() {
         let beside = label.rect.right_center() + egui::vec2(2.0, 0.0);
         let overlay = image.get_pixel(beside.x as u32, beside.y as u32).0;
         let text = label.color;
-        let overlay_contrast = (luminance([text.r(), text.g(), text.b()]) + 0.05)
-            / (luminance([overlay[0], overlay[1], overlay[2]]) + 0.05);
+        // Dark text on the daylight strip, or light text on a dark one: the lighter over the darker.
+        let (ink, ground) =
+            (luminance([text.r(), text.g(), text.b()]), luminance([overlay[0], overlay[1], overlay[2]]));
+        let overlay_contrast = (ink.max(ground) + 0.05) / (ink.min(ground) + 0.05);
         assert!(overlay_contrast >= 4.5, "{}: sketch switches contrast is {overlay_contrast}:1", scene.label());
         let p = image.get_pixel(sample.x.round() as u32, sample.y.round() as u32).0;
         let background = [p[0], p[1], p[2]];

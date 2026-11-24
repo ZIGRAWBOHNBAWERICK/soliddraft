@@ -167,32 +167,36 @@
       },
       "checks": [
         {
-          "pointer": "/summary/edit_state/answered_within_bound",
+          "pointer": "/summary/edit_state/display_ready",
           "equals": true
+        },
+        {
+          "pointer": "/summary/edit_state/proved_revision",
+          "same_as": {
+            "pointer": "/summary/edit_state/requested_revision"
+          }
+        },
+        {
+          "pointer": "/summary/edit_state/displayed_revision",
+          "same_as": {
+            "pointer": "/summary/edit_state/requested_revision"
+          }
+        },
+        {
+          "pointer": "/summary/edit_state/answered_within_bound",
+          "absent": true
         },
         {
           "pointer": "/summary/edit_state/display_only_bound",
-          "equals": true
+          "absent": true
         },
         {
-          "pointer": "/summary/features/3/display_answer/display/kind",
-          "equals": "spline display mesh"
+          "pointer": "/summary/features/3/display_answer",
+          "absent": true
         },
         {
-          "pointer": "/summary/features/3/display_answer/display/level_mm",
-          "equals": 0.01
-        },
-        {
-          "pointer": "/summary/features/3/display_answer/display/measured_mm",
-          "maximum": 0.01
-        },
-        {
-          "pointer": "/summary/features/3/display_answer/display/method",
-          "contains": "Bernstein"
-        },
-        {
-          "pointer": "/summary/features/3/display_answer/display/method",
-          "contains": "outward L1 bound for f32 screen-coordinate rounding"
+          "pointer": "/summary/features/3/status",
+          "equals": "ok"
         }
       ]
     },
@@ -206,32 +210,36 @@
       "same_geometry_as_step": 4,
       "checks": [
         {
-          "pointer": "/summary/edit_state/answered_within_bound",
+          "pointer": "/summary/edit_state/display_ready",
           "equals": true
+        },
+        {
+          "pointer": "/summary/edit_state/proved_revision",
+          "same_as": {
+            "pointer": "/summary/edit_state/requested_revision"
+          }
+        },
+        {
+          "pointer": "/summary/edit_state/displayed_revision",
+          "same_as": {
+            "pointer": "/summary/edit_state/requested_revision"
+          }
+        },
+        {
+          "pointer": "/summary/edit_state/answered_within_bound",
+          "absent": true
         },
         {
           "pointer": "/summary/edit_state/display_only_bound",
-          "equals": true
+          "absent": true
         },
         {
-          "pointer": "/summary/features/3/display_answer/display/kind",
-          "equals": "spline display mesh"
+          "pointer": "/summary/features/3/display_answer",
+          "absent": true
         },
         {
-          "pointer": "/summary/features/3/display_answer/display/level_mm",
-          "equals": 0.01
-        },
-        {
-          "pointer": "/summary/features/3/display_answer/display/measured_mm",
-          "maximum": 0.01
-        },
-        {
-          "pointer": "/summary/features/3/display_answer/display/method",
-          "contains": "Bernstein"
-        },
-        {
-          "pointer": "/summary/features/3/display_answer/display/method",
-          "contains": "outward L1 bound for f32 screen-coordinate rounding"
+          "pointer": "/summary/features/3/status",
+          "equals": "ok"
         }
       ]
     },
@@ -279,32 +287,36 @@
       ],
       "checks": [
         {
-          "pointer": "/summary/edit_state/answered_within_bound",
+          "pointer": "/summary/edit_state/display_ready",
           "equals": true
+        },
+        {
+          "pointer": "/summary/edit_state/proved_revision",
+          "same_as": {
+            "pointer": "/summary/edit_state/requested_revision"
+          }
+        },
+        {
+          "pointer": "/summary/edit_state/displayed_revision",
+          "same_as": {
+            "pointer": "/summary/edit_state/requested_revision"
+          }
+        },
+        {
+          "pointer": "/summary/edit_state/answered_within_bound",
+          "absent": true
         },
         {
           "pointer": "/summary/edit_state/display_only_bound",
-          "equals": true
+          "absent": true
         },
         {
-          "pointer": "/summary/features/3/display_answer/display/kind",
-          "equals": "spline display mesh"
+          "pointer": "/summary/features/3/display_answer",
+          "absent": true
         },
         {
-          "pointer": "/summary/features/3/display_answer/display/level_mm",
-          "equals": 0.01
-        },
-        {
-          "pointer": "/summary/features/3/display_answer/display/measured_mm",
-          "maximum": 0.01
-        },
-        {
-          "pointer": "/summary/features/3/display_answer/display/method",
-          "contains": "Bernstein"
-        },
-        {
-          "pointer": "/summary/features/3/display_answer/display/method",
-          "contains": "outward L1 bound for f32 screen-coordinate rounding"
+          "pointer": "/summary/features/3/status",
+          "equals": "ok"
         }
       ]
     }

@@ -126,7 +126,7 @@ pub(super) fn show(p: &mut Preferences, ui: &mut egui::Ui) {
 
     ui.separator();
     ui.heading("Current view");
-    current_view_controls(ui, &mut view, p.view_preset, device.tier, p.camera_editable, highlight);
+    current_view_controls(ui, &mut view, p.view_preset, device.tier, p.camera_editable, highlight, true);
 
     ui.separator();
     ui.heading("In the view");
@@ -196,6 +196,7 @@ pub(crate) fn current_view_controls(
     tier: Tier,
     camera_editable: bool,
     highlight: Option<&str>,
+    show_style: bool,
 ) {
     toggle(ui, highlight, "grid", "Show grid", &mut view.references.show_grid);
     row(ui, highlight, "shadow", |ui| {
@@ -220,13 +221,15 @@ pub(crate) fn current_view_controls(
         }
     });
     toggle(ui, highlight, "shadow_follows", "Ground shadow follows the model", &mut view.lighting.shadow_follows_model);
-    row(ui, highlight, "display", |ui| {
-        egui::ComboBox::from_label("Visual style").selected_text(view.display.label()).show_ui(ui, |ui| {
-            for display in DisplayMode::ALL {
-                ui.selectable_value(&mut view.display, display, display.label());
-            }
+    if show_style {
+        row(ui, highlight, "display", |ui| {
+            egui::ComboBox::from_label("Visual style").selected_text(view.display.label()).show_ui(ui, |ui| {
+                for display in DisplayMode::ALL {
+                    ui.selectable_value(&mut view.display, display, display.label());
+                }
+            });
         });
-    });
+    }
     row(ui, highlight, "fov", |ui| {
         ui.add_enabled(
             camera_editable && view.perspective,

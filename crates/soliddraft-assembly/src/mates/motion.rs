@@ -2,6 +2,7 @@
 
 mod interval;
 mod native;
+mod outline;
 use super::solver::{
     self, Along, Body, Constraint, FreeMotion, LocalAxis, LocalPlane, LocalPoint, Mirrored, Slide, SlotMode, WidthMode,
 };
@@ -12,8 +13,13 @@ use interval::{Interval, Number, radians};
 pub(super) use native::{mechanical_value, native_constraint, projection, square_shafts};
 use num_rational::BigRational;
 use num_traits::Zero;
+pub(super) use outline::outline_side;
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
+
+pub(super) fn hinge_angle(reads: &[super::command::Read; 2], poses: &BTreeMap<Body, Placement>, near: f64) -> f64 {
+    native::joint_angle(reads, poses, near)
+}
 
 const MM: f64 = 1e-9;
 const RAD: f64 = 1e-9;

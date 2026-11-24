@@ -69,14 +69,18 @@ level of detail.
 ```
 
 - **Ids.** Sources, components, patterns, mates and values take their ids from one
-  counter, `next_id`, and an id is never reused. Ids are stable for the life of the assembly; names are
+  counter, `next_id`, and an id is never reused. Configurations and explode steps shape
+  nothing and count apart, from `next_configured_id`, which a file without them leaves out. Ids are stable for the life of the assembly; names are
   labels. A component without a name shows as its source's file name and its id.
 - **Sources** are the documents the assembly places. Each is a `DocRef` (see
   [documents.md](documents.md#references)) with its pinned revision. A thousand
   placements of one bolt share one source. A source lives as long as a component places
   it: deleting its last component removes it, and Undo brings both back. A hidden or
   suppressed component still places its source. A source's `configuration` picks the
-  configuration placed; it is reserved and always the default for now.
+  configuration placed, and left out it is the one the file was saved in. For a part it is
+  the configuration's stable id from the part file (`Default` for its Default); for a
+  sub-assembly it is the number of one of its configurations. One document placed in two
+  configurations is two sources.
 - **Components** place a source. `placement` is rigid: `translation` in millimetres and
   `rotation` as a unit quaternion `[x, y, z, w]`, each left out when it is the identity's.
   There is no scale and no mirror: scale would change dimensions and mass, and a mirrored
@@ -101,8 +105,178 @@ level of detail.
   no mates keeps them as authored.
   Interference and clearance checks read placements and save nothing; see
   [interference.md](interference.md).
-- **Reserved.** `configurations` and `display_states` are kept exactly as read until those
-  formats are defined.
+- **Configurations and the exploded view**: see [Configurations](#configurations) and
+  [Exploded views](#exploded-views).
+- **Reserved.** `display_states` is kept exactly as read until its format is defined.
+
+## Configurations
+
+A configuration is a named state of the assembly: which components are hidden or
+suppressed, where each sits, the overrides below them, the values that drive its mates and
+its exploded view. The truth always holds the active configuration's state, so loading,
+mates, interference and saving read it as they read any assembly. Every other
+configuration keeps its own state in its row:
+
+```json
+"configurations": [
+  { "id": 9, "name": "Default" },
+  { "id": 10, "name": "Open", "state": {
+      "components": [ { "id": 2 }, { "id": 4, "placement": { "translation": [10.0, 10.0, 44.0] } } ],
+      "values": [ { "id": 8, "name": "gap", "expression": "30 mm" } ] } }
+]
+```
+
+- The row without a `state` is the active one. Adding the first configuration also adds
+  `Default`, active, for the state the assembly had; the new one starts as a copy of it.
+- Activating a configuration swaps: the truth's state goes into the row that was active
+  and the chosen row's state into the truth, as one undo step. A component inserted while
+  another configuration was active keeps its state; a value is matched by id, and its
+  expression keeps reading the values it read when saved, under their names now.
+- Every other edit changes the active configuration. Deleting a component takes it out of
+  every configuration, and Undo brings it back.
+- Names are unique. The active configuration cannot be deleted; with one row left the
+  assembly goes back to having none. An assembly with more than 1,024 components, or one
+  with 64 configurations, refuses another.
+- The geometry hash leaves out the other configurations, the exploded view and their id
+  counter, so the active configuration decides the assembly's shape, and adding a
+  configuration or an explode step leaves it as it was.
+- The list was reserved before configurations were defined. A file whose rows this version
+  cannot read keeps every row as read and shows no configurations; adding one is refused,
+  so saving writes the rows back unchanged.
+
+Each component can also show one of its own document's configurations
+(`AssemblyDocument::set_configuration`, the `assembly_component_configuration` tool):
+
+- A part placed in a configuration is rebuilt in it. Its display mesh, its exact body for
+  mates, measure and drawings, and the proofs mates read are all of that configuration.
+  Display copies keep each configuration's mesh under its own name in the copy folder
+  (`display@<id>.bin`), so the assembly opens without the part files.
+- A sub-assembly placed in a configuration shows that configuration's placements,
+  suppression, hiding and overrides. Its copy in the file stays the sub-assembly's own
+  truth.
+- The component keeps its placement, and its mates are solved again on the new shape. A
+  name the document does not have is refused with the names it has, and nothing changes.
+  One undo step; the assembly's own configurations do not record the choice.
+- The bill of materials lists a part once per configuration placed, as `name (configuration)`.
+
+## Exploded views
+
+An exploded view is a list of steps in the active configuration, each moving some
+occurrences, with everything under them, a distance along a direction in the root's frame,
+after the steps before it:
+
+```json
+"explode": [ { "id": 11, "occurrences": ["4"], "direction": [0.0, 0.0, 1.0], "distance": 50.0 } ]
+```
+
+It is for display and drawings. Showing it moves rows of the occurrence table and never a
+placement: the truth, its revision and the undo history do not change. Any edit, a drag
+and an interference check show the assembled positions first. Adding, changing and
+deleting steps are undo steps. Auto explode replaces the steps with one per shown
+component, each moving it straight away from the middle of the assembly; the component
+nearest the middle stays. A configuration made from another starts with copies of its
+steps; a step's id names it within its configuration.
+
+`AssemblyDocument::exploded_worlds` answers where each occurrence shows exploded without
+showing it, for drawings.
+
+## Pack and Go
+
+Pack and Go copies an assembly and every document it references, at any depth, into a new
+or empty folder, or into one zip, so the folder or the unpacked zip opens anywhere on its
+own (`soliddraft_assembly::pack_and_go` and `pack_zip`). Both make the pack in memory
+first (`gather`), then write it.
+
+- Parts and mesh references are copied byte for byte. Each assembly is written again with
+  its references pointing at the copies.
+- A sub-assembly whose file changes that way gets a new revision: the assemblies above it
+  pin the new one, and their display copies of it are replaced. A pin that was already
+  behind its file stays as it was, so the copy shows what the original showed.
+- Ids are kept: a packed file is the same document in a new place.
+- A prefix or a suffix goes on every copied file's name. Without `flatten` the files keep
+  the folders they were in below the assembly's; with it they all land in the destination.
+- Drawings in the assembly's folder whose model is packed come along when asked, pointed at
+  their models' copies; their views stay current when only paths moved.
+- Nothing is written unless every reference resolves, and nothing in the destination is
+  replaced; two files that would land on one name are refused. A zip that exists, or a
+  name that does not end in `.zip`, is refused.
+- A zip holds each file at its place in the pack, stored as it is (the documents are
+  compressed already), with a fixed date, so a pack gives the same bytes each time.
+- The browser has no folders. It packs the files the page holds (`HeldFiles`): the
+  assembly as it was opened or last saved, and the part and assembly files handed over
+  with it, each reference found by its target's id. The pack downloads as one zip with
+  every file at its top. The page does not hold drawings, so none come along.
+
+## Drawings of assemblies
+
+A drawing's model can be an assembly (`crates/soliddraft-drawing/src/assembly.rs`). Each
+shown part is rebuilt on the kernel at the revision the assembly pins, and its line work is
+Catallax's own view of that part, placed where the assembly puts it
+(`crates/soliddraft-drawing/src/placed.rs`). A part the kernel refuses refuses the view by
+name, as in a part drawing, and so does a part with no exact body, such as a mesh reference.
+No kernel query sees two parts at once, so where one part hides another the hiding is
+measured against the other parts' meshes; a curve that measurement decided is labelled
+approximate, and the view carries the code `assembly.part-visibility`. Each curve keeps the
+occurrence it belongs to. A view can show the exploded view. PDF, SVG and DXF exports
+work as for a part drawing.
+
+Projected, section and detail views come off an assembly drawing's views as off a part
+drawing's (`drawing_projected`, `drawing_section` and `drawing_detail` over MCP). A section
+cuts every part with its own kernel, so its hatch regions are the kernel's, and a cutting
+line that meets no part is refused.
+
+The bill of materials lists parts only: one row per part document, in the order the tree
+first places it, with its name, its file and how many times it is placed. A part placed in
+another of its configurations has a row of its own, named for that configuration; a
+placement that names the configuration its file was saved in shares the row of one that
+names none. Hidden parts
+count; suppressed parts do not. A balloon carries its row's item number and a leader to a
+visible edge of one occurrence of that part, and sits outside the view clear of the others.
+The BOM sits in the sheet's top-right corner and the views beside it at the largest of the
+template's scales that fits. A BOM taller than the sheet, or views that fit at none of its
+scales, refuse the drawing; Rebuild refuses a BOM that would grow off the sheet.
+
+Rebuild brings the drawing to the saved assembly as one undo step: every base view's line
+work at its scale, the BOM's rows, each balloon moved onto its occurrence and renumbered
+from its row, a balloon for every new row, and the new pin. A balloon whose occurrence is
+gone, or shows no edge in the view, is marked as needing attention and shows `?`: its old
+number may be another row's now, so it numbers no row, and a row it numbered gets a new
+balloon. Rebuild recomputes the projected, section and detail views too, and moves each
+cutting line and detail circle with the model point it went through. A view excluded from
+updates keeps its line work and its balloons.
+
+## Robotics export
+
+`soliddraft_scene::export` writes an assembly as URDF, with its meshes as binary STL in
+millimetres in a folder beside it, or as OpenUSD text with UsdPhysics joints. Every part
+occurrence that is not suppressed is a link with its display mesh as visual and collision
+geometry. The part with an Origin mate, else the first component, hangs from `base_link`
+at the assembly's origin. Mates become joints:
+
+| Mates between two parts | Joint |
+|---|---|
+| Hinge with angle limits | revolute, with limits measured from the accepted pose |
+| Hinge without limits | continuous |
+| Concentric between axes, without Lock rotation | continuous about the axis |
+| Concentric between axes, with Lock rotation | prismatic along the axis |
+| Coincident or Distance between two planes | planar, with the plane normal as its axis |
+| Coincident or Concentric between two points | spherical, with the common point as its pivot |
+| anything else | fixed, at the pose the assembly holds |
+
+Prismatic, planar and spherical mappings require a single mate between the two
+parts. Additional mates can restrict motion further. A Lock mate keeps its pair fixed,
+including a pair with a Hinge. URDF writes
+an unlimited slide with infinite limits. It uses the `spherical` joint type read
+by SolidDraft's importer. ROS urdfdom supports its own list of joint types, which
+excludes `spherical`.
+
+A Gear between two of those joints makes the second follow the first (URDF `mimic`,
+`newton:mimicJoint` in OpenUSD). Each connected group of parts attaches to `base_link` by
+a fixed joint. It keeps its internal joints, including mates authored in sub-assemblies.
+An Origin mate picks the attachment part when the group has one. A mate that would close
+a loop is left out and named in the export report. Each joint frame
+puts the joint's axis along its X. URDF lengths are metres; the OpenUSD layer is in
+millimetres with Z up.
 
 ## Occurrence paths
 
@@ -518,6 +692,11 @@ soliddraft asm colour <file.dwasm> <path>... (--rgb '#rrggbb' [--metallic <0-1>]
 soliddraft asm quality <file.dwasm> [<path>... (--set <quality> | --none)] [--every <quality>] [--json]
 soliddraft asm rename <file.dwasm> <component> <name>
 soliddraft asm delete <file.dwasm> <component>...
+soliddraft asm config <file.dwasm> (list [--json] | add <name> | activate <name> | rename <name> <new> | delete <name>)
+soliddraft asm explode <file.dwasm> (list [--json] | add <path>... --direction x,y,z --distance <mm> | edit <step> ... | delete <step> | auto [--distance <mm>])
+soliddraft asm drawing <file.dwasm> <out.dwdrw> [--template <id>] [--exploded] [--json]
+soliddraft asm export <file.dwasm> <out.urdf | out.usda> [--json]
+soliddraft asm pack <file.dwasm> <folder | out.zip> [--prefix <text>] [--suffix <text>] [--flatten] [--drawings] [--json]
 soliddraft asm rebuild <file.dwasm> [--search <folder>]... [--json]
 soliddraft asm generate <folder> [--unique <n>] [--placements <n>] [--modules <n>] [--no-part-files] [--seed <n>]
 soliddraft asm bench <file.dwasm> [--size <w>x<h>] [--frames <n>] [--json]
@@ -556,11 +735,25 @@ way with files handed to the page in place of a folder; see [web.md](web.md).
   about x, then y, then z in degrees, relative to the assembly that holds it. A change
   applies with `move_to` when the field lets go, as one undo step.
 - **Interference** opens the panel for [interference and clearance checks](interference.md).
+- **Configurations** opens a panel in the property area: the configurations with the
+  active one marked, Activate and Delete for the others, a name field and Add, then the
+  exploded view's steps with their distances, Explode or Collapse, Auto explode, and the
+  six directions to move the chosen components along. **Explode** on the ribbon shows the
+  exploded view or the assembled positions.
+- **Make drawing** makes a drawing of the saved assembly with a BOM and balloons and opens
+  it; Rebuild in the drawing, and its BOM and Balloon tiles, bring it to the assembly.
+- **Pack and Go** asks for an empty folder and packs the saved assembly, its parts and the
+  drawings beside it there; **Pack and Go to zip** (File menu) asks for a zip file
+  instead. **Export URDF** and **Export USD** ask where to write.
 - **Save assembly** (Ctrl+S) and **Save assembly as** (Ctrl+Shift+S) write the `.dwasm`
   with its display copies; **File > Open** and Open recent open one with
   `open_in_background`. Undo and redo follow the active tab.
 
-The browser build leaves these commands off, because the loader needs threads.
+The browser app has these commands too, loading on the page's one thread and taking files
+handed to it in place of a folder ([web.md](web.md)). What it writes downloads: Pack and Go
+downloads one zip, Export USD the `.usda` file, and Export URDF one zip of the URDF and its
+meshes folder. Form subassembly writes new files beside the assembly's, so it stays in the
+desktop app.
 
 ## For the interface
 

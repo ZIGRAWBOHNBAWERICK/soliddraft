@@ -82,6 +82,7 @@ fn clean_block_and_cylinder_import_render_save_reopen_and_checked_export() {
                     flip: false,
                     end: Default::default(),
                     draft: None,
+                    ..Default::default()
                 },
                 via_assistant: false,
             })

@@ -53,8 +53,8 @@ mod sweep;
 pub use checks::{IndependentCheck, IndependentStep, PrintMesh, PrintReport};
 pub use edit::{ConstructionEdit, ConstructionFace, ConstructionMesh, ProofWork, ScalarEdit, ScalarParameter};
 pub use field::{
-    ExactRange, ExchangedMoments, FieldMass, FieldMassAccuracy, Grade, GradeAxis, LinearGrade, ProxyMoments,
-    StandInExport, StandInReport,
+    DistanceGrade, ExactRange, ExchangedMoments, FieldMass, FieldMassAccuracy, Grade, GradeAxis, GradeFaces, GradeKind,
+    GradedField, LinearGrade, PointGrade, ProxyMoments, RadialGrade, StandInExport, StandInReport,
 };
 pub use geometry::{Aabb, Plane, Point2, Vec3};
 pub use history::{EntityChanges, FaceOrigin, FaceRole, HistoryRecord, HolePart, OpKind, Origin, Split};
@@ -251,6 +251,10 @@ pub enum ThickenSide {
     Back,
 }
 
+fn graded_thickness_unavailable() -> KernelError {
+    KernelError::Unsupported("Field-driven thickness is unavailable in this kernel.".into())
+}
+
 /// A solid made from selected faces at a constant thickness.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Thicken {
@@ -380,7 +384,7 @@ pub struct FieldReport {
 }
 
 /// Parameters of the final lattice stage.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Lattice {
     /// Cell type.
     pub cell: LatticeCell,
@@ -397,7 +401,7 @@ pub struct Lattice {
 }
 
 /// Parameters of the final gyroid stage.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Gyroid {
     /// Gyroid kind.
     pub kind: GyroidKind,
@@ -1092,6 +1096,25 @@ pub trait Kernel: Send + Sync {
     /// Hollows a solid to wall `thickness`, leaving `open_faces` open.
     fn shell(&self, tag: &OpTag, body: BodyId, open_faces: &[FaceId], thickness: f64) -> KernelResult<OpResult>;
 
+    /// Whether the backend offers linear wall thickness for this operation and body.
+    /// This query does not build geometry.
+    /// Individual grades and face selections still need to pass the operation's proof.
+    fn graded_thickness_available(&self, _op: OpKind, _body: BodyId) -> bool {
+        false
+    }
+
+    /// Hollows a solid at a constant or part-axis linear thickness.
+    fn shell_with_grade(
+        &self,
+        tag: &OpTag,
+        body: BodyId,
+        open_faces: &[FaceId],
+        thickness: Grade,
+    ) -> KernelResult<OpResult> {
+        let thickness = thickness.constant().ok_or_else(graded_thickness_unavailable)?;
+        self.shell(tag, body, open_faces, thickness)
+    }
+
     /// Opens every face of `body`, an explicit choice rather than a list of picked faces.
     /// Nothing remains, so a success has no result body, and the part carries on without
     /// one. A refusal leaves `body` as it was.
@@ -1107,6 +1130,19 @@ pub trait Kernel: Send + Sync {
     /// Makes a solid from the selected faces at a constant thickness.
     fn thicken(&self, _tag: &OpTag, _body: BodyId, _params: &Thicken) -> KernelResult<OpResult> {
         Err(KernelError::Unsupported("Thicken is coming soon.".into()))
+    }
+
+    /// Makes a solid from selected faces at a constant or part-axis linear thickness.
+    fn thicken_with_grade(
+        &self,
+        tag: &OpTag,
+        body: BodyId,
+        faces: Vec<FaceId>,
+        thickness: Grade,
+        side: ThickenSide,
+    ) -> KernelResult<OpResult> {
+        let thickness = thickness.constant().ok_or_else(graded_thickness_unavailable)?;
+        self.thicken(tag, body, &Thicken { faces, thickness, side })
     }
 
     /// Repeats only the operation graph between a feature's input and result.
@@ -1160,6 +1196,12 @@ pub trait Kernel: Send + Sync {
         Err(KernelError::Unsupported("draft".into()))
     }
 
+    /// Whether this body can be used as the source of a terminal field.
+    fn supports_field_source(&self, body: BodyId) -> bool {
+        let _ = body;
+        true
+    }
+
     /// Compiles a terminal lattice and its unproved display. Labelled export certifies
     /// closedness, connectivity and the requested two-sided distance bound.
     fn lattice(&self, tag: &OpTag, body: BodyId, params: &Lattice) -> KernelResult<OpResult> {
@@ -1172,6 +1214,17 @@ pub trait Kernel: Send + Sync {
     fn gyroid(&self, tag: &OpTag, body: BodyId, params: &Gyroid) -> KernelResult<OpResult> {
         let _ = (tag, body, params);
         Err(KernelError::Unsupported("gyroid".into()))
+    }
+
+    /// Whether this kernel builds a terminal field driven by this kind of grade: `Ok`
+    /// when it does, otherwise the refusal it gives every such grade. The editor offers
+    /// only the kinds a kernel accepts, so a control that always refuses is never shown.
+    fn field_grade(&self, field: GradedField, kind: GradeKind) -> KernelResult<()> {
+        let _ = field;
+        match kind {
+            GradeKind::Constant | GradeKind::Linear => Ok(()),
+            other => Err(KernelError::Unsupported(format!("{} grades", other.name()))),
+        }
     }
 
     /// Certifies an active field and writes its labelled STL.

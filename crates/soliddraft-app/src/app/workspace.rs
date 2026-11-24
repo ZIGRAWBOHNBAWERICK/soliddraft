@@ -45,11 +45,14 @@ pub struct SolidDraftApp {
     pub state: AppState,
     /// The middle dock: the part and the drawing.
     pub(super) dock: DockState<Tab>,
+    /// Additional open part tabs parked beside the active part.
+    pub open_parts: crate::top_bar::OpenParts,
     /// The panel layout as last written to disk.
     saved_layout: Layout,
     /// The command line's chips and session height as last written to disk.
     saved_bar: crate::command_line::BarSettings,
     saved_commands: crate::commands::History,
+    saved_create_pins: crate::create_menu::Pins,
     automation: Automation,
     frame: u64,
     bench: Option<Bench>,
@@ -200,8 +203,10 @@ impl SolidDraftApp {
             saved_layout: state.layout,
             saved_bar: state.command_line.settings.clone(),
             saved_commands: state.commands.clone(),
+            saved_create_pins: state.create_pins.clone(),
             state,
             dock: center_dock(),
+            open_parts: crate::top_bar::OpenParts::default(),
             automation,
             frame: 0,
             bench,
@@ -548,12 +553,19 @@ impl SolidDraftApp {
     pub(super) fn opened_from(&mut self, opened: Result<Document, String>, saved: Option<&[u8]>) {
         match opened {
             Ok(doc) => {
+                // An editor or sketch puts back the rollback it set for its view first: the
+                // part may stay open in its tab.
+                self.state.end_document_views();
                 self.close_editor();
                 self.state.sketch = None;
                 self.state.chat.preview = None;
                 let n = doc.features.len();
                 self.state.scan = Default::default();
-                self.state.doc = doc;
+                if std::mem::take(&mut self.state.open_in_new_tab) {
+                    self.open_parts.park_active(&mut self.state, doc);
+                } else {
+                    self.state.doc = doc;
+                }
                 match saved {
                     Some(saved) => self.state.remember_opened_revision(saved),
                     None => self.state.remember_revision(),
@@ -579,6 +591,7 @@ impl SolidDraftApp {
             }
             Err(e) => {
                 self.state.drawing_after_open = false;
+                self.state.open_in_new_tab = false;
                 self.state.note(e, NoteKind::Error);
             }
         }
@@ -819,25 +832,29 @@ impl SolidDraftApp {
         egui::Panel::top("menu")
             .exact_size(theme::MENU_HEIGHT)
             .frame(chrome_frame)
-            .show_separator_line(true)
-            .show(root, |ui| self.menu_bar(ui));
+            .show_separator_line(false)
+            .show(root, |ui| crate::top_bar::show(ui, &mut self.state, &mut self.dock, &mut self.open_parts));
         self.leave_start_page();
         let start = self.state.start.is_some();
-        if !start {
-            crate::left_bar::panel(root, &mut self.state);
-            crate::options_bar::panel(root, &mut self.state);
-        }
         let status = self.status();
         if start {
             crate::command_line::panel(root, &mut self.state, &status);
-        }
-        let window_width = root.available_width();
-        if !start {
+        } else {
+            // D1 Clear Bench top tool strip (workspace tabs + icon-over-label tools).
             crate::tool_palette::panel(root, &mut self.state);
+            // Bottom bar (Zoo model: chips, ai, command line, physical analysis, filter, units, status).
             crate::command_line::panel(root, &mut self.state, &status);
-            if self.state.tree_shown() {
+            // Slim left toggle rail (Tree, History, Values, Props + Clear).
+            crate::left_bar::panel(root, &mut self.state);
+            let window_width = root.available_width();
+            if self.state.tree_shown()
+                || crate::feature_panel::active(&self.state)
+                || crate::hole_wizard_panel::active(&self.state)
+            {
                 self.side_panel(root, Side::Tree, window_width);
             }
+            // Contextual inline form strip sits over the viewport without shifting the side column.
+            crate::options_bar::panel(root, &mut self.state);
         }
         egui::CentralPanel::default().frame(egui::Frame::new().fill(theme::chrome())).show(root, |ui| {
             if start {
@@ -847,6 +864,9 @@ impl SolidDraftApp {
                 show_dock(ui, &mut self.dock, egui::Id::new("center_dock"), &mut panels);
             }
         });
+        if !start {
+            crate::options_bar::float(root, &mut self.state);
+        }
     }
 
     /// Closes the start page once a document was opened, made or edited.
@@ -892,6 +912,8 @@ impl eframe::App for SolidDraftApp {
 
     fn ui(&mut self, root: &mut egui::Ui, frame: &mut eframe::Frame) {
         crate::multibody::show(root.ctx(), &mut self.state);
+        crate::material_dialog::show(root.ctx(), &mut self.state);
+        crate::properties::show_appearance_editor(root.ctx(), &mut self.state);
         let ctx = &root.ctx().clone();
         log::debug!("ui frame {}", self.frame);
         self.state.doc.set_repaint(ctx);
@@ -947,6 +969,9 @@ impl eframe::App for SolidDraftApp {
             match uploaded.purpose {
                 crate::platform::Purpose::Insert => crate::assembly::insert_bytes(&mut self.state, uploaded.files),
                 crate::platform::Purpose::Open => self.open_uploads(uploaded.files),
+                crate::platform::Purpose::Parameters => {
+                    crate::values_tab::apply_upload(&mut self.state, uploaded.files)
+                }
             }
         }
         #[cfg(target_arch = "wasm32")]
@@ -997,6 +1022,12 @@ impl eframe::App for SolidDraftApp {
                 log::warn!("cannot save the command history: {e}");
             }
             self.saved_commands = self.state.commands.clone();
+        }
+        if self.state.create_pins != self.saved_create_pins {
+            if let Err(e) = crate::settings::save_create_pins(&self.state.create_pins) {
+                log::warn!("cannot save the pinned create commands: {e}");
+            }
+            self.saved_create_pins = self.state.create_pins.clone();
         }
         if self.state.layout != self.saved_layout && !ctx.input(|i| i.pointer.any_down()) {
             self.state.layout.save();

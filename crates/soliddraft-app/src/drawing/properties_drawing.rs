@@ -268,6 +268,19 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
         Some(DrawingSel::Annotation(id)) => annotation_panel(ui, s, id, &mut actions),
         Some(DrawingSel::Format) => format_panel(ui, s, &mut actions),
         Some(DrawingSel::Revisions) => properties_d3::revisions_panel(ui, s, &mut actions),
+        Some(DrawingSel::HoleTable(i)) => {
+            if let Some(table) = s.sheet().tables.get(i).filter(|t| t.kind == soliddraft_drawing::TableKind::Hole) {
+                header(ui, Icon::Hole, "Hole table");
+                if let Some(view) = table.hole_view.and_then(|id| s.sheet().view(id)) {
+                    value_row(ui, "View", &view_label_in(&s.doc.drawing, s.sheet(), view));
+                }
+                value_row(ui, "Rows", &table.holes.len().to_string());
+                hint(ui, "X and Y run along the view axes from the model origin.");
+                if ui.button("Delete hole table").clicked() {
+                    actions.push(DrawingAction::DeleteSelection);
+                }
+            }
+        }
         Some(DrawingSel::Model) => {
             header(ui, Icon::Extrude, "Model reference");
             super::reference::panel(ui, s, part_open, &mut actions);
@@ -412,10 +425,12 @@ fn kind_words(a: &soliddraft_drawing::Annotation) -> String {
         AnnotationKind::HoleCallout { .. } => "hole callout".into(),
         AnnotationKind::CentreMark => "centre mark".into(),
         AnnotationKind::Centreline => "centreline".into(),
+        AnnotationKind::Weld { .. } => "fillet weld".into(),
         AnnotationKind::Gdt { .. } => "geometric tolerance".into(),
         AnnotationKind::Datum { .. } => "datum".into(),
         AnnotationKind::SurfaceFinish { .. } => "surface finish".into(),
         AnnotationKind::RevisionSymbol { .. } => "revision symbol".into(),
+        AnnotationKind::Balloon { .. } => "balloon".into(),
         AnnotationKind::DimensionSet(set) => match set.kind {
             soliddraft_drawing::SetKind::Ordinate => "ordinate".into(),
             soliddraft_drawing::SetKind::Baseline => "baseline".into(),

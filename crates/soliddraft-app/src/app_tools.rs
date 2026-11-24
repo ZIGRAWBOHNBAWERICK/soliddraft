@@ -22,8 +22,8 @@ use soliddraft_drawing::export::Format as SheetFormat;
 use soliddraft_drawing::measure::value_text;
 use soliddraft_drawing::project::{self, view_label_in};
 use soliddraft_drawing::{
-    AnnotationId, AnnotationKind, AnnotationState, Boundary, Command as DrawingCommand, Drawing, HiddenLines,
-    PartIndex, SHEET, TangentEdges, ViewDisplay, ViewId, ViewKind, derived,
+    AnnotationId, AnnotationKind, AnnotationState, Boundary, Command as DrawingCommand, Drawing, FoldDirection,
+    HiddenLines, PartIndex, SHEET, TangentEdges, ViewDisplay, ViewId, ViewKind, derived,
 };
 use soliddraft_exchange::Format as ExportFormat;
 use soliddraft_kernel_api::{Point2, Vec3};
@@ -174,6 +174,36 @@ pub fn section_params() -> Vec<(&'static str, Value)> {
     ]
 }
 
+/// The directions a projected view folds off its parent, as `drawing_projected` takes them.
+const FOLDS: [&str; 8] = ["left", "right", "up", "down", "up_left", "up_right", "down_left", "down_right"];
+
+/// The `drawing_projected` tool's parameters.
+pub fn projected_params() -> Vec<(&'static str, Value)> {
+    vec![
+        ("view", any_of(view_schema("The view to fold from"))),
+        (
+            "direction",
+            one_of(
+                &FOLDS,
+                "The side of the view the new one sits on; a diagonal side gives a pictorial view at a free place",
+            ),
+        ),
+    ]
+}
+
+/// The `drawing_detail` tool's parameters.
+pub fn detail_params() -> Vec<(&'static str, Value)> {
+    vec![
+        ("view", any_of(view_schema("The view to magnify a region of"))),
+        (
+            "center",
+            array(number("mm"), "A model point [x, y, z] the detail circle is centred on, such as a hole's centre"),
+        ),
+        ("radius", number("The circle's radius in the view's millimetres on the sheet, above 0")),
+        ("factor", number("How many times larger than its parent the detail is drawn, above 0, such as 2")),
+    ]
+}
+
 /// The `drawing_auto_update` tool's parameters.
 pub fn auto_update_params() -> Vec<(&'static str, Value)> {
     vec![("on", boolean("true rebuilds the drawing after every change of the open part"))]
@@ -272,6 +302,12 @@ impl AppTools<'_> {
         if let Some(result) = crate::subassembly::tools::run(self.state, name, input) {
             return Some(result);
         }
+        if let Some(result) = crate::configurations::tools::run(self.state, name, input) {
+            return Some(result);
+        }
+        if let Some(result) = crate::assembly_files::tools::run(self.state, name, input) {
+            return Some(result);
+        }
         if let Some(result) = crate::pmi::tools::run(self.state, name, input) {
             return Some(result);
         }
@@ -311,6 +347,8 @@ impl AppTools<'_> {
             "drawing_tangent_edges" => self.tangent_edges(input),
             "drawing_crop" => self.crop(input),
             "drawing_section" => self.section(input),
+            "drawing_projected" => self.projected(input),
+            "drawing_detail" => self.detail(input),
             "drawing_rebuild" => self.rebuild(),
             "drawing_replace_model" => self.repoint(input, true),
             "drawing_repair_reference" => self.repoint(input, false),
@@ -386,6 +424,14 @@ impl AppTools<'_> {
     /// Opens the drawing's part in place of the open part, as the app does after opening
     /// a drawing or repairing its reference. Says which part is open.
     fn open_model(&mut self) -> Result<String, String> {
+        if let Some(file) = drawing::model_to_open(self.state)?
+            && DocKind::of_path(&file) == Some(DocKind::Assembly)
+        {
+            crate::assembly::tools::open(self.state, file)?;
+            self.state.assembly.active = false;
+            self.state.drawing.active = true;
+            return Ok(self.state.assembly.session.as_ref().map(|a| a.doc.assembly().name.clone()).unwrap_or_default());
+        }
         if let Some(file) = drawing::model_to_open(self.state)? {
             let caller = Caller::Mcp { client: "drawing".into() };
             let out = self.part().call("open", json!({ "path": file }), &caller);
@@ -633,6 +679,11 @@ impl AppTools<'_> {
             other => return Err(format!("the direction is horizontal or vertical, not `{other}`")),
         };
         let flip = input["flip"].as_bool().unwrap_or(false);
+        if crate::assembly_files::drawing::drawing_is_of_assembly(self.state) {
+            let placed =
+                crate::assembly_files::drawing::section(self.state, parent, Vec3::new(x, y, z), horizontal, flip)?;
+            return Ok(json!({ "placed": placed.0, "id": placed.1, "drawing": drawing_json(self.state) }));
+        }
         if !drawing::part_is_model(self.state) {
             return Err("The open part is not the one this drawing shows".into());
         }
@@ -659,10 +710,95 @@ impl AppTools<'_> {
         Ok(json!({ "placed": placed, "id": id.0, "drawing": drawing_json(self.state) }))
     }
 
+    /// Projected: folds a view off a view on one of eight sides, as the canvas tool does
+    /// after its click. A part drawing's view is drawn from the open part, which must be
+    /// the drawing's; an assembly drawing's from the open assembly.
+    fn projected(&mut self, input: &Value) -> Result<Value, String> {
+        let (parent, _) = self.view(input)?;
+        let said = input["direction"].as_str().unwrap_or_default();
+        let direction: FoldDirection = serde_json::from_value(json!(said))
+            .map_err(|_| format!("the direction is one of {}, not `{said}`", FOLDS.join(", ")))?;
+        if crate::assembly_files::drawing::drawing_is_of_assembly(self.state) {
+            let placed = crate::assembly_files::drawing::projected(self.state, parent, direction)?;
+            return Ok(json!({ "placed": placed.0, "id": placed.1, "drawing": drawing_json(self.state) }));
+        }
+        self.place_part_view(parent, "Projected", |drawing, part, index, sheet| {
+            derived::new_projected(drawing, part, index, sheet, parent, direction)
+        })
+    }
+
+    /// Detail: magnifies the region of a view inside a circle round a model point, as the
+    /// canvas tool does after its clicks, placed at a free place near the view.
+    fn detail(&mut self, input: &Value) -> Result<Value, String> {
+        let (parent, _) = self.view(input)?;
+        let n: Vec<f64> = input["center"].as_array().into_iter().flatten().filter_map(Value::as_f64).collect();
+        let [x, y, z] = n[..] else {
+            return Err("center is a model point: three numbers [x, y, z]".into());
+        };
+        let radius = input["radius"].as_f64().unwrap_or(f64::NAN);
+        let factor = input["factor"].as_f64().unwrap_or(f64::NAN);
+        let positive = |v: f64| v > 0.0 && v.is_finite();
+        if !n.iter().all(|v| v.is_finite()) || !positive(radius) || !positive(factor) {
+            return Err("center must be three finite numbers, and radius and factor finite numbers above 0".into());
+        }
+        let center = Vec3::new(x, y, z);
+        if crate::assembly_files::drawing::drawing_is_of_assembly(self.state) {
+            let placed = crate::assembly_files::drawing::detail(self.state, parent, center, radius, factor)?;
+            return Ok(json!({ "placed": placed.0, "id": placed.1, "drawing": drawing_json(self.state) }));
+        }
+        self.place_part_view(parent, "Detail", |drawing, part, index, sheet| {
+            let at = derived::context(drawing, part, index, parent)?.xf.point(center);
+            derived::new_detail(drawing, part, index, sheet, parent, at, radius, Vec::new(), factor, None)
+        })
+    }
+
+    /// Places a view `make` derives from the part drawing's view `parent` as one undo step,
+    /// drawn from the open part, which must be the drawing's. Answers with its label.
+    fn place_part_view(
+        &mut self,
+        parent: ViewId,
+        what: &str,
+        make: impl FnOnce(
+            &Drawing,
+            &soliddraft_drawing::Part<'_>,
+            &PartIndex<'_>,
+            usize,
+        )
+            -> Result<(soliddraft_drawing::View, project::ViewContext), soliddraft_drawing::DrawingError>,
+    ) -> Result<Value, String> {
+        if !drawing::part_is_model(self.state) {
+            return Err("The open part is not the one this drawing shows".into());
+        }
+        let st = &mut *self.state;
+        let ctx = PartContext::new(&st.doc).ok_or("The part has no body; extrude something first")?;
+        let session = st.drawing.session.as_mut().ok_or_else(|| NO_DRAWING.to_owned())?;
+        let sheet = project::sheet_of(&session.doc.drawing, parent).ok_or(NO_DRAWING)?;
+        let part = ctx.part();
+        let index = PartIndex::build(&part).map_err(|e| e.to_string())?;
+        let (view, vctx) = make(&session.doc.drawing, &part, &index, sheet).map_err(|e| format!("{what}: {e}"))?;
+        let id = view.id;
+        session.doc.remember(id, &vctx.projected);
+        drawing::run_command(self.state, DrawingCommand::PlaceView { sheet, view })?;
+        let drawing = &self.session()?.doc.drawing;
+        let placed =
+            drawing.sheet_of(id).and_then(|s| s.view(id).map(|v| view_label_in(drawing, s, v))).unwrap_or_default();
+        Ok(json!({ "placed": placed, "id": id.0, "drawing": drawing_json(self.state) }))
+    }
+
     /// Rebuild: opens the drawing's part when it is not the open part, then brings the
     /// views to its revision.
     fn rebuild(&mut self) -> Result<Value, String> {
         self.session()?;
+        if crate::assembly_files::drawing::drawing_is_of_assembly(self.state) {
+            let wanted = self.session()?.doc.drawing.model.id;
+            if self.state.assembly.session.as_ref().map(|a| a.doc.id()) != wanted {
+                let file = drawing::model_to_open(self.state)?
+                    .ok_or("the drawing's assembly was not found; drawing_repair_reference points it at the file")?;
+                crate::assembly::tools::open(self.state, file)?;
+            }
+            let said = drawing::update_views(self.state)?;
+            return Ok(self.drawing_said(said));
+        }
         if !drawing::part_is_model(self.state) {
             if drawing::model_to_open(self.state)?.is_none() {
                 return Err(

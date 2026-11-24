@@ -33,6 +33,7 @@ fn block(kernel: Arc<dyn Kernel>) -> (Document, FeatureId) {
             operation: ExtrudeOp::Boss,
             end: EndCondition::Blind { depth: 10.0 },
             reverse: false,
+            options: Default::default(),
         }),
     );
     (d, e)
@@ -207,6 +208,7 @@ fn holed(kernel: Arc<dyn Kernel>) -> (Document, FeatureId) {
             operation: ExtrudeOp::Cut,
             end: EndCondition::ThroughAll,
             reverse: false,
+            options: Default::default(),
         }),
     );
     assert!(d.status(cut).unwrap().is_ok(), "{:?}", d.status(cut));

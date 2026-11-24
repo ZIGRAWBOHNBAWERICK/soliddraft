@@ -9,26 +9,34 @@
 pub mod app;
 pub mod app_tools;
 pub mod assembly;
+pub mod assembly_files;
+pub mod bottom_popovers;
 pub mod chat;
 pub mod command_line;
 #[macro_use]
 pub mod command_tools;
 pub mod commands;
+pub mod configurations;
 pub mod context_menu;
+pub mod create_menu;
 pub mod dimension_edit;
 pub mod display_quality;
+pub(crate) mod display_states;
 pub mod document;
 #[cfg(target_arch = "wasm32")]
 pub mod documents_browser;
 pub mod drag;
 pub mod drawing;
 pub mod feature_forms;
+pub mod feature_panel;
 pub mod file;
 pub mod fillet_collect;
 pub mod form_bar;
 pub mod geometry_message;
 pub mod graphics;
 mod grid;
+pub mod history_panel;
+pub mod hole_wizard_panel;
 pub mod icons;
 pub mod import;
 pub mod interference;
@@ -39,6 +47,7 @@ pub mod kernel_worker;
 pub mod left_bar;
 pub mod locations;
 mod loft_panel;
+pub(crate) mod material_dialog;
 pub mod mates;
 pub mod measure;
 pub mod navigation;
@@ -58,6 +67,7 @@ pub mod scan;
 pub mod scene_import;
 pub mod section;
 pub mod settings;
+mod shortcut_menu;
 pub mod sketch_diagnostics;
 pub mod sketch_tools;
 pub mod sketch_values;
@@ -68,6 +78,7 @@ pub mod subassembly;
 pub mod sweep_panel;
 pub mod theme;
 pub mod tool_palette;
+pub mod top_bar;
 pub mod tree;
 pub mod tree_visibility;
 pub mod values_tab;
@@ -126,6 +137,7 @@ pub fn populate_demo(doc: &mut Document) {
             flip: false,
             end: Default::default(),
             draft: None,
+            ..Default::default()
         },
         ExtrudeParams {
             sketch: None,
@@ -135,6 +147,7 @@ pub fn populate_demo(doc: &mut Document) {
             flip: true,
             end: Default::default(),
             draft: None,
+            ..Default::default()
         },
         ExtrudeParams {
             sketch: None,
@@ -144,6 +157,7 @@ pub fn populate_demo(doc: &mut Document) {
             flip: false,
             end: Default::default(),
             draft: None,
+            ..Default::default()
         },
     ] {
         doc.apply(Command::AddExtrude { params, via_assistant: false }).ok();
@@ -166,6 +180,7 @@ pub fn bench_document() -> Document {
             flip: false,
             end: Default::default(),
             draft: None,
+            ..Default::default()
         },
         via_assistant: false,
     })

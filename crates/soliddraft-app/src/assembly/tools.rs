@@ -16,7 +16,15 @@ pub(crate) fn summary(state: &mut AppState) -> Option<Value> {
         let table = s.doc.table();
         let def = s.doc.store().get(table.definition(row));
         let reference = s.doc.reference(table.definition(row));
-        let placement = table.local(row);
+        // An exploded view moves only what is shown: the placement stays the truth's. A drag
+        // preview shows its pose here, as before.
+        let step = table.step(row);
+        let placement = match (s.doc.is_exploded(), step.member) {
+            (true, None) => {
+                s.doc.assembly().component(step.component).map(|c| c.placement).unwrap_or(table.local(row))
+            }
+            _ => table.local(row),
+        };
         let bounds = table.bounds(row);
         let (status, now) = freshness(def);
         json!({
@@ -37,6 +45,7 @@ pub(crate) fn summary(state: &mut AppState) -> Option<Value> {
         "revision": s.doc.revision(), "geometry_hash": s.doc.assembly().geometry_hash(), "dirty": s.doc.is_dirty(), "undo": s.doc.undo_label(),
         "components": components, "occurrences": occurrences, "mates": mates, "values": values, "solver": solver,
         "proof_rebuilds": s.doc.parts_rebuilt_for_proofs(),
+        "configured": crate::configurations::tools::describe(&s.doc),
         "accepted_state": accepted_state(s),
         "import": imported(s),
     }))

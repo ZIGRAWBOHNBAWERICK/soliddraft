@@ -117,6 +117,8 @@ impl Offscreen {
             // A picture shows the part, not the workspace around it.
             grid: None,
             planes: None,
+            #[cfg(target_arch = "wasm32")]
+            part_probe: None,
         };
         self.renderer.prepare(device, queue, &input);
         let texture = device.create_texture(&wgpu::TextureDescriptor {

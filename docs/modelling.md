@@ -24,6 +24,50 @@ export is coming soon. Combine the bodies into one solid before exporting, makin
 drawing, or inserting the part into an assembly. Several-solid STEP and IGES import
 is a separate follow-up and currently reports that it is coming soon.
 
+## Feature property panel
+
+While a feature is created or edited, the side area turns into its property panel. OK,
+Cancel and Preview sit at the top. The fields below come in sections that fold. The
+common choices start open and the rest start folded. Direction 2 and Thin feature have a
+tick box. Ticking one opens it, and untick it to drop the choice. A section you open stays
+open for that kind of feature until the app closes. Enter applies the feature and
+Escape cancels it. When the side area is hidden, it shows for the panel and hides again
+when the feature closes.
+
+The Create menu at the top of the palette's Create group lists every command that adds
+or removes material, with its shortcut. The pin on a row puts the command in the palette
+or takes it out. Every command starts pinned. The pins are kept in the settings file.
+
+## Extrusion options
+
+An extrusion or cut has these choices besides its end and depth:
+
+- From starts it on the sketch plane, on a plane or planar face parallel to the sketch,
+  on the plane through a vertex, or at an offset from the sketch plane. The offset is
+  measured along the first direction, and Reverse offset measures it the other way.
+  Starting on a plane or face that is not parallel to the sketch, or on a curved face,
+  is coming soon and is refused by name.
+- Flip direction turns the first direction round. An offset start turns with it.
+- Merge result joins an extrusion or revolve to the body it grows from. Off makes it the
+  first feature of a new body. Turning it on again moves it back into the body of the
+  nearest solid feature above it.
+- Direction 2 also goes against the first direction from the same start, blind, through
+  all, up to the next face or up to a face. With a length both ways the extrusion is one
+  sweep through its start. With a face limit it is one sweep each way.
+- Thin feature sweeps a wall along the sketch's lines, arcs and circles instead of the
+  closed regions: on one side (outside a closed contour unless reversed), centred, or on
+  both sides with two thicknesses. An open chain's wall gets a straight end at each end.
+  A wall along a spline or an ellipse is coming soon.
+- Selected contours extrudes only the ticked closed regions. None ticked extrudes every
+  region. A contour is named by the sketch curves around it, so moving them keeps it and
+  deleting one loses it.
+
+The Draft option works without Direction 2 and Thin feature. A draft with either is
+coming soon.
+
+From, Direction 2, Thin feature and Selected contours require `soliddraft-part/6` or
+later. See [Native files](#native-files) for the full version chain.
+
 ## Loft
 
 Loft joins two or more closed sketch regions or planar faces, in the order shown in
@@ -143,7 +187,9 @@ A hole can be tapped. Set Thread to Tapped in the hole's form and pick an ISO me
 size from M1.6 to M64 and its coarse or fine pitch (ISO 262). The drill becomes the
 tap drill: the ISO 2306 drill for a coarse thread, such as Ø5 for M6, and the nominal
 diameter less the pitch for a fine one, such as Ø7 for M8x1. The drill stays editable.
-The thread's tolerance class (6H unless chosen) and its depth are in the form's sheet;
+The thread's tolerance class (6H unless chosen) and its depth are in the form's sheet. A
+class is one ISO 965-1 gives an internal thread: a grade from 4 to 8 and G or H, such as
+6H, or the pitch and crest classes in the same position, such as 5H6H.
 Full depth threads the whole wall, or the thread stops at a depth measured from the face
 the hole starts on.
 
@@ -151,18 +197,25 @@ The thread is cosmetic: the hole keeps the plain cylinder of its drill, and no t
 modelled. The viewport draws the thread on the wall, a helix at its pitch over the part
 of the wall it covers, a circle where it ends and a circle of its major diameter where
 it starts. The marks follow the body: a later feature that removes part of the wall
-leaves the thread on what is left of it.
+leaves the thread on what is left of it, and where a cut takes the wall away, all round
+or part of the way round, no mark is drawn. In a part of several bodies the thread
+stays on the body that has the hole.
 
 The hole states the thread as an item of the part's manufacturing information: the
 diameter of its walls with the designation, such as `2× M6x1-6H DEEP 12` (see
 [manufacturing information](manufacturing-information.md)). The part stores no item of
 its own for it; editing the thread changes the item and taking the thread out removes
-it.
+it. The item states the thread that is left: its depth counts from where the hole starts
+now, so a later cut that mills the top makes it shallower, and a thread that runs out of
+a through hole is THRU. Holes of one feature that a later cut left different threads get
+an item each. A hole whose thread a later feature took away states its item with the
+reason, and the item goes on no drawing and into no file.
 
 A thread that does not fit its hole stops the hole with the reason: a drill that is not
 between the thread's minor and major diameters (`A M6x1-6H thread is cut in a hole from
 Ø4.917 to under Ø6; this hole is Ø6.6.`), a thread deeper than a blind hole, a thread
-that ends inside the counterbore, or a size or pitch that is not in the table. The
+that ends inside the counterbore or the countersink, a tolerance class no internal
+thread has, or a size or pitch that is not in the table. The
 scripted `hole` and `edit_hole` lines take a `thread` with `size`, and optionally
 `pitch`, `class` and `length`; `edit_hole` takes `plain: true` to take a thread out.
 
@@ -318,20 +371,38 @@ hash, not the geometry hash.
 
 ## Native files
 
-A part file (`.dwprt`) is a zip archive with two entries:
+A part file (`.dwprt`) is a zip archive with two required entries:
 
 - `manifest.json`: the part's id, kind and format, the application and kernel backend
   that saved it, its semantic and geometry hashes and its sections (see
   [documents.md](documents.md)).
-- `part.json`: format tag `soliddraft-part/2`, name, units, every feature with its
+- `part.json`: format tag, name, units, every feature with its
   parameters, sketch and references, the rollback bar and the next feature id. No
   kernel ids, no computed geometry: it rebuilds on Catallax.
 
-Writing is deterministic and floats round-trip bit for bit, so saving an opened file
-gives the same bytes. A file with a newer major version is refused, as is a recipe with
-repeated ids or a feature that reads one below it. Saving writes next to the target and
-renames over it. Part files from before the manifest (`.dwpart`, `recipe.json` with
-`soliddraft-part/1`) still open, with an id derived from their content.
+Both entries carry the part format. A save uses the highest version required by the
+part, including features that are suppressed or below the rollback bar.
+
+| Version | Data it adds |
+| --- | --- |
+| `soliddraft-part/1` | Pre-envelope recipe in a `.dwpart` file. The reader derives its id from its content. |
+| `soliddraft-part/2` | Base envelope, including whole-part materials and appearances. |
+| `soliddraft-part/3` | Explicit body identities. |
+| `soliddraft-part/4` | Historical development files. The reader accepts the part options, extrusion options and Hole Wizard data written under this shared tag. |
+| `soliddraft-part/5` | Parameter formulas and comments, configuration suppression, body-level materials and appearances, extended material data and display states. |
+| `soliddraft-part/6` | Extrusion options and references to Thin feature walls and ends. |
+| `soliddraft-part/7` | Hole Wizard features. |
+| `soliddraft-part/8` | Graded Shell and Thicken thicknesses. Constant thicknesses still use a number. |
+
+From format 5 onward, a file whose payload requires a newer version is refused.
+Graded walls in files tagged /1 through /4 still open and resave as format 8, including
+recovery copies. A legacy unstyled display mesh still provides a part's geometry when the
+kernel is unavailable.
+
+Writing is deterministic and floats round-trip bit for bit. Saving an unchanged file
+in the same format gives the same bytes. A file with an unsupported major version is
+refused, as is a recipe with repeated ids or a feature that reads one below it. Saving
+writes next to the target and renames over it.
 
 Application file, byte-upload/recovery and MCP loaders can seed the new document's
 existing build cache from the current model. Reuse requires the same document id and
@@ -370,13 +441,13 @@ covers the original import only and is not copied onto a later modified body.
 
 ## Terminal lattice
 
-With a finished body, choose Lattice on the Features ribbon. Cell size and the beam radius, which controls density, are in millimetres. The radius is one value, or linear along a part axis (see [graded fields](#graded-fields)). The cell grid uses the part's origin and axes. Edit Suite adds a Cell type selector for cubic, body-centred, face-centred and octet beams. Accuracy and minimum detail control certified STL export. The viewport and tree label the displayed mesh as an unproved preview. The additional named cells use a bounded sample of the native field for display. Sampling does not set the export accuracy, and certified exports still use the native field definition.
+With a finished body, choose Lattice on the Features ribbon. Cell size and the beam radius, which controls density, are in millimetres. The radius can be constant or [graded](#graded-fields). The cell grid uses the part's origin and axes. Edit Suite adds a Cell type selector for cubic, body-centred, face-centred and octet beams. Accuracy and minimum detail control certified STL export. The viewport and tree label the displayed mesh as an unproved preview. The additional named cells use a bounded sample of the native field for display. Sampling does not set the export accuracy, and certified exports still use the native field definition.
 
 The lattice stays last. Edit an earlier feature to rebuild it, or return before the lattice to continue CAD work without losing its settings. The `lattice` and `edit_lattice` agent verbs use the same document commands. Both accept `cell` as `cubic`, `body_centred`, `face_centred` or `octet`. A partial edit that omits `cell` keeps the current type. Old two-setting lattice files open with their earlier body visible and a message naming the missing cell size and density. Configure those inputs to build the field.
 
 ## Terminal network gyroid
 
-With a finished body, choose Gyroid on the Features ribbon. The body becomes the part of it where `sin X cos Y + sin Y cos Z + sin Z cos X` is at most the level, with `X = 2πx/a` and `a` the period. Period, accuracy and minimum detail are in millimetres. The level is dimensionless, not a wall thickness or a volume fraction, and zero and negative levels are valid. It is one value, or linear along a part axis (see [graded fields](#graded-fields)). The gyroid uses the part's origin and axes. The viewport and tree label the displayed mesh as an unproved preview, and the preview gives the part no volume or mass.
+With a finished body, choose Gyroid on the Features ribbon. The body becomes the part of it where `sin X cos Y + sin Y cos Z + sin Z cos X` is at most the level, with `X = 2πx/a` and `a` the period. Period, accuracy and minimum detail are in millimetres. The level is dimensionless, not a wall thickness or a volume fraction, and zero and negative levels are valid. The level can be constant or [graded](#graded-fields). The gyroid uses the part's origin and axes. The viewport and tree label the displayed mesh as an unproved preview, and the preview gives the part no volume or mass.
 
 A gyroid stays last like a lattice, and a part has one terminal field. The `gyroid` and `edit_gyroid` agent verbs use the same document commands. Only the network is available; sheet gyroids come later.
 
@@ -384,9 +455,17 @@ Export can refuse a valid gyroid. The certified STL must be one closed, connecte
 
 ## Graded fields
 
-A lattice's beam radius or a gyroid's level can change linearly along one part axis. In the field's editor choose Linear along an axis, pick x, y or z, and give two anchor coordinates on that axis in millimetres with the value at each: the value is the start value at the from coordinate and before it, the end value at the to coordinate and beyond it, and linear in between. The anchors are part coordinates, not the body's bounds, so editing an upstream size leaves them where they are and the value is held beyond them. Equal start and end values give the same field as the constant. The `grade_field` MCP tool sets a grade; `edit_lattice` with a radius or `edit_gyroid` with a level makes it one value again.
+Choose Constant for a single lattice beam radius or gyroid level. To vary it, choose Linear along an axis, pick x, y or z, and give two anchor coordinates in millimetres with the value at each. The value stays at the start or end value outside the anchors and varies linearly between them. The anchors are part coordinates, so editing an upstream size leaves them where they are. Equal start and end values give the same field as Constant. The `grade_field` MCP tool sets a grade. Use `edit_lattice` with a radius or `edit_gyroid` with a level to make it one value again.
 
 Catallax certifies a radius grade whose endpoints are positive and at most a quarter of the cell size, with a slope of at most 1/2, and a level grade with endpoints in [-1/4, 1/4] and a slope of at most 1/10 per millimetre. Other grades keep the edit, and the field shows Catallax's typed coverage refusal (`lattice.grade-range-unsupported`, `gyroid.grade-range-unsupported`). A grade whose anchors coincide is refused before the document changes. Files store a constant as a number and a grade as `{"linear": {"axis", "from", "to", "start", "end"}}`; a file with a grade form or a field setting this version does not know is refused rather than read as a constant.
+
+The pinned Catallax also supports these choices in both field editors.
+
+- **Distance from faces** varies the value over a span measured from the whole skin or selected faces. Selected faces follow upstream edits by persistent reference. Files store this as `{"distance": {"faces", "near", "far", "span"}}`, with `faces` set to `"skin"` or `{"picked": [...]}`.
+- **Radial from an axis** measures distance from a line parallel to a part axis through a point you enter. Files store this as `{"radial": {"axis", "through", "from", "to", "start", "end"}}`.
+- **From a point** measures distance from a point you enter in part coordinates. Files store this as `{"point": {"centre", "from", "to", "start", "end"}}`.
+
+Each grade holds its endpoint values outside its distance range. The same endpoint and slope limits apply. A grade with no span, no faces, a negative distance or two equal distances is refused before the document changes.
 
 The labels say what each value is: the lattice's "Beam radius (mm), controls density" and the gyroid's "Network level (dimensionless)". Neither is a wall thickness or a density percentage.
 

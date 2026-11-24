@@ -129,6 +129,7 @@ impl View {
                 levels: std::mem::take(&mut self.levels),
                 deviations: std::mem::take(&mut self.deviations),
                 budget: DeviceBudget::default(),
+                display: soliddraft_document::display_state::DisplayMode::Shaded,
             }),
         };
         // The pick window comes back a frame late: wait for one drawn from here.

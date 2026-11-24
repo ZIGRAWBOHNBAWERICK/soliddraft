@@ -8,7 +8,7 @@ use sha2::{Digest, Sha256};
 use soliddraft_kernel_api::{Decision, Grade, HoleDepth, HoleHead, HoleTip, Plane, Vec3, question_index};
 use soliddraft_sketch::{P2, Sketch};
 
-use crate::reference::{EdgeRef, FaceRef, Generator};
+use crate::reference::{EdgeRef, FaceRef, Generator, VertexRef};
 
 /// Id of a feature. It never changes and is never reused within a document.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -179,18 +179,27 @@ impl FeatureKind {
                 if let EndCondition::UpToFace { face } = &e.end {
                     out.push(face.feature);
                 }
+                out.extend(e.options.dependencies());
             }
             FeatureKind::Fillet(b) | FeatureKind::Chamfer(b) => {
                 out.extend(b.edges.iter().flat_map(|e| e.faces.iter().map(|f| f.feature)));
             }
-            FeatureKind::Hole(h) => out.push(h.face.feature),
+            FeatureKind::Hole(h) => {
+                out.push(h.face.feature);
+                if let Some(sketch) = h.sketch {
+                    out.push(sketch);
+                }
+                if let Some(wizard) = &h.wizard {
+                    out.extend(wizard.end_condition.dependencies());
+                }
+            }
             FeatureKind::Pattern(p) => out.extend(p.source),
             FeatureKind::Thicken(t) => out.extend(t.faces.iter().map(|face| face.feature)),
-            FeatureKind::Scan(_)
-            | FeatureKind::Offset(_)
-            | FeatureKind::ImportStep(_)
-            | FeatureKind::Lattice(_)
-            | FeatureKind::Gyroid(_) => {}
+            FeatureKind::Scan(_) | FeatureKind::Offset(_) | FeatureKind::ImportStep(_) => {}
+            FeatureKind::Lattice(l) => {
+                out.extend(l.radius_mm.iter().flat_map(|g| g.picked_faces().iter().map(|f| f.feature)));
+            }
+            FeatureKind::Gyroid(g) => out.extend(g.level.picked_faces().iter().map(|f| f.feature)),
             FeatureKind::Mirror(m) => {
                 out.extend(m.plane.dependencies());
             }
@@ -490,6 +499,132 @@ pub struct ExtrudeFeature {
     /// the part usually needs this, since the face normal points out of the material.
     #[serde(default, skip_serializing_if = "is_false")]
     pub reverse: bool,
+    /// Where it starts, a second direction, a thin wall and the regions it uses. Each is
+    /// saved only when set, so an extrusion without them reads as it always did.
+    #[serde(flatten)]
+    pub options: ExtrudeOptions,
+}
+
+/// The less common choices of an extrusion or cut. All default to off: the extrusion
+/// starts on its sketch plane, goes one way, is solid and uses every closed region.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct ExtrudeOptions {
+    /// Where the extrusion starts. None starts on the sketch plane.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from: Option<ExtrudeStart>,
+    /// How far it also goes against its first direction, from the same start.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub direction2: Option<EndCondition>,
+    /// A wall of constant thickness along the profile instead of the solid region.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thin: Option<ThinFeature>,
+    /// The closed regions to extrude. Empty extrudes every region.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub contours: Vec<Contour>,
+}
+
+impl ExtrudeOptions {
+    /// True when no option is set.
+    pub fn is_default(&self) -> bool {
+        *self == ExtrudeOptions::default()
+    }
+
+    /// Features the options read: the start face or vertex, and Direction 2's face.
+    pub fn dependencies(&self) -> Vec<FeatureId> {
+        let mut out = match &self.from {
+            Some(ExtrudeStart::Surface { plane }) => plane.dependencies(),
+            Some(ExtrudeStart::Vertex { vertex }) => vertex.faces.iter().map(|f| f.feature).collect(),
+            Some(ExtrudeStart::Offset { .. }) | None => Vec::new(),
+        };
+        if let Some(EndCondition::UpToFace { face }) = &self.direction2 {
+            out.push(face.feature);
+        }
+        out
+    }
+}
+
+/// Where an extrusion starts when it does not start on its sketch plane. The profile
+/// keeps its shape and moves along the sketch plane's normal to the start.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ExtrudeStart {
+    /// A plane parallel to the sketch plane, `distance` millimetres from it in the
+    /// extrusion's first direction, or against it when `reverse`.
+    Offset {
+        /// Positive distance in millimetres.
+        distance: f64,
+        /// Measure the distance against the first direction.
+        #[serde(default, skip_serializing_if = "is_false")]
+        reverse: bool,
+    },
+    /// A reference plane or planar face parallel to the sketch plane.
+    Surface {
+        /// The plane or face.
+        plane: PlaneRef,
+    },
+    /// The plane through a vertex of the part, parallel to the sketch plane.
+    Vertex {
+        /// The vertex.
+        vertex: VertexRef,
+    },
+}
+
+/// A thin extrusion: a wall of constant thickness along the sketch's curves.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ThinFeature {
+    /// Wall thickness in millimetres, on the first side.
+    pub thickness: f64,
+    /// Which side of the curves the wall lies on.
+    pub side: ThinSide,
+}
+
+/// Which side of the sketch's curves a thin wall lies on.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ThinSide {
+    /// One side: outside a closed contour, or the default side of an open one, unless
+    /// `reverse`.
+    One {
+        /// Put the wall on the other side.
+        #[serde(default, skip_serializing_if = "is_false")]
+        reverse: bool,
+    },
+    /// Centred on the curves, half the thickness each way.
+    MidPlane,
+    /// Both sides: the thickness on the first and `other` on the second.
+    Two {
+        /// Thickness on the second side, in millimetres.
+        other: f64,
+    },
+}
+
+impl ThinSide {
+    /// The thickness on the first and the second side, in millimetres.
+    pub fn split(self, thickness: f64) -> (f64, f64) {
+        match self {
+            ThinSide::One { .. } => (thickness, 0.0),
+            ThinSide::MidPlane => (thickness / 2.0, thickness / 2.0),
+            ThinSide::Two { other } => (thickness, other),
+        }
+    }
+}
+
+/// One closed region of a sketch, named by every sketch entity on its boundary, in
+/// ascending order. Moving or resizing the entities keeps the name; deleting or
+/// splitting one of them loses it.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct Contour(pub Vec<soliddraft_sketch::EntityId>);
+
+impl Contour {
+    /// The name of `region`.
+    pub fn of(region: &soliddraft_sketch::Region) -> Contour {
+        let mut ids: Vec<_> =
+            region.outer.entities.iter().chain(region.holes.iter().flat_map(|h| &h.entities)).copied().collect();
+        ids.sort();
+        ids.dedup();
+        Contour(ids)
+    }
 }
 
 /// A fillet or chamfer.
@@ -505,17 +640,20 @@ pub struct BlendFeature {
     pub other_distance: Option<f64>,
 }
 
-/// Holes drilled into a planar face, one per point.
+/// Holes drilled into a planar face, one per point (or per point in an absorbed
+/// position sketch).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct HoleFeature {
-    /// The planar face the holes start on. They drill against its outward normal.
+    /// The planar face the holes start on. They drill against its outward normal
+    /// (or along it when `wizard.flip_direction` is true).
     pub face: FaceRef,
     /// Hole centres in the face's sketch frame (see
-    /// [`plane_on_face`](crate::plane_on_face)), in millimetres.
+    /// [`plane_on_face`](crate::plane_on_face)), in millimetres. Used when `sketch`
+    /// is `None`, or as a cached mirror of the position sketch's points.
     pub points: Vec<P2>,
-    /// Diameter of the main wall.
+    /// Diameter of the main wall (or slot width).
     pub diameter: f64,
-    /// How deep the main wall goes.
+    /// How deep the main wall goes (legacy / fallback when `wizard` is absent).
     pub depth: HoleDepth,
     /// The bottom of a blind hole.
     pub tip: HoleTip,
@@ -525,12 +663,70 @@ pub struct HoleFeature {
     /// A cosmetic thread tapped in the main wall. The wall stays the drill's cylinder.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thread: Option<crate::thread::HoleThread>,
+    /// Optional absorbed position sketch whose non-construction `Point` entities
+    /// drive hole placements (including dimensions, relations, and sketch patterns).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sketch: Option<FeatureId>,
+    /// Optional Hole Wizard specification (standard, hole type, fastener, size, fit,
+    /// end condition, options, and callout tolerances).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wizard: Option<crate::hole_wizard::HoleWizardSpec>,
 }
 
 impl HoleFeature {
+    /// The fixed depth or through condition in the definition. Geometry resolves the
+    /// conditions that depend on another surface or vertex.
+    pub fn specified_depth(&self) -> Option<HoleDepth> {
+        use crate::hole_wizard::HoleEndCondition;
+        match self.wizard.as_ref().map(|wizard| &wizard.end_condition) {
+            None => Some(self.depth),
+            Some(HoleEndCondition::Blind { depth }) => Some(HoleDepth::Blind { depth: *depth }),
+            Some(HoleEndCondition::ThroughAll) => Some(HoleDepth::Through),
+            Some(_) => None,
+        }
+    }
+
+    /// Sets a fixed hole depth in the definition and its legacy mirror.
+    pub fn set_depth(&mut self, depth: HoleDepth) {
+        use crate::hole_wizard::HoleEndCondition;
+        self.depth = depth;
+        if let Some(wizard) = &mut self.wizard {
+            wizard.end_condition = match depth {
+                HoleDepth::Blind { depth } => HoleEndCondition::Blind { depth },
+                HoleDepth::Through => HoleEndCondition::ThroughAll,
+            };
+        }
+    }
+
+    /// True when this hole uses Hole Wizard fields that require `soliddraft-part/7`.
+    pub fn uses_wizard_format(&self) -> bool {
+        self.sketch.is_some() || self.wizard.is_some()
+    }
+
+    /// The effective entry head, accounting for Hole Wizard head clearance and
+    /// near-side countersink options.
+    pub fn effective_head(&self) -> Option<HoleHead> {
+        let Some(wizard) = &self.wizard else {
+            return self.head;
+        };
+        match self.head {
+            Some(HoleHead::Counterbore { diameter, depth }) => {
+                let extra = wizard.options.head_clearance.unwrap_or(0.0).max(0.0);
+                Some(HoleHead::Counterbore { diameter, depth: depth + extra })
+            }
+            Some(other) => Some(other),
+            None => wizard
+                .options
+                .near_side_csk
+                .map(|csk| HoleHead::Countersink { diameter: csk.diameter, angle_deg: csk.angle_deg }),
+        }
+    }
+
     /// Why the hole's thread cannot be cut in it, for people, or `None`.
     pub fn thread_problem(&self) -> Option<String> {
-        self.thread.as_ref()?.problem(self.diameter, &self.depth, self.head.as_ref())
+        let depth = self.specified_depth().unwrap_or(HoleDepth::Through);
+        let head = self.effective_head();
+        self.thread.as_ref()?.problem(self.diameter, &depth, head.as_ref())
     }
 }
 
@@ -745,13 +941,24 @@ impl<'de> Deserialize<'de> for ShellOpenings {
     }
 }
 
-/// A constant-thickness shell with persistent references to its openings.
+/// A shell with persistent references to its openings.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ShellFeature {
     /// Faces removed to open the shell.
     pub open_faces: ShellOpenings,
-    /// Positive, finite wall thickness in millimetres.
-    pub thickness: f64,
+    /// Positive wall thickness in millimetres, constant or graded.
+    pub thickness: FieldGrade,
+}
+
+impl ShellFeature {
+    /// Validates the wall and the all-faces opening, which only accepts a constant.
+    pub fn check_thickness(&self) -> Result<(), &'static str> {
+        self.thickness.check_thickness()?;
+        if self.open_faces.is_all() && self.thickness.constant().is_none() {
+            return Err("Opening every face requires a constant thickness.");
+        }
+        Ok(())
+    }
 }
 
 /// A signed offset of the complete body boundary.
@@ -766,16 +973,21 @@ pub struct OffsetFeature {
 pub struct ThickenFeature {
     /// Persistent names of the selected faces.
     pub faces: Vec<FaceRef>,
-    /// Positive thickness in millimetres.
-    pub thickness: f64,
+    /// Positive thickness in millimetres, constant or graded.
+    pub thickness: FieldGrade,
     /// Which side of the selected faces receives material.
     pub side: soliddraft_kernel_api::ThickenSide,
 }
 
-/// The final lattice stage. It reads the whole finished body, so it references nothing.
-/// Cell, density and output settings are saved with the feature. Unknown keys are
-/// refused, so a file from a later version is not read as a different lattice.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+/// A terminal field's grade as a part saves it: a distance grade names its faces by
+/// persistent reference.
+pub type FieldGrade = Grade<FaceRef>;
+
+/// The final lattice stage. It reads the whole finished body; only a density graded by
+/// distance from picked faces references anything. Cell, density and output settings
+/// are saved with the feature. Unknown keys are refused, so a file from a later version
+/// is not read as a different lattice.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct LatticeFeature {
     /// Missing in legacy files, which keep their earlier body visible until configured.
@@ -784,10 +996,9 @@ pub struct LatticeFeature {
     /// Cell edge length, in millimetres.
     #[serde(default)]
     pub cell_size_mm: Option<f64>,
-    /// Density as the beam radius in millimetres: one value, or a linear grade along a
-    /// part axis.
+    /// Density as the beam radius in millimetres: one value, or a grade over the part.
     #[serde(default)]
-    pub radius_mm: Option<Grade>,
+    pub radius_mm: Option<FieldGrade>,
     /// Grid fixed to the part origin and axes.
     #[serde(default)]
     pub frame: soliddraft_kernel_api::FieldFrame,
@@ -810,19 +1021,20 @@ impl Default for LatticeFeature {
     }
 }
 
-/// The final gyroid stage. It reads the whole finished body, so it references nothing.
-/// The level is the dimensionless value of the gyroid function, not a wall thickness.
-/// Unknown keys are refused, as for [`LatticeFeature`].
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+/// The final gyroid stage. It reads the whole finished body; only a level graded by
+/// distance from picked faces references anything. The level is the dimensionless value
+/// of the gyroid function, not a wall thickness. Unknown keys are refused, as for
+/// [`LatticeFeature`].
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct GyroidFeature {
     /// Only the network is supported.
     pub kind: soliddraft_kernel_api::GyroidKind,
     /// Length of one period, in millimetres.
     pub period_mm: f64,
-    /// Dimensionless level: one value, or a linear grade along a part axis. Zero and
-    /// negative levels are valid.
-    pub level: Grade,
+    /// Dimensionless level: one value, or a grade over the part. Zero and negative
+    /// levels are valid.
+    pub level: FieldGrade,
     /// Gyroid fixed to the part origin and axes.
     pub frame: soliddraft_kernel_api::FieldFrame,
     /// Accuracy the gyroid is proven to, in millimetres.

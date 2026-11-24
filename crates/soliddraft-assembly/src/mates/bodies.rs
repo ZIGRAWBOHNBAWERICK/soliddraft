@@ -8,7 +8,6 @@
 use std::collections::BTreeMap;
 
 use crate::document::AssemblyDocument;
-use crate::mates::reference::check_endpoint;
 use crate::mates::solver::{self, Body};
 use crate::mates::{
     Alignment, Entity, FaceEndpoint, Mate, MateEntry, MateRefusal, RefusalCode, SlotConstraint, StoredSupport,
@@ -22,6 +21,7 @@ use crate::store::DefinitionStore;
 use num_rational::BigRational;
 use soliddraft_document::resolve::{Location, Resolution, Resolver};
 use soliddraft_document::{DocKind, DocRef};
+use soliddraft_model::Expression;
 
 /// An assembly's truth over the structure it was flattened into: `truth` decides the
 /// root's components and overrides, and each sub-assembly's own truth the rest.
@@ -129,6 +129,17 @@ pub(crate) enum Rule {
         mode: solver::SlotMode,
         lock: Option<super::StoredTurn>,
     },
+    /// The ends are the outline, then the point kept on it, then the direction that follows
+    /// the path's tangent when `follow` has its sign, then the up direction when `up` has.
+    Path {
+        mode: solver::SlotMode,
+        follow: Option<i8>,
+        up: Option<i8>,
+    },
+    /// The ends are the cam's outline, then the follower; `outside` is the side it rides on.
+    Cam {
+        outside: bool,
+    },
 }
 
 /// A mate, read from the assembly that holds it and placed in the root.
@@ -180,6 +191,26 @@ pub(crate) struct Problem {
 
 fn invalid(message: String) -> MateRefusal {
     MateRefusal::invalid(message)
+}
+
+/// Where a Slot puts its pin, or a Path its point, as the solver reads it.
+fn slot_mode(
+    constraint: &SlotConstraint,
+    name: &str,
+    length: &impl Fn(&Expression) -> Result<f64, MateRefusal>,
+) -> Result<solver::SlotMode, MateRefusal> {
+    let exact = |v: f64, what: &str| solver::exact(v).ok_or_else(|| invalid(format!("{name}: {what} is not finite")));
+    let hundred = BigRational::from_integer(100.into());
+    Ok(match constraint {
+        SlotConstraint::Free => solver::SlotMode::Free,
+        SlotConstraint::Center => solver::SlotMode::Centre,
+        SlotConstraint::Distance { distance, flipped } => {
+            solver::SlotMode::Distance { distance: exact(length(distance)?, "the distance")?, flipped: *flipped }
+        }
+        SlotConstraint::Percent { percent, flipped } => {
+            solver::SlotMode::Share { fraction: exact(*percent, "the percentage")? / hundred, flipped: *flipped }
+        }
+    })
 }
 
 impl<'a> Scope<'a> {
@@ -281,13 +312,6 @@ impl<'a> Scope<'a> {
             .ok_or_else(|| invalid(format!("the assembly holding {path} is not loaded")))?;
         let c = holder.component(last.component).ok_or_else(|| invalid(format!("no occurrence at {path}")))?;
         let source = holder.source(c.source).ok_or_else(|| invalid(format!("occurrence {path} has no source")))?;
-        if let Some(configuration) = &source.document.configuration {
-            let message = format!(
-                "occurrence {path} names configuration {}; this version mates default configurations only",
-                configuration.0
-            );
-            return Err(MateRefusal::new(RefusalCode::UnsupportedConfiguration, message));
-        }
         if source.document.kind != DocKind::Part {
             return Err(invalid(format!("{path} is a sub-assembly; mates reach the parts inside it")));
         }
@@ -381,10 +405,14 @@ fn label(prefix: &OccurrencePath, name: &str) -> String {
 }
 
 impl AssemblyDocument {
+    /// Assemblies whose mates apply, keyed by the path of each assembly occurrence.
+    pub fn mate_holders(&self) -> Vec<(OccurrencePath, &Assembly)> {
+        Scope::new(self.assembly(), self.table(), self.store()).holders()
+    }
+
     /// The face `e` names, on the part at `body`, as a solve reads it.
     pub(crate) fn end_of(&self, scope: &Scope, body: Body, e: &FaceEndpoint, mate: &str) -> Result<End, MateRefusal> {
         let named = |r: MateRefusal| MateRefusal { mates: vec![mate.to_owned()], ..r };
-        check_endpoint(e).map_err(named)?;
         let source = scope.part_source(&body).map_err(named)?;
         if source.id != Some(e.document) {
             return Err(named(invalid(format!("{mate}: {body} places another document"))));
@@ -404,7 +432,6 @@ impl AssemblyDocument {
                     format!("this version cannot solve the mate {}", serde_json::to_string(future).unwrap_or_default()),
                 ));
             }
-            crate::mates::reference::check_configurations(holder)?;
             for mate in holder.mates.iter().filter_map(MateEntry::known) {
                 let name = label(&prefix, mate.name());
                 let mut place = |body: &Body| {
@@ -435,7 +462,9 @@ impl AssemblyDocument {
                         mates.push(Gathered::Lock { mate: name, a: ba, b: bb, relative: *relative });
                     }
                     _ => {
-                        let length = |e| holder.values.length(e).map_err(|e| super::command::value_refusal(&name, e));
+                        let length = |e: &Expression| {
+                            holder.values.length(e).map_err(|e| super::command::value_refusal(&name, e))
+                        };
                         let rule = match mate {
                             Mate::Mechanical {
                                 id,
@@ -591,24 +620,15 @@ impl AssemblyDocument {
                                 lock: *lock_rotation,
                             },
                             Mate::Slot { alignment, constraint, lock_rotation, .. } => {
-                                let exact = |v: f64, what: &str| {
-                                    solver::exact(v).ok_or_else(|| invalid(format!("{name}: {what} is not finite")))
-                                };
-                                let hundred = BigRational::from_integer(100.into());
-                                let mode = match constraint {
-                                    SlotConstraint::Free => solver::SlotMode::Free,
-                                    SlotConstraint::Center => solver::SlotMode::Centre,
-                                    SlotConstraint::Distance { distance, flipped } => solver::SlotMode::Distance {
-                                        distance: exact(length(distance)?, "the distance")?,
-                                        flipped: *flipped,
-                                    },
-                                    SlotConstraint::Percent { percent, flipped } => solver::SlotMode::Share {
-                                        fraction: exact(*percent, "the percentage")? / hundred,
-                                        flipped: *flipped,
-                                    },
-                                };
+                                let mode = slot_mode(constraint, &name, &length)?;
                                 Rule::Slot { sign: sign(alignment), mode, lock: *lock_rotation }
                             }
+                            Mate::Path { constraint, follow, up, .. } => Rule::Path {
+                                mode: slot_mode(constraint, &name, &length)?,
+                                follow: follow.as_ref().map(|s| sign(&s.alignment)),
+                                up: up.as_ref().map(|s| sign(&s.alignment)),
+                            },
+                            Mate::Cam { outside, .. } => Rule::Cam { outside: *outside },
                             Mate::Origin { .. } | Mate::Lock { .. } => unreachable!("handled above"),
                         };
                         let mut ends = Vec::new();
@@ -620,6 +640,23 @@ impl AssemblyDocument {
                         mates.push(Gathered::Between { mate: name, ends, rule });
                     }
                 }
+            }
+        }
+        // A part placed in a configuration it could not be shown in cannot be solved on.
+        for body in bodies.keys() {
+            let Ok(source) = scope.part_source(body) else { continue };
+            let (Some(c), Some(row)) = (&source.configuration, scope.table.find(body)) else { continue };
+            let d = scope.store.get(scope.table.definition(row));
+            if d.state == crate::store::LoadState::Failed {
+                let why = d.problem.clone().unwrap_or_default();
+                let message = format!("{} cannot be shown in configuration {}: {why}", source.path, c.0);
+                let named = mates.iter().filter(|g| g.bodies().contains(&body)).map(|g| match g {
+                    Gathered::Origin { mate, .. } | Gathered::Between { mate, .. } | Gathered::Lock { mate, .. } => {
+                        mate.clone()
+                    }
+                });
+                let refused = MateRefusal::new(RefusalCode::UnsupportedConfiguration, message);
+                return Err(MateRefusal { mates: named.collect(), ..refused });
             }
         }
         Ok(Problem { bodies, mates, parts: scope.parts() })

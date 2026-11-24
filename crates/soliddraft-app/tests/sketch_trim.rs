@@ -74,7 +74,7 @@ fn trim_can_keep_removed_pieces_as_non_profile_guides() {
     assert_eq!(session(&app).sketch, before);
     assert_eq!(app.state().state.doc.revision(), revision);
     let samples: Vec<_> = (0..64).map(|i| P2::new(-2.5 + 5.0 * i as f64 / 63.0, 0.0)).collect();
-    let count = stroke_samples(&mut app, &samples, soliddraft_app::theme::accent());
+    let count = stroke_samples(&mut app, &samples, soliddraft_app::theme::highlight());
     assert!((10..55).contains(&count), "the guide preview needs visible dashes, got {count}/64");
     ribbon::click_at(&mut app, at);
     assert!(session(&app).sketch.entity(target).is_some());

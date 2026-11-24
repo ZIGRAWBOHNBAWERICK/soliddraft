@@ -203,7 +203,7 @@
       "checks": [
         {
           "pointer": "/output/items/0/callout",
-          "equals": "2\u00d7 M8x1-6H DEEP 8"
+          "equals": "2\u00d7 M8x1-6H DEEP 5"
         },
         {
           "pointer": "/output/items/0/problem",
@@ -275,7 +275,7 @@
       "checks": [
         {
           "pointer": "/output/items/0/callout",
-          "equals": "2\u00d7 M8x1-6H DEEP 8"
+          "equals": "2\u00d7 M8x1-6H DEEP 5"
         }
       ]
     }

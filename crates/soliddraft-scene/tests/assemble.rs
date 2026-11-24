@@ -661,3 +661,48 @@ fn transforms_compose_their_ops_and_animated_stages_read_their_start() {
     assert!(scene.notes.iter().any(|n| n.contains("start time code")), "{:?}", scene.notes);
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn a_usd_planar_joint_requires_applied_locks_for_exactly_three_freedoms() {
+    use std::fmt::Write as _;
+
+    let dir = scratch("planar");
+    let path = dir.join("d6.usda");
+    let mut layer = String::from(
+        "#usda 1.0\n(\n    defaultPrim = \"Rig\"\n    upAxis = \"Z\"\n)\n\
+        def Xform \"Rig\" {\n    def Cube \"Parent\" {}\n    def Cube \"Child\" {}\n",
+    );
+    for (name, schemas) in [
+        (
+            "Planar",
+            r#" ( prepend apiSchemas = ["PhysicsLimitAPI:transY", "PhysicsLimitAPI:rotX", "PhysicsLimitAPI:rotZ"] )"#,
+        ),
+        (
+            "ExtraLock",
+            r#" ( prepend apiSchemas = ["PhysicsLimitAPI:transY", "PhysicsLimitAPI:rotX", "PhysicsLimitAPI:rotZ", "PhysicsLimitAPI:transZ"] )"#,
+        ),
+        ("UnusedLimits", ""),
+    ] {
+        writeln!(layer, "    def PhysicsJoint \"{name}\"{schemas} {{").unwrap();
+        layer.push_str("        rel physics:body0 = </Rig/Parent>\n        rel physics:body1 = </Rig/Child>\n");
+        for axis in ["transY", "rotX", "rotZ"] {
+            writeln!(layer, "        float limit:{axis}:physics:low = 1").unwrap();
+            writeln!(layer, "        float limit:{axis}:physics:high = -1").unwrap();
+        }
+        if name == "ExtraLock" {
+            layer
+                .push_str("        float limit:transZ:physics:low = 1\n        float limit:transZ:physics:high = -1\n");
+        }
+        layer.push_str("    }\n");
+    }
+    layer.push_str("}\n");
+    std::fs::write(&path, layer).unwrap();
+    let read = read(&path, &Options::default());
+    std::fs::remove_dir_all(dir).unwrap();
+    let scene = read.unwrap();
+    let joint = |name| scene.joints.iter().find(|joint| joint.name == name).unwrap();
+    assert_eq!(joint("Planar").kind, soliddraft_scene::JointKind::Planar);
+    assert_eq!(joint("Planar").axis, DVec3::Y);
+    assert_eq!(joint("ExtraLock").kind, soliddraft_scene::JointKind::Other);
+    assert_eq!(joint("UnusedLimits").kind, soliddraft_scene::JointKind::Other);
+}

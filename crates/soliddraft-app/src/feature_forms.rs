@@ -1,10 +1,12 @@
-//! Field lists and controls for the feature editors in the Edit Suite options bar.
+//! Field lists and controls for the feature editors. The feature property panel (see
+//! `feature_panel.rs`) shows the fields in sections, one per field group.
 
-use crate::document::{EndKind, ProfileKind};
+use crate::document::{EndKind, ProfileKind, StartKind};
 use crate::form_bar::Field;
 use crate::icons::Icon;
+use crate::properties;
 use crate::state::EditorParams;
-use soliddraft_kernel_api::{Grade, HoleDepth as DrillDepth, HoleHead, HoleTip};
+use soliddraft_kernel_api::{Grade, HoleDepth as DrillDepth, HoleHead, HoleTip, OpKind};
 use soliddraft_model::PatternSpec;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -64,6 +66,7 @@ pub enum Key {
     LevelGrade,
     OpenFaces,
     Thickness,
+    ThicknessGrade,
     DraftFaces,
     NeutralPlane,
     PullDirection,
@@ -89,7 +92,43 @@ pub enum Key {
     RepairReplacement,
     RepairNavigation,
     RepairList,
+    /// Where an extrusion or cut starts.
+    From,
+    /// The face, plane or vertex it starts at.
+    StartPick,
+    /// The distance of an offset start.
+    StartOffset,
+    /// An offset start measured against the first direction.
+    StartReverse,
+    /// Merge result: join the body the feature grows from, or start a new body.
+    Merge,
+    /// Direction 2's end, depth and face.
+    End2,
+    Depth2,
+    UpToFace2,
+    /// A thin feature's side, thickness, side flip and second thickness.
+    ThinType,
+    ThinThickness,
+    ThinReverse,
+    ThinOther,
+    /// The closed regions an extrusion or cut uses.
+    Contours,
+    /// A revolve's direction about its axis.
+    RevolveFlip,
+    /// Holds the place of a section a tick box has turned off, so its header shows.
+    SectionOff,
 }
+
+/// The section of an extrusion's or cut's start.
+pub const FROM: &str = "From";
+/// The section of the first direction: end, depth, flip, merge and draft.
+pub const DIRECTION_1: &str = "Direction 1";
+/// The section of the second direction, turned on by its tick box.
+pub const DIRECTION_2: &str = "Direction 2";
+/// The section of a thin feature, turned on by its tick box.
+pub const THIN: &str = "Thin feature";
+/// The section listing the closed regions to use.
+pub const CONTOURS: &str = "Selected contours";
 
 pub struct Spec {
     pub kind: &'static str,
@@ -100,10 +139,56 @@ pub struct Spec {
 
 /// The Draft option's fields: a tick box, then, when ticked, its angle and Outward.
 fn draft_fields(fields: &mut Vec<Field<Key>>, on: bool) {
-    fields.push(Field::new(Key::TaperOn, "", "Draft", 82.0));
+    fields.push(Field::new(Key::TaperOn, "", DIRECTION_1, 82.0));
     if on {
-        fields.push(Field::new(Key::TaperAngle, "Angle", "Draft", 130.0));
-        fields.push(Field::new(Key::TaperOutward, "", "Draft", 96.0));
+        fields.push(Field::new(Key::TaperAngle, "Draft angle", DIRECTION_1, 130.0));
+        fields.push(Field::new(Key::TaperOutward, "", DIRECTION_1, 96.0));
+    }
+}
+
+/// The sections an extrusion and a cut share past their first direction: From before
+/// it, then Direction 2, Thin feature and Selected contours. A section that is off or
+/// empty is folded: its fields go on the sheet.
+fn shared_fields(fields: &mut Vec<Field<Key>>, choices: &crate::document::ExtrudeChoices, at: usize, sketch: bool) {
+    use Key::*;
+    let field = |id, label, group, width| Field::new(id, label, group, width);
+    let mut from = vec![field(From, "From", FROM, 200.0)];
+    match choices.from {
+        StartKind::SketchPlane => from[0] = field(From, "From", FROM, 200.0).sheet(),
+        StartKind::Surface(_) | StartKind::Vertex(_) => from.push(field(StartPick, "Start", FROM, 220.0)),
+        StartKind::Offset { .. } => {
+            from.push(field(StartOffset, "Offset", FROM, 150.0));
+            from.push(field(StartReverse, "", FROM, 150.0));
+        }
+    }
+    fields.splice(at..at, from);
+    match &choices.direction2 {
+        Some(d) => {
+            fields.push(field(End2, "End", DIRECTION_2, 170.0));
+            match d.end {
+                EndKind::Blind => fields.push(field(Depth2, "Depth", DIRECTION_2, 140.0)),
+                EndKind::UpToFace(_) => fields.push(field(UpToFace2, "To", DIRECTION_2, 190.0)),
+                _ => {}
+            }
+        }
+        None => fields.push(field(SectionOff, "", DIRECTION_2, 0.0).sheet()),
+    }
+    match &choices.thin {
+        Some(thin) => {
+            fields.push(field(ThinType, "Type", THIN, 170.0));
+            fields.push(field(ThinThickness, "Thickness", THIN, 150.0));
+            match thin.side {
+                soliddraft_model::ThinSide::One { .. } => fields.push(field(ThinReverse, "", THIN, 150.0)),
+                soliddraft_model::ThinSide::Two { .. } => fields.push(field(ThinOther, "Thickness 2", THIN, 150.0)),
+                soliddraft_model::ThinSide::MidPlane => {}
+            }
+        }
+        None => fields.push(field(SectionOff, "", THIN, 0.0).sheet()),
+    }
+    // A built-in shape is one region: only a sketch has contours to choose.
+    if sketch {
+        let contours = field(Contours, "", CONTOURS, 280.0).count(choices.contours.len().max(1));
+        fields.push(if choices.contours.is_empty() { contours.sheet() } else { contours });
     }
 }
 
@@ -127,14 +212,17 @@ pub fn spec(
                 }
                 fields.push(field(Plane, "Plane", "Profile", 160.0));
             }
-            fields.push(field(End, "End", "Direction", 170.0));
+            let at = fields.len();
+            fields.push(field(End, "End", DIRECTION_1, 170.0));
+            fields.push(field(Flip, "", DIRECTION_1, 112.0));
             match p.end {
-                EndKind::Blind => fields.push(field(Depth, "Depth", "Direction", 140.0)),
-                EndKind::UpToFace(_) => fields.push(field(UpToFace, "To", "Direction", 190.0)),
+                EndKind::Blind => fields.push(field(Depth, "Depth", DIRECTION_1, 140.0)),
+                EndKind::UpToFace(_) => fields.push(field(UpToFace, "To", DIRECTION_1, 190.0)),
                 _ => {}
             }
+            fields.push(field(Merge, "", DIRECTION_1, 130.0));
             draft_fields(&mut fields, p.draft.is_some());
-            fields.push(field(Flip, "", "Direction", 112.0));
+            shared_fields(&mut fields, &p.choices, at, p.sketch.is_some());
             ("extrude", Icon::Extrude, fields)
         }
         EditorParams::Revolve(_) => (
@@ -143,7 +231,9 @@ pub fn spec(
             vec![
                 field(Profile, "Profile", "Profile", 175.0),
                 field(RevolveAxis, "Axis", "Axis", 220.0),
-                field(Angle, "Angle", "Size", 145.0),
+                field(Angle, "Angle", DIRECTION_1, 145.0),
+                field(RevolveFlip, "", DIRECTION_1, 150.0),
+                field(Merge, "", DIRECTION_1, 130.0),
             ],
         ),
         EditorParams::Sweep(s) => (
@@ -166,14 +256,17 @@ pub fn spec(
             ],
         ),
         EditorParams::Cut(p) => {
-            let mut fields = vec![field(Profile, "Profile", "Profile", 175.0), field(End, "End", "Direction", 170.0)];
+            let mut fields = vec![field(Profile, "Profile", "Profile", 175.0)];
+            let at = fields.len();
+            fields.push(field(End, "End", DIRECTION_1, 170.0));
+            fields.push(field(Flip, "", DIRECTION_1, 112.0));
             match p.end() {
-                EndKind::Blind => fields.push(field(Depth, "Depth", "Direction", 140.0)),
-                EndKind::UpToFace(_) => fields.push(field(UpToFace, "To", "Direction", 190.0)),
+                EndKind::Blind => fields.push(field(Depth, "Depth", DIRECTION_1, 140.0)),
+                EndKind::UpToFace(_) => fields.push(field(UpToFace, "To", DIRECTION_1, 190.0)),
                 _ => {}
             }
             draft_fields(&mut fields, p.draft.is_some());
-            fields.push(field(Flip, "", "Direction", 112.0));
+            shared_fields(&mut fields, &p.choices, at, true);
             ("cut", Icon::Cut, fields)
         }
         EditorParams::Fillet(_) => (
@@ -301,27 +394,23 @@ pub fn spec(
                 field(BeamRadius, "Beam radius", "Cell", 180.0),
                 field(BeamGrade, "", "Beam gradient", 280.0)
                     .sheet()
-                    .count(if matches!(l.radius_mm, Some(Grade::Linear(_))) { 5 } else { 1 }),
+                    .count(l.radius_mm.as_ref().map_or(1, properties::grade_rows)),
                 field(Accuracy, "Accuracy", "Accuracy", 170.0).sheet(),
                 field(MinimumDetail, "Minimum detail", "Accuracy", 180.0).sheet(),
             ],
         ),
-        EditorParams::Gyroid(g) => {
-            (
-                "gyroid",
-                Icon::Cad("lattice"),
-                vec![
-                    field(Body, "Body", "Body", 150.0),
-                    field(Period, "Period", "Network", 150.0),
-                    field(Level, "Level", "Network", 155.0),
-                    field(LevelGrade, "", "Level gradient", 280.0)
-                        .sheet()
-                        .count(if matches!(g.level, Grade::Linear(_)) { 5 } else { 1 }),
-                    field(Accuracy, "Accuracy", "Accuracy", 170.0).sheet(),
-                    field(MinimumDetail, "Minimum detail", "Accuracy", 180.0).sheet(),
-                ],
-            )
-        }
+        EditorParams::Gyroid(g) => (
+            "gyroid",
+            Icon::Cad("lattice"),
+            vec![
+                field(Body, "Body", "Body", 150.0),
+                field(Period, "Period", "Network", 150.0),
+                field(Level, "Level", "Network", 155.0),
+                field(LevelGrade, "", "Level gradient", 280.0).sheet().count(properties::grade_rows(&g.level)),
+                field(Accuracy, "Accuracy", "Accuracy", 170.0).sheet(),
+                field(MinimumDetail, "Minimum detail", "Accuracy", 180.0).sheet(),
+            ],
+        ),
         EditorParams::PickPlane => {
             let mut fields = vec![
                 field(PlaneDatum(0), "", "Origin planes", 130.0),
@@ -366,8 +455,12 @@ pub fn spec(
     Spec { kind, icon, confirm: !matches!(params, EditorParams::PickPlane | EditorParams::PickSketch(_)), fields }
 }
 
-struct Context {
+pub(crate) struct Context {
     sketches: Vec<(crate::document::FeatureId, String)>,
+    /// The closed regions of the extruded sketch, with their names for people.
+    contours: Vec<(soliddraft_model::Contour, String)>,
+    /// A solid feature comes before the one in the form, so it can merge into it.
+    can_merge: bool,
     /// Sketches with geometry that no feature uses yet, for a feature asking for one.
     free_sketches: Vec<(crate::document::FeatureId, String)>,
     planes: Vec<(soliddraft_model::FeatureId, String)>,
@@ -375,13 +468,61 @@ struct Context {
     sweep_radius: f64,
     loft_choices: Vec<(soliddraft_model::LoftProfile, String)>,
     pattern_choices: Vec<(soliddraft_model::FeatureId, String)>,
+    /// The grades the kernel builds for a lattice's or a gyroid's field.
+    grades: properties::GradeChoices,
+    /// Whether the kernel builds a graded wall for the open Shell or Thicken.
+    graded_thickness: bool,
 }
 
-pub fn show(ui: &mut egui::Ui, state: &mut crate::state::AppState) {
-    use crate::{form_bar, state::AppAction};
-    let Some(editor) = &state.editor else { return };
+impl Context {
+    /// The reference planes before the feature, for plane choices.
+    pub(crate) fn planes(&self) -> &[(soliddraft_model::FeatureId, String)] {
+        &self.planes
+    }
+
+    /// The sketches no feature uses yet, for a feature asking for its sketch.
+    pub(crate) fn free_sketches(&self) -> &[(crate::document::FeatureId, String)] {
+        &self.free_sketches
+    }
+}
+
+/// The open form's fields as the feature panel shows them: [`spec`], with a Thickness
+/// grade section for a Shell or Thicken whose wall the kernel can grade.
+pub(crate) fn form_spec(params: &EditorParams, context: &Context) -> Spec {
+    let mut spec = spec(params, context.planes(), context.free_sketches());
+    if context.graded_thickness {
+        let linear = match params {
+            EditorParams::Shell(p) => matches!(p.thickness, Grade::Linear(_)),
+            EditorParams::Thicken(p) => matches!(p.thickness, Grade::Linear(_)),
+            _ => false,
+        };
+        let rows = if linear { 5 } else { 1 };
+        spec.fields.push(Field::new(Key::ThicknessGrade, "", "Thickness grade", 280.0).sheet().count(rows));
+    }
+    spec
+}
+
+/// What the fields of the open form read besides its parameters: the part's sketches,
+/// planes and the choices its lists offer.
+pub(crate) fn context(state: &crate::state::AppState) -> Option<Context> {
+    let editor = state.editor.as_ref()?;
     let target = editor.target.and_then(|id| state.doc.index_of(id)).unwrap_or(state.doc.features.len());
-    let context = Context {
+    let wall = match &editor.params {
+        EditorParams::Shell(p) if !p.open_faces.is_all() => Some((OpKind::Shell, &p.thickness)),
+        EditorParams::Thicken(p) => Some((OpKind::Thicken, &p.thickness)),
+        _ => None,
+    };
+    let graded_thickness = wall.is_some_and(|(op, _)| {
+        let before = if editor.target.is_some() { state.doc.body_before(target) } else { state.doc.display_body() };
+        before.is_some_and(|body| state.doc.kernel().graded_thickness_available(op, body))
+    });
+    let profile_sketch = match &editor.params {
+        EditorParams::Extrude(p) => p.sketch,
+        EditorParams::Cut(p) => Some(p.sketch),
+        _ => None,
+    };
+    Some(Context {
+        graded_thickness,
         pattern_choices: if matches!(editor.params, EditorParams::Pattern(_)) {
             crate::properties::pattern_sources(&state.doc, target)
         } else {
@@ -417,44 +558,132 @@ pub fn show(ui: &mut egui::Ui, state: &mut crate::state::AppState) {
             .into_iter()
             .map(|p| (p, state.doc.model().datum_name(p.to_model()).to_owned()))
             .collect(),
+        grades: match &editor.params {
+            EditorParams::Lattice(l) => properties::GradeChoices::ask(
+                state.doc.kernel().as_ref(),
+                soliddraft_kernel_api::GradedField::LatticeRadius,
+                l.radius_mm.as_ref(),
+            ),
+            EditorParams::Gyroid(g) => properties::GradeChoices::ask(
+                state.doc.kernel().as_ref(),
+                soliddraft_kernel_api::GradedField::GyroidLevel,
+                Some(&g.level),
+            ),
+            _ => properties::GradeChoices::default(),
+        },
         sweep_radius: match &editor.params {
             EditorParams::Sweep(s) => state.doc.sweep_anchor(s.sketch.0 as u64).map_or(10.0, |(_, radius)| radius),
             _ => 0.0,
         },
-    };
-    let spec = spec(&editor.params, &context.planes, &context.free_sketches);
-    let title = editor.title();
-    let key = egui::Id::new(("feature_form", spec.kind, editor.target));
-    let error = editor
+        contours: profile_sketch
+            .and_then(|id| state.doc.model().built_sketch(soliddraft_model::FeatureId(id as u32)))
+            .and_then(|built| built.regions.as_ref().ok())
+            .map(|regions| {
+                regions
+                    .iter()
+                    .enumerate()
+                    .map(|(i, region)| {
+                        let edges =
+                            region.outer.entities.len() + region.holes.iter().map(|h| h.entities.len()).sum::<usize>();
+                        let holes = match region.holes.len() {
+                            0 => String::new(),
+                            1 => ", 1 hole".to_owned(),
+                            n => format!(", {n} holes"),
+                        };
+                        (
+                            soliddraft_model::Contour::of(region),
+                            format!("Contour {} ({}{holes})", i + 1, counted(edges, "edge")),
+                        )
+                    })
+                    .collect()
+            })
+            .unwrap_or_default(),
+        // Merge result means something once a solid feature comes before this one.
+        can_merge: state.doc.features.iter().take(target).any(|f| {
+            !matches!(f.kind, crate::document::FeatureKind::Sketch(_) | crate::document::FeatureKind::ReferencePlane(_))
+                && Some(f.id) != editor.target
+        }),
+    })
+}
+
+/// The message the open form shows: why OK was refused, a refused size or pick, or why
+/// the preview failed.
+pub(crate) fn message(editor: &crate::state::FeatureEditor) -> Option<String> {
+    editor
         .refusal()
         .or(editor.feedback.size.as_deref())
         .or(editor.feedback.second_size.as_deref())
         .or(editor.feedback.pick.as_deref())
         .or(editor.error.as_deref())
-        .map(crate::geometry_message::for_user);
-    let mut actions = Vec::new();
-    let editor = state.editor.as_mut().expect("open feature form");
-    let response = form_bar::show(
-        ui,
-        &mut state.form_bar,
-        form_bar::Form {
-            key,
-            title: &title,
-            icon: spec.icon,
-            fields: &spec.fields,
-            can_confirm: spec.confirm,
-            error: error.as_deref(),
-        },
-        |ui, field| render(ui, field, editor, &context, &mut actions),
-    );
-    if response.confirm {
-        actions.push(AppAction::CommitEditor);
+        .map(crate::geometry_message::for_user)
+}
+
+/// Whether section `group` of the form is one a tick box turns on, and if so whether it
+/// is on: Direction 2 and Thin feature of an extrusion or cut.
+pub fn section_toggle(params: &EditorParams, group: &str) -> Option<bool> {
+    let choices = match params {
+        EditorParams::Extrude(p) => &p.choices,
+        EditorParams::Cut(p) => &p.choices,
+        _ => return None,
+    };
+    match group {
+        DIRECTION_2 => Some(choices.direction2.is_some()),
+        THIN => Some(choices.thin.is_some()),
+        _ => None,
     }
-    if response.cancel {
-        actions.push(AppAction::CancelEditor);
+}
+
+/// Turns section `group` on or off. Turning it on starts from defaults: 10 mm blind for
+/// Direction 2, a 1 mm one-sided wall for a thin feature.
+pub fn set_section(params: &mut EditorParams, group: &str, on: bool) {
+    let choices = match params {
+        EditorParams::Extrude(p) => &mut p.choices,
+        EditorParams::Cut(p) => &mut p.choices,
+        _ => return,
+    };
+    match group {
+        DIRECTION_2 => choices.direction2 = on.then(Default::default),
+        THIN => {
+            choices.thin = on.then_some(soliddraft_model::ThinFeature {
+                thickness: 1.0,
+                side: soliddraft_model::ThinSide::One { reverse: false },
+            });
+            if on {
+                // A thin feature follows the sketch's curves, not chosen regions.
+                choices.contours.clear();
+            }
+        }
+        _ => {}
     }
-    for action in actions {
-        state.push(action);
+}
+
+/// The Draft option beside the other choices. A draft of a thin wall, or of both
+/// directions, is coming soon: the box is greyed and says why.
+fn draft_with(
+    ui: &mut egui::Ui,
+    key: Key,
+    draft: &mut Option<crate::document::ExtrudeDraft>,
+    choices: &crate::document::ExtrudeChoices,
+) {
+    let why = if choices.direction2.is_some() {
+        Some("A draft in both directions is coming soon")
+    } else if choices.thin.is_some() {
+        Some("A draft on a thin feature is coming soon")
+    } else {
+        None
+    };
+    match why {
+        None => draft_option(ui, key, draft),
+        Some(why) => {
+            if key == Key::TaperOn {
+                *draft = None;
+                ui.add_enabled_ui(false, |ui| {
+                    ui.checkbox(&mut false, "Draft");
+                })
+                .response
+                .on_disabled_hover_text(why);
+            }
+        }
     }
 }
 
@@ -481,9 +710,14 @@ fn draft_option(ui: &mut egui::Ui, key: Key, draft: &mut Option<crate::document:
 }
 
 fn number(ui: &mut egui::Ui, label: &str, unit: &str, widget: impl egui::Widget) {
+    number_field(ui, label, unit, widget);
+}
+
+fn number_field(ui: &mut egui::Ui, label: &str, unit: &str, widget: impl egui::Widget) -> egui::Response {
     let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width().max(36.0), 24.0), egui::Sense::hover());
     let response = crate::form_bar::value_cell(ui, rect, unit, |ui, inner| ui.put(inner, widget));
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::DragValue, true, format!("{label} value")));
+    response
 }
 
 /// An extrusion's Depth, which takes the keyboard when `focus`, as a double-click on the
@@ -512,12 +746,12 @@ fn noted_choice<T: Clone + PartialEq>(ui: &mut egui::Ui, label: &str, value: &mu
             for (v, entry) in choices {
                 let _response = ui.selectable_value(value, v.clone(), entry);
                 #[cfg(target_arch = "wasm32")]
-                crate::web::show_control(format!("{label}: {entry}"), _response.rect);
+                crate::web::show_visible_control(ui, format!("{label}: {entry}"), _response.rect);
             }
         },
     );
     #[cfg(target_arch = "wasm32")]
-    crate::web::show_control(label, shown.response.rect);
+    crate::web::show_visible_control(ui, label, shown.response.rect);
     shown.response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::ComboBox, true, label));
 }
 
@@ -545,7 +779,7 @@ fn axis(ui: &mut egui::Ui, name: &str, value: &mut soliddraft_kernel_api::Vec3) 
     );
 }
 
-fn end(ui: &mut egui::Ui, value: &mut crate::document::EndKind, cut: bool, linked: bool) {
+fn end(ui: &mut egui::Ui, salt: &str, value: &mut crate::document::EndKind, cut: bool, linked: bool) {
     use crate::document::EndKind;
     let text = match value {
         EndKind::Blind => "Blind",
@@ -553,7 +787,7 @@ fn end(ui: &mut egui::Ui, value: &mut crate::document::EndKind, cut: bool, linke
         EndKind::UpToFace(_) => "Up to face",
         EndKind::UpToNext => "Up to next",
     };
-    egui::ComboBox::from_id_salt("end").width(ui.available_width()).selected_text(text).show_ui(ui, |ui| {
+    egui::ComboBox::from_id_salt(salt).width(ui.available_width()).selected_text(text).show_ui(ui, |ui| {
         ui.selectable_value(value, EndKind::Blind, "Blind");
         if cut {
             ui.selectable_value(value, EndKind::ThroughAll, "Through all");
@@ -570,9 +804,227 @@ fn end(ui: &mut egui::Ui, value: &mut crate::document::EndKind, cut: bool, linke
     });
 }
 
+/// Merge result. With nothing before the feature to merge into, the box is ticked and
+/// greyed: the first solid starts the body.
+fn merge(ui: &mut egui::Ui, merge: &mut bool, can_merge: bool) {
+    ui.add_enabled_ui(can_merge, |ui| {
+        let mut shown = *merge || !can_merge;
+        let response =
+            ui.checkbox(&mut shown, "Merge result").on_hover_text("Join the body it grows from. Off makes a new body");
+        #[cfg(target_arch = "wasm32")]
+        crate::web::show_visible_control(ui, "Merge result", response.rect);
+        if response.changed() {
+            *merge = shown;
+        }
+    })
+    .response
+    .on_disabled_hover_text("The first solid feature starts the body");
+}
+
+/// True for the fields of From, Direction 2, Thin feature and Selected contours.
+fn shared_key(key: Key) -> bool {
+    matches!(
+        key,
+        Key::From
+            | Key::StartPick
+            | Key::StartOffset
+            | Key::StartReverse
+            | Key::End2
+            | Key::Depth2
+            | Key::UpToFace2
+            | Key::ThinType
+            | Key::ThinThickness
+            | Key::ThinReverse
+            | Key::ThinOther
+            | Key::Contours
+    )
+}
+
+/// One field of From, Direction 2, Thin feature or Selected contours.
+fn shared(
+    ui: &mut egui::Ui,
+    key: Key,
+    choices: &mut crate::document::ExtrudeChoices,
+    cut: bool,
+    linked: bool,
+    context: &Context,
+) {
+    use soliddraft_model::ThinSide;
+    match key {
+        Key::From => {
+            let mut kind = match choices.from {
+                StartKind::SketchPlane => 0,
+                StartKind::Surface(_) => 1,
+                StartKind::Vertex(_) => 2,
+                StartKind::Offset { .. } => 3,
+            };
+            let was = kind;
+            noted_choice(
+                ui,
+                "Extrude from",
+                &mut kind,
+                &[
+                    (0, "Sketch plane".into()),
+                    (1, "Surface/Face/Plane".into()),
+                    (2, "Vertex".into()),
+                    (3, "Offset".into()),
+                ],
+            );
+            if kind != was {
+                choices.from = match kind {
+                    1 => StartKind::Surface(None),
+                    2 => StartKind::Vertex(None),
+                    3 => StartKind::Offset { distance: 5.0, reverse: false },
+                    _ => StartKind::SketchPlane,
+                };
+            }
+        }
+        Key::StartPick => {
+            let picked = match &choices.from {
+                StartKind::Surface(Some(plane)) => Some(crate::document::plane_ref_label(plane)),
+                StartKind::Vertex(Some(vertex)) if !vertex.label.is_empty() => Some(vertex.label.clone()),
+                StartKind::Vertex(Some(_)) => Some("Vertex".into()),
+                _ => None,
+            };
+            match picked {
+                Some(label) => {
+                    ui.horizontal(|ui| {
+                        if ui.small_button("Change").on_hover_text("Pick the start again").clicked() {
+                            choices.from = match choices.from {
+                                StartKind::Vertex(_) => StartKind::Vertex(None),
+                                _ => StartKind::Surface(None),
+                            };
+                        }
+                        readout(ui, label);
+                    });
+                }
+                None => readout(
+                    ui,
+                    if matches!(choices.from, StartKind::Vertex(_)) {
+                        "Click a vertex"
+                    } else {
+                        "Click a planar face or a plane"
+                    },
+                ),
+            }
+        }
+        Key::StartOffset => {
+            if let StartKind::Offset { distance, .. } = &mut choices.from {
+                mm(ui, "Start offset", distance);
+            }
+        }
+        Key::StartReverse => {
+            if let StartKind::Offset { reverse, .. } = &mut choices.from {
+                ui.checkbox(reverse, "Reverse offset").on_hover_text("Measure the offset against the first direction");
+            }
+        }
+        Key::End2 => {
+            if let Some(d) = &mut choices.direction2 {
+                end(ui, "end2", &mut d.end, cut, linked);
+            }
+        }
+        Key::Depth2 => {
+            if let Some(d) = &mut choices.direction2 {
+                mm(ui, "Depth 2", &mut d.depth);
+            }
+        }
+        Key::UpToFace2 => {
+            if let Some(crate::document::Direction2 { end: EndKind::UpToFace(face), .. }) = &choices.direction2 {
+                readout(ui, face.as_ref().map(|f| f.label.as_str()).unwrap_or("Click a face"));
+            }
+        }
+        Key::ThinType => {
+            if let Some(thin) = &mut choices.thin {
+                let mut kind = match thin.side {
+                    ThinSide::One { .. } => 0,
+                    ThinSide::MidPlane => 1,
+                    ThinSide::Two { .. } => 2,
+                };
+                let was = kind;
+                noted_choice(
+                    ui,
+                    "Thin type",
+                    &mut kind,
+                    &[(0, "One direction".into()), (1, "Mid-plane".into()), (2, "Two directions".into())],
+                );
+                if kind != was {
+                    thin.side = match kind {
+                        1 => ThinSide::MidPlane,
+                        2 => ThinSide::Two { other: thin.thickness },
+                        _ => ThinSide::One { reverse: false },
+                    };
+                }
+            }
+        }
+        Key::ThinThickness => {
+            if let Some(thin) = &mut choices.thin {
+                mm(ui, "Wall thickness", &mut thin.thickness);
+            }
+        }
+        Key::ThinReverse => {
+            if let Some(soliddraft_model::ThinFeature { side: ThinSide::One { reverse }, .. }) = &mut choices.thin {
+                ui.checkbox(reverse, "Reverse side").on_hover_text("Put the wall on the other side of the sketch");
+            }
+        }
+        Key::ThinOther => {
+            if let Some(soliddraft_model::ThinFeature { side: ThinSide::Two { other }, .. }) = &mut choices.thin {
+                mm(ui, "Second thickness", other);
+            }
+        }
+        Key::Contours => {
+            if choices.thin.is_some() {
+                readout(ui, "A thin feature follows every curve of the sketch");
+                return;
+            }
+            if context.contours.is_empty() {
+                readout(ui, "The sketch has no closed contours");
+                return;
+            }
+            for (contour, label) in &context.contours {
+                let mut on = choices.contours.contains(contour);
+                if ui.checkbox(&mut on, label).changed() {
+                    if on {
+                        choices.contours.push(contour.clone());
+                    } else {
+                        choices.contours.retain(|c| c != contour);
+                    }
+                }
+            }
+            ui.weak(if choices.contours.is_empty() {
+                "None ticked: every contour"
+            } else {
+                "Only the ticked contours"
+            });
+        }
+        _ => {}
+    }
+}
+
 /// A count with its noun: "1 face", "3 faces".
 fn counted(count: usize, noun: &str) -> String {
     format!("{count} {noun}{}", if count == 1 { "" } else { "s" })
+}
+
+fn thickness(ui: &mut egui::Ui, label: &str, grade: &mut soliddraft_model::FieldGrade, available: bool) -> bool {
+    match grade {
+        Grade::Constant(value) => {
+            let _response = number_field(ui, label, "mm", egui::DragValue::new(value).speed(0.1));
+            #[cfg(target_arch = "wasm32")]
+            crate::web::show_control("Thickness value", _response.rect);
+        }
+        Grade::Linear(_) if available => return ui.button("Linear grade").clicked(),
+        // A grade this wall cannot take here: offer the constant it starts from.
+        _ => {
+            let start = grade.endpoints().first().copied().unwrap_or(1.0);
+            let response = ui.button("Use constant");
+            #[cfg(target_arch = "wasm32")]
+            crate::web::show_control("Use constant", response.rect);
+            if response.clicked() {
+                *grade = Grade::Constant(start);
+            }
+        }
+    }
+    false
 }
 
 fn picked_edges(ui: &mut egui::Ui, editor: &mut crate::state::FeatureEditor) {
@@ -610,7 +1062,9 @@ fn set_source(source: &mut soliddraft_model::SketchPlane, plane: soliddraft_mode
     };
 }
 
-fn render(
+/// Draws field `key` of the open form. Returns true when the field asks for its
+/// details, such as a path's or a hole's position list.
+pub(crate) fn render(
     ui: &mut egui::Ui,
     key: Key,
     editor: &mut crate::state::FeatureEditor,
@@ -633,11 +1087,11 @@ fn render(
         } else {
             ("Rectangle", ProfileKind::Rectangle { width: 60.0, height: 40.0 })
         };
-        if ui
-            .button(name)
-            .on_hover_text(format!("Extrude a sized {} on an origin plane", name.to_lowercase()))
-            .clicked()
-        {
+        let button =
+            ui.button(name).on_hover_text(format!("Extrude a sized {} on an origin plane", name.to_lowercase()));
+        #[cfg(target_arch = "wasm32")]
+        crate::web::show_visible_control(ui, name, button.rect);
+        if button.clicked() {
             editor.params = EditorParams::Extrude(crate::document::ExtrudeParams { profile, ..Default::default() });
         }
         return false;
@@ -650,7 +1104,7 @@ fn render(
             number(ui, "Offset", "mm", egui::DragValue::new(&mut p.distance).speed(0.1));
         }
         (EditorParams::Thicken(p), Key::Thickness) => {
-            number(ui, "Thickness", "mm", egui::DragValue::new(&mut p.thickness).speed(0.1));
+            return thickness(ui, "Thickness", &mut p.thickness, context.graded_thickness);
         }
         (EditorParams::Thicken(p), Key::ThickenSide) => properties::thicken_side(ui, &mut p.side),
         (EditorParams::Thicken(p), Key::ThickenFaces) => {
@@ -716,7 +1170,22 @@ fn render(
                 }
             });
         }
-        (EditorParams::Extrude(p), Key::End) => end(ui, &mut p.end, false, p.sketch.is_some()),
+        (EditorParams::Extrude(p), Key::End) => end(ui, "end", &mut p.end, false, p.sketch.is_some()),
+        (EditorParams::Extrude(p), Key::Merge) => merge(ui, &mut p.merge, context.can_merge),
+        (EditorParams::Revolve(_), Key::Merge) => merge(ui, &mut editor.merge, context.can_merge),
+        (EditorParams::Revolve(p), Key::RevolveFlip) => {
+            // A revolve turns counter-clockwise about its axis; flipping turns the axis.
+            if ui.button("Reverse direction").on_hover_text("Revolve the other way about the axis").clicked() {
+                for v in &mut p.axis_direction {
+                    *v = -*v;
+                }
+            }
+        }
+        (EditorParams::Extrude(p), key) if shared_key(key) => {
+            let linked = p.sketch.is_some();
+            shared(ui, key, &mut p.choices, false, linked, context)
+        }
+        (EditorParams::Cut(p), key) if shared_key(key) => shared(ui, key, &mut p.choices, true, true, context),
         (EditorParams::Extrude(p), Key::Depth) => {
             let focus = std::mem::take(&mut editor_focus);
             depth_field(ui, &mut p.depth, focus)
@@ -730,15 +1199,15 @@ fn render(
             ui.checkbox(&mut p.flip, "Flip direction");
         }
         (EditorParams::Extrude(p), key @ (Key::TaperOn | Key::TaperAngle | Key::TaperOutward)) => {
-            draft_option(ui, key, &mut p.draft)
+            draft_with(ui, key, &mut p.draft, &p.choices)
         }
         (EditorParams::Cut(p), key @ (Key::TaperOn | Key::TaperAngle | Key::TaperOutward)) => {
-            draft_option(ui, key, &mut p.draft)
+            draft_with(ui, key, &mut p.draft, &p.choices)
         }
         (EditorParams::Cut(p), Key::Profile) => readout(ui, sketch_name(p.sketch)),
         (EditorParams::Cut(p), Key::End) => {
             let mut value = p.end();
-            end(ui, &mut value, true, true);
+            end(ui, "end", &mut value, true, true);
             if value != p.end() {
                 p.set_end(value);
             }
@@ -848,22 +1317,31 @@ fn render(
         }
         (EditorParams::Hole(p), Key::PositionList) => {
             let mut remove = None;
-            for (i, point) in p.points.iter_mut().enumerate() {
+            let mut edits = Vec::new();
+            for (i, point) in p.points.iter().enumerate() {
+                let mut u = point.u;
+                let mut v = point.v;
                 ui.horizontal(|ui| {
                     ui.label(format!("{}", i + 1));
-                    properties::coord(ui, &format!("hole_u{i}"), "u", &mut point.u);
-                    properties::coord(ui, &format!("hole_v{i}"), "v", &mut point.v);
+                    properties::coord(ui, &format!("hole_u{i}"), "u", &mut u);
+                    properties::coord(ui, &format!("hole_v{i}"), "v", &mut v);
                     if ui.small_button("Remove").clicked() {
                         remove = Some(i);
                     }
                 });
+                if u != point.u || v != point.v {
+                    edits.push((i, crate::sketch::P2::new(u, v)));
+                }
+            }
+            for (i, pt) in edits {
+                p.set_position_point(i, pt);
             }
             if let Some(i) = remove.filter(|_| p.points.len() > 1) {
-                p.points.remove(i);
+                p.remove_position_point(i);
             }
             if ui.button("Add point").clicked() {
                 let next = p.points.last().copied().unwrap_or_default();
-                p.points.push(crate::sketch::P2::new(next.u + 10.0, next.v));
+                p.add_position_point(crate::sketch::P2::new(next.u + 10.0, next.v));
             }
         }
         (EditorParams::Hole(p), Key::Diameter) => {
@@ -961,11 +1439,21 @@ fn render(
             choice(ui, "hole_depth", &mut through, &[(true, "Through"), (false, "Blind")]);
             if through != was {
                 p.depth = if through { HoleDepth::Through } else { HoleDepth::Blind { depth: 10.0 } };
+                if let Some(w) = p.wizard.as_mut() {
+                    w.end_condition = if through {
+                        soliddraft_model::hole_wizard::HoleEndCondition::ThroughAll
+                    } else {
+                        soliddraft_model::hole_wizard::HoleEndCondition::Blind { depth: 10.0 }
+                    };
+                }
             }
         }
         (EditorParams::Hole(p), Key::Depth) => {
             if let HoleDepth::Blind { depth } = &mut p.depth {
                 mm(ui, "Depth", depth);
+                if let Some(w) = p.wizard.as_mut() {
+                    w.end_condition = soliddraft_model::hole_wizard::HoleEndCondition::Blind { depth: *depth };
+                }
             }
         }
         (EditorParams::Hole(p), Key::TipKind) => {
@@ -1162,7 +1650,19 @@ fn render(
             });
         }
         (EditorParams::Shell(p), Key::Thickness) => {
-            number(ui, "Wall thickness", "mm", egui::DragValue::new(&mut p.thickness).speed(0.1))
+            return thickness(ui, "Wall thickness", &mut p.thickness, context.graded_thickness);
+        }
+        (
+            EditorParams::Shell(soliddraft_model::ShellFeature { thickness, .. })
+            | EditorParams::Thicken(soliddraft_model::ThickenFeature { thickness, .. }),
+            Key::ThicknessGrade,
+        ) => {
+            // A wall takes a constant or a linear grade.
+            let walls = properties::GradeChoices {
+                offered: vec![soliddraft_kernel_api::GradeKind::Constant, soliddraft_kernel_api::GradeKind::Linear],
+                refusal: None,
+            };
+            properties::grade_options(ui, "Thickness", thickness, "mm", 0.1, &walls)
         }
         (EditorParams::Lattice(p), Key::Cell) => {
             let cell = p.cell.get_or_insert(LatticeCell::Cubic);
@@ -1185,15 +1685,20 @@ fn render(
         }
         (EditorParams::Lattice(p), Key::BeamRadius) => match p.radius_mm.get_or_insert(Grade::Constant(0.0)) {
             Grade::Constant(v) => number(ui, "Beam radius", "mm", egui::DragValue::new(v).speed(0.1)),
-            Grade::Linear(_) => {
-                if ui.button("Linear along an axis").clicked() {
+            graded => {
+                if ui.button(graded.kind().label()).clicked() {
                     return true;
                 }
             }
         },
-        (EditorParams::Lattice(p), Key::BeamGrade) => {
-            properties::grade_options(ui, "Beam radius", p.radius_mm.get_or_insert(Grade::Constant(0.0)), "mm", 0.1)
-        }
+        (EditorParams::Lattice(p), Key::BeamGrade) => properties::grade_options(
+            ui,
+            "Beam radius",
+            p.radius_mm.get_or_insert(Grade::Constant(0.0)),
+            "mm",
+            0.1,
+            &context.grades,
+        ),
         (EditorParams::Lattice(p), Key::Accuracy) => {
             number(ui, "Accuracy", "mm", egui::DragValue::new(&mut p.accuracy_mm).speed(0.01))
         }
@@ -1205,14 +1710,14 @@ fn render(
         }
         (EditorParams::Gyroid(p), Key::Level) => match &mut p.level {
             Grade::Constant(v) => number(ui, "Level", "", egui::DragValue::new(v).speed(0.01)),
-            Grade::Linear(_) => {
-                if ui.button("Linear along an axis").clicked() {
+            graded => {
+                if ui.button(graded.kind().label()).clicked() {
                     return true;
                 }
             }
         },
         (EditorParams::Gyroid(p), Key::LevelGrade) => {
-            properties::grade_options(ui, "Network level", &mut p.level, "", 0.01)
+            properties::grade_options(ui, "Network level", &mut p.level, "", 0.01, &context.grades)
         }
         (EditorParams::Gyroid(p), Key::Accuracy) => {
             number(ui, "Accuracy", "mm", egui::DragValue::new(&mut p.accuracy_mm).speed(0.01))
@@ -1243,10 +1748,13 @@ fn render(
             }
         }
         (EditorParams::PickSketch(_), Key::UseSketch(id)) => {
-            if let Some((_, name)) = context.free_sketches.iter().find(|(v, _)| *v == id)
-                && ui.button(name).clicked()
-            {
-                actions.push(AppAction::Select(Some(crate::document::Selection::Feature(id))));
+            if let Some((_, name)) = context.free_sketches.iter().find(|(v, _)| *v == id) {
+                let button = ui.button(name);
+                #[cfg(target_arch = "wasm32")]
+                crate::web::show_visible_control(ui, format!("Use {name}"), button.rect);
+                if button.clicked() {
+                    actions.push(AppAction::Select(Some(crate::document::Selection::Feature(id))));
+                }
             }
         }
         (EditorParams::Repair { items, active, .. }, Key::RepairWas) => {

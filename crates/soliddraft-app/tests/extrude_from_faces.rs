@@ -287,9 +287,6 @@ fn extrude_from_a_curved_face_picked_in_the_viewport() {
         assert_eq!(back.geometry_hash(), model.geometry_hash());
         assert!(back.statuses().into_iter().all(|(_, status)| status.is_ok()), "every feature builds after reopening");
         std::fs::write(case.dir.join("extrude-from-curved.dwprt"), &bytes).unwrap();
-        if let Some(dir) = std::env::var_os("SOLIDDRAFT_BROWSER_FIXTURES") {
-            std::fs::write(std::path::PathBuf::from(dir).join("extrude-from-curved.dwprt"), &bytes).unwrap();
-        }
         case.note("saved and reopened with the same truth and geometry");
     });
 }
@@ -416,4 +413,83 @@ fn a_lost_curved_start_is_repaired_by_picking_the_face_again() {
         case.frame(app, "repaired");
         case.note("a lost curved From face repaired by picking it in the viewport");
     });
+}
+
+/// The curved-start part the browser check opens, built without a renderer: the web job
+/// that makes browser fixtures has none. The rendered test above builds the same part by
+/// picking the rod's top in the viewport; this one names that face through the model.
+#[test]
+fn a_headless_curved_start_part_produces_the_browser_fixture() {
+    use soliddraft_model::sketch::{P2 as ModelP2, Sketch, solve::solve};
+    use soliddraft_model::{
+        DatumPlane, EndCondition, ExtrudeFeature, ExtrudeOp, ExtrudeOptions, ExtrudeStart, FeatureId, FeatureKind,
+        ProfileSource, SketchFeature,
+    };
+    let mut doc = soliddraft_model::Document::new("Part", soliddraft_app::kernel());
+    let add = |doc: &mut soliddraft_model::Document, kind: FeatureKind| -> FeatureId {
+        doc.execute(soliddraft_model::Command::AddFeature { kind, name: None, position: None, via_assistant: false })
+            .unwrap()
+            .created
+            .unwrap()
+    };
+    let sketch = |datum: DatumPlane, offset: f64, draw: &dyn Fn(&mut Sketch)| {
+        let mut s = Sketch::new();
+        draw(&mut s);
+        solve(&mut s, None, true);
+        FeatureKind::Sketch(SketchFeature { plane: soliddraft_model::SketchPlane::Datum { datum, offset }, sketch: s })
+    };
+    let extrude = |sketch: FeatureId, depth: f64, reverse: bool, options: ExtrudeOptions| {
+        FeatureKind::Extrude(ExtrudeFeature {
+            profile: ProfileSource::Sketch { feature: sketch },
+            operation: ExtrudeOp::Boss,
+            end: EndCondition::Blind { depth },
+            reverse,
+            options,
+        })
+    };
+    // The rod and the square of rod_and_square().
+    let circle = add(
+        &mut doc,
+        sketch(DatumPlane::Front, 0.0, &|s| {
+            s.circle_at(ModelP2::new(0.0, 0.0), 40.0).unwrap();
+        }),
+    );
+    add(&mut doc, extrude(circle, 40.0, false, ExtrudeOptions::default()));
+    let square = add(
+        &mut doc,
+        sketch(DatumPlane::Top, 30.0, &|s| {
+            s.rectangle(ModelP2::new(5.0, -20.0), 6.0, 6.0).unwrap();
+        }),
+    );
+    // The boss the rendered test ends with: from the rod's round top, flipped into the rod
+    // 5 mm and 7 mm up as Direction 2, merged.
+    let topology = doc.kernel().topology(doc.body().unwrap()).unwrap();
+    let round = topology.faces.iter().find(|f| f.normal.is_none()).expect("the rod's round face").id;
+    let face = doc.face_ref(round).unwrap();
+    let options = ExtrudeOptions {
+        from: Some(ExtrudeStart::Surface { plane: soliddraft_model::PlaneRef::Face { face } }),
+        direction2: Some(EndCondition::Blind { depth: 7.0 }),
+        ..Default::default()
+    };
+    add(&mut doc, extrude(square, 5.0, true, options));
+    let volume = |doc: &soliddraft_model::Document| doc.kernel().mass_properties(doc.body().unwrap()).unwrap().volume;
+    close(volume(&doc), ROD + 252.0, "the boss 7 mm out of the rod's top");
+    // The later 4 mm post from the Top plane up through the rod.
+    let post = add(
+        &mut doc,
+        sketch(DatumPlane::Top, 0.0, &|s| {
+            s.rectangle(ModelP2::new(-10.0, -20.0), 4.0, 4.0).unwrap();
+        }),
+    );
+    add(&mut doc, extrude(post, 45.0, false, ExtrudeOptions::default()));
+    assert!(doc.statuses().into_iter().all(|(_, status)| status.is_ok()), "every feature builds");
+    assert!(volume(&doc) > ROD + 252.0, "the later post adds material above the rod");
+    let names: Vec<&str> = doc.features().iter().map(|f| f.name.as_str()).collect();
+    assert_eq!(names[3], "Boss-Extrude2", "the browser check edits this feature by name: {names:?}");
+    let bytes = doc.to_bytes().unwrap();
+    let back = soliddraft_model::Document::from_bytes(&bytes, soliddraft_app::kernel()).unwrap();
+    assert_eq!(back.part_json(), doc.part_json());
+    if let Some(dir) = std::env::var_os("SOLIDDRAFT_BROWSER_FIXTURES") {
+        std::fs::write(std::path::PathBuf::from(dir).join("extrude-from-curved.dwprt"), &bytes).unwrap();
+    }
 }

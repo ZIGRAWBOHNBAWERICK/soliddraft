@@ -171,8 +171,10 @@ fn the_bracket_in_light_and_dark() {
 fn capture_picture(custom: &mut Harness<'_, SolidDraftApp>, file: &str) {
     let view = custom.state().state.viewport.rect;
     let image = custom.render().expect("the imported theme and background render");
-    let x = view.left() as u32 + 20;
-    let y = view.top() as u32 + 64;
+    let ppp = custom.ctx.pixels_per_point();
+    let x = ((view.left() + 20.0) * ppp) as u32;
+    let y = ((view.top() + 64.0) * ppp) as u32;
+    image.save(out_dir().join(file)).unwrap();
     let painted = (x..x + 200)
         .flat_map(|x| (y..y + 100).map(move |y| (x, y)))
         .filter(|&(x, y)| {
@@ -180,6 +182,9 @@ fn capture_picture(custom: &mut Harness<'_, SolidDraftApp>, file: &str) {
             red.abs_diff(32) <= 9 && green.abs_diff(106) <= 9 && blue.abs_diff(120) <= 9
         })
         .count();
-    assert!(painted > 4000, "the saved PNG painted {painted} background pixels");
-    image.save(out_dir().join(file)).unwrap();
+    assert!(
+        painted > 4000,
+        "{file}: the saved PNG painted {painted} background pixels, sample {:?} at ({x}, {y})",
+        image.get_pixel(x, y).0
+    );
 }

@@ -223,7 +223,7 @@
         "accuracy": 0.1,
         "min_detail": 0.5
       },
-      "refused": "A lattice on an imported body is coming soon.",
+      "refused": "distance.planar-domain: derived or curved source has no polygonal Boolean recovery proof",
       "checks": [
         {
           "pointer": "/revision",

@@ -990,11 +990,10 @@ fn shared(
                     }
                 }
             }
-            ui.weak(if choices.contours.is_empty() {
-                "None ticked: every contour"
-            } else {
-                "Only the ticked contours"
-            });
+            ui.colored_label(
+                crate::theme::muted(),
+                if choices.contours.is_empty() { "None ticked: every contour" } else { "Only the ticked contours" },
+            );
         }
         _ => {}
     }
@@ -1618,7 +1617,7 @@ pub(crate) fn render(
                 if ui.checkbox(&mut p.picking_pull, "Next face click sets the pull direction").changed() {
                     p.picking_neutral = false;
                 }
-                ui.weak("Or click an edge or an origin axis");
+                ui.colored_label(crate::theme::muted(), "Or click an edge or an origin axis");
             });
         }
         (EditorParams::Draft(p), Key::Angle) => number(

@@ -111,6 +111,8 @@ struct Vertex {
 struct Globals {
     view_proj: [[f32; 4]; 4],
     eye: [f32; 4],
+    edge_color: [f32; 4],
+    selection_color: [f32; 4],
 }
 
 #[repr(C)]
@@ -628,14 +630,14 @@ impl AssemblyRenderer {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         encoder: &mut wgpu::CommandEncoder,
-        frame: Option<&AssemblyFrame>,
-        size_px: [u32; 2],
-        cursor_px: Option<[u32; 2]>,
+        input: &super::render::FrameInput,
     ) {
-        let Some(frame) = frame else {
+        let Some(frame) = &input.assembly else {
             self.active = false;
             return;
         };
+        let size_px = input.size_px;
+        let cursor_px = input.cursor_px;
         // Another assembly: what was uploaded for the last one goes.
         if !std::sync::Weak::ptr_eq(&self.scene, &Arc::downgrade(&frame.scene)) {
             self.clear(device);
@@ -893,6 +895,8 @@ impl AssemblyRenderer {
             bytemuck::bytes_of(&Globals {
                 view_proj: vp.to_cols_array_2d(),
                 eye: [eye.x as f32, eye.y as f32, eye.z as f32, 1.0],
+                edge_color: super::render::Controls::color_uniform(input.controls.edge_color),
+                selection_color: super::render::Controls::color_uniform(input.controls.selection_color),
             }),
         );
         self.culling = false;
@@ -1411,7 +1415,8 @@ pub fn request_features(config: &mut egui_wgpu::WgpuConfiguration) {
         let base = setup.device_descriptor.clone();
         setup.device_descriptor = Arc::new(move |adapter| {
             let mut d = base(adapter);
-            d.required_features |= adapter.features() & wgpu::Features::INDIRECT_FIRST_INSTANCE;
+            d.required_features |= adapter.features()
+                & (wgpu::Features::INDIRECT_FIRST_INSTANCE | wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES);
             // A large assembly's meshes and instances outgrow the default 256 MB buffer
             // and 128 MB storage binding; take what the adapter allows.
             let a = adapter.limits();

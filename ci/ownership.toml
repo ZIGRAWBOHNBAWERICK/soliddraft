@@ -141,6 +141,13 @@ paths = ["crates/soliddraft-app/src/geometry_message.rs"]
 module = ["geometry_message"]
 
 [[areas]]
+name = "app.graphics"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/graphics.rs"]
+module = ["graphics"]
+
+[[areas]]
 name = "app.history_panel"
 owner = "core"
 crate = "soliddraft-app"
@@ -389,7 +396,7 @@ module = ["state"]
 name = "app.theme"
 owner = "core"
 crate = "soliddraft-app"
-paths = ["crates/soliddraft-app/src/theme.rs"]
+paths = ["crates/soliddraft-app/src/theme.rs", "crates/soliddraft-app/src/theme/"]
 module = ["theme"]
 
 [[areas]]

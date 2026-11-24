@@ -48,6 +48,8 @@ struct Globals {
     plane_size: vec4<f32>,
     // Top, Front and Right. rgb: their colour. a: their strength, 0 when hidden.
     planes: array<vec4<f32>, 3>,
+    edge_color: vec4<f32>,
+    selection_color: vec4<f32>,
     // Diffuse environment light as nine spherical-harmonic coefficients (environment.rs).
     sh: array<vec4<f32>, 9>,
     hover_id: u32,
@@ -64,6 +66,10 @@ struct Shade {
     // x: metallic. y: roughness.
     params: vec4<f32>,
 };
+
+fn selection_color() -> vec3<f32> {
+    return mix(srgb_to_linear(vec3<f32>(0.12, 0.37, 0.82)), globals.selection_color.rgb, globals.selection_color.a);
+}
 
 struct Body {
     // bit 0: whole body selected, bit 1: ghost preview, bit 2: preview result, bit 3: ghost removes material
@@ -265,14 +271,14 @@ fn face_colour(in: FaceOut) -> vec4<f32> {
     if (dot(n, v) < 0.0) {
         n = -n;
     }
-    let accent = srgb_to_linear(vec3<f32>(0.12, 0.37, 0.82));
+    let accent = selection_color();
     let red = srgb_to_linear(vec3<f32>(0.80, 0.24, 0.24));
     let selected_body = (body.flags & 1u) != 0u;
     let ghost = (body.flags & 2u) != 0u;
     let preview = (body.flags & 4u) != 0u;
     let removes = (body.flags & 8u) != 0u;
     // The rest of an assembly around a part edited in context (render.rs CONTEXT).
-    let context = (body.flags & 32u) != 0u;
+    let context = (body.flags & 256u) != 0u;
 
     // One preview look for every form: material a feature adds or reshapes is amber with
     // dark edges, material it removes red (theme.rs PREVIEW_EDGE and PREVIEW_REMOVE_EDGE).
@@ -280,14 +286,15 @@ fn face_colour(in: FaceOut) -> vec4<f32> {
     var base = shade.base.rgb;
     let metallic = shade.params.x;
     let roughness = shade.params.y;
+    let tint = (body.flags & 32u) == 0u;
     if (context) {
         base = mix(base, srgb_to_linear(vec3<f32>(0.70, 0.72, 0.76)), 0.6);
-    } else if (ghost && removes) {
+    } else if (ghost && removes && tint) {
         base = mix(base, red, 0.7);
-    } else if (ghost) {
+    } else if (ghost && tint) {
         base = mix(base, srgb_to_linear(vec3<f32>(0.96, 0.66, 0.16)), 0.85);
     }
-    if (preview) {
+    if (preview && tint) {
         // The faces the operation made (document.rs PREVIEW_MADE) turn amber, even when
         // picked; the rest of the previewed body keeps main's faint tint.
         let made_face = in.feature_id == 0xffffffffu;
@@ -309,12 +316,20 @@ fn face_colour(in: FaceOut) -> vec4<f32> {
     } else if (selected_body) {
         // Lighter than a selected face, so a colour chosen for the body still shows.
         color = mix(color, lit_accent, 0.25);
-    } else if (made) {
+    } else if (made && tint) {
         color = mix(color, srgb_to_linear(vec3<f32>(0.96, 0.66, 0.16)) * (0.55 + 0.45 * max(dot(n, v), 0.0)), 0.3);
     } else if (feature_selected) {
         color = mix(color, lit_accent, 0.40);
     } else if (!context && in.face_id != 0u && in.face_id == globals.hover_id) {
         color = mix(color, lit_accent, 0.22);
+    }
+    if (made && (body.flags & 64u) != 0u) {
+        let at = in.clip.xy / globals.viewport.w;
+        let diagonal = fract((at.x + at.y) / 8.0) < 0.16;
+        let cross = (body.flags & 128u) != 0u && fract((at.x - at.y) / 8.0) < 0.16;
+        if (diagonal || cross) {
+            color *= 0.58;
+        }
     }
     var alpha = shade.base.a;
     if (ghost) {
@@ -571,8 +586,8 @@ fn fs_edge(in: LineOut) -> @location(0) vec4<f32> {
     let ghost = (body.flags & 2u) != 0u;
     let removes = (body.flags & 8u) != 0u;
     let thread = (body.flags & 16u) != 0u;
-    let context = (body.flags & 32u) != 0u;
-    var color = srgb_to_linear(vec3<f32>(0.16, 0.19, 0.25));
+    let context = (body.flags & 256u) != 0u;
+    var color = mix(srgb_to_linear(vec3<f32>(0.16, 0.19, 0.25)), globals.edge_color.rgb, globals.edge_color.a);
     var alpha = 0.9;
     if (context) {
         color = srgb_to_linear(vec3<f32>(0.45, 0.47, 0.52));
@@ -581,15 +596,21 @@ fn fs_edge(in: LineOut) -> @location(0) vec4<f32> {
         // Cosmetic thread marks (render.rs THREAD_MARKS), in a blue apart from the edges.
         color = srgb_to_linear(vec3<f32>(0.18, 0.40, 0.72));
         alpha = 0.95;
-    } else if (ghost && removes) {
+    } else if (ghost && removes && (body.flags & 32u) == 0u) {
         color = srgb_to_linear(vec3<f32>(0.62, 0.12, 0.10));
         alpha = 0.95;
-    } else if (ghost) {
+    } else if (ghost && (body.flags & 32u) == 0u) {
         // Dark edges round the amber, as a built body's.
         color = srgb_to_linear(vec3<f32>(0.24, 0.15, 0.02));
         alpha = 0.95;
     }
     return vec4<f32>(color * alpha, alpha);
+}
+
+@fragment
+fn fs_hidden_edge() -> @location(0) vec4<f32> {
+    let color = selection_color();
+    return vec4<f32>(color * 0.5, 0.5);
 }
 
 // Id buffer ----------------------------------------------------------------
@@ -642,6 +663,30 @@ fn vs_id_vertex(in: IdVertexIn) -> IdFaceOut {
     out.clip = vec4<f32>(clip.x + o.x, clip.y + o.y, clip.z, clip.w);
     out.id = (3u << 30u) | in.vertex_id;
     return out;
+}
+
+struct MarkerOut {
+    @builtin(position) clip: vec4<f32>,
+    @location(0) offset: vec2<f32>,
+};
+
+@vertex
+fn vs_marker(in: IdVertexIn) -> MarkerOut {
+    let clip = pulled_clip(in.position, 4.0);
+    let offsets = array<vec2<f32>, 6>(
+        vec2<f32>(-1.0, -1.0), vec2<f32>(1.0, -1.0), vec2<f32>(1.0, 1.0),
+        vec2<f32>(-1.0, -1.0), vec2<f32>(1.0, 1.0), vec2<f32>(-1.0, 1.0));
+    let offset = offsets[in.corner];
+    let delta = offset * 6.0 * globals.viewport.w / globals.viewport.xy * clip.w;
+    return MarkerOut(vec4<f32>(clip.xy + delta, clip.zw), offset);
+}
+
+@fragment
+fn fs_marker(in: MarkerOut) -> @location(0) vec4<f32> {
+    let d = length(in.offset);
+    let a = 1.0 - smoothstep(0.75, 1.0, d);
+    let color = mix(selection_color(), vec3<f32>(1.0), smoothstep(0.45, 0.75, d));
+    return vec4<f32>(color * a, a);
 }
 
 // Ambient occlusion (full tier only) ----------------------------------------------
@@ -764,8 +809,10 @@ struct Backdrop {
     stops: array<vec4<f32>, 5>,
     radial: vec4<f32>,
     grid: vec4<f32>,
+    picture_uv: vec4<f32>,
 };
 @group(0) @binding(2) var<uniform> backdrop: Backdrop;
+@group(0) @binding(3) var backdrop_picture: texture_2d<f32>;
 
 struct BlitOut {
     @builtin(position) clip: vec4<f32>,
@@ -796,6 +843,8 @@ fn composite(uv: vec2<f32>) -> vec3<f32> {
             bg = mix(bg, b.rgb, clamp((t - a.w) / (b.w - a.w), 0.0, 1.0));
         }
     }
+    let picture = textureSample(backdrop_picture, scene_sampler, uv * backdrop.picture_uv.xy + backdrop.picture_uv.zw);
+    bg = mix(bg, picture.rgb, picture.a);
     if backdrop.grid.x > 0.0 {
         let pixel = uv * backdrop.grid.zw;
         let cell = fract(pixel / backdrop.grid.x) * backdrop.grid.x;

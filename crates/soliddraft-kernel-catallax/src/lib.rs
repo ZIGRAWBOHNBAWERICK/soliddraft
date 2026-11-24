@@ -50,7 +50,7 @@ use soliddraft_kernel_api::*;
 pub use diagnostics::{APP_REQUEST_WORK, APP_WORK_TARGET, RequestWork, with_request_allowance};
 
 /// The pinned Catallax application entry revision.
-pub const CATALLAX_REVISION: &str = "801cb656751d463237c116437c78a03cd873e434";
+pub const CATALLAX_REVISION: &str = "e3ef8f8fce7c20acf1d6dd5a2d19dbd9d7640b45";
 
 /// An in-process Catallax backend. There is no global kernel state or kernel thread.
 #[derive(Default)]
@@ -86,6 +86,8 @@ struct State {
     fresh_topologies: u64,
     /// Recipe keys whose topology has been handed over already.
     sent_topologies: std::collections::BTreeSet<String>,
+    /// The early display meshes handed over already, by recipe key and display key.
+    sent_previews: std::collections::BTreeSet<(String, String)>,
     /// Early display requests answered by sampling here rather than from an offer.
     fresh_previews: u64,
     /// The interface id this kernel gave each entity another kernel's id named, for
@@ -122,8 +124,9 @@ struct Solid {
     app: AppBody,
     /// The recipe key of this build, for a hand-over of its topology.
     key: String,
-    /// Early display meshes another kernel sampled for this build, by display key.
-    handed_previews: handover::Previews,
+    /// Early display meshes another kernel sampled for this build, by display key. More
+    /// arrive when that kernel samples the build at other display settings.
+    handed_previews: Mutex<handover::Previews>,
     /// The kernel instance that handed this build over, if one did.
     source: Option<u64>,
     ids: convert::Ids,
@@ -227,7 +230,30 @@ impl<T> MeshCache<T> {
     }
 }
 
+fn screen_deviation(display: &catallax_mesh::DisplayMesh) -> Option<Rational> {
+    if display.geometry.positions.iter().flatten().any(|value| !(*value as f32).is_finite()) {
+        return None;
+    }
+    let rounding = display
+        .geometry
+        .positions
+        .iter()
+        .map(|point| {
+            point
+                .iter()
+                .fold(0.0_f64, |sum, value| (sum + (*value - f64::from(*value as f32)).abs().next_up()).next_up())
+        })
+        .fold(0.0_f64, f64::max);
+    let rounding = Rational::from_f64_exact(rounding)?;
+    Some(&display.measurement.maximum_deviation + &rounding)
+}
+
 impl Solid {
+    /// The early display meshes another kernel handed over for this build.
+    fn handed_previews(&self) -> MutexGuard<'_, handover::Previews> {
+        self.handed_previews.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
     fn has_splines(&self) -> bool {
         if let Some(handed) = self.app.unread() {
             return handed.splines;
@@ -238,10 +264,35 @@ impl Solid {
         })
     }
 
+    fn rendering_answer(
+        &self,
+        dec: &mut Decider,
+    ) -> Result<catallax_numbers::OperationResult<catallax_mesh::DisplayMesh>, Error> {
+        use catallax_numbers::OperationResult;
+        let mut options = MeshOptions::default();
+        let answer = self.app.display_result(&options, dec)?;
+        let OperationResult::Proven(proven) = &answer else { return Ok(answer) };
+        if screen_deviation(&proven.value).is_none_or(|bound| bound <= options.chord_tolerance) {
+            return Ok(answer);
+        }
+
+        let extent = proven.value.geometry.positions.iter().flatten().fold(0.0_f64, |max, p| max.max(p.abs()));
+        let extent = Rational::from_f64_exact(extent).expect("screen deviation requires finite coordinates");
+        // Allow one chord on either side of the first mesh. The L1 rounding error
+        // of a vertex uses at most three binary32 half ulps at that extent.
+        let reserve = (&extent + &options.chord_tolerance.mul_pow2(1)).mul_pow2(-22);
+        let chord = &options.chord_tolerance - &reserve;
+        if chord <= Rational::zero() {
+            return Ok(answer);
+        }
+        options.chord_tolerance = chord;
+        self.app.display_result(&options, dec)
+    }
+
     fn rendering(&self) -> KernelResult<Arc<catallax_numbers::OperationResult<catallax_mesh::DisplayMesh>>> {
         use catallax_numbers::{Answer, OperationResult, Refusal};
         self.rendering.get(display_key(&MeshOptions::default()), || {
-            let run = || numerical("display_result", |dec| match self.app.display_result(&MeshOptions::default(), dec) {
+            let run = || numerical("display_result", |dec| match self.rendering_answer(dec) {
                 Ok(OperationResult::Refused(refusal)) => Err(refusal),
                 Ok(answer) => Ok(Answer::exact(answer)),
                 Err(Error::Display(refusal)) => Err(refusal),
@@ -272,30 +323,16 @@ impl Solid {
             OperationResult::Bounded(answer) => (answer.value(), Some(answer.evidence())),
             OperationResult::Refused(refusal) => return Err(query_error("display_result", refusal.clone())),
         };
-        if display.geometry.positions.iter().flatten().any(|value| !(*value as f32).is_finite()) {
-            return Err(KernelError::Unsupported("The display coordinates cannot be represented on screen".into()));
-        }
-        let mut mesh = convert::preview(&display.geometry, &self.ids);
-        let rounding = display
-            .geometry
-            .positions
-            .iter()
-            .map(|point| {
-                point
-                    .iter()
-                    .fold(0.0_f64, |sum, value| (sum + (*value - f64::from(*value as f32)).abs().next_up()).next_up())
-            })
-            .fold(0.0_f64, f64::max);
-        let rounding = Rational::from_f64_exact(rounding).ok_or_else(|| {
+        let bound = screen_deviation(display).ok_or_else(|| {
             KernelError::Unsupported("The display coordinates cannot be represented on screen".into())
         })?;
-        let bound = &display.measurement.maximum_deviation + &rounding;
         let level = MeshOptions::default().chord_tolerance;
         if bound > level {
             return Err(KernelError::Unsupported(
                 "Spline display bound (SD-DISPLAY-03): The measured deviation exceeds 0.01 mm after screen-coordinate rounding. The existing part is retained".into(),
             ));
         }
+        let mut mesh = convert::preview(&display.geometry, &self.ids);
         if let Some(evidence) = evidence {
             let mut measured = bound.to_f64_nearest();
             if Rational::from_f64_exact(measured).is_some_and(|value| value < bound) {
@@ -677,7 +714,7 @@ impl CatallaxKernel {
             source: app.handed_source(),
             app,
             key,
-            handed_previews,
+            handed_previews: Mutex::new(handed_previews),
             ids,
             display,
             print: MeshCache::new(),
@@ -1434,26 +1471,33 @@ impl Kernel for CatallaxKernel {
         let solids = state.bodies.values().filter_map(|stored| stored.solid.as_deref());
         for solid in solids.chain(kept_solids.iter().map(|solid| solid.as_ref())) {
             let Some(Ok(topology)) = solid.topology.get() else { continue };
-            if solid.key.is_empty() || state.sent_topologies.contains(&solid.key) || topologies.contains_key(&solid.key)
-            {
+            if solid.key.is_empty() || topologies.contains_key(&solid.key) {
                 continue;
             }
-            let (faces, edges, vertices) = solid.ids.by_index();
-            let pairs = |ids: Vec<(u32, u64)>| ids.into_iter().map(|(index, raw)| (raw, index)).collect();
-            // The early display meshes sampled so far travel with the topology.
-            let previews = solid
+            // The early display meshes sampled so far travel with the topology. Once it
+            // has gone, the ones sampled since go with it again, as a display change asks.
+            let previews: Vec<_> = solid
                 .previews
                 .computed()
                 .into_iter()
                 .filter_map(|(key, preview)| {
+                    let key = preview_key(&key);
+                    if state.sent_previews.contains(&(solid.key.clone(), key.clone())) {
+                        return None;
+                    }
                     let mesh = preview.as_ref().as_ref()?;
                     Some(handover::HandedPreview {
-                        key: preview_key(&key),
+                        key,
                         mesh: convert::preview(mesh, &solid.ids),
                         edges: preview_edges(mesh, &solid.ids),
                     })
                 })
                 .collect();
+            if state.sent_topologies.contains(&solid.key) && previews.is_empty() {
+                continue;
+            }
+            let (faces, edges, vertices) = solid.ids.by_index();
+            let pairs = |ids: Vec<(u32, u64)>| ids.into_iter().map(|(index, raw)| (raw, index)).collect();
             topologies.insert(
                 solid.key.clone(),
                 handover::HandedTopology {
@@ -1479,8 +1523,11 @@ impl Kernel for CatallaxKernel {
             identity: None,
         }));
         for entry in &handed {
-            if entry.topology.is_some() {
+            if let Some(topology) = &entry.topology {
                 state.sent_topologies.insert(entry.key.clone());
+                for preview in &topology.previews {
+                    state.sent_previews.insert((entry.key.clone(), preview.key.clone()));
+                }
             }
         }
         drop(state);
@@ -1499,9 +1546,23 @@ impl Kernel for CatallaxKernel {
                     state.offered.insert(key, offer);
                 }
                 // A topology for a build offered before: the body built from it next takes it.
+                // One sent again carries early display meshes sampled since, which join the
+                // offer's and those of every body already built from the same recipe.
                 handover::Received::Topology(topology) => {
+                    for solid in state.bodies.values().filter_map(|stored| stored.solid.as_deref()) {
+                        if solid.key != key {
+                            continue;
+                        }
+                        let (faces, edges, _) = solid.ids.by_index();
+                        if let Some(previews) = topology.renamed_previews(&faces, &edges) {
+                            solid.handed_previews().extend(previews);
+                        }
+                    }
                     if let Some(offer) = state.offered.get_mut(&key) {
-                        offer.topology = Some(topology);
+                        match &mut offer.topology {
+                            Some(earlier) => Arc::make_mut(earlier).previews.extend(topology.previews.iter().cloned()),
+                            None => offer.topology = Some(topology),
+                        }
                     }
                 }
             }
@@ -2229,7 +2290,7 @@ impl Kernel for CatallaxKernel {
             }
             let solid = self.solid(body)?;
             let options = options(params)?;
-            if let Some((mesh, _)) = solid.handed_previews.get(&preview_key(&display_key(&options))) {
+            if let Some((mesh, _)) = solid.handed_previews().get(&preview_key(&display_key(&options))) {
                 return Ok(mesh.clone());
             }
             self.state()?.fresh_previews += 1;
@@ -2258,7 +2319,7 @@ impl Kernel for CatallaxKernel {
             }
             let solid = self.solid(body)?;
             let options = options(params)?;
-            if let Some((_, edges)) = solid.handed_previews.get(&preview_key(&display_key(&options))) {
+            if let Some((_, edges)) = solid.handed_previews().get(&preview_key(&display_key(&options))) {
                 return Ok(edges.clone());
             }
             let preview = solid.preview(&options, "preview_edges")?;

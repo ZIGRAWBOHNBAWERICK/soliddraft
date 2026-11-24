@@ -33,6 +33,7 @@ pub mod file;
 pub mod fillet_collect;
 pub mod form_bar;
 pub mod geometry_message;
+pub mod graphics;
 mod grid;
 pub mod history_panel;
 pub mod hole_wizard_panel;

@@ -15,6 +15,46 @@ pub enum Purpose {
     Insert,
     /// To import cells into the part's configuration table.
     Parameters,
+    Theme(u32),
+    ViewportPicture(u32),
+}
+
+impl Purpose {
+    pub fn appearance_limit(self) -> Option<usize> {
+        match self {
+            Self::Theme(_) => Some(crate::theme::THEME_LIMIT),
+            Self::ViewportPicture(_) => Some(crate::theme::PICTURE_LIMIT),
+            _ => None,
+        }
+    }
+}
+
+pub fn open_appearance_file(purpose: Purpose) -> Option<Result<(String, Vec<u8>), String>> {
+    let (title, filter, extension) = match purpose {
+        Purpose::Theme(_) => ("Import theme", "SolidDraft theme", "json"),
+        Purpose::ViewportPicture(_) => ("Choose viewport picture", "PNG picture", "png"),
+        _ => return None,
+    };
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        use std::io::Read;
+        let path = open_path(title, filter, &[extension])?;
+        let name = path.file_name()?.to_string_lossy().into_owned();
+        let limit = purpose.appearance_limit()?;
+        let read = || -> Result<_, String> {
+            let file = std::fs::File::open(&path).map_err(|e| format!("Cannot open {name}: {e}"))?;
+            let mut bytes = Vec::new();
+            file.take(limit as u64 + 1).read_to_end(&mut bytes).map_err(|e| format!("Cannot read {name}: {e}"))?;
+            Ok((name, bytes))
+        };
+        Some(read())
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = (title, filter);
+        crate::web::upload(&[extension], false, purpose);
+        None
+    }
 }
 
 /// Opens a table file, with uploaded bytes delivered on a later browser frame.
@@ -34,6 +74,7 @@ pub fn open_parameters(extensions: &[&str]) -> Option<PathBuf> {
 #[derive(Debug)]
 pub struct Uploaded {
     pub purpose: Purpose,
+    pub error: Option<String>,
     pub files: Vec<(String, Vec<u8>)>,
 }
 

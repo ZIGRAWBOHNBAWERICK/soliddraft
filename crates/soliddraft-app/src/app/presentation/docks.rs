@@ -560,6 +560,9 @@ impl TabViewer for Panels<'_> {
                 if st.doc.update_display(&st.viewport.projection(ppp), dt) {
                     ui.ctx().request_repaint_after(std::time::Duration::from_millis(50));
                 }
+                if let Some(message) = st.doc.take_display_quality_error() {
+                    st.note(message, crate::state::NoteKind::Error);
+                }
                 for a in events.actions {
                     st.push(a);
                 }

@@ -43,3 +43,23 @@ fn field_hints_remain_readable() {
         assert_eq!(style.visuals.extreme_bg_color, PALETTE.field_bg);
     }
 }
+
+#[test]
+fn themed_text_edits_keep_readable_text_and_hints() {
+    use soliddraft_app::theme::{self, Appearance, BuiltIn, Mode, Selection};
+
+    let ctx = egui::Context::default();
+    theme::install(&ctx, Mode::Light);
+    let mut appearance = Appearance::default();
+    for builtin in BuiltIn::ALL {
+        appearance.selected = Selection::BuiltIn(builtin);
+        theme::apply_appearance(&ctx, &appearance);
+        let style = ctx.global_style();
+        let visuals = &style.visuals;
+        let fill = visuals.text_edit_bg_color();
+        let hint = visuals.weak_text_color();
+        assert_eq!(hint.a(), 255, "{builtin:?} hint");
+        assert!(contrast(hint, fill) >= 4.5, "{builtin:?} hint on {fill:?}");
+        assert!(contrast(visuals.widgets.inactive.text_color(), fill) >= 4.5, "{builtin:?} text on {fill:?}");
+    }
+}

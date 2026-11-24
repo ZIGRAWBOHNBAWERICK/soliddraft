@@ -66,6 +66,7 @@ if (query.get('graphics') === 'restart') {
   await page.type('Preferences');
   await page.eval(() => new Promise(done => requestAnimationFrame(() => requestAnimationFrame(() => done(true)))));
   await page.press('Enter');
+  await page.wait(240);
   await click('Preferences: Graphics');
   await click('Graphics preset: Performance');
   await until(settings, s => s?.preset === 'performance' && s.curved_surfaces === 'coarse', 'Performance did not save');

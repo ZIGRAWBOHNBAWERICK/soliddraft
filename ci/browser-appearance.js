@@ -62,6 +62,7 @@ async function openAppearance() {
   await page.type('Preferences');
   await page.eval(() => new Promise(done => requestAnimationFrame(() => requestAnimationFrame(() => done(true)))));
   await page.press('Enter');
+  await page.wait(240);
   await click('Preferences: Appearance');
 }
 

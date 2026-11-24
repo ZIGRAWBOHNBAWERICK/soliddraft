@@ -92,6 +92,7 @@ pub fn show_contents(ui: &mut egui::Ui, state: &mut AppState) {
     let mut actions = Vec::new();
     egui::ScrollArea::vertical().id_salt("tree").auto_shrink([false, false]).show(ui, |ui| {
         ui.add_space(4.0);
+        crate::in_context::tree_banner(ui, state);
         let selected_feature = state.selected_feature();
         // A feature asking for its sketch also takes a plane to draw a new one on.
         let picking_plane = matches!(
@@ -281,6 +282,13 @@ pub fn show_contents(ui: &mut egui::Ui, state: &mut AppState) {
             } else {
                 sub
             };
+            // A sketch folded under its feature lends the feature its note.
+            let note = crate::in_context::tree_note(&f.kind)
+                .or_else(|| child.and_then(|c| crate::in_context::tree_note(&c.kind)));
+            let sub = match note {
+                Some(note) => format!("{sub} · {note}"),
+                None => sub,
+            };
             items.push(RowItem {
                 id: f.id,
                 index: i,
@@ -373,6 +381,13 @@ pub fn show_contents(ui: &mut egui::Ui, state: &mut AppState) {
                 )),
                 _ => None,
             };
+            // A broken in-context reference warns on its sketch, or on the feature the
+            // sketch is folded under.
+            let repair = repair.or_else(|| {
+                let f = state.doc.feature(item.id)?;
+                let child = f.kind.sketch().and_then(|s| state.doc.feature(s));
+                crate::in_context::broken(&f.kind).or_else(|| child.and_then(|c| crate::in_context::broken(&c.kind)))
+            });
             let renaming = state.rename.as_ref().filter(|r| r.feature == item.id).cloned();
             let resp = if let Some(r) = renaming {
                 let (rect, resp) =

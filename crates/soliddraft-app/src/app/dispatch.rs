@@ -289,6 +289,23 @@ impl SolidDraftApp {
                 }
                 crate::assembly::apply(&mut self.state, &mut self.dock, crate::assembly::AssemblyAction::FromPart);
             }
+            AppAction::Assembly(crate::assembly::AssemblyAction::EditPartInContext(path)) => {
+                use crate::assembly::{AssemblyAction, ComponentPart};
+                let path = path.or_else(|| self.state.assembly.session.as_ref().and_then(crate::assembly::edit_target));
+                let Some(path) = path else {
+                    return self.state.note("Select a component to edit its part in context", NoteKind::Info);
+                };
+                self.apply(ctx, AppAction::OpenComponentPart(path.clone()));
+                if matches!(crate::assembly::component_part(&self.state, &path), Ok(ComponentPart::Current)) {
+                    if let Err(e) = crate::in_context::enter(&mut self.state, &path) {
+                        self.state.note(e, NoteKind::Error);
+                        self.apply(ctx, AppAction::Assembly(AssemblyAction::Show));
+                    }
+                } else if cfg!(target_arch = "wasm32") {
+                    // The page opens the part's bytes a frame or more later.
+                    self.state.assembly.entering = Some(path);
+                }
+            }
             AppAction::Assembly(a) => crate::assembly::apply(&mut self.state, &mut self.dock, a),
             AppAction::OpenComponentPart(path) => {
                 use crate::assembly::{AssemblyAction, ComponentPart};
@@ -386,6 +403,12 @@ impl SolidDraftApp {
                     Some(Selection::Reference(Reference::Plane(plane))) => {
                         Some(SketchPlane::Reference { plane, offset: 0.0 })
                     }
+                    // Editing in context, a face of another component picked in the view.
+                    None => match crate::in_context::picked_plane(&mut self.state) {
+                        Some(Ok(plane)) => Some(plane),
+                        Some(Err(why)) => return self.state.note(why, NoteKind::Error),
+                        None => None,
+                    },
                     _ => None,
                 };
                 match plane {
@@ -2138,21 +2161,35 @@ impl SolidDraftApp {
                 let Some(path) = path else { return };
                 let path = file::with_extension(&path);
                 let thumbnail = self.thumbnail();
-                let extras = file::Extras { thumbnail: thumbnail.as_deref(), ..Default::default() };
-                match file::save_with(&mut self.state.doc, &path, &extras) {
-                    Ok(warning) => {
+                let saved = if self.state.assembly.in_context.is_some() {
+                    // Editing in context: the part, then the assemblies that show it.
+                    crate::in_context::save(&mut self.state, &path, thumbnail.as_deref())
+                } else {
+                    let extras = file::Extras { thumbnail: thumbnail.as_deref(), ..Default::default() };
+                    file::save_with(&mut self.state.doc, &path, &extras).map(|warning| {
                         self.state.remember_revision();
                         self.state.recent = file::recent();
+                        match warning {
+                            Some(w) => (format!("Saved {} · {w}", path.display()), NoteKind::Error),
+                            None => (format!("Saved {}", path.display()), NoteKind::Ok),
+                        }
+                    })
+                };
+                match saved {
+                    Ok((text, kind)) => {
                         #[cfg(target_arch = "wasm32")]
                         {
                             let id = self.state.doc.model().id();
                             let key = crate::documents_browser::key(id, soliddraft_document::DocKind::Part);
-                            self.picture_for_recent(ctx, key);
+                            if crate::in_context::screen_shows_part_alone(&self.state) {
+                                self.picture_for_recent(ctx, key);
+                            } else if let Some(png) = &thumbnail {
+                                // The screen holds the dimmed assembly too: the part's own
+                                // picture goes to the recent list instead.
+                                crate::documents_browser::set_thumbnail(&key, png);
+                            }
                         }
-                        match warning {
-                            Some(w) => self.state.note(format!("Saved {} · {w}", path.display()), NoteKind::Error),
-                            None => self.state.note(format!("Saved {}", path.display()), NoteKind::Ok),
-                        }
+                        self.state.note(text, kind);
                     }
                     Err(e) => self.state.note(e, NoteKind::Error),
                 }

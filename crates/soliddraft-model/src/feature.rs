@@ -8,6 +8,7 @@ use sha2::{Digest, Sha256};
 use soliddraft_kernel_api::{Decision, Grade, HoleDepth, HoleHead, HoleTip, Plane, Vec3, question_index};
 use soliddraft_sketch::{P2, Sketch};
 
+use crate::context::ContextFace;
 use crate::reference::{EdgeRef, FaceRef, Generator, VertexRef};
 
 /// Id of a feature. It never changes and is never reused within a document.
@@ -319,6 +320,16 @@ pub enum SketchPlane {
         /// Signed distance along the face normal, in millimetres.
         offset: f64,
     },
+    /// A planar face of another component, taken while the part was edited in an
+    /// assembly. The part keeps the face's plane and builds on that copy; editing the
+    /// part in the assembly again reads the face afresh (see [`crate::context`]).
+    Context {
+        /// The face and its plane as last read.
+        context: ContextFace,
+        /// Signed distance along the face normal, in millimetres.
+        #[serde(default, skip_serializing_if = "is_zero")]
+        offset: f64,
+    },
 }
 
 impl SketchPlane {
@@ -327,14 +338,17 @@ impl SketchPlane {
         match self {
             Self::Feature { feature, .. } => vec![*feature],
             Self::Face { face } | Self::FaceOffset { face, .. } => vec![face.feature],
-            Self::Datum { .. } => Vec::new(),
+            Self::Datum { .. } | Self::Context { .. } => Vec::new(),
         }
     }
 
     /// Signed distance from the datum or face plane, in millimetres.
     pub fn offset(&self) -> f64 {
         match self {
-            Self::Datum { offset, .. } | Self::FaceOffset { offset, .. } | Self::Feature { offset, .. } => *offset,
+            Self::Datum { offset, .. }
+            | Self::FaceOffset { offset, .. }
+            | Self::Feature { offset, .. }
+            | Self::Context { offset, .. } => *offset,
             Self::Face { .. } => 0.0,
         }
     }

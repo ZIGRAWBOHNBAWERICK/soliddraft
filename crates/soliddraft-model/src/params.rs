@@ -354,12 +354,13 @@ fn write_parameter(
             SketchPlane::Feature { offset, .. }
             | SketchPlane::Datum { offset, .. }
             | SketchPlane::FaceOffset { offset, .. } => *offset = value,
-            SketchPlane::Face { .. } => return missing(),
+            SketchPlane::Face { .. } | SketchPlane::Context { .. } => return missing(),
         },
         (FeatureKind::Sketch(s), Parameter::Offset) => match &mut s.plane {
             SketchPlane::Feature { offset, .. }
             | SketchPlane::Datum { offset, .. }
-            | SketchPlane::FaceOffset { offset, .. } => *offset = value,
+            | SketchPlane::FaceOffset { offset, .. }
+            | SketchPlane::Context { offset, .. } => *offset = value,
             SketchPlane::Face { .. } => return missing(),
         },
         (FeatureKind::Extrude(e), Parameter::Width | Parameter::Height | Parameter::Diameter) => {

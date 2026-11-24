@@ -287,6 +287,9 @@ fn references(doc: &soliddraft_model::Document) -> Value {
                 SketchPlane::Feature { feature, .. } => {
                     vec![(ReferenceSlot::Plane, format!("plane:{feature}"), Vec::new())]
                 }
+                SketchPlane::Context { context, .. } => {
+                    vec![(ReferenceSlot::Plane, format!("context:{}", context.label()), Vec::new())]
+                }
             },
             FeatureKind::Sketch(s) => match &s.plane {
                 SketchPlane::Feature { feature, .. } => {
@@ -297,6 +300,9 @@ fn references(doc: &soliddraft_model::Document) -> Value {
                 }
                 SketchPlane::Datum { datum, .. } => {
                     vec![(ReferenceSlot::SketchPlane, format!("datum:{datum:?}"), Vec::new())]
+                }
+                SketchPlane::Context { context, .. } => {
+                    vec![(ReferenceSlot::SketchPlane, format!("context:{}", context.label()), Vec::new())]
                 }
             },
             FeatureKind::Fillet(b) | FeatureKind::Chamfer(b) => b
@@ -374,6 +380,15 @@ fn references(doc: &soliddraft_model::Document) -> Value {
                 Some(FeatureStatus::RepairNeeded(items)) => items.iter().find(|r| r.slot == slot),
                 _ => None,
             };
+            // A sketch on another component's face keeps why its last update could not
+            // follow the face; the plane it builds on is then the last one read.
+            let broken = match slot {
+                ReferenceSlot::SketchPlane | ReferenceSlot::Plane => soliddraft_model::context::of_feature(&f.kind)
+                    .and_then(|c| {
+                        c.broken.as_ref().map(|why| format!("in-context reference to {} broken: {why}", c.label()))
+                    }),
+                _ => None,
+            };
             let built =
                 matches!(status, Some(FeatureStatus::Ok | FeatureStatus::RepairNeeded(_) | FeatureStatus::Failed(_)));
             let origins: Vec<_> = faces
@@ -406,6 +421,9 @@ fn references(doc: &soliddraft_model::Document) -> Value {
                             let p = datum.plane();
                             built.plane == p.with_origin(p.origin + p.normal * *offset)
                         }
+                        SketchPlane::Context { context, offset } => {
+                            context.plane().is_ok_and(|p| built.plane == p.with_origin(p.origin + p.normal * *offset))
+                        }
                         SketchPlane::Face { .. } | SketchPlane::FaceOffset { .. } => carriers.iter().all(|set| {
                             !set.is_empty()
                                 && set.iter().all(|f| {
@@ -426,6 +444,9 @@ fn references(doc: &soliddraft_model::Document) -> Value {
                             SketchPlane::Feature { feature, offset } => doc
                                 .reference_plane(*feature)
                                 .is_some_and(|p| plane == p.with_origin(p.origin + p.normal * *offset)),
+                            SketchPlane::Context { context, offset } => {
+                                context.plane().is_ok_and(|p| plane == p.with_origin(p.origin + p.normal * *offset))
+                            }
                             SketchPlane::Face { .. } | SketchPlane::FaceOffset { .. } => carriers.iter().all(|set| {
                                 !set.is_empty()
                                     && set.iter().all(|face| {
@@ -446,12 +467,12 @@ fn references(doc: &soliddraft_model::Document) -> Value {
                 "slot": slot.to_string(),
                 "origin": text,
                 "of": faces.iter().map(|r| doc.feature(r.feature).map(|g| g.name.clone())).collect::<Vec<_>>(),
-                "resolved": built.then_some(repair.is_none()),
+                "resolved": built.then_some(repair.is_none() && broken.is_none()),
                 "kernel_origins": origins,
                 "carrier_counts": carriers.iter().map(Vec::len).collect::<Vec<_>>(),
                 "carrier_origin_counts": carriers.iter().map(|set| set.iter().map(|f| f.origins.len()).collect::<Vec<_>>()).collect::<Vec<_>>(),
                 "matches_origin": matches_origin,
-                "repair": repair.map(|r| r.message.clone()),
+                "repair": repair.map(|r| r.message.clone()).or(broken),
             }));
         }
     }
@@ -598,6 +619,27 @@ mod tests {
         }
         drop(bundle);
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_broken_in_context_reference_is_reported_unresolved_with_its_reason() {
+        use soliddraft_kernel_api::{Plane, Vec3};
+        use soliddraft_model::sketch::{EntityKind, P2, Sketch, solve::solve};
+        use soliddraft_model::{Command, ContextFace, FeatureKind, SketchFeature, SketchPlane};
+        let mut doc = soliddraft_model::Document::new("Plate", Arc::new(CatallaxKernel::new()));
+        let plane = Plane { origin: Vec3::new(0.0, 0.0, -20.0), normal: Vec3::Z, x_dir: Vec3::X };
+        let face = ContextFace::new(("asm", "Rig"), "2", ("1", "base<1>"), ("{}", "Extrude1 · End cap"), plane)
+            .broken("base<1> is no longer in the assembly");
+        let mut sketch = Sketch::new();
+        sketch.add(EntityKind::Circle { center: P2::ZERO, radius: 5.0 }, false);
+        solve(&mut sketch, None, true);
+        let kind =
+            FeatureKind::Sketch(SketchFeature { plane: SketchPlane::Context { context: face, offset: 0.0 }, sketch });
+        doc.execute(Command::AddFeature { kind, name: None, position: None, via_assistant: false }).unwrap();
+        let rows = super::references(&doc);
+        let row = &rows.as_array().unwrap()[0];
+        assert_eq!(row["resolved"], json!(false), "{row}");
+        assert!(row["repair"].as_str().is_some_and(|r| r.contains("no longer in the assembly")), "{row}");
     }
 
     #[test]

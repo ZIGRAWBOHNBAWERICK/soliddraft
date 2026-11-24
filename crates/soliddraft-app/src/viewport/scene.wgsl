@@ -277,6 +277,8 @@ fn face_colour(in: FaceOut) -> vec4<f32> {
     let ghost = (body.flags & 2u) != 0u;
     let preview = (body.flags & 4u) != 0u;
     let removes = (body.flags & 8u) != 0u;
+    // The rest of an assembly around a part edited in context (render.rs CONTEXT).
+    let context = (body.flags & 256u) != 0u;
 
     // One preview look for every form: material a feature adds or reshapes is amber with
     // dark edges, material it removes red (theme.rs PREVIEW_EDGE and PREVIEW_REMOVE_EDGE).
@@ -285,7 +287,9 @@ fn face_colour(in: FaceOut) -> vec4<f32> {
     let metallic = shade.params.x;
     let roughness = shade.params.y;
     let tint = (body.flags & 32u) == 0u;
-    if (ghost && removes && tint) {
+    if (context) {
+        base = mix(base, srgb_to_linear(vec3<f32>(0.70, 0.72, 0.76)), 0.6);
+    } else if (ghost && removes && tint) {
         base = mix(base, red, 0.7);
     } else if (ghost && tint) {
         base = mix(base, srgb_to_linear(vec3<f32>(0.96, 0.66, 0.16)), 0.85);
@@ -307,7 +311,7 @@ fn face_colour(in: FaceOut) -> vec4<f32> {
     let lit_accent = accent * (0.55 + 0.45 * max(dot(n, v), 0.0));
     // A preview marks the faces its operation made (document.rs PREVIEW_MADE).
     let made = preview && in.feature_id == 0xffffffffu;
-    if (in.face_id != 0u && in.face_id == globals.selected_id) {
+    if (!context && in.face_id != 0u && in.face_id == globals.selected_id) {
         color = mix(color, lit_accent, 0.55);
     } else if (selected_body) {
         // Lighter than a selected face, so a colour chosen for the body still shows.
@@ -316,7 +320,7 @@ fn face_colour(in: FaceOut) -> vec4<f32> {
         color = mix(color, srgb_to_linear(vec3<f32>(0.96, 0.66, 0.16)) * (0.55 + 0.45 * max(dot(n, v), 0.0)), 0.3);
     } else if (feature_selected) {
         color = mix(color, lit_accent, 0.40);
-    } else if (in.face_id != 0u && in.face_id == globals.hover_id) {
+    } else if (!context && in.face_id != 0u && in.face_id == globals.hover_id) {
         color = mix(color, lit_accent, 0.22);
     }
     if (made && (body.flags & 64u) != 0u) {
@@ -331,6 +335,9 @@ fn face_colour(in: FaceOut) -> vec4<f32> {
     if (ghost) {
         // A removal sits inside the part, so it shows through the faces in front of it.
         alpha = select(0.92, 0.6, removes);
+    }
+    if (context) {
+        alpha = 0.3;
     }
     return vec4<f32>(color * alpha, alpha);
 }
@@ -579,9 +586,13 @@ fn fs_edge(in: LineOut) -> @location(0) vec4<f32> {
     let ghost = (body.flags & 2u) != 0u;
     let removes = (body.flags & 8u) != 0u;
     let thread = (body.flags & 16u) != 0u;
+    let context = (body.flags & 256u) != 0u;
     var color = mix(srgb_to_linear(vec3<f32>(0.16, 0.19, 0.25)), globals.edge_color.rgb, globals.edge_color.a);
     var alpha = 0.9;
-    if (thread) {
+    if (context) {
+        color = srgb_to_linear(vec3<f32>(0.45, 0.47, 0.52));
+        alpha = 0.35;
+    } else if (thread) {
         // Cosmetic thread marks (render.rs THREAD_MARKS), in a blue apart from the edges.
         color = srgb_to_linear(vec3<f32>(0.18, 0.40, 0.72));
         alpha = 0.95;

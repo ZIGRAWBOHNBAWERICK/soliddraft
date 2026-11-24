@@ -83,7 +83,7 @@ const ERROR_CODES: &[&str] = &["#DIV/0!", "#N/A", "#NAME?", "#NULL!", "#NUM!", "
 
 /// Spreadsheet display code for a refused parameter formula.
 pub fn formula_error_code(reason: &str) -> &'static str {
-    if let Some(code) = ERROR_CODES.iter().find(|code| reason.starts_with(**code)) {
+    if let Some(code) = ERROR_CODES.iter().find(|code| reason.contains(**code)) {
         code
     } else if reason.contains("value cycle") {
         "#CIRCULAR"

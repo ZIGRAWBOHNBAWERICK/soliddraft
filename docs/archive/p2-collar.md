@@ -1,3 +1,5 @@
+Archived on 2026-11-26. Historical record only. Not current rules or plans. Current: [canonical-parts.md](../canonical-parts.md).
+
 # P2 collar application slice
 
 The public P2 meridian is a rectangle at radii 6–12 mm, height 12 mm,

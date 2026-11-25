@@ -141,8 +141,8 @@ A drawing also keeps `source_properties`, the part's text properties at the pinn
 and configuration, and a sheet keeps `title_bindings`, which title fields read them. Both are
 left out when empty.
 
-A drawing's `model` is a reference. Phase 2 turns it into a list (`models`), one per part
-or assembly on the sheet.
+A drawing's `model` is one reference. A list (`models`), one per part or assembly on the
+sheet, is reserved for a later format.
 
 ## Finding a reference's target
 
@@ -203,7 +203,7 @@ pub trait RevisionStore: Send + Sync {
 }
 ```
 
-Phase 0 has `CacheOnlyStore`: the revisions this session opened or saved, nothing older.
+SolidDraft has `CacheOnlyStore`: the revisions this session opened or saved, nothing older.
 When it does not have one, the error says to Rebuild. A Git store (desktop only) comes
 next, and a SolidDraft PDM later; the screens stay the same whichever store is behind them.
 
@@ -247,7 +247,7 @@ older one saves.
   `"scope": "only", "configurations": ["c1"]` (see [materials.md](materials.md)).
   Assembly-level appearances carry one too (see [assemblies.md](assemblies.md#colours)).
 
-## Files from before phase 0
+## Files from before the document envelope
 
 - A `.dwpart` part (`recipe.json` with `soliddraft-part/1` and `meta.json`) opens. Its id
   is derived from its content (a version 8 UUID from the kind and the semantic hash), so

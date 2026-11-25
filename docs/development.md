@@ -49,6 +49,12 @@ cargo test --workspace
 
 The app's exit tests drive the real interface through `egui_kittest` on wgpu. They skip themselves when no GPU adapter is available. See [ci.md](ci.md) for the full checks.
 
+## Documents
+
+[ROADMAP.md](../ROADMAP.md) is the plan, by phase, step and task; [glossary.md](glossary.md) defines those words. Catallax holds the source of the roadmap, and SolidDraft keeps a byte-identical copy that the `Roadmap` workflow compares with Catallax's default branch. Change the roadmap in Catallax first, then copy it here.
+
+Current docs live in `docs/`, one topic per file. `docs/archive/` holds history: slice reports and superseded plans, each marked by its first line. Agents must not read `docs/archive/` unless asked for history. When a doc stops being true, fix it or move it there with the archive banner and a link to the current doc.
+
 ## Project background
 
 The free-market and anti-IP position in the README follows the argument that ideas are not scarce: copying code does not take it away from its author. See the [patents and copyrights section of Man, Economy, and State](https://mises.org/online-book/man-economy-and-state-power-and-market/10-monopoly-and-competition/7-patents-and-copyrights) and Against Intellectual Property, Journal of Libertarian Studies 15:2, 2001, section "Scarcity and Ideas". The first treats patents as state monopoly grants while retaining copyright as contract; the second rejects intellectual property more broadly. A public kernel lets small vendors, scripts, plug-ins and individual products compete without renting a closed kernel.

@@ -2,11 +2,11 @@
 
 ## Version rule and first-release gate
 
-SolidDraft uses `0.x.y` versions. Every `0.x` release is labelled **alpha** and marked as a GitHub prerelease. Numbers describe completed work, never dates. Increase the minor number for a completed capability milestone and the patch number for fixes to that milestone. Set `[workspace.package].version` in `Cargo.toml`; packaging reads that value rather than maintaining a second release counter. Keep `Cargo.lock` in sync when changing the workspace version.
+SolidDraft uses `0.x.y` versions. Every `0.x` release is labelled **alpha** and marked as a GitHub prerelease. Numbers describe completed work, never dates. Increase the minor number for a release that adds capabilities and the patch number for fixes to that release. Set `[workspace.package].version` in `Cargo.toml`; packaging reads that value rather than maintaining a second release counter. Keep `Cargo.lock` in sync when changing the workspace version.
 
 Before the first `0.1.0` cut, record an explicit landed-or-parked disposition for the work in flight at the candidate freeze. Included feature work must have landed and been pushed to `main`; parked work remains unfinished. Preparing or merging release machinery is not permission to publish. There are no scheduled releases or nightlies.
 
-The freeze selects release candidates, not a development stop. Record both repositories' frozen commit hashes and create `release/<version>` branches from them. Continue development on `main`. Final kernel pins, acceptance, packages and smoke checks use the release branches. A blocker fix lands on `main` through its owning lane first, then is cherry-picked to the release branch, unless the fix applies only to the release. Record the resulting candidate hashes and repeat affected exact-source evidence after each fix. If release checks are starved by development CI, ask the integration owner to prioritize the release queue; do not cancel other lanes' runs yourself.
+The freeze selects release candidates, not a development stop. Record both repositories' frozen commit hashes and create `release/<version>` branches from them. Continue development on `main`. Final kernel pins, acceptance, packages and smoke checks use the release branches. A blocker fix lands on `main` through its own pull request first, then is cherry-picked to the release branch, unless the fix applies only to the release. Record the resulting candidate hashes and repeat affected exact-source evidence after each fix. If release checks are starved by development CI, ask the integration owner to prioritize the release queue; do not cancel other pull requests' runs yourself.
 
 ## What the workflow builds
 
@@ -111,4 +111,4 @@ GitHub Pages is static hosting. The modelling kernel runs in the browser; there 
 
 ## Interface work outside this change
 
-This workflow adds no application interface. The design lane owns final package icon artwork, download-page layout, and any in-app update or unsigned-build messaging. The packaging icon is a minimal cube so installers can be exercised now. Those interface choices must not add timing or release instrumentation to modelling or user-edit code paths.
+This workflow adds no application interface. Design work owns the final package icon artwork, download-page layout, and any in-app update or unsigned-build messaging. The packaging icon is a minimal cube so installers can be exercised now. Those interface choices must not add timing or release instrumentation to modelling or user-edit code paths.

@@ -100,7 +100,7 @@ File > Import STEP reads a source file and shows its preview. In the browser the
 
 Default STEP imports keep each body Catallax admits independently and list refused bodies with their reasons in Import report. Admitted bodies become separate import features in one undo step. Each keeps the original bytes, their hash, admission evidence and its source selector, so reordering features cannot swap solids. Part-level limits, multi-body reviews with explicit repair answers, IGES imports and replacements remain all-or-nothing.
 
-An opening that exceeds the application allowance refuses without publishing a blank import feature or partial body. See the [known filleted STEP opening limit](needs-catallax.md#step-import-work-limit) and its Catallax follow-up.
+An opening that exceeds the application allowance refuses without publishing a blank import feature or partial body. See the [known filleted STEP opening limit](needs-catallax.md#numerical-step-reopening) and its Catallax follow-up.
 
 Changed source bytes for a selected STEP import replace the whole file only when every solid has a verified partner; see [Replace an imported file](#replace-an-imported-file). An unmatched solid, or changed IGES source bytes for a selected solid, refuses the replacement. Import the changed file as new bodies instead.
 

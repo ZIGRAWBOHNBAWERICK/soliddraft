@@ -1,6 +1,6 @@
 # The assistant
 
-Phase 3 connects the assistant to a model, and serves the same commands to outside agents over MCP. The assistant changes the part only through the command layer the ribbon uses, so everything it does is an ordinary feature in the tree that the user can undo.
+The assistant connects SolidDraft to a model, and SolidDraft serves the same commands to outside agents over MCP. The assistant changes the part only through the command layer the ribbon uses, so everything it does is an ordinary feature in the tree that the user can undo.
 
 ## Crates
 

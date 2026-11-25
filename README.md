@@ -20,7 +20,7 @@ SolidDraft is alpha software. Keep backups of your documents. In SolidDraft 0.8.
 - Lattices and gyroids with an unproved viewport preview and certified STL export. See [field modelling](docs/modelling.md#terminal-lattice) and [export limits](docs/exchange.md#terminal-fields).
 - A desktop [assistant and MCP interface](docs/assistant.md), plus a [headless command line](docs/development.md#command-line) for recipes, parts, drawings and exports. The public browser app has no AI assistant or API key.
 
-Broader modelling domains remain in design; a working command can still refuse unsupported inputs. See the [roadmap](ROADMAP.md) for what works and what is still planned. A failed or pending feature cannot export an unproved whole part.
+Broader modelling domains remain in design; a working command can still refuse unsupported inputs. See the [roadmap](ROADMAP.md) for what comes next. A failed or pending feature cannot export an unproved whole part.
 
 ## Get SolidDraft
 
@@ -40,6 +40,13 @@ cargo run --release -p soliddraft-app -- --demo
 ```
 
 Without `--demo`, the app opens its start page. Pass a part, assembly or drawing file to open it. See [development](docs/development.md) for command-line examples, tests and contribution checks, and [application scenarios](docs/application-loop.md) for agent-driven verification.
+
+## Documentation
+
+- [ROADMAP.md](ROADMAP.md): the plan shared with Catallax, by phase and step. [The glossary](docs/glossary.md) defines those words.
+- [docs/DESIGN.md](docs/DESIGN.md): the interface design. [docs/kernel-bridge.md](docs/kernel-bridge.md): how SolidDraft calls Catallax.
+- [docs/development.md](docs/development.md): building, testing and contributing. Topic docs sit beside it in `docs/`.
+- `docs/archive/` holds history only. Agents: do not read it unless you are asked for history.
 
 ## Licence, support and thanks
 

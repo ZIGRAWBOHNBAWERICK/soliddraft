@@ -1,6 +1,6 @@
-# Modelling (phase 2 plumbing)
+# Modelling
 
-Phase 2 makes SolidDraft a parametric modeller: sketches with constraints, extrusions that
+SolidDraft is a parametric modeller: sketches with constraints, extrusions that
 add or cut material, fillets and chamfers, persistent references that survive edits,
 undo and redo, and a native file. This page covers the crates that do it. The screens on
 top of them are described in [DESIGN.md](DESIGN.md).
@@ -247,11 +247,32 @@ request full mass properties only after the changed body has reached the viewpor
 The complete requested measurement has its own elapsed time, separate from the
 hole click. Both the original and edited case must retain their existing values.
 
+### Shell
+
+Shell hollows the body with a wall of the given thickness and opens the picked faces. The
+editor picks openings by persistent face reference and previews a wall change through the
+same kernel operation as the committed feature. Inner walls are named after the faces they
+offset, so they keep their names through edits and reopening. An invalid thickness reports
+an error in the editor and leaves the part as it was. See
+[backend limits](needs-catallax.md) for the shapes Catallax shells today.
+
+The editor's Open every face choice saves as `[{}]`, and no faces as `[]`. It is one
+choice, not a list of the faces there are, so it means the same after an upstream edit. It
+leaves nothing of the part, so the part has no body to display or export until the choice
+is undone or cleared.
+
+Scripts and MCP use two commands. `shell` takes `open_faces`, an array of persistent face
+labels (empty for a closed shell), and a positive `thickness` in mm. Setting `all_faces`
+to true with an empty `open_faces` opens every face; naming faces as well is refused.
+`edit_shell` takes the shell `feature` name and a positive `thickness`, and keeps the
+openings. Missing faces, invalid thickness, wrong feature kinds and malformed arguments
+are refused without changing the part.
+
 ## Commands, undo and redo
 
 Every change is a `Command`: add, insert, edit, set a sketch dimension, rename, delete,
 move, suppress, roll back, or a batch of these as one undo entry. The ribbon, the
-assistant (phase 3) and scripts all issue the same commands, and commands serialise to
+assistant and scripts all issue the same commands, and commands serialise to
 JSON for the assistant and MCP.
 
 `Document::execute` applies a command, records its exact inverse and rebuilds. Undo is a
@@ -434,7 +455,7 @@ their dependent builds; names and refusals are resolved by the new rebuild.
 
 `crates/soliddraft-model/tests/exit_test.rs` builds the sample L-bracket through the command layer, saves and reopens it, edits its base thickness and checks undo, redo and reference repair. Its saved inside fillet builds through Catallax's elementary fillet strips. Supported downstream features keep building.
 
-The document tests also reopen a part containing a chamfer and check that it rebuilds to the same body. Ribbon tests check that waiting commands stay visible, stay disabled and name their stages, and that the switched-on commands are enabled. These run in the workspace CI suite. The application scenarios in `ci/scenarios` build and edit each switched-on feature through MCP.
+The document tests also reopen a part containing a chamfer and check that it rebuilds to the same body. Ribbon tests check that waiting commands stay visible, stay disabled and show Coming soon, and that the switched-on commands are enabled. These run in the workspace CI suite. The application scenarios in `ci/scenarios` build and edit each switched-on feature through MCP.
 
 ## Chamfer setbacks and face accuracy
 

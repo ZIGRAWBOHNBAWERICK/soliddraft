@@ -10,6 +10,8 @@
 use crate::display_quality::{self, DisplayQuality};
 use crate::sketch::{self, Sketch};
 use glam::Vec3;
+use part_display::PartDisplay;
+pub(crate) use part_display::{ReadyDisplay, ready_display};
 use serde::{Deserialize, Serialize};
 use soliddraft_document::{ContentHash, DocumentId};
 use soliddraft_kernel_api::{
@@ -23,6 +25,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 pub use soliddraft_model::{EdgeRef, FaceRef};
+
+mod part_display;
 
 pub type FeatureId = u64;
 
@@ -2015,30 +2019,6 @@ struct AppearancePreview {
     base: model::PartMaterials,
 }
 
-/// A body's display geometry and picks as it was last shown.
-struct Shown {
-    body: BodyId,
-    params: TessellationParams,
-    mesh: Arc<DisplayMesh>,
-    meshes: HashMap<BodyId, Arc<DisplayMesh>>,
-    picks: Vec<PickEntry>,
-    faces: Vec<NamedFace>,
-    edges: Vec<NamedEdge>,
-}
-
-#[derive(Clone, Debug)]
-pub(crate) struct ReadyDisplay {
-    body: BodyId,
-    params: TessellationParams,
-    pub mesh: Arc<DisplayMesh>,
-    meshes: HashMap<BodyId, Arc<DisplayMesh>>,
-    picks: Vec<PickEntry>,
-    faces: Vec<NamedFace>,
-    edges: Vec<NamedEdge>,
-    topology: Topology,
-    kernel_mesh: Mesh,
-}
-
 #[derive(Clone, Debug)]
 struct ConstructionFace {
     id: FaceId,
@@ -2073,7 +2053,7 @@ impl CandidateDisplay {
     fn picks(&self) -> &[PickEntry] {
         match self {
             Self::Construction(view) => &view.picks,
-            Self::Proved(view) => &view.picks,
+            Self::Proved(view) => &view.part.picks,
         }
     }
 
@@ -2085,7 +2065,7 @@ impl CandidateDisplay {
                 .find(|face| face.id == id)
                 .map(|face| (face.feature, face.label.as_str(), face.origins.as_slice())),
             Self::Proved(view) => {
-                let face = view.faces.iter().find(|face| face.id == id)?;
+                let face = view.part.faces.iter().find(|face| face.id == id)?;
                 Some((
                     face.feature,
                     &face.label,
@@ -2326,8 +2306,8 @@ pub struct Document {
     /// The pointer gesture under way when history moved or the part was edited. It
     /// shows and applies no appearance until the pointer is released.
     appearance_gesture_void: bool,
-    /// Bodies shown before, latest last, kept while the part keeps them.
-    recent: Vec<Shown>,
+    /// Single-body displays shown before, latest last, kept while the part keeps them.
+    recent: Vec<PartDisplay>,
     model: model::Document,
     /// What the last STEP import's manufacturing information became in this part.
     pub pmi_import: Option<model::pmi::PmiImport>,
@@ -3040,29 +3020,23 @@ impl Document {
             return Ok(());
         }
         if let Some(display) = &proof.display {
-            for body in display.meshes.keys() {
+            for body in display.part.meshes.keys() {
                 self.capture_display_bound(*body)?;
             }
         }
         self.retain_proved_revision();
         let depth = self.edit_depth.take();
         if let Some(display) = proof.display {
-            let display = Arc::try_unwrap(display).unwrap_or_else(|display| (*display).clone());
-            let wanted = self.quality.retarget(display.body, &display.topology, &self.model.settings().viewport);
-            if wanted == display.params {
-                self.quality.made(display.body, display.kernel_mesh);
+            let ReadyDisplay { part, topology, kernel_mesh, .. } =
+                Arc::try_unwrap(display).unwrap_or_else(|display| (*display).clone());
+            let wanted = self.quality.retarget(part.body, &topology, &self.model.settings().viewport);
+            if wanted == part.params {
+                self.quality.made(part.body, kernel_mesh);
             } else {
                 self.quality.set_quality(&self.model.settings().viewport);
             }
-            self.shown = Some(display.body);
-            self.tess_params = display.params;
-            self.faces = display.faces;
-            self.edges = display.edges;
-            self.picks = display.picks;
-            self.meshes = display.meshes;
-            self.apply_appearances();
+            self.publish(part);
             self.shown_revision = self.revision;
-            self.mesh_version += 1;
             // The proof meshed its bodies at the curved-surface setting it was asked
             // with. A setting chosen while it ran meshes the other bodies again.
             if self.model.live_bodies().len() > 1 {
@@ -3379,7 +3353,12 @@ impl Document {
     /// Abandons the steps since `depth`, and those since `drawn` too if the part at
     /// `depth` cannot be displayed either. With nothing drawn to return to, the part at
     /// `depth` may not display, and `retained` stays on screen at its own revision.
-    fn withdraw(&mut self, depth: usize, drawn: Option<usize>, retained: Option<(Shown, u64)>) -> Result<(), String> {
+    fn withdraw(
+        &mut self,
+        depth: usize,
+        drawn: Option<usize>,
+        retained: Option<(PartDisplay, u64)>,
+    ) -> Result<(), String> {
         // The history goes back as the command found it, with what redo held then.
         self.model.withdraw(depth).map_err(|e| e.to_string())?;
         self.after_change();
@@ -3404,12 +3383,14 @@ impl Document {
 
     /// The display on screen and the revision it was drawn at, when that is not the
     /// current revision, as after an undo the viewport could not draw.
-    fn retained_display(&self) -> Option<(Shown, u64)> {
+    fn retained_display(&self) -> Option<(PartDisplay, u64)> {
         let body = self.shown.filter(|_| self.shown_revision != self.revision)?;
-        let shown = Shown {
+        if !self.meshes.contains_key(&body) {
+            return None;
+        }
+        let shown = PartDisplay {
             body,
             params: self.tess_params,
-            mesh: self.meshes.get(&body)?.clone(),
             meshes: self.meshes.clone(),
             picks: self.picks.clone(),
             faces: self.faces.clone(),
@@ -3420,17 +3401,40 @@ impl Document {
 
     /// Puts a display back on screen without calling it the current model: the displayed
     /// revision stays the one it was drawn at.
-    fn keep_shown(&mut self, shown: Shown, revision: u64) {
+    fn keep_shown(&mut self, shown: PartDisplay, revision: u64) {
         self.recent.retain(|s| s.body != shown.body);
-        self.meshes = shown.meshes;
-        self.shown = Some(shown.body);
-        self.tess_params = shown.params;
-        self.picks = shown.picks;
-        self.faces = shown.faces;
-        self.edges = shown.edges;
-        self.apply_appearances();
+        self.publish(shown);
         self.shown_revision = revision;
+    }
+
+    /// Puts one revision's display on screen whole: each body's mesh with the names and
+    /// the pick table it was made with, so a pick number always means an entity of the
+    /// mesh shown.
+    fn publish(&mut self, display: PartDisplay) {
+        let PartDisplay { body, params, meshes, picks, faces, edges } = display;
+        self.tess_params = params;
+        self.meshes = meshes;
+        self.faces = faces;
+        self.edges = edges;
+        self.picks = picks;
+        self.shown = Some(body);
+        self.apply_appearances();
         self.mesh_version += 1;
+    }
+
+    /// Publishes a display made of every live body, or records why there is none. A
+    /// headless document keeps its names and picks and draws nothing.
+    fn publish_ready(&mut self, ready: Result<Option<ReadyDisplay>, String>) {
+        match ready {
+            Ok(Some(mut display)) => {
+                if self.headless {
+                    display.part.meshes.clear();
+                }
+                self.publish(display.part);
+            }
+            Ok(None) => {}
+            Err(message) => self.display_failure = Some(display_unavailable(message)),
+        }
     }
 
     /// Adds a line to the command log.
@@ -3806,7 +3810,8 @@ impl Document {
             Command::EditFeature { id, kind } => {
                 if let FeatureKind::ReferencePlane(source) = &kind {
                     let target = self.index_of(id).ok_or("no such reference plane")?;
-                    if source.dependencies().iter().any(|id| self.model.index_of(*id).is_some_and(|i| i >= target)) {
+                    let reads = model::FeatureKind::ReferencePlane(source.clone()).dependencies();
+                    if reads.iter().any(|id| self.model.index_of(*id).is_some_and(|i| i >= target)) {
                         return Err("Choose a source above this plane in the feature tree".into());
                     }
                 }
@@ -4359,21 +4364,9 @@ impl Document {
             && proved.model.next_body() > 1
             && proved.model.live_bodies().len() > 1
         {
-            match ready_display(&proved.model, soliddraft_tessellation::Level::Standard, self.quality.curved_surfaces())
-            {
-                Ok(Some(display)) => {
-                    self.tess_params = display.params;
-                    self.meshes = if self.headless { HashMap::new() } else { display.meshes };
-                    self.faces = display.faces;
-                    self.edges = display.edges;
-                    self.picks = display.picks;
-                    self.shown = Some(display.body);
-                    self.apply_appearances();
-                    self.mesh_version += 1;
-                }
-                Ok(None) => {}
-                Err(message) => self.display_failure = Some(display_unavailable(message)),
-            }
+            let ready =
+                ready_display(&proved.model, soliddraft_tessellation::Level::Standard, self.quality.curved_surfaces());
+            self.publish_ready(ready);
             return;
         }
         if self.model.next_body() > 1
@@ -4426,14 +4419,13 @@ impl Document {
         let previous = self.shown.take();
         if self.meshes.len() == 1
             && let Some(body) = previous
-            && let Some(mesh) = self.meshes.get(&body).cloned()
+            && self.meshes.contains_key(&body)
         {
             self.recent.retain(|s| s.body != body);
-            self.recent.push(Shown {
+            self.recent.push(PartDisplay {
                 body,
                 params: self.tess_params,
-                mesh,
-                meshes: self.meshes.clone(),
+                meshes: std::mem::take(&mut self.meshes),
                 picks: std::mem::take(&mut self.picks),
                 faces: std::mem::take(&mut self.faces),
                 edges: std::mem::take(&mut self.edges),
@@ -4459,27 +4451,23 @@ impl Document {
             let kept = self.recent.iter().position(|s| s.body == body && s.params == self.tess_params);
             let cached = self.quality.reuse(body);
             if let (Some(i), Some(_)) = (kept, &cached) {
-                let s = self.recent.remove(i);
-                self.meshes.insert(body, s.mesh);
-                self.picks = s.picks;
-                self.faces = s.faces;
-                self.edges = s.edges;
-                self.apply_appearances();
+                // The kept display was made at these parameters for this body alone.
+                let kept = self.recent.remove(i);
+                self.publish(kept);
+                return;
+            }
+            self.name_entities(body, &topology);
+            if let Some(mesh) = cached {
+                self.show_mesh(body, &topology, &mesh);
                 self.shown = next;
             } else {
-                self.name_entities(body, &topology);
-                if let Some(mesh) = cached {
-                    self.show_mesh(body, &topology, &mesh);
-                    self.shown = next;
-                } else {
-                    match self.kernel().rendering(body, &self.tess_params) {
-                        Ok(mesh) => {
-                            self.show_mesh(body, &topology, &mesh);
-                            self.quality.made(body, mesh);
-                            self.shown = next;
-                        }
-                        Err(error) => self.display_failure = Some(display_unavailable(error.to_string())),
+                match self.kernel().rendering(body, &self.tess_params) {
+                    Ok(mesh) => {
+                        self.show_mesh(body, &topology, &mesh);
+                        self.quality.made(body, mesh);
+                        self.shown = next;
                     }
+                    Err(error) => self.display_failure = Some(display_unavailable(error.to_string())),
                 }
             }
         } else {
@@ -4516,20 +4504,9 @@ impl Document {
             }
             return;
         }
-        match ready_display(&self.model, soliddraft_tessellation::Level::Standard, self.quality.curved_surfaces()) {
-            Ok(Some(display)) => {
-                self.tess_params = display.params;
-                self.meshes = if self.headless { HashMap::new() } else { display.meshes };
-                self.faces = display.faces;
-                self.edges = display.edges;
-                self.picks = display.picks;
-                self.shown = Some(display.body);
-                self.apply_appearances();
-                self.mesh_version += 1;
-            }
-            Ok(None) => {}
-            Err(message) => self.display_failure = Some(display_unavailable(message)),
-        }
+        let ready =
+            ready_display(&self.model, soliddraft_tessellation::Level::Standard, self.quality.curved_surfaces());
+        self.publish_ready(ready);
     }
 
     /// Starts the next additive feature in a separate body.
@@ -5276,6 +5253,15 @@ impl Document {
     /// pattern, a mirror, a hole, and an extrusion or cut with its Draft option. An edited
     /// feature `target` is built again past the rollback its editor set.
     pub fn preview_built(&self, command: Command, target: Option<FeatureId>) -> Result<Preview, String> {
+        self.prepare_built(command, target).map(|(preview, _)| preview)
+    }
+
+    /// [`Self::preview_built`], with the fork that built it, so OK can reuse its builds.
+    pub(crate) fn prepare_built(
+        &self,
+        command: Command,
+        target: Option<FeatureId>,
+    ) -> Result<(Preview, model::Document), String> {
         let commands = self.to_model(command)?;
         let mut fork = self.model.fork();
         if let Some(id) = target {
@@ -5347,7 +5333,50 @@ impl Document {
             }
         }
         let mesh = preview_mesh_marked(fork.kernel().as_ref(), body, &self.tess_params, &made)?;
-        Ok(Preview { result: Some(mesh), tool: None, removes: false, guides })
+        Ok((Preview { result: Some(mesh), tool: None, removes: false, guides }, fork))
+    }
+
+    /// The depth arrow of an extrusion or cut previewed as built. It stands on the sketch
+    /// plane under the middle of the faces the preview made and is as long as the
+    /// extrusion's extent: its depth, or for Through All as far as the cut faces reach.
+    /// It needs no kernel work. An extrusion up to the part's boundary has none.
+    pub(crate) fn extrusion_arrow(&self, params: &crate::state::EditorParams, built: &Preview) -> Option<PreviewArrow> {
+        use crate::state::EditorParams;
+        let plane_of = |sketch: FeatureId| self.feature(sketch).and_then(|f| f.plane);
+        // The plane, the direction, and the depth unless the extent is Through All.
+        let (plane, dir, depth) = match params {
+            EditorParams::Extrude(p) if p.end == EndKind::Blind => {
+                let plane = match p.sketch {
+                    Some(sketch) => plane_of(sketch)?,
+                    None => p.plane.to_kernel(),
+                };
+                (plane, if p.flip { -plane.normal } else { plane.normal }, Some(p.depth))
+            }
+            EditorParams::Cut(p) if p.up_to.is_none() => {
+                let plane = plane_of(p.sketch)?;
+                (plane, if p.flip { plane.normal } else { -plane.normal }, (!p.through_all).then_some(p.depth))
+            }
+            _ => return None,
+        };
+        let mesh = built.result.as_ref()?;
+        let made: Vec<Vec3> = mesh
+            .positions
+            .iter()
+            .zip(&mesh.face_features)
+            .filter(|(_, feature)| **feature == PREVIEW_MADE)
+            .map(|(p, _)| *p)
+            .collect();
+        let first = *made.first()?;
+        let bounds = made.iter().fold((first, first), |(lo, hi), p| (lo.min(*p), hi.max(*p)));
+        let Some(depth) = depth else {
+            let origin = Vec3::new(plane.origin.x as f32, plane.origin.y as f32, plane.origin.z as f32);
+            let along = Vec3::new(dir.x as f32, dir.y as f32, dir.z as f32).normalize_or_zero();
+            let reach = made.iter().map(|p| (*p - origin).dot(along)).fold(f32::MIN, f32::max);
+            let mut arrow = arrow_in(bounds, &plane, dir, f64::from(reach.max(0.0)), false)?;
+            arrow.text = "Through all".into();
+            return Some(arrow);
+        };
+        arrow_in(bounds, &plane, dir, depth, true)
     }
 
     /// Builds the sweep tool for the editor without changing the document.
@@ -6127,84 +6156,6 @@ fn named_entities(model: &model::Document, body: BodyId, topology: &Topology) ->
     (faces, edges)
 }
 
-pub(crate) fn ready_display(
-    model: &model::Document,
-    level: soliddraft_tessellation::Level,
-    curved_surfaces: Option<crate::graphics::CurvedSurfaces>,
-) -> Result<Option<ReadyDisplay>, String> {
-    let Some((_, body)) = model.live_bodies().last().copied() else { return Ok(None) };
-    let kernel = model.kernel();
-    let topology = kernel.topology(body).map_err(|error| error.to_string())?;
-    let params =
-        *crate::graphics::body_mesh_levels(curved_surfaces, &model.settings().viewport, &topology).params(level);
-    let kernel_mesh = kernel.rendering(body, &params).map_err(|error| error.to_string())?;
-    let edges = edge_polylines(kernel.as_ref(), body, &params);
-    let (faces, named_edges) = named_entities(model, body, &topology);
-    let makers = faces.iter().map(|face| (face.id, face.feature)).collect();
-    let feature = model
-        .features()
-        .iter()
-        .rev()
-        .find(|feature| {
-            !matches!(
-                model.status(feature.id),
-                Some(model::FeatureStatus::Suppressed | model::FeatureStatus::RolledBack)
-            ) && model.body_after(feature.id) == Some(body)
-        })
-        .map(|feature| app_id(feature.id))
-        .unwrap_or(0);
-    let mut picks = Vec::new();
-    let mesh = Arc::new(display_mesh(feature, &kernel_mesh, &edges, &topology, &makers, &mut picks));
-    let mut display = ReadyDisplay {
-        body,
-        params,
-        meshes: HashMap::from([(body, mesh.clone())]),
-        mesh,
-        picks,
-        faces,
-        edges: named_edges,
-        topology,
-        kernel_mesh,
-    };
-    if model.live_bodies().len() == 1 {
-        return Ok(Some(display));
-    }
-    let mut aggregate = (*display.mesh).clone();
-    for (key, other) in model.live_bodies().into_iter().filter(|(_, other)| *other != body) {
-        let topology = kernel.topology(other).map_err(|error| error.to_string())?;
-        let params =
-            *crate::graphics::body_mesh_levels(curved_surfaces, &model.settings().viewport, &topology).params(level);
-        let kernel_mesh = kernel.rendering(other, &params).map_err(|error| error.to_string())?;
-        let edges = edge_polylines(kernel.as_ref(), other, &params);
-        let (faces, named_edges) = named_entities(model, other, &topology);
-        let makers = faces.iter().map(|face| (face.id, face.feature)).collect();
-        let feature = model
-            .features()
-            .iter()
-            .rev()
-            .find(|feature| feature.body == key && model.body_after(feature.id) == Some(other))
-            .map_or(0, |f| app_id(f.id));
-        let mesh = display_mesh(feature, &kernel_mesh, &edges, &topology, &makers, &mut display.picks);
-        let offset = aggregate.positions.len() as u32;
-        aggregate.positions.extend_from_slice(&mesh.positions);
-        aggregate.normals.extend_from_slice(&mesh.normals);
-        aggregate.face_picks.extend_from_slice(&mesh.face_picks);
-        aggregate.face_features.extend_from_slice(&mesh.face_features);
-        aggregate.face_appearances.extend_from_slice(&mesh.face_appearances);
-        aggregate.indices.extend(mesh.indices.iter().map(|i| i + offset));
-        aggregate.edges.extend_from_slice(&mesh.edges);
-        aggregate.corners.extend_from_slice(&mesh.corners);
-        display.meshes.insert(other, Arc::new(mesh));
-        display.faces.extend(faces);
-        display.edges.extend(named_edges);
-        display.topology.faces.extend(topology.faces);
-        display.topology.edges.extend(topology.edges);
-        display.topology.vertices.extend(topology.vertices);
-    }
-    display.mesh = Arc::new(aggregate);
-    Ok(Some(display))
-}
-
 // The browser shows its kernel worker's proved part and has no early construction display.
 #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 pub(crate) fn construction_view(
@@ -6470,8 +6421,18 @@ fn depth_arrow(
     depth: f64,
     drags: bool,
 ) -> Option<PreviewArrow> {
+    arrow_in(tool.bounds()?, plane, dir, depth, drags)
+}
+
+/// An arrow from the middle of `bounds`, dropped onto `plane`, `depth` along `dir`.
+fn arrow_in(
+    (lo, hi): (Vec3, Vec3),
+    plane: &soliddraft_kernel_api::Plane,
+    dir: soliddraft_kernel_api::Vec3,
+    depth: f64,
+    drags: bool,
+) -> Option<PreviewArrow> {
     let v = |p: soliddraft_kernel_api::Vec3| Vec3::new(p.x as f32, p.y as f32, p.z as f32);
-    let (lo, hi) = tool.bounds()?;
     let centre = (lo + hi) / 2.0;
     let normal = v(plane.normal).normalize_or_zero();
     let from = centre - normal * (centre - v(plane.origin)).dot(normal);
@@ -6730,6 +6691,33 @@ mod tests {
 
     fn volume(d: &Document) -> f64 {
         d.kernel().mass_properties(d.display_body().unwrap()).unwrap().volume
+    }
+
+    /// An extrusion form with its Draft option previews as built, and OK applies the same
+    /// edit. With the part as it was at the preview, OK reuses the preview's builds and
+    /// runs no kernel operation of its own. Once the part changes, nothing is offered.
+    #[test]
+    fn ok_reuses_the_build_of_an_unchanged_preview() {
+        use crate::state::{EditorParams, FeatureEditor, extrusion_command};
+        use soliddraft_kernel_api::counting::{Counting, Work};
+        let kernel = Arc::new(Counting::new(Arc::new(soliddraft_kernel_catallax::CatallaxKernel::new())));
+        let mut d = Document::new("Test", kernel.clone());
+        let params = ExtrudeParams { draft: Some(ExtrudeDraft { angle: 5.0, outward: false }), ..Default::default() };
+        let open = |d: &Document| {
+            let mut editor = FeatureEditor::new(None, EditorParams::Extrude(params.clone()), None);
+            editor.refresh(d);
+            assert!(editor.preview.result.is_some(), "{:?}", editor.error);
+            assert!(editor.preview.guides.arrow.as_ref().is_some_and(|a| a.drags), "the depth arrow shows");
+            editor
+        };
+        let (mut editor, mut stale) = (open(&d), open(&d));
+        let command = extrusion_command(None, &editor.params).unwrap();
+        kernel.take();
+        editor.take_prepared(&d).expect("the preview prepared its build").offer(&mut d, &command);
+        d.apply_form(command).unwrap().unwrap();
+        let operations = kernel.take().iter().filter(|w| matches!(w, Work::Operation(_))).count();
+        assert_eq!(operations, 0, "OK built the previewed extrusion again");
+        assert!(stale.take_prepared(&d).is_none(), "a preview of an earlier part was offered");
     }
 
     /// Draft is an option of Extrude and Cut: one undo step adds the extrusion and a draft

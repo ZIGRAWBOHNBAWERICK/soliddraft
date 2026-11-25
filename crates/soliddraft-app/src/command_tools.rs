@@ -2795,14 +2795,24 @@ impl ProposalBook {
     }
 
     /// Runs a pending proposal's tool call on the part as one undo step, and answers
-    /// what the tool answered. The manufacturing package writes files and opens a
-    /// drawing, which the app does (`pmi::assistant::apply_package`).
+    /// what the tool answered. A call that would now change other things than its card
+    /// shows, because the part changed since the card was made, is refused. The
+    /// manufacturing package writes files and opens a drawing, which the app does
+    /// (`pmi::assistant::apply_package`).
     pub fn apply_call(&mut self, doc: &mut Document, id: &str) -> Result<Value, String> {
         let call = self.pending_call(id)?;
         let i = self.index(id)?;
         let p = &self.proposals[i];
         if call.tool == crate::pmi::assistant::PACKAGE {
             return Err(format!("{} writes files and opens a drawing: the user applies it from its card", p.id));
+        }
+        // The call runs again on the part as it is now, so it must do what the card showed.
+        if !crate::pmi::assistant::card(doc, &call).is_ok_and(|card| card.rows == p.rows) {
+            return Err(format!(
+                "{} is out of date: the part changed since its card was made, and it would no longer do what the \
+                 card shows. Discard it and ask again.",
+                p.id
+            ));
         }
         let depth = doc.undo_depth();
         let answer = crate::pmi::tools::run(doc, &call.tool, &call.input)

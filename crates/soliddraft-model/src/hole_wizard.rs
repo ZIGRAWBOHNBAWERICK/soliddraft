@@ -35,7 +35,6 @@
 use serde::{Deserialize, Serialize};
 use soliddraft_kernel_api::{HoleDepth, HoleHead, HoleTip};
 
-use crate::feature::FeatureId;
 use crate::reference::{FaceRef, VertexRef};
 use crate::thread::HoleThread;
 
@@ -380,15 +379,6 @@ impl HoleEndCondition {
             Self::UpToVertex { .. } => "Up To Vertex",
             Self::UpToSurface { .. } => "Up To Surface",
             Self::OffsetFromSurface { .. } => "Offset From Surface",
-        }
-    }
-
-    /// Feature ids referenced by this end condition.
-    pub fn dependencies(&self) -> Vec<FeatureId> {
-        match self {
-            Self::UpToSurface { face } | Self::OffsetFromSurface { face, .. } => vec![face.feature],
-            Self::UpToVertex { vertex } => vertex.faces.iter().map(|f| f.feature).collect(),
-            Self::Blind { .. } | Self::ThroughAll | Self::UpToNext => Vec::new(),
         }
     }
 }

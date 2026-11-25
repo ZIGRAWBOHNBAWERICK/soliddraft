@@ -906,4 +906,163 @@ mod rebuild {
         assert_eq!(reopened.id(), source.id());
         assert_matches_full_replay(&reopened, "after rejecting a foreign kernel cache");
     }
+
+    /// Every feature's status and face names, then every live body's faces by name with
+    /// their measures and its mass: what a part with several bodies shows.
+    fn bodies_picture(doc: &Document) -> Vec<String> {
+        let k = doc.kernel();
+        let mut out: Vec<String> = doc
+            .features()
+            .iter()
+            .map(|f| {
+                let names: Vec<String> =
+                    doc.generated_faces(f.id).iter().map(|n| format!("{:?} {}", n.generator, n.ordinal)).collect();
+                format!("{} {}: {:?}, faces {names:?}", f.id, f.name, doc.status(f.id))
+            })
+            .collect();
+        for (key, body) in doc.live_bodies() {
+            let t = k.topology(body).unwrap();
+            let mut faces: Vec<String> = doc
+                .face_labels(body)
+                .into_iter()
+                .map(|(id, label)| {
+                    let f = t.face(id).unwrap();
+                    let name = label.map_or_else(|| "unnamed".to_owned(), |l| l.text);
+                    format!("body {key} face {name}: area {:?} centroid {:?}", f.area, f.centroid)
+                })
+                .collect();
+            faces.sort();
+            out.extend(faces);
+            out.push(format!("body {key} mass {:?}", k.mass_properties(body).unwrap()));
+        }
+        out
+    }
+
+    fn assert_bodies_match_full_replay(doc: &Document, when: &str) {
+        let replay = Document::from_bytes(&doc.to_bytes().unwrap(), kernel()).unwrap();
+        assert_eq!(
+            bodies_picture(doc),
+            bodies_picture(&replay),
+            "{when}: the incremental part differs from a full replay"
+        );
+    }
+
+    #[test]
+    fn a_warm_edit_rebuilds_what_reads_another_body_or_a_plane_and_nothing_else() {
+        use soliddraft_kernel_api::BooleanOp;
+        use soliddraft_model::{ExtrudeOptions, ExtrudeStart, PlaneRef};
+
+        let kernel = counting();
+        let mut doc = Document::new("Inputs", kernel.clone());
+        let in_body = |doc: &mut Document, body: u32, kind: FeatureKind| {
+            doc.execute(Command::AddFeatureInBody { body, kind, via_assistant: false, position: None })
+                .unwrap()
+                .created
+                .unwrap()
+        };
+        let on_top = |draw: &dyn Fn(&mut Sketch)| {
+            let mut s = Sketch::new();
+            draw(&mut s);
+            sketch_on(SketchPlane::Datum { datum: DatumPlane::Top, offset: 0.0 }, solved(s))
+        };
+        let from = |sketch: FeatureId, depth: f64, start: PlaneRef| {
+            let mut kind = extrude(sketch, ExtrudeOp::Boss, blind(depth), false);
+            let FeatureKind::Extrude(e) = &mut kind else { unreachable!() };
+            e.options = ExtrudeOptions { from: Some(ExtrudeStart::Surface { plane: start }), ..Default::default() };
+            kind
+        };
+        // Body 1 starts on a plane 5 mm over the plate's top, body 2 on the top itself;
+        // a Combine joins body 2 to the plate. Body 3, sketch and all, reads nothing of them.
+        let (profile, base) = plate(&mut doc, 40.0, 30.0);
+        let SketchPlane::Face { face: top } = pick_face(&doc, Vec3::new(0.0, 0.0, 10.0), Vec3::Z) else {
+            unreachable!()
+        };
+        let plane = add(
+            &mut doc,
+            "Over the top",
+            FeatureKind::ReferencePlane(SketchPlane::FaceOffset { face: top.clone(), offset: 5.0 }),
+        );
+        let peg = add(
+            &mut doc,
+            "Peg",
+            on_top(&|s| {
+                s.circle_at(p(-10.0, -5.0), 6.0).unwrap();
+            }),
+        );
+        let on_plane = in_body(&mut doc, 1, from(peg, 4.0, PlaneRef::Feature { feature: plane }));
+        let pad = add(
+            &mut doc,
+            "Pad",
+            on_top(&|s| {
+                s.rectangle(p(10.0, 5.0), 8.0, 8.0).unwrap();
+            }),
+        );
+        let on_face = in_body(&mut doc, 2, from(pad, 3.0, PlaneRef::Face { face: top }));
+        let block = in_body(
+            &mut doc,
+            3,
+            on_top(&|s| {
+                s.rectangle(p(100.0, 0.0), 10.0, 10.0).unwrap();
+            }),
+        );
+        let apart = in_body(&mut doc, 3, extrude(block, ExtrudeOp::Boss, blind(5.0), false));
+        let combine = in_body(&mut doc, 0, FeatureKind::Combine { operation: BooleanOp::Union, tool: 2 });
+        assert_all_ok(&doc);
+        assert_bodies_match_full_replay(&doc, "as built");
+        kernel.take();
+
+        // A thicker plate moves the plane and the top. Every feature that reads them
+        // builds again; the block, on a body of its own, builds nothing.
+        doc.execute(Command::EditFeature { id: base, kind: extrude(profile, ExtrudeOp::Boss, blind(12.0), false) })
+            .unwrap();
+        let (built, _) = recomputed(&kernel.take());
+        for id in [base, on_plane, on_face, combine] {
+            assert!(built.contains(&id), "{id} reads the plate but was not built again: {built:?}");
+        }
+        assert!(!built.contains(&apart), "the separate block was built again");
+        assert_all_ok(&doc);
+        assert_bodies_match_full_replay(&doc, "after the edit");
+
+        // Without its plane, body 1 asks for a new start, as a reopened file does.
+        doc.execute(Command::DeleteFeature { id: plane }).unwrap();
+        assert!(
+            matches!(doc.status(on_plane), Some(FeatureStatus::RepairNeeded(r)) if r[0].reason == RepairReason::Missing),
+            "{:?}",
+            doc.status(on_plane)
+        );
+        assert_bodies_match_full_replay(&doc, "after deleting the plane");
+    }
+
+    #[test]
+    fn a_plane_on_another_bodys_face_moves_with_that_face() {
+        let kernel = counting();
+        let mut doc = Document::new("Plane on another body", kernel.clone());
+        let in_body = |doc: &mut Document, body: u32, kind: FeatureKind| {
+            doc.execute(Command::AddFeatureInBody { body, kind, via_assistant: false, position: None })
+                .unwrap()
+                .created
+                .unwrap()
+        };
+        // A plane of body 1 lies 5 mm over the plate's top, and body 1 grows a peg from it.
+        let (profile, base) = plate(&mut doc, 40.0, 30.0);
+        let SketchPlane::Face { face: top } = pick_face(&doc, Vec3::new(0.0, 0.0, 10.0), Vec3::Z) else {
+            unreachable!()
+        };
+        let plane =
+            in_body(&mut doc, 1, FeatureKind::ReferencePlane(SketchPlane::FaceOffset { face: top, offset: 5.0 }));
+        let mut circle = Sketch::new();
+        circle.circle_at(p(0.0, 0.0), 6.0).unwrap();
+        let peg = in_body(&mut doc, 1, sketch_on(SketchPlane::Feature { feature: plane, offset: 0.0 }, solved(circle)));
+        let grown = in_body(&mut doc, 1, extrude(peg, ExtrudeOp::Boss, blind(3.0), false));
+        assert_all_ok(&doc);
+        kernel.take();
+
+        // A thicker plate moves the plane, and with it the peg.
+        doc.execute(Command::EditFeature { id: base, kind: extrude(profile, ExtrudeOp::Boss, blind(12.0), false) })
+            .unwrap();
+        assert!(recomputed(&kernel.take()).0.contains(&grown), "the peg on the moved plane was not built again");
+        assert_eq!(doc.reference_plane(plane).unwrap().origin.z, 17.0, "the plane follows the plate's top");
+        assert_all_ok(&doc);
+        assert_bodies_match_full_replay(&doc, "after moving the plate's top");
+    }
 }

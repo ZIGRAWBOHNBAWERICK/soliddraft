@@ -50,7 +50,7 @@ sha2 = "0.10.9"
 # Property tests of the command layer, the MCP protocol and the command line (dev only).
 proptest = { version = "1.9", default-features = false, features = ["std"] }
 thiserror = "2.0.18"
-zip = { version = "9.0.2", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+zip = { version = "9.0.5", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 quick-xml = "0.41"
 egui = "0.36.2"
 eframe = { version = "0.36.2", default-features = false, features = ["wgpu", "wayland", "x11", "default_fonts", "accesskit"] }

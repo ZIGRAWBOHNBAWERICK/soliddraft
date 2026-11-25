@@ -3941,9 +3941,9 @@ checksum = "7c87def4c32ab89d880effc9e097653c8da5d6ef28e6b539d313baaacfbafcbe"
 
 [[package]]
 name = "openusd"
-version = "0.8.0"
+version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "54f38d869c64c96492e1a482fb621eda620d120d91dbe93072112ee315a8923c"
+checksum = "caf1d3030ab9442f205c20a6c551754f4bc4b8e6727e49f915c4f482345c7dc5"
 dependencies = [
  "bitflags 2.13.2",
  "bytemuck",
@@ -3953,17 +3953,19 @@ dependencies = [
  "lz4_flex",
  "num-traits 0.2.19",
  "regex-lite",
+ "rustc-hash 2.1.3",
  "strum",
  "thiserror 2.0.21",
  "windows-sys 0.61.2",
- "zip 8.6.0",
+ "zip",
+ "zmij",
 ]
 
 [[package]]
 name = "openusd-build"
-version = "0.8.0"
+version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9ffbbcc78f97548fe2e4c6eaa164f6ec25414c6f685c73ee547504a7bc2361c6"
+checksum = "6d659e0709efed1fbd1716ef3177d5ebe75974e269c55eb79d75d361805f15d8"
 dependencies = [
  "openusd",
  "prettyplease",
@@ -3977,9 +3979,9 @@ dependencies = [
 
 [[package]]
 name = "openusd-schemas"
-version = "0.8.0"
+version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "841935b1f1445c20c139f42478566459fac7b8830da0358d735526a7415057f4"
+checksum = "bb4814d6ad33935128eb8e28027ccbdcabd5343768d0a80b712988cf7f56e9af"
 dependencies = [
  "derive_more",
  "openusd",
@@ -5376,7 +5378,7 @@ dependencies = [
  "web-sys",
  "web-time",
  "wgpu",
- "zip 9.0.5",
+ "zip",
 ]
 
 [[package]]
@@ -5400,7 +5402,7 @@ dependencies = [
  "soliddraft-tessellation",
  "thiserror 2.0.21",
  "web-time",
- "zip 9.0.5",
+ "zip",
 ]
 
 [[package]]
@@ -5445,7 +5447,7 @@ dependencies = [
  "soliddraft-recipe",
  "soliddraft-scene",
  "soliddraft-tessellation",
- "zip 9.0.5",
+ "zip",
 ]
 
 [[package]]
@@ -5459,7 +5461,7 @@ dependencies = [
  "thiserror 2.0.21",
  "uuid",
  "web-time",
- "zip 9.0.5",
+ "zip",
 ]
 
 [[package]]
@@ -5481,7 +5483,7 @@ dependencies = [
  "tiny-skia 0.11.4",
  "toml",
  "ttf-parser",
- "zip 9.0.5",
+ "zip",
 ]
 
 [[package]]
@@ -5496,7 +5498,7 @@ dependencies = [
  "soliddraft-recipe",
  "soliddraft-tessellation",
  "thiserror 2.0.21",
- "zip 9.0.5",
+ "zip",
 ]
 
 [[package]]
@@ -5562,7 +5564,7 @@ dependencies = [
  "soliddraft-sketch",
  "soliddraft-tessellation",
  "thiserror 2.0.21",
- "zip 9.0.5",
+ "zip",
 ]
 
 [[package]]
@@ -7565,20 +7567,6 @@ dependencies = [
 
 [[package]]
 name = "zip"
-version = "8.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2d04a6b5381502aa6087c94c669499eb1602eb9c5e8198e534de571f7154809b"
-dependencies = [
- "crc32fast",
- "flate2",
- "indexmap",
- "memchr",
- "typed-path",
- "zopfli",
-]
-
-[[package]]
-name = "zip"
 version = "9.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6e04976da629d3b04204ba8105b396a193af8ad2583b2c79bfb3ab8af580a11e"
@@ -7589,6 +7577,7 @@ dependencies = [
  "memchr",
  "nix",
  "typed-path",
+ "zopfli",
 ]
 
 [[package]]

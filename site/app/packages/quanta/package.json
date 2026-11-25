@@ -45,7 +45,7 @@
     "@typescript/native-preview": "7.0.0-dev.20260619.1",
     "@vitejs/plugin-react": "^4.3.0",
     "dotenv": "^16.4.5",
-    "happy-dom": "^20.9.0",
+    "happy-dom": "^21.0.4",
     "storybook": "^10.2.10",
     "tailwindcss": "^4.1.4",
     "tsx": "^4.19.0",

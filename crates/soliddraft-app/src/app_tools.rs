@@ -489,10 +489,7 @@ impl AppTools<'_> {
     /// show, every text that lies over something, and anything on the drawing that the
     /// file does not state.
     pub(crate) fn manufacturing_package(&mut self, input: &Value) -> Result<Value, String> {
-        let step = PathBuf::from(input["path"].as_str().unwrap_or_default());
-        if !ExportFormat::Step.suits(&step) {
-            return Err("the path must end in .step or .stp".into());
-        }
+        let step = package_path(input)?;
         let template = input["template"].as_str().unwrap_or("iso-a3");
         let mut new = self.drawing_request(&json!({ "template": template }))?;
         // Front, top and side; the section through the tightest hole comes with the
@@ -933,6 +930,16 @@ impl ToolHost for AppTools<'_> {
         drawing::follow_part(self.state);
         out
     }
+}
+
+/// The STEP file a manufacturing package writes: its input's `path`, trimmed. The
+/// package card shows this path and Apply writes to it.
+pub(crate) fn package_path(input: &Value) -> Result<PathBuf, String> {
+    let step = PathBuf::from(input["path"].as_str().unwrap_or_default().trim());
+    if !ExportFormat::Step.suits(&step) {
+        return Err("the path must end in .step or .stp".into());
+    }
+    Ok(step)
 }
 
 /// Whether a drawing of `doc` can be made now on the template `id`.

@@ -7,7 +7,6 @@
 //! `manufacturing_package` writes the files. With auto-apply on they run at once.
 
 use serde_json::{Value, json};
-use soliddraft_exchange::Format as ExportFormat;
 
 use super::tools;
 use crate::command_tools::ProposedCall;
@@ -124,10 +123,7 @@ fn described(item: &Value) -> String {
 }
 
 fn package_card(doc: &Document, input: &Value) -> Result<Card, String> {
-    let step = std::path::PathBuf::from(input["path"].as_str().unwrap_or_default().trim());
-    if !ExportFormat::Step.suits(&step) {
-        return Err("the path must end in .step or .stp".into());
-    }
+    let step = crate::app_tools::package_path(input)?;
     let template = input["template"].as_str().unwrap_or("iso-a3");
     crate::app_tools::check_drawing(doc, template)?;
     let name = step.file_name().map_or_else(|| step.display().to_string(), |name| name.to_string_lossy().into_owned());

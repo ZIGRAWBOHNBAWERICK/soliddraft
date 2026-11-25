@@ -459,7 +459,7 @@ fn mesh(scene: &mut Scene, prim: &Prim, name: &str) -> Result<Option<Mesh>, Impo
     let normals = ["primvars:normals", "normals"].into_iter().find_map(|n| {
         let attr = prim.attribute(n);
         let values = attr.get_at::<Value>(time()).ok().flatten().as_ref().and_then(vec3s)?;
-        let interp = attr.get_metadata::<Value>("interpolation").ok().flatten().as_ref().and_then(token);
+        let interp = attr.metadata::<Value>("interpolation").ok().flatten().as_ref().and_then(token);
         let idx = prim.attribute(format!("{n}:indices")).get_at::<Value>(time()).ok().flatten().as_ref().and_then(ints);
         Some((values, interp.unwrap_or_else(|| "vertex".into()), idx))
     });

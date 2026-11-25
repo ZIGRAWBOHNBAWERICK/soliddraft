@@ -1,3 +1,5 @@
+Archived on 2026-11-26. Historical record only. Not current rules or plans. Current: [modelling.md, Shell](../modelling.md#shell).
+
 # Analytic shell tool
 
 This slice exposes Catallax's supported analytic shell operation in SolidDraft. The

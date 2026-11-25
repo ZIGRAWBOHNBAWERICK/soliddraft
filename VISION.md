@@ -40,7 +40,7 @@ Each command asks for the inputs a mechanical designer expects, with sensible de
 When Catallax offers a choice meant for the user, SolidDraft lets the user make it, starting from Catallax's default.
 Names and shortcuts borrow common SolidWorks terms where they make sense; elsewhere SolidDraft makes its own or borrows from other applications.
 A Coming soon command is added only once its scope is clearly defined and its work is on the roadmap of both projects where needed.
-It shows only "Coming soon", without stage names or kernel details.
+It shows only "Coming soon", without phase or step names or kernel details.
 One frame, Edit Suite, holds parts, assemblies and drawings, and a replaced interface is deleted rather than kept behind a switch.
 
 ## The user's work survives

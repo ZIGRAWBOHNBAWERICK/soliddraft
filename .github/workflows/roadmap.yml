@@ -1,0 +1,42 @@
+name: Roadmap
+
+# Catallax holds the source of ROADMAP.md; SolidDraft keeps a byte-identical copy.
+# Pull requests that touch the copy, pushes to main that touch it, a daily run and a
+# manual run compare it with Catallax's default branch. Other pull requests never run it.
+
+on:
+  push:
+    branches: [main]
+    paths: ['ROADMAP.md', '.github/workflows/roadmap.yml']
+  pull_request:
+    paths: ['ROADMAP.md', '.github/workflows/roadmap.yml']
+  schedule:
+    - cron: '23 5 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: roadmap-${{ (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/tags/')) && github.run_id || github.head_ref || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/heads/release/') && !startsWith(github.ref, 'refs/tags/') }}
+
+jobs:
+  same-as-catallax:
+    name: ROADMAP.md matches Catallax
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Compare with the Catallax source copy
+        env:
+          SOURCE: https://raw.githubusercontent.com/BohnBawerick/catallax/main/ROADMAP.md
+        run: |
+          curl -fsSL --retry 3 "$SOURCE" -o "$RUNNER_TEMP/catallax-roadmap.md"
+          if ! cmp -s "$RUNNER_TEMP/catallax-roadmap.md" ROADMAP.md; then
+            echo "::error file=ROADMAP.md::ROADMAP.md differs from the Catallax source copy at $SOURCE. Change the roadmap in Catallax first, then copy it here byte for byte: curl -fsSL $SOURCE -o ROADMAP.md"
+            diff -u "$RUNNER_TEMP/catallax-roadmap.md" ROADMAP.md || true
+            exit 1
+          fi
+          echo "ROADMAP.md matches $SOURCE"

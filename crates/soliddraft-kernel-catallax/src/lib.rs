@@ -26,8 +26,8 @@ mod measure;
 mod native;
 mod pmi;
 mod recognition;
-mod scan;
 mod request;
+mod scan;
 mod shell;
 mod step;
 mod sweep;
@@ -1428,9 +1428,7 @@ impl Kernel for CatallaxKernel {
     }
 
     fn body_relation(&self, a: PlacedBody, b: PlacedBody, clearance: Option<f64>) -> KernelResult<BodyRelation> {
-        self.observe("body_relation", || {
-            RequestPolicy::Query.run(|| body_relation::relation(self, a, b, clearance)).0
-        })
+        self.observe("body_relation", || RequestPolicy::Query.run(|| body_relation::relation(self, a, b, clearance)).0)
     }
 
     fn propose_import(&self, source: &[u8], options: &ImportOptions) -> KernelResult<ProposalSet> {

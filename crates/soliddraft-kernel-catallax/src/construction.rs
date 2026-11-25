@@ -11,8 +11,8 @@ use soliddraft_kernel_api::{
     ProofWork, ScalarEdit, ScalarParameter, TessellationParams,
 };
 
-use crate::request::{self, ReservedWork};
 use super::{CatallaxKernel, build_error, convert, converted_recipe, native, options, query_error};
+use crate::request::{self, ReservedWork};
 
 /// Work for an early construction display, separate from the exact rebuild.
 const CONSTRUCTION_WORK: u64 = 2_000_000;
@@ -45,7 +45,8 @@ impl ProofWork for ReservedProof {
 /// A caller-owned allowance pays for both from one existing default, so a nested
 /// request never obtains fresh work.
 fn reserve(construction: u64) -> KernelResult<(ReservedWork, ReservedProof)> {
-    let (display, proof) = request::reserve_edit(construction).map_err(|refusal| query_error("edit allocation", refusal))?;
+    let (display, proof) =
+        request::reserve_edit(construction).map_err(|refusal| query_error("edit allocation", refusal))?;
     Ok((display, proof.map_or(ReservedProof::PerBuild, ReservedProof::Caller)))
 }
 
@@ -181,25 +182,35 @@ mod tests {
         assert_eq!(height, 20.0);
         assert!(display.faces.iter().all(|face| original_topology.face(face.id).is_none()));
         let rebuilt = std::thread::scope(|scope| {
-            scope.spawn(|| {
-                let mut rebuilt = None;
-                request.proof.run(&mut || {
-                    let (spent, work) = crate::with_request_allowance(u64::MAX, || OperationAllowance::reserve(1));
-                    spent.unwrap();
-                    assert_eq!(work.limit, limit, "the worker keeps the caller's refusal context");
-                    assert_eq!(work.used, 1);
-                    let profile = kernel.create_body_from_profile(
-                        &OpTag::new("block_sketch"),
-                        &Profile::rectangle(Plane::XY, Point2::new(0.0, 0.0), 40.0, 30.0),
-                    )?;
-                    let result =
-                        kernel.extrude(&OpTag::new("block"), profile.body, &Extrude { distance: 20.0, direction: None });
-                    kernel.release(profile.body)?;
-                    rebuilt = Some(result?.body);
-                    Ok(())
-                }).unwrap();
-                rebuilt.unwrap()
-            }).join().unwrap()
+            scope
+                .spawn(|| {
+                    let mut rebuilt = None;
+                    request
+                        .proof
+                        .run(&mut || {
+                            let (spent, work) =
+                                crate::with_request_allowance(u64::MAX, || OperationAllowance::reserve(1));
+                            spent.unwrap();
+                            assert_eq!(work.limit, limit, "the worker keeps the caller's refusal context");
+                            assert_eq!(work.used, 1);
+                            let profile = kernel.create_body_from_profile(
+                                &OpTag::new("block_sketch"),
+                                &Profile::rectangle(Plane::XY, Point2::new(0.0, 0.0), 40.0, 30.0),
+                            )?;
+                            let result = kernel.extrude(
+                                &OpTag::new("block"),
+                                profile.body,
+                                &Extrude { distance: 20.0, direction: None },
+                            );
+                            kernel.release(profile.body)?;
+                            rebuilt = Some(result?.body);
+                            Ok(())
+                        })
+                        .unwrap();
+                    rebuilt.unwrap()
+                })
+                .join()
+                .unwrap()
         });
         let proved = kernel.topology(rebuilt).unwrap();
         for face in &display.faces {

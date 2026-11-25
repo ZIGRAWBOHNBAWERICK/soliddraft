@@ -475,7 +475,7 @@ impl Approximate {
         let step = on_request_allowance(RequestPolicy::Export, "export_step", |dec| {
             catallax_step::numerical::build(body, &step_options, dec)
         })
-            .map_err(|error| crate::query_error("export_step", error))?;
+        .map_err(|error| crate::query_error("export_step", error))?;
         let report = step.report();
         let rounding = &report.max_scalar_rounding_error_mm;
         let [faces, edges, vertices] = report.counts;

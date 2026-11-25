@@ -207,12 +207,14 @@ impl AppBody {
         options: &catallax_mesh::MeshOptions,
         decider: &mut Decider,
     ) -> Result<catallax_numbers::OperationResult<catallax_mesh::DisplayMesh>, Error> {
-        RequestPolicy::Display.run(|| {
-            let built = self.checkpoint.built();
-            let revision = serde_json::to_string(built.recipe()).map_err(|error| {
-                Error::Display(catallax_numbers::Refusal::new("app.display-revision", error.to_string()))
-            })?;
-            Ok(catallax_mesh::display_mesh_body(&built.model, built.result, options, &revision, decider))
-        }).0
+        RequestPolicy::Display
+            .run(|| {
+                let built = self.checkpoint.built();
+                let revision = serde_json::to_string(built.recipe()).map_err(|error| {
+                    Error::Display(catallax_numbers::Refusal::new("app.display-revision", error.to_string()))
+                })?;
+                Ok(catallax_mesh::display_mesh_body(&built.model, built.result, options, &revision, decider))
+            })
+            .0
     }
 }

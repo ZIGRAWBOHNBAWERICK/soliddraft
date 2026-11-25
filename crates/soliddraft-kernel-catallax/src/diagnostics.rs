@@ -81,7 +81,8 @@ impl Diagnostics {
         let _scope = Scope;
         // Background mass requests carry their own allowance, separate from edit and export limits.
         let caller_mass_allowance = operation == "mass_properties" && request::active();
-        let policy = if caller_mass_allowance { Some(RequestPolicy::Query) } else { max_work.map(RequestPolicy::Measured) };
+        let policy =
+            if caller_mass_allowance { Some(RequestPolicy::Query) } else { max_work.map(RequestPolicy::Measured) };
         let ((mut result, work), entries) = with_operation_log(|| match policy {
             Some(policy) => {
                 let (result, work) = policy.run(run);
@@ -153,7 +154,6 @@ fn entry(sequence: usize, e: &OperationEntry) -> Value {
         "refusal":e.refusal.as_ref().map(|r| json!({"code":r.code,"detail":r.detail})),
         "work":{"before":e.work_before,"after":e.work_after,"used":e.work_after-e.work_before},"wall_ms":e.wall_ms})
 }
-
 
 #[cfg(test)]
 mod tests {

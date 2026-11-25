@@ -84,7 +84,10 @@ fn allowance<T>(
 ) -> KernelResult<(T, request::ScopedWork)> {
     let (result, work) = policy.run(action);
     if work.request.exhausted {
-        return Err(query_error(operation, Refusal::new("numbers.operation-budget", "operation work allowance exhausted")));
+        return Err(query_error(
+            operation,
+            Refusal::new("numbers.operation-budget", "operation work allowance exhausted"),
+        ));
     }
     Ok((result?, work))
 }

@@ -36,8 +36,7 @@ use glam::{DMat4, DQuat, DVec3};
 use serde::Serialize;
 use soliddraft_assembly::mates::{Mechanism, hinge_angle_at};
 use soliddraft_assembly::{
-    AssemblyDocument, DisplayMesh, Entity, FaceEndpoint, Flags, Mate, OccurrenceIndex, OccurrencePath, Placement, Step,
-    StoredSupport,
+    AssemblyDocument, DisplayMesh, Entity, FaceEndpoint, Mate, OccurrencePath, Placement, Step, StoredSupport,
 };
 use soliddraft_kernel_api::{EnclosedSupport, ExactRational, SupportBounds};
 
@@ -189,8 +188,6 @@ fn axis_frame(at: DVec3, axis: DVec3, like: DQuat) -> DMat4 {
 /// Builds the articulation of the open assembly at its accepted placements.
 pub fn articulate(doc: &mut AssemblyDocument) -> Result<Articulation, String> {
     doc.finish_loading();
-    let table = doc.table();
-    let accepted = doc.accepted_worlds();
     let mut notes = Vec::new();
 
     // Links: every part or mesh occurrence that is not suppressed.
@@ -201,33 +198,30 @@ pub fn articulate(doc: &mut AssemblyDocument) -> Result<Articulation, String> {
     let mut meshes: Vec<ExportMesh> = Vec::new();
     let mut mesh_of: HashMap<usize, usize> = HashMap::new();
     let mut names: HashSet<String> = HashSet::from(["base_link".to_owned()]);
-    for row in (1..table.len() as u32).map(OccurrenceIndex) {
-        let f = table.flags(row);
-        if f.has(Flags::ASSEMBLY) || f.has(Flags::SUPPRESSED) || f.has(Flags::REMOVED) {
+    for occ in doc.placed_occurrences() {
+        if !occ.is_active_leaf() {
             continue;
         }
-        let def = doc.store().get(table.definition(row));
-        let Some(mesh) = def.mesh.as_ref() else {
-            notes.push(format!("{} has no display mesh loaded and is left out", doc.label(row)));
+        let Some(mesh) = occ.mesh.as_ref() else {
+            notes.push(format!("{} has no display mesh loaded and is left out", occ.label));
             continue;
         };
-        let d = table.definition(row).0 as usize;
+        let d = occ.definition.0 as usize;
         let m = *mesh_of.entry(d).or_insert_with(|| {
-            meshes.push(export_mesh(&format!("{}_{}", safe(&def.label), meshes.len()), mesh));
+            meshes.push(export_mesh(&format!("{}_{}", safe(&occ.definition_label), meshes.len()), mesh));
             meshes.len() - 1
         });
-        let path = table.path(row);
-        let mut name = safe(&doc.label(row));
+        let mut name = safe(&occ.label);
         while !names.insert(name.clone()) {
-            name = format!("{name}_{}", path.to_string().replace(['/', ':', '.'], "_"));
+            name = format!("{name}_{}", occ.path.to_string().replace(['/', ':', '.'], "_"));
         }
-        let colour = table.colour(row).map(|a| {
+        let colour = occ.colour.as_ref().map(|a| {
             let c = a.base_color;
             [c.r as f64 / 255.0, c.g as f64 / 255.0, c.b as f64 / 255.0]
         });
-        bodies.insert(path.clone(), worlds.len());
-        worlds.push(accepted[row.0 as usize]);
-        links.push(Link { name, path: Some(path.to_string()), mesh: Some(m), visual: DMat4::IDENTITY, colour });
+        bodies.insert(occ.path.clone(), worlds.len());
+        worlds.push(occ.placement);
+        links.push(Link { name, path: Some(occ.path.to_string()), mesh: Some(m), visual: DMat4::IDENTITY, colour });
     }
     if worlds.is_empty() {
         return Err("the assembly has no parts to export".into());

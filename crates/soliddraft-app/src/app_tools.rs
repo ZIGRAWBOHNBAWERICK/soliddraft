@@ -677,22 +677,25 @@ impl AppTools<'_> {
         if !drawing::part_is_model(self.state) {
             return Err("The open part is not the one this drawing shows".into());
         }
-        let st = &mut *self.state;
-        let ctx = PartContext::new(&st.doc).ok_or("The part has no body; extrude something first")?;
-        let session = st.drawing.session.as_mut().ok_or_else(|| NO_DRAWING.to_owned())?;
-        if matches!(session.doc.drawing.view(parent).map(|v| &v.kind), Some(ViewKind::Detail { .. })) {
-            return Err(format!("`{name}` is a detail view and cannot be sectioned; cut its parent"));
-        }
-        let sheet = project::sheet_of(&session.doc.drawing, parent).ok_or(NO_DRAWING)?;
-        let part = ctx.part();
-        let index = PartIndex::build(&part).map_err(|e| e.to_string())?;
-        let drawing = &session.doc.drawing;
-        let line = derived::cutting_line(drawing, &part, &index, parent, Vec3::new(x, y, z), horizontal)
-            .map_err(|e| format!("Section: {e}"))?;
-        let (view, vctx) = derived::new_section(drawing, &part, &index, sheet, parent, line, flip, None)
-            .map_err(|e| format!("Section: {e}"))?;
-        let id = view.id;
-        session.doc.remember(id, &vctx.projected);
+        let (sheet, view, id) = {
+            let st = &mut *self.state;
+            let ctx = PartContext::new(&st.doc).ok_or("The part has no body; extrude something first")?;
+            let session = st.drawing.session.as_mut().ok_or_else(|| NO_DRAWING.to_owned())?;
+            if matches!(session.doc.drawing.view(parent).map(|v| &v.kind), Some(ViewKind::Detail { .. })) {
+                return Err(format!("`{name}` is a detail view and cannot be sectioned; cut its parent"));
+            }
+            let sheet = project::sheet_of(&session.doc.drawing, parent).ok_or(NO_DRAWING)?;
+            let part = ctx.part();
+            let index = PartIndex::build(&part).map_err(|e| e.to_string())?;
+            let drawing = &session.doc.drawing;
+            let line = derived::cutting_line(drawing, &part, &index, parent, Vec3::new(x, y, z), horizontal)
+                .map_err(|e| format!("Section: {e}"))?;
+            let (view, vctx) = derived::new_section(drawing, &part, &index, sheet, parent, line, flip, None)
+                .map_err(|e| format!("Section: {e}"))?;
+            let id = view.id;
+            session.doc.remember(id, &vctx.projected);
+            (sheet, view, id)
+        };
         drawing::run_command(self.state, DrawingCommand::PlaceView { sheet, view })?;
         let drawing = &self.session()?.doc.drawing;
         let placed =
@@ -759,15 +762,18 @@ impl AppTools<'_> {
         if !drawing::part_is_model(self.state) {
             return Err("The open part is not the one this drawing shows".into());
         }
-        let st = &mut *self.state;
-        let ctx = PartContext::new(&st.doc).ok_or("The part has no body; extrude something first")?;
-        let session = st.drawing.session.as_mut().ok_or_else(|| NO_DRAWING.to_owned())?;
-        let sheet = project::sheet_of(&session.doc.drawing, parent).ok_or(NO_DRAWING)?;
-        let part = ctx.part();
-        let index = PartIndex::build(&part).map_err(|e| e.to_string())?;
-        let (view, vctx) = make(&session.doc.drawing, &part, &index, sheet).map_err(|e| format!("{what}: {e}"))?;
-        let id = view.id;
-        session.doc.remember(id, &vctx.projected);
+        let (sheet, view, id) = {
+            let st = &mut *self.state;
+            let ctx = PartContext::new(&st.doc).ok_or("The part has no body; extrude something first")?;
+            let session = st.drawing.session.as_mut().ok_or_else(|| NO_DRAWING.to_owned())?;
+            let sheet = project::sheet_of(&session.doc.drawing, parent).ok_or(NO_DRAWING)?;
+            let part = ctx.part();
+            let index = PartIndex::build(&part).map_err(|e| e.to_string())?;
+            let (view, vctx) = make(&session.doc.drawing, &part, &index, sheet).map_err(|e| format!("{what}: {e}"))?;
+            let id = view.id;
+            session.doc.remember(id, &vctx.projected);
+            (sheet, view, id)
+        };
         drawing::run_command(self.state, DrawingCommand::PlaceView { sheet, view })?;
         let drawing = &self.session()?.doc.drawing;
         let placed =

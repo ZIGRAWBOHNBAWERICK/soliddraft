@@ -24,7 +24,7 @@ use std::sync::Arc;
 
 use egui::{Align2, Stroke, pos2};
 use glam::DVec3;
-use soliddraft_assembly::{Flags, KernelSource, OccurrenceIndex, OccurrencePath, Placement};
+use soliddraft_assembly::{Flags, KernelSource, OccurrencePath, PlacedOccurrence};
 use soliddraft_kernel_api::{Kernel, Plane, Vec3};
 use soliddraft_model::ContextFace;
 use soliddraft_tessellation::mesh::{DisplayMesh, MeshFace};
@@ -101,23 +101,12 @@ pub struct ContextPick {
     triangles: Vec<[glam::Vec3; 3]>,
 }
 
-fn live_row(s: &AssemblySession, path: &OccurrencePath) -> Option<OccurrenceIndex> {
-    let table = s.doc.table();
-    table.find(path).filter(|r| !table.flags(*r).has(Flags::REMOVED))
-}
-
-/// Where the assembly's design places the occurrence at `row`: the exploded view and a
-/// drag being previewed move only what is shown, never what a part is built from.
-fn design(s: &AssemblySession, row: OccurrenceIndex) -> Placement {
-    s.doc.accepted_worlds()[row.0 as usize]
-}
-
 /// Makes the open part show the configuration the occurrence at `path` places, as the
 /// assembly shows it.
 fn show_configuration(state: &mut AppState, path: &OccurrencePath) -> Result<(), String> {
     let s = state.assembly.session.as_ref().ok_or("Open an assembly first.")?;
-    let row = live_row(s, path).ok_or("The component is no longer in the assembly.")?;
-    let wanted = s.doc.reference(s.doc.table().definition(row)).and_then(|r| r.configuration.clone());
+    let occ = s.doc.placed_occurrence(path).ok_or("The component is no longer in the assembly.")?;
+    let wanted = occ.configuration().cloned();
     let model = state.doc.model();
     if model.active_configuration() == wanted.as_ref() {
         return Ok(());
@@ -138,11 +127,11 @@ fn show_configuration(state: &mut AppState, path: &OccurrencePath) -> Result<(),
 pub fn enter(state: &mut AppState, path: &OccurrencePath) -> Result<(), String> {
     show_configuration(state, path)?;
     let s = state.assembly.session.as_ref().ok_or("Open an assembly first.")?;
-    let row = live_row(s, path).ok_or("The component is no longer in the assembly.")?;
-    let name = s.doc.label(row);
+    let occ = s.doc.placed_occurrence(path).ok_or("The component is no longer in the assembly.")?;
+    let name = occ.label;
     let assembly = s.doc.assembly().name.clone();
     // The part opens seen as the assembly was, when the component is not turned.
-    let world = design(s, row);
+    let world = occ.placement;
     if world.rotation.abs_diff_eq(glam::DQuat::IDENTITY, 1e-12) {
         let mut camera = s.viewport.camera.clone();
         camera.target = world.inverse().apply(camera.target.as_dvec3()).as_vec3();
@@ -199,7 +188,7 @@ pub(crate) fn frame(state: &mut AppState) {
         }
     }
     let Some(ic) = state.assembly.in_context.as_ref() else { return };
-    let gone = state.assembly.session.as_ref().is_none_or(|s| live_row(s, &ic.path).is_none());
+    let gone = state.assembly.session.as_ref().is_none_or(|s| s.doc.placed_occurrence(&ic.path).is_none());
     if gone {
         state.assembly.in_context = None;
         state.note("Stopped editing in context: the component is no longer in the assembly", NoteKind::Info);
@@ -219,7 +208,7 @@ pub(crate) fn frame(state: &mut AppState) {
     }
     let key = context_key(s, &ic.path);
     if ic.built != Some(key) {
-        ic.context = Some(context_mesh(s, &ic.path));
+        ic.context = Some(context_mesh(&s.doc, &ic.path));
         ic.built = Some(key);
         ic.picked = None;
     }
@@ -232,46 +221,33 @@ fn context_key(s: &AssemblySession, own: &OccurrencePath) -> u64 {
     let mut h = std::collections::hash_map::DefaultHasher::new();
     s.scene.lock().expect("the scene lock").generation().hash(&mut h);
     own.to_string().hash(&mut h);
-    let table = s.doc.table();
-    for (row, world) in s.doc.accepted_worlds().iter().enumerate() {
-        let r = OccurrenceIndex(row as u32);
-        let flags = table.flags(r);
-        [Flags::REMOVED, Flags::HIDDEN, Flags::SUPPRESSED, Flags::ASSEMBLY].map(|f| flags.has(f)).hash(&mut h);
-        for v in world.translation.to_array().into_iter().chain(world.rotation.to_array()) {
+    for occ in s.doc.placed_occurrences() {
+        occ.row.0.hash(&mut h);
+        [Flags::HIDDEN, Flags::SUPPRESSED, Flags::ASSEMBLY].map(|f| occ.flags.has(f)).hash(&mut h);
+        for v in occ.placement.translation.to_array().into_iter().chain(occ.placement.rotation.to_array()) {
             v.to_bits().hash(&mut h);
         }
-        s.doc.store().get(table.definition(r)).mesh.as_ref().map(|m| Arc::as_ptr(m) as usize).hash(&mut h);
+        occ.mesh.as_ref().map(|m| Arc::as_ptr(m) as usize).hash(&mut h);
     }
     h.finish()
 }
 
 /// Every component but `own`, shown and not suppressed, in `own`'s frame, where the
 /// assembly's design places them.
-fn context_mesh(s: &AssemblySession, own: &OccurrencePath) -> ContextMesh {
+fn context_mesh(doc: &soliddraft_assembly::AssemblyDocument, own: &OccurrencePath) -> ContextMesh {
     let mut out = DisplayMesh::default();
     let mut owners = Vec::new();
-    let table = s.doc.table();
-    let Some(own_row) = live_row(s, own) else {
+    let Some(own_occ) = doc.placed_occurrence(own) else {
         return ContextMesh::new(out, owners);
     };
-    let worlds = s.doc.accepted_worlds();
-    let into_part = worlds[own_row.0 as usize].inverse();
-    let mut stack = vec![OccurrenceIndex::ROOT];
-    while let Some(r) = stack.pop() {
-        for c in table.children(r) {
-            let flags = table.flags(c);
-            if c == own_row || flags.has(Flags::REMOVED) || flags.has(Flags::HIDDEN) || flags.has(Flags::SUPPRESSED) {
-                continue;
-            }
-            if flags.has(Flags::ASSEMBLY) {
-                stack.push(c);
-                continue;
-            }
-            let Some(mesh) = s.doc.store().get(table.definition(c)).mesh.as_ref() else { continue };
-            append(&mut out, mesh, &into_part.compose(&worlds[c.0 as usize]));
-            let owner = (table.path(c), s.doc.label(c));
-            owners.extend(mesh.faces.iter().map(|_| owner.clone()));
+    for occ in doc.placed_occurrences() {
+        if occ.row == own_occ.row || !occ.is_shown_leaf() {
+            continue;
         }
+        let Some(mesh) = occ.mesh.as_ref() else { continue };
+        append(&mut out, mesh, &occ.placement_in(&own_occ.placement));
+        let owner = (occ.path, occ.label);
+        owners.extend(mesh.faces.iter().map(|_| owner.clone()));
     }
     ContextMesh::new(out, owners)
 }
@@ -379,21 +355,20 @@ fn face_in_part(part: &soliddraft_model::Document, face: &str) -> Result<(DVec3,
     Err(why)
 }
 
-/// The plane of `face` of the component at `row`, in the frame of the occurrence at
-/// `own`, read from the part's exact body where the assembly's design places both.
+/// The plane of `face` of `other`, in the frame of `own`, read from the part's exact body
+/// where the assembly's design places both.
 fn face_plane(
-    s: &mut AssemblySession,
+    doc: &mut soliddraft_assembly::AssemblyDocument,
     kernel: &Arc<dyn Kernel>,
-    own: OccurrenceIndex,
-    row: OccurrenceIndex,
+    own: &PlacedOccurrence,
+    other: &PlacedOccurrence,
     face: &str,
 ) -> Result<Plane, String> {
-    let into_own = design(s, own).inverse().compose(&design(s, row));
-    let def = s.doc.table().definition(row);
-    let name = s.doc.label(row);
-    let part = s.doc.exact(def, &KernelSource::new(kernel.clone()))?;
-    let part = part.lock().map_err(|_| format!("{name} is busy"))?;
-    let (normal, point) = face_in_part(&part, face).map_err(|why| format!("{} of {name}: {why}", face_label(face)))?;
+    let into_own = other.placement_in(&own.placement);
+    let part = doc.exact(other.definition, &KernelSource::new(kernel.clone()))?;
+    let part = part.lock().map_err(|_| format!("{} is busy", other.label))?;
+    let (normal, point) =
+        face_in_part(&part, face).map_err(|why| format!("{} of {}: {why}", face_label(face), other.label))?;
     let n = into_own.rotate(normal).normalize();
     let p = into_own.apply(point);
     Ok(soliddraft_model::plane_on_face(Vec3::new(n.x, n.y, n.z), Vec3::new(p.x, p.y, p.z)))
@@ -408,12 +383,10 @@ pub(crate) fn picked_plane(state: &mut AppState) -> Option<Result<SketchPlane, S
     let pick = ic.picked.take()?;
     let own = ic.path.clone();
     let s = assembly.session.as_mut()?;
-    let own_row = live_row(s, &own);
-    let row = live_row(s, &pick.path);
-    let (Some(own_row), Some(row)) = (own_row, row) else {
+    let (Some(own_occ), Some(other)) = (s.doc.placed_occurrence(&own), s.doc.placed_occurrence(&pick.path)) else {
         return Some(Err(format!("{} is no longer in the assembly", pick.component)));
     };
-    Some(face_plane(s, &kernel, own_row, row, &pick.face).map(|plane| {
+    Some(face_plane(&mut s.doc, &kernel, &own_occ, &other, &pick.face).map(|plane| {
         let context = ContextFace::new(
             (s.doc.id().to_string(), s.doc.assembly().name.clone()),
             own.to_string(),
@@ -427,12 +400,16 @@ pub(crate) fn picked_plane(state: &mut AppState) -> Option<Result<SketchPlane, S
 
 /// `c` read afresh from the open assembly.
 fn read(s: &mut AssemblySession, kernel: &Arc<dyn Kernel>, c: &ContextFace) -> Result<ContextFace, String> {
-    let own = OccurrencePath::from_str(&c.own).ok().and_then(|p| live_row(s, &p));
-    let own = own.ok_or("the part is no longer placed where the reference was made")?;
-    let row = OccurrencePath::from_str(&c.component).ok().and_then(|p| live_row(s, &p));
-    let row = row.ok_or_else(|| format!("{} is no longer in the assembly", c.component_name))?;
-    let plane = face_plane(s, kernel, own, row, &c.face)?;
-    Ok(c.followed(&s.doc.assembly().name, &s.doc.label(row), plane))
+    let own = OccurrencePath::from_str(&c.own)
+        .ok()
+        .and_then(|p| s.doc.placed_occurrence(&p))
+        .ok_or("the part is no longer placed where the reference was made")?;
+    let other = OccurrencePath::from_str(&c.component)
+        .ok()
+        .and_then(|p| s.doc.placed_occurrence(&p))
+        .ok_or_else(|| format!("{} is no longer in the assembly", c.component_name))?;
+    let plane = face_plane(&mut s.doc, kernel, &own, &other, &c.face)?;
+    Ok(c.followed(&s.doc.assembly().name, &other.label, plane))
 }
 
 /// Within this many millimetres two readings of a plane are the same.
@@ -817,7 +794,11 @@ mod tests {
     #[test]
     fn a_face_without_a_persistent_name_is_never_picked_or_matched_by_label() {
         let mut mesh = DisplayMesh::default();
-        append(&mut mesh, &square(5.0, "Boss-Extrude1 · End cap"), &Placement::translation(DVec3::ZERO));
+        append(
+            &mut mesh,
+            &square(5.0, "Boss-Extrude1 · End cap"),
+            &soliddraft_assembly::Placement::translation(DVec3::ZERO),
+        );
         let context = ContextMesh::new(mesh, vec![("1".parse().unwrap(), "Low<1>".into())]);
         assert!(pick(&context, glam::Vec3::new(5.0, 4.0, 50.0), glam::Vec3::new(0.0, 0.0, -1.0)).is_none());
         let blocks = two_blocks();
@@ -898,5 +879,138 @@ mod tests {
         // Read before a later change of the same sketch, it is refused too.
         assert!(first.apply(for_first).is_err());
         assert_eq!(reference_z(&first), -15.0);
+    }
+
+    /// A nested assembly with repeated placements in two configurations, one hidden part
+    /// and an exploded view: BOM quantities, robot export poses and in-context face plane
+    /// must each follow their own selection and pose rules through `PlacedOccurrence`.
+    #[test]
+    fn nested_assembly_readers_follow_configuration_visibility_and_accepted_pose_rules() {
+        use soliddraft_assembly::{AssemblyDocument, OpenOptions, Placement};
+        use soliddraft_document::{CacheOnlyStore, DocRef, identify_file};
+
+        let dir = std::env::temp_dir().join(format!("soliddraft-placed-occ-readers-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        // Part 1: block with two configurations (Default and Wide), saved showing Default.
+        let block_path = dir.join("block.dwprt");
+        let mut block = crate::new_document();
+        let params = crate::document::ExtrudeParams {
+            profile: crate::document::ProfileKind::Rectangle { width: 40.0, height: 20.0 },
+            plane: crate::document::PlaneKind::Top,
+            depth: 10.0,
+            ..Default::default()
+        };
+        block.apply(Command::AddExtrude { params, via_assistant: false }).unwrap();
+        block.apply(Command::AddConfiguration { name: "Wide".into() }).unwrap();
+        block.apply(Command::ActivateConfiguration { name: "Default".into() }).unwrap();
+        let block_top_face = face_name(block.model(), 0, 1.0);
+        crate::file::save(&mut block, &block_path).unwrap();
+
+        // Part 2: plate edited in context.
+        let plate_path = dir.join("plate.dwprt");
+        let mut plate = crate::new_document();
+        let params = crate::document::ExtrudeParams {
+            profile: crate::document::ProfileKind::Rectangle { width: 40.0, height: 40.0 },
+            plane: crate::document::PlaneKind::Top,
+            depth: 5.0,
+            ..Default::default()
+        };
+        plate.apply(Command::AddExtrude { params, via_assistant: false }).unwrap();
+        crate::file::save(&mut plate, &plate_path).unwrap();
+
+        let ref_to = |from: &Path, to: &Path| {
+            let id = identify_file(to).unwrap();
+            let mut r = DocRef::new(id.id, id.kind, "", id.revision);
+            r.set_path(from, to);
+            r
+        };
+        let kernel = crate::kernel();
+        let options = || OpenOptions {
+            display: Some(Arc::new(KernelSource::new(kernel.clone()))),
+            revisions: Some(Arc::new(CacheOnlyStore::new())),
+            ..OpenOptions::default()
+        };
+
+        // Sub-assembly: two placements of block, one Default and one Wide.
+        let sub_path = dir.join("sub.dwasm");
+        let mut sub = AssemblyDocument::new_with("Sub", options());
+        sub.save(Some(&sub_path)).unwrap();
+        let b_def = sub.insert(ref_to(&sub_path, &block_path), Placement::IDENTITY).unwrap();
+        let b_wide =
+            sub.insert(ref_to(&sub_path, &block_path), Placement::translation(DVec3::new(100.0, 0.0, 0.0))).unwrap();
+        sub.set_configuration(b_wide, Some("Wide")).unwrap();
+        sub.finish_loading();
+        sub.save(None).unwrap();
+
+        // Root assembly: two placements of sub, one hidden root block (Default), and plate at z = 30.
+        let rig_path = dir.join("rig.dwasm");
+        let mut doc = AssemblyDocument::new_with("Rig", options());
+        doc.save(Some(&rig_path)).unwrap();
+        let sub1 = doc.insert(ref_to(&rig_path, &sub_path), Placement::IDENTITY).unwrap();
+        let _sub2 =
+            doc.insert(ref_to(&rig_path, &sub_path), Placement::translation(DVec3::new(0.0, 80.0, 0.0))).unwrap();
+        let hidden_block =
+            doc.insert(ref_to(&rig_path, &block_path), Placement::translation(DVec3::new(0.0, -80.0, 0.0))).unwrap();
+        let plate_comp =
+            doc.insert(ref_to(&rig_path, &plate_path), Placement::translation(DVec3::new(0.0, 0.0, 30.0))).unwrap();
+        doc.finish_loading();
+        let hidden_path = soliddraft_assembly::component_path(hidden_block);
+        let plate_occ_path = soliddraft_assembly::component_path(plate_comp);
+        let sub1_block_path =
+            soliddraft_assembly::component_path(sub1).child(soliddraft_assembly::Step::component(b_def));
+        doc.set_hidden(std::slice::from_ref(&hidden_path), true).unwrap();
+        doc.add_explode_step(vec![soliddraft_assembly::component_path(sub1)], DVec3::Z, 50.0).unwrap();
+        doc.save(None).unwrap();
+
+        // Show the exploded view before reading from all three readers.
+        doc.set_exploded(true).unwrap();
+        assert!(doc.is_exploded());
+        let sub1_row = doc.table().find(&sub1_block_path).unwrap();
+        assert!((doc.table().world(sub1_row).translation.z - 50.0).abs() < 1e-9, "viewport shows exploded pose");
+
+        // 1. Assembly drawing reader: hidden block counts in BOM (Default qty = 3, Wide qty = 2,
+        //    plate qty = 1), is excluded from drawn parts (5 drawn), accepted placement stays at
+        //    z = 0 while exploded placement is at z = 50.
+        let exact = crate::assembly_files::drawing::exact_parts(&mut doc).unwrap();
+        let model = exact.model();
+        let mut bom: Vec<(String, u32)> = model.bom.iter().map(|r| (r.name.clone(), r.quantity)).collect();
+        bom.sort();
+        assert_eq!(bom, vec![("block".into(), 3), ("block (Wide)".into(), 2), ("plate".into(), 1)]);
+        assert_eq!(model.parts.len(), 5, "hidden block counts in BOM but does not draw");
+        assert!(model.parts.iter().all(|p| p.component != hidden_path.to_string()));
+        let sub1_idx = model.parts.iter().position(|p| p.component == sub1_block_path.to_string()).unwrap();
+        assert!(model.parts[sub1_idx].placement.translation.z.abs() < 1e-9, "drawing accepted pose ignores explode");
+        assert!((model.exploded[sub1_idx].translation.z - 50.0).abs() < 1e-9, "drawing exploded pose carries step");
+
+        // 2. Robot export reader: includes all 6 active leaves (including the hidden block)
+        //    at their accepted world placements, ignoring the exploded viewport pose.
+        let articulation = soliddraft_scene::export::articulate(&mut doc).unwrap();
+        assert_eq!(articulation.links.len(), 7, "base_link + 6 active leaves including hidden part");
+        assert!(articulation.links.iter().any(|l| l.path.as_deref() == Some(hidden_path.to_string().as_str())));
+        let sub1_link = articulation
+            .links
+            .iter()
+            .position(|l| l.path.as_deref() == Some(sub1_block_path.to_string().as_str()))
+            .unwrap();
+        let sub1_joint = articulation.joints.iter().find(|j| j.child == sub1_link).unwrap();
+        assert!(sub1_joint.frame.w_axis.z.abs() < 1e-9, "robot export uses accepted pose, not exploded");
+
+        // 3. In-context reader: skips own occurrence (plate) and hidden block (4 shown neighbours),
+        //    and reads sub1/block's top face (accepted z = 10) in plate's frame (z = 30) as z = -20.
+        let ctx = context_mesh(&doc, &plate_occ_path);
+        let mut owner_paths: Vec<OccurrencePath> = ctx.owners.iter().map(|(p, _)| p.clone()).collect();
+        owner_paths.sort();
+        owner_paths.dedup();
+        assert_eq!(owner_paths.len(), 4, "4 shown nested blocks, excluding plate and hidden block");
+        assert!(!owner_paths.contains(&plate_occ_path));
+        assert!(!owner_paths.contains(&hidden_path));
+        let own_occ = doc.placed_occurrence(&plate_occ_path).unwrap();
+        let target_occ = doc.placed_occurrence(&sub1_block_path).unwrap();
+        let plane = face_plane(&mut doc, &kernel, &own_occ, &target_occ, &block_top_face).unwrap();
+        assert!((plane.origin.z - (-20.0)).abs() < 1e-9, "in-context face uses accepted pose: {plane:?}");
+
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

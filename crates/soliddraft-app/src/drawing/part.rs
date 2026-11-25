@@ -8,8 +8,8 @@ use soliddraft_drawing::measure::format_value;
 use soliddraft_drawing::project::{CircleInfo, Projected};
 use soliddraft_drawing::{ContentHash, DocumentId};
 use soliddraft_drawing::{
-    Entity, EntityKind, EntityRef, ModelDimension, ModelEntity, ModelMeasure, Namer, Part, PartSource, Resolution,
-    feature_name,
+    Entity, EntityKind, EntityRef, KernelBody, ModelDimension, ModelEntity, ModelMeasure, Namer, Part, PartSource,
+    Resolution, feature_name,
 };
 use soliddraft_kernel_api::{BodyId, EdgeId, FaceId, Kernel, Point2, Topology, Vec3};
 use std::sync::Arc;
@@ -50,8 +50,7 @@ impl<'a> PartContext<'a> {
     /// The part as `soliddraft-drawing` takes it for Catallax line work.
     pub fn part(&self) -> Part<'_> {
         Part {
-            kernel: self.kernel.as_ref(),
-            body: self.body,
+            geometry: Box::new(KernelBody::new(self.kernel.as_ref(), self.body)),
             digest: self.digest.clone(),
             dimensions: feature_dimensions(self.doc),
             namer: Some(self),

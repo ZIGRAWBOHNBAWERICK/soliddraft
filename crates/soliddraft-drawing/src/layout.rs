@@ -366,7 +366,7 @@ fn section_through_hole(
 ) -> Result<Option<(View, ViewContext)>, DrawingError> {
     use soliddraft_kernel_api::drawing::Curve3;
     use soliddraft_kernel_api::pmi::{PmiKind, SizeKind, Tolerance};
-    let topology = part.kernel.topology(part.body)?;
+    let topology = part.geometry.topology()?;
     let mut best: Option<(f64, Vec3, Vec3)> = None;
     for row in &part.requirements.rows {
         let Some(PmiKind::Size { size: SizeKind::Diameter, features, tolerance, .. }) =

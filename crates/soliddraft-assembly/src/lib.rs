@@ -60,7 +60,7 @@ pub mod subassembly;
 
 pub use binary::BinaryError;
 pub use configuration::{ComponentState, ConfigState, Configuration, Configurations, ExplodeStep};
-pub use configure::component_path;
+pub use configure::{PlacedOccurrence, component_path};
 pub use document::{AssemblyDocument, Changes, EditError, Opening, RebuildReport, RefChange, Selection, SourceReport};
 pub use file::{AssemblyPackage, CopyReader, FileError, RefCopy, TruthEntries};
 pub use interference::{

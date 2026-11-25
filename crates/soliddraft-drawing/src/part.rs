@@ -20,15 +20,15 @@ use soliddraft_kernel_api::drawing::Curve3;
 use soliddraft_kernel_api::{BodyId, EdgeId, FaceId, HistoryRecord, Kernel, KernelError, SurfaceKind, Vec3};
 
 use crate::entity::{EntityKind, EntityRef};
+use crate::geometry::{DrawingGeometry, KernelBody};
 use crate::model_items::ModelDimension;
 use crate::{ContentHash, DrawingError};
 
-/// The part a drawing shows: a body and what its definition says about it.
+/// The part or assembly a drawing shows: its read-only geometry and what its definition
+/// says about it.
 pub struct Part<'k> {
-    /// The kernel session that owns the body.
-    pub kernel: &'k dyn Kernel,
-    /// The part's body.
-    pub body: BodyId,
+    /// Read-only geometry queries bound to the body or placed assembly being drawn.
+    pub geometry: Box<dyn DrawingGeometry + 'k>,
     /// The part's revision: the semantic hash of its definition. A view made from
     /// another revision is out of date.
     pub digest: ContentHash,
@@ -152,25 +152,30 @@ const TIE_TOL: f64 = 1e-6;
 impl<'k> PartIndex<'k> {
     /// Reads the part's topology, history and edge curves.
     pub fn build(part: &Part<'k>) -> Result<PartIndex<'k>, DrawingError> {
-        let mut index = PartIndex::of_body(part.kernel, part.body)?;
+        let mut index = PartIndex::of_geometry(part.geometry.as_ref())?;
         index.namer = part.namer;
         Ok(index)
     }
 
     /// Reads a body's topology, history and edge curves, naming by fingerprint.
     pub fn of_body(kernel: &dyn Kernel, body: BodyId) -> Result<PartIndex<'k>, DrawingError> {
-        let topology = kernel.topology(body)?;
-        let history = kernel.history(body)?;
+        PartIndex::of_geometry(&KernelBody::new(kernel, body))
+    }
+
+    /// Reads a drawing geometry's topology, history and edge curves, naming by fingerprint.
+    pub fn of_geometry(geometry: &dyn DrawingGeometry) -> Result<PartIndex<'k>, DrawingError> {
+        let topology = geometry.topology()?;
+        let history = geometry.history()?;
         let edge_origin = origins(&history, |r| r.edges.generated().collect());
         let face_origin = origins(&history, |r| r.faces.generated().collect());
         let mut edges = Vec::with_capacity(topology.edges.len());
         let mut display_edges = None;
         for e in &topology.edges {
-            let (curve, approximate) = match kernel.edge_drawing(body, e.id) {
+            let (curve, approximate) = match geometry.edge_drawing(e.id) {
                 Ok(drawn) => (drawn.curve, drawn.approximate),
                 Err(error @ (KernelError::QueryFailed { .. } | KernelError::Unsupported(_))) => {
                     if display_edges.is_none() {
-                        display_edges = Some(kernel.rendering_edges(body, &Default::default())?);
+                        display_edges = Some(geometry.rendering_edges(&Default::default())?);
                     }
                     let points = display_edges
                         .as_ref()

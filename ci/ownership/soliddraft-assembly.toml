@@ -1,0 +1,45 @@
+[[areas]]
+name = "assembly.core"
+owner = "core"
+crate = "soliddraft-assembly"
+paths = [
+  "crates/soliddraft-assembly/src/lib.rs",
+  "crates/soliddraft-assembly/src/document.rs",
+  "crates/soliddraft-assembly/src/schema.rs",
+  "crates/soliddraft-assembly/src/file.rs",
+  "crates/soliddraft-assembly/src/load.rs",
+  "crates/soliddraft-assembly/src/load/",
+  "crates/soliddraft-assembly/src/store.rs",
+  "crates/soliddraft-assembly/src/occurrence.rs",
+  "crates/soliddraft-assembly/src/placement.rs",
+  "crates/soliddraft-assembly/src/reference_mesh.rs",
+  "crates/soliddraft-assembly/src/path.rs",
+  "crates/soliddraft-assembly/src/source.rs",
+  "crates/soliddraft-assembly/src/scene.rs",
+  "crates/soliddraft-assembly/src/bvh.rs",
+  "crates/soliddraft-assembly/src/mesh.rs",
+  "crates/soliddraft-assembly/src/binary.rs",
+  "crates/soliddraft-assembly/src/bulk.rs"
+]
+module = []
+
+[[areas]]
+name = "v5.assembly_mates"
+owner = "V5"
+crate = "soliddraft-assembly"
+paths = ["crates/soliddraft-assembly/src/mates/"]
+module = ["mates"]
+
+[[areas]]
+name = "b7.assembly_interference"
+owner = "B7"
+crate = "soliddraft-assembly"
+paths = ["crates/soliddraft-assembly/src/interference/"]
+module = ["interference"]
+
+[[areas]]
+name = "v6.subassembly_model"
+owner = "V6"
+crate = "soliddraft-assembly"
+paths = ["crates/soliddraft-assembly/src/subassembly/"]
+module = ["subassembly"]

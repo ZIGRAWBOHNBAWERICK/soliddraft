@@ -70,7 +70,7 @@ fn clean_block_and_cylinder_import_render_save_reopen_and_checked_export() {
         ("block", ProfileKind::Rectangle { width: 2.0, height: 3.0 }, 5.0, 6, 30.0),
         ("cylinder", ProfileKind::Circle { diameter: 6.0 }, 7.0, 3, 63.0 * std::f64::consts::PI),
     ] {
-        let kernel = soliddraft_app::kernel();
+        let kernel = soliddraft_app::startup::kernel();
         let mut original = Document::new("Source", kernel.clone());
         original
             .apply(Command::AddExtrude {
@@ -223,7 +223,7 @@ fn approved_seam_repair_renders_saves_reopens_and_exports_with_its_record() {
     let bytes = include_bytes!("../../../ci/fixtures/import/block-seam-20um.step").to_vec();
     let path = root.join("block-seam-20um.step");
     std::fs::write(&path, &bytes).unwrap();
-    let kernel = soliddraft_app::kernel();
+    let kernel = soliddraft_app::startup::kernel();
     let mut app = Harness::builder()
         .with_size(egui::vec2(1440.0, 900.0))
         .with_step_dt(0.1)
@@ -297,7 +297,7 @@ fn approved_seam_repair_renders_saves_reopens_and_exports_with_its_record() {
 
 #[test]
 fn malformed_and_unsupported_step_files_get_plain_messages_without_editing_the_part() {
-    let doc = soliddraft_app::new_document();
+    let doc = soliddraft_app::startup::new_document();
     let source = std::str::from_utf8(include_bytes!("../../../ci/fixtures/import/block-seam-4um.step")).unwrap();
     let original = doc.model().to_bytes().unwrap();
     for source in [
@@ -318,7 +318,7 @@ fn a_faceted_brep_opens_with_default_tolerant_authority() {
     let source = include_str!("../../../ci/fixtures/import/block-seam-4um.step")
         .replace("MANIFOLD_SOLID_BREP(", "FACETED_BREP(")
         .into_bytes();
-    let mut doc = soliddraft_app::new_document();
+    let mut doc = soliddraft_app::startup::new_document();
     let preview = soliddraft_app::import::Preview::from_bytes(&doc, "faceted.step", source.clone()).unwrap();
     soliddraft_app::import::commit(&mut doc, &preview, &Default::default()).unwrap();
     let body = doc.display_body().unwrap();

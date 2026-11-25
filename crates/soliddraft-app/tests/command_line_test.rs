@@ -42,7 +42,7 @@ fn harness() -> App<'static> {
         .with_step_dt(1.0 / 60.0)
         .wgpu()
         .build_eframe(|cc| {
-            let mut app = SolidDraftApp::new(cc, soliddraft_app::demo_document(), Automation::default());
+            let mut app = SolidDraftApp::new(cc, soliddraft_app::startup::demo_document(), Automation::default());
             let provider = std::sync::Arc::new(MockProvider::new(vec![
                 MockTurn::tools(
                     "",

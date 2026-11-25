@@ -27,7 +27,7 @@ fn call(doc: &mut Document, name: &str, input: Value) -> Result<Value, String> {
 }
 
 fn imported() -> (Document, u64) {
-    let mut doc = Document::new("Replacement", soliddraft_app::kernel());
+    let mut doc = Document::new("Replacement", soliddraft_app::startup::kernel());
     let preview = Preview::from_bytes(&doc, "part.step", BLOCK.to_vec()).unwrap();
     let id = commit(&mut doc, &preview, &Review::default()).unwrap();
     (doc, id)
@@ -67,7 +67,7 @@ fn replaced_source_keeps_identity_and_matching_references_and_marks_the_rest_for
     assert!(source.decisions.is_empty());
     let saved = doc.model().to_bytes().unwrap();
     let reopened =
-        soliddraft_app::file::open_bytes("replacement.dwprt", &saved, soliddraft_app::kernel(), None).unwrap();
+        soliddraft_app::file::open_bytes("replacement.dwprt", &saved, soliddraft_app::startup::kernel(), None).unwrap();
     assert!(reopened.features.iter().all(|f| f.status == FeatureStatus::Ok));
     doc.undo().unwrap();
     assert_eq!(doc.model().to_bytes().unwrap(), untouched);
@@ -91,7 +91,7 @@ fn replaced_source_keeps_identity_and_matching_references_and_marks_the_rest_for
     assert!(matches!(doc.features[2].status, FeatureStatus::NeedsRepair(_)));
     let saved = doc.model().to_bytes().unwrap();
     let reopened =
-        soliddraft_app::file::open_bytes("replacement.dwprt", &saved, soliddraft_app::kernel(), None).unwrap();
+        soliddraft_app::file::open_bytes("replacement.dwprt", &saved, soliddraft_app::startup::kernel(), None).unwrap();
     assert!(matches!(reopened.features[1].status, FeatureStatus::NeedsRepair(_)));
     assert!(matches!(reopened.features[2].status, FeatureStatus::NeedsRepair(_)));
     doc.undo().unwrap();
@@ -122,7 +122,7 @@ fn closed_mesh_review_accepts_displays_saves_reopens_and_exports_an_exact_solid(
     let case = ribbon::case("release-mesh-import");
     let source = case.path("tetrahedron.obj");
     std::fs::write(&source, MESH).unwrap();
-    let mut app = ribbon::app(Document::new("Mesh solid", soliddraft_app::kernel()));
+    let mut app = ribbon::app(Document::new("Mesh solid", soliddraft_app::startup::kernel()));
     app.run_steps(3);
     let command = soliddraft_app::commands::get("import_mesh").unwrap();
     assert!((command.shown)(&app.state().state));
@@ -173,15 +173,19 @@ fn closed_mesh_review_accepts_displays_saves_reopens_and_exports_an_exact_solid(
     app.key_press(egui::Key::Escape);
     app.run_steps(3);
     let saved = app.state().state.doc.model().to_bytes().unwrap();
-    let reopened = soliddraft_app::file::open_bytes("mesh.dwprt", &saved, soliddraft_app::kernel(), None).unwrap();
+    let reopened =
+        soliddraft_app::file::open_bytes("mesh.dwprt", &saved, soliddraft_app::startup::kernel(), None).unwrap();
     let FeatureKind::ImportStep(import) = &reopened.features[0].kind else { panic!("import") };
     assert_eq!(import.format, ImportFormat::Mesh);
     assert_eq!(import.source, MESH);
     let export = reopened.kernel().export_step(reopened.display_body().unwrap(), &Default::default()).unwrap();
     assert!(export.report.within_tolerance);
-    let preview =
-        Preview::from_bytes(&Document::new("check", soliddraft_app::kernel()), "mesh.step", export.text.into_bytes())
-            .unwrap();
+    let preview = Preview::from_bytes(
+        &Document::new("check", soliddraft_app::startup::kernel()),
+        "mesh.step",
+        export.text.into_bytes(),
+    )
+    .unwrap();
     assert!(preview.summary()["proposals"].as_array().unwrap().is_empty());
     app.state_mut().state.doc.undo().unwrap();
     assert!(app.state().state.doc.features.is_empty());
@@ -189,7 +193,7 @@ fn closed_mesh_review_accepts_displays_saves_reopens_and_exports_an_exact_solid(
 
 #[test]
 fn source_cleanup_keeps_its_certificate_and_saved_record() {
-    let mut doc = Document::new("Source cleanup", soliddraft_app::kernel());
+    let mut doc = Document::new("Source cleanup", soliddraft_app::startup::kernel());
     let source = include_bytes!("../../soliddraft-kernel-catallax/tests/fixtures/planar-source-incidence.step");
     let preview = Preview::from_bytes(&doc, "incidence.step", source.to_vec()).unwrap();
     let id = commit(&mut doc, &preview, &Review::default()).unwrap();
@@ -201,7 +205,8 @@ fn source_cleanup_keeps_its_certificate_and_saved_record() {
     assert!(record.tolerant.is_none());
     assert_eq!(record.source_incidence.len(), 1);
     let saved = doc.model().to_bytes().unwrap();
-    let reopened = soliddraft_app::file::open_bytes("cleanup.dwprt", &saved, soliddraft_app::kernel(), None).unwrap();
+    let reopened =
+        soliddraft_app::file::open_bytes("cleanup.dwprt", &saved, soliddraft_app::startup::kernel(), None).unwrap();
     assert_eq!(reopened.model().import_record(soliddraft_model::FeatureId(id as u32)), Some(record));
     assert_eq!(reopened.features[0].status, FeatureStatus::Ok);
 }
@@ -228,14 +233,15 @@ fn ascii_and_binary_stl_take_the_same_review_and_saved_solid_path() {
     }
     ascii.push_str("endsolid tetrahedron\n");
     for bytes in [ascii.into_bytes(), binary] {
-        let mut doc = Document::new("STL solid", soliddraft_app::kernel());
+        let mut doc = Document::new("STL solid", soliddraft_app::startup::kernel());
         let preview = Preview::from_source(&doc, "tetrahedron.stl", bytes.clone(), ImportFormat::Mesh).unwrap();
         commit(&mut doc, &preview, &Review::default()).unwrap();
         assert!(
             (doc.kernel().mass_properties(doc.display_body().unwrap()).unwrap().volume - 1000.0 / 6.0).abs() < 1e-8
         );
         let saved = doc.model().to_bytes().unwrap();
-        let reopened = soliddraft_app::file::open_bytes("stl.dwprt", &saved, soliddraft_app::kernel(), None).unwrap();
+        let reopened =
+            soliddraft_app::file::open_bytes("stl.dwprt", &saved, soliddraft_app::startup::kernel(), None).unwrap();
         let FeatureKind::ImportStep(source) = &reopened.features[0].kind else { panic!("import") };
         assert_eq!(source.source, bytes);
         assert_eq!(reopened.features[0].status, FeatureStatus::Ok);
@@ -244,7 +250,7 @@ fn ascii_and_binary_stl_take_the_same_review_and_saved_solid_path() {
 
 #[test]
 fn mesh_refusals_are_plain_and_do_not_change_the_part() {
-    let doc = Document::new("Refusals", soliddraft_app::kernel());
+    let doc = Document::new("Refusals", soliddraft_app::startup::kernel());
     let text = std::str::from_utf8(MESH).unwrap();
     for (source, fragment) in [
         (b"broken".to_vec(), "STL or OBJ"),
@@ -268,7 +274,7 @@ fn mesh_refusals_are_plain_and_do_not_change_the_part() {
 
 #[test]
 fn cleanup_beyond_the_certified_limit_is_tolerant_not_certified() {
-    let mut doc = Document::new("Tolerant cleanup", soliddraft_app::kernel());
+    let mut doc = Document::new("Tolerant cleanup", soliddraft_app::startup::kernel());
     let source = include_str!("../../soliddraft-kernel-catallax/tests/fixtures/planar-source-incidence.step")
         .replace("(0.000001,0,1)", "(0.003,0,1)");
     let bytes = source.into_bytes();
@@ -306,7 +312,7 @@ fn closed_mesh_downstream_boss_edits_reopens_and_exports_as_a_solid() {
     assert_eq!(imported["file"]["sha256"], soliddraft_model::sha256_hex(MESH));
     let saved = doc.model().to_bytes().unwrap();
     let mut reopened =
-        soliddraft_app::file::open_bytes("mesh-boss.dwprt", &saved, soliddraft_app::kernel(), None).unwrap();
+        soliddraft_app::file::open_bytes("mesh-boss.dwprt", &saved, soliddraft_app::startup::kernel(), None).unwrap();
     assert!(reopened.features.iter().all(|f| f.status == FeatureStatus::Ok));
     assert!((volume(&reopened) - 518.0 / 3.0).abs() < 1e-6);
     call(&mut reopened, "edit_extrude", json!({"feature":"Boss-Extrude1","depth":3,"flip":false})).unwrap();

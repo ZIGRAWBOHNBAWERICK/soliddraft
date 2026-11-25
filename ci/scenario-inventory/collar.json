@@ -1,0 +1,24 @@
+{
+  "id": "collar",
+  "file": "ci/scenarios/collar.json",
+  "acceptance": true,
+  "owners": [
+    "soliddraft-app",
+    "soliddraft-model",
+    "soliddraft-kernel-catallax"
+  ],
+  "kernel_parts": [
+    "boolean",
+    "chamfer",
+    "hole",
+    "measure",
+    "mesh",
+    "revolve",
+    "step",
+    "verify"
+  ],
+  "catallax_revision": "76cdf97f3e85d22ea74868b77d849498ebdfcf1c",
+  "route": "MCP document commands -> Catallax adapter -> pinned kernel",
+  "supported_limits": "P2 collar: radii 6 to 12 mm, height 12 mm, revolved 360 degrees about Y, outer-rim chamfers 1 and 0.75 mm; one plain through hole on the top annulus at radius 9 mm, diameter 2 edited to 2.5 mm, strictly inside both bevel rings; volume tolerance 0.005 mm3 at a 20M work allowance; a hole whose wall meets a bevel cone retains intersect.traced-pair-required; partial M7 evidence",
+  "evidence": "result.json, protocol.json and commands/NNNN/{part.dwprt,command.json,kernel.json,measurement.json,viewport.png,view.svg}; steps 3-4 drawing.dwdrw, drawing.svg and STEP/STL exports; steps 10 and 13 Hole1 wall name; collar-hole.dwprt; commands/0012/{part.step,step-report.json,check-step.stdout,check-step.stderr,raw-step.stdout,raw-step.stderr}; commands/0014 refusal question and replay; geometry-info.stdout recipe hashes"
+}

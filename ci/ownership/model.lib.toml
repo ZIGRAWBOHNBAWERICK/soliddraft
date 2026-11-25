@@ -1,0 +1,6 @@
+[[areas]]
+name = "model.lib"
+owner = "core"
+crate = "soliddraft-model"
+paths = ["crates/soliddraft-model/src/lib.rs"]
+module = []

@@ -1,0 +1,6 @@
+[[areas]]
+name = "app.command_tools"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/command_tools.rs"]
+module = ["command_tools"]

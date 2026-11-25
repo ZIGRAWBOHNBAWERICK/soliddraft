@@ -5,13 +5,13 @@ use soliddraft_app::document::{Command, Document};
 
 fn bracket() -> Document {
     let bytes = include_bytes!("../../../site/parts/bracket.dwprt");
-    soliddraft_app::file::open_bytes("bracket.dwprt", bytes, soliddraft_app::kernel(), None).unwrap()
+    soliddraft_app::file::open_bytes("bracket.dwprt", bytes, soliddraft_app::startup::kernel(), None).unwrap()
 }
 
 /// Every edge of the sample part has a name that finds the same edge again.
 #[test]
 fn the_demo_part_names_every_edge() {
-    let doc = soliddraft_app::demo_document();
+    let doc = soliddraft_app::startup::demo_document();
     let body = doc.model().body().unwrap();
     let topology = doc.model().kernel().topology(body).unwrap();
     assert_eq!(topology.edges.len(), 48);
@@ -71,7 +71,8 @@ fn a_saved_piece_reference_finds_its_piece_after_reopening() {
         .collect();
     assert_eq!(pieces.len(), 3);
     let saved = doc.model().to_bytes().unwrap();
-    let reopened = soliddraft_app::file::open_bytes("bracket.dwprt", &saved, soliddraft_app::kernel(), None).unwrap();
+    let reopened =
+        soliddraft_app::file::open_bytes("bracket.dwprt", &saved, soliddraft_app::startup::kernel(), None).unwrap();
     let again = reopened.model().body().unwrap();
     let edges = reopened.model().kernel().topology(again).unwrap().edges;
     for (midpoint, piece) in pieces {

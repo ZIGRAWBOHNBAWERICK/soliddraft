@@ -1,0 +1,17 @@
+{
+  "id": "sketch-ellipse",
+  "file": "ci/scenarios/sketch-ellipse.json",
+  "acceptance": false,
+  "owners": [
+    "soliddraft-app",
+    "soliddraft-model",
+    "soliddraft-sketch",
+    "soliddraft-kernel-catallax"
+  ],
+  "kernel_parts": [
+    "boolean",
+    "extrude",
+    "measure",
+    "mesh"
+  ]
+}

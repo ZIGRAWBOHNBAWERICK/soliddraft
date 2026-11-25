@@ -40,7 +40,7 @@ fn authored_slider_plane_and_ball_round_trip_through_both_scene_importers() {
     }
     let _cleanup = Cleanup(&dir);
     let (block, shaft, rig) = (dir.join("block.dwprt"), dir.join("shaft.dwprt"), dir.join("rig.dwasm"));
-    let mut state = AppState::new(soliddraft_app::new_document());
+    let mut state = AppState::new(soliddraft_app::startup::new_document());
     part(&mut state, &block, json!({ "shape": "rectangle", "center": [0, 0, 0], "width": 20, "height": 10 }));
     part(&mut state, &shaft, json!({ "shape": "circle", "center": [0, 0, 0], "diameter": 10 }));
     call(&mut state, "make_assembly", json!({}));
@@ -66,7 +66,7 @@ fn authored_slider_plane_and_ball_round_trip_through_both_scene_importers() {
     call(&mut state, "assembly_save", json!({ "path": rig }));
 
     // The same assembly reopened in a fresh session takes a point-to-point mate.
-    let mut state = AppState::new(soliddraft_app::new_document());
+    let mut state = AppState::new(soliddraft_app::startup::new_document());
     call(&mut state, "open", json!({ "path": rig }));
     let ball = place(&mut state, &block, [20.0, 2.0, 0.0]);
     let corner = |component| {
@@ -96,7 +96,7 @@ fn authored_slider_plane_and_ball_round_trip_through_both_scene_importers() {
         };
 
         let imported_path = dir.join(format!("imported-{extension}.dwasm"));
-        let mut reopened = AppState::new(soliddraft_app::new_document());
+        let mut reopened = AppState::new(soliddraft_app::startup::new_document());
         let imported = call(&mut reopened, "import_scene", json!({ "path": file, "out": imported_path }));
         let record = &imported["import"];
         assert_eq!(record["nodes"].as_array().unwrap().iter().filter(|n| !n["body"].is_null()).count(), 4);
@@ -120,7 +120,7 @@ fn authored_slider_plane_and_ball_round_trip_through_both_scene_importers() {
         }
 
         call(&mut reopened, "assembly_save", json!({ "path": imported_path }));
-        let mut fresh = AppState::new(soliddraft_app::new_document());
+        let mut fresh = AppState::new(soliddraft_app::startup::new_document());
         let saved = call(&mut fresh, "open", json!({ "path": imported_path }));
         let names = saved["assembly"]["import"]["joints"].as_array().unwrap();
         assert_eq!(names.len(), 4);

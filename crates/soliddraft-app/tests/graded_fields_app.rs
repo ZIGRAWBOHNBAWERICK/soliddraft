@@ -88,7 +88,7 @@ fn renderer() -> App {
     let temporary = std::env::temp_dir().join(format!("soliddraft-graded-{}", std::process::id()));
     std::fs::create_dir_all(&temporary).unwrap();
     soliddraft_app::file::set_config_dir(Some(temporary.join("config")));
-    let mut doc = Some(Document::new("Graded", soliddraft_app::kernel()));
+    let mut doc = Some(Document::new("Graded", soliddraft_app::startup::kernel()));
     Harness::builder()
         .with_size(vec2(1440.0, 900.0))
         .with_render_every_step(true)

@@ -1,0 +1,7 @@
+{
+  "files": {
+    "ci/check-step-oracle.py": [
+      "application-loop"
+    ]
+  }
+}

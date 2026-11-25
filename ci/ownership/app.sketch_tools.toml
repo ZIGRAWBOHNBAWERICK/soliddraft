@@ -1,0 +1,6 @@
+[[areas]]
+name = "app.sketch_tools"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/sketch_tools.rs", "crates/soliddraft-app/src/sketch_tools/"]
+module = ["sketch_tools"]

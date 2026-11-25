@@ -1,0 +1,23 @@
+{
+  "id": "edit-display-reuse",
+  "file": "ci/scenarios/edit-display-reuse.json",
+  "acceptance": true,
+  "owners": [
+    "soliddraft-app",
+    "soliddraft-cli",
+    "soliddraft-model",
+    "soliddraft-kernel-api",
+    "soliddraft-kernel-catallax"
+  ],
+  "kernel_parts": [
+    "boolean",
+    "extrude",
+    "fillet",
+    "measure",
+    "mesh"
+  ],
+  "catallax_revision": "76cdf97f3e85d22ea74868b77d849498ebdfcf1c",
+  "route": "MCP edits -> document rebuild and immutable display meshes -> retained offscreen viewport -> development rebuild report",
+  "supported_limits": "One part at a time; rounded boss dimension and fillet edits, rename, undo/redo, suppress/restore and fresh reopen; unchanged meshes keep their GPU buffers.",
+  "evidence": "commands/NNNN and commands-1/NNNN/{command.json,display.json,kernel.json,viewport.png,view.svg}; rounded.dwprt; foreground mesh requests and GPU body placements checked separately from background display refinement"
+}

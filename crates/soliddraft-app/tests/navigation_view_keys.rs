@@ -146,7 +146,7 @@ fn f_conflict_does_not_steal_front_or_fillet() {
 }
 
 fn box_document() -> Document {
-    let mut doc = Document::new("Box", soliddraft_app::kernel());
+    let mut doc = Document::new("Box", soliddraft_app::startup::kernel());
     doc.apply(Command::AddExtrude {
         params: ExtrudeParams {
             profile: ProfileKind::Rectangle { width: 60.0, height: 40.0 },

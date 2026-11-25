@@ -284,7 +284,7 @@ mod tests {
 
     #[test]
     fn an_unfinished_old_request_does_not_block_the_edited_part() {
-        let mut doc = Document::new("Body", crate::kernel());
+        let mut doc = Document::new("Body", crate::startup::kernel());
         let feature =
             doc.apply(Command::AddExtrude { params: ExtrudeParams::default(), via_assistant: false }).unwrap().unwrap();
         let request = Request::of(&doc, feature).unwrap();
@@ -299,7 +299,7 @@ mod tests {
 
     #[test]
     fn a_cached_answer_is_available_while_an_old_request_is_unfinished() {
-        let mut doc = Document::new("Body", crate::kernel());
+        let mut doc = Document::new("Body", crate::startup::kernel());
         let feature =
             doc.apply(Command::AddExtrude { params: ExtrudeParams::default(), via_assistant: false }).unwrap().unwrap();
         let request = Request::of(&doc, feature).unwrap();
@@ -349,8 +349,8 @@ mod tests {
 
     #[test]
     fn a_kept_answer_belongs_to_one_open_part_even_when_another_reuses_its_body_id() {
-        let mut first = Document::new("First", crate::kernel());
-        let mut second = Document::new("Second", crate::kernel());
+        let mut first = Document::new("First", crate::startup::kernel());
+        let mut second = Document::new("Second", crate::startup::kernel());
         let a = first
             .apply(Command::AddExtrude { params: ExtrudeParams::default(), via_assistant: false })
             .unwrap()
@@ -368,7 +368,7 @@ mod tests {
 
     #[test]
     fn an_answer_is_kept_only_while_its_request_is_current() {
-        let mut doc = Document::new("Body", crate::kernel());
+        let mut doc = Document::new("Body", crate::startup::kernel());
         let feature =
             doc.apply(Command::AddExtrude { params: ExtrudeParams::default(), via_assistant: false }).unwrap().unwrap();
         let request = Request::of(&doc, feature).unwrap();
@@ -389,7 +389,7 @@ mod tests {
 
     #[test]
     fn pending_and_refused_properties_cannot_follow_another_revision_or_part() {
-        let mut doc = Document::new("Body", crate::kernel());
+        let mut doc = Document::new("Body", crate::startup::kernel());
         let feature =
             doc.apply(Command::AddExtrude { params: ExtrudeParams::default(), via_assistant: false }).unwrap().unwrap();
         let request = Request::of(&doc, feature).unwrap();
@@ -411,6 +411,6 @@ mod tests {
         assert!(state.pending.is_none());
         assert!(state.message(&doc, feature).is_none());
         assert!(state.failure.is_none());
-        assert!(!request.current(&Document::new("Other part", crate::kernel())));
+        assert!(!request.current(&Document::new("Other part", crate::startup::kernel())));
     }
 }

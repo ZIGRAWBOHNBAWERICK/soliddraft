@@ -1,0 +1,7 @@
+{
+  "files": {
+    "ci/check-graded-stl.py": [
+      "application-loop"
+    ]
+  }
+}

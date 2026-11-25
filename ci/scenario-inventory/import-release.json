@@ -1,0 +1,22 @@
+{
+  "id": "import-release",
+  "file": "ci/scenarios/import-release.json",
+  "acceptance": true,
+  "owners": [
+    "soliddraft-app",
+    "soliddraft-model",
+    "soliddraft-kernel-catallax"
+  ],
+  "kernel_parts": [
+    "fillet",
+    "iges",
+    "import",
+    "measure",
+    "mesh",
+    "step"
+  ],
+  "catallax_revision": "9aed0777184353a5f52d1b660f9d2411b97f0fc9",
+  "route": "MCP reviewed import and replacement -> document features -> Catallax exact solid import",
+  "supported_limits": "One closed STL or OBJ solid in millimetres, up to 200,000 triangles. Replacing a STEP source keeps the feature identity and asks for new references when its bytes change.",
+  "evidence": "Mesh volume, saved source and reopen; reviewed STEP replacement with approved repair, retained feature name and undo to the original fillet."
+}

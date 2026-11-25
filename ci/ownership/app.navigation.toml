@@ -1,0 +1,6 @@
+[[areas]]
+name = "app.navigation"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/navigation/"]
+module = ["navigation"]

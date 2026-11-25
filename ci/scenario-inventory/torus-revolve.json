@@ -1,0 +1,21 @@
+{
+  "id": "torus-revolve",
+  "file": "ci/scenarios/torus-revolve.json",
+  "acceptance": true,
+  "owners": [
+    "soliddraft-app",
+    "soliddraft-model",
+    "soliddraft-kernel-catallax"
+  ],
+  "kernel_parts": [
+    "boolean",
+    "measure",
+    "mesh",
+    "revolve",
+    "step"
+  ],
+  "catallax_revision": "76cdf97f3e85d22ea74868b77d849498ebdfcf1c",
+  "route": "MCP document commands -> real document rebuild -> pinned Catallax -> drawing and checked STEP export",
+  "supported_limits": "R3/r1 torus, circle revolved 360 degrees about Y; volume and area tolerance 0.005, box tolerance 0.001 mm; save, fresh-process reopen and a refused zero-angle or zero-depth edit preserve the body; 20M work per request; edit/history, rename, suppress/restore, exact prior-value reuse and fresh reopen count foreground mesh requests and GPU placements",
+  "evidence": "result.json, protocol.json, commands/NNNN/{command.json,kernel.json,measurement.json,viewport.png,view.svg,drawing.dwdrw,drawing.svg}; saved part; checked STEP export and independent surface, volume and material-point oracle after reopen"
+}

@@ -1,0 +1,21 @@
+{
+  "id": "configuration-grid-csv",
+  "file": "ci/scenarios/configuration-grid-csv.json",
+  "acceptance": true,
+  "owners": [
+    "soliddraft-app",
+    "soliddraft-model",
+    "soliddraft-kernel-catallax"
+  ],
+  "kernel_parts": [
+    "boolean",
+    "extrude",
+    "measure",
+    "mesh",
+    "step"
+  ],
+  "catallax_revision": "76cdf97f3e85d22ea74868b77d849498ebdfcf1c",
+  "route": "MCP configuration grid tools -> CSV codec -> document transaction -> Catallax adapter -> pinned kernel",
+  "supported_limits": "Text properties and named values of one part with rows Default, Narrow and a quoted row; the complete row set must be present; no row rename or deletion; volume and area tolerance 0.005, centroid tolerance 1e-6 mm, mesh bounds tolerance 0.001 mm; app work cap 20M",
+  "evidence": "result.json, protocol.json, commands/NNNN and commands-N/NNNN/{command.json,kernel.json,viewport.png,helper-*.stdout}; fixtures/; out/{g0,g1,unicode}.*; csv-130.dwprt; commands-2/0001/{part.step,step-report.json,check-step.stdout,check-step.stderr}"
+}

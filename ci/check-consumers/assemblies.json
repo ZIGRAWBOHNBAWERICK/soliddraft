@@ -1,0 +1,7 @@
+{
+  "files": {
+    "ci/browser-assemblies.mjs": [
+      "web"
+    ]
+  }
+}

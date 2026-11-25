@@ -149,7 +149,7 @@ fn a_part_keeps_its_own_rollback_and_playback_while_another_tab_is_active() {
     let _case = ribbon::case("tab-rollback");
     let mut app = ribbon::app(plate_with_two_features());
     let first = app.state().state.doc.features[0].id;
-    act(&mut app, AppAction::EditFeature(first));
+    act(&mut app, AppAction::Editor(soliddraft_app::app::EditorAction::EditFeature(first)));
     assert_eq!(app.state().state.doc.rollback, Some(0), "the editor shows the part before its feature");
 
     // Another tab, then back: the editor's view of the part ended with the switch.

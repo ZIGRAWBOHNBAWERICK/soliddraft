@@ -1,0 +1,6 @@
+[[areas]]
+name = "v4.tabs"
+owner = "V4"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/tabs/"]
+module = ["tabs"]

@@ -16,7 +16,7 @@ use soliddraft_sketch::{P2, Sketch};
 
 fn bracket() -> document::Document {
     let recipe = soliddraft_recipe::parse(include_str!("../../../recipes/bracket.json")).unwrap();
-    let mut part = model::Document::new("Catallax bracket", soliddraft_app::kernel());
+    let mut part = model::Document::new("Catallax bracket", soliddraft_app::startup::kernel());
     let mut profiles = BTreeMap::new();
     for step in &recipe.steps {
         match &step.command {
@@ -97,7 +97,7 @@ fn bracket_renders_picks_a_named_face_edits_and_undoes_on_catallax() {
         assert!(std::env::var_os("SOLIDDRAFT_REQUIRE_GPU").is_none(), "CI requires its software Vulkan adapter");
         return;
     }
-    assert_eq!(soliddraft_app::kernel().backend().name, "catallax");
+    assert_eq!(soliddraft_app::startup::kernel().backend().name, "catallax");
     let doc = bracket();
     let original = volume(&doc);
     let plate = doc.features.iter().find(|f| f.name == "plate").unwrap().id;
@@ -289,7 +289,7 @@ fn polygon_tool_commits_undoes_redoes_and_extrudes_on_catallax() {
         .with_pixels_per_point(1.0)
         .with_render_every_step(true)
         .wgpu()
-        .build_eframe(|cc| SolidDraftApp::new(cc, soliddraft_app::new_document(), Automation::default()));
+        .build_eframe(|cc| SolidDraftApp::new(cc, soliddraft_app::startup::new_document(), Automation::default()));
     harness
         .state_mut()
         .state

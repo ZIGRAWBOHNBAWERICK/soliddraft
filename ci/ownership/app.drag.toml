@@ -1,0 +1,6 @@
+[[areas]]
+name = "app.drag"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/drag.rs"]
+module = ["drag"]

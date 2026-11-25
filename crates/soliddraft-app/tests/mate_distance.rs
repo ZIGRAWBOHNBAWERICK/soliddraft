@@ -69,7 +69,7 @@ fn rig(name: &str) -> Rig {
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     soliddraft_app::file::set_config_dir(Some(dir.join("config")));
-    let mut r = Rig { state: AppState::new(soliddraft_app::new_document()), dir };
+    let mut r = Rig { state: AppState::new(soliddraft_app::startup::new_document()), dir };
     let (a, b) = (r.dir.join("a.dwprt"), r.dir.join("b.dwprt"));
     r.part(&a, 40.0, 30.0, 10.0);
     r.ok("make_assembly", json!({}));

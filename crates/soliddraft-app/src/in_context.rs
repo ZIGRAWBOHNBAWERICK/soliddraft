@@ -855,7 +855,7 @@ mod tests {
 
     /// A part with one sketch on the base's top face, `z` millimetres from the part.
     fn plate(z: f64) -> crate::document::Document {
-        let mut doc = crate::new_document();
+        let mut doc = crate::startup::new_document();
         let context = ContextFace::new(
             ("asm", "Rig"),
             "2",

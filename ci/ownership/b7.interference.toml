@@ -1,0 +1,6 @@
+[[areas]]
+name = "b7.interference"
+owner = "B7"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/interference/"]
+module = ["interference"]

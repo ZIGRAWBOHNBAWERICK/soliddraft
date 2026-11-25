@@ -27,7 +27,7 @@ fn session(app: &App) -> &SketchSession {
 
 /// A line with its length dimension, a vertical line to the right of it and a circle.
 fn document() -> (Document, FeatureId, Sketch) {
-    let mut doc = Document::new("Box selection", soliddraft_app::kernel());
+    let mut doc = Document::new("Box selection", soliddraft_app::startup::kernel());
     let id = doc
         .apply(Command::AddSketch { plane: SketchPlane::Reference { plane: PlaneKind::Top, offset: 0.0 } })
         .unwrap()

@@ -69,7 +69,7 @@ fn flow(format: ImportFormat, source: &[u8]) {
     let case = ribbon::case(&format!("multisolid-{}", format.label()));
     let path = case.path("original.source");
     std::fs::write(&path, source).unwrap();
-    let mut app = ribbon::app(Document::new("Several imported solids", soliddraft_app::kernel()));
+    let mut app = ribbon::app(Document::new("Several imported solids", soliddraft_app::startup::kernel()));
     case.run(&mut app, |app| {
         reviewed(app, path.clone(), format);
         let doc = &app.state().state.doc;
@@ -118,7 +118,7 @@ fn flow(format: ImportFormat, source: &[u8]) {
         assert_eq!(membership(doc), reopened, "feature order cannot swap source solids");
         doc.undo().unwrap();
 
-        app.state_mut().state.push(AppAction::SelectBody(0));
+        app.state_mut().state.push(AppAction::Body(soliddraft_app::app::BodyAction::SelectBody(0)));
         app.run_steps(3);
         let untouched = app.state().state.doc.model().live_bodies()[1].1;
         app.state_mut().state.push(AppAction::Command(Command::AddFeature(FeatureKind::Mirror(
@@ -136,7 +136,7 @@ fn flow(format: ImportFormat, source: &[u8]) {
         app.run_steps(4);
         ribbon::until(app, "undo rebuild", |app| !app.state().state.doc.proof_pending());
 
-        app.state_mut().state.push(AppAction::StartCombine);
+        app.state_mut().state.push(AppAction::Body(soliddraft_app::app::BodyAction::StartCombine));
         app.run_steps(4);
         app.get_by_label("Combine bodies").get_by_label("Combine").click();
         app.run_steps(8);
@@ -214,11 +214,11 @@ fn reordering_source_solid_declarations_preserves_entity_to_geometry_membership(
     let reordered = lines.join("\n").replace("(#150,#300,#309)", "(#300,#150,#309)");
     let path = case.path("reordered.step");
     std::fs::write(&path, reordered.as_bytes()).unwrap();
-    let mut app = ribbon::app(Document::new("Original order", soliddraft_app::kernel()));
+    let mut app = ribbon::app(Document::new("Original order", soliddraft_app::startup::kernel()));
     case.run(&mut app, |app| {
         reviewed(app, original, ImportFormat::Step);
         let expected = geometry(&app.state().state.doc);
-        app.state_mut().state.doc = Document::new("Reordered source", soliddraft_app::kernel());
+        app.state_mut().state.doc = Document::new("Reordered source", soliddraft_app::startup::kernel());
         reviewed(app, path, ImportFormat::Step);
         assert_eq!(geometry(&app.state().state.doc), expected);
         for feature in &app.state().state.doc.features {
@@ -246,7 +246,7 @@ fn release_mcp_scenario_imports_two_bodies_undoes_and_previews_the_next_file() {
     use soliddraft_assistant::{Caller, ToolHost};
 
     let scenario: Value = serde_json::from_str(include_str!("../../../ci/scenarios/import-block.json")).unwrap();
-    let mut doc = Document::new("MCP solids", soliddraft_app::kernel());
+    let mut doc = Document::new("MCP solids", soliddraft_app::startup::kernel());
     let mut book = ProposalBook::default();
     let mut token = Value::Null;
     let mut imported = Vec::new();
@@ -298,7 +298,7 @@ fn saved_stock_with_body_counter(next: u32) -> Vec<u8> {
     let mut truth: serde_json::Value = serde_json::from_str(&stock.model().part_json()).unwrap();
     truth["format"] = "soliddraft-part/3".into();
     truth["next_body"] = next.into();
-    soliddraft_model::Document::from_part_json(&truth.to_string(), soliddraft_app::kernel())
+    soliddraft_model::Document::from_part_json(&truth.to_string(), soliddraft_app::startup::kernel())
         .unwrap()
         .to_bytes()
         .unwrap()
@@ -309,7 +309,8 @@ fn saved_exhausted_body_id_range_refuses_import_without_changes() {
     for counter in [u32::MAX, u32::MAX - 1] {
         let case = ribbon::case(&format!("import-exhausted-body-ids-{counter}"));
         let saved = saved_stock_with_body_counter(counter);
-        let doc = soliddraft_app::file::open_bytes("stock.dwprt", &saved, soliddraft_app::kernel(), None).unwrap();
+        let doc =
+            soliddraft_app::file::open_bytes("stock.dwprt", &saved, soliddraft_app::startup::kernel(), None).unwrap();
         assert_eq!(doc.model().next_body(), counter);
         assert_eq!(doc.model().live_bodies().len(), 1);
         let source = case.path("two-solids.step");
@@ -347,7 +348,7 @@ fn saved_exhausted_body_id_range_refuses_import_without_changes() {
 fn last_available_body_id_range_imports_saves_and_undoes_without_reusing_ids() {
     let case = ribbon::case("import-last-body-ids");
     let saved = saved_stock_with_body_counter(u32::MAX - 2);
-    let doc = soliddraft_app::file::open_bytes("stock.dwprt", &saved, soliddraft_app::kernel(), None).unwrap();
+    let doc = soliddraft_app::file::open_bytes("stock.dwprt", &saved, soliddraft_app::startup::kernel(), None).unwrap();
     let source = case.path("two-solids.step");
     std::fs::write(&source, STEP).unwrap();
     let mut app = ribbon::app(doc);
@@ -358,7 +359,8 @@ fn last_available_body_id_range_imports_saves_and_undoes_without_reusing_ids() {
         assert_eq!(doc.features.iter().map(|f| f.body_key).collect::<Vec<_>>(), [0, u32::MAX - 2, u32::MAX - 1]);
         let saved = doc.model().to_bytes().unwrap();
         let reopened =
-            soliddraft_app::file::open_bytes("last-ids.dwprt", &saved, soliddraft_app::kernel(), None).unwrap();
+            soliddraft_app::file::open_bytes("last-ids.dwprt", &saved, soliddraft_app::startup::kernel(), None)
+                .unwrap();
         assert_eq!(reopened.model().next_body(), u32::MAX);
         assert_eq!(reopened.model().live_bodies().len(), 3);
         app.state_mut().state.push(AppAction::Undo);

@@ -1,0 +1,6 @@
+[[areas]]
+name = "model.values"
+owner = "core"
+crate = "soliddraft-model"
+paths = ["crates/soliddraft-model/src/values.rs", "crates/soliddraft-model/src/params.rs"]
+module = ["values", "params"]

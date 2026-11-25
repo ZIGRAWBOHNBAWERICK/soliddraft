@@ -1,0 +1,6 @@
+[[areas]]
+name = "app.preferences"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/preferences/"]
+module = ["preferences"]

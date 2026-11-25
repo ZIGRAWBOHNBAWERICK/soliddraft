@@ -1,0 +1,6 @@
+[[areas]]
+name = "app.configurations"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/configurations/"]
+module = ["configurations"]

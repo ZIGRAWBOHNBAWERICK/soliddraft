@@ -1,0 +1,21 @@
+{
+  "id": "mate-gear-motion",
+  "file": "ci/scenarios/mate-gear-motion.json",
+  "acceptance": true,
+  "owners": [
+    "soliddraft-app",
+    "soliddraft-assembly",
+    "soliddraft-model",
+    "soliddraft-kernel-catallax"
+  ],
+  "kernel_parts": [
+    "boolean",
+    "extrude",
+    "measure",
+    "mesh"
+  ],
+  "catallax_revision": "76cdf97f3e85d22ea74868b77d849498ebdfcf1c",
+  "route": "MCP mechanical mate and drag commands -> assembly transaction -> exact or bounded residual checks",
+  "supported_limits": "B6: coupled motion, undo/redo and save/reopen; root joint references and continuous turn tracking; no contact or dynamics.",
+  "evidence": "result.json, protocol.json, command summaries, work/rig.dwasm and pinned parts"
+}

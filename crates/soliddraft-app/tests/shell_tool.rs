@@ -92,7 +92,7 @@ fn shell_opens_picks_previews_edits_persists_selects_and_exports() {
     let out = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/exit-test/l08-shell");
     std::fs::create_dir_all(&out).unwrap();
     soliddraft_app::file::set_config_dir(Some(out.join("config")));
-    let mut doc = Document::new("Analytic tray", soliddraft_app::kernel());
+    let mut doc = Document::new("Analytic tray", soliddraft_app::startup::kernel());
     doc.apply(Command::AddExtrude {
         params: ExtrudeParams {
             profile: ProfileKind::Rectangle { width: 40.0, height: 30.0 },
@@ -212,7 +212,7 @@ fn window(doc: Document) -> App {
 
 /// A 40 x 30 x 12 mm block with a diameter-6 through bore, made by the part's own commands.
 fn bored_block() -> Document {
-    let mut state = AppState::new(Document::new("Bored tray", soliddraft_app::kernel()));
+    let mut state = AppState::new(Document::new("Bored tray", soliddraft_app::startup::kernel()));
     let caller = Caller::Mcp { client: "shell-tool".into() };
     for (tool, arguments) in [
         (

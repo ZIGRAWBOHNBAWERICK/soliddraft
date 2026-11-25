@@ -1,0 +1,22 @@
+{
+  "id": "skew-corner-fillet",
+  "file": "ci/scenarios/skew-corner-fillet.json",
+  "acceptance": true,
+  "owners": [
+    "soliddraft-app",
+    "soliddraft-model",
+    "soliddraft-kernel-catallax"
+  ],
+  "kernel_parts": [
+    "boolean",
+    "extrude",
+    "fillet",
+    "measure",
+    "mesh",
+    "step"
+  ],
+  "catallax_revision": "76cdf97f3e85d22ea74868b77d849498ebdfcf1c",
+  "route": "MCP sketch_geometry, extrude, fillet, track and edit_fillet -> real document rebuild -> pinned Catallax skew spherical corners -> checked STEP on one request allowance",
+  "supported_limits": "A triangular prism (0,0), (8,0), (0,6), 10 mm deep, with all nine edges filleted at radius 1 and 1/2: 5 planes, 9 cylinders and 6 spheres; 20M per request, export included; volume and area tolerance 0.005, box 0.001 mm; concave, curved and unequal-radius corners stay refused in Catallax; partial M7 evidence",
+  "evidence": "result.json, protocol.json, commands/NNNN/{command.json,kernel.json,measurement.json,viewport.png,view.svg}; tracked skew blend and corner references through edit, undo, redo, reopen and refusal; commands/0004/{part.step,step-oracle.json} for radius 1; skew-corner.dwprt and commands-1/NNNN/{part.step,step-report.json,raw-step.stdout,step-oracle.json,step-oracle.stdout} at the refused edit; material_queries.rs and fillet_corner_names.rs for the exact points and the stored corner reference"
+}

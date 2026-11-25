@@ -122,7 +122,7 @@ fn part_contexts(pending: &mut BTreeSet<&str>) {
     state.doc.selection = Some(Selection::Feature(feature));
     find_and_dispatch(&mut state, pending);
 
-    let mut state = AppState::new(soliddraft_app::new_document());
+    let mut state = AppState::new(soliddraft_app::startup::new_document());
     tool(
         &mut state,
         "sketch",
@@ -174,7 +174,7 @@ fn part_contexts(pending: &mut BTreeSet<&str>) {
 }
 
 fn file_contexts(dir: &std::path::Path, pending: &mut BTreeSet<&str>) {
-    let mut state = AppState::new(soliddraft_app::new_document());
+    let mut state = AppState::new(soliddraft_app::startup::new_document());
     let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../ci/fixtures/import");
     let source = fixtures.join("block-closed.step");
     let preview = tool(&mut state, "preview_import", json!({"path":source}));
@@ -182,7 +182,7 @@ fn file_contexts(dir: &std::path::Path, pending: &mut BTreeSet<&str>) {
     state.doc.selection = Some(Selection::Feature(state.doc.features[0].id));
     find_and_dispatch(&mut state, pending);
 
-    let mut state = AppState::new(soliddraft_app::new_document());
+    let mut state = AppState::new(soliddraft_app::startup::new_document());
     let bytes = std::fs::read(fixtures.join("tetrahedron.obj")).unwrap();
     let source = soliddraft_kernel_api::scan::ScanSource {
         name: "tetrahedron.obj".into(),
@@ -195,7 +195,7 @@ fn file_contexts(dir: &std::path::Path, pending: &mut BTreeSet<&str>) {
         .unwrap();
     find_and_dispatch(&mut state, pending);
 
-    let mut state = AppState::new(soliddraft_app::new_document());
+    let mut state = AppState::new(soliddraft_app::startup::new_document());
     let rectangle = json!([{"shape":"rectangle","center":[0,0,20],"width":6,"height":6}]);
     tool(&mut state, "sketch", json!({"plane":"top","offset":20,"shapes":rectangle}));
     tool(&mut state, "extrude", json!({"sketch":"Sketch1","depth":10,"flip":false}));
@@ -228,7 +228,7 @@ fn file_contexts(dir: &std::path::Path, pending: &mut BTreeSet<&str>) {
     find_and_dispatch(&mut state, pending);
 
     std::fs::remove_file(part).unwrap();
-    let mut state = AppState::new(soliddraft_app::new_document());
+    let mut state = AppState::new(soliddraft_app::startup::new_document());
     tool(&mut state, "open", json!({"path":sheet}));
     drawing::reference::refresh(&mut state);
     find_and_dispatch(&mut state, pending);
@@ -236,7 +236,7 @@ fn file_contexts(dir: &std::path::Path, pending: &mut BTreeSet<&str>) {
 
 #[test]
 fn naming_a_command_outside_its_workspace_or_with_a_disabled_action_does_not_reach_it() {
-    let mut state = AppState::new(soliddraft_app::new_document());
+    let mut state = AppState::new(soliddraft_app::startup::new_document());
     let mut pending = BTreeSet::from(["assembly_mate", "make_assembly"]);
     for id in &pending {
         let named = soliddraft_app::command_line::named(id, commands::Context::of(&state));

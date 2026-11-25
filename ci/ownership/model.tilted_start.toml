@@ -1,0 +1,6 @@
+[[areas]]
+name = "model.tilted_start"
+owner = "core"
+crate = "soliddraft-model"
+paths = ["crates/soliddraft-model/src/tilted_start.rs"]
+module = ["tilted_start"]

@@ -46,14 +46,10 @@ pub enum AppAction {
     EditSketch(FeatureId),
     /// Closes the sketch and returns to the part without starting a feature.
     ExitSketch,
-    StartExtrude,
-    StartRevolve,
-    StartSweep,
-    /// Opens a loft between ordered sketch or face profiles.
-    StartLoft,
-    StartCut,
-    StartFillet,
-    StartChamfer,
+    Profile(crate::app::ProfileAction),
+    Body(crate::app::BodyAction),
+    Hole(crate::app::HoleAction),
+    Editor(crate::app::EditorAction),
     ShowMaterial,
     ShowBodyMaterial,
     ShowMaterialLibrary,
@@ -62,30 +58,6 @@ pub enum AppAction {
     /// Shows the selected face's colour and transparency, or the part's when no face
     /// is selected.
     ShowAppearance,
-    StartHole,
-    /// Opens the live inline position sketch inside an active Hole Wizard editor.
-    OpenHolePositionSketch,
-    /// Exits the live inline position sketch and syncs its points back to the Hole Wizard.
-    CloseHolePositionSketch,
-    /// Pushes panel-side point/pattern edits into an open inline position sketch session.
-    SyncHolePositionSketch,
-    StartPattern {
-        circular: bool,
-    },
-    StartMirror,
-    StartReferencePlane,
-    StartDraft,
-    StartShell,
-    NewBody,
-    SelectBody(u32),
-    RenameBody,
-    StartCombine,
-    StartOffset,
-    StartThicken,
-    StartLattice,
-    StartGyroid,
-    StartRepair(FeatureId),
-    EditFeature(FeatureId),
     SketchTool(Tool),
     /// Escape in a sketch: drops the tool, or clears the selection. It never closes the
     /// sketch.
@@ -142,13 +114,6 @@ pub enum AppAction {
     ToggleProjection,
     /// Opens the browser page's feedback form.
     GiveFeedback,
-    CancelEditor,
-    CommitEditor,
-    ApplySuggestedFilletRadius(f64),
-    /// The open Extrude's or Cut's depth, from its arrow on the preview.
-    EditorDepth(f64),
-    /// Opens the open form's Depth for typing.
-    EditorFocusDepth,
     PreviewProposal(String),
     ApplyProposal(String),
     DiscardProposal(String),
@@ -374,10 +339,10 @@ impl ProfileFeature {
     /// The action that starts the feature from the selected sketch.
     pub fn start(self) -> AppAction {
         match self {
-            ProfileFeature::Extrude => AppAction::StartExtrude,
-            ProfileFeature::Cut => AppAction::StartCut,
-            ProfileFeature::Revolve => AppAction::StartRevolve,
-            ProfileFeature::Sweep => AppAction::StartSweep,
+            ProfileFeature::Extrude => AppAction::Profile(crate::app::ProfileAction::Extrude),
+            ProfileFeature::Cut => AppAction::Profile(crate::app::ProfileAction::Cut),
+            ProfileFeature::Revolve => AppAction::Profile(crate::app::ProfileAction::Revolve),
+            ProfileFeature::Sweep => AppAction::Profile(crate::app::ProfileAction::Sweep),
         }
     }
 }

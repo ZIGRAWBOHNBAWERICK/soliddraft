@@ -1,0 +1,24 @@
+{
+  "id": "graded-fields",
+  "file": "ci/scenarios/graded-fields.json",
+  "acceptance": true,
+  "owners": [
+    "soliddraft-app",
+    "soliddraft-model",
+    "soliddraft-kernel-catallax"
+  ],
+  "kernel_parts": [
+    "boolean",
+    "extrude",
+    "field",
+    "fillet",
+    "measure",
+    "mesh",
+    "step",
+    "verify"
+  ],
+  "catallax_revision": "76cdf97f3e85d22ea74868b77d849498ebdfcf1c",
+  "route": "MCP document commands -> terminal Catallax field stage -> certified labelled STL, field moments and explicit mass stand-in STEP",
+  "supported_limits": "V7d-S: a cubic lattice radius or a network gyroid level graded linearly along one part axis, clamped beyond its anchors, in the part frame. D0-D2 (cell 100 mm, radius 1 to 2 mm along z from 20 to 30 mm, region 6 x 6 x 10 or 12 mm) and G0-G2 (period 10 mm, level -1/10 to 1/10 along z from -1 to 1 mm, region 2 or 12/5 x 2 x 2 mm), accuracy 0.1 mm (D0 and G0 also 0.5 mm), minimum detail 0.1 mm, default caps, every action within 19,999,999 work. Kernel coverage: radius endpoints at most a quarter of the cell, slope at most 1/2; level endpoints in [-1/4, 1/4], slope at most 1/10 per mm. Drawings, other field functions and density percentages remain deferred.",
+  "evidence": "result.json and commands/NNNN/{command.json,kernel.json,recipe.json,viewport.png,part.stl,export-stl-oracle.stdout,stand-in.step,export-stand-in.stdout,export-stand-in-oracle.stdout,stand-in-question.json,stand-in-replay/answer.step,field-mass.json,field-mass-oracle.stdout}; d.dwprt, d1.dwprt, g.dwprt, g1.dwprt"
+}

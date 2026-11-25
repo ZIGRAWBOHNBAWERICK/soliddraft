@@ -1,0 +1,6 @@
+[[areas]]
+name = "app.form_bar"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/form_bar.rs"]
+module = ["form_bar"]

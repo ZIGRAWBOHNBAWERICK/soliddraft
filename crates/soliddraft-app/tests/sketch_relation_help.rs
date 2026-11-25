@@ -186,7 +186,7 @@ fn every_glyph() -> (Sketch, Picks) {
 }
 
 fn part(source: Sketch) -> (Document, FeatureId) {
-    let mut doc = Document::new("Relation glyphs", soliddraft_app::kernel());
+    let mut doc = Document::new("Relation glyphs", soliddraft_app::startup::kernel());
     let id = doc
         .apply(Command::AddSketch { plane: SketchPlane::Reference { plane: PlaneKind::Top, offset: 0.0 } })
         .unwrap()

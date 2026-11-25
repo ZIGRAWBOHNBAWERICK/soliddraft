@@ -1200,7 +1200,7 @@ fn proposal_card(ui: &mut egui::Ui, p: &Proposal, can_undo: bool, previewing: bo
                 }
                 ProposalStatus::Applied { .. } => {
                     ui.horizontal_wrapped(|ui| {
-                        text(ui, "Applied to the tree as ordinary features.", theme::terminal_muted());
+                        text(ui, p.applied_text(), theme::terminal_muted());
                         if ui.add_enabled(can_undo, egui::Button::new(format!("Undo {}", p.id))).clicked() {
                             actions.push(AppAction::UndoProposal(p.id.clone()));
                         }

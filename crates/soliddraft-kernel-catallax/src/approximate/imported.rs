@@ -379,7 +379,7 @@ fn checked_topology(
 }
 
 pub(super) fn export_step(opened: &OpenedStep, index: usize, options: &StepOptions) -> KernelResult<StepExport> {
-    let bytes = super::on_request_allowance("export_step", |dec| {
+    let bytes = super::on_request_allowance(crate::RequestPolicy::Export, "export_step", |dec| {
         let bytes = match opened.body(index) {
             Some(BodyView::Certified { model, body }) => {
                 let mut bytes = Vec::new();

@@ -1,0 +1,6 @@
+[[areas]]
+name = "model.cache"
+owner = "core"
+crate = "soliddraft-model"
+paths = ["crates/soliddraft-model/src/rebuild.rs", "crates/soliddraft-model/src/inputs.rs"]
+module = ["rebuild", "inputs"]

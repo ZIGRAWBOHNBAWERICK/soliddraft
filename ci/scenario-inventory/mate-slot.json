@@ -1,0 +1,22 @@
+{
+  "id": "mate-slot",
+  "file": "ci/scenarios/mate-slot.json",
+  "acceptance": true,
+  "owners": [
+    "soliddraft-app",
+    "soliddraft-assembly",
+    "soliddraft-model",
+    "soliddraft-kernel-api",
+    "soliddraft-kernel-catallax"
+  ],
+  "kernel_parts": [
+    "boolean",
+    "extrude",
+    "measure",
+    "mesh"
+  ],
+  "catallax_revision": "76cdf97f3e85d22ea74868b77d849498ebdfcf1c",
+  "route": "MCP assembly and Slot mate commands -> assembly transaction -> slot recognition from proven walls and round ends -> Catallax adapter -> pinned kernel",
+  "supported_limits": "B4: Slot between a straight, axis-aligned slot cut through a block and a pin's cylinder: a block's top refused as unsupported_reference by name, the pin free and stopped at the far end, Lock rotation, a distance along the slot edited and flipped, undo, redo, save and reopen.",
+  "evidence": "result.json, protocol.json, commands/NNNN/{part.dwprt,command.json,kernel.json,inspect-*.stdout}; work/a.dwprt, work/pin.dwprt and work/rig.dwasm"
+}

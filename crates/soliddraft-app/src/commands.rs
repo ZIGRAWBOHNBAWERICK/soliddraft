@@ -1894,7 +1894,7 @@ fn registry() -> Vec<CommandSpec> {
         cmd("extrude", "Extrude", Icon::Cad("extrude"), "Add material: extrude a sketch and join it to the part")
             .on(Solid, "Create", Large)
             .key(Scope::Model, none, Key::E)
-            .run(|_| AppAction::StartExtrude)
+            .run(|_| AppAction::Profile(crate::app::ProfileAction::Extrude))
             .outside_sketch()
             .when(|s| !s.in_sketch() && field_open(s))
             .lit(|s| editing(s, |p| matches!(p, EditorParams::Extrude(_) | EditorParams::PickSketch(ProfileFeature::Extrude))))
@@ -1903,7 +1903,7 @@ fn registry() -> Vec<CommandSpec> {
 .undo(Undo::Step),
         cmd("revolve", "Revolve", Icon::Cad("revolve"), "Add material: revolve a sketch about an axis")
             .on(Solid, "Create", Large)
-            .run(|_| AppAction::StartRevolve)
+            .run(|_| AppAction::Profile(crate::app::ProfileAction::Revolve))
             .outside_sketch()
             .when(|s| !s.in_sketch() && field_open(s))
             .lit(|s| editing(s, |p| matches!(p, EditorParams::Revolve(_) | EditorParams::PickSketch(ProfileFeature::Revolve))))
@@ -1915,7 +1915,7 @@ fn registry() -> Vec<CommandSpec> {
             .undo(Undo::Step),
         cmd("sweep", "Sweep", Icon::Cad("sweep"), "Add material: sweep a polygon profile along lines, arcs or a spline")
             .on(Solid, "Create", Small)
-            .run(|_| AppAction::StartSweep)
+            .run(|_| AppAction::Profile(crate::app::ProfileAction::Sweep))
             .outside_sketch()
             .when(|s| !s.in_sketch() && field_open(s))
             .lit(|s| editing(s, |p| matches!(p, EditorParams::Sweep(_) | EditorParams::PickSketch(ProfileFeature::Sweep))))
@@ -1927,7 +1927,7 @@ fn registry() -> Vec<CommandSpec> {
             .undo(Undo::Step),
         cmd("loft", "Loft", Icon::Cad("loft"), "Add material: loft through ordered sketch or face profiles")
             .on(Solid, "Create", Small)
-            .run(|_| AppAction::StartLoft)
+            .run(|_| AppAction::Profile(crate::app::ProfileAction::Loft))
             .outside_sketch()
             .when(|s| !s.in_sketch() && field_open(s))
             .lit(|s| editing(s, |p| matches!(p, EditorParams::Loft(_))))
@@ -1941,7 +1941,7 @@ fn registry() -> Vec<CommandSpec> {
         cmd("cut", "Cut", Icon::Cad("cut"), "Remove material: cut a sketch into the part")
             .on(Solid, "Remove", Large)
             .key(Scope::Model, none, Key::X)
-            .run(|_| AppAction::StartCut)
+            .run(|_| AppAction::Profile(crate::app::ProfileAction::Cut))
             .outside_sketch()
             .when(|s| !s.in_sketch() && field_open(s) && has_body(s))
             .lit(|s| editing(s, |p| matches!(p, EditorParams::Cut(_) | EditorParams::PickSketch(ProfileFeature::Cut))))
@@ -1955,7 +1955,7 @@ fn registry() -> Vec<CommandSpec> {
             .undo(Undo::Step),
         cmd("hole", "Hole", Icon::Cad("hole"), "Drill holes into a planar face, with a counterbore or countersink")
             .on(Solid, "Remove", Large)
-            .run(|_| AppAction::StartHole)
+            .run(|_| AppAction::Hole(crate::app::HoleAction::Start))
             .when(|s| has_body(s) && field_open(s))
             .lit(|s| editing(s, |p| matches!(p, EditorParams::Hole(_))))
             .hint(|s| after_field(s).or_else(|| (!has_body(s)).then(|| "Hole needs a body".into())))
@@ -1971,7 +1971,7 @@ fn registry() -> Vec<CommandSpec> {
         cmd("fillet", "Fillet", Icon::Cad("fillet"), "Round edges with a circular fillet of one radius")
             .on(Solid, "Modify", Large)
             .key(Scope::Edge, none, Key::F)
-            .run(|_| AppAction::StartFillet)
+            .run(|_| AppAction::Body(crate::app::BodyAction::StartFillet))
             .when(|s| has_body(s) && field_open(s))
             .lit(|s| editing(s, |p| matches!(p, EditorParams::Fillet(_))))
             .hint(|s| after_field(s).or_else(|| (!has_body(s)).then(|| "Fillet needs a body".into())))
@@ -1980,7 +1980,7 @@ fn registry() -> Vec<CommandSpec> {
         cmd("chamfer", "Chamfer", Icon::Cad("chamfer"), "Bevel edges with a flat chamfer of one distance")
             .on(Solid, "Modify", Large)
             .key(Scope::Model, none, Key::C)
-            .run(|_| AppAction::StartChamfer)
+            .run(|_| AppAction::Body(crate::app::BodyAction::StartChamfer))
             .when(|s| has_body(s) && field_open(s))
             .lit(|s| editing(s, |p| matches!(p, EditorParams::Chamfer(_))))
             .hint(|s| after_field(s).or_else(|| (!has_body(s)).then(|| "Chamfer needs a body".into())))
@@ -1988,7 +1988,7 @@ fn registry() -> Vec<CommandSpec> {
 .undo(Undo::Step),
         cmd("lattice", "Lattice", Icon::Cad("lattice"), "Make a terminal lattice")
             .on(Solid, "Modify", Small)
-            .run(|_| AppAction::StartLattice)
+            .run(|_| AppAction::Body(crate::app::BodyAction::StartLattice))
             .shown(field_source_supported)
             .when(|s| has_body(s) && field_open(s) && field_source_supported(s))
             .lit(|s| editing(s, |p| matches!(p, EditorParams::Lattice(_))))
@@ -2000,7 +2000,7 @@ fn registry() -> Vec<CommandSpec> {
             .undo(Undo::Step),
         cmd("gyroid", "Gyroid", Icon::Cad("lattice"), "Make a terminal network gyroid")
             .on(Solid, "Modify", Small)
-            .run(|_| AppAction::StartGyroid)
+            .run(|_| AppAction::Body(crate::app::BodyAction::StartGyroid))
             .shown(field_source_supported)
             .when(|s| has_body(s) && field_open(s) && field_source_supported(s))
             .lit(|s| editing(s, |p| matches!(p, EditorParams::Gyroid(_))))
@@ -2031,26 +2031,26 @@ fn registry() -> Vec<CommandSpec> {
             ),
         cmd("new_body", "New body", Icon::Extrude, "Create the next feature in a separate solid body")
             .on(Solid, "Create", Small).outside_sketch()
-            .run(|_| AppAction::NewBody)
+            .run(|_| AppAction::Body(crate::app::BodyAction::NewBody))
             .when(|s| !s.in_sketch() && s.editor.is_none() && field_open(s))
             .app_only("Choose the next feature's body in the modelling window"),
         cmd("combine", "Combine", Icon::Extrude, "Union, subtract or intersect two solid bodies")
             .on(Solid, "Modify", Small).outside_sketch()
-            .run(|_| AppAction::StartCombine)
+            .run(|_| AppAction::Body(crate::app::BodyAction::StartCombine))
             .when(|s| !s.in_sketch() && s.editor.is_none() && s.doc.model().live_bodies().len() >= 2 && field_open(s))
             .hint(|s| (s.doc.model().live_bodies().len() < 2).then(|| "Combine needs two solid bodies".into()))
             .undo(Undo::Step)
             .app_only("Choose target and tool bodies in the Combine window"),
         cmd("offset", "Offset", Icon::Cad("srf_offset"), "Grow or shrink the body by a signed distance")
             .on(Solid, "Modify", Small).outside_sketch()
-            .run(|_| AppAction::StartOffset)
+            .run(|_| AppAction::Body(crate::app::BodyAction::StartOffset))
             .when(|s| !s.in_sketch() && has_body(s) && field_open(s))
             .lit(|s| editing(s, |p| matches!(p, EditorParams::Offset(_))))
             .agents(Agents::Verb, "Positive grows the body; negative shrinks it.", tools::offset_params)
             .undo(Undo::Step),
         cmd("thicken", "Thicken", Icon::Shell, "Create a solid from selected faces")
             .on(Solid, "Modify", Small).outside_sketch()
-            .run(|_| AppAction::StartThicken)
+            .run(|_| AppAction::Body(crate::app::BodyAction::StartThicken))
             .when(|s| !s.in_sketch() && has_body(s) && field_open(s))
             .lit(|s| editing(s, |p| matches!(p, EditorParams::Thicken(_))))
             .agents(Agents::Verb, "Choose faces, thickness and front or back side.", tools::thicken_params)
@@ -2061,7 +2061,7 @@ fn registry() -> Vec<CommandSpec> {
             .agents(Agents::Verb, "Selected faces stay the same; everything after it rebuilds.", tools::edit_thicken_params).undo(Undo::Step),
         cmd("shell", "Shell", Icon::Cad("shell"), "Hollow the part, leaving walls of one thickness")
             .on(Solid, "Modify", Small)
-            .run(|_| AppAction::StartShell)
+            .run(|_| AppAction::Body(crate::app::BodyAction::StartShell))
             .when(|s| has_body(s) && field_open(s))
             .lit(|s| editing(s, |p| matches!(p, EditorParams::Shell(_))))
             .hint(|s| after_field(s).or_else(|| (!has_body(s)).then(|| "Shell needs a body".into())))
@@ -2069,7 +2069,7 @@ fn registry() -> Vec<CommandSpec> {
             .undo(Undo::Step),
         cmd("draft", "Draft", Icon::Cad("draft"), "Taper faces by an angle about a neutral plane")
             .on(Solid, "Modify", Small)
-            .run(|_| AppAction::StartDraft)
+            .run(|_| AppAction::Body(crate::app::BodyAction::StartDraft))
             .when(|s| has_body(s) && field_open(s))
             .lit(|s| editing(s, |p| matches!(p, EditorParams::Draft(_))))
             .hint(|s| after_field(s).or_else(|| (!has_body(s)).then(|| "Draft needs a body".into())))
@@ -2083,7 +2083,7 @@ fn registry() -> Vec<CommandSpec> {
         // Pattern.
         cmd("linear_pattern", "Linear", Icon::Cad("linear"), "Repeat a feature or body along a direction").outside_sketch()
             .on(Solid, "Pattern", Large)
-            .run(|_| AppAction::StartPattern { circular: false })
+            .run(|_| AppAction::Body(crate::app::BodyAction::StartPattern { circular: false }))
             .when(|s| has_body(s) && field_open(s))
             .lit(|s| editing(s, |p| matches!(p, EditorParams::Pattern(f) if matches!(f.layout, soliddraft_model::PatternSpec::Linear { .. }))))
             .hint(|s| after_field(s).or_else(|| (!has_body(s)).then(|| "Pattern needs a body".into())))
@@ -2091,7 +2091,7 @@ fn registry() -> Vec<CommandSpec> {
             .undo(Undo::Step),
         cmd("circular_pattern", "Circular", Icon::Cad("circular"), "Repeat a feature or body around an axis").outside_sketch()
             .on(Solid, "Pattern", Large)
-            .run(|_| AppAction::StartPattern { circular: true })
+            .run(|_| AppAction::Body(crate::app::BodyAction::StartPattern { circular: true }))
             .when(|s| has_body(s) && field_open(s))
             .lit(|s| editing(s, |p| matches!(p, EditorParams::Pattern(f) if matches!(f.layout, soliddraft_model::PatternSpec::Circular { .. }))))
             .hint(|s| after_field(s).or_else(|| (!has_body(s)).then(|| "Pattern needs a body".into())))
@@ -2099,7 +2099,7 @@ fn registry() -> Vec<CommandSpec> {
             .undo(Undo::Step),
         cmd("mirror", "Mirror", Icon::Cad("mirror"), "Mirror the part's body in a plane")
             .on(Solid, "Pattern", Large)
-            .run(|_| AppAction::StartMirror)
+            .run(|_| AppAction::Body(crate::app::BodyAction::StartMirror))
             .when(|s| has_body(s) && field_open(s))
             .lit(|s| editing(s, |p| matches!(p, EditorParams::Mirror(_))))
             .hint(|s| after_field(s).or_else(|| (!has_body(s)).then(|| "Mirror needs a body".into())))
@@ -2108,7 +2108,7 @@ fn registry() -> Vec<CommandSpec> {
         // Reference geometry.
         cmd("reference_plane", "Plane", Icon::Cad("plane"), "Add a reference plane")
             .on(Solid, "Reference", Small)
-            .run(|_| AppAction::StartReferencePlane)
+            .run(|_| AppAction::Body(crate::app::BodyAction::StartReferencePlane))
             .when(field_open)
             .lit(|s| editing(s, |p| matches!(p, EditorParams::ReferencePlane(_))))
             .agents(Agents::Verb, "Create a reusable plane offset from a reference plane or planar face.", tools::reference_plane_params)
@@ -2576,7 +2576,7 @@ fn registry() -> Vec<CommandSpec> {
             .label_now(|s| Some(if crate::tree_visibility::body_shown(&s.doc) { "Hide body" } else { "Show body" }.into()))
             .outside_sketch().app_only(LOOK),
         cmd("rename_body", "Rename body", Icon::Text, "Set the selected body's name in the tree")
-            .run(|_| AppAction::RenameBody)
+            .run(|_| AppAction::Body(crate::app::BodyAction::RenameBody))
             .when(|s| s.doc.selection == Some(Selection::Body) && s.doc.display_body().is_some())
             .outside_sketch().app_only(PANEL),
         cmd("show_all_bodies", "Show all bodies", Icon::Eye, "Show every solid body in the part")
@@ -2651,13 +2651,13 @@ fn registry() -> Vec<CommandSpec> {
                 if selected_feature_is(s, |f| f.is_sketch()) {
                     AppAction::EditSketch(id)
                 } else {
-                    AppAction::EditFeature(id)
+                    AppAction::Editor(crate::app::EditorAction::EditFeature(id))
                 }
             })
             .when(|s| s.selected_feature().is_some())
             .app_only("It opens the feature's PropertyManager; agents and scripts change a feature with edit_extrude, edit_revolve, edit_sweep, edit_cut, edit_fillet, edit_chamfer and edit_dimension"),
         cmd("repair_feature", "Repair references…", Icon::Repair, "Repair the selected feature's references")
-            .run(|s| AppAction::StartRepair(s.selected_feature().expect("enabled with a selected feature")))
+            .run(|s| AppAction::Body(crate::app::BodyAction::StartRepair(s.selected_feature().expect("enabled with a selected feature"))))
             .outside_sketch()
             .when(|s| selected_feature_is(s, |f| matches!(f.status, crate::document::FeatureStatus::NeedsRepair(_))))
             .shown(|s| selected_feature_is(s, |f| matches!(f.status, crate::document::FeatureStatus::NeedsRepair(_))))
@@ -2806,7 +2806,7 @@ fn registry() -> Vec<CommandSpec> {
             } else if s.drawing.new.is_some() {
                 AppAction::Drawing(DrawingAction::CancelNewDrawing)
             } else if s.editor.is_some() {
-                AppAction::CancelEditor
+                AppAction::Editor(crate::app::EditorAction::Cancel)
             } else if s.sketch.as_ref().is_some_and(|k| k.tool_in_progress()) {
                 // Escape drops the tool and what it started, then the selection. It never
                 // leaves the sketch: Close sketch does, or Enter.
@@ -2828,7 +2828,7 @@ fn registry() -> Vec<CommandSpec> {
                 if s.drawing.new.is_some() {
                     AppAction::Drawing(DrawingAction::CreateDrawing)
                 } else if s.editor.is_some() {
-                    AppAction::CommitEditor
+                    AppAction::Editor(crate::app::EditorAction::Commit)
                 } else if s.sketch.as_ref().is_some_and(|s| s.tool.spline_mode().is_some() && !s.pending.is_empty()) {
                     AppAction::FinishSpline
                 } else {
@@ -3387,7 +3387,7 @@ mod tests {
 
     #[test]
     fn unfinished_commands_stay_visible_disabled_and_say_only_coming_soon() {
-        let state = AppState::new(crate::demo_document());
+        let state = AppState::new(crate::startup::demo_document());
         for command in all().iter().filter(|c| c.in_app() && (c.action.is_none() || c.catallax_wait().is_some())) {
             assert!(!command.is_enabled(&state), "{}", command.id);
             assert!(command.action_now(&state).is_none(), "{}", command.id);
@@ -3402,7 +3402,7 @@ mod tests {
 
     #[test]
     fn catallax_features_on_main_are_switched_on() {
-        let state = AppState::new(crate::demo_document());
+        let state = AppState::new(crate::startup::demo_document());
         for id in ["fillet", "chamfer", "hole", "linear_pattern", "circular_pattern", "mirror", "draft"] {
             let command = get(id).unwrap();
             assert!(command.catallax_wait().is_none(), "{id}");

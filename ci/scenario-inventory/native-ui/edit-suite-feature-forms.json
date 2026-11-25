@@ -1,0 +1,9 @@
+{
+  "id": "edit-suite-feature-forms",
+  "file": "crates/soliddraft-app/tests/ux_feature_forms.rs",
+  "owners": [
+    "soliddraft-app"
+  ],
+  "route": "egui_kittest pointer and keyboard -> application dispatcher -> existing feature editor -> software Vulkan renderer",
+  "evidence": "target/ux-tools/feature-forms, feature-form-edits and feature-form-hole; primary fields, grouped drop sheets, fixed OK/Cancel, commit/undo, refused size text and resizing"
+}

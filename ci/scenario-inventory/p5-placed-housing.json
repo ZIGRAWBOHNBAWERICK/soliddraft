@@ -1,0 +1,24 @@
+{
+  "id": "p5-placed-housing",
+  "file": "ci/scenarios/p5-placed-housing.json",
+  "acceptance": true,
+  "owners": [
+    "soliddraft-app",
+    "soliddraft-model",
+    "soliddraft-kernel-catallax"
+  ],
+  "kernel_parts": [
+    "boolean",
+    "fillet",
+    "hole",
+    "measure",
+    "mesh",
+    "revolve",
+    "step",
+    "verify"
+  ],
+  "catallax_revision": "76cdf97f3e85d22ea74868b77d849498ebdfcf1c",
+  "route": "MCP sketch on an offset datum, revolve about a tilted axis, four-point hole, fillet and edit_fillet -> real document rebuild -> pinned Catallax fitted junction",
+  "supported_limits": "The P5 housing under an in-plane rotation and translation, built from ordinary app commands; radii 2 and 2.5 at the mouths; radius 3.5 refuses with shapes.rolling-envelope and keeps the document; a fitted body's box is a display estimate, so only the housing and drilled boxes are checked tight",
+  "evidence": "result.json, protocol.json, commands/NNNN/{command.json,kernel.json,viewport.png,view.svg}; 28-step edit, undo, redo, fresh-process reopen and refusal scenario; p5-placed-housing.dwprt and commands-1/0001/{part.step,step-report.json,raw-step.stdout,step-oracle.json,step-oracle.stdout}"
+}

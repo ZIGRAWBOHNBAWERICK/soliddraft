@@ -48,11 +48,11 @@ fn interference_clearance_and_hole_alignment_application_loops() {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("work")).unwrap();
         soliddraft_app::file::set_config_dir(Some(dir.join("config")));
-        let mut state = AppState::new(soliddraft_app::new_document());
+        let mut state = AppState::new(soliddraft_app::startup::new_document());
         let mut history: Vec<Value> = Vec::new();
         for (index, step) in spec["steps"].as_array().unwrap().iter().enumerate() {
             if step["fresh_process"] == true {
-                state = AppState::new(soliddraft_app::new_document());
+                state = AppState::new(soliddraft_app::startup::new_document());
             }
             let tool = step["tool"].as_str().unwrap();
             let args = serde_json::to_string(&step["arguments"]).unwrap().replace("{bundle}", dir.to_str().unwrap());
@@ -146,7 +146,7 @@ fn interference_clearance_and_hole_alignment_application_loops() {
 fn p3_copies_report_proved_overlap_and_unresolved_tangency() {
     let dir = std::env::temp_dir().join(format!("soliddraft-p3-interference-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
-    let mut state = AppState::new(soliddraft_app::new_document());
+    let mut state = AppState::new(soliddraft_app::startup::new_document());
     let scenario: Value = serde_json::from_str(include_str!("../../../ci/scenarios/p3-rounded-boss.json")).unwrap();
     for step in scenario["steps"].as_array().unwrap().iter().take(8) {
         let tool = step["tool"].as_str().unwrap();

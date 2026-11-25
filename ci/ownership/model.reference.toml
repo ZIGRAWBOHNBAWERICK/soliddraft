@@ -1,0 +1,6 @@
+[[areas]]
+name = "model.reference"
+owner = "core"
+crate = "soliddraft-model"
+paths = ["crates/soliddraft-model/src/reference.rs"]
+module = ["reference"]

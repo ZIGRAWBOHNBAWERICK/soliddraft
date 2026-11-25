@@ -18,7 +18,7 @@ fn block(doc: &mut Document, width: f64, depth: f64) -> u64 {
 }
 
 fn pair() -> Document {
-    let mut doc = Document::new("Several bodies", soliddraft_app::kernel());
+    let mut doc = Document::new("Several bodies", soliddraft_app::startup::kernel());
     block(&mut doc, 10.0, 10.0);
     doc.new_body();
     block(&mut doc, 20.0, 5.0);
@@ -42,7 +42,7 @@ fn editing_combine_refuses_export_until_the_dialog_is_finished() {
     let mut app = ribbon::app(doc);
     case.run(&mut app, |app| {
         assert!(!app.state().state.export_part(Format::Stl).unwrap().bytes.is_empty());
-        app.state_mut().state.push(AppAction::EditFeature(id));
+        app.state_mut().state.push(AppAction::Editor(soliddraft_app::app::EditorAction::EditFeature(id)));
         app.run_steps(8);
         assert!(app.state().state.editor.is_none());
         assert!(app.state().state.doc.combine_form.is_some());
@@ -73,7 +73,7 @@ fn assert_picks(doc: &Document) {
 
 #[test]
 fn ordinary_parts_keep_the_legacy_summary_until_a_second_body_is_started() {
-    let mut doc = Document::new("Legacy summary", soliddraft_app::kernel());
+    let mut doc = Document::new("Legacy summary", soliddraft_app::startup::kernel());
     block(&mut doc, 10.0, 10.0);
     let mut book = ProposalBook::default();
     let summary = CommandTools { doc: &mut doc, book: &mut book, surface: Surface::Mcp, drawing: None }.summary();
@@ -112,7 +112,9 @@ fn selecting_a_body_or_its_face_targets_only_that_body_and_reopens() {
     assert!((volume(&doc, 1) - 1200.0).abs() < 1e-6);
     assert_eq!(doc.features[1].body_key, 1);
     let saved = doc.model().to_bytes().unwrap();
-    let back = Document::from_model(soliddraft_model::Document::from_bytes(&saved, soliddraft_app::kernel()).unwrap());
+    let back = Document::from_model(
+        soliddraft_model::Document::from_bytes(&saved, soliddraft_app::startup::kernel()).unwrap(),
+    );
     assert_eq!(back.meshes.len(), 2);
     assert!((volume(&back, 0) - 1000.0).abs() < 1e-6);
     assert!((volume(&back, 1) - 1200.0).abs() < 1e-6);
@@ -126,7 +128,7 @@ fn combine_checks_refusals_before_changing_geometry_or_history() {
     let depth = doc.model().undo_depth();
     assert_eq!(doc.combine(0, 0, BooleanOp::Union).unwrap_err(), "Choose two different bodies to combine.");
     assert_eq!(doc.combine(0, 7, BooleanOp::Union).unwrap_err(), "Combine needs two available solid bodies.");
-    let mut empty = Document::new("Empty result", soliddraft_app::kernel());
+    let mut empty = Document::new("Empty result", soliddraft_app::startup::kernel());
     block(&mut empty, 10.0, 5.0);
     empty.new_body();
     block(&mut empty, 20.0, 10.0);
@@ -169,7 +171,7 @@ fn new_body_and_combine_are_available_in_the_application() {
     use soliddraft_app::state::AppAction;
 
     let case = ribbon::case("multibody-combine");
-    let mut doc = Document::new("Several bodies", soliddraft_app::kernel());
+    let mut doc = Document::new("Several bodies", soliddraft_app::startup::kernel());
     block(&mut doc, 10.0, 10.0);
     let mut app = ribbon::app(doc);
     case.run(&mut app, |app| {
@@ -318,7 +320,7 @@ fn export_refuses_to_silently_drop_a_body() {
 
 #[test]
 fn a_new_body_can_start_on_an_existing_bodys_face_without_joining_it() {
-    let mut doc = Document::new("Face-based body", soliddraft_app::kernel());
+    let mut doc = Document::new("Face-based body", soliddraft_app::startup::kernel());
     block(&mut doc, 10.0, 10.0);
     let body = doc.display_body().unwrap();
     let face = doc.kernel().topology(body).unwrap().faces.into_iter().find(|f| f.centroid.z > 9.9).unwrap().id;
@@ -350,7 +352,7 @@ fn assemblies_show_both_bodies_and_drawings_explain_their_limit() {
     use soliddraft_assembly::source::{DisplaySource, KernelSource};
     let doc = pair();
     let bytes = doc.model().to_bytes().unwrap();
-    let source = KernelSource::new(soliddraft_app::kernel());
+    let source = KernelSource::new(soliddraft_app::startup::kernel());
     let (mesh, _) = source.part_mesh(&bytes).unwrap();
     assert_eq!(mesh.triangle_count(), 24, "both rectangular solids are tessellated");
     assert_eq!(mesh.faces.len(), 12);
@@ -369,7 +371,7 @@ fn assemblies_show_both_bodies_and_drawings_explain_their_limit() {
 
 #[test]
 fn a_refused_first_feature_in_a_new_body_keeps_the_existing_body_visible() {
-    let mut doc = Document::new("Refused new body", soliddraft_app::kernel());
+    let mut doc = Document::new("Refused new body", soliddraft_app::startup::kernel());
     block(&mut doc, 10.0, 10.0);
     let before = doc.meshes.clone();
     doc.new_body();

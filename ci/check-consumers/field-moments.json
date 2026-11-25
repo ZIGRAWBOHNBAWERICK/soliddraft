@@ -1,0 +1,7 @@
+{
+  "files": {
+    "ci/check-field-moments.py": [
+      "application-loop"
+    ]
+  }
+}

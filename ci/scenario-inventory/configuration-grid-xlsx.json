@@ -1,0 +1,21 @@
+{
+  "id": "configuration-grid-xlsx",
+  "file": "ci/scenarios/configuration-grid-xlsx.json",
+  "acceptance": true,
+  "owners": [
+    "soliddraft-app",
+    "soliddraft-model",
+    "soliddraft-kernel-catallax"
+  ],
+  "kernel_parts": [
+    "boolean",
+    "extrude",
+    "measure",
+    "mesh",
+    "step"
+  ],
+  "catallax_revision": "76cdf97f3e85d22ea74868b77d849498ebdfcf1c",
+  "route": "MCP configuration grid tools -> OOXML codec -> document transaction -> Catallax adapter -> pinned kernel",
+  "supported_limits": "One Configurations sheet of string and numeric cells mapped by header name; formula cells are refused; other limits as configuration-grid-csv",
+  "evidence": "result.json, protocol.json, commands/NNNN and commands-N/NNNN/{command.json,kernel.json,viewport.png,helper-*.stdout}; fixtures/; out/{g0,g1,unicode}.*; xlsx-130.dwprt; commands-2/0001/{part.step,step-report.json,check-step.stdout,check-step.stderr}"
+}

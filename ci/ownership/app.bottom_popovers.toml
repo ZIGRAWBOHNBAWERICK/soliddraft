@@ -1,0 +1,6 @@
+[[areas]]
+name = "app.bottom_popovers"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/bottom_popovers.rs"]
+module = ["bottom_popovers"]

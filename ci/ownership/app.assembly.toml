@@ -1,0 +1,6 @@
+[[areas]]
+name = "app.assembly"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/assembly.rs", "crates/soliddraft-app/src/assembly/"]
+module = ["assembly"]

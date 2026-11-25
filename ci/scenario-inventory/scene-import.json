@@ -1,0 +1,21 @@
+{
+  "id": "scene-import",
+  "file": "ci/scenarios/scene-import.json",
+  "acceptance": true,
+  "owners": [
+    "soliddraft-app",
+    "soliddraft-scene",
+    "soliddraft-assembly",
+    "soliddraft-document"
+  ],
+  "kernel_parts": [
+    "iges",
+    "import",
+    "measure",
+    "mesh",
+    "step"
+  ],
+  "route": "MCP import_scene -> soliddraft-scene readers -> assembly and mesh reference files -> assembly open -> save -> fresh-process open",
+  "supported_limits": "OpenUSD (usd, usda, usdc, usdz) composed under the default prim, glTF 2.0, URDF with OBJ or STL meshes and primitive shapes, OBJ and STL; meshes arrive as mesh reference bodies, never solids; texture maps, skins, animation, collision geometry, USD curves, points and NURBS are left out",
+  "evidence": "result.json, protocol.json and commands/NNNN/command.json with each import record and assembly summary; work/*.dwasm and work/*.parts/ mesh references; work/washer-saved.dwasm"
+}

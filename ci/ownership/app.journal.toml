@@ -1,0 +1,6 @@
+[[areas]]
+name = "app.journal"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/journal.rs"]
+module = ["journal"]

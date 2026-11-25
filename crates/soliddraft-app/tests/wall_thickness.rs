@@ -34,7 +34,7 @@ fn pinned_kernel_refuses_graded_walls_and_keeps_the_constant_feature_editable() 
         ),
         ("thicken", json!({"faces":["Boss-Extrude1 · End cap"], "side":"front"}), "Thicken1", [160.0, 120.0], -6.75),
     ] {
-        let mut state = AppState::new(Document::new(name, soliddraft_app::kernel()));
+        let mut state = AppState::new(Document::new(name, soliddraft_app::startup::kernel()));
         call(
             &mut state,
             "sketch",
@@ -122,7 +122,7 @@ fn saved_walls_keep_the_grade_or_legacy_number() {
 
 #[test]
 fn graded_walls_use_format_eight_in_saves_and_recovery_copies() {
-    let kernel = soliddraft_app::kernel();
+    let kernel = soliddraft_app::startup::kernel();
     let mut fixture: Value = serde_json::from_str(include_str!("../../../ci/fixtures/graded-wall.json")).unwrap();
     let shell = fixture["features"][1]["kind"].clone();
     let thicken = json!({

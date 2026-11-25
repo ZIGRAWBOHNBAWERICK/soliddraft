@@ -62,7 +62,7 @@ type App = Harness<'static, (Option<Preferences>, AppState)>;
 
 /// The app's state as a start reads it, with Preferences open as the app opens it.
 fn launch() -> App {
-    let mut state = AppState::new(soliddraft_app::new_document());
+    let mut state = AppState::new(soliddraft_app::startup::new_document());
     let view = settings::view();
     state.viewport.references = view.references;
     state.viewport.grid_style = view.grid;

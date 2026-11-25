@@ -1,0 +1,6 @@
+[[areas]]
+name = "app.startup"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/startup.rs"]
+module = ["startup"]

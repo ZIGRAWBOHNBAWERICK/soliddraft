@@ -140,12 +140,12 @@ impl Drop for Case {
 
 /// E: a new document with nothing in it.
 pub fn empty() -> Document {
-    soliddraft_app::new_document()
+    soliddraft_app::startup::new_document()
 }
 
 /// B: a 60 x 40 x 20 box on z = 0.
 pub fn box_part() -> Document {
-    let mut doc = Document::new("Box", soliddraft_app::kernel());
+    let mut doc = Document::new("Box", soliddraft_app::startup::kernel());
     doc.apply(Command::AddExtrude {
         params: ExtrudeParams {
             profile: ProfileKind::Rectangle { width: 60.0, height: 40.0 },
@@ -169,7 +169,7 @@ pub fn old_part(case: &Case) -> (PathBuf, Vec<u8>) {
 
 /// S: a closed rectangle on each reference plane, and one on Top offset by 25 mm.
 pub fn sketches() -> Document {
-    let mut doc = soliddraft_app::new_document();
+    let mut doc = soliddraft_app::startup::new_document();
     for (plane, offset) in
         [(PlaneKind::Front, 0.0), (PlaneKind::Top, 0.0), (PlaneKind::Right, 0.0), (PlaneKind::Top, 25.0)]
     {

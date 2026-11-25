@@ -42,7 +42,7 @@ fn harness() -> App<'static> {
         .with_render_every_step(true)
         .with_step_dt(1.0 / 60.0)
         .wgpu()
-        .build_eframe(|cc| SolidDraftApp::new(cc, soliddraft_app::new_document(), Automation::default()))
+        .build_eframe(|cc| SolidDraftApp::new(cc, soliddraft_app::startup::new_document(), Automation::default()))
 }
 
 fn push(harness: &mut App<'_>, action: AppAction) {
@@ -135,7 +135,7 @@ fn origin_axes_show_in_every_part_and_set_directions() {
     );
 
     // A linear pattern starts along X; the Y axis row turns it.
-    push(&mut harness, AppAction::StartPattern { circular: false });
+    push(&mut harness, AppAction::Body(soliddraft_app::app::BodyAction::StartPattern { circular: false }));
     harness.get_by_label("Y axis").click();
     harness.run_steps(3);
     match &harness.state().state.editor.as_ref().expect("pattern editor").params {
@@ -148,7 +148,7 @@ fn origin_axes_show_in_every_part_and_set_directions() {
     render(&mut harness, "pattern-along-y-axis");
 
     // Cancelled, and with the reference cleared, the axes go away again.
-    push(&mut harness, AppAction::CancelEditor);
+    push(&mut harness, AppAction::Editor(soliddraft_app::app::EditorAction::Cancel));
     push(&mut harness, AppAction::Select(None));
     assert!(!matches!(harness.state().state.doc.selection, Some(Selection::Reference(_))));
     let image = render(&mut harness, "part-after-pattern");

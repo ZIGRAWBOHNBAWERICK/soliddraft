@@ -165,3 +165,97 @@ fn the_assistant_drives_the_manufacturing_information_tools() {
     assert!(!st.can_undo("P3"), "writing files is no undo step");
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+/// A card is checked against the part it was made for. When the part changes under a
+/// pending `pmi_answer` card, so that the same answer would now take proposals the
+/// card never showed, Apply refuses the card and the part keeps what it had.
+#[test]
+fn apply_refuses_a_card_the_part_has_outgrown() {
+    let provider = Arc::new(MockProvider::new(Vec::new()));
+    let mut st = AppState::new(board_bracket());
+    st.chat = ChatState::connected(provider.clone(), "mock provider");
+    let answered = exchange(
+        &mut st,
+        &provider,
+        "Take every proposal.",
+        vec![
+            MockTurn::tools("", vec![("pmi_answer", json!({ "accept": "all" }))]),
+            MockTurn::text("The card adds them."),
+        ],
+    );
+    let [(_, false, card)] = &answered[..] else { panic!("{answered:?}") };
+    let id = card["proposal_id"].as_str().unwrap().to_owned();
+    let rows = st.chat.book.get(&id).unwrap().rows.clone();
+
+    // A Ø5 hole that no card question covers, cut before Apply.
+    let hole = json!({
+        "summary": "A Ø5 hole",
+        "commands": [
+            { "op": "sketch", "plane": "Boss-Extrude1 · End cap", "shapes": [
+                { "shape": "circle", "center": [20, 70, 10], "diameter": 5 }
+            ]},
+            { "op": "cut", "sketch": "previous", "through_all": true, "depth": 10, "flip": false }
+        ]
+    });
+    let cut = mcp(&mut st, "propose", hole);
+    mcp(&mut st, "apply", json!({ "proposal_id": cut["proposal_id"] }));
+    let asked = mcp(&mut st, "pmi_interview", json!({}));
+    let new_hole = |q: &Value| q["id"].as_str().unwrap_or_default().starts_with("hole Ø5 ");
+    assert!(
+        asked["questions"].as_array().unwrap().iter().any(|q| new_hole(q) && q["proposal"].is_object()),
+        "the new hole has proposals: {asked}"
+    );
+
+    let depth = st.doc.undo_depth();
+    st.apply_proposal(&id);
+    let listed = mcp(&mut st, "pmi_list", json!({}));
+    let items = listed["items"].as_array().unwrap();
+    let shown =
+        |item: &Value| rows.iter().any(|(_, row)| row.starts_with(&format!("{}:", item["name"].as_str().unwrap())));
+    assert!(items.iter().all(shown), "only what the card showed can land: {listed}\ncard: {rows:#?}");
+    assert_eq!(items.len(), 0, "the stale card changes nothing: {listed}");
+    assert_eq!(st.doc.undo_depth(), depth, "no undo step");
+    assert!(matches!(st.proposal_status(&id), Some(ProposalStatus::Pending)), "the card stays pending");
+    let note = st.note.as_ref().map(|n| n.text.clone()).unwrap_or_default();
+    assert!(note.contains("out of date"), "the user is told why: {note}");
+}
+
+/// The package card shows the path the files are written to, and Apply writes there,
+/// even when the path the assistant gave has spaces around it.
+#[test]
+fn the_package_card_writes_where_it_says() {
+    let dir = std::env::temp_dir().join(format!("soliddraft-pmi-package-path-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let provider = Arc::new(MockProvider::new(Vec::new()));
+    let mut st = AppState::new(board_bracket());
+    st.chat = ChatState::connected(provider.clone(), "mock provider");
+    mcp(&mut st, "pmi_answer", json!({ "accept": "all", "material": "6061-T6" }));
+
+    let step = dir.join("bracket.step");
+    let spaced = format!("  {}  ", step.display());
+    let made = exchange(
+        &mut st,
+        &provider,
+        "Write the package.",
+        vec![
+            MockTurn::tools("", vec![("manufacturing_package", json!({ "path": spaced }))]),
+            MockTurn::text("The card writes the files."),
+        ],
+    );
+    let [(_, false, card)] = &made[..] else { panic!("{made:?}") };
+    let id = card["proposal_id"].as_str().unwrap().to_owned();
+    let rows = st.chat.book.get(&id).unwrap().rows.clone();
+    assert!(
+        rows.contains(&("Writes".to_owned(), step.display().to_string())),
+        "the card names the trimmed path: {rows:?}"
+    );
+
+    st.apply_proposal(&id);
+    let note = st.note.as_ref().map(|n| n.text.clone()).unwrap_or_default();
+    for file in ["bracket.step", "bracket.pdf", "bracket.dxf"] {
+        assert!(dir.join(file).is_file(), "{file} is written where the card says: {note}");
+    }
+    assert!(matches!(st.proposal_status(&id), Some(ProposalStatus::Applied { .. })), "{note}");
+    std::fs::remove_dir_all(dir).unwrap();
+}

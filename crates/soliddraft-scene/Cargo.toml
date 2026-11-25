@@ -13,8 +13,9 @@ publish.workspace = true
 base64 = "0.23.1"
 glam.workspace = true
 gltf = { version = "1.4.1", default-features = false, features = ["names", "utils", "extras"] }
-openusd = "0.8.0"
-openusd-schemas = { version = "0.8.0", features = ["geom", "shade"] }
+# OpenUSD 0.8 pulls in zip 8 for USDZ. Keep the schemas on the same OpenUSD release.
+openusd = "0.9.0"
+openusd-schemas = { version = "0.9.0", features = ["geom", "shade"] }
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true

@@ -13,8 +13,9 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use glam::{DMat4, DQuat, DVec3};
-use openusd::sdf::{self, Value};
+use openusd::sdf;
 use openusd::usd::{self, Prim, Stage};
+use openusd::vt::Value;
 use openusd_schemas::geom::XformCache;
 
 use crate::{
@@ -77,7 +78,7 @@ pub(crate) fn read(path: &Path) -> Result<Scene, ImportError> {
     };
     match top.as_slice() {
         [one] => {
-            let (local, _) = reader.xforms.local_transformation(one).map_err(|e| err(path, e))?;
+            let (local, _) = reader.xforms.local_transform(one).map_err(|e| err(path, e))?;
             scene.nodes[0].local = matrix(&local);
             scene.nodes[0].source = one.path().to_string();
             reader.nodes.insert(one.path().to_string(), 0);
@@ -178,7 +179,7 @@ impl Reader<'_> {
             }
             _ => {}
         }
-        let (local, resets) = self.xforms.local_transformation(prim).map_err(|e| err(self.file, e))?;
+        let (local, resets) = self.xforms.local_transform(prim).map_err(|e| err(self.file, e))?;
         let mut local = matrix(&local);
         if resets {
             // The prim ignores its parents' frames: make its frame relative to the parent's.
@@ -372,7 +373,7 @@ fn planar_axis(prim: &Prim) -> Option<DVec3> {
 }
 
 /// A USD row-vector matrix as a column-vector one.
-fn matrix(m: &openusd::gf::Matrix4d) -> DMat4 {
+fn matrix(m: &openusd::gf::Mat4d) -> DMat4 {
     DMat4::from_cols_array(&m.0)
 }
 
@@ -494,7 +495,7 @@ fn mesh(scene: &mut Scene, prim: &Prim, name: &str) -> Result<Option<Mesh>, Impo
 fn display_color(scene: &mut Scene, prim: &Prim) -> Option<Material> {
     let attr = prim.attribute("primvars:displayColor");
     let colours = attr.get_at::<Value>(time()).ok().flatten().as_ref().and_then(vec3s)?;
-    let interp = attr.get_metadata::<Value>("interpolation").ok().flatten().as_ref().and_then(token);
+    let interp = attr.metadata::<Value>("interpolation").ok().flatten().as_ref().and_then(token);
     let constant = interp.as_deref().is_none_or(|i| i == "constant") || colours.len() == 1;
     let (Some(c), true) = (colours.first(), constant) else {
         scene.note("per-face and per-vertex display colours are not imported");

@@ -27,6 +27,7 @@ mod native;
 mod pmi;
 mod recognition;
 mod scan;
+mod request;
 mod shell;
 mod step;
 mod sweep;
@@ -47,7 +48,8 @@ pub(crate) use evaluated::{AppBody, Exact};
 use serde_json::{Value, json};
 use soliddraft_kernel_api::*;
 
-pub use diagnostics::{APP_REQUEST_WORK, APP_WORK_TARGET, RequestWork, with_request_allowance};
+use request::RequestPolicy;
+pub use request::{APP_REQUEST_WORK, APP_WORK_TARGET, RequestWork, with_request_allowance};
 
 /// The pinned Catallax application entry revision.
 pub const CATALLAX_REVISION: &str = "a59f3aa9a07a217b0c963d68c97865a9804619ee";
@@ -298,13 +300,8 @@ impl Solid {
                 Err(Error::Display(refusal)) => Err(refusal),
                 Err(error) => Err(Refusal::new(error.code(), error.to_string())),
             });
-            let (result, used, limit) = if catallax_numbers::operation_budget_active() {
-                let result = run();
-                (result, catallax_numbers::current_operation_work().used, diagnostics::request_limit())
-            } else {
-                let (result, work) = catallax_numbers::with_operation_budget(APP_REQUEST_WORK, run);
-                (result, work.used, APP_REQUEST_WORK)
-            };
+            let (result, work) = RequestPolicy::Display.run(run);
+            let (used, limit) = (work.total_used, work.request.limit);
             result.map(|answer| answer.value).map_err(|error| {
                 if matches!(error.code, "mesh.spline-display-budget" | "numbers.operation-budget" | "numbers.budget-exhausted" | "application.work-limit") {
                     KernelError::DisplayLimit { used, limit }
@@ -1189,13 +1186,11 @@ fn build(
     // Catallax tries the exact construction first and returns a numerical body, built
     // within its stated tolerance, where only that construction succeeds. Either is kept
     // as Catallax built it, never turned into a refusal or the other kind.
-    let outcome = catallax_app::build_incremental_with_files_without_display(
-        &converted.recipe,
-        prefix,
-        files,
-        &mut Decider::default(),
-    )
-    .map_err(|e| {
+    let mut decider = Decider::default();
+    let (outcome, work) = RequestPolicy::Edit.run(|| {
+        catallax_app::build_incremental_with_files_without_display(&converted.recipe, prefix, files, &mut decider)
+    });
+    let outcome = if work.exhausted_here() { Err(Error::ResourceLimit) } else { outcome }.map_err(|e| {
         let spline = input["steps"].as_array()
             .and_then(|steps| steps.iter().find(|step| step["id"] == input["result"]))
             .and_then(|step| step["path"]["segments"].as_array())
@@ -1433,7 +1428,9 @@ impl Kernel for CatallaxKernel {
     }
 
     fn body_relation(&self, a: PlacedBody, b: PlacedBody, clearance: Option<f64>) -> KernelResult<BodyRelation> {
-        self.observe("body_relation", || body_relation::relation(self, a, b, clearance))
+        self.observe("body_relation", || {
+            RequestPolicy::Query.run(|| body_relation::relation(self, a, b, clearance)).0
+        })
     }
 
     fn propose_import(&self, source: &[u8], options: &ImportOptions) -> KernelResult<ProposalSet> {
@@ -2220,23 +2217,18 @@ impl Kernel for CatallaxKernel {
     }
 
     fn measure_work(&self, run: &mut dyn FnMut()) -> KernelResult<Option<u64>> {
-        let (used, exhausted) = if catallax_numbers::operation_budget_active() {
-            let before = catallax_numbers::current_operation_work().used;
-            run();
-            let after = catallax_numbers::current_operation_work();
-            (after.used.saturating_sub(before), after.exhausted)
-        } else if let Some(diagnostics) = &self.diagnostics {
+        if !request::active()
+            && let Some(diagnostics) = &self.diagnostics
+        {
             let before = diagnostics.work_used();
             run();
             return Ok(before.zip(diagnostics.work_used()).map(|(before, after)| after.saturating_sub(before)));
-        } else {
-            let (_, work) = catallax_numbers::with_operation_budget(catallax_app::DEFAULT_BUILD_WORK, run);
-            (work.used, work.exhausted)
-        };
-        if exhausted {
+        }
+        let (_, work) = RequestPolicy::Edit.run(run);
+        if work.request.exhausted {
             Err(KernelError::Unavailable("numbers.operation-budget: operation work allowance exhausted".into()))
         } else {
-            Ok(Some(used))
+            Ok(Some(work.request.used))
         }
     }
 

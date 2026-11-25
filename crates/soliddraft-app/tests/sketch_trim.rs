@@ -28,7 +28,7 @@ fn launch(sketch: Sketch) -> (App, FeatureId) {
     let config = std::env::temp_dir().join(format!("soliddraft-trim-{}", std::process::id()));
     std::fs::create_dir_all(&config).unwrap();
     soliddraft_app::file::set_config_dir(Some(config));
-    let mut doc = Document::new("Trim regressions", soliddraft_app::kernel());
+    let mut doc = Document::new("Trim regressions", soliddraft_app::startup::kernel());
     let id = doc
         .apply(Command::AddSketch { plane: SketchPlane::Reference { plane: PlaneKind::Top, offset: 0.0 } })
         .unwrap()

@@ -1,0 +1,6 @@
+[[areas]]
+name = "app.hole_wizard_panel"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/hole_wizard_panel.rs"]
+module = ["hole_wizard_panel"]

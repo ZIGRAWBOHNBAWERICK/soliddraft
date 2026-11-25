@@ -2659,8 +2659,10 @@ pub struct Proposal {
     pub id: String,
     /// One-line summary from the proposer.
     pub summary: String,
-    /// The recipe lines.
+    /// The recipe lines; none when it runs a tool call.
     pub lines: Vec<Line>,
+    /// The manufacturing information tool call it runs in place of recipe lines.
+    pub call: Option<ProposedCall>,
     /// Tool caller, or the local refusal assistant.
     origin: Option<Caller>,
     /// What it does to the part, as rows for the card.
@@ -2672,10 +2674,29 @@ pub struct Proposal {
     builds: Option<PreparedBuilds>,
 }
 
+/// A tool call a proposal runs when it is applied: one of the assistant's manufacturing
+/// information changes, such as `pmi_answer`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ProposedCall {
+    /// The tool's name.
+    pub tool: String,
+    /// Its input, as the assistant gave it.
+    pub input: Value,
+}
+
 impl Proposal {
     /// Whether it waits for the user.
     pub fn pending(&self) -> bool {
         matches!(self.status, ProposalStatus::Pending)
+    }
+
+    /// What its card says once it is applied.
+    pub fn applied_text(&self) -> &'static str {
+        match self.call.as_ref().map(|call| call.tool.as_str()) {
+            None => "Applied to the tree as ordinary features.",
+            Some(crate::pmi::assistant::PACKAGE) => "Written; the drawing is open.",
+            Some(_) => "Applied to the part's manufacturing information.",
+        }
     }
 
     fn origin_text(&self) -> String {
@@ -2721,10 +2742,91 @@ impl ProposalBook {
         })
     }
 
-    /// Whether the proposal's undo step is the one on top of the undo stack.
+    /// Whether the proposal's undo step is the one on top of the undo stack. A proposal
+    /// that left no undo step has an empty label.
     pub fn can_undo(&self, doc: &Document, id: &str) -> bool {
         matches!(self.get(id).map(|p| &p.status), Some(ProposalStatus::Applied { label, depth, .. })
-            if doc.undo_depth() == *depth && doc.undo_label() == Some(label.as_str()))
+            if !label.is_empty() && doc.undo_depth() == *depth && doc.undo_label() == Some(label.as_str()))
+    }
+
+    /// Records a pending proposal that runs one manufacturing information tool, once the
+    /// call is checked: `pmi_answer` and `pmi_add` run on a scratch copy of the part,
+    /// and the card lists what they would change. Answers its id and those changes.
+    pub fn propose_call(
+        &mut self,
+        doc: &Document,
+        call: ProposedCall,
+        origin: Caller,
+    ) -> Result<(String, Value), String> {
+        let card = crate::pmi::assistant::card(doc, &call)?;
+        self.next += 1;
+        let id = format!("P{}", self.next);
+        let effect: Vec<String> = card.rows.iter().map(|(what, item)| format!("{what} {item}")).collect();
+        self.proposals.push(Proposal {
+            id: id.clone(),
+            summary: card.summary,
+            lines: Vec::new(),
+            call: Some(call),
+            origin: Some(origin),
+            rows: card.rows,
+            preview: Preview::default(),
+            status: ProposalStatus::Pending,
+            builds: None,
+        });
+        Ok((id, json!(effect)))
+    }
+
+    /// Fails unless the proposal waits for the user.
+    fn check_pending(&self, i: usize) -> Result<(), String> {
+        let p = &self.proposals[i];
+        match p.status {
+            ProposalStatus::Pending => Ok(()),
+            ProposalStatus::Applied { .. } => Err(format!("{} is already applied", p.id)),
+            ProposalStatus::Undone => Err(format!("{} was applied and undone; propose it again", p.id)),
+            ProposalStatus::Discarded => Err(format!("{} was discarded", p.id)),
+        }
+    }
+
+    /// The tool call of a pending proposal.
+    pub(crate) fn pending_call(&self, id: &str) -> Result<ProposedCall, String> {
+        let i = self.index(id)?;
+        self.check_pending(i)?;
+        self.proposals[i].call.clone().ok_or_else(|| format!("{} runs recipe lines, not a tool", self.proposals[i].id))
+    }
+
+    /// Runs a pending proposal's tool call on the part as one undo step, and answers
+    /// what the tool answered. The manufacturing package writes files and opens a
+    /// drawing, which the app does (`pmi::assistant::apply_package`).
+    pub fn apply_call(&mut self, doc: &mut Document, id: &str) -> Result<Value, String> {
+        let call = self.pending_call(id)?;
+        let i = self.index(id)?;
+        let p = &self.proposals[i];
+        if call.tool == crate::pmi::assistant::PACKAGE {
+            return Err(format!("{} writes files and opens a drawing: the user applies it from its card", p.id));
+        }
+        let depth = doc.undo_depth();
+        let answer = crate::pmi::tools::run(doc, &call.tool, &call.input)
+            .unwrap_or_else(|| Err(format!("unknown tool `{}`", call.tool)))?;
+        let label = format!("Apply {}: {}", p.id, p.summary);
+        if doc.undo_depth() > depth {
+            doc.group_undo(depth, label.clone());
+        }
+        doc.log_note(format!("apply {} \"{}\" ({})", p.id, p.summary, p.origin_text()));
+        doc.log_note(format!("  {}: {}", call.tool, call.input));
+        self.proposals[i].status = ProposalStatus::Applied { label, depth: doc.undo_depth(), made: Vec::new() };
+        Ok(answer)
+    }
+
+    /// Marks a pending proposal applied once the app has run its call, which left
+    /// nothing on the part's undo stack.
+    pub(crate) fn applied_by_app(&mut self, doc: &mut Document, id: &str) -> Result<(), String> {
+        let call = self.pending_call(id)?;
+        let i = self.index(id)?;
+        let p = &self.proposals[i];
+        doc.log_note(format!("apply {} \"{}\" ({})", p.id, p.summary, p.origin_text()));
+        doc.log_note(format!("  {}: {}", call.tool, call.input));
+        self.proposals[i].status = ProposalStatus::Applied { label: String::new(), depth: 0, made: Vec::new() };
+        Ok(())
     }
 
     /// Tries `lines` on a scratch copy of `doc` and records a pending proposal. A
@@ -2776,6 +2878,7 @@ impl ProposalBook {
             id: id.clone(),
             summary: summary.trim().to_owned(),
             lines,
+            call: None,
             origin,
             rows: run.rows,
             preview: run.preview,
@@ -2789,13 +2892,11 @@ impl ProposalBook {
     /// failure the part is put back as it was.
     pub fn apply(&mut self, doc: &mut Document, id: &str) -> Result<Vec<FeatureId>, String> {
         let i = self.index(id)?;
-        let p = &self.proposals[i];
-        match p.status {
-            ProposalStatus::Pending => {}
-            ProposalStatus::Applied { .. } => return Err(format!("{} is already applied", p.id)),
-            ProposalStatus::Undone => return Err(format!("{} was applied and undone; propose it again", p.id)),
-            ProposalStatus::Discarded => return Err(format!("{} was discarded", p.id)),
+        self.check_pending(i)?;
+        if self.proposals[i].call.is_some() {
+            return self.apply_call(doc, id).map(|_| Vec::new());
         }
+        let p = &self.proposals[i];
         if let Some(builds) = &p.builds {
             doc.reuse_builds_from(&builds.0);
         }
@@ -3365,6 +3466,29 @@ impl CommandTools<'_> {
         }))
     }
 
+    /// A manufacturing information change from the assistant: a card the user applies,
+    /// or the change itself when auto-apply is on. The package writes files, which only
+    /// the app does, so it stays a card here (see `pmi::assistant::apply_package`).
+    fn propose_call(&mut self, tool: &str, input: &Value, caller: &Caller) -> Result<Value, String> {
+        let call = ProposedCall { tool: tool.to_owned(), input: input.clone() };
+        let (id, effect) = self.book.propose_call(self.doc, call, caller.clone())?;
+        let auto = matches!(caller, Caller::Assistant { .. }) && self.book.auto_apply;
+        if auto && tool != crate::pmi::assistant::PACKAGE {
+            let answer = self.book.apply_call(self.doc, &id)?;
+            return Ok(json!({
+                "proposal_id": id, "status": "applied", "effect": effect, "answer": answer,
+                "note": "Auto-apply is on, so the change was applied. The user can undo it from its card.",
+            }));
+        }
+        Ok(json!({
+            "proposal_id": id,
+            "status": "pending",
+            "effect": effect,
+            "note": "The user now sees a card with Apply and Discard. Nothing changes until they apply it; tell them \
+                     what it does.",
+        }))
+    }
+
     fn apply(&mut self, id: &str, caller: &Caller) -> Result<Value, String> {
         if matches!(caller, Caller::Assistant { .. }) && !self.book.auto_apply {
             return Err("only the user can apply proposals in this session: they apply it from its card. \
@@ -3497,6 +3621,10 @@ impl ToolHost for CommandTools<'_> {
                 "selection": self.doc.selection.map(|s| selection_json(self.doc, s)).unwrap_or(Value::Null)
             })),
             "measure_entity" | "track" | "measure" => crate::measure::tools::call(self.doc, name, &input),
+            change if !mcp && crate::pmi::assistant::CHANGES.contains(&change) => self.propose_call(change, &input, caller),
+            "pmi_recognise" | "pmi_interview" | "pmi_list" | "pmi_add" | "pmi_answer" | "pmi_remove" | "pmi_notes" => {
+                crate::pmi::tools::run(self.doc, name, &input).expect("a manufacturing information tool")
+            }
             "propose" => self.propose(&input, caller),
             "apply" => self.apply(input["proposal_id"].as_str().unwrap_or_default(), caller),
             "rollback" if mcp => (|| {
@@ -3589,7 +3717,7 @@ impl ToolHost for CommandTools<'_> {
 /// boss with a Ø12 bore. The fillet, the hole pattern and the slot are left for the
 /// assistant.
 pub fn board_bracket() -> Document {
-    let mut doc = Document::new("Part1", crate::kernel());
+    let mut doc = Document::new("Part1", crate::startup::kernel());
     let rect = |center: Point, width: f64, height: f64| Shape::Rectangle { center, width, height };
     let circle = |center: Point, diameter: f64| Shape::Circle { center, diameter };
     let steps = [
@@ -3733,7 +3861,7 @@ mod tests {
 
     #[test]
     fn assistant_values_require_a_proposal_and_explicit_apply() {
-        let mut doc = Document::new("Part1", crate::kernel());
+        let mut doc = Document::new("Part1", crate::startup::kernel());
         let mut book = ProposalBook::default();
         let mut tools = CommandTools { doc: &mut doc, book: &mut book, surface: Surface::Assistant, drawing: None };
         let arguments = json!({"name":"plate_w","expression":"140"});
@@ -3848,7 +3976,7 @@ mod tests {
     #[test]
     fn mcp_verbs_run_directly_and_undo() {
         use soliddraft_kernel_api::counting::{Counting, Work};
-        let kernel = std::sync::Arc::new(Counting::new(crate::kernel()));
+        let kernel = std::sync::Arc::new(Counting::new(crate::startup::kernel()));
         let mut doc = Document::new("Part1", kernel.clone());
         let mut book = ProposalBook::default();
         let mut tools = CommandTools { doc: &mut doc, book: &mut book, surface: Surface::Mcp, drawing: None };
@@ -3972,7 +4100,7 @@ mod tests {
 
     #[test]
     fn mcp_measure_refuses_when_the_kernel_refuses_the_proof() {
-        let kernel = std::sync::Arc::new(RefusesProofs(crate::kernel()));
+        let kernel = std::sync::Arc::new(RefusesProofs(crate::startup::kernel()));
         let mut doc = Document::new("Part1", kernel);
         let mut book = ProposalBook::default();
         let mut tools = CommandTools { doc: &mut doc, book: &mut book, surface: Surface::Mcp, drawing: None };
@@ -4007,7 +4135,7 @@ mod tests {
 
     #[test]
     fn reference_dimensions_report_measurements_and_refuse_numeric_edits() {
-        let mut doc = Document::new("Reference controls", crate::kernel());
+        let mut doc = Document::new("Reference controls", crate::startup::kernel());
         let mut book = ProposalBook::default();
         let mut tools = CommandTools { doc: &mut doc, book: &mut book, surface: Surface::Mcp, drawing: None };
         let mcp = Caller::Mcp { client: "test".into() };
@@ -4035,7 +4163,7 @@ mod tests {
     /// sketch showed -4.
     #[test]
     fn a_negative_or_zero_length_is_refused_and_changes_nothing() {
-        let mut doc = Document::new("Part1", crate::kernel());
+        let mut doc = Document::new("Part1", crate::startup::kernel());
         let mut book = ProposalBook::default();
         let mut tools = CommandTools { doc: &mut doc, book: &mut book, surface: Surface::Mcp, drawing: None };
         let mcp = Caller::Mcp { client: "test".into() };

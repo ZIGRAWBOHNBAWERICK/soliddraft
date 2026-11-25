@@ -1,0 +1,6 @@
+[[areas]]
+name = "pmi.model"
+owner = "core"
+crate = "soliddraft-model"
+paths = ["crates/soliddraft-model/src/pmi.rs", "crates/soliddraft-model/src/interview.rs"]
+module = ["pmi"]

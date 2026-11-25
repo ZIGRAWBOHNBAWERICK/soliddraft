@@ -1,0 +1,22 @@
+{
+  "files": {
+    "ci/fixtures/universal-joint/bearing.dwasm": [
+      "web"
+    ],
+    "ci/fixtures/universal-joint/bearing.txt": [
+      "web"
+    ],
+    "ci/fixtures/universal-joint/block.dwprt": [
+      "web"
+    ],
+    "ci/fixtures/universal-joint/rig.dwasm": [
+      "web"
+    ],
+    "ci/fixtures/universal-joint/rig.txt": [
+      "web"
+    ],
+    "ci/fixtures/universal-joint/shaft.dwprt": [
+      "web"
+    ]
+  }
+}

@@ -31,7 +31,7 @@ fn step_exports_ship_feature_answers_and_retained_work_in_both_reports() {
     let dir = std::env::temp_dir().join(format!("soliddraft-proof-export-{}", soliddraft_document::DocumentId::new()));
     std::fs::create_dir_all(&dir).unwrap();
     soliddraft_app::file::set_config_dir(Some(dir.join("config")));
-    let mut state = AppState::new(soliddraft_app::new_document());
+    let mut state = AppState::new(soliddraft_app::startup::new_document());
     run(
         &mut state,
         "sketch",

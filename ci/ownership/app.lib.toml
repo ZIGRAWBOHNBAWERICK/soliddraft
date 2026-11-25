@@ -1,0 +1,6 @@
+[[areas]]
+name = "app.lib"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/lib.rs"]
+module = []

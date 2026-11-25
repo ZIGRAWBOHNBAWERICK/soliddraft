@@ -1,0 +1,112 @@
+{
+  "files": {
+    "ci/fixtures/scene-import/README.md": [
+      "lint",
+      "test-linux",
+      "test-macos",
+      "application-loop"
+    ],
+    "ci/fixtures/scene-import/omniverse-cubebox/cubebox_a02.usd": [
+      "lint",
+      "test-linux",
+      "test-macos",
+      "application-loop"
+    ],
+    "ci/fixtures/scene-import/sand3d-bracket/bracket.glb": [
+      "lint",
+      "test-linux",
+      "test-macos",
+      "application-loop"
+    ],
+    "ci/fixtures/scene-import/sand3d-bracket/bracket.obj": [
+      "lint",
+      "test-linux",
+      "test-macos",
+      "application-loop"
+    ],
+    "ci/fixtures/scene-import/sand3d-bracket/bracket.stl": [
+      "lint",
+      "test-linux",
+      "test-macos",
+      "application-loop"
+    ],
+    "ci/fixtures/scene-import/sand3d-bracket/bracket.urdf": [
+      "lint",
+      "test-linux",
+      "test-macos",
+      "application-loop"
+    ],
+    "ci/fixtures/scene-import/sand3d-bracket/bracket.usda": [
+      "lint",
+      "test-linux",
+      "test-macos",
+      "application-loop"
+    ],
+    "ci/fixtures/scene-import/sand3d-bracket/bracket_meshes/plate.obj": [
+      "lint",
+      "test-linux",
+      "test-macos",
+      "application-loop"
+    ],
+    "ci/fixtures/scene-import/sand3d-washer/washer.glb": [
+      "lint",
+      "test-linux",
+      "test-macos",
+      "application-loop"
+    ],
+    "ci/fixtures/scene-import/sand3d-washer/washer.urdf": [
+      "lint",
+      "test-linux",
+      "test-macos",
+      "application-loop"
+    ],
+    "ci/fixtures/scene-import/sand3d-washer/washer.usda": [
+      "lint",
+      "test-linux",
+      "test-macos",
+      "application-loop"
+    ],
+    "ci/fixtures/scene-import/sand3d-washer/washer_meshes/cabinet.obj": [
+      "lint",
+      "test-linux",
+      "test-macos",
+      "application-loop"
+    ],
+    "ci/fixtures/scene-import/sand3d-washer/washer_meshes/dial.obj": [
+      "lint",
+      "test-linux",
+      "test-macos",
+      "application-loop"
+    ],
+    "ci/fixtures/scene-import/sand3d-washer/washer_meshes/drawer.obj": [
+      "lint",
+      "test-linux",
+      "test-macos",
+      "application-loop"
+    ],
+    "ci/fixtures/scene-import/sand3d-washer/washer_meshes/drum.obj": [
+      "lint",
+      "test-linux",
+      "test-macos",
+      "application-loop"
+    ],
+    "ci/fixtures/scene-import/sand3d-washer/washer_meshes/glass.obj": [
+      "lint",
+      "test-linux",
+      "test-macos",
+      "application-loop"
+    ],
+    "ci/fixtures/scene-import/sand3d-washer/washer_meshes/handle.obj": [
+      "lint",
+      "test-linux",
+      "test-macos",
+      "application-loop"
+    ],
+    "ci/fixtures/scene-import/sand3d-washer/washer_meshes/ring.obj": [
+      "lint",
+      "test-linux",
+      "test-macos",
+      "application-loop"
+    ]
+  }
+}

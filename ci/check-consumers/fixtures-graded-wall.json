@@ -1,0 +1,9 @@
+{
+  "files": {
+    "ci/fixtures/graded-wall.json": [
+      "test-linux",
+      "test-macos",
+      "web"
+    ]
+  }
+}

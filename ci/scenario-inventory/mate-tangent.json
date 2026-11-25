@@ -1,0 +1,22 @@
+{
+  "id": "mate-tangent",
+  "file": "ci/scenarios/mate-tangent.json",
+  "acceptance": true,
+  "owners": [
+    "soliddraft-app",
+    "soliddraft-assembly",
+    "soliddraft-model",
+    "soliddraft-kernel-api",
+    "soliddraft-kernel-catallax"
+  ],
+  "kernel_parts": [
+    "boolean",
+    "extrude",
+    "measure",
+    "mesh"
+  ],
+  "catallax_revision": "76cdf97f3e85d22ea74868b77d849498ebdfcf1c",
+  "route": "MCP assembly and Tangent mate commands -> assembly transaction -> proven plane and axis queries -> Catallax adapter -> pinned kernel",
+  "supported_limits": "B2: Tangent mates from an axis-aligned planar face to a cylinder with a rational radius: the shaft turned flat one radius above the plane, flipped behind it, a planar second end refused as unsupported_reference, undo, redo, save and reopen.",
+  "evidence": "result.json, protocol.json, commands/NNNN/{part.dwprt,command.json,kernel.json,inspect-*.stdout}; work/a.dwprt, work/shaft.dwprt and work/rig.dwasm"
+}

@@ -1,0 +1,7 @@
+{
+  "files": {
+    "ci/browser-part-check.js": [
+      "web"
+    ]
+  }
+}

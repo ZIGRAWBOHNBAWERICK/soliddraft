@@ -1,0 +1,6 @@
+[[areas]]
+name = "v5.mates"
+owner = "V5"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/mates/"]
+module = ["mates"]

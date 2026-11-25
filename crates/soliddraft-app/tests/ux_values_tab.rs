@@ -33,7 +33,7 @@ fn call(state: &mut AppState, name: &str, arguments: Value) -> Value {
 
 /// A plate, a flange on it and a hole through the plate: six features, numbers typed in.
 fn bracket() -> Document {
-    let mut state = AppState::new(Document::new("Bracket", soliddraft_app::kernel()));
+    let mut state = AppState::new(Document::new("Bracket", soliddraft_app::startup::kernel()));
     let rectangle =
         |x: f64, width: f64| json!({ "shape": "rectangle", "center": [x, 45, 0], "width": width, "height": 90 });
     call(&mut state, "sketch", json!({ "plane": "top", "shapes": [rectangle(60.0, 140.0)] }));

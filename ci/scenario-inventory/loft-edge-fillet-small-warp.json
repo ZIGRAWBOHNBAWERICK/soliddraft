@@ -1,0 +1,22 @@
+{
+  "id": "loft-edge-fillet-small-warp",
+  "file": "ci/scenarios/loft-edge-fillet-small-warp.json",
+  "acceptance": true,
+  "owners": [
+    "soliddraft-app",
+    "soliddraft-model",
+    "soliddraft-kernel-catallax"
+  ],
+  "kernel_parts": [
+    "boolean",
+    "fillet",
+    "loft",
+    "measure",
+    "mesh",
+    "step"
+  ],
+  "catallax_revision": "45b0a37f483d0acf3b3525a4961d54a80a056efd",
+  "route": "MCP sketches and loft -> exact longitudinal rail selection -> native bounded fillet display -> history, reopen and independent certified STEP",
+  "supported_limits": "Small-warp 2 mm ruled loft and radius 0.1 mm rail fillet. Native display answers within the stated 0.01 mm bound and unchanged 20M whole-request allowance. Measured deviation, method and retained boundary remain display evidence, never proof or an export certificate. Undo/redo and save/reopen preserve the fillet; exact STEP is certified independently.",
+  "evidence": "result.json, protocol.json, command/kernel logs, work counters, viewport PNG and SVG; spline_display.rs checks native measured evidence, bounded status, history, independent certified-request refusal and exact STEP. spline_display_ui.rs renders the bounded proof light in both frames."
+}

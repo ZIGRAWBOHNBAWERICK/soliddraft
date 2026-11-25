@@ -10,7 +10,7 @@ const SURFACE: &[u8] = include_bytes!("data/surface-square.step");
 
 #[test]
 fn a_step_surface_model_opens_as_a_marked_surface_body() {
-    let mut doc = Document::new("Surface", soliddraft_app::kernel());
+    let mut doc = Document::new("Surface", soliddraft_app::startup::kernel());
     let preview = Preview::from_bytes(&doc, "surface-square.step", SURFACE.to_vec()).unwrap();
     commit(&mut doc, &preview, &Review::default()).unwrap();
     assert!(doc.features.iter().all(|f| f.status == FeatureStatus::Ok));
@@ -49,7 +49,7 @@ fn every_surface_model_of_a_step_file_opens_as_its_own_surface_body() {
         let source =
             base.replace("ENDSEC;\nEND-ISO-10303-21;", &format!("{}ENDSEC;\nEND-ISO-10303-21;", second_copy()));
         assert_ne!(source, base, "{name}: the second model was not added");
-        let mut doc = Document::new("Surfaces", soliddraft_app::kernel());
+        let mut doc = Document::new("Surfaces", soliddraft_app::startup::kernel());
         let preview = Preview::from_bytes(&doc, name, source.into_bytes()).unwrap();
         commit(&mut doc, &preview, &Review::default()).unwrap();
         assert!(doc.features.iter().all(|f| f.status == FeatureStatus::Ok), "{name}");

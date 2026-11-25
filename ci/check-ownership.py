@@ -5,7 +5,8 @@ import argparse
 import bisect
 import pathlib
 import re
-import tomllib
+
+from registries import ownership
 
 
 def tokens(source):
@@ -118,7 +119,7 @@ def absolute(path, module, exports):
 
 
 def check(root):
-    areas = tomllib.loads((root / 'ci/ownership.toml').read_text())['areas']
+    areas = ownership(root)
     crate_names = {area['crate'].replace('-', '_'): area['crate'] for area in areas}
     roots = {'crate', 'self', 'super'} | crate_names.keys()
     violations = []

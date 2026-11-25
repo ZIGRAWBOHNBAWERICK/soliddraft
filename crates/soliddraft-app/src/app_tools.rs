@@ -308,7 +308,7 @@ impl AppTools<'_> {
         if let Some(result) = crate::assembly_files::tools::run(self.state, name, input) {
             return Some(result);
         }
-        if let Some(result) = crate::pmi::tools::run(self.state, name, input) {
+        if let Some(result) = crate::pmi::tools::run(&mut self.state.doc, name, input) {
             return Some(result);
         }
         let drawing_active = self.state.drawing.is_active();
@@ -558,17 +558,7 @@ impl AppTools<'_> {
 
     pub(crate) fn drawing_request(&self, input: &Value) -> Result<NewDrawing, String> {
         let id = input["template"].as_str().unwrap_or_default().trim();
-        let templates = &soliddraft_drawing::library::library().templates;
-        if !templates.iter().any(|t| t.id == id) {
-            let ids: Vec<&str> = templates.iter().map(|t| t.id.as_str()).collect();
-            return Err(format!("no template `{id}` (there are: {})", ids.join(", ")));
-        }
-        if self.state.doc.display_body().is_none() {
-            return Err("Make drawing needs a body; extrude something first".into());
-        }
-        if !self.state.doc.proof_state().current_proved_model() {
-            return Err("Wait for the part edit to finish before making a drawing".into());
-        }
+        check_drawing(&self.state.doc, id)?;
         let mut new = NewDrawing::new();
         new.set_template(id);
         Ok(new)
@@ -943,6 +933,23 @@ impl ToolHost for AppTools<'_> {
         drawing::follow_part(self.state);
         out
     }
+}
+
+/// Whether a drawing of `doc` can be made now on the template `id`.
+pub(crate) fn check_drawing(doc: &Document, id: &str) -> Result<(), String> {
+    let id = id.trim();
+    let templates = &soliddraft_drawing::library::library().templates;
+    if !templates.iter().any(|t| t.id == id) {
+        let ids: Vec<&str> = templates.iter().map(|t| t.id.as_str()).collect();
+        return Err(format!("no template `{id}` (there are: {})", ids.join(", ")));
+    }
+    if doc.display_body().is_none() {
+        return Err("Make drawing needs a body; extrude something first".into());
+    }
+    if !doc.proof_state().current_proved_model() {
+        return Err("Wait for the part edit to finish before making a drawing".into());
+    }
+    Ok(())
 }
 
 /// The view `wanted` means, on any sheet: its id, or a label no other view has,

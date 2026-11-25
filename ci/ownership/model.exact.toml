@@ -1,0 +1,6 @@
+[[areas]]
+name = "model.exact"
+owner = "core"
+crate = "soliddraft-model"
+paths = ["crates/soliddraft-model/src/exact.rs"]
+module = ["exact"]

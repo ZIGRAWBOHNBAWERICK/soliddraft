@@ -1,0 +1,6 @@
+[[areas]]
+name = "model.document"
+owner = "core"
+crate = "soliddraft-model"
+paths = ["crates/soliddraft-model/src/document.rs"]
+module = ["document"]

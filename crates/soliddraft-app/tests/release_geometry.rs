@@ -12,7 +12,7 @@ fn fresh() -> AppState {
         let dir = std::env::temp_dir().join(format!("soliddraft-release-config-{}", std::process::id()));
         soliddraft_app::file::set_config_dir(Some(dir));
     });
-    AppState::new(soliddraft_app::new_document())
+    AppState::new(soliddraft_app::startup::new_document())
 }
 
 fn accepted(state: &mut AppState, tool: &str, arguments: Value) {
@@ -523,7 +523,7 @@ fn ridealong_chamfer_distances_edit_undo_and_reopen() {
     assert!((volume(&state) - (14400.0 - 60.0)).abs() < 1e-6);
     state.doc.redo().unwrap();
     let bytes = state.doc.model().to_bytes().unwrap();
-    let reopened = soliddraft_model::Document::from_bytes(&bytes, soliddraft_app::kernel()).unwrap();
+    let reopened = soliddraft_model::Document::from_bytes(&bytes, soliddraft_app::startup::kernel()).unwrap();
     let soliddraft_model::FeatureKind::Chamfer(chamfer) = &reopened.features().last().unwrap().kind else {
         panic!("chamfer")
     };
@@ -560,9 +560,11 @@ fn ridealong_lattice_cells_survive_partial_edits_and_reopen() {
         };
         assert_eq!(lattice.cell, Some(cell));
         assert_eq!(lattice.radius_mm, Some(0.7.into()));
-        let reopened =
-            soliddraft_model::Document::from_bytes(&state.doc.model().to_bytes().unwrap(), soliddraft_app::kernel())
-                .unwrap();
+        let reopened = soliddraft_model::Document::from_bytes(
+            &state.doc.model().to_bytes().unwrap(),
+            soliddraft_app::startup::kernel(),
+        )
+        .unwrap();
         let soliddraft_model::FeatureKind::Lattice(lattice) = &reopened.features().last().unwrap().kind else {
             panic!("lattice")
         };
@@ -588,9 +590,11 @@ fn ridealong_material_mass_and_face_accuracy_survive_reopen() {
     state.doc.set_material(Some(steel.clone()), catalog.default_appearance_of(steel).cloned()).unwrap();
     let mass = state.doc.model().mass(None).unwrap();
     assert!((mass.mass_kg - 14400.0 * 7900e-9).abs() < 1e-10);
-    let reopened =
-        soliddraft_model::Document::from_bytes(&state.doc.model().to_bytes().unwrap(), soliddraft_app::kernel())
-            .unwrap();
+    let reopened = soliddraft_model::Document::from_bytes(
+        &state.doc.model().to_bytes().unwrap(),
+        soliddraft_app::startup::kernel(),
+    )
+    .unwrap();
     assert_eq!(reopened.material(None).unwrap().id, steel.id);
     assert!((reopened.mass(None).unwrap().mass_kg - mass.mass_kg).abs() < 1e-10);
     state.doc.undo().unwrap();
@@ -621,8 +625,11 @@ fn ridealong_fitted_faces_keep_their_own_bounds() {
     assert!(!fitted.is_empty());
     assert!(fitted.iter().all(|bound| bound.is_finite() && *bound > 0.0 && *bound < 1.0));
     assert!(state.doc.faces.iter().any(|face| face.accuracy == FaceAccuracy::Exact));
-    let back = soliddraft_model::Document::from_bytes(&state.doc.model().to_bytes().unwrap(), soliddraft_app::kernel())
-        .unwrap();
+    let back = soliddraft_model::Document::from_bytes(
+        &state.doc.model().to_bytes().unwrap(),
+        soliddraft_app::startup::kernel(),
+    )
+    .unwrap();
     let topology = back.kernel().topology(back.body().unwrap()).unwrap();
     let restored: Vec<_> = topology
         .faces
@@ -640,9 +647,11 @@ fn ridealong_second_distance_is_checked_at_the_document_boundary() {
     use soliddraft_model::{BlendFeature, Command, CommandError, FeatureKind};
     let state = block();
     let edge = state.doc.edge_ref(state.doc.edges[0].id).unwrap();
-    let mut document =
-        soliddraft_model::Document::from_bytes(&state.doc.model().to_bytes().unwrap(), soliddraft_app::kernel())
-            .unwrap();
+    let mut document = soliddraft_model::Document::from_bytes(
+        &state.doc.model().to_bytes().unwrap(),
+        soliddraft_app::startup::kernel(),
+    )
+    .unwrap();
     let before = document.part_json();
     for other in [0.0, -1.0, f64::NAN, f64::INFINITY] {
         let result = document.execute(Command::AddFeature {
@@ -696,7 +705,10 @@ fn ridealong_repaired_faces_show_attained_source_bounds() {
         }
     };
     check(&state.doc);
-    let back = soliddraft_model::Document::from_bytes(&state.doc.model().to_bytes().unwrap(), soliddraft_app::kernel())
-        .unwrap();
+    let back = soliddraft_model::Document::from_bytes(
+        &state.doc.model().to_bytes().unwrap(),
+        soliddraft_app::startup::kernel(),
+    )
+    .unwrap();
     check(&Document::from_model(back));
 }

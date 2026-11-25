@@ -1,0 +1,5 @@
+{
+  "name": "Apply a fillet refusal correction in Chromium",
+  "script": "ci/browser-refusal-assistant.js",
+  "port": 8776
+}

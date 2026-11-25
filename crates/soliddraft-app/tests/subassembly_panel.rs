@@ -231,7 +231,7 @@ fn form_pick_and_move_the_floating_child_in_the_window() {
         .with_render_every_step(true)
         .with_step_dt(1.0 / 60.0)
         .wgpu()
-        .build_eframe(|cc| SolidDraftApp::new(cc, soliddraft_app::new_document(), Automation::default()));
+        .build_eframe(|cc| SolidDraftApp::new(cc, soliddraft_app::startup::new_document(), Automation::default()));
     h.run_steps(3);
 
     // The flat root T0 of the design: A on the origin, B on A, C on B, F free.

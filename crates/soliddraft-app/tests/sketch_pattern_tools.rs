@@ -6,7 +6,7 @@ use soliddraft_assistant::{Caller, tools::call_checked};
 
 #[test]
 fn skipped_pattern_positions_are_validated_atomically_for_creation_and_edits() {
-    let mut state = AppState::new(Document::new("Pattern tools", soliddraft_app::kernel()));
+    let mut state = AppState::new(Document::new("Pattern tools", soliddraft_app::startup::kernel()));
     let caller = Caller::Mcp { client: "pattern tools".into() };
     let spec = json!({"type":"linear","step":{"u":10,"v":0},"count":3});
     let circle = json!({"tool":"add","kind":{"type":"circle","center":{"u":0,"v":0},"radius":1},"construction":false});

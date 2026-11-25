@@ -1,0 +1,6 @@
+[[areas]]
+name = "app.sketcher"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/sketcher.rs", "crates/soliddraft-app/src/sketcher/"]
+module = ["sketcher"]

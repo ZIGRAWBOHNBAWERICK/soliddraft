@@ -1,0 +1,16 @@
+{
+  "id": "sketch-offset",
+  "file": "ci/scenarios/sketch-offset.json",
+  "acceptance": false,
+  "owners": [
+    "soliddraft-app",
+    "soliddraft-model",
+    "soliddraft-kernel-catallax"
+  ],
+  "kernel_parts": [
+    "boolean",
+    "extrude",
+    "measure",
+    "mesh"
+  ]
+}

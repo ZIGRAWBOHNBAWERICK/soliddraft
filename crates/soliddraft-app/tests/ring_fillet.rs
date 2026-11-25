@@ -17,7 +17,7 @@ fn accepted(state: &mut AppState, tool: &str, arguments: serde_json::Value) {
 
 /// A pipe of radius 10 along z, with a boss of radius 4 leaving it along y.
 fn tee() -> AppState {
-    let mut state = AppState::new(Document::new("Tee", soliddraft_app::kernel()));
+    let mut state = AppState::new(Document::new("Tee", soliddraft_app::startup::kernel()));
     accepted(&mut state, "sketch", json!({"plane":"top","shapes":[{"shape":"circle","center":[0,0,0],"diameter":20}]}));
     accepted(&mut state, "extrude", json!({"sketch":"Sketch1","depth":40,"flip":false}));
     accepted(

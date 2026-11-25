@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 
 #[test]
 fn scaled_part_interior_sections_stop_at_the_requested_plane() {
-    let mut doc = Document::new("Wide section plate", soliddraft_app::kernel());
+    let mut doc = Document::new("Wide section plate", soliddraft_app::startup::kernel());
     doc.apply(Command::AddExtrude {
         params: ExtrudeParams {
             profile: ProfileKind::Rectangle { width: 1_000_000_000.0, height: 40.0 },

@@ -304,7 +304,7 @@ fn import_exported_step(name: &str, faces: usize) -> (KernelResult<f64>, Aabb) {
     };
     let path = step_path(name);
     let case = ribbon::case(&format!("fillet-roundtrip-{name}"));
-    let mut app = ribbon::app(Document::new("Reimported fillets", soliddraft_app::kernel()));
+    let mut app = ribbon::app(Document::new("Reimported fillets", soliddraft_app::startup::kernel()));
     app.state_mut().state.push(soliddraft_app::state::AppAction::ImportStep(Some(path.clone())));
     app.run_steps(3);
     assert!(app.state().state.import_dialog.is_some(), "{name}: Import STEP did not open");
@@ -807,7 +807,7 @@ fn box_all_edges_take_r9_9() {
 /// run passes CI's ten-minute limit.
 fn demo_edges(quarter: usize) {
     let mut part = Part::new("Part1");
-    soliddraft_app::populate_demo(&mut part.state.doc);
+    soliddraft_app::startup::populate_demo(&mut part.state.doc);
     let edges: Vec<EdgeId> = part.topology().edges.iter().map(|e| e.id).collect();
     assert_eq!(edges.len(), 48, "the sample part has 48 edges");
     let rows: Vec<Row> = edges[quarter * 12..(quarter + 1) * 12]

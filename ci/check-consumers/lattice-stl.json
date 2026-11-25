@@ -1,0 +1,7 @@
+{
+  "files": {
+    "ci/check-lattice-stl.py": [
+      "application-loop"
+    ]
+  }
+}

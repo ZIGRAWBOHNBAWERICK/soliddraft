@@ -12,7 +12,7 @@ fn import(doc: &mut Document, name: &str, format: ImportFormat, source: &[u8]) {
 }
 
 fn imported(name: &str, format: ImportFormat, source: &[u8]) -> Document {
-    let mut doc = Document::new("Report", soliddraft_app::kernel());
+    let mut doc = Document::new("Report", soliddraft_app::startup::kernel());
     import(&mut doc, name, format, source);
     doc
 }
@@ -128,7 +128,7 @@ fn a_refused_step_body_does_not_discard_its_certified_sibling() {
         ("(#190,#230,#252,#274,#286,#298)", "(#190,#230,#252,#274,#286)", "#150", 10.0),
     ] {
         let source = original.replace(shell, open_shell).into_bytes();
-        let mut state = AppState::new(Document::new("Partial import", soliddraft_app::kernel()));
+        let mut state = AppState::new(Document::new("Partial import", soliddraft_app::startup::kernel()));
         let preview = Preview::from_source(&state.doc, "mixed.step", source.clone(), ImportFormat::Step).unwrap();
         commit_in(&mut state, &preview, &Review::default()).unwrap();
         assert_eq!(state.doc.features.len(), 1);
@@ -147,7 +147,8 @@ fn a_refused_step_body_does_not_discard_its_certified_sibling() {
         assert!(!report[1].why.contains("catallax") && !report[1].why.contains("numbers."));
 
         let saved = state.doc.model().to_bytes().unwrap();
-        let reopened = soliddraft_app::file::open_bytes("mixed.dwprt", &saved, soliddraft_app::kernel(), None).unwrap();
+        let reopened =
+            soliddraft_app::file::open_bytes("mixed.dwprt", &saved, soliddraft_app::startup::kernel(), None).unwrap();
         assert_eq!(reopened.model().live_bodies().len(), 1);
         assert_eq!(rows(&reopened, &[])[0].tier, Tier::Exact);
         assert!(

@@ -30,7 +30,7 @@ fn check_display(name: &str, source: &str, refusal_budget: Option<u64>) {
     let caller = Caller::Mcp { client: "native-spline-display-ui".into() };
     {
         let layout = "edit_suite";
-        let mut app = ribbon::app(soliddraft_app::new_document());
+        let mut app = ribbon::app(soliddraft_app::startup::new_document());
         case.run(&mut app, |app| {
             for step in scenario["steps"].as_array().unwrap().iter().take(3) {
                 let name = step["tool"].as_str().unwrap();

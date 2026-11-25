@@ -1,0 +1,21 @@
+{
+  "id": "mate-remaining",
+  "file": "ci/scenarios/mate-remaining.json",
+  "acceptance": true,
+  "owners": [
+    "soliddraft-app",
+    "soliddraft-assembly",
+    "soliddraft-model",
+    "soliddraft-kernel-catallax"
+  ],
+  "kernel_parts": [
+    "boolean",
+    "extrude",
+    "measure",
+    "mesh"
+  ],
+  "catallax_revision": "b9aa4309345e72d6eaf8bbd835f5cdd921ddadf8",
+  "route": "MCP arc Slot, Mate Controller, Path options and spline Cam commands -> exact arc slot and outline proofs -> bounded residual checks",
+  "supported_limits": "A pin centred in an arc slot cut through a plate, a Distance driven by two Mate Controller positions with frames between them, apply, undo and redo, a block's corner held halfway round the plate's outline with its pitch, yaw and roll steered, a refused distance edit of a percentage Path, a percentage edit, a roller on a cam whose top is a spline, save/reopen, and a later Coincident on top. Physical Dynamics needs the desktop collision worker and is covered by the assembly tests.",
+  "evidence": "result.json, protocol.json, command summaries, work/rig.dwasm and parts"
+}

@@ -51,7 +51,7 @@ fn saved_history(name: &str, save_as: bool, redo: bool, control: Control) {
         locations.add(LocationKind::ReferencedDocuments, root.join("parts"));
         soliddraft_app::settings::save_file_locations(&locations).unwrap();
     }
-    let mut doc = Document::new("Bracket", soliddraft_app::kernel());
+    let mut doc = Document::new("Bracket", soliddraft_app::startup::kernel());
     doc.apply(PartCommand::AddExtrude { params: ExtrudeParams::default(), via_assistant: false }).unwrap();
     let mut app = Harness::builder()
         .with_size(egui::vec2(1440.0, 900.0))
@@ -162,7 +162,7 @@ fn save_as_rebases_each_historical_reference_without_copying_its_identity_or_pin
         std::fs::create_dir_all(root.join(dir)).unwrap();
     }
     soliddraft_app::file::set_config_dir(Some(root.join("config")));
-    let mut part = Document::new("B", soliddraft_app::kernel());
+    let mut part = Document::new("B", soliddraft_app::startup::kernel());
     let b = root.join("old/b.dwprt");
     soliddraft_app::file::save(&mut part, &b).unwrap();
     let old = root.join("old/sheet.dwdrw");

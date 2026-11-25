@@ -1,0 +1,17 @@
+{
+  "id": "hole",
+  "file": "ci/scenarios/hole.json",
+  "acceptance": false,
+  "owners": [
+    "soliddraft-app",
+    "soliddraft-model",
+    "soliddraft-kernel-catallax"
+  ],
+  "kernel_parts": [
+    "boolean",
+    "extrude",
+    "hole",
+    "measure",
+    "mesh"
+  ]
+}

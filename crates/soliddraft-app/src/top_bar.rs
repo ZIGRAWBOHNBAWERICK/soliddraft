@@ -129,7 +129,7 @@ impl OpenParts {
     pub fn open_new_part(&mut self, state: &mut AppState, dock: &mut DockState<Tab>) {
         self.next_number = self.next_number.max(self.total()) + 1;
         let name = format!("Part{}", self.next_number);
-        let new_doc = Document::new(&name, crate::kernel());
+        let new_doc = Document::new(&name, crate::startup::kernel());
         state.start = None;
         state.chat.preview = None;
         state.import_dialog = None;
@@ -181,7 +181,7 @@ impl OpenParts {
         // Flatten all parts into one ordered list, swap the chosen one into `state`.
         let mut all: Vec<ParkedPart> = Vec::with_capacity(self.total());
         all.append(&mut self.before);
-        let current_doc = std::mem::replace(&mut state.doc, Document::new("_swap", crate::kernel()));
+        let current_doc = std::mem::replace(&mut state.doc, Document::new("_swap", crate::startup::kernel()));
         let current_vp = std::mem::take(&mut state.viewport);
         all.push(ParkedPart { doc: current_doc, viewport: current_vp, unit: state.display_unit });
         all.append(&mut self.after);

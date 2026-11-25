@@ -95,7 +95,7 @@ pub(crate) fn commands() -> Vec<CommandSpec> {
         .run(|_| AppAction::ManufacturingPackage)
         .when(|s| s.doc.display_body().is_some() && !s.doc.proof_pending() && s.doc.model().live_bodies().len() == 1)
         .agents(
-            Agents::Mcp,
+            Agents::Tool,
             "Writes path (.step) with the part's manufacturing information, and a drawing made from it as .pdf and .dxf \
              beside it. The answer lists what the drawing shows, what it could not show, what overlaps and what is on \
              the drawing but not in the file. The drawing becomes the active document, in place of an open drawing.",
@@ -103,7 +103,7 @@ pub(crate) fn commands() -> Vec<CommandSpec> {
         )
         .undo(Undo::Replaces),
         row("pmi_add", "Add manufacturing information", "Put a datum, dimension, tolerance or finish on faces").agents(
-            Agents::Mcp,
+            Agents::Tool,
             "Adds one item to the part, or replaces the item named in replaces. A dimension takes no size: it reads the part's.",
             add_params,
         )
@@ -126,26 +126,26 @@ pub(crate) fn commands() -> Vec<CommandSpec> {
             "List the holes, hole patterns, bosses and slots the part's faces show",
         )
         .agents(
-            Agents::Mcp,
+            Agents::Tool,
             "Reads the features off the body's faces, on a modelled or an imported part: each with its faces, whether \
              it goes through, what it opens onto and its sizes. It is geometry, not a proposal.",
             Vec::new,
         ),
         row("pmi_interview", "Interview", "List what the part's manufacturing information still lacks").agents(
-            Agents::Mcp,
+            Agents::Tool,
             "The decisions still open, in order: material, general tolerance, datums, then each hole, boss and slot. \
              Each has a proposal from rules and standards tables and the reason for it. Nothing is added to the part.",
             Vec::new,
         ),
         row("pmi_answer", "Answer the interview", "Take the interview's proposals as the part's items").agents(
-            Agents::Mcp,
+            Agents::Tool,
             "Adds the proposals of the questions named in accept, or of every question with accept \"all\", and sets \
              the material when it is given, as one undo step. Answer a question another way with pmi_add or pmi_notes.",
             answer_params,
         )
         .undo(Undo::Step),
         row("pmi_list", "List manufacturing information", "List the part's items as a drawing writes them").agents(
-            Agents::Mcp,
+            Agents::Tool,
             "Every item with its callout, its faces and what is wrong with it if it does not apply, and the part's notes.",
             Vec::new,
         ),

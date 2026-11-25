@@ -680,7 +680,7 @@ fn body_folder(
             crate::web::show_control(&label, response.rect);
             tree_visibility::eye(ui, state, response.rect, item, &label);
             if response.clicked() {
-                actions.push(AppAction::SelectBody(key));
+                actions.push(AppAction::Body(crate::app::BodyAction::SelectBody(key)));
             }
             if !state.in_sketch() {
                 if response.secondary_clicked() {

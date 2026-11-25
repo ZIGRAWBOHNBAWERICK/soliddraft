@@ -49,6 +49,26 @@ cargo test --workspace
 
 The app's exit tests drive the real interface through `egui_kittest` on wgpu. They skip themselves when no GPU adapter is available. See [ci.md](ci.md) for the full checks.
 
+CI check consumers live in per-feature fragments under `ci/check-consumers/`. Add a new script to the matching feature fragment, or add a fragment for a new feature. Every tracked file under `ci/` needs exactly one entry. When adding or changing a check, update `ci/check-registry.json` as needed.
+
+Register each new Rust module in its parent module before using it.
+
+### Merging `Cargo.lock`
+
+In each clone that assembles branches, enable the opt-in lockfile driver. Run this from
+the repository root with Python 3.11 or newer:
+
+```sh
+git config merge.cargo-lock.driver 'python3 ci/cargo-lock-merge.py %O %A %B %L'
+```
+
+Git invokes the driver before it writes the merged manifests. The driver combines locked
+package changes from both sides without resolving new versions. It leaves overlapping
+changes it cannot reconcile as conflicts. After merging, validate the result against the
+merged manifests with `cargo metadata --locked --format-version 1` or the existing CI
+builds that pass `--locked`. If Cargo reports a stale lockfile, run
+`cargo update --workspace`, review `Cargo.lock`, and repeat the locked check.
+
 ## Documents
 
 [ROADMAP.md](../ROADMAP.md) is the plan, by phase, step and task; [glossary.md](glossary.md) defines those words. Catallax holds the source of the roadmap, and SolidDraft keeps a byte-identical copy that the `Roadmap` workflow compares with Catallax's default branch. Change the roadmap in Catallax first, then copy it here.

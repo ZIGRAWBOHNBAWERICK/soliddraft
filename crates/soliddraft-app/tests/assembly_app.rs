@@ -39,7 +39,7 @@ fn folder(name: &str) -> PathBuf {
 
 /// A block `w` by `d` on the top plane, `h` tall, saved at `path`.
 fn part(path: &Path, w: f64, d: f64, h: f64) -> PathBuf {
-    let mut doc = soliddraft_app::new_document();
+    let mut doc = soliddraft_app::startup::new_document();
     let params = ExtrudeParams {
         sketch: None,
         profile: ProfileKind::Rectangle { width: w, height: d },
@@ -91,7 +91,7 @@ fn new_assembly_supersedes_an_uncollected_open_without_losing_edits_or_undo() {
     let old = dir.join("a.dwasm");
     soliddraft_assembly::AssemblyDocument::new("A").save(Some(&old)).unwrap();
     let block = part(&dir.join("parts/block.dwprt"), 10.0, 10.0, 10.0);
-    let mut state = AppState::new(soliddraft_app::new_document());
+    let mut state = AppState::new(soliddraft_app::startup::new_document());
     let mut dock = DockState::new(vec![Tab::Viewport]);
     let ctx = egui::Context::default();
     assembly::apply(&mut state, &mut dock, AssemblyAction::Open(old));
@@ -113,7 +113,7 @@ fn an_assembly_is_made_from_two_parts_saved_and_reopened() {
     let dir = folder("flow");
     let block = part(&dir.join("parts/block.dwprt"), 40.0, 30.0, 10.0);
     let pin = part(&dir.join("parts/pin.dwprt"), 10.0, 10.0, 60.0);
-    let mut state = AppState::new(soliddraft_app::new_document());
+    let mut state = AppState::new(soliddraft_app::startup::new_document());
     let mut dock = DockState::new(vec![Tab::Viewport]);
     let ctx = egui::Context::default();
 
@@ -199,13 +199,13 @@ fn make_assembly_places_the_open_part() {
     let block = part(&dir.join("parts/block.dwprt"), 40.0, 30.0, 10.0);
 
     // An unsaved part is refused: the assembly would have no file to reference.
-    let mut state = AppState::new(soliddraft_app::demo_document());
+    let mut state = AppState::new(soliddraft_app::startup::demo_document());
     let mut dock = DockState::new(vec![Tab::Viewport]);
     assembly::apply(&mut state, &mut dock, AssemblyAction::FromPart);
     assert!(state.assembly.session.is_none());
     assert!(state.note.as_ref().is_some_and(|n| n.text.contains("Save the part")));
 
-    let doc: Document = file::open(&block, soliddraft_app::kernel(), None).unwrap();
+    let doc: Document = file::open(&block, soliddraft_app::startup::kernel(), None).unwrap();
     state.doc = doc;
     assembly::apply(&mut state, &mut dock, AssemblyAction::FromPart);
     let s = session(&mut state);
@@ -232,7 +232,7 @@ fn an_assembly_of_files_handed_over_saves_and_reopens_without_their_folder() {
         })
         .collect();
     std::fs::remove_dir_all(dir.join("parts")).unwrap();
-    let mut state = AppState::new(soliddraft_app::new_document());
+    let mut state = AppState::new(soliddraft_app::startup::new_document());
     let mut dock = DockState::new(vec![Tab::Viewport]);
     let ctx = egui::Context::default();
 
@@ -270,7 +270,7 @@ fn an_assembly_of_files_handed_over_saves_and_reopens_without_their_folder() {
 
     // Opened again from its bytes, with the parts handed over beside it, as File > Open
     // takes several files in the browser: found, current, at the saved placements.
-    let mut state = AppState::new(soliddraft_app::new_document());
+    let mut state = AppState::new(soliddraft_app::startup::new_document());
     assembly::hold_all(&mut state, &files);
     assembly::open_bytes(&mut state, "rig.dwasm", bytes.clone());
     wait_open(&mut state, &mut dock, &ctx);
@@ -295,7 +295,7 @@ fn an_assembly_of_files_handed_over_saves_and_reopens_without_their_folder() {
 
     // Opened alone: still drawn from the copies the file keeps, each part said to be
     // missing.
-    let mut state = AppState::new(soliddraft_app::new_document());
+    let mut state = AppState::new(soliddraft_app::startup::new_document());
     assembly::open_bytes(&mut state, "rig.dwasm", bytes);
     wait_open(&mut state, &mut dock, &ctx);
     let shown = assembly::shown(&state);
@@ -332,13 +332,13 @@ fn uploaded_assemblies_open_the_one_chosen() {
     };
 
     // The child places both parts; the parent places the child.
-    let mut state = AppState::new(soliddraft_app::new_document());
+    let mut state = AppState::new(soliddraft_app::startup::new_document());
     assembly::apply(&mut state, &mut dock, AssemblyAction::New);
     assembly::insert_bytes(&mut state, parts.clone());
     session(&mut state).doc.finish_loading();
     assembly::frame(&mut state, &mut dock, &ctx);
     let child = saved(&mut state, &mut dock, "child.dwasm");
-    let mut state = AppState::new(soliddraft_app::new_document());
+    let mut state = AppState::new(soliddraft_app::startup::new_document());
     assembly::hold_all(&mut state, &parts);
     assembly::apply(&mut state, &mut dock, AssemblyAction::New);
     assembly::insert_bytes(&mut state, vec![child.clone()]);
@@ -348,7 +348,7 @@ fn uploaded_assemblies_open_the_one_chosen() {
     let parent = saved(&mut state, &mut dock, "parent.dwasm");
 
     // The child first: nothing opens, and both assemblies are offered.
-    let mut state = AppState::new(soliddraft_app::new_document());
+    let mut state = AppState::new(soliddraft_app::startup::new_document());
     let upload = vec![child, parent, parts[0].clone(), parts[1].clone()];
     assembly::open_uploaded(&mut state, upload);
     assert!(state.assembly.session.is_none() && state.assembly.opening.is_none());
@@ -451,7 +451,7 @@ fn the_window_builds_an_assembly_from_dropped_parts() {
         .with_render_every_step(true)
         .with_step_dt(1.0 / 60.0)
         .wgpu()
-        .build_eframe(|cc| SolidDraftApp::new(cc, soliddraft_app::demo_document(), Automation::default()));
+        .build_eframe(|cc| SolidDraftApp::new(cc, soliddraft_app::startup::demo_document(), Automation::default()));
     harness.run_steps(3);
 
     // File > New assembly, then both parts dropped on the window.

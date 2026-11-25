@@ -1,0 +1,9 @@
+{
+  "id": "edit-suite-panes-and-sketch-close",
+  "file": "crates/soliddraft-app/tests/ux_feature_forms.rs",
+  "owners": [
+    "soliddraft-app"
+  ],
+  "route": "egui_kittest -> View commands and Close sketch -> application dispatcher",
+  "evidence": "target/ux-tools/edit-suite-panes-sketch and target/ux-tools/edit-suite-document-panes; hidden part pane, Tree/Values tabs, actual assembly/drawing defaults, red Close sketch, display-only (-) prefix and retained classic dock"
+}

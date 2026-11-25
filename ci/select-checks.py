@@ -10,6 +10,8 @@ import sys
 import tempfile
 import tomllib
 
+from registries import RegistryError, check_consumers, scenario_inventory
+
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 LINUX = {'lint', 'kernel', 'step-opencascade', 'test-linux', 'web', 'msrv', 'interactive-linux', 'application-loop'}
 PLATFORM = {'test-macos', 'test-windows', 'interactive-macos'}
@@ -28,6 +30,7 @@ OWNERS = {
     'interactive-linux': {'soliddraft-app'},
     'application-loop': {'soliddraft-cli'},
 }
+# The virtual map name is also the on-disk path in accepted pre-fragment revisions.
 POLICY = 'ci/check-consumers.json'
 # Reviewed viewport UI and math with no device, adapter, surface or OS API. The rest of viewport/ is platform.
 SHARED_VIEWPORT = {f'crates/soliddraft-app/src/viewport/{name}.rs'
@@ -46,6 +49,12 @@ def git(root, *args):
 
 
 def content(root, path, revision=None):
+    if path == POLICY:
+        try:
+            return json.dumps(check_consumers(root, revision))
+        except RegistryError as error:
+            if str(error) != 'ci/check-consumers: no JSON policy fragments':
+                raise
     if revision:
         try:
             return git(root, 'show', f'{revision}:{path}').decode(errors='replace')
@@ -377,6 +386,8 @@ def ci_only_selection(changes, event, ref, read_sources):
                 removed = change[0][0] in 'DR' and path == change[1]
                 for unit in sorted(ci_consumers(path, removed, mapped, base_map) - {'lint'}):
                     reasons.setdefault(unit, []).append(f'CI consumers: {path}')
+            elif path.startswith('ci/browser-checks/') or path == 'ci/run-browser-checks.py':
+                reasons.setdefault('web', []).append(f'web check definition: {path}')
     registries = [json.loads(text)['jobs'] for text in read_sources('ci/check-registry.json') if text]
     for path in sorted(paths):
         if re.fullmatch(r'ci/scenarios/[^/]+\.json', path):
@@ -540,10 +551,12 @@ def catallax_changes(old, new):
         return changed
 
 
-def scenario_parts(text):
+def scenario_parts(root, revision):
     """Scenario file -> listed kernel parts, or None for a scenario with no list."""
+    legacy = content(root, INVENTORY, revision)
+    inventory = json.loads(legacy) if legacy else scenario_inventory(root, revision)
     return {entry['file']: set(entry['kernel_parts']) if 'kernel_parts' in entry else None
-            for entry in json.loads(text)['scenarios']}
+            for entry in inventory['scenarios']}
 
 
 def pin_move_scenarios(root, base, head):
@@ -558,7 +571,7 @@ def pin_move_scenarios(root, base, head):
         if not old or not new or old == new:
             return None
         maps = [parse_kernel_parts(content(root, KERNEL_PARTS, revision)) for revision in (base, head)]
-        listed = [scenario_parts(content(root, INVENTORY, revision)) for revision in (base, head)]
+        listed = [scenario_parts(root, revision) for revision in (base, head)]
         changed_paths = catallax_changes(old, new)
     except (ValueError, KeyError, TypeError, AttributeError, re.error, OSError,
             subprocess.SubprocessError) as error:
@@ -699,19 +712,26 @@ def main():
                         help="the windows_catch_up input; only a manual run may select the deferred Windows jobs")
     parser.add_argument('--output', type=pathlib.Path, required=True)
     args = parser.parse_args()
-    # The running checkout's selector and map are the candidate policy; --head names the tree they judge.
-    policy = content(args.root, POLICY)
-    sources = lambda path: [content(args.root, path, args.base),
-                            policy if path == POLICY else content(args.root, path, args.head)]
+    # The running checkout supplies the candidate fragments; --head names the tree they judge.
     try:
+        policy = json.dumps(check_consumers(args.root))
+        base_script = content(args.root, 'ci/select-checks.py', args.base)
+        base_policy = content(args.root, POLICY, args.base)
+        if base_script and not base_policy:
+            try:
+                base_policy = json.dumps(check_consumers(args.root, args.base))
+            except RegistryError as error:
+                # If it used a map, the accepted selector will reject the empty input.
+                print(f'select-checks: cannot assemble accepted check consumers: {error}', file=sys.stderr)
+        sources = lambda path: ([base_policy, policy] if path == POLICY else
+                                [content(args.root, path, args.base), content(args.root, path, args.head)])
         check_inventory(args.root, args.head, parse_consumers(policy))
         changes = changes_between(args.root, args.base, args.head)
         packages = graph(args.root, args.base if changes is not None else None)
         windows = args.windows == 'true' and args.event == 'workflow_dispatch'
         result = select(changes, args.event, args.ref, packages, sources, windows)
-        base_script = content(args.root, 'ci/select-checks.py', args.base)
         result = with_base_rules(result, base_script, changes, args.event, args.ref, packages, sources)
-    except PolicyError as error:
+    except (PolicyError, RegistryError) as error:
         sys.exit(f'select-checks: {error}')
     work = accepted_work(args.root, args.base, args.head, changes, args.event, packages, base_script)
     args.output.write_text(json.dumps({'selected': sorted(result), 'reasons': result, 'work': work}, indent=2) + '\n')

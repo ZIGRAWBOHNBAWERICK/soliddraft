@@ -1,0 +1,6 @@
+[[areas]]
+name = "app.section"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/section.rs"]
+module = ["section"]

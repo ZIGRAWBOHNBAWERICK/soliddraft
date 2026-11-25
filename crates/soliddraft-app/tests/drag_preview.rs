@@ -56,7 +56,7 @@ fn scenario() -> (AppState, Arc<Gated>, FeatureId) {
     soliddraft_app::file::set_config_dir(Some(dir));
     let kernel = Arc::new(Gated::default());
     let mut doc = Document::new("Part1", kernel.clone());
-    soliddraft_app::populate_demo(&mut doc);
+    soliddraft_app::startup::populate_demo(&mut doc);
     assert_eq!(doc.error_count(), 0, "the sample part builds");
     let plate = doc.features[0].id;
     doc.selection = Some(Selection::Feature(plate));

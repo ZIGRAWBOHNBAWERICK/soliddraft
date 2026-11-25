@@ -1,0 +1,24 @@
+{
+  "id": "p5-flanged-housing",
+  "file": "ci/scenarios/p5-flanged-housing.json",
+  "acceptance": true,
+  "owners": [
+    "soliddraft-app",
+    "soliddraft-model",
+    "soliddraft-kernel-catallax"
+  ],
+  "kernel_parts": [
+    "boolean",
+    "fillet",
+    "hole",
+    "measure",
+    "mesh",
+    "revolve",
+    "step",
+    "verify"
+  ],
+  "catallax_revision": "76cdf97f3e85d22ea74868b77d849498ebdfcf1c",
+  "route": "MCP revolve, four-point hole, fillet and edit_fillet -> real document rebuild -> pinned Catallax fitted and analytic junctions",
+  "supported_limits": "Radii 2 and 2.5 on the canonical P5 housing, the ball resting on all four countersink mouths, radius 0.999 and 0.5, whose one torus clears them, and radius 1, whose rail touches all four mouths at isolated points; radius 3.5 refuses with shapes.rolling-envelope and keeps the document; mass properties of a fitted body have no inertia; fitted face and edge values are display estimates",
+  "evidence": "result.json, protocol.json, commands/NNNN/{command.json,kernel.json,viewport.png,view.svg}; steps 1-16 edit, undo, redo, reopen and refusal; p5-flanged-housing.dwprt and commands/0013/{part.step,step-report.json,check-step.stdout,check-step.stderr,raw-step.stdout}; steps 17-41 radius 0.999 edit, undo, redo, fresh-process reopen, refusal and return to radius 2.5; p5-clearance.dwprt and commands-1/0001/{part.step,step-oracle.json,step-oracle.stdout}; steps 42-72 tracked mouth area, radius 1 and 0.5 edits, undo, redo, return to radius 1, fresh-process reopen and refusal; p5-separated.dwprt and commands-1/0022/{part.step,step-oracle.json,step-oracle.stdout}; p5-tangent.dwprt and commands-2/0005/{part.step,step-oracle.json,step-oracle.stdout}"
+}

@@ -120,7 +120,7 @@ pub fn app_unrendered(doc: Document, size: Vec2, pixels_per_point: f32) -> App {
 
 /// No features, body, selection, editor or sketch session.
 pub fn blank() -> Document {
-    Document::new("Ribbon acceptance", soliddraft_app::kernel())
+    Document::new("Ribbon acceptance", soliddraft_app::startup::kernel())
 }
 
 /// One extrusion, 60 by 40 by 20: volume 48000, six faces, twelve edges.

@@ -399,7 +399,7 @@ fn rows_mark_only_unfinished_features_with_their_reason() {
         // A built feature has no mark.
         assert!(app.query_all_by_label_contains("Boss-Extrude1 status:").next().is_none());
         let id = app.state().state.doc.features[0].id;
-        app.state_mut().state.push(AppAction::EditFeature(id));
+        app.state_mut().state.push(AppAction::Editor(soliddraft_app::app::EditorAction::EditFeature(id)));
         app.run_steps(8);
         let badge = app.get_by_label("Boss-Extrude1 status: Working").rect();
         let feature = row(app, "Boss-Extrude1");

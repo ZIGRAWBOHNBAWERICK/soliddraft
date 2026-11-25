@@ -96,7 +96,7 @@ fn transforms_preview_apply_cancel_undo_and_reopen() {
         .unwrap_or_else(|| std::env::temp_dir().join(format!("soliddraft-transforms-{}", std::process::id())));
     std::fs::create_dir_all(dir.join("config")).unwrap();
     soliddraft_app::file::set_config_dir(Some(dir.join("config")));
-    let mut doc = Document::new("Transforms", soliddraft_app::kernel());
+    let mut doc = Document::new("Transforms", soliddraft_app::startup::kernel());
     doc.apply(Command::AddSketch { plane: SketchPlane::Reference { plane: PlaneKind::Top, offset: 0.0 } }).unwrap();
     let id = doc.features[0].id;
     let name = doc.features[0].name.clone();

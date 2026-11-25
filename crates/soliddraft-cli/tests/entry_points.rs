@@ -159,7 +159,7 @@ fn every_command_has_an_entry_point_and_the_command_line_lists_it() {
 /// nothing runs yet says what it waits for.
 #[test]
 fn a_command_without_a_tool_says_why() {
-    let state = AppState::new(soliddraft_app::new_document());
+    let state = AppState::new(soliddraft_app::startup::new_document());
     let mut unexplained = Vec::new();
     for c in commands::all() {
         match c.agents {
@@ -199,7 +199,7 @@ fn the_command_line_describes_each_command_as_the_registry_does() {
 #[test]
 fn every_agent_tool_has_a_handler() {
     let caller = Caller::Assistant { prompt: "test".into(), model: "test".into() };
-    let mut doc = soliddraft_app::new_document();
+    let mut doc = soliddraft_app::startup::new_document();
     let mut book = ProposalBook::default();
     let mut host = CommandTools { doc: &mut doc, book: &mut book, surface: Surface::Assistant, drawing: None };
     for tool in host.tools() {
@@ -207,7 +207,7 @@ fn every_agent_tool_has_a_handler() {
         assert!(!out.content.starts_with("unknown tool"), "the assistant's {} has no handler", tool.name);
     }
     let caller = Caller::Mcp { client: "test".into() };
-    let mut state = AppState::new(soliddraft_app::new_document());
+    let mut state = AppState::new(soliddraft_app::startup::new_document());
     let mut host = AppTools { state: &mut state };
     for tool in host.tools() {
         let out = host.call(&tool.name, json!({}), &caller);

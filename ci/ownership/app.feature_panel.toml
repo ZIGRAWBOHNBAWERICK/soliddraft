@@ -1,0 +1,6 @@
+[[areas]]
+name = "app.feature_panel"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/feature_panel.rs"]
+module = ["feature_panel"]

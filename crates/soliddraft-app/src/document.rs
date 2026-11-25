@@ -6899,8 +6899,9 @@ mod tests {
         };
         built(&d);
         let v_before = d.mass_properties(fillet).unwrap().volume;
-        let reopened =
-            Document::from_model(model::Document::from_bytes(&d.model.to_bytes().unwrap(), crate::kernel()).unwrap());
+        let reopened = Document::from_model(
+            model::Document::from_bytes(&d.model.to_bytes().unwrap(), crate::startup::kernel()).unwrap(),
+        );
         built(&reopened);
         assert!((reopened.mass_properties(fillet).unwrap().volume - v_before).abs() < 1e-9 * v_before);
         // Thicker base: the inside edge moves up; the fillet follows it.

@@ -106,7 +106,7 @@ fn check_interference_and_clearance_from_the_panel() {
         .with_render_every_step(true)
         .with_step_dt(1.0 / 60.0)
         .wgpu()
-        .build_eframe(|cc| SolidDraftApp::new(cc, soliddraft_app::new_document(), Automation::default()));
+        .build_eframe(|cc| SolidDraftApp::new(cc, soliddraft_app::startup::new_document(), Automation::default()));
     h.run_steps(3);
 
     // A plate, a block resting on it by a Coincident mate, and a second block sunk 1 mm
@@ -238,7 +238,7 @@ fn check_hole_alignment_from_the_panel() {
         .with_render_every_step(true)
         .with_step_dt(1.0 / 60.0)
         .wgpu()
-        .build_eframe(|cc| SolidDraftApp::new(cc, soliddraft_app::new_document(), Automation::default()));
+        .build_eframe(|cc| SolidDraftApp::new(cc, soliddraft_app::startup::new_document(), Automation::default()));
     h.run_steps(3);
     let a = dir.join("plate.dwprt");
     {

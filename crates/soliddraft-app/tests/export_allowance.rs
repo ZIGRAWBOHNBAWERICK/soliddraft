@@ -39,7 +39,7 @@ fn a_refused_export_leaves_its_destination_alone() {
     let dir = std::env::temp_dir().join(format!("soliddraft-export-allowance-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     soliddraft_app::file::set_config_dir(Some(dir.join("config")));
-    let mut state = AppState::new(soliddraft_app::new_document());
+    let mut state = AppState::new(soliddraft_app::startup::new_document());
     let rectangle = json!([{ "shape": "rectangle", "center": [0, 0, 20], "width": 6, "height": 6 }]);
     run(&mut state, "sketch", json!({ "plane": "top", "offset": 20, "shapes": rectangle }));
     run(&mut state, "extrude", json!({ "sketch": "Sketch1", "depth": 10, "flip": false }));
@@ -72,7 +72,7 @@ fn check_smooth_export(limit: u64) {
     let dir = std::env::temp_dir().join(format!("soliddraft-smooth-export-{}", soliddraft_document::DocumentId::new()));
     std::fs::create_dir_all(&dir).unwrap();
     soliddraft_app::file::set_config_dir(Some(dir.join("config")));
-    let mut state = AppState::new(soliddraft_app::new_document());
+    let mut state = AppState::new(soliddraft_app::startup::new_document());
     for (size, z) in [(2, 0), (4, 3), (2, 6)] {
         run(
             &mut state,

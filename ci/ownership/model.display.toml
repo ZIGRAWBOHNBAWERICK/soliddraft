@@ -1,0 +1,6 @@
+[[areas]]
+name = "model.display"
+owner = "core"
+crate = "soliddraft-model"
+paths = ["crates/soliddraft-model/src/display.rs"]
+module = ["display"]

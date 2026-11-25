@@ -62,7 +62,7 @@ fn a_blend_reference_taken_on_the_fitted_patches_follows_the_blend_to_the_contac
     let dir = std::env::temp_dir().join(format!("soliddraft-p5-reference-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     soliddraft_app::file::set_config_dir(Some(dir.join("config")));
-    let mut state = AppState::new(soliddraft_app::new_document());
+    let mut state = AppState::new(soliddraft_app::startup::new_document());
     let scenario: Value = serde_json::from_str(SCENARIO).unwrap();
     for step in &scenario["steps"].as_array().unwrap()[..4] {
         run(&mut state, step["tool"].as_str().unwrap(), step["arguments"].clone());
@@ -127,7 +127,7 @@ fn a_blend_reference_taken_on_the_fitted_patches_follows_the_blend_to_the_contac
     let path = dir.join("p5-reference.dwprt");
     run(&mut state, "save", json!({"path": path}));
     drop(state);
-    let doc = soliddraft_app::file::open(&path, soliddraft_app::kernel(), None).unwrap();
+    let doc = soliddraft_app::file::open(&path, soliddraft_app::startup::kernel(), None).unwrap();
     let mut reopened = AppState::new(doc);
     check(&reopened, "fresh open");
     let refused = call(&mut reopened, "edit_fillet", json!({"feature": "Fillet1", "radius": 3.5}));

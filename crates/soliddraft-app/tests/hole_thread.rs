@@ -176,7 +176,7 @@ fn a_tapped_hole_is_made_in_the_form_edited_milled_saved_and_reopened() {
         assert!(tapped_blue > before + 50, "the viewport draws the thread: {before} -> {tapped_blue}");
 
         // Edit: M10 coarse, and the drill follows.
-        app.state_mut().state.push(AppAction::EditFeature(id));
+        app.state_mut().state.push(AppAction::Editor(soliddraft_app::app::EditorAction::EditFeature(id)));
         settle(app);
         assert_eq!(editing(app).thread.as_ref().map(HoleThread::designation).as_deref(), Some("M8x1-6H"));
         pick(app, "Thread size", "M10");
@@ -211,7 +211,7 @@ fn a_tapped_hole_is_made_in_the_form_edited_milled_saved_and_reopened() {
 
         // Saved and reopened, the thread is the same.
         let bytes = app.state().state.doc.model().to_bytes().unwrap();
-        let reopened = soliddraft_model::Document::from_bytes(&bytes, soliddraft_app::kernel()).unwrap();
+        let reopened = soliddraft_model::Document::from_bytes(&bytes, soliddraft_app::startup::kernel()).unwrap();
         let reopened = Document::from_model(reopened);
         assert_eq!(hole(&reopened).1, hole(&app.state().state.doc).1);
         assert_eq!(thread_callouts(&reopened), ["M10x1.5-6H DEEP 5"]);
@@ -634,7 +634,7 @@ fn hiding_the_active_body_keeps_thread_marks_on_a_visible_body() {
     assert_ne!(active, 0);
     let mut app = launch(state.doc, STANDARD);
     ux_tools::rebuilt(&mut app);
-    app.state_mut().state.push(AppAction::SelectBody(active));
+    app.state_mut().state.push(AppAction::Body(soliddraft_app::app::BodyAction::SelectBody(active)));
     app.state_mut().state.push(AppAction::Select(None));
     settle(&mut app);
     assert_eq!(app.state().state.doc.active_body, active);

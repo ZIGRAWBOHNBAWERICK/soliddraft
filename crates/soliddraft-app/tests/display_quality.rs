@@ -310,7 +310,7 @@ fn a_late_answer_for_another_quality_does_not_replace_the_cached_levels() {
 /// The near-coincident flange with its sketch constraints removed, built on `kernel`.
 fn unsnapped_flange(via_reference_plane: bool, kernel: Arc<dyn Kernel>) -> soliddraft_model::Document {
     let bytes = include_bytes!("data/near-coincident-flange.dwprt");
-    let part = soliddraft_model::Document::from_bytes(bytes, soliddraft_app::kernel()).unwrap();
+    let part = soliddraft_model::Document::from_bytes(bytes, soliddraft_app::startup::kernel()).unwrap();
     let mut source = part.truth();
     for feature in source["features"].as_array_mut().unwrap() {
         let kind = &mut feature["kind"];
@@ -383,7 +383,7 @@ fn a_reference_plane_flange_shows_its_early_preview() {
 #[test]
 fn a_snapped_flange_can_use_an_early_display() {
     let bytes = include_bytes!("data/near-coincident-flange.dwprt");
-    let part = soliddraft_model::Document::from_bytes(bytes, soliddraft_app::kernel()).unwrap();
+    let part = soliddraft_model::Document::from_bytes(bytes, soliddraft_app::startup::kernel()).unwrap();
     let (kernel, body) = (part.kernel(), part.body().unwrap());
     let params = soliddraft_kernel_api::TessellationParams { chord_height: 0.1, ..Default::default() };
     let shown = kernel.preview(body, &params).unwrap();

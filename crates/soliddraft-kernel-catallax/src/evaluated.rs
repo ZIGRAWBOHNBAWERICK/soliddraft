@@ -4,10 +4,12 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use catallax_app::{DEFAULT_BUILD_WORK, Error, EvaluatedApplicationBody, Names};
+use catallax_app::{Error, EvaluatedApplicationBody, Names};
 use catallax_features::{Built, EvaluationCheckpoint};
-use catallax_numbers::{Decider, operation_budget_active, with_operation_budget};
+use catallax_numbers::Decider;
 use catallax_recipe::Recipe;
+
+use crate::RequestPolicy;
 
 /// Where a body's exact result came from.
 #[derive(Clone, Debug)]
@@ -191,15 +193,11 @@ impl AppBody {
         options: &catallax_mesh::MeshOptions,
         decider: &mut Decider,
     ) -> Result<catallax_numbers::Answer<catallax_mesh::Mesh>, Error> {
-        let mut run = move || {
+        let (result, work) = RequestPolicy::Display.run(|| {
             let built = self.checkpoint.built();
             catallax_mesh::mesh_body(&built.model, built.result, options, decider).map_err(Error::Display)
-        };
-        if operation_budget_active() {
-            return run();
-        }
-        let (result, work) = with_operation_budget(DEFAULT_BUILD_WORK, run);
-        if work.exhausted { Err(Error::ResourceLimit) } else { result }
+        });
+        if work.exhausted_here() { Err(Error::ResourceLimit) } else { result }
     }
 
     /// The rendering answer, as `EvaluatedApplicationBody::display_result` gives it: a typed
@@ -209,13 +207,14 @@ impl AppBody {
         options: &catallax_mesh::MeshOptions,
         decider: &mut Decider,
     ) -> Result<catallax_numbers::OperationResult<catallax_mesh::DisplayMesh>, Error> {
-        let mut run = move || {
-            let built = self.checkpoint.built();
-            let revision = serde_json::to_string(built.recipe()).map_err(|error| {
-                Error::Display(catallax_numbers::Refusal::new("app.display-revision", error.to_string()))
-            })?;
-            Ok(catallax_mesh::display_mesh_body(&built.model, built.result, options, &revision, decider))
-        };
-        if operation_budget_active() { run() } else { with_operation_budget(DEFAULT_BUILD_WORK, run).0 }
+        RequestPolicy::Display
+            .run(|| {
+                let built = self.checkpoint.built();
+                let revision = serde_json::to_string(built.recipe()).map_err(|error| {
+                    Error::Display(catallax_numbers::Refusal::new("app.display-revision", error.to_string()))
+                })?;
+                Ok(catallax_mesh::display_mesh_body(&built.model, built.result, options, &revision, decider))
+            })
+            .0
     }
 }

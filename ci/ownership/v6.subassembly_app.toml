@@ -1,0 +1,6 @@
+[[areas]]
+name = "v6.subassembly_app"
+owner = "V6"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/subassembly/"]
+module = ["subassembly"]

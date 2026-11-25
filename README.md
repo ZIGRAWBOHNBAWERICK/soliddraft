@@ -24,7 +24,7 @@ Broader modelling domains remain in design; a working command can still refuse u
 
 ## Get SolidDraft
 
-[Open the browser app](https://zigrawbohnbawerick.github.io/soliddraft/app/). The kernel runs inside your tab. Files open by upload and save by download. Nothing to install. Assemblies open in the browser from uploaded part files; Form subassembly stays on the desktop. Long kernel work runs in a worker, and other browser geometry calculations run on the interface thread. See [the browser build](docs/web.md) for local builds and optional self-hosted assistant support.
+[Open the browser app](https://zigrawbohnbawerick.github.io/soliddraft/app/). The kernel runs inside your tab. Files open by upload and save by download. Nothing to install. Assemblies open in the browser when you upload the assembly file together with its part files; Form subassembly stays on the desktop. Long kernel work runs in a worker, and other browser geometry calculations run on the interface thread. See [the browser build](docs/web.md) for local builds and optional self-hosted assistant support.
 
 [Desktop downloads](https://github.com/ZIGRAWBOHNBAWERICK/soliddraft/releases) include Linux AppImage, Debian package and portable archive, and a macOS disk image. Builds are unsigned for now, with checksums and build attestations. Windows downloads are deferred.
 

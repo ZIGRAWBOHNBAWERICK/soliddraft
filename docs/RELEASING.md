@@ -82,7 +82,7 @@ For the ordinary-parts alpha, require the SolidDraft application bracket, edited
 
 Reserve an actual desktop interaction session on the validation machine. Download the candidate AppImage and browser zip from the recorded successful package run. Open an accepted part, select and edit it, export it, then reopen its saved drawing. Also reopen older supported part and drawing files. Retain the exact recipe/settings, source pair, screenshots, command logs, timing/proof verdicts and output hashes outside the source tree. Test the downloaded browser build locally with the same paths it advertises. Do not enable public Pages for validation.
 
-The release review must distinguish package generation, downloaded-build interaction and source acceptance. Missing evidence keeps the tag on hold, even when the preparation pull requests or packaging jobs are green. This checklist does not waive the first-release gate, the kernel's milestone policy or either repository's exact-commit evidence requirements.
+The release review must distinguish package generation, downloaded-build interaction and source acceptance. Missing evidence keeps the tag on hold, even when the preparation pull requests or packaging jobs are green. This checklist does not waive the first-release gate, the kernel's release policy or either repository's exact-commit evidence requirements.
 
 ## Optional signing credentials
 

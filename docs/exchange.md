@@ -18,7 +18,7 @@ IGES writes Catallax's supported exact planes, cylinders and cones with shared B
 
 The `iges` JSON report retains the rational similarity scale, coordinate bound, trim bound and composed boundary bound, plus the decimal and `f64` bounds rounded upward for display. It counts the solids, faces, shared edges, vertices and required export-only seams and ring vertices. MCP's `export_iges {"path":"bracket.igs"}` returns the same one-line deviation summary as `export_step`. As with other formats, a CLI batch prepares all exports before replacing any destination, so an IGES refusal leaves every destination unchanged.
 
-Meshes use the export tolerance in the part's `settings.json`, 0.01 mm and 10 degrees by default; see [tessellation.md](tessellation.md#the-four-tolerances). The chord height is proven after rounding to the file's 32-bit coordinates. Catallax stage 1 certifies the chord height only, so the report lists the angle as a control it could not guarantee.
+Meshes use the export tolerance in the part's `settings.json`, 0.01 mm and 10 degrees by default; see [tessellation.md](tessellation.md#the-four-tolerances). The chord height is proven after rounding to the file's 32-bit coordinates. Catallax certifies the chord height only, so the report lists the angle as a control it could not guarantee.
 
 ## Meshes
 

@@ -2,8 +2,8 @@
 
 use std::collections::BTreeMap;
 
-use catallax_app::{ConstructionOptions, lifecycle::WorkAllocation};
-use catallax_numbers::{Decider, OperationAllowance, Refusal, operation_budget_active};
+use catallax_app::ConstructionOptions;
+use catallax_numbers::{Decider, Refusal};
 use catallax_recipe::Operation;
 use serde_json::json;
 use soliddraft_kernel_api::{
@@ -11,6 +11,7 @@ use soliddraft_kernel_api::{
     ProofWork, ScalarEdit, ScalarParameter, TessellationParams,
 };
 
+use crate::request::{self, ReservedWork};
 use super::{CatallaxKernel, build_error, convert, converted_recipe, native, options, query_error};
 
 /// Work for an early construction display, separate from the exact rebuild.
@@ -21,7 +22,7 @@ enum ReservedProof {
     /// default allowance, exactly as the synchronous rebuild does.
     PerBuild,
     /// Work already taken from a caller-owned allowance. Nested builds share it.
-    Caller(OperationAllowance),
+    Caller(ReservedWork),
 }
 
 impl ProofWork for ReservedProof {
@@ -43,15 +44,9 @@ impl ProofWork for ReservedProof {
 /// Reserves `construction` units for the early display and the exact proof's work.
 /// A caller-owned allowance pays for both from one existing default, so a nested
 /// request never obtains fresh work.
-fn reserve(construction: u64) -> KernelResult<(OperationAllowance, ReservedProof)> {
-    let refused = |refusal| query_error("edit allocation", refusal);
-    if !operation_budget_active() {
-        return Ok((OperationAllowance::reserve(construction).map_err(refused)?, ReservedProof::PerBuild));
-    }
-    let allocation = WorkAllocation::application(construction).expect("constant split is within the application total");
-    let mut display = OperationAllowance::reserve(catallax_app::DEFAULT_BUILD_WORK).map_err(refused)?;
-    let proof = display.split_off(allocation.proof).expect("validated phase split");
-    Ok((display, ReservedProof::Caller(proof)))
+fn reserve(construction: u64) -> KernelResult<(ReservedWork, ReservedProof)> {
+    let (display, proof) = request::reserve_edit(construction).map_err(|refusal| query_error("edit allocation", refusal))?;
+    Ok((display, proof.map_or(ReservedProof::PerBuild, ReservedProof::Caller)))
 }
 
 pub(super) fn reserve_proof_work() -> KernelResult<Box<dyn ProofWork>> {
@@ -163,7 +158,7 @@ pub(super) fn prepare(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use catallax_numbers::with_operation_budget;
+    use catallax_numbers::{OperationAllowance, with_operation_budget};
     use soliddraft_kernel_api::{Extrude, Kernel, Plane, Point2, Profile, contract};
 
     fn edit() -> ScalarEdit {
@@ -175,7 +170,8 @@ mod tests {
         let kernel = CatallaxKernel::new();
         let original = contract::block(&kernel);
         let original_topology = kernel.topology(original).unwrap();
-        let (request, reserved) = with_operation_budget(catallax_app::DEFAULT_BUILD_WORK, || {
+        let limit = catallax_app::DEFAULT_BUILD_WORK + 1;
+        let (request, reserved) = crate::with_request_allowance(limit, || {
             kernel.construction_edit(original, &[edit()], &TessellationParams::default()).unwrap()
         });
         assert_eq!(reserved.used, catallax_app::DEFAULT_BUILD_WORK);
@@ -184,22 +180,27 @@ mod tests {
         let height = display.mesh.positions.iter().map(|point| point[2]).fold(f32::NEG_INFINITY, f32::max);
         assert_eq!(height, 20.0);
         assert!(display.faces.iter().all(|face| original_topology.face(face.id).is_none()));
-        let mut rebuilt = None;
-        request
-            .proof
-            .run(&mut || {
-                let profile = kernel.create_body_from_profile(
-                    &OpTag::new("block_sketch"),
-                    &Profile::rectangle(Plane::XY, Point2::new(0.0, 0.0), 40.0, 30.0),
-                )?;
-                let result =
-                    kernel.extrude(&OpTag::new("block"), profile.body, &Extrude { distance: 20.0, direction: None });
-                kernel.release(profile.body)?;
-                rebuilt = Some(result?.body);
-                Ok(())
-            })
-            .unwrap();
-        let rebuilt = rebuilt.unwrap();
+        let rebuilt = std::thread::scope(|scope| {
+            scope.spawn(|| {
+                let mut rebuilt = None;
+                request.proof.run(&mut || {
+                    let (spent, work) = crate::with_request_allowance(u64::MAX, || OperationAllowance::reserve(1));
+                    spent.unwrap();
+                    assert_eq!(work.limit, limit, "the worker keeps the caller's refusal context");
+                    assert_eq!(work.used, 1);
+                    let profile = kernel.create_body_from_profile(
+                        &OpTag::new("block_sketch"),
+                        &Profile::rectangle(Plane::XY, Point2::new(0.0, 0.0), 40.0, 30.0),
+                    )?;
+                    let result =
+                        kernel.extrude(&OpTag::new("block"), profile.body, &Extrude { distance: 20.0, direction: None });
+                    kernel.release(profile.body)?;
+                    rebuilt = Some(result?.body);
+                    Ok(())
+                }).unwrap();
+                rebuilt.unwrap()
+            }).join().unwrap()
+        });
         let proved = kernel.topology(rebuilt).unwrap();
         for face in &display.faces {
             assert!(

@@ -2,12 +2,11 @@
 
 use std::{cell::RefCell, collections::HashMap, sync::Mutex, thread::ThreadId, time::Instant};
 
-use catallax_numbers::{
-    BoundKind, MarkLog, OperationEntry, current_operation_work, operation_budget_active, with_operation_budget,
-    with_operation_log,
-};
+use catallax_numbers::{BoundKind, MarkLog, OperationEntry, with_operation_log};
 use serde_json::{Value, json};
 use soliddraft_kernel_api::{KernelError, KernelResult};
+
+use crate::request::{self, APP_REQUEST_WORK, APP_WORK_TARGET, RequestPolicy};
 
 thread_local! {
     static ACTIVE: RefCell<Option<String>> = const { RefCell::new(None) };
@@ -81,20 +80,14 @@ impl Diagnostics {
         ACTIVE.with(|active| *active.borrow_mut() = Some(operation.to_owned()));
         let _scope = Scope;
         // Background mass requests carry their own allowance, separate from edit and export limits.
-        let caller_mass_allowance = operation == "mass_properties" && operation_budget_active();
-        let before = current_operation_work();
-        let ((mut result, work), entries) = with_operation_log(|| match (max_work, caller_mass_allowance) {
-            (_, true) => {
-                let result = run();
-                let after = current_operation_work();
-                (result, Some(Spent { used: after.used - before.used, exhausted: after.exhausted }))
+        let caller_mass_allowance = operation == "mass_properties" && request::active();
+        let policy = if caller_mass_allowance { Some(RequestPolicy::Query) } else { max_work.map(RequestPolicy::Measured) };
+        let ((mut result, work), entries) = with_operation_log(|| match policy {
+            Some(policy) => {
+                let (result, work) = policy.run(run);
+                (result, Some(work.request))
             }
-            (Some(limit), false) => {
-                // A request allowance, so a refusal inside names this limit, not the default.
-                let (result, work) = with_request_allowance(limit, run);
-                (result, Some(Spent { used: work.used, exhausted: work.exhausted }))
-            }
-            (None, false) => (run(), None),
+            None => (run(), None),
         });
         if work.is_some_and(|w| w.exhausted)
             && (operation != "body_relation" || result.is_err())
@@ -120,7 +113,7 @@ impl Diagnostics {
             "operation":operation, "log_scope":operation,"nested":false, "status":if result.is_ok() {"answered"} else {"refused"},
             "on_capture_thread":on_capture_thread,
             "error":result.as_ref().err().map(ToString::to_string),
-            "max_work":if caller_mass_allowance {None} else {max_work},
+            "max_work":if caller_mass_allowance {None} else {work.map(|w| w.limit)},
             "work":work.map(|w| json!({"used":w.used,"exhausted":w.exhausted,
                 "target":APP_WORK_TARGET,"over_target":w.used > APP_WORK_TARGET})),
             "wall_ms":start.elapsed().as_secs_f64()*1000.0,
@@ -161,62 +154,11 @@ fn entry(sequence: usize, e: &OperationEntry) -> Value {
         "work":{"before":e.work_before,"after":e.work_after,"used":e.work_after-e.work_before},"wall_ms":e.wall_ms})
 }
 
-/// The deterministic work one application request may use. Kernel replay and the
-/// scoreboard keep their own limits. Until the speed phase it is five times
-/// [`APP_WORK_TARGET`], so slow parts still build; a request over the target is
-/// recorded as such.
-pub const APP_REQUEST_WORK: u64 = 100_000_000;
-
-/// The work one edit should fit in. A request that uses more is marked
-/// `over_target` in the diagnostics, with its work per stage, for the speed phase.
-pub const APP_WORK_TARGET: u64 = 20_000_000;
-
-/// The work one observed call charged to its allowance.
-#[derive(Clone, Copy)]
-struct Spent {
-    used: u64,
-    exhausted: bool,
-}
-
-/// The deterministic work one whole request used: opening, rebuilding and writing.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct RequestWork {
-    /// Units every kernel call in the request used together.
-    pub used: u64,
-    /// The request's allowance.
-    pub limit: u64,
-    /// The allowance ran out; nothing the request computed may be published.
-    pub exhausted: bool,
-}
-
-/// Runs a whole request on one deterministic allowance that every kernel call in it
-/// shares on this thread, with no fresh allowance for a nested call.
-pub fn with_request_allowance<T>(limit: u64, run: impl FnOnce() -> T) -> (T, RequestWork) {
-    struct Restore(Option<u64>);
-    impl Drop for Restore {
-        fn drop(&mut self) {
-            REQUEST_LIMIT.set(self.0);
-        }
-    }
-    let _restore = Restore(REQUEST_LIMIT.replace(Some(limit)));
-    let (value, work) = with_operation_budget(limit, run);
-    (value, RequestWork { used: work.used, limit, exhausted: work.exhausted })
-}
-
-thread_local! {
-    static REQUEST_LIMIT: std::cell::Cell<Option<u64>> = const { std::cell::Cell::new(None) };
-}
-
-/// The allowance of the request running on this thread, for a refusal to name: the
-/// caller's when it set one through [`with_request_allowance`], otherwise the
-/// application's.
-pub(crate) fn request_limit() -> u64 {
-    REQUEST_LIMIT.get().unwrap_or(APP_REQUEST_WORK)
-}
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::request::{request_limit, with_request_allowance};
     use catallax_numbers::{Decider, OperationAllowance, OperationSpan};
 
     #[test]
@@ -225,6 +167,9 @@ mod tests {
         diagnostics
             .observe("view_curves", || {
                 diagnostics.observe("tessellate", || {
+                    let (_, work) = with_request_allowance(200, || OperationAllowance::reserve(7).unwrap());
+                    assert_eq!(work.limit, 100);
+                    assert_eq!(work.used, 7);
                     let decider = Decider::default();
                     OperationSpan::begin("catallax", &"mesh", "mesh", &decider).finish(&decider, None, None);
                     Ok(())
@@ -237,6 +182,8 @@ mod tests {
         assert_eq!(calls[0]["log_scope"], "view_curves");
         assert!(calls[0]["work"].is_null());
         assert_eq!(calls[1]["operation_log"]["operations"][0]["operation"], "mesh");
+        assert_eq!(calls[1]["work"]["used"], 7);
+        assert_eq!(diagnostics.work_used(), Some(7));
         diagnostics.observe("next_request", || Ok(())).unwrap();
         assert_eq!(diagnostics.take()[0]["nested"], false);
     }

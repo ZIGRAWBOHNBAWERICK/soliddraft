@@ -130,11 +130,7 @@ impl CatallaxKernel {
             let complete = !resource_incomplete(&opened);
             Ok((Arc::new(opened), complete))
         };
-        let (opened, complete) = if catallax_numbers::operation_budget_active() {
-            read()
-        } else {
-            crate::with_request_allowance(crate::APP_REQUEST_WORK, read).0
-        }?;
+        let (opened, complete) = crate::RequestPolicy::Open.run(read).0?;
         if complete {
             self.state()?.tolerant_imports.insert(sha256, opened.clone());
         }
@@ -321,7 +317,8 @@ mod tests {
     #[test]
     fn a_cold_open_is_charged_and_an_exhausted_open_can_retry_with_more_work() {
         let source = mixed(CLOSED, TOLERANT);
-        let measured = CatallaxKernel::new().opened_step(&source).unwrap();
+        let fresh = CatallaxKernel::new();
+        let measured = fresh.opened_step(&source).unwrap();
         assert!(measured.native_admission_work_used() > 0);
         let limit = measured.read_work_used()
             + measured.checked_upgrade_work_used()
@@ -343,31 +340,31 @@ mod tests {
         let kernel = CatallaxKernel::new();
         let (limited, work) = crate::with_request_allowance(limit, || kernel.opened_step(&source));
         assert!(work.exhausted);
-        assert!(limited.is_err());
-        let (retried, work) = crate::with_request_allowance(crate::APP_REQUEST_WORK, || kernel.opened_step(&source));
-        assert!(!work.exhausted);
-        let retried = retried.unwrap();
+        assert!(matches!(limited, Err(KernelError::InvalidInput(reason)) if reason == TOO_COMPLEX));
+        let retried = kernel.opened_step(&source).unwrap();
         assert!(!resource_incomplete(&retried));
         assert!(matches!(retried.body(0), Some(BodyView::Certified { .. })));
         assert!(matches!(retried.body(1), Some(BodyView::Tolerant { .. })));
         let options = Default::default();
         let sha256 = catallax_import::sha256_hex(&source);
-        let imported = kernel
-            .import_step(
-                &OpTag::new("retried"),
-                &ImportStepRequest {
-                    source_solid: Some(retried.source().bodies()[1].name()),
-                    name: "mixed.step",
-                    source: &source,
-                    sha256: &sha256,
-                    options: &options,
-                    decisions: &[],
-                    record: None,
-                },
-            )
-            .unwrap();
-        let body = imported.bodies[0].result.body;
-        assert_eq!(kernel.body_accuracy(body).unwrap(), BodyAccuracy::Tolerant);
-        assert!(!kernel.tessellate(body, &Default::default()).unwrap().indices.is_empty());
+        let request = ImportStepRequest {
+            source_solid: Some(retried.source().bodies()[1].name()),
+            name: "mixed.step",
+            source: &source,
+            sha256: &sha256,
+            options: &options,
+            decisions: &[],
+            record: None,
+        };
+        let import = |kernel: &CatallaxKernel| {
+            let imported = kernel.import_step(&OpTag::new("mixed"), &request).unwrap();
+            let body = imported.bodies[0].result.body;
+            assert_eq!(kernel.body_accuracy(body).unwrap(), BodyAccuracy::Tolerant);
+            let topology = kernel.topology(body).unwrap();
+            let mesh = kernel.tessellate(body, &Default::default()).unwrap();
+            assert!(!mesh.indices.is_empty());
+            (imported, topology, mesh)
+        };
+        assert_eq!(import(&kernel), import(&fresh));
     }
 }

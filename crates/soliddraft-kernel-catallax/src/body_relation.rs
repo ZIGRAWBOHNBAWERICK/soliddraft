@@ -244,9 +244,6 @@ pub(super) fn relation(
     b: PlacedBody,
     clearance: Option<f64>,
 ) -> KernelResult<BodyRelation> {
-    if !catallax_numbers::operation_budget_active() {
-        return catallax_numbers::with_operation_budget(crate::APP_REQUEST_WORK, || relation(k, a, b, clearance)).0;
-    }
     if clearance.is_some_and(|c| !c.is_finite() || c < 0.0) {
         return Err(KernelError::InvalidInput("A clearance must be a finite length of zero or more".into()));
     }

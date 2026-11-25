@@ -15,7 +15,7 @@ use catallax_numbers::{Decider, Rational, Refusal};
 use catallax_shapes::CurveKind as CatCurve;
 use soliddraft_kernel_api::*;
 
-use crate::convert;
+use crate::{RequestPolicy, convert};
 
 mod imported;
 
@@ -254,7 +254,7 @@ impl Approximate {
             return Err(crate::gap("Display of an approximate surface body"));
         }
         self.samples.get(crate::display_key(options), || {
-            on_request_allowance("approximate_display", |dec| match &self.geometry {
+            on_request_allowance(RequestPolicy::Display, "approximate_display", |dec| match &self.geometry {
                 Geometry::Imported { opened, index } => {
                     imported::sample(opened, *index, &PreviewOptions::from(options), dec)
                 }
@@ -472,7 +472,9 @@ impl Approximate {
             max_scalar_rounding_error_mm: limit.clone(),
             ..Default::default()
         };
-        let step = on_request_allowance("export_step", |dec| catallax_step::numerical::build(body, &step_options, dec))
+        let step = on_request_allowance(RequestPolicy::Export, "export_step", |dec| {
+            catallax_step::numerical::build(body, &step_options, dec)
+        })
             .map_err(|error| crate::query_error("export_step", error))?;
         let report = step.report();
         let rounding = &report.max_scalar_rounding_error_mm;
@@ -524,20 +526,16 @@ impl Approximate {
     }
 }
 
-/// Writes or shows an approximate body on the caller's allowance, or on the app's request
-/// allowance when none is active, as an exact body's display and export run. Left to
-/// itself, Catallax's numerical STEP writer stops at its smaller standalone default,
-/// which the STEP of a rounded pocket rim passes.
+/// The numerical STEP writer's standalone allowance is smaller than the application's.
+/// Approximations use the enclosing display or export request, including when sampled via STEP.
 fn on_request_allowance<T>(
+    policy: RequestPolicy,
     operation: &str,
     run: impl FnOnce(&mut Decider) -> Result<T, Refusal>,
 ) -> Result<T, Refusal> {
     let observed = || crate::numerical(operation, |dec| run(dec).map(catallax_numbers::Answer::exact));
-    if catallax_numbers::operation_budget_active() {
-        return observed().map(|answer| answer.value);
-    }
-    let (result, work) = catallax_numbers::with_operation_budget(catallax_app::DEFAULT_BUILD_WORK, observed);
-    if work.exhausted {
+    let (result, work) = policy.run(observed);
+    if work.exhausted_here() {
         return Err(Refusal::new(
             "numbers.operation-budget",
             format!("{operation} exhausted the application's work allowance"),

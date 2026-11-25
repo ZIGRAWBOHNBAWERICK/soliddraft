@@ -299,11 +299,7 @@ fn catallax<T>(query: &str, run: impl FnOnce(&mut Decider) -> Result<Answer<T>, 
         }
         answer
     };
-    let answer = if catallax_numbers::operation_budget_active() {
-        within()
-    } else {
-        catallax_numbers::with_operation_budget(crate::APP_REQUEST_WORK, within).0
-    };
+    let answer = crate::RequestPolicy::Query.run(within).0;
     answer.map_err(|refusal| crate::query_error(query, refusal))
 }
 

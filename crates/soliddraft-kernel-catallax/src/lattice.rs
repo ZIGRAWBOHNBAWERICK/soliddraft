@@ -6,9 +6,7 @@ use catallax_field::{
     mass, printing,
 };
 use catallax_measure::{Accuracy as QuantityAccuracy, Enclosure};
-use catallax_numbers::{
-    Decider, OperationSpan, Rational, Refusal, current_operation_work, operation_budget_active, with_operation_budget,
-};
+use catallax_numbers::{Decider, OperationSpan, Rational, Refusal};
 use catallax_recipe::{Pose, Recipe};
 use sha2::{Digest, Sha256};
 
@@ -78,40 +76,31 @@ fn run<T>(operation: &str, action: impl FnOnce(&mut Decider) -> Result<T, Refusa
     decide(operation, action).map_err(|e| query_error(operation, e))
 }
 
-/// Runs one action on its caller's allowance, or on the application's [`APP_REQUEST_WORK`]
-/// when the caller has none, and returns the work it used. A nested action never gets a
-/// fresh allowance, and a value computed after the allowance ran out is discarded.
-pub(crate) fn allowance<T>(operation: &str, action: impl FnOnce() -> KernelResult<T>) -> KernelResult<(T, u64)> {
-    let exhausted =
-        || query_error(operation, Refusal::new("numbers.operation-budget", "operation work allowance exhausted"));
-    if operation_budget_active() {
-        let before = current_operation_work().used;
-        let result = action();
-        let after = current_operation_work();
-        if after.exhausted {
-            return Err(exhausted());
-        }
-        return result.map(|value| (value, after.used - before));
+/// Returns the delta charged to this action, without publishing an exhausted answer.
+fn allowance<T>(
+    policy: RequestPolicy,
+    operation: &str,
+    action: impl FnOnce() -> KernelResult<T>,
+) -> KernelResult<(T, request::ScopedWork)> {
+    let (result, work) = policy.run(action);
+    if work.request.exhausted {
+        return Err(query_error(operation, Refusal::new("numbers.operation-budget", "operation work allowance exhausted")));
     }
-    let (result, work) = with_operation_budget(APP_REQUEST_WORK, action);
-    if work.exhausted {
-        return Err(exhausted());
-    }
-    result.map(|value| (value, work.used))
+    Ok((result?, work))
 }
 
 /// Runs one application export like [`allowance`]. A caller's allowance above the
 /// application's limit does not lift it: once the whole request has used more, the output
 /// is refused and the work stays spent.
 pub(crate) fn export_allowance<T>(operation: &str, action: impl FnOnce() -> KernelResult<T>) -> KernelResult<(T, u64)> {
-    let answer = allowance(operation, action)?;
-    if current_operation_work().used > APP_REQUEST_WORK {
+    let (answer, work) = allowance(RequestPolicy::Export, operation, action)?;
+    if work.total_used > APP_REQUEST_WORK {
         return Err(query_error(
             operation,
             Refusal::new("numbers.operation-budget", "the request used more than the application's work limit"),
         ));
     }
-    Ok(answer)
+    Ok((answer, work.request.used))
 }
 
 /// The output settings of one field, at the default caps.
@@ -294,7 +283,7 @@ impl CatallaxKernel {
             }
         }
         // A valid constant lattice asks the stage compiler whether it can read this source.
-        let supported = allowance("field_source", || {
+        let supported = allowance(RequestPolicy::Edit, "field_source", || {
             let (recipe, files) = self.field_source(body, OpKind::Lattice)?;
             let spec = LatticeSpec {
                 cell: catallax_recipe::LatticeCell::Cubic,
@@ -517,10 +506,10 @@ impl Field {
     pub(super) fn mass(&self, accuracy: &FieldMassAccuracy) -> KernelResult<FieldMass> {
         let requested = requested(accuracy)?;
         let operation = "field_mass";
-        let (measured, work) = allowance(operation, || {
+        let (measured, work) = allowance(RequestPolicy::Query, operation, || {
             run(operation, |dec| mass::properties(self.stage.plan(), &requested, &mass::Options::default(), dec))
         })?;
-        Ok(report_mass(&measured, &requested, work))
+        Ok(report_mass(&measured, &requested, work.request.used))
     }
 
     /// The explicit mass stand-in, checked against the field's enclosures before any
@@ -646,9 +635,10 @@ mod tests {
     #[test]
     fn a_direct_field_action_runs_on_the_application_allowance() {
         // Manual export and the field tools call in with no allowance of their own.
-        assert!(!operation_budget_active());
+        assert!(!request::active());
         let over_target = APP_WORK_TARGET + 1;
-        assert_eq!(allowance("field_mass", spend(over_target)).unwrap().1, over_target);
+        let (_, work) = allowance(RequestPolicy::Query, "field_mass", spend(over_target)).unwrap();
+        assert_eq!(work.request.used, over_target);
         assert_eq!(export_allowance("export_field_stl", spend(over_target)).unwrap().1, over_target);
         assert_eq!(export_allowance("export_field_stl", spend(APP_REQUEST_WORK)).unwrap().1, APP_REQUEST_WORK);
         let refused = export_allowance("export_field_stand_in", spend(APP_REQUEST_WORK + 1)).unwrap_err();

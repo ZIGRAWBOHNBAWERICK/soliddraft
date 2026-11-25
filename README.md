@@ -8,7 +8,7 @@ We support free markets and reject intellectual property. Copying a program does
 
 ## What works today
 
-SolidDraft is alpha software. Keep backups of your documents. On main, targeting 0.5.0, these features work:
+SolidDraft is alpha software. Keep backups of your documents. In SolidDraft 0.8.0, on Catallax 0.5.0, these features work:
 
 - The Edit Suite frame, with the feature tree, Values and the workspaces in an icon strip at the left edge, tools beside it, an options bar, a 3D viewport and a command line.
 - Sketches with relations and dimensions. Extrude, cut, revolve, combine several bodies, drill holes, pattern and mirror. Edit features later, undo and redo, save and reopen parts. Supported sweeps, shells and drafts also work. See [modelling](docs/modelling.md).
@@ -24,7 +24,7 @@ Broader modelling domains remain in design; a working command can still refuse u
 
 ## Get SolidDraft
 
-[Open the browser app](https://zigrawbohnbawerick.github.io/soliddraft/app/). The kernel runs inside your tab. Files open by upload and save by download. Nothing to install. Assemblies are desktop-only, and browser geometry calculations run on the interface thread. See [the browser build](docs/web.md) for local builds and optional self-hosted assistant support.
+[Open the browser app](https://zigrawbohnbawerick.github.io/soliddraft/app/). The kernel runs inside your tab. Files open by upload and save by download. Nothing to install. Assemblies open in the browser from uploaded part files; Form subassembly stays on the desktop. Long kernel work runs in a worker, and other browser geometry calculations run on the interface thread. See [the browser build](docs/web.md) for local builds and optional self-hosted assistant support.
 
 [Desktop downloads](https://github.com/ZIGRAWBOHNBAWERICK/soliddraft/releases) include Linux AppImage, Debian package and portable archive, and a macOS disk image. Builds are unsigned for now, with checksums and build attestations. Windows downloads are deferred.
 

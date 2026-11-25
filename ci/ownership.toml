@@ -95,7 +95,7 @@ module = ["display_states"]
 name = "app.document"
 owner = "core"
 crate = "soliddraft-app"
-paths = ["crates/soliddraft-app/src/document.rs"]
+paths = ["crates/soliddraft-app/src/document.rs", "crates/soliddraft-app/src/document/"]
 module = ["document"]
 
 [[areas]]

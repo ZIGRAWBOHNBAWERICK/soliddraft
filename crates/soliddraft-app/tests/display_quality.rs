@@ -452,3 +452,61 @@ fn a_proof_adopted_after_a_curve_change_meshes_every_body_at_the_new_setting() {
     assert_eq!(doc.tess_params, expected.tess_params, "the adopted bodies use the current setting");
     assert_eq!(triangles_by_body(&doc), triangles_by_body(&expected), "every body is meshed at Ultra");
 }
+
+/// Every named face with its pick number, by feature and name. Each face's pick must be
+/// drawn by exactly one mesh on screen, the mesh of the body that holds the face.
+fn picks_by_name(doc: &Document) -> Vec<((u64, String), u32)> {
+    let mut named = Vec::new();
+    for face in &doc.faces {
+        let pick = doc.pick_of_face(face.id).expect("every named face has a pick");
+        let drawn: Vec<_> =
+            doc.meshes.iter().filter(|(_, mesh)| mesh.face_picks.contains(&pick)).map(|(body, _)| *body).collect();
+        assert_eq!(drawn.len(), 1, "{} is drawn by {} meshes", face.label, drawn.len());
+        let holds = doc.kernel().topology(drawn[0]).unwrap().faces.iter().any(|f| f.id == face.id);
+        assert!(holds, "{} is picked on another body's mesh", face.label);
+        named.push(((face.feature, face.label.clone()), pick));
+    }
+    named.sort();
+    named
+}
+
+#[test]
+fn a_two_body_part_publishes_meshes_names_and_picks_together() {
+    use soliddraft_app::graphics::CurvedSurfaces;
+
+    let mut doc = two_discs();
+    let first = picks_by_name(&doc);
+
+    // A rename changes no geometry: both bodies keep their meshes and their GPU upload.
+    let (meshes, upload) = (doc.meshes.clone(), doc.mesh_version);
+    let id = doc.features.last().unwrap().id;
+    doc.apply(Command::Rename { id, name: "Small disc".into() }).unwrap();
+    assert_eq!(doc.mesh_version, upload, "a rename uploaded the meshes again");
+    assert!(meshes.iter().all(|(body, mesh)| Arc::ptr_eq(&doc.meshes[body], mesh)), "a rename remeshed a body");
+
+    // The second disc deepened, with Ultra chosen while its proof runs.
+    let mut params = match &doc.feature(id).unwrap().kind {
+        soliddraft_app::document::FeatureKind::Extrude(params) => params.clone(),
+        _ => panic!("the second disc is an extrusion"),
+    };
+    params.depth = 45.0;
+    doc.apply_interactive(Command::EditExtrude { id, params }).unwrap();
+    doc.set_curved_surfaces(Some(CurvedSurfaces::Ultra));
+    wait_proof(&mut doc);
+    let edited = picks_by_name(&doc);
+    assert_eq!(edited.len(), first.len());
+
+    // The same part opened fresh at that setting numbers its picks the same way.
+    let bytes = doc.model().to_bytes().unwrap();
+    let mut reopened =
+        Document::from_model(soliddraft_model::Document::from_bytes(&bytes, doc.kernel().clone()).unwrap());
+    reopened.set_curved_surfaces(Some(CurvedSurfaces::Ultra));
+    wait_proof(&mut reopened);
+    assert_eq!(reopened.tess_params, doc.tess_params);
+    assert_eq!(picks_by_name(&reopened), edited);
+
+    // Undo shows the first discs again, each face under its first pick.
+    doc.undo().unwrap();
+    wait_proof(&mut doc);
+    assert_eq!(picks_by_name(&doc), first);
+}

@@ -27,6 +27,18 @@ pub(crate) struct Card {
     pub rows: Vec<(String, String)>,
 }
 
+/// The call as the assistant's card keeps it: the package's path trimmed of the spaces
+/// the assistant typed around it. The card is made from this call and Apply runs it, so
+/// both name the same file. A direct MCP or script call keeps its path exactly.
+pub(crate) fn normalized(mut call: ProposedCall) -> ProposedCall {
+    if call.tool == PACKAGE
+        && let Some(path) = call.input["path"].as_str()
+    {
+        call.input["path"] = json!(path.trim());
+    }
+    call
+}
+
 /// The card for a manufacturing information call, checked first: `pmi_answer` and
 /// `pmi_add` run on a scratch copy of the part, and the card lists what they would
 /// change; `manufacturing_package` is checked as the action checks it before it writes.
@@ -149,7 +161,7 @@ pub(crate) fn is_package(state: &AppState, id: &str) -> bool {
 /// Writes a pending package proposal's files and opens its drawing, as the ribbon's
 /// action does, and marks the proposal applied. Answers the action's report.
 pub(crate) fn apply_package(state: &mut AppState, id: &str) -> Result<Value, String> {
-    let call = state.chat.book.pending_call(id)?;
+    let call = state.chat.book.pending_call(&state.doc, id)?;
     let report = crate::app_tools::AppTools { state: &mut *state }.manufacturing_package(&call.input)?;
     state.chat.book.applied_by_app(&mut state.doc, id)?;
     Ok(json!({ "proposal_id": id, "status": "applied", "report": report }))

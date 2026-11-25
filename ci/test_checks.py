@@ -9,8 +9,12 @@ import subprocess
 import tempfile
 import unittest
 
+from registries import check_consumers, scenario_inventory
+
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 POLICY = 'ci/check-consumers.json'
+POLICY_PART = 'ci/check-consumers/infrastructure.json'
+OLD_POLICY_PATHS = {POLICY: 'all', 'ci/ownership.toml': ['lint'], 'ci/scenario-inventory.json': ['lint']}
 FROZEN_BASE = ROOT / 'ci/routing-replays/select-checks.py.9e81eb4'
 # The selector accepted on main before shared viewport files stopped selecting the desktop legs.
 ROUND3_BASE = ROOT / 'ci/routing-replays/select-checks.py.23e47cd'
@@ -36,6 +40,21 @@ def load(name):
 
 selector = load('select-checks')
 gate = load('check-gate')
+
+LIVE_POLICY = json.dumps(check_consumers(ROOT))
+
+
+def live_sources(path):
+    return [LIVE_POLICY if path == POLICY else selector.content(ROOT, path)] * 2
+
+
+def replay_sources(path):
+    if path != POLICY:
+        return [selector.content(ROOT, path, 'HEAD'), selector.content(ROOT, path)]
+    # Frozen replays still refer to the retired monolith paths.
+    policy = json.loads(LIVE_POLICY)
+    policy['files'].update(OLD_POLICY_PATHS)
+    return [json.dumps(policy)] * 2
 
 
 def read(name):
@@ -137,7 +156,7 @@ class Inventory(unittest.TestCase):
                          len({step['scenario'] for step in gaps['steps']}))
 
     def test_inventory_matches_files_and_has_owners(self):
-        entries = read('scenario-inventory.json')['scenarios']
+        entries = scenario_inventory(ROOT)['scenarios']
         self.assertEqual(len(entries), len({e['file'] for e in entries}))
         self.assertEqual({e['file'] for e in entries},
                          {str(p.relative_to(ROOT)) for p in (ROOT / 'ci/scenarios').glob('*.json')})
@@ -145,7 +164,7 @@ class Inventory(unittest.TestCase):
 
     def test_every_scenario_lists_known_kernel_parts_covering_its_steps(self):
         known = set(read('kernel-parts.json')['parts'])
-        for entry in read('scenario-inventory.json')['scenarios']:
+        for entry in scenario_inventory(ROOT)['scenarios']:
             with self.subTest(scenario=entry['id']):
                 parts = entry['kernel_parts']
                 self.assertEqual(parts, sorted(set(parts)))
@@ -185,7 +204,7 @@ class Inventory(unittest.TestCase):
                 self.assertEqual(selector.kernel_part_of(path, kernel_map), parts)
 
     def test_acceptance_has_numeric_output_and_error_path(self):
-        entries = read('scenario-inventory.json')['scenarios']
+        entries = scenario_inventory(ROOT)['scenarios']
         self.assertTrue(next(e for e in entries if e['id'] == 'bracket')['acceptance'])
         for entry in entries:
             if entry['acceptance']:
@@ -200,7 +219,7 @@ class Routing(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.packages = selector.graph(ROOT)
-        cls.sources = staticmethod(lambda p: [selector.content(ROOT, p, 'HEAD'), selector.content(ROOT, p)])
+        cls.sources = staticmethod(replay_sources)
 
     def test_frozen_fixtures(self):
         for name, sha in [('routing-cases.json', '5360929b3dd5d42d103faa99866ffb686d466abe111d4167b5c55bb442aff40d'),
@@ -259,11 +278,10 @@ class Routing(unittest.TestCase):
                 self.assertEqual(set(selected), everything() if units == 'all' else {'lint', *units})
 
     def test_map_covers_every_ci_file(self):
-        self.assertEqual(list(read('check-consumers.json')['patterns']), [r'ci/scenarios/[^/]+\.json'])
-        consumers = selector.parse_consumers((ROOT / POLICY).read_text())
+        consumers = selector.parse_consumers(json.dumps(check_consumers(ROOT)))
         files = selector.git(ROOT, 'ls-files', '--cached', '--others', '--exclude-standard', '-z', 'ci')
-        paths = [p for p in files.decode().split('\0') if p]
-        self.assertIn('ci/ownership.toml', paths)
+        paths = [p for p in files.decode().split('\0') if p and (ROOT / p).is_file()]
+        self.assertIn('ci/ownership/app.lib.toml', paths)
         self.assertEqual([p for p in paths if selector.mapped_units(p, consumers) is None], [])
 
     def test_refusal_fixture(self):
@@ -380,12 +398,12 @@ class CiOnly(unittest.TestCase):
         cls.workflow = (ROOT / '.github/workflows/hosted.yml').read_text()
 
     def select(self, changes, overrides=None, **options):
-        sources = lambda path: (overrides or {}).get(path, [selector.content(ROOT, path)] * 2)
+        sources = lambda path: (overrides or {}).get(path, live_sources(path))
         return selector.select(changes, options.get('event', 'pull_request'), options.get('ref', ''),
                                self.packages, sources)
 
     def test_ci_files_and_both_sides_of_renames(self):
-        for changes in ([['M', 'ci/select-checks.py']], [['M', POLICY]],
+        for changes in ([['M', 'ci/select-checks.py']], [['M', POLICY_PART]],
                         [['A', 'ci/tools']], [['D', 'ci/old-tool']],
                         [['M', 'docs/ci.md'], ['M', 'ci/run']],
                         [['R100', 'ci/old-tool', 'ci/new-tool']]):
@@ -454,14 +472,13 @@ class CiOnly(unittest.TestCase):
 
     def test_base_policy_keeps_this_transition_full_once(self):
         changes = [['M', 'ci/select-checks.py']]
-        sources = lambda path: [selector.content(ROOT, path)] * 2
         candidate = self.select(changes)
         base = FROZEN_BASE.read_text()
         self.assertEqual(set(selector.with_base_rules(candidate, base, changes, 'pull_request', '',
-                                                      self.packages, sources)), everything())
+                                                      self.packages, live_sources)), everything())
         current = (ROOT / 'ci/select-checks.py').read_text()
         self.assertEqual(set(selector.with_base_rules(self.select(changes), current, changes,
-                                                      'pull_request', '', self.packages, sources)), {'lint'})
+                                                      'pull_request', '', self.packages, live_sources)), {'lint'})
 
 
 class SharedViewport(unittest.TestCase):
@@ -472,7 +489,7 @@ class SharedViewport(unittest.TestCase):
         cls.packages = selector.graph(ROOT)
 
     def select(self, changes, sources=None, event='pull_request', ref=''):
-        read = lambda path: list((sources or {}).get(path) or [selector.content(ROOT, path)] * 2)
+        read = lambda path: list((sources or {}).get(path) or live_sources(path))
         return selector.select(changes, event, ref, self.packages, read)
 
     def assertSelects(self, changes, expected, sources=None, **options):
@@ -554,8 +571,8 @@ class SharedViewport(unittest.TestCase):
                          'dfa51adb04a1a35924561297f57039cc465e562ced0fcb29993e52f102c37519')
         candidate = self.select([['M', CAMERA]])
         self.assertEqual(set(candidate), APP)
-        read = lambda path: [selector.content(ROOT, path)] * 2
-        union = selector.with_base_rules(candidate, script, [['M', CAMERA]], 'pull_request', '', self.packages, read)
+        union = selector.with_base_rules(candidate, script, [['M', CAMERA]], 'pull_request', '',
+                                         self.packages, live_sources)
         # Main's selector before the deferral still selected Windows; a change cannot narrow that.
         self.assertEqual(set(union), APP | DESKTOP | {'test-windows'})
         for unit in DESKTOP | {'test-windows'}:
@@ -620,7 +637,18 @@ class Cli(unittest.TestCase):
             with self.subTest(case['id']):
                 files = {change[1]: 'new\n' for change in case['changes'] if change[0] == 'A'}
                 if 'policy' in case:
-                    files[POLICY] = case['policy']
+                    if case['policy'] is None:
+                        files.update({p.relative_to(self.root).as_posix(): None
+                                      for p in (self.root / 'ci/check-consumers').glob('*.json')})
+                    else:
+                        # Preserve raw duplicate keys and invalid JSON. Remove only the
+                        # monolith's format tag, which is supplied by the assembler.
+                        policy = re.sub(r'"format": "soliddraft-check-consumers/1", ', '', case['policy'])
+                        files[POLICY_PART] = policy
+                        if case['diagnostic'] in ('ci/scenarios/bracket.json', 'more than one'):
+                            files['ci/check-consumers/registry-paths.json'] = json.dumps(
+                                {'patterns': {k: v for k, v in check_consumers(ROOT)['patterns'].items()
+                                              if k != r'ci/scenarios/[^/]+\.json'}})
                 self.commit(files)
                 result = self.select(self.base, case['event'], case.get('ref', ''))
                 self.assertEqual(result.returncode, 1, result.stderr)
@@ -639,7 +667,7 @@ class Cli(unittest.TestCase):
                 self.assertFalse(self.output.exists())
 
     def test_selection_after_this_policy_is_accepted(self):
-        policy = (self.root / POLICY).read_text()
+        policy = (self.root / POLICY_PART).read_text()
         lock = (self.root / 'Cargo.lock').read_text()
         pin = re.search(r'catallax\?rev=([0-9a-f]{40})', lock)[1]
         source = f'source = "git+https://github.com/BohnBawerick/catallax?rev={"a" * 40}#{"a" * 40}"\n'
@@ -649,13 +677,15 @@ class Cli(unittest.TestCase):
         # A name no real lockfile holds, so a later pin bump cannot turn this into a duplicate table.
         bumped = bumped.replace(edge, edge + ' "catallax-routing-fixture",\n', 1)
         bumped += f'\n[[package]]\nname = "catallax-routing-fixture"\nversion = "0.1.0"\n{source}'
-        ownership = {'ci/ownership.toml': (self.root / 'ci/ownership.toml').read_text() + '\n'}
+        area = 'ci/ownership/app.lib.toml'
+        ownership = {area: (self.root / area).read_text() + '\n'}
         full = sorted(qualified())
         linux = sorted(selector.LINUX)
         for name, files, options, expected in (
                 ('ownership', ownership, {}, ['lint']),
                 ('lock', {'Cargo.lock': bumped}, {}, linux),
-                ('map', {POLICY: policy.replace('"ci/cargo-cache.sh": []', '"ci/cargo-cache.sh": ["lint"]')}, {}, ['lint']),
+                ('map', {POLICY_PART: policy.replace('"ci/cargo-cache.sh": []', '"ci/cargo-cache.sh": ["lint"]')},
+                 {}, ['lint']),
                 ('selector', {'ci/select-checks.py': (self.root / 'ci/select-checks.py').read_text() + '\n'}, {}, ['lint']),
                 ('main', ownership, {'event': 'push', 'ref': 'refs/heads/main'}, ['lint']),
                 ('release', ownership, {'event': 'push', 'ref': 'refs/heads/release/0.1.0'}, full)):
@@ -679,18 +709,19 @@ class Cli(unittest.TestCase):
                 self.tearDown()
 
     def test_base_map_comes_from_the_base_commit(self):
-        policy = (self.root / POLICY).read_text()
+        policy = (self.root / POLICY_PART).read_text()
         helper = '"ci/cargo-cache.sh": [],\n    "ci/linux-helper.py": '
-        base = self.commit({'ci/linux-helper.py': 'one\n', POLICY: policy.replace(
+        base = self.commit({'ci/linux-helper.py': 'one\n', POLICY_PART: policy.replace(
             '"ci/cargo-cache.sh": [],\n    ', helper + '["test-macos"],\n    ')})
-        self.commit({'ci/linux-helper.py': 'two\n', 'README.md': 'ordinary documentation edit\n', POLICY: policy.replace(
+        self.commit({'ci/linux-helper.py': 'two\n', 'README.md': 'ordinary documentation edit\n', POLICY_PART: policy.replace(
             '"ci/cargo-cache.sh": [],\n    ', helper + '["application-loop"],\n    ')})
         selection = self.selection(base)
         self.assertEqual(set(selection['selected']), qualified())
         self.assertIn('base: CI consumers: ci/linux-helper.py', selection['reasons']['test-macos'])
 
     def test_new_ci_file_with_its_map_entry_runs_only_lint(self):
-        entry = self.edited(POLICY, '"ci/cargo-cache.sh": []', '"ci/cargo-cache.sh": [],\n    "ci/new.py": ["lint"]')
+        entry = self.edited(POLICY_PART, '"ci/cargo-cache.sh": []',
+                            '"ci/cargo-cache.sh": [],\n    "ci/new.py": ["lint"]')
         self.commit({'ci/new.py': 'new\n', **entry})
         selection = self.selection(self.base)
         self.assertEqual(set(selection['selected']), {'lint'})
@@ -723,8 +754,10 @@ class Cli(unittest.TestCase):
                 self.assertEqual(set(self.selection(self.base, **options)['selected']), expected)
 
     def test_first_map_needs_no_base_map(self):
-        current = {path: (self.root / path).read_text() for path in (POLICY, 'ci/select-checks.py')}
-        base = self.commit({POLICY: None, 'ci/select-checks.py': FROZEN_BASE.read_text()})
+        parts = {p.relative_to(self.root).as_posix(): p.read_text()
+                 for p in (self.root / 'ci/check-consumers').glob('*.json')}
+        current = {**parts, 'ci/select-checks.py': (self.root / 'ci/select-checks.py').read_text()}
+        base = self.commit({**dict.fromkeys(parts), 'ci/select-checks.py': FROZEN_BASE.read_text()})
         self.commit(current)
         self.assertEqual(set(self.selection(base)['selected']), everything())
 
@@ -742,7 +775,7 @@ class WindowsDeferred(unittest.TestCase):
         cls.packages = selector.graph(ROOT)
 
     def select(self, changes, event='pull_request', ref='', sources=None, **options):
-        read = lambda path: list((sources or {}).get(path) or [selector.content(ROOT, path)] * 2)
+        read = lambda path: list((sources or {}).get(path) or live_sources(path))
         return set(selector.select(changes, event, ref, self.packages, read, **options))
 
     def test_edits_that_selected_windows_no_longer_do(self):
@@ -781,7 +814,7 @@ class WindowsDeferred(unittest.TestCase):
 
     def test_every_frozen_case_only_loses_the_windows_units(self):
         routing = Routing('test_frozen_fixtures')
-        routing.sources = lambda p: [selector.content(ROOT, p, 'HEAD'), selector.content(ROOT, p)]
+        routing.sources = replay_sources
         for case in read('routing-cases.json')['cases']:
             with self.subTest(case['id']):
                 arguments = (case['changes'], case['event'], case.get('ref', ''), self.packages,
@@ -791,19 +824,17 @@ class WindowsDeferred(unittest.TestCase):
 
     def test_the_landed_deferral_binds_the_accepted_selector_too(self):
         changes = [['M', VIEWPORT + 'render.rs']]
-        sources = lambda path: [selector.content(ROOT, path)] * 2
-        candidate = selector.select(changes, 'pull_request', '', self.packages, sources)
+        candidate = selector.select(changes, 'pull_request', '', self.packages, live_sources)
         script = (ROOT / 'ci/select-checks.py').read_text()
-        union = selector.with_base_rules(candidate, script, changes, 'pull_request', '', self.packages, sources)
+        union = selector.with_base_rules(candidate, script, changes, 'pull_request', '', self.packages, live_sources)
         self.assertEqual(set(union), self.NATIVE)
 
 
 class NightlyRouting(unittest.TestCase):
     def test_schedule_ignores_empty_docs_and_ci_only_diffs(self):
-        sources = lambda path: [selector.content(ROOT, path)] * 2
         for changes in (None, [], [['M', 'docs/ci.md']], [['M', 'ci/select-checks.py']]):
             with self.subTest(changes=changes):
-                result = selector.select(changes, 'schedule', 'refs/heads/main', {}, sources)
+                result = selector.select(changes, 'schedule', 'refs/heads/main', {}, live_sources)
                 self.assertEqual(set(result), qualified())
 
 

@@ -37,7 +37,7 @@ fn main() {}
 #[cfg(not(target_arch = "wasm32"))]
 fn main() -> eframe::Result {
     env_logger::init();
-    soliddraft_app::load_reference_files();
+    soliddraft_app::startup::load_reference_files();
     let args: Vec<String> = std::env::args().skip(1).collect();
     let mut demo = false;
     let mut automation = Automation {
@@ -135,11 +135,11 @@ fn main() -> eframe::Result {
     // With no document asked for, the window opens on the start page.
     let start_page = open.is_none() && !demo && !automation.bench;
     let doc = if automation.bench {
-        soliddraft_app::bench_document()
+        soliddraft_app::startup::bench_document()
     } else if demo {
-        soliddraft_app::demo_document()
+        soliddraft_app::startup::demo_document()
     } else {
-        soliddraft_app::new_document()
+        soliddraft_app::startup::new_document()
     };
 
     let mut wgpu_options = egui_wgpu::WgpuConfiguration {

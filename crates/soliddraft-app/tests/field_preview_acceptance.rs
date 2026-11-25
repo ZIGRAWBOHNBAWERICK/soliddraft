@@ -36,7 +36,7 @@ const HANG: Duration = Duration::from_secs(600);
 const UNPROVED: &str = "unproved preview";
 
 fn counted() -> (Arc<Counting>, Document) {
-    let kernel = Arc::new(Counting::new(soliddraft_app::kernel()));
+    let kernel = Arc::new(Counting::new(soliddraft_app::startup::kernel()));
     (kernel.clone(), Document::new("Field preview", kernel))
 }
 

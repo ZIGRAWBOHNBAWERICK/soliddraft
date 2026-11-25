@@ -76,7 +76,7 @@ fn dragging_the_depth_field_previews_and_applies_one_undo_step() {
     soliddraft_app::file::set_config_dir(Some(config));
     let kernel = Arc::new(gated::Gated::default());
     let mut doc = Document::new("Part1", kernel.clone());
-    soliddraft_app::populate_demo(&mut doc);
+    soliddraft_app::startup::populate_demo(&mut doc);
     let mut harness = Harness::builder()
         .with_size(vec2(1440.0, 900.0))
         .with_pixels_per_point(1.0)
@@ -180,7 +180,7 @@ fn refused_fillet_edit_restores_the_proved_shape_and_blocks_export() {
     let config = std::env::temp_dir().join(format!("soliddraft-failed-edit-interface-{}", std::process::id()));
     std::fs::create_dir_all(&config).unwrap();
     soliddraft_app::file::set_config_dir(Some(config));
-    let mut doc = Document::new("Fillet edit", soliddraft_app::kernel());
+    let mut doc = Document::new("Fillet edit", soliddraft_app::startup::kernel());
     doc.apply(Command::AddExtrude {
         params: ExtrudeParams {
             profile: ProfileKind::Rectangle { width: 40.0, height: 30.0 },

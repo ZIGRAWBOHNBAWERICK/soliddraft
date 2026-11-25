@@ -1,0 +1,23 @@
+{
+  "id": "countersink",
+  "file": "ci/scenarios/countersink.json",
+  "acceptance": true,
+  "owners": [
+    "soliddraft-app",
+    "soliddraft-model",
+    "soliddraft-kernel-catallax"
+  ],
+  "kernel_parts": [
+    "boolean",
+    "extrude",
+    "hole",
+    "measure",
+    "mesh",
+    "step",
+    "verify"
+  ],
+  "catallax_revision": "76cdf97f3e85d22ea74868b77d849498ebdfcf1c",
+  "route": "MCP document commands -> Catallax adapter -> pinned kernel",
+  "supported_limits": "60 x 40 x 5 mm plate at the origin corner, two 90-degree countersinks, a radius-8 boss and a third countersink 14 mm from its axis; volume tolerance 0.005 mm3 and bounds tolerance 0.001 mm; true cone/cylinder meeting retains intersect.traced-pair-required; partial M7 evidence",
+  "evidence": "result.json, protocol.json and commands/NNNN/{part.dwprt,command.json,kernel.json,measurement.json,viewport.png,view.svg}; steps 12 and 15 Hole2 face names; countersink-boss.dwprt; commands/0014/{part.step,step-report.json,check-step.stdout,check-step.stderr,raw-step.stdout,raw-step.stderr}; geometry-info.stdout recipe hashes"
+}

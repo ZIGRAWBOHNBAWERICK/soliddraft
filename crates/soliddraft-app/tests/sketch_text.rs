@@ -18,7 +18,7 @@ fn text_tool_schema_accepts_bundled_fonts_and_refuses_invalid_text_atomically() 
     use soliddraft_app::{app_tools::AppTools, document::Document, state::AppState};
     use soliddraft_assistant::{Caller, tools::call_checked};
 
-    let mut state = AppState::new(Document::new("Text tools", soliddraft_app::kernel()));
+    let mut state = AppState::new(Document::new("Text tools", soliddraft_app::startup::kernel()));
     let caller = Caller::Mcp { client: "text test".into() };
     for (content, height, valid) in [("oae", 10.0, true), ("", 10.0, false), ("B", -1.0, false)] {
         let before = state.doc.model().part_json();

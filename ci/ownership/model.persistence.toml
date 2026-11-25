@@ -1,0 +1,6 @@
+[[areas]]
+name = "model.persistence"
+owner = "core"
+crate = "soliddraft-model"
+paths = ["crates/soliddraft-model/src/file.rs"]
+module = ["file"]

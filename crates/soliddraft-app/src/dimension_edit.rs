@@ -108,13 +108,13 @@ pub enum DimensionAction {
 /// What a double-click on a feature's tree row does: a sketch opens, a feature with
 /// dimensions shows them on the part, and any other feature opens its editor.
 pub fn row_double_click(state: &AppState, id: FeatureId) -> AppAction {
-    let Some(f) = state.doc.feature(id) else { return AppAction::EditFeature(id) };
+    let Some(f) = state.doc.feature(id) else { return AppAction::Editor(crate::app::EditorAction::EditFeature(id)) };
     if f.is_sketch() {
         AppAction::EditSketch(id)
     } else if shows_in_place(state, id) {
         AppAction::Dimension(DimensionAction::ShowFeature(id))
     } else {
-        AppAction::EditFeature(id)
+        AppAction::Editor(crate::app::EditorAction::EditFeature(id))
     }
 }
 

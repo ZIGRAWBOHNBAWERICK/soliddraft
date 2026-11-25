@@ -1,0 +1,16 @@
+{
+  "id": "sketch-linear-pattern",
+  "file": "ci/scenarios/sketch-linear-pattern.json",
+  "acceptance": false,
+  "owners": [
+    "soliddraft-app",
+    "soliddraft-model",
+    "soliddraft-kernel-catallax"
+  ],
+  "kernel_parts": [
+    "boolean",
+    "extrude",
+    "measure",
+    "mesh"
+  ]
+}

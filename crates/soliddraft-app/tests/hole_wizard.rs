@@ -192,10 +192,10 @@ fn legacy_hole_position_round_trip(open: impl FnOnce(Document) -> App) -> Docume
     let id = drill(&mut doc, params);
     let old = doc.model().to_bytes().unwrap();
     assert_ne!(doc.model().truth()["format"], HOLE_WIZARD_FORMAT);
-    let reopened = soliddraft_model::Document::from_bytes(&old, soliddraft_app::kernel()).unwrap();
+    let reopened = soliddraft_model::Document::from_bytes(&old, soliddraft_app::startup::kernel()).unwrap();
     let mut app = open(Document::from_model(reopened));
     settle(&mut app);
-    app.state_mut().state.push(AppAction::EditFeature(id));
+    app.state_mut().state.push(AppAction::Editor(soliddraft_app::app::EditorAction::EditFeature(id)));
     settle(&mut app);
     click(&mut app, "Hole Wizard Positions tab");
     let EditorParams::Hole(h) = &mut app.state_mut().state.editor.as_mut().unwrap().params else { panic!() };
@@ -215,7 +215,7 @@ fn legacy_hole_position_round_trip(open: impl FnOnce(Document) -> App) -> Docume
     assert_eq!(doc.undo_depth(), undo_before + 1);
     assert_eq!(doc.model().truth()["format"], HOLE_WIZARD_FORMAT);
     let bytes = doc.model().to_bytes().unwrap();
-    let reopened = soliddraft_model::Document::from_bytes(&bytes, soliddraft_app::kernel()).unwrap();
+    let reopened = soliddraft_model::Document::from_bytes(&bytes, soliddraft_app::startup::kernel()).unwrap();
     let doc = Document::from_model(reopened);
     let sketch_id = doc.feature(id).unwrap().kind.sketch().expect("the hole still owns its position sketch");
     let saved = &doc.feature(sketch_id).unwrap().sketch().unwrap().sketch;
@@ -368,7 +368,7 @@ fn hole_wizard_iso_m6_four_holes_edit_positions_switch_ansi_inch_favorites_save_
     assert!(vol_iso_5 < vol_iso_4, "editing position sketch adds 5th hole and reduces volume");
 
     // 8. Re-open Hole Wizard feature editor and switch to ANSI Inch 1/4" SHCS Counterbore.
-    app.state_mut().state.push(AppAction::EditFeature(hole_id));
+    app.state_mut().state.push(AppAction::Editor(soliddraft_app::app::EditorAction::EditFeature(hole_id)));
     settle(&mut app);
     {
         let EditorParams::Hole(h) = &mut app.state_mut().state.editor.as_mut().unwrap().params else { panic!() };
@@ -387,7 +387,7 @@ fn hole_wizard_iso_m6_four_holes_edit_positions_switch_ansi_inch_favorites_save_
     let model = app.state().state.doc.model();
     assert_eq!(model.truth()["format"], HOLE_WIZARD_FORMAT);
     let bytes = model.to_bytes().unwrap();
-    let reopened = soliddraft_model::Document::from_bytes(&bytes, soliddraft_app::kernel()).unwrap();
+    let reopened = soliddraft_model::Document::from_bytes(&bytes, soliddraft_app::startup::kernel()).unwrap();
     let reopened_doc = Document::from_model(reopened);
     assert!((volume(&reopened_doc) - vol_inch_5).abs() < 1e-4);
 

@@ -1,0 +1,6 @@
+[[areas]]
+name = "app.in_context"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/in_context.rs"]
+module = ["in_context"]

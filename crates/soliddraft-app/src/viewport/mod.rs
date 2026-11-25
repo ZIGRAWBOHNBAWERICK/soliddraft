@@ -1137,7 +1137,7 @@ impl ViewportState {
             let moved = (pointer - start).dot(along.normalized()) / per_mm;
             let value = ((depth + moved).max(0.1) * 10.0).round() / 10.0;
             if (value - length).abs() > 1e-3 {
-                events.actions.push(AppAction::EditorDepth(f64::from(value)));
+                events.actions.push(AppAction::Editor(crate::app::EditorAction::Depth(f64::from(value))));
             }
         }
         if response.drag_stopped() {
@@ -1159,7 +1159,7 @@ impl ViewportState {
             info
         });
         if value.double_clicked() {
-            events.actions.push(AppAction::EditorFocusDepth);
+            events.actions.push(AppAction::Editor(crate::app::EditorAction::FocusDepth));
         }
         value.on_hover_text("Drag the arrow, or double-click to type the depth");
     }

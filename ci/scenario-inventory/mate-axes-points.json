@@ -1,0 +1,22 @@
+{
+  "id": "mate-axes-points",
+  "file": "ci/scenarios/mate-axes-points.json",
+  "acceptance": true,
+  "owners": [
+    "soliddraft-app",
+    "soliddraft-assembly",
+    "soliddraft-model",
+    "soliddraft-kernel-api",
+    "soliddraft-kernel-catallax"
+  ],
+  "kernel_parts": [
+    "boolean",
+    "extrude",
+    "measure",
+    "mesh"
+  ],
+  "catallax_revision": "76cdf97f3e85d22ea74868b77d849498ebdfcf1c",
+  "route": "MCP assembly and Coincident, Distance, Parallel and Perpendicular mate commands on edges and vertices -> assembly transaction -> proven axis and point queries -> Catallax adapter -> pinned kernel",
+  "supported_limits": "B2: Coincident between two vertices, a straight edge in a plane, a vertex at a distance from a plane and its edit, Parallel between two straight edges, a Perpendicular against it refused naming both, negative point-point Distance refused without state changes, save and reopen. Positive Euclidean Distance is covered by mate-point-distance.",
+  "evidence": "result.json, protocol.json, commands/NNNN/{part.dwprt,command.json,kernel.json,inspect-*.stdout}; work/a.dwprt, work/b.dwprt and work/rig.dwasm"
+}

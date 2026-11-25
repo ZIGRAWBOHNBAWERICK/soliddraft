@@ -24,7 +24,7 @@ fn modelling_guide_names_the_grades_the_pinned_editors_offer() {
     let (_, grades) = guide.split_once("## Graded fields\n").unwrap();
     let grades = grades.split("\n## ").next().unwrap();
     let support_notes = include_str!("../../../docs/needs-catallax.md");
-    let kernel = soliddraft_app::kernel();
+    let kernel = soliddraft_app::startup::kernel();
     for field in [GradedField::LatticeRadius, GradedField::GyroidLevel] {
         for kind in NEW_GRADES {
             if kernel.field_grade(field, kind).is_ok() {
@@ -107,7 +107,7 @@ fn renderer() -> App {
     let temporary = std::env::temp_dir().join(format!("soliddraft-more-grades-{}", std::process::id()));
     std::fs::create_dir_all(&temporary).unwrap();
     soliddraft_app::file::set_config_dir(Some(temporary.join("config")));
-    let mut doc = Some(Document::new("Grades", soliddraft_app::kernel()));
+    let mut doc = Some(Document::new("Grades", soliddraft_app::startup::kernel()));
     Harness::builder()
         .with_size(vec2(1440.0, 900.0))
         .with_render_every_step(true)

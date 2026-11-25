@@ -1,0 +1,6 @@
+[[areas]]
+name = "app.graphics"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/graphics.rs"]
+module = ["graphics"]

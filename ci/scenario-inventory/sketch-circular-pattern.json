@@ -1,0 +1,16 @@
+{
+  "id": "sketch-circular-pattern",
+  "file": "ci/scenarios/sketch-circular-pattern.json",
+  "acceptance": false,
+  "owners": [
+    "soliddraft-app",
+    "soliddraft-model",
+    "soliddraft-kernel-catallax"
+  ],
+  "kernel_parts": [
+    "boolean",
+    "extrude",
+    "measure",
+    "mesh"
+  ]
+}

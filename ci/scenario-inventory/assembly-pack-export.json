@@ -1,0 +1,23 @@
+{
+  "id": "assembly-pack-export",
+  "file": "ci/scenarios/assembly-pack-export.json",
+  "acceptance": true,
+  "owners": [
+    "soliddraft-app",
+    "soliddraft-assembly",
+    "soliddraft-scene",
+    "soliddraft-drawing",
+    "soliddraft-model",
+    "soliddraft-kernel-catallax"
+  ],
+  "kernel_parts": [
+    "boolean",
+    "extrude",
+    "measure",
+    "mesh"
+  ],
+  "catallax_revision": "ccfb4e4bee95cbb42f7c1ea1dbdfe8874ed01c4a",
+  "route": "MCP export and Pack and Go tools -> articulation from mates -> URDF and USDA writers; pack_and_go -> rewritten assemblies and drawings -> reopen the copy",
+  "supported_limits": "A limited Hinge exported as a revolute joint with its stops to URDF and OpenUSD, a refused extension, Pack and Go with a prefix carrying the assembly, two parts and its drawing, a refused non-empty destination, and the packed copy reopened current and extended. Prismatic and other joint kinds are carried as fixed with notes.",
+  "evidence": "result.json, protocol.json, command summaries, work/robot/rig.urdf, work/robot/rig.usda, work/packed"
+}

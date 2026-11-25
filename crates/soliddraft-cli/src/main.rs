@@ -490,7 +490,8 @@ fn mcp(args: &[String]) -> ExitCode {
         bundle.as_ref().map(|_| Arc::new(soliddraft_kernel_catallax::CatallaxKernel::with_diagnostics(max_work)));
     // A bundle counts the work each command asks of the kernel, outside the application.
     let counting = evidence_kernel.clone().map(|k| Arc::new(Counting::new(k)));
-    let kernel: Arc<dyn Kernel> = counting.clone().map(|k| k as Arc<dyn Kernel>).unwrap_or_else(soliddraft_app::kernel);
+    let kernel: Arc<dyn Kernel> =
+        counting.clone().map(|k| k as Arc<dyn Kernel>).unwrap_or_else(soliddraft_app::startup::kernel);
     let doc = match open {
         Some(path) => match soliddraft_app::file::open(&path, kernel.clone(), None) {
             Ok(doc) => doc,
@@ -501,7 +502,7 @@ fn mcp(args: &[String]) -> ExitCode {
         },
         None if demo => {
             let mut doc = soliddraft_app::document::Document::new("Part1", kernel);
-            soliddraft_app::populate_demo(&mut doc);
+            soliddraft_app::startup::populate_demo(&mut doc);
             doc
         }
         None => soliddraft_app::document::Document::new("Part1", kernel),

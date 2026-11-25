@@ -1,0 +1,17 @@
+{
+  "id": "p3-rounded-boss",
+  "file": "ci/scenarios/p3-rounded-boss.json",
+  "acceptance": false,
+  "owners": [
+    "soliddraft-app",
+    "soliddraft-model",
+    "soliddraft-kernel-catallax"
+  ],
+  "kernel_parts": [
+    "boolean",
+    "extrude",
+    "fillet",
+    "measure",
+    "mesh"
+  ]
+}

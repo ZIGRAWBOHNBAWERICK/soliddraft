@@ -22,7 +22,7 @@ fn source(format: ImportFormat) -> Document {
 }
 
 fn import(format: ImportFormat, name: &str, bytes: &[u8]) -> Document {
-    let mut doc = Document::new("Imported field", soliddraft_app::kernel());
+    let mut doc = Document::new("Imported field", soliddraft_app::startup::kernel());
     let preview = Preview::from_source(&doc, name, bytes.to_vec(), format).unwrap();
     commit(&mut doc, &preview, &Review::default()).unwrap();
     doc
@@ -101,7 +101,7 @@ fn imported_fields_build_edit_reopen_and_rebuild_after_a_cad_feature() {
             let mut doc = soliddraft_app::file::open_bytes(
                 "field.dwprt",
                 &std::fs::read(&path).unwrap(),
-                soliddraft_app::kernel(),
+                soliddraft_app::startup::kernel(),
                 None,
             )
             .unwrap();
@@ -195,7 +195,7 @@ fn certified_imported_fields_clip_stl_and_preserve_print_refusals() {
 v -1 -1 1.5\nv 1 -1 1.5\nv 1 1 1.5\nv -1 1 1.5\n\
 f 1 4 3\nf 1 3 2\nf 5 6 7\nf 5 7 8\nf 1 2 6\nf 1 6 5\n\
 f 2 3 7\nf 2 7 6\nf 3 4 8\nf 3 8 7\nf 4 1 5\nf 4 5 8\n";
-    let mut block = Document::new("Print fixture", soliddraft_app::kernel());
+    let mut block = Document::new("Print fixture", soliddraft_app::startup::kernel());
     call(
         &mut block,
         "sketch",

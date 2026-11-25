@@ -125,7 +125,7 @@ fn names(app: &App) -> Vec<String> {
 #[test]
 fn fillet_and_chamfer_an_imported_block_in_the_app() {
     let case = ribbon::case("ux-import-features-edges");
-    let mut app = ribbon::app(Document::new("Imported block", soliddraft_app::kernel()));
+    let mut app = ribbon::app(Document::new("Imported block", soliddraft_app::startup::kernel()));
     case.run(&mut app, |app| {
         import(&case, app);
         case.frame(app, "1-imported");
@@ -170,7 +170,7 @@ fn fillet_and_chamfer_an_imported_block_in_the_app() {
 #[test]
 fn shell_an_imported_block_in_the_app() {
     let case = ribbon::case("ux-import-features-shell");
-    let mut app = ribbon::app(Document::new("Imported block", soliddraft_app::kernel()));
+    let mut app = ribbon::app(Document::new("Imported block", soliddraft_app::startup::kernel()));
     case.run(&mut app, |app| {
         import(&case, app);
         ribbon::run_command(app, "shell");

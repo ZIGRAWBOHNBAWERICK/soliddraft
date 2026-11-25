@@ -32,7 +32,7 @@ fn directory(name: &str) -> PathBuf {
 }
 
 fn app() -> App {
-    app_with(soliddraft_app::new_document())
+    app_with(soliddraft_app::startup::new_document())
 }
 
 fn app_with(doc: soliddraft_app::document::Document) -> App {

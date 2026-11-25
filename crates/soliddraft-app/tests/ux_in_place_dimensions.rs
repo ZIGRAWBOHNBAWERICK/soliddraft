@@ -55,7 +55,7 @@ fn gesture_text(key: &str) -> String {
 /// The manifest's B20 fixture.
 fn b20() -> Document {
     let e = part("B20");
-    let mut doc = Document::new("B20", soliddraft_app::kernel());
+    let mut doc = Document::new("B20", soliddraft_app::startup::kernel());
     doc.apply(Command::AddExtrude {
         params: ExtrudeParams {
             profile: ProfileKind::Rectangle { width: e.width, height: e.height },
@@ -281,7 +281,7 @@ fn edit_in_place(case: &mut Case, look: Look) {
     });
     drop(app);
 
-    let mut app = launch(soliddraft_app::new_document(), look);
+    let mut app = launch(soliddraft_app::startup::new_document(), look);
     case.run(&mut app, |case, app| {
         let file = path.file_name().expect("a file name").to_string_lossy().into_owned();
         case.note("fresh app, File > Open recent");

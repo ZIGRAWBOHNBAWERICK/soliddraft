@@ -1,0 +1,6 @@
+[[areas]]
+name = "app.theme"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/theme.rs", "crates/soliddraft-app/src/theme/"]
+module = ["theme"]

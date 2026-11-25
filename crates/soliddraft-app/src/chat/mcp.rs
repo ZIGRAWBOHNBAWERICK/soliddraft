@@ -319,7 +319,7 @@ mod tests {
     #[test]
     fn a_timeout_replies_once_and_discards_a_late_success() {
         let mut endpoint = McpEndpoint::start(0, None).unwrap();
-        let mut state = AppState::new(crate::new_document());
+        let mut state = AppState::new(crate::startup::new_document());
         let made = blank_drawing(&state);
         let (request, client) = queued(&endpoint, message(7));
         let (tx, rx) = channel();
@@ -349,7 +349,7 @@ mod tests {
     fn a_completed_drawing_cannot_replace_changed_documents() {
         for replace_part in [false, true] {
             let mut endpoint = McpEndpoint::start(0, None).unwrap();
-            let mut state = AppState::new(crate::new_document());
+            let mut state = AppState::new(crate::startup::new_document());
             state.drawing.session = Some(blank_drawing(&state));
             let drawing = state.drawing.session.as_ref().unwrap().doc.id;
             let made = blank_drawing(&state);
@@ -357,7 +357,7 @@ mod tests {
             let (tx, rx) = channel();
             endpoint.drawing = Some(job(&state, request, rx));
             if replace_part {
-                state.doc = crate::new_document();
+                state.doc = crate::startup::new_document();
             } else {
                 state.drawing.session.as_mut().unwrap().doc.touch();
             }
@@ -376,7 +376,7 @@ mod tests {
     fn a_completed_drawing_cannot_replace_reopened_documents() {
         for reopen_part in [false, true] {
             let mut endpoint = McpEndpoint::start(0, None).unwrap();
-            let mut state = AppState::new(crate::new_document());
+            let mut state = AppState::new(crate::startup::new_document());
             state.drawing.session = Some(blank_drawing(&state));
             let drawing_id = state.drawing.session.as_ref().unwrap().doc.id;
             let made = blank_drawing(&state);
@@ -405,7 +405,7 @@ mod tests {
     #[test]
     fn a_stopped_worker_returns_a_tool_refusal() {
         let mut endpoint = McpEndpoint::start(0, None).unwrap();
-        let mut state = AppState::new(crate::new_document());
+        let mut state = AppState::new(crate::startup::new_document());
         let (request, client) = queued(&endpoint, message(4));
         let (tx, rx) = channel();
         endpoint.drawing = Some(job(&state, request, rx));
@@ -419,7 +419,7 @@ mod tests {
     #[test]
     fn another_query_can_finish_while_a_drawing_waits_and_its_refusal_is_preserved() {
         let mut endpoint = McpEndpoint::start(0, None).unwrap();
-        let mut state = AppState::new(crate::new_document());
+        let mut state = AppState::new(crate::startup::new_document());
         let (request, drawing_client) = queued(&endpoint, message(1));
         let (tx, rx) = channel();
         endpoint.drawing = Some(job(&state, request, rx));
@@ -440,7 +440,7 @@ mod tests {
     #[test]
     fn deferred_batches_keep_reply_order_and_skip_notifications() {
         let mut endpoint = McpEndpoint::start(0, None).unwrap();
-        let mut state = AppState::new(crate::new_document());
+        let mut state = AppState::new(crate::startup::new_document());
         let batch = json!([
             {"jsonrpc":"2.0","method":"ping"},
             message(1),
@@ -466,7 +466,7 @@ mod tests {
     #[test]
     fn drawings_in_a_batch_share_the_request_deadline() {
         let mut endpoint = McpEndpoint::start(0, None).unwrap();
-        let mut state = AppState::new(crate::new_document());
+        let mut state = AppState::new(crate::startup::new_document());
         let (mut request, client) = queued(&endpoint, json!([message(1), message(2)]));
         request.deadline = Instant::now() - Duration::from_secs(1);
         endpoint.drive(request, &mut state);

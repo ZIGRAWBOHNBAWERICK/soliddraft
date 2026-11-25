@@ -1,7 +1,7 @@
 //! Opens and saves part and drawing files across format versions.
 
 use serde_json::{Value, json};
-use soliddraft_app::{drawing::DrawingDoc, file::open_bytes, kernel};
+use soliddraft_app::{drawing::DrawingDoc, file::open_bytes, startup::kernel};
 use soliddraft_document::manifest::{self, Entry, Package};
 use soliddraft_drawing::{AnnotationId, AnnotationKind, Attach, Dimension, DimensionKind, HoleRow, PmiSource, Table};
 use soliddraft_kernel_api::Point2;

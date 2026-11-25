@@ -1,0 +1,22 @@
+{
+  "id": "draft-oblique-pull",
+  "file": "ci/scenarios/draft-oblique-pull.json",
+  "acceptance": true,
+  "owners": [
+    "soliddraft-app",
+    "soliddraft-model",
+    "soliddraft-kernel-catallax"
+  ],
+  "kernel_parts": [
+    "boolean",
+    "draft",
+    "extrude",
+    "measure",
+    "mesh",
+    "step"
+  ],
+  "catallax_revision": "56be782ba461216bf931384748a1f8c204317c72",
+  "route": "MCP sketch, cut, reference_plane, draft with pull and edit_draft -> real document rebuild -> pinned Catallax hollow oblique draft -> raw STEP check on one request allowance",
+  "supported_limits": "Catallax's hollow oblique acceptance case: an 8/4 mm ring 2 mm tall, both walls drafted about the plane through (0, 0, 1) with normal (1, 0, 8), pulled along +z from the Z axis and then from the reversed start cap. The tilted neutral plane is a reference plane offset from a slanted cut face. The angle edits from 45 to -45 degrees; other angles on this part are refused with draft.unsupported-arrangement, and mass properties refuse the drafted body with measure.unsupported-surface, so the steps check its bounding box.",
+  "evidence": "result.json, protocol.json, commands/NNNN/{command.json,kernel.json,viewport.png,view.svg}; draft-oblique-pull.dwprt, live.step and commands-1/0001/{part.step,export-step.stdout,export-step-raw-step.stdout}"
+}

@@ -1,0 +1,9 @@
+{
+  "id": "edit-suite-all-dimensions",
+  "file": "crates/soliddraft-app/tests/ux_feature_forms.rs",
+  "owners": [
+    "soliddraft-app"
+  ],
+  "route": "rendered viewport face/edge picks -> dimension annotations for every built feature",
+  "evidence": "target/ux-tools/edit-suite-all-dimensions; two-feature face and edge picks, current dimension targets; viewport_settings checks the axes default and saved override"
+}

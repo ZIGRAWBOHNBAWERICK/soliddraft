@@ -101,7 +101,7 @@ fn the_selected_body_shows_its_feature_dimensions() {
         return;
     }
     let _case = ui::case("body-feature-dimensions");
-    let mut harness = harness(soliddraft_app::demo_document());
+    let mut harness = harness(soliddraft_app::startup::demo_document());
     harness.state_mut().state.show_tree(false);
     harness.run_steps(5);
     harness.key_press(Key::Z);
@@ -206,7 +206,7 @@ fn a_sketch_dimension_of_the_body_edits_in_its_sketch() {
         return;
     }
     let _case = ui::case("body-sketch-dimensions");
-    let mut doc = soliddraft_app::new_document();
+    let mut doc = soliddraft_app::startup::new_document();
     let sketch_id = doc
         .apply(Command::AddSketch { plane: SketchPlane::Reference { plane: PlaneKind::Top, offset: 0.0 } })
         .unwrap()
@@ -253,7 +253,7 @@ fn a_shown_sketch_stays_out_of_another_features_dimensions() {
         return;
     }
     let _case = ui::case("body-feature-dimensions-shown-sketch");
-    let mut doc = soliddraft_app::demo_document();
+    let mut doc = soliddraft_app::startup::demo_document();
     let sketch_id = doc
         .apply(Command::AddSketch { plane: SketchPlane::Reference { plane: PlaneKind::Top, offset: 0.0 } })
         .unwrap()

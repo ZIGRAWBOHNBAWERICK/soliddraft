@@ -1,0 +1,6 @@
+[[areas]]
+name = "app.part_check"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/part_check.rs"]
+module = ["part_check"]

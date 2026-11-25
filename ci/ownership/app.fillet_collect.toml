@@ -1,0 +1,6 @@
+[[areas]]
+name = "app.fillet_collect"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/fillet_collect.rs"]
+module = ["fillet_collect"]

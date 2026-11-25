@@ -1,0 +1,17 @@
+{
+  "id": "reference-planes",
+  "file": "ci/scenarios/reference-planes.json",
+  "acceptance": false,
+  "owners": [
+    "soliddraft-app",
+    "soliddraft-model",
+    "soliddraft-kernel-catallax"
+  ],
+  "kernel_parts": [
+    "boolean",
+    "extrude",
+    "measure",
+    "mesh",
+    "pattern"
+  ]
+}

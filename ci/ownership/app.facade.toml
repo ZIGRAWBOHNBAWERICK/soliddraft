@@ -1,0 +1,6 @@
+[[areas]]
+name = "app.facade"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/app/mod.rs"]
+module = ["app"]

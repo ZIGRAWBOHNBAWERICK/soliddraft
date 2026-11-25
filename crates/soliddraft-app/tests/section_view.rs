@@ -11,7 +11,7 @@ fn separated_bodies() -> soliddraft_app::document::Document {
     use soliddraft_app::document::{Command, Document, ExtrudeParams, PlaneKind, SketchPlane};
     use soliddraft_sketch::{P2, Sketch};
 
-    let mut doc = Document::new("Section both bodies", soliddraft_app::kernel());
+    let mut doc = Document::new("Section both bodies", soliddraft_app::startup::kernel());
     for (x, depth) in [(-30.0, 10.0), (30.0, 20.0)] {
         if x > 0.0 {
             doc.new_body();

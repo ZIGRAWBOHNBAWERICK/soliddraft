@@ -1,0 +1,6 @@
+[[areas]]
+name = "app.documents_browser"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/documents_browser.rs"]
+module = ["documents_browser"]

@@ -143,14 +143,14 @@ fn file_commands_replay_without_reading_or_overwriting_user_files() {
     std::fs::create_dir_all(&root).unwrap();
     let source = root.join("source.dwprt");
     let saved = root.join("saved.dwprt");
-    let mut imported = Document::new("Imported", soliddraft_app::kernel());
+    let mut imported = Document::new("Imported", soliddraft_app::startup::kernel());
     imported
         .apply(Command::AddExtrude { params: ExtrudeParams { depth: 4.0, ..Default::default() }, via_assistant: false })
         .unwrap();
     imported.model().save(&source).unwrap();
     let session = Session::start(&root.join("journals")).unwrap();
     let path = session.path().to_owned();
-    let mut doc = Document::new("Before open", soliddraft_app::kernel());
+    let mut doc = Document::new("Before open", soliddraft_app::startup::kernel());
     let mut book = ProposalBook::default();
     let sketch = || json!({"plane":"top","shapes":[{"shape":"rectangle","center":[0,0,0],"width":10,"height":8}]});
     let call = |doc: &mut Document, book: &mut ProposalBook, name: &str, input: Value| {
@@ -174,7 +174,7 @@ fn file_commands_replay_without_reading_or_overwriting_user_files() {
     drop(session);
     std::fs::remove_file(&source).unwrap();
     std::fs::write(&saved, b"leave this user's file unchanged").unwrap();
-    let replay = Replay::read(&path, soliddraft_app::kernel()).unwrap();
+    let replay = Replay::read(&path, soliddraft_app::startup::kernel()).unwrap();
     assert!(replay.failure.is_none(), "{:?}", replay.failure);
     let report = replay.report();
     assert_eq!(report["parts"][0]["part"], closed);
@@ -188,7 +188,7 @@ fn file_commands_replay_without_reading_or_overwriting_user_files() {
     let portable = root.join("report.jsonl");
     journal::export(&path, &portable).unwrap();
     assert!(!std::fs::read_to_string(&portable).unwrap().contains(root.to_str().unwrap()));
-    let replay = Replay::read(&portable, soliddraft_app::kernel()).unwrap();
+    let replay = Replay::read(&portable, soliddraft_app::startup::kernel()).unwrap();
     assert!(replay.failure.is_none(), "{:?}", replay.failure);
     assert_eq!(replay.report()["parts"][1]["part"], expected);
     std::fs::remove_dir_all(root).unwrap();
@@ -203,7 +203,7 @@ fn missing_file_inputs_never_fall_back_to_real_writes() {
     std::fs::write(&target, b"protected original").unwrap();
     let session = Session::start(&root.join("journals")).unwrap();
     let path = session.path().to_owned();
-    let doc = Document::new("Untrusted input", soliddraft_app::kernel());
+    let doc = Document::new("Untrusted input", soliddraft_app::startup::kernel());
     doc.model()
         .journal_command(|| {
             json!({"op":"tool","name":"save","input":{"path":target},
@@ -212,7 +212,7 @@ fn missing_file_inputs_never_fall_back_to_real_writes() {
         .finish(Ok::<_, String>(()))
         .unwrap();
     drop(session);
-    let replay = Replay::read(&path, soliddraft_app::kernel()).unwrap();
+    let replay = Replay::read(&path, soliddraft_app::startup::kernel()).unwrap();
     assert!(replay.failure.as_ref().is_some_and(|e| e.contains("missing a filesystem input")));
     assert_eq!(std::fs::read(&target).unwrap(), b"protected original");
     std::fs::remove_dir_all(root).unwrap();
@@ -224,7 +224,7 @@ fn an_opening_rebuild_crash_replays_after_the_source_is_removed() {
         std::env::temp_dir().join(format!("soliddraft-journal-open-crash-{}", soliddraft_document::DocumentId::new()));
     std::fs::create_dir_all(&root).unwrap();
     let source = root.join("crashing.dwprt");
-    let mut imported = Document::new("Opening crash", soliddraft_app::kernel());
+    let mut imported = Document::new("Opening crash", soliddraft_app::startup::kernel());
     imported
         .apply(Command::AddExtrude {
             params: ExtrudeParams { depth: 13.0, ..Default::default() },

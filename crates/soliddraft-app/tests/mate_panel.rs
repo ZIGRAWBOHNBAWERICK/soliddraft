@@ -262,7 +262,7 @@ fn pick_drive_update_and_refuse_in_the_window() {
         .with_render_every_step(true)
         .with_step_dt(1.0 / 60.0)
         .wgpu()
-        .build_eframe(|cc| SolidDraftApp::new(cc, soliddraft_app::new_document(), Automation::default()));
+        .build_eframe(|cc| SolidDraftApp::new(cc, soliddraft_app::startup::new_document(), Automation::default()));
     h.run_steps(3);
 
     // The two parts, placed apart so each cap can be clicked: B floats at x = 60.
@@ -393,7 +393,7 @@ fn pick_coincident_update_and_refuse_in_the_window() {
         .with_render_every_step(true)
         .with_step_dt(1.0 / 60.0)
         .wgpu()
-        .build_eframe(|cc| SolidDraftApp::new(cc, soliddraft_app::new_document(), Automation::default()));
+        .build_eframe(|cc| SolidDraftApp::new(cc, soliddraft_app::startup::new_document(), Automation::default()));
     h.run_steps(3);
 
     // A, and B over it at [3, 7, 30]; O, Cx and Cy through the commands bring B to
@@ -561,7 +561,7 @@ fn width_lock_and_conflicts_in_the_window() {
         .with_render_every_step(true)
         .with_step_dt(1.0 / 60.0)
         .wgpu()
-        .build_eframe(|cc| SolidDraftApp::new(cc, soliddraft_app::new_document(), Automation::default()));
+        .build_eframe(|cc| SolidDraftApp::new(cc, soliddraft_app::startup::new_document(), Automation::default()));
     h.run_steps(3);
 
     // A on the origin, and B over it at [3, 7, 30].
@@ -700,7 +700,7 @@ fn universal_joint_picked_in_the_window_drives_the_bent_shaft() {
         .with_render_every_step(true)
         .with_step_dt(1.0 / 60.0)
         .wgpu()
-        .build_eframe(|cc| SolidDraftApp::new(cc, soliddraft_app::new_document(), Automation::default()));
+        .build_eframe(|cc| SolidDraftApp::new(cc, soliddraft_app::startup::new_document(), Automation::default()));
     h.run_steps(3);
 
     // The base and both shafts on their hinges, the output's bearing locked at 40 degrees:

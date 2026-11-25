@@ -1,0 +1,6 @@
+[[areas]]
+name = "v3.configs"
+owner = "V3"
+crate = "soliddraft-model"
+paths = ["crates/soliddraft-model/src/configs/"]
+module = ["configs"]

@@ -1,0 +1,22 @@
+{
+  "id": "mate-bounded",
+  "file": "ci/scenarios/mate-bounded.json",
+  "acceptance": true,
+  "owners": [
+    "soliddraft-app",
+    "soliddraft-assembly",
+    "soliddraft-model",
+    "soliddraft-kernel-api",
+    "soliddraft-kernel-catallax"
+  ],
+  "kernel_parts": [
+    "boolean",
+    "extrude",
+    "measure",
+    "mesh"
+  ],
+  "catallax_revision": "76cdf97f3e85d22ea74868b77d849498ebdfcf1c",
+  "route": "MCP mate commands -> assembly transaction -> bounded residual certificate -> native support queries -> pinned Catallax kernel",
+  "supported_limits": "B5: earlier static mate families on rotated parts, curved Tangent, axis-axis Distance, signed Angle and Limit Angle including the 180-degree wrap; residual bounds 1e-9 mm and 1e-9 rad; undo/redo, reopen and named dragging/mechanical refusals.",
+  "evidence": "result.json, protocol.json, commands/NNNN/{command.json,kernel.json,viewport.png,view.svg}; bounded mate proofs in command summaries; work/rig.dwasm and its pinned parts"
+}

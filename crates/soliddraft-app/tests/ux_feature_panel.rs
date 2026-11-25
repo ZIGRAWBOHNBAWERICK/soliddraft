@@ -120,7 +120,7 @@ fn extrude_numbers_accept_keyboard_input() {
     let mut case = Case::new("feature-panel/extrude");
     let mut app = launch(ribbon::blank(), STANDARD);
     case.run(&mut app, |case, app| {
-        open(app, AppAction::StartExtrude);
+        open(app, AppAction::Profile(soliddraft_app::app::ProfileAction::Extrude));
         assert_eq!(editor_title(app), "Boss-Extrude");
         // With no sketch, the extrude asks for one; its sized rectangle needs none.
         let rectangle = app.get_by_label("Rectangle").rect();
@@ -164,31 +164,31 @@ fn cut_shell_draft_and_pattern_forms_expose_their_fields() {
     let (doc, _) = plate_with_circle();
     let mut app = launch(doc, STANDARD);
     case.run(&mut app, |case, app| {
-        open(app, AppAction::StartCut);
+        open(app, AppAction::Profile(soliddraft_app::app::ProfileAction::Cut));
         assert_eq!(editor_title(app), "Cut-Extrude");
         case.frame(app, "cut");
         ribbon::open_options(app);
         assert!(app.query_by_label("Flip direction").is_some(), "the cut keeps its flip");
         assert!(shows(app, "Through all"), "a cut starts through all");
-        open(app, AppAction::CancelEditor);
+        open(app, AppAction::Editor(soliddraft_app::app::EditorAction::Cancel));
 
-        open(app, AppAction::StartChamfer);
+        open(app, AppAction::Body(soliddraft_app::app::BodyAction::StartChamfer));
         case.frame(app, "chamfer");
         assert!(app.query_by_label("Distance value").is_some());
         assert_asks_for_edges(app, "chamfer");
-        open(app, AppAction::CancelEditor);
+        open(app, AppAction::Editor(soliddraft_app::app::EditorAction::Cancel));
 
-        open(app, AppAction::StartHole);
+        open(app, AppAction::Hole(soliddraft_app::app::HoleAction::Start));
         case.frame(app, "hole");
         assert_fields(app, "Hole", &["Diameter value"]);
-        open(app, AppAction::CancelEditor);
+        open(app, AppAction::Editor(soliddraft_app::app::EditorAction::Cancel));
 
-        open(app, AppAction::StartShell);
+        open(app, AppAction::Body(soliddraft_app::app::BodyAction::StartShell));
         case.frame(app, "shell");
         assert!(app.query_by_label("Wall thickness value").is_some());
-        open(app, AppAction::CancelEditor);
+        open(app, AppAction::Editor(soliddraft_app::app::EditorAction::Cancel));
 
-        open(app, AppAction::StartDraft);
+        open(app, AppAction::Body(soliddraft_app::app::BodyAction::StartDraft));
         case.frame(app, "draft");
         assert_fields(app, "Draft", &["Angle value"]);
         assert!(shows(app, "Click faces to draft"), "an empty draft asks for faces, not \"0 faces\"");
@@ -208,7 +208,7 @@ fn cut_shell_draft_and_pattern_forms_expose_their_fields() {
         // the reason in its message area, under the bar, and the tree gains no
         // failed row.
         let count = app.state().state.doc.features.len();
-        open(app, AppAction::CommitEditor);
+        open(app, AppAction::Editor(soliddraft_app::app::EditorAction::Commit));
         rebuilt(app);
         assert!(
             matches!(app.state().state.editor.as_ref().map(|e| &e.params), Some(EditorParams::Draft(_))),
@@ -227,15 +227,15 @@ fn cut_shell_draft_and_pattern_forms_expose_their_fields() {
             "a refusal is no error note"
         );
         case.frame(app, "draft-refused");
-        open(app, AppAction::CancelEditor);
+        open(app, AppAction::Editor(soliddraft_app::app::EditorAction::Cancel));
 
         // A side face drafts. A draft in the tree names its value Angle. It read
         // "Layout", the word for a pattern's copies.
-        open(app, AppAction::StartDraft);
+        open(app, AppAction::Body(soliddraft_app::app::BodyAction::StartDraft));
         ribbon::click_world(app, Vec3::new(30.0, 0.0, TOP / 2.0));
         settle(app);
         pointer_to_chrome(app);
-        open(app, AppAction::CommitEditor);
+        open(app, AppAction::Editor(soliddraft_app::app::EditorAction::Commit));
         rebuilt(app);
         let doc = &app.state().state.doc;
         let draft = doc.features.iter().find(|f| f.kind.noun() == "draft").expect("the draft is in the tree").id;
@@ -243,15 +243,15 @@ fn cut_shell_draft_and_pattern_forms_expose_their_fields() {
         assert!(details.iter().any(|(label, value)| label == "Angle" && value == "3°"), "{details:?}");
         assert!(!details.iter().any(|(label, _)| label == "Layout"), "{details:?}");
         if app.state().state.editor.is_some() {
-            open(app, AppAction::CancelEditor);
+            open(app, AppAction::Editor(soliddraft_app::app::EditorAction::Cancel));
         }
         app.state_mut().state.push(AppAction::Select(None));
         settle(app);
 
-        open(app, AppAction::StartPattern { circular: false });
+        open(app, AppAction::Body(soliddraft_app::app::BodyAction::StartPattern { circular: false }));
         case.frame(app, "pattern");
         assert_fields(app, "Linear Pattern", &["Spacing value", "Copies value"]);
-        open(app, AppAction::CancelEditor);
+        open(app, AppAction::Editor(soliddraft_app::app::EditorAction::Cancel));
     });
 }
 
@@ -272,7 +272,7 @@ fn draft_pull_follows_a_clicked_edge_axis_or_face() {
     let mut case = Case::new("feature-panel/draft-pull");
     let mut app = launch(ribbon::plate(), STANDARD);
     case.run(&mut app, |case, app| {
-        open(app, AppAction::StartDraft);
+        open(app, AppAction::Body(soliddraft_app::app::BodyAction::StartDraft));
         ribbon::click_world(app, Vec3::new(30.0, 0.0, TOP / 2.0));
         settle(app);
         pointer_to_chrome(app);
@@ -310,7 +310,7 @@ fn draft_pull_follows_a_clicked_edge_axis_or_face() {
         assert!(!form.picking_pull, "one face click ends the pick");
         assert_eq!(form.faces.len(), 1, "the top face is not drafted");
 
-        open(app, AppAction::CommitEditor);
+        open(app, AppAction::Editor(soliddraft_app::app::EditorAction::Commit));
         rebuilt(app);
         let doc = &app.state().state.doc;
         let draft = doc.features.iter().find(|f| f.kind.noun() == "draft").expect("the draft is in the tree");
@@ -328,7 +328,7 @@ fn a_refused_radius_keeps_the_fillet_form_open() {
     let mut case = Case::new("feature-panel/fillet-radius-refused");
     let mut app = launch(ribbon::plate(), STANDARD);
     case.run(&mut app, |case, app| {
-        open(app, AppAction::StartFillet);
+        open(app, AppAction::Body(soliddraft_app::app::BodyAction::StartFillet));
         let (long, short) = near_edges(app);
         ribbon::click_world(app, long);
         ribbon::click_world(app, short);
@@ -336,16 +336,16 @@ fn a_refused_radius_keeps_the_fillet_form_open() {
         ribbon::type_field(app, "Radius value", "5");
         settle(app);
         pointer_to_chrome(app);
-        open(app, AppAction::CommitEditor);
+        open(app, AppAction::Editor(soliddraft_app::app::EditorAction::Commit));
         rebuilt(app);
         let fillet = app.state().state.doc.features.last().expect("the fillet is in the tree").id;
         let before = ux_tools::facts(app);
 
-        open(app, AppAction::EditFeature(fillet));
+        open(app, AppAction::Editor(soliddraft_app::app::EditorAction::EditFeature(fillet)));
         ribbon::type_field(app, "Radius value", "35");
         settle(app);
         pointer_to_chrome(app);
-        open(app, AppAction::CommitEditor);
+        open(app, AppAction::Editor(soliddraft_app::app::EditorAction::Commit));
         rebuilt(app);
         assert!(
             matches!(app.state().state.editor.as_ref().map(|e| &e.params), Some(EditorParams::Fillet(_))),
@@ -354,7 +354,7 @@ fn a_refused_radius_keeps_the_fillet_form_open() {
         case.frame(app, "fillet-radius-refused");
         // The open form shows the part rolled back to before the fillet. Cancel brings the
         // fillet back as it was.
-        open(app, AppAction::CancelEditor);
+        open(app, AppAction::Editor(soliddraft_app::app::EditorAction::Cancel));
         rebuilt(app);
         let status = app.state().state.doc.feature(fillet).unwrap().status.clone();
         assert_eq!(status, soliddraft_app::document::FeatureStatus::Ok, "the fillet keeps its radius");
@@ -368,7 +368,7 @@ fn fillet_preview_tints_new_faces_and_names_the_radius() {
     let mut app = launch(ribbon::plate(), STANDARD);
     case.run(&mut app, |case, app| {
         let before = ux_tools::facts(app);
-        open(app, AppAction::StartFillet);
+        open(app, AppAction::Body(soliddraft_app::app::BodyAction::StartFillet));
         case.frame(app, "fillet-empty");
         assert!(app.query_by_label("Fillet preview").is_none(), "no preview without a pick");
 
@@ -435,7 +435,7 @@ fn a_long_pick_list_scrolls_and_keeps_the_radius_in_view() {
     let mut case = Case::new("feature-panel/fillet-faces");
     let mut app = launch(ribbon::plate(), STANDARD);
     case.run(&mut app, |case, app| {
-        open(app, AppAction::StartFillet);
+        open(app, AppAction::Body(soliddraft_app::app::BodyAction::StartFillet));
         // Two faces add every edge on their boundaries: seven, the shared one once.
         let (long, _) = near_edges(app);
         ribbon::click_world(app, Vec3::new(0.0, 0.0, TOP));
@@ -469,7 +469,7 @@ fn fillet_panel_in_dark_at_double_scale() {
     let look: Look = SMALL_DARK;
     let mut app = launch(ribbon::plate(), look);
     case.run(&mut app, |case, app| {
-        open(app, AppAction::StartFillet);
+        open(app, AppAction::Body(soliddraft_app::app::BodyAction::StartFillet));
         let (long, _) = near_edges(app);
         ribbon::click_world(app, long);
         settle(app);
@@ -505,7 +505,7 @@ fn the_fillet_form_asks_only_for_edges_and_radius() {
     let mut app = launch(ribbon::plate(), STANDARD);
     case.run(&mut app, |case, app| {
         let soon_before = nodes_reading(app, "Coming soon");
-        open(app, AppAction::StartFillet);
+        open(app, AppAction::Body(soliddraft_app::app::BodyAction::StartFillet));
         case.frame(app, "fillet-nothing-picked");
         assert_asks_for_edges(app, "fillet");
         let (long, _) = near_edges(app);
@@ -534,7 +534,7 @@ fn the_fillet_form_asks_only_for_edges_and_radius() {
         settle(app);
         let hud = app.get_by_label("Fillet preview").accesskit_node().value().unwrap_or_default();
         assert_eq!(hud, "R 5 mm · 1 edge");
-        open(app, AppAction::CommitEditor);
+        open(app, AppAction::Editor(soliddraft_app::app::EditorAction::Commit));
         rebuilt(app);
         let doc = &app.state().state.doc;
         match &doc.features.last().expect("a feature").kind {
@@ -659,7 +659,7 @@ fn extrude_previews_its_depth_arrow_and_takes_a_draft_option() {
         pointer_to_chrome(app);
         case.frame(app, "3-extrude-draft-preview");
 
-        open(app, AppAction::CommitEditor);
+        open(app, AppAction::Editor(soliddraft_app::app::EditorAction::Commit));
         rebuilt(app);
         assert!(app.state().state.editor.is_none(), "{:?}", app.state().state.note.as_ref().map(|n| &n.text));
         let doc = &app.state().state.doc;
@@ -692,14 +692,14 @@ fn pattern_mirror_and_draft_preview_before_ok() {
     let mut app = launch(doc, STANDARD);
     case.run(&mut app, |case, app| {
         // A boss to copy: the circle on the plate, extruded.
-        open(app, AppAction::StartExtrude);
-        open(app, AppAction::CommitEditor);
+        open(app, AppAction::Profile(soliddraft_app::app::ProfileAction::Extrude));
+        open(app, AppAction::Editor(soliddraft_app::app::EditorAction::Commit));
         rebuilt(app);
         let boss = app.state().state.doc.features.last().unwrap().id;
         app.state_mut().state.push(AppAction::Select(Some(Selection::Feature(boss))));
         settle(app);
 
-        open(app, AppAction::StartPattern { circular: false });
+        open(app, AppAction::Body(soliddraft_app::app::BodyAction::StartPattern { circular: false }));
         let preview = app.state().state.editor.as_ref().expect("the Pattern form").preview.clone();
         assert!(
             preview.result.is_some(),
@@ -708,11 +708,11 @@ fn pattern_mirror_and_draft_preview_before_ok() {
         );
         assert!(!preview.guides.labels.is_empty(), "the copies are numbered");
         case.frame(app, "linear-pattern");
-        open(app, AppAction::CancelEditor);
+        open(app, AppAction::Editor(soliddraft_app::app::EditorAction::Cancel));
 
         app.state_mut().state.push(AppAction::Select(Some(Selection::Feature(boss))));
         settle(app);
-        open(app, AppAction::StartMirror);
+        open(app, AppAction::Body(soliddraft_app::app::BodyAction::StartMirror));
         let preview = app.state().state.editor.as_ref().expect("the Mirror form").preview.clone();
         assert!(
             preview.result.is_some(),
@@ -720,10 +720,10 @@ fn pattern_mirror_and_draft_preview_before_ok() {
             app.state().state.editor.as_ref().unwrap().error
         );
         case.frame(app, "mirror");
-        open(app, AppAction::CancelEditor);
+        open(app, AppAction::Editor(soliddraft_app::app::EditorAction::Cancel));
 
         app.state_mut().state.push(AppAction::Select(None));
-        open(app, AppAction::StartDraft);
+        open(app, AppAction::Body(soliddraft_app::app::BodyAction::StartDraft));
         ribbon::click_world(app, Vec3::new(30.0, 0.0, TOP / 2.0));
         settle(app);
         pointer_to_chrome(app);
@@ -732,15 +732,15 @@ fn pattern_mirror_and_draft_preview_before_ok() {
         assert_eq!(preview.guides.outline.len(), 4, "the neutral plane is outlined");
         assert!(preview.guides.arrow.as_ref().is_some_and(|a| !a.drags), "the pull is an arrow");
         case.frame(app, "draft");
-        open(app, AppAction::CancelEditor);
+        open(app, AppAction::Editor(soliddraft_app::app::EditorAction::Cancel));
 
         // A hole before its face: a ghost follows the pointer over a planar face.
-        open(app, AppAction::StartHole);
+        open(app, AppAction::Hole(soliddraft_app::app::HoleAction::Start));
         let state = &app.state().state;
         let top = state.viewport.camera.project(Vec3::new(-20.0, -12.0, TOP), state.viewport.rect).unwrap();
         ribbon::render_steps::await_pick(app, top);
         app.run_steps(3);
         case.frame(app, "hole-ghost");
-        open(app, AppAction::CancelEditor);
+        open(app, AppAction::Editor(soliddraft_app::app::EditorAction::Cancel));
     });
 }

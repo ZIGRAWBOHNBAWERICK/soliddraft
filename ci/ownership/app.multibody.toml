@@ -1,0 +1,6 @@
+[[areas]]
+name = "app.multibody"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/multibody.rs"]
+module = ["multibody"]

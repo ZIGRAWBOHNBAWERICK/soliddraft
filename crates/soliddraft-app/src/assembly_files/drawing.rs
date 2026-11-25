@@ -85,7 +85,7 @@ pub fn exact_parts(doc: &mut AssemblyDocument) -> Result<ExactParts, String> {
     let path = doc.path().ok_or("save the assembly first: its drawing refers to its file")?;
     let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     let reference = DocRef::new(doc.id(), DocKind::Assembly, name, doc.revision());
-    let source = KernelSource::new(crate::kernel());
+    let source = KernelSource::new(crate::startup::kernel());
     // One BOM row per part document in the configuration it shows, by the order the tree
     // first places it. A placement that names no configuration shows the one its file was
     // saved in, so it shares a row with a placement that names that one. The row is named

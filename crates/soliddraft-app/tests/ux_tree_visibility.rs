@@ -160,7 +160,7 @@ fn until(app: &mut App, what: &str, done: impl Fn(&App) -> bool) {
 /// B20: the centred 60 x 40 mm rectangle on Top, extruded up 20 mm.
 fn b20() -> Document {
     let b = &manifest()["fixtures"]["B20"];
-    let mut doc = Document::new("B20", soliddraft_app::kernel());
+    let mut doc = Document::new("B20", soliddraft_app::startup::kernel());
     doc.apply(Command::AddExtrude {
         params: ExtrudeParams {
             profile: ProfileKind::Rectangle { width: f(&b["width_mm"]), height: f(&b["height_mm"]) },
@@ -1341,7 +1341,7 @@ fn view_choices_survive_undo_and_native_reopen() {
     drop(app);
 
     let (id, semantic, geometry_hash, solid) = saved.expect("the first part was saved");
-    let mut app = launch(&mut case, soliddraft_app::new_document(), "standard");
+    let mut app = launch(&mut case, soliddraft_app::startup::new_document(), "standard");
     case.run(&mut app, |case, app| {
         let name = file.file_name().unwrap().to_string_lossy().into_owned();
         menu(case, app, &["File", "Open recent", &name]);
@@ -1444,7 +1444,7 @@ fn frame_fixture_any(case: &mut Case, app: &mut App) {
 #[test]
 fn view_choices_serialize_outside_the_part_truth() {
     let mut case = Case::new("serializer");
-    let kernel = soliddraft_app::kernel();
+    let kernel = soliddraft_app::startup::kernel();
     let mut doc = soliddraft_model::Document::from_bytes(&b20().model().to_bytes().unwrap(), kernel.clone()).unwrap();
     case.note("B20 written and read back without view choices");
     let plain = doc.to_bytes().unwrap();

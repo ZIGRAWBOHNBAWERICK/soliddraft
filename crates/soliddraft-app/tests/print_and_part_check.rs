@@ -12,7 +12,7 @@ use soliddraft_exchange::{Format, Report};
 use std::time::{Duration, Instant};
 
 fn counted_plate() -> soliddraft_app::document::Document {
-    let kernel = std::sync::Arc::new(soliddraft_kernel_api::counting::Counting::new(soliddraft_app::kernel()));
+    let kernel = std::sync::Arc::new(soliddraft_kernel_api::counting::Counting::new(soliddraft_app::startup::kernel()));
     let mut doc = soliddraft_app::document::Document::new("Checked part", kernel);
     doc.apply(Command::AddExtrude { params: Default::default(), via_assistant: false }).unwrap();
     doc

@@ -580,7 +580,7 @@ proptest! {
 /// A floating block and a second one placed on it, with `O` and `Z`, saved.
 fn mated_state(dir: &Path) -> AppState {
     std::fs::create_dir_all(dir).unwrap();
-    let mut state = AppState::new(soliddraft_app::new_document());
+    let mut state = AppState::new(soliddraft_app::startup::new_document());
     let caller = Caller::Mcp { client: "fuzz".into() };
     let mut run = |state: &mut AppState, tool: &str, input: Value| {
         let out = call_checked(&mut AppTools { state }, tool, input, &caller);

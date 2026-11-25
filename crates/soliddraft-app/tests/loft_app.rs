@@ -18,7 +18,7 @@ fn call(doc: &mut Document, name: &str, input: Value) -> Value {
 }
 
 fn profiles() -> Document {
-    let mut doc = Document::new("Loft", soliddraft_app::kernel());
+    let mut doc = Document::new("Loft", soliddraft_app::startup::kernel());
     for (size, z) in [(2.0, 0), (4.0, 3), (2.0, 6)] {
         rectangle(&mut doc, z, 0.0, size, size);
     }
@@ -47,7 +47,7 @@ fn assert_loft(doc: &Document, shape: LoftShape, profile_count: usize, expected_
 
 #[test]
 fn loft_edit_cache_undo_reopen_and_refusal_preserve_the_exact_part() {
-    let mut doc = Document::new("Loft", soliddraft_app::kernel());
+    let mut doc = Document::new("Loft", soliddraft_app::startup::kernel());
     // The first two rectangles form a prism. Widening the last at one edge curves only one wall.
     rectangle(&mut doc, 0, 1.0, 2.0, 2.0);
     rectangle(&mut doc, 7, 1.0, 2.0, 2.0);
@@ -96,7 +96,7 @@ fn loft_edit_cache_undo_reopen_and_refusal_preserve_the_exact_part() {
     assert_eq!(body, doc.display_body());
     let path = std::env::temp_dir().join(format!("loft-{}.dwprt", soliddraft_document::DocumentId::new()));
     call(&mut doc, "save", json!({"path":path}));
-    let mut reopened = Document::new("Reopened", soliddraft_app::kernel());
+    let mut reopened = Document::new("Reopened", soliddraft_app::startup::kernel());
     call(&mut reopened, "open", json!({"path":path}));
     assert_loft(&reopened, LoftShape::Smooth, 3, smooth_volume);
     assert_eq!(doc.features[3].kind, reopened.features[3].kind);
@@ -315,7 +315,7 @@ fn three_section_smooth_loft_previews_and_commits_without_changing_the_allowance
     use soliddraft_app::state::EditorParams;
 
     let mut case = ux_tools::Case::new("loft-smooth-three-section");
-    let mut doc = Document::new("Loft", soliddraft_app::kernel());
+    let mut doc = Document::new("Loft", soliddraft_app::startup::kernel());
     // Widen only one edge of the middle rectangle to limit spline face integration.
     rectangle(&mut doc, 0, 1.0, 2.0, 2.0);
     rectangle(&mut doc, 3, 1.125, 2.25, 2.0);

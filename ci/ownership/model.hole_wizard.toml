@@ -1,0 +1,6 @@
+[[areas]]
+name = "model.hole_wizard"
+owner = "core"
+crate = "soliddraft-model"
+paths = ["crates/soliddraft-model/src/hole_wizard.rs"]
+module = ["hole_wizard"]

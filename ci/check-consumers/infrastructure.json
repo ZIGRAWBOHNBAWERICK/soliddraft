@@ -1,0 +1,160 @@
+{
+  "files": {
+    "ci/install-rust-toolchain.py": "all",
+    "ci/install-tool.py": "all",
+    "ci/balance.py": [
+      "lint",
+      "test-linux",
+      "test-macos",
+      "application-loop"
+    ],
+    "ci/compact-archive.py": [
+      "lint",
+      "test-linux",
+      "test-macos"
+    ],
+    "ci/test_compact_archive.py": [
+      "lint"
+    ],
+    "ci/test-durations.json": [
+      "test-linux",
+      "test-macos"
+    ],
+    "ci/test-durations-macos.json": [
+      "test-macos"
+    ],
+    "ci/scenario-durations.json": [
+      "application-loop"
+    ],
+    "ci/select-runner.py": "all",
+    "ci/test_ci_speed.py": [
+      "lint"
+    ],
+    "ci/chrome.mjs": [
+      "web"
+    ],
+    "ci/canvas-browser.mjs": [
+      "web"
+    ],
+    "ci/cargo-cache.sh": [],
+    "ci/bootstrap": "all",
+    "ci/hooks/pre-push": [
+      "lint"
+    ],
+    "ci/run-selected.py": [
+      "lint",
+      "test-linux",
+      "test-macos",
+      "application-loop"
+    ],
+    "ci/test_selected_work.py": [
+      "lint"
+    ],
+    "ci/run": [
+      "lint",
+      "test-linux",
+      "test-macos"
+    ],
+    "ci/tools": "all",
+    "ci/nextest.toml": [
+      "lint",
+      "test-linux",
+      "test-macos"
+    ],
+    "ci/check-gate.py": "all",
+    "ci/check-ownership.py": [
+      "lint"
+    ],
+    "ci/check-registry.json": "all",
+    "ci/check-same-file.py": [
+      "application-loop"
+    ],
+    "ci/check-unchanged-tests.py": [],
+    "ci/compare-scenario-bundles.py": [],
+    "ci/configuration-grid-fixtures.py": [
+      "lint",
+      "application-loop"
+    ],
+    "ci/edit_speed.py": [
+      "lint"
+    ],
+    "ci/fake_mcp_server.py": [
+      "lint",
+      "application-loop"
+    ],
+    "ci/gate-cases.json": [
+      "lint"
+    ],
+    "ci/kernel-parts.json": [
+      "lint"
+    ],
+    "ci/known-over-budget.json": [
+      "lint",
+      "application-loop"
+    ],
+    "ci/public-items.py": [],
+    "ci/refactor_baseline.py": [],
+    "ci/run-scenarios.py": [
+      "lint",
+      "application-loop"
+    ],
+    "ci/scenarios/p3-rounded-boss.md": [],
+    "ci/scenarios/p5-flanged-housing.md": [],
+    "ci/select-checks.py": "all",
+    "ci/test_checks.py": [
+      "lint"
+    ],
+    "ci/test_edit_speed.py": [
+      "lint"
+    ],
+    "ci/test_run.py": [
+      "lint"
+    ],
+    "ci/test_icons.py": [
+      "lint"
+    ],
+    "ci/test_install_rust_toolchain.py": [
+      "lint"
+    ],
+    "ci/test_ownership.py": [
+      "lint"
+    ],
+    "ci/test_scenario_bundles.py": [
+      "lint"
+    ],
+    "ci/test_scenarios.py": [
+      "lint",
+      "application-loop"
+    ],
+    "ci/test_workflows.py": [
+      "lint"
+    ],
+    "ci/merge-shards.py": [
+      "lint",
+      "test-linux"
+    ],
+    "ci/test_merge_shards.py": [
+      "lint"
+    ],
+    "ci/blade-disk.py": [
+      "lint",
+      "kernel",
+      "test-linux",
+      "step-opencascade",
+      "msrv"
+    ],
+    "ci/test_blade_disk.py": [
+      "lint"
+    ],
+    "ci/registries.py": "all",
+    "ci/cargo-lock-merge.py": [
+      "lint"
+    ],
+    "ci/test_cargo_lock_merge.py": [
+      "lint"
+    ],
+    "ci/run-browser-checks.py": [
+      "web"
+    ]
+  }
+}

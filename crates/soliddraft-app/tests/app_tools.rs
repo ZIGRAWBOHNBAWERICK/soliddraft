@@ -960,7 +960,11 @@ fn editing_and_inspection_measure_only_on_request_and_keep_body_results_separate
 }
 
 fn offset_session() -> Session {
-    Session { state: AppState::new(soliddraft_app::new_document()), ran: BTreeSet::new(), dir: std::env::temp_dir() }
+    Session {
+        state: AppState::new(soliddraft_app::startup::new_document()),
+        ran: BTreeSet::new(),
+        dir: std::env::temp_dir(),
+    }
 }
 
 fn assembly_with_origin_block(dir: PathBuf) -> (Session, Value, u64) {

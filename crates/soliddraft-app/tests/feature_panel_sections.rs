@@ -108,7 +108,7 @@ fn all_ok(doc: &Document) {
 fn reopen(case: &mut Case, app: &App) -> App {
     let bytes = app.state().state.doc.model().to_bytes().unwrap();
     std::fs::write(case.dir.join("part.dwprt"), &bytes).unwrap();
-    let model = soliddraft_model::Document::from_bytes(&bytes, soliddraft_app::kernel()).unwrap();
+    let model = soliddraft_model::Document::from_bytes(&bytes, soliddraft_app::startup::kernel()).unwrap();
     launch(Document::from_model(model), STANDARD)
 }
 
@@ -149,7 +149,7 @@ fn sections_fold_and_ticked_sections_persist() {
     let (doc, _) = plate_with_circle(on_top(20.0));
     let mut app = launch(doc, STANDARD);
     case.run(&mut app, |case, app| {
-        open(app, AppAction::StartExtrude);
+        open(app, AppAction::Profile(soliddraft_app::app::ProfileAction::Extrude));
         assert!(shows(app, "Feature panel: Boss-Extrude"), "the side area is the extrusion's panel");
         assert!(shows(app, "OK") && shows(app, "Cancel") && shows(app, "Preview"), "OK, Cancel and Preview on top");
         // The common choices are open, the advanced ones folded.
@@ -182,7 +182,7 @@ fn sections_fold_and_ticked_sections_persist() {
         let p = extrusion(app);
         assert_eq!(p.choices.direction2.as_ref().map(|d| d.depth), Some(4.0));
         // Editing it again: Direction 2 is still ticked and open, with its depth.
-        open(app, AppAction::EditFeature(id));
+        open(app, AppAction::Editor(soliddraft_app::app::EditorAction::EditFeature(id)));
         assert!(ticked(app, "Direction 2") && shows(app, "Fold Direction 2"), "a ticked section stays ticked");
         assert!(shows(app, "Depth 2 value"));
         // A section the user opened stays open for this kind of feature.
@@ -193,13 +193,13 @@ fn sections_fold_and_ticked_sections_persist() {
         settle(app);
         assert!(app.state().state.editor.is_none(), "Escape cancels");
         assert_eq!(app.state().state.doc.model().part_json(), before, "a cancelled edit changes nothing");
-        open(app, AppAction::EditFeature(id));
+        open(app, AppAction::Editor(soliddraft_app::app::EditorAction::EditFeature(id)));
         assert!(shows(app, "Fold Selected contours"), "the opened section is still open");
         app.key_press(Key::Escape);
         settle(app);
         // Saved and reopened, the section is still ticked.
         let mut again = reopen(case, app);
-        open(&mut again, AppAction::EditFeature(id));
+        open(&mut again, AppAction::Editor(soliddraft_app::app::EditorAction::EditFeature(id)));
         assert!(ticked(&again, "Direction 2"), "a ticked section survives the file");
         case.frame(&mut again, "reopened");
     });
@@ -232,7 +232,7 @@ fn from_an_offset_face_starts_inside_the_plate() {
     let (doc, _) = plate_with_circle(top_face);
     let mut app = launch(doc, STANDARD);
     case.run(&mut app, |case, app| {
-        open(app, AppAction::StartExtrude);
+        open(app, AppAction::Profile(soliddraft_app::app::ProfileAction::Extrude));
         click(app, "Unfold From");
         choose(app, "Extrude from", "Offset");
         ribbon::type_field(app, "Start offset value", "4");
@@ -251,7 +251,7 @@ fn flip_turns_the_extrusion_down_through_the_plate() {
     let (doc, _) = plate_with_circle(on_top(20.0));
     let mut app = launch(doc, STANDARD);
     case.run(&mut app, |case, app| {
-        open(app, AppAction::StartExtrude);
+        open(app, AppAction::Profile(soliddraft_app::app::ProfileAction::Extrude));
         ribbon::type_field(app, "Depth value", "30");
         click(app, "Flip direction");
         apply(app);
@@ -267,7 +267,7 @@ fn merge_off_makes_a_second_body() {
     let (doc, _) = plate_with_circle(on_top(20.0));
     let mut app = launch(doc, STANDARD);
     case.run(&mut app, |case, app| {
-        open(app, AppAction::StartExtrude);
+        open(app, AppAction::Profile(soliddraft_app::app::ProfileAction::Extrude));
         assert!(ticked(app, "Merge result"), "an extrusion on a part merges by default");
         click(app, "Merge result");
         apply(app);
@@ -277,12 +277,12 @@ fn merge_off_makes_a_second_body() {
         close(v[1], 48000.0, "the plate alone");
         // Edited back on, it joins the plate; off again, it is separate again.
         let id = app.state().state.doc.features.last().unwrap().id;
-        open(app, AppAction::EditFeature(id));
+        open(app, AppAction::Editor(soliddraft_app::app::EditorAction::EditFeature(id)));
         assert!(!ticked(app, "Merge result"), "the panel reads Merge result back");
         click(app, "Merge result");
         apply(app);
         assert_eq!(volumes(&app.state().state.doc).len(), 1, "merged into the plate");
-        open(app, AppAction::EditFeature(id));
+        open(app, AppAction::Editor(soliddraft_app::app::EditorAction::EditFeature(id)));
         click(app, "Merge result");
         apply(app);
         assert_eq!(volumes(&app.state().state.doc).len(), 2);
@@ -296,7 +296,7 @@ fn direction_2_goes_both_ways() {
     let (doc, _) = plate_with_circle(on_top(30.0));
     let mut app = launch(doc, STANDARD);
     case.run(&mut app, |case, app| {
-        open(app, AppAction::StartExtrude);
+        open(app, AppAction::Profile(soliddraft_app::app::ProfileAction::Extrude));
         click(app, "Direction 2");
         ribbon::type_field(app, "Depth 2 value", "10");
         apply(app);
@@ -313,7 +313,7 @@ fn a_thin_feature_makes_a_tube() {
     let (doc, _) = plate_with_circle(on_top(20.0));
     let mut app = launch(doc, STANDARD);
     case.run(&mut app, |case, app| {
-        open(app, AppAction::StartExtrude);
+        open(app, AppAction::Profile(soliddraft_app::app::ProfileAction::Extrude));
         click(app, "Thin feature");
         assert!(shows(app, "Fold Thin feature"), "ticking opens the section");
         ribbon::type_field(app, "Wall thickness value", "1");
@@ -335,7 +335,7 @@ fn the_details_sheet_steps_aside_for_the_panel() {
     case.run(&mut app, |case, app| {
         click(app, "Details");
         assert!(shows(app, "Close options"), "Details opens the sheet");
-        open(app, AppAction::StartExtrude);
+        open(app, AppAction::Profile(soliddraft_app::app::ProfileAction::Extrude));
         assert!(shows(app, "Feature panel: Boss-Extrude"));
         assert!(!shows(app, "Close options") && !shows(app, "Details"), "the panel shows the details while editing");
         case.frame(app, "editing");

@@ -1,0 +1,18 @@
+{
+  "id": "chamfer",
+  "file": "ci/scenarios/chamfer.json",
+  "acceptance": false,
+  "owners": [
+    "soliddraft-app",
+    "soliddraft-model",
+    "soliddraft-kernel-catallax"
+  ],
+  "kernel_parts": [
+    "boolean",
+    "chamfer",
+    "extrude",
+    "measure",
+    "mesh",
+    "step"
+  ]
+}

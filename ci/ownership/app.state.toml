@@ -1,0 +1,6 @@
+[[areas]]
+name = "app.state"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/state.rs"]
+module = ["state"]

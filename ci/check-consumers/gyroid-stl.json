@@ -1,0 +1,7 @@
+{
+  "files": {
+    "ci/check-gyroid-stl.py": [
+      "application-loop"
+    ]
+  }
+}

@@ -9,7 +9,7 @@ use soliddraft_exchange::Format;
 use soliddraft_model::ShellOpenings;
 
 fn blank() -> AppState {
-    let mut doc = Document::new("tray", soliddraft_app::kernel());
+    let mut doc = Document::new("tray", soliddraft_app::startup::kernel());
     doc.apply(Command::AddExtrude {
         params: ExtrudeParams {
             profile: ProfileKind::Rectangle { width: 40.0, height: 30.0 },

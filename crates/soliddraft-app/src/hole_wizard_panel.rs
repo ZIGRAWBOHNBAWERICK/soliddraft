@@ -61,7 +61,7 @@ pub fn show_contents(ui: &mut egui::Ui, state: &mut AppState) {
             let cancel_btn = ui.button("✕").on_hover_text("Cancel Hole Wizard");
             cancel_btn.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Cancel Hole Wizard"));
             if cancel_btn.clicked() {
-                actions.push(AppAction::CancelEditor);
+                actions.push(AppAction::Editor(crate::app::EditorAction::Cancel));
             }
             let apply_btn = ui
                 .add(
@@ -74,7 +74,7 @@ pub fn show_contents(ui: &mut egui::Ui, state: &mut AppState) {
             #[cfg(target_arch = "wasm32")]
             crate::web::show_control("Apply Hole Wizard", apply_btn.rect);
             if apply_btn.clicked() {
-                actions.push(AppAction::CommitEditor);
+                actions.push(AppAction::Editor(crate::app::EditorAction::Commit));
             }
         });
     });
@@ -94,7 +94,7 @@ pub fn show_contents(ui: &mut egui::Ui, state: &mut AppState) {
             params.wizard_tab = HoleWizardTab::Type;
             params.picking_target = None;
             if is_inline_sketch {
-                actions.push(AppAction::CloseHolePositionSketch);
+                actions.push(AppAction::Hole(crate::app::HoleAction::ClosePositionSketch));
             }
         }
         let pos_btn = ui.selectable_label(pos_selected, format!("Positions ({point_count})"));
@@ -1122,9 +1122,9 @@ fn show_positions_tab(
             if btn.clicked() {
                 params.ensure_position_sketch();
                 if is_inline_sketch {
-                    actions.push(AppAction::CloseHolePositionSketch);
+                    actions.push(AppAction::Hole(crate::app::HoleAction::ClosePositionSketch));
                 } else {
-                    actions.push(AppAction::OpenHolePositionSketch);
+                    actions.push(AppAction::Hole(crate::app::HoleAction::OpenPositionSketch));
                 }
             }
 
@@ -1176,7 +1176,7 @@ fn show_positions_tab(
                 match params.apply_linear_point_pattern() {
                     Ok(()) => {
                         changed = true;
-                        actions.push(AppAction::SyncHolePositionSketch);
+                        actions.push(AppAction::Hole(crate::app::HoleAction::SyncPositionSketch));
                     }
                     Err(e) => *note = Some((e, NoteKind::Error)),
                 }
@@ -1204,7 +1204,7 @@ fn show_positions_tab(
                 match params.apply_circular_point_pattern() {
                     Ok(()) => {
                         changed = true;
-                        actions.push(AppAction::SyncHolePositionSketch);
+                        actions.push(AppAction::Hole(crate::app::HoleAction::SyncPositionSketch));
                     }
                     Err(e) => *note = Some((e, NoteKind::Error)),
                 }
@@ -1240,12 +1240,12 @@ fn show_positions_tab(
         for (i, p) in edits {
             params.set_position_point(i, p);
             changed = true;
-            actions.push(AppAction::SyncHolePositionSketch);
+            actions.push(AppAction::Hole(crate::app::HoleAction::SyncPositionSketch));
         }
         if let Some(i) = remove {
             params.remove_position_point(i);
             changed = true;
-            actions.push(AppAction::SyncHolePositionSketch);
+            actions.push(AppAction::Hole(crate::app::HoleAction::SyncPositionSketch));
         }
         let add_btn = ui.button("+ Add hole point");
         add_btn.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Add hole point"));
@@ -1253,7 +1253,7 @@ fn show_positions_tab(
             let next = params.points.last().copied().unwrap_or_default();
             params.add_position_point(crate::sketch::P2::new(next.u + 15.0, next.v));
             changed = true;
-            actions.push(AppAction::SyncHolePositionSketch);
+            actions.push(AppAction::Hole(crate::app::HoleAction::SyncPositionSketch));
         }
         if !params.points.is_empty() {
             ui.label(RichText::new(format!("Hole Ø{} mm", fmt_mm(params.diameter))).size(10.5).color(theme::muted()));

@@ -1,0 +1,23 @@
+{
+  "id": "draft-through-holes",
+  "file": "ci/scenarios/draft-through-holes.json",
+  "acceptance": true,
+  "owners": [
+    "soliddraft-app",
+    "soliddraft-model",
+    "soliddraft-kernel-catallax"
+  ],
+  "kernel_parts": [
+    "boolean",
+    "draft",
+    "extrude",
+    "hole",
+    "measure",
+    "mesh",
+    "step"
+  ],
+  "catallax_revision": "76cdf97f3e85d22ea74868b77d849498ebdfcf1c",
+  "route": "MCP sketch, extrude, two holes, draft, track and edit_draft -> real document rebuild -> pinned Catallax preserved-bore draft -> checked STEP on one request allowance",
+  "supported_limits": "A 40 x 30 x 20 mm block with through holes of diameter 6 at x=-8 and 8 at x=8, both made before Draft1; two planar walls drafted 3 and 5 degrees about z=0; 20M per request, export included; volume and area tolerance 0.005, centroid and box 0.001 mm; touching or crossing bores stay refused in Catallax; partial M7 evidence",
+  "evidence": "result.json, protocol.json, commands/NNNN/{command.json,kernel.json,measurement.json,viewport.png,view.svg}; 3-degree draft commands/0005/{part.step,step-report.json,raw-step.stdout,step-oracle.json,step-oracle.stdout}; tracked wall and side references through edit, undo, redo, reopen and refusal; draft-through-holes.dwprt and commands-1/0001/{part.step,step-report.json,raw-step.stdout,step-oracle.json,step-oracle.stdout}"
+}

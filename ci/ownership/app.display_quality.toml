@@ -1,0 +1,6 @@
+[[areas]]
+name = "app.display_quality"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/display_quality.rs"]
+module = ["display_quality"]

@@ -1,0 +1,23 @@
+{
+  "id": "parallel-cylinder-fillet",
+  "file": "ci/scenarios/parallel-cylinder-fillet.json",
+  "acceptance": true,
+  "owners": [
+    "soliddraft-app",
+    "soliddraft-model",
+    "soliddraft-kernel-catallax"
+  ],
+  "kernel_parts": [
+    "boolean",
+    "extrude",
+    "fillet",
+    "hole",
+    "measure",
+    "mesh",
+    "step"
+  ],
+  "catallax_revision": "76cdf97f3e85d22ea74868b77d849498ebdfcf1c",
+  "route": "MCP document commands -> Catallax adapter -> pinned kernel",
+  "supported_limits": "One straight generator between overlapping through bores, radius 0.5 edited to 0.25 mm.",
+  "evidence": "Build, edit, undo, redo, save, fresh-process reopen and exports; result.json, command.json, viewport.png, view.svg and exported files."
+}

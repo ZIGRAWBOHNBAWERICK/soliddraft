@@ -115,7 +115,7 @@ fn typed_feature_edits_commit_once_and_refused_sizes_survive_resizing() {
     suite(&mut app);
     case.run(&mut app, |case, app| {
         let feature = app.state().state.doc.features[0].id;
-        app.state_mut().state.push(AppAction::EditFeature(feature));
+        app.state_mut().state.push(AppAction::Editor(soliddraft_app::app::EditorAction::EditFeature(feature)));
         settle(app);
         let before = ribbon::fingerprint(app);
         ribbon::type_field(app, "Depth value", "24");

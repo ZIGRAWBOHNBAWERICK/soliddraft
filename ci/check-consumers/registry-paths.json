@@ -1,0 +1,18 @@
+{
+  "patterns": {
+    "ci/scenarios/[^/]+\\.json": [
+      "lint",
+      "application-loop"
+    ],
+    "ci/check-consumers/[^/]+\\.json": "all",
+    "ci/scenario-inventory/(?:native-ui/)?[^/]+\\.json": [
+      "lint"
+    ],
+    "ci/ownership/[^/]+\\.toml": [
+      "lint"
+    ],
+    "ci/browser-checks/[^/]+\\.json": [
+      "web"
+    ]
+  }
+}

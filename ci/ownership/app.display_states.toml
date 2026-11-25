@@ -1,0 +1,6 @@
+[[areas]]
+name = "app.display_states"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/display_states.rs"]
+module = ["display_states"]

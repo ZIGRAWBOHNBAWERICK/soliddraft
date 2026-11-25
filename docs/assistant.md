@@ -1,6 +1,6 @@
 # The assistant
 
-Phase 3 connects the assistant to a model, and serves the same commands to outside agents over MCP. The assistant changes the part only through the command layer the ribbon uses, so everything it does is an ordinary feature in the tree that the user can undo.
+The assistant connects SolidDraft to a model, and SolidDraft serves the same commands to outside agents over MCP. The assistant changes the part only through the command layer the ribbon uses, so everything it does is an ordinary feature in the tree that the user can undo.
 
 ## Crates
 
@@ -143,6 +143,6 @@ gives the full digest when there is exactly one, or `null` otherwise.
 
 ## Tests
 
-The assistant tests run without a network or a key. `MockProvider` encodes scripted replies as real event streams, with empty thinking blocks and signatures as `claude-opus-5-5` sends them, and reads them back through the same parser as the real provider. The phase 3 exit test, `crates/soliddraft-app/tests/assistant_exit_test.rs`, builds the sample bracket without its fillet, hole pattern and slot, then runs the three example exchanges from text: "Add a fillet to the inside corner, R8", "Add four 9 mm holes on a 90 x 44 pattern" and "Cut a 40 x 12 slot through the flange". Each proposal is previewed, applied (the test checks the volume each one adds or removes, and the command log) and undone. An MCP client then makes the same three changes over HTTP and undoes them. `crates/soliddraft-cli/tests/mcp_stdio.rs` drives the command line over stdio, and the interface test in `exit_test.rs` clicks a proposal card through Preview, Apply and Undo.
+The assistant tests run without a network or a key. `MockProvider` encodes scripted replies as real event streams, with empty thinking blocks and signatures as `claude-opus-5-5` sends them, and reads them back through the same parser as the real provider. The assistant exit test, `crates/soliddraft-app/tests/assistant_exit_test.rs`, builds the sample bracket without its fillet, hole pattern and slot, then runs the three example exchanges from text: "Add a fillet to the inside corner, R8", "Add four 9 mm holes on a 90 x 44 pattern" and "Cut a 40 x 12 slot through the flange". Each proposal is previewed, applied (the test checks the volume each one adds or removes, and the command log) and undone. An MCP client then makes the same three changes over HTTP and undoes them. `crates/soliddraft-cli/tests/mcp_stdio.rs` drives the command line over stdio, and the interface test in `exit_test.rs` clicks a proposal card through Preview, Apply and Undo.
 
 The exit test also runs against the real model when a key is available, on the provider the app would choose, and prints that it skipped that part otherwise. `SOLIDDRAFT_RECORD_DIR=dir` saves every real stream to `dir` as a new fixture.

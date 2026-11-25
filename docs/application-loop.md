@@ -47,8 +47,7 @@ and checks that a refused zero-depth edit preserves the displayed result.
 `straight-sweep.json` checks a polygon translated by one straight path segment.
 It edits the endpoint displacement, undoes and redoes, refuses zero-length and
 in-plane paths without changing the body, saves, reopens in a fresh process and
-exports checked STEP. The profile stays on its authored offset plane. This scenario
-belongs to the feature batch after 0.2.0.
+exports checked STEP. The profile stays on its authored offset plane.
 
 `line-arc-sweep.json` turns a profile along a line, a quarter arc and a line. It
 edits the run, undoes and redoes, refuses an oblique join, a zero-length line and a

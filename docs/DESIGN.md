@@ -1,14 +1,11 @@
 # SolidDraft interface design
 
-The release interface is Edit Suite, approved in the L00 merged prototype on
-13 November 2026. It combines B3's frame, sketch mode and tool palette with A2's
+The interface is Edit Suite, approved as a merged prototype on 13 November 2026. It combines B3's frame, sketch mode and tool palette with A2's
 right-click ring, navigation bar and scene gallery. This guide records that target.
 It does not claim that every panel below has shipped.
 
-The internal `frame_layout` setting selects `classic` or `edit_suite`. Classic
-remains the default during the rebuild. It retains its ribbon, docked tree and
-Properties panel, light and dark Studio palettes, and saved panel layout. New frame
-work belongs behind `edit_suite` until the release switches the default.
+Edit Suite is the only frame. Settings saved with the old `classic` `frame_layout`
+open in Edit Suite.
 
 ## Frame
 
@@ -81,11 +78,10 @@ row and the rollback bar. Values holds named inputs and expressions.
 
 `crates/soliddraft-app/src/theme.rs` is the source of shared colours, bundled fonts
 and egui styling. `theme::edit_suite` contains the approved prototype values.
-`theme::palette()` and the existing accessors choose that palette for Edit Suite.
-`theme::LIGHT` and `theme::DARK` remain the classic palettes.
+`theme::palette()` and the existing accessors return that palette.
 
 Edit Suite's charcoal chrome and amber accent do not change with the saved light
-or dark appearance preference. The preference is retained for Classic. Viewport
+or dark appearance preference. Viewport
 scenes are a separate choice; a dark frame does not imply a dark modelling space.
 
 | Role | Token | Value |
@@ -138,8 +134,7 @@ wrapped label more height instead of clipping its name.
 
 Use 6 px corners for ordinary controls and popups, 4 px for value fields, 5 px for
 palette tools and 10 px for the floating navigation bar. These are `RADIUS`,
-`FIELD_RADIUS`, `TOOL_RADIUS` and `FLOATING_RADIUS`. The classic constants at the
-module root remain unchanged. New panels should consume these tokens rather than
+`FIELD_RADIUS`, `TOOL_RADIUS` and `FLOATING_RADIUS`. New panels should consume these tokens rather than
 copying prototype literals.
 
 ## Viewport scenes and navigation
@@ -171,10 +166,10 @@ projection and rendering quality retain their existing preferences.
 
 ## Sketch mode
 
-The internal Edit Suite frame leads its sketch palette with a full-width Smart
+Edit Suite leads its sketch palette with a full-width Smart
 Dimension tile. Entity tools use Edit and Move and copy groups, and Relations opens
 beside its palette tile. Canceling plane picking restores plane visibility and drops
-the pending tool. The classic frame keeps its ribbon.
+the pending tool.
 
 L, R, C, A, D, T, O and M select line, rectangle, circle, arc, Smart Dimension, trim,
 offset and move across all shortcut presets. Custom bindings take precedence, and

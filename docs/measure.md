@@ -8,7 +8,7 @@ Enter a value name, or leave it blank for an automatic name, then press Track th
 
 Tracked rows follow persistent geometry references through edits and feature renames. Each accepted rebuild re-proves the requested quantities. A missing source, pending proof or kernel refusal marks its row stale and its check unknown. The last measured number stays visible for that session. A stale row never blocks the edit or save. Reopening re-proves the definitions; a source still missing has no cached number.
 
-Row definitions share the named values' namespace and undo history. Measured numbers live outside document truth, so reading or re-measuring changes neither revision nor geometry. Track changes the revision and leaves geometry unchanged. `rename_value` also renames tracked rows. Tracked names cannot drive geometry or appear in expressions in this batch.
+Row definitions share the named values' namespace and undo history. Measured numbers live outside document truth, so reading or re-measuring changes neither revision nor geometry. Track changes the revision and leaves geometry unchanged. `rename_value` also renames tracked rows. Tracked names cannot drive geometry or appear in expressions yet.
 
 MCP example:
 

@@ -61,22 +61,27 @@ def run(command, timeout=30):
     return subprocess.run(command, check=True, capture_output=True, text=True, timeout=timeout)
 
 
-def installed_toolchain(rustup, channel, components, targets):
+def installed_toolchain(rustup, channel, components, targets, step_name):
+    probe_timeout = int(os.environ.get("RUSTUP_PROBE_TIMEOUT_SECONDS", "15"))
+    if probe_timeout < 1:
+        raise ValueError("rustup probe timeout must be a positive integer")
     try:
-        listing = run([rustup, "toolchain", "list"], timeout=15).stdout.splitlines()
+        listing = run([rustup, "toolchain", "list"], timeout=probe_timeout).stdout.splitlines()
         names = {line.split()[0] for line in listing if line.split()}
         if not any(name == channel or name.startswith(channel + "-") for name in names):
             return False
         installed_components = set(run(
-            [rustup, "component", "list", "--toolchain", channel, "--installed"], timeout=15
+            [rustup, "component", "list", "--toolchain", channel, "--installed"], timeout=probe_timeout
         ).stdout.split())
         installed_targets = set(run(
-            [rustup, "target", "list", "--toolchain", channel, "--installed"], timeout=15
+            [rustup, "target", "list", "--toolchain", channel, "--installed"], timeout=probe_timeout
         ).stdout.split())
         has_components = all(any(item == component or item.startswith(component + "-")
                                  for item in installed_components) for component in components)
         return has_components and set(targets) <= installed_targets
-    except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
+        print(f"::warning::{step_name}: Rustup toolchain probe failed; attempting installation: {error}",
+              flush=True)
         return False
 
 
@@ -136,7 +141,7 @@ def install(rustup, channel, components, targets, step_name):
     if timeout < 1 or attempts < 1:
         raise ValueError("rustup timeout and attempt count must be positive integers")
 
-    if installed_toolchain(rustup, channel, components, targets):
+    if installed_toolchain(rustup, channel, components, targets, step_name):
         print(f"{step_name}: reusing installed Rust toolchain {channel}")
     else:
         command = [rustup, "toolchain", "install", channel, "--profile", "minimal",
@@ -161,7 +166,8 @@ def install(rustup, channel, components, targets, step_name):
                 return 1
 
     try:
-        subprocess.run([rustup, "default", channel], check=True, timeout=15)
+        subprocess.run([rustup, "default", channel], check=True,
+                       timeout=int(os.environ.get("RUSTUP_PROBE_TIMEOUT_SECONDS", "15")))
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
         print(f"::error::{step_name}: could not select installed Rust toolchain {channel}: {error}",
               file=sys.stderr, flush=True)

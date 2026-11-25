@@ -170,7 +170,7 @@ mod tests {
 
     #[test]
     fn a_file_previewed_for_the_window_replaces_its_preview_and_an_edit_retires_it() {
-        let mut state = AppState::new(Document::new("Part1", crate::kernel()));
+        let mut state = AppState::new(Document::new("Part1", crate::startup::kernel()));
         let dir = std::env::temp_dir().join(format!("soliddraft-import-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("table.csv");

@@ -1,0 +1,22 @@
+{
+  "id": "import-repair",
+  "file": "ci/scenarios/import-repair.json",
+  "acceptance": true,
+  "owners": [
+    "soliddraft-app",
+    "soliddraft-model",
+    "soliddraft-kernel-api",
+    "soliddraft-kernel-catallax"
+  ],
+  "kernel_parts": [
+    "iges",
+    "import",
+    "measure",
+    "mesh",
+    "step"
+  ],
+  "catallax_revision": "76cdf97f3e85d22ea74868b77d849498ebdfcf1c",
+  "route": "MCP document commands -> Catallax adapter -> pinned kernel",
+  "supported_limits": "One planar block with a straight 0.02 mm seam above the automatic cap; the import needs an approved limit of at least the gap and a named approver; the record keeps attained face tolerances apart from the limit and the movement; nonconvex, holed and curved repairs stay refused",
+  "evidence": "result.json, protocol.json and commands/NNNN/{part.dwprt,command.json,kernel.json}; repaired.dwprt; fresh-process reopen with part.step, step-report.json, check-step.stdout and check-step.stderr; the STL"
+}

@@ -1,0 +1,22 @@
+{
+  "id": "hole-thread",
+  "file": "ci/scenarios/hole-thread.json",
+  "acceptance": true,
+  "owners": [
+    "soliddraft-app",
+    "soliddraft-model",
+    "soliddraft-kernel-catallax"
+  ],
+  "kernel_parts": [
+    "boolean",
+    "extrude",
+    "hole",
+    "measure",
+    "mesh",
+    "step"
+  ],
+  "catallax_revision": "ccfb4e4bee95cbb42f7c1ea1dbdfe8874ed01c4a",
+  "route": "MCP hole and edit_hole with a thread -> document rebuild -> native hole of the tap drill -> thread item in pmi_list -> viewport and checked STEP export",
+  "supported_limits": "ISO metric coarse and fine threads, M1.6 to M64, on a hole's main wall; a cosmetic thread, no modelled teeth; size, pitch and depth edits, undo/redo, a drill that does not take the thread refuses without changing the part, a later cut on top, save and fresh-process reopen. Pattern and mirror copies of a tapped hole are not threaded.",
+  "evidence": "result.json, protocol.json, commands/NNNN/{command.json,kernel.json,measurement.json,viewport.png,view.svg}; saved part; checked STEP and independent volume and point oracle"
+}

@@ -76,7 +76,7 @@ fn install_kind_is_captured_before_any_settings_write() {
         if let Some(text) = start {
             std::fs::write(dir.join("settings.json"), text).unwrap();
         }
-        let mut app = harness(soliddraft_app::new_document);
+        let mut app = harness(soliddraft_app::startup::new_document);
         app.run_steps(2);
         assert_eq!(app.state().state.navigation.active_preset().id, preset, "the app starts on {preset}");
         app.state_mut().state.push(AppAction::SetTheme(Mode::Dark));
@@ -86,7 +86,7 @@ fn install_kind_is_captured_before_any_settings_write() {
         assert_eq!(all["navigation"]["preset_id"], preset, "and the preset with it: {all}");
         drop(app);
 
-        let mut app = harness(soliddraft_app::new_document);
+        let mut app = harness(soliddraft_app::startup::new_document);
         app.run_steps(2);
         assert_eq!(app.state().state.navigation.active_preset().id, preset, "{preset} after a restart");
         record(&format!("captured-{preset}"), &dir);
@@ -101,7 +101,7 @@ fn navigation_save_does_not_touch_document_or_undo() {
         eprintln!("skipping: no GPU adapter");
         return;
     }
-    let mut app = harness(soliddraft_app::demo_document);
+    let mut app = harness(soliddraft_app::startup::demo_document);
     app.run_steps(2);
     let feature = app.state().state.doc.features[0].id;
     app.state_mut().state.doc.selection = Some(Selection::Feature(feature));
@@ -153,7 +153,7 @@ fn use_preset(app: &mut App, preset: &str) {
 
 /// A 60 x 40 x 20 box on the top plane.
 fn box_document() -> Document {
-    let mut doc = Document::new("Box", soliddraft_app::kernel());
+    let mut doc = Document::new("Box", soliddraft_app::startup::kernel());
     doc.apply(Command::AddExtrude {
         params: ExtrudeParams {
             profile: ProfileKind::Rectangle { width: 60.0, height: 40.0 },
@@ -274,7 +274,7 @@ fn held_ordinary_keys_are_modifiers_and_taps_still_run_their_command() {
     if skip_without_gpu() {
         return;
     }
-    let mut app = gesture_app(soliddraft_app::demo_document(), "inventor");
+    let mut app = gesture_app(soliddraft_app::startup::demo_document(), "inventor");
     let feature = app.state().state.doc.features[0].id;
     app.state_mut().state.doc.selection = Some(Selection::Feature(feature));
     app.run_steps(2);
@@ -308,7 +308,7 @@ fn drag_capture_requires_viewport_origin_and_threshold() {
     if skip_without_gpu() {
         return;
     }
-    let mut app = gesture_app(soliddraft_app::demo_document(), "legacy_soliddraft");
+    let mut app = gesture_app(soliddraft_app::startup::demo_document(), "legacy_soliddraft");
     let rect = viewport(&app);
     // Empty space near a corner, away from the part, the cube and the toolbar.
     let start = rect.left_bottom() + vec2(120.0, -120.0);
@@ -403,7 +403,7 @@ fn one_physical_zoom_gesture_produces_one_zoom() {
     if skip_without_gpu() {
         return;
     }
-    let mut app = gesture_app(soliddraft_app::demo_document(), "fusion");
+    let mut app = gesture_app(soliddraft_app::startup::demo_document(), "fusion");
     let c = viewport(&app).center();
     let d0 = rendered(&mut app, |app| {
         app.hover_at(c);
@@ -434,7 +434,7 @@ fn navigation_works_with_active_sketch_and_collector() {
         return;
     }
     // A sketch with the line tool, under Fusion.
-    let mut app = gesture_app(soliddraft_app::new_document(), "fusion");
+    let mut app = gesture_app(soliddraft_app::startup::new_document(), "fusion");
     app.state_mut().state.push(AppAction::StartSketchOn(SketchPlane::Reference { plane: PlaneKind::Top, offset: 0.0 }));
     app.run_steps(60);
     app.state_mut().state.push(AppAction::SketchTool(Tool::Line));
@@ -474,7 +474,7 @@ fn navigation_works_with_active_sketch_and_collector() {
         doc.edges.iter().find(|e| (e.midpoint.z - 20.0).abs() < 1e-9).unwrap().id
     };
     app.state_mut().state.doc.selection = Some(Selection::Edge(edge));
-    app.state_mut().state.push(AppAction::StartFillet);
+    app.state_mut().state.push(AppAction::Body(soliddraft_app::app::BodyAction::StartFillet));
     app.run_steps(20);
     let snapshot = |app: &App| {
         let s = &app.state().state;
@@ -679,7 +679,7 @@ fn wheel_direction_is_global_and_independent() {
     if skip_without_gpu() {
         return;
     }
-    let mut app = gesture_app(soliddraft_app::demo_document(), "fusion");
+    let mut app = gesture_app(soliddraft_app::startup::demo_document(), "fusion");
     let mut nav = app.state().state.navigation.clone();
     nav.wheel.invert = true;
     app.state_mut().state.set_navigation(nav).unwrap();
@@ -734,7 +734,7 @@ fn inventor_held_keys_and_wheel_direction() {
     if skip_without_gpu() {
         return;
     }
-    let mut app = gesture_app(soliddraft_app::demo_document(), "inventor");
+    let mut app = gesture_app(soliddraft_app::startup::demo_document(), "inventor");
     let c = viewport(&app).left_bottom() + vec2(150.0, -150.0);
     let none = Modifiers::NONE;
     let shift_m = effect(&mut app, "inventor-shift-middle", |app| {
@@ -994,7 +994,7 @@ fn preferences_window_opens_with_search_and_categories() {
         return;
     }
     std::fs::write(dir.join("settings.json"), r#"{"theme":"dark"}"#).unwrap();
-    let mut app = gesture_app(soliddraft_app::demo_document(), "legacy_soliddraft");
+    let mut app = gesture_app(soliddraft_app::startup::demo_document(), "legacy_soliddraft");
     let before = settings_bytes(&dir);
     open_preferences(&mut app);
     assert!(app.query_by_label("Search settings").is_some());
@@ -1124,7 +1124,7 @@ fn preferences_does_not_disturb_existing_settings() {
     if skip_without_gpu() {
         return;
     }
-    let mut app = gesture_app(soliddraft_app::demo_document(), "fusion");
+    let mut app = gesture_app(soliddraft_app::startup::demo_document(), "fusion");
     let root = dir.join("recovery-root");
     app.state_mut().start_recovery(&root, Default::default());
     open_preferences(&mut app);

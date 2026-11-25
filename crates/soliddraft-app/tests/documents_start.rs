@@ -167,7 +167,7 @@ fn the_browser_checks_find_new_part_where_they_click() {
 fn the_browser_checks_find_extrude_rectangle_where_they_click() {
     let _case = case("extrude-rectangle-point");
     let mut app = app_at(blank(), vec2(1400.0, 813.0), 1.0);
-    app.state_mut().state.push(AppAction::StartExtrude);
+    app.state_mut().state.push(AppAction::Profile(soliddraft_app::app::ProfileAction::Extrude));
     app.run_steps(4);
     let button = app.get_by_role_and_label(egui::accesskit::Role::Button, "Rectangle").rect();
     assert!(button.shrink(4.0).contains(egui::pos2(99.0, 355.0)), "Rectangle is at {button:?}");
@@ -179,7 +179,7 @@ fn the_browser_checks_find_extrude_rectangle_where_they_click() {
 fn killed_app_edits_until_it_is_killed() {
     let Some(dir) = std::env::var_os(CHILD).map(PathBuf::from) else { return };
     soliddraft_app::file::set_config_dir(Some(dir.join("config")));
-    let mut app = app_at(Document::new("Bracket", soliddraft_app::kernel()), WINDOW, 1.0);
+    let mut app = app_at(Document::new("Bracket", soliddraft_app::startup::kernel()), WINDOW, 1.0);
     let policy = AutosavePolicy { enabled: true, interval_seconds: 1, edits: 1 };
     app.state_mut().start_recovery(&dir.join("recovery"), policy);
     let mut depth = 10.0;

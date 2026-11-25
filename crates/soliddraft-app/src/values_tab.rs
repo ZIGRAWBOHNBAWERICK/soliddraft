@@ -1422,7 +1422,7 @@ mod tests {
 
     /// A part with globals Gap and Bore and the named configurations.
     fn configured(names: &[&str]) -> AppState {
-        let mut doc = crate::document::Document::new("Plate", crate::kernel());
+        let mut doc = crate::document::Document::new("Plate", crate::startup::kernel());
         doc.apply(Command::AddExtrude { params: Default::default(), via_assistant: false }).unwrap();
         for (name, expression) in [("Gap", "5"), ("Bore", "1")] {
             doc.apply(Command::SetValue { name: name.into(), expression: expression.into() }).unwrap();
@@ -1495,7 +1495,7 @@ mod tests {
         // Another part's Values tab has no formula last edited.
         remember_formula(&mut state.values, &Field::Cell("Gap".into(), 0), "=Gap+");
         state.values.drafts.clear();
-        state.doc = crate::document::Document::new("Other", crate::kernel());
+        state.doc = crate::document::Document::new("Other", crate::startup::kernel());
         apply(&mut state, ValuesAction::InsertFunction("ROUND".into()));
         assert_eq!(state.values.drafts.get(&Field::NewGlobalFormula).map(String::as_str), Some("=ROUND("));
         assert_eq!(state.values.drafts.len(), 1, "the other part's cell took the formula");

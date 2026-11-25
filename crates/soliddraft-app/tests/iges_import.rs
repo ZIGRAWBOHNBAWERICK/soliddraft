@@ -27,7 +27,7 @@ fn corpus_iges_review_cancel_accept_reopen_and_refusal_in_edit_suite() {
     std::fs::write(&refused, SPHERE).unwrap();
     {
         let layout = "edit_suite";
-        let mut app = ribbon::app(Document::new("IGES import", soliddraft_app::kernel()));
+        let mut app = ribbon::app(Document::new("IGES import", soliddraft_app::startup::kernel()));
 
         app.run_steps(3);
         case.run(&mut app, |app| {

@@ -16,7 +16,7 @@ fn call(doc: &mut Document, name: &str, input: Value) -> Value {
 }
 
 fn meridian() -> Document {
-    let mut doc = Document::new("P2 collar", soliddraft_app::kernel());
+    let mut doc = Document::new("P2 collar", soliddraft_app::startup::kernel());
     call(
         &mut doc,
         "sketch",
@@ -79,7 +79,7 @@ fn collar_commands_keep_picking_names_through_edit_undo_and_reopen() {
     selectable(&doc);
     let path = std::env::temp_dir().join(format!("soliddraft-p2-{}.dwprt", std::process::id()));
     doc.model().save(&path).unwrap();
-    let mut reopened = Document::new("reopened", soliddraft_app::kernel());
+    let mut reopened = Document::new("reopened", soliddraft_app::startup::kernel());
     call(&mut reopened, "open", json!({"path":path}));
     selectable(&reopened);
     assert!(matches!(reopened.features[1].kind, FeatureKind::Revolve(_)));

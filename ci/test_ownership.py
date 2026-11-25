@@ -18,7 +18,7 @@ class OwnershipTests(unittest.TestCase):
         for crate in ('soliddraft-app', 'soliddraft-model'):
             shutil.copytree(ROOT / 'crates' / crate / 'src', self.root / 'crates' / crate / 'src')
         (self.root / 'ci').mkdir()
-        shutil.copy(ROOT / 'ci/ownership.toml', self.root / 'ci/ownership.toml')
+        shutil.copytree(ROOT / 'ci/ownership', self.root / 'ci/ownership')
 
     def run_check(self):
         return subprocess.run(['python3', str(ROOT / 'ci/check-ownership.py'), '--root', str(self.root)],

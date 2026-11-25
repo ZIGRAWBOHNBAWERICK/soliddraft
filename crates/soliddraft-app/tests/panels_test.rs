@@ -33,7 +33,7 @@ fn harness() -> App<'static> {
         .with_pixels_per_point(1.0)
         .with_step_dt(1.0 / 60.0)
         .renderer(render_steps::renderer())
-        .build_eframe(|cc| SolidDraftApp::new(cc, soliddraft_app::demo_document(), Automation::default()))
+        .build_eframe(|cc| SolidDraftApp::new(cc, soliddraft_app::startup::demo_document(), Automation::default()))
 }
 
 fn save(harness: &mut App<'_>, name: &str) {

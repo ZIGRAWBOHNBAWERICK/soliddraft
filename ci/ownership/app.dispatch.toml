@@ -1,0 +1,6 @@
+[[areas]]
+name = "app.dispatch"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/app/dispatch.rs", "crates/soliddraft-app/src/app/dispatch/"]
+module = ["app", "dispatch"]

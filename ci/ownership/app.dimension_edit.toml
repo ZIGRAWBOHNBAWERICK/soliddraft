@@ -1,0 +1,6 @@
+[[areas]]
+name = "app.dimension_edit"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/dimension_edit.rs"]
+module = ["dimension_edit"]

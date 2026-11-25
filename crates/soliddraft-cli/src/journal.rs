@@ -15,21 +15,23 @@ pub fn run(args: &[String]) -> ExitCode {
             soliddraft_document::journal::export(Path::new(&args[1]), Path::new(&args[2])).map(|()| true)
         }
         Some("replay") if args.len() == 2 || (args.len() == 4 && args[2] == "--out") => {
-            soliddraft_app::journal::Replay::read(Path::new(&args[1]), soliddraft_app::kernel()).and_then(|replay| {
-                let report = serde_json::to_string_pretty(&replay.report()).map_err(|e| e.to_string())?;
-                if let Some(out) = args.get(3) {
-                    // Replay may describe a crash. Never overwrite an existing report.
-                    use std::io::Write;
-                    let mut file = std::fs::OpenOptions::new()
-                        .write(true)
-                        .create_new(true)
-                        .open(out)
-                        .map_err(|e| e.to_string())?;
-                    writeln!(file, "{report}").map_err(|e| e.to_string())?;
-                }
-                println!("{report}");
-                Ok(replay.failure.is_none())
-            })
+            soliddraft_app::journal::Replay::read(Path::new(&args[1]), soliddraft_app::startup::kernel()).and_then(
+                |replay| {
+                    let report = serde_json::to_string_pretty(&replay.report()).map_err(|e| e.to_string())?;
+                    if let Some(out) = args.get(3) {
+                        // Replay may describe a crash. Never overwrite an existing report.
+                        use std::io::Write;
+                        let mut file = std::fs::OpenOptions::new()
+                            .write(true)
+                            .create_new(true)
+                            .open(out)
+                            .map_err(|e| e.to_string())?;
+                        writeln!(file, "{report}").map_err(|e| e.to_string())?;
+                    }
+                    println!("{report}");
+                    Ok(replay.failure.is_none())
+                },
+            )
         }
         _ => {
             eprint!("{USAGE}");

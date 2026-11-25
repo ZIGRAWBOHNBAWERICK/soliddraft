@@ -71,7 +71,7 @@ fn flat(name: &str) -> Rig {
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(dir.join("work/parts")).unwrap();
     soliddraft_app::file::set_config_dir(Some(dir.join("config")));
-    let mut r = Rig { state: AppState::new(soliddraft_app::new_document()), dir };
+    let mut r = Rig { state: AppState::new(soliddraft_app::startup::new_document()), dir };
     let work = r.dir.join("work");
     build(&mut r, &work);
     r

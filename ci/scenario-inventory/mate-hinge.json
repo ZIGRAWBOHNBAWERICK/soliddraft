@@ -1,0 +1,22 @@
+{
+  "id": "mate-hinge",
+  "file": "ci/scenarios/mate-hinge.json",
+  "acceptance": true,
+  "owners": [
+    "soliddraft-app",
+    "soliddraft-assembly",
+    "soliddraft-model",
+    "soliddraft-kernel-api",
+    "soliddraft-kernel-catallax"
+  ],
+  "kernel_parts": [
+    "boolean",
+    "extrude",
+    "measure",
+    "mesh"
+  ],
+  "catallax_revision": "76cdf97f3e85d22ea74868b77d849498ebdfcf1c",
+  "route": "MCP assembly and Hinge mate commands -> assembly transaction -> proven axis and plane queries -> Catallax adapter -> pinned kernel",
+  "supported_limits": "B2: Hinge mates without limits, a Concentric between two cylinders and a Coincident between two planes under one name: the shaft seated flush in the bore with only its spin left, a strict refusal, a plane flip alone refused naming the hinge, both flips turning the shaft over, undo, redo, save and reopen.",
+  "evidence": "result.json, protocol.json, commands/NNNN/{part.dwprt,command.json,kernel.json,inspect-*.stdout}; work/a.dwprt, work/shaft.dwprt and work/rig.dwasm"
+}

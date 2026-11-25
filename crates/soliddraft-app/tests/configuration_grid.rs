@@ -47,7 +47,7 @@ fn call(state: &mut AppState, name: &str, arguments: Value) -> Value {
 fn parameter_dependent_grid(name: &str, default: &str, expression: &str) -> AppState {
     let model = soliddraft_model::Document::from_bytes(
         include_bytes!("../../soliddraft-model/tests/fixtures/bracket-140.dwprt"),
-        soliddraft_app::kernel(),
+        soliddraft_app::startup::kernel(),
     )
     .unwrap();
     let mut state = AppState::new(Document::from_model(model));
@@ -82,7 +82,7 @@ fn resolved_thin(report: &Value, name: &str) -> Value {
 fn renaming_a_global_keeps_case_distinct_configuration_bindings() {
     use soliddraft_app::values_tab::{self, Field, ValuesAction};
 
-    let doc = Document::new("Case-distinct formula references", soliddraft_app::kernel());
+    let doc = Document::new("Case-distinct formula references", soliddraft_app::startup::kernel());
     let mut state = AppState::new(doc);
     call(
         &mut state,
@@ -293,7 +293,7 @@ fn volume(state: &mut AppState) -> f64 {
 #[test]
 fn g_refuse_every_bad_file_changes_nothing_and_a_good_one_still_imports() {
     let dir = scratch("refuse");
-    let mut state = AppState::new(Document::new("Part1", soliddraft_app::kernel()));
+    let mut state = AppState::new(Document::new("Part1", soliddraft_app::startup::kernel()));
     g0(&mut state);
     // Nonempty undo and redo history and a saved file.
     call(&mut state, "activate_configuration", json!({ "name": "Default" }));
@@ -340,7 +340,7 @@ fn g_refuse_every_bad_file_changes_nothing_and_a_good_one_still_imports() {
 
 #[test]
 fn g_token_a_preview_is_bound_to_its_document_and_revision_and_used_once() {
-    let mut state = AppState::new(Document::new("Part1", soliddraft_app::kernel()));
+    let mut state = AppState::new(Document::new("Part1", soliddraft_app::startup::kernel()));
     g0(&mut state);
     let old = preview_file(&mut state, "g1-inch.csv").unwrap()["preview_id"].as_str().unwrap().to_owned();
 
@@ -367,7 +367,7 @@ fn g_token_a_preview_is_bound_to_its_document_and_revision_and_used_once() {
     assert_eq!(accepted(&mut state, None), applied, "a used token made a second entry");
 
     // A token from another document, even a twin with the same cells, does not apply.
-    let mut twin = AppState::new(Document::new("Part1", soliddraft_app::kernel()));
+    let mut twin = AppState::new(Document::new("Part1", soliddraft_app::startup::kernel()));
     g0(&mut twin);
     let token = preview_file(&mut twin, "g1-inch.csv").unwrap()["preview_id"].as_str().unwrap().to_owned();
     std::mem::swap(&mut twin.doc, &mut state.doc);
@@ -385,7 +385,7 @@ fn title_text(state: &AppState) -> Vec<String> {
 
 #[test]
 fn d_title_the_two_undo_stacks_stay_apart_and_title_and_views_move_together() {
-    let mut state = AppState::new(Document::new("Part1", soliddraft_app::kernel()));
+    let mut state = AppState::new(Document::new("Part1", soliddraft_app::startup::kernel()));
     g0(&mut state);
     call(&mut state, "make_drawing", json!({ "template": "iso-a3" }));
     call(&mut state, "drawing_auto_update", json!({ "on": false }));

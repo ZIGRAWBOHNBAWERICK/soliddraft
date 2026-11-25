@@ -1,0 +1,6 @@
+[[areas]]
+name = "model.evaluate"
+owner = "core"
+crate = "soliddraft-model"
+paths = ["crates/soliddraft-model/src/evaluate.rs"]
+module = ["evaluate"]

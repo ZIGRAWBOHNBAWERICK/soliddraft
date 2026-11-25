@@ -1,0 +1,6 @@
+[[areas]]
+name = "app.recent"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/recent.rs"]
+module = ["recent"]

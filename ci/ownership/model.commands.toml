@@ -1,0 +1,6 @@
+[[areas]]
+name = "model.commands"
+owner = "core"
+crate = "soliddraft-model"
+paths = ["crates/soliddraft-model/src/command.rs"]
+module = ["command"]

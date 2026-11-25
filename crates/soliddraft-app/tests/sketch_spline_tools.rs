@@ -7,7 +7,7 @@ use soliddraft_assistant::{Caller, tools::call_checked};
 #[test]
 fn spline_point_minimum_is_atomic_for_both_modes() {
     for mode in ["fit", "control"] {
-        let mut state = AppState::new(Document::new("Spline tools", soliddraft_app::kernel()));
+        let mut state = AppState::new(Document::new("Spline tools", soliddraft_app::startup::kernel()));
         let caller = Caller::Mcp { client: "spline tools".into() };
         let out = call_checked(
             &mut AppTools { state: &mut state },

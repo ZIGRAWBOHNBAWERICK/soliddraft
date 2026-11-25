@@ -49,6 +49,22 @@ cargo test --workspace
 
 The app's exit tests drive the real interface through `egui_kittest` on wgpu. They skip themselves when no GPU adapter is available. See [ci.md](ci.md) for the full checks.
 
+### Merging `Cargo.lock`
+
+In each clone that assembles branches, enable the opt-in lockfile driver. Run this from
+the repository root with Python 3.11 or newer:
+
+```sh
+git config merge.cargo-lock.driver 'python3 ci/cargo-lock-merge.py %O %A %B %L'
+```
+
+Git invokes the driver before it writes the merged manifests. The driver combines locked
+package changes from both sides without resolving new versions. It leaves overlapping
+changes it cannot reconcile as conflicts. After merging, validate the result against the
+merged manifests with `cargo metadata --locked --format-version 1` or the existing CI
+builds that pass `--locked`. If Cargo reports a stale lockfile, run
+`cargo update --workspace`, review `Cargo.lock`, and repeat the locked check.
+
 ## Project background
 
 The free-market and anti-IP position in the README follows the argument that ideas are not scarce: copying code does not take it away from its author. See the [patents and copyrights section of Man, Economy, and State](https://mises.org/online-book/man-economy-and-state-power-and-market/10-monopoly-and-competition/7-patents-and-copyrights) and Against Intellectual Property, Journal of Libertarian Studies 15:2, 2001, section "Scarcity and Ideas". The first treats patents as state monopoly grants while retaining copyright as contract; the second rejects intellectual property more broadly. A public kernel lets small vendors, scripts, plug-ins and individual products compete without renting a closed kernel.

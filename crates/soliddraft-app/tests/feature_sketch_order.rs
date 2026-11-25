@@ -299,7 +299,7 @@ fn a_feature_opened_from_the_sketch_view_turns_to_show_its_depth() {
         assert_eq!(app.state().state.viewport.camera.view_name, "Isometric");
         assert!(along(app) < 0.9, "the view left the normal, so the depth shows: {}", along(app));
         case.frame(app, "2-extrude-preview-in-isometric");
-        app.state_mut().state.push(AppAction::CancelEditor);
+        app.state_mut().state.push(AppAction::Editor(soliddraft_app::app::EditorAction::Cancel));
         settle(app);
 
         // A view the user chose is kept: the feature opens without turning it.
@@ -472,7 +472,7 @@ fn a_rollback_dragged_in_an_open_editor_stands_after_it_closes() {
     let mut case = Case::new("feature-sketch-order/rollback-in-editor");
     let mut app = launch(doc, STANDARD);
     case.run(&mut app, |case, app| {
-        app.state_mut().state.push(AppAction::EditFeature(second));
+        app.state_mut().state.push(AppAction::Editor(soliddraft_app::app::EditorAction::EditFeature(second)));
         settle(app);
         assert!(app.state().state.editor.is_some());
         assert_eq!(app.state().state.doc.rollback, Some(1), "the editor shows the part before its feature");
@@ -480,7 +480,7 @@ fn a_rollback_dragged_in_an_open_editor_stands_after_it_closes() {
         app.state_mut().state.push(AppAction::Command(soliddraft_app::document::Command::Rollback(Some(2))));
         settle(app);
         case.frame(app, "1-dragged-in-the-editor");
-        app.state_mut().state.push(AppAction::CancelEditor);
+        app.state_mut().state.push(AppAction::Editor(soliddraft_app::app::EditorAction::Cancel));
         settle(app);
         let state = &app.state().state;
         assert!(state.editor.is_none());

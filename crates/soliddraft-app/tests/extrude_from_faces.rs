@@ -126,7 +126,7 @@ fn extrude_from_a_sloping_face_picked_in_the_viewport() {
     case.run(&mut app, |case, app| {
         rebuilt(app);
         close(volume_of(app, 0), WEDGE, "the wedge");
-        run(app, AppAction::StartExtrude);
+        run(app, AppAction::Profile(soliddraft_app::app::ProfileAction::Extrude));
         // From: Surface/Face/Plane, then a click on the slope at x = 10, where it is 15 mm up.
         extrude_params(app).choices.from = StartKind::Surface(None);
         extrude_params(app).depth = 5.0;
@@ -142,7 +142,7 @@ fn extrude_from_a_sloping_face_picked_in_the_viewport() {
         );
         pointer_to_chrome(app);
         case.frame(app, "slope-picked");
-        run(app, AppAction::CommitEditor);
+        run(app, AppAction::Editor(soliddraft_app::app::EditorAction::Commit));
         assert!(app.state().state.editor.is_none(), "the form closes on OK");
         let boss = app.state().state.doc.features.last().unwrap().id;
         assert_eq!(app.state().state.doc.feature(boss).unwrap().status, FeatureStatus::Ok);
@@ -154,9 +154,9 @@ fn extrude_from_a_sloping_face_picked_in_the_viewport() {
         soliddraft_app::file::save(&mut app.state_mut().state.doc, &file).expect("the part saves");
 
         // Merge result off: the boss becomes a body of its own on the slope.
-        run(app, AppAction::EditFeature(boss));
+        run(app, AppAction::Editor(soliddraft_app::app::EditorAction::EditFeature(boss)));
         extrude_params(app).merge = false;
-        run(app, AppAction::CommitEditor);
+        run(app, AppAction::Editor(soliddraft_app::app::EditorAction::Commit));
         let doc = app.state().state.doc.model();
         assert_eq!(doc.live_bodies().len(), 2, "a new body");
         close(volume_of(app, 0), WEDGE, "the wedge alone");
@@ -164,9 +164,9 @@ fn extrude_from_a_sloping_face_picked_in_the_viewport() {
         // The slope is 20 mm up over the square's middle: the boss reaches 5 mm above it.
         close(height_of(app, 1), 22.5, "the boss stands on the slope");
         // Flip turns it into the wedge from the same slope.
-        run(app, AppAction::EditFeature(boss));
+        run(app, AppAction::Editor(soliddraft_app::app::EditorAction::EditFeature(boss)));
         extrude_params(app).flip = true;
-        run(app, AppAction::CommitEditor);
+        run(app, AppAction::Editor(soliddraft_app::app::EditorAction::Commit));
         assert_eq!(app.state().state.doc.feature(boss).unwrap().status, FeatureStatus::Ok);
         close(volume_of(app, 1), 180.0, "the flipped body");
         close(height_of(app, 1), 17.5, "the flipped body hangs under the slope");
@@ -192,7 +192,7 @@ fn extrude_from_a_curved_face_picked_in_the_viewport() {
     case.run(&mut app, |case, app| {
         rebuilt(app);
         close(volume_of(app, 0), ROD, "the rod");
-        run(app, AppAction::StartExtrude);
+        run(app, AppAction::Profile(soliddraft_app::app::ProfileAction::Extrude));
         // From: Surface/Face/Plane, then a click on the rod's top at x = -10. Flipped, the
         // lines go down and first cross the top; Direction 2 goes 5 mm up from it.
         extrude_params(app).choices.from = StartKind::Surface(None);
@@ -212,7 +212,7 @@ fn extrude_from_a_curved_face_picked_in_the_viewport() {
         );
         pointer_to_chrome(app);
         case.frame(app, "curved-top-picked");
-        run(app, AppAction::CommitEditor);
+        run(app, AppAction::Editor(soliddraft_app::app::EditorAction::Commit));
         assert!(app.state().state.editor.is_none(), "the form closes on OK");
         let boss = app.state().state.doc.features.last().unwrap().id;
         assert_eq!(app.state().state.doc.feature(boss).unwrap().status, FeatureStatus::Ok);
@@ -221,40 +221,40 @@ fn extrude_from_a_curved_face_picked_in_the_viewport() {
         case.frame(app, "boss-on-curved-top");
 
         // Up to next cannot start on a curved face: the form stays open with a plain reason.
-        run(app, AppAction::EditFeature(boss));
+        run(app, AppAction::Editor(soliddraft_app::app::EditorAction::EditFeature(boss)));
         extrude_params(app).end = soliddraft_app::document::EndKind::UpToNext;
-        run(app, AppAction::CommitEditor);
+        run(app, AppAction::Editor(soliddraft_app::app::EditorAction::Commit));
         let refusal = app.state().state.editor.as_ref().and_then(|e| e.refusal()).map(str::to_owned);
         let shown = soliddraft_app::geometry_message::for_user(refusal.as_deref().expect("the edit is refused"));
         assert!(shown.contains("cannot start on a curved face"), "the user reads {shown}");
         pointer_to_chrome(app);
         case.frame(app, "up-to-next-refused");
-        run(app, AppAction::CancelEditor);
+        run(app, AppAction::Editor(soliddraft_app::app::EditorAction::Cancel));
         close(volume_of(app, 0), ROD + 180.0, "the refused edit leaves the boss");
 
         // Unflipped, the lines go up and first cross the rod's underside: both 5 mm sweeps
         // from there stay inside the rod or hang under it.
-        run(app, AppAction::EditFeature(boss));
+        run(app, AppAction::Editor(soliddraft_app::app::EditorAction::EditFeature(boss)));
         extrude_params(app).flip = false;
-        run(app, AppAction::CommitEditor);
+        run(app, AppAction::Editor(soliddraft_app::app::EditorAction::Commit));
         assert_eq!(app.state().state.doc.feature(boss).unwrap().status, FeatureStatus::Ok);
         close(volume_of(app, 0), ROD + 180.0, "5 mm hang under the rod");
         // Merge result off: both sweeps become a body of their own.
-        run(app, AppAction::EditFeature(boss));
+        run(app, AppAction::Editor(soliddraft_app::app::EditorAction::EditFeature(boss)));
         extrude_params(app).flip = true;
         extrude_params(app).merge = false;
-        run(app, AppAction::CommitEditor);
+        run(app, AppAction::Editor(soliddraft_app::app::EditorAction::Commit));
         assert_eq!(app.state().state.doc.model().live_bodies().len(), 2, "a new body");
         close(volume_of(app, 0), ROD, "the rod alone");
         close(volume_of(app, 1), 360.0, "5 mm each side of the rod's top as its own body");
         pointer_to_chrome(app);
         case.frame(app, "curved-new-body");
         // Back into the rod and 7 mm up.
-        run(app, AppAction::EditFeature(boss));
+        run(app, AppAction::Editor(soliddraft_app::app::EditorAction::EditFeature(boss)));
         extrude_params(app).merge = true;
         extrude_params(app).choices.direction2 =
             Some(soliddraft_app::document::Direction2 { end: soliddraft_app::document::EndKind::Blind, depth: 7.0 });
-        run(app, AppAction::CommitEditor);
+        run(app, AppAction::Editor(soliddraft_app::app::EditorAction::Commit));
         close(volume_of(app, 0), ROD + 252.0, "the taller boss");
 
         // A later feature: a 4 mm square post from the Top plane up through the rod.
@@ -325,7 +325,7 @@ fn up_to_a_curved_face_picked_in_the_viewport() {
     let mut app = launch(doc, STANDARD);
     case.run(&mut app, |case, app| {
         rebuilt(app);
-        run(app, AppAction::StartExtrude);
+        run(app, AppAction::Profile(soliddraft_app::app::ProfileAction::Extrude));
         // Down from 30 mm, Up to face, then a click on the rod's top at x = -10.
         extrude_params(app).flip = true;
         extrude_params(app).end = EndKind::UpToFace(None);
@@ -338,7 +338,7 @@ fn up_to_a_curved_face_picked_in_the_viewport() {
         assert!(matches!(&end, EndKind::UpToFace(Some(_))), "the click names the curved top as the limit: {end:?}");
         pointer_to_chrome(app);
         case.frame(app, "curved-limit-picked");
-        run(app, AppAction::CommitEditor);
+        run(app, AppAction::Editor(soliddraft_app::app::EditorAction::Commit));
         assert!(app.state().state.editor.is_none(), "the form closes on OK");
         let column = app.state().state.doc.features.last().unwrap().id;
         assert_eq!(app.state().state.doc.feature(column).unwrap().status, FeatureStatus::Ok);
@@ -361,7 +361,7 @@ fn a_lost_curved_start_is_repaired_by_picking_the_face_again() {
     let mut app = launch(doc, STANDARD);
     case.run(&mut app, |case, app| {
         rebuilt(app);
-        run(app, AppAction::StartExtrude);
+        run(app, AppAction::Profile(soliddraft_app::app::ProfileAction::Extrude));
         extrude_params(app).choices.from = StartKind::Surface(None);
         extrude_params(app).depth = 5.0;
         extrude_params(app).flip = true;
@@ -372,7 +372,7 @@ fn a_lost_curved_start_is_repaired_by_picking_the_face_again() {
         ribbon::render_steps::await_pick(app, point);
         ribbon::render_steps::rendered(app, |app| ribbon::click_at(app, point));
         settle(app);
-        run(app, AppAction::CommitEditor);
+        run(app, AppAction::Editor(soliddraft_app::app::EditorAction::Commit));
         let boss = app.state().state.doc.features.last().unwrap().id;
         assert_eq!(app.state().state.doc.feature(boss).unwrap().status, FeatureStatus::Ok);
 
@@ -388,7 +388,7 @@ fn a_lost_curved_start_is_repaired_by_picking_the_face_again() {
         let status = app.state().state.doc.feature(boss).unwrap().status.clone();
         let FeatureStatus::NeedsRepair(items) = status else { panic!("the boss needs repair: {status:?}") };
         assert_eq!(items.len(), 1, "{items:?}");
-        run(app, AppAction::StartRepair(boss));
+        run(app, AppAction::Body(soliddraft_app::app::BodyAction::StartRepair(boss)));
         pointer_to_chrome(app);
         case.frame(app, "repair-open");
 
@@ -406,7 +406,7 @@ fn a_lost_curved_start_is_repaired_by_picking_the_face_again() {
         );
         pointer_to_chrome(app);
         case.frame(app, "curved-replacement-picked");
-        run(app, AppAction::CommitEditor);
+        run(app, AppAction::Editor(soliddraft_app::app::EditorAction::Commit));
         assert_eq!(app.state().state.doc.feature(boss).unwrap().status, FeatureStatus::Ok);
         close(volume_of(app, 0), ROD + 180.0, "the repaired boss stands on the rod's top again");
         pointer_to_chrome(app);
@@ -425,7 +425,7 @@ fn a_headless_curved_start_part_produces_the_browser_fixture() {
         DatumPlane, EndCondition, ExtrudeFeature, ExtrudeOp, ExtrudeOptions, ExtrudeStart, FeatureId, FeatureKind,
         ProfileSource, SketchFeature,
     };
-    let mut doc = soliddraft_model::Document::new("Part", soliddraft_app::kernel());
+    let mut doc = soliddraft_model::Document::new("Part", soliddraft_app::startup::kernel());
     let add = |doc: &mut soliddraft_model::Document, kind: FeatureKind| -> FeatureId {
         doc.execute(soliddraft_model::Command::AddFeature { kind, name: None, position: None, via_assistant: false })
             .unwrap()
@@ -487,7 +487,7 @@ fn a_headless_curved_start_part_produces_the_browser_fixture() {
     let names: Vec<&str> = doc.features().iter().map(|f| f.name.as_str()).collect();
     assert_eq!(names[3], "Boss-Extrude2", "the browser check edits this feature by name: {names:?}");
     let bytes = doc.to_bytes().unwrap();
-    let back = soliddraft_model::Document::from_bytes(&bytes, soliddraft_app::kernel()).unwrap();
+    let back = soliddraft_model::Document::from_bytes(&bytes, soliddraft_app::startup::kernel()).unwrap();
     assert_eq!(back.part_json(), doc.part_json());
     if let Some(dir) = std::env::var_os("SOLIDDRAFT_BROWSER_FIXTURES") {
         std::fs::write(std::path::PathBuf::from(dir).join("extrude-from-curved.dwprt"), &bytes).unwrap();

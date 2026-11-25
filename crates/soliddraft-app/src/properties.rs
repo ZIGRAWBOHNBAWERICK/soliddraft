@@ -1211,7 +1211,7 @@ fn selection(ui: &mut egui::Ui, state: &mut AppState) {
                     });
                     ui.add_space(4.0);
                     if ui.add(egui::Button::new("Repair…").fill(theme::warn()).stroke(Stroke::NONE)).clicked() {
-                        state.push(AppAction::StartRepair(id));
+                        state.push(AppAction::Body(crate::app::BodyAction::StartRepair(id)));
                     }
                 });
         }
@@ -1230,7 +1230,7 @@ fn selection(ui: &mut egui::Ui, state: &mut AppState) {
                         state.push(AppAction::EditSketch(id));
                     }
                 } else if ui.button("Edit feature").clicked() {
-                    state.push(AppAction::EditFeature(id));
+                    state.push(AppAction::Editor(crate::app::EditorAction::EditFeature(id)));
                 }
                 if ui.button(if suppressed { "Unsuppress" } else { "Suppress" }).clicked() {
                     state.push(AppAction::Command(Command::Suppress { id, suppressed: !suppressed }));

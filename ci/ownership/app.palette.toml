@@ -1,0 +1,6 @@
+[[areas]]
+name = "app.palette"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/palette.rs"]
+module = ["palette"]

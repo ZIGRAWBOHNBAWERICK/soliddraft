@@ -1,0 +1,21 @@
+{
+  "id": "loft",
+  "file": "ci/scenarios/loft.json",
+  "acceptance": true,
+  "owners": [
+    "soliddraft-app",
+    "soliddraft-model",
+    "soliddraft-kernel-catallax"
+  ],
+  "kernel_parts": [
+    "boolean",
+    "loft",
+    "measure",
+    "mesh",
+    "step"
+  ],
+  "catallax_revision": "7cde4119547109994eb685d6ff10187ce0b846fc",
+  "route": "MCP document commands -> Catallax adapter -> pinned kernel",
+  "supported_limits": "Two-profile ruled and Smooth prisms, plus a bulged three-profile Smooth loft with square widths 2, 4 and 2 at z=0, 3 and 6. Certified display, fresh-process reopen and checked STEP export stay within the unchanged 20M request allowance. Coplanar profiles refuse without changing the part.",
+  "evidence": "Measured volume, edit, undo, redo, refused edit, save, fresh-process reopen and checked STEP export; live viewport PNG and kernel view records for every solid state."
+}

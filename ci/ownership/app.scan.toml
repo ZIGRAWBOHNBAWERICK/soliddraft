@@ -1,0 +1,6 @@
+[[areas]]
+name = "app.scan"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/scan.rs"]
+module = ["scan"]

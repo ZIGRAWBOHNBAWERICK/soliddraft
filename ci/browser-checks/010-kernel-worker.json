@@ -1,0 +1,6 @@
+{
+  "name": "Measure mass properties in the kernel worker in Chromium",
+  "script": "ci/browser-kernel-worker.js",
+  "port": 8769,
+  "query": "?demo"
+}

@@ -1,0 +1,22 @@
+{
+  "id": "canonical-p4",
+  "file": "ci/scenarios/canonical-p4.json",
+  "acceptance": true,
+  "owners": [
+    "soliddraft-app",
+    "soliddraft-model",
+    "soliddraft-kernel-catallax"
+  ],
+  "kernel_parts": [
+    "boolean",
+    "extrude",
+    "measure",
+    "mesh",
+    "shell",
+    "step"
+  ],
+  "catallax_revision": "9aed0777184353a5f52d1b660f9d2411b97f0fc9",
+  "route": "MCP document commands -> Catallax adapter -> pinned kernel",
+  "supported_limits": "Canonical 40 x 30 x 12 tray, top open, wall 2 edited to 1.5, intersected with the radius-23 disk by an exact cut of its enclosing complement. Application allowance is 20M, not the separate 1M kernel scoreboard allowance.",
+  "evidence": "Build, parameter edit, undo, redo, fresh reopen, proven STEP and closed STL exports. canonical_parts also resolves stored face and edge references and renders each checkpoint in Edit Suite."
+}

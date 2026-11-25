@@ -168,7 +168,7 @@ fn gpu() -> std::sync::MutexGuard<'static, ()> {
 /// A 60 x 40 x 20 plate standing on z = 0: six planar faces, twelve straight edges,
 /// and a top boundary the kernel can round (proved by the edge-pick regression test).
 fn box_document() -> Document {
-    let mut doc = Document::new("Box", soliddraft_app::kernel());
+    let mut doc = Document::new("Box", soliddraft_app::startup::kernel());
     doc.apply(Command::AddExtrude {
         params: ExtrudeParams {
             profile: ProfileKind::Rectangle { width: 60.0, height: 40.0 },
@@ -185,7 +185,7 @@ fn box_document() -> Document {
 /// rounds the whole top boundary or one straight top edge, but refuses a chamfer of the
 /// boundary, so this is also the body whose refusal must not poison the part.
 fn slot_document() -> Document {
-    let mut doc = Document::new("Slot", soliddraft_app::kernel());
+    let mut doc = Document::new("Slot", soliddraft_app::startup::kernel());
     let sketch = doc
         .apply(Command::AddSketch { plane: SketchPlane::Reference { plane: PlaneKind::Top, offset: 0.0 } })
         .unwrap()
@@ -204,7 +204,7 @@ fn slot_document() -> Document {
 /// The box with a 10 mm hole through it, 1 mm in from the front wall. Catallax cannot
 /// yet trim a fillet of the hole's rim against the hole wall.
 fn holed_box_document() -> Document {
-    let mut doc = Document::new("Holed box", soliddraft_app::kernel());
+    let mut doc = Document::new("Holed box", soliddraft_app::startup::kernel());
     doc.apply(Command::AddExtrude {
         params: ExtrudeParams {
             profile: ProfileKind::Rectangle { width: 60.0, height: 40.0 },
@@ -672,7 +672,7 @@ fn fillet_edge_on_the_slot_rounds_the_straight_top_edge() {
 
 fn demo_branch_pick_fillets_and_reopens(label: &str) {
     let _gpu = gpu();
-    let mut app = harness(soliddraft_app::demo_document());
+    let mut app = harness(soliddraft_app::startup::demo_document());
     ribbon::run_command(&mut app, "view_back");
     let (edge, midpoint, faces) = {
         let doc = &app.state().state.doc;
@@ -717,7 +717,7 @@ fn demo_branch_pick_fillets_and_reopens(label: &str) {
     app.render().unwrap().save(frame).unwrap();
     drop(app);
     let reopened =
-        soliddraft_app::file::open_bytes("demo-fillet.dwprt", &saved, soliddraft_app::kernel(), None).unwrap();
+        soliddraft_app::file::open_bytes("demo-fillet.dwprt", &saved, soliddraft_app::startup::kernel(), None).unwrap();
     the_rounding(&reopened, false);
     assert!(reopened.features.iter().all(|feature| feature.status == FeatureStatus::Ok));
     assert_eq!(reopened.kernel().topology(reopened.display_body().unwrap()).unwrap().faces.len(), rounded_faces);
@@ -839,7 +839,7 @@ fn fillet_edge_refusal_on_the_slot_names_the_kernel_reason_and_leaves_the_part_u
         assert_eq!(typed_reason(said), expected_reason, "the form names the kernel's reason: {said}");
         assert!(state.note.as_ref().is_none_or(|n| n.kind != NoteKind::Error), "a refusal is no error note");
     }
-    app.state_mut().state.push(soliddraft_app::state::AppAction::CancelEditor);
+    app.state_mut().state.push(soliddraft_app::state::AppAction::Editor(soliddraft_app::app::EditorAction::Cancel));
     app.run_steps(4);
     let after = shape(&app.state().state.doc);
     assert!(same_shape(before, after), "a refusal does not change the shown shape: {before:?} -> {after:?}");
@@ -884,7 +884,7 @@ fn chamfer_face_refusal_on_the_slot_names_the_kernel_reason_and_leaves_the_part_
         assert_eq!(typed_reason(said), expected_reason, "the form names the kernel's reason: {said}");
         assert!(state.note.as_ref().is_none_or(|n| n.kind != NoteKind::Error), "a refusal is no error note");
     }
-    app.state_mut().state.push(soliddraft_app::state::AppAction::CancelEditor);
+    app.state_mut().state.push(soliddraft_app::state::AppAction::Editor(soliddraft_app::app::EditorAction::Cancel));
     app.run_steps(4);
     let after = shape(&app.state().state.doc);
     assert!(same_shape(before, after), "a refusal does not change the shown shape: {before:?} -> {after:?}");
@@ -929,7 +929,7 @@ fn fillet_refusal_then_retry_rounds_the_box_top() {
         assert_eq!(typed_reason(said), expected_reason, "the form names the kernel's reason: {said}");
         assert!(state.note.as_ref().is_none_or(|n| n.kind != NoteKind::Error), "a refusal is no error note");
     }
-    app.state_mut().state.push(soliddraft_app::state::AppAction::CancelEditor);
+    app.state_mut().state.push(soliddraft_app::state::AppAction::Editor(soliddraft_app::app::EditorAction::Cancel));
     app.run_steps(4);
     assert!(close(volume(&app.state().state.doc), before), "a refusal does not change the volume");
     assert_no_blocking_failure(&app.state().state.doc, "the refused fillet");
@@ -961,7 +961,7 @@ fn output_refusals_are_plain_in_the_window() {
     let _gpu = gpu();
     let scenario: serde_json::Value =
         serde_json::from_str(include_str!("../../../ci/scenarios/oblique-cylinder-fillet.json")).unwrap();
-    let mut state = AppState::new(Document::new("Output refusals", soliddraft_app::kernel()));
+    let mut state = AppState::new(Document::new("Output refusals", soliddraft_app::startup::kernel()));
     for step in scenario["steps"].as_array().unwrap().iter().take(5) {
         let out = call_checked(
             &mut AppTools { state: &mut state },
@@ -1077,7 +1077,7 @@ fn ridealong_edit_suite_displays_fitted_face_deviation() {
     let _gpu = gpu();
     let scenario: serde_json::Value =
         serde_json::from_str(include_str!("../../../ci/scenarios/ring-fillet.json")).unwrap();
-    let mut state = AppState::new(Document::new("Fitted face", soliddraft_app::kernel()));
+    let mut state = AppState::new(Document::new("Fitted face", soliddraft_app::startup::kernel()));
     for step in scenario["steps"].as_array().unwrap().iter().take(5) {
         let out = call_checked(
             &mut AppTools { state: &mut state },
@@ -1108,7 +1108,7 @@ fn ridealong_edit_suite_displays_fitted_face_deviation() {
 fn ridealong_edit_suite_displays_repaired_face_source_deviation() {
     use soliddraft_app::state::AppAction;
     let _gpu = gpu();
-    let mut doc = Document::new("Repaired face", soliddraft_app::kernel());
+    let mut doc = Document::new("Repaired face", soliddraft_app::startup::kernel());
     let source = include_bytes!("../../../ci/fixtures/import/block-seam-20um.step");
     let proposal = doc.kernel().propose_import(source, &Default::default()).unwrap().proposals.remove(0);
     let imported = soliddraft_model::ImportStepFeature::new("seam.step", source.to_vec()).accepted(
@@ -1135,9 +1135,11 @@ fn ridealong_material_uses_the_visible_configuration() {
     use soliddraft_document::ConfigScope;
     use soliddraft_model::Command as ModelCommand;
     let _gpu = gpu();
-    let mut model =
-        soliddraft_model::Document::from_bytes(&box_document().model().to_bytes().unwrap(), soliddraft_app::kernel())
-            .unwrap();
+    let mut model = soliddraft_model::Document::from_bytes(
+        &box_document().model().to_bytes().unwrap(),
+        soliddraft_app::startup::kernel(),
+    )
+    .unwrap();
     let mut base = soliddraft_materials::Material::new("fixture-base", "Base material");
     base.density_kg_m3 = Some(1000.0);
     model

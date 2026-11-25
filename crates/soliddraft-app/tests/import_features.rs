@@ -34,7 +34,7 @@ impl Part {
         let source = dir.join("block.step");
         std::fs::write(&source, BLOCK).unwrap();
         let mut part =
-            Self { doc: Document::new("Imported block", soliddraft_app::kernel()), book: <_>::default(), dir };
+            Self { doc: Document::new("Imported block", soliddraft_app::startup::kernel()), book: <_>::default(), dir };
         let preview = part.call("preview_import", json!({"path":source})).unwrap();
         let input = json!({"path":source,"preview_token":preview["token"],"decline":[]});
         part.call("import_step", input).unwrap();
@@ -109,7 +109,7 @@ impl Part {
         let volume = self.volume(last);
         let saved = self.dir.join("part.dwprt");
         soliddraft_app::file::save(&mut self.doc, &saved).unwrap();
-        self.doc = soliddraft_app::file::open(&saved, soliddraft_app::kernel(), None).unwrap();
+        self.doc = soliddraft_app::file::open(&saved, soliddraft_app::startup::kernel(), None).unwrap();
         for f in &self.doc.features {
             assert_eq!(f.status, FeatureStatus::Ok, "reopened {} is {:?}", f.name, f.status);
         }

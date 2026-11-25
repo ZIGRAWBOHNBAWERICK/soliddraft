@@ -46,7 +46,7 @@ fn content(s: &Sketch) -> (Vec<soliddraft_app::sketch::Entity>, Vec<Constraint>)
 }
 
 fn part(source: Sketch) -> (Document, FeatureId) {
-    let mut doc = Document::new("Broken dimensions", soliddraft_app::kernel());
+    let mut doc = Document::new("Broken dimensions", soliddraft_app::startup::kernel());
     let id = doc
         .apply(Command::AddSketch { plane: SketchPlane::Reference { plane: PlaneKind::Top, offset: 0.0 } })
         .unwrap()

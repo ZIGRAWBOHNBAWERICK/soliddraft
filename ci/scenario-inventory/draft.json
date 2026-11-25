@@ -1,0 +1,22 @@
+{
+  "id": "draft",
+  "file": "ci/scenarios/draft.json",
+  "acceptance": true,
+  "owners": [
+    "soliddraft-app",
+    "soliddraft-model",
+    "soliddraft-kernel-catallax"
+  ],
+  "kernel_parts": [
+    "boolean",
+    "draft",
+    "extrude",
+    "measure",
+    "mesh",
+    "step"
+  ],
+  "catallax_revision": "76cdf97f3e85d22ea74868b77d849498ebdfcf1c",
+  "route": "MCP sketch, extrude, draft, boss and edit_draft -> real document rebuild -> pinned Catallax analytic draft -> checked STEP on one request allowance",
+  "supported_limits": "Two planar walls of a block drafted 3 and 5 degrees about z=0, with a boss on the top face; 20M per request, export included; broader draft arrangements stay refused; other rational angles are unproved here",
+  "evidence": "result.json, protocol.json, commands/NNNN/{command.json,kernel.json,viewport.png,view.svg}; commands/0003/{part.step,step-oracle.json,step-oracle.stdout}; draft-checked.dwprt and commands-1/0001/{part.step,step-report.json,raw-step.stdout,step-oracle.json,step-oracle.stdout}"
+}

@@ -1,0 +1,6 @@
+[[areas]]
+name = "v2.measure"
+owner = "V2"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/measure/"]
+module = ["measure"]

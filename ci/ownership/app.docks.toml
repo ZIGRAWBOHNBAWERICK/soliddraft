@@ -1,0 +1,6 @@
+[[areas]]
+name = "app.docks"
+owner = "V4"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/app/presentation/docks.rs"]
+module = ["app", "presentation", "docks"]

@@ -1,0 +1,7 @@
+{
+  "files": {
+    "ci/check-step-pmi.py": [
+      "step-opencascade"
+    ]
+  }
+}

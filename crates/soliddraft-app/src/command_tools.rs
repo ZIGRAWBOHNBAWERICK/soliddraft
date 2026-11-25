@@ -3717,7 +3717,7 @@ impl ToolHost for CommandTools<'_> {
 /// boss with a Ø12 bore. The fillet, the hole pattern and the slot are left for the
 /// assistant.
 pub fn board_bracket() -> Document {
-    let mut doc = Document::new("Part1", crate::kernel());
+    let mut doc = Document::new("Part1", crate::startup::kernel());
     let rect = |center: Point, width: f64, height: f64| Shape::Rectangle { center, width, height };
     let circle = |center: Point, diameter: f64| Shape::Circle { center, diameter };
     let steps = [
@@ -3861,7 +3861,7 @@ mod tests {
 
     #[test]
     fn assistant_values_require_a_proposal_and_explicit_apply() {
-        let mut doc = Document::new("Part1", crate::kernel());
+        let mut doc = Document::new("Part1", crate::startup::kernel());
         let mut book = ProposalBook::default();
         let mut tools = CommandTools { doc: &mut doc, book: &mut book, surface: Surface::Assistant, drawing: None };
         let arguments = json!({"name":"plate_w","expression":"140"});
@@ -3976,7 +3976,7 @@ mod tests {
     #[test]
     fn mcp_verbs_run_directly_and_undo() {
         use soliddraft_kernel_api::counting::{Counting, Work};
-        let kernel = std::sync::Arc::new(Counting::new(crate::kernel()));
+        let kernel = std::sync::Arc::new(Counting::new(crate::startup::kernel()));
         let mut doc = Document::new("Part1", kernel.clone());
         let mut book = ProposalBook::default();
         let mut tools = CommandTools { doc: &mut doc, book: &mut book, surface: Surface::Mcp, drawing: None };
@@ -4100,7 +4100,7 @@ mod tests {
 
     #[test]
     fn mcp_measure_refuses_when_the_kernel_refuses_the_proof() {
-        let kernel = std::sync::Arc::new(RefusesProofs(crate::kernel()));
+        let kernel = std::sync::Arc::new(RefusesProofs(crate::startup::kernel()));
         let mut doc = Document::new("Part1", kernel);
         let mut book = ProposalBook::default();
         let mut tools = CommandTools { doc: &mut doc, book: &mut book, surface: Surface::Mcp, drawing: None };
@@ -4135,7 +4135,7 @@ mod tests {
 
     #[test]
     fn reference_dimensions_report_measurements_and_refuse_numeric_edits() {
-        let mut doc = Document::new("Reference controls", crate::kernel());
+        let mut doc = Document::new("Reference controls", crate::startup::kernel());
         let mut book = ProposalBook::default();
         let mut tools = CommandTools { doc: &mut doc, book: &mut book, surface: Surface::Mcp, drawing: None };
         let mcp = Caller::Mcp { client: "test".into() };
@@ -4163,7 +4163,7 @@ mod tests {
     /// sketch showed -4.
     #[test]
     fn a_negative_or_zero_length_is_refused_and_changes_nothing() {
-        let mut doc = Document::new("Part1", crate::kernel());
+        let mut doc = Document::new("Part1", crate::startup::kernel());
         let mut book = ProposalBook::default();
         let mut tools = CommandTools { doc: &mut doc, book: &mut book, surface: Surface::Mcp, drawing: None };
         let mcp = Caller::Mcp { client: "test".into() };

@@ -17,7 +17,7 @@ fn call(doc: &mut Document, name: &str, input: Value) -> Value {
 }
 
 fn profile() -> Document {
-    let mut doc = Document::new("Straight sweep", soliddraft_app::kernel());
+    let mut doc = Document::new("Straight sweep", soliddraft_app::startup::kernel());
     call(
         &mut doc,
         "sketch",
@@ -67,7 +67,7 @@ fn sweep_commands_edit_undo_reopen_and_export_the_saved_path() {
     check(&doc, 48.0);
     let path = std::env::temp_dir().join(format!("soliddraft-sweep-{}.dwprt", std::process::id()));
     call(&mut doc, "save", json!({"path":path}));
-    let mut reopened = Document::new("Reopened", soliddraft_app::kernel());
+    let mut reopened = Document::new("Reopened", soliddraft_app::startup::kernel());
     call(&mut reopened, "open", json!({"path":path}));
     check(&reopened, 48.0);
     assert_eq!(before, names(&reopened));
@@ -174,7 +174,7 @@ fn refused_paths_and_curved_profiles_leave_the_document_unchanged() {
     ] {
         assert!(serde_json::from_value::<soliddraft_app::command_tools::Line>(input).is_err());
     }
-    let mut circle = Document::new("Curved profile", soliddraft_app::kernel());
+    let mut circle = Document::new("Curved profile", soliddraft_app::startup::kernel());
     call(&mut circle, "sketch", json!({"plane":"top","shapes":[{"shape":"circle","center":[0,0,0],"diameter":2}]}));
     let result =
         CommandTools { doc: &mut circle, book: &mut ProposalBook::default(), surface: Surface::Mcp, drawing: None }
@@ -214,7 +214,7 @@ fn sweep_work_refusal_is_plain_and_preserves_the_sketch() {
 }
 
 fn beside_the_path() -> Document {
-    let mut doc = Document::new("Chain sweep", soliddraft_app::kernel());
+    let mut doc = Document::new("Chain sweep", soliddraft_app::startup::kernel());
     call(
         &mut doc,
         "sketch",
@@ -276,7 +276,7 @@ fn line_arc_chain_edits_undoes_reopens_selects_and_exports() {
     selectable(&doc, at(12.0));
     let path = std::env::temp_dir().join(format!("soliddraft-chain-{}.dwprt", std::process::id()));
     call(&mut doc, "save", json!({"path":path}));
-    let mut reopened = Document::new("Reopened", soliddraft_app::kernel());
+    let mut reopened = Document::new("Reopened", soliddraft_app::startup::kernel());
     call(&mut reopened, "open", json!({"path":path}));
     selectable(&reopened, at(12.0));
     assert_eq!(before, names(&reopened));
@@ -547,7 +547,7 @@ fn spline_sweep_edits_reopens_and_refuses_a_return_without_changing_the_part() {
     check_spline(&doc, 48.0);
     let path = std::env::temp_dir().join(format!("soliddraft-spline-sweep-{}.dwprt", std::process::id()));
     call(&mut doc, "save", json!({"path":path}));
-    let mut reopened = Document::new("Reopened spline", soliddraft_app::kernel());
+    let mut reopened = Document::new("Reopened spline", soliddraft_app::startup::kernel());
     call(&mut reopened, "open", json!({"path":path}));
     check_spline(&reopened, 48.0);
     assert_eq!(reopened.features[1].kind, before);

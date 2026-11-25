@@ -1,0 +1,7 @@
+{
+  "files": {
+    "ci/browser-hole-wizard.mjs": [
+      "web"
+    ]
+  }
+}

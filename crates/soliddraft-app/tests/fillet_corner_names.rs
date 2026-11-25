@@ -57,7 +57,7 @@ fn spherical_corners_keep_their_names_through_upstream_and_radius_edits() {
     let dir = std::env::temp_dir().join(format!("soliddraft-corner-names-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     soliddraft_app::file::set_config_dir(Some(dir.join("config")));
-    let mut state = AppState::new(soliddraft_app::new_document());
+    let mut state = AppState::new(soliddraft_app::startup::new_document());
     let line = |a: [f64; 2], b: [f64; 2]| {
         let (a, b) = (json!({ "u": a[0], "v": a[1] }), json!({ "u": b[0], "v": b[1] }));
         json!({ "tool": "add", "kind": { "type": "line", "a": a, "b": b }, "construction": false })
@@ -131,7 +131,7 @@ fn a_stored_corner_reference_stays_on_its_own_sphere() {
     let dir = std::env::temp_dir().join(format!("soliddraft-corner-reference-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     soliddraft_app::file::set_config_dir(Some(dir.join("config")));
-    let mut state = AppState::new(soliddraft_app::new_document());
+    let mut state = AppState::new(soliddraft_app::startup::new_document());
     let scenario: Value = serde_json::from_str(SCENARIO).unwrap();
     let steps = scenario["steps"].as_array().unwrap();
     for step in steps[..4].iter().filter(|s| s["tool"] != "feature") {
@@ -187,7 +187,7 @@ fn a_stored_corner_reference_stays_on_its_own_sphere() {
     let path = dir.join("skew-corner.dwprt");
     run(&mut state, "save", json!({ "path": path }));
     drop(state);
-    let doc = soliddraft_app::file::open(&path, soliddraft_app::kernel(), None).unwrap();
+    let doc = soliddraft_app::file::open(&path, soliddraft_app::startup::kernel(), None).unwrap();
     let mut reopened = AppState::new(doc);
     check(&reopened, 0.5, "fresh open");
     let caller = Caller::Mcp { client: "test".into() };

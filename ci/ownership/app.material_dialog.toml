@@ -1,0 +1,6 @@
+[[areas]]
+name = "app.material_dialog"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/material_dialog.rs"]
+module = ["material_dialog"]

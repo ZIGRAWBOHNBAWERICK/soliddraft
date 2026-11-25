@@ -358,7 +358,7 @@ mod tests {
     use crate::document::{Command, ExtrudeParams, ProfileKind};
 
     fn block() -> Document {
-        let mut doc = Document::new("Section block", crate::kernel());
+        let mut doc = Document::new("Section block", crate::startup::kernel());
         doc.apply(Command::AddExtrude {
             params: ExtrudeParams {
                 profile: ProfileKind::Rectangle { width: 60.0, height: 40.0 },
@@ -459,7 +459,7 @@ mod tests {
 
     #[test]
     fn a_cap_keeps_the_opening_through_a_hollow_part() {
-        let kernel = crate::kernel();
+        let kernel = crate::startup::kernel();
         let mut profile = Profile::rectangle(Plane::XY, Point2::new(0.0, 0.0), 60.0, 40.0);
         profile.holes.push(Profile::rectangle(Plane::XY, Point2::new(0.0, 0.0), 20.0, 10.0).outer);
         let sketch = kernel.create_body_from_profile(&OpTag::new("hollow_profile"), &profile).unwrap();

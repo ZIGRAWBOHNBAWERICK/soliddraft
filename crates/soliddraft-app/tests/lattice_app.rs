@@ -70,7 +70,7 @@ fn ribbon_and_editor_create_a_terminal_unproved_lattice() {
     let temporary = std::env::temp_dir().join(format!("soliddraft-lattice-{}", std::process::id()));
     std::fs::create_dir_all(&temporary).unwrap();
     soliddraft_app::file::set_config_dir(Some(temporary.join("config")));
-    let mut doc = Document::new("Lattice UI", soliddraft_app::kernel());
+    let mut doc = Document::new("Lattice UI", soliddraft_app::startup::kernel());
     doc.apply(Command::AddExtrude {
         params: ExtrudeParams {
             profile: ProfileKind::Rectangle { width: 25.0, height: 15.0 },
@@ -131,7 +131,7 @@ fn ribbon_and_editor_create_a_terminal_unproved_gyroid() {
     let temporary = std::env::temp_dir().join(format!("soliddraft-gyroid-{}", std::process::id()));
     std::fs::create_dir_all(&temporary).unwrap();
     soliddraft_app::file::set_config_dir(Some(temporary.join("config")));
-    let mut doc = Some(Document::new("Gyroid UI", soliddraft_app::kernel()));
+    let mut doc = Some(Document::new("Gyroid UI", soliddraft_app::startup::kernel()));
     let mut app = Harness::builder()
         .with_size(vec2(1440.0, 900.0))
         .with_render_every_step(true)
@@ -200,7 +200,7 @@ fn ribbon_and_editor_create_a_terminal_unproved_gyroid() {
 fn ridealong_edit_suite_exposes_all_lattice_cells() {
     let temporary = std::env::temp_dir().join(format!("soliddraft-cells-{}", std::process::id()));
     soliddraft_app::file::set_config_dir(Some(temporary.join("config")));
-    let mut doc = Document::new("Lattice cells", soliddraft_app::kernel());
+    let mut doc = Document::new("Lattice cells", soliddraft_app::startup::kernel());
     doc.apply(Command::AddExtrude {
         params: ExtrudeParams {
             profile: ProfileKind::Rectangle { width: 25.0, height: 15.0 },

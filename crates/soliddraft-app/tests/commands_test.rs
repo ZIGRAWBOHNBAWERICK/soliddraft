@@ -35,7 +35,7 @@ fn gpu_available() -> bool {
 type App<'a> = Harness<'a, SolidDraftApp>;
 
 fn harness() -> App<'static> {
-    harness_with(soliddraft_app::demo_document)
+    harness_with(soliddraft_app::startup::demo_document)
 }
 
 fn harness_with(doc: fn() -> soliddraft_app::document::Document) -> App<'static> {
@@ -284,7 +284,7 @@ fn assigned_shortcuts_run_immediately_in_the_app_without_a_restart() {
     }
     let dir = std::env::temp_dir().join(format!("soliddraft-shortcut-editor-live-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
-    let mut harness = harness_in(soliddraft_app::demo_document, dir.clone());
+    let mut harness = harness_in(soliddraft_app::startup::demo_document, dir.clone());
     harness.run_steps(3);
     let proof = std::env::var_os("SOLIDDRAFT_SHORTCUT_PROOF_DIR").map(PathBuf::from);
     if let Some(proof) = &proof {

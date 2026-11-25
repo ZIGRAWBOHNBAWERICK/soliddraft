@@ -1,0 +1,6 @@
+[[areas]]
+name = "app.kernel_worker"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/kernel_worker.rs"]
+module = ["kernel_worker"]

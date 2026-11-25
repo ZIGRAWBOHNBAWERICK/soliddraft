@@ -11,7 +11,7 @@ fn call(state: &mut AppState, name: &str, arguments: Value, refused: bool) {
 
 #[test]
 fn circular_operations_use_strict_schema_and_atomic_batch_history() {
-    let mut state = AppState::new(Document::new("Circular", soliddraft_app::kernel()));
+    let mut state = AppState::new(Document::new("Circular", soliddraft_app::startup::kernel()));
     call(
         &mut state,
         "sketch_geometry",

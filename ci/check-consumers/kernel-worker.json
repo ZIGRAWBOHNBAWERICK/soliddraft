@@ -1,0 +1,7 @@
+{
+  "files": {
+    "ci/browser-kernel-worker.js": [
+      "web"
+    ]
+  }
+}

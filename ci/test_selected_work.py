@@ -13,6 +13,8 @@ import tempfile
 import unittest
 from unittest import mock
 
+from registries import scenario_inventory
+
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 
@@ -195,7 +197,7 @@ class WorkPlan(unittest.TestCase):
     def test_source_helpers_policy_and_unknown_changes_cannot_drop_scenarios(self):
         scenario = ['M', 'ci/scenarios/bracket.json']
         for path in ('crates/soliddraft-app/src/lib.rs', 'ci/run-scenarios.py', 'ci/run-selected.py',
-                     'ci/known-over-budget.json', 'ci/scenario-inventory.json', 'recipes/bracket.json',
+                     'ci/known-over-budget.json', 'ci/scenario-inventory/bracket.json', 'recipes/bracket.json',
                      '.github/workflows/hosted.yml', 'unknown'):
             with self.subTest(path=path):
                 self.assertIsNone(self.plan([scenario, ['M', path]])['scenarios'])
@@ -273,14 +275,12 @@ class PinMove(unittest.TestCase):
         write(self.root, 'Cargo.lock', f'version = 4\n\n[[package]]\nname = "catallax-app"\nversion = "0.4.0"\n'
                                        f'source = "{source}"\n')
         write(self.root, 'ci/kernel-parts.json', (ROOT / 'ci/kernel-parts.json').read_text())
-        entries = []
         for name, parts in scenarios.items():
             write(self.root, f'ci/scenarios/{name}.json', '{}')
             entry = {'id': name, 'file': f'ci/scenarios/{name}.json'}
             if parts is not None:
                 entry['kernel_parts'] = parts
-            entries.append(entry)
-        write(self.root, 'ci/scenario-inventory.json', json.dumps({'scenarios': entries}))
+            write(self.root, f'ci/scenario-inventory/{name}.json', json.dumps(entry))
 
     def bump(self, edits, scenarios=None):
         new = self.kernel_commit(edits)
@@ -402,7 +402,7 @@ class Runner(unittest.TestCase):
             runner.scenario_paths(dict(selector.FULL_WORK, scenarios=['ci/scenarios/missing.json']), ROOT)
 
     def test_full_scenario_plan_runs_the_complete_inventory(self):
-        expected = sorted(e['file'] for e in json.loads((ROOT / 'ci/scenario-inventory.json').read_text())['scenarios'])
+        expected = sorted(e['file'] for e in scenario_inventory(ROOT)['scenarios'])
         self.assertEqual(runner.scenario_paths(selector.FULL_WORK, ROOT), expected)
 
     def test_scenario_shards_cover_the_selected_inventory_once(self):

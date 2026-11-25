@@ -1,0 +1,6 @@
+[[areas]]
+name = "app.tree"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/tree.rs"]
+module = ["tree"]

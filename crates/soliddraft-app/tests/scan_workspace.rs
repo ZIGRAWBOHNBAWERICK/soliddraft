@@ -81,7 +81,8 @@ fn scan_fit_uses_the_reference_owner_after_body_selection_changes() {
         assert!((volume - 120.0).abs() < 0.2, "{volume}");
         let saved = doc.model().to_bytes().unwrap();
         let reopened =
-            soliddraft_app::file::open_bytes("two-bodies.dwprt", &saved, soliddraft_app::kernel(), None).unwrap();
+            soliddraft_app::file::open_bytes("two-bodies.dwprt", &saved, soliddraft_app::startup::kernel(), None)
+                .unwrap();
         assert_eq!(reopened.feature(scan).unwrap().body_key, 1);
         assert_eq!(reopened.model().live_bodies().len(), 2);
         app.state_mut().state.doc.undo().unwrap();
@@ -126,7 +127,7 @@ fn open_scan_review_cancel_accept_save_reopen_and_fit_refusal_leave_reference_in
     let path = case.path("open.obj");
     let bytes = b"v 0 0 0\nv 10 0 0\nv 0 10 0\nv 5 5 3\nf 1 2 3\n";
     std::fs::write(&path, bytes).unwrap();
-    let mut app = ribbon::app(Document::new("Reference", soliddraft_app::kernel()));
+    let mut app = ribbon::app(Document::new("Reference", soliddraft_app::startup::kernel()));
     app.state_mut().state.push(AppAction::ImportScan(Some(path.clone())));
     app.run_steps(4);
     app.get_by_label("3 open edges · 0 reversed edge pairs · 0 nonmanifold edges");
@@ -136,7 +137,7 @@ fn open_scan_review_cancel_accept_save_reopen_and_fit_refusal_leave_reference_in
     assert!(app.state().state.doc.features.is_empty());
     app.state_mut().state.push(AppAction::ImportScan(Some(path.clone())));
     app.run_steps(3);
-    app.state_mut().state.doc = Document::new("Another part", soliddraft_app::kernel());
+    app.state_mut().state.doc = Document::new("Another part", soliddraft_app::startup::kernel());
     app.get_by_role_and_label(egui::accesskit::Role::Button, "Accept reference").click();
     app.run_steps(3);
     assert!(app.state().state.doc.features.is_empty());
@@ -148,7 +149,8 @@ fn open_scan_review_cancel_accept_save_reopen_and_fit_refusal_leave_reference_in
     assert!(app.state().state.doc.display_body().is_none());
     case.frame(&mut app, "reference");
     let saved = app.state().state.doc.model().to_bytes().unwrap();
-    let reopened = soliddraft_app::file::open_bytes("scan.dwprt", &saved, soliddraft_app::kernel(), None).unwrap();
+    let reopened =
+        soliddraft_app::file::open_bytes("scan.dwprt", &saved, soliddraft_app::startup::kernel(), None).unwrap();
     let FeatureKind::Scan(scan) = &reopened.features[0].kind else { panic!("scan") };
     assert_eq!(scan.source.bytes, bytes);
     assert!(scan.fit.is_none());
@@ -182,7 +184,7 @@ fn fit_scan_reviews_both_numbers_and_maps_then_reopens_an_editable_solid() {
     let path = case.path("cloud.obj");
     let bytes = cloud();
     std::fs::write(&path, &bytes).unwrap();
-    let mut app = ribbon::app(Document::new("Fit", soliddraft_app::kernel()));
+    let mut app = ribbon::app(Document::new("Fit", soliddraft_app::startup::kernel()));
     app.run_steps(3);
     app.state_mut().state.push(AppAction::ImportScan(Some(path)));
     app.run_steps(4);
@@ -233,7 +235,7 @@ fn fit_scan_reviews_both_numbers_and_maps_then_reopens_an_editable_solid() {
     assert_eq!(proof["features"][0]["work_used"], work);
     case.frame(&mut app, "accepted-fit");
     let mut reopened =
-        soliddraft_app::file::open_bytes("fitted.dwprt", &saved, soliddraft_app::kernel(), None).unwrap();
+        soliddraft_app::file::open_bytes("fitted.dwprt", &saved, soliddraft_app::startup::kernel(), None).unwrap();
     assert_eq!(reopened.features[0].status, FeatureStatus::Ok);
     assert!(reopened.proof_report().features[0].work_used.is_some());
     let FeatureKind::Scan(scan) = &reopened.features[0].kind else { panic!("scan") };
@@ -245,9 +247,9 @@ fn fit_scan_reviews_both_numbers_and_maps_then_reopens_an_editable_solid() {
         .apply(Command::AddFeature(FeatureKind::ReferencePlane(soliddraft_model::SketchPlane::Face { face })))
         .unwrap();
     let saved = reopened.model().to_bytes().unwrap();
-    let kernel = soliddraft_app::kernel();
+    let kernel = soliddraft_app::startup::kernel();
     let mut unrelated = Document::new("Unrelated", kernel.clone());
-    soliddraft_app::populate_demo(&mut unrelated);
+    soliddraft_app::startup::populate_demo(&mut unrelated);
     reopened = soliddraft_app::file::open_bytes("named-fit.dwprt", &saved, kernel, None).unwrap();
     assert!(reopened.features.iter().all(|f| f.status == FeatureStatus::Ok));
     reopened
@@ -301,7 +303,7 @@ fn reference_review_on_other_document(assembly: bool) {
     let case = ribbon::case(if assembly { "scan-assembly-isolation" } else { "scan-drawing-isolation" });
     let path = case.path("reference.obj");
     std::fs::write(&path, b"v 0 0 0\nv 10 0 0\nv 0 10 0\nf 1 2 3\n").unwrap();
-    let mut app = ribbon::app(Document::new("Retained part", soliddraft_app::kernel()));
+    let mut app = ribbon::app(Document::new("Retained part", soliddraft_app::startup::kernel()));
     app.state_mut().state.push(AppAction::ImportScan(Some(path.clone())));
     app.run_steps(4);
     app.get_by_label("Accept reference");
@@ -346,7 +348,7 @@ fn review_fitted_part_cannot_be_accepted_from_a_drawing() {
     let case = ribbon::case("scan-fit-drawing-isolation");
     let path = case.path("cloud.obj");
     std::fs::write(&path, cloud()).unwrap();
-    let mut app = ribbon::app(Document::new("Retained fit", soliddraft_app::kernel()));
+    let mut app = ribbon::app(Document::new("Retained fit", soliddraft_app::startup::kernel()));
     app.state_mut().state.push(AppAction::ImportScan(Some(path)));
     app.run_steps(4);
     app.get_by_label("Accept reference").click();
@@ -408,7 +410,7 @@ fn review_counting_preserves_scan_admission_fit_and_saved_replay() {
     );
     assert!((counting.mass_properties(doc.display_body().unwrap()).unwrap().volume - 120.0).abs() < 0.2);
     let saved = doc.model().to_bytes().unwrap();
-    let fresh = Arc::new(Counting::new(soliddraft_app::kernel()));
+    let fresh = Arc::new(Counting::new(soliddraft_app::startup::kernel()));
     let reopened = soliddraft_app::file::open_bytes("counted-fit.dwprt", &saved, fresh.clone(), None).unwrap();
     assert_eq!(reopened.features[0].status, FeatureStatus::Ok);
     assert!(reopened.display_body().is_some());

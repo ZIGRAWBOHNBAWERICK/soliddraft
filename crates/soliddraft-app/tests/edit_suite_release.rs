@@ -701,7 +701,7 @@ fn a_proof_start_refusal_belongs_to_the_changed_chip() {
     let case = ribbon::case("timeline-proof-start-refusal");
     let kernel = Arc::new(gated::Gated::default());
     let mut doc = Document::new("Proof start refusal", kernel.clone());
-    soliddraft_app::populate_demo(&mut doc);
+    soliddraft_app::startup::populate_demo(&mut doc);
     let id = doc.features[0].id;
     let later = doc.features[1].name.clone();
     let mut app = suite(doc);
@@ -740,7 +740,7 @@ fn file_export_action_writes_the_step_and_both_proof_reports() {
         let path = case.path("plate.step");
         std::fs::write(&path, b"previous STEP").unwrap();
         let id = app.state().state.doc.features[0].id;
-        app.state_mut().state.push(AppAction::EditFeature(id));
+        app.state_mut().state.push(AppAction::Editor(soliddraft_app::app::EditorAction::EditFeature(id)));
         app.run_steps(8);
         assert!(app.state().state.editor.is_some());
         assert!(app.query_all_by_label("Boss-Extrude1 status: Working").next().is_some());

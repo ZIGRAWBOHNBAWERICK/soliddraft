@@ -226,7 +226,8 @@ fn exercise(index: usize) {
         app.key_press(egui::Key::Z);
         app.run_steps(5);
         app.render().unwrap().save(dir.join(format!("{label}.png"))).unwrap();
-        state = AppState::new(std::mem::replace(&mut app.state_mut().state.doc, soliddraft_app::new_document()));
+        state =
+            AppState::new(std::mem::replace(&mut app.state_mut().state.doc, soliddraft_app::startup::new_document()));
     }
 }
 

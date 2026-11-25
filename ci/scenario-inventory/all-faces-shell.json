@@ -1,0 +1,24 @@
+{
+  "id": "all-faces-shell",
+  "file": "ci/scenarios/all-faces-shell.json",
+  "acceptance": true,
+  "owners": [
+    "soliddraft-app",
+    "soliddraft-model",
+    "soliddraft-kernel-catallax"
+  ],
+  "kernel_parts": [
+    "boolean",
+    "chamfer",
+    "extrude",
+    "hole",
+    "measure",
+    "mesh",
+    "shell",
+    "step"
+  ],
+  "catallax_revision": "76cdf97f3e85d22ea74868b77d849498ebdfcf1c",
+  "route": "MCP document commands -> Catallax adapter -> pinned kernel",
+  "supported_limits": "A 40 x 30 x 12 mm block with a through bore and a chamfer, every face opened; the part has no body afterwards, and an export of it is refused.",
+  "evidence": "Build, wall edit, upstream edit, undo, redo, save, fresh-process reopen and refused exports; result.json, command.json and the saved part."
+}

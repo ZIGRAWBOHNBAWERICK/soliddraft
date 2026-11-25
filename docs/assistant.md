@@ -40,13 +40,21 @@ Apply runs the same commands as the ribbon, as one step on the document's undo s
 
 The assistant can only propose. Its `apply` tool fails unless the user turned on Auto-apply (Tools, Assistant) for the session.
 
+## Manufacturing information
+
+The assistant drives the manufacturing information tools, and rules decide every value it puts on the part. `pmi_recognise`, `pmi_interview` and `pmi_list` read the part and run at once. The assistant relays the interview's questions with their proposals and reasons, and asks the user for what no rule proposes, such as the material.
+
+`pmi_answer`, `pmi_add` and `manufacturing_package` make a card, as `propose` does. `pmi_answer` and `pmi_add` run first on a scratch copy of the part, and the card lists each item they would add, change or remove and each note they would set. Apply makes the change as one undo step, which the card's Undo button undoes. The package card names the STEP, PDF and DXF files; Apply writes them and opens the drawing, as Inspect > Drawing and files does, and leaves nothing to undo. With Auto-apply on, each runs at once. The assistant's `apply` tool cannot write the package without Auto-apply either.
+
+The system prompt tells the assistant to take only the proposals the user accepted and to put only values the user stated. `pmi_remove` and `pmi_notes` stay with MCP clients and `soliddraft run`. `crates/soliddraft-app/src/pmi/assistant.rs` makes the cards, and `chat.rs` serves the assistant's tools over the whole app, since the package needs the drawing.
+
 ## Fillet refusals
 
 When a fillet radius is too large and the kernel reports a limit, the Fillet form shows the limit, names any faces the kernel identified, and offers one smaller radius. Choose **Apply … mm radius** to check and apply the correction as one undo step. The assistant keeps the current edge picks and checks that the corrected fillet and its downstream features still build. This works for new fillets and edits, with or without a provider key.
 
 ## Tools
 
-The assistant gets `model_summary`, `feature`, `selection`, `measure`, `mass_properties`, `propose` and `apply`. The verbs are `sketch`, `extrude`, `cut`, `hole`, `linear_pattern`, `circular_pattern`, `mirror`, `draft`, `fillet`, `chamfer`, `edit_extrude`, `edit_cut`, `edit_hole`, `edit_pattern`, `edit_mirror`, `edit_draft`, `edit_fillet`, `edit_chamfer`, `suppress` and `delete_feature`; `extrude` and `cut` also take an up-to-next or up-to-face end; for the assistant they are the line types inside `propose`. Every tool's name, description and parameters come from the command registry in `commands.rs`, the table the ribbon, the keyboard shortcuts and `soliddraft commands` also read, so a new verb shows up everywhere at once. The parameter schemas sit beside the typed recipe lines in `command_tools.rs`.
+The assistant gets `model_summary`, `feature`, `selection`, `measure`, `measure_entity`, `mass_properties`, `field_mass`, `propose` and `apply`, and the six manufacturing information tools: `pmi_recognise`, `pmi_interview`, `pmi_answer`, `pmi_add`, `pmi_list` and `manufacturing_package`. The verbs are `sketch`, `extrude`, `cut`, `hole`, `linear_pattern`, `circular_pattern`, `mirror`, `draft`, `fillet`, `chamfer`, `edit_extrude`, `edit_cut`, `edit_hole`, `edit_pattern`, `edit_mirror`, `edit_draft`, `edit_fillet`, `edit_chamfer`, `suppress` and `delete_feature`; `extrude` and `cut` also take an up-to-next or up-to-face end; for the assistant they are the line types inside `propose`. Every tool's name, description and parameters come from the command registry in `commands.rs`, the table the ribbon, the keyboard shortcuts and `soliddraft commands` also read, so a new verb shows up everywhere at once. The parameter schemas sit beside the typed recipe lines in `command_tools.rs`.
 
 `feature` lists the faces and edges a feature made, with positions, planar faces' normals and sketch frames, the two faces each edge joins, and whether the edge is a convex outside edge or a concave inside corner. That is how the model finds "the inside corner" without a selection. For a sketch it also numbers the dimensions.
 

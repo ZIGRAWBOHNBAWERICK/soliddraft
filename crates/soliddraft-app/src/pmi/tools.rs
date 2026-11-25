@@ -1,4 +1,6 @@
-//! Manufacturing information over MCP: add, change, remove and list a part's items.
+//! Manufacturing information tools: add, change, remove and list a part's items, recognise
+//! its features and run the interview. MCP clients and `soliddraft run` get every one;
+//! the assistant gets the six its registry rows give it (see `assistant.rs`).
 
 use serde_json::{Value, json};
 use soliddraft_kernel_api::pmi::{
@@ -9,7 +11,6 @@ use soliddraft_model::FaceRef;
 
 use crate::command_tools::{face_by_name, name_of_face};
 use crate::document::Document;
-use crate::state::AppState;
 
 fn text<'a>(input: &'a Value, key: &str) -> Option<&'a str> {
     input.get(key).and_then(Value::as_str).map(str::trim).filter(|text| !text.is_empty())
@@ -210,6 +211,12 @@ fn item(doc: &Document, input: &Value) -> Result<PmiItem<FaceRef>, String> {
 
 /// The part's items as rows of JSON: name, kind, callout, faces and any problem.
 pub(crate) fn rows(doc: &Document) -> Value {
+    rows_named(doc, doc)
+}
+
+/// The rows of `doc`'s items, with faces named as `names` names them: a scratch copy's
+/// items, named from the part it was copied from.
+pub(crate) fn rows_named(doc: &Document, names: &Document) -> Value {
     let rows: Vec<Value> = doc
         .model()
         .pmi_rows()
@@ -221,7 +228,7 @@ pub(crate) fn rows(doc: &Document) -> Value {
                 Some(on_body) => on_body
                     .features()
                     .into_iter()
-                    .map(|feature| feature.iter().filter_map(|face| name_of_face(doc, *face)).collect())
+                    .map(|feature| feature.iter().filter_map(|face| name_of_face(names, *face)).collect())
                     .collect(),
                 None => row
                     .item
@@ -280,9 +287,9 @@ fn notes(doc: &Document, input: &Value) -> Result<PartNotes, String> {
     Ok(notes)
 }
 
-/// Runs the manufacturing information tools. `None` hands the call on.
-pub(crate) fn run(state: &mut AppState, name: &str, input: &Value) -> Option<Result<Value, String>> {
-    let doc = &mut state.doc;
+/// Runs the manufacturing information tools that work on the part alone. `None` hands
+/// the call on.
+pub(crate) fn run(doc: &mut Document, name: &str, input: &Value) -> Option<Result<Value, String>> {
     Some(match name {
         "pmi_add" => (|| {
             let item = item(doc, input)?;

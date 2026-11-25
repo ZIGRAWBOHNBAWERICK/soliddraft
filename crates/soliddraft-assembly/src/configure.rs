@@ -5,13 +5,106 @@ use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap};
 
 use glam::DVec3;
+use soliddraft_document::{ConfigurationId, ContentHash, DocKind, DocRef, DocumentId};
+use soliddraft_materials::Appearance;
 
 use crate::configuration::ExplodeStep;
 use crate::document::{AssemblyDocument, Configured, EditError};
+use crate::mesh::SharedMesh;
 use crate::occurrence::{Flags, OccurrenceIndex};
 use crate::path::{OccurrencePath, Step};
 use crate::placement::{Aabb, Placement};
 use crate::schema::{Assembly, Invalid};
+use crate::store::{DefinitionIndex, DefinitionKey};
+
+/// A live (non-removed) occurrence in an open assembly with its path, pinned definition
+/// and configuration, flags, and accepted world placement.
+///
+/// The placement is always the accepted design placement from
+/// [`AssemblyDocument::accepted_worlds`], never a viewport drag preview or an exploded
+/// pose. Readers (drawings, robot export, in-context editing, BOM) apply their own
+/// selection rules (such as hidden-part handling, mesh vs exact body, or relative frame)
+/// on top of these records without indexing the occurrence table and definition store
+/// separately.
+#[derive(Clone, Debug)]
+pub struct PlacedOccurrence {
+    /// Its row in the occurrence table.
+    pub row: OccurrenceIndex,
+    /// Its persistent path from the root assembly.
+    pub path: OccurrencePath,
+    /// The display label shown in the tree (e.g. `"Bracket<2>"`).
+    pub label: String,
+    /// Its interned definition index in the store.
+    pub definition: DefinitionIndex,
+    /// The pinned definition identity: document id, configuration, pinned revision, and
+    /// quality override.
+    pub key: DefinitionKey,
+    /// Whether the definition is a part, sub-assembly, or mesh reference.
+    pub kind: DocKind,
+    /// The definition's base label (its referenced file stem).
+    pub definition_label: String,
+    /// The pinned document reference the definition was reached by, if any.
+    pub reference: Option<DocRef>,
+    /// Effective and self flags (hidden, suppressed, assembly, etc.).
+    pub flags: Flags,
+    /// Accepted world placement in the root assembly's frame, ignoring viewport drag or
+    /// exploded previews.
+    pub placement: Placement,
+    /// Assembly-level colour override on this occurrence, if any.
+    pub colour: Option<Appearance>,
+    /// Loaded display mesh of the definition, if any.
+    pub mesh: Option<SharedMesh>,
+}
+
+impl PlacedOccurrence {
+    /// The document id of the pinned definition.
+    pub fn document(&self) -> DocumentId {
+        self.key.document
+    }
+
+    /// The pinned revision of the definition.
+    pub fn revision(&self) -> &ContentHash {
+        &self.key.revision
+    }
+
+    /// The configuration placed by this occurrence (`None` when the placement uses the
+    /// document's saved/default configuration).
+    pub fn configuration(&self) -> Option<&ConfigurationId> {
+        self.key.configuration.as_ref()
+    }
+
+    /// True when this occurrence is a sub-assembly (or the root assembly).
+    pub fn is_assembly(&self) -> bool {
+        self.flags.has(Flags::ASSEMBLY)
+    }
+
+    /// True when this occurrence is hidden (itself or through an ancestor).
+    pub fn is_hidden(&self) -> bool {
+        self.flags.has(Flags::HIDDEN)
+    }
+
+    /// True when this occurrence is suppressed (itself or through an ancestor).
+    pub fn is_suppressed(&self) -> bool {
+        self.flags.has(Flags::SUPPRESSED)
+    }
+
+    /// True when this occurrence is a live leaf component (part or mesh reference) that
+    /// is not suppressed. Hidden leaves return `true` (for BOM and robot export).
+    pub fn is_active_leaf(&self) -> bool {
+        !(self.flags.has(Flags::ASSEMBLY) || self.flags.has(Flags::SUPPRESSED) || self.flags.has(Flags::REMOVED))
+    }
+
+    /// True when this occurrence is a live leaf component that is shown (neither hidden
+    /// nor suppressed).
+    pub fn is_shown_leaf(&self) -> bool {
+        self.flags.drawn_part()
+    }
+
+    /// This occurrence's accepted placement expressed in `frame`'s coordinate system.
+    pub fn placement_in(&self, frame: &Placement) -> Placement {
+        frame.inverse().compose(&self.placement)
+    }
+}
 
 impl AssemblyDocument {
     /// Changes the configurations or the exploded view on a copy of the truth with `edit`,
@@ -287,6 +380,57 @@ impl AssemblyDocument {
             worlds.push(world);
         }
         Cow::Owned(worlds)
+    }
+
+    fn placed_occurrence_with(&self, row: OccurrenceIndex, worlds: &[Placement]) -> PlacedOccurrence {
+        let def_index = self.table.definition(row);
+        let def = self.store.get(def_index);
+        PlacedOccurrence {
+            row,
+            path: self.table.path(row),
+            label: self.label(row),
+            definition: def_index,
+            key: def.key.clone(),
+            kind: def.kind,
+            definition_label: def.label.clone(),
+            reference: self.reference(def_index).cloned(),
+            flags: self.table.flags(row),
+            placement: worlds[row.0 as usize],
+            colour: self.table.colour(row).cloned(),
+            mesh: def.mesh.clone(),
+        }
+    }
+
+    /// Every live (non-removed) occurrence under the root in occurrence-table order, with
+    /// its path, pinned definition and configuration, flags, and accepted world placement.
+    pub fn placed_occurrences(&self) -> Vec<PlacedOccurrence> {
+        let worlds = self.accepted_worlds();
+        let mut out = Vec::with_capacity(self.table.len().saturating_sub(1));
+        for row in (1..self.table.len() as u32).map(OccurrenceIndex) {
+            if self.table.flags(row).has(Flags::REMOVED) {
+                continue;
+            }
+            out.push(self.placed_occurrence_with(row, &worlds));
+        }
+        out
+    }
+
+    /// The live occurrence at `path`, with its pinned definition, flags, and accepted
+    /// world placement, or `None` if removed or absent.
+    pub fn placed_occurrence(&self, path: &OccurrencePath) -> Option<PlacedOccurrence> {
+        let row = self.table.find(path)?;
+        let worlds = self.accepted_worlds();
+        Some(self.placed_occurrence_with(row, &worlds))
+    }
+
+    /// The live occurrence at `row`, with its pinned definition, flags, and accepted
+    /// world placement, or `None` if out of range or removed.
+    pub fn placed_occurrence_at(&self, row: OccurrenceIndex) -> Option<PlacedOccurrence> {
+        if (row.0 as usize) >= self.table.len() || self.table.flags(row).has(Flags::REMOVED) {
+            return None;
+        }
+        let worlds = self.accepted_worlds();
+        Some(self.placed_occurrence_with(row, &worlds))
     }
 
     /// Where each occurrence of the root's components sits in the exploded view, in the

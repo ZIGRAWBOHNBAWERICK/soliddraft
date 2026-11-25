@@ -645,10 +645,10 @@ fn with_part<R>(
             let value: serde_json::Value =
                 serde_json::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))?;
             let revision = ContentHash::of_json(&value);
-            let (part, backend) = build(&kernel, &recipe, path, revision.clone())?;
+            let (part, body, backend) = build(&kernel, &recipe, path, revision.clone())?;
             let source = Source { id: None, revision, name: recipe.name.clone(), backend };
             let out = f(&part, &source);
-            let _ = kernel.release(part.body);
+            let _ = kernel.release(body);
             out
         }
     })();
@@ -1188,14 +1188,13 @@ fn build<'k>(
     recipe: &Recipe,
     path: &Path,
     revision: ContentHash,
-) -> Result<(Part<'k>, String), String> {
+) -> Result<(Part<'k>, soliddraft_kernel_api::BodyId, String), String> {
     let (report, body) = soliddraft_recipe::build(kernel, recipe).map_err(|e| format!("{}: {e}", path.display()))?;
     let backend = format!("{} {}", report.backend.name, report.backend.version);
     // The CLI only writes files, so its views come from the certified mesh.
     let dimensions = feature_dimensions(recipe);
     let part = Part {
-        kernel,
-        body,
+        geometry: Box::new(soliddraft_drawing::KernelBody::new(kernel, body)),
         digest: revision,
         dimensions,
         namer: None,
@@ -1203,7 +1202,7 @@ fn build<'k>(
         source: Default::default(),
         requirements: Default::default(),
     };
-    Ok((part, backend))
+    Ok((part, body, backend))
 }
 
 /// The dimensions a recipe's features define: each rectangle's width and height, each

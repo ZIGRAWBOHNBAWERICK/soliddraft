@@ -30,6 +30,7 @@ mod entity;
 pub mod export;
 pub mod file;
 pub mod fixture;
+mod geometry;
 mod ids;
 mod layout;
 pub mod library;
@@ -52,6 +53,7 @@ pub use annotation::{
 };
 pub use command::{Command, UndoStack, apply, apply_with, next_letter};
 pub use entity::{EntityKind, EntityRef, Fingerprint, ModelEntity};
+pub use geometry::{DrawingGeometry, KernelBody};
 pub use ids::{AnnotationId, SHEET, TemplateId, ViewId};
 pub use layout::{MadeDrawing, NewDrawing, default_views, make_drawing};
 pub use model_items::{ImportReport, ModelDimension, ModelMeasure};

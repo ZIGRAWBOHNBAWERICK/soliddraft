@@ -167,11 +167,11 @@ impl<'k> AssemblyModel<'k> {
     }
 }
 
-/// The assembly as the part the drawing code reads: the placed parts as one body.
+/// The assembly as the part the drawing code reads: the placed parts bound as a
+/// read-only drawing geometry.
 pub fn as_part<'a>(model: &AssemblyModel<'_>, bodies: &'a PlacedBodies<'_>) -> Part<'a> {
     Part {
-        kernel: bodies,
-        body: PlacedBodies::BODY,
+        geometry: Box::new(bodies),
         digest: model.digest(),
         dimensions: Vec::new(),
         namer: None,

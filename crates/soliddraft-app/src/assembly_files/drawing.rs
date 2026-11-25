@@ -3,7 +3,7 @@
 
 use crate::drawing::{DrawingDoc, DrawingSession};
 use crate::state::AppState;
-use soliddraft_assembly::{AssemblyDocument, Flags, KernelSource, OccurrenceIndex, OccurrencePath, Placement};
+use soliddraft_assembly::{AssemblyDocument, KernelSource, OccurrencePath, PlacedOccurrence, Placement};
 use soliddraft_document::{ConfigurationId, DocKind, DocRef, DocumentId};
 use soliddraft_drawing::assembly::{self, AssemblyModel, BomRow, NewAssemblyDrawing};
 use soliddraft_drawing::placed::{PlacedPart, Rigid};
@@ -45,12 +45,8 @@ impl ExactParts {
             parts: self
                 .parts
                 .iter()
-                .map(|p| PlacedPart {
-                    kernel: p.kernel.as_ref(),
-                    body: p.body,
-                    placement: p.placement,
-                    component: p.path.clone(),
-                    label: p.label.clone(),
+                .map(|p| {
+                    PlacedPart::from_kernel(p.kernel.as_ref(), p.body, p.placement, p.path.clone(), p.label.clone())
                 })
                 .collect(),
             items: self.parts.iter().map(|p| p.item).collect(),
@@ -81,7 +77,7 @@ pub fn exact_parts(doc: &mut AssemblyDocument) -> Result<ExactParts, String> {
     doc.finish_loading();
     let exploded: HashMap<OccurrencePath, Placement> =
         if doc.assembly().explode.is_empty() { HashMap::new() } else { doc.exploded_worlds().into_iter().collect() };
-    let accepted = doc.accepted_worlds().into_owned();
+    let occurrences = doc.placed_occurrences();
     let path = doc.path().ok_or("save the assembly first: its drawing refers to its file")?;
     let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     let reference = DocRef::new(doc.id(), DocKind::Assembly, name, doc.revision());
@@ -93,45 +89,38 @@ pub fn exact_parts(doc: &mut AssemblyDocument) -> Result<ExactParts, String> {
     let mut items: Vec<BomGroup> = Vec::new();
     let mut parts = Vec::new();
     let mut documents = Vec::new();
-    let rows = doc.table().len() as u32;
-    let counted = |f: Flags| !(f.has(Flags::ASSEMBLY) || f.has(Flags::SUPPRESSED) || f.has(Flags::REMOVED));
-    let named_documents: HashSet<DocumentId> = (1..rows)
-        .map(OccurrenceIndex)
-        .filter(|row| counted(doc.table().flags(*row)))
-        .map(|row| doc.store().get(doc.table().definition(row)))
-        .filter(|def| def.kind == DocKind::Part && def.key.configuration.is_some())
-        .map(|def| def.key.document)
+    let named_documents: HashSet<DocumentId> = occurrences
+        .iter()
+        .filter(|occ| occ.is_active_leaf() && occ.kind == DocKind::Part && occ.configuration().is_some())
+        .map(PlacedOccurrence::document)
         .collect();
-    for row in (1..rows).map(OccurrenceIndex) {
-        let f = doc.table().flags(row);
-        if !counted(f) {
+    for occ in occurrences {
+        if !occ.is_active_leaf() {
             continue;
         }
-        let def_index = doc.table().definition(row);
-        let def = doc.store().get(def_index).clone();
-        if def.kind != DocKind::Part {
+        if occ.kind != DocKind::Part {
             // Only a part has an exact body. A shown mesh reference refuses the drawing by
             // name rather than leaving a hole where it stands; a hidden one is not drawn.
-            if f.has(Flags::HIDDEN) {
+            if occ.is_hidden() {
                 continue;
             }
-            let what = if def.kind == DocKind::Mesh { "a mesh reference" } else { "not a part" };
+            let what = if occ.kind == DocKind::Mesh { "a mesh reference" } else { "not a part" };
             return Err(format!(
                 "{} is {what} with no exact body to draw; hide it or take it out of the assembly to draw the rest",
-                doc.label(row)
+                occ.label
             ));
         }
-        let name = def.label.trim_end_matches(".dwprt").to_owned();
+        let name = occ.definition_label.trim_end_matches(".dwprt").to_owned();
         // A placement that names a configuration, or that may share a row with one, reads
         // its part for which configuration it shows; the others of a document share a row.
-        let (shows, named) = if def.key.configuration.is_some() || named_documents.contains(&def.key.document) {
-            let part = doc.exact(def_index, &source).map_err(|e| format!("{name}: {e}"))?;
+        let (shows, named) = if occ.configuration().is_some() || named_documents.contains(&occ.document()) {
+            let part = doc.exact(occ.definition, &source).map_err(|e| format!("{name}: {e}"))?;
             let part = part.lock().map_err(|_| format!("{name}: the part is unavailable"))?;
-            let shows = match &def.key.configuration {
+            let shows = match occ.configuration() {
                 Some(c) => c.clone(),
                 None => part.active_configuration().cloned().unwrap_or_else(|| ConfigurationId(DEFAULT_ROW.into())),
             };
-            let named = def.key.configuration.as_ref().map(|c| {
+            let named = occ.configuration().map(|c| {
                 let names = part.configuration_names();
                 names.iter().find(|(id, _)| id == c).map_or_else(|| c.0.clone(), |(_, n)| n.clone())
             });
@@ -139,7 +128,7 @@ pub fn exact_parts(doc: &mut AssemblyDocument) -> Result<ExactParts, String> {
         } else {
             (None, None)
         };
-        let key = (def.key.document, shows);
+        let key = (occ.document(), shows);
         let item = match items.iter_mut().find(|g| g.key == key) {
             Some(g) => {
                 g.row.quantity += 1;
@@ -150,31 +139,28 @@ pub fn exact_parts(doc: &mut AssemblyDocument) -> Result<ExactParts, String> {
             }
             None => {
                 let item = items.len() as u32 + 1;
-                let file = doc.reference(def_index).map(|r| r.path.clone()).unwrap_or_default();
+                let file = occ.reference.as_ref().map(|r| r.path.clone()).unwrap_or_default();
                 items.push(BomGroup { key, row: BomRow { item, name, file, quantity: 1 }, named });
                 item
             }
         };
         // Hidden parts count in the BOM; only shown ones are drawn.
-        if f.has(Flags::HIDDEN) {
+        if occ.is_hidden() {
             continue;
         }
-        let label = doc.label(row);
-        let exact = doc.exact(def_index, &source).map_err(|e| format!("{label}: {e}"))?;
+        let exact = doc.exact(occ.definition, &source).map_err(|e| format!("{}: {e}", occ.label))?;
         let (kernel, body) = {
-            let part = exact.lock().map_err(|_| format!("{label}: the part is unavailable"))?;
-            let body = part.body().ok_or_else(|| format!("{label}: the part has no body"))?;
+            let part = exact.lock().map_err(|_| format!("{}: the part is unavailable", occ.label))?;
+            let body = part.body().ok_or_else(|| format!("{}: the part has no body", occ.label))?;
             (part.kernel().clone(), body)
         };
-        let occurrence = doc.table().path(row);
-        let world = accepted[row.0 as usize];
         parts.push(ExactPart {
             kernel,
             body,
-            placement: rigid(world),
-            exploded: rigid(exploded.get(&occurrence).copied().unwrap_or(world)),
-            path: occurrence.to_string(),
-            label,
+            placement: rigid(occ.placement),
+            exploded: rigid(exploded.get(&occ.path).copied().unwrap_or(occ.placement)),
+            path: occ.path.to_string(),
+            label: occ.label,
             item,
         });
         documents.push(exact);

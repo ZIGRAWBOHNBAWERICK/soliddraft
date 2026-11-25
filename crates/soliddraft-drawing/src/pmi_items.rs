@@ -1130,7 +1130,7 @@ pub fn import(
     if rows.is_empty() {
         return Ok(report);
     }
-    let topology = part.kernel.topology(part.body)?;
+    let topology = part.geometry.topology()?;
     let size = topology.faces.iter().fold(1.0_f64, |size, face| size.max(face.bbox.max.distance(face.bbox.min)));
     let template = drawing.sheets.get(sheet).map(|s| s.template.as_str()).unwrap_or("");
     let style = crate::library::template(template).style_file();
@@ -1147,7 +1147,7 @@ pub fn import(
         .filter(|v| !v.pictorial)
         .filter(|v| drawing.view(v.id).is_some_and(|view| !matches!(view.kind, crate::ViewKind::Section { .. })))
         .collect();
-    let axes = part.kernel.face_carriers(part.body)?.into_iter().filter_map(|c| Some((c.id, c.axis?))).collect();
+    let axes = part.geometry.face_carriers()?.into_iter().filter_map(|c| Some((c.id, c.axis?))).collect();
     // The way out of the group of views, for each view: away from the middle of the
     // others.
     let places: Vec<(ViewId, Point2)> =

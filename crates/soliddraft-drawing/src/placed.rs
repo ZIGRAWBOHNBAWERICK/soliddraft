@@ -1,13 +1,12 @@
 //! A drawing of several placed bodies: an assembly's parts.
 //!
-//! [`PlacedBodies`] shows the rest of this crate one body, [`PlacedBodies::BODY`], made of
-//! the parts at their placements, so an assembly drawing is made, rebuilt and exported
-//! by the same code as a part drawing and keeps its refusal rules. Each drawing query is
-//! asked of each part's kernel in the part's own frame, and the answers are placed in the
-//! assembly's frame: a part's line work is the kernel's own hidden-line view of that
-//! part, and a part the kernel refuses refuses the view, named.
+//! [`PlacedBodies`] implements [`DrawingGeometry`] for an assembly's placed parts, so an
+//! assembly drawing is made, rebuilt and exported by the same code as a part drawing and
+//! keeps its refusal rules. Each drawing query is asked of each part's geometry in the
+//! part's own frame, and the answers are placed in the assembly's frame: a part's line
+//! work is its own hidden-line view, and a part that refuses refuses the view, named.
 //!
-//! No kernel query sees two parts at once, so where one part hides another the
+//! No single-part query sees two parts at once, so where one part hides another the
 //! visibility is measured against the other parts' meshes: certified meshes for an
 //! exported view, the screen's meshes for a preview. A view where that measurement
 //! decided a curve carries the code [`PART_VISIBILITY`] and is labelled approximate, as
@@ -18,17 +17,19 @@
 //! `c2/f3` is the operation tagged `f3` in component `c2`.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use soliddraft_kernel_api::drawing::mesh_hlr::MeshOccluder;
 use soliddraft_kernel_api::drawing::{
     Curve3, CurveSource, CutRegion, SectionSpec, SectionView, ViewCurve, ViewCurves, ViewFrame, ViewSpec, sheet_bounds,
 };
 use soliddraft_kernel_api::{
-    Aabb, BackendInfo, BodyAccuracy, BodyId, BodyKind, BooleanOp, EdgeId, EdgeInfo, EdgePolyline, EntityChanges,
-    Extrude, FaceAxis, FaceCarrier, FaceId, FaceInfo, HistoryRecord, Kernel, KernelError, KernelResult, MassProperties,
-    Mesh, OpResult, OpTag, Origin, Plane, Profile, Revolve, TessellationParams, Topology, Validation, Vec3, VertexId,
-    VertexInfo,
+    Aabb, BodyId, BodyKind, EdgeId, EdgeInfo, EdgePolyline, EntityChanges, FaceAxis, FaceCarrier, FaceId, FaceInfo,
+    HistoryRecord, Kernel, KernelError, KernelResult, Mesh, OpTag, Origin, TessellationParams, Topology, Vec3,
+    VertexId, VertexInfo,
 };
+
+use crate::geometry::{DrawingGeometry, KernelBody};
 
 /// The code a view carries when visibility between parts was measured on meshes.
 pub const PART_VISIBILITY: &str = "assembly.part-visibility";
@@ -121,10 +122,8 @@ fn turn(q: Vec3, w: f64, v: Vec3) -> Vec3 {
 /// One part of an assembly as a drawing sees it.
 #[derive(Clone)]
 pub struct PlacedPart<'k> {
-    /// The kernel the part's body lives in.
-    pub kernel: &'k dyn Kernel,
-    /// The part's body, in its own frame.
-    pub body: BodyId,
+    /// The part's read-only drawing geometry, in its own frame.
+    pub geometry: Arc<dyn DrawingGeometry + 'k>,
     /// Where the assembly places it.
     pub placement: Rigid,
     /// The component's occurrence path, unique in the assembly, such as `c2` or
@@ -134,7 +133,30 @@ pub struct PlacedPart<'k> {
     pub label: String,
 }
 
-/// An assembly's parts as one body for drawing queries. See the module documentation.
+impl<'k> PlacedPart<'k> {
+    /// A placed part backed by any read-only [`DrawingGeometry`].
+    pub fn new(
+        geometry: Arc<dyn DrawingGeometry + 'k>,
+        placement: Rigid,
+        component: impl Into<String>,
+        label: impl Into<String>,
+    ) -> PlacedPart<'k> {
+        PlacedPart { geometry, placement, component: component.into(), label: label.into() }
+    }
+
+    /// A placed part backed by a body in a kernel session.
+    pub fn from_kernel(
+        kernel: &'k dyn Kernel,
+        body: BodyId,
+        placement: Rigid,
+        component: impl Into<String>,
+        label: impl Into<String>,
+    ) -> PlacedPart<'k> {
+        PlacedPart::new(Arc::new(KernelBody::new(kernel, body)), placement, component, label)
+    }
+}
+
+/// An assembly's parts as a read-only [`DrawingGeometry`]. See the module documentation.
 pub struct PlacedBodies<'k> {
     parts: Vec<PlacedPart<'k>>,
     faces: Vec<(usize, FaceId)>,
@@ -147,16 +169,9 @@ pub struct PlacedBodies<'k> {
     history: Vec<HistoryRecord>,
 }
 
-fn no_build() -> KernelError {
-    KernelError::Unsupported("an assembly drawing builds nothing".into())
-}
-
 impl<'k> PlacedBodies<'k> {
-    /// The one body the parts make.
-    pub const BODY: BodyId = BodyId::from_raw(1);
-
-    /// The parts as one body, reading each part's topology and history once. A part
-    /// whose body is not a solid is refused by name, as is an assembly with no part.
+    /// The parts as one drawing geometry, reading each part's topology and history once.
+    /// A part whose body is not a solid is refused by name, as is an assembly with no part.
     pub fn new(parts: Vec<PlacedPart<'k>>) -> KernelResult<PlacedBodies<'k>> {
         if parts.is_empty() {
             return Err(KernelError::InvalidInput("the assembly places no part to draw".into()));
@@ -182,11 +197,11 @@ impl<'k> PlacedBodies<'k> {
         let mut all: Option<Aabb> = None;
         let mut next_vertex = 0u64;
         for (i, part) in parts.iter().enumerate() {
-            let topology = part.kernel.topology(part.body).map_err(|e| named(&part.label, e))?;
+            let topology = part.geometry.topology().map_err(|e| named(&part.label, e))?;
             if topology.kind != BodyKind::Solid {
                 return Err(KernelError::Unsupported(format!("{} is not a solid, so it cannot be drawn", part.label)));
             }
-            let history = part.kernel.history(part.body).map_err(|e| named(&part.label, e))?;
+            let history = part.geometry.history().map_err(|e| named(&part.label, e))?;
             let mut faces = HashMap::new();
             for f in &topology.faces {
                 out.faces.push((i, f.id));
@@ -275,18 +290,14 @@ impl<'k> PlacedBodies<'k> {
         &self.parts
     }
 
-    /// The part a face of [`Self::BODY`] is on, and its id in that part's body.
+    /// The part a face of this assembly geometry is on, and its id in that part.
     pub fn face_of(&self, face: FaceId) -> Option<(usize, FaceId)> {
         self.faces.get((face.raw() as usize).checked_sub(1)?).copied()
     }
 
-    /// The part an edge of [`Self::BODY`] is on, and its id in that part's body.
+    /// The part an edge of this assembly geometry is on, and its id in that part.
     pub fn edge_of(&self, edge: EdgeId) -> Option<(usize, EdgeId)> {
         self.edges.get((edge.raw() as usize).checked_sub(1)?).copied()
-    }
-
-    fn check(&self, body: BodyId) -> KernelResult<()> {
-        if body == Self::BODY { Ok(()) } else { Err(KernelError::UnknownBody(body)) }
     }
 
     fn source(&self, i: usize, source: CurveSource) -> CurveSource {
@@ -324,12 +335,7 @@ impl<'k> PlacedBodies<'k> {
             surface_angle_deg: angle,
             ..Default::default()
         };
-        let mesh = if spec.preview {
-            part.kernel.preview(part.body, &params)
-        } else {
-            part.kernel.tessellate(part.body, &params)
-        }
-        .map_err(|e| named(&part.label, e))?;
+        let mesh = part.geometry.occlusion_mesh(&params, spec.preview).map_err(|e| named(&part.label, e))?;
         Ok((part.placement.mesh(mesh), chord))
     }
 
@@ -448,8 +454,7 @@ impl<'k> PlacedBodies<'k> {
         let mut curves = Vec::with_capacity(self.parts.len());
         let (mut unproved, mut catallax, mut codes) = (false, true, Vec::new());
         for (i, part) in self.parts.iter().enumerate() {
-            let view =
-                part.kernel.view_curves(part.body, &self.local_spec(i, spec)).map_err(|e| named(&part.label, e))?;
+            let view = part.geometry.view_curves(&self.local_spec(i, spec)).map_err(|e| named(&part.label, e))?;
             unproved |= view.unproved;
             catallax &= view.catallax;
             merge_codes(&mut codes, view.approximate);
@@ -489,10 +494,10 @@ impl<'k> PlacedBodies<'k> {
                 continue;
             }
             let view = if far <= cut {
-                part.kernel.view_curves(part.body, &local)
+                part.geometry.view_curves(&local)
             } else {
                 let section = SectionSpec { view: local, origin: part.placement.unapply(spec.origin) };
-                part.kernel.section_view(part.body, &section).map(|s| {
+                part.geometry.section_view(&section).map(|s| {
                     regions.extend(s.regions.into_iter().map(|r| CutRegion {
                         outer: r.outer.into_iter().map(|c| self.place(i, c)).collect(),
                         holes: r.holes.into_iter().map(|h| h.into_iter().map(|c| self.place(i, c)).collect()).collect(),
@@ -560,16 +565,6 @@ impl<'k> PlacedBodies<'k> {
         }
         Ok(out)
     }
-
-    fn part_of_face(&self, body: BodyId, face: FaceId) -> KernelResult<(usize, FaceId)> {
-        self.check(body)?;
-        self.face_of(face).ok_or(KernelError::UnknownFace { body, face })
-    }
-
-    fn part_of_edge(&self, body: BodyId, edge: EdgeId) -> KernelResult<(usize, EdgeId)> {
-        self.check(body)?;
-        self.edge_of(edge).ok_or(KernelError::UnknownEdge { body, edge })
-    }
 }
 
 /// The component a name in an assembly drawing starts with: `c2` for `c2/f3`.
@@ -631,102 +626,18 @@ fn place_box(at: &Rigid, b: &Aabb) -> Aabb {
     out
 }
 
-impl Kernel for PlacedBodies<'_> {
-    fn backend(&self) -> BackendInfo {
-        self.parts[0].kernel.backend()
-    }
-
-    fn create_body_from_profile(&self, _tag: &OpTag, _profile: &Profile) -> KernelResult<OpResult> {
-        Err(no_build())
-    }
-
-    fn extrude(&self, _tag: &OpTag, _profile: BodyId, _params: &Extrude) -> KernelResult<OpResult> {
-        Err(no_build())
-    }
-
-    fn revolve(&self, _tag: &OpTag, _profile: BodyId, _params: &Revolve) -> KernelResult<OpResult> {
-        Err(no_build())
-    }
-
-    fn boolean(&self, _tag: &OpTag, _op: BooleanOp, _target: BodyId, _tool: BodyId) -> KernelResult<OpResult> {
-        Err(no_build())
-    }
-
-    fn fillet(&self, _tag: &OpTag, _body: BodyId, _edges: &[EdgeId], _radius: f64) -> KernelResult<OpResult> {
-        Err(no_build())
-    }
-
-    fn chamfer(&self, _tag: &OpTag, _body: BodyId, _edges: &[EdgeId], _distance: f64) -> KernelResult<OpResult> {
-        Err(no_build())
-    }
-
-    fn shell(&self, _tag: &OpTag, _body: BodyId, _faces: &[FaceId], _thickness: f64) -> KernelResult<OpResult> {
-        Err(no_build())
-    }
-
-    fn tessellate(&self, body: BodyId, params: &TessellationParams) -> KernelResult<Mesh> {
-        self.check(body)?;
-        self.meshes(|p| p.kernel.tessellate(p.body, params))
-    }
-
-    fn preview(&self, body: BodyId, params: &TessellationParams) -> KernelResult<Mesh> {
-        self.check(body)?;
-        self.meshes(|p| p.kernel.preview(p.body, params))
-    }
-
-    fn rendering(&self, body: BodyId, params: &TessellationParams) -> KernelResult<Mesh> {
-        self.check(body)?;
-        self.meshes(|p| p.kernel.rendering(p.body, params))
-    }
-
-    fn tessellate_edges(&self, body: BodyId, params: &TessellationParams) -> KernelResult<Vec<EdgePolyline>> {
-        self.check(body)?;
-        Ok(self.placed_polylines(self.each(|p| p.kernel.tessellate_edges(p.body, params))?))
-    }
-
-    fn preview_edges(&self, body: BodyId, params: &TessellationParams) -> KernelResult<Vec<EdgePolyline>> {
-        self.check(body)?;
-        Ok(self.placed_polylines(self.each(|p| p.kernel.preview_edges(p.body, params))?))
-    }
-
-    fn rendering_edges(&self, body: BodyId, params: &TessellationParams) -> KernelResult<Vec<EdgePolyline>> {
-        self.check(body)?;
-        Ok(self.placed_polylines(self.each(|p| p.kernel.rendering_edges(p.body, params))?))
-    }
-
-    fn body_kind(&self, body: BodyId) -> KernelResult<BodyKind> {
-        self.check(body)?;
-        Ok(BodyKind::Solid)
-    }
-
-    fn body_accuracy(&self, body: BodyId) -> KernelResult<BodyAccuracy> {
-        self.check(body)?;
-        for p in &self.parts {
-            let accuracy = p.kernel.body_accuracy(p.body)?;
-            if accuracy != BodyAccuracy::Exact {
-                return Ok(accuracy);
-            }
-        }
-        Ok(BodyAccuracy::Exact)
-    }
-
-    fn mass_properties(&self, _body: BodyId) -> KernelResult<MassProperties> {
-        Err(KernelError::Unsupported("mass properties of an assembly drawing".into()))
-    }
-
-    fn validate(&self, _body: BodyId) -> KernelResult<Validation> {
-        Err(KernelError::Unsupported("checking an assembly drawing's body".into()))
-    }
-
-    fn topology(&self, body: BodyId) -> KernelResult<Topology> {
-        self.check(body)?;
+impl DrawingGeometry for PlacedBodies<'_> {
+    fn topology(&self) -> KernelResult<Topology> {
         Ok(self.topology.clone())
     }
 
-    fn face_carriers(&self, body: BodyId) -> KernelResult<Vec<FaceCarrier>> {
-        self.check(body)?;
+    fn history(&self) -> KernelResult<Vec<HistoryRecord>> {
+        Ok(self.history.clone())
+    }
+
+    fn face_carriers(&self) -> KernelResult<Vec<FaceCarrier>> {
         let mut out = Vec::new();
-        for (i, carriers) in self.each(|p| p.kernel.face_carriers(p.body))?.into_iter().enumerate() {
+        for (i, carriers) in self.each(|p| p.geometry.face_carriers())?.into_iter().enumerate() {
             let part = &self.parts[i];
             let at = &part.placement;
             for c in carriers {
@@ -752,94 +663,27 @@ impl Kernel for PlacedBodies<'_> {
         Ok(out)
     }
 
-    fn history(&self, body: BodyId) -> KernelResult<Vec<HistoryRecord>> {
-        self.check(body)?;
-        Ok(self.history.clone())
-    }
-
-    fn release(&self, _body: BodyId) -> KernelResult<()> {
-        Ok(())
-    }
-
-    fn view_curves(&self, body: BodyId, spec: &ViewSpec) -> KernelResult<ViewCurves> {
-        self.check(body)?;
-        self.view(spec)
-    }
-
-    fn silhouette_curves(&self, body: BodyId, direction: Vec3) -> KernelResult<Vec<ViewCurve>> {
-        self.check(body)?;
-        let mut out = Vec::new();
-        for (i, part) in self.parts.iter().enumerate() {
-            let local = part.placement.unrotate(direction);
-            let curves = part.kernel.silhouette_curves(part.body, local).map_err(|e| named(&part.label, e))?;
-            out.extend(curves.into_iter().map(|c| self.place(i, c)));
-        }
-        Ok(out)
-    }
-
-    fn section_curves(&self, body: BodyId, plane: &Plane) -> KernelResult<Vec<ViewCurve>> {
-        self.check(body)?;
-        let mut out = Vec::new();
-        for (i, part) in self.parts.iter().enumerate() {
-            let at = &part.placement;
-            let local = Plane {
-                origin: at.unapply(plane.origin),
-                normal: at.unrotate(plane.normal),
-                x_dir: at.unrotate(plane.x_dir),
-            };
-            let curves = part.kernel.section_curves(part.body, &local).map_err(|e| named(&part.label, e))?;
-            out.extend(curves.into_iter().map(|c| self.place(i, c)));
-        }
-        Ok(out)
-    }
-
-    fn section_view(&self, body: BodyId, spec: &SectionSpec) -> KernelResult<SectionView> {
-        self.check(body)?;
-        self.section(spec)
-    }
-
-    fn edge_curve(&self, body: BodyId, edge: EdgeId) -> KernelResult<Curve3> {
-        self.edge_drawing(body, edge).map(|c| c.curve)
-    }
-
-    fn edge_drawing(&self, body: BodyId, edge: EdgeId) -> KernelResult<ViewCurve> {
-        let (i, real) = self.part_of_edge(body, edge)?;
+    fn edge_drawing(&self, edge: EdgeId) -> KernelResult<ViewCurve> {
+        let (i, real) = self.edge_of(edge).ok_or(KernelError::UnknownEdge { body: BodyId::from_raw(0), edge })?;
         let part = &self.parts[i];
-        let drawn = part.kernel.edge_drawing(part.body, real).map_err(|e| named(&part.label, e))?;
+        let drawn = part.geometry.edge_drawing(real).map_err(|e| named(&part.label, e))?;
         Ok(self.place(i, drawn))
     }
 
-    fn face_loops(&self, body: BodyId, face: FaceId) -> KernelResult<Vec<Vec<Curve3>>> {
-        let (i, real) = self.part_of_face(body, face)?;
-        let part = &self.parts[i];
-        let loops = part.kernel.face_loops(part.body, real).map_err(|e| named(&part.label, e))?;
-        Ok(loops.into_iter().map(|l| l.iter().map(|c| part.placement.curve(c)).collect()).collect())
+    fn rendering_edges(&self, params: &TessellationParams) -> KernelResult<Vec<EdgePolyline>> {
+        Ok(self.placed_polylines(self.each(|p| p.geometry.rendering_edges(params))?))
     }
 
-    fn face_drawing_loops(&self, body: BodyId, face: FaceId) -> KernelResult<Vec<Vec<ViewCurve>>> {
-        let (i, real) = self.part_of_face(body, face)?;
-        let part = &self.parts[i];
-        let loops = part.kernel.face_drawing_loops(part.body, real).map_err(|e| named(&part.label, e))?;
-        Ok(loops.into_iter().map(|l| l.into_iter().map(|c| self.place(i, c)).collect()).collect())
+    fn view_curves(&self, spec: &ViewSpec) -> KernelResult<ViewCurves> {
+        self.view(spec)
     }
 
-    fn lines_and_arcs(&self, curve: &Curve3, tolerance: f64) -> KernelResult<Vec<Curve3>> {
-        self.parts[0].kernel.lines_and_arcs(curve, tolerance)
+    fn section_view(&self, spec: &SectionSpec) -> KernelResult<SectionView> {
+        self.section(spec)
     }
 
-    fn exact_unread(&self, body: BodyId) -> KernelResult<bool> {
-        self.check(body)?;
-        for p in &self.parts {
-            if p.kernel.exact_unread(p.body)? {
-                return Ok(true);
-            }
-        }
-        Ok(false)
-    }
-
-    fn read_exact(&self, body: BodyId) -> KernelResult<()> {
-        self.check(body)?;
-        self.each(|p| p.kernel.read_exact(p.body)).map(|_| ())
+    fn occlusion_mesh(&self, params: &TessellationParams, preview: bool) -> KernelResult<Mesh> {
+        self.meshes(|p| p.geometry.occlusion_mesh(params, preview))
     }
 }
 

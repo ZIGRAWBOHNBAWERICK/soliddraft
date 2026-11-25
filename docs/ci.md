@@ -157,6 +157,8 @@ Run CI tooling checks with `python3 -m unittest discover -s ci -p 'test_*.py'`. 
 
 By the captain's decision, CI builds and checks the browser, Linux and macOS only until a later Windows catch-up. No pull request, main push, release branch, tag or full qualification selects `test-windows` or `package-windows`, and releases publish no Windows packages. Windows product code stays in the tree, unbuilt by CI, so a Windows-only fault can land unnoticed until the catch-up.
 
+One job runs on `windows-latest` without building anything. `step-nist` belongs to the `step-opencascade` unit and reads the P1 bracket's exported STEP files in the NIST STEP File Analyzer (SFA), which exists only for Windows. `ci/check-step-sfa.py` downloads SFA 5.54 from NIST's repository at a pinned commit and checks its checksum. It then installs SFA's IFCsvr toolkit without a window and runs the command-line version. SFA's PMI and validation property reports need Microsoft Excel, which hosted runners lack, so the check uses SFA's syntax checker and the CSV file SFA writes for each entity type. It compares those with `ci/fixtures/pmi/p1-bracket-sfa.json`, leaving out entity numbers. `sfa-cl.exe` ends every running Excel first, so the check refuses to run while Excel is open. Never run it on a desktop in use.
+
 The routing rules still name Windows, and the frozen routing fixtures still pin them. `select()` in `ci/select-checks.py` drops the two units last, and the accepted selector goes through the same function. The `test-windows` job, the Windows package cell and both registry entries stay defined. The merge gate skips Windows when it is unselected. When Windows is selected, the gate requires it to be green like any other unit.
 
 To catch up, dispatch Hosted CI manually with `windows_catch_up` on. That is the only way to select Windows: the selector ignores the input on any other event, and `release.yml` passes no input to `packages.yml`, so its dry runs and tags have no Windows path. The run is a full qualification plus both Windows units, and takes 2 to 3 hours on Windows. Branch `fm/sdc-ci-round4-windows-shards-parked` holds unfinished work to split those tests across runners.
@@ -191,6 +193,8 @@ The running selector and its map are the candidate policy; `--head` names the tr
 | `ci/check-field-moments.py`, `ci/check-graded-stl.py`, `ci/check-gyroid-stl.py`, `ci/check-lattice-stl.py` | `application-loop` | Called by `ci/run-scenarios.py` |
 | `ci/check-step.py` | `step-opencascade`, `application-loop` | OpenCASCADE job, and called by `ci/run-scenarios.py` |
 | `ci/check-step-pmi.py`, `ci/fixtures/pmi/p1-bracket-pmi.json` | `step-opencascade` | OpenCASCADE job: reads the P1 bracket's manufacturing information from its STEP file |
+| `ci/check-step-sfa.py`, `ci/fixtures/pmi/p1-bracket-sfa.json` | `step-opencascade` | NIST job (`step-nist`): reads the same files in the NIST STEP File Analyzer |
+| `ci/test_check_step_sfa.py` | None | Python discovery in lint |
 | `ci/edit_speed.py`, `ci/test_edit_speed.py` | None | The `edit-speed.yml` pull request workflow, and Python discovery in lint |
 | `ci/balance.py`, `ci/test-durations.json`, `ci/test-durations-macos.json` | `test-linux`, `test-macos` | Current test inventory partitioning |
 | `ci/scenario-durations.json` | `application-loop` | Current scenario inventory partitioning |

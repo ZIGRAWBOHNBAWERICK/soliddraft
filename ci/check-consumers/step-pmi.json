@@ -2,6 +2,10 @@
   "files": {
     "ci/check-step-pmi.py": [
       "step-opencascade"
-    ]
+    ],
+    "ci/check-step-sfa.py": [
+      "step-opencascade"
+    ],
+    "ci/test_check_step_sfa.py": []
   }
 }

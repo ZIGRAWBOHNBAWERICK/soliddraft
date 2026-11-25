@@ -4,7 +4,10 @@
     "select": "select",
     "lint": "lint",
     "kernel": "kernel",
-    "step-opencascade": "step-opencascade",
+    "step-opencascade": [
+      "step-opencascade",
+      "step-nist"
+    ],
     "test-linux": [
       "build-linux",
       "partition-linux",

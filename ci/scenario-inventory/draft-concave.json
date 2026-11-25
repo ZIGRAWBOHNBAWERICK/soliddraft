@@ -1,0 +1,22 @@
+{
+  "id": "draft-concave",
+  "file": "ci/scenarios/draft-concave.json",
+  "acceptance": true,
+  "owners": [
+    "soliddraft-app",
+    "soliddraft-model",
+    "soliddraft-kernel-catallax"
+  ],
+  "kernel_parts": [
+    "boolean",
+    "draft",
+    "extrude",
+    "measure",
+    "mesh",
+    "step"
+  ],
+  "catallax_revision": "76cdf97f3e85d22ea74868b77d849498ebdfcf1c",
+  "route": "MCP sketch_geometry, extrude, draft, track and edit_draft -> real document rebuild -> pinned Catallax concave planar draft -> checked STEP on one request allowance",
+  "supported_limits": "A hole-free 40 x 30 x 20 mm L bracket with its right, inner and left walls drafted 3 and 5 degrees about z=0; the notch wall and the other walls stay; 20M per request, export included; volume and area tolerance 0.005, centroid and box 0.001 mm; a concave base with a preserved bore or boss stays refused in Catallax; partial M7 evidence",
+  "evidence": "result.json, protocol.json, commands/NNNN/{command.json,kernel.json,measurement.json,viewport.png,view.svg}; tracked notch and inner wall references through edit, undo, redo, reopen and refusal; commands/0004/{part.step,step-oracle.json} for a3; concave-draft.dwprt and commands-1/NNNN/{part.step,step-report.json,raw-step.stdout,step-oracle.json,step-oracle.stdout} at the refused edit; the exact material table in crates/soliddraft-kernel-catallax/tests/material_queries.rs"
+}

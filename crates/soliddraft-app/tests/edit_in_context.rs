@@ -47,7 +47,7 @@ fn save_frame(harness: &mut App<'_>, name: &str) {
 
 /// A block `w` by `d` on the top plane, `h` tall, centred on the origin, saved at `path`.
 fn part(path: &Path, w: f64, d: f64, h: f64) -> PathBuf {
-    let mut doc = soliddraft_app::new_document();
+    let mut doc = soliddraft_app::startup::new_document();
     let params = ExtrudeParams {
         profile: ProfileKind::Rectangle { width: w, height: d },
         plane: PlaneKind::Top,
@@ -202,7 +202,7 @@ fn a_part_edited_in_its_assembly_takes_and_follows_a_face_of_another_component()
         .with_render_every_step(true)
         .with_step_dt(1.0 / 60.0)
         .wgpu()
-        .build_eframe(|cc| SolidDraftApp::new(cc, soliddraft_app::demo_document(), Automation::default()));
+        .build_eframe(|cc| SolidDraftApp::new(cc, soliddraft_app::startup::demo_document(), Automation::default()));
     harness.run_steps(3);
 
     // An assembly of the base and, 30 mm up, the plate; saved.
@@ -469,7 +469,7 @@ fn a_part_edited_in_its_assembly_takes_and_follows_a_face_of_another_component()
 
 /// A block `w` by `d` on the top plane, `h` tall, centred on the origin, not yet saved.
 fn block(w: f64, d: f64, h: f64) -> soliddraft_app::document::Document {
-    let mut doc = soliddraft_app::new_document();
+    let mut doc = soliddraft_app::startup::new_document();
     let params = ExtrudeParams {
         profile: ProfileKind::Rectangle { width: w, height: d },
         plane: PlaneKind::Top,
@@ -487,7 +487,7 @@ fn window() -> App<'static> {
         .with_render_every_step(true)
         .with_step_dt(1.0 / 60.0)
         .wgpu()
-        .build_eframe(|cc| SolidDraftApp::new(cc, soliddraft_app::demo_document(), Automation::default()));
+        .build_eframe(|cc| SolidDraftApp::new(cc, soliddraft_app::startup::demo_document(), Automation::default()));
     harness.run_steps(3);
     harness
 }

@@ -1,0 +1,8 @@
+{
+  "files": {
+    "ci/check-step.py": [
+      "step-opencascade",
+      "application-loop"
+    ]
+  }
+}

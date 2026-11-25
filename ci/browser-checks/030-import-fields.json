@@ -1,0 +1,10 @@
+{
+  "name": "Check field command availability on an imported STEP body",
+  "script": "ci/browser-import-fields.js",
+  "port": 8793,
+  "query": "?demo",
+  "fixture": {
+    "source": "ci/fixtures/import/block-closed.step",
+    "destination": "import-field-block.step"
+  }
+}

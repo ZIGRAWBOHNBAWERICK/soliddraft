@@ -165,9 +165,9 @@ pub fn run(args: &[String]) -> ExitCode {
         },
         None => vec![(0, o.words.join(" "))],
     };
-    let mut doc = Document::new("Part1", soliddraft_app::kernel());
+    let mut doc = Document::new("Part1", soliddraft_app::startup::kernel());
     if o.demo {
-        soliddraft_app::populate_demo(&mut doc);
+        soliddraft_app::startup::populate_demo(&mut doc);
     }
     let mut state = AppState::new(doc);
     let mut host = AppTools { state: &mut state };

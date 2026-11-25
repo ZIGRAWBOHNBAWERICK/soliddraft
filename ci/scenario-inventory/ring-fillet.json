@@ -1,0 +1,22 @@
+{
+  "id": "ring-fillet",
+  "file": "ci/scenarios/ring-fillet.json",
+  "acceptance": true,
+  "owners": [
+    "soliddraft-app",
+    "soliddraft-model",
+    "soliddraft-kernel-catallax"
+  ],
+  "kernel_parts": [
+    "boolean",
+    "extrude",
+    "fillet",
+    "measure",
+    "mesh",
+    "step"
+  ],
+  "catallax_revision": "76cdf97f3e85d22ea74868b77d849498ebdfcf1c",
+  "route": "MCP document commands -> Catallax adapter -> pinned kernel",
+  "supported_limits": "A radius-10 pipe with a radius-4 boss leaving it at a right angle, the closed ring between them rounded at radius 1 edited to 0.75 mm on the 20M allowance; STL exports, and STEP writes one valid solid under the ring's certificate.",
+  "evidence": "Build, radius edit, undo, redo, save, fresh-process reopen and exports; result.json, command.json, viewport.png, view.svg, the STL and the STEP with its direct validity check."
+}

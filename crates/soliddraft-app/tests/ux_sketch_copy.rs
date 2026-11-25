@@ -115,7 +115,7 @@ fn copy_tools_place_values_without_moving_sources_and_apply_as_one_undo() {
     let frame = |app: &mut App, name: &str| {
         app.render().expect("the app renders").save(dir.join(format!("{name}.png"))).unwrap();
     };
-    let mut doc = Document::new("Copy placement", soliddraft_app::kernel());
+    let mut doc = Document::new("Copy placement", soliddraft_app::startup::kernel());
     doc.apply(Command::AddSketch { plane: SketchPlane::Reference { plane: PlaneKind::Top, offset: 0.0 } }).unwrap();
     let id = doc.features[0].id;
     let name = doc.features[0].name.clone();

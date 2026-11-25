@@ -1,0 +1,6 @@
+[[areas]]
+name = "app.create_menu"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/create_menu.rs"]
+module = ["create_menu"]

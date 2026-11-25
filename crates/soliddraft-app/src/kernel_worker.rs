@@ -471,7 +471,7 @@ mod browser {
             HOST.with_borrow_mut(|host| {
                 host.get_or_insert_with(|| {
                     report_panics();
-                    Host::new(crate::kernel())
+                    Host::new(crate::startup::kernel())
                 })
                 .run(part, &job)
             })
@@ -518,7 +518,7 @@ mod tests {
     use super::*;
 
     fn demo() -> crate::document::Document {
-        crate::demo_document()
+        crate::startup::demo_document()
     }
 
     #[test]
@@ -528,7 +528,7 @@ mod tests {
         let body = doc.model().body_after(feature).unwrap();
         let expected = doc.kernel().mass_properties(body).unwrap();
         let (_, part) = doc.model().snapshot().encode().unwrap();
-        let mut host = Host::new(crate::kernel());
+        let mut host = Host::new(crate::startup::kernel());
         let answer = host.run(&part, &Job::MassProperties { feature }).unwrap();
         let measured: soliddraft_kernel_api::MassProperties = serde_json::from_value(answer).unwrap();
         assert_eq!(measured, expected);
@@ -539,7 +539,7 @@ mod tests {
         let mut doc = demo();
         let first = doc.model().features()[0].id;
         let (_, part) = doc.model().snapshot().encode().unwrap();
-        let mut host = Host::new(crate::kernel());
+        let mut host = Host::new(crate::startup::kernel());
         host.run(&part, &Job::MassProperties { feature: first }).unwrap();
         let built = host.part.as_ref().unwrap().1.body_after(first);
         host.run(&part, &Job::MassProperties { feature: first }).unwrap();
@@ -556,7 +556,7 @@ mod tests {
     #[test]
     fn a_feature_the_worker_cannot_find_is_refused() {
         let (_, part) = demo().model().snapshot().encode().unwrap();
-        let mut host = Host::new(crate::kernel());
+        let mut host = Host::new(crate::startup::kernel());
         let error = host.run(&part, &Job::MassProperties { feature: model::FeatureId(9999) }).unwrap_err();
         assert!(error.contains("no such feature"), "{error}");
         assert!(host.run(b"not a part", &Job::MassProperties { feature: model::FeatureId(1) }).is_err());
@@ -572,7 +572,7 @@ mod tests {
             dimension: crate::drag::Dimension::Depth,
             value: 12.0,
         };
-        let mut host = Host::new(crate::kernel());
+        let mut host = Host::new(crate::startup::kernel());
         for job in [
             Job::Build { edit: Some(edit), level: Default::default(), curved_surfaces: None },
             Job::Build { edit: None, level: Default::default(), curved_surfaces: None },
@@ -643,7 +643,7 @@ mod tests {
         edited.reuse_builds_from(&opened);
         edited.rebuild();
 
-        let mut fresh = model::Document::from_bytes(&part, crate::kernel()).unwrap();
+        let mut fresh = model::Document::from_bytes(&part, crate::startup::kernel()).unwrap();
         fresh.execute_deferred(crate::document::scalar_draft_command(&fresh, edit).unwrap()).unwrap();
         fresh.rebuild();
         for feature in fresh.features() {

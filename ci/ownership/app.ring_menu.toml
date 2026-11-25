@@ -1,0 +1,6 @@
+[[areas]]
+name = "app.ring_menu"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/ring_menu.rs"]
+module = ["ring_menu"]

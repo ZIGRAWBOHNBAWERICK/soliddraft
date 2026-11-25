@@ -5,8 +5,12 @@
 use crate::command_tools::{CommandTools, ProposalBook, ProposalStatus, Surface};
 use crate::document::Preview;
 use crate::state::{AppState, NoteKind};
+use serde_json::{Value, json};
 use soliddraft_assistant::key::{self, ApiKey, KeySource};
-use soliddraft_assistant::{AssistantSettings, ChatEvent, Conversation, ConversationConfig, Provider, ProviderKind};
+use soliddraft_assistant::{
+    AssistantSettings, Caller, ChatEvent, Conversation, ConversationConfig, Provider, ProviderKind, ToolHost,
+    ToolOutput, ToolSpec,
+};
 use std::sync::Arc;
 
 mod mcp;
@@ -178,7 +182,76 @@ How you answer:
 - If no available command can make what the user asks for, say so plainly instead of approximating it with \
 other features, and say what you can do instead.
 - Ask a short question when the request is ambiguous in a way that changes the geometry (which edge, which face, \
-which side).";
+which side).
+
+Manufacturing information (datums, dimensions with tolerances, geometric tolerances, finishes, the material and \
+the general tolerance):
+- Rules and standards tables decide every value. You never choose a value yourself and never change a value a \
+tool proposed.
+- `pmi_recognise` lists the features the part's faces show, `pmi_interview` lists the open questions, each with \
+the rule's proposal and its reason, and `pmi_list` lists the part's items. They change nothing.
+- Relay the interview to the user in its order: each question, its proposal and the reason. Ask the user for what \
+no rule proposes, such as the material, and for any question without a proposal. Do not answer for them.
+- `pmi_answer` takes the proposals of the questions the user accepted (`accept` with their ids, or \"all\" when \
+they accepted every one) and the material as the user named it. `pmi_add` puts one item with values the user \
+stated, when they answer a question another way.
+- `manufacturing_package` writes the STEP file with its drawing beside it as PDF and DXF. Ask the user where to \
+write it unless they said.
+- `pmi_answer`, `pmi_add` and `manufacturing_package` each make a card, as `propose` does: nothing changes \
+until the user applies it, unless auto_apply is true. Tell the user what the card does.";
+
+/// The assistant's tools over the whole app: the part's command layer, and the
+/// manufacturing package, which writes files and opens a drawing.
+struct AssistantTools<'a> {
+    state: &'a mut AppState,
+}
+
+impl AssistantTools<'_> {
+    fn part(&mut self) -> CommandTools<'_> {
+        let st = &mut *self.state;
+        CommandTools { doc: &mut st.doc, book: &mut st.chat.book, surface: Surface::Assistant, drawing: None }
+    }
+
+    fn package(&mut self, id: &str) -> ToolOutput {
+        match crate::pmi::assistant::apply_package(self.state, id) {
+            Ok(report) => ToolOutput::json(&report),
+            Err(e) => ToolOutput::error(e),
+        }
+    }
+}
+
+impl ToolHost for AssistantTools<'_> {
+    fn tools(&self) -> Vec<ToolSpec> {
+        crate::command_tools::tool_specs(Surface::Assistant)
+    }
+
+    fn call(&mut self, name: &str, input: Value, caller: &Caller) -> ToolOutput {
+        let assistant = matches!(caller, Caller::Assistant { .. });
+        let id = input["proposal_id"].as_str().unwrap_or_default().to_owned();
+        if name == "apply" && crate::pmi::assistant::is_package(self.state, &id) {
+            if assistant && !self.state.chat.book.auto_apply {
+                return ToolOutput::error(
+                    "only the user can apply proposals in this session: they apply it from its card. Tell them the \
+                     proposal is ready.",
+                );
+            }
+            return self.package(&id);
+        }
+        let out = self.part().call(name, input, caller);
+        if name == crate::pmi::assistant::PACKAGE && !out.is_error && assistant && self.state.chat.book.auto_apply {
+            let made: Value = serde_json::from_str(&out.content).unwrap_or_default();
+            let id = made["proposal_id"].as_str().unwrap_or_default().to_owned();
+            let mut written = self.package(&id);
+            if !written.is_error {
+                let mut report: Value = serde_json::from_str(&written.content).unwrap_or_default();
+                report["note"] = json!("Auto-apply is on, so the files were written and the drawing is open.");
+                written = ToolOutput::json(&report);
+            }
+            return written;
+        }
+        out
+    }
+}
 
 impl ChatState {
     /// A chat connected as the settings file and the environment say, or offline with the reason.
@@ -221,7 +294,7 @@ impl ChatState {
         let mut chat = Self::empty(Link::Connected(Box::new(conversation)), status);
         chat.messages.push(ChatMessage::new(
             Role::System,
-            "Reads the model and proposes features. Nothing changes until you apply.",
+            "Reads the model and proposes features and manufacturing information. Nothing changes until you apply.",
         ));
         chat
     }
@@ -361,21 +434,24 @@ impl AppState {
 
     /// Takes the assistant's progress since the last frame and runs its tool calls.
     pub fn poll_assistant(&mut self) {
-        let crate::chat::ChatState { link, book, .. } = &mut self.chat;
-        let Link::Connected(conversation) = link else { return };
-        let mut host = CommandTools { doc: &mut self.doc, book, surface: Surface::Assistant, drawing: None };
-        let events = conversation.poll(&mut host);
-        for e in events {
-            self.chat_event(e);
-        }
+        self.drive_assistant(|conversation, host| conversation.poll(host));
     }
 
     /// Blocks until the current answer is complete. For tests and scripts.
     pub fn wait_assistant(&mut self) {
-        let crate::chat::ChatState { link, book, .. } = &mut self.chat;
-        let Link::Connected(conversation) = link else { return };
-        let mut host = CommandTools { doc: &mut self.doc, book, surface: Surface::Assistant, drawing: None };
-        let events = conversation.wait(&mut host);
+        self.drive_assistant(|conversation, host| conversation.wait(host));
+    }
+
+    /// Runs the conversation's tool calls over the whole app. The conversation is taken
+    /// out of the chat while its tools run, since they reach the chat's proposals.
+    fn drive_assistant(&mut self, drive: impl FnOnce(&mut Conversation, &mut AssistantTools<'_>) -> Vec<ChatEvent>) {
+        let link = std::mem::replace(&mut self.chat.link, Link::Offline(String::new()));
+        let Link::Connected(mut conversation) = link else {
+            self.chat.link = link;
+            return;
+        };
+        let events = drive(&mut conversation, &mut AssistantTools { state: self });
+        self.chat.link = Link::Connected(conversation);
         for e in events {
             self.chat_event(e);
         }
@@ -403,20 +479,13 @@ impl AppState {
                     t.state = if output.is_error {
                         ToolState::Failed(short(&output.content))
                     } else {
-                        ToolState::Done(match name.as_str() {
-                            "propose" | "apply" => {
-                                format!(
-                                    "{} {}",
-                                    parsed["proposal_id"].as_str().unwrap_or(""),
-                                    parsed["status"].as_str().unwrap_or("")
-                                )
-                            }
-                            _ => "done".into(),
+                        ToolState::Done(match parsed["proposal_id"].as_str() {
+                            Some(pid) => format!("{pid} {}", parsed["status"].as_str().unwrap_or("")),
+                            None => "done".into(),
                         })
                     };
                 }
                 if !output.is_error
-                    && (name == "propose" || name == "apply")
                     && let Some(pid) = parsed["proposal_id"].as_str()
                     && !m.proposals.iter().any(|p| p == pid)
                 {
@@ -462,6 +531,13 @@ impl AppState {
     /// Applies a proposal for the user.
     pub fn apply_proposal(&mut self, id: &str) {
         self.after_change();
+        if crate::pmi::assistant::is_package(self, id) {
+            match crate::pmi::assistant::apply_package(self, id) {
+                Ok(report) => self.note(crate::pmi::package_summary(&report["report"]), NoteKind::Info),
+                Err(e) => self.note(e, NoteKind::Error),
+            }
+            return;
+        }
         match self.chat.book.apply(&mut self.doc, id) {
             Ok(added) => {
                 let names: Vec<String> =

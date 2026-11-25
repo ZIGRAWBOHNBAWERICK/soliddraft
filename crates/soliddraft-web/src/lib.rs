@@ -99,7 +99,11 @@ pub fn start() {
                 canvas,
                 options,
                 Box::new(move |cc| {
-                    let doc = if demo { soliddraft_app::demo_document() } else { soliddraft_app::new_document() };
+                    let doc = if demo {
+                        soliddraft_app::startup::demo_document()
+                    } else {
+                        soliddraft_app::startup::new_document()
+                    };
                     let automation = Automation { connect_assistant: true, preset, theme, ..Default::default() };
                     let mut app = SolidDraftApp::new(cc, doc, automation);
                     // Unsaved work and the recent list stay in this browser's storage.

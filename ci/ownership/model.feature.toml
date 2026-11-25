@@ -1,0 +1,6 @@
+[[areas]]
+name = "model.feature"
+owner = "core"
+crate = "soliddraft-model"
+paths = ["crates/soliddraft-model/src/feature.rs"]
+module = ["feature"]

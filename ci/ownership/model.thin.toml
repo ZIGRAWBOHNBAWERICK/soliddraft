@@ -1,0 +1,6 @@
+[[areas]]
+name = "model.thin"
+owner = "core"
+crate = "soliddraft-model"
+paths = ["crates/soliddraft-model/src/thin.rs"]
+module = ["thin"]

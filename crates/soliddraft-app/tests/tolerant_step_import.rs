@@ -13,7 +13,7 @@ use soliddraft_kernel_api::{BodyAccuracy, StepOptions};
 mod render_steps;
 
 fn box_step() -> String {
-    let mut doc = Document::new("Source", soliddraft_app::kernel());
+    let mut doc = Document::new("Source", soliddraft_app::startup::kernel());
     doc.apply(Command::AddExtrude {
         params: ExtrudeParams {
             profile: ProfileKind::Rectangle { width: 10.0, height: 8.0 },
@@ -53,7 +53,11 @@ fn tolerant_and_certified_imports_display_with_their_own_authority_and_reopen() 
             .with_step_dt(0.1)
             .renderer(render_steps::renderer())
             .build_eframe(|cc| {
-                SolidDraftApp::new(cc, Document::new("Imported", soliddraft_app::kernel()), Automation::default())
+                SolidDraftApp::new(
+                    cc,
+                    Document::new("Imported", soliddraft_app::startup::kernel()),
+                    Automation::default(),
+                )
             });
         app.run_steps(3);
         app.state_mut().state.push(AppAction::ImportStep(Some(path.clone())));
@@ -123,7 +127,7 @@ fn tolerant_and_certified_imports_display_with_their_own_authority_and_reopen() 
         app.render().unwrap().save(root.join(format!("{name}.png"))).unwrap();
         let part = root.join(format!("{name}.dwprt"));
         soliddraft_app::file::save(&mut app.state_mut().state.doc, &part).unwrap();
-        let reopened = soliddraft_app::file::open(&part, soliddraft_app::kernel(), None).unwrap();
+        let reopened = soliddraft_app::file::open(&part, soliddraft_app::startup::kernel(), None).unwrap();
         let rows = report::rows(&reopened, &[]);
         assert_eq!(rows.len(), body_count);
         assert!(rows.iter().all(|row| row.tier == tier));

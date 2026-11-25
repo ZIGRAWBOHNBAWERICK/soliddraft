@@ -1,0 +1,8 @@
+{
+  "files": {
+    "ci/check-configuration-grid.py": [
+      "lint",
+      "application-loop"
+    ]
+  }
+}

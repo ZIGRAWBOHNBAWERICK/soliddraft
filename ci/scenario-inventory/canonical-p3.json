@@ -1,0 +1,22 @@
+{
+  "id": "canonical-p3",
+  "file": "ci/scenarios/canonical-p3.json",
+  "acceptance": true,
+  "owners": [
+    "soliddraft-app",
+    "soliddraft-model",
+    "soliddraft-kernel-catallax"
+  ],
+  "kernel_parts": [
+    "boolean",
+    "extrude",
+    "fillet",
+    "measure",
+    "mesh",
+    "step"
+  ],
+  "catallax_revision": "9aed0777184353a5f52d1b660f9d2411b97f0fc9",
+  "route": "MCP document commands -> Catallax adapter -> pinned kernel",
+  "supported_limits": "Canonical 40 x 30 x 10 block with radius-8 boss of height 12, concave junction radius 2 edited to 2.5, all four top edges rounded at radius 1.",
+  "evidence": "Build, parameter edit, undo, redo, fresh reopen, proven STEP and closed STL exports. canonical_parts also resolves stored face and edge references and renders each checkpoint in Edit Suite."
+}

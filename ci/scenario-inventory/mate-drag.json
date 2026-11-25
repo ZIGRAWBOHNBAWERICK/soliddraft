@@ -1,0 +1,21 @@
+{
+  "id": "mate-drag",
+  "file": "ci/scenarios/mate-drag.json",
+  "acceptance": true,
+  "owners": [
+    "soliddraft-app",
+    "soliddraft-assembly",
+    "soliddraft-model",
+    "soliddraft-kernel-catallax"
+  ],
+  "kernel_parts": [
+    "boolean",
+    "extrude",
+    "measure",
+    "mesh"
+  ],
+  "catallax_revision": "76cdf97f3e85d22ea74868b77d849498ebdfcf1c",
+  "route": "MCP assembly_drag -> assembly preview -> existing exact or bounded solver -> one-step commit",
+  "supported_limits": "B6: drag previews and cancel, distance stops, one-step commit, undo/redo and save/reopen; no collision checks.",
+  "evidence": "result.json, protocol.json, command summaries, work/rig.dwasm and pinned parts"
+}

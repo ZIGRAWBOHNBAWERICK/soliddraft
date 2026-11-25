@@ -1,0 +1,6 @@
+{
+  "name": "Check the sample part with Inspect > Check in Chromium",
+  "script": "ci/browser-part-check.js",
+  "port": 8770,
+  "query": "?demo"
+}

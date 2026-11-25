@@ -1,0 +1,28 @@
+{
+  "id": "import-features",
+  "file": "ci/scenarios/import-features.json",
+  "acceptance": true,
+  "owners": [
+    "soliddraft-app",
+    "soliddraft-model",
+    "soliddraft-kernel-api",
+    "soliddraft-kernel-catallax"
+  ],
+  "kernel_parts": [
+    "boolean",
+    "chamfer",
+    "extrude",
+    "field",
+    "fillet",
+    "hole",
+    "iges",
+    "import",
+    "measure",
+    "mesh",
+    "step"
+  ],
+  "catallax_revision": "a59f3aa9a07a217b0c963d68c97865a9804619ee",
+  "route": "MCP document commands -> Catallax adapter -> pinned kernel",
+  "supported_limits": "Fillet, chamfer, boss, pocket and hole on the imported planar block, with an edit before and after a save and reopen. Imported faces keep their Import1 · Face N names. Catallax refuses a lattice after the face-mounted features with distance.planar-domain and leaves the revision intact.",
+  "evidence": "result.json, protocol.json and commands/NNNN/{part.dwprt,command.json,kernel.json}; imported-features.dwprt"
+}

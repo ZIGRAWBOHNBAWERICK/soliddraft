@@ -8,7 +8,7 @@ use soliddraft_app::{
 use soliddraft_assistant::{Caller, ToolOutput, tools::call_checked};
 
 fn blank(w: f64, h: f64, d: f64) -> AppState {
-    let mut doc = Document::new("Distance and pattern", soliddraft_app::kernel());
+    let mut doc = Document::new("Distance and pattern", soliddraft_app::startup::kernel());
     doc.apply(Command::AddExtrude {
         params: ExtrudeParams {
             profile: ProfileKind::Rectangle { width: w, height: h },
@@ -210,7 +210,7 @@ fn distance_commands_render_in_both_frames_and_hide_pins_during_sketches() {
             app.run_steps(10);
             volume(&app.state().state, 192.0);
             let id = app.state().state.doc.features.last().unwrap().id;
-            app.state_mut().state.push(AppAction::EditFeature(id));
+            app.state_mut().state.push(AppAction::Editor(soliddraft_app::app::EditorAction::EditFeature(id)));
             app.run_steps(4);
             field(app, "Offset value", "0");
             let editor = app.state().state.editor.as_ref().unwrap();

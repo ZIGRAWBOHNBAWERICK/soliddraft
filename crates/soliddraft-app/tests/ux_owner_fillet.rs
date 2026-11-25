@@ -24,7 +24,7 @@ const HANG_GUARD: Duration = Duration::from_secs(900);
 /// The owner's part, as `fillet_acceptance` builds it, and the midpoints of its pocket
 /// rim's six edges.
 fn owner_part() -> (Document, Vec<Vec3>) {
-    let mut state = AppState::new(soliddraft_app::new_document());
+    let mut state = AppState::new(soliddraft_app::startup::new_document());
     let caller = Caller::Mcp { client: "ux-owner-fillet".into() };
     for (tool, arguments) in [
         (
@@ -47,7 +47,7 @@ fn owner_part() -> (Document, Vec<Vec3>) {
         let out = call_checked(&mut AppTools { state: &mut state }, tool, arguments, &caller);
         assert!(!out.is_error, "{tool}: {}", out.content);
     }
-    let doc = std::mem::replace(&mut state.doc, soliddraft_app::new_document());
+    let doc = std::mem::replace(&mut state.doc, soliddraft_app::startup::new_document());
     let model = doc.model();
     let topology = model.kernel().topology(model.body().unwrap()).unwrap();
     let feature = |face| {

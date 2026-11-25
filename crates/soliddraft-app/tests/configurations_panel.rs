@@ -109,7 +109,7 @@ fn the_panel_adds_activates_explodes_and_collapses() {
         .with_render_every_step(true)
         .with_step_dt(1.0 / 60.0)
         .wgpu()
-        .build_eframe(|cc| SolidDraftApp::new(cc, soliddraft_app::new_document(), Automation::default()));
+        .build_eframe(|cc| SolidDraftApp::new(cc, soliddraft_app::startup::new_document(), Automation::default()));
     h.run_steps(3);
 
     // A plate and a block standing on it.

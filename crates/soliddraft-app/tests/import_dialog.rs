@@ -11,7 +11,7 @@ const WIDE: &[u8] = include_bytes!("../../../ci/fixtures/import/block-seam-20um.
 
 #[test]
 fn certified_preview_cancel_and_accept_keeps_reviewed_bytes() {
-    let doc = Document::new("Import test", soliddraft_app::kernel());
+    let doc = Document::new("Import test", soliddraft_app::startup::kernel());
     let original_revision = doc.revision();
     let mut state = AppState::new(doc);
     state.import_dialog = Some(Preview::from_bytes(&state.doc, "block-seam-4um.step", BLOCK.to_vec()).unwrap());
@@ -68,7 +68,7 @@ fn typed(app: &mut Harness<'_, soliddraft_app::state::AppState>, label: &str, te
 
 #[test]
 fn an_asked_repair_needs_a_limit_and_an_approver_and_is_saved_with_both() {
-    let doc = Document::new("Approval test", soliddraft_app::kernel());
+    let doc = Document::new("Approval test", soliddraft_app::startup::kernel());
     let mut state = AppState::new(doc);
     state.import_dialog = Some(Preview::from_bytes(&state.doc, "block-seam-20um.step", WIDE.to_vec()).unwrap());
     let mut app = Harness::builder()
@@ -119,7 +119,7 @@ fn an_asked_repair_needs_a_limit_and_an_approver_and_is_saved_with_both() {
 #[test]
 fn a_repair_past_the_tenth_of_the_nearest_feature_is_refused_after_approval() {
     let source = std::str::from_utf8(BLOCK).unwrap().replace("10.004", "0.07").replace(",10.)", ",0.05)");
-    let mut doc = Document::new("Limit test", soliddraft_app::kernel());
+    let mut doc = Document::new("Limit test", soliddraft_app::startup::kernel());
     let preview = Preview::from_bytes(&doc, "thin.step", source.into_bytes()).unwrap();
     let revision = doc.revision();
     let review = soliddraft_app::import::Review {
@@ -158,7 +158,8 @@ fn mcp_refuses_source_substitution_after_preview() {
     let mut observed = Vec::new();
     for decline in [json!(["g0"]), json!([])] {
         std::fs::write(&path, BLOCK).unwrap();
-        let kernel = std::sync::Arc::new(soliddraft_kernel_api::counting::Counting::new(soliddraft_app::kernel()));
+        let kernel =
+            std::sync::Arc::new(soliddraft_kernel_api::counting::Counting::new(soliddraft_app::startup::kernel()));
         let mut doc = Document::new("Import binding", kernel);
         let mut book = ProposalBook::default();
         let before = (doc.revision(), doc.undo_depth());
@@ -204,7 +205,7 @@ fn mcp_refuses_source_substitution_after_preview() {
 /// was "the import made no feature", which says nothing about the answer.
 #[test]
 fn an_allowed_movement_that_is_not_a_number_says_so() {
-    let mut doc = Document::new("Wide seam", soliddraft_app::kernel());
+    let mut doc = Document::new("Wide seam", soliddraft_app::startup::kernel());
     let preview = Preview::from_bytes(&doc, "wide.step", WIDE.to_vec()).unwrap();
     let revision = doc.revision();
     for tolerance in ["abc", "", "0.0.3", "-0.03"] {
@@ -227,7 +228,7 @@ fn an_allowed_movement_that_is_not_a_number_says_so() {
 /// its STEP entity number in the tree, "#178 not imported until the gap is resolved".
 #[test]
 fn a_declined_import_names_no_entity_number() {
-    let mut doc = Document::new("Declined", soliddraft_app::kernel());
+    let mut doc = Document::new("Declined", soliddraft_app::startup::kernel());
     let preview = Preview::from_bytes(&doc, "block.step", WIDE.to_vec()).unwrap();
     let review = soliddraft_app::import::Review { decline: vec!["g0".into()], accept: Vec::new() };
     soliddraft_app::import::commit(&mut doc, &preview, &review).unwrap();
@@ -260,7 +261,7 @@ fn an_imported_body_has_faces_to_measure_and_sketch_on() {
     std::fs::create_dir_all(&dir).unwrap();
     let source = dir.join("block.step");
     std::fs::write(&source, include_bytes!("../../../ci/fixtures/import/block-closed.step")).unwrap();
-    let mut doc = Document::new("Imported faces", soliddraft_app::kernel());
+    let mut doc = Document::new("Imported faces", soliddraft_app::startup::kernel());
     let mut book = ProposalBook::default();
     let preview = call(&mut doc, &mut book, "preview_import", json!({"path":source}));
     let token = serde_json::from_str::<Value>(&preview.content).unwrap()["token"].clone();
@@ -291,7 +292,7 @@ fn an_imported_body_has_faces_to_measure_and_sketch_on() {
 
     let saved = dir.join("imported.dwprt");
     soliddraft_app::file::save(&mut doc, &saved).unwrap();
-    let mut reopened = soliddraft_app::file::open(&saved, soliddraft_app::kernel(), None).unwrap();
+    let mut reopened = soliddraft_app::file::open(&saved, soliddraft_app::startup::kernel(), None).unwrap();
     let sketch: Value =
         serde_json::from_str(&call(&mut reopened, &mut book, "feature", json!({"name":"Sketch1"})).content).unwrap();
     assert_eq!(sketch["status"], "ok", "{sketch}");

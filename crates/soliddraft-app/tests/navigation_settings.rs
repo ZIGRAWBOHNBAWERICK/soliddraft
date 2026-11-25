@@ -155,7 +155,7 @@ fn navigation_save_does_not_touch_document_or_undo() {
             write(&dir, text);
         }
         assert_eq!(settings::capture_install_kind(), kind, "{name}: the app starts");
-        let mut state = AppState::new(soliddraft_app::demo_document());
+        let mut state = AppState::new(soliddraft_app::startup::demo_document());
         assert_eq!(state.navigation.active_preset().id, preset, "{name}");
         let feature = state.doc.features[0].id;
         state.doc.selection = Some(Selection::Feature(feature));
@@ -247,7 +247,7 @@ fn install_kind_is_captured_before_any_settings_write() {
             write(&dir, text);
         }
         assert_eq!(settings::capture_install_kind(), kind, "the app starts");
-        let state = AppState::new(soliddraft_app::new_document());
+        let state = AppState::new(soliddraft_app::startup::new_document());
         assert_eq!(state.navigation.active_preset().id, preset);
         settings::save_appearance(&Appearance { theme: Mode::Dark }).unwrap();
         let all = file_json(&dir);
@@ -255,7 +255,7 @@ fn install_kind_is_captured_before_any_settings_write() {
         assert_eq!(all["appearance"]["theme"], "dark");
 
         assert_eq!(settings::capture_install_kind(), InstallKind::Existing, "the app starts again");
-        let state = AppState::new(soliddraft_app::new_document());
+        let state = AppState::new(soliddraft_app::startup::new_document());
         assert_eq!(state.navigation.active_preset().id, preset, "still {preset} after a restart");
         settings::save_appearance(&Appearance { theme: Mode::Light }).unwrap();
         assert_eq!(file_json(&dir)["navigation"]["preset_id"], preset, "a later write keeps it");
@@ -279,7 +279,7 @@ fn newer_navigation_section_is_preserved_and_read_only() {
     let fresh = NavigationSettings::new(InstallKind::Existing);
     assert_eq!(settings::save_navigation(&fresh), Err(SaveError::NewerVersion { found: 99 }), "the file decides too");
     assert_eq!(bytes(&dir), text.as_bytes());
-    let mut state = AppState::new(soliddraft_app::new_document());
+    let mut state = AppState::new(soliddraft_app::startup::new_document());
     assert!(state.set_navigation(fresh).is_err(), "the app's path is refused as well");
     assert!(state.navigation.read_only, "and keeps what it read");
 
@@ -314,7 +314,7 @@ fn a_captured_install_kind_belongs_to_its_config_dir() {
     drop(guard);
     let (_guard, fresh) = config_dir("captured-fresh");
     assert_eq!(settings::install_kind(), InstallKind::New, "another directory is not the captured one");
-    assert_eq!(AppState::new(soliddraft_app::new_document()).navigation.active_preset().id, "fusion");
+    assert_eq!(AppState::new(soliddraft_app::startup::new_document()).navigation.active_preset().id, "fusion");
     settings::save_appearance(&settings::Appearance { theme: soliddraft_app::theme::Mode::Dark }).unwrap();
     assert!(file_json(&fresh).get("navigation").is_none(), "nothing captured here, so nothing is recorded");
     let _ = std::fs::remove_dir_all(existing);

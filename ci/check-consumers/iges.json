@@ -1,0 +1,8 @@
+{
+  "files": {
+    "ci/check-iges.py": [
+      "lint",
+      "application-loop"
+    ]
+  }
+}

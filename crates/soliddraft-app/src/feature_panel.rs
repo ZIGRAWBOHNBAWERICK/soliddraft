@@ -124,7 +124,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
                 && crate::form_bar::show_error(ui, message, correction.as_deref())
                 && let Some(radius) = suggested
             {
-                actions.push(AppAction::ApplySuggestedFilletRadius(radius));
+                actions.push(AppAction::Editor(crate::app::EditorAction::ApplySuggestedFilletRadius(radius)));
             }
         });
         let above = ui.cursor().top() - drawn.top();
@@ -211,11 +211,11 @@ fn header(
             #[cfg(target_arch = "wasm32")]
             crate::web::show_control("Form OK", ok.rect);
             if ok.clicked() {
-                actions.push(AppAction::CommitEditor);
+                actions.push(AppAction::Editor(crate::app::EditorAction::Commit));
             }
         }
         if action_button(ui, Icon::Close, "Cancel", false).on_hover_text("Cancel (Esc)").clicked() {
-            actions.push(AppAction::CancelEditor);
+            actions.push(AppAction::Editor(crate::app::EditorAction::Cancel));
         }
         if let Some(editor) = state.editor.as_mut() {
             let shown = editor.show_preview;

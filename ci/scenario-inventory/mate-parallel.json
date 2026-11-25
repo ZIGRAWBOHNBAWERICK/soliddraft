@@ -1,0 +1,22 @@
+{
+  "id": "mate-parallel",
+  "file": "ci/scenarios/mate-parallel.json",
+  "acceptance": true,
+  "owners": [
+    "soliddraft-app",
+    "soliddraft-assembly",
+    "soliddraft-model",
+    "soliddraft-kernel-api",
+    "soliddraft-kernel-catallax"
+  ],
+  "kernel_parts": [
+    "boolean",
+    "extrude",
+    "measure",
+    "mesh"
+  ],
+  "catallax_revision": "76cdf97f3e85d22ea74868b77d849498ebdfcf1c",
+  "route": "MCP assembly and Parallel mate commands -> assembly transaction -> proven plane query -> Catallax adapter -> pinned kernel",
+  "supported_limits": "B1: Parallel mates between proven axis-aligned planar faces of the root's own part components, aligned or opposed, default configuration; a strict refusal naming what stays free, a distance edit refused, an alignment edit that conflicts refused and named, undo, redo, save and reopen.",
+  "evidence": "result.json, protocol.json, commands/NNNN/{part.dwprt,command.json,kernel.json,inspect-*.stdout}; work/a.dwprt, work/b.dwprt and work/rig.dwasm"
+}

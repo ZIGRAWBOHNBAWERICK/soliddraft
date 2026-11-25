@@ -1,0 +1,22 @@
+{
+  "id": "mate-bounded-slot",
+  "file": "ci/scenarios/mate-bounded-slot.json",
+  "acceptance": true,
+  "owners": [
+    "soliddraft-app",
+    "soliddraft-assembly",
+    "soliddraft-model",
+    "soliddraft-kernel-api",
+    "soliddraft-kernel-catallax"
+  ],
+  "kernel_parts": [
+    "boolean",
+    "extrude",
+    "measure",
+    "mesh"
+  ],
+  "catallax_revision": "76cdf97f3e85d22ea74868b77d849498ebdfcf1c",
+  "route": "MCP mate commands -> assembly transaction -> bounded residual certificate -> native support queries -> pinned Catallax kernel",
+  "supported_limits": "B5: a straight Slot with an off-axis pin and a signed Angle, including rotation lock; residual bounds 1e-9 mm and 1e-9 rad; unsupported slot selection refused; save and fresh reopen.",
+  "evidence": "result.json, protocol.json, commands/NNNN/{command.json,kernel.json,viewport.png,view.svg}; bounded mate proofs in command summaries; work/rig.dwasm and its pinned parts"
+}

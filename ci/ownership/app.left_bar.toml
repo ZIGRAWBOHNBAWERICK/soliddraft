@@ -1,0 +1,6 @@
+[[areas]]
+name = "app.left_bar"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/left_bar.rs"]
+module = ["left_bar"]

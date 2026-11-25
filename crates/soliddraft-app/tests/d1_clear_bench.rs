@@ -18,7 +18,7 @@ use soliddraft_app::viewport::render::DisplayMode;
 #[test]
 fn d1_top_bar_single_file_menu_tabs_and_utilities() {
     let case = ribbon::case("d1-top-bar");
-    let mut app = ribbon::app(soliddraft_app::demo_document());
+    let mut app = ribbon::app(soliddraft_app::startup::demo_document());
     case.run(&mut app, |app| {
         // Legacy 7-item menu row is gone; single File button remains.
         assert!(app.query_by_label("File").is_some(), "single File button present");
@@ -88,7 +88,7 @@ fn d1_top_bar_single_file_menu_tabs_and_utilities() {
 #[test]
 fn d1_stacked_side_column_history_rollback_and_all_off_clear() {
     let case = ribbon::case("d1-side-column");
-    let mut app = ribbon::app(soliddraft_app::demo_document());
+    let mut app = ribbon::app(soliddraft_app::startup::demo_document());
     case.run(&mut app, |app| {
         // Default D1 Clear Bench opens Browser (Tree) + History stacked in one column.
         assert!(app.state().state.pane_shown(Pane::Tree));

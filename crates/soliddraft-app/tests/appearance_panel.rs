@@ -330,7 +330,7 @@ fn named_state_renders_two_body_appearances_and_reopens_with_visibility() {
         .unwrap();
     }
 
-    let mut doc = Document::new("Painted parts", soliddraft_app::kernel());
+    let mut doc = Document::new("Painted parts", soliddraft_app::startup::kernel());
     block(&mut doc, -18.0, 10.0);
     doc.new_body();
     block(&mut doc, 18.0, 20.0);
@@ -374,7 +374,7 @@ fn named_state_renders_two_body_appearances_and_reopens_with_visibility() {
     doc.apply(Command::ActivateConfiguration { name: "Service".into() }).unwrap();
     std::fs::write(out_dir().join("display-states-service.dwprt"), doc.model().to_bytes().unwrap()).unwrap();
 
-    let back = soliddraft_model::Document::from_bytes(&bytes, soliddraft_app::kernel()).unwrap();
+    let back = soliddraft_model::Document::from_bytes(&bytes, soliddraft_app::startup::kernel()).unwrap();
     let mut doc = Document::from_model(back);
     assert_eq!(doc.display_state().unwrap().id, inspection_id);
     doc.new_body();
@@ -455,7 +455,7 @@ fn assembly_colour_replaces_and_reveals_the_part_finish_after_reopen() {
             *adapter.borrow_mut() = cc.wgpu_render_state.clone();
             SolidDraftApp::new(
                 cc,
-                soliddraft_app::document::Document::new("Part", soliddraft_app::kernel()),
+                soliddraft_app::document::Document::new("Part", soliddraft_app::startup::kernel()),
                 Automation::default(),
             )
         });

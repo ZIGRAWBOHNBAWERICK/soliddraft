@@ -119,7 +119,7 @@ fn feature_drag_is_model_space_undoable_and_keeps_value_editing() {
         "undoing a subsequent geometry edit leaves the earlier placement intact"
     );
     let bytes = app.state().state.doc.model().to_bytes().unwrap();
-    let reopened = soliddraft_model::Document::from_bytes(&bytes, soliddraft_app::kernel()).unwrap();
+    let reopened = soliddraft_model::Document::from_bytes(&bytes, soliddraft_app::startup::kernel()).unwrap();
     let mut reopened = ribbon::app(Document::from_model(reopened));
     reopened.state_mut().state.push(AppAction::Select(Some(Selection::Body)));
     reopened.run_steps(6);

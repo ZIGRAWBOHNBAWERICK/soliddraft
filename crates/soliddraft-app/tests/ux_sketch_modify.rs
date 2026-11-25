@@ -44,7 +44,7 @@ fn expected_area() -> f64 {
 
 /// A part with one empty sketch on the Top plane and nothing built.
 fn empty_sketch() -> Document {
-    let mut doc = Document::new("Modify tools", soliddraft_app::kernel());
+    let mut doc = Document::new("Modify tools", soliddraft_app::startup::kernel());
     let plane = SketchPlane::Reference { plane: PlaneKind::Top, offset: 0.0 };
     doc.apply(Command::AddSketch { plane }).unwrap();
     doc.selection = None;

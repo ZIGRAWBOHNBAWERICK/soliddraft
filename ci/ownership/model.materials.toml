@@ -1,0 +1,6 @@
+[[areas]]
+name = "model.materials"
+owner = "core"
+crate = "soliddraft-model"
+paths = ["crates/soliddraft-model/src/materials.rs"]
+module = ["materials"]

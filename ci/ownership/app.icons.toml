@@ -1,0 +1,6 @@
+[[areas]]
+name = "app.icons"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/icons.rs"]
+module = ["icons"]

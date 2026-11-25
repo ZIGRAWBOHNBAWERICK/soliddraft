@@ -95,7 +95,7 @@ fn all_built(doc: &Document) {
 
 /// The two-solid import with a fillet on one edge of its second solid.
 fn imported() -> Document {
-    let mut doc = Document::new("Two blocks", soliddraft_app::kernel());
+    let mut doc = Document::new("Two blocks", soliddraft_app::startup::kernel());
     let preview = Preview::from_bytes(&doc, "blocks.step", STEP.to_vec()).unwrap();
     commit(&mut doc, &preview, &Review::default()).unwrap();
     assert_eq!(sources(&doc).len(), 2);
@@ -170,7 +170,8 @@ fn a_renumbered_file_replaces_both_solids_and_moves_their_references_as_one_step
 
     // The new version saves and reopens with its new file and references.
     let saved = doc.model().to_bytes().unwrap();
-    let reopened = soliddraft_app::file::open_bytes("replaced.dwprt", &saved, soliddraft_app::kernel(), None).unwrap();
+    let reopened =
+        soliddraft_app::file::open_bytes("replaced.dwprt", &saved, soliddraft_app::startup::kernel(), None).unwrap();
     all_built(&reopened);
     assert_eq!(sources(&reopened), new_sources);
     assert_eq!(fillet_faces(&reopened), new_faces);
@@ -323,7 +324,7 @@ fn two_seamed_blocks() -> Vec<u8> {
 #[test]
 fn a_reviewed_new_file_with_repair_answers_refuses_and_changes_nothing() {
     let file = two_seamed_blocks();
-    let mut doc = Document::new("Seamed blocks", soliddraft_app::kernel());
+    let mut doc = Document::new("Seamed blocks", soliddraft_app::startup::kernel());
     let preview = Preview::from_bytes(&doc, "seams.step", file.clone()).unwrap();
     commit(&mut doc, &preview, &Review::default()).unwrap();
     assert_eq!(sources(&doc).len(), 2);
@@ -353,7 +354,7 @@ fn block_step(height: f64, hole: Option<[f64; 2]>) -> Vec<u8> {
 /// The 40 x 30 mm block `height` mm tall with a hole of each diameter straight through it
 /// at each point.
 fn holes_step(height: f64, holes: &[([f64; 2], f64)]) -> Vec<u8> {
-    let mut doc = Document::new("Source block", soliddraft_app::kernel());
+    let mut doc = Document::new("Source block", soliddraft_app::startup::kernel());
     let rectangle = json!({"shape":"rectangle","center":[0,0,0],"width":40,"height":30});
     call(&mut doc, "sketch", json!({"plane":"top","shapes":[rectangle]})).unwrap();
     call(&mut doc, "extrude", json!({"sketch":"Sketch1","depth":height,"flip":false})).unwrap();
@@ -408,7 +409,7 @@ fn near(a: f64, b: f64) -> bool {
 /// - Boss-Extrude2 stands on a circle sketched on the bottom;
 /// - Chamfer1 bevels the hole's top edge.
 fn holed_block() -> Document {
-    let mut doc = Document::new("Holed block", soliddraft_app::kernel());
+    let mut doc = Document::new("Holed block", soliddraft_app::startup::kernel());
     let preview = Preview::from_bytes(&doc, "block.step", block_step(20.0, Some([0.0, 0.0]))).unwrap();
     commit(&mut doc, &preview, &Review::default()).unwrap();
     assert_eq!(sources(&doc).len(), 1);
@@ -519,7 +520,8 @@ fn a_deleted_face_names_the_references_it_breaks_and_keeps_the_rest() {
     assert_ne!(after, before);
 
     let saved = doc.model().to_bytes().unwrap();
-    let reopened = soliddraft_app::file::open_bytes("replaced.dwprt", &saved, soliddraft_app::kernel(), None).unwrap();
+    let reopened =
+        soliddraft_app::file::open_bytes("replaced.dwprt", &saved, soliddraft_app::startup::kernel(), None).unwrap();
     assert_eq!(built(&reopened), after);
     assert_eq!(reopened.model().stored_face_refs(), refs);
     assert_eq!(sources(&reopened)[0].0, sha256_hex(&block_step(20.0, None)));
@@ -575,7 +577,7 @@ fn a_resized_face_takes_its_references_with_it() {
 fn two_holes_that_move_past_each_other_keep_their_identities() {
     let old = [([-10.0, 0.0], 2.0), ([-2.0, 0.0], 4.0)];
     let new = [([1.0, 0.0], 2.0), ([-5.0, 0.0], 4.0)];
-    let mut doc = Document::new("Two holes", soliddraft_app::kernel());
+    let mut doc = Document::new("Two holes", soliddraft_app::startup::kernel());
     let preview = Preview::from_bytes(&doc, "holes.step", holes_step(20.0, &old)).unwrap();
     commit(&mut doc, &preview, &Review::default()).unwrap();
     let rim = edge_named(&doc, |m| near(m.z, 20.0) && near(((m.x + 10.0).powi(2) + m.y * m.y).sqrt(), 1.0));
@@ -610,7 +612,7 @@ fn a_drawing_dimension_survives_a_file_replacement() {
     };
     use soliddraft_kernel_api::{Point2, Vec3};
 
-    let mut doc = Document::new("Drawn block", soliddraft_app::kernel());
+    let mut doc = Document::new("Drawn block", soliddraft_app::startup::kernel());
     let preview = Preview::from_bytes(&doc, "block.step", block_step(20.0, Some([0.0, 0.0]))).unwrap();
     commit(&mut doc, &preview, &Review::default()).unwrap();
     let ctx = PartContext::new(&doc).unwrap();

@@ -10,6 +10,8 @@ import tempfile
 import textwrap
 import unittest
 
+from registries import check_consumers
+
 WORKFLOWS = sorted(pathlib.Path(__file__).resolve().parent.parent.joinpath(".github", "workflows").glob("*.yml"))
 MAIN = "refs/heads/main"
 
@@ -501,11 +503,15 @@ def browser_launches(text):
 class BrowserStartup(unittest.TestCase):
     def test_each_routed_web_browser_script_runs_once(self):
         hosted = next(p for p in WORKFLOWS if p.name == 'hosted.yml')
-        routes = json.loads(hosted.parents[2].joinpath('ci', 'check-consumers.json').read_text())['files']
+        root = hosted.parents[2]
+        routes = check_consumers(root)['files']
         expected = [path.removeprefix('ci/') for path, jobs in routes.items()
                     if path.startswith('ci/browser-') and (jobs == 'all' or 'web' in jobs)]
         text = hosted.read_text()
-        self.assertCountEqual(browser_launches(text), expected)
+        cases = json.loads(subprocess.check_output(
+            ['python3', str(root / 'ci/run-browser-checks.py'), '--list']))
+        fragment_scripts = [pathlib.PurePosixPath(case['script']).name for case in cases]
+        self.assertCountEqual(browser_launches(text) + fragment_scripts, expected)
 
     def test_a_commented_out_browser_launch_does_not_count(self):
         text = next(p for p in WORKFLOWS if p.name == 'hosted.yml').read_text()

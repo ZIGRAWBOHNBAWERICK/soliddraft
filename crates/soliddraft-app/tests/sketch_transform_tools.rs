@@ -11,7 +11,7 @@ fn call(state: &mut AppState, name: &str, arguments: Value, refused: bool) {
 
 #[test]
 fn headless_transforms_validate_schema_and_undo_the_whole_batch() {
-    let mut state = AppState::new(Document::new("Transforms", soliddraft_app::kernel()));
+    let mut state = AppState::new(Document::new("Transforms", soliddraft_app::startup::kernel()));
     call(
         &mut state,
         "sketch_geometry",

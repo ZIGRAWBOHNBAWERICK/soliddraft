@@ -1,0 +1,20 @@
+{
+  "id": "hole-alignment",
+  "file": "ci/scenarios/hole-alignment.json",
+  "acceptance": true,
+  "owners": [
+    "soliddraft-app",
+    "soliddraft-assembly"
+  ],
+  "kernel_parts": [
+    "assembly",
+    "boolean",
+    "extrude",
+    "measure",
+    "mesh"
+  ],
+  "catallax_revision": "76cdf97f3e85d22ea74868b77d849498ebdfcf1c",
+  "route": "MCP assembly_check_hole_alignment -> pinned native cylinder supports -> exact rational placed axes",
+  "supported_limits": "Internal cylindrical axes exactly on world axes; coaxial or parallel offset within a maximum deviation; selected components, negative deviation and single-part refusals; no diameter or fit test.",
+  "evidence": "result.json, protocol.json and command evidence; work/a.dwprt and work/rig.dwasm; unchanged accepted state and fresh-process reopen."
+}

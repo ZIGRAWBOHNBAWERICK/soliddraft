@@ -1,0 +1,6 @@
+[[areas]]
+name = "app.workspace"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/app/workspace.rs"]
+module = ["app", "workspace"]

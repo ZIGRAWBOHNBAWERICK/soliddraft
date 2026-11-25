@@ -58,7 +58,7 @@ fn check_fillet_display(source: &str, rail: soliddraft_kernel_api::Vec3, refusal
         std::env::temp_dir().join(format!("soliddraft-spline-display-{}", soliddraft_document::DocumentId::new()));
     std::fs::create_dir_all(&dir).unwrap();
     soliddraft_app::file::set_config_dir(Some(dir.join("config")));
-    let mut state = AppState::new(soliddraft_app::new_document());
+    let mut state = AppState::new(soliddraft_app::startup::new_document());
     let scenario: Value = serde_json::from_str(source).unwrap();
     let caller = Caller::Mcp { client: "spline-display-test".into() };
     for step in scenario["steps"].as_array().unwrap().iter().take(3) {

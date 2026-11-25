@@ -1,0 +1,6 @@
+[[areas]]
+name = "app.start_page"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/start_page.rs"]
+module = ["start_page"]

@@ -1,0 +1,22 @@
+{
+  "id": "gyroid",
+  "file": "ci/scenarios/gyroid.json",
+  "acceptance": true,
+  "owners": [
+    "soliddraft-app",
+    "soliddraft-model",
+    "soliddraft-kernel-catallax"
+  ],
+  "kernel_parts": [
+    "boolean",
+    "extrude",
+    "field",
+    "measure",
+    "mesh",
+    "step"
+  ],
+  "catallax_revision": "76cdf97f3e85d22ea74868b77d849498ebdfcf1c",
+  "route": "MCP document commands -> terminal Catallax field stage -> certified labelled STL",
+  "supported_limits": "One terminal network gyroid in the part frame with a constant dimensionless level; the scenario uses period 10 mm, levels 0 and -1/2, accuracy 0.1 mm, minimum detail 0.5 mm and the default caps. Sheet gyroids and drawings remain deferred; graded levels and field mass are in the graded-fields scenario.",
+  "evidence": "result.json and commands/NNNN/{command.json,kernel.json,viewport.png,part.stl,export-stl-oracle.stdout}"
+}

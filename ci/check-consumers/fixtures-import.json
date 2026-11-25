@@ -1,0 +1,65 @@
+{
+  "files": {
+    "ci/fixtures/import/iges-provenance.md": [
+      "lint",
+      "test-linux",
+      "test-macos",
+      "application-loop"
+    ],
+    "ci/fixtures/import/occt-box.igs": [
+      "lint",
+      "test-linux",
+      "test-macos",
+      "application-loop"
+    ],
+    "ci/fixtures/import/occt-sphere.igs": [
+      "lint",
+      "test-linux",
+      "test-macos",
+      "application-loop"
+    ],
+    "ci/fixtures/import/block-closed.step": [
+      "lint",
+      "kernel",
+      "test-linux",
+      "application-loop",
+      "web"
+    ],
+    "ci/fixtures/import/healed-and-tolerant.step": [
+      "lint",
+      "kernel",
+      "test-linux",
+      "application-loop"
+    ],
+    "ci/fixtures/import/block-seam-4um.step": [
+      "lint",
+      "kernel",
+      "test-linux",
+      "application-loop"
+    ],
+    "ci/fixtures/import/block-seam-20um.step": [
+      "lint",
+      "kernel",
+      "test-linux",
+      "application-loop"
+    ],
+    "ci/fixtures/import/two-blocks-5um.step": [
+      "lint",
+      "kernel",
+      "test-linux",
+      "application-loop"
+    ],
+    "ci/fixtures/import/tetrahedron.obj": [
+      "lint",
+      "test-linux",
+      "test-macos",
+      "application-loop"
+    ],
+    "ci/fixtures/import/two-blocks.igs": [
+      "lint",
+      "kernel",
+      "test-linux",
+      "application-loop"
+    ]
+  }
+}

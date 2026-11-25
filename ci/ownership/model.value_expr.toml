@@ -1,0 +1,6 @@
+[[areas]]
+name = "model.value_expr"
+owner = "core"
+crate = "soliddraft-model"
+paths = ["crates/soliddraft-model/src/value_expr.rs", "crates/soliddraft-model/src/value_expr/"]
+module = ["value_expr"]

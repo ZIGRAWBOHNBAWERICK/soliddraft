@@ -308,7 +308,8 @@ fn rounded_endpoints_form_a_closed_profile_at_the_kernel_boundary() {
     let volume = doc.model().kernel().mass_properties(doc.model().body().unwrap()).unwrap().volume;
     assert!((volume - 600.0).abs() < 1e-5, "{volume}");
     let mut reopened =
-        soliddraft_model::Document::from_bytes(&doc.model().to_bytes().unwrap(), soliddraft_app::kernel()).unwrap();
+        soliddraft_model::Document::from_bytes(&doc.model().to_bytes().unwrap(), soliddraft_app::startup::kernel())
+            .unwrap();
     reopened.rebuild();
     let volume = reopened.kernel().mass_properties(reopened.body().unwrap()).unwrap().volume;
     assert!((volume - 600.0).abs() < 1e-5, "{volume}");

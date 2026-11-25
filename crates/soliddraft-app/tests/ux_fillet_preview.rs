@@ -184,7 +184,7 @@ impl Drop for Case {
 /// B20: the centred 60 x 40 rectangle on Top, extruded 20 up.
 fn b20() -> Document {
     let f = "/fixtures/B20";
-    let mut doc = Document::new("B20", soliddraft_app::kernel());
+    let mut doc = Document::new("B20", soliddraft_app::startup::kernel());
     doc.apply(Command::AddExtrude {
         params: ExtrudeParams {
             profile: ProfileKind::Rectangle {
@@ -203,7 +203,7 @@ fn b20() -> Document {
 /// S: the centred 50 x 10 slot on Top, extruded 10 up.
 fn slot() -> Document {
     let f = "/fixtures/S";
-    let mut doc = Document::new("S", soliddraft_app::kernel());
+    let mut doc = Document::new("S", soliddraft_app::startup::kernel());
     let sketch = doc
         .apply(Command::AddSketch { plane: SketchPlane::Reference { plane: PlaneKind::Top, offset: 0.0 } })
         .unwrap()

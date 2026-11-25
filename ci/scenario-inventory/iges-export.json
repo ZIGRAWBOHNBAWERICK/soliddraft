@@ -1,0 +1,20 @@
+{
+  "id": "iges-export",
+  "file": "ci/scenarios/iges-export.json",
+  "acceptance": true,
+  "owners": [
+    "soliddraft-app",
+    "soliddraft-exchange",
+    "soliddraft-kernel-catallax"
+  ],
+  "kernel_parts": [
+    "boolean",
+    "extrude",
+    "iges",
+    "measure",
+    "mesh"
+  ],
+  "route": "MCP bracket construction and IGES export -> save/reopen -> CLI IGES -> direct OpenCASCADE reader",
+  "supported_limits": "Catallax exact IGES coverage only; bracket planes and cylinders; unsupported definitions and over-tolerance files refused; millimetres only",
+  "evidence": "result.json, bracket.igs, bracket.dwprt, commands/0022/{part.iges,iges-report.json,check-iges.stdout,check-iges.stderr}"
+}

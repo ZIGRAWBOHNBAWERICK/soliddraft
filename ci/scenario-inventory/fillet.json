@@ -1,0 +1,17 @@
+{
+  "id": "fillet",
+  "file": "ci/scenarios/fillet.json",
+  "acceptance": false,
+  "owners": [
+    "soliddraft-app",
+    "soliddraft-model",
+    "soliddraft-kernel-catallax"
+  ],
+  "kernel_parts": [
+    "boolean",
+    "extrude",
+    "fillet",
+    "measure",
+    "mesh"
+  ]
+}

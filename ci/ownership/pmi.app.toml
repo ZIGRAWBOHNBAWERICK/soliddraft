@@ -1,0 +1,6 @@
+[[areas]]
+name = "pmi.app"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/pmi/"]
+module = ["pmi"]

@@ -1,0 +1,6 @@
+[[areas]]
+name = "model.context"
+owner = "core"
+crate = "soliddraft-model"
+paths = ["crates/soliddraft-model/src/context.rs"]
+module = ["context"]

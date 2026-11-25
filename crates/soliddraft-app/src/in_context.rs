@@ -895,7 +895,7 @@ mod tests {
 
         // Part 1: block with two configurations (Default and Wide), saved showing Default.
         let block_path = dir.join("block.dwprt");
-        let mut block = crate::new_document();
+        let mut block = crate::startup::new_document();
         let params = crate::document::ExtrudeParams {
             profile: crate::document::ProfileKind::Rectangle { width: 40.0, height: 20.0 },
             plane: crate::document::PlaneKind::Top,
@@ -910,7 +910,7 @@ mod tests {
 
         // Part 2: plate edited in context.
         let plate_path = dir.join("plate.dwprt");
-        let mut plate = crate::new_document();
+        let mut plate = crate::startup::new_document();
         let params = crate::document::ExtrudeParams {
             profile: crate::document::ProfileKind::Rectangle { width: 40.0, height: 40.0 },
             plane: crate::document::PlaneKind::Top,
@@ -926,7 +926,7 @@ mod tests {
             r.set_path(from, to);
             r
         };
-        let kernel = crate::kernel();
+        let kernel = crate::startup::kernel();
         let options = || OpenOptions {
             display: Some(Arc::new(KernelSource::new(kernel.clone()))),
             revisions: Some(Arc::new(CacheOnlyStore::new())),

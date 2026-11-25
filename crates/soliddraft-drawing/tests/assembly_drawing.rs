@@ -4,6 +4,8 @@
 
 mod support;
 
+use std::sync::Arc;
+
 use soliddraft_drawing::assembly::{
     AssemblyModel, BomRow, NewAssemblyDrawing, make_assembly_drawing, new_assembly_detail, new_assembly_projected,
     new_assembly_section, update_assembly_drawing,
@@ -23,13 +25,12 @@ use support::BoxKernel;
 /// A box of `size` with a corner at the origin, placed with that corner at `at`.
 fn cuboid<'k>(k: &'k BoxKernel, path: &str, at: Vec3, size: Vec3) -> PlacedPart<'k> {
     let body = k.add("f1", Vec3::ZERO, size);
-    PlacedPart {
-        kernel: k,
-        body,
-        placement: Rigid { translation: at, ..Rigid::IDENTITY },
-        component: path.into(),
-        label: format!("Part<{path}>"),
-    }
+    PlacedPart::new(
+        Arc::new(k.geometry(body)),
+        Rigid { translation: at, ..Rigid::IDENTITY },
+        path,
+        format!("Part<{path}>"),
+    )
 }
 
 fn model<'k>(revision: &[u8], parts: Vec<(PlacedPart<'k>, u32)>) -> AssemblyModel<'k> {
@@ -474,4 +475,128 @@ fn a_bom_too_tall_for_the_sheet_is_refused() {
     grown.reference.as_mut().unwrap().id = first.reference.as_ref().unwrap().id;
     let err = update_assembly_drawing(&drawing, &grown).expect_err("47 rows do not fit an A3 sheet");
     assert!(err.to_string().contains("BOM"), "{err}");
+}
+
+#[test]
+fn part_and_assembly_adapters_share_view_section_rebuild_and_evidence_rules() {
+    use soliddraft_drawing::{
+        DrawingGeometry, HiddenLines, NewDrawing, PART_VISIBILITY, PartIndex, derived, export, make_drawing,
+        update_from_model,
+    };
+    use soliddraft_kernel_api::drawing::{SectionSpec, ViewSpec};
+
+    // 1. Single-part adapter: view, section, preview vs export, and rebuild.
+    let mut part_kernel = BoxKernel::new();
+    part_kernel.sections = true;
+    let part = support::box_part(&part_kernel, "extrude", Vec3::new(100.0, 60.0, 10.0));
+    let front_spec = ViewSpec::standard(StandardView::Front);
+    let part_view = project::view_curves(&part, &front_spec).unwrap();
+    assert!(!part_view.unproved && part_view.catallax && part_view.approximate.is_empty());
+
+    let mut preview_part = support::box_part(&part_kernel, "extrude", Vec3::new(110.0, 60.0, 10.0));
+    preview_part.preview = true;
+    let part_preview = project::view_curves(&preview_part, &front_spec).unwrap();
+    assert!(part_preview.unproved && !part_preview.catallax);
+
+    let mut part_drawing = make_drawing(
+        &part,
+        &NewDrawing {
+            model: DocRef::new(DocumentId::new(), DocKind::Part, "base.dwprt", part.digest.clone()),
+            template: Template::by_id("iso-a3").unwrap(),
+            meta: DrawingMeta { title: "Base".into(), ..DrawingMeta::default() },
+            views: vec![StandardView::Front],
+            scale: Some(Scale::FULL),
+            hidden: HiddenLines::Visible,
+            model_items: false,
+            centre_marks: false,
+            requirements: false,
+        },
+    )
+    .unwrap()
+    .drawing;
+    let part_front = part_drawing.sheets[0].views[0].id;
+    let part_index = PartIndex::build(&part).unwrap();
+    let part_line =
+        derived::cutting_line(&part_drawing, &part, &part_index, part_front, Vec3::new(20.0, 30.0, 5.0), false)
+            .unwrap();
+    let (part_section, _) =
+        derived::new_section(&part_drawing, &part, &part_index, 0, part_front, part_line, false, None).unwrap();
+    assert_eq!(hatched(&part_section).len(), 1);
+    assert!(!part_section.geometry.unproved && part_section.geometry.catallax);
+    apply(&mut part_drawing, &Command::PlaceView { sheet: 0, view: part_section }).unwrap();
+    // Preview drawing must never export; proved rebuild exports cleanly.
+    update_from_model(&mut part_drawing, &preview_part).unwrap();
+    assert!(part_drawing.sheets[0].views.iter().all(|v| v.geometry.unproved && v.geometry.coarse));
+    let preview_list = layout_sheet(&part_drawing, 0);
+    assert!(preview_list.unproved);
+    assert!(export::bytes(&preview_list, export::Format::Svg, "Base").is_err(), "unproved preview must not export");
+    let part_v2 = support::box_part(&part_kernel, "extrude", Vec3::new(120.0, 60.0, 10.0));
+    update_from_model(&mut part_drawing, &part_v2).unwrap();
+    assert!(part_drawing.sheets[0].views.iter().all(|v| !v.geometry.unproved && v.geometry.catallax));
+    export::bytes(&layout_sheet(&part_drawing, 0), export::Format::Svg, "Base").unwrap();
+
+    // 2. Assembly adapter (`PlacedBodies`): same view, section, rebuild, evidence labels,
+    //    named refusals, preview-never-exports, and balloon attachment.
+    let mut asm_kernel = BoxKernel::new();
+    asm_kernel.sections = true;
+    let cover = (cuboid(&asm_kernel, "3", Vec3::new(40.0, -20.0, -5.0), Vec3::new(20.0, 10.0, 20.0)), 2);
+    let asm_v1 = model(b"r1", vec![base(&asm_kernel), cover]);
+    let bodies = asm_v1.bodies(false).unwrap();
+    let asm_curves = bodies.view_curves(&front_spec).unwrap();
+    assert!(!asm_curves.unproved && asm_curves.catallax);
+    assert!(
+        asm_curves.approximate.contains(&PART_VISIBILITY.to_owned()),
+        "inter-part occlusion carries PART_VISIBILITY evidence: {:?}",
+        asm_curves.approximate
+    );
+    let asm_preview = bodies.view_curves(&ViewSpec { preview: true, ..front_spec }).unwrap();
+    assert!(asm_preview.unproved && !asm_preview.catallax);
+    let asm_section_raw = bodies
+        .section_view(&SectionSpec { view: ViewSpec::standard(StandardView::Right), origin: Vec3::new(50.0, 0.0, 0.0) })
+        .unwrap();
+    assert_eq!(asm_section_raw.regions.len(), 2);
+
+    let mut asm_drawing = drawing_of(&asm_v1, "iso-a3", vec![StandardView::Front], Some(Scale::FULL));
+    let asm_front = asm_drawing.sheets[0].views[0].id;
+    let asm_section =
+        new_assembly_section(&asm_drawing, &asm_v1, 0, asm_front, Vec3::new(50.0, 0.0, 5.0), false, false).unwrap();
+    assert_eq!(hatched(&asm_section).len(), 2);
+    assert_eq!(owners(&asm_section, CurveKind::Section), ["2", "3"]);
+    apply(&mut asm_drawing, &Command::PlaceView { sheet: 0, view: asm_section }).unwrap();
+    export::bytes(&layout_sheet(&asm_drawing, 0), export::Format::Svg, "Rig").unwrap();
+
+    // Rebuild moves the cover; balloons stay attached to visible stretches of each part.
+    let cover_moved = (cuboid(&asm_kernel, "3", Vec3::new(70.0, -20.0, -5.0), Vec3::new(20.0, 10.0, 20.0)), 2);
+    let asm_v2 = later(&asm_v1, b"r2", vec![base(&asm_kernel), cover_moved]);
+    let updated = update_assembly_drawing(&asm_drawing, &asm_v2).unwrap();
+    apply(&mut asm_drawing, &Command::UpdateFromAssembly { drawing: Box::new(updated) }).unwrap();
+    assert!(asm_drawing.views_match_pin());
+    let view = &asm_drawing.sheets[0].views[0];
+    for occ in ["2", "3"] {
+        let balloon = asm_drawing.sheets[0]
+            .annotations
+            .iter()
+            .find(|a| matches!(&a.body, AnnotationKind::Balloon { occurrence, .. } if occurrence == occ))
+            .unwrap();
+        assert_eq!(balloon.state, AnnotationState::Ok);
+        let at = balloon.anchors[0].cached;
+        let dist = view
+            .geometry
+            .curves
+            .iter()
+            .filter(|c| c.visible && component_of(&c.source.feature) == Some(occ))
+            .map(|c| distance_to(&c.path, at))
+            .fold(f64::INFINITY, f64::min);
+        assert!(dist < 1e-6, "balloon for {occ} landed {dist} mm from visible edge");
+    }
+
+    // Named refusal on unsupported non-preview view; preview falls back but stays unproved.
+    let mut refusing = BoxKernel::new();
+    refusing.unsupported_view = true;
+    let refused_model = model(b"r3", vec![(cuboid(&refusing, "9", Vec3::ZERO, Vec3::new(20.0, 20.0, 10.0)), 1)]);
+    let refused_bodies = refused_model.bodies(false).unwrap();
+    let err = refused_bodies.view_curves(&front_spec).unwrap_err();
+    assert!(err.to_string().contains("Part<9>"), "refusal names the component: {err}");
+    let fallback = refused_bodies.view_curves(&ViewSpec { preview: true, ..front_spec }).unwrap();
+    assert!(fallback.unproved && !fallback.catallax && !fallback.curves.is_empty());
 }

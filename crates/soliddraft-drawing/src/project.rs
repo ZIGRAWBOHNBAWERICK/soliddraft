@@ -18,7 +18,7 @@ use std::collections::BTreeMap;
 
 use kurbo::{BezPath, ParamCurve, PathSeg, Point};
 use soliddraft_kernel_api::drawing::{
-    Curve3, CurveSource, CutRegion, SectionSpec, ViewCurve, ViewCurves, ViewFrame, ViewSpec, mesh_hlr,
+    Curve3, CurveSource, CutRegion, SectionSpec, ViewCurve, ViewCurves, ViewFrame, ViewSpec,
 };
 use soliddraft_kernel_api::{KernelError, Point2, Vec3};
 
@@ -208,8 +208,8 @@ fn compute_view_at(
             let spec = with_display(ViewSpec::new(direction, up), &display);
             let origin = model_line.first().copied().unwrap_or_else(|| pctx.xf.unproject(line[0]));
             let section = part
-                .kernel
-                .section_view(part.body, &SectionSpec { view: ViewSpec { preview: part.preview, ..spec }, origin })
+                .geometry
+                .section_view(&SectionSpec { view: ViewSpec { preview: part.preview, ..spec }, origin })
                 .map_err(|e| refused(e.into()))?;
             let xf = match projection {
                 Some((_, xf)) => xf,
@@ -364,7 +364,7 @@ fn broken_out(
     display: &ViewDisplay,
 ) -> Result<(), DrawingError> {
     let d = ctx.xf.frame.direction;
-    let bbox = part.kernel.topology(part.body)?.bbox;
+    let bbox = part.geometry.topology()?.bbox;
     let front = (0..8)
         .map(|i| {
             Vec3::new(
@@ -377,7 +377,7 @@ fn broken_out(
         .fold(f64::NEG_INFINITY, f64::max);
     let mut spec = with_display(ctx.spec(), display);
     spec.preview = part.preview;
-    let section = part.kernel.section_view(part.body, &SectionSpec { view: spec, origin: d * (front - b.depth) })?;
+    let section = part.geometry.section_view(&SectionSpec { view: spec, origin: d * (front - b.depth) })?;
     let mut cut = project(index, &section.curves, &ctx.xf, part.digest.as_str(), part.preview);
     clip_projected(&mut ctx.projected, &b.boundary, false);
     clip_projected(&mut cut, &b.boundary, true);
@@ -711,17 +711,11 @@ fn scale_of<'a>(find: &FindScale<'a>, sheet_scale: f64, view: &View, depth: u8) 
     }
 }
 
-/// The kernel's curves for a view, with a mesh fallback for previews.
+/// The drawing geometry's curves for a view (with mesh fallback handled by the geometry
+/// adapter for preview requests only).
 pub fn view_curves(part: &Part, spec: &ViewSpec) -> Result<ViewCurves, DrawingError> {
-    let spec = &ViewSpec { preview: part.preview, ..*spec };
-    match part.kernel.view_curves(part.body, spec) {
-        Err(KernelError::Unsupported(_)) if spec.preview => {
-            let mut curves = mesh_hlr::view_curves(part.kernel, part.body, spec)?;
-            curves.unproved = true;
-            Ok(curves)
-        }
-        other => Ok(other?),
-    }
+    let spec = ViewSpec { preview: part.preview, ..*spec };
+    Ok(part.geometry.view_curves(&spec)?)
 }
 
 /// The transform that centres `curves` at `scale`.

@@ -661,6 +661,7 @@ fn a_drawing_dimension_survives_a_file_replacement() {
     };
     let id = annotation.id;
     drawing.apply(DrawingCommand::AddDimension { annotation }, None).unwrap();
+    drop(part);
 
     assert!(replace(&mut doc, block_step(20.0, None)).is_empty(), "the drawing is not part of the part");
     let ctx = PartContext::new(&doc).unwrap();

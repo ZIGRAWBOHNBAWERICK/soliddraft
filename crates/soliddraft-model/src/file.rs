@@ -443,12 +443,8 @@ impl Document {
         }
         // A feature may read one that was deleted (it reports that when it rebuilds),
         // but never one below it.
-        for (i, f) in recipe.features.iter().enumerate() {
-            for dep in f.kind.dependencies() {
-                if recipe.features[i..].iter().any(|g| g.id == dep) {
-                    return Err(FileError::Invalid(format!("{} reads {dep}, which comes after it", f.id)));
-                }
-            }
+        if let Some((feature, dep)) = crate::inputs::misordered(&recipe.features) {
+            return Err(FileError::Invalid(format!("{feature} reads {dep}, which comes after it")));
         }
         // A terminal field is the only one and the last feature; a file that puts CAD after it
         // is damaged, not a different part.

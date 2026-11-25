@@ -91,7 +91,7 @@ impl Built {
         self
     }
 
-    fn pass(status: FeatureStatus, current: Option<BodyId>) -> Built {
+    pub(crate) fn pass(status: FeatureStatus, current: Option<BodyId>) -> Built {
         Built {
             body_key: 0,
             consumed_tool: None,
@@ -107,7 +107,7 @@ impl Built {
         }
     }
 
-    fn failed(current: Option<BodyId>, message: impl Into<String>) -> Built {
+    pub(crate) fn failed(current: Option<BodyId>, message: impl Into<String>) -> Built {
         Built::pass(FeatureStatus::Failed(message.into()), current)
     }
 }
@@ -297,102 +297,14 @@ impl Document {
         cache: &mut BuildCache,
         kept: Option<&Built>,
     ) -> Built {
-        let named_plane = match &f.kind {
-            FeatureKind::Sketch(SketchFeature { plane: SketchPlane::Feature { feature, .. }, .. }) => {
-                Some((*feature, ReferenceSlot::SketchPlane))
-            }
-            FeatureKind::ReferencePlane(SketchPlane::Feature { feature, .. })
-            | FeatureKind::Mirror(MirrorFeature { plane: PlaneRef::Feature { feature }, .. })
-            | FeatureKind::Draft(DraftFeature { neutral: PlaneRef::Feature { feature }, .. }) => {
-                Some((*feature, ReferenceSlot::Plane))
-            }
-            _ => None,
+        let mut reads = match self.resolve_reads(f, current) {
+            Ok(reads) => reads,
+            Err(stopped) => return *stopped,
         };
-        if let Some((id, slot)) = named_plane
-            && self.reference_plane(id).is_none()
-        {
-            return Built::pass(FeatureStatus::RepairNeeded(vec![self.missing_plane(id, slot)]), current);
-        }
-        let profile = match &f.kind {
-            FeatureKind::Extrude(ExtrudeFeature { profile: ProfileSource::Sketch { feature }, options, .. }) => {
-                match self.sketch_input(*feature, current, options.thin.is_some()) {
-                    Ok(input) => Some(input.version),
-                    Err(refused) => return *refused,
-                }
-            }
-            FeatureKind::Sweep(crate::SweepFeature { sketch: feature, .. })
-            | FeatureKind::Revolve(RevolveFeature { sketch: feature, .. }) => {
-                match self.profile_input(*feature, current) {
-                    Ok(input) => Some(input.version),
-                    Err(refused) => return *refused,
-                }
-            }
-            FeatureKind::Pattern(p) if p.source.is_some() => {
-                p.source.and_then(|id| self.built_index(id)).map(|i| self.built[i].version)
-            }
-            _ => named_plane.and_then(|(id, _)| self.built_index(id).map(|i| self.built[i].version)),
-        };
-        let mut profiles: Vec<_> = profile.into_iter().collect();
-        if let FeatureKind::Loft(l) = &f.kind {
-            for source in &l.profiles {
-                let Some(index) = self.built_index(source.feature()) else {
-                    return Built::failed(current, "A loft profile is missing. Select it again");
-                };
-                if !self.built[index].status.is_ok() {
-                    return Built::pass(FeatureStatus::Blocked(source.feature()), current);
-                }
-                profiles.push(self.built[index].version);
-            }
-        }
-        if let FeatureKind::Sketch(SketchFeature {
-            plane: SketchPlane::Face { face } | SketchPlane::FaceOffset { face, .. },
-            ..
-        }) = &f.kind
-        {
-            let body =
-                self.feature(face.feature).and_then(|feature| self.body_at(feature.body, self.built.len())).or(current);
-            if let Some(owner) = body.and_then(|body| self.built.iter().find(|b| b.owned == Some(body))) {
-                profiles.push(owner.version);
-            }
-        }
-        // An extrusion that starts on another body's face or vertex reads that body.
-        if let FeatureKind::Extrude(e) = &f.kind
-            && let Some(body) = self.start_body(f, e.options.from.as_ref(), None)
-            && let Some(owner) = self.built.iter().find(|b| b.owned == Some(body))
-        {
-            profiles.push(owner.version);
-        }
-        // One that starts on a named plane reads the plane, which can move while the
-        // sketch, the extrusion and its input body stay as they were.
-        if let FeatureKind::Extrude(e) = &f.kind
-            && let Some(ExtrudeStart::Surface { plane: PlaneRef::Feature { feature } }) = &e.options.from
-            && let Some(index) = self.built_index(*feature)
-        {
-            profiles.push(self.built[index].version);
-        }
-        if let FeatureKind::Hole(h) = &f.kind
-            && let Some(sketch_id) = h.sketch
-        {
-            let Some(index) = self.built_index(sketch_id) else {
-                return Built::failed(current, format!("its position sketch {sketch_id} is missing"));
-            };
-            if !self.built[index].status.is_ok() {
-                return Built::pass(FeatureStatus::Blocked(sketch_id), current);
-            }
-            profiles.push(self.built[index].version);
-        }
-        if let FeatureKind::Combine { tool, .. } = f.kind {
-            let end = self.index_of(f.id).unwrap_or(self.built.len());
-            if let Some(body) = self.body_at(tool, end)
-                && let Some(owner) = self.built.iter().find(|b| b.owned == Some(body))
-            {
-                profiles.push(owner.version);
-            }
-        }
         if let Some(kept) = kept {
             return kept.clone();
         }
-        let key = cache.key(f, current, profiles);
+        let key = cache.key(f, current, std::mem::take(&mut reads.versions));
         if let Some(built) = cache.get(&key) {
             return built;
         }
@@ -400,8 +312,7 @@ impl Document {
         let work_used = self.kernel.measure_work(&mut || {
             result = Some(match &f.kind {
                 FeatureKind::Combine { operation, tool } => {
-                    let end = self.index_of(f.id).unwrap_or(self.built.len());
-                    match (current, self.body_at(*tool, end)) {
+                    match (current, reads.tool) {
                         _ if f.body == *tool => Built::failed(current, "Choose two different bodies to combine."),
                         (Some(target), Some(tool)) => {
                             let result = self.kernel.boolean(&OpTag::new(format!("{}.combine", f.id)), *operation, target, tool).map_err(|error| {
@@ -439,7 +350,7 @@ impl Document {
                     }
                 },
                 FeatureKind::Sketch(s) => self.build_sketch(s, current),
-                FeatureKind::Extrude(e) => self.build_extrude(f, e, current),
+                FeatureKind::Extrude(e) => self.build_extrude(f, e, current, reads.start),
                 FeatureKind::Revolve(r) => self.build_revolve(f, r, current),
                 FeatureKind::Sweep(s) => self
                     .build_profile_tool(f, s.sketch, current, |tag, profile| self.kernel.sweep(tag, profile, &s.path)),
@@ -514,7 +425,12 @@ impl Document {
 
     /// The built sketch a feature reads, with or without closed regions: a thin
     /// extrusion follows open chains as well (`open`).
-    fn sketch_input(&self, sketch: FeatureId, current: Option<BodyId>, open: bool) -> Result<&Built, Box<Built>> {
+    pub(crate) fn sketch_input(
+        &self,
+        sketch: FeatureId,
+        current: Option<BodyId>,
+        open: bool,
+    ) -> Result<&Built, Box<Built>> {
         let sketch_name = || self.feature(sketch).map(|s| s.name.clone()).unwrap_or_else(|| sketch.to_string());
         let failed = |message: String| Err(Box::new(Built::failed(current, message)));
         let Some(input) = self.built_index(sketch).map(|i| &self.built[i]) else {
@@ -610,7 +526,7 @@ impl Document {
         Ok(plane)
     }
 
-    fn missing_plane(&self, feature: FeatureId, slot: ReferenceSlot) -> RepairNeeded {
+    pub(crate) fn missing_plane(&self, feature: FeatureId, slot: ReferenceSlot) -> RepairNeeded {
         let name = self.feature(feature).map(|f| f.name.as_str()).unwrap_or("the selected plane");
         RepairNeeded {
             slot,
@@ -832,7 +748,9 @@ impl Document {
         }
     }
 
-    fn build_extrude(&self, f: &Feature, e: &ExtrudeFeature, current: Option<BodyId>) -> Built {
+    /// Builds an extrusion on `current`. `start` is the other body its start face or vertex
+    /// lies on, when it lies on one (see [`crate::inputs`]).
+    fn build_extrude(&self, f: &Feature, e: &ExtrudeFeature, current: Option<BodyId>, start: Option<BodyId>) -> Built {
         let shape_sketch;
         let sk = match &e.profile {
             ProfileSource::Sketch { feature } => match self.sketch_input(*feature, current, e.options.thin.is_some()) {
@@ -914,7 +832,7 @@ impl Document {
         let mut tilted: Option<Plane> = None;
         // The body the start face or vertex lies on, which may be another body when
         // Merge result is off.
-        let start_body = self.start_body(f, e.options.from.as_ref(), current);
+        let start_body = start.or(current);
         // A curved start face: each sweep starts where its lines along the first direction
         // first cross the face, and ends at the face moved along that direction.
         let curved = self.curved_start(e.options.from.as_ref(), start_body);
@@ -1305,27 +1223,6 @@ impl Document {
             work_used: None,
             import_record: None,
         }
-    }
-
-    /// The body an extrusion's start face or vertex lies on, as it stands before the
-    /// extrusion: the body of the feature that made the face, or `current` when that is
-    /// the extrusion's own body or the start names no face.
-    fn start_body(&self, f: &Feature, from: Option<&ExtrudeStart>, current: Option<BodyId>) -> Option<BodyId> {
-        let owner = match from {
-            Some(ExtrudeStart::Surface { plane: PlaneRef::Face { face } }) => Some(face.feature),
-            Some(ExtrudeStart::Vertex { vertex }) => vertex.faces.first().map(|face| face.feature),
-            _ => None,
-        };
-        let Some(key) = owner.and_then(|id| self.feature(id)).map(|g| g.body) else {
-            return current;
-        };
-        let end = self.index_of(f.id).unwrap_or(self.built.len());
-        // A Combine may have joined that body to another, which holds the face now.
-        let key = self.surviving_key(key, end);
-        if key == f.body {
-            return current;
-        }
-        self.body_at(key, end).or(current)
     }
 
     /// The body and face an extrusion starts on when its From face is curved.

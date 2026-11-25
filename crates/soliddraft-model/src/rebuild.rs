@@ -3,7 +3,8 @@
 //! Kernel bodies are immutable, so a feature built once from the same definition and the
 //! same input bodies gives the same result. The cache keeps each build under a key of
 //! its exact inputs: the feature, the exact bytes of its definition, the body it starts from,
-//! and, for an extrusion, the build of the sketch it sweeps. A body handle names one
+//! and the builds of the other things it reads, such as the sketch it sweeps (see
+//! [`crate::inputs`]). A body handle names one
 //! immutable body and is never reused, so it stands for everything that built the body.
 //! Nothing is keyed by rounded coordinates.
 //!
@@ -37,7 +38,7 @@ pub(crate) struct StepKey {
     definition: Definition,
     /// The part body the feature starts from.
     input: Option<BodyId>,
-    /// Versions of the sketches or reusable planes this feature reads.
+    /// Versions of the builds this feature reads besides its input body.
     profiles: Vec<u64>,
 }
 
@@ -88,8 +89,8 @@ impl Default for BuildCache {
 }
 
 impl BuildCache {
-    /// The key of `feature` built on `input` and its sketch or plane versions.
-    /// These inputs can change without changing the part body.
+    /// The key of `feature` built on `input` with the versions of the other builds it
+    /// reads. These inputs can change without changing the part body.
     pub(crate) fn key(&mut self, feature: &Feature, input: Option<BodyId>, profiles: Vec<u64>) -> StepKey {
         let definition = match crate::exact::bytes(&(feature.body, &feature.kind)) {
             Some(bytes) => Definition::Exact(bytes),

@@ -4,6 +4,7 @@
 //! module holds the commands, the tools, and what reading a STEP file's information into
 //! the part reports.
 
+pub(crate) mod assistant;
 pub mod panel;
 pub(crate) mod registry;
 pub(crate) mod tools;

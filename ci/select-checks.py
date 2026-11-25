@@ -49,6 +49,12 @@ def git(root, *args):
 
 
 def content(root, path, revision=None):
+    if path == POLICY:
+        try:
+            return json.dumps(check_consumers(root, revision))
+        except RegistryError as error:
+            if str(error) != 'ci/check-consumers: no JSON policy fragments':
+                raise
     if revision:
         try:
             return git(root, 'show', f'{revision}:{path}').decode(errors='replace')

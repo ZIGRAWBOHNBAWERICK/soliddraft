@@ -8,7 +8,7 @@ Catallax is the geometry kernel. SolidDraft is the CAD application. This is thei
 | --- | --- | --- |
 | Phase | Work that ends in one joint release after a checkpoint. | Phase 5 |
 | Step | A numbered goal within a phase, with a done-when line. Measure it at the end. Independent steps can run in parallel. | 5.1 Profile everything |
-| Task | One worker, one branch, one pull request. | Cache display meshes per face |
+| Task | One worker, one branch, one pull request. The worker carrying a task is its lane. | Cache display meshes per face |
 
 A **checkpoint** is the measured report and the owner's review at the end of a phase, before release. A **coverage line** is one of 61 capabilities scored against OpenCASCADE and SMLib. Neither is a unit of work. Use phase, step and task instead of "stage", "item N", "job" or "milestone" for roadmap work. G numbers refer only to the historical gap board.
 

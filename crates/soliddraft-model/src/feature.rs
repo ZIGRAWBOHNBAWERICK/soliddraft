@@ -163,57 +163,9 @@ impl FeatureKind {
     }
 
     /// The features this one reads: its sketch, and the features that made the faces
-    /// and edges it references.
+    /// and edges it references. [`crate::inputs`] declares them.
     pub fn dependencies(&self) -> Vec<FeatureId> {
-        let mut out = Vec::new();
-        match self {
-            FeatureKind::Combine { .. } => {}
-            FeatureKind::Sketch(s) => out.extend(s.plane.dependencies()),
-            FeatureKind::ReferencePlane(p) => out.extend(p.dependencies()),
-            FeatureKind::Revolve(r) => out.push(r.sketch),
-            FeatureKind::Sweep(s) => out.push(s.sketch),
-            FeatureKind::Loft(l) => out.extend(l.profiles.iter().map(LoftProfile::feature)),
-            FeatureKind::Extrude(e) => {
-                if let ProfileSource::Sketch { feature } = e.profile {
-                    out.push(feature);
-                }
-                if let EndCondition::UpToFace { face } = &e.end {
-                    out.push(face.feature);
-                }
-                out.extend(e.options.dependencies());
-            }
-            FeatureKind::Fillet(b) | FeatureKind::Chamfer(b) => {
-                out.extend(b.edges.iter().flat_map(|e| e.faces.iter().map(|f| f.feature)));
-            }
-            FeatureKind::Hole(h) => {
-                out.push(h.face.feature);
-                if let Some(sketch) = h.sketch {
-                    out.push(sketch);
-                }
-                if let Some(wizard) = &h.wizard {
-                    out.extend(wizard.end_condition.dependencies());
-                }
-            }
-            FeatureKind::Pattern(p) => out.extend(p.source),
-            FeatureKind::Thicken(t) => out.extend(t.faces.iter().map(|face| face.feature)),
-            FeatureKind::Scan(_) | FeatureKind::Offset(_) | FeatureKind::ImportStep(_) => {}
-            FeatureKind::Lattice(l) => {
-                out.extend(l.radius_mm.iter().flat_map(|g| g.picked_faces().iter().map(|f| f.feature)));
-            }
-            FeatureKind::Gyroid(g) => out.extend(g.level.picked_faces().iter().map(|f| f.feature)),
-            FeatureKind::Mirror(m) => {
-                out.extend(m.plane.dependencies());
-            }
-            FeatureKind::Shell(s) => out.extend(s.open_faces.picked().iter().map(|f| f.feature)),
-            FeatureKind::Draft(d) => {
-                out.extend(d.faces.iter().map(|f| f.feature));
-                out.extend(d.neutral.dependencies());
-                out.extend(d.pull.iter().flat_map(PullRef::dependencies));
-            }
-        }
-        out.sort();
-        out.dedup();
-        out
+        crate::inputs::features_read(self)
     }
 }
 
@@ -333,15 +285,6 @@ pub enum SketchPlane {
 }
 
 impl SketchPlane {
-    /// Features that define this plane.
-    pub fn dependencies(&self) -> Vec<FeatureId> {
-        match self {
-            Self::Feature { feature, .. } => vec![*feature],
-            Self::Face { face } | Self::FaceOffset { face, .. } => vec![face.feature],
-            Self::Datum { .. } | Self::Context { .. } => Vec::new(),
-        }
-    }
-
     /// Signed distance from the datum or face plane, in millimetres.
     pub fn offset(&self) -> f64 {
         match self {
@@ -541,19 +484,6 @@ impl ExtrudeOptions {
     /// True when no option is set.
     pub fn is_default(&self) -> bool {
         *self == ExtrudeOptions::default()
-    }
-
-    /// Features the options read: the start face or vertex, and Direction 2's face.
-    pub fn dependencies(&self) -> Vec<FeatureId> {
-        let mut out = match &self.from {
-            Some(ExtrudeStart::Surface { plane }) => plane.dependencies(),
-            Some(ExtrudeStart::Vertex { vertex }) => vertex.faces.iter().map(|f| f.feature).collect(),
-            Some(ExtrudeStart::Offset { .. }) | None => Vec::new(),
-        };
-        if let Some(EndCondition::UpToFace { face }) = &self.direction2 {
-            out.push(face.feature);
-        }
-        out
     }
 }
 
@@ -805,17 +735,6 @@ pub enum PlaneRef {
     },
 }
 
-impl PlaneRef {
-    /// Features that define this plane.
-    pub fn dependencies(&self) -> Vec<FeatureId> {
-        match self {
-            Self::Feature { feature } => vec![*feature],
-            Self::Face { face } => vec![face.feature],
-            Self::Datum { .. } => Vec::new(),
-        }
-    }
-}
-
 /// The part's body reflected in a plane.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct MirrorFeature {
@@ -870,15 +789,6 @@ pub enum PullRef {
 }
 
 impl PullRef {
-    /// Features that define this direction.
-    pub fn dependencies(&self) -> Vec<FeatureId> {
-        match self {
-            Self::Axis { .. } => Vec::new(),
-            Self::Edge { edge } => edge.faces.iter().map(|f| f.feature).collect(),
-            Self::Face { face } => vec![face.feature],
-        }
-    }
-
     /// Name for people.
     pub fn label(&self) -> String {
         match self {

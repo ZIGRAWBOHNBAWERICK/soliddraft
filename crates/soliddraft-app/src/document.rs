@@ -3806,7 +3806,8 @@ impl Document {
             Command::EditFeature { id, kind } => {
                 if let FeatureKind::ReferencePlane(source) = &kind {
                     let target = self.index_of(id).ok_or("no such reference plane")?;
-                    if source.dependencies().iter().any(|id| self.model.index_of(*id).is_some_and(|i| i >= target)) {
+                    let reads = model::FeatureKind::ReferencePlane(source.clone()).dependencies();
+                    if reads.iter().any(|id| self.model.index_of(*id).is_some_and(|i| i >= target)) {
                         return Err("Choose a source above this plane in the feature tree".into());
                     }
                 }
@@ -5276,6 +5277,15 @@ impl Document {
     /// pattern, a mirror, a hole, and an extrusion or cut with its Draft option. An edited
     /// feature `target` is built again past the rollback its editor set.
     pub fn preview_built(&self, command: Command, target: Option<FeatureId>) -> Result<Preview, String> {
+        self.prepare_built(command, target).map(|(preview, _)| preview)
+    }
+
+    /// [`Self::preview_built`], with the fork that built it, so OK can reuse its builds.
+    pub(crate) fn prepare_built(
+        &self,
+        command: Command,
+        target: Option<FeatureId>,
+    ) -> Result<(Preview, model::Document), String> {
         let commands = self.to_model(command)?;
         let mut fork = self.model.fork();
         if let Some(id) = target {
@@ -5347,7 +5357,50 @@ impl Document {
             }
         }
         let mesh = preview_mesh_marked(fork.kernel().as_ref(), body, &self.tess_params, &made)?;
-        Ok(Preview { result: Some(mesh), tool: None, removes: false, guides })
+        Ok((Preview { result: Some(mesh), tool: None, removes: false, guides }, fork))
+    }
+
+    /// The depth arrow of an extrusion or cut previewed as built. It stands on the sketch
+    /// plane under the middle of the faces the preview made and is as long as the
+    /// extrusion's extent: its depth, or for Through All as far as the cut faces reach.
+    /// It needs no kernel work. An extrusion up to the part's boundary has none.
+    pub(crate) fn extrusion_arrow(&self, params: &crate::state::EditorParams, built: &Preview) -> Option<PreviewArrow> {
+        use crate::state::EditorParams;
+        let plane_of = |sketch: FeatureId| self.feature(sketch).and_then(|f| f.plane);
+        // The plane, the direction, and the depth unless the extent is Through All.
+        let (plane, dir, depth) = match params {
+            EditorParams::Extrude(p) if p.end == EndKind::Blind => {
+                let plane = match p.sketch {
+                    Some(sketch) => plane_of(sketch)?,
+                    None => p.plane.to_kernel(),
+                };
+                (plane, if p.flip { -plane.normal } else { plane.normal }, Some(p.depth))
+            }
+            EditorParams::Cut(p) if p.up_to.is_none() => {
+                let plane = plane_of(p.sketch)?;
+                (plane, if p.flip { plane.normal } else { -plane.normal }, (!p.through_all).then_some(p.depth))
+            }
+            _ => return None,
+        };
+        let mesh = built.result.as_ref()?;
+        let made: Vec<Vec3> = mesh
+            .positions
+            .iter()
+            .zip(&mesh.face_features)
+            .filter(|(_, feature)| **feature == PREVIEW_MADE)
+            .map(|(p, _)| *p)
+            .collect();
+        let first = *made.first()?;
+        let bounds = made.iter().fold((first, first), |(lo, hi), p| (lo.min(*p), hi.max(*p)));
+        let Some(depth) = depth else {
+            let origin = Vec3::new(plane.origin.x as f32, plane.origin.y as f32, plane.origin.z as f32);
+            let along = Vec3::new(dir.x as f32, dir.y as f32, dir.z as f32).normalize_or_zero();
+            let reach = made.iter().map(|p| (*p - origin).dot(along)).fold(f32::MIN, f32::max);
+            let mut arrow = arrow_in(bounds, &plane, dir, f64::from(reach.max(0.0)), false)?;
+            arrow.text = "Through all".into();
+            return Some(arrow);
+        };
+        arrow_in(bounds, &plane, dir, depth, true)
     }
 
     /// Builds the sweep tool for the editor without changing the document.
@@ -6470,8 +6523,18 @@ fn depth_arrow(
     depth: f64,
     drags: bool,
 ) -> Option<PreviewArrow> {
+    arrow_in(tool.bounds()?, plane, dir, depth, drags)
+}
+
+/// An arrow from the middle of `bounds`, dropped onto `plane`, `depth` along `dir`.
+fn arrow_in(
+    (lo, hi): (Vec3, Vec3),
+    plane: &soliddraft_kernel_api::Plane,
+    dir: soliddraft_kernel_api::Vec3,
+    depth: f64,
+    drags: bool,
+) -> Option<PreviewArrow> {
     let v = |p: soliddraft_kernel_api::Vec3| Vec3::new(p.x as f32, p.y as f32, p.z as f32);
-    let (lo, hi) = tool.bounds()?;
     let centre = (lo + hi) / 2.0;
     let normal = v(plane.normal).normalize_or_zero();
     let from = centre - normal * (centre - v(plane.origin)).dot(normal);
@@ -6730,6 +6793,33 @@ mod tests {
 
     fn volume(d: &Document) -> f64 {
         d.kernel().mass_properties(d.display_body().unwrap()).unwrap().volume
+    }
+
+    /// An extrusion form with its Draft option previews as built, and OK applies the same
+    /// edit. With the part as it was at the preview, OK reuses the preview's builds and
+    /// runs no kernel operation of its own. Once the part changes, nothing is offered.
+    #[test]
+    fn ok_reuses_the_build_of_an_unchanged_preview() {
+        use crate::state::{EditorParams, FeatureEditor, extrusion_command};
+        use soliddraft_kernel_api::counting::{Counting, Work};
+        let kernel = Arc::new(Counting::new(Arc::new(soliddraft_kernel_catallax::CatallaxKernel::new())));
+        let mut d = Document::new("Test", kernel.clone());
+        let params = ExtrudeParams { draft: Some(ExtrudeDraft { angle: 5.0, outward: false }), ..Default::default() };
+        let open = |d: &Document| {
+            let mut editor = FeatureEditor::new(None, EditorParams::Extrude(params.clone()), None);
+            editor.refresh(d);
+            assert!(editor.preview.result.is_some(), "{:?}", editor.error);
+            assert!(editor.preview.guides.arrow.as_ref().is_some_and(|a| a.drags), "the depth arrow shows");
+            editor
+        };
+        let (mut editor, mut stale) = (open(&d), open(&d));
+        let command = extrusion_command(None, &editor.params).unwrap();
+        kernel.take();
+        editor.take_prepared(&d).expect("the preview prepared its build").offer(&mut d, &command);
+        d.apply_form(command).unwrap().unwrap();
+        let operations = kernel.take().iter().filter(|w| matches!(w, Work::Operation(_))).count();
+        assert_eq!(operations, 0, "OK built the previewed extrusion again");
+        assert!(stale.take_prepared(&d).is_none(), "a preview of an earlier part was offered");
     }
 
     /// Draft is an option of Extrude and Cut: one undo step adds the extrusion and a draft

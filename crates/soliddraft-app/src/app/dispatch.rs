@@ -897,6 +897,8 @@ impl SolidDraftApp {
                         h.sync_points_from_sketch();
                     }
                 }
+                // The extrusion or cut the preview built, while the part is as it was then.
+                let prepared = self.state.editor.as_mut().and_then(|e| e.take_prepared(&self.state.doc));
                 let Some(e) = self.close_editor() else { return };
                 let reopen = (e.target, e.params.clone(), e.then_feature);
                 let cmd = match (e.target, e.params) {
@@ -912,10 +914,9 @@ impl SolidDraftApp {
                         Some(id) => Command::EditRevolve { id, revolve: r, merge: e.merge },
                         None => Command::AddRevolve { revolve: r, merge: e.merge },
                     },
-                    (Some(id), EditorParams::Extrude(p)) => Command::EditExtrude { id, params: p },
-                    (None, EditorParams::Extrude(p)) => Command::AddExtrude { params: p, via_assistant: false },
-                    (Some(id), EditorParams::Cut(p)) => Command::EditCut { id, params: p },
-                    (None, EditorParams::Cut(p)) => Command::AddCut { params: p },
+                    (target, params @ (EditorParams::Extrude(_) | EditorParams::Cut(_))) => {
+                        crate::state::extrusion_command(target, &params).expect("an extrusion or cut has its edit")
+                    }
                     (Some(id), EditorParams::Fillet(p)) => Command::EditFillet { id, params: p },
                     (None, EditorParams::Fillet(p)) => Command::AddFillet { params: p },
                     (Some(id), EditorParams::Chamfer(p)) => Command::EditChamfer { id, params: p },
@@ -1013,6 +1014,9 @@ impl SolidDraftApp {
                 // one keeps its form, and the part and its history stay as they were.
                 if let Some(drag) = self.state.drag_preview.take() {
                     drag.cancel(&mut self.state.doc);
+                }
+                if let Some(prepared) = prepared {
+                    prepared.offer(&mut self.state.doc, &cmd);
                 }
                 match self.state.doc.apply_form(cmd) {
                     Ok(Some(id)) => {

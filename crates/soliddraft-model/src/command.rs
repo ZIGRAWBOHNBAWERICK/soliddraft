@@ -707,19 +707,13 @@ impl Document {
     }
 
     /// Checks that every feature reads only features above it, in this order.
+    /// A missing input is allowed: deleting a feature leaves its readers to report what
+    /// broke (see [`crate::inputs`]).
     pub(crate) fn check_order(features: &[Feature]) -> Result<(), CommandError> {
-        for (i, f) in features.iter().enumerate() {
-            for dep in f.kind.dependencies() {
-                match features.iter().position(|g| g.id == dep) {
-                    Some(j) if j < i => {}
-                    Some(_) => return Err(CommandError::Order(f.id, dep)),
-                    // A missing input is allowed: deleting a feature leaves its readers
-                    // to report what broke.
-                    None => {}
-                }
-            }
+        match crate::inputs::misordered(features) {
+            Some((feature, dep)) => Err(CommandError::Order(feature, dep)),
+            None => Ok(()),
         }
-        Ok(())
     }
 
     /// Checks that a terminal field is the only one and the last feature, so no CAD

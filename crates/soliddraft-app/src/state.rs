@@ -316,6 +316,39 @@ pub struct FeatureEditor {
     /// The viewport shows the feature's preview. The panel's eye turns it off to see
     /// the part as it is.
     pub show_preview: bool,
+    /// The extrusion or cut the preview built, kept for OK.
+    prepared: Option<PreparedForm>,
+}
+
+/// An extrusion or cut form's OK as one edit: the command that adds its feature or edits
+/// `target`. The form's preview and its OK both take it from here. Other forms have none.
+pub(crate) fn extrusion_command(target: Option<FeatureId>, params: &EditorParams) -> Option<crate::document::Command> {
+    use crate::document::Command;
+    Some(match (target, params.clone()) {
+        (Some(id), EditorParams::Extrude(params)) => Command::EditExtrude { id, params },
+        (None, EditorParams::Extrude(params)) => Command::AddExtrude { params, via_assistant: false },
+        (Some(id), EditorParams::Cut(params)) => Command::EditCut { id, params },
+        (None, EditorParams::Cut(params)) => Command::AddCut { params },
+        _ => return None,
+    })
+}
+
+/// An extrusion or cut as its form's preview built it, in a fork of the part. OK reuses
+/// those builds only while the part, its rollback and the form's edit are as they were.
+pub(crate) struct PreparedForm {
+    revision: u64,
+    rollback: Option<usize>,
+    command: crate::document::Command,
+    fork: soliddraft_model::Document,
+}
+
+impl PreparedForm {
+    /// Lets `doc` reuse the prepared builds when OK applies the same edit.
+    pub(crate) fn offer(self, doc: &mut Document, command: &crate::document::Command) {
+        if self.command == *command {
+            doc.reuse_builds_from(&self.fork);
+        }
+    }
 }
 
 /// A feature built from one sketch. Starting one with no sketch selected asks for it.
@@ -400,7 +433,14 @@ impl FeatureEditor {
             focus_depth: false,
             merge: true,
             show_preview: true,
+            prepared: None,
         }
+    }
+
+    /// The build the preview prepared, while the part and its rollback are as they were
+    /// when the preview built it.
+    pub(crate) fn take_prepared(&mut self, doc: &Document) -> Option<PreparedForm> {
+        self.prepared.take().filter(|p| p.revision == doc.revision() && p.rollback == doc.rollback)
     }
 
     /// Keeps the form open after OK was refused, saying why.
@@ -518,61 +558,52 @@ impl FeatureEditor {
             };
             doc.preview_built(command, target)
         };
-        // The depth arrow of the extrusion before its draft, which a tapered preview keeps.
-        let arrow = |plain: Result<crate::document::Preview, String>| plain.ok().and_then(|p| p.guides.arrow);
-        let result = match &self.params {
-            // With its Draft option an extrusion previews as built, tapered.
-            // With From, Direction 2, a thin wall or chosen contours an extrusion previews
-            // as built, so the picture is the kernel's own answer.
-            EditorParams::Extrude(p) if p.draft.is_some() || !p.choices.is_default() => doc
-                .preview_built(
-                    match target {
-                        Some(id) => Command::EditExtrude { id, params: p.clone() },
-                        None => Command::AddExtrude { params: p.clone(), via_assistant: false },
-                    },
-                    target,
-                )
-                .map(|mut built| {
-                    built.guides.arrow = arrow(doc.preview_extrude(p));
-                    built
-                }),
-            EditorParams::Cut(p) if p.draft.is_some() || !p.choices.is_default() => doc
-                .preview_built(
-                    match target {
-                        Some(id) => Command::EditCut { id, params: p.clone() },
-                        None => Command::AddCut { params: p.clone() },
-                    },
-                    target,
-                )
-                .map(|mut built| {
-                    built.guides.arrow = arrow(doc.preview_cut(p, before));
-                    built
-                }),
-            EditorParams::Extrude(p) => doc.preview_extrude(p),
-            EditorParams::Revolve(r) => doc.preview_revolve(r),
-            EditorParams::Sweep(s) => doc.preview_sweep(s),
-            EditorParams::Loft(l) => doc.preview_loft(l, self.target),
-            EditorParams::Cut(p) => doc.preview_cut(p, before),
-            EditorParams::Fillet(f) => doc.preview_rounding(&f.blend(), false, before),
-            EditorParams::Chamfer(c) => doc.preview_rounding(&c.blend(), true, before),
-            EditorParams::Shell(s) => doc.preview_shell(s, before),
-            EditorParams::Offset(s) => doc.preview_offset(s, before),
-            EditorParams::Thicken(s) => doc.preview_thicken(s, before),
-            // These preview as built, in a fork of the part.
-            EditorParams::Draft(d) if !d.faces.is_empty() => built(FeatureKind::Draft(d.to_model())),
-            EditorParams::Pattern(p) => built(FeatureKind::Pattern(p.clone())),
-            EditorParams::Mirror(m) => built(FeatureKind::Mirror(m.clone())),
-            EditorParams::Hole(h) if h.face.is_some() => h.to_preview_model().and_then(|h| built(FeatureKind::Hole(h))),
-            // These preview once applied. A hole without its face shows a ghost at the
-            // pointer instead.
-            EditorParams::Lattice(_)
-            | EditorParams::Gyroid(_)
-            | EditorParams::Hole(_)
-            | EditorParams::ReferencePlane(_)
-            | EditorParams::Draft(_)
-            | EditorParams::PickPlane
-            | EditorParams::PickSketch(_)
-            | EditorParams::Repair { .. } => Ok(Preview::default()),
+        // With its Draft option, From, Direction 2, a thin wall or chosen contours an
+        // extrusion or cut previews as built, so the picture is the kernel's own answer.
+        let as_built = match &self.params {
+            EditorParams::Extrude(p) => p.draft.is_some() || !p.choices.is_default(),
+            EditorParams::Cut(p) => p.draft.is_some() || !p.choices.is_default(),
+            _ => false,
+        };
+        self.prepared = None;
+        let prepared = as_built.then(|| extrusion_command(target, &self.params)).flatten();
+        let result = if let Some(command) = prepared {
+            let (revision, rollback) = (doc.revision(), doc.rollback);
+            doc.prepare_built(command.clone(), target).map(|(mut built, fork)| {
+                built.guides.arrow = doc.extrusion_arrow(&self.params, &built);
+                self.prepared = Some(PreparedForm { revision, rollback, command, fork });
+                built
+            })
+        } else {
+            match &self.params {
+                EditorParams::Extrude(p) => doc.preview_extrude(p),
+                EditorParams::Revolve(r) => doc.preview_revolve(r),
+                EditorParams::Sweep(s) => doc.preview_sweep(s),
+                EditorParams::Loft(l) => doc.preview_loft(l, self.target),
+                EditorParams::Cut(p) => doc.preview_cut(p, before),
+                EditorParams::Fillet(f) => doc.preview_rounding(&f.blend(), false, before),
+                EditorParams::Chamfer(c) => doc.preview_rounding(&c.blend(), true, before),
+                EditorParams::Shell(s) => doc.preview_shell(s, before),
+                EditorParams::Offset(s) => doc.preview_offset(s, before),
+                EditorParams::Thicken(s) => doc.preview_thicken(s, before),
+                // These preview as built, in a fork of the part.
+                EditorParams::Draft(d) if !d.faces.is_empty() => built(FeatureKind::Draft(d.to_model())),
+                EditorParams::Pattern(p) => built(FeatureKind::Pattern(p.clone())),
+                EditorParams::Mirror(m) => built(FeatureKind::Mirror(m.clone())),
+                EditorParams::Hole(h) if h.face.is_some() => {
+                    h.to_preview_model().and_then(|h| built(FeatureKind::Hole(h)))
+                }
+                // These preview once applied. A hole without its face shows a ghost at the
+                // pointer instead.
+                EditorParams::Lattice(_)
+                | EditorParams::Gyroid(_)
+                | EditorParams::Hole(_)
+                | EditorParams::ReferencePlane(_)
+                | EditorParams::Draft(_)
+                | EditorParams::PickPlane
+                | EditorParams::PickSketch(_)
+                | EditorParams::Repair { .. } => Ok(Preview::default()),
+            }
         };
         match result {
             Ok(p) => {

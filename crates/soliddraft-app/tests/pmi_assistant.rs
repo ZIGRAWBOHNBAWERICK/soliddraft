@@ -6,11 +6,14 @@
 //! on the part is the rules' own: the assistant's answer leaves the part as the same
 //! answer over MCP does.
 
+use egui_dock::DockState;
 use serde_json::{Value, json};
+use soliddraft_app::app::Tab;
 use soliddraft_app::app_tools::AppTools;
 use soliddraft_app::chat::ChatState;
 use soliddraft_app::command_tools::{ProposalStatus, board_bracket};
 use soliddraft_app::state::AppState;
+use soliddraft_app::top_bar::OpenParts;
 use soliddraft_assistant::{Caller, MockProvider, MockTurn, ToolHost};
 use std::sync::Arc;
 
@@ -257,5 +260,93 @@ fn the_package_card_writes_where_it_says() {
         assert!(dir.join(file).is_file(), "{file} is written where the card says: {note}");
     }
     assert!(matches!(st.proposal_status(&id), Some(ProposalStatus::Applied { .. })), "{note}");
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+/// A card belongs to the part it was made for. In another part tab, even one holding
+/// the same bracket, where the same item would show the same rows, Apply refuses an add
+/// card and a package card and changes and writes nothing. Back in its own tab, each
+/// card applies.
+#[test]
+fn a_card_applies_only_in_the_part_it_was_made_for() {
+    let dir = std::env::temp_dir().join(format!("soliddraft-pmi-card-part-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let provider = Arc::new(MockProvider::new(Vec::new()));
+    let mut st = AppState::new(board_bracket());
+    st.chat = ChatState::connected(provider.clone(), "mock provider");
+    let found = mcp(&mut st, "pmi_recognise", json!({}));
+    let hole = found["features"].as_array().unwrap().iter().find(|f| f["kind"] == "hole").expect("the bore is a hole");
+    let finish = json!({ "kind": "finish", "name": "Bore finish", "faces": hole["faces"], "roughness": "Ra 1.6" });
+    let step = dir.join("bracket.step");
+    let made = exchange(
+        &mut st,
+        &provider,
+        "Give the bore Ra 1.6 and write the package.",
+        vec![
+            MockTurn::tools("", vec![("pmi_add", finish), ("manufacturing_package", json!({ "path": step }))]),
+            MockTurn::text("Two cards."),
+        ],
+    );
+    let [(_, false, add), (_, false, package)] = &made[..] else { panic!("{made:?}") };
+    let ids = [add["proposal_id"].as_str().unwrap().to_owned(), package["proposal_id"].as_str().unwrap().to_owned()];
+
+    // A second tab with the same bracket: the add card would show the same rows there.
+    let mut tabs = OpenParts::default();
+    let mut dock = DockState::new(vec![Tab::Viewport]);
+    tabs.park_active(&mut st, board_bracket());
+    let depth = st.doc.undo_depth();
+    for id in &ids {
+        st.apply_proposal(id);
+        let note = st.note.as_ref().map(|n| n.text.clone()).unwrap_or_default();
+        assert!(note.contains("another part"), "{id} is refused in the other tab: {note}");
+        assert!(matches!(st.proposal_status(id), Some(ProposalStatus::Pending)), "{id} stays pending");
+    }
+    assert_eq!(mcp(&mut st, "pmi_list", json!({}))["items"], json!([]), "nothing lands on the other part");
+    assert_eq!(st.doc.undo_depth(), depth, "no undo step on the other part");
+    assert!(!step.exists(), "nothing is written for the other part");
+    assert!(!st.drawing.is_active(), "no drawing opens");
+
+    // Back in the tab the cards were made in.
+    tabs.activate(0, &mut st, &mut dock);
+    for id in &ids {
+        st.apply_proposal(id);
+        let note = st.note.as_ref().map(|n| n.text.clone()).unwrap_or_default();
+        assert!(matches!(st.proposal_status(id), Some(ProposalStatus::Applied { .. })), "{id} applies: {note}");
+    }
+    let listed = mcp(&mut st, "pmi_list", json!({}));
+    assert!(listed["items"].as_array().unwrap().iter().any(|i| i["name"] == "Bore finish"), "{listed}");
+    for file in ["bracket.step", "bracket.pdf", "bracket.dxf"] {
+        assert!(dir.join(file).is_file(), "{file} is written");
+    }
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+/// The direct command writes the path exactly as its caller gave it: a relative
+/// ` bracket.step` is that file, and a `bracket.step` beside it is left alone. Only the
+/// assistant's input is trimmed, once, when its card is made.
+#[test]
+fn the_direct_package_command_keeps_its_path_exactly() {
+    let dir = std::env::temp_dir().join(format!("soliddraft-pmi-exact-path-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("bracket.step"), "unrelated").unwrap();
+    let mut st = AppState::new(board_bracket());
+    mcp(&mut st, "pmi_answer", json!({ "accept": "all", "material": "6061-T6" }));
+
+    // A relative path is read from the working directory. No other test here uses one.
+    let here = std::env::current_dir().unwrap();
+    std::env::set_current_dir(&dir).unwrap();
+    let out = AppTools { state: &mut st }.call(
+        "manufacturing_package",
+        json!({ "path": " bracket.step" }),
+        &Caller::Mcp { client: "test".into() },
+    );
+    std::env::set_current_dir(here).unwrap();
+    assert!(!out.is_error, "{}", out.content);
+    assert_eq!(std::fs::read_to_string(dir.join("bracket.step")).unwrap(), "unrelated", "{}", out.content);
+    for file in [" bracket.step", " bracket.pdf", " bracket.dxf"] {
+        assert!(dir.join(file).is_file(), "{file:?} is written: {}", out.content);
+    }
     std::fs::remove_dir_all(dir).unwrap();
 }

@@ -938,10 +938,11 @@ impl ToolHost for AppTools<'_> {
     }
 }
 
-/// The STEP file a manufacturing package writes: its input's `path`, trimmed. The
-/// package card shows this path and Apply writes to it.
+/// The STEP file a manufacturing package writes: its input's `path`, exactly as given.
+/// The package card shows this path and Apply writes to it; the assistant's path is
+/// trimmed once, before its card is made (`pmi::assistant::normalized`).
 pub(crate) fn package_path(input: &Value) -> Result<PathBuf, String> {
-    let step = PathBuf::from(input["path"].as_str().unwrap_or_default().trim());
+    let step = PathBuf::from(input["path"].as_str().unwrap_or_default());
     if !ExportFormat::Step.suits(&step) {
         return Err("the path must end in .step or .stp".into());
     }

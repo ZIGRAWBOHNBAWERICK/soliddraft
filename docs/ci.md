@@ -147,6 +147,12 @@ Other comparison differences were run-generated configuration and assembly-sourc
 
 The `sphere-revolve`, `torus-revolve` and `rod-cut-28deg` scenarios cover small curved solids, drawing generation, save/reopen and independently checked STEP exports. The native HTTP regressions also check each sphere and torus view's full projected width and height after scale. Automatic screen drawing views use a chord of 0.02 percent of the body diagonal, with a 1 mm minimum diagonal. Fitted-body previews retain their existing 0.02 mm chord. Screen views use the viewport's 15-degree normal-angle target, while certified drawing exports keep the 2-degree target. Explicit chord tolerances retain their requested accuracy.
 
+`cargo test -p soliddraft-app --test viewport_silhouette` exercises the native viewport on a
+wgpu adapter. It captures the cylinder, torus and filleted loft before and after orbit in
+`target/viewport-acceptance/silhouette-*/`. The test checks that orbit makes no model or
+display-mesh request and does not rebuild the CPU silhouette inputs. It also compares
+shaded frames with and without contours after removing topological edge strokes.
+
 The `measure` acceptance scenario checks picked edge length and face area, tracked checks, upstream edits, stale sources, undo, reopen and a checked STEP export; `measure_panel` drives the same path through a real viewport pick in each interactive job. The `measure-pairs` scenario extends it to midpoints, edge and face pairs, tracked pairs, a fillet that removes one end, and stale and current reopen; `measure_panel` and `measure_guides` drive the hovered midpoint, the pair, Track this and the sketch guide through the real window.
 
 The `mate-distance` acceptance scenario builds two parts, mates them through the MCP commands, drives the distance from a typed value, edits a part, updates, reopens and refuses a dangling reference, comparing the whole accepted state across every refusal. `mate_panel` makes the same mate in the window with real picks.

@@ -55,7 +55,12 @@ struct Globals {
     hover_id: u32,
     selected_id: u32,
     selected_feature: u32,
-    _pad1: u32,
+    section_flags: u32,
+    // xyz: a point on the section plane. w: half the cap quad's side.
+    section_origin: vec4<f32>,
+    // xyz: normal toward the removed side. w: clipping enabled.
+    section_normal: vec4<f32>,
+    section_u: vec4<f32>,
 };
 
 // One appearance (soliddraft-materials), metallic-roughness in linear colour.
@@ -119,6 +124,22 @@ fn vs_face(in: FaceIn) -> FaceOut {
     out.feature_id = in.feature_id;
     out.appearance = in.appearance;
     return out;
+}
+
+fn section_distance(p: vec3<f32>) -> f32 {
+    return dot(p - globals.section_origin.xyz, globals.section_normal.xyz);
+}
+
+@vertex
+fn vs_section_plane(@builtin(vertex_index) i: u32) -> FaceOut {
+    let corners = array<vec2<f32>, 6>(
+        vec2<f32>(-1.0, -1.0), vec2<f32>(1.0, -1.0), vec2<f32>(1.0, 1.0),
+        vec2<f32>(-1.0, -1.0), vec2<f32>(1.0, 1.0), vec2<f32>(-1.0, 1.0));
+    let at = corners[i] * globals.section_origin.w;
+    let n = globals.section_normal.xyz;
+    let u = globals.section_u.xyz;
+    let p = globals.section_origin.xyz + u * at.x + cross(n, u) * at.y;
+    return FaceOut(globals.view_proj * vec4<f32>(p, 1.0), p, n, 0u, 0xffffffffu, 0u);
 }
 
 fn srgb_to_linear(c: vec3<f32>) -> vec3<f32> {
@@ -248,23 +269,34 @@ const OPAQUE: f32 = 0.999;
 @fragment
 fn fs_face(in: FaceOut) -> @location(0) vec4<f32> {
     let ghost = (body.flags & 2u) != 0u;
+    if ((body.flags & 256u) == 0u && globals.section_normal.w != 0.0 && section_distance(in.world) > 0.0) {
+        discard;
+    }
     if (!ghost && body.shades[min(in.appearance, 63u)].base.a < OPAQUE) {
         discard;
     }
-    return face_colour(in);
+    return face_colour(in, body.flags, body.shades[min(in.appearance, 63u)]);
 }
 
 // Faces whose appearance is not opaque, drawn after every opaque one without writing
 // depth. Their own triangles blend in draw order, unsorted.
 @fragment
 fn fs_face_see_through(in: FaceOut) -> @location(0) vec4<f32> {
+    if (globals.section_normal.w != 0.0 && section_distance(in.world) > 0.0) {
+        discard;
+    }
     if (body.shades[min(in.appearance, 63u)].base.a >= OPAQUE) {
         discard;
     }
-    return face_colour(in);
+    return face_colour(in, body.flags, body.shades[min(in.appearance, 63u)]);
 }
 
-fn face_colour(in: FaceOut) -> vec4<f32> {
+@fragment
+fn fs_section_cap(in: FaceOut) -> @location(0) vec4<f32> {
+    return face_colour(in, globals.section_flags, body.shades[0]);
+}
+
+fn face_colour(in: FaceOut, flags: u32, shade: Shade) -> vec4<f32> {
     var n = normalize(in.normal);
     let v = normalize(globals.eye.xyz - in.world);
     // Light the side the viewer sees, even through a sheet or an open preview.
@@ -273,20 +305,19 @@ fn face_colour(in: FaceOut) -> vec4<f32> {
     }
     let accent = selection_color();
     let red = srgb_to_linear(vec3<f32>(0.80, 0.24, 0.24));
-    let selected_body = (body.flags & 1u) != 0u;
-    let ghost = (body.flags & 2u) != 0u;
-    let preview = (body.flags & 4u) != 0u;
-    let removes = (body.flags & 8u) != 0u;
+    let selected_body = (flags & 1u) != 0u;
+    let ghost = (flags & 2u) != 0u;
+    let preview = (flags & 4u) != 0u;
+    let removes = (flags & 8u) != 0u;
     // The rest of an assembly around a part edited in context (render.rs CONTEXT).
-    let context = (body.flags & 256u) != 0u;
+    let context = (flags & 256u) != 0u;
 
     // One preview look for every form: material a feature adds or reshapes is amber with
     // dark edges, material it removes red (theme.rs PREVIEW_EDGE and PREVIEW_REMOVE_EDGE).
-    let shade = body.shades[min(in.appearance, 63u)];
     var base = shade.base.rgb;
     let metallic = shade.params.x;
     let roughness = shade.params.y;
-    let tint = (body.flags & 32u) == 0u;
+    let tint = (flags & 32u) == 0u;
     if (context) {
         base = mix(base, srgb_to_linear(vec3<f32>(0.70, 0.72, 0.76)), 0.6);
     } else if (ghost && removes && tint) {
@@ -323,10 +354,10 @@ fn face_colour(in: FaceOut) -> vec4<f32> {
     } else if (!context && in.face_id != 0u && in.face_id == globals.hover_id) {
         color = mix(color, lit_accent, 0.22);
     }
-    if (made && (body.flags & 64u) != 0u) {
+    if (made && (flags & 64u) != 0u) {
         let at = in.clip.xy / globals.viewport.w;
         let diagonal = fract((at.x + at.y) / 8.0) < 0.16;
-        let cross = (body.flags & 128u) != 0u && fract((at.x - at.y) / 8.0) < 0.16;
+        let cross = (flags & 128u) != 0u && fract((at.x - at.y) / 8.0) < 0.16;
         if (diagonal || cross) {
             color *= 0.58;
         }
@@ -575,8 +606,21 @@ fn line_vertex(in: LineIn, width_px: f32) -> vec4<f32> {
 
 @vertex
 fn vs_edge(in: LineIn) -> LineOut {
+    var segment = in;
+    if (globals.section_normal.w != 0.0 && (body.flags & 256u) == 0u) {
+        let a = section_distance(in.a);
+        let b = section_distance(in.b);
+        if (a > 0.0 && b > 0.0) {
+            return LineOut(vec4<f32>(0.0, 0.0, -1.0, 1.0), in.id);
+        }
+        if (a > 0.0) {
+            segment.a = mix(in.a, in.b, a / (a - b));
+        } else if (b > 0.0) {
+            segment.b = mix(in.a, in.b, a / (a - b));
+        }
+    }
     var out: LineOut;
-    out.clip = line_vertex(in, globals.viewport.z);
+    out.clip = line_vertex(segment, globals.viewport.z);
     out.id = in.id;
     return out;
 }

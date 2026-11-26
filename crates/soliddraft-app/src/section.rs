@@ -1,4 +1,4 @@
-//! A temporary half-space cut. Only its tessellation reaches the viewport.
+//! A display-only half-space cut. The GPU previews the plane; the kernel settles it.
 
 use crate::document::{DisplayMesh, Document, Selection, preview_mesh};
 use crate::theme;
@@ -52,6 +52,9 @@ pub struct State {
     pub plane: SectionPlane,
     pub offset: f64,
     pub flip: bool,
+    pub(crate) gpu_preview: bool,
+    dragging: bool,
+    solid_meshes: Option<(soliddraft_document::DocumentId, u64, bool)>,
     cached: Option<(Request, Answer)>,
     pending: Option<Pending>,
 }
@@ -83,16 +86,41 @@ impl State {
         }
     }
 
-    fn request(&self, doc: &Document) -> Option<Request> {
+    fn plane_for(&self, doc: &Document) -> Option<Plane> {
         if !self.enabled
             || !self.offset.is_finite()
+            || doc.meshes.is_empty()
             || !doc.proof_state().current_proved_display()
             || !crate::tree_visibility::body_shown(doc)
         {
             return None;
         }
-        let mut plane = self.plane.resolve(doc)?;
-        plane.origin = plane.origin + plane.normal * self.offset;
+        let plane = self.plane.resolve(doc)?;
+        Some(plane.with_origin(plane.origin + plane.normal * self.offset))
+    }
+
+    pub(crate) fn gpu_plane(&mut self, doc: &Document) -> Option<Plane> {
+        if !self.gpu_preview {
+            return None;
+        }
+        let mut plane = self.plane_for(doc)?;
+        let id = doc.model().id();
+        let version = doc.mesh_version;
+        if self.solid_meshes.is_none_or(|(d, v, _)| (d, v) != (id, version)) {
+            let solid = doc.meshes.keys().all(|&body| doc.kernel().body_kind(body) == Ok(BodyKind::Solid));
+            self.solid_meshes = Some((id, version, solid));
+        }
+        if !self.solid_meshes.is_some_and(|(_, _, solid)| solid) {
+            return None;
+        }
+        if self.flip {
+            plane.normal = plane.normal * -1.0;
+        }
+        Some(plane)
+    }
+
+    fn request(&self, doc: &Document) -> Option<Request> {
+        let plane = self.plane_for(doc)?;
         let bodies: Vec<_> = doc
             .model()
             .live_bodies()
@@ -106,14 +134,18 @@ impl State {
         Some(Request { document: doc.model().id(), bodies, mesh_version: doc.mesh_version, plane, flip: self.flip })
     }
 
-    /// One in-flight boolean per window. Dragging coalesces to the latest plane.
+    /// One in-flight cut per window. On the stencil path, offsets are only submitted after release.
     pub fn refresh(&mut self, doc: &Document, ctx: &egui::Context) {
+        if self.gpu_preview && self.dragging {
+            return;
+        }
         let wanted = self.request(doc);
         if let Some(pending) = &self.pending {
             match pending.answer.try_recv() {
                 Ok(answer) => {
                     if Some(&pending.request) == wanted.as_ref() {
                         self.cached = Some((pending.request.clone(), answer));
+                        ctx.request_repaint();
                     }
                     self.pending = None;
                 }
@@ -124,6 +156,7 @@ impl State {
                     if Some(&pending.request) == wanted.as_ref() {
                         self.cached =
                             Some((pending.request.clone(), Err("Could not create the section. Try again.".into())));
+                        ctx.request_repaint();
                     }
                     self.pending = None;
                 }
@@ -172,11 +205,15 @@ impl State {
     }
 
     pub fn mesh(&self, doc: &Document) -> Option<Arc<DisplayMesh>> {
+        if self.gpu_preview && self.dragging {
+            return None;
+        }
         let (request, answer) = self.cached.as_ref()?;
         (Some(request) == self.request(doc).as_ref()).then(|| answer.as_ref().ok().cloned()).flatten()
     }
 
     pub fn show(&mut self, ctx: &egui::Context, doc: &Document) {
+        self.dragging = false;
         if !self.enabled {
             return;
         }
@@ -208,8 +245,9 @@ impl State {
                 });
             ui.horizontal(|ui| {
                 ui.label("Offset");
-                ui.add(egui::DragValue::new(&mut self.offset).speed(0.25).suffix(" mm"))
-                    .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::DragValue, true, "Section offset"));
+                let response = ui.add(egui::DragValue::new(&mut self.offset).speed(0.25).suffix(" mm"));
+                response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::DragValue, true, "Section offset"));
+                self.dragging = response.dragged();
             });
             if ui.button("Flip side").clicked() {
                 self.flip = !self.flip;
@@ -217,21 +255,38 @@ impl State {
             ui.label(if self.flip { "Keep positive side" } else { "Keep negative side" });
             if !self.offset.is_finite() {
                 ui.colored_label(theme::error(), "Enter a finite offset.");
-            } else if self.request(doc).is_none() {
+            } else if self.plane_for(doc).is_none() {
                 ui.label(if matches!(self.plane, SectionPlane::Face(_)) {
                     "Choose a planar face on the current part."
                 } else {
                     "A solid part is needed for a section."
                 });
-            } else if let Some((_, Err(error))) = &self.cached {
-                ui.colored_label(theme::error(), error);
-            } else if self.mesh(doc).is_some_and(|mesh| mesh.indices.is_empty()) {
-                ui.label("Nothing of the part is on this side of the plane");
-            } else if self.mesh(doc).is_none() {
-                ui.horizontal(|ui| {
-                    ui.spinner();
-                    ui.label("Updating section...");
-                });
+            } else if self.gpu_preview && self.dragging {
+                ui.label("Previewing section");
+            } else {
+                let request = self.request(doc);
+                let live_cap = self.gpu_plane(doc).is_some();
+                match self.cached.as_ref().filter(|(cached, _)| Some(cached) == request.as_ref()) {
+                    Some((_, Err(_))) if live_cap => {
+                        ui.colored_label(
+                            theme::error(),
+                            "The kernel could not cut this plane. Showing a display-only cap.",
+                        );
+                    }
+                    Some((_, Err(error))) => {
+                        ui.colored_label(theme::error(), error);
+                    }
+                    Some((_, Ok(mesh))) if mesh.indices.is_empty() => {
+                        ui.label("Nothing of the part is on this side of the plane");
+                    }
+                    Some(_) => {}
+                    None => {
+                        ui.horizontal(|ui| {
+                            ui.spinner();
+                            ui.label("Updating section...");
+                        });
+                    }
+                }
             }
             close = ui.button("Close section").clicked();
         });

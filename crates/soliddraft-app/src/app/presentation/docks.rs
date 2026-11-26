@@ -437,11 +437,14 @@ impl TabViewer for Panels<'_> {
                 let st = &mut *self.state;
                 let section_allowed = st.editor.is_none() && !st.in_sketch() && st.drag_preview.is_none();
                 if section_allowed {
-                    st.section.refresh(&st.doc, ui.ctx());
+                    st.section.gpu_preview = st.viewport.graphics_tier == crate::viewport::look::Tier::Full;
                     st.section.show(ui.ctx(), &st.doc);
+                    st.section.refresh(&st.doc, ui.ctx());
                 }
                 st.viewport.section_active = section_allowed && st.section.enabled;
                 let section_mesh = section_allowed.then(|| st.section.mesh(&st.doc)).flatten();
+                st.viewport.section_plane =
+                    if section_allowed && section_mesh.is_none() { st.section.gpu_plane(&st.doc) } else { None };
                 let ghost = st.ghost();
                 let preview = section_mesh.or_else(|| st.preview_body());
                 let selection = st.doc.selection;

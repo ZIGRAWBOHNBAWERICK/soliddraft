@@ -193,6 +193,8 @@ pub struct Controls {
     pub red_removal: bool,
     /// The hatch of a section view's cap, while a section view is shown.
     pub section: Option<crate::graphics::SectionHatch>,
+    /// Plane of the live stencil preview; its normal points toward the removed side.
+    pub section_plane: Option<soliddraft_kernel_api::Plane>,
     pub edge_color: Option<crate::theme::Rgb>,
     pub selection_color: Option<crate::theme::Rgb>,
 }
@@ -208,6 +210,7 @@ impl Default for Controls {
             tint_preview: true,
             red_removal: true,
             section: None,
+            section_plane: None,
             edge_color: None,
             selection_color: None,
         }
@@ -318,7 +321,10 @@ struct Globals {
     selected_id: u32,
     /// Faces made by this feature are highlighted (0 for none).
     selected_feature: u32,
-    _pad: u32,
+    section_flags: u32,
+    section_origin: [f32; 4],
+    section_normal: [f32; 4],
+    section_u: [f32; 4],
 }
 
 /// Mirrors `Backdrop` in scene.wgsl. Stop RGB is linear; w is the stop position.
@@ -502,6 +508,22 @@ fn sun_frame_with_ground(lo: Vec3, hi: Vec3, follows_model: bool) -> SunFrame {
 const MSAA: u32 = 4;
 const COLOR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
+
+fn scene_depth(tier: Tier) -> wgpu::TextureFormat {
+    match tier {
+        Tier::Basic => DEPTH_FORMAT,
+        Tier::Full => wgpu::TextureFormat::Depth24PlusStencil8,
+    }
+}
+
+fn section_flags(hatch: crate::graphics::SectionHatch) -> u32 {
+    use crate::graphics::SectionHatch;
+    4 | match hatch {
+        SectionHatch::Solid => 0,
+        SectionHatch::Diagonal => 64,
+        SectionHatch::Crosshatch => 64 | 128,
+    }
+}
 const ID_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rg32Uint;
 /// Bytes per id texel.
 const ID_TEXEL: u32 = 8;
@@ -604,10 +626,18 @@ struct Layouts {
     blit: wgpu::BindGroupLayout,
 }
 
+struct SectionPipelines {
+    plane_depth: wgpu::RenderPipeline,
+    count: wgpu::RenderPipeline,
+    cap: wgpu::RenderPipeline,
+    material: wgpu::BindGroup,
+}
+
 pub struct ViewportRenderer {
     tier: Tier,
     samples: u32,
     face_pipeline: wgpu::RenderPipeline,
+    section: Option<SectionPipelines>,
     /// The faces whose appearance is not opaque: blended over everything opaque,
     /// both sides, writing no depth, so what is behind or inside them shows.
     see_through_pipeline: wgpu::RenderPipeline,
@@ -702,7 +732,8 @@ impl ViewportRenderer {
             }
         };
         let color = flags(COLOR_FORMAT);
-        let depth = flags(DEPTH_FORMAT);
+        let tier = Tier::of(info.backend);
+        let depth = flags(scene_depth(tier));
         let mut samples = vec![1];
         if color.contains(wgpu::TextureFormatFeatureFlags::MULTISAMPLE_RESOLVE) {
             samples.extend(
@@ -723,7 +754,7 @@ impl ViewportRenderer {
             renderer: format!("{:?}", info.backend),
             samples,
             active_samples,
-            tier: Tier::of(info.backend),
+            tier,
         }
     }
 
@@ -882,15 +913,15 @@ impl ViewportRenderer {
                 cache: None,
             })
         };
-        let depth_compare = |write: bool, compare| {
-            Some(wgpu::DepthStencilState {
-                format: DEPTH_FORMAT,
-                depth_write_enabled: Some(write),
-                depth_compare: Some(compare),
-                stencil: Default::default(),
-                bias: Default::default(),
-            })
+        let depth_state = |format, write: bool, compare| wgpu::DepthStencilState {
+            format,
+            depth_write_enabled: Some(write),
+            depth_compare: Some(compare),
+            stencil: Default::default(),
+            bias: Default::default(),
         };
+        let depth_format = scene_depth(tier);
+        let depth_compare = |write, compare| Some(depth_state(depth_format, write, compare));
         let depth = |write| depth_compare(write, DEPTH_COMPARE);
         let premul = Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING);
         let back = Some(wgpu::Face::Back);
@@ -908,6 +939,64 @@ impl ViewportRenderer {
             samples,
             cull: back,
             depth: depth(true),
+        });
+        let section = (tier == Tier::Full).then(|| {
+            use wgpu::{CompareFunction, StencilFaceState, StencilOperation};
+            let mask_pipeline = |label, vs, buffers, depth| {
+                pipeline(Desc {
+                    label,
+                    layout: &uniforms_layout,
+                    vs,
+                    fs: None,
+                    buffers,
+                    format: None,
+                    blend: None,
+                    samples,
+                    cull: None,
+                    depth,
+                })
+            };
+            let plane_depth = mask_pipeline("section depth", "vs_section_plane", &[], depth(true));
+            let winding = |pass_op| StencilFaceState { pass_op, ..StencilFaceState::IGNORE };
+            let mut count_depth = depth_state(depth_format, false, CompareFunction::Less);
+            count_depth.stencil = wgpu::StencilState {
+                front: winding(StencilOperation::IncrementWrap),
+                back: winding(StencilOperation::DecrementWrap),
+                read_mask: 0xff,
+                write_mask: 0xff,
+            };
+            let count = mask_pipeline("section winding", "vs_face", &faces, Some(count_depth));
+            let nonzero = StencilFaceState { compare: CompareFunction::NotEqual, ..StencilFaceState::IGNORE };
+            let mut cap_depth = depth_state(depth_format, true, DEPTH_COMPARE);
+            cap_depth.stencil = wgpu::StencilState { front: nonzero, back: nonzero, read_mask: 0xff, write_mask: 0 };
+            let cap = pipeline(Desc {
+                label: "section cap",
+                layout: &scene_layout,
+                vs: "vs_section_plane",
+                fs: Some("fs_section_cap"),
+                buffers: &[],
+                format: Some(COLOR_FORMAT),
+                blend: premul,
+                samples,
+                cull: None,
+                depth: Some(cap_depth),
+            });
+            let uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("section cap material"),
+                contents: bytemuck::bytes_of(&BodyUniform {
+                    flags: 0,
+                    _pad: [0; 3],
+                    tint: [0.0; 4],
+                    shades: [GpuShade::from(Appearance::default_part().shading()); MAX_APPEARANCES],
+                }),
+                usage: wgpu::BufferUsages::UNIFORM,
+            });
+            let material = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("section cap material"),
+                layout: &layouts.body,
+                entries: &[wgpu::BindGroupEntry { binding: 0, resource: uniform.as_entire_binding() }],
+            });
+            SectionPipelines { plane_depth, count, cap, material }
         });
         let see_through_pipeline = pipeline(Desc {
             label: "see-through faces",
@@ -1085,7 +1174,7 @@ impl ViewportRenderer {
                     blend: None,
                     samples: 1,
                     cull: back,
-                    depth: depth(true),
+                    depth: Some(depth_state(DEPTH_FORMAT, true, DEPTH_COMPARE)),
                 }),
                 fullscreen("occlusion", "fs_ssao", AO_FORMAT),
                 fullscreen("occlusion blur", "fs_ao_blur", AO_FORMAT),
@@ -1204,6 +1293,7 @@ impl ViewportRenderer {
             tier,
             samples,
             face_pipeline,
+            section,
             see_through_pipeline,
             ground_pipeline,
             grid_pipeline,
@@ -1245,7 +1335,7 @@ impl ViewportRenderer {
             picks: PickCache::default(),
             display: DisplayMode::default(),
             frame: 0,
-            assembly: AssemblyRenderer::new(device, COLOR_FORMAT, DEPTH_FORMAT, samples, ID_FORMAT),
+            assembly: AssemblyRenderer::new(device, COLOR_FORMAT, depth_format, samples, ID_FORMAT),
         }
     }
 
@@ -1293,10 +1383,11 @@ impl ViewportRenderer {
         let color_msaa = (self.samples > 1)
             .then(|| tex("color msaa", COLOR_FORMAT, self.samples, ra, scale).create_view(&Default::default()));
         let color = tex("color", COLOR_FORMAT, 1, sampled, scale).create_view(&Default::default());
-        let depth_msaa = tex("scene depth", DEPTH_FORMAT, self.samples, ra, scale).create_view(&Default::default());
+        let depth_format = scene_depth(self.tier);
+        let depth_msaa = tex("scene depth", depth_format, self.samples, ra, scale).create_view(&Default::default());
         let id = tex("id", ID_FORMAT, 1, ra | wgpu::TextureUsages::COPY_SRC, 1);
         let id_view = id.create_view(&Default::default());
-        let id_depth = tex("id depth", DEPTH_FORMAT, 1, ra, 1).create_view(&Default::default());
+        let id_depth = tex("id depth", depth_format, 1, ra, 1).create_view(&Default::default());
         let blit_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("blit"),
             layout: &self.layouts.blit,
@@ -1494,15 +1585,10 @@ impl ViewportRenderer {
         match &input.preview {
             Some(p) => {
                 let ptr = Arc::as_ptr(p) as usize;
-                let flags = 4 | match input.controls.section {
-                    // A section's cap keeps its fill: the preview tint is a feature preview's.
-                    Some(hatch) => match hatch {
-                        crate::graphics::SectionHatch::Solid => 0,
-                        crate::graphics::SectionHatch::Diagonal => 64,
-                        crate::graphics::SectionHatch::Crosshatch => 64 | 128,
-                    },
-                    None if input.controls.tint_preview => 0,
-                    None => 32,
+                let flags = match input.controls.section {
+                    Some(hatch) => section_flags(hatch),
+                    None if input.controls.tint_preview => 4,
+                    None => 4 | 32,
                 };
                 if self.preview.as_ref().map(|(q, flags, _)| (*q, *flags)) != Some((ptr, flags)) {
                     self.preview = Some((ptr, flags, self.upload_body(device, p, flags)));
@@ -1519,9 +1605,16 @@ impl ViewportRenderer {
             }
             None => self.threads = None,
         }
+        let section = input.controls.section_plane.filter(|_| self.section.is_some() && self.preview.is_none());
         for (id, body) in &self.bodies {
             // Only the flags change per frame; the appearance table stays as uploaded.
-            let flags: u32 = if input.selected_body == Some(*id) { 1 } else { 0 };
+            let flags: u32 = if section.is_some() {
+                4
+            } else if input.selected_body == Some(*id) {
+                1
+            } else {
+                0
+            };
             queue.write_buffer(&body.uniform, 0, bytemuck::bytes_of(&flags));
         }
 
@@ -1532,16 +1625,39 @@ impl ViewportRenderer {
         // Construction previews replace the colour and revision-bound pick geometry.
         let shown: Vec<_> = Self::scene_bodies(&self.preview, &self.bodies).collect();
         let bounds = shown.iter().filter_map(|b| b.bounds).reduce(|(lo, hi), (l, h)| (lo.min(l), hi.max(h)));
-        let shadows = look.shadows && show_faces && bounds.is_some();
+        let daylight = look.shadows && show_faces && bounds.is_some();
+        let shadows = daylight && section.is_none();
         let follows_model = input.controls.lighting.shadow_follows_model;
         let shadow_key = (self.mesh_version, preview_key, follows_model);
         let draw_shadow_map = shadows && self.shadow_key != Some(shadow_key);
-        if draw_shadow_map && let Some((lo, hi)) = bounds {
+        if daylight
+            && (draw_shadow_map || self.sun.is_none())
+            && let Some((lo, hi)) = bounds
+        {
             self.sun = Some(sun_frame_with_ground(lo, hi, follows_model));
         }
-        let ao = look.ambient_occlusion > 0.0 && show_faces && self.ao_pipelines.is_some();
+        let ao = look.ambient_occlusion > 0.0 && show_faces && self.ao_pipelines.is_some() && section.is_none();
         let ground = shadows && ground_shadow && self.sun.is_some_and(|s| input.eye.z > s.ground.z);
 
+        let (section_origin, section_normal, section_u) = match (section, bounds) {
+            (Some(plane), Some((lo, hi))) => {
+                let n = plane.normal;
+                let normal = Vec3::new(n.x as f32, n.y as f32, n.z as f32);
+                let u = Vec3::new(plane.x_dir.x as f32, plane.x_dir.y as f32, plane.x_dir.z as f32);
+                let mid = (lo.as_dvec3() + hi.as_dvec3()) * 0.5;
+                let delta = (soliddraft_kernel_api::Vec3::new(mid.x, mid.y, mid.z) - plane.origin).dot(n);
+                let extent = (hi - lo) * 0.5;
+                let reach = f64::from(extent.dot(normal.abs()));
+                // Clamp outside offsets before converting to f32 and skip the stencil
+                // work when the plane cannot intersect the AABB.
+                let delta_clamped = delta.clamp(-reach - 1.0, reach + 1.0);
+                let at = mid.as_vec3() - normal * delta_clamped as f32;
+                let half = if delta.abs() < reach { extent.length() * 1.001 } else { 0.0 };
+                (at.extend(half).to_array(), normal.extend(1.0).to_array(), u.extend(0.0).to_array())
+            }
+            _ => ([0.0; 4], [0.0; 4], [0.0; 4]),
+        };
+        let section_cap = self.section.as_ref().filter(|_| show_faces && section_origin[3] > 0.0);
         let size = self.targets.as_ref().map(|t| t.size).unwrap_or([1, 1]);
         let view_proj = input.proj * input.view;
         let [right, up, back] = input.basis;
@@ -1596,7 +1712,7 @@ impl ViewportRenderer {
             key: rig(-0.45, 0.3, 0.85, 0.8),
             fill: rig(0.85, 0.1, 0.5, 0.3),
             rim: rig(0.2, 0.6, -0.75, 0.15),
-            sun: [toward_sun.x, toward_sun.y, toward_sun.z, if shadows { look.sun } else { 0.0 }],
+            sun: [toward_sun.x, toward_sun.y, toward_sun.z, if daylight { look.sun } else { 0.0 }],
             ground: [sun.ground.x, sun.ground.y, sun.ground.z, sun.ground_radius],
             shadow: [look.shadow_strength, 0.007 * look.shadow_softness, if shadows { 1.0 } else { 0.0 }, sun.texel],
             look: [
@@ -1625,10 +1741,13 @@ impl ViewportRenderer {
             edge_color: Controls::color_uniform(input.controls.edge_color),
             selection_color: Controls::color_uniform(input.controls.selection_color),
             sh: self.sh,
-            hover_id: input.hover_id,
-            selected_id: input.selected_id,
-            selected_feature: input.selected_feature,
-            _pad: 0,
+            hover_id: if section.is_some() { 0 } else { input.hover_id },
+            selected_id: if section.is_some() { 0 } else { input.selected_id },
+            selected_feature: if section.is_some() { 0 } else { input.selected_feature },
+            section_flags: input.controls.section.map_or(4, section_flags),
+            section_origin,
+            section_normal,
+            section_u,
         };
         if scale > 1 {
             queue.write_buffer(&self.pick_globals, 0, bytemuck::bytes_of(&globals));
@@ -1761,6 +1880,31 @@ impl ViewportRenderer {
             }
         }
 
+        if let Some(section) = section_cap {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("section stencil"),
+                color_attachments: &[],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &targets.depth_msaa,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(DEPTH_CLEAR),
+                        store: wgpu::StoreOp::Discard,
+                    }),
+                    stencil_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(0), store: wgpu::StoreOp::Store }),
+                }),
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            pass.set_bind_group(0, &self.uniforms_bind_group, &[]);
+            pass.set_pipeline(&section.plane_depth);
+            pass.draw(0..6, 0..1);
+            // Count oriented crossings from the plane toward far depth. This also works
+            // when the near plane clips the mesh or the camera is inside the body.
+            pass.set_pipeline(&section.count);
+            draw_faces(&mut pass, &mut shown.iter().copied(), false);
+        }
+
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("scene"),
@@ -1779,7 +1923,8 @@ impl ViewportRenderer {
                         load: wgpu::LoadOp::Clear(DEPTH_CLEAR),
                         store: wgpu::StoreOp::Discard,
                     }),
-                    stencil_ops: None,
+                    stencil_ops: section_cap
+                        .map(|_| wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Discard }),
                 }),
                 timestamp_writes: None,
                 occlusion_query_set: None,
@@ -1792,6 +1937,11 @@ impl ViewportRenderer {
             if show_faces {
                 pass.set_pipeline(&self.face_pipeline);
                 draw_faces(&mut pass, &mut shown.iter().copied(), true);
+                if let Some(section) = section_cap {
+                    pass.set_pipeline(&section.cap);
+                    pass.set_bind_group(1, &section.material, &[]);
+                    pass.draw(0..6, 0..1);
+                }
                 self.assembly.draw(&mut pass);
                 // The assembly binds its own group 0.
                 pass.set_bind_group(0, &self.globals_bind_group, &[]);
@@ -1836,6 +1986,7 @@ impl ViewportRenderer {
             if show_faces
                 && input.controls.hidden_selected_edges
                 && self.preview.is_none()
+                && section.is_none()
                 && let Some(body) = input.selected_body.and_then(|id| self.bodies.get(&id))
             {
                 pass.set_pipeline(&self.hidden_edges_pipeline);
@@ -1853,7 +2004,7 @@ impl ViewportRenderer {
                     draw_lines(&mut pass, &mut ghost.into_iter());
                 }
             }
-            if input.controls.vertex_markers && self.preview.is_none() {
+            if input.controls.vertex_markers && self.preview.is_none() && section.is_none() {
                 pass.set_pipeline(&self.markers_pipeline);
                 for body in &shown {
                     if body.point_count > 0 {
@@ -1863,7 +2014,7 @@ impl ViewportRenderer {
                     }
                 }
             }
-            if let Some(threads) = self.scene_threads() {
+            if let Some(threads) = self.scene_threads().filter(|_| section.is_none()) {
                 pass.set_pipeline(&self.edge_pipeline);
                 draw_lines(&mut pass, &mut std::iter::once(threads));
             }
@@ -1892,27 +2043,31 @@ impl ViewportRenderer {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
-            pass.set_bind_group(2, &targets.frame_bind_group, &[]);
-            pass.set_bind_group(
-                0,
-                if scale > 1 { &self.pick_globals_bind_group } else { &self.globals_bind_group },
-                &[],
-            );
-            pass.set_pipeline(&self.id_face_pipeline);
-            draw_faces(&mut pass, &mut pick_bodies(), true);
-            if !input.preview_pickable || self.preview.is_none() {
-                pass.set_pipeline(&self.id_edge_pipeline);
-                draw_lines(&mut pass, &mut self.bodies.values());
-                pass.set_pipeline(&self.id_vertex_pipeline);
-                for body in self.bodies.values() {
-                    if body.point_count > 0 {
-                        pass.set_bind_group(1, &body.bind_group, &[]);
-                        pass.set_vertex_buffer(0, body.points.slice(..));
-                        pass.draw(0..6, 0..body.point_count);
+            // The stencil preview is display-only; even the original body must not
+            // supply an id or a hit point for what looks like section geometry.
+            if section.is_none() {
+                pass.set_bind_group(2, &targets.frame_bind_group, &[]);
+                pass.set_bind_group(
+                    0,
+                    if scale > 1 { &self.pick_globals_bind_group } else { &self.globals_bind_group },
+                    &[],
+                );
+                pass.set_pipeline(&self.id_face_pipeline);
+                draw_faces(&mut pass, &mut pick_bodies(), true);
+                if !input.preview_pickable || self.preview.is_none() {
+                    pass.set_pipeline(&self.id_edge_pipeline);
+                    draw_lines(&mut pass, &mut self.bodies.values());
+                    pass.set_pipeline(&self.id_vertex_pipeline);
+                    for body in self.bodies.values() {
+                        if body.point_count > 0 {
+                            pass.set_bind_group(1, &body.bind_group, &[]);
+                            pass.set_vertex_buffer(0, body.points.slice(..));
+                            pass.draw(0..6, 0..body.point_count);
+                        }
                     }
                 }
+                self.assembly.draw_ids(&mut pass);
             }
-            self.assembly.draw_ids(&mut pass);
         }
 
         let mut issued = None;
@@ -2110,8 +2265,8 @@ mod tests {
 
     #[test]
     fn globals_match_the_shader_layout() {
-        // Five matrices, twenty-one vectors, nine harmonics and four ids.
-        assert_eq!(std::mem::size_of::<Globals>(), 5 * 64 + 21 * 16 + 9 * 16 + 16);
+        // Five matrices, twenty-four vectors, nine harmonics and four scalars.
+        assert_eq!(std::mem::size_of::<Globals>(), 5 * 64 + 24 * 16 + 9 * 16 + 16);
         assert_eq!(std::mem::size_of::<Backdrop>(), 8 * 16);
         assert_eq!(std::mem::size_of::<LineInstance>(), 28);
         assert_eq!(std::mem::size_of::<BodyUniform>(), 32 + 48 * MAX_APPEARANCES);

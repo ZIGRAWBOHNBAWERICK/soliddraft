@@ -603,6 +603,41 @@ impl Planner<'_> {
                     dropped: false,
                 });
             }
+            PmiKind::Hole { pilot, head, .. } => {
+                let Shape::Round { axis, radius, .. } = self.body.feature(pilot)? else {
+                    return Err("a hole needs a cylindrical pilot wall".into());
+                };
+                let attached = head.as_ref().map_or(pilot.as_slice(), |head| head.faces.as_slice());
+                let outer_radius = match row.hole.and_then(|values| values.head) {
+                    Some(
+                        soliddraft_kernel_api::pmi::HoleHeadNominals::Counterbore { diameter_mm, .. }
+                        | soliddraft_kernel_api::pmi::HoleHeadNominals::Countersink { diameter_mm, .. },
+                    ) => diameter_mm * 0.5,
+                    None => radius,
+                };
+                let (view, edge, _, centre, placement, dir) = self.callout(&[attached], axis, outer_radius)?;
+                let rim_radius = match self.body.index.edge_curve(edge) {
+                    Some(Curve3::Circle { radius, .. } | Curve3::Arc { radius, .. }) => *radius,
+                    _ => outer_radius,
+                };
+                let scale = self.views.iter().find(|v| v.id == view).map_or(1.0, |v| v.xf.scale);
+                let on = Point2::new(centre.u + dir.u * rim_radius * scale, centre.v + dir.v * rim_radius * scale);
+                let at = self.views.iter().find(|v| v.id == view).map(|v| v.xf.unproject(on));
+                if let Some(face) = pilot.first() {
+                    self.sizes.insert(*face, self.plans.len());
+                }
+                self.plans.push(Plan {
+                    source,
+                    view,
+                    body: AnnotationKind::Note { text: row.callout(), leader: Vec::new() },
+                    anchors: vec![(edge, at.map_or(Attach::Mid, |at| Attach::Point { at }), on)],
+                    placement,
+                    slide: Slide { along: dir, step: 3.0 },
+                    host: None,
+                    stack: None,
+                    dropped: false,
+                });
+            }
             PmiKind::Location { from, to, tolerance, .. } => {
                 let end = |anchor: &soliddraft_kernel_api::pmi::Anchor<FaceId>| -> Result<End, String> {
                     let shape = self.body.feature(&anchor.feature)?;
@@ -962,8 +997,10 @@ fn row_of<'r>(source: &PmiSource, rows: &'r [PmiRow]) -> Option<&'r PmiRow> {
 fn shows<F>(body: &AnnotationKind, kind: &PmiKind<F>) -> bool {
     matches!(
         (body, kind),
-        (AnnotationKind::Note { .. }, PmiKind::Size { thread: Some(_), .. } | PmiKind::Slot { .. })
-            | (AnnotationKind::Dimension(_), PmiKind::Size { thread: None, .. } | PmiKind::Location { .. })
+        (
+            AnnotationKind::Note { .. },
+            PmiKind::Size { thread: Some(_), .. } | PmiKind::Slot { .. } | PmiKind::Hole { .. }
+        ) | (AnnotationKind::Dimension(_), PmiKind::Size { thread: None, .. } | PmiKind::Location { .. })
             | (AnnotationKind::Gdt { .. }, PmiKind::Gdt { .. })
             | (AnnotationKind::Datum { .. }, PmiKind::Datum { .. })
             | (AnnotationKind::SurfaceFinish { .. }, PmiKind::SurfaceFinish { .. })

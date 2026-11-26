@@ -234,7 +234,9 @@ fn item(doc: &Document, input: &Value) -> Result<PmiItem<FaceRef>, String> {
             feature: named_feature(doc, input, "faces")?,
         },
         other => {
-            return Err(format!("kind `{other}` is not datum, diameter, radius, distance, slot, tolerance or finish"));
+            return Err(format!(
+                "kind `{other}` is not datum, diameter, radius, hole, distance, slot, tolerance or finish"
+            ));
         }
     };
     let mut item = PmiItem { id: String::new(), kind };

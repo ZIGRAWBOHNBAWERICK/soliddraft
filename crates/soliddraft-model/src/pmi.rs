@@ -25,11 +25,14 @@
 //! and a drawing like any other.
 
 use serde::{Deserialize, Serialize};
+use soliddraft_kernel_api::drawing::Curve3;
 use soliddraft_kernel_api::pmi::{
     Anchor, At, Feature, GdtCharacteristic, HoleHeadKind, HoleHeadNominals, HoleNominals, PartNotes, Pmi, PmiItem,
     PmiKind, StepPmi, Tolerance, length_text,
 };
-use soliddraft_kernel_api::{BodyId, FaceId, FaceRole, KernelError, Topology};
+use soliddraft_kernel_api::{
+    BodyId, EdgeId, FaceAxis, FaceId, FaceRole, HolePart, Kernel, KernelError, SurfaceKind, Topology,
+};
 
 use crate::document::Document;
 use crate::feature::{FeatureId, FeatureKind};

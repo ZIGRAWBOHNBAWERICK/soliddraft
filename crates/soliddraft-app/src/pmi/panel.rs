@@ -28,8 +28,16 @@ pub enum Kind {
 }
 
 impl Kind {
-    const ALL: [Kind; 7] =
-        [Kind::Datum, Kind::Diameter, Kind::Radius, Kind::Distance, Kind::Slot, Kind::Tolerance, Kind::Finish];
+    const ALL: [Kind; 8] = [
+        Kind::Datum,
+        Kind::Diameter,
+        Kind::Radius,
+        Kind::Hole,
+        Kind::Distance,
+        Kind::Slot,
+        Kind::Tolerance,
+        Kind::Finish,
+    ];
 
     fn label(self) -> &'static str {
         match self {
@@ -558,6 +566,26 @@ fn form(ui: &mut egui::Ui, state: &mut AppState) {
                             .hint_text("Thread: M6x1-6H, empty for a plain hole"),
                     ),
                     "Thread",
+                );
+            }
+            if form.kind == Kind::Hole {
+                if !form.through {
+                    labelled(
+                        ui.add(
+                            egui::TextEdit::singleline(&mut form.drill_depth)
+                                .hint_text("Drill depth (mm), blank to measure"),
+                        ),
+                        "Drill depth",
+                    );
+                } else {
+                    form.drill_depth.clear();
+                }
+                labelled(
+                    ui.add(
+                        egui::TextEdit::singleline(&mut form.thread_depth)
+                            .hint_text("Usable thread depth (mm), optional"),
+                    ),
+                    "Usable thread depth",
                 );
             }
             if matches!(form.kind, Kind::Diameter | Kind::Radius) && form.picks.len() > 1 {

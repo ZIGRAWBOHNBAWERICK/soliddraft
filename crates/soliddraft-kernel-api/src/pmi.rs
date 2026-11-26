@@ -612,6 +612,13 @@ impl<F> PmiItem<F> {
         match &self.kind {
             PmiKind::Datum { feature, .. } | PmiKind::SurfaceFinish { feature, .. } => vec![feature],
             PmiKind::Size { features, .. } | PmiKind::Gdt { features, .. } => features.iter().collect(),
+            PmiKind::Hole { pilot, head, .. } => {
+                if let Some(head) = head {
+                    vec![pilot, &head.faces]
+                } else {
+                    vec![pilot]
+                }
+            }
             PmiKind::Location { from, to, .. } => vec![&from.feature, &to.feature],
             PmiKind::Slot { flats, ends, .. } => flats.iter().chain(ends).collect(),
         }
@@ -1158,6 +1165,46 @@ impl<F> PmiItem<F> {
             }
             PmiKind::SurfaceFinish { text, .. } => text.clone(),
         }
+    }
+
+    /// The complete callout for a hole, combining its checked geometry and stated requirements.
+    pub fn hole_callout(&self, pilot_diameter: &str, measured: Option<&HoleNominals>) -> String {
+        use std::fmt::Write;
+
+        let PmiKind::Hole { head, tolerance, through, drill_depth, thread, .. } = &self.kind else {
+            return String::new();
+        };
+        let mut text = format!("Ø{pilot_diameter}{}", tolerance.suffix());
+        if *through {
+            text.push_str(" THRU");
+        } else if let Some(depth) = drill_depth {
+            let _ = write!(text, " DRILL DEEP {depth}");
+        } else if let Some(depth) = measured.and_then(|values| values.drill_depth_mm) {
+            let _ = write!(text, " DRILL DEEP {}", length_text(depth));
+        } else {
+            text.push_str(" DRILL DEEP ?");
+        }
+        match (head.as_ref().map(|head| head.kind), measured.and_then(|values| values.head)) {
+            (Some(HoleHeadKind::Counterbore), Some(HoleHeadNominals::Counterbore { diameter_mm, depth_mm })) => {
+                let _ = write!(text, "\nC'BORE Ø{} DEEP {}", length_text(diameter_mm), length_text(depth_mm));
+            }
+            (
+                Some(HoleHeadKind::Countersink),
+                Some(HoleHeadNominals::Countersink { diameter_mm, included_angle_deg }),
+            ) => {
+                let _ = write!(text, "\nC'SINK Ø{} × {}°", length_text(diameter_mm), length_text(included_angle_deg));
+            }
+            (Some(HoleHeadKind::Counterbore), _) => text.push_str("\nC'BORE Ø? DEEP ?"),
+            (Some(HoleHeadKind::Countersink), _) => text.push_str("\nC'SINK Ø? × ?°"),
+            (None, _) => {}
+        }
+        if let Some(thread) = thread {
+            let _ = write!(text, "\n{}", thread.designation);
+            if let Some(depth) = &thread.depth {
+                let _ = write!(text, " THREAD DEEP {depth}");
+            }
+        }
+        text
     }
 
     /// Why a STEP file cannot hold the item as it stands, or `None` when it can. The

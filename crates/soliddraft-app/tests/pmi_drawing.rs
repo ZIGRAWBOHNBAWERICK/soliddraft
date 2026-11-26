@@ -178,9 +178,19 @@ fn hole_requirements_round_trip_through_panel_tools_and_drawing() {
     s.pmi.open = true;
     let s = RefCell::new(s);
     {
+        let mut installed = false;
         let mut app = egui_kittest::Harness::builder()
             .with_size(egui::vec2(720.0, 1000.0))
-            .build_ui(|ui| panel::show(ui, &mut s.borrow_mut()));
+            .build_ui(|ui| {
+                if installed {
+                    panel::show(ui, &mut s.borrow_mut());
+                } else {
+                    use soliddraft_app::theme;
+                    theme::install(ui.ctx(), theme::Mode::Light);
+                    installed = true;
+                }
+            });
+        app.run_steps(2);
         for (i, ((name, _, head, through, thread), (pilot_id, head_id))) in cases.iter().zip(picked).enumerate() {
             app.get_by_label("Hole").click();
             app.run_steps(2);

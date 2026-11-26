@@ -474,6 +474,10 @@ impl Kernel for Counting {
         self.inner.measure_work(run)
     }
 
+    fn with_rebuild_source(&self, body: BodyId, run: &mut dyn FnMut()) {
+        self.inner.with_rebuild_source(body, run);
+    }
+
     fn reserve_proof_work(&self) -> KernelResult<Box<dyn crate::ProofWork>> {
         self.inner.reserve_proof_work()
     }

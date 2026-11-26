@@ -4,7 +4,8 @@
 use std::sync::Arc;
 
 use soliddraft_kernel_api::pmi::{
-    Anchor, At, DatumRef, GdtCharacteristic, MaterialCondition, PartNotes, PmiItem, PmiKind, SizeKind, Tolerance,
+    Anchor, At, DatumRef, Decimal, GdtCharacteristic, HoleHead as PmiHead, HoleHeadKind, HoleHeadNominals, HoleThread,
+    MaterialCondition, PartNotes, Pmi, PmiItem, PmiKind, SizeKind, Tolerance,
 };
 use soliddraft_kernel_api::{FaceId, StepOptions, SurfaceKind, Vec3};
 use soliddraft_kernel_catallax::CatallaxKernel;
@@ -12,7 +13,7 @@ use soliddraft_model::pmi::Located;
 use soliddraft_model::sketch::{P2, Sketch, SolveStatus, solve::solve};
 use soliddraft_model::{
     Command, CommandError, DatumPlane, Document, EndCondition, ExtrudeFeature, ExtrudeOp, FaceRef, FeatureId,
-    FeatureKind, ImportStepFeature, ProfileSource, SketchFeature, SketchPlane,
+    FeatureKind, HoleFeature, ImportStepFeature, ProfileSource, SketchFeature, SketchPlane,
 };
 
 fn doc() -> Document {

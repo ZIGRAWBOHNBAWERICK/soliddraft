@@ -26,7 +26,8 @@
 
 use serde::{Deserialize, Serialize};
 use soliddraft_kernel_api::pmi::{
-    Anchor, At, Feature, GdtCharacteristic, PartNotes, Pmi, PmiItem, PmiKind, StepPmi, Tolerance,
+    Anchor, At, Feature, GdtCharacteristic, HoleHeadKind, HoleHeadNominals, HoleNominals, PartNotes, Pmi, PmiItem,
+    PmiKind, StepPmi, Tolerance, length_text,
 };
 use soliddraft_kernel_api::{BodyId, FaceId, FaceRole, KernelError, Topology};
 
@@ -47,6 +48,8 @@ pub struct PmiRow {
     /// The measured values in millimetres: one for a size or a distance; the length,
     /// the width and the end radius for a slot.
     pub measured: Vec<f64>,
+    /// Nominals for a typed hole, including values whose units are not millimetres.
+    pub hole: Option<HoleNominals>,
     /// For a position tolerance, the basic distances that locate its features from
     /// its datums.
     pub located: Vec<Located>,
@@ -68,6 +71,10 @@ pub struct PmiRow {
 impl PmiRow {
     /// The item as a drawing writes it, such as `Ø8 H7` or `M6x1-6H DEEP 12`.
     pub fn callout(&self) -> String {
+        if let PmiKind::Hole { .. } = &self.item.kind {
+            let diameter = self.measured.first().map_or_else(|| "?".to_owned(), |value| length_text(*value));
+            return self.item.hole_callout(&diameter, self.hole.as_ref());
+        }
         let callout = self.item.callout(&self.measured);
         match self.depth {
             Some(depth) => format!("{callout} DEEP {}", soliddraft_kernel_api::pmi::length_text(depth)),
@@ -173,6 +180,183 @@ fn reason(error: KernelError, id: &str) -> String {
         other => other.to_string(),
     };
     text.strip_prefix(&format!("{id}: ")).map(str::to_owned).unwrap_or(text)
+}
+
+// Allow for conversion of exact carriers to doubles, not for an approximation of the part.
+const HOLE_EPS: f64 = 1e-7;
+
+struct HoleRim {
+    z: f64,
+    radius: f64,
+    edges: Vec<EdgeId>,
+    neighbours: Vec<FaceId>,
+}
+
+fn hole_rims(
+    kernel: &dyn Kernel,
+    body: BodyId,
+    topology: &Topology,
+    faces: &[FaceId],
+    axis: FaceAxis,
+) -> Result<[HoleRim; 2], String> {
+    let mut rims: Vec<HoleRim> = Vec::with_capacity(2);
+    for &id in faces {
+        let face = topology.face(id).ok_or("A hole wall is missing.")?;
+        for edge in face.edges.iter().filter_map(|edge| topology.edge(*edge)) {
+            if edge.faces.iter().all(|face| faces.contains(face)) {
+                continue; // Seam or boundary between pieces of the same wall.
+            }
+            let curve = kernel.edge_drawing(body, edge.id).map_err(|error| error.to_string())?;
+            let (center, normal, radius) = match curve.curve {
+                Curve3::Circle { center, normal, radius } | Curve3::Arc { center, normal, radius, .. }
+                    if !curve.approximate =>
+                {
+                    (center, normal, radius)
+                }
+                _ => continue,
+            };
+            let offset = center - axis.point;
+            if offset.cross(axis.direction).length() > HOLE_EPS || normal.cross(axis.direction).length() > HOLE_EPS {
+                continue;
+            }
+            let z = offset.dot(axis.direction);
+            let rim = match rims.iter_mut().find(|rim| (rim.z - z).abs() <= HOLE_EPS) {
+                Some(rim) if (rim.radius - radius).abs() <= HOLE_EPS => rim,
+                Some(_) => return Err("The hole has different radii at the same rim.".into()),
+                None => {
+                    if rims.len() == 2 {
+                        return Err("The hole wall has more than two circular rims.".into());
+                    }
+                    rims.push(HoleRim { z, radius, edges: Vec::new(), neighbours: Vec::new() });
+                    rims.last_mut().unwrap()
+                }
+            };
+            if !rim.edges.contains(&edge.id) {
+                rim.edges.push(edge.id);
+                for neighbour in edge.faces.iter().filter(|face| !faces.contains(face)) {
+                    if !rim.neighbours.contains(neighbour) {
+                        rim.neighbours.push(*neighbour);
+                    }
+                }
+            }
+        }
+    }
+    rims.try_into().map_err(|_| "The hole wall needs two checked circular rims.".to_owned())
+}
+
+fn measure_hole(
+    kernel: &dyn Kernel,
+    body: BodyId,
+    topology: &Topology,
+    item: &PmiItem<FaceId>,
+) -> Result<HoleNominals, String> {
+    let PmiKind::Hole { pilot, head, through, thread, .. } = &item.kind else {
+        unreachable!();
+    };
+    let carriers = kernel.face_carriers(body).map_err(|error| error.to_string())?;
+    let carrier = |face| carriers.iter().find(|candidate| candidate.id == face);
+    let axis = |face| carrier(face).and_then(|face| face.axis);
+    let pilot_axis = pilot.first().copied().and_then(axis).ok_or("Pick a cylindrical pilot wall.")?;
+    for &face in pilot {
+        let other = axis(face).ok_or("Every pilot face must be cylindrical.")?;
+        if (other.radius - pilot_axis.radius).abs() > HOLE_EPS
+            || (other.point - pilot_axis.point).cross(pilot_axis.direction).length() > HOLE_EPS
+            || other.direction.cross(pilot_axis.direction).length() > HOLE_EPS
+        {
+            return Err("The pilot faces are not on the same cylinder.".into());
+        }
+    }
+    let pilot_rims = hole_rims(kernel, body, topology, pilot, pilot_axis)?;
+    let planar = |face| {
+        carrier(face)
+            .and_then(|face| face.normal)
+            .is_some_and(|normal| normal.cross(pilot_axis.direction).length() <= HOLE_EPS)
+    };
+    let closed = |rim: &HoleRim| {
+        rim.neighbours.iter().filter_map(|id| topology.face(*id)).any(|face| {
+            (planar(face.id) && face.edges.iter().all(|edge| rim.edges.contains(edge)))
+                || face.origins.iter().any(|origin| matches!(origin.role, FaceRole::Hole { part: HolePart::Tip, .. }))
+        })
+    };
+    let opening = |rim: &HoleRim| {
+        !closed(rim)
+            && rim.neighbours.iter().copied().any(|id| {
+                planar(id)
+                    && carrier(id).is_some_and(|face| {
+                        !face.origins.iter().any(|origin| {
+                            matches!(origin.role, FaceRole::Hole { part: HolePart::CounterboreFloor, .. })
+                        })
+                    })
+            })
+    };
+    let (entry_z, end, head_nominals) = if let Some(head) = head {
+        let surface = match head.kind {
+            HoleHeadKind::Counterbore => SurfaceKind::Cylinder,
+            HoleHeadKind::Countersink => SurfaceKind::Cone,
+        };
+        if !head.faces.iter().all(|face| carrier(*face).is_some_and(|face| face.surface == surface)) {
+            return Err("The head faces do not match the chosen head kind.".into());
+        }
+        let head_rims = hole_rims(kernel, body, topology, &head.faces, pilot_axis)?;
+        let mut matched = None;
+        for (i, inner) in head_rims.iter().enumerate() {
+            let outer = &head_rims[1 - i];
+            if !opening(outer) || outer.radius <= pilot_axis.radius + HOLE_EPS {
+                continue;
+            }
+            for (j, start) in pilot_rims.iter().enumerate() {
+                let end = &pilot_rims[1 - j];
+                if (start.z - inner.z).abs() > HOLE_EPS || (outer.z - inner.z) * (end.z - start.z) >= 0.0 {
+                    continue;
+                }
+                let connected = match head.kind {
+                    HoleHeadKind::Counterbore => {
+                        (inner.radius - outer.radius).abs() <= HOLE_EPS
+                            && inner.neighbours.iter().any(|id| start.neighbours.contains(id) && planar(*id))
+                    }
+                    HoleHeadKind::Countersink => {
+                        (inner.radius - pilot_axis.radius).abs() <= HOLE_EPS
+                            && inner.edges.iter().any(|id| start.edges.contains(id))
+                    }
+                };
+                if connected && matched.replace((inner, outer, end)).is_some() {
+                    return Err("The head and pilot do not have a unique junction.".into());
+                }
+            }
+        }
+        let (inner, outer, end) = matched.ok_or("The head and pilot must meet on the same axis.")?;
+        let depth_mm = (outer.z - inner.z).abs();
+        let diameter_mm = outer.radius * 2.0;
+        let values = match head.kind {
+            HoleHeadKind::Counterbore => HoleHeadNominals::Counterbore { diameter_mm, depth_mm },
+            HoleHeadKind::Countersink => HoleHeadNominals::Countersink {
+                diameter_mm,
+                included_angle_deg: 2.0 * (outer.radius - inner.radius).atan2(depth_mm).to_degrees(),
+            },
+        };
+        (outer.z, end, Some(values))
+    } else if *through && pilot_rims.iter().all(opening) {
+        (pilot_rims[0].z, &pilot_rims[1], None)
+    } else if !*through && opening(&pilot_rims[0]) && closed(&pilot_rims[1]) {
+        (pilot_rims[0].z, &pilot_rims[1], None)
+    } else if !*through && opening(&pilot_rims[1]) && closed(&pilot_rims[0]) {
+        (pilot_rims[1].z, &pilot_rims[0], None)
+    } else {
+        return Err("The pilot does not have the selected through or blind extent.".into());
+    };
+    if (*through && !opening(end)) || (!*through && !closed(end)) {
+        return Err("The pilot does not have the selected through or blind extent.".into());
+    }
+    let depth_mm = (end.z - entry_z).abs();
+    if thread.as_ref().and_then(|thread| thread.depth.as_ref()).is_some_and(|depth| depth.value() > depth_mm + HOLE_EPS)
+    {
+        return Err("Usable thread depth exceeds the available drill depth.".into());
+    }
+    Ok(HoleNominals {
+        pilot_diameter_mm: pilot_axis.radius * 2.0,
+        head: head_nominals,
+        drill_depth_mm: (!through).then_some(depth_mm),
+    })
 }
 
 impl Document {
@@ -292,6 +476,7 @@ impl Document {
                 item: item.clone(),
                 on_body: None,
                 measured: Vec::new(),
+                hole: None,
                 located: Vec::new(),
                 problem: None,
                 feature: stated.map(|s| s.feature),
@@ -322,7 +507,15 @@ impl Document {
                     }
                     Ok(on_body) => {
                         problem = None;
-                        if on_body.is_dimension() {
+                        if matches!(on_body.kind, PmiKind::Hole { .. }) {
+                            match measure_hole(self.kernel.as_ref(), *body, topology, &on_body) {
+                                Ok(values) => {
+                                    row.measured.push(values.pilot_diameter_mm);
+                                    row.hole = Some(values);
+                                }
+                                Err(error) => problem = Some(error),
+                            }
+                        } else if on_body.is_dimension() {
                             let alone = Pmi { items: vec![on_body.clone()], part: PartNotes::default() };
                             match self.kernel.pmi_nominals(*body, &alone) {
                                 Ok(values) => row.measured = values.into_iter().next().unwrap_or_default(),

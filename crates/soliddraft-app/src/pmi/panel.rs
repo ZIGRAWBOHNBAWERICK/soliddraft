@@ -3,8 +3,8 @@
 //! finish on the faces picked in the viewport.
 
 use soliddraft_kernel_api::pmi::{
-    Anchor, At, DatumRef, Feature, GdtCharacteristic, MaterialCondition, PartNotes, PmiItem, PmiKind, SizeKind,
-    SurfaceProcess, Tolerance,
+    Anchor, At, DatumRef, Decimal, Feature, GdtCharacteristic, HoleHead, HoleHeadKind, HoleThread, MaterialCondition,
+    PartNotes, PmiItem, PmiKind, SizeKind, SurfaceProcess, Tolerance,
 };
 use soliddraft_kernel_api::{FaceId, SurfaceKind};
 use soliddraft_model::FaceRef;
@@ -20,6 +20,7 @@ pub enum Kind {
     Datum,
     Diameter,
     Radius,
+    Hole,
     Distance,
     Slot,
     Tolerance,
@@ -35,6 +36,7 @@ impl Kind {
             Kind::Datum => "Datum",
             Kind::Diameter => "Diameter",
             Kind::Radius => "Radius",
+            Kind::Hole => "Hole",
             Kind::Distance => "Distance",
             Kind::Slot => "Slot",
             Kind::Tolerance => "Geometric tolerance",
@@ -47,6 +49,7 @@ impl Kind {
         match self {
             Kind::Datum => "Pick the face that is the datum.",
             Kind::Diameter | Kind::Radius => "Pick the round face, or each round face of a pattern.",
+            Kind::Hole => "Pick the head wall first if there is one, then pick the cylindrical pilot wall.",
             Kind::Distance => "Pick the faces it starts on, press From, then pick the faces it ends on.",
             Kind::Slot => "Pick the slot's two flat sides and its two round ends.",
             Kind::Tolerance => "Pick the face it applies to, or each face of a pattern.",
@@ -116,6 +119,10 @@ pub struct State {
     through: bool,
     /// A diameter's thread designation, such as `M6x1-6H`; empty for a plain one.
     thread: String,
+    head_kind: Option<HoleHeadKind>,
+    head_faces: Vec<FaceId>,
+    drill_depth: String,
+    thread_depth: String,
     /// Several picked faces are one feature each, such as four equal holes.
     pattern: bool,
     from_at: At,
@@ -177,6 +184,10 @@ impl Default for State {
             tolerance: String::new(),
             through: false,
             thread: String::new(),
+            head_kind: None,
+            head_faces: Vec::new(),
+            drill_depth: String::new(),
+            thread_depth: String::new(),
             pattern: true,
             from_at: At::Feature,
             to_at: At::Feature,
@@ -224,6 +235,25 @@ impl State {
                 self.thread = thread.clone().unwrap_or_default();
                 self.pattern = features.len() > 1;
                 self.picks = all(features);
+            }
+            PmiKind::Hole { pilot, head, tolerance, through, drill_depth, thread } => {
+                self.kind = Kind::Hole;
+                self.picks.clone_from(pilot);
+                if let Some(head) = head {
+                    self.head_kind = Some(head.kind);
+                    self.head_faces.clone_from(&head.faces);
+                }
+                self.tolerance = tolerance.suffix().trim().to_owned();
+                self.through = *through;
+                if let Some(depth) = drill_depth {
+                    self.drill_depth = depth.to_string();
+                }
+                if let Some(thread) = thread {
+                    self.thread.clone_from(&thread.designation);
+                    if let Some(depth) = &thread.depth {
+                        self.thread_depth = depth.to_string();
+                    }
+                }
             }
             PmiKind::Location { from, to, tolerance, .. } => {
                 self.kind = Kind::Distance;
@@ -303,6 +333,35 @@ fn item(doc: &Document, form: &State) -> Result<PmiItem<FaceRef>, String> {
             thread: Some(form.thread.trim().to_owned()).filter(|t| form.kind == Kind::Diameter && !t.is_empty()),
             nominal: None,
         },
+        Kind::Hole => {
+            let decimal = |input: &str, label: &str| {
+                if input.trim().is_empty() {
+                    Ok(None)
+                } else {
+                    Decimal::parse(input).map(Some).ok_or_else(|| format!("{label} must be a decimal in mm."))
+                }
+            };
+            let head = match form.head_kind {
+                Some(kind) => Some(HoleHead { kind, faces: feature(doc, &form.head_faces)? }),
+                None => None,
+            };
+            let thread = match form.thread.trim() {
+                "" if !form.thread_depth.trim().is_empty() => return Err("Enter a thread designation.".into()),
+                "" => None,
+                designation => Some(HoleThread {
+                    designation: designation.to_owned(),
+                    depth: decimal(&form.thread_depth, "Usable thread depth")?,
+                }),
+            };
+            PmiKind::Hole {
+                pilot: feature(doc, &form.picks)?,
+                head,
+                tolerance: typed_tolerance(&form.tolerance)?,
+                through: form.through,
+                drill_depth: decimal(&form.drill_depth, "Drill depth")?,
+                thread,
+            }
+        }
         Kind::Distance => {
             if form.from.is_empty() {
                 return Err("Pick the faces it starts on and press From.".to_owned());
@@ -452,7 +511,25 @@ fn form(ui: &mut egui::Ui, state: &mut AppState) {
             form.from = std::mem::take(&mut form.picks);
         }
     }
-    picked(ui, doc, if form.kind == Kind::Distance { "To" } else { "Picked" }, &mut form.picks);
+    if form.kind == Kind::Hole {
+        ui.horizontal_wrapped(|ui| {
+            ui.selectable_value(&mut form.head_kind, None, "No head");
+            ui.selectable_value(&mut form.head_kind, Some(HoleHeadKind::Counterbore), "Counterbore");
+            ui.selectable_value(&mut form.head_kind, Some(HoleHeadKind::Countersink), "Countersink");
+        });
+        if form.head_kind.is_some() {
+            picked(ui, doc, "Head", &mut form.head_faces);
+            if ui.button("Use picks as head").clicked() && !form.picks.is_empty() {
+                form.head_faces = std::mem::take(&mut form.picks);
+            }
+        }
+    }
+    let label = match form.kind {
+        Kind::Distance => "To",
+        Kind::Hole => "Pilot",
+        _ => "Picked",
+    };
+    picked(ui, doc, label, &mut form.picks);
     match form.kind {
         Kind::Datum => {
             let hint = doc.model().pmi().next_datum_letter();
@@ -461,7 +538,7 @@ fn form(ui: &mut egui::Ui, state: &mut AppState) {
                 "Datum letter",
             );
         }
-        Kind::Diameter | Kind::Radius | Kind::Distance | Kind::Slot => {
+        Kind::Diameter | Kind::Radius | Kind::Hole | Kind::Distance | Kind::Slot => {
             if form.kind == Kind::Distance && !form.picks.is_empty() {
                 ui.horizontal_wrapped(|ui| {
                     for (at, label) in ENDS {
@@ -473,7 +550,7 @@ fn form(ui: &mut egui::Ui, state: &mut AppState) {
                 ui.add(egui::TextEdit::singleline(&mut form.tolerance).hint_text("Tolerance: H7, \u{b1}0.1 or +0.1/0")),
                 "Tolerance",
             );
-            if form.kind == Kind::Diameter {
+            if matches!(form.kind, Kind::Diameter | Kind::Hole) {
                 ui.checkbox(&mut form.through, "Through hole");
                 labelled(
                     ui.add(

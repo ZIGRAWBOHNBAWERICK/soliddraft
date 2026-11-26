@@ -4,8 +4,8 @@
 
 use serde_json::{Value, json};
 use soliddraft_kernel_api::pmi::{
-    Anchor, At, DatumRef, Feature, GdtCharacteristic, Lay, MaterialCondition, PartNotes, PmiItem, PmiKind, SizeKind,
-    SurfaceProcess, Tolerance,
+    Anchor, At, DatumRef, Decimal, Feature, GdtCharacteristic, HoleHead, HoleHeadKind, HoleThread, Lay,
+    MaterialCondition, PartNotes, PmiItem, PmiKind, SizeKind, SurfaceProcess, Tolerance,
 };
 use soliddraft_model::FaceRef;
 
@@ -24,6 +24,16 @@ fn number(input: &Value, key: &str) -> Result<f64, String> {
         _ => return Err(format!("{key} is required")),
     };
     read.filter(|value| value.is_finite()).ok_or_else(|| format!("{key} is a number, such as 0.05"))
+}
+
+fn depth(input: &Value, key: &str) -> Result<Option<Decimal>, String> {
+    let parsed = match input.get(key) {
+        None | Some(Value::Null) => return Ok(None),
+        Some(Value::String(value)) => Decimal::parse(value),
+        Some(Value::Number(value)) => Decimal::parse(&value.to_string()),
+        _ => None,
+    };
+    parsed.map(Some).ok_or_else(|| format!("{key} must be a decimal in mm"))
 }
 
 /// The faces of one feature, from their names.
@@ -152,6 +162,36 @@ fn item(doc: &Document, input: &Value) -> Result<PmiItem<FaceRef>, String> {
             thread: text(input, "thread").map(|t| t.trim().to_owned()).filter(|t| !t.is_empty()),
             nominal: None,
         },
+        "hole" => {
+            let head = match text(input, "head_kind") {
+                None if input.get("head_faces").is_some_and(|faces| !faces.is_null()) => {
+                    return Err("head_kind is required when head_faces are given".into());
+                }
+                None => None,
+                Some(kind) => Some(HoleHead {
+                    kind: match kind {
+                        "counterbore" => HoleHeadKind::Counterbore,
+                        "countersink" => HoleHeadKind::Countersink,
+                        _ => return Err("head_kind is counterbore or countersink".into()),
+                    },
+                    faces: named_feature(doc, input, "head_faces")?,
+                }),
+            };
+            let thread_depth = depth(input, "thread_depth")?;
+            let thread = match text(input, "thread") {
+                Some(designation) => Some(HoleThread { designation: designation.to_owned(), depth: thread_depth }),
+                None if thread_depth.is_some() => return Err("thread is required when thread_depth is given".into()),
+                None => None,
+            };
+            PmiKind::Hole {
+                pilot: named_feature(doc, input, "pilot_faces")?,
+                head,
+                through: input["through"].as_bool().unwrap_or(false),
+                drill_depth: depth(input, "drill_depth")?,
+                tolerance: tolerance(input)?,
+                thread,
+            }
+        }
         "distance" => PmiKind::Location {
             from: anchor(doc, input, "from")?,
             to: anchor(doc, input, "to")?,
@@ -245,6 +285,29 @@ pub(crate) fn rows_named(doc: &Document, names: &Document) -> Value {
             });
             if !row.measured.is_empty() {
                 value["measured_mm"] = json!(row.measured);
+            }
+            if let PmiKind::Hole { head, tolerance, through, drill_depth, thread, .. } = &row.item.kind {
+                let mut hole = json!({ "pilot_faces": faces[0], "through": through });
+                if let Some(head) = head {
+                    hole["head_kind"] = json!(head.kind);
+                    hole["head_faces"] = json!(faces[1]);
+                }
+                if let Some(depth) = drill_depth {
+                    hole["drill_depth"] = json!(depth);
+                }
+                if let Some(thread) = thread {
+                    hole["thread"] = json!(thread.designation);
+                    if let Some(depth) = &thread.depth {
+                        hole["thread_depth"] = json!(depth);
+                    }
+                }
+                if !tolerance.is_none() {
+                    hole["tolerance"] = json!(tolerance.suffix().trim());
+                }
+                if let Some(measured) = &row.hole {
+                    hole["measured"] = json!(measured);
+                }
+                value["hole"] = hole;
             }
             if !row.located.is_empty() {
                 value["located"] = json!(row.located);

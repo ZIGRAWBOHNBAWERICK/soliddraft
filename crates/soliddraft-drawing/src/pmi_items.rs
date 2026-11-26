@@ -123,13 +123,13 @@ impl Body<'_> {
     fn round_edge(&self, feature: &[FaceId], view: &ViewContext, axis: Vec3) -> Option<(EdgeId, Attach, Vec3, bool)> {
         let mut best: Option<((bool, f64), EdgeId, Attach, Vec3)> = None;
         for face in feature {
-            let on_axis = self.axes.get(face)?.point;
             for edge in &self.faces.get(face)?.edges {
                 let curve = self.index.edge_curve(*edge)?;
                 let (attach, centre) = match curve {
                     Curve3::Line { .. } => continue,
                     Curve3::Circle { center, .. } | Curve3::Arc { center, .. } => (Attach::Centre, *center),
                     other => {
+                        let on_axis = self.axes.get(face)?.point;
                         let centre = on_axis + axis * (other.point_at(0.5) - on_axis).dot(axis);
                         (Attach::Point { at: centre }, centre)
                     }
@@ -493,7 +493,7 @@ impl Planner<'_> {
         let item = row.on_body.as_ref().ok_or("its faces are not on the body")?;
         let wanted = match &item.kind {
             PmiKind::Location { .. } => self.pass == Pass::Distances,
-            PmiKind::Size { .. } => self.pass == Pass::Sizes,
+            PmiKind::Size { .. } | PmiKind::Hole { .. } => self.pass == Pass::Sizes,
             PmiKind::Gdt { .. } => self.pass != Pass::Sizes,
             _ => self.pass == Pass::Rest,
         };
@@ -1094,7 +1094,7 @@ fn update(annotation: &mut Annotation, row: &PmiRow, symbols: &crate::library::S
                 d.value = crate::DimValue::Measured { value: *value };
             }
         }
-        (AnnotationKind::Note { text, .. }, PmiKind::Slot { .. }) => *text = row.callout(),
+        (AnnotationKind::Note { text, .. }, PmiKind::Slot { .. } | PmiKind::Hole { .. }) => *text = row.callout(),
         (
             AnnotationKind::Gdt { characteristic, tolerance, diameter, material, datums },
             PmiKind::Gdt { characteristic: c, tolerance: t, diameter: d, material: m, datums: refs, .. },

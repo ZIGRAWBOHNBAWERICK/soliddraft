@@ -10,7 +10,7 @@ fn add_params() -> Vec<(&'static str, Value)> {
     let faces = || array(string("A face name, such as Boss-Extrude1 · End cap"), "The faces of one feature");
     let two = |what| array(faces(), what);
     vec![
-        ("kind", string("datum, diameter, radius, distance, slot, tolerance or finish")),
+        ("kind", string("datum, diameter, radius, hole, distance, slot, tolerance or finish")),
         ("name", optional(string("The item's name; one is made up when left out"))),
         ("replaces", optional(string("The name of the item this one takes the place of"))),
         ("faces", optional(faces())),
@@ -104,7 +104,8 @@ pub(crate) fn commands() -> Vec<CommandSpec> {
         .undo(Undo::Replaces),
         row("pmi_add", "Add manufacturing information", "Put a datum, dimension, tolerance or finish on faces").agents(
             Agents::Tool,
-            "Adds one item to the part, or replaces the item named in replaces. A dimension takes no size: it reads the part's.",
+            "Adds an item or replaces the item named in replaces. Nominal sizes are measured from the part. \
+             Only specify drill depth, thread depth or limits when the user supplies them.",
             add_params,
         )
         .undo(Undo::Step),

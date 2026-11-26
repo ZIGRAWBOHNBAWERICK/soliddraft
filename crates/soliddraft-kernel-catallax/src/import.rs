@@ -473,6 +473,8 @@ impl CatallaxKernel {
                     print: MeshCache::new(),
                     previews: MeshCache::new(),
                     rendering: MeshCache::new(),
+                    area_prefix: Default::default(),
+                    areas: Default::default(),
                     topology: OnceLock::new(),
                     measured: OnceLock::new(),
                     mass: OnceLock::new(),

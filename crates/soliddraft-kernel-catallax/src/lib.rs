@@ -14,6 +14,7 @@ mod diagnostics;
 mod distance;
 mod drawing_queries;
 mod edge_control;
+mod face_areas;
 mod feature_pattern;
 mod field_preview;
 mod frames;
@@ -33,7 +34,7 @@ mod step;
 mod sweep;
 
 use std::collections::{BTreeMap, VecDeque};
-use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock, Weak};
 
 use catallax_app::{Error, EvaluatedApplicationOutcome, NumericalApplicationBody};
 
@@ -59,6 +60,7 @@ pub const CATALLAX_REVISION: &str = "6e4b5f89e1396d314e991b24fd777bac037526dd";
 pub struct CatallaxKernel {
     state: Mutex<State>,
     diagnostics: Option<diagnostics::Diagnostics>,
+    recent_areas: face_areas::Recent,
 }
 
 #[derive(Default)]
@@ -137,6 +139,8 @@ struct Solid {
     /// `None` where Catallax refused to sample a preview, so it is not asked again.
     previews: MeshCache<Option<PreviewMesh>>,
     rendering: MeshCache<catallax_numbers::OperationResult<catallax_mesh::DisplayMesh>>,
+    area_prefix: Weak<Solid>,
+    areas: face_areas::Areas,
     topology: OnceLock<KernelResult<Topology>>,
     measured: OnceLock<KernelResult<Topology>>,
     mass: OnceLock<KernelResult<MassProperties>>,
@@ -499,6 +503,7 @@ impl CatallaxKernel {
         Self {
             state: Mutex::new(State { capture: true, ..State::default() }),
             diagnostics: Some(diagnostics::Diagnostics::new(max_work)),
+            recent_areas: face_areas::Recent::default(),
         }
     }
 
@@ -507,7 +512,7 @@ impl CatallaxKernel {
     /// tests until Catallax returns them itself.
     #[cfg(feature = "numerical-stand-in")]
     pub fn with_numerical_stand_in(ops: &[OpKind]) -> Self {
-        Self { state: Mutex::new(State { stand_in: ops.to_vec(), ..State::default() }), diagnostics: None }
+        Self { state: Mutex::new(State { stand_in: ops.to_vec(), ..State::default() }), ..Self::default() }
     }
 
     /// Takes completed kernel calls and their portable recipe questions.
@@ -592,8 +597,19 @@ impl CatallaxKernel {
         step: Value,
     ) -> KernelResult<OpResult> {
         let (mut state, evaluated) = self.evaluate(state, op, inputs, context, step)?;
-        let Evaluated { app, key, handed, names, steps, mut history, parents, approximate_parent, seq, result } =
-            evaluated;
+        let Evaluated {
+            app,
+            key,
+            handed,
+            names,
+            steps,
+            mut history,
+            parents,
+            approximate_parent,
+            area_prefix,
+            seq,
+            result,
+        } = evaluated;
         // Catallax names faces by recipe step; the interface uses the caller's tag.
         let mut tags: BTreeMap<String, OpTag> = names
             .into_iter()
@@ -717,6 +733,8 @@ impl CatallaxKernel {
             print: MeshCache::new(),
             previews: MeshCache::new(),
             rendering: MeshCache::new(),
+            area_prefix,
+            areas: face_areas::Areas::default(),
             topology,
             measured: OnceLock::new(),
             mass: OnceLock::new(),
@@ -818,7 +836,7 @@ impl CatallaxKernel {
         });
         // A build made here is kept for hand-over outside the lock; an offered one is not.
         let kept = match &built {
-            Ok((Outcome::Exact(app), _, key, _)) if keeping && matches!(app.checkpoint, Exact::Checkpoint(_)) => {
+            Ok((Outcome::Exact(app), _, key, _, _)) if keeping && matches!(app.checkpoint, Exact::Checkpoint(_)) => {
                 Some((key.clone(), handover::write(app.checkpoint.built())?))
             }
             _ => None,
@@ -829,13 +847,29 @@ impl CatallaxKernel {
         if let (Some((key, bytes)), Some(list)) = (kept, state.kept.as_mut()) {
             list.push((key, bytes, None));
         }
-        if matches!(&built, Ok((Outcome::Exact(app), _, _, _)) if matches!(app.checkpoint, Exact::Checkpoint(_)))
-            || matches!(&built, Ok((Outcome::Approximate(_), _, _, _)))
+        if matches!(&built, Ok((Outcome::Exact(app), _, _, _, _)) if matches!(app.checkpoint, Exact::Checkpoint(_)))
+            || matches!(&built, Ok((Outcome::Approximate(_), _, _, _, _)))
         {
             state.fresh += 1;
         }
-        let (app, names, key, handed) = built?;
-        Ok((state, Evaluated { app, key, handed, names, steps, history, parents, approximate_parent, seq, result }))
+        let (app, names, key, handed, continued) = built?;
+        let area_prefix = if continued { prefix.as_ref().map(Arc::downgrade).unwrap_or_default() } else { Weak::new() };
+        Ok((
+            state,
+            Evaluated {
+                app,
+                key,
+                handed,
+                names,
+                steps,
+                history,
+                parents,
+                approximate_parent,
+                area_prefix,
+                seq,
+                result,
+            },
+        ))
     }
 
     /// Stores a Catallax-native step that reads the solid `base` and builds the chain.
@@ -921,6 +955,7 @@ struct Evaluated {
     history: BTreeMap<u64, HistoryRecord>,
     parents: Vec<Arc<Solid>>,
     approximate_parent: Option<Arc<approximate::Approximate>>,
+    area_prefix: Weak<Solid>,
     seq: u64,
     result: String,
 }
@@ -1143,9 +1178,10 @@ impl From<EvaluatedApplicationOutcome> for Outcome {
     }
 }
 
-/// A build: its result, the step ids of the caller's tags, its recipe key for a
-/// hand-over, and the topology another kernel computed when the build was offered.
-type BuildAnswer = (Outcome, BTreeMap<String, catallax_recipe::StepId>, String, Option<Arc<handover::HandedTopology>>);
+/// A build's outcome, step ids, hand-over key and topology, and whether it
+/// preserved the selected checkpoint's arena.
+type BuildAnswer =
+    (Outcome, BTreeMap<String, catallax_recipe::StepId>, String, Option<Arc<handover::HandedTopology>>, bool);
 
 /// Builds a legacy recipe, returning the body and the legacy step names' Catallax step ids.
 #[allow(clippy::too_many_arguments)]
@@ -1170,19 +1206,25 @@ fn build(
         if files.is_empty()
             && let Some(app) = AppBody::offered(offer.clone(), &converted.recipe)
         {
-            return Ok((Outcome::Exact(app), converted.steps, key, offer.topology.clone()));
+            return Ok((Outcome::Exact(app), converted.steps, key, offer.topology.clone(), false));
         }
         // An offer whose bytes cannot be read is passed over; the build is evaluated instead.
         if let Ok(built) = offer.built()
             && let Some(app) = AppBody::adopted(built, &converted.recipe)
         {
-            return Ok((Outcome::Exact(app), converted.steps, key, offer.topology.clone()));
+            return Ok((Outcome::Exact(app), converted.steps, key, offer.topology.clone(), false));
         }
     }
     // Earlier bodies remain immutable for undo, branches and concurrent queries.
     // Clone only the selected checkpoint, after releasing the body arena lock.
     // A handed-over body has no continuation; its prefix is rebuilt from the recipe.
     let prefix = prefix.and_then(|app| app.checkpoint.continuation());
+    // Locally built checkpoints use the same default decider policy below.
+    // These are the remaining conditions checked by Catallax's resume_state.
+    let continued = prefix.as_ref().is_some_and(|checkpoint| {
+        let prior = checkpoint.built().recipe();
+        converted.recipe.format == prior.format && converted.recipe.steps.starts_with(&prior.steps)
+    });
     // Catallax tries the exact construction first and returns a numerical body, built
     // within its stated tolerance, where only that construction succeeds. Either is kept
     // as Catallax built it, never turned into a refusal or the other kind.
@@ -1227,7 +1269,7 @@ fn build(
     };
     #[cfg(not(feature = "numerical-stand-in"))]
     let _ = stand_in;
-    Ok((outcome.into(), converted.steps, key, None))
+    Ok((outcome.into(), converted.steps, key, None, continued))
 }
 
 /// What a Catallax fillet refusal writes before each face of the input body the fillet
@@ -2437,6 +2479,7 @@ impl Kernel for CatallaxKernel {
     }
 
     fn topology(&self, body: BodyId) -> KernelResult<Topology> {
+        let reuse = !request::active() && self.diagnostics.as_ref().is_none_or(diagnostics::Diagnostics::uncapped);
         self.observe("topology", || {
             if let Some(field) = self.field(body)? {
                 return Ok(field.topology());
@@ -2461,11 +2504,20 @@ impl Kernel for CatallaxKernel {
                 };
                 return solid
                     .topology
-                    .get_or_init(|| convert::rendering_topology(&solid.app, &solid.ids, mesh))
+                    .get_or_init(|| {
+                        let areas = reuse.then(|| self.recent_areas.query(&solid));
+                        convert::rendering_topology(&solid.app, &solid.ids, mesh, areas.as_ref())
+                    })
                     .clone();
             }
             let mesh = solid.display(&MeshOptions::default(), "topology")?;
-            solid.topology.get_or_init(|| convert::topology(&solid.app, &solid.ids, &mesh, false)).clone()
+            solid
+                .topology
+                .get_or_init(|| {
+                    let areas = reuse.then(|| self.recent_areas.query(&solid));
+                    convert::topology(&solid.app, &solid.ids, &mesh, false, areas.as_ref())
+                })
+                .clone()
         })
     }
 
@@ -2477,6 +2529,7 @@ impl Kernel for CatallaxKernel {
     }
 
     fn measured_topology(&self, body: BodyId) -> KernelResult<Topology> {
+        let reuse = !request::active() && self.diagnostics.as_ref().is_none_or(diagnostics::Diagnostics::uncapped);
         self.observe("measured_topology", || {
             // An approximate body's measures are estimates on its display either way.
             if let Some(approximate) = self.approximate(body)? {
@@ -2487,7 +2540,13 @@ impl Kernel for CatallaxKernel {
                 return value.clone();
             }
             let mesh = solid.display(&MeshOptions::default(), "measured_topology")?;
-            solid.measured.get_or_init(|| convert::topology(&solid.app, &solid.ids, &mesh, true)).clone()
+            solid
+                .measured
+                .get_or_init(|| {
+                    let areas = reuse.then(|| self.recent_areas.query(&solid));
+                    convert::topology(&solid.app, &solid.ids, &mesh, true, areas.as_ref())
+                })
+                .clone()
         })
     }
 
@@ -2814,6 +2873,120 @@ mod tests {
         assert!(kernel.topology(body).is_ok(), "a mesh refusal must not poison the topology cache");
     }
 
+    fn area_proofs(kernel: &CatallaxKernel) -> usize {
+        kernel.take_diagnostics().unwrap()["calls"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .flat_map(|call| call["operation_log"]["operations"].as_array().unwrap())
+            .filter(|entry| entry["operation"] == "face_area")
+            .count()
+    }
+
+    fn uncached_rendering_topology(solid: &Solid) -> Topology {
+        let mesh = solid.rendering().unwrap();
+        let mesh = match mesh.as_ref() {
+            catallax_numbers::OperationResult::Proven(answer) => &answer.value,
+            catallax_numbers::OperationResult::Bounded(answer) => answer.value(),
+            catallax_numbers::OperationResult::Refused(refusal) => panic!("{refusal}"),
+        };
+        convert::rendering_topology(&solid.app, &solid.ids, mesh, None).unwrap()
+    }
+
+    #[test]
+    fn unchanged_face_areas_survive_a_cut_and_feed_both_topology_views() {
+        fn cut(kernel: &CatallaxKernel) -> (BodyId, BodyId) {
+            let block = contract::block(kernel);
+            let pin = contract::cylinder(kernel, Vec3::new(1.0, 1.0, 8.0), 0.5, 3.0);
+            let cut = kernel.boolean(&OpTag::new("cut"), BooleanOp::Subtract, block, pin).unwrap().body;
+            (block, cut)
+        }
+
+        let kernel = CatallaxKernel::with_operation_log();
+        let (stock, body) = cut(&kernel);
+        let solid = kernel.solid(body).unwrap();
+        let mesh = solid.display(&MeshOptions::default(), "test").unwrap();
+        let expected = convert::topology(&solid.app, &solid.ids, &mesh, false, None).unwrap();
+        let expected_measured = convert::topology(&solid.app, &solid.ids, &mesh, true, None).unwrap();
+        kernel.topology(stock).unwrap();
+        area_proofs(&kernel);
+
+        let actual = kernel.topology(body).unwrap();
+        assert_eq!(serde_json::to_vec(&actual).unwrap(), serde_json::to_vec(&expected).unwrap());
+        let recomputed = area_proofs(&kernel);
+        assert!(recomputed > 0 && recomputed < actual.faces.len());
+        let measured = kernel.measured_topology(body).unwrap();
+        assert_eq!(serde_json::to_vec(&measured).unwrap(), serde_json::to_vec(&expected_measured).unwrap());
+        assert_eq!(area_proofs(&kernel), 0);
+    }
+
+    #[test]
+    fn unchanged_face_areas_reuse_the_start_cap_of_a_rebuilt_spline_sweep() {
+        let kernel = CatallaxKernel::with_operation_log();
+        let profile = Profile::rectangle(Plane::XY, [9.0, -2.0].into(), 4.0, 2.0);
+        let sheet = kernel.create_body_from_profile(&OpTag::new("profile"), &profile).unwrap().body;
+        let sweep = |height| Sweep {
+            start: [0.0; 3],
+            orientation: SweepOrientation::Fixed,
+            segments: vec![PathSegment::Spline {
+                id: "rail".into(),
+                degree: 3,
+                control_points: vec![[0.0; 3], [2.0, 0.0, height], [2.0, 2.0, 2.0 * height], [0.0, 2.0, 3.0 * height]],
+                weights: vec![1.0; 4],
+                knots: vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+            }],
+        };
+        let run = |height| kernel.sweep(&OpTag::new("sweep"), sheet, &sweep(height)).unwrap().body;
+        let before = run(10.0);
+        kernel.topology(before).unwrap();
+        assert_eq!(area_proofs(&kernel), 6);
+
+        let after = run(20.0);
+        let solid = kernel.solid(after).unwrap();
+        let expected = uncached_rendering_topology(&solid);
+        let actual = kernel.topology(after).unwrap();
+        assert_eq!(area_proofs(&kernel), 5, "only the start cap of the revised sweep is unchanged");
+        assert!(serde_json::to_vec(&actual).unwrap() == serde_json::to_vec(&expected).unwrap());
+    }
+
+    #[test]
+    fn unchanged_face_areas_keep_loft_patch_enclosures_through_a_fillet() {
+        let kernel = CatallaxKernel::with_operation_log();
+        let section = |height, points: [Point2; 4]| Profile {
+            plane: Plane { origin: Vec3::new(0.0, 0.0, height), ..Plane::XY },
+            outer: Loop((0..4).map(|i| Segment::Line { from: points[i], to: points[(i + 1) % 4] }).collect()),
+            holes: vec![],
+        };
+        let point = |(x, y)| Point2::new(x, y);
+        let bottom = section(0.0, [(-0.1, -0.1), (0.1, -0.1), (0.1, 0.1), (-0.1, 0.1)].map(point));
+        let top = section(0.2, [(0.0, -0.1), (0.1, 0.0), (0.0, 0.2), (-0.2, 0.0)].map(point));
+        let a = kernel.create_body_from_profile(&OpTag::new("bottom"), &bottom).unwrap().body;
+        let b = kernel.create_body_from_profile(&OpTag::new("top"), &top).unwrap().body;
+        let loft = kernel.loft(&OpTag::new("loft"), &[a, b], LoftShape::Ruled).unwrap();
+        kernel.topology(loft.body).unwrap();
+        assert_eq!(area_proofs(&kernel), 6);
+
+        let edge = loft
+            .record
+            .edges
+            .created
+            .iter()
+            .copied()
+            .find(|&edge| {
+                kernel.edge_midpoint(loft.body, edge).is_ok_and(|point| {
+                    let [x, y, z] = point.coordinates.map(|coordinate| coordinate.value);
+                    Vec3::new(x, y, z).distance(Vec3::new(0.1, -0.05, 0.1)) < 1e-10
+                })
+            })
+            .unwrap();
+        let body = kernel.fillet(&OpTag::new("round"), loft.body, &[edge], 0.01).unwrap().body;
+        let solid = kernel.solid(body).unwrap();
+        let expected = uncached_rendering_topology(&solid);
+        let actual = kernel.topology(body).unwrap();
+        assert_eq!(area_proofs(&kernel), 5, "the fillet leaves two of the loft's side faces intact");
+        assert!(serde_json::to_vec(&actual).unwrap() == serde_json::to_vec(&expected).unwrap());
+    }
+
     #[test]
     fn face_carriers_match_the_topology_and_build_no_mesh() {
         let kernel = CatallaxKernel::new();
@@ -2876,7 +3049,7 @@ mod tests {
             let cut = kernel.boolean(&OpTag::new("cut"), BooleanOp::Subtract, base, tool).unwrap().body;
             let evidence = kernel.take_diagnostics().unwrap();
             let recipe = kernel.body_recipe(cut).unwrap();
-            let (Outcome::Exact(replayed), steps, _, _) =
+            let (Outcome::Exact(replayed), steps, ..) =
                 build(&recipe, OpKind::Subtract, &[], None, &Default::default(), None, &Default::default(), &[])
                     .unwrap()
             else {
@@ -2929,7 +3102,7 @@ mod tests {
                 assert!(!operations.iter().any(|op| &op["id"] == id), "rebuilt read-only target {id}: {evidence}");
             }
             let recipe = kernel.body_recipe(swept.body).unwrap();
-            let (Outcome::Exact(fresh), _, _, _) =
+            let (Outcome::Exact(fresh), ..) =
                 build(&recipe, OpKind::ExtrudeTo, &[], None, &Default::default(), None, &Default::default(), &[])
                     .unwrap()
             else {

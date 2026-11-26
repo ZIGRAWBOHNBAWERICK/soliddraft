@@ -704,7 +704,13 @@ fn proven_box(b: &catallax_measure::BoundingBox) -> Aabb {
 /// rebuild or a display never waits for a measurement. With it, they are Catallax's
 /// proven measures, for an explicit measurement request. Edge boxes are the edge's
 /// display polyline grown by its chord error either way, so they enclose the edge.
-pub(super) fn topology(app: &AppBody, ids: &Ids, mesh: &catallax_mesh::Mesh, proven: bool) -> KernelResult<Topology> {
+pub(super) fn topology(
+    app: &AppBody,
+    ids: &Ids,
+    mesh: &catallax_mesh::Mesh,
+    proven: bool,
+    areas: Option<&super::face_areas::Query<'_>>,
+) -> KernelResult<Topology> {
     topology_view(
         app,
         ids,
@@ -720,6 +726,7 @@ pub(super) fn topology(app: &AppBody, ids: &Ids, mesh: &catallax_mesh::Mesh, pro
             chord: catallax_mesh::MeshOptions::default().chord_tolerance.to_f64_nearest(),
         },
         proven,
+        areas,
     )
 }
 
@@ -727,6 +734,7 @@ pub(super) fn rendering_topology(
     app: &AppBody,
     ids: &Ids,
     mesh: &catallax_mesh::DisplayMesh,
+    areas: Option<&super::face_areas::Query<'_>>,
 ) -> KernelResult<Topology> {
     let chord = catallax_mesh::MeshOptions::default().chord_tolerance.to_f64_nearest();
     let geometry = &mesh.geometry;
@@ -741,6 +749,7 @@ pub(super) fn rendering_topology(
             chord,
         },
         false,
+        areas,
     )
 }
 
@@ -752,7 +761,13 @@ struct TopologyMesh<'a> {
     chord: f64,
 }
 
-fn topology_view(app: &AppBody, ids: &Ids, mesh: TopologyMesh<'_>, proven: bool) -> KernelResult<Topology> {
+fn topology_view(
+    app: &AppBody,
+    ids: &Ids,
+    mesh: TopologyMesh<'_>,
+    proven: bool,
+    areas: Option<&super::face_areas::Query<'_>>,
+) -> KernelResult<Topology> {
     let model = &app.checkpoint.built().model;
     let chord = mesh.chord;
     let accuracy = catallax_measure::Accuracy::default();
@@ -764,8 +779,8 @@ fn topology_view(app: &AppBody, ids: &Ids, mesh: TopologyMesh<'_>, proven: bool)
         let face = model.face(id);
         let triangles = &mesh.triangles[range.clone()];
         let (display_area, display_center) = display_face(mesh.positions, triangles);
-        let area = match super::numerical("face_area", |dec| catallax_measure::face_area(model, id, &accuracy, dec)) {
-            Ok(area) => midpoint(&area.value),
+        let area = match super::face_areas::measure(model, id, &accuracy, areas) {
+            Ok(area) => area,
             // Position-only cap cuts still have a measured rendering mesh, not exact area derivatives.
             Err(e) if display_only(&e) || (!proven && e.code == "intersect.fillet-cut-derivative") => display_area,
             Err(e) => return Err(query("face_area", e)),

@@ -1,0 +1,228 @@
+{
+ "format": "catallax-recipe/4",
+ "name": "P5 later cut: axis section",
+ "description": "Half the part removed by the plane z=0 through the axis, the symmetry plane of two fitted patches.",
+ "steps": [
+  {
+   "id": "section",
+   "op": "sketch",
+   "plane": {
+    "rotation": [
+     "1",
+     "0",
+     "0",
+     "0"
+    ],
+    "translation": [
+     "0",
+     "0",
+     "0"
+    ]
+   },
+   "loops": [
+    [
+     {
+      "kind": "line",
+      "id": "flange-bottom",
+      "to": [
+       "22",
+       "0"
+      ]
+     },
+     {
+      "kind": "line",
+      "id": "flange-rim",
+      "to": [
+       "22",
+       "5"
+      ]
+     },
+     {
+      "kind": "line",
+      "id": "flange-top",
+      "to": [
+       "12",
+       "5"
+      ]
+     },
+     {
+      "kind": "line",
+      "id": "body-wall",
+      "to": [
+       "12",
+       "30"
+      ]
+     },
+     {
+      "kind": "line",
+      "id": "body-top",
+      "to": [
+       "8",
+       "30"
+      ]
+     },
+     {
+      "kind": "line",
+      "id": "inner-wall",
+      "to": [
+       "8",
+       "0"
+      ]
+     }
+    ]
+   ]
+  },
+  {
+   "id": "housing",
+   "op": "revolve",
+   "profile": "section",
+   "axis": {
+    "point": [
+     "0",
+     "0",
+     "0"
+    ],
+    "direction": [
+     "0",
+     "1",
+     "0"
+    ]
+   },
+   "angle": "360"
+  },
+  {
+   "id": "drill",
+   "op": "cylinder",
+   "radius": "2",
+   "height": "7",
+   "pose": {
+    "rotation": [
+     "1",
+     "1",
+     "0",
+     "0"
+    ],
+    "translation": [
+     "17",
+     "6",
+     "0"
+    ]
+   }
+  },
+  {
+   "id": "sink",
+   "op": "cone",
+   "base_radius": "4",
+   "top_radius": "2",
+   "height": "2",
+   "pose": {
+    "rotation": [
+     "1",
+     "1",
+     "0",
+     "0"
+    ],
+    "translation": [
+     "17",
+     "5",
+     "0"
+    ]
+   }
+  },
+  {
+   "id": "countersink",
+   "op": "boolean",
+   "kind": "union",
+   "target": "drill",
+   "tool": "sink"
+  },
+  {
+   "id": "hole-pattern",
+   "op": "pattern",
+   "body": "countersink",
+   "layout": {
+    "circular": {
+     "axis": {
+      "point": [
+       "0",
+       "0",
+       "0"
+      ],
+      "direction": [
+       "0",
+       "1",
+       "0"
+      ]
+     },
+     "count": 4,
+     "angle": "90"
+    }
+   }
+  },
+  {
+   "id": "drilled",
+   "op": "boolean",
+   "kind": "subtract",
+   "target": "housing",
+   "tool": "hole-pattern"
+  },
+  {
+   "id": "filleted",
+   "op": "fillet",
+   "body": "drilled",
+   "radius": "2",
+   "edges": [
+    {
+     "between": [
+      {
+       "step": "housing",
+       "role": {
+        "side": {
+         "segment": "flange-top"
+        }
+       }
+      },
+      {
+       "step": "housing",
+       "role": {
+        "side": {
+         "segment": "body-wall"
+        }
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "tool",
+   "op": "block",
+   "size": [
+    "60",
+    "60",
+    "30"
+   ],
+   "pose": {
+    "rotation": [
+     "1",
+     "0",
+     "0",
+     "0"
+    ],
+    "translation": [
+     "-30",
+     "-10",
+     "0"
+    ]
+   }
+  },
+  {
+   "id": "later-cut",
+   "op": "boolean",
+   "kind": "subtract",
+   "target": "filleted",
+   "tool": "tool"
+  }
+ ],
+ "result": "later-cut"
+}

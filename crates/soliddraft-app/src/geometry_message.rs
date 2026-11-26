@@ -132,6 +132,8 @@ fn plain_message(message: &str) -> &str {
          different edges."
     } else if message.contains("fillet.") {
         "This fillet cannot be made on the selected edges. Reduce the radius or select different edges."
+    } else if message.contains("edit.work-stopgap") {
+        "This change took too long to build and was stopped. Try a simpler change."
     } else if message.contains("numbers.operation-budget") {
         "This operation reached its calculation limit. Try a simpler shape or suppress a feature."
     } else if message.contains("mass_properties") {
@@ -300,6 +302,10 @@ mod tests {
         assert_eq!(
             for_user("export_step failed: numbers.operation-budget: operation work allowance exhausted"),
             "This operation reached its calculation limit. Try a simpler shape or suppress a feature."
+        );
+        assert_eq!(
+            for_user("Cut-Extrude2: edit.work-stopgap: the edit did not finish within 1,000,000,000 work units"),
+            "This change took too long to build and was stopped. Try a simpler change."
         );
     }
 

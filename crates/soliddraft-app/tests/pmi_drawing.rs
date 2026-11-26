@@ -210,10 +210,14 @@ fn hole_requirements_round_trip_through_panel_tools_and_drawing() {
             }
             if let Some(depth) = thread {
                 for (label, value) in [("Thread", "M5x0.8-6H"), ("Usable thread depth", *depth)] {
+                    app.get_by_label(label).focus();
+                    app.run_steps(2);
                     app.get_by_label(label).type_text(value);
                     app.run_steps(2);
                 }
             }
+            app.get_by_label("Item name").focus();
+            app.run_steps(2);
             app.get_by_label("Item name").type_text(name);
             app.run_steps(2);
             app.get_by_label("Add").click();
@@ -226,6 +230,8 @@ fn hole_requirements_round_trip_through_panel_tools_and_drawing() {
             app.get_all_by_label("Edit").nth(i).unwrap().click();
             app.run_steps(2);
             let (field, value) = if thread.is_some() { ("Drill depth", "7") } else { ("Tolerance", "H7") };
+            app.get_by_label(field).focus();
+            app.run_steps(2);
             app.get_by_label(field).type_text(value);
             app.run_steps(2);
             app.get_by_label("Change").click();

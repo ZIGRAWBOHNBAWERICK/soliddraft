@@ -387,7 +387,9 @@ fn hole_roles_checked_nominals_and_independent_depths_survive_native_reopen() {
     ];
     let mut hole_ids = Vec::new();
     for (id, x, head, through) in cases {
-        let face = facing(&d, Vec3::Z).remove(0);
+        let entry = faces(&d, |face| face.normal == Some(Vec3::Z) && (face.centroid.z - 10.0).abs() < 1e-7);
+        let [entry] = entry.as_slice() else { panic!("expected one plate top face") };
+        let face = d.face_ref(*entry).unwrap();
         let feature = add(
             &mut d,
             FeatureKind::Hole(HoleFeature {

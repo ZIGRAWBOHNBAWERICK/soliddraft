@@ -76,7 +76,14 @@ pub struct SolidDraftApp {
     pub(super) reading: Option<Reading>,
     #[cfg(target_arch = "wasm32")]
     curve_change: Option<CurveChange>,
+    /// When the build owed now started to be owed, for [`SLOW_BUILD`].
+    #[cfg(not(target_arch = "wasm32"))]
+    build_started: Option<Instant>,
 }
+
+/// How long a desktop build runs before the window says so and offers Cancel.
+#[cfg(not(target_arch = "wasm32"))]
+const SLOW_BUILD: Duration = Duration::from_secs(1);
 
 #[cfg(target_arch = "wasm32")]
 type CurveTarget = (soliddraft_document::DocumentId, u64, Option<crate::graphics::CurvedSurfaces>);
@@ -234,6 +241,8 @@ impl SolidDraftApp {
             reading: None,
             #[cfg(target_arch = "wasm32")]
             curve_change: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            build_started: None,
         }
     }
 
@@ -779,22 +788,26 @@ impl SolidDraftApp {
         ctx.request_repaint();
     }
 
-    /// The browser builds the part away from the page's thread. While a build is owed the
-    /// page says so above the status bar and offers Cancel, which returns the part to its
-    /// last accepted revision. While the page reads exact geometry a command needs, it says
-    /// that instead, and Cancel drops the command.
-    #[cfg(target_arch = "wasm32")]
+    /// A build that is owed is said above the viewport's view bar, with Cancel, which returns the
+    /// part to its last accepted revision and stops the build. The browser builds in its
+    /// kernel worker and says so for every build. It also says so while it opens a part or
+    /// reads exact geometry a command needs; Cancel then drops the open or the command. The
+    /// desktop says so only once a build has run for [`SLOW_BUILD`], so a quick edit shows
+    /// nothing.
     fn building(&mut self, ctx: &egui::Context) {
-        let opening = self.opening.as_ref().map(|opening| opening.name.clone());
-        let reading = self.reading.is_some();
+        #[cfg(target_arch = "wasm32")]
+        let (opening, reading) = (self.opening.as_ref().map(|opening| opening.name.clone()), self.reading.is_some());
+        #[cfg(not(target_arch = "wasm32"))]
+        let (opening, reading) = (None::<String>, false);
         let pending = self.state.doc.proof_pending() || opening.is_some() || reading;
         let mut cancel = None;
         if !pending {
             self.state.cancelling = false;
         }
-        if pending {
-            egui::Area::new(egui::Id::new("browser-build"))
-                .anchor(egui::Align2::CENTER_BOTTOM, egui::vec2(0.0, -64.0))
+        if self.build_shown(ctx, pending) {
+            // Above the viewport's view bar and the chips over it, which it would cover.
+            egui::Area::new(egui::Id::new("build-owed"))
+                .anchor(egui::Align2::CENTER_BOTTOM, egui::vec2(0.0, -124.0))
                 .order(egui::Order::Foreground)
                 .show(ctx, |ui| {
                     egui::Frame::popup(ui.style()).show(ui, |ui| {
@@ -806,33 +819,72 @@ impl SolidDraftApp {
                                 None if self.state.cancelling => "Cancelling…".to_owned(),
                                 None => "Building the part".to_owned(),
                             });
-                            let button = ui.add_enabled(!self.state.cancelling, egui::Button::new("Cancel"));
-                            if button.clicked() {
-                                // Cancelling an open keeps the part on screen; cancelling a
-                                // read drops the actions waiting for it.
-                                if self.opening.take().is_none() && self.reading.take().is_none() {
-                                    self.state.cancelling = true;
-                                    self.state.push(AppAction::CancelBuild);
-                                }
+                            let enabled = !self.state.cancelling;
+                            let button = ui.add_enabled(enabled, egui::Button::new("Cancel"));
+                            // Named apart from a form's Cancel, which can be open at once.
+                            button.widget_info(|| {
+                                egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, "Cancel build")
+                            });
+                            if button.clicked() && !self.drop_open_or_read() {
+                                self.state.cancelling = true;
+                                self.state.push(AppAction::CancelBuild);
                             }
                             cancel = Some(button.rect.center());
                         });
                     });
                 });
         }
-        if let Some(reading) = &mut self.reading {
-            reading.drawn = true;
-            ctx.request_repaint();
+        #[cfg(target_arch = "wasm32")]
+        {
+            if let Some(reading) = &mut self.reading {
+                reading.drawn = true;
+                ctx.request_repaint();
+            }
+            let cancel = cancel.map(|centre| serde_json::json!({ "x": centre.x, "y": centre.y }));
+            let picking = self.state.viewport.picking;
+            crate::web::show_build(serde_json::json!({
+                "pending": pending,
+                "cancel": cancel,
+                "reading": reading,
+                "picking": picking,
+                "cancelling": self.state.cancelling,
+            }));
         }
-        let cancel = cancel.map(|centre| serde_json::json!({ "x": centre.x, "y": centre.y }));
-        let picking = self.state.viewport.picking;
-        crate::web::show_build(serde_json::json!({
-            "pending": pending,
-            "cancel": cancel,
-            "reading": reading,
-            "picking": picking,
-            "cancelling": self.state.cancelling,
-        }));
+        #[cfg(not(target_arch = "wasm32"))]
+        let _ = cancel;
+    }
+
+    /// Whether a build that is `pending` is said: in the browser always, on the desktop
+    /// once it has run for [`SLOW_BUILD`]. Until then the desktop wakes when it would be.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn build_shown(&mut self, ctx: &egui::Context, pending: bool) -> bool {
+        if !pending {
+            self.build_started = None;
+            return false;
+        }
+        let waited = self.build_started.get_or_insert_with(Instant::now).elapsed();
+        if waited < SLOW_BUILD {
+            ctx.request_repaint_after(SLOW_BUILD - waited);
+        }
+        waited >= SLOW_BUILD
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn build_shown(&mut self, _ctx: &egui::Context, pending: bool) -> bool {
+        pending
+    }
+
+    /// Drops a part the browser is opening, or the actions waiting for the page to read
+    /// exact geometry, which Cancel stops before any build. False when there is neither.
+    /// Cancelling an open keeps the part on screen.
+    #[cfg(target_arch = "wasm32")]
+    fn drop_open_or_read(&mut self) -> bool {
+        self.opening.take().is_some() || self.reading.take().is_some()
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn drop_open_or_read(&mut self) -> bool {
+        false
     }
 
     fn edit_suite_frame(&mut self, root: &mut egui::Ui) {
@@ -1026,7 +1078,6 @@ impl eframe::App for SolidDraftApp {
         // After the frame's controls are cleared, so the browser check finds its buttons.
         crate::assembly::show_choice(ctx, &mut self.state);
         crate::import::report::notice(ctx, &self.state);
-        #[cfg(target_arch = "wasm32")]
         self.building(ctx);
         crate::preferences::window(ctx, &mut self.preferences, &mut self.state);
         self.apply_actions(ctx);

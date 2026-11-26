@@ -46,6 +46,7 @@ mod history;
 mod ids;
 mod iges;
 mod import;
+mod interrupt;
 mod profile;
 pub mod scan;
 mod sweep;
@@ -66,6 +67,7 @@ pub use import::{
     PROPOSALS_FORMAT, PlanarRepairMethod, Proposal, ProposalSet, REPAIR_FORMAT, RepairChange, RepairDerivative,
     RepairRecord, RepairSource, ReplacedImport, SourceIncidence, question_id, question_index,
 };
+pub use interrupt::{Interrupt, Registration, Stopper};
 pub use profile::{BezierControls, Loop, PROFILE_JOIN_TOLERANCE, Profile, ProfileError, Segment};
 pub use sweep::{ArcTurn, PathSegment, Sweep, SweepOrientation};
 

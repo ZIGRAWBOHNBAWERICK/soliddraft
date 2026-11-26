@@ -1,6 +1,8 @@
 use soliddraft_kernel_api::*;
 use soliddraft_kernel_catallax::CatallaxKernel;
-use std::sync::{Condvar, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Condvar, Mutex};
+use std::time::{Duration, Instant};
 /// Catallax, with selected operations held back or refused on request.
 #[derive(Default)]
 pub struct Gated {
@@ -18,6 +20,12 @@ pub struct Rules {
     pub holding: Option<f64>,
     /// Extrusions this deep fail.
     pub refuse: Vec<f64>,
+    /// Extrusions this deep build until their interrupt stops them, as a build that
+    /// would run for minutes does, then fail. One with no interrupt gives up after a
+    /// minute and builds.
+    pub spin: Option<f64>,
+    /// How each spinning extrusion ended: true when its interrupt stopped it.
+    pub spun: Vec<bool>,
     /// Fillets with these radii fail.
     pub refuse_fillet_radii: Vec<f64>,
     /// No body can be meshed for display.
@@ -38,7 +46,36 @@ pub struct Rules {
 }
 
 impl Gated {
+    /// Spins as a long build does, until the interrupt over this thread's requests stops
+    /// it. A backend that can stop part way registers so; see [`Interrupt::register`].
+    fn spin(&self, distance: f64) -> KernelResult<()> {
+        let stopped = Arc::new(AtomicBool::new(false));
+        let registration = Interrupt::current().map(|interrupt| {
+            let stopped = stopped.clone();
+            interrupt.register(Box::new(move || stopped.store(true, Ordering::SeqCst)))
+        });
+        let give_up = Instant::now() + Duration::from_secs(60);
+        while !stopped.load(Ordering::SeqCst) && Instant::now() < give_up {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        drop(registration);
+        let stopped = stopped.load(Ordering::SeqCst);
+        self.rules.lock().unwrap().spun.push(stopped);
+        self.changed.notify_all();
+        if stopped {
+            return Err(KernelError::Failed {
+                op: OpKind::Extrude,
+                code: 0,
+                message: format!("depth {distance} stopped"),
+            });
+        }
+        Ok(())
+    }
+
     fn check_extrude(&self, distance: f64) -> KernelResult<()> {
+        if self.rules.lock().unwrap().spin == Some(distance) {
+            self.spin(distance)?;
+        }
         let mut rules = self.rules.lock().unwrap();
         if rules.hold_next {
             rules.hold_next = false;

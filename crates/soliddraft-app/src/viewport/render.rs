@@ -406,6 +406,20 @@ struct LineInstance {
     id: u32,
 }
 
+/// Camera-independent inputs for one triangle's apparent contour.
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct SilhouetteTriangle {
+    vertices: [SilhouetteVertex; 3],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct SilhouetteVertex {
+    position: [f32; 3],
+    normal: [f32; 3],
+}
+
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 struct TaggedVertex {
@@ -419,6 +433,7 @@ struct GpuBody {
     index_count: u32,
     lines: wgpu::Buffer,
     line_count: u32,
+    silhouettes: Option<(wgpu::Buffer, u32)>,
     points: wgpu::Buffer,
     point_count: u32,
     uniform: wgpu::Buffer,
@@ -514,6 +529,8 @@ const AO_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::R8Unorm;
 const EDGE_WIDTH: f32 = 1.3;
 /// How far edges are pulled toward the viewer, as a fraction of their distance.
 const EDGE_PULL: f32 = 0.003;
+
+const SCENE_SHADER: &str = concat!(include_str!("scene.wgsl"), "\n", include_str!("silhouette.wgsl"));
 /// Reversed depth: the near plane clears to 1 and far is 0.
 const DEPTH_CLEAR: f32 = 0.0;
 const DEPTH_COMPARE: wgpu::CompareFunction = wgpu::CompareFunction::GreaterEqual;
@@ -618,6 +635,7 @@ pub struct ViewportRenderer {
     hidden_edges_pipeline: wgpu::RenderPipeline,
     markers_pipeline: wgpu::RenderPipeline,
     edge_pipeline: wgpu::RenderPipeline,
+    silhouette_pipeline: wgpu::RenderPipeline,
     shadow_pipeline: wgpu::RenderPipeline,
     id_face_pipeline: wgpu::RenderPipeline,
     id_edge_pipeline: wgpu::RenderPipeline,
@@ -739,7 +757,10 @@ impl ViewportRenderer {
         samples: u32,
     ) -> Self {
         log::info!("viewport renderer: {} tier", tier.label());
-        let shader = device.create_shader_module(wgpu::include_wgsl!("scene.wgsl"));
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("viewport scene"),
+            source: wgpu::ShaderSource::Wgsl(SCENE_SHADER.into()),
+        });
 
         let stages = wgpu::ShaderStages::VERTEX_FRAGMENT;
         let uniform_entry = |binding: u32| wgpu::BindGroupLayoutEntry {
@@ -831,6 +852,13 @@ impl ViewportRenderer {
             array_stride: std::mem::size_of::<LineInstance>() as u64,
             step_mode: wgpu::VertexStepMode::Instance,
             attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Uint32],
+        };
+        let silhouette_layout = wgpu::VertexBufferLayout {
+            array_stride: std::mem::size_of::<SilhouetteTriangle>() as u64,
+            step_mode: wgpu::VertexStepMode::Instance,
+            attributes: &wgpu::vertex_attr_array![
+                0 => Float32x3, 1 => Float32x3, 2 => Float32x3, 3 => Float32x3, 4 => Float32x3, 5 => Float32x3,
+            ],
         };
         let point_layout = wgpu::VertexBufferLayout {
             array_stride: std::mem::size_of::<TaggedVertex>() as u64,
@@ -999,6 +1027,18 @@ impl ViewportRenderer {
             vs: "vs_edge",
             fs: Some("fs_edge"),
             buffers: &lines,
+            format: Some(COLOR_FORMAT),
+            blend: premul,
+            samples,
+            cull: None,
+            depth: depth(true),
+        });
+        let silhouette_pipeline = pipeline(Desc {
+            label: "silhouettes",
+            layout: &scene_layout,
+            vs: "vs_silhouette",
+            fs: Some("fs_edge"),
+            buffers: &[Some(silhouette_layout)],
             format: Some(COLOR_FORMAT),
             blend: premul,
             samples,
@@ -1212,6 +1252,7 @@ impl ViewportRenderer {
             hidden_edges_pipeline,
             markers_pipeline,
             edge_pipeline,
+            silhouette_pipeline,
             shadow_pipeline,
             id_face_pipeline,
             id_edge_pipeline,
@@ -1381,13 +1422,22 @@ impl ViewportRenderer {
                 id: e.pick,
             }));
         }
+        let mut silhouettes = Vec::new();
+        for triangle in mesh.indices.as_chunks::<3>().0 {
+            let [a, b, c] = triangle.map(|i| &verts[i as usize]);
+            if a.normal != b.normal || b.normal != c.normal {
+                silhouettes.push(SilhouetteTriangle {
+                    vertices: [a, b, c].map(|v| SilhouetteVertex { position: v.position, normal: v.normal }),
+                });
+            }
+        }
         let points: Vec<TaggedVertex> =
             mesh.corners.iter().map(|v| TaggedVertex { position: v.position.to_array(), id: v.pick }).collect();
-        let non_empty = |v: &[u8]| if v.is_empty() { vec![0u8; 32] } else { v.to_vec() };
+        let empty = [0u8; 32];
         let make = |label: &str, bytes: &[u8], usage| {
             device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some(label),
-                contents: &non_empty(bytes),
+                contents: if bytes.is_empty() { &empty } else { bytes },
                 usage,
             })
         };
@@ -1407,6 +1457,17 @@ impl ViewportRenderer {
             index_count: mesh.indices.len() as u32,
             lines: make("edges", bytemuck::cast_slice(&lines), wgpu::BufferUsages::VERTEX),
             line_count: lines.len() as u32,
+            silhouettes: (!silhouettes.is_empty()).then(|| {
+                log::debug!(
+                    target: "soliddraft_app::viewport::silhouette",
+                    "uploaded silhouette inputs for {} triangles",
+                    silhouettes.len(),
+                );
+                (
+                    make("silhouette triangles", bytemuck::cast_slice(&silhouettes), wgpu::BufferUsages::VERTEX),
+                    silhouettes.len() as u32,
+                )
+            }),
             points: make("points", bytemuck::cast_slice(&points), wgpu::BufferUsages::VERTEX),
             point_count: points.len() as u32,
             uniform,
@@ -1845,6 +1906,18 @@ impl ViewportRenderer {
                 self.assembly.draw_edges(&mut pass);
                 pass.set_bind_group(0, &self.globals_bind_group, &[]);
             }
+            // Only the shaded-with-edges view gets apparent contours. Wireframe
+            // continues to show topology, and contours are never pickable.
+            if show_faces && show_edges {
+                pass.set_pipeline(&self.silhouette_pipeline);
+                for body in &shown {
+                    if let Some((triangles, count)) = &body.silhouettes {
+                        pass.set_bind_group(1, &body.bind_group, &[]);
+                        pass.set_vertex_buffer(0, triangles.slice(..));
+                        pass.draw(0..6, 0..*count);
+                    }
+                }
+            }
             if show_edges || ghost.is_some() {
                 pass.set_pipeline(&self.edge_pipeline);
                 if show_edges {
@@ -2073,7 +2146,7 @@ mod tests {
     #[test]
     fn the_basic_tier_translates_to_webgl2() {
         use naga::back::glsl;
-        let module = naga::front::wgsl::parse_str(include_str!("scene.wgsl")).expect("scene.wgsl parses");
+        let module = naga::front::wgsl::parse_str(SCENE_SHADER).expect("scene and silhouette shaders parse");
         let info = naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::empty())
             .validate(&module)
             .expect("scene.wgsl validates");
@@ -2085,6 +2158,7 @@ mod tests {
             "vs_grid",
             "vs_plane",
             "vs_edge",
+            "vs_silhouette",
             "vs_shadow",
             "vs_id_face",
             "vs_id_edge",

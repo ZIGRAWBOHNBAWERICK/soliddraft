@@ -25,6 +25,11 @@ an imported STEP body keep format 3 until a reviewed migration.
 The document's first-changed-feature cache supplies earlier bodies for parameter edits,
 so both model-feature reuse and native prefix reuse apply to the changed suffix.
 
+During an edit, the document also offers the previous build at that feature as a
+checkpoint. The adapter uses it only when it shares more of the lowered recipe than
+the ordinary input does. Catallax rewinds it to the shared prefix before evaluating
+the changed suffix. The previous body contributes no names, topology or proof allowance.
+
 - Sweep accepts a closed polygon profile and a chain of lines and quarter, half and three-quarter arcs. A fixed-orientation path takes lines or one rational spline. Spline control points, positive weights and clamped knots persist through editing and reopening. Catallax refuses returning or crossing spline paths when it cannot prove the sweep is safe. A rotation-minimising path takes both, with stationary turns at perpendicular joins and at reversals, where the outgoing segment saves its turn axis. Quarter turns need an axis of rational length. A turning profile must lie on one side of the turn axis, in a plane through it. The adapter saves an arc as its centre, axis and turn and derives the exact end, emits native `path` and `sweep` definitions, keeps the profile at its authored placement and retains every segment identity. Faces keep every origin Catallax reports. A one-segment path keeps the face names saved before chains. Other motions and curved profiles show only Coming soon.
 - Profiles are definitions, not sheet bodies. The recipe runner now defers profiles and reports loop count, closure and tags without querying sheet topology, mass or validity. An extrusion or revolution creates and releases the backend's temporary profile handle. Direct sheet queries return `Unsupported`.
 - Empty boolean results cannot be expressed by the existing solid/sheet `BodyKind` and mandatory centroid. The adapter returns `Unsupported` without changing the operands. Opening every face by choice is the one empty result the interface carries: `shell_all_faces` returns no body, and the part has none after that feature.

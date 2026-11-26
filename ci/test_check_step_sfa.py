@@ -1,9 +1,12 @@
 """The NIST analyzer check must read SFA's output the way SFA writes it, and fail on findings."""
+import hashlib
 import importlib.util
+import io
 import json
 import pathlib
 import tempfile
 import unittest
+import zipfile
 from unittest import mock
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -116,6 +119,22 @@ class Expectation(unittest.TestCase):
             found['entities']['datum']['rows'][0][-1] = 'D'
             del found['items']['Bore finish']
             self.assertEqual(sfa.compare(found, self.expected), ['datum', 'items'])
+
+    def test_install_turns_dep_off_for_sfa_cl_even_with_the_toolkit_installed(self):
+        archive = io.BytesIO()
+        with zipfile.ZipFile(archive, 'w') as zipped:
+            zipped.writestr('sfa-cl.exe', b'MZ')
+        payload = archive.getvalue()
+        with tempfile.TemporaryDirectory() as directory, \
+                mock.patch.object(sfa, 'download', return_value=payload), \
+                mock.patch.object(sfa, 'SHA256', hashlib.sha256(payload).hexdigest()), \
+                mock.patch.object(sfa, 'ifcsvr_version', return_value=sfa.IFCSVR_VERSION), \
+                mock.patch.object(sfa.subprocess, 'run') as run, \
+                mock.patch('builtins.print'):
+            sfa.install(directory)
+        commands = [call.args[0] for call in run.call_args_list]
+        self.assertEqual(commands, [['powershell', '-NoProfile', '-NonInteractive', '-Command',
+                                     'Set-ProcessMitigation -Name sfa-cl.exe -Disable DEP']])
 
     def test_the_check_refuses_to_run_beside_excel(self):
         with mock.patch.object(sfa, 'excel_running', return_value=True):

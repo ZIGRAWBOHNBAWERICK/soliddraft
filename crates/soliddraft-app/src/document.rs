@@ -4976,6 +4976,10 @@ impl Document {
         true
     }
 
+    pub(crate) fn set_display_budget(&mut self, budget: soliddraft_tessellation::DeviceBudget) {
+        self.quality.set_budget(budget);
+    }
+
     /// The display levels: the level shown and wanted, and each level's parameters.
     pub fn display_quality(&self) -> &DisplayQuality {
         &self.quality

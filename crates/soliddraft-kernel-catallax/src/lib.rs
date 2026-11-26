@@ -3080,7 +3080,7 @@ mod tests {
             let evidence = kernel.take_diagnostics().unwrap();
             let recipe = kernel.body_recipe(cut).unwrap();
             let (Outcome::Exact(replayed), steps, ..) =
-                build(&recipe, OpKind::Subtract, &[], None, &Default::default(), None, &Default::default(), &[])
+                build(&recipe, OpKind::Subtract, &[], None, None, &Default::default(), None, &Default::default(), &[])
                     .unwrap()
             else {
                 panic!("an exact cut")
@@ -3104,6 +3104,39 @@ mod tests {
             assert_eq!(kernel.export_step(base, &options).unwrap(), original);
         }
         assert_eq!(kernel.mass_properties(base).unwrap().volume, 12000.0);
+    }
+
+    #[test]
+    fn edited_cut_reuses_a_profile_beyond_the_ordinary_input_checkpoint() {
+        let kernel = CatallaxKernel::with_operation_log();
+        let base = contract::block(&kernel);
+        let profile = Profile::rectangle(Plane::XY, Point2::new(0.0, 0.0), 4.0, 6.0);
+        let sheet = kernel.create_body_from_profile(&OpTag::new("profile"), &profile).unwrap();
+        let extrude = |distance| {
+            kernel.extrude(&OpTag::new("tool"), sheet.body, &Extrude { distance, direction: None }).unwrap().body
+        };
+        let cut = |tool| kernel.boolean(&OpTag::new("cut"), BooleanOp::Subtract, base, tool).unwrap().body;
+        let previous = cut(extrude(4.0));
+        let tool = extrude(5.0);
+        kernel.take_diagnostics().unwrap();
+        let mut edited = None;
+        kernel.with_rebuild_source(previous, &mut || edited = Some(cut(tool)));
+        let edited = edited.unwrap();
+
+        let evidence = kernel.take_diagnostics().unwrap();
+        let profile_step = format!("op_{}", sheet.record.seq);
+        let operations = evidence["calls"][0]["operation_log"]["operations"].as_array().unwrap();
+        assert!(!operations.iter().any(|op| op["id"] == profile_step), "replayed the unchanged profile: {evidence}");
+
+        let recipe = kernel.body_recipe(edited).unwrap();
+        let (Outcome::Exact(fresh), ..) =
+            build(&recipe, OpKind::Subtract, &[], None, None, &Default::default(), None, &Default::default(), &[])
+                .unwrap()
+        else {
+            panic!("an exact cut")
+        };
+        let options = StepOptions::default();
+        assert_eq!(kernel.export_step(edited, &options).unwrap(), step::export(&fresh, &options, None).unwrap());
     }
 
     #[test]
@@ -3133,7 +3166,7 @@ mod tests {
             }
             let recipe = kernel.body_recipe(swept.body).unwrap();
             let (Outcome::Exact(fresh), ..) =
-                build(&recipe, OpKind::ExtrudeTo, &[], None, &Default::default(), None, &Default::default(), &[])
+                build(&recipe, OpKind::ExtrudeTo, &[], None, None, &Default::default(), None, &Default::default(), &[])
                     .unwrap()
             else {
                 panic!("an exact sweep")

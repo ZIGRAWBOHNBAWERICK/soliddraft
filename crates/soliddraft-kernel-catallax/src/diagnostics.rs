@@ -37,6 +37,10 @@ impl Diagnostics {
         }
     }
 
+    pub(crate) fn uncapped(&self) -> bool {
+        self.max_work.is_none_or(|limit| limit == u64::MAX)
+    }
+
     /// Completed outer calls on this thread, independent of draining the evidence log.
     pub(crate) fn work_used(&self) -> Option<u64> {
         self.max_work

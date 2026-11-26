@@ -309,6 +309,23 @@
    "value": 8.0
   },
   {
+   "drawn": true,
+   "faces": [
+    {
+     "centroid": [
+      30.0,
+      25.0,
+      7.5
+     ],
+     "radius": 4.0,
+     "surface": "cylinder"
+    }
+   ],
+   "presentation": "Bore finish",
+   "type": "DimensionPresentation",
+   "value": 0.0
+  },
+  {
    "faces": [
     {
      "centroid": [
@@ -501,7 +518,6 @@
   }
  ],
  "not_read": [
-  "Bore finish (Ra 1.6): OpenCASCADE has no reader for the AP242 surface texture entity",
   "THRU on Hole diameter: an attribute of the feature, which OpenCASCADE reads on the product only"
  ],
  "notes": {

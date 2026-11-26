@@ -3,6 +3,9 @@
     "ci/fixtures/pmi/p1-bracket-pmi.json": [
       "step-opencascade"
     ],
+    "ci/fixtures/pmi/p1-bracket-sfa.json": [
+      "step-opencascade"
+    ],
     "ci/fixtures/pmi/p1-bracket-pmi.step": [
       "web"
     ]

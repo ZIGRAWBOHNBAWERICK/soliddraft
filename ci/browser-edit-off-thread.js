@@ -7,15 +7,15 @@
 // 2.7 to 7 s in headless Chrome. The page shows that it is building, with a Cancel that
 // returns the part to its last accepted state. In CI this is regression detection, not
 // the 250 ms target: that target is measured separately on a Mac's real GPU. A CI runner
-// is slower and varies from run to run, so the check times a fixed loop on the page's
-// thread first and flags a regression when the depth edit, Undo, Redo or the edit after
-// a cancel runs longer than 250 ms scaled by how much slower that loop ran than on the
-// Apple M3. A CPU loop does not calibrate GPU readback waits, so the scaled bound says
-// nothing about the target. Every step logs its absolute time. Opening the bracket and Cancel
-// are logged without a bound: under software rendering, as in CI, the viewport's pick
-// readback after the part changes under the pointer still takes up to 0.8 s there. The
-// check reads the build state through the read-only
-// `shown_build` export, which also places the Cancel button, and Details through
+// is slower and varies from run to run. A fixed loop scales the 250 ms regression
+// budget by how much slower the runner is than the Apple M3. The depth edit, Undo
+// and Redo check elapsed task time here. The edit after Cancel checks renderer
+// main-thread CPU and elapsed time in the Chrome trace (see check-edit-off-thread-trace.py).
+// Elapsed time gets extra headroom for waits that are not page CPU work.
+// Every step still logs elapsed task time. Opening the bracket and Cancel are only
+// logged: under software rendering the viewport's pick readback can take up to 0.8 s.
+// The check reads the build state through the read-only `shown_build` export,
+// which also places the Cancel button, and Details through
 // `shown_details`, since the canvas has no text. A cancelled edit's answer still comes
 // from the worker; the page drops the builds it carries, as its kernel trace records,
 // so the next edit builds from its own.
@@ -120,15 +120,19 @@ async function pointerOff(what) {
   await until(building, state => state && state.picking === false,
     `${what}: no frame saw the pointer outside the viewport`, 100);
 }
-async function window_(what, act, bounded = true) {
-  if (bounded) await pointerOff(what);
-  // Marks in the page's performance trace, so CI's trace shows each step's span.
-  await page.eval(`(() => { window.longTasks = []; performance.mark(${JSON.stringify(what + ': start')}); return true; })()`);
+async function window_(what, act, timing = 'wall') {
+  if (timing !== 'log') await pointerOff(what);
+  // The trace checker reads the same calibrated budget from the after-Cancel mark.
+  const start = JSON.stringify(what + ': start');
+  const options = timing === 'trace' ? `, { detail: ${bound} }` : '';
+  await page.eval(`(() => { window.longTasks = []; performance.mark(${start}${options}); return true; })()`);
   await act();
   await page.eval(`(() => { performance.mark(${JSON.stringify(what + ': end')}); return true; })()`);
   const longest = await page.eval(() => Math.max(0, ...window.longTasks));
-  console.log(`${what}: longest page task ${longest} ms${bounded ? ` (regression bound ${Math.round(bound)} ms)` : ' (logged, not bounded)'}`);
-  check(!bounded || longest < bound, `Regression: ${what} blocked the page for ${longest} ms, over ${Math.round(bound)} ms`);
+  const budget = timing === 'wall' ? `regression bound ${Math.round(bound)} ms`
+    : timing === 'trace' ? 'CPU and elapsed time checked in trace' : 'logged, not bounded';
+  console.log(`${what}: longest page task ${longest} ms (${budget})`);
+  check(timing !== 'wall' || longest < bound, `Regression: ${what} blocked the page for ${longest} ms, over ${Math.round(bound)} ms`);
 }
 async function depthShown(depth, what) {
   await until(async () => (await shown('shown_details')) || {}, drawn => drawn.title === 'Boss-Extrude1'
@@ -153,7 +157,7 @@ await window_('Opening the bracket', async () => {
   await page.press('Control+o');
   await until(() => page.eval(() => window.featureCount), count => count === 10, 'The bracket did not open');
   await idle('The opened bracket');
-}, false);
+}, 'log');
 
 // The options bar draws Details for a new selection only in a later frame, so the
 // pointer moves until a frame shows both, and Details is clicked where it was drawn.
@@ -214,14 +218,14 @@ await window_('Cancelling a depth edit', async () => {
   await until(dropped, Boolean, 'The cancelled edit was neither abandoned nor dropped, or its builds were offered');
   await idle('After the cancelled edit\'s answer');
   await depthShown(12, 'After the cancelled edit\'s answer');
-}, false);
+}, 'log');
 
 await window_('Changing the base depth to 16 mm after the cancel', async () => {
   const entered = await typeDepth(16);
   await until(building, state => state && state.pending, 'The edit after the cancel drew no busy state', 50);
   await usable('The edit after the cancel', entered);
   await depthShown(16, 'The edit after the cancel');
-});
+}, 'trace');
 
 await click(CLOSE);
 await click(INSPECT);

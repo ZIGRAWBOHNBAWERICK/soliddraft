@@ -181,7 +181,7 @@ The running selector and its map are the candidate policy; `--head` names the tr
 |---|---|---|
 | `ci/browser-journal.js` | `web` | Browser journal check in the web job |
 | `ci/browser-kernel-worker.js` | `web` | Browser kernel worker check in the web job |
-| `ci/browser-edit-off-thread.js` | `web` | Regression detection for browser bracket edits built off the page's thread, scaled to the runner |
+| `ci/browser-edit-off-thread.js`, `ci/check-edit-off-thread-trace.py` | `web` | Detect main-thread bracket builds with a runner-scaled budget. The first edit, Undo and Redo check elapsed time. After Cancel, the trace checks renderer main-thread CPU time and elapsed time, with 15% headroom for elapsed time. |
 | `ci/browser-part-check.js` | `web` | Browser Inspect > Check in the web job |
 | `ci/browser-preferences.mjs` | `web` | Browser preferences check in the web job |
 | `ci/browser-manufacturing-information.mjs`, `ci/fixtures/pmi/p1-bracket-pmi.step` | `web` | Browser check: Import STEP reads the bracket's manufacturing information, and the items stay on their faces through save and a fresh reopen |

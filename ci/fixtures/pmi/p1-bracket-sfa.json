@@ -1,0 +1,583 @@
+{
+ "entities": {
+  "annotation_curve_occurrence": {
+   "columns": ["name","styles","item"],
+   "rows": [
+    ["Bore finish","(1) presentation_style_assignment","geometric_curve_set"]
+   ]
+  },
+  "annotation_plane": {
+   "columns": ["name","styles","item","elements"],
+   "rows": [
+    ["","(1) presentation_style_assignment","plane","(1) draughting_callout"]
+   ]
+  },
+  "centre_of_symmetry": {
+   "columns": ["name","description","of_shape","product_definitional"],
+   "rows": [
+    ["","","product_definition_shape","FALSE"]
+   ]
+  },
+  "characterized_item_within_representation": {
+   "columns": ["name","description","item","rep"],
+   "rows": [
+    ["","","draughting_callout","draughting_model"]
+   ]
+  },
+  "composite_group_shape_aspect": {
+   "columns": ["name","description","of_shape","product_definitional"],
+   "rows": [
+    ["","pattern of features","product_definition_shape","TRUE"],
+    ["","pattern of features","product_definition_shape","TRUE"]
+   ]
+  },
+  "curve_style": {
+   "columns": ["name","curve_font","curve_width","curve_colour"],
+   "rows": [
+    ["","draughting_pre_defined_curve_font","0.25","draughting_pre_defined_colour"]
+   ]
+  },
+  "datum": {
+   "columns": ["name","description","of_shape","product_definitional","identification"],
+   "rows": [
+    ["","","product_definition_shape","FALSE","A"],
+    ["","","product_definition_shape","FALSE","B"],
+    ["","","product_definition_shape","FALSE","C"]
+   ]
+  },
+  "datum_feature": {
+   "columns": ["name","description","of_shape","product_definitional"],
+   "rows": [
+    ["","","product_definition_shape","TRUE"],
+    ["","","product_definition_shape","TRUE"],
+    ["","","product_definition_shape","TRUE"]
+   ]
+  },
+  "datum_reference_compartment": {
+   "columns": ["name","description","of_shape","product_definitional","base","modifiers"],
+   "rows": [
+    ["","","product_definition_shape","FALSE","datum",""],
+    ["","","product_definition_shape","FALSE","datum",""],
+    ["","","product_definition_shape","FALSE","datum",""],
+    ["","","product_definition_shape","FALSE","datum",""]
+   ]
+  },
+  "datum_system": {
+   "columns": ["name","description","of_shape","product_definitional","constituents"],
+   "rows": [
+    ["A","","product_definition_shape","FALSE","(1) datum_reference_compartment"],
+    ["A|B|C","","product_definition_shape","FALSE","(3) datum_reference_compartment"]
+   ]
+  },
+  "descriptive_representation_item": {
+   "columns": ["name","description"],
+   "rows": [
+    ["dimensional note","theoretical"],
+    ["dimensional note","theoretical"],
+    ["dimensional note","theoretical"],
+    ["dimensional note","theoretical"],
+    ["dimensional note","theoretical"],
+    ["dimensional note","theoretical"],
+    ["dimensional note","theoretical"],
+    ["dimensional note","theoretical"],
+    ["dimensional note","theoretical"],
+    ["dimensional note","theoretical"],
+    ["equivalent unicode string","DIM\\w150.1"],
+    ["equivalent unicode string","DIM\\w180.1"],
+    ["equivalent unicode string","DIM\\w20\\u+0.1\\n0\\u"],
+    ["equivalent unicode string","DIM\\w6\\u+0.1\\n0\\u"],
+    ["equivalent unicode string","DIM\\w[10]"],
+    ["equivalent unicode string","DIM\\w[10]"],
+    ["equivalent unicode string","DIM\\w[12]"],
+    ["equivalent unicode string","DIM\\w[12]"],
+    ["equivalent unicode string","DIM\\w[25]"],
+    ["equivalent unicode string","DIM\\w[30]"],
+    ["equivalent unicode string","DIM\\w[32]"],
+    ["equivalent unicode string","DIM\\w[32]"],
+    ["equivalent unicode string","DIM\\w[50]"],
+    ["equivalent unicode string","DIM\\w[50]"],
+    ["equivalent unicode string","DTM\\wA"],
+    ["equivalent unicode string","DTM\\wB"],
+    ["equivalent unicode string","DTM\\wC"],
+    ["equivalent unicode string","SRFAPAN\\w\\w\\w\\wRa 1.6"],
+    ["general tolerance","ISO 2768-m"],
+    ["hole depth","through"],
+    ["material","6061-T6"],
+    ["measuring method","ISO 4287"],
+    ["note 1","Break sharp edges"]
+   ]
+  },
+  "dimensional_characteristic_representation": {
+   "columns": ["dimension","representation"],
+   "rows": [
+    ["dimensional_location","shape_dimension_representation"],
+    ["dimensional_location","shape_dimension_representation"],
+    ["dimensional_location","shape_dimension_representation"],
+    ["dimensional_location","shape_dimension_representation"],
+    ["dimensional_location","shape_dimension_representation"],
+    ["dimensional_location","shape_dimension_representation"],
+    ["dimensional_location","shape_dimension_representation"],
+    ["dimensional_location","shape_dimension_representation"],
+    ["dimensional_location","shape_dimension_representation"],
+    ["dimensional_location","shape_dimension_representation"],
+    ["dimensional_location","shape_dimension_representation"],
+    ["dimensional_location","shape_dimension_representation"],
+    ["dimensional_location","shape_dimension_representation"],
+    ["dimensional_location","shape_dimension_representation"],
+    ["dimensional_size","shape_dimension_representation"],
+    ["dimensional_size","shape_dimension_representation"],
+    ["dimensional_size","shape_dimension_representation"],
+    ["dimensional_size","shape_dimension_representation"]
+   ]
+  },
+  "dimensional_location": {
+   "columns": ["name","description","relating_shape_aspect","related_shape_aspect"],
+   "rows": [
+    ["linear distance","","datum_feature","centre_of_symmetry"],
+    ["linear distance","","datum_feature","shape_aspect"],
+    ["linear distance","","datum_feature","shape_aspect"],
+    ["linear distance","","datum_feature","shape_aspect"],
+    ["linear distance","","datum_feature","shape_aspect"],
+    ["linear distance","","datum_feature","shape_aspect"],
+    ["linear distance","","datum_feature","shape_aspect"],
+    ["linear distance","","datum_feature","shape_aspect"],
+    ["linear distance","","datum_feature","shape_aspect"],
+    ["linear distance","","datum_feature","shape_aspect"],
+    ["linear distance","","datum_feature","shape_aspect"],
+    ["linear distance","","datum_feature","shape_aspect"],
+    ["linear distance","","shape_aspect","shape_aspect"],
+    ["linear distance outer outer","","shape_aspect","shape_aspect"]
+   ]
+  },
+  "dimensional_size": {
+   "columns": ["applies_to","name"],
+   "rows": [
+    ["composite_group_shape_aspect","diameter"],
+    ["composite_group_shape_aspect","radius"],
+    ["shape_aspect","diameter"],
+    ["shape_aspect","diameter"]
+   ]
+  },
+  "draughting_callout": {
+   "columns": ["name","contents"],
+   "rows": [
+    ["Bore finish","(1) annotation_curve_occurrence"]
+   ]
+  },
+  "draughting_model": {
+   "columns": ["name","items","context_of_items"],
+   "rows": [
+    ["","(1) annotation_plane","(geometric_representation_context) (global_uncertainty_assigned_context) (global_unit_assigned_context)"]
+   ]
+  },
+  "draughting_model_item_association": {
+   "columns": ["name","description","definition","used_representation","identified_item"],
+   "rows": [
+    ["Bore finish","","shape_aspect","draughting_model","draughting_callout"]
+   ]
+  },
+  "draughting_pre_defined_colour": {
+   "columns": ["name"],
+   "rows": [
+    ["black"]
+   ]
+  },
+  "draughting_pre_defined_curve_font": {
+   "columns": ["name"],
+   "rows": [
+    ["continuous"]
+   ]
+  },
+  "flatness_tolerance": {
+   "columns": ["name","description","magnitude","toleranced_shape_aspect"],
+   "rows": [
+    ["Flatness of A","","0.05 (length_measure_with_unit)","datum_feature"]
+   ]
+  },
+  "general_property": {
+   "columns": ["id","name","description"],
+   "rows": [
+    ["Bore finish","surface_condition",""],
+    ["general tolerance","general tolerance","user defined attribute"],
+    ["hole depth","hole depth","user defined attribute"],
+    ["material","material","user defined attribute"],
+    ["note 1","note 1","user defined attribute"]
+   ]
+  },
+  "general_property_association": {
+   "columns": ["name","description","base_definition","derived_definition"],
+   "rows": [
+    ["","","general_property","property_definition"],
+    ["","","general_property","property_definition"],
+    ["","","general_property","property_definition"],
+    ["","","general_property","property_definition"],
+    ["","","general_property","property_definition"]
+   ]
+  },
+  "geometric_curve_set": {
+   "columns": ["name","elements"],
+   "rows": [
+    ["surface roughness","(11) polyline"]
+   ]
+  },
+  "geometric_item_specific_usage": {
+   "columns": ["name","description","definition","used_representation","identified_item"],
+   "rows": [
+    ["","","datum_feature","advanced_brep_shape_representation","advanced_face"],
+    ["","","datum_feature","advanced_brep_shape_representation","advanced_face"],
+    ["","","datum_feature","advanced_brep_shape_representation","advanced_face"],
+    ["","","shape_aspect","advanced_brep_shape_representation","advanced_face"],
+    ["","","shape_aspect","advanced_brep_shape_representation","advanced_face"],
+    ["","","shape_aspect","advanced_brep_shape_representation","advanced_face"],
+    ["","","shape_aspect","advanced_brep_shape_representation","advanced_face"],
+    ["","","shape_aspect","advanced_brep_shape_representation","advanced_face"],
+    ["","","shape_aspect","advanced_brep_shape_representation","advanced_face"],
+    ["","","shape_aspect","advanced_brep_shape_representation","advanced_face"],
+    ["","","shape_aspect","advanced_brep_shape_representation","advanced_face"],
+    ["","","shape_aspect","advanced_brep_shape_representation","advanced_face"],
+    ["","","shape_aspect","advanced_brep_shape_representation","advanced_face"],
+    ["","","shape_aspect","advanced_brep_shape_representation","advanced_face"],
+    ["","","shape_aspect","advanced_brep_shape_representation","advanced_face"]
+   ]
+  },
+  "geometric_tolerance_with_datum_reference_and_position_tolerance": {
+   "columns": ["name","description","magnitude","toleranced_shape_aspect","datum_system"],
+   "rows": [
+    ["Bore position","","0.05 (length_measure_with_unit)","shape_aspect","(1) datum_system"],
+    ["Hole position","","0.2 (length_measure_with_unit)","composite_group_shape_aspect","(1) datum_system"]
+   ]
+  },
+  "id_attribute": {
+   "columns": ["attribute_value","identified_item"],
+   "rows": [
+    ["Bore diameter","dimensional_size"],
+    ["Bore finish","property_definition"],
+    ["Bore position/1 from B","dimensional_location"],
+    ["Bore position/1 from C","dimensional_location"],
+    ["Boss diameter","dimensional_size"],
+    ["Boss height","dimensional_location"],
+    ["Datum A","datum_feature"],
+    ["Datum B","datum_feature"],
+    ["Datum C","datum_feature"],
+    ["Hole diameter","dimensional_size"],
+    ["Hole position/1 from B","dimensional_location"],
+    ["Hole position/1 from C","dimensional_location"],
+    ["Hole position/2 from B","dimensional_location"],
+    ["Hole position/2 from C","dimensional_location"],
+    ["Hole position/3 from B","dimensional_location"],
+    ["Hole position/3 from C","dimensional_location"],
+    ["Hole position/4 from B","dimensional_location"],
+    ["Hole position/4 from C","dimensional_location"],
+    ["Slot height","dimensional_location"],
+    ["Slot/end radius","dimensional_size"],
+    ["Slot/length","dimensional_location"],
+    ["Slot/width","dimensional_location"]
+   ]
+  },
+  "integer_representation_item": {
+   "columns": ["name","the_value"],
+   "rows": [
+    ["number of annotations","1.0"],
+    ["number of composite tolerances","0.0"],
+    ["number of datum targets","0.0"],
+    ["number of datums","3.0"],
+    ["number of dimensional locations","14.0"],
+    ["number of dimensional sizes","4.0"],
+    ["number of geometric tolerances","4.0"],
+    ["number of semantic pmi elements","26.0"]
+   ]
+  },
+  "length_measure_with_unit": {
+   "columns": ["value_component","unit_component"],
+   "rows": [
+    ["-0.1","(length_unit) (si_unit)"],
+    ["-0.1","(length_unit) (si_unit)"],
+    ["-0.1","(length_unit) (si_unit)"],
+    ["0.0","(length_unit) (si_unit)"],
+    ["0.0","(length_unit) (si_unit)"],
+    ["0.0","(length_unit) (si_unit)"],
+    ["0.05","(length_unit) (si_unit)"],
+    ["0.05","(length_unit) (si_unit)"],
+    ["0.1","(length_unit) (si_unit)"],
+    ["0.1","(length_unit) (si_unit)"],
+    ["0.1","(length_unit) (si_unit)"],
+    ["0.1","(length_unit) (si_unit)"],
+    ["0.1","(length_unit) (si_unit)"],
+    ["0.1","(length_unit) (si_unit)"],
+    ["0.1","(length_unit) (si_unit)"],
+    ["0.2","(length_unit) (si_unit)"]
+   ]
+  },
+  "length_measure_with_unit_and_measure_representation_item": {
+   "columns": ["value_component","unit_component","name"],
+   "rows": [
+    ["10.0","(length_unit) (si_unit)","nominal value"],
+    ["10.0","(length_unit) (si_unit)","nominal value"],
+    ["12.0","(length_unit) (si_unit)","nominal value"],
+    ["12.0","(length_unit) (si_unit)","nominal value"],
+    ["15.0","(length_unit) (si_unit)","nominal value"],
+    ["16.0","(length_unit) (si_unit)","nominal value"],
+    ["18.0","(length_unit) (si_unit)","nominal value"],
+    ["20.0","(length_unit) (si_unit)","nominal value"],
+    ["25.0","(length_unit) (si_unit)","nominal value"],
+    ["3.0","(length_unit) (si_unit)","nominal value"],
+    ["30.0","(length_unit) (si_unit)","nominal value"],
+    ["32.0","(length_unit) (si_unit)","nominal value"],
+    ["32.0","(length_unit) (si_unit)","nominal value"],
+    ["4.0","(length_unit) (si_unit)","nominal value"],
+    ["50.0","(length_unit) (si_unit)","nominal value"],
+    ["50.0","(length_unit) (si_unit)","nominal value"],
+    ["6.0","(length_unit) (si_unit)","nominal value"],
+    ["8.0","(length_unit) (si_unit)","nominal value"]
+   ]
+  },
+  "limits_and_fits": {
+   "columns": ["form_variance","zone_variance","grade","source"],
+   "rows": [
+    ["H","hole","7",""]
+   ]
+  },
+  "measure_representation_item": {
+   "columns": ["name","value_component","unit_component"],
+   "rows": [
+    ["Ra","1.6","(length_unit) (si_unit)"],
+    ["polyline curve length","78.129591","(length_unit) (si_unit)"]
+   ]
+  },
+  "perpendicularity_tolerance": {
+   "columns": ["name","description","magnitude","toleranced_shape_aspect","datum_system"],
+   "rows": [
+    ["Perpendicularity of B","","0.1 (length_measure_with_unit)","datum_feature","(1) datum_system"]
+   ]
+  },
+  "plus_minus_tolerance": {
+   "columns": ["range","toleranced_dimension"],
+   "rows": [
+    ["limits_and_fits","dimensional_size"],
+    ["tolerance_value","dimensional_location"],
+    ["tolerance_value","dimensional_location"],
+    ["tolerance_value","dimensional_location"],
+    ["tolerance_value","dimensional_location"],
+    ["tolerance_value","dimensional_size"],
+    ["tolerance_value","dimensional_size"]
+   ]
+  },
+  "polyline": {
+   "columns": ["name","points"],
+   "rows": [
+    ["","(11) cartesian_point"],
+    ["","(2) cartesian_point"],
+    ["","(2) cartesian_point"],
+    ["","(2) cartesian_point"],
+    ["","(2) cartesian_point"],
+    ["","(2) cartesian_point"],
+    ["","(3) cartesian_point"],
+    ["","(3) cartesian_point"],
+    ["","(4) cartesian_point"],
+    ["","(7) cartesian_point"],
+    ["","(8) cartesian_point"]
+   ]
+  },
+  "presentation_style_assignment": {
+   "columns": ["styles"],
+   "rows": [
+    ["(1) curve_style"],
+    ["null"]
+   ]
+  },
+  "property_definition": {
+   "columns": ["name","description","definition"],
+   "rows": [
+    ["general tolerance","user defined attribute","product_definition"],
+    ["hole depth","user defined attribute","composite_group_shape_aspect"],
+    ["material","user defined attribute","product_definition"],
+    ["note 1","user defined attribute","product_definition"],
+    ["pmi validation property","","characterized_item_within_representation"],
+    ["pmi validation property","","datum"],
+    ["pmi validation property","","datum"],
+    ["pmi validation property","","datum"],
+    ["pmi validation property","","dimensional_location"],
+    ["pmi validation property","","dimensional_location"],
+    ["pmi validation property","","dimensional_location"],
+    ["pmi validation property","","dimensional_location"],
+    ["pmi validation property","","dimensional_location"],
+    ["pmi validation property","","dimensional_location"],
+    ["pmi validation property","","dimensional_location"],
+    ["pmi validation property","","dimensional_location"],
+    ["pmi validation property","","dimensional_location"],
+    ["pmi validation property","","dimensional_location"],
+    ["pmi validation property","","dimensional_location"],
+    ["pmi validation property","","dimensional_location"],
+    ["pmi validation property","","dimensional_location"],
+    ["pmi validation property","","dimensional_location"],
+    ["pmi validation property","","product_definition_shape"],
+    ["surface_condition","any process allowed","shape_aspect"]
+   ]
+  },
+  "property_definition_representation": {
+   "columns": ["definition","used_representation"],
+   "rows": [
+    ["property_definition","representation"],
+    ["property_definition","representation"],
+    ["property_definition","representation"],
+    ["property_definition","representation"],
+    ["property_definition","representation"],
+    ["property_definition","representation"],
+    ["property_definition","representation"],
+    ["property_definition","representation"],
+    ["property_definition","representation"],
+    ["property_definition","representation"],
+    ["property_definition","representation"],
+    ["property_definition","representation"],
+    ["property_definition","representation"],
+    ["property_definition","representation"],
+    ["property_definition","representation"],
+    ["property_definition","representation"],
+    ["property_definition","representation"],
+    ["property_definition","representation"],
+    ["property_definition","representation"],
+    ["property_definition","representation"],
+    ["property_definition","representation"],
+    ["property_definition","representation"],
+    ["property_definition","representation"],
+    ["property_definition","surface_texture_representation"]
+   ]
+  },
+  "representation": {
+   "columns": ["name","items","context_of_items"],
+   "rows": [
+    ["","(1) cartesian_point   (1) descriptive_representation_item   (1) measure_representation_item","(geometric_representation_context) (global_uncertainty_assigned_context) (global_unit_assigned_context)"],
+    ["","(1) descriptive_representation_item","(geometric_representation_context) (global_uncertainty_assigned_context) (global_unit_assigned_context)"],
+    ["","(1) descriptive_representation_item","(geometric_representation_context) (global_uncertainty_assigned_context) (global_unit_assigned_context)"],
+    ["","(1) descriptive_representation_item","(geometric_representation_context) (global_uncertainty_assigned_context) (global_unit_assigned_context)"],
+    ["","(1) descriptive_representation_item","(geometric_representation_context) (global_uncertainty_assigned_context) (global_unit_assigned_context)"],
+    ["","(1) descriptive_representation_item","(geometric_representation_context) (global_uncertainty_assigned_context) (global_unit_assigned_context)"],
+    ["","(1) descriptive_representation_item","(geometric_representation_context) (global_uncertainty_assigned_context) (global_unit_assigned_context)"],
+    ["","(1) descriptive_representation_item","(geometric_representation_context) (global_uncertainty_assigned_context) (global_unit_assigned_context)"],
+    ["","(1) descriptive_representation_item","(geometric_representation_context) (global_uncertainty_assigned_context) (global_unit_assigned_context)"],
+    ["","(1) descriptive_representation_item","(geometric_representation_context) (global_uncertainty_assigned_context) (global_unit_assigned_context)"],
+    ["","(1) descriptive_representation_item","(geometric_representation_context) (global_uncertainty_assigned_context) (global_unit_assigned_context)"],
+    ["","(1) descriptive_representation_item","(geometric_representation_context) (global_uncertainty_assigned_context) (global_unit_assigned_context)"],
+    ["","(1) descriptive_representation_item","(geometric_representation_context) (global_uncertainty_assigned_context) (global_unit_assigned_context)"],
+    ["","(1) descriptive_representation_item","(geometric_representation_context) (global_uncertainty_assigned_context) (global_unit_assigned_context)"],
+    ["","(1) descriptive_representation_item","(geometric_representation_context) (global_uncertainty_assigned_context) (global_unit_assigned_context)"],
+    ["","(1) descriptive_representation_item","(geometric_representation_context) (global_uncertainty_assigned_context) (global_unit_assigned_context)"],
+    ["","(1) descriptive_representation_item","(geometric_representation_context) (global_uncertainty_assigned_context) (global_unit_assigned_context)"],
+    ["","(1) descriptive_representation_item","(geometric_representation_context) (global_uncertainty_assigned_context) (global_unit_assigned_context)"],
+    ["","(1) descriptive_representation_item","(geometric_representation_context) (global_uncertainty_assigned_context) (global_unit_assigned_context)"],
+    ["","(1) descriptive_representation_item","(geometric_representation_context) (global_uncertainty_assigned_context) (global_unit_assigned_context)"],
+    ["","(1) descriptive_representation_item","(geometric_representation_context) (global_uncertainty_assigned_context) (global_unit_assigned_context)"],
+    ["","(1) descriptive_representation_item","(geometric_representation_context) (global_uncertainty_assigned_context) (global_unit_assigned_context)"],
+    ["","(8) integer_representation_item","(geometric_representation_context) (global_uncertainty_assigned_context) (global_unit_assigned_context)"]
+   ]
+  },
+  "shape_aspect": {
+   "columns": ["name","description","of_shape","product_definitional"],
+   "rows": [
+    ["","","product_definition_shape","TRUE"],
+    ["","","product_definition_shape","TRUE"],
+    ["","","product_definition_shape","TRUE"],
+    ["","","product_definition_shape","TRUE"],
+    ["","","product_definition_shape","TRUE"],
+    ["","","product_definition_shape","TRUE"],
+    ["","","product_definition_shape","TRUE"],
+    ["","","product_definition_shape","TRUE"],
+    ["","","product_definition_shape","TRUE"],
+    ["","","product_definition_shape","TRUE"],
+    ["","","product_definition_shape","TRUE"],
+    ["Bore finish","","product_definition_shape","TRUE"]
+   ]
+  },
+  "shape_aspect_deriving_relationship": {
+   "columns": ["name","description","relating_shape_aspect","related_shape_aspect"],
+   "rows": [
+    ["","","centre_of_symmetry","shape_aspect"],
+    ["","","centre_of_symmetry","shape_aspect"]
+   ]
+  },
+  "shape_aspect_relationship": {
+   "columns": ["name","description","relating_shape_aspect","related_shape_aspect"],
+   "rows": [
+    ["","","composite_group_shape_aspect","shape_aspect"],
+    ["","","composite_group_shape_aspect","shape_aspect"],
+    ["","","composite_group_shape_aspect","shape_aspect"],
+    ["","","composite_group_shape_aspect","shape_aspect"],
+    ["","","composite_group_shape_aspect","shape_aspect"],
+    ["","","composite_group_shape_aspect","shape_aspect"],
+    ["","","datum_feature","datum"],
+    ["","","datum_feature","datum"],
+    ["","","datum_feature","datum"]
+   ]
+  },
+  "shape_dimension_representation": {
+   "columns": ["name","items","context_of_items"],
+   "rows": [
+    ["","(1) (length_measure_with_unit) (measure_representation_item)","(geometric_representation_context) (global_uncertainty_assigned_context) (global_unit_assigned_context)"],
+    ["","(1) (length_measure_with_unit) (measure_representation_item)","(geometric_representation_context) (global_uncertainty_assigned_context) (global_unit_assigned_context)"],
+    ["","(1) (length_measure_with_unit) (measure_representation_item)","(geometric_representation_context) (global_uncertainty_assigned_context) (global_unit_assigned_context)"],
+    ["","(1) (length_measure_with_unit) (measure_representation_item)","(geometric_representation_context) (global_uncertainty_assigned_context) (global_unit_assigned_context)"],
+    ["","(1) (length_measure_with_unit) (measure_representation_item)","(geometric_representation_context) (global_uncertainty_assigned_context) (global_unit_assigned_context)"],
+    ["","(1) (length_measure_with_unit) (measure_representation_item)","(geometric_representation_context) (global_uncertainty_assigned_context) (global_unit_assigned_context)"],
+    ["","(1) (length_measure_with_unit) (measure_representation_item)","(geometric_representation_context) (global_uncertainty_assigned_context) (global_unit_assigned_context)"],
+    ["","(1) (length_measure_with_unit) (measure_representation_item)","(geometric_representation_context) (global_uncertainty_assigned_context) (global_unit_assigned_context)"],
+    ["","(1) descriptive_representation_item   (1) (length_measure_with_unit) (measure_representation_item)","(geometric_representation_context) (global_uncertainty_assigned_context) (global_unit_assigned_context)"],
+    ["","(1) descriptive_representation_item   (1) (length_measure_with_unit) (measure_representation_item)","(geometric_representation_context) (global_uncertainty_assigned_context) (global_unit_assigned_context)"],
+    ["","(1) descriptive_representation_item   (1) (length_measure_with_unit) (measure_representation_item)","(geometric_representation_context) (global_uncertainty_assigned_context) (global_unit_assigned_context)"],
+    ["","(1) descriptive_representation_item   (1) (length_measure_with_unit) (measure_representation_item)","(geometric_representation_context) (global_uncertainty_assigned_context) (global_unit_assigned_context)"],
+    ["","(1) descriptive_representation_item   (1) (length_measure_with_unit) (measure_representation_item)","(geometric_representation_context) (global_uncertainty_assigned_context) (global_unit_assigned_context)"],
+    ["","(1) descriptive_representation_item   (1) (length_measure_with_unit) (measure_representation_item)","(geometric_representation_context) (global_uncertainty_assigned_context) (global_unit_assigned_context)"],
+    ["","(1) descriptive_representation_item   (1) (length_measure_with_unit) (measure_representation_item)","(geometric_representation_context) (global_uncertainty_assigned_context) (global_unit_assigned_context)"],
+    ["","(1) descriptive_representation_item   (1) (length_measure_with_unit) (measure_representation_item)","(geometric_representation_context) (global_uncertainty_assigned_context) (global_unit_assigned_context)"],
+    ["","(1) descriptive_representation_item   (1) (length_measure_with_unit) (measure_representation_item)","(geometric_representation_context) (global_uncertainty_assigned_context) (global_unit_assigned_context)"],
+    ["","(1) descriptive_representation_item   (1) (length_measure_with_unit) (measure_representation_item)","(geometric_representation_context) (global_uncertainty_assigned_context) (global_unit_assigned_context)"]
+   ]
+  },
+  "surface_texture_representation": {
+   "columns": ["name","items","context_of_items"],
+   "rows": [
+    ["","(1) descriptive_representation_item   (1) measure_representation_item","(geometric_representation_context) (global_uncertainty_assigned_context) (global_unit_assigned_context)"]
+   ]
+  },
+  "tolerance_value": {
+   "columns": ["lower_bound","upper_bound"],
+   "rows": [
+    ["-0.1 (length_measure_with_unit)","0.1 (length_measure_with_unit)"],
+    ["-0.1 (length_measure_with_unit)","0.1 (length_measure_with_unit)"],
+    ["-0.1 (length_measure_with_unit)","0.1 (length_measure_with_unit)"],
+    ["0.0 (length_measure_with_unit)","0.1 (length_measure_with_unit)"],
+    ["0.0 (length_measure_with_unit)","0.1 (length_measure_with_unit)"],
+    ["0.0 (length_measure_with_unit)","0.1 (length_measure_with_unit)"]
+   ]
+  },
+  "tolerance_zone": {
+   "columns": ["name","description","of_shape","product_definitional","defining_tolerance","form"],
+   "rows": [
+    ["","","product_definition_shape","FALSE","(1) (geometric_tolerance_with_datum_reference) (position_tolerance)","tolerance_zone_form"],
+    ["","","product_definition_shape","FALSE","(1) (geometric_tolerance_with_datum_reference) (position_tolerance)","tolerance_zone_form"]
+   ]
+  },
+  "tolerance_zone_form": {
+   "columns": ["name"],
+   "rows": [
+    ["cylindrical or circular"],
+    ["cylindrical or circular"]
+   ]
+  }
+ },
+ "items": {
+  "Bore diameter": ["dimensional_size"],
+  "Bore finish": ["property_definition"],
+  "Bore position": ["dimensional_location","geometric_tolerance_with_datum_reference_and_position_tolerance"],
+  "Boss diameter": ["dimensional_size"],
+  "Boss height": ["dimensional_location"],
+  "Datum A": ["datum_feature"],
+  "Datum B": ["datum_feature"],
+  "Datum C": ["datum_feature"],
+  "Flatness of A": ["flatness_tolerance"],
+  "Hole diameter": ["dimensional_size"],
+  "Hole position": ["dimensional_location","geometric_tolerance_with_datum_reference_and_position_tolerance"],
+  "Perpendicularity of B": ["perpendicularity_tolerance"],
+  "Slot": ["dimensional_location","dimensional_size"],
+  "Slot height": ["dimensional_location"]
+ }
+}

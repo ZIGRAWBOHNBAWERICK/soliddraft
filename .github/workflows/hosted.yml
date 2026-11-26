@@ -428,6 +428,38 @@ jobs:
           path: ${{ runner.temp }}/blade-disk.json
           if-no-files-found: warn
 
+  # The NIST STEP File Analyzer reads the bracket files the OpenCASCADE job exported. SFA
+  # runs only on Windows, and its PMI reports need Excel, which hosted runners lack, so the
+  # check reads its syntax checker and its CSV files. SFA is a test tool; the application
+  # never runs it.
+  step-nist:
+    needs: [select, step-opencascade]
+    if: contains(fromJSON(needs.select.outputs.selected), 'step-opencascade')
+    name: Bracket STEP in the NIST STEP File Analyzer
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@v4
+        with:
+          name: bracket-export
+          path: ${{ runner.temp }}/bracket-export
+      - name: Install the NIST STEP File Analyzer and its STEP toolkit
+        run: python ci/check-step-sfa.py install "$RUNNER_TEMP/sfa"
+      - name: Read the P1 bracket's manufacturing information in the NIST STEP File Analyzer
+        run: |
+          pmi="$RUNNER_TEMP/bracket-export/pmi"
+          python ci/check-step-sfa.py "$RUNNER_TEMP/sfa/sfa-cl.exe" "$pmi/p1-bracket-pmi.step" ci/fixtures/pmi/p1-bracket-sfa.json
+          python ci/check-step-sfa.py "$RUNNER_TEMP/sfa/sfa-cl.exe" "$pmi/p1-bracket-pmi-reexported.step" ci/fixtures/pmi/p1-bracket-sfa.json
+
   build-linux:
     needs: select
     if: contains(fromJSON(needs.select.outputs.selected), 'test-linux')
@@ -1515,7 +1547,7 @@ jobs:
   gate:
     name: ${{ github.event_name == 'workflow_dispatch' && inputs.refresh_catallax_views && 'Baseline refresh gate' || github.event_name == 'workflow_dispatch' && inputs.benchmark_linux_only && 'Linux benchmark gate' || 'Merge gate' }}
     if: always()
-    needs: [select, lint, kernel, step-opencascade, build-linux, partition-linux, test-linux, build-macos, test-macos, test-windows, web, msrv, interactive-linux, interactive-macos, application-loop, packaging]
+    needs: [select, lint, kernel, step-opencascade, step-nist, build-linux, partition-linux, test-linux, build-macos, test-macos, test-windows, web, msrv, interactive-linux, interactive-macos, application-loop, packaging]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

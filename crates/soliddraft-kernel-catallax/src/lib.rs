@@ -1230,11 +1230,15 @@ fn build(
     }
     // An offered or adopted body has no local continuation; don't read its geometry for one.
     // Locally built checkpoints use the same default decider policy below.
-    let prefix = prefix.and_then(|app| app.checkpoint.continuation()).filter(|checkpoint| {
+    let prefix = prefix.and_then(|app| app.checkpoint.continuation());
+    let (leading, keeps_arena) = prefix.map_or((0, false), |checkpoint| {
         let prior = checkpoint.built().recipe();
-        converted.recipe.format == prior.format && converted.recipe.steps.starts_with(&prior.steps)
+        if converted.recipe.format != prior.format {
+            return (0, false);
+        }
+        let shared = prior.steps.iter().zip(&converted.recipe.steps).take_while(|(old, new)| old == new).count();
+        (shared, shared == prior.steps.len())
     });
-    let leading = prefix.map_or(0, |checkpoint| checkpoint.built().recipe().steps.len());
     let retained = retained.and_then(|app| app.checkpoint.continuation()).filter(|checkpoint| {
         let prior = checkpoint.built().recipe();
         prior.format == converted.recipe.format
@@ -1242,7 +1246,7 @@ fn build(
             && prior.steps.iter().zip(&converted.recipe.steps).take(leading + 1).all(|(old, new)| old == new)
     });
     // Face areas can follow the ordinary input's arena, not a rewound edit source.
-    let continued = retained.is_none() && prefix.is_some();
+    let continued = retained.is_none() && keeps_arena;
     let prefix = retained.or(prefix).cloned();
     // Catallax tries the exact construction first and returns a numerical body, built
     // within its stated tolerance, where only that construction succeeds. Either is kept

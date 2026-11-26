@@ -2883,6 +2883,16 @@ mod tests {
             .count()
     }
 
+    fn uncached_rendering_topology(solid: &Solid) -> Topology {
+        let mesh = solid.rendering().unwrap();
+        let mesh = match mesh.as_ref() {
+            catallax_numbers::OperationResult::Proven(answer) => &answer.value,
+            catallax_numbers::OperationResult::Bounded(answer) => answer.value(),
+            catallax_numbers::OperationResult::Refused(refusal) => panic!("{refusal}"),
+        };
+        convert::rendering_topology(&solid.app, &solid.ids, mesh, None).unwrap()
+    }
+
     #[test]
     fn unchanged_face_areas_survive_a_cut_and_feed_both_topology_views() {
         fn cut(kernel: &CatallaxKernel) -> (BodyId, BodyId) {
@@ -2933,15 +2943,47 @@ mod tests {
 
         let after = run(20.0);
         let solid = kernel.solid(after).unwrap();
-        let mesh = solid.rendering().unwrap();
-        let mesh = match mesh.as_ref() {
-            catallax_numbers::OperationResult::Proven(answer) => &answer.value,
-            catallax_numbers::OperationResult::Bounded(answer) => answer.value(),
-            catallax_numbers::OperationResult::Refused(refusal) => panic!("{refusal}"),
-        };
-        let expected = convert::rendering_topology(&solid.app, &solid.ids, mesh, None).unwrap();
+        let expected = uncached_rendering_topology(&solid);
         let actual = kernel.topology(after).unwrap();
         assert_eq!(area_proofs(&kernel), 5, "only the start cap of the revised sweep is unchanged");
+        assert!(serde_json::to_vec(&actual).unwrap() == serde_json::to_vec(&expected).unwrap());
+    }
+
+    #[test]
+    fn unchanged_face_areas_keep_loft_patch_enclosures_through_a_fillet() {
+        let kernel = CatallaxKernel::with_operation_log();
+        let section = |height, points: [Point2; 4]| Profile {
+            plane: Plane { origin: Vec3::new(0.0, 0.0, height), ..Plane::XY },
+            outer: Loop((0..4).map(|i| Segment::Line { from: points[i], to: points[(i + 1) % 4] }).collect()),
+            holes: vec![],
+        };
+        let point = |(x, y)| Point2::new(x, y);
+        let bottom = section(0.0, [(-0.1, -0.1), (0.1, -0.1), (0.1, 0.1), (-0.1, 0.1)].map(point));
+        let top = section(0.2, [(0.0, -0.1), (0.1, 0.0), (0.0, 0.2), (-0.2, 0.0)].map(point));
+        let a = kernel.create_body_from_profile(&OpTag::new("bottom"), &bottom).unwrap().body;
+        let b = kernel.create_body_from_profile(&OpTag::new("top"), &top).unwrap().body;
+        let loft = kernel.loft(&OpTag::new("loft"), &[a, b], LoftShape::Ruled).unwrap();
+        kernel.topology(loft.body).unwrap();
+        assert_eq!(area_proofs(&kernel), 6);
+
+        let edge = loft
+            .record
+            .edges
+            .created
+            .iter()
+            .copied()
+            .find(|&edge| {
+                kernel.edge_midpoint(loft.body, edge).is_ok_and(|point| {
+                    let [x, y, z] = point.coordinates.map(|coordinate| coordinate.value);
+                    Vec3::new(x, y, z).distance(Vec3::new(0.1, -0.05, 0.1)) < 1e-10
+                })
+            })
+            .unwrap();
+        let body = kernel.fillet(&OpTag::new("round"), loft.body, &[edge], 0.01).unwrap().body;
+        let solid = kernel.solid(body).unwrap();
+        let expected = uncached_rendering_topology(&solid);
+        let actual = kernel.topology(body).unwrap();
+        assert_eq!(area_proofs(&kernel), 5, "the fillet leaves two of the loft's side faces intact");
         assert!(serde_json::to_vec(&actual).unwrap() == serde_json::to_vec(&expected).unwrap());
     }
 

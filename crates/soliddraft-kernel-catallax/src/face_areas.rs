@@ -85,10 +85,11 @@ impl Query<'_> {
             for (&old_face, old_area) in previous.iter() {
                 let old_id = other.ids.faces[&old_face];
                 if &other.ids.face_origins[&old_id] == origins
-                    && same_face(old, old_face, current, face)
-                    && (old_id == own_id
-                        && old_area.reads.as_ref().is_some_and(|reads| current.unchanged_where_read(old, reads))
-                        || local_area(old, old_face) && local_area(current, face))
+                    && (same_face(old, old_face, current, face)
+                        && (old_id == own_id
+                            && old_area.reads.as_ref().is_some_and(|reads| current.unchanged_where_read(old, reads))
+                            || local_area(old, old_face) && local_area(current, face))
+                        || same_patch_area(old, old_face, current, face))
                 {
                     areas.insert(face, Proven { area: old_area.area, reads: None });
                     return Ok(old_area.area);
@@ -115,8 +116,13 @@ impl Query<'_> {
         watched.watch();
         let answer = prove(&watched, face, accuracy)?;
         let area = midpoint(&answer.value);
-        // A best-effort enclosure at the proof cap is not reusable.
-        if !answer.marks.iter().any(|mark| mark.code == "measure.accuracy-not-reached") {
+        // Checked patch area has a fixed, per-query quadrature allowance.
+        // Preparation caches change the charged work, not where refinement
+        // stops. Retain its certified interval's midpoint even if that
+        // allowance ran out before the requested width was met.
+        if !answer.marks.iter().any(|mark| mark.code == "measure.accuracy-not-reached")
+            || patch_cells(current, &face).is_some() && local_area(current, face)
+        {
             areas.insert(face, Proven { area, reads: Some(watched.watched()) });
         }
         Ok(area)
@@ -149,6 +155,33 @@ fn same_face(a: &Model, af: FaceId, b: &Model, bf: FaceId) -> bool {
     let mut edges = Vec::new();
     let mut vertices = Vec::new();
     compare_cover(a, af, b, bf, |x, y| trims(a, x, b, y, &mut edges, &mut vertices))
+}
+
+fn patch_cells<'a>(model: &'a Model, face: &'a FaceId) -> Option<&'a [FaceId]> {
+    let cells = model.face_chart_cover(*face).unwrap_or_else(|| std::slice::from_ref(face));
+    (!cells.is_empty()
+        && cells.iter().all(|&cell| {
+            matches!(model.geom().surface(model.face(cell).surface), Surface::BSpline(SplineSupport::RationalPatch(_)))
+        }))
+    .then_some(cells)
+}
+
+// Fillet may publish the retained chart directly rather than through its old
+// logical face. Catallax integrates the same ordered charts either way, but
+// checks for a fitted rail on the current logical boundary before doing so.
+fn same_patch_area(a: &Model, af: FaceId, b: &Model, bf: FaceId) -> bool {
+    let (Some(left), Some(right)) = (patch_cells(a, &af), patch_cells(b, &bf)) else {
+        return false;
+    };
+    let mut faces = Vec::new();
+    let mut edges = Vec::new();
+    let mut vertices = Vec::new();
+    left.len() == right.len()
+        && left.iter().zip(right).all(|(&x, &y)| pair(&mut faces, x, y) && trims(a, x, b, y, &mut edges, &mut vertices))
+        && local_area(a, af)
+        && local_area(b, bf)
+        && !face_has_fitted_rail(a, af)
+        && !face_has_fitted_rail(b, bf)
 }
 
 // For a plane with explicit vertices and native lines or splines, and for a
@@ -233,6 +266,15 @@ fn fitted_rail(model: &Model, edge: EdgeId) -> bool {
                 )
             )
         })
+    })
+}
+
+fn face_has_fitted_rail(model: &Model, face: FaceId) -> bool {
+    model.face(face).loops.iter().any(|id| {
+        matches!(model.loop_(*id), Loop::Coedges(coedges) if coedges.iter().any(|id| {
+            let edge = model.coedge(*id).edge;
+            matches!(model.geom().curve(model.edge(edge).curve), Curve::BSpline(_)) && fitted_rail(model, edge)
+        }))
     })
 }
 

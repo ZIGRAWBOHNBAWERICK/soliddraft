@@ -2672,6 +2672,9 @@ pub struct Proposal {
     /// Where it stands.
     pub status: ProposalStatus,
     builds: Option<PreparedBuilds>,
+    /// The open part it was made for, and that part's name then. It applies only there.
+    part: soliddraft_document::DocumentId,
+    part_name: String,
 }
 
 /// A tool call a proposal runs when it is applied: one of the assistant's manufacturing
@@ -2729,12 +2732,13 @@ impl ProposalBook {
     }
 
     /// A proposal's status as the part stands now: an applied proposal whose features
-    /// are gone (the user pressed Undo in the Edit menu) reads as undone.
+    /// are gone (the user pressed Undo in the Edit menu) reads as undone. Another part's
+    /// proposal keeps the status it has.
     pub fn status(&self, doc: &Document, id: &str) -> Option<ProposalStatus> {
         let p = self.get(id)?;
         Some(match &p.status {
             ProposalStatus::Applied { made, .. }
-                if !made.is_empty() && made.iter().all(|f| doc.feature(*f).is_none()) =>
+                if p.part == doc.instance() && !made.is_empty() && made.iter().all(|f| doc.feature(*f).is_none()) =>
             {
                 ProposalStatus::Undone
             }
@@ -2758,6 +2762,8 @@ impl ProposalBook {
         call: ProposedCall,
         origin: Caller,
     ) -> Result<(String, Value), String> {
+        // What Apply runs is what the card was made from.
+        let call = crate::pmi::assistant::normalized(call);
         let card = crate::pmi::assistant::card(doc, &call)?;
         self.next += 1;
         let id = format!("P{}", self.next);
@@ -2772,25 +2778,36 @@ impl ProposalBook {
             preview: Preview::default(),
             status: ProposalStatus::Pending,
             builds: None,
+            part: doc.instance(),
+            part_name: doc.name.clone(),
         });
         Ok((id, json!(effect)))
     }
 
-    /// Fails unless the proposal waits for the user.
-    fn check_pending(&self, i: usize) -> Result<(), String> {
+    /// Fails unless the proposal waits for the user and was made for `doc`: the
+    /// proposals outlive a switch to another part tab, and one part's card must not
+    /// change or export another part.
+    fn check_pending(&self, doc: &Document, i: usize) -> Result<(), String> {
         let p = &self.proposals[i];
         match p.status {
-            ProposalStatus::Pending => Ok(()),
-            ProposalStatus::Applied { .. } => Err(format!("{} is already applied", p.id)),
-            ProposalStatus::Undone => Err(format!("{} was applied and undone; propose it again", p.id)),
-            ProposalStatus::Discarded => Err(format!("{} was discarded", p.id)),
+            ProposalStatus::Pending => {}
+            ProposalStatus::Applied { .. } => return Err(format!("{} is already applied", p.id)),
+            ProposalStatus::Undone => return Err(format!("{} was applied and undone; propose it again", p.id)),
+            ProposalStatus::Discarded => return Err(format!("{} was discarded", p.id)),
         }
+        if p.part != doc.instance() {
+            return Err(format!(
+                "{} was made for another part ({}), not this one. Apply it in that part's tab, or discard it.",
+                p.id, p.part_name
+            ));
+        }
+        Ok(())
     }
 
-    /// The tool call of a pending proposal.
-    pub(crate) fn pending_call(&self, id: &str) -> Result<ProposedCall, String> {
+    /// The tool call of a pending proposal made for `doc`.
+    pub(crate) fn pending_call(&self, doc: &Document, id: &str) -> Result<ProposedCall, String> {
         let i = self.index(id)?;
-        self.check_pending(i)?;
+        self.check_pending(doc, i)?;
         self.proposals[i].call.clone().ok_or_else(|| format!("{} runs recipe lines, not a tool", self.proposals[i].id))
     }
 
@@ -2800,7 +2817,7 @@ impl ProposalBook {
     /// manufacturing package writes files and opens a drawing, which the app does
     /// (`pmi::assistant::apply_package`).
     pub fn apply_call(&mut self, doc: &mut Document, id: &str) -> Result<Value, String> {
-        let call = self.pending_call(id)?;
+        let call = self.pending_call(doc, id)?;
         let i = self.index(id)?;
         let p = &self.proposals[i];
         if call.tool == crate::pmi::assistant::PACKAGE {
@@ -2830,7 +2847,7 @@ impl ProposalBook {
     /// Marks a pending proposal applied once the app has run its call, which left
     /// nothing on the part's undo stack.
     pub(crate) fn applied_by_app(&mut self, doc: &mut Document, id: &str) -> Result<(), String> {
-        let call = self.pending_call(id)?;
+        let call = self.pending_call(doc, id)?;
         let i = self.index(id)?;
         let p = &self.proposals[i];
         doc.log_note(format!("apply {} \"{}\" ({})", p.id, p.summary, p.origin_text()));
@@ -2894,6 +2911,8 @@ impl ProposalBook {
             preview: run.preview,
             builds: Some(run.builds),
             status: ProposalStatus::Pending,
+            part: doc.instance(),
+            part_name: doc.name.clone(),
         });
         Ok((id, run.effect))
     }
@@ -2902,7 +2921,7 @@ impl ProposalBook {
     /// failure the part is put back as it was.
     pub fn apply(&mut self, doc: &mut Document, id: &str) -> Result<Vec<FeatureId>, String> {
         let i = self.index(id)?;
-        self.check_pending(i)?;
+        self.check_pending(doc, i)?;
         if self.proposals[i].call.is_some() {
             return self.apply_call(doc, id).map(|_| Vec::new());
         }

@@ -2971,7 +2971,7 @@ mod tests {
             let cut = kernel.boolean(&OpTag::new("cut"), BooleanOp::Subtract, base, tool).unwrap().body;
             let evidence = kernel.take_diagnostics().unwrap();
             let recipe = kernel.body_recipe(cut).unwrap();
-            let (Outcome::Exact(replayed), steps, _, _) =
+            let (Outcome::Exact(replayed), steps, ..) =
                 build(&recipe, OpKind::Subtract, &[], None, &Default::default(), None, &Default::default(), &[])
                     .unwrap()
             else {
@@ -3024,7 +3024,7 @@ mod tests {
                 assert!(!operations.iter().any(|op| &op["id"] == id), "rebuilt read-only target {id}: {evidence}");
             }
             let recipe = kernel.body_recipe(swept.body).unwrap();
-            let (Outcome::Exact(fresh), _, _, _) =
+            let (Outcome::Exact(fresh), ..) =
                 build(&recipe, OpKind::ExtrudeTo, &[], None, &Default::default(), None, &Default::default(), &[])
                     .unwrap()
             else {

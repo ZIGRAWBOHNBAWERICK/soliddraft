@@ -17,7 +17,8 @@ the reading does not depend on the file's numbering. `--print` writes the whole 
 the form the check compares; an expectation keeps the manufacturing information types.
 
 `install <dir>` downloads the pinned SFA, checks its checksum, puts sfa-cl.exe in <dir>,
-and installs SFA's IFCsvr STEP toolkit without a window when it is missing.
+installs SFA's IFCsvr STEP toolkit without a window when it is missing, and turns DEP off
+for sfa-cl.exe, which Windows Server would otherwise end at its first exception.
 
 sfa-cl.exe ends every running Excel before it reads a file, so this check refuses to run
 while Excel is open. This checker belongs to CI. The application never runs SFA.
@@ -216,7 +217,26 @@ def install(directory):
     print(f"SFA {VERSION} command-line version in {directory}")
     if ifcsvr_version() >= IFCSVR_VERSION:
         print(f"IFCsvr {ifcsvr_version()} is installed")
-        return
+    else:
+        install_ifcsvr(directory)
+    allow_sfa_exceptions()
+
+
+def allow_sfa_exceptions():
+    """Turns data execution prevention (DEP) off for sfa-cl.exe.
+
+    sfa-cl.exe loads its COM extension from memory, not as a mapped library, and DEP
+    rejects that code's exception handlers. An exception the extension would catch then
+    ends SFA at "Connecting to IFCsvr" with 0xE06D7363. Windows Server, as on hosted
+    runners, turns DEP on for every program; a Windows desktop does not, which is why SFA
+    runs there as it is. The setting applies to programs named sfa-cl.exe only.
+    """
+    subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command",
+                    "Set-ProcessMitigation -Name sfa-cl.exe -Disable DEP"], check=True, timeout=120)
+    print("DEP is off for sfa-cl.exe")
+
+
+def install_ifcsvr(directory):
     # On its first run SFA copies the toolkit's installer to its temporary folder, opens it
     # in a window and exits. Close that window and install the toolkit without one.
     probe = directory / "first-run.step"

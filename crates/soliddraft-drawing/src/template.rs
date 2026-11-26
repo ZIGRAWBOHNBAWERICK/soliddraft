@@ -32,11 +32,14 @@ pub struct Template {
 }
 
 impl Template {
-    /// The four built-in templates, read from the data files in `templates/`: ISO A3
-    /// and A4 (first angle) and ANSI A and B (third angle). ISO A3 comes first and is
-    /// the default.
+    /// The built-in templates, with the default ISO A3 template first.
     pub fn builtin() -> Vec<Template> {
-        ["iso-a3", "iso-a4", "ansi-a", "ansi-b"].into_iter().map(|id| crate::library::template(id).template()).collect()
+        ["iso-a3", "iso-a4", "ansi-a", "ansi-b"]
+            .into_iter()
+            .map(crate::library::template)
+            .chain(crate::library::library().staged_templates())
+            .map(crate::library::TemplateFile::template)
+            .collect()
     }
 
     /// The built-in template with id `id`.

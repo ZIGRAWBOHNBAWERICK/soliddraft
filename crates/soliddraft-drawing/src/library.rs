@@ -50,6 +50,8 @@ pub struct TemplateFile {
     /// The general notes block, if the template has one.
     #[serde(default)]
     pub notes: Option<NotesDef>,
+    #[serde(skip)]
+    staged: bool,
 }
 
 fn default_units() -> String {
@@ -452,6 +454,17 @@ pub struct Library {
     pub problems: Vec<String>,
 }
 
+impl Library {
+    /// Templates offered in the drawing picker.
+    pub fn selectable_templates(&self) -> impl Iterator<Item = &TemplateFile> {
+        self.templates.iter().filter(|t| !t.staged)
+    }
+
+    pub(crate) fn staged_templates(&self) -> impl Iterator<Item = &TemplateFile> {
+        self.templates.iter().filter(|t| t.staged)
+    }
+}
+
 /// Template and style files from File locations, read when the library is first built.
 static USER_FILES: OnceLock<(Vec<PathBuf>, Vec<PathBuf>)> = OnceLock::new();
 
@@ -493,6 +506,46 @@ const TEMPLATE_SOURCES: [(&str, &str); 4] = [
     ("ansi-b", include_str!("../templates/ansi-b.toml")),
     ("ansi-a", include_str!("../templates/ansi-a.toml")),
 ];
+
+#[derive(Deserialize)]
+struct PaperPresets {
+    presets: Vec<PaperPreset>,
+}
+
+#[derive(Deserialize)]
+struct PaperPreset {
+    base: String,
+    id: String,
+    name: String,
+    paper: Paper,
+    columns: u32,
+    rows: u32,
+}
+
+impl PaperPreset {
+    fn template(self, templates: &[TemplateFile]) -> TemplateFile {
+        let base = templates
+            .iter()
+            .find(|t| t.id == self.base)
+            .unwrap_or_else(|| panic!("large-paper.toml: unknown base {} for {}", self.base, self.id));
+        TemplateFile {
+            id: self.id,
+            name: self.name,
+            standard: base.standard.clone(),
+            projection: base.projection.clone(),
+            units: base.units.clone(),
+            style: base.style.clone(),
+            paper: self.paper,
+            margins: base.margins,
+            zones: ZonesDef { columns: self.columns, rows: self.rows, ..base.zones },
+            lines: base.lines,
+            scales: base.scales.clone(),
+            title_block: base.title_block.clone(),
+            notes: base.notes.clone(),
+            staged: true,
+        }
+    }
+}
 const STYLE_SOURCES: [(&str, &str); 2] =
     [("iso", include_str!("../styles/iso.toml")), ("asme", include_str!("../styles/asme.toml"))];
 const HATCH_SOURCE: &str = include_str!("../styles/hatch.toml");
@@ -514,6 +567,10 @@ pub fn library() -> &'static Library {
             fonts: parse::<FontsFile>("fonts", FONTS_SOURCE).fonts,
             problems: Vec::new(),
         };
+        let large: PaperPresets = parse("large-paper", include_str!("../templates/large-paper.toml"));
+        for preset in large.presets {
+            lib.templates.push(preset.template(&lib.templates));
+        }
         if let Some((templates, styles)) = USER_FILES.get() {
             add_user(styles, &mut lib.styles, |s: &StyleFile| &s.id, &mut lib.problems);
             add_user(templates, &mut lib.templates, |t: &TemplateFile| &t.id, &mut lib.problems);
@@ -653,7 +710,7 @@ mod tests {
     #[test]
     fn data_files_parse_and_match_the_model_templates() {
         let lib = library();
-        let ids: Vec<&str> = lib.templates.iter().map(|t| t.id.as_str()).collect();
+        let ids: Vec<&str> = lib.selectable_templates().map(|t| t.id.as_str()).collect();
         assert_eq!(ids, ["iso-a3", "iso-a4", "ansi-b", "ansi-a"]);
         for t in &lib.templates {
             let model = t.template();

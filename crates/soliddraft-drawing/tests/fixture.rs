@@ -2,6 +2,9 @@
 
 use std::path::PathBuf;
 
+use soliddraft_drawing::display::layout_sheet;
+use soliddraft_drawing::export;
+use soliddraft_drawing::file::{self, FileMeta};
 use soliddraft_drawing::fixture::bracket_a3;
 use soliddraft_drawing::{
     AnnotationState, Command, ContentHash, DocKind, DocRef, Drawing, DrawingError, Projection, Template, ViewId,
@@ -69,15 +72,67 @@ fn fixture_views_fit_the_sheet() {
 
 #[test]
 fn builtin_templates() {
+    use Projection::{FirstAngle, ThirdAngle};
+
     let all = Template::builtin();
-    let ids: Vec<_> = all.iter().map(|t| t.id.as_str()).collect();
-    assert_eq!(ids, ["iso-a3", "iso-a4", "ansi-a", "ansi-b"]);
-    assert_eq!(all[0].projection, Projection::FirstAngle);
-    assert_eq!(all[3].projection, Projection::ThirdAngle);
-    assert_eq!((all[2].size.width_mm, all[2].size.height_mm), (279.4, 215.9));
+    let sizes: Vec<_> = all.iter().map(|t| (t.id.as_str(), t.size.width_mm, t.size.height_mm, t.projection)).collect();
+    assert_eq!(
+        sizes,
+        [
+            ("iso-a3", 420.0, 297.0, FirstAngle),
+            ("iso-a4", 297.0, 210.0, FirstAngle),
+            ("ansi-a", 279.4, 215.9, ThirdAngle),
+            ("ansi-b", 431.8, 279.4, ThirdAngle),
+            ("iso-a2", 594.0, 420.0, FirstAngle),
+            ("iso-a1", 841.0, 594.0, FirstAngle),
+            ("iso-a0", 1189.0, 841.0, FirstAngle),
+            ("ansi-c", 558.8, 431.8, ThirdAngle),
+            ("ansi-d", 863.6, 558.8, ThirdAngle),
+            ("ansi-e", 1117.6, 863.6, ThirdAngle),
+        ]
+    );
     assert!(Template::by_id("nope").is_none());
     for t in &all {
         assert!(t.title_block.fields.iter().any(|f| f.link == "${title}"));
+    }
+}
+
+#[test]
+fn large_and_small_presets_reopen_and_export_at_paper_size() {
+    for (id, width, height) in [("iso-a0", 1189.0, 841.0), ("ansi-e", 1117.6, 863.6), ("iso-a4", 297.0, 210.0)] {
+        let model = DocRef::unbound(DocKind::Part, "pump.json", ContentHash::of_bytes(b"pump"));
+        let mut drawing = Drawing::new(model, &Template::by_id(id).unwrap());
+        let title = "Pump housing";
+        apply(&mut drawing, &Command::SetTitleField { sheet: 0, key: "title".into(), value: title.into() }).unwrap();
+        let bytes = file::to_bytes(&drawing, &FileMeta::new("paper test", drawing.meta.units)).unwrap();
+        let (back, _) = file::from_bytes(&bytes).unwrap();
+        let sheet = &back.sheets[0];
+        assert_eq!(sheet.template.as_str(), id);
+        assert_eq!((sheet.size.width_mm, sheet.size.height_mm), (width, height), "{id}");
+        assert_eq!(sheet.format_overrides["title"], title);
+
+        let list = layout_sheet(&back, 0);
+        let svg = export::svg(&list);
+        assert!(svg.contains(&format!(r#"width="{width}mm" height="{height}mm""#)), "{id}");
+        assert!(svg.contains(&format!(">{title}</text>")), "{id}");
+
+        let pdf = export::pdf(std::slice::from_ref(&list), &export::PdfInfo::default()).unwrap();
+        let pdf = lopdf::Document::load_mem(&pdf).unwrap();
+        let page = pdf.get_pages()[&1];
+        let media_box = pdf.get_dictionary(page).unwrap().get(b"MediaBox").unwrap().as_array().unwrap();
+        assert_eq!(media_box.len(), 4);
+        for (value, mm) in media_box[2..].iter().zip([width, height]) {
+            let points = f64::from(value.as_float().unwrap());
+            assert!((points - mm * 72.0 / 25.4).abs() < 0.01, "{id}: {points} pt");
+        }
+        assert!(pdf.extract_text(&[1]).unwrap().contains(title), "{id}");
+
+        let dxf = export::dxf(&list).unwrap();
+        let dxf = dxf::Drawing::load(&mut dxf.as_slice()).unwrap();
+        let extents = &dxf.header.maximum_drawing_extents;
+        assert_eq!((extents.x, extents.y), (width, height), "{id}");
+        assert!(dxf.entities().any(|e| matches!(&e.specific, dxf::entities::EntityType::Text(t) if t.value == title)));
+        assert!(dxf.entities().any(|e| matches!(&e.specific, dxf::entities::EntityType::Line(_))));
     }
 }
 

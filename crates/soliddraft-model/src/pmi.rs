@@ -292,6 +292,7 @@ fn measure_hole(
                     })
             })
     };
+    let end_matches = |rim: &HoleRim| if *through { opening(rim) } else { closed(rim) };
     let (entry_z, end, head_nominals) = if let Some(head) = head {
         let surface = match head.kind {
             HoleHeadKind::Counterbore => SurfaceKind::Cylinder,
@@ -338,16 +339,14 @@ fn measure_hole(
             },
         };
         (outer.z, end, Some(values))
-    } else if *through && pilot_rims.iter().all(opening) {
-        (pilot_rims[0].z, &pilot_rims[1], None)
-    } else if !*through && opening(&pilot_rims[0]) && closed(&pilot_rims[1]) {
+    } else if opening(&pilot_rims[0]) && end_matches(&pilot_rims[1]) {
         (pilot_rims[0].z, &pilot_rims[1], None)
     } else if !*through && opening(&pilot_rims[1]) && closed(&pilot_rims[0]) {
         (pilot_rims[1].z, &pilot_rims[0], None)
     } else {
         return Err("The pilot does not have the selected through or blind extent.".into());
     };
-    if (*through && !opening(end)) || (!*through && !closed(end)) {
+    if head.is_some() && !end_matches(end) {
         return Err("The pilot does not have the selected through or blind extent.".into());
     }
     let depth_mm = (end.z - entry_z).abs();

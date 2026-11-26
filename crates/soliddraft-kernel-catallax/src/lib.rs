@@ -49,7 +49,7 @@ use serde_json::{Value, json};
 use soliddraft_kernel_api::*;
 
 use request::RequestPolicy;
-pub use request::{APP_REQUEST_WORK, APP_WORK_TARGET, RequestWork, with_request_allowance};
+pub use request::{APP_REQUEST_WORK, APP_WORK_TARGET, EDIT_STOPGAP_WORK, RequestWork, with_request_allowance};
 
 /// The pinned Catallax application entry revision.
 pub const CATALLAX_REVISION: &str = "a59f3aa9a07a217b0c963d68c97865a9804619ee";
@@ -1190,6 +1190,9 @@ fn build(
     let (outcome, work) = RequestPolicy::Edit.run(|| {
         catallax_app::build_incremental_with_files_without_display(&converted.recipe, prefix, files, &mut decider)
     });
+    if work.exhausted_here() && work.request.limit == request::EDIT_STOPGAP_WORK {
+        return Err(KernelError::Failed { op, code: 0, message: request::EDIT_STOPGAP_REFUSAL.into() });
+    }
     let outcome = if work.exhausted_here() { Err(Error::ResourceLimit) } else { outcome }.map_err(|e| {
         let spline = input["steps"].as_array()
             .and_then(|steps| steps.iter().find(|step| step["id"] == input["result"]))

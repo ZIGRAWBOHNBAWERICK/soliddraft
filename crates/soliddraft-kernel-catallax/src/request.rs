@@ -12,6 +12,16 @@ pub const APP_REQUEST_WORK: u64 = 100_000_000;
 /// The work target for one measured edit. Exceeding it does not refuse work.
 pub const APP_WORK_TARGET: u64 = 20_000_000;
 
+/// The most work an edit may do. A stopgap until the user can cancel an edit, which then
+/// needs no work limit.
+pub const EDIT_STOPGAP_WORK: u64 = 1_000_000_000;
+
+/// The refusal of an edit that reached [`EDIT_STOPGAP_WORK`].
+pub const EDIT_STOPGAP_REFUSAL: &str = concat!(
+    "edit.work-stopgap: the edit did not finish within 1,000,000,000 work units, ",
+    "the most an edit may do while the window waits for it"
+);
+
 /// The deterministic work charged by a request.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RequestWork {
@@ -59,7 +69,8 @@ impl RequestPolicy {
     fn limit(self) -> u64 {
         match self {
             Self::Open | Self::Query => 100_000_000,
-            Self::Edit | Self::Display => catallax_app::DEFAULT_BUILD_WORK,
+            Self::Edit => EDIT_STOPGAP_WORK,
+            Self::Display => catallax_app::DEFAULT_BUILD_WORK,
             Self::Measured(limit) | Self::Limited(limit) => limit,
             Self::Export => APP_REQUEST_WORK,
         }
@@ -90,7 +101,7 @@ pub(crate) fn reserve_edit(preview: u64) -> Result<(ReservedWork, Option<Reserve
     if !active() {
         return Ok((ReservedWork::reserve(preview)?, None));
     }
-    let total = RequestPolicy::Edit.limit();
+    let total = catallax_app::DEFAULT_BUILD_WORK;
     let proof = total.checked_sub(preview).expect("constant split is within the application total");
     let mut display = ReservedWork::reserve(total)?;
     let proof = display.split_off(proof).expect("validated phase split");
@@ -134,5 +145,16 @@ impl ReservedWork {
 
     pub(crate) fn run<T>(self, run: impl FnOnce() -> T) -> (T, OperationWork) {
         with_reported_limit(self.request_limit, || self.allowance.run(run))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_edit_stops_at_the_stopgap_and_display_keeps_its_limit() {
+        assert_eq!(RequestPolicy::Edit.limit(), EDIT_STOPGAP_WORK);
+        assert_eq!(RequestPolicy::Display.limit(), catallax_app::DEFAULT_BUILD_WORK);
     }
 }

@@ -34,8 +34,8 @@ impl Preset {
         Preset::ALL.into_iter().find(|p| p.label().eq_ignore_ascii_case(name.trim()))
     }
 
-    /// Whether the preset draws edges unless the user asks for them. Realistic is for
-    /// presentation and leaves them off.
+    /// Whether the preset draws topology edges and the apparent contours of curved
+    /// faces unless the user asks otherwise. Realistic leaves them off.
     pub fn shows_edges(&self) -> bool {
         !matches!(self, Preset::Realistic)
     }

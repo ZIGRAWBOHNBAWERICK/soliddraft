@@ -1,4 +1,4 @@
-//! Feature recognition: the holes, bosses and slots of a body, read off its faces.
+//! Features proved from a body's boundary, without relying on feature history.
 //!
 //! A part made in the app knows its features from its history. An imported body has
 //! none, so the kernel reads them from the faces: which lie on one cylinder, which side
@@ -7,7 +7,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::FaceId;
+use crate::{FaceId, Vec3};
 
 /// The features of one body.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -20,6 +20,15 @@ pub struct Recognised {
     pub bosses: Vec<Boss>,
     /// Slots with round ends.
     pub slots: Vec<Slot>,
+    /// Stepped or conical mouths with a single coaxial pilot. Not repeated in `holes`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub compound_holes: Vec<CompoundHole>,
+    /// Shallow recesses with a flat floor and straight walls.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub recesses: Vec<Recess>,
+    /// Edge treatments with proved analytic support on both sides.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub edge_treatments: Vec<EdgeTreatment>,
 }
 
 /// A round hole.
@@ -67,4 +76,89 @@ pub struct Slot {
     pub length: f64,
     /// True when no face floors it.
     pub through: bool,
+}
+
+/// A pilot and a larger head joined at a common axis.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CompoundHole {
+    /// Pilot wall faces.
+    pub pilot_faces: Vec<FaceId>,
+    /// Head wall faces; excludes a flat counterbore shoulder.
+    pub head_faces: Vec<FaceId>,
+    /// The entry face containing the head opening.
+    pub entry: FaceId,
+    /// The exit face or flat blind bottom.
+    pub end: FaceId,
+    /// Centre of the entry circle in millimetres.
+    pub mouth_center: Vec3,
+    /// Unit direction along the axis from the mouth into the body.
+    pub direction: Vec3,
+    /// Pilot diameter in millimetres.
+    pub pilot_diameter: f64,
+    /// Head diameter at the mouth in millimetres.
+    pub head_diameter: f64,
+    /// Axial distance from the entry to the exit or flat blind bottom, in millimetres.
+    pub depth: f64,
+    /// Axial distance from the entry to the pilot, in millimetres.
+    pub head_depth: f64,
+    /// True for a pilot that opens through the body.
+    pub through: bool,
+    /// The geometry joining the two diameters.
+    pub head: CompoundHead,
+}
+
+/// Geometry of a compound hole's head.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum CompoundHead {
+    /// A cylindrical wall and a planar annular shoulder.
+    Counterbore {
+        /// The annular face.
+        shoulder: FaceId,
+    },
+    /// A conical wall joining the pilot directly.
+    Countersink {
+        /// Included angle of the cone in degrees.
+        angle_deg: f64,
+    },
+}
+
+/// A flat-bottomed pocket or open step, shallower than its narrowest floor span.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Recess {
+    /// The recessed plane.
+    pub floor: FaceId,
+    /// Rising faces bounding the floor. Excludes exterior faces below an open side.
+    pub walls: Vec<FaceId>,
+    /// The coplanar faces at the top of the rising walls.
+    pub opens_onto: Vec<FaceId>,
+    /// Perpendicular depth in millimetres.
+    pub depth: f64,
+    /// True when at least one side of the floor is open.
+    pub open_sided: bool,
+}
+
+/// An analytic band between two perpendicular flat supports.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct EdgeTreatment {
+    /// The face between the supports.
+    pub face: FaceId,
+    /// The two faces joined by the band.
+    pub supports: [FaceId; 2],
+    /// The recognized profile and its geometric size.
+    pub kind: EdgeTreatmentKind,
+}
+
+/// Profile of a recognized edge treatment; no manufacturing intent is implied.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum EdgeTreatmentKind {
+    /// A tangent quarter cylinder.
+    Fillet {
+        /// Radius in millimetres.
+        radius: f64,
+    },
+    /// An equal-setback planar bevel.
+    Chamfer {
+        /// Setback along either support in millimetres.
+        setback: f64,
+    },
 }

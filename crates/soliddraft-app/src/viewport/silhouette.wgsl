@@ -44,5 +44,5 @@ fn vs_silhouette(in: SilhouetteIn) -> LineOut {
     if (all(a == b)) {
         return clipped;
     }
-    return LineOut(line_vertex(LineIn(in.corner, a, b, 0u), globals.viewport.z), 0u);
+    return LineOut(display_line_vertex(LineIn(in.corner, a, b, 0u)), 0u);
 }

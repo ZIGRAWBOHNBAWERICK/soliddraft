@@ -612,14 +612,13 @@ fn line_vertex(in: LineIn, width_px: f32) -> vec4<f32> {
     return vec4<f32>(c.xy + offset / half_size * c.w, c.z, c.w);
 }
 
-@vertex
-fn vs_edge(in: LineIn) -> LineOut {
+fn display_line_vertex(in: LineIn) -> vec4<f32> {
     var segment = in;
     if (globals.section_normal.w != 0.0 && (body.flags & 256u) == 0u) {
         let a = section_distance(in.a);
         let b = section_distance(in.b);
         if (a > 0.0 && b > 0.0) {
-            return LineOut(vec4<f32>(0.0, 0.0, -1.0, 1.0), in.id);
+            return vec4<f32>(0.0, 0.0, -1.0, 1.0);
         }
         if (a > 0.0) {
             segment.a = mix(in.a, in.b, a / (a - b));
@@ -627,10 +626,12 @@ fn vs_edge(in: LineIn) -> LineOut {
             segment.b = mix(in.a, in.b, a / (a - b));
         }
     }
-    var out: LineOut;
-    out.clip = line_vertex(segment, globals.viewport.z);
-    out.id = in.id;
-    return out;
+    return line_vertex(segment, globals.viewport.z);
+}
+
+@vertex
+fn vs_edge(in: LineIn) -> LineOut {
+    return LineOut(display_line_vertex(in), in.id);
 }
 
 @fragment

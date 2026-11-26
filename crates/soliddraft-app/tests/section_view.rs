@@ -575,3 +575,62 @@ fn check_drag(
         );
     });
 }
+
+#[test]
+fn live_section_clips_apparent_contours() {
+    use soliddraft_app::document::{Command, ExtrudeParams, ProfileKind};
+    use soliddraft_app::viewport::{look::Preset, render::DisplayMode};
+
+    let case = ribbon::case("section-clipped-silhouette");
+    let mut doc = ribbon::blank();
+    doc.apply(Command::AddExtrude {
+        params: ExtrudeParams { profile: ProfileKind::Circle { diameter: 40.0 }, depth: 30.0, ..Default::default() },
+        via_assistant: false,
+    })
+    .unwrap();
+    let mut app = ribbon::app(doc);
+    case.run(&mut app, |app| {
+        ribbon::until(app, "display refinement", |app| !app.state().state.doc.display_quality().pending());
+        let state = &mut app.state_mut().state;
+        // Isolate apparent contours from topological strokes.
+        for mesh in state.doc.meshes.values_mut() {
+            Arc::make_mut(mesh).edges.clear();
+        }
+        state.doc.mesh_version += 1;
+        state.doc.selection = None;
+        state.viewport.preset = Preset::Fast;
+        state.viewport.camera.orthographic = true;
+        state.viewport.camera.look_from("Cylinder side", Vec3::Y);
+        state.viewport.camera.fit(state.doc.bounds());
+        state.viewport.camera.tick(10.0);
+
+        let count_contour_pixels = |app: &mut ribbon::App, label: &str| {
+            let frame = |app: &mut ribbon::App, mode, suffix| {
+                app.state_mut().state.viewport.display = mode;
+                app.step();
+                image::open(case.frame(app, &format!("{label}-{suffix}"))).unwrap().to_rgba8()
+            };
+            let contours = frame(app, DisplayMode::ShadedWithEdges, "contours");
+            let shaded = frame(app, DisplayMode::Shaded, "shaded");
+            let area = app.state().state.viewport.rect.shrink(100.0);
+            (area.top().ceil() as u32..area.bottom() as u32)
+                .map(|y| {
+                    (area.left().ceil() as u32..area.right() as u32)
+                        .filter(|&x| contours.get_pixel(x, y) != shaded.get_pixel(x, y))
+                        .count()
+                })
+                .sum::<usize>()
+        };
+        assert!(count_contour_pixels(app, "whole") > 40, "the cylinder shows its apparent contours");
+
+        let state = &mut app.state_mut().state;
+        state.section.enabled = true;
+        state.section.offset = -5.0;
+        ready(app);
+        drag_offset_with(app, -20.0, |app| {
+            assert!(app.query_by_label("Previewing section").is_some());
+            assert_eq!(count_contour_pixels(app, "clipped"), 0, "removed triangles contribute no contour strokes");
+        });
+        ready(app);
+    });
+}

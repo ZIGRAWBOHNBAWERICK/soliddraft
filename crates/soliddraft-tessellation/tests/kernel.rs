@@ -55,7 +55,9 @@ fn the_worker_answers_off_the_interface_thread() {
     let done = t.wait(WAIT).expect("an answer");
     assert_eq!((done.key, done.generation), ("block", generation));
     let meshes = done.result.unwrap();
-    assert_eq!(meshes, k.preview_levels(body, levels.all()).unwrap());
+    // Compare bytes, including the sign bit of zero in positions and normals.
+    let direct = k.preview_levels(body, levels.all()).unwrap();
+    assert_eq!(serde_json::to_vec(&meshes).unwrap(), serde_json::to_vec(&direct).unwrap());
     assert_eq!(t.pending(), 0);
     assert!(t.poll().is_empty());
 }
@@ -97,7 +99,7 @@ fn many_placements_share_one_definitions_meshes() {
     let bolt = contract::cylinder(k.as_ref(), Vec3::new(0.0, 0.0, 0.0), 3.0, 20.0);
     let levels = Levels::new(&Quality::Auto, k.topology(bolt).unwrap().bbox.diagonal());
     let mut t: Tessellator<&str> = Tessellator::new(k.clone());
-    let mut cache: DisplayCache<&str, Mesh> = DisplayCache::new(DeviceBudget::DESKTOP);
+    let mut cache: DisplayCache<&str, Mesh> = DisplayCache::new(DeviceBudget::UNLIMITED);
     // Ten thousand placements ask for the definition; one request goes out.
     for _ in 0..10_000 {
         if cache.missing(&"bolt", &levels).len() == 3 && t.pending() == 0 {

@@ -39,6 +39,7 @@ struct Gpu {
     queue: wgpu::Queue,
     adapter: String,
     tier: Tier,
+    budget: DeviceBudget,
 }
 
 fn gpu() -> Result<Gpu, String> {
@@ -58,7 +59,10 @@ fn gpu() -> Result<Gpu, String> {
     };
     let desc = wgpu::DeviceDescriptor { required_features: features, required_limits: limits, ..Default::default() };
     let (device, queue) = pollster::block_on(adapter.request_device(&desc)).map_err(|e| e.to_string())?;
-    Ok(Gpu { device, queue, adapter: format!("{} ({:?})", info.name, info.backend), tier: Tier::of(info.backend) })
+    let limits = device.limits();
+    let tier = Tier::of(info.backend, &limits);
+    let budget = DeviceBudget::from_buffer_limit(limits.max_buffer_size);
+    Ok(Gpu { device, queue, adapter: format!("{} ({:?})", info.name, info.backend), tier, budget })
 }
 
 /// The process's resident memory, from /proc on Linux.
@@ -209,7 +213,7 @@ impl Bench {
                 detail: self.detail,
                 levels,
                 deviations,
-                budget: DeviceBudget::default(),
+                budget: self.gpu.budget,
                 display: soliddraft_document::display_state::DisplayMode::Shaded,
             }),
         };

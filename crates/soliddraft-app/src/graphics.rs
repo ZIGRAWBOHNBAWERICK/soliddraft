@@ -2,7 +2,7 @@
 
 use crate::viewport::look::{Look, Preset, Tier};
 use serde::{Deserialize, Serialize};
-use soliddraft_tessellation::{Advanced, Levels, Quality, policy};
+use soliddraft_tessellation::{Advanced, DeviceBudget, Levels, Quality, policy};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -186,6 +186,8 @@ pub struct GraphicsDevice {
     pub samples: Vec<u32>,
     pub active_samples: u32,
     pub tier: crate::viewport::look::Tier,
+    /// Display allowance of the active device, independent of document quality.
+    pub display_budget: DeviceBudget,
 }
 
 /// The 3D view on screen, which the Current view controls change.
@@ -282,6 +284,7 @@ impl Default for GraphicsDevice {
             samples: vec![1],
             active_samples: 1,
             tier: crate::viewport::look::Tier::Basic,
+            display_budget: DeviceBudget::default(),
         }
     }
 }

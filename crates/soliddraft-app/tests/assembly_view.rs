@@ -23,8 +23,8 @@ fn device() -> Option<(wgpu::Device, wgpu::Queue, Tier)> {
     let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default())).ok()?;
     let features = adapter.features() & wgpu::Features::INDIRECT_FIRST_INSTANCE;
     let desc = wgpu::DeviceDescriptor { required_features: features, ..Default::default() };
-    let tier = Tier::of(adapter.get_info().backend);
     let (device, queue) = pollster::block_on(adapter.request_device(&desc)).ok()?;
+    let tier = Tier::of(adapter.get_info().backend, &device.limits());
     Some((device, queue, tier))
 }
 
@@ -52,6 +52,7 @@ struct View {
     device: wgpu::Device,
     queue: wgpu::Queue,
     pick: Arc<Mutex<PickSample>>,
+    budget: DeviceBudget,
     /// Standard meshes beyond the scene's, coarse and fine meshes, and deviations for
     /// the next frame.
     meshes: Vec<(DefinitionIndex, SharedMesh)>,
@@ -62,7 +63,8 @@ struct View {
 impl View {
     fn new(renderer: ViewportRenderer, device: wgpu::Device, queue: wgpu::Queue) -> View {
         let pick = Arc::new(Mutex::new(PickSample::default()));
-        View { renderer, device, queue, pick, meshes: Vec::new(), levels: Vec::new(), deviations: Vec::new() }
+        let budget = DeviceBudget::from_buffer_limit(device.limits().max_buffer_size);
+        View { renderer, device, queue, pick, budget, meshes: Vec::new(), levels: Vec::new(), deviations: Vec::new() }
     }
 
     /// Renders until a pick window that this frame's scene produced has come back.
@@ -130,7 +132,7 @@ impl View {
                 detail,
                 levels: std::mem::take(&mut self.levels),
                 deviations: std::mem::take(&mut self.deviations),
-                budget: DeviceBudget::default(),
+                budget: self.budget,
                 display: soliddraft_document::display_state::DisplayMode::Shaded,
             }),
         };
@@ -288,6 +290,12 @@ fn each_placement_draws_the_level_its_size_on_screen_needs() {
         }
     }
     assert_eq!(seen, ["-y", "+z"]);
+
+    let budget = v.budget;
+    v.budget = DeviceBudget { triangles: 11, bytes: budget.bytes };
+    assert_eq!(top(&mut v, 40.0, false), "-x", "the budget caps even a close view at coarse");
+    v.budget = budget;
+    assert_eq!(top(&mut v, 40.0, false), "-y", "budget headroom lets the same meshes draw fine again");
 }
 
 /// Parts A and B, distinct bricks, with A at x = 0 and B under the cursor at x = 50; and

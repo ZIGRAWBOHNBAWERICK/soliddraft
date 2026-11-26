@@ -694,6 +694,7 @@ impl ViewportRenderer {
         requested: u32,
     ) -> crate::graphics::GraphicsDevice {
         let info = adapter.get_info();
+        let limits = device.limits();
         let flags = |format: wgpu::TextureFormat| {
             if device.features().contains(wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES) {
                 adapter.get_texture_format_features(format).flags
@@ -723,7 +724,8 @@ impl ViewportRenderer {
             renderer: format!("{:?}", info.backend),
             samples,
             active_samples,
-            tier: Tier::of(info.backend),
+            tier: Tier::of(info.backend, &limits),
+            display_budget: soliddraft_tessellation::DeviceBudget::from_buffer_limit(limits.max_buffer_size),
         }
     }
 

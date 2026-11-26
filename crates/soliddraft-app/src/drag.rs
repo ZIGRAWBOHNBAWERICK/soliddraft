@@ -25,6 +25,8 @@ use crate::document::{
     CandidateDisplay, Command, DisplayMesh, Document, EndKind, FeatureId, FeatureKind, FeatureStatus, ReadyDisplay,
     Selection, ViewToken, construction_view, fmt_mm, ready_display,
 };
+#[cfg(not(target_arch = "wasm32"))]
+use soliddraft_kernel_api::Interrupt;
 use soliddraft_kernel_api::{ProofWork, TessellationParams};
 use soliddraft_model as model;
 use std::sync::{
@@ -683,6 +685,45 @@ fn oldest_work<T>(pending: &mut Vec<T>, newest: u64, protected: u64, key: impl F
     (!pending.is_empty()).then(|| pending.remove(0))
 }
 
+/// The requests the desktop's worker threads are building, each with the interrupt that
+/// stops it part way. A request nobody wants any more is stopped at once, so it never
+/// holds back the requests after it; that is what lets these builds go without a work limit.
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Clone, Default)]
+struct Building(Arc<std::sync::Mutex<Vec<(u64, Interrupt)>>>);
+
+#[cfg(not(target_arch = "wasm32"))]
+impl Building {
+    /// Runs `work` for `request` where [`Self::stop`] reaches it, unless `wanted` says
+    /// the request is no longer wanted.
+    fn run<T>(&self, request: u64, wanted: impl Fn() -> bool, work: impl FnOnce() -> T) -> Option<T> {
+        struct Unlist<'a>(&'a Building, Interrupt);
+        impl Drop for Unlist<'_> {
+            fn drop(&mut self) {
+                self.0.listed().retain(|(_, listed)| *listed != self.1);
+            }
+        }
+        let interrupt = Interrupt::new();
+        // Listed before the check, so a stop that comes between the two still finds it.
+        self.listed().push((request, interrupt.clone()));
+        let _unlist = Unlist(self, interrupt.clone());
+        wanted().then(|| interrupt.run(work))
+    }
+
+    /// Stops each listed request that `wanted` refuses.
+    fn stop(&self, wanted: impl Fn(u64) -> bool) {
+        for (request, interrupt) in self.listed().iter() {
+            if !wanted(*request) {
+                interrupt.stop();
+            }
+        }
+    }
+
+    fn listed(&self) -> std::sync::MutexGuard<'_, Vec<(u64, Interrupt)>> {
+        self.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+}
+
 /// One scheduler, with independent construction and exact jobs. A long proof
 /// cannot hold the next edit's construction preview behind it, and a slow
 /// construction preview cannot hold its own proof behind it.
@@ -693,6 +734,8 @@ pub(crate) struct Worker {
     request: u64,
     #[cfg(not(target_arch = "wasm32"))]
     jobs: mpsc::Sender<Queued>,
+    #[cfg(not(target_arch = "wasm32"))]
+    building: Building,
     #[cfg(target_arch = "wasm32")]
     answered: Answered,
     /// Requests the browser's kernel worker is building, by request number.
@@ -722,6 +765,9 @@ impl Worker {
             let (jobs, queue) = mpsc::channel::<Queued>();
             let (proofs, proof_queue) = mpsc::channel::<ProofTask>();
             let (constructions, construction_queue) = mpsc::channel::<ConstructionTask>();
+            let building = Building::default();
+            let proving = building.clone();
+            let constructing = building.clone();
             let current = newest.clone();
             let retained = protected.clone();
             let finished = answered.clone();
@@ -748,10 +794,13 @@ impl Worker {
                             continue;
                         };
                         let request = task.request;
-                        if !wanted(request, &current, &retained) {
+                        let Some(result) = proving.run(
+                            request,
+                            || wanted(request, &current, &retained),
+                            || prove(task, &current, &retained, previous.as_deref()),
+                        ) else {
                             continue;
-                        }
-                        let result = prove(task, &current, &retained, previous.as_deref());
+                        };
                         if result.failure.is_none() && !result.model.is_dirty() {
                             previous = Some(result.model.clone());
                         }
@@ -785,10 +834,9 @@ impl Worker {
                         ) else {
                             continue;
                         };
-                        if !wanted(task.request, &current, &retained) {
-                            continue;
-                        }
-                        if construct(task, &answered).is_err() {
+                        let request = task.request;
+                        let live = || wanted(request, &current, &retained);
+                        if constructing.run(request, live, || construct(task, &answered)) == Some(Err(())) {
                             break;
                         }
                     }
@@ -820,7 +868,7 @@ impl Worker {
                     }
                 })
                 .map_err(|error| format!("cannot start edit preparation: {error}"))?;
-            Ok(Self { answers, newest, protected, request: 0, jobs })
+            Ok(Self { answers, newest, protected, request: 0, jobs, building })
         }
         #[cfg(target_arch = "wasm32")]
         {
@@ -842,17 +890,44 @@ impl Worker {
 
     pub(crate) fn protect(&mut self, request: Option<u64>) {
         self.protected.store(request.unwrap_or(0), Ordering::Release);
+        self.drop_unwanted();
     }
 
     pub(crate) fn activate(&mut self, request: u64) {
         self.newest.store(request, Ordering::Release);
+        self.drop_unwanted();
     }
 
     pub(crate) fn invalidate(&mut self) -> u64 {
         self.request =
             self.request.checked_add(1).filter(|request| *request != u64::MAX).expect("edit request space exhausted");
         self.newest.store(self.request, Ordering::Release);
+        self.drop_unwanted();
         self.request
+    }
+
+    /// Stops the desktop's builds nobody wants any more, the moment they stop being
+    /// wanted. The browser's kernel worker cannot stop part way; see [`Self::stop_unwanted`].
+    fn drop_unwanted(&self) {
+        #[cfg(not(target_arch = "wasm32"))]
+        self.building.stop(|request| wanted(request, &self.newest, &self.protected));
+    }
+
+    /// Stops the builds nobody wants any more, such as a cancelled edit's, instead of
+    /// letting them run to the end. The browser replaces its kernel worker to do it.
+    pub(crate) fn stop_unwanted(&mut self) {
+        self.drop_unwanted();
+        #[cfg(target_arch = "wasm32")]
+        crate::kernel_worker::abandon_unwanted();
+    }
+
+    /// Whether a desktop worker thread is still building a request, wanted or not.
+    pub(crate) fn busy(&self) -> bool {
+        #[cfg(not(target_arch = "wasm32"))]
+        let busy = !self.building.listed().is_empty();
+        #[cfg(target_arch = "wasm32")]
+        let busy = false;
+        busy
     }
 
     pub(crate) fn enqueue(&mut self, request: u64, job: Job) -> Result<(), String> {
@@ -944,5 +1019,6 @@ impl Drop for Worker {
     fn drop(&mut self) {
         self.protected.store(u64::MAX, Ordering::Release);
         self.newest.store(u64::MAX, Ordering::Release);
+        self.drop_unwanted();
     }
 }

@@ -2709,6 +2709,11 @@ impl Document {
                 Err(why) => log::debug!("cancel proves the restored part again: {why}"),
             }
             self.after_history_change();
+            // The cancelled build stops now instead of running to its end, so the restored
+            // part does not wait behind it.
+            if let Some(worker) = self.worker.as_mut() {
+                worker.stop_unwanted();
+            }
             return Ok(());
         }
         Err("The part cannot return to its last accepted state. Let the build finish, then undo.".into())
@@ -2818,6 +2823,12 @@ impl Document {
         if self.repaint.is_none() {
             self.repaint = Some(ctx.clone());
         }
+    }
+
+    /// Whether the edit worker is still building a request, wanted or not. A build
+    /// nobody wants any more stops at once, so this turns false soon after Cancel.
+    pub fn worker_busy(&self) -> bool {
+        self.worker.as_ref().is_some_and(crate::drag::Worker::busy)
     }
 
     pub(crate) fn take_worker(&mut self) -> Result<crate::drag::Worker, String> {

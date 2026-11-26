@@ -664,7 +664,7 @@ pub enum PmiKind<F> {
         /// The cylindrical pilot wall, including its pieces if split.
         pilot: Feature<F>,
         /// The counterbore wall or countersink cone, if present.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[serde(default = "Option::default", skip_serializing_if = "Option::is_none")]
         head: Option<HoleHead<F>>,
         /// Limits on the pilot diameter. None leaves them unstated.
         #[serde(default, skip_serializing_if = "Tolerance::is_none")]

@@ -126,24 +126,35 @@ impl Query<'_> {
 /// Shared-prefix geometry handles name immutable definitions. Topology handles
 /// can change even when sewing restores exactly the same boundary.
 fn same_face(a: &Model, af: FaceId, b: &Model, bf: FaceId) -> bool {
-    trims(a, af, b, bf)
+    // The integrator groups edge uses across the whole cover, not just one chart.
+    let mut edges = Vec::new();
+    let mut vertices = Vec::new();
+    let mut same_trim = |left, right| trims(a, left, b, right, &mut edges, &mut vertices);
+    same_trim(af, bf)
         && match (a.face_chart_cover(af), b.face_chart_cover(bf)) {
             (None, None) => true,
             (Some(a_cover), Some(b_cover)) => {
-                a_cover.len() == b_cover.len() && a_cover.iter().zip(b_cover).all(|(&x, &y)| trims(a, x, b, y))
+                let mut faces = Vec::new();
+                a_cover.len() == b_cover.len()
+                    && a_cover.iter().zip(b_cover).all(|(&x, &y)| pair(&mut faces, x, y) && same_trim(x, y))
             }
             _ => false,
         }
 }
 
-fn trims(a: &Model, af: FaceId, b: &Model, bf: FaceId) -> bool {
+fn trims(
+    a: &Model,
+    af: FaceId,
+    b: &Model,
+    bf: FaceId,
+    edges: &mut Vec<(EdgeId, EdgeId)>,
+    vertices: &mut Vec<(VertexId, VertexId)>,
+) -> bool {
     let (left, right) = (a.face(af), b.face(bf));
     if left.surface != right.surface || a.face_origins(af) != b.face_origins(bf) {
         return false;
     }
-    let mut edges = Vec::new();
-    let mut vertices = Vec::new();
-    let mut vertex = |x: VertexId, y: VertexId| a.vertex(x) == b.vertex(y) && pair(&mut vertices, x, y);
+    let mut vertex = |x: VertexId, y: VertexId| a.vertex(x) == b.vertex(y) && pair(vertices, x, y);
     walks(
         a,
         af,
@@ -154,7 +165,7 @@ fn trims(a: &Model, af: FaceId, b: &Model, bf: FaceId) -> bool {
             e.curve == f.curve
                 && e.sense == f.sense
                 && e.tolerance == f.tolerance
-                && pair(&mut edges, x, y)
+                && pair(edges, x, y)
                 && (x == y
                     || !matches!(a.geom().curve(e.curve), Curve::BSpline(_))
                     || fitted_rail(a, x) == fitted_rail(b, y))
@@ -201,6 +212,7 @@ fn same_rational_polygon(a: &Model, af: FaceId, b: &Model, bf: FaceId) -> bool {
     else {
         return false;
     };
+    let mut edges = Vec::new();
     rational_equal(
         [&p.origin.x, &p.origin.y, &p.origin.z, &p.normal.x, &p.normal.y, &p.normal.z],
         [&q.origin.x, &q.origin.y, &q.origin.z, &q.normal.x, &q.normal.y, &q.normal.z],
@@ -216,6 +228,7 @@ fn same_rational_polygon(a: &Model, af: FaceId, b: &Model, bf: FaceId) -> bool {
                     && x.end.is_some()
                     && matches!(a.geom().curve(x.curve), Curve::Line(_))
                     && matches!(b.geom().curve(y.curve), Curve::Line(_))
+                    && pair(&mut edges, x, y)
             },
             |x, y| {
                 let (PointDef::Explicit(x), PointDef::Explicit(y)) =

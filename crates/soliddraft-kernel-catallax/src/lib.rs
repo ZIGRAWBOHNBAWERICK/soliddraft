@@ -2933,11 +2933,16 @@ mod tests {
 
         let after = run(20.0);
         let solid = kernel.solid(after).unwrap();
-        let mesh = solid.display(&MeshOptions::default(), "test").unwrap();
-        let expected = convert::topology(&solid.app, &solid.ids, &mesh, false, None).unwrap();
+        let mesh = solid.rendering().unwrap();
+        let mesh = match mesh.as_ref() {
+            catallax_numbers::OperationResult::Proven(answer) => &answer.value,
+            catallax_numbers::OperationResult::Bounded(answer) => answer.value(),
+            catallax_numbers::OperationResult::Refused(refusal) => panic!("{refusal}"),
+        };
+        let expected = convert::rendering_topology(&solid.app, &solid.ids, mesh, None).unwrap();
         let actual = kernel.topology(after).unwrap();
-        assert_eq!(serde_json::to_vec(&actual).unwrap(), serde_json::to_vec(&expected).unwrap());
         assert_eq!(area_proofs(&kernel), 5, "only the start cap of the revised sweep is unchanged");
+        assert!(serde_json::to_vec(&actual).unwrap() == serde_json::to_vec(&expected).unwrap());
     }
 
     #[test]

@@ -1495,6 +1495,11 @@ fn settle(drawing: &mut Drawing, sheet: usize, made: &[Made]) {
         if !lead.stacked && along.u.abs() > 1e-9 && along.v.abs() > 1e-9 {
             ways.push(Point2::new(along.u.signum(), 0.0));
             ways.push(Point2::new(0.0, along.v.signum()));
+            if drawing.annotation(lead.id).is_some_and(|a| matches!(a.body, AnnotationKind::Note { .. })) {
+                // A multiline callout may need the space below the rim, not farther across the sheet.
+                ways.push(Point2::new(0.0, -along.v.signum()));
+                ways.push(Point2::new(-along.u.signum(), 0.0));
+            }
         }
         let mut best: Option<(usize, Vec<Option<Point2>>)> = None;
         let slide = |ways: &[Point2], best: &mut Option<(usize, Vec<Option<Point2>>)>, drawing: &mut Drawing| {

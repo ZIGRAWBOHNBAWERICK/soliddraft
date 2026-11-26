@@ -289,6 +289,8 @@ fn hole_requirements_round_trip_through_panel_tools_and_drawing() {
     assert!(session.requirements.unplaced.is_empty(), "{:?}", session.requirements.unplaced);
     let drawing = &session.doc.drawing;
     assert_eq!(pmi_items::shown(drawing).len(), 4);
+    let overlaps = pmi_items::overlaps(drawing, 0);
+    assert!(overlaps.is_empty(), "hole callout overlaps: {overlaps:?}");
     for text in expected {
         assert!(
             drawing.sheets[0].annotations.iter().any(|annotation| {

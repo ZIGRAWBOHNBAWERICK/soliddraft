@@ -396,7 +396,8 @@ fn assert_drawn_cap(app: &mut ribbon::App, case: &ribbon::Case, frame: &str, out
         let sy = y as f32 + 0.5;
         let mut xs: Vec<_> = segments
             .iter()
-            .filter_map(|&[a, b]| ((a.y > sy) != (b.y > sy)).then(|| a.x + (b.x - a.x) * (sy - a.y) / (b.y - a.y)))
+            .filter(|&&[a, b]| (a.y > sy) != (b.y > sy))
+            .map(|&[a, b]| a.x + (b.x - a.x) * (sy - a.y) / (b.y - a.y))
             .collect();
         xs.sort_unstable_by(f32::total_cmp);
         assert_eq!(xs.len() % 2, 0, "{frame}: the section has an open contour at y={sy}");

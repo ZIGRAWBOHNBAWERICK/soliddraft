@@ -399,6 +399,7 @@ fn a_disabled_menu_entry_explains_itself_on_hover() {
 /// renderer can run no other frame before the next click, which the sheet then lost.
 #[test]
 fn the_options_sheet_takes_a_click_in_the_frame_after_it_opens() {
+    let _case = ribbon::case("options-sheet-click");
     let mut app = ribbon::app(ribbon::plate());
     let feature = app.state().state.doc.features.iter().find(|f| f.kind.noun() == "extrude").expect("the plate").id;
     app.state_mut()
@@ -488,6 +489,7 @@ fn view_insert_options_and_fit_after_the_walkover() {
 /// Details: a click sent before it lands where Details is not drawn yet.
 #[test]
 fn a_tree_row_and_then_details_take_clicks_in_the_frames_they_are_drawn() {
+    let _case = ribbon::case("tree-row-details-click");
     let mut app = ribbon::app(ribbon::plate());
     app.run_steps(6);
     let feature =

@@ -924,7 +924,8 @@ jobs:
           status=0
           chrome-devtools-axi run < ci/browser-edit-off-thread.js || status=$?
           chrome-devtools-axi perf-stop --file "$trace" || true
-          exit "$status"
+          if [ "$status" -ne 0 ]; then exit "$status"; fi
+          python3 ci/check-edit-off-thread-trace.py "$trace"
       - name: Publish the browser edit check's performance trace
         if: always()
         uses: actions/upload-artifact@v4

@@ -11,8 +11,10 @@ sits on without knowing the file's entity numbers. The check passes when what wa
 equals <expected.json>, whatever the order. `--print` writes what was read, in the
 form the check compares, to make or review an expectation.
 
-OpenCASCADE has no reader for the AP242 surface texture entity, so a surface finish is
-not in its reading. An expectation names such items under `not_read` with the reason;
+OpenCASCADE has no reader for the AP242 surface texture entity. It reads a surface
+finish through the finish's graphical callout instead: a dimension of type
+`DimensionPresentation` on the finish's faces, with the callout's name and its drawing.
+An expectation names what OpenCASCADE does not read under `not_read` with the reason;
 the check does not look for them.
 
 This checker belongs to CI. The application never runs OpenCASCADE.
@@ -141,6 +143,11 @@ def read(path):
             item["lower"] = number(obj.GetLowerTolValue())
         if obj.IsDimWithClassOfTolerance():
             item["class"] = True
+        if item["type"] == "DimensionPresentation":
+            # A presentation only: the item is known by its callout's name and drawing.
+            name = obj.GetPresentationName()
+            item["presentation"] = name.ToCString() if name is not None else ""
+            item["drawn"] = not obj.GetPresentation().IsNull()
         notes = [obj.GetDescription(j).ToCString() for j in range(obj.NbDescriptions())]
         if "theoretical" in notes:
             item["basic"] = True

@@ -101,6 +101,14 @@ class Expectation(unittest.TestCase):
                            '(geometric_representation_context) (global_uncertainty_assigned_context) '
                            '(global_unit_assigned_context)']])
 
+    def test_the_bracket_expectation_holds_the_finish_callout_and_the_validation_counts(self):
+        entities = self.expected['entities']
+        self.assertEqual(entities['draughting_callout']['rows'],
+                         [['Bore finish', '(1) annotation_curve_occurrence']])
+        self.assertEqual(entities['draughting_model_item_association']['rows'],
+                         [['Bore finish', '', 'shape_aspect', 'draughting_model', 'draughting_callout']])
+        self.assertIn(['number of annotations', '1.0'], entities['integer_representation_item']['rows'])
+
     def test_a_reading_equal_to_the_expectation_passes_and_a_changed_row_fails(self):
         found = json.loads(json.dumps(self.expected))
         with mock.patch('builtins.print'):

@@ -2873,6 +2873,16 @@ mod tests {
         assert!(kernel.topology(body).is_ok(), "a mesh refusal must not poison the topology cache");
     }
 
+    fn area_proofs(kernel: &CatallaxKernel) -> usize {
+        kernel.take_diagnostics().unwrap()["calls"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .flat_map(|call| call["operation_log"]["operations"].as_array().unwrap())
+            .filter(|entry| entry["operation"] == "face_area")
+            .count()
+    }
+
     #[test]
     fn unchanged_face_areas_survive_a_cut_and_feed_both_topology_views() {
         fn cut(kernel: &CatallaxKernel) -> (BodyId, BodyId) {
@@ -2880,15 +2890,6 @@ mod tests {
             let pin = contract::cylinder(kernel, Vec3::new(1.0, 1.0, 8.0), 0.5, 3.0);
             let cut = kernel.boolean(&OpTag::new("cut"), BooleanOp::Subtract, block, pin).unwrap().body;
             (block, cut)
-        }
-        fn areas_computed(kernel: &CatallaxKernel) -> usize {
-            kernel.take_diagnostics().unwrap()["calls"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .flat_map(|call| call["operation_log"]["operations"].as_array().unwrap())
-                .filter(|entry| entry["operation"] == "face_area")
-                .count()
         }
 
         let kernel = CatallaxKernel::with_operation_log();
@@ -2898,15 +2899,45 @@ mod tests {
         let expected = convert::topology(&solid.app, &solid.ids, &mesh, false, None).unwrap();
         let expected_measured = convert::topology(&solid.app, &solid.ids, &mesh, true, None).unwrap();
         kernel.topology(stock).unwrap();
-        areas_computed(&kernel);
+        area_proofs(&kernel);
 
         let actual = kernel.topology(body).unwrap();
         assert_eq!(serde_json::to_vec(&actual).unwrap(), serde_json::to_vec(&expected).unwrap());
-        let recomputed = areas_computed(&kernel);
+        let recomputed = area_proofs(&kernel);
         assert!(recomputed > 0 && recomputed < actual.faces.len());
         let measured = kernel.measured_topology(body).unwrap();
         assert_eq!(serde_json::to_vec(&measured).unwrap(), serde_json::to_vec(&expected_measured).unwrap());
-        assert_eq!(areas_computed(&kernel), 0);
+        assert_eq!(area_proofs(&kernel), 0);
+    }
+
+    #[test]
+    fn unchanged_face_areas_reuse_the_start_cap_of_a_rebuilt_spline_sweep() {
+        let kernel = CatallaxKernel::with_operation_log();
+        let profile = Profile::rectangle(Plane::XY, [9.0, -2.0].into(), 4.0, 2.0);
+        let sheet = kernel.create_body_from_profile(&OpTag::new("profile"), &profile).unwrap().body;
+        let sweep = |height| Sweep {
+            start: [0.0; 3],
+            orientation: SweepOrientation::Fixed,
+            segments: vec![PathSegment::Spline {
+                id: "rail".into(),
+                degree: 3,
+                control_points: vec![[0.0; 3], [2.0, 0.0, height], [2.0, 2.0, 2.0 * height], [0.0, 2.0, 3.0 * height]],
+                weights: vec![1.0; 4],
+                knots: vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+            }],
+        };
+        let run = |height| kernel.sweep(&OpTag::new("sweep"), sheet, &sweep(height)).unwrap().body;
+        let before = run(10.0);
+        kernel.topology(before).unwrap();
+        assert_eq!(area_proofs(&kernel), 6);
+
+        let after = run(20.0);
+        let solid = kernel.solid(after).unwrap();
+        let mesh = solid.display(&MeshOptions::default(), "test").unwrap();
+        let expected = convert::topology(&solid.app, &solid.ids, &mesh, false, None).unwrap();
+        let actual = kernel.topology(after).unwrap();
+        assert_eq!(serde_json::to_vec(&actual).unwrap(), serde_json::to_vec(&expected).unwrap());
+        assert_eq!(area_proofs(&kernel), 5, "only the start cap of the revised sweep is unchanged");
     }
 
     #[test]

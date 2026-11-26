@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex, Weak};
 
 use catallax_measure::{Accuracy, Enclosure};
 use catallax_numbers::{Answer, Real, Refusal};
-use catallax_shapes::{Curve, PointDef, SplineSupport, Surface};
+use catallax_shapes::{BSplineCurve, Curve, PointDef, SplineBoundary, SplineSupport, Surface};
 use catallax_topology::{EdgeId, FaceId, Loop, Model, Reads, VertexId};
 
 use super::{Solid, convert::midpoint, numerical};
@@ -78,26 +78,26 @@ impl Query<'_> {
             return Ok(area.area);
         }
         let own_id = self.solid.ids.faces[&face];
+        let origins = &self.solid.ids.face_origins[&own_id];
         for other in &self.ancestors {
             let old = model(other);
             let previous = other.areas.0.lock().unwrap_or_else(|e| e.into_inner());
             for (&old_face, old_area) in previous.iter() {
-                if other.ids.faces[&old_face] == own_id
-                    && let Some(reads) = &old_area.reads
-                    && current.unchanged_where_read(old, reads)
+                let old_id = other.ids.faces[&old_face];
+                if &other.ids.face_origins[&old_id] == origins
                     && same_face(old, old_face, current, face)
+                    && (old_id == own_id
+                        && old_area.reads.as_ref().is_some_and(|reads| current.unchanged_where_read(old, reads))
+                        || local_area(old, old_face) && local_area(current, face))
                 {
                     areas.insert(face, Proven { area: old_area.area, reads: None });
                     return Ok(old_area.area);
                 }
             }
         }
-        // No arena-handle equality across independent builds. The rational
-        // straight-boundary path depends only on the plane and directed walks.
-        if current.face_chart_cover(face).is_none()
-            && matches!(current.geom().surface(current.face(face).surface), Surface::Plane(_))
-        {
-            let origins = &self.solid.ids.face_origins[&own_id];
+        // Only the planar measure paths below are compared across independent
+        // builds, where equal numeric handles provide no evidence.
+        if matches!(current.geom().surface(current.face(face).surface), Surface::Plane(_)) {
             for other in &self.recent {
                 let old = model(other);
                 let Ok(previous) = other.areas.0.try_lock() else { continue };
@@ -125,11 +125,14 @@ impl Query<'_> {
 
 /// Shared-prefix geometry handles name immutable definitions. Topology handles
 /// can change even when sewing restores exactly the same boundary.
-fn same_face(a: &Model, af: FaceId, b: &Model, bf: FaceId) -> bool {
+fn compare_cover(
+    a: &Model,
+    af: FaceId,
+    b: &Model,
+    bf: FaceId,
+    mut same_trim: impl FnMut(FaceId, FaceId) -> bool,
+) -> bool {
     // The integrator groups edge uses across the whole cover, not just one chart.
-    let mut edges = Vec::new();
-    let mut vertices = Vec::new();
-    let mut same_trim = |left, right| trims(a, left, b, right, &mut edges, &mut vertices);
     same_trim(af, bf)
         && match (a.face_chart_cover(af), b.face_chart_cover(bf)) {
             (None, None) => true,
@@ -139,6 +142,42 @@ fn same_face(a: &Model, af: FaceId, b: &Model, bf: FaceId) -> bool {
                     && a_cover.iter().zip(b_cover).all(|(&x, &y)| pair(&mut faces, x, y) && same_trim(x, y))
             }
             _ => false,
+        }
+}
+
+fn same_face(a: &Model, af: FaceId, b: &Model, bf: FaceId) -> bool {
+    let mut edges = Vec::new();
+    let mut vertices = Vec::new();
+    compare_cover(a, af, b, bf, |x, y| trims(a, x, b, y, &mut edges, &mut vertices))
+}
+
+// For a plane with explicit vertices and native lines or splines, and for a
+// checked rational patch, Catallax's area engine only needs the face and
+// ordered physical trims (including roles and the fitted-rail predicate).
+// New coedge uses on untouched edges need not invalidate those proofs.
+fn local_area(model: &Model, face: FaceId) -> bool {
+    let matches = |face| {
+        let value = model.face(face);
+        value.loops.iter().all(|id| match model.loop_(*id) {
+            Loop::Vertex(_) => false,
+            Loop::Coedges(coedges) => coedges.iter().all(|id| {
+                let edge = model.edge(model.coedge(*id).edge);
+                matches!(model.geom().curve(edge.curve), Curve::Line(_) | Curve::BSpline(_))
+                    && [edge.start, edge.end]
+                        .into_iter()
+                        .flatten()
+                        .all(|v| matches!(model.geom().point(model.vertex(v).point), PointDef::Explicit(_)))
+            }),
+        })
+    };
+    let surface = |face| model.geom().surface(model.face(face).surface);
+    matches(face)
+        && match model.face_chart_cover(face) {
+            Some(cover) => cover.iter().all(|&cell| {
+                matches!(surface(cell), Surface::Plane(_) | Surface::BSpline(SplineSupport::RationalPatch(_)))
+                    && matches(cell)
+            }),
+            None => matches!(surface(face), Surface::Plane(_) | Surface::BSpline(SplineSupport::RationalPatch(_))),
         }
 }
 
@@ -166,9 +205,7 @@ fn trims(
                 && e.sense == f.sense
                 && e.tolerance == f.tolerance
                 && pair(edges, x, y)
-                && (x == y
-                    || !matches!(a.geom().curve(e.curve), Curve::BSpline(_))
-                    || fitted_rail(a, x) == fitted_rail(b, y))
+                && (!matches!(a.geom().curve(e.curve), Curve::BSpline(_)) || fitted_rail(a, x) == fitted_rail(b, y))
         },
         &mut vertex,
     )
@@ -204,41 +241,109 @@ fn rational_equal<const N: usize>(a: [&Real; N], b: [&Real; N]) -> bool {
 }
 
 fn same_rational_polygon(a: &Model, af: FaceId, b: &Model, bf: FaceId) -> bool {
-    if a.face_chart_cover(af).is_some() || b.face_chart_cover(bf).is_some() {
-        return false;
-    }
-    let (Surface::Plane(p), Surface::Plane(q)) =
-        (a.geom().surface(a.face(af).surface), b.geom().surface(b.face(bf).surface))
-    else {
-        return false;
-    };
     let mut edges = Vec::new();
-    rational_equal(
-        [&p.origin.x, &p.origin.y, &p.origin.z, &p.normal.x, &p.normal.y, &p.normal.z],
-        [&q.origin.x, &q.origin.y, &q.origin.z, &q.normal.x, &q.normal.y, &q.normal.z],
-    ) && a.face(af).loops.iter().all(|l| matches!(a.loop_(*l), Loop::Coedges(_)))
-        && walks(
-            a,
-            af,
-            b,
-            bf,
-            |x, y| {
-                let (x, y) = (a.edge(x), b.edge(y));
-                x.start.is_some()
-                    && x.end.is_some()
-                    && matches!(a.geom().curve(x.curve), Curve::Line(_))
-                    && matches!(b.geom().curve(y.curve), Curve::Line(_))
-                    && pair(&mut edges, x, y)
-            },
-            |x, y| {
-                let (PointDef::Explicit(x), PointDef::Explicit(y)) =
-                    (a.geom().point(a.vertex(x).point), b.geom().point(b.vertex(y).point))
-                else {
-                    return false;
-                };
-                rational_equal([&x.x, &x.y, &x.z], [&y.x, &y.y, &y.z])
-            },
-        )
+    let mut vertices = Vec::new();
+    let mut points = Vec::new();
+    compare_cover(a, af, b, bf, |af, bf| {
+        let (Surface::Plane(p), Surface::Plane(q)) =
+            (a.geom().surface(a.face(af).surface), b.geom().surface(b.face(bf).surface))
+        else {
+            return false;
+        };
+        if !a.face_origins(af).iter().map(|o| &o.role).eq(b.face_origins(bf).iter().map(|o| &o.role)) {
+            return false;
+        }
+        rational_equal(
+            [
+                &p.origin.x,
+                &p.origin.y,
+                &p.origin.z,
+                &p.normal.x,
+                &p.normal.y,
+                &p.normal.z,
+                &p.ref_dir.x,
+                &p.ref_dir.y,
+                &p.ref_dir.z,
+            ],
+            [
+                &q.origin.x,
+                &q.origin.y,
+                &q.origin.z,
+                &q.normal.x,
+                &q.normal.y,
+                &q.normal.z,
+                &q.ref_dir.x,
+                &q.ref_dir.y,
+                &q.ref_dir.z,
+            ],
+        ) && a.face(af).loops.iter().all(|l| matches!(a.loop_(*l), Loop::Coedges(_)))
+            && walks(
+                a,
+                af,
+                b,
+                bf,
+                |xi, yi| {
+                    let (x, y) = (a.edge(xi), b.edge(yi));
+                    x.start.is_some()
+                        && x.end.is_some()
+                        && x.sense == y.sense
+                        && x.tolerance == y.tolerance
+                        && pair(&mut edges, xi, yi)
+                        && match (a.geom().curve(x.curve), b.geom().curve(y.curve)) {
+                            // Catallax's rational planar path only uses the endpoints.
+                            (Curve::Line(_), Curve::Line(_)) => true,
+                            (Curve::BSpline(left), Curve::BSpline(right)) => {
+                                straight_patch_row(a, xi, left)
+                                    && straight_patch_row(b, yi, right)
+                                    && left.same_definition(right)
+                                    && !fitted_rail(a, xi)
+                                    && !fitted_rail(b, yi)
+                            }
+                            _ => false,
+                        }
+                },
+                |x, y| {
+                    if !pair(&mut vertices, x, y) {
+                        return false;
+                    }
+                    let (x, y) = (a.vertex(x), b.vertex(y));
+                    if x.tolerance != y.tolerance || !pair(&mut points, x.point, y.point) {
+                        return false;
+                    }
+                    let (PointDef::Explicit(x), PointDef::Explicit(y)) =
+                        (a.geom().point(x.point), b.geom().point(y.point))
+                    else {
+                        return false;
+                    };
+                    rational_equal([&x.x, &x.y, &x.z], [&y.x, &y.y, &y.z])
+                },
+            )
+    })
+}
+
+/// Independent sweeps and lofts can rebuild the same planar cap on degree-one
+/// rational patch rows. The owning patch identifies the native curve view
+/// (not a transported/reduced curve). Constant rational weights throughout
+/// that carrier keep the row's trace representation independent of other rows.
+fn straight_patch_row(model: &Model, edge: EdgeId, curve: &BSplineCurve) -> bool {
+    curve.degree() == 1
+        && curve.control_count() == 2
+        && curve.has_rational_definition()
+        && model.coedges_of_edge(edge).into_iter().any(|coedge| {
+            let Some((_, owner)) = model.owner_of_coedge(coedge) else { return false };
+            let Surface::BSpline(SplineSupport::RationalPatch(patch)) = model.geom().surface(model.face(owner).surface)
+            else {
+                return false;
+            };
+            let carrier = patch.carrier();
+            [SplineBoundary::VMin, SplineBoundary::VMax, SplineBoundary::UMin, SplineBoundary::UMax]
+                .into_iter()
+                .any(|side| curve.is_boundary_of(carrier, side))
+                && carrier
+                    .weights()
+                    .iter()
+                    .all(|w| w.rational_ref().is_some_and(|weight| Some(weight) == curve.weight(0).rational_ref()))
+        })
 }
 
 fn walks(

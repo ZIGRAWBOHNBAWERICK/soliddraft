@@ -146,20 +146,6 @@ class PartServer(gate.GateServer):
         super().do_GET()
 
 
-def canvas_adapter(record):
-    """The canvas device's adapter: the probe's record of it, or else the adapter the app's
-    GPU preview names for its own device, matched to the page's adapter requests. Safari 27
-    configures the canvas without passing the probe's hook."""
-    if record.get('renderer'):
-        return record['renderer']
-    status = (record.get('preview') or {}).get('status') or ''
-    requests = [request for request in record.get('requests') or [] if request]
-    if 'BrowserWebGpu' not in status or not requests:
-        return None
-    named = [request for request in requests if f'name: "{request.get("description")}"' in status]
-    return named[-1] if named and all(request.get('fallback') is False for request in requests) else None
-
-
 def safari_scenario(evaluate, screenshot, navigate, name, out):
     record = {'scenario': name}
     navigate()
@@ -167,23 +153,23 @@ def safari_scenario(evaluate, screenshot, navigate, name, out):
       renderer: window.gpuAcceptance?.renderer,
       document: window.gpuAcceptance?.document,
       ready: document.querySelector('#status')?.classList.contains('hidden'),
-      preview: window.sdGpuPreview ?? null
+      preview: window.sdGpuPreview ?? null,
+      visibility: document.visibilityState
     })'''
 
     def state():
         record.update(evaluate(snapshot) or {})
-        record['adapter'] = canvas_adapter(record)
-        return record['adapter'] and record.get('ready')
+        return record.get('renderer') and record.get('ready')
 
-    gate.wait_for(state, 'the shipping Wasm viewport', seconds=90)
-    gate.require_hardware(record['adapter'], {'WebGPU'})
+    gate.wait_drawn(state, 'the shipping Wasm viewport', record, seconds=90)
+    gate.require_hardware(record['renderer'], {'WebGPU'})
     result = evaluate(f'window.gpuAcceptance.drop({json.dumps(name)}).then(() => true)')
     if result is not True:
         raise RuntimeError(f'Dropping {name}: {result}')
-    gate.wait_for(lambda: state() and (record.get('document') or {}).get('count', 0) > 0, f'{name} to open',
-                  seconds=600)
-    gate.wait_for(lambda: state() and (record.get('preview') or {}).get('gpu_previews', 0) > 0,
-                  f'{name} to show a GPU preview', seconds=300)
+    gate.wait_drawn(lambda: state() and (record.get('document') or {}).get('count', 0) > 0, f'{name} to open',
+                    record, seconds=600)
+    gate.wait_drawn(lambda: state() and (record.get('preview') or {}).get('gpu_previews', 0) > 0,
+                    f'{name} to show a GPU preview', record, seconds=300)
     time.sleep(3)
     state()
     screenshot(out / f'{name}.png')

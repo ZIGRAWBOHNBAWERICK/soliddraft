@@ -485,6 +485,9 @@ pub(crate) fn run(doc: &mut Document, name: &str, input: &Value) -> Option<Resul
                         "faces": names(&feature.faces),
                         "sizes_mm": feature.sizes.iter().map(|(name, value)| (name.clone(), json!(value))).collect::<serde_json::Map<String, Value>>(),
                     });
+                    if let Some(angle) = feature.angle_deg {
+                        row["angle_deg"] = json!(angle);
+                    }
                     if let Some(through) = feature.through {
                         row["through"] = json!(through);
                     }

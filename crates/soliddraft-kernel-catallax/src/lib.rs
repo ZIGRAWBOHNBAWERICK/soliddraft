@@ -1797,13 +1797,8 @@ impl Kernel for CatallaxKernel {
         // Read outside the lock; offers share their read result, so the build that takes
         // one later finds it read. An offer that came with its names is adopted unread,
         // so it is read only when exact geometry is asked of it.
-        let unread: Vec<handover::Offer> = self
-            .state()?
-            .offered
-            .values()
-            .filter(|offer| !offer.is_read() && offer.identity.is_none())
-            .cloned()
-            .collect();
+        let unread: Vec<handover::Offer> =
+            self.state()?.offered.values().filter(|offer| !offer.is_read() && !offer.has_identity()).cloned().collect();
         for offer in unread.iter().take(at_most) {
             let _ = offer.built();
         }

@@ -97,6 +97,9 @@ ran that loop than an Apple M3. A CPU loop does not calibrate GPU readback waits
 is not evidence toward the 250 ms target, which is measured separately on a Mac's real
 GPU. Every step logs its absolute time. Opening and Cancel are logged without a bound,
 since software rendering's pick readback still holds the page up to 0.8 s there.
+Each edit types only once Depth has taken the keyboard: egui reads a press held over
+0.8 s as a drag, which one slow frame between the click's press and release causes,
+so the check clicks Depth again, at most three times, until it edits.
 
 `ci/browser-part-check.js` runs the same way on the sample part, in its own session and
 on its own origin. It clicks Inspect > Check, which builds each solid step again in the

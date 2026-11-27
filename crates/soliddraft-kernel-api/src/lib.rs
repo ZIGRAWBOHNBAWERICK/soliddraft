@@ -1334,8 +1334,9 @@ pub trait Kernel: Send + Sync {
     }
 
     /// Offers the previous result of this feature as a checkpoint during `run`.
-    /// It is not an operation input and must not change geometry or names.
-    fn with_rebuild_source(&self, _body: BodyId, run: &mut dyn FnMut()) {
+    /// `input` is the rebuilt body immediately before the feature, if any.
+    /// The previous result is not an operation input and must not change geometry or names.
+    fn with_rebuild_source(&self, _body: BodyId, _input: Option<BodyId>, run: &mut dyn FnMut()) {
         run();
     }
 

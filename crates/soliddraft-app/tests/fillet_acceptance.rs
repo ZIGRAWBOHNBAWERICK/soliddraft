@@ -14,6 +14,8 @@ use soliddraft_assistant::{Caller, tools::call_checked};
 use soliddraft_kernel_api::{Aabb, BodyAccuracy, EdgeId, FaceId, KernelError, KernelResult};
 use soliddraft_kernel_catallax::{APP_REQUEST_WORK, CatallaxKernel};
 
+#[path = "support/import_open.rs"]
+mod import_open;
 #[path = "support/ui.rs"]
 mod ribbon;
 
@@ -306,10 +308,10 @@ fn import_exported_step(name: &str, faces: usize) -> (KernelResult<f64>, Aabb) {
     let case = ribbon::case(&format!("fillet-roundtrip-{name}"));
     let mut app = ribbon::app(Document::new("Reimported fillets", soliddraft_app::startup::kernel()));
     app.state_mut().state.push(soliddraft_app::state::AppAction::ImportStep(Some(path.clone())));
-    app.run_steps(3);
+    import_open::settle(&mut app);
     assert!(app.state().state.import_dialog.is_some(), "{name}: Import STEP did not open");
     app.get_by_role_and_label(egui::accesskit::Role::Button, "Accept").click();
-    app.run_steps(3);
+    import_open::settle(&mut app);
     let doc = &app.state().state.doc;
     assert_eq!(doc.model().live_bodies().len(), 1, "{name}");
     assert_eq!(doc.features.len(), 1, "{name}");

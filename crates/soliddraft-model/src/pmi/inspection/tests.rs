@@ -149,7 +149,8 @@ fn p1_inspection_csv_preserves_grouping_and_trace_after_native_reopen() {
     let diameter: Vec<_> = named("Hole diameter").collect();
     let position: Vec<_> = named("Hole position").collect();
     assert_eq!((diameter.len(), position.len()), (4, 12));
-    for (index, (diameter, frame)) in diameter.iter().zip(position.chunks_exact(3)).enumerate() {
+    let (frames, []) = position.as_chunks::<3>() else { panic!("incomplete position frame") };
+    for (index, (diameter, frame)) in diameter.iter().zip(frames).enumerate() {
         let member = (index + 1).to_string();
         assert_eq!(diameter[col("group_id")], "pmi/Hole diameter");
         assert_eq!(diameter[col("member")], member);

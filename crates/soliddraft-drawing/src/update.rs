@@ -236,6 +236,8 @@ pub fn regenerate_view(drawing: &mut Drawing, part: &Part, id: ViewId) -> Result
     let mut contexts = Contexts::new();
     for &id in &ids {
         project::compute_in(drawing, part, &index, id, &mut contexts)?;
+    }
+    for &id in &ids {
         let ctx = &contexts[&id];
         let view = drawing.view_mut(id).ok_or(DrawingError::UnknownView(id))?;
         view.geometry = ctx.projected.geometry.clone();
@@ -287,6 +289,14 @@ fn collect(drawing: &Drawing, report: &mut UpdateReport) {
     }
 }
 
+fn resolve_anchor(index: &PartIndex, ctx: &ViewContext, anchor: &crate::Anchor) -> Resolution {
+    let leg = anchor.entity.section_leg;
+    if leg != 0 && ctx.xf.leg_turn(leg).is_none() {
+        return Resolution::Lost("The aligned cut leg is missing".into());
+    }
+    index.resolve(&anchor.entity)
+}
+
 /// Re-resolves one annotation; returns the change when its displayed value moved.
 pub(crate) fn re_resolve(
     a: &mut Annotation,
@@ -300,7 +310,7 @@ pub(crate) fn re_resolve(
     let found: Vec<Result<Entity, String>> = a
         .anchors
         .iter()
-        .map(|anchor| match index.resolve(&anchor.entity) {
+        .map(|anchor| match resolve_anchor(index, ctx, anchor) {
             Resolution::Found(e) => Ok(e),
             Resolution::Lost(why) => Err(why),
         })
@@ -314,11 +324,38 @@ pub(crate) fn re_resolve(
     }
     let entities: Vec<Entity> = found.into_iter().map(|r| r.expect("no losses")).collect();
     for (anchor, e) in a.anchors.iter_mut().zip(&entities) {
-        if let Some(r) = index.entity_ref(*e) {
+        if let Some(mut r) = index.entity_ref(*e) {
+            r.section_leg = anchor.entity.section_leg;
             anchor.entity = r;
         }
     }
     remeasure(a, index, ctx, &entities, symbols)
+}
+
+pub(crate) fn anchor_curve<'a>(
+    ctx: &ViewContext,
+    anchor: &crate::Anchor,
+    curve: Option<&'a soliddraft_kernel_api::drawing::Curve3>,
+) -> Option<std::borrow::Cow<'a, soliddraft_kernel_api::drawing::Curve3>> {
+    let curve = curve?;
+    Some(match ctx.xf.leg_turn(anchor.entity.section_leg) {
+        Some(turn) => std::borrow::Cow::Owned(turn.curve(curve)),
+        None => std::borrow::Cow::Borrowed(curve),
+    })
+}
+
+pub(crate) fn anchor_geometry<'a>(
+    ctx: &ViewContext,
+    anchor: &crate::Anchor,
+    curve: Option<&'a soliddraft_kernel_api::drawing::Curve3>,
+) -> AnchorGeometry<'a> {
+    let turn = ctx.xf.leg_turn(anchor.entity.section_leg);
+    let placed = |p| turn.map_or(p, |turn| turn.point(p));
+    let attach = match anchor.attach {
+        Attach::Point { at } => Attach::Point { at: placed(at) },
+        other => other,
+    };
+    AnchorGeometry { curve, point: placed(anchor.entity.fingerprint.point), attach }
 }
 
 /// Re-caches the anchors' points and re-measures a dimension whose anchors all resolve to
@@ -330,19 +367,17 @@ pub(crate) fn remeasure(
     entities: &[Entity],
     symbols: &Symbols,
 ) -> Option<ChangedValue> {
-    let geometry: Vec<AnchorGeometry> = a
+    let curves: Vec<_> = a
         .anchors
         .iter()
         .zip(entities)
-        .map(|(anchor, e)| AnchorGeometry {
-            curve: match e {
-                Entity::Edge(id) => index.edge_curve(*id),
-                Entity::Face(_) => None,
-            },
-            point: anchor.entity.fingerprint.point,
-            attach: anchor.attach,
+        .map(|(anchor, e)| match e {
+            Entity::Edge(id) => anchor_curve(ctx, anchor, index.edge_curve(*id)),
+            Entity::Face(_) => None,
         })
         .collect();
+    let geometry: Vec<_> =
+        a.anchors.iter().zip(&curves).map(|(anchor, curve)| anchor_geometry(ctx, anchor, curve.as_deref())).collect();
     let (before_state, mut change) = (a.state.clone(), None);
     match &mut a.body {
         AnnotationKind::Dimension(d) => {
@@ -427,11 +462,8 @@ pub(crate) fn remeasure(
                     }
                 }
                 AnnotationKind::HoleCallout { text } => {
-                    let circle = entities.first().and_then(|e| match e {
-                        Entity::Edge(id) => {
-                            ctx.projected.circles.iter().find(|c| c.entity.kernel_hint == Some(id.raw()))
-                        }
-                        Entity::Face(_) => None,
+                    let circle = a.anchors.first().and_then(|anchor| {
+                        ctx.projected.circles.iter().find(|c| c.entity.same_projected_entity(&anchor.entity))
                     });
                     let fresh = circle.and_then(|c| index.namer()?.hole_callout(c, &ctx.projected, symbols));
                     if let Some(fresh) = fresh
@@ -501,7 +533,7 @@ pub fn reattach(
     let anchor = a.anchors.get_mut(end).ok_or(DrawingError::BadRequest(format!("{id} has no end {end}")))?;
     anchor.entity = entity;
     // A round takes its centre, a line its middle, unless the end picks a side.
-    if let Resolution::Found(Entity::Edge(edge)) = index.resolve(&anchor.entity)
+    if let Resolution::Found(Entity::Edge(edge)) = resolve_anchor(&index, &ctx, anchor)
         && let Some(curve) = index.edge_curve(edge)
     {
         let round = crate::measure::radius_of(curve).is_some();
@@ -510,13 +542,14 @@ pub fn reattach(
         } else if !round && matches!(anchor.attach, Attach::Centre | Attach::Silhouette) {
             anchor.attach = Attach::Mid;
         }
-        let g = AnchorGeometry { curve: Some(curve), point: anchor.entity.fingerprint.point, attach: anchor.attach };
+        let curve = anchor_curve(&ctx, anchor, Some(curve));
+        let g = anchor_geometry(&ctx, anchor, curve.as_deref());
         anchor.cached = ctx.xf.point(anchor_point(&g, &ctx.xf, Default::default()));
     }
     let resolved: Vec<Option<Entity>> = a
         .anchors
         .iter()
-        .map(|x| match index.resolve(&x.entity) {
+        .map(|x| match resolve_anchor(&index, &ctx, x) {
             Resolution::Found(e) => Some(e),
             Resolution::Lost(_) => None,
         })

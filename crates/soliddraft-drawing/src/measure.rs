@@ -116,8 +116,7 @@ pub fn measure(kind: &DimensionKind, dim_type: DimType, anchors: &[AnchorGeometr
                 (len > 0.0).then(|| Point2::new(v.u / len, v.v / len))
             };
             let (a, b) = (dir(anchors.first()?)?, dir(anchors.get(1)?)?);
-            let cos = (a.u * b.u + a.v * b.v).clamp(-1.0, 1.0);
-            Some(cos.acos().to_degrees())
+            Some(acute_angle(a.u * b.u + a.v * b.v))
         }
         DimensionKind::Chamfer => chamfer(anchors, xf).map(|(size, _)| size),
         DimensionKind::Ordinate => None,
@@ -130,6 +129,10 @@ fn edge_ends(anchors: &[AnchorGeometry], xf: &ViewTransform) -> Option<[Vec3; 4]
         return None;
     }
     Some([a, b, c, d].map(|g| anchor_point(g, xf, Point2::default())))
+}
+
+fn acute_angle(cos: f64) -> f64 {
+    cos.abs().min(1.0).acos().to_degrees()
 }
 
 /// The projected ends of two straight model edges, in anchor order.
@@ -423,9 +426,7 @@ fn anchor(curve: &crate::Curve2, attach: Attach, at: Point2) -> Anchor {
 
 /// Uses a complete edge's exact circle metadata across visibility fragments.
 pub fn shape_of_curve(curve: &crate::Curve2, circles: &[CircleInfo]) -> CurveShape {
-    if curve.source.kernel_hint.is_some()
-        && let Some(circle) = circles.iter().find(|c| c.entity.kernel_hint == curve.source.kernel_hint)
-    {
+    if let Some(circle) = circles.iter().find(|c| c.entity.same_projected_entity(&curve.source)) {
         return CurveShape::Circle { centre: circle.centre, radius: circle.radius };
     }
     shape_of(&curve.path)
@@ -522,8 +523,7 @@ pub fn propose(view: &View, picks: &[Pick], circles: &[CircleInfo]) -> Option<Pr
                 ..base
             });
         }
-        let angle = (d1.dot(d2) / (d1.length() * d2.length())).clamp(-1.0, 1.0).acos().to_degrees();
-        let angle = if angle > 90.0 { 180.0 - angle } else { angle };
+        let angle = acute_angle(d1.dot(d2) / (d1.length() * d2.length()));
         return Some(Proposal {
             kind: DimensionKind::Angular,
             anchors: vec![anchor(first, Attach::Mid, s1.mid()), anchor(second, Attach::Mid, s2.mid())],

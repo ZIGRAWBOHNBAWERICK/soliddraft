@@ -804,6 +804,11 @@ fn move_view_to_sheet(drawing: &mut Drawing, view: ViewId, to_sheet: usize, to: 
         return move_view(drawing, view, to);
     }
     let before = scale_followers(drawing, view)?;
+    let moved = drawing.view(view).expect("view on source sheet");
+    let ratio = project::scale_in(drawing, to_sheet, moved) / project::scale_in(drawing, from, moved);
+    for (id, _) in &before {
+        check_break_scale(drawing, *id, ratio)?;
+    }
     let s = &mut drawing.sheets[from];
     let i = s.views.iter().position(|v| v.id == view).expect("found");
     let mut v = s.views.remove(i);
@@ -863,7 +868,8 @@ impl Command {
             _ => return false,
         };
         !annotation.anchors.is_empty()
-            && drawing.view(annotation.view).is_some_and(|view| !view.geometry.breaks.is_empty())
+            && (annotation.anchors.iter().any(|a| a.entity.section_leg != 0)
+                || drawing.view(annotation.view).is_some_and(|view| !view.geometry.breaks.is_empty()))
     }
 }
 
@@ -946,15 +952,17 @@ pub fn apply_with(drawing: &mut Drawing, command: &Command, part: &Part) -> Resu
                     "a detail view shows its parent as it is; break the parent".into(),
                 ));
             }
-            v.breaks = breaks.clone();
-            update::regenerate_view(drawing, part, *view).map(|_| None)
+            let before = std::mem::replace(&mut v.breaks, breaks.clone());
+            let result = update::regenerate_view(drawing, part, *view).map(|_| None);
+            if result.is_err() {
+                drawing.view_mut(*view).expect("existing view").breaks = before;
+            }
+            result
         }
         Command::SetHalfSection { view, half } => {
             let v = drawing.view_mut(*view).ok_or(DrawingError::UnknownView(*view))?;
-            if half.is_some() && matches!(v.kind, ViewKind::Detail { .. } | ViewKind::Section { .. }) {
-                return Err(DrawingError::BadRequest(
-                    "a half section is made of a whole view, not a section or detail".into(),
-                ));
+            if half.is_some() && !matches!(v.kind, ViewKind::Base { .. } | ViewKind::Projected { .. }) {
+                return Err(DrawingError::BadRequest("A half section requires a model or projected view".into()));
             }
             v.half = half.clone();
             update::regenerate_view(drawing, part, *view).map(|_| None)
@@ -1011,8 +1019,12 @@ fn set_sheet_scale(drawing: &mut Drawing, sheet: usize, scale: Scale) -> Result<
         .flat_map(|(si, s)| s.views.iter().map(move |v| (si, v)))
         .map(|(si, v)| (v.id, project::scale_in(drawing, si, v)))
         .collect();
-    drawing.sheets[sheet].scale = scale;
-    rescale_changed(drawing, before)
+    let old = std::mem::replace(&mut drawing.sheets[sheet].scale, scale);
+    let result = rescale_changed(drawing, before);
+    if result.is_err() {
+        drawing.sheets[sheet].scale = old;
+    }
+    result
 }
 
 /// Deletes a view with its annotations, once nothing is derived from it.
@@ -1096,8 +1108,13 @@ fn move_view(drawing: &mut Drawing, id: ViewId, to: Point2) -> Result<(), Drawin
 /// the parent's scale, scale about each view's origin.
 fn set_view_scale(drawing: &mut Drawing, id: ViewId, scale: ViewScale) -> Result<(), DrawingError> {
     let before = scale_followers(drawing, id)?;
-    drawing.view_mut(id).ok_or(DrawingError::UnknownView(id))?.scale = scale;
-    rescale_changed(drawing, before)
+    let view = drawing.view_mut(id).ok_or(DrawingError::UnknownView(id))?;
+    let old = std::mem::replace(&mut view.scale, scale);
+    let result = rescale_changed(drawing, before);
+    if result.is_err() {
+        drawing.view_mut(id).expect("existing view").scale = old;
+    }
+    result
 }
 
 /// Captures the effective scales of a view and descendants that inherit its scale.
@@ -1120,11 +1137,28 @@ fn scale_followers(drawing: &Drawing, id: ViewId) -> Result<Vec<(ViewId, f64)>, 
 }
 
 fn rescale_changed(drawing: &mut Drawing, before: Vec<(ViewId, f64)>) -> Result<(), DrawingError> {
+    let mut changes = Vec::new();
     for (v, old) in before {
         let ratio = project::view_scale(drawing, v)? / old;
         if (ratio - 1.0).abs() >= 1e-12 {
-            rescale(drawing, v, ratio);
+            check_break_scale(drawing, v, ratio)?;
+            changes.push((v, ratio));
         }
+    }
+    for (v, ratio) in changes {
+        rescale(drawing, v, ratio);
+    }
+    Ok(())
+}
+
+fn check_break_scale(drawing: &Drawing, id: ViewId, ratio: f64) -> Result<(), DrawingError> {
+    let view = drawing.view(id).ok_or(DrawingError::UnknownView(id))?;
+    if !view.breaks.is_empty()
+        && view.geometry.breaks.first().is_some_and(|gap| gap.omitted_mm.is_some_and(|width| width * ratio <= gap.gap))
+    {
+        return Err(DrawingError::BadRequest(
+            "The break must shorten the view and leave material on both sides".into(),
+        ));
     }
     Ok(())
 }
@@ -1144,9 +1178,16 @@ fn rescale(drawing: &mut Drawing, v: ViewId, ratio: f64) {
         match &mut child.kind {
             ViewKind::Section { line, .. } => line.iter_mut().for_each(|p| *p = rounded(*p)),
             ViewKind::Detail { center, radius, profile, .. } => {
+                let boundary = if profile.len() >= 3 {
+                    crate::Boundary::Polygon { points: std::mem::take(profile) }
+                } else {
+                    crate::Boundary::Circle { center: *center, radius: *radius }
+                };
                 *center = s(*center);
-                *radius *= ratio;
-                profile.iter_mut().for_each(|p| *p = s(*p));
+                match project::scaled_boundary(&boundary, ratio, gap) {
+                    crate::Boundary::Circle { radius: scaled, .. } => *radius = scaled,
+                    crate::Boundary::Polygon { points } => *profile = points,
+                }
             }
             _ => {}
         }

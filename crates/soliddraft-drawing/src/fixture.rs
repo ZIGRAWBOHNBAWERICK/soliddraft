@@ -405,6 +405,7 @@ fn view_geometry(view: StandardView, scale: f64, lines: fn(&mut Lines)) -> (View
         coarse: false,
         breaks: Vec::new(),
         symmetry: None,
+        symmetry_segments: Vec::new(),
     };
     (geometry, raw)
 }

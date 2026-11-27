@@ -240,7 +240,16 @@ fn aligned_section_through_a_five_hole_flange() {
         "flange.dwdrw",
         "--json",
     ];
-    let report: Value = serde_json::from_str(&soliddraft(&dir, &args)).unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_soliddraft"))
+        .args(args)
+        .current_dir(&dir)
+        .env("RUST_LOG", "soliddraft_drawing=warn")
+        .output()
+        .unwrap();
+    let log = String::from_utf8(out.stderr).unwrap();
+    assert!(out.status.success(), "{log}");
+    assert!(log.contains("showing the display mesh"), "{log}");
+    let report: Value = serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!(report["views"], 5, "{report:#}");
     let (section, scale) = bent_section(&dir.join("flange.dwdrw"), 3);
     assert!(section.geometry.display_only && !section.geometry.unproved);
@@ -267,6 +276,7 @@ fn aligned_section_through_a_five_hole_flange() {
     let svg = std::fs::read_to_string(dir.join("flange.svg")).unwrap();
     assert!(svg.contains(r#"<g id="VISIBLE""#), "the other views print");
     assert!(!svg.contains(r#"<g id="HATCH""#), "the display section's hatch stays off the print");
+    assert!(!svg.contains(r#"<g id="CUTTING""#), "the display section's cutting line stays off the print");
     let (drawing, _) = soliddraft_drawing::file::read(&dir.join("flange.dwdrw")).unwrap();
     let list = soliddraft_drawing::display::layout_sheet(&drawing, 0);
     assert!(

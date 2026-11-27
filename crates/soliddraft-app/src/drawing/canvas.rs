@@ -1331,14 +1331,8 @@ fn circle_tool(
 ) {
     let Some(v) = s.sheet().view(view).cloned() else { return };
     let Some(c) = v.geometry.curves.get(index) else { return };
-    let circle = s
-        .doc
-        .circles
-        .get(&view)
-        .and_then(|cs| {
-            cs.iter().find(|k| k.entity.kernel_hint.is_some() && k.entity.kernel_hint == c.source.kernel_hint)
-        })
-        .cloned();
+    let circle =
+        s.doc.circles.get(&view).and_then(|cs| cs.iter().find(|k| k.entity.same_projected_entity(&c.source))).cloned();
     let Some(circle) = circle else {
         s.say("That is not a circle seen face-on");
         return;

@@ -186,14 +186,16 @@ pub fn new_section_along(
     flip: bool,
     label: Option<String>,
 ) -> Result<(View, ViewContext), DrawingError> {
-    if line.len() != 2 {
-        CutPath::of_line(line, flip).map_err(|e| DrawingError::BadRequest(format!("cutting line: {e}")))?;
-    }
     // The parent is projected once: for the cutting line's model points and, through
     // the same memo, for the section's frame.
     let mut memo = Contexts::new();
     project::compute_in(drawing, part, index, parent, &mut memo)?;
-    let model_line = line.iter().map(|p| memo[&parent].xf.unproject(*p)).collect();
+    let xf = memo[&parent].xf;
+    let model_line: Vec<_> = line.iter().map(|p| xf.unproject(*p)).collect();
+    let flat: Vec<_> = model_line.iter().map(|p| xf.unbroken().precise_point(*p)).collect();
+    if flat.len() != 2 {
+        CutPath::of_line(&flat, flip).map_err(|e| DrawingError::BadRequest(format!("cutting line: {e}")))?;
+    }
     let kind = ViewKind::Section {
         parent,
         line: line.to_vec(),
@@ -210,7 +212,7 @@ pub fn new_section_along(
     // The view goes where the eye is (third angle) or where the arrows point (first
     // angle), in line with its parent.
     let arrow =
-        project::section_arrow(line, flip).ok_or(DrawingError::BadRequest("the cutting line has no length".into()))?;
+        project::section_arrow(&flat, flip).ok_or(DrawingError::BadRequest("the cutting line has no length".into()))?;
     let projection = drawing.sheets.get(sheet).map_or(Projection::FirstAngle, |s| s.projection);
     let side = match projection {
         Projection::ThirdAngle => Point2::new(-arrow.u, -arrow.v),

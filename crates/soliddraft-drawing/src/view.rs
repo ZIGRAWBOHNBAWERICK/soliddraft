@@ -529,6 +529,8 @@ pub struct ViewGeometry {
     /// A half section's symmetry line across the view, in view millimetres.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub symmetry: Option<[Point2; 2]>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) symmetry_segments: Vec<[Point2; 2]>,
 }
 
 /// A closed-up break as drawn: two break lines `gap` apart across the view.
@@ -542,6 +544,56 @@ pub struct BreakGap {
     pub gap: f64,
     #[serde(default = "mid_fraction")]
     pub(crate) centre_fraction: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) omitted_mm: Option<f64>,
+}
+
+impl BreakGap {
+    pub(crate) fn along(self, p: Point2) -> f64 {
+        if self.axis == AlignAxis::Vertical { p.v } else { p.u }
+    }
+
+    pub(crate) fn unshift(self, p: Point2) -> Point2 {
+        let offset = self
+            .omitted_mm
+            .map_or(0.0, |omitted| (omitted - self.gap) * ((self.along(p) - self.at) / self.gap).clamp(0.0, 1.0));
+        if self.axis == AlignAxis::Vertical { Point2::new(p.u, p.v + offset) } else { Point2::new(p.u + offset, p.v) }
+    }
+
+    pub(crate) fn trace(self, a: Point2, b: Point2) -> [[Point2; 2]; 2] {
+        let (a0, b0) = (self.unshift(a), self.unshift(b));
+        let (start, end) = (self.along(a0), self.along(b0));
+        let far = self.at + self.omitted_mm.unwrap_or(self.gap);
+        let (first, last) = if start <= end { (self.at, far) } else { (far, self.at) };
+        let at = |station: f64, shift: f64| {
+            let t = ((station - start) / (end - start)).clamp(0.0, 1.0);
+            let p = Point2::new(a0.u + (b0.u - a0.u) * t, a0.v + (b0.v - a0.v) * t);
+            if t == 0.0 {
+                a
+            } else if t == 1.0 {
+                b
+            } else if self.axis == AlignAxis::Vertical {
+                Point2::new(p.u, p.v - shift)
+            } else {
+                Point2::new(p.u - shift, p.v)
+            }
+        };
+        if start == end && self.contains(a) {
+            return [[a, a], [b, b]];
+        }
+        if start == end {
+            return [[a, b], [b, b]];
+        }
+        [
+            [a, at(first, first - self.at - if first == far { self.gap } else { 0.0 })],
+            [at(last, last - self.at - if last == far { self.gap } else { 0.0 }), b],
+        ]
+    }
+
+    pub(crate) fn contains(self, p: Point2) -> bool {
+        let p = self.along(p);
+        p > self.at && p < self.at + self.gap
+    }
 }
 
 fn mid_fraction() -> f64 {

@@ -37,6 +37,7 @@ pub struct BoxKernel {
     pub refuse_direction: Option<Vec3>,
     /// Cuts sections square to an axis itself; without it sections are unsupported.
     pub sections: bool,
+    pub refuse_exact_section: bool,
 }
 
 /// One box in a [`BoxKernel`], bound as a read-only [`DrawingGeometry`].
@@ -262,6 +263,9 @@ impl BoxKernel {
     fn section_view_of(&self, body: BodyId, spec: &SectionSpec) -> KernelResult<SectionView> {
         if !self.sections {
             return Err(KernelError::Unsupported("profiles".into()));
+        }
+        if self.refuse_exact_section && !spec.view.preview {
+            return Err(KernelError::Unsupported("test exact section refused".into()));
         }
         let frame = spec.view.frame().ok_or_else(|| KernelError::InvalidInput("view direction".into()))?;
         let n = frame.direction;

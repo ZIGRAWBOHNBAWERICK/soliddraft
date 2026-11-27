@@ -83,3 +83,33 @@ fn sheet_format_and_title_layout_undo_redo_and_reopen() {
     assert_eq!(stack.redo(&mut drawing), Some("Title block layout"));
     assert_eq!(drawing, reopened);
 }
+
+#[test]
+fn long_title_values_fit_their_cells_without_losing_the_saved_text() {
+    let mut drawing = fixture::bracket_a3();
+    let owner = "Intercontinental precision components and fabrication company";
+    let mut stack = UndoStack::new();
+    for command in [
+        Command::SetTitleLayout {
+            sheet: 0,
+            key: "owner".into(),
+            layout: Some(TitleCell { cell: [30.0, 9.0, 30.0, 9.0] }),
+        },
+        Command::SetTitleField { sheet: 0, key: "owner".into(), value: owner.into() },
+    ] {
+        stack.run(&mut drawing, &command, None).unwrap();
+    }
+    assert_eq!(drawing.sheets[0].format_overrides["owner"], owner);
+    let list = display::layout_sheet(&drawing, 0);
+    let field = list
+        .printable()
+        .find_map(|item| match item {
+            Item::Text(text) if text.text == owner => Some(text),
+            _ => None,
+        })
+        .unwrap();
+    assert!(field.height > 0.0);
+    // The visible cells in ISO A3 show Owner immediately to the left of Title.
+    let title_boundary = 420.0 - 10.0 - 180.0 + 60.0;
+    assert!(field.pos.u + display::text_width(&field.text, field.height) <= title_boundary + 1e-8);
+}

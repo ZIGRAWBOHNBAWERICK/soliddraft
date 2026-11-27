@@ -146,6 +146,7 @@ asm     `soliddraft asm --help` describes the assembly commands.
 ";
 
 fn main() -> ExitCode {
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("off")).init();
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
         Some("journal") => journal::run(&args[1..]),

@@ -104,7 +104,7 @@ impl TitleCell {
     pub(crate) fn fits(&self, field: &crate::library::FieldDef) -> bool {
         let [x, y, w, h] = self.cell;
         let [left, bottom, width, height] = field.cell;
-        let caption = 2.4 + crate::text::text_width(&field.label, 1.8);
+        let caption = 2.4 + crate::display::text_width(&field.label, 1.8);
         let min_width = if field.symbol.is_some() { caption.max(17.0) } else { caption };
         let min_height = (field.size + 5.0).min(height).max(6.8);
         [x, y, w, h].iter().all(|v| v.is_finite())

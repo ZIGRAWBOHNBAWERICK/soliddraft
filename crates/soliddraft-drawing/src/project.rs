@@ -28,7 +28,7 @@ use crate::annotation::{Anchor, Annotation, AnnotationKind, AnnotationState, Att
 use crate::entity::{EntityKind, EntityRef};
 use crate::ids::{AnnotationId, ViewId};
 use crate::part::{Entity, Part, PartIndex, Resolution, round};
-use crate::section_path::{Band, BentSection, CutPath};
+use crate::section_path::{Band, BentSection, CutPath, Turn};
 use crate::sheet::{Projection, Sheet};
 use crate::view::{
     Accuracy, AlignAxis, Boundary, Break, BreakGap, BrokenOut, Curve2, CurveKind, FoldDirection, HalfSection, Polygon,
@@ -49,6 +49,7 @@ pub struct ViewTransform {
     pub centre: Point2,
     /// The stretches a broken view leaves out; none for most views.
     pub breaks: Breaks,
+    aligned_turn: Option<Turn>,
 }
 
 /// The breaks of a view as its transform applies them: stretches of the part, in model
@@ -125,9 +126,13 @@ impl Breaks {
 }
 
 impl ViewTransform {
+    pub(crate) fn leg_turn(&self, leg: u8) -> Option<Turn> {
+        if leg == 1 { self.aligned_turn } else { None }
+    }
+
     /// A transform with no breaks.
     pub fn new(frame: ViewFrame, scale: f64, centre: Point2) -> ViewTransform {
-        ViewTransform { frame, scale, centre, breaks: Breaks::default() }
+        ViewTransform { frame, scale, centre, breaks: Breaks::default(), aligned_turn: None }
     }
 
     /// The same transform without its breaks: what a broken view's first kept stretch
@@ -138,15 +143,18 @@ impl ViewTransform {
 
     /// The transform with `breaks`, centred again on what a view of the curves with
     /// sheet bounds `bbox_2d` (see [`ViewCurves::bbox_2d`]) keeps.
-    pub fn with_breaks(self, mut breaks: Breaks, bbox_2d: [f64; 4]) -> ViewTransform {
-        if breaks.is_empty() {
-            return self;
-        }
+    pub fn with_breaks(self, mut breaks: Breaks, bbox_2d: [f64; 4]) -> Result<ViewTransform, DrawingError> {
+        let Some((start, end)) = breaks.stretch else { return Ok(self) };
         let (lo, hi) = if breaks.vertical { (bbox_2d[1], bbox_2d[3]) } else { (bbox_2d[0], bbox_2d[2]) };
         let s = self.scale;
+        if start <= lo || end >= hi || (end - start) * s <= Break::GAP {
+            return Err(DrawingError::BadRequest(
+                "The break must shorten the view and leave material on both sides".into(),
+            ));
+        }
         let middle = ((lo * s - breaks.shift(lo, s)) + (hi * s - breaks.shift(hi, s))) / 2.0;
         breaks.centre_fraction = (breaks.fraction(lo) + breaks.fraction(hi)) / 2.0;
-        ViewTransform { centre: breaks.with_along(self.centre, middle), breaks, ..self }
+        Ok(ViewTransform { centre: breaks.with_along(self.centre, middle), breaks, ..self })
     }
 
     /// A model point projected and scaled, not yet closed up or centred.
@@ -189,10 +197,16 @@ impl ViewTransform {
 
     /// Where a broken view's gaps lie, in view millimetres.
     pub fn gaps(&self) -> Vec<BreakGap> {
-        let Some((lo, _)) = self.breaks.stretch else { return Vec::new() };
+        let Some((lo, hi)) = self.breaks.stretch else { return Vec::new() };
         let axis = if self.breaks.vertical { AlignAxis::Vertical } else { AlignAxis::Horizontal };
         let at = lo * self.scale - self.breaks.along(self.centre);
-        vec![BreakGap { axis, at, gap: Break::GAP, centre_fraction: self.breaks.centre_fraction }]
+        vec![BreakGap {
+            axis,
+            at,
+            gap: Break::GAP,
+            centre_fraction: self.breaks.centre_fraction,
+            omitted_mm: Some((hi - lo) * self.scale),
+        }]
     }
 
     /// Changes scale while keeping the break gap in paper millimetres.
@@ -381,7 +395,15 @@ fn compute_view_at(
                 Some((_, xf)) => xf,
                 None => view_transform(&unfolded.curves, &spec, scale, view)?,
             };
-            let mut projected = project(index, &unfolded.curves, &xf, part.digest.as_str(), part.preview);
+            let xf = ViewTransform { aligned_turn: bent.aligned_turn(), ..xf };
+            let mut projected = project_curves(
+                index,
+                &unfolded.curves,
+                &xf,
+                part.digest.as_str(),
+                part.preview,
+                Some(unfolded.cuts[0].curves.len()),
+            );
             projected.geometry.display_only = display_only;
             // Each cut hatches only its own stretch: the jogs and the pivot draw no line.
             let flat = xf.unbroken();
@@ -392,17 +414,9 @@ fn compute_view_at(
                     let window = cut.band.window(|p| flat.point(p), |d| flat.vector(d));
                     cut.regions.iter().flat_map(move |r| {
                         let polygon = region_polygon(r, &flat, None);
-                        let polygon = Polygon {
-                            outer: crate::display::clip_polygon(&polygon.outer, &window),
-                            holes: polygon
-                                .holes
-                                .iter()
-                                .map(|h| crate::display::clip_polygon(h, &window))
-                                .filter(|h| h.len() >= 3)
-                                .collect(),
-                            ..polygon
-                        };
-                        split_polygon(polygon, &xf)
+                        clip_polygon_region(polygon, &window, true)
+                            .into_iter()
+                            .flat_map(move |polygon| split_polygon(polygon, &xf))
                     })
                 })
                 .filter(|h| h.outer.len() >= 3)
@@ -458,50 +472,38 @@ fn compute_view_at(
                 let q = scale_view_point(*p, ratio, gap);
                 Point2::new(round(q.u - shift.u), round(q.v - shift.v))
             };
-            let boundary = if profile.len() >= 3 {
-                Boundary::Polygon { points: profile.iter().map(map).collect() }
+            let callout = if profile.len() >= 3 {
+                Boundary::Polygon { points: profile.clone() }
             } else {
-                Boundary::Circle { center: map(center), radius: radius * ratio }
+                Boundary::Circle { center: *center, radius: *radius }
             };
-            let parent = &pctx.projected;
+            let boundary = scaled_boundary(&callout, ratio, gap).mapped(-shift.u, -shift.v, 1.0);
+            let mut parent = pctx.projected.clone();
+            clip_projected(&mut parent, &callout, true);
             let curves = parent
                 .geometry
                 .curves
-                .iter()
-                .map(|c| Curve2 {
-                    path: scaled_path(&c.path, ratio, gap, shift),
-                    ends: c.ends.map(|ends| ends.map(|p| map(&p))),
-                    ..c.clone()
+                .into_iter()
+                .map(|mut c| {
+                    c.path = scaled_path(&c.path, ratio, gap, shift);
+                    c.ends = c.ends.map(|ends| ends.map(|p| map(&p)));
+                    c
                 })
                 .collect();
             let hatch = parent
                 .geometry
                 .hatch
-                .iter()
-                .map(|h| {
-                    let outer: Vec<Point2> = h.outer.iter().map(map).collect();
-                    let holes: Vec<Vec<Point2>> = h.holes.iter().map(|l| l.iter().map(map).collect()).collect();
-                    match &h.clip {
-                        // A region clipped already, as by a broken-out section: cut its
-                        // outline to the detail and keep the first clip.
-                        Some(c) => {
-                            let window = boundary.polygon(96);
-                            Polygon {
-                                outer: crate::display::clip_polygon(&outer, &window),
-                                holes: holes.iter().map(|l| crate::display::clip_polygon(l, &window)).collect(),
-                                clip: Some(scaled_boundary(c, ratio, gap).mapped(-shift.u, -shift.v, 1.0)),
-                                approximate: h.approximate || matches!(boundary, Boundary::Circle { .. }),
-                            }
-                        }
-                        None => Polygon { outer, holes, clip: Some(boundary.clone()), approximate: h.approximate },
-                    }
+                .into_iter()
+                .map(|mut h| {
+                    h.outer.iter_mut().chain(h.holes.iter_mut().flatten()).for_each(|p| *p = map(p));
+                    h.clip = h.clip.map(|clip| scaled_boundary(&clip, ratio, gap).mapped(-shift.u, -shift.v, 1.0));
+                    h
                 })
-                .filter(|h| h.outer.len() >= 3)
                 .collect();
             let circles = parent
                 .circles
-                .iter()
-                .map(|c| CircleInfo { centre: map(&c.centre), radius: c.radius * ratio, ..c.clone() })
+                .into_iter()
+                .map(|c| CircleInfo { centre: map(&c.centre), radius: c.radius * ratio, ..c })
                 .collect();
             let geometry = ViewGeometry {
                 source_digest: part.digest.to_string(),
@@ -515,9 +517,9 @@ fn compute_view_at(
                 coarse: parent.geometry.coarse,
                 breaks: Vec::new(),
                 symmetry: None,
+                symmetry_segments: Vec::new(),
             };
             let mut projected = Projected { geometry, transform: xf, circles };
-            clip_projected(&mut projected, &boundary, true);
             projected.geometry.bbox = boundary.bounds().map(round);
             projected.geometry.outline = Some(boundary);
             ViewContext { id: view.id, curves: pctx.curves.clone(), xf, pictorial: pctx.pictorial, projected }
@@ -555,7 +557,12 @@ fn compute_view_at(
     }
     ctx.projected.geometry.breaks = ctx.xf.gaps();
     if let Some(half) = &view.half {
-        ctx.projected.geometry.symmetry = symmetry_line(&ctx, half);
+        let segments = symmetry_line(&ctx, half);
+        if let [line] = segments.as_slice() {
+            ctx.projected.geometry.symmetry = Some(*line);
+        } else {
+            ctx.projected.geometry.symmetry_segments = segments;
+        }
     }
     Ok(ctx)
 }
@@ -568,7 +575,7 @@ fn view_transform(
     view: &View,
 ) -> Result<ViewTransform, DrawingError> {
     let xf = transform(curves, spec, scale)?;
-    Ok(xf.with_breaks(Breaks::new(&view.breaks, &xf.frame)?, curves.bbox_2d))
+    xf.with_breaks(Breaks::new(&view.breaks, &xf.frame)?, curves.bbox_2d)
 }
 
 fn section_or_mesh(
@@ -579,7 +586,7 @@ fn section_or_mesh(
 ) -> soliddraft_kernel_api::KernelResult<SectionView> {
     let section = |preview| part.geometry.section_view(&SectionSpec { view: ViewSpec { preview, ..*spec }, origin });
     match section(part.preview) {
-        Err(exact) if !part.preview => match section(true) {
+        Err(exact) if !part.preview && is_pictorial(spec) => match section(true) {
             Ok(mut mesh) => {
                 log::warn!("drawing section: the certified cut failed, showing the display mesh's: {exact}");
                 *display_only = true;
@@ -606,30 +613,28 @@ fn half_section(
     if !a.is_finite() || !b.is_finite() || (a - b).abs() > 1e-8 {
         return Err(DrawingError::BadRequest("Both symmetry axis points must lie in the same cutting plane".into()));
     }
-    let boundary = half_boundary(&ctx.xf, half)?;
+    let flat = ctx.xf.unbroken();
+    let boundary = half_boundary(&flat, half)?;
     let mut spec = with_display(ctx.spec(), display);
     spec.preview = part.preview;
     let section = section_or_mesh(part, &spec, half.axis[0], &mut ctx.projected.geometry.display_only)?;
     let mut cut = project(index, &section.curves, &ctx.xf, part.digest.as_str(), part.preview);
-    clip_projected(&mut ctx.projected, &boundary, false);
-    clip_projected(&mut cut, &boundary, true);
+    let xf = ctx.xf;
+    let in_cut = |p: Point2| boundary.contains(flat.precise_point(xf.unproject(p)));
+    clip_projected_lines(&mut ctx.projected, &|p| !in_cut(p));
+    clip_projected_lines(&mut cut, &in_cut);
     ctx.projected.geometry.curves.extend(cut.geometry.curves);
+    ctx.projected.circles.extend(cut.circles);
     ctx.projected.geometry.unproved |= cut.geometry.unproved;
     ctx.projected.geometry.catallax &= cut.geometry.catallax;
     // The half-plane is convex: the cut regions are clipped to it outright.
     let Boundary::Polygon { points: window } = &boundary else { unreachable!("a half-plane is a polygon") };
-    let clip = |ring: &[Point2]| crate::display::clip_polygon(ring, window);
     ctx.projected.geometry.hatch.extend(
         section
             .regions
             .iter()
-            .flat_map(|r| region_polygons(r, &ctx.xf, None))
-            .map(|p| Polygon {
-                outer: clip(&p.outer),
-                holes: p.holes.iter().map(|h| clip(h)).filter(|h| h.len() >= 3).collect(),
-                ..p
-            })
-            .filter(|p| p.outer.len() >= 3),
+            .flat_map(|r| clip_polygon_region(region_polygon(r, &flat, None), window, true))
+            .flat_map(|p| split_polygon(p, &xf)),
     );
     Ok(())
 }
@@ -638,7 +643,7 @@ fn half_section(
 /// past any view on the cut side of the symmetry line.
 fn half_boundary(xf: &ViewTransform, half: &HalfSection) -> Result<Boundary, DrawingError> {
     const FAR: f64 = 1e5;
-    let (a, b) = (xf.point(half.axis[0]), xf.point(half.axis[1]));
+    let (a, b) = (xf.precise_point(half.axis[0]), xf.precise_point(half.axis[1]));
     let (du, dv) = (b.u - a.u, b.v - a.v);
     let len = du.hypot(dv);
     if !len.is_finite() || len <= 1e-9 {
@@ -654,20 +659,25 @@ fn half_boundary(xf: &ViewTransform, half: &HalfSection) -> Result<Boundary, Dra
 }
 
 /// A half section's symmetry line across the view's line work, 3 mm past it.
-fn symmetry_line(ctx: &ViewContext, half: &HalfSection) -> Option<[Point2; 2]> {
-    let (a, b) = (ctx.xf.point(half.axis[0]), ctx.xf.point(half.axis[1]));
+fn symmetry_line(ctx: &ViewContext, half: &HalfSection) -> Vec<[Point2; 2]> {
+    let flat = ctx.xf.unbroken();
+    let (a, b) = (flat.precise_point(half.axis[0]), flat.precise_point(half.axis[1]));
     let (du, dv) = (b.u - a.u, b.v - a.v);
     let len = du.hypot(dv);
     if !len.is_finite() || len <= 1e-9 {
-        return None;
+        return Vec::new();
     }
     let (du, dv) = (du / len, dv / len);
-    let [x0, y0, x1, y1] = ctx.projected.geometry.bbox;
+    let [x0, y0, x1, y1] = flat.bounds(ctx.curves.bbox_2d);
     let along = [(x0, y0), (x1, y0), (x1, y1), (x0, y1)].map(|(u, v)| (u - a.u) * du + (v - a.v) * dv);
     let lo = along.iter().copied().fold(f64::INFINITY, f64::min) - 3.0;
     let hi = along.iter().copied().fold(f64::NEG_INFINITY, f64::max) + 3.0;
     let at = |t: f64| Point2::new(round(a.u + du * t), round(a.v + dv * t));
-    Some([at(lo), at(hi)])
+    let axis = Curve3::Line { a: flat.unproject(at(lo)), b: flat.unproject(at(hi)) };
+    path_of(&axis, &ctx.xf)
+        .segments()
+        .map(|segment| [segment.start(), segment.end()].map(|p| Point2::new(p.x, p.y)))
+        .collect()
 }
 
 pub(crate) fn view_refusal(label: impl FnOnce() -> String, error: DrawingError) -> DrawingError {
@@ -740,28 +750,41 @@ fn split_polygon(polygon: Polygon, xf: &ViewTransform) -> Vec<Polygon> {
     let sheet = |s: f64, far: f64| if s.is_finite() { s * xf.scale - centre } else { far };
     b.kept(xf.scale)
         .into_iter()
-        .filter_map(|(lo, hi, d)| {
+        .flat_map(|(lo, hi, d)| {
             let (a0, a1) = (sheet(lo, -FAR), sheet(hi, FAR));
-            // `with_along` sets the coordinate along the axis; the other one is `across`.
             let window: Vec<Point2> = [(a0, -FAR), (a1, -FAR), (a1, FAR), (a0, FAR)]
                 .into_iter()
                 .map(|(along, across)| b.with_along(Point2::new(across, across), along))
                 .collect();
-            let moved = |ring: Vec<Point2>| -> Vec<Point2> {
-                ring.into_iter().map(|p| b.with_along(p, round(b.along(p) - d))).collect()
-            };
-            let outer = moved(crate::display::clip_polygon(&polygon.outer, &window));
-            (outer.len() >= 3).then(|| Polygon {
-                outer,
-                holes: polygon
-                    .holes
-                    .iter()
-                    .map(|h| moved(crate::display::clip_polygon(h, &window)))
-                    .filter(|h| h.len() >= 3)
-                    .collect(),
-                clip: polygon.clip.clone(),
-                approximate: polygon.approximate,
-            })
+            let mut clipped = clip_polygon_region(
+                Polygon {
+                    outer: polygon.outer.clone(),
+                    holes: polygon.holes.clone(),
+                    clip: None,
+                    approximate: polygon.approximate,
+                },
+                &window,
+                true,
+            );
+            for region in &mut clipped {
+                for p in region.outer.iter_mut().chain(region.holes.iter_mut().flatten()) {
+                    *p = b.with_along(*p, round(b.along(*p) - d));
+                }
+                region.clip.clone_from(&polygon.clip);
+            }
+            clipped
+        })
+        .collect()
+}
+
+fn clip_polygon_region(polygon: Polygon, window: &[Point2], inside: bool) -> Vec<Polygon> {
+    let mut rings = vec![polygon.outer];
+    rings.extend(polygon.holes);
+    crate::display::clip_regions(&rings, window, inside)
+        .into_iter()
+        .filter_map(|shape| {
+            let mut rings = shape.into_iter();
+            Some(Polygon { outer: rings.next()?, holes: rings.collect(), clip: None, approximate: polygon.approximate })
         })
         .collect()
 }
@@ -798,22 +821,42 @@ pub fn region_polygon(r: &CutRegion, xf: &ViewTransform, clip: Option<Boundary>)
 /// Keeps the part of every curve, hatch and face-on circle inside `boundary` (or
 /// outside it, when `inside` is false).
 pub fn clip_projected(p: &mut Projected, boundary: &Boundary, inside: bool) {
-    let test = |q: Point| boundary.contains(Point2::new(q.x, q.y)) == inside;
-    let curves = std::mem::take(&mut p.geometry.curves);
-    for mut c in curves {
-        c.path = clip_path(&c.path, &test);
-        if c.path.elements().len() >= 2 {
-            p.geometry.curves.push(c);
-        }
-    }
-    if inside {
-        for h in &mut p.geometry.hatch {
-            if h.clip.is_none() {
+    clip_projected_lines(p, &|point| boundary.contains(point) == inside);
+    p.geometry.hatch = std::mem::take(&mut p.geometry.hatch)
+        .into_iter()
+        .flat_map(|mut h| {
+            if inside && h.clip.is_none() {
                 h.clip = Some(boundary.clone());
+                return vec![h];
             }
-        }
-    }
-    p.circles.retain(|c| boundary.contains(c.centre) == inside);
+            let hatches = if let Some(previous) = h.clip.take() {
+                h.approximate |= matches!(previous, Boundary::Circle { .. });
+                clip_polygon_region(h, &previous.polygon(96), true)
+            } else {
+                vec![h]
+            };
+            hatches
+                .into_iter()
+                .flat_map(|mut h| {
+                    if inside {
+                        h.clip = Some(boundary.clone());
+                        vec![h]
+                    } else {
+                        h.approximate |= matches!(boundary, Boundary::Circle { .. });
+                        clip_polygon_region(h, &boundary.polygon(96), false)
+                    }
+                })
+                .collect()
+        })
+        .collect();
+}
+
+fn clip_projected_lines(p: &mut Projected, keep: &dyn Fn(Point2) -> bool) {
+    p.geometry.curves.retain_mut(|c| {
+        c.path = clip_path(&c.path, &|q| keep(Point2::new(q.x, q.y)));
+        c.path.elements().len() >= 2
+    });
+    p.circles.retain(|c| keep(c.centre));
 }
 
 /// The bounds of the curves' control points, or `None` when there are none.
@@ -1006,6 +1049,8 @@ fn auxiliary_axes(
         Resolution::Lost(why) => return Err(DrawingError::LostReference(why)),
     };
     let curve = index.edge_curve(id).ok_or(DrawingError::LostReference("the edge has no curve".into()))?;
+    let turned = pctx.xf.leg_turn(edge.section_leg).map(|turn| turn.curve(curve));
+    let curve = turned.as_ref().unwrap_or(curve);
     let along = pctx.xf.vector(curve.end() - curve.start());
     let len = along.u.hypot(along.v);
     if len < 1e-6 {
@@ -1150,12 +1195,15 @@ impl Projected {
             .curves
             .iter()
             .filter(|curve| curve.visible && curve.kind == CurveKind::Edge)
-            .filter_map(|curve| curve.source.kernel_hint)
+            .filter_map(|curve| curve.source.kernel_hint.map(|id| (id, curve.source.section_leg)))
             .collect();
         let mut holes: Vec<_> = self
             .circles
             .iter()
-            .filter(|circle| circle.entity.kernel_hint.is_some_and(|id| visible.contains(&id)) && namer.is_hole(circle))
+            .filter(|circle| {
+                circle.entity.kernel_hint.is_some_and(|id| visible.contains(&(id, circle.entity.section_leg)))
+                    && namer.is_hole(circle)
+            })
             .map(|circle| {
                 let coordinate = self.transform.frame.project(circle.model_centre);
                 let scale = self.transform.scale;
@@ -1200,25 +1248,39 @@ impl Projected {
 
 /// Projects the kernel's curves into a view's line work.
 pub fn project(index: &PartIndex, curves: &ViewCurves, xf: &ViewTransform, digest: &str, coarse: bool) -> Projected {
+    project_curves(index, curves, xf, digest, coarse, None)
+}
+
+fn project_curves(
+    index: &PartIndex,
+    curves: &ViewCurves,
+    xf: &ViewTransform,
+    digest: &str,
+    coarse: bool,
+    first_leg_curves: Option<usize>,
+) -> Projected {
     let mut out = Vec::with_capacity(curves.curves.len());
     let mut circles: Vec<CircleInfo> = Vec::new();
-    for c in &curves.curves {
+    for (i, c) in curves.curves.iter().enumerate() {
         let path = path_of(&c.curve, xf);
         if path.elements().len() < 2 {
             continue;
         }
-        let (source, kind) = source_ref(index, c);
+        let (mut source, kind) = source_ref(index, c);
+        source.section_leg = u8::from(xf.aligned_turn.is_some() && first_leg_curves.is_some_and(|n| i >= n));
         // Visibility fragments keep the complete edge's exact circle metadata.
-        let geometry = match c.source {
-            CurveSource::Edge(edge) if !c.approximate => index.exact_edge_curve(edge).unwrap_or(&c.curve),
-            _ => &c.curve,
+        let exact = match c.source {
+            CurveSource::Edge(edge) => index.exact_edge_curve(edge),
+            _ => None,
         };
+        let turned = exact.zip(xf.leg_turn(source.section_leg)).map(|(curve, turn)| turn.curve(curve));
+        let geometry = turned.as_ref().or(exact).unwrap_or(&c.curve);
         if !c.approximate
             && let Curve3::Circle { center, normal, radius } = geometry
             && normal.cross(xf.frame.direction).length() < 1e-6
             && !xf.breaks.hides(center.dot(xf.breaks.axis(&xf.frame)))
             && matches!(c.source, CurveSource::Edge(_))
-            && !circles.iter().any(|k| k.entity.kernel_hint == source.kernel_hint)
+            && !circles.iter().any(|k| k.entity.same_projected_entity(&source))
         {
             circles.push(CircleInfo {
                 entity: source.clone(),
@@ -1232,7 +1294,8 @@ pub fn project(index: &PartIndex, curves: &ViewCurves, xf: &ViewTransform, diges
         let accuracy =
             if c.approximate || !curves.approximate.is_empty() { Accuracy::Approximate } else { accuracy_of(&c.curve) };
         let accuracy = accuracy.for_path(&path);
-        let ends = (!xf.breaks.is_empty()).then(|| [geometry.start(), geometry.end()].map(|p| xf.point(p)));
+        let ends = (!xf.breaks.is_empty() || first_leg_curves.is_some())
+            .then(|| [geometry.start(), geometry.end()].map(|p| xf.point(p)));
         out.push(Curve2 { path, source, visible: c.visible, kind, tangent: c.smooth, accuracy, ends });
     }
     let geometry = ViewGeometry {
@@ -1247,6 +1310,7 @@ pub fn project(index: &PartIndex, curves: &ViewCurves, xf: &ViewTransform, diges
         coarse,
         breaks: Vec::new(),
         symmetry: None,
+        symmetry_segments: Vec::new(),
     };
     Projected { geometry, transform: *xf, circles }
 }
@@ -1534,12 +1598,36 @@ fn scaled_path(path: &BezPath, ratio: f64, gap: Option<BreakGap>, shift: Point2)
         .collect()
 }
 
-fn scaled_boundary(boundary: &Boundary, ratio: f64, gap: Option<BreakGap>) -> Boundary {
+pub(crate) fn scaled_boundary(boundary: &Boundary, ratio: f64, gap: Option<BreakGap>) -> Boundary {
     let map = |p| scale_view_point(p, ratio, gap);
-    match boundary {
-        Boundary::Circle { center, radius } => Boundary::Circle { center: map(*center), radius: radius * ratio },
-        Boundary::Polygon { points } => Boundary::Polygon { points: points.iter().copied().map(map).collect() },
+    let spans_gap = gap.filter(|g| {
+        let [min_x, min_y, max_x, max_y] = boundary.bounds();
+        let (lo, hi) = if g.axis == AlignAxis::Vertical { (min_y, max_y) } else { (min_x, max_x) };
+        lo < g.at + g.gap && hi > g.at && !(g.at <= lo && hi <= g.at + g.gap)
+    });
+    if let Boundary::Circle { center, radius } = boundary
+        && spans_gap.is_none()
+        && !gap.is_some_and(|g| g.contains(*center))
+    {
+        return Boundary::Circle { center: map(*center), radius: radius * ratio };
     }
+
+    let points = boundary.polygon(96);
+    let mut mapped = Vec::with_capacity(points.len());
+    for (a, b) in points.iter().copied().zip(points.iter().copied().cycle().skip(1)) {
+        mapped.push(map(a));
+        if let Some(g) = spans_gap {
+            let (start, end) = (g.along(a), g.along(b));
+            let stations = if start <= end { [g.at, g.at + g.gap] } else { [g.at + g.gap, g.at] };
+            for station in stations {
+                let fraction = (station - start) / (end - start);
+                if fraction > 0.0 && fraction < 1.0 {
+                    mapped.push(map(Point2::new(a.u + (b.u - a.u) * fraction, a.v + (b.v - a.v) * fraction)));
+                }
+            }
+        }
+    }
+    Boundary::Polygon { points: mapped }
 }
 
 /// Re-projects a view at a new scale without the kernel.
@@ -1581,7 +1669,11 @@ fn rescale_geometry(geometry: &mut ViewGeometry, ratio: f64) {
     if let Some([a, b]) = geometry.symmetry {
         geometry.symmetry = Some([s(a), s(b)]);
     }
+    for ends in &mut geometry.symmetry_segments {
+        *ends = ends.map(s);
+    }
     if let Some(g) = geometry.breaks.first_mut() {
+        g.omitted_mm = g.omitted_mm.map(|width| width * ratio);
         g.at = g.at * ratio - (1.0 - ratio) * g.gap * g.centre_fraction;
     }
 }

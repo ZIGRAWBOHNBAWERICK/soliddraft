@@ -15,10 +15,11 @@ use serde_json::json;
 use soliddraft_app::app::{Automation, SolidDraftApp};
 use soliddraft_app::document::Document;
 use soliddraft_app::drawing::{DrawingAction, DrawingSel, DrawingSession, LinkState};
-use soliddraft_app::review::{ReviewerMarkup, RevisionPin, SavedRevision};
+use soliddraft_app::review::{FaceOrigin, ReviewerMarkup, RevisionPin, SavedDrawing, SavedRevision};
 use soliddraft_app::state::AppAction;
 use soliddraft_document::identify_file;
 use soliddraft_drawing::{Command, PmiSource};
+use soliddraft_kernel_api::SurfaceKind;
 use soliddraft_kernel_api::pmi::{PmiKind, Tolerance};
 
 type App = Harness<'static, SolidDraftApp>;
@@ -39,6 +40,35 @@ fn session(app: &App) -> &DrawingSession {
 fn pin(path: &Path) -> RevisionPin {
     let identity = identify_file(path).unwrap();
     RevisionPin { document: identity.id, revision: identity.revision }
+}
+
+fn cylindrical_face(state: &soliddraft_app::state::AppState, z: f32) -> FaceOrigin {
+    let matches: Vec<_> = state
+        .doc
+        .faces
+        .iter()
+        .filter(|face| {
+            face.surface == SurfaceKind::Cylinder
+                && (face.centroid.x - 30.0).abs() < 1e-3
+                && (face.centroid.y - 25.0).abs() < 1e-3
+                && (face.centroid.z - z).abs() < 1e-3
+        })
+        .collect();
+    let [face] = matches.as_slice() else { panic!("one cylindrical face at (30, 25, {z})") };
+    FaceOrigin::from(&state.doc.model().face_ref(face.id).unwrap())
+}
+
+fn review_value(app: &App, column: &str, value: &str) {
+    let heading = app.get_by_label(column).rect();
+    assert!(
+        app.query_all_by_label(value).any(|node| {
+            let rect = node.rect();
+            (rect.left() - heading.left()).abs() < 1.0
+                && rect.top() >= heading.bottom()
+                && rect.top() < heading.bottom() + 12.0
+        }),
+        "{column} does not show {value}"
+    );
 }
 
 #[test]
@@ -62,7 +92,7 @@ fn a_drawing_review_compares_bracket_revisions_and_reopens_its_markup_on_that_dr
     let mut app = Harness::builder()
         .with_size(egui::vec2(1440.0, 900.0))
         .build_eframe(move |cc| SolidDraftApp::new(cc, doc, Automation::default()));
-    {
+    let (baseline_bore, baseline_boss, candidate_bore) = {
         let state = &mut app.state_mut().state;
         bracket::build(state);
         bracket::annotate(state);
@@ -72,6 +102,8 @@ fn a_drawing_review_compares_bracket_revisions_and_reopens_its_markup_on_that_dr
             "pmi_add",
             json!({"kind": "finish", "name": "Boss finish", "faces": [boss], "roughness": "Ra 3.2"}),
         );
+        let baseline_bore = cylindrical_face(state, 7.5);
+        let baseline_boss = cylindrical_face(state, 10.0);
         state.doc.model().save(&baseline).unwrap();
         bracket::call(state, "drive", json!({"sketch": "Sketch4", "dimension": 1, "expression": "10"}));
         for id in ["Bore diameter", "Bore finish"] {
@@ -84,7 +116,8 @@ fn a_drawing_review_compares_bracket_revisions_and_reopens_its_markup_on_that_dr
             state.doc.put_pmi(item, Some(id.into())).unwrap();
         }
         state.doc.remove_pmi("Boss finish").unwrap();
-    }
+        (baseline_bore, baseline_boss, cylindrical_face(state, 7.5))
+    };
     app.run_steps(2);
     action(&mut app, AppAction::SaveAs(Some(candidate.clone())));
     drawing(&mut app, DrawingAction::MakeDrawing);
@@ -104,13 +137,25 @@ fn a_drawing_review_compares_bracket_revisions_and_reopens_its_markup_on_that_dr
     assert_eq!(session(&app).selection, Some(DrawingSel::Review));
     app.get_by_label("Changed · Bore finish").click();
     app.run_steps(2);
-    app.get_by_label("Ra 1.6");
-    app.get_by_label("Ra 0.8");
+    review_value(&app, "Baseline", "Ra 1.6");
+    review_value(&app, "Candidate", "Ra 0.8");
     app.get_by_label("Removed · Boss finish").click();
     app.run_steps(2);
-    app.get_by_label("Ra 3.2");
-    app.get_by_label("Item not present");
-    let candidate_revision = SavedRevision::open(&candidate, app.state().state.doc.kernel().clone()).unwrap();
+    review_value(&app, "Baseline", "Ra 3.2");
+    review_value(&app, "Candidate", "Item not present");
+    let kernel = app.state().state.doc.kernel().clone();
+    let baseline_revision = SavedRevision::open(&baseline, kernel.clone()).unwrap();
+    let candidate_revision = SavedRevision::open(&candidate, kernel).unwrap();
+    for (revision, item, face) in [
+        (&baseline_revision, "Bore diameter", &baseline_bore),
+        (&baseline_revision, "Bore finish", &baseline_bore),
+        (&baseline_revision, "Boss finish", &baseline_boss),
+        (&candidate_revision, "Bore diameter", &candidate_bore),
+        (&candidate_revision, "Bore finish", &candidate_bore),
+    ] {
+        assert_eq!(revision.item(item).unwrap().item.features(), [std::slice::from_ref(face)]);
+    }
+    assert!(candidate_revision.item("Boss finish").is_none());
     candidate_revision
         .markup(Some("Bore diameter"), "Part comment".into())
         .unwrap()
@@ -120,9 +165,8 @@ fn a_drawing_review_compares_bracket_revisions_and_reopens_its_markup_on_that_dr
     assert!(session(&app).review.as_ref().unwrap().draft().is_none());
     app.get_by_label("Changed · Bore diameter").click();
     app.run_steps(2);
-    app.get_by_label("Ø8 H7");
-    // The drawing tree names the annotation too.
-    assert!(app.query_all_by_label("Ø10 H8").next().is_some());
+    review_value(&app, "Baseline", "Ø8 H7");
+    review_value(&app, "Candidate", "Ø10 H8");
     app.get_by_label("Candidate − baseline: +2 mm");
     app.get_by_label("Attach markup to selected item").click();
     app.run_steps(2);
@@ -143,6 +187,9 @@ fn a_drawing_review_compares_bracket_revisions_and_reopens_its_markup_on_that_dr
     assert_eq!((on.place.sheet, on.place.annotation), (place.sheet, place.annotation));
     let sidecar: serde_json::Value = serde_json::from_slice(&std::fs::read(&markup_path).unwrap()).unwrap();
     assert_eq!(sidecar["drawing"]["place"].as_object().unwrap().len(), 2);
+    let mut no_item = saved;
+    no_item.item_id = None;
+    assert!(no_item.place_on(&SavedDrawing::open(&drawing_path).unwrap()).is_none());
     assert_ne!(pin(&baseline).revision, pin(&candidate).revision);
 
     // Another revision of the drawing does not take the comment.

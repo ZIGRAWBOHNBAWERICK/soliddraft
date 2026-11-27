@@ -185,11 +185,11 @@ pub(super) fn hatch_items(
         let loops = match &clip {
             Some(c) => {
                 let window = c.polygon(96);
-                loops.iter().map(|l| clip_polygon(l, &window)).filter(|l| l.len() >= 3).collect()
+                clip_regions(&loops, &window, true)
             }
-            None => loops,
+            None => vec![loops],
         };
-        if !loops.is_empty() {
+        for loops in loops.into_iter().filter(|loops| !loops.is_empty()) {
             records.push(HatchRecord {
                 owner: Owner::View(view.id),
                 loops,
@@ -240,36 +240,19 @@ pub fn hatch_lines(loops: &[Vec<Point2>], angle: f64, spacing: f64, offset: f64)
     out
 }
 
-/// `subject` clipped to the convex polygon `window` (Sutherland and Hodgman).
-pub fn clip_polygon(subject: &[Point2], window: &[Point2]) -> Vec<Point2> {
-    let area: f64 = (0..window.len())
-        .map(|i| {
-            let (a, b) = (window[i], window[(i + 1) % window.len()]);
-            a.u * b.v - b.u * a.v
-        })
-        .sum();
-    let sign = if area >= 0.0 { 1.0 } else { -1.0 };
-    let mut out: Vec<Point2> = subject.to_vec();
-    for i in 0..window.len() {
-        if out.is_empty() {
-            break;
-        }
-        let (a, b) = (window[i], window[(i + 1) % window.len()]);
-        let side = |p: Point2| sign * ((b.u - a.u) * (p.v - a.v) - (b.v - a.v) * (p.u - a.u));
-        let input = std::mem::take(&mut out);
-        for j in 0..input.len() {
-            let (p, q) = (input[j], input[(j + 1) % input.len()]);
-            let (sp, sq) = (side(p), side(q));
-            if sp >= 0.0 {
-                out.push(p);
-            }
-            if (sp >= 0.0) != (sq >= 0.0) {
-                let t = sp / (sp - sq);
-                out.push(Point2::new(p.u + (q.u - p.u) * t, p.v + (q.v - p.v) * t));
-            }
-        }
-    }
-    out
+pub(crate) fn clip_regions(subject: &[Vec<Point2>], clip: &[Point2], inside: bool) -> Vec<Vec<Vec<Point2>>> {
+    use i_overlay::{
+        core::{fill_rule::FillRule, overlay_rule::OverlayRule},
+        float::single::SingleFloatOverlay,
+    };
+    let ring = |points: &[Point2]| points.iter().map(|p| [p.u, p.v]).collect::<Vec<_>>();
+    let subject: Vec<_> = subject.iter().filter(|r| r.len() >= 3).map(|r| ring(r)).collect();
+    let rule = if inside { OverlayRule::Intersect } else { OverlayRule::Difference };
+    subject
+        .overlay_as::<i64>(&ring(clip), rule, FillRule::EvenOdd)
+        .into_iter()
+        .map(|shape| shape.into_iter().map(|r| r.into_iter().map(|[x, y]| Point2::new(x, y)).collect()).collect())
+        .collect()
 }
 
 /// A detail view's own boundary and the edges of broken-out sections, thin and
@@ -298,7 +281,7 @@ pub(super) fn boundary_items(view: &View, ctx: &Context<'_>, items: &mut Vec<Ite
     let o = view.position;
     let at = |p: Point2| Point2::new(p.u + o.u, p.v + o.v);
     // A half section's symmetry line: a thin chain line, as any centre line.
-    if let Some([a, b]) = view.geometry.symmetry {
+    for [a, b] in view.geometry.symmetry.iter().chain(&view.geometry.symmetry_segments).copied() {
         items.push(Item::Path(PathItem {
             path: line(at(a), at(b)),
             width: ctx.format.lines.centre,
@@ -361,8 +344,22 @@ pub(super) fn parent_marks(drawing: &Drawing, sheet_index: usize, ctx: &Context<
             let see = location_of(drawing, child_sheet, child).and_then(|l| l.on_parent());
             match &child.kind {
                 ViewKind::Section { line: cut, flip, label: letter, .. } if cut.len() >= 2 => {
-                    let Some(arrow_dir) = section_arrow(&cut[..2], *flip) else { continue };
+                    let gap = parent.geometry.breaks.first().copied();
+                    let flat: Vec<_> = cut.iter().map(|p| gap.map_or(*p, |g| g.unshift(*p))).collect();
+                    let Some(arrow_dir) = section_arrow(&flat[..2], *flip) else { continue };
                     let pts: Vec<Point2> = cut.iter().map(at).collect();
+                    let trace = |points: &[Point2]| {
+                        let Some(g) = gap else { return polyline(&points.iter().map(at).collect::<Vec<_>>()) };
+                        let mut path = BezPath::new();
+                        for [a, b] in points.windows(2).flat_map(|s| g.trace(s[0], s[1])) {
+                            if a != b {
+                                let (a, b) = (at(&a), at(&b));
+                                path.move_to((a.u, a.v));
+                                path.line_to((b.u, b.v));
+                            }
+                        }
+                        path
+                    };
                     let (first, last) = (pts[0], pts[pts.len() - 1]);
                     let leg = |a: Point2, b: Point2| {
                         let dir = sub(b, a);
@@ -370,14 +367,14 @@ pub(super) fn parent_marks(drawing: &Drawing, sheet_index: usize, ctx: &Context<
                         (len >= 1e-9).then(|| (dir / len, len))
                     };
                     let (Some((d0, len0)), Some((d1, len1))) =
-                        (leg(pts[0], pts[1]), leg(pts[pts.len() - 2], pts[pts.len() - 1]))
+                        (leg(flat[0], flat[1]), leg(flat[flat.len() - 2], flat[flat.len() - 1]))
                     else {
                         continue;
                     };
                     // A thin chain line, thick at its ends and where it changes direction
                     // (ISO 128-40, ISO 128-44).
                     items.push(Item::Path(PathItem {
-                        path: polyline(&pts),
+                        path: trace(cut),
                         width: lines.centre,
                         dash: Some(super::CENTRE_DASH.to_vec()),
                         role: Role::CuttingPlane,
@@ -385,13 +382,24 @@ pub(super) fn parent_marks(drawing: &Drawing, sheet_index: usize, ctx: &Context<
                         fill: false,
                         accuracy: None,
                     }));
-                    for bend in pts.windows(3) {
+                    for (i, bend) in flat.windows(3).enumerate() {
+                        let vertex = cut[i + 1];
+                        if gap.is_some_and(|g| g.contains(vertex)) {
+                            continue;
+                        }
                         let (Some((into, l0)), Some((out, l1))) = (leg(bend[0], bend[1]), leg(bend[1], bend[2])) else {
                             continue;
                         };
                         let thick = 6.0f64.min(l0 / 3.0).min(l1 / 3.0);
+                        let path =
+                            polyline(&[at(&add(vertex, into * -thick)), pts[i + 1], at(&add(vertex, out * thick))]);
+                        let path = if let Some(g) = gap {
+                            clip_path(&path, &|p| !g.contains(Point2::new(p.x - o.u, p.y - o.v)))
+                        } else {
+                            path
+                        };
                         items.push(Item::Path(PathItem {
-                            path: polyline(&[add(bend[1], into * -thick), bend[1], add(bend[1], out * thick)]),
+                            path,
                             width: lines.cutting,
                             dash: None,
                             role: Role::CuttingPlane,
@@ -406,8 +414,14 @@ pub(super) fn parent_marks(drawing: &Drawing, sheet_index: usize, ctx: &Context<
                     for (end, inward, thick, a) in
                         [(first, d0, 6.0f64.min(len0 / 3.0), a), (last, d1 * -1.0, 6.0f64.min(len1 / 3.0), a_last)]
                     {
+                        let path = line(end, add(end, inward * thick));
+                        let path = if let Some(g) = gap {
+                            clip_path(&path, &|p| !g.contains(Point2::new(p.x - o.u, p.y - o.v)))
+                        } else {
+                            path
+                        };
                         items.push(Item::Path(PathItem {
-                            path: line(end, add(end, inward * thick)),
+                            path,
                             width: lines.cutting,
                             dash: None,
                             role: Role::CuttingPlane,
@@ -499,8 +513,9 @@ pub(super) fn parent_marks(drawing: &Drawing, sheet_index: usize, ctx: &Context<
                     // The arrow points at the middle of the reference edge as the parent
                     // shows it, from the side the auxiliary view looks from.
                     let same = |c: &crate::Curve2| {
-                        (edge.kernel_hint.is_some() && c.source.kernel_hint == edge.kernel_hint)
-                            || (c.source.feature == edge.feature
+                        c.source.same_projected_entity(edge)
+                            || (c.source.section_leg == edge.section_leg
+                                && c.source.feature == edge.feature
                                 && c.source.role == edge.role
                                 && c.source.ordinal == edge.ordinal)
                     };
@@ -593,7 +608,8 @@ mod tests {
 
     #[test]
     fn polygons_clip_to_a_convex_window() {
-        let clipped = clip_polygon(&square(0.0, 5.0), &square(5.0, 5.0));
+        let regions = clip_regions(&[square(0.0, 5.0)], &square(5.0, 5.0), true);
+        let clipped = &regions[0][0];
         let area: f64 = (0..clipped.len())
             .map(|i| {
                 let (a, b) = (clipped[i], clipped[(i + 1) % clipped.len()]);

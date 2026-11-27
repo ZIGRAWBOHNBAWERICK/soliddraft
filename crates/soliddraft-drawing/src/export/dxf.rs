@@ -62,7 +62,7 @@ pub fn dxf(list: &DisplayList) -> Result<Vec<u8>, DrawingError> {
     }
     let owners: Vec<AnnotationId> = {
         let mut seen = Vec::new();
-        for r in &list.dimensions {
+        for r in list.printable_dimensions() {
             if !seen.contains(&r.owner) {
                 seen.push(r.owner);
             }
@@ -72,8 +72,7 @@ pub fn dxf(list: &DisplayList) -> Result<Vec<u8>, DrawingError> {
     // The dimension style the anonymous blocks were drawn with, so a CAD program that
     // redraws a dimension draws it the same size.
     let text_height = list
-        .items
-        .iter()
+        .printable()
         .find_map(|i| match i {
             Item::Text(t) if matches!(t.owner, Owner::Annotation(a) if owners.contains(&a)) => Some(t.height),
             _ => None,
@@ -110,7 +109,7 @@ pub fn dxf(list: &DisplayList) -> Result<Vec<u8>, DrawingError> {
     let mut n = 0;
     for owner in &owners {
         let mut first = true;
-        for r in list.dimensions.iter().filter(|r| r.owner == *owner) {
+        for r in list.printable_dimensions().filter(|r| r.owner == *owner) {
             n += 1;
             let name = format!("*D{n}");
             let style_name = format!("{DIMSTYLE}{n}");
@@ -215,12 +214,8 @@ pub fn dxf(list: &DisplayList) -> Result<Vec<u8>, DrawingError> {
 /// factor makes a reader that measures the definition points show the model length.
 fn measurement_scale(r: &crate::display::DimensionRecord) -> Option<f64> {
     let distance = raw_measurement(r.geometry);
-    if r.format.dim_type != DimType::True {
-        let drawn = distance * r.measurement_scale;
-        // Anchors are kept to 0.0001 sheet mm, so a whole view's dimensions agree with
-        // their drawn length far closer than 0.01 mm.
-        let shortened = distance > 1e-9 && r.value > 0.0 && (drawn - r.value).abs() > 0.01;
-        return Some(if shortened { r.value / distance } else { r.measurement_scale });
+    if r.format.dim_type != DimType::True && !r.spans_break {
+        return Some(r.measurement_scale);
     }
     (distance > 1e-9).then(|| r.value / distance)
 }

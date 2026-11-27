@@ -148,24 +148,6 @@ impl CutPath {
     pub(crate) fn spans(&self) -> &[CutSpan] {
         &self.spans
     }
-
-    /// Distance of `p` along the unfolded cut, measured on stretch `span` of `trace`.
-    /// Aligned legs rotate about their shared pivot; parallel offset legs translate
-    /// across the jog without advancing along the cut.
-    #[cfg(test)]
-    fn station(&self, trace: &[Point2], span: usize, p: Point2) -> f64 {
-        let cut = &self.spans[span];
-        let o = trace[cut.from];
-        cut.start + (p.u - o.u) * cut.tangent.u + (p.v - o.v) * cut.tangent.v
-    }
-
-    /// The joint belongs to the following span, including the pivot of an aligned cut.
-    #[cfg(test)]
-    fn owns_station(&self, span: usize, station: f64) -> bool {
-        self.spans.get(span).is_some_and(|cut| {
-            station >= cut.start && (station < cut.end || (span + 1 == self.spans.len() && station == cut.end))
-        })
-    }
 }
 
 impl CutSpan {
@@ -397,11 +379,11 @@ impl Turn {
         v * self.cos + k.cross(v) * self.sin + k * (k.dot(v) * (1.0 - self.cos))
     }
 
-    fn point(&self, p: Vec3) -> Vec3 {
+    pub(crate) fn point(&self, p: Vec3) -> Vec3 {
         self.pivot + self.vector(p - self.pivot)
     }
 
-    fn curve(&self, curve: &Curve3) -> Curve3 {
+    pub(crate) fn curve(&self, curve: &Curve3) -> Curve3 {
         match curve {
             Curve3::Line { a, b } => Curve3::Line { a: self.point(*a), b: self.point(*b) },
             Curve3::Arc { center, normal, x_axis, radius, start_deg, end_deg } => Curve3::Arc {
@@ -477,6 +459,20 @@ impl BentSection {
         self.parent.right * v.u + self.parent.up * v.v
     }
 
+    pub(crate) fn aligned_turn(&self) -> Option<Turn> {
+        if self.path.kind != CutKind::Aligned {
+            return None;
+        }
+        let (first, second) = (&self.path.spans[0], &self.path.spans[1]);
+        let (t, t0) = (second.tangent, first.tangent);
+        Some(Turn {
+            pivot: self.model[second.from],
+            axis: self.parent.right.cross(self.parent.up),
+            cos: t.u * t0.u + t.v * t0.v,
+            sin: t.u * t0.v - t.v * t0.u,
+        })
+    }
+
     /// Each cut sectioned with `section(direction, up, origin)`, kept to its band and
     /// unfolded into the first cut's frame.
     pub(crate) fn unfold(
@@ -484,7 +480,7 @@ impl BentSection {
         mut section: impl FnMut(Vec3, Vec3, Vec3) -> KernelResult<SectionView>,
     ) -> KernelResult<Unfolded> {
         let spans = &self.path.spans;
-        let first = &spans[0];
+        let aligned = self.aligned_turn();
         let (direction, up) = self.axes();
         let frame =
             soliddraft_kernel_api::drawing::ViewSpec::new(direction, up).frame().expect("a quarter turn of a frame");
@@ -511,18 +507,7 @@ impl BentSection {
                 hi: if i + 1 == spans.len() { f64::INFINITY } else { span.end },
                 tol: BOUNDARY_TOL * length,
             };
-            // An aligned cut's later leg revolves about the pivot onto the first leg's line.
-            let turn = if self.path.kind == CutKind::Aligned && i > 0 {
-                let (t, t0) = (span.tangent, first.tangent);
-                Turn {
-                    pivot: origin,
-                    axis: self.parent.right.cross(self.parent.up),
-                    cos: t.u * t0.u + t.v * t0.v,
-                    sin: t.u * t0.v - t.v * t0.u,
-                }
-            } else {
-                Turn::NONE
-            };
+            let turn = if i == 1 { aligned.unwrap_or(Turn::NONE) } else { Turn::NONE };
             let curves = cut
                 .curves
                 .curves
@@ -578,19 +563,44 @@ mod tests {
         assert_eq!(CutPath::of_line(&straight, false).unwrap_err(), CutPathError::PointCount);
     }
 
+    fn unfold_lines(trace: &[Point2], lines: &[Vec<Curve3>]) -> Unfolded {
+        use soliddraft_kernel_api::drawing::CurveSource;
+        let model: Vec<_> = trace.iter().map(|p| Vec3::new(p.u, p.v, 0.0)).collect();
+        let bent = BentSection::new(&top(), &model, false).unwrap();
+        let mut lines = lines.iter();
+        bent.unfold(|eye, up, _| {
+            let frame = ViewSpec::new(eye, up).frame().unwrap();
+            let curves = lines
+                .next()
+                .unwrap()
+                .iter()
+                .cloned()
+                .map(|curve| ViewCurve::new(curve, CurveSource::Unknown, true))
+                .collect();
+            Ok(SectionView { curves: ViewCurves::new(curves, &frame), regions: Vec::new() })
+        })
+        .unwrap()
+    }
+
+    fn vertical_at(u: f64, v: f64) -> Curve3 {
+        Curve3::Line { a: Vec3::new(u, v, 0.0), b: Vec3::new(u, v, 5.0) }
+    }
+
     #[test]
     fn offset_trace_crosses_both_staggered_holes_but_does_not_cut_on_the_jog() {
         let trace = points([[-20.0, -6.0], [0.0, -6.0], [0.0, 6.0], [20.0, 6.0]]);
-        let [left_hole, right_hole] = points([[-10.0, -6.0], [10.0, 6.0]]);
         let path = CutPath::new(CutKind::Offset, &trace, false).unwrap();
         let [left, right] = path.spans() else { panic!("expected two material cuts") };
-        near(path.station(&trace, 0, left_hole), 10.0);
-        near(path.station(&trace, 1, right_hole), 30.0);
-        near(path.station(&trace, 0, trace[1]), path.station(&trace, 1, trace[2]));
-        assert!(!path.owns_station(0, 20.0));
-        assert!(path.owns_station(1, 20.0));
-        assert!(path.owns_station(1, 40.0));
-        assert!(!path.owns_station(1, 41.0));
+        let unfold = unfold_lines(
+            &trace,
+            &[
+                vec![vertical_at(-10.0, -6.0), vertical_at(0.0, -6.0), vertical_at(10.0, -6.0)],
+                vec![vertical_at(-10.0, 6.0), vertical_at(0.0, 6.0), vertical_at(10.0, 6.0)],
+            ],
+        );
+        let stations = |i: usize| unfold.cuts[i].curves.iter().map(|vc| vc.curve.start().x).collect::<Vec<_>>();
+        assert_eq!(stations(0), [-10.0]);
+        assert_eq!(stations(1), [0.0, 10.0]);
 
         let parent = top();
         assert_eq!(left.axes(&parent), right.axes(&parent));
@@ -618,16 +628,21 @@ mod tests {
     #[test]
     fn rotated_radial_trace_unfolds_both_legs_and_owns_the_pivot_once() {
         let trace = points([[-12.0, -16.0], [0.0, 0.0], [-12.0, 9.0]]);
-        let [inner, radial] = points([[-6.0, -8.0], [-8.0, 6.0]]);
         let path = CutPath::new(CutKind::Aligned, &trace, false).unwrap();
         let [fixed, rotated] = path.spans() else { panic!("expected both radial cuts") };
-        near(path.station(&trace, 0, inner), 10.0);
-        near(path.station(&trace, 1, radial), 30.0);
-        let joint = path.station(&trace, 1, trace[1]);
-        near(path.station(&trace, 0, trace[1]), joint);
-        assert!(!path.owns_station(0, joint));
-        assert!(path.owns_station(1, joint));
-        near(path.station(&trace, 1, trace[2]), 35.0);
+        let unfold = unfold_lines(
+            &trace,
+            &[
+                vec![vertical_at(-6.0, -8.0), vertical_at(0.0, 0.0)],
+                vec![vertical_at(0.0, 0.0), vertical_at(-8.0, 6.0)],
+            ],
+        );
+        assert_eq!(unfold.cuts[0].curves.len(), 1);
+        assert_eq!(unfold.cuts[1].curves.len(), 2);
+        assert_eq!(unfold.cuts[1].curves[0].curve.start(), Vec3::ZERO);
+        let turned = unfold.cuts[1].curves[1].curve.start();
+        near(turned.x, 6.0);
+        near(turned.y, 8.0);
 
         let parent = top();
         let (first_eye, _) = fixed.axes(&parent);

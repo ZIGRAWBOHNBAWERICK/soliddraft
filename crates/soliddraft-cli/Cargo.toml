@@ -28,6 +28,7 @@ soliddraft-tessellation.workspace = true
 soliddraft-app = { path = "../soliddraft-app" }
 soliddraft-assistant.workspace = true
 egui-wgpu.workspace = true
+env_logger.workspace = true
 glam.workspace = true
 image.workspace = true
 pollster.workspace = true

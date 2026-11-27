@@ -286,7 +286,10 @@ impl ReviewerMarkup {
     /// and only while the annotation still shows the comment's item.
     pub fn place_on(&self, drawing: &SavedDrawing) -> Option<MarkupPlace> {
         let on = self.drawing.as_ref().filter(|d| d.drawing == *drawing.pin())?;
-        review::find_place(drawing.drawing(), &on.place, self.item_id.as_deref())
+        if !drawing.shows(&self.candidate) {
+            return None;
+        }
+        review::find_place(drawing.drawing(), &on.place, self.item_id.as_deref()?)
     }
 
     /// Creates a separate file; refuses any existing path, including either source.

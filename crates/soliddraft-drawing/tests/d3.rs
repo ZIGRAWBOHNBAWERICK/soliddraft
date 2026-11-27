@@ -90,6 +90,8 @@ fn rebuild_commits_successful_views_alongside_base_and_projected_refusals() {
             apply(&mut d, &Command::AddAnnotation { annotation: note.clone() }).unwrap();
             saved.push(note);
         }
+        let markup = soliddraft_drawing::review::MarkupTarget { sheet: target, annotation: saved[0].id };
+        assert!(soliddraft_drawing::review::find_place(&d, &markup, "removed requirement").is_some());
         let changed = box_part(&k, "block", Vec3::new(60.0, 30.0, 10.0));
         let report = UndoStack::new().run(&mut d, &Command::UpdateFromModel, Some(&changed)).unwrap().unwrap();
         assert!(report.views_updated > 0);
@@ -100,6 +102,8 @@ fn rebuild_commits_successful_views_alongside_base_and_projected_refusals() {
         assert_eq!(d.view(id).unwrap().geometry, before);
         assert_eq!(d.annotation(saved[0].id), Some(&saved[0]));
         assert!(d.annotation(saved[1].id).is_none());
+        assert!(soliddraft_drawing::review::place_of_item(&d, "removed requirement").is_none());
+        assert!(soliddraft_drawing::review::find_place(&d, &markup, "removed requirement").is_none());
         assert!(!d.views_match_pin());
         for rebuilt in d.sheets[0].views.iter().filter(|v| v.id != id) {
             assert_eq!(rebuilt.geometry.source_digest, changed.digest.as_str());
@@ -210,7 +214,8 @@ fn a_detail_magnifies_inside_its_circle_and_stays_on_the_part() {
 
 #[test]
 fn an_auxiliary_view_looks_square_to_its_edge_and_dangles_when_it_goes() {
-    let k = BoxKernel::new();
+    let mut k = BoxKernel::new();
+    k.sections = true;
     let part = box_part(&k, "block", Vec3::new(40.0, 30.0, 10.0));
     let mut d = drawing(&part);
     let index = PartIndex::build(&part).unwrap();
@@ -223,6 +228,12 @@ fn an_auxiliary_view_looks_square_to_its_edge_and_dangles_when_it_goes() {
     run(&mut stack, &mut d, &part, Command::PlaceView { sheet: 0, view });
     assert!(texts(&d, 0).contains(&"VIEW A".to_owned()));
     assert!(layout_sheet(&d, 0).items.iter().any(|i| i.role() == Role::CuttingPlane), "the arrow on the front view");
+
+    let half =
+        soliddraft_drawing::HalfSection { axis: [Vec3::new(20.0, 0.0, 5.0), Vec3::new(20.0, 30.0, 5.0)], flip: false };
+    let attempt = stack.run(&mut d, &Command::SetHalfSection { view: id, half: Some(half) }, Some(&part));
+    assert!(matches!(attempt, Err(soliddraft_drawing::DrawingError::BadRequest(_))));
+    assert!(d.view(id).unwrap().half.is_none());
 
     // A part made by another feature: the edge is gone; the view keeps its line work.
     let other = box_part(&k, "other", Vec3::new(40.0, 30.0, 10.0));
@@ -884,23 +895,27 @@ fn a_detail_of_either_break_axis_keeps_its_model_points_after_rescale() {
             Command::SetViewBreaks { view: FRONT, breaks: vec![soliddraft_drawing::Break { from, to, axis }] },
         );
         let before = project::view_scale(&drawing, FRONT).unwrap();
-        let corner = Vec3::new(120.0, 0.0, 120.0);
         let parent = derived::context(&drawing, &part, &index, FRONT).unwrap();
-        let centre = parent.xf.point(corner);
+        let [gap] = parent.xf.gaps()[..] else { panic!("one break") };
+        let along = axis == soliddraft_drawing::AlignAxis::Horizontal;
+        let [u0, v0, _, _] = parent.projected.geometry.bbox;
+        let centre = if along { Point2::new(gap.at - 4.0, v0) } else { Point2::new(u0, gap.at - 4.0) };
         let (detail, ctx) =
-            derived::new_detail(&drawing, &part, &index, 0, FRONT, centre, 8.0, Vec::new(), 2.0, None).unwrap();
-        let at = ctx.xf.point(corner);
-        assert!(at.u.hypot(at.v) < 1e-5, "{axis:?} {at:?}");
-        assert!(
-            ctx.projected
-                .geometry
+            derived::new_detail(&drawing, &part, &index, 0, FRONT, centre, 12.0, Vec::new(), 2.0, None).unwrap();
+        let reach = |geometry: &soliddraft_drawing::ViewGeometry| {
+            let [g] = geometry.breaks[..] else { panic!("the detail inherits the gap") };
+            let max = geometry
                 .curves
                 .iter()
-                .flat_map(|curve| curve.path.elements())
+                .flat_map(|c| c.path.elements())
                 .filter_map(|el| el.end_point())
-                .any(|p| p.x.hypot(p.y) < 1e-5),
-            "{axis:?} the corner must be on the detail"
-        );
+                .map(|p| if along { p.x } else { p.y })
+                .fold(f64::NEG_INFINITY, f64::max);
+            max - (g.at + g.gap)
+        };
+        assert!((reach(&ctx.projected.geometry) - 4.0).abs() < 1e-3, "{axis:?}: 2 mm on the other side at 2×");
+        let id = detail.id;
+        run(&mut stack, &mut drawing, &part, Command::PlaceView { sheet: 0, view: detail });
         run(
             &mut stack,
             &mut drawing,
@@ -917,6 +932,348 @@ fn a_detail_of_either_break_axis_keeps_its_model_points_after_rescale() {
         for (cached, rebuilt) in saved.bbox.into_iter().zip(fresh.projected.geometry.bbox) {
             assert!((cached - rebuilt).abs() < 1e-6, "{axis:?} {cached} != {rebuilt}");
         }
-        assert!(!detail.geometry.curves.is_empty());
+        let saved_detail = &drawing.view(id).unwrap().geometry;
+        assert!((reach(saved_detail) - 2.0).abs() < 1e-3, "{axis:?}");
+        let rebuilt = derived::context(&drawing, &part, &index, id).unwrap();
+        assert!((reach(&rebuilt.projected.geometry) - 2.0).abs() < 2e-2, "{axis:?}");
     }
+}
+
+#[test]
+fn a_break_must_shorten_the_view_and_keep_both_ends() {
+    let kernel = BoxKernel::new();
+    let part = box_part(&kernel, "block", Vec3::new(120.0, 50.0, 120.0));
+    let mut drawing = drawing(&part);
+    apply(
+        &mut drawing,
+        &Command::SetViewScale { view: FRONT, scale: soliddraft_drawing::ViewScale::Custom { factor: 1.0 } },
+    )
+    .unwrap();
+    apply(&mut drawing, &Command::AddSheet { name: "Reduced".into(), template: "iso-a3".into() }).unwrap();
+    let reduced = soliddraft_drawing::Scale::new(1, 2);
+    apply(&mut drawing, &Command::SetSheetScale { sheet: 0, scale: soliddraft_drawing::Scale::FULL }).unwrap();
+    apply(&mut drawing, &Command::SetSheetScale { sheet: 1, scale: reduced }).unwrap();
+    let mut stack = UndoStack::new();
+    for axis in [soliddraft_drawing::AlignAxis::Horizontal, soliddraft_drawing::AlignAxis::Vertical] {
+        let point = |x| match axis {
+            soliddraft_drawing::AlignAxis::Horizontal => Vec3::new(x, 0.0, 0.0),
+            soliddraft_drawing::AlignAxis::Vertical => Vec3::new(0.0, 0.0, x),
+        };
+        let interrupt = |a, b| Command::SetViewBreaks {
+            view: FRONT,
+            breaks: vec![soliddraft_drawing::Break { from: point(a), to: point(b), axis }],
+        };
+        let before = drawing.clone();
+        for cmd in [interrupt(40.0, 42.0), interrupt(-2.0, 122.0)] {
+            assert!(stack.run(&mut drawing, &cmd, Some(&part)).is_err(), "{axis:?}");
+            assert_eq!(drawing, before);
+        }
+        run(&mut stack, &mut drawing, &part, interrupt(50.0, 60.0));
+        let before = drawing.clone();
+        let too_small =
+            Command::SetViewScale { view: FRONT, scale: soliddraft_drawing::ViewScale::Custom { factor: 0.5 } };
+        assert!(apply(&mut drawing, &too_small).is_err(), "{axis:?}");
+        assert_eq!(drawing, before);
+        let parent_scale = Command::SetViewScale { view: FRONT, scale: soliddraft_drawing::ViewScale::Parent };
+        apply(&mut drawing, &parent_scale).unwrap();
+        let before = drawing.clone();
+        for cmd in [
+            Command::SetSheetScale { sheet: 0, scale: reduced },
+            Command::MoveViewToSheet { view: FRONT, sheet: 1, to: Point2::new(100.0, 100.0) },
+        ] {
+            assert!(apply(&mut drawing, &cmd).is_err(), "{axis:?}");
+            assert_eq!(drawing, before);
+        }
+    }
+}
+
+#[test]
+fn dxf_preserves_the_length_across_a_small_break() {
+    use dxf::entities::EntityType;
+    let kernel = BoxKernel::new();
+    let part = box_part(&kernel, "block", Vec3::new(120.0, 50.0, 50.0));
+    let mut drawing = drawing(&part);
+    apply(
+        &mut drawing,
+        &Command::SetViewScale { view: FRONT, scale: soliddraft_drawing::ViewScale::Custom { factor: 1.0 } },
+    )
+    .unwrap();
+    let mut stack = UndoStack::new();
+    run(
+        &mut stack,
+        &mut drawing,
+        &part,
+        Command::SetViewBreaks {
+            view: FRONT,
+            breaks: vec![soliddraft_drawing::Break {
+                from: Vec3::new(50.0, 0.0, 0.0),
+                to: Vec3::new(56.005, 0.0, 0.0),
+                axis: soliddraft_drawing::AlignAxis::Horizontal,
+            }],
+        },
+    );
+    let index = PartIndex::build(&part).unwrap();
+    let ctx = derived::context(&drawing, &part, &index, FRONT).unwrap();
+    let annotation = annotate::dimension_set(
+        &drawing,
+        &index,
+        &ctx,
+        SetKind::Baseline,
+        LinearOrientation::Horizontal,
+        &[Vec3::ZERO, Vec3::new(120.0, 0.0, 0.0)],
+        10.0,
+    )
+    .unwrap();
+    run(&mut stack, &mut drawing, &part, Command::AddAnnotation { annotation });
+    let bytes = export::dxf(&layout_sheet(&drawing, 0)).unwrap();
+    let dxf = dxf::Drawing::load(&mut bytes.as_slice()).unwrap();
+    let dim = dxf
+        .entities()
+        .find_map(|e| match &e.specific {
+            EntityType::RotatedDimension(dim) => Some(dim),
+            _ => None,
+        })
+        .unwrap();
+    let scale = dxf
+        .dim_styles()
+        .find(|s| s.name == dim.dimension_base.dimension_style_name)
+        .unwrap()
+        .dimension_linear_measurement_scale_factor;
+    let drawn = (dim.definition_point_3.x - dim.definition_point_2.x).abs();
+    assert!((drawn - 119.995).abs() < 1e-5);
+    assert!((drawn * scale - 120.0).abs() < 1e-5);
+}
+
+#[test]
+fn clipping_a_hatch_opens_a_hole_into_a_notch_in_the_dxf_region() {
+    let mut drawing = soliddraft_drawing::fixture::bracket_a3();
+    let points = |ring: &[(f64, f64)]| ring.iter().map(|&(u, v)| Point2::new(u, v)).collect();
+    let view = drawing.view_mut(FRONT).unwrap();
+    view.geometry.hatch.push(soliddraft_drawing::Polygon {
+        outer: points(&[(-10.0, -10.0), (10.0, -10.0), (10.0, 10.0), (-10.0, 10.0)]),
+        holes: vec![points(&[(-2.0, -3.0), (2.0, -3.0), (2.0, 3.0), (-2.0, 3.0)])],
+        clip: Some(Boundary::rectangle(Point2::new(0.0, -10.0), Point2::new(10.0, 10.0))),
+        approximate: false,
+    });
+    let list = layout_sheet(&drawing, 0);
+    let [hatch] = list.hatches.as_slice() else { panic!("one region") };
+    let [outer] = hatch.loops.as_slice() else { panic!("the hole opens to the outside") };
+    let area =
+        outer.iter().zip(outer.iter().cycle().skip(1)).map(|(a, b)| a.u * b.v - b.u * a.v).sum::<f64>().abs() / 2.0;
+    assert!((area - 188.0).abs() < 1e-6, "{area}");
+    assert_eq!(outer.len(), 8);
+}
+
+#[test]
+fn exporting_omits_a_display_section_annotations_and_its_marks_on_another_sheet() {
+    use soliddraft_drawing::display::Owner;
+    let kernel = BoxKernel::new();
+    let part = box_part(&kernel, "block", Vec3::new(120.0, 50.0, 50.0));
+    let mut drawing = drawing(&part);
+    apply(&mut drawing, &Command::AddSheet { name: "Section".into(), template: "iso-a3".into() }).unwrap();
+    let mut section = drawing.view(FRONT).unwrap().clone();
+    section.id = drawing.next_view_id();
+    section.kind = ViewKind::Section {
+        parent: FRONT,
+        line: vec![Point2::new(-10.0, -5.0), Point2::new(10.0, 5.0)],
+        flip: false,
+        label: "B".into(),
+        hatch: None,
+        model_line: Vec::new(),
+    };
+    section.geometry.display_only = true;
+    let id = section.id;
+    apply(&mut drawing, &Command::PlaceView { sheet: 1, view: section }).unwrap();
+    let mut note = soliddraft_drawing::fixture::bracket_a3()
+        .sheets
+        .remove(0)
+        .annotations
+        .into_iter()
+        .find(|a| matches!(a.body, AnnotationKind::Dimension(_)))
+        .unwrap();
+    note.view = id;
+    note.id = drawing.next_annotation_id();
+    let annotation = note.id;
+    apply(&mut drawing, &Command::AddDimension { annotation: note }).unwrap();
+    let parent = layout_sheet(&drawing, 0);
+    assert!(parent.items.iter().any(|i| i.owner() == Owner::View(id) && i.role() == Role::CuttingPlane));
+    assert!(parent.printable().all(|i| i.owner() != Owner::View(id)));
+    let child = layout_sheet(&drawing, 1);
+    assert_eq!(child.dimensions.len(), 1);
+    assert!(child.printable().all(|i| i.owner() != Owner::Annotation(annotation)));
+    let bytes = export::dxf(&child).unwrap();
+    let dxf = dxf::Drawing::load(&mut bytes.as_slice()).unwrap();
+    assert!(!dxf.entities().any(|e| e.common.layer == "DIMENSION"));
+}
+
+#[test]
+fn a_diagonal_half_section_clips_both_sides_of_a_break_in_model_space() {
+    let mut kernel = BoxKernel::new();
+    kernel.sections = true;
+    let part = box_part(&kernel, "block", Vec3::new(120.0, 50.0, 120.0));
+    let mut drawing = drawing(&part);
+    let mut stack = UndoStack::new();
+    run(
+        &mut stack,
+        &mut drawing,
+        &part,
+        Command::SetViewScale { view: FRONT, scale: soliddraft_drawing::ViewScale::Custom { factor: 1.0 } },
+    );
+    run(
+        &mut stack,
+        &mut drawing,
+        &part,
+        Command::SetHalfSection {
+            view: FRONT,
+            half: Some(soliddraft_drawing::HalfSection {
+                axis: [Vec3::new(0.0, 25.0, 0.0), Vec3::new(120.0, 25.0, 120.0)],
+                flip: false,
+            }),
+        },
+    );
+    run(
+        &mut stack,
+        &mut drawing,
+        &part,
+        Command::SetViewBreaks {
+            view: FRONT,
+            breaks: vec![soliddraft_drawing::Break {
+                from: Vec3::new(40.0, 0.0, 0.0),
+                to: Vec3::new(80.0, 0.0, 0.0),
+                axis: soliddraft_drawing::AlignAxis::Horizontal,
+            }],
+        },
+    );
+    let view = drawing.view(FRONT).unwrap();
+    let mut areas: Vec<f64> = view
+        .geometry
+        .hatch
+        .iter()
+        .map(|p| {
+            p.outer.iter().zip(p.outer.iter().cycle().skip(1)).map(|(a, b)| a.u * b.v - b.u * a.v).sum::<f64>().abs()
+                / 2.0
+        })
+        .collect();
+    areas.sort_by(f64::total_cmp);
+    assert_eq!(areas.len(), 2);
+    assert!((areas[0] - 800.0).abs() < 1e-4 && (areas[1] - 4000.0).abs() < 1e-4, "{areas:?}");
+    let list = layout_sheet(&drawing, 0);
+    let centre_lines: Vec<_> = list
+        .printable()
+        .filter_map(|i| match i {
+            Item::Path(p) if p.role == Role::Boundary && p.dash.is_some() => Some(p),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(centre_lines.len(), 2);
+    for line in centre_lines {
+        let [kurbo::PathEl::MoveTo(a), kurbo::PathEl::LineTo(b)] = line.path.elements() else {
+            panic!("one line per side");
+        };
+        assert!(((b.x - a.x).abs() - (b.y - a.y).abs()).abs() < 1e-4);
+    }
+}
+
+#[test]
+fn aligned_section_dimensions_keep_the_second_leg_on_rebuild() {
+    use soliddraft_drawing::measure::{Pick, propose};
+    use soliddraft_drawing::{Attach, DimValue, Dimension, DimensionKind, Entity, Resolution};
+    let mut kernel = BoxKernel::new();
+    kernel.sections = true;
+    let part = box_part(&kernel, "block", Vec3::new(120.0, 100.0, 50.0));
+    let mut drawing = drawing(&part);
+    let index = PartIndex::build(&part).unwrap();
+    let top = drawing.sheets[0]
+        .views
+        .iter()
+        .find(|v| project::view_label_in(&drawing, &drawing.sheets[0], v) == "Top view")
+        .unwrap()
+        .id;
+    let context = derived::context(&drawing, &part, &index, top).unwrap();
+    let line = [Vec3::new(0.0, 30.0, 0.0), Vec3::new(60.0, 30.0, 0.0), Vec3::new(60.0, 100.0, 0.0)]
+        .map(|p| context.xf.point(p));
+    let (section, ctx) = derived::new_section_along(&drawing, &part, &index, 0, top, &line, false, None).unwrap();
+    let (edge, _) = section
+        .geometry
+        .curves
+        .iter()
+        .enumerate()
+        .find(|(_, c)| {
+            let Resolution::Found(Entity::Edge(id)) = index.resolve(&c.source) else { return false };
+            let Some(curve) = index.edge_curve(id) else { return false };
+            let delta = curve.end() - curve.start();
+            c.source.section_leg == 1 && delta.y.abs() > 99.0 && c.ends.is_some_and(|p| (p[1].u - p[0].u).abs() > 1.0)
+        })
+        .expect("the second leg unfolds a 100 mm model edge along the sheet's X");
+    let proposal =
+        propose(&section, &[Pick { view: section.id, curve: edge, end: None }], &ctx.projected.circles).unwrap();
+    assert_eq!(proposal.anchors.iter().map(|a| a.attach).collect::<Vec<_>>(), [Attach::Start, Attach::End]);
+    let id = section.id;
+    let mut stack = UndoStack::new();
+    run(&mut stack, &mut drawing, &part, Command::PlaceView { sheet: 0, view: section });
+    let annotation = soliddraft_drawing::Annotation {
+        id: drawing.next_annotation_id(),
+        view: id,
+        body: AnnotationKind::Dimension(Dimension::measured(
+            DimensionKind::Linear { orientation: LinearOrientation::Horizontal },
+            100.0,
+            0,
+        )),
+        anchors: proposal.anchors,
+        placement: Point2::new(0.0, -30.0),
+        style: Default::default(),
+        state: AnnotationState::Ok,
+        source: None,
+    };
+    let annotation_id = annotation.id;
+    run(&mut stack, &mut drawing, &part, Command::AddDimension { annotation });
+    let file = soliddraft_drawing::file::to_bytes(
+        &drawing,
+        &soliddraft_drawing::file::FileMeta::new("test", drawing.meta.units),
+    )
+    .unwrap();
+    let (mut drawing, _) = soliddraft_drawing::file::from_bytes(&file).unwrap();
+    soliddraft_drawing::regenerate_view(&mut drawing, &part, id).unwrap();
+    let ann = drawing.annotation(annotation_id).unwrap();
+    assert!(ann.anchors.iter().all(|anchor| anchor.entity.section_leg == 1));
+    assert!(matches!(&ann.body, AnnotationKind::Dimension(d) if d.value == DimValue::Measured { value: 100.0 }));
+}
+
+#[test]
+fn measuring_the_same_two_lines_does_not_depend_on_edge_direction() {
+    use soliddraft_drawing::measure::{AnchorGeometry, measure};
+    use soliddraft_drawing::{Attach, DimType, DimensionKind};
+    use soliddraft_kernel_api::drawing::{Curve3, ViewSpec};
+    let xf = project::ViewTransform::new(ViewSpec::new(Vec3::Z, Vec3::Y).frame().unwrap(), 1.0, Point2::default());
+    let horizontal = Curve3::Line { a: Vec3::ZERO, b: Vec3::X };
+    let diagonal = Vec3::new(-1.0, 1.0, 0.0);
+    for (a, b) in [(Vec3::ZERO, diagonal), (diagonal, Vec3::ZERO)] {
+        let other = Curve3::Line { a, b };
+        let anchors = [&horizontal, &other].map(|curve| AnchorGeometry {
+            curve: Some(curve),
+            point: Vec3::ZERO,
+            attach: Attach::Mid,
+        });
+        let angle = measure(&DimensionKind::Angular, DimType::Projected, &anchors, &xf).unwrap();
+        assert!((angle - 45.0).abs() < 1e-9, "{angle}");
+    }
+}
+
+#[test]
+fn an_axial_section_refuses_when_only_its_mesh_cut_succeeds() {
+    let mut kernel = BoxKernel::new();
+    kernel.sections = true;
+    kernel.refuse_exact_section = true;
+    let part = box_part(&kernel, "block", Vec3::new(120.0, 50.0, 50.0));
+    let drawing = drawing(&part);
+    let index = PartIndex::build(&part).unwrap();
+    let xf = derived::context(&drawing, &part, &index, FRONT).unwrap().xf;
+    let trace = [Vec3::new(0.0, 0.0, 20.0), Vec3::new(120.0, 0.0, 20.0)].map(|p| xf.point(p));
+    let error = derived::new_section(&drawing, &part, &index, 0, FRONT, trace, false, None).unwrap_err();
+    assert!(matches!(error, soliddraft_drawing::DrawingError::ViewRefused { .. }));
+    assert!(error.to_string().contains("test exact section refused"));
+
+    let preview = Part { preview: true, ..part };
+    let (_, context) = derived::new_section(&drawing, &preview, &index, 0, FRONT, trace, false, None).unwrap();
+    assert!(!context.projected.geometry.hatch.is_empty());
 }

@@ -8,7 +8,7 @@ use soliddraft_kernel_api::Point2;
 
 use crate::annotation::{Annotation, PmiSource};
 use crate::display::{self, Item, Owner};
-use crate::{AnnotationId, Drawing};
+use crate::{AnnotationId, Drawing, Sheet};
 
 /// A place on a drawing for a review comment.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -41,17 +41,21 @@ pub fn place_of_item(drawing: &Drawing, item: &str) -> Option<MarkupTarget> {
     };
     [true, false].into_iter().find_map(|own| {
         drawing.sheets.iter().enumerate().find_map(|(sheet, s)| {
-            let a = s.annotations.iter().find(|a| shows(a, own))?;
+            let a = s.annotations.iter().find(|a| shows(a, own) && current(drawing, s, a))?;
             Some(MarkupTarget { sheet, annotation: a.id })
         })
     })
 }
 
-/// `place` on `drawing` as it is now: the sheet still has the annotation and, with
-/// `item`, the annotation still shows that item. Its point follows the annotation.
-pub fn find_place(drawing: &Drawing, place: &MarkupTarget, item: Option<&str>) -> Option<MarkupPlace> {
-    let a = drawing.sheets.get(place.sheet)?.annotations.iter().find(|a| a.id == place.annotation)?;
-    if item.is_some_and(|item| a.source.as_ref().and_then(PmiSource::item) != Some(item)) {
+fn current(drawing: &Drawing, sheet: &Sheet, a: &Annotation) -> bool {
+    sheet.view(a.view).is_some_and(|v| v.geometry.source_digest == drawing.model.pinned.as_str())
+}
+
+/// Resolves the current annotation showing the named item and finds its position.
+pub fn find_place(drawing: &Drawing, place: &MarkupTarget, item: &str) -> Option<MarkupPlace> {
+    let sheet = drawing.sheets.get(place.sheet)?;
+    let a = sheet.annotations.iter().find(|a| a.id == place.annotation)?;
+    if !current(drawing, sheet, a) || a.source.as_ref().and_then(PmiSource::item) != Some(item) {
         return None;
     }
     Some(MarkupPlace { sheet: place.sheet, annotation: a.id, at: centre(drawing, place.sheet, a.id)? })
@@ -88,18 +92,20 @@ mod tests {
         sheet.annotations[index].source = Some(PmiSource::Item { item: "Bore diameter".into() });
         let id = sheet.annotations[index].id;
         let target = place_of_item(&drawing, "Bore diameter").expect("the item is on the drawing");
-        let place = find_place(&drawing, &target, Some("Bore diameter")).unwrap();
+        let place = find_place(&drawing, &target, "Bore diameter").unwrap();
         assert_eq!((place.sheet, place.annotation), (0, id));
         assert!(place_of_item(&drawing, "Slot").is_none());
 
         let placement = &mut drawing.sheets[0].annotations[index].placement;
         placement.u += 10.0;
         placement.v += 10.0;
-        let moved = find_place(&drawing, &target, Some("Bore diameter")).expect("still there");
+        let moved = find_place(&drawing, &target, "Bore diameter").expect("still there");
         let shift = (moved.at.u - place.at.u).hypot(moved.at.v - place.at.v);
         assert!(shift > 1.0, "{moved:?} follows the annotation from {place:?}");
-        assert!(find_place(&drawing, &target, Some("Slot")).is_none());
-        drawing.sheets[0].annotations.remove(index);
-        assert!(find_place(&drawing, &target, None).is_none());
+        assert!(find_place(&drawing, &target, "Slot").is_none());
+        let view = drawing.sheets[0].annotations[index].view;
+        drawing.view_mut(view).unwrap().geometry.source_digest = "older".into();
+        assert!(place_of_item(&drawing, "Bore diameter").is_none());
+        assert!(find_place(&drawing, &target, "Bore diameter").is_none());
     }
 }

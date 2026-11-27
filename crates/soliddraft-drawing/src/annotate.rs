@@ -12,7 +12,7 @@ use crate::annotation::{
     StyleOverrides,
 };
 use crate::ids::ViewId;
-use crate::measure::{AnchorGeometry, measure_set, precision_for};
+use crate::measure::{measure_set, precision_for};
 use crate::part::{PartIndex, round};
 use crate::project::{ViewContext, ViewTransform};
 use crate::{Drawing, DrawingError};
@@ -40,6 +40,26 @@ pub fn anchor_near(index: &PartIndex, xf: &ViewTransform, at: Vec3) -> Option<An
         .filter(|(_, p)| p.distance(at) <= 1e-3)
         .unwrap_or((Attach::Point { at }, at));
     Some(Anchor { entity, attach, cached: xf.point(point) })
+}
+
+fn view_anchor_near(index: &PartIndex, ctx: &ViewContext, at: Vec3) -> Option<Anchor> {
+    let mut anchor = anchor_near(index, &ctx.xf, at)?;
+    if ctx.xf.leg_turn(1).is_some() {
+        let projected_edge = ctx
+            .projected
+            .geometry
+            .curves
+            .iter()
+            .filter(|curve| curve.source.kernel_hint.is_some() && curve.source.kernel_hint == anchor.entity.kernel_hint)
+            .min_by_key(|curve| curve.source.section_leg);
+        if let Some(curve) = projected_edge {
+            anchor.entity.section_leg = curve.source.section_leg;
+            if let Some(turn) = ctx.xf.leg_turn(curve.source.section_leg) {
+                anchor.cached = ctx.xf.point(turn.point(at));
+            }
+        }
+    }
+    Some(anchor)
 }
 
 fn segment_distance(p: Vec3, a: Vec3, b: Vec3) -> f64 {
@@ -90,18 +110,23 @@ pub fn dimension_set(
     }
     let anchors: Vec<Anchor> = points
         .iter()
-        .map(|p| anchor_near(index, &ctx.xf, *p))
+        .map(|p| view_anchor_near(index, ctx, *p))
         .collect::<Option<_>>()
         .ok_or(DrawingError::BadRequest("the part has no edges".into()))?;
-    let geometry: Vec<AnchorGeometry> = anchors
+    let curves: Vec<_> = anchors
         .iter()
         .map(|a| {
             let curve = match index.resolve(&a.entity) {
                 crate::Resolution::Found(crate::Entity::Edge(id)) => index.edge_curve(id),
                 _ => None,
             };
-            AnchorGeometry { curve, point: a.entity.fingerprint.point, attach: a.attach }
+            crate::update::anchor_curve(ctx, a, curve)
         })
+        .collect();
+    let geometry: Vec<_> = anchors
+        .iter()
+        .zip(&curves)
+        .map(|(anchor, curve)| crate::update::anchor_geometry(ctx, anchor, curve.as_deref()))
         .collect();
     let mut set = DimensionSet { kind, orientation, values: Vec::new(), precision: 0, dim_type: DimType::Projected };
     let values =
@@ -137,7 +162,7 @@ pub fn attached(
     body: AnnotationKind,
     offset: Point2,
 ) -> Result<Annotation, DrawingError> {
-    let anchor = anchor_near(index, &ctx.xf, at).ok_or(DrawingError::BadRequest("the part has no edges".into()))?;
+    let anchor = view_anchor_near(index, ctx, at).ok_or(DrawingError::BadRequest("the part has no edges".into()))?;
     let placement = Point2::new(round(anchor.cached.u + offset.u), round(anchor.cached.v + offset.v));
     Ok(new_annotation(drawing, ctx.id, body, vec![anchor], placement))
 }

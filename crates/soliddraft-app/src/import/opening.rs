@@ -135,7 +135,7 @@ mod tests {
     use super::*;
     use egui::accesskit::Role;
     use egui_kittest::{Harness, kittest::Queryable};
-    use soliddraft_kernel_api::BodyAccuracy;
+    use soliddraft_kernel_api::BodyKind;
     use std::time::{Duration, Instant};
 
     fn until(mut ready: impl FnMut() -> bool, timeout: Duration, reason: &str) {
@@ -149,7 +149,7 @@ mod tests {
     #[test]
     #[ignore = "requires the ABC census fixture, see docs/exchange.md"]
     fn census_step_opens_as_solid_and_cancel_stops_its_running_admission() {
-        let path = PathBuf::from(std::env::var_os("SOLIDDRAFT_CENSUS_STEP").expect("path to ABC file 00000057"));
+        let path = PathBuf::from(std::env::var_os("SOLIDDRAFT_CENSUS_STEP").expect("path to the ABC STEP fixture"));
         let source = std::fs::read(&path).unwrap();
         let cold = crate::startup::kernel();
         let (old, work) = soliddraft_kernel_catallax::with_request_allowance(100_000_000, || {
@@ -157,7 +157,7 @@ mod tests {
         });
         assert!(old.is_err() && work.exhausted, "fixture must exceed the former allowance: {work:?}");
 
-        let mut state = AppState::new(Document::new("Census import", crate::startup::kernel()));
+        let state = AppState::new(Document::new("Census import", crate::startup::kernel()));
         let before = state.doc.model().semantic_hash();
         let revision = state.doc.revision();
         let mut app = Harness::builder()
@@ -211,7 +211,7 @@ mod tests {
         assert!(state.import_refusals.is_empty(), "{:?}", state.import_refusals);
         let body = state.doc.display_body().expect("the census STEP must open as a solid");
         let accuracy = state.doc.kernel().body_accuracy(body).unwrap();
-        assert!(matches!(accuracy, BodyAccuracy::Exact | BodyAccuracy::Tolerant), "{accuracy:?}");
+        assert_eq!(state.doc.kernel().body_kind(body).unwrap(), BodyKind::Solid);
         eprintln!(
             "Opened census STEP as a solid ({accuracy:?}) after exceeding {} work units on the old cap",
             work.limit

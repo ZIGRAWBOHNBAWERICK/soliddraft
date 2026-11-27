@@ -120,13 +120,13 @@ fn refusal(format: ImportFormat, error: catallax_import::ImportRefusal) -> Kerne
     KernelError::InvalidInput(message)
 }
 
-/// Cover both the source-certified reader and its tolerant fallback on an open worker.
-pub(super) fn during_open<T>(format: ImportFormat, run: impl FnOnce() -> KernelResult<T>) -> KernelResult<T> {
+/// Lets the open worker stop the source-certified reader without changing display limits.
+pub(super) fn during_open<T>(format: ImportFormat, run: impl FnOnce() -> T) -> KernelResult<T> {
     if format != ImportFormat::Step || soliddraft_kernel_api::Interrupt::current().is_none() {
-        return run();
+        return Ok(run());
     }
     let (result, work) = crate::RequestPolicy::Open.run(run);
-    if work.exhausted_here() { Err(KernelError::InvalidInput(TOO_COMPLEX.into())) } else { result }
+    if work.exhausted_here() { Err(KernelError::InvalidInput(TOO_COMPLEX.into())) } else { Ok(result) }
 }
 
 pub(super) fn propose(
@@ -139,7 +139,9 @@ pub(super) fn propose(
         checked_mesh(source)?;
         return Ok(ProposalSet { source_sha256: catallax_import::sha256_hex(source), proposals: Vec::new() });
     }
-    let proposals = match catallax_import::propose_source(source_format(format), source, &options(input)?) {
+    let options = options(input)?;
+    let proposals = during_open(format, || catallax_import::propose_source(source_format(format), source, &options))?;
+    let proposals = match proposals {
         Ok(proposals) => proposals,
         Err(_) if format == ImportFormat::Step => {
             let opened = kernel.opened_step(source)?;
@@ -303,15 +305,18 @@ impl CatallaxKernel {
         }
         let decisions: Vec<catallax_import::Decision> = wire(request.decisions)?;
         let mut model = catallax_topology::Model::new();
-        let imported = catallax_import::apply_source(
-            &mut model,
-            source_format(format),
-            request.source,
-            request.name,
-            &options(request.options)?,
-            &decisions,
-            None,
-        );
+        let options = options(request.options)?;
+        let imported = during_open(format, || {
+            catallax_import::apply_source(
+                &mut model,
+                source_format(format),
+                request.source,
+                request.name,
+                &options,
+                &decisions,
+                None,
+            )
+        })?;
         let imported = match imported {
             Ok(imported) => imported,
             Err(error) if format == ImportFormat::Step && request.decisions.is_empty() && request.record.is_none() => {

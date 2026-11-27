@@ -1500,11 +1500,11 @@ impl Kernel for CatallaxKernel {
     }
 
     fn propose_import(&self, source: &[u8], options: &ImportOptions) -> KernelResult<ProposalSet> {
-        self.propose_import_source(ImportFormat::Step, source, options)
+        self.observe("propose_import", || import::propose(self, ImportFormat::Step, source, options))
     }
 
     fn import_step(&self, tag: &OpTag, request: &ImportStepRequest<'_>) -> KernelResult<ImportStepResult> {
-        self.import_source(ImportFormat::Step, tag, request)
+        self.observe("import_step", || self.import_body(ImportFormat::Step, tag, request))
     }
 
     fn propose_import_source(
@@ -1513,9 +1513,7 @@ impl Kernel for CatallaxKernel {
         source: &[u8],
         options: &ImportOptions,
     ) -> KernelResult<ProposalSet> {
-        self.observe("propose_import", || {
-            import::during_open(format, || import::propose(self, format, source, options))
-        })
+        self.observe("propose_import", || import::propose(self, format, source, options))
     }
 
     fn replace_import_file(&self, request: &FileReplacementRequest<'_>) -> KernelResult<FileReplacement> {
@@ -1699,7 +1697,7 @@ impl Kernel for CatallaxKernel {
             ImportFormat::Iges => "import_iges",
             ImportFormat::Mesh => "import_mesh",
         };
-        self.observe(op, || import::during_open(format, || self.import_body(format, tag, request)))
+        self.observe(op, || self.import_body(format, tag, request))
     }
 
     fn backend(&self) -> BackendInfo {

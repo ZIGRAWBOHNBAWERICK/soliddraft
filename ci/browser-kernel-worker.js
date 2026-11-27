@@ -31,6 +31,9 @@ check(await page.eval(() => location.search === '?demo'), 'Open the application 
 const size = await page.eval(() => [innerWidth, innerHeight]);
 check(size[0] === 1400 && size[1] === 813, `The page is ${size.join(' x ')}; set a 1400 x 813 viewport first`);
 await page.wait('#status.hidden', 60000);
+check(await page.eval(() =>
+  !performance.getEntriesByType('resource').some(entry => entry.name.includes('/soliddraft-kernel')),
+), 'The page requested the worker module before a kernel job');
 await page.eval(() => {
   window.sdClick = (x, y) => {
     const canvas = document.getElementById('soliddraft');
@@ -45,6 +48,8 @@ await page.eval(() => {
   // Every worker the page starts, and what each one answers, with the time it arrived.
   window.kernelWorkers = [];
   window.kernelAnswers = [];
+  window.holdKernelJob = false;
+  window.releaseKernelJob = null;
   const Original = window.Worker;
   window.Worker = class extends Original {
     constructor(...args) {
@@ -57,6 +62,15 @@ await page.eval(() => {
         const size = hand_over ? { hand_over: hand_over.byteLength } : {};
         window.kernelAnswers.push({ ...JSON.parse(JSON.stringify(message)), ...size, at: performance.now() });
       });
+    }
+
+    postMessage(message, ...options) {
+      if (window.holdKernelJob && message.id !== undefined) {
+        window.holdKernelJob = false;
+        window.releaseKernelJob = () => super.postMessage(message, ...options);
+        return;
+      }
+      super.postMessage(message, ...options);
     }
   };
   // Each kernel job's steps on the page; the worker's arrive among kernelAnswers.
@@ -195,30 +209,28 @@ const plate = await measure(ROW.first, 'Boss-Extrude1', 1, 'The sample part\'s p
 check(plate === 108000, `The 120 x 90 x 10 mm plate measured ${plate} mm³`);
 check(await page.eval(() => window.kernelWorkers.length) === 1, 'Mass properties did not start one kernel worker');
 
-// Starting the worker again on a module that is not the application fails inside the
-// worker, which reports it and closes, as a trap does. The page keeps running.
+// A worker from a different application revision reports the mismatch and closes.
+// The page keeps running and can start another worker.
 await page.eval(() => {
-  window.kernelWorkers[0].postMessage({ init: { glue: 'data:text/javascript,', module: null } });
+  window.kernelWorkers[0].postMessage({ init: { base: document.baseURI, commit: 'different-revision' } });
   return true;
 });
 const fatal = await answered(2, 'the failed worker');
-check('fatal' in fatal, `The worker did not report its failure: ${JSON.stringify(fatal)}`);
+check(fatal.fatal?.includes('Reload the page'), `The worker did not report the revision mismatch: ${JSON.stringify(fatal)}`);
 check(await page.eval(() => document.getElementById('status').classList.contains('hidden')), 'The page stopped with its worker');
 const flanged = await measure(ROW.second, 'Boss-Extrude2', 3, 'The plate and flange, after the worker stopped');
 check(await page.eval(() => window.kernelWorkers.length) === 2, 'The next request did not start a new kernel worker');
 check(flanged > plate, `The plate and flange (${flanged}) are not larger than the plate (${plate})`);
 
-// File > New part, and the time of the click that replaced the part. On a slow frame the
-// menu can still be undrawn when New part is clicked, so the click is lost; then the
-// menu is closed and both are clicked again.
+// File > New part, waiting for the blank replacement to open. On a slow frame the
+// menu can still be undrawn when New part is clicked, so close the menu and try again.
 async function newPart(what) {
   for (let attempt = 0; attempt < 3; attempt++) {
     await click(FILE);
     await page.wait(300 + 700 * attempt);
     await click(NEW_PART);
-    const clicked = await page.eval(() => performance.now());
     for (let i = 0; i < 100; i++) {
-      if (await page.eval(() => window.featureCount) === 0) return clicked;
+      if (await page.eval(() => window.featureCount) === 0) return;
       await page.wait(100);
     }
     await page.press('Escape');
@@ -226,13 +238,23 @@ async function newPart(what) {
   throw new Error(`${what}: File > New part opened no new part in three tries`);
 }
 
-// Ask for the whole part, then replace it with a new part before the answer comes.
+// Hold the old part's job at the worker boundary until the new part is open.
+// The measured part then gets a real worker answer regardless of how fast it builds.
 await select(ROW.third, 'Boss-Extrude3', 'The whole part');
+await page.eval(() => { window.holdKernelJob = true; return true; });
 await click(MASS);
 await sent(3, 'The whole part');
-const replaced = await newPart('New part');
+check(await page.eval(() => window.releaseKernelJob !== null), 'Expected a held job for the whole part');
+await newPart('New part');
+const replaced = await page.eval(() => {
+  const at = performance.now();
+  window.releaseKernelJob();
+  window.releaseKernelJob = null;
+  return at;
+});
 const late = await answered(4, 'the replaced part');
-check(late.at > replaced, 'The whole part\'s answer came before the new part replaced it');
+check('answer' in late && JSON.parse(late.answer).ok?.volume > 0 && late.at > replaced,
+  'The whole part did not receive a successful worker answer after replacement');
 
 // A new part with one 60 x 40 x 20 mm block, selected, with Details open. A new part's
 // kernel numbers its bodies from the start, so two such blocks have the same body id.

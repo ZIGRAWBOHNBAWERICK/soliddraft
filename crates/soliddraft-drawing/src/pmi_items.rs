@@ -1619,7 +1619,7 @@ fn lay(drawing: &Drawing, sheet: usize) -> Laid {
                             if material.is_regardless() { 0.0 } else { 1.3 * th }
                         };
                         let cell =
-                            |text: f64, material, extra| (text + 0.9 * th + modifier(material) + extra).max(2.0 * th);
+                            |text: f64, material, extra: f64| (text + 0.9 * th + modifier(material) + extra).max(2.0 * th);
                         2.0 * th
                             + cell(
                                 display::text_width(&format!("Ø{}", segment.value_mm), th),

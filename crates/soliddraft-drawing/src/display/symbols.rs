@@ -343,7 +343,7 @@ fn position_cells(
             Point2::new(x, top),
         ]));
         pen.text(Point2::new(start, y), text, Align::Left, VAlign::Centre, 0.0);
-        let mut circle = |pen: &mut Pen, at: f64, letter| {
+        let circle = |pen: &mut Pen, at: f64, letter| {
             let center = Point2::new(at + th * 0.65, y);
             pen.circle(center, th * 0.55);
             pen.height = th * 0.7;

@@ -3,20 +3,16 @@
 //!
 //! An imported part has geometry and no requirements. The kernel reads its features off
 //! its faces ([`Document::recognised`]); the interview then lists what a drawing of the
-//! part cannot do without and what the part does not yet state: its material and general
-//! tolerance, three datums, and for every hole, boss and slot its size, where it is
-//! held from and, for a fitted hole, its finish. A decision the part has already taken
-//! is not asked again.
+//! part still lacks: material and general tolerance, datum and dimension checks, and
+//! requirements such as fits and threads. A decision the part has already taken is
+//! not asked again.
 //!
 //! Every proposal comes from a rule, never from a guess about intent:
 //!
 //! - datums: the largest flat face, then the largest flat face square to it, then the
 //!   largest square to both;
-//! - a lone hole through a boss is a fitted hole: H7, the first-choice hole of ISO 286,
-//!   with the finish reaming gives;
-//! - equal holes in a pattern take fasteners: H13, the clearance class of ISO 273
-//!   (medium series), and a position tolerance of the hole less the largest screw it
-//!   clears, the floating fastener rule;
+//! - measured dimensions describe geometry, not the intended fit, thread,
+//!   position tolerance or finish;
 //! - a boss and a slot get their sizes and a distance from the datum they are parallel
 //!   to, under the general tolerance;
 //! - the general tolerance is ISO 2768-mK.
@@ -34,10 +30,10 @@ use std::collections::BTreeSet;
 
 use serde::{Deserialize, Serialize};
 use soliddraft_kernel_api::pmi::{
-    Anchor, At, DatumRef, Feature, FitClass, GdtCharacteristic, MaterialCondition, PmiItem, PmiKind, SizeKind,
-    SurfaceProcess, Tolerance, length_text,
+    Anchor, At, Feature, GdtCharacteristic, HoleHead, HoleHeadKind, HoleHeadNominals, HoleNominals, PmiItem, PmiKind,
+    SizeKind, Tolerance, length_text,
 };
-use soliddraft_kernel_api::recognition::Recognised;
+use soliddraft_kernel_api::recognition::{CompoundHead, EdgeTreatmentKind, Recognised};
 use soliddraft_kernel_api::{FaceId, FaceInfo, SurfaceKind, Topology, Vec3};
 
 use crate::document::Document;
@@ -46,7 +42,7 @@ use crate::reference::FaceRef;
 /// A feature the kernel read off the body, on the body's faces.
 #[derive(Clone, Debug, PartialEq)]
 pub struct RecognisedFeature {
-    /// What it is: `hole`, `hole pattern`, `boss` or `slot`.
+    /// The feature kind, such as `hole`, `counterbore`, `pocket` or `chamfer`.
     pub kind: String,
     /// What the interview and the panel call it, such as `Hole Ø8` or `4 holes Ø4`.
     pub name: String,
@@ -59,9 +55,10 @@ pub struct RecognisedFeature {
     pub opens_onto: Vec<FaceId>,
     /// The faces that close a hole, or the face on top of a boss.
     pub closed_by: Vec<FaceId>,
-    /// Its sizes in millimetres, by name: `diameter`, `depth`, `height`, `length`,
-    /// `width`.
+    /// Its linear dimensions in millimetres, by name.
     pub sizes: Vec<(String, f64)>,
+    /// The included countersink angle or the chamfer angle, in degrees.
+    pub angle_deg: Option<f64>,
 }
 
 /// What a question proposes.
@@ -97,35 +94,6 @@ pub struct Question {
     /// The proposal itself, to accept as it is.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub proposal: Option<Proposal>,
-}
-
-/// The clearance holes of ISO 273, medium series: thread size and hole diameter.
-const CLEARANCE: [(f64, f64); 16] = [
-    (1.6, 1.8),
-    (2.0, 2.4),
-    (2.5, 2.9),
-    (3.0, 3.4),
-    (3.5, 3.9),
-    (4.0, 4.5),
-    (5.0, 5.5),
-    (6.0, 6.6),
-    (8.0, 9.0),
-    (10.0, 11.0),
-    (12.0, 13.5),
-    (14.0, 15.5),
-    (16.0, 17.5),
-    (20.0, 22.0),
-    (24.0, 26.0),
-    (30.0, 33.0),
-];
-
-/// The largest screw a hole clears by the medium series of ISO 273.
-fn screw_for(diameter: f64) -> Option<f64> {
-    CLEARANCE.iter().rev().find(|(_, hole)| *hole <= diameter + 1e-9).map(|(screw, _)| *screw)
-}
-
-fn fit(class: &str) -> Tolerance {
-    FitClass::parse(class).map_or(Tolerance::None, |class| Tolerance::Fit { class })
 }
 
 /// A flat face of the body as a datum sees it.
@@ -169,6 +137,11 @@ struct Asking<'a> {
     topology: &'a Topology,
     /// Faces under a size, a position tolerance, a finish, a slot item and a distance.
     sized: BTreeSet<FaceId>,
+    hole_intent: BTreeSet<FaceId>,
+    radii: BTreeSet<FaceId>,
+    edge_limits: BTreeSet<FaceId>,
+    plane_distances: BTreeSet<(FaceId, FaceId)>,
+    native_holes: Vec<&'a PmiKind<FaceId>>,
     positioned: BTreeSet<FaceId>,
     finished: BTreeSet<FaceId>,
     slotted: BTreeSet<FaceId>,
@@ -210,17 +183,14 @@ impl Asking<'_> {
         });
     }
 
+    fn unanswered(&mut self, id: String, asks: String, reason: &str) {
+        self.questions.push(Question { id, asks, proposes: String::new(), reason: reason.into(), proposal: None });
+    }
+
     /// The datum plane parallel to a face with this normal: the one a height or a depth
     /// along the normal is held from.
     fn datum_along(&self, normal: Vec3) -> Option<(String, Flat)> {
         self.datums.iter().find(|(_, flat)| parallel(flat.normal, normal)).cloned()
-    }
-
-    fn datum_refs(&self) -> Vec<DatumRef> {
-        self.datums
-            .iter()
-            .map(|(letter, _)| DatumRef { letter: letter.clone(), material: MaterialCondition::Regardless })
-            .collect()
     }
 
     /// The distance from a datum plane to a face parallel to it.
@@ -253,6 +223,7 @@ impl Document {
                 opens_onto: labels(&hole.opens_onto),
                 closed_by: labels(&hole.bottoms),
                 sizes,
+                angle_deg: None,
             });
         }
         for pattern in &found.hole_patterns {
@@ -267,6 +238,7 @@ impl Document {
                 opens_onto: labels(&first.opens_onto),
                 closed_by: labels(&first.bottoms),
                 sizes,
+                angle_deg: None,
             });
         }
         for boss in &found.bosses {
@@ -280,6 +252,7 @@ impl Document {
                 opens_onto: labels(&[boss.base]),
                 closed_by: labels(&[boss.top]),
                 sizes,
+                angle_deg: None,
             });
         }
         for slot in &found.slots {
@@ -291,6 +264,57 @@ impl Document {
                 opens_onto: Vec::new(),
                 closed_by: Vec::new(),
                 sizes: vec![("length".to_owned(), slot.length), ("width".to_owned(), slot.width)],
+                angle_deg: None,
+            });
+        }
+        for hole in found.compound_holes {
+            let (kind, angle_deg) = match hole.head {
+                CompoundHead::Counterbore { .. } => ("counterbore", None),
+                CompoundHead::Countersink { angle_deg } => ("countersink", Some(angle_deg)),
+            };
+            out.push(RecognisedFeature {
+                kind: kind.into(),
+                name: format!("{} Ø{}", capital(kind), length_text(hole.pilot_diameter)),
+                faces: hole.pilot_faces.into_iter().chain(hole.head_faces).collect(),
+                through: Some(hole.through),
+                opens_onto: if hole.through { vec![hole.entry, hole.end] } else { vec![hole.entry] },
+                closed_by: if hole.through { Vec::new() } else { vec![hole.end] },
+                sizes: vec![
+                    ("diameter".into(), hole.pilot_diameter),
+                    ("depth".into(), hole.depth),
+                    ("head_diameter".into(), hole.head_diameter),
+                    ("head_depth".into(), hole.head_depth),
+                ],
+                angle_deg,
+            });
+        }
+        for recess in found.recesses {
+            let kind = if recess.open_sided { "step" } else { "pocket" };
+            out.push(RecognisedFeature {
+                kind: kind.into(),
+                name: capital(kind),
+                faces: std::iter::once(recess.floor).chain(recess.walls).collect(),
+                through: None,
+                opens_onto: recess.opens_onto,
+                closed_by: vec![recess.floor],
+                sizes: vec![("depth".into(), recess.depth)],
+                angle_deg: None,
+            });
+        }
+        for edge in found.edge_treatments {
+            let (kind, dimension, value, angle_deg) = match edge.kind {
+                EdgeTreatmentKind::Fillet { radius } => ("fillet", "radius", radius, None),
+                EdgeTreatmentKind::Chamfer { setback } => ("chamfer", "setback", setback, Some(45.0)),
+            };
+            out.push(RecognisedFeature {
+                kind: kind.into(),
+                name: capital(kind),
+                faces: vec![edge.face],
+                through: None,
+                opens_onto: Vec::new(),
+                closed_by: Vec::new(),
+                sizes: vec![(dimension.into(), value)],
+                angle_deg,
             });
         }
         Ok(out)
@@ -307,6 +331,11 @@ impl Document {
             doc: self,
             topology: &topology,
             sized: BTreeSet::new(),
+            hole_intent: BTreeSet::new(),
+            radii: BTreeSet::new(),
+            edge_limits: BTreeSet::new(),
+            plane_distances: BTreeSet::new(),
+            native_holes: Vec::new(),
             positioned: BTreeSet::new(),
             finished: BTreeSet::new(),
             slotted: BTreeSet::new(),
@@ -316,26 +345,49 @@ impl Document {
             questions: Vec::new(),
         };
         for row in &rows {
+            if !row.applies() {
+                continue;
+            }
             let Some(item) = &row.on_body else { continue };
             let all = || item.features().into_iter().flatten().copied();
             match &item.kind {
-                PmiKind::Size { .. } => asking.sized.extend(all()),
-                PmiKind::Hole { pilot, tolerance, thread, .. }
-                    if row.applies() && (!tolerance.is_none() || thread.is_some()) =>
-                {
-                    asking.sized.extend(pilot.iter().copied());
+                PmiKind::Size { size: SizeKind::Diameter, tolerance, thread, .. } => {
+                    asking.sized.extend(all());
+                    if !tolerance.is_none() || thread.is_some() {
+                        asking.hole_intent.extend(all());
+                    }
                 }
-                PmiKind::Hole { .. } => {}
+                PmiKind::Size { size: SizeKind::Radius, tolerance, .. } => {
+                    asking.radii.extend(all());
+                    if !tolerance.is_none() {
+                        asking.edge_limits.extend(all());
+                    }
+                }
+                PmiKind::Hole { pilot, tolerance, thread, .. } => {
+                    asking.native_holes.push(&item.kind);
+                    asking.sized.extend(pilot.iter().copied());
+                    if !tolerance.is_none() || thread.is_some() {
+                        asking.hole_intent.extend(pilot.iter().copied());
+                    }
+                }
                 PmiKind::Gdt { characteristic: GdtCharacteristic::Position, .. } => asking.positioned.extend(all()),
                 PmiKind::SurfaceFinish { .. } => asking.finished.extend(all()),
                 PmiKind::Slot { .. } => asking.slotted.extend(all()),
-                PmiKind::Location { .. } => asking.located.extend(all()),
+                PmiKind::Location { from, to, .. } => {
+                    asking.located.extend(all());
+                    if let (At::Feature, At::Feature, [a], [b]) =
+                        (&from.at, &to.at, from.feature.as_slice(), to.feature.as_slice())
+                    {
+                        asking.plane_distances.insert(ordered_pair(*a, *b));
+                    }
+                }
+                PmiKind::Chamfer { bevel, .. } | PmiKind::EdgeBreak { bevel, .. } => {
+                    asking.edge_limits.extend(bevel);
+                }
+                PmiKind::PositionControl(_) => asking.positioned.extend(all()),
                 PmiKind::Width { .. }
-                | PmiKind::Chamfer { .. }
-                | PmiKind::EdgeBreak { .. }
                 | PmiKind::BasicAngle { .. }
                 | PmiKind::DatumTarget(_)
-                | PmiKind::PositionControl(_)
                 | PmiKind::Knurl { .. }
                 | PmiKind::FaceNote { .. } => {}
                 PmiKind::Datum { letter, feature } => {
@@ -374,6 +426,8 @@ impl Document {
         holes(&mut asking, &found);
         bosses(&mut asking, &found);
         slots(&mut asking, &found);
+        recesses(&mut asking, &found);
+        edges(&mut asking, &found);
         Ok(asking.questions)
     }
 }
@@ -434,8 +488,7 @@ fn datums(asking: &mut Asking) {
     }
 }
 
-/// A hole or a pattern of holes: what it is for, how closely it is located and, for a
-/// fitted hole, its finish.
+/// Record checked dimensions separately from unknown requirements.
 fn holes(asking: &mut Asking, found: &Recognised) {
     let mut groups: Vec<Vec<usize>> = found.hole_patterns.clone();
     for index in 0..found.holes.len() {
@@ -444,7 +497,8 @@ fn holes(asking: &mut Asking, found: &Recognised) {
         }
     }
     for group in groups {
-        let first = &found.holes[group[0]];
+        let Some(&index) = group.first() else { continue };
+        let first = &found.holes[index];
         let walls: Vec<&[FaceId]> = group.iter().map(|hole| found.holes[*hole].faces.as_slice()).collect();
         let diameter = length_text(first.diameter);
         let pattern = group.len() > 1;
@@ -460,104 +514,269 @@ fn holes(asking: &mut Asking, found: &Recognised) {
                 .map(|(_, feature)| feature.clone())
                 .collect()
         };
-        // What a question about these holes calls them.
-        let what = |members: &[Feature<FaceRef>]| match (pattern, members.len()) {
-            (false, _) => format!("hole Ø{diameter}"),
-            (true, n) if n == group.len() => format!("{n} holes Ø{diameter}"),
-            (true, 1) => format!("remaining one of the {} holes Ø{diameter}", group.len()),
-            (true, n) => format!("remaining {n} of the {} holes Ø{diameter}", group.len()),
+        if first.through {
+            let members = open(&asking.sized);
+            if !members.is_empty() {
+                let id = question_id(&key, "size", &members);
+                let item = PmiItem {
+                    id: asking.name(&format!("{} diameter", capital(&key))),
+                    kind: PmiKind::Size {
+                        size: SizeKind::Diameter,
+                        features: members,
+                        tolerance: Tolerance::None,
+                        through: true,
+                        thread: None,
+                        nominal: None,
+                    },
+                };
+                asking.ask(
+                    id,
+                    format!("Record the measured diameter for {key}?"),
+                    "The cylindrical walls establish the diameter, not the fit.",
+                    item,
+                    &[first.diameter],
+                );
+            }
+            hole_intent(asking, &key, open(&asking.hole_intent));
+        } else {
+            for &index in &group {
+                let hole = &found.holes[index];
+                axial_hole(asking, &format!("hole Ø{diameter}"), &hole.faces, hole.diameter, false, hole.depth, None);
+            }
+        }
+        hole_position(asking, &key, open(&asking.positioned));
+
+        if !pattern && first.through && found.bosses.iter().any(|boss| first.opens_onto.contains(&boss.top)) {
+            let members = open(&asking.finished);
+            if !members.is_empty() {
+                asking.unanswered(
+                    question_id(&key, "finish", &members),
+                    format!("What finish does {key} require?"),
+                    "The geometry does not establish a required roughness or manufacturing process.",
+                );
+            }
+        }
+    }
+    for hole in &found.compound_holes {
+        let (label, kind, nominal) = match hole.head {
+            CompoundHead::Counterbore { .. } => (
+                "counterbore",
+                HoleHeadKind::Counterbore,
+                HoleHeadNominals::Counterbore { diameter_mm: hole.head_diameter, depth_mm: hole.head_depth },
+            ),
+            CompoundHead::Countersink { angle_deg } => (
+                "countersink",
+                HoleHeadKind::Countersink,
+                HoleHeadNominals::Countersink { diameter_mm: hole.head_diameter, included_angle_deg: angle_deg },
+            ),
         };
-        // A lone hole through a boss is fitted; holes in a pattern take fasteners.
-        let fitted = !pattern && found.bosses.iter().any(|boss| first.opens_onto.contains(&boss.top));
-        let screw = screw_for(first.diameter);
-        let members = open(&asking.sized);
-        if !members.is_empty() {
-            let (tolerance, reason) = if fitted {
-                (
-                    fit("H7"),
-                    "A lone hole through a boss locates a shaft or a pin. H7 is the first-choice hole of ISO 286."
-                        .to_owned(),
-                )
-            } else {
-                let clears =
-                    screw.map_or_else(String::new, |screw| format!(" It clears an M{} screw.", length_text(screw)));
-                (
-                    fit("H13"),
-                    format!(
-                        "{} H13 is the clearance class of ISO 273, medium series.{clears}",
-                        if pattern {
-                            "Equal holes in a pattern take fasteners."
-                        } else {
-                            "A plain hole takes a fastener."
-                        }
-                    ),
-                )
+        let key = format!("{label} Ø{}", length_text(hole.pilot_diameter));
+        axial_hole(
+            asking,
+            &key,
+            &hole.pilot_faces,
+            hole.pilot_diameter,
+            hole.through,
+            (!hole.through).then_some(hole.depth),
+            Some((kind, &hole.head_faces, nominal)),
+        );
+        if !hole.pilot_faces.iter().any(|face| asking.positioned.contains(face))
+            && let Some(pilot) = asking.refs(&hole.pilot_faces)
+        {
+            hole_position(asking, &key, vec![pilot]);
+        }
+    }
+}
+
+fn hole_intent(asking: &mut Asking, key: &str, members: Vec<Feature<FaceRef>>) {
+    if !members.is_empty() {
+        asking.unanswered(
+            question_id(key, "fit or thread", &members),
+            format!("What fit or thread, if any, is required for {key}?"),
+            "A measured bore cannot identify its mating part, fit class or thread designation.",
+        );
+    }
+}
+
+fn hole_position(asking: &mut Asking, key: &str, members: Vec<Feature<FaceRef>>) {
+    if asking.datums.len() == 3 && !members.is_empty() {
+        asking.unanswered(
+            question_id(key, "position", &members),
+            format!("What position limits apply to {key}?"),
+            "The geometry establishes the nominal location, not how far it may vary.",
+        );
+    }
+}
+
+fn axial_hole(
+    asking: &mut Asking,
+    key: &str,
+    walls: &[FaceId],
+    diameter: f64,
+    through: bool,
+    depth: Option<f64>,
+    head: Option<(HoleHeadKind, &[FaceId], HoleHeadNominals)>,
+) {
+    let Some(pilot) = asking.refs(walls) else { return };
+    let id = |aspect| question_id(key, aspect, std::slice::from_ref(&pilot));
+    let same_faces = |a: &[FaceId], b: &[FaceId]| a.len() == b.len() && a.iter().all(|face| b.contains(face));
+    let native = asking.native_holes.iter().find_map(|item| {
+        let PmiKind::Hole { pilot, head: actual, through: actual_through, thread, .. } = item else { return None };
+        let same_head = match (head, actual) {
+            (None, None) => true,
+            (Some((kind, faces, _)), Some(actual)) => kind == actual.kind && same_faces(faces, &actual.faces),
+            _ => false,
+        };
+        (*actual_through == through && same_faces(pilot, walls) && same_head)
+            .then(|| thread.as_ref().is_some_and(|thread| thread.depth.is_none()))
+    });
+    if native.is_none() {
+        let asks = format!("Record the checked dimensions of {key}?");
+        if !through && depth.is_none() {
+            asking.unanswered(
+                id("geometry"),
+                format!("What drill depth is required for {key}?"),
+                "The recogniser has not established the full axial drill depth.",
+            );
+        } else if walls.iter().any(|face| asking.sized.contains(face)) {
+            asking.unanswered(
+                id("geometry"),
+                asks,
+                "Update the existing pilot callout to include the axial geometry instead of adding a second size.",
+            );
+        } else {
+            let measured = HoleNominals {
+                pilot_diameter_mm: diameter,
+                head: head.map(|(_, _, nominal)| nominal),
+                drill_depth_mm: depth,
             };
-            let id = question_id(&key, "size", &members);
-            let asks = format!("What {} the {} for?", if members.len() > 1 { "are" } else { "is" }, what(&members));
-            let name = asking.name(&format!("{} diameter", capital(&key)));
+            let head = match head {
+                Some((kind, faces, _)) => {
+                    let Some(faces) = asking.refs(faces) else { return };
+                    Some(HoleHead { kind, faces })
+                }
+                None => None,
+            };
             let item = PmiItem {
-                id: name,
+                id: asking.name(&format!("{} dimensions", capital(key))),
+                kind: PmiKind::Hole {
+                    pilot: pilot.clone(),
+                    head,
+                    tolerance: Tolerance::None,
+                    through,
+                    drill_depth: None,
+                    thread: None,
+                },
+            };
+            asking.questions.push(Question {
+                id: id("geometry"),
+                asks,
+                proposes: item.hole_callout(&length_text(diameter), Some(&measured)),
+                reason: "The checked walls and axial ends establish these nominal dimensions, not the tolerances."
+                    .into(),
+                proposal: Some(Proposal::Item { item: Box::new(item) }),
+            });
+        }
+    }
+    if !through && native == Some(true) {
+        asking.unanswered(
+            id("thread depth"),
+            format!("What usable thread depth does {key} require?"),
+            "The drill depth is not the usable thread depth.",
+        );
+    }
+    if !walls.iter().any(|face| asking.hole_intent.contains(face)) {
+        hole_intent(asking, key, vec![pilot]);
+    }
+}
+
+fn ordered_pair(a: FaceId, b: FaceId) -> (FaceId, FaceId) {
+    if a < b { (a, b) } else { (b, a) }
+}
+
+fn recesses(asking: &mut Asking, found: &Recognised) {
+    for recess in &found.recesses {
+        if recess.opens_onto.iter().any(|&top| asking.plane_distances.contains(&ordered_pair(top, recess.floor))) {
+            continue;
+        }
+        let Some(floor) = asking.refs(&[recess.floor]) else { continue };
+        let key = if recess.open_sided { "step" } else { "pocket" };
+        let id = question_id(key, "depth", std::slice::from_ref(&floor));
+        let Some(&top) = recess.opens_onto.first() else { continue };
+        let Some(top) = asking.refs(&[top]) else { continue };
+        let item = PmiItem {
+            id: asking.name(&format!("{} depth", capital(key))),
+            kind: PmiKind::Location {
+                from: Anchor { feature: top, at: At::Feature },
+                to: Anchor { feature: floor, at: At::Feature },
+                tolerance: Tolerance::None,
+                nominal: None,
+            },
+        };
+        asking.ask(
+            id,
+            format!("Record the measured {key} depth?"),
+            "The opening and floor planes establish the perpendicular depth.",
+            item,
+            &[recess.depth],
+        );
+    }
+}
+
+fn edges(asking: &mut Asking, found: &Recognised) {
+    for edge in &found.edge_treatments {
+        let Some(feature) = asking.refs(&[edge.face]) else { continue };
+        let (key, nominal) = match edge.kind {
+            EdgeTreatmentKind::Fillet { radius } => ("fillet", format!("R{}", length_text(radius))),
+            EdgeTreatmentKind::Chamfer { setback } => {
+                if !asking.edge_limits.contains(&edge.face)
+                    && let (Some(a), Some(b)) = (asking.refs(&[edge.supports[0]]), asking.refs(&[edge.supports[1]]))
+                {
+                    let id = question_id("chamfer", "treatment", std::slice::from_ref(&feature));
+                    let item = PmiItem {
+                        id: asking.name("Chamfer"),
+                        kind: PmiKind::Chamfer { bevel: feature, sides: [a, b] },
+                    };
+                    asking.ask(
+                        id,
+                        "Record the measured chamfer, or specify edge-break limits?".into(),
+                        "The setback and angle come from equal setbacks on perpendicular supports; any limits must be stated.",
+                        item,
+                        &[setback, 45.0],
+                    );
+                }
+                continue;
+            }
+        };
+        let id = |aspect| question_id(key, aspect, std::slice::from_ref(&feature));
+        if let EdgeTreatmentKind::Fillet { radius } = edge.kind
+            && !asking.radii.contains(&edge.face)
+        {
+            let item = PmiItem {
+                id: asking.name("Fillet radius"),
                 kind: PmiKind::Size {
-                    size: SizeKind::Diameter,
-                    features: members,
-                    tolerance,
-                    through: first.through,
+                    size: SizeKind::Radius,
+                    features: vec![feature.clone()],
+                    tolerance: Tolerance::None,
+                    through: false,
                     thread: None,
                     nominal: None,
                 },
             };
-            asking.ask(id, asks, &reason, item, &[first.diameter]);
+            asking.ask(
+                id("radius"),
+                "Record the measured fillet radius?".into(),
+                "The tangent cylindrical band establishes the nominal radius.",
+                item,
+                &[radius],
+            );
         }
-        let members = open(&asking.positioned);
-        if !members.is_empty() && asking.datums.len() == 3 {
-            let (value, reason) = match (fitted, screw) {
-                (true, _) => {
-                    (0.05, "A starting value for a fitted hole. Set it from what mates with the hole.".to_owned())
-                }
-                (false, Some(screw)) => (
-                    first.diameter - screw,
-                    format!(
-                        "The hole less the M{} screw it clears: what a floating fastener leaves for position.",
-                        length_text(screw)
-                    ),
-                ),
-                (false, None) => (0.2, "A starting value. Set it from what passes through the hole.".to_owned()),
-            };
-            let id = question_id(&key, "position", &members);
-            let asks = format!("How closely must the {} be located?", what(&members));
-            let name = asking.name(&format!("{} position", capital(&key)));
-            let item = PmiItem {
-                id: name,
-                kind: PmiKind::Gdt {
-                    characteristic: GdtCharacteristic::Position,
-                    tolerance: (value * 1000.0).round() / 1000.0,
-                    diameter: true,
-                    material: MaterialCondition::Regardless,
-                    datums: asking.datum_refs(),
-                    features: members,
-                },
-            };
-            asking.ask(id, asks, &reason, item, &[]);
-        }
-        // Only a lone hole is fitted, so this asks about one wall at most.
-        if let Some(wall) = open(&asking.finished).into_iter().next().filter(|_| fitted) {
-            let id = question_id(&key, "finish", std::slice::from_ref(&wall));
-            let asks = format!("What finish does the {} need?", what(std::slice::from_ref(&wall)));
-            let name = asking.name(&format!("{} finish", capital(&key)));
-            let item = PmiItem {
-                id: name,
-                kind: PmiKind::SurfaceFinish {
-                    text: "Ra 1.6".into(),
-                    process: SurfaceProcess::Any,
-                    method: String::new(),
-                    lay: None,
-                    allowance: String::new(),
-                    all_around: false,
-                    feature: wall,
-                },
-            };
-            asking.ask(id, asks, "Reaming, the usual way to an H7 hole, leaves about Ra 1.6.", item, &[]);
+        if !asking.edge_limits.contains(&edge.face) {
+            asking.unanswered(
+                id("treatment"),
+                format!("What treatment or limits are required for the {key} ({nominal})?"),
+                "The measured profile does not establish the manufacturing requirement.",
+            );
         }
     }
 }

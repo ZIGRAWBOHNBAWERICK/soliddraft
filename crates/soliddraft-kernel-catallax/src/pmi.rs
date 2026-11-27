@@ -268,9 +268,11 @@ fn app_item<F: Clone>(item: &cx::Item<F>) -> Option<PmiItem<F>> {
     let kind = match &item.kind {
         cx::ItemKind::Datum(datum) => PmiKind::Datum { letter: datum.letter.clone(), feature: datum.feature.clone() },
         cx::ItemKind::Size(size) => PmiKind::Size {
-            size: match size.kind {
+            size: match &size.kind {
                 cx::SizeKind::Diameter => SizeKind::Diameter,
                 cx::SizeKind::Radius => SizeKind::Radius,
+                // A compound hole callout has no form in the app's PMI yet.
+                cx::SizeKind::Hole(_) => return None,
             },
             features: size.features.clone(),
             tolerance: limits_back(&size.limits)?,

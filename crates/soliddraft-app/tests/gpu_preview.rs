@@ -30,6 +30,7 @@ fn device() -> Option<(wgpu::Device, wgpu::Queue, String)> {
     };
     let info = adapter.get_info();
     let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).ok()?;
+    eprintln!("adapter: {}", gpu_preview::describe(&info));
     Some((device, queue, gpu_preview::describe(&info)))
 }
 

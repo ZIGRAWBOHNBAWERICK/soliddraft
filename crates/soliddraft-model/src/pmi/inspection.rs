@@ -22,44 +22,80 @@ use crate::{Document, FaceRef, FeatureId};
 /// not inferred from a file name or the CAD document's content hash.
 #[derive(Debug, PartialEq)]
 pub struct InspectionPlan {
+    /// Document name; not a manufacturing part number.
     pub part: String,
+    /// Caller-supplied manufacturing revision, if known.
     pub revision: Option<String>,
+    /// Material stated in the part notes.
     pub material: Option<String>,
+    /// General tolerance designation stated in the part notes.
     pub general_tolerance: Option<String>,
+    /// Inspection groups in document order.
     pub groups: Vec<InspectionGroup>,
 }
 
 /// One native PMI item or part note, with its child characteristics in drawing order.
 #[derive(Debug, PartialEq)]
 pub struct InspectionGroup {
+    /// Stable part-local group identifier.
     pub id: String,
+    /// Source PMI item identifier; absent for a part note.
     pub item_id: Option<String>,
+    /// Human-readable requirement from the source PMI.
     pub callout: String,
+    /// Datum references in precedence order.
     pub datums: Vec<DatumRef>,
+    /// Why the source PMI could not be resolved.
     pub problem: Option<String>,
+    /// Characteristics belonging to this group, in requirement order.
     pub rows: Vec<InspectionRow>,
     face_groups: Vec<Feature<FaceRef>>,
     thread_feature: Option<FeatureId>,
 }
 
+/// Design requirement represented by one characteristic row.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum InspectionKind {
+    /// Diameter of a cylinder, including a hole pilot.
     Diameter,
+    /// Radius of a circular feature.
     Radius,
+    /// Axial length from entry to the end of the full drill diameter.
     DrillDepth,
+    /// Diameter of the cylindrical head enlargement.
     CounterboreDiameter,
+    /// Axial distance from entry to the counterbore shoulder.
     CounterboreDepth,
+    /// Major diameter at the countersink entry.
     CountersinkDiameter,
+    /// Full included angle of the countersink cone.
     CountersinkAngle,
+    /// Specified usable thread depth from the entry.
     ThreadDepth,
+    /// Distance between two features or from a locating datum.
     Distance,
+    /// Length of a slot between its ends.
     SlotLength,
+    /// Width between the slot flats.
     SlotWidth,
+    /// Radius of the slot ends.
     SlotRadius,
-    Geometric { characteristic: GdtCharacteristic, diameter: bool, material: MaterialCondition },
+    /// A geometric control.
+    Geometric {
+        /// Characteristic named by the feature control frame.
+        characteristic: GdtCharacteristic,
+        /// Whether the tolerance zone is specified by diameter.
+        diameter: bool,
+        /// Material condition modifier on the tolerance zone.
+        material: MaterialCondition,
+    },
+    /// Surface texture requirement.
     SurfaceFinish,
+    /// Thread designation, not a measured cylinder diameter.
     Thread,
+    /// Datum definition, not a measurement.
     Datum,
+    /// Part note, not a measurement.
     Note,
 }
 
@@ -87,10 +123,14 @@ impl InspectionKind {
     }
 }
 
+/// Unit of the nominal and numerical limits on a characteristic.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum InspectionUnit {
+    /// Linear dimensions.
     Millimetre,
+    /// Surface roughness.
     Micrometre,
+    /// Angular dimensions in degrees.
     Degree,
 }
 
@@ -104,10 +144,14 @@ impl InspectionUnit {
     }
 }
 
+/// Whether a design requirement can contribute an inspection characteristic.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Applicability {
+    /// Inspection requirement, with no as-built result implied.
     Inspect,
+    /// Reference information such as a basic dimension or note.
     Reference,
+    /// A missing or unresolved design input prevents inspection.
     Unresolved,
 }
 
@@ -127,14 +171,21 @@ impl Applicability {
 /// when the actual feature size is known.
 #[derive(Debug, PartialEq)]
 pub struct InspectionRow {
+    /// Stable part-local characteristic identifier.
     pub id: String,
     /// One-based position in the PMI pattern (or placement of the native thread feature).
     pub member: Option<usize>,
+    /// What the requirement controls.
     pub kind: InspectionKind,
+    /// Units for the numeric values, if relevant.
     pub unit: Option<InspectionUnit>,
+    /// Design nominal, if specified or available from the checked model.
     pub nominal: Option<f64>,
+    /// Absolute lower bound, when stated numerically.
     pub lower_limit: Option<f64>,
+    /// Absolute upper bound, when stated numerically.
     pub upper_limit: Option<f64>,
+    /// Source dimensional tolerance, if applicable.
     pub dimension_tolerance: Option<Tolerance>,
     /// Index into the group's ordered datum frame, only for a derived basic distance.
     pub locating_datum: Option<usize>,
@@ -142,6 +193,7 @@ pub struct InspectionRow {
 }
 
 impl InspectionRow {
+    /// Classify the requirement without treating a CAD nominal as an inspection result.
     pub fn applicability(&self, group: &InspectionGroup) -> Applicability {
         if matches!(self.kind, InspectionKind::Datum | InspectionKind::Note)
             || self.dimension_tolerance == Some(Tolerance::Basic)

@@ -4,7 +4,9 @@ use crate::commands::{Agents, CommandSpec, Size, Undo};
 use crate::icons::Icon;
 use crate::state::{AppAction, RibbonTab};
 use serde_json::Value;
-use soliddraft_assistant::tools::schema::{any_of, array, boolean, integer, number, object, one_of, optional, string};
+use soliddraft_assistant::tools::schema::{
+    any_of, array, boolean, described, integer, number, object, one_of, optional, string,
+};
 
 fn segment() -> Value {
     object(&[
@@ -29,8 +31,6 @@ fn vector(label: &str) -> Value {
 }
 
 fn target() -> Value {
-    let shape = |name| one_of(&[name], "Target shape");
-    let length = |what| string(what);
     object(&[
         ("datum", string("Declared datum letter")),
         ("number", integer("Explicit positive target number for this datum")),
@@ -38,52 +38,42 @@ fn target() -> Value {
         ("point_mm", vector("Target center: three part coordinates in mm")),
         (
             "kind",
-            any_of(vec![
-                object(&[("shape", shape("point"))]),
-                object(&[
-                    ("shape", shape("line")),
-                    ("length_mm", length("Full length in mm")),
-                    ("direction", vector("Tangent direction in part axes")),
-                ]),
-                object(&[
-                    ("shape", shape("area")),
-                    (
-                        "area",
-                        any_of(vec![
-                            object(&[("shape", shape("circular")), ("diameter_mm", length("Full diameter in mm"))]),
-                            object(&[
-                                ("shape", shape("rectangular")),
-                                ("length_mm", length("Full length in mm")),
-                                ("width_mm", length("Full width in mm")),
-                                ("direction", vector("Tangent length axis")),
-                            ]),
-                        ]),
-                    ),
-                ]),
+            object(&[
+                ("shape", one_of(&["point", "line", "area"], "Target shape")),
+                ("length_mm", optional(string("Line only: required full length in mm"))),
+                ("direction", optional(vector("Line only: required tangent direction in part axes"))),
+                (
+                    "area",
+                    optional(object(&[
+                        ("shape", one_of(&["circular", "rectangular"], "Required area shape")),
+                        ("diameter_mm", optional(string("Circular only: required full diameter in mm"))),
+                        ("length_mm", optional(string("Rectangular only: required full length in mm"))),
+                        ("width_mm", optional(string("Rectangular only: required full width in mm"))),
+                        ("direction", optional(vector("Rectangular only: required tangent length axis"))),
+                    ])),
+                ),
             ]),
         ),
     ])
 }
 
 fn position_frame() -> Value {
-    any_of(vec![
-        object(&[
-            ("frame", one_of(&["single"], "Single position frame")),
-            ("segment", segment()),
-            (
-                "projected_zone",
-                optional(object(&[
+    object(&[
+        ("frame", one_of(&["single", "composite"], "Position frame type")),
+        ("segment", optional(described(segment(), "Required for a single frame; omit for a composite"))),
+        (
+            "projected_zone",
+            optional(described(
+                object(&[
                     ("height_mm", string("Explicit positive height along the outward axis, in mm")),
                     ("direction", vector("Explicit outward direction in part axes")),
                     ("entry_faces", array(string("Planar entry face name"), "One per feature, in order")),
-                ])),
-            ),
-        ]),
-        object(&[
-            ("frame", one_of(&["composite"], "Exactly two ordered segments, no projection")),
-            ("upper", segment()),
-            ("lower", segment()),
-        ]),
+                ]),
+                "Single frames only",
+            )),
+        ),
+        ("upper", optional(described(segment(), "Required upper segment of a composite; omit for a single frame"))),
+        ("lower", optional(described(segment(), "Required lower segment of a composite; omit for a single frame"))),
     ])
 }
 

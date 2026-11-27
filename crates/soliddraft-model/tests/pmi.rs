@@ -4,7 +4,7 @@
 use std::sync::Arc;
 
 use soliddraft_kernel_api::pmi::{
-    Anchor, At, DatumRef, DatumTarget, Decimal, GdtCharacteristic, HoleHead as PmiHead, HoleHeadKind, HoleNominals,
+    Anchor, At, DatumRef, DatumTarget, Decimal, GdtCharacteristic, HoleHead as PmiHead, HoleHeadKind, HoleHeadNominals,
     HoleThread, MaterialCondition, PartNotes, Pmi, PmiItem, PmiKind, PositionControl, PositionFrame, PositionSegment,
     ProjectedZone, SizeKind, TargetArea, TargetKind, Tolerance,
 };
@@ -278,13 +278,19 @@ fn step_carries_the_items_to_another_part_and_back_onto_the_same_faces() {
     // A typed reader may return a damaged target even when its declaration is valid.
     // The dependent frame cannot fall back to using the datum as a whole face.
     let mut damaged = read.clone();
-    damaged.pmi.items.insert(0, PmiItem {
-        id: "A1".into(),
-        kind: PmiKind::DatumTarget(DatumTarget {
-            datum: "A".into(), number: 1, face: "missing-face".into(), point_mm: [10.0, 0.0, 0.0],
-            kind: TargetKind::Point,
-        }),
-    });
+    damaged.pmi.items.insert(
+        0,
+        PmiItem {
+            id: "A1".into(),
+            kind: PmiKind::DatumTarget(DatumTarget {
+                datum: "A".into(),
+                number: 1,
+                face: "missing-face".into(),
+                point_mm: [10.0, 0.0, 0.0],
+                kind: TargetKind::Point,
+            }),
+        },
+    );
     let mut clean = doc();
     let import = add(&mut clean, FeatureKind::ImportStep(ImportStepFeature::new("block.step", step.text.into_bytes())));
     let (surviving, report) = clean.pmi_from_step(&[import], &damaged);
@@ -417,10 +423,9 @@ fn position_edit_preserves_the_ordered_datum_frame_on_rejection() {
     let valid = d.pmi().item("Bore position").unwrap().clone();
     assert_eq!(valid.callout(&[]), "Position \u{d8}0.05 A|B|C");
 
-    for (letters, diagnostic) in [
-        (["A", "B", "A"], "A datum is referred to twice"),
-        (["A", "B", "D"], "Datum D is not defined"),
-    ] {
+    for (letters, diagnostic) in
+        [(["A", "B", "A"], "A datum is referred to twice"), (["A", "B", "D"], "Datum D is not defined")]
+    {
         let Err(CommandError::Invalid(message)) = d.execute(edit(&letters)) else {
             panic!("position edit with {letters:?} should be invalid");
         };
@@ -440,31 +445,46 @@ fn targets_and_position_frames_reopen_and_reject_invalid_edits() {
     let side = facing(&d, Vec3::new(0.0, -1.0, 0.0));
     put(&mut d, "Datum C", PmiKind::Datum { letter: "C".into(), feature: side });
 
-    let target = |number, kind| PmiKind::DatumTarget(DatumTarget {
-        datum: "A".into(), number, face: underside.clone(), point_mm: [10.0, 0.0, 0.0], kind,
-    });
+    let target = |number, kind| {
+        PmiKind::DatumTarget(DatumTarget {
+            datum: "A".into(),
+            number,
+            face: underside.clone(),
+            point_mm: [10.0, 0.0, 0.0],
+            kind,
+        })
+    };
     for (number, kind) in [
         (1, TargetKind::Point),
         (2, TargetKind::Line { length_mm: p("4"), direction: [1.0, 0.0, 0.0] }),
         (3, TargetKind::Area { area: TargetArea::Circular { diameter_mm: p("2") } }),
-        (4, TargetKind::Area { area: TargetArea::Rectangular {
-            length_mm: p("4"), width_mm: p("2"), direction: [1.0, 0.0, 0.0],
-        }}),
+        (
+            4,
+            TargetKind::Area {
+                area: TargetArea::Rectangular { length_mm: p("4"), width_mm: p("2"), direction: [1.0, 0.0, 0.0] },
+            },
+        ),
     ] {
         put(&mut d, &format!("A{number}"), target(number, kind));
     }
 
     let segment = |value, material, letters: &[&str]| PositionSegment {
-        value_mm: p(value), diameter_zone: true, material, datums: datums(letters),
+        value_mm: p(value),
+        diameter_zone: true,
+        material,
+        datums: datums(letters),
     };
     let upper = segment("0.08", MaterialCondition::Maximum, &["A", "B", "C"]);
     let lower = segment("0.02", MaterialCondition::Least, &["A", "B"]);
     let bore = cylinders(&d);
     let control = |frame| PmiKind::PositionControl(PositionControl { features: vec![bore.clone()], frame });
     put(&mut d, "Composite", control(PositionFrame::Composite { upper: upper.clone(), lower: lower.clone() }));
-    let projection = |height, direction, entry_faces| control(PositionFrame::Single {
-        segment: upper.clone(), projected_zone: Some(ProjectedZone { height_mm: p(height), direction, entry_faces }),
-    });
+    let projection = |height, direction, entry_faces| {
+        control(PositionFrame::Single {
+            segment: upper.clone(),
+            projected_zone: Some(ProjectedZone { height_mm: p(height), direction, entry_faces }),
+        })
+    };
     put(&mut d, "Projected", projection("5", [0.0, 0.0, 2.0], vec![top.clone()]));
 
     let saved = d.to_bytes().unwrap();
@@ -472,8 +492,11 @@ fn targets_and_position_frames_reopen_and_reject_invalid_edits() {
     assert_eq!(back.pmi(), d.pmi());
     let rows = back.pmi_rows();
     for (id, text) in [
-        ("A1", "TARGET A1"), ("A2", "TARGET A2 LINE 4"), ("A3", "TARGET A3 Ø2"),
-        ("A4", "TARGET A4 4×2"), ("Composite", "Position Ø0.08 (M)|A|B|C\nØ0.02 (L)|A|B"),
+        ("A1", "TARGET A1"),
+        ("A2", "TARGET A2 LINE 4"),
+        ("A3", "TARGET A3 Ø2"),
+        ("A4", "TARGET A4 4×2"),
+        ("Composite", "Position Ø0.08 (M)|A|B|C\nØ0.02 (L)|A|B"),
         ("Projected", "Position Ø0.08 (M)|A|B|C Ⓟ5"),
     ] {
         let row = rows.iter().find(|row| row.item.id == id).unwrap();
@@ -485,7 +508,9 @@ fn targets_and_position_frames_reopen_and_reject_invalid_edits() {
         let Err(CommandError::Invalid(error)) = doc.execute(Command::PutPmiItem {
             item: Box::new(PmiItem { id: id.into(), kind }),
             replaces: before.item(id).map(|item| item.id.clone()),
-        }) else { panic!("{id} should be invalid: {message}"); };
+        }) else {
+            panic!("{id} should be invalid: {message}");
+        };
         assert!(error.contains(message), "{id}: {error}");
         assert_eq!(doc.pmi(), &before);
     };
@@ -494,10 +519,26 @@ fn targets_and_position_frames_reopen_and_reject_invalid_edits() {
         (target(2, TargetKind::Point), "already defined"),
         (target(1, TargetKind::Line { length_mm: p("1"), direction: [0.0, 0.0, 1.0] }), "tangent"),
         (target(1, TargetKind::Area { area: TargetArea::Circular { diameter_mm: p("13") } }), "trim"),
-        (PmiKind::DatumTarget(DatumTarget { datum: "A".into(), number: 1, face: top.clone(),
-            point_mm: [10.0, 0.0, 10.0], kind: TargetKind::Point }), "must belong"),
-        (PmiKind::DatumTarget(DatumTarget { datum: "A".into(), number: 1, face: underside.clone(),
-            point_mm: [0.0, 0.0, 0.0], kind: TargetKind::Point }), "off"),
+        (
+            PmiKind::DatumTarget(DatumTarget {
+                datum: "A".into(),
+                number: 1,
+                face: top.clone(),
+                point_mm: [10.0, 0.0, 10.0],
+                kind: TargetKind::Point,
+            }),
+            "must belong",
+        ),
+        (
+            PmiKind::DatumTarget(DatumTarget {
+                datum: "A".into(),
+                number: 1,
+                face: underside.clone(),
+                point_mm: [0.0, 0.0, 0.0],
+                kind: TargetKind::Point,
+            }),
+            "off",
+        ),
     ] {
         reject(&mut back, "A1", kind, message);
     }
@@ -514,14 +555,19 @@ fn targets_and_position_frames_reopen_and_reject_invalid_edits() {
         (segment("0.02", MaterialCondition::Least, &["B", "A"]), "ordered prefix"),
         (segment("0.12", MaterialCondition::Least, &["A", "B"]), "cannot exceed"),
         (PositionSegment { diameter_zone: false, ..lower.clone() }, "cylindrical"),
-        (PositionSegment {
-            datums: vec![DatumRef { letter: "A".into(), material: MaterialCondition::Maximum }], ..lower.clone()
-        }, "material boundary modifier"),
+        (
+            PositionSegment {
+                datums: vec![DatumRef { letter: "A".into(), material: MaterialCondition::Maximum }],
+                ..lower.clone()
+            },
+            "material boundary modifier",
+        ),
     ] {
         reject(&mut back, "Composite", control(PositionFrame::Composite { upper: upper.clone(), lower }), message);
     }
 
-    let rename = PmiItem { id: "Datum A".into(), kind: PmiKind::Datum { letter: "D".into(), feature: vec![underside] } };
+    let rename =
+        PmiItem { id: "Datum A".into(), kind: PmiKind::Datum { letter: "D".into(), feature: vec![underside] } };
     back.execute(Command::PutPmiItem { item: Box::new(rename), replaces: Some("Datum A".into()) }).unwrap();
     for id in ["A1", "A2", "A3", "A4", "Composite", "Projected"] {
         assert!(back.pmi().item(id).unwrap().references_datum("D"), "{id}");
@@ -534,6 +580,8 @@ fn targets_and_position_frames_reopen_and_reject_invalid_edits() {
     let pmi = Pmi { items: vec![on], part: PartNotes::default() };
     let refused = back.kernel().export_step_with_pmi(back.body().unwrap(), &StepOptions::default(), &pmi).unwrap_err();
     assert!(refused.to_string().contains("Composite: Position control PMI is not supported"), "{refused}");
+    let refused = back.export(soliddraft_exchange::Format::Step).unwrap_err();
+    assert!(refused.contains("A1: Datum target PMI is not supported in STEP export"), "{refused}");
 
     back.execute(Command::EditFeature { id: bore_sketch_id, kind: bore_sketch(22.0) }).unwrap();
     let rows = back.pmi_rows();

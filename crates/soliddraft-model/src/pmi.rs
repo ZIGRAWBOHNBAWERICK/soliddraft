@@ -392,9 +392,7 @@ fn cylinder(carriers: &[FaceCarrier], group: &[FaceId]) -> Result<FaceAxis, Stri
     Ok(axis)
 }
 
-fn full_cylinder(
-    kernel: &dyn Kernel, body: BodyId, topology: &Topology, faces: &[FaceId], axis: FaceAxis,
-) -> bool {
+fn full_cylinder(kernel: &dyn Kernel, body: BodyId, topology: &Topology, faces: &[FaceId], axis: FaceAxis) -> bool {
     hole_rims(kernel, body, topology, faces, axis).is_ok_and(|rims| {
         rims.iter().all(|rim| {
             (rim.sweep_rad - std::f64::consts::TAU).abs() <= HOLE_EPS && (rim.radius - axis.radius).abs() <= HOLE_EPS
@@ -403,15 +401,21 @@ fn full_cylinder(
 }
 
 fn feature_of_size(
-    kernel: &dyn Kernel, body: BodyId, topology: &Topology, carriers: &[FaceCarrier], faces: &[FaceId],
+    kernel: &dyn Kernel,
+    body: BodyId,
+    topology: &Topology,
+    carriers: &[FaceCarrier],
+    faces: &[FaceId],
 ) -> bool {
     if let Ok(axis) = cylinder(carriers, faces) {
         return full_cylinder(kernel, body, topology, faces, axis);
     }
     matches!(faces, [a, b] if a != b)
-        && planar_group(carriers, &faces[..1]).ok().zip(planar_group(carriers, &faces[1..]).ok())
-            .is_some_and(|((a, na), (b, nb))| na.dot(nb) < 0.0 && na.cross(nb).length() <= HOLE_EPS
-                && (b - a).dot(na).abs() > HOLE_EPS)
+        && planar_group(carriers, &faces[..1]).ok().zip(planar_group(carriers, &faces[1..]).ok()).is_some_and(
+            |((a, na), (b, nb))| {
+                na.dot(nb) < 0.0 && na.cross(nb).length() <= HOLE_EPS && (b - a).dot(na).abs() > HOLE_EPS
+            },
+        )
 }
 
 enum TargetFootprint {
@@ -525,14 +529,21 @@ fn target_on_face(
 }
 
 fn projection_start(
-    kernel: &dyn Kernel, body: BodyId, topology: &Topology, carriers: &[FaceCarrier], group: &[FaceId],
-    axis: FaceAxis, entry: FaceId, outward: Vec3,
+    kernel: &dyn Kernel,
+    body: BodyId,
+    topology: &Topology,
+    carriers: &[FaceCarrier],
+    group: &[FaceId],
+    axis: FaceAxis,
+    entry: FaceId,
+    outward: Vec3,
 ) -> Result<(), String> {
     let face = carriers.iter().find(|face| face.id == entry).ok_or("The projection entry face is missing.")?;
     let (Some(point), Some(normal)) = (face.on_plane, face.normal) else {
         return Err("The projection entry needs a checked planar face.".into());
     };
-    if normal.dot(outward) <= 0.0 || normal.cross(outward).length() > HOLE_EPS
+    if normal.dot(outward) <= 0.0
+        || normal.cross(outward).length() > HOLE_EPS
         || axis.direction.cross(outward).length() > HOLE_EPS
     {
         return Err("The projected direction must run outward along the controlled axis.".into());
@@ -540,7 +551,9 @@ fn projection_start(
     let z = (point - axis.point).dot(normal) / axis.direction.dot(normal);
     let rims = hole_rims(kernel, body, topology, group, axis)?;
     let mut openings = rims.iter().filter(|rim| (rim.z - z).abs() <= HOLE_EPS && rim.neighbours.contains(&entry));
-    let rim = openings.next().filter(|_| openings.next().is_none())
+    let rim = openings
+        .next()
+        .filter(|_| openings.next().is_none())
         .ok_or("The axis does not have a unique opening at the selected entry.")?;
     if (rim.radius - axis.radius).abs() > HOLE_EPS
         || rims.iter().any(|other| (other.z - rim.z) * axis.direction.dot(outward) > HOLE_EPS)
@@ -643,22 +656,36 @@ fn measure_planar_pmi(
 
 impl Document {
     fn checked_gdt_on(
-        &self, state: &PartPmi, item: &PmiItem<FaceId>, body: BodyId, topology: &Topology,
-        names: &reference::NameMap, carriers: &[FaceCarrier],
+        &self,
+        state: &PartPmi,
+        item: &PmiItem<FaceId>,
+        body: BodyId,
+        topology: &Topology,
+        names: &reference::NameMap,
+        carriers: &[FaceCarrier],
     ) -> Result<(), String> {
         let check_datum = |datum: &soliddraft_kernel_api::pmi::DatumRef, require_face: bool| -> Result<(), String> {
             for letter in datum.letters() {
                 if !require_face && datum.material.is_regardless() {
                     continue;
                 }
-                let declared = state.items.iter().find(|item| matches!(&item.kind, PmiKind::Datum { letter: name, .. }
-                    if name == letter)).ok_or_else(|| format!("Datum {letter} is not defined."))?;
-                let placed = self.item_on(declared, topology, names)
-                    .map_err(|error| format!("Datum {letter}: {error}"))?;
+                let declared = state
+                    .items
+                    .iter()
+                    .find(|item| {
+                        matches!(&item.kind, PmiKind::Datum { letter: name, .. }
+                    if name == letter)
+                    })
+                    .ok_or_else(|| format!("Datum {letter} is not defined."))?;
+                let placed =
+                    self.item_on(declared, topology, names).map_err(|error| format!("Datum {letter}: {error}"))?;
                 let PmiKind::Datum { feature, .. } = placed.kind else { unreachable!() };
                 if !datum.material.is_regardless()
                     && (!feature_of_size(self.kernel.as_ref(), body, topology, carriers, &feature)
-                        || state.items.iter().any(|item| matches!(&item.kind, PmiKind::DatumTarget(t) if t.datum == letter)))
+                        || state
+                            .items
+                            .iter()
+                            .any(|item| matches!(&item.kind, PmiKind::DatumTarget(t) if t.datum == letter)))
                 {
                     return Err(format!("Datum {letter} does not support a material boundary modifier."));
                 }
@@ -678,15 +705,20 @@ impl Document {
                     if control.features[..i].iter().any(|other| group.iter().any(|face| other.contains(face))) {
                         return Err("Controlled feature groups must not reuse faces.".into());
                     }
-                    let axis = cylinder(carriers, group).map_err(|error| format!("Controlled feature {}: {error}", i + 1))?;
+                    let axis =
+                        cylinder(carriers, group).map_err(|error| format!("Controlled feature {}: {error}", i + 1))?;
                     if let Some(segment) = material
                         && !full_cylinder(self.kernel.as_ref(), body, topology, group, axis)
                     {
-                        return Err(format!("Position segment {}: feature {} does not support a material modifier.",
-                            segment + 1, i + 1));
+                        return Err(format!(
+                            "Position segment {}: feature {} does not support a material modifier.",
+                            segment + 1,
+                            i + 1
+                        ));
                     }
                     if let (Some(zone), Some(outward)) = (projected, outward) {
-                        let entry = *zone.entry_faces.get(i).ok_or("A projected zone needs an entry for every feature.")?;
+                        let entry =
+                            *zone.entry_faces.get(i).ok_or("A projected zone needs an entry for every feature.")?;
                         projection_start(self.kernel.as_ref(), body, topology, carriers, group, axis, entry, outward)
                             .map_err(|error| format!("Projected entry {}: {error}", i + 1))?;
                     }
@@ -700,10 +732,17 @@ impl Document {
             }
             PmiKind::Gdt { characteristic, material, datums, features, .. } => {
                 if !material.is_regardless()
-                    && (!matches!(characteristic,
-                        GdtCharacteristic::Position | GdtCharacteristic::Straightness | GdtCharacteristic::Flatness
-                        | GdtCharacteristic::Parallelism | GdtCharacteristic::Perpendicularity | GdtCharacteristic::Angularity)
-                        || features.iter().any(|group| !feature_of_size(self.kernel.as_ref(), body, topology, carriers, group)))
+                    && (!matches!(
+                        characteristic,
+                        GdtCharacteristic::Position
+                            | GdtCharacteristic::Straightness
+                            | GdtCharacteristic::Flatness
+                            | GdtCharacteristic::Parallelism
+                            | GdtCharacteristic::Perpendicularity
+                            | GdtCharacteristic::Angularity
+                    ) || features
+                        .iter()
+                        .any(|group| !feature_of_size(self.kernel.as_ref(), body, topology, carriers, group)))
                 {
                     return Err("This control does not support a material modifier on its features.".into());
                 }
@@ -717,9 +756,7 @@ impl Document {
         if let Some(problem) = state.problem_with(item, Some(&item.id)) {
             return Err(problem);
         }
-        let needs_targets = |other: &&PmiItem<FaceRef>| {
-            matches!(&other.kind, PmiKind::DatumTarget(t) if item.references_datum(&t.datum))
-        };
+        let needs_targets = |other: &&PmiItem<FaceRef>| matches!(&other.kind, PmiKind::DatumTarget(t) if item.references_datum(&t.datum));
         if !checked_gdt_kind(&item.kind) && !state.items.iter().any(|other| needs_targets(&other)) {
             return Ok(());
         }
@@ -898,9 +935,13 @@ impl Document {
                         problem = None;
                         if checked_gdt_kind(&item.kind) {
                             problem = self.pmi.problem_with(item, Some(&item.id)).or_else(|| {
-                                carriers[index].get_or_init(|| self.kernel.face_carriers(*body)).as_ref()
+                                carriers[index]
+                                    .get_or_init(|| self.kernel.face_carriers(*body))
+                                    .as_ref()
                                     .map_err(|error| error.to_string())
-                                    .and_then(|carriers| self.checked_gdt_on(&self.pmi, &on_body, *body, topology, &names, carriers))
+                                    .and_then(|carriers| {
+                                        self.checked_gdt_on(&self.pmi, &on_body, *body, topology, &names, carriers)
+                                    })
                                     .err()
                             });
                         } else if matches!(on_body.kind, PmiKind::Hole { .. }) {
@@ -959,16 +1000,14 @@ impl Document {
         let mut targeted = std::collections::BTreeMap::new();
         for row in &rows {
             if let PmiKind::DatumTarget(target) = &row.item.kind {
-                targeted.entry(target.datum.clone())
-                    .and_modify(|all| *all &= row.applies()).or_insert(row.applies());
+                targeted.entry(target.datum.clone()).and_modify(|all| *all &= row.applies()).or_insert(row.applies());
             }
         }
         for row in &mut rows {
             if row.problem.is_none()
                 && let Some(missing) = row.item.referenced_datums().find(|letter| {
                     standing.get(*letter).is_none_or(|(body, _)| *body != row.body)
-                        || (targeted.get(*letter) == Some(&false)
-                            && !matches!(row.item.kind, PmiKind::DatumTarget(_)))
+                        || (targeted.get(*letter) == Some(&false) && !matches!(row.item.kind, PmiKind::DatumTarget(_)))
                 })
             {
                 row.problem = Some(format!("Datum {missing} does not apply."));
@@ -1018,46 +1057,52 @@ impl Document {
         names: &reference::NameMap,
     ) -> Result<PmiItem<FaceId>, String> {
         let view = View { topology };
-        item.map_attachments(&mut (), |_, feature| {
-            // A bevel can tilt when its setback changes, and the angle measures
-            // precisely such a change. Keep the origin and surface checks; validate
-            // the resolved planes and their relationships in measure_planar_pmi.
-            let may_turn = match &item.kind {
-                PmiKind::Chamfer { bevel, .. } | PmiKind::EdgeBreak { bevel, .. } => std::ptr::eq(feature, bevel.as_slice()),
-                PmiKind::BasicAngle { .. } => true,
-                _ => false,
-            };
-            let mut faces: Feature<FaceId> = Vec::new();
-            for face in feature {
-                let mut turning;
-                let reference = if may_turn && face.fingerprint.normal.is_some() {
-                    turning = face.clone();
-                    turning.fingerprint.normal = None;
-                    &turning
-                } else {
-                    face
-                };
-                let found = reference::resolve_faces(reference, &view, names).map_err(|unresolved| {
-                    if face.label.is_empty() {
-                        unresolved.message
-                    } else {
-                        format!("{}: {}", face.label, unresolved.message)
+        item.map_attachments(
+            &mut (),
+            |_, feature| {
+                // A bevel can tilt when its setback changes, and the angle measures
+                // precisely such a change. Keep the origin and surface checks; validate
+                // the resolved planes and their relationships in measure_planar_pmi.
+                let may_turn = match &item.kind {
+                    PmiKind::Chamfer { bevel, .. } | PmiKind::EdgeBreak { bevel, .. } => {
+                        std::ptr::eq(feature, bevel.as_slice())
                     }
-                })?;
-                for id in found {
-                    if !faces.contains(&id) {
-                        faces.push(id);
+                    PmiKind::BasicAngle { .. } => true,
+                    _ => false,
+                };
+                let mut faces: Feature<FaceId> = Vec::new();
+                for face in feature {
+                    let mut turning;
+                    let reference = if may_turn && face.fingerprint.normal.is_some() {
+                        turning = face.clone();
+                        turning.fingerprint.normal = None;
+                        &turning
+                    } else {
+                        face
+                    };
+                    let found = reference::resolve_faces(reference, &view, names).map_err(|unresolved| {
+                        if face.label.is_empty() {
+                            unresolved.message
+                        } else {
+                            format!("{}: {}", face.label, unresolved.message)
+                        }
+                    })?;
+                    for id in found {
+                        if !faces.contains(&id) {
+                            faces.push(id);
+                        }
                     }
                 }
-            }
-            Ok::<_, String>(faces)
-        }, |_, face| {
-            let resolved = reference::resolve_faces(face, &view, names).map_err(|error| error.message)?;
-            match resolved.as_slice() {
-                [face] => Ok(*face),
-                _ => Err("A single-face attachment is ambiguous after the geometry edit.".into()),
-            }
-        })
+                Ok::<_, String>(faces)
+            },
+            |_, face| {
+                let resolved = reference::resolve_faces(face, &view, names).map_err(|error| error.message)?;
+                match resolved.as_slice() {
+                    [face] => Ok(*face),
+                    _ => Err("A single-face attachment is ambiguous after the geometry edit.".into()),
+                }
+            },
+        )
     }
 
     /// The part's manufacturing information for a STEP file: the items that apply, on

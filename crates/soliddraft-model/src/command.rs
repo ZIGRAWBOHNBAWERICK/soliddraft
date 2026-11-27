@@ -1407,15 +1407,23 @@ impl Document {
                                     if datum.letter == *was {
                                         datum.letter.clone_from(now);
                                     } else if datum.letters().any(|letter| letter == was) {
-                                        datum.letter = datum.letters()
+                                        datum.letter = datum
+                                            .letters()
                                             .map(|letter| if letter == was { now.as_str() } else { letter })
-                                            .collect::<Vec<_>>().join("-");
+                                            .collect::<Vec<_>>()
+                                            .join("-");
                                     }
                                 };
                                 match &mut other.kind {
-                                    PmiKind::DatumTarget(target) if target.datum == *was => target.datum.clone_from(now),
+                                    PmiKind::DatumTarget(target) if target.datum == *was => {
+                                        target.datum.clone_from(now)
+                                    }
                                     PmiKind::PositionControl(control) => {
-                                        control.frame.segments_mut().flat_map(|segment| &mut segment.datums).for_each(rename);
+                                        control
+                                            .frame
+                                            .segments_mut()
+                                            .flat_map(|segment| &mut segment.datums)
+                                            .for_each(rename);
                                     }
                                     PmiKind::Gdt { datums, .. } => datums.iter_mut().for_each(rename),
                                     _ => {}
@@ -1430,9 +1438,16 @@ impl Document {
                     PmiKind::DatumTarget(target) => Some(target.datum.as_str()),
                     _ => None,
                 };
-                let checked = self.pmi.items.iter()
-                    .filter(|other| other.id == item.id || affected_datum.is_some_and(|letter| other.references_datum(letter)))
-                    .find_map(|other| self.check_pmi_edit(&self.pmi, other).err().map(|problem| (other.id.clone(), problem)));
+                let checked = self
+                    .pmi
+                    .items
+                    .iter()
+                    .filter(|other| {
+                        other.id == item.id || affected_datum.is_some_and(|letter| other.references_datum(letter))
+                    })
+                    .find_map(|other| {
+                        self.check_pmi_edit(&self.pmi, other).err().map(|problem| (other.id.clone(), problem))
+                    });
                 if let Some((id, problem)) = checked {
                     self.pmi = old;
                     return Err(CommandError::Invalid(format!("{id}: {problem}")));

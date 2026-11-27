@@ -268,6 +268,9 @@ fn app_item<F: Clone>(item: &cx::Item<F>) -> Option<PmiItem<F>> {
             size: match size.kind {
                 cx::SizeKind::Diameter => SizeKind::Diameter,
                 cx::SizeKind::Radius => SizeKind::Radius,
+                // The app does not yet import a compound STEP hole callout. Report it
+                // as unread rather than turning it into a diameter and losing its requirements.
+                cx::SizeKind::Hole(_) => return None,
             },
             features: size.features.clone(),
             tolerance: limits_back(&size.limits)?,

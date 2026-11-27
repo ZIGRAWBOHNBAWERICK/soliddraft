@@ -43,11 +43,12 @@ impl Screen {
             events,
             ..Default::default()
         };
-        let output = self.ctx.run_ui(input, |ui| {
+        let mut output = self.ctx.run_ui(input, |ui| {
             state.poll(doc, ui.ctx());
             state.controls(ui, doc);
             state.dialogs(doc, ui.ctx());
         });
+        output.textures_delta.clear();
         fn text(shape: Shape, out: &mut Vec<(String, Pos2)>) {
             match shape {
                 Shape::Text(shape) if shape.visual_bounding_rect().is_positive() => {

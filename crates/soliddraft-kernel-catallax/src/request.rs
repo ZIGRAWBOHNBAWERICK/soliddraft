@@ -73,7 +73,10 @@ impl ScopedWork {
 impl RequestPolicy {
     fn limit(self) -> u64 {
         match self {
-            Self::Open | Self::Query => 100_000_000,
+            // Browser import still runs on the page thread.
+            Self::Open if cfg!(target_arch = "wasm32") => 100_000_000,
+            Self::Open => UNLIMITED_WORK,
+            Self::Query => 100_000_000,
             // A worker runs an edit under an interrupt when the user can cancel it, so it
             // needs no limit. One the window waits for keeps the stopgap.
             Self::Edit if Interrupt::current().is_some() => UNLIMITED_WORK,

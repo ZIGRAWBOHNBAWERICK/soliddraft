@@ -64,6 +64,9 @@ pub(crate) enum CheckKind {
     SlotLength,
     SlotWidth,
     Geometric(GdtCharacteristic),
+    HoleDepth,
+    HoleHead,
+    HoleThread,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -156,6 +159,35 @@ pub(crate) fn face_status<'a, F: PartialEq>(
                         dimension(*tolerance, *nominal, DimensionCheck::Cylinder { size: *size, member, faces })
                     };
                     add(CheckKind::Cylinder(*size), Some(member), status);
+                }
+            }
+            PmiKind::Hole { pilot, head, tolerance, through, thread, .. } => {
+                if pilot.contains(face) {
+                    if *tolerance != Tolerance::Basic {
+                        let size = SizeKind::Diameter;
+                        add(
+                            CheckKind::Cylinder(size),
+                            Some(0),
+                            dimension(*tolerance, None, DimensionCheck::Cylinder { size, member: 0, faces: pilot }),
+                        );
+                    }
+                    if !through {
+                        add(CheckKind::HoleDepth, None, Err(Indeterminate::Unsupported("Drill depth is not checked.")));
+                    }
+                    if thread.is_some() {
+                        add(
+                            CheckKind::HoleThread,
+                            None,
+                            Err(Indeterminate::Unsupported("Thread requirements are not checked.")),
+                        );
+                    }
+                }
+                if head.as_ref().is_some_and(|head| head.faces.contains(face)) {
+                    add(
+                        CheckKind::HoleHead,
+                        None,
+                        Err(Indeterminate::Unsupported("Hole head dimensions are not checked.")),
+                    );
                 }
             }
             PmiKind::Location { from, to, tolerance, nominal }
@@ -278,6 +310,42 @@ fn compare(measured: f64, lower: f64, upper: f64) -> Result<Status, Indeterminat
 mod tests {
     use super::*;
     use soliddraft_kernel_api::pmi::{At, MaterialCondition};
+
+    #[test]
+    fn native_hole_does_not_turn_unchecked_head_or_depth_into_a_pass() {
+        use soliddraft_kernel_api::pmi::{HoleHead, HoleHeadKind};
+
+        let pmi = Pmi {
+            items: vec![PmiItem {
+                id: "Compound hole".into(),
+                kind: PmiKind::Hole {
+                    pilot: vec![1],
+                    head: Some(HoleHead { kind: HoleHeadKind::Counterbore, faces: vec![2] }),
+                    tolerance: Tolerance::Deviation { lower: -0.1, upper: 0.1 },
+                    through: false,
+                    drill_depth: None,
+                    thread: None,
+                },
+            }],
+            part: Default::default(),
+        };
+        let status = |face| {
+            face_status(
+                &pmi,
+                &face,
+                |_, _| Ok(DimensionMeasurement { measured_mm: 4.0, nominal_mm: Some(4.0) }),
+                |_, _| panic!("no position constraint"),
+            )
+        };
+        let pilot = status(1);
+        assert!(matches!(pilot.contributors[0].status, Status::InTolerance(_)));
+        assert_eq!(pilot.contributors[1].kind, CheckKind::HoleDepth);
+        assert_eq!(pilot.verdict(), Some(Verdict::Indeterminate));
+        let head = status(2);
+        assert_eq!(head.contributors[0].kind, CheckKind::HoleHead);
+        assert_eq!(head.verdict(), Some(Verdict::Indeterminate));
+        assert_eq!(status(3).verdict(), None);
+    }
 
     fn diameter(tolerance: Tolerance, nominal: Option<f64>) -> PmiItem<u8> {
         PmiItem {

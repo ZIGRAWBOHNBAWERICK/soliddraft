@@ -11,7 +11,10 @@ use soliddraft_kernel_api::{
     FaceId, FaceRole, HoleDepth, HoleHead, HolePart, HoleTip, OpTag, StepOptions, SurfaceKind, Vec3,
 };
 use soliddraft_kernel_catallax::CatallaxKernel;
-use soliddraft_model::pmi::Located;
+use soliddraft_model::pmi::{
+    Located,
+    inspection::{Applicability, InspectionKind, InspectionPlan, InspectionUnit},
+};
 use soliddraft_model::sketch::{P2, Sketch, SolveStatus, solve::solve};
 use soliddraft_model::{
     Command, CommandError, DatumPlane, Document, EndCondition, ExtrudeFeature, ExtrudeOp, FaceRef, FeatureId,
@@ -471,6 +474,23 @@ fn hole_roles_checked_nominals_and_independent_depths_survive_native_reopen() {
             assert!(matches!(row.item.kind, PmiKind::Hole { tolerance: Tolerance::None, .. }));
         }
         assert_eq!(rows[3].callout(), "Ø4 DRILL DEEP 7\nM5x0.8-6H THREAD DEEP 5.12345");
+        let plan = InspectionPlan::from_document(d, Some("B"));
+        let expected = [
+            ("Counterbore", InspectionKind::CounterboreDepth, "counterbore_depth", InspectionUnit::Millimetre, 3.0, 1),
+            ("Countersink", InspectionKind::CountersinkAngle, "countersink_angle", InspectionUnit::Degree, 90.0, 1),
+            ("Blind", InspectionKind::DrillDepth, "drill_depth", InspectionUnit::Millimetre, 7.0, 0),
+            ("Blind thread", InspectionKind::ThreadDepth, "thread_depth", InspectionUnit::Millimetre, 5.12345, 0),
+        ];
+        for (id, kind, key, unit, value, face) in expected {
+            let group = plan.groups.iter().find(|group| group.item_id.as_deref() == Some(id)).unwrap();
+            let row = group.rows.iter().find(|row| row.kind == kind).unwrap();
+            assert_eq!(row.id, format!("pmi/{id}/1/{key}"));
+            assert_eq!(row.applicability(group), Applicability::Inspect);
+            assert_eq!(row.unit, Some(unit));
+            exact(row.nominal.unwrap(), value);
+            assert_eq!((row.lower_limit, row.upper_limit), (None, None));
+            assert_eq!(row.faces(group), &[d.pmi().item(id).unwrap().features()[face].clone()]);
+        }
     };
     check(&d);
     let reopened = Document::from_bytes(&d.to_bytes().unwrap(), Arc::new(CatallaxKernel::new())).unwrap();

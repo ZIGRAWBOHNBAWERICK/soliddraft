@@ -646,7 +646,7 @@ impl Document {
         &self, state: &PartPmi, item: &PmiItem<FaceId>, body: BodyId, topology: &Topology,
         names: &reference::NameMap, carriers: &[FaceCarrier],
     ) -> Result<(), String> {
-        let check_datum = |datum: &soliddraft_kernel_api::pmi::DatumRef, require_face| -> Result<(), String> {
+        let check_datum = |datum: &soliddraft_kernel_api::pmi::DatumRef, require_face: bool| -> Result<(), String> {
             for letter in datum.letters() {
                 if !require_face && datum.material.is_regardless() {
                     continue;

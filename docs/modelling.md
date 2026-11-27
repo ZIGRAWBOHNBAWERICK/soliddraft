@@ -38,6 +38,19 @@ The Create menu at the top of the palette's Create group lists every command tha
 or removes material, with its shortcut. The pin on a row puts the command in the palette
 or takes it out. Every command starts pinned. The pins are kept in the settings file.
 
+## Geometry proof
+
+Select a body and choose **Prove part** under **Geometry proof** in Properties.
+The check covers every edge of the part, including edges on other bodies. Complex
+parts ask for confirmation first. You can cancel a running proof from Properties.
+The check does not change the viewport.
+
+**Open proof report** shows each edge's distance bound or **Could not prove**, plus
+the geometry counts, mass properties and computing cost. **Fully proven** means
+every edge has a certified bound to its incident surfaces; it is not a claim that
+the part is fit for manufacture. An edit clears the verdict. The report and verdict
+are not saved in the part file.
+
 ## Extrusion options
 
 An extrusion or cut has these choices besides its end and depth:

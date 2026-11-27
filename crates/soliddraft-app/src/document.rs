@@ -6641,6 +6641,11 @@ fn draft_guides(
 pub const PREVIEW_MADE: u32 = u32::MAX;
 
 /// A preview mesh whose faces in `made` carry their marks in `face_features`.
+///
+/// Tool and section previews stay on the CPU preview, with or without the GPU preview.
+/// The code around them reads their triangles (the depth arrow, the section cap's tint,
+/// the dimension anchors), no checked mesh ever replaces them, and some bodies they show
+/// are released as soon as they are meshed, so the kernel cannot answer picks on them.
 fn preview_mesh_marked(
     kernel: &dyn Kernel,
     body: BodyId,
@@ -6649,10 +6654,6 @@ fn preview_mesh_marked(
 ) -> Result<Arc<DisplayMesh>, String> {
     let topology = kernel.topology(body).map_err(|e| e.to_string())?;
     let mut picks = Vec::new();
-    if let Some(meshing) = crate::viewport::gpu_preview::mesh_body(kernel, body, params) {
-        return Ok(Arc::new(gpu_display_mesh(0, body, meshing, &topology, made, &mut picks)));
-    }
-    crate::viewport::gpu_preview::note_cpu_preview(body);
     let mesh = kernel.rendering(body, params).map_err(|e| e.to_string())?;
     let edges = kernel.rendering_edges(body, params).unwrap_or_else(|e| {
         log::warn!("edges of body {body:?}: {e}");

@@ -312,6 +312,12 @@ fn app_item<F: Clone>(item: &cx::Item<F>) -> Option<PmiItem<F>> {
             all_around: false,
             feature: texture.feature.clone(),
         },
+        // The app writes none of these to STEP yet and does not import them: they are
+        // reported as unread, as a compound hole callout is.
+        cx::ItemKind::Width { .. }
+        | cx::ItemKind::Chamfer { .. }
+        | cx::ItemKind::EdgeBreak { .. }
+        | cx::ItemKind::BasicAngle { .. } => return None,
     };
     Some(PmiItem { id: item.id.clone(), kind })
 }

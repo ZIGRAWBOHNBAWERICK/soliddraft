@@ -207,3 +207,57 @@ fn cull_main(@builtin(global_invocation_id) id: vec3<u32>) {
         visible[LEVELS * cull.count.x + first + j] = i;
     }
 }
+
+struct PartView {
+    view_proj: mat4x4<f32>,
+    half_size: vec2<f32>,
+};
+
+struct FaceBounds {
+    lo: vec4<f32>,
+    hi: vec4<f32>,
+};
+
+@group(0) @binding(9) var<uniform> part_view: PartView;
+@group(0) @binding(10) var<storage, read> face_bounds: array<FaceBounds>;
+@group(0) @binding(11) var<storage, read_write> face_args: array<Args>;
+
+// Test the whole face bound, not its centre. A box crossing the eye plane does
+// not have a finite projected bound, so only the frustum test can drop it.
+fn face_visible(bounds: FaceBounds) -> bool {
+    var outside = vec4<bool>(true);
+    var outside_depth = vec2<bool>(true);
+    var projectable = true;
+    var lo = vec2<f32>(1e30);
+    var hi = vec2<f32>(-1e30);
+    for (var corner = 0u; corner < 8u; corner += 1u) {
+        let high = (vec3<u32>(corner) & vec3<u32>(1u, 2u, 4u)) != vec3<u32>(0u);
+        let clip = part_view.view_proj * vec4<f32>(select(bounds.lo.xyz, bounds.hi.xyz, high), 1.0);
+        // WGSL has no component-wise logical &&.
+        let below_xy = clip.xy < -clip.ww;
+        let above_xy = clip.xy > clip.ww;
+        let below_z = clip.z < 0.0;
+        let above_z = clip.z > clip.w;
+        outside = select(vec4<bool>(false), outside, vec4<bool>(below_xy, above_xy));
+        outside_depth = select(vec2<bool>(false), outside_depth, vec2<bool>(below_z, above_z));
+        if (clip.w > 0.0) {
+            let p = clip.xy / clip.w;
+            lo = min(lo, p);
+            hi = max(hi, p);
+        } else {
+            projectable = false;
+        }
+    }
+    if (any(outside) || any(outside_depth)) {
+        return false;
+    }
+    let extent = (hi - lo) * part_view.half_size;
+    return !projectable || dot(extent, extent) >= 1.0;
+}
+
+@compute @workgroup_size(256)
+fn cull_part_faces(@builtin(global_invocation_id) id: vec3<u32>) {
+    if (id.x < arrayLength(&face_bounds)) {
+        atomicStore(&face_args[id.x].instance_count, select(0u, 1u, face_visible(face_bounds[id.x])));
+    }
+}

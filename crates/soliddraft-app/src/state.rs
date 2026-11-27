@@ -1380,8 +1380,10 @@ pub struct AppState {
     pub(crate) body_rename: Option<crate::tree::BodyRename>,
     pub(crate) shortcut_menu: crate::shortcut_menu::Preferences,
     pub(crate) shortcut_menu_editor: Option<crate::shortcut_menu::Customize>,
-    /// The open Provider dialog.
+    /// The open import review.
     pub import_dialog: Option<crate::import::Preview>,
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) step_open: Option<crate::import::Opening>,
     /// Import STEP asked the browser for a file: the next uploaded STEP file is reviewed
     /// for import, not opened as a document.
     pub step_upload: bool,
@@ -1642,6 +1644,8 @@ impl AppState {
             shortcut_menu: crate::settings::shortcut_menu(),
             shortcut_menu_editor: None,
             import_dialog: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            step_open: None,
             step_upload: false,
             import_report: false,
             import_refusals: Vec::new(),

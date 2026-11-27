@@ -330,6 +330,12 @@ impl Document {
                 PmiKind::SurfaceFinish { .. } => asking.finished.extend(all()),
                 PmiKind::Slot { .. } => asking.slotted.extend(all()),
                 PmiKind::Location { .. } => asking.located.extend(all()),
+                PmiKind::Width { .. }
+                | PmiKind::Chamfer { .. }
+                | PmiKind::EdgeBreak { .. }
+                | PmiKind::BasicAngle { .. }
+                | PmiKind::DatumTarget(_)
+                | PmiKind::PositionControl(_) => {}
                 PmiKind::Datum { letter, feature } => {
                     let flat = feature.first().and_then(|face| asking.face(*face)).and_then(|info| {
                         Some(Flat { face: info.id, normal: info.normal?, centroid: info.centroid, area: info.area })

@@ -541,15 +541,34 @@ pub struct PmiItem<F> {
 impl<F> PmiItem<F> {
     /// The same item with every face named another way.
     pub fn try_map<G, E>(&self, mut map: impl FnMut(&F) -> Result<G, E>) -> Result<PmiItem<G>, E> {
-        self.try_map_features(|faces| faces.iter().map(&mut map).collect())
+        self.map_attachments(&mut map, |map, faces| faces.iter().map(map).collect(), |map, face| map(face))
     }
 
-    /// The same item with every feature's faces named another way, where one name may
-    /// stand for several faces, such as the pieces of a face a later cut split.
+    /// Maps feature groups, which may expand when split. The mapper must preserve
+    /// single-face attachments when given a singleton; use `map_attachments` to
+    /// resolve ambiguity separately when mapping to live geometry.
     pub fn try_map_features<G, E>(
         &self,
-        mut feature: impl FnMut(&Feature<F>) -> Result<Feature<G>, E>,
+        mut feature: impl FnMut(&[F]) -> Result<Feature<G>, E>,
     ) -> Result<PmiItem<G>, E> {
+        self.map_attachments(
+            &mut feature,
+            |map, faces| map(faces),
+            |map, face| {
+                let [face]: [G; 1] = map(std::slice::from_ref(face))?.try_into().ok().expect("one mapped attachment");
+                Ok(face)
+            },
+        )
+    }
+
+    /// Maps groups and exact single-face attachments separately.
+    pub fn map_attachments<G, E, M>(
+        &self,
+        state: &mut M,
+        mut group: impl FnMut(&mut M, &[F]) -> Result<Feature<G>, E>,
+        mut face: impl FnMut(&mut M, &F) -> Result<G, E>,
+    ) -> Result<PmiItem<G>, E> {
+        let mut feature = |faces: &Feature<F>| group(state, faces);
         let kind = match &self.kind {
             PmiKind::Datum { letter, feature: faces } => {
                 PmiKind::Datum { letter: letter.clone(), feature: feature(faces)? }
@@ -584,6 +603,52 @@ impl<F> PmiItem<F> {
                 ends: [feature(&ends[0])?, feature(&ends[1])?],
                 tolerance: *tolerance,
             },
+            PmiKind::Width { flats: [a, b], tolerance } => {
+                PmiKind::Width { flats: [feature(a)?, feature(b)?], tolerance: *tolerance }
+            }
+            PmiKind::Chamfer { bevel, sides: [a, b] } => {
+                PmiKind::Chamfer { bevel: feature(bevel)?, sides: [feature(a)?, feature(b)?] }
+            }
+            PmiKind::EdgeBreak { bevel, sides: [a, b], min_mm, max_mm } => PmiKind::EdgeBreak {
+                bevel: feature(bevel)?,
+                sides: [feature(a)?, feature(b)?],
+                min_mm: min_mm.clone(),
+                max_mm: max_mm.clone(),
+            },
+            PmiKind::BasicAngle { planes: [a, b] } => PmiKind::BasicAngle { planes: [feature(a)?, feature(b)?] },
+            PmiKind::DatumTarget(target) => PmiKind::DatumTarget(DatumTarget {
+                datum: target.datum.clone(),
+                number: target.number,
+                face: face(state, &target.face)?,
+                point_mm: target.point_mm,
+                kind: target.kind.clone(),
+            }),
+            PmiKind::PositionControl(control) => {
+                let features = control.features.iter().map(&mut feature).collect::<Result<_, _>>()?;
+                let frame = match &control.frame {
+                    PositionFrame::Single { segment, projected_zone } => PositionFrame::Single {
+                        segment: segment.clone(),
+                        projected_zone: projected_zone
+                            .as_ref()
+                            .map(|zone| {
+                                Ok::<_, E>(ProjectedZone {
+                                    height_mm: zone.height_mm.clone(),
+                                    direction: zone.direction,
+                                    entry_faces: zone
+                                        .entry_faces
+                                        .iter()
+                                        .map(|entry| face(state, entry))
+                                        .collect::<Result<_, E>>()?,
+                                })
+                            })
+                            .transpose()?,
+                    },
+                    PositionFrame::Composite { upper, lower } => {
+                        PositionFrame::Composite { upper: upper.clone(), lower: lower.clone() }
+                    }
+                };
+                PmiKind::PositionControl(PositionControl { features, frame })
+            }
             PmiKind::Gdt { characteristic, tolerance, diameter, material, datums, features } => PmiKind::Gdt {
                 characteristic: *characteristic,
                 tolerance: *tolerance,
@@ -608,10 +673,20 @@ impl<F> PmiItem<F> {
     }
 
     /// Every feature the item names, in order.
-    pub fn features(&self) -> Vec<&Feature<F>> {
+    pub fn features(&self) -> Vec<&[F]> {
         match &self.kind {
             PmiKind::Datum { feature, .. } | PmiKind::SurfaceFinish { feature, .. } => vec![feature],
-            PmiKind::Size { features, .. } | PmiKind::Gdt { features, .. } => features.iter().collect(),
+            PmiKind::Size { features, .. } | PmiKind::Gdt { features, .. } => {
+                features.iter().map(Vec::as_slice).collect()
+            }
+            PmiKind::DatumTarget(target) => vec![std::slice::from_ref(&target.face)],
+            PmiKind::PositionControl(control) => {
+                let mut faces: Vec<_> = control.features.iter().map(Vec::as_slice).collect();
+                if let PositionFrame::Single { projected_zone: Some(zone), .. } = &control.frame {
+                    faces.extend(zone.entry_faces.iter().map(std::slice::from_ref));
+                }
+                faces
+            }
             PmiKind::Hole { pilot, head, .. } => {
                 if let Some(head) = head {
                     vec![pilot, &head.faces]
@@ -620,7 +695,13 @@ impl<F> PmiItem<F> {
                 }
             }
             PmiKind::Location { from, to, .. } => vec![&from.feature, &to.feature],
-            PmiKind::Slot { flats, ends, .. } => flats.iter().chain(ends).collect(),
+            PmiKind::Slot { flats, ends, .. } => flats.iter().chain(ends).map(Vec::as_slice).collect(),
+            PmiKind::Width { flats, .. } | PmiKind::BasicAngle { planes: flats } => {
+                flats.iter().map(Vec::as_slice).collect()
+            }
+            PmiKind::Chamfer { bevel, sides } | PmiKind::EdgeBreak { bevel, sides, .. } => {
+                vec![bevel, &sides[0], &sides[1]]
+            }
         }
     }
 
@@ -628,7 +709,14 @@ impl<F> PmiItem<F> {
     pub fn is_dimension(&self) -> bool {
         matches!(
             self.kind,
-            PmiKind::Size { .. } | PmiKind::Hole { .. } | PmiKind::Location { .. } | PmiKind::Slot { .. }
+            PmiKind::Size { .. }
+                | PmiKind::Hole { .. }
+                | PmiKind::Location { .. }
+                | PmiKind::Slot { .. }
+                | PmiKind::Width { .. }
+                | PmiKind::Chamfer { .. }
+                | PmiKind::EdgeBreak { .. }
+                | PmiKind::BasicAngle { .. }
         )
     }
 }
@@ -710,6 +798,42 @@ pub enum PmiKind<F> {
         #[serde(default, skip_serializing_if = "Tolerance::is_none")]
         tolerance: Tolerance,
     },
+    /// The width between two opposed flat sides, in millimetres.
+    Width {
+        /// The two opposed planar face groups.
+        flats: [Feature<F>; 2],
+        /// The size tolerance, if stated.
+        #[serde(default, skip_serializing_if = "Tolerance::is_none")]
+        tolerance: Tolerance,
+    },
+    /// Setback from the theoretical corner along the first side, in millimetres,
+    /// and the angle from that side to the bevel, in degrees.
+    Chamfer {
+        /// The planar bevel.
+        bevel: Feature<F>,
+        /// The two adjacent planar faces, reference side first.
+        sides: [Feature<F>; 2],
+    },
+    /// Explicit bounds on the largest setback of a planar broken edge.
+    EdgeBreak {
+        /// The planar break face.
+        bevel: Feature<F>,
+        /// The adjacent planar faces.
+        sides: [Feature<F>; 2],
+        /// Minimum setback in millimetres.
+        min_mm: Decimal,
+        /// Maximum setback in millimetres.
+        max_mm: Decimal,
+    },
+    /// The basic included angle between two planes, in degrees.
+    BasicAngle {
+        /// The two planar face groups.
+        planes: [Feature<F>; 2],
+    },
+    /// A bounded target on a face belonging to a declared datum.
+    DatumTarget(DatumTarget<F>),
+    /// Position control with a single or composite frame.
+    PositionControl(PositionControl<F>),
     /// A geometric tolerance: a feature control frame (ISO 1101, ASME Y14.5).
     Gdt {
         /// The geometric characteristic.
@@ -750,6 +874,139 @@ pub enum PmiKind<F> {
         /// The feature it applies to.
         feature: Feature<F>,
     },
+}
+
+/// The target point or center is in the part coordinate frame.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DatumTarget<F> {
+    /// Letter of the datum declaration.
+    pub datum: String,
+    /// Positive number unique within the datum.
+    pub number: u32,
+    /// Single persistent supporting face.
+    pub face: F,
+    /// Target point or center in part axes, in millimetres.
+    pub point_mm: [f64; 3],
+    /// Exact shape and extent.
+    pub kind: TargetKind,
+}
+
+/// Target extent; sizes are full dimensions in millimetres.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "shape", rename_all = "snake_case", deny_unknown_fields)]
+pub enum TargetKind {
+    /// An individual point.
+    Point,
+    /// A centered line on the face.
+    Line {
+        /// Full length in millimetres.
+        length_mm: Decimal,
+        /// Tangent direction in part axes.
+        direction: [f64; 3],
+    },
+    /// A bounded area on the face.
+    Area {
+        /// Shape of the bounded area.
+        area: TargetArea,
+    },
+}
+
+/// Area target footprint on the supporting face.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "shape", rename_all = "snake_case", deny_unknown_fields)]
+pub enum TargetArea {
+    /// A disk centered on the target.
+    Circular {
+        /// Full diameter in millimetres.
+        diameter_mm: Decimal,
+    },
+    /// A rectangle centered on the target.
+    Rectangular {
+        /// Full length in millimetres.
+        length_mm: Decimal,
+        /// Full width in millimetres.
+        width_mm: Decimal,
+        /// Tangent length axis in part coordinates.
+        direction: [f64; 3],
+    },
+}
+
+/// One position control, with all its segments governing the same ordered groups.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PositionControl<F> {
+    /// Controlled cylindrical feature groups.
+    pub features: Vec<Feature<F>>,
+    /// Zone definition for those groups.
+    pub frame: PositionFrame<F>,
+}
+
+/// A composite is ordered and cannot have a projected zone.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "frame", rename_all = "snake_case", deny_unknown_fields)]
+pub enum PositionFrame<F> {
+    /// A single segment with optional projection.
+    Single {
+        /// The segment that governs the controlled features.
+        segment: PositionSegment,
+        /// Optional extension into free space.
+        projected_zone: Option<ProjectedZone<F>>,
+    },
+    /// Two linked segments sharing the same features.
+    Composite {
+        /// Locates the pattern relative to its datum frame.
+        upper: PositionSegment,
+        /// Refines the relationship between controlled features.
+        lower: PositionSegment,
+    },
+}
+
+impl<F> PositionFrame<F> {
+    /// Segments in drawing order, upper first.
+    pub fn segments(&self) -> impl Iterator<Item = &PositionSegment> {
+        let (first, lower) = match self {
+            Self::Single { segment, .. } => (segment, None),
+            Self::Composite { upper, lower } => (upper, Some(lower)),
+        };
+        std::iter::once(first).chain(lower)
+    }
+
+    /// Mutable segments in drawing order, upper first.
+    pub fn segments_mut(&mut self) -> impl Iterator<Item = &mut PositionSegment> {
+        let (first, lower) = match self {
+            Self::Single { segment, .. } => (segment, None),
+            Self::Composite { upper, lower } => (upper, Some(lower)),
+        };
+        std::iter::once(first).chain(lower)
+    }
+}
+
+/// Total zone size and the independent feature and datum material conditions.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PositionSegment {
+    /// Positive total zone size in millimetres, never a radius.
+    pub value_mm: Decimal,
+    /// Whether the zone is cylindrical.
+    pub diameter_zone: bool,
+    /// Feature material condition; independent of datum modifiers.
+    #[serde(default, skip_serializing_if = "MaterialCondition::is_regardless")]
+    pub material: MaterialCondition,
+    /// Ordered datum references, primary first.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub datums: Vec<DatumRef>,
+}
+
+/// Height follows an outward part-space axis; entry faces follow feature order.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProjectedZone<F> {
+    /// Positive projection height in millimetres.
+    pub height_mm: Decimal,
+    /// Outward direction in part axes.
+    pub direction: [f64; 3],
+    /// Planar entry face for each controlled feature, in feature order.
+    pub entry_faces: Vec<F>,
 }
 
 /// The separate wall faces of the enlargement at a hole's entry.
@@ -953,6 +1210,19 @@ impl<F: PartialEq> Pmi<F> {
                 return Some("A face is picked twice.".into());
             }
         }
+        if matches!(
+            item.kind,
+            PmiKind::Width { .. } | PmiKind::Chamfer { .. } | PmiKind::EdgeBreak { .. } | PmiKind::BasicAngle { .. }
+        ) {
+            let groups = item.features();
+            if groups
+                .iter()
+                .enumerate()
+                .any(|(i, group)| groups[..i].iter().any(|other| group.iter().any(|face| other.contains(face))))
+            {
+                return Some("Pick different faces for each group.".into());
+            }
+        }
         let range = |tolerance: &Tolerance| tolerance.problem().map(str::to_owned);
         match &item.kind {
             PmiKind::Datum { letter, feature } => {
@@ -1043,6 +1313,106 @@ impl<F: PartialEq> Pmi<F> {
                 }
                 range(tolerance)
             }
+            PmiKind::Width { tolerance, .. } => range(tolerance),
+            PmiKind::EdgeBreak { min_mm, max_mm, .. } => {
+                let (min, max) = (min_mm.value(), max_mm.value());
+                (!(min >= 0.0 && max > min && max.is_finite()))
+                    .then(|| "Edge break bounds must be nonnegative and the maximum must exceed the minimum.".into())
+            }
+            PmiKind::Chamfer { .. } | PmiKind::BasicAngle { .. } => None,
+            PmiKind::DatumTarget(target) => {
+                if target.number == 0 {
+                    return Some("The datum target number must be positive.".into());
+                }
+                let Some(on) = others().find_map(|other| match &other.kind {
+                    PmiKind::Datum { letter, feature } if letter == &target.datum => Some(feature),
+                    _ => None,
+                }) else {
+                    return Some(format!("Datum {} is not defined.", target.datum));
+                };
+                if !on.contains(&target.face) {
+                    return Some("The target face must belong to its datum declaration.".into());
+                }
+                if others().any(|other| {
+                    matches!(&other.kind, PmiKind::DatumTarget(t)
+                    if t.datum == target.datum && t.number == target.number)
+                }) {
+                    return Some(format!("Datum target {}{} is already defined.", target.datum, target.number));
+                }
+                if !target.point_mm.into_iter().all(f64::is_finite) {
+                    return Some("The target point must be finite.".into());
+                }
+                let positive = match &target.kind {
+                    TargetKind::Point => true,
+                    TargetKind::Line { length_mm, .. } => length_mm.is_positive(),
+                    TargetKind::Area { area: TargetArea::Circular { diameter_mm } } => diameter_mm.is_positive(),
+                    TargetKind::Area { area: TargetArea::Rectangular { length_mm, width_mm, .. } } => {
+                        length_mm.is_positive() && width_mm.is_positive()
+                    }
+                };
+                (!positive).then(|| "Datum target sizes must be positive.".into())
+            }
+            PmiKind::PositionControl(control) => {
+                if control.features.is_empty() {
+                    return Some("Position control needs at least one feature.".into());
+                }
+                for (i, segment) in control.frame.segments().enumerate() {
+                    let problem = if !segment.value_mm.is_positive() {
+                        Some("The zone size must be positive.".into())
+                    } else if !segment.diameter_zone {
+                        Some("Position control requires a cylindrical zone.".into())
+                    } else if segment.datums.len() > 3 {
+                        Some("At most three datums are allowed.".into())
+                    } else if segment.datums.iter().any(|datum| !is_datum_letter(&datum.letter)) {
+                        Some("Position segments require single declared datum letters.".into())
+                    } else if segment
+                        .datums
+                        .iter()
+                        .enumerate()
+                        .any(|(i, datum)| segment.datums[..i].iter().any(|other| other.letter == datum.letter))
+                    {
+                        Some("A datum is referred to twice.".into())
+                    } else {
+                        segment.datums.iter().find_map(|datum| {
+                            (!others().any(|other| {
+                                matches!(&other.kind, PmiKind::Datum { letter, .. }
+                                if letter == &datum.letter)
+                            }))
+                            .then(|| format!("Datum {} is not defined.", datum.letter))
+                        })
+                    };
+                    if let Some(problem) = problem {
+                        return Some(format!("Position segment {}: {problem}", i + 1));
+                    }
+                }
+                match &control.frame {
+                    PositionFrame::Composite { upper, lower } => {
+                        if upper.datums.is_empty() {
+                            return Some("The upper composite segment needs a datum frame.".into());
+                        }
+                        if lower.datums.len() > upper.datums.len()
+                            || lower.datums.iter().zip(&upper.datums).any(|(low, up)| low.letter != up.letter)
+                        {
+                            return Some(
+                                "Lower segment datums must repeat an ordered prefix of the upper frame.".into(),
+                            );
+                        }
+                        if lower.value_mm.value() > upper.value_mm.value() {
+                            return Some("The lower zone cannot exceed the upper zone.".into());
+                        }
+                    }
+                    PositionFrame::Single { projected_zone: Some(zone), .. } => {
+                        if !zone.height_mm.is_positive() {
+                            return Some("Projected zone height must be positive.".into());
+                        }
+                        if zone.entry_faces.len() != control.features.len() {
+                            return Some("A projected zone needs one entry face per controlled feature.".into());
+                        }
+                    }
+                    PositionFrame::Single { .. } => {}
+                }
+                None
+            }
             PmiKind::Gdt { characteristic, tolerance, datums, features, .. } => {
                 if features.is_empty() {
                     return Some("Pick the faces it applies to.".into());
@@ -1081,14 +1451,7 @@ impl<F: PartialEq> Pmi<F> {
 
     /// The items that refer to datum `letter`, by name.
     pub fn users_of_datum(&self, letter: &str) -> Vec<&str> {
-        self.items
-            .iter()
-            .filter(|item| {
-                matches!(&item.kind, PmiKind::Gdt { datums, .. }
-                    if datums.iter().flat_map(DatumRef::letters).any(|d| d == letter))
-            })
-            .map(|item| item.id.as_str())
-            .collect()
+        self.items.iter().filter(|item| item.references_datum(letter)).map(|item| item.id.as_str()).collect()
     }
 }
 
@@ -1110,6 +1473,25 @@ pub fn length_text(value: f64) -> String {
 }
 
 impl<F> PmiItem<F> {
+    /// Datum declarations this item references, in frame order.
+    pub fn referenced_datums(&self) -> impl Iterator<Item = &str> {
+        let (target, first, lower): (_, &[DatumRef], &[DatumRef]) = match &self.kind {
+            PmiKind::DatumTarget(target) => (Some(target.datum.as_str()), &[], &[]),
+            PmiKind::PositionControl(control) => match &control.frame {
+                PositionFrame::Single { segment, .. } => (None, &segment.datums, &[]),
+                PositionFrame::Composite { upper, lower } => (None, &upper.datums, &lower.datums),
+            },
+            PmiKind::Gdt { datums, .. } => (None, datums, &[]),
+            _ => (None, &[], &[]),
+        };
+        target.into_iter().chain(first.iter().chain(lower).flat_map(DatumRef::letters))
+    }
+
+    /// Whether this item depends on a datum declaration.
+    pub fn references_datum(&self, letter: &str) -> bool {
+        self.referenced_datums().any(|datum| datum == letter)
+    }
+
     /// The item as a drawing writes it, with its measured values: `Ø8 H7`,
     /// `4× Ø4 +0.1/0 THRU`, `15 ±0.1`, `20×6 +0.1/0 R3`, `Position Ø0.05 A|B|C`,
     /// `Ra 1.6`, `Datum A`. A size or a distance has one value; a slot its length, its
@@ -1136,6 +1518,49 @@ impl<F> PmiItem<F> {
             PmiKind::Location { tolerance, .. } => format!("{}{}", value(0), tolerance.suffix()),
             PmiKind::Slot { tolerance, .. } => {
                 format!("{}\u{d7}{}{} R{}", value(0), value(1), tolerance.suffix(), value(2))
+            }
+            PmiKind::Width { tolerance, .. } => format!("{}{}", value(0), tolerance.suffix()),
+            PmiKind::Chamfer { .. } => format!("{} × {}° CHAMFER", value(0), value(1)),
+            PmiKind::EdgeBreak { min_mm, max_mm, .. } => format!("EDGE BREAK {min_mm}–{max_mm}"),
+            PmiKind::BasicAngle { .. } => format!("{}° BASIC", value(0)),
+            PmiKind::DatumTarget(target) => {
+                let extent = match &target.kind {
+                    TargetKind::Point => String::new(),
+                    TargetKind::Line { length_mm, .. } => format!(" LINE {length_mm}"),
+                    TargetKind::Area { area: TargetArea::Circular { diameter_mm } } => format!(" Ø{diameter_mm}"),
+                    TargetKind::Area { area: TargetArea::Rectangular { length_mm, width_mm, .. } } => {
+                        format!(" {length_mm}×{width_mm}")
+                    }
+                };
+                format!("TARGET {}{}{extent}", target.datum, target.number)
+            }
+            PmiKind::PositionControl(control) => {
+                let segment = |seg: &PositionSegment| {
+                    let mut text = format!("Ø{}", seg.value_mm);
+                    if !seg.material.is_regardless() {
+                        text.push_str(&format!(" ({})", seg.material.letter()));
+                    }
+                    for datum in &seg.datums {
+                        text.push('|');
+                        text.push_str(&datum.letter);
+                        if !datum.material.is_regardless() {
+                            text.push_str(&format!(" ({})", datum.material.letter()));
+                        }
+                    }
+                    text
+                };
+                match &control.frame {
+                    PositionFrame::Single { segment: single, projected_zone } => {
+                        let mut text = format!("Position {}", segment(single));
+                        if let Some(zone) = projected_zone {
+                            text.push_str(&format!(" Ⓟ{}", zone.height_mm));
+                        }
+                        text
+                    }
+                    PositionFrame::Composite { upper, lower } => {
+                        format!("Position {}\n{}", segment(upper), segment(lower))
+                    }
+                }
             }
             PmiKind::Gdt { characteristic, tolerance, diameter, material, datums, .. } => {
                 let mut text = format!(
@@ -1212,6 +1637,14 @@ impl<F> PmiItem<F> {
     pub fn file_problem(&self) -> Option<String> {
         match &self.kind {
             PmiKind::Hole { .. } => Some("Compound hole and depth PMI is not supported in STEP export.".to_owned()),
+            PmiKind::Width { .. }
+            | PmiKind::Chamfer { .. }
+            | PmiKind::EdgeBreak { .. }
+            | PmiKind::BasicAngle { .. }
+            | PmiKind::DatumTarget(_)
+            | PmiKind::PositionControl(_) => {
+                Some(format!("{} PMI is not supported in STEP export.", self.kind_label()))
+            }
             PmiKind::Gdt { datums, .. }
                 if datums.iter().any(|datum| !datum.material.is_regardless() || datum.letter.contains('-')) =>
             {
@@ -1234,11 +1667,17 @@ impl<F> PmiItem<F> {
     pub fn kind_label(&self) -> &'static str {
         match &self.kind {
             PmiKind::Datum { .. } => "Datum",
+            PmiKind::DatumTarget(_) => "Datum target",
+            PmiKind::PositionControl(_) => "Position control",
             PmiKind::Size { size: SizeKind::Diameter, .. } => "Diameter",
             PmiKind::Size { size: SizeKind::Radius, .. } => "Radius",
             PmiKind::Hole { .. } => "Hole",
             PmiKind::Location { .. } => "Distance",
             PmiKind::Slot { .. } => "Slot",
+            PmiKind::Width { .. } => "Width",
+            PmiKind::Chamfer { .. } => "Chamfer",
+            PmiKind::EdgeBreak { .. } => "Edge break",
+            PmiKind::BasicAngle { .. } => "Basic angle",
             PmiKind::Gdt { characteristic, .. } => characteristic.name(),
             PmiKind::SurfaceFinish { .. } => "Surface finish",
         }

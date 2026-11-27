@@ -11,7 +11,8 @@ use std::ops::Range;
 
 use serde::Serialize;
 use soliddraft_kernel_api::pmi::{
-    DatumRef, Feature, GdtCharacteristic, MaterialCondition, PmiKind, SizeKind, Tolerance, roughness,
+    DatumRef, Feature, GdtCharacteristic, HoleHeadKind, HoleHeadNominals, MaterialCondition, PmiKind, SizeKind,
+    Tolerance, roughness,
 };
 
 use crate::pmi::PmiRow;
@@ -21,38 +22,92 @@ use crate::{Document, FaceRef, FeatureId};
 /// not inferred from a file name or the CAD document's content hash.
 #[derive(Debug, PartialEq)]
 pub struct InspectionPlan {
+    /// Document name; not a manufacturing part number.
     pub part: String,
+    /// Caller-supplied manufacturing revision, if known.
     pub revision: Option<String>,
+    /// Material stated in the part notes.
     pub material: Option<String>,
+    /// General tolerance designation stated in the part notes.
     pub general_tolerance: Option<String>,
+    /// Inspection groups in document order.
     pub groups: Vec<InspectionGroup>,
 }
 
 /// One native PMI item or part note, with its child characteristics in drawing order.
 #[derive(Debug, PartialEq)]
 pub struct InspectionGroup {
+    /// Stable part-local group identifier.
     pub id: String,
+    /// Source PMI item identifier; absent for a part note.
     pub item_id: Option<String>,
+    /// Human-readable requirement from the source PMI.
     pub callout: String,
+    /// Datum references in precedence order.
     pub datums: Vec<DatumRef>,
+    /// Why the source PMI could not be resolved.
     pub problem: Option<String>,
+    /// Characteristics belonging to this group, in requirement order.
     pub rows: Vec<InspectionRow>,
     face_groups: Vec<Feature<FaceRef>>,
+    datum_label: Option<String>,
+    roughness_average: bool,
     thread_feature: Option<FeatureId>,
 }
 
+/// Design requirement represented by one characteristic row.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum InspectionKind {
+    /// Diameter of a cylinder, including a hole pilot.
     Diameter,
+    /// Radius of a circular feature.
     Radius,
+    /// Axial length from entry to the end of the full drill diameter.
+    DrillDepth,
+    /// Diameter of the cylindrical head enlargement.
+    CounterboreDiameter,
+    /// Axial distance from entry to the counterbore shoulder.
+    CounterboreDepth,
+    /// Major diameter at the countersink entry.
+    CountersinkDiameter,
+    /// Full included angle of the countersink cone.
+    CountersinkAngle,
+    /// Specified usable thread depth from the entry.
+    ThreadDepth,
+    /// Distance between two features or from a locating datum.
     Distance,
+    /// Length of a slot between its ends.
     SlotLength,
+    /// Width between the slot flats.
     SlotWidth,
+    /// Radius of the slot ends.
     SlotRadius,
-    Geometric { characteristic: GdtCharacteristic, diameter: bool, material: MaterialCondition },
+    /// Width between opposed flats.
+    Width,
+    /// Chamfer setback on the reference side.
+    ChamferSetback,
+    /// Chamfer angle from the reference side to the bevel.
+    ChamferAngle,
+    /// Largest setback at a bounded edge break.
+    EdgeBreak,
+    /// Theoretically exact included angle between two planes.
+    BasicAngle,
+    /// A geometric control.
+    Geometric {
+        /// Characteristic named by the feature control frame.
+        characteristic: GdtCharacteristic,
+        /// Whether the tolerance zone is specified by diameter.
+        diameter: bool,
+        /// Material condition modifier on the tolerance zone.
+        material: MaterialCondition,
+    },
+    /// Surface texture requirement.
     SurfaceFinish,
+    /// Thread designation, not a measured cylinder diameter.
     Thread,
+    /// Datum definition, not a measurement.
     Datum,
+    /// Part note, not a measurement.
     Note,
 }
 
@@ -60,11 +115,22 @@ impl InspectionKind {
     fn key(self) -> &'static str {
         match self {
             Self::Diameter => "diameter",
+            Self::DrillDepth => "drill_depth",
+            Self::CounterboreDiameter => "counterbore_diameter",
+            Self::CounterboreDepth => "counterbore_depth",
+            Self::CountersinkDiameter => "countersink_diameter",
+            Self::CountersinkAngle => "countersink_angle",
+            Self::ThreadDepth => "thread_depth",
             Self::Radius => "radius",
             Self::Distance => "distance",
             Self::SlotLength => "slot_length",
             Self::SlotWidth => "slot_width",
             Self::SlotRadius => "slot_radius",
+            Self::Width => "width",
+            Self::ChamferSetback => "chamfer_setback",
+            Self::ChamferAngle => "chamfer_angle",
+            Self::EdgeBreak => "edge_break",
+            Self::BasicAngle => "basic_angle",
             Self::Geometric { characteristic, .. } => characteristic.key(),
             Self::SurfaceFinish => "surface_finish",
             Self::Thread => "thread",
@@ -74,10 +140,15 @@ impl InspectionKind {
     }
 }
 
+/// Unit of the nominal and numerical limits on a characteristic.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum InspectionUnit {
+    /// Linear dimensions.
     Millimetre,
+    /// Surface roughness.
     Micrometre,
+    /// Angular dimensions in degrees.
+    Degree,
 }
 
 impl InspectionUnit {
@@ -85,14 +156,19 @@ impl InspectionUnit {
         match self {
             Self::Millimetre => "mm",
             Self::Micrometre => "µm",
+            Self::Degree => "°",
         }
     }
 }
 
+/// Whether a design requirement can contribute an inspection characteristic.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Applicability {
+    /// Inspection requirement, with no as-built result implied.
     Inspect,
+    /// Reference information such as a basic dimension or note.
     Reference,
+    /// A missing or unresolved design input prevents inspection.
     Unresolved,
 }
 
@@ -112,14 +188,21 @@ impl Applicability {
 /// when the actual feature size is known.
 #[derive(Debug, PartialEq)]
 pub struct InspectionRow {
+    /// Stable part-local characteristic identifier.
     pub id: String,
     /// One-based position in the PMI pattern (or placement of the native thread feature).
     pub member: Option<usize>,
+    /// What the requirement controls.
     pub kind: InspectionKind,
+    /// Units for the numeric values, if relevant.
     pub unit: Option<InspectionUnit>,
+    /// Design nominal, if specified or available from the checked model.
     pub nominal: Option<f64>,
+    /// Absolute lower bound, when stated numerically.
     pub lower_limit: Option<f64>,
+    /// Absolute upper bound, when stated numerically.
     pub upper_limit: Option<f64>,
+    /// Source dimensional tolerance, if applicable.
     pub dimension_tolerance: Option<Tolerance>,
     /// Index into the group's ordered datum frame, only for a derived basic distance.
     pub locating_datum: Option<usize>,
@@ -127,6 +210,7 @@ pub struct InspectionRow {
 }
 
 impl InspectionRow {
+    /// Classify the requirement without treating a CAD nominal as an inspection result.
     pub fn applicability(&self, group: &InspectionGroup) -> Applicability {
         if matches!(self.kind, InspectionKind::Datum | InspectionKind::Note)
             || self.dimension_tolerance == Some(Tolerance::Basic)
@@ -168,6 +252,8 @@ impl InspectionGroup {
             problem: None,
             rows: Vec::new(),
             face_groups: Vec::new(),
+            datum_label: None,
+            roughness_average: false,
             thread_feature: None,
         }
     }
@@ -204,7 +290,7 @@ impl InspectionGroup {
 
     fn from_pmi(source: PmiRow) -> Self {
         let callout = source.callout();
-        let PmiRow { item, measured, located, problem, feature, placements, .. } = source;
+        let PmiRow { item, measured, hole, located, problem, feature, placements, .. } = source;
         let id = match (feature, placements.first()) {
             (Some(feature), Some(first)) => format!("thread/{}/group/{}", feature.0, first + 1),
             _ => format!("pmi/{}", item.id),
@@ -213,7 +299,8 @@ impl InspectionGroup {
         group.problem = problem;
         group.thread_feature = feature;
         match item.kind {
-            PmiKind::Datum { feature, .. } => {
+            PmiKind::Datum { letter, feature } => {
+                group.datum_label = Some(letter);
                 group.face_groups.push(feature);
                 group.add(InspectionKind::Datum, None, 0..1, None);
             }
@@ -230,6 +317,68 @@ impl InspectionGroup {
                     // The CAD cylinder's diameter is not the thread's inspection requirement.
                     if kind != InspectionKind::Thread {
                         row.dimension(measured.first().copied(), tolerance);
+                    }
+                }
+            }
+            PmiKind::Hole { pilot, head, tolerance, through, drill_depth, thread } => {
+                group.face_groups.push(pilot);
+                group
+                    .add(InspectionKind::Diameter, Some(1), 0..1, None)
+                    .dimension(hole.map(|nominal| nominal.pilot_diameter_mm), tolerance);
+                if !through {
+                    group.add(InspectionKind::DrillDepth, Some(1), 0..1, None).dimension(
+                        drill_depth
+                            .map(|depth| depth.value())
+                            .or_else(|| hole.and_then(|nominal| nominal.drill_depth_mm)),
+                        Tolerance::None,
+                    );
+                }
+                if let Some(head) = head {
+                    group.face_groups.push(head.faces);
+                    let nominal = hole.and_then(|nominal| nominal.head);
+                    let (diameter_kind, extent_kind, diameter, extent, unit) = match (head.kind, nominal) {
+                        (HoleHeadKind::Counterbore, nominal) => {
+                            let (diameter, depth) = match nominal {
+                                Some(HoleHeadNominals::Counterbore { diameter_mm, depth_mm }) => {
+                                    (Some(diameter_mm), Some(depth_mm))
+                                }
+                                _ => (None, None),
+                            };
+                            (
+                                InspectionKind::CounterboreDiameter,
+                                InspectionKind::CounterboreDepth,
+                                diameter,
+                                depth,
+                                InspectionUnit::Millimetre,
+                            )
+                        }
+                        (HoleHeadKind::Countersink, nominal) => {
+                            let (diameter, angle) = match nominal {
+                                Some(HoleHeadNominals::Countersink { diameter_mm, included_angle_deg }) => {
+                                    (Some(diameter_mm), Some(included_angle_deg))
+                                }
+                                _ => (None, None),
+                            };
+                            (
+                                InspectionKind::CountersinkDiameter,
+                                InspectionKind::CountersinkAngle,
+                                diameter,
+                                angle,
+                                InspectionUnit::Degree,
+                            )
+                        }
+                    };
+                    group.add(diameter_kind, Some(1), 1..2, None).dimension(diameter, Tolerance::None);
+                    let row = group.add(extent_kind, Some(1), 1..2, None);
+                    row.dimension(extent, Tolerance::None);
+                    row.unit = Some(unit);
+                }
+                if let Some(thread) = thread {
+                    group.add(InspectionKind::Thread, Some(1), 0..1, None);
+                    if let Some(depth) = thread.depth {
+                        group
+                            .add(InspectionKind::ThreadDepth, Some(1), 0..1, None)
+                            .dimension(Some(depth.value()), Tolerance::None);
                     }
                 }
             }
@@ -250,6 +399,33 @@ impl InspectionGroup {
                     group.add(kind, None, faces, None).dimension(measured.get(index).copied(), tolerance);
                 }
             }
+            PmiKind::Width { flats: [a, b], tolerance } => {
+                group.face_groups = vec![a, b];
+                group.add(InspectionKind::Width, None, 0..2, None).dimension(measured.first().copied(), tolerance);
+            }
+            PmiKind::Chamfer { bevel, sides: [a, b] } => {
+                group.face_groups = vec![bevel, a, b];
+                group
+                    .add(InspectionKind::ChamferSetback, None, 0..3, None)
+                    .dimension(measured.first().copied(), Tolerance::None);
+                let angle = group.add(InspectionKind::ChamferAngle, None, 0..3, None);
+                angle.dimension(measured.get(1).copied(), Tolerance::None);
+                angle.unit = Some(InspectionUnit::Degree);
+            }
+            PmiKind::EdgeBreak { bevel, sides: [a, b], min_mm, max_mm } => {
+                group.face_groups = vec![bevel, a, b];
+                let row = group.add(InspectionKind::EdgeBreak, None, 0..3, None);
+                row.dimension(measured.first().copied(), Tolerance::None);
+                row.lower_limit = Some(min_mm.value());
+                row.upper_limit = Some(max_mm.value());
+            }
+            PmiKind::BasicAngle { planes: [a, b] } => {
+                group.face_groups = vec![a, b];
+                let angle = group.add(InspectionKind::BasicAngle, None, 0..2, None);
+                angle.dimension(measured.first().copied(), Tolerance::Basic);
+                angle.unit = Some(InspectionUnit::Degree);
+            }
+            PmiKind::DatumTarget(_) | PmiKind::PositionControl(_) => {}
             PmiKind::Gdt { characteristic, tolerance, diameter, material, datums, features } => {
                 group.face_groups = features;
                 group.datums = datums;
@@ -273,9 +449,10 @@ impl InspectionGroup {
             PmiKind::SurfaceFinish { feature, text, .. } => {
                 group.face_groups.push(feature);
                 let row = group.add(InspectionKind::SurfaceFinish, None, 0..1, None);
-                if let Some((_, limit)) = roughness(&text) {
+                if let Some((parameter, limit)) = roughness(&text) {
                     row.unit = Some(InspectionUnit::Micrometre);
                     row.upper_limit = Some(limit.value());
+                    group.roughness_average = parameter == "Ra";
                 }
             }
         }
@@ -302,6 +479,98 @@ impl InspectionPlan {
             general_tolerance: notes.general_tolerance,
             groups,
         }
+    }
+
+    /// Publish inspection requirements as QIF 3.0, without generating measurement results.
+    /// The returned omissions identify rows that this profile could not carry.
+    pub fn write_qif(
+        &self,
+        out: impl Write,
+        metadata: soliddraft_exchange::qif::Metadata<'_>,
+    ) -> io::Result<Vec<soliddraft_exchange::qif::Omission>> {
+        use soliddraft_exchange::qif::{self, Dimension, Requirement};
+
+        let mut rows = Vec::new();
+        for group in &self.groups {
+            for row in &group.rows {
+                let dimension = |kind| match (row.nominal, row.unit, row.dimension_tolerance) {
+                    (Some(target), Some(InspectionUnit::Millimetre), Some(tolerance)) => {
+                        Requirement::Dimension { kind, target, tolerance, limits: row.lower_limit.zip(row.upper_limit) }
+                    }
+                    _ => Requirement::Omit("missing nominal or dimensional tolerance"),
+                };
+                let requirement = if group.problem.is_some() {
+                    Requirement::Omit("unresolved source PMI")
+                } else {
+                    match row.kind {
+                        InspectionKind::Datum => Requirement::Datum,
+                        InspectionKind::Diameter
+                        | InspectionKind::CounterboreDiameter
+                        | InspectionKind::CountersinkDiameter => dimension(Dimension::Diameter),
+                        InspectionKind::Radius | InspectionKind::SlotRadius => dimension(Dimension::Radius),
+                        InspectionKind::Distance
+                        | InspectionKind::SlotLength
+                        | InspectionKind::DrillDepth
+                        | InspectionKind::CounterboreDepth
+                        | InspectionKind::ThreadDepth => dimension(Dimension::Length),
+                        InspectionKind::SlotWidth | InspectionKind::Width => dimension(Dimension::Width),
+                        InspectionKind::Geometric { characteristic, diameter, material } => {
+                            match (row.unit, row.upper_limit) {
+                                (Some(InspectionUnit::Millimetre), Some(limit_mm)) => Requirement::Geometric {
+                                    kind: characteristic,
+                                    limit_mm,
+                                    diametrical: diameter,
+                                    material,
+                                },
+                                _ => Requirement::Omit("missing geometric tolerance"),
+                            }
+                        }
+                        InspectionKind::SurfaceFinish => match (row.unit, row.upper_limit) {
+                            (Some(InspectionUnit::Micrometre), Some(limit_um)) if group.roughness_average => {
+                                Requirement::RoughnessAverage { limit_um }
+                            }
+                            _ => Requirement::Omit("surface finish has no numeric Ra limit"),
+                        },
+                        InspectionKind::Thread => Requirement::Omit("thread has no QIF mapping in this profile"),
+                        InspectionKind::CountersinkAngle
+                        | InspectionKind::ChamferAngle
+                        | InspectionKind::BasicAngle => Requirement::Omit("angle has no QIF mapping in this profile"),
+                        InspectionKind::ChamferSetback => {
+                            Requirement::Omit("chamfer setback has no QIF mapping in this profile")
+                        }
+                        InspectionKind::EdgeBreak => {
+                            Requirement::Omit("bounded edge break has no QIF mapping in this profile")
+                        }
+                        InspectionKind::Note => Requirement::Omit("note is not an inspection requirement"),
+                    }
+                };
+                rows.push(qif::Row {
+                    id: &row.id,
+                    callout: &group.callout,
+                    features: row
+                        .faces(group)
+                        .iter()
+                        .filter(|faces| !faces.is_empty())
+                        .map(json)
+                        .collect::<io::Result<_>>()?,
+                    datum_label: group.datum_label.as_deref(),
+                    frame: &group.datums,
+                    locating_datum: row.locating_datum.map(|index| group.datums[index].letter.as_str()),
+                    requirement,
+                });
+            }
+        }
+        qif::write(
+            out,
+            qif::Part {
+                name: &self.part,
+                revision: self.revision.as_deref(),
+                material: self.material.as_deref(),
+                general_tolerance: self.general_tolerance.as_deref(),
+            },
+            metadata,
+            &rows,
+        )
     }
 
     /// Write UTF-8 RFC 4180 CSV. Datum order and persistent face groups are JSON arrays in

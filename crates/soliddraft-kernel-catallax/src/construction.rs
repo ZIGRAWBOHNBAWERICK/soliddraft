@@ -55,6 +55,36 @@ pub(super) fn reserve_proof_work() -> KernelResult<Box<dyn ProofWork>> {
     Ok(Box::new(proof))
 }
 
+/// Keep an unchanged profile in its old recipe slot only before any newly
+/// allocated step. Moving it ahead of rebuilt inputs would break their prefix.
+pub(super) fn profile_identity(
+    kernel: &CatallaxKernel,
+    state: &mut super::State,
+    tag: &OpTag,
+    step: &mut serde_json::Value,
+) -> (u64, String) {
+    let fresh = state.id();
+    let retained = kernel.rebuild_source().and_then(|source| {
+        let previous = state.bodies.get(&source.previous)?;
+        previous.solid.as_ref()?;
+        let input_last = source.input.and_then(|id| state.bodies.get(&id)).and_then(|body| body.steps.last_key_value());
+        let after = input_last.map_or(source.after, |(&last, _)| source.after.max(last));
+        let mut profiles = previous.history.iter().filter(|record| record.op == OpKind::Profile && &record.tag == tag);
+        let seq = profiles.next()?.seq;
+        if seq <= after || profiles.next().is_some() {
+            return None;
+        }
+        let old = previous.steps.get(&seq)?.as_object()?;
+        let fields = step.as_object().expect("a lowered profile is an object");
+        (old.len() == fields.len() + 1 && fields.iter().all(|(key, value)| old.get(key) == Some(value))).then_some(seq)
+    });
+    let seq = retained.unwrap_or(fresh);
+    let result = format!("op_{seq}");
+    step["id"] = result.clone().into();
+    kernel.advance_rebuild_source(seq);
+    (seq, result)
+}
+
 pub(super) fn prepare(
     kernel: &CatallaxKernel,
     body: BodyId,

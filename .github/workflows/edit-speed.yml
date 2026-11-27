@@ -9,6 +9,7 @@ on:
       - 'crates/soliddraft-kernel-catallax/**'
       - 'crates/soliddraft-model/**'
       - 'ci/edit_speed.py'
+      - 'ci/edit-speed-expected-differences.json'
       - '.github/workflows/edit-speed.yml'
 
 permissions:
@@ -83,7 +84,14 @@ jobs:
         env:
           BASE_SHA: ${{ steps.revisions.outputs.base }}
           HEAD_SHA: ${{ steps.revisions.outputs.head }}
-        run: python3 ci/edit_speed.py run --app . --binaries "$RUNNER_TEMP/edit-binaries" --verifier "$RUNNER_TEMP/catallax-verify" --out "$RUNNER_TEMP/edit-speed"
+        run: |
+          expected=ci/edit-speed-expected-differences.json
+          args=()
+          if [[ -f "$expected" ]] && ! git diff --quiet "$BASE_SHA" "$HEAD_SHA" -- "$expected"; then
+            args+=(--expected-differences "$expected")
+          fi
+          python3 ci/edit_speed.py run --app . --binaries "$RUNNER_TEMP/edit-binaries" \
+            --verifier "$RUNNER_TEMP/catallax-verify" --out "$RUNNER_TEMP/edit-speed" "${args[@]}"
       - uses: actions/upload-artifact@v4
         if: always()
         with:

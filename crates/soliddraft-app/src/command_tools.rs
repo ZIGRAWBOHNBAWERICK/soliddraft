@@ -3500,9 +3500,10 @@ impl CommandTools<'_> {
     /// the app does, so it stays a card here (see `pmi::assistant::apply_package`).
     fn propose_call(&mut self, tool: &str, input: &Value, caller: &Caller) -> Result<Value, String> {
         let call = ProposedCall { tool: tool.to_owned(), input: input.clone() };
+        let needs_user = crate::pmi::assistant::requires_user(&call);
         let (id, effect) = self.book.propose_call(self.doc, call, caller.clone())?;
         let auto = matches!(caller, Caller::Assistant { .. }) && self.book.auto_apply;
-        if auto && tool != crate::pmi::assistant::PACKAGE {
+        if auto && tool != crate::pmi::assistant::PACKAGE && !needs_user {
             let answer = self.book.apply_call(self.doc, &id)?;
             return Ok(json!({
                 "proposal_id": id, "status": "applied", "effect": effect, "answer": answer,
@@ -3519,7 +3520,14 @@ impl CommandTools<'_> {
     }
 
     fn apply(&mut self, id: &str, caller: &Caller) -> Result<Value, String> {
-        if matches!(caller, Caller::Assistant { .. }) && !self.book.auto_apply {
+        if matches!(caller, Caller::Assistant { .. })
+            && (!self.book.auto_apply
+                || self
+                    .book
+                    .get(id)
+                    .and_then(|proposal| proposal.call.as_ref())
+                    .is_some_and(crate::pmi::assistant::requires_user))
+        {
             return Err("only the user can apply proposals in this session: they apply it from its card. \
                         Tell them the proposal is ready."
                 .into());

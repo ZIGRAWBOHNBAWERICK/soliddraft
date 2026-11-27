@@ -3,8 +3,9 @@
 //! finish on the faces picked in the viewport.
 
 use soliddraft_kernel_api::pmi::{
-    Anchor, At, DatumRef, Decimal, Feature, GdtCharacteristic, HoleHead, HoleHeadKind, HoleThread, MaterialCondition,
-    PartNotes, PmiItem, PmiKind, SizeKind, SurfaceProcess, Tolerance,
+    Anchor, At, DatumRef, DatumTarget, Decimal, Feature, GdtCharacteristic, HoleHead, HoleHeadKind, HoleThread,
+    MaterialCondition, PartNotes, PmiItem, PmiKind, PositionControl, PositionFrame, PositionSegment, ProjectedZone,
+    SizeKind, SurfaceProcess, TargetArea, TargetKind, Tolerance,
 };
 use soliddraft_kernel_api::{FaceId, SurfaceKind};
 use soliddraft_model::FaceRef;
@@ -18,36 +19,54 @@ use crate::theme;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
     Datum,
+    DatumTarget,
     Diameter,
     Radius,
     Hole,
     Distance,
     Slot,
+    Width,
+    Chamfer,
+    EdgeBreak,
+    BasicAngle,
     Tolerance,
+    PositionControl,
     Finish,
 }
 
 impl Kind {
-    const ALL: [Kind; 8] = [
+    const ALL: [Kind; 14] = [
         Kind::Datum,
+        Kind::DatumTarget,
         Kind::Diameter,
         Kind::Radius,
         Kind::Hole,
         Kind::Distance,
         Kind::Slot,
+        Kind::Width,
+        Kind::Chamfer,
+        Kind::EdgeBreak,
+        Kind::BasicAngle,
         Kind::Tolerance,
+        Kind::PositionControl,
         Kind::Finish,
     ];
 
     fn label(self) -> &'static str {
         match self {
             Kind::Datum => "Datum",
+            Kind::DatumTarget => "Datum target",
             Kind::Diameter => "Diameter",
             Kind::Radius => "Radius",
             Kind::Hole => "Hole",
             Kind::Distance => "Distance",
             Kind::Slot => "Slot",
+            Kind::Width => "Width",
+            Kind::Chamfer => "Chamfer",
+            Kind::EdgeBreak => "Edge break",
+            Kind::BasicAngle => "Basic angle",
             Kind::Tolerance => "Geometric tolerance",
+            Kind::PositionControl => "Position control",
             Kind::Finish => "Surface finish",
         }
     }
@@ -56,11 +75,18 @@ impl Kind {
     pub fn prompt(self) -> &'static str {
         match self {
             Kind::Datum => "Pick the face that is the datum.",
+            Kind::DatumTarget => "Pick one face in the declared datum.",
             Kind::Diameter | Kind::Radius => "Pick the round face, or each round face of a pattern.",
             Kind::Hole => "Pick the head wall first if there is one, then pick the cylindrical pilot wall.",
             Kind::Distance => "Pick the faces it starts on, press From, then pick the faces it ends on.",
             Kind::Slot => "Pick the slot's two flat sides and its two round ends.",
+            Kind::Width => "Pick the two opposed planar sides, assigning the first group before picking the second.",
+            Kind::Chamfer | Kind::EdgeBreak => "Assign the bevel and the first support, then pick the other support.",
+            Kind::BasicAngle => "Pick two angled planar groups, assigning the first before picking the second.",
             Kind::Tolerance => "Pick the face it applies to, or each face of a pattern.",
+            Kind::PositionControl => {
+                "Pick each cylindrical feature group. For a projected zone, also pick the entry faces in feature order."
+            }
             Kind::Finish => "Pick the face the finish applies to.",
         }
     }
@@ -68,6 +94,115 @@ impl Kind {
 
 const ENDS: [(At, &str); 4] =
     [(At::Feature, "Face or axis"), (At::Middle, "Middle"), (At::Inner, "Near side"), (At::Outer, "Far side")];
+
+#[derive(Default, Clone, Copy, PartialEq, Eq)]
+enum TargetShape {
+    #[default]
+    Point,
+    Line,
+    Circular,
+    Rectangular,
+}
+
+#[derive(Default, Clone, Copy, PartialEq, Eq)]
+enum FrameShape {
+    #[default]
+    Single,
+    Composite,
+    Projected,
+}
+
+#[derive(Default)]
+struct SegmentDraft {
+    value: String,
+    material: MaterialCondition,
+    datums: String,
+}
+
+impl SegmentDraft {
+    fn of(segment: &PositionSegment) -> Self {
+        Self {
+            value: segment.value_mm.to_string(),
+            material: segment.material,
+            datums: segment
+                .datums
+                .iter()
+                .map(|datum| {
+                    if datum.material.is_regardless() {
+                        datum.letter.clone()
+                    } else {
+                        format!("{}({})", datum.letter, datum.material.letter())
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(" "),
+        }
+    }
+
+    fn typed(&self) -> Result<PositionSegment, String> {
+        let datums = self
+            .datums
+            .split(|c: char| c == '|' || c == ',' || c.is_whitespace())
+            .filter(|word| !word.is_empty())
+            .map(|word| {
+                let (letter, material) = if let Some(letter) = word.strip_suffix("(M)") {
+                    (letter, MaterialCondition::Maximum)
+                } else if let Some(letter) = word.strip_suffix("(L)") {
+                    (letter, MaterialCondition::Least)
+                } else {
+                    (word, MaterialCondition::Regardless)
+                };
+                if !soliddraft_kernel_api::pmi::is_datum_letter(letter) {
+                    return Err(format!("Invalid datum reference {word}; use A, A(M) or A(L)."));
+                }
+                Ok(DatumRef { letter: letter.into(), material })
+            })
+            .collect::<Result<_, String>>()?;
+        Ok(PositionSegment {
+            value_mm: decimal(&self.value, "zone diameter")?,
+            diameter_zone: true,
+            material: self.material,
+            datums,
+        })
+    }
+
+    fn show(&mut self, ui: &mut egui::Ui, title: &str) {
+        ui.label(title);
+        entry(ui, &mut self.value, "Zone diameter (mm)");
+        entry(ui, &mut self.datums, "Datums (A B(M) C(L))");
+        ui.horizontal_wrapped(|ui| {
+            ui.selectable_value(&mut self.material, MaterialCondition::Regardless, "RFS");
+            ui.selectable_value(&mut self.material, MaterialCondition::Maximum, "MMC");
+            ui.selectable_value(&mut self.material, MaterialCondition::Least, "LMC");
+        });
+    }
+}
+
+fn vector_text([x, y, z]: [f64; 3]) -> String {
+    format!("{x}, {y}, {z}")
+}
+
+fn vector(text: &str, label: &str) -> Result<[f64; 3], String> {
+    let mut values = text.split(|c: char| c == ',' || c.is_whitespace()).filter(|s| !s.is_empty());
+    let [Some(x), Some(y), Some(z), None] = std::array::from_fn(|_| values.next()) else {
+        return Err(format!("Enter three coordinates for {label}."));
+    };
+    let parse = |s: &str| {
+        s.parse::<f64>().ok().filter(|n| n.is_finite()).ok_or_else(|| format!("Enter finite coordinates for {label}."))
+    };
+    Ok([parse(x)?, parse(y)?, parse(z)?])
+}
+
+fn decimal(text: &str, label: &str) -> Result<Decimal, String> {
+    Decimal::parse(text).ok_or_else(|| format!("Enter the {label} as a decimal in mm."))
+}
+
+fn entry(ui: &mut egui::Ui, text: &mut String, label: &'static str) {
+    ui.horizontal(|ui| {
+        ui.label(format!("{label}:"));
+        labelled(ui.add(egui::TextEdit::singleline(text)), label);
+    });
+}
 
 /// The rows last listed, and what they were listed from.
 struct Listed {
@@ -116,8 +251,11 @@ pub struct State {
     pub open: bool,
     /// The faces picked for the item being made, in order.
     pub picks: Vec<FaceId>,
-    /// The faces a distance starts on.
+    /// The first group of a distance or planar dimension.
     from: Vec<FaceId>,
+    bevel: Vec<FaceId>,
+    min_mm: String,
+    max_mm: String,
     /// The selection seen last frame: a new face selection is a pick.
     seen: Option<Selection>,
     pub kind: Kind,
@@ -140,6 +278,17 @@ pub struct State {
     diameter: bool,
     material: MaterialCondition,
     datums: String,
+    target_shape: TargetShape,
+    target_number: String,
+    target_point: String,
+    gdt_direction: String,
+    gdt_length: String,
+    gdt_width: String,
+    frame_shape: FrameShape,
+    upper: SegmentDraft,
+    lower: SegmentDraft,
+    position_groups: Vec<Feature<FaceId>>,
+    entry_faces: Vec<FaceId>,
     roughness: String,
     process: SurfaceProcess,
     /// The item the form replaces, when it was filled from one.
@@ -196,6 +345,9 @@ impl Default for State {
             head_faces: Vec::new(),
             drill_depth: String::new(),
             thread_depth: String::new(),
+            bevel: Vec::new(),
+            min_mm: String::new(),
+            max_mm: String::new(),
             pattern: true,
             from_at: At::Feature,
             to_at: At::Feature,
@@ -204,6 +356,17 @@ impl Default for State {
             diameter: false,
             material: MaterialCondition::Regardless,
             datums: String::new(),
+            target_shape: TargetShape::default(),
+            target_number: String::new(),
+            target_point: String::new(),
+            gdt_direction: String::new(),
+            gdt_length: String::new(),
+            gdt_width: String::new(),
+            frame_shape: FrameShape::default(),
+            upper: SegmentDraft::default(),
+            lower: SegmentDraft::default(),
+            position_groups: Vec::new(),
+            entry_faces: Vec::new(),
             roughness: String::new(),
             process: SurfaceProcess::Any,
             replaces: None,
@@ -235,6 +398,51 @@ impl State {
                 self.kind = Kind::Datum;
                 self.letter.clone_from(letter);
                 self.picks.clone_from(feature);
+            }
+            PmiKind::DatumTarget(target) => {
+                self.kind = Kind::DatumTarget;
+                self.letter.clone_from(&target.datum);
+                self.target_number = target.number.to_string();
+                self.target_point = vector_text(target.point_mm);
+                self.picks.push(target.face);
+                self.target_shape = match &target.kind {
+                    TargetKind::Point => TargetShape::Point,
+                    TargetKind::Line { length_mm, direction } => {
+                        self.gdt_length = length_mm.to_string();
+                        self.gdt_direction = vector_text(*direction);
+                        TargetShape::Line
+                    }
+                    TargetKind::Area { area: TargetArea::Circular { diameter_mm } } => {
+                        self.gdt_length = diameter_mm.to_string();
+                        TargetShape::Circular
+                    }
+                    TargetKind::Area { area: TargetArea::Rectangular { length_mm, width_mm, direction } } => {
+                        self.gdt_length = length_mm.to_string();
+                        self.gdt_width = width_mm.to_string();
+                        self.gdt_direction = vector_text(*direction);
+                        TargetShape::Rectangular
+                    }
+                };
+            }
+            PmiKind::PositionControl(control) => {
+                self.kind = Kind::PositionControl;
+                self.position_groups.clone_from(&control.features);
+                match &control.frame {
+                    PositionFrame::Single { segment, projected_zone } => {
+                        self.upper = SegmentDraft::of(segment);
+                        if let Some(zone) = projected_zone {
+                            self.frame_shape = FrameShape::Projected;
+                            self.gdt_length = zone.height_mm.to_string();
+                            self.gdt_direction = vector_text(zone.direction);
+                            self.entry_faces.clone_from(&zone.entry_faces);
+                        }
+                    }
+                    PositionFrame::Composite { upper, lower } => {
+                        self.frame_shape = FrameShape::Composite;
+                        self.upper = SegmentDraft::of(upper);
+                        self.lower = SegmentDraft::of(lower);
+                    }
+                }
             }
             PmiKind::Size { size, features, tolerance, through, thread, .. } => {
                 self.kind = if *size == SizeKind::Diameter { Kind::Diameter } else { Kind::Radius };
@@ -275,6 +483,28 @@ impl State {
                 self.kind = Kind::Slot;
                 self.tolerance = tolerance.suffix().trim().to_owned();
                 self.picks = flats.iter().chain(ends).flatten().copied().collect();
+            }
+            PmiKind::Width { flats: [a, b], tolerance } => {
+                self.kind = Kind::Width;
+                self.from.clone_from(a);
+                self.picks.clone_from(b);
+                self.tolerance = tolerance.suffix().trim().to_owned();
+            }
+            PmiKind::BasicAngle { planes: [a, b] } => {
+                self.kind = Kind::BasicAngle;
+                self.from.clone_from(a);
+                self.picks.clone_from(b);
+            }
+            PmiKind::Chamfer { bevel, sides: [a, b] } | PmiKind::EdgeBreak { bevel, sides: [a, b], .. } => {
+                self.kind = Kind::Chamfer;
+                self.bevel.clone_from(bevel);
+                self.from.clone_from(a);
+                self.picks.clone_from(b);
+                if let PmiKind::EdgeBreak { min_mm, max_mm, .. } = &on_body.kind {
+                    self.kind = Kind::EdgeBreak;
+                    self.min_mm = min_mm.to_string();
+                    self.max_mm = max_mm.to_string();
+                }
             }
             PmiKind::Gdt { characteristic, tolerance, diameter, material, datums, features } => {
                 self.kind = Kind::Tolerance;
@@ -323,9 +553,11 @@ fn typed_tolerance(text: &str) -> Result<Tolerance, String> {
 /// The item the form describes, on the part's faces.
 fn item(doc: &Document, form: &State) -> Result<PmiItem<FaceRef>, String> {
     let pmi = doc.model().pmi();
-    if form.picks.is_empty() {
+    if form.picks.is_empty() && form.kind != Kind::PositionControl {
         return Err(form.kind.prompt().to_owned());
     }
+    let planes =
+        || -> Result<[Feature<FaceRef>; 2], String> { Ok([feature(doc, &form.from)?, feature(doc, &form.picks)?]) };
     let kind = match form.kind {
         Kind::Datum => PmiKind::Datum {
             letter: Some(form.letter.trim().to_ascii_uppercase())
@@ -333,6 +565,65 @@ fn item(doc: &Document, form: &State) -> Result<PmiItem<FaceRef>, String> {
                 .unwrap_or_else(|| pmi.next_datum_letter()),
             feature: feature(doc, &form.picks)?,
         },
+        Kind::DatumTarget => {
+            let [face] = form.picks.as_slice() else {
+                return Err("Pick exactly one target face.".into());
+            };
+            let kind = match form.target_shape {
+                TargetShape::Point => TargetKind::Point,
+                TargetShape::Line => TargetKind::Line {
+                    length_mm: decimal(&form.gdt_length, "line length")?,
+                    direction: vector(&form.gdt_direction, "the target direction")?,
+                },
+                TargetShape::Circular => TargetKind::Area {
+                    area: TargetArea::Circular { diameter_mm: decimal(&form.gdt_length, "target diameter")? },
+                },
+                TargetShape::Rectangular => TargetKind::Area {
+                    area: TargetArea::Rectangular {
+                        length_mm: decimal(&form.gdt_length, "target length")?,
+                        width_mm: decimal(&form.gdt_width, "target width")?,
+                        direction: vector(&form.gdt_direction, "the target direction")?,
+                    },
+                },
+            };
+            PmiKind::DatumTarget(DatumTarget {
+                datum: form.letter.trim().to_ascii_uppercase(),
+                number: form.target_number.trim().parse().map_err(|_| "Enter a positive target number.")?,
+                face: doc.model().face_ref(*face).map_err(|error| error.to_string())?,
+                point_mm: vector(&form.target_point, "the target point")?,
+                kind,
+            })
+        }
+        Kind::PositionControl => {
+            let segment = form.upper.typed()?;
+            let frame = match form.frame_shape {
+                FrameShape::Single => PositionFrame::Single { segment, projected_zone: None },
+                FrameShape::Composite => PositionFrame::Composite { upper: segment, lower: form.lower.typed()? },
+                FrameShape::Projected => PositionFrame::Single {
+                    segment,
+                    projected_zone: Some(ProjectedZone {
+                        height_mm: decimal(&form.gdt_length, "projection height")?,
+                        direction: vector(&form.gdt_direction, "the outward direction")?,
+                        entry_faces: form
+                            .entry_faces
+                            .iter()
+                            .map(|face| doc.model().face_ref(*face).map_err(|error| error.to_string()))
+                            .collect::<Result<_, _>>()?,
+                    }),
+                },
+            };
+            let features = form
+                .position_groups
+                .iter()
+                .map(Vec::as_slice)
+                .chain((!form.picks.is_empty()).then_some(form.picks.as_slice()))
+                .map(|faces| feature(doc, faces))
+                .collect::<Result<Vec<_>, _>>()?;
+            if features.is_empty() {
+                return Err(form.kind.prompt().into());
+            }
+            PmiKind::PositionControl(PositionControl { features, frame })
+        }
         Kind::Diameter | Kind::Radius => PmiKind::Size {
             size: if form.kind == Kind::Diameter { SizeKind::Diameter } else { SizeKind::Radius },
             features: features(doc, &form.picks, form.pattern)?,
@@ -399,6 +690,18 @@ fn item(doc: &Document, form: &State) -> Result<PmiItem<FaceRef>, String> {
                 tolerance: typed_tolerance(&form.tolerance)?,
             }
         }
+        Kind::Width => PmiKind::Width { flats: planes()?, tolerance: typed_tolerance(&form.tolerance)? },
+        Kind::BasicAngle => PmiKind::BasicAngle { planes: planes()? },
+        Kind::Chamfer => PmiKind::Chamfer { bevel: feature(doc, &form.bevel)?, sides: planes()? },
+        Kind::EdgeBreak => {
+            let bound = |text: &str, label| Decimal::parse(text).ok_or_else(|| format!("Enter the {label} in mm."));
+            PmiKind::EdgeBreak {
+                bevel: feature(doc, &form.bevel)?,
+                sides: planes()?,
+                min_mm: bound(&form.min_mm, "minimum setback")?,
+                max_mm: bound(&form.max_mm, "maximum setback")?,
+            }
+        }
         Kind::Tolerance => PmiKind::Gdt {
             characteristic: form.characteristic,
             tolerance: form
@@ -433,6 +736,7 @@ fn item(doc: &Document, form: &State) -> Result<PmiItem<FaceRef>, String> {
         ("", Some(old)) => old.clone(),
         ("", None) => pmi.free_name(&match &item.kind {
             PmiKind::Datum { letter, .. } => format!("Datum {letter}"),
+            PmiKind::DatumTarget(target) => format!("Datum target {}{}", target.datum, target.number),
             _ => item.kind_label().to_owned(),
         }),
         (name, _) => name.to_owned(),
@@ -532,9 +836,22 @@ fn form(ui: &mut egui::Ui, state: &mut AppState) {
             }
         }
     }
+    if matches!(form.kind, Kind::Chamfer | Kind::EdgeBreak) {
+        picked(ui, doc, "Bevel", &mut form.bevel);
+        if ui.button("Use picks as bevel").clicked() && !form.picks.is_empty() {
+            form.bevel = std::mem::take(&mut form.picks);
+        }
+    }
+    if matches!(form.kind, Kind::Width | Kind::Chamfer | Kind::EdgeBreak | Kind::BasicAngle) {
+        picked(ui, doc, "First planar group", &mut form.from);
+        if ui.button("Use picks as first group").clicked() && !form.picks.is_empty() {
+            form.from = std::mem::take(&mut form.picks);
+        }
+    }
     let label = match form.kind {
         Kind::Distance => "To",
         Kind::Hole => "Pilot",
+        Kind::Width | Kind::Chamfer | Kind::EdgeBreak | Kind::BasicAngle => "Second planar group",
         _ => "Picked",
     };
     picked(ui, doc, label, &mut form.picks);
@@ -546,7 +863,65 @@ fn form(ui: &mut egui::Ui, state: &mut AppState) {
                 "Datum letter",
             );
         }
-        Kind::Diameter | Kind::Radius | Kind::Hole | Kind::Distance | Kind::Slot => {
+        Kind::DatumTarget => {
+            entry(ui, &mut form.letter, "Declared datum");
+            entry(ui, &mut form.target_number, "Target number");
+            entry(ui, &mut form.target_point, "Target point X, Y, Z (mm)");
+            ui.horizontal_wrapped(|ui| {
+                for (kind, label) in [
+                    (TargetShape::Point, "Point"),
+                    (TargetShape::Line, "Line"),
+                    (TargetShape::Circular, "Circular area"),
+                    (TargetShape::Rectangular, "Rectangular area"),
+                ] {
+                    ui.selectable_value(&mut form.target_shape, kind, label);
+                }
+            });
+            match form.target_shape {
+                TargetShape::Point => {}
+                TargetShape::Circular => entry(ui, &mut form.gdt_length, "Diameter (mm)"),
+                TargetShape::Line | TargetShape::Rectangular => {
+                    entry(ui, &mut form.gdt_length, "Length (mm)");
+                    entry(ui, &mut form.gdt_direction, "Tangent direction X, Y, Z");
+                    if form.target_shape == TargetShape::Rectangular {
+                        entry(ui, &mut form.gdt_width, "Width (mm)");
+                    }
+                }
+            }
+        }
+        Kind::PositionControl => {
+            let mut empty = None;
+            for (i, faces) in form.position_groups.iter_mut().enumerate() {
+                picked(ui, doc, &format!("Controlled feature {}", i + 1), faces);
+                if faces.is_empty() {
+                    empty = Some(i);
+                }
+            }
+            if let Some(i) = empty {
+                form.position_groups.remove(i);
+            }
+            if ui.add_enabled(!form.picks.is_empty(), egui::Button::new("Use picks as feature")).clicked() {
+                form.position_groups.push(std::mem::take(&mut form.picks));
+            }
+            ui.horizontal_wrapped(|ui| {
+                ui.selectable_value(&mut form.frame_shape, FrameShape::Single, "Single");
+                ui.selectable_value(&mut form.frame_shape, FrameShape::Composite, "Composite");
+                ui.selectable_value(&mut form.frame_shape, FrameShape::Projected, "Projected");
+            });
+            form.upper.show(ui, if form.frame_shape == FrameShape::Composite { "Upper segment" } else { "Segment" });
+            if form.frame_shape == FrameShape::Composite {
+                form.lower.show(ui, "Lower segment");
+            }
+            if form.frame_shape == FrameShape::Projected {
+                picked(ui, doc, "Entry faces (feature order)", &mut form.entry_faces);
+                if ui.add_enabled(!form.picks.is_empty(), egui::Button::new("Use picks as entries")).clicked() {
+                    form.entry_faces = std::mem::take(&mut form.picks);
+                }
+                entry(ui, &mut form.gdt_length, "Projection height (mm)");
+                entry(ui, &mut form.gdt_direction, "Outward direction X, Y, Z");
+            }
+        }
+        Kind::Diameter | Kind::Radius | Kind::Hole | Kind::Distance | Kind::Slot | Kind::Width => {
             if form.kind == Kind::Distance && !form.picks.is_empty() {
                 ui.horizontal_wrapped(|ui| {
                     for (at, label) in ENDS {
@@ -592,6 +967,17 @@ fn form(ui: &mut egui::Ui, state: &mut AppState) {
                 ui.checkbox(&mut form.pattern, "Each picked face is one of a pattern");
             }
         }
+        Kind::EdgeBreak => {
+            labelled(
+                ui.add(egui::TextEdit::singleline(&mut form.min_mm).hint_text("Minimum setback (mm)")),
+                "Minimum setback",
+            );
+            labelled(
+                ui.add(egui::TextEdit::singleline(&mut form.max_mm).hint_text("Maximum setback (mm)")),
+                "Maximum setback",
+            );
+        }
+        Kind::Chamfer | Kind::BasicAngle => {}
         Kind::Tolerance => {
             egui::ComboBox::from_id_salt("pmi_characteristic")
                 .selected_text(form.characteristic.name())

@@ -17,6 +17,8 @@
 //! - a distance, between the edges of its two ends in a view that sees both end on,
 //!   stacked outside the view;
 //! - a slot, as one callout on a round end where the slot is seen in true shape;
+//! - a width, like a distance between its opposed flats; an angle, framed, in a
+//!   view that sees both planes edge on; a chamfer or edge break, on its bevel;
 //! - a datum, a tolerance or a finish of a flat face, on the line the face shows as
 //!   where a view sees it edge on;
 //! - a tolerance of a feature that has a size on the drawing, under that size;
@@ -31,7 +33,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use kurbo::Shape as _;
 use serde::{Deserialize, Serialize};
 use soliddraft_kernel_api::drawing::Curve3;
-use soliddraft_kernel_api::pmi::{At, PmiKind, SizeKind, Tolerance};
+use soliddraft_kernel_api::pmi::{At, PmiKind, PositionFrame, SizeKind, TargetArea, TargetKind, Tolerance};
 use soliddraft_kernel_api::{EdgeId, FaceId, FaceInfo, Point2, SurfaceKind, Vec3};
 use soliddraft_model::pmi::PmiRow;
 
@@ -299,13 +301,22 @@ impl Planner<'_> {
     /// A symbol on the line a flat face shows as: the view, the edge, the point on it and
     /// the outward direction.
     fn on_line(&mut self, point: Vec3, normal: Vec3) -> Result<(ViewId, EdgeId, Attach, Point2, Point2), String> {
+        self.on_planar_edge(point, normal, false)
+    }
+
+    fn on_planar_edge(
+        &mut self,
+        point: Vec3,
+        normal: Vec3,
+        oblique: bool,
+    ) -> Result<(ViewId, EdgeId, Attach, Point2, Point2), String> {
         let mut best: Option<((bool, i32, i32), &ViewContext, EdgeId)> = None;
         for (order, view) in self.views.iter().enumerate() {
             let frame = &view.xf.frame;
             if normal.dot(frame.direction).abs() > 1e-6 {
                 continue;
             }
-            if normal.dot(frame.right).abs() < 1.0 - 1e-6 && normal.dot(frame.up).abs() < 1.0 - 1e-6 {
+            if !oblique && normal.dot(frame.right).abs() < 1.0 - 1e-6 && normal.dot(frame.up).abs() < 1.0 - 1e-6 {
                 continue;
             }
             let Some((edge, visible)) = plane_edge(self.body.index, view, point, normal, self.body.tol) else {
@@ -485,6 +496,43 @@ impl Planner<'_> {
         self.plans.push(plan);
         Ok(())
     }
+    fn target_plan(
+        &mut self,
+        target: &soliddraft_kernel_api::pmi::DatumTarget<FaceId>,
+        source: PmiSource,
+    ) -> Result<(), String> {
+        let info = self.body.faces.get(&target.face).ok_or("the target face is missing")?;
+        let normal = info.normal.ok_or("the target face has no checked normal")?;
+        let [x, y, z] = target.point_mm;
+        let point = Vec3::new(x, y, z);
+        let (view, edge) = self
+            .views
+            .iter()
+            .filter_map(|view| {
+                let alignment = normal.dot(view.xf.frame.direction);
+                if alignment <= 1e-6 {
+                    return None;
+                }
+                info.edges.iter().copied().find(|edge| visible_in(view, *edge)).map(|edge| (alignment, *view, edge))
+            })
+            .max_by(|a, b| a.0.total_cmp(&b.0))
+            .map(|(_, view, edge)| (view, edge))
+            .ok_or("no view shows the target face")?;
+        let on = view.xf.point(point);
+        let dir = self.diagonal(view.id, on);
+        self.plans.push(Plan {
+            source,
+            view: view.id,
+            body: datum_target_body(target),
+            anchors: vec![(edge, Attach::Point { at: point }, on)],
+            placement: Point2::new(round(on.u + dir.u * SYMBOL_OFFSET), round(on.v + dir.v * SYMBOL_OFFSET)),
+            slide: Slide { along: dir, step: 3.0 },
+            host: None,
+            stack: None,
+            dropped: false,
+        });
+        Ok(())
+    }
 
     fn row(&mut self, row: &PmiRow, rows: &[PmiRow]) -> Result<(), String> {
         if let Some(problem) = &row.problem {
@@ -492,7 +540,7 @@ impl Planner<'_> {
         }
         let item = row.on_body.as_ref().ok_or("its faces are not on the body")?;
         let wanted = match &item.kind {
-            PmiKind::Location { .. } => self.pass == Pass::Distances,
+            PmiKind::Location { .. } | PmiKind::Width { .. } => self.pass == Pass::Distances,
             PmiKind::Size { .. } | PmiKind::Hole { .. } => self.pass == Pass::Sizes,
             PmiKind::Gdt { .. } => self.pass != Pass::Sizes,
             _ => self.pass == Pass::Rest,
@@ -648,6 +696,76 @@ impl Planner<'_> {
                 let value = row.measured.first().copied().ok_or("the part could not measure it")?;
                 self.linear(None, source, &from, &to, value, *tolerance)?;
             }
+            PmiKind::Width { flats: [a, b], tolerance } => {
+                let end = |faces: &[FaceId]| -> Result<End, String> {
+                    Ok(End { shape: self.body.feature(faces)?, faces: faces.to_vec(), at: At::Feature, pair: None })
+                };
+                let value = row.measured.first().copied().ok_or("the part could not measure it")?;
+                self.linear(None, source, &end(a)?, &end(b)?, value, *tolerance)?;
+            }
+            PmiKind::Chamfer { bevel, .. } | PmiKind::EdgeBreak { bevel, .. } => {
+                let Shape::Plane { point, normal } = self.body.feature(bevel)? else {
+                    return Err("the callout needs a planar face".into());
+                };
+                let (view, edge, attach, on, out) = self.on_planar_edge(point, normal, true)?;
+                self.plans.push(Plan {
+                    source,
+                    view,
+                    body: AnnotationKind::Note { text: row.callout(), leader: Vec::new() },
+                    anchors: vec![(edge, attach, on)],
+                    placement: Point2::new(round(on.u + out.u * SYMBOL_OFFSET), round(on.v + out.v * SYMBOL_OFFSET)),
+                    slide: Slide { along: out, step: 3.0 },
+                    host: None,
+                    stack: None,
+                    dropped: false,
+                });
+            }
+            PmiKind::BasicAngle { planes: [first, second] } => {
+                let flat = |group: &[FaceId]| match self.body.feature(group)? {
+                    Shape::Plane { point, normal } => Ok((point, normal)),
+                    _ => Err("an angle needs two planes".to_owned()),
+                };
+                let ((p, n), (q, m)) = (flat(first)?, flat(second)?);
+                let mut best: Option<((u8, i32), &ViewContext, EdgeId, EdgeId)> = None;
+                for view in self.views.iter().copied() {
+                    let frame = &view.xf.frame;
+                    if n.dot(frame.direction).abs() > 1e-6 || m.dot(frame.direction).abs() > 1e-6 {
+                        continue;
+                    }
+                    let edge = |point, normal| plane_edge(self.body.index, view, point, normal, self.body.tol);
+                    let (Some((a, av)), Some((b, bv))) = (edge(p, n), edge(q, m)) else { continue };
+                    if a == b {
+                        continue;
+                    }
+                    let key = (u8::from(av) + u8::from(bv), -self.planned_in(view.id));
+                    if best.as_ref().is_none_or(|(score, ..)| key > *score) {
+                        best = Some((key, view, a, b));
+                    }
+                }
+                let (_, view, a, b) = best.ok_or("no view sees both angle faces edge on")?;
+                let anchor = |edge| -> Result<_, String> {
+                    let at = self.body.index.edge_curve(edge).ok_or("the edge is gone")?.point_at(0.5);
+                    Ok((edge, Attach::Point { at }, view.xf.point(at)))
+                };
+                let (first, second) = (anchor(a)?, anchor(b)?);
+                let on = first.2;
+                let out = self.outward(view.id, on, unit(view.xf.vector(n)));
+                let value = row.measured.first().copied().ok_or("the part could not measure it")?;
+                let mut d = Dimension::measured(DimensionKind::Angular, value, precision_for(value));
+                d.tolerance = Tolerance::Basic;
+                d.requirement = true;
+                self.plans.push(Plan {
+                    source,
+                    view: view.id,
+                    body: AnnotationKind::Dimension(d),
+                    anchors: vec![first, second],
+                    placement: Point2::new(round(on.u + out.u * SYMBOL_OFFSET), round(on.v + out.v * SYMBOL_OFFSET)),
+                    slide: Slide { along: out, step: 3.0 },
+                    host: None,
+                    stack: None,
+                    dropped: false,
+                });
+            }
             PmiKind::Slot { ends, .. } => {
                 let Shape::Round { axis, radius, .. } = self.body.feature(&ends[0])? else {
                     return Err("a slot needs round ends".into());
@@ -663,6 +781,31 @@ impl Planner<'_> {
                     view,
                     body: AnnotationKind::Note { text: row.callout(), leader: Vec::new() },
                     anchors: vec![(edge, at.map_or(Attach::Mid, |at| Attach::Point { at }), on)],
+                    placement,
+                    slide: Slide { along: dir, step: 3.0 },
+                    host: None,
+                    stack: None,
+                    dropped: false,
+                });
+            }
+            PmiKind::DatumTarget(target) => self.target_plan(target, source)?,
+            PmiKind::PositionControl(control) => {
+                let first = control.features.first().ok_or("it is on no feature")?;
+                let Shape::Round { axis, radius, .. } = self.body.feature(first)? else {
+                    return Err("the controlled feature is not round".into());
+                };
+                let groups: Vec<_> = control.features.iter().map(Vec::as_slice).collect();
+                let (view, edge, _, centre, placement, dir) = self.callout(&groups, axis, radius)?;
+                let context = self.views.iter().find(|item| item.id == view).ok_or("the view is missing")?;
+                let reach = radius * context.xf.scale;
+                let on = Point2::new(centre.u + dir.u * reach, centre.v + dir.v * reach);
+                let at = context.xf.unproject(on);
+                let body = position_body(&control.frame);
+                self.plans.push(Plan {
+                    source,
+                    view,
+                    body,
+                    anchors: vec![(edge, Attach::Point { at }, on)],
                     placement,
                     slide: Slide { along: dir, step: 3.0 },
                     host: None,
@@ -992,6 +1135,28 @@ fn row_of<'r>(source: &PmiSource, rows: &'r [PmiRow]) -> Option<&'r PmiRow> {
     }
 }
 
+fn datum_target_body<F>(target: &soliddraft_kernel_api::pmi::DatumTarget<F>) -> AnnotationKind {
+    let extent = match &target.kind {
+        TargetKind::Point => String::new(),
+        TargetKind::Line { length_mm, .. } => format!("LINE {length_mm}"),
+        TargetKind::Area { area: TargetArea::Circular { diameter_mm } } => format!("Ø{diameter_mm}"),
+        TargetKind::Area { area: TargetArea::Rectangular { length_mm, width_mm, .. } } => {
+            format!("{length_mm}×{width_mm}")
+        }
+    };
+    AnnotationKind::DatumTarget { label: format!("{}{}", target.datum, target.number), extent }
+}
+
+fn position_body<F>(frame: &PositionFrame<F>) -> AnnotationKind {
+    let (upper, lower, projected_height_mm) = match frame {
+        PositionFrame::Single { segment, projected_zone } => {
+            (segment.clone(), None, projected_zone.as_ref().map(|zone| zone.height_mm.clone()))
+        }
+        PositionFrame::Composite { upper, lower } => (upper.clone(), Some(lower.clone()), None),
+    };
+    AnnotationKind::PositionFrame { upper, lower, projected_height_mm }
+}
+
 /// True when an annotation of kind `body` is how the drawing shows an item of kind
 /// `kind`: a thread as a note, a plain size as a dimension, and so on.
 fn shows<F>(body: &AnnotationKind, kind: &PmiKind<F>) -> bool {
@@ -999,9 +1164,18 @@ fn shows<F>(body: &AnnotationKind, kind: &PmiKind<F>) -> bool {
         (body, kind),
         (
             AnnotationKind::Note { .. },
-            PmiKind::Size { thread: Some(_), .. } | PmiKind::Slot { .. } | PmiKind::Hole { .. }
-        ) | (AnnotationKind::Dimension(_), PmiKind::Size { thread: None, .. } | PmiKind::Location { .. })
+            PmiKind::Size { thread: Some(_), .. }
+                | PmiKind::Slot { .. }
+                | PmiKind::Hole { .. }
+                | PmiKind::Chamfer { .. }
+                | PmiKind::EdgeBreak { .. }
+        ) | (
+            AnnotationKind::Dimension(_),
+            PmiKind::Size { thread: None, .. } | PmiKind::Location { .. } | PmiKind::Width { .. }
+        ) | (AnnotationKind::Dimension(Dimension { kind: DimensionKind::Angular, .. }), PmiKind::BasicAngle { .. })
             | (AnnotationKind::Gdt { .. }, PmiKind::Gdt { .. })
+            | (AnnotationKind::PositionFrame { .. }, PmiKind::PositionControl(_))
+            | (AnnotationKind::DatumTarget { .. }, PmiKind::DatumTarget(_))
             | (AnnotationKind::Datum { .. }, PmiKind::Datum { .. })
             | (AnnotationKind::SurfaceFinish { .. }, PmiKind::SurfaceFinish { .. })
     )
@@ -1072,6 +1246,13 @@ pub(crate) fn refresh(
                 }),
                 PmiSource::Item { .. } | PmiSource::Thread { .. } => {
                     match annotation_row(annotation, &source, all).filter(|(row, _)| row.applies()) {
+                        Some((row, _))
+                            if redraw
+                                && matches!(row.item.kind, PmiKind::DatumTarget(_) | PmiKind::PositionControl(_)) =>
+                        {
+                            redrawn = true;
+                            false
+                        }
                         Some((row, placement)) if shows(&annotation.body, &row.item.kind) => {
                             if thread_notes.get(row.item.id.as_str()).is_some_and(|(kept, _)| *kept != annotation.id) {
                                 return false;
@@ -1124,14 +1305,23 @@ fn update(annotation: &mut Annotation, row: &PmiRow, symbols: &crate::library::S
                 d.value = crate::DimValue::Measured { value: *value };
             }
         }
-        (AnnotationKind::Dimension(d), PmiKind::Location { tolerance, .. }) => {
+        (AnnotationKind::Dimension(d), PmiKind::Location { tolerance, .. } | PmiKind::Width { tolerance, .. }) => {
             d.tolerance = *tolerance;
             d.requirement = true;
             if let Some(value) = row.measured.first() {
                 d.value = crate::DimValue::Measured { value: *value };
             }
         }
-        (AnnotationKind::Note { text, .. }, PmiKind::Slot { .. } | PmiKind::Hole { .. }) => *text = row.callout(),
+        (AnnotationKind::Dimension(d), PmiKind::BasicAngle { .. }) => {
+            if let Some(value) = row.measured.first() {
+                d.value = crate::DimValue::Measured { value: *value };
+                d.precision = precision_for(*value);
+            }
+        }
+        (
+            AnnotationKind::Note { text, .. },
+            PmiKind::Slot { .. } | PmiKind::Hole { .. } | PmiKind::Chamfer { .. } | PmiKind::EdgeBreak { .. },
+        ) => *text = row.callout(),
         (
             AnnotationKind::Gdt { characteristic, tolerance, diameter, material, datums },
             PmiKind::Gdt { characteristic: c, tolerance: t, diameter: d, material: m, datums: refs, .. },
@@ -1140,6 +1330,10 @@ fn update(annotation: &mut Annotation, row: &PmiRow, symbols: &crate::library::S
             datums.clone_from(refs);
         }
         (AnnotationKind::Datum { letter }, PmiKind::Datum { letter: stated, .. }) => letter.clone_from(stated),
+        (body @ AnnotationKind::DatumTarget { .. }, PmiKind::DatumTarget(target)) => *body = datum_target_body(target),
+        (body @ AnnotationKind::PositionFrame { .. }, PmiKind::PositionControl(control)) => {
+            *body = position_body(&control.frame)
+        }
         (
             AnnotationKind::SurfaceFinish { text, process, method, lay, allowance, all_around },
             PmiKind::SurfaceFinish { text: t, process: p, method: m, lay: l, allowance: a, all_around: all, .. },
@@ -1419,6 +1613,38 @@ fn lay(drawing: &Drawing, sheet: usize) -> Laid {
             let (u, v) = (a.placement.u + origin.u, a.placement.v + origin.v);
             let frame = match &a.body {
                 AnnotationKind::Gdt { .. } => Rect { x0: u, y0: v - th, x1: u + gdt_width(&a.body, th), y1: v + th },
+                AnnotationKind::PositionFrame { upper, lower, projected_height_mm } => {
+                    let width = |segment: &soliddraft_kernel_api::pmi::PositionSegment, projection: f64| {
+                        let modifier = |material: soliddraft_kernel_api::pmi::MaterialCondition| {
+                            if material.is_regardless() { 0.0 } else { 1.3 * th }
+                        };
+                        let cell = |text: f64, material, extra: f64| {
+                            (text + 0.9 * th + modifier(material) + extra).max(2.0 * th)
+                        };
+                        2.0 * th
+                            + cell(
+                                display::text_width(&format!("Ø{}", segment.value_mm), th),
+                                segment.material,
+                                projection,
+                            )
+                            + segment
+                                .datums
+                                .iter()
+                                .map(|d| cell(display::text_width(&d.letter, th), d.material, 0.0))
+                                .sum::<f64>()
+                    };
+                    let extent = lower.as_ref().map_or(th, |_| 2.0 * th);
+                    let projection = projected_height_mm
+                        .as_ref()
+                        .map_or(0.0, |height| 1.3 * th + display::text_width(height.as_str(), th));
+                    let width = width(upper, projection).max(lower.as_ref().map_or(0.0, |lower| width(lower, 0.0)));
+                    Rect { x0: u, y0: v - extent, x1: u + width, y1: v + extent }
+                }
+                AnnotationKind::DatumTarget { label, extent } => {
+                    let r = (display::text_width(label, th).max(display::text_width(extent, th)) * 0.62 + th * 0.45)
+                        .max(1.35 * th);
+                    Rect { x0: u - r, y0: v - r, x1: u + r, y1: v + r }
+                }
                 AnnotationKind::Datum { letter } => {
                     let half = (display::text_width(letter, th) + th).max(2.0 * th) / 2.0;
                     Rect { x0: u - half, y0: v - th, x1: u + half, y1: v + th }
@@ -1603,9 +1829,11 @@ pub fn not_from_part(drawing: &Drawing, items: &BTreeSet<String>) -> Vec<String>
         for annotation in &sheet.annotations {
             let states = match &annotation.body {
                 AnnotationKind::Dimension(d) => !d.tolerance.is_none() || d.requirement,
-                AnnotationKind::Gdt { .. } | AnnotationKind::Datum { .. } | AnnotationKind::SurfaceFinish { .. } => {
-                    true
-                }
+                AnnotationKind::Gdt { .. }
+                | AnnotationKind::Datum { .. }
+                | AnnotationKind::SurfaceFinish { .. }
+                | AnnotationKind::DatumTarget { .. }
+                | AnnotationKind::PositionFrame { .. } => true,
                 _ => annotation.source.is_some(),
             };
             let backed = match &annotation.source {

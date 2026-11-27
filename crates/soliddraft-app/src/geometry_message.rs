@@ -1,7 +1,44 @@
 //! Geometry refusals in the interface. Diagnostics retain the original reason.
 
-/// What the user reads for a kernel or backend `message`: plain words, never a code.
+/// What the user reads for a kernel or backend `message`: plain words, never a code, and
+/// never proof wording such as "certified" or "proved", which kernel text can carry.
 pub fn for_user(message: &str) -> String {
+    let plain = translate(message);
+    if says_proof(&plain) { UNAVAILABLE.into() } else { plain }
+}
+
+/// The line for a refusal with no plainer words of its own.
+const UNAVAILABLE: &str = "This operation is unavailable for the selected shape.";
+
+/// Whether `text` uses proof, check or certification wording.
+fn says_proof(text: &str) -> bool {
+    let text = text.to_lowercase();
+    text.contains("certif")
+        || text.contains("proved")
+        || text.contains("proven")
+        || text.contains("unprov")
+        || text.contains("verified")
+        || text.contains("not checked")
+        || text.contains("proof")
+}
+
+/// A graded field's endpoint outside the range the field supports, with that range.
+fn grade_range(message: &str) -> Option<String> {
+    let (_, rest) = message.split_once("grade endpoint ")?;
+    let (value, rest) = rest.split_once(" is outside the ")?;
+    let (_, range) = rest.split_once("range ")?;
+    Some(format!(
+        "The grade endpoint {value} is outside the supported range {}. Choose an endpoint inside it.",
+        range.trim()
+    ))
+}
+
+fn translate(message: &str) -> String {
+    if message.contains("grade-range-unsupported")
+        && let Some(plain) = grade_range(message)
+    {
+        return plain;
+    }
     if let Some((message, faces)) = message.split_once(soliddraft_model::FITS_BETWEEN)
         && !faces.trim().is_empty()
     {
@@ -157,7 +194,7 @@ fn plain_message(message: &str) -> &str {
         || message.contains("intersect.")
         || message.contains("numbers.")
     {
-        "This operation is unavailable for the selected shape."
+        UNAVAILABLE
     } else {
         message
     }
@@ -204,6 +241,26 @@ fn has_code(message: &str, family: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{for_user, suggested_fillet_radius};
+
+    /// A graded field's range refusal keeps its numbers and loses the kernel's proof words.
+    #[test]
+    fn a_grade_out_of_range_gives_the_range_in_plain_words() {
+        let raw = "gyroid failed (status 0): gyroid.grade-range-unsupported: grade endpoint 9/10 is outside the \
+                   certified range [-1/4, 1/4]";
+        assert_eq!(
+            for_user(raw),
+            "The grade endpoint 9/10 is outside the supported range [-1/4, 1/4]. Choose an endpoint inside it."
+        );
+    }
+
+    /// Kernel text with proof wording that no plainer words cover never reaches the screen.
+    #[test]
+    fn proof_wording_from_the_kernel_is_never_shown() {
+        for raw in ["the offset surface is not proved disjoint", "no certified bound for this face", "unverified trim"]
+        {
+            assert_eq!(for_user(raw), "This operation is unavailable for the selected shape.", "{raw}");
+        }
+    }
 
     /// Refusals of an extrusion's start or limit face read as plain reasons, never as the
     /// generic line or a code.

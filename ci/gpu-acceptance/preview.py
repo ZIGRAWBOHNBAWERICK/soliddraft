@@ -30,31 +30,22 @@ SCENARIOS = (
     'drawing', 'ring-fillet', 'spline-sweep', 'canonical-p5', 'bracket', 'references', 'torus-revolve',
     'sphere-revolve', 'rod-cut-28deg', 'skew-corner-fillet', 'loft', 'graded-fields', 'sketch-trim',
 )
-CHECKED = ('tessellate', 'tessellate_edges', 'rendering', 'rendering_edges')
+# The certified mesh of an analytic body; a spline body's checked mesh is its display result.
+CHECKED = ('tessellate', 'tessellate_edges')
+CPU_PREVIEW = ('preview', 'preview_edges')
+# The step's own kernel log and its display capture. Exports, measurements and drawing
+# views are not the viewport's display.
+DISPLAY_LOGS = ('kernel.json', 'display.kernel.json')
 
 
 def kernel_calls(log):
-    """(name, elapsed ms) of each kernel call a kernel log lists."""
+    """(operation, wall ms) of each kernel call a kernel log lists."""
     try:
         value = json.loads(log.read_text(encoding='utf-8'))
     except (OSError, ValueError):
         return []
-    calls = []
-
-    def walk(item):
-        if isinstance(item, dict):
-            name = item.get('query') or item.get('name') or item.get('call')
-            elapsed = item.get('elapsed_ms', item.get('ms'))
-            if isinstance(name, str) and isinstance(elapsed, (int, float)):
-                calls.append((name, float(elapsed)))
-            for child in item.values():
-                walk(child)
-        elif isinstance(item, list):
-            for child in item:
-                walk(child)
-
-    walk(value)
-    return calls
+    return [(call.get('operation'), float(call.get('wall_ms') or 0.0)) for call in value.get('calls', [])
+            if isinstance(call, dict)]
 
 
 def adapter_of(viewport):
@@ -79,8 +70,9 @@ def native_scenario(args, name, out):
 
 def summarize(name, bundle, exit_code):
     """The acceptance record of one scenario bundle."""
-    record = {'scenario': name, 'runner_exit': exit_code, 'steps': 0, 'adapters': [],
-              'gpu_previews': 0, 'cpu_previews': 0, 'refused_faces': 0, 'status': None, 'checked_ms': {}}
+    record = {'scenario': name, 'runner_exit': exit_code, 'steps': 0, 'adapters': [], 'gpu_previews': 0,
+              'cpu_previews': 0, 'refused_faces': 0, 'refusals': {}, 'status': None, 'checked_ms': {},
+              'kernel_previews': 0}
     result = bundle / 'result.json'
     if result.is_file():
         report = json.loads(result.read_text(encoding='utf-8'))
@@ -94,17 +86,27 @@ def summarize(name, bundle, exit_code):
         # The counts are the process's since it started; a fresh process starts again.
         for key in ('gpu_previews', 'cpu_previews', 'refused_faces'):
             record[key] = max(record[key], counts.get(key, 0))
+        for reason, count in (counts.get('refusals') or {}).items():
+            record['refusals'][reason] = max(record['refusals'].get(reason, 0), count)
         viewport = display.with_name('viewport.json')
         if viewport.is_file():
             adapter = adapter_of(json.loads(viewport.read_text(encoding='utf-8')))
             if adapter not in record['adapters']:
                 record['adapters'].append(adapter)
-        revision = shown.get('revision')
-        for log in display.parent.glob('*kernel.json'):
-            for call, elapsed in kernel_calls(log):
+    for log in sorted((bundle / 'commands').glob('*/kernel.json')):
+        command = log.with_name('command.json')
+        revision = json.loads(command.read_text(encoding='utf-8')).get('revision') if command.is_file() else None
+        for name in DISPLAY_LOGS:
+            for call, elapsed in kernel_calls(log.with_name(name)):
                 if call in CHECKED:
                     record['checked_ms'][str(revision)] = record['checked_ms'].get(str(revision), 0.0) + elapsed
+                elif call in CPU_PREVIEW:
+                    record['kernel_previews'] += 1
+    record['checked_ms'] = {revision: round(ms, 1) for revision, ms in record['checked_ms'].items()}
     record['checked_total_ms'] = round(sum(record['checked_ms'].values()), 1)
+    # Strict: the kernel logs show no CPU preview call at all. Faces the GPU mesher refuses
+    # and field bodies still call it.
+    record['strict'] = record['kernel_previews'] == 0
     problems = []
     if not record['steps']:
         problems.append('no displayed step')
@@ -239,7 +241,8 @@ def main():
     finally:
         summary['pass'] = bool(records) and all(record.get('accepted') for record in records)
         (out / 'result.json').write_text(json.dumps(summary, indent=2) + '\n', encoding='utf-8')
-    print(json.dumps({'pass': summary['pass'], 'failed': [r['scenario'] for r in records if not r.get('accepted')]}))
+    print(json.dumps({'pass': summary['pass'], 'failed': [r['scenario'] for r in records if not r.get('accepted')],
+                      'not_strict': [r['scenario'] for r in records if r.get('strict') is False]}))
     return 0 if summary['pass'] else 1
 
 

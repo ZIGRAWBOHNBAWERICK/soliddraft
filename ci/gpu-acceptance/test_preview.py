@@ -15,7 +15,9 @@ def step(bundle, number, counts, viewport=METAL, calls=()):
     folder.mkdir(parents=True)
     (folder / 'display.json').write_text(json.dumps({'revision': number, 'gpu_preview': counts}))
     (folder / 'viewport.json').write_text(json.dumps(viewport))
-    (folder / 'display.kernel.json').write_text(json.dumps({'calls': [{'query': q, 'elapsed_ms': ms} for q, ms in calls]}))
+    (folder / 'command.json').write_text(json.dumps({'revision': number}))
+    (folder / 'kernel.json').write_text(json.dumps({'calls': [{'operation': q, 'wall_ms': ms} for q, ms in calls]}))
+    (folder / 'display.kernel.json').write_text(json.dumps({'calls': []}))
 
 
 class SummarizeTest(unittest.TestCase):
@@ -31,6 +33,8 @@ class SummarizeTest(unittest.TestCase):
             step(bundle, 2, self.counts(), calls=[('tessellate', 7.5), ('tessellate_edges', 1)])
             record = preview.summarize('box', bundle, 0)
         self.assertTrue(record['accepted'], record['problems'])
+        self.assertFalse(record['strict'], 'a preview call is in the kernel log')
+        self.assertEqual(record['kernel_previews'], 1)
         self.assertEqual(record['gpu_previews'], 2)
         self.assertEqual(record['checked_ms'], {'1': 12.5, '2': 8.5})
         self.assertEqual(record['checked_total_ms'], 21.0)

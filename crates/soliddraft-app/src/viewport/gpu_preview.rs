@@ -67,6 +67,8 @@ pub(crate) fn checked_route<T>(work: impl FnOnce() -> T) -> T {
 static SHOWN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 static CPU_PREVIEWS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 static REFUSED_FACES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// Why the mesher refused faces, with how many, for the acceptance records.
+static REFUSALS: Mutex<std::collections::BTreeMap<String, u64>> = Mutex::new(std::collections::BTreeMap::new());
 
 /// Notes a GPU preview put on screen, for the acceptance records.
 pub(crate) fn note_shown(body: BodyId) {
@@ -93,6 +95,7 @@ pub fn counts() -> serde_json::Value {
         "gpu_previews": SHOWN.load(Relaxed),
         "cpu_previews": CPU_PREVIEWS.load(Relaxed),
         "refused_faces": REFUSED_FACES.load(Relaxed),
+        "refusals": REFUSALS.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone(),
     })
 }
 
@@ -300,6 +303,10 @@ fn finish(
     let refused: HashSet<FaceId> =
         meshed.faces.iter().filter(|face| face.draw.is_err()).map(|face| face.face).collect();
     REFUSED_FACES.fetch_add(refused.len() as u64, std::sync::atomic::Ordering::Relaxed);
+    for reason in meshed.faces.iter().filter_map(|face| face.draw.as_ref().err()) {
+        let mut refusals = REFUSALS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        *refusals.entry((*reason).to_owned()).or_default() += 1;
+    }
     for face in meshed.faces.iter().filter(|face| face.draw.is_err()) {
         log::info!(
             target: "soliddraft_app::gpu_preview",

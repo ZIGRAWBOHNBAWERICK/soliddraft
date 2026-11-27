@@ -2,6 +2,11 @@
 
 pub mod report;
 
+#[cfg(not(target_arch = "wasm32"))]
+mod opening;
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) use opening::{Opening, start_step_open};
+
 use std::collections::BTreeMap;
 use std::path::Path;
 
@@ -171,14 +176,19 @@ fn plain_mm(text: &str) -> bool {
     !text.is_empty() && text.bytes().all(|b| b.is_ascii_digit() || b == b'.') && text.parse::<f64>().is_ok()
 }
 
+fn read_file(path: &Path) -> Result<(std::borrow::Cow<'_, str>, Vec<u8>), String> {
+    let source = std::fs::read(path).map_err(|e| format!("cannot read {}: {e}", path.display()))?;
+    Ok((path.file_name().unwrap_or_default().to_string_lossy(), source))
+}
+
 impl Preview {
     pub fn read(doc: &Document, path: &Path) -> Result<Self, String> {
         Self::read_source(doc, path, ImportFormat::Step)
     }
 
     pub fn read_source(doc: &Document, path: &Path, format: ImportFormat) -> Result<Self, String> {
-        let source = std::fs::read(path).map_err(|e| format!("cannot read {}: {e}", path.display()))?;
-        Self::from_source(doc, &path.file_name().unwrap_or_default().to_string_lossy(), source, format)
+        let (name, source) = read_file(path)?;
+        Self::from_source(doc, &name, source, format)
     }
 
     pub fn from_bytes(doc: &Document, name: &str, source: Vec<u8>) -> Result<Self, String> {
@@ -186,10 +196,21 @@ impl Preview {
     }
 
     pub fn from_source(doc: &Document, name: &str, source: Vec<u8>, format: ImportFormat) -> Result<Self, String> {
+        Self::propose(doc.kernel().as_ref(), doc.model().id(), doc.revision(), name, source, format)
+    }
+
+    fn propose(
+        kernel: &dyn soliddraft_kernel_api::Kernel,
+        document: soliddraft_document::DocumentId,
+        revision: u64,
+        name: &str,
+        source: Vec<u8>,
+        format: ImportFormat,
+    ) -> Result<Self, String> {
         let mut feature = ImportStepFeature::new(name, source);
         feature.format = format;
         let proposals =
-            doc.kernel().propose_import_source(format, &feature.source, &ImportOptions::default()).map_err(plain)?;
+            kernel.propose_import_source(format, &feature.source, &ImportOptions::default()).map_err(plain)?;
         if proposals.source_sha256 != feature.sha256 {
             return Err("the repair preview does not match the source file".into());
         }
@@ -202,8 +223,8 @@ impl Preview {
             file: None,
             unmatched: None,
             proposals,
-            revision: doc.revision(),
-            document: doc.model().id(),
+            revision,
+            document,
             allowed,
             approver,
         })
@@ -696,6 +717,15 @@ pub fn commit_in(state: &mut AppState, preview: &Preview, review: &Review) -> Re
     let result = answered(&state.doc, preview, review)
         .map_err(CommitError::Review)
         .and_then(|feature| admit(&mut state.doc, preview, feature).map_err(CommitError::Refused));
+    finish_in(state, file, format, result)
+}
+
+fn finish_in(
+    state: &mut AppState,
+    file: String,
+    format: ImportFormat,
+    result: Result<(FeatureId, Vec<String>), CommitError>,
+) -> Result<FeatureId, CommitError> {
     match &result {
         Ok((_, refusals)) => {
             state.import_refusals.retain(|r| r.file != file || r.format != format);
@@ -764,6 +794,19 @@ fn admit(
             return commit_file(doc, swap, &feature).map(|id| (id, Vec::new()));
         }
     }
+    let prepared = prepare(doc, preview, feature)?;
+    prepared.commit(doc)
+}
+
+struct Prepared {
+    command: Command,
+    model: soliddraft_model::Document,
+    replacement: Option<FeatureId>,
+    declined_record: Option<RepairRecord>,
+    refusals: Vec<String>,
+}
+
+fn prepare(doc: &Document, preview: &Preview, feature: ImportStepFeature) -> Result<Prepared, String> {
     let mut command = match preview.replacement {
         Some(id) => Command::EditFeature { id, kind: FeatureKind::ImportStep(feature) },
         None => {
@@ -849,25 +892,41 @@ fn admit(
     if !declined {
         trial_result?;
     }
-    let declined_record = declined.then(|| record.cloned()).flatten();
-    doc.reuse_builds_from(trial.model());
-    let before: Vec<FeatureId> = doc.features.iter().map(|f| f.id).collect();
-    let id = match doc.apply(command) {
-        Ok(Some(id)) => Ok(id),
-        Err(error) => {
-            let imported = doc.features.last().ok_or("the import made no feature")?;
-            let record = doc.model().import_record(soliddraft_model::FeatureId(imported.id as u32));
-            if declined && record == declined_record.as_ref() { Ok(imported.id) } else { Err(error) }
+    Ok(Prepared {
+        command,
+        declined_record: declined.then(|| record.cloned()).flatten(),
+        model: trial.into_model(),
+        replacement: preview.replacement,
+        refusals,
+    })
+}
+
+impl Prepared {
+    fn commit(self, doc: &mut Document) -> Result<(FeatureId, Vec<String>), String> {
+        let Self { command, model, replacement, declined_record, refusals } = self;
+        doc.reuse_builds_from(&model);
+        let before: Vec<FeatureId> = doc.features.iter().map(|f| f.id).collect();
+        let id = match doc.apply(command) {
+            Ok(Some(id)) => Ok(id),
+            Err(error) => {
+                let imported = doc.features.last().ok_or("the import made no feature")?;
+                let record = doc.model().import_record(soliddraft_model::FeatureId(imported.id as u32));
+                if declined_record.is_some() && record == declined_record.as_ref() {
+                    Ok(imported.id)
+                } else {
+                    Err(error)
+                }
+            }
+            Ok(None) => replacement.ok_or_else(|| "the import made no feature".into()),
+        }?;
+        // New imports bring the file's manufacturing information. Replacements keep the
+        // part's own: its items follow the faces the replacement matched.
+        if replacement.is_none() {
+            let added: Vec<FeatureId> = doc.features.iter().map(|f| f.id).filter(|id| !before.contains(id)).collect();
+            crate::pmi::after_import(doc, &added);
         }
-        Ok(None) => preview.replacement.ok_or_else(|| "the import made no feature".into()),
-    }?;
-    // A new import brings the file's manufacturing information with it. A replaced
-    // file keeps the part's own: its items follow the faces the replacement matched.
-    if preview.replacement.is_none() {
-        let added: Vec<FeatureId> = doc.features.iter().map(|f| f.id).filter(|id| !before.contains(id)).collect();
-        crate::pmi::after_import(doc, &added);
+        Ok((id, refusals))
     }
-    Ok((id, refusals))
 }
 
 /// The repair record as rows of the feature's properties: how each gap was answered and the
@@ -965,6 +1024,10 @@ fn opened_note(doc: &Document, id: FeatureId, format: ImportFormat) -> Option<St
 }
 
 pub fn window(ctx: &egui::Context, state: &mut AppState) {
+    #[cfg(not(target_arch = "wasm32"))]
+    if opening::window(ctx, state) {
+        return;
+    }
     let Some(mut preview) = state.import_dialog.take() else { return };
     let mut open = true;
     let mut choice = None;
@@ -1042,48 +1105,64 @@ pub fn window(ctx: &egui::Context, state: &mut AppState) {
             });
             Review { decline: Vec::new(), accept: accept.collect() }
         };
+        #[cfg(not(target_arch = "wasm32"))]
+        if format == ImportFormat::Step && preview.replacement.is_none() {
+            match answered(&state.doc, &preview, &review) {
+                Ok(feature) => opening::start_admission(ctx, state, preview, feature, decline),
+                Err(message) => {
+                    state.note(message, NoteKind::Error);
+                    state.import_dialog = Some(preview);
+                }
+            }
+            return;
+        }
         let committed = commit_in(state, &preview, &review);
-        if committed.is_ok() && preview.replacement.is_none() {
-            // A new import is framed, however small it is.
-            state.push(crate::state::AppAction::ZoomFit);
-        }
-        match committed {
-            Ok(id)
-                if preview.replacement.is_none()
-                    && let Some(note) = opened_note(&state.doc, id, format) =>
-            {
-                state.note_import(note, NoteKind::Info)
-            }
-            Ok(_) => state.note(
-                if decline {
-                    "Import saved with declined repairs; the solid stays open".into()
-                } else if !preview.lost().is_empty() {
-                    let count = preview.lost().len();
-                    format!(
-                        "Replaced imported file. {count} {} repair.",
-                        if count == 1 { "item needs" } else { "items need" }
-                    )
-                } else if preview.file.is_some() {
-                    "Replaced imported file. Every reference follows.".into()
-                } else if preview.replacement.is_some() {
-                    "Replaced imported file. Check any references marked for repair.".into()
-                } else {
-                    format!("Imported {} body", format.label())
-                },
-                NoteKind::Info,
-            ),
-            Err(CommitError::Review(error)) => {
-                // The review can be answered again, so the dialog stays.
-                state.note(error, NoteKind::Error);
-                state.import_dialog = Some(preview);
-            }
-            Err(CommitError::Refused(error)) => {
-                // Answering again cannot help: the dialog closes, and the refusal stays in
-                // the import report, which the notice links to.
-                state.note_import(format!("{} was refused: {error}", preview.feature.source_name), NoteKind::Error);
-            }
-        }
+        show_result(state, preview, decline, committed);
     } else if open && !cancelled {
         state.import_dialog = Some(preview);
+    }
+}
+
+fn show_result(state: &mut AppState, preview: Preview, decline: bool, committed: Result<FeatureId, CommitError>) {
+    let format = preview.feature.format;
+    if committed.is_ok() && preview.replacement.is_none() {
+        // A new import is framed, however small it is.
+        state.push(crate::state::AppAction::ZoomFit);
+    }
+    match committed {
+        Ok(id)
+            if preview.replacement.is_none()
+                && let Some(note) = opened_note(&state.doc, id, format) =>
+        {
+            state.note_import(note, NoteKind::Info)
+        }
+        Ok(_) => state.note(
+            if decline {
+                "Import saved with declined repairs; the solid stays open".into()
+            } else if !preview.lost().is_empty() {
+                let count = preview.lost().len();
+                format!(
+                    "Replaced imported file. {count} {} repair.",
+                    if count == 1 { "item needs" } else { "items need" }
+                )
+            } else if preview.file.is_some() {
+                "Replaced imported file. Every reference follows.".into()
+            } else if preview.replacement.is_some() {
+                "Replaced imported file. Check any references marked for repair.".into()
+            } else {
+                format!("Imported {} body", format.label())
+            },
+            NoteKind::Info,
+        ),
+        Err(CommitError::Review(error)) => {
+            // The review can be answered again, so the dialog stays.
+            state.note(error, NoteKind::Error);
+            state.import_dialog = Some(preview);
+        }
+        Err(CommitError::Refused(error)) => {
+            // Answering again cannot help: the dialog closes, and the refusal stays in
+            // the import report, which the notice links to.
+            state.note_import(format!("{} was refused: {error}", preview.feature.source_name), NoteKind::Error);
+        }
     }
 }

@@ -79,6 +79,12 @@ impl Interrupt {
         self.0.lock().unwrap_or_else(PoisonError::into_inner).stopped
     }
 
+    /// Whether a kernel request has registered a stop callback.
+    #[cfg(feature = "counting")]
+    pub fn request_running(&self) -> bool {
+        !self.0.lock().unwrap_or_else(PoisonError::into_inner).running.is_empty()
+    }
+
     /// Keeps `stop` for the request starting now, until the returned registration is
     /// dropped as the request ends. Calls it at once when this interrupt was stopped.
     pub fn register(&self, stop: Stopper) -> Registration {

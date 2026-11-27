@@ -120,6 +120,15 @@ fn refusal(format: ImportFormat, error: catallax_import::ImportRefusal) -> Kerne
     KernelError::InvalidInput(message)
 }
 
+/// Cover both the source-certified reader and its tolerant fallback on an open worker.
+pub(super) fn during_open<T>(format: ImportFormat, run: impl FnOnce() -> KernelResult<T>) -> KernelResult<T> {
+    if format != ImportFormat::Step || soliddraft_kernel_api::Interrupt::current().is_none() {
+        return run();
+    }
+    let (result, work) = crate::RequestPolicy::Open.run(run);
+    if work.exhausted_here() { Err(KernelError::InvalidInput(TOO_COMPLEX.into())) } else { result }
+}
+
 pub(super) fn propose(
     kernel: &CatallaxKernel,
     format: ImportFormat,

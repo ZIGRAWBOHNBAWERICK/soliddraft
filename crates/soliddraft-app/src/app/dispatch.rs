@@ -922,6 +922,9 @@ impl SolidDraftApp {
                 self.state.step_upload = path.is_none() && cfg!(target_arch = "wasm32");
                 let path = path.or_else(|| crate::platform::open_path("Import STEP", "STEP", &["step", "stp"]));
                 if let Some(path) = path {
+                    #[cfg(not(target_arch = "wasm32"))]
+                    crate::import::start_step_open(ctx, &mut self.state, path);
+                    #[cfg(target_arch = "wasm32")]
                     match crate::import::Preview::read(&self.state.doc, &path) {
                         Ok(preview) => self.state.import_dialog = Some(preview),
                         Err(message) => crate::import::report::refused(
@@ -939,6 +942,10 @@ impl SolidDraftApp {
                 }
                 let path = path.or_else(|| crate::platform::open_path("Import IGES", "IGES", &["iges", "igs"]));
                 if let Some(path) = path {
+                    #[cfg(not(target_arch = "wasm32"))]
+                    {
+                        self.state.step_open = None;
+                    }
                     match crate::import::Preview::read_source(
                         &self.state.doc,
                         &path,
@@ -987,6 +994,10 @@ impl SolidDraftApp {
                 let path =
                     path.or_else(|| crate::platform::open_path("Import mesh solid", "STL or OBJ", &["stl", "obj"]));
                 if let Some(path) = path {
+                    #[cfg(not(target_arch = "wasm32"))]
+                    {
+                        self.state.step_open = None;
+                    }
                     match crate::import::Preview::read_source(
                         &self.state.doc,
                         &path,
@@ -1018,6 +1029,10 @@ impl SolidDraftApp {
                 let path =
                     path.or_else(|| crate::platform::open_path("Replace imported file", format.label(), extensions));
                 if let Some(path) = path {
+                    #[cfg(not(target_arch = "wasm32"))]
+                    {
+                        self.state.step_open = None;
+                    }
                     match crate::import::Preview::read_source(&self.state.doc, &path, format)
                         .and_then(|preview| preview.replacing(&self.state.doc, feature))
                     {

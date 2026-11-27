@@ -6,6 +6,9 @@ use egui_kittest::{
 };
 use soliddraft_app::{document::Document, import::Preview, state::AppState};
 
+#[path = "support/import_open.rs"]
+mod import_open;
+
 const BLOCK: &[u8] = include_bytes!("../../../ci/fixtures/import/block-seam-4um.step");
 const WIDE: &[u8] = include_bytes!("../../../ci/fixtures/import/block-seam-20um.step");
 
@@ -34,7 +37,7 @@ fn certified_preview_cancel_and_accept_keeps_reviewed_bytes() {
     std::fs::write(&path, replacement).unwrap();
     app.run_steps(3);
     app.get_by_role_and_label(egui::accesskit::Role::Button, "Accept").click();
-    app.run_steps(3);
+    import_open::settle(&mut app);
     let feature = &app.state().doc.features[0];
     assert_eq!(feature.name, "Import1");
     let soliddraft_app::document::FeatureKind::ImportStep(import) = &feature.kind else { panic!("import feature") };
@@ -88,7 +91,7 @@ fn an_asked_repair_needs_a_limit_and_an_approver_and_is_saved_with_both() {
     typed(&mut app, "Allowed movement", "0.03");
     assert!(button_enabled(&app, "Accept"));
     app.get_by_role_and_label(egui::accesskit::Role::Button, "Accept").click();
-    app.run_steps(3);
+    import_open::settle(&mut app);
 
     let state = app.state();
     assert!(state.import_dialog.is_none());

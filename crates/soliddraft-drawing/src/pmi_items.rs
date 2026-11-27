@@ -1618,8 +1618,9 @@ fn lay(drawing: &Drawing, sheet: usize) -> Laid {
                         let modifier = |material: soliddraft_kernel_api::pmi::MaterialCondition| {
                             if material.is_regardless() { 0.0 } else { 1.3 * th }
                         };
-                        let cell =
-                            |text: f64, material, extra: f64| (text + 0.9 * th + modifier(material) + extra).max(2.0 * th);
+                        let cell = |text: f64, material, extra: f64| {
+                            (text + 0.9 * th + modifier(material) + extra).max(2.0 * th)
+                        };
                         2.0 * th
                             + cell(
                                 display::text_width(&format!("Ø{}", segment.value_mm), th),

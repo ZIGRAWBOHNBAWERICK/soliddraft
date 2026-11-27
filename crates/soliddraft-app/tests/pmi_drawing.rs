@@ -445,11 +445,7 @@ fn datum_targets_and_position_frames_draw_from_a_reopened_part() {
     );
     call(&mut s, "extrude", json!({"sketch":"Sketch1","depth":10,"flip":false}));
     for x in [20, 55] {
-        call(
-            &mut s,
-            "hole",
-            json!({"face":"Boss-Extrude1 · End cap","points":[[x,20,10]],"diameter":6}),
-        );
+        call(&mut s, "hole", json!({"face":"Boss-Extrude1 · End cap","points":[[x,20,10]],"diameter":6}));
     }
     let top = bracket::face(&s, Plane, [None, None, Some(10.0)]);
     let left = bracket::face(&s, Plane, [Some(0.0), None, None]);

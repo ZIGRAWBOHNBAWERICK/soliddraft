@@ -444,18 +444,11 @@ fn datum_targets_and_position_frames_draw_from_a_reopened_part() {
         ]}),
     );
     call(&mut s, "extrude", json!({"sketch":"Sketch1","depth":10,"flip":false}));
-    for (index, x) in [20, 55].into_iter().enumerate() {
+    for x in [20, 55] {
         call(
             &mut s,
-            "sketch",
-            json!({"plane":"top","shapes":[
-                {"shape":"circle","center":[x,20,0],"diameter":6}
-            ]}),
-        );
-        call(
-            &mut s,
-            "cut",
-            json!({"sketch":format!("Sketch{}", index + 2),"through_all":true,"depth":10,"flip":false}),
+            "hole",
+            json!({"face":"Boss-Extrude1 · End cap","points":[[x,20,10]],"diameter":6}),
         );
     }
     let top = bracket::face(&s, Plane, [None, None, Some(10.0)]);

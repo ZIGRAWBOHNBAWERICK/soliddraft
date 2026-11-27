@@ -1,0 +1,6 @@
+[[areas]]
+name = "model.saved_view"
+owner = "core"
+crate = "soliddraft-model"
+paths = ["crates/soliddraft-model/src/file/saved_view.rs"]
+module = ["file", "saved_view"]

@@ -1106,6 +1106,8 @@ fn annotation_items(sheet: &Sheet, a: &Annotation, ctx: &Context<'_>, list: &mut
         }
         AnnotationKind::SurfaceFinish { .. }
         | AnnotationKind::Gdt { .. }
+        | AnnotationKind::PositionFrame { .. }
+        | AnnotationKind::DatumTarget { .. }
         | AnnotationKind::Datum { .. }
         | AnnotationKind::RevisionSymbol { .. }
         | AnnotationKind::Balloon { .. } => {
@@ -1299,6 +1301,28 @@ pub fn annotation_name(a: &Annotation, style: &StyleFile) -> String {
             if *diameter { style.symbols.diameter.as_str() } else { "" },
             symbols::tolerance_text(*tolerance)
         ),
+        AnnotationKind::PositionFrame { upper, lower, projected_height_mm } => {
+            let segment = |s: &soliddraft_kernel_api::pmi::PositionSegment| {
+                let modifier = |m: soliddraft_kernel_api::pmi::MaterialCondition| {
+                    if m.is_regardless() { String::new() } else { format!(" ({})", m.letter()) }
+                };
+                let mut text = format!("{}{}{}", style.symbols.diameter, s.value_mm, modifier(s.material));
+                for datum in &s.datums {
+                    text.push_str(&format!("|{}{}", datum.letter, modifier(datum.material)));
+                }
+                text
+            };
+            let mut name = format!("Position {}", segment(upper));
+            if let Some(lower) = lower {
+                name.push_str(&format!("\n{}", segment(lower)));
+            }
+            if let Some(height) = projected_height_mm {
+                name.push_str(&format!(" Ⓟ{height}"));
+            }
+            name
+        }
+        AnnotationKind::DatumTarget { label, extent } if extent.is_empty() => format!("Datum target {label}"),
+        AnnotationKind::DatumTarget { label, extent } => format!("Datum target {label} {extent}"),
         AnnotationKind::DimensionSet(set) => format!(
             "{} {}",
             match set.kind {

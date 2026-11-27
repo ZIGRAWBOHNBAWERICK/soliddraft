@@ -117,12 +117,12 @@ struct Globals {
 
 #[repr(C)]
 #[derive(Clone, Copy, Default, bytemuck::Pod, bytemuck::Zeroable)]
-struct IndirectArgs {
-    index_count: u32,
-    instance_count: u32,
-    first_index: u32,
-    base_vertex: i32,
-    first_instance: u32,
+pub(super) struct IndirectArgs {
+    pub(super) index_count: u32,
+    pub(super) instance_count: u32,
+    pub(super) first_index: u32,
+    pub(super) base_vertex: i32,
+    pub(super) first_instance: u32,
 }
 
 /// A definition as the cull pass and the box pass read it.
@@ -289,6 +289,7 @@ pub struct AssemblyRenderer {
     id: wgpu::RenderPipeline,
     culled_color: Option<[wgpu::RenderPipeline; 4]>,
     cull_pipeline: Option<wgpu::ComputePipeline>,
+    pub(super) part_cull_pipeline: Option<wgpu::ComputePipeline>,
     cull_layout: Option<wgpu::BindGroupLayout>,
     draw_layout: Option<wgpu::BindGroupLayout>,
     globals: wgpu::Buffer,
@@ -462,6 +463,7 @@ impl AssemblyRenderer {
             && limits.max_compute_workgroup_size_x >= 256
             && limits.max_compute_invocations_per_workgroup >= 256;
         let (mut culled_color, mut cull_pipeline, mut cull_layout, mut draw_layout) = (None, None, None, None);
+        let mut part_cull_pipeline = None;
         if can_cull {
             let storage = |binding, visibility, read_only| wgpu::BindGroupLayoutEntry {
                 binding,
@@ -540,6 +542,14 @@ impl AssemblyRenderer {
                 compilation_options: Default::default(),
                 cache: None,
             }));
+            part_cull_pipeline = Some(device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some("part face cull"),
+                layout: None,
+                module: &cull_shader,
+                entry_point: Some("cull_part_faces"),
+                compilation_options: Default::default(),
+                cache: None,
+            }));
             cull_layout = Some(cl);
             draw_layout = Some(dl);
         }
@@ -587,6 +597,7 @@ impl AssemblyRenderer {
             deferred: Vec::new(),
             deferred_levels: Vec::new(),
             multi_draw,
+            part_cull_pipeline,
             active: false,
             culling: false,
             scene: std::sync::Weak::new(),

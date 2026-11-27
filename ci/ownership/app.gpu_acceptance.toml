@@ -1,0 +1,10 @@
+[[areas]]
+name = "app.gpu_acceptance"
+owner = "core"
+crate = "soliddraft-app"
+paths = [
+    "ci/gpu-acceptance/",
+    "crates/soliddraft-app/tests/gpu_viewport_acceptance.rs",
+    "crates/soliddraft-app/tests/support/viewport_acceptance.rs",
+]
+module = []

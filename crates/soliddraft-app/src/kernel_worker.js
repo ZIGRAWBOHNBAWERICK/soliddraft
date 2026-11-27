@@ -7,6 +7,7 @@
 // page starts a new worker for its next job.
 
 let glue = null;
+let offerBuilds = true;
 let queue = [];
 let draining = false;
 let dead = false;
@@ -25,6 +26,7 @@ self.onmessage = async (event) => {
       if (module.kernel_worker_commit() !== message.init.commit) {
         throw new Error("SolidDraft was updated. Reload the page to use the matching kernel");
       }
+      offerBuilds = message.init.handOver;
       glue = module;
       self.postMessage({ ready: true });
     } catch (error) {
@@ -74,10 +76,12 @@ function drain() {
   trace(job, 'worker replied');
   // The builds made for this job travel with its answer, for the page's own kernel.
   let hand_over = null;
-  try {
-    hand_over = glue.kernel_worker_hand_over();
-  } catch (error) {
-    hand_over = null;
+  if (offerBuilds) {
+    try {
+      hand_over = glue.kernel_worker_hand_over();
+    } catch (error) {
+      hand_over = null;
+    }
   }
   if (hand_over && hand_over.length) {
     self.postMessage({ id: job.id, answer, hand_over }, [hand_over.buffer]);

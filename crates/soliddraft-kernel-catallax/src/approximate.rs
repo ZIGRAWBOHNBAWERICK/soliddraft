@@ -141,7 +141,7 @@ impl Approximate {
         }
     }
 
-    fn body(&self) -> KernelResult<&NumericalBody> {
+    pub(crate) fn body(&self) -> KernelResult<&NumericalBody> {
         match &self.geometry {
             Geometry::Numerical(outcome) => Ok(outcome.body()),
             Geometry::Imported { opened, index } => match opened.body(*index) {

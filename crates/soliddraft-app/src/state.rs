@@ -1338,6 +1338,7 @@ pub struct AppState {
     pub print_check: Option<crate::print_check::Dialog>,
     pub section: crate::section::State,
     pub(crate) mass: crate::measure::mass::State,
+    pub(crate) part_proof: crate::measure::part_proof::State,
     pub viewport: ViewportState,
     /// The appearance on screen, which an open Preferences window may be previewing.
     pub(crate) appearance: std::sync::Arc<crate::theme::Appearance>,
@@ -1612,6 +1613,7 @@ impl AppState {
             print_check: None,
             section: Default::default(),
             mass: Default::default(),
+            part_proof: Default::default(),
             viewport: ViewportState::default(),
             appearance: Default::default(),
             saved_appearance: Default::default(),

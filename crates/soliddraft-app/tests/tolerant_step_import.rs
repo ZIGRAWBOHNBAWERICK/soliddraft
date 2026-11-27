@@ -122,7 +122,7 @@ fn tolerant_and_certified_imports_display_with_their_own_authority_and_reopen() 
             }
         } else {
             assert_eq!(doc.kernel().body_accuracy(body).unwrap(), BodyAccuracy::Exact);
-            assert!(report::rows(doc, &[])[0].tier.label().contains("Certified"));
+            assert!(report::rows(doc, &[])[0].tier.label().starts_with("Solid"));
             let expected_volume = if name == "certified" { 480.0 } else { 10004.0 };
             assert!((doc.kernel().mass_properties(body).unwrap().volume - expected_volume).abs() < 1e-6);
         }

@@ -73,7 +73,7 @@ fn headless_and_assistant_reject_an_invalid_position_edit() {
     let input = |letters: &[&str]| {
         json!({
             "kind": "tolerance", "name": "Bore frame", "characteristic": "position",
-            "faces": hole["faces"], "value": 0.05, "diameter_zone": true, "datums": letters
+            "faces": hole["faces"], "value": "0.05", "diameter_zone": true, "datums": letters
         })
     };
     mcp(&mut st, "pmi_add", input(&["A", "B", "C"]));

@@ -404,7 +404,8 @@ impl Document {
         };
         let work_used = if let Some(source) = source {
             let mut work = None;
-            self.kernel.with_rebuild_source(source, &mut || work = Some(self.kernel.measure_work(&mut evaluate)));
+            self.kernel
+                .with_rebuild_source(source, current, &mut || work = Some(self.kernel.measure_work(&mut evaluate)));
             work.expect("the checkpoint scope runs the build")
         } else {
             self.kernel.measure_work(&mut evaluate)

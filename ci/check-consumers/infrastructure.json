@@ -75,6 +75,9 @@
       "lint",
       "application-loop"
     ],
+    "ci/edit-speed-expected-differences.json": [
+      "lint"
+    ],
     "ci/edit_speed.py": [
       "lint"
     ],

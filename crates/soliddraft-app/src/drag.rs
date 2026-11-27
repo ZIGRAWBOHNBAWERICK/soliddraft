@@ -505,6 +505,8 @@ pub(crate) struct Job {
     pub params: TessellationParams,
     pub level: soliddraft_tessellation::Level,
     pub curved_surfaces: Option<crate::graphics::CurvedSurfaces>,
+    /// The GPU preview of the thread that asked, which the proof meshes its preview on.
+    pub gpu: Option<Arc<crate::viewport::gpu_preview::Gpu>>,
 }
 
 pub(crate) enum AnswerKind {
@@ -528,6 +530,7 @@ struct ProofTask {
     level: soliddraft_tessellation::Level,
     curved_surfaces: Option<crate::graphics::CurvedSurfaces>,
     allowance: Box<dyn ProofWork>,
+    gpu: Option<Arc<crate::viewport::gpu_preview::Gpu>>,
 }
 
 /// An early display of one request, built beside that request's exact proof.
@@ -561,7 +564,7 @@ impl Answered {
 /// Applies a request's edit and reserves its exact proof. Neither builds anything,
 /// so the proof starts without waiting for the early display.
 fn prepare(queued: Queued) -> Result<(ProofTask, Option<ConstructionTask>), Answer> {
-    let Queued { request, job: Job { source, edit, baseline, params, level, curved_surfaces } } = queued;
+    let Queued { request, job: Job { source, edit, baseline, params, level, curved_surfaces, gpu } } = queued;
     let refused = |message: String| Answer { request, kind: AnswerKind::Proved(Err(message)) };
     let mut model = Arc::try_unwrap(source).unwrap_or_else(|source| source.fork());
     if let Some(edit) = edit {
@@ -580,7 +583,7 @@ fn prepare(queued: Queued) -> Result<(ProofTask, Option<ConstructionTask>), Answ
         baseline.body()?;
         Some(ConstructionTask { request, baseline, edits, params, model: model.fork() })
     });
-    Ok((ProofTask { request, model, level, curved_surfaces, allowance }, construction))
+    Ok((ProofTask { request, model, level, curved_surfaces, allowance, gpu }, construction))
 }
 
 // The browser shows its kernel worker's proved part and has no early construction display.
@@ -611,7 +614,8 @@ pub(crate) fn prove_now(
     curved_surfaces: Option<crate::graphics::CurvedSurfaces>,
     rebuilt: &dyn Fn(&model::Document),
 ) -> Result<ProvedBuild, String> {
-    let job = Job { source, edit, baseline: None, params: TessellationParams::default(), level, curved_surfaces };
+    let job =
+        Job { source, edit, baseline: None, params: TessellationParams::default(), level, curved_surfaces, gpu: None };
     let (task, _) = prepare(Queued { request: 1, job }).map_err(|answer| match answer.kind {
         AnswerKind::Proved(Err(error)) => error,
         _ => "The edit could not be prepared.".into(),
@@ -643,63 +647,66 @@ fn prove(
     early: &dyn Fn(CandidateDisplay),
     rebuilt: &dyn Fn(&model::Document),
 ) -> ProvedBuild {
-    let ProofTask { request, mut model, level, curved_surfaces, allowance } = task;
-    if let Some(previous) = previous {
-        model.reuse_builds_from(previous);
-    }
-    let mut display = None;
-    let mut display_error = None;
-    let mut failure = None;
-    let mut preview = None;
-    let result = allowance.run(&mut || {
-        model.rebuild();
-        failure = model_failure(&model);
-        if failure.is_none() && wanted(request, newest, protected) {
-            rebuilt(&model);
-            match ready_preview(&model, level, curved_surfaces) {
-                Ok(Some(view)) => {
-                    let view = Arc::new(view);
-                    preview = Some(view.clone());
-                    early(CandidateDisplay::Preview(view));
+    let ProofTask { request, mut model, level, curved_surfaces, allowance, gpu } = task;
+    // The proof meshes its preview on the GPU of the thread that asked for it.
+    crate::viewport::gpu_preview::with_active(gpu, move || {
+        if let Some(previous) = previous {
+            model.reuse_builds_from(previous);
+        }
+        let mut display = None;
+        let mut display_error = None;
+        let mut failure = None;
+        let mut preview = None;
+        let result = allowance.run(&mut || {
+            model.rebuild();
+            failure = model_failure(&model);
+            if failure.is_none() && wanted(request, newest, protected) {
+                rebuilt(&model);
+                match ready_preview(&model, level, curved_surfaces) {
+                    Ok(Some(view)) => {
+                        let view = Arc::new(view);
+                        preview = Some(view.clone());
+                        early(CandidateDisplay::Preview(view));
+                    }
+                    Ok(None) => {}
+                    Err(error) => log::warn!("no GPU preview of request {request}: {error}"),
                 }
-                Ok(None) => {}
-                Err(error) => log::warn!("no GPU preview of request {request}: {error}"),
             }
-        }
-        if failure.is_none() && wanted(request, newest, protected) {
-            match ready_display(&model, level, curved_surfaces) {
-                Ok(view) => display = view.map(Arc::new),
-                Err(error) => display_error = Some(error),
+            if failure.is_none() && wanted(request, newest, protected) {
+                match ready_display(&model, level, curved_surfaces) {
+                    Ok(view) => display = view.map(Arc::new),
+                    Err(error) => display_error = Some(error),
+                }
             }
-        }
-        Ok(())
-    });
-    if let Err(error) = result
-        && failure.is_none()
-    {
-        display_error = Some(error.to_string());
-    }
-    // A built part is always drawn: when its checked display fails, its preview stays,
-    // and the reason goes to the log only.
-    let mut checked = true;
-    if failure.is_none()
-        && let Some(error) = &display_error
-    {
-        let kept = preview.or_else(|| match ready_fallback(&model, level, curved_surfaces) {
-            Ok(view) => view.map(Arc::new),
-            Err(fallback) => {
-                log::warn!("no preview of request {request} either: {fallback}");
-                None
-            }
+            Ok(())
         });
-        if let Some(view) = kept {
-            log::warn!("the checked display of request {request} failed; its preview stays: {error}");
-            display = Some(view);
-            display_error = None;
-            checked = false;
+        if let Err(error) = result
+            && failure.is_none()
+        {
+            display_error = Some(error.to_string());
         }
-    }
-    ProvedBuild { model: Arc::new(model), display, checked, failure, display_error }
+        // A built part is always drawn: when its checked display fails, its preview stays,
+        // and the reason goes to the log only.
+        let mut checked = true;
+        if failure.is_none()
+            && let Some(error) = &display_error
+        {
+            let kept = preview.or_else(|| match ready_fallback(&model, level, curved_surfaces) {
+                Ok(view) => view.map(Arc::new),
+                Err(fallback) => {
+                    log::warn!("no preview of request {request} either: {fallback}");
+                    None
+                }
+            });
+            if let Some(view) = kept {
+                log::warn!("the checked display of request {request} failed; its preview stays: {error}");
+                display = Some(view);
+                display_error = None;
+                checked = false;
+            }
+        }
+        ProvedBuild { model: Arc::new(model), display, checked, failure, display_error }
+    })
 }
 
 fn wanted(request: u64, newest: &AtomicU64, protected: &AtomicU64) -> bool {

@@ -1687,7 +1687,12 @@ impl ViewportRenderer {
             layout: &self.layouts.body,
             entries: &[wgpu::BindGroupEntry { binding: 0, resource: uniform.as_entire_binding() }],
         });
-        if let Some(gpu) = &mesh.gpu {
+        if let Some(gpu) = &mesh.gpu
+            && gpu.device != *device
+        {
+            log::warn!("a GPU preview made on another device is not drawn here; its CPU faces are");
+        }
+        if let Some(gpu) = mesh.gpu.as_ref().filter(|gpu| gpu.device == *device) {
             // A GPU preview: the mesher's buffers become face vertices on the GPU, with
             // the CPU preview's faces the mesher refused after them. No part culling:
             // the CPU has no face bounds for the GPU faces.

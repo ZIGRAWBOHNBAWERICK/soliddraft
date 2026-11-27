@@ -255,6 +255,7 @@ impl Kernel for Gated {
     }
 
     fn gpu_preview(&self, body: BodyId, params: &TessellationParams) -> KernelResult<Option<GpuPreview>> {
+        self.display(body)?;
         self.inner.gpu_preview(body, params)
     }
 

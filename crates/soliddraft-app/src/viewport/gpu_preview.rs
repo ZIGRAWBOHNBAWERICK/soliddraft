@@ -26,17 +26,45 @@ pub const SWITCH: &str = "SOLIDDRAFT_GPU_PREVIEW";
 /// The GPU preview's mesher, compiled on the renderer's device.
 pub struct Gpu {
     mesher: Mesher,
+    /// The renderer's device, which owns every buffer the mesher writes.
+    device: wgpu::Device,
     /// Backend and adapter, as each acceptance run records them.
     pub adapter: String,
 }
 
-static GPU: Mutex<Option<Arc<Gpu>>> = Mutex::new(None);
 static STATUS: Mutex<String> = Mutex::new(String::new());
 
-/// The GPU preview, when one is installed. Display code asks per body, so a preview
-/// installed after a document opened applies from its next display.
+thread_local! {
+    /// The GPU preview of the renderer this thread draws for. Each renderer installs its
+    /// own, so a process with several devices, such as parallel test harnesses, never
+    /// draws one device's buffers on another. Work for this thread on other threads, such
+    /// as an edit's proof, carries it there with [`with_active`].
+    static CURRENT: std::cell::RefCell<Option<Arc<Gpu>>> = const { std::cell::RefCell::new(None) };
+}
+
+/// This thread's GPU preview, when one is installed. Display code asks per body, so a
+/// preview installed after a document opened applies from its next display.
 pub fn active() -> Option<Arc<Gpu>> {
-    GPU.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone()
+    CURRENT.with_borrow(Clone::clone)
+}
+
+fn set_active(gpu: Option<Arc<Gpu>>) -> Option<Arc<Gpu>> {
+    CURRENT.with_borrow_mut(|current| std::mem::replace(current, gpu))
+}
+
+/// Runs `work` on this thread with `gpu` as its GPU preview: a proof worker meshes
+/// the preview of the thread that asked for the proof.
+pub(crate) fn with_active<T>(gpu: Option<Arc<Gpu>>, work: impl FnOnce() -> T) -> T {
+    struct Restore(Option<Option<Arc<Gpu>>>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            if let Some(previous) = self.0.take() {
+                set_active(previous);
+            }
+        }
+    }
+    let _restore = Restore(Some(set_active(gpu)));
+    work()
 }
 
 thread_local! {
@@ -182,8 +210,8 @@ pub fn install_unchecked(device: &wgpu::Device, queue: &wgpu::Queue, adapter: &s
         let mesher = pollster::block_on(Mesher::new(device, queue)).inspect_err(|reason| {
             set_status(format!("GPU preview off, CPU preview kept ({reason}); adapter {adapter}"));
         })?;
-        let gpu = Gpu { mesher, adapter: adapter.to_owned() };
-        *GPU.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Arc::new(gpu));
+        let gpu = Gpu { mesher, device: device.clone(), adapter: adapter.to_owned() };
+        set_active(Some(Arc::new(gpu)));
         set_status(format!("GPU preview on {adapter}"));
         Ok(())
     }
@@ -193,8 +221,8 @@ pub fn install_unchecked(device: &wgpu::Device, queue: &wgpu::Queue, adapter: &s
         wasm_bindgen_futures::spawn_local(async move {
             match Mesher::new(&device, &queue).await {
                 Ok(mesher) => {
-                    let gpu = Gpu { mesher, adapter: adapter.clone() };
-                    *GPU.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Arc::new(gpu));
+                    let gpu = Gpu { mesher, device: device.clone(), adapter: adapter.clone() };
+                    set_active(Some(Arc::new(gpu)));
                     set_status(format!("GPU preview on {adapter}"));
                 }
                 Err(reason) => set_status(format!("GPU preview off, CPU preview kept ({reason}); adapter {adapter}")),
@@ -204,9 +232,9 @@ pub fn install_unchecked(device: &wgpu::Device, queue: &wgpu::Queue, adapter: &s
     }
 }
 
-/// Removes the GPU preview, so displays from now on take the CPU route.
+/// Removes this thread's GPU preview, so its displays from now on take the CPU route.
 pub fn uninstall() {
-    *GPU.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+    set_active(None);
 }
 
 /// One face of a GPU preview, as the renderer colours and picks it.
@@ -229,6 +257,8 @@ pub struct GpuFaces {
     /// The body the description came from, for the kernel's point queries.
     pub body: BodyId,
     pub meshed: Arc<Meshed>,
+    /// The device that owns `meshed`'s buffers; only its renderer can draw them.
+    pub device: wgpu::Device,
     pub faces: Vec<GpuFace>,
     /// The body's box, since no CPU positions exist for the GPU faces.
     pub bounds: (Vec3, Vec3),
@@ -244,12 +274,18 @@ impl GpuFaces {
     pub fn face(&self, pick: u32) -> Option<FaceId> {
         self.faces.iter().find(|face| face.pick == pick && face.drawn).map(|face| face.face)
     }
+
+    /// The triangles the GPU draws.
+    pub fn triangle_count(&self) -> usize {
+        self.meshed.faces.iter().filter_map(|face| face.draw.as_ref().ok()).map(|range| range.len() / 3).sum()
+    }
 }
 
 impl PartialEq for GpuFaces {
     fn eq(&self, other: &Self) -> bool {
         self.body == other.body
             && Arc::ptr_eq(&self.meshed, &other.meshed)
+            && self.device == other.device
             && self.faces == other.faces
             && self.bounds == other.bounds
     }
@@ -268,6 +304,8 @@ pub(crate) struct Meshing {
     pub meshed: Meshed,
     /// The CPU preview restricted to the refused faces; empty when none refused.
     pub refused: Mesh,
+    /// The device that owns `meshed`'s buffers.
+    pub device: wgpu::Device,
 }
 
 /// The kernel's description of `body` for the installed GPU preview, or `None` when
@@ -288,6 +326,7 @@ fn describe_body(kernel: &dyn Kernel, body: BodyId, params: &TessellationParams)
 /// preview, each with its reason logged. `None` when the device failed.
 fn finish(
     kernel: &dyn Kernel,
+    gpu: &Gpu,
     body: BodyId,
     params: &TessellationParams,
     preview: GpuPreview,
@@ -326,7 +365,7 @@ fn finish(
             }
         }
     };
-    Some(Meshing { preview, meshed, refused })
+    Some(Meshing { preview, meshed, refused, device: gpu.device.clone() })
 }
 
 /// Meshes `body` on the GPU preview now. `None` when there is no GPU preview, the
@@ -337,7 +376,7 @@ pub(crate) fn mesh_body(kernel: &dyn Kernel, body: BodyId, params: &Tessellation
     {
         let (gpu, preview) = describe_body(kernel, body, params)?;
         let meshed = pollster::block_on(gpu.mesher.mesh(&preview, params));
-        finish(kernel, body, params, preview, meshed)
+        finish(kernel, &gpu, body, params, preview, meshed)
     }
     #[cfg(target_arch = "wasm32")]
     {
@@ -374,7 +413,7 @@ pub(crate) fn start(kernel: Arc<dyn Kernel>, body: BodyId, params: TessellationP
         let answer = slot.clone();
         wasm_bindgen_futures::spawn_local(async move {
             let meshed = gpu.mesher.mesh(&preview, &params).await;
-            let meshing = finish(kernel.as_ref(), body, &params, preview, meshed);
+            let meshing = finish(kernel.as_ref(), &gpu, body, &params, preview, meshed);
             *answer.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(meshing);
             if let Some(ctx) = crate::web::context() {
                 ctx.request_repaint();
@@ -404,6 +443,7 @@ fn only_faces(mut mesh: Mesh, faces: &HashSet<FaceId>) -> Mesh {
 pub(crate) fn faces(
     body: BodyId,
     meshed: Meshed,
+    device: wgpu::Device,
     picks: &HashMap<FaceId, u32>,
     feature: impl Fn(FaceId) -> u32,
     bounds: (Vec3, Vec3),
@@ -422,6 +462,7 @@ pub(crate) fn faces(
             })
             .collect(),
         meshed: Arc::new(meshed),
+        device,
         bounds,
     }
 }

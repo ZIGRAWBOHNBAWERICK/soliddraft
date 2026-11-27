@@ -2895,6 +2895,7 @@ impl Document {
             params: self.tess_params,
             level: self.quality.wanted(),
             curved_surfaces: self.quality.curved_surfaces(),
+            gpu: crate::viewport::gpu_preview::active(),
         }
     }
 
@@ -3276,8 +3277,9 @@ impl Document {
         self.features.iter().filter(|f| matches!(f.status, FeatureStatus::NeedsRepair(_))).count()
     }
 
+    /// The triangles on screen, a GPU preview's included.
     pub fn triangle_count(&self) -> usize {
-        self.meshes.values().map(|m| m.triangle_count()).sum()
+        self.meshes.values().map(|m| m.triangle_count() + m.gpu.as_ref().map_or(0, |gpu| gpu.triangle_count())).sum()
     }
 
     /// The feature that consumes a sketch, if any.
@@ -6699,7 +6701,7 @@ fn gpu_display_mesh(
     makers: &HashMap<FaceId, FeatureId>,
     picks: &mut Vec<PickEntry>,
 ) -> DisplayMesh {
-    let crate::viewport::gpu_preview::Meshing { preview, meshed, refused } = meshing;
+    let crate::viewport::gpu_preview::Meshing { preview, meshed, refused, device } = meshing;
     crate::viewport::gpu_preview::note_shown(body);
     let first = picks.len();
     let mut out = display_mesh(feature, &refused, &preview.edges, topology, makers, picks);
@@ -6714,7 +6716,7 @@ fn gpu_display_mesh(
         .collect();
     let bounds = (kv(topology.bbox.min), kv(topology.bbox.max));
     let maker = |face: FaceId| makers.get(&face).map_or(0, |feature| *feature as u32);
-    out.gpu = Some(crate::viewport::gpu_preview::faces(body, meshed, &face_picks, maker, bounds));
+    out.gpu = Some(crate::viewport::gpu_preview::faces(body, meshed, device, &face_picks, maker, bounds));
     out
 }
 

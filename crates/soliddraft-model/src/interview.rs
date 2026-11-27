@@ -335,7 +335,9 @@ impl Document {
                 | PmiKind::EdgeBreak { .. }
                 | PmiKind::BasicAngle { .. }
                 | PmiKind::DatumTarget(_)
-                | PmiKind::PositionControl(_) => {}
+                | PmiKind::PositionControl(_)
+                | PmiKind::Knurl { .. }
+                | PmiKind::FaceNote { .. } => {}
                 PmiKind::Datum { letter, feature } => {
                     let flat = feature.first().and_then(|face| asking.face(*face)).and_then(|info| {
                         Some(Flat { face: info.id, normal: info.normal?, centroid: info.centroid, area: info.area })

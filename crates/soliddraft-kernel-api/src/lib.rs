@@ -796,17 +796,22 @@ pub struct Validation {
 /// A whole-edge distance bound in millimetres. `None` means the kernel could not prove it.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct EdgeProof {
+    /// The backend's retained identity for the edge.
     pub edge: EdgeId,
+    /// An outward upper bound, absent when the edge could not be proved.
     pub bound_mm: Option<f64>,
 }
 
 /// Results and costs for a bounded proof of one body's edges.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct EdgeProofRun {
+    /// Results for the edges the kernel visited.
     pub edges: Vec<EdgeProof>,
+    /// Work charged against the requested limit.
     pub work_used: u64,
     /// Sum of CPU time across the proof workers, where the platform can measure it.
     pub cpu_ns: Option<u64>,
+    /// Peak number of threads used by the proof.
     pub threads_used: usize,
 }
 

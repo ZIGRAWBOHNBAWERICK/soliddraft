@@ -11,6 +11,8 @@ const P1: &str = include_str!("../../../../../ci/scenarios/canonical-p1.json");
 const FITTED: &str = include_str!("../../../../../ci/scenarios/ring-fillet.json");
 const BOUND: f64 = 0.000_000_03125;
 const TIMEOUT: Duration = Duration::from_secs(10);
+// The real P1 mass query runs under the production work cap, even in a debug build.
+const REPORT_TIMEOUT: Duration = Duration::from_secs(90);
 
 fn replay(source: &str, last: &str) -> Document {
     let scenario: Value = serde_json::from_str(source).unwrap();
@@ -85,7 +87,17 @@ impl Screen {
     }
 
     fn until(&mut self, state: &mut State, doc: &Document, predicate: impl Fn(&Self) -> bool) {
-        let end = Instant::now() + TIMEOUT;
+        self.until_with_timeout(state, doc, TIMEOUT, predicate);
+    }
+
+    fn until_with_timeout(
+        &mut self,
+        state: &mut State,
+        doc: &Document,
+        timeout: Duration,
+        predicate: impl Fn(&Self) -> bool,
+    ) {
+        let end = Instant::now() + timeout;
         loop {
             self.frame(state, doc, Vec::new());
             if predicate(self) {
@@ -118,11 +130,13 @@ fn button_proves_p1_and_reports_the_unproved_edge_on_a_fitted_part() {
         let mut state = State { prover: Some(fake(miss_one)), ..Default::default() };
         let mut screen = Screen::new();
         screen.click(&mut state, &doc, "Prove part");
-        screen.until(&mut state, &doc, |s| s.contains("Prove this complex part?") || s.contains("Open proof report"));
+        screen.until(&mut state, &doc, |s| {
+            s.contains("Prove this complex part?") || s.contains("Proving edges…") || s.contains("Open proof report")
+        });
         if screen.contains("Prove this complex part?") {
             screen.click(&mut state, &doc, "Continue");
         }
-        screen.until(&mut state, &doc, |s| s.contains("Open proof report"));
+        screen.until_with_timeout(&mut state, &doc, REPORT_TIMEOUT, |s| s.contains("Open proof report"));
         assert_eq!(screen.contains("Fully proven"), !miss_one);
         screen.click(&mut state, &doc, "Open proof report");
         screen.until(&mut state, &doc, |screen| screen.contains("Part proof report") && screen.contains("Wall time"));

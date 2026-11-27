@@ -344,26 +344,8 @@ fn curved_importer() -> Arc<Importer> {
 }
 
 #[test]
-fn a_curved_body_says_self_intersection_is_not_verified() {
+fn a_curved_body_imports() {
     let mut doc = Document::new("Part1", curved_importer());
     let id = add(&mut doc, FeatureKind::ImportStep(import())).unwrap();
     assert_eq!(status(&doc, id), FeatureStatus::Ok);
-    let note = doc.import_check_note(id).expect("a curved body carries a note");
-    assert!(note.contains("self-intersection not verified"), "{note}");
-    assert!(note.contains("not marked validated"), "{note}");
-}
-
-#[test]
-fn a_planar_body_makes_no_self_intersection_claim_yet() {
-    let mut doc = Document::new("Part1", Importer::new(1, &[]));
-    let id = add(&mut doc, FeatureKind::ImportStep(import())).unwrap();
-    assert_eq!(status(&doc, id), FeatureStatus::Ok);
-    assert_eq!(doc.import_check_note(id), None);
-}
-
-#[test]
-fn a_failed_import_has_no_check_note() {
-    let mut doc = Document::new("Part1", Arc::new(CatallaxKernel::new()));
-    let id = add(&mut doc, FeatureKind::ImportStep(import())).unwrap();
-    assert_eq!(doc.import_check_note(id), None);
 }

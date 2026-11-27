@@ -125,7 +125,7 @@ fn write_ring_body(
     let junction = certified
         .built()
         .junction()
-        .ok_or_else(|| Refusal::new("numbers.geometric-gap-unproven", "the ring has no certificate"))?;
+        .ok_or_else(|| Refusal::new("numbers.geometric-gap-unproven", "the ring has no bound"))?;
     let bands = junction.saddles().iter().map(|ring| ring.bound().upper.clone());
     let trims = junction.faces().iter().map(|&face| junction.face_bound(face));
     let fit = bands.chain(trims).fold(Rational::zero(), Rational::max);

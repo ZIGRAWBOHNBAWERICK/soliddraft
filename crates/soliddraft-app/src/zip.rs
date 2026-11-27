@@ -78,8 +78,8 @@ mod tests {
     fn an_export_and_its_proof_make_one_archive() {
         let files = vec![
             ("Part1.step".to_owned(), b"ISO-10303-21;".to_vec()),
-            ("Part1.step.proof.json".to_owned(), b"{}\n".to_vec()),
-            ("Part1.step.proof.txt".to_owned(), b"proved\n".to_vec()),
+            ("Part1.step.precision.json".to_owned(), b"{}\n".to_vec()),
+            ("Part1.step.precision.txt".to_owned(), b"exact\n".to_vec()),
         ];
         let archive = stored(&files);
         assert_eq!(&archive[..4], b"PK\x03\x04");
@@ -92,7 +92,7 @@ mod tests {
         {
             let names = String::from_utf8_lossy(&listing.stdout);
             let names: Vec<&str> = names.lines().collect();
-            assert_eq!(names, ["Part1.step", "Part1.step.proof.json", "Part1.step.proof.txt"]);
+            assert_eq!(names, ["Part1.step", "Part1.step.precision.json", "Part1.step.precision.txt"]);
             let test = std::process::Command::new("unzip").arg("-t").arg(&path).output().unwrap();
             assert!(test.status.success(), "{}", String::from_utf8_lossy(&test.stdout));
         }

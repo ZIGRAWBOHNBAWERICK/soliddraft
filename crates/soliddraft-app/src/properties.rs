@@ -1161,7 +1161,7 @@ fn selection(ui: &mut egui::Ui, state: &mut AppState) {
             }
         });
         if sel == Selection::Body {
-            section(ui, "Geometry proof", |ui| state.part_proof.controls(ui, &state.doc));
+            section(ui, "Precision", |ui| state.part_proof.controls(ui, &state.doc));
             ui.add_space(8.0);
             material_panel(ui, state);
             appearance_panel(ui, state, AppearanceTarget::Part, None);

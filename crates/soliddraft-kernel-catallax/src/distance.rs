@@ -34,7 +34,7 @@ pub(super) fn refusal(op: OpKind, code: &str) -> KernelError {
     let message = if matches!(code, "numbers.operation-budget" | "app.resource-limit") {
         format!("{what} needs too much work to finish. Try a smaller distance or a simpler selection")
     } else if op == OpKind::Offset {
-        "Offset could not be verified for this body and distance. Try a smaller distance or a simpler body".into()
+        "Offset could not be built for this body and distance. Try a smaller distance or a simpler body".into()
     } else {
         "These faces cannot be thickened at this thickness and side. Try one planar face or a smaller thickness".into()
     };

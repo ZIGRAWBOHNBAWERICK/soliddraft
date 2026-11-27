@@ -159,7 +159,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
     // Wrapping can move a hovered choice to another row before the click releases.
     ui.vertical(|ui| {
         ui.selectable_value(&mut d.mode, Mode::Interference, "Detect interference");
-        ui.selectable_value(&mut d.mode, Mode::Clearance, "Verify clearance");
+        ui.selectable_value(&mut d.mode, Mode::Clearance, "Check clearance");
         ui.selectable_value(&mut d.mode, Mode::HoleAlignment, "Hole alignment");
     });
     ui.horizontal(|ui| {
@@ -182,8 +182,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
         ui.label("Exact internal cylinder axes at pinned revisions. Checks parallel axes within the maximum deviation, not diameter or fit.");
     } else {
         ui.label(
-            egui::RichText::new("Exact geometry and certified mesh bounds at each part's pinned revision.")
-                .color(theme::muted()),
+            egui::RichText::new("Exact geometry and mesh bounds at each part's pinned revision.").color(theme::muted()),
         );
     }
     if let Some(e) = &d.error {
@@ -204,7 +203,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
             egui::RichText::new(format!("Mesh chord bound {} mm per part", report.chord_mm)).color(theme::muted()),
         );
         for part in &report.skipped {
-            ui.colored_label(theme::error(), format!("Not checked: {}. {}", part.label, part.message));
+            ui.colored_label(theme::error(), format!("Skipped {}: {}", part.label, part.message));
         }
         if report.results.is_empty() {
             ui.label(all_clear(report));
@@ -254,16 +253,22 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
     }
 }
 
-/// What an empty result list proves: every pair, or with anything skipped, only the pairs
-/// of the parts that were checked.
-fn all_clear(report: &CheckReport) -> &'static str {
+/// What an empty result list means, with its scope: every pair, or with anything skipped,
+/// only the pairs compared, so an incomplete result never reads as a complete one.
+fn all_clear(report: &CheckReport) -> String {
+    let pairs = plural(report.pairs, "pair", "pairs");
+    let skipped = plural(report.skipped.len(), "item", "items");
     match (report.clearance_mm, report.complete) {
-        (Some(_), true) => "Every pair is proven clear of the clearance",
-        (None, true) => "Every pair is proven clear",
+        (Some(_), true) => format!("{pairs} compared, all meeting the clearance"),
+        (None, true) => format!("No interference: {pairs} compared, all clear"),
         (Some(_), false) => {
-            "Every pair of the checked parts is proven clear of the clearance; the parts not checked are unknown"
+            format!(
+                "Incomplete: {pairs} compared, all meeting the clearance; {skipped} skipped, so their pairs are unknown"
+            )
         }
-        (None, false) => "Every pair of the checked parts is proven clear; the parts not checked are unknown",
+        (None, false) => {
+            format!("Incomplete: {pairs} compared, all clear; {skipped} skipped, so their pairs are unknown")
+        }
     }
 }
 
@@ -308,13 +313,13 @@ fn show_holes(ui: &mut egui::Ui, report: &HoleAlignmentReport, stale: bool, acti
         report.beyond
     ));
     for part in &report.skipped {
-        ui.colored_label(theme::error(), format!("Not checked: {}. {}", part.label, part.message));
+        ui.colored_label(theme::error(), format!("Skipped {}: {}", part.label, part.message));
     }
     if !report.complete {
-        ui.colored_label(theme::warn(), "Incomplete check; unchecked parts may contain other holes");
+        ui.colored_label(theme::warn(), "Incomplete: the skipped parts may contain other holes");
     }
     if report.results.is_empty() {
-        ui.label("No parallel bore-axis pairs found within the maximum deviation in the checked parts");
+        ui.label("No parallel bore-axis pairs found within the maximum deviation in the parts inspected");
     }
     for pair in &report.results {
         let (a, b) = (&report.holes[pair.a], &report.holes[pair.b]);

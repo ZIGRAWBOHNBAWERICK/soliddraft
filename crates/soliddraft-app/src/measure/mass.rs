@@ -94,7 +94,7 @@ impl Pending {
 
 #[cfg(target_arch = "wasm32")]
 fn describe(doc: &Document) -> String {
-    format!("doc {:?} rev {} proved {}", doc.instance(), doc.revision(), doc.proof_state().current_proved_display())
+    format!("doc {:?} rev {} exact {}", doc.instance(), doc.revision(), doc.proof_state().current_proved_display())
 }
 
 #[cfg(not(target_arch = "wasm32"))]

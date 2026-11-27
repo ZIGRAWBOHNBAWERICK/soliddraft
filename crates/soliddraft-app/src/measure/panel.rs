@@ -224,7 +224,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
         );
         ui.label(tracked["source"].as_str().unwrap_or(""));
         if tracked["state"] == "stale" {
-            ui.label(format!("Stale: {}", tracked["reason"].as_str().unwrap_or("proof pending")));
+            ui.label(format!("Stale: {}", tracked["reason"].as_str().unwrap_or("the part is still building")));
         } else {
             ui.label(tracked["certainty"].as_str().unwrap_or(""));
         }

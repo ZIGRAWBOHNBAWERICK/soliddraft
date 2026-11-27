@@ -223,7 +223,7 @@ fn nx12() -> Preset {
         bindings,
         limitations: vec![limit(
             LimitKind::HistoricalProfile,
-            "Based on NX 12 documentation. Current NX releases are not certified.",
+            "Based on NX 12 documentation. Current NX releases may differ.",
         )],
     }
 }
@@ -246,7 +246,7 @@ fn solid_edge() -> Preset {
         limitations: vec![
             limit(
                 LimitKind::SelectionUnverified,
-                "Selection is SolidDraft's; Solid Edge's selection rules in the graphics area are not verified.",
+                "Selection is SolidDraft's and may differ from Solid Edge's selection rules in the graphics area.",
             ),
             limit(LimitKind::Note, "Look At Face is a command; Solid Edge documents no generic key for it."),
         ],
@@ -267,7 +267,7 @@ fn blender() -> Preset {
     Preset {
         id: "blender",
         label: "Blender",
-        release_scope: "Blender's default keymap, checked against the 4.5.0 keymap.",
+        release_scope: "Blender's default keymap, as of the 4.5.0 keymap.",
         wheel: WheelPolicy::SoliddraftDefault,
         bindings,
         limitations: vec![limit(

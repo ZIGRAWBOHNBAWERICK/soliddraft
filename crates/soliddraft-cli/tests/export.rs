@@ -300,8 +300,6 @@ fn step_from_recipe_writes_proof_reports_with_operation_work() {
     }
     assert!(features.iter().any(|feature| feature["work_used"].as_u64().unwrap() > 0));
     assert!(std::fs::read(&path).unwrap().starts_with(b"ISO-10303-21"));
-    assert!(
-        std::fs::read_to_string(soliddraft_exchange::proof::sidecar_path(&path, "txt")).unwrap().contains("Proved")
-    );
+    assert!(std::fs::read_to_string(soliddraft_exchange::proof::sidecar_path(&path, "txt")).unwrap().contains("Exact"));
     std::fs::remove_dir_all(dir).unwrap();
 }

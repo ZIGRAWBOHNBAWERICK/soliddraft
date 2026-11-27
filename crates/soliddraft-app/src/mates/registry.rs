@@ -393,7 +393,7 @@ pub(crate) fn commands() -> Vec<CommandSpec> {
             .on(Tab::Assembly, "Component", Size::Large)
             .run(|_| AppAction::Assembly(AssemblyAction::Mate(crate::mates::MateAction::Toggle)))
             .app_only("It opens the Mate panel; the assembly_mate tools add mates without it"),
-        row("assembly_measure_planes", "Measure planes", "Prove the signed distance between two faces' planes").agents(
+        row("assembly_measure_planes", "Measure planes", "Measure the signed distance between two faces' planes").agents(
             Agents::Mcp,
             "Reads exact plane equations at the accepted revisions and changes nothing.",
             measure_params,

@@ -656,7 +656,7 @@ fn nx12_ordered_chords_and_historical_label() {
     assert_eq!(keys.row_for(NavKey::main(Key::End), none, false, false).map(|b| b.action), Some(Action::Isometric));
     let nx = navigation::preset("nx12").unwrap();
     assert_eq!(nx.label, "NX 12");
-    assert!(nx.limitations.iter().any(|l| l.kind == LimitKind::HistoricalProfile && l.text.contains("not certified")));
+    assert!(nx.limitations.iter().any(|l| l.kind == LimitKind::HistoricalProfile && l.text.contains("may differ")));
     assert!(!nx.label.to_lowercase().contains("current"));
 }
 

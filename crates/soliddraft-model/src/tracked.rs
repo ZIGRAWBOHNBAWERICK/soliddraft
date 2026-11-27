@@ -243,7 +243,7 @@ impl Document {
     /// A single proof on the current part, without changing either hash.
     pub fn measure_source(&self, source: &Source) -> Result<Measurement, String> {
         if self.is_dirty() {
-            return Err("proof pending".into());
+            return Err("the part is still building".into());
         }
         let body = self.body().ok_or("the part has no body")?;
         match source.resolve(self, body)? {
@@ -258,7 +258,7 @@ impl Document {
     /// is a readout, not a tracked scalar.
     pub fn measure_midpoint(&self, reference: &EdgeRef) -> Result<PointProof, String> {
         if self.is_dirty() {
-            return Err("proof pending".into());
+            return Err("the part is still building".into());
         }
         let body = self.body().ok_or("the part has no body")?;
         let edge = self.resolve_edge(reference, body).map_err(|e| format!("{}: {}", reference.label, e.message))?;
@@ -302,7 +302,7 @@ impl Document {
                 && o.reason.is_none()
                 && o.measurement.is_some()
                 && o.geometry.as_ref() == geometry.as_ref();
-            let reason = if current { None } else { Some(o.reason.as_deref().unwrap_or("proof pending")) };
+            let reason = if current { None } else { Some(o.reason.as_deref().unwrap_or("the part is still building")) };
             let m = o.measurement;
             let mut row_json = json!({"name": row.name, "expression": null, "value": m.map(|m| m.value),
             "unit": row.source.unit(), "tracked": {

@@ -503,7 +503,7 @@ impl Planner<'_> {
         source: PmiSource,
     ) -> Result<(), String> {
         let info = self.body.faces.get(&target.face).ok_or("the target face is missing")?;
-        let normal = info.normal.ok_or("the target face has no checked normal")?;
+        let normal = info.normal.ok_or("the target face has no exact normal")?;
         let [x, y, z] = target.point_mm;
         let point = Vec3::new(x, y, z);
         let (view, edge) = self

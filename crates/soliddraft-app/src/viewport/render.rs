@@ -168,7 +168,8 @@ pub struct FrameInput {
 #[cfg(target_arch = "wasm32")]
 pub(super) struct PartProbe {
     pub camera: super::camera::Camera,
-    pub unproved: bool,
+    /// A lattice or gyroid preview is on screen.
+    pub field_preview: bool,
     pub pending: bool,
     /// The part's active display state, by name.
     pub display_state: Option<String>,
@@ -271,7 +272,7 @@ impl egui_wgpu::CallbackTrait for ViewportCallback {
                 let threads = r.scene_threads().map_or(0, |threads| threads.line_count as usize);
                 crate::web::show_part_view(&probe.camera, _info.viewport, threads);
                 crate::web::show_viewport(serde_json::json!({
-                    "label": probe.unproved.then_some("unproved preview"),
+                    "field_preview": probe.field_preview,
                     "triangles": triangles,
                     "pending": probe.pending,
                     "preview": r.preview.is_some(),

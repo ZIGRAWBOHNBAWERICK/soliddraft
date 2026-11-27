@@ -33,6 +33,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 const HANG: Duration = Duration::from_secs(600);
+/// The field preview's former label. No frame may show it.
 const UNPROVED: &str = "unproved preview";
 
 fn counted() -> (Arc<Counting>, Document) {
@@ -213,7 +214,7 @@ fn lattices_and_gyroids_show_at_once_from_their_field_sample() {
             let expected: Vec<[f32; 3]> = sample.indices.iter().map(|i| sample.positions[*i as usize]).collect();
             assert_eq!(drawn, expected, "{name} is drawn from its field sample");
             app.run_steps(4);
-            assert!(app.query_by_label(UNPROVED).is_none(), "{name}: nothing about checking shows to the user");
+            assert!(app.query_by_label(UNPROVED).is_none(), "{name}: the field preview carries no label");
             assert!(marks(app).is_empty(), "{name}: a built field has no mark: {:?}", marks(app));
             let last = app.state().state.doc.features.last().unwrap();
             assert_eq!(last.status, FeatureStatus::Ok, "{name}");
@@ -319,11 +320,11 @@ fn a_preview_on_screen_does_not_make_an_export_the_kernel_refuses() {
         assert!(app.query_by_label("Print route: distance field").is_some());
         assert!(
             app.query_by_label(
-                "Export refused: The requested accuracy could not be certified within the calculation limits."
+                "Export refused: The requested accuracy could not be reached within the calculation limits."
             )
             .is_some()
         );
-        assert!(app.query_by_label("Save checked export").is_none(), "a refused export offers no Save");
+        assert!(app.query_by_label("Save export").is_none(), "a refused export offers no Save");
         assert_eq!(std::fs::read(&path).unwrap(), b"previous file", "nothing is written");
         // The window checks on a thread of its own; the screen may refine meanwhile.
         let routes = routes_of(&kernel.take_routes(), body);
@@ -396,7 +397,7 @@ fn a_field_waiting_on_an_upstream_edit_is_marked_working_and_exports_nothing() {
         let gyroid = app.state().state.doc.features.last().unwrap();
         assert_eq!(gyroid.status, FeatureStatus::Pending);
         assert!(app.query_by_label("Gyroid1 status: Working").is_some(), "marks: {:?}", marks(app));
-        // The screen keeps the gyroid it last built, still labelled a preview, and nothing
+        // The screen keeps the gyroid it last built, with no label, and nothing
         // is exported while the edit works.
         let doc = &app.state().state.doc;
         assert_eq!(doc.meshes.keys().copied().collect::<Vec<_>>(), [built], "the built gyroid stays on screen");
@@ -441,7 +442,8 @@ fn a_refused_field_is_marked_with_its_reason_and_exports_nothing() {
         let error = app.state().state.export_part(Format::Stl).unwrap_err();
         assert!(
             error.starts_with("Export needs every feature built. Gyroid1: ")
-                && error.contains("gyroid.grade-range-unsupported"),
+                && error.contains("outside the supported range [-1/4, 1/4]")
+                && !error.contains("certified"),
             "{error}"
         );
         assert!(

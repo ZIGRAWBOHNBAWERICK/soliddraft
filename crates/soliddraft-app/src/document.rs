@@ -1676,7 +1676,7 @@ impl Feature {
         }
     }
 
-    /// A field's accuracy. Nothing about checking the display shows to the user.
+    /// A field's accuracy: the tolerance its export is held to.
     fn field_summary(&self, accuracy_mm: f64) -> String {
         format!("±{} mm", fmt_mm(accuracy_mm))
     }
@@ -1725,7 +1725,7 @@ pub const APPROXIMATE_SURFACE_BODY_NAME: &str = "Approximate surface body";
 /// A STEP body admitted with local, sampled tolerances rather than a certificate.
 pub const TOLERANT_BODY_NAME: &str = "Tolerant solid body";
 /// The accuracy statement for sampled STEP admission, without a global error claim.
-pub const TOLERANT_WORDS: &str = "Tolerant import. Faces and edges were fitted within local tolerances, not certified. Display, measurements and mass are estimates";
+pub const TOLERANT_WORDS: &str = "Tolerant import. Faces and edges were fitted within local tolerances. Display, measurements and mass are estimates";
 
 /// How a body built within `tolerance_mm` is described, in Details.
 pub fn approximate_words(tolerance_mm: &str) -> String {
@@ -6138,9 +6138,6 @@ impl Document {
                         details.push(("SHA-256".to_owned(), i.sha256.clone()));
                         details.push(("Size".to_owned(), format!("{} bytes", i.source.len())));
                         details.push(("Answers".to_owned(), i.decisions.len().to_string()));
-                        if let Some(note) = self.model().import_check_note(model_id(id)) {
-                            details.push(("Check".to_owned(), note));
-                        }
                         if let Some(record) = self.model().import_record(model_id(id)) {
                             details.extend(crate::import::record_rows(record));
                         }

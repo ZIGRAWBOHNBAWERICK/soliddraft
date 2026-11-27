@@ -250,7 +250,7 @@ fn hole_rims(
             }
         }
     }
-    rims.try_into().map_err(|_| "The hole wall needs two checked circular rims.".to_owned())
+    rims.try_into().map_err(|_| "The hole wall needs two circular rims.".to_owned())
 }
 
 fn measure_hole(
@@ -379,14 +379,14 @@ fn direction(vector: [f64; 3]) -> Result<Vec3, String> {
 
 fn cylinder(carriers: &[FaceCarrier], group: &[FaceId]) -> Result<FaceAxis, String> {
     let axis_of = |id| carriers.iter().find(|face| face.id == id).and_then(|face| face.axis);
-    let axis = group.first().copied().and_then(axis_of).ok_or("Pick a checked cylindrical feature.")?;
+    let axis = group.first().copied().and_then(axis_of).ok_or("Pick a cylindrical feature.")?;
     for &id in group {
         let other = axis_of(id).ok_or("Every controlled face must be cylindrical.")?;
         if (axis.radius - other.radius).abs() > HOLE_EPS
             || (axis.point - other.point).cross(axis.direction).length() > HOLE_EPS
             || axis.direction.cross(other.direction).length() > HOLE_EPS
         {
-            return Err("A feature group must describe one checked cylinder.".into());
+            return Err("A feature group must describe one cylinder.".into());
         }
     }
     Ok(axis)
@@ -463,7 +463,7 @@ fn target_on_face(
 ) -> Result<(), String> {
     let face = carriers.iter().find(|face| face.id == target.face).ok_or("The target face is missing.")?;
     let (Some(origin), Some(normal)) = (face.on_plane, face.normal) else {
-        return Err("The target needs a checked planar supporting face.".into());
+        return Err("The target needs a planar supporting face.".into());
     };
     let [x, y, z] = target.point_mm;
     let point = Vec3::new(x, y, z);
@@ -504,7 +504,7 @@ fn target_on_face(
             Curve3::Arc { radius, start_deg, end_deg, .. } if !edge.approximate => {
                 (*radius, (end_deg - start_deg).to_radians())
             }
-            _ => return Err("The target trim cannot be checked from its boundary curves.".into()),
+            _ => return Err("The target trim cannot be read from its boundary curves.".into()),
         };
         let steps = (angle * (radius / (8.0 * HOLE_EPS)).sqrt()).ceil().clamp(1.0, 4096.0) as u32;
         let half_angle = angle / (4.0 * f64::from(steps));
@@ -545,7 +545,7 @@ fn projection_start(
     let ProjectionEntry { face: entry, outward } = entry;
     let face = carriers.iter().find(|face| face.id == entry).ok_or("The projection entry face is missing.")?;
     let (Some(point), Some(normal)) = (face.on_plane, face.normal) else {
-        return Err("The projection entry needs a checked planar face.".into());
+        return Err("The projection entry needs a planar face.".into());
     };
     if normal.dot(outward) <= 0.0
         || normal.cross(outward).length() > HOLE_EPS

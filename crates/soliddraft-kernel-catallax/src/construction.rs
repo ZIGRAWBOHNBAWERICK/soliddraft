@@ -33,8 +33,8 @@ impl ProofWork for ReservedProof {
         let (answer, work) = allowance.run(rebuild);
         if work.exhausted {
             return Err(query_error(
-                "edit model proof",
-                Refusal::new("numbers.operation-budget", "the reserved exact-proof allowance was exhausted"),
+                "edit model rebuild",
+                Refusal::new("numbers.operation-budget", "the reserved exact-build allowance was exhausted"),
             ));
         }
         answer

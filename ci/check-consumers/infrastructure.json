@@ -132,6 +132,12 @@
     "ci/test_workflows.py": [
       "lint"
     ],
+    "ci/test_user_text.py": [
+      "lint"
+    ],
+    "ci/user-text-allowlist.json": [
+      "lint"
+    ],
     "ci/merge-shards.py": [
       "lint",
       "test-linux"

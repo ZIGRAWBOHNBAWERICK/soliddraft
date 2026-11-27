@@ -13,7 +13,7 @@ use soliddraft_model as model;
 use crate::document::Document;
 
 const WORK_LIMIT: u64 = 4_096;
-const CANCELLED: &str = "Proof cancelled.";
+const CANCELLED: &str = "Cancelled.";
 
 type Answer<T> = Receiver<Result<T, String>>;
 
@@ -41,14 +41,14 @@ fn bodies(doc: &model::Document) -> Result<Vec<Body>, String> {
     if doc.is_dirty()
         || doc.statuses().iter().any(|(_, status)| matches!(status, Blocked(_) | Failed(_) | RepairNeeded(_)))
     {
-        return Err("Finish rebuilding the part before proving it.".into());
+        return Err("Finish rebuilding the part first.".into());
     }
     doc.live_bodies()
         .into_iter()
         .map(|(key, id)| {
             let topology = doc.kernel().topology(id).map_err(|error| error.to_string())?;
             if topology.edges.is_empty() {
-                return Err("The part has a body with no edges to prove.".into());
+                return Err("The part has a body with no edges.".into());
             }
             Ok(Body { key, id, topology })
         })
@@ -76,7 +76,7 @@ pub(crate) fn estimate(doc: &model::Document) -> Result<Estimate, String> {
         }
     }
     if estimate.edges == 0 {
-        return Err("The part has no edges to prove.".into());
+        return Err("The part has no edges.".into());
     }
     Ok(estimate)
 }
@@ -142,7 +142,7 @@ pub(crate) fn prove(
                 let run = prover(kernel, id, work_left, interrupt)?;
                 check_cancel(interrupt)?;
                 if run.work_used > work_left {
-                    return Err("The kernel exceeded the proof work limit.".into());
+                    return Err("The calculation exceeded its work limit.".into());
                 }
                 report.work_used += run.work_used;
                 report.cpu_ns = report.cpu_ns.zip(run.cpu_ns).map(|(total, cpu)| total.saturating_add(cpu));
@@ -348,22 +348,26 @@ impl State {
 
     pub(crate) fn controls(&mut self, ui: &mut egui::Ui, doc: &Document) {
         if let Some(report) = &self.report {
-            ui.label(if report.fully_proven() { "Fully proven" } else { "Could not prove every edge" });
-            if ui.button("Open proof report").clicked() {
+            ui.label(if report.fully_proven() {
+                "Every edge has a precision bound"
+            } else {
+                "Some edges have no precision bound"
+            });
+            if ui.button("Open precision report").clicked() {
                 self.report_open = true;
             }
         }
         if self.active.is_some() {
             ui.label(match self.active.as_ref().map(|run| &run.phase) {
-                Some(Phase::Estimating(_)) => "Estimating proof cost…",
+                Some(Phase::Estimating(_)) => "Estimating the work…",
                 Some(Phase::Confirm(_)) => "Waiting for confirmation…",
-                _ => "Proving edges…",
+                _ => "Measuring edge precision…",
             });
-            if ui.button("Cancel proof").clicked() {
+            if ui.button("Cancel").clicked() {
                 self.finish(CANCELLED.into());
             }
         } else {
-            if ui.add_enabled(doc.proof_state().current_proved_model(), egui::Button::new("Prove part")).clicked()
+            if ui.add_enabled(doc.proof_state().current_proved_model(), egui::Button::new("Show precision")).clicked()
                 && let Err(error) = self.start(doc, ui.ctx())
             {
                 self.finish(error);
@@ -383,8 +387,8 @@ impl State {
             let mut cancel = false;
             let modal = egui::Modal::new(egui::Id::new("confirm_whole_edge_proof")).show(ctx, |ui| {
                 ui.set_width(360.0);
-                ui.heading("Prove this complex part?");
-                ui.label("The proof may take a long time and use a lot of computing power.");
+                ui.heading("Show precision for this complex part?");
+                ui.label("This may take a long time and use a lot of computing power.");
                 ui.label(format!(
                     "{} edges · {} complex faces · limit: {WORK_LIMIT} work units",
                     estimate.edges, estimate.complex_faces
@@ -405,7 +409,7 @@ impl State {
         if self.report_open
             && let Some(report) = &self.report
         {
-            egui::Window::new("Part proof report")
+            egui::Window::new("Part precision report")
                 .open(&mut self.report_open)
                 .default_width(480.0)
                 .default_height(440.0)
@@ -419,7 +423,7 @@ fn try_answer<T>(answer: &Answer<T>) -> Option<Result<T, String>> {
     match answer.try_recv() {
         Ok(answer) => Some(answer),
         Err(TryRecvError::Empty) => None,
-        Err(TryRecvError::Disconnected) => Some(Err("The proof worker stopped.".into())),
+        Err(TryRecvError::Disconnected) => Some(Err("The precision worker stopped.".into())),
     }
 }
 
@@ -441,7 +445,7 @@ fn native_job<T: Send + 'static>(
             let _ = sent.send(result);
             ctx.request_repaint();
         })
-        .map_err(|error| format!("The proof worker could not start: {error}"))?;
+        .map_err(|error| format!("The precision worker could not start: {error}"))?;
     Ok(answer)
 }
 
@@ -459,16 +463,20 @@ fn browser_job<T: serde::de::DeserializeOwned + 'static>(
 }
 
 fn show_report(ui: &mut egui::Ui, report: &Report) {
-    ui.heading(if report.fully_proven() { "Fully proven" } else { "Could not prove every edge" });
-    ui.label("Bounds measure the distance from the whole edge curve to its incident surfaces.");
-    ui.label(format!("Wall time (proof and report): {:.3} s", report.wall_seconds));
-    if let Some(cpu) = report.cpu_ns {
-        ui.label(format!("Proof CPU time: {:.3} s", cpu as f64 * 1e-9));
+    ui.heading(if report.fully_proven() {
+        "Every edge has a precision bound"
     } else {
-        ui.label("Proof CPU time: unavailable on this platform");
+        "Some edges have no precision bound"
+    });
+    ui.label("Bounds measure the distance from the whole edge curve to its incident surfaces.");
+    ui.label(format!("Wall time: {:.3} s", report.wall_seconds));
+    if let Some(cpu) = report.cpu_ns {
+        ui.label(format!("CPU time: {:.3} s", cpu as f64 * 1e-9));
+    } else {
+        ui.label("CPU time: unavailable on this platform");
     }
-    ui.label(format!("Proof threads used (peak): {}", report.threads));
-    ui.label(format!("Kernel proof work units: {} / {WORK_LIMIT}", report.work_used));
+    ui.label(format!("Threads used (peak): {}", report.threads));
+    ui.label(format!("Work units: {} / {WORK_LIMIT}", report.work_used));
     for body in &report.bodies {
         ui.separator();
         if report.bodies.len() > 1 {
@@ -508,9 +516,9 @@ fn show_report(ui: &mut egui::Ui, report: &Report) {
         for (edge, bound) in &body.edges {
             if let Some(bound) = bound {
                 // Debug formatting round-trips the conservative value without rounding it down to a display precision.
-                ui.label(format!("Edge {}: proved ≤ {bound:?} mm", edge.raw()));
+                ui.label(format!("Edge {}: ≤ {bound:?} mm", edge.raw()));
             } else {
-                ui.label(format!("Edge {}: could not prove", edge.raw()));
+                ui.label(format!("Edge {}: no bound", edge.raw()));
             }
         }
     }

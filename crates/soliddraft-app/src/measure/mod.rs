@@ -20,7 +20,7 @@ use soliddraft_model::tracked::{Endpoint, Entity, Source};
 /// Names a persistent source using the interface label only as a fallback.
 pub fn source(doc: &Document, selection: Selection) -> Result<Source, String> {
     if !doc.proof_state().current_proved_model() {
-        return Err("proof pending or failed".into());
+        return Err("the part is still building or failed to build".into());
     }
     let label = doc.describe(selection).map(|i| i.title).unwrap_or_default();
     match selection {

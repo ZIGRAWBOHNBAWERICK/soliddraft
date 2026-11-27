@@ -718,7 +718,7 @@ fn a_proof_start_refusal_belongs_to_the_changed_chip() {
         assert!(app.query_all_by_label(&format!("{later} status: Refused")).next().is_none());
         app.hover_at(badge.center());
         app.run_steps(90);
-        assert!(ribbon::painted(app).iter().any(|text| text.text.contains("could not start its proof")));
+        assert!(ribbon::painted(app).iter().any(|text| text.text.contains("This edit could not start")));
         let path = case.path("refused.step");
         app.state_mut()
             .state
@@ -727,7 +727,7 @@ fn a_proof_start_refusal_belongs_to_the_changed_chip() {
         assert!(!path.exists());
         assert!(!soliddraft_exchange::proof::sidecar_path(&path, "json").exists());
         let notice = &app.state().state.note.as_ref().unwrap().text;
-        assert!(notice.contains("could not start its proof"), "{notice}");
+        assert!(notice.contains("This edit could not start"), "{notice}");
         case.frame(app, "refused-on-changed-chip");
     });
 }

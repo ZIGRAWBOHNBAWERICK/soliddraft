@@ -24,7 +24,7 @@ fn refused(query: &str, code: &str) -> BodyQueryRefusal {
     } else if code.contains("distance") || code.contains("surface") || code.contains("curve") {
         "The check does not support this combination of faces and edges."
     } else {
-        "The check could not prove the required geometric comparisons for these parts."
+        "The check could not settle the geometric comparisons these parts need."
     };
     BodyQueryRefusal {
         query: query.into(),

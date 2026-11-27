@@ -14,7 +14,7 @@
 //! grid, edges as wide lines, ghosts) and the id pass. Depth is reversed (near 1, far 0) on every
 //! camera pass. `look.rs` holds the presets and the tiers.
 
-use super::assembly::{AssemblyFrame, AssemblyRenderer};
+use super::assembly::{AssemblyFrame, AssemblyRenderer, IndirectArgs};
 use super::grid::{self, GridFrame};
 use super::planes::{self, PlaneFrame};
 use crate::document::DisplayMesh;
@@ -433,10 +433,133 @@ struct TaggedVertex {
     id: u32,
 }
 
+const PART_CULL_MIN_FACES: usize = 200;
+
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct PartView {
+    view_proj: [[f32; 4]; 4],
+    half_size: [f32; 2],
+    _pad: [f32; 2],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct FaceBounds {
+    lo: [f32; 4],
+    hi: [f32; 4],
+}
+
+struct PartCull {
+    args: wgpu::Buffer,
+    grouped_indices: Option<wgpu::Buffer>,
+    group: wgpu::BindGroup,
+    faces: u32,
+}
+
+/// One range and bound per face. Use the original index stream when faces are
+/// contiguous; otherwise group only the GPU indices, in first-seen face order.
+fn part_face_draws(mesh: &DisplayMesh) -> (Vec<FaceBounds>, Vec<IndirectArgs>, Option<Vec<u32>>) {
+    let triangles = mesh.indices.as_chunks::<3>().0;
+    let face = |tri: &[u32; 3]| mesh.face_picks[tri[0] as usize];
+    let mut slots = HashMap::new();
+    let mut bounds = Vec::<FaceBounds>::new();
+    let mut draws = Vec::<IndirectArgs>::new();
+    let mut regroup = false;
+    for run in triangles.chunk_by(|a, b| face(a) == face(b)) {
+        let slot = *slots.entry(face(&run[0])).or_insert(draws.len());
+        let mut lo = Vec3::splat(f32::INFINITY);
+        let mut hi = Vec3::splat(f32::NEG_INFINITY);
+        for &idx in run.as_flattened() {
+            let p = mesh.positions[idx as usize];
+            lo = lo.min(p);
+            hi = hi.max(p);
+        }
+        let count = run.as_flattened().len() as u32;
+        if let Some(draw) = draws.get_mut(slot) {
+            regroup = true;
+            draw.index_count += count;
+            let b = &mut bounds[slot];
+            lo = lo.min(Vec3::from_slice(&b.lo));
+            hi = hi.max(Vec3::from_slice(&b.hi));
+            *b = FaceBounds { lo: lo.extend(0.0).to_array(), hi: hi.extend(0.0).to_array() };
+        } else {
+            bounds.push(FaceBounds { lo: lo.extend(0.0).to_array(), hi: hi.extend(0.0).to_array() });
+            draws.push(IndirectArgs { index_count: count, ..Default::default() });
+        }
+    }
+    let mut first = 0;
+    for draw in &mut draws {
+        draw.first_index = first;
+        first += draw.index_count;
+    }
+    let indices = (regroup && draws.len() >= PART_CULL_MIN_FACES).then(|| {
+        let mut next: Vec<_> = draws.iter().map(|draw| draw.first_index as usize).collect();
+        let mut indices = vec![0; mesh.indices.len()];
+        for run in triangles.chunk_by(|a, b| face(a) == face(b)) {
+            let at = &mut next[slots[&face(&run[0])]];
+            let data = run.as_flattened();
+            indices[*at..*at + data.len()].copy_from_slice(data);
+            *at += data.len();
+        }
+        indices
+    });
+    (bounds, draws, indices)
+}
+
+impl PartCull {
+    fn upload(
+        device: &wgpu::Device,
+        pipeline: &wgpu::ComputePipeline,
+        view: &wgpu::Buffer,
+        mesh: &DisplayMesh,
+    ) -> Option<Self> {
+        let (bounds, draws, indices) = part_face_draws(mesh);
+        let faces = draws.len() as u32;
+        let limits = device.limits();
+        if bounds.len() < PART_CULL_MIN_FACES
+            || faces.div_ceil(256) > limits.max_compute_workgroups_per_dimension
+            || std::mem::size_of_val(bounds.as_slice()) as u64 > u64::from(limits.max_storage_buffer_binding_size)
+        {
+            return None;
+        }
+        let bounds = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("part face bounds"),
+            contents: bytemuck::cast_slice(&bounds),
+            usage: wgpu::BufferUsages::STORAGE,
+        });
+        let args = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("part face draws"),
+            contents: bytemuck::cast_slice(&draws),
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::INDIRECT
+                | if cfg!(test) { wgpu::BufferUsages::COPY_SRC } else { wgpu::BufferUsages::empty() },
+        });
+        let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("part face cull"),
+            layout: &pipeline.get_bind_group_layout(0),
+            entries: &[
+                wgpu::BindGroupEntry { binding: 9, resource: view.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 10, resource: bounds.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 11, resource: args.as_entire_binding() },
+            ],
+        });
+        let grouped_indices = indices.map(|indices| {
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("part indices grouped by face"),
+                contents: bytemuck::cast_slice(&indices),
+                usage: wgpu::BufferUsages::INDEX,
+            })
+        });
+        Some(Self { args, grouped_indices, group, faces })
+    }
+}
+
 struct GpuBody {
     vertices: wgpu::Buffer,
     indices: wgpu::Buffer,
     index_count: u32,
+    cull: Option<PartCull>,
     lines: wgpu::Buffer,
     line_count: u32,
     silhouettes: Option<(wgpu::Buffer, u32)>,
@@ -708,6 +831,7 @@ pub struct ViewportRenderer {
     display: DisplayMode,
     frame: u64,
     assembly: AssemblyRenderer,
+    part_view: Option<wgpu::Buffer>,
 }
 
 fn picture_view(
@@ -1331,6 +1455,15 @@ impl ViewportRenderer {
             mapped_at_creation: false,
         });
 
+        let assembly = AssemblyRenderer::new(device, COLOR_FORMAT, depth_format, samples, ID_FORMAT);
+        let part_view = assembly.part_cull_pipeline.as_ref().map(|_| {
+            device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("part cull view"),
+                size: std::mem::size_of::<PartView>() as u64,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            })
+        });
         Self {
             tier,
             samples,
@@ -1378,7 +1511,8 @@ impl ViewportRenderer {
             picks: PickCache::default(),
             display: DisplayMode::default(),
             frame: 0,
-            assembly: AssemblyRenderer::new(device, COLOR_FORMAT, depth_format, samples, ID_FORMAT),
+            assembly,
+            part_view,
         }
     }
 
@@ -1544,10 +1678,18 @@ impl ViewportRenderer {
             layout: &self.layouts.body,
             entries: &[wgpu::BindGroupEntry { binding: 0, resource: uniform.as_entire_binding() }],
         });
+        let cull = self
+            .assembly
+            .part_cull_pipeline
+            .as_ref()
+            .zip(self.part_view.as_ref())
+            .filter(|_| flags == 0 && mesh.triangle_count() >= PART_CULL_MIN_FACES)
+            .and_then(|(pipeline, view)| PartCull::upload(device, pipeline, view, mesh));
         GpuBody {
             vertices: make("faces", bytemuck::cast_slice(&verts), wgpu::BufferUsages::VERTEX),
             indices: make("indices", bytemuck::cast_slice(&mesh.indices), wgpu::BufferUsages::INDEX),
             index_count: mesh.indices.len() as u32,
+            cull,
             lines: make("edges", bytemuck::cast_slice(&lines), wgpu::BufferUsages::VERTEX),
             line_count: lines.len() as u32,
             silhouettes: (!silhouettes.is_empty()).then(|| {
@@ -1858,17 +2000,51 @@ impl ViewportRenderer {
 
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("viewport") });
         self.assembly.prepare(device, queue, &mut encoder, input);
-        let targets = self.targets.as_ref().expect("targets");
-        let draw_faces = |pass: &mut wgpu::RenderPass<'_>, bodies: &mut dyn Iterator<Item = &GpuBody>, groups: bool| {
-            for body in bodies {
-                if groups {
-                    pass.set_bind_group(1, &body.bind_group, &[]);
+        // Stencil caps count crossings on the closed mesh, including subpixel faces.
+        let cull_parts = section.is_none();
+        if cull_parts
+            && let Some((pipeline, view)) = self.assembly.part_cull_pipeline.as_ref().zip(self.part_view.as_ref())
+        {
+            let mut culls = self.bodies.values().filter_map(|body| body.cull.as_ref()).peekable();
+            if culls.peek().is_some() {
+                queue.write_buffer(
+                    view,
+                    0,
+                    bytemuck::bytes_of(&PartView {
+                        view_proj: (input.proj * input.view).to_cols_array_2d(),
+                        half_size: input.size_px.map(|size| size as f32 * 0.5),
+                        _pad: [0.0; 2],
+                    }),
+                );
+                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("part face cull"),
+                    timestamp_writes: None,
+                });
+                pass.set_pipeline(pipeline);
+                for cull in culls {
+                    pass.set_bind_group(0, &cull.group, &[]);
+                    pass.dispatch_workgroups(cull.faces.div_ceil(256), 1, 1);
                 }
-                pass.set_vertex_buffer(0, body.vertices.slice(..));
-                pass.set_index_buffer(body.indices.slice(..), wgpu::IndexFormat::Uint32);
-                pass.draw_indexed(0..body.index_count, 0, 0..1);
             }
-        };
+        }
+        let targets = self.targets.as_ref().expect("targets");
+        let draw_faces =
+            |pass: &mut wgpu::RenderPass<'_>, bodies: &mut dyn Iterator<Item = &GpuBody>, groups: bool, cull: bool| {
+                for body in bodies {
+                    if groups {
+                        pass.set_bind_group(1, &body.bind_group, &[]);
+                    }
+                    pass.set_vertex_buffer(0, body.vertices.slice(..));
+                    if cull && let Some(part) = &body.cull {
+                        let indices = part.grouped_indices.as_ref().unwrap_or(&body.indices);
+                        pass.set_index_buffer(indices.slice(..), wgpu::IndexFormat::Uint32);
+                        pass.multi_draw_indexed_indirect(&part.args, 0, part.faces);
+                    } else {
+                        pass.set_index_buffer(body.indices.slice(..), wgpu::IndexFormat::Uint32);
+                        pass.draw_indexed(0..body.index_count, 0, 0..1);
+                    }
+                }
+            };
         let draw_lines = |pass: &mut wgpu::RenderPass<'_>, bodies: &mut dyn Iterator<Item = &GpuBody>| {
             for body in bodies {
                 if body.line_count > 0 {
@@ -1905,7 +2081,7 @@ impl ViewportRenderer {
             });
             pass.set_pipeline(&self.shadow_pipeline);
             pass.set_bind_group(0, &self.uniforms_bind_group, &[]);
-            draw_faces(&mut pass, &mut shown.iter().copied(), false);
+            draw_faces(&mut pass, &mut shown.iter().copied(), false, false);
             drop(pass);
             self.shadow_key = Some(shadow_key);
         }
@@ -1922,7 +2098,7 @@ impl ViewportRenderer {
                 });
                 pass.set_pipeline(normals);
                 pass.set_bind_group(0, &self.uniforms_bind_group, &[]);
-                draw_faces(&mut pass, &mut shown.iter().copied(), false);
+                draw_faces(&mut pass, &mut shown.iter().copied(), false, cull_parts);
             }
             for (label, pipeline, inputs, out) in [
                 ("occlusion", sample, &t.sample_bind_group, &t.raw),
@@ -1965,7 +2141,7 @@ impl ViewportRenderer {
             // Count oriented crossings from the plane toward far depth. This also works
             // when the near plane clips the mesh or the camera is inside the body.
             pass.set_pipeline(&section.count);
-            draw_faces(&mut pass, &mut shown.iter().copied(), false);
+            draw_faces(&mut pass, &mut shown.iter().copied(), false, false);
         }
 
         {
@@ -1999,7 +2175,7 @@ impl ViewportRenderer {
             let context = self.context.as_ref().map(|(_, b)| b);
             if show_faces {
                 pass.set_pipeline(&self.face_pipeline);
-                draw_faces(&mut pass, &mut shown.iter().copied(), true);
+                draw_faces(&mut pass, &mut shown.iter().copied(), true, cull_parts);
                 if let Some(section) = section_cap {
                     pass.set_pipeline(&section.cap);
                     pass.set_bind_group(1, &section.material, &[]);
@@ -2031,16 +2207,16 @@ impl ViewportRenderer {
             if show_faces && shown.iter().any(|b| b.see_through) {
                 // After everything opaque, so the opaque depth hides what is behind.
                 pass.set_pipeline(&self.see_through_pipeline);
-                draw_faces(&mut pass, &mut shown.iter().copied().filter(|b| b.see_through), true);
+                draw_faces(&mut pass, &mut shown.iter().copied().filter(|b| b.see_through), true, cull_parts);
             }
             if show_faces && let Some(c) = context {
                 // Over the part's opaque faces, so the part shows through it.
                 pass.set_pipeline(&self.face_pipeline);
-                draw_faces(&mut pass, &mut std::iter::once(c), true);
+                draw_faces(&mut pass, &mut std::iter::once(c), true, false);
             }
             if show_faces && let Some(g) = ghost {
                 pass.set_pipeline(&self.face_pipeline);
-                draw_faces(&mut pass, &mut std::iter::once(g), true);
+                draw_faces(&mut pass, &mut std::iter::once(g), true, false);
             }
             if let Some(c) = context {
                 pass.set_pipeline(&self.edge_pipeline);
@@ -2128,7 +2304,7 @@ impl ViewportRenderer {
                     &[],
                 );
                 pass.set_pipeline(&self.id_face_pipeline);
-                draw_faces(&mut pass, &mut pick_bodies(), true);
+                draw_faces(&mut pass, &mut pick_bodies(), true, cull_parts);
                 if !input.preview_pickable || self.preview.is_none() {
                     pass.set_pipeline(&self.id_edge_pipeline);
                     draw_lines(&mut pass, &mut self.bodies.values());
@@ -2250,6 +2426,107 @@ fn upload_environment(device: &wgpu::Device, queue: &wgpu::Queue, env: &environm
 mod tests {
     use super::*;
     use glam::Vec4;
+
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    #[test]
+    fn a_part_culls_off_screen_and_subpixel_faces_on_the_gpu() {
+        let instance = wgpu::Instance::default();
+        let features = wgpu::Features::INDIRECT_FIRST_INSTANCE;
+        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
+            .ok()
+            .filter(|adapter| adapter.features().contains(features));
+        let Some(adapter) = adapter else {
+            assert!(std::env::var_os("SOLIDDRAFT_REQUIRE_GPU").is_none(), "no adapter with indirect draws");
+            return;
+        };
+        let (device, queue) = pollster::block_on(
+            adapter.request_device(&wgpu::DeviceDescriptor { required_features: features, ..Default::default() }),
+        )
+        .unwrap();
+        let mut renderer = ViewportRenderer::with_samples(&device, &queue, COLOR_FORMAT, Tier::Basic, 1);
+        let body = BodyId::from_raw(1);
+        let mut mesh = DisplayMesh::default();
+        for face in (1..=200).chain([1]) {
+            let (x, radius) = match face {
+                1 => (0.0, 0.1),
+                2 => (1.05, 0.1), // Crosses the frustum even though its centre is outside.
+                3..=70 => (-0.5, 0.1),
+                71..=130 => (0.4, 0.001),
+                131 => (3.0, 0.1),
+                _ => (3.4, 0.1),
+            };
+            let start = mesh.positions.len() as u32;
+            mesh.positions.extend([
+                Vec3::new(x - radius, -radius, 0.5),
+                Vec3::new(x + radius, -radius, 0.5),
+                Vec3::new(x, radius, 0.5),
+            ]);
+            mesh.normals.extend([Vec3::Z; 3]);
+            mesh.face_picks.extend([face; 3]);
+            mesh.indices.extend(start..start + 3);
+        }
+        let mut input = FrameInput {
+            view: Mat4::IDENTITY,
+            proj: Mat4::IDENTITY,
+            eye: Vec3::Z,
+            basis: [Vec3::X, Vec3::Y, Vec3::Z],
+            orthographic: true,
+            distance: 1.0,
+            size_px: [256, 256],
+            pixels_per_point: 1.0,
+            display: DisplayMode::Shaded,
+            preset: Default::default(),
+            controls: Default::default(),
+            backdrop: super::super::scenes::Scene::White.backdrop(),
+            backdrop_picture: None,
+            floor: false,
+            hover_id: 0,
+            selected_id: 0,
+            selected_feature: 0,
+            selected_body: None,
+            cursor_px: Some([128, 128]),
+            meshes: (1, vec![(body, Arc::new(mesh))]),
+            ghost: None,
+            context: None,
+            preview: None,
+            threads: None,
+            preview_pickable: false,
+            pick_revision: None,
+            pick_out: Arc::new(Mutex::new(PickSample::default())),
+            assembly: None,
+            grid: None,
+            planes: None,
+        };
+        for (camera_x, visible, pick) in [(0.0, 0..70, 1), (3.0, 130..200, 131)] {
+            input.view = Mat4::from_translation(Vec3::new(-camera_x, 0.0, 0.0));
+            renderer.prepare(&device, &queue, &input);
+            let part = renderer.bodies[&body].cull.as_ref().expect("200 distinct faces use GPU culling");
+            let size = part.args.size();
+            let readback = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("part face draw readback"),
+                size,
+                usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                mapped_at_creation: false,
+            });
+            let mut encoder = device.create_command_encoder(&Default::default());
+            encoder.copy_buffer_to_buffer(&part.args, 0, &readback, 0, size);
+            queue.submit([encoder.finish()]);
+            let (send, recv) = std::sync::mpsc::channel();
+            readback.slice(..).map_async(wgpu::MapMode::Read, move |result| send.send(result).unwrap());
+            device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+            recv.recv().unwrap().unwrap();
+            let mapped = readback.slice(..).get_mapped_range().unwrap();
+            let draws: &[IndirectArgs] = bytemuck::cast_slice(&mapped);
+            assert_eq!(draws.len(), 200);
+            let submitted: Vec<_> =
+                draws.iter().enumerate().filter_map(|(i, draw)| (draw.instance_count == 1).then_some(i)).collect();
+            assert_eq!(submitted, visible.collect::<Vec<_>>());
+            assert_eq!(draws[0].index_count, 6, "nonconsecutive triangles of one face share a draw");
+            renderer.prepare(&device, &queue, &input);
+            assert_eq!(input.pick_out.lock().unwrap().at(128, 128), Some((1 << KIND_SHIFT) | pick));
+        }
+        eprintln!("GPU {:?}: 70 of 200 faces drawn from either camera position", adapter.get_info().backend);
+    }
 
     fn project(m: Mat4, p: Vec3) -> Vec3 {
         let c = m * Vec4::new(p.x, p.y, p.z, 1.0);

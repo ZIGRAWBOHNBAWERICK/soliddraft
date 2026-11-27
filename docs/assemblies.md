@@ -587,6 +587,13 @@ and nothing when there is no cursor. `Detail` is the light-mode setting: larger 
 draw less. Without those features (WebGL2) every visible instance is drawn with one
 `draw_indexed` per definition and hidden instances are dropped in the vertex shader.
 
+In the part viewport, a body with at least 200 mesh faces uses the same GPU
+compute and indexed indirect draw path, one draw record per face at the current
+mesh level. A face is skipped when its bounds are outside the camera frustum or
+project to less than one pixel across. The uploaded mesh level and CPU mesh
+bytes do not change. Shadow maps and active section views retain the full
+mesh; WebGL2 keeps one direct indexed draw per body.
+
 Each definition has three levels of detail (coarse, standard and fine, see
 [tessellation.md](tessellation.md)), and where the GPU culls each placement draws the
 one its size on screen needs. The cull pass applies the same rules as

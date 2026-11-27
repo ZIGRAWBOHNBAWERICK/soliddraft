@@ -4,3 +4,10 @@ owner = "core"
 crate = "soliddraft-exchange"
 paths = ["crates/soliddraft-exchange/src/pdf3d.rs", "crates/soliddraft-exchange/src/pdf3d/u3d.rs"]
 module = ["pdf3d"]
+
+[[areas]]
+name = "exchange.qif"
+owner = "core"
+crate = "soliddraft-exchange"
+paths = ["crates/soliddraft-exchange/src/qif.rs", "crates/soliddraft-exchange/tests/check-qif.py"]
+module = ["qif"]

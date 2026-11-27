@@ -297,9 +297,24 @@ fn item(doc: &Document, input: &Value) -> Result<PmiItem<FaceRef>, String> {
             all_around: input["all_around"].as_bool().unwrap_or(false),
             feature: named_feature(doc, input, "faces")?,
         },
+        "knurl" | "face_note" => {
+            let Some([name]) = input["faces"].as_array().map(Vec::as_slice) else {
+                return Err("faces must name exactly one face.".into());
+            };
+            let name = name.as_str().ok_or("faces must name exactly one face.")?;
+            let id = face_by_name(doc, name).ok_or_else(|| format!("No face named `{name}`."))?;
+            let face = doc.model().face_ref(id).map_err(|error| error.to_string())?;
+            if requested == "knurl" {
+                let designation = input["designation"].as_str().ok_or("designation is required")?.to_owned();
+                PmiKind::Knurl { designation, face }
+            } else {
+                let text = input["text"].as_str().ok_or("text is required")?.to_owned();
+                PmiKind::FaceNote { text, face }
+            }
+        }
         other => {
             return Err(format!(
-                "unknown PMI kind `{other}`; use datum, datum_target, diameter, radius, hole, distance, slot, width, chamfer, edge_break, basic_angle, tolerance, position_control or finish"
+                "unknown PMI kind `{other}`; use datum, datum_target, diameter, radius, hole, distance, slot, width, chamfer, edge_break, basic_angle, tolerance, position_control, finish, knurl or face_note"
             ));
         }
     };
@@ -351,6 +366,8 @@ pub(crate) fn rows_named(doc: &Document, names: &Document) -> Value {
                 "faces": faces,
             });
             match &row.item.kind {
+                PmiKind::Knurl { designation, .. } => value["designation"] = json!(designation),
+                PmiKind::FaceNote { text, .. } => value["text"] = json!(text),
                 PmiKind::DatumTarget(target) => {
                     value["target"] = json!({
                         "datum": target.datum, "number": target.number, "face": faces[0].first(),

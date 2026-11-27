@@ -668,6 +668,12 @@ impl<F> PmiItem<F> {
                     feature: feature(faces)?,
                 }
             }
+            PmiKind::Knurl { designation, face: attached } => {
+                PmiKind::Knurl { designation: designation.clone(), face: face(state, attached)? }
+            }
+            PmiKind::FaceNote { text, face: attached } => {
+                PmiKind::FaceNote { text: text.clone(), face: face(state, attached)? }
+            }
         };
         Ok(PmiItem { id: self.id.clone(), kind })
     }
@@ -676,6 +682,7 @@ impl<F> PmiItem<F> {
     pub fn features(&self) -> Vec<&[F]> {
         match &self.kind {
             PmiKind::Datum { feature, .. } | PmiKind::SurfaceFinish { feature, .. } => vec![feature],
+            PmiKind::Knurl { face, .. } | PmiKind::FaceNote { face, .. } => vec![std::slice::from_ref(face)],
             PmiKind::Size { features, .. } | PmiKind::Gdt { features, .. } => {
                 features.iter().map(Vec::as_slice).collect()
             }
@@ -873,6 +880,20 @@ pub enum PmiKind<F> {
         all_around: bool,
         /// The feature it applies to.
         feature: Feature<F>,
+    },
+    /// A stated knurl designation on one face, not a measured size.
+    Knurl {
+        /// The designation as specified by the user.
+        designation: String,
+        /// The face to knurl.
+        face: F,
+    },
+    /// Free text attached to one face.
+    FaceNote {
+        /// The note as written by the user.
+        text: String,
+        /// The face the note applies to.
+        face: F,
     },
 }
 
@@ -1446,6 +1467,10 @@ impl<F: PartialEq> Pmi<F> {
             PmiKind::SurfaceFinish { text, .. } => {
                 text.trim().is_empty().then(|| "The finish needs a requirement, such as Ra 1.6.".to_owned())
             }
+            PmiKind::Knurl { designation, .. } => {
+                designation.trim().is_empty().then(|| "The knurl needs a designation.".to_owned())
+            }
+            PmiKind::FaceNote { text, .. } => text.trim().is_empty().then(|| "The face note needs text.".to_owned()),
         }
     }
 
@@ -1588,7 +1613,8 @@ impl<F> PmiItem<F> {
                 }
                 text
             }
-            PmiKind::SurfaceFinish { text, .. } => text.clone(),
+            PmiKind::SurfaceFinish { text, .. } | PmiKind::FaceNote { text, .. } => text.clone(),
+            PmiKind::Knurl { designation, .. } => format!("KNURL {designation}"),
         }
     }
 
@@ -1642,9 +1668,9 @@ impl<F> PmiItem<F> {
             | PmiKind::EdgeBreak { .. }
             | PmiKind::BasicAngle { .. }
             | PmiKind::DatumTarget(_)
-            | PmiKind::PositionControl(_) => {
-                Some(format!("{} PMI is not supported in STEP export.", self.kind_label()))
-            }
+            | PmiKind::PositionControl(_)
+            | PmiKind::Knurl { .. }
+            | PmiKind::FaceNote { .. } => Some(format!("{} PMI is not supported in STEP export.", self.kind_label())),
             PmiKind::Gdt { datums, .. }
                 if datums.iter().any(|datum| !datum.material.is_regardless() || datum.letter.contains('-')) =>
             {
@@ -1680,6 +1706,8 @@ impl<F> PmiItem<F> {
             PmiKind::BasicAngle { .. } => "Basic angle",
             PmiKind::Gdt { characteristic, .. } => characteristic.name(),
             PmiKind::SurfaceFinish { .. } => "Surface finish",
+            PmiKind::Knurl { .. } => "Knurl",
+            PmiKind::FaceNote { .. } => "Face note",
         }
     }
 }

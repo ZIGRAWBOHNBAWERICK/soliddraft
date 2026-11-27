@@ -346,6 +346,8 @@ impl Command {
                 AnnotationKind::Dimension(_) => "Add dimension",
                 AnnotationKind::DimensionSet(_) => "Add dimensions",
                 AnnotationKind::Gdt { .. } => "Add geometric tolerance",
+                AnnotationKind::PositionFrame { .. } => "Add position frame",
+                AnnotationKind::DatumTarget { .. } => "Add datum target",
                 AnnotationKind::Datum { .. } => "Add datum",
                 AnnotationKind::SurfaceFinish { .. } => "Add surface finish",
                 AnnotationKind::RevisionSymbol { .. } => "Add revision symbol",
@@ -463,7 +465,9 @@ pub fn apply(drawing: &mut Drawing, command: &Command) -> Result<(), DrawingErro
                 AnnotationKind::Datum { letter } => letter.clone(),
                 AnnotationKind::RevisionSymbol { revision } => revision.clone(),
                 AnnotationKind::Balloon { item, .. } => item.to_string(),
-                AnnotationKind::Gdt { .. } => crate::display::annotation_name(a, style),
+                AnnotationKind::Gdt { .. }
+                | AnnotationKind::PositionFrame { .. }
+                | AnnotationKind::DatumTarget { .. } => crate::display::annotation_name(a, style),
                 AnnotationKind::DimensionSet(set) => set.values_text(),
                 AnnotationKind::Weld { .. } => "Fillet weld".into(),
                 AnnotationKind::CentreMark | AnnotationKind::Centreline => String::new(),

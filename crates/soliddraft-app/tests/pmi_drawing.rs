@@ -428,3 +428,133 @@ fn planar_pmi_follows_the_same_faces_through_reopen_and_edits() {
     call(&mut reopened, "drawing_export_pdf", json!({"path": proof.join("planar-pmi.pdf")}));
     std::fs::remove_dir_all(scratch).unwrap();
 }
+
+#[test]
+fn datum_targets_and_position_frames_draw_from_a_reopened_part() {
+    use egui_kittest::kittest::Queryable;
+    use soliddraft_app::{document::Selection, pmi::panel};
+    use soliddraft_kernel_api::SurfaceKind::{Cylinder, Plane};
+    use std::cell::RefCell;
+    let mut s = state("Position and targets");
+    call(
+        &mut s,
+        "sketch",
+        json!({"plane":"top","shapes":[
+            {"shape":"rectangle","center":[40,20,0],"width":80,"height":40}
+        ]}),
+    );
+    call(&mut s, "extrude", json!({"sketch":"Sketch1","depth":10,"flip":false}));
+    for x in [20, 55] {
+        call(&mut s, "hole", json!({"face":"Boss-Extrude1 · End cap","points":[[x,20,10]],"diameter":6}));
+    }
+    let top = bracket::face(&s, Plane, [None, None, Some(10.0)]);
+    let left = bracket::face(&s, Plane, [Some(0.0), None, None]);
+    let side = bracket::face(&s, Plane, [None, Some(0.0), None]);
+    let first = bracket::face(&s, Cylinder, [Some(20.0), None, None]);
+    let second = bracket::face(&s, Cylinder, [Some(55.0), None, None]);
+    for (letter, face) in [("A", &top), ("B", &left), ("C", &side)] {
+        call(&mut s, "pmi_add", json!({"kind":"datum","letter":letter,"faces":[face]}));
+    }
+    let target_face = s
+        .doc
+        .faces
+        .iter()
+        .find(|face| format!("{} · {}", s.doc.feature(face.feature).unwrap().name, face.label) == top)
+        .unwrap()
+        .id;
+    s.pmi.open = true;
+    let panel_state = RefCell::new(s);
+    {
+        let mut installed = false;
+        let mut app = egui_kittest::Harness::builder().with_size(egui::vec2(850.0, 1050.0)).build_ui(|ui| {
+            if installed {
+                panel::show(ui, &mut panel_state.borrow_mut());
+            } else {
+                use soliddraft_app::theme;
+                theme::install(ui.ctx(), theme::Mode::Light);
+                installed = true;
+            }
+        });
+        app.run_steps(2);
+        app.get_by_label("Datum target").click();
+        app.run_steps(2);
+        app.get_by_label("Rectangular area").click();
+        app.run_steps(2);
+        panel_state.borrow_mut().doc.selection = Some(Selection::Face(target_face));
+        app.run_steps(2);
+        for (label, value) in [
+            ("Declared datum", "A"),
+            ("Target number", "1"),
+            ("Target point X, Y, Z (mm)", "40, 25, 10"),
+            ("Length (mm)", "6"),
+            ("Width (mm)", "2"),
+            ("Tangent direction X, Y, Z", "1, 0, 0"),
+            ("Item name", "Top target"),
+        ] {
+            app.get_by_label(label).focus();
+            app.run_steps(2);
+            app.get_by_label(label).type_text(value);
+            app.run_steps(2);
+        }
+        app.get_by_label("Add").click();
+        app.run_steps(2);
+        assert!(panel_state.borrow().doc.model().pmi().item("Top target").is_some(), "native panel applied target");
+    }
+    let mut s = panel_state.into_inner();
+    call(
+        &mut s,
+        "pmi_add",
+        json!({
+            "kind":"position_control","name":"Bore pattern","features":[[first],[second]],
+            "frame":{"frame":"composite",
+                "upper":{"value_mm":"0.10","diameter_zone":true,"material":"maximum","datums":[{"letter":"A"},{"letter":"B"},{"letter":"C"}]},
+                "lower":{"value_mm":"0.04","diameter_zone":true,"material":"least","datums":[{"letter":"A"},{"letter":"B"}]}}
+        }),
+    );
+    call(
+        &mut s,
+        "pmi_add",
+        json!({
+            "kind":"position_control","name":"Projection","faces":[second],
+            "frame":{"frame":"single","segment":{"value_mm":"0.15","diameter_zone":true,"datums":[{"letter":"A"}]},
+                "projected_zone":{"height_mm":"8","direction":[0,0,1],"entry_faces":[top]}}
+        }),
+    );
+
+    let scratch = std::env::temp_dir().join(format!("soliddraft-position-pmi-{}", std::process::id()));
+    let proof = std::env::var_os("SOLIDDRAFT_PMI_PROOF_DIR").map_or_else(|| scratch.clone(), std::path::PathBuf::from);
+    std::fs::create_dir_all(&scratch).unwrap();
+    std::fs::create_dir_all(&proof).unwrap();
+    let native = scratch.join("position-pmi.dwprt");
+    let items = call(&mut s, "pmi_list", json!({}));
+    call(&mut s, "save_as", json!({"path":native}));
+    let mut reopened = state("Empty");
+    call(&mut reopened, "open", json!({"path":native}));
+    assert_eq!(call(&mut reopened, "pmi_list", json!({})), items);
+    call(&mut reopened, "make_drawing", json!({"template":"iso-a3"}));
+    let session = reopened.drawing.session.as_ref().unwrap();
+    assert!(session.requirements.unplaced.is_empty(), "{:?}", session.requirements.unplaced);
+    let drawing = &session.doc.drawing;
+    let shown = pmi_items::shown(drawing);
+    for name in ["Top target", "Bore pattern", "Projection"] {
+        assert_eq!(shown.get(name), Some(&1), "{shown:?}");
+    }
+    let sheet = &drawing.sheets[0];
+    assert!(sheet.annotations.iter().any(|a| {
+        !a.anchors.is_empty()
+            && matches!(&a.body, AnnotationKind::DatumTarget { label, extent } if label == "A1" && extent == "6×2")
+    }));
+    assert!(sheet.annotations.iter().any(|a| {
+        !a.anchors.is_empty()
+            && matches!(&a.body, AnnotationKind::PositionFrame { upper, lower: Some(lower), .. }
+            if upper.value_mm.as_str() == "0.1" && lower.value_mm.as_str() == "0.04")
+    }));
+    assert!(sheet.annotations.iter().any(|a| {
+        !a.anchors.is_empty()
+            && matches!(&a.body, AnnotationKind::PositionFrame { projected_height_mm: Some(height), .. }
+            if height.as_str() == "8")
+    }));
+    call(&mut reopened, "drawing_export_svg", json!({"path":proof.join("position-pmi.svg")}));
+    call(&mut reopened, "drawing_export_pdf", json!({"path":proof.join("position-pmi.pdf")}));
+    let _ = std::fs::remove_dir_all(scratch);
+}

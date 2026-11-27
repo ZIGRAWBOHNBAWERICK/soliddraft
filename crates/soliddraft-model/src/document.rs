@@ -301,6 +301,16 @@ impl Document {
     /// not apply are left out and named in the result. A body the kernel cannot attach
     /// information to yet is written without any, and every item is named as left out.
     fn export_step_with_pmi(&self, body: BodyId) -> Result<soliddraft_exchange::Export, String> {
+        if let Some(item) = self.pmi.items.iter().find(|item| {
+            matches!(
+                item.kind,
+                soliddraft_kernel_api::pmi::PmiKind::DatumTarget(_)
+                    | soliddraft_kernel_api::pmi::PmiKind::PositionControl(_)
+            )
+        }) && let Some(problem) = item.file_problem()
+        {
+            return Err(format!("{}: {problem}", item.id));
+        }
         let on_body = self.pmi_on(Some(body));
         let kernel = self.kernel.as_ref();
         match soliddraft_exchange::export_step_with_pmi(kernel, body, &self.name, &on_body.pmi) {

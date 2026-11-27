@@ -180,6 +180,7 @@ pub struct ViewportState {
     pub camera: Camera,
     pub display: DisplayMode,
     pub section_active: bool,
+    pub(crate) section_plane: Option<soliddraft_kernel_api::Plane>,
     pub preset: Preset,
     pub lighting: crate::graphics::Lighting,
     pub(crate) graphics: crate::graphics::Graphics,
@@ -237,6 +238,7 @@ impl Default for ViewportState {
             camera: Camera::default(),
             display: DisplayMode::default(),
             section_active: false,
+            section_plane: None,
             preset: Preset::default(),
             lighting: Default::default(),
             graphics: Default::default(),
@@ -930,6 +932,7 @@ impl ViewportState {
             tint_preview: self.graphics.tint_preview,
             red_removal: self.graphics.red_removal,
             section: self.section_active.then_some(self.graphics.section_hatch),
+            section_plane: self.section_plane,
             edge_color: self.appearance.colors.edges,
             selection_color: self.appearance.colors.selection,
             ..Default::default()

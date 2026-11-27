@@ -1692,15 +1692,12 @@ impl ViewportRenderer {
             // the CPU preview's faces the mesher refused after them. No part culling:
             // the CPU has no face bounds for the GPU faces.
             let convert = self.gpu_convert.get_or_init(|| super::gpu_preview::Convert::new(device));
-            let converted = convert.run(
-                device,
-                queue,
-                gpu,
-                table,
-                bytemuck::cast_slice(&verts),
-                &mesh.indices,
-                bytemuck::cast_slice(&silhouettes),
-            );
+            let cpu = super::gpu_preview::CpuPart {
+                vertices: bytemuck::cast_slice(&verts),
+                indices: &mesh.indices,
+                silhouettes: bytemuck::cast_slice(&silhouettes),
+            };
+            let converted = convert.run(device, queue, gpu, table, cpu);
             return GpuBody {
                 vertices: converted.vertices,
                 indices: converted.indices,

@@ -258,7 +258,7 @@ pub(crate) fn mesh_body(kernel: &dyn Kernel, body: BodyId, params: &Tessellation
 fn only_faces(mut mesh: Mesh, faces: &HashSet<FaceId>) -> Mesh {
     let mut indices = Vec::new();
     let mut triangle_faces = Vec::new();
-    for (triangle, face) in mesh.indices.chunks_exact(3).zip(&mesh.triangle_faces) {
+    for (triangle, face) in mesh.indices.as_chunks::<3>().0.iter().zip(&mesh.triangle_faces) {
         if faces.contains(face) {
             indices.extend_from_slice(triangle);
             triangle_faces.push(*face);
@@ -314,6 +314,14 @@ pub(crate) struct Convert {
     per_axis: u32,
 }
 
+/// The faces the CPU draws in a GPU preview: those the mesher refused, already in the
+/// renderer's vertex and silhouette layouts.
+pub(crate) struct CpuPart<'a> {
+    pub vertices: &'a [u8],
+    pub indices: &'a [u32],
+    pub silhouettes: &'a [u8],
+}
+
 /// What [`Convert::run`] wrote: buffers the renderer draws.
 pub(crate) struct Converted {
     pub vertices: wgpu::Buffer,
@@ -346,19 +354,19 @@ impl Convert {
         Convert { pipeline, layout, per_axis: device.limits().max_compute_workgroups_per_dimension.max(1) }
     }
 
-    /// Writes face vertices for the GPU faces of `gpu`, followed by `cpu_vertices`, and
+    /// Writes face vertices for the GPU faces of `gpu`, followed by the CPU part's, and
     /// indices for both, the CPU ones shifted past the GPU vertices. The silhouette
-    /// inputs of the GPU triangles come first, then `cpu_silhouettes`.
+    /// inputs of the GPU triangles come first, then the CPU part's. `table` is the
+    /// length of the body's appearance table.
     pub(crate) fn run(
         &self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         gpu: &GpuFaces,
         table: usize,
-        cpu_vertices: &[u8],
-        cpu_indices: &[u32],
-        cpu_silhouettes: &[u8],
+        cpu: CpuPart<'_>,
     ) -> Converted {
+        let CpuPart { vertices: cpu_vertices, indices: cpu_indices, silhouettes: cpu_silhouettes } = cpu;
         use wgpu::util::DeviceExt;
         let meshed = &gpu.meshed;
         let (gpu_vertices, gpu_indices) = match &meshed.buffers {

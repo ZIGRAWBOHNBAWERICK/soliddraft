@@ -604,12 +604,14 @@ fn view_transform(
 
 /// The kernel's certified section along `spec` through `origin`. Where the certified cut
 /// fails, the section cut from the display mesh stands in, marked unproved: the view
-/// shows it, and an export, which takes only certified line work, refuses the view.
+/// shows it, and an export, which takes only certified line work, refuses the view. Why
+/// the certified cut failed goes to the log only.
 fn section_or_mesh(part: &Part, spec: &ViewSpec, origin: Vec3) -> soliddraft_kernel_api::KernelResult<SectionView> {
     let section = |preview| part.geometry.section_view(&SectionSpec { view: ViewSpec { preview, ..*spec }, origin });
     match section(part.preview) {
         Err(exact) if !part.preview => match section(true) {
             Ok(mut mesh) => {
+                log::warn!("drawing section: the certified cut failed, showing the display mesh's: {exact}");
                 mesh.curves.unproved = true;
                 Ok(mesh)
             }

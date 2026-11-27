@@ -64,6 +64,52 @@ pub(crate) fn checked_route<T>(work: impl FnOnce() -> T) -> T {
     work()
 }
 
+static SHOWN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static CPU_PREVIEWS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static REFUSED_FACES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Notes a GPU preview put on screen, for the acceptance records.
+pub(crate) fn note_shown(body: BodyId) {
+    SHOWN.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    log::info!(target: "soliddraft_app::gpu_preview", "GPU preview shown for {body:?}");
+    publish();
+}
+
+/// Notes a CPU preview the viewport asked the kernel for, for the acceptance records.
+/// With a GPU preview installed there should be none.
+pub(crate) fn note_cpu_preview(body: BodyId) {
+    CPU_PREVIEWS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    log::info!(target: "soliddraft_app::gpu_preview", "CPU preview for the display of {body:?}");
+    publish();
+}
+
+/// The GPU preview's status and what it has shown since the process started: GPU
+/// previews, CPU previews asked for the display, and faces the mesher refused, which the
+/// CPU preview drew.
+pub fn counts() -> serde_json::Value {
+    use std::sync::atomic::Ordering::Relaxed;
+    serde_json::json!({
+        "status": status(),
+        "gpu_previews": SHOWN.load(Relaxed),
+        "cpu_previews": CPU_PREVIEWS.load(Relaxed),
+        "refused_faces": REFUSED_FACES.load(Relaxed),
+    })
+}
+
+/// Sets the page's `sdGpuPreview` to [`counts`], for the browser acceptance gate.
+fn publish() {
+    #[cfg(target_arch = "wasm32")]
+    if let Ok(value) = to_js(&counts()) {
+        let _ = js_sys::Reflect::set(&js_sys::global(), &"sdGpuPreview".into(), &value);
+    }
+}
+
+/// `value` as a JavaScript object, through JSON.
+#[cfg(target_arch = "wasm32")]
+fn to_js(value: &serde_json::Value) -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue> {
+    js_sys::JSON::parse(&value.to_string())
+}
+
 /// What the last install chose, for the logs and the acceptance records: the backend
 /// and adapter, or why the CPU preview stays.
 pub fn status() -> String {
@@ -73,6 +119,7 @@ pub fn status() -> String {
 fn set_status(status: String) {
     log::info!(target: "soliddraft_app::gpu_preview", "{status}");
     *STATUS.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = status;
+    publish();
 }
 
 /// Whether `value`, the switch's setting, turns the GPU preview off.
@@ -252,6 +299,7 @@ fn finish(
     };
     let refused: HashSet<FaceId> =
         meshed.faces.iter().filter(|face| face.draw.is_err()).map(|face| face.face).collect();
+    REFUSED_FACES.fetch_add(refused.len() as u64, std::sync::atomic::Ordering::Relaxed);
     for face in meshed.faces.iter().filter(|face| face.draw.is_err()) {
         log::info!(
             target: "soliddraft_app::gpu_preview",

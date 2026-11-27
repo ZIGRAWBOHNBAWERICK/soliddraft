@@ -5016,7 +5016,10 @@ impl Document {
                 self.show_mesh(body, topology, &mesh);
                 self.quality.made(body, mesh);
             }
-            Err(error) => match self.kernel().preview(body, &self.tess_params) {
+            Err(error) => match {
+                crate::viewport::gpu_preview::note_cpu_preview(body);
+                self.kernel().preview(body, &self.tess_params)
+            } {
                 Ok(mesh) => {
                     log::warn!("the checked mesh of {body:?} failed; its preview stays: {error}");
                     self.show_mesh(body, topology, &mesh);
@@ -6647,6 +6650,7 @@ fn preview_mesh_marked(
     if let Some(meshing) = crate::viewport::gpu_preview::mesh_body(kernel, body, params) {
         return Ok(Arc::new(gpu_display_mesh(0, body, meshing, &topology, made, &mut picks)));
     }
+    crate::viewport::gpu_preview::note_cpu_preview(body);
     let mesh = kernel.rendering(body, params).map_err(|e| e.to_string())?;
     let edges = kernel.rendering_edges(body, params).unwrap_or_else(|e| {
         log::warn!("edges of body {body:?}: {e}");
@@ -6679,6 +6683,7 @@ fn screen_mesh(
     if crate::viewport::gpu_preview::route_active() {
         kernel.checked_rendering(body, params)
     } else {
+        crate::viewport::gpu_preview::note_cpu_preview(body);
         kernel.rendering(body, params)
     }
 }
@@ -6695,6 +6700,7 @@ fn gpu_display_mesh(
     picks: &mut Vec<PickEntry>,
 ) -> DisplayMesh {
     let crate::viewport::gpu_preview::Meshing { preview, meshed, refused } = meshing;
+    crate::viewport::gpu_preview::note_shown(body);
     let first = picks.len();
     let mut out = display_mesh(feature, &refused, &preview.edges, topology, makers, picks);
     let face_picks: HashMap<FaceId, u32> = picks

@@ -79,6 +79,7 @@ impl BodyDisplay {
         let params =
             *crate::graphics::body_mesh_levels(curved_surfaces, &model.settings().viewport, &topology).params(level);
         let (kernel_mesh, polylines) = if fallback {
+            gpu_preview::note_cpu_preview(body);
             let mesh = kernel.preview(body, &params).map_err(|error| error.to_string())?;
             (mesh, kernel.preview_edges(body, &params).unwrap_or_default())
         } else {

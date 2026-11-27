@@ -150,6 +150,10 @@ pub struct Drawing {
     /// its other notes. The title block and the notes show these.
     #[serde(default, skip_serializing_if = "soliddraft_kernel_api::pmi::PartNotes::is_empty")]
     pub part_notes: soliddraft_kernel_api::pmi::PartNotes,
+    /// Views that could not be rebuilt from the pinned model revision. Kept with the
+    /// drawing so reopening it cannot make its older saved line work exportable.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub refused_views: Vec<DanglingView>,
 }
 
 impl Drawing {
@@ -165,6 +169,7 @@ impl Drawing {
             settings: DrawingSettings::default(),
             source_properties: BTreeMap::new(),
             part_notes: Default::default(),
+            refused_views: Vec::new(),
         }
     }
 

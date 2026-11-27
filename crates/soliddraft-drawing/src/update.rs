@@ -179,6 +179,7 @@ pub fn update_from_model(drawing: &mut Drawing, part: &Part) -> Result<UpdateRep
         crate::pmi_items::place_notes(drawing, sheet, part);
     }
     collect(drawing, &mut report);
+    drawing.refused_views.clone_from(&report.dangling_views);
     drawing.accept_source(part);
     Ok(report)
 }
@@ -252,6 +253,7 @@ pub fn regenerate_view(drawing: &mut Drawing, part: &Part, id: ViewId) -> Result
         }
     }
     crate::pmi_items::refresh(drawing, part, |view| ids.contains(&view), false);
+    drawing.refused_views.retain(|refusal| !ids.contains(&refusal.view));
     Ok(())
 }
 

@@ -230,10 +230,7 @@ impl DrawingDoc {
     }
 
     fn active_refusals(&self) -> impl Iterator<Item = &soliddraft_drawing::DanglingView> {
-        self.last_update
-            .iter()
-            .filter(|update| update.to_revision == self.drawing.model.pinned)
-            .flat_map(|update| &update.dangling_views)
+        self.drawing.refused_views.iter()
     }
 
     pub fn refused_views(&self) -> impl Iterator<Item = (usize, ViewId, String, &str)> {

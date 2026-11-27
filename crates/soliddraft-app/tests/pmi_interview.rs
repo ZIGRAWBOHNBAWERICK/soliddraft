@@ -17,7 +17,8 @@ use bracket::{build, call, face, faces, state};
 use std::collections::BTreeSet;
 
 use serde_json::{Value, json};
-use soliddraft_app::state::AppState;
+use soliddraft_app::{app_tools::AppTools, chat::ChatState, state::AppState};
+use soliddraft_assistant::{Caller, MockProvider, MockTurn, ToolHost};
 use soliddraft_kernel_api::SurfaceKind;
 
 /// The bracket with no manufacturing information, imported from its own STEP file.
@@ -416,12 +417,22 @@ fn two_compound_hole_checks_match_direct_values_and_survive_reopen() {
 
     let mut accepted_ids = Vec::new();
     let mut expectations = Vec::new();
+    let recognised = call(&mut accepted, "pmi_recognise", json!({}));
     for (kind, x, pilot_z, surface, head_z, through, callout) in [
         ("counterbore", 12.0, 5.5, SurfaceKind::Cylinder, Some(9.0), false, "Ø4 DRILL DEEP 7\nC'BORE Ø10 DEEP 2"),
         ("countersink", 30.0, 4.0, SurfaceKind::Cone, None, true, "Ø4 THRU\nC'SINK Ø8 × 90°"),
     ] {
         let pilot = face(&accepted, SurfaceKind::Cylinder, [Some(x), Some(20.0), Some(pilot_z)]);
         let head = face(&accepted, surface, [Some(x), Some(20.0), head_z]);
+        let entry = recognised["features"].as_array().unwrap().iter().find(|f| f["kind"] == kind).unwrap();
+        assert_eq!(entry["faces"], json!([pilot, head]));
+        let (depth, head_diameter, angle) = if through { (10.0, 8.0, json!(90.0)) } else { (7.0, 10.0, Value::Null) };
+        assert_eq!(entry["through"], through);
+        assert_eq!(
+            entry["sizes_mm"],
+            json!({"diameter": 4.0, "depth": depth, "head_diameter": head_diameter, "head_depth": 2.0})
+        );
+        assert_eq!(entry["angle_deg"], angle);
         let id = format!("{kind} Ø4 geometry: {pilot}");
         let question = questions.iter().find(|q| q["id"] == id).unwrap_or_else(|| panic!("{id}: {questions:#?}"));
         assert_eq!(question["proposes"], callout);
@@ -437,8 +448,33 @@ fn two_compound_hole_checks_match_direct_values_and_survive_reopen() {
         accepted_ids.push(id);
         expectations.push((name, pilot, head, callout));
     }
-    let answered = call(&mut accepted, "pmi_answer", json!({"accept": accepted_ids}));
-    assert_eq!(answered["accepted"], json!(accepted_ids));
+    let provider = std::sync::Arc::new(MockProvider::new(Vec::new()));
+    accepted.chat = ChatState::connected(provider.clone(), "mock provider");
+    let intent = questions.iter().find(|q| asks(q) == "counterbore Ø4 fit or thread").unwrap();
+    let refuse = json!({"accept": [intent["id"]]});
+    let error =
+        AppTools { state: &mut accepted }.call("pmi_answer", refuse.clone(), &Caller::Mcp { client: "test".into() });
+    assert!(error.is_error && error.content.contains("has no proposal"), "{}", error.content);
+    provider.push(vec![
+        MockTurn::tools("", vec![("pmi_answer", refuse)]),
+        MockTurn::tools("", vec![("pmi_answer", json!({"accept": accepted_ids}))]),
+        MockTurn::text("The measured dimensions are ready for approval; I still need the fit or thread."),
+    ]);
+    accepted.chat.draft = "Record the measured compound-hole dimensions; leave the fit unspecified.".into();
+    accepted.send_chat();
+    accepted.wait_assistant();
+    assert_eq!(provider.remaining(), 0);
+    let requests = provider.requests();
+    let result = |index: usize| {
+        requests[index].messages.last().unwrap().content.iter().find(|b| b["type"] == "tool_result").unwrap()
+    };
+    assert_eq!(result(1)["is_error"], true);
+    assert!(result(1)["content"].as_str().unwrap().contains("has no proposal"));
+    assert_eq!(result(2)["is_error"], false);
+    let card: Value = serde_json::from_str(result(2)["content"].as_str().unwrap()).unwrap();
+    assert_eq!(card["status"], "pending");
+    assert_eq!(call(&mut accepted, "pmi_list", json!({}))["items"], json!([]));
+    accepted.apply_proposal(card["proposal_id"].as_str().unwrap());
     let open = interview(&mut accepted);
     for (kind, (_, pilot, _, _)) in ["counterbore", "countersink"].into_iter().zip(&expectations) {
         let id = format!("{kind} Ø4 fit or thread: {pilot}");
@@ -532,8 +568,14 @@ fn a_recess_depth_and_fillet_radius_do_not_answer_edge_intent() {
     let chamfer = edge_at(&plate, 0.0, 0.0);
     call(&mut plate, "chamfer", json!({"edges": [chamfer], "distance": 1}));
     let questions = interview(&mut plate);
-    let chamfer_intent = questions.iter().find(|q| asks(q) == "chamfer treatment").unwrap();
-    assert!(chamfer_intent.get("proposal").is_none(), "{chamfer_intent}");
-    assert!(chamfer_intent["asks"].as_str().unwrap().contains("1 mm setback"), "{chamfer_intent}");
+    let treatment = questions.iter().find(|q| asks(q) == "chamfer treatment").unwrap();
+    assert_eq!(treatment["proposes"], "1 × 45° CHAMFER");
+    let answered = call(&mut plate, "pmi_answer", json!({"accept": [treatment["id"]]}));
+    let open = interview(&mut plate);
+    assert!(open.iter().all(|q| q["id"] != treatment["id"]), "{open:#?}");
+    let items = answered["items"].as_array().unwrap();
+    let row = items.iter().find(|item| item["name"] == treatment["proposal"]["item"]["id"]).unwrap();
+    assert_eq!(row["callout"], treatment["proposes"]);
+    assert!(row.get("problem").is_none(), "{row}");
     std::fs::remove_dir_all(dir).unwrap();
 }

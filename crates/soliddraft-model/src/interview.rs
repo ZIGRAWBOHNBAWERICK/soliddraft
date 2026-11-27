@@ -3,10 +3,9 @@
 //!
 //! An imported part has geometry and no requirements. The kernel reads its features off
 //! its faces ([`Document::recognised`]); the interview then lists what a drawing of the
-//! part cannot do without and what the part does not yet state: its material and general
-//! tolerance, three datums, and for every hole, boss and slot its size, where it is
-//! held from and, for a fitted hole, its finish. A decision the part has already taken
-//! is not asked again.
+//! part still lacks: material and general tolerance, datum and dimension checks, and
+//! requirements such as fits and threads. A decision the part has already taken is
+//! not asked again.
 //!
 //! Every proposal comes from a rule, never from a guess about intent:
 //!
@@ -43,7 +42,7 @@ use crate::reference::FaceRef;
 /// A feature the kernel read off the body, on the body's faces.
 #[derive(Clone, Debug, PartialEq)]
 pub struct RecognisedFeature {
-    /// What it is: `hole`, `hole pattern`, `boss` or `slot`.
+    /// The feature kind, such as `hole`, `counterbore`, `pocket` or `chamfer`.
     pub kind: String,
     /// What the interview and the panel call it, such as `Hole Ø8` or `4 holes Ø4`.
     pub name: String,
@@ -56,9 +55,10 @@ pub struct RecognisedFeature {
     pub opens_onto: Vec<FaceId>,
     /// The faces that close a hole, or the face on top of a boss.
     pub closed_by: Vec<FaceId>,
-    /// Its sizes in millimetres, by name: `diameter`, `depth`, `height`, `length`,
-    /// `width`.
+    /// Its linear dimensions in millimetres, by name.
     pub sizes: Vec<(String, f64)>,
+    /// The included countersink angle or the chamfer angle, in degrees.
+    pub angle_deg: Option<f64>,
 }
 
 /// What a question proposes.
@@ -223,6 +223,7 @@ impl Document {
                 opens_onto: labels(&hole.opens_onto),
                 closed_by: labels(&hole.bottoms),
                 sizes,
+                angle_deg: None,
             });
         }
         for pattern in &found.hole_patterns {
@@ -237,6 +238,7 @@ impl Document {
                 opens_onto: labels(&first.opens_onto),
                 closed_by: labels(&first.bottoms),
                 sizes,
+                angle_deg: None,
             });
         }
         for boss in &found.bosses {
@@ -250,6 +252,7 @@ impl Document {
                 opens_onto: labels(&[boss.base]),
                 closed_by: labels(&[boss.top]),
                 sizes,
+                angle_deg: None,
             });
         }
         for slot in &found.slots {
@@ -261,6 +264,57 @@ impl Document {
                 opens_onto: Vec::new(),
                 closed_by: Vec::new(),
                 sizes: vec![("length".to_owned(), slot.length), ("width".to_owned(), slot.width)],
+                angle_deg: None,
+            });
+        }
+        for hole in found.compound_holes {
+            let (kind, angle_deg) = match hole.head {
+                CompoundHead::Counterbore { .. } => ("counterbore", None),
+                CompoundHead::Countersink { angle_deg } => ("countersink", Some(angle_deg)),
+            };
+            out.push(RecognisedFeature {
+                kind: kind.into(),
+                name: format!("{} Ø{}", capital(kind), length_text(hole.pilot_diameter)),
+                faces: hole.pilot_faces.into_iter().chain(hole.head_faces).collect(),
+                through: Some(hole.through),
+                opens_onto: if hole.through { vec![hole.entry, hole.end] } else { vec![hole.entry] },
+                closed_by: if hole.through { Vec::new() } else { vec![hole.end] },
+                sizes: vec![
+                    ("diameter".into(), hole.pilot_diameter),
+                    ("depth".into(), hole.depth),
+                    ("head_diameter".into(), hole.head_diameter),
+                    ("head_depth".into(), hole.head_depth),
+                ],
+                angle_deg,
+            });
+        }
+        for recess in found.recesses {
+            let kind = if recess.open_sided { "step" } else { "pocket" };
+            out.push(RecognisedFeature {
+                kind: kind.into(),
+                name: capital(kind),
+                faces: std::iter::once(recess.floor).chain(recess.walls).collect(),
+                through: None,
+                opens_onto: recess.opens_onto,
+                closed_by: vec![recess.floor],
+                sizes: vec![("depth".into(), recess.depth)],
+                angle_deg: None,
+            });
+        }
+        for edge in found.edge_treatments {
+            let (kind, dimension, value, angle_deg) = match edge.kind {
+                EdgeTreatmentKind::Fillet { radius } => ("fillet", "radius", radius, None),
+                EdgeTreatmentKind::Chamfer { setback } => ("chamfer", "setback", setback, Some(45.0)),
+            };
+            out.push(RecognisedFeature {
+                kind: kind.into(),
+                name: capital(kind),
+                faces: vec![edge.face],
+                through: None,
+                opens_onto: Vec::new(),
+                closed_by: Vec::new(),
+                sizes: vec![(dimension.into(), value)],
+                angle_deg,
             });
         }
         Ok(out)
@@ -327,12 +381,11 @@ impl Document {
                         asking.plane_distances.insert(ordered_pair(*a, *b));
                     }
                 }
-                PmiKind::Width { .. }
-                | PmiKind::Chamfer { .. }
-                | PmiKind::EdgeBreak { .. }
-                | PmiKind::BasicAngle { .. }
-                | PmiKind::DatumTarget(_)
-                | PmiKind::PositionControl(_) => {}
+                PmiKind::Chamfer { bevel, .. } | PmiKind::EdgeBreak { bevel, .. } => {
+                    asking.edge_limits.extend(bevel);
+                }
+                PmiKind::PositionControl(_) => asking.positioned.extend(all()),
+                PmiKind::Width { .. } | PmiKind::BasicAngle { .. } | PmiKind::DatumTarget(_) => {}
                 PmiKind::Datum { letter, feature } => {
                     let flat = feature.first().and_then(|face| asking.face(*face)).and_then(|info| {
                         Some(Flat { face: info.id, normal: info.normal?, centroid: info.centroid, area: info.area })
@@ -671,7 +724,25 @@ fn edges(asking: &mut Asking, found: &Recognised) {
         let Some(feature) = asking.refs(&[edge.face]) else { continue };
         let (key, nominal) = match edge.kind {
             EdgeTreatmentKind::Fillet { radius } => ("fillet", format!("R{}", length_text(radius))),
-            EdgeTreatmentKind::Chamfer { setback } => ("chamfer", format!("{} mm setback", length_text(setback))),
+            EdgeTreatmentKind::Chamfer { setback } => {
+                if !asking.edge_limits.contains(&edge.face)
+                    && let (Some(a), Some(b)) = (asking.refs(&[edge.supports[0]]), asking.refs(&[edge.supports[1]]))
+                {
+                    let id = question_id("chamfer", "treatment", std::slice::from_ref(&feature));
+                    let item = PmiItem {
+                        id: asking.name("Chamfer"),
+                        kind: PmiKind::Chamfer { bevel: feature, sides: [a, b] },
+                    };
+                    asking.ask(
+                        id,
+                        "Record the measured chamfer, or specify edge-break limits?".into(),
+                        "The setback and angle come from equal setbacks on perpendicular supports; any limits must be stated.",
+                        item,
+                        &[setback, 45.0],
+                    );
+                }
+                continue;
+            }
         };
         let id = |aspect| question_id(key, aspect, std::slice::from_ref(&feature));
         if let EdgeTreatmentKind::Fillet { radius } = edge.kind

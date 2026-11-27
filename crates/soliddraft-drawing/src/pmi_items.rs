@@ -689,7 +689,7 @@ impl Planner<'_> {
                     _ => Err("an angle needs two planes".to_owned()),
                 };
                 let ((p, n), (q, m)) = (flat(first)?, flat(second)?);
-                let mut best = None;
+                let mut best: Option<((u8, i32), &ViewContext, EdgeId, EdgeId)> = None;
                 for view in self.views.iter().copied() {
                     let frame = &view.xf.frame;
                     if n.dot(frame.direction).abs() > 1e-6 || m.dot(frame.direction).abs() > 1e-6 {

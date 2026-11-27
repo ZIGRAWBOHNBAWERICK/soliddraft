@@ -519,7 +519,7 @@ impl PartCull {
         let limits = device.limits();
         if bounds.len() < PART_CULL_MIN_FACES
             || faces.div_ceil(256) > limits.max_compute_workgroups_per_dimension
-            || std::mem::size_of_val(bounds.as_slice()) as u64 > u64::from(limits.max_storage_buffer_binding_size)
+            || std::mem::size_of_val(bounds.as_slice()) as u64 > limits.max_storage_buffer_binding_size
         {
             return None;
         }

@@ -56,5 +56,21 @@ class SummarizeTest(unittest.TestCase):
             self.assertFalse(preview.summarize('box', bundle, 0)['accepted'])
 
 
+class CanvasAdapterTest(unittest.TestCase):
+    APPLE = {'backend': 'WebGPU', 'fallback': False, 'vendor': 'apple', 'description': 'apple'}
+
+    def test_the_app_status_names_the_canvas_adapter_when_the_hook_saw_none(self):
+        record = {'renderer': None, 'requests': [self.APPLE],
+                  'preview': {'status': 'GPU preview on backend: BrowserWebGpu, device_type: Other, name: "apple"'}}
+        self.assertEqual(preview.canvas_adapter(record), self.APPLE)
+
+    def test_a_fallback_request_or_the_cpu_preview_names_no_adapter(self):
+        status = {'status': 'GPU preview on backend: BrowserWebGpu, device_type: Other, name: "apple"'}
+        fallback = {**self.APPLE, 'fallback': True}
+        self.assertIsNone(preview.canvas_adapter({'requests': [self.APPLE, fallback], 'preview': status}))
+        off = {'status': 'GPU preview off, CPU preview kept (preview.no-device: Gl has no compute)'}
+        self.assertIsNone(preview.canvas_adapter({'requests': [self.APPLE], 'preview': off}))
+
+
 if __name__ == '__main__':
     unittest.main()

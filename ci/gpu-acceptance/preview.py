@@ -104,8 +104,9 @@ def summarize(name, bundle, exit_code):
                     record['kernel_previews'] += 1
     record['checked_ms'] = {revision: round(ms, 1) for revision, ms in record['checked_ms'].items()}
     record['checked_total_ms'] = round(sum(record['checked_ms'].values()), 1)
-    # Strict: the kernel logs show no CPU preview call at all. Faces the GPU mesher refuses
-    # and field bodies still call it.
+    # Strict: the step logs show no CPU preview call at all. They also count calls outside
+    # the viewport: saved display data and field bodies keep the CPU preview by decision,
+    # and faces the GPU mesher refuses fall back to it (`refused_faces`).
     record['strict'] = record['kernel_previews'] == 0
     problems = []
     if not record['steps']:
@@ -145,6 +146,20 @@ class PartServer(gate.GateServer):
         super().do_GET()
 
 
+def canvas_adapter(record):
+    """The canvas device's adapter: the probe's record of it, or else the adapter the app's
+    GPU preview names for its own device, matched to the page's adapter requests. Safari 27
+    configures the canvas without passing the probe's hook."""
+    if record.get('renderer'):
+        return record['renderer']
+    status = (record.get('preview') or {}).get('status') or ''
+    requests = [request for request in record.get('requests') or [] if request]
+    if 'BrowserWebGpu' not in status or not requests:
+        return None
+    named = [request for request in requests if f'name: "{request.get("description")}"' in status]
+    return named[-1] if named and all(request.get('fallback') is False for request in requests) else None
+
+
 def safari_scenario(evaluate, screenshot, navigate, name, out):
     record = {'scenario': name}
     navigate()
@@ -156,11 +171,12 @@ def safari_scenario(evaluate, screenshot, navigate, name, out):
     })'''
 
     def state():
-        record.update(evaluate(snapshot))
-        return record.get('renderer') and record.get('ready')
+        record.update(evaluate(snapshot) or {})
+        record['adapter'] = canvas_adapter(record)
+        return record['adapter'] and record.get('ready')
 
     gate.wait_for(state, 'the shipping Wasm viewport', seconds=90)
-    gate.require_hardware(record['renderer'], {'WebGPU'})
+    gate.require_hardware(record['adapter'], {'WebGPU'})
     result = evaluate(f'window.gpuAcceptance.drop({json.dumps(name)}).then(() => true)')
     if result is not True:
         raise RuntimeError(f'Dropping {name}: {result}')
@@ -203,7 +219,7 @@ def safari(args, out, records):
                         continue
                     try:
                         records.append(safari_scenario(evaluate, screenshot, navigate, name, out))
-                    except (ValueError, RuntimeError) as error:
+                    except (ValueError, RuntimeError, TypeError) as error:
                         records.append({'scenario': name, 'accepted': False, 'problems': [str(error)]})
             return browser_record
         finally:

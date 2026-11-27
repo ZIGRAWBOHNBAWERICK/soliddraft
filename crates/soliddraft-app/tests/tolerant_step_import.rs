@@ -111,7 +111,7 @@ fn tolerant_and_certified_imports_display_with_their_own_authority_and_reopen() 
                 let soliddraft_exchange::Report::Step(report) = &export.report else { panic!("STEP report") };
                 assert!(report.tolerant && report.approximate.is_none() && !report.within_tolerance);
                 assert_eq!((report.faces, report.edges, report.vertices), (6, 12, 8));
-                assert!(export.report.summary().contains("not certified"));
+                assert!(export.report.summary().contains("distance from the part is unknown"));
             } else {
                 for (_, body) in doc.model().live_bodies() {
                     let export = doc.kernel().export_step(body, &StepOptions::default()).unwrap();

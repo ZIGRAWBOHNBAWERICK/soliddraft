@@ -77,7 +77,7 @@ fn displayed_field(doc: &Document, name: &str) -> soliddraft_kernel_api::BodyId 
     let feature = doc.features.last().unwrap();
     assert_eq!(feature.name, name);
     assert_eq!(feature.status, FeatureStatus::Ok);
-    assert!(feature.summary().contains("unproved preview"));
+    assert!(feature.summary().starts_with('±') && !feature.summary().contains("unproved"), "{}", feature.summary());
     assert!(doc.triangle_count() > 0);
     doc.display_body().unwrap()
 }

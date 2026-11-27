@@ -869,6 +869,9 @@ pub fn annotation_body(
             }
             hint(ui, "ISO 1101 and ASME Y14.5: the characteristic, the zone and the datums, primary first.");
         }
+        AnnotationKind::PositionFrame { .. } | AnnotationKind::DatumTarget { .. } => {
+            hint(ui, "This symbol reads the part's manufacturing information. Edit it on the part.");
+        }
         AnnotationKind::SurfaceFinish { .. } => {
             let Some(mut f) = FinishDraft::from_body(&a.body) else { return false };
             if finish_editor(ui, &mut f, "finish_edit") {

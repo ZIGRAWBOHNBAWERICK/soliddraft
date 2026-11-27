@@ -30,7 +30,7 @@ use serde::{Deserialize, Serialize};
 use soliddraft_kernel_api::drawing::Curve3;
 use soliddraft_kernel_api::pmi::{
     Anchor, At, Feature, GdtCharacteristic, HoleHeadKind, HoleHeadNominals, HoleNominals, PartNotes, Pmi, PmiItem,
-    PmiKind, StepPmi, Tolerance, length_text,
+    PmiKind, PositionFrame, StepPmi, TargetArea, TargetKind, Tolerance, length_text,
 };
 use soliddraft_kernel_api::{
     BodyId, EdgeId, FaceAxis, FaceId, FaceRole, HolePart, Kernel, KernelError, SurfaceKind, Topology,
@@ -194,6 +194,7 @@ const HOLE_EPS: f64 = 1e-7;
 struct HoleRim {
     z: f64,
     radius: f64,
+    sweep_rad: f64,
     edges: Vec<EdgeId>,
     neighbours: Vec<FaceId>,
 }
@@ -213,11 +214,12 @@ fn hole_rims(
                 continue; // Seam or boundary between pieces of the same wall.
             }
             let curve = kernel.edge_drawing(body, edge.id).map_err(|error| error.to_string())?;
-            let (center, normal, radius) = match curve.curve {
-                Curve3::Circle { center, normal, radius } | Curve3::Arc { center, normal, radius, .. }
-                    if !curve.approximate =>
-                {
-                    (center, normal, radius)
+            let (center, normal, radius, sweep) = match curve.curve {
+                Curve3::Circle { center, normal, radius } if !curve.approximate => {
+                    (center, normal, radius, std::f64::consts::TAU)
+                }
+                Curve3::Arc { center, normal, radius, start_deg, end_deg, .. } if !curve.approximate => {
+                    (center, normal, radius, (end_deg - start_deg).to_radians())
                 }
                 _ => continue,
             };
@@ -233,11 +235,12 @@ fn hole_rims(
                     if rims.len() == 2 {
                         return Err("The hole wall has more than two circular rims.".into());
                     }
-                    rims.push(HoleRim { z, radius, edges: Vec::new(), neighbours: Vec::new() });
+                    rims.push(HoleRim { z, radius, sweep_rad: 0.0, edges: Vec::new(), neighbours: Vec::new() });
                     rims.last_mut().unwrap()
                 }
             };
             if !rim.edges.contains(&edge.id) {
+                rim.sweep_rad += sweep;
                 rim.edges.push(edge.id);
                 for neighbour in edge.faces.iter().filter(|face| !faces.contains(face)) {
                     if !rim.neighbours.contains(neighbour) {
@@ -364,6 +367,213 @@ fn measure_hole(
     })
 }
 
+fn direction(vector: [f64; 3]) -> Result<Vec3, String> {
+    let [x, y, z] = vector;
+    let scale = x.abs().max(y.abs()).max(z.abs());
+    if !vector.into_iter().all(f64::is_finite) || scale == 0.0 {
+        return Err("The direction must be finite and nonzero.".into());
+    }
+    let scaled = Vec3::new(x / scale, y / scale, z / scale);
+    Ok(scaled * (1.0 / scaled.length()))
+}
+
+fn cylinder(carriers: &[FaceCarrier], group: &[FaceId]) -> Result<FaceAxis, String> {
+    let axis_of = |id| carriers.iter().find(|face| face.id == id).and_then(|face| face.axis);
+    let axis = group.first().copied().and_then(axis_of).ok_or("Pick a checked cylindrical feature.")?;
+    for &id in group {
+        let other = axis_of(id).ok_or("Every controlled face must be cylindrical.")?;
+        if (axis.radius - other.radius).abs() > HOLE_EPS
+            || (axis.point - other.point).cross(axis.direction).length() > HOLE_EPS
+            || axis.direction.cross(other.direction).length() > HOLE_EPS
+        {
+            return Err("A feature group must describe one checked cylinder.".into());
+        }
+    }
+    Ok(axis)
+}
+
+fn full_cylinder(kernel: &dyn Kernel, body: BodyId, topology: &Topology, faces: &[FaceId], axis: FaceAxis) -> bool {
+    hole_rims(kernel, body, topology, faces, axis).is_ok_and(|rims| {
+        rims.iter().all(|rim| {
+            (rim.sweep_rad - std::f64::consts::TAU).abs() <= HOLE_EPS && (rim.radius - axis.radius).abs() <= HOLE_EPS
+        })
+    })
+}
+
+fn feature_of_size(
+    kernel: &dyn Kernel,
+    body: BodyId,
+    topology: &Topology,
+    carriers: &[FaceCarrier],
+    faces: &[FaceId],
+) -> bool {
+    if let Ok(axis) = cylinder(carriers, faces) {
+        return full_cylinder(kernel, body, topology, faces, axis);
+    }
+    matches!(faces, [a, b] if a != b)
+        && planar_group(carriers, &faces[..1]).ok().zip(planar_group(carriers, &faces[1..]).ok()).is_some_and(
+            |((a, na), (b, nb))| {
+                na.dot(nb) < 0.0 && na.cross(nb).length() <= HOLE_EPS && (b - a).dot(na).abs() > HOLE_EPS
+            },
+        )
+}
+
+enum TargetFootprint {
+    Round(f64),
+    Box([f64; 2]),
+}
+
+impl TargetFootprint {
+    // The chord is inflated by its proved sagitta. A trim entering this envelope
+    // prevents a containment proof, including a hole wholly inside the footprint.
+    fn touches(&self, a: [f64; 2], b: [f64; 2], error: f64) -> bool {
+        let d = [b[0] - a[0], b[1] - a[1]];
+        match self {
+            Self::Round(radius) => {
+                let square = d[0] * d[0] + d[1] * d[1];
+                let t = if square == 0.0 { 0.0 } else { (-(a[0] * d[0] + a[1] * d[1]) / square).clamp(0.0, 1.0) };
+                (a[0] + t * d[0]).hypot(a[1] + t * d[1]) <= radius + error
+            }
+            Self::Box(half) => {
+                let (mut lo, mut hi) = (0.0_f64, 1.0_f64);
+                for i in 0..2 {
+                    let bound = half[i] + error;
+                    if d[i] == 0.0 {
+                        if a[i].abs() > bound {
+                            return false;
+                        }
+                    } else {
+                        let t0 = (-bound - a[i]) / d[i];
+                        let t1 = (bound - a[i]) / d[i];
+                        lo = lo.max(t0.min(t1));
+                        hi = hi.min(t0.max(t1));
+                    }
+                }
+                lo <= hi
+            }
+        }
+    }
+}
+
+fn target_on_face(
+    kernel: &dyn Kernel,
+    body: BodyId,
+    carriers: &[FaceCarrier],
+    target: &soliddraft_kernel_api::pmi::DatumTarget<FaceId>,
+) -> Result<(), String> {
+    let face = carriers.iter().find(|face| face.id == target.face).ok_or("The target face is missing.")?;
+    let (Some(origin), Some(normal)) = (face.on_plane, face.normal) else {
+        return Err("The target needs a checked planar supporting face.".into());
+    };
+    let [x, y, z] = target.point_mm;
+    let point = Vec3::new(x, y, z);
+    if !target.point_mm.into_iter().all(f64::is_finite) || (point - origin).dot(normal).abs() > HOLE_EPS {
+        return Err("The target point is off its supporting face.".into());
+    }
+    let (footprint, along) = match &target.kind {
+        TargetKind::Point => (TargetFootprint::Round(0.0), None),
+        TargetKind::Area { area: TargetArea::Circular { diameter_mm } } => {
+            (TargetFootprint::Round(diameter_mm.value() / 2.0), None)
+        }
+        TargetKind::Line { length_mm, direction: along } => {
+            (TargetFootprint::Box([length_mm.value() / 2.0, 0.0]), Some(direction(*along)?))
+        }
+        TargetKind::Area { area: TargetArea::Rectangular { length_mm, width_mm, direction: along } } => {
+            (TargetFootprint::Box([length_mm.value() / 2.0, width_mm.value() / 2.0]), Some(direction(*along)?))
+        }
+    };
+    let x_axis = along.unwrap_or_else(|| {
+        let axis = normal.cross(if normal.x.abs() < 0.8 { Vec3::new(1.0, 0.0, 0.0) } else { Vec3::Z });
+        axis * (1.0 / axis.length())
+    });
+    if x_axis.dot(normal).abs() > HOLE_EPS {
+        return Err("The datum target direction must be tangent to its supporting plane.".into());
+    }
+    let y_axis = normal.cross(x_axis);
+    let local = |p: Vec3| {
+        let d = p - point;
+        [d.dot(x_axis), d.dot(y_axis)]
+    };
+    let loops = kernel.face_drawing_loops(body, target.face).map_err(|error| error.to_string())?;
+    let mut inside = false;
+    let mut on_line = false;
+    for edge in loops.iter().flatten() {
+        let (radius, angle) = match &edge.curve {
+            Curve3::Line { .. } if !edge.approximate => (0.0, 0.0),
+            Curve3::Circle { radius, .. } if !edge.approximate => (*radius, std::f64::consts::TAU),
+            Curve3::Arc { radius, start_deg, end_deg, .. } if !edge.approximate => {
+                (*radius, (end_deg - start_deg).to_radians())
+            }
+            _ => return Err("The target trim cannot be checked from its boundary curves.".into()),
+        };
+        let steps = (angle * (radius / (8.0 * HOLE_EPS)).sqrt()).ceil().clamp(1.0, 4096.0) as u32;
+        let half_angle = angle / (4.0 * f64::from(steps));
+        let error = 2.0 * radius * half_angle.sin().powi(2);
+        let mut a = local(edge.curve.start());
+        for step in 1..=steps {
+            let b = local(edge.curve.point_at(f64::from(step) / f64::from(steps)));
+            if footprint.touches(a, b, error + HOLE_EPS) {
+                if matches!(target.kind, TargetKind::Point) && error == 0.0 && footprint.touches(a, b, HOLE_EPS) {
+                    on_line = true;
+                } else {
+                    return Err("The target footprint meets or crosses the supporting face trim.".into());
+                }
+            }
+            if (a[1] > 0.0) != (b[1] > 0.0) && a[0] + (b[0] - a[0]) * (-a[1] / (b[1] - a[1])) > 0.0 {
+                inside = !inside;
+            }
+            a = b;
+        }
+    }
+    if inside || on_line { Ok(()) } else { Err("The target point is off its supporting face.".into()) }
+}
+
+fn projection_start(
+    kernel: &dyn Kernel,
+    body: BodyId,
+    topology: &Topology,
+    carriers: &[FaceCarrier],
+    group: &[FaceId],
+    axis: FaceAxis,
+    entry: FaceId,
+    outward: Vec3,
+) -> Result<(), String> {
+    let face = carriers.iter().find(|face| face.id == entry).ok_or("The projection entry face is missing.")?;
+    let (Some(point), Some(normal)) = (face.on_plane, face.normal) else {
+        return Err("The projection entry needs a checked planar face.".into());
+    };
+    if normal.dot(outward) <= 0.0
+        || normal.cross(outward).length() > HOLE_EPS
+        || axis.direction.cross(outward).length() > HOLE_EPS
+    {
+        return Err("The projected direction must run outward along the controlled axis.".into());
+    }
+    let z = (point - axis.point).dot(normal) / axis.direction.dot(normal);
+    let rims = hole_rims(kernel, body, topology, group, axis)?;
+    let mut openings = rims.iter().filter(|rim| (rim.z - z).abs() <= HOLE_EPS && rim.neighbours.contains(&entry));
+    let rim = openings
+        .next()
+        .filter(|_| openings.next().is_none())
+        .ok_or("The axis does not have a unique opening at the selected entry.")?;
+    if (rim.radius - axis.radius).abs() > HOLE_EPS
+        || rims.iter().any(|other| (other.z - rim.z) * axis.direction.dot(outward) > HOLE_EPS)
+        || topology.face(entry).is_none_or(|face| face.edges.iter().all(|edge| rim.edges.contains(edge)))
+    {
+        return Err("The selected entry must open outward into free space.".into());
+    }
+    Ok(())
+}
+
+fn checked_gdt_kind(kind: &PmiKind<FaceRef>) -> bool {
+    match kind {
+        PmiKind::DatumTarget(_) | PmiKind::PositionControl(_) => true,
+        PmiKind::Gdt { material, datums, .. } => {
+            !material.is_regardless() || datums.iter().any(|datum| !datum.material.is_regardless())
+        }
+        _ => false,
+    }
+}
+
 fn planar_group(carriers: &[FaceCarrier], ids: &[FaceId]) -> Result<(Vec3, Vec3), String> {
     let plane = |id| {
         let face = carriers.iter().find(|face| face.id == id && face.surface == SurfaceKind::Plane)?;
@@ -445,6 +655,134 @@ fn measure_planar_pmi(
 }
 
 impl Document {
+    fn checked_gdt_on(
+        &self,
+        state: &PartPmi,
+        item: &PmiItem<FaceId>,
+        body: BodyId,
+        topology: &Topology,
+        names: &reference::NameMap,
+        carriers: &[FaceCarrier],
+    ) -> Result<(), String> {
+        let check_datum = |datum: &soliddraft_kernel_api::pmi::DatumRef, require_face: bool| -> Result<(), String> {
+            for letter in datum.letters() {
+                if !require_face && datum.material.is_regardless() {
+                    continue;
+                }
+                let declared = state
+                    .items
+                    .iter()
+                    .find(|item| {
+                        matches!(&item.kind, PmiKind::Datum { letter: name, .. }
+                    if name == letter)
+                    })
+                    .ok_or_else(|| format!("Datum {letter} is not defined."))?;
+                let placed =
+                    self.item_on(declared, topology, names).map_err(|error| format!("Datum {letter}: {error}"))?;
+                let PmiKind::Datum { feature, .. } = placed.kind else { unreachable!() };
+                if !datum.material.is_regardless()
+                    && (!feature_of_size(self.kernel.as_ref(), body, topology, carriers, &feature)
+                        || state
+                            .items
+                            .iter()
+                            .any(|item| matches!(&item.kind, PmiKind::DatumTarget(t) if t.datum == letter)))
+                {
+                    return Err(format!("Datum {letter} does not support a material boundary modifier."));
+                }
+            }
+            Ok(())
+        };
+        match &item.kind {
+            PmiKind::DatumTarget(target) => target_on_face(self.kernel.as_ref(), body, carriers, target),
+            PmiKind::PositionControl(control) => {
+                let projected = match &control.frame {
+                    PositionFrame::Single { projected_zone, .. } => projected_zone.as_ref(),
+                    PositionFrame::Composite { .. } => None,
+                };
+                let outward = projected.map(|zone| direction(zone.direction)).transpose()?;
+                let material = control.frame.segments().position(|segment| !segment.material.is_regardless());
+                for (i, group) in control.features.iter().enumerate() {
+                    if control.features[..i].iter().any(|other| group.iter().any(|face| other.contains(face))) {
+                        return Err("Controlled feature groups must not reuse faces.".into());
+                    }
+                    let axis =
+                        cylinder(carriers, group).map_err(|error| format!("Controlled feature {}: {error}", i + 1))?;
+                    if let Some(segment) = material
+                        && !full_cylinder(self.kernel.as_ref(), body, topology, group, axis)
+                    {
+                        return Err(format!(
+                            "Position segment {}: feature {} does not support a material modifier.",
+                            segment + 1,
+                            i + 1
+                        ));
+                    }
+                    if let (Some(zone), Some(outward)) = (projected, outward) {
+                        let entry =
+                            *zone.entry_faces.get(i).ok_or("A projected zone needs an entry for every feature.")?;
+                        projection_start(self.kernel.as_ref(), body, topology, carriers, group, axis, entry, outward)
+                            .map_err(|error| format!("Projected entry {}: {error}", i + 1))?;
+                    }
+                }
+                for (i, segment) in control.frame.segments().enumerate() {
+                    for datum in &segment.datums {
+                        check_datum(datum, true).map_err(|error| format!("Position segment {}: {error}", i + 1))?;
+                    }
+                }
+                Ok(())
+            }
+            PmiKind::Gdt { characteristic, material, datums, features, .. } => {
+                if !material.is_regardless()
+                    && (!matches!(
+                        characteristic,
+                        GdtCharacteristic::Position
+                            | GdtCharacteristic::Straightness
+                            | GdtCharacteristic::Flatness
+                            | GdtCharacteristic::Parallelism
+                            | GdtCharacteristic::Perpendicularity
+                            | GdtCharacteristic::Angularity
+                    ) || features
+                        .iter()
+                        .any(|group| !feature_of_size(self.kernel.as_ref(), body, topology, carriers, group)))
+                {
+                    return Err("This control does not support a material modifier on its features.".into());
+                }
+                datums.iter().try_for_each(|datum| check_datum(datum, false))
+            }
+            _ => Ok(()),
+        }
+    }
+
+    pub(crate) fn check_pmi_edit(&self, state: &PartPmi, item: &PmiItem<FaceRef>) -> Result<(), String> {
+        if let Some(problem) = state.problem_with(item, Some(&item.id)) {
+            return Err(problem);
+        }
+        let needs_targets = |other: &&PmiItem<FaceRef>| matches!(&other.kind, PmiKind::DatumTarget(t) if item.references_datum(&t.datum));
+        if !checked_gdt_kind(&item.kind) && !state.items.iter().any(|other| needs_targets(&other)) {
+            return Ok(());
+        }
+        let names = self.name_map();
+        let mut problem = "The part has no body for this PMI item.".to_owned();
+        for (_, body) in self.live_bodies() {
+            let checked = (|| {
+                let topology = self.view_of(body).map_err(|error| error.to_string())?;
+                let on = self.item_on(item, &topology, &names)?;
+                let carriers = self.kernel.face_carriers(body).map_err(|error| error.to_string())?;
+                self.checked_gdt_on(state, &on, body, &topology, &names, &carriers)?;
+                for target in state.items.iter().filter(needs_targets).filter(|target| target.id != item.id) {
+                    let on = self.item_on(target, &topology, &names)?;
+                    self.checked_gdt_on(state, &on, body, &topology, &names, &carriers)
+                        .map_err(|problem| format!("Datum target {}: {problem}", target.id))?;
+                }
+                Ok::<_, String>(())
+            })();
+            match checked {
+                Ok(()) => return Ok(()),
+                Err(error) => problem = error,
+            }
+        }
+        Err(problem)
+    }
+
     /// The part's manufacturing information.
     pub fn pmi(&self) -> &PartPmi {
         &self.pmi
@@ -595,7 +933,18 @@ impl Document {
                     }
                     Ok(on_body) => {
                         problem = None;
-                        if matches!(on_body.kind, PmiKind::Hole { .. }) {
+                        if checked_gdt_kind(&item.kind) {
+                            problem = self.pmi.problem_with(item, Some(&item.id)).or_else(|| {
+                                carriers[index]
+                                    .get_or_init(|| self.kernel.face_carriers(*body))
+                                    .as_ref()
+                                    .map_err(|error| error.to_string())
+                                    .and_then(|carriers| {
+                                        self.checked_gdt_on(&self.pmi, &on_body, *body, topology, &names, carriers)
+                                    })
+                                    .err()
+                            });
+                        } else if matches!(on_body.kind, PmiKind::Hole { .. }) {
                             match measure_hole(self.kernel.as_ref(), *body, topology, &on_body) {
                                 Ok(values) => {
                                     row.measured.push(values.pilot_diameter_mm);
@@ -640,19 +989,26 @@ impl Document {
             rows.push(row);
         }
         // A tolerance leans on its datums: one whose datum does not apply does not either.
-        let standing: std::collections::BTreeMap<String, Feature<FaceId>> = rows
+        let standing: std::collections::BTreeMap<_, _> = rows
             .iter()
             .filter(|row| row.applies())
             .filter_map(|row| match row.on_body.as_ref().map(|item| &item.kind) {
-                Some(PmiKind::Datum { letter, feature }) => Some((letter.clone(), feature.clone())),
+                Some(PmiKind::Datum { letter, feature }) => Some((letter.clone(), (row.body, feature.clone()))),
                 _ => None,
             })
             .collect();
+        let mut targeted = std::collections::BTreeMap::new();
+        for row in &rows {
+            if let PmiKind::DatumTarget(target) = &row.item.kind {
+                targeted.entry(target.datum.clone()).and_modify(|all| *all &= row.applies()).or_insert(row.applies());
+            }
+        }
         for row in &mut rows {
-            if let PmiKind::Gdt { datums, .. } = &row.item.kind
-                && row.problem.is_none()
-                && let Some(missing) =
-                    datums.iter().flat_map(|datum| datum.letters()).find(|letter| !standing.contains_key(*letter))
+            if row.problem.is_none()
+                && let Some(missing) = row.item.referenced_datums().find(|letter| {
+                    standing.get(*letter).is_none_or(|(body, _)| *body != row.body)
+                        || (targeted.get(*letter) == Some(&false) && !matches!(row.item.kind, PmiKind::DatumTarget(_)))
+                })
             {
                 row.problem = Some(format!("Datum {missing} does not apply."));
             }
@@ -671,7 +1027,10 @@ impl Document {
             };
             for (index, feature) in features.iter().enumerate() {
                 for datum in datums {
-                    let Some(from) = standing.get(datum.letter.as_str()) else { continue };
+                    if targeted.contains_key(datum.letter.as_str()) {
+                        continue;
+                    }
+                    let Some((_, from)) = standing.get(datum.letter.as_str()) else { continue };
                     let alone = Pmi {
                         items: vec![PmiItem { id: row.item.id.clone(), kind: locating(from, feature) }],
                         part: PartNotes::default(),
@@ -698,40 +1057,52 @@ impl Document {
         names: &reference::NameMap,
     ) -> Result<PmiItem<FaceId>, String> {
         let view = View { topology };
-        item.try_map_features(|feature| {
-            // A bevel can tilt when its setback changes, and the angle measures
-            // precisely such a change. Keep the origin and surface checks; validate
-            // the resolved planes and their relationships in measure_planar_pmi.
-            let may_turn = match &item.kind {
-                PmiKind::Chamfer { bevel, .. } | PmiKind::EdgeBreak { bevel, .. } => std::ptr::eq(feature, bevel),
-                PmiKind::BasicAngle { .. } => true,
-                _ => false,
-            };
-            let mut faces: Feature<FaceId> = Vec::new();
-            for face in feature {
-                let mut turning;
-                let reference = if may_turn && face.fingerprint.normal.is_some() {
-                    turning = face.clone();
-                    turning.fingerprint.normal = None;
-                    &turning
-                } else {
-                    face
-                };
-                let found = reference::resolve_faces(reference, &view, names).map_err(|unresolved| {
-                    if face.label.is_empty() {
-                        unresolved.message
-                    } else {
-                        format!("{}: {}", face.label, unresolved.message)
+        item.map_attachments(
+            &mut (),
+            |_, feature| {
+                // A bevel can tilt when its setback changes, and the angle measures
+                // precisely such a change. Keep the origin and surface checks; validate
+                // the resolved planes and their relationships in measure_planar_pmi.
+                let may_turn = match &item.kind {
+                    PmiKind::Chamfer { bevel, .. } | PmiKind::EdgeBreak { bevel, .. } => {
+                        std::ptr::eq(feature, bevel.as_slice())
                     }
-                })?;
-                for id in found {
-                    if !faces.contains(&id) {
-                        faces.push(id);
+                    PmiKind::BasicAngle { .. } => true,
+                    _ => false,
+                };
+                let mut faces: Feature<FaceId> = Vec::new();
+                for face in feature {
+                    let mut turning;
+                    let reference = if may_turn && face.fingerprint.normal.is_some() {
+                        turning = face.clone();
+                        turning.fingerprint.normal = None;
+                        &turning
+                    } else {
+                        face
+                    };
+                    let found = reference::resolve_faces(reference, &view, names).map_err(|unresolved| {
+                        if face.label.is_empty() {
+                            unresolved.message
+                        } else {
+                            format!("{}: {}", face.label, unresolved.message)
+                        }
+                    })?;
+                    for id in found {
+                        if !faces.contains(&id) {
+                            faces.push(id);
+                        }
                     }
                 }
-            }
-            Ok::<_, String>(faces)
-        })
+                Ok::<_, String>(faces)
+            },
+            |_, face| {
+                let resolved = reference::resolve_faces(face, &view, names).map_err(|error| error.message)?;
+                match resolved.as_slice() {
+                    [face] => Ok(*face),
+                    _ => Err("A single-face attachment is ambiguous after the geometry edit.".into()),
+                }
+            },
+        )
     }
 
     /// The part's manufacturing information for a STEP file: the items that apply, on
@@ -863,7 +1234,25 @@ impl Document {
                 })
         };
         let mut taken = self.pmi.clone();
-        for item in read.pmi.items.iter().filter(|item| !derived(item)) {
+        let mut invalid_datums: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
+        // Resolve declarations and targets before frames, independent of file order.
+        let stage = |item: &PmiItem<String>| match item.kind {
+            PmiKind::Datum { .. } => 0,
+            PmiKind::DatumTarget(_) => 1,
+            _ => 2,
+        };
+        let mut ordered: Vec<_> = read.pmi.items.iter().filter(|item| !derived(item)).collect();
+        ordered.sort_by_key(|item| stage(item));
+        for item in ordered {
+            let datum = match &item.kind {
+                PmiKind::Datum { letter, .. } => Some(letter.as_str()),
+                PmiKind::DatumTarget(target) => Some(target.datum.as_str()),
+                _ => None,
+            };
+            if let Some(datum) = invalid_datums.iter().find(|letter| item.references_datum(letter)) {
+                report.left_out.push((item.id.clone(), format!("Datum {datum} could not be imported.")));
+                continue;
+            }
             let placed = item.try_map(|key| {
                 let face = face_of(key).ok_or_else(|| "A face it is attached to was not imported.".to_owned())?;
                 self.face_ref(face).map_err(|error| error.to_string())
@@ -871,6 +1260,7 @@ impl Document {
             let mut item = match placed {
                 Ok(item) => item,
                 Err(reason) => {
+                    invalid_datums.extend(datum);
                     report.left_out.push((item.id.clone(), reason));
                     continue;
                 }
@@ -884,14 +1274,18 @@ impl Document {
             if let PmiKind::Datum { letter, .. } = &item.kind
                 && taken.datum_letters().contains(&letter.as_str())
             {
+                invalid_datums.extend(datum);
                 report.left_out.push((item.id.clone(), format!("Datum {letter} is already defined in the part.")));
                 continue;
             }
-            match taken.problem_with(&item, None) {
-                Some(problem) => report.left_out.push((item.id.clone(), problem)),
-                None => {
-                    report.added.push(item.id.clone());
+            match self.check_pmi_edit(&taken, &item) {
+                Err(problem) => {
+                    invalid_datums.extend(datum);
+                    report.left_out.push((item.id.clone(), problem));
+                }
+                Ok(()) => {
                     taken.items.push(item.clone());
+                    report.added.push(item.id.clone());
                     items.push(item);
                 }
             }

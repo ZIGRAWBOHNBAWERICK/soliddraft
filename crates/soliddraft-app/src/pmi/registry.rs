@@ -4,7 +4,88 @@ use crate::commands::{Agents, CommandSpec, Size, Undo};
 use crate::icons::Icon;
 use crate::state::{AppAction, RibbonTab};
 use serde_json::Value;
-use soliddraft_assistant::tools::schema::{any_of, array, boolean, optional, string};
+use soliddraft_assistant::tools::schema::{any_of, array, boolean, integer, number, object, one_of, optional, string};
+
+fn segment() -> Value {
+    object(&[
+        ("value_mm", string("Explicit total zone diameter in mm, as a decimal")),
+        ("diameter_zone", boolean("Must be true for this axis control")),
+        ("material", optional(one_of(&["regardless", "maximum", "least"], "Feature material condition"))),
+        (
+            "datums",
+            optional(array(
+                object(&[
+                    ("letter", string("A declared datum")),
+                    ("material", optional(one_of(&["regardless", "maximum", "least"], "Datum material boundary"))),
+                ]),
+                "Ordered datum references, primary first",
+            )),
+        ),
+    ])
+}
+
+fn vector(label: &str) -> Value {
+    array(number("Coordinate in part axes"), label)
+}
+
+fn target() -> Value {
+    let shape = |name| one_of(&[name], "Target shape");
+    let length = |what| string(what);
+    object(&[
+        ("datum", string("Declared datum letter")),
+        ("number", integer("Explicit positive target number for this datum")),
+        ("face", string("One face in the datum declaration")),
+        ("point_mm", vector("Target center: three part coordinates in mm")),
+        (
+            "kind",
+            any_of(vec![
+                object(&[("shape", shape("point"))]),
+                object(&[
+                    ("shape", shape("line")),
+                    ("length_mm", length("Full length in mm")),
+                    ("direction", vector("Tangent direction in part axes")),
+                ]),
+                object(&[
+                    ("shape", shape("area")),
+                    (
+                        "area",
+                        any_of(vec![
+                            object(&[("shape", shape("circular")), ("diameter_mm", length("Full diameter in mm"))]),
+                            object(&[
+                                ("shape", shape("rectangular")),
+                                ("length_mm", length("Full length in mm")),
+                                ("width_mm", length("Full width in mm")),
+                                ("direction", vector("Tangent length axis")),
+                            ]),
+                        ]),
+                    ),
+                ]),
+            ]),
+        ),
+    ])
+}
+
+fn position_frame() -> Value {
+    any_of(vec![
+        object(&[
+            ("frame", one_of(&["single"], "Single position frame")),
+            ("segment", segment()),
+            (
+                "projected_zone",
+                optional(object(&[
+                    ("height_mm", string("Explicit positive height along the outward axis, in mm")),
+                    ("direction", vector("Explicit outward direction in part axes")),
+                    ("entry_faces", array(string("Planar entry face name"), "One per feature, in order")),
+                ])),
+            ),
+        ]),
+        object(&[
+            ("frame", one_of(&["composite"], "Exactly two ordered segments, no projection")),
+            ("upper", segment()),
+            ("lower", segment()),
+        ]),
+    ])
+}
 
 fn add_params() -> Vec<(&'static str, Value)> {
     let faces = || array(string("A face name, such as Boss-Extrude1 · End cap"), "The faces of one feature");
@@ -13,7 +94,7 @@ fn add_params() -> Vec<(&'static str, Value)> {
         (
             "kind",
             string(
-                "datum, diameter, radius, hole, distance, slot, width, chamfer, edge_break, basic_angle, tolerance or finish",
+                "datum, datum_target, diameter, radius, hole, distance, slot, width, chamfer, edge_break, basic_angle, tolerance, position_control or finish",
             ),
         ),
         ("name", optional(string("The item's name; one is made up when left out"))),
@@ -21,6 +102,8 @@ fn add_params() -> Vec<(&'static str, Value)> {
         ("faces", optional(faces())),
         ("features", optional(two("A pattern: the faces of each feature, such as each of four holes"))),
         ("letter", optional(string("A datum's letter; the next free one when left out"))),
+        ("target", optional(target())),
+        ("frame", optional(position_frame())),
         ("tolerance", optional(string("A dimension's tolerance: H7, ±0.1, +0.1/0, +0.2/-0.1 or basic"))),
         ("through", optional(boolean("true for a drill that goes through the part"))),
         ("thread", optional(string("A threaded diameter or hole's designation, such as M6x1-6H"))),
@@ -123,7 +206,9 @@ pub(crate) fn commands() -> Vec<CommandSpec> {
         row("pmi_add", "Add manufacturing information", "Put a datum, dimension, tolerance or finish on faces").agents(
             Agents::Tool,
             "Adds an item or replaces the item named in replaces. Nominal sizes are measured from the part. \
-             Only specify drill depth, thread depth or limits when the user supplies them.",
+             Only specify drill depth, thread depth or limits when the user supplies them. For datum_target and \
+             position_control, use only stated intent. Ask for a missing target, datum, material modifier, zone \
+             height or direction; do not make it up. Omitted segment and datum materials mean RFS and RMB.",
             add_params,
         )
         .undo(Undo::Step),

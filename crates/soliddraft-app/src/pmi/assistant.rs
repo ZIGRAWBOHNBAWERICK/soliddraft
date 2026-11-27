@@ -19,6 +19,12 @@ pub(crate) const CHANGES: [&str; 3] = ["pmi_answer", "pmi_add", PACKAGE];
 /// The tool that writes files and opens a drawing, which only the app can apply.
 pub(crate) const PACKAGE: &str = "manufacturing_package";
 
+/// The user approves explicitly supplied typed GD&T even when auto-apply is on.
+pub(crate) fn requires_user(call: &ProposedCall) -> bool {
+    call.tool == "pmi_add"
+        && matches!(call.input["kind"].as_str().map(str::trim), Some("datum_target" | "position_control"))
+}
+
 /// What a card shows before the user applies it.
 pub(crate) struct Card {
     /// One line, the card's title.
@@ -127,6 +133,26 @@ fn described(item: &Value) -> String {
         format!("{}: {}", item["name"].as_str().unwrap_or_default(), item["callout"].as_str().unwrap_or_default());
     if !faces.is_empty() {
         text.push_str(&format!(" on {}", faces.join("; ")));
+    }
+    if let Some(point) = item["target"]["point_mm"].as_array() {
+        let values = |values: &[Value]| values.iter().map(Value::to_string).collect::<Vec<_>>().join(", ");
+        text.push_str(&format!("; target point ({}) mm", values(point)));
+        let kind = &item["target"]["kind"];
+        if let Some(direction) = kind["direction"].as_array().or_else(|| kind["area"]["direction"].as_array()) {
+            text.push_str(&format!("; tangent direction ({})", values(direction)));
+        }
+    }
+    let zone = &item["frame"]["projected_zone"];
+    if let Some(direction) = zone["direction"].as_array() {
+        let direction = direction.iter().map(Value::to_string).collect::<Vec<_>>().join(", ");
+        let entries = zone["entry_faces"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .collect::<Vec<_>>()
+            .join(", ");
+        text.push_str(&format!("; outward direction ({direction}); entries in order: {entries}"));
     }
     if let Some(problem) = item["problem"].as_str() {
         text.push_str(&format!(" ({problem})"));

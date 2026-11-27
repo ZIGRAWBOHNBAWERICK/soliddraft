@@ -4,15 +4,18 @@
 use std::sync::Arc;
 
 use soliddraft_kernel_api::pmi::{
-    Anchor, At, DatumRef, GdtCharacteristic, MaterialCondition, PartNotes, PmiItem, PmiKind, SizeKind, Tolerance,
+    Anchor, At, DatumRef, Decimal, GdtCharacteristic, HoleHead as PmiHead, HoleHeadKind, HoleHeadNominals, HoleThread,
+    MaterialCondition, PartNotes, Pmi, PmiItem, PmiKind, SizeKind, Tolerance,
 };
-use soliddraft_kernel_api::{FaceId, StepOptions, SurfaceKind, Vec3};
+use soliddraft_kernel_api::{
+    FaceId, FaceRole, HoleDepth, HoleHead, HolePart, HoleTip, OpTag, StepOptions, SurfaceKind, Vec3,
+};
 use soliddraft_kernel_catallax::CatallaxKernel;
 use soliddraft_model::pmi::Located;
 use soliddraft_model::sketch::{P2, Sketch, SolveStatus, solve::solve};
 use soliddraft_model::{
     Command, CommandError, DatumPlane, Document, EndCondition, ExtrudeFeature, ExtrudeOp, FaceRef, FeatureId,
-    FeatureKind, ImportStepFeature, ProfileSource, SketchFeature, SketchPlane,
+    FeatureKind, HoleFeature, ImportStepFeature, ProfileSource, SketchFeature, SketchPlane,
 };
 
 fn doc() -> Document {
@@ -364,4 +367,134 @@ fn commands_refuse_what_does_not_fit_and_undo_what_they_did() {
     assert!(d.pmi().item("Bore finish").is_none());
     d.undo().unwrap();
     assert_eq!(callouts(&d), expected("8"));
+}
+
+#[test]
+fn hole_roles_checked_nominals_and_independent_depths_survive_native_reopen() {
+    let mut d = doc();
+    let plate = add(
+        &mut d,
+        sketch(|s| {
+            s.rectangle(P2::new(0.0, 0.0), 60.0, 30.0).unwrap();
+        }),
+    );
+    add(&mut d, extrude(plate, ExtrudeOp::Boss, EndCondition::Blind { depth: 10.0 }));
+    let cases = [
+        ("Counterbore", -21.0, Some(HoleHead::Counterbore { diameter: 10.0, depth: 3.0 }), true),
+        ("Countersink", -7.0, Some(HoleHead::Countersink { diameter: 8.0, angle_deg: 90.0 }), true),
+        ("Blind", 7.0, None, false),
+        ("Blind thread", 21.0, None, false),
+    ];
+    let mut hole_ids = Vec::new();
+    for (id, x, head, through) in cases {
+        let entry = faces(&d, |face| face.normal == Some(Vec3::Z) && (face.centroid.z - 10.0).abs() < 1e-7);
+        let [entry] = entry.as_slice() else { panic!("expected one plate top face") };
+        let face = d.face_ref(*entry).unwrap();
+        let feature = add(
+            &mut d,
+            FeatureKind::Hole(HoleFeature {
+                face,
+                points: vec![P2::new(x, 0.0)],
+                diameter: 4.0,
+                depth: if through { HoleDepth::Through } else { HoleDepth::Blind { depth: 7.0 } },
+                tip: HoleTip::Flat,
+                head,
+                thread: None,
+                sketch: None,
+                wizard: None,
+            }),
+        );
+        assert!(d.status(feature).unwrap().is_ok(), "{id}: {:?}", d.status(feature));
+        hole_ids.push(feature);
+    }
+    for ((id, _, head, through), feature) in cases.into_iter().zip(hole_ids.iter().copied()) {
+        let tag = OpTag::new(format!("{feature}.hole"));
+        let wall = |part| {
+            d.pmi_feature(&faces(&d, |face| {
+                face.origins.iter().any(|origin| {
+                    origin.tag == tag && matches!(origin.role, FaceRole::Hole { part: role, .. } if role == part)
+                })
+            }))
+            .unwrap()
+        };
+        let head = head.map(|head| match head {
+            HoleHead::Counterbore { .. } => {
+                PmiHead { kind: HoleHeadKind::Counterbore, faces: wall(HolePart::CounterboreWall) }
+            }
+            HoleHead::Countersink { .. } => {
+                PmiHead { kind: HoleHeadKind::Countersink, faces: wall(HolePart::Countersink) }
+            }
+        });
+        let kind = PmiKind::Hole {
+            pilot: wall(HolePart::Wall),
+            head,
+            tolerance: Tolerance::None,
+            through,
+            drill_depth: (id == "Blind thread").then(|| Decimal::parse("7").unwrap()),
+            thread: (id == "Blind thread")
+                .then(|| HoleThread { designation: "M5x0.8-6H".into(), depth: Decimal::parse("5.12345") }),
+        };
+        put(&mut d, id, kind);
+        assert!(d.status(feature).unwrap().is_ok());
+    }
+    let exact = |actual: f64, expected: f64| assert!((actual - expected).abs() < 1e-7, "{actual} != {expected}");
+    let check = |d: &Document| {
+        let rows = d.pmi_rows();
+        assert_eq!(rows.len(), 4);
+        for (row, (id, _, head, through)) in rows.iter().zip(cases) {
+            assert_eq!(row.item.id, id);
+            assert_eq!(row.problem, None, "{id}: {row:?}");
+            let faces = row.on_body.as_ref().unwrap().features();
+            assert_eq!(faces.len(), 1 + usize::from(head.is_some()));
+            assert!(faces.iter().all(|faces| !faces.is_empty()));
+            let values = row.hole.unwrap();
+            exact(values.pilot_diameter_mm, 4.0);
+            assert_eq!(values.drill_depth_mm.is_none(), through);
+            match (head, values.head) {
+                (
+                    Some(HoleHead::Counterbore { diameter, depth }),
+                    Some(HoleHeadNominals::Counterbore { diameter_mm, depth_mm }),
+                ) => {
+                    exact(diameter_mm, diameter);
+                    exact(depth_mm, depth);
+                }
+                (
+                    Some(HoleHead::Countersink { diameter, angle_deg }),
+                    Some(HoleHeadNominals::Countersink { diameter_mm, included_angle_deg }),
+                ) => {
+                    exact(diameter_mm, diameter);
+                    exact(included_angle_deg, angle_deg);
+                }
+                (None, None) => exact(values.drill_depth_mm.unwrap(), 7.0),
+                other => panic!("{id}: {other:?}"),
+            }
+            assert!(matches!(row.item.kind, PmiKind::Hole { tolerance: Tolerance::None, .. }));
+        }
+        assert_eq!(rows[3].callout(), "Ø4 DRILL DEEP 7\nM5x0.8-6H THREAD DEEP 5.12345");
+    };
+    check(&d);
+    let reopened = Document::from_bytes(&d.to_bytes().unwrap(), Arc::new(CatallaxKernel::new())).unwrap();
+    assert_eq!(reopened.pmi(), d.pmi());
+    check(&reopened);
+
+    let on_body = reopened.pmi_on_body();
+    assert_eq!(on_body.left_out.len(), 4);
+    assert!(on_body.left_out.iter().all(|(_, reason)| reason.contains("not supported in STEP export")));
+    let rows = reopened.pmi_rows();
+    let pair = Pmi { items: vec![rows[0].on_body.clone().unwrap()], part: PartNotes::default() };
+    let body = reopened.body().unwrap();
+    let error = reopened.kernel().export_step_with_pmi(body, &StepOptions::default(), &pair).unwrap_err();
+    assert!(error.to_string().contains("Counterbore: compound hole and depth PMI is not supported"));
+
+    // A different cylinder is not interchangeable with the counterbore's head.
+    let mut mismatched = reopened.pmi().item("Counterbore").unwrap().clone();
+    let PmiKind::Hole { head: Some(head), .. } = &mut mismatched.kind else { panic!("counterbore") };
+    head.faces.clone_from(reopened.pmi().item("Blind").unwrap().features()[0]);
+    let mut reopened = reopened;
+    reopened.execute(Command::PutPmiItem { item: Box::new(mismatched), replaces: Some("Counterbore".into()) }).unwrap();
+    let row = &reopened.pmi_rows()[0];
+    assert!(
+        row.problem.as_ref().is_some_and(|problem| problem.contains("circular rims") || problem.contains("same axis"))
+    );
+    assert!(row.hole.is_none());
 }

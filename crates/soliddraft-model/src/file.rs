@@ -25,6 +25,8 @@
 //!   and origin axes chosen, by id (see [`view`](crate::view)). An optional section
 //!   outside both hashes, like the settings; a reader that cannot read it opens the part
 //!   with every item at its default.
+//! - `saved-views.json`, when the part has named PMI views: their order, camera poses
+//!   and visible PMI item IDs. Optional, outside both hashes.
 //! - `cache/mesh/coarse.bin` and `cache/mesh/standard.bin`, when the settings save
 //!   display data and the part has a body: its meshes at two display levels, so it can
 //!   be shown without a rebuild (see [`display`](crate::display)). Optional, outside both
@@ -59,10 +61,12 @@ use soliddraft_materials::Snapshots;
 use soliddraft_tessellation::{Settings, settings};
 
 use crate::display;
-use crate::document::Document;
+use crate::document::{Document, PartView};
 use crate::feature::{DatumPlane, Feature, FeatureId};
 use crate::materials::{AppearanceAssignment, MaterialAssignment, PartMaterials};
 use crate::view::{self, Visibility};
+
+pub mod saved_view;
 
 /// The format for a part using the original document envelope.
 pub const FORMAT: &str = "soliddraft-part/2";
@@ -192,7 +196,7 @@ pub struct Snapshot {
     id: DocumentId,
     recipe: Recipe,
     settings: Settings,
-    view: Visibility,
+    view: PartView,
     backend: BackendInfo,
 }
 
@@ -203,7 +207,7 @@ impl Snapshot {
         let truth = serde_json::to_value(&self.recipe)?;
         let m = part_manifest(self.id, &self.backend, &truth, &self.settings, &self.view);
         let mut entries = vec![Entry::new(PART, (serde_json::to_string_pretty(&self.recipe)? + "\n").into_bytes())];
-        entries.extend(optional_entries(&self.settings, &self.view));
+        entries.extend(optional_entries(&self.settings, &self.view)?);
         let bytes = manifest::write_package(&m, &entries)?;
         Ok((m, bytes))
     }
@@ -325,7 +329,7 @@ impl Document {
     /// The part file's bytes, with what `extras` adds or leaves out.
     pub fn to_bytes_with(&self, extras: &Extras<'_>) -> Result<Vec<u8>, FileError> {
         let mut entries = vec![Entry::new(PART, self.part_json().into_bytes())];
-        entries.extend(optional_entries(&self.settings, &self.view));
+        entries.extend(optional_entries(&self.settings, &self.view)?);
         let mut m = self.manifest_for(extras);
         if self.saves_display_data(extras) {
             match self.display_data(&self.settings.viewport, &display::SAVED) {
@@ -391,7 +395,11 @@ impl Document {
             doc.settings = Settings::from_json(&text).unwrap_or_default();
         }
         if let Ok(Some(text)) = package.read_text(view::ENTRY) {
-            doc.view = Visibility::from_json(&text).unwrap_or_default();
+            doc.view.visibility = Visibility::from_json(&text).unwrap_or_default();
+        }
+        if let Some(text) = package.read_text(saved_view::ENTRY)? {
+            doc.view.saved =
+                serde_json::from_str(&text).map_err(|err| FileError::Invalid(format!("saved views: {err}")))?;
         }
         Ok(doc)
     }
@@ -590,7 +598,7 @@ fn part_manifest(
     backend: &BackendInfo,
     truth: &Value,
     settings: &Settings,
-    view: &Visibility,
+    view: &PartView,
 ) -> Manifest {
     let mut m = Manifest::new(id, DocKind::Part, manifest::semantic_hash(DocKind::Part, truth));
     m.kernel = Some(format!("{} {}", backend.name, backend.version));
@@ -603,14 +611,26 @@ fn part_manifest(
     if !view.is_empty() {
         m.sections.push(Section::optional(view::ENTRY));
     }
+    if !view.saved.is_empty() {
+        m.sections.push(Section::optional(saved_view::ENTRY));
+    }
     m
 }
 
-/// The entries of the settings and the view choices, each only when it holds something.
-fn optional_entries<'a>(settings: &Settings, view: &Visibility) -> impl Iterator<Item = Entry<'a>> + use<'a> {
+/// The settings and view entries, each only when it holds something.
+fn optional_entries<'a>(
+    settings: &Settings,
+    view: &PartView,
+) -> Result<impl Iterator<Item = Entry<'a>> + use<'a>, FileError> {
     let settings = (!settings.is_default()).then(|| Entry::new(settings::ENTRY, settings.to_json().into_bytes()));
+    let saved_views = &view.saved;
     let view = (!view.is_empty()).then(|| Entry::new(view::ENTRY, view.to_json().into_bytes()));
-    settings.into_iter().chain(view)
+    let saved_views = if saved_views.is_empty() {
+        None
+    } else {
+        Some(Entry::new(saved_view::ENTRY, saved_view::encode(saved_views)?))
+    };
+    Ok(settings.into_iter().chain(view).chain(saved_views))
 }
 
 fn has_extended_styles(materials: &PartMaterials) -> bool {

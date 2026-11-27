@@ -123,13 +123,13 @@ impl Body<'_> {
     fn round_edge(&self, feature: &[FaceId], view: &ViewContext, axis: Vec3) -> Option<(EdgeId, Attach, Vec3, bool)> {
         let mut best: Option<((bool, f64), EdgeId, Attach, Vec3)> = None;
         for face in feature {
-            let on_axis = self.axes.get(face)?.point;
             for edge in &self.faces.get(face)?.edges {
                 let curve = self.index.edge_curve(*edge)?;
                 let (attach, centre) = match curve {
                     Curve3::Line { .. } => continue,
                     Curve3::Circle { center, .. } | Curve3::Arc { center, .. } => (Attach::Centre, *center),
                     other => {
+                        let on_axis = self.axes.get(face)?.point;
                         let centre = on_axis + axis * (other.point_at(0.5) - on_axis).dot(axis);
                         (Attach::Point { at: centre }, centre)
                     }
@@ -493,7 +493,7 @@ impl Planner<'_> {
         let item = row.on_body.as_ref().ok_or("its faces are not on the body")?;
         let wanted = match &item.kind {
             PmiKind::Location { .. } => self.pass == Pass::Distances,
-            PmiKind::Size { .. } => self.pass == Pass::Sizes,
+            PmiKind::Size { .. } | PmiKind::Hole { .. } => self.pass == Pass::Sizes,
             PmiKind::Gdt { .. } => self.pass != Pass::Sizes,
             _ => self.pass == Pass::Rest,
         };
@@ -596,6 +596,41 @@ impl Planner<'_> {
                     view,
                     body: AnnotationKind::Dimension(dimension),
                     anchors: vec![(edge, centred, centre)],
+                    placement,
+                    slide: Slide { along: dir, step: 3.0 },
+                    host: None,
+                    stack: None,
+                    dropped: false,
+                });
+            }
+            PmiKind::Hole { pilot, head, .. } => {
+                let Shape::Round { axis, radius, .. } = self.body.feature(pilot)? else {
+                    return Err("a hole needs a cylindrical pilot wall".into());
+                };
+                let attached = head.as_ref().map_or(pilot.as_slice(), |head| head.faces.as_slice());
+                let outer_radius = match row.hole.and_then(|values| values.head) {
+                    Some(
+                        soliddraft_kernel_api::pmi::HoleHeadNominals::Counterbore { diameter_mm, .. }
+                        | soliddraft_kernel_api::pmi::HoleHeadNominals::Countersink { diameter_mm, .. },
+                    ) => diameter_mm * 0.5,
+                    None => radius,
+                };
+                let (view, edge, _, centre, placement, dir) = self.callout(&[attached], axis, outer_radius)?;
+                let rim_radius = match self.body.index.edge_curve(edge) {
+                    Some(Curve3::Circle { radius, .. } | Curve3::Arc { radius, .. }) => *radius,
+                    _ => outer_radius,
+                };
+                let scale = self.views.iter().find(|v| v.id == view).map_or(1.0, |v| v.xf.scale);
+                let on = Point2::new(centre.u + dir.u * rim_radius * scale, centre.v + dir.v * rim_radius * scale);
+                let at = self.views.iter().find(|v| v.id == view).map(|v| v.xf.unproject(on));
+                if let Some(face) = pilot.first() {
+                    self.sizes.insert(*face, self.plans.len());
+                }
+                self.plans.push(Plan {
+                    source,
+                    view,
+                    body: AnnotationKind::Note { text: row.callout(), leader: Vec::new() },
+                    anchors: vec![(edge, at.map_or(Attach::Mid, |at| Attach::Point { at }), on)],
                     placement,
                     slide: Slide { along: dir, step: 3.0 },
                     host: None,
@@ -962,8 +997,10 @@ fn row_of<'r>(source: &PmiSource, rows: &'r [PmiRow]) -> Option<&'r PmiRow> {
 fn shows<F>(body: &AnnotationKind, kind: &PmiKind<F>) -> bool {
     matches!(
         (body, kind),
-        (AnnotationKind::Note { .. }, PmiKind::Size { thread: Some(_), .. } | PmiKind::Slot { .. })
-            | (AnnotationKind::Dimension(_), PmiKind::Size { thread: None, .. } | PmiKind::Location { .. })
+        (
+            AnnotationKind::Note { .. },
+            PmiKind::Size { thread: Some(_), .. } | PmiKind::Slot { .. } | PmiKind::Hole { .. }
+        ) | (AnnotationKind::Dimension(_), PmiKind::Size { thread: None, .. } | PmiKind::Location { .. })
             | (AnnotationKind::Gdt { .. }, PmiKind::Gdt { .. })
             | (AnnotationKind::Datum { .. }, PmiKind::Datum { .. })
             | (AnnotationKind::SurfaceFinish { .. }, PmiKind::SurfaceFinish { .. })
@@ -1094,7 +1131,7 @@ fn update(annotation: &mut Annotation, row: &PmiRow, symbols: &crate::library::S
                 d.value = crate::DimValue::Measured { value: *value };
             }
         }
-        (AnnotationKind::Note { text, .. }, PmiKind::Slot { .. }) => *text = row.callout(),
+        (AnnotationKind::Note { text, .. }, PmiKind::Slot { .. } | PmiKind::Hole { .. }) => *text = row.callout(),
         (
             AnnotationKind::Gdt { characteristic, tolerance, diameter, material, datums },
             PmiKind::Gdt { characteristic: c, tolerance: t, diameter: d, material: m, datums: refs, .. },
@@ -1458,6 +1495,11 @@ fn settle(drawing: &mut Drawing, sheet: usize, made: &[Made]) {
         if !lead.stacked && along.u.abs() > 1e-9 && along.v.abs() > 1e-9 {
             ways.push(Point2::new(along.u.signum(), 0.0));
             ways.push(Point2::new(0.0, along.v.signum()));
+            if drawing.annotation(lead.id).is_some_and(|a| matches!(a.body, AnnotationKind::Note { .. })) {
+                // A multiline callout may need the space below the rim, not farther across the sheet.
+                ways.push(Point2::new(0.0, -along.v.signum()));
+                ways.push(Point2::new(-along.u.signum(), 0.0));
+            }
         }
         let mut best: Option<(usize, Vec<Option<Point2>>)> = None;
         let slide = |ways: &[Point2], best: &mut Option<(usize, Vec<Option<Point2>>)>, drawing: &mut Drawing| {

@@ -320,6 +320,12 @@ impl Document {
             let all = || item.features().into_iter().flatten().copied();
             match &item.kind {
                 PmiKind::Size { .. } => asking.sized.extend(all()),
+                PmiKind::Hole { pilot, tolerance, thread, .. }
+                    if row.applies() && (!tolerance.is_none() || thread.is_some()) =>
+                {
+                    asking.sized.extend(pilot.iter().copied());
+                }
+                PmiKind::Hole { .. } => {}
                 PmiKind::Gdt { characteristic: GdtCharacteristic::Position, .. } => asking.positioned.extend(all()),
                 PmiKind::SurfaceFinish { .. } => asking.finished.extend(all()),
                 PmiKind::Slot { .. } => asking.slotted.extend(all()),

@@ -10,15 +10,23 @@ fn add_params() -> Vec<(&'static str, Value)> {
     let faces = || array(string("A face name, such as Boss-Extrude1 · End cap"), "The faces of one feature");
     let two = |what| array(faces(), what);
     vec![
-        ("kind", string("datum, diameter, radius, distance, slot, tolerance or finish")),
+        ("kind", string("datum, diameter, radius, hole, distance, slot, tolerance or finish")),
         ("name", optional(string("The item's name; one is made up when left out"))),
         ("replaces", optional(string("The name of the item this one takes the place of"))),
         ("faces", optional(faces())),
         ("features", optional(two("A pattern: the faces of each feature, such as each of four holes"))),
         ("letter", optional(string("A datum's letter; the next free one when left out"))),
         ("tolerance", optional(string("A dimension's tolerance: H7, ±0.1, +0.1/0, +0.2/-0.1 or basic"))),
-        ("through", optional(boolean("true for the diameter of a hole that goes through the part"))),
-        ("thread", optional(string("A threaded hole's designation, such as M6x1-6H; a diameter only"))),
+        ("through", optional(boolean("true for a drill that goes through the part"))),
+        ("thread", optional(string("A threaded diameter or hole's designation, such as M6x1-6H"))),
+        ("pilot_faces", optional(faces())),
+        ("head_kind", optional(string("For a compound hole: counterbore or countersink"))),
+        ("head_faces", optional(faces())),
+        ("drill_depth", optional(string("Explicit blind drill depth in mm, as a decimal; omit to measure"))),
+        (
+            "thread_depth",
+            optional(string("Explicit usable thread depth in mm, as a decimal; requires a thread designation")),
+        ),
         ("from_faces", optional(faces())),
         ("from_at", optional(string("Where a distance starts: feature, middle, inner or outer"))),
         ("to_faces", optional(faces())),
@@ -104,7 +112,8 @@ pub(crate) fn commands() -> Vec<CommandSpec> {
         .undo(Undo::Replaces),
         row("pmi_add", "Add manufacturing information", "Put a datum, dimension, tolerance or finish on faces").agents(
             Agents::Tool,
-            "Adds one item to the part, or replaces the item named in replaces. A dimension takes no size: it reads the part's.",
+            "Adds an item or replaces the item named in replaces. Nominal sizes are measured from the part. \
+             Only specify drill depth, thread depth or limits when the user supplies them.",
             add_params,
         )
         .undo(Undo::Step),

@@ -349,7 +349,7 @@ impl CatallaxKernel {
                     &mut catallax_topology::Model::new(),
                     source_format(format),
                     request.source,
-                    &options(request.options)?,
+                    &options,
                     &saved,
                     None,
                 )

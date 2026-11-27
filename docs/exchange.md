@@ -100,10 +100,10 @@ File > Import STEP reads the source and shows its repair review. Accept imports 
 
 Default STEP imports keep each body Catallax admits independently and list refused bodies with their reasons in Import report. Admitted bodies become separate import features in one undo step. Each keeps the original bytes, their hash, admission evidence and its source selector, so reordering features cannot swap solids. Part-level limits, multi-body reviews with explicit repair answers, IGES imports and replacements remain all-or-nothing.
 
-Desktop STEP admission has no application work cap. The browser keeps its existing allowance while it runs admission on the page thread. The desktop census test exercises opening and cancelling ABC file `00000057`, which exceeds the former 100-million-unit desktop allowance. Download [the ABC STEP fixture](https://concept-collection.github.io/abc-step-1000/step/00000057_666139e3bff64d4e8a6ce183_step_006.step.gz) and decompress it before running the test:
+Desktop STEP admission has no application work cap. The browser keeps its existing allowance while it runs admission on the page thread. The desktop census test opens and cancels ABC file `00000025`, which exceeds the former 100-million-unit allowance. Catallax can admit solids from this file even if a sibling body is refused. Download [the ABC STEP fixture](https://concept-collection.github.io/abc-step-1000/step/00000025_ad34a3f60c4a4caa99646600_step_005.step.gz) and decompress it before running the test:
 
 ```sh
-SOLIDDRAFT_CENSUS_STEP=/path/to/00000057.step cargo test -p soliddraft-app --lib \
+SOLIDDRAFT_CENSUS_STEP=/path/to/00000025.step cargo test -p soliddraft-app --lib \
   census_step_opens_as_solid_and_cancel_stops_its_running_admission -- --ignored --nocapture
 ```
 

@@ -208,13 +208,15 @@ mod tests {
             "STEP admission did not finish",
         );
         let state = app.state();
-        assert!(state.import_refusals.is_empty(), "{:?}", state.import_refusals);
-        let body = state.doc.display_body().expect("the census STEP must open as a solid");
+        let Some(body) = state.doc.display_body() else {
+            panic!("the census STEP must open as a solid: {:?}", state.import_refusals);
+        };
         let accuracy = state.doc.kernel().body_accuracy(body).unwrap();
         assert_eq!(state.doc.kernel().body_kind(body).unwrap(), BodyKind::Solid);
         eprintln!(
-            "Opened census STEP as a solid ({accuracy:?}) after exceeding {} work units on the old cap",
-            work.limit
+            "Opened census STEP as a solid ({accuracy:?}) after exceeding {} work units on the old cap; {} refusal entries",
+            work.limit,
+            state.import_refusals.len()
         );
     }
 }

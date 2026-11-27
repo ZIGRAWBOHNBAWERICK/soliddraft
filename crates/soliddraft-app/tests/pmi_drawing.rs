@@ -657,6 +657,9 @@ fn face_annotations_edit_reopen_and_draw_on_their_own_faces() {
     assert!(session.requirements.unplaced.is_empty(), "{:?}", session.requirements.unplaced);
     let drawing = &session.doc.drawing;
     let shown = pmi_items::shown(drawing);
+    let model = reopened.doc.model();
+    let body = model.body().unwrap();
+    let topology = model.kernel().topology(body).unwrap();
     for (name, text) in [("Knurl", format!("KNURL {designation}")), ("Face note", note.to_owned())] {
         assert_eq!(shown.get(name), Some(&1));
         let annotations = &drawing.sheets[0].annotations;
@@ -666,8 +669,10 @@ fn face_annotations_edit_reopen_and_draw_on_their_own_faces() {
             .unwrap();
         let [anchor] = annotation.anchors.as_slice() else { panic!("{name}: one face leader") };
         let Some(ModelEntity::Edge(edge)) = &anchor.entity.model else { panic!("{name}: a model edge") };
-        let item = reopened.doc.model().pmi().item(name).unwrap();
-        assert!(edge.faces.contains(&item.features()[0][0]), "{name}: on its own face");
+        let item = model.pmi().item(name).unwrap();
+        let face = model.resolve_face(&item.features()[0][0], body).unwrap();
+        let edge = model.resolve_edge(edge, body).unwrap();
+        assert!(topology.face(face).unwrap().edges.contains(&edge), "{name}: on its own face");
     }
     call(&mut reopened, "drawing_export_svg", json!({"path":proof.join("face-pmi.svg")}));
     call(&mut reopened, "drawing_export_pdf", json!({"path":proof.join("face-pmi.pdf")}));

@@ -360,6 +360,7 @@ impl SolidDraftApp {
             edit: None,
             level: Default::default(),
             curved_surfaces: self.state.graphics.curved_surfaces,
+            checked: crate::viewport::gpu_preview::route_active(),
         };
         let kernel = self.state.doc.kernel().clone();
         let ctx = crate::web::context().unwrap_or_default();
@@ -462,7 +463,10 @@ impl SolidDraftApp {
         let wanted = Arc::new(AtomicBool::new(true));
         let live = wanted.clone();
         let mut change = CurveChange { target, reply, arrived: false, failed: false, wanted };
-        let job = crate::kernel_worker::Job::Remesh { curved_surfaces: choice };
+        let job = crate::kernel_worker::Job::Remesh {
+            curved_surfaces: choice,
+            checked: crate::viewport::gpu_preview::route_active(),
+        };
         let result = doc.model().snapshot().encode().map_err(|error| error.to_string()).and_then(|(_, part)| {
             crate::kernel_worker::submit(
                 part,

@@ -35,9 +35,19 @@ pub enum Job {
         level: soliddraft_tessellation::Level,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         curved_surfaces: Option<crate::graphics::CurvedSurfaces>,
+        /// The page shows GPU previews: the worker hands the rebuilt part over as soon as
+        /// it is built, so the page can mesh its preview, and then makes the checked
+        /// meshes the page shows in its place.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        checked: bool,
     },
     /// Warm the viewport meshes for a display setting while the open document stays usable.
-    Remesh { curved_surfaces: Option<crate::graphics::CurvedSurfaces> },
+    /// For a page that shows GPU previews, these are the checked meshes.
+    Remesh {
+        curved_surfaces: Option<crate::graphics::CurvedSurfaces>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        checked: bool,
+    },
 }
 
 impl Job {
@@ -75,6 +85,13 @@ impl Host {
 
     /// Runs `job` against the part saved as `part` and answers with plain data.
     pub fn run(&mut self, part: &[u8], job: &Job) -> Result<serde_json::Value, String> {
+        self.run_with(part, job, &|_| {})
+    }
+
+    /// [`Host::run`], handing a checked build's part over to `early` as soon as it is
+    /// rebuilt, before its checked meshes are made.
+    pub fn run_with(&mut self, part: &[u8], job: &Job, early: &dyn Fn(Vec<u8>)) -> Result<serde_json::Value, String> {
+        let kernel = self.kernel.clone();
         let doc = self.open(part)?;
         match job {
             Job::MassProperties { feature } => {
@@ -93,24 +110,48 @@ impl Host {
                 let properties = result.map_err(|error| error.to_string())?;
                 serde_json::to_value(properties).map_err(|error| error.to_string())
             }
-            Job::Build { edit, level, curved_surfaces } => {
-                let proved = crate::drag::prove_now(std::sync::Arc::new(doc.fork()), *edit, *level, *curved_surfaces)?;
-                let model = &proved.model;
-                let statuses: Vec<_> = model
-                    .features()
-                    .iter()
-                    .map(|feature| serde_json::json!({ "feature": feature.id, "status": built(model, feature.id).err() }))
-                    .collect();
-                let triangles = proved.display.as_ref().map(|display| display.mesh.indices.len() / 3);
-                sample_display_levels(model, *curved_surfaces);
-                Ok(serde_json::json!({
-                    "failure": proved.failure,
-                    "display_error": proved.display_error,
-                    "statuses": statuses,
-                    "triangles": triangles,
-                }))
+            Job::Build { edit, level, curved_surfaces, checked } => {
+                // The rebuilt part goes to the page at once, with the topology of each of
+                // its bodies, so the page meshes its GPU preview while this worker makes
+                // the checked meshes.
+                let hand_early = |model: &model::Document| {
+                    if !*checked {
+                        return;
+                    }
+                    for (_, body) in model.live_bodies() {
+                        let _ = kernel.topology(body);
+                    }
+                    match kernel.hand_over() {
+                        Ok(bytes) => {
+                            let _ = kernel.keep_builds();
+                            if !bytes.is_empty() {
+                                early(bytes);
+                            }
+                        }
+                        Err(error) => log::warn!("the kernel worker could not hand its rebuilt part over: {error}"),
+                    }
+                };
+                let build = || -> Result<serde_json::Value, String> {
+                    let source = std::sync::Arc::new(doc.fork());
+                    let proved = crate::drag::prove_now(source, *edit, *level, *curved_surfaces, &hand_early)?;
+                    let model = &proved.model;
+                    let statuses: Vec<_> = model
+                        .features()
+                        .iter()
+                        .map(|feature| serde_json::json!({ "feature": feature.id, "status": built(model, feature.id).err() }))
+                        .collect();
+                    let triangles = proved.display.as_ref().map(|display| display.mesh.indices.len() / 3);
+                    sample_display_levels(model, *curved_surfaces);
+                    Ok(serde_json::json!({
+                        "failure": proved.failure,
+                        "display_error": proved.display_error,
+                        "statuses": statuses,
+                        "triangles": triangles,
+                    }))
+                };
+                if *checked { crate::viewport::gpu_preview::checked_route(build) } else { build() }
             }
-            Job::Remesh { curved_surfaces } => {
+            Job::Remesh { curved_surfaces, checked } => {
                 for (_, body) in doc.live_bodies() {
                     let kernel = doc.kernel();
                     let topology = kernel.topology(body).map_err(|error| error.to_string())?;
@@ -120,8 +161,14 @@ impl Host {
                     let levels =
                         crate::graphics::body_mesh_levels(*curved_surfaces, &doc.settings().viewport, &topology);
                     for params in levels.all() {
-                        kernel.preview(body, params).map_err(|error| error.to_string())?;
-                        kernel.preview_edges(body, params).map_err(|error| error.to_string())?;
+                        if *checked {
+                            // A refused checked mesh leaves the page its preview.
+                            let _ = kernel.checked_rendering(body, params);
+                            let _ = kernel.checked_rendering_edges(body, params);
+                        } else {
+                            kernel.preview(body, params).map_err(|error| error.to_string())?;
+                            kernel.preview_edges(body, params).map_err(|error| error.to_string())?;
+                        }
                     }
                 }
                 Ok(serde_json::Value::Null)
@@ -144,7 +191,7 @@ impl Host {
 
 /// Samples the early display of the part's shown body at every display level, as the
 /// page's display quality asks for them, so the hand-over carries each and the page
-/// samples none.
+/// samples none. For a page that shows GPU previews, these are the checked meshes.
 fn sample_display_levels(model: &model::Document, curved_surfaces: Option<crate::graphics::CurvedSurfaces>) {
     use soliddraft_tessellation::Level;
     let Some((_, body)) = model.live_bodies().last().copied() else { return };
@@ -154,10 +201,16 @@ fn sample_display_levels(model: &model::Document, curved_surfaces: Option<crate:
         return;
     }
     let levels = crate::graphics::body_mesh_levels(curved_surfaces, &model.settings().viewport, &topology);
+    let checked = crate::viewport::gpu_preview::route_active();
     for level in [Level::Coarse, Level::Standard, Level::Fine] {
         let params = *levels.params(level);
-        let _ = kernel.preview(body, &params);
-        let _ = kernel.preview_edges(body, &params);
+        if checked {
+            let _ = kernel.checked_rendering(body, &params);
+            let _ = kernel.checked_rendering_edges(body, &params);
+        } else {
+            let _ = kernel.preview(body, &params);
+            let _ = kernel.preview_edges(body, &params);
+        }
     }
 }
 
@@ -172,7 +225,7 @@ fn built(doc: &model::Document, feature: model::FeatureId) -> Result<(), String>
 }
 
 #[cfg(target_arch = "wasm32")]
-pub use browser::{abandon_unwanted, submit, trace};
+pub use browser::{abandon_unwanted, submit, submit_with_early, trace};
 
 #[cfg(target_arch = "wasm32")]
 mod browser {
@@ -217,6 +270,8 @@ mod browser {
         /// Which worker the page started this is, for [`soliddraft_kernel_api::Kernel::offer_builds`].
         session: u64,
         waiting: HashMap<u64, Waiting>,
+        /// What runs when a job hands its rebuilt part over before its answer.
+        early: HashMap<u64, Box<dyn FnMut()>>,
         /// The last panic the worker reported, the reason for the trap that follows it.
         panic: Option<String>,
         stopped: bool,
@@ -228,7 +283,22 @@ mod browser {
             self.waiting.get(&id).is_some_and(|(_, _, _, live, _)| live())
         }
 
+        /// Offers a job's rebuilt part to the page's kernel ahead of its answer, and tells
+        /// whoever waits for it.
+        fn early(&mut self, id: u64, hand_over: &[u8]) {
+            let Some((_, ctx, kernel, _, _)) = self.waiting.get(&id) else { return };
+            if let Err(error) = kernel.offer_builds(self.session, hand_over) {
+                log::warn!("the page could not take the kernel worker's rebuilt part: {error}");
+                return;
+            }
+            ctx.request_repaint();
+            if let Some(early) = self.early.get_mut(&id) {
+                early();
+            }
+        }
+
         fn answer(&mut self, id: u64, result: Result<serde_json::Value, String>, hand_over: &[u8]) {
+            self.early.remove(&id);
             if let Some((answered, ctx, kernel, _, _)) = self.waiting.remove(&id) {
                 // The builds come first, so a rebuild the answer starts takes them.
                 if !hand_over.is_empty()
@@ -243,6 +313,7 @@ mod browser {
 
         fn stop(&mut self, reason: &str) {
             self.stopped = true;
+            self.early.clear();
             for (_, (answered, ctx, _, _, _)) in self.waiting.drain() {
                 answered(Err(format!("The kernel worker stopped: {reason}. Try again.")));
                 ctx.request_repaint();
@@ -299,7 +370,8 @@ mod browser {
 
     fn received(shared: &mut Shared, data: &JsValue) {
         if let Some(id) = get(data, "id").as_f64() {
-            let kind = ["answer", "fatal", "superseded"].into_iter().find(|key| !get(data, key).is_undefined());
+            let kind =
+                ["answer", "early", "fatal", "superseded"].into_iter().find(|key| !get(data, key).is_undefined());
             trace("page received", id as u64, kind.unwrap_or("other").into());
         }
         if let Some(panic) = get(data, "panic").as_string() {
@@ -316,6 +388,11 @@ mod browser {
         if get(data, "superseded").is_truthy() {
             // The interface already asked again; nobody waits for this answer.
             shared.waiting.remove(&id);
+            shared.early.remove(&id);
+        } else if let Ok(early) = get(data, "early").dyn_into::<js_sys::Uint8Array>() {
+            if shared.live(id) {
+                shared.early(id, &early.to_vec());
+            }
         } else if let Some(answer) = get(data, "answer").as_string() {
             // A job no longer wanted has its builds dropped unread, not offered.
             let hand_over = if shared.live(id) {
@@ -352,6 +429,20 @@ mod browser {
         live: impl Fn() -> bool + 'static,
         answered: impl FnOnce(Result<serde_json::Value, String>) + 'static,
     ) -> Result<u64, String> {
+        submit_with_early(part, job, kernel, ctx, live, answered, || {})
+    }
+
+    /// [`submit`], with `early` run when a checked build hands its rebuilt part over,
+    /// after the part has been offered to `kernel` and before the job's answer.
+    pub fn submit_with_early(
+        part: Vec<u8>,
+        job: &Job,
+        kernel: Arc<dyn soliddraft_kernel_api::Kernel>,
+        ctx: &egui::Context,
+        live: impl Fn() -> bool + 'static,
+        answered: impl FnOnce(Result<serde_json::Value, String>) + 'static,
+        early: impl FnMut() + 'static,
+    ) -> Result<u64, String> {
         CLIENT.with_borrow_mut(|client| {
             if client.as_ref().is_none_or(|client| client.shared.borrow().stopped) {
                 // Dropping the stopped client here, outside its own handlers, ends it.
@@ -362,11 +453,9 @@ mod browser {
             let header = serde_json::to_string(job).map_err(|error| error.to_string())?;
             let sent = Sent { slot: job.slot(), header, part };
             post(&client.worker, id, &sent)?;
-            client
-                .shared
-                .borrow_mut()
-                .waiting
-                .insert(id, (Box::new(answered), ctx.clone(), kernel, Box::new(live), sent));
+            let mut shared = client.shared.borrow_mut();
+            shared.waiting.insert(id, (Box::new(answered), ctx.clone(), kernel, Box::new(live), sent));
+            shared.early.insert(id, Box::new(early));
             Ok(id)
         })
     }
@@ -403,9 +492,11 @@ mod browser {
             }
             for id in &unwanted {
                 shared.waiting.remove(id);
+                shared.early.remove(id);
                 trace("page abandoned job", *id, String::new());
             }
             let wanted: Vec<(u64, Waiting)> = shared.waiting.drain().collect();
+            let mut early: HashMap<u64, Box<dyn FnMut()>> = shared.early.drain().collect();
             drop(shared);
             // Dropping the old client terminates its worker, and the job it was running.
             *client = None;
@@ -422,7 +513,11 @@ mod browser {
             for (id, waiting) in wanted {
                 match post(&fresh.worker, id, &waiting.4) {
                     Ok(()) => {
-                        fresh.shared.borrow_mut().waiting.insert(id, waiting);
+                        let mut shared = fresh.shared.borrow_mut();
+                        shared.waiting.insert(id, waiting);
+                        if let Some(early) = early.remove(&id) {
+                            shared.early.insert(id, early);
+                        }
                     }
                     Err(error) => {
                         let (answered, ctx, _, _, _) = waiting;
@@ -464,16 +559,26 @@ mod browser {
         HOST.with_borrow_mut(|host| host.as_mut().and_then(|host| host.take_hand_over().ok())).unwrap_or_default()
     }
 
-    /// The worker's entry: runs one job on this worker's kernel and answers as JSON.
+    /// The worker's entry: runs job `id` on this worker's kernel and answers as JSON. A
+    /// checked build posts its rebuilt part to the page as `{ id, early }` before that.
     #[wasm_bindgen]
-    pub fn kernel_worker_run(header: &str, part: &[u8]) -> String {
+    pub fn kernel_worker_run(header: &str, part: &[u8], id: f64) -> String {
+        let early = |bytes: Vec<u8>| {
+            let bytes = js_sys::Uint8Array::from(bytes.as_slice());
+            let message = js_sys::Object::new();
+            set(&message, "id", &id.into());
+            set(&message, "early", &bytes);
+            if let Ok(scope) = js_sys::global().dyn_into::<web_sys::DedicatedWorkerGlobalScope>() {
+                let _ = scope.post_message_with_transfer(&message, &js_sys::Array::of1(&bytes.buffer()));
+            }
+        };
         let result = serde_json::from_str::<Job>(header).map_err(|error| error.to_string()).and_then(|job| {
             HOST.with_borrow_mut(|host| {
                 host.get_or_insert_with(|| {
                     report_panics();
                     Host::new(crate::startup::kernel())
                 })
-                .run(part, &job)
+                .run_with(part, &job, &early)
             })
         });
         match result {
@@ -574,8 +679,8 @@ mod tests {
         };
         let mut host = Host::new(crate::startup::kernel());
         for job in [
-            Job::Build { edit: Some(edit), level: Default::default(), curved_surfaces: None },
-            Job::Build { edit: None, level: Default::default(), curved_surfaces: None },
+            Job::Build { edit: Some(edit), level: Default::default(), curved_surfaces: None, checked: false },
+            Job::Build { edit: None, level: Default::default(), curved_surfaces: None, checked: false },
         ] {
             let answer = host.run(&part, &job).unwrap();
             assert_eq!(answer["failure"], serde_json::Value::Null, "{answer}");
@@ -585,8 +690,10 @@ mod tests {
             assert!(statuses.iter().all(|status| status["status"].is_null()), "{answer}");
         }
         let too_deep = crate::drag::ScalarDraft { value: -5.0, ..edit };
-        let refused =
-            host.run(&part, &Job::Build { edit: Some(too_deep), level: Default::default(), curved_surfaces: None });
+        let refused = host.run(
+            &part,
+            &Job::Build { edit: Some(too_deep), level: Default::default(), curved_surfaces: None, checked: false },
+        );
         assert!(refused.is_err() || !refused.as_ref().unwrap()["failure"].is_null(), "{refused:?}");
     }
 
@@ -603,7 +710,10 @@ mod tests {
         let worker = Arc::new(soliddraft_kernel_catallax::CatallaxKernel::new());
         let mut host = Host::new(worker.clone());
         let answer = host
-            .run(&part, &Job::Build { edit: Some(edit), level: Default::default(), curved_surfaces: None })
+            .run(
+                &part,
+                &Job::Build { edit: Some(edit), level: Default::default(), curved_surfaces: None, checked: false },
+            )
             .unwrap();
         assert_eq!(answer["failure"], serde_json::Value::Null, "{answer}");
         let bytes = host.take_hand_over().unwrap();
@@ -629,14 +739,19 @@ mod tests {
         let worker = Arc::new(soliddraft_kernel_catallax::CatallaxKernel::new());
         let page = Arc::new(soliddraft_kernel_catallax::CatallaxKernel::new());
         let mut host = Host::new(worker.clone());
-        host.run(&part, &Job::Build { edit: None, level: Default::default(), curved_surfaces: None }).unwrap();
+        host.run(&part, &Job::Build { edit: None, level: Default::default(), curved_surfaces: None, checked: false })
+            .unwrap();
         page.offer_builds(1, &host.take_hand_over().unwrap()).unwrap();
         let opened = model::Document::from_bytes(&part, page.clone()).unwrap();
         assert_eq!(page.fresh_builds(), 0);
         let base = opened.features().iter().find(|f| matches!(f.kind, model::FeatureKind::Extrude(_))).unwrap().id;
         let (_, saved) = opened.snapshot().encode().unwrap();
         let edit = crate::drag::ScalarDraft { feature: base, dimension: crate::drag::Dimension::Depth, value: 12.0 };
-        host.run(&saved, &Job::Build { edit: Some(edit), level: Default::default(), curved_surfaces: None }).unwrap();
+        host.run(
+            &saved,
+            &Job::Build { edit: Some(edit), level: Default::default(), curved_surfaces: None, checked: false },
+        )
+        .unwrap();
         page.offer_builds(1, &host.take_hand_over().unwrap()).unwrap();
         let mut edited = opened.fork();
         edited.execute_deferred(crate::document::scalar_draft_command(&edited, edit).unwrap()).unwrap();
@@ -662,7 +777,7 @@ mod tests {
     #[test]
     fn a_second_workers_builds_take_none_of_the_firsts_ids() {
         let page = Arc::new(soliddraft_kernel_catallax::CatallaxKernel::new());
-        let build = Job::Build { edit: None, level: Default::default(), curved_surfaces: None };
+        let build = Job::Build { edit: None, level: Default::default(), curved_surfaces: None, checked: false };
         let bracket = include_bytes!("../../../site/parts/bracket.dwprt").to_vec();
         let mut first = Host::new(Arc::new(soliddraft_kernel_catallax::CatallaxKernel::new()));
         first.run(&bracket, &build).unwrap();
@@ -706,6 +821,42 @@ mod tests {
         assert_eq!(page.bodies_read(), 1, "its topology is computed from the exact geometry");
     }
 
+    /// The browser with a GPU preview. The worker hands the rebuilt part over as soon as
+    /// it is built, then makes the checked meshes. The page describes the body for its GPU
+    /// from the early hand-over, and takes every checked mesh from the answer's without
+    /// reading the exact body.
+    #[test]
+    fn a_checked_build_hands_its_part_over_early_and_its_checked_meshes_after() {
+        use soliddraft_tessellation::Level;
+
+        let part = include_bytes!("../../../site/parts/bracket.dwprt").to_vec();
+        let worker = Arc::new(soliddraft_kernel_catallax::CatallaxKernel::new());
+        let page = Arc::new(soliddraft_kernel_catallax::CatallaxKernel::new());
+        let mut host = Host::new(worker.clone());
+        let early = std::cell::RefCell::new(Vec::new());
+        let job = Job::Build { edit: None, level: Default::default(), curved_surfaces: None, checked: true };
+        host.run_with(&part, &job, &|bytes| early.borrow_mut().push(bytes)).unwrap();
+        let early = early.into_inner();
+        assert_eq!(early.len(), 1, "one early hand-over");
+        assert!(page.offer_builds(1, &early[0]).unwrap() > 0);
+        let opened = model::Document::from_bytes(&part, page.clone()).unwrap();
+        assert_eq!(page.fresh_builds(), 0, "the early hand-over carried the part");
+        let (_, body) = opened.live_bodies().last().copied().unwrap();
+        let topology = page.topology(body).unwrap();
+        let levels = crate::graphics::body_mesh_levels(None, &opened.settings().viewport, &topology);
+        assert!(page.gpu_preview(body, levels.params(Level::Standard)).unwrap().is_some());
+
+        page.offer_builds(1, &host.take_hand_over().unwrap()).unwrap();
+        let read = page.bodies_read();
+        for level in [Level::Coarse, Level::Standard, Level::Fine] {
+            let params = levels.params(level);
+            assert!(!page.checked_rendering(body, params).unwrap().indices.is_empty());
+            page.checked_rendering_edges(body, params).unwrap();
+        }
+        assert_eq!(page.bodies_read(), read, "the page made a checked mesh the worker had made");
+        assert_eq!(page.fresh_previews(), 0, "the page sampled a CPU preview");
+    }
+
     #[test]
     fn jobs_round_trip_as_the_worker_reads_them() {
         let job = Job::MassProperties { feature: model::FeatureId(3) };
@@ -724,12 +875,13 @@ mod tests {
         let worker = Arc::new(soliddraft_kernel_catallax::CatallaxKernel::new());
         let page = Arc::new(soliddraft_kernel_catallax::CatallaxKernel::new());
         let mut host = Host::new(worker.clone());
-        host.run(&part, &Job::Build { edit: None, level: Default::default(), curved_surfaces: None }).unwrap();
+        host.run(&part, &Job::Build { edit: None, level: Default::default(), curved_surfaces: None, checked: false })
+            .unwrap();
         page.offer_builds(1, &host.take_hand_over().unwrap()).unwrap();
         let opened = model::Document::from_bytes(&part, page.clone()).unwrap();
 
         let choice = Some(CurvedSurfaces::Ultra);
-        host.run(&part, &Job::Remesh { curved_surfaces: choice }).unwrap();
+        host.run(&part, &Job::Remesh { curved_surfaces: choice, checked: false }).unwrap();
         page.offer_builds(1, &host.take_hand_over().unwrap()).unwrap();
         let sampled = page.fresh_previews();
         let mut levels = 0;

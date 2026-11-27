@@ -2,8 +2,10 @@
 // glue and its compiled WebAssembly module (kernel_worker.rs), so the worker runs the
 // same application code with its own memory and its own Catallax kernel.
 //
-// Jobs arrive as { id, slot, header, part }. A newer job for the same slot replaces one
-// that has not started: the worker answers the replaced job { id, superseded: true }.
+// Jobs arrive as { id, slot, header, part }. A checked build posts { id, early } with its
+// rebuilt part before its answer, so the page can mesh a GPU preview meanwhile. A newer
+// job for the same slot replaces one that has not started: the worker answers the
+// replaced job { id, superseded: true }.
 // A job that traps the module ends the worker. It answers { id, fatal } first, and the
 // page starts a new worker for its next job.
 
@@ -60,7 +62,7 @@ function drain() {
   trace(job, 'worker started');
   let answer;
   try {
-    answer = glue.kernel_worker_run(job.header, job.part);
+    answer = glue.kernel_worker_run(job.header, job.part, job.id);
   } catch (error) {
     dead = true;
     self.postMessage({ id: job.id, fatal: String(error) });

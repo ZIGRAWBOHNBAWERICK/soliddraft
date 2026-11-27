@@ -146,6 +146,10 @@ struct Solid {
     /// Early display meshes another kernel sampled for this build, by display key. More
     /// arrive when that kernel samples the build at other display settings.
     handed_previews: Mutex<handover::Previews>,
+    /// The checked displays made here and their edges, by `checked_key`. They travel in a
+    /// hand-over beside the early display meshes, so the browser's page draws its
+    /// worker's checked meshes without making them again.
+    checked: Mutex<handover::Previews>,
     /// The kernel instance that handed this build over, if one did.
     source: Option<u64>,
     ids: convert::Ids,
@@ -175,6 +179,11 @@ fn preview_edges(mesh: &PreviewMesh, ids: &convert::Ids) -> Vec<EdgePolyline> {
             points: edge.vertices.iter().map(|v| mesh.positions[*v].into()).collect(),
         })
         .collect()
+}
+
+/// The hand-over key of a checked display at `options`.
+fn checked_key(options: &MeshOptions) -> String {
+    format!("checked:{}", preview_key(&display_key(options)))
 }
 
 /// Every display control of a mesh request.
@@ -755,6 +764,7 @@ impl CatallaxKernel {
             app,
             key,
             handed_previews: Mutex::new(handed_previews),
+            checked: Mutex::new(handover::Previews::new()),
             ids,
             display,
             print: MeshCache::new(),
@@ -932,6 +942,27 @@ impl CatallaxKernel {
 
     fn solid(&self, body: BodyId) -> KernelResult<Arc<Solid>> {
         self.state()?.solid(body)
+    }
+
+    /// An exact body's checked display and its edges: its display result where it has
+    /// spline faces, its certified mesh otherwise. One handed over is taken as it is.
+    fn checked_solid(&self, body: BodyId, params: &TessellationParams) -> KernelResult<(Mesh, Vec<EdgePolyline>)> {
+        let solid = self.solid(body)?;
+        let key = checked_key(&options(params)?);
+        if let Some(handed) = solid.handed_previews().get(&key) {
+            return Ok(handed.clone());
+        }
+        let lock = || solid.checked.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(made) = lock().get(&key) {
+            return Ok(made.clone());
+        }
+        let made = if solid.has_splines() {
+            (self.rendering(body, params)?, self.rendering_edges(body, params)?)
+        } else {
+            (self.tessellate(body, params)?, self.tessellate_edges(body, params)?)
+        };
+        lock().insert(key, made.clone());
+        Ok(made)
     }
 
     /// The numerical body stored as `body`, if it is one.
@@ -1561,22 +1592,34 @@ impl Kernel for CatallaxKernel {
             }
             // The early display meshes sampled so far travel with the topology. Once it
             // has gone, the ones sampled since go with it again, as a display change asks.
+            let checked: Vec<_> = solid
+                .checked
+                .lock()
+                .map(|checked| {
+                    checked
+                        .iter()
+                        .map(|(key, (mesh, edges))| handover::HandedPreview {
+                            key: key.clone(),
+                            mesh: mesh.clone(),
+                            edges: edges.clone(),
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
             let previews: Vec<_> = solid
                 .previews
                 .computed()
                 .into_iter()
                 .filter_map(|(key, preview)| {
-                    let key = preview_key(&key);
-                    if state.sent_previews.contains(&(solid.key.clone(), key.clone())) {
-                        return None;
-                    }
                     let mesh = preview.as_ref().as_ref()?;
                     Some(handover::HandedPreview {
-                        key,
+                        key: preview_key(&key),
                         mesh: convert::preview(mesh, &solid.ids),
                         edges: preview_edges(mesh, &solid.ids),
                     })
                 })
+                .chain(checked)
+                .filter(|preview| !state.sent_previews.contains(&(solid.key.clone(), preview.key.clone())))
                 .collect();
             if state.sent_topologies.contains(&solid.key) && previews.is_empty() {
                 continue;
@@ -2433,24 +2476,24 @@ impl Kernel for CatallaxKernel {
 
     fn checked_rendering(&self, body: BodyId, params: &TessellationParams) -> KernelResult<Mesh> {
         // A field shows its sample; a numerical body's only mesh is its measured sample,
-        // which `tessellate` returns; a spline body's checked form is its display result.
+        // which `tessellate` returns.
         if self.field(body)?.is_some() {
             return self.preview(body, params);
         }
-        if self.approximate(body)?.is_none() && self.solid(body)?.has_splines() {
-            return self.rendering(body, params);
+        if self.approximate(body)?.is_some() {
+            return self.tessellate(body, params);
         }
-        self.tessellate(body, params)
+        Ok(self.checked_solid(body, params)?.0)
     }
 
     fn checked_rendering_edges(&self, body: BodyId, params: &TessellationParams) -> KernelResult<Vec<EdgePolyline>> {
         if self.field(body)?.is_some() {
             return self.preview_edges(body, params);
         }
-        if self.approximate(body)?.is_none() && self.solid(body)?.has_splines() {
-            return self.rendering_edges(body, params);
+        if self.approximate(body)?.is_some() {
+            return self.tessellate_edges(body, params);
         }
-        self.tessellate_edges(body, params)
+        Ok(self.checked_solid(body, params)?.1)
     }
 
     fn gpu_preview(&self, body: BodyId, params: &TessellationParams) -> KernelResult<Option<GpuPreview>> {

@@ -172,11 +172,54 @@ pub(crate) fn ready_preview(
 ) -> Result<Option<ReadyDisplay>, String> {
     let bodies = model.live_bodies();
     let [(_, body)] = bodies.as_slice() else { return Ok(None) };
-    if !gpu_preview::route_active() {
+    if gpu_preview::active().is_none() {
         return Ok(None);
     }
     let prepared = BodyDisplay::prepare_preview(model, *body, display_feature(model, *body), level, curved_surfaces)?;
     Ok(prepared.map(|prepared| combine(vec![prepared])))
+}
+
+/// What the browser's page needs to mesh `model`'s one live body on its GPU: its body,
+/// feature, topology and display parameters at `level`. `None` for a part of several
+/// bodies or none.
+pub(crate) struct PreviewTarget {
+    pub body: BodyId,
+    feature: FeatureId,
+    topology: Topology,
+    pub params: TessellationParams,
+}
+
+pub(crate) fn preview_target(
+    model: &model::Document,
+    level: soliddraft_tessellation::Level,
+    curved_surfaces: Option<crate::graphics::CurvedSurfaces>,
+) -> Result<Option<PreviewTarget>, String> {
+    let bodies = model.live_bodies();
+    let [(_, body)] = bodies.as_slice() else { return Ok(None) };
+    let topology = model.kernel().topology(*body).map_err(|error| error.to_string())?;
+    let params =
+        *crate::graphics::body_mesh_levels(curved_surfaces, &model.settings().viewport, &topology).params(level);
+    Ok(Some(PreviewTarget { body: *body, feature: display_feature(model, *body), topology, params }))
+}
+
+/// The display of a GPU preview the page meshed for `target`.
+pub(crate) fn preview_display(
+    model: &model::Document,
+    target: PreviewTarget,
+    meshing: gpu_preview::Meshing,
+) -> ReadyDisplay {
+    let (faces, edges) = named_entities(model, target.body, &target.topology);
+    combine(vec![BodyDisplay {
+        body: target.body,
+        feature: target.feature,
+        params: target.params,
+        topology: target.topology,
+        kernel_mesh: Mesh::default(),
+        polylines: Vec::new(),
+        gpu: Some(meshing),
+        faces,
+        edges,
+    }])
 }
 
 /// The display body's picks belong to the last feature that built it and is neither

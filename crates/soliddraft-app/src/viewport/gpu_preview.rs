@@ -39,10 +39,29 @@ pub fn active() -> Option<Arc<Gpu>> {
     GPU.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone()
 }
 
+thread_local! {
+    /// Set while the browser's kernel worker builds for a page that shows GPU previews:
+    /// the worker makes the checked meshes the page will show, though it has no GPU.
+    static CHECKED_ROUTE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
 /// Whether the viewport takes its preview from the GPU and its final mesh from
 /// [`Kernel::checked_rendering`].
 pub fn route_active() -> bool {
-    active().is_some()
+    active().is_some() || CHECKED_ROUTE.get()
+}
+
+/// Runs `work` on this thread as if the GPU preview were installed, so its displays
+/// are the checked meshes. The kernel worker builds this way for a page with a GPU.
+pub(crate) fn checked_route<T>(work: impl FnOnce() -> T) -> T {
+    struct Reset(bool);
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            CHECKED_ROUTE.set(self.0);
+        }
+    }
+    let _reset = Reset(CHECKED_ROUTE.replace(true));
+    work()
 }
 
 /// What the last install chose, for the logs and the acceptance records: the backend
@@ -97,13 +116,7 @@ pub fn describe(info: &wgpu::AdapterInfo) -> String {
 /// Installs the GPU preview on the renderer's device unless the switch is off or the
 /// adapter is not a usable GPU. Returns the reason when it keeps the CPU preview.
 pub fn install(info: &wgpu::AdapterInfo, device: &wgpu::Device, queue: &wgpu::Queue) -> Result<(), String> {
-    let refused = if cfg!(target_arch = "wasm32") {
-        Some("preview.no-device: the page meshes no GPU preview yet".to_owned())
-    } else if switched_off() {
-        Some(format!("preview.gpu-disabled: {SWITCH} is off"))
-    } else {
-        refusal(info)
-    };
+    let refused = if switched_off() { Some(format!("preview.gpu-disabled: {SWITCH} is off")) } else { refusal(info) };
     if let Some(reason) = refused {
         set_status(format!("GPU preview off, CPU preview kept ({reason}); adapter {}", describe(info)));
         return Err(reason);
@@ -207,22 +220,29 @@ pub(crate) struct Meshing {
     pub refused: Mesh,
 }
 
-/// Meshes `body` on the GPU preview. `None` when there is no GPU preview, the kernel
-/// has no description of the body, or the device failed; the caller keeps the CPU route.
-pub(crate) fn mesh_body(kernel: &dyn Kernel, body: BodyId, params: &TessellationParams) -> Option<Meshing> {
+/// The kernel's description of `body` for the installed GPU preview, or `None` when
+/// there is no GPU preview or the kernel has no description of the body.
+fn describe_body(kernel: &dyn Kernel, body: BodyId, params: &TessellationParams) -> Option<(Arc<Gpu>, GpuPreview)> {
     let gpu = active()?;
-    let preview = match kernel.gpu_preview(body, params) {
-        Ok(Some(preview)) => preview,
-        Ok(None) => return None,
+    match kernel.gpu_preview(body, params) {
+        Ok(Some(preview)) => Some((gpu, preview)),
+        Ok(None) => None,
         Err(error) => {
             log::warn!(target: "soliddraft_app::gpu_preview", "no GPU preview of {body:?}: {error}");
-            return None;
+            None
         }
-    };
-    #[cfg(not(target_arch = "wasm32"))]
-    let meshed = pollster::block_on(gpu.mesher.mesh(&preview, params));
-    #[cfg(target_arch = "wasm32")]
-    let meshed: Result<Meshed, String> = Err("preview.gpu-device: the page meshes no GPU preview yet".into());
+    }
+}
+
+/// The mesher's answer as a [`Meshing`]: the faces it refused come from the CPU
+/// preview, each with its reason logged. `None` when the device failed.
+fn finish(
+    kernel: &dyn Kernel,
+    body: BodyId,
+    params: &TessellationParams,
+    preview: GpuPreview,
+    meshed: Result<Meshed, String>,
+) -> Option<Meshing> {
     let meshed = match meshed {
         Ok(meshed) => meshed,
         Err(reason) => {
@@ -252,6 +272,61 @@ pub(crate) fn mesh_body(kernel: &dyn Kernel, body: BodyId, params: &Tessellation
         }
     };
     Some(Meshing { preview, meshed, refused })
+}
+
+/// Meshes `body` on the GPU preview now. `None` when there is no GPU preview, the
+/// kernel has no description of the body, or the device failed; the caller keeps the
+/// CPU route. The browser's device answers later: see [`start`].
+pub(crate) fn mesh_body(kernel: &dyn Kernel, body: BodyId, params: &TessellationParams) -> Option<Meshing> {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let (gpu, preview) = describe_body(kernel, body, params)?;
+        let meshed = pollster::block_on(gpu.mesher.mesh(&preview, params));
+        finish(kernel, body, params, preview, meshed)
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = (kernel, body, params);
+        None
+    }
+}
+
+/// A GPU preview being meshed. The desktop's is ready at once; the browser's device
+/// answers after the frame.
+#[derive(Clone)]
+pub(crate) struct Pending(Arc<Mutex<Option<Option<Meshing>>>>);
+
+impl Pending {
+    /// `None` while the device has not answered; then the preview, or `None` when it
+    /// failed and the caller keeps the CPU route. Taken once.
+    pub(crate) fn take(&self) -> Option<Option<Meshing>> {
+        self.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take()
+    }
+}
+
+/// Starts meshing `body` on the GPU preview. `None` when there is no GPU preview or the
+/// kernel has no description of the body.
+pub(crate) fn start(kernel: Arc<dyn Kernel>, body: BodyId, params: TessellationParams) -> Option<Pending> {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let meshing = mesh_body(kernel.as_ref(), body, &params)?;
+        Some(Pending(Arc::new(Mutex::new(Some(Some(meshing))))))
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let (gpu, preview) = describe_body(kernel.as_ref(), body, &params)?;
+        let slot = Arc::new(Mutex::new(None));
+        let answer = slot.clone();
+        wasm_bindgen_futures::spawn_local(async move {
+            let meshed = gpu.mesher.mesh(&preview, &params).await;
+            let meshing = finish(kernel.as_ref(), body, &params, preview, meshed);
+            *answer.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(meshing);
+            if let Some(ctx) = crate::web::context() {
+                ctx.request_repaint();
+            }
+        });
+        Some(Pending(slot))
+    }
 }
 
 /// `mesh` with only the triangles of `faces`.

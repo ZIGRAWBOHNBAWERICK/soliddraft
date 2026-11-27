@@ -11,7 +11,9 @@ use crate::display_quality::{self, DisplayQuality};
 use crate::sketch::{self, Sketch};
 use glam::Vec3;
 use part_display::PartDisplay;
-pub(crate) use part_display::{ReadyDisplay, ready_display, ready_fallback, ready_preview};
+pub(crate) use part_display::{
+    PreviewTarget, ReadyDisplay, preview_display, preview_target, ready_display, ready_fallback, ready_preview,
+};
 use serde::{Deserialize, Serialize};
 use soliddraft_document::{ContentHash, DocumentId};
 use soliddraft_kernel_api::{

@@ -508,8 +508,6 @@ pub(crate) struct Job {
 }
 
 pub(crate) enum AnswerKind {
-    // The browser shows its kernel worker's proved part and has no early construction display.
-    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     Construction(Result<CandidateDisplay, String>),
     Proved(Result<ProvedBuild, String>),
 }
@@ -611,13 +609,14 @@ pub(crate) fn prove_now(
     edit: Option<ScalarDraft>,
     level: soliddraft_tessellation::Level,
     curved_surfaces: Option<crate::graphics::CurvedSurfaces>,
+    rebuilt: &dyn Fn(&model::Document),
 ) -> Result<ProvedBuild, String> {
     let job = Job { source, edit, baseline: None, params: TessellationParams::default(), level, curved_surfaces };
     let (task, _) = prepare(Queued { request: 1, job }).map_err(|answer| match answer.kind {
         AnswerKind::Proved(Err(error)) => error,
         _ => "The edit could not be prepared.".into(),
     })?;
-    Ok(prove(task, &AtomicU64::new(1), &AtomicU64::new(0), None, &|_| {}))
+    Ok(prove(task, &AtomicU64::new(1), &AtomicU64::new(0), None, &|_| {}, rebuilt))
 }
 
 /// A feature that shapes the body did not build. A sketch that did not build blocks
@@ -633,15 +632,16 @@ fn model_failure(model: &model::Document) -> Option<String> {
     })
 }
 
-/// Rebuilds and proves `task`'s part and makes its checked display. On a machine with
-/// a GPU preview, `early` gets the rebuilt part's GPU preview before the checked
-/// display is made.
+/// Rebuilds and proves `task`'s part and makes its checked display. `rebuilt` sees the
+/// part as soon as it is rebuilt. On a machine with a GPU preview, `early` gets the
+/// rebuilt part's GPU preview before the checked display is made.
 fn prove(
     task: ProofTask,
     newest: &AtomicU64,
     protected: &AtomicU64,
     previous: Option<&model::Document>,
     early: &dyn Fn(CandidateDisplay),
+    rebuilt: &dyn Fn(&model::Document),
 ) -> ProvedBuild {
     let ProofTask { request, mut model, level, curved_surfaces, allowance } = task;
     if let Some(previous) = previous {
@@ -655,6 +655,7 @@ fn prove(
         model.rebuild();
         failure = model_failure(&model);
         if failure.is_none() && wanted(request, newest, protected) {
+            rebuilt(&model);
             match ready_preview(&model, level, curved_surfaces) {
                 Ok(Some(view)) => {
                     let view = Arc::new(view);
@@ -794,6 +795,27 @@ pub(crate) struct Worker {
     reading: Vec<Queued>,
     #[cfg(target_arch = "wasm32")]
     previous: Option<Arc<model::Document>>,
+    /// Requests whose rebuilt part the kernel worker handed over before its answer.
+    #[cfg(target_arch = "wasm32")]
+    early: mpsc::Sender<u64>,
+    #[cfg(target_arch = "wasm32")]
+    early_built: mpsc::Receiver<u64>,
+    /// Requests whose early hand-over is still being read, a few builds a frame.
+    #[cfg(target_arch = "wasm32")]
+    early_reading: Vec<u64>,
+    /// GPU previews the page is meshing for requests not yet proved.
+    #[cfg(target_arch = "wasm32")]
+    previews: Vec<EarlyPreview>,
+}
+
+/// A GPU preview the browser's page is meshing for a request whose rebuilt part the
+/// kernel worker handed over ahead of its answer.
+#[cfg(target_arch = "wasm32")]
+struct EarlyPreview {
+    request: u64,
+    model: model::Document,
+    target: crate::document::PreviewTarget,
+    pending: crate::viewport::gpu_preview::Pending,
 }
 
 impl Worker {
@@ -845,7 +867,7 @@ impl Worker {
                         let Some(result) = proving.run(
                             request,
                             || wanted(request, &current, &retained),
-                            || prove(task, &current, &retained, previous.as_deref(), &early),
+                            || prove(task, &current, &retained, previous.as_deref(), &early, &|_| {}),
                         ) else {
                             continue;
                         };
@@ -921,6 +943,7 @@ impl Worker {
         #[cfg(target_arch = "wasm32")]
         {
             let (built, built_answers) = mpsc::channel();
+            let (early, early_built) = mpsc::channel();
             Ok(Self {
                 answers,
                 newest,
@@ -932,6 +955,10 @@ impl Worker {
                 built_answers,
                 reading: Vec::new(),
                 previous: None,
+                early,
+                early_built,
+                early_reading: Vec::new(),
+                previews: Vec::new(),
             })
         }
     }
@@ -988,22 +1015,91 @@ impl Worker {
         #[cfg(target_arch = "wasm32")]
         {
             let (_, part) = job.source.snapshot().encode().map_err(|error| error.to_string())?;
+            // With a GPU preview, the worker hands the rebuilt part over first and makes
+            // the checked meshes; the page meshes the preview meanwhile.
             let build = crate::kernel_worker::Job::Build {
                 edit: job.edit,
                 level: job.level,
                 curved_surfaces: job.curved_surfaces,
+                checked: crate::viewport::gpu_preview::route_active(),
             };
             let kernel = job.source.kernel().clone();
             let ctx = self.answered.repaint.clone().unwrap_or_default();
             let built = self.built.clone();
+            let early = self.early.clone();
             let (newest, protected) = (self.newest.clone(), self.protected.clone());
             let live = move || wanted(request, &newest, &protected);
-            crate::kernel_worker::submit(part, &build, kernel, &ctx, live, move |result| {
-                let _ = built.send((request, result.map(|_| ())));
-            })?;
+            crate::kernel_worker::submit_with_early(
+                part,
+                &build,
+                kernel,
+                &ctx,
+                live,
+                move |result| {
+                    let _ = built.send((request, result.map(|_| ())));
+                },
+                move || {
+                    let _ = early.send(request);
+                },
+            )?;
             self.waiting.insert(request, Queued { request, job });
             Ok(())
         }
+    }
+
+    /// Rebuilds a request's part on the page's kernel from the rebuilt part the kernel
+    /// worker handed over early, and starts meshing its GPU preview.
+    #[cfg(target_arch = "wasm32")]
+    fn start_preview(&mut self, request: u64) {
+        let Some(queued) = self.waiting.get(&request) else { return };
+        let job = &queued.job;
+        let mut model = job.source.fork();
+        if let Some(edit) = job.edit {
+            let edited = crate::document::scalar_draft_command(&model, edit)
+                .and_then(|command| model.execute_deferred(command).map(|_| ()).map_err(|error| error.to_string()));
+            if let Err(error) = edited {
+                log::warn!("no GPU preview of request {request}: {error}");
+                return;
+            }
+        }
+        model.rebuild();
+        if model_failure(&model).is_some() {
+            return;
+        }
+        let target = match crate::document::preview_target(&model, job.level, job.curved_surfaces) {
+            Ok(Some(target)) => target,
+            Ok(None) => return,
+            Err(error) => {
+                log::warn!("no GPU preview of request {request}: {error}");
+                return;
+            }
+        };
+        let kernel = model.kernel().clone();
+        if let Some(pending) = crate::viewport::gpu_preview::start(kernel, target.body, target.params) {
+            self.previews.push(EarlyPreview { request, model, target, pending });
+        }
+    }
+
+    /// Sends each GPU preview the page has meshed for a request still wanted and not yet
+    /// proved.
+    #[cfg(target_arch = "wasm32")]
+    fn send_previews(&mut self) {
+        let mut waiting = Vec::new();
+        for preview in std::mem::take(&mut self.previews) {
+            let Some(meshed) = preview.pending.take() else {
+                waiting.push(preview);
+                continue;
+            };
+            let EarlyPreview { request, model, target, .. } = preview;
+            if let Some(meshing) = meshed
+                && wanted(request, &self.newest, &self.protected)
+            {
+                let view = crate::document::preview_display(&model, target, meshing);
+                let candidate = CandidateDisplay::Preview(Arc::new(view));
+                let _ = self.answered.send(Answer { request, kind: AnswerKind::Construction(Ok(candidate)) });
+            }
+        }
+        self.previews = waiting;
     }
 
     /// Proves an answered request on the page's kernel, from the builds and topologies the
@@ -1011,9 +1107,11 @@ impl Worker {
     #[cfg(target_arch = "wasm32")]
     fn prove_answered(&mut self, queued: Queued) {
         let request = queued.request;
+        // The proof's checked display replaces any preview still being meshed.
+        self.previews.retain(|preview| preview.request != request);
         match prepare(queued) {
             Ok((proof, _)) => {
-                let built = prove(proof, &self.newest, &self.protected, self.previous.as_deref(), &|_| {});
+                let built = prove(proof, &self.newest, &self.protected, self.previous.as_deref(), &|_| {}, &|_| {});
                 if built.failure.is_none() && !built.model.is_dirty() {
                     self.previous = Some(built.model.clone());
                 }
@@ -1040,10 +1138,26 @@ impl Worker {
                 }
                 self.reading.push(queued);
             }
-            // The offered builds are read one a frame; the proof waits until none is unread,
-            // so no frame holds the page for all of them.
-            let unread = self.reading.first().map(|queued| queued.job.source.kernel().read_offers(1).unwrap_or(0));
+            for request in self.early_built.try_iter().collect::<Vec<_>>() {
+                if self.waiting.contains_key(&request) && wanted(request, &self.newest, &self.protected) {
+                    self.early_reading.push(request);
+                }
+            }
+            // The offered builds are read one a frame; the proof and the preview wait until
+            // none is unread, so no frame holds the page for all of them.
+            let kernel = self.reading.first().map(|queued| queued.job.source.kernel().clone()).or_else(|| {
+                self.early_reading
+                    .iter()
+                    .find_map(|request| self.waiting.get(request))
+                    .map(|q| q.job.source.kernel().clone())
+            });
+            let unread = kernel.map(|kernel| kernel.read_offers(1).unwrap_or(0));
             if unread == Some(0) {
+                for request in std::mem::take(&mut self.early_reading) {
+                    if wanted(request, &self.newest, &self.protected) {
+                        self.start_preview(request);
+                    }
+                }
                 for queued in std::mem::take(&mut self.reading) {
                     let request = queued.request;
                     if wanted(request, &self.newest, &self.protected) {
@@ -1055,9 +1169,16 @@ impl Worker {
             {
                 ctx.request_repaint();
             }
+            self.send_previews();
             // A request replaced before its answer came is not waited for.
             let (newest, protected) = (self.newest.clone(), self.protected.clone());
             self.waiting.retain(|request, _| wanted(*request, &newest, &protected));
+            self.previews.retain(|preview| wanted(preview.request, &newest, &protected));
+            if !self.previews.is_empty()
+                && let Some(ctx) = &self.answered.repaint
+            {
+                ctx.request_repaint();
+            }
         }
         self.answers.try_iter().collect()
     }

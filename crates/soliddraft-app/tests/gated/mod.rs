@@ -50,6 +50,11 @@ pub struct Rules {
     pub checked_released: Vec<BodyId>,
     /// CPU preview and rendering calls, which a GPU preview replaces.
     pub cpu_previews: usize,
+    /// Checked displays fail, as a refused certified mesh does.
+    pub refuse_checked: bool,
+    /// The screen's rendering fails, as a refused spline display result does, while the
+    /// CPU preview still draws.
+    pub refuse_rendering: bool,
 }
 
 impl Gated {
@@ -63,6 +68,7 @@ impl Gated {
         self.changed.notify_all();
         rules = self.changed.wait_while(rules, |r| r.hold_checked && !r.checked_released.contains(&body)).unwrap();
         rules.checked_holding.retain(|held| *held != body);
+        self.changed.notify_all();
     }
 
     /// Spins as a long build does, until the interrupt over this thread's requests stops
@@ -219,13 +225,27 @@ impl Kernel for Gated {
         self.inner.reserve_proof_work()
     }
     fn rendering(&self, body: BodyId, params: &TessellationParams) -> KernelResult<Mesh> {
-        self.rules.lock().unwrap().cpu_previews += 1;
+        let refused = {
+            let mut rules = self.rules.lock().unwrap();
+            rules.cpu_previews += 1;
+            rules.refuse_rendering
+        };
+        if refused {
+            return Err(KernelError::Unsupported("Spline display bound (SD-DISPLAY-02): the scenario refuses".into()));
+        }
         self.display(body)?;
         self.inner.rendering(body, params)
     }
 
     fn checked_rendering(&self, body: BodyId, params: &TessellationParams) -> KernelResult<Mesh> {
         self.check_checked(body);
+        if self.rules.lock().unwrap().refuse_checked {
+            return Err(KernelError::QueryFailed {
+                query: "tessellate".into(),
+                code: 0,
+                message: "mesh.precision-or-budget: the scenario refuses the checked mesh".into(),
+            });
+        }
         self.display(body)?;
         self.inner.checked_rendering(body, params)
     }

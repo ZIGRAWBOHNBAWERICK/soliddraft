@@ -23,7 +23,7 @@
 
 use crate::document::{
     CandidateDisplay, Command, DisplayMesh, Document, EndKind, FeatureId, FeatureKind, FeatureStatus, ReadyDisplay,
-    Selection, ViewToken, construction_view, fmt_mm, ready_display, ready_preview,
+    Selection, ViewToken, construction_view, fmt_mm, ready_display, ready_fallback, ready_preview,
 };
 #[cfg(not(target_arch = "wasm32"))]
 use soliddraft_kernel_api::Interrupt;
@@ -477,6 +477,9 @@ impl DragPreview {
 pub(crate) struct ProvedBuild {
     pub model: Arc<model::Document>,
     pub display: Option<Arc<ReadyDisplay>>,
+    /// False when `display` is the part's preview, kept because its checked display
+    /// failed.
+    pub checked: bool,
     pub failure: Option<String>,
     pub display_error: Option<String>,
 }
@@ -647,12 +650,17 @@ fn prove(
     let mut display = None;
     let mut display_error = None;
     let mut failure = None;
+    let mut preview = None;
     let result = allowance.run(&mut || {
         model.rebuild();
         failure = model_failure(&model);
         if failure.is_none() && wanted(request, newest, protected) {
             match ready_preview(&model, level, curved_surfaces) {
-                Ok(Some(view)) => early(CandidateDisplay::Preview(Arc::new(view))),
+                Ok(Some(view)) => {
+                    let view = Arc::new(view);
+                    preview = Some(view.clone());
+                    early(CandidateDisplay::Preview(view));
+                }
                 Ok(None) => {}
                 Err(error) => log::warn!("no GPU preview of request {request}: {error}"),
             }
@@ -670,7 +678,27 @@ fn prove(
     {
         display_error = Some(error.to_string());
     }
-    ProvedBuild { model: Arc::new(model), display, failure, display_error }
+    // A built part is always drawn: when its checked display fails, its preview stays,
+    // and the reason goes to the log only.
+    let mut checked = true;
+    if failure.is_none()
+        && let Some(error) = &display_error
+    {
+        let kept = preview.or_else(|| match ready_fallback(&model, level, curved_surfaces) {
+            Ok(view) => view.map(Arc::new),
+            Err(fallback) => {
+                log::warn!("no preview of request {request} either: {fallback}");
+                None
+            }
+        });
+        if let Some(view) = kept {
+            log::warn!("the checked display of request {request} failed; its preview stays: {error}");
+            display = Some(view);
+            display_error = None;
+            checked = false;
+        }
+    }
+    ProvedBuild { model: Arc::new(model), display, checked, failure, display_error }
 }
 
 fn wanted(request: u64, newest: &AtomicU64, protected: &AtomicU64) -> bool {

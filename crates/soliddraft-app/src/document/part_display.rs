@@ -64,20 +64,27 @@ struct BodyDisplay {
 }
 
 impl BodyDisplay {
-    /// Queries, renders and names `body` at `level` of its display levels.
+    /// Queries, renders and names `body` at `level` of its display levels. A fallback
+    /// takes the kernel's CPU preview instead of the screen's usual mesh.
     fn prepare(
         model: &model::Document,
         body: BodyId,
         feature: FeatureId,
         level: soliddraft_tessellation::Level,
         curved_surfaces: Option<crate::graphics::CurvedSurfaces>,
+        fallback: bool,
     ) -> Result<Self, String> {
         let kernel = model.kernel();
         let topology = kernel.topology(body).map_err(|error| error.to_string())?;
         let params =
             *crate::graphics::body_mesh_levels(curved_surfaces, &model.settings().viewport, &topology).params(level);
-        let kernel_mesh = screen_mesh(kernel.as_ref(), body, &params).map_err(|error| error.to_string())?;
-        let polylines = edge_polylines(kernel.as_ref(), body, &params);
+        let (kernel_mesh, polylines) = if fallback {
+            let mesh = kernel.preview(body, &params).map_err(|error| error.to_string())?;
+            (mesh, kernel.preview_edges(body, &params).unwrap_or_default())
+        } else {
+            let mesh = screen_mesh(kernel.as_ref(), body, &params).map_err(|error| error.to_string())?;
+            (mesh, edge_polylines(kernel.as_ref(), body, &params))
+        };
         let (faces, edges) = named_entities(model, body, &topology);
         Ok(Self { body, feature, params, topology, kernel_mesh, polylines, gpu: None, faces, edges })
     }
@@ -125,11 +132,32 @@ pub(crate) fn ready_display(
     level: soliddraft_tessellation::Level,
     curved_surfaces: Option<crate::graphics::CurvedSurfaces>,
 ) -> Result<Option<ReadyDisplay>, String> {
+    display_of(model, level, curved_surfaces, false)
+}
+
+/// Every live body's CPU preview, for a part whose checked display failed: a built
+/// body is always drawn.
+pub(crate) fn ready_fallback(
+    model: &model::Document,
+    level: soliddraft_tessellation::Level,
+    curved_surfaces: Option<crate::graphics::CurvedSurfaces>,
+) -> Result<Option<ReadyDisplay>, String> {
+    display_of(model, level, curved_surfaces, true)
+}
+
+fn display_of(
+    model: &model::Document,
+    level: soliddraft_tessellation::Level,
+    curved_surfaces: Option<crate::graphics::CurvedSurfaces>,
+    fallback: bool,
+) -> Result<Option<ReadyDisplay>, String> {
     let bodies = model.live_bodies();
     let Some((_, body)) = bodies.last().copied() else { return Ok(None) };
-    let mut prepared = vec![BodyDisplay::prepare(model, body, display_feature(model, body), level, curved_surfaces)?];
+    let feature = display_feature(model, body);
+    let mut prepared = vec![BodyDisplay::prepare(model, body, feature, level, curved_surfaces, fallback)?];
     for (key, other) in bodies.into_iter().filter(|(_, other)| *other != body) {
-        prepared.push(BodyDisplay::prepare(model, other, body_feature(model, key, other), level, curved_surfaces)?);
+        let feature = body_feature(model, key, other);
+        prepared.push(BodyDisplay::prepare(model, other, feature, level, curved_surfaces, fallback)?);
     }
     Ok(Some(combine(prepared)))
 }

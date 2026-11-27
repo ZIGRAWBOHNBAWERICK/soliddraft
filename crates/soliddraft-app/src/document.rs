@@ -11,7 +11,7 @@ use crate::display_quality::{self, DisplayQuality};
 use crate::sketch::{self, Sketch};
 use glam::Vec3;
 use part_display::PartDisplay;
-pub(crate) use part_display::{ReadyDisplay, ready_display, ready_preview};
+pub(crate) use part_display::{ReadyDisplay, ready_display, ready_fallback, ready_preview};
 use serde::{Deserialize, Serialize};
 use soliddraft_document::{ContentHash, DocumentId};
 use soliddraft_kernel_api::{
@@ -3058,7 +3058,7 @@ impl Document {
             }
             return Ok(());
         }
-        if let Some(display) = &proof.display {
+        if let Some(display) = proof.display.as_ref().filter(|_| proof.checked) {
             for body in display.part.meshes.keys() {
                 self.capture_display_bound(*body)?;
             }
@@ -3069,7 +3069,10 @@ impl Document {
             let ReadyDisplay { part, topology, kernel_mesh, .. } =
                 Arc::try_unwrap(display).unwrap_or_else(|display| (*display).clone());
             let wanted = self.quality.retarget(part.body, &topology, &self.model.settings().viewport);
-            if wanted == part.params {
+            if !proof.checked {
+                // The preview stays: its checked display failed, and asking again
+                // would fail again.
+            } else if wanted == part.params {
                 self.quality.made(part.body, kernel_mesh);
             } else {
                 self.quality.set_quality(&self.model.settings().viewport);
@@ -3462,8 +3465,20 @@ impl Document {
     }
 
     /// Publishes a display made of every live body, or records why there is none. A
-    /// headless document keeps its names and picks and draws nothing.
-    fn publish_ready(&mut self, ready: Result<Option<ReadyDisplay>, String>) {
+    /// headless document keeps its names and picks and draws nothing. When the checked
+    /// display failed, `fallback` makes the bodies' previews: a built body is always drawn.
+    fn publish_ready(
+        &mut self,
+        ready: Result<Option<ReadyDisplay>, String>,
+        fallback: impl FnOnce() -> Result<Option<ReadyDisplay>, String>,
+    ) {
+        let ready = ready.or_else(|error| match fallback() {
+            Ok(Some(display)) => {
+                log::warn!("the checked display failed; the preview stays: {error}");
+                Ok(Some(display))
+            }
+            _ => Err(error),
+        });
         match ready {
             Ok(Some(mut display)) => {
                 if self.headless {
@@ -4403,9 +4418,10 @@ impl Document {
             && proved.model.next_body() > 1
             && proved.model.live_bodies().len() > 1
         {
-            let ready =
-                ready_display(&proved.model, soliddraft_tessellation::Level::Standard, self.quality.curved_surfaces());
-            self.publish_ready(ready);
+            let (level, curved) = (soliddraft_tessellation::Level::Standard, self.quality.curved_surfaces());
+            let model = proved.model.clone();
+            let ready = ready_display(&model, level, curved);
+            self.publish_ready(ready, || ready_fallback(&model, level, curved));
             return;
         }
         if self.model.next_body() > 1
@@ -4514,7 +4530,16 @@ impl Document {
                         self.quality.made(body, mesh);
                         self.shown = next;
                     }
-                    Err(error) => self.display_failure = Some(display_unavailable(error.to_string())),
+                    // A built body is always drawn: its preview stays when its checked
+                    // mesh fails, and the reason goes to the log only.
+                    Err(error) => match self.kernel().preview(body, &self.tess_params) {
+                        Ok(mesh) => {
+                            log::warn!("the checked mesh of {body:?} failed; its preview stays: {error}");
+                            self.show_mesh(body, &topology, &mesh);
+                            self.shown = next;
+                        }
+                        Err(_) => self.display_failure = Some(display_unavailable(error.to_string())),
+                    },
                 }
             }
         } else {
@@ -4551,9 +4576,11 @@ impl Document {
             }
             return;
         }
-        let ready =
-            ready_display(&self.model, soliddraft_tessellation::Level::Standard, self.quality.curved_surfaces());
-        self.publish_ready(ready);
+        let (level, curved) = (soliddraft_tessellation::Level::Standard, self.quality.curved_surfaces());
+        let ready = ready_display(&self.model, level, curved);
+        let model = &self.model;
+        let fallback = ready.is_err().then(|| ready_fallback(model, level, curved));
+        self.publish_ready(ready, || fallback.unwrap_or(Ok(None)));
     }
 
     /// Starts the next additive feature in a separate body.

@@ -19,6 +19,9 @@ use soliddraft_tessellation::Projection;
 
 const HANG: Duration = Duration::from_secs(600);
 
+/// The GPU preview is installed for the whole process, so these tests take turns.
+static SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 fn device() -> Option<(wgpu::Device, wgpu::Queue, String)> {
     let instance = wgpu::Instance::default();
     let Ok(adapter) = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default())) else {
@@ -93,6 +96,7 @@ fn depth(depth: f64) -> ExtrudeParams {
 
 #[test]
 fn the_gpu_preview_shows_first_and_a_late_checked_result_never_replaces_a_newer_preview() {
+    let _serial = SERIAL.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let Some((device, queue, adapter)) = device() else { return };
     let started = Instant::now();
     let phase = |what: &str| eprintln!("{:>7.2} s  {what}", started.elapsed().as_secs_f64());
@@ -161,4 +165,43 @@ fn the_gpu_preview_shows_first_and_a_late_checked_result_never_replaces_a_newer_
     assert!(cpu.gpu.is_none() && !cpu.positions.is_empty());
     assert!(top(&cpu) > top(&checked) + 1.0);
     assert!(kernel.rules.lock().unwrap().cpu_previews > 0, "the CPU preview is the display without a GPU");
+}
+/// A built body is always drawn. When its checked mesh is refused, its preview stays
+/// on screen, without a word to the user, and an edit is kept rather than rolled back.
+/// Without a GPU, the CPU preview stays the same way when the checked display fails.
+#[test]
+fn a_refused_checked_mesh_leaves_the_preview_on_screen() {
+    let _serial = SERIAL.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let Some((device, queue, adapter)) = device() else { return };
+    gpu_preview::install_unchecked(&device, &queue, &adapter).unwrap();
+    let kernel = Arc::new(Gated::default());
+    kernel.rules.lock().unwrap().refuse_checked = true;
+    let mut doc = Document::new("Refused checked mesh", kernel.clone());
+    let id = doc.apply(Command::AddExtrude { params: depth(25.0), via_assistant: false }).unwrap().unwrap();
+    doc.finish_display();
+    let (_, shown_first) = shown(&doc);
+    assert!(shown_first.gpu.is_some(), "the GPU preview stays when the checked mesh is refused");
+    assert_eq!(doc.display_failure(), None);
+
+    doc.apply_interactive(Command::EditExtrude { id, params: depth(30.0) }).unwrap();
+    frames(&mut doc, |doc| !doc.proof_pending() && doc.provisional_mesh().is_none(), "the edit never landed");
+    doc.finish_display();
+    let (_, edited) = shown(&doc);
+    assert!(edited.gpu.is_some(), "the edit's GPU preview stays when its checked mesh is refused");
+    assert!(top(&edited) > top(&shown_first) + 1.0, "the edit was kept, not rolled back");
+    assert_eq!(doc.display_failure(), None, "the refusal goes to the log, not to the user");
+
+    // Without a GPU: the screen's rendering is refused, and the CPU preview stays.
+    gpu_preview::uninstall();
+    {
+        let mut rules = kernel.rules.lock().unwrap();
+        rules.refuse_checked = false;
+        rules.refuse_rendering = true;
+    }
+    doc.apply_interactive(Command::EditExtrude { id, params: depth(35.0) }).unwrap();
+    frames(&mut doc, |doc| !doc.proof_pending() && doc.provisional_mesh().is_none(), "the CPU edit never landed");
+    let (_, cpu) = shown(&doc);
+    assert!(cpu.gpu.is_none() && !cpu.positions.is_empty(), "the CPU preview stays");
+    assert!(top(&cpu) > top(&edited) + 1.0, "the CPU edit was kept, not rolled back");
+    assert_eq!(doc.display_failure(), None);
 }

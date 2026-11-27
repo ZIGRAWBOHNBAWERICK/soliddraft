@@ -528,6 +528,11 @@ fn target_on_face(
     if inside || on_line { Ok(()) } else { Err("The target point is off its supporting face.".into()) }
 }
 
+struct ProjectionEntry {
+    face: FaceId,
+    outward: Vec3,
+}
+
 fn projection_start(
     kernel: &dyn Kernel,
     body: BodyId,
@@ -535,9 +540,9 @@ fn projection_start(
     carriers: &[FaceCarrier],
     group: &[FaceId],
     axis: FaceAxis,
-    entry: FaceId,
-    outward: Vec3,
+    entry: ProjectionEntry,
 ) -> Result<(), String> {
+    let ProjectionEntry { face: entry, outward } = entry;
     let face = carriers.iter().find(|face| face.id == entry).ok_or("The projection entry face is missing.")?;
     let (Some(point), Some(normal)) = (face.on_plane, face.normal) else {
         return Err("The projection entry needs a checked planar face.".into());
@@ -719,8 +724,16 @@ impl Document {
                     if let (Some(zone), Some(outward)) = (projected, outward) {
                         let entry =
                             *zone.entry_faces.get(i).ok_or("A projected zone needs an entry for every feature.")?;
-                        projection_start(self.kernel.as_ref(), body, topology, carriers, group, axis, entry, outward)
-                            .map_err(|error| format!("Projected entry {}: {error}", i + 1))?;
+                        projection_start(
+                            self.kernel.as_ref(),
+                            body,
+                            topology,
+                            carriers,
+                            group,
+                            axis,
+                            ProjectionEntry { face: entry, outward },
+                        )
+                        .map_err(|error| format!("Projected entry {}: {error}", i + 1))?;
                     }
                 }
                 for (i, segment) in control.frame.segments().enumerate() {

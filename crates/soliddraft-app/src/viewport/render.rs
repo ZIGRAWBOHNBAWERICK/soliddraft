@@ -1488,7 +1488,7 @@ impl ViewportRenderer {
         });
     }
 
-    fn upload_body(&self, device: &wgpu::Device, mesh: &DisplayMesh, flags: u32) -> GpuBody {
+    fn upload_body(&self, device: &wgpu::Device, queue: &wgpu::Queue, mesh: &DisplayMesh, flags: u32) -> GpuBody {
         let table = mesh.appearances.len().min(MAX_APPEARANCES);
         if mesh.appearances.len() > MAX_APPEARANCES {
             log::warn!("a body shows {} appearances; the first {MAX_APPEARANCES} are drawn", mesh.appearances.len());
@@ -1528,11 +1528,20 @@ impl ViewportRenderer {
             mesh.corners.iter().map(|v| TaggedVertex { position: v.position.to_array(), id: v.pick }).collect();
         let empty = [0u8; 32];
         let make = |label: &str, bytes: &[u8], usage| {
-            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some(label),
-                contents: if bytes.is_empty() { &empty } else { bytes },
-                usage,
-            })
+            let contents = if bytes.is_empty() { &empty } else { bytes };
+            if cfg!(target_arch = "wasm32") {
+                // SwiftShader WebGPU can refuse mapped buffers during the extrusion preview.
+                let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some(label),
+                    size: contents.len() as u64,
+                    usage: usage | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                });
+                queue.write_buffer(&buffer, 0, contents);
+                buffer
+            } else {
+                device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some(label), contents, usage })
+            }
         };
         let uniform = make(
             "body",
@@ -1622,7 +1631,7 @@ impl ViewportRenderer {
             || self.bodies.len() != meshes.len()
             || meshes.iter().any(|(id, _)| !self.bodies.contains_key(id))
         {
-            self.bodies = meshes.iter().map(|(id, m)| (*id, self.upload_body(device, m, 0))).collect();
+            self.bodies = meshes.iter().map(|(id, m)| (*id, self.upload_body(device, queue, m, 0))).collect();
             self.mesh_version = *version;
         }
         match &input.ghost {
@@ -1631,7 +1640,7 @@ impl ViewportRenderer {
                 let tint = if *removes { input.controls.red_removal } else { input.controls.tint_preview };
                 let flags = 2 | if *removes { 8 } else { 0 } | if tint { 0 } else { 32 };
                 if self.ghost.as_ref().map(|(p, flags, _)| (*p, *flags)) != Some((ptr, flags)) {
-                    self.ghost = Some((ptr, flags, self.upload_body(device, g, flags)));
+                    self.ghost = Some((ptr, flags, self.upload_body(device, queue, g, flags)));
                 }
             }
             None => self.ghost = None,
@@ -1640,7 +1649,7 @@ impl ViewportRenderer {
             Some(c) => {
                 let ptr = Arc::as_ptr(c) as usize;
                 if self.context.as_ref().map(|(q, _)| *q) != Some(ptr) {
-                    self.context = Some((ptr, self.upload_body(device, c, CONTEXT)));
+                    self.context = Some((ptr, self.upload_body(device, queue, c, CONTEXT)));
                 }
             }
             None => self.context = None,
@@ -1654,7 +1663,7 @@ impl ViewportRenderer {
                     None => 4 | 32,
                 };
                 if self.preview.as_ref().map(|(q, flags, _)| (*q, *flags)) != Some((ptr, flags)) {
-                    self.preview = Some((ptr, flags, self.upload_body(device, p, flags)));
+                    self.preview = Some((ptr, flags, self.upload_body(device, queue, p, flags)));
                 }
             }
             None => self.preview = None,
@@ -1663,7 +1672,7 @@ impl ViewportRenderer {
             Some(t) => {
                 let ptr = Arc::as_ptr(t) as usize;
                 if self.threads.as_ref().map(|(q, _)| *q) != Some(ptr) {
-                    self.threads = Some((ptr, self.upload_body(device, t, THREAD_MARKS)));
+                    self.threads = Some((ptr, self.upload_body(device, queue, t, THREAD_MARKS)));
                 }
             }
             None => self.threads = None,

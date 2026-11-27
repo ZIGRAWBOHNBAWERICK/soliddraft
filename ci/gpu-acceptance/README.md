@@ -17,6 +17,17 @@ SafariDriver requires **Develop → Developer Settings → Allow remote automati
 
 The native gate replays the checked-in [canonical P1 scenario](../scenarios/canonical-p1.json) through the desktop app to its `original` checkpoint and saves a scratch part. The browsers open that part through the existing file-drop path. Each gate retains `result.json`, the empty and P1 frames, and the extracted P1 silhouette used for comparison. The comparison omits window chrome, subtracts the empty frame, and allows differences in display scale and edge antialiasing. It requires at least 0.84 intersection-over-union with `p1-reference.pgm`. Do not regenerate the reference to clear a regression; inspect the screenshots first.
 
+## GPU preview
+
+`preview.py` checks that the 18 scenarios of the phase 5 speed set show their preview from the GPU mesher. Run it on the Mac. Build the release CLI with `cargo build --release --locked -p soliddraft-cli`. Build `catallax-verify` from the pinned Catallax checkout. The shipping site comes from the dist build above.
+
+| Gate | Command arguments after `python ci/gpu-acceptance/preview.py` |
+| --- | --- |
+| macOS desktop | `native --soliddraft target/release/soliddraft --catallax-verify <verifier> --out /tmp/preview-native` |
+| macOS browser | `safari --dist crates/soliddraft-web/dist --fixtures /tmp/preview-native/fixtures --out /tmp/preview-safari` |
+
+The native gate replays each scenario with `ci/run-scenarios.py`. Each displayed step must run on a hardware Metal adapter with the GPU preview on. The scenario must show GPU previews. The viewport must ask the kernel for no CPU preview. Faces the mesher refuses are drawn by the CPU preview and are counted apart. The gate sums the checked-mesh calls of each revision from the kernel logs. It saves each scenario's last part for the browser gate. The browser gate opens each part in a fresh page and reads the page's `sdGpuPreview` counts. Set `SOLIDDRAFT_GPU_PREVIEW=off` (or `?gpu-preview=off` in the browser) to keep the CPU preview on a machine with a GPU. CI runs the scenarios that way.
+
 The adapter-policy tests run without a GPU: `python -m unittest discover -s ci/gpu-acceptance`. For a real negative control on the Mac, run the Chrome command with `--force-software` and fresh output. It requests a fallback adapter and enables SwiftShader in the isolated browser. Expect exit 1 and an adapter record naming the forced fallback. Missing SwiftShader, a browser launch failure, or a timeout is not evidence that the software adapter was rejected.
 
 The Windows gates need an interactive native desktop, a usable Python/Pillow environment, a native SolidDraft executable and shipping Wasm distribution, and headed Chrome with `chrome-devtools-axi`. If the binaries are not provided, install Rust with the native and `wasm32-unknown-unknown` targets and Trunk on the build host. Windows interop alone does not establish access to a hardware-accelerated desktop.

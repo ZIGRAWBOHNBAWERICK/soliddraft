@@ -1,0 +1,247 @@
+#!/usr/bin/env python3
+"""GPU preview acceptance: the phase 5 speed scenarios show their preview from the GPU mesher.
+
+native: replays each scenario through `ci/run-scenarios.py` with the release `soliddraft`,
+on the adapter the CLI selects. Every displayed step must run on a hardware adapter with the
+GPU preview on, the scenario must show GPU previews, and the viewport must ask the kernel for
+no CPU preview. Faces the mesher refuses are drawn by the CPU preview and are reported apart.
+The certified-mesh calls each revision made are summed from the kernel logs.
+
+safari: opens each scenario's last saved part in the shipping Wasm app in Safari, on the
+canvas's own WebGPU adapter, and reads the page's GPU preview counts.
+
+Run on a Mac only. Software and fallback adapters fail.
+"""
+
+import argparse
+import json
+from pathlib import Path
+import platform
+import subprocess
+import sys
+import time
+
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+import run as gate  # noqa: E402
+
+SCENARIOS = (
+    'loft-edge-fillet', 'p5-placed-housing', 'p5-flanged-housing', 'canonical-p1', 'draft-oblique-pull',
+    'drawing', 'ring-fillet', 'spline-sweep', 'canonical-p5', 'bracket', 'references', 'torus-revolve',
+    'sphere-revolve', 'rod-cut-28deg', 'skew-corner-fillet', 'loft', 'graded-fields', 'sketch-trim',
+)
+CHECKED = ('tessellate', 'tessellate_edges', 'rendering', 'rendering_edges')
+
+
+def kernel_calls(log):
+    """(name, elapsed ms) of each kernel call a kernel log lists."""
+    try:
+        value = json.loads(log.read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        return []
+    calls = []
+
+    def walk(item):
+        if isinstance(item, dict):
+            name = item.get('query') or item.get('name') or item.get('call')
+            elapsed = item.get('elapsed_ms', item.get('ms'))
+            if isinstance(name, str) and isinstance(elapsed, (int, float)):
+                calls.append((name, float(elapsed)))
+            for child in item.values():
+                walk(child)
+        elif isinstance(item, list):
+            for child in item:
+                walk(child)
+
+    walk(value)
+    return calls
+
+
+def adapter_of(viewport):
+    return {'backend': viewport.get('backend'), 'device_type': viewport.get('device_type'),
+            'name': viewport.get('adapter') or ''}
+
+
+def native_scenario(args, name, out):
+    bundle = out / name
+    command = [sys.executable, str(HERE.parent / 'run-scenarios.py'), str(HERE.parent / 'scenarios' / f'{name}.json'),
+               '--out', str(bundle), '--soliddraft', str(args.soliddraft), '--catallax-verify', str(args.catallax_verify)]
+    with (out / f'{name}.log').open('wb') as log:
+        finished = subprocess.run(command, stdout=log, stderr=subprocess.STDOUT, timeout=3600)
+    record = summarize(name, bundle, finished.returncode)
+    parts = sorted((bundle / 'commands').glob('*/part.dwprt')) or sorted(bundle.glob('**/part.dwprt'))
+    if parts:
+        fixture = out / 'fixtures' / f'{name}.dwprt'
+        fixture.parent.mkdir(exist_ok=True)
+        fixture.write_bytes(parts[-1].read_bytes())
+    return record
+
+
+def summarize(name, bundle, exit_code):
+    """The acceptance record of one scenario bundle."""
+    record = {'scenario': name, 'runner_exit': exit_code, 'steps': 0, 'adapters': [],
+              'gpu_previews': 0, 'cpu_previews': 0, 'refused_faces': 0, 'status': None, 'checked_ms': {}}
+    result = bundle / 'result.json'
+    if result.is_file():
+        report = json.loads(result.read_text(encoding='utf-8'))
+        record['pass'] = report.get('pass')
+        record['revisions'] = len({step.get('revision') for step in report.get('steps', []) if step.get('revision')})
+    for display in sorted((bundle / 'commands').glob('*/display.json')):
+        shown = json.loads(display.read_text(encoding='utf-8'))
+        counts = shown.get('gpu_preview') or {}
+        record['steps'] += 1
+        record['status'] = counts.get('status')
+        # The counts are the process's since it started; a fresh process starts again.
+        for key in ('gpu_previews', 'cpu_previews', 'refused_faces'):
+            record[key] = max(record[key], counts.get(key, 0))
+        viewport = display.with_name('viewport.json')
+        if viewport.is_file():
+            adapter = adapter_of(json.loads(viewport.read_text(encoding='utf-8')))
+            if adapter not in record['adapters']:
+                record['adapters'].append(adapter)
+        revision = shown.get('revision')
+        for log in display.parent.glob('*kernel.json'):
+            for call, elapsed in kernel_calls(log):
+                if call in CHECKED:
+                    record['checked_ms'][str(revision)] = record['checked_ms'].get(str(revision), 0.0) + elapsed
+    record['checked_total_ms'] = round(sum(record['checked_ms'].values()), 1)
+    problems = []
+    if not record['steps']:
+        problems.append('no displayed step')
+    for adapter in record['adapters']:
+        try:
+            gate.require_hardware(adapter, {'Metal'})
+        except ValueError as error:
+            problems.append(str(error))
+    if not (record['status'] or '').startswith('GPU preview on'):
+        problems.append(f"GPU preview not on: {record['status']}")
+    if record['steps'] and not record['gpu_previews']:
+        problems.append('no GPU preview was shown')
+    if record['cpu_previews']:
+        problems.append(f"{record['cpu_previews']} CPU previews for the display")
+    record['problems'] = problems
+    record['accepted'] = not problems
+    return record
+
+
+class PartServer(gate.GateServer):
+    def do_GET(self):
+        local = self.path.partition('?')[0]
+        prefix = '/.gpu-acceptance/'
+        if local.startswith(prefix) and local.endswith('.dwprt'):
+            path = self.server.fixture / local[len(prefix):]
+            if path.parent != self.server.fixture or not path.is_file():
+                self.send_error(404)
+                return
+            body = path.read_bytes()
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/octet-stream')
+            self.send_header('Content-Length', str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        super().do_GET()
+
+
+def safari_scenario(evaluate, screenshot, navigate, name, out):
+    record = {'scenario': name}
+    navigate()
+    snapshot = '''({
+      renderer: window.gpuAcceptance?.renderer,
+      document: window.gpuAcceptance?.document,
+      ready: document.querySelector('#status')?.classList.contains('hidden'),
+      preview: window.sdGpuPreview ?? null
+    })'''
+
+    def state():
+        record.update(evaluate(snapshot))
+        return record.get('renderer') and record.get('ready')
+
+    gate.wait_for(state, 'the shipping Wasm viewport', seconds=90)
+    gate.require_hardware(record['renderer'], {'WebGPU'})
+    result = evaluate(f'window.gpuAcceptance.drop({json.dumps(name)}).then(() => true)')
+    if result is not True:
+        raise RuntimeError(f'Dropping {name}: {result}')
+    gate.wait_for(lambda: state() and (record.get('document') or {}).get('count', 0) > 0, f'{name} to open',
+                  seconds=600)
+    gate.wait_for(lambda: state() and (record.get('preview') or {}).get('gpu_previews', 0) > 0,
+                  f'{name} to show a GPU preview', seconds=300)
+    time.sleep(3)
+    state()
+    screenshot(out / f'{name}.png')
+    preview = record.get('preview') or {}
+    problems = []
+    if not (preview.get('status') or '').startswith('GPU preview on'):
+        problems.append(f"GPU preview not on: {preview.get('status')}")
+    if preview.get('cpu_previews'):
+        problems.append(f"{preview['cpu_previews']} CPU previews for the display")
+    record['problems'] = problems
+    record['accepted'] = not problems
+    return record
+
+
+def safari(args, out, records):
+    fixtures = args.fixtures.resolve()
+    with gate.ThreadingHTTPServer(('127.0.0.1', 0), gate.partial(PartServer, directory=args.dist)) as server:
+        server.fixture = fixtures
+        worker = gate.threading.Thread(target=server.serve_forever, daemon=True)
+        worker.start()
+        url = f'http://127.0.0.1:{server.server_port}/?preset=fast&theme=light'
+        try:
+            browser_record = {}
+            with gate.safari(out, url, browser_record) as (evaluate, screenshot):
+                def navigate():
+                    # A fresh page per part, so each part's counts start at zero.
+                    evaluate(f'(setTimeout(() => {{ location.href = {json.dumps(url)}; }}, 50), true)')
+                    time.sleep(3)
+
+                for name in args.scenarios:
+                    if not (fixtures / f'{name}.dwprt').is_file():
+                        records.append({'scenario': name, 'accepted': False, 'problems': ['no saved part']})
+                        continue
+                    try:
+                        records.append(safari_scenario(evaluate, screenshot, navigate, name, out))
+                    except (ValueError, RuntimeError) as error:
+                        records.append({'scenario': name, 'accepted': False, 'problems': [str(error)]})
+            return browser_record
+        finally:
+            server.shutdown()
+            worker.join()
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument('gate', choices=('native', 'safari'))
+    parser.add_argument('--out', type=Path, required=True)
+    parser.add_argument('--soliddraft', type=Path, help='release soliddraft executable (native)')
+    parser.add_argument('--catallax-verify', type=Path, help='verifier from the pinned Catallax revision (native)')
+    parser.add_argument('--dist', type=Path, help='shipping Wasm site (safari)')
+    parser.add_argument('--fixtures', type=Path, help='the native gate\'s fixtures folder (safari)')
+    parser.add_argument('--scenarios', nargs='+', default=list(SCENARIOS))
+    args = parser.parse_args()
+    if platform.system() != 'Darwin':
+        parser.error('GPU preview acceptance runs on a Mac')
+    if args.gate == 'native' and not (args.soliddraft and args.catallax_verify):
+        parser.error('native needs --soliddraft and --catallax-verify')
+    if args.gate == 'safari' and not (args.dist and args.fixtures):
+        parser.error('safari needs --dist and --fixtures')
+    out = args.out.resolve()
+    out.mkdir(parents=True, exist_ok=False)
+    records = []
+    summary = {'gate': args.gate, 'scenarios': records}
+    try:
+        if args.gate == 'native':
+            for name in args.scenarios:
+                records.append(native_scenario(args, name, out))
+                (out / 'result.json').write_text(json.dumps(summary, indent=2) + '\n', encoding='utf-8')
+        else:
+            summary['browser'] = safari(args, out, records)
+    finally:
+        summary['pass'] = bool(records) and all(record.get('accepted') for record in records)
+        (out / 'result.json').write_text(json.dumps(summary, indent=2) + '\n', encoding='utf-8')
+    print(json.dumps({'pass': summary['pass'], 'failed': [r['scenario'] for r in records if not r.get('accepted')]}))
+    return 0 if summary['pass'] else 1
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())

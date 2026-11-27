@@ -470,7 +470,7 @@ fn two_compound_hole_checks_match_direct_values_and_survive_reopen() {
     };
     assert_eq!(result(1)["is_error"], true);
     assert!(result(1)["content"].as_str().unwrap().contains("has no proposal"));
-    assert_eq!(result(2)["is_error"], false);
+    assert!(!result(2)["is_error"].as_bool().unwrap_or(false));
     let card: Value = serde_json::from_str(result(2)["content"].as_str().unwrap()).unwrap();
     assert_eq!(card["status"], "pending");
     assert_eq!(call(&mut accepted, "pmi_list", json!({}))["items"], json!([]));

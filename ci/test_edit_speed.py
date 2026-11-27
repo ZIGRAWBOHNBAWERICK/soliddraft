@@ -150,24 +150,44 @@ class Answers(unittest.TestCase):
                 (bundle / "protocol.json").write_text("[]")
             file = "0001/question-0000.json"
             baseline, candidate = (bundle / "commands" / file for bundle in (left, right))
-            baseline.write_text('{"problem":{"steps":[{"id":"op_9"},{"profile":"op_9","distance":72}]}}')
-            candidate.write_text('{"problem":{"steps":[{"id":"op_3"},{"profile":"op_3","distance":72}]}}')
+            def question(first, second):
+                # Identical profiles keep the geometry unchanged if their references are swapped.
+                sketch = dict(op="sketch", loops=[[{"op": "circle", "radius": 2}]])
+                return {"problem": {"steps": [
+                    dict(sketch, id=first), dict(sketch, id=second),
+                    dict(id="op_20", op="extrude", profile=first, distance=72),
+                    dict(id="op_21", op="extrude", profile=second, distance=72),
+                ]}}
+
+            baseline.write_text(json.dumps(question("op_9", "op_10")))
+            retained = question("op_3", "op_4")
+            candidate_text = json.dumps(retained)
+            candidate.write_text(candidate_text)
             manifest = root / "expected.json"
             manifest.write_text(json.dumps([
-                dict(scenario="bracket", file=file, pointer=f"/problem/steps/{field}",
-                     baseline="op_9", candidate="op_3", reason="Retain the unchanged sketch.")
-                for field in ("0/id", "1/profile")
+                dict(scenario="drawing", file=file, pointer=f"/problem/steps/{field}",
+                     baseline=old, candidate=new, reason="Retain the unchanged sketch.")
+                for field, old, new in (
+                    ("0/id", "op_9", "op_3"), ("1/id", "op_10", "op_4"),
+                    ("2/profile", "op_9", "op_3"), ("3/profile", "op_10", "op_4"),
+                )
             ]))
-            expected = edit_speed.load_expected_differences(manifest)["bracket"]
+            expected = edit_speed.load_expected_differences(manifest)["drawing"]
             comparator = edit_speed.load(ROOT / "compare-scenario-bundles.py", "bundles")
             edit_speed.compare_answers(comparator, left, right, None, expected)
 
-            for changed in ('"distance":73', '"distance": 72'):
+            for changed in ('"distance": 73', '"distance":72'):
                 with self.subTest(changed=changed):
-                    candidate.write_text(
-                        '{"problem":{"steps":[{"id":"op_3"},{"profile":"op_3",' + changed + '}]}}')
+                    candidate.write_text(candidate_text.replace('"distance": 72', changed, 1))
                     with self.assertRaisesRegex(AssertionError, file):
                         edit_speed.compare_answers(comparator, left, right, None, expected)
+
+            first, second = retained["problem"]["steps"][2:]
+            first["profile"], second["profile"] = second["profile"], first["profile"]
+            candidate.write_text(json.dumps(retained))
+            with self.assertRaisesRegex(AssertionError, "/problem/steps/2/profile"):
+                edit_speed.compare_answers(comparator, left, right, None, expected)
+
             candidate.write_bytes(baseline.read_bytes())
             with self.assertRaisesRegex(AssertionError, "expected difference missing"):
                 edit_speed.compare_answers(comparator, left, right, None, expected)

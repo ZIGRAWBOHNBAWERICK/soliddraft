@@ -80,10 +80,9 @@ fn headless_and_assistant_reject_an_invalid_position_edit() {
     let before = mcp(&mut st, "pmi_list", json!({}));
     let depth = st.doc.undo_depth();
 
-    for (letters, diagnostic) in [
-        (["A", "A", "C"], "A datum is referred to twice"),
-        (["A", "B", "ZZ"], "Datum ZZ is not defined"),
-    ] {
+    for (letters, diagnostic) in
+        [(["A", "A", "C"], "A datum is referred to twice"), (["A", "B", "ZZ"], "Datum ZZ is not defined")]
+    {
         let mut invalid = input(&letters);
         invalid["replaces"] = json!("Bore frame");
         let out = AppTools { state: &mut st }.call("pmi_add", invalid.clone(), &Caller::Mcp { client: "test".into() });
@@ -99,6 +98,103 @@ fn headless_and_assistant_reject_an_invalid_position_edit() {
         assert_eq!(mcp(&mut st, "pmi_list", json!({})), before);
         assert_eq!(st.doc.undo_depth(), depth);
     }
+}
+
+#[test]
+fn position_tool_refuses_incomplete_and_conflicting_intent() {
+    let provider = Arc::new(MockProvider::new(Vec::new()));
+    let mut st = AppState::new(board_bracket());
+    st.chat = ChatState::connected(provider.clone(), "mock provider");
+    let recognised = mcp(&mut st, "pmi_recognise", json!({}));
+    let feature = recognised["features"].as_array().unwrap().iter().find(|f| f["kind"] == "hole").unwrap();
+    mcp(&mut st, "pmi_answer", json!({"accept":"all"}));
+    let baseline = mcp(&mut st, "pmi_list", json!({}));
+    let depth = st.doc.undo_depth();
+    let segment = json!({"value_mm":"0.1","diameter_zone":true,"datums":[{"letter":"A"}]});
+    for (frame, diagnostic) in [
+        (
+            json!({"frame":"single","segment":segment,
+            "projected_zone":{"direction":[0,0,1],"entry_faces":[]}}),
+            "height_mm",
+        ),
+        (
+            json!({"frame":"single","segment":segment,
+            "projected_zone":{"height_mm":"0","direction":[0,0,1],"entry_faces":[]}}),
+            "height must be positive",
+        ),
+        (
+            json!({"frame":"single","segment":segment,
+            "projected_zone":{"height_mm":"8","entry_faces":[]}}),
+            "direction",
+        ),
+        (json!({"frame":"composite","upper":segment,"lower":segment,"projected_zone":null}), "projected_zone"),
+        (
+            json!({"frame":"composite","upper":segment,
+            "lower":{"value_mm":"0.02","diameter_zone":true,"datums":[{"letter":"A","material":"maximum"}]}}),
+            "material boundary modifier",
+        ),
+        (
+            json!({"frame":"composite","upper":segment,
+            "lower":{"value_mm":"0.02","diameter_zone":true,"datums":[{"letter":"B"}]}}),
+            "ordered prefix",
+        ),
+    ] {
+        let input = json!({"kind":"position_control","name":"New bore frame","faces":feature["faces"],"frame":frame});
+        let out = AppTools { state: &mut st }.call("pmi_add", input.clone(), &Caller::Mcp { client: "test".into() });
+        assert!(out.is_error && out.content.contains(diagnostic), "{diagnostic}: {}", out.content);
+        let answered = exchange(
+            &mut st,
+            &provider,
+            "Add a position frame only if its required values are present.",
+            vec![MockTurn::tools("", vec![("pmi_add", input)]), MockTurn::text("I need a valid frame.")],
+        );
+        let [(_, true, _)] = &answered[..] else { panic!("the assistant received a proposal: {answered:?}") };
+        assert_eq!(mcp(&mut st, "pmi_list", json!({})), baseline);
+        assert_eq!(st.doc.undo_depth(), depth);
+    }
+}
+
+#[test]
+fn typed_gdt_requires_human_apply_even_with_auto_apply() {
+    let provider = Arc::new(MockProvider::new(Vec::new()));
+    let mut st = AppState::new(board_bracket());
+    st.chat = ChatState::connected(provider.clone(), "mock provider");
+    let recognised = mcp(&mut st, "pmi_recognise", json!({}));
+    let feature = recognised["features"].as_array().unwrap().iter().find(|f| f["kind"] == "hole").unwrap();
+    let mut direct = AppState::new(board_bracket());
+    for state in [&mut st, &mut direct] {
+        mcp(state, "pmi_answer", json!({"accept":"all"}));
+    }
+    let input = json!({
+        "kind":"position_control", "name":"Checked frame", "faces":feature["faces"],
+        "frame":{"frame":"composite",
+            "upper":{"value_mm":"0.1","diameter_zone":true,"datums":[{"letter":"A"},{"letter":"B"},{"letter":"C"}]},
+            "lower":{"value_mm":"0.02","diameter_zone":true,"datums":[{"letter":"A"},{"letter":"B"}]}}
+    });
+    let depth = st.doc.undo_depth();
+    st.toggle_auto_apply();
+    let result = exchange(
+        &mut st,
+        &provider,
+        "Propose the two position segments I specified: Ø0.1 A B C and Ø0.02 A B.",
+        vec![
+            MockTurn::tools("", vec![("pmi_add", input.clone())]),
+            MockTurn::tools("", vec![("apply", json!({"proposal_id":"P1"}))]),
+            MockTurn::text("The frame awaits your approval."),
+        ],
+    );
+    let [(_, false, card), (_, true, error)] = &result[..] else {
+        panic!("{result:?}");
+    };
+    assert_eq!(card["status"], "pending");
+    assert!(error.to_string().contains("only the user"));
+    assert_eq!(st.doc.undo_depth(), depth);
+    assert!(st.doc.model().pmi().item("Checked frame").is_none());
+
+    st.apply_proposal(card["proposal_id"].as_str().unwrap());
+    mcp(&mut direct, "pmi_add", input);
+    assert_eq!(mcp(&mut st, "pmi_list", json!({})), mcp(&mut direct, "pmi_list", json!({})));
+    assert_eq!(st.doc.undo_depth(), depth + 1);
 }
 
 #[test]

@@ -6,6 +6,7 @@
 
 use kurbo::{BezPath, Shape, Vec2};
 use soliddraft_kernel_api::Point2;
+use soliddraft_kernel_api::pmi::{Decimal, PositionSegment};
 
 use super::{
     Context, DimensionGeometry, DimensionRecord, DisplayList, Item, Owner, PathItem, Role, TextItem, VAlign, add,
@@ -153,6 +154,59 @@ pub(super) fn symbol_items(
                 pen.leader(from, *to, ctx);
             }
         }
+        AnnotationKind::PositionFrame { upper, lower, projected_height_mm } => {
+            let h = 2.0 * th;
+            let x = place.u;
+            let y = place.v;
+            let (top, bottom) = if lower.is_some() { (y + h, y - h) } else { (y + th, y - th) };
+            pen.path(rect(x, bottom, x + h, top));
+            characteristic_sign(&mut pen, GdtCharacteristic::Position, Point2::new(x + th, y), h * 0.62);
+            let (upper_bottom, upper_top) = (if lower.is_some() { y } else { bottom }, top);
+            let right = position_cells(
+                &mut pen,
+                x + h,
+                upper_bottom,
+                upper_top,
+                upper,
+                projected_height_mm.as_ref(),
+                &ctx.style.symbols.diameter,
+            );
+            let right = if let Some(lower) = lower {
+                right.max(position_cells(&mut pen, x + h, bottom, y, lower, None, &ctx.style.symbols.diameter))
+            } else {
+                right
+            };
+            if let Some(to) = anchors.first() {
+                let from = if to.u < x {
+                    Point2::new(x, y)
+                } else if to.u > right {
+                    Point2::new(right, (upper_bottom + upper_top) / 2.0)
+                } else if to.v >= top {
+                    Point2::new(x + th, top)
+                } else {
+                    Point2::new(x + th, bottom)
+                };
+                pen.leader(from, *to, ctx);
+            }
+        }
+        AnnotationKind::DatumTarget { label, extent } => {
+            let radius = (text_width(label, th).max(text_width(extent, th)) * 0.62 + th * 0.45).max(1.35 * th);
+            pen.circle(place, radius);
+            pen.path(line(Point2::new(place.u - radius, place.v), Point2::new(place.u + radius, place.v)));
+            pen.text(Point2::new(place.u, place.v - radius * 0.45), label, Align::Centre, VAlign::Centre, 0.0);
+            if !extent.is_empty() {
+                pen.text(Point2::new(place.u, place.v + radius * 0.45), extent, Align::Centre, VAlign::Centre, 0.0);
+            }
+            if let Some(&to) = anchors.first() {
+                let d = sub(to, place);
+                if d.length() > radius {
+                    pen.path(line(add(place, d * (radius / d.length())), to));
+                }
+                let r = th * 0.38;
+                pen.path(line(Point2::new(to.u - r, to.v - r), Point2::new(to.u + r, to.v + r)));
+                pen.path(line(Point2::new(to.u - r, to.v + r), Point2::new(to.u + r, to.v - r)));
+            }
+        }
         AnnotationKind::Datum { letter } => {
             let h = 2.0 * th;
             let w = (text_width(letter, th) + th).max(h);
@@ -258,6 +312,59 @@ pub(super) fn symbol_items(
         }
         _ => {}
     }
+}
+
+fn position_cells(
+    pen: &mut Pen<'_>,
+    mut x: f64,
+    bottom: f64,
+    top: f64,
+    segment: &PositionSegment,
+    projected: Option<&Decimal>,
+    diameter: &str,
+) -> f64 {
+    let th = pen.height;
+    let y = (top + bottom) / 2.0;
+    let pad = th * 0.45;
+    let circled = th * 1.3;
+    let zone = format!("{diameter}{}", segment.value_mm);
+    let projected = projected.map(ToString::to_string);
+    let mut cell = |text: &str, material: MaterialCondition, projection: Option<&str>| {
+        let text_len = text_width(text, th);
+        let after = if material.is_regardless() { 0.0 } else { circled };
+        let extension = projection.map_or(0.0, |height| circled + text_width(height, th));
+        let width = (text_len + after + extension + 2.0 * pad).max(2.0 * th);
+        let start = x + (width - text_len - after - extension) / 2.0;
+        // The left edge is shared with the previous cell or the position symbol.
+        pen.path(polyline(&[
+            Point2::new(x, bottom),
+            Point2::new(x + width, bottom),
+            Point2::new(x + width, top),
+            Point2::new(x, top),
+        ]));
+        pen.text(Point2::new(start, y), text, Align::Left, VAlign::Centre, 0.0);
+        let mut circle = |pen: &mut Pen, at: f64, letter| {
+            let center = Point2::new(at + th * 0.65, y);
+            pen.circle(center, th * 0.55);
+            pen.height = th * 0.7;
+            pen.text(center, letter, Align::Centre, VAlign::Centre, 0.0);
+            pen.height = th;
+        };
+        if !material.is_regardless() {
+            circle(pen, start + text_len, material.letter());
+        }
+        if let Some(height) = projection {
+            let at = start + text_len + after;
+            circle(pen, at, "P");
+            pen.text(Point2::new(at + circled, y), height, Align::Left, VAlign::Centre, 0.0);
+        }
+        x += width;
+    };
+    cell(&zone, segment.material, projected.as_deref());
+    for datum in &segment.datums {
+        cell(&datum.letter, datum.material, None);
+    }
+    x
 }
 
 /// The point on a frame of size `w` by `h` centred on `c` nearest `towards`, on the

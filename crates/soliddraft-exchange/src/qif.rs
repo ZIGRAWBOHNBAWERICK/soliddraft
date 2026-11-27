@@ -11,50 +11,100 @@ use soliddraft_kernel_api::pmi::{DatumRef, GdtCharacteristic, MaterialCondition,
 
 /// QIF requires a document UUID and a formal inspection standard. Neither is inferred from PMI.
 pub struct Metadata<'a> {
+    /// UUID identifying this QIF document.
     pub qpid: &'a str,
+    /// Organization that publishes the inspection standard.
     pub organization: &'a str,
+    /// Standard designation without the organization or publication year.
     pub designator: &'a str,
+    /// Publication year, when known.
     pub year: Option<&'a str>,
 }
 
+/// Identification and document-wide requirements for the inspected part.
 pub struct Part<'a> {
+    /// Part name or number.
     pub name: &'a str,
+    /// Manufacturing revision, when known.
     pub revision: Option<&'a str>,
+    /// Material as specified by the designer.
     pub material: Option<&'a str>,
+    /// General tolerance as specified by the designer.
     pub general_tolerance: Option<&'a str>,
 }
 
 /// Inspection types supported by the requirements-only export profile.
 pub enum Requirement {
+    /// A datum definition.
     Datum,
-    Dimension { kind: Dimension, target: f64, tolerance: Tolerance, limits: Option<(f64, f64)> },
-    Geometric { kind: GdtCharacteristic, limit_mm: f64, diametrical: bool, material: MaterialCondition },
-    RoughnessAverage { limit_um: f64 },
+    /// A linear dimension in millimetres.
+    Dimension {
+        /// Measurement type.
+        kind: Dimension,
+        /// Nominal value.
+        target: f64,
+        /// Source tolerance classification.
+        tolerance: Tolerance,
+        /// Absolute lower and upper bounds, when stated numerically.
+        limits: Option<(f64, f64)>,
+    },
+    /// A geometric tolerance.
+    Geometric {
+        /// Geometric characteristic from the source frame.
+        kind: GdtCharacteristic,
+        /// Stated tolerance value in millimetres.
+        limit_mm: f64,
+        /// Whether the tolerance zone is specified by diameter.
+        diametrical: bool,
+        /// The controlled feature's material condition.
+        material: MaterialCondition,
+    },
+    /// An Ra requirement.
+    RoughnessAverage {
+        /// Maximum Ra in micrometres.
+        limit_um: f64,
+    },
+    /// Retain this ID in the omission report with the reason.
     Omit(&'static str),
 }
 
+/// Linear dimensional characteristics supported by this profile.
 #[derive(Clone, Copy)]
 pub enum Dimension {
+    /// Diameter.
     Diameter,
+    /// Radius.
     Radius,
+    /// Length or separation.
     Length,
+    /// Width.
     Width,
 }
 
 /// One CSV row. Each feature key is a JSON array of the grouped persistent face references.
 pub struct Row<'a> {
+    /// Stable characteristic ID from the inspection plan.
     pub id: &'a str,
+    /// Original PMI callout, for display.
     pub callout: &'a str,
+    /// Controlled features in source order.
     pub features: Vec<String>,
+    /// Label for a datum definition.
     pub datum_label: Option<&'a str>,
+    /// Datum references in precedence order.
     pub frame: &'a [DatumRef],
+    /// Datum from which a basic distance locates its feature.
     pub locating_datum: Option<&'a str>,
+    /// Values and mapping for this characteristic.
     pub requirement: Requirement,
 }
 
+/// A source row excluded from the exported profile.
 #[derive(Debug)]
 pub struct Omission {
+    /// Stable characteristic ID from the inspection plan.
     pub characteristic_id: String,
+    /// Why the row could not be written.
     pub reason: &'static str,
 }
 

@@ -44,17 +44,38 @@ pub struct InspectionGroup {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// The kind of requirement a characteristic row represents.
 pub enum InspectionKind {
+    /// A diameter size requirement.
     Diameter,
+    /// A radius size requirement.
     Radius,
+    /// A radius-independent distance between features.
     Distance,
+    /// Overall length of a round-ended slot.
     SlotLength,
+    /// Width between a slot's flats.
     SlotWidth,
+    /// Radius of a slot's ends.
     SlotRadius,
-    Geometric { characteristic: GdtCharacteristic, diameter: bool, material: MaterialCondition },
+    /// A geometric tolerance and its zone and material modifiers.
+    Geometric {
+        /// Geometric characteristic from the feature control frame.
+        characteristic: GdtCharacteristic,
+        /// Whether the tolerance is stated as a diameter.
+        diameter: bool,
+        /// The feature's material condition.
+        material: MaterialCondition,
+    },
+    /// A surface texture requirement.
     SurfaceFinish,
+    /// A thread designation.
     Thread,
+    /// A hole callout that has not been decomposed into inspection dimensions.
+    Hole,
+    /// A datum definition.
     Datum,
+    /// A part note.
     Note,
 }
 
@@ -70,6 +91,7 @@ impl InspectionKind {
             Self::Geometric { characteristic, .. } => characteristic.key(),
             Self::SurfaceFinish => "surface_finish",
             Self::Thread => "thread",
+            Self::Hole => "hole",
             Self::Datum => "datum",
             Self::Note => "note",
         }
@@ -238,6 +260,14 @@ impl InspectionGroup {
                     }
                 }
             }
+            PmiKind::Hole { pilot, head, .. } => {
+                group.face_groups.push(pilot);
+                if let Some(head) = head {
+                    group.face_groups.push(head.faces);
+                }
+                group.problem.get_or_insert_with(|| "Hole inspection requirements are not decomposed.".to_owned());
+                group.add(InspectionKind::Hole, None, 0..group.face_groups.len(), None);
+            }
             PmiKind::Location { from, to, tolerance, .. } => {
                 group.face_groups = vec![from.feature, to.feature];
                 group.add(InspectionKind::Distance, None, 0..2, None).dimension(measured.first().copied(), tolerance);
@@ -355,6 +385,7 @@ impl InspectionPlan {
                             _ => Requirement::Omit("surface finish has no numeric Ra limit"),
                         },
                         InspectionKind::Thread => Requirement::Omit("thread has no QIF mapping in this profile"),
+                        InspectionKind::Hole => Requirement::Omit("hole requirements are not decomposed"),
                         InspectionKind::Note => Requirement::Omit("note is not an inspection requirement"),
                     }
                 };

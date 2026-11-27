@@ -9,7 +9,10 @@ FROM rust:${RUST_VERSION}-bookworm AS build
 # trunk builds the web app. It downloads the matching wasm-bindgen and wasm-opt itself.
 ARG TRUNK_VERSION=0.21.14
 ARG TRUNK_SHA256=a67f4054b249fe9acc5fabc25de1aebf19783aca3ad6ff64bf34d7da44d0ea20
-RUN rustup target add wasm32-unknown-unknown \
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends brotli \
+ && rm -rf /var/lib/apt/lists/* \
+ && rustup target add wasm32-unknown-unknown \
  && curl -sSfL -o /tmp/trunk.tgz \
       "https://github.com/trunk-rs/trunk/releases/download/v${TRUNK_VERSION}/trunk-x86_64-unknown-linux-musl.tar.gz" \
  && echo "${TRUNK_SHA256}  /tmp/trunk.tgz" | sha256sum -c - \
@@ -27,7 +30,10 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     cargo build --release --locked -p soliddraft-server \
  && cp target/release/soliddraft-server /out-server \
  && cd crates/soliddraft-web \
- && trunk build --release --locked --dist /out/web
+ && trunk build --release --locked --dist /out/web \
+ && for module in /out/web/*.wasm; do \
+      brotli --quality=9 --keep "$module" && gzip -9 -n -k "$module" || exit 1; \
+    done
 
 FROM debian:bookworm-slim
 # CA certificates for the assistant's calls to the model provider.

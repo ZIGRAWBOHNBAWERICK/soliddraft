@@ -9,7 +9,8 @@
   <link rel="stylesheet" href="client/form.css">
   <link rel="stylesheet" href="client/app.css">
   <script type="module" src="client/app.mjs"></script>
-  <link data-trunk rel="rust" href="Cargo.toml" data-wasm-opt="2" data-cargo-profile-release="web-release">
+  <link data-trunk rel="rust" href="Cargo.toml" data-target-name="soliddraft_web" data-wasm-opt="2" data-cargo-profile-release="web-release">
+  <link data-trunk rel="rust" href="Cargo.toml" data-bin="soliddraft-kernel" data-type="worker" data-bindgen-target="web" data-wasm-opt="2" data-cargo-profile-release="web-release">
   <style>
     html, body { margin: 0; height: 100%; overflow: hidden; background: #f7f8fa; }
     canvas { display: block; width: 100%; height: 100%; outline: none; }

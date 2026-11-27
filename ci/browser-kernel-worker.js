@@ -31,6 +31,9 @@ check(await page.eval(() => location.search === '?demo'), 'Open the application 
 const size = await page.eval(() => [innerWidth, innerHeight]);
 check(size[0] === 1400 && size[1] === 813, `The page is ${size.join(' x ')}; set a 1400 x 813 viewport first`);
 await page.wait('#status.hidden', 60000);
+check(await page.eval(() =>
+  !performance.getEntriesByType('resource').some(entry => entry.name.includes('/soliddraft-kernel')),
+), 'The page requested the worker module before a kernel job');
 await page.eval(() => {
   window.sdClick = (x, y) => {
     const canvas = document.getElementById('soliddraft');
@@ -195,14 +198,14 @@ const plate = await measure(ROW.first, 'Boss-Extrude1', 1, 'The sample part\'s p
 check(plate === 108000, `The 120 x 90 x 10 mm plate measured ${plate} mm³`);
 check(await page.eval(() => window.kernelWorkers.length) === 1, 'Mass properties did not start one kernel worker');
 
-// Starting the worker again on a module that is not the application fails inside the
-// worker, which reports it and closes, as a trap does. The page keeps running.
+// A worker from a different application revision reports the mismatch and closes.
+// The page keeps running and can start another worker.
 await page.eval(() => {
-  window.kernelWorkers[0].postMessage({ init: { glue: 'data:text/javascript,', module: null } });
+  window.kernelWorkers[0].postMessage({ init: { base: document.baseURI, commit: 'different-revision' } });
   return true;
 });
 const fatal = await answered(2, 'the failed worker');
-check('fatal' in fatal, `The worker did not report its failure: ${JSON.stringify(fatal)}`);
+check(fatal.fatal?.includes('Reload the page'), `The worker did not report the revision mismatch: ${JSON.stringify(fatal)}`);
 check(await page.eval(() => document.getElementById('status').classList.contains('hidden')), 'The page stopped with its worker');
 const flanged = await measure(ROW.second, 'Boss-Extrude2', 3, 'The plate and flange, after the worker stopped');
 check(await page.eval(() => window.kernelWorkers.length) === 2, 'The next request did not start a new kernel worker');

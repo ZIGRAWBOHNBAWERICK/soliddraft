@@ -1,8 +1,8 @@
 # SolidDraft in the browser
 
-The application and Catallax compile into one `wasm32-unknown-unknown` module. The browser runs the same egui interface and wgpu viewport as the desktop app. There is no second kernel module or server kernel fallback. Catallax's current operation limits apply on both platforms.
+The browser runs the same egui interface and wgpu viewport as the desktop app. The page's WebAssembly module includes Catallax for geometry operations on the interface thread. Catallax's current operation limits apply on both platforms.
 
-The page has one thread, so long kernel work moves to a kernel worker: a Web Worker that runs the same module, already compiled, with its own memory and its own Catallax kernel. A job sends the part's saved bytes; the worker rebuilds them, reusing its builds from the previous job, and answers with plain data. Mass properties run there. The interface accepts an answer only for the document revision that asked, and a newer job of the same kind replaces one that has not started. A worker that fails answers with its reason; the part on screen stays as it was and the next job starts a new worker. Other kernel work still runs on the interface thread.
+The page has one thread, so long kernel work moves to a Web Worker with its own memory and Catallax kernel. The first job starts the worker and downloads its WebAssembly module. Jobs wait until the worker has initialized and verified that its application revision matches the page's. A job sends the part's saved bytes. The worker rebuilds them, reuses builds from the previous job, and answers with plain data. Mass properties run there. The interface accepts an answer only for the document revision that asked, and a newer job of the same kind replaces one that has yet to start. A worker that fails answers with its reason. The part on screen stays as it was and the next job starts a new worker.
 
 A small Rust server serves the web build and relays assistant requests. The assistant's API key stays on the server. Tools execute in the browser against the part there. Files open by upload and save by download; the server stores no parts.
 
@@ -35,7 +35,7 @@ Feedback is saved privately in our Cloudflare inbox and GitHub issue tracker; op
 
 | Path | What |
 |---|---|
-| `GET /` and the files under it | The web build. Content-hashed files are cached for a year; the page is checked with an ETag. Responses over 16 KB are gzipped. |
+| `GET /` and the files under it | The web build. Content-hashed files are cached for a year. The Docker build precompresses both WebAssembly modules with Brotli and gzip. The server selects a supported variant and offers gzip for other responses of at least 16 KiB. |
 | `GET /api/info` | Whether the assistant is on, with its provider and model or the reason it is off. |
 | `GET /version` | The running build's commit and crate version. The commit comes from `SOLIDDRAFT_COMMIT`, or is `null` when unset. |
 | `POST /api/assistant` | Runs one chat request and streams the reply as JSON lines. |
@@ -56,7 +56,7 @@ cargo run --release -p soliddraft-server -- --web target/web-dist
 
 Open <http://127.0.0.1:8766/>. The kernel runs locally in the browser, including when the assistant is off.
 
-Hosted CI builds the complete application module. The Docker image builds the Rust server and uses trunk for the browser application. See [continuous integration](ci.md) for the native and browser checks.
+Hosted CI builds both browser modules. The Docker image builds the Rust server and uses trunk for the browser application. See [continuous integration](ci.md) for the native and browser checks.
 
 The [release workflow](RELEASING.md) also produces a static browser zip and a GitHub Pages payload. Pages deployment remains off until the owner approves it. Static hosting runs the kernel locally without the assistant relay; it does not need the Rust server or a public self-hosted service.
 

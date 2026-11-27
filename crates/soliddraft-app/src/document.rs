@@ -5016,16 +5016,16 @@ impl Document {
                 self.show_mesh(body, topology, &mesh);
                 self.quality.made(body, mesh);
             }
-            Err(error) => match {
+            Err(error) => {
                 crate::viewport::gpu_preview::note_cpu_preview(body);
-                self.kernel().preview(body, &self.tess_params)
-            } {
-                Ok(mesh) => {
-                    log::warn!("the checked mesh of {body:?} failed; its preview stays: {error}");
-                    self.show_mesh(body, topology, &mesh);
+                match self.kernel().preview(body, &self.tess_params) {
+                    Ok(mesh) => {
+                        log::warn!("the checked mesh of {body:?} failed; its preview stays: {error}");
+                        self.show_mesh(body, topology, &mesh);
+                    }
+                    Err(_) => self.display_failure = Some(display_unavailable(error.to_string())),
                 }
-                Err(_) => self.display_failure = Some(display_unavailable(error.to_string())),
-            },
+            }
         }
     }
 

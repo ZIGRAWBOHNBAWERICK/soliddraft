@@ -503,11 +503,18 @@ fn attributes(xml: &mut String, pairs: &[(&str, Option<&str>)]) -> io::Result<()
     Ok(())
 }
 
-fn escaped(value: &str) -> io::Result<impl Display + '_> {
+fn escaped(value: &str) -> io::Result<Escaped<'_>> {
     if value.chars().any(|c| matches!(c, '\0'..='\x08' | '\x0b' | '\x0c' | '\x0e'..='\x1f' | '\u{fffe}' | '\u{ffff}')) {
         return Err(io::Error::new(io::ErrorKind::InvalidInput, "text is not valid in XML 1.0"));
     }
-    Ok(fmt::from_fn(move |f| {
+    Ok(Escaped(value))
+}
+
+struct Escaped<'a>(&'a str);
+
+impl Display for Escaped<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let value = self.0;
         let mut offset = 0;
         for (i, c) in value.char_indices() {
             let escape = match c {
@@ -525,5 +532,5 @@ fn escaped(value: &str) -> io::Result<impl Display + '_> {
             offset = i + c.len_utf8();
         }
         f.write_str(&value[offset..])
-    }))
+    }
 }

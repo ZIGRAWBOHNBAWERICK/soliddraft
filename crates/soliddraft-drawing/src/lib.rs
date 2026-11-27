@@ -40,7 +40,6 @@ mod part;
 pub mod placed;
 pub mod pmi_items;
 pub mod project;
-#[cfg(test)]
 mod section_path;
 mod sheet;
 mod template;

@@ -6,7 +6,7 @@
 //! table.
 
 use super::properties_drawing::{choice, header, hint, primary_button, section_gap, small_button, value_row};
-use super::{DrawingAction, DrawingSel, DrawingSession, DrawingTool, FinishDraft, GdtDraft, RevisionDraft};
+use super::{CutMode, DrawingAction, DrawingSel, DrawingSession, DrawingTool, FinishDraft, GdtDraft, RevisionDraft};
 use crate::icons::Icon;
 use crate::theme;
 use egui::{Rect, pos2, vec2};
@@ -128,16 +128,43 @@ fn section_panel(ui: &mut egui::Ui, s: &mut DrawingSession, replace: Option<View
         let on = replace.and_then(|r| s.doc.drawing.view(r).and_then(|v| v.parent())).or(s.draft.view);
         value_row(ui, "On", &view_name_of(s, on));
         let drawn = !s.draft.points.is_empty() || pending;
-        if choice(ui, s.draft.horizontal, "Horizontal", drawn.then_some("drawn")) {
-            s.draft.horizontal = true;
+        for (mode, label) in [
+            (CutMode::Straight, "Straight"),
+            (CutMode::Offset, "Offset (stepped)"),
+            (CutMode::Aligned, "Aligned (turned)"),
+        ] {
+            if choice(ui, s.draft.cut == mode, label, None) && s.draft.cut != mode && !drawn {
+                s.draft.cut = mode;
+            }
         }
-        if choice(ui, !s.draft.horizontal, "Vertical", drawn.then_some("drawn")) {
-            s.draft.horizontal = false;
+        match s.draft.cut {
+            CutMode::Straight => {
+                if choice(ui, s.draft.horizontal, "Horizontal", drawn.then_some("drawn")) {
+                    s.draft.horizontal = true;
+                }
+                if choice(ui, !s.draft.horizontal, "Vertical", drawn.then_some("drawn")) {
+                    s.draft.horizontal = false;
+                }
+                hint(
+                    ui,
+                    "The first click starts the line; moving the pointer picks horizontal or vertical; the second click finishes it. Circle centres snap.",
+                );
+            }
+            CutMode::Offset => {
+                hint(
+                    ui,
+                    "Click the centres the cut passes through, in order. The line steps square between them; the steps cut nothing. Click the last centre again or press Finish.",
+                );
+                let ready = s.draft.points.len() >= 2 && !pending;
+                if ui.add_enabled(ready, egui::Button::new("Finish cutting line")).clicked() {
+                    actions.push(DrawingAction::FinishCut);
+                }
+            }
+            CutMode::Aligned => hint(
+                ui,
+                "Click a point on the first leg, the pivot where the legs meet, then a point on the second leg. The second leg turns about the pivot into the plane of the first.",
+            ),
         }
-        hint(
-            ui,
-            "The first click starts the line; moving the pointer picks horizontal or vertical; the second click finishes it. Circle centres snap.",
-        );
         ui.add_space(4.0);
         ui.horizontal(|ui| {
             let flip = egui::Button::new(if s.draft.flip { "Flip direction (flipped)" } else { "Flip direction" });

@@ -7,7 +7,7 @@
 
 use super::canvas::{Hit, Sheet2, card, ghost_annotation, ghost_view, to_view, view_at};
 use super::part::PartContext;
-use super::{DrawingAction, DrawingSel, DrawingSession, DrawingTool, PendingDerived, SHEET};
+use super::{CutMode, DrawingAction, DrawingSel, DrawingSession, DrawingTool, PendingDerived, SHEET};
 use crate::document::Document;
 use crate::state::AppState;
 use crate::theme;
@@ -103,11 +103,13 @@ fn compute_section(
     doc: &Document,
     sheet: usize,
     parent: ViewId,
-    line: [Point2; 2],
+    line: &[Point2],
     flip: bool,
 ) -> Result<PendingDerived, String> {
-    with_part(doc, |part, index| derived::new_section(&s.doc.drawing, part, index, sheet, parent, line, flip, None))
-        .map(|made| pending_of(made, sheet))
+    with_part(doc, |part, index| {
+        derived::new_section_along(&s.doc.drawing, part, index, sheet, parent, line, flip, None)
+    })
+    .map(|made| pending_of(made, sheet))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -202,6 +204,16 @@ fn paint_draft(s: &DrawingSession, sheet2: &Sheet2<'_>, pointer: Option<Point2>)
     let stroke = preview_stroke();
     let pv = pointer.map(|p| to_view(s, view, p));
     match (&s.tool, s.draft.points.as_slice()) {
+        (DrawingTool::Section { .. }, pts) if s.draft.cut != CutMode::Straight && !pts.is_empty() => {
+            let mut through = pts.to_vec();
+            through.extend(pv);
+            let line = bent_line(s.draft.cut, &through);
+            let shown: Vec<egui::Pos2> = line.iter().map(|q| at(*q)).collect();
+            painter.extend(egui::Shape::dashed_line(&shown, stroke, 8.0, 3.0));
+            for q in pts {
+                painter.circle_filled(at(*q), 4.0, theme::accent());
+            }
+        }
         (DrawingTool::Section { .. }, [start]) => {
             if let Some(line) = cut_line(s, view, *start, s.draft.horizontal) {
                 painter.extend(egui::Shape::dashed_line(&[at(line[0]), at(line[1])], stroke, 8.0, 3.0));
@@ -331,6 +343,10 @@ fn section_tool(
     replace: Option<ViewId>,
     push: &mut impl FnMut(DrawingAction),
 ) {
+    if s.draft.cut != CutMode::Straight {
+        bent_section_tool(s, doc, sheet2, hit, p, clicked, replace, push);
+        return;
+    }
     match (s.draft.view, s.draft.points.first().copied()) {
         (Some(view), Some(start)) => {
             // The pointer picks the line's direction until the click finishes it.
@@ -345,8 +361,8 @@ fn section_tool(
             }
             let Some(line) = cut_line(s, view, start, s.draft.horizontal) else { return };
             match replace {
-                Some(section) => redraw_section(s, doc, section, line, push),
-                None => match compute_section(s, doc, s.sheet, view, line, s.draft.flip) {
+                Some(section) => redraw_section(s, doc, section, &line, push),
+                None => match compute_section(s, doc, s.sheet, view, &line, s.draft.flip) {
                     Ok(pending) => {
                         s.draft.points.clear();
                         take_pending(s, pending, push);
@@ -363,22 +379,129 @@ fn section_tool(
                 return;
             }
             // With a parent chosen beforehand, the line must be drawn on it.
-            let Some(view) = replace
-                .and_then(|r| s.doc.drawing.view(r).and_then(|v| v.parent()))
-                .or_else(|| view_of_click(s, hit, p))
-            else {
-                s.say("Click on the view to cut");
-                return;
-            };
-            if matches!(s.doc.drawing.view(view).map(|v| &v.kind), Some(ViewKind::Detail { .. })) {
-                s.say("A detail view cannot be sectioned; cut its parent");
-                return;
-            }
+            let Some(view) = section_parent(s, hit, p, replace) else { return };
             let start = snap_centre(s, view, to_view(s, view, p));
             s.draft.view = Some(view);
             s.draft.points = vec![start];
             s.say("Move for a horizontal or vertical line, click to finish it");
         }
+    }
+}
+
+/// The view a section's cutting line is drawn on: the section's parent when redrawing,
+/// otherwise the clicked view, which must not be a detail.
+fn section_parent(s: &mut DrawingSession, hit: Option<Hit>, p: Point2, replace: Option<ViewId>) -> Option<ViewId> {
+    let Some(view) =
+        replace.and_then(|r| s.doc.drawing.view(r).and_then(|v| v.parent())).or_else(|| view_of_click(s, hit, p))
+    else {
+        s.say("Click on the view to cut");
+        return None;
+    };
+    if matches!(s.doc.drawing.view(view).map(|v| &v.kind), Some(ViewKind::Detail { .. })) {
+        s.say("A detail view cannot be sectioned; cut its parent");
+        return None;
+    }
+    Some(view)
+}
+
+/// The cutting line through the clicked points in a view's millimetres: legs through
+/// the centres joined by square jogs for an offset cut, running the way the first and
+/// last centres lie furthest apart; the three points as they are for an aligned cut.
+fn bent_line(cut: CutMode, points: &[Point2]) -> Vec<Point2> {
+    match (cut, points) {
+        (CutMode::Offset, [first, .., last]) => {
+            derived::staggered_line(points, (last.u - first.u).abs() >= (last.v - first.v).abs())
+        }
+        _ => points.to_vec(),
+    }
+}
+
+/// An offset or aligned cutting line: each click adds a point, circle centres snap. An
+/// aligned line ends at its third point; an offset line when its last point is clicked
+/// again or Finish is pressed.
+#[allow(clippy::too_many_arguments)]
+fn bent_section_tool(
+    s: &mut DrawingSession,
+    doc: &Document,
+    sheet2: &Sheet2<'_>,
+    hit: Option<Hit>,
+    p: Point2,
+    clicked: bool,
+    replace: Option<ViewId>,
+    push: &mut impl FnMut(DrawingAction),
+) {
+    paint_draft(s, sheet2, Some(p));
+    if !clicked {
+        return;
+    }
+    let view = match s.draft.view {
+        Some(view) => view,
+        None => {
+            let Some(view) = section_parent(s, hit, p, replace) else { return };
+            s.draft.view = Some(view);
+            view
+        }
+    };
+    let q = snap_centre(s, view, to_view(s, view, p));
+    let again = s.draft.points.last().is_some_and(|l| (l.u - q.u).hypot(l.v - q.v) <= snap_mm(s));
+    if s.draft.cut == CutMode::Offset && again {
+        finish_cut(s, doc, replace, push);
+        return;
+    }
+    s.draft.points.push(q);
+    match (s.draft.cut, s.draft.points.len()) {
+        (CutMode::Aligned, 3) => finish_cut(s, doc, replace, push),
+        (CutMode::Aligned, 1) => s.say("Click the pivot, where the two legs meet"),
+        (CutMode::Aligned, _) => s.say("Click where the second leg goes; it turns into the plane of the first"),
+        _ => s.say("Click the next centre; click the last one again or press Finish to end the line"),
+    }
+}
+
+/// Makes the section along the offset or aligned line drawn so far.
+fn finish_cut(s: &mut DrawingSession, doc: &Document, replace: Option<ViewId>, push: &mut impl FnMut(DrawingAction)) {
+    let Some(view) = s.draft.view else { return };
+    let points = s.draft.points.clone();
+    let enough = match s.draft.cut {
+        CutMode::Offset => points.len() >= 2,
+        CutMode::Aligned => points.len() == 3,
+        CutMode::Straight => false,
+    };
+    if !enough {
+        s.say("Section: click at least two centres for an offset line, three points for an aligned one");
+        return;
+    }
+    let line = match derived::extend_cutting_line(&s.doc.drawing, view, bent_line(s.draft.cut, &points)) {
+        Ok(line) => line,
+        Err(e) => {
+            s.say(format!("Section: {e}"));
+            s.draft.reset();
+            return;
+        }
+    };
+    match replace {
+        Some(section) => redraw_section(s, doc, section, &line, push),
+        None => match compute_section(s, doc, s.sheet, view, &line, s.draft.flip) {
+            Ok(pending) => {
+                s.draft.points.clear();
+                take_pending(s, pending, push);
+            }
+            Err(e) => {
+                s.say(format!("Section: {e}"));
+                s.draft.reset();
+            }
+        },
+    }
+}
+
+/// Finish, from the panel: ends the offset cutting line being drawn.
+pub fn finish_cut_action(state: &mut AppState) {
+    let doc = &state.doc;
+    let Some(s) = state.drawing.session.as_mut() else { return };
+    let DrawingTool::Section { replace } = s.tool else { return };
+    let mut actions = Vec::new();
+    finish_cut(s, doc, replace, &mut |a| actions.push(a));
+    for a in actions {
+        state.push(crate::state::AppAction::Drawing(a));
     }
 }
 
@@ -388,7 +511,7 @@ fn redraw_section(
     s: &mut DrawingSession,
     doc: &Document,
     section: ViewId,
-    line: [Point2; 2],
+    line: &[Point2],
     push: &mut impl FnMut(DrawingAction),
 ) {
     let Some(ViewKind::Section { parent, flip, label, hatch, .. }) =
@@ -636,7 +759,7 @@ pub fn flip_pending(state: &mut AppState) {
     };
     let made = match &pending.view.kind {
         ViewKind::Section { parent, line, .. } if line.len() >= 2 => {
-            compute_section(s, doc, pending.sheet, *parent, [line[0], line[1]], s.draft.flip)
+            compute_section(s, doc, pending.sheet, *parent, line, s.draft.flip)
         }
         ViewKind::Auxiliary { parent, edge, .. } => {
             compute_auxiliary(s, doc, pending.sheet, *parent, edge.clone(), s.draft.flip)

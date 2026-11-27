@@ -25,7 +25,7 @@ pub const EDIT_STOPGAP_REFUSAL: &str = concat!(
 );
 
 /// No work limit, as large as the phase 5 census used for one.
-const UNLIMITED_WORK: u64 = 1 << 62;
+pub(crate) const UNLIMITED_WORK: u64 = 1 << 62;
 
 /// The deterministic work charged by a request.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

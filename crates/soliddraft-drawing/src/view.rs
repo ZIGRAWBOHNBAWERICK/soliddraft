@@ -124,8 +124,11 @@ pub enum ViewKind {
     Section {
         /// The view the cutting line is drawn on.
         parent: ViewId,
-        /// The cutting line in the parent's view millimetres, from end to end. Only
-        /// straight cuts (two points) are built.
+        /// The cutting line in the parent's view millimetres, from end to end. Two
+        /// points make a straight cut. Three make an aligned cut: the second leg is
+        /// revolved about the middle point into the plane of the first. An even number
+        /// from four make an offset cut: parallel cuts joined by jogs square to them,
+        /// which cut no material.
         line: Vec<Point2>,
         /// True to look the other way along the cut.
         flip: bool,

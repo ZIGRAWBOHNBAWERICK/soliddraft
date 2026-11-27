@@ -18,7 +18,7 @@ use std::collections::BTreeMap;
 
 use kurbo::{BezPath, ParamCurve, PathSeg, Point};
 use soliddraft_kernel_api::drawing::{
-    Curve3, CurveSource, CutRegion, SectionSpec, ViewCurve, ViewCurves, ViewFrame, ViewSpec,
+    Curve3, CurveSource, CutRegion, SectionSpec, SectionView, ViewCurve, ViewCurves, ViewFrame, ViewSpec,
 };
 use soliddraft_kernel_api::{KernelError, Point2, Vec3};
 
@@ -28,6 +28,7 @@ use crate::annotation::{Anchor, Annotation, AnnotationKind, AnnotationState, Att
 use crate::entity::{EntityKind, EntityRef};
 use crate::ids::{AnnotationId, ViewId};
 use crate::part::{Entity, Part, PartIndex, Resolution, round};
+use crate::section_path::{BentSection, CutPath};
 use crate::sheet::{Projection, Sheet};
 use crate::view::{
     Accuracy, Boundary, BrokenOut, Curve2, CurveKind, FoldDirection, Polygon, View, ViewDisplay, ViewGeometry,
@@ -202,15 +203,60 @@ fn compute_view_at(
             let projected = project(index, &curves, &xf, part.digest.as_str(), part.preview);
             ViewContext { id: view.id, curves, xf, pictorial: is_pictorial(&spec), projected }
         }
+        ViewKind::Section { parent, line, flip, model_line, .. } if line.len() > 2 => {
+            let pctx = &memo[parent];
+            // The cut stays where the model points put it; the parent's line is drawn from
+            // them, rounded.
+            let model: Vec<Vec3> = if model_line.len() == line.len() {
+                model_line.clone()
+            } else {
+                line.iter().map(|p| pctx.xf.unproject(*p)).collect()
+            };
+            let bent = BentSection::new(&pctx.xf.frame, &model, *flip).map_err(|e| {
+                DrawingError::BadRequest(format!("{}: {e}", view_label_in(drawing, &drawing.sheets[sheet], view)))
+            })?;
+            let (direction, up) = bent.axes();
+            let spec = with_display(ViewSpec::new(direction, up), &display);
+            let unfolded = bent
+                .unfold(|direction, up, origin| {
+                    section_or_mesh(part, &with_display(ViewSpec::new(direction, up), &display), origin)
+                })
+                .map_err(|e| refused(e.into()))?;
+            let xf = match projection {
+                Some((_, xf)) => xf,
+                None => transform(&unfolded.curves, &spec, scale)?,
+            };
+            let mut projected = project(index, &unfolded.curves, &xf, part.digest.as_str(), part.preview);
+            // Each cut hatches only its own stretch: the jogs and the pivot draw no line.
+            projected.geometry.hatch = unfolded
+                .cuts
+                .iter()
+                .flat_map(|cut| {
+                    let window = cut.band.window(|p| xf.point(p), |d| xf.vector(d));
+                    cut.regions.iter().map(move |r| {
+                        let polygon = region_polygon(r, &xf, None);
+                        Polygon {
+                            outer: crate::display::clip_polygon(&polygon.outer, &window),
+                            holes: polygon
+                                .holes
+                                .iter()
+                                .map(|h| crate::display::clip_polygon(h, &window))
+                                .filter(|h| h.len() >= 3)
+                                .collect(),
+                            ..polygon
+                        }
+                    })
+                })
+                .filter(|h| h.outer.len() >= 3)
+                .collect();
+            ViewContext { id: view.id, curves: unfolded.curves, xf, pictorial: false, projected }
+        }
         ViewKind::Section { parent, line, flip, model_line, .. } => {
             let pctx = &memo[parent];
             let (direction, up) = section_axes(&pctx.xf.frame, line, *flip).ok_or(DrawingError::BadView(view.id))?;
             let spec = with_display(ViewSpec::new(direction, up), &display);
             let origin = model_line.first().copied().unwrap_or_else(|| pctx.xf.unproject(line[0]));
-            let section = part
-                .geometry
-                .section_view(&SectionSpec { view: ViewSpec { preview: part.preview, ..spec }, origin })
-                .map_err(|e| refused(e.into()))?;
+            let section = section_or_mesh(part, &spec, origin).map_err(|e| refused(e.into()))?;
             let xf = match projection {
                 Some((_, xf)) => xf,
                 None => transform(&section.curves, &spec, scale)?,
@@ -341,6 +387,23 @@ fn compute_view_at(
     Ok(ctx)
 }
 
+/// The kernel's certified section along `spec` through `origin`. Where the certified cut
+/// fails, the section cut from the display mesh stands in, marked unproved: the view
+/// shows it, and an export, which takes only certified line work, refuses the view.
+fn section_or_mesh(part: &Part, spec: &ViewSpec, origin: Vec3) -> soliddraft_kernel_api::KernelResult<SectionView> {
+    let section = |preview| part.geometry.section_view(&SectionSpec { view: ViewSpec { preview, ..*spec }, origin });
+    match section(part.preview) {
+        Err(exact) if !part.preview => match section(true) {
+            Ok(mut mesh) => {
+                mesh.curves.unproved = true;
+                Ok(mesh)
+            }
+            Err(_) => Err(exact),
+        },
+        answer => answer,
+    }
+}
+
 pub(crate) fn view_refusal(label: impl FnOnce() -> String, error: DrawingError) -> DrawingError {
     match error {
         DrawingError::Kernel(source) => DrawingError::ViewRefused { view: label(), source },
@@ -377,7 +440,7 @@ fn broken_out(
         .fold(f64::NEG_INFINITY, f64::max);
     let mut spec = with_display(ctx.spec(), display);
     spec.preview = part.preview;
-    let section = part.geometry.section_view(&SectionSpec { view: spec, origin: d * (front - b.depth) })?;
+    let section = section_or_mesh(part, &spec, d * (front - b.depth))?;
     let mut cut = project(index, &section.curves, &ctx.xf, part.digest.as_str(), part.preview);
     clip_projected(&mut ctx.projected, &b.boundary, false);
     clip_projected(&mut cut, &b.boundary, true);
@@ -570,6 +633,10 @@ fn view_axes<'a>(find: &Find<'a>, view: &View, projection: Projection, depth: u8
 /// (or, when vertical, lowest) point, the other way when `flip` is set. `None` when the
 /// line has no length.
 pub fn section_arrow(line: &[Point2], flip: bool) -> Option<Point2> {
+    if line.len() > 2 {
+        // A bent line looks the way its first cut does.
+        return CutPath::of_line(line, flip).ok().map(|path| path.spans()[0].arrow());
+    }
     let (a, b) = (line.first()?, line.last()?);
     let (mut dx, mut dy) = (b.u - a.u, b.v - a.v);
     let len = dx.hypot(dy);

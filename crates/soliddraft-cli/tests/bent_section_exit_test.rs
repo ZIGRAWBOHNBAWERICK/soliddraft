@@ -1,0 +1,310 @@
+//! Offset and aligned sections through `soliddraft draw`, as separate processes, on the
+//! certified Catallax section path:
+//!
+//! - an offset section of the bracket through two staggered holes (hole 1 at 25, 23 and
+//!   hole 4 at 115, 67): each cut shows the hole on its own leg, the cut faces add up to
+//!   the true section areas and the jog draws no line;
+//! - an aligned section of the five-hole flange through hole 1, the bore and hole 3:
+//!   the second leg is revolved into the first leg's plane, so hole 3 shows at its true
+//!   distance from the axis, and nothing at the pivot is drawn twice. Its inclined leg
+//!   draws from the display mesh until Catallax certifies inclined sections;
+//! - both survive a model edit and `draw --update`, reopen with their cutting lines, and
+//!   export with one DXF HATCH per cut region.
+
+use std::path::{Path, PathBuf};
+use std::process::Command;
+
+use serde_json::Value;
+use soliddraft_drawing::{CurveKind, View, ViewKind};
+
+fn recipes_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../recipes")
+}
+
+fn soliddraft(dir: &Path, args: &[&str]) -> String {
+    let out = Command::new(env!("CARGO_BIN_EXE_soliddraft"))
+        .args(args)
+        .current_dir(dir)
+        .env("SOURCE_DATE_EPOCH", "1791936000")
+        .output()
+        .expect("running soliddraft");
+    assert!(out.status.success(), "soliddraft {args:?} failed: {}", String::from_utf8_lossy(&out.stderr));
+    String::from_utf8(out.stdout).unwrap()
+}
+
+fn scratch(name: &str, recipe: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("soliddraft-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::copy(recipes_dir().join(recipe), dir.join(recipe)).unwrap();
+    dir
+}
+
+/// The bent section of the drawing's first sheet, and its scale.
+fn bent_section(path: &Path, points: usize) -> (View, f64) {
+    let (drawing, _) = soliddraft_drawing::file::read(path).expect("the drawing opens");
+    let sheet = &drawing.sheets[0];
+    let section = sheet
+        .views
+        .iter()
+        .find(|v| matches!(&v.kind, ViewKind::Section { line, .. } if line.len() == points))
+        .unwrap_or_else(|| panic!("no section with a {points}-point cutting line"))
+        .clone();
+    let ViewKind::Section { line, model_line, .. } = &section.kind else { unreachable!() };
+    assert_eq!(model_line.len(), line.len(), "the cut keeps its model points");
+    let scale = soliddraft_drawing::project::effective_scale(sheet, &section);
+    (section, scale)
+}
+
+fn ring_area(ring: &[soliddraft_kernel_api::Point2]) -> f64 {
+    (0..ring.len())
+        .map(|i| {
+            let (a, b) = (ring[i], ring[(i + 1) % ring.len()]);
+            a.u * b.v - b.u * a.v
+        })
+        .sum::<f64>()
+        .abs()
+        / 2.0
+}
+
+/// The hatched area in model square millimetres.
+fn cut_area(view: &View, scale: f64) -> f64 {
+    let area: f64 = view
+        .geometry
+        .hatch
+        .iter()
+        .map(|h| ring_area(&h.outer) - h.holes.iter().map(|r| ring_area(r)).sum::<f64>())
+        .sum();
+    area / (scale * scale)
+}
+
+/// The centre, along the sheet's X, of the section curves cut from faces of the hole of
+/// radius `r` on the axis at `(x, y)`: faces whose fingerprint lies within the hole.
+/// `None` when the cut misses the hole.
+fn hole_cut_at(view: &View, x: f64, y: f64, r: f64) -> Option<f64> {
+    let us: Vec<f64> = view
+        .geometry
+        .curves
+        .iter()
+        .filter(|c| c.kind == CurveKind::Section)
+        .filter(|c| {
+            let p = c.source.fingerprint.point;
+            (p.x - x).hypot(p.y - y) <= r + 1e-6
+        })
+        .flat_map(|c| c.path.elements().iter().filter_map(|e| e.end_point()).map(|p| p.x).collect::<Vec<_>>())
+        .collect();
+    let (lo, hi) = us.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), u| (lo.min(*u), hi.max(*u)));
+    (!us.is_empty()).then_some((lo + hi) / 2.0)
+}
+
+fn near(actual: f64, expected: f64, tol: f64, what: &str) {
+    assert!((actual - expected).abs() <= tol, "{what}: {actual} is not {expected}");
+}
+
+/// Straight visible pieces of the view, as segments in view millimetres.
+fn visible_segments(view: &View) -> Vec<[(f64, f64); 2]> {
+    let mut out = Vec::new();
+    for c in view.geometry.curves.iter().filter(|c| c.visible && !c.path.to_svg().contains(['C', 'Q'])) {
+        let points: Vec<(f64, f64)> =
+            c.path.elements().iter().filter_map(|e| e.end_point()).map(|p| (p.x, p.y)).collect();
+        out.extend(points.windows(2).map(|w| [w[0], w[1]]));
+    }
+    out
+}
+
+/// Each cut keeps to its own stretch: no visible line runs across the joint at sheet X
+/// `joint`, where a jog or the pivot meets the next cut, and no line along the joint is
+/// drawn twice. Curved pieces are checked by their ends' sides.
+fn assert_joint_drawn_once(view: &View, joint: f64) {
+    for c in view.geometry.curves.iter().filter(|c| c.visible) {
+        let xs: Vec<f64> = c.path.elements().iter().filter_map(|e| e.end_point()).map(|p| p.x).collect();
+        let (lo, hi) = xs.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), x| (lo.min(*x), hi.max(*x)));
+        assert!(
+            !(lo < joint - 1e-6 && hi > joint + 1e-6),
+            "a visible line runs across the joint at {joint}: {}",
+            c.path.to_svg()
+        );
+    }
+    let on_joint: Vec<(f64, f64)> = visible_segments(view)
+        .into_iter()
+        .filter(|[a, b]| (a.0 - joint).abs() < 1e-6 && (b.0 - joint).abs() < 1e-6)
+        .map(|[a, b]| (a.1.min(b.1), a.1.max(b.1)))
+        .collect();
+    for (i, a) in on_joint.iter().enumerate() {
+        for b in &on_joint[i + 1..] {
+            assert!(a.1.min(b.1) - a.0.max(b.0) < 1e-6, "a line on the joint is drawn twice: {a:?} and {b:?}");
+        }
+    }
+}
+
+fn hatch_count(dxf: &Path) -> usize {
+    let counts =
+        soliddraft_drawing::export::dxf::count_entities(&std::fs::read(dxf).unwrap()).expect("the DXF re-reads");
+    counts.get("HATCH/HATCH").copied().unwrap_or(0)
+}
+
+/// Sets `field` of recipe step `id` and writes the recipe back.
+fn edit_recipe(path: &Path, id: &str, field: &str, value: f64) {
+    let mut v: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    let step = v["steps"].as_array_mut().unwrap().iter_mut().find(|s| s["id"] == id).unwrap();
+    step[field] = value.into();
+    std::fs::write(path, serde_json::to_string_pretty(&v).unwrap()).unwrap();
+}
+
+#[test]
+fn offset_section_through_staggered_bracket_holes() {
+    let dir = scratch("offset-section", "bracket.json");
+    let args = [
+        "draw",
+        "bracket.json",
+        "--template",
+        "iso-a3",
+        "--offset-section",
+        "top:25,23,10;70,23,10;70,67,10;115,67,10",
+        "--out",
+        "bracket.dwdrw",
+        "--out",
+        "bracket.svg",
+        "--out",
+        "bracket.pdf",
+        "--out",
+        "bracket.dxf",
+        "--json",
+    ];
+    let report: Value = serde_json::from_str(&soliddraft(&dir, &args)).unwrap();
+    assert_eq!(report["views"], 5, "four standard views and the section: {report:#}");
+    let (section, scale) = bent_section(&dir.join("bracket.dwdrw"), 4);
+    assert!(section.has_saved_catallax_linework(), "certified line work, which an export writes");
+    let ViewKind::Section { model_line, label, .. } = &section.kind else { unreachable!() };
+    // The jog runs at x = 70 from y = 23 to y = 67, as asked.
+    for (p, (x, y)) in model_line[1..3].iter().zip([(70.0, 23.0), (70.0, 67.0)]) {
+        near(p.x, x, 1e-9, "jog x");
+        near(p.y, y, 1e-9, "jog y");
+    }
+    // Each leg cuts its own hole: hole 1 on the first leg, hole 4 on the second. A
+    // straight cut along either leg would cut hole 3 or hole 2 instead.
+    let first = hole_cut_at(&section, 25.0, 23.0, 4.5).expect("the first leg cuts hole 1");
+    let second = hole_cut_at(&section, 115.0, 67.0, 4.5).expect("the second leg cuts hole 4");
+    assert!(hole_cut_at(&section, 115.0, 23.0, 4.5).is_none(), "hole 3 lies off the cut");
+    assert!(hole_cut_at(&section, 25.0, 67.0, 4.5).is_none(), "hole 2 lies off the cut");
+    near((second - first).abs(), 90.0 * scale, 1e-6, "hole 1 to hole 4 along the cut");
+    // True section areas: on y = 23 for x < 70, the flange (10 x 60) and the plate
+    // (60 x 10) less hole 1 (9 x 10); on y = 67 for x >= 70, the plate (50 x 10) less
+    // hole 4.
+    near(cut_area(&section, scale), 1110.0 + 410.0, 1e-6, "cut area");
+    // The jog at x = 70 lies 45 mm along the cut from hole 1.
+    assert_joint_drawn_once(&section, first + (second - first) * 0.5);
+    // Exported with one HATCH per cut region, with the letter on the sheet.
+    assert_eq!(hatch_count(&dir.join("bracket.dxf")), section.geometry.hatch.len());
+    let svg = std::fs::read_to_string(dir.join("bracket.svg")).unwrap();
+    assert!(svg.contains(&format!(">SECTION {label}-{label}</text>")), "the section's caption");
+    assert!(svg.contains(r#"<g id="HATCH""#) && svg.contains(r#"<g id="CUTTING""#));
+    let pdf = lopdf::Document::load(dir.join("bracket.pdf")).expect("the PDF loads");
+    assert_eq!(pdf.get_pages().len(), 1);
+
+    // The flange gets taller: the drawing rebuilds the same cut against the new part.
+    edit_recipe(&dir.join("bracket.json"), "flange", "distance", 70.0);
+    let report: Value = serde_json::from_str(&soliddraft(
+        &dir,
+        &["draw", "--update", "bracket.dwdrw", "--out", "after.svg", "--out", "after.dxf", "--json"],
+    ))
+    .unwrap();
+    assert!(report.get("dangling_views").is_none(), "{report:#}");
+    let (after, scale) = bent_section(&dir.join("bracket.dwdrw"), 4);
+    assert!(after.has_saved_catallax_linework());
+    let ViewKind::Section { model_line: kept, .. } = &after.kind else { unreachable!() };
+    assert_eq!(kept, model_line, "the cut stays where it was on the part");
+    near(cut_area(&after, scale), 1520.0 + 100.0, 1e-6, "cut area after the flange grew 10 mm");
+    assert!(hole_cut_at(&after, 25.0, 23.0, 4.5).is_some() && hole_cut_at(&after, 115.0, 67.0, 4.5).is_some());
+    assert_eq!(hatch_count(&dir.join("after.dxf")), after.geometry.hatch.len());
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// The flange's second leg runs at 144 degrees. Catallax's certified section does not yet
+/// cut an inclined plane through its cylinders within its work allowance (the kernel
+/// fix is its own Catallax task); until it does, the view shows the section cut from the
+/// display mesh, marked unproved, and an export, which takes only certified line work,
+/// refuses it. The geometry checks hold at the mesh's chord tolerance.
+#[test]
+fn aligned_section_through_a_five_hole_flange() {
+    let dir = scratch("aligned-section", "flange.json");
+    let hole3 = (-28.315594803123158, 20.572483830236564);
+    let through = format!("top:35,0,10;0,0,10;{},{},10", hole3.0, hole3.1);
+    let args = [
+        "draw",
+        "flange.json",
+        "--template",
+        "iso-a3",
+        "--aligned-section",
+        through.as_str(),
+        "--out",
+        "flange.dwdrw",
+        "--json",
+    ];
+    let report: Value = serde_json::from_str(&soliddraft(&dir, &args)).unwrap();
+    assert_eq!(report["views"], 5, "{report:#}");
+    let (section, scale) = bent_section(&dir.join("flange.dwdrw"), 3);
+    assert!(section.geometry.unproved, "the inclined leg stands in from the display mesh");
+    // Hole 3 is revolved onto the first leg's line: it shows 35 mm from the axis, as
+    // hole 1 does, so the two cut holes are 70 mm apart. Unrevolved, its projection
+    // would sit 28.3 mm from the axis.
+    let tol = 0.05 * scale;
+    let first = hole_cut_at(&section, 35.0, 0.0, 5.0).expect("the first leg cuts hole 1");
+    let revolved = hole_cut_at(&section, hole3.0, hole3.1, 5.0).expect("the second leg cuts hole 3");
+    near((revolved - first).abs(), 70.0 * scale, tol, "hole 1 to revolved hole 3");
+    for (x, y) in [(10.815594803123162, 33.28697807033037), (-28.315594803123165, -20.572483830236557)] {
+        assert!(hole_cut_at(&section, x, y, 5.0).is_none(), "the cut misses the hole at {x}, {y}");
+    }
+    // True areas on each leg: the hub wall (10 x 25) and the disk beside it (10 x 10),
+    // then the disk beyond the hole (10 x 10). A straight cut through hole 1 would
+    // find no hole on the far side and hatch 100 mm^2 more.
+    near(cut_area(&section, scale), 2.0 * (250.0 + 100.0 + 100.0), 9.0, "cut area");
+    // The pivot lies halfway between the two holes, each 35 mm from the axis. The far
+    // half of the hub's top rim shows on both legs; each leg draws only its own half.
+    assert_joint_drawn_once(&section, (first + revolved) / 2.0);
+
+    // An export takes certified line work only, so it refuses the stand-in.
+    let out = Command::new(env!("CARGO_BIN_EXE_soliddraft"))
+        .args(["draw", "flange.json", "--aligned-section", through.as_str(), "--out", "flange.svg"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert!(!out.status.success(), "an export of unproved line work was written");
+    assert!(!dir.join("flange.svg").exists());
+
+    // A taller hub: both legs rebuild with it.
+    edit_recipe(&dir.join("flange.json"), "hub", "distance", 30.0);
+    let report: Value =
+        serde_json::from_str(&soliddraft(&dir, &["draw", "--update", "flange.dwdrw", "--json"])).unwrap();
+    assert!(report.get("dangling_views").is_none(), "{report:#}");
+    let (after, scale) = bent_section(&dir.join("flange.dwdrw"), 3);
+    // The bore tool still ends at z = 26, so the taller hub closes over the bore: each leg
+    // gains the 10 x 4 mm cap between the bore's edge and the axis.
+    near(cut_area(&after, scale), 2.0 * (300.0 + 40.0 + 100.0 + 100.0), 9.0, "cut area after the hub grew 5 mm");
+    let first = hole_cut_at(&after, 35.0, 0.0, 5.0).unwrap();
+    let revolved = hole_cut_at(&after, hole3.0, hole3.1, 5.0).unwrap();
+    assert_joint_drawn_once(&after, (first + revolved) / 2.0);
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn bent_sections_refuse_malformed_cutting_lines() {
+    let dir = scratch("bent-refusals", "bracket.json");
+    for (flag, value, says) in [
+        ("--offset-section", "top:25,23,10;70,23,10;70,67,10", "even number of points"),
+        ("--aligned-section", "top:25,23,10;70,23,10", "three points"),
+        ("--offset-section", "top:25,23,10;70,23,10;80,67,10;115,67,10", "jogs square"),
+        ("--aligned-section", "top:25,23,10;70,23,10;115,23,10", "must not be in line"),
+    ] {
+        let out = Command::new(env!("CARGO_BIN_EXE_soliddraft"))
+            .args(["draw", "bracket.json", flag, value, "--out", "refused.dwdrw"])
+            .current_dir(&dir)
+            .output()
+            .unwrap();
+        assert!(!out.status.success(), "{flag} {value} was accepted");
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(stderr.contains(says), "{flag} {value}: {stderr}");
+        assert!(!dir.join("refused.dwdrw").exists(), "a refused drawing was written");
+    }
+    std::fs::remove_dir_all(&dir).unwrap();
+}

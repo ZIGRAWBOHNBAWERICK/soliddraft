@@ -11,6 +11,7 @@ use crate::Drawing;
 use crate::ids::ViewId;
 use crate::library::{self, Align, HatchPattern, TemplateFile, Weight};
 use crate::project::{clip_path, section_arrow, view_bounds};
+use crate::section_path::CutPath;
 use crate::view::{Boundary, View, ViewKind};
 
 /// Where a derived view and the mark it leaves on its parent are, so each can name the
@@ -318,16 +319,28 @@ pub(super) fn parent_marks(drawing: &Drawing, sheet_index: usize, ctx: &Context<
             match &child.kind {
                 ViewKind::Section { line: cut, flip, label: letter, .. } if cut.len() >= 2 => {
                     let Some(arrow_dir) = section_arrow(cut, *flip) else { continue };
+                    // Each end's arrow stands square to its own leg: an aligned cut's
+                    // second leg looks its own way.
+                    let last_arrow = if cut.len() > 2 {
+                        let Ok(path) = CutPath::of_line(cut, *flip) else { continue };
+                        path.spans().last().map_or(arrow_dir, |span| span.arrow())
+                    } else {
+                        arrow_dir
+                    };
                     let pts: Vec<Point2> = cut.iter().map(at).collect();
                     let (first, last) = (pts[0], pts[pts.len() - 1]);
-                    let dir = sub(last, first);
-                    let len = dir.length();
-                    if len < 1e-9 {
+                    let leg = |a: Point2, b: Point2| {
+                        let dir = sub(b, a);
+                        let len = dir.length();
+                        (len >= 1e-9).then(|| (dir / len, len))
+                    };
+                    let (Some((d0, len0)), Some((d1, len1))) =
+                        (leg(pts[0], pts[1]), leg(pts[pts.len() - 2], pts[pts.len() - 1]))
+                    else {
                         continue;
-                    }
-                    let d = dir / len;
-                    let a = Vec2::new(arrow_dir.u, arrow_dir.v);
-                    // A thin chain line, thick at its ends (ISO 128-40).
+                    };
+                    // A thin chain line, thick at its ends and where it changes direction
+                    // (ISO 128-40, ISO 128-44).
                     items.push(Item::Path(PathItem {
                         path: polyline(&pts),
                         width: lines.centre,
@@ -337,8 +350,26 @@ pub(super) fn parent_marks(drawing: &Drawing, sheet_index: usize, ctx: &Context<
                         fill: false,
                         accuracy: None,
                     }));
-                    let thick = 6.0f64.min(len / 3.0);
-                    for (end, inward) in [(first, d), (last, d * -1.0)] {
+                    for bend in pts.windows(3) {
+                        let (Some((into, l0)), Some((out, l1))) = (leg(bend[0], bend[1]), leg(bend[1], bend[2])) else {
+                            continue;
+                        };
+                        let thick = 6.0f64.min(l0 / 3.0).min(l1 / 3.0);
+                        items.push(Item::Path(PathItem {
+                            path: polyline(&[add(bend[1], into * -thick), bend[1], add(bend[1], out * thick)]),
+                            width: lines.cutting,
+                            dash: None,
+                            role: Role::CuttingPlane,
+                            owner,
+                            fill: false,
+                            accuracy: None,
+                        }));
+                    }
+                    let a_last = Vec2::new(last_arrow.u, last_arrow.v);
+                    let a = Vec2::new(arrow_dir.u, arrow_dir.v);
+                    for (end, inward, thick, a) in
+                        [(first, d0, 6.0f64.min(len0 / 3.0), a), (last, d1 * -1.0, 6.0f64.min(len1 / 3.0), a_last)]
+                    {
                         items.push(Item::Path(PathItem {
                             path: line(end, add(end, inward * thick)),
                             width: lines.cutting,
@@ -373,7 +404,7 @@ pub(super) fn parent_marks(drawing: &Drawing, sheet_index: usize, ctx: &Context<
                         ));
                     }
                     if let Some(see) = &see {
-                        let pos = add(add(last, a * (9.0 + letter_height + 4.0)), Vec2::new(0.0, 0.0));
+                        let pos = add(add(last, a_last * (9.0 + letter_height + 4.0)), Vec2::new(0.0, 0.0));
                         items.push(label(
                             pos,
                             ctx.style.text.label_height,

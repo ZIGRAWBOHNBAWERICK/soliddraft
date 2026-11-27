@@ -56,6 +56,14 @@ it on sheet n, which is made from the same template if it does not exist yet:
   --section <view>:<x,y,z>:h|v[:flip]       a section along a horizontal or
                                              vertical cutting line through the model
                                              point; flip looks the other way
+  --offset-section <view>:<x,y,z>;<x,y,z>;...[:flip]
+                                             an offset section through an even number
+                                             of model points from four: parallel cuts
+                                             joined by jogs square to them
+  --aligned-section <view>:<x,y,z>;<x,y,z>;<x,y,z>[:flip]
+                                             an aligned section through three model
+                                             points: the second leg is revolved about
+                                             the middle point into the first leg's plane
   --detail <view>:<x,y,z>:<radius>:<factor> a detail of the circle round the model
                                              point, radius in model mm
   --aux <view>:<x,y,z>[:flip]               an auxiliary view square to the edge
@@ -141,6 +149,7 @@ struct Options {
 #[derive(Clone, Debug)]
 enum Step2 {
     Section { parent: String, through: Vec3, horizontal: bool, flip: bool, sheet: Option<usize> },
+    BentSection { parent: String, through: Vec<Vec3>, flip: bool, sheet: Option<usize> },
     Detail { parent: String, center: Vec3, radius: f64, factor: f64, sheet: Option<usize> },
     Aux { parent: String, near: Vec3, flip: bool, sheet: Option<usize> },
     Crop { view: String, a: Vec3, b: Vec3 },
@@ -242,6 +251,27 @@ fn parse_step(flag: &str, value: &str) -> Result<Step2, String> {
             };
             let horizontal = orientation(dir)? == LinearOrientation::Horizontal;
             Ok(Step2::Section { parent: parent.into(), through: point(through)?, horizontal, flip, sheet })
+        }
+        "--offset-section" | "--aligned-section" => {
+            let (v, sheet) = on_sheet(value)?;
+            let parts: Vec<&str> = v.split(':').collect();
+            let (parent, pts, flip) = match parts[..] {
+                [p, x] => (p, x, false),
+                [p, x, "flip"] => (p, x, true),
+                _ => return Err(bad("<view>:<x,y,z>;<x,y,z>;...[:flip]")),
+            };
+            let through = pts.split(';').map(point).collect::<Result<Vec<_>, _>>()?;
+            let fits = match flag {
+                "--aligned-section" => through.len() == 3,
+                _ => through.len() >= 4 && through.len().is_multiple_of(2),
+            };
+            if !fits {
+                return Err(match flag {
+                    "--aligned-section" => format!("{flag} needs three points, not {}", through.len()),
+                    _ => format!("{flag} needs an even number of points from four, not {}", through.len()),
+                });
+            }
+            Ok(Step2::BentSection { parent: parent.into(), through, flip, sheet })
         }
         "--detail" => {
             let (v, sheet) = on_sheet(value)?;
@@ -450,9 +480,9 @@ fn parse(args: &[String]) -> Result<Options, String> {
                 let end = e.parse().map_err(|_| "--reattach needs an end index")?;
                 o.reattach.push((id(a.to_owned(), "--reattach")?, end, Vec3::new(x, y, z)));
             }
-            flag @ ("--section" | "--detail" | "--aux" | "--crop" | "--broken-out" | "--display" | "--ordinate"
-            | "--baseline" | "--chain" | "--gdt" | "--datum" | "--finish" | "--revision"
-            | "--revision-symbol") => {
+            flag @ ("--section" | "--offset-section" | "--aligned-section" | "--detail" | "--aux" | "--crop"
+            | "--broken-out" | "--display" | "--ordinate" | "--baseline" | "--chain" | "--gdt" | "--datum"
+            | "--finish" | "--revision" | "--revision-symbol") => {
                 let v = value(flag)?;
                 o.steps.push(parse_step(flag, &v)?);
             }
@@ -1061,6 +1091,15 @@ fn apply_steps(drawing: &mut Drawing, part: &Part, steps: &[Step2]) -> Result<()
                 let line = derived::cutting_line(drawing, part, &index, parent, *through, *horizontal).map_err(err)?;
                 let (view, _) =
                     derived::new_section(drawing, part, &index, sheet, parent, line, *flip, None).map_err(err)?;
+                Command::PlaceView { sheet, view }
+            }
+            Step2::BentSection { parent, through, flip, sheet } => {
+                let parent = find_view(drawing, parent)?;
+                let sheet = sheet_for(drawing, parent, *sheet);
+                ensure_sheet(&mut stack, drawing, part, sheet)?;
+                let line = derived::cutting_path(drawing, part, &index, parent, through).map_err(err)?;
+                let (view, _) = derived::new_section_along(drawing, part, &index, sheet, parent, &line, *flip, None)
+                    .map_err(err)?;
                 Command::PlaceView { sheet, view }
             }
             Step2::Detail { parent, center, radius, factor, sheet } => {

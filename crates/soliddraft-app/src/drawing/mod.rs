@@ -421,6 +421,18 @@ pub struct PendingDerived {
     pub sheet: usize,
 }
 
+/// The shape of a section's cutting line.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum CutMode {
+    /// One straight line, horizontal or vertical.
+    #[default]
+    Straight,
+    /// Legs through the clicked centres joined by square jogs, which cut nothing.
+    Offset,
+    /// Two legs about a pivot: the second is revolved into the plane of the first.
+    Aligned,
+}
+
 /// What the derived-view and symbol tools hold between clicks, and the settings they
 /// keep from one use to the next.
 #[derive(Clone, Debug)]
@@ -437,6 +449,8 @@ pub struct ToolDraft {
     pub horizontal: bool,
     /// Section: the hatch pattern the cut faces get; `None` for the library's first.
     pub hatch: Option<String>,
+    /// Section: a straight, offset or aligned cutting line.
+    pub cut: CutMode,
     /// Detail: magnification relative to the parent.
     pub factor: f64,
     /// Detail: a drawn profile instead of a circle.
@@ -473,6 +487,7 @@ impl Default for ToolDraft {
             flip: false,
             horizontal: false,
             hatch: None,
+            cut: CutMode::Straight,
             factor: 2.0,
             profile: false,
             target_sheet: None,
@@ -919,6 +934,8 @@ pub enum DrawingAction {
     ShowLocations,
     /// Hide the reference bar until the reference's state changes.
     DismissMarker,
+    /// Finish the offset cutting line being drawn and compute the section.
+    FinishCut,
 }
 
 /// The part context for the current part, if it has a body.
@@ -1731,6 +1748,7 @@ pub fn apply(state: &mut AppState, dock: &mut DockState<Tab>, ctx: &egui::Contex
         }
         DrawingAction::FlipPending => tools::flip_pending(state),
         DrawingAction::CloseProfile => tools::close_profile(state),
+        DrawingAction::FinishCut => tools::finish_cut_action(state),
         DrawingAction::MoveViewToSheet { view, sheet } => {
             let Some(s) = state.drawing.session.as_mut() else { return };
             let Some(v) = s.doc.drawing.view(view).cloned() else { return };

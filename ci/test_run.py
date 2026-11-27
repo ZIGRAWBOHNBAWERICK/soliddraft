@@ -86,7 +86,8 @@ class LintHook(unittest.TestCase):
                 path.chmod(0o755)
             commands = ['cargo fmt --all --check',
                         'cargo clippy --workspace --all-targets --all-features -- -D warnings',
-                        "python3 -m unittest discover -s ci -p test_*.py"]
+                        "python3 -m unittest discover -s ci -p test_*.py",
+                        "python3 -m unittest discover -s ci/gpu-acceptance -p test_*.py"]
             log = root / 'commands'
             for failure, expected in (('', commands), ('fmt --all --check', commands[:1]),
                                       (commands[1].removeprefix('cargo '), commands[:2])):

@@ -11,6 +11,7 @@ case "${1:-}" in
     cargo fmt --all --check
     cargo clippy --workspace --all-targets --all-features -- -D warnings
     python3 -m unittest discover -s ci -p 'test_*.py'
+    python3 -m unittest discover -s ci/gpu-acceptance -p 'test_*.py'
     ;;
   test-build|test-build-shards)
     [[ $# -eq 2 || $# -eq 3 ]]

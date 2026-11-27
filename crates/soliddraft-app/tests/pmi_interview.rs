@@ -500,8 +500,6 @@ fn a_recess_depth_and_fillet_radius_do_not_answer_edge_intent() {
     };
     let fillet = edge_at(&plate, 60.0, 40.0);
     call(&mut plate, "fillet", json!({"edges": [fillet], "radius": 2}));
-    let chamfer = edge_at(&plate, 0.0, 0.0);
-    call(&mut plate, "chamfer", json!({"edges": [chamfer], "distance": 1}));
 
     let questions = interview(&mut plate);
     let get = |name: &str| {
@@ -514,12 +512,20 @@ fn a_recess_depth_and_fillet_radius_do_not_answer_edge_intent() {
     assert_eq!(depth["proposes"], "2");
     assert_eq!(radius["proposes"], "R2");
     let fillet_intent = get("fillet treatment");
-    let chamfer_intent = get("chamfer treatment");
-    for intent in [fillet_intent, chamfer_intent] {
-        assert!(intent.get("proposal").is_none(), "{intent}");
-    }
+    assert!(fillet_intent.get("proposal").is_none(), "{fillet_intent}");
     call(&mut plate, "pmi_answer", json!({"accept": [depth["id"], radius["id"]]}));
     let open = interview(&mut plate);
     assert!(!open.contains(depth) && !open.contains(radius), "{open:#?}");
-    assert!(open.contains(fillet_intent) && open.contains(chamfer_intent), "{open:#?}");
+    assert!(open.contains(fillet_intent), "{open:#?}");
+
+    // Exercise the bevel on an unmodified block, without the recess or fillet's supports.
+    for _ in 0..4 {
+        call(&mut plate, "undo", json!({}));
+    }
+    let chamfer = edge_at(&plate, 0.0, 0.0);
+    call(&mut plate, "chamfer", json!({"edges": [chamfer], "distance": 1}));
+    let questions = interview(&mut plate);
+    let chamfer_intent = questions.iter().find(|q| asks(q) == "chamfer treatment").unwrap();
+    assert!(chamfer_intent.get("proposal").is_none(), "{chamfer_intent}");
+    assert!(chamfer_intent["asks"].as_str().unwrap().contains("1 mm setback"), "{chamfer_intent}");
 }

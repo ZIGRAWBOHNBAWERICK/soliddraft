@@ -204,7 +204,7 @@ fn file_items<F: Clone>(item: &PmiItem<F>) -> KernelResult<Vec<cx::Item<F>>> {
         PmiKind::Width { .. } | PmiKind::Chamfer { .. } | PmiKind::EdgeBreak { .. } | PmiKind::BasicAngle { .. } => {
             Err(invalid(id, &format!("{} PMI is not supported by this STEP kernel", item.kind_label())))
         }
-        PmiKind::DatumTarget(_) | PmiKind::PositionControl(_) => {
+        PmiKind::DatumTarget(_) | PmiKind::PositionControl(_) | PmiKind::Knurl { .. } | PmiKind::FaceNote { .. } => {
             Err(invalid(id, &format!("{} PMI is not supported by this STEP kernel", item.kind_label())))
         }
         PmiKind::Gdt { characteristic: which, tolerance, diameter, material, datums, features } => {

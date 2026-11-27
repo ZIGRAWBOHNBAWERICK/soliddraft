@@ -189,10 +189,11 @@ pub(crate) fn face_status<'a, F: PartialEq>(
                     add(CheckKind::Geometric(*characteristic), Some(member), status);
                 }
             }
-            // Datum definitions, finish requirements and basic dimensions do not
-            // themselves give a numerical tolerance to check.
+            // These items do not themselves give a numerical tolerance to check.
             PmiKind::Datum { .. }
             | PmiKind::SurfaceFinish { .. }
+            | PmiKind::Knurl { .. }
+            | PmiKind::FaceNote { .. }
             | PmiKind::Size { .. }
             | PmiKind::Location { .. }
             | PmiKind::Slot { .. } => {}

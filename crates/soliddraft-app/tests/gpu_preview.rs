@@ -63,13 +63,13 @@ fn frames(doc: &mut Document, until: impl Fn(&Document) -> bool, what: &str) {
 
 /// The renderer draws the GPU preview, and a pick on its top face takes its point from
 /// the kernel, since the preview has no CPU triangles.
-fn drawn_and_picked(device: &wgpu::Device, queue: &wgpu::Queue, doc: &Document, mesh: &DisplayMesh) {
+fn drawn_and_picked(device: &wgpu::Device, queue: &wgpu::Queue, doc: &Document, mesh: &DisplayMesh, depth: f32) {
     use soliddraft_app::viewport::offscreen::Offscreen;
     use soliddraft_app::viewport::render::Picked;
     let mut offscreen = Offscreen::new(device, queue, soliddraft_app::viewport::look::Tier::Basic);
     let picture = offscreen.capture(device, queue, doc, [160, 120]).unwrap();
     let corner = &picture.pixels[..4];
-    let painted = picture.pixels.chunks_exact(4).filter(|pixel| *pixel != corner).count();
+    let painted = picture.pixels.as_chunks::<4>().0.iter().filter(|pixel| pixel.as_slice() != corner).count();
     assert!(painted > 500, "the GPU preview drew {painted} pixels");
 
     let (lo, hi) = mesh.bounds().unwrap();
@@ -84,7 +84,7 @@ fn drawn_and_picked(device: &wgpu::Device, queue: &wgpu::Queue, doc: &Document, 
             soliddraft_app::viewport::pick::hit_point(doc, Picked::Face(face.pick), origin, glam::Vec3::NEG_Z)
         })
         .collect();
-    assert!(hits.iter().any(|hit| (hit.z - hi.z).abs() < 1e-3), "no pick met the top face: {hits:?}");
+    assert!(hits.iter().any(|hit| (hit.z - depth).abs() < 1e-4), "no pick met the top face: {hits:?}");
 }
 
 fn depth(depth: f64) -> ExtrudeParams {
@@ -105,7 +105,7 @@ fn the_gpu_preview_shows_first_and_a_late_checked_result_never_replaces_a_newer_
     let (old_body, old) = shown(&doc);
     assert!(old.gpu.is_some(), "the new body shows from the GPU mesher first");
     assert!(old.positions.is_empty(), "no face of a box falls back to the CPU preview");
-    drawn_and_picked(&device, &queue, &doc, &old);
+    drawn_and_picked(&device, &queue, &doc, &old, 25.0);
     wait(&kernel, "the old body's checked mesh never started", |r| r.checked_holding.contains(&old_body));
 
     // An edit while that checked mesh is still being made: the edited part shows its

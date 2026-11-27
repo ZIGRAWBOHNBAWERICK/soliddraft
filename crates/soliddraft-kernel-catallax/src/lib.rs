@@ -26,6 +26,7 @@ mod loft;
 mod measure;
 mod native;
 mod pmi;
+mod proof_clock;
 mod recognition;
 mod request;
 mod scan;
@@ -1477,17 +1478,6 @@ fn options(params: &TessellationParams) -> KernelResult<MeshOptions> {
     Ok(options)
 }
 
-fn proof_cpu_ns() -> Option<u64> {
-    #[cfg(target_os = "linux")]
-    {
-        use rustix::time::{ClockId, clock_gettime};
-        let clock = clock_gettime(ClockId::ThreadCPUTime);
-        u64::try_from(clock.tv_sec).ok()?.checked_mul(1_000_000_000)?.checked_add(u64::try_from(clock.tv_nsec).ok()?)
-    }
-    #[cfg(not(target_os = "linux"))]
-    None
-}
-
 fn edge_proof_run(
     report: catallax_app::EdgeProofReport,
     started: Option<u64>,
@@ -1495,7 +1485,7 @@ fn edge_proof_run(
 ) -> KernelResult<EdgeProofRun> {
     use catallax_app::EdgeProofOutcome;
 
-    let cpu_ns = started.zip(proof_cpu_ns()).and_then(|(start, end)| end.checked_sub(start));
+    let cpu_ns = started.zip(proof_clock::proof_cpu_ns()).and_then(|(start, end)| end.checked_sub(start));
     let edges = report
         .edges
         .into_iter()
@@ -2501,7 +2491,7 @@ impl Kernel for CatallaxKernel {
         let cancelled = Arc::new(AtomicBool::new(false));
         let stop = cancelled.clone();
         let _registration = interrupt.register(Box::new(move || stop.store(true, Ordering::Relaxed)));
-        let started = proof_cpu_ns();
+        let started = proof_clock::proof_cpu_ns();
         if let Some(approximate) = self.approximate(body)? {
             let Ok(numerical) = approximate.body() else {
                 // A checked tolerant import is not a proof of its source geometry.

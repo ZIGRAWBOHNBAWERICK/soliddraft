@@ -2,6 +2,12 @@
   "files": {
     "ci/browser-kernel-worker.js": [
       "web"
+    ],
+    "ci/kernel-worker.test.mjs": [
+      "lint"
+    ],
+    "ci/test_kernel_worker_js.py": [
+      "lint"
     ]
   }
 }

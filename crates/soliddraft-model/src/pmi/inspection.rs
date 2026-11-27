@@ -535,6 +535,10 @@ impl InspectionGroup {
                     group.roughness_average = parameter == "Ra";
                 }
             }
+            PmiKind::Knurl { face, .. } | PmiKind::FaceNote { face, .. } => {
+                group.face_groups.push(vec![face]);
+                group.add(InspectionKind::Note, None, 0..1, None);
+            }
         }
         group
     }

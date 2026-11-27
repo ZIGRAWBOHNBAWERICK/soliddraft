@@ -385,7 +385,11 @@ impl Document {
                     asking.edge_limits.extend(bevel);
                 }
                 PmiKind::PositionControl(_) => asking.positioned.extend(all()),
-                PmiKind::Width { .. } | PmiKind::BasicAngle { .. } | PmiKind::DatumTarget(_) => {}
+                PmiKind::Width { .. }
+                | PmiKind::BasicAngle { .. }
+                | PmiKind::DatumTarget(_)
+                | PmiKind::Knurl { .. }
+                | PmiKind::FaceNote { .. } => {}
                 PmiKind::Datum { letter, feature } => {
                     let flat = feature.first().and_then(|face| asking.face(*face)).and_then(|info| {
                         Some(Flat { face: info.id, normal: info.normal?, centroid: info.centroid, area: info.area })

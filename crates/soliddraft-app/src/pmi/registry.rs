@@ -84,16 +84,18 @@ fn add_params() -> Vec<(&'static str, Value)> {
         (
             "kind",
             string(
-                "datum, datum_target, diameter, radius, hole, distance, slot, width, chamfer, edge_break, basic_angle, tolerance, position_control or finish",
+                "datum, datum_target, diameter, radius, hole, distance, slot, width, chamfer, edge_break, basic_angle, tolerance, position_control, finish, knurl or face_note",
             ),
         ),
         ("name", optional(string("The item's name; one is made up when left out"))),
         ("replaces", optional(string("The name of the item this one takes the place of"))),
-        ("faces", optional(faces())),
+        ("faces", optional(described(faces(), "Exactly one face name for knurl or face_note"))),
         ("features", optional(two("A pattern: the faces of each feature, such as each of four holes"))),
         ("letter", optional(string("A datum's letter; the next free one when left out"))),
         ("target", optional(target())),
         ("frame", optional(position_frame())),
+        ("designation", optional(string("Knurl designation as stated by the user; required for knurl"))),
+        ("text", optional(string("Note as written by the user; required for face_note"))),
         ("tolerance", optional(string("A dimension's tolerance: H7, ±0.1, +0.1/0, +0.2/-0.1 or basic"))),
         ("through", optional(boolean("true for a drill that goes through the part"))),
         ("thread", optional(string("A threaded diameter or hole's designation, such as M6x1-6H"))),
@@ -209,12 +211,13 @@ pub(crate) fn commands() -> Vec<CommandSpec> {
             package_params,
         )
         .undo(Undo::Replaces),
-        row("pmi_add", "Add manufacturing information", "Put a datum, dimension, tolerance or finish on faces").agents(
+        row("pmi_add", "Add manufacturing information", "Put a dimension, tolerance or annotation on faces").agents(
             Agents::Tool,
             "Adds an item or replaces the item named in replaces. Nominal sizes are measured from the part. \
              Only specify drill depth, thread depth or limits when the user supplies them. For datum_target and \
              position_control, use only stated intent. Ask for a missing target, datum, material modifier, zone \
-             height or direction; do not make it up. Omitted segment and datum materials mean RFS and RMB.",
+             height or direction; do not make it up. Omitted segment and datum materials mean RFS and RMB. \
+             For knurl or face_note, ask for the face and the user's designation or text if missing.",
             add_params,
         )
         .undo(Undo::Step),

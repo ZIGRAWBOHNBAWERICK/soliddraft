@@ -32,10 +32,12 @@ pub enum Kind {
     Tolerance,
     PositionControl,
     Finish,
+    Knurl,
+    FaceNote,
 }
 
 impl Kind {
-    const ALL: [Kind; 14] = [
+    const ALL: [Kind; 16] = [
         Kind::Datum,
         Kind::DatumTarget,
         Kind::Diameter,
@@ -50,6 +52,8 @@ impl Kind {
         Kind::Tolerance,
         Kind::PositionControl,
         Kind::Finish,
+        Kind::Knurl,
+        Kind::FaceNote,
     ];
 
     fn label(self) -> &'static str {
@@ -68,6 +72,8 @@ impl Kind {
             Kind::Tolerance => "Geometric tolerance",
             Kind::PositionControl => "Position control",
             Kind::Finish => "Surface finish",
+            Kind::Knurl => "Knurl",
+            Kind::FaceNote => "Face note",
         }
     }
 
@@ -88,6 +94,8 @@ impl Kind {
                 "Pick each cylindrical feature group. For a projected zone, also pick the entry faces in feature order."
             }
             Kind::Finish => "Pick the face the finish applies to.",
+            Kind::Knurl => "Pick one face to knurl.",
+            Kind::FaceNote => "Pick one face for the note.",
         }
     }
 }
@@ -291,6 +299,7 @@ pub struct State {
     entry_faces: Vec<FaceId>,
     roughness: String,
     process: SurfaceProcess,
+    annotation_text: String,
     /// The item the form replaces, when it was filled from one.
     replaces: Option<String>,
     error: Option<String>,
@@ -369,6 +378,7 @@ impl Default for State {
             entry_faces: Vec::new(),
             roughness: String::new(),
             process: SurfaceProcess::Any,
+            annotation_text: String::new(),
             replaces: None,
             error: None,
             notes: None,
@@ -391,6 +401,17 @@ impl State {
         self.clear();
         self.replaces = Some(row.item.id.clone());
         self.name.clone_from(&row.item.id);
+        match &row.item.kind {
+            PmiKind::Knurl { designation, .. } => {
+                self.kind = Kind::Knurl;
+                self.annotation_text.clone_from(designation);
+            }
+            PmiKind::FaceNote { text, .. } => {
+                self.kind = Kind::FaceNote;
+                self.annotation_text.clone_from(text);
+            }
+            _ => {}
+        }
         let Some(on_body) = &row.on_body else { return };
         let all = |features: &[Feature<FaceId>]| features.iter().flatten().copied().collect::<Vec<_>>();
         match &on_body.kind {
@@ -522,6 +543,7 @@ impl State {
                 self.process = *process;
                 self.picks.clone_from(feature);
             }
+            PmiKind::Knurl { face, .. } | PmiKind::FaceNote { face, .. } => self.picks.push(*face),
         }
     }
 }
@@ -730,6 +752,17 @@ fn item(doc: &Document, form: &State) -> Result<PmiItem<FaceRef>, String> {
             all_around: false,
             feature: feature(doc, &form.picks)?,
         },
+        Kind::Knurl | Kind::FaceNote => {
+            let [face] = form.picks.as_slice() else {
+                return Err(form.kind.prompt().to_owned());
+            };
+            let face = doc.model().face_ref(*face).map_err(|error| error.to_string())?;
+            if form.kind == Kind::Knurl {
+                PmiKind::Knurl { designation: form.annotation_text.clone(), face }
+            } else {
+                PmiKind::FaceNote { text: form.annotation_text.clone(), face }
+            }
+        }
     };
     let mut item = PmiItem { id: String::new(), kind };
     item.id = match (form.name.trim(), &form.replaces) {
@@ -1016,6 +1049,12 @@ fn form(ui: &mut egui::Ui, state: &mut AppState) {
                 ui.selectable_value(&mut form.process, SurfaceProcess::Removal, "Material removed");
                 ui.selectable_value(&mut form.process, SurfaceProcess::NoRemoval, "No material removed");
             });
+        }
+        Kind::Knurl => {
+            labelled(ui.text_edit_singleline(&mut form.annotation_text), "Knurl designation");
+        }
+        Kind::FaceNote => {
+            labelled(ui.text_edit_multiline(&mut form.annotation_text), "Note text");
         }
     }
     labelled(ui.add(egui::TextEdit::singleline(&mut form.name).hint_text("Name, made up if empty")), "Item name");

@@ -483,6 +483,7 @@ fn datum_targets_and_position_frames_draw_from_a_reopened_part() {
         app.get_by_label("Datum target").click();
         app.run_steps(2);
         app.get_by_label("Rectangular area").click();
+        app.run_steps(2);
         panel_state.borrow_mut().doc.selection = Some(Selection::Face(target_face));
         app.run_steps(2);
         for (label, value) in [

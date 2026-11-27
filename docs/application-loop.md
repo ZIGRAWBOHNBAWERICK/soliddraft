@@ -281,8 +281,10 @@ MCP tool call has a numbered directory under `commands/` containing:
   recipes, not numeric body handles or paths into this machine.
 - `view.svg` and `viewport.png`, when a solid exists. The PNG comes from the
   viewport's `ViewportRenderer`, shader and camera, without reopening saved input.
-  `viewport.json` records the retained GPU adapter. `display.json` identifies the
-  live viewport and backend; `display.kernel.json` retains only its capture calls.
+  `viewport.json` records the retained GPU adapter and whether the GPU preview is on.
+  `display.json` identifies the live viewport and backend, and counts the GPU previews
+  shown and the CPU previews the viewport asked for; `display.kernel.json` retains
+  only its capture calls.
   The separate bundle-only `scenario_view` request writes `view.svg`, `view.json`
   and `view.kernel.json` from the same live body, without reopening saved input.
   Its external wait, phase split and work are in `view.timing.json` and the step's

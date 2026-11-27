@@ -7,6 +7,7 @@ pub mod assembly;
 pub mod camera;
 pub mod dimensions;
 pub mod environment;
+pub mod gpu_preview;
 pub mod grid;
 pub mod look;
 mod navigation_bar;
@@ -567,9 +568,11 @@ impl ViewportState {
         if let Some(session) = &sketch {
             input.grid = self.grid(rect, &GridPlane::of_sketch(&session.plane));
         }
-        let unproved = doc.model().active_field().is_some_and(|f| doc.model().status(f.id).is_some_and(|s| s.is_ok()));
+        // Browser checks read whether a field sample is on screen; the user sees no label.
         #[cfg(target_arch = "wasm32")]
         {
+            let unproved =
+                doc.model().active_field().is_some_and(|f| doc.model().status(f.id).is_some_and(|s| s.is_ok()));
             input.part_probe = Some(render::PartProbe {
                 camera: self.camera.clone(),
                 unproved,
@@ -634,12 +637,6 @@ impl ViewportState {
                 curve_halo,
             );
             ui.ctx().request_repaint();
-        }
-        if unproved {
-            ui.put(
-                Rect::from_min_size(rect.left_top() + vec2(12.0, 12.0), vec2(160.0, 24.0)),
-                egui::Label::new(egui::RichText::new("unproved preview").color(theme::muted())),
-            );
         }
         if scene.axes.contains(&true) {
             self.paint_origin_axes(&painter, scene.reach, rect, scene.axes);

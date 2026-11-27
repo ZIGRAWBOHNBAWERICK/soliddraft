@@ -54,6 +54,8 @@ soliddraft-scene.workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 env_logger.workspace = true
+# The GPU preview mesher's calls are async; on the desktop they finish at once.
+pollster.workspace = true
 rfd.workspace = true
 
 # The web build: Catallax runs locally; assistant calls use the server (docs/web.md).
@@ -81,6 +83,7 @@ web-sys = { workspace = true, features = [
     "HtmlAnchorElement",
     "HtmlInputElement",
     "HtmlLinkElement",
+    "Location",
     "MessageEvent",
     "Navigator",
     "NodeList",

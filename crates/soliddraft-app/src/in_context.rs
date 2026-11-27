@@ -81,6 +81,7 @@ impl ContextMesh {
                 })
                 .collect(),
             corners: Vec::new(),
+            gpu: None,
         };
         ContextMesh { mesh: Arc::new(mesh), owners, drawn: Arc::new(drawn) }
     }

@@ -64,8 +64,12 @@ impl Renderer {
         };
         let (device, queue) = adapter.request_device(&desc).await?;
         let offscreen = Offscreen::new(&device, &queue, Tier::of(info.backend, &device.limits()));
+        // Scenario captures show what the window shows: the GPU preview where this
+        // adapter has one, then the checked mesh.
+        let _ = soliddraft_app::viewport::gpu_preview::install(&info, &device, &queue);
         let metadata = json!({"renderer":"soliddraft_app::viewport::render::ViewportRenderer",
-            "adapter":info.name,"backend":format!("{:?}",info.backend),"size":[960,720]});
+            "adapter":info.name,"backend":format!("{:?}",info.backend),"device_type":format!("{:?}",info.device_type),"size":[960,720],
+            "gpu_preview":soliddraft_app::viewport::gpu_preview::status()});
         Ok(Self { device, queue, offscreen, metadata })
     }
 

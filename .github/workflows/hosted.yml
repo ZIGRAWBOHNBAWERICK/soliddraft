@@ -1367,6 +1367,9 @@ jobs:
       VK_DRIVER_FILES: /usr/share/vulkan/icd.d/lvp_icd.json
       VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.json
       XDG_RUNTIME_DIR: /tmp/soliddraft-runtime
+      # The scenarios run on the CPU preview, as on a machine without a usable GPU. GPU
+      # preview acceptance runs on hardware, never on this software adapter.
+      SOLIDDRAFT_GPU_PREVIEW: "off"
     steps:
       - uses: actions/checkout@v4
         with:

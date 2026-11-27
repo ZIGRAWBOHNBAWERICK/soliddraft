@@ -562,6 +562,17 @@ impl<F> PmiItem<F> {
                 thread: thread.clone(),
                 nominal: *nominal,
             },
+            PmiKind::Hole { pilot, head, tolerance, through, drill_depth, thread } => PmiKind::Hole {
+                pilot: feature(pilot)?,
+                head: match head {
+                    Some(head) => Some(HoleHead { kind: head.kind, faces: feature(&head.faces)? }),
+                    None => None,
+                },
+                tolerance: *tolerance,
+                through: *through,
+                drill_depth: drill_depth.clone(),
+                thread: thread.clone(),
+            },
             PmiKind::Location { from, to, tolerance, nominal } => PmiKind::Location {
                 from: Anchor { feature: feature(&from.feature)?, at: from.at },
                 to: Anchor { feature: feature(&to.feature)?, at: to.at },
@@ -601,6 +612,13 @@ impl<F> PmiItem<F> {
         match &self.kind {
             PmiKind::Datum { feature, .. } | PmiKind::SurfaceFinish { feature, .. } => vec![feature],
             PmiKind::Size { features, .. } | PmiKind::Gdt { features, .. } => features.iter().collect(),
+            PmiKind::Hole { pilot, head, .. } => {
+                if let Some(head) = head {
+                    vec![pilot, &head.faces]
+                } else {
+                    vec![pilot]
+                }
+            }
             PmiKind::Location { from, to, .. } => vec![&from.feature, &to.feature],
             PmiKind::Slot { flats, ends, .. } => flats.iter().chain(ends).collect(),
         }
@@ -608,7 +626,10 @@ impl<F> PmiItem<F> {
 
     /// True for a size, a distance or a slot: an item with measured values.
     pub fn is_dimension(&self) -> bool {
-        matches!(self.kind, PmiKind::Size { .. } | PmiKind::Location { .. } | PmiKind::Slot { .. })
+        matches!(
+            self.kind,
+            PmiKind::Size { .. } | PmiKind::Hole { .. } | PmiKind::Location { .. } | PmiKind::Slot { .. }
+        )
     }
 }
 
@@ -644,6 +665,26 @@ pub enum PmiKind<F> {
         /// measured on the body.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         nominal: Option<f64>,
+    },
+    /// One hole with optional compound head and independently specified drill and thread depths.
+    Hole {
+        /// The cylindrical pilot wall, including its pieces if split.
+        pilot: Feature<F>,
+        /// The counterbore wall or countersink cone, if present.
+        #[serde(default = "Option::default", skip_serializing_if = "Option::is_none")]
+        head: Option<HoleHead<F>>,
+        /// Limits on the pilot diameter. None leaves them unstated.
+        #[serde(default, skip_serializing_if = "Tolerance::is_none")]
+        tolerance: Tolerance,
+        /// Whether the drill, not necessarily the thread, breaks through.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        through: bool,
+        /// Explicit drill depth in millimetres. If absent on a blind hole, measure it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        drill_depth: Option<Decimal>,
+        /// The thread's designation and optional usable depth, separate from the drill.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        thread: Option<HoleThread>,
     },
     /// The distance between two features.
     Location {
@@ -708,6 +749,68 @@ pub enum PmiKind<F> {
         all_around: bool,
         /// The feature it applies to.
         feature: Feature<F>,
+    },
+}
+
+/// The separate wall faces of the enlargement at a hole's entry.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct HoleHead<F> {
+    /// The shape of the enlargement.
+    pub kind: HoleHeadKind,
+    /// The wall of the head, including its pieces if split.
+    pub faces: Feature<F>,
+}
+
+/// The shape of the enlargement at a hole's entry.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HoleHeadKind {
+    /// Cylindrical enlargement bounded by a shoulder.
+    Counterbore,
+    /// Conical enlargement, specified by its full included angle.
+    Countersink,
+}
+
+/// A hole's explicitly stated thread requirements.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct HoleThread {
+    /// The thread designation, such as `M6x1-6H`.
+    pub designation: String,
+    /// The usable axial thread depth, in millimetres from the entry.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub depth: Option<Decimal>,
+}
+
+/// Checked nominal values of one hole, independent of its stated requirements.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+pub struct HoleNominals {
+    /// Diameter of the cylindrical pilot wall, in millimetres.
+    pub pilot_diameter_mm: f64,
+    /// The enlargement's dimensions.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub head: Option<HoleHeadNominals>,
+    /// Axial depth from entry to the end of the full drill diameter, in millimetres.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub drill_depth_mm: Option<f64>,
+}
+
+/// Checked dimensions of a hole head.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum HoleHeadNominals {
+    /// A counterbore's cylindrical diameter and axial depth from entry to shoulder.
+    Counterbore {
+        /// Diameter in millimetres.
+        diameter_mm: f64,
+        /// Depth in millimetres.
+        depth_mm: f64,
+    },
+    /// A countersink's major diameter at entry and full included angle.
+    Countersink {
+        /// Diameter in millimetres.
+        diameter_mm: f64,
+        /// Full included angle in degrees.
+        included_angle_deg: f64,
     },
 }
 
@@ -888,6 +991,37 @@ impl<F: PartialEq> Pmi<F> {
                 }
                 range(tolerance)
             }
+            PmiKind::Hole { pilot, head, tolerance, through, drill_depth, thread } => {
+                if head.as_ref().is_some_and(|head| head.faces.iter().any(|face| pilot.contains(face))) {
+                    return Some("The pilot and head must use different faces.".into());
+                }
+                if *through && drill_depth.is_some() {
+                    return Some("A through drill cannot have a blind drill depth.".into());
+                }
+                if head.is_none() && *through && thread.as_ref().is_none_or(|thread| thread.depth.is_none()) {
+                    return Some("Use Diameter for a through hole with no head or usable thread depth.".into());
+                }
+                if drill_depth.as_ref().is_some_and(|depth| !depth.is_positive()) {
+                    return Some("Drill depth must be positive.".into());
+                }
+                if let Some(thread) = thread {
+                    if let Some(problem) = thread_problem(&thread.designation) {
+                        return Some(problem.into());
+                    }
+                    if !tolerance.is_none() {
+                        return Some("A thread's designation states its fit; it takes no tolerance.".into());
+                    }
+                    if let Some(depth) = &thread.depth {
+                        if !depth.is_positive() {
+                            return Some("Usable thread depth must be positive.".into());
+                        }
+                        if drill_depth.as_ref().is_some_and(|drill| depth.value() > drill.value()) {
+                            return Some("Usable thread depth cannot exceed drill depth.".into());
+                        }
+                    }
+                }
+                range(tolerance)
+            }
             PmiKind::Location { from, to, tolerance, .. } => {
                 let same = from.at == to.at
                     && from.feature.len() == to.feature.len()
@@ -998,6 +1132,7 @@ impl<F> PmiItem<F> {
                 let thru = if *through { " THRU" } else { "" };
                 format!("{count}{sign}{}{}{thru}", value(0), tolerance.suffix())
             }
+            PmiKind::Hole { .. } => self.hole_callout(&value(0), None),
             PmiKind::Location { tolerance, .. } => format!("{}{}", value(0), tolerance.suffix()),
             PmiKind::Slot { tolerance, .. } => {
                 format!("{}\u{d7}{}{} R{}", value(0), value(1), tolerance.suffix(), value(2))
@@ -1032,10 +1167,51 @@ impl<F> PmiItem<F> {
         }
     }
 
+    /// The complete callout for a hole, combining its checked geometry and stated requirements.
+    pub fn hole_callout(&self, pilot_diameter: &str, measured: Option<&HoleNominals>) -> String {
+        use std::fmt::Write;
+
+        let PmiKind::Hole { head, tolerance, through, drill_depth, thread, .. } = &self.kind else {
+            return String::new();
+        };
+        let mut text = format!("Ø{pilot_diameter}{}", tolerance.suffix());
+        if *through {
+            text.push_str(" THRU");
+        } else if let Some(depth) = drill_depth {
+            let _ = write!(text, " DRILL DEEP {depth}");
+        } else if let Some(depth) = measured.and_then(|values| values.drill_depth_mm) {
+            let _ = write!(text, " DRILL DEEP {}", length_text(depth));
+        } else {
+            text.push_str(" DRILL DEEP ?");
+        }
+        match (head.as_ref().map(|head| head.kind), measured.and_then(|values| values.head)) {
+            (Some(HoleHeadKind::Counterbore), Some(HoleHeadNominals::Counterbore { diameter_mm, depth_mm })) => {
+                let _ = write!(text, "\nC'BORE Ø{} DEEP {}", length_text(diameter_mm), length_text(depth_mm));
+            }
+            (
+                Some(HoleHeadKind::Countersink),
+                Some(HoleHeadNominals::Countersink { diameter_mm, included_angle_deg }),
+            ) => {
+                let _ = write!(text, "\nC'SINK Ø{} × {}°", length_text(diameter_mm), length_text(included_angle_deg));
+            }
+            (Some(HoleHeadKind::Counterbore), _) => text.push_str("\nC'BORE Ø? DEEP ?"),
+            (Some(HoleHeadKind::Countersink), _) => text.push_str("\nC'SINK Ø? × ?°"),
+            (None, _) => {}
+        }
+        if let Some(thread) = thread {
+            let _ = write!(text, "\n{}", thread.designation);
+            if let Some(depth) = &thread.depth {
+                let _ = write!(text, " THREAD DEEP {depth}");
+            }
+        }
+        text
+    }
+
     /// Why a STEP file cannot hold the item as it stands, or `None` when it can. The
     /// item still stands on the part and on its drawing.
     pub fn file_problem(&self) -> Option<String> {
         match &self.kind {
+            PmiKind::Hole { .. } => Some("Compound hole and depth PMI is not supported in STEP export.".to_owned()),
             PmiKind::Gdt { datums, .. }
                 if datums.iter().any(|datum| !datum.material.is_regardless() || datum.letter.contains('-')) =>
             {
@@ -1060,6 +1236,7 @@ impl<F> PmiItem<F> {
             PmiKind::Datum { .. } => "Datum",
             PmiKind::Size { size: SizeKind::Diameter, .. } => "Diameter",
             PmiKind::Size { size: SizeKind::Radius, .. } => "Radius",
+            PmiKind::Hole { .. } => "Hole",
             PmiKind::Location { .. } => "Distance",
             PmiKind::Slot { .. } => "Slot",
             PmiKind::Gdt { characteristic, .. } => characteristic.name(),

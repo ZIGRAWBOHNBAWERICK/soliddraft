@@ -538,6 +538,7 @@ impl Planner<'_> {
     fn face_note(&mut self, face: FaceId, text: String, source: PmiSource) -> Result<(), String> {
         let edges = &self.body.faces.get(&face).ok_or("its face is gone")?.edges;
         let mut best = None;
+        let mut best_key = (i32::MIN, 0.0);
         for view in &self.views {
             let load = -self.planned_in(view.id);
             for curve in &view.curves.curves {
@@ -551,12 +552,13 @@ impl Planner<'_> {
                 let end = view.xf.point(curve.curve.end());
                 let extent = (start.u - on.u).hypot(start.v - on.v) + (end.u - on.u).hypot(end.v - on.v);
                 let key = (load, extent);
-                if extent > self.body.tol * view.xf.scale && best.as_ref().is_none_or(|(old, ..)| key > *old) {
-                    best = Some((key, view.id, edge, at, on));
+                if extent > self.body.tol * view.xf.scale && key > best_key {
+                    best_key = key;
+                    best = Some((view.id, edge, at, on));
                 }
             }
         }
-        let (_, view, edge, at, on) = best.ok_or("no view shows a visible edge of its face")?;
+        let (view, edge, at, on) = best.ok_or("no view shows a visible edge of its face")?;
         let dir = self.diagonal(view, on);
         self.plans.push(Plan {
             source,

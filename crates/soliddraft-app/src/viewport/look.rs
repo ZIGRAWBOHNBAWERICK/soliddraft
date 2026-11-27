@@ -34,8 +34,8 @@ impl Preset {
         Preset::ALL.into_iter().find(|p| p.label().eq_ignore_ascii_case(name.trim()))
     }
 
-    /// Whether the preset draws edges unless the user asks for them. Realistic is for
-    /// presentation and leaves them off.
+    /// Whether the preset draws topology edges and the apparent contours of curved
+    /// faces unless the user asks otherwise. Realistic leaves them off.
     pub fn shows_edges(&self) -> bool {
         !matches!(self, Preset::Realistic)
     }
@@ -99,28 +99,32 @@ pub struct Look {
     pub sun: f32,
 }
 
-/// What the device can run. WebGL2 has no compute, no storage buffers and one-pixel
-/// lines; everything the viewport draws has to work there, and the extra passes run
-/// only on the full tier.
+/// What the device can run. Basic keeps the WebGL2-compatible passes; the full tier
+/// adds ambient occlusion.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Tier {
-    /// WebGL2 or native OpenGL ES: shading, shadows and wide lines, no occlusion pass.
+    /// Shading, shadows and wide lines, without the occlusion pass.
     Basic,
-    /// WebGPU, Vulkan, Metal or Direct3D 12: every pass.
+    /// Every viewport lighting pass.
     Full,
 }
 
 impl Tier {
-    pub fn of(backend: wgpu::Backend) -> Tier {
-        match backend {
-            wgpu::Backend::Gl | wgpu::Backend::Noop => Tier::Basic,
-            _ => Tier::Full,
+    /// Selects the tier from the active backend and its enabled limits. Keep OpenGL
+    /// on the basic path, which avoids loading depth texels in the occlusion shader.
+    pub fn of(backend: wgpu::Backend, limits: &wgpu::Limits) -> Tier {
+        if matches!(backend, wgpu::Backend::Gl | wgpu::Backend::Noop)
+            || limits.max_compute_invocations_per_workgroup == 0
+        {
+            Tier::Basic
+        } else {
+            Tier::Full
         }
     }
 
     pub fn label(&self) -> &'static str {
         match self {
-            Tier::Basic => "basic (WebGL2)",
+            Tier::Basic => "basic",
             Tier::Full => "full",
         }
     }
@@ -151,8 +155,32 @@ mod tests {
         assert_eq!(basic.ambient_occlusion, 0.0);
         assert!(basic.shadows);
         assert!(!Preset::Fast.look(Tier::Full).shadows);
-        assert_eq!(Tier::of(wgpu::Backend::Gl), Tier::Basic);
-        assert_eq!(Tier::of(wgpu::Backend::BrowserWebGpu), Tier::Full);
+        let webgl = wgpu::Limits::downlevel_webgl2_defaults();
+        assert_eq!(Tier::of(wgpu::Backend::Gl, &webgl), Tier::Basic);
+        assert_eq!(Tier::of(wgpu::Backend::Vulkan, &webgl), Tier::Basic);
+        assert_eq!(Tier::of(wgpu::Backend::BrowserWebGpu, &wgpu::Limits::default()), Tier::Full);
+    }
+
+    #[test]
+    fn recorded_adapter_limits_change_the_level_for_the_same_view() {
+        use soliddraft_tessellation::{DeviceBudget, Level, Levels, Quality, Thresholds, Usage};
+
+        // Linux Vulkan: RTX 2070 Max-Q and UHD 630. wgpu clamps the Intel buffer limit
+        // to i32::MAX, and reports the NVIDIA limit of 1 TiB. Both support compute.
+        let discrete = wgpu::Limits {
+            max_buffer_size: 1 << 40,
+            max_compute_invocations_per_workgroup: 1024,
+            ..wgpu::Limits::default()
+        };
+        let integrated = wgpu::Limits { max_buffer_size: i32::MAX as u64, ..discrete.clone() };
+        let levels = Levels::new(&Quality::Auto, 100.0);
+        let usage = Usage { triangles: 10_000_000, bytes: 640_000_000 };
+        let [strong, weak] = [&discrete, &integrated].map(|limits| {
+            assert_eq!(Tier::of(wgpu::Backend::Vulkan, limits), Tier::Full);
+            let budget = DeviceBudget::from_buffer_limit(limits.max_buffer_size);
+            Thresholds::default().initial(&levels, 10.0, budget.ceiling(usage)).level
+        });
+        assert_eq!((strong, weak), (Level::Fine, Level::Coarse));
     }
 
     #[test]

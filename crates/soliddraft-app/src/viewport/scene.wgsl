@@ -58,6 +58,14 @@ struct Globals {
     _pad1: u32,
 };
 
+// An unnormalized ray to the eye, or a constant direction in an orthographic view.
+fn toward_eye(world: vec3<f32>) -> vec3<f32> {
+    if (globals.eye.w > 0.5) {
+        return vec3<f32>(globals.view[0][2], globals.view[1][2], globals.view[2][2]);
+    }
+    return globals.eye.xyz - world;
+}
+
 // One appearance (soliddraft-materials), metallic-roughness in linear colour.
 struct Shade {
     // rgb: base colour. a: opacity.

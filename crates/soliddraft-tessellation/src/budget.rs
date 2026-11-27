@@ -31,13 +31,15 @@ impl DeviceBudget {
     /// No limit.
     pub const UNLIMITED: DeviceBudget = DeviceBudget { triangles: u64::MAX, bytes: u64::MAX };
 
-    /// A desktop with a discrete or recent integrated GPU: 40 million triangles in
-    /// 2 GiB.
-    pub const DESKTOP: DeviceBudget = DeviceBudget { triangles: 40_000_000, bytes: 2 << 30 };
-
-    /// A browser tab, whose memory and WebGL2 buffers are tighter: 8 million triangles
-    /// in 512 MiB.
-    pub const BROWSER: DeviceBudget = DeviceBudget { triangles: 8_000_000, bytes: 512 << 20 };
+    /// Derives a display allowance from the device's enabled maximum buffer size.
+    /// Leave room for the assembly arena to grow fourfold and cap the allowance at
+    /// 2 GiB: a legal allocation size is not a measure of available memory.
+    pub fn from_buffer_limit(max_buffer_size: u64) -> DeviceBudget {
+        let bytes = (max_buffer_size / 4).min(2 << 30);
+        // Use a conservative 64 bytes per triangle for the count limit. The cache
+        // also checks actual bytes, since vertex sharing varies by mesh.
+        DeviceBudget { triangles: bytes / 64, bytes }
+    }
 
     /// The finest level the level choice may promote to with `usage` held: fine below
     /// 80 percent of the budget, standard below all of it, coarse beyond.
@@ -66,7 +68,8 @@ impl DeviceBudget {
 
 impl Default for DeviceBudget {
     fn default() -> DeviceBudget {
-        if cfg!(target_arch = "wasm32") { DeviceBudget::BROWSER } else { DeviceBudget::DESKTOP }
+        // Headless callers have no adapter. Use WebGPU's baseline buffer limit.
+        DeviceBudget::from_buffer_limit(256 << 20)
     }
 }
 

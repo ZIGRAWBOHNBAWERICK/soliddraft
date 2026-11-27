@@ -137,7 +137,7 @@ pub fn new_drawing(ui: &mut egui::Ui, state: &mut AppState) {
         egui::Frame::new().inner_margin(egui::Margin::symmetric(10, 8)).show(ui, |ui| {
             theme::section_label(ui, "Template");
             ui.add_space(2.0);
-            for t in &lib.templates {
+            for t in lib.selectable_templates() {
                 let tag = if t.id == "iso-a3" { Some("default") } else { None };
                 if choice(ui, new.template == t.id, &t.name, tag) {
                     new.set_template(&t.id);

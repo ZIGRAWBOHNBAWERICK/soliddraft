@@ -63,6 +63,12 @@ pub struct CatallaxKernel {
     recent_areas: face_areas::Recent,
 }
 
+type RebuildSource = (*const CatallaxKernel, BodyId);
+
+thread_local! {
+    static REBUILD_SOURCE: std::cell::Cell<Option<RebuildSource>> = const { std::cell::Cell::new(None) };
+}
+
 #[derive(Default)]
 struct State {
     next: u64,
@@ -810,6 +816,11 @@ impl CatallaxKernel {
             }
         }
         let prefix = prefix.and_then(|stored| stored.solid.clone());
+        let retained = REBUILD_SOURCE
+            .get()
+            .filter(|&(kernel, _)| std::ptr::eq(kernel, self))
+            .and_then(|(_, body)| state.bodies.get(&body))
+            .and_then(|stored| stored.solid.clone());
         let input = json!({"format":"soliddraft-recipe/1", "name":"SolidDraft", "steps": steps.values().collect::<Vec<_>>(), "result": result});
         let sources = state.sources(&steps)?;
         let capture = state.capture;
@@ -824,6 +835,7 @@ impl CatallaxKernel {
             op,
             &parents,
             prefix.as_ref().map(|solid| &solid.app),
+            retained.as_ref().map(|solid| &solid.app),
             &files,
             capture.then_some(&mut questions),
             &offered,
@@ -1190,6 +1202,7 @@ fn build(
     op: OpKind,
     parents: &[Arc<Solid>],
     prefix: Option<&AppBody>,
+    retained: Option<&AppBody>,
     files: &catallax_features::ImportFiles<'_>,
     questions: Option<&mut Vec<Value>>,
     offered: &BTreeMap<String, handover::Offer>,
@@ -1215,16 +1228,26 @@ fn build(
             return Ok((Outcome::Exact(app), converted.steps, key, offer.topology.clone(), false));
         }
     }
-    // Earlier bodies remain immutable for undo, branches and concurrent queries.
-    // Clone only the selected checkpoint, after releasing the body arena lock.
-    // A handed-over body has no continuation; its prefix is rebuilt from the recipe.
-    let prefix = prefix.and_then(|app| app.checkpoint.continuation());
+    // An offered or adopted body has no local continuation; don't read its geometry for one.
     // Locally built checkpoints use the same default decider policy below.
-    // These are the remaining conditions checked by Catallax's resume_state.
-    let continued = prefix.as_ref().is_some_and(|checkpoint| {
+    let prefix = prefix.and_then(|app| app.checkpoint.continuation());
+    let (leading, keeps_arena) = prefix.map_or((0, false), |checkpoint| {
         let prior = checkpoint.built().recipe();
-        converted.recipe.format == prior.format && converted.recipe.steps.starts_with(&prior.steps)
+        if converted.recipe.format != prior.format {
+            return (0, false);
+        }
+        let shared = prior.steps.iter().zip(&converted.recipe.steps).take_while(|(old, new)| old == new).count();
+        (shared, shared == prior.steps.len())
     });
+    let retained = retained.and_then(|app| app.checkpoint.continuation()).filter(|checkpoint| {
+        let prior = checkpoint.built().recipe();
+        prior.format == converted.recipe.format
+            && prior.steps.len().min(converted.recipe.steps.len()) > leading
+            && prior.steps.iter().zip(&converted.recipe.steps).take(leading + 1).all(|(old, new)| old == new)
+    });
+    // Face areas can follow the ordinary input's arena, not a rewound edit source.
+    let continued = retained.is_none() && keeps_arena;
+    let prefix = retained.or(prefix).cloned();
     // Catallax tries the exact construction first and returns a numerical body, built
     // within its stated tolerance, where only that construction succeeds. Either is kept
     // as Catallax built it, never turned into a refusal or the other kind.
@@ -2275,6 +2298,17 @@ impl Kernel for CatallaxKernel {
         }
     }
 
+    fn with_rebuild_source(&self, body: BodyId, run: &mut dyn FnMut()) {
+        struct Restore(Option<RebuildSource>);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                REBUILD_SOURCE.set(self.0);
+            }
+        }
+        let _restore = Restore(REBUILD_SOURCE.replace(Some((self, body))));
+        run();
+    }
+
     fn reserve_proof_work(&self) -> KernelResult<Box<dyn ProofWork>> {
         construction::reserve_proof_work()
     }
@@ -3050,7 +3084,7 @@ mod tests {
             let evidence = kernel.take_diagnostics().unwrap();
             let recipe = kernel.body_recipe(cut).unwrap();
             let (Outcome::Exact(replayed), steps, ..) =
-                build(&recipe, OpKind::Subtract, &[], None, &Default::default(), None, &Default::default(), &[])
+                build(&recipe, OpKind::Subtract, &[], None, None, &Default::default(), None, &Default::default(), &[])
                     .unwrap()
             else {
                 panic!("an exact cut")
@@ -3074,6 +3108,39 @@ mod tests {
             assert_eq!(kernel.export_step(base, &options).unwrap(), original);
         }
         assert_eq!(kernel.mass_properties(base).unwrap().volume, 12000.0);
+    }
+
+    #[test]
+    fn edited_cut_reuses_a_profile_beyond_the_ordinary_input_checkpoint() {
+        let kernel = CatallaxKernel::with_operation_log();
+        let base = contract::block(&kernel);
+        let profile = Profile::rectangle(Plane::XY, Point2::new(0.0, 0.0), 4.0, 6.0);
+        let sheet = kernel.create_body_from_profile(&OpTag::new("profile"), &profile).unwrap();
+        let extrude = |distance| {
+            kernel.extrude(&OpTag::new("tool"), sheet.body, &Extrude { distance, direction: None }).unwrap().body
+        };
+        let cut = |tool| kernel.boolean(&OpTag::new("cut"), BooleanOp::Subtract, base, tool).unwrap().body;
+        let previous = cut(extrude(4.0));
+        let tool = extrude(5.0);
+        kernel.take_diagnostics().unwrap();
+        let mut edited = None;
+        kernel.with_rebuild_source(previous, &mut || edited = Some(cut(tool)));
+        let edited = edited.unwrap();
+
+        let evidence = kernel.take_diagnostics().unwrap();
+        let profile_step = format!("op_{}", sheet.record.seq);
+        let operations = evidence["calls"][0]["operation_log"]["operations"].as_array().unwrap();
+        assert!(!operations.iter().any(|op| op["id"] == profile_step), "replayed the unchanged profile: {evidence}");
+
+        let recipe = kernel.body_recipe(edited).unwrap();
+        let (Outcome::Exact(fresh), ..) =
+            build(&recipe, OpKind::Subtract, &[], None, None, &Default::default(), None, &Default::default(), &[])
+                .unwrap()
+        else {
+            panic!("an exact cut")
+        };
+        let options = StepOptions::default();
+        assert_eq!(kernel.export_step(edited, &options).unwrap(), step::export(&fresh, &options, None).unwrap());
     }
 
     #[test]
@@ -3103,7 +3170,7 @@ mod tests {
             }
             let recipe = kernel.body_recipe(swept.body).unwrap();
             let (Outcome::Exact(fresh), ..) =
-                build(&recipe, OpKind::ExtrudeTo, &[], None, &Default::default(), None, &Default::default(), &[])
+                build(&recipe, OpKind::ExtrudeTo, &[], None, None, &Default::default(), None, &Default::default(), &[])
                     .unwrap()
             else {
                 panic!("an exact sweep")

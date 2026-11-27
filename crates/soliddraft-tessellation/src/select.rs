@@ -7,8 +7,8 @@
 //! thresholds, with levels a factor of four apart, keeps an occurrence from flickering
 //! between levels while the camera moves.
 //!
-//! The device budget sets a ceiling: when the app's meshes fill its budget it stops
-//! promoting to the fine level, or to the standard one.
+//! The adapter's display budget sets a ceiling from the meshes already held. It can
+//! change which level is shown, not the parameters or mesh of any level.
 
 use soliddraft_kernel_api::Vec3;
 

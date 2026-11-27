@@ -242,7 +242,9 @@ impl Document {
 
     fn rebuild_inner(&mut self) {
         let start = self.dirty.min(self.built.len());
-        self.built.truncate(start);
+        // The cache keeps these bodies alive until the rebuild finishes.
+        let retained: Vec<_> =
+            self.built.drain(start..).map(|built| built.owned.map(|body| (built.body_key, body))).collect();
         let active = self.active_count();
         let mut cache = std::mem::take(&mut self.cache);
 
@@ -254,7 +256,9 @@ impl Document {
             } else if f.suppressed {
                 Built::pass(FeatureStatus::Suppressed, current)
             } else {
-                self.build(&f, current, &mut cache)
+                let source =
+                    retained.get(i - start).copied().flatten().and_then(|(key, body)| (key == f.body).then_some(body));
+                self.build_or_keep(&f, current, &mut cache, None, source)
             }
             .in_body(&f);
             self.built.push(built);
@@ -276,7 +280,7 @@ impl Document {
         for i in 0..self.dirty.min(self.built.len()) {
             if i < self.active_count() && !self.features[i].suppressed {
                 let current = self.body_at(self.features[i].body, i);
-                self.built[i] = self.build_or_keep(&self.features[i], current, &mut cache, Some(&self.built[i]));
+                self.built[i] = self.build_or_keep(&self.features[i], current, &mut cache, Some(&self.built[i]), None);
             }
         }
         self.cache = cache;
@@ -286,16 +290,13 @@ impl Document {
     /// A feature's build: the kept one when the cache has its exact inputs, else a new
     /// one, kept. Checks whose messages name another feature run every time and are not
     /// kept, so a rename shows in them without building anything.
-    fn build(&self, f: &Feature, current: Option<BodyId>, cache: &mut BuildCache) -> Built {
-        self.build_or_keep(f, current, cache, None)
-    }
-
     fn build_or_keep(
         &self,
         f: &Feature,
         current: Option<BodyId>,
         cache: &mut BuildCache,
         kept: Option<&Built>,
+        source: Option<BodyId>,
     ) -> Built {
         let mut reads = match self.resolve_reads(f, current) {
             Ok(reads) => reads,
@@ -309,13 +310,12 @@ impl Document {
             return built;
         }
         let mut result = None;
-        let work_used = self.kernel.measure_work(&mut || {
+        let mut evaluate = || {
             result = Some(match &f.kind {
-                FeatureKind::Combine { operation, tool } => {
-                    match (current, reads.tool) {
-                        _ if f.body == *tool => Built::failed(current, "Choose two different bodies to combine."),
-                        (Some(target), Some(tool)) => {
-                            let result = self.kernel.boolean(&OpTag::new(format!("{}.combine", f.id)), *operation, target, tool).map_err(|error| {
+                FeatureKind::Combine { operation, tool } => match (current, reads.tool) {
+                    _ if f.body == *tool => Built::failed(current, "Choose two different bodies to combine."),
+                    (Some(target), Some(tool)) => {
+                        let result = self.kernel.boolean(&OpTag::new(format!("{}.combine", f.id)), *operation, target, tool).map_err(|error| {
                                 let message = match error {
                                     KernelError::InvalidInput(message) => message,
                                     KernelError::Unsupported(message) if message == "this would leave nothing of the part" => "This combine would leave no solid body.".into(),
@@ -324,11 +324,10 @@ impl Document {
                                 };
                                 KernelError::InvalidInput(message)
                             });
-                            self.finish(result, current, |_| Vec::new())
-                        }
-                        _ => Built::failed(current, "Combine needs two available solid bodies."),
+                        self.finish(result, current, |_| Vec::new())
                     }
-                }
+                    _ => Built::failed(current, "Combine needs two available solid bodies."),
+                },
                 // Only a sketch takes a face of another component (see Command::check_kind);
                 // a file that says otherwise builds no plane.
                 FeatureKind::ReferencePlane(SketchPlane::Context { .. }) => {
@@ -402,7 +401,14 @@ impl Document {
                 FeatureKind::Lattice(l) => self.build_lattice(f, l, current),
                 FeatureKind::Gyroid(g) => self.build_gyroid(f, g, current),
             });
-        });
+        };
+        let work_used = if let Some(source) = source {
+            let mut work = None;
+            self.kernel.with_rebuild_source(source, &mut || work = Some(self.kernel.measure_work(&mut evaluate)));
+            work.expect("the checkpoint scope runs the build")
+        } else {
+            self.kernel.measure_work(&mut evaluate)
+        };
         let mut built = result.expect("work observation runs the build");
         match work_used {
             Ok(work) => built.work_used = work,

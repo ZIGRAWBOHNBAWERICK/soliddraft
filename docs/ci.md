@@ -175,6 +175,8 @@ Add a TOML fragment under `ci/ownership/` when adding a Rust ownership area. Kee
 
 For a Chromium check that uses the standard demo setup, add a JSON entry under `ci/browser-checks/` and map its script in the matching consumer fragment. The web job runs these entries in filename order. Checks with their own fixture generation, browser setup or artifact uploads still use explicit workflow steps.
 
+The import-fields and feature-regression checks wait for the Command Palette's browser text focus and the intended first result before pressing Enter. They verify the dispatched command through `soliddraft-feedback`, then wait for the expected document, pane, or other app state before continuing. A timeout reports the last observed state instead of repeating the input.
+
 `ci/check-consumers/` holds one JSON fragment per feature or CI area. The selector combines their `files` and `patterns` maps without allowing duplicate keys. `files` maps exact paths to unit names, or to `"all"` for every unit and package. `patterns` maps full-match regular expressions to unit names. Lint always runs, so an empty list means no other job reads the file.
 
 The selector looks up every changed `ci/` path, for all statuses and for both sides of a rename or copy. A deleted or renamed-away path may use the base map. The result is united with every other path's selection, main pushes with non-CI changes retain all eight Linux units, and release branches and normal manual dispatch retain every unit and package except the deferred Windows ones. The explicit baseline refresh dispatch is separate and selects only its generators.

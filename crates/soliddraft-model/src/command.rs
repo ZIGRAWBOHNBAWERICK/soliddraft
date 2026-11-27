@@ -1376,7 +1376,17 @@ impl Document {
                 {
                     return Err(CommandError::Invalid(format!("The part has no item called {old}.")));
                 }
+                if let Some(decl) = replaces.as_deref().and_then(|id| self.pmi.item(id))
+                    && let PmiKind::Datum { letter, .. } = &decl.kind
+                    && !matches!(item.kind, PmiKind::Datum { .. })
+                    && let Some(user) = self.pmi.users_of_datum(letter).first()
+                {
+                    return Err(CommandError::Invalid(format!("Datum {letter} is used by {user}.")));
+                }
                 if let Some(problem) = self.pmi.problem_with(&item, replaces.as_deref()) {
+                    if matches!(item.kind, PmiKind::DatumTarget(_) | PmiKind::PositionControl(_)) {
+                        return Err(CommandError::Invalid(format!("{}: {problem}", item.id)));
+                    }
                     return Err(CommandError::Invalid(problem));
                 }
                 let old = self.pmi.clone();
@@ -1393,15 +1403,39 @@ impl Document {
                             && was != now
                         {
                             for other in &mut self.pmi.items {
-                                if let PmiKind::Gdt { datums, .. } = &mut other.kind {
-                                    for datum in datums.iter_mut().filter(|datum| datum.letter == *was) {
+                                let rename = |datum: &mut soliddraft_kernel_api::pmi::DatumRef| {
+                                    if datum.letter == *was {
                                         datum.letter.clone_from(now);
+                                    } else if datum.letters().any(|letter| letter == was) {
+                                        datum.letter = datum.letters()
+                                            .map(|letter| if letter == was { now.as_str() } else { letter })
+                                            .collect::<Vec<_>>().join("-");
                                     }
+                                };
+                                match &mut other.kind {
+                                    PmiKind::DatumTarget(target) if target.datum == *was => target.datum.clone_from(now),
+                                    PmiKind::PositionControl(control) => {
+                                        control.frame.segments_mut().flat_map(|segment| &mut segment.datums).for_each(rename);
+                                    }
+                                    PmiKind::Gdt { datums, .. } => datums.iter_mut().for_each(rename),
+                                    _ => {}
                                 }
                             }
                         }
                     }
                     None => self.pmi.items.push((*item).clone()),
+                }
+                let affected_datum = match &item.kind {
+                    PmiKind::Datum { letter, .. } => Some(letter.as_str()),
+                    PmiKind::DatumTarget(target) => Some(target.datum.as_str()),
+                    _ => None,
+                };
+                let checked = self.pmi.items.iter()
+                    .filter(|other| other.id == item.id || affected_datum.is_some_and(|letter| other.references_datum(letter)))
+                    .find_map(|other| self.check_pmi_edit(&self.pmi, other).err().map(|problem| (other.id.clone(), problem)));
+                if let Some((id, problem)) = checked {
+                    self.pmi = old;
+                    return Err(CommandError::Invalid(format!("{id}: {problem}")));
                 }
                 Ok(self.pmi_changed(old, Command::PutPmiItem { item, replaces }, label))
             }
@@ -1414,7 +1448,7 @@ impl Document {
                     let users = self.pmi.users_of_datum(letter);
                     if let Some(first) = users.first() {
                         return Err(CommandError::Invalid(format!(
-                            "Datum {letter} is used by {first}. Remove or change that tolerance first."
+                            "Datum {letter} is used by {first}. Remove or change that item first."
                         )));
                     }
                 }

@@ -35,7 +35,7 @@ Topology contains exact definitions and incidence with Catallax's proven measure
 
 See [Catallax backend gaps](needs-catallax.md) for the drawing query mapping. A preview section (`ViewSpec::preview`) cuts the preview mesh using `drawing::section::by_mesh_slice`. A saved section subtracts a half-space through a Catallax boolean (`by_half_space`) and reads the cut body's view and face loops. Saved curve accuracy distinguishes `exact` geometry, `polygon` paths such as sampled splines, and `approximate` geometry or placement. Export counts use the written paths. A cubic sheet path counts as approximate even if its source curve is exact.
 
-The part viewport's Section view subtracts a temporary half-space box through `Kernel::boolean`, tessellates the capped result, and releases the temporary bodies. Its display mesh stays outside the model and export path. Desktop cuts run one at a time on a worker, coalesce offset changes, and accept results only for the requested document, source body, display version and plane.
+On the full GPU tier, the part viewport clips the current proved display mesh and fills the section plane using stencil while the offset is dragged. Releasing the offset submits the same temporary half-space subtraction that WebGL2 uses throughout a drag. The live cap stays visible until the matching cut is ready. If the kernel refuses, the viewport keeps the cap and marks it display-only. It provides no pick IDs or measurement points. The worker accepts results only for the requested document, bodies, display version and plane. Section geometry never enters the model or exports.
 
 ## Request work
 

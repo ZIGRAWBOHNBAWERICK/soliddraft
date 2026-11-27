@@ -166,6 +166,16 @@ fn file_items<F: Clone>(item: &PmiItem<F>) -> KernelResult<Vec<cx::Item<F>>> {
             thread: thread.clone(),
             nominal: None,
         })),
+        // The scalar nominals API gives the pilot diameter, just as for any size.
+        // on_model rejects native hole requirements before converting for STEP.
+        PmiKind::Hole { pilot, .. } => one(cx::ItemKind::Size(cx::Size {
+            kind: cx::SizeKind::Diameter,
+            features: vec![pilot.clone()],
+            limits: None,
+            through: false,
+            thread: None,
+            nominal: None,
+        })),
         PmiKind::Location { from, to, tolerance, .. } => one(location(id, from, to, *tolerance)?),
         PmiKind::Slot { flats, ends, tolerance } => {
             let end = |feature: &Vec<F>, at| Anchor { feature: feature.clone(), at };
@@ -389,6 +399,9 @@ pub(super) fn on_model(
     body: BodyId,
     pmi: &Pmi<FaceId>,
 ) -> KernelResult<cx::Pmi<catallax_topology::FaceId>> {
+    if let Some(item) = pmi.items.iter().find(|item| matches!(item.kind, PmiKind::Hole { .. })) {
+        return Err(invalid(&item.id, "compound hole and depth PMI is not supported in STEP export"));
+    }
     held(solid, body, pmi).map(|(pmi, _)| pmi)
 }
 

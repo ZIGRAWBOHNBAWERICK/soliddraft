@@ -1,6 +1,7 @@
 //! The part document: features in tree order, rebuilt through the kernel trait.
 
 use std::collections::BTreeMap;
+use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 
 use soliddraft_document::DocumentId;
@@ -15,6 +16,7 @@ use soliddraft_tessellation::{Report, Settings};
 use crate::command::UndoEntry;
 use crate::evaluate::{Built, kernel_repair};
 use crate::feature::{BlendFeature, DatumPlane, Feature, FeatureId, FeatureKind, ProfileSource};
+use crate::file::saved_view::SavedView;
 use crate::materials::PartMaterials;
 use crate::rebuild::BuildCache;
 use crate::reference::{
@@ -88,6 +90,27 @@ pub struct FaceLabel {
     pub text: String,
 }
 
+/// View state shared by document forks and file snapshots.
+#[derive(Clone, Default)]
+pub(crate) struct PartView {
+    pub(crate) visibility: Visibility,
+    pub(crate) saved: Vec<SavedView>,
+}
+
+impl Deref for PartView {
+    type Target = Visibility;
+
+    fn deref(&self) -> &Visibility {
+        &self.visibility
+    }
+}
+
+impl DerefMut for PartView {
+    fn deref_mut(&mut self) -> &mut Visibility {
+        &mut self.visibility
+    }
+}
+
 /// A part: an ordered feature list, its rebuild, its undo history.
 ///
 /// The document never stores kernel state. It stores features and rebuilds them through
@@ -121,9 +144,8 @@ pub struct Document {
     /// Viewport quality, export accuracy and whether to save display data: kept in the
     /// file's `settings.json`, outside the part's truth and hashes.
     pub(crate) settings: Settings,
-    /// What the user shows and hides: kept in the file's `view.json`, outside the part's
-    /// truth, its hashes and its undo history.
-    pub(crate) view: Visibility,
+    /// Visibility choices and named PMI views, outside part truth and undo history.
+    pub(crate) view: PartView,
     pub(crate) kernel: Arc<dyn Kernel>,
     pub(crate) built: Vec<Built>,
     /// Index of the first feature whose cached build is stale.
@@ -172,7 +194,7 @@ impl Document {
             materials: PartMaterials::default(),
             pmi: crate::pmi::PartPmi::default(),
             settings: Settings::default(),
-            view: Visibility::default(),
+            view: PartView::default(),
             kernel,
             built: Vec::new(),
             dirty: 0,
@@ -237,6 +259,16 @@ impl Document {
     /// What the user chose to show and hide in the part.
     pub fn visibility(&self) -> &Visibility {
         &self.view
+    }
+
+    /// Named PMI views, in the order the part saves them.
+    pub fn saved_views(&self) -> &[SavedView] {
+        &self.view.saved
+    }
+
+    /// Edits the saved views without changing the part's geometry or revision.
+    pub fn saved_views_mut(&mut self) -> &mut Vec<SavedView> {
+        &mut self.view.saved
     }
 
     /// Shows or hides `item`, or with `None` lets it follow the defaults again. Like the

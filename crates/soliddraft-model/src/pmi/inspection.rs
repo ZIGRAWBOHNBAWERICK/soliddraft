@@ -11,7 +11,8 @@ use std::ops::Range;
 
 use serde::Serialize;
 use soliddraft_kernel_api::pmi::{
-    DatumRef, Feature, GdtCharacteristic, MaterialCondition, PmiKind, SizeKind, Tolerance, roughness,
+    DatumRef, Feature, GdtCharacteristic, HoleHeadKind, HoleHeadNominals, MaterialCondition, PmiKind, SizeKind,
+    Tolerance, roughness,
 };
 
 use crate::pmi::PmiRow;
@@ -45,6 +46,12 @@ pub struct InspectionGroup {
 pub enum InspectionKind {
     Diameter,
     Radius,
+    DrillDepth,
+    CounterboreDiameter,
+    CounterboreDepth,
+    CountersinkDiameter,
+    CountersinkAngle,
+    ThreadDepth,
     Distance,
     SlotLength,
     SlotWidth,
@@ -60,6 +67,12 @@ impl InspectionKind {
     fn key(self) -> &'static str {
         match self {
             Self::Diameter => "diameter",
+            Self::DrillDepth => "drill_depth",
+            Self::CounterboreDiameter => "counterbore_diameter",
+            Self::CounterboreDepth => "counterbore_depth",
+            Self::CountersinkDiameter => "countersink_diameter",
+            Self::CountersinkAngle => "countersink_angle",
+            Self::ThreadDepth => "thread_depth",
             Self::Radius => "radius",
             Self::Distance => "distance",
             Self::SlotLength => "slot_length",
@@ -78,6 +91,7 @@ impl InspectionKind {
 pub enum InspectionUnit {
     Millimetre,
     Micrometre,
+    Degree,
 }
 
 impl InspectionUnit {
@@ -85,6 +99,7 @@ impl InspectionUnit {
         match self {
             Self::Millimetre => "mm",
             Self::Micrometre => "µm",
+            Self::Degree => "°",
         }
     }
 }
@@ -204,7 +219,7 @@ impl InspectionGroup {
 
     fn from_pmi(source: PmiRow) -> Self {
         let callout = source.callout();
-        let PmiRow { item, measured, located, problem, feature, placements, .. } = source;
+        let PmiRow { item, measured, hole, located, problem, feature, placements, .. } = source;
         let id = match (feature, placements.first()) {
             (Some(feature), Some(first)) => format!("thread/{}/group/{}", feature.0, first + 1),
             _ => format!("pmi/{}", item.id),
@@ -230,6 +245,68 @@ impl InspectionGroup {
                     // The CAD cylinder's diameter is not the thread's inspection requirement.
                     if kind != InspectionKind::Thread {
                         row.dimension(measured.first().copied(), tolerance);
+                    }
+                }
+            }
+            PmiKind::Hole { pilot, head, tolerance, through, drill_depth, thread } => {
+                group.face_groups.push(pilot);
+                group
+                    .add(InspectionKind::Diameter, Some(1), 0..1, None)
+                    .dimension(hole.map(|nominal| nominal.pilot_diameter_mm), tolerance);
+                if !through {
+                    group.add(InspectionKind::DrillDepth, Some(1), 0..1, None).dimension(
+                        drill_depth
+                            .map(|depth| depth.value())
+                            .or_else(|| hole.and_then(|nominal| nominal.drill_depth_mm)),
+                        Tolerance::None,
+                    );
+                }
+                if let Some(head) = head {
+                    group.face_groups.push(head.faces);
+                    let nominal = hole.and_then(|nominal| nominal.head);
+                    let (diameter_kind, extent_kind, diameter, extent, unit) = match (head.kind, nominal) {
+                        (HoleHeadKind::Counterbore, nominal) => {
+                            let (diameter, depth) = match nominal {
+                                Some(HoleHeadNominals::Counterbore { diameter_mm, depth_mm }) => {
+                                    (Some(diameter_mm), Some(depth_mm))
+                                }
+                                _ => (None, None),
+                            };
+                            (
+                                InspectionKind::CounterboreDiameter,
+                                InspectionKind::CounterboreDepth,
+                                diameter,
+                                depth,
+                                InspectionUnit::Millimetre,
+                            )
+                        }
+                        (HoleHeadKind::Countersink, nominal) => {
+                            let (diameter, angle) = match nominal {
+                                Some(HoleHeadNominals::Countersink { diameter_mm, included_angle_deg }) => {
+                                    (Some(diameter_mm), Some(included_angle_deg))
+                                }
+                                _ => (None, None),
+                            };
+                            (
+                                InspectionKind::CountersinkDiameter,
+                                InspectionKind::CountersinkAngle,
+                                diameter,
+                                angle,
+                                InspectionUnit::Degree,
+                            )
+                        }
+                    };
+                    group.add(diameter_kind, Some(1), 1..2, None).dimension(diameter, Tolerance::None);
+                    let row = group.add(extent_kind, Some(1), 1..2, None);
+                    row.dimension(extent, Tolerance::None);
+                    row.unit = Some(unit);
+                }
+                if let Some(thread) = thread {
+                    group.add(InspectionKind::Thread, Some(1), 0..1, None);
+                    if let Some(depth) = thread.depth {
+                        group
+                            .add(InspectionKind::ThreadDepth, Some(1), 0..1, None)
+                            .dimension(Some(depth.value()), Tolerance::None);
                     }
                 }
             }

@@ -24,6 +24,9 @@
 //! thread, and how deep it goes from where the hole starts now. It reaches a STEP file
 //! and a drawing like any other.
 
+pub mod inspection;
+pub(crate) mod status;
+
 use serde::{Deserialize, Serialize};
 use soliddraft_kernel_api::drawing::Curve3;
 use soliddraft_kernel_api::pmi::{

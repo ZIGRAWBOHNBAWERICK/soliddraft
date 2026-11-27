@@ -84,7 +84,7 @@ pub(crate) fn sheet_error(drawing: &crate::Drawing, sheet: &crate::Sheet) -> Opt
     let pinned = drawing.model.pinned.as_str();
     for view in &sheet.views {
         let label = || crate::project::view_label_in(drawing, sheet, view);
-        if !view.has_saved_catallax_linework() {
+        if !view.geometry.display_only && !view.has_saved_catallax_linework() {
             let guidance = if view.needs_inclusion_for_redraw() {
                 INCLUDE_FOR_REDRAW
             } else {

@@ -15,10 +15,11 @@ use serde_json::json;
 use soliddraft_app::app::{Automation, SolidDraftApp};
 use soliddraft_app::document::Document;
 use soliddraft_app::drawing::{DrawingAction, DrawingSel, DrawingSession, LinkState};
-use soliddraft_app::review::{ReviewerMarkup, RevisionPin};
+use soliddraft_app::review::{ReviewerMarkup, RevisionPin, SavedRevision};
 use soliddraft_app::state::AppAction;
 use soliddraft_document::identify_file;
 use soliddraft_drawing::{Command, PmiSource};
+use soliddraft_kernel_api::pmi::{PmiKind, Tolerance};
 
 type App = Harness<'static, SolidDraftApp>;
 
@@ -53,6 +54,8 @@ fn a_drawing_review_compares_bracket_revisions_and_reopens_its_markup_on_that_dr
     let drawing_path = root.join("parts/bracket-b.dwdrw");
     let edited_drawing = root.join("parts/bracket-b-owner.dwdrw");
     let markup_path = root.join("bracket-b-review.json");
+    let stale_markup_path = root.join("stale-review.json");
+    let part_markup_path = root.join("part-review.json");
 
     let kernel = Arc::new(soliddraft_kernel_catallax::CatallaxKernel::with_diagnostics(20_000_000));
     let doc = Document::new("P1 bracket", kernel);
@@ -60,12 +63,27 @@ fn a_drawing_review_compares_bracket_revisions_and_reopens_its_markup_on_that_dr
         .with_size(egui::vec2(1440.0, 900.0))
         .build_eframe(move |cc| SolidDraftApp::new(cc, doc, Automation::default()));
     {
-        // Revision A as annotated; revision B with the bore at 10 mm instead of 8.
         let state = &mut app.state_mut().state;
         bracket::build(state);
         bracket::annotate(state);
+        let boss = bracket::faces(state, 30.0).boss;
+        bracket::call(
+            state,
+            "pmi_add",
+            json!({"kind": "finish", "name": "Boss finish", "faces": [boss], "roughness": "Ra 3.2"}),
+        );
         state.doc.model().save(&baseline).unwrap();
         bracket::call(state, "drive", json!({"sketch": "Sketch4", "dimension": 1, "expression": "10"}));
+        for id in ["Bore diameter", "Bore finish"] {
+            let mut item = state.doc.model().pmi().item(id).unwrap().clone();
+            match &mut item.kind {
+                PmiKind::Size { tolerance, .. } => *tolerance = Tolerance::parse("H8").unwrap(),
+                PmiKind::SurfaceFinish { text, .. } => *text = "Ra 0.8".into(),
+                _ => unreachable!(),
+            }
+            state.doc.put_pmi(item, Some(id.into())).unwrap();
+        }
+        state.doc.remove_pmi("Boss finish").unwrap();
     }
     app.run_steps(2);
     action(&mut app, AppAction::SaveAs(Some(candidate.clone())));
@@ -84,11 +102,27 @@ fn a_drawing_review_compares_bracket_revisions_and_reopens_its_markup_on_that_dr
     // Compare, pick the changed bore and comment on its annotation.
     drawing(&mut app, DrawingAction::ReviewRevisions(Some(baseline.clone())));
     assert_eq!(session(&app).selection, Some(DrawingSel::Review));
+    app.get_by_label("Changed · Bore finish").click();
+    app.run_steps(2);
+    app.get_by_label("Ra 1.6");
+    app.get_by_label("Ra 0.8");
+    app.get_by_label("Removed · Boss finish").click();
+    app.run_steps(2);
+    app.get_by_label("Ra 3.2");
+    app.get_by_label("Item not present");
+    let candidate_revision = SavedRevision::open(&candidate, app.state().state.doc.kernel().clone()).unwrap();
+    candidate_revision
+        .markup(Some("Bore diameter"), "Part comment".into())
+        .unwrap()
+        .save_new(&part_markup_path)
+        .unwrap();
+    drawing(&mut app, DrawingAction::OpenMarkup(Some(part_markup_path)));
+    assert!(session(&app).review.as_ref().unwrap().draft().is_none());
     app.get_by_label("Changed · Bore diameter").click();
     app.run_steps(2);
     app.get_by_label("Ø8 H7");
     // The drawing tree names the annotation too.
-    assert!(app.query_all_by_label("Ø10 H7").next().is_some());
+    assert!(app.query_all_by_label("Ø10 H8").next().is_some());
     app.get_by_label("Candidate − baseline: +2 mm");
     app.get_by_label("Attach markup to selected item").click();
     app.run_steps(2);
@@ -106,7 +140,9 @@ fn a_drawing_review_compares_bracket_revisions_and_reopens_its_markup_on_that_dr
     assert_eq!(saved.text, "Check the bore fit on the drawing.");
     let on = saved.drawing.as_ref().expect("the markup names the drawing");
     assert_eq!(on.drawing, pin(&drawing_path));
-    assert_eq!(on.place, place);
+    assert_eq!((on.place.sheet, on.place.annotation), (place.sheet, place.annotation));
+    let sidecar: serde_json::Value = serde_json::from_slice(&std::fs::read(&markup_path).unwrap()).unwrap();
+    assert_eq!(sidecar["drawing"]["place"].as_object().unwrap().len(), 2);
     assert_ne!(pin(&baseline).revision, pin(&candidate).revision);
 
     // Another revision of the drawing does not take the comment.
@@ -114,8 +150,15 @@ fn a_drawing_review_compares_bracket_revisions_and_reopens_its_markup_on_that_dr
         &mut app,
         DrawingAction::Command(Command::SetTitleField { sheet: 0, key: "owner".into(), value: "Rig Shop".into() }),
     );
+    drawing(&mut app, DrawingAction::ReviewRevisions(Some(baseline.clone())));
+    drawing(&mut app, DrawingAction::OpenMarkup(Some(markup_path.clone())));
+    drawing(&mut app, DrawingAction::SaveMarkup(Some(stale_markup_path.clone())));
+    assert!(!stale_markup_path.exists(), "a dirty drawing cannot save review markup");
     drawing(&mut app, DrawingAction::Save(Some(edited_drawing.clone())));
     assert_ne!(pin(&edited_drawing).revision, pin(&drawing_path).revision);
+    drawing(&mut app, DrawingAction::OpenMarkup(Some(markup_path.clone())));
+    drawing(&mut app, DrawingAction::SaveMarkup(Some(stale_markup_path.clone())));
+    assert!(!stale_markup_path.exists(), "the still-open review cannot save markup on another revision");
     drawing(&mut app, DrawingAction::ReviewRevisions(Some(baseline.clone())));
     drawing(&mut app, DrawingAction::OpenMarkup(Some(markup_path.clone())));
     let review = session(&app).review.as_ref().expect("the edited drawing is under review");

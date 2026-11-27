@@ -300,8 +300,8 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
 fn needs_attention(ui: &mut egui::Ui, s: &mut DrawingSession, actions: &mut Vec<DrawingAction>) {
     let n = s.doc.attention_count();
     header(ui, Icon::Warning, &format!("Needs attention ({n})"));
-    let style = s.doc.style();
     let sheet = s.sheet().clone();
+    let style = super::document::DrawingDoc::style(&sheet);
     let dangling: Vec<_> =
         sheet.annotations.iter().filter(|a| matches!(a.state, AnnotationState::Dangling { .. })).cloned().collect();
     let changed: Vec<_> =
@@ -640,9 +640,12 @@ fn annotation_panel(
     id: soliddraft_drawing::AnnotationId,
     actions: &mut Vec<DrawingAction>,
 ) {
-    let sheet = s.sheet().clone();
-    let Some(a) = s.doc.drawing.annotation(id).cloned() else { return };
-    let style = s.doc.style();
+    let Some(sheet) = s.doc.drawing.sheets.iter().find(|sheet| sheet.annotations.iter().any(|a| a.id == id)).cloned()
+    else {
+        return;
+    };
+    let a = sheet.annotations.iter().find(|a| a.id == id).expect("the owning sheet has the annotation").clone();
+    let style = super::document::DrawingDoc::style(&sheet);
     let name = annotation_name(&a, style);
     let (icon, title) = match &a.body {
         AnnotationKind::Dimension(_) => (Icon::SmartDim, format!("Dimension {name}")),
@@ -965,7 +968,7 @@ fn sheet_panel(ui: &mut egui::Ui, s: &mut DrawingSession, actions: &mut Vec<Draw
             section_gap(ui);
             theme::section_label(ui, "Title block");
             let mut m = meta.clone();
-            let mut changed = false;
+            let fields = ui.id().with((s.instance, si));
             for (label, value) in [
                 ("Title", &mut m.title),
                 ("Number", &mut m.number),
@@ -973,75 +976,45 @@ fn sheet_panel(ui: &mut egui::Ui, s: &mut DrawingSession, actions: &mut Vec<Draw
                 ("Designer", &mut m.designer),
                 ("Date", &mut m.date),
             ] {
-                ui.horizontal(|ui| {
-                    ui.add_sized(
-                        vec2(68.0, 22.0),
-                        egui::Label::new(egui::RichText::new(label).size(12.0).color(theme::muted())),
-                    );
-                    let r = ui.add(egui::TextEdit::singleline(value).desired_width(ui.available_width() - 20.0));
-                    r.widget_info(|| {
-                        egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, format!("{label} field"))
-                    });
-                    changed |= r.lost_focus() && r.changed()
-                        || (r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)));
-                    if r.lost_focus() {
-                        changed = true;
-                    }
-                });
+                if let Some(text) = sheet_text_field(ui, fields, label, value, "") {
+                    *value = text;
+                }
             }
-            if changed && m != meta {
+            if m != meta {
                 actions.push(DrawingAction::Command(Command::SetMeta { meta: m }));
             }
-            let bound = sheet.title_bindings.get("title").cloned().unwrap_or_default();
-            let mut property = bound.clone();
-            ui.horizontal(|ui| {
-                ui.add_sized(
-                    vec2(68.0, 22.0),
-                    egui::Label::new(egui::RichText::new("Title from").size(12.0).color(theme::muted())),
-                );
-                let edit = egui::TextEdit::singleline(&mut property).hint_text("part property");
-                let r = ui.add(edit.desired_width(ui.available_width() - 20.0));
-                if r.lost_focus() && property != bound {
-                    actions.push(DrawingAction::Command(Command::BindTitleProperty {
-                        sheet: si,
-                        key: "title".to_owned(),
-                        property: property.trim().to_owned(),
-                    }));
-                }
-            });
-            for key in ["owner", "status", "checked", "approved"] {
-                let current = sheet.format_overrides.get(key).cloned().unwrap_or_default();
-                let mut text = current.clone();
-                ui.horizontal(|ui| {
-                    let label = key[..1].to_uppercase() + &key[1..];
-                    ui.add_sized(
-                        vec2(68.0, 22.0),
-                        egui::Label::new(egui::RichText::new(label).size(12.0).color(theme::muted())),
-                    );
-                    let r = ui.add(egui::TextEdit::singleline(&mut text).desired_width(ui.available_width() - 20.0));
-                    if r.lost_focus() && text != current {
-                        actions.push(DrawingAction::Command(Command::SetTitleField {
-                            sheet: si,
-                            key: key.to_owned(),
-                            value: text.clone(),
-                        }));
-                    }
-                });
+            let bound = sheet.title_bindings.get("title").map_or("", String::as_str);
+            if let Some(property) = sheet_text_field(ui, fields, "Title from", bound, "part property") {
+                actions.push(DrawingAction::Command(Command::BindTitleProperty {
+                    sheet: si,
+                    key: "title".to_owned(),
+                    property: property.trim().to_owned(),
+                }));
             }
-            section_gap(ui);
-            theme::section_label(ui, "Review");
-            if s.review.is_some() {
-                if ui.button("Revision review").clicked() {
-                    actions.push(DrawingAction::Select(Some(DrawingSel::Review)));
-                }
-            } else if ui
-                .button("Compare with a saved revision…")
-                .on_hover_text(
-                    "Compare the saved drawing's part with an earlier saved revision and comment on the drawing",
-                )
-                .clicked()
+            for (key, label) in
+                [("owner", "Owner"), ("status", "Status"), ("checked", "Checked"), ("approved", "Approved")]
             {
-                actions.push(DrawingAction::ReviewRevisions(None));
+                let current = sheet.format_overrides.get(key).map_or("", String::as_str);
+                if let Some(value) = sheet_text_field(ui, fields, label, current, "") {
+                    actions.push(DrawingAction::Command(Command::SetTitleField { sheet: si, key: key.into(), value }));
+                }
+            }
+            if !cfg!(target_arch = "wasm32") {
+                section_gap(ui);
+                theme::section_label(ui, "Review");
+                if s.review_ready().is_ok() {
+                    if ui.button("Revision review").clicked() {
+                        actions.push(DrawingAction::Select(Some(DrawingSel::Review)));
+                    }
+                } else if ui
+                    .button("Compare with a saved revision…")
+                    .on_hover_text(
+                        "Compare the saved drawing's part with an earlier saved revision and comment on the drawing",
+                    )
+                    .clicked()
+                {
+                    actions.push(DrawingAction::ReviewRevisions(None));
+                }
             }
             section_gap(ui);
             theme::section_label(ui, "Tables");
@@ -1063,22 +1036,64 @@ fn sheet_panel(ui: &mut egui::Ui, s: &mut DrawingSession, actions: &mut Vec<Draw
     });
 }
 
+fn sheet_text_field(
+    ui: &mut egui::Ui,
+    fields: egui::Id,
+    label: &str,
+    current: &str,
+    hint_text: &str,
+) -> Option<String> {
+    let id = fields.with(label);
+    let mut text = ui
+        .data(|d| d.get_temp::<(String, String)>(id))
+        .filter(|(original, _)| original == current)
+        .map_or_else(|| current.to_owned(), |(_, draft)| draft);
+    let response = ui
+        .horizontal(|ui| {
+            ui.add_sized(
+                vec2(68.0, 22.0),
+                egui::Label::new(egui::RichText::new(label).size(12.0).color(theme::muted())),
+            );
+            let response = ui.add(
+                egui::TextEdit::singleline(&mut text)
+                    .id(id)
+                    .hint_text(hint_text)
+                    .desired_width(ui.available_width() - 20.0),
+            );
+            response
+                .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, format!("{label} field")));
+            response
+        })
+        .inner;
+    if response.has_focus() {
+        ui.data_mut(|d| d.insert_temp(id, (current.to_owned(), text)));
+        return None;
+    }
+    ui.data_mut(|d| d.remove::<(String, String)>(id));
+    (response.lost_focus() && text != current).then_some(text)
+}
+
 /// The revision review of the saved drawing: what changed in the part's manufacturing
 /// information, and the comment on the drawing.
 fn review_panel(ui: &mut egui::Ui, s: &mut DrawingSession, actions: &mut Vec<DrawingAction>) {
     header(ui, Icon::Props, "Revision review");
-    let Some(review) = s.review.as_mut() else {
-        hint(ui, "Compare the saved drawing with an earlier revision of its part from the sheet properties.");
+    if cfg!(target_arch = "wasm32") {
         return;
-    };
+    }
+    let ready = s.review_ready();
+    let Some(review) = s.review.as_mut() else { return };
     let mut close = false;
     egui::ScrollArea::vertical().id_salt("revision_review").auto_shrink([false, false]).show(ui, |ui| {
         egui::Frame::new().inner_margin(egui::Margin::symmetric(10, 8)).show(ui, |ui| {
-            match review.show(ui) {
-                Some(MarkupFileAction::Open) => actions.push(DrawingAction::OpenMarkup(None)),
-                Some(MarkupFileAction::SaveAs) => actions.push(DrawingAction::SaveMarkup(None)),
-                Some(MarkupFileAction::Show) => actions.push(DrawingAction::ShowMarkup),
-                None => {}
+            if let Err(error) = ready {
+                hint(ui, error);
+            } else {
+                match review.show(ui) {
+                    Some(MarkupFileAction::Open) => actions.push(DrawingAction::OpenMarkup(None)),
+                    Some(MarkupFileAction::SaveAs) => actions.push(DrawingAction::SaveMarkup(None)),
+                    Some(MarkupFileAction::Show) => actions.push(DrawingAction::ShowMarkup),
+                    None => {}
+                }
             }
             section_gap(ui);
             close = ui.button("Close review").clicked();
@@ -1114,7 +1129,7 @@ fn format_panel(ui: &mut egui::Ui, s: &mut DrawingSession, actions: &mut Vec<Dra
             .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::ComboBox, true, "Paper size"));
         section_gap(ui);
         theme::section_label(ui, "Title block layout");
-        hint(ui, "Each field's cell: x, y, width and height in mm from the block's bottom-left corner.");
+        hint(ui, "Set x, y, width and height in mm within each field's template cell.");
         for field in &t.title_block.fields {
             let placed = sheet.title_layout.get(&field.key).copied();
             let stored = placed.map_or(field.cell, |p| p.cell);
@@ -1153,7 +1168,7 @@ fn format_panel(ui: &mut egui::Ui, s: &mut DrawingSession, actions: &mut Vec<Dra
                 actions.push(DrawingAction::Command(Command::SetTitleLayout {
                     sheet: si,
                     key: field.key.clone(),
-                    layout: Some(soliddraft_drawing::TitleCell { cell, size: placed.and_then(|p| p.size) }),
+                    layout: Some(soliddraft_drawing::TitleCell { cell }),
                 }));
             }
         }

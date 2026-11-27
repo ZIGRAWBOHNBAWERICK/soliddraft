@@ -11,7 +11,9 @@ use soliddraft_app::document::{Command, CutParams, Document, ExtrudeParams, Plan
 use soliddraft_app::drawing::{DrawingAction, DrawingSel, DrawingSession, DrawingTool};
 use soliddraft_app::sketch::{EntityKind, P2, Sketch};
 use soliddraft_app::state::AppAction;
-use soliddraft_drawing::{AlignAxis, View, ViewId, ViewKind};
+use soliddraft_drawing::{
+    AlignAxis, AnnotationKind, Command as DrawCommand, DimValue, SetKind, View, ViewId, ViewKind, ViewScale,
+};
 use soliddraft_kernel_api::{Point2, Vec3};
 
 type App = Harness<'static, SolidDraftApp>;
@@ -188,10 +190,8 @@ fn place_right_of(app: &mut App, beside: ViewId, by: f64) {
     settle(app);
 }
 
-#[test]
-fn offset_aligned_half_and_broken_views_from_the_drawing_tools() {
-    let root = std::env::temp_dir().join(format!("soliddraft-cut-tools-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&root);
+fn bracket_drawing(root: &std::path::Path) -> App {
+    let _ = std::fs::remove_dir_all(root);
     std::fs::create_dir_all(root.join("config")).unwrap();
     soliddraft_app::file::set_config_dir(Some(root.join("config")));
     let doc = bracket();
@@ -204,16 +204,31 @@ fn offset_aligned_half_and_broken_views_from_the_drawing_tools() {
     drawing(&mut app, DrawingAction::CreateDrawing);
     settle(&mut app);
     app.state_mut().state.options_details = true;
+    app
+}
+
+#[test]
+fn offset_aligned_half_and_broken_views_from_the_drawing_tools() {
+    let root = std::env::temp_dir().join(format!("soliddraft-cut-tools-{}", std::process::id()));
+    let mut app = bracket_drawing(&root);
     let (top, front) = (view_named(&app, "Top view"), view_named(&app, "Front view"));
 
-    // An offset section through two staggered holes: their centres clicked, the last
-    // one twice. On y = 23 up to x = 70 the flange (10 x 60) and plate (60 x 10) less the
+    // An offset section through two staggered holes. On y = 23 up to x = 70 the flange
+    // (10 x 60) and plate (60 x 10) less the
     // hole (9 x 10); on y = 67 beyond it the plate (50 x 10) less the other hole.
     drawing(&mut app, DrawingAction::SetTool(DrawingTool::Section { replace: None }));
     click_label(&mut app, "Offset (stepped)");
-    click_model(&mut app, top, Vec3::new(25.0, 23.0, 10.0));
+    let first = Vec3::new(25.0, 23.0, 10.0);
+    click_model(&mut app, top, first);
+    click_model(&mut app, top, first);
+    assert_eq!(session(&app).draft.points.len(), 2);
+    assert!(session(&app).draft.pending.is_none());
+    drawing(&mut app, DrawingAction::SetTool(DrawingTool::Section { replace: None }));
+    click_label(&mut app, "Offset (stepped)");
+    click_model(&mut app, top, first);
     click_model(&mut app, top, Vec3::new(115.0, 67.0, 10.0));
-    click_model(&mut app, top, Vec3::new(115.0, 67.0, 10.0));
+    assert!(session(&app).draft.pending.is_none());
+    click_label(&mut app, "Finish cutting line");
     place_right_of(&mut app, top, 160.0);
     let offset = sections(&app).pop().expect("an offset section");
     let ViewKind::Section { line, model_line, .. } = &offset.kind else { unreachable!() };
@@ -243,6 +258,20 @@ fn offset_aligned_half_and_broken_views_from_the_drawing_tools() {
     let made = half.half.clone().expect("the front view is a half section");
     assert!((made.axis[0].x - 70.0).abs() < 1e-6 && (made.axis[1].x - 70.0).abs() < 1e-6, "{made:?}");
     assert!(half.geometry.symmetry.is_some() && !half.geometry.hatch.is_empty(), "the cut half is hatched");
+    for point in made.axis {
+        near(point.y, 45.0, 1e-6, "the cutting plane is midway through the 90 mm plate");
+    }
+    drawing(
+        &mut app,
+        DrawingAction::Command(DrawCommand::SetViewScale { view: front, scale: ViewScale::Custom { factor: 0.5 } }),
+    );
+    let after = view(&app, front);
+    let [a, b] = after.geometry.symmetry.unwrap();
+    near(a.u, b.u, 1e-6, "the scaled centreline is still vertical");
+    let axis_x = session(&app).doc.transforms[&front].point(made.axis[0]).u;
+    near(a.u, axis_x, 1e-6, "the scaled centreline follows the model axis");
+    drawing(&mut app, DrawingAction::Undo);
+    drawing(&mut app, DrawingAction::Select(Some(DrawingSel::View(front))));
     click_label(&mut app, "Flip half");
     assert_eq!(view(&app, front).half.map(|h| h.flip), Some(!made.flip));
     click_label(&mut app, "Remove half section");
@@ -272,6 +301,27 @@ fn offset_aligned_half_and_broken_views_from_the_drawing_tools() {
     drawing(&mut app, DrawingAction::Redo);
     assert_eq!(view(&app, front).breaks, broken.breaks);
 
+    drawing(
+        &mut app,
+        DrawingAction::Command(DrawCommand::SetViewScale { view: front, scale: ViewScale::Custom { factor: 0.5 } }),
+    );
+    let scaled = view(&app, front);
+    let gap = scaled.geometry.breaks[0];
+    let xf = session(&app).doc.transforms[&front];
+    let left = xf.point(broken.breaks[0].from).u.min(xf.point(broken.breaks[0].to).u);
+    near(gap.at, xf.gaps()[0].at, 1e-6, "the scaled break mark follows the picking transform");
+    near(gap.gap, 6.0, 1e-9, "the paper gap stays 6 mm");
+    assert!(
+        scaled
+            .geometry
+            .curves
+            .iter()
+            .flat_map(|c| c.path.elements())
+            .filter_map(|e| e.end_point())
+            .all(|p| p.x <= left + 1e-5 || p.x >= left + gap.gap - 1e-5)
+    );
+    drawing(&mut app, DrawingAction::Undo);
+
     // Saved and reopened as it is.
     let path = root.join("bracket.dwdrw");
     drawing(&mut app, DrawingAction::Save(Some(path.clone())));
@@ -289,24 +339,83 @@ fn offset_aligned_half_and_broken_views_from_the_drawing_tools() {
     std::fs::remove_dir_all(&root).unwrap();
 }
 
+#[test]
+fn broken_view_dimensions_measure_the_model_from_native_picks() {
+    let root = std::env::temp_dir().join(format!("soliddraft-break-dimensions-{}", std::process::id()));
+    let mut app = bracket_drawing(&root);
+    let front = view_named(&app, "Front view");
+    drawing(
+        &mut app,
+        DrawingAction::Command(DrawCommand::SetViewBreaks {
+            view: front,
+            breaks: vec![soliddraft_drawing::Break {
+                from: Vec3::new(30.0, 0.0, 0.0),
+                to: Vec3::new(60.0, 0.0, 0.0),
+                axis: AlignAxis::Horizontal,
+            }],
+        }),
+    );
+    drawing(&mut app, DrawingAction::SetTool(DrawingTool::SmartDimension));
+    click_model(&mut app, front, Vec3::new(30.0, 0.0, 0.0));
+    assert_eq!(session(&app).picks.first().expect("a clipped edge pick").end, None);
+    drawing(&mut app, DrawingAction::SetTool(DrawingTool::Select));
+    drawing(&mut app, DrawingAction::SetTool(DrawingTool::SmartDimension));
+    let ends = [Vec3::ZERO, Vec3::new(120.0, 0.0, 0.0)];
+    for point in ends {
+        click_model(&mut app, front, point);
+    }
+    assert!(session(&app).picks.iter().all(|pick| pick.end.is_some()));
+    let base = session(&app).sheet_point(front, Vec3::new(50.0, 0.0, 0.0)).unwrap();
+    let place = session(&app).screen_of(Point2::new(base.u, base.v - 15.0));
+    click_at(&mut app, place);
+    let dimension = session(&app).sheet().annotations.iter().rev().find(|a| a.view == front &&
+        matches!(&a.body, AnnotationKind::Dimension(d) if matches!(d.value, DimValue::Measured { value: 120.0 }))).unwrap().clone();
+    for kind in [SetKind::Ordinate, SetKind::Baseline, SetKind::Chain] {
+        drawing(&mut app, DrawingAction::SetTool(DrawingTool::DimensionSet(kind)));
+        for point in ends {
+            click_model(&mut app, front, point);
+        }
+        assert_eq!(session(&app).draft.anchors.len(), 2, "{kind:?}: {:?}", session(&app).message);
+        click_at(&mut app, place);
+        let s = session(&app);
+        let set = s
+            .sheet()
+            .annotations
+            .iter()
+            .find_map(|a| match &a.body {
+                AnnotationKind::DimensionSet(set) if a.view == front && set.kind == kind => Some(set),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("{kind:?}: {:?}", s.message));
+        assert_eq!(set.values, [120.0], "{kind:?}");
+    }
+    let AnnotationKind::Dimension(mut edited) = dimension.body else { unreachable!() };
+    edited.kind =
+        soliddraft_drawing::DimensionKind::Linear { orientation: soliddraft_drawing::LinearOrientation::Aligned };
+    drawing(
+        &mut app,
+        DrawingAction::Command(DrawCommand::EditDimension { annotation: dimension.id, dimension: edited }),
+    );
+    let annotation = session(&app).doc.drawing.annotation(dimension.id).unwrap();
+    assert!(matches!(&annotation.body, AnnotationKind::Dimension(d) if
+        d.kind == soliddraft_drawing::DimensionKind::Linear { orientation: soliddraft_drawing::LinearOrientation::Aligned }
+        && matches!(d.value, DimValue::Measured { value: 120.0 })));
+
+    let dxf =
+        soliddraft_drawing::export::dxf(&soliddraft_drawing::display::layout_sheet(&session(&app).doc.drawing, 0))
+            .unwrap();
+    let entities = soliddraft_drawing::export::dxf::count_entities(&dxf).unwrap();
+    assert!(entities.get("DIMENSION/DIMENSION").is_some_and(|n| *n >= 4));
+    drop(app);
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
 /// The sheet format panel: the paper picked from its list, a title block field's cell
 /// moved by typing its x, then undo, redo and reopen.
 #[test]
 fn paper_and_title_cell_from_the_sheet_format_panel() {
     let root = std::env::temp_dir().join(format!("soliddraft-format-panel-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&root);
-    std::fs::create_dir_all(root.join("config")).unwrap();
-    soliddraft_app::file::set_config_dir(Some(root.join("config")));
-    let doc = bracket();
-    let mut app = Harness::builder()
-        .with_size(vec2(1440.0, 900.0))
-        .with_pixels_per_point(1.0)
-        .build_eframe(move |cc| SolidDraftApp::new(cc, doc, Automation::default()));
-    app.run_steps(6);
-    drawing(&mut app, DrawingAction::MakeDrawing);
-    drawing(&mut app, DrawingAction::CreateDrawing);
-    settle(&mut app);
-    app.state_mut().state.options_details = true;
+    let mut app = bracket_drawing(&root);
     drawing(&mut app, DrawingAction::Select(Some(DrawingSel::Format)));
     assert_eq!(session(&app).sheet().template.as_str(), "iso-a3");
 
@@ -320,25 +429,41 @@ fn paper_and_title_cell_from_the_sheet_format_panel() {
     let paper = soliddraft_drawing::display::layout_sheet(&session(&app).doc.drawing, 0).paper;
     assert_eq!(paper, (1189.0, 841.0));
 
-    // The legal owner's cell moves to x 120 of the block.
-    app.get_by_label("Legal owner x").click();
-    app.run_steps(3);
-    // The click opens the value for typing; the keys go to that editor.
-    app.key_press_modifiers(Modifiers::COMMAND, Key::A);
-    app.event(egui::Event::Text("120".into()));
+    for (control, value) in [("Legal owner width", "54"), ("Legal owner x", "4")] {
+        app.get_by_label(control).click();
+        app.run_steps(3);
+        app.key_press_modifiers(Modifiers::COMMAND, Key::A);
+        app.event(egui::Event::Text(value.into()));
+        app.run_steps(2);
+        app.key_press(Key::Enter);
+        app.run_steps(4);
+    }
+    let moved = session(&app).sheet().title_layout.get("owner").copied().expect("the owner field moved");
+    assert_eq!(moved.cell, [4.0, 9.0, 54.0, 9.0]);
+    drawing(&mut app, DrawingAction::Select(None));
+    let original_owner = session(&app).sheet().format_overrides.get("owner").cloned();
+    app.get_by_label("Owner field").focus();
     app.run_steps(2);
+    app.key_press_modifiers(Modifiers::COMMAND, Key::A);
+    app.event(egui::Event::Text("Rig Shop".into()));
+    app.run_steps(2);
+    assert_eq!(session(&app).sheet().format_overrides.get("owner"), original_owner.as_ref());
     app.key_press(Key::Enter);
     app.run_steps(4);
-    let moved = session(&app).sheet().title_layout.get("owner").copied().expect("the owner field moved");
-    assert_eq!(moved.cell, [120.0, 9.0, 60.0, 9.0]);
+    assert_eq!(session(&app).sheet().format_overrides["owner"], "Rig Shop");
+    drawing(&mut app, DrawingAction::Undo);
+    assert_eq!(session(&app).sheet().format_overrides.get("owner"), original_owner.as_ref());
+    drawing(&mut app, DrawingAction::Undo);
     drawing(&mut app, DrawingAction::Undo);
     assert!(session(&app).sheet().title_layout.is_empty(), "undo puts the field back");
     assert_eq!(session(&app).sheet().template.as_str(), "iso-a0", "and keeps the paper");
     drawing(&mut app, DrawingAction::Undo);
-    assert_eq!(session(&app).sheet().template.as_str(), "iso-a3", "a second undo the paper");
-    drawing(&mut app, DrawingAction::Redo);
-    drawing(&mut app, DrawingAction::Redo);
+    assert_eq!(session(&app).sheet().template.as_str(), "iso-a3", "a final undo restores the paper");
+    for _ in 0..4 {
+        drawing(&mut app, DrawingAction::Redo);
+    }
     assert_eq!(session(&app).sheet().title_layout.get("owner"), Some(&moved));
+    assert_eq!(session(&app).sheet().format_overrides["owner"], "Rig Shop");
 
     let path = root.join("bracket.dwdrw");
     drawing(&mut app, DrawingAction::Save(Some(path.clone())));
@@ -348,6 +473,23 @@ fn paper_and_title_cell_from_the_sheet_format_panel() {
     let sheet = session(&app).sheet();
     assert_eq!(sheet.template.as_str(), "iso-a0");
     assert_eq!(sheet.title_layout.get("owner"), Some(&moved));
+    assert_eq!(sheet.format_overrides["owner"], "Rig Shop");
     drop(app);
     std::fs::remove_dir_all(&root).unwrap();
+}
+
+#[test]
+fn mixed_sheet_reference_dimensions_use_the_owning_sheets_style() {
+    use soliddraft_app::drawing::document::DrawingDoc;
+    let mut drawing = soliddraft_drawing::fixture::bracket_a3();
+    let mut second = drawing.sheets[0].clone();
+    second.template = "ansi-e".into();
+    drawing.sheets.push(second);
+    let dim = soliddraft_drawing::Dimension::measured(
+        soliddraft_drawing::DimensionKind::Linear { orientation: soliddraft_drawing::LinearOrientation::Horizontal },
+        120.0,
+        0,
+    );
+    assert_eq!(DrawingDoc::dimension_text(&drawing.sheets[0], &dim), "120");
+    assert_eq!(DrawingDoc::dimension_text(&drawing.sheets[1], &dim), "(120)");
 }

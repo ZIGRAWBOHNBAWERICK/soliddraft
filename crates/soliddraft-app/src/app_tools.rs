@@ -1083,7 +1083,6 @@ fn kind_name<T: serde::Serialize>(kind: &T) -> Value {
 fn drawing_json(state: &AppState) -> Option<Value> {
     let s = state.drawing.session.as_ref()?;
     let d = &s.doc.drawing;
-    let style = s.doc.style();
     let refusals: std::collections::BTreeMap<_, _> =
         s.doc.refused_views().map(|(_, id, name, cause)| (id, (name, cause))).collect();
     let (mut changed, mut dangling) = (Vec::new(), Vec::new());
@@ -1092,6 +1091,7 @@ fn drawing_json(state: &AppState) -> Option<Value> {
         .iter()
         .enumerate()
         .map(|(index, sheet)| {
+            let style = crate::drawing::document::DrawingDoc::style(sheet);
             let name_of = |id: ViewId| d.sheet_of(id).and_then(|s| s.view(id).map(|v| view_label_in(d, s, v)));
             let views: Vec<Value> = sheet
                 .views

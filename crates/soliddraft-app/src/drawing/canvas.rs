@@ -16,8 +16,7 @@ use soliddraft_drawing::measure::{self as resolve, CurveShape, Pick, shape_of};
 use soliddraft_drawing::project::{self, view_bounds};
 use soliddraft_drawing::{
     AlignAxis, Alignment, Annotation, AnnotationId, AnnotationKind, AnnotationState, Attach, Command, Dimension,
-    DimensionKind, FoldDirection, LinearOrientation, Orientation, StyleOverrides, Tolerance, ViewDisplay, ViewId,
-    ViewKind, ViewScale,
+    DimensionKind, FoldDirection, Orientation, StyleOverrides, Tolerance, ViewDisplay, ViewId, ViewKind, ViewScale,
 };
 use soliddraft_kernel_api::Point2;
 
@@ -176,7 +175,13 @@ pub(super) struct Hit {
 /// Annotations win over curves, visible curves over hidden ones, and of two curves at
 /// the same distance the shorter one, so a hole's edge wins over the long edge it
 /// lies on.
-fn hit_test(sheet: &Sheet2<'_>, list: &DisplayList, pos: Pos2, curves_only: bool) -> Option<Hit> {
+fn hit_test(
+    sheet: &Sheet2<'_>,
+    model: &soliddraft_drawing::Sheet,
+    list: &DisplayList,
+    pos: Pos2,
+    curves_only: bool,
+) -> Option<Hit> {
     let mut best: Option<Hit> = None;
     let mut consider = |owner: Owner, distance: f32, end: Option<Attach>, penalty: f32, length: f32| {
         let priority = match owner {
@@ -201,13 +206,26 @@ fn hit_test(sheet: &Sheet2<'_>, list: &DisplayList, pos: Pos2, curves_only: bool
                 let polys = sheet.polylines(&p.path);
                 let length: f32 =
                     polys.iter().map(|poly| poly.windows(2).map(|w| (w[1] - w[0]).length()).sum::<f32>()).sum();
+                let model_ends = match p.owner {
+                    Owner::Curve(id, index) => model.view(id).and_then(|v| {
+                        let ends = v.geometry.curves.get(index)?.ends?;
+                        Some(ends.map(|end| sheet.s(Point2::new(end.u + v.position.u, end.v + v.position.v))))
+                    }),
+                    _ => None,
+                };
                 for poly in &polys {
                     for w in poly.windows(2) {
                         let d = seg_distance(pos, w[0], w[1]);
                         if d <= HIT_PX {
-                            let end = if let Owner::Curve(..) = p.owner {
+                            let end = if matches!(p.owner, Owner::Curve(..)) {
                                 let (a, b) = (poly[0], poly[poly.len() - 1]);
-                                if (pos - a).length() <= HIT_PX + 1.0 {
+                                if let Some(ends) = model_ends {
+                                    ends.into_iter().zip([Attach::Start, Attach::End]).find_map(|(end, attach)| {
+                                        (((a - end).length() < 0.05 || (b - end).length() < 0.05)
+                                            && (pos - end).length() <= HIT_PX + 1.0)
+                                            .then_some(attach)
+                                    })
+                                } else if (pos - a).length() <= HIT_PX + 1.0 {
                                     Some(Attach::Start)
                                 } else if (pos - b).length() <= HIT_PX + 1.0 {
                                     Some(Attach::End)
@@ -386,7 +404,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
 
     // Hover: the tools that pick model entities see curves only.
     let curves_only = s.tool != DrawingTool::Select && !s.tool.is_derived();
-    let hit = hover_pos.filter(|_| !panning).and_then(|p| hit_test(&sheet2, &list, p, curves_only));
+    let hit = hover_pos.filter(|_| !panning).and_then(|p| hit_test(&sheet2, s.sheet(), &list, p, curves_only));
     s.hover = hit.map(|h| h.owner);
     s.hover_label = hit.and_then(|h| hover_label(s, h.owner));
 
@@ -422,7 +440,8 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
     }
 
     // The review comment's place: a ring around the annotation it is on.
-    if let Some(place) = s.review.as_ref().and_then(|r| r.place())
+    if s.review_ready().is_ok()
+        && let Some(place) = s.review.as_ref().and_then(|r| r.place())
         && place.sheet == s.sheet
     {
         let at = sheet2.s(place.at);
@@ -683,7 +702,7 @@ fn hover_label(s: &DrawingSession, owner: Owner) -> Option<String> {
         }),
         Owner::Annotation(id) | Owner::AnnotationEnd(id, _) => {
             let a = s.doc.drawing.annotation(id)?;
-            Some(layout::annotation_name(a, s.doc.style()))
+            Some(layout::annotation_name(a, super::document::DrawingDoc::style(s.sheet())))
         }
         Owner::Table(i) => match sheet.tables.get(i)?.kind {
             soliddraft_drawing::TableKind::Revision => Some("Revision table".into()),
@@ -1135,7 +1154,7 @@ fn smart_dimension_tool(
                 && let Some(c) = v.geometry.curves.get(p.curve)
             {
                 let shape = shape_of(&c.path);
-                let q = if end == Attach::Start { shape.start() } else { shape.end() };
+                let q = resolve::endpoint(c, shape, end);
                 let at = sheet2.s(Point2::new(q.u + v.position.u, q.v + v.position.v));
                 sheet2.painter.circle_filled(at, 4.0, theme::accent());
             }
@@ -1237,13 +1256,7 @@ fn build_dimension(s: &DrawingSession, prop: &resolve::Proposal, placement_sheet
     let precision = if (value - value.round()).abs() > 1e-6 { 2 } else { precision };
     let mut anchors = prop.anchors.clone();
     // Linear dimensions between two rounds attach at the centres; the picks decided.
-    if let DimensionKind::Linear { orientation } = kind {
-        let axis = match orientation {
-            LinearOrientation::Horizontal => (1.0, 0.0),
-            LinearOrientation::Vertical => (0.0, 1.0),
-            LinearOrientation::Aligned => (0.0, 0.0),
-        };
-        let _ = axis;
+    if matches!(kind, DimensionKind::Linear { .. }) {
         for a in &mut anchors {
             if a.attach == Attach::Silhouette {
                 a.attach = Attach::Mid;
@@ -1521,7 +1534,7 @@ fn palette(
                     ui.spacing_mut().item_spacing = vec2(4.0, 4.0);
                     ui.horizontal(|ui| {
                         ui.label(
-                            egui::RichText::new(s.doc.dimension_text(d))
+                            egui::RichText::new(super::document::DrawingDoc::dimension_text(s.sheet(), d))
                                 .family(theme::semibold())
                                 .size(12.5)
                                 .color(theme::ink()),

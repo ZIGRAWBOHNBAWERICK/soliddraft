@@ -223,8 +223,7 @@ fn offset_section_through_staggered_bracket_holes() {
 /// The flange's second leg runs at 144 degrees. Catallax's certified section does not yet
 /// cut an inclined plane through its cylinders within its work allowance (the kernel
 /// fix is its own Catallax task); until it does, the view shows the section cut from the
-/// display mesh, marked unproved, and an export, which takes only certified line work,
-/// refuses it. The geometry checks hold at the mesh's chord tolerance.
+/// display mesh. The geometry checks hold at the mesh's chord tolerance.
 #[test]
 fn aligned_section_through_a_five_hole_flange() {
     let dir = scratch("aligned-section", "flange.json");
@@ -244,7 +243,8 @@ fn aligned_section_through_a_five_hole_flange() {
     let report: Value = serde_json::from_str(&soliddraft(&dir, &args)).unwrap();
     assert_eq!(report["views"], 5, "{report:#}");
     let (section, scale) = bent_section(&dir.join("flange.dwdrw"), 3);
-    assert!(section.geometry.unproved, "the inclined leg stands in from the display mesh");
+    assert!(section.geometry.display_only && !section.geometry.unproved);
+    assert!(!section.has_saved_catallax_linework());
     // Hole 3 is revolved onto the first leg's line: it shows 35 mm from the axis, as
     // hole 1 does, so the two cut holes are 70 mm apart. Unrevolved, its projection
     // would sit 28.3 mm from the axis.
@@ -263,14 +263,21 @@ fn aligned_section_through_a_five_hole_flange() {
     // half of the hub's top rim shows on both legs; each leg draws only its own half.
     assert_joint_drawn_once(&section, (first + revolved) / 2.0);
 
-    // An export takes certified line work only, so it refuses the stand-in.
-    let out = Command::new(env!("CARGO_BIN_EXE_soliddraft"))
-        .args(["draw", "flange.json", "--aligned-section", through.as_str(), "--out", "flange.svg"])
-        .current_dir(&dir)
-        .output()
-        .unwrap();
-    assert!(!out.status.success(), "an export of unproved line work was written");
-    assert!(!dir.join("flange.svg").exists());
+    soliddraft(&dir, &["draw", "flange.json", "--aligned-section", through.as_str(), "--out", "flange.svg"]);
+    let svg = std::fs::read_to_string(dir.join("flange.svg")).unwrap();
+    assert!(svg.contains(r#"<g id="VISIBLE""#), "the other views print");
+    assert!(!svg.contains(r#"<g id="HATCH""#), "the display section's hatch stays off the print");
+    let (drawing, _) = soliddraft_drawing::file::read(&dir.join("flange.dwdrw")).unwrap();
+    let list = soliddraft_drawing::display::layout_sheet(&drawing, 0);
+    assert!(
+        list.items
+            .iter()
+            .any(|i| matches!(i.owner(), soliddraft_drawing::display::Owner::Curve(id, _) if id == section.id))
+    );
+    assert!(
+        list.printable()
+            .all(|i| !matches!(i.owner(), soliddraft_drawing::display::Owner::Curve(id, _) if id == section.id))
+    );
 
     // A taller hub: both legs rebuild with it.
     edit_recipe(&dir.join("flange.json"), "hub", "distance", 30.0);
@@ -306,5 +313,31 @@ fn bent_sections_refuse_malformed_cutting_lines() {
         assert!(stderr.contains(says), "{flag} {value}: {stderr}");
         assert!(!dir.join("refused.dwdrw").exists(), "a refused drawing was written");
     }
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn an_oblique_offset_keeps_its_square_jog_after_extension_and_reopen() {
+    let dir = scratch("oblique-offset", "bracket.json");
+    soliddraft(
+        &dir,
+        &[
+            "draw",
+            "bracket.json",
+            "--offset-section",
+            "top:10,10,0;40,20,0;38,26,0;68,36,0",
+            "--out",
+            "oblique.dwdrw",
+            "--out",
+            "oblique.svg",
+        ],
+    );
+    let (section, _) = bent_section(&dir.join("oblique.dwdrw"), 4);
+    let ViewKind::Section { model_line, .. } = section.kind else { unreachable!() };
+    let leg = model_line[1] - model_line[0];
+    let jog = model_line[2] - model_line[1];
+    near(leg.dot(jog), 0.0, 1e-8, "the extended leg is square to its jog");
+    let svg = std::fs::read_to_string(dir.join("oblique.svg")).unwrap();
+    assert!(svg.contains(r#"<g id="CUTTING""#), "the parent prints its offset trace");
     std::fs::remove_dir_all(&dir).unwrap();
 }

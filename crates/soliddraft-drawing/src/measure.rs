@@ -431,6 +431,15 @@ pub fn shape_of_curve(curve: &crate::Curve2, circles: &[CircleInfo]) -> CurveSha
     shape_of(&curve.path)
 }
 
+/// The selected end in view millimetres.
+pub fn endpoint(curve: &crate::Curve2, shape: CurveShape, attach: Attach) -> Point2 {
+    if attach == Attach::Start {
+        curve.ends.map_or_else(|| shape.start(), |ends| ends[0])
+    } else {
+        curve.ends.map_or_else(|| shape.end(), |ends| ends[1])
+    }
+}
+
 /// Reads one or two picks the way SolidWorks does: a line gives its length, a circle a
 /// diameter, an arc a radius, two parallel lines a distance, two other lines an angle,
 /// a round and a line the distance from the centre, two ends a point-to-point distance.
@@ -465,33 +474,31 @@ pub fn propose(view: &View, picks: &[Pick], circles: &[CircleInfo]) -> Option<Pr
                 centre,
                 ..base
             },
-            (CurveShape::Line { a, b }, None) => Proposal {
-                anchors: vec![anchor(first, Attach::Start, a), anchor(first, Attach::End, b)],
-                points: vec![a, b],
-                ..base
-            },
+            (shape @ (CurveShape::Line { .. } | CurveShape::Other { .. }), None) => {
+                let a = endpoint(first, shape, Attach::Start);
+                let b = endpoint(first, shape, Attach::End);
+                Proposal {
+                    anchors: vec![anchor(first, Attach::Start, a), anchor(first, Attach::End, b)],
+                    points: vec![a, b],
+                    ..base
+                }
+            }
             (shape, Some(end)) => {
-                let at = if end == Attach::Start { shape.start() } else { shape.end() };
+                let at = endpoint(first, shape, end);
                 Proposal { anchors: vec![anchor(first, end, at)], points: vec![at], complete: false, ..base }
             }
-            (CurveShape::Other { a, b }, None) => Proposal {
-                anchors: vec![anchor(first, Attach::Start, a), anchor(first, Attach::End, b)],
-                points: vec![a, b],
-                ..base
-            },
         });
     }
     let second = curve(1)?;
     let s2 = shape_of_curve(second, circles);
     let (p1, p2) = (&picks[0], &picks[1]);
     // Two ends, or an end and a curve: point to point or point to the curve's reference.
-    let point_of = |pick: &Pick, shape: CurveShape| -> (Attach, Point2) {
+    let point_of = |pick: &Pick, curve: &crate::Curve2, shape: CurveShape| -> (Attach, Point2) {
         if let CurveShape::Circle { centre, .. } = shape {
             return (Attach::Centre, centre);
         }
         match pick.end {
-            Some(Attach::Start) => (Attach::Start, shape.start()),
-            Some(_) => (Attach::End, shape.end()),
+            Some(end) => (end, endpoint(curve, shape, end)),
             None => match shape {
                 CurveShape::Circle { centre, .. } | CurveShape::Arc { centre, .. } => (Attach::Centre, centre),
                 _ => (Attach::Mid, shape.mid()),
@@ -525,8 +532,8 @@ pub fn propose(view: &View, picks: &[Pick], circles: &[CircleInfo]) -> Option<Pr
             ..base
         });
     }
-    let (at1, q1) = point_of(p1, s1);
-    let (at2, q2) = point_of(p2, s2);
+    let (at1, q1) = point_of(p1, first, s1);
+    let (at2, q2) = point_of(p2, second, s2);
     Some(Proposal { anchors: vec![anchor(first, at1, q1), anchor(second, at2, q2)], points: vec![q1, q2], ..base })
 }
 

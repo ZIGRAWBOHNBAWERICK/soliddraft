@@ -59,62 +59,38 @@ pub struct ViewTransform {
 pub struct Breaks {
     /// True when the breaks shorten the view's height, false its width.
     vertical: bool,
-    count: usize,
-    /// Each stretch left out, from and to along the axis, sorted and apart.
-    stretches: [(f64, f64); Breaks::MAX],
-    /// Each closed-up gap, in sheet millimetres.
-    gaps: [f64; Breaks::MAX],
+    stretch: Option<(f64, f64)>,
+    centre_fraction: f64,
 }
 
 impl Breaks {
-    /// The most breaks a view takes.
-    pub const MAX: usize = 4;
-
-    /// The breaks of a view with frame `frame`. They must all run the same way, leave
-    /// out stretches with length and not overlap.
+    /// Resolves a saved view interruption into the view frame.
     pub fn new(breaks: &[Break], frame: &ViewFrame) -> Result<Breaks, DrawingError> {
-        let Some(first) = breaks.first() else { return Ok(Breaks::default()) };
-        if breaks.len() > Breaks::MAX {
-            return Err(DrawingError::BadRequest(format!("a view takes at most {} breaks", Breaks::MAX)));
-        }
-        if breaks.iter().any(|b| b.axis != first.axis) {
-            return Err(DrawingError::BadRequest("all of a view's breaks run the same way".into()));
-        }
-        let vertical = first.axis == AlignAxis::Vertical;
+        let b = match breaks {
+            [] => return Ok(Breaks::default()),
+            [b] => b,
+            _ => return Err(DrawingError::BadRequest("A view takes one break".into())),
+        };
+        let vertical = b.axis == AlignAxis::Vertical;
         let axis = if vertical { frame.up } else { frame.right };
-        let mut list = Vec::with_capacity(breaks.len());
-        for b in breaks {
-            let (a, c) = (b.from.dot(axis), b.to.dot(axis));
-            if !(a.is_finite() && c.is_finite() && (a - c).abs() > 1e-9 && b.gap.is_finite() && b.gap >= 0.0) {
-                return Err(DrawingError::BadRequest(
-                    "a break leaves out a stretch with length, along the way it runs, and a gap of zero or more".into(),
-                ));
-            }
-            list.push((a.min(c), a.max(c), b.gap));
+        let (a, c) = (b.from.dot(axis), b.to.dot(axis));
+        if !a.is_finite() || !c.is_finite() || (a - c).abs() <= 1e-9 {
+            return Err(DrawingError::BadRequest("A break needs two distinct positions along its axis".into()));
         }
-        list.sort_by(|a, b| a.0.total_cmp(&b.0));
-        if list.windows(2).any(|w| w[1].0 < w[0].1) {
-            return Err(DrawingError::BadRequest("a view's breaks must not overlap".into()));
-        }
-        let mut out = Breaks { vertical, count: list.len(), ..Breaks::default() };
-        for (i, (lo, hi, gap)) in list.into_iter().enumerate() {
-            out.stretches[i] = (lo, hi);
-            out.gaps[i] = gap;
-        }
-        Ok(out)
+        Ok(Breaks { vertical, stretch: Some((a.min(c), a.max(c))), centre_fraction: 0.5 })
     }
 
-    /// True when the view has no breaks.
+    /// Whether the view has no interruption.
     pub fn is_empty(&self) -> bool {
-        self.count == 0
+        self.stretch.is_none()
     }
 
-    /// True when the model coordinate `s` along the axis lies in a stretch left out.
+    /// Whether a station along the break axis lies inside the removed stretch.
     pub fn hides(&self, s: f64) -> bool {
-        self.stretches[..self.count].iter().any(|(lo, hi)| s > *lo && s < *hi)
+        self.stretch.is_some_and(|(lo, hi)| s > lo && s < hi)
     }
 
-    /// The model direction the breaks shorten the view along.
+    /// The model direction along which the view is shortened.
     pub fn axis(&self, frame: &ViewFrame) -> Vec3 {
         if self.vertical { frame.up } else { frame.right }
     }
@@ -127,54 +103,24 @@ impl Breaks {
         if self.vertical { Point2::new(p.u, value) } else { Point2::new(value, p.v) }
     }
 
-    /// How far, in sheet millimetres, the view closes up before the model coordinate `s`
-    /// along the axis. A point inside a stretch left out lands in its gap, in proportion.
+    fn fraction(&self, s: f64) -> f64 {
+        self.stretch.map_or(0.0, |(lo, hi)| ((s - lo) / (hi - lo)).clamp(0.0, 1.0))
+    }
+
     fn shift(&self, s: f64, scale: f64) -> f64 {
-        let mut d = 0.0;
-        for i in 0..self.count {
-            let ((lo, hi), gap) = (self.stretches[i], self.gaps[i]);
-            if s >= hi {
-                d += (hi - lo) * scale - gap;
-            } else {
-                if s > lo {
-                    d += (s - lo) * scale - (s - lo) / (hi - lo) * gap;
-                }
-                break;
-            }
-        }
-        d
+        self.stretch.map_or(0.0, |(lo, hi)| self.fraction(s) * ((hi - lo) * scale - Break::GAP))
     }
 
-    /// The scaled, unshortened coordinate along the axis of the closed-up coordinate `b`.
     fn unshift(&self, b: f64, scale: f64) -> f64 {
-        let mut d = 0.0;
-        for i in 0..self.count {
-            let ((lo, hi), gap) = (self.stretches[i], self.gaps[i]);
-            let start = lo * scale - d;
-            if b <= start {
-                return b + d;
-            }
-            if b < start + gap {
-                return (lo + (b - start) / gap * (hi - lo)) * scale;
-            }
-            d += (hi - lo) * scale - gap;
-        }
-        b + d
+        let Some((lo, hi)) = self.stretch else { return b };
+        let start = lo * scale;
+        let fraction = ((b - start) / Break::GAP).clamp(0.0, 1.0);
+        b + fraction * ((hi - lo) * scale - Break::GAP)
     }
 
-    /// The stretches the view keeps, as model ranges along the axis, each with how far
-    /// it moves back in sheet millimetres.
-    fn kept(&self, scale: f64) -> Vec<(f64, f64, f64)> {
-        let mut out = Vec::with_capacity(self.count + 1);
-        let (mut from, mut d) = (f64::NEG_INFINITY, 0.0);
-        for i in 0..self.count {
-            let ((lo, hi), gap) = (self.stretches[i], self.gaps[i]);
-            out.push((from, lo, d));
-            from = hi;
-            d += (hi - lo) * scale - gap;
-        }
-        out.push((from, f64::INFINITY, d));
-        out
+    fn kept(&self, scale: f64) -> [(f64, f64, f64); 2] {
+        let (lo, hi) = self.stretch.expect("a broken view");
+        [(f64::NEG_INFINITY, lo, 0.0), (hi, f64::INFINITY, self.shift(hi, scale))]
     }
 }
 
@@ -192,13 +138,14 @@ impl ViewTransform {
 
     /// The transform with `breaks`, centred again on what a view of the curves with
     /// sheet bounds `bbox_2d` (see [`ViewCurves::bbox_2d`]) keeps.
-    pub fn with_breaks(self, breaks: Breaks, bbox_2d: [f64; 4]) -> ViewTransform {
+    pub fn with_breaks(self, mut breaks: Breaks, bbox_2d: [f64; 4]) -> ViewTransform {
         if breaks.is_empty() {
             return self;
         }
         let (lo, hi) = if breaks.vertical { (bbox_2d[1], bbox_2d[3]) } else { (bbox_2d[0], bbox_2d[2]) };
         let s = self.scale;
         let middle = ((lo * s - breaks.shift(lo, s)) + (hi * s - breaks.shift(hi, s))) / 2.0;
+        breaks.centre_fraction = (breaks.fraction(lo) + breaks.fraction(hi)) / 2.0;
         ViewTransform { centre: breaks.with_along(self.centre, middle), breaks, ..self }
     }
 
@@ -210,13 +157,18 @@ impl ViewTransform {
 
     /// View millimetres of a model point.
     pub fn point(&self, p: Vec3) -> Point2 {
+        let q = self.precise_point(p);
+        Point2::new(round(q.u), round(q.v))
+    }
+
+    pub(crate) fn precise_point(&self, p: Vec3) -> Point2 {
         let q = self.frame.project(p);
         let mut q = Point2::new(q.u * self.scale, q.v * self.scale);
         if !self.breaks.is_empty() {
             let s = p.dot(self.breaks.axis(&self.frame));
             q = self.breaks.with_along(q, self.breaks.along(q) - self.breaks.shift(s, self.scale));
         }
-        Point2::new(round(q.u - self.centre.u), round(q.v - self.centre.v))
+        Point2::new(q.u - self.centre.u, q.v - self.centre.v)
     }
 
     /// View millimetres of a box in the frame's sheet coordinates (model millimetres),
@@ -237,17 +189,21 @@ impl ViewTransform {
 
     /// Where a broken view's gaps lie, in view millimetres.
     pub fn gaps(&self) -> Vec<BreakGap> {
+        let Some((lo, _)) = self.breaks.stretch else { return Vec::new() };
         let axis = if self.breaks.vertical { AlignAxis::Vertical } else { AlignAxis::Horizontal };
-        let centre = self.breaks.along(self.centre);
-        let mut d = 0.0;
-        (0..self.breaks.count)
-            .map(|i| {
-                let ((lo, hi), gap) = (self.breaks.stretches[i], self.breaks.gaps[i]);
-                let at = round(lo * self.scale - d - centre);
-                d += (hi - lo) * self.scale - gap;
-                BreakGap { axis, at, gap }
-            })
-            .collect()
+        let at = lo * self.scale - self.breaks.along(self.centre);
+        vec![BreakGap { axis, at, gap: Break::GAP, centre_fraction: self.breaks.centre_fraction }]
+    }
+
+    /// Changes scale while keeping the break gap in paper millimetres.
+    pub fn rescaled(self, scale: f64) -> Self {
+        let ratio = scale / self.scale;
+        let mut centre = Point2::new(self.centre.u * ratio, self.centre.v * ratio);
+        if !self.breaks.is_empty() {
+            let correction = (1.0 - ratio) * Break::GAP * self.breaks.centre_fraction;
+            centre = self.breaks.with_along(centre, self.breaks.along(centre) + correction);
+        }
+        Self { scale, centre, ..self }
     }
 
     /// A model direction in the view, scaled.
@@ -410,9 +366,15 @@ fn compute_view_at(
             })?;
             let (direction, up) = bent.axes();
             let spec = with_display(ViewSpec::new(direction, up), &display);
+            let mut display_only = false;
             let unfolded = bent
                 .unfold(|direction, up, origin| {
-                    section_or_mesh(part, &with_display(ViewSpec::new(direction, up), &display), origin)
+                    section_or_mesh(
+                        part,
+                        &with_display(ViewSpec::new(direction, up), &display),
+                        origin,
+                        &mut display_only,
+                    )
                 })
                 .map_err(|e| refused(e.into()))?;
             let xf = match projection {
@@ -420,6 +382,7 @@ fn compute_view_at(
                 None => view_transform(&unfolded.curves, &spec, scale, view)?,
             };
             let mut projected = project(index, &unfolded.curves, &xf, part.digest.as_str(), part.preview);
+            projected.geometry.display_only = display_only;
             // Each cut hatches only its own stretch: the jogs and the pivot draw no line.
             let flat = xf.unbroken();
             projected.geometry.hatch = unfolded
@@ -448,15 +411,18 @@ fn compute_view_at(
         }
         ViewKind::Section { parent, line, flip, model_line, .. } => {
             let pctx = &memo[parent];
-            let (direction, up) = section_axes(&pctx.xf.frame, line, *flip).ok_or(DrawingError::BadView(view.id))?;
+            let (direction, up) =
+                section_model_axes(&pctx.xf.frame, line, model_line, *flip).ok_or(DrawingError::BadView(view.id))?;
             let spec = with_display(ViewSpec::new(direction, up), &display);
             let origin = model_line.first().copied().unwrap_or_else(|| pctx.xf.unproject(line[0]));
-            let section = section_or_mesh(part, &spec, origin).map_err(|e| refused(e.into()))?;
+            let mut display_only = false;
+            let section = section_or_mesh(part, &spec, origin, &mut display_only).map_err(|e| refused(e.into()))?;
             let xf = match projection {
                 Some((_, xf)) => xf,
                 None => view_transform(&section.curves, &spec, scale, view)?,
             };
             let mut projected = project(index, &section.curves, &xf, part.digest.as_str(), part.preview);
+            projected.geometry.display_only = display_only;
             projected.geometry.hatch = section.regions.iter().flat_map(|r| region_polygons(r, &xf, None)).collect();
             ViewContext { id: view.id, curves: section.curves, xf, pictorial: false, projected }
         }
@@ -483,28 +449,30 @@ fn compute_view_at(
             let pctx = alternate.as_ref().unwrap_or(&memo[parent]);
             let ratio = scale / pctx.xf.scale;
             let model = model_center.unwrap_or_else(|| pctx.xf.unproject(*center));
-            let probe = ViewTransform::new(pctx.xf.frame, scale, Point2::new(0.0, 0.0));
-            let c = probe.raw(model);
-            let xf = ViewTransform::new(pctx.xf.frame, scale, Point2::new(c.x, c.y));
-            // Parent view millimetres to detail view millimetres: p -> (p + pc) * ratio - dc.
-            let (pc, dc) = (pctx.xf.centre, xf.centre);
-            let (du, dv) = (pc.u - dc.u / ratio, pc.v - dc.v / ratio);
-            let boundary = if profile.len() >= 3 {
-                Boundary::Polygon { points: profile.clone() }
-            } else {
-                Boundary::Circle { center: *center, radius: *radius }
+            let mut xf = pctx.xf.rescaled(scale);
+            let shift = xf.precise_point(model);
+            xf.centre = Point2::new(xf.centre.u + shift.u, xf.centre.v + shift.v);
+            xf.breaks.centre_fraction = xf.breaks.fraction(model.dot(xf.breaks.axis(&xf.frame)));
+            let gap = pctx.projected.geometry.breaks.first().copied();
+            let map = |p: &Point2| {
+                let q = scale_view_point(*p, ratio, gap);
+                Point2::new(round(q.u - shift.u), round(q.v - shift.v))
             };
-            let boundary = boundary.mapped(du, dv, ratio);
-            // The parent's finished line work, magnified: what the parent shows, cut or
-            // broken out, the detail shows too.
-            let map = |p: &Point2| Point2::new(round((p.u + du) * ratio), round((p.v + dv) * ratio));
-            let kmap = |p: Point| Point::new(round((p.x + du) * ratio), round((p.y + dv) * ratio));
+            let boundary = if profile.len() >= 3 {
+                Boundary::Polygon { points: profile.iter().map(map).collect() }
+            } else {
+                Boundary::Circle { center: map(center), radius: radius * ratio }
+            };
             let parent = &pctx.projected;
             let curves = parent
                 .geometry
                 .curves
                 .iter()
-                .map(|c| Curve2 { path: c.path.elements().iter().map(|el| map_el(*el, kmap)).collect(), ..c.clone() })
+                .map(|c| Curve2 {
+                    path: scaled_path(&c.path, ratio, gap, shift),
+                    ends: c.ends.map(|ends| ends.map(|p| map(&p))),
+                    ..c.clone()
+                })
                 .collect();
             let hatch = parent
                 .geometry
@@ -521,7 +489,7 @@ fn compute_view_at(
                             Polygon {
                                 outer: crate::display::clip_polygon(&outer, &window),
                                 holes: holes.iter().map(|l| crate::display::clip_polygon(l, &window)).collect(),
-                                clip: Some(c.mapped(du, dv, ratio)),
+                                clip: Some(scaled_boundary(c, ratio, gap).mapped(-shift.u, -shift.v, 1.0)),
                                 approximate: h.approximate || matches!(boundary, Boundary::Circle { .. }),
                             }
                         }
@@ -542,6 +510,7 @@ fn compute_view_at(
                 outline: None,
                 bbox: parent.geometry.bbox,
                 unproved: parent.geometry.unproved,
+                display_only: parent.geometry.display_only,
                 catallax: parent.geometry.catallax,
                 coarse: parent.geometry.coarse,
                 breaks: Vec::new(),
@@ -602,17 +571,20 @@ fn view_transform(
     Ok(xf.with_breaks(Breaks::new(&view.breaks, &xf.frame)?, curves.bbox_2d))
 }
 
-/// The kernel's certified section along `spec` through `origin`. Where the certified cut
-/// fails, the section cut from the display mesh stands in, marked unproved: the view
-/// shows it, and an export, which takes only certified line work, refuses the view. Why
-/// the certified cut failed goes to the log only.
-fn section_or_mesh(part: &Part, spec: &ViewSpec, origin: Vec3) -> soliddraft_kernel_api::KernelResult<SectionView> {
+fn section_or_mesh(
+    part: &Part,
+    spec: &ViewSpec,
+    origin: Vec3,
+    display_only: &mut bool,
+) -> soliddraft_kernel_api::KernelResult<SectionView> {
     let section = |preview| part.geometry.section_view(&SectionSpec { view: ViewSpec { preview, ..*spec }, origin });
     match section(part.preview) {
         Err(exact) if !part.preview => match section(true) {
             Ok(mut mesh) => {
                 log::warn!("drawing section: the certified cut failed, showing the display mesh's: {exact}");
-                mesh.curves.unproved = true;
+                *display_only = true;
+                mesh.curves.unproved = false;
+                mesh.curves.catallax = false;
                 Ok(mesh)
             }
             Err(_) => Err(exact),
@@ -630,10 +602,14 @@ fn half_section(
     half: &HalfSection,
     display: &ViewDisplay,
 ) -> Result<(), DrawingError> {
+    let [a, b] = half.axis.map(|point| point.dot(ctx.xf.frame.direction));
+    if !a.is_finite() || !b.is_finite() || (a - b).abs() > 1e-8 {
+        return Err(DrawingError::BadRequest("Both symmetry axis points must lie in the same cutting plane".into()));
+    }
     let boundary = half_boundary(&ctx.xf, half)?;
     let mut spec = with_display(ctx.spec(), display);
     spec.preview = part.preview;
-    let section = section_or_mesh(part, &spec, half.axis[0])?;
+    let section = section_or_mesh(part, &spec, half.axis[0], &mut ctx.projected.geometry.display_only)?;
     let mut cut = project(index, &section.curves, &ctx.xf, part.digest.as_str(), part.preview);
     clip_projected(&mut ctx.projected, &boundary, false);
     clip_projected(&mut cut, &boundary, true);
@@ -665,7 +641,7 @@ fn half_boundary(xf: &ViewTransform, half: &HalfSection) -> Result<Boundary, Dra
     let (a, b) = (xf.point(half.axis[0]), xf.point(half.axis[1]));
     let (du, dv) = (b.u - a.u, b.v - a.v);
     let len = du.hypot(dv);
-    if len.is_nan() || len <= 1e-9 {
+    if !len.is_finite() || len <= 1e-9 {
         return Err(DrawingError::BadRequest(
             "a half section's symmetry line must not run along the view direction".into(),
         ));
@@ -682,7 +658,7 @@ fn symmetry_line(ctx: &ViewContext, half: &HalfSection) -> Option<[Point2; 2]> {
     let (a, b) = (ctx.xf.point(half.axis[0]), ctx.xf.point(half.axis[1]));
     let (du, dv) = (b.u - a.u, b.v - a.v);
     let len = du.hypot(dv);
-    if len.is_nan() || len <= 1e-9 {
+    if !len.is_finite() || len <= 1e-9 {
         return None;
     }
     let (du, dv) = (du / len, dv / len);
@@ -730,7 +706,7 @@ fn broken_out(
         .fold(f64::NEG_INFINITY, f64::max);
     let mut spec = with_display(ctx.spec(), display);
     spec.preview = part.preview;
-    let section = section_or_mesh(part, &spec, d * (front - b.depth))?;
+    let section = section_or_mesh(part, &spec, d * (front - b.depth), &mut ctx.projected.geometry.display_only)?;
     let mut cut = project(index, &section.curves, &ctx.xf, part.digest.as_str(), part.preview);
     clip_projected(&mut ctx.projected, &b.boundary, false);
     clip_projected(&mut cut, &b.boundary, true);
@@ -956,11 +932,20 @@ fn view_axes<'a>(find: &Find<'a>, view: &View, projection: Projection, depth: u8
             let frame = ViewSpec::new(pd, pu).frame()?;
             Some(fold(&frame, *direction, placed.unwrap_or(projection)))
         }
-        ViewKind::Section { parent: p, line, flip, .. } => {
+        ViewKind::Section { parent: p, line, model_line, flip, .. } => {
             let (pd, pu) = parent(*p)?;
-            section_axes(&ViewSpec::new(pd, pu).frame()?, line, *flip)
+            section_model_axes(&ViewSpec::new(pd, pu).frame()?, line, model_line, *flip)
         }
         ViewKind::Detail { parent: p, .. } | ViewKind::Auxiliary { parent: p, .. } => parent(*p),
+    }
+}
+
+fn section_model_axes(frame: &ViewFrame, line: &[Point2], model_line: &[Vec3], flip: bool) -> Option<(Vec3, Vec3)> {
+    if model_line.len() == line.len() {
+        let trace: Vec<_> = model_line.iter().map(|p| frame.project(*p)).collect();
+        section_axes(frame, &trace, flip)
+    } else {
+        section_axes(frame, line, flip)
     }
 }
 
@@ -1204,15 +1189,10 @@ impl Projected {
         if (k - 1.0).abs() < 1e-12 {
             return;
         }
-        let s = |p: Point| Point::new(round(p.x * k), round(p.y * k));
-        for c in &mut self.geometry.curves {
-            c.path = c.path.elements().iter().map(|el| map_el(*el, s)).collect();
-        }
-        self.geometry.bbox = self.geometry.bbox.map(|v| round(v * k));
-        self.transform.centre = Point2::new(self.transform.centre.u * k, self.transform.centre.v * k);
-        self.transform.scale = scale;
+        rescale_geometry(&mut self.geometry, k);
+        self.transform = self.transform.rescaled(scale);
         for c in &mut self.circles {
-            c.centre = Point2::new(round(c.centre.u * k), round(c.centre.v * k));
+            c.centre = self.transform.point(c.model_centre);
             c.radius *= k;
         }
     }
@@ -1252,7 +1232,8 @@ pub fn project(index: &PartIndex, curves: &ViewCurves, xf: &ViewTransform, diges
         let accuracy =
             if c.approximate || !curves.approximate.is_empty() { Accuracy::Approximate } else { accuracy_of(&c.curve) };
         let accuracy = accuracy.for_path(&path);
-        out.push(Curve2 { path, source, visible: c.visible, kind, tangent: c.smooth, accuracy });
+        let ends = (!xf.breaks.is_empty()).then(|| [geometry.start(), geometry.end()].map(|p| xf.point(p)));
+        out.push(Curve2 { path, source, visible: c.visible, kind, tangent: c.smooth, accuracy, ends });
     }
     let geometry = ViewGeometry {
         source_digest: digest.to_owned(),
@@ -1261,6 +1242,7 @@ pub fn project(index: &PartIndex, curves: &ViewCurves, xf: &ViewTransform, diges
         outline: None,
         bbox: xf.bounds(curves.bbox_2d),
         unproved: curves.unproved,
+        display_only: false,
         catallax: curves.catallax,
         coarse,
         breaks: Vec::new(),
@@ -1527,30 +1509,80 @@ fn arc_path(
     }
 }
 
-/// Re-projects a view at a new scale without the kernel: its geometry and the cached
-/// points of its annotations scale about the view's origin.
+pub(crate) fn scale_view_point(p: Point2, ratio: f64, gap: Option<BreakGap>) -> Point2 {
+    let scaled = Point2::new(p.u * ratio, p.v * ratio);
+    let Some(g) = gap else { return scaled };
+    let along = if g.axis == AlignAxis::Vertical { p.v } else { p.u };
+    let fraction = ((along - g.at) / g.gap).clamp(0.0, 1.0);
+    let at = along * ratio + (1.0 - ratio) * g.gap * (fraction - g.centre_fraction);
+    if g.axis == AlignAxis::Vertical { Point2::new(scaled.u, at) } else { Point2::new(at, scaled.v) }
+}
+
+fn scaled_path(path: &BezPath, ratio: f64, gap: Option<BreakGap>, shift: Point2) -> BezPath {
+    let mut offset = Point2::default();
+    path.elements()
+        .iter()
+        .map(|el| {
+            if let kurbo::PathEl::MoveTo(p) = *el {
+                let moved = scale_view_point(Point2::new(p.x, p.y), ratio, gap);
+                offset = Point2::new(moved.u - p.x * ratio, moved.v - p.y * ratio);
+            }
+            map_el(*el, |p| {
+                Point::new(round(p.x * ratio + offset.u - shift.u), round(p.y * ratio + offset.v - shift.v))
+            })
+        })
+        .collect()
+}
+
+fn scaled_boundary(boundary: &Boundary, ratio: f64, gap: Option<BreakGap>) -> Boundary {
+    let map = |p| scale_view_point(p, ratio, gap);
+    match boundary {
+        Boundary::Circle { center, radius } => Boundary::Circle { center: map(*center), radius: radius * ratio },
+        Boundary::Polygon { points } => Boundary::Polygon { points: points.iter().copied().map(map).collect() },
+    }
+}
+
+/// Re-projects a view at a new scale without the kernel.
 pub fn rescale_view(view: &mut View, ratio: f64) {
-    let s = |p: Point| Point::new(round(p.x * ratio), round(p.y * ratio));
-    for c in &mut view.geometry.curves {
-        c.path = c.path.elements().iter().map(|el| map_el(*el, s)).collect();
-    }
-    for poly in &mut view.geometry.hatch {
-        for p in poly.outer.iter_mut().chain(poly.holes.iter_mut().flatten()) {
-            *p = Point2::new(round(p.u * ratio), round(p.v * ratio));
-        }
-        if let Some(c) = &mut poly.clip {
-            *c = c.mapped(0.0, 0.0, ratio);
-        }
-    }
-    view.geometry.bbox = view.geometry.bbox.map(|v| round(v * ratio));
+    let gap = view.geometry.breaks.first().copied();
+    rescale_geometry(&mut view.geometry, ratio);
     if let Some(c) = &mut view.crop {
-        *c = c.mapped(0.0, 0.0, ratio);
-    }
-    if let Some(c) = &mut view.geometry.outline {
-        *c = c.mapped(0.0, 0.0, ratio);
+        *c = scaled_boundary(c, ratio, gap);
     }
     for b in &mut view.broken_out {
-        b.boundary = b.boundary.mapped(0.0, 0.0, ratio);
+        b.boundary = scaled_boundary(&b.boundary, ratio, gap);
+    }
+}
+
+fn rescale_geometry(geometry: &mut ViewGeometry, ratio: f64) {
+    let gap = geometry.breaks.first().copied();
+    let s = |p| {
+        let q = scale_view_point(p, ratio, gap);
+        Point2::new(round(q.u), round(q.v))
+    };
+    for c in &mut geometry.curves {
+        c.path = scaled_path(&c.path, ratio, gap, Point2::default());
+        c.ends = c.ends.map(|ends| ends.map(s));
+    }
+    for poly in &mut geometry.hatch {
+        for p in poly.outer.iter_mut().chain(poly.holes.iter_mut().flatten()) {
+            *p = s(*p);
+        }
+        if let Some(c) = &mut poly.clip {
+            *c = scaled_boundary(c, ratio, gap);
+        }
+    }
+    let [x0, y0, x1, y1] = geometry.bbox;
+    let (a, b) = (s(Point2::new(x0, y0)), s(Point2::new(x1, y1)));
+    geometry.bbox = [a.u, a.v, b.u, b.v];
+    if let Some(c) = &mut geometry.outline {
+        *c = scaled_boundary(c, ratio, gap);
+    }
+    if let Some([a, b]) = geometry.symmetry {
+        geometry.symmetry = Some([s(a), s(b)]);
+    }
+    if let Some(g) = geometry.breaks.first_mut() {
+        g.at = g.at * ratio - (1.0 - ratio) * g.gap * g.centre_fraction;
     }
 }
 

@@ -44,8 +44,7 @@ pub struct View {
     /// For a view of an assembly: it shows the assembly's exploded view.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub exploded: bool,
-    /// Breaks: stretches of a long part left out, the rest closed up to a gap. All of a
-    /// view's breaks run across the same sheet direction.
+    /// The interruption of a long view, stored as zero or one break.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub breaks: Vec<Break>,
     /// A half section: one side of a symmetry line cut open to the plane through it.
@@ -57,13 +56,13 @@ impl View {
     /// True when the saved line work was drawn by the kernel's exact drawing queries,
     /// which is what an export writes.
     pub fn has_saved_catallax_linework(&self) -> bool {
-        self.geometry.catallax && !self.geometry.unproved
+        self.geometry.catallax && !self.geometry.unproved && !self.geometry.display_only
     }
 
     /// True when the view is excluded from automatic update and its saved line work
     /// cannot be exported, so it must be included and rebuilt first.
     pub fn needs_inclusion_for_redraw(&self) -> bool {
-        self.excluded_from_update && !self.has_saved_catallax_linework()
+        self.excluded_from_update && !self.has_saved_catallax_linework() && !self.geometry.display_only
     }
 
     /// True when the view was drawn from `digest` or excluded from automatic update.
@@ -322,12 +321,10 @@ pub struct Break {
     /// The sheet direction the view is shortened along: horizontal leaves out a stretch
     /// of the view's width, vertical of its height.
     pub axis: AlignAxis,
-    /// The gap between the two break lines, in sheet millimetres.
-    pub gap: f64,
 }
 
 impl Break {
-    /// The default gap between break lines, in sheet millimetres.
+    /// The gap between break lines, in sheet millimetres.
     pub const GAP: f64 = 6.0;
 }
 
@@ -516,6 +513,9 @@ pub struct ViewGeometry {
     /// it and are made from certified line work instead.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub unproved: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    /// The view uses a display section and has no exportable line work.
+    pub display_only: bool,
     /// The saved line work came from Catallax drawing queries.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub catallax: bool,
@@ -540,6 +540,12 @@ pub struct BreakGap {
     pub at: f64,
     /// The gap to the second break line, in sheet millimetres.
     pub gap: f64,
+    #[serde(default = "mid_fraction")]
+    pub(crate) centre_fraction: f64,
+}
+
+fn mid_fraction() -> f64 {
+    0.5
 }
 
 fn unknown_quality() -> bool {
@@ -552,6 +558,9 @@ pub struct Curve2 {
     /// The curve in view millimetres. Stored as SVG path data with absolute commands.
     #[serde(with = "svg_path")]
     pub path: BezPath,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Projected endpoints of the source edge when the view clips a break.
+    pub ends: Option<[Point2; 2]>,
     /// The model entity it comes from.
     pub source: EntityRef,
     /// False when the model hides it.

@@ -167,7 +167,7 @@ fn section_panel(ui: &mut egui::Ui, s: &mut DrawingSession, replace: Option<View
             CutMode::Offset => {
                 hint(
                     ui,
-                    "Click the centres the cut passes through, in order. The line steps square between them; the steps cut nothing. Click the last centre again or press Finish.",
+                    "Click the centres the cut passes through, in order. The line steps square between them; the steps cut nothing. Press Finish when the line is complete.",
                 );
                 let ready = s.draft.points.len() >= 2 && !pending;
                 if ui.add_enabled(ready, egui::Button::new("Finish cutting line")).clicked() {
@@ -826,19 +826,15 @@ pub fn view_extras(ui: &mut egui::Ui, s: &DrawingSession, v: &View, actions: &mu
     if !matches!(v.kind, ViewKind::Detail { .. }) {
         theme::section_label(ui, "Break and half section");
         ui.horizontal(|ui| {
-            let room = v.breaks.len() < 4;
             let tip = "Leave out a stretch of a long view; its dimensions keep the full length";
-            if ui.add_enabled(room, egui::Button::new("Break…")).on_hover_text(tip).clicked() {
+            let name = if v.breaks.is_empty() { "Break…" } else { "Edit break…" };
+            if ui.button(name).on_hover_text(tip).clicked() {
                 actions.push(DrawingAction::SetTool(DrawingTool::Break));
             }
-            if !v.breaks.is_empty() && ui.button("Remove breaks").clicked() {
+            if !v.breaks.is_empty() && ui.button("Remove break").clicked() {
                 actions.push(DrawingAction::Command(Command::SetViewBreaks { view: id, breaks: Vec::new() }));
             }
         });
-        if !v.breaks.is_empty() {
-            let n = v.breaks.len();
-            hint(ui, &format!("{n} break{}, closed up to a {} mm gap", if n == 1 { "" } else { "s" }, v.breaks[0].gap));
-        }
         if matches!(v.kind, ViewKind::Base { .. } | ViewKind::Projected { .. }) {
             ui.horizontal(|ui| match &v.half {
                 None => {

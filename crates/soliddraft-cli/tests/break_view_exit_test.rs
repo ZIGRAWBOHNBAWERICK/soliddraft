@@ -94,6 +94,23 @@ fn set_body_length(path: &Path, id: &str, distance: f64) {
 #[test]
 fn half_section_of_a_symmetric_shaft() {
     let dir = scratch("half-section");
+    let invalid = Command::new(env!("CARGO_BIN_EXE_soliddraft"))
+        .args([
+            "draw",
+            "shaft.json",
+            "--views",
+            "front",
+            "--half-section",
+            "front:-20,0,0:260,3,0",
+            "--out",
+            "bad.dwdrw",
+        ])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert!(!invalid.status.success());
+    assert!(String::from_utf8_lossy(&invalid.stderr).contains("same cutting plane"));
+    assert!(!dir.join("bad.dwdrw").exists());
     let args = [
         "draw",
         "shaft.json",
@@ -187,6 +204,13 @@ fn set_values(path: &Path) -> Vec<f64> {
 #[test]
 fn break_view_of_a_long_shaft_keeps_its_full_length() {
     let dir = scratch("break-view");
+    let custom = Command::new(env!("CARGO_BIN_EXE_soliddraft"))
+        .args(["draw", "shaft.json", "--break", "front:60,0,0:180,0,0:h:0", "--out", "bad.dwdrw"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert!(!custom.status.success());
+    assert!(!dir.join("bad.dwdrw").exists());
     let args = [
         "draw",
         "shaft.json",
@@ -194,6 +218,8 @@ fn break_view_of_a_long_shaft_keeps_its_full_length() {
         "front",
         "--dims",
         "none",
+        "--break",
+        "front:50,0,0:150,0,0:h",
         "--break",
         "front:60,0,0:180,0,0:h",
         "--baseline",

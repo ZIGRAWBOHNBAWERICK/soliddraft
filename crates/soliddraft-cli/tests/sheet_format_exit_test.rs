@@ -1,13 +1,9 @@
 //! Larger and legacy sheets through `soliddraft draw`, as separate processes: the bracket
 //! on ISO A3 and ANSI B, the built-in sizes, and on ISO A0 and ANSI E, the larger ones,
-//! with a title block field's text set and two fields moved to other cells. Each SVG,
-//! PDF page and DXF has the paper's declared size, the moved field's text sits in its new
-//! cell in the SVG and the DXF, and the drawing reopens with the moved cells.
+//! with an edited title field. SVG, PDF and DXF retain the paper size and the field position.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
-
-use soliddraft_drawing::display::{self, Item};
 
 fn soliddraft(dir: &Path, args: &[&str]) -> String {
     let out = Command::new(env!("CARGO_BIN_EXE_soliddraft"))
@@ -34,6 +30,45 @@ fn svg_text(svg: &str, text: &str) -> (f64, f64) {
     (attr("x"), attr("y"))
 }
 
+fn pdf_text(pdf: &lopdf::Document, page_id: lopdf::ObjectId, text: &str) -> ([f64; 6], [f64; 2]) {
+    let page = pdf.get_dictionary(page_id).unwrap();
+    let fonts = page.get(b"Resources").unwrap().as_dict().unwrap().get(b"Font").unwrap().as_dict().unwrap();
+    let font = pdf.get_dictionary(fonts.iter().next().unwrap().1.as_reference().unwrap()).unwrap();
+    let cmap = pdf.get_object(font.get(b"ToUnicode").unwrap().as_reference().unwrap()).unwrap().as_stream().unwrap();
+    let glyphs: std::collections::BTreeMap<_, _> = String::from_utf8(cmap.get_plain_content().unwrap())
+        .unwrap()
+        .lines()
+        .filter_map(|line| {
+            let mut parts = line.split_ascii_whitespace();
+            let hex = |s: &str| u16::from_str_radix(s.strip_prefix('<')?.strip_suffix('>')?, 16).ok();
+            let (source, unicode) = (hex(parts.next()?)?, hex(parts.next()?)?);
+            parts.next().is_none().then_some((source, unicode))
+        })
+        .collect();
+    let content = lopdf::content::Content::decode(&pdf.get_page_content(page_id)).unwrap();
+    let mut matrix = [1.0, 0.0, 0.0, 1.0, 0.0, 0.0];
+    let mut text_origin = [0.0; 2];
+    for op in content.operations {
+        let number = |i: usize| f64::from(op.operands[i].as_float().unwrap());
+        match op.operator.as_str() {
+            "cm" => matrix = std::array::from_fn(number),
+            "Tm" => text_origin = [number(4), number(5)],
+            "Tj" => {
+                let encoded = op.operands[0].as_str().unwrap();
+                let unicode: Option<Vec<u16>> = encoded
+                    .chunks_exact(2)
+                    .map(|pair| glyphs.get(&u16::from_be_bytes([pair[0], pair[1]])).copied())
+                    .collect();
+                if unicode.and_then(|c| String::from_utf16(&c).ok()).as_deref() == Some(text) {
+                    return (matrix, text_origin);
+                }
+            }
+            _ => {}
+        }
+    }
+    panic!("no {text} in the PDF");
+}
+
 #[test]
 fn larger_and_legacy_sheets_print_at_their_size_with_their_title_layout() {
     let dir = std::env::temp_dir().join(format!("soliddraft-sheet-format-{}", std::process::id()));
@@ -53,9 +88,7 @@ fn larger_and_legacy_sheets_print_at_their_size_with_their_title_layout() {
             "--title-field",
             "owner=Rig Shop",
             "--title-cell",
-            "owner=120,27,60,9,5",
-            "--title-cell",
-            "material=0,9,60,9",
+            "owner=4,9,54,9",
             "--out",
             &out("dwdrw"),
             "--out",
@@ -72,27 +105,8 @@ fn larger_and_legacy_sheets_print_at_their_size_with_their_title_layout() {
         let sheet = &drawing.sheets[0];
         assert_eq!(sheet.template.as_str(), template);
         assert_eq!(sheet.format_overrides.get("owner").map(String::as_str), Some("Rig Shop"));
-        assert_eq!(sheet.title_layout["owner"].cell, [120.0, 27.0, 60.0, 9.0]);
-        assert_eq!(sheet.title_layout["owner"].size, Some(5.0));
-        assert_eq!(sheet.title_layout["material"].cell, [0.0, 9.0, 60.0, 9.0]);
-
-        // The laid-out sheet has the paper's size and the text in its new cell.
-        let list = display::layout_sheet(&drawing, 0);
-        assert_eq!(list.paper, (width, height), "{template}");
-        let origin = soliddraft_drawing::library::template(template).title_block_origin();
-        let item = list
-            .items
-            .iter()
-            .find_map(|i| match i {
-                Item::Text(t) if t.text == "Rig Shop" => Some(t.clone()),
-                _ => None,
-            })
-            .expect("the owner's text is on the sheet");
-        near(item.pos.u, origin.u + 121.5, "the owner's text x");
-        near(item.pos.v, origin.v + 28.5, "the owner's text y");
-        // The 5 mm text asked for is held to the 9 mm cell less its 5 mm caption band.
-        near(item.height, 4.0, "the owner's text height");
-        let (at, _) = soliddraft_drawing::export::baseline(&item);
+        assert_eq!(sheet.title_layout["owner"].cell, [4.0, 9.0, 54.0, 9.0]);
+        let expected = (width - 10.0 - 180.0 + 4.0 + 1.5, 10.0 + 9.0 + 1.5);
 
         let svg = std::fs::read_to_string(dir.join(out("svg"))).unwrap();
         assert!(
@@ -100,17 +114,24 @@ fn larger_and_legacy_sheets_print_at_their_size_with_their_title_layout() {
             "{template}: the SVG is not {width} x {height} mm"
         );
         let (x, y) = svg_text(&svg, "Rig Shop");
-        near(x, at.u, "SVG text x");
-        near(y, height - at.v, "SVG text y");
+        near(x, expected.0, "SVG text x");
+        near(y, height - expected.1, "SVG text y");
 
         let pdf = lopdf::Document::load(dir.join(out("pdf"))).expect("the PDF loads");
         let pages = pdf.get_pages();
         assert_eq!(pages.len(), 1);
-        let page = pdf.get_dictionary(*pages.values().next().unwrap()).unwrap();
+        let page_id = *pages.values().next().unwrap();
+        let page = pdf.get_dictionary(page_id).unwrap();
         let media: Vec<f64> =
             page.get(b"MediaBox").unwrap().as_array().unwrap().iter().map(|v| v.as_float().unwrap() as f64).collect();
         let pt = 72.0 / 25.4;
         assert!((media[2] - width * pt).abs() < 0.01 && (media[3] - height * pt).abs() < 0.01, "{template}: {media:?}");
+
+        let (matrix, text) = pdf_text(&pdf, page_id, "Rig Shop");
+        near(matrix[0], pt, "PDF page scale x");
+        near(matrix[3], pt, "PDF page scale y");
+        near(matrix[4] + matrix[0] * text[0] + matrix[2] * text[1], expected.0 * pt, "PDF text x in points");
+        near(matrix[5] + matrix[1] * text[0] + matrix[3] * text[1], expected.1 * pt, "PDF text y in points");
 
         let dxf = dxf::Drawing::load_file(dir.join(out("dxf"))).unwrap();
         let extents = &dxf.header.maximum_drawing_extents;
@@ -124,8 +145,8 @@ fn larger_and_legacy_sheets_print_at_their_size_with_their_title_layout() {
                 _ => None,
             })
             .expect("the owner's text is in the DXF");
-        near(text.x, at.u, "DXF text x");
-        near(text.y, at.v, "DXF text y");
+        near(text.x, expected.0, "DXF text x");
+        near(text.y, expected.1, "DXF text y");
     }
     std::fs::remove_dir_all(&dir).unwrap();
 }

@@ -1580,7 +1580,7 @@ fn lay(drawing: &Drawing, sheet: usize) -> Laid {
         [l + band, b + band, r - band, t - band]
     });
     let mut laid = Laid { texts: BTreeMap::new(), lines: BTreeMap::new(), fixed: Vec::new(), frame };
-    for item in list.printable() {
+    for item in list.sheet_items() {
         match (item.owner(), item) {
             (Owner::Annotation(id) | Owner::AnnotationEnd(id, _), Item::Text(text)) => {
                 laid.texts.entry(id).or_default().push(text_box(text));

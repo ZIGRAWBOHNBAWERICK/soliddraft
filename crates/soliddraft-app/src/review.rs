@@ -12,9 +12,9 @@ use std::path::Path;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
-use soliddraft_document::{ContentHash, DocumentId, identify, identify_file, save_new};
+use soliddraft_document::{ContentHash, DocumentId, identify, save_new};
 use soliddraft_drawing::Drawing;
-use soliddraft_drawing::review::{self, MarkupPlace};
+use soliddraft_drawing::review::{self, MarkupPlace, MarkupTarget};
 use soliddraft_kernel_api::Kernel;
 use soliddraft_kernel_api::pmi::{PmiItem, PmiKind};
 use soliddraft_model::pmi::PmiRow;
@@ -227,8 +227,9 @@ impl SavedDrawing {
     /// Reads a drawing file. Its pin is the saved revision, as for a part.
     pub fn open(path: &Path) -> io::Result<Self> {
         let invalid = |e: String| io::Error::new(io::ErrorKind::InvalidData, e);
-        let identity = identify_file(path).map_err(|e| invalid(e.to_string()))?;
-        let (drawing, _) = soliddraft_drawing::file::read(path).map_err(|e| invalid(e.to_string()))?;
+        let bytes = std::fs::read(path)?;
+        let identity = identify(Cursor::new(&bytes)).map_err(|e| invalid(e.to_string()))?;
+        let (drawing, _) = soliddraft_drawing::file::from_bytes(&bytes).map_err(|e| invalid(e.to_string()))?;
         Ok(Self { pin: RevisionPin { document: identity.id, revision: identity.revision }, drawing })
     }
 
@@ -250,7 +251,7 @@ impl SavedDrawing {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct DrawingMarkup {
     pub drawing: RevisionPin,
-    pub place: MarkupPlace,
+    pub place: MarkupTarget,
 }
 
 /// JSON sidecar data. No paths, kernel IDs or modifications to the part are needed.

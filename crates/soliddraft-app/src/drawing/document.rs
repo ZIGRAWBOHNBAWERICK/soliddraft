@@ -5,7 +5,7 @@
 
 use super::part::PartContext;
 use soliddraft_drawing::file::{self, FileMeta};
-use soliddraft_drawing::library::{self, StyleFile, TemplateFile};
+use soliddraft_drawing::library::{self, StyleFile};
 use soliddraft_drawing::measure::display_text;
 use soliddraft_drawing::project::{self, CircleInfo, Projected, ViewTransform};
 use soliddraft_drawing::{
@@ -44,6 +44,7 @@ pub struct DrawingDoc {
     pub id: DocumentId,
     pub drawing: Drawing,
     pub path: Option<PathBuf>,
+    pub(super) saved_revision: Option<ContentHash>,
     pub dirty: bool,
     /// Counts every change, so autosave can tell edits apart from redraws.
     pub edits: u64,
@@ -101,6 +102,7 @@ impl DrawingDoc {
             id: DocumentId::new(),
             drawing,
             path: None,
+            saved_revision: None,
             dirty: false,
             edits: 0,
             stack: UndoStack::new(),
@@ -115,12 +117,8 @@ impl DrawingDoc {
         }
     }
 
-    pub fn template(&self) -> &'static TemplateFile {
-        library::template(self.drawing.sheets.first().map(|s| s.template.as_str()).unwrap_or("iso-a3"))
-    }
-
-    pub fn style(&self) -> &'static StyleFile {
-        self.template().style_file()
+    pub fn style(sheet: &soliddraft_drawing::Sheet) -> &'static StyleFile {
+        library::template(sheet.template.as_str()).style_file()
     }
 
     pub fn can_undo(&self) -> bool {
@@ -201,7 +199,7 @@ impl DrawingDoc {
             Some(&failure.cause)
         } else if view.needs_inclusion_for_redraw() {
             Some(soliddraft_drawing::export::INCLUDE_FOR_REDRAW)
-        } else if !view.has_saved_catallax_linework() {
+        } else if !view.geometry.display_only && !view.has_saved_catallax_linework() {
             Some("Rebuild to replace the saved line work with Catallax line work")
         } else if !view.accepts_revision(self.seen_digest.as_str())
             || !view.accepts_revision(self.drawing.model.pinned.as_str())
@@ -358,8 +356,7 @@ impl DrawingDoc {
             if (ratio - 1.0).abs() < 1e-12 {
                 continue;
             }
-            xf.centre = Point2::new(xf.centre.u * ratio, xf.centre.v * ratio);
-            xf.scale = scale;
+            *xf = xf.rescaled(scale);
             if let Some(circles) = self.circles.get_mut(id) {
                 for c in circles {
                     c.centre = xf.point(c.model_centre);
@@ -430,8 +427,8 @@ impl DrawingDoc {
     }
 
     /// A dimension's display text in the drawing's style.
-    pub fn dimension_text(&self, d: &Dimension) -> String {
-        display_text(d, &self.style().symbols)
+    pub fn dimension_text(sheet: &soliddraft_drawing::Sheet, d: &Dimension) -> String {
+        display_text(d, &Self::style(sheet).symbols)
     }
 
     /// Marks a change: unsaved, and one more edit for autosave.
@@ -451,8 +448,11 @@ impl DrawingDoc {
     /// where. The id is kept: saving under another name is a rename, not a copy.
     /// Returns a warning when the backup could not be made.
     pub fn save(&mut self, path: &Path, kernel: &str) -> Result<Option<String>, String> {
-        let warning = crate::file::write_document(path, &self.to_bytes(kernel, true)?)?;
+        let bytes = self.to_bytes(kernel, true)?;
+        let identity = soliddraft_document::identify(std::io::Cursor::new(&bytes)).map_err(|e| e.to_string())?;
+        let warning = crate::file::write_document(path, &bytes)?;
         self.path = Some(path.to_path_buf());
+        self.saved_revision = Some(identity.revision);
         self.dirty = false;
         Ok(warning)
     }
@@ -481,15 +481,15 @@ impl DrawingDoc {
         let (drawing, meta) = file::from_bytes(bytes).map_err(|e| e.to_string())?;
         let mut doc = DrawingDoc::new(drawing);
         doc.id = meta.id;
+        doc.saved_revision = soliddraft_document::identify(std::io::Cursor::new(bytes)).ok().map(|id| id.revision);
         Ok(doc)
     }
 
     /// Opens a drawing file. It shows the part revision it is pinned at; whether the
     /// part has moved on is the resolver's answer (see `super::resolve_model`).
     pub fn open(path: &Path) -> Result<DrawingDoc, String> {
-        let (drawing, meta) = file::read(path).map_err(|e| e.to_string())?;
-        let mut doc = DrawingDoc::new(drawing);
-        doc.id = meta.id;
+        let bytes = std::fs::read(path).map_err(|e| format!("cannot read {}: {e}", path.display()))?;
+        let mut doc = Self::from_bytes(&bytes).map_err(|e| format!("{}: {e}", path.display()))?;
         doc.path = Some(path.to_path_buf());
         Ok(doc)
     }

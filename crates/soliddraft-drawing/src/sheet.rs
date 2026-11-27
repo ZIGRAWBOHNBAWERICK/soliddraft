@@ -98,24 +98,22 @@ impl Sheet {
 pub struct TitleCell {
     /// `[x, y, width, height]` in millimetres from the title block's bottom-left corner.
     pub cell: [f64; 4],
-    /// Cap height of the value in millimetres; `None` keeps the template's.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub size: Option<f64>,
 }
 
 impl TitleCell {
-    /// True when the cell has a size, lies inside a title block of `width` by `height`
-    /// and its text size, if any, is positive.
-    pub fn fits(&self, width: f64, height: f64) -> bool {
+    pub(crate) fn fits(&self, field: &crate::library::FieldDef) -> bool {
         let [x, y, w, h] = self.cell;
+        let [left, bottom, width, height] = field.cell;
+        let caption = 2.4 + crate::text::text_width(&field.label, 1.8);
+        let min_width = if field.symbol.is_some() { caption.max(17.0) } else { caption };
+        let min_height = (field.size + 5.0).min(height).max(6.8);
         [x, y, w, h].iter().all(|v| v.is_finite())
-            && w > 0.0
-            && h > 0.0
-            && x >= -1e-9
-            && y >= -1e-9
-            && x + w <= width + 1e-9
-            && y + h <= height + 1e-9
-            && self.size.is_none_or(|s| s.is_finite() && s > 0.0)
+            && w >= min_width.min(width) - 1e-9
+            && h >= min_height - 1e-9
+            && x >= left - 1e-9
+            && y >= bottom - 1e-9
+            && x + w <= left + width + 1e-9
+            && y + h <= bottom + height + 1e-9
     }
 }
 

@@ -79,7 +79,7 @@ pub fn cutting_path(
     through: &[Vec3],
 ) -> Result<Vec<Point2>, DrawingError> {
     let ctx = context(drawing, part, index, parent)?;
-    extend_cutting_line(drawing, parent, through.iter().map(|p| ctx.xf.point(*p)).collect())
+    extend_cutting_line(drawing, parent, through.iter().map(|p| ctx.xf.precise_point(*p)).collect())
 }
 
 /// A bent cutting line on view `parent`, given in the parent's view millimetres, checked
@@ -107,7 +107,7 @@ pub fn extend_cutting_line(
             }
         };
         let t = exit(from.u, du, x0, x1).min(exit(from.v, dv, y0, y1)).max(0.0);
-        Point2::new(round(from.u + du * t), round(from.v + dv * t))
+        Point2::new(from.u + du * t, from.v + dv * t)
     };
     let n = line.len();
     line[0] = reach(line[0], line[1]);
@@ -205,6 +205,7 @@ pub fn new_section_along(
     let display = ViewDisplay { hidden: HiddenLines::Removed, ..ViewDisplay::ORTHOGRAPHIC };
     let mut view = blank(drawing, kind, display);
     let ctx = project::compute_view(drawing, part, index, &view, sheet, &mut memo)?;
+    project::reproject_parent_marks(&mut view.kind, &memo[&parent].xf);
     view.geometry = ctx.projected.geometry.clone();
     // The view goes where the eye is (third angle) or where the arrows point (first
     // angle), in line with its parent.

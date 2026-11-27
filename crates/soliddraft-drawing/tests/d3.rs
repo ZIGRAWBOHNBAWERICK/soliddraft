@@ -865,3 +865,58 @@ fn detail_uses_its_own_tangents_and_seams_inside_the_parent_crop() {
     assert_eq!(flags(&drawing, FRONT), (true, true));
     assert_eq!(flags(&drawing, detail), (false, false));
 }
+
+#[test]
+fn a_detail_of_either_break_axis_keeps_its_model_points_after_rescale() {
+    let k = BoxKernel::new();
+    let part = box_part(&k, "block", Vec3::new(120.0, 30.0, 120.0));
+    let index = PartIndex::build(&part).unwrap();
+    for (axis, from, to) in [
+        (soliddraft_drawing::AlignAxis::Horizontal, Vec3::new(30.0, 0.0, 0.0), Vec3::new(80.0, 0.0, 0.0)),
+        (soliddraft_drawing::AlignAxis::Vertical, Vec3::new(0.0, 0.0, 30.0), Vec3::new(0.0, 0.0, 80.0)),
+    ] {
+        let mut drawing = drawing(&part);
+        let mut stack = UndoStack::new();
+        run(
+            &mut stack,
+            &mut drawing,
+            &part,
+            Command::SetViewBreaks { view: FRONT, breaks: vec![soliddraft_drawing::Break { from, to, axis }] },
+        );
+        let before = project::view_scale(&drawing, FRONT).unwrap();
+        let corner = Vec3::new(120.0, 0.0, 120.0);
+        let parent = derived::context(&drawing, &part, &index, FRONT).unwrap();
+        let centre = parent.xf.point(corner);
+        let (detail, ctx) =
+            derived::new_detail(&drawing, &part, &index, 0, FRONT, centre, 8.0, Vec::new(), 2.0, None).unwrap();
+        let at = ctx.xf.point(corner);
+        assert!(at.u.hypot(at.v) < 1e-5, "{axis:?} {at:?}");
+        assert!(
+            ctx.projected
+                .geometry
+                .curves
+                .iter()
+                .flat_map(|curve| curve.path.elements())
+                .filter_map(|el| el.end_point())
+                .any(|p| p.x.hypot(p.y) < 1e-5),
+            "{axis:?} the corner must be on the detail"
+        );
+        run(
+            &mut stack,
+            &mut drawing,
+            &part,
+            Command::SetViewScale {
+                view: FRONT,
+                scale: soliddraft_drawing::ViewScale::Custom { factor: before * 0.5 },
+            },
+        );
+        let fresh = derived::context(&drawing, &part, &index, FRONT).unwrap();
+        let saved = &drawing.view(FRONT).unwrap().geometry;
+        assert_eq!(saved.breaks[0].gap, 6.0);
+        assert!((saved.breaks[0].at - fresh.xf.gaps()[0].at).abs() < 1e-6);
+        for (cached, rebuilt) in saved.bbox.into_iter().zip(fresh.projected.geometry.bbox) {
+            assert!((cached - rebuilt).abs() < 1e-6, "{axis:?} {cached} != {rebuilt}");
+        }
+        assert!(!detail.geometry.curves.is_empty());
+    }
+}

@@ -1399,14 +1399,32 @@ pub(crate) fn put_opened(state: &mut AppState, doc: DrawingDoc) -> String {
     format!("{title} · {views} view{} · {words}", if views == 1 { "" } else { "s" })
 }
 
-/// Opens the drawing's part, found by the resolver, in the part tab when the part tab
-/// holds nothing unsaved.
+impl DrawingSession {
+    fn check_review_revision(&self, drawing: &crate::review::SavedDrawing) -> Result<(), &'static str> {
+        if self.doc.dirty || self.doc.path.is_none() || self.drag.as_ref().is_some_and(|drag| drag.moved) {
+            return Err("Save the drawing before reviewing it.");
+        }
+        if self.doc.id != drawing.pin().document || self.doc.saved_revision.as_ref() != Some(&drawing.pin().revision) {
+            return Err("The drawing changed. Start a review of the saved revision.");
+        }
+        Ok(())
+    }
+
+    fn review_ready(&self) -> Result<(), &'static str> {
+        let drawing = self.review.as_ref().and_then(|r| r.drawing()).ok_or("Open a drawing revision review first.")?;
+        self.check_review_revision(drawing)
+    }
+}
+
 /// Opens the review of the saved drawing: its part's file is the candidate, `baseline` the
 /// earlier revision. Nothing is written to either part or the drawing.
 fn review_revisions(state: &mut AppState, baseline: Option<PathBuf>) {
+    if cfg!(target_arch = "wasm32") {
+        return;
+    }
     use crate::review::{SavedDrawing, SavedRevision};
     let Some(s) = state.drawing.session.as_mut() else { return };
-    let Some(drawing_path) = s.doc.path.clone() else {
+    let Some(drawing_path) = s.doc.path.clone().filter(|_| !s.doc.dirty) else {
         s.say("Save the drawing first: the review reads the saved drawing");
         return;
     };
@@ -1422,6 +1440,7 @@ fn review_revisions(state: &mut AppState, baseline: Option<PathBuf>) {
         let baseline = SavedRevision::open(&baseline, kernel.clone()).map_err(|e| e.to_string())?;
         let candidate = SavedRevision::open(&candidate_path, kernel).map_err(|e| e.to_string())?;
         let drawing = SavedDrawing::open(&drawing_path).map_err(|e| e.to_string())?;
+        s.check_review_revision(&drawing)?;
         revision_review::RevisionReview::new(baseline, candidate).with_drawing(drawing).map_err(|e| e.to_string())
     })();
     match review {
@@ -1437,6 +1456,10 @@ fn review_revisions(state: &mut AppState, baseline: Option<PathBuf>) {
 
 /// Goes to the review comment's sheet and keeps the review open beside it.
 fn show_markup(s: &mut DrawingSession) {
+    if let Err(error) = s.review_ready() {
+        s.say(error);
+        return;
+    }
     let Some(place) = s.review.as_ref().and_then(|r| r.place()).copied() else { return };
     if place.sheet < s.doc.drawing.sheets.len() && place.sheet != s.sheet {
         s.sheet = place.sheet;
@@ -1447,6 +1470,7 @@ fn show_markup(s: &mut DrawingSession) {
     s.selection = Some(DrawingSel::Review);
 }
 
+/// Opens the drawing's part in the part tab when that tab holds nothing unsaved.
 fn open_model(state: &mut AppState) {
     match model_to_open(state) {
         Ok(Some(file)) => state.push(crate::state::AppAction::Open(Some(file))),
@@ -1714,7 +1738,14 @@ pub fn apply(state: &mut AppState, dock: &mut DockState<Tab>, ctx: &egui::Contex
         }
         DrawingAction::ReviewRevisions(path) => review_revisions(state, path),
         DrawingAction::SaveMarkup(path) => {
+            if cfg!(target_arch = "wasm32") {
+                return;
+            }
             let Some(s) = state.drawing.session.as_mut() else { return };
+            if let Err(error) = s.review_ready() {
+                s.say(error);
+                return;
+            }
             let Some(review) = s.review.as_ref() else { return };
             let path =
                 path.or_else(|| crate::platform::save_path("Save markup", "Review markup", "json", "review.json"));
@@ -1725,7 +1756,14 @@ pub fn apply(state: &mut AppState, dock: &mut DockState<Tab>, ctx: &egui::Contex
             }
         }
         DrawingAction::OpenMarkup(path) => {
+            if cfg!(target_arch = "wasm32") {
+                return;
+            }
             let Some(s) = state.drawing.session.as_mut() else { return };
+            if let Err(error) = s.review_ready() {
+                s.say(error);
+                return;
+            }
             let Some(review) = s.review.as_mut() else { return };
             let path = path.or_else(|| crate::platform::open_path("Open markup", "Review markup", &["json"]));
             let Some(path) = path else { return };
@@ -1884,19 +1922,20 @@ pub fn apply(state: &mut AppState, dock: &mut DockState<Tab>, ctx: &egui::Contex
 /// Runs a drawing command as one undo step, with the open part when the command reads
 /// it. A command that reads the part refuses when the open part is not the drawing's.
 pub(crate) fn run_command(state: &mut AppState, cmd: Command) -> Result<(), String> {
-    let needs_part = matches!(
-        cmd,
-        Command::UpdateFromModel
-            | Command::Reattach { .. }
-            | Command::EditView { .. }
-            | Command::SetViewCrop { .. }
-            | Command::AddBrokenOut { .. }
-            | Command::RemoveBrokenOut { .. }
-            | Command::SetViewBreaks { .. }
-            | Command::SetHalfSection { .. }
-            | Command::ReattachView { .. }
-            | Command::SetViewDisplay { .. }
-    );
+    let needs_part =
+        matches!(
+            cmd,
+            Command::UpdateFromModel
+                | Command::Reattach { .. }
+                | Command::EditView { .. }
+                | Command::SetViewCrop { .. }
+                | Command::AddBrokenOut { .. }
+                | Command::RemoveBrokenOut { .. }
+                | Command::SetViewBreaks { .. }
+                | Command::SetHalfSection { .. }
+                | Command::ReattachView { .. }
+                | Command::SetViewDisplay { .. }
+        ) || state.drawing.session.as_ref().is_some_and(|session| cmd.dimension_needs_model(&session.doc.drawing));
     if needs_part && !part_is_model(state) {
         return Err("The open part is not the one this drawing shows".into());
     }
@@ -2184,7 +2223,13 @@ pub(crate) fn save_session(
             s.doc.drawing.model.id = id;
         }
     }
-    let warning = s.doc.save(&path, kernel)?;
+    let warning = match s.doc.save(&path, kernel) {
+        Ok(warning) => warning,
+        Err(error) => {
+            s.doc.drawing.model = previous_model;
+            return Err(error);
+        }
+    };
     s.doc.rebase_history_paths(previous_path.as_deref(), &previous_model);
     Ok((path, warning))
 }

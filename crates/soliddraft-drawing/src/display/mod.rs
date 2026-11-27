@@ -183,6 +183,7 @@ pub struct DisplayList {
     /// never exported.
     pub unproved: bool,
     pub(crate) export_error: Option<String>,
+    display_only_views: Vec<ViewId>,
 }
 
 /// One dimension as its definition points, in sheet millimetres.
@@ -265,7 +266,22 @@ impl DisplayList {
     /// The items that belong on paper: everything but the interface's own marks (the
     /// changed-value highlight and the out-of-date hatch).
     pub fn printable(&self) -> impl Iterator<Item = &Item> {
+        self.sheet_items().filter(|i| i.role() == Role::CuttingPlane || self.prints_owner(i.owner()))
+    }
+
+    pub(crate) fn sheet_items(&self) -> impl Iterator<Item = &Item> {
         self.items.iter().filter(|i| !matches!(i.role(), Role::Changed | Role::Stale))
+    }
+
+    fn prints_owner(&self, owner: Owner) -> bool {
+        match owner {
+            Owner::Curve(view, _) | Owner::View(view) => !self.display_only_views.contains(&view),
+            _ => true,
+        }
+    }
+
+    pub(crate) fn printable_hatches(&self) -> impl Iterator<Item = &HatchRecord> {
+        self.hatches.iter().filter(|h| self.prints_owner(h.owner))
     }
 
     /// Accuracy counts for the curve paths sent to the sheet writers.
@@ -299,7 +315,7 @@ impl DisplayList {
             }
         }
         if native_hatches {
-            counts.approximate += self.hatches.iter().filter(|h| h.approximate).count();
+            counts.approximate += self.printable_hatches().filter(|h| h.approximate).count();
         }
         counts
     }
@@ -478,12 +494,14 @@ pub fn layout(drawing: &Drawing, sheet_index: usize, ctx: &Context<'_>) -> Displ
         hatches: Vec::new(),
         unproved: false,
         export_error: None,
+        display_only_views: Vec::new(),
     };
     let Some(sheet) = drawing.sheets.get(sheet_index) else {
         return list;
     };
     list.unproved = sheet.views.iter().any(|v| v.geometry.unproved);
     list.export_error = crate::export::sheet_error(drawing, sheet);
+    list.display_only_views = sheet.views.iter().filter(|v| v.geometry.display_only).map(|v| v.id).collect();
     format_items(drawing, sheet, ctx, &mut list.items);
     tables::table_items(drawing, sheet, ctx, &mut list.items);
     for view in &sheet.views {
@@ -599,9 +617,9 @@ fn format_items(drawing: &Drawing, sheet: &Sheet, ctx: &Context<'_>, items: &mut
     }
     let lookup = |key: &str| property(drawing, sheet, ctx.sheet_index, ctx.sheet_count, key);
     for field in &tb.fields {
-        let placed = sheet.title_layout.get(&field.key);
+        let placed = sheet.title_layout.get(&field.key).filter(|cell| cell.fits(field));
         let [x, y, w, h] = placed.map_or(field.cell, |p| p.cell);
-        let size = placed.and_then(|p| p.size).unwrap_or(field.size);
+        let size = field.size;
         let cell = (o.u + x, o.v + y, w, h);
         items.push(Item::Text(TextItem {
             pos: Point2::new(cell.0 + 1.2, cell.1 + cell.3 - 1.0),

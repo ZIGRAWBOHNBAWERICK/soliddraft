@@ -75,8 +75,7 @@ fn anchor_from_hit(s: &DrawingSession, hit: Hit) -> Option<(ViewId, Anchor)> {
     // A circle's start is where its path begins, not a corner: the centre wins.
     let (attach, at) = match (&shape, hit.end) {
         (CurveShape::Circle { centre, .. }, _) => (Attach::Centre, *centre),
-        (_, Some(Attach::Start)) => (Attach::Start, shape.start()),
-        (_, Some(Attach::End)) => (Attach::End, shape.end()),
+        (_, Some(end)) => (end, soliddraft_drawing::measure::endpoint(c, shape, end)),
         _ => (Attach::Mid, shape.mid()),
     };
     Some((view, Anchor { entity: c.source.clone(), attach, cached: at }))
@@ -444,8 +443,7 @@ fn bent_line(cut: CutMode, points: &[Point2]) -> Vec<Point2> {
 }
 
 /// An offset or aligned cutting line: each click adds a point, circle centres snap. An
-/// aligned line ends at its third point; an offset line when its last point is clicked
-/// again or Finish is pressed.
+/// aligned line ends at its third point and an offset line ends with Finish.
 #[allow(clippy::too_many_arguments)]
 fn bent_section_tool(
     s: &mut DrawingSession,
@@ -470,17 +468,12 @@ fn bent_section_tool(
         }
     };
     let q = snap_centre(s, view, to_view(s, view, p));
-    let again = s.draft.points.last().is_some_and(|l| (l.u - q.u).hypot(l.v - q.v) <= snap_mm(s));
-    if s.draft.cut == CutMode::Offset && again {
-        finish_cut(s, doc, replace, push);
-        return;
-    }
     s.draft.points.push(q);
     match (s.draft.cut, s.draft.points.len()) {
         (CutMode::Aligned, 3) => finish_cut(s, doc, replace, push),
         (CutMode::Aligned, 1) => s.say("Click the pivot, where the two legs meet"),
         (CutMode::Aligned, _) => s.say("Click where the second leg goes; it turns into the plane of the first"),
-        _ => s.say("Click the next centre; click the last one again or press Finish to end the line"),
+        _ => s.say("Click the next centre; press Finish to end the line"),
     }
 }
 
@@ -569,15 +562,13 @@ fn break_tool(
         let ctx = derived::context(&s.doc.drawing, part, index, view)?;
         Ok((ctx.xf.unproject(start), ctx.xf.unproject(end)))
     });
-    let Some(existing) = s.doc.drawing.view(view).map(|v| v.breaks.clone()) else { return };
     match ends {
         Ok((from, to)) => {
-            let mut breaks = existing;
-            breaks.push(Break { from, to, axis, gap: Break::GAP });
+            let breaks = vec![Break { from, to, axis }];
             push(DrawingAction::Command(Command::SetViewBreaks { view, breaks }));
             push(DrawingAction::SetTool(DrawingTool::Select));
             push(DrawingAction::Select(Some(DrawingSel::View(view))));
-            s.say("Break added");
+            s.say("Break set");
         }
         Err(e) => s.say(format!("Break: {e}")),
     }
@@ -624,7 +615,9 @@ fn half_section_tool(
     }
     let axis = with_part(doc, |part, index| {
         let ctx = derived::context(&s.doc.drawing, part, index, view)?;
-        Ok([ctx.xf.unproject(start), ctx.xf.unproject(end)])
+        let direction = ctx.xf.frame.direction;
+        let depth = part.geometry.topology()?.bbox.center().dot(direction);
+        Ok([start, end].map(|point| ctx.xf.unproject(point) + direction * depth))
     });
     match axis {
         Ok(axis) => {

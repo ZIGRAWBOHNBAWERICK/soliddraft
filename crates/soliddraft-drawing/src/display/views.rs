@@ -11,7 +11,6 @@ use crate::Drawing;
 use crate::ids::ViewId;
 use crate::library::{self, Align, HatchPattern, TemplateFile, Weight};
 use crate::project::{clip_path, section_arrow, view_bounds};
-use crate::section_path::CutPath;
 use crate::view::{Boundary, View, ViewKind};
 
 /// Where a derived view and the mark it leaves on its parent are, so each can name the
@@ -313,7 +312,7 @@ pub(super) fn boundary_items(view: &View, ctx: &Context<'_>, items: &mut Vec<Ite
     // Break lines: a thin line across the view on each side of a gap, with one zigzag
     // (ISO 128-30).
     let [x0, y0, x1, y1] = view.geometry.bbox;
-    for g in &view.geometry.breaks {
+    for g in view.geometry.breaks.iter().filter(|_| !matches!(view.kind, ViewKind::Detail { .. })) {
         let vertical = g.axis == crate::view::AlignAxis::Vertical;
         let (from, to) = if vertical { (x0 - 3.0, x1 + 3.0) } else { (y0 - 3.0, y1 + 3.0) };
         let mid = (from + to) / 2.0;
@@ -362,15 +361,7 @@ pub(super) fn parent_marks(drawing: &Drawing, sheet_index: usize, ctx: &Context<
             let see = location_of(drawing, child_sheet, child).and_then(|l| l.on_parent());
             match &child.kind {
                 ViewKind::Section { line: cut, flip, label: letter, .. } if cut.len() >= 2 => {
-                    let Some(arrow_dir) = section_arrow(cut, *flip) else { continue };
-                    // Each end's arrow stands square to its own leg: an aligned cut's
-                    // second leg looks its own way.
-                    let last_arrow = if cut.len() > 2 {
-                        let Ok(path) = CutPath::of_line(cut, *flip) else { continue };
-                        path.spans().last().map_or(arrow_dir, |span| span.arrow())
-                    } else {
-                        arrow_dir
-                    };
+                    let Some(arrow_dir) = section_arrow(&cut[..2], *flip) else { continue };
                     let pts: Vec<Point2> = cut.iter().map(at).collect();
                     let (first, last) = (pts[0], pts[pts.len() - 1]);
                     let leg = |a: Point2, b: Point2| {
@@ -409,8 +400,9 @@ pub(super) fn parent_marks(drawing: &Drawing, sheet_index: usize, ctx: &Context<
                             accuracy: None,
                         }));
                     }
-                    let a_last = Vec2::new(last_arrow.u, last_arrow.v);
                     let a = Vec2::new(arrow_dir.u, arrow_dir.v);
+                    let side = d0.cross(a).signum();
+                    let a_last = Vec2::new(-d1.y, d1.x) * side;
                     for (end, inward, thick, a) in
                         [(first, d0, 6.0f64.min(len0 / 3.0), a), (last, d1 * -1.0, 6.0f64.min(len1 / 3.0), a_last)]
                     {

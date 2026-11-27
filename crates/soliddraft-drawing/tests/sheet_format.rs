@@ -3,7 +3,7 @@
 //! back, and its owner field moves cells and back.
 
 use soliddraft_drawing::display::{self, Item};
-use soliddraft_drawing::{Command, DrawingError, TemplateId, TitleCell, UndoStack, apply, file, fixture};
+use soliddraft_drawing::{Command, DrawingError, TemplateId, TitleCell, UndoStack, file, fixture};
 
 fn owner_at(drawing: &soliddraft_drawing::Drawing) -> soliddraft_kernel_api::Point2 {
     display::layout_sheet(drawing, 0)
@@ -19,8 +19,10 @@ fn owner_at(drawing: &soliddraft_drawing::Drawing) -> soliddraft_kernel_api::Poi
 #[test]
 fn sheet_format_and_title_layout_undo_redo_and_reopen() {
     let mut drawing = fixture::bracket_a3();
-    apply(&mut drawing, &Command::SetTitleField { sheet: 0, key: "owner".into(), value: "Rig Shop".into() }).unwrap();
     let mut stack = UndoStack::new();
+    stack
+        .run(&mut drawing, &Command::SetTitleField { sheet: 0, key: "owner".into(), value: "Rig Shop".into() }, None)
+        .unwrap();
     let origin = |d: &soliddraft_drawing::Drawing| {
         soliddraft_drawing::library::template(d.sheets[0].template.as_str()).title_block_origin()
     };
@@ -36,21 +38,23 @@ fn sheet_format_and_title_layout_undo_redo_and_reopen() {
     assert_eq!(drawing.sheets[0].zones.columns, 24);
     assert_eq!(drawing.sheets[0].views, views);
 
-    // The owner field moves to the material cell.
-    let moved = TitleCell { cell: [120.0, 27.0, 60.0, 9.0], size: None };
+    let moved = TitleCell { cell: [4.0, 9.0, 54.0, 9.0] };
     stack
         .run(&mut drawing, &Command::SetTitleLayout { sheet: 0, key: "owner".into(), layout: Some(moved) }, None)
         .unwrap();
     let (at, o) = (owner_at(&drawing), origin(&drawing));
-    assert_eq!((at.u - o.u, at.v - o.v), (121.5, 28.5));
+    assert_eq!((at.u - o.u, at.v - o.v), (5.5, 10.5));
 
     // A cell outside the block or a field the block lacks is refused, with no change.
     let before = drawing.clone();
-    for (key, cell) in
-        [("owner", [170.0, 30.0, 20.0, 9.0]), ("owner", [0.0, 0.0, 0.0, 9.0]), ("nope", [0.0, 0.0, 9.0, 9.0])]
-    {
-        let command =
-            Command::SetTitleLayout { sheet: 0, key: key.into(), layout: Some(TitleCell { cell, size: None }) };
+    for (key, cell) in [
+        ("owner", [170.0, 30.0, 20.0, 9.0]),
+        ("owner", [60.0, 9.0, 60.0, 9.0]),
+        ("owner", [0.0, 9.0, 0.5, 9.0]),
+        ("owner", [0.0, 9.0, 60.0, 2.0]),
+        ("nope", [0.0, 0.0, 9.0, 9.0]),
+    ] {
+        let command = Command::SetTitleLayout { sheet: 0, key: key.into(), layout: Some(TitleCell { cell }) };
         assert!(matches!(stack.run(&mut drawing, &command, None), Err(DrawingError::BadRequest(_))), "{key} {cell:?}");
         assert_eq!(drawing, before);
     }
@@ -71,6 +75,10 @@ fn sheet_format_and_title_layout_undo_redo_and_reopen() {
     assert_eq!((at.u - o.u, at.v - o.v), (1.5, 10.5));
     assert_eq!(stack.undo(&mut drawing), Some("Sheet format"));
     assert_eq!(display::layout_sheet(&drawing, 0).paper, (420.0, 297.0));
+    assert_eq!(stack.undo(&mut drawing), Some("Title block"));
+    assert_eq!(drawing.sheets[0].format_overrides["owner"], "SolidDraft workshop");
+    assert_eq!(stack.redo(&mut drawing), Some("Title block"));
+    assert_eq!(owner_at(&drawing).u - origin(&drawing).u, 1.5);
     assert_eq!(stack.redo(&mut drawing), Some("Sheet format"));
     assert_eq!(stack.redo(&mut drawing), Some("Title block layout"));
     assert_eq!(drawing, reopened);

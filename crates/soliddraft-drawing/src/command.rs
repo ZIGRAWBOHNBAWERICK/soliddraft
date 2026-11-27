@@ -8,7 +8,7 @@ use crate::annotation::{Annotation, AnnotationKind, AnnotationState, Dimension};
 use crate::entity::EntityRef;
 use crate::ids::SHEET;
 use crate::ids::{AnnotationId, TemplateId, ViewId};
-use crate::part::Part;
+use crate::part::{Part, PartIndex};
 use crate::sheet::{Projection, RevisionRow, Scale, Table, TableKind, TitleCell};
 use crate::update::{self, UpdateReport};
 use crate::view::{
@@ -432,6 +432,9 @@ impl Command {
 /// [`Command::UpdateFromModel`] and [`Command::Reattach`] read the part and return
 /// [`DrawingError::NeedsModel`] here; run them with [`apply_with`].
 pub fn apply(drawing: &mut Drawing, command: &Command) -> Result<(), DrawingError> {
+    if command.dimension_needs_model(drawing) {
+        return Err(DrawingError::NeedsModel(command.name()));
+    }
     match command {
         Command::PlaceView { sheet, view } => {
             if drawing.view(view.id).is_some() {
@@ -591,23 +594,23 @@ pub fn apply(drawing: &mut Drawing, command: &Command) -> Result<(), DrawingErro
             s.size = model.size;
             s.zones = model.zones;
             // Cells placed for another block's fields go; the new block's own cells stand.
-            s.title_layout.retain(|key, cell| {
-                format.title_block.fields.iter().any(|f| &f.key == key)
-                    && cell.fits(format.title_block.width, format.title_block.height)
-            });
+            s.title_layout.retain(|key, cell| format.title_block.fields.iter().any(|f| &f.key == key && cell.fits(f)));
             Ok(())
         }
         Command::SetTitleLayout { sheet, key, layout } => {
             let s = sheet_mut(drawing, *sheet)?;
             let format = library::template(s.template.as_str());
-            if !format.title_block.fields.iter().any(|f| &f.key == key) {
-                return Err(DrawingError::BadRequest(format!("the title block has no field {key}")));
-            }
+            let field = format
+                .title_block
+                .fields
+                .iter()
+                .find(|f| &f.key == key)
+                .ok_or_else(|| DrawingError::BadRequest(format!("the title block has no field {key}")))?;
             match layout {
-                Some(cell) if !cell.fits(format.title_block.width, format.title_block.height) => {
+                Some(cell) if !cell.fits(field) => {
                     return Err(DrawingError::BadRequest(format!(
-                        "a title block field needs a size and must lie inside the {} x {} mm block",
-                        format.title_block.width, format.title_block.height
+                        "{} must stay inside its template cell with room for its caption and value",
+                        field.label
                     )));
                 }
                 Some(cell) => {
@@ -832,10 +835,81 @@ fn move_view_to_sheet(drawing: &mut Drawing, view: ViewId, to_sheet: usize, to: 
     rescale_changed(drawing, before)
 }
 
+impl Command {
+    /// Whether the command must measure anchors against the part before applying.
+    pub fn dimension_needs_model(&self, drawing: &Drawing) -> bool {
+        let annotation = match self {
+            Self::AddDimension { annotation } | Self::AddAnnotation { annotation } => {
+                let measured = match &annotation.body {
+                    AnnotationKind::Dimension(d) => matches!(d.value, crate::DimValue::Measured { .. }),
+                    AnnotationKind::DimensionSet(_) => matches!(self, Self::AddAnnotation { .. }),
+                    _ => false,
+                };
+                if !measured {
+                    return false;
+                }
+                annotation
+            }
+            Self::EditDimension { annotation, dimension } => {
+                let Some(a) = drawing.annotation(*annotation) else { return false };
+                let AnnotationKind::Dimension(before) = &a.body else { return false };
+                if (dimension.kind == before.kind && dimension.dim_type == before.dim_type)
+                    || !matches!(dimension.value, crate::DimValue::Measured { .. })
+                {
+                    return false;
+                }
+                a
+            }
+            _ => return false,
+        };
+        !annotation.anchors.is_empty()
+            && drawing.view(annotation.view).is_some_and(|view| !view.geometry.breaks.is_empty())
+    }
+}
+
+fn measure_dimension(drawing: &Drawing, part: &Part, annotation: &mut Annotation) -> Result<(), DrawingError> {
+    let sheet = drawing.sheet_of(annotation.view).ok_or(DrawingError::UnknownView(annotation.view))?;
+    let view = sheet.view(annotation.view).expect("the view is on the sheet");
+    if view.geometry.source_digest != part.digest.as_str() {
+        return Err(DrawingError::BadRequest("Rebuild the view from the open part before dimensioning it".into()));
+    }
+    let index = PartIndex::build(part)?;
+    let context = crate::derived::context(drawing, part, &index, annotation.view)?;
+    let symbols = &library::template(sheet.template.as_str()).style_file().symbols;
+    update::re_resolve(annotation, &index, &context, symbols);
+    if let AnnotationState::Dangling { cause, .. } = &annotation.state {
+        return Err(DrawingError::BadRequest(cause.clone()));
+    }
+    annotation.state = AnnotationState::Ok;
+    Ok(())
+}
+
 /// Applies any command, reading the part for those that need it. Returns the update's
 /// report for [`Command::UpdateFromModel`].
 pub fn apply_with(drawing: &mut Drawing, command: &Command, part: &Part) -> Result<Option<UpdateReport>, DrawingError> {
     match command {
+        Command::AddDimension { annotation } | Command::AddAnnotation { annotation }
+            if command.dimension_needs_model(drawing) =>
+        {
+            let mut measured = annotation.clone();
+            measure_dimension(drawing, part, &mut measured)?;
+            if let AnnotationKind::Dimension(d) = &mut measured.body
+                && let crate::DimValue::Measured { value } = d.value
+            {
+                d.precision = d.precision.max(crate::measure::precision_for(value));
+            } else if let AnnotationKind::DimensionSet(set) = &mut measured.body {
+                set.precision =
+                    set.values.iter().copied().map(crate::measure::precision_for).fold(set.precision, u8::max);
+            }
+            add_annotation(drawing, &measured).map(|_| None)
+        }
+        Command::EditDimension { annotation, dimension } if command.dimension_needs_model(drawing) => {
+            let mut measured = drawing.annotation(*annotation).expect("dimension to edit").clone();
+            measured.body = AnnotationKind::Dimension(dimension.clone());
+            measure_dimension(drawing, part, &mut measured)?;
+            *drawing.annotation_mut(*annotation).expect("dimension to edit") = measured;
+            Ok(None)
+        }
         Command::UpdateFromModel => update::update_from_model(drawing, part).map(Some),
         Command::Reattach { annotation, end, entity } => {
             update::reattach(drawing, part, *annotation, *end, entity.clone()).map(|_| None)
@@ -1058,13 +1132,17 @@ fn rescale_changed(drawing: &mut Drawing, before: Vec<(ViewId, f64)>) -> Result<
 /// Scales a view's line work and its annotations' points about the view's origin, and
 /// the marks its derived views keep on it.
 fn rescale(drawing: &mut Drawing, v: ViewId, ratio: f64) {
-    if let Some(view) = drawing.view_mut(v) {
-        project::rescale_view(view, ratio);
-    }
-    let s = |p: Point2| Point2::new(crate::part::round(p.u * ratio), crate::part::round(p.v * ratio));
+    let Some(view) = drawing.view_mut(v) else { return };
+    let gap = view.geometry.breaks.first().copied();
+    project::rescale_view(view, ratio);
+    let s = |p: Point2| project::scale_view_point(p, ratio, gap);
+    let rounded = |p: Point2| {
+        let q = s(p);
+        Point2::new(crate::part::round(q.u), crate::part::round(q.v))
+    };
     for child in drawing.sheets.iter_mut().flat_map(|sh| sh.views.iter_mut()).filter(|c| c.parent() == Some(v)) {
         match &mut child.kind {
-            ViewKind::Section { line, .. } => line.iter_mut().for_each(|p| *p = s(*p)),
+            ViewKind::Section { line, .. } => line.iter_mut().for_each(|p| *p = rounded(*p)),
             ViewKind::Detail { center, radius, profile, .. } => {
                 *center = s(*center);
                 *radius *= ratio;
@@ -1074,14 +1152,13 @@ fn rescale(drawing: &mut Drawing, v: ViewId, ratio: f64) {
         }
     }
     for a in drawing.sheets.iter_mut().flat_map(|s| s.annotations.iter_mut()).filter(|a| a.view == v) {
-        let s = |p: Point2| Point2::new(crate::part::round(p.u * ratio), crate::part::round(p.v * ratio));
-        a.placement = s(a.placement);
+        a.placement = rounded(a.placement);
         for anchor in &mut a.anchors {
-            anchor.cached = s(anchor.cached);
+            anchor.cached = rounded(anchor.cached);
         }
         if let AnnotationKind::Note { leader, .. } = &mut a.body {
             for p in leader {
-                *p = s(*p);
+                *p = rounded(*p);
             }
         }
     }

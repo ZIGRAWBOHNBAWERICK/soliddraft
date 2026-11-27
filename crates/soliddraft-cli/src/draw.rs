@@ -75,7 +75,7 @@ letter, or a view id. View edits:
   --crop <view>:<x,y,z>:<x,y,z>             keep the rectangle between two model points
   --broken-out <view>:<x,y,z>:<radius>:<depth>
                                              cut away a circle to a depth (model mm)
-  --break <view>:<x,y,z>:<x,y,z>:h|v[:<gap>]
+  --break <view>:<x,y,z>:<x,y,z>:h|v
                                              leave out the stretch of the view between
                                              two model points, horizontally or
                                              vertically, closed up to a gap (default
@@ -108,7 +108,7 @@ Annotations, attached to the edges nearest model points:
   --revision-symbol <view>:<x,y,z>:<rev>    a revision symbol
   --title-field <key>=<text>[@<n>]           a title block field's text on sheet n
                                              (default 1)
-  --title-cell <key>=<x>,<y>,<w>,<h>[,<size>][@<n>]
+  --title-cell <key>=<x>,<y>,<w>,<h>[@<n>]
                                              move a title block field's cell, in mm
                                              from the block's bottom-left corner, with
                                              an optional text height
@@ -169,7 +169,7 @@ enum Step2 {
     Aux { parent: String, near: Vec3, flip: bool, sheet: Option<usize> },
     Crop { view: String, a: Vec3, b: Vec3 },
     BrokenOut { view: String, at: Vec3, radius: f64, depth: f64 },
-    Break { view: String, from: Vec3, to: Vec3, axis: AlignAxis, gap: f64 },
+    Break { view: String, from: Vec3, to: Vec3, axis: AlignAxis },
     Half { view: String, axis: [Vec3; 2], flip: bool },
     TitleField { sheet: usize, key: String, value: String },
     TitleCell { sheet: usize, key: String, cell: TitleCell },
@@ -333,18 +333,15 @@ fn parse_step(flag: &str, value: &str) -> Result<Step2, String> {
             })
         }
         "--break" => {
-            let parts: Vec<&str> = value.split(':').collect();
-            let (view, from, to, dir, gap) = match parts[..] {
-                [v, a, b, d] => (v, a, b, d, None),
-                [v, a, b, d, g] => (v, a, b, d, Some(g)),
-                _ => return Err(bad("<view>:<x,y,z>:<x,y,z>:h|v[:<gap>]")),
+            let [view, from, to, dir] = value.split(':').collect::<Vec<_>>()[..] else {
+                return Err(bad("<view>:<x,y,z>:<x,y,z>:h|v"));
             };
             let axis = match orientation(dir)? {
                 LinearOrientation::Horizontal => AlignAxis::Horizontal,
-                _ => AlignAxis::Vertical,
+                LinearOrientation::Vertical => AlignAxis::Vertical,
+                _ => return Err(bad("<view>:<x,y,z>:<x,y,z>:h|v")),
             };
-            let gap = gap.map(|g| number(g, "a break gap")).transpose()?.unwrap_or(Break::GAP);
-            Ok(Step2::Break { view: view.into(), from: point(from)?, to: point(to)?, axis, gap })
+            Ok(Step2::Break { view: view.into(), from: point(from)?, to: point(to)?, axis })
         }
         "--half-section" => {
             let parts: Vec<&str> = value.split(':').collect();
@@ -364,9 +361,8 @@ fn parse_step(flag: &str, value: &str) -> Result<Step2, String> {
             }
             let numbers = rest.split(',').map(|n| number(n, "a title cell")).collect::<Result<Vec<_>, _>>()?;
             let cell = match numbers[..] {
-                [x, y, w, h] => TitleCell { cell: [x, y, w, h], size: None },
-                [x, y, w, h, size] => TitleCell { cell: [x, y, w, h], size: Some(size) },
-                _ => return Err(bad("<key>=<x>,<y>,<w>,<h>[,<size>]")),
+                [x, y, w, h] => TitleCell { cell: [x, y, w, h] },
+                _ => return Err(bad("<key>=<x>,<y>,<w>,<h>")),
             };
             Ok(Step2::TitleCell { sheet, key: key.into(), cell })
         }
@@ -1200,10 +1196,9 @@ fn apply_steps(drawing: &mut Drawing, part: &Part, steps: &[Step2]) -> Result<()
                 let boundary = Boundary::Circle { center: ctx.xf.point(*at), radius: radius * ctx.xf.scale };
                 Command::AddBrokenOut { view, broken_out: BrokenOut { boundary, depth: *depth } }
             }
-            Step2::Break { view, from, to, axis, gap } => {
+            Step2::Break { view, from, to, axis } => {
                 let view = find_view(drawing, view)?;
-                let mut breaks = drawing.view(view).expect("found").breaks.clone();
-                breaks.push(Break { from: *from, to: *to, axis: *axis, gap: *gap });
+                let breaks = vec![Break { from: *from, to: *to, axis: *axis }];
                 Command::SetViewBreaks { view, breaks }
             }
             Step2::Half { view, axis, flip } => {

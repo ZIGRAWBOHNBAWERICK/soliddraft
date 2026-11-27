@@ -400,6 +400,7 @@ fn view_geometry(view: StandardView, scale: f64, lines: fn(&mut Lines)) -> (View
         outline: None,
         bbox: [min.x, min.y, max.x, max.y],
         unproved: false,
+        display_only: false,
         catallax: false,
         coarse: false,
         breaks: Vec::new(),
@@ -441,7 +442,7 @@ struct Lines {
 
 impl Lines {
     fn push(&mut self, path: BezPath, source: EntityRef, visible: bool, kind: CurveKind) {
-        self.curves.push(Curve2 { path, source, visible, kind, tangent: false, accuracy: Accuracy::Exact });
+        self.curves.push(Curve2 { path, source, visible, kind, tangent: false, accuracy: Accuracy::Exact, ends: None });
     }
 
     fn segment(&self, a: Vec3, b: Vec3) -> BezPath {

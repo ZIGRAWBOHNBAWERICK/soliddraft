@@ -136,7 +136,13 @@ impl RevisionReview {
             (Some(_), Some(drawing)) => Some(markup.place_on(drawing).ok_or_else(|| {
                 io::Error::new(io::ErrorKind::InvalidData, "Markup belongs to another revision of this drawing.")
             })?),
-            _ => None,
+            (None, Some(_)) => {
+                return Err(io::Error::new(io::ErrorKind::InvalidData, "This markup has no drawing attachment."));
+            }
+            (None, None) => None,
+            (Some(_), None) => {
+                return Err(io::Error::new(io::ErrorKind::InvalidData, "Open the drawing to see this markup."));
+            }
         };
         self.selected =
             markup.item_id.as_deref().and_then(|id| self.changes.binary_search_by(|row| row.id.as_str().cmp(id)).ok());
@@ -153,7 +159,9 @@ impl RevisionReview {
     }
 
     fn nonempty_draft(&self) -> Option<&ReviewerMarkup> {
-        self.draft.as_ref().filter(|draft| !draft.text.trim().is_empty())
+        self.draft
+            .as_ref()
+            .filter(|draft| !draft.text.trim().is_empty() && (self.drawing.is_none() || self.place.is_some()))
     }
 
     pub fn show(&mut self, ui: &mut egui::Ui) -> Option<MarkupFileAction> {
@@ -189,15 +197,26 @@ impl RevisionReview {
                 ui.label(format!("Candidate − baseline: {delta} mm"));
             }
             if row.after.is_some() {
-                if ui.button("Attach markup to selected item").clicked() {
-                    let text = self.draft.take().map_or_else(String::new, |draft| draft.text);
-                    let markup = self.candidate.markup(Some(&row.id), text);
-                    // On a drawing, the comment goes on the item's annotation when it has one.
-                    self.draft = match (&self.drawing, markup) {
-                        (Some(drawing), Some(m)) => Some(m.clone().on_drawing(drawing).unwrap_or(m)),
-                        (_, m) => m,
+                if ui.button("Attach markup to selected item").clicked()
+                    && let Some(mut markup) = self.candidate.markup(Some(&row.id), String::new())
+                {
+                    let place = if let Some(drawing) = &self.drawing {
+                        match markup.on_drawing(drawing).and_then(|m| Some((m.place_on(drawing)?, m))) {
+                            Some((place, attached)) => {
+                                markup = attached;
+                                Some(place)
+                            }
+                            None => {
+                                ui.label("No drawing annotation shows this item.");
+                                return self.show_editor(ui);
+                            }
+                        }
+                    } else {
+                        None
                     };
-                    self.place = self.draft.as_ref().and_then(|d| Some(d.drawing.as_ref()?.place));
+                    markup.text = self.draft.take().map_or_else(String::new, |draft| draft.text);
+                    self.draft = Some(markup);
+                    self.place = place;
                 }
             } else {
                 ui.label("Removed items cannot receive candidate markup.");
@@ -211,15 +230,8 @@ impl RevisionReview {
         ui.heading("Reviewer markup");
         if let Some(draft) = &mut self.draft {
             ui.label(format!("Attached to: {}", draft.item_id.as_deref().unwrap_or("candidate revision")));
-            if self.drawing.is_some() {
-                match &self.place {
-                    Some(place) => {
-                        ui.label(format!("On drawing sheet {}", place.sheet + 1));
-                    }
-                    None => {
-                        ui.label("Not on the drawing: no annotation shows this item.");
-                    }
-                }
+            if let Some(place) = &self.place {
+                ui.label(format!("On drawing sheet {}", place.sheet + 1));
             }
             let label = ui.label("Comment");
             ui.add(egui::TextEdit::multiline(&mut draft.text).desired_rows(3).desired_width(f32::INFINITY))

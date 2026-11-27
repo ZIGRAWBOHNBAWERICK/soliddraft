@@ -207,7 +207,7 @@ pub fn dxf(list: &DisplayList) -> Result<Vec<u8>, DrawingError> {
     }
     let mut out = Vec::new();
     d.save(&mut out).map_err(|e| DrawingError::Io(format!("DXF: {e}")))?;
-    finish(&out, &list.hatches)
+    finish(&out, list.printable_hatches())
 }
 
 /// True lengths on pictorial views need the foreshortening factor as well as scale. A
@@ -328,7 +328,7 @@ fn pairs(text: &str) -> Result<(Vec<Pair>, &'static str), DrawingError> {
 /// reject, and it has no HATCH entity. Each of those gets a fresh handle above the
 /// file's handle seed, and the hatches go at the end of the ENTITIES section with the
 /// model space as their owner.
-fn finish(bytes: &[u8], hatches: &[HatchRecord]) -> Result<Vec<u8>, DrawingError> {
+fn finish<'a>(bytes: &[u8], hatches: impl Iterator<Item = &'a HatchRecord>) -> Result<Vec<u8>, DrawingError> {
     let text = std::str::from_utf8(bytes).map_err(|_| DrawingError::Format("DXF: not text".into()))?;
     let (p, ending) = pairs(text)?;
     let seed = p
@@ -447,7 +447,7 @@ fn finish(bytes: &[u8], hatches: &[HatchRecord]) -> Result<Vec<u8>, DrawingError
     p.splice(end..end, add);
     let seed = p.iter().position(|q| q.1 == "$HANDSEED").expect("found above") + 1;
     p[seed].1 = fresh();
-    let mut out = String::with_capacity(text.len() + 64 * hatches.len());
+    let mut out = String::with_capacity(text.len());
     for (code, value) in p {
         out.push_str(&format!("{code: >3}{ending}{value}{ending}"));
     }

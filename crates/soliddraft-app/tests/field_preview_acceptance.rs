@@ -433,7 +433,8 @@ fn a_refused_field_is_marked_with_its_reason_and_exports_nothing() {
         let error = app.state().state.export_part(Format::Stl).unwrap_err();
         assert!(
             error.starts_with("Export needs every feature built. Gyroid1: ")
-                && error.contains("gyroid.grade-range-unsupported"),
+                && error.contains("outside the supported range [-1/4, 1/4]")
+                && !error.contains("certified"),
             "{error}"
         );
         assert!(

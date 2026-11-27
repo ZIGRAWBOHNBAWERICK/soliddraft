@@ -26,6 +26,7 @@ mod loft;
 mod measure;
 mod native;
 mod pmi;
+mod proof_clock;
 mod recognition;
 mod request;
 mod scan;
@@ -53,7 +54,7 @@ use request::RequestPolicy;
 pub use request::{APP_REQUEST_WORK, APP_WORK_TARGET, EDIT_STOPGAP_WORK, RequestWork, with_request_allowance};
 
 /// The pinned Catallax application entry revision.
-pub const CATALLAX_REVISION: &str = "d080d74955b2f4c84b395d82c60ed9360b405e08";
+pub const CATALLAX_REVISION: &str = "e15c27e19bab4a2f341682138e7c9ab3be3b181e";
 
 /// An in-process Catallax backend. There is no global kernel state or kernel thread.
 #[derive(Default)]
@@ -1477,6 +1478,40 @@ fn options(params: &TessellationParams) -> KernelResult<MeshOptions> {
     Ok(options)
 }
 
+fn edge_proof_run(
+    report: catallax_app::EdgeProofReport,
+    started: Option<u64>,
+    id: impl Fn(catallax_app::EdgeProofKey) -> Option<EdgeId>,
+) -> KernelResult<EdgeProofRun> {
+    use catallax_app::EdgeProofOutcome;
+
+    let cpu_ns = started.zip(proof_clock::proof_cpu_ns()).and_then(|(start, end)| end.checked_sub(start));
+    let edges = report
+        .edges
+        .into_iter()
+        .map(|row| {
+            let edge = id(row.edge).ok_or_else(|| KernelError::QueryFailed {
+                query: "prove_edges".into(),
+                code: -1,
+                message: "A reported edge has no interface identity".into(),
+            })?;
+            let bound_mm = match row.outcome {
+                EdgeProofOutcome::Proved { upper_mm } => {
+                    let mut bound = upper_mm.to_f64_nearest();
+                    if Rational::from_f64_exact(bound).is_some_and(|value| value < upper_mm) {
+                        bound = bound.next_up();
+                    }
+                    Some(bound)
+                }
+                EdgeProofOutcome::CouldNotProve(_) => None,
+            };
+            Ok(EdgeProof { edge, bound_mm })
+        })
+        .collect::<KernelResult<_>>()?;
+    // Both Catallax whole-edge routines run serially on the calling thread.
+    Ok(EdgeProofRun { edges, work_used: report.work, cpu_ns, threads_used: 1 })
+}
+
 impl Kernel for CatallaxKernel {
     fn scan_reference(
         &self,
@@ -1686,13 +1721,8 @@ impl Kernel for CatallaxKernel {
         // Read outside the lock; offers share their read result, so the build that takes
         // one later finds it read. An offer that came with its names is adopted unread,
         // so it is read only when exact geometry is asked of it.
-        let unread: Vec<handover::Offer> = self
-            .state()?
-            .offered
-            .values()
-            .filter(|offer| !offer.is_read() && offer.identity.is_none())
-            .cloned()
-            .collect();
+        let unread: Vec<handover::Offer> =
+            self.state()?.offered.values().filter(|offer| !offer.is_read() && !offer.has_identity()).cloned().collect();
         for offer in unread.iter().take(at_most) {
             let _ = offer.built();
         }
@@ -2445,6 +2475,39 @@ impl Kernel for CatallaxKernel {
                 return self.tessellate_edges(body, params);
             };
             Ok(preview_edges(mesh, &solid.ids))
+        })
+    }
+
+    fn prove_edges(&self, body: BodyId, work_limit: u64, interrupt: &Interrupt) -> KernelResult<EdgeProofRun> {
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        use catallax_topology::numerical::edge_proof::{EdgeProofKey, prove_exact_edges, prove_numerical_edges};
+
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let stop = cancelled.clone();
+        let _registration = interrupt.register(Box::new(move || stop.store(true, Ordering::Relaxed)));
+        let started = proof_clock::proof_cpu_ns();
+        if let Some(approximate) = self.approximate(body)? {
+            let Ok(numerical) = approximate.body() else {
+                // A checked tolerant import is not a proof of its source geometry.
+                return Ok(EdgeProofRun { edges: Vec::new(), work_used: 0, cpu_ns: Some(0), threads_used: 0 });
+            };
+            let limit = catallax_topology::Tolerance::new(Rational::parse("0.01").expect("constant decimal"))
+                .expect("positive whole-edge proof limit");
+            let report = prove_numerical_edges(numerical, &limit, work_limit, &cancelled);
+            return edge_proof_run(report, started, |key| match key {
+                EdgeProofKey::Numerical(key) => approximate.edges.get(&key).copied(),
+                EdgeProofKey::Exact(_) => None,
+            });
+        }
+        // Use the retained model directly: a body handed over from the browser worker
+        // may not have an evaluation checkpoint in this kernel.
+        let solid = self.solid(body)?;
+        let built = solid.app.checkpoint.built();
+        let report = prove_exact_edges(&built.model, built.result, work_limit, &cancelled);
+        edge_proof_run(report, started, |key| match key {
+            EdgeProofKey::Exact(key) => solid.ids.edges.get(&key).copied(),
+            EdgeProofKey::Numerical(_) => None,
         })
     }
 

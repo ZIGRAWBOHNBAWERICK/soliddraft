@@ -125,6 +125,49 @@ fn client_modules_and_declarations_have_text_content_types() {
 }
 
 #[test]
+fn wasm_uses_precompressed_variants_and_representation_specific_etags() {
+    let name = "wasm-variants";
+    let dir = web_dir(name);
+    let brotli = vec![b'b'; 64 * 1024];
+    std::fs::write(dir.join("app_bg.wasm"), b"wasm").unwrap();
+    std::fs::write(dir.join("app_bg.wasm.br"), &brotli).unwrap();
+    std::fs::write(dir.join("app_bg.wasm.gz"), b"gzip bytes").unwrap();
+    let base = start(name, Err("off".into()));
+    let client = Http::new(&base).client;
+    let get = |encoding| client.get(format!("{base}/app_bg.wasm")).header("Accept-Encoding", encoding);
+
+    let compressed = get("gzip, br").send().unwrap();
+    assert_eq!(compressed.status().as_u16(), 200);
+    assert_eq!(compressed.headers()["content-type"], "application/wasm");
+    assert_eq!(compressed.headers()["content-encoding"], "br");
+    assert_eq!(compressed.headers()["content-length"], "65536");
+    assert_eq!(compressed.headers()["connection"], "close");
+    assert!(!compressed.headers().contains_key("transfer-encoding"));
+    let etag = compressed.headers()["etag"].clone();
+    assert_eq!(compressed.bytes().unwrap(), brotli.as_slice());
+
+    let cached = get("br").header("If-None-Match", &etag).send().unwrap();
+    assert_eq!(cached.status().as_u16(), 304);
+    assert_eq!(cached.headers()["vary"], "Accept-Encoding");
+    assert_eq!(cached.headers()["connection"], "close");
+    let head = client.head(format!("{base}/app_bg.wasm")).header("Accept-Encoding", "br").send().unwrap();
+    assert_eq!(head.headers()["content-length"], "65536");
+    assert_eq!(head.headers()["content-encoding"], "br");
+    assert!(head.bytes().unwrap().is_empty());
+    let gzip = get("br;q=0.5, gzip").header("If-None-Match", &etag).send().unwrap();
+    assert_eq!(gzip.status().as_u16(), 200);
+    assert_eq!(gzip.headers()["content-encoding"], "gzip");
+    assert_eq!(gzip.bytes().unwrap(), &b"gzip bytes"[..]);
+
+    let plain = get("br;q=0, gzip;q=0, *").header("If-None-Match", &etag).send().unwrap();
+    assert_eq!(plain.status().as_u16(), 200);
+    assert_eq!(plain.headers()["vary"], "Accept-Encoding");
+    assert!(!plain.headers().contains_key("content-encoding"));
+    assert_eq!(plain.bytes().unwrap(), &b"wasm"[..]);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
 fn version_names_the_commit() {
     let base = start("version", Err("off".into()));
     let client = reqwest::blocking::Client::builder().no_proxy().build().unwrap();

@@ -2,7 +2,7 @@
 //!
 //! The page has one thread, and a long Catallax query on it freezes the camera and every
 //! control until it ends. The browser build therefore starts a dedicated Web Worker
-//! (`kernel_worker.js`) on the same compiled WebAssembly module. The worker has its own
+//! (`kernel_worker.js`) on a separate WebAssembly module. The worker has its own
 //! memory and its own Catallax kernel: it never sees the page's bodies. Each job carries
 //! the part's saved bytes, the worker rebuilds them, reusing what it built for the
 //! previous job, and answers with plain data.
@@ -38,6 +38,8 @@ pub enum Job {
     },
     /// Warm the viewport meshes for a display setting while the open document stays usable.
     Remesh { curved_surfaces: Option<crate::graphics::CurvedSurfaces> },
+    /// Estimate or run a whole-edge proof in a worker isolated from viewport jobs.
+    PartProof { estimate: bool },
 }
 
 impl Job {
@@ -47,6 +49,7 @@ impl Job {
             Job::MassProperties { .. } => "mass_properties",
             Job::Build { .. } => "build",
             Job::Remesh { .. } => "remesh",
+            Job::PartProof { .. } => "part_proof",
         }
     }
 }
@@ -126,6 +129,18 @@ impl Host {
                 }
                 Ok(serde_json::Value::Null)
             }
+            Job::PartProof { estimate: true } => {
+                let estimate = crate::measure::part_proof::estimate(doc)?;
+                serde_json::to_value(estimate).map_err(|error| error.to_string())
+            }
+            Job::PartProof { estimate: false } => {
+                let report = crate::measure::part_proof::prove(
+                    doc,
+                    &soliddraft_kernel_api::Interrupt::new(),
+                    crate::measure::part_proof::kernel_prover,
+                )?;
+                serde_json::to_value(report).map_err(|error| error.to_string())
+            }
         }
     }
 
@@ -172,7 +187,7 @@ fn built(doc: &model::Document, feature: model::FeatureId) -> Result<(), String>
 }
 
 #[cfg(target_arch = "wasm32")]
-pub use browser::{abandon_unwanted, submit, trace};
+pub use browser::{ProofWorker, abandon_unwanted, submit, trace, worker_hand_over, worker_run};
 
 #[cfg(target_arch = "wasm32")]
 mod browser {
@@ -264,8 +279,13 @@ mod browser {
     }
 
     impl Client {
-        fn start() -> Result<Self, String> {
-            let glue = glue_url().ok_or("The kernel worker could not find the application module")?;
+        fn start(hand_over: bool) -> Result<Self, String> {
+            let base = glue_url().ok_or("The kernel worker could not find the application module")?;
+            let commit = web_sys::window()
+                .and_then(|window| window.document())
+                .and_then(|document| document.document_element())
+                .and_then(|root| root.get_attribute("data-feedback-commit"))
+                .ok_or("The kernel worker could not find the application revision")?;
             let script = wasm_bindgen::link_to!(module = "/src/kernel_worker.js");
             let options = web_sys::WorkerOptions::new();
             options.set_type(web_sys::WorkerType::Module);
@@ -286,14 +306,48 @@ mod browser {
             worker.set_onmessage(Some(message.as_ref().unchecked_ref()));
             worker.set_onerror(Some(error.as_ref().unchecked_ref()));
             let init = js_sys::Object::new();
-            set(&init, "glue", &glue.into());
-            set(&init, "module", &wasm_bindgen::module());
+            set(&init, "base", &base.into());
+            set(&init, "commit", &commit.into());
+            set(&init, "handOver", &hand_over.into());
             let message_init = js_sys::Object::new();
             set(&message_init, "init", &init);
             worker
                 .post_message(&message_init)
                 .map_err(|error| format!("The kernel worker could not start: {error:?}"))?;
             Ok(Self { worker, shared, _message: message, _error: error })
+        }
+    }
+
+    /// A proof never waits for viewport jobs or supplies builds to the page. Dropping
+    /// this client terminates the proof without interrupting any other job.
+    pub struct ProofWorker {
+        client: Client,
+        part: Vec<u8>,
+        kernel: Arc<dyn soliddraft_kernel_api::Kernel>,
+    }
+
+    impl ProofWorker {
+        pub fn new(part: Vec<u8>, kernel: Arc<dyn soliddraft_kernel_api::Kernel>) -> Result<Self, String> {
+            Ok(Self { client: Client::start(false)?, part, kernel })
+        }
+
+        pub fn submit(
+            &self,
+            estimate: bool,
+            ctx: &egui::Context,
+            answered: impl FnOnce(Result<serde_json::Value, String>) + 'static,
+        ) -> Result<(), String> {
+            let id = NEXT.with(|next| next.replace(next.get() + 1));
+            let job = Job::PartProof { estimate };
+            let header = serde_json::to_string(&job).map_err(|error| error.to_string())?;
+            let sent = Sent { slot: job.slot(), header, part: self.part.clone() };
+            post(&self.client.worker, id, &sent)?;
+            self.client
+                .shared
+                .borrow_mut()
+                .waiting
+                .insert(id, (Box::new(answered), ctx.clone(), self.kernel.clone(), Box::new(|| false), sent));
+            Ok(())
         }
     }
 
@@ -355,7 +409,7 @@ mod browser {
         CLIENT.with_borrow_mut(|client| {
             if client.as_ref().is_none_or(|client| client.shared.borrow().stopped) {
                 // Dropping the stopped client here, outside its own handlers, ends it.
-                *client = Some(Client::start()?);
+                *client = Some(Client::start(true)?);
             }
             let client = client.as_ref().expect("the kernel worker started");
             let id = NEXT.with(|next| next.replace(next.get() + 1));
@@ -409,7 +463,7 @@ mod browser {
             drop(shared);
             // Dropping the old client terminates its worker, and the job it was running.
             *client = None;
-            let fresh = match Client::start() {
+            let fresh = match Client::start(true) {
                 Ok(fresh) => fresh,
                 Err(error) => {
                     for (_, (answered, ctx, _, _, _)) in wanted {
@@ -459,14 +513,12 @@ mod browser {
 
     /// The builds the worker's kernel made for the job just answered, as bytes the page's
     /// kernel can be offered. Empty when there is no host yet or nothing was built.
-    #[wasm_bindgen]
-    pub fn kernel_worker_hand_over() -> Vec<u8> {
+    pub fn worker_hand_over() -> Vec<u8> {
         HOST.with_borrow_mut(|host| host.as_mut().and_then(|host| host.take_hand_over().ok())).unwrap_or_default()
     }
 
     /// The worker's entry: runs one job on this worker's kernel and answers as JSON.
-    #[wasm_bindgen]
-    pub fn kernel_worker_run(header: &str, part: &[u8]) -> String {
+    pub fn worker_run(header: &str, part: &[u8]) -> String {
         let result = serde_json::from_str::<Job>(header).map_err(|error| error.to_string()).and_then(|job| {
             HOST.with_borrow_mut(|host| {
                 host.get_or_insert_with(|| {
@@ -494,7 +546,7 @@ mod browser {
         }));
     }
 
-    /// The address of the page's wasm-bindgen glue, which trunk preloads by name.
+    /// Trunk preloads the page glue in the directory that also holds the worker glue.
     fn glue_url() -> Option<String> {
         let document = web_sys::window()?.document()?;
         let links = document.query_selector_all("link[rel=modulepreload]").ok()?;

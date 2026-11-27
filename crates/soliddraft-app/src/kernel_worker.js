@@ -1,6 +1,5 @@
-// The browser's kernel worker. The page starts it with the address of its wasm-bindgen
-// glue and its compiled WebAssembly module (kernel_worker.rs), so the worker runs the
-// same application code with its own memory and its own Catallax kernel.
+// The browser's kernel worker. Load its WebAssembly module when the first job
+// starts the worker. Jobs wait in the queue while the module loads.
 //
 // Jobs arrive as { id, slot, header, part }. A newer job for the same slot replaces one
 // that has not started: the worker answers the replaced job { id, superseded: true }.
@@ -8,6 +7,7 @@
 // page starts a new worker for its next job.
 
 let glue = null;
+let offerBuilds = true;
 let queue = [];
 let draining = false;
 let dead = false;
@@ -21,8 +21,13 @@ self.onmessage = async (event) => {
   const message = event.data;
   if (message.init) {
     try {
-      glue = await import(message.init.glue);
-      glue.initSync({ module: message.init.module });
+      const module = await import(new URL("soliddraft-kernel.js", message.init.base));
+      await module.default();
+      if (module.kernel_worker_commit() !== message.init.commit) {
+        throw new Error("SolidDraft was updated. Reload the page to use the matching kernel");
+      }
+      offerBuilds = message.init.handOver;
+      glue = module;
       self.postMessage({ ready: true });
     } catch (error) {
       dead = true;
@@ -71,10 +76,12 @@ function drain() {
   trace(job, 'worker replied');
   // The builds made for this job travel with its answer, for the page's own kernel.
   let hand_over = null;
-  try {
-    hand_over = glue.kernel_worker_hand_over();
-  } catch (error) {
-    hand_over = null;
+  if (offerBuilds) {
+    try {
+      hand_over = glue.kernel_worker_hand_over();
+    } catch (error) {
+      hand_over = null;
+    }
   }
   if (hand_over && hand_over.length) {
     self.postMessage({ id: job.id, answer, hand_over }, [hand_over.buffer]);

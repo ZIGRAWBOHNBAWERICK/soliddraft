@@ -210,12 +210,18 @@ pub fn dxf(list: &DisplayList) -> Result<Vec<u8>, DrawingError> {
     finish(&out, &list.hatches)
 }
 
-/// True lengths on pictorial views need the foreshortening factor as well as scale.
+/// True lengths on pictorial views need the foreshortening factor as well as scale. A
+/// dimension across a break is drawn shorter than the model length it measures; its
+/// factor makes a reader that measures the definition points show the model length.
 fn measurement_scale(r: &crate::display::DimensionRecord) -> Option<f64> {
-    if r.format.dim_type != DimType::True {
-        return Some(r.measurement_scale);
-    }
     let distance = raw_measurement(r.geometry);
+    if r.format.dim_type != DimType::True {
+        let drawn = distance * r.measurement_scale;
+        // Anchors are kept to 0.0001 sheet mm, so a whole view's dimensions agree with
+        // their drawn length far closer than 0.01 mm.
+        let shortened = distance > 1e-9 && r.value > 0.0 && (drawn - r.value).abs() > 0.01;
+        return Some(if shortened { r.value / distance } else { r.measurement_scale });
+    }
     (distance > 1e-9).then(|| r.value / distance)
 }
 

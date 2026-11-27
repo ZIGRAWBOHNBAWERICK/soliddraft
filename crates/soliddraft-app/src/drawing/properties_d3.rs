@@ -14,8 +14,8 @@ use soliddraft_drawing::display::{self, scale_text};
 use soliddraft_drawing::library;
 use soliddraft_drawing::project::effective_scale;
 use soliddraft_drawing::{
-    AnnotationKind, Command, DatumRef, GdtCharacteristic, Lay, LinearOrientation, MaterialCondition, RevisionRow,
-    SetKind, SurfaceProcess, TableKind, View, ViewId, ViewKind, ViewScale, next_letter,
+    AnnotationKind, Command, DatumRef, GdtCharacteristic, HalfSection, Lay, LinearOrientation, MaterialCondition,
+    RevisionRow, SetKind, SurfaceProcess, TableKind, View, ViewId, ViewKind, ViewScale, next_letter,
 };
 
 /// A labelled row: the label in the left column, the widget filling the rest.
@@ -71,6 +71,20 @@ pub fn tool_panel(ui: &mut egui::Ui, s: &mut DrawingSession, actions: &mut Vec<D
             actions,
         ),
         DrawingTool::BrokenOut => broken_out_panel(ui, s, actions),
+        DrawingTool::Break => simple_panel(
+            ui,
+            Icon::Rectangle,
+            "Break view",
+            "Click on a view where the stretch to leave out starts, then where it ends. The view closes up to a gap and its dimensions keep the full length. The view's properties remove the breaks.",
+            actions,
+        ),
+        DrawingTool::HalfSection => simple_panel(
+            ui,
+            Icon::Section,
+            "Half section",
+            "Click two points on the symmetry axis of a model or projected view. One half is drawn in section; the view's properties flip which or remove it.",
+            actions,
+        ),
         DrawingTool::DimensionSet(kind) => set_panel(ui, s, kind, actions),
         DrawingTool::Gdt => gdt_panel(ui, s, actions),
         DrawingTool::Datum => datum_panel(ui, s, actions),
@@ -808,6 +822,43 @@ pub fn view_extras(ui: &mut egui::Ui, s: &DrawingSession, v: &View, actions: &mu
         });
     }
     section_gap(ui);
+    // Breaks shorten a long view; a half section cuts one side of a symmetric one.
+    if !matches!(v.kind, ViewKind::Detail { .. }) {
+        theme::section_label(ui, "Break and half section");
+        ui.horizontal(|ui| {
+            let room = v.breaks.len() < 4;
+            let tip = "Leave out a stretch of a long view; its dimensions keep the full length";
+            if ui.add_enabled(room, egui::Button::new("Break…")).on_hover_text(tip).clicked() {
+                actions.push(DrawingAction::SetTool(DrawingTool::Break));
+            }
+            if !v.breaks.is_empty() && ui.button("Remove breaks").clicked() {
+                actions.push(DrawingAction::Command(Command::SetViewBreaks { view: id, breaks: Vec::new() }));
+            }
+        });
+        if !v.breaks.is_empty() {
+            let n = v.breaks.len();
+            hint(ui, &format!("{n} break{}, closed up to a {} mm gap", if n == 1 { "" } else { "s" }, v.breaks[0].gap));
+        }
+        if matches!(v.kind, ViewKind::Base { .. } | ViewKind::Projected { .. }) {
+            ui.horizontal(|ui| match &v.half {
+                None => {
+                    if ui.button("Half section…").on_hover_text("Cut one side of the symmetry axis").clicked() {
+                        actions.push(DrawingAction::SetTool(DrawingTool::HalfSection));
+                    }
+                }
+                Some(half) => {
+                    if ui.button("Flip half").clicked() {
+                        let half = Some(HalfSection { axis: half.axis, flip: !half.flip });
+                        actions.push(DrawingAction::Command(Command::SetHalfSection { view: id, half }));
+                    }
+                    if ui.button("Remove half section").clicked() {
+                        actions.push(DrawingAction::Command(Command::SetHalfSection { view: id, half: None }));
+                    }
+                }
+            });
+        }
+        section_gap(ui);
+    }
     // Location labels and the sheet the view is on.
     theme::section_label(ui, "Location");
     let labels = display::location_labels(&s.doc.drawing);

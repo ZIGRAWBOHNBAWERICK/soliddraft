@@ -69,8 +69,9 @@ pub use update::{
     update_from_model,
 };
 pub use view::{
-    Accuracy, AccuracyCounts, AlignAxis, Alignment, Boundary, BrokenOut, Curve2, CurveKind, FoldDirection, HiddenLines,
-    Orientation, Polygon, TangentEdges, View, ViewDisplay, ViewGeometry, ViewKind, ViewScale,
+    Accuracy, AccuracyCounts, AlignAxis, Alignment, Boundary, Break, BreakGap, BrokenOut, Curve2, CurveKind,
+    FoldDirection, HalfSection, HiddenLines, Orientation, Polygon, TangentEdges, View, ViewDisplay, ViewGeometry,
+    ViewKind, ViewScale,
 };
 
 use serde::{Deserialize, Serialize};

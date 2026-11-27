@@ -630,11 +630,7 @@ mod tests {
     use soliddraft_kernel_api::drawing::{StandardView, ViewSpec};
 
     fn xf() -> ViewTransform {
-        ViewTransform {
-            frame: ViewSpec::standard(StandardView::Front).frame().unwrap(),
-            scale: 0.5,
-            centre: Point2::new(0.0, 0.0),
-        }
+        ViewTransform::new(ViewSpec::standard(StandardView::Front).frame().unwrap(), 0.5, Point2::new(0.0, 0.0))
     }
 
     #[test]

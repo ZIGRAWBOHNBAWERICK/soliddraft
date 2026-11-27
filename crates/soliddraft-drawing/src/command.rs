@@ -11,7 +11,10 @@ use crate::ids::{AnnotationId, ViewId};
 use crate::part::Part;
 use crate::sheet::{Projection, RevisionRow, Scale, Table, TableKind};
 use crate::update::{self, UpdateReport};
-use crate::view::{AlignAxis, Alignment, Boundary, BrokenOut, FoldDirection, View, ViewDisplay, ViewKind, ViewScale};
+use crate::view::{
+    AlignAxis, Alignment, Boundary, Break, BrokenOut, FoldDirection, HalfSection, View, ViewDisplay, ViewKind,
+    ViewScale,
+};
 use crate::{DocRef, Drawing, DrawingError, DrawingMeta, library, measure, project};
 
 /// One undoable change to a drawing.
@@ -313,6 +316,20 @@ pub enum Command {
         /// Index into the view's broken-out sections.
         index: usize,
     },
+    /// Give a view its breaks, or none. Remakes its line work.
+    SetViewBreaks {
+        /// The view.
+        view: ViewId,
+        /// The breaks, all running the same way.
+        breaks: Vec<Break>,
+    },
+    /// Make a view a half section, or a whole view again. Remakes its line work.
+    SetHalfSection {
+        /// The view.
+        view: ViewId,
+        /// The half section, or `None` for none.
+        half: Option<HalfSection>,
+    },
     /// Point an auxiliary view at another edge, the repair for a lost reference edge.
     ReattachView {
         /// The view.
@@ -383,6 +400,8 @@ impl Command {
             Command::SetViewCrop { .. } => "Crop view",
             Command::AddBrokenOut { .. } => "Broken-out section",
             Command::RemoveBrokenOut { .. } => "Remove broken-out section",
+            Command::SetViewBreaks { .. } => "Break view",
+            Command::SetHalfSection { .. } => "Half section",
             Command::ReattachView { .. } => "Reattach view",
         }
     }
@@ -655,6 +674,8 @@ pub fn apply(drawing: &mut Drawing, command: &Command) -> Result<(), DrawingErro
         | Command::SetViewCrop { .. }
         | Command::AddBrokenOut { .. }
         | Command::RemoveBrokenOut { .. }
+        | Command::SetViewBreaks { .. }
+        | Command::SetHalfSection { .. }
         | Command::ReattachView { .. } => Err(DrawingError::NeedsModel(command.name())),
     }
 }
@@ -782,6 +803,26 @@ pub fn apply_with(drawing: &mut Drawing, command: &Command, part: &Part) -> Resu
                 return Err(DrawingError::BadRequest(format!("{view} has no broken-out section {index}")));
             }
             v.broken_out.remove(*index);
+            update::regenerate_view(drawing, part, *view).map(|_| None)
+        }
+        Command::SetViewBreaks { view, breaks } => {
+            let v = drawing.view_mut(*view).ok_or(DrawingError::UnknownView(*view))?;
+            if matches!(v.kind, ViewKind::Detail { .. }) {
+                return Err(DrawingError::BadRequest(
+                    "a detail view shows its parent as it is; break the parent".into(),
+                ));
+            }
+            v.breaks = breaks.clone();
+            update::regenerate_view(drawing, part, *view).map(|_| None)
+        }
+        Command::SetHalfSection { view, half } => {
+            let v = drawing.view_mut(*view).ok_or(DrawingError::UnknownView(*view))?;
+            if half.is_some() && matches!(v.kind, ViewKind::Detail { .. } | ViewKind::Section { .. }) {
+                return Err(DrawingError::BadRequest(
+                    "a half section is made of a whole view, not a section or detail".into(),
+                ));
+            }
+            v.half = half.clone();
             update::regenerate_view(drawing, part, *view).map(|_| None)
         }
         Command::SetViewDisplay { view, display } => {

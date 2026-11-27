@@ -278,6 +278,8 @@ impl DrawingDoc {
                 | Command::SetViewCrop { view, .. }
                 | Command::AddBrokenOut { view, .. }
                 | Command::RemoveBrokenOut { view, .. }
+                | Command::SetViewBreaks { view, .. }
+                | Command::SetHalfSection { view, .. }
                 | Command::ReattachView { view, .. } => Some(*view),
                 Command::SetViewDisplay { view, display } => {
                     let before = self.drawing.view(*view).map(|v| v.display);
@@ -406,6 +408,8 @@ impl DrawingDoc {
             crop: None,
             broken_out: Vec::new(),
             exploded: false,
+            breaks: Vec::new(),
+            half: None,
         };
         let mut with_view = s.clone();
         with_view.views.push(view.clone());

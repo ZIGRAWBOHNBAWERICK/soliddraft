@@ -16,9 +16,9 @@ use soliddraft_drawing::display::{self as layout, Owner};
 use soliddraft_drawing::measure::{CurveShape, precision_for, shape_of, shape_of_curve};
 use soliddraft_drawing::project::{self, view_label_in};
 use soliddraft_drawing::{
-    AlignAxis, Anchor, Annotation, AnnotationKind, AnnotationState, Attach, Boundary, BrokenOut, Command, CurveKind,
-    DimType, DimensionSet, DrawingError, EntityRef, LinearOrientation, Part, PartIndex, SetKind, StyleOverrides,
-    ViewId, ViewKind, derived,
+    AlignAxis, Anchor, Annotation, AnnotationKind, AnnotationState, Attach, Boundary, Break, BrokenOut, Command,
+    CurveKind, DimType, DimensionSet, DrawingError, EntityRef, HalfSection, LinearOrientation, Part, PartIndex,
+    SetKind, StyleOverrides, ViewId, ViewKind, derived,
 };
 use soliddraft_kernel_api::{Point2, Vec3};
 
@@ -189,6 +189,8 @@ pub(super) fn derived_tool(
         DrawingTool::Auxiliary => auxiliary_tool(s, doc, hit, clicked, push),
         DrawingTool::Crop => crop_tool(s, sheet2, hit, p, clicked, push),
         DrawingTool::BrokenOut => broken_out_tool(s, sheet2, hit, p, clicked, push),
+        DrawingTool::Break => break_tool(s, doc, sheet2, hit, p, clicked, push),
+        DrawingTool::HalfSection => half_section_tool(s, doc, sheet2, hit, p, clicked, push),
         _ => {}
     }
 }
@@ -213,6 +215,31 @@ fn paint_draft(s: &DrawingSession, sheet2: &Sheet2<'_>, pointer: Option<Point2>)
             for q in pts {
                 painter.circle_filled(at(*q), 4.0, theme::accent());
             }
+        }
+        (DrawingTool::Break, [start]) => {
+            if let Some(q) = pv {
+                let [x0, y0, x1, y1] = v.geometry.bbox;
+                let ends = if (q.u - start.u).abs() >= (q.v - start.v).abs() {
+                    [[start.u, y0, start.u, y1], [q.u, y0, q.u, y1]]
+                } else {
+                    [[x0, start.v, x1, start.v], [x0, q.v, x1, q.v]]
+                };
+                for [a, b, c, d] in ends {
+                    painter.extend(egui::Shape::dashed_line(
+                        &[at(Point2::new(a, b)), at(Point2::new(c, d))],
+                        stroke,
+                        6.0,
+                        3.0,
+                    ));
+                }
+            }
+            painter.circle_filled(at(*start), 4.0, theme::accent());
+        }
+        (DrawingTool::HalfSection, [start]) => {
+            if let Some(q) = pv {
+                painter.extend(egui::Shape::dashed_line(&[at(*start), at(q)], stroke, 10.0, 3.0));
+            }
+            painter.circle_filled(at(*start), 4.0, theme::accent());
         }
         (DrawingTool::Section { .. }, [start]) => {
             if let Some(line) = cut_line(s, view, *start, s.draft.horizontal) {
@@ -503,6 +530,113 @@ pub fn finish_cut_action(state: &mut AppState) {
     for a in actions {
         state.push(crate::state::AppAction::Drawing(a));
     }
+}
+
+/// Two clicks on a view: the stretch between them along the way they lie furthest apart
+/// is left out, and the view closes up to a gap.
+#[allow(clippy::too_many_arguments)]
+fn break_tool(
+    s: &mut DrawingSession,
+    doc: &Document,
+    sheet2: &Sheet2<'_>,
+    hit: Option<Hit>,
+    p: Point2,
+    clicked: bool,
+    push: &mut impl FnMut(DrawingAction),
+) {
+    paint_draft(s, sheet2, Some(p));
+    if !clicked {
+        return;
+    }
+    let (Some(view), Some(start)) = (s.draft.view, s.draft.points.first().copied()) else {
+        let Some(view) = view_of_click(s, hit, p) else {
+            s.say("Click on the view to break");
+            return;
+        };
+        if matches!(s.doc.drawing.view(view).map(|v| &v.kind), Some(ViewKind::Detail { .. })) {
+            s.say("A detail view cannot be broken; break its parent");
+            return;
+        }
+        s.draft.view = Some(view);
+        s.draft.points = vec![to_view(s, view, p)];
+        s.say("Click where the stretch to leave out ends");
+        return;
+    };
+    let end = to_view(s, view, p);
+    let axis =
+        if (end.u - start.u).abs() >= (end.v - start.v).abs() { AlignAxis::Horizontal } else { AlignAxis::Vertical };
+    let ends = with_part(doc, |part, index| {
+        let ctx = derived::context(&s.doc.drawing, part, index, view)?;
+        Ok((ctx.xf.unproject(start), ctx.xf.unproject(end)))
+    });
+    let Some(existing) = s.doc.drawing.view(view).map(|v| v.breaks.clone()) else { return };
+    match ends {
+        Ok((from, to)) => {
+            let mut breaks = existing;
+            breaks.push(Break { from, to, axis, gap: Break::GAP });
+            push(DrawingAction::Command(Command::SetViewBreaks { view, breaks }));
+            push(DrawingAction::SetTool(DrawingTool::Select));
+            push(DrawingAction::Select(Some(DrawingSel::View(view))));
+            s.say("Break added");
+        }
+        Err(e) => s.say(format!("Break: {e}")),
+    }
+    s.draft.reset();
+}
+
+/// Two clicks on a model or projected view: the line through them is the symmetry axis.
+/// One side of it is drawn in section; the view's properties flip which.
+#[allow(clippy::too_many_arguments)]
+fn half_section_tool(
+    s: &mut DrawingSession,
+    doc: &Document,
+    sheet2: &Sheet2<'_>,
+    hit: Option<Hit>,
+    p: Point2,
+    clicked: bool,
+    push: &mut impl FnMut(DrawingAction),
+) {
+    paint_draft(s, sheet2, Some(p));
+    if !clicked {
+        return;
+    }
+    let (Some(view), Some(start)) = (s.draft.view, s.draft.points.first().copied()) else {
+        let Some(view) = view_of_click(s, hit, p) else {
+            s.say("Click on the view to half-section");
+            return;
+        };
+        if !matches!(
+            s.doc.drawing.view(view).map(|v| &v.kind),
+            Some(ViewKind::Base { .. } | ViewKind::Projected { .. })
+        ) {
+            s.say("A half section is made on a model or projected view");
+            return;
+        }
+        s.draft.view = Some(view);
+        s.draft.points = vec![snap_centre(s, view, to_view(s, view, p))];
+        s.say("Click a second point on the axis");
+        return;
+    };
+    let end = snap_centre(s, view, to_view(s, view, p));
+    if (end.u - start.u).hypot(end.v - start.v) < 1e-6 {
+        s.say("Click a second point away from the first");
+        return;
+    }
+    let axis = with_part(doc, |part, index| {
+        let ctx = derived::context(&s.doc.drawing, part, index, view)?;
+        Ok([ctx.xf.unproject(start), ctx.xf.unproject(end)])
+    });
+    match axis {
+        Ok(axis) => {
+            let half = Some(HalfSection { axis, flip: s.draft.flip });
+            push(DrawingAction::Command(Command::SetHalfSection { view, half }));
+            push(DrawingAction::SetTool(DrawingTool::Select));
+            push(DrawingAction::Select(Some(DrawingSel::View(view))));
+            s.say("Half section made");
+        }
+        Err(e) => s.say(format!("Half section: {e}")),
+    }
+    s.draft.reset();
 }
 
 /// Gives an existing section a new cutting line, keeping its letter, direction and

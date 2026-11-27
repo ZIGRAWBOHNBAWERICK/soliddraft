@@ -36,6 +36,8 @@ fn blank(drawing: &Drawing, kind: ViewKind, display: ViewDisplay) -> View {
         crop: None,
         broken_out: Vec::new(),
         exploded: false,
+        breaks: Vec::new(),
+        half: None,
     }
 }
 

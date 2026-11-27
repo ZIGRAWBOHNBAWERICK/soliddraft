@@ -214,6 +214,13 @@ pub(crate) struct Band {
 }
 
 impl Band {
+    /// The points whose coordinate along `axis` from the model origin lies in
+    /// `[lo, hi)`; either end may be infinite.
+    pub(crate) fn along(axis: Vec3, lo: f64, hi: f64) -> Band {
+        let size = [lo, hi].into_iter().filter(|v| v.is_finite()).fold(1.0f64, |m, v| m.max(v.abs()));
+        Band { origin: Vec3::ZERO, axis, start: 0.0, lo, hi, tol: BOUNDARY_TOL * size }
+    }
+
     fn station(&self, p: Vec3) -> f64 {
         self.start + (p - self.origin).dot(self.axis)
     }

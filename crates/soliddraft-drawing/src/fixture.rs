@@ -75,6 +75,8 @@ pub fn bracket_a3() -> Drawing {
             crop: None,
             broken_out: Vec::new(),
             exploded: false,
+            breaks: Vec::new(),
+            half: None,
         },
         View {
             id: TOP,
@@ -89,6 +91,8 @@ pub fn bracket_a3() -> Drawing {
             crop: None,
             broken_out: Vec::new(),
             exploded: false,
+            breaks: Vec::new(),
+            half: None,
         },
         View {
             id: LEFT,
@@ -103,6 +107,8 @@ pub fn bracket_a3() -> Drawing {
             crop: None,
             broken_out: Vec::new(),
             exploded: false,
+            breaks: Vec::new(),
+            half: None,
         },
         View {
             id: ISO,
@@ -117,6 +123,8 @@ pub fn bracket_a3() -> Drawing {
             crop: None,
             broken_out: Vec::new(),
             exploded: false,
+            breaks: Vec::new(),
+            half: None,
         },
     ];
 
@@ -394,6 +402,8 @@ fn view_geometry(view: StandardView, scale: f64, lines: fn(&mut Lines)) -> (View
         unproved: false,
         catallax: false,
         coarse: false,
+        breaks: Vec::new(),
+        symmetry: None,
     };
     (geometry, raw)
 }

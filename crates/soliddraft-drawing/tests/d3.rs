@@ -582,7 +582,7 @@ fn a_detail_on_sheet_two_and_its_parent_point_at_each_other() {
 fn unmarked_circular_hatch_boundaries_are_approximate_after_sampling() {
     use soliddraft_kernel_api::drawing::{Curve3, CurveSource, CutRegion, ViewCurve, ViewSpec};
     let frame = ViewSpec::new(Vec3::Z, Vec3::Y).frame().unwrap();
-    let xf = project::ViewTransform { frame, scale: 1.0, centre: Point2::new(0.0, 0.0) };
+    let xf = project::ViewTransform::new(frame, 1.0, Point2::new(0.0, 0.0));
     let circle = |radius| {
         ViewCurve::new(Curve3::Circle { center: Vec3::ZERO, normal: Vec3::Z, radius }, CurveSource::Unknown, true)
     };

@@ -93,11 +93,11 @@ fn history_discards_a_cached_preview_from_the_removed_sheet() {
     s.pending = Some(PendingView {
         projected: Projected {
             geometry: view.geometry.clone(),
-            transform: ViewTransform {
-                frame: ViewSpec::standard(StandardView::Front).frame().unwrap(),
-                scale: 1.0,
-                centre: Point2::new(0.0, 0.0),
-            },
+            transform: ViewTransform::new(
+                ViewSpec::standard(StandardView::Front).frame().unwrap(),
+                1.0,
+                Point2::new(0.0, 0.0),
+            ),
             circles: Vec::new(),
         },
         view,

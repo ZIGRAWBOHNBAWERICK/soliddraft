@@ -12,10 +12,10 @@ use soliddraft_document::{ContentHash, DocKind, DocRef, DocumentId, Resolution, 
 use soliddraft_drawing::export::{self, Format, PdfInfo};
 use soliddraft_drawing::file::{self, FileMeta};
 use soliddraft_drawing::{
-    AccuracyCounts, AnnotationId, AnnotationKind, Boundary, BrokenOut, Command, DatumRef, Drawing, DrawingError,
-    DrawingMeta, GdtCharacteristic, HiddenLines, LinearOrientation, MaterialCondition, ModelDimension, ModelMeasure,
-    NewDrawing, Part, PartIndex, RevisionRow, SetKind, SurfaceProcess, TangentEdges, Template, UndoStack, UpdateReport,
-    ViewId, annotate, derived, display, project,
+    AccuracyCounts, AlignAxis, AnnotationId, AnnotationKind, Boundary, Break, BrokenOut, Command, DatumRef, Drawing,
+    DrawingError, DrawingMeta, GdtCharacteristic, HalfSection, HiddenLines, LinearOrientation, MaterialCondition,
+    ModelDimension, ModelMeasure, NewDrawing, Part, PartIndex, RevisionRow, SetKind, SurfaceProcess, TangentEdges,
+    Template, UndoStack, UpdateReport, ViewId, annotate, derived, display, project,
 };
 use soliddraft_kernel_api::drawing::StandardView;
 use soliddraft_kernel_api::{BooleanOp, Kernel, Point2, Vec3};
@@ -75,6 +75,15 @@ letter, or a view id. View edits:
   --crop <view>:<x,y,z>:<x,y,z>             keep the rectangle between two model points
   --broken-out <view>:<x,y,z>:<radius>:<depth>
                                              cut away a circle to a depth (model mm)
+  --break <view>:<x,y,z>:<x,y,z>:h|v[:<gap>]
+                                             leave out the stretch of the view between
+                                             two model points, horizontally or
+                                             vertically, closed up to a gap (default
+                                             6 sheet mm); dimensions keep model lengths
+  --half-section <view>:<x,y,z>:<x,y,z>[:flip]
+                                             cut open the side left of the symmetry line
+                                             through two model points, to the plane
+                                             through it; flip cuts the right side
   --display <view>:hidden=removed|visible   hidden lines
   --display <view>:tangent=removed|phantom|visible
                                              tangent edges
@@ -154,6 +163,8 @@ enum Step2 {
     Aux { parent: String, near: Vec3, flip: bool, sheet: Option<usize> },
     Crop { view: String, a: Vec3, b: Vec3 },
     BrokenOut { view: String, at: Vec3, radius: f64, depth: f64 },
+    Break { view: String, from: Vec3, to: Vec3, axis: AlignAxis, gap: f64 },
+    Half { view: String, axis: [Vec3; 2], flip: bool },
     Display { view: String, key: String, value: String },
     Set { kind: SetKind, view: String, orientation: LinearOrientation, offset: f64, points: Vec<Vec3> },
     Gdt { view: String, at: Vec3, body: AnnotationKind, offset: Option<Point2> },
@@ -312,6 +323,29 @@ fn parse_step(flag: &str, value: &str) -> Result<Step2, String> {
                 radius: number(r, "a radius")?,
                 depth: number(depth, "a depth")?,
             })
+        }
+        "--break" => {
+            let parts: Vec<&str> = value.split(':').collect();
+            let (view, from, to, dir, gap) = match parts[..] {
+                [v, a, b, d] => (v, a, b, d, None),
+                [v, a, b, d, g] => (v, a, b, d, Some(g)),
+                _ => return Err(bad("<view>:<x,y,z>:<x,y,z>:h|v[:<gap>]")),
+            };
+            let axis = match orientation(dir)? {
+                LinearOrientation::Horizontal => AlignAxis::Horizontal,
+                _ => AlignAxis::Vertical,
+            };
+            let gap = gap.map(|g| number(g, "a break gap")).transpose()?.unwrap_or(Break::GAP);
+            Ok(Step2::Break { view: view.into(), from: point(from)?, to: point(to)?, axis, gap })
+        }
+        "--half-section" => {
+            let parts: Vec<&str> = value.split(':').collect();
+            let (view, a, b, flip) = match parts[..] {
+                [v, a, b] => (v, a, b, false),
+                [v, a, b, "flip"] => (v, a, b, true),
+                _ => return Err(bad("<view>:<x,y,z>:<x,y,z>[:flip]")),
+            };
+            Ok(Step2::Half { view: view.into(), axis: [point(a)?, point(b)?], flip })
         }
         "--display" => {
             let Some((view, setting)) = value.split_once(':') else { return Err(bad("<view>:<key>=<value>")) };
@@ -481,8 +515,8 @@ fn parse(args: &[String]) -> Result<Options, String> {
                 o.reattach.push((id(a.to_owned(), "--reattach")?, end, Vec3::new(x, y, z)));
             }
             flag @ ("--section" | "--offset-section" | "--aligned-section" | "--detail" | "--aux" | "--crop"
-            | "--broken-out" | "--display" | "--ordinate" | "--baseline" | "--chain" | "--gdt" | "--datum"
-            | "--finish" | "--revision" | "--revision-symbol") => {
+            | "--broken-out" | "--break" | "--half-section" | "--display" | "--ordinate" | "--baseline"
+            | "--chain" | "--gdt" | "--datum" | "--finish" | "--revision" | "--revision-symbol") => {
                 let v = value(flag)?;
                 o.steps.push(parse_step(flag, &v)?);
             }
@@ -1141,6 +1175,16 @@ fn apply_steps(drawing: &mut Drawing, part: &Part, steps: &[Step2]) -> Result<()
                 let ctx = derived::context(drawing, part, &index, view).map_err(err)?;
                 let boundary = Boundary::Circle { center: ctx.xf.point(*at), radius: radius * ctx.xf.scale };
                 Command::AddBrokenOut { view, broken_out: BrokenOut { boundary, depth: *depth } }
+            }
+            Step2::Break { view, from, to, axis, gap } => {
+                let view = find_view(drawing, view)?;
+                let mut breaks = drawing.view(view).expect("found").breaks.clone();
+                breaks.push(Break { from: *from, to: *to, axis: *axis, gap: *gap });
+                Command::SetViewBreaks { view, breaks }
+            }
+            Step2::Half { view, axis, flip } => {
+                let view = find_view(drawing, view)?;
+                Command::SetHalfSection { view, half: Some(HalfSection { axis: *axis, flip: *flip }) }
             }
             Step2::Display { view, key, value } => {
                 let view = find_view(drawing, view)?;

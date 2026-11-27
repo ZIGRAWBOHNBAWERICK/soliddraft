@@ -445,6 +445,8 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
         DrawingTool::PlaceView(_)
             | DrawingTool::Section { .. }
             | DrawingTool::Detail
+            | DrawingTool::Break
+            | DrawingTool::HalfSection
             | DrawingTool::Auxiliary
             | DrawingTool::HoleCallout
     );
@@ -501,7 +503,9 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
         | DrawingTool::Detail
         | DrawingTool::Auxiliary
         | DrawingTool::Crop
-        | DrawingTool::BrokenOut => {
+        | DrawingTool::BrokenOut
+        | DrawingTool::Break
+        | DrawingTool::HalfSection => {
             tools::derived_tool(s, doc, &sheet2, &lctx, hit, pointer, ctrl, clicked, resp.double_clicked(), &mut push);
         }
         DrawingTool::DimensionSet(kind) => {

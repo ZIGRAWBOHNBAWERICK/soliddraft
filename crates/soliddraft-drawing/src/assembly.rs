@@ -374,6 +374,8 @@ pub fn make_assembly_drawing(model: &AssemblyModel<'_>, new: &NewAssemblyDrawing
             crop: None,
             broken_out: Vec::new(),
             exploded: new.exploded && !model.exploded.is_empty(),
+            breaks: Vec::new(),
+            half: None,
         });
     }
     if new.balloons {

@@ -44,6 +44,13 @@ pub struct View {
     /// For a view of an assembly: it shows the assembly's exploded view.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub exploded: bool,
+    /// Breaks: stretches of a long part left out, the rest closed up to a gap. All of a
+    /// view's breaks run across the same sheet direction.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub breaks: Vec<Break>,
+    /// A half section: one side of a symmetry line cut open to the plane through it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub half: Option<HalfSection>,
 }
 
 impl View {
@@ -302,6 +309,43 @@ pub struct BrokenOut {
     pub depth: f64,
 }
 
+/// A break in a view: the stretch of the part between two model points along one sheet
+/// direction is left out, and the view closes up to a gap between two break lines. The
+/// line work keeps its model references and the view its scale; dimensions across the
+/// break measure the model, so they keep their full length.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Break {
+    /// One end of the stretch left out, a model point.
+    pub from: Vec3,
+    /// The other end, a model point.
+    pub to: Vec3,
+    /// The sheet direction the view is shortened along: horizontal leaves out a stretch
+    /// of the view's width, vertical of its height.
+    pub axis: AlignAxis,
+    /// The gap between the two break lines, in sheet millimetres.
+    pub gap: f64,
+}
+
+impl Break {
+    /// The default gap between break lines, in sheet millimetres.
+    pub const GAP: f64 = 6.0;
+}
+
+/// A half section of a symmetric part: on one side of the symmetry line the material in
+/// front of the plane through that line, facing the eye, is removed and the cut is
+/// hatched; the other side shows the outside. The symmetry line is drawn as a centre
+/// line.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct HalfSection {
+    /// Two model points on the symmetry line. The cutting plane holds the line and faces
+    /// the eye.
+    pub axis: [Vec3; 2],
+    /// False cuts the side to the left of the line run from its first point to its
+    /// second, as the view shows it; true cuts the right side.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub flip: bool,
+}
+
 /// The orientation of a base view.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -479,6 +523,23 @@ pub struct ViewGeometry {
     /// Older caches have unknown quality and must be regenerated for export.
     #[serde(default = "unknown_quality")]
     pub coarse: bool,
+    /// Where the view's breaks close up, in view millimetres, for the break lines.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub breaks: Vec<BreakGap>,
+    /// A half section's symmetry line across the view, in view millimetres.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub symmetry: Option<[Point2; 2]>,
+}
+
+/// A closed-up break as drawn: two break lines `gap` apart across the view.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct BreakGap {
+    /// The sheet direction the view is shortened along.
+    pub axis: AlignAxis,
+    /// Where the first break line crosses that direction, in view millimetres.
+    pub at: f64,
+    /// The gap to the second break line, in sheet millimetres.
+    pub gap: f64,
 }
 
 fn unknown_quality() -> bool {

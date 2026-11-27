@@ -296,6 +296,50 @@ pub(super) fn boundary_items(view: &View, ctx: &Context<'_>, items: &mut Vec<Ite
     for b in &view.broken_out {
         push(&b.boundary);
     }
+    let o = view.position;
+    let at = |p: Point2| Point2::new(p.u + o.u, p.v + o.v);
+    // A half section's symmetry line: a thin chain line, as any centre line.
+    if let Some([a, b]) = view.geometry.symmetry {
+        items.push(Item::Path(PathItem {
+            path: line(at(a), at(b)),
+            width: ctx.format.lines.centre,
+            dash: Some(super::CENTRE_DASH.to_vec()),
+            role: Role::Boundary,
+            owner: Owner::View(view.id),
+            fill: false,
+            accuracy: None,
+        }));
+    }
+    // Break lines: a thin line across the view on each side of a gap, with one zigzag
+    // (ISO 128-30).
+    let [x0, y0, x1, y1] = view.geometry.bbox;
+    for g in &view.geometry.breaks {
+        let vertical = g.axis == crate::view::AlignAxis::Vertical;
+        let (from, to) = if vertical { (x0 - 3.0, x1 + 3.0) } else { (y0 - 3.0, y1 + 3.0) };
+        let mid = (from + to) / 2.0;
+        let z = 2.0f64.min((to - from) / 8.0);
+        for along in [g.at, g.at + g.gap] {
+            let p = |across: f64, off: f64| {
+                if vertical { at(Point2::new(across, along + off)) } else { at(Point2::new(along + off, across)) }
+            };
+            items.push(Item::Path(PathItem {
+                path: polyline(&[
+                    p(from, 0.0),
+                    p(mid - z, 0.0),
+                    p(mid - z / 3.0, z),
+                    p(mid + z / 3.0, -z),
+                    p(mid + z, 0.0),
+                    p(to, 0.0),
+                ]),
+                width: ctx.format.lines.thin,
+                dash: None,
+                role: Role::Boundary,
+                owner: Owner::View(view.id),
+                fill: false,
+                accuracy: None,
+            }));
+        }
+    }
 }
 
 fn label(pos: Point2, height: f64, text: String, halign: Align, valign: VAlign, role: Role, owner: Owner) -> Item {

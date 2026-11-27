@@ -123,6 +123,10 @@ pub enum DrawingTool {
     /// A detail view: a click for the centre, one for the radius (or several for a
     /// profile), one to place.
     Detail,
+    /// A break: two clicks on a view mark the stretch left out.
+    Break,
+    /// A half section: two clicks on a view mark its symmetry axis.
+    HalfSection,
     /// An auxiliary view: click the reference edge, then place.
     Auxiliary,
     /// Crop a view to a rectangle: two corners.
@@ -159,6 +163,8 @@ impl DrawingTool {
             DrawingTool::Section { replace: None } => "Section view",
             DrawingTool::Section { replace: Some(_) } => "Redraw cutting line",
             DrawingTool::Detail => "Detail view",
+            DrawingTool::Break => "Break view",
+            DrawingTool::HalfSection => "Half section",
             DrawingTool::Auxiliary => "Auxiliary view",
             DrawingTool::Crop => "Crop view",
             DrawingTool::BrokenOut => "Broken-out section",
@@ -182,6 +188,8 @@ impl DrawingTool {
                 | DrawingTool::Auxiliary
                 | DrawingTool::Crop
                 | DrawingTool::BrokenOut
+                | DrawingTool::Break
+                | DrawingTool::HalfSection
         )
     }
 
@@ -246,6 +254,14 @@ impl DrawingTool {
             DrawingTool::Section { .. } => match picks {
                 0 => "Section · click where the cutting line starts; circle centres snap".into(),
                 _ => "Section · move for a horizontal or vertical line, click to finish it".into(),
+            },
+            DrawingTool::Break => match picks {
+                0 => "Break · click on a view where the stretch to leave out starts".into(),
+                _ => "Break · click where it ends; the longer move picks horizontal or vertical".into(),
+            },
+            DrawingTool::HalfSection => match picks {
+                0 => "Half section · click a point on the view's symmetry axis; circle centres snap".into(),
+                _ => "Half section · click a second point on the axis".into(),
             },
             DrawingTool::Detail if pending => "Detail · click to place the magnified view".into(),
             DrawingTool::Detail => match picks {
@@ -1784,6 +1800,8 @@ pub(crate) fn run_command(state: &mut AppState, cmd: Command) -> Result<(), Stri
             | Command::SetViewCrop { .. }
             | Command::AddBrokenOut { .. }
             | Command::RemoveBrokenOut { .. }
+            | Command::SetViewBreaks { .. }
+            | Command::SetHalfSection { .. }
             | Command::ReattachView { .. }
             | Command::SetViewDisplay { .. }
     );

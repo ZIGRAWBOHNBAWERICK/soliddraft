@@ -7,12 +7,12 @@ use soliddraft_kernel_catallax::CatallaxKernel;
 use super::{DatumRef, FaceRef, InspectionPlan};
 use crate::{Command, Document, FeatureId, FeatureKind, ImportStepFeature};
 
-const PART: &str = "P1 bracket, \"L\"";
-const REVISION: &str = "Rev, \"B\"\r\nreleased";
-const NOTE: &str = "Deburr, \"do not polish\"\nSee drawing.";
+pub(super) const PART: &str = "P1 bracket, \"L\"";
+pub(super) const REVISION: &str = "Rev, \"B\"\r\nreleased";
+pub(super) const NOTE: &str = "Deburr, \"do not polish\"\nSee drawing.";
 const BRACKET: &[u8] = include_bytes!("../../../../../ci/fixtures/pmi/p1-bracket-pmi.step");
 
-fn bracket() -> (Document, FeatureId) {
+pub(super) fn bracket() -> (Document, FeatureId) {
     let mut doc = Document::new(PART, Arc::new(CatallaxKernel::new()));
     let import = doc
         .execute(Command::AddFeature {
@@ -138,8 +138,166 @@ fn planar_inspection_qif_exports_width_and_reports_unrepresentable_requirements(
     }
 }
 
+#[test]
+fn typed_position_frames_keep_each_segment_and_its_datum_order() {
+    use super::as9102::tests::{characteristics, read};
+    use super::{Applicability, FrameSegment, InspectionGroup, InspectionKind, PmiRow};
+    use soliddraft_kernel_api::pmi::{
+        DatumTarget, Decimal, MaterialCondition, PositionControl, PositionFrame, PositionSegment, ProjectedZone,
+        TargetKind,
+    };
+
+    let (doc, _) = bracket();
+    let mut plan = InspectionPlan::from_document(&doc, Some(REVISION));
+    let face_group = |letter| doc.pmi().datum_feature(letter).unwrap().clone();
+    let (a, b, c) = (face_group("A"), face_group("B"), face_group("C"));
+    let segment = |value: &str, material, letters: &[&str]| PositionSegment {
+        value_mm: Decimal::parse(value).unwrap(),
+        diameter_zone: true,
+        material,
+        datums: letters.iter().map(|letter| DatumRef::new(letter)).collect(),
+    };
+    let group = |id: &str, kind| {
+        InspectionGroup::from_pmi(PmiRow {
+            item: PmiItem { id: id.into(), kind },
+            measured: Vec::new(),
+            on_body: None,
+            hole: None,
+            located: Vec::new(),
+            problem: None,
+            feature: None,
+            placements: Vec::new(),
+            depth: None,
+            body: None,
+        })
+    };
+    // The bracket's datum definitions stay, so QIF can resolve the frames.
+    let mut groups: Vec<_> =
+        plan.groups.drain(..).filter(|group| group.rows.iter().any(|row| row.kind == InspectionKind::Datum)).collect();
+    assert_eq!(groups.len(), 3);
+    groups.extend([
+        group(
+            "Target A1",
+            PmiKind::DatumTarget(DatumTarget {
+                datum: "A".into(),
+                number: 1,
+                face: a[0].clone(),
+                point_mm: [40.0, 25.0, 10.0],
+                kind: TargetKind::Point,
+            }),
+        ),
+        group(
+            "Bore pattern",
+            PmiKind::PositionControl(PositionControl {
+                features: vec![b.clone(), c.clone()],
+                frame: PositionFrame::Composite {
+                    upper: segment("0.10", MaterialCondition::Maximum, &["A", "B", "C"]),
+                    lower: segment("0.04", MaterialCondition::Least, &["A", "B"]),
+                },
+            }),
+        ),
+        group(
+            "Projection",
+            PmiKind::PositionControl(PositionControl {
+                features: vec![c.clone()],
+                frame: PositionFrame::Single {
+                    segment: segment("0.15", MaterialCondition::Regardless, &["A"]),
+                    projected_zone: Some(ProjectedZone {
+                        height_mm: Decimal::parse("8").unwrap(),
+                        direction: [0.0, 0.0, 1.0],
+                        entry_faces: a.clone(),
+                    }),
+                },
+            }),
+        ),
+    ]);
+    plan.groups = groups;
+
+    let letters = |datums: &[DatumRef]| datums.iter().map(|datum| datum.letter.clone()).collect::<Vec<_>>();
+    let target = &plan.groups[3];
+    assert_eq!(target.rows.len(), 1);
+    assert_eq!(target.rows[0].id, "pmi/Target A1/datum_target");
+    assert_eq!(target.rows[0].applicability(target), Applicability::Reference);
+    assert_eq!(target.rows[0].faces(target), &[vec![a[0].clone()]]);
+    let pattern = &plan.groups[4];
+    let expected = [
+        ("pmi/Bore pattern/1/composite_position_upper", FrameSegment::CompositeUpper, 0.1, vec!["A", "B", "C"], &b),
+        ("pmi/Bore pattern/1/composite_position_lower", FrameSegment::CompositeLower, 0.04, vec!["A", "B"], &b),
+        ("pmi/Bore pattern/2/composite_position_upper", FrameSegment::CompositeUpper, 0.1, vec!["A", "B", "C"], &c),
+        ("pmi/Bore pattern/2/composite_position_lower", FrameSegment::CompositeLower, 0.04, vec!["A", "B"], &c),
+    ];
+    assert_eq!(pattern.rows.len(), expected.len());
+    for (row, (id, segment, limit, datums, faces)) in pattern.rows.iter().zip(expected) {
+        assert_eq!(row.id, id);
+        let material =
+            if segment == FrameSegment::CompositeUpper { MaterialCondition::Maximum } else { MaterialCondition::Least };
+        assert_eq!(row.kind, InspectionKind::Position { segment, diameter: true, material });
+        assert_eq!(row.applicability(pattern), Applicability::Inspect);
+        assert_eq!((row.nominal, row.lower_limit, row.upper_limit), (None, None, Some(limit)));
+        assert_eq!(letters(row.datums(pattern)), datums);
+        assert_eq!(row.faces(pattern), std::slice::from_ref(faces));
+    }
+    let projection = &plan.groups[5];
+    assert_eq!(projection.rows[0].id, "pmi/Projection/1/projected_position");
+    assert_eq!(letters(projection.rows[0].datums(projection)), ["A"]);
+
+    let mut csv = Vec::new();
+    plan.write_csv(&mut csv).unwrap();
+    let records = parse_csv(&csv);
+    let col = |name| records[0].iter().position(|column| column == name).unwrap();
+    let ids: Vec<_> = plan.groups.iter().flat_map(|group| &group.rows).map(|row| row.id.as_str()).collect();
+    assert_eq!(records[1..].iter().map(|record| record[col("characteristic_id")].as_str()).collect::<Vec<_>>(), ids);
+    let order = |text: &str| letters(&serde_json::from_str::<Vec<DatumRef>>(text).unwrap());
+    let record = |id: &str| records.iter().find(|record| record[col("characteristic_id")] == id).unwrap();
+    let lower = record("pmi/Bore pattern/1/composite_position_lower");
+    assert_eq!(order(&lower[col("datum_order")]), ["A", "B"], "the lower segment's own frame");
+    assert_eq!(order(&record("pmi/Bore pattern/1/composite_position_upper")[col("datum_order")]), ["A", "B", "C"]);
+    assert_eq!(record("pmi/Projection/1/projected_position")[col("upper_limit")], "0.15");
+    assert!(
+        records[1..].iter().all(|record| record[col("actual")].is_empty() && record[col("disposition")].is_empty())
+    );
+
+    let sheets = read(&plan.as9102_xlsx(None).unwrap());
+    let rows = characteristics(&sheets[2].1);
+    for (row, record) in rows.iter().zip(&records[1..]) {
+        assert_eq!(row["5. Char. No."], record[col("characteristic_id")]);
+        assert_eq!(row["Kind"], record[col("kind")]);
+        assert_eq!(row["Upper Limit"].parse::<f64>().ok(), record[col("upper_limit")].parse::<f64>().ok());
+        let workbook = if row["Datum Order (JSON)"].is_empty() { "[]" } else { &row["Datum Order (JSON)"] };
+        assert_eq!(order(workbook), order(&record[col("datum_order")]));
+        assert!(row["9. Results"].is_empty() && row["Disposition"].is_empty());
+    }
+
+    let metadata = soliddraft_exchange::qif::Metadata {
+        qpid: "0d9a4bb0-5f2f-4a0d-9b7a-3ad2c9e1f4b1",
+        organization: "ISO",
+        designator: "1101",
+        year: Some("2017"),
+    };
+    let mut qif = Vec::new();
+    let omitted = plan.write_qif(&mut qif, metadata).unwrap();
+    let skipped: Vec<_> = omitted.iter().map(|o| (o.characteristic_id.as_str(), o.reason)).collect();
+    assert_eq!(
+        skipped,
+        [
+            ("pmi/Target A1/datum_target", "datum target has no QIF mapping in this profile"),
+            (
+                "pmi/Bore pattern/1/composite_position_lower",
+                "composite lower segment has no QIF mapping in this profile"
+            ),
+            (
+                "pmi/Bore pattern/2/composite_position_lower",
+                "composite lower segment has no QIF mapping in this profile"
+            ),
+            ("pmi/Projection/1/projected_position", "projected tolerance zone has no QIF mapping in this profile"),
+        ]
+    );
+    let xml = std::str::from_utf8(&qif).unwrap();
+    assert!(xml.contains("value=\"pmi/Bore pattern/1/composite_position_upper\""));
+}
+
 /// Test reader for the CSV wire format, independent of the writer and its column ordering.
-fn parse_csv(csv: &[u8]) -> Vec<Vec<String>> {
+pub(super) fn parse_csv(csv: &[u8]) -> Vec<Vec<String>> {
     let mut records = Vec::new();
     let mut record = Vec::new();
     let mut field = String::new();

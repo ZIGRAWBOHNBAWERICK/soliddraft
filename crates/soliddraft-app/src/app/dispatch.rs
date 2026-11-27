@@ -537,13 +537,8 @@ impl SolidDraftApp {
                 let Some(path) = crate::platform::save_path("Drawing and files", "STEP", "step", &name) else {
                     return;
                 };
-                let written = crate::app_tools::AppTools { state: &mut self.state }
-                    .manufacturing_package(&serde_json::json!({ "path": path }));
-                match written {
-                    Ok(report) => {
-                        let text = crate::pmi::package_summary(&report);
-                        self.state.note(text, NoteKind::Info);
-                    }
+                match crate::pmi::ribbon_package(&mut self.state, &path) {
+                    Ok(text) => self.state.note(text, NoteKind::Info),
                     Err(error) => self.state.note(error, NoteKind::Error),
                 }
             }

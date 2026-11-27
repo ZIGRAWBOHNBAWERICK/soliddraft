@@ -8,7 +8,10 @@ use std::io::ErrorKind;
 use std::path::PathBuf;
 
 use bracket::{annotate, build, call, faces, state};
+use egui_kittest::Harness;
+use egui_kittest::kittest::Queryable;
 use serde_json::json;
+use soliddraft_app::drawing::revision_review::{MarkupFileAction, RevisionReview};
 use soliddraft_app::review::{FaceOrigin, ReviewerMarkup, SavedRevision};
 use soliddraft_document::{DocumentId, identify_file};
 use soliddraft_kernel_api::pmi::{PmiKind, Tolerance};
@@ -52,6 +55,7 @@ fn saved_bracket_revisions_report_fit_finish_and_measured_changes_and_keep_marku
     let candidate_path = scratch.0.join("bracket-b.dwprt");
     let reordered_path = scratch.0.join("bracket-b-reordered.dwprt");
     let markup_path = scratch.0.join("bracket-b-review.json");
+    let drawing_markup_path = scratch.0.join("drawing-review.json");
     let mut app = state("P1 bracket");
     build(&mut app);
     annotate(&mut app);
@@ -86,7 +90,7 @@ fn saved_bracket_revisions_report_fit_finish_and_measured_changes_and_keep_marku
     let original_b = fs::read(&candidate_path).unwrap();
     let baseline = SavedRevision::open(&baseline_path, kernel.clone()).unwrap();
     let candidate = SavedRevision::open(&candidate_path, kernel.clone()).unwrap();
-    let reordered = SavedRevision::open(&reordered_path, kernel).unwrap();
+    let reordered = SavedRevision::open(&reordered_path, kernel.clone()).unwrap();
     let review = baseline.compare(&candidate);
     assert_eq!(baseline.issues().chain(candidate.issues()).collect::<Vec<_>>(), []);
     assert_eq!(baseline.pin().document, candidate.pin().document);
@@ -130,6 +134,67 @@ fn saved_bracket_revisions_report_fit_finish_and_measured_changes_and_keep_marku
     for path in [&baseline_path, &candidate_path] {
         assert_eq!(reopened.save_new(path).unwrap_err().kind(), ErrorKind::AlreadyExists);
     }
+
+    let stale_markup = baseline.markup(Some("Bore diameter"), "Older review".into()).unwrap();
+    let stale_path = scratch.0.join("stale-review.json");
+    stale_markup.save_new(&stale_path).unwrap();
+
+    let mut panel = Harness::builder().with_size(egui::vec2(600.0, 520.0)).build_ui_state(
+        |ui, review| {
+            if review.show(ui) == Some(MarkupFileAction::SaveAs) {
+                review.save_markup(&drawing_markup_path).unwrap();
+            }
+        },
+        RevisionReview::new(baseline, candidate),
+    );
+    panel.get_by_label("Changed · Bore finish").click();
+    panel.run_steps(2);
+    panel.get_by_label("Ra 1.6");
+    panel.get_by_label("Ra 0.8");
+    panel.get_by_label("Added · Boss finish replacement");
+    panel.get_by_label("Changed · Bore diameter").click();
+    panel.run_steps(2);
+    panel.get_by_label("Ø8 H7");
+    panel.get_by_label("Ø10 H8");
+    panel.get_by_label("Candidate − baseline: +2 mm");
+    panel.get_by_label("Attach markup to selected item").click();
+    panel.run_steps(2);
+    assert_eq!(panel.state().save_markup(&drawing_markup_path).unwrap_err().kind(), ErrorKind::InvalidInput);
+    panel.get_by_label("Comment").focus();
+    panel.run_steps(2);
+    panel.get_by_label("Comment").type_text("Check the new bore fit.");
+    panel.run_steps(2);
+
+    // Looking at another row cannot silently retarget a draft.
+    panel.get_by_label("Removed · Boss finish").click();
+    panel.run_steps(2);
+    panel.get_by_label("Removed items cannot receive candidate markup.");
+    panel.get_by_label("Attached to: Bore diameter");
+    panel.get_by_label("Save markup as…").click();
+    panel.run_steps(2);
+    for path in [&drawing_markup_path, &baseline_path, &candidate_path] {
+        assert_eq!(panel.state().save_markup(path).unwrap_err().kind(), ErrorKind::AlreadyExists);
+    }
+    drop(panel);
+
+    let mut reopened_panel = Harness::builder().with_size(egui::vec2(600.0, 520.0)).build_ui_state(
+        |ui, review| {
+            if review.show(ui) == Some(MarkupFileAction::Open) {
+                review.open_markup(&drawing_markup_path).unwrap();
+            }
+        },
+        RevisionReview::new(
+            SavedRevision::open(&baseline_path, kernel.clone()).unwrap(),
+            SavedRevision::open(&candidate_path, kernel).unwrap(),
+        ),
+    );
+    reopened_panel.get_by_label("Open markup…").click();
+    reopened_panel.run_steps(2);
+    reopened_panel.get_by_label("Attached to: Bore diameter");
+    reopened_panel.get_by_label("Candidate − baseline: +2 mm");
+    assert_eq!(reopened_panel.state().draft().unwrap().text, "Check the new bore fit.");
+    assert_eq!(reopened_panel.state_mut().open_markup(&stale_path).unwrap_err().kind(), ErrorKind::InvalidData);
+    assert_eq!(reopened_panel.state().draft().unwrap().text, "Check the new bore fit.");
     assert_eq!(fs::read(baseline_path).unwrap(), original_a);
     assert_eq!(fs::read(candidate_path).unwrap(), original_b);
 }

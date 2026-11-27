@@ -12,6 +12,7 @@ pub mod part;
 pub mod properties_d3;
 pub mod properties_drawing;
 pub mod reference;
+pub mod revision_review;
 pub mod sheets;
 pub mod tools;
 pub mod tree_drawing;

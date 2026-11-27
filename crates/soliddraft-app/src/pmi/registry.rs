@@ -159,8 +159,20 @@ fn answer_params() -> Vec<(&'static str, Value)> {
 
 fn package_params() -> Vec<(&'static str, Value)> {
     vec![
-        ("path", string("The STEP file to write, ending in .step; the drawing goes beside it as .pdf and .dxf")),
+        (
+            "path",
+            string(
+                "The STEP file to write, ending in .step; the drawing goes beside it as .pdf and .dxf, and the \
+                 inspection plan as .csv and an AS9102 workbook as .xlsx",
+            ),
+        ),
         ("template", optional(string("The sheet template's id; iso-a3 when left out"))),
+        ("inspection", optional(boolean("Write the inspection CSV and AS9102 workbook too; true when left out"))),
+        (
+            "part_number",
+            optional(string("The manufacturing part number for AS9102 Form 1, only as the user states it")),
+        ),
+        ("revision", optional(string("The part revision for the inspection files, only as the user states it"))),
     ]
 }
 
@@ -181,7 +193,8 @@ pub(crate) fn commands() -> Vec<CommandSpec> {
             "manufacturing_package",
             "Drawing and files",
             Icon::Cad("drawing"),
-            "Write the STEP file with its manufacturing information and a drawing of it as PDF and DXF",
+            "Write the STEP file with its manufacturing information, a drawing of it as PDF and DXF, and its \
+             inspection plan as CSV and an AS9102 workbook",
         )
         .on(RibbonTab::Inspect, "Annotate", Size::Large)
         .shown(|s| !s.in_sketch())
@@ -189,9 +202,12 @@ pub(crate) fn commands() -> Vec<CommandSpec> {
         .when(|s| s.doc.display_body().is_some() && !s.doc.proof_pending() && s.doc.model().live_bodies().len() == 1)
         .agents(
             Agents::Tool,
-            "Writes path (.step) with the part's manufacturing information, and a drawing made from it as .pdf and .dxf \
-             beside it. The answer lists what the drawing shows, what it could not show, what overlaps and what is on \
-             the drawing but not in the file. The drawing becomes the active document, in place of an open drawing.",
+            "Writes path (.step) with the part's manufacturing information, a drawing made from it as .pdf and .dxf \
+             beside it, and unless inspection is false the inspection plan as .csv and an AS9102 first article \
+             workbook as .xlsx. Give part_number and revision only when the user states them. The answer lists what \
+             the drawing shows, what it could not show, what overlaps, what is on the drawing but not in the file, \
+             and the characteristics that cannot be inspected as they stand. The drawing becomes the active \
+             document, in place of an open drawing.",
             package_params,
         )
         .undo(Undo::Replaces),

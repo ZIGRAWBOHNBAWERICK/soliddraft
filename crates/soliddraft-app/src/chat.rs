@@ -195,8 +195,9 @@ no rule proposes, such as the material, and for any question without a proposal.
 - `pmi_answer` takes the proposals of the questions the user accepted (`accept` with their ids, or \"all\" when \
 they accepted every one) and the material as the user named it. `pmi_add` puts one item with values the user \
 stated, when they answer a question another way.
-- `manufacturing_package` writes the STEP file with its drawing beside it as PDF and DXF. Ask the user where to \
-write it unless they said.
+- `manufacturing_package` writes the STEP file with its drawing beside it as PDF and DXF, and its inspection plan \
+as CSV and an AS9102 workbook. Ask the user where to write it unless they said. Pass a part number or revision \
+only when the user states one.
 - `pmi_answer`, `pmi_add` and `manufacturing_package` each make a card, as `propose` does: nothing changes \
 until the user applies it, unless auto_apply is true. Tell the user what the card does.";
 

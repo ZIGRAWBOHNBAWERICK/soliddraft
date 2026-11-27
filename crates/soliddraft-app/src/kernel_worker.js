@@ -1,6 +1,5 @@
-// The browser's kernel worker. The page starts it with the address of its wasm-bindgen
-// glue and its compiled WebAssembly module (kernel_worker.rs), so the worker runs the
-// same application code with its own memory and its own Catallax kernel.
+// The browser's kernel worker. Load its WebAssembly module when the first job
+// starts the worker. Jobs wait in the queue while the module loads.
 //
 // Jobs arrive as { id, slot, header, part }. A checked build posts { id, early } with its
 // rebuilt part before its answer, so the page can mesh a GPU preview meanwhile. A newer
@@ -23,10 +22,14 @@ function trace(job, stage) {
 self.onmessage = async (event) => {
   const message = event.data;
   if (message.init) {
-    offerBuilds = message.init.handOver;
     try {
-      glue = await import(message.init.glue);
-      glue.initSync({ module: message.init.module });
+      const module = await import(new URL("soliddraft-kernel.js", message.init.base));
+      await module.default();
+      if (module.kernel_worker_commit() !== message.init.commit) {
+        throw new Error("SolidDraft was updated. Reload the page to use the matching kernel");
+      }
+      offerBuilds = message.init.handOver;
+      glue = module;
       self.postMessage({ ready: true });
     } catch (error) {
       dead = true;

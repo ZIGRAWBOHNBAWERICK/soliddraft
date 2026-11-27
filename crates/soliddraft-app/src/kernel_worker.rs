@@ -2,7 +2,7 @@
 //!
 //! The page has one thread, and a long Catallax query on it freezes the camera and every
 //! control until it ends. The browser build therefore starts a dedicated Web Worker
-//! (`kernel_worker.js`) on the same compiled WebAssembly module. The worker has its own
+//! (`kernel_worker.js`) on a separate WebAssembly module. The worker has its own
 //! memory and its own Catallax kernel: it never sees the page's bodies. Each job carries
 //! the part's saved bytes, the worker rebuilds them, reusing what it built for the
 //! previous job, and answers with plain data.
@@ -240,7 +240,7 @@ fn built(doc: &model::Document, feature: model::FeatureId) -> Result<(), String>
 }
 
 #[cfg(target_arch = "wasm32")]
-pub use browser::{ProofWorker, abandon_unwanted, submit, submit_with_early, trace};
+pub use browser::{ProofWorker, abandon_unwanted, submit, submit_with_early, trace, worker_hand_over, worker_run};
 
 #[cfg(target_arch = "wasm32")]
 mod browser {
@@ -351,7 +351,12 @@ mod browser {
 
     impl Client {
         fn start(hand_over: bool) -> Result<Self, String> {
-            let glue = glue_url().ok_or("The kernel worker could not find the application module")?;
+            let base = glue_url().ok_or("The kernel worker could not find the application module")?;
+            let commit = web_sys::window()
+                .and_then(|window| window.document())
+                .and_then(|document| document.document_element())
+                .and_then(|root| root.get_attribute("data-feedback-commit"))
+                .ok_or("The kernel worker could not find the application revision")?;
             let script = wasm_bindgen::link_to!(module = "/src/kernel_worker.js");
             let options = web_sys::WorkerOptions::new();
             options.set_type(web_sys::WorkerType::Module);
@@ -372,8 +377,8 @@ mod browser {
             worker.set_onmessage(Some(message.as_ref().unchecked_ref()));
             worker.set_onerror(Some(error.as_ref().unchecked_ref()));
             let init = js_sys::Object::new();
-            set(&init, "glue", &glue.into());
-            set(&init, "module", &wasm_bindgen::module());
+            set(&init, "base", &base.into());
+            set(&init, "commit", &commit.into());
             set(&init, "handOver", &hand_over.into());
             let message_init = js_sys::Object::new();
             set(&message_init, "init", &init);
@@ -603,15 +608,13 @@ mod browser {
 
     /// The builds the worker's kernel made for the job just answered, as bytes the page's
     /// kernel can be offered. Empty when there is no host yet or nothing was built.
-    #[wasm_bindgen]
-    pub fn kernel_worker_hand_over() -> Vec<u8> {
+    pub fn worker_hand_over() -> Vec<u8> {
         HOST.with_borrow_mut(|host| host.as_mut().and_then(|host| host.take_hand_over().ok())).unwrap_or_default()
     }
 
     /// The worker's entry: runs job `id` on this worker's kernel and answers as JSON. A
     /// checked build posts its rebuilt part to the page as `{ id, early }` before that.
-    #[wasm_bindgen]
-    pub fn kernel_worker_run(header: &str, part: &[u8], id: f64) -> String {
+    pub fn worker_run(header: &str, part: &[u8], id: f64) -> String {
         let early = |bytes: Vec<u8>| {
             let bytes = js_sys::Uint8Array::from(bytes.as_slice());
             let message = js_sys::Object::new();
@@ -648,7 +651,7 @@ mod browser {
         }));
     }
 
-    /// The address of the page's wasm-bindgen glue, which trunk preloads by name.
+    /// Trunk preloads the page glue in the directory that also holds the worker glue.
     fn glue_url() -> Option<String> {
         let document = web_sys::window()?.document()?;
         let links = document.query_selector_all("link[rel=modulepreload]").ok()?;

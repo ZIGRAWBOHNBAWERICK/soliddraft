@@ -11,7 +11,7 @@
 //! as the ribbon's is (the row's [`Undo`](crate::commands::Undo)). A command that needs
 //! the window has no tool; its row says why.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};
 use soliddraft_assistant::tools::schema::{any_of, array, boolean, integer, number, one_of, string};
@@ -27,6 +27,7 @@ use soliddraft_drawing::{
 };
 use soliddraft_exchange::Format as ExportFormat;
 use soliddraft_kernel_api::{Point2, Vec3};
+use soliddraft_model::pmi::inspection::{Applicability, InspectionPlan};
 
 use crate::command_tools::{CommandTools, Surface, tool_specs};
 use crate::document::{Command, Document};
@@ -484,13 +485,16 @@ impl AppTools<'_> {
     }
 
     /// One action for the shop: the part's STEP file with its manufacturing information,
-    /// and a drawing made from that information as PDF and DXF beside it. The answer
-    /// says what each file holds and lists, by name, every item the drawing could not
-    /// show, every text that lies over something, and anything on the drawing that the
-    /// file does not state.
+    /// a drawing made from that information as PDF and DXF beside it and, unless
+    /// `inspection` is false, its inspection plan as CSV and an AS9102 first article
+    /// workbook. The answer says what each file holds and lists, by name, every item the
+    /// drawing could not show, every text that lies over something, anything on the
+    /// drawing that the file does not state, and every characteristic that cannot be
+    /// inspected as it stands.
     pub(crate) fn manufacturing_package(&mut self, input: &Value) -> Result<Value, String> {
         let step = package_path(input)?;
         let template = input["template"].as_str().unwrap_or("iso-a3");
+        let inspection = package_inspection(input)?;
         let mut new = self.drawing_request(&json!({ "template": template }))?;
         // Front, top and side; the section through the tightest hole comes with the
         // manufacturing information.
@@ -509,6 +513,20 @@ impl AppTools<'_> {
         let on_body = self.state.doc.model().pmi_on_body();
         let written: std::collections::BTreeSet<String> =
             on_body.pmi.items.iter().take(on_body.items).map(|item| item.id.clone()).collect();
+        let inspection = match inspection {
+            Some(stated) => {
+                let plan = InspectionPlan::from_document(self.state.doc.model(), stated.revision.as_deref());
+                let (csv, workbook) = (step.with_extension("csv"), step.with_extension("xlsx"));
+                let mut table = Vec::new();
+                plan.write_csv(&mut table).map_err(|e| format!("the inspection CSV: {e}"))?;
+                let forms =
+                    plan.as9102_xlsx(stated.part_number.as_deref()).map_err(|e| format!("the AS9102 workbook: {e}"))?;
+                files.push((csv.clone(), table));
+                files.push((workbook.clone(), forms));
+                inspection_report(&plan, &stated, &csv, &workbook)
+            }
+            None => Value::Null,
+        };
         let session = drawing::create_drawing(self.state, &new)?;
         let requirements = session.requirements.clone();
         self.install_drawing(session);
@@ -543,6 +561,7 @@ impl AppTools<'_> {
                 "overlaps": overlaps,
                 "not_in_file": soliddraft_drawing::pmi_items::not_from_part(drawing, &written),
             },
+            "inspection": inspection,
         }))
     }
 
@@ -949,6 +968,61 @@ pub(crate) fn package_path(input: &Value) -> Result<PathBuf, String> {
         return Err("the path must end in .step or .stp".into());
     }
     Ok(step)
+}
+
+/// What the user stated for a package's inspection files: `None` when the input turns
+/// them off. A part number and a revision are only ever what the input says.
+pub(crate) fn package_inspection(input: &Value) -> Result<Option<InspectionStated>, String> {
+    let stated = |key: &str| match &input[key] {
+        Value::Null => Ok(None),
+        Value::String(text) if text.trim().is_empty() => Ok(None),
+        Value::String(text) => Ok(Some(text.trim().to_owned())),
+        _ => Err(format!("`{key}` is text")),
+    };
+    let wanted = match &input["inspection"] {
+        Value::Null => true,
+        Value::Bool(wanted) => *wanted,
+        _ => return Err("`inspection` is true or false".into()),
+    };
+    let (part_number, revision) = (stated("part_number")?, stated("revision")?);
+    if !wanted && (part_number.is_some() || revision.is_some()) {
+        return Err("a part number or revision goes on the inspection files; leave `inspection` on".into());
+    }
+    Ok(wanted.then_some(InspectionStated { part_number, revision }))
+}
+
+/// The part number and revision a user stated for the inspection files.
+pub(crate) struct InspectionStated {
+    pub(crate) part_number: Option<String>,
+    pub(crate) revision: Option<String>,
+}
+
+/// What the inspection files hold: how many characteristics, how many to measure, and
+/// each one that cannot be measured as it stands, by ID with the reason.
+fn inspection_report(plan: &InspectionPlan, stated: &InspectionStated, csv: &Path, workbook: &Path) -> Value {
+    let (mut inspect, mut reference, mut unresolved) = (0, 0, Vec::new());
+    for group in &plan.groups {
+        for row in &group.rows {
+            match row.applicability(group) {
+                Applicability::Inspect => inspect += 1,
+                Applicability::Reference => reference += 1,
+                Applicability::Unresolved => unresolved.push(json!({
+                    "id": row.id,
+                    "problem": group.problem.as_deref().unwrap_or("The source PMI has no nominal for this tolerance."),
+                })),
+            }
+        }
+    }
+    json!({
+        "csv": csv,
+        "workbook": workbook,
+        "part_number": stated.part_number,
+        "revision": stated.revision,
+        "characteristics": inspect + reference + unresolved.len(),
+        "inspect": inspect,
+        "reference": reference,
+        "unresolved": unresolved,
+    })
 }
 
 /// Whether a drawing of `doc` can be made now on the template `id`.

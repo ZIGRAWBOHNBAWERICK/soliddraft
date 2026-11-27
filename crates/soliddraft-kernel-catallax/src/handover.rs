@@ -277,14 +277,20 @@ pub(crate) enum Received {
 }
 
 /// A build offered by another kernel. Its bytes are read only when a build takes it:
-/// most offers repeat bodies the receiving kernel already holds.
+/// most offers repeat bodies the receiving kernel already holds. Its identity is read
+/// only then too: reading every offer's identity as the hand-over arrived was most of
+/// the browser page's work on a measurement's answer, which offers the whole part
+/// again, and on a busy machine it held the page for over a quarter of a second.
 #[derive(Clone)]
 pub(crate) struct Offer {
     bytes: Arc<[u8]>,
     built: Arc<std::sync::OnceLock<Result<Arc<Built>, String>>>,
     pub topology: Option<Arc<HandedTopology>>,
-    /// What adopting the build without reading its bytes needs, when it was handed.
-    pub identity: Option<Arc<HandedIdentity>>,
+    /// What adopting the build without reading its bytes needs, as handed, if it was.
+    identity_bytes: Option<Arc<[u8]>>,
+    /// The identity read from `identity_bytes` the first time it is asked for, or none
+    /// if they do not read.
+    identity: Arc<std::sync::OnceLock<Option<Arc<HandedIdentity>>>>,
     /// Counts the reads of the receiving kernel's offers.
     pub reads: Arc<std::sync::atomic::AtomicU64>,
     /// The kernel instance that handed the build over, whose ids its identity carries.
@@ -321,6 +327,19 @@ impl Offer {
     /// The size of the offered bytes.
     pub(crate) fn len(&self) -> usize {
         self.bytes.len()
+    }
+
+    /// Whether the build came with what adopting it unread needs, without reading it.
+    pub(crate) fn has_identity(&self) -> bool {
+        self.identity_bytes.is_some()
+    }
+
+    /// What adopting the build without reading its bytes needs, read the first time it
+    /// is asked for. `None` if it was not handed or does not read: the build is then
+    /// adopted from its bytes, as one handed without it is.
+    pub(crate) fn identity(&self) -> Option<&Arc<HandedIdentity>> {
+        let bytes = self.identity_bytes.as_ref()?;
+        self.identity.get_or_init(|| serde_json::from_slice(bytes).ok().map(Arc::new)).as_ref()
     }
 }
 
@@ -359,7 +378,8 @@ pub(crate) fn decode(bytes: &[u8]) -> KernelResult<Vec<(String, Received)>> {
         let key = String::from_utf8(part()?.to_vec()).map_err(|_| broken())?;
         let body = part()?;
         let topology: Option<HandedTopology> = serde_json::from_slice(part()?).map_err(|_| broken())?;
-        let identity: Option<HandedIdentity> = serde_json::from_slice(part()?).map_err(|_| broken())?;
+        // An identity is read when a build asks for it; `null` means none was handed.
+        let identity = part()?;
         let received = if body.is_empty() {
             Received::Topology(Arc::new(topology.ok_or_else(broken)?))
         } else {
@@ -367,7 +387,8 @@ pub(crate) fn decode(bytes: &[u8]) -> KernelResult<Vec<(String, Received)>> {
                 bytes: body.into(),
                 built: Arc::default(),
                 topology: topology.map(Arc::new),
-                identity: identity.map(Arc::new),
+                identity_bytes: (identity != b"null").then(|| identity.into()),
+                identity: Arc::default(),
                 reads: Arc::default(),
                 source: 0,
             })
@@ -481,5 +502,34 @@ mod tests {
         let mut value = serde_json::json!({"op_183": ["op_183_scan_a", {"step": "op_183"}], "role": "End"});
         rename_steps(&mut value, &renames);
         assert_eq!(value, serde_json::json!({"op_198": ["op_198_scan_a", {"step": "op_198"}], "role": "End"}));
+    }
+
+    /// A hand-over of one build whose identity is `identity`, as [`encode`] lays it out.
+    fn one_build(identity: &[u8]) -> Vec<u8> {
+        let mut out = MAGIC.to_vec();
+        out.extend(1u32.to_le_bytes());
+        for part in [b"key".as_slice(), b"body", b"null", identity] {
+            out.extend((part.len() as u64).to_le_bytes());
+            out.extend(part);
+        }
+        out
+    }
+
+    fn offer(bytes: &[u8]) -> Offer {
+        match decode(bytes).unwrap().pop() {
+            Some((_, Received::Build(offer))) => offer,
+            _ => panic!("one build"),
+        }
+    }
+
+    #[test]
+    fn an_offers_identity_is_read_only_when_a_build_asks_for_it() {
+        // Taking the offer reads no identity: these bytes would not have read.
+        let damaged = offer(&one_build(b"{\"steps\":"));
+        assert!(damaged.has_identity() && damaged.identity.get().is_none());
+        // Asked for, it does not read, so the build is adopted from its bytes instead.
+        assert!(damaged.identity().is_none());
+        let none = offer(&one_build(b"null"));
+        assert!(!none.has_identity() && none.identity().is_none());
     }
 }

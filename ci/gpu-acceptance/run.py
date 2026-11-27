@@ -10,6 +10,7 @@ import json
 import os
 from pathlib import Path
 import platform
+import plistlib
 import re
 import socket
 import subprocess
@@ -124,6 +125,31 @@ def wait_for(action, description, seconds=45):
             return result
         time.sleep(0.3)
     raise RuntimeError(f'Timed out waiting for {description}')
+
+
+def wait_drawn(action, description, record, seconds=45):
+    """Wait for the page, and name a hidden page rather than a slow app on timeout.
+
+    A browser runs no animation frames for a hidden page, so the app never draws and
+    never configures its canvas, however long the gate waits.
+    """
+    try:
+        return wait_for(action, description, seconds)
+    except RuntimeError as error:
+        if record.get('visibility') == 'hidden':
+            raise RuntimeError(f'{error}: the page was hidden, and browsers do not draw hidden pages. Unlock '
+                               'the desktop, keep the display on and leave the browser window visible') from error
+        raise
+
+
+def console_unlocked(registry, uid):
+    """True when the user's macOS session is on the console and not behind the lock screen.
+
+    `registry` is the plist printed by `ioreg -n Root -d1 -a`.
+    """
+    sessions = plistlib.loads(registry).get('IOConsoleUsers', [])
+    return any(session.get('kCGSSessionUserIDKey') == uid and session.get('kCGSSessionOnConsoleKey')
+               and not session.get('CGSSessionScreenIsLocked') for session in sessions)
 
 
 @contextmanager
@@ -289,7 +315,14 @@ def safari(out, url, record):
         except URLError:
             return None
 
-    with child(['/usr/bin/safaridriver', '-p', str(port)], out / 'driver.log'):
+    # Safari draws nothing in a locked session: every window is hidden, so the app
+    # starts but never paints, and screenshots come back black. Refuse a locked
+    # session, then keep the display on so it cannot lock while the gate runs.
+    if not console_unlocked(subprocess.check_output(['/usr/sbin/ioreg', '-n', 'Root', '-d1', '-a']), os.getuid()):
+        raise RuntimeError('The macOS session is locked or not on the console, and Safari does not draw '
+                           'pages there. Unlock the Mac and rerun')
+    with child(['/usr/bin/caffeinate', '-d', '-i', '-u'], out / 'caffeinate.log'), \
+            child(['/usr/bin/safaridriver', '-p', str(port)], out / 'driver.log'):
         wait_for(ready, 'SafariDriver')
         session = driver('/session', {'capabilities': {'alwaysMatch': {'browserName': 'safari'}}})
         path = f"/session/{session['sessionId']}"
@@ -358,12 +391,15 @@ def web(args, out, record):
             url += '&force-software'
         browser = safari(out, url, record) if args.gate == 'safari' else chrome(out, url, record, args.force_software)
         with browser as (evaluate, screenshot):
+            # `status` is the startup message only while it is on screen; the app hides
+            # it, text unchanged, once it has started.
             snapshot = '''({
               renderer: window.gpuAcceptance?.renderer,
               requests: window.gpuAcceptance?.requests,
               document: window.gpuAcceptance?.document,
               ready: document.querySelector('#status')?.classList.contains('hidden'),
-              status: document.querySelector('#status')?.textContent
+              status: document.querySelector('#status:not(.hidden)')?.textContent ?? null,
+              visibility: document.visibilityState
             })'''
 
             def state():
@@ -380,15 +416,15 @@ def web(args, out, record):
                 if result is not True:
                     raise RuntimeError(f'Dropping {part}: {result}')
 
-            wait_for(state, 'the shipping Wasm viewport')
+            wait_drawn(state, 'the shipping Wasm viewport', record)
             drop('empty')
-            wait_for(lambda: state() and record['document'] == {'type': 'document', 'extension': '.dwprt', 'count': 0},
-                     'the empty part to open')
+            empty = {'type': 'document', 'extension': '.dwprt', 'count': 0}
+            wait_drawn(lambda: state() and record['document'] == empty, 'the empty part to open', record)
             evaluate('window.gpuAcceptance.painted()')
             screenshot(out / 'empty.png')
             drop('p1')
-            wait_for(lambda: state() and (record.get('document') or {}).get('count', 0) > 0,
-                     'P1 features to open', seconds=120)
+            wait_drawn(lambda: state() and (record.get('document') or {}).get('count', 0) > 0,
+                       'P1 features to open', record, seconds=120)
             evaluate('window.gpuAcceptance.painted()')
             last_error = None
 
@@ -403,9 +439,9 @@ def web(args, out, record):
                     return None
 
             try:
-                return wait_for(rendered, 'the canonical P1 picture', seconds=45)
+                return wait_drawn(rendered, 'the canonical P1 picture', record, seconds=45)
             except RuntimeError as error:
-                if last_error:
+                if last_error and record.get('visibility') != 'hidden':
                     raise ValueError(str(last_error)) from error
                 raise
 

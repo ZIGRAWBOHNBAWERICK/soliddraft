@@ -99,9 +99,90 @@ def heading(pins, kernels, pairs):
             "These figures show the pin and the application change together.\n\n" + line)
 
 
-def compare_answers(comparator, left, right, pins):
-    """Fails on any answer that differs. A count of background meshes is delivery, not an answer."""
+def load_expected_differences(path):
+    """Read exact, reviewable JSON differences for this PR's baseline/candidate pair."""
+    expected = {}
+    for entry in json.loads(path.read_bytes()):
+        scenario, file, pointer = (entry[key] for key in ("scenario", "file", "pointer"))
+        before, after = entry["baseline"], entry["candidate"]
+        if (scenario not in TARGETS
+                or not re.fullmatch(r"\d{4}/(?:question-\d+|recipe)\.json", file)
+                or not re.fullmatch(r"(?:/(?:[^~/]|~[01])*)+", pointer)
+                or type(before) not in (str, int, float, bool, type(None))
+                or type(after) not in (str, int, float, bool, type(None))
+                or json.dumps(before) == json.dumps(after)
+                or not entry["reason"].strip()):
+            raise ValueError(f"invalid expected edit difference: {entry}")
+        fields = expected.setdefault(scenario, {}).setdefault(file, {})
+        if pointer in fields:
+            raise ValueError(f"duplicate expected edit difference: {scenario}/{file}{pointer}")
+        fields[pointer] = before, after
+    return expected
+
+
+# Keep the JSON token spans so every byte outside a listed scalar still has to match.
+JSON_TOKEN = re.compile(r'"(?:[^"\\]|\\.)*"|[{}\[\]:,]|[^ \t\r\n{}\[\]:,]+', re.DOTALL)
+
+
+def json_scalars(text):
+    tokens = iter(JSON_TOKEN.finditer(text))
+
+    def walk(token, pointer):
+        if token[0] not in ("{", "["):
+            yield pointer, token
+            return
+        obj = token[0] == "{"
+        end = "}" if obj else "]"
+        token = next(tokens)
+        index = 0
+        while token[0] != end:
+            if obj:
+                key = json.loads(token[0]).replace("~", "~0").replace("/", "~1")
+                next(tokens)  # colon
+                token = next(tokens)
+            else:
+                key = str(index)
+                index += 1
+            yield from walk(token, f"{pointer}/{key}")
+            if next(tokens)[0] == end:
+                return
+            token = next(tokens)
+
+    yield from walk(next(tokens), "")
+
+
+def mask_expected(text, expected, side, label):
+    text = text.decode()
+    # These paths point to JSON scalars, not arbitrary substrings or whole subtrees.
+    json.loads(text)
+    pending = expected.copy()
+    chunks, end = [], 0
+    for pointer, token in json_scalars(text):
+        if pointer not in pending:
+            continue
+        value = pending.pop(pointer)[side]
+        if json.dumps(json.loads(token[0])) != json.dumps(value):
+            raise AssertionError(f"unexpected value in {label}: {pointer}")
+        chunks.extend((text[end:token.start()], "\0"))
+        end = token.end()
+    if pending:
+        raise AssertionError(f"expected difference missing in {label}: {min(pending)}")
+    return "".join((*chunks, text[end:]))
+
+
+def compare_answers(comparator, left, right, pins, expected=None):
+    """Accept only exact listed field changes and differences in background mesh delivery."""
+    pending = {} if expected is None else expected.copy()
     for difference in comparator.problems(left, right, pins):
+        if difference in pending:
+            fields = pending.pop(difference)
+            masked = [
+                mask_expected(comparator.normalise((root / "commands" / difference).read_bytes(), pins),
+                              fields, side, f"{root}: {difference}")
+                for side, root in enumerate((left, right))
+            ]
+            if masked[0] == masked[1]:
+                continue
         if re.fullmatch(r"\d{4}/command.json", difference):
             values = [json.loads(comparator.text(root / "commands" / difference, root, pins))
                       for root in (left, right)]
@@ -110,6 +191,8 @@ def compare_answers(comparator, left, right, pins):
             if values[0] == values[1]:
                 continue
         raise AssertionError(f"application answers differ in {right}: {difference}")
+    if pending:
+        raise AssertionError(f"expected difference missing in {right}: {min(pending)}{min(pending[min(pending)])}")
 
 
 def sample(folder, step):
@@ -213,6 +296,9 @@ def run(args):
     comparator = load(args.app / "ci/compare-scenario-bundles.py", "compare_bundles")
     pins = os.environ["BASE_SHA"], os.environ["HEAD_SHA"]
     kernels = json.loads((args.binaries / "kernels.json").read_text())
+    expected = load_expected_differences(args.expected_differences) if args.expected_differences else {}
+    if expected and pin_moved(kernels):
+        raise ValueError("expected edit differences require the same Catallax pin")
     scenarios = args.out / "inputs"
     scenarios.mkdir()
     for name, targets in TARGETS.items():
@@ -238,9 +324,11 @@ def run(args):
                 assert report["pass"], f"incomplete or failed scenario: {dest}"
                 group = answer_group(name, revision, kernels)
                 if group in references:
-                    compare_answers(comparator, references[group], dest, pins)
+                    first_revision, first = references[group]
+                    allowed = expected.get(name) if (first_revision, revision) == ("baseline", "candidate") else None
+                    compare_answers(comparator, first, dest, pins, allowed)
                 else:
-                    references[group] = dest
+                    references[group] = revision, dest
                 for number in targets:
                     row = dict(pair=pair, warmup=pair == 0, revision=revision, scenario=name, step=number,
                                load_before=load_before, load_after=os.getloadavg(),
@@ -270,5 +358,6 @@ if __name__ == "__main__":
     parser.add_argument("--binaries", type=lambda value: Path(value).resolve(), required=True)
     parser.add_argument("--verifier", type=lambda value: Path(value).resolve())
     parser.add_argument("--out", type=lambda value: Path(value).resolve())
+    parser.add_argument("--expected-differences", type=Path, help="JSON field changes declared for this PR")
     arguments = parser.parse_args()
     {"build": build, "run": run}[arguments.mode](arguments)

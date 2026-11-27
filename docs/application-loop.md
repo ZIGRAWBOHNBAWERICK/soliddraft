@@ -550,6 +550,13 @@ document UUIDs, alongside the comparator's existing bundle-path, saved document
 id and mesh-rebuild-count handling. It compares viewport PNGs and all STEP files
 as raw bytes. A missing scenario, incomplete bundle or changed answer fails.
 
+The paired edit timing job also accepts exact JSON field changes declared in the
+PR's `ci/edit-speed-expected-differences.json`. List the scenario, command file,
+JSON pointer, baseline and candidate scalar values, and reason. Each change must
+occur in every baseline-to-candidate comparison; all unlisted bytes still have
+to match under the existing comparison rules. The job ignores the file when the
+PR did not change it, and compares runs within a revision without exceptions.
+
 An optional `trends` list selects comparable tool series with `tool` and
 `from_step`. Each sample records its current feature count. After the scenario,
 the runner fits the median pairwise slope (Theil–Sen), requiring at least ten

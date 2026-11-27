@@ -431,6 +431,7 @@ fn planar_pmi_follows_the_same_faces_through_reopen_and_edits() {
 
 #[test]
 fn datum_targets_and_position_frames_draw_from_a_reopened_part() {
+    use egui_kittest::kittest::Queryable;
     use soliddraft_app::{document::Selection, pmi::panel};
     use soliddraft_kernel_api::SurfaceKind::{Cylinder, Plane};
     use std::cell::RefCell;

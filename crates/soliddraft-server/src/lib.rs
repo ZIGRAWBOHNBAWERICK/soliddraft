@@ -134,9 +134,9 @@ impl Reply {
 
     fn into_response(self, request: &Request) -> Response<std::io::Cursor<Vec<u8>>> {
         let varies = self.body.len() >= COMPRESS_FROM || self.content_type == "application/wasm";
-        let gzip = self.encoding.is_none()
-            && self.body.len() >= COMPRESS_FROM
-            && encoding_quality(request.headers(), "gzip") > 0.0;
+        let precompressed = self.encoding.is_some();
+        let gzip =
+            !precompressed && self.body.len() >= COMPRESS_FROM && encoding_quality(request.headers(), "gzip") > 0.0;
         let encoding = self.encoding.or(gzip.then_some("gzip"));
         let etag = self.etag.map(|tag| match encoding {
             Some(encoding) => format!("\"{tag}-{encoding}\""),
@@ -156,6 +156,10 @@ impl Reply {
             .with_status_code(status)
             .with_header(header("Content-Type", self.content_type))
             .with_header(header("Cache-Control", self.cache));
+        if precompressed {
+            // Send the known encoded length. Chrome can stall on the chunked Brotli preload.
+            response = response.with_chunked_threshold(usize::MAX);
+        }
         if let Some(encoding) = encoding.filter(|_| !unchanged) {
             response.add_header(header("Content-Encoding", encoding));
         }

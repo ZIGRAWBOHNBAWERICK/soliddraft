@@ -128,8 +128,9 @@ fn client_modules_and_declarations_have_text_content_types() {
 fn wasm_uses_precompressed_variants_and_representation_specific_etags() {
     let name = "wasm-variants";
     let dir = web_dir(name);
+    let brotli = vec![b'b'; 64 * 1024];
     std::fs::write(dir.join("app_bg.wasm"), b"wasm").unwrap();
-    std::fs::write(dir.join("app_bg.wasm.br"), b"brotli bytes").unwrap();
+    std::fs::write(dir.join("app_bg.wasm.br"), &brotli).unwrap();
     std::fs::write(dir.join("app_bg.wasm.gz"), b"gzip bytes").unwrap();
     let base = start(name, Err("off".into()));
     let client = Http::new(&base).client;
@@ -139,8 +140,10 @@ fn wasm_uses_precompressed_variants_and_representation_specific_etags() {
     assert_eq!(compressed.status().as_u16(), 200);
     assert_eq!(compressed.headers()["content-type"], "application/wasm");
     assert_eq!(compressed.headers()["content-encoding"], "br");
+    assert_eq!(compressed.headers()["content-length"], "65536");
+    assert!(!compressed.headers().contains_key("transfer-encoding"));
     let etag = compressed.headers()["etag"].clone();
-    assert_eq!(compressed.bytes().unwrap(), &b"brotli bytes"[..]);
+    assert_eq!(compressed.bytes().unwrap(), brotli.as_slice());
 
     let cached = get("br").header("If-None-Match", &etag).send().unwrap();
     assert_eq!(cached.status().as_u16(), 304);

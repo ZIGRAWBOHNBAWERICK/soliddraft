@@ -9,8 +9,10 @@
 //! corner of the mesh on screen.
 
 use super::{
-    DisplayMesh, FeatureId, NamedEdge, NamedFace, PickEntry, app_id, display_mesh, edge_polylines, named_entities,
+    DisplayMesh, FeatureId, NamedEdge, NamedFace, PickEntry, app_id, display_mesh, edge_polylines, gpu_display_mesh,
+    named_entities, screen_mesh,
 };
+use crate::viewport::gpu_preview::{self, Meshing};
 use soliddraft_kernel_api::{BodyId, EdgePolyline, FaceId, Mesh, TessellationParams, Topology};
 use soliddraft_model as model;
 use std::collections::HashMap;
@@ -55,33 +57,46 @@ struct BodyDisplay {
     topology: Topology,
     kernel_mesh: Mesh,
     polylines: Vec<EdgePolyline>,
+    /// The body's GPU preview, drawn instead of `kernel_mesh`.
+    gpu: Option<Meshing>,
     faces: Vec<NamedFace>,
     edges: Vec<NamedEdge>,
 }
 
 impl BodyDisplay {
-    /// Queries, renders and names `body` at `level` of its display levels.
+    /// Queries, renders and names `body` at `level` of its display levels. A fallback
+    /// takes the kernel's CPU preview instead of the screen's usual mesh.
     fn prepare(
         model: &model::Document,
         body: BodyId,
         feature: FeatureId,
         level: soliddraft_tessellation::Level,
         curved_surfaces: Option<crate::graphics::CurvedSurfaces>,
+        fallback: bool,
     ) -> Result<Self, String> {
         let kernel = model.kernel();
         let topology = kernel.topology(body).map_err(|error| error.to_string())?;
         let params =
             *crate::graphics::body_mesh_levels(curved_surfaces, &model.settings().viewport, &topology).params(level);
-        let kernel_mesh = kernel.rendering(body, &params).map_err(|error| error.to_string())?;
-        let polylines = edge_polylines(kernel.as_ref(), body, &params);
+        let (kernel_mesh, polylines) = if fallback {
+            gpu_preview::note_cpu_preview(body);
+            let mesh = kernel.preview(body, &params).map_err(|error| error.to_string())?;
+            (mesh, kernel.preview_edges(body, &params).unwrap_or_default())
+        } else {
+            let mesh = screen_mesh(kernel.as_ref(), body, &params).map_err(|error| error.to_string())?;
+            (mesh, edge_polylines(kernel.as_ref(), body, &params))
+        };
         let (faces, edges) = named_entities(model, body, &topology);
-        Ok(Self { body, feature, params, topology, kernel_mesh, polylines, faces, edges })
+        Ok(Self { body, feature, params, topology, kernel_mesh, polylines, gpu: None, faces, edges })
     }
 
     /// The body's display mesh, its faces, edges and corners numbered after `picks`.
-    fn display_mesh(&self, picks: &mut Vec<PickEntry>) -> DisplayMesh {
+    fn display_mesh(&mut self, picks: &mut Vec<PickEntry>) -> DisplayMesh {
         let makers: HashMap<FaceId, FeatureId> = self.faces.iter().map(|face| (face.id, face.feature)).collect();
-        display_mesh(self.feature, &self.kernel_mesh, &self.polylines, &self.topology, &makers, picks)
+        match self.gpu.take() {
+            Some(meshing) => gpu_display_mesh(self.feature, self.body, meshing, &self.topology, &makers, picks),
+            None => display_mesh(self.feature, &self.kernel_mesh, &self.polylines, &self.topology, &makers, picks),
+        }
     }
 }
 
@@ -91,13 +106,95 @@ pub(crate) fn ready_display(
     level: soliddraft_tessellation::Level,
     curved_surfaces: Option<crate::graphics::CurvedSurfaces>,
 ) -> Result<Option<ReadyDisplay>, String> {
+    display_of(model, level, curved_surfaces, false)
+}
+
+/// Every live body's CPU preview, for a part whose checked display failed: a built
+/// body is always drawn.
+pub(crate) fn ready_fallback(
+    model: &model::Document,
+    level: soliddraft_tessellation::Level,
+    curved_surfaces: Option<crate::graphics::CurvedSurfaces>,
+) -> Result<Option<ReadyDisplay>, String> {
+    display_of(model, level, curved_surfaces, true)
+}
+
+fn display_of(
+    model: &model::Document,
+    level: soliddraft_tessellation::Level,
+    curved_surfaces: Option<crate::graphics::CurvedSurfaces>,
+    fallback: bool,
+) -> Result<Option<ReadyDisplay>, String> {
     let bodies = model.live_bodies();
     let Some((_, body)) = bodies.last().copied() else { return Ok(None) };
-    let mut prepared = vec![BodyDisplay::prepare(model, body, display_feature(model, body), level, curved_surfaces)?];
+    let feature = display_feature(model, body);
+    let mut prepared = vec![BodyDisplay::prepare(model, body, feature, level, curved_surfaces, fallback)?];
     for (key, other) in bodies.into_iter().filter(|(_, other)| *other != body) {
-        prepared.push(BodyDisplay::prepare(model, other, body_feature(model, key, other), level, curved_surfaces)?);
+        let feature = body_feature(model, key, other);
+        prepared.push(BodyDisplay::prepare(model, other, feature, level, curved_surfaces, fallback)?);
     }
     Ok(Some(combine(prepared)))
+}
+
+/// The GPU preview of `model`'s one live body at `level`, shown while its checked
+/// display is made. `None` without a GPU preview, for a part of several bodies, or for
+/// a body the kernel cannot describe.
+pub(crate) fn ready_preview(
+    model: &model::Document,
+    level: soliddraft_tessellation::Level,
+    curved_surfaces: Option<crate::graphics::CurvedSurfaces>,
+) -> Result<Option<ReadyDisplay>, String> {
+    if gpu_preview::active().is_none() {
+        return Ok(None);
+    }
+    let Some(target) = preview_target(model, level, curved_surfaces)? else { return Ok(None) };
+    let Some(meshing) = gpu_preview::mesh_body(model.kernel().as_ref(), target.body, &target.params) else {
+        return Ok(None);
+    };
+    Ok(Some(preview_display(model, target, meshing)))
+}
+
+/// What the browser's page needs to mesh `model`'s one live body on its GPU: its body,
+/// feature, topology and display parameters at `level`. `None` for a part of several
+/// bodies or none.
+pub(crate) struct PreviewTarget {
+    pub body: BodyId,
+    feature: FeatureId,
+    topology: Topology,
+    pub params: TessellationParams,
+}
+
+pub(crate) fn preview_target(
+    model: &model::Document,
+    level: soliddraft_tessellation::Level,
+    curved_surfaces: Option<crate::graphics::CurvedSurfaces>,
+) -> Result<Option<PreviewTarget>, String> {
+    let bodies = model.live_bodies();
+    let [(_, body)] = bodies.as_slice() else { return Ok(None) };
+    let topology = model.kernel().topology(*body).map_err(|error| error.to_string())?;
+    let params =
+        *crate::graphics::body_mesh_levels(curved_surfaces, &model.settings().viewport, &topology).params(level);
+    Ok(Some(PreviewTarget { body: *body, feature: display_feature(model, *body), topology, params }))
+}
+
+/// The display of a GPU preview the page meshed for `target`.
+pub(crate) fn preview_display(
+    model: &model::Document,
+    target: PreviewTarget,
+    meshing: gpu_preview::Meshing,
+) -> ReadyDisplay {
+    let (faces, edges) = named_entities(model, target.body, &target.topology);
+    combine(vec![BodyDisplay {
+        body: target.body,
+        feature: target.feature,
+        params: target.params,
+        topology: target.topology,
+        kernel_mesh: Mesh::default(),
+        polylines: Vec::new(),
+        gpu: Some(meshing),
+        faces,
+        edges,
+    }])
 }
 
 /// The display body's picks belong to the last feature that built it and is neither
@@ -131,14 +228,14 @@ fn body_feature(model: &model::Document, key: u32, body: BodyId) -> FeatureId {
 /// meshes, names and topology into one display.
 fn combine(prepared: Vec<BodyDisplay>) -> ReadyDisplay {
     let mut prepared = prepared.into_iter();
-    let first = prepared.next().expect("a display has a body");
+    let mut first = prepared.next().expect("a display has a body");
     let mut picks = Vec::new();
     let mesh = Arc::new(first.display_mesh(&mut picks));
     let BodyDisplay { body, params, topology, kernel_mesh, faces, edges, .. } = first;
     let part = PartDisplay { body, params, meshes: HashMap::from([(body, mesh.clone())]), picks, faces, edges };
     let mut display = ReadyDisplay { part, mesh, topology, kernel_mesh };
     let mut aggregate: Option<DisplayMesh> = None;
-    for other in prepared {
+    for mut other in prepared {
         let aggregate = aggregate.get_or_insert_with(|| (*display.mesh).clone());
         let mesh = other.display_mesh(&mut display.part.picks);
         let offset = aggregate.positions.len() as u32;

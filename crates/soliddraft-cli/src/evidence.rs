@@ -167,7 +167,7 @@ impl<'a> Evidence<'a> {
         let result = json!({
             "backend":doc.kernel().backend(),"method":"viewport","mesh":"unproved preview","live_document":true,
             "request":self.sequence,"revision":doc.revision(),"selectable":selectable(doc),
-            "bodies_placed":bodies_placed,
+            "bodies_placed":bodies_placed,"gpu_preview":soliddraft_app::viewport::gpu_preview::counts(),
         });
         write_json(dir.join("display.json"), &result)?;
         Ok(result)

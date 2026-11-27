@@ -23,6 +23,9 @@
 //   past the range Catallax certifies. The tree marks the gyroid Refused with its reason, the
 //   viewport stops reporting a field preview, and the STL command opens no export.
 //
+// The label is the frame probe's name for a field sample on screen. The page itself shows
+// no words about checking.
+//
 // The app draws into one canvas and takes only trusted input: keys and clicks sent as the
 // browser's own, through the DevTools protocol. The canvas has no text to read, so the check
 // reads what the frame drew through the read-only `shown_first_part_frame`,

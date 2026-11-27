@@ -118,11 +118,19 @@ fn marks(app: &ribbon::App) -> Vec<String> {
         .collect()
 }
 
+/// These checks hold the CPU preview route, the display without a usable GPU and the
+/// one CI runs. On a machine with a GPU the harness installs the GPU preview, whose own
+/// route `tests/gpu_preview.rs` checks; this takes it off for this thread.
+fn cpu_route() {
+    soliddraft_app::viewport::gpu_preview::uninstall();
+}
+
 #[test]
 fn boundary_model_features_show_at_once_from_their_own_faces() {
     let case = ribbon::case("field-preview-brep");
     let (catallax, kernel, doc) = observed_display();
     let mut app = ribbon::app(doc);
+    cpu_route();
     case.run(&mut app, |app| {
         tool(
             app,
@@ -185,6 +193,7 @@ fn lattices_and_gyroids_show_at_once_from_their_field_sample() {
     for (name, verb, input, grade) in cases {
         let (catallax, kernel, doc) = observed_display();
         let mut app = ribbon::app(doc);
+        cpu_route();
         case.run(&mut app, |app| {
             block(app);
             let (before, _) = shown(app);

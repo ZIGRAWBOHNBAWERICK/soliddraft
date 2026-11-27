@@ -18,6 +18,7 @@ mod face_areas;
 mod feature_pattern;
 mod field_preview;
 mod frames;
+pub mod gpu_preview;
 mod identity;
 mod iges;
 mod import;
@@ -62,6 +63,8 @@ pub struct CatallaxKernel {
     state: Mutex<State>,
     diagnostics: Option<diagnostics::Diagnostics>,
     recent_areas: face_areas::Recent,
+    /// The descriptions of the last GPU previews, for the points of picks on them.
+    descriptions: gpu_preview::Recent,
 }
 
 #[derive(Clone, Copy)]
@@ -144,6 +147,12 @@ struct Solid {
     /// Early display meshes another kernel sampled for this build, by display key. More
     /// arrive when that kernel samples the build at other display settings.
     handed_previews: Mutex<handover::Previews>,
+    /// The checked displays made here and their edges, by `checked_key`. They travel in a
+    /// hand-over beside the early display meshes, so the browser's page draws its
+    /// worker's checked meshes without making them again.
+    checked: Mutex<handover::Checked>,
+    /// The checked displays the kernel that handed this build over was refused, by key.
+    handed_refused: Mutex<BTreeMap<String, String>>,
     /// The kernel instance that handed this build over, if one did.
     source: Option<u64>,
     ids: convert::Ids,
@@ -173,6 +182,11 @@ fn preview_edges(mesh: &PreviewMesh, ids: &convert::Ids) -> Vec<EdgePolyline> {
             points: edge.vertices.iter().map(|v| mesh.positions[*v].into()).collect(),
         })
         .collect()
+}
+
+/// The hand-over key of a checked display at `options`.
+fn checked_key(options: &MeshOptions) -> String {
+    format!("checked:{}", preview_key(&display_key(options)))
 }
 
 /// Every display control of a mesh request.
@@ -517,6 +531,7 @@ impl CatallaxKernel {
             state: Mutex::new(State { capture: true, ..State::default() }),
             diagnostics: Some(diagnostics::Diagnostics::new(max_work)),
             recent_areas: face_areas::Recent::default(),
+            descriptions: gpu_preview::Recent::default(),
         }
     }
 
@@ -738,6 +753,7 @@ impl CatallaxKernel {
         let display = MeshCache::new();
         let topology = OnceLock::new();
         let mut handed_previews = handover::Previews::new();
+        let mut handed_refused = BTreeMap::new();
         // A handed-over topology and early display are renamed into this kernel's ids, so
         // neither is computed again.
         if let Some(handed) = handed {
@@ -746,12 +762,15 @@ impl CatallaxKernel {
                 let _ = topology.set(Ok(renamed));
             }
             handed_previews = handed.renamed_previews(&faces, &edges).unwrap_or_default();
+            handed_refused = handed.refused.iter().cloned().collect();
         }
         let solid = Arc::new(Solid {
             source: app.handed_source(),
             app,
             key,
             handed_previews: Mutex::new(handed_previews),
+            checked: Mutex::new(handover::Checked::new()),
+            handed_refused: Mutex::new(handed_refused),
             ids,
             display,
             print: MeshCache::new(),
@@ -929,6 +948,42 @@ impl CatallaxKernel {
 
     fn solid(&self, body: BodyId) -> KernelResult<Arc<Solid>> {
         self.state()?.solid(body)
+    }
+
+    /// An exact body's checked display and its edges: its display result where it has
+    /// spline faces, its certified mesh otherwise. One handed over is taken as it is.
+    fn checked_solid(&self, body: BodyId, params: &TessellationParams) -> KernelResult<(Mesh, Vec<EdgePolyline>)> {
+        let solid = self.solid(body)?;
+        let key = checked_key(&options(params)?);
+        let refusal = |message: String| KernelError::QueryFailed { query: "tessellate".into(), code: 0, message };
+        if let Some(handed) = solid.handed_previews().get(&key) {
+            return Ok(handed.clone());
+        }
+        let refused = solid.handed_refused.lock().unwrap_or_else(std::sync::PoisonError::into_inner).get(&key).cloned();
+        if let Some(reason) = refused {
+            return Err(refusal(reason));
+        }
+        let lock = || solid.checked.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(made) = lock().get(&key) {
+            return made.clone().map_err(refusal);
+        }
+        let made = if solid.has_splines() {
+            self.rendering(body, params).and_then(|mesh| Ok((mesh, self.rendering_edges(body, params)?)))
+        } else {
+            self.tessellate(body, params).and_then(|mesh| Ok((mesh, self.tessellate_edges(body, params)?)))
+        };
+        // A refusal is kept, and handed over, so nobody makes the same mesh again; a
+        // cancelled or interrupted call is not.
+        match &made {
+            Ok(made) => {
+                lock().insert(key, Ok(made.clone()));
+            }
+            Err(error @ (KernelError::QueryFailed { .. } | KernelError::Unsupported(_))) => {
+                lock().insert(key, Err(error.to_string()));
+            }
+            Err(_) => {}
+        }
+        made
     }
 
     /// The numerical body stored as `body`, if it is one.
@@ -1592,24 +1647,32 @@ impl Kernel for CatallaxKernel {
             }
             // The early display meshes sampled so far travel with the topology. Once it
             // has gone, the ones sampled since go with it again, as a display change asks.
+            let unsent = |key: &String| !state.sent_previews.contains(&(solid.key.clone(), key.clone()));
+            let made = solid.checked.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone();
+            let mut checked = Vec::new();
+            let mut refused = Vec::new();
+            for (key, made) in made.into_iter().filter(|(key, _)| unsent(key)) {
+                match made {
+                    Ok((mesh, edges)) => checked.push(handover::HandedPreview { key, mesh, edges }),
+                    Err(reason) => refused.push((key, reason)),
+                }
+            }
             let previews: Vec<_> = solid
                 .previews
                 .computed()
                 .into_iter()
                 .filter_map(|(key, preview)| {
-                    let key = preview_key(&key);
-                    if state.sent_previews.contains(&(solid.key.clone(), key.clone())) {
-                        return None;
-                    }
                     let mesh = preview.as_ref().as_ref()?;
                     Some(handover::HandedPreview {
-                        key,
+                        key: preview_key(&key),
                         mesh: convert::preview(mesh, &solid.ids),
                         edges: preview_edges(mesh, &solid.ids),
                     })
                 })
+                .filter(|preview| unsent(&preview.key))
+                .chain(checked)
                 .collect();
-            if state.sent_topologies.contains(&solid.key) && previews.is_empty() {
+            if state.sent_topologies.contains(&solid.key) && previews.is_empty() && refused.is_empty() {
                 continue;
             }
             let (faces, edges, vertices) = solid.ids.by_index();
@@ -1618,6 +1681,7 @@ impl Kernel for CatallaxKernel {
                 solid.key.clone(),
                 handover::HandedTopology {
                     previews,
+                    refused,
                     topology: topology.clone(),
                     faces: pairs(faces.into_iter().map(|(index, id)| (index, id.raw())).collect()),
                     edges: pairs(edges.into_iter().map(|(index, id)| (index, id.raw())).collect()),
@@ -1641,8 +1705,13 @@ impl Kernel for CatallaxKernel {
         for entry in &handed {
             if let Some(topology) = &entry.topology {
                 state.sent_topologies.insert(entry.key.clone());
-                for preview in &topology.previews {
-                    state.sent_previews.insert((entry.key.clone(), preview.key.clone()));
+                for key in topology
+                    .previews
+                    .iter()
+                    .map(|preview| &preview.key)
+                    .chain(topology.refused.iter().map(|(key, _)| key))
+                {
+                    state.sent_previews.insert((entry.key.clone(), key.clone()));
                 }
             }
         }
@@ -1673,10 +1742,17 @@ impl Kernel for CatallaxKernel {
                         if let Some(previews) = topology.renamed_previews(&faces, &edges) {
                             solid.handed_previews().extend(previews);
                         }
+                        let mut refused =
+                            solid.handed_refused.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                        refused.extend(topology.refused.iter().cloned());
                     }
                     if let Some(offer) = state.offered.get_mut(&key) {
                         match &mut offer.topology {
-                            Some(earlier) => Arc::make_mut(earlier).previews.extend(topology.previews.iter().cloned()),
+                            Some(earlier) => {
+                                let earlier = Arc::make_mut(earlier);
+                                earlier.previews.extend(topology.previews.iter().cloned());
+                                earlier.refused.extend(topology.refused.iter().cloned());
+                            }
                             None => offer.topology = Some(topology),
                         }
                     }
@@ -2454,6 +2530,70 @@ impl Kernel for CatallaxKernel {
                 ));
             }
             Ok(convert::preview(mesh, &solid.ids))
+        })
+    }
+
+    fn checked_rendering(&self, body: BodyId, params: &TessellationParams) -> KernelResult<Mesh> {
+        // A field shows its sample; a numerical body's only mesh is its measured sample,
+        // which `tessellate` returns.
+        if self.field(body)?.is_some() {
+            return self.preview(body, params);
+        }
+        if self.approximate(body)?.is_some() {
+            return self.tessellate(body, params);
+        }
+        Ok(self.checked_solid(body, params)?.0)
+    }
+
+    fn checked_rendering_edges(&self, body: BodyId, params: &TessellationParams) -> KernelResult<Vec<EdgePolyline>> {
+        if self.field(body)?.is_some() {
+            return self.preview_edges(body, params);
+        }
+        if self.approximate(body)?.is_some() {
+            return self.tessellate_edges(body, params);
+        }
+        Ok(self.checked_solid(body, params)?.1)
+    }
+
+    fn gpu_preview(&self, body: BodyId, params: &TessellationParams) -> KernelResult<Option<GpuPreview>> {
+        self.observe("gpu_preview", || {
+            if self.field(body)?.is_some() {
+                return Ok(None);
+            }
+            let options = gpu_preview::options(params);
+            let description = if let Some(approximate) = self.approximate(body)? {
+                match approximate.gpu_description(&options)? {
+                    Some(description) => description,
+                    None => return Ok(None),
+                }
+            } else {
+                let solid = self.solid(body)?;
+                let built = solid.app.checkpoint.built();
+                // A body Catallax cannot describe keeps the CPU preview.
+                let Ok(described) = catallax_mesh::float::describe_body(&built.model, built.result, &options) else {
+                    return Ok(None);
+                };
+                gpu_preview::rekey(
+                    described,
+                    |face| solid.ids.faces.get(face).copied(),
+                    |edge| solid.ids.edges.get(edge).copied(),
+                )?
+            };
+            let description = Arc::new(description);
+            self.descriptions.keep(body, description.clone());
+            Ok(Some(gpu_preview::preview(description)))
+        })
+    }
+
+    fn face_ray_point(&self, body: BodyId, face: FaceId, origin: Vec3, direction: Vec3) -> KernelResult<Option<Vec3>> {
+        self.observe("face_ray_point", || {
+            if self.descriptions.get(body).is_none()
+                && self.gpu_preview(body, &TessellationParams::default())?.is_none()
+            {
+                return Ok(None);
+            }
+            let Some(description) = self.descriptions.get(body) else { return Ok(None) };
+            Ok(gpu_preview::ray_point(&description, face, origin, direction))
         })
     }
 

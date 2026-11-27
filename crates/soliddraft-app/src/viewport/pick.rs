@@ -1,6 +1,9 @@
 //! CPU ray queries against the display mesh. The id buffer decides what was
 //! hit; these give the exact 3D point for the status bar and for later
 //! features such as placing a sketch on a face.
+//!
+//! A face a GPU preview draws has no CPU triangles: its point comes from the kernel
+//! ([`Kernel::face_ray_point`](soliddraft_kernel_api::Kernel::face_ray_point)).
 
 use crate::document::{DisplayMesh, Document, PickEntry, Selection};
 use crate::viewport::render::Picked;
@@ -16,6 +19,12 @@ pub fn selection(doc: &Document, picked: Picked) -> Option<Selection> {
 }
 
 pub fn hit_point(doc: &Document, picked: Picked, origin: Vec3, dir: Vec3) -> Option<Vec3> {
+    if let Picked::Face(pick) = picked {
+        let shown = doc.provisional_mesh().into_iter().chain(doc.meshes.values().cloned());
+        if let Some(gpu) = shown.filter_map(|mesh| mesh.gpu.clone()).find(|gpu| gpu.draws(pick)) {
+            return gpu_point(doc, &gpu, pick, origin, dir);
+        }
+    }
     if let Some(mesh) = doc.provisional_mesh() {
         return match picked {
             Picked::Face(pick) => ray_face(&mesh, pick, origin, dir).map(|(_, point)| point),
@@ -39,6 +48,20 @@ pub fn hit_point(doc: &Document, picked: Picked, origin: Vec3, dir: Vec3) -> Opt
             doc.meshes.values().flat_map(|m| m.corners.iter()).find(|c| c.pick == pick).map(|c| c.position)
         }
     }
+}
+
+/// Where the ray meets a face a GPU preview draws, from the kernel's description of it.
+fn gpu_point(
+    doc: &Document,
+    gpu: &crate::viewport::gpu_preview::GpuFaces,
+    pick: u32,
+    origin: Vec3,
+    dir: Vec3,
+) -> Option<Vec3> {
+    let face = gpu.face(pick)?;
+    let v = |p: Vec3| soliddraft_kernel_api::Vec3::new(f64::from(p.x), f64::from(p.y), f64::from(p.z));
+    let point = doc.kernel().face_ray_point(gpu.body, face, v(origin), v(dir)).ok()??;
+    Some(Vec3::new(point.x as f32, point.y as f32, point.z as f32))
 }
 
 fn ray_face(mesh: &DisplayMesh, pick: u32, origin: Vec3, dir: Vec3) -> Option<(f32, Vec3)> {

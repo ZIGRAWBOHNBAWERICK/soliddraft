@@ -42,5 +42,5 @@ pub use policy::{Levels, ParamsKey};
 pub use quality::{Advanced, Quality};
 pub use report::{LevelReport, Report, report};
 pub use select::{Choice, Projection, Thresholds};
-pub use service::{Done, Tessellator};
+pub use service::{Done, Route, Tessellator};
 pub use settings::{DrawingTolerance, ExportTolerance, QualityOverride, Settings};

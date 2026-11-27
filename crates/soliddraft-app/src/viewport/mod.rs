@@ -7,6 +7,7 @@ pub mod assembly;
 pub mod camera;
 pub mod dimensions;
 pub mod environment;
+pub mod gpu_preview;
 pub mod grid;
 pub mod look;
 mod navigation_bar;
@@ -567,14 +568,14 @@ impl ViewportState {
         if let Some(session) = &sketch {
             input.grid = self.grid(rect, &GridPlane::of_sketch(&session.plane));
         }
+        // Browser checks read whether a field sample is on screen; the user sees no label.
         #[cfg(target_arch = "wasm32")]
         {
+            let field_preview =
+                doc.model().active_field().is_some_and(|f| doc.model().status(f.id).is_some_and(|s| s.is_ok()));
             input.part_probe = Some(render::PartProbe {
                 camera: self.camera.clone(),
-                field_preview: doc
-                    .model()
-                    .active_field()
-                    .is_some_and(|f| doc.model().status(f.id).is_some_and(|s| s.is_ok())),
+                field_preview,
                 pending: doc.proof_pending(),
                 display_state: doc.display_state().map(|state| state.name.clone()),
                 display_mode: input.display.label().to_string(),

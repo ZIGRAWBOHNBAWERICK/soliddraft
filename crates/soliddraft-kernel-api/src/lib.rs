@@ -42,6 +42,7 @@ mod checks;
 mod edit;
 mod field;
 mod geometry;
+mod gpu_preview;
 mod history;
 mod ids;
 mod iges;
@@ -58,6 +59,7 @@ pub use field::{
     GradedField, LinearGrade, PointGrade, ProxyMoments, RadialGrade, StandInExport, StandInReport,
 };
 pub use geometry::{Aabb, Plane, Point2, Vec3};
+pub use gpu_preview::GpuPreview;
 pub use history::{EntityChanges, FaceOrigin, FaceRole, HistoryRecord, HolePart, OpKind, Origin, Split};
 pub use ids::{BodyId, EdgeId, FaceId, OpTag, VertexId};
 pub use iges::{IgesExport, IgesOptions, IgesReport};
@@ -1393,6 +1395,47 @@ pub trait Kernel: Send + Sync {
     /// default returns [`tessellate_edges`](Self::tessellate_edges).
     fn preview_edges(&self, body: BodyId, params: &TessellationParams) -> KernelResult<Vec<EdgePolyline>> {
         self.tessellate_edges(body, params)
+    }
+
+    /// The body's input for a GPU preview at `params`, in place of
+    /// [`preview`](Self::preview) on a machine with a usable GPU. `None` when the
+    /// backend has no float description of the body, such as a field body; the screen
+    /// then keeps `preview`. Reading it does no exact arithmetic and meshes nothing.
+    /// The default has none.
+    fn gpu_preview(&self, _body: BodyId, _params: &TessellationParams) -> KernelResult<Option<GpuPreview>> {
+        Ok(None)
+    }
+
+    /// The screen's checked display, which replaces a GPU preview once it is ready:
+    /// a mesh within the requested controls, or the backend's measured display where
+    /// that is its checked form. Never unproved sampling where a checked mesh exists.
+    /// The default returns [`tessellate`](Self::tessellate).
+    fn checked_rendering(&self, body: BodyId, params: &TessellationParams) -> KernelResult<Mesh> {
+        self.tessellate(body, params)
+    }
+
+    /// [`checked_rendering`](Self::checked_rendering) once per entry of `levels`, in order.
+    fn checked_rendering_levels(&self, body: BodyId, levels: &[TessellationParams]) -> KernelResult<Vec<Mesh>> {
+        levels.iter().map(|p| self.checked_rendering(body, p)).collect()
+    }
+
+    /// Edge polylines matching [`checked_rendering`](Self::checked_rendering). The default
+    /// returns [`tessellate_edges`](Self::tessellate_edges).
+    fn checked_rendering_edges(&self, body: BodyId, params: &TessellationParams) -> KernelResult<Vec<EdgePolyline>> {
+        self.tessellate_edges(body, params)
+    }
+
+    /// Where the ray from `origin` along `direction` first meets `face` of `body`, for a
+    /// pick on a GPU preview, which keeps no triangles on the CPU. `None` when the ray
+    /// misses the face. The default answers `None`.
+    fn face_ray_point(
+        &self,
+        _body: BodyId,
+        _face: FaceId,
+        _origin: Vec3,
+        _direction: Vec3,
+    ) -> KernelResult<Option<Vec3>> {
+        Ok(None)
     }
 
     /// Whether a body is a closed solid or open faces, without computing its topology or

@@ -15,6 +15,11 @@
     "why": "RefusalCode::as_str, a machine refusal code for MCP and logs; the mate panel shows a headline instead."
   },
   {
+    "file": "crates/soliddraft-exchange/src/proof.rs",
+    "text": "proof",
+    "why": "Suffix of the report files older versions wrote; read only, so their exports still open. New reports are named .precision."
+  },
+  {
     "file": "crates/soliddraft-kernel-catallax/src/lib.rs",
     "text": "checked",
     "why": "Recipe element tag passed to sweep::path_step; an identifier, never shown."

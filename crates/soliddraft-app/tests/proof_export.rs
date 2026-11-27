@@ -42,7 +42,7 @@ fn step_exports_ship_feature_answers_and_retained_work_in_both_reports() {
     run(&mut state, "export_step", json!({"path":path}));
     assert!(std::fs::read(&path).unwrap().starts_with(b"ISO-10303-21"));
     let original = report(&path);
-    assert_eq!(original["format"], "soliddraft-proof/1");
+    assert_eq!(original["format"], "soliddraft-precision/1");
     assert_eq!(original["file"], "plate.stp");
     assert_eq!(original["sha256"].as_str().unwrap().len(), 64);
     let features = original["features"].as_array().unwrap();
@@ -68,8 +68,8 @@ fn step_exports_ship_feature_answers_and_retained_work_in_both_reports() {
     })
     .unwrap();
     assert_eq!(delivered.len(), 3);
-    assert_eq!(delivered[0].0, Path::new("download.step.proof.json"));
-    assert_eq!(delivered[1].0, Path::new("download.step.proof.txt"));
+    assert_eq!(delivered[0].0, Path::new("download.step.precision.json"));
+    assert_eq!(delivered[1].0, Path::new("download.step.precision.txt"));
     assert_eq!(delivered[2].0, Path::new("download.step"));
     run(&mut state, "edit_extrude", json!({"feature":"Boss-Extrude1","depth":12,"flip":false}));
     run(&mut state, "undo", json!({}));

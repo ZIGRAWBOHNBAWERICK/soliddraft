@@ -313,14 +313,17 @@ The `scan_workspace` application test drives reference review, cancellation,
 acceptance, a fitting refusal, both maps, fit acceptance, save/reopen, downstream
 editing and STEP export through the real application and renderer.
 
-## STEP proof reports
+## STEP precision reports
 
 Every STEP file written by the app or `soliddraft export` has two adjacent reports:
-`part.step.proof.txt` for reading and `part.step.proof.json` for tools. The suffix
-preserves the full filename, including `.stp`. Browser exports download all three
-files. A report write failure prevents publication of the new STEP file.
+`part.step.precision.txt` for reading and `part.step.precision.json` for tools. The
+suffix preserves the full filename, including `.stp`. Browser exports download all three
+files. A report write failure prevents publication of the new STEP file. Earlier versions
+named the reports `part.step.proof.txt` and `part.step.proof.json`;
+`soliddraft_exchange::proof::read_report` still reads those.
 
-The JSON format is `soliddraft-proof/1`. It records the STEP bytes' SHA-256, the
+The JSON format is `soliddraft-precision/1`; reports in the earlier
+`soliddraft-proof/1` format still read. It records the STEP bytes' SHA-256, the
 export deviation certificate, and each feature's name, id, model answer kind,
 model bound, independent display bound, and work used. Suppressed features and
 features below the rollback bar are inactive and contribute no geometry.

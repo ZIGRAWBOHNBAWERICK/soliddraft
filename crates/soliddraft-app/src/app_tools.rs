@@ -932,7 +932,9 @@ impl ToolHost for AppTools<'_> {
                 crate::app::Tab::Viewport
             });
         }
-        // What the window's frame does after a change: the drawing follows its part.
+        // What the window's frames do after a change: the checked mesh replaces a GPU
+        // preview, and the drawing follows its part.
+        self.state.doc.finish_display();
         drawing::follow_part(self.state);
         out
     }

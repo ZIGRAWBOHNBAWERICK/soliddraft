@@ -18,6 +18,7 @@ mod face_areas;
 mod feature_pattern;
 mod field_preview;
 mod frames;
+pub mod gpu_preview;
 mod identity;
 mod iges;
 mod import;
@@ -61,6 +62,8 @@ pub struct CatallaxKernel {
     state: Mutex<State>,
     diagnostics: Option<diagnostics::Diagnostics>,
     recent_areas: face_areas::Recent,
+    /// The descriptions of the last GPU previews, for the points of picks on them.
+    descriptions: gpu_preview::Recent,
 }
 
 #[derive(Clone, Copy)]
@@ -516,6 +519,7 @@ impl CatallaxKernel {
             state: Mutex::new(State { capture: true, ..State::default() }),
             diagnostics: Some(diagnostics::Diagnostics::new(max_work)),
             recent_areas: face_areas::Recent::default(),
+            descriptions: gpu_preview::Recent::default(),
         }
     }
 
@@ -2424,6 +2428,70 @@ impl Kernel for CatallaxKernel {
                 ));
             }
             Ok(convert::preview(mesh, &solid.ids))
+        })
+    }
+
+    fn checked_rendering(&self, body: BodyId, params: &TessellationParams) -> KernelResult<Mesh> {
+        // A field shows its sample; a numerical body's only mesh is its measured sample,
+        // which `tessellate` returns; a spline body's checked form is its display result.
+        if self.field(body)?.is_some() {
+            return self.preview(body, params);
+        }
+        if self.approximate(body)?.is_none() && self.solid(body)?.has_splines() {
+            return self.rendering(body, params);
+        }
+        self.tessellate(body, params)
+    }
+
+    fn checked_rendering_edges(&self, body: BodyId, params: &TessellationParams) -> KernelResult<Vec<EdgePolyline>> {
+        if self.field(body)?.is_some() {
+            return self.preview_edges(body, params);
+        }
+        if self.approximate(body)?.is_none() && self.solid(body)?.has_splines() {
+            return self.rendering_edges(body, params);
+        }
+        self.tessellate_edges(body, params)
+    }
+
+    fn gpu_preview(&self, body: BodyId, params: &TessellationParams) -> KernelResult<Option<GpuPreview>> {
+        self.observe("gpu_preview", || {
+            if self.field(body)?.is_some() {
+                return Ok(None);
+            }
+            let options = gpu_preview::options(params);
+            let description = if let Some(approximate) = self.approximate(body)? {
+                match approximate.gpu_description(&options)? {
+                    Some(description) => description,
+                    None => return Ok(None),
+                }
+            } else {
+                let solid = self.solid(body)?;
+                let built = solid.app.checkpoint.built();
+                // A body Catallax cannot describe keeps the CPU preview.
+                let Ok(described) = catallax_mesh::float::describe_body(&built.model, built.result, &options) else {
+                    return Ok(None);
+                };
+                gpu_preview::rekey(
+                    described,
+                    |face| solid.ids.faces.get(face).copied(),
+                    |edge| solid.ids.edges.get(edge).copied(),
+                )?
+            };
+            let description = Arc::new(description);
+            self.descriptions.keep(body, description.clone());
+            Ok(Some(gpu_preview::preview(description)))
+        })
+    }
+
+    fn face_ray_point(&self, body: BodyId, face: FaceId, origin: Vec3, direction: Vec3) -> KernelResult<Option<Vec3>> {
+        self.observe("face_ray_point", || {
+            if self.descriptions.get(body).is_none()
+                && self.gpu_preview(body, &TessellationParams::default())?.is_none()
+            {
+                return Ok(None);
+            }
+            let Some(description) = self.descriptions.get(body) else { return Ok(None) };
+            Ok(gpu_preview::ray_point(&description, face, origin, direction))
         })
     }
 

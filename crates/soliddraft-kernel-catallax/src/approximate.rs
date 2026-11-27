@@ -160,6 +160,18 @@ impl Approximate {
         }
     }
 
+    /// The body's float description for a GPU preview, keyed by interface ids, or
+    /// `None` where it has none to give.
+    pub(crate) fn gpu_description(
+        &self,
+        options: &catallax_mesh::float::DisplayOptions,
+    ) -> KernelResult<Option<crate::gpu_preview::Description>> {
+        let Ok(body) = self.body() else { return Ok(None) };
+        let Ok(described) = catallax_mesh::float::describe_numerical_body(body, options) else { return Ok(None) };
+        crate::gpu_preview::rekey(described, |key| self.faces.get(key).copied(), |key| self.edges.get(key).copied())
+            .map(Some)
+    }
+
     /// Whether Catallax built this body numerically, as against a tolerant import.
     pub(crate) fn numerical(&self) -> bool {
         matches!(self.geometry, Geometry::Numerical(_))

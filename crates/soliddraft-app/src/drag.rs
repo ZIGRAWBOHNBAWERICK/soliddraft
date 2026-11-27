@@ -23,7 +23,7 @@
 
 use crate::document::{
     CandidateDisplay, Command, DisplayMesh, Document, EndKind, FeatureId, FeatureKind, FeatureStatus, ReadyDisplay,
-    Selection, ViewToken, construction_view, fmt_mm, ready_display,
+    Selection, ViewToken, construction_view, fmt_mm, ready_display, ready_preview,
 };
 #[cfg(not(target_arch = "wasm32"))]
 use soliddraft_kernel_api::Interrupt;
@@ -339,6 +339,10 @@ impl DragPreview {
                 continue;
             }
             match answer.kind {
+                AnswerKind::Construction(Ok(candidate))
+                    if self.shown_request == answer.request
+                        && matches!(&self.shown, Shown::Result(Intermediate { candidate: Some(shown), .. }) if !candidate.replaces(shown)) =>
+                    {}
                 AnswerKind::Construction(Ok(candidate)) => {
                     self.shown = Shown::Result(Intermediate {
                         value: self.value,
@@ -610,7 +614,7 @@ pub(crate) fn prove_now(
         AnswerKind::Proved(Err(error)) => error,
         _ => "The edit could not be prepared.".into(),
     })?;
-    Ok(prove(task, &AtomicU64::new(1), &AtomicU64::new(0), None))
+    Ok(prove(task, &AtomicU64::new(1), &AtomicU64::new(0), None, &|_| {}))
 }
 
 /// A feature that shapes the body did not build. A sketch that did not build blocks
@@ -626,11 +630,15 @@ fn model_failure(model: &model::Document) -> Option<String> {
     })
 }
 
+/// Rebuilds and proves `task`'s part and makes its checked display. On a machine with
+/// a GPU preview, `early` gets the rebuilt part's GPU preview before the checked
+/// display is made.
 fn prove(
     task: ProofTask,
     newest: &AtomicU64,
     protected: &AtomicU64,
     previous: Option<&model::Document>,
+    early: &dyn Fn(CandidateDisplay),
 ) -> ProvedBuild {
     let ProofTask { request, mut model, level, curved_surfaces, allowance } = task;
     if let Some(previous) = previous {
@@ -642,6 +650,13 @@ fn prove(
     let result = allowance.run(&mut || {
         model.rebuild();
         failure = model_failure(&model);
+        if failure.is_none() && wanted(request, newest, protected) {
+            match ready_preview(&model, level, curved_surfaces) {
+                Ok(Some(view)) => early(CandidateDisplay::Preview(Arc::new(view))),
+                Ok(None) => {}
+                Err(error) => log::warn!("no GPU preview of request {request}: {error}"),
+            }
+        }
         if failure.is_none() && wanted(request, newest, protected) {
             match ready_display(&model, level, curved_surfaces) {
                 Ok(view) => display = view.map(Arc::new),
@@ -794,10 +809,15 @@ impl Worker {
                             continue;
                         };
                         let request = task.request;
+                        let early = |display| {
+                            if wanted(request, &current, &retained) {
+                                let _ = finished.send(Answer { request, kind: AnswerKind::Construction(Ok(display)) });
+                            }
+                        };
                         let Some(result) = proving.run(
                             request,
                             || wanted(request, &current, &retained),
-                            || prove(task, &current, &retained, previous.as_deref()),
+                            || prove(task, &current, &retained, previous.as_deref(), &early),
                         ) else {
                             continue;
                         };
@@ -965,7 +985,7 @@ impl Worker {
         let request = queued.request;
         match prepare(queued) {
             Ok((proof, _)) => {
-                let built = prove(proof, &self.newest, &self.protected, self.previous.as_deref());
+                let built = prove(proof, &self.newest, &self.protected, self.previous.as_deref(), &|_| {});
                 if built.failure.is_none() && !built.model.is_dirty() {
                     self.previous = Some(built.model.clone());
                 }

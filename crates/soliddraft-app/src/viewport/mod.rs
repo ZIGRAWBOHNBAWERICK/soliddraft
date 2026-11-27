@@ -7,6 +7,7 @@ pub mod assembly;
 pub mod camera;
 pub mod dimensions;
 pub mod environment;
+pub mod gpu_preview;
 pub mod grid;
 pub mod look;
 mod navigation_bar;

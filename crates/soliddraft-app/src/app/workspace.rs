@@ -168,6 +168,9 @@ impl SolidDraftApp {
                 device.active_samples,
             );
             rs.renderer.write().callback_resources.insert(renderer);
+            // The browser's page installs its GPU preview from the canvas device too; see
+            // crate::viewport::gpu_preview.
+            let _ = crate::viewport::gpu_preview::install(&rs.adapter.get_info(), &rs.device, &rs.queue);
             device
         });
         log::debug!("renderer installed");

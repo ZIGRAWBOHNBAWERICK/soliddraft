@@ -148,9 +148,7 @@ impl ViewTransform {
         let (lo, hi) = if breaks.vertical { (bbox_2d[1], bbox_2d[3]) } else { (bbox_2d[0], bbox_2d[2]) };
         let s = self.scale;
         if start <= lo || end >= hi || (end - start) * s <= Break::GAP {
-            return Err(DrawingError::BadRequest(
-                "The break must shorten the view and leave material on both sides".into(),
-            ));
+            return Err(invalid_break());
         }
         let middle = ((lo * s - breaks.shift(lo, s)) + (hi * s - breaks.shift(hi, s))) / 2.0;
         breaks.centre_fraction = (breaks.fraction(lo) + breaks.fraction(hi)) / 2.0;
@@ -283,12 +281,23 @@ pub fn compute_in(
     id: ViewId,
     memo: &mut Contexts,
 ) -> Result<(), DrawingError> {
+    compute_with_previous(drawing, part, index, id, memo, None)
+}
+
+pub(crate) fn compute_with_previous(
+    drawing: &Drawing,
+    part: &Part,
+    index: &PartIndex,
+    id: ViewId,
+    memo: &mut Contexts,
+    previous: Option<&Contexts>,
+) -> Result<(), DrawingError> {
     if memo.contains_key(&id) {
         return Ok(());
     }
     let sheet = sheet_of(drawing, id).ok_or(DrawingError::UnknownView(id))?;
     let view = drawing.view(id).ok_or(DrawingError::UnknownView(id))?;
-    let ctx = compute_view(drawing, part, index, view, sheet, memo)?;
+    let ctx = compute_view_at(drawing, part, index, view, sheet, memo, 0, None, previous)?;
     memo.insert(id, ctx);
     Ok(())
 }
@@ -304,7 +313,7 @@ pub fn compute_view(
     sheet: usize,
     memo: &mut Contexts,
 ) -> Result<ViewContext, DrawingError> {
-    compute_view_at(drawing, part, index, view, sheet, memo, 0, None)
+    compute_view_at(drawing, part, index, view, sheet, memo, 0, None, None)
 }
 
 pub(crate) fn reproject_parent_marks(kind: &mut ViewKind, xf: &ViewTransform) {
@@ -336,6 +345,7 @@ fn compute_view_at(
     memo: &mut Contexts,
     depth: u8,
     projection: Option<(ViewDisplay, ViewTransform)>,
+    previous: Option<&Contexts>,
 ) -> Result<ViewContext, DrawingError> {
     if depth > 16 {
         return Err(DrawingError::BadView(view.id));
@@ -345,7 +355,7 @@ fn compute_view_at(
     {
         let p = drawing.view(parent).ok_or(DrawingError::UnknownView(parent))?;
         let ps = sheet_of(drawing, parent).unwrap_or(sheet);
-        let ctx = compute_view_at(drawing, part, index, p, ps, memo, depth + 1, None)?;
+        let ctx = compute_view_at(drawing, part, index, p, ps, memo, depth + 1, None, previous)?;
         memo.insert(parent, ctx);
     }
     let display = projection.map_or(view.display, |(display, _)| display);
@@ -353,7 +363,11 @@ fn compute_view_at(
     let refused = |error| view_refusal(|| view_label_in(drawing, &drawing.sheets[sheet], view), error);
     let mut kind = view.kind.clone();
     if let Some(parent) = view.geometry_parent() {
-        reproject_parent_marks(&mut kind, &memo[&parent].xf);
+        let after = &memo[&parent].xf;
+        if let Some(before) = previous.and_then(|views| views.get(&parent)) {
+            remap_parent_boundary(&mut kind, &before.xf, after);
+        }
+        reproject_parent_marks(&mut kind, after);
     }
     let mut ctx = match &kind {
         ViewKind::Base { .. } | ViewKind::Projected { .. } => {
@@ -456,6 +470,7 @@ fn compute_view_at(
                     memo,
                     depth + 1,
                     Some((display, parent_xf)),
+                    previous,
                 )?)
             } else {
                 None
@@ -516,7 +531,6 @@ fn compute_view_at(
                 catallax: parent.geometry.catallax,
                 coarse: parent.geometry.coarse,
                 breaks: Vec::new(),
-                symmetry: None,
                 symmetry_segments: Vec::new(),
             };
             let mut projected = Projected { geometry, transform: xf, circles };
@@ -540,10 +554,16 @@ fn compute_view_at(
     if let Some(half) = &view.half {
         half_section(part, index, &mut ctx, half, &display).map_err(refused)?;
     }
-    for cut in &view.broken_out {
+    let before = previous.and_then(|views| views.get(&view.id)).map(|ctx| ctx.xf);
+    let remap =
+        |boundary: &Boundary| before.map_or_else(|| boundary.clone(), |old| remap_boundary(boundary, &old, &ctx.xf));
+    let cuts: Vec<_> =
+        view.broken_out.iter().map(|cut| BrokenOut { boundary: remap(&cut.boundary), depth: cut.depth }).collect();
+    let crop = view.crop.as_ref().map(remap);
+    for cut in &cuts {
         broken_out(part, index, &mut ctx, cut, &display).map_err(refused)?;
     }
-    if let Some(crop) = &view.crop {
+    if let Some(crop) = &crop {
         clip_projected(&mut ctx.projected, crop, true);
         let mut bbox = curves_bounds(&ctx.projected.geometry.curves).unwrap_or(ctx.projected.geometry.bbox);
         for h in &ctx.projected.geometry.hatch {
@@ -556,13 +576,9 @@ fn compute_view_at(
             [bbox[0].max(c[0]), bbox[1].max(c[1]), bbox[2].min(c[2]), bbox[3].min(c[3])].map(round);
     }
     ctx.projected.geometry.breaks = ctx.xf.gaps();
+    validate_break(&ctx.projected.geometry, display, 1.0, projection.is_none() && !view.breaks.is_empty())?;
     if let Some(half) = &view.half {
-        let segments = symmetry_line(&ctx, half);
-        if let [line] = segments.as_slice() {
-            ctx.projected.geometry.symmetry = Some(*line);
-        } else {
-            ctx.projected.geometry.symmetry_segments = segments;
-        }
+        ctx.projected.geometry.symmetry_segments = symmetry_line(&ctx, half);
     }
     Ok(ctx)
 }
@@ -1309,7 +1325,6 @@ fn project_curves(
         catallax: curves.catallax,
         coarse,
         breaks: Vec::new(),
-        symmetry: None,
         symmetry_segments: Vec::new(),
     };
     Projected { geometry, transform: *xf, circles }
@@ -1599,15 +1614,29 @@ fn scaled_path(path: &BezPath, ratio: f64, gap: Option<BreakGap>, shift: Point2)
 }
 
 pub(crate) fn scaled_boundary(boundary: &Boundary, ratio: f64, gap: Option<BreakGap>) -> Boundary {
-    let map = |p| scale_view_point(p, ratio, gap);
-    let spans_gap = gap.filter(|g| {
+    map_boundary(boundary, ratio, gap.map(|g| (g.axis, g.at, g.at + g.gap)), |p| scale_view_point(p, ratio, gap))
+}
+
+fn map_boundary(
+    boundary: &Boundary,
+    ratio: f64,
+    cuts: Option<(AlignAxis, f64, f64)>,
+    map: impl Fn(Point2) -> Point2,
+) -> Boundary {
+    let spans_gap = cuts.filter(|(axis, start, end)| {
         let [min_x, min_y, max_x, max_y] = boundary.bounds();
-        let (lo, hi) = if g.axis == AlignAxis::Vertical { (min_y, max_y) } else { (min_x, max_x) };
-        lo < g.at + g.gap && hi > g.at && !(g.at <= lo && hi <= g.at + g.gap)
+        let (lo, hi) = if *axis == AlignAxis::Vertical { (min_y, max_y) } else { (min_x, max_x) };
+        [start, end].into_iter().any(|station| lo < *station && *station < hi)
     });
     if let Boundary::Circle { center, radius } = boundary
         && spans_gap.is_none()
-        && !gap.is_some_and(|g| g.contains(*center))
+        && !cuts.is_some_and(|(axis, lo, hi)| {
+            let at = match axis {
+                AlignAxis::Horizontal => center.u,
+                AlignAxis::Vertical => center.v,
+            };
+            lo < at && at < hi
+        })
     {
         return Boundary::Circle { center: map(*center), radius: radius * ratio };
     }
@@ -1616,9 +1645,13 @@ pub(crate) fn scaled_boundary(boundary: &Boundary, ratio: f64, gap: Option<Break
     let mut mapped = Vec::with_capacity(points.len());
     for (a, b) in points.iter().copied().zip(points.iter().copied().cycle().skip(1)) {
         mapped.push(map(a));
-        if let Some(g) = spans_gap {
-            let (start, end) = (g.along(a), g.along(b));
-            let stations = if start <= end { [g.at, g.at + g.gap] } else { [g.at + g.gap, g.at] };
+        if let Some((axis, lo, hi)) = spans_gap {
+            let along = |p: Point2| match axis {
+                AlignAxis::Horizontal => p.u,
+                AlignAxis::Vertical => p.v,
+            };
+            let (start, end) = (along(a), along(b));
+            let stations = if start <= end { [lo, hi] } else { [hi, lo] };
             for station in stations {
                 let fraction = (station - start) / (end - start);
                 if fraction > 0.0 && fraction < 1.0 {
@@ -1628,6 +1661,93 @@ pub(crate) fn scaled_boundary(boundary: &Boundary, ratio: f64, gap: Option<Break
         }
     }
     Boundary::Polygon { points: mapped }
+}
+
+fn remap_boundary(boundary: &Boundary, before: &ViewTransform, after: &ViewTransform) -> Boundary {
+    if before == after {
+        return boundary.clone();
+    }
+    let flat = before.unbroken();
+    let old_cuts = before.gaps().first().map(|g| (g.axis, g.at, g.at + g.gap));
+    let unbroken = map_boundary(boundary, 1.0, old_cuts, |p| flat.precise_point(before.unproject(p)));
+    let new_cuts = after.gaps().first().map(|g| {
+        let at = |s| {
+            let p = match g.axis {
+                AlignAxis::Horizontal => Point2::new(s, 0.0),
+                AlignAxis::Vertical => Point2::new(0.0, s),
+            };
+            g.along(flat.precise_point(after.unproject(p)))
+        };
+        (g.axis, at(g.at), at(g.at + g.gap))
+    });
+    map_boundary(&unbroken, after.scale / flat.scale, new_cuts, |p| after.precise_point(flat.unproject(p)))
+}
+
+pub(crate) fn remap_parent_boundary(kind: &mut ViewKind, before: &ViewTransform, after: &ViewTransform) {
+    if before == after {
+        return;
+    }
+    if let ViewKind::Detail { center, radius, profile, model_center, .. } = kind {
+        let boundary = if profile.len() >= 3 {
+            Boundary::Polygon { points: std::mem::take(profile) }
+        } else {
+            Boundary::Circle { center: *center, radius: *radius }
+        };
+        *center = after.point(model_center.unwrap_or_else(|| before.unproject(*center)));
+        match remap_boundary(&boundary, before, after) {
+            Boundary::Circle { radius: r, .. } => *radius = r,
+            Boundary::Polygon { points } => *profile = points,
+        }
+    }
+}
+
+pub(crate) fn remap_view_boundaries(view: &mut View, before: &ViewTransform, after: &ViewTransform) {
+    if let Some(crop) = &mut view.crop {
+        *crop = remap_boundary(crop, before, after);
+    }
+    for cut in &mut view.broken_out {
+        cut.boundary = remap_boundary(&cut.boundary, before, after);
+    }
+}
+
+fn invalid_break() -> DrawingError {
+    DrawingError::BadRequest("The break must shorten the view and leave material on both sides".into())
+}
+
+fn spans_break(geometry: &ViewGeometry, display: ViewDisplay) -> bool {
+    let Some(gap) = geometry.breaks.first() else { return false };
+    let bounds = geometry
+        .curves
+        .iter()
+        .filter(|c| c.visible || display.hidden != crate::HiddenLines::Removed)
+        .map(|c| kurbo::Shape::bounding_box(&c.path));
+    let (mut left, mut right) = (false, false);
+    for r in bounds {
+        let (lo, hi) = match gap.axis {
+            AlignAxis::Horizontal => (r.x0, r.x1),
+            AlignAxis::Vertical => (r.y0, r.y1),
+        };
+        left |= lo < gap.at - 1e-6;
+        right |= hi > gap.at + gap.gap + 1e-6;
+    }
+    left && right
+}
+
+pub(crate) fn validate_break(
+    geometry: &ViewGeometry,
+    display: ViewDisplay,
+    ratio: f64,
+    must_span: bool,
+) -> Result<(), DrawingError> {
+    let too_short =
+        geometry.breaks.first().is_some_and(|gap| gap.omitted_mm.is_some_and(|width| width * ratio <= gap.gap));
+    if too_short || must_span {
+        let spans = spans_break(geometry, display);
+        if (too_short && spans) || (must_span && !spans) {
+            return Err(invalid_break());
+        }
+    }
+    Ok(())
 }
 
 /// Re-projects a view at a new scale without the kernel.
@@ -1665,9 +1785,6 @@ fn rescale_geometry(geometry: &mut ViewGeometry, ratio: f64) {
     geometry.bbox = [a.u, a.v, b.u, b.v];
     if let Some(c) = &mut geometry.outline {
         *c = scaled_boundary(c, ratio, gap);
-    }
-    if let Some([a, b]) = geometry.symmetry {
-        geometry.symmetry = Some([s(a), s(b)]);
     }
     for ends in &mut geometry.symmetry_segments {
         *ends = ends.map(s);

@@ -226,6 +226,28 @@ pub fn reattach_view(drawing: &mut Drawing, part: &Part, id: ViewId, entity: Ent
 /// Remakes a view and its dependent descendants, keeping placement and accepted
 /// dimension values. Descendants excluded from updates keep their linework.
 pub fn regenerate_view(drawing: &mut Drawing, part: &Part, id: ViewId) -> Result<(), DrawingError> {
+    regenerate(drawing, part, id, None)
+}
+
+pub(crate) fn edit_breaks(
+    drawing: &mut Drawing,
+    part: &Part,
+    id: ViewId,
+    breaks: Vec<crate::Break>,
+) -> Result<(), DrawingError> {
+    let view = drawing.view(id).ok_or(DrawingError::UnknownView(id))?;
+    if matches!(view.kind, ViewKind::Detail { .. }) {
+        return Err(DrawingError::BadRequest("A detail inherits its parent's break".into()));
+    }
+    regenerate(drawing, part, id, Some(breaks))
+}
+
+fn regenerate(
+    drawing: &mut Drawing,
+    part: &Part,
+    id: ViewId,
+    breaks: Option<Vec<crate::Break>>,
+) -> Result<(), DrawingError> {
     let descendants = project::dependent_views(drawing, id);
     let ids: Vec<_> = descendants
         .iter()
@@ -233,14 +255,46 @@ pub fn regenerate_view(drawing: &mut Drawing, part: &Part, id: ViewId) -> Result
         .filter(|child| *child == id || !drawing.view(*child).is_some_and(|v| v.excluded_from_update))
         .collect();
     let index = PartIndex::build(part)?;
+    let mut previous = Contexts::new();
+    let mut staged = None;
+    if let Some(breaks) = breaks {
+        for &id in &ids {
+            project::compute_in(drawing, part, &index, id, &mut previous)?;
+        }
+        let mut next = drawing.clone();
+        next.view_mut(id).expect("existing view").breaks = breaks;
+        staged = Some(next);
+    }
+    let source = staged.as_ref().unwrap_or(drawing);
     let mut contexts = Contexts::new();
     for &id in &ids {
-        project::compute_in(drawing, part, &index, id, &mut contexts)?;
+        project::compute_with_previous(
+            source,
+            part,
+            &index,
+            id,
+            &mut contexts,
+            (!previous.is_empty()).then_some(&previous),
+        )?;
+    }
+    if let Some(next) = staged {
+        *drawing = next;
     }
     for &id in &ids {
         let ctx = &contexts[&id];
-        let view = drawing.view_mut(id).ok_or(DrawingError::UnknownView(id))?;
+        let view = drawing.view_mut(id).expect("computed view");
+        if let Some(before) = previous.get(&id) {
+            project::remap_view_boundaries(view, &before.xf, &ctx.xf);
+        }
         view.geometry = ctx.projected.geometry.clone();
+    }
+    for &child in &descendants {
+        let view = drawing.view_mut(child).expect("dependent view");
+        if let Some(parent) = view.geometry_parent()
+            && let (Some(before), Some(after)) = (previous.get(&parent), contexts.get(&parent))
+        {
+            project::remap_parent_boundary(&mut view.kind, &before.xf, &after.xf);
+        }
     }
     for child in descendants {
         follow_parent(drawing, child, &contexts);
@@ -345,11 +399,11 @@ pub(crate) fn anchor_curve<'a>(
 }
 
 pub(crate) fn anchor_geometry<'a>(
-    ctx: &ViewContext,
+    xf: &project::ViewTransform,
     anchor: &crate::Anchor,
     curve: Option<&'a soliddraft_kernel_api::drawing::Curve3>,
 ) -> AnchorGeometry<'a> {
-    let turn = ctx.xf.leg_turn(anchor.entity.section_leg);
+    let turn = xf.leg_turn(anchor.entity.section_leg);
     let placed = |p| turn.map_or(p, |turn| turn.point(p));
     let attach = match anchor.attach {
         Attach::Point { at } => Attach::Point { at: placed(at) },
@@ -376,8 +430,12 @@ pub(crate) fn remeasure(
             Entity::Face(_) => None,
         })
         .collect();
-    let geometry: Vec<_> =
-        a.anchors.iter().zip(&curves).map(|(anchor, curve)| anchor_geometry(ctx, anchor, curve.as_deref())).collect();
+    let geometry: Vec<_> = a
+        .anchors
+        .iter()
+        .zip(&curves)
+        .map(|(anchor, curve)| anchor_geometry(&ctx.xf, anchor, curve.as_deref()))
+        .collect();
     let (before_state, mut change) = (a.state.clone(), None);
     match &mut a.body {
         AnnotationKind::Dimension(d) => {
@@ -424,9 +482,14 @@ pub(crate) fn remeasure(
                 anchor.cached = ctx.xf.point(anchor_point(g, &ctx.xf, across));
             }
             let old = set.values_text();
-            if let Some(values) = crate::measure::measure_set(set, &geometry, &ctx.xf) {
-                set.values = values.into_iter().map(crate::model_items::round_value).collect();
-            }
+            let Some(values) = crate::measure::measure_set(set, &geometry, &ctx.xf) else {
+                a.state = AnnotationState::Dangling {
+                    lost: (0..a.anchors.len()).collect(),
+                    cause: "The references cannot measure this dimension set".into(),
+                };
+                return None;
+            };
+            set.values = values.into_iter().map(crate::model_items::round_value).collect();
             let now = set.values_text();
             let accepted = match &before_state {
                 AnnotationState::Changed { previous } => previous.clone(),
@@ -543,7 +606,7 @@ pub fn reattach(
             anchor.attach = Attach::Mid;
         }
         let curve = anchor_curve(&ctx, anchor, Some(curve));
-        let g = anchor_geometry(&ctx, anchor, curve.as_deref());
+        let g = anchor_geometry(&ctx.xf, anchor, curve.as_deref());
         anchor.cached = ctx.xf.point(anchor_point(&g, &ctx.xf, Default::default()));
     }
     let resolved: Vec<Option<Entity>> = a
@@ -588,23 +651,7 @@ pub fn reattach(
 /// window.
 pub fn edge_near(part: &Part, at: soliddraft_kernel_api::Vec3) -> Result<EntityRef, DrawingError> {
     let index = PartIndex::build(part)?;
-    let (id, _) = index
-        .edges()
-        .map(|(id, c)| {
-            (id, c.sample(0.0).windows(2).map(|w| segment_distance(at, w[0], w[1])).fold(f64::INFINITY, f64::min))
-        })
-        .min_by(|a, b| a.1.total_cmp(&b.1))
-        .ok_or(DrawingError::BadRequest("the part has no edges".into()))?;
+    let (id, _) =
+        crate::annotate::nearest_edge(&index, at).ok_or(DrawingError::BadRequest("the part has no edges".into()))?;
     index.edge_ref(id).ok_or(DrawingError::BadRequest("edge vanished".into()))
-}
-
-fn segment_distance(
-    p: soliddraft_kernel_api::Vec3,
-    a: soliddraft_kernel_api::Vec3,
-    b: soliddraft_kernel_api::Vec3,
-) -> f64 {
-    let ab = b - a;
-    let len2 = ab.dot(ab);
-    let t = if len2 > 0.0 { ((p - a).dot(ab) / len2).clamp(0.0, 1.0) } else { 0.0 };
-    p.distance(a + ab * t)
 }

@@ -527,10 +527,8 @@ pub struct ViewGeometry {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub breaks: Vec<BreakGap>,
     /// A half section's symmetry line across the view, in view millimetres.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub symmetry: Option<[Point2; 2]>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub(crate) symmetry_segments: Vec<[Point2; 2]>,
+    pub symmetry_segments: Vec<[Point2; 2]>,
 }
 
 /// A closed-up break as drawn: two break lines `gap` apart across the view.

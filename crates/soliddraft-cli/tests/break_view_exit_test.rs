@@ -131,7 +131,7 @@ fn half_section_of_a_symmetric_shaft() {
     soliddraft(&dir, &args);
     let (view, scale) = front(&dir.join("shaft.dwdrw"));
     assert!(view.half.is_some(), "the half section is saved with the view");
-    let [a, b] = view.geometry.symmetry.expect("the symmetry line is drawn");
+    let [[a, b]] = view.geometry.symmetry_segments[..] else { panic!("one symmetry line") };
     near(a.v, b.v, 1e-9, "the shaft's axis runs across the sheet");
     let axis = a.v;
     // Only the side above the axis is cut: the wall between the bore and the outside,

@@ -501,7 +501,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
             place_tool(s, doc, &sheet2, &lctx, kind, pointer, ctrl, clicked, &mut push);
         }
         DrawingTool::SmartDimension => {
-            smart_dimension_tool(s, &sheet2, &lctx, hit, pointer, clicked, &mut push);
+            smart_dimension_tool(s, doc, &sheet2, &lctx, hit, pointer, clicked, &mut push);
         }
         DrawingTool::Note => {
             if clicked && let Some(p) = pointer {
@@ -545,7 +545,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
             tools::derived_tool(s, doc, &sheet2, &lctx, hit, pointer, ctrl, clicked, resp.double_clicked(), &mut push);
         }
         DrawingTool::DimensionSet(kind) => {
-            tools::set_tool(s, kind, &sheet2, &lctx, hit, pointer, clicked, &mut push);
+            tools::set_tool(s, doc, kind, &sheet2, &lctx, hit, pointer, clicked, &mut push);
         }
         DrawingTool::Gdt
         | DrawingTool::Datum
@@ -1125,6 +1125,7 @@ fn hover_card(painter: &egui::Painter, at: Pos2, line1: &str, line2: &str) {
 #[allow(clippy::too_many_arguments)]
 fn smart_dimension_tool(
     s: &mut DrawingSession,
+    doc: &crate::document::Document,
     sheet2: &Sheet2<'_>,
     lctx: &layout::Context<'_>,
     hit: Option<Hit>,
@@ -1203,12 +1204,28 @@ fn smart_dimension_tool(
             if s.picks.contains(&pick) {
                 return;
             }
-            s.picks.push(pick);
-            let view_ref = s.sheet().view(view).cloned();
-            s.proposal = view_ref.and_then(|v| {
-                let circles = s.doc.circles.get(&v.id).map(Vec::as_slice).unwrap_or_default();
-                resolve::propose(&v, &s.picks, circles)
-            });
+            let Some(v) = s.sheet().view(view) else { return };
+            let mut picks = s.picks.clone();
+            picks.push(pick);
+            let circles = s.doc.circles.get(&view).map(Vec::as_slice).unwrap_or_default();
+            let model = !v.geometry.breaks.is_empty()
+                || picks.iter().any(|p| v.geometry.curves.get(p.curve).is_some_and(|c| c.source.section_leg != 0));
+            let proposal = if model {
+                tools::with_part(doc, |_, index| {
+                    let xf = s.doc.transforms.get(&view).ok_or(soliddraft_drawing::DrawingError::BadView(view))?;
+                    Ok(resolve::propose_model(v, &picks, index, xf))
+                })
+                .ok()
+                .flatten()
+            } else {
+                resolve::propose(v, &picks, circles)
+            };
+            let Some(proposal) = proposal else {
+                s.say("Pick edges with measurable model geometry");
+                return;
+            };
+            s.picks = picks;
+            s.proposal = Some(proposal);
             if let Some(pr) = &s.proposal {
                 let what = match pr.kind {
                     DimensionKind::Diameter => "diameter",
@@ -1235,18 +1252,12 @@ fn smart_dimension_tool(
 
 /// The dimension a proposal makes once placed at a sheet point.
 fn build_dimension(s: &DrawingSession, prop: &resolve::Proposal, placement_sheet: Point2) -> Annotation {
-    let sheet = s.sheet();
-    let view = sheet.view(prop.view);
-    let scale = view.map(|v| project::effective_scale(sheet, v)).unwrap_or(1.0);
+    let scale = project::view_scale(&s.doc.drawing, prop.view).unwrap_or(1.0);
     let placement = to_view(s, prop.view, placement_sheet);
     let (kind, value, precision) = match prop.kind {
         DimensionKind::Linear { .. } if prop.points.len() >= 2 => {
             let orientation = resolve::orientation_for(&prop.points, placement);
-            (
-                DimensionKind::Linear { orientation },
-                resolve::linear_value(orientation, prop.points[0], prop.points[1], scale),
-                0,
-            )
+            (DimensionKind::Linear { orientation }, prop.distance(orientation, scale), 0)
         }
         DimensionKind::Diameter => (DimensionKind::Diameter, prop.radius * 2.0 / scale, 0),
         DimensionKind::Radius => (DimensionKind::Radius, prop.radius / scale, 0),

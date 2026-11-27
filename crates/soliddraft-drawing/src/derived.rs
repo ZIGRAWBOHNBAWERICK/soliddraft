@@ -11,7 +11,7 @@ use soliddraft_kernel_api::{Point2, Vec3};
 use crate::entity::EntityRef;
 use crate::ids::ViewId;
 use crate::part::{Part, PartIndex, round};
-use crate::project::{self, Contexts, ViewContext, view_bounds};
+use crate::project::{self, Contexts, ViewContext, ViewTransform, view_bounds};
 use crate::section_path::CutPath;
 use crate::sheet::Projection;
 use crate::view::{
@@ -79,18 +79,21 @@ pub fn cutting_path(
     through: &[Vec3],
 ) -> Result<Vec<Point2>, DrawingError> {
     let ctx = context(drawing, part, index, parent)?;
-    extend_cutting_line(drawing, parent, through.iter().map(|p| ctx.xf.precise_point(*p)).collect())
+    extend_cutting_line(drawing, parent, &ctx.xf, through.iter().map(|p| ctx.xf.unbroken().precise_point(*p)).collect())
 }
 
-/// A bent cutting line on view `parent`, given in the parent's view millimetres, checked
-/// and with its first and last legs carried on to 6 mm past the view's line work.
+/// Extends a bent cutting line in the unbroken view frame and projects it onto the parent.
 pub fn extend_cutting_line(
     drawing: &Drawing,
     parent: ViewId,
+    xf: &ViewTransform,
     mut line: Vec<Point2>,
 ) -> Result<Vec<Point2>, DrawingError> {
     CutPath::of_line(&line, false).map_err(|e| DrawingError::BadRequest(format!("cutting line: {e}")))?;
     let [x0, y0, x1, y1] = drawing.view(parent).ok_or(DrawingError::UnknownView(parent))?.geometry.bbox;
+    let flat = xf.unbroken();
+    let [lo, hi] = [Point2::new(x0, y0), Point2::new(x1, y1)].map(|p| flat.precise_point(xf.unproject(p)));
+    let [x0, y0, x1, y1] = [lo.u, lo.v, hi.u, hi.v];
     let m = 6.0;
     // `from` carried away from `toward` until it leaves the view's box grown by m.
     let reach = |from: Point2, toward: Point2| {
@@ -112,7 +115,7 @@ pub fn extend_cutting_line(
     let n = line.len();
     line[0] = reach(line[0], line[1]);
     line[n - 1] = reach(line[n - 1], line[n - 2]);
-    Ok(line)
+    Ok(line.into_iter().map(|p| xf.precise_point(flat.unproject(p))).collect())
 }
 
 /// An offset cutting line through `centres` in order: a leg through each, horizontal

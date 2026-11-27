@@ -6,7 +6,7 @@ use kurbo::Shape;
 use serde::{Deserialize, Serialize};
 use soliddraft_kernel_api::Point2;
 
-use crate::annotation::{Annotation, PmiSource};
+use crate::annotation::{Annotation, AnnotationState, PmiSource};
 use crate::display::{self, Item, Owner};
 use crate::{AnnotationId, Drawing, Sheet};
 
@@ -30,32 +30,26 @@ pub struct MarkupPlace {
     pub at: Point2,
 }
 
-/// Where the annotation that shows the part's item `item` is: the annotation made from
-/// the item itself, or else one made from it such as a basic distance, on the first sheet
-/// that has one. `None` when no annotation shows it.
+/// Finds the annotation for this PMI item on the current drawing revision.
 pub fn place_of_item(drawing: &Drawing, item: &str) -> Option<MarkupTarget> {
-    let shows = |a: &Annotation, own: bool| match &a.source {
-        Some(PmiSource::Item { item: i }) => i == item,
-        Some(source) => !own && source.item() == Some(item),
-        None => false,
-    };
-    [true, false].into_iter().find_map(|own| {
-        drawing.sheets.iter().enumerate().find_map(|(sheet, s)| {
-            let a = s.annotations.iter().find(|a| shows(a, own) && current(drawing, s, a))?;
-            Some(MarkupTarget { sheet, annotation: a.id })
-        })
+    drawing.sheets.iter().enumerate().find_map(|(sheet, s)| {
+        let a = s.annotations.iter().find(|a| shows_item(drawing, s, a, item))?;
+        Some(MarkupTarget { sheet, annotation: a.id })
     })
 }
 
-fn current(drawing: &Drawing, sheet: &Sheet, a: &Annotation) -> bool {
-    sheet.view(a.view).is_some_and(|v| v.geometry.source_digest == drawing.model.pinned.as_str())
+fn shows_item(drawing: &Drawing, sheet: &Sheet, a: &Annotation, item: &str) -> bool {
+    matches!(&a.source, Some(PmiSource::Item { item: id }) if id == item)
+        && !a.anchors.is_empty()
+        && !matches!(a.state, AnnotationState::Dangling { .. })
+        && sheet.view(a.view).is_some_and(|v| v.geometry.source_digest == drawing.model.pinned.as_str())
 }
 
 /// Resolves the current annotation showing the named item and finds its position.
 pub fn find_place(drawing: &Drawing, place: &MarkupTarget, item: &str) -> Option<MarkupPlace> {
     let sheet = drawing.sheets.get(place.sheet)?;
     let a = sheet.annotations.iter().find(|a| a.id == place.annotation)?;
-    if !current(drawing, sheet, a) || a.source.as_ref().and_then(PmiSource::item) != Some(item) {
+    if !shows_item(drawing, sheet, a, item) {
         return None;
     }
     Some(MarkupPlace { sheet: place.sheet, annotation: a.id, at: centre(drawing, place.sheet, a.id)? })
@@ -88,7 +82,11 @@ mod tests {
     fn a_place_follows_its_annotation_and_refuses_another_item() {
         let mut drawing = fixture::bracket_a3();
         let sheet = &mut drawing.sheets[0];
-        let index = sheet.annotations.iter().position(|a| a.view != crate::SHEET).expect("an annotation in a view");
+        let index = sheet
+            .annotations
+            .iter()
+            .position(|a| !a.anchors.is_empty() && matches!(a.state, AnnotationState::Ok))
+            .expect("an annotation in a view");
         sheet.annotations[index].source = Some(PmiSource::Item { item: "Bore diameter".into() });
         let id = sheet.annotations[index].id;
         let target = place_of_item(&drawing, "Bore diameter").expect("the item is on the drawing");

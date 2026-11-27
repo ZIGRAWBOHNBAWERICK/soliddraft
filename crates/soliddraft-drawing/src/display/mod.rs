@@ -187,6 +187,7 @@ pub struct DisplayList {
     display_only_views: Vec<ViewId>,
     display_only_annotations: Vec<AnnotationId>,
     display_only_tables: Vec<usize>,
+    display_only_relationships: Vec<std::ops::Range<usize>>,
 }
 
 /// One dimension as its definition points, in sheet millimetres.
@@ -270,11 +271,20 @@ impl DisplayList {
     /// The items that belong on paper: everything but the interface's own marks (the
     /// changed-value highlight and the out-of-date hatch).
     pub fn printable(&self) -> impl Iterator<Item = &Item> {
-        self.sheet_items().filter(|i| self.prints_owner(i.owner()))
+        self.items.iter().enumerate().filter_map(|(index, item)| {
+            (Self::on_sheet(item)
+                && self.prints_owner(item.owner())
+                && !self.display_only_relationships.iter().any(|range| range.contains(&index)))
+            .then_some(item)
+        })
     }
 
     pub(crate) fn sheet_items(&self) -> impl Iterator<Item = &Item> {
-        self.items.iter().filter(|i| !matches!(i.role(), Role::Changed | Role::Stale))
+        self.items.iter().filter(|item| Self::on_sheet(item))
+    }
+
+    fn on_sheet(item: &Item) -> bool {
+        !matches!(item.role(), Role::Changed | Role::Stale)
     }
 
     fn prints_owner(&self, owner: Owner) -> bool {
@@ -507,6 +517,7 @@ pub fn layout(drawing: &Drawing, sheet_index: usize, ctx: &Context<'_>) -> Displ
         display_only_views: Vec::new(),
         display_only_annotations: Vec::new(),
         display_only_tables: Vec::new(),
+        display_only_relationships: Vec::new(),
     };
     let Some(sheet) = drawing.sheets.get(sheet_index) else {
         return list;
@@ -528,7 +539,7 @@ pub fn layout(drawing: &Drawing, sheet_index: usize, ctx: &Context<'_>) -> Displ
     for view in &sheet.views {
         view_items(drawing, sheet, view, ctx, &mut list);
     }
-    views::parent_marks(drawing, sheet_index, ctx, &mut list.items);
+    views::parent_marks(drawing, sheet_index, ctx, &mut list);
     for a in &sheet.annotations {
         let first = list.dimensions.len();
         let view = sheet.view(a.view);
@@ -815,8 +826,13 @@ fn view_items(drawing: &Drawing, sheet: &Sheet, view: &View, ctx: &Context<'_>, 
     if scale_differs {
         lines_out.push(format!("SCALE {}", scale_text(scale)));
     }
+    let relationship = lines_out.len();
     if let Some(from) = views::location_from(drawing, view) {
         lines_out.push(from);
+    }
+    if relationship < lines_out.len() && view.parent().is_some_and(|id| list.display_only_views.contains(&id)) {
+        let at = items.len() + relationship;
+        list.display_only_relationships.push(at..at + 1);
     }
     for (n, text) in lines_out.into_iter().enumerate() {
         items.push(Item::Text(TextItem {

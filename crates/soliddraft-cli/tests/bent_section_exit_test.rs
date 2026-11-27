@@ -334,6 +334,8 @@ fn an_oblique_offset_keeps_its_square_jog_after_extension_and_reopen() {
         &[
             "draw",
             "bracket.json",
+            "--break",
+            "top:20,0,0:40,0,0:h",
             "--offset-section",
             "top:10,10,0;40,20,0;38,26,0;68,36,0",
             "--out",

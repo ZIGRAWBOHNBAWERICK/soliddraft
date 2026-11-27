@@ -445,6 +445,7 @@ pub fn apply(drawing: &mut Drawing, command: &Command) -> Result<(), DrawingErro
             {
                 return Err(DrawingError::UnknownView(parent));
             }
+            project::validate_break(&view.geometry, view.display, 1.0, !view.breaks.is_empty())?;
             if view.letter().is_some_and(|l| l == drawing.next_view_label) {
                 drawing.next_view_label = next_letter(&drawing.next_view_label);
             }
@@ -517,6 +518,7 @@ pub fn apply(drawing: &mut Drawing, command: &Command) -> Result<(), DrawingErro
             // The reference mark says the text no longer follows the part.
             a.body = AnnotationKind::Note { text: format!("{text} (ref)"), leader: Vec::new() };
             a.anchors.clear();
+            a.source = None;
             a.state = AnnotationState::Ok;
             Ok(())
         }
@@ -547,7 +549,9 @@ pub fn apply(drawing: &mut Drawing, command: &Command) -> Result<(), DrawingErro
             }
         }
         Command::SetViewDisplay { view, display } => {
-            drawing.view_mut(*view).ok_or(DrawingError::UnknownView(*view))?.display = *display;
+            let v = drawing.view_mut(*view).ok_or(DrawingError::UnknownView(*view))?;
+            project::validate_break(&v.geometry, *display, 1.0, !v.breaks.is_empty())?;
+            v.display = *display;
             Ok(())
         }
         Command::SetViewExcluded { view, excluded } => {
@@ -578,6 +582,16 @@ pub fn apply(drawing: &mut Drawing, command: &Command) -> Result<(), DrawingErro
             if value.is_empty() {
                 s.format_overrides.remove(key);
             } else {
+                let template = library::template(s.template.as_str());
+                let editable = template.title_block.fields.iter().filter(|field| field.symbol.is_none()).any(|field| {
+                    field.key == *key
+                        || (!s.format_overrides.contains_key(&field.key)
+                            && !s.title_bindings.contains_key(&field.key)
+                            && field.value.contains(&format!("${{{key}}}")))
+                });
+                if !editable {
+                    return Err(DrawingError::BadRequest(format!("No editable title text uses {key}")));
+                }
                 s.format_overrides.insert(key.clone(), value.clone());
             }
             Ok(())
@@ -921,64 +935,67 @@ pub fn apply_with(drawing: &mut Drawing, command: &Command, part: &Part) -> Resu
             update::reattach(drawing, part, *annotation, *end, entity.clone()).map(|_| None)
         }
         Command::ReattachView { view, edge } => update::reattach_view(drawing, part, *view, edge.clone()).map(|_| None),
-        Command::EditView { view, kind } => {
-            let v = drawing.view_mut(*view).ok_or(DrawingError::UnknownView(*view))?;
+        Command::EditView { view, kind } => edit_and_regenerate(drawing, part, *view, |v| {
             if std::mem::discriminant(&v.kind) != std::mem::discriminant(kind) || v.parent() != kind_parent(kind) {
                 return Err(DrawingError::BadRequest(format!("{view} cannot become another kind of view")));
             }
             v.kind = kind.clone();
-            update::regenerate_view(drawing, part, *view).map(|_| None)
-        }
-        Command::SetViewCrop { view, crop } => {
-            drawing.view_mut(*view).ok_or(DrawingError::UnknownView(*view))?.crop = crop.clone();
-            update::regenerate_view(drawing, part, *view).map(|_| None)
-        }
-        Command::AddBrokenOut { view, broken_out } => {
-            drawing.view_mut(*view).ok_or(DrawingError::UnknownView(*view))?.broken_out.push(broken_out.clone());
-            update::regenerate_view(drawing, part, *view).map(|_| None)
-        }
-        Command::RemoveBrokenOut { view, index } => {
-            let v = drawing.view_mut(*view).ok_or(DrawingError::UnknownView(*view))?;
+            Ok(())
+        }),
+        Command::SetViewCrop { view, crop } => edit_and_regenerate(drawing, part, *view, |v| {
+            v.crop.clone_from(crop);
+            Ok(())
+        }),
+        Command::AddBrokenOut { view, broken_out } => edit_and_regenerate(drawing, part, *view, |v| {
+            v.broken_out.push(broken_out.clone());
+            Ok(())
+        }),
+        Command::RemoveBrokenOut { view, index } => edit_and_regenerate(drawing, part, *view, |v| {
             if *index >= v.broken_out.len() {
                 return Err(DrawingError::BadRequest(format!("{view} has no broken-out section {index}")));
             }
             v.broken_out.remove(*index);
-            update::regenerate_view(drawing, part, *view).map(|_| None)
-        }
+            Ok(())
+        }),
         Command::SetViewBreaks { view, breaks } => {
-            let v = drawing.view_mut(*view).ok_or(DrawingError::UnknownView(*view))?;
-            if matches!(v.kind, ViewKind::Detail { .. }) {
-                return Err(DrawingError::BadRequest(
-                    "a detail view shows its parent as it is; break the parent".into(),
-                ));
-            }
-            let before = std::mem::replace(&mut v.breaks, breaks.clone());
-            let result = update::regenerate_view(drawing, part, *view).map(|_| None);
-            if result.is_err() {
-                drawing.view_mut(*view).expect("existing view").breaks = before;
-            }
-            result
+            update::edit_breaks(drawing, part, *view, breaks.clone()).map(|_| None)
         }
-        Command::SetHalfSection { view, half } => {
-            let v = drawing.view_mut(*view).ok_or(DrawingError::UnknownView(*view))?;
+        Command::SetHalfSection { view, half } => edit_and_regenerate(drawing, part, *view, |v| {
             if half.is_some() && !matches!(v.kind, ViewKind::Base { .. } | ViewKind::Projected { .. }) {
                 return Err(DrawingError::BadRequest("A half section requires a model or projected view".into()));
             }
-            v.half = half.clone();
-            update::regenerate_view(drawing, part, *view).map(|_| None)
-        }
+            v.half.clone_from(half);
+            Ok(())
+        }),
         Command::SetViewDisplay { view, display } => {
             let before = drawing.view(*view).ok_or(DrawingError::UnknownView(*view))?.display;
-            apply(drawing, command)?;
-            // Tangent edges and seams change what the kernel returns; hidden lines only
-            // change what is drawn.
             if before.tangent != display.tangent || before.seams != display.seams {
-                update::regenerate_view(drawing, part, *view)?;
+                edit_and_regenerate(drawing, part, *view, |v| {
+                    v.display = *display;
+                    Ok(())
+                })
+            } else {
+                apply(drawing, command).map(|_| None)
             }
-            Ok(None)
         }
         other => apply(drawing, other).map(|_| None),
     }
+}
+
+fn edit_and_regenerate(
+    drawing: &mut Drawing,
+    part: &Part,
+    id: ViewId,
+    edit: impl FnOnce(&mut View) -> Result<(), DrawingError>,
+) -> Result<Option<UpdateReport>, DrawingError> {
+    let v = drawing.view_mut(id).ok_or(DrawingError::UnknownView(id))?;
+    let before = v.clone();
+    edit(v)?;
+    let result = update::regenerate_view(drawing, part, id);
+    if result.is_err() {
+        *drawing.view_mut(id).expect("existing view") = before;
+    }
+    result.map(|_| None)
 }
 
 fn kind_parent(kind: &ViewKind) -> Option<ViewId> {
@@ -1153,14 +1170,7 @@ fn rescale_changed(drawing: &mut Drawing, before: Vec<(ViewId, f64)>) -> Result<
 
 fn check_break_scale(drawing: &Drawing, id: ViewId, ratio: f64) -> Result<(), DrawingError> {
     let view = drawing.view(id).ok_or(DrawingError::UnknownView(id))?;
-    if !view.breaks.is_empty()
-        && view.geometry.breaks.first().is_some_and(|gap| gap.omitted_mm.is_some_and(|width| width * ratio <= gap.gap))
-    {
-        return Err(DrawingError::BadRequest(
-            "The break must shorten the view and leave material on both sides".into(),
-        ));
-    }
-    Ok(())
+    project::validate_break(&view.geometry, view.display, ratio, !view.breaks.is_empty())
 }
 
 /// Scales a view's line work and its annotations' points about the view's origin, and

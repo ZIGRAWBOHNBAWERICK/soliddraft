@@ -28,7 +28,7 @@ fn snap_mm(s: &DrawingSession) -> f64 {
 }
 
 /// Runs `f` with the part and its index, or says why it cannot.
-fn with_part<R>(
+pub(super) fn with_part<R>(
     doc: &Document,
     f: impl FnOnce(&Part<'_>, &PartIndex<'_>) -> Result<R, DrawingError>,
 ) -> Result<R, String> {
@@ -208,9 +208,19 @@ fn paint_draft(s: &DrawingSession, sheet2: &Sheet2<'_>, pointer: Option<Point2>)
         (DrawingTool::Section { .. }, pts) if s.draft.cut != CutMode::Straight && !pts.is_empty() => {
             let mut through = pts.to_vec();
             through.extend(pv);
-            let line = bent_line(s.draft.cut, &through);
-            let shown: Vec<egui::Pos2> = line.iter().map(|q| at(*q)).collect();
-            painter.extend(egui::Shape::dashed_line(&shown, stroke, 8.0, 3.0));
+            if let Some(xf) = s.doc.transforms.get(&view) {
+                use soliddraft_kernel_api::drawing::Curve3;
+                let flat = xf.unbroken();
+                let through: Vec<_> = through.into_iter().map(|q| flat.point(xf.unproject(q))).collect();
+                let points = bent_line(s.draft.cut, &through).into_iter().map(|q| flat.unproject(q)).collect();
+                let path = project::path_of(&Curve3::Polyline { points }, xf);
+                for segment in path.segments() {
+                    if let kurbo::PathSeg::Line(line) = segment {
+                        let ends = [line.p0, line.p1].map(|p| at(Point2::new(p.x, p.y)));
+                        painter.extend(egui::Shape::dashed_line(&ends, stroke, 8.0, 3.0));
+                    }
+                }
+            }
             for q in pts {
                 painter.circle_filled(at(*q), 4.0, theme::accent());
             }
@@ -490,7 +500,12 @@ fn finish_cut(s: &mut DrawingSession, doc: &Document, replace: Option<ViewId>, p
         s.say("Section: click at least two centres for an offset line, three points for an aligned one");
         return;
     }
-    let line = match derived::extend_cutting_line(&s.doc.drawing, view, bent_line(s.draft.cut, &points)) {
+    let Some(xf) = s.doc.transforms.get(&view) else {
+        s.say("Rebuild the view before adding a cutting line");
+        return;
+    };
+    let points: Vec<_> = points.into_iter().map(|p| xf.unbroken().point(xf.unproject(p))).collect();
+    let line = match derived::extend_cutting_line(&s.doc.drawing, view, xf, bent_line(s.draft.cut, &points)) {
         Ok(line) => line,
         Err(e) => {
             s.say(format!("Section: {e}"));
@@ -921,9 +936,14 @@ pub fn close_profile(state: &mut AppState) {
 fn build_set(s: &DrawingSession, kind: SetKind, placement: Point2) -> Annotation {
     let anchors = s.draft.anchors.clone();
     let view = s.draft.view.unwrap_or(SHEET);
-    let sheet = s.sheet();
-    let scale = sheet.view(view).map(|v| project::effective_scale(sheet, v)).unwrap_or(1.0);
-    let (us, vs): (Vec<f64>, Vec<f64>) = anchors.iter().map(|a| (a.cached.u, a.cached.v)).unzip();
+    let scale = project::view_scale(&s.doc.drawing, view).unwrap_or(1.0);
+    let (us, vs): (Vec<f64>, Vec<f64>) = anchors
+        .iter()
+        .map(|a| {
+            let at = s.doc.transforms.get(&view).map_or(a.cached, |xf| xf.unbroken().point(xf.unproject(a.cached)));
+            (at.u, at.v)
+        })
+        .unzip();
     let spread = |c: &[f64]| {
         c.iter().cloned().fold(f64::NEG_INFINITY, f64::max) - c.iter().cloned().fold(f64::INFINITY, f64::min)
     };
@@ -974,6 +994,7 @@ fn build_set(s: &DrawingSession, kind: SetKind, placement: Point2) -> Annotation
 #[allow(clippy::too_many_arguments)]
 pub(super) fn set_tool(
     s: &mut DrawingSession,
+    doc: &Document,
     kind: SetKind,
     sheet2: &Sheet2<'_>,
     lctx: &layout::Context<'_>,
@@ -1011,9 +1032,21 @@ pub(super) fn set_tool(
         return;
     }
     match (on_curve, hit.and_then(|h| anchor_from_hit(s, h))) {
-        (true, Some((view, anchor))) => {
+        (true, Some((view, mut anchor))) => {
             if s.draft.view.is_some_and(|v| v != view) {
                 s.say("Every point must be in the same view");
+                return;
+            }
+            if (anchor.entity.section_leg != 0 || s.sheet().view(view).is_some_and(|v| !v.geometry.breaks.is_empty()))
+                && !with_part(doc, |_, index| {
+                    Ok(s.doc
+                        .transforms
+                        .get(&view)
+                        .is_some_and(|xf| soliddraft_drawing::measure::place_model_pick(index, xf, &mut anchor)))
+                })
+                .unwrap_or(false)
+            {
+                s.say("Pick edges with measurable model geometry");
                 return;
             }
             if s.draft

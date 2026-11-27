@@ -11,6 +11,7 @@ use crate::annotation::{
     Anchor, Attach, DimType, DimValue, Dimension, DimensionKind, DimensionSet, LinearOrientation, SetKind,
 };
 use crate::ids::ViewId;
+use crate::part::{Entity, PartIndex, Resolution};
 use crate::project::{CircleInfo, ViewTransform};
 use crate::view::View;
 
@@ -61,6 +62,37 @@ pub fn anchor_point(a: &AnchorGeometry, xf: &ViewTransform, across: Point2) -> V
     }
 }
 
+fn measurable(anchor: &AnchorGeometry<'_>) -> bool {
+    anchor.curve.is_some() || matches!(anchor.attach, Attach::Point { .. })
+}
+
+fn model_curve<'a>(
+    index: &'a PartIndex<'_>,
+    xf: &ViewTransform,
+    entity: &crate::EntityRef,
+) -> Option<std::borrow::Cow<'a, Curve3>> {
+    let Resolution::Found(Entity::Edge(id)) = index.resolve(entity) else { return None };
+    let curve = index.edge_curve(id)?;
+    Some(match xf.leg_turn(entity.section_leg) {
+        Some(turn) => std::borrow::Cow::Owned(turn.curve(curve)),
+        None if entity.section_leg == 0 => std::borrow::Cow::Borrowed(curve),
+        None => return None,
+    })
+}
+
+fn resolve_model_pick(index: &PartIndex, xf: &ViewTransform, anchor: &Anchor) -> Option<Vec3> {
+    let curve = model_curve(index, xf, &anchor.entity)?;
+    let geometry = crate::update::anchor_geometry(xf, anchor, Some(&curve));
+    Some(anchor_point(&geometry, xf, Point2::default()))
+}
+
+/// Refines a curve pick to its model point and maps it back to the drawing.
+pub fn place_model_pick(index: &PartIndex, xf: &ViewTransform, anchor: &mut Anchor) -> bool {
+    let Some(at) = resolve_model_pick(index, xf, anchor) else { return false };
+    anchor.cached = xf.point(at);
+    true
+}
+
 /// The direction extension lines of a dimension run in, in the view: across the
 /// measuring direction.
 pub fn extension_direction(kind: &DimensionKind, a: Point2, b: Point2) -> Point2 {
@@ -81,6 +113,9 @@ pub fn extension_direction(kind: &DimensionKind, a: Point2, b: Point2) -> Point2
 pub fn measure(kind: &DimensionKind, dim_type: DimType, anchors: &[AnchorGeometry], xf: &ViewTransform) -> Option<f64> {
     match kind {
         DimensionKind::Linear { orientation } => {
+            if !anchors.iter().all(measurable) {
+                return None;
+            }
             let (p, q) = match anchors {
                 [one] => {
                     let c = one.curve?;
@@ -186,7 +221,7 @@ pub fn centreline([a, b, c, d]: [Point2; 4]) -> Option<[Point2; 2]> {
 /// first, along the set's direction in the view: from anchor 0 for ordinate and baseline
 /// sets, from the previous anchor for a chain. `None` with fewer than two anchors.
 pub fn measure_set(set: &DimensionSet, anchors: &[AnchorGeometry], xf: &ViewTransform) -> Option<Vec<f64>> {
-    if anchors.len() < 2 {
+    if anchors.len() < 2 || !anchors.iter().all(measurable) {
         return None;
     }
     let (axis, across) = match set.orientation {
@@ -410,6 +445,7 @@ pub struct Proposal {
     pub anchors: Vec<Anchor>,
     /// For a linear proposal between two points: the two points in view millimetres.
     pub points: Vec<Point2>,
+    model_points: Option<Vec<Point2>>,
     /// Radius in view millimetres for diameter and radius dimensions.
     pub radius: f64,
     /// Angle in degrees for angular dimensions.
@@ -418,6 +454,14 @@ pub struct Proposal {
     pub centre: Point2,
     /// Whether the proposal is complete or wants another pick.
     pub complete: bool,
+}
+
+impl Proposal {
+    /// The distance at the selected orientation, in model millimetres.
+    pub fn distance(&self, orientation: LinearOrientation, scale: f64) -> f64 {
+        let points = self.model_points.as_ref().unwrap_or(&self.points);
+        linear_value(orientation, points[0], points[1], scale)
+    }
 }
 
 fn anchor(curve: &crate::Curve2, attach: Attach, at: Point2) -> Anchor {
@@ -434,10 +478,14 @@ pub fn shape_of_curve(curve: &crate::Curve2, circles: &[CircleInfo]) -> CurveSha
 
 /// The selected end in view millimetres.
 pub fn endpoint(curve: &crate::Curve2, shape: CurveShape, attach: Attach) -> Point2 {
+    endpoint_at(curve.ends, shape, attach)
+}
+
+fn endpoint_at(ends: Option<[Point2; 2]>, shape: CurveShape, attach: Attach) -> Point2 {
     if attach == Attach::Start {
-        curve.ends.map_or_else(|| shape.start(), |ends| ends[0])
+        ends.map_or_else(|| shape.start(), |p| p[0])
     } else {
-        curve.ends.map_or_else(|| shape.end(), |ends| ends[1])
+        ends.map_or_else(|| shape.end(), |p| p[1])
     }
 }
 
@@ -445,14 +493,48 @@ pub fn endpoint(curve: &crate::Curve2, shape: CurveShape, attach: Attach) -> Poi
 /// diameter, an arc a radius, two parallel lines a distance, two other lines an angle,
 /// a round and a line the distance from the centre, two ends a point-to-point distance.
 pub fn propose(view: &View, picks: &[Pick], circles: &[CircleInfo]) -> Option<Proposal> {
-    let curve = |i: usize| view.geometry.curves.get(picks.get(i)?.curve);
-    let first = curve(0)?;
-    let s1 = shape_of_curve(first, circles);
+    propose_from(view.id, picks, |pick| {
+        let curve = view.geometry.curves.get(pick.curve)?;
+        Some((curve, shape_of_curve(curve, circles), curve.ends))
+    })
+}
+
+/// Makes a proposal from the original model edges, then places its anchors on the view.
+pub fn propose_model(view: &View, picks: &[Pick], index: &PartIndex, xf: &ViewTransform) -> Option<Proposal> {
+    let flat = xf.unbroken();
+    let mut proposal = propose_from(view.id, picks, |pick| {
+        let c = view.geometry.curves.get(pick.curve)?;
+        let curve = model_curve(index, xf, &c.source)?;
+        let shape = shape_of(&crate::project::path_of(&curve, &flat));
+        let ends = [curve.start(), curve.end()].map(|p| flat.precise_point(p));
+        Some((c, shape, Some(ends)))
+    })?;
+    let model: Vec<_> = proposal.anchors.iter().map(|a| resolve_model_pick(index, xf, a)).collect::<Option<_>>()?;
+    for (anchor, p) in proposal.anchors.iter_mut().zip(&model) {
+        anchor.cached = xf.point(*p);
+    }
+    if !proposal.points.is_empty() {
+        proposal.model_points = Some(model.iter().map(|p| flat.precise_point(*p)).collect());
+        proposal.points = proposal.anchors.iter().map(|a| a.cached).collect();
+    }
+    if let [at] = model.as_slice() {
+        proposal.centre = xf.point(*at);
+    }
+    Some(proposal)
+}
+
+fn propose_from<'a>(
+    view: ViewId,
+    picks: &[Pick],
+    curve: impl Fn(&Pick) -> Option<(&'a crate::Curve2, CurveShape, Option<[Point2; 2]>)>,
+) -> Option<Proposal> {
+    let (first, s1, ends1) = curve(picks.first()?)?;
     let base = Proposal {
-        view: view.id,
+        view,
         kind: DimensionKind::Linear { orientation: LinearOrientation::Horizontal },
         anchors: Vec::new(),
         points: Vec::new(),
+        model_points: None,
         radius: 0.0,
         angle: 0.0,
         centre: Point2::new(0.0, 0.0),
@@ -476,8 +558,8 @@ pub fn propose(view: &View, picks: &[Pick], circles: &[CircleInfo]) -> Option<Pr
                 ..base
             },
             (shape @ (CurveShape::Line { .. } | CurveShape::Other { .. }), None) => {
-                let a = endpoint(first, shape, Attach::Start);
-                let b = endpoint(first, shape, Attach::End);
+                let a = endpoint_at(ends1, shape, Attach::Start);
+                let b = endpoint_at(ends1, shape, Attach::End);
                 Proposal {
                     anchors: vec![anchor(first, Attach::Start, a), anchor(first, Attach::End, b)],
                     points: vec![a, b],
@@ -485,21 +567,20 @@ pub fn propose(view: &View, picks: &[Pick], circles: &[CircleInfo]) -> Option<Pr
                 }
             }
             (shape, Some(end)) => {
-                let at = endpoint(first, shape, end);
+                let at = endpoint_at(ends1, shape, end);
                 Proposal { anchors: vec![anchor(first, end, at)], points: vec![at], complete: false, ..base }
             }
         });
     }
-    let second = curve(1)?;
-    let s2 = shape_of_curve(second, circles);
+    let (second, s2, ends2) = curve(picks.get(1)?)?;
     let (p1, p2) = (&picks[0], &picks[1]);
     // Two ends, or an end and a curve: point to point or point to the curve's reference.
-    let point_of = |pick: &Pick, curve: &crate::Curve2, shape: CurveShape| -> (Attach, Point2) {
+    let point_of = |pick: &Pick, shape: CurveShape, ends: Option<[Point2; 2]>| -> (Attach, Point2) {
         if let CurveShape::Circle { centre, .. } = shape {
             return (Attach::Centre, centre);
         }
         match pick.end {
-            Some(end) => (end, endpoint(curve, shape, end)),
+            Some(end) => (end, endpoint_at(ends, shape, end)),
             None => match shape {
                 CurveShape::Circle { centre, .. } | CurveShape::Arc { centre, .. } => (Attach::Centre, centre),
                 _ => (Attach::Mid, shape.mid()),
@@ -532,8 +613,8 @@ pub fn propose(view: &View, picks: &[Pick], circles: &[CircleInfo]) -> Option<Pr
             ..base
         });
     }
-    let (at1, q1) = point_of(p1, first, s1);
-    let (at2, q2) = point_of(p2, second, s2);
+    let (at1, q1) = point_of(p1, s1, ends1);
+    let (at2, q2) = point_of(p2, s2, ends2);
     Some(Proposal { anchors: vec![anchor(first, at1, q1), anchor(second, at2, q2)], points: vec![q1, q2], ..base })
 }
 

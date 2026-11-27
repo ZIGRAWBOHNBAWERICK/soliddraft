@@ -106,12 +106,11 @@ Annotations, attached to the edges nearest model points:
   --revision <rev>:<description>[:<date>[:<approved>]]
                                              a row of the revision table
   --revision-symbol <view>:<x,y,z>:<rev>    a revision symbol
-  --title-field <key>=<text>[@<n>]           a title block field's text on sheet n
+  --title-field <key>[@<n>]=<text>           a title block field's text on sheet n
                                              (default 1)
   --title-cell <key>=<x>,<y>,<w>,<h>[@<n>]
                                              move a title block field's cell, in mm
-                                             from the block's bottom-left corner, with
-                                             an optional text height
+                                             from the block's bottom-left corner
 
 Add @dx,dy to --gdt, --datum, --finish and --revision-symbol to place the symbol
 that far from its anchor, in sheet millimetres.
@@ -352,13 +351,15 @@ fn parse_step(flag: &str, value: &str) -> Result<Step2, String> {
             };
             Ok(Step2::Half { view: view.into(), axis: [point(a)?, point(b)?], flip })
         }
-        "--title-field" | "--title-cell" => {
-            let (v, sheet) = on_sheet(value)?;
-            let Some((key, rest)) = v.split_once('=') else { return Err(bad("<key>=<value>")) };
+        "--title-field" => {
+            let Some((key, text)) = value.split_once('=') else { return Err(bad("<key>[@<n>]=<text>")) };
+            let (key, sheet) = on_sheet(key)?;
+            Ok(Step2::TitleField { sheet: sheet.unwrap_or(0), key: key.into(), value: text.into() })
+        }
+        "--title-cell" => {
+            let (cell, sheet) = on_sheet(value)?;
+            let Some((key, rest)) = cell.split_once('=') else { return Err(bad("<key>=<x>,<y>,<w>,<h>")) };
             let sheet = sheet.unwrap_or(0);
-            if flag == "--title-field" {
-                return Ok(Step2::TitleField { sheet, key: key.into(), value: rest.into() });
-            }
             let numbers = rest.split(',').map(|n| number(n, "a title cell")).collect::<Result<Vec<_>, _>>()?;
             let cell = match numbers[..] {
                 [x, y, w, h] => TitleCell { cell: [x, y, w, h] },
@@ -832,7 +833,11 @@ fn update(o: &Options) -> Result<(), String> {
                 if !at.is_finite() {
                     return Err(DrawingError::BadRequest(format!("The point for end {end} of {id} must be finite")));
                 }
-                let entity = soliddraft_drawing::edge_near(part, *at)?;
+                let index = PartIndex::build(part)?;
+                let ctx = derived::context(&drawing, part, &index, annotation(id)?.view)?;
+                let entity = soliddraft_drawing::annotate::view_anchor_near(&index, &ctx, *at)
+                    .ok_or_else(|| DrawingError::BadRequest("No edge in the view is available at that point".into()))?
+                    .entity;
                 requested.push((
                     Command::Reattach { annotation: id, end: *end, entity },
                     format!("reattached end {end} of {id}"),
@@ -1180,7 +1185,10 @@ fn apply_steps(drawing: &mut Drawing, part: &Part, steps: &[Step2]) -> Result<()
                 let parent = find_view(drawing, parent)?;
                 let sheet = sheet_for(drawing, parent, *sheet);
                 ensure_sheet(&mut stack, drawing, part, sheet)?;
-                let edge = soliddraft_drawing::edge_near(part, *near).map_err(err)?;
+                let ctx = derived::context(drawing, part, &index, parent).map_err(err)?;
+                let edge = soliddraft_drawing::annotate::view_anchor_near(&index, &ctx, *near)
+                    .ok_or("No edge in the view is available at that point")?
+                    .entity;
                 let (view, _) =
                     derived::new_auxiliary(drawing, part, &index, sheet, parent, edge, *flip, None).map_err(err)?;
                 Command::PlaceView { sheet, view }

@@ -257,7 +257,7 @@ fn offset_aligned_half_and_broken_views_from_the_drawing_tools() {
     let half = view(&app, front);
     let made = half.half.clone().expect("the front view is a half section");
     assert!((made.axis[0].x - 70.0).abs() < 1e-6 && (made.axis[1].x - 70.0).abs() < 1e-6, "{made:?}");
-    assert!(half.geometry.symmetry.is_some() && !half.geometry.hatch.is_empty(), "the cut half is hatched");
+    assert!(half.geometry.symmetry_segments.len() == 1 && !half.geometry.hatch.is_empty(), "the cut half is hatched");
     for point in made.axis {
         near(point.y, 45.0, 1e-6, "the cutting plane is midway through the 90 mm plate");
     }
@@ -266,7 +266,7 @@ fn offset_aligned_half_and_broken_views_from_the_drawing_tools() {
         DrawingAction::Command(DrawCommand::SetViewScale { view: front, scale: ViewScale::Custom { factor: 0.5 } }),
     );
     let after = view(&app, front);
-    let [a, b] = after.geometry.symmetry.unwrap();
+    let [[a, b]] = after.geometry.symmetry_segments[..] else { panic!("one symmetry line") };
     near(a.u, b.u, 1e-6, "the scaled centreline is still vertical");
     let axis_x = session(&app).doc.transforms[&front].point(made.axis[0]).u;
     near(a.u, axis_x, 1e-6, "the scaled centreline follows the model axis");
@@ -365,6 +365,10 @@ fn broken_view_dimensions_measure_the_model_from_native_picks() {
         click_model(&mut app, front, point);
     }
     assert!(session(&app).picks.iter().all(|pick| pick.end.is_some()));
+    let current = session(&app);
+    let proposal = current.proposal.as_ref().expect("the dimension preview");
+    let scale = soliddraft_drawing::project::view_scale(&current.doc.drawing, front).unwrap();
+    near(proposal.distance(soliddraft_drawing::LinearOrientation::Horizontal, scale), 120.0, 1e-6, "preview value");
     let base = session(&app).sheet_point(front, Vec3::new(50.0, 0.0, 0.0)).unwrap();
     let place = session(&app).screen_of(Point2::new(base.u, base.v - 15.0));
     click_at(&mut app, place);

@@ -86,7 +86,7 @@ fn larger_and_legacy_sheets_print_at_their_size_with_their_title_layout() {
             "--template",
             template,
             "--title-field",
-            "owner=Rig Shop",
+            "owner@1=ops@example.com@2",
             "--title-cell",
             "owner=4,9,54,9",
             "--out",
@@ -104,7 +104,7 @@ fn larger_and_legacy_sheets_print_at_their_size_with_their_title_layout() {
         let (drawing, _) = soliddraft_drawing::file::read(&dir.join(out("dwdrw"))).expect("the drawing opens");
         let sheet = &drawing.sheets[0];
         assert_eq!(sheet.template.as_str(), template);
-        assert_eq!(sheet.format_overrides.get("owner").map(String::as_str), Some("Rig Shop"));
+        assert_eq!(sheet.format_overrides.get("owner").map(String::as_str), Some("ops@example.com@2"));
         assert_eq!(sheet.title_layout["owner"].cell, [4.0, 9.0, 54.0, 9.0]);
         let expected = (width - 10.0 - 180.0 + 4.0 + 1.5, 10.0 + 9.0 + 1.5);
 
@@ -113,7 +113,7 @@ fn larger_and_legacy_sheets_print_at_their_size_with_their_title_layout() {
             svg.contains(&format!(r#"width="{width}mm" height="{height}mm" viewBox="0 0 {width} {height}""#)),
             "{template}: the SVG is not {width} x {height} mm"
         );
-        let (x, y) = svg_text(&svg, "Rig Shop");
+        let (x, y) = svg_text(&svg, "ops@example.com@2");
         near(x, expected.0, "SVG text x");
         near(y, height - expected.1, "SVG text y");
 
@@ -127,7 +127,7 @@ fn larger_and_legacy_sheets_print_at_their_size_with_their_title_layout() {
         let pt = 72.0 / 25.4;
         assert!((media[2] - width * pt).abs() < 0.01 && (media[3] - height * pt).abs() < 0.01, "{template}: {media:?}");
 
-        let (matrix, text) = pdf_text(&pdf, page_id, "Rig Shop");
+        let (matrix, text) = pdf_text(&pdf, page_id, "ops@example.com@2");
         near(matrix[0], pt, "PDF page scale x");
         near(matrix[3], pt, "PDF page scale y");
         near(matrix[4] + matrix[0] * text[0] + matrix[2] * text[1], expected.0 * pt, "PDF text x in points");
@@ -140,8 +140,8 @@ fn larger_and_legacy_sheets_print_at_their_size_with_their_title_layout() {
         let text = dxf
             .entities()
             .find_map(|e| match &e.specific {
-                dxf::entities::EntityType::Text(t) if t.value == "Rig Shop" => Some(t.location.clone()),
-                dxf::entities::EntityType::MText(t) if t.text == "Rig Shop" => Some(t.insertion_point.clone()),
+                dxf::entities::EntityType::Text(t) if t.value == "ops@example.com@2" => Some(t.location.clone()),
+                dxf::entities::EntityType::MText(t) if t.text == "ops@example.com@2" => Some(t.insertion_point.clone()),
                 _ => None,
             })
             .expect("the owner's text is in the DXF");

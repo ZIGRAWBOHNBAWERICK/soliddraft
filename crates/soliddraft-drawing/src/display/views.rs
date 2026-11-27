@@ -281,7 +281,7 @@ pub(super) fn boundary_items(view: &View, ctx: &Context<'_>, items: &mut Vec<Ite
     let o = view.position;
     let at = |p: Point2| Point2::new(p.u + o.u, p.v + o.v);
     // A half section's symmetry line: a thin chain line, as any centre line.
-    for [a, b] in view.geometry.symmetry.iter().chain(&view.geometry.symmetry_segments).copied() {
+    for [a, b] in view.geometry.symmetry_segments.iter().copied() {
         items.push(Item::Path(PathItem {
             path: line(at(a), at(b)),
             width: ctx.format.lines.centre,
@@ -331,14 +331,16 @@ fn label(pos: Point2, height: f64, text: String, halign: Align, valign: VAlign, 
 /// The marks derived views leave on the views of sheet `sheet_index`: cutting lines,
 /// detail circles and auxiliary arrows, each with its letter and, when the derived view
 /// is on another sheet, where to find it. They belong to the derived view.
-pub(super) fn parent_marks(drawing: &Drawing, sheet_index: usize, ctx: &Context<'_>, items: &mut Vec<Item>) {
+pub(super) fn parent_marks(drawing: &Drawing, sheet_index: usize, ctx: &Context<'_>, list: &mut super::DisplayList) {
     let Some(sheet) = drawing.sheets.get(sheet_index) else { return };
+    let items = &mut list.items;
     let lines = &ctx.format.lines;
     let letter_height = ctx.style.text.height * 1.4;
     for (child_sheet, s) in drawing.sheets.iter().enumerate() {
         for child in &s.views {
             let Some(parent) = child.parent().and_then(|p| sheet.view(p)) else { continue };
             let owner = Owner::View(child.id);
+            let first = items.len();
             let o = parent.position;
             let at = |p: &Point2| Point2::new(p.u + o.u, p.v + o.v);
             let see = location_of(drawing, child_sheet, child).and_then(|l| l.on_parent());
@@ -574,6 +576,9 @@ pub(super) fn parent_marks(drawing: &Drawing, sheet_index: usize, ctx: &Context<
                     }
                 }
                 _ => {}
+            }
+            if parent.geometry.display_only && first != items.len() {
+                list.display_only_relationships.push(first..items.len());
             }
         }
     }

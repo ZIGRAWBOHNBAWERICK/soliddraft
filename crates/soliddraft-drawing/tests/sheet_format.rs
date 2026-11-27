@@ -100,16 +100,69 @@ fn long_title_values_fit_their_cells_without_losing_the_saved_text() {
         stack.run(&mut drawing, &command, None).unwrap();
     }
     assert_eq!(drawing.sheets[0].format_overrides["owner"], owner);
+    drawing.sheets[0].views.clear();
+    drawing.sheets[0].annotations.clear();
     let list = display::layout_sheet(&drawing, 0);
-    let field = list
-        .printable()
-        .find_map(|item| match item {
-            Item::Text(text) if text.text == owner => Some(text),
-            _ => None,
-        })
+    let pdf = soliddraft_drawing::export::pdf(&[list], &Default::default()).unwrap();
+    let pdf = lopdf::Document::load_mem(&pdf).unwrap();
+    let page = *pdf.get_pages().values().next().unwrap();
+    let fonts = pdf.get_page_fonts(page).unwrap();
+    let font = fonts.values().next().unwrap();
+    let encoding = font.get_font_encoding(&pdf).unwrap();
+    let cid = font.get(b"DescendantFonts").unwrap().as_array().unwrap()[0].as_reference().unwrap();
+    let cid = pdf.get_dictionary(cid).unwrap();
+    let descriptor = pdf.get_dictionary(cid.get(b"FontDescriptor").unwrap().as_reference().unwrap()).unwrap();
+    let embedded = pdf
+        .get_object(descriptor.get(b"FontFile2").unwrap().as_reference().unwrap())
+        .unwrap()
+        .as_stream()
+        .unwrap()
+        .get_plain_content()
         .unwrap();
-    assert!(field.height > 0.0);
-    // The visible cells in ISO A3 show Owner immediately to the left of Title.
-    let title_boundary = 420.0 - 10.0 - 180.0 + 60.0;
-    assert!(field.pos.u + display::text_width(&field.text, field.height) <= title_boundary + 1e-8);
+    let face = ttf_parser::Face::parse(&embedded, 0).unwrap();
+    let operations = lopdf::content::Content::decode(&pdf.get_page_content(page)).unwrap().operations;
+    let mut origin = 0.0;
+    let mut size = 0.0;
+    let mut scale = 1.0;
+    let right = operations
+        .iter()
+        .find_map(|op| {
+            let number = |i: usize| f64::from(op.operands[i].as_float().unwrap());
+            match op.operator.as_str() {
+                "cm" => scale = number(0),
+                "Tm" => origin = number(4),
+                "Tf" => size = number(1),
+                "Tj" => {
+                    let bytes = op.operands[0].as_str().unwrap();
+                    if lopdf::Document::decode_text(&encoding, bytes).unwrap() == owner {
+                        let mut x = 0.0;
+                        let mut right = 0.0_f64;
+                        for glyph in bytes.chunks_exact(2) {
+                            let id = ttf_parser::GlyphId(u16::from_be_bytes([glyph[0], glyph[1]]));
+                            if let Some(box_) = face.glyph_bounding_box(id) {
+                                right = right.max(x + f64::from(box_.x_max));
+                            }
+                            x += f64::from(face.glyph_hor_advance(id).unwrap());
+                        }
+                        return Some((origin + right * size / f64::from(face.units_per_em())) * scale);
+                    }
+                }
+                _ => {}
+            }
+            None
+        })
+        .expect("the owner text is present in the PDF");
+    let title_boundary = (420.0 - 10.0 - 180.0 + 60.0) * 72.0 / 25.4;
+    assert!(right <= title_boundary + 0.01, "{right} pt exceeds {title_boundary} pt");
+}
+
+#[test]
+fn an_override_must_affect_title_text() {
+    let mut drawing = fixture::bracket_a3();
+    let before = drawing.clone();
+    for key in ["owenr", "projection"] {
+        let command = Command::SetTitleField { sheet: 0, key: key.into(), value: "third-angle".into() };
+        assert!(matches!(soliddraft_drawing::apply(&mut drawing, &command), Err(DrawingError::BadRequest(_))));
+        assert_eq!(drawing, before);
+    }
 }

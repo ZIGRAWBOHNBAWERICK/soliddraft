@@ -11,9 +11,10 @@ use crate::display_quality::{self, DisplayQuality};
 use crate::sketch::{self, Sketch};
 use glam::Vec3;
 use part_display::PartDisplay;
-pub(crate) use part_display::{
-    PreviewTarget, ReadyDisplay, preview_display, preview_target, ready_display, ready_fallback, ready_preview,
-};
+pub(crate) use part_display::{ReadyDisplay, ready_display, ready_fallback, ready_preview};
+// The browser's page meshes the GPU preview of a part its kernel worker rebuilt.
+#[cfg(target_arch = "wasm32")]
+pub(crate) use part_display::{PreviewTarget, preview_display, preview_target};
 use serde::{Deserialize, Serialize};
 use soliddraft_document::{ContentHash, DocumentId};
 use soliddraft_kernel_api::{

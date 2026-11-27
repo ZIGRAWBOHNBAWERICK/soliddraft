@@ -35,11 +35,18 @@ def picture(empty, part):
             raise ValueError(f'Viewport resized between captures: {before.size} != {after.size}')
         width, height = after.size
         crop = (int(width * .24), int(height * .27), int(width * .94), int(height * .86))
-        delta = ImageChops.difference(before.crop(crop).convert('RGB'), after.crop(crop).convert('RGB'))
+        rendered = after.crop(crop).convert('RGB')
+        delta = ImageChops.difference(before.crop(crop).convert('RGB'), rendered)
     red, green, blue = delta.split()
     mask = ImageChops.lighter(ImageChops.lighter(red, green), blue).point(lambda n: 255 if n >= 30 else 0)
+    # The default light P1 material is blue-grey; construction planes are warm and
+    # can move between the two fits. Do not mistake them for the body.
+    red, _, blue = rendered.split()
+    material = ImageChops.subtract(blue, red).point(lambda n: 255 if n >= 8 else 0)
+    mask = ImageChops.darker(mask, material)
     # Ignore one-pixel differences from antialiasing, the grid and overlays.
-    mask = mask.resize((420, 240)).point(lambda n: 255 if n >= 128 else 0)
+    normalized = (420, round(mask.height * 420 / mask.width))
+    mask = mask.resize(normalized).point(lambda n: 255 if n >= 128 else 0)
     mask = mask.filter(ImageFilter.MinFilter(5)).filter(ImageFilter.MaxFilter(5))
     bounds = mask.getbbox()
     if not bounds or mask.histogram()[255] < 1000:
@@ -186,18 +193,28 @@ def build_fixture(app, out, env):
         tool('save', {'path': str(out / 'p1.dwprt')})
 
 
-def native(app, out, record):
+def native(args, out, record):
     system = platform.system()
     backends = {'Darwin': {'Metal'}, 'Windows': {'Dx12', 'Vulkan'}}.get(system)
     if backends is None:
         raise ValueError('Native GPU acceptance runs only on macOS and native Windows')
     env = native_env(out)
-    build_fixture(app, out, env)
+    build_fixture(args.app.resolve(), out, env)
+    if system == 'Darwin':
+        env['SOLIDDRAFT_GPU_ACCEPTANCE_OUT'] = str(out)
+        with (out / 'metal.log').open('wb') as log:
+            subprocess.run([args.metal_harness.resolve(), '--ignored', '--exact', 'capture_metal_p1'],
+                           env=env, stdout=log, stderr=subprocess.STDOUT, check=True, timeout=180)
+        record['capture'] = 'offscreen'
+        record['renderer'] = json.loads((out / 'adapter.json').read_text(encoding='utf-8'))
+        require_hardware(record['renderer'], backends)
+        return
+    record['capture'] = 'window'
     for name in ('empty', 'p1'):
         logfile = out / f'{name}.log'
         png = out / f'{name}.png'
         with logfile.open('wb') as log:
-            subprocess.run([app, str(out / f'{name}.dwprt'), '--no-assistant', '--size', '1200x780',
+            subprocess.run([args.app.resolve(), str(out / f'{name}.dwprt'), '--no-assistant', '--size', '1200x780',
                             '--preset', 'fast', '--theme', 'light', '--screenshot', str(png)],
                            env=env, stdout=log, stderr=subprocess.STDOUT, check=True, timeout=45)
         adapter = selected_native(logfile)
@@ -398,12 +415,15 @@ def main():
     parser.add_argument('gate', choices=('native', 'safari', 'chrome'))
     parser.add_argument('--out', type=Path, required=True)
     parser.add_argument('--app', type=Path)
+    parser.add_argument('--metal-harness', type=Path, help='Mac test executable from cargo test --no-run')
     parser.add_argument('--dist', type=Path)
     parser.add_argument('--fixture', type=Path)
     parser.add_argument('--force-software', action='store_true')
     args = parser.parse_args()
     if args.gate == 'native' and (not args.app or args.force_software):
         parser.error('native requires --app and cannot use --force-software')
+    if args.gate == 'native' and platform.system() == 'Darwin' and not args.metal_harness:
+        parser.error('the Mac native gate requires --metal-harness')
     if args.gate != 'native' and (not args.dist or not args.fixture):
         parser.error('browser gates require --dist and --fixture from the native gate')
     if args.force_software and args.gate != 'chrome':
@@ -413,7 +433,7 @@ def main():
     record = {'gate': args.gate, 'system': platform.system(), 'pass': False, 'forced_software': args.force_software}
     try:
         if args.gate == 'native':
-            native(args.app.resolve(), out, record)
+            native(args, out, record)
             record['picture'] = compare_pictures(out)
         else:
             record['picture'] = web(args, out, record)

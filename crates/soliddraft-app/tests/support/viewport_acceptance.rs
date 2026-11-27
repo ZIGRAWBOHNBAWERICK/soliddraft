@@ -186,6 +186,55 @@ pub fn sketches() -> Document {
 // ---------------------------------------------------------------------------
 // Driving the real app.
 
+/// Runs the viewport on Metal without a window surface or the default software-first
+/// test adapter policy. The selected render state also owns the screenshot readback.
+#[cfg(target_os = "macos")]
+pub fn capture_metal_p1(out: &Path) {
+    use egui_kittest::wgpu::{WgpuTestRenderer, create_render_state};
+    use egui_wgpu::{WgpuConfiguration, WgpuSetup, WgpuSetupCreateNew, wgpu};
+
+    let mut setup = WgpuSetupCreateNew::without_display_handle();
+    setup.instance_descriptor.backends = wgpu::Backends::METAL;
+    let mut config = WgpuConfiguration { wgpu_setup: WgpuSetup::CreateNew(setup), ..Default::default() };
+    soliddraft_app::viewport::assembly::request_features(&mut config);
+    let state = create_render_state(config.wgpu_setup, egui_wgpu::RendererOptions::PREDICTABLE);
+    let info = state.adapter.get_info();
+    std::fs::write(
+        out.join("adapter.json"),
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "backend": format!("{:?}", info.backend),
+            "device_type": format!("{:?}", info.device_type),
+            "name": info.name,
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(info.backend, wgpu::Backend::Metal);
+    assert!(matches!(info.device_type, wgpu::DeviceType::IntegratedGpu | wgpu::DeviceType::DiscreteGpu));
+    soliddraft_app::file::set_config_dir(Some(out.join("config")));
+    let mut app = Harness::builder()
+        .with_size(vec2(1200.0, 780.0))
+        .with_pixels_per_point(1.0)
+        .with_render_every_step(false)
+        .renderer(WgpuTestRenderer::from_render_state(state))
+        .build_eframe(|cc| {
+            let automation = Automation {
+                preset: Some(soliddraft_app::viewport::look::Preset::Fast),
+                theme: Some(soliddraft_app::theme::Mode::Light),
+                ..Default::default()
+            };
+            SolidDraftApp::new(cc, empty(), automation)
+        });
+    for name in ["empty", "p1"] {
+        soliddraft_app::app::open_at_start(app.state_mut(), out.join(format!("{name}.dwprt")));
+        settle(&mut app);
+        let doc = &app.state().state.doc;
+        assert_eq!(doc.name, name, "the requested fixture opened");
+        assert_eq!(doc.triangle_count() > 0, name == "p1", "fixture contents");
+        app.render().expect("render on Metal").save(out.join(format!("{name}.png"))).unwrap();
+    }
+}
+
 pub fn launch(doc: Document) -> App {
     launch_at(doc, vec2(1440.0, 900.0), 1.0)
 }

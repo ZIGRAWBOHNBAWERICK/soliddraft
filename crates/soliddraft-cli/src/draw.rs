@@ -15,7 +15,7 @@ use soliddraft_drawing::{
     AccuracyCounts, AlignAxis, AnnotationId, AnnotationKind, Boundary, Break, BrokenOut, Command, DatumRef, Drawing,
     DrawingError, DrawingMeta, GdtCharacteristic, HalfSection, HiddenLines, LinearOrientation, MaterialCondition,
     ModelDimension, ModelMeasure, NewDrawing, Part, PartIndex, RevisionRow, SetKind, SurfaceProcess, TangentEdges,
-    Template, UndoStack, UpdateReport, ViewId, annotate, derived, display, project,
+    Template, TitleCell, UndoStack, UpdateReport, ViewId, annotate, derived, display, project,
 };
 use soliddraft_kernel_api::drawing::StandardView;
 use soliddraft_kernel_api::{BooleanOp, Kernel, Point2, Vec3};
@@ -106,6 +106,12 @@ Annotations, attached to the edges nearest model points:
   --revision <rev>:<description>[:<date>[:<approved>]]
                                              a row of the revision table
   --revision-symbol <view>:<x,y,z>:<rev>    a revision symbol
+  --title-field <key>=<text>[@<n>]           a title block field's text on sheet n
+                                             (default 1)
+  --title-cell <key>=<x>,<y>,<w>,<h>[,<size>][@<n>]
+                                             move a title block field's cell, in mm
+                                             from the block's bottom-left corner, with
+                                             an optional text height
 
 Add @dx,dy to --gdt, --datum, --finish and --revision-symbol to place the symbol
 that far from its anchor, in sheet millimetres.
@@ -165,6 +171,8 @@ enum Step2 {
     BrokenOut { view: String, at: Vec3, radius: f64, depth: f64 },
     Break { view: String, from: Vec3, to: Vec3, axis: AlignAxis, gap: f64 },
     Half { view: String, axis: [Vec3; 2], flip: bool },
+    TitleField { sheet: usize, key: String, value: String },
+    TitleCell { sheet: usize, key: String, cell: TitleCell },
     Display { view: String, key: String, value: String },
     Set { kind: SetKind, view: String, orientation: LinearOrientation, offset: f64, points: Vec<Vec3> },
     Gdt { view: String, at: Vec3, body: AnnotationKind, offset: Option<Point2> },
@@ -347,6 +355,21 @@ fn parse_step(flag: &str, value: &str) -> Result<Step2, String> {
             };
             Ok(Step2::Half { view: view.into(), axis: [point(a)?, point(b)?], flip })
         }
+        "--title-field" | "--title-cell" => {
+            let (v, sheet) = on_sheet(value)?;
+            let Some((key, rest)) = v.split_once('=') else { return Err(bad("<key>=<value>")) };
+            let sheet = sheet.unwrap_or(0);
+            if flag == "--title-field" {
+                return Ok(Step2::TitleField { sheet, key: key.into(), value: rest.into() });
+            }
+            let numbers = rest.split(',').map(|n| number(n, "a title cell")).collect::<Result<Vec<_>, _>>()?;
+            let cell = match numbers[..] {
+                [x, y, w, h] => TitleCell { cell: [x, y, w, h], size: None },
+                [x, y, w, h, size] => TitleCell { cell: [x, y, w, h], size: Some(size) },
+                _ => return Err(bad("<key>=<x>,<y>,<w>,<h>[,<size>]")),
+            };
+            Ok(Step2::TitleCell { sheet, key: key.into(), cell })
+        }
         "--display" => {
             let Some((view, setting)) = value.split_once(':') else { return Err(bad("<view>:<key>=<value>")) };
             let Some((key, v)) = setting.split_once('=') else { return Err(bad("<view>:<key>=<value>")) };
@@ -515,8 +538,9 @@ fn parse(args: &[String]) -> Result<Options, String> {
                 o.reattach.push((id(a.to_owned(), "--reattach")?, end, Vec3::new(x, y, z)));
             }
             flag @ ("--section" | "--offset-section" | "--aligned-section" | "--detail" | "--aux" | "--crop"
-            | "--broken-out" | "--break" | "--half-section" | "--display" | "--ordinate" | "--baseline"
-            | "--chain" | "--gdt" | "--datum" | "--finish" | "--revision" | "--revision-symbol") => {
+            | "--broken-out" | "--break" | "--half-section" | "--title-field" | "--title-cell"
+            | "--display" | "--ordinate" | "--baseline" | "--chain" | "--gdt" | "--datum" | "--finish"
+            | "--revision" | "--revision-symbol") => {
                 let v = value(flag)?;
                 o.steps.push(parse_step(flag, &v)?);
             }
@@ -1185,6 +1209,12 @@ fn apply_steps(drawing: &mut Drawing, part: &Part, steps: &[Step2]) -> Result<()
             Step2::Half { view, axis, flip } => {
                 let view = find_view(drawing, view)?;
                 Command::SetHalfSection { view, half: Some(HalfSection { axis: *axis, flip: *flip }) }
+            }
+            Step2::TitleField { sheet, key, value } => {
+                Command::SetTitleField { sheet: *sheet, key: key.clone(), value: value.clone() }
+            }
+            Step2::TitleCell { sheet, key, cell } => {
+                Command::SetTitleLayout { sheet: *sheet, key: key.clone(), layout: Some(*cell) }
             }
             Step2::Display { view, key, value } => {
                 let view = find_view(drawing, view)?;

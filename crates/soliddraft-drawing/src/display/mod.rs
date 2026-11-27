@@ -599,7 +599,9 @@ fn format_items(drawing: &Drawing, sheet: &Sheet, ctx: &Context<'_>, items: &mut
     }
     let lookup = |key: &str| property(drawing, sheet, ctx.sheet_index, ctx.sheet_count, key);
     for field in &tb.fields {
-        let [x, y, w, h] = field.cell;
+        let placed = sheet.title_layout.get(&field.key);
+        let [x, y, w, h] = placed.map_or(field.cell, |p| p.cell);
+        let size = placed.and_then(|p| p.size).unwrap_or(field.size);
         let cell = (o.u + x, o.v + y, w, h);
         items.push(Item::Text(TextItem {
             pos: Point2::new(cell.0 + 1.2, cell.1 + cell.3 - 1.0),
@@ -627,7 +629,7 @@ fn format_items(drawing: &Drawing, sheet: &Sheet, ctx: &Context<'_>, items: &mut
         };
         items.push(Item::Text(TextItem {
             pos,
-            height: field.size.min(cell.3 - 5.0).max(1.8),
+            height: size.min(cell.3 - 5.0).max(1.8),
             angle: 0.0,
             text: value,
             halign,

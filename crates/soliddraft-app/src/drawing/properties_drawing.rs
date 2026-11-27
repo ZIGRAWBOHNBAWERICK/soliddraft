@@ -516,7 +516,7 @@ fn view_panel(
                     .width(ui.available_width() - 20.0)
                     .selected_text(current)
                     .show_ui(ui, |ui| {
-                        for sc in s.doc.template().scales() {
+                        for sc in templates::template(s.sheet().template.as_str()).scales() {
                             let on =
                                 matches!(v.scale, ViewScale::Custom { factor } if (factor - sc.factor()).abs() < 1e-9);
                             if ui.selectable_label(on, sc.to_string()).clicked() {
@@ -888,7 +888,7 @@ fn sheet_panel(ui: &mut egui::Ui, s: &mut DrawingSession, actions: &mut Vec<Draw
     let sheet = s.sheet().clone();
     let name = sheet.name.replace("Sheet", "Sheet ");
     header(ui, Icon::Rectangle, &name);
-    let template = s.doc.template();
+    let template = templates::template(sheet.template.as_str());
     let auto = s.doc.drawing.settings.automatic_update;
     let meta = s.doc.drawing.meta.clone();
     let sheet_count = s.doc.drawing.sheets.len();
@@ -1048,8 +1048,72 @@ fn sheet_panel(ui: &mut egui::Ui, s: &mut DrawingSession, actions: &mut Vec<Draw
 
 fn format_panel(ui: &mut egui::Ui, s: &mut DrawingSession, actions: &mut Vec<DrawingAction>) {
     header(ui, Icon::Props, "Sheet format");
-    let t = s.doc.template();
+    let si = s.sheet;
+    let sheet = s.sheet().clone();
+    let t = templates::template(sheet.template.as_str());
     egui::Frame::new().inner_margin(egui::Margin::symmetric(10, 8)).show(ui, |ui| {
+        theme::section_label(ui, "Paper");
+        egui::ComboBox::from_id_salt("sheet_format")
+            .width(ui.available_width() - 20.0)
+            .selected_text(&t.name)
+            .show_ui(ui, |ui| {
+                for choice in templates::library().selectable_templates() {
+                    if ui.selectable_label(choice.id == t.id, &choice.name).clicked() && choice.id != t.id {
+                        actions.push(DrawingAction::Command(Command::SetSheetFormat {
+                            sheet: si,
+                            template: soliddraft_drawing::TemplateId::from(choice.id.as_str()),
+                        }));
+                    }
+                }
+            })
+            .response
+            .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::ComboBox, true, "Paper size"));
+        section_gap(ui);
+        theme::section_label(ui, "Title block layout");
+        hint(ui, "Each field's cell: x, y, width and height in mm from the block's bottom-left corner.");
+        for field in &t.title_block.fields {
+            let placed = sheet.title_layout.get(&field.key).copied();
+            let stored = placed.map_or(field.cell, |p| p.cell);
+            // A cell being dragged or typed is kept here until the edit ends.
+            let draft = ui.id().with(("title_cell", si, field.key.as_str()));
+            let mut cell = ui.data(|d| d.get_temp::<[f64; 4]>(draft)).unwrap_or(stored);
+            let (mut changed, mut active, mut ended) = (false, false, false);
+            ui.horizontal(|ui| {
+                ui.add_sized(
+                    vec2(68.0, 22.0),
+                    egui::Label::new(egui::RichText::new(&field.label).size(12.0).color(theme::muted())).truncate(),
+                );
+                for (i, part) in ["x", "y", "width", "height"].into_iter().enumerate() {
+                    let r = ui.add(egui::DragValue::new(&mut cell[i]).speed(0.5).range(0.0..=2000.0).max_decimals(1));
+                    r.widget_info(|| {
+                        egui::WidgetInfo::labeled(egui::WidgetType::DragValue, true, format!("{} {part}", field.label))
+                    });
+                    changed |= r.changed();
+                    active |= r.dragged() || r.has_focus();
+                    ended |= r.drag_stopped() || r.lost_focus();
+                }
+                if placed.is_some() && ui.small_button("Reset").on_hover_text("Back to the template's cell").clicked() {
+                    actions.push(DrawingAction::Command(Command::SetTitleLayout {
+                        sheet: si,
+                        key: field.key.clone(),
+                        layout: None,
+                    }));
+                }
+            });
+            if active && !ended {
+                ui.data_mut(|d| d.insert_temp(draft, cell));
+                continue;
+            }
+            ui.data_mut(|d| d.remove::<[f64; 4]>(draft));
+            if (ended || changed) && cell != stored {
+                actions.push(DrawingAction::Command(Command::SetTitleLayout {
+                    sheet: si,
+                    key: field.key.clone(),
+                    layout: Some(soliddraft_drawing::TitleCell { cell, size: placed.and_then(|p| p.size) }),
+                }));
+            }
+        }
+        section_gap(ui);
         theme::section_label(ui, "From the template");
         value_row(ui, "Template", &t.name);
         value_row(ui, "Margins", &format!("{} / {} / {} / {} mm", t.margins.left, t.margins.top, t.margins.right, t.margins.bottom));
@@ -1073,7 +1137,7 @@ pub fn sheet_bar(ui: &mut egui::Ui, state: &mut AppState) -> Option<Rect> {
     }
     let index = session.sheet;
     let sheet = session.sheet().clone();
-    let scales = session.doc.template().scales();
+    let scales = templates::template(session.sheet().template.as_str()).scales();
     let mut actions = Vec::new();
     let mut anchor = Rect::NOTHING;
     ui.horizontal_centered(|ui| {

@@ -267,7 +267,8 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
                     ui.close();
                 }
             });
-            let format_name = format!("Sheet format {}", s.doc.template().name.split(" ·").next().unwrap_or("").trim());
+            let format = soliddraft_drawing::library::template(s.doc.drawing.sheets[si].template.as_str());
+            let format_name = format!("Sheet format {}", format.name.split(" ·").next().unwrap_or("").trim());
             let r = row(
                 ui,
                 RowSpec {

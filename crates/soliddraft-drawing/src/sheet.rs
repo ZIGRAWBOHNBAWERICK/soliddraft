@@ -32,6 +32,9 @@ pub struct Sheet {
     /// Title block fields that read a part property, by field key. An override still wins.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub title_bindings: BTreeMap<String, String>,
+    /// Title block fields placed differently from the template, by field key.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub title_layout: BTreeMap<String, TitleCell>,
     /// Views, parents before their children.
     #[serde(default)]
     pub views: Vec<View>,
@@ -56,6 +59,7 @@ impl Sheet {
             zones: template.zones,
             format_overrides: BTreeMap::new(),
             title_bindings: BTreeMap::new(),
+            title_layout: BTreeMap::new(),
             views: Vec::new(),
             annotations: Vec::new(),
             tables: Vec::new(),
@@ -86,6 +90,32 @@ impl Sheet {
     /// The annotations of view `id`.
     pub fn annotations_of(&self, id: ViewId) -> impl Iterator<Item = &Annotation> {
         self.annotations.iter().filter(move |a| a.view == id)
+    }
+}
+
+/// Where a title block field sits on one sheet, in place of its template cell.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct TitleCell {
+    /// `[x, y, width, height]` in millimetres from the title block's bottom-left corner.
+    pub cell: [f64; 4],
+    /// Cap height of the value in millimetres; `None` keeps the template's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size: Option<f64>,
+}
+
+impl TitleCell {
+    /// True when the cell has a size, lies inside a title block of `width` by `height`
+    /// and its text size, if any, is positive.
+    pub fn fits(&self, width: f64, height: f64) -> bool {
+        let [x, y, w, h] = self.cell;
+        [x, y, w, h].iter().all(|v| v.is_finite())
+            && w > 0.0
+            && h > 0.0
+            && x >= -1e-9
+            && y >= -1e-9
+            && x + w <= width + 1e-9
+            && y + h <= height + 1e-9
+            && self.size.is_none_or(|s| s.is_finite() && s > 0.0)
     }
 }
 

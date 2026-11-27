@@ -7,9 +7,9 @@ use soliddraft_kernel_api::Point2;
 use crate::annotation::{Annotation, AnnotationKind, AnnotationState, Dimension};
 use crate::entity::EntityRef;
 use crate::ids::SHEET;
-use crate::ids::{AnnotationId, ViewId};
+use crate::ids::{AnnotationId, TemplateId, ViewId};
 use crate::part::Part;
-use crate::sheet::{Projection, RevisionRow, Scale, Table, TableKind};
+use crate::sheet::{Projection, RevisionRow, Scale, Table, TableKind, TitleCell};
 use crate::update::{self, UpdateReport};
 use crate::view::{
     AlignAxis, Alignment, Boundary, Break, BrokenOut, FoldDirection, HalfSection, View, ViewDisplay, ViewKind,
@@ -161,6 +161,24 @@ pub enum Command {
         key: String,
         /// The value.
         value: String,
+    },
+    /// Change a sheet's format: its paper, zones and title block come from another
+    /// template. Its views, annotations, scale and projection angle stay as they are.
+    SetSheetFormat {
+        /// Index of the sheet.
+        sheet: usize,
+        /// The template.
+        template: TemplateId,
+    },
+    /// Place a title block field of a sheet elsewhere in the block, or back where its
+    /// template puts it.
+    SetTitleLayout {
+        /// Index of the sheet.
+        sheet: usize,
+        /// The field's key.
+        key: String,
+        /// The new place, or `None` for the template's.
+        layout: Option<TitleCell>,
     },
     /// Bind a title block field to a part property; an empty property removes the
     /// binding. The value comes from the source the drawing accepted.
@@ -379,6 +397,8 @@ impl Command {
             Command::SetAutomaticUpdate { .. } => "Automatic update",
             Command::SetMeta { .. } => "Document properties",
             Command::SetTitleField { .. } => "Title block",
+            Command::SetSheetFormat { .. } => "Sheet format",
+            Command::SetTitleLayout { .. } => "Title block layout",
             Command::BindTitleProperty { .. } => "Bind title field",
             Command::DeleteView { .. } => "Delete view",
             Command::RenameView { .. } => "Rename view",
@@ -556,6 +576,46 @@ pub fn apply(drawing: &mut Drawing, command: &Command) -> Result<(), DrawingErro
                 s.format_overrides.remove(key);
             } else {
                 s.format_overrides.insert(key.clone(), value.clone());
+            }
+            Ok(())
+        }
+        Command::SetSheetFormat { sheet, template } => {
+            let format = library::library()
+                .templates
+                .iter()
+                .find(|t| t.id == template.as_str())
+                .ok_or_else(|| DrawingError::BadRequest(format!("there is no template {template}")))?;
+            let model = format.template();
+            let s = sheet_mut(drawing, *sheet)?;
+            s.template = template.clone();
+            s.size = model.size;
+            s.zones = model.zones;
+            // Cells placed for another block's fields go; the new block's own cells stand.
+            s.title_layout.retain(|key, cell| {
+                format.title_block.fields.iter().any(|f| &f.key == key)
+                    && cell.fits(format.title_block.width, format.title_block.height)
+            });
+            Ok(())
+        }
+        Command::SetTitleLayout { sheet, key, layout } => {
+            let s = sheet_mut(drawing, *sheet)?;
+            let format = library::template(s.template.as_str());
+            if !format.title_block.fields.iter().any(|f| &f.key == key) {
+                return Err(DrawingError::BadRequest(format!("the title block has no field {key}")));
+            }
+            match layout {
+                Some(cell) if !cell.fits(format.title_block.width, format.title_block.height) => {
+                    return Err(DrawingError::BadRequest(format!(
+                        "a title block field needs a size and must lie inside the {} x {} mm block",
+                        format.title_block.width, format.title_block.height
+                    )));
+                }
+                Some(cell) => {
+                    s.title_layout.insert(key.clone(), *cell);
+                }
+                None => {
+                    s.title_layout.remove(key);
+                }
             }
             Ok(())
         }

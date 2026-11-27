@@ -3,12 +3,12 @@
 //! cut faces have their true areas, the panel buttons flip and remove a half section,
 //! a break undoes and redoes, and all of it is there when the drawing reopens.
 
-use egui::{Pos2, vec2};
+use egui::{Key, Modifiers, Pos2, vec2};
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
 use soliddraft_app::app::{Automation, SolidDraftApp};
 use soliddraft_app::document::{Command, CutParams, Document, ExtrudeParams, PlaneKind, SketchPlane};
-use soliddraft_app::drawing::{DrawingAction, DrawingSession, DrawingTool};
+use soliddraft_app::drawing::{DrawingAction, DrawingSel, DrawingSession, DrawingTool};
 use soliddraft_app::sketch::{EntityKind, P2, Sketch};
 use soliddraft_app::state::AppAction;
 use soliddraft_drawing::{AlignAxis, View, ViewId, ViewKind};
@@ -289,3 +289,65 @@ fn offset_aligned_half_and_broken_views_from_the_drawing_tools() {
     std::fs::remove_dir_all(&root).unwrap();
 }
 
+/// The sheet format panel: the paper picked from its list, a title block field's cell
+/// moved by typing its x, then undo, redo and reopen.
+#[test]
+fn paper_and_title_cell_from_the_sheet_format_panel() {
+    let root = std::env::temp_dir().join(format!("soliddraft-format-panel-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(root.join("config")).unwrap();
+    soliddraft_app::file::set_config_dir(Some(root.join("config")));
+    let doc = bracket();
+    let mut app = Harness::builder()
+        .with_size(vec2(1440.0, 900.0))
+        .with_pixels_per_point(1.0)
+        .build_eframe(move |cc| SolidDraftApp::new(cc, doc, Automation::default()));
+    app.run_steps(6);
+    drawing(&mut app, DrawingAction::MakeDrawing);
+    drawing(&mut app, DrawingAction::CreateDrawing);
+    settle(&mut app);
+    app.state_mut().state.options_details = true;
+    drawing(&mut app, DrawingAction::Select(Some(DrawingSel::Format)));
+    assert_eq!(session(&app).sheet().template.as_str(), "iso-a3");
+
+    // A0 from the paper list: a popup's first frame only sizes it.
+    click_label(&mut app, "Paper size");
+    app.run_steps(5);
+    click_label(&mut app, "ISO A0 landscape · first angle");
+    settle(&mut app);
+    let sheet = session(&app).sheet().clone();
+    assert_eq!((sheet.template.as_str(), sheet.size.width_mm, sheet.size.height_mm), ("iso-a0", 1189.0, 841.0));
+    let paper = soliddraft_drawing::display::layout_sheet(&session(&app).doc.drawing, 0).paper;
+    assert_eq!(paper, (1189.0, 841.0));
+
+    // The legal owner's cell moves to x 120 of the block.
+    app.get_by_label("Legal owner x").click();
+    app.run_steps(3);
+    // The click opens the value for typing; the keys go to that editor.
+    app.key_press_modifiers(Modifiers::COMMAND, Key::A);
+    app.event(egui::Event::Text("120".into()));
+    app.run_steps(2);
+    app.key_press(Key::Enter);
+    app.run_steps(4);
+    let moved = session(&app).sheet().title_layout.get("owner").copied().expect("the owner field moved");
+    assert_eq!(moved.cell, [120.0, 9.0, 60.0, 9.0]);
+    drawing(&mut app, DrawingAction::Undo);
+    assert!(session(&app).sheet().title_layout.is_empty(), "undo puts the field back");
+    assert_eq!(session(&app).sheet().template.as_str(), "iso-a0", "and keeps the paper");
+    drawing(&mut app, DrawingAction::Undo);
+    assert_eq!(session(&app).sheet().template.as_str(), "iso-a3", "a second undo the paper");
+    drawing(&mut app, DrawingAction::Redo);
+    drawing(&mut app, DrawingAction::Redo);
+    assert_eq!(session(&app).sheet().title_layout.get("owner"), Some(&moved));
+
+    let path = root.join("bracket.dwdrw");
+    drawing(&mut app, DrawingAction::Save(Some(path.clone())));
+    drawing(&mut app, DrawingAction::CloseDrawing);
+    drawing(&mut app, DrawingAction::OpenFile(path));
+    settle(&mut app);
+    let sheet = session(&app).sheet();
+    assert_eq!(sheet.template.as_str(), "iso-a0");
+    assert_eq!(sheet.title_layout.get("owner"), Some(&moved));
+    drop(app);
+    std::fs::remove_dir_all(&root).unwrap();
+}

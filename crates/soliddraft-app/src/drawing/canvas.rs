@@ -315,7 +315,9 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
     let canvas = Rect::from_min_max(whole.min, pos2(whole.right(), strip.top()));
     let (rect, resp) = ui.allocate_exact_size(canvas.size(), Sense::click_and_drag());
     s.canvas_rect = rect;
-    let paper = (s.doc.template().paper.width, s.doc.template().paper.height);
+    // Each sheet has its own format.
+    let format = soliddraft_drawing::library::template(s.sheet().template.as_str());
+    let paper = (format.paper.width, format.paper.height);
     if s.needs_fit {
         s.camera.fit(rect, paper);
         s.needs_fit = false;
@@ -352,7 +354,6 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
 
     // The display list for this frame.
     let stale = s.doc.stale_views();
-    let format = s.doc.template();
     let style = format.style_file();
     let lctx =
         layout::Context { format, style, stale: &stale, sheet_index: s.sheet, sheet_count: s.doc.drawing.sheets.len() };

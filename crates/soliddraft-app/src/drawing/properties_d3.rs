@@ -976,7 +976,10 @@ pub fn annotation_body(
                     body: AnnotationKind::RevisionSymbol { revision: r.trim().to_owned() },
                 }));
             }
-            let zone = display::zone_at(s.doc.template(), display_point(s, a));
+            let zone = display::zone_at(
+                soliddraft_drawing::library::template(s.sheet().template.as_str()),
+                display_point(s, a),
+            );
             value_row(ui, "Zone", &zone);
             if ui.button("Revision table…").clicked() {
                 actions.push(DrawingAction::Select(Some(DrawingSel::Revisions)));

@@ -39,17 +39,27 @@ thread_local! {
     /// own, so a process with several devices, such as parallel test harnesses, never
     /// draws one device's buffers on another. Work for this thread on other threads, such
     /// as an edit's proof, carries it there with [`with_active`].
-    static CURRENT: std::cell::RefCell<Option<Arc<Gpu>>> = const { std::cell::RefCell::new(None) };
+    static CURRENT: std::cell::RefCell<Slot> = const { std::cell::RefCell::new(Slot(None)) };
+}
+
+/// A thread's GPU preview. A thread that ends keeps its mesher until the process ends:
+/// dropping a device while the thread's locals are torn down aborts on Metal.
+struct Slot(Option<Arc<Gpu>>);
+
+impl Drop for Slot {
+    fn drop(&mut self) {
+        std::mem::forget(self.0.take());
+    }
 }
 
 /// This thread's GPU preview, when one is installed. Display code asks per body, so a
 /// preview installed after a document opened applies from its next display.
 pub fn active() -> Option<Arc<Gpu>> {
-    CURRENT.with_borrow(Clone::clone)
+    CURRENT.with_borrow(|slot| slot.0.clone())
 }
 
 fn set_active(gpu: Option<Arc<Gpu>>) -> Option<Arc<Gpu>> {
-    CURRENT.with_borrow_mut(|current| std::mem::replace(current, gpu))
+    CURRENT.with_borrow_mut(|slot| std::mem::replace(&mut slot.0, gpu))
 }
 
 /// Runs `work` on this thread with `gpu` as its GPU preview: a proof worker meshes

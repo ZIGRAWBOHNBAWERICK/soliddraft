@@ -2,9 +2,8 @@
 //!
 //! C5: the bracket comes in as a bare STEP file, with no manufacturing information.
 //! Recognition finds its bore, its boss, its four holes and its slot. The interview
-//! asks only for what is missing, each question with a proposal, and the part that
-//! results passes C3 and C4: one action writes the STEP file and a drawing with every
-//! item once and nothing overlapping.
+//! separates geometric checks from unstated requirements. With explicit requirements
+//! supplied, one action writes the STEP file and a drawing with every item once.
 //!
 //! What recognition found is checked apart from what the interview proposes.
 //! Recognition is geometry: which faces each feature owns, what a hole opens onto and
@@ -150,10 +149,10 @@ fn a_bare_import_is_recognised_interviewed_and_drawn() {
     assert_eq!(slot["faces"].as_array().unwrap().len(), 4, "two flats and two ends");
     assert_eq!((&slot["through"], &slot["sizes_mm"]), (&json!(true), &json!({"length": 20.0, "width": 6.0})));
 
-    // The interview: everything is missing, so everything is asked, in order, each with
-    // a proposal but the material.
+    // The bare geometry supports nominal checks, not a fit, position tolerance or finish.
     let f = faces(&imported, 30.0);
-    let questions = call(&mut imported, "pmi_interview", json!({}))["questions"].as_array().unwrap().clone();
+    let questions = interview(&mut imported);
+    assert_eq!(questions, interview(&mut imported));
     let asked: Vec<(&str, &str)> = questions.iter().map(|q| (asks(q), q["proposes"].as_str().unwrap())).collect();
     assert_eq!(
         asked,
@@ -163,11 +162,13 @@ fn a_bare_import_is_recognised_interviewed_and_drawn() {
             ("datum A", "Datum A"),
             ("datum B", "Datum B"),
             ("datum C", "Datum C"),
-            ("holes \u{d8}4 size", "4\u{d7} \u{d8}4 H13 THRU"),
-            ("holes \u{d8}4 position", "Position \u{d8}0.5 A|B|C"),
-            ("hole \u{d8}8 size", "\u{d8}8 H7 THRU"),
-            ("hole \u{d8}8 position", "Position \u{d8}0.05 A|B|C"),
-            ("hole \u{d8}8 finish", "Ra 1.6"),
+            ("holes Ø4 size", "4× Ø4 THRU"),
+            ("holes Ø4 fit or thread", ""),
+            ("holes Ø4 position", ""),
+            ("hole Ø8 size", "Ø8 THRU"),
+            ("hole Ø8 fit or thread", ""),
+            ("hole Ø8 position", ""),
+            ("hole Ø8 finish", ""),
             ("boss \u{d8}16 size", "\u{d8}16"),
             ("boss \u{d8}16 height", "15"),
             ("slot 20\u{d7}6 size", "20\u{d7}6 R3"),
@@ -196,10 +197,25 @@ fn a_bare_import_is_recognised_interviewed_and_drawn() {
     call(&mut imported, "pmi_add", json!({"kind": "diameter", "name": "Bore", "faces": [f.bore], "tolerance": "H7"}));
     let open = call(&mut imported, "pmi_interview", json!({}))["questions"].as_array().unwrap().clone();
     let ids: Vec<&str> = open.iter().map(asks).collect();
-    assert!(!ids.contains(&"datum A") && !ids.contains(&"hole \u{d8}8 size"), "{ids:?}");
-    assert_eq!(ids.len(), questions.len() - 2, "{ids:?}");
+    for known in ["datum A", "hole Ø8 size", "hole Ø8 fit or thread"] {
+        assert!(!ids.contains(&known), "{ids:?}");
+    }
+    assert_eq!(ids.len(), questions.len() - 3, "{ids:?}");
 
-    // Every proposal accepted, and the material said: nothing is left to ask.
+    // Requirements the operator supplies, not values drawn from the bare bracket.
+    let pattern: Vec<_> = f.holes.iter().map(|hole| [hole]).collect();
+    call(&mut imported, "pmi_answer", json!({"accept": ["datum B", "datum C"]}));
+    for input in [
+        json!({"kind": "diameter", "name": "Hole diameter", "features": pattern, "tolerance": "H13", "through": true}),
+        json!({"kind": "tolerance", "name": "Hole position", "characteristic": "position", "value": "0.5",
+               "diameter_zone": true, "datums": ["A", "B", "C"], "features": pattern}),
+        json!({"kind": "tolerance", "name": "Bore position", "characteristic": "position", "value": "0.05",
+               "diameter_zone": true, "datums": ["A", "B", "C"], "faces": [f.bore]}),
+        json!({"kind": "finish", "name": "Bore finish", "faces": [f.bore], "roughness": "Ra 1.6"}),
+    ] {
+        call(&mut imported, "pmi_add", input);
+    }
+    let before = call(&mut imported, "pmi_list", json!({}));
     let answered = call(&mut imported, "pmi_answer", json!({"accept": "all", "material": "6061-T6"}));
     assert_eq!(answered["questions"], json!([]), "{answered}");
     let listed = call(&mut imported, "pmi_list", json!({}));
@@ -208,7 +224,7 @@ fn a_bare_import_is_recognised_interviewed_and_drawn() {
     assert_eq!(listed["notes"], json!({"general_tolerance": "ISO 2768-mK", "material": "6061-T6"}));
     // One undo takes all the answers back, and one redo returns them.
     call(&mut imported, "undo", json!({}));
-    assert_eq!(call(&mut imported, "pmi_list", json!({}))["items"].as_array().unwrap().len(), 2);
+    assert_eq!(call(&mut imported, "pmi_list", json!({})), before);
     call(&mut imported, "redo", json!({}));
 
     // The result passes C3 and C4.
@@ -230,8 +246,7 @@ fn a_bare_import_is_recognised_interviewed_and_drawn() {
 }
 
 /// One hole of the pattern sized and another located by hand: each item answers for
-/// its own hole only, so the interview still asks the size of the other three and the
-/// position of the other three, and accepting every proposal covers each hole once.
+/// its own hole only, so the interview still asks about the other three.
 #[test]
 fn a_partly_annotated_pattern_is_asked_about_its_other_holes() {
     let dir = std::env::temp_dir().join(format!("soliddraft-pmi-interview-partial-{}", std::process::id()));
@@ -267,25 +282,26 @@ fn a_partly_annotated_pattern_is_asked_about_its_other_holes() {
     let set = |question: &Value| -> BTreeSet<String> { asked_of(question).into_iter().collect() };
     let size = find("holes \u{d8}4 size");
     assert_eq!(set(&size), others(0), "the sized hole is not asked again, the other three are: {size}");
-    assert_eq!(size["proposes"], "3\u{d7} \u{d8}4 H13 THRU");
-    assert_eq!(size["asks"], "What are the remaining 3 of the 4 holes \u{d8}4 for?");
-    let position = find("holes \u{d8}4 position");
-    assert_eq!(set(&position), others(1), "the located hole is not asked again, the other three are: {position}");
+    assert_eq!(size["proposes"], "3× Ø4 THRU");
+    for (aspect, except) in [("fit or thread", 0), ("position", 1)] {
+        let question = find(&format!("holes Ø4 {aspect}"));
+        let id = question["id"].as_str().unwrap();
+        let asked_faces = id.split_once(": ").unwrap().1.split(", ").map(str::to_owned).collect::<BTreeSet<_>>();
+        assert_eq!(asked_faces, others(except), "{question}");
+        assert!(question.get("proposal").is_none(), "{question}");
+    }
 
-    let answered = call(&mut imported, "pmi_answer", json!({"accept": "all", "material": "6061-T6"}));
-    assert_eq!(answered["questions"], json!([]), "{answered}");
+    call(&mut imported, "pmi_answer", json!({"accept": [size["id"]]}));
     for hole in &f.holes {
         assert_eq!(items_on(&mut imported, "Diameter", hole).len(), 1, "{hole} has one size");
-        assert_eq!(items_on(&mut imported, "Position", hole).len(), 1, "{hole} has one position");
     }
     assert_eq!(items_on(&mut imported, "Diameter", &f.holes[0]), ["First hole"]);
     assert_eq!(items_on(&mut imported, "Position", &f.holes[1]), ["Second hole position"]);
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// A plate with a through hole and a blind hole of one diameter: two features, not a
-/// pattern, whose questions differ by their faces. Each answer lands on its own hole,
-/// whether accepted by id or with every other proposal.
+/// Blind drill depth is geometric. Fit, thread designation and usable thread depth
+/// are not, even when the pilot diameter is known.
 #[test]
 fn equal_holes_on_different_features_are_asked_and_answered_apart() {
     let mut plate = state("Plate");
@@ -317,45 +333,193 @@ fn equal_holes_on_different_features_are_asked_and_answered_apart() {
 
     let questions = interview(&mut plate);
     unique(&questions);
-    let of = |questions: &[Value], asked: &str, wall: &str| -> Option<Value> {
-        let found: Vec<&Value> =
-            questions.iter().filter(|q| asks(q) == asked && asked_of(q) == [wall.to_owned()]).collect();
-        assert!(found.len() <= 1, "{found:#?}");
-        found.first().map(|q| (*q).clone())
+    assert_eq!(questions, interview(&mut plate));
+    let find = |questions: &[Value], label: &str, wall: &str| {
+        let id = format!("{label}: {wall}");
+        questions.iter().find(|q| q["id"] == id).cloned()
     };
+    let drill = find(&questions, "hole Ø6 geometry", &blind).unwrap();
+    assert_eq!(drill["proposes"], "Ø6 DRILL DEEP 4");
     for wall in [&through, &blind] {
-        for asked in ["hole \u{d8}6 size", "hole \u{d8}6 position"] {
-            assert!(of(&questions, asked, wall).is_some(), "{asked} of {wall}: {questions:#?}");
+        for aspect in ["fit or thread", "position"] {
+            let question = find(&questions, &format!("hole Ø6 {aspect}"), wall).unwrap();
+            assert!(question.get("proposal").is_none(), "{question}");
         }
     }
-
-    // Accepting the blind hole's size by its id sizes that hole, and only it.
-    let blind_size = of(&questions, "hole \u{d8}6 size", &blind).unwrap();
-    assert_eq!(blind_size["proposes"], "\u{d8}6 H13");
-    let answered = call(&mut plate, "pmi_answer", json!({"accept": [blind_size["id"]]}));
-    assert_eq!(answered["accepted"], json!([blind_size["id"]]));
-    assert_eq!(items_on(&mut plate, "Diameter", &blind).len(), 1, "{answered}");
-    assert_eq!(items_on(&mut plate, "Diameter", &through).len(), 0, "{answered}");
+    let answered = call(&mut plate, "pmi_answer", json!({"accept": [drill["id"]]}));
+    assert_eq!(answered["accepted"], json!([drill["id"]]));
     let open = interview(&mut plate);
-    assert!(of(&open, "hole \u{d8}6 size", &blind).is_none(), "{open:#?}");
-    let through_size = of(&open, "hole \u{d8}6 size", &through).expect("the through hole is still asked");
-    assert_eq!(through_size["proposes"], "\u{d8}6 H13 THRU");
+    assert!(find(&open, "hole Ø6 geometry", &blind).is_none(), "{open:#?}");
+    assert_eq!(find(&open, "hole Ø6 size", &through).unwrap()["proposes"], "Ø6 THRU");
+    assert!(find(&open, "hole Ø6 fit or thread", &blind).is_some(), "{open:#?}");
 
-    // Accept all: each remaining proposal once, on its own hole.
-    let answered = call(&mut plate, "pmi_answer", json!({"accept": "all", "material": "6061-T6"}));
-    assert_eq!(answered["questions"], json!([]), "{answered}");
-    for wall in [&through, &blind] {
-        assert_eq!(items_on(&mut plate, "Diameter", wall).len(), 1, "{wall} has one size: {answered}");
-        assert_eq!(items_on(&mut plate, "Position", wall).len(), 1, "{wall} has one position: {answered}");
-    }
-    let listed = call(&mut plate, "pmi_list", json!({}));
-    let rows = listed["items"].as_array().unwrap();
-    assert!(rows.iter().all(|row| row.get("problem").is_none()), "{listed}");
-    let callout_on = |wall: &str| {
-        rows.iter()
-            .find(|row| row["kind"] == "Diameter" && row["faces"] == json!([[wall]]))
-            .map(|row| row["callout"].as_str().unwrap().to_owned())
+    let id = drill["proposal"]["item"]["id"].as_str().unwrap();
+    let thread = json!({"kind": "hole", "replaces": id, "pilot_faces": [blind], "thread": "M7x1-6H"});
+    call(&mut plate, "pmi_add", thread.clone());
+    let open = interview(&mut plate);
+    assert!(find(&open, "hole Ø6 fit or thread", &blind).is_none(), "{open:#?}");
+    let missing_depth = find(&open, "hole Ø6 thread depth", &blind).unwrap();
+    assert!(missing_depth.get("proposal").is_none(), "{missing_depth}");
+
+    let mut thread = thread;
+    thread["thread_depth"] = json!("2.5");
+    thread["drill_depth"] = json!("4");
+    let edited = call(&mut plate, "pmi_add", thread);
+    assert_eq!(edited["added"]["callout"], "Ø6 DRILL DEEP 4\nM7x1-6H THREAD DEEP 2.5", "{edited}");
+    let open = interview(&mut plate);
+    assert!(find(&open, "hole Ø6 thread depth", &blind).is_none(), "{open:#?}");
+}
+
+#[test]
+fn two_compound_hole_checks_match_direct_values_and_survive_reopen() {
+    let dir = std::env::temp_dir().join(format!("soliddraft-pmi-interview-compound-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut built = state("Plate");
+    call(
+        &mut built,
+        "sketch",
+        json!({
+            "plane": "top", "shapes": [{"shape": "rectangle", "center": [40, 20, 0], "width": 80, "height": 40}]
+        }),
+    );
+    call(&mut built, "extrude", json!({"sketch": "Sketch1", "depth": 10, "flip": false}));
+    let top = "Boss-Extrude1 · End cap";
+    call(
+        &mut built,
+        "hole",
+        json!({
+            "face": top, "points": [[12, 20, 10]], "diameter": 4, "depth": 7,
+            "counterbore": {"diameter": 10, "depth": 2}
+        }),
+    );
+    call(
+        &mut built,
+        "hole",
+        json!({
+            "face": top, "points": [[30, 20, 10]], "diameter": 4, "countersink": {"diameter": 8, "angle": 90}
+        }),
+    );
+    let step = dir.join("compound.step");
+    call(&mut built, "export_step", json!({"path": step}));
+    let import = || {
+        let mut imported = state("Bare plate");
+        let preview = call(&mut imported, "preview_import", json!({"path": step}));
+        call(&mut imported, "import_step", json!({"path": step, "decline": [], "preview_token": preview["token"]}));
+        imported
     };
-    assert_eq!(callout_on(&through).as_deref(), Some("\u{d8}6 H13 THRU"));
-    assert_eq!(callout_on(&blind).as_deref(), Some("\u{d8}6 H13"));
+    let mut accepted = import();
+    let mut direct = import();
+    let questions = interview(&mut accepted);
+    assert_eq!(questions, interview(&mut accepted));
+    assert_eq!(questions, interview(&mut direct));
+    unique(&questions);
+
+    let mut accepted_ids = Vec::new();
+    let mut expectations = Vec::new();
+    for (kind, x, pilot_z, surface, head_z, through, callout) in [
+        ("counterbore", 12.0, 5.5, SurfaceKind::Cylinder, Some(9.0), false, "Ø4 DRILL DEEP 7\nC'BORE Ø10 DEEP 2"),
+        ("countersink", 30.0, 4.0, SurfaceKind::Cone, None, true, "Ø4 THRU\nC'SINK Ø8 × 90°"),
+    ] {
+        let pilot = face(&accepted, SurfaceKind::Cylinder, [Some(x), Some(20.0), Some(pilot_z)]);
+        let head = face(&accepted, surface, [Some(x), Some(20.0), head_z]);
+        let id = format!("{kind} Ø4 geometry: {pilot}");
+        let question = questions.iter().find(|q| q["id"] == id).unwrap_or_else(|| panic!("{id}: {questions:#?}"));
+        assert_eq!(question["proposes"], callout);
+        let name = question["proposal"]["item"]["id"].as_str().unwrap();
+        call(
+            &mut direct,
+            "pmi_add",
+            json!({
+                "kind": "hole", "name": name, "pilot_faces": [pilot], "head_kind": kind, "head_faces": [head],
+                "through": through
+            }),
+        );
+        accepted_ids.push(id);
+        expectations.push((name, pilot, head, callout));
+    }
+    let answered = call(&mut accepted, "pmi_answer", json!({"accept": accepted_ids}));
+    assert_eq!(answered["accepted"], json!(accepted_ids));
+    let open = interview(&mut accepted);
+    for (kind, (_, pilot, _, _)) in ["counterbore", "countersink"].into_iter().zip(&expectations) {
+        let id = format!("{kind} Ø4 fit or thread: {pilot}");
+        let prior = questions.iter().find(|q| q["id"] == id).unwrap();
+        assert!(prior.get("proposal").is_none(), "{prior}");
+        assert!(open.contains(prior), "accepting a measured size did not answer the fit or thread");
+    }
+    assert!(open.iter().all(|q| !accepted_ids.iter().any(|id| q["id"] == *id)));
+    assert_eq!(accepted.doc.model().pmi(), direct.doc.model().pmi());
+    let listed = call(&mut accepted, "pmi_list", json!({}));
+    assert_eq!(listed, call(&mut direct, "pmi_list", json!({})));
+    for (name, pilot, head, callout) in expectations {
+        let row = listed["items"].as_array().unwrap().iter().find(|item| item["name"] == name).unwrap();
+        assert_eq!(row["callout"], callout);
+        assert_eq!(row["faces"], json!([[pilot], [head]]));
+    }
+    let native = dir.join("compound.dwprt");
+    call(&mut accepted, "save_as", json!({"path": native}));
+    let mut reopened = state("Reopened");
+    call(&mut reopened, "open", json!({"path": native}));
+    assert_eq!(call(&mut reopened, "pmi_list", json!({})), listed);
+    assert_eq!(interview(&mut reopened), open);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn a_recess_depth_and_fillet_radius_do_not_answer_edge_intent() {
+    let mut plate = state("Recess and edge plate");
+    call(
+        &mut plate,
+        "sketch",
+        json!({
+            "plane": "top", "shapes": [{"shape": "rectangle", "center": [30, 20, 0], "width": 60, "height": 40}]
+        }),
+    );
+    call(&mut plate, "extrude", json!({"sketch": "Sketch1", "depth": 10, "flip": false}));
+    call(
+        &mut plate,
+        "sketch",
+        json!({
+            "plane": "Boss-Extrude1 · End cap",
+            "shapes": [{"shape": "rectangle", "center": [30, 20, 10], "width": 12, "height": 8}]
+        }),
+    );
+    call(&mut plate, "cut", json!({"sketch": "Sketch2", "depth": 2, "through_all": false, "flip": false}));
+    let edge_at = |plate: &AppState, x, y| {
+        let model = plate.doc.model();
+        let topology = model.kernel().topology(model.body().unwrap()).unwrap();
+        let edge = topology
+            .edges
+            .iter()
+            .find(|edge| {
+                let bounds = edge.bbox;
+                (bounds.min.x, bounds.max.x, bounds.min.y, bounds.max.y) == (x, x, y, y) && bounds.min.z < bounds.max.z
+            })
+            .unwrap();
+        let named = plate.doc.named_edge(edge.id).unwrap();
+        format!("{} · {}", plate.doc.feature(named.feature).unwrap().name, named.label)
+    };
+    let fillet = edge_at(&plate, 60.0, 40.0);
+    call(&mut plate, "fillet", json!({"edges": [fillet], "radius": 2}));
+    let chamfer = edge_at(&plate, 0.0, 0.0);
+    call(&mut plate, "chamfer", json!({"edges": [chamfer], "distance": 1}));
+
+    let questions = interview(&mut plate);
+    let get = |name: &str| {
+        let matching: Vec<_> = questions.iter().filter(|q| asks(q) == name).collect();
+        assert_eq!(matching.len(), 1, "{name}: {questions:#?}");
+        matching[0]
+    };
+    let depth = get("pocket depth");
+    let radius = get("fillet radius");
+    assert_eq!(depth["proposes"], "2");
+    assert_eq!(radius["proposes"], "R2");
+    let fillet_intent = get("fillet treatment");
+    let chamfer_intent = get("chamfer treatment");
+    for intent in [fillet_intent, chamfer_intent] {
+        assert!(intent.get("proposal").is_none(), "{intent}");
+    }
+    call(&mut plate, "pmi_answer", json!({"accept": [depth["id"], radius["id"]]}));
+    let open = interview(&mut plate);
+    assert!(!open.contains(depth) && !open.contains(radius), "{open:#?}");
+    assert!(open.contains(fillet_intent) && open.contains(chamfer_intent), "{open:#?}");
 }

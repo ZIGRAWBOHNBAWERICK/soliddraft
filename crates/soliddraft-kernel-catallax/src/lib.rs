@@ -53,7 +53,7 @@ use request::RequestPolicy;
 pub use request::{APP_REQUEST_WORK, APP_WORK_TARGET, EDIT_STOPGAP_WORK, RequestWork, with_request_allowance};
 
 /// The pinned Catallax application entry revision.
-pub const CATALLAX_REVISION: &str = "c48bbadbe75fce380d038cc0d5461427376be1ed";
+pub const CATALLAX_REVISION: &str = "a2d7126e02e549e3c531ff5d4c14c69cd5731a1d";
 
 /// An in-process Catallax backend. There is no global kernel state or kernel thread.
 #[derive(Default)]

@@ -37,6 +37,35 @@ fn bracket() -> (Document, FeatureId) {
     (doc, import)
 }
 
+#[test]
+fn p1_inspection_qif_exports_requirements_without_inventing_results() {
+    let (doc, _) = bracket();
+    let plan = InspectionPlan::from_document(&doc, Some(REVISION));
+    let metadata = soliddraft_exchange::qif::Metadata {
+        qpid: "550e8400-e29b-41d4-a716-446655440000",
+        organization: "ISO",
+        designator: "1101",
+        year: Some("2017"),
+    };
+    let mut qif = Vec::new();
+    let omitted = plan.write_qif(&mut qif, metadata).unwrap();
+    let notes: Vec<_> = plan
+        .groups
+        .iter()
+        .flat_map(|g| &g.rows)
+        .filter(|r| r.kind == super::InspectionKind::Note)
+        .map(|r| r.id.as_str())
+        .collect();
+    assert_eq!(omitted.iter().map(|o| o.characteristic_id.as_str()).collect::<Vec<_>>(), notes, "{omitted:?}");
+    if let Some(dir) = std::env::var_os("SOLIDDRAFT_QIF_PROOF_DIR") {
+        let dir = PathBuf::from(dir);
+        let mut csv = Vec::new();
+        plan.write_csv(&mut csv).unwrap();
+        std::fs::write(dir.join("p1.qif"), qif).unwrap();
+        std::fs::write(dir.join("p1.csv"), csv).unwrap();
+    }
+}
+
 /// Test reader for the CSV wire format, independent of the writer and its column ordering.
 fn parse_csv(csv: &[u8]) -> Vec<Vec<String>> {
     let mut records = Vec::new();

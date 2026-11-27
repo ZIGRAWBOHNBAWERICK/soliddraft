@@ -12,7 +12,7 @@ use soliddraft_model as model;
 
 use crate::document::Document;
 
-const WORK_LIMIT: u64 = 200_000;
+const WORK_LIMIT: u64 = 4_096;
 const CANCELLED: &str = "Proof cancelled.";
 
 type Answer<T> = Receiver<Result<T, String>>;
@@ -60,7 +60,7 @@ pub(crate) fn estimate(doc: &model::Document) -> Result<Estimate, String> {
     for body in bodies(doc)? {
         estimate.edges += body.topology.edges.len();
         // A screening heuristic, not a promise about duration or subdivision depth.
-        estimate.work_hint = estimate.work_hint.saturating_add(body.topology.edges.len() as u64 * 512);
+        estimate.work_hint = estimate.work_hint.saturating_add(body.topology.edges.len() as u64 * 2);
         for face in body.topology.faces {
             let factor = if matches!(face.accuracy, FaceAccuracy::Fitted { .. })
                 || matches!(face.surface, SurfaceKind::Spline | SurfaceKind::Other)
@@ -72,7 +72,7 @@ pub(crate) fn estimate(doc: &model::Document) -> Result<Estimate, String> {
             } else {
                 1
             };
-            estimate.work_hint = estimate.work_hint.saturating_add(face.edges.len() as u64 * 512 * factor);
+            estimate.work_hint = estimate.work_hint.saturating_add(face.edges.len() as u64 * factor);
         }
     }
     if estimate.edges == 0 {

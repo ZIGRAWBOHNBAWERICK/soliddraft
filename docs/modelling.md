@@ -50,6 +50,7 @@ the geometry counts, mass properties and computing cost. **Fully proven** means
 every edge has a certified bound to its incident surfaces; it is not a claim that
 the part is fit for manufacture. An edit clears the verdict. The report and verdict
 are not saved in the part file.
+For numerical geometry, the proof looks for bounds within 0.01 mm.
 
 ## Extrusion options
 

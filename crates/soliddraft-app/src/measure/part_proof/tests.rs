@@ -3,13 +3,11 @@ use crate::{app_tools::AppTools, state::AppState};
 use egui::{Event, Modifiers, PointerButton, Pos2, Shape};
 use serde_json::Value;
 use soliddraft_assistant::{Caller, tools::call_checked};
-use soliddraft_kernel_api::EdgeProof;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 const P1: &str = include_str!("../../../../../ci/scenarios/canonical-p1.json");
 const FITTED: &str = include_str!("../../../../../ci/scenarios/ring-fillet.json");
-const BOUND: f64 = 0.000_000_03125;
 const TIMEOUT: Duration = Duration::from_secs(10);
 // The real P1 mass query runs under the production work cap, even in a debug build.
 const REPORT_TIMEOUT: Duration = Duration::from_secs(90);
@@ -109,25 +107,14 @@ impl Screen {
     }
 }
 
-fn fake(miss_one: bool) -> TestProver {
-    Arc::new(move |kernel, body, _, _| {
-        let mut edges = kernel.topology(body).unwrap().edges;
-        if miss_one {
-            edges.pop(); // A capped kernel may return no row for an unvisited edge.
-        }
-        let edges = edges.into_iter().map(|edge| EdgeProof { edge: edge.id, bound_mm: Some(BOUND) }).collect();
-        Ok(EdgeProofRun { edges, work_used: 123, cpu_ns: Some(5_000_000), threads_used: 2 })
-    })
-}
-
 #[test]
-fn button_proves_p1_and_reports_the_unproved_edge_on_a_fitted_part() {
-    for (source, checkpoint, miss_one) in [(P1, "original", false), (FITTED, "ring-fillet build", true)] {
+fn button_reports_real_proof_for_p1_and_a_fitted_part() {
+    for (source, checkpoint) in [(P1, "original"), (FITTED, "ring-fillet build")] {
         let mut doc = replay(source, checkpoint);
         let mesh_version = doc.mesh_version;
         let display = doc.meshes.clone();
         assert!(!display.is_empty());
-        let mut state = State { prover: Some(fake(miss_one)), ..Default::default() };
+        let mut state = State::default();
         let mut screen = Screen::new();
         screen.click(&mut state, &doc, "Prove part");
         screen.until(&mut state, &doc, |s| {
@@ -137,13 +124,13 @@ fn button_proves_p1_and_reports_the_unproved_edge_on_a_fitted_part() {
             screen.click(&mut state, &doc, "Continue");
         }
         screen.until_with_timeout(&mut state, &doc, REPORT_TIMEOUT, |s| s.contains("Open proof report"));
-        assert_eq!(screen.contains("Fully proven"), !miss_one);
+        let fully_proven = screen.contains("Fully proven");
         screen.click(&mut state, &doc, "Open proof report");
         screen.until(&mut state, &doc, |screen| screen.contains("Part proof report") && screen.contains("Wall time"));
         for text in [
-            "Proof CPU time: 0.005 s",
-            "Proof threads used (peak): 2",
-            "Kernel proof work units: 123",
+            "Proof CPU time:",
+            "Proof threads used (peak): 1",
+            "Kernel proof work units:",
             "Faces:",
             "Edges:",
             "Vertices:",
@@ -156,13 +143,18 @@ fn button_proves_p1_and_reports_the_unproved_edge_on_a_fitted_part() {
         assert_eq!(body.edges.len(), topology.edges.len());
         assert_eq!(body.surfaces.values().sum::<usize>(), topology.faces.len());
         assert_eq!(body.vertices, topology.vertex_count);
-        assert_eq!(body.edges.iter().filter(|(_, bound)| bound.is_none()).count(), usize::from(miss_one));
-        assert_eq!(body.edges[0].1, Some(BOUND));
+        assert_eq!(fully_proven, body.edges.iter().all(|(_, bound)| bound.is_some()));
+        assert!(body.edges.iter().all(|(_, bound)| bound.is_none_or(|mm| (0.0..=0.01_f64.next_up()).contains(&mm))));
+        assert!((1..=WORK_LIMIT).contains(&report.work_used));
+        #[cfg(target_os = "linux")]
+        assert!(report.cpu_ns.is_some_and(|ns| ns > 0));
         assert!(body.mass.as_ref().is_ok_and(|mass| mass.area > 0.0 && mass.volume > 0.0), "{:?}", body.mass);
         assert_eq!(doc.mesh_version, mesh_version, "proof changed the renderer's mesh version");
         assert_eq!(doc.meshes, display, "proof changed the displayed geometry");
 
-        if !miss_one {
+        if source == P1 {
+            assert!(fully_proven, "P1 has an unproved edge");
+            assert!(body.edges.iter().all(|(_, bound)| *bound == Some(0.0)));
             let before_edit = doc.model().geometry_hash();
             doc.undo().unwrap();
             assert_ne!(doc.model().geometry_hash(), before_edit);

@@ -82,6 +82,16 @@ pub enum InspectionKind {
     SlotWidth,
     /// Radius of the slot ends.
     SlotRadius,
+    /// Width between opposed flats.
+    Width,
+    /// Chamfer setback on the reference side.
+    ChamferSetback,
+    /// Chamfer angle from the reference side to the bevel.
+    ChamferAngle,
+    /// Largest setback at a bounded edge break.
+    EdgeBreak,
+    /// Theoretically exact included angle between two planes.
+    BasicAngle,
     /// A geometric control.
     Geometric {
         /// Characteristic named by the feature control frame.
@@ -116,6 +126,11 @@ impl InspectionKind {
             Self::SlotLength => "slot_length",
             Self::SlotWidth => "slot_width",
             Self::SlotRadius => "slot_radius",
+            Self::Width => "width",
+            Self::ChamferSetback => "chamfer_setback",
+            Self::ChamferAngle => "chamfer_angle",
+            Self::EdgeBreak => "edge_break",
+            Self::BasicAngle => "basic_angle",
             Self::Geometric { characteristic, .. } => characteristic.key(),
             Self::SurfaceFinish => "surface_finish",
             Self::Thread => "thread",
@@ -383,6 +398,32 @@ impl InspectionGroup {
                 {
                     group.add(kind, None, faces, None).dimension(measured.get(index).copied(), tolerance);
                 }
+            }
+            PmiKind::Width { flats: [a, b], tolerance } => {
+                group.face_groups = vec![a, b];
+                group.add(InspectionKind::Width, None, 0..2, None).dimension(measured.first().copied(), tolerance);
+            }
+            PmiKind::Chamfer { bevel, sides: [a, b] } => {
+                group.face_groups = vec![bevel, a, b];
+                group
+                    .add(InspectionKind::ChamferSetback, None, 0..3, None)
+                    .dimension(measured.first().copied(), Tolerance::None);
+                let angle = group.add(InspectionKind::ChamferAngle, None, 0..3, None);
+                angle.dimension(measured.get(1).copied(), Tolerance::None);
+                angle.unit = Some(InspectionUnit::Degree);
+            }
+            PmiKind::EdgeBreak { bevel, sides: [a, b], min_mm, max_mm } => {
+                group.face_groups = vec![bevel, a, b];
+                let row = group.add(InspectionKind::EdgeBreak, None, 0..3, None);
+                row.dimension(measured.first().copied(), Tolerance::None);
+                row.lower_limit = Some(min_mm.value());
+                row.upper_limit = Some(max_mm.value());
+            }
+            PmiKind::BasicAngle { planes: [a, b] } => {
+                group.face_groups = vec![a, b];
+                let angle = group.add(InspectionKind::BasicAngle, None, 0..2, None);
+                angle.dimension(measured.first().copied(), Tolerance::Basic);
+                angle.unit = Some(InspectionUnit::Degree);
             }
             PmiKind::Gdt { characteristic, tolerance, diameter, material, datums, features } => {
                 group.face_groups = features;

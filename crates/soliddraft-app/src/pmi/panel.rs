@@ -23,18 +23,26 @@ pub enum Kind {
     Hole,
     Distance,
     Slot,
+    Width,
+    Chamfer,
+    EdgeBreak,
+    BasicAngle,
     Tolerance,
     Finish,
 }
 
 impl Kind {
-    const ALL: [Kind; 8] = [
+    const ALL: [Kind; 12] = [
         Kind::Datum,
         Kind::Diameter,
         Kind::Radius,
         Kind::Hole,
         Kind::Distance,
         Kind::Slot,
+        Kind::Width,
+        Kind::Chamfer,
+        Kind::EdgeBreak,
+        Kind::BasicAngle,
         Kind::Tolerance,
         Kind::Finish,
     ];
@@ -47,6 +55,10 @@ impl Kind {
             Kind::Hole => "Hole",
             Kind::Distance => "Distance",
             Kind::Slot => "Slot",
+            Kind::Width => "Width",
+            Kind::Chamfer => "Chamfer",
+            Kind::EdgeBreak => "Edge break",
+            Kind::BasicAngle => "Basic angle",
             Kind::Tolerance => "Geometric tolerance",
             Kind::Finish => "Surface finish",
         }
@@ -60,6 +72,9 @@ impl Kind {
             Kind::Hole => "Pick the head wall first if there is one, then pick the cylindrical pilot wall.",
             Kind::Distance => "Pick the faces it starts on, press From, then pick the faces it ends on.",
             Kind::Slot => "Pick the slot's two flat sides and its two round ends.",
+            Kind::Width => "Pick the two opposed planar sides, assigning the first group before picking the second.",
+            Kind::Chamfer | Kind::EdgeBreak => "Assign the bevel and the first support, then pick the other support.",
+            Kind::BasicAngle => "Pick two angled planar groups, assigning the first before picking the second.",
             Kind::Tolerance => "Pick the face it applies to, or each face of a pattern.",
             Kind::Finish => "Pick the face the finish applies to.",
         }
@@ -116,8 +131,11 @@ pub struct State {
     pub open: bool,
     /// The faces picked for the item being made, in order.
     pub picks: Vec<FaceId>,
-    /// The faces a distance starts on.
+    /// The first group of a distance or planar dimension.
     from: Vec<FaceId>,
+    bevel: Vec<FaceId>,
+    min_mm: String,
+    max_mm: String,
     /// The selection seen last frame: a new face selection is a pick.
     seen: Option<Selection>,
     pub kind: Kind,
@@ -196,6 +214,9 @@ impl Default for State {
             head_faces: Vec::new(),
             drill_depth: String::new(),
             thread_depth: String::new(),
+            bevel: Vec::new(),
+            min_mm: String::new(),
+            max_mm: String::new(),
             pattern: true,
             from_at: At::Feature,
             to_at: At::Feature,
@@ -276,6 +297,28 @@ impl State {
                 self.tolerance = tolerance.suffix().trim().to_owned();
                 self.picks = flats.iter().chain(ends).flatten().copied().collect();
             }
+            PmiKind::Width { flats: [a, b], tolerance } => {
+                self.kind = Kind::Width;
+                self.from.clone_from(a);
+                self.picks.clone_from(b);
+                self.tolerance = tolerance.suffix().trim().to_owned();
+            }
+            PmiKind::BasicAngle { planes: [a, b] } => {
+                self.kind = Kind::BasicAngle;
+                self.from.clone_from(a);
+                self.picks.clone_from(b);
+            }
+            PmiKind::Chamfer { bevel, sides: [a, b] } | PmiKind::EdgeBreak { bevel, sides: [a, b], .. } => {
+                self.kind = Kind::Chamfer;
+                self.bevel.clone_from(bevel);
+                self.from.clone_from(a);
+                self.picks.clone_from(b);
+                if let PmiKind::EdgeBreak { min_mm, max_mm, .. } = &on_body.kind {
+                    self.kind = Kind::EdgeBreak;
+                    self.min_mm = min_mm.to_string();
+                    self.max_mm = max_mm.to_string();
+                }
+            }
             PmiKind::Gdt { characteristic, tolerance, diameter, material, datums, features } => {
                 self.kind = Kind::Tolerance;
                 self.characteristic = *characteristic;
@@ -326,6 +369,8 @@ fn item(doc: &Document, form: &State) -> Result<PmiItem<FaceRef>, String> {
     if form.picks.is_empty() {
         return Err(form.kind.prompt().to_owned());
     }
+    let planes =
+        || -> Result<[Feature<FaceRef>; 2], String> { Ok([feature(doc, &form.from)?, feature(doc, &form.picks)?]) };
     let kind = match form.kind {
         Kind::Datum => PmiKind::Datum {
             letter: Some(form.letter.trim().to_ascii_uppercase())
@@ -397,6 +442,18 @@ fn item(doc: &Document, form: &State) -> Result<PmiItem<FaceRef>, String> {
                 flats: [feature(doc, &flats[..1])?, feature(doc, &flats[1..])?],
                 ends: [feature(doc, &ends[..1])?, feature(doc, &ends[1..])?],
                 tolerance: typed_tolerance(&form.tolerance)?,
+            }
+        }
+        Kind::Width => PmiKind::Width { flats: planes()?, tolerance: typed_tolerance(&form.tolerance)? },
+        Kind::BasicAngle => PmiKind::BasicAngle { planes: planes()? },
+        Kind::Chamfer => PmiKind::Chamfer { bevel: feature(doc, &form.bevel)?, sides: planes()? },
+        Kind::EdgeBreak => {
+            let bound = |text: &str, label| Decimal::parse(text).ok_or_else(|| format!("Enter the {label} in mm."));
+            PmiKind::EdgeBreak {
+                bevel: feature(doc, &form.bevel)?,
+                sides: planes()?,
+                min_mm: bound(&form.min_mm, "minimum setback")?,
+                max_mm: bound(&form.max_mm, "maximum setback")?,
             }
         }
         Kind::Tolerance => PmiKind::Gdt {
@@ -532,9 +589,22 @@ fn form(ui: &mut egui::Ui, state: &mut AppState) {
             }
         }
     }
+    if matches!(form.kind, Kind::Chamfer | Kind::EdgeBreak) {
+        picked(ui, doc, "Bevel", &mut form.bevel);
+        if ui.button("Use picks as bevel").clicked() && !form.picks.is_empty() {
+            form.bevel = std::mem::take(&mut form.picks);
+        }
+    }
+    if matches!(form.kind, Kind::Width | Kind::Chamfer | Kind::EdgeBreak | Kind::BasicAngle) {
+        picked(ui, doc, "First planar group", &mut form.from);
+        if ui.button("Use picks as first group").clicked() && !form.picks.is_empty() {
+            form.from = std::mem::take(&mut form.picks);
+        }
+    }
     let label = match form.kind {
         Kind::Distance => "To",
         Kind::Hole => "Pilot",
+        Kind::Width | Kind::Chamfer | Kind::EdgeBreak | Kind::BasicAngle => "Second planar group",
         _ => "Picked",
     };
     picked(ui, doc, label, &mut form.picks);
@@ -546,7 +616,7 @@ fn form(ui: &mut egui::Ui, state: &mut AppState) {
                 "Datum letter",
             );
         }
-        Kind::Diameter | Kind::Radius | Kind::Hole | Kind::Distance | Kind::Slot => {
+        Kind::Diameter | Kind::Radius | Kind::Hole | Kind::Distance | Kind::Slot | Kind::Width => {
             if form.kind == Kind::Distance && !form.picks.is_empty() {
                 ui.horizontal_wrapped(|ui| {
                     for (at, label) in ENDS {
@@ -592,6 +662,17 @@ fn form(ui: &mut egui::Ui, state: &mut AppState) {
                 ui.checkbox(&mut form.pattern, "Each picked face is one of a pattern");
             }
         }
+        Kind::EdgeBreak => {
+            labelled(
+                ui.add(egui::TextEdit::singleline(&mut form.min_mm).hint_text("Minimum setback (mm)")),
+                "Minimum setback",
+            );
+            labelled(
+                ui.add(egui::TextEdit::singleline(&mut form.max_mm).hint_text("Maximum setback (mm)")),
+                "Maximum setback",
+            );
+        }
+        Kind::Chamfer | Kind::BasicAngle => {}
         Kind::Tolerance => {
             egui::ComboBox::from_id_salt("pmi_characteristic")
                 .selected_text(form.characteristic.name())

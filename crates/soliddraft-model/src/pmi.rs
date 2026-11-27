@@ -35,6 +35,7 @@ use soliddraft_kernel_api::pmi::{
 use soliddraft_kernel_api::{
     BodyId, EdgeId, FaceAxis, FaceId, FaceRole, HolePart, Kernel, KernelError, SurfaceKind, Topology,
 };
+use soliddraft_kernel_api::{FaceCarrier, Vec3};
 
 use crate::document::Document;
 use crate::feature::{FeatureId, FeatureKind};
@@ -50,8 +51,8 @@ pub struct PmiRow {
     pub item: PmiItem<FaceRef>,
     /// The item on the body's faces, when every face it names is there.
     pub on_body: Option<PmiItem<FaceId>>,
-    /// The measured values in millimetres: one for a size or a distance; the length,
-    /// the width and the end radius for a slot.
+    /// Nominals in millimetres unless angular: basic angle is in degrees; chamfer is
+    /// first-side setback in millimetres followed by bevel angle in degrees.
     pub measured: Vec<f64>,
     /// Nominals for a typed hole, including values whose units are not millimetres.
     pub hole: Option<HoleNominals>,
@@ -363,6 +364,86 @@ fn measure_hole(
     })
 }
 
+fn planar_group(carriers: &[FaceCarrier], ids: &[FaceId]) -> Result<(Vec3, Vec3), String> {
+    let plane = |id| {
+        let face = carriers.iter().find(|face| face.id == id && face.surface == SurfaceKind::Plane)?;
+        Some((face.on_plane?, face.normal?.normalized()?))
+    };
+    let (point, normal) = ids.first().and_then(|id| plane(*id)).ok_or("Pick planar faces for this dimension.")?;
+    if ids[1..].iter().any(|id| {
+        plane(*id).is_none_or(|(other, direction)| {
+            direction.dot(normal) <= 0.0
+                || direction.cross(normal).length() > HOLE_EPS
+                || (other - point).dot(normal).abs() > HOLE_EPS
+        })
+    }) {
+        return Err("Faces in one group must lie on the same oriented plane.".into());
+    }
+    Ok((point, normal))
+}
+
+fn measure_planar_pmi(
+    topology: &Topology,
+    carriers: &[FaceCarrier],
+    kind: &PmiKind<FaceId>,
+) -> Result<Vec<f64>, String> {
+    let plane = |group: &Feature<FaceId>| planar_group(carriers, group);
+    match kind {
+        PmiKind::Width { flats: [a, b], .. } => {
+            let ((p, n), (q, m)) = (plane(a)?, plane(b)?);
+            let width = (q - p).dot(n).abs();
+            if n.dot(m) >= 0.0 || n.cross(m).length() > HOLE_EPS || !(width > HOLE_EPS && width.is_finite()) {
+                return Err("Width needs two distinct opposed parallel planes.".into());
+            }
+            Ok(vec![width])
+        }
+        PmiKind::BasicAngle { planes: [a, b] } => {
+            let ((_, n), (_, m)) = (plane(a)?, plane(b)?);
+            let sine = n.cross(m).length();
+            if sine <= HOLE_EPS {
+                return Err("Basic angle needs two nonparallel planes.".into());
+            }
+            Ok(vec![sine.atan2(-n.dot(m)).to_degrees()])
+        }
+        PmiKind::Chamfer { bevel, sides: [a, b] } | PmiKind::EdgeBreak { bevel, sides: [a, b], .. } => {
+            let ((p, n), (q, m), (r, h)) = (plane(a)?, plane(b)?, plane(bevel)?);
+            let adjacent = |side: &[FaceId]| {
+                bevel.iter().any(|id| {
+                    topology.face(*id).is_some_and(|face| {
+                        face.edges
+                            .iter()
+                            .filter_map(|id| topology.edge(*id))
+                            .any(|edge| edge.faces.iter().any(|face| side.contains(face)))
+                    })
+                })
+            };
+            let along = n.cross(m);
+            if along.length() <= HOLE_EPS || along.dot(h).abs() > HOLE_EPS || !adjacent(a) || !adjacent(b) {
+                return Err("The bevel must meet both sides along their corner direction.".into());
+            }
+            let setback = |p: Vec3, n: Vec3, q: Vec3, m: Vec3| -> Option<f64> {
+                let across = (m - n * m.dot(n)).normalized()?;
+                let corner = p + across * ((q - p).dot(m) / across.dot(m));
+                let slope = across.dot(h);
+                if slope <= HOLE_EPS {
+                    return None;
+                }
+                let value = (corner - r).dot(h) / slope;
+                (value > HOLE_EPS && value.is_finite()).then_some(value)
+            };
+            let first = setback(p, n, q, m).ok_or("The bevel must cut back the theoretical corner.")?;
+            let second = setback(q, m, p, n).ok_or("The bevel must cut back the theoretical corner.")?;
+            if matches!(kind, PmiKind::EdgeBreak { .. }) {
+                Ok(vec![first.max(second)])
+            } else {
+                let angle = n.cross(h).length().atan2(n.dot(h).abs()).to_degrees();
+                Ok(vec![first, angle])
+            }
+        }
+        _ => unreachable!("only native planar PMI goes through this measurement"),
+    }
+}
+
 impl Document {
     /// The part's manufacturing information.
     pub fn pmi(&self) -> &PartPmi {
@@ -466,6 +547,7 @@ impl Document {
                 .map(|(_, body)| (body, self.view_of(body).map_err(|e| e.to_string())))
                 .collect(),
         };
+        let carriers: Vec<std::cell::OnceCell<_>> = (0..bodies.len()).map(|_| std::cell::OnceCell::new()).collect();
         let names = self.name_map();
         let stated = self.thread_items();
         let mut rows: Vec<PmiRow> = Vec::with_capacity(self.pmi.items.len() + stated.len());
@@ -497,7 +579,9 @@ impl Document {
             // or on the first of several bodies that has every face it names.
             let wanted = stated.and_then(|s| s.body);
             let mut problem = None;
-            for (body, topology) in bodies.iter().filter(|(body, _)| wanted.is_none_or(|wanted| wanted == *body)) {
+            for (index, (body, topology)) in
+                bodies.iter().enumerate().filter(|(_, (body, _))| wanted.is_none_or(|wanted| wanted == *body))
+            {
                 let topology = match topology {
                     Ok(topology) => topology,
                     Err(error) => {
@@ -517,6 +601,22 @@ impl Document {
                                     row.measured.push(values.pilot_diameter_mm);
                                     row.hole = Some(values);
                                 }
+                                Err(error) => problem = Some(error),
+                            }
+                        } else if matches!(
+                            on_body.kind,
+                            PmiKind::Width { .. }
+                                | PmiKind::Chamfer { .. }
+                                | PmiKind::EdgeBreak { .. }
+                                | PmiKind::BasicAngle { .. }
+                        ) {
+                            match carriers[index]
+                                .get_or_init(|| self.kernel.face_carriers(*body))
+                                .as_ref()
+                                .map_err(|error| error.to_string())
+                                .and_then(|carriers| measure_planar_pmi(topology, carriers, &on_body.kind))
+                            {
+                                Ok(values) => row.measured = values,
                                 Err(error) => problem = Some(error),
                             }
                         } else if on_body.is_dimension() {
@@ -599,9 +699,25 @@ impl Document {
     ) -> Result<PmiItem<FaceId>, String> {
         let view = View { topology };
         item.try_map_features(|feature| {
+            // A bevel can tilt when its setback changes, and the angle measures
+            // precisely such a change. Keep the origin and surface checks; validate
+            // the resolved planes and their relationships in measure_planar_pmi.
+            let may_turn = match &item.kind {
+                PmiKind::Chamfer { bevel, .. } | PmiKind::EdgeBreak { bevel, .. } => std::ptr::eq(feature, bevel),
+                PmiKind::BasicAngle { .. } => true,
+                _ => false,
+            };
             let mut faces: Feature<FaceId> = Vec::new();
             for face in feature {
-                let found = reference::resolve_faces(face, &view, names).map_err(|unresolved| {
+                let mut turning;
+                let reference = if may_turn && face.fingerprint.normal.is_some() {
+                    turning = face.clone();
+                    turning.fingerprint.normal = None;
+                    &turning
+                } else {
+                    face
+                };
+                let found = reference::resolve_faces(reference, &view, names).map_err(|unresolved| {
                     if face.label.is_empty() {
                         unresolved.message
                     } else {

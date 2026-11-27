@@ -203,6 +203,15 @@ fn item(doc: &Document, input: &Value) -> Result<PmiItem<FaceRef>, String> {
             ends: pair(doc, input, "ends")?,
             tolerance: tolerance(input)?,
         },
+        "width" => PmiKind::Width { flats: pair(doc, input, "flats")?, tolerance: tolerance(input)? },
+        "chamfer" => PmiKind::Chamfer { bevel: named_feature(doc, input, "bevel")?, sides: pair(doc, input, "sides")? },
+        "edge_break" => PmiKind::EdgeBreak {
+            bevel: named_feature(doc, input, "bevel")?,
+            sides: pair(doc, input, "sides")?,
+            min_mm: depth(input, "min_mm")?.ok_or("min_mm is required")?,
+            max_mm: depth(input, "max_mm")?.ok_or("max_mm is required")?,
+        },
+        "basic_angle" => PmiKind::BasicAngle { planes: pair(doc, input, "planes")? },
         "tolerance" => PmiKind::Gdt {
             characteristic: characteristic(text(input, "characteristic").ok_or("characteristic is required")?)?,
             tolerance: number(input, "value")?,
@@ -235,7 +244,7 @@ fn item(doc: &Document, input: &Value) -> Result<PmiItem<FaceRef>, String> {
         },
         other => {
             return Err(format!(
-                "kind `{other}` is not datum, diameter, radius, hole, distance, slot, tolerance or finish"
+                "unknown PMI kind `{other}`; use datum, diameter, radius, hole, distance, slot, width, chamfer, edge_break, basic_angle, tolerance or finish"
             ));
         }
     };
@@ -285,8 +294,17 @@ pub(crate) fn rows_named(doc: &Document, names: &Document) -> Value {
                 "callout": row.callout(),
                 "faces": faces,
             });
-            if !row.measured.is_empty() {
-                value["measured_mm"] = json!(row.measured);
+            match (&row.item.kind, row.measured.as_slice()) {
+                (PmiKind::BasicAngle { .. }, [angle]) => value["measured_deg"] = json!([angle]),
+                (PmiKind::Chamfer { .. }, [setback, angle]) => {
+                    value["measured_mm"] = json!([setback]);
+                    value["measured_deg"] = json!([angle]);
+                }
+                (_, []) => {}
+                (_, measured) => value["measured_mm"] = json!(measured),
+            }
+            if let PmiKind::EdgeBreak { min_mm, max_mm, .. } = &row.item.kind {
+                value["bounds_mm"] = json!({ "min": min_mm.value(), "max": max_mm.value() });
             }
             if let PmiKind::Hole { head, tolerance, through, drill_depth, thread, .. } = &row.item.kind {
                 let mut hole = json!({ "pilot_faces": faces[0], "through": through });

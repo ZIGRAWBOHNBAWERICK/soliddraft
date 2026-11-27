@@ -17,6 +17,8 @@
 //! - a distance, between the edges of its two ends in a view that sees both end on,
 //!   stacked outside the view;
 //! - a slot, as one callout on a round end where the slot is seen in true shape;
+//! - a width, like a distance between its opposed flats; an angle, framed, in a
+//!   view that sees both planes edge on; a chamfer or edge break, on its bevel;
 //! - a datum, a tolerance or a finish of a flat face, on the line the face shows as
 //!   where a view sees it edge on;
 //! - a tolerance of a feature that has a size on the drawing, under that size;
@@ -299,13 +301,22 @@ impl Planner<'_> {
     /// A symbol on the line a flat face shows as: the view, the edge, the point on it and
     /// the outward direction.
     fn on_line(&mut self, point: Vec3, normal: Vec3) -> Result<(ViewId, EdgeId, Attach, Point2, Point2), String> {
+        self.on_planar_edge(point, normal, false)
+    }
+
+    fn on_planar_edge(
+        &mut self,
+        point: Vec3,
+        normal: Vec3,
+        oblique: bool,
+    ) -> Result<(ViewId, EdgeId, Attach, Point2, Point2), String> {
         let mut best: Option<((bool, i32, i32), &ViewContext, EdgeId)> = None;
         for (order, view) in self.views.iter().enumerate() {
             let frame = &view.xf.frame;
             if normal.dot(frame.direction).abs() > 1e-6 {
                 continue;
             }
-            if normal.dot(frame.right).abs() < 1.0 - 1e-6 && normal.dot(frame.up).abs() < 1.0 - 1e-6 {
+            if !oblique && normal.dot(frame.right).abs() < 1.0 - 1e-6 && normal.dot(frame.up).abs() < 1.0 - 1e-6 {
                 continue;
             }
             let Some((edge, visible)) = plane_edge(self.body.index, view, point, normal, self.body.tol) else {
@@ -492,7 +503,7 @@ impl Planner<'_> {
         }
         let item = row.on_body.as_ref().ok_or("its faces are not on the body")?;
         let wanted = match &item.kind {
-            PmiKind::Location { .. } => self.pass == Pass::Distances,
+            PmiKind::Location { .. } | PmiKind::Width { .. } => self.pass == Pass::Distances,
             PmiKind::Size { .. } | PmiKind::Hole { .. } => self.pass == Pass::Sizes,
             PmiKind::Gdt { .. } => self.pass != Pass::Sizes,
             _ => self.pass == Pass::Rest,
@@ -647,6 +658,76 @@ impl Planner<'_> {
                 let (from, to) = (end(from)?, end(to)?);
                 let value = row.measured.first().copied().ok_or("the part could not measure it")?;
                 self.linear(None, source, &from, &to, value, *tolerance)?;
+            }
+            PmiKind::Width { flats: [a, b], tolerance } => {
+                let end = |faces: &[FaceId]| -> Result<End, String> {
+                    Ok(End { shape: self.body.feature(faces)?, faces: faces.to_vec(), at: At::Feature, pair: None })
+                };
+                let value = row.measured.first().copied().ok_or("the part could not measure it")?;
+                self.linear(None, source, &end(a)?, &end(b)?, value, *tolerance)?;
+            }
+            PmiKind::Chamfer { bevel, .. } | PmiKind::EdgeBreak { bevel, .. } => {
+                let Shape::Plane { point, normal } = self.body.feature(bevel)? else {
+                    return Err("the callout needs a planar face".into());
+                };
+                let (view, edge, attach, on, out) = self.on_planar_edge(point, normal, true)?;
+                self.plans.push(Plan {
+                    source,
+                    view,
+                    body: AnnotationKind::Note { text: row.callout(), leader: Vec::new() },
+                    anchors: vec![(edge, attach, on)],
+                    placement: Point2::new(round(on.u + out.u * SYMBOL_OFFSET), round(on.v + out.v * SYMBOL_OFFSET)),
+                    slide: Slide { along: out, step: 3.0 },
+                    host: None,
+                    stack: None,
+                    dropped: false,
+                });
+            }
+            PmiKind::BasicAngle { planes: [first, second] } => {
+                let flat = |group: &[FaceId]| match self.body.feature(group)? {
+                    Shape::Plane { point, normal } => Ok((point, normal)),
+                    _ => Err("an angle needs two planes".to_owned()),
+                };
+                let ((p, n), (q, m)) = (flat(first)?, flat(second)?);
+                let mut best: Option<((u8, i32), &ViewContext, EdgeId, EdgeId)> = None;
+                for view in self.views.iter().copied() {
+                    let frame = &view.xf.frame;
+                    if n.dot(frame.direction).abs() > 1e-6 || m.dot(frame.direction).abs() > 1e-6 {
+                        continue;
+                    }
+                    let edge = |point, normal| plane_edge(self.body.index, view, point, normal, self.body.tol);
+                    let (Some((a, av)), Some((b, bv))) = (edge(p, n), edge(q, m)) else { continue };
+                    if a == b {
+                        continue;
+                    }
+                    let key = (u8::from(av) + u8::from(bv), -self.planned_in(view.id));
+                    if best.as_ref().is_none_or(|(score, ..)| key > *score) {
+                        best = Some((key, view, a, b));
+                    }
+                }
+                let (_, view, a, b) = best.ok_or("no view sees both angle faces edge on")?;
+                let anchor = |edge| -> Result<_, String> {
+                    let at = self.body.index.edge_curve(edge).ok_or("the edge is gone")?.point_at(0.5);
+                    Ok((edge, Attach::Point { at }, view.xf.point(at)))
+                };
+                let (first, second) = (anchor(a)?, anchor(b)?);
+                let on = first.2;
+                let out = self.outward(view.id, on, unit(view.xf.vector(n)));
+                let value = row.measured.first().copied().ok_or("the part could not measure it")?;
+                let mut d = Dimension::measured(DimensionKind::Angular, value, precision_for(value));
+                d.tolerance = Tolerance::Basic;
+                d.requirement = true;
+                self.plans.push(Plan {
+                    source,
+                    view: view.id,
+                    body: AnnotationKind::Dimension(d),
+                    anchors: vec![first, second],
+                    placement: Point2::new(round(on.u + out.u * SYMBOL_OFFSET), round(on.v + out.v * SYMBOL_OFFSET)),
+                    slide: Slide { along: out, step: 3.0 },
+                    host: None,
+                    stack: None,
+                    dropped: false,
+                });
             }
             PmiKind::Slot { ends, .. } => {
                 let Shape::Round { axis, radius, .. } = self.body.feature(&ends[0])? else {
@@ -999,8 +1080,15 @@ fn shows<F>(body: &AnnotationKind, kind: &PmiKind<F>) -> bool {
         (body, kind),
         (
             AnnotationKind::Note { .. },
-            PmiKind::Size { thread: Some(_), .. } | PmiKind::Slot { .. } | PmiKind::Hole { .. }
-        ) | (AnnotationKind::Dimension(_), PmiKind::Size { thread: None, .. } | PmiKind::Location { .. })
+            PmiKind::Size { thread: Some(_), .. }
+                | PmiKind::Slot { .. }
+                | PmiKind::Hole { .. }
+                | PmiKind::Chamfer { .. }
+                | PmiKind::EdgeBreak { .. }
+        ) | (
+            AnnotationKind::Dimension(_),
+            PmiKind::Size { thread: None, .. } | PmiKind::Location { .. } | PmiKind::Width { .. }
+        ) | (AnnotationKind::Dimension(Dimension { kind: DimensionKind::Angular, .. }), PmiKind::BasicAngle { .. })
             | (AnnotationKind::Gdt { .. }, PmiKind::Gdt { .. })
             | (AnnotationKind::Datum { .. }, PmiKind::Datum { .. })
             | (AnnotationKind::SurfaceFinish { .. }, PmiKind::SurfaceFinish { .. })
@@ -1124,14 +1212,23 @@ fn update(annotation: &mut Annotation, row: &PmiRow, symbols: &crate::library::S
                 d.value = crate::DimValue::Measured { value: *value };
             }
         }
-        (AnnotationKind::Dimension(d), PmiKind::Location { tolerance, .. }) => {
+        (AnnotationKind::Dimension(d), PmiKind::Location { tolerance, .. } | PmiKind::Width { tolerance, .. }) => {
             d.tolerance = *tolerance;
             d.requirement = true;
             if let Some(value) = row.measured.first() {
                 d.value = crate::DimValue::Measured { value: *value };
             }
         }
-        (AnnotationKind::Note { text, .. }, PmiKind::Slot { .. } | PmiKind::Hole { .. }) => *text = row.callout(),
+        (AnnotationKind::Dimension(d), PmiKind::BasicAngle { .. }) => {
+            if let Some(value) = row.measured.first() {
+                d.value = crate::DimValue::Measured { value: *value };
+                d.precision = precision_for(*value);
+            }
+        }
+        (
+            AnnotationKind::Note { text, .. },
+            PmiKind::Slot { .. } | PmiKind::Hole { .. } | PmiKind::Chamfer { .. } | PmiKind::EdgeBreak { .. },
+        ) => *text = row.callout(),
         (
             AnnotationKind::Gdt { characteristic, tolerance, diameter, material, datums },
             PmiKind::Gdt { characteristic: c, tolerance: t, diameter: d, material: m, datums: refs, .. },

@@ -584,6 +584,19 @@ impl<F> PmiItem<F> {
                 ends: [feature(&ends[0])?, feature(&ends[1])?],
                 tolerance: *tolerance,
             },
+            PmiKind::Width { flats: [a, b], tolerance } => {
+                PmiKind::Width { flats: [feature(a)?, feature(b)?], tolerance: *tolerance }
+            }
+            PmiKind::Chamfer { bevel, sides: [a, b] } => {
+                PmiKind::Chamfer { bevel: feature(bevel)?, sides: [feature(a)?, feature(b)?] }
+            }
+            PmiKind::EdgeBreak { bevel, sides: [a, b], min_mm, max_mm } => PmiKind::EdgeBreak {
+                bevel: feature(bevel)?,
+                sides: [feature(a)?, feature(b)?],
+                min_mm: min_mm.clone(),
+                max_mm: max_mm.clone(),
+            },
+            PmiKind::BasicAngle { planes: [a, b] } => PmiKind::BasicAngle { planes: [feature(a)?, feature(b)?] },
             PmiKind::Gdt { characteristic, tolerance, diameter, material, datums, features } => PmiKind::Gdt {
                 characteristic: *characteristic,
                 tolerance: *tolerance,
@@ -621,6 +634,10 @@ impl<F> PmiItem<F> {
             }
             PmiKind::Location { from, to, .. } => vec![&from.feature, &to.feature],
             PmiKind::Slot { flats, ends, .. } => flats.iter().chain(ends).collect(),
+            PmiKind::Width { flats, .. } | PmiKind::BasicAngle { planes: flats } => flats.iter().collect(),
+            PmiKind::Chamfer { bevel, sides } | PmiKind::EdgeBreak { bevel, sides, .. } => {
+                vec![bevel, &sides[0], &sides[1]]
+            }
         }
     }
 
@@ -628,7 +645,14 @@ impl<F> PmiItem<F> {
     pub fn is_dimension(&self) -> bool {
         matches!(
             self.kind,
-            PmiKind::Size { .. } | PmiKind::Hole { .. } | PmiKind::Location { .. } | PmiKind::Slot { .. }
+            PmiKind::Size { .. }
+                | PmiKind::Hole { .. }
+                | PmiKind::Location { .. }
+                | PmiKind::Slot { .. }
+                | PmiKind::Width { .. }
+                | PmiKind::Chamfer { .. }
+                | PmiKind::EdgeBreak { .. }
+                | PmiKind::BasicAngle { .. }
         )
     }
 }
@@ -709,6 +733,38 @@ pub enum PmiKind<F> {
         /// The tolerance of the length and the width.
         #[serde(default, skip_serializing_if = "Tolerance::is_none")]
         tolerance: Tolerance,
+    },
+    /// The width between two opposed flat sides, in millimetres.
+    Width {
+        /// The two opposed planar face groups.
+        flats: [Feature<F>; 2],
+        /// The size tolerance, if stated.
+        #[serde(default, skip_serializing_if = "Tolerance::is_none")]
+        tolerance: Tolerance,
+    },
+    /// Setback from the theoretical corner along the first side, in millimetres,
+    /// and the angle from that side to the bevel, in degrees.
+    Chamfer {
+        /// The planar bevel.
+        bevel: Feature<F>,
+        /// The two adjacent planar faces, reference side first.
+        sides: [Feature<F>; 2],
+    },
+    /// Explicit bounds on the largest setback of a planar broken edge.
+    EdgeBreak {
+        /// The planar break face.
+        bevel: Feature<F>,
+        /// The adjacent planar faces.
+        sides: [Feature<F>; 2],
+        /// Minimum setback in millimetres.
+        min_mm: Decimal,
+        /// Maximum setback in millimetres.
+        max_mm: Decimal,
+    },
+    /// The basic included angle between two planes, in degrees.
+    BasicAngle {
+        /// The two planar face groups.
+        planes: [Feature<F>; 2],
     },
     /// A geometric tolerance: a feature control frame (ISO 1101, ASME Y14.5).
     Gdt {
@@ -953,6 +1009,19 @@ impl<F: PartialEq> Pmi<F> {
                 return Some("A face is picked twice.".into());
             }
         }
+        if matches!(
+            item.kind,
+            PmiKind::Width { .. } | PmiKind::Chamfer { .. } | PmiKind::EdgeBreak { .. } | PmiKind::BasicAngle { .. }
+        ) {
+            let groups = item.features();
+            if groups
+                .iter()
+                .enumerate()
+                .any(|(i, group)| groups[..i].iter().any(|other| group.iter().any(|face| other.contains(face))))
+            {
+                return Some("Pick different faces for each group.".into());
+            }
+        }
         let range = |tolerance: &Tolerance| tolerance.problem().map(str::to_owned);
         match &item.kind {
             PmiKind::Datum { letter, feature } => {
@@ -1043,6 +1112,13 @@ impl<F: PartialEq> Pmi<F> {
                 }
                 range(tolerance)
             }
+            PmiKind::Width { tolerance, .. } => range(tolerance),
+            PmiKind::EdgeBreak { min_mm, max_mm, .. } => {
+                let (min, max) = (min_mm.value(), max_mm.value());
+                (!(min >= 0.0 && max > min && max.is_finite()))
+                    .then(|| "Edge break bounds must be nonnegative and the maximum must exceed the minimum.".into())
+            }
+            PmiKind::Chamfer { .. } | PmiKind::BasicAngle { .. } => None,
             PmiKind::Gdt { characteristic, tolerance, datums, features, .. } => {
                 if features.is_empty() {
                     return Some("Pick the faces it applies to.".into());
@@ -1137,6 +1213,10 @@ impl<F> PmiItem<F> {
             PmiKind::Slot { tolerance, .. } => {
                 format!("{}\u{d7}{}{} R{}", value(0), value(1), tolerance.suffix(), value(2))
             }
+            PmiKind::Width { tolerance, .. } => format!("{}{}", value(0), tolerance.suffix()),
+            PmiKind::Chamfer { .. } => format!("{} × {}° CHAMFER", value(0), value(1)),
+            PmiKind::EdgeBreak { min_mm, max_mm, .. } => format!("EDGE BREAK {min_mm}–{max_mm}"),
+            PmiKind::BasicAngle { .. } => format!("{}° BASIC", value(0)),
             PmiKind::Gdt { characteristic, tolerance, diameter, material, datums, .. } => {
                 let mut text = format!(
                     "{} {}{}",
@@ -1212,6 +1292,10 @@ impl<F> PmiItem<F> {
     pub fn file_problem(&self) -> Option<String> {
         match &self.kind {
             PmiKind::Hole { .. } => Some("Compound hole and depth PMI is not supported in STEP export.".to_owned()),
+            PmiKind::Width { .. }
+            | PmiKind::Chamfer { .. }
+            | PmiKind::EdgeBreak { .. }
+            | PmiKind::BasicAngle { .. } => Some(format!("{} PMI is not supported in STEP export.", self.kind_label())),
             PmiKind::Gdt { datums, .. }
                 if datums.iter().any(|datum| !datum.material.is_regardless() || datum.letter.contains('-')) =>
             {
@@ -1239,6 +1323,10 @@ impl<F> PmiItem<F> {
             PmiKind::Hole { .. } => "Hole",
             PmiKind::Location { .. } => "Distance",
             PmiKind::Slot { .. } => "Slot",
+            PmiKind::Width { .. } => "Width",
+            PmiKind::Chamfer { .. } => "Chamfer",
+            PmiKind::EdgeBreak { .. } => "Edge break",
+            PmiKind::BasicAngle { .. } => "Basic angle",
             PmiKind::Gdt { characteristic, .. } => characteristic.name(),
             PmiKind::SurfaceFinish { .. } => "Surface finish",
         }

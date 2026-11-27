@@ -4,8 +4,9 @@
 use std::sync::Arc;
 
 use soliddraft_kernel_api::pmi::{
-    Anchor, At, DatumRef, Decimal, GdtCharacteristic, HoleHead as PmiHead, HoleHeadKind, HoleHeadNominals, HoleThread,
-    MaterialCondition, PartNotes, Pmi, PmiItem, PmiKind, SizeKind, Tolerance,
+    Anchor, At, DatumRef, DatumTarget, Decimal, GdtCharacteristic, HoleHead as PmiHead, HoleHeadKind, HoleHeadNominals,
+    HoleThread, MaterialCondition, PartNotes, Pmi, PmiItem, PmiKind, PositionControl, PositionFrame, PositionSegment,
+    ProjectedZone, SizeKind, TargetArea, TargetKind, Tolerance,
 };
 use soliddraft_kernel_api::{
     FaceId, FaceRole, HoleDepth, HoleHead, HolePart, HoleTip, OpTag, StepOptions, SurfaceKind, Vec3,
@@ -273,6 +274,30 @@ fn step_carries_the_items_to_another_part_and_back_onto_the_same_faces() {
     let reread = reopened.kernel().read_step_pmi(second.text.as_bytes()).unwrap();
     assert_eq!(reread.pmi.items.len(), read.pmi.items.len());
     assert_eq!(reread.pmi.part, read.pmi.part);
+
+    // A typed reader may return a damaged target even when its declaration is valid.
+    // The dependent frame cannot fall back to using the datum as a whole face.
+    let mut damaged = read.clone();
+    damaged.pmi.items.insert(
+        0,
+        PmiItem {
+            id: "A1".into(),
+            kind: PmiKind::DatumTarget(DatumTarget {
+                datum: "A".into(),
+                number: 1,
+                face: "missing-face".into(),
+                point_mm: [10.0, 0.0, 0.0],
+                kind: TargetKind::Point,
+            }),
+        },
+    );
+    let mut clean = doc();
+    let import = add(&mut clean, FeatureKind::ImportStep(ImportStepFeature::new("block.step", step.text.into_bytes())));
+    let (surviving, report) = clean.pmi_from_step(&[import], &damaged);
+    assert!(surviving.iter().any(|item| item.id == "Bore diameter"));
+    assert!(surviving.iter().all(|item| item.id != "A1" && item.id != "Bore position"));
+    assert!(report.left_out.iter().any(|(id, problem)| id == "A1" && problem.contains("was not imported")));
+    assert!(report.left_out.iter().any(|(id, problem)| id == "Bore position" && problem.contains("Datum A")));
 }
 
 #[test]
@@ -370,6 +395,200 @@ fn commands_refuse_what_does_not_fit_and_undo_what_they_did() {
     assert!(d.pmi().item("Bore finish").is_none());
     d.undo().unwrap();
     assert_eq!(callouts(&d), expected("8"));
+}
+
+#[test]
+fn position_edit_preserves_the_ordered_datum_frame_on_rejection() {
+    let mut d = doc();
+    bored_block(&mut d, 8.0);
+    annotate(&mut d);
+    let side = facing(&d, Vec3::new(0.0, -1.0, 0.0));
+    put(&mut d, "Datum C", PmiKind::Datum { letter: "C".into(), feature: side });
+    let bore = cylinders(&d);
+    let edit = |letters: &[&str]| Command::PutPmiItem {
+        item: Box::new(PmiItem {
+            id: "Bore position".into(),
+            kind: PmiKind::Gdt {
+                characteristic: GdtCharacteristic::Position,
+                tolerance: 0.05,
+                diameter: true,
+                material: MaterialCondition::Regardless,
+                datums: datums(letters),
+                features: vec![bore.clone()],
+            },
+        }),
+        replaces: Some("Bore position".into()),
+    };
+    d.execute(edit(&["A", "B", "C"])).unwrap();
+    let valid = d.pmi().item("Bore position").unwrap().clone();
+    assert_eq!(valid.callout(&[]), "Position \u{d8}0.05 A|B|C");
+
+    for (letters, diagnostic) in
+        [(["A", "B", "A"], "A datum is referred to twice"), (["A", "B", "D"], "Datum D is not defined")]
+    {
+        let Err(CommandError::Invalid(message)) = d.execute(edit(&letters)) else {
+            panic!("position edit with {letters:?} should be invalid");
+        };
+        assert!(message.contains(diagnostic), "{message}");
+        assert_eq!(d.pmi().item("Bore position"), Some(&valid));
+    }
+}
+
+#[test]
+fn targets_and_position_frames_reopen_and_reject_invalid_edits() {
+    let mut d = doc();
+    let bore_sketch_id = bored_block(&mut d, 8.0);
+    annotate(&mut d);
+    let p = |s| Decimal::parse(s).unwrap();
+    let underside = facing(&d, Vec3::new(0.0, 0.0, -1.0)).pop().unwrap();
+    let top = facing(&d, Vec3::Z).pop().unwrap();
+    let side = facing(&d, Vec3::new(0.0, -1.0, 0.0));
+    put(&mut d, "Datum C", PmiKind::Datum { letter: "C".into(), feature: side });
+
+    let target = |number, kind| {
+        PmiKind::DatumTarget(DatumTarget {
+            datum: "A".into(),
+            number,
+            face: underside.clone(),
+            point_mm: [10.0, 0.0, 0.0],
+            kind,
+        })
+    };
+    for (number, kind) in [
+        (1, TargetKind::Point),
+        (2, TargetKind::Line { length_mm: p("4"), direction: [1.0, 0.0, 0.0] }),
+        (3, TargetKind::Area { area: TargetArea::Circular { diameter_mm: p("2") } }),
+        (
+            4,
+            TargetKind::Area {
+                area: TargetArea::Rectangular { length_mm: p("4"), width_mm: p("2"), direction: [1.0, 0.0, 0.0] },
+            },
+        ),
+    ] {
+        put(&mut d, &format!("A{number}"), target(number, kind));
+    }
+
+    let segment = |value, material, letters: &[&str]| PositionSegment {
+        value_mm: p(value),
+        diameter_zone: true,
+        material,
+        datums: datums(letters),
+    };
+    let upper = segment("0.08", MaterialCondition::Maximum, &["A", "B", "C"]);
+    let lower = segment("0.02", MaterialCondition::Least, &["A", "B"]);
+    let bore = cylinders(&d);
+    let control = |frame| PmiKind::PositionControl(PositionControl { features: vec![bore.clone()], frame });
+    put(&mut d, "Composite", control(PositionFrame::Composite { upper: upper.clone(), lower: lower.clone() }));
+    let projection = |height, direction, entry_faces| {
+        control(PositionFrame::Single {
+            segment: upper.clone(),
+            projected_zone: Some(ProjectedZone { height_mm: p(height), direction, entry_faces }),
+        })
+    };
+    put(&mut d, "Projected", projection("5", [0.0, 0.0, 2.0], vec![top.clone()]));
+
+    let saved = d.to_bytes().unwrap();
+    let mut back = Document::from_bytes(&saved, Arc::new(CatallaxKernel::new())).unwrap();
+    assert_eq!(back.pmi(), d.pmi());
+    let rows = back.pmi_rows();
+    for (id, text) in [
+        ("A1", "TARGET A1"),
+        ("A2", "TARGET A2 LINE 4"),
+        ("A3", "TARGET A3 Ø2"),
+        ("A4", "TARGET A4 4×2"),
+        ("Composite", "Position Ø0.08 (M)|A|B|C\nØ0.02 (L)|A|B"),
+        ("Projected", "Position Ø0.08 (M)|A|B|C Ⓟ5"),
+    ] {
+        let row = rows.iter().find(|row| row.item.id == id).unwrap();
+        assert!(row.applies(), "{id}: {:?}", row.problem);
+        assert_eq!(row.callout(), text);
+    }
+    let reject = |doc: &mut Document, id: &str, kind, message: &str| {
+        let before = doc.pmi().clone();
+        let Err(CommandError::Invalid(error)) = doc.execute(Command::PutPmiItem {
+            item: Box::new(PmiItem { id: id.into(), kind }),
+            replaces: before.item(id).map(|item| item.id.clone()),
+        }) else {
+            panic!("{id} should be invalid: {message}");
+        };
+        assert!(error.contains(message), "{id}: {error}");
+        assert_eq!(doc.pmi(), &before);
+    };
+    for (kind, message) in [
+        (target(0, TargetKind::Point), "positive"),
+        (target(2, TargetKind::Point), "already defined"),
+        (target(1, TargetKind::Line { length_mm: p("1"), direction: [0.0, 0.0, 1.0] }), "tangent"),
+        (target(1, TargetKind::Area { area: TargetArea::Circular { diameter_mm: p("13") } }), "trim"),
+        (
+            PmiKind::DatumTarget(DatumTarget {
+                datum: "A".into(),
+                number: 1,
+                face: top.clone(),
+                point_mm: [10.0, 0.0, 10.0],
+                kind: TargetKind::Point,
+            }),
+            "must belong",
+        ),
+        (
+            PmiKind::DatumTarget(DatumTarget {
+                datum: "A".into(),
+                number: 1,
+                face: underside.clone(),
+                point_mm: [0.0, 0.0, 0.0],
+                kind: TargetKind::Point,
+            }),
+            "off",
+        ),
+    ] {
+        reject(&mut back, "A1", kind, message);
+    }
+    for (kind, message) in [
+        (projection("0", [0.0, 0.0, 1.0], vec![top.clone()]), "height must be positive"),
+        (projection("5", [0.0; 3], vec![top.clone()]), "nonzero"),
+        (projection("5", [0.0, 0.0, -1.0], vec![top.clone()]), "outward"),
+        (projection("5", [1.0, 0.0, 1.0], vec![top.clone()]), "outward"),
+        (projection("5", [0.0, 0.0, 1.0], vec![]), "entry face per"),
+    ] {
+        reject(&mut back, "Projected", kind, message);
+    }
+    for (lower, message) in [
+        (segment("0.02", MaterialCondition::Least, &["B", "A"]), "ordered prefix"),
+        (segment("0.12", MaterialCondition::Least, &["A", "B"]), "cannot exceed"),
+        (PositionSegment { diameter_zone: false, ..lower.clone() }, "cylindrical"),
+        (
+            PositionSegment {
+                datums: vec![DatumRef { letter: "A".into(), material: MaterialCondition::Maximum }],
+                ..lower.clone()
+            },
+            "material boundary modifier",
+        ),
+    ] {
+        reject(&mut back, "Composite", control(PositionFrame::Composite { upper: upper.clone(), lower }), message);
+    }
+
+    let rename =
+        PmiItem { id: "Datum A".into(), kind: PmiKind::Datum { letter: "D".into(), feature: vec![underside] } };
+    back.execute(Command::PutPmiItem { item: Box::new(rename), replaces: Some("Datum A".into()) }).unwrap();
+    for id in ["A1", "A2", "A3", "A4", "Composite", "Projected"] {
+        assert!(back.pmi().item(id).unwrap().references_datum("D"), "{id}");
+    }
+    assert!(back.execute(Command::RemovePmiItem { id: "Datum A".into() }).is_err());
+    back.undo().unwrap();
+    assert_eq!(back.pmi(), d.pmi());
+
+    let on = back.pmi_rows().into_iter().find(|row| row.item.id == "Composite").unwrap().on_body.unwrap();
+    let pmi = Pmi { items: vec![on], part: PartNotes::default() };
+    let refused = back.kernel().export_step_with_pmi(back.body().unwrap(), &StepOptions::default(), &pmi).unwrap_err();
+    assert!(refused.to_string().contains("Composite: Position control PMI is not supported"), "{refused}");
+    let refused = back.export(soliddraft_exchange::Format::Step).unwrap_err();
+    assert!(refused.contains("A1: Datum target PMI is not supported in STEP export"), "{refused}");
+
+    back.execute(Command::EditFeature { id: bore_sketch_id, kind: bore_sketch(22.0) }).unwrap();
+    let rows = back.pmi_rows();
+    let problem = |id| rows.iter().find(|row| row.item.id == id).unwrap().problem.as_deref();
+    assert!(problem("A1").is_some());
+    assert!(problem("Composite").is_some_and(|problem| problem.contains("Datum A")));
+    assert!(problem("Bore finish").is_none());
 }
 
 #[test]
@@ -489,7 +708,7 @@ fn hole_roles_checked_nominals_and_independent_depths_survive_native_reopen() {
             assert_eq!(row.unit, Some(unit));
             exact(row.nominal.unwrap(), value);
             assert_eq!((row.lower_limit, row.upper_limit), (None, None));
-            assert_eq!(row.faces(group), &[d.pmi().item(id).unwrap().features()[face].clone()]);
+            assert_eq!(row.faces(group), &[d.pmi().item(id).unwrap().features()[face].to_vec()]);
         }
     };
     check(&d);
@@ -509,7 +728,7 @@ fn hole_roles_checked_nominals_and_independent_depths_survive_native_reopen() {
     // A different cylinder is not interchangeable with the counterbore's head.
     let mut mismatched = reopened.pmi().item("Counterbore").unwrap().clone();
     let PmiKind::Hole { head: Some(head), .. } = &mut mismatched.kind else { panic!("counterbore") };
-    head.faces.clone_from(reopened.pmi().item("Blind").unwrap().features()[0]);
+    head.faces = reopened.pmi().item("Blind").unwrap().features()[0].to_vec();
     let mut reopened = reopened;
     reopened.execute(Command::PutPmiItem { item: Box::new(mismatched), replaces: Some("Counterbore".into()) }).unwrap();
     let row = &reopened.pmi_rows()[0];

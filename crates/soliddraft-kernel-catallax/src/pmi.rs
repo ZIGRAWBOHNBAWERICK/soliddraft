@@ -204,6 +204,9 @@ fn file_items<F: Clone>(item: &PmiItem<F>) -> KernelResult<Vec<cx::Item<F>>> {
         PmiKind::Width { .. } | PmiKind::Chamfer { .. } | PmiKind::EdgeBreak { .. } | PmiKind::BasicAngle { .. } => {
             Err(invalid(id, &format!("{} PMI is not supported by this STEP kernel", item.kind_label())))
         }
+        PmiKind::DatumTarget(_) | PmiKind::PositionControl(_) => {
+            Err(invalid(id, &format!("{} PMI is not supported by this STEP kernel", item.kind_label())))
+        }
         PmiKind::Gdt { characteristic: which, tolerance, diameter, material, datums, features } => {
             if datums.iter().any(|datum| !datum.material.is_regardless() || datum.letter.contains('-')) {
                 return Err(KernelError::Unsupported("a datum reference at a material condition".into()));

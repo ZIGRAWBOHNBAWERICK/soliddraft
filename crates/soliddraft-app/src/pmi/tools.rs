@@ -4,8 +4,9 @@
 
 use serde_json::{Value, json};
 use soliddraft_kernel_api::pmi::{
-    Anchor, At, DatumRef, Decimal, Feature, GdtCharacteristic, HoleHead, HoleHeadKind, HoleThread, Lay,
-    MaterialCondition, PartNotes, PmiItem, PmiKind, SizeKind, SurfaceProcess, Tolerance,
+    Anchor, At, DatumRef, DatumTarget, Decimal, Feature, GdtCharacteristic, HoleHead, HoleHeadKind, HoleThread, Lay,
+    MaterialCondition, PartNotes, PmiItem, PmiKind, PositionControl, PositionFrame, SizeKind, SurfaceProcess,
+    Tolerance,
 };
 use soliddraft_model::FaceRef;
 
@@ -135,11 +136,63 @@ fn lay(name: &str) -> Result<Lay, String> {
     })
 }
 
+fn fields(input: &Value, allowed: &[&str]) -> Result<(), String> {
+    let object = input.as_object().ok_or("PMI input must be an object.")?;
+    if let Some(key) = object
+        .keys()
+        .find(|key| !allowed.contains(&key.as_str()) && !matches!(key.as_str(), "kind" | "name" | "replaces"))
+    {
+        return Err(format!("Unexpected field {key} for this PMI kind."));
+    }
+    Ok(())
+}
+
+fn typed_gdt(doc: &Document, input: &Value, target: bool) -> Result<PmiKind<FaceRef>, String> {
+    let kind = if target {
+        fields(input, &["target"])?;
+        let target: DatumTarget<String> =
+            serde_json::from_value(input["target"].clone()).map_err(|error| format!("Datum target: {error}"))?;
+        PmiKind::DatumTarget(target)
+    } else {
+        fields(input, &["faces", "features", "frame"])?;
+        for slot in ["segment", "upper", "lower"] {
+            if let Some(datums) = input["frame"][slot]["datums"].as_array() {
+                for datum in datums {
+                    let datum = datum.as_object().ok_or("A datum reference needs a letter and optional material.")?;
+                    if datum.keys().any(|key| !matches!(key.as_str(), "letter" | "material")) {
+                        return Err("A datum reference accepts only letter and one material modifier.".into());
+                    }
+                }
+            }
+        }
+        let frame: PositionFrame<String> =
+            serde_json::from_value(input["frame"].clone()).map_err(|error| format!("Position frame: {error}"))?;
+        PmiKind::PositionControl(PositionControl { features: Vec::new(), frame })
+    };
+    let mut mapped = PmiItem { id: String::new(), kind }
+        .try_map(|name| {
+            let face = face_by_name(doc, name).ok_or_else(|| format!("No face named `{name}`."))?;
+            doc.model().face_ref(face).map_err(|error| error.to_string())
+        })?
+        .kind;
+    if let PmiKind::PositionControl(control) = &mut mapped {
+        control.features = features(doc, input)?;
+    }
+    Ok(mapped)
+}
+
 /// The item a `pmi_add` call describes, named, on the part's faces.
 fn item(doc: &Document, input: &Value) -> Result<PmiItem<FaceRef>, String> {
     let pmi = doc.model().pmi();
     let replaces = text(input, "replaces");
-    let kind = match text(input, "kind").ok_or("kind is required")? {
+    let requested = text(input, "kind").ok_or("kind is required")?;
+    if input.get("projected_zone").is_some() || (requested != "position_control" && input.get("frame").is_some()) {
+        return Err("Projection and composite segments require a position_control frame.".into());
+    }
+    if requested != "datum_target" && input.get("target").is_some() {
+        return Err("A target payload requires the datum_target kind.".into());
+    }
+    let kind = match requested {
         "datum" => {
             let letter = match text(input, "letter") {
                 Some(letter) => letter.to_owned(),
@@ -212,6 +265,8 @@ fn item(doc: &Document, input: &Value) -> Result<PmiItem<FaceRef>, String> {
             max_mm: depth(input, "max_mm")?.ok_or("max_mm is required")?,
         },
         "basic_angle" => PmiKind::BasicAngle { planes: pair(doc, input, "planes")? },
+        "datum_target" => typed_gdt(doc, input, true)?,
+        "position_control" => typed_gdt(doc, input, false)?,
         "tolerance" => PmiKind::Gdt {
             characteristic: characteristic(text(input, "characteristic").ok_or("characteristic is required")?)?,
             tolerance: number(input, "value")?,
@@ -244,7 +299,7 @@ fn item(doc: &Document, input: &Value) -> Result<PmiItem<FaceRef>, String> {
         },
         other => {
             return Err(format!(
-                "unknown PMI kind `{other}`; use datum, diameter, radius, hole, distance, slot, width, chamfer, edge_break, basic_angle, tolerance or finish"
+                "unknown PMI kind `{other}`; use datum, datum_target, diameter, radius, hole, distance, slot, width, chamfer, edge_break, basic_angle, tolerance, position_control or finish"
             ));
         }
     };
@@ -254,6 +309,7 @@ fn item(doc: &Document, input: &Value) -> Result<PmiItem<FaceRef>, String> {
         (None, Some(old)) => old.to_owned(),
         (None, None) => pmi.free_name(&match &item.kind {
             PmiKind::Datum { letter, .. } => format!("Datum {letter}"),
+            PmiKind::DatumTarget(target) => format!("Datum target {}{}", target.datum, target.number),
             _ => item.kind_label().to_owned(),
         }),
     };
@@ -294,6 +350,29 @@ pub(crate) fn rows_named(doc: &Document, names: &Document) -> Value {
                 "callout": row.callout(),
                 "faces": faces,
             });
+            match &row.item.kind {
+                PmiKind::DatumTarget(target) => {
+                    value["target"] = json!({
+                        "datum": target.datum, "number": target.number, "face": faces[0].first(),
+                        "point_mm": target.point_mm, "kind": target.kind
+                    });
+                }
+                PmiKind::PositionControl(control) => {
+                    value["frame"] = match &control.frame {
+                        PositionFrame::Single { segment, projected_zone } => {
+                            let zone = projected_zone.as_ref().map(|zone| json!({
+                                "height_mm": zone.height_mm, "direction": zone.direction,
+                                "entry_faces": faces[control.features.len()..].iter().map(|group| group.first()).collect::<Vec<_>>()
+                            }));
+                            json!({"frame": "single", "segment": segment, "projected_zone": zone})
+                        }
+                        PositionFrame::Composite { upper, lower } => {
+                            json!({"frame": "composite", "upper": upper, "lower": lower})
+                        }
+                    };
+                }
+                _ => {}
+            }
             match (&row.item.kind, row.measured.as_slice()) {
                 (PmiKind::BasicAngle { .. }, [angle]) => value["measured_deg"] = json!([angle]),
                 (PmiKind::Chamfer { .. }, [setback, angle]) => {

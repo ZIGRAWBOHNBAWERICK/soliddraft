@@ -3,6 +3,7 @@
 use serde::{Deserialize, Serialize};
 // The tolerance types are the part's: a drawing shows what the part states.
 pub use soliddraft_kernel_api::pmi::{DatumRef, GdtCharacteristic, Lay, MaterialCondition, SurfaceProcess, Tolerance};
+use soliddraft_kernel_api::pmi::{Decimal, PositionSegment};
 use soliddraft_kernel_api::{Point2, Vec3};
 
 use crate::entity::EntityRef;
@@ -155,6 +156,24 @@ pub enum AnnotationKind {
         /// Datum references, primary first.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         datums: Vec<DatumRef>,
+    },
+    /// Position frame copied from part PMI, with a shared position symbol for a composite.
+    PositionFrame {
+        /// Single or upper locating segment.
+        upper: PositionSegment,
+        /// Lower refinement segment on a composite.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        lower: Option<PositionSegment>,
+        /// Positive projected height for a single segment, in millimetres.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        projected_height_mm: Option<Decimal>,
+    },
+    /// Datum target symbol with a leader to the actual target point on the part.
+    DatumTarget {
+        /// Datum letter and target number, such as `A1`.
+        label: String,
+        /// Target size text in drawing units, empty for a point.
+        extent: String,
     },
     /// A datum feature symbol: the letter in a frame, joined to a filled triangle on the
     /// feature it names.

@@ -425,6 +425,7 @@ impl InspectionGroup {
                 angle.dimension(measured.first().copied(), Tolerance::Basic);
                 angle.unit = Some(InspectionUnit::Degree);
             }
+            PmiKind::DatumTarget(_) | PmiKind::PositionControl(_) => {}
             PmiKind::Gdt { characteristic, tolerance, diameter, material, datums, features } => {
                 group.face_groups = features;
                 group.datums = datums;

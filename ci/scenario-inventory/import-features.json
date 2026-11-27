@@ -21,7 +21,7 @@
     "mesh",
     "step"
   ],
-  "catallax_revision": "6e4b5f89e1396d314e991b24fd777bac037526dd",
+  "catallax_revision": "d080d74955b2f4c84b395d82c60ed9360b405e08",
   "route": "MCP document commands -> Catallax adapter -> pinned kernel",
   "supported_limits": "Fillet, chamfer, boss, pocket and hole on the imported planar block, with an edit before and after a save and reopen. Imported faces keep their Import1 · Face N names. Catallax refuses a lattice after the face-mounted features with distance.planar-domain and leaves the revision intact.",
   "evidence": "result.json, protocol.json and commands/NNNN/{part.dwprt,command.json,kernel.json}; imported-features.dwprt"

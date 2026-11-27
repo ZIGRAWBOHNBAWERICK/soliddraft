@@ -18,3 +18,10 @@ owner = "core"
 crate = "soliddraft-kernel-catallax"
 paths = ["crates/soliddraft-kernel-catallax/src/feature_pattern.rs", "crates/soliddraft-kernel-catallax/tests/feature_pattern.rs"]
 module = ["feature_pattern"]
+
+[[areas]]
+name = "kernel_catallax.proof_clock"
+owner = "core"
+crate = "soliddraft-kernel-catallax"
+paths = ["crates/soliddraft-kernel-catallax/src/proof_clock.rs"]
+module = ["proof_clock"]

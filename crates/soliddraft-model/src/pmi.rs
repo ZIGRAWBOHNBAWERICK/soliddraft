@@ -699,9 +699,25 @@ impl Document {
     ) -> Result<PmiItem<FaceId>, String> {
         let view = View { topology };
         item.try_map_features(|feature| {
+            // A bevel can tilt when its setback changes, and the angle measures
+            // precisely such a change. Keep the origin and surface checks; validate
+            // the resolved planes and their relationships in measure_planar_pmi.
+            let may_turn = match &item.kind {
+                PmiKind::Chamfer { bevel, .. } | PmiKind::EdgeBreak { bevel, .. } => std::ptr::eq(feature, bevel),
+                PmiKind::BasicAngle { .. } => true,
+                _ => false,
+            };
             let mut faces: Feature<FaceId> = Vec::new();
             for face in feature {
-                let found = reference::resolve_faces(face, &view, names).map_err(|unresolved| {
+                let mut turning;
+                let reference = if may_turn && face.fingerprint.normal.is_some() {
+                    turning = face.clone();
+                    turning.fingerprint.normal = None;
+                    &turning
+                } else {
+                    face
+                };
+                let found = reference::resolve_faces(reference, &view, names).map_err(|unresolved| {
                     if face.label.is_empty() {
                         unresolved.message
                     } else {

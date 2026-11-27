@@ -164,19 +164,35 @@ fn package_card(doc: &Document, input: &Value) -> Result<Card, String> {
     let step = crate::app_tools::package_path(input)?;
     let template = input["template"].as_str().unwrap_or("iso-a3");
     crate::app_tools::check_drawing(doc, template)?;
+    let inspection = crate::app_tools::package_inspection(input)?;
     let name = step.file_name().map_or_else(|| step.display().to_string(), |name| name.to_string_lossy().into_owned());
-    Ok(Card {
-        summary: format!("Write {name} with its drawing as PDF and DXF"),
-        rows: vec![
-            ("Writes".to_owned(), step.display().to_string()),
-            (
-                "Drawing".to_owned(),
-                format!("{} and {}", step.with_extension("pdf").display(), step.with_extension("dxf").display()),
-            ),
-            ("Template".to_owned(), template.to_owned()),
-            ("Opens".to_owned(), "the drawing, in place of any open drawing".to_owned()),
-        ],
-    })
+    let mut rows = vec![
+        ("Writes".to_owned(), step.display().to_string()),
+        (
+            "Drawing".to_owned(),
+            format!("{} and {}", step.with_extension("pdf").display(), step.with_extension("dxf").display()),
+        ),
+    ];
+    let summary = match &inspection {
+        Some(stated) => {
+            rows.push((
+                "Inspection".to_owned(),
+                format!(
+                    "{} and the AS9102 workbook {}",
+                    step.with_extension("csv").display(),
+                    step.with_extension("xlsx").display()
+                ),
+            ));
+            for (label, value) in [("Part number", &stated.part_number), ("Revision", &stated.revision)] {
+                rows.push((label.to_owned(), value.clone().unwrap_or_else(|| "not stated; left blank".to_owned())));
+            }
+            format!("Write {name} with its drawing as PDF and DXF, and its inspection plan")
+        }
+        None => format!("Write {name} with its drawing as PDF and DXF"),
+    };
+    rows.push(("Template".to_owned(), template.to_owned()));
+    rows.push(("Opens".to_owned(), "the drawing, in place of any open drawing".to_owned()));
+    Ok(Card { summary, rows })
 }
 
 /// Whether the proposal `id` writes the manufacturing package.

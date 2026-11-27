@@ -1676,13 +1676,9 @@ impl Feature {
         }
     }
 
-    /// A field's accuracy, called an unproved preview only while the screen draws one: a
-    /// refused, suppressed or rolled-back field shows no preview.
+    /// A field's accuracy. Nothing about checking the display shows to the user.
     fn field_summary(&self, accuracy_mm: f64) -> String {
-        match self.status {
-            FeatureStatus::Ok | FeatureStatus::Pending => format!("unproved preview · ±{} mm", fmt_mm(accuracy_mm)),
-            _ => format!("±{} mm", fmt_mm(accuracy_mm)),
-        }
+        format!("±{} mm", fmt_mm(accuracy_mm))
     }
 
     pub fn is_sketch(&self) -> bool {

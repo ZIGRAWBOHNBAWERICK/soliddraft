@@ -94,6 +94,8 @@ fn depth(depth: f64) -> ExtrudeParams {
 #[test]
 fn the_gpu_preview_shows_first_and_a_late_checked_result_never_replaces_a_newer_preview() {
     let Some((device, queue, adapter)) = device() else { return };
+    let started = Instant::now();
+    let phase = |what: &str| eprintln!("{:>7.2} s  {what}", started.elapsed().as_secs_f64());
     gpu_preview::install_unchecked(&device, &queue, &adapter).unwrap();
     let kernel = Arc::new(Gated::default());
     kernel.rules.lock().unwrap().hold_checked = true;
@@ -102,6 +104,7 @@ fn the_gpu_preview_shows_first_and_a_late_checked_result_never_replaces_a_newer_
 
     // The new body shows from the GPU mesher while the display worker's checked mesh
     // of it waits.
+    phase("part built");
     let (old_body, old) = shown(&doc);
     assert!(old.gpu.is_some(), "the new body shows from the GPU mesher first");
     assert!(old.positions.is_empty(), "no face of a box falls back to the CPU preview");
@@ -110,6 +113,7 @@ fn the_gpu_preview_shows_first_and_a_late_checked_result_never_replaces_a_newer_
 
     // An edit while that checked mesh is still being made: the edited part shows its
     // own GPU preview while its checked mesh waits too.
+    phase("old checked mesh held");
     doc.apply_interactive(Command::EditExtrude { id, params: depth(30.0) }).unwrap();
     frames(&mut doc, |doc| doc.provisional_mesh().is_some_and(|mesh| mesh.gpu.is_some()), "no GPU preview of the edit");
     let preview = doc.provisional_mesh().unwrap();
@@ -119,6 +123,7 @@ fn the_gpu_preview_shows_first_and_a_late_checked_result_never_replaces_a_newer_
     wait(&kernel, "the edit's checked mesh never started", |r| r.checked_holding.contains(&new_body));
 
     // The old part's checked mesh arrives late. The edit's preview stays on screen.
+    phase("edit preview shown, its checked mesh held");
     release(&kernel, old_body);
     wait(&kernel, "the old body's checked mesh was not let go", |r| !r.checked_holding.contains(&old_body));
     let projection = Projection::Orthographic { pixels_per_mm: 10.0 };
@@ -128,6 +133,7 @@ fn the_gpu_preview_shows_first_and_a_late_checked_result_never_replaces_a_newer_
         doc.finish_display();
         std::thread::sleep(Duration::from_millis(5));
     }
+    phase("late old checked mesh polled");
     let still = doc.provisional_mesh().expect("the edit's preview is still shown");
     assert!(Arc::ptr_eq(&still, &preview), "the late checked mesh of the old part replaced the newer preview");
 
@@ -137,6 +143,7 @@ fn the_gpu_preview_shows_first_and_a_late_checked_result_never_replaces_a_newer_
     for _ in 0..20 {
         doc.update_display(&projection, 0.016);
     }
+    phase("edit adopted");
     let (body, checked) = shown(&doc);
     assert_eq!(body, new_body);
     assert!(checked.gpu.is_none() && !checked.positions.is_empty(), "the checked mesh replaced the preview");
@@ -144,10 +151,12 @@ fn the_gpu_preview_shows_first_and_a_late_checked_result_never_replaces_a_newer_
     assert_eq!(kernel.rules.lock().unwrap().cpu_previews, 0, "a CPU preview ran beside the GPU preview");
 
     // With the GPU preview off, the next edit shows the CPU preview, as without a GPU.
+    phase("checked mesh shown");
     gpu_preview::uninstall();
     kernel.rules.lock().unwrap().hold_checked = false;
     doc.apply_interactive(Command::EditExtrude { id, params: depth(35.0) }).unwrap();
     frames(&mut doc, |doc| !doc.proof_pending() && doc.provisional_mesh().is_none(), "the CPU edit never landed");
+    phase("CPU edit adopted");
     let (_, cpu) = shown(&doc);
     assert!(cpu.gpu.is_none() && !cpu.positions.is_empty());
     assert!(top(&cpu) > top(&checked) + 1.0);

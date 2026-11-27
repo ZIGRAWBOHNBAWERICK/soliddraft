@@ -2341,6 +2341,9 @@ pub struct Document {
     repaint: Option<egui::Context>,
     pending: Option<PendingBuild>,
     provisional: Option<ProvisionalShown>,
+    /// The browser's GPU preview of the shown body, while its device meshes it. Its
+    /// checked levels are asked for once it is on screen.
+    gpu_pending: Option<(BodyId, crate::viewport::gpu_preview::Pending)>,
     proof_failure: Option<String>,
     proof_notice: Option<String>,
     /// Why the current body has no display mesh, or why the last change was rolled back
@@ -2406,6 +2409,7 @@ impl Document {
             repaint: None,
             pending: None,
             provisional: None,
+            gpu_pending: None,
             proof_failure: None,
             proof_notice: None,
             display_failure: None,
@@ -2466,6 +2470,7 @@ impl Document {
             repaint: self.repaint.clone(),
             pending: None,
             provisional: None,
+            gpu_pending: None,
             proof_failure: self.proof_failure.clone(),
             proof_notice: None,
             display_failure: None,
@@ -4415,6 +4420,7 @@ impl Document {
     /// Shows a new body at the requested level. Unchanged bodies keep their display
     /// geometry and GPU buffers; undo and redo restore recent bodies' meshes and picks.
     fn refresh_display(&mut self) {
+        self.gpu_pending = None;
         if (self.model.is_dirty() || self.has_model_failure() || self.proof_failure.is_some())
             && let Some(proved) = &self.last_proved
             && proved.model.next_body() > 1
@@ -4517,32 +4523,20 @@ impl Document {
             if let Some(mesh) = cached {
                 self.show_mesh(body, &topology, &mesh);
                 self.shown = next;
-            } else if let Some(meshing) =
-                crate::viewport::gpu_preview::mesh_body(self.kernel().as_ref(), body, &self.tess_params)
-            {
-                // The display worker makes the checked levels; the first to arrive at the
-                // wanted level replaces this preview.
-                self.show_gpu_preview(body, &topology, meshing);
-                self.quality.request_levels(body);
-                self.shown = next;
             } else {
-                match screen_mesh(self.kernel().as_ref(), body, &self.tess_params) {
-                    Ok(mesh) => {
-                        self.show_mesh(body, &topology, &mesh);
-                        self.quality.made(body, mesh);
-                        self.shown = next;
+                let pending = crate::viewport::gpu_preview::start(self.kernel().clone(), body, self.tess_params);
+                match pending.as_ref().map(|pending| pending.take()) {
+                    // The display worker makes the checked levels; the first to arrive at
+                    // the wanted level replaces this preview.
+                    Some(Some(Some(meshing))) => {
+                        self.show_gpu_preview(body, &topology, meshing);
+                        self.quality.request_levels(body);
                     }
-                    // A built body is always drawn: its preview stays when its checked
-                    // mesh fails, and the reason goes to the log only.
-                    Err(error) => match self.kernel().preview(body, &self.tess_params) {
-                        Ok(mesh) => {
-                            log::warn!("the checked mesh of {body:?} failed; its preview stays: {error}");
-                            self.show_mesh(body, &topology, &mesh);
-                            self.shown = next;
-                        }
-                        Err(_) => self.display_failure = Some(display_unavailable(error.to_string())),
-                    },
+                    // The browser's device answers after this frame.
+                    Some(None) => self.gpu_pending = pending.map(|pending| (body, pending)),
+                    _ => self.show_screen_mesh(body, &topology),
                 }
+                self.shown = next;
             }
         } else {
             self.quality.clear();
@@ -5017,6 +5011,47 @@ impl Document {
         }
     }
 
+    /// Shows `body`'s screen mesh. A built body is always drawn: its CPU preview stays
+    /// when its checked mesh fails, and the reason goes to the log only.
+    fn show_screen_mesh(&mut self, body: BodyId, topology: &Topology) {
+        match screen_mesh(self.kernel().as_ref(), body, &self.tess_params) {
+            Ok(mesh) => {
+                self.show_mesh(body, topology, &mesh);
+                self.quality.made(body, mesh);
+            }
+            Err(error) => match self.kernel().preview(body, &self.tess_params) {
+                Ok(mesh) => {
+                    log::warn!("the checked mesh of {body:?} failed; its preview stays: {error}");
+                    self.show_mesh(body, topology, &mesh);
+                }
+                Err(_) => self.display_failure = Some(display_unavailable(error.to_string())),
+            },
+        }
+    }
+
+    /// Shows the browser's GPU preview once its device has meshed it, and asks for the
+    /// checked levels that replace it. One the device failed falls back to the screen
+    /// mesh. Returns whether the display changed.
+    fn land_gpu_preview(&mut self) -> bool {
+        let Some((body, pending)) = &self.gpu_pending else { return false };
+        let body = *body;
+        let Some(meshed) = pending.take() else { return false };
+        self.gpu_pending = None;
+        if self.display_body() != Some(body) {
+            return false;
+        }
+        let Ok(topology) = self.kernel().topology(body) else { return false };
+        match meshed {
+            Some(meshing) => {
+                self.show_gpu_preview(body, &topology, meshing);
+                self.quality.request_levels(body);
+            }
+            None => self.show_screen_mesh(body, &topology),
+        }
+        self.mesh_version += 1;
+        true
+    }
+
     /// Makes a GPU preview the displayed body's display mesh, with its picks, until the
     /// display worker's checked mesh replaces it.
     fn show_gpu_preview(&mut self, body: BodyId, topology: &Topology, meshing: crate::viewport::gpu_preview::Meshing) {
@@ -5069,6 +5104,9 @@ impl Document {
             || self.proof_failure.is_some()
         {
             return false;
+        }
+        if self.gpu_pending.is_some() {
+            return self.land_gpu_preview() || self.gpu_pending.is_some();
         }
         let Some((level, mesh)) = self.quality.update(projection, dt_s) else {
             return self.quality.pending();

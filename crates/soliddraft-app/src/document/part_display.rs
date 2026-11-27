@@ -89,33 +89,6 @@ impl BodyDisplay {
         Ok(Self { body, feature, params, topology, kernel_mesh, polylines, gpu: None, faces, edges })
     }
 
-    /// Queries and names `body` and meshes its GPU preview, or `None` when it has none.
-    fn prepare_preview(
-        model: &model::Document,
-        body: BodyId,
-        feature: FeatureId,
-        level: soliddraft_tessellation::Level,
-        curved_surfaces: Option<crate::graphics::CurvedSurfaces>,
-    ) -> Result<Option<Self>, String> {
-        let kernel = model.kernel();
-        let topology = kernel.topology(body).map_err(|error| error.to_string())?;
-        let params =
-            *crate::graphics::body_mesh_levels(curved_surfaces, &model.settings().viewport, &topology).params(level);
-        let Some(meshing) = gpu_preview::mesh_body(kernel.as_ref(), body, &params) else { return Ok(None) };
-        let (faces, edges) = named_entities(model, body, &topology);
-        Ok(Some(Self {
-            body,
-            feature,
-            params,
-            topology,
-            kernel_mesh: Mesh::default(),
-            polylines: Vec::new(),
-            gpu: Some(meshing),
-            faces,
-            edges,
-        }))
-    }
-
     /// The body's display mesh, its faces, edges and corners numbered after `picks`.
     fn display_mesh(&mut self, picks: &mut Vec<PickEntry>) -> DisplayMesh {
         let makers: HashMap<FaceId, FeatureId> = self.faces.iter().map(|face| (face.id, face.feature)).collect();
@@ -170,13 +143,14 @@ pub(crate) fn ready_preview(
     level: soliddraft_tessellation::Level,
     curved_surfaces: Option<crate::graphics::CurvedSurfaces>,
 ) -> Result<Option<ReadyDisplay>, String> {
-    let bodies = model.live_bodies();
-    let [(_, body)] = bodies.as_slice() else { return Ok(None) };
     if gpu_preview::active().is_none() {
         return Ok(None);
     }
-    let prepared = BodyDisplay::prepare_preview(model, *body, display_feature(model, *body), level, curved_surfaces)?;
-    Ok(prepared.map(|prepared| combine(vec![prepared])))
+    let Some(target) = preview_target(model, level, curved_surfaces)? else { return Ok(None) };
+    let Some(meshing) = gpu_preview::mesh_body(model.kernel().as_ref(), target.body, &target.params) else {
+        return Ok(None);
+    };
+    Ok(Some(preview_display(model, target, meshing)))
 }
 
 /// What the browser's page needs to mesh `model`'s one live body on its GPU: its body,

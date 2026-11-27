@@ -496,7 +496,7 @@ mod browser {
                 trace("page abandoned job", *id, String::new());
             }
             let wanted: Vec<(u64, Waiting)> = shared.waiting.drain().collect();
-            let mut early: HashMap<u64, Box<dyn FnMut()>> = shared.early.drain().collect();
+            let mut early = std::mem::take(&mut shared.early);
             drop(shared);
             // Dropping the old client terminates its worker, and the job it was running.
             *client = None;

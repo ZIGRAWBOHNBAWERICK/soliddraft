@@ -217,7 +217,7 @@ pub(crate) fn commands() -> Vec<CommandSpec> {
         row(
             "pmi_recognise",
             "Recognise features",
-            "List the holes, hole patterns, bosses and slots the part's faces show",
+            "List the proved holes, bosses, slots, recesses and edge treatments",
         )
         .agents(
             Agents::Tool,
@@ -227,14 +227,14 @@ pub(crate) fn commands() -> Vec<CommandSpec> {
         ),
         row("pmi_interview", "Interview", "List what the part's manufacturing information still lacks").agents(
             Agents::Tool,
-            "The decisions still open, in order: material, general tolerance, datums, then each hole, boss and slot. \
-             Each has a proposal from rules and standards tables and the reason for it. Nothing is added to the part.",
+            "Lists missing design requirements and geometric checks with reasons and stable question IDs. \
+             A question without a proposal needs user input; do not choose a requirement from geometry. Nothing is added.",
             Vec::new,
         ),
         row("pmi_answer", "Answer the interview", "Take the interview's proposals as the part's items").agents(
             Agents::Tool,
-            "Adds the proposals of the questions named in accept, or of every question with accept \"all\", and sets \
-             the material when it is given, as one undo step. Answer a question another way with pmi_add or pmi_notes.",
+            "Adds only the proposals named in accept, or all available proposals with accept \"all\", and sets the \
+             user's material in one undo step. For unanswered requirements use pmi_add or pmi_notes with user values.",
             answer_params,
         )
         .undo(Undo::Step),

@@ -185,7 +185,7 @@ fn an_approved_seam_saves_its_limit_and_approver_and_verifies_on_reopen() {
     forged.face_tolerances[0].deviation_upper_mm = "0".into();
     let refused =
         kernel.import_step(&OpTag::new("forged"), &ImportStepRequest { record: Some(&forged), ..request }).unwrap_err();
-    assert!(refused.to_string().contains("without an unverified repair"), "{refused}");
+    assert!(refused.to_string().contains("without a repair SolidDraft cannot make"), "{refused}");
 
     let below = unanswered.accepted(&proposal.question, "0.01", "Ana").kernel_decisions().unwrap();
     let refused =

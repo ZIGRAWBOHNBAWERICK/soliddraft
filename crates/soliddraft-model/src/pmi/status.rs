@@ -24,9 +24,9 @@ impl Indeterminate {
             Self::UnresolvedFace => "A controlled face could not be resolved.",
             Self::UnresolvedDatum => "A datum could not be resolved.",
             Self::MissingNominal => "No independent design nominal is available.",
-            Self::MissingMeasurement => "No checked CAD measurement is available.",
+            Self::MissingMeasurement => "No CAD measurement is available.",
             Self::InvalidNominal => "The design nominal is not a valid number for this check.",
-            Self::InvalidMeasurement => "The checked CAD measurement is not a valid number for this check.",
+            Self::InvalidMeasurement => "The CAD measurement is not a valid number for this check.",
             Self::InvalidLimits => "A valid numerical tolerance interval could not be established.",
             Self::DatumFrameMismatch => "The design target and measured axis must use the specified datum order.",
             Self::Unsupported(reason) => reason,
@@ -151,7 +151,7 @@ pub(crate) fn face_status<'a, F: PartialEq>(
             PmiKind::Size { size, features, tolerance, thread, nominal, .. } if *tolerance != Tolerance::Basic => {
                 for (member, faces) in features.iter().enumerate().filter(|(_, faces)| faces.contains(face)) {
                     let status = if thread.is_some() {
-                        Err(Indeterminate::Unsupported("Threaded feature size is not checked."))
+                        Err(Indeterminate::Unsupported("SolidDraft does not evaluate threaded feature size."))
                     } else {
                         dimension(*tolerance, *nominal, DimensionCheck::Cylinder { size: *size, member, faces })
                     };
@@ -174,11 +174,11 @@ pub(crate) fn face_status<'a, F: PartialEq>(
             PmiKind::Gdt { characteristic, tolerance, diameter, material, datums, features } => {
                 for (member, faces) in features.iter().enumerate().filter(|(_, faces)| faces.contains(face)) {
                     let status = if *characteristic != GdtCharacteristic::Position {
-                        Err(Indeterminate::Unsupported("This geometric characteristic is not checked."))
+                        Err(Indeterminate::Unsupported("SolidDraft does not evaluate this geometric characteristic."))
                     } else if !diameter {
-                        Err(Indeterminate::Unsupported("Only cylindrical position zones are checked."))
+                        Err(Indeterminate::Unsupported("SolidDraft evaluates only cylindrical position zones."))
                     } else if !material.is_regardless() {
-                        Err(Indeterminate::Unsupported("Position with a material modifier is not checked."))
+                        Err(Indeterminate::Unsupported("SolidDraft does not evaluate position with a material modifier."))
                     } else {
                         datum_frame(datums).and_then(|frame| {
                             compare_position(*tolerance, frame, || {
@@ -211,7 +211,7 @@ fn compare_dimension(
         return Err(Indeterminate::InvalidLimits);
     }
     let (upper, lower) = tolerance.deviations().ok_or(Indeterminate::Unsupported(match tolerance {
-        Tolerance::Fit { .. } => "The fit class has no checked numerical limits.",
+        Tolerance::Fit { .. } => "The fit class has no known numerical limits.",
         _ => "No numerical tolerance limits are specified for this dimension.",
     }))?;
     let measured = measure()?;
@@ -228,7 +228,7 @@ fn datum_frame(datums: &[DatumRef]) -> Result<DatumFrame<'_>, Indeterminate> {
     };
     let frame = [a.letter.as_str(), b.letter.as_str(), c.letter.as_str()];
     if datums.iter().any(|datum| !datum.material.is_regardless()) {
-        return Err(Indeterminate::Unsupported("Datum material modifiers are not checked."));
+        return Err(Indeterminate::Unsupported("SolidDraft does not evaluate datum material modifiers."));
     }
     if frame.iter().any(|letter| letter.is_empty() || letter.contains('-'))
         || frame[0] == frame[1]
@@ -448,7 +448,7 @@ mod tests {
             (form.item_id, form.status),
             (
                 "Flatness",
-                Status::Indeterminate(Indeterminate::Unsupported("This geometric characteristic is not checked."))
+                Status::Indeterminate(Indeterminate::Unsupported("SolidDraft does not evaluate this geometric characteristic."))
             )
         );
         let outside = evaluate(5.0, Indeterminate::UnresolvedDatum);

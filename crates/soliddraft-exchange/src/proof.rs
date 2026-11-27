@@ -27,7 +27,7 @@ impl AnswerKind {
     /// Plain label for the report.
     pub fn label(self) -> &'static str {
         match self {
-            Self::Proved => "Proved",
+            Self::Proved => "Exact",
             Self::Pending => "Pending",
             Self::WithinStatedBound => "Within a stated bound",
             Self::Refused => "Refused",
@@ -81,11 +81,11 @@ impl super::Export {
         mut write: impl FnMut(&Path, &[u8]) -> Result<(), String>,
     ) -> Result<(), String> {
         if matches!(self.report, super::Report::Step(_) | super::Report::StandIn(_)) {
-            let proof = self.proof.as_ref().ok_or("This STEP file has no proof report; export was not written")?;
+            let proof = self.proof.as_ref().ok_or("This STEP file has no build report; export was not written")?;
             if proof.features.iter().any(|feature| {
                 !matches!(feature.answer_kind, AnswerKind::Proved | AnswerKind::Approximate | AnswerKind::Inactive)
             }) {
-                return Err("This part has an unproved answer. STEP export requires a proved result.".into());
+                return Err("This part can't be exported as STEP yet: a feature is still building, was refused, or is answered only within a stated bound.".into());
             }
             let hash = format!("{:x}", Sha256::digest(&self.bytes));
             let json = serde_json::json!({
@@ -99,7 +99,7 @@ impl super::Export {
             let mut machine = serde_json::to_vec_pretty(&json).map_err(|e| e.to_string())?;
             machine.push(b'\n');
             let mut human = format!(
-                "SolidDraft STEP proof report\nFile: {}\nSHA-256: {hash}\n{}\n\nWork counts cover original retained feature builds, excluding display and export.\nUnavailable means no count was recorded. Inactive features contributed no geometry.\nDisplay bounds are measured deviations, never model proof.\n",
+                "SolidDraft STEP build report\nFile: {}\nSHA-256: {hash}\n{}\n\nWork counts cover original retained feature builds, excluding display and export.\nUnavailable means no count was recorded. Inactive features contributed no geometry.\nDisplay bounds are measured deviations of the screen mesh, not of the model.\n",
                 path.display(),
                 self.report.summary()
             );

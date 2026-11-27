@@ -16,7 +16,7 @@ fn admission_error(error: catallax_import::tolerant::Error) -> KernelError {
             } else if error.code.contains("unit") {
                 "This STEP file's units could not be read consistently."
             } else if error.code.contains("resolution") || error.code.contains("precision") {
-                "This STEP body's fits could not be checked to the required precision."
+                "This STEP body could not be fitted to the required precision."
             } else {
                 "This STEP file could not be opened as a closed solid. Check its faces and edges, or export it again."
             };

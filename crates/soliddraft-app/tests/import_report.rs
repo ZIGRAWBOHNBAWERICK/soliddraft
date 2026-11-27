@@ -51,12 +51,16 @@ fn each_import_says_what_it_opened_as() {
     }
 }
 
-/// A curved import says which check it did not run.
+/// A curved import opens as a plain solid, with no note about checks.
 #[test]
-fn a_curved_import_names_the_check_not_run() {
+fn a_curved_import_opens_as_a_solid() {
     let doc = imported("fillet.step", ImportFormat::Step, include_bytes!("../../../site/parts/fillet.step"));
     let report = rows(&doc, &[]);
-    assert!(report[0].not_checked.as_deref().is_some_and(|note| note.starts_with("self-intersection not verified")));
+    assert_ne!(report[0].tier, Tier::Refused);
+    for words in [report[0].tier.label(), report[0].why.as_str()] {
+        assert!(!words.to_lowercase().contains("certif") && !words.contains("verified"), "{words}");
+    }
+    assert_eq!(Tier::Exact.label(), "Solid");
 }
 
 /// A refused file has no feature, so the report lists it after the part's imports.

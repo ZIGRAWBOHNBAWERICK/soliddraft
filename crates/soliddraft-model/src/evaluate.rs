@@ -4,10 +4,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use soliddraft_kernel_api::{
-    Aabb, BodyId, BooleanOp, CurveKind, Draft, EdgeId, Extrude, ExtrudeLimit, FaceId, FacePoint, FaceRole, FaceSupport,
-    Gyroid, HistoryRecord, Hole, HoleDepth, HoleHead, HolePlacement, HoleTip, ImportOptions, ImportStepRequest,
+    Aabb, BodyId, BooleanOp, Draft, EdgeId, Extrude, ExtrudeLimit, FaceId, FacePoint, FaceRole, FaceSupport, Gyroid,
+    HistoryRecord, Hole, HoleDepth, HoleHead, HolePlacement, HoleTip, ImportOptions, ImportStepRequest,
     ImportStepResult, KernelError, KernelResult, Lattice, Mirror, OpResult, OpTag, Origin, PatternLayout, Plane,
-    Point2, Profile, SurfaceKind, Vec3, drawing::Curve3,
+    Point2, Profile, Vec3, drawing::Curve3,
 };
 
 use crate::feature::{
@@ -271,7 +271,7 @@ impl Document {
     /// Marks every feature from `index` down as stale.
     pub(crate) fn touch(&mut self, index: usize) {
         self.dirty = self.dirty.min(index);
-        self.stale_tracked("proof pending");
+        self.stale_tracked("the part is still building");
     }
 
     /// Refreshes name-dependent checks without retrying refused geometry or dirtying proof.
@@ -2251,25 +2251,6 @@ impl Document {
                 NamedFace { origin: Origin { tag: r.record.tag.clone(), role }, generator, ordinal }
             })
             .collect()
-    }
-
-    /// What the part says about the self-intersection of imported body `id`. A body with
-    /// curved faces or edges is not checked for it, and is never called validated. A
-    /// planar, straight-edged body gets no claim either, until the backend's check is
-    /// pinned. `None` when the import did not build.
-    pub fn import_check_note(&self, id: FeatureId) -> Option<String> {
-        let built = &self.built[self.built_index(id)?];
-        if !matches!(self.feature(id)?.kind, FeatureKind::ImportStep(_)) || !built.status.is_ok() {
-            return None;
-        }
-        let topology = self.view_of(built.output?).ok()?;
-        let curved = topology.faces.iter().any(|f| f.surface != SurfaceKind::Plane)
-            || topology.edges.iter().any(|e| e.curve != CurveKind::Line);
-        curved.then(|| {
-            "self-intersection not verified: this body has curved faces or edges, which are not checked for \
-             self-intersection. It is not marked validated."
-                .to_string()
-        })
     }
 
     fn build_lattice(&self, f: &Feature, l: &LatticeFeature, current: Option<BodyId>) -> Built {

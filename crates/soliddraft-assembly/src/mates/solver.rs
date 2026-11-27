@@ -424,7 +424,7 @@ fn exactly_turned(rotation: DQuat, n: Normal, axis: Normal) -> Option<Normal> {
 fn world(rotation: DQuat, n: Normal, mate: &str) -> Result<Normal, MateRefusal> {
     turned(rotation, n).ok_or_else(|| {
         let message = format!(
-            "{mate}: a face is placed off the world axes; this version proves planes on axis-aligned placements only"
+            "{mate}: a face is placed off the world axes; this version mates planes on axis-aligned placements only"
         );
         MateRefusal { mates: vec![mate.to_owned()], ..MateRefusal::new(RefusalCode::UnsupportedPlacement, message) }
     })

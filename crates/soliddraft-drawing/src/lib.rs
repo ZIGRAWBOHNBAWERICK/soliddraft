@@ -122,7 +122,7 @@ pub enum DrawingError {
     Format(String),
     /// The views were drawn from the kernel's unproved preview, which is for the screen
     /// only. Update them from the kernel's exact drawing queries before exporting.
-    #[error("the views come from an unproved preview; update them from the part to export")]
+    #[error("the views come from a screen preview; update them from the part to export")]
     Unproved,
 }
 

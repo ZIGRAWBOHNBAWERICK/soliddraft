@@ -983,7 +983,7 @@ pub fn lattice_params() -> Vec<(&'static str, Value)> {
         ("cell", json!({"type":"string", "enum":["cubic", "body_centred", "face_centred", "octet"]})),
         ("cell_size", number("Cell size in millimetres")),
         ("radius", number("Density as beam radius in millimetres")),
-        ("accuracy", number("Certified export accuracy in millimetres")),
+        ("accuracy", number("Export accuracy in millimetres")),
         ("min_detail", number("Minimum preserved detail in millimetres")),
     ]
 }
@@ -1001,7 +1001,7 @@ pub fn gyroid_params() -> Vec<(&'static str, Value)> {
         ("kind", constant("network")),
         ("period", number("Length of one period in millimetres")),
         ("level", number("Constant dimensionless level of the gyroid function, which may be zero or negative")),
-        ("accuracy", number("Certified export accuracy in millimetres")),
+        ("accuracy", number("Export accuracy in millimetres")),
         ("min_detail", number("Minimum preserved detail in millimetres")),
     ]
 }
@@ -2529,7 +2529,7 @@ fn scratch_copy(doc: &Document) -> Document {
 pub(crate) fn status_text(doc: &Document, id: FeatureId) -> String {
     match doc.feature(id).map(|f| (&f.status, f.suppressed)) {
         Some((FeatureStatus::Ok, _)) => "ok".into(),
-        Some((FeatureStatus::Pending, _)) => "proof pending".into(),
+        Some((FeatureStatus::Pending, _)) => "building".into(),
         Some((FeatureStatus::AnsweredWithinBound(bound), _)) => {
             format!("{}: {}", crate::document::WITHIN_BOUND_LABEL, bound.description())
         }
@@ -3162,7 +3162,7 @@ fn edge_json(
 fn mark_estimates(v: &mut Value, topology: Option<&soliddraft_kernel_api::Topology>) {
     if let Some(chord) = topology.and_then(|t| t.display_chord_height) {
         v["estimates"] = format!(
-            "centroids, midpoints and lengths are estimated from the display mesh, within {chord:.3} mm; measure_entity proves edge length or face area; measure reports reference-point offsets"
+            "centroids, midpoints and lengths are estimated from the display mesh, within {chord:.3} mm; measure_entity gives exact edge length or face area; measure reports reference-point offsets"
         )
         .into();
     }

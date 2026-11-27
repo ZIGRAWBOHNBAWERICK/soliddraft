@@ -116,25 +116,21 @@ fn button_reports_real_proof_for_p1_and_a_fitted_part() {
         assert!(!display.is_empty());
         let mut state = State::default();
         let mut screen = Screen::new();
-        screen.click(&mut state, &doc, "Prove part");
+        screen.click(&mut state, &doc, "Show precision");
         screen.until(&mut state, &doc, |s| {
-            s.contains("Prove this complex part?") || s.contains("Proving edges…") || s.contains("Open proof report")
+            s.contains("Show precision for this complex part?")
+                || s.contains("Measuring edge precision…")
+                || s.contains("Open precision report")
         });
-        if screen.contains("Prove this complex part?") {
+        if screen.contains("Show precision for this complex part?") {
             screen.click(&mut state, &doc, "Continue");
         }
-        screen.until_with_timeout(&mut state, &doc, REPORT_TIMEOUT, |s| s.contains("Open proof report"));
-        let fully_proven = screen.contains("Fully proven");
-        screen.click(&mut state, &doc, "Open proof report");
-        screen.until(&mut state, &doc, |screen| screen.contains("Part proof report") && screen.contains("Wall time"));
-        for text in [
-            "Proof CPU time:",
-            "Proof threads used (peak): 1",
-            "Kernel proof work units:",
-            "Faces:",
-            "Edges:",
-            "Vertices:",
-        ] {
+        screen.until_with_timeout(&mut state, &doc, REPORT_TIMEOUT, |s| s.contains("Open precision report"));
+        let fully_proven = screen.contains("Every edge has a precision bound");
+        screen.click(&mut state, &doc, "Open precision report");
+        screen
+            .until(&mut state, &doc, |screen| screen.contains("Part precision report") && screen.contains("Wall time"));
+        for text in ["CPU time:", "Threads used (peak): 1", "Work units:", "Faces:", "Edges:", "Vertices:"] {
             assert!(screen.contains(text), "missing {text:?}");
         }
         let report = state.report.as_ref().unwrap();
@@ -159,12 +155,12 @@ fn button_reports_real_proof_for_p1_and_a_fitted_part() {
             doc.undo().unwrap();
             assert_ne!(doc.model().geometry_hash(), before_edit);
             screen.frame(&mut state, &doc, Vec::new());
-            assert!(!screen.contains("Fully proven"));
+            assert!(!screen.contains("Every edge has a precision bound"));
             let bytes = doc.model().snapshot().encode().unwrap().1;
             let reopened = model::Document::from_bytes(&bytes, crate::startup::kernel()).unwrap();
             let reopened = Document::from_model(reopened);
             screen.frame(&mut state, &reopened, Vec::new());
-            assert!(!screen.contains("Fully proven") && !screen.contains("Open proof report"));
+            assert!(!screen.contains("Every edge has a precision bound") && !screen.contains("Open precision report"));
         }
     }
 }
@@ -185,21 +181,21 @@ fn heavy_warning_waits_and_cancel_interrupts_the_prover() {
     });
     let mut state = State { prover: Some(prover), ..Default::default() };
     let mut screen = Screen::new();
-    screen.click(&mut state, &doc, "Prove part");
-    screen.until(&mut state, &doc, |s| s.contains("Prove this complex part?"));
+    screen.click(&mut state, &doc, "Show precision");
+    screen.until(&mut state, &doc, |s| s.contains("Show precision for this complex part?"));
     assert!(screen.contains("may take a long time and use a lot of computing power"));
     assert_eq!(waiting.try_recv(), Err(TryRecvError::Empty));
     screen.click(&mut state, &doc, "Cancel");
     screen.until(&mut state, &doc, |s| s.contains(CANCELLED));
     assert_eq!(waiting.try_recv(), Err(TryRecvError::Empty));
 
-    screen.click(&mut state, &doc, "Prove part");
-    screen.until(&mut state, &doc, |s| s.contains("Prove this complex part?"));
+    screen.click(&mut state, &doc, "Show precision");
+    screen.until(&mut state, &doc, |s| s.contains("Show precision for this complex part?"));
     screen.click(&mut state, &doc, "Continue");
-    screen.until(&mut state, &doc, |s| s.contains("Proving edges…"));
+    screen.until(&mut state, &doc, |s| s.contains("Measuring edge precision…"));
     waiting.recv_timeout(TIMEOUT).unwrap();
-    screen.click(&mut state, &doc, "Cancel proof");
+    screen.click(&mut state, &doc, "Cancel");
     assert!(observed.recv_timeout(TIMEOUT).unwrap(), "cancel must stop the worker, not just hide its answer");
     screen.until(&mut state, &doc, |s| s.contains(CANCELLED));
-    assert!(!screen.contains("Open proof report"));
+    assert!(!screen.contains("Open precision report"));
 }

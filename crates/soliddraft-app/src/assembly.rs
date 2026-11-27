@@ -1738,8 +1738,8 @@ pub fn properties(ui: &mut egui::Ui, state: &mut AppState) {
             return;
         };
         ui.add_enabled_ui(!s.doc.dragging(), |ui| {
-            ui.checkbox(collision_drag, "Collision detection (mesh-certified)");
-            ui.checkbox(dynamic_clearance, "Dynamic clearance (mesh-certified)");
+            ui.checkbox(collision_drag, "Collision detection");
+            ui.checkbox(dynamic_clearance, "Dynamic clearance");
             if *dynamic_clearance {
                 ui.add(egui::DragValue::new(clearance_mm).range(0.0..=1e9).suffix(" mm"));
             }

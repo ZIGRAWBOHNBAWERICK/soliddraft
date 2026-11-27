@@ -149,7 +149,7 @@ pub(in crate::mates) fn native_constraint(
                     mates: vec![mate.clone()],
                     ..MateRefusal::new(
                         RefusalCode::UnsupportedReference,
-                        "internal Tangent requires radii proved different; use Concentric for equal radii",
+                        "internal Tangent requires radii known to differ; use Concentric for equal radii",
                     )
                 });
             }

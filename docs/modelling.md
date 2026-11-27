@@ -38,18 +38,18 @@ The Create menu at the top of the palette's Create group lists every command tha
 or removes material, with its shortcut. The pin on a row puts the command in the palette
 or takes it out. Every command starts pinned. The pins are kept in the settings file.
 
-## Geometry proof
+## Precision
 
-Select a body and choose **Prove part** under **Geometry proof** in Properties.
-The check covers every edge of the part, including edges on other bodies. Complex
-parts ask for confirmation first. You can cancel a running proof from Properties.
-The check does not change the viewport.
+Select a body and choose **Show precision** under **Precision** in Properties.
+It covers every edge of the part, including edges on other bodies. Complex parts
+ask for confirmation first. You can cancel a running calculation from Properties.
+It does not change the viewport.
 
-**Open proof report** shows each edge's distance bound or **Could not prove**, plus
-the geometry counts, mass properties and computing cost. **Fully proven** means
-every edge has a certified bound to its incident surfaces; it is not a claim that
-the part is fit for manufacture. An edit clears the verdict. The report and verdict
-are not saved in the part file.
+**Open precision report** shows each edge's distance bound or **no bound**, plus
+the geometry counts, mass properties and computing cost. **Every edge has a
+precision bound** means each edge has a bound on its distance to its incident
+surfaces; it is not a claim that the part is fit for manufacture. An edit clears
+the result. The report is not saved in the part file.
 For numerical geometry, the proof looks for bounds within 0.01 mm.
 
 ## Extrusion options
@@ -491,13 +491,13 @@ covers the original import only and is not copied onto a later modified body.
 
 ## Terminal lattice
 
-With a finished body, choose Lattice on the Features ribbon. Cell size and the beam radius, which controls density, are in millimetres. The radius can be constant or [graded](#graded-fields). The cell grid uses the part's origin and axes. Edit Suite adds a Cell type selector for cubic, body-centred, face-centred and octet beams. Accuracy and minimum detail control certified STL export. The viewport and tree label the displayed mesh as an unproved preview. The additional named cells use a bounded sample of the native field for display. Sampling does not set the export accuracy, and certified exports still use the native field definition.
+With a finished body, choose Lattice on the Features ribbon. Cell size and the beam radius, which controls density, are in millimetres. The radius can be constant or [graded](#graded-fields). The cell grid uses the part's origin and axes. Edit Suite adds a Cell type selector for cubic, body-centred, face-centred and octet beams. Accuracy and minimum detail control STL export. The viewport shows a preview mesh, and the tree row gives the export accuracy. The additional named cells use a bounded sample of the native field for display. Sampling does not set the export accuracy, and exports still use the native field definition.
 
 The lattice stays last. Edit an earlier feature to rebuild it, or return before the lattice to continue CAD work without losing its settings. The `lattice` and `edit_lattice` agent verbs use the same document commands. Both accept `cell` as `cubic`, `body_centred`, `face_centred` or `octet`. A partial edit that omits `cell` keeps the current type. Old two-setting lattice files open with their earlier body visible and a message naming the missing cell size and density. Configure those inputs to build the field.
 
 ## Terminal network gyroid
 
-With a finished body, choose Gyroid on the Features ribbon. The body becomes the part of it where `sin X cos Y + sin Y cos Z + sin Z cos X` is at most the level, with `X = 2πx/a` and `a` the period. Period, accuracy and minimum detail are in millimetres. The level is dimensionless, not a wall thickness or a volume fraction, and zero and negative levels are valid. The level can be constant or [graded](#graded-fields). The gyroid uses the part's origin and axes. The viewport and tree label the displayed mesh as an unproved preview, and the preview gives the part no volume or mass.
+With a finished body, choose Gyroid on the Features ribbon. The body becomes the part of it where `sin X cos Y + sin Y cos Z + sin Z cos X` is at most the level, with `X = 2πx/a` and `a` the period. Period, accuracy and minimum detail are in millimetres. The level is dimensionless, not a wall thickness or a volume fraction, and zero and negative levels are valid. The level can be constant or [graded](#graded-fields). The gyroid uses the part's origin and axes. The viewport shows a preview mesh, which gives the part no volume or mass.
 
 A gyroid stays last like a lattice, and a part has one terminal field. The `gyroid` and `edit_gyroid` agent verbs use the same document commands. Only the network is available; sheet gyroids come later.
 
@@ -527,9 +527,9 @@ While a field is last, every CAD command (sketch, extrude, revolve, sweep, cut, 
 
 What the screen draws and what an export writes come from separate routes, and the app says which one you are looking at.
 
-- Only a lattice or a gyroid draws from a sample of its distance field. The viewport labels it "unproved preview", and its tree row gives the accuracy the export will be held to. Every other feature, early preview included, draws from the boundary model: each face is drawn and can be picked.
+- Only a lattice or a gyroid draws from a sample of its distance field. Its tree row gives the accuracy the export will be held to. Every other feature, early preview included, draws from the boundary model: each face is drawn and can be picked.
 - A feature shows at once. Its first display is the screen's mesh and never waits for a certified one.
-- A feature row carries a mark only while it is unfinished: an amber ring, "Working", while it or an earlier feature rebuilds, and a red cross, "Refused", with Catallax's reason when it was refused. A refused field drops the "unproved preview" label. While a field waits on an edit before it, the screen keeps the field it last built and export waits.
+- A feature row carries a mark only while it is unfinished: an amber ring, "Working", while it or an earlier feature rebuilds, and a red cross, "Refused", with Catallax's reason when it was refused. A refused field shows no preview. While a field waits on an edit before it, the screen keeps the field it last built and export waits.
 - A preview never stands in for an export. A mesh export of a boundary-model part runs the print route at the export accuracy, whatever the viewport quality. A field part exports only its certified field STL; STEP, IGES, 3MF and OBJ are refused before any mesh is made. When Catallax refuses the certified STL, the Print check window names the refusal, offers no Save and leaves the file as it was, though the screen still shows the preview.
 
 Two limits remain. The Lattice and Gyroid editors show nothing until OK, where other features preview as you type. A field whose preview needs more sample cells than the preview limit, such as thin beams with a coarse minimum detail, is refused at once with `field.print-budget`, and the part keeps its earlier body.

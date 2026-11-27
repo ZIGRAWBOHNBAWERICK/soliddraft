@@ -57,7 +57,7 @@ fn step_exports_ship_feature_answers_and_retained_work_in_both_reports() {
     }
     assert!(features[1]["work_used"].as_u64().unwrap() > 0);
     let text = std::fs::read_to_string(sidecar_path(&path, "txt")).unwrap();
-    for expected in ["Sketch1", "Boss-Extrude1", "Proved", "Work used:", original["sha256"].as_str().unwrap()] {
+    for expected in ["Sketch1", "Boss-Extrude1", "Exact", "Work used:", original["sha256"].as_str().unwrap()] {
         assert!(text.contains(expected), "missing {expected}");
     }
     let out = state.export_part(Format::Step).unwrap();

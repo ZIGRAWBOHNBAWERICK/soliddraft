@@ -642,7 +642,7 @@ pub(crate) fn show_print_check(shown: serde_json::Value) {
 /// "state", "message"}`. The route is `"distance field"` or `"boundary model"`; the state is
 /// `"checking"`, `"refused"` with the refusal the window shows as its message, `"checked"`
 /// with the report's summary, or `"stale"`. The window's buttons are in [`shown_controls`]
-/// as `Save checked export` and `Print check: Cancel`. Empty when that frame drew no Print
+/// as `Save export` and `Print check: Cancel`. Empty when that frame drew no Print
 /// check window. Read only, for browser checks.
 #[wasm_bindgen]
 pub fn shown_print_check() -> String {

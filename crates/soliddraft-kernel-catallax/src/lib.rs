@@ -2285,7 +2285,7 @@ impl Kernel for CatallaxKernel {
     fn tessellate(&self, body: BodyId, params: &TessellationParams) -> KernelResult<Mesh> {
         self.observe("tessellate", || {
             if self.field(body)?.is_some() {
-                return Err(KernelError::Unsupported("field meshes require labelled certified export".into()));
+                return Err(KernelError::Unsupported("field meshes come only from the labelled field export".into()));
             }
             if let Some(approximate) = self.approximate(body)? {
                 return approximate.mesh(&options(params)?);

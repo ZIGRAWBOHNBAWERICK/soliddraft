@@ -81,7 +81,7 @@ pub(super) fn show(p: &mut Preferences, ui: &mut egui::Ui) {
         );
         if p.spline_curves_unavailable {
             ui.label("Spline mesh controls · Coming soon").on_hover_text(
-                "Spline faces use their certified precision. The curved-surface setting applies to other bodies.",
+                "Spline faces use their own precision. The curved-surface setting applies to other bodies.",
             );
         }
     });
@@ -170,11 +170,11 @@ pub(super) fn show(p: &mut Preferences, ui: &mut egui::Ui) {
     toggle(ui, highlight, "follow_grid", "Grid follows the view", &mut graphics.view_aligned_grid);
     if row(ui, highlight, "surface_analysis", |ui| {
         ui.button("Single surface analysis · Coming soon")
-            .on_hover_text("Single surface analysis needs certified curvature samples for the selected face.")
+            .on_hover_text("Single surface analysis needs exact curvature samples for the selected face.")
             .clicked()
     }) {
         p.message = Some(super::Message {
-            text: "Single surface analysis is coming soon. Certified curvature samples for the selected face are unavailable in this version."
+            text: "Single surface analysis is coming soon. Exact curvature samples for the selected face are unavailable in this version."
                 .into(),
             error: true,
         });

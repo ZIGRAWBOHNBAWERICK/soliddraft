@@ -1365,7 +1365,7 @@ pub trait Kernel: Send + Sync {
     /// Prepares exact-proof work when no early representation is requested.
     /// Nested rebuild operations receive the synchronous rebuild's allowances.
     fn reserve_proof_work(&self) -> KernelResult<Box<dyn ProofWork>> {
-        Err(KernelError::Unsupported("reserved background proof is unavailable in this backend".into()))
+        Err(KernelError::Unsupported("reserved background work is unavailable in this backend".into()))
     }
 
     /// Builds a definition-native display before rebuilding the exact model.
@@ -1414,7 +1414,7 @@ pub trait Kernel: Send + Sync {
     /// budget runs out may be omitted. Stop promptly when `interrupt` is stopped.
     fn prove_edges(&self, body: BodyId, work_limit: u64, interrupt: &Interrupt) -> KernelResult<EdgeProofRun> {
         let _ = (body, work_limit, interrupt);
-        Err(KernelError::Unsupported("Whole-edge proof is unavailable in this kernel".into()))
+        Err(KernelError::Unsupported("Edge precision is unavailable in this kernel".into()))
     }
 
     /// Volume, area, centroid and inertia.
@@ -1450,18 +1450,18 @@ pub trait Kernel: Send + Sync {
 
     /// Proven length of one trimmed edge. Display estimates cannot answer this query.
     fn edge_length(&self, _body: BodyId, _edge: EdgeId) -> KernelResult<Measurement> {
-        Err(KernelError::Unsupported("proven edge length".into()))
+        Err(KernelError::Unsupported("exact edge length".into()))
     }
 
     /// Proven area of one trimmed face.
     fn face_area(&self, _body: BodyId, _face: FaceId) -> KernelResult<Measurement> {
-        Err(KernelError::Unsupported("proven face area".into()))
+        Err(KernelError::Unsupported("exact face area".into()))
     }
 
     /// Proven arc-length midpoint of one edge. Display polylines and pick rays cannot
     /// answer this query.
     fn edge_midpoint(&self, _body: BodyId, _edge: EdgeId) -> KernelResult<PointProof> {
-        Err(KernelError::Unsupported("proven edge midpoint".into()))
+        Err(KernelError::Unsupported("exact edge midpoint".into()))
     }
 
     /// Proven scalar between two entities of one body, in its part frame. A domain the
@@ -1473,13 +1473,13 @@ pub trait Kernel: Send + Sync {
         _b: PairEndpoint,
         _quantity: PairQuantity,
     ) -> KernelResult<Measurement> {
-        Err(KernelError::Unsupported("proven pair measurement".into()))
+        Err(KernelError::Unsupported("exact pair measurement".into()))
     }
 
     /// The exact plane a face lies on, for assembly mates: an axis-aligned plane with a
     /// rational offset, read from the kernel's own definition. Any other face is refused.
     fn face_support_plane(&self, _body: BodyId, _face: FaceId) -> KernelResult<ExactAxisPlane> {
-        Err(KernelError::Unsupported("proven support plane".into()))
+        Err(KernelError::Unsupported("exact support plane".into()))
     }
 
     /// What a face, edge or vertex supports, for assembly mates: a plane, an axis or a
@@ -1490,7 +1490,7 @@ pub trait Kernel: Send + Sync {
     fn entity_support(&self, body: BodyId, entity: SupportEntity) -> KernelResult<ExactSupport> {
         match entity {
             SupportEntity::Face(face) => self.face_support_plane(body, face).map(ExactSupport::Plane),
-            _ => Err(KernelError::Unsupported("proven axes and points".into())),
+            _ => Err(KernelError::Unsupported("exact axes and points".into())),
         }
     }
 

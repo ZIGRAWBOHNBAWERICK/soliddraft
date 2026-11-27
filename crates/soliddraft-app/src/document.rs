@@ -1673,13 +1673,9 @@ impl Feature {
         }
     }
 
-    /// A field's accuracy, called an unproved preview only while the screen draws one: a
-    /// refused, suppressed or rolled-back field shows no preview.
+    /// A field's accuracy: the tolerance its export is held to.
     fn field_summary(&self, accuracy_mm: f64) -> String {
-        match self.status {
-            FeatureStatus::Ok | FeatureStatus::Pending => format!("unproved preview · ±{} mm", fmt_mm(accuracy_mm)),
-            _ => format!("±{} mm", fmt_mm(accuracy_mm)),
-        }
+        format!("±{} mm", fmt_mm(accuracy_mm))
     }
 
     pub fn is_sketch(&self) -> bool {
@@ -1726,7 +1722,7 @@ pub const APPROXIMATE_SURFACE_BODY_NAME: &str = "Approximate surface body";
 /// A STEP body admitted with local, sampled tolerances rather than a certificate.
 pub const TOLERANT_BODY_NAME: &str = "Tolerant solid body";
 /// The accuracy statement for sampled STEP admission, without a global error claim.
-pub const TOLERANT_WORDS: &str = "Tolerant import. Faces and edges were fitted within local tolerances, not certified. Display, measurements and mass are estimates";
+pub const TOLERANT_WORDS: &str = "Tolerant import. Faces and edges were fitted within local tolerances. Display, measurements and mass are estimates";
 
 /// How a body built within `tolerance_mm` is described, in Details.
 pub fn approximate_words(tolerance_mm: &str) -> String {
@@ -5993,9 +5989,6 @@ impl Document {
                         details.push(("SHA-256".to_owned(), i.sha256.clone()));
                         details.push(("Size".to_owned(), format!("{} bytes", i.source.len())));
                         details.push(("Answers".to_owned(), i.decisions.len().to_string()));
-                        if let Some(note) = self.model().import_check_note(model_id(id)) {
-                            details.push(("Check".to_owned(), note));
-                        }
                         if let Some(record) = self.model().import_record(model_id(id)) {
                             details.extend(crate::import::record_rows(record));
                         }

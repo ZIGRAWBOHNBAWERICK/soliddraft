@@ -71,8 +71,10 @@ impl AssemblyDocument {
                 result.overlap_mm3 = Some(v.volume);
                 if v.positive.is_none() {
                     result.exact_refused.push(BodyQueryRefusal {
-                        query: "Overlap volume".into(), code: "body-relation.overlap-undecided".into(),
-                        message: "Overlap was not determined. The proven volume range includes both zero and positive values.".into(),
+                        query: "Overlap volume".into(),
+                        code: "body-relation.overlap-undecided".into(),
+                        message: "Overlap was not determined. The volume range includes both zero and positive values."
+                            .into(),
                     });
                 }
                 v.positive
@@ -129,7 +131,7 @@ impl AssemblyDocument {
                         result.why = "The exact solids touch and have no overlap volume.".into();
                     } else if gap.distance.lo > 0.0 {
                         result.outcome = Outcome::Clear;
-                        result.why = "The exact solids are separated by a proven gap.".into();
+                        result.why = "The exact solids are separated by a gap.".into();
                     }
                     result.clearance = clearance.map(|_| match gap.exceeds_clearance {
                         Some(true) => ClearanceOutcome::Met,
@@ -144,8 +146,11 @@ impl AssemblyDocument {
                     result.exact_refused.push(refusal);
                 } else if clearance.is_some() && result.clearance == Some(ClearanceOutcome::Undecided) {
                     result.exact_refused.push(BodyQueryRefusal {
-                        query: "Clearance".into(), code: "body-relation.clearance-undecided".into(),
-                        message: "The clearance was not determined. The proven distance range crosses the requested clearance.".into(),
+                        query: "Clearance".into(),
+                        code: "body-relation.clearance-undecided".into(),
+                        message:
+                            "The clearance was not determined. The distance range crosses the requested clearance."
+                                .into(),
                     });
                 }
             }

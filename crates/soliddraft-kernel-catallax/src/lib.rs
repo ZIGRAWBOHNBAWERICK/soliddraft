@@ -149,7 +149,9 @@ struct Solid {
     /// The checked displays made here and their edges, by `checked_key`. They travel in a
     /// hand-over beside the early display meshes, so the browser's page draws its
     /// worker's checked meshes without making them again.
-    checked: Mutex<handover::Previews>,
+    checked: Mutex<handover::Checked>,
+    /// The checked displays the kernel that handed this build over was refused, by key.
+    handed_refused: Mutex<BTreeMap<String, String>>,
     /// The kernel instance that handed this build over, if one did.
     source: Option<u64>,
     ids: convert::Ids,
@@ -750,6 +752,7 @@ impl CatallaxKernel {
         let display = MeshCache::new();
         let topology = OnceLock::new();
         let mut handed_previews = handover::Previews::new();
+        let mut handed_refused = BTreeMap::new();
         // A handed-over topology and early display are renamed into this kernel's ids, so
         // neither is computed again.
         if let Some(handed) = handed {
@@ -758,13 +761,15 @@ impl CatallaxKernel {
                 let _ = topology.set(Ok(renamed));
             }
             handed_previews = handed.renamed_previews(&faces, &edges).unwrap_or_default();
+            handed_refused = handed.refused.iter().cloned().collect();
         }
         let solid = Arc::new(Solid {
             source: app.handed_source(),
             app,
             key,
             handed_previews: Mutex::new(handed_previews),
-            checked: Mutex::new(handover::Previews::new()),
+            checked: Mutex::new(handover::Checked::new()),
+            handed_refused: Mutex::new(handed_refused),
             ids,
             display,
             print: MeshCache::new(),
@@ -949,20 +954,35 @@ impl CatallaxKernel {
     fn checked_solid(&self, body: BodyId, params: &TessellationParams) -> KernelResult<(Mesh, Vec<EdgePolyline>)> {
         let solid = self.solid(body)?;
         let key = checked_key(&options(params)?);
+        let refusal = |message: String| KernelError::QueryFailed { query: "tessellate".into(), code: 0, message };
         if let Some(handed) = solid.handed_previews().get(&key) {
             return Ok(handed.clone());
         }
+        let refused = solid.handed_refused.lock().unwrap_or_else(std::sync::PoisonError::into_inner).get(&key).cloned();
+        if let Some(reason) = refused {
+            return Err(refusal(reason));
+        }
         let lock = || solid.checked.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some(made) = lock().get(&key) {
-            return Ok(made.clone());
+            return made.clone().map_err(refusal);
         }
         let made = if solid.has_splines() {
-            (self.rendering(body, params)?, self.rendering_edges(body, params)?)
+            self.rendering(body, params).and_then(|mesh| Ok((mesh, self.rendering_edges(body, params)?)))
         } else {
-            (self.tessellate(body, params)?, self.tessellate_edges(body, params)?)
+            self.tessellate(body, params).and_then(|mesh| Ok((mesh, self.tessellate_edges(body, params)?)))
         };
-        lock().insert(key, made.clone());
-        Ok(made)
+        // A refusal is kept, and handed over, so nobody makes the same mesh again; a
+        // cancelled or interrupted call is not.
+        match &made {
+            Ok(made) => {
+                lock().insert(key, Ok(made.clone()));
+            }
+            Err(error @ (KernelError::QueryFailed { .. } | KernelError::Unsupported(_))) => {
+                lock().insert(key, Err(error.to_string()));
+            }
+            Err(_) => {}
+        }
+        made
     }
 
     /// The numerical body stored as `body`, if it is one.
@@ -1592,20 +1612,16 @@ impl Kernel for CatallaxKernel {
             }
             // The early display meshes sampled so far travel with the topology. Once it
             // has gone, the ones sampled since go with it again, as a display change asks.
-            let checked: Vec<_> = solid
-                .checked
-                .lock()
-                .map(|checked| {
-                    checked
-                        .iter()
-                        .map(|(key, (mesh, edges))| handover::HandedPreview {
-                            key: key.clone(),
-                            mesh: mesh.clone(),
-                            edges: edges.clone(),
-                        })
-                        .collect()
-                })
-                .unwrap_or_default();
+            let unsent = |key: &String| !state.sent_previews.contains(&(solid.key.clone(), key.clone()));
+            let made = solid.checked.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone();
+            let mut checked = Vec::new();
+            let mut refused = Vec::new();
+            for (key, made) in made.into_iter().filter(|(key, _)| unsent(key)) {
+                match made {
+                    Ok((mesh, edges)) => checked.push(handover::HandedPreview { key, mesh, edges }),
+                    Err(reason) => refused.push((key, reason)),
+                }
+            }
             let previews: Vec<_> = solid
                 .previews
                 .computed()
@@ -1618,10 +1634,10 @@ impl Kernel for CatallaxKernel {
                         edges: preview_edges(mesh, &solid.ids),
                     })
                 })
+                .filter(|preview| unsent(&preview.key))
                 .chain(checked)
-                .filter(|preview| !state.sent_previews.contains(&(solid.key.clone(), preview.key.clone())))
                 .collect();
-            if state.sent_topologies.contains(&solid.key) && previews.is_empty() {
+            if state.sent_topologies.contains(&solid.key) && previews.is_empty() && refused.is_empty() {
                 continue;
             }
             let (faces, edges, vertices) = solid.ids.by_index();
@@ -1630,6 +1646,7 @@ impl Kernel for CatallaxKernel {
                 solid.key.clone(),
                 handover::HandedTopology {
                     previews,
+                    refused,
                     topology: topology.clone(),
                     faces: pairs(faces.into_iter().map(|(index, id)| (index, id.raw())).collect()),
                     edges: pairs(edges.into_iter().map(|(index, id)| (index, id.raw())).collect()),
@@ -1653,8 +1670,13 @@ impl Kernel for CatallaxKernel {
         for entry in &handed {
             if let Some(topology) = &entry.topology {
                 state.sent_topologies.insert(entry.key.clone());
-                for preview in &topology.previews {
-                    state.sent_previews.insert((entry.key.clone(), preview.key.clone()));
+                for key in topology
+                    .previews
+                    .iter()
+                    .map(|preview| &preview.key)
+                    .chain(topology.refused.iter().map(|(key, _)| key))
+                {
+                    state.sent_previews.insert((entry.key.clone(), key.clone()));
                 }
             }
         }
@@ -1685,10 +1707,17 @@ impl Kernel for CatallaxKernel {
                         if let Some(previews) = topology.renamed_previews(&faces, &edges) {
                             solid.handed_previews().extend(previews);
                         }
+                        let mut refused =
+                            solid.handed_refused.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                        refused.extend(topology.refused.iter().cloned());
                     }
                     if let Some(offer) = state.offered.get_mut(&key) {
                         match &mut offer.topology {
-                            Some(earlier) => Arc::make_mut(earlier).previews.extend(topology.previews.iter().cloned()),
+                            Some(earlier) => {
+                                let earlier = Arc::make_mut(earlier);
+                                earlier.previews.extend(topology.previews.iter().cloned());
+                                earlier.refused.extend(topology.refused.iter().cloned());
+                            }
                             None => offer.topology = Some(topology),
                         }
                     }

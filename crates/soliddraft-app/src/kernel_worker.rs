@@ -848,13 +848,28 @@ mod tests {
 
         page.offer_builds(1, &host.take_hand_over().unwrap()).unwrap();
         let read = page.bodies_read();
+        // A level the certified mesher refuses is handed over as refused, and the page
+        // keeps its preview rather than trying again.
+        let mut made = 0;
         for level in [Level::Coarse, Level::Standard, Level::Fine] {
             let params = levels.params(level);
-            assert!(!page.checked_rendering(body, params).unwrap().indices.is_empty());
-            page.checked_rendering_edges(body, params).unwrap();
+            let mesh = page.checked_rendering(body, params);
+            let theirs = worker.checked_rendering(worker_body(&host), params);
+            assert_eq!(mesh.is_ok(), theirs.is_ok(), "{mesh:?} against {theirs:?}");
+            if let Ok(mesh) = mesh {
+                assert!(!mesh.indices.is_empty());
+                page.checked_rendering_edges(body, params).unwrap();
+                made += 1;
+            }
         }
+        assert!(made > 0, "every level was refused");
         assert_eq!(page.bodies_read(), read, "the page made a checked mesh the worker had made");
         assert_eq!(page.fresh_previews(), 0, "the page sampled a CPU preview");
+    }
+
+    /// The shown body of the part the host built last, in the worker's kernel.
+    fn worker_body(host: &Host) -> soliddraft_kernel_api::BodyId {
+        host.part.as_ref().unwrap().1.live_bodies().last().unwrap().1
     }
 
     #[test]

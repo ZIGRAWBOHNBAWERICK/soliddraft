@@ -71,6 +71,10 @@ pub(crate) struct HandedTopology {
     /// The early display meshes the handing kernel sampled, by display key, with its ids.
     #[serde(default)]
     pub previews: Vec<HandedPreview>,
+    /// The checked displays the handing kernel was refused, by display key, with the
+    /// reason, so the receiving kernel keeps its preview instead of trying again.
+    #[serde(default)]
+    pub refused: Vec<(String, String)>,
 }
 
 /// One early display mesh and its edges, as [`soliddraft_kernel_api::Kernel::preview`] and
@@ -84,6 +88,10 @@ pub(crate) struct HandedPreview {
 
 /// Early display meshes renamed into a kernel's own ids, by display key.
 pub(crate) type Previews = BTreeMap<String, (Mesh, Vec<EdgePolyline>)>;
+
+/// Checked displays made here, by display key: the mesh and its edges, or the reason
+/// it was refused.
+pub(crate) type Checked = BTreeMap<String, Result<(Mesh, Vec<EdgePolyline>), String>>;
 
 impl HandedTopology {
     /// The topology with each id the handing kernel gave replaced by the id this kernel

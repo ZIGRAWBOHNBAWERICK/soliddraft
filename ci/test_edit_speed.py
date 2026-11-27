@@ -140,6 +140,38 @@ class Answers(unittest.TestCase):
             with self.assertRaisesRegex(AssertionError, "0001/command.json"):
                 edit_speed.compare_answers(self.comparator(["0001/command.json"]), left, right, None)
 
+    def test_only_listed_question_fields_may_differ_and_must_occur(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = pathlib.Path(temp)
+            left, right = (self.bundle(root / side, 1) for side in ("left", "right"))
+            for bundle in (left, right):
+                (bundle / "scenario.json").write_text('{"steps":[{}]}')
+                (bundle / "result.json").write_text('{"steps":[{}]}')
+                (bundle / "protocol.json").write_text("[]")
+            file = "0001/question-0000.json"
+            baseline, candidate = (bundle / "commands" / file for bundle in (left, right))
+            baseline.write_text('{"problem":{"steps":[{"id":"op_9"},{"profile":"op_9","distance":72}]}}')
+            candidate.write_text('{"problem":{"steps":[{"id":"op_3"},{"profile":"op_3","distance":72}]}}')
+            manifest = root / "expected.json"
+            manifest.write_text(json.dumps([
+                dict(scenario="bracket", file=file, pointer=f"/problem/steps/{field}",
+                     baseline="op_9", candidate="op_3", reason="Retain the unchanged sketch.")
+                for field in ("0/id", "1/profile")
+            ]))
+            expected = edit_speed.load_expected_differences(manifest)["bracket"]
+            comparator = edit_speed.load(ROOT / "compare-scenario-bundles.py", "bundles")
+            edit_speed.compare_answers(comparator, left, right, None, expected)
+
+            for changed in ('"distance":73', '"distance": 72'):
+                with self.subTest(changed=changed):
+                    candidate.write_text(
+                        '{"problem":{"steps":[{"id":"op_3"},{"profile":"op_3",' + changed + '}]}}')
+                    with self.assertRaisesRegex(AssertionError, file):
+                        edit_speed.compare_answers(comparator, left, right, None, expected)
+            candidate.write_bytes(baseline.read_bytes())
+            with self.assertRaisesRegex(AssertionError, "expected difference missing"):
+                edit_speed.compare_answers(comparator, left, right, None, expected)
+
 
 if __name__ == "__main__":
     unittest.main()

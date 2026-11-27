@@ -319,6 +319,8 @@ pub enum DrawingSel {
     HoleTable(usize),
     /// The model reference: the part the drawing shows.
     Model,
+    /// The revision review of the saved drawing and its comment.
+    Review,
 }
 
 /// A feature control frame being built or edited.
@@ -706,6 +708,9 @@ pub struct DrawingSession {
     pub part_seen: Option<DocumentId>,
     /// The reference bar over the sheet was dismissed for the current state.
     pub marker_dismissed: bool,
+    /// The saved drawing compared against an earlier revision of its part, with the
+    /// review comment being written or read.
+    pub review: Option<revision_review::RevisionReview>,
 }
 
 impl DrawingSession {
@@ -744,6 +749,7 @@ impl DrawingSession {
             link: None,
             part_seen: None,
             marker_dismissed: false,
+            review: None,
         }
     }
 
@@ -950,6 +956,15 @@ pub enum DrawingAction {
     ShowLocations,
     /// Hide the reference bar until the reference's state changes.
     DismissMarker,
+    /// Compare the saved drawing's part with an earlier saved revision of it, picked
+    /// when `None`, and review the drawing.
+    ReviewRevisions(Option<PathBuf>),
+    /// Save the review comment as a new file beside the sources, picked when `None`.
+    SaveMarkup(Option<PathBuf>),
+    /// Open a review comment, picked when `None`, on this revision of the drawing.
+    OpenMarkup(Option<PathBuf>),
+    /// Show the review comment's annotation on its sheet.
+    ShowMarkup,
     /// Finish the offset cutting line being drawn and compute the section.
     FinishCut,
 }
@@ -1386,6 +1401,52 @@ pub(crate) fn put_opened(state: &mut AppState, doc: DrawingDoc) -> String {
 
 /// Opens the drawing's part, found by the resolver, in the part tab when the part tab
 /// holds nothing unsaved.
+/// Opens the review of the saved drawing: its part's file is the candidate, `baseline` the
+/// earlier revision. Nothing is written to either part or the drawing.
+fn review_revisions(state: &mut AppState, baseline: Option<PathBuf>) {
+    use crate::review::{SavedDrawing, SavedRevision};
+    let Some(s) = state.drawing.session.as_mut() else { return };
+    let Some(drawing_path) = s.doc.path.clone() else {
+        s.say("Save the drawing first: the review reads the saved drawing");
+        return;
+    };
+    let Some(candidate_path) = s.model_file() else {
+        s.say("The drawing's part was not found, so there is no candidate to review");
+        return;
+    };
+    let baseline =
+        baseline.or_else(|| crate::platform::open_path("Compare with a saved revision", "SolidDraft part", &["dwprt"]));
+    let Some(baseline) = baseline else { return };
+    let kernel = state.doc.model().kernel().clone();
+    let review = (|| -> Result<revision_review::RevisionReview, String> {
+        let baseline = SavedRevision::open(&baseline, kernel.clone()).map_err(|e| e.to_string())?;
+        let candidate = SavedRevision::open(&candidate_path, kernel).map_err(|e| e.to_string())?;
+        let drawing = SavedDrawing::open(&drawing_path).map_err(|e| e.to_string())?;
+        revision_review::RevisionReview::new(baseline, candidate).with_drawing(drawing).map_err(|e| e.to_string())
+    })();
+    match review {
+        Ok(review) => {
+            s.review = Some(review);
+            s.selection = Some(DrawingSel::Review);
+            s.set_tool(DrawingTool::Select);
+            state.options_details = true;
+        }
+        Err(e) => state.note(format!("The revisions could not be compared: {e}"), NoteKind::Error),
+    }
+}
+
+/// Goes to the review comment's sheet and keeps the review open beside it.
+fn show_markup(s: &mut DrawingSession) {
+    let Some(place) = s.review.as_ref().and_then(|r| r.place()).copied() else { return };
+    if place.sheet < s.doc.drawing.sheets.len() && place.sheet != s.sheet {
+        s.sheet = place.sheet;
+        s.needs_fit = true;
+        s.note_edit = None;
+        s.sheet_rename = None;
+    }
+    s.selection = Some(DrawingSel::Review);
+}
+
 fn open_model(state: &mut AppState) {
     match model_to_open(state) {
         Ok(Some(file)) => state.push(crate::state::AppAction::Open(Some(file))),
@@ -1649,6 +1710,37 @@ pub fn apply(state: &mut AppState, dock: &mut DockState<Tab>, ctx: &egui::Contex
                 if let Some(r) = s.doc.last_update.as_mut() {
                     r.dismissed = true;
                 }
+            }
+        }
+        DrawingAction::ReviewRevisions(path) => review_revisions(state, path),
+        DrawingAction::SaveMarkup(path) => {
+            let Some(s) = state.drawing.session.as_mut() else { return };
+            let Some(review) = s.review.as_ref() else { return };
+            let path =
+                path.or_else(|| crate::platform::save_path("Save markup", "Review markup", "json", "review.json"));
+            let Some(path) = path else { return };
+            match review.save_markup(&path) {
+                Ok(()) => state.note(format!("Saved {}", path.display()), NoteKind::Ok),
+                Err(e) => state.note(format!("The markup was not saved: {e}"), NoteKind::Error),
+            }
+        }
+        DrawingAction::OpenMarkup(path) => {
+            let Some(s) = state.drawing.session.as_mut() else { return };
+            let Some(review) = s.review.as_mut() else { return };
+            let path = path.or_else(|| crate::platform::open_path("Open markup", "Review markup", &["json"]));
+            let Some(path) = path else { return };
+            match review.open_markup(&path) {
+                Ok(()) => {
+                    show_markup(s);
+                    state.options_details = true;
+                }
+                Err(e) => state.note(format!("The markup was not opened: {e}"), NoteKind::Error),
+            }
+        }
+        DrawingAction::ShowMarkup => {
+            if let Some(s) = state.drawing.session.as_mut() {
+                show_markup(s);
+                state.options_details = true;
             }
         }
         DrawingAction::Export { format, path } => export_sheet(state, format, path),

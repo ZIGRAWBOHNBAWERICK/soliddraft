@@ -2,6 +2,7 @@
 //! selected dimension or note, the sheet, and the Needs attention list with Reattach,
 //! Delete and Keep as note.
 
+use super::revision_review::MarkupFileAction;
 use super::{DrawingAction, DrawingSel, DrawingSession, DrawingTool, NewDrawing, SHEET, properties_d3, sheets};
 use crate::icons::{self, Icon};
 use crate::state::{AppAction, AppState};
@@ -281,6 +282,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
                 }
             }
         }
+        Some(DrawingSel::Review) => review_panel(ui, s, &mut actions),
         Some(DrawingSel::Model) => {
             header(ui, Icon::Extrude, "Model reference");
             super::reference::panel(ui, s, part_open, &mut actions);
@@ -1027,6 +1029,21 @@ fn sheet_panel(ui: &mut egui::Ui, s: &mut DrawingSession, actions: &mut Vec<Draw
                 });
             }
             section_gap(ui);
+            theme::section_label(ui, "Review");
+            if s.review.is_some() {
+                if ui.button("Revision review").clicked() {
+                    actions.push(DrawingAction::Select(Some(DrawingSel::Review)));
+                }
+            } else if ui
+                .button("Compare with a saved revision…")
+                .on_hover_text(
+                    "Compare the saved drawing's part with an earlier saved revision and comment on the drawing",
+                )
+                .clicked()
+            {
+                actions.push(DrawingAction::ReviewRevisions(None));
+            }
+            section_gap(ui);
             theme::section_label(ui, "Tables");
             let revisions = sheet.revision_table().map(|t| t.revisions.len());
             value_row(
@@ -1044,6 +1061,33 @@ fn sheet_panel(ui: &mut egui::Ui, s: &mut DrawingSession, actions: &mut Vec<Draw
             hint(ui, "Select a view or an annotation on the sheet or in the tree to see its properties.");
         });
     });
+}
+
+/// The revision review of the saved drawing: what changed in the part's manufacturing
+/// information, and the comment on the drawing.
+fn review_panel(ui: &mut egui::Ui, s: &mut DrawingSession, actions: &mut Vec<DrawingAction>) {
+    header(ui, Icon::Props, "Revision review");
+    let Some(review) = s.review.as_mut() else {
+        hint(ui, "Compare the saved drawing with an earlier revision of its part from the sheet properties.");
+        return;
+    };
+    let mut close = false;
+    egui::ScrollArea::vertical().id_salt("revision_review").auto_shrink([false, false]).show(ui, |ui| {
+        egui::Frame::new().inner_margin(egui::Margin::symmetric(10, 8)).show(ui, |ui| {
+            match review.show(ui) {
+                Some(MarkupFileAction::Open) => actions.push(DrawingAction::OpenMarkup(None)),
+                Some(MarkupFileAction::SaveAs) => actions.push(DrawingAction::SaveMarkup(None)),
+                Some(MarkupFileAction::Show) => actions.push(DrawingAction::ShowMarkup),
+                None => {}
+            }
+            section_gap(ui);
+            close = ui.button("Close review").clicked();
+        });
+    });
+    if close {
+        s.review = None;
+        actions.push(DrawingAction::Select(None));
+    }
 }
 
 fn format_panel(ui: &mut egui::Ui, s: &mut DrawingSession, actions: &mut Vec<DrawingAction>) {

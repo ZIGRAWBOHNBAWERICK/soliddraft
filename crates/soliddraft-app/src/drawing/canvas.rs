@@ -421,6 +421,22 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
         sheet2.paint(item, colour, extra);
     }
 
+    // The review comment's place: a ring around the annotation it is on.
+    if let Some(place) = s.review.as_ref().and_then(|r| r.place())
+        && place.sheet == s.sheet
+    {
+        let at = sheet2.s(place.at);
+        let stroke = Stroke::new(2.0, theme::accent());
+        painter.circle_stroke(at, 14.0, stroke);
+        painter.text(
+            at + vec2(16.0, -16.0),
+            Align2::LEFT_BOTTOM,
+            "Review",
+            theme::font_semibold(11.0),
+            theme::accent(),
+        );
+    }
+
     // Selected view: a dashed boundary; while a projected view is being placed, the
     // eight direction dots around its parent.
     if let Some(DrawingSel::View(id)) = s.selection
@@ -711,7 +727,7 @@ fn select_tool(
                 DrawingSel::View(v) => s.doc.drawing.view(v).map(|v| v.position),
                 DrawingSel::Annotation(a) => s.doc.drawing.annotation(a).map(|a| a.placement),
                 DrawingSel::HoleTable(i) => s.sheet().tables.get(i).map(|t| t.position),
-                DrawingSel::Format | DrawingSel::Revisions | DrawingSel::Model => None,
+                DrawingSel::Format | DrawingSel::Revisions | DrawingSel::Model | DrawingSel::Review => None,
             };
             if let Some(origin) = origin {
                 s.drag = Some(Drag { target: t, origin, start_pointer: p, moved: false });
@@ -744,7 +760,7 @@ fn select_tool(
                         table.position = to;
                     }
                 }
-                DrawingSel::Format | DrawingSel::Revisions | DrawingSel::Model => {}
+                DrawingSel::Format | DrawingSel::Revisions | DrawingSel::Model | DrawingSel::Review => {}
             }
             if let Some(d) = s.drag.as_mut() {
                 d.moved = true;
@@ -776,7 +792,7 @@ fn select_tool(
                     push(DrawingAction::Command(Command::MoveTable { sheet: s.sheet, table: i, to }));
                 }
             }
-            DrawingSel::Format | DrawingSel::Revisions | DrawingSel::Model => {}
+            DrawingSel::Format | DrawingSel::Revisions | DrawingSel::Model | DrawingSel::Review => {}
         }
         return;
     }

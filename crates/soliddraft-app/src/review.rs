@@ -12,7 +12,9 @@ use std::path::Path;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
-use soliddraft_document::{ContentHash, DocumentId, identify, save_new};
+use soliddraft_document::{ContentHash, DocumentId, identify, identify_file, save_new};
+use soliddraft_drawing::Drawing;
+use soliddraft_drawing::review::{self, MarkupPlace};
 use soliddraft_kernel_api::Kernel;
 use soliddraft_kernel_api::pmi::{PmiItem, PmiKind};
 use soliddraft_model::pmi::PmiRow;
@@ -154,7 +156,7 @@ impl SavedRevision {
         if let Some(id) = item_id {
             self.item(id)?;
         }
-        Some(ReviewerMarkup { candidate: self.pin.clone(), item_id: item_id.map(str::to_owned), text })
+        Some(ReviewerMarkup { candidate: self.pin.clone(), item_id: item_id.map(str::to_owned), text, drawing: None })
     }
 }
 
@@ -214,18 +216,76 @@ pub struct UnmatchedFaces<'a> {
     pub candidate_only: Vec<&'a FaceOrigin>,
 }
 
+/// A saved drawing, read only: its identity and revision, and what it shows.
+#[derive(Debug)]
+pub struct SavedDrawing {
+    pin: RevisionPin,
+    drawing: Drawing,
+}
+
+impl SavedDrawing {
+    /// Reads a drawing file. Its pin is the saved revision, as for a part.
+    pub fn open(path: &Path) -> io::Result<Self> {
+        let invalid = |e: String| io::Error::new(io::ErrorKind::InvalidData, e);
+        let identity = identify_file(path).map_err(|e| invalid(e.to_string()))?;
+        let (drawing, _) = soliddraft_drawing::file::read(path).map_err(|e| invalid(e.to_string()))?;
+        Ok(Self { pin: RevisionPin { document: identity.id, revision: identity.revision }, drawing })
+    }
+
+    pub fn pin(&self) -> &RevisionPin {
+        &self.pin
+    }
+
+    pub fn drawing(&self) -> &Drawing {
+        &self.drawing
+    }
+
+    /// True when the drawing is of this part and pinned at this exact revision.
+    pub fn shows(&self, part: &RevisionPin) -> bool {
+        self.drawing.model.id == Some(part.document) && self.drawing.model.pinned == part.revision
+    }
+}
+
+/// Where a comment sits on one saved revision of a drawing of the candidate.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct DrawingMarkup {
+    pub drawing: RevisionPin,
+    pub place: MarkupPlace,
+}
+
 /// JSON sidecar data. No paths, kernel IDs or modifications to the part are needed.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ReviewerMarkup {
     pub candidate: RevisionPin,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub item_id: Option<String>,
     pub text: String,
+    /// The drawing annotation the comment is on, when it was written on a drawing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub drawing: Option<DrawingMarkup>,
 }
 
 impl ReviewerMarkup {
     pub fn applies_to(&self, candidate: &SavedRevision) -> bool {
         self.candidate == *candidate.pin() && self.item_id.as_deref().is_none_or(|id| candidate.item(id).is_some())
+    }
+
+    /// Puts the comment on the annotation of `drawing` that shows its item. `None` when
+    /// the drawing does not show the candidate at its revision, or shows no such item.
+    pub fn on_drawing(mut self, drawing: &SavedDrawing) -> Option<Self> {
+        if !drawing.shows(&self.candidate) {
+            return None;
+        }
+        let place = review::place_of_item(drawing.drawing(), self.item_id.as_deref()?)?;
+        self.drawing = Some(DrawingMarkup { drawing: drawing.pin().clone(), place });
+        Some(self)
+    }
+
+    /// Where the comment is on `drawing` now: only on the revision it was written on,
+    /// and only while the annotation still shows the comment's item.
+    pub fn place_on(&self, drawing: &SavedDrawing) -> Option<MarkupPlace> {
+        let on = self.drawing.as_ref().filter(|d| d.drawing == *drawing.pin())?;
+        review::find_place(drawing.drawing(), &on.place, self.item_id.as_deref())
     }
 
     /// Creates a separate file; refuses any existing path, including either source.

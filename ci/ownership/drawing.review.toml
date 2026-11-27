@@ -1,0 +1,6 @@
+[[areas]]
+name = "drawing.review"
+owner = "core"
+crate = "soliddraft-drawing"
+paths = ["crates/soliddraft-drawing/src/review.rs"]
+module = ["review"]

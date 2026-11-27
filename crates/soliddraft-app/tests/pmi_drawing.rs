@@ -558,3 +558,123 @@ fn datum_targets_and_position_frames_draw_from_a_reopened_part() {
     call(&mut reopened, "drawing_export_pdf", json!({"path":proof.join("position-pmi.pdf")}));
     let _ = std::fs::remove_dir_all(scratch);
 }
+
+#[test]
+fn face_annotations_edit_reopen_and_draw_on_their_own_faces() {
+    use egui_kittest::kittest::Queryable;
+    use soliddraft_app::{document::Selection, pmi::panel};
+    use soliddraft_drawing::ModelEntity;
+    use soliddraft_kernel_api::SurfaceKind::{Cylinder, Plane};
+    use std::cell::RefCell;
+
+    let mut s = state("Face annotations");
+    call(
+        &mut s,
+        "sketch",
+        json!({"plane":"top","shapes":[{"shape":"rectangle","center":[40,20,0],"width":80,"height":40}]}),
+    );
+    call(&mut s, "extrude", json!({"sketch":"Sketch1","depth":10,"flip":false}));
+    call(&mut s, "hole", json!({"face":"Boss-Extrude1 · End cap","points":[[20,20,10]],"diameter":6}));
+    let bore = bracket::face(&s, Cylinder, [Some(20.0), None, None]);
+    let side = bracket::face(&s, Plane, [Some(0.0), None, None]);
+    let pick = |name: &str| {
+        s.doc
+            .faces
+            .iter()
+            .find(|face| format!("{} · {}", s.doc.feature(face.feature).unwrap().name, face.label) == name)
+            .unwrap()
+            .id
+    };
+    let selections = [pick(&bore), pick(&side)];
+    s.pmi.open = true;
+    let s = RefCell::new(s);
+    {
+        let mut installed = false;
+        let mut app = egui_kittest::Harness::builder().with_size(egui::vec2(850.0, 1050.0)).build_ui(|ui| {
+            if installed {
+                panel::show(ui, &mut s.borrow_mut());
+            } else {
+                soliddraft_app::theme::install(ui.ctx(), soliddraft_app::theme::Mode::Light);
+                installed = true;
+            }
+        });
+        app.run_steps(2);
+        for (index, (kind, field, text)) in
+            [("Knurl", "Knurl designation", "DIN 82 RGE 0.8"), ("Face note", "Note text", "Mask this face")]
+                .into_iter()
+                .enumerate()
+        {
+            app.get_by_label(kind).click();
+            app.run_steps(2);
+            s.borrow_mut().doc.selection = Some(Selection::Face(selections[index]));
+            app.run_steps(2);
+            app.get_by_label(field).focus();
+            app.run_steps(2);
+            app.get_by_label(field).type_text(text);
+            app.run_steps(2);
+            app.get_by_label("Add").click();
+            app.run_steps(2);
+
+            app.get_all_by_label("Edit").nth(index).unwrap().click();
+            app.run_steps(2);
+            app.get_by_label("Change").click();
+            app.run_steps(2);
+            let rows = s.borrow().doc.model().pmi_rows();
+            let row = &rows[index];
+            assert_eq!(row.item.id, kind);
+            assert!(row.applies(), "{:?}", row.problem);
+            assert_eq!(row.on_body.as_ref().unwrap().features(), [&[selections[index]][..]]);
+            let expected = if index == 0 { format!("KNURL {text}") } else { text.to_owned() };
+            assert_eq!(row.callout(), expected);
+        }
+    }
+    let mut s = s.into_inner();
+    let designation = "DIN 82 RGE 1.2";
+    let note = "Mask this face\nDo not coat";
+    for (kind, name, field, text, face) in
+        [("knurl", "Knurl", "designation", designation, &bore), ("face_note", "Face note", "text", note, &side)]
+    {
+        let mut input = json!({"kind":kind,"replaces":name,"faces":[face]});
+        input[field] = json!(text);
+        let result = call(&mut s, "pmi_add", input);
+        assert_eq!(result["added"][field], text);
+        assert_eq!(result["added"]["faces"], json!([[face]]));
+    }
+
+    let scratch = std::env::temp_dir().join(format!("soliddraft-face-pmi-{}", std::process::id()));
+    let proof = std::env::var_os("SOLIDDRAFT_PMI_PROOF_DIR").map_or_else(|| scratch.clone(), std::path::PathBuf::from);
+    std::fs::create_dir_all(&scratch).unwrap();
+    std::fs::create_dir_all(&proof).unwrap();
+    let native = scratch.join("face-pmi.dwprt");
+    call(&mut s, "save_as", json!({"path":native}));
+    let mut reopened = state("Empty");
+    call(&mut reopened, "open", json!({"path":native}));
+    assert_eq!(reopened.doc.model().pmi(), s.doc.model().pmi());
+    assert_eq!(call(&mut reopened, "pmi_list", json!({})), call(&mut s, "pmi_list", json!({})));
+
+    call(&mut reopened, "make_drawing", json!({"template":"iso-a3"}));
+    let session = reopened.drawing.session.as_ref().unwrap();
+    assert!(session.requirements.unplaced.is_empty(), "{:?}", session.requirements.unplaced);
+    let drawing = &session.doc.drawing;
+    let shown = pmi_items::shown(drawing);
+    let model = reopened.doc.model();
+    let body = model.body().unwrap();
+    let topology = model.kernel().topology(body).unwrap();
+    for (name, text) in [("Knurl", format!("KNURL {designation}")), ("Face note", note.to_owned())] {
+        assert_eq!(shown.get(name), Some(&1));
+        let annotations = &drawing.sheets[0].annotations;
+        let annotation = annotations
+            .iter()
+            .find(|annotation| matches!(&annotation.body, AnnotationKind::Note { text: drawn, .. } if *drawn == text))
+            .unwrap();
+        let [anchor] = annotation.anchors.as_slice() else { panic!("{name}: one face leader") };
+        let Some(ModelEntity::Edge(edge)) = &anchor.entity.model else { panic!("{name}: a model edge") };
+        let item = model.pmi().item(name).unwrap();
+        let face = model.resolve_face(&item.features()[0][0], body).unwrap();
+        let edge = model.resolve_edge(edge, body).unwrap();
+        assert!(topology.face(face).unwrap().edges.contains(&edge), "{name}: on its own face");
+    }
+    call(&mut reopened, "drawing_export_svg", json!({"path":proof.join("face-pmi.svg")}));
+    call(&mut reopened, "drawing_export_pdf", json!({"path":proof.join("face-pmi.pdf")}));
+    std::fs::remove_dir_all(scratch).unwrap();
+}

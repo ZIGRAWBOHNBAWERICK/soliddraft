@@ -737,3 +737,44 @@ fn hole_roles_checked_nominals_and_independent_depths_survive_native_reopen() {
     );
     assert!(row.hole.is_none());
 }
+
+#[test]
+fn face_annotations_remain_text_and_refuse_step() {
+    let mut doc = doc();
+    bored_block(&mut doc, 8.0);
+    let bore = cylinders(&doc).remove(0);
+    let side = facing(&doc, Vec3::new(-1.0, 0.0, 0.0)).remove(0);
+    let cases = [
+        ("Grip", PmiKind::Knurl { designation: "DIN 82 RGE 0.8".into(), face: bore }, "KNURL DIN 82 RGE 0.8"),
+        (
+            "Mask",
+            PmiKind::FaceNote { text: "Mask this face\nDo not coat".into(), face: side },
+            "Mask this face\nDo not coat",
+        ),
+    ];
+    for (name, kind, callout) in cases {
+        put(&mut doc, name, kind.clone());
+        let item = doc.pmi().item(name).unwrap();
+        assert_eq!(item.kind, kind);
+        let row = doc.pmi_rows().into_iter().find(|row| row.item.id == name).unwrap();
+        assert!(row.applies(), "{:?}", row.problem);
+        assert!(row.measured.is_empty());
+        assert_eq!(row.callout(), callout);
+
+        let plan = InspectionPlan::from_document(&doc, None);
+        let group = plan.groups.iter().find(|group| group.item_id.as_deref() == Some(name)).unwrap();
+        let [check] = group.rows.as_slice() else { panic!("expected one note row") };
+        assert_eq!(check.kind, InspectionKind::Note);
+        assert_eq!(check.applicability(group), Applicability::Reference);
+        assert_eq!((check.unit, check.nominal, check.lower_limit, check.upper_limit), (None, None, None, None));
+        assert_eq!(check.faces(group)[0], item.features()[0]);
+
+        let reason = format!("{name}: {} PMI is not supported", item.kind_label());
+        let error = doc.export(soliddraft_exchange::Format::Step).unwrap_err();
+        assert!(error.contains(&reason), "{error}");
+        let pmi = Pmi { items: vec![row.on_body.unwrap()], part: PartNotes::default() };
+        let error = doc.kernel().export_step_with_pmi(doc.body().unwrap(), &StepOptions::default(), &pmi).unwrap_err();
+        assert!(error.to_string().contains(&reason), "{error}");
+        doc.execute(Command::RemovePmiItem { id: name.into() }).unwrap();
+    }
+}

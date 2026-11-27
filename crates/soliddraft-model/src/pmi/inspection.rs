@@ -50,6 +50,8 @@ pub struct InspectionGroup {
     /// Characteristics belonging to this group, in requirement order.
     pub rows: Vec<InspectionRow>,
     face_groups: Vec<Feature<FaceRef>>,
+    datum_label: Option<String>,
+    roughness_average: bool,
     thread_feature: Option<FeatureId>,
 }
 
@@ -235,6 +237,8 @@ impl InspectionGroup {
             problem: None,
             rows: Vec::new(),
             face_groups: Vec::new(),
+            datum_label: None,
+            roughness_average: false,
             thread_feature: None,
         }
     }
@@ -280,7 +284,8 @@ impl InspectionGroup {
         group.problem = problem;
         group.thread_feature = feature;
         match item.kind {
-            PmiKind::Datum { feature, .. } => {
+            PmiKind::Datum { letter, feature } => {
+                group.datum_label = Some(letter);
                 group.face_groups.push(feature);
                 group.add(InspectionKind::Datum, None, 0..1, None);
             }
@@ -402,9 +407,10 @@ impl InspectionGroup {
             PmiKind::SurfaceFinish { feature, text, .. } => {
                 group.face_groups.push(feature);
                 let row = group.add(InspectionKind::SurfaceFinish, None, 0..1, None);
-                if let Some((_, limit)) = roughness(&text) {
+                if let Some((parameter, limit)) = roughness(&text) {
                     row.unit = Some(InspectionUnit::Micrometre);
                     row.upper_limit = Some(limit.value());
+                    group.roughness_average = parameter == "Ra";
                 }
             }
         }
@@ -431,6 +437,92 @@ impl InspectionPlan {
             general_tolerance: notes.general_tolerance,
             groups,
         }
+    }
+
+    /// Publish inspection requirements as QIF 3.0, without generating measurement results.
+    /// The returned omissions identify rows that this profile could not carry.
+    pub fn write_qif(
+        &self,
+        out: impl Write,
+        metadata: soliddraft_exchange::qif::Metadata<'_>,
+    ) -> io::Result<Vec<soliddraft_exchange::qif::Omission>> {
+        use soliddraft_exchange::qif::{self, Dimension, Requirement};
+
+        let mut rows = Vec::new();
+        for group in &self.groups {
+            for row in &group.rows {
+                let dimension = |kind| match (row.nominal, row.unit, row.dimension_tolerance) {
+                    (Some(target), Some(InspectionUnit::Millimetre), Some(tolerance)) => {
+                        Requirement::Dimension { kind, target, tolerance, limits: row.lower_limit.zip(row.upper_limit) }
+                    }
+                    _ => Requirement::Omit("missing nominal or dimensional tolerance"),
+                };
+                let requirement = if group.problem.is_some() {
+                    Requirement::Omit("unresolved source PMI")
+                } else {
+                    match row.kind {
+                        InspectionKind::Datum => Requirement::Datum,
+                        InspectionKind::Diameter
+                        | InspectionKind::CounterboreDiameter
+                        | InspectionKind::CountersinkDiameter => dimension(Dimension::Diameter),
+                        InspectionKind::Radius | InspectionKind::SlotRadius => dimension(Dimension::Radius),
+                        InspectionKind::Distance
+                        | InspectionKind::SlotLength
+                        | InspectionKind::DrillDepth
+                        | InspectionKind::CounterboreDepth
+                        | InspectionKind::ThreadDepth => dimension(Dimension::Length),
+                        InspectionKind::SlotWidth => dimension(Dimension::Width),
+                        InspectionKind::Geometric { characteristic, diameter, material } => {
+                            match (row.unit, row.upper_limit) {
+                                (Some(InspectionUnit::Millimetre), Some(limit_mm)) => Requirement::Geometric {
+                                    kind: characteristic,
+                                    limit_mm,
+                                    diametrical: diameter,
+                                    material,
+                                },
+                                _ => Requirement::Omit("missing geometric tolerance"),
+                            }
+                        }
+                        InspectionKind::SurfaceFinish => match (row.unit, row.upper_limit) {
+                            (Some(InspectionUnit::Micrometre), Some(limit_um)) if group.roughness_average => {
+                                Requirement::RoughnessAverage { limit_um }
+                            }
+                            _ => Requirement::Omit("surface finish has no numeric Ra limit"),
+                        },
+                        InspectionKind::Thread => Requirement::Omit("thread has no QIF mapping in this profile"),
+                        InspectionKind::CountersinkAngle => {
+                            Requirement::Omit("angle has no QIF mapping in this profile")
+                        }
+                        InspectionKind::Note => Requirement::Omit("note is not an inspection requirement"),
+                    }
+                };
+                rows.push(qif::Row {
+                    id: &row.id,
+                    callout: &group.callout,
+                    features: row
+                        .faces(group)
+                        .iter()
+                        .filter(|faces| !faces.is_empty())
+                        .map(json)
+                        .collect::<io::Result<_>>()?,
+                    datum_label: group.datum_label.as_deref(),
+                    frame: &group.datums,
+                    locating_datum: row.locating_datum.map(|index| group.datums[index].letter.as_str()),
+                    requirement,
+                });
+            }
+        }
+        qif::write(
+            out,
+            qif::Part {
+                name: &self.part,
+                revision: self.revision.as_deref(),
+                material: self.material.as_deref(),
+                general_tolerance: self.general_tolerance.as_deref(),
+            },
+            metadata,
+            &rows,
+        )
     }
 
     /// Write UTF-8 RFC 4180 CSV. Datum order and persistent face groups are JSON arrays in

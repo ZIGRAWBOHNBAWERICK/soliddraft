@@ -9,7 +9,9 @@
 
 pub mod mesh;
 mod obj;
+pub mod pdf3d;
 pub mod proof;
+pub mod qif;
 mod stl;
 mod three_mf;
 

@@ -1,15 +1,13 @@
 {
   "format": "soliddraft-known-over-budget/1",
   "follow_up": "https://github.com/ZIGRAWBOHNBAWERICK/soliddraft/issues/27",
-  "comment": "Legacy timing inventory. Wall-clock budgets and the former 120 percent regression limits are advisory under the 30 October policy; work caps remain hard. The six retained entries keep their original recorded times. References and original bracket records use the local work-PC baseline identified below; drawing step 24 retains its hosted release record from https://github.com/BohnBawerick/soliddraft/actions/runs/40823628229, and bracket steps 35 and 43 retain their captain-approved first records from https://github.com/BohnBawerick/soliddraft/actions/runs/41008941098. Ten entries were removed using sample 1 of https://github.com/BohnBawerick/soliddraft/actions/runs/41036690172; each was below 1000 ms raw and 900 ms after slow-class projection.",
+  "comment": "Legacy timing inventory. Wall-clock budgets and the former 120 percent regression limits are advisory under the 30 October policy; work caps remain hard. The four retained entries keep their original recorded times. References and bracket records use the local baseline identified below; drawing step 24 retains its hosted release record from https://github.com/BohnBawerick/soliddraft/actions/runs/40823628229. Ten entries were removed using sample 1 of https://github.com/BohnBawerick/soliddraft/actions/runs/41036690172; each was below 1000 ms raw and 900 ms after slow-class projection.",
   "measured_run": "https://github.com/BohnBawerick/soliddraft/actions/runs/40167997912",
   "measured_on": "local work-PC Linux x64 runner, ci-linux-local",
   "steps": [
     {"scenario": "references", "step": 17, "tool": "edit_extrude", "last_measured_ms": 2450.378498},
     {"scenario": "references", "step": 18, "tool": "edit_dimension", "last_measured_ms": 2685.202890},
     {"scenario": "bracket", "step": 27, "tool": "edit_dimension", "last_measured_ms": 2381.346},
-    {"scenario": "bracket", "step": 35, "tool": "drive", "last_measured_ms": 1892.423282},
-    {"scenario": "bracket", "step": 43, "tool": "set_value", "last_measured_ms": 1945.130604},
     {"scenario": "drawing", "step": 24, "tool": "edit_extrude", "last_measured_ms": 2571.201994}
   ],
   "release_limitations": {

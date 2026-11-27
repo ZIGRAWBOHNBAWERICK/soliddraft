@@ -9,6 +9,8 @@ use soliddraft_app::{
 };
 use soliddraft_kernel_api::{BodyAccuracy, StepOptions};
 
+#[path = "support/import_open.rs"]
+mod import_open;
 #[path = "support/render_steps.rs"]
 mod render_steps;
 
@@ -61,10 +63,10 @@ fn tolerant_and_certified_imports_display_with_their_own_authority_and_reopen() 
             });
         app.run_steps(3);
         app.state_mut().state.push(AppAction::ImportStep(Some(path.clone())));
-        app.run_steps(3);
+        import_open::settle(&mut app);
         assert!(app.state().state.import_dialog.is_some());
         app.get_by_role_and_label(egui::accesskit::Role::Button, "Accept").click();
-        app.run_steps(3);
+        import_open::settle(&mut app);
         let doc = &app.state().state.doc;
         let body = doc.display_body().unwrap_or_else(|| {
             panic!(

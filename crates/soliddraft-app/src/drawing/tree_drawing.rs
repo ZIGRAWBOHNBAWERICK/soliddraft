@@ -471,8 +471,8 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
                         AnnotationKind::Note { .. } => Icon::Chat,
                         AnnotationKind::HoleCallout { .. } => Icon::Hole,
                         AnnotationKind::CentreMark | AnnotationKind::Centreline => Icon::Point,
-                        AnnotationKind::Gdt { .. } => Icon::Rectangle,
-                        AnnotationKind::Datum { .. } => Icon::Plane,
+                        AnnotationKind::Gdt { .. } | AnnotationKind::PositionFrame { .. } => Icon::Rectangle,
+                        AnnotationKind::Datum { .. } | AnnotationKind::DatumTarget { .. } => Icon::Plane,
                         AnnotationKind::RevisionSymbol { .. } => Icon::Rollback,
                         _ => Icon::Material,
                     };

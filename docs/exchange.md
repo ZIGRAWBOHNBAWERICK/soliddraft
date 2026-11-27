@@ -96,11 +96,16 @@ The `iges-export` application scenario builds the bracket through MCP, exports `
 
 Default STEP import keeps a source-certified result when Catallax can produce one, including certified source repairs. Otherwise it uses Catallax's default tolerant reader, including numerical bodies written by fillets. Certified is the higher label; bodies admitted through local fits are labelled Tolerant. A checked model of healed geometry does not by itself certify the original source. Local tolerances are not a whole-body deviation bound: a tolerant body's display, measurements and mass are estimates. A refused body keeps the kernel's reason in plain words.
 
-File > Import STEP reads a source file and shows its preview. In the browser the file is uploaded and gets the same preview from the same bytes; Open is unchanged and opens saved documents. Accept uses default admission and automatic repairs. A certified source repair above the automatic cap, or with no known nearest feature, asks for an allowed movement of at least the measured gap and who approved it. Accept stays off until both are given. Decline keeps that source with a declined answer and an unbuilt import in the tree. Cancel, including closing the preview, leaves the part unchanged.
+File > Import STEP reads the source and shows its repair review. Accept imports the solid with automatic repairs. A certified source repair above the automatic cap, or with no known nearest feature, asks for an allowed movement of at least the measured gap and the approver's name. Accept stays off until both are given. Decline saves an unbuilt import with the declined answer. On desktop, checking the file and building an accepted import run off the interface thread. Cancel or close either window to stop the check and leave the part unchanged. In the browser, Import STEP uploads the file for the same repair review. Open still opens saved documents.
 
 Default STEP imports keep each body Catallax admits independently and list refused bodies with their reasons in Import report. Admitted bodies become separate import features in one undo step. Each keeps the original bytes, their hash, admission evidence and its source selector, so reordering features cannot swap solids. Part-level limits, multi-body reviews with explicit repair answers, IGES imports and replacements remain all-or-nothing.
 
-An opening that exceeds the application allowance refuses without publishing a blank import feature or partial body. See the [known filleted STEP opening limit](needs-catallax.md#numerical-step-reopening) and its Catallax follow-up.
+Desktop STEP admission has no application work cap. The browser keeps its existing allowance while it runs admission on the page thread. The desktop census test opens and cancels ABC file `00000025`, which exceeds the former 100-million-unit allowance. Catallax can admit solids from this file even if a sibling body is refused. Download [the ABC STEP fixture](https://concept-collection.github.io/abc-step-1000/step/00000025_ad34a3f60c4a4caa99646600_step_005.step.gz) and decompress it before running the test:
+
+```sh
+SOLIDDRAFT_CENSUS_STEP=/path/to/00000025.step cargo test -p soliddraft-app --lib \
+  census_step_opens_as_solid_and_cancel_stops_its_running_admission -- --ignored --nocapture
+```
 
 Changed source bytes for a selected STEP import replace the whole file only when every solid has a verified partner; see [Replace an imported file](#replace-an-imported-file). An unmatched solid, or changed IGES source bytes for a selected solid, refuses the replacement. Import the changed file as new bodies instead.
 

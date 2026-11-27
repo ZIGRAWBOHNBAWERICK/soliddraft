@@ -4,18 +4,96 @@ use crate::commands::{Agents, CommandSpec, Size, Undo};
 use crate::icons::Icon;
 use crate::state::{AppAction, RibbonTab};
 use serde_json::Value;
-use soliddraft_assistant::tools::schema::{any_of, array, boolean, optional, string};
+use soliddraft_assistant::tools::schema::{
+    any_of, array, boolean, described, integer, number, object, one_of, optional, string,
+};
+
+fn segment() -> Value {
+    object(&[
+        ("value_mm", string("Explicit total zone diameter in mm, as a decimal")),
+        ("diameter_zone", boolean("Must be true for this axis control")),
+        ("material", optional(one_of(&["regardless", "maximum", "least"], "Feature material condition"))),
+        (
+            "datums",
+            optional(array(
+                object(&[
+                    ("letter", string("A declared datum")),
+                    ("material", optional(one_of(&["regardless", "maximum", "least"], "Datum material boundary"))),
+                ]),
+                "Ordered datum references, primary first",
+            )),
+        ),
+    ])
+}
+
+fn vector(label: &str) -> Value {
+    array(number("Coordinate in part axes"), label)
+}
+
+fn target() -> Value {
+    object(&[
+        ("datum", string("Declared datum letter")),
+        ("number", integer("Explicit positive target number for this datum")),
+        ("face", string("One face in the datum declaration")),
+        ("point_mm", vector("Target center: three part coordinates in mm")),
+        (
+            "kind",
+            object(&[
+                ("shape", one_of(&["point", "line", "area"], "Target shape")),
+                ("length_mm", optional(string("Line only: required full length in mm"))),
+                ("direction", optional(vector("Line only: required tangent direction in part axes"))),
+                (
+                    "area",
+                    optional(object(&[
+                        ("shape", one_of(&["circular", "rectangular"], "Required area shape")),
+                        ("diameter_mm", optional(string("Circular only: required full diameter in mm"))),
+                        ("length_mm", optional(string("Rectangular only: required full length in mm"))),
+                        ("width_mm", optional(string("Rectangular only: required full width in mm"))),
+                        ("direction", optional(vector("Rectangular only: required tangent length axis"))),
+                    ])),
+                ),
+            ]),
+        ),
+    ])
+}
+
+fn position_frame() -> Value {
+    object(&[
+        ("frame", one_of(&["single", "composite"], "Position frame type")),
+        ("segment", optional(described(segment(), "Required for a single frame; omit for a composite"))),
+        (
+            "projected_zone",
+            optional(described(
+                object(&[
+                    ("height_mm", string("Explicit positive height along the outward axis, in mm")),
+                    ("direction", vector("Explicit outward direction in part axes")),
+                    ("entry_faces", array(string("Planar entry face name"), "One per feature, in order")),
+                ]),
+                "Single frames only",
+            )),
+        ),
+        ("upper", optional(described(segment(), "Required upper segment of a composite; omit for a single frame"))),
+        ("lower", optional(described(segment(), "Required lower segment of a composite; omit for a single frame"))),
+    ])
+}
 
 fn add_params() -> Vec<(&'static str, Value)> {
     let faces = || array(string("A face name, such as Boss-Extrude1 · End cap"), "The faces of one feature");
     let two = |what| array(faces(), what);
     vec![
-        ("kind", string("datum, diameter, radius, hole, distance, slot, tolerance or finish")),
+        (
+            "kind",
+            string(
+                "datum, datum_target, diameter, radius, hole, distance, slot, width, chamfer, edge_break, basic_angle, tolerance, position_control or finish",
+            ),
+        ),
         ("name", optional(string("The item's name; one is made up when left out"))),
         ("replaces", optional(string("The name of the item this one takes the place of"))),
         ("faces", optional(faces())),
         ("features", optional(two("A pattern: the faces of each feature, such as each of four holes"))),
         ("letter", optional(string("A datum's letter; the next free one when left out"))),
+        ("target", optional(target())),
+        ("frame", optional(position_frame())),
         ("tolerance", optional(string("A dimension's tolerance: H7, ±0.1, +0.1/0, +0.2/-0.1 or basic"))),
         ("through", optional(boolean("true for a drill that goes through the part"))),
         ("thread", optional(string("A threaded diameter or hole's designation, such as M6x1-6H"))),
@@ -31,8 +109,13 @@ fn add_params() -> Vec<(&'static str, Value)> {
         ("from_at", optional(string("Where a distance starts: feature, middle, inner or outer"))),
         ("to_faces", optional(faces())),
         ("to_at", optional(string("Where a distance ends: feature, middle, inner or outer"))),
-        ("flats", optional(two("A slot's two flat sides"))),
+        ("flats", optional(two("The two flat sides of a slot or width"))),
         ("ends", optional(two("A slot's two round ends"))),
+        ("bevel", optional(faces())),
+        ("sides", optional(two("The two supports of a chamfer or edge break, reference side first"))),
+        ("planes", optional(two("The two planar groups for a basic angle"))),
+        ("min_mm", optional(string("Edge break minimum setback in mm, explicitly stated"))),
+        ("max_mm", optional(string("Edge break maximum setback in mm, explicitly stated"))),
         ("characteristic", optional(string("A geometric tolerance's characteristic, such as position or flatness"))),
         ("value", optional(string("A geometric tolerance in mm, such as 0.05"))),
         ("diameter_zone", optional(boolean("true when the tolerance zone is a cylinder"))),
@@ -113,7 +196,9 @@ pub(crate) fn commands() -> Vec<CommandSpec> {
         row("pmi_add", "Add manufacturing information", "Put a datum, dimension, tolerance or finish on faces").agents(
             Agents::Tool,
             "Adds an item or replaces the item named in replaces. Nominal sizes are measured from the part. \
-             Only specify drill depth, thread depth or limits when the user supplies them.",
+             Only specify drill depth, thread depth or limits when the user supplies them. For datum_target and \
+             position_control, use only stated intent. Ask for a missing target, datum, material modifier, zone \
+             height or direction; do not make it up. Omitted segment and datum materials mean RFS and RMB.",
             add_params,
         )
         .undo(Undo::Step),

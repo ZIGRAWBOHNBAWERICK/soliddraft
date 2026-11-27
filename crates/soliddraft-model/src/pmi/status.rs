@@ -63,6 +63,8 @@ pub(crate) enum CheckKind {
     Location,
     SlotLength,
     SlotWidth,
+    Width,
+    EdgeBreak,
     Geometric(GdtCharacteristic),
 }
 
@@ -99,6 +101,8 @@ pub(crate) enum DimensionCheck<'a, F> {
     Location { from: &'a Anchor<F>, to: &'a Anchor<F> },
     SlotLength(&'a [Feature<F>; 2]),
     SlotWidth(&'a [Feature<F>; 2]),
+    Width(&'a [Feature<F>; 2]),
+    EdgeBreak { bevel: &'a [F], sides: &'a [Feature<F>; 2] },
 }
 
 pub(crate) struct DimensionMeasurement {
@@ -145,7 +149,7 @@ pub(crate) fn face_status<'a, F: PartialEq>(
                 status: status.unwrap_or_else(Status::Indeterminate),
             });
         };
-        let mut dimension =
+        let mut compare_checked =
             |tolerance, nominal, request| compare_dimension(tolerance, nominal, || dimension(item, request));
         match &item.kind {
             PmiKind::Size { size, features, tolerance, thread, nominal, .. } if *tolerance != Tolerance::Basic => {
@@ -153,7 +157,7 @@ pub(crate) fn face_status<'a, F: PartialEq>(
                     let status = if thread.is_some() {
                         Err(Indeterminate::Unsupported("Threaded feature size is not checked."))
                     } else {
-                        dimension(*tolerance, *nominal, DimensionCheck::Cylinder { size: *size, member, faces })
+                        compare_checked(*tolerance, *nominal, DimensionCheck::Cylinder { size: *size, member, faces })
                     };
                     add(CheckKind::Cylinder(*size), Some(member), status);
                 }
@@ -161,15 +165,40 @@ pub(crate) fn face_status<'a, F: PartialEq>(
             PmiKind::Location { from, to, tolerance, nominal }
                 if *tolerance != Tolerance::Basic && (from.feature.contains(face) || to.feature.contains(face)) =>
             {
-                add(CheckKind::Location, None, dimension(*tolerance, *nominal, DimensionCheck::Location { from, to }));
+                add(
+                    CheckKind::Location,
+                    None,
+                    compare_checked(*tolerance, *nominal, DimensionCheck::Location { from, to }),
+                );
             }
             PmiKind::Slot { flats, ends, tolerance } if *tolerance != Tolerance::Basic => {
                 if flats.iter().any(|faces| faces.contains(face)) {
-                    add(CheckKind::SlotWidth, None, dimension(*tolerance, None, DimensionCheck::SlotWidth(flats)));
+                    add(
+                        CheckKind::SlotWidth,
+                        None,
+                        compare_checked(*tolerance, None, DimensionCheck::SlotWidth(flats)),
+                    );
                 }
                 if ends.iter().any(|faces| faces.contains(face)) {
-                    add(CheckKind::SlotLength, None, dimension(*tolerance, None, DimensionCheck::SlotLength(ends)));
+                    add(
+                        CheckKind::SlotLength,
+                        None,
+                        compare_checked(*tolerance, None, DimensionCheck::SlotLength(ends)),
+                    );
                 }
+            }
+            PmiKind::Width { flats, tolerance }
+                if *tolerance != Tolerance::Basic && flats.iter().any(|faces| faces.contains(face)) =>
+            {
+                add(CheckKind::Width, None, compare_checked(*tolerance, None, DimensionCheck::Width(flats)));
+            }
+            PmiKind::EdgeBreak { bevel, sides, min_mm, max_mm, .. }
+                if bevel.contains(face) || sides.iter().any(|faces| faces.contains(face)) =>
+            {
+                let checked = dimension_check_edge_break(min_mm.value(), max_mm.value(), || {
+                    dimension(item, DimensionCheck::EdgeBreak { bevel, sides })
+                });
+                add(CheckKind::EdgeBreak, None, checked);
             }
             PmiKind::Gdt { characteristic, tolerance, diameter, material, datums, features } => {
                 for (member, faces) in features.iter().enumerate().filter(|(_, faces)| faces.contains(face)) {
@@ -195,7 +224,11 @@ pub(crate) fn face_status<'a, F: PartialEq>(
             | PmiKind::SurfaceFinish { .. }
             | PmiKind::Size { .. }
             | PmiKind::Location { .. }
-            | PmiKind::Slot { .. } => {}
+            | PmiKind::Slot { .. }
+            | PmiKind::Width { .. }
+            | PmiKind::Chamfer { .. }
+            | PmiKind::EdgeBreak { .. }
+            | PmiKind::BasicAngle { .. } => {}
         }
     }
     result
@@ -219,6 +252,17 @@ fn compare_dimension(
         return Err(Indeterminate::InvalidNominal);
     }
     compare(measured.measured_mm, nominal + lower, nominal + upper)
+}
+
+fn dimension_check_edge_break(
+    min: f64,
+    max: f64,
+    measure: impl FnOnce() -> Result<DimensionMeasurement, Indeterminate>,
+) -> Result<Status, Indeterminate> {
+    if !(min >= 0.0 && max > min && max.is_finite()) {
+        return Err(Indeterminate::InvalidLimits);
+    }
+    compare(measure()?.measured_mm, min, max)
 }
 
 fn datum_frame(datums: &[DatumRef]) -> Result<DatumFrame<'_>, Indeterminate> {
@@ -473,5 +517,39 @@ mod tests {
         assert_eq!(found.contributors.len(), 1);
         assert_eq!(found.contributors[0].status, Status::Indeterminate(Indeterminate::MissingNominal));
         assert_eq!(face_status(&pmi, &2, |_, _| unreachable!(), |_, _| unreachable!()).verdict(), None);
+    }
+
+    #[test]
+    fn edge_break_compares_the_measured_setback_to_absolute_bounds() {
+        use soliddraft_kernel_api::pmi::Decimal;
+
+        let pmi = Pmi {
+            items: vec![PmiItem {
+                id: "Edge break".into(),
+                kind: PmiKind::EdgeBreak {
+                    bevel: vec![1],
+                    sides: [vec![2], vec![3]],
+                    min_mm: Decimal::parse("0.2").unwrap(),
+                    max_mm: Decimal::parse("0.5").unwrap(),
+                },
+            }],
+            ..Pmi::default()
+        };
+        for (measured_mm, verdict) in [(0.5, Verdict::InTolerance), (0.51, Verdict::OutOfTolerance)] {
+            let status = face_status(
+                &pmi,
+                &2,
+                |_, request| {
+                    let DimensionCheck::EdgeBreak { bevel: [1], sides } = request else {
+                        panic!("edge break must request the bevel and its supports")
+                    };
+                    assert_eq!(sides, &[vec![2], vec![3]]);
+                    Ok(DimensionMeasurement { measured_mm, nominal_mm: None })
+                },
+                |_, _| unreachable!(),
+            );
+            assert_eq!(status.verdict(), Some(verdict));
+        }
+        assert_eq!(face_status(&pmi, &4, |_, _| unreachable!(), |_, _| unreachable!()).verdict(), None);
     }
 }

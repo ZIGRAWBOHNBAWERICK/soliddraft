@@ -10,7 +10,12 @@ fn add_params() -> Vec<(&'static str, Value)> {
     let faces = || array(string("A face name, such as Boss-Extrude1 · End cap"), "The faces of one feature");
     let two = |what| array(faces(), what);
     vec![
-        ("kind", string("datum, diameter, radius, hole, distance, slot, tolerance or finish")),
+        (
+            "kind",
+            string(
+                "datum, diameter, radius, hole, distance, slot, width, chamfer, edge_break, basic_angle, tolerance or finish",
+            ),
+        ),
         ("name", optional(string("The item's name; one is made up when left out"))),
         ("replaces", optional(string("The name of the item this one takes the place of"))),
         ("faces", optional(faces())),
@@ -31,8 +36,13 @@ fn add_params() -> Vec<(&'static str, Value)> {
         ("from_at", optional(string("Where a distance starts: feature, middle, inner or outer"))),
         ("to_faces", optional(faces())),
         ("to_at", optional(string("Where a distance ends: feature, middle, inner or outer"))),
-        ("flats", optional(two("A slot's two flat sides"))),
+        ("flats", optional(two("The two flat sides of a slot or width"))),
         ("ends", optional(two("A slot's two round ends"))),
+        ("bevel", optional(faces())),
+        ("sides", optional(two("The two supports of a chamfer or edge break, reference side first"))),
+        ("planes", optional(two("The two planar groups for a basic angle"))),
+        ("min_mm", optional(string("Edge break minimum setback in mm, explicitly stated"))),
+        ("max_mm", optional(string("Edge break maximum setback in mm, explicitly stated"))),
         ("characteristic", optional(string("A geometric tolerance's characteristic, such as position or flatness"))),
         ("value", optional(string("A geometric tolerance in mm, such as 0.05"))),
         ("diameter_zone", optional(boolean("true when the tolerance zone is a cylinder"))),

@@ -301,3 +301,130 @@ fn hole_requirements_round_trip_through_panel_tools_and_drawing() {
     call(&mut reopened, "drawing_export_pdf", json!({"path": dir.join("hole-pmi.pdf")}));
     let _ = std::fs::remove_dir_all(scratch);
 }
+
+#[test]
+fn planar_pmi_follows_the_same_faces_through_reopen_and_edits() {
+    use soliddraft_kernel_api::SurfaceKind::Plane;
+
+    let mut s = state("Planar PMI");
+    call(
+        &mut s,
+        "sketch",
+        json!({"plane": "top", "shapes": [{"shape": "rectangle", "center": [40, 20, 0], "width": 80, "height": 40}]}),
+    );
+    call(&mut s, "extrude", json!({"sketch": "Sketch1", "depth": 10, "flip": false}));
+    let edge = s
+        .doc
+        .edges
+        .iter()
+        .find(|edge| (edge.midpoint.x - 80.0).abs() < 1e-6 && (edge.midpoint.z - 10.0).abs() < 1e-6)
+        .unwrap();
+    let edge = format!("{} · {}", s.doc.feature(edge.feature).unwrap().name, edge.label);
+    call(&mut s, "chamfer", json!({"edges": [edge], "distance": 1}));
+    let top = bracket::face(&s, Plane, [None, None, Some(10.0)]);
+    let bottom = bracket::face(&s, Plane, [None, None, Some(0.0)]);
+    let side = bracket::face(&s, Plane, [Some(80.0), None, None]);
+    let bevel = bracket::face(&s, Plane, [Some(79.5), None, Some(9.5)]);
+    let near = bracket::face(&s, Plane, [None, Some(0.0), None]);
+    let far = bracket::face(&s, Plane, [None, Some(40.0), None]);
+    for input in [
+        json!({"kind": "width", "name": "Opposed flats", "flats": [[top], [bottom]]}),
+        json!({"kind": "chamfer", "name": "Bevel size", "bevel": [bevel], "sides": [[top], [side]]}),
+        json!({"kind": "edge_break", "name": "Break limit", "bevel": [bevel], "sides": [[top], [side]],
+               "min_mm": "0.5", "max_mm": "4.5"}),
+        json!({"kind": "basic_angle", "name": "Bevel angle", "planes": [[top], [bevel]]}),
+        json!({"kind": "distance", "name": "Basic span", "from_faces": [near], "to_faces": [far], "tolerance": "basic"}),
+    ] {
+        let added = call(&mut s, "pmi_add", input);
+        assert!(added["added"].get("problem").is_none(), "{added}");
+    }
+    let stored = s.doc.model().pmi().clone();
+    let before = call(&mut s, "pmi_list", json!({}));
+    let metric = |listed: &serde_json::Value, index: usize, field: &str| {
+        let row = &listed["items"][index];
+        assert!(row.get("problem").is_none(), "{row}");
+        row[field][0].as_f64().unwrap_or_else(|| panic!("no {field} in {row}"))
+    };
+    let close = |actual: f64, expected: f64| assert!((actual - expected).abs() < 1e-6, "{actual} != {expected}");
+    for (index, unit, expected) in [
+        (0, "measured_mm", 10.0),
+        (1, "measured_mm", 1.0),
+        (1, "measured_deg", 45.0),
+        (2, "measured_mm", 1.0),
+        (3, "measured_deg", 135.0),
+        (4, "measured_mm", 40.0),
+    ] {
+        close(metric(&before, index, unit), expected);
+    }
+
+    let scratch = std::env::temp_dir().join(format!("soliddraft-planar-pmi-{}", std::process::id()));
+    let proof = std::env::var_os("SOLIDDRAFT_PMI_PROOF_DIR").map_or_else(|| scratch.clone(), std::path::PathBuf::from);
+    std::fs::create_dir_all(&scratch).unwrap();
+    std::fs::create_dir_all(&proof).unwrap();
+    let path = scratch.join("planar-pmi.dwprt");
+    call(&mut s, "save_as", json!({"path": path}));
+    let mut reopened = state("Empty");
+    call(&mut reopened, "open", json!({"path": path}));
+    assert_eq!(*reopened.doc.model().pmi(), stored);
+    assert_eq!(call(&mut reopened, "pmi_list", json!({})), before);
+
+    call(&mut reopened, "edit_extrude", json!({"feature": "Boss-Extrude1", "depth": 12, "flip": false}));
+    call(&mut reopened, "edit_chamfer", json!({"feature": "Chamfer1", "distance": 2, "other_distance": 4}));
+    assert_eq!(*reopened.doc.model().pmi(), stored);
+    let after = call(&mut reopened, "pmi_list", json!({}));
+    for index in 0..5 {
+        assert_eq!(after["items"][index]["name"], before["items"][index]["name"]);
+        assert_eq!(after["items"][index]["faces"], before["items"][index]["faces"]);
+    }
+    close(metric(&after, 0, "measured_mm"), 12.0);
+    let top_setback = metric(&after, 1, "measured_mm");
+    let side_setback: f64 = if (top_setback - 2.0).abs() < 1e-6 {
+        4.0
+    } else {
+        close(top_setback, 4.0);
+        2.0
+    };
+    let angle = side_setback.atan2(top_setback).to_degrees();
+    close(metric(&after, 1, "measured_deg"), angle);
+    close(metric(&after, 2, "measured_mm"), 4.0);
+    assert_eq!(after["items"][2]["bounds_mm"], json!({"min": 0.5, "max": 4.5}));
+    close(metric(&after, 3, "measured_deg"), 180.0 - angle);
+    assert_eq!(after["items"][4], before["items"][4]);
+
+    call(&mut reopened, "make_drawing", json!({"template": "iso-a3"}));
+    let session = reopened.drawing.session.as_ref().unwrap();
+    assert!(session.requirements.unplaced.is_empty(), "{:?}", session.requirements.unplaced);
+    let drawing = &session.doc.drawing;
+    let shown = pmi_items::shown(drawing);
+    for name in ["Opposed flats", "Bevel size", "Break limit", "Bevel angle", "Basic span"] {
+        assert_eq!(shown.get(name), Some(&1), "{name}: {shown:?}");
+    }
+    let angular = drawing.sheets[0]
+        .annotations
+        .iter()
+        .find_map(|a| match &a.body {
+            AnnotationKind::Dimension(d) if matches!(d.kind, soliddraft_drawing::DimensionKind::Angular) => {
+                Some((a, d))
+            }
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(angular.0.anchors.len(), 2);
+    assert_eq!(angular.1.tolerance, soliddraft_kernel_api::pmi::Tolerance::Basic);
+    let soliddraft_drawing::DimValue::Measured { value } = angular.1.value else {
+        panic!("the drawing must use the measured angle");
+    };
+    close(value, 180.0 - angle);
+    for index in [1, 2] {
+        let text = after["items"][index]["callout"].as_str().unwrap();
+        assert!(
+            drawing.sheets[0].annotations.iter().any(|annotation| {
+                !annotation.anchors.is_empty()
+                    && matches!(&annotation.body, AnnotationKind::Note { text: drawn, .. } if drawn == text)
+            }),
+            "missing {text}"
+        );
+    }
+    call(&mut reopened, "drawing_export_pdf", json!({"path": proof.join("planar-pmi.pdf")}));
+    std::fs::remove_dir_all(scratch).unwrap();
+}

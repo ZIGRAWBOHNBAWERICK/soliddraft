@@ -793,6 +793,28 @@ pub struct Validation {
     pub issues: Vec<String>,
 }
 
+/// A whole-edge distance bound in millimetres. `None` means the kernel could not prove it.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct EdgeProof {
+    /// The backend's retained identity for the edge.
+    pub edge: EdgeId,
+    /// An outward upper bound, absent when the edge could not be proved.
+    pub bound_mm: Option<f64>,
+}
+
+/// Results and costs for a bounded proof of one body's edges.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct EdgeProofRun {
+    /// Results for the edges the kernel visited.
+    pub edges: Vec<EdgeProof>,
+    /// Work charged against the requested limit.
+    pub work_used: u64,
+    /// Sum of CPU time across the proof workers, where the platform can measure it.
+    pub cpu_ns: Option<u64>,
+    /// Peak number of threads used by the proof.
+    pub threads_used: usize,
+}
+
 /// What a STEP export writes and how closely it must follow the exact body.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct StepOptions {
@@ -1385,6 +1407,14 @@ pub trait Kernel: Send + Sync {
     fn body_accuracy(&self, body: BodyId) -> KernelResult<BodyAccuracy> {
         let _ = body;
         Ok(BodyAccuracy::Exact)
+    }
+
+    /// Bounds the distance from each complete edge curve to its incident surfaces.
+    /// The work limit is shared across the body's edges. Edges left unproved when the
+    /// budget runs out may be omitted. Stop promptly when `interrupt` is stopped.
+    fn prove_edges(&self, body: BodyId, work_limit: u64, interrupt: &Interrupt) -> KernelResult<EdgeProofRun> {
+        let _ = (body, work_limit, interrupt);
+        Err(KernelError::Unsupported("Whole-edge proof is unavailable in this kernel".into()))
     }
 
     /// Volume, area, centroid and inertia.

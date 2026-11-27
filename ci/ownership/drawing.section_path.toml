@@ -1,0 +1,6 @@
+[[areas]]
+name = "drawing.section_path"
+owner = "core"
+crate = "soliddraft-drawing"
+paths = ["crates/soliddraft-drawing/src/section_path.rs"]
+module = ["section_path"]

@@ -1,9 +1,11 @@
 {
   "files": {
-    "ci/gpu-acceptance/README.md": [],
     "ci/gpu-acceptance/p1-reference.pgm": [],
+    "ci/gpu-acceptance/preview.py": [],
     "ci/gpu-acceptance/probe.js": [],
+    "ci/gpu-acceptance/README.md": [],
     "ci/gpu-acceptance/run.py": [],
+    "ci/gpu-acceptance/test_preview.py": [],
     "ci/gpu-acceptance/test_run.py": []
   }
 }

@@ -43,9 +43,28 @@ pub struct Rules {
     pub refuse_proof_reservation: bool,
     /// Delays the next drawing view to exercise native request handling.
     pub drawing_delay: std::time::Duration,
+    /// Every checked display waits until its body is in `checked_released`.
+    pub hold_checked: bool,
+    /// The bodies whose checked display waits.
+    pub checked_holding: Vec<BodyId>,
+    pub checked_released: Vec<BodyId>,
+    /// CPU preview and rendering calls, which a GPU preview replaces.
+    pub cpu_previews: usize,
 }
 
 impl Gated {
+    /// Waits while checked displays are held, until `body` is released.
+    fn check_checked(&self, body: BodyId) {
+        let mut rules = self.rules.lock().unwrap();
+        if !rules.hold_checked || rules.checked_released.contains(&body) {
+            return;
+        }
+        rules.checked_holding.push(body);
+        self.changed.notify_all();
+        rules = self.changed.wait_while(rules, |r| r.hold_checked && !r.checked_released.contains(&body)).unwrap();
+        rules.checked_holding.retain(|held| *held != body);
+    }
+
     /// Spins as a long build does, until the interrupt over this thread's requests stops
     /// it. A backend that can stop part way registers so; see [`Interrupt::register`].
     fn spin(&self, distance: f64) -> KernelResult<()> {
@@ -200,8 +219,27 @@ impl Kernel for Gated {
         self.inner.reserve_proof_work()
     }
     fn rendering(&self, body: BodyId, params: &TessellationParams) -> KernelResult<Mesh> {
+        self.rules.lock().unwrap().cpu_previews += 1;
         self.display(body)?;
         self.inner.rendering(body, params)
+    }
+
+    fn checked_rendering(&self, body: BodyId, params: &TessellationParams) -> KernelResult<Mesh> {
+        self.check_checked(body);
+        self.display(body)?;
+        self.inner.checked_rendering(body, params)
+    }
+
+    fn checked_rendering_edges(&self, body: BodyId, params: &TessellationParams) -> KernelResult<Vec<EdgePolyline>> {
+        self.inner.checked_rendering_edges(body, params)
+    }
+
+    fn gpu_preview(&self, body: BodyId, params: &TessellationParams) -> KernelResult<Option<GpuPreview>> {
+        self.inner.gpu_preview(body, params)
+    }
+
+    fn face_ray_point(&self, body: BodyId, face: FaceId, origin: Vec3, direction: Vec3) -> KernelResult<Option<Vec3>> {
+        self.inner.face_ray_point(body, face, origin, direction)
     }
 
     fn rendering_edges(&self, body: BodyId, params: &TessellationParams) -> KernelResult<Vec<EdgePolyline>> {
@@ -213,6 +251,7 @@ impl Kernel for Gated {
     }
 
     fn preview(&self, body: BodyId, params: &TessellationParams) -> KernelResult<Mesh> {
+        self.rules.lock().unwrap().cpu_previews += 1;
         self.display(body)?;
         self.inner.preview(body, params)
     }

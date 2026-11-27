@@ -149,15 +149,15 @@ pub(crate) fn face_status<'a, F: PartialEq>(
                 status: status.unwrap_or_else(Status::Indeterminate),
             });
         };
-        let mut compare_checked =
-            |tolerance, nominal, request| compare_dimension(tolerance, nominal, || dimension(item, request));
+        let mut measure = |request| dimension(item, request);
+        let mut dimension = |tolerance, nominal, request| compare_dimension(tolerance, nominal, || measure(request));
         match &item.kind {
             PmiKind::Size { size, features, tolerance, thread, nominal, .. } if *tolerance != Tolerance::Basic => {
                 for (member, faces) in features.iter().enumerate().filter(|(_, faces)| faces.contains(face)) {
                     let status = if thread.is_some() {
                         Err(Indeterminate::Unsupported("Threaded feature size is not checked."))
                     } else {
-                        compare_checked(*tolerance, *nominal, DimensionCheck::Cylinder { size: *size, member, faces })
+                        dimension(*tolerance, *nominal, DimensionCheck::Cylinder { size: *size, member, faces })
                     };
                     add(CheckKind::Cylinder(*size), Some(member), status);
                 }
@@ -165,38 +165,26 @@ pub(crate) fn face_status<'a, F: PartialEq>(
             PmiKind::Location { from, to, tolerance, nominal }
                 if *tolerance != Tolerance::Basic && (from.feature.contains(face) || to.feature.contains(face)) =>
             {
-                add(
-                    CheckKind::Location,
-                    None,
-                    compare_checked(*tolerance, *nominal, DimensionCheck::Location { from, to }),
-                );
+                add(CheckKind::Location, None, dimension(*tolerance, *nominal, DimensionCheck::Location { from, to }));
             }
             PmiKind::Slot { flats, ends, tolerance } if *tolerance != Tolerance::Basic => {
                 if flats.iter().any(|faces| faces.contains(face)) {
-                    add(
-                        CheckKind::SlotWidth,
-                        None,
-                        compare_checked(*tolerance, None, DimensionCheck::SlotWidth(flats)),
-                    );
+                    add(CheckKind::SlotWidth, None, dimension(*tolerance, None, DimensionCheck::SlotWidth(flats)));
                 }
                 if ends.iter().any(|faces| faces.contains(face)) {
-                    add(
-                        CheckKind::SlotLength,
-                        None,
-                        compare_checked(*tolerance, None, DimensionCheck::SlotLength(ends)),
-                    );
+                    add(CheckKind::SlotLength, None, dimension(*tolerance, None, DimensionCheck::SlotLength(ends)));
                 }
             }
             PmiKind::Width { flats, tolerance }
                 if *tolerance != Tolerance::Basic && flats.iter().any(|faces| faces.contains(face)) =>
             {
-                add(CheckKind::Width, None, compare_checked(*tolerance, None, DimensionCheck::Width(flats)));
+                add(CheckKind::Width, None, dimension(*tolerance, None, DimensionCheck::Width(flats)));
             }
             PmiKind::EdgeBreak { bevel, sides, min_mm, max_mm, .. }
                 if bevel.contains(face) || sides.iter().any(|faces| faces.contains(face)) =>
             {
                 let checked = dimension_check_edge_break(min_mm.value(), max_mm.value(), || {
-                    dimension(item, DimensionCheck::EdgeBreak { bevel, sides })
+                    measure(DimensionCheck::EdgeBreak { bevel, sides })
                 });
                 add(CheckKind::EdgeBreak, None, checked);
             }

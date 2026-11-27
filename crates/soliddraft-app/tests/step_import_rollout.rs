@@ -13,6 +13,8 @@ use soliddraft_kernel_api::StepOptions;
 use soliddraft_tessellation::Level;
 use std::time::{Duration, Instant};
 
+#[path = "support/import_open.rs"]
+mod import_open;
 #[path = "support/render_steps.rs"]
 mod render_steps;
 
@@ -102,12 +104,12 @@ fn clean_block_and_cylinder_import_render_save_reopen_and_checked_export() {
             });
         app.run_steps(3);
         app.state_mut().state.push(AppAction::ImportStep(Some(path.clone())));
-        app.run_steps(3);
+        import_open::settle(&mut app);
         assert!(app.state().state.import_dialog.is_some());
         assert!(app.state().state.doc.features.is_empty(), "preview must not edit the part");
         app.get_by_label("No repairs proposed.");
         app.get_by_role_and_label(egui::accesskit::Role::Button, "Accept").click();
-        app.run_steps(3);
+        import_open::settle(&mut app);
         let doc = &app.state().state.doc;
         assert_eq!(doc.features[0].status, soliddraft_app::document::FeatureStatus::Ok);
         let body = doc.display_body().unwrap();
@@ -231,7 +233,7 @@ fn approved_seam_repair_renders_saves_reopens_and_exports_with_its_record() {
         .build_eframe(|cc| SolidDraftApp::new(cc, Document::new("Repaired", kernel.clone()), Automation::default()));
     app.run_steps(3);
     app.state_mut().state.push(AppAction::ImportStep(Some(path.clone())));
-    app.run_steps(3);
+    import_open::settle(&mut app);
     app.get_by_label("Measured 0.02 mm");
     app.render().unwrap().save(root.join("repair-review.png")).unwrap();
     app.get_by_role_and_label(egui::accesskit::Role::TextInput, "Approved by").click();
@@ -242,7 +244,7 @@ fn approved_seam_repair_renders_saves_reopens_and_exports_with_its_record() {
     app.get_by_role_and_label(egui::accesskit::Role::TextInput, "Approved by").type_text("Ana Reviewer");
     app.run_steps(3);
     app.get_by_role_and_label(egui::accesskit::Role::Button, "Accept").click();
-    app.run_steps(3);
+    import_open::settle(&mut app);
 
     let doc = &app.state().state.doc;
     assert_eq!(doc.features[0].status, soliddraft_app::document::FeatureStatus::Ok);

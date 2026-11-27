@@ -70,9 +70,7 @@ A full symmetric union of equal crossing cylinders can stop at an ambiguous appl
 
 ## Numerical STEP reopening
 
-The owner pocket-rim R2 fillet's STEP reopens as a tolerant body on the ordinary 100,000,000-unit opening allowance. The import keeps all 19 faces and the bounding box within 0.000001 mm. SolidDraft shows the approximate display and refuses to estimate mass until the display closes. Closing that display is a follow-on. [Fillet acceptance](../crates/soliddraft-app/tests/fillet_acceptance.rs).
-
-An import that exhausts the allowance says “This file is too complex to open yet” and leaves the existing part intact.
+The owner pocket-rim R2 fillet's STEP reopens as a tolerant body with all 19 faces and the bounding box within 0.000001 mm. SolidDraft shows the approximate display and refuses to estimate mass until the display closes. Closing that display is a follow-on. [Fillet acceptance](../crates/soliddraft-app/tests/fillet_acceptance.rs).
 
 ## Two-body intersection and distance
 

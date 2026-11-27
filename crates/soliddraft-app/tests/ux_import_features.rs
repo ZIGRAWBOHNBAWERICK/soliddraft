@@ -10,6 +10,8 @@ use soliddraft_app::document::{Document, FeatureKind, FeatureStatus, Selection};
 use soliddraft_app::state::AppAction;
 use std::time::{Duration, Instant};
 
+#[path = "support/import_open.rs"]
+mod import_open;
 #[path = "support/ui.rs"]
 mod ribbon;
 
@@ -88,8 +90,9 @@ fn import(case: &ribbon::Case, app: &mut App) {
     let source = case.path("block.step");
     std::fs::write(&source, BLOCK).unwrap();
     app.state_mut().state.push(AppAction::ImportStep(Some(source)));
-    app.run_steps(6);
+    import_open::settle(app);
     app.get_by_role_and_label(egui::accesskit::Role::Button, "Accept").click();
+    import_open::settle(app);
     settle(app);
     isometric(app);
     all_ok(app);

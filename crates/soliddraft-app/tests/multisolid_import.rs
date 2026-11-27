@@ -1,5 +1,7 @@
 //! Several-solid imports through review, selection, replacement and saved replay.
 
+#[path = "support/import_open.rs"]
+mod import_open;
 #[path = "support/ui.rs"]
 mod ribbon;
 
@@ -20,9 +22,9 @@ fn reviewed(app: &mut ribbon::App, path: std::path::PathBuf, format: ImportForma
         ImportFormat::Iges => AppAction::ImportIges(Some(path)),
         ImportFormat::Mesh => unreachable!(),
     });
-    app.run_steps(4);
+    import_open::settle(app);
     app.get_by_role_and_label(egui::accesskit::Role::Button, "Accept").click();
-    app.run_steps(8);
+    import_open::settle(app);
     assert!(app.state().state.import_dialog.is_none(), "{:?}", app.state().state.note.as_ref().map(|n| &n.text));
 }
 
@@ -323,9 +325,9 @@ fn saved_exhausted_body_id_range_refuses_import_without_changes() {
             let bodies = app.state().state.doc.model().live_bodies();
             let meshes = app.state().state.doc.meshes.clone();
             app.state_mut().state.push(AppAction::ImportStep(Some(source)));
-            app.run_steps(4);
+            import_open::settle(app);
             app.get_by_role_and_label(egui::accesskit::Role::Button, "Accept").click();
-            app.run_steps(8);
+            import_open::settle(app);
             let state = &app.state().state;
             assert_eq!(
                 state.note.as_ref().unwrap().text,

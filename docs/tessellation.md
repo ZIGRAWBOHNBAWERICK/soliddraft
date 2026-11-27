@@ -70,10 +70,13 @@ its cull pass; see "Rendering and picking" in [assemblies.md](assemblies.md).
 
 ## The device budget
 
-The app owns the budget (`DeviceBudget`), not the document, so a file opens the same on
-every machine and a smaller device shows it coarser. The desktop default is 40 million
-triangles in 2 GiB; the browser default is 8 million in 512 MiB. With usage under 80
-percent of the budget the ceiling is fine, under 100 percent standard, beyond it coarse.
+The app owns `DeviceBudget`, not the document. Desktop and browser use one quarter of
+the active device's maximum buffer size, capped at 2 GiB, and allow one triangle per
+64 budgeted bytes. This is a pressure limit, not a measure of free GPU memory.
+Below 80 percent of both limits the ceiling is fine; below both limits it is standard;
+at or above either limit it is coarse. The budget changes only which level
+is drawn, not its parameters or mesh bytes. The render tier also checks the enabled
+compute limit and keeps OpenGL on the basic path.
 
 ## The display cache
 

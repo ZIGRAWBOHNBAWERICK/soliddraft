@@ -63,7 +63,7 @@ impl Renderer {
             ..Default::default()
         };
         let (device, queue) = adapter.request_device(&desc).await?;
-        let offscreen = Offscreen::new(&device, &queue, Tier::of(info.backend));
+        let offscreen = Offscreen::new(&device, &queue, Tier::of(info.backend, &device.limits()));
         let metadata = json!({"renderer":"soliddraft_app::viewport::render::ViewportRenderer",
             "adapter":info.name,"backend":format!("{:?}",info.backend),"size":[960,720]});
         Ok(Self { device, queue, offscreen, metadata })

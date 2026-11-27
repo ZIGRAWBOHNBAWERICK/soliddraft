@@ -60,9 +60,9 @@ impl Exact {
     }
 
     /// The checkpoint a later feature continues from, if this kernel built the body.
-    pub(crate) fn continuation(&self) -> Option<EvaluationCheckpoint> {
+    pub(crate) fn continuation(&self) -> Option<&EvaluationCheckpoint> {
         match self {
-            Exact::Checkpoint(checkpoint) => Some(checkpoint.clone()),
+            Exact::Checkpoint(checkpoint) => Some(checkpoint),
             Exact::Adopted(_) | Exact::Offered(_) => None,
         }
     }

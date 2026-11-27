@@ -368,7 +368,7 @@ impl AssemblySession {
 
     /// What this pass hands the renderer: the meshes that arrived, and again those a
     /// discarded pass carried.
-    fn frame(&mut self, ctx: &egui::Context) -> AssemblyFrame {
+    fn frame(&mut self, ctx: &egui::Context, budget: DeviceBudget) -> AssemblyFrame {
         let pass = ctx.cumulative_pass_nr();
         let resend = ctx.current_pass_index() > 0 && self.outbox.sent_at.is_some_and(|p| p + 1 == pass);
         let (meshes, levels, generation) = {
@@ -409,7 +409,7 @@ impl AssemblySession {
             detail: Detail::default(),
             levels: self.outbox.levels.clone(),
             deviations: self.outbox.deviations.clone(),
-            budget: DeviceBudget::default(),
+            budget,
             display: self.doc.assembly().viewport_state().map_or(self.viewport.display, |s| s.mode),
         }
     }
@@ -1309,7 +1309,7 @@ pub fn viewport(ui: &mut egui::Ui, state: &mut AppState) {
     let nav = &state.navigation;
     let Some(s) = state.assembly.session.as_mut() else { return };
     let ctx = ui.ctx().clone();
-    let frame = s.frame(&ctx);
+    let frame = s.frame(&ctx, state.graphics_device.display_budget);
     let hover_label = s.shown.1.as_ref().and_then(|p| s.doc.table().find(p)).map(|r| s.doc.label(r));
     let empty = s.components().is_empty();
     let events = s.viewport.show_assembly(ui, frame, hover_label.as_deref(), nav);

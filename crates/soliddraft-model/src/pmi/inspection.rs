@@ -11,8 +11,8 @@ use std::ops::Range;
 
 use serde::Serialize;
 use soliddraft_kernel_api::pmi::{
-    DatumRef, Feature, GdtCharacteristic, HoleHeadKind, HoleHeadNominals, MaterialCondition, PmiKind, SizeKind,
-    Tolerance, roughness,
+    DatumRef, Feature, FitClass, GdtCharacteristic, HoleHeadKind, HoleHeadNominals, MaterialCondition, PmiKind,
+    PositionFrame, SizeKind, Tolerance, roughness,
 };
 
 use crate::pmi::PmiRow;
@@ -101,14 +101,38 @@ pub enum InspectionKind {
         /// Material condition modifier on the tolerance zone.
         material: MaterialCondition,
     },
+    /// One segment of a typed position control frame.
+    Position {
+        /// Which segment of the frame this row checks.
+        segment: FrameSegment,
+        /// Whether the tolerance zone is cylindrical.
+        diameter: bool,
+        /// Feature material condition modifier on the tolerance zone.
+        material: MaterialCondition,
+    },
     /// Surface texture requirement.
     SurfaceFinish,
     /// Thread designation, not a measured cylinder diameter.
     Thread,
     /// Datum definition, not a measurement.
     Datum,
+    /// Datum target definition, not a measurement.
+    DatumTarget,
     /// Part note, not a measurement.
     Note,
+}
+
+/// The segment of a position control frame that a characteristic row checks.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FrameSegment {
+    /// The only segment of a single-segment frame.
+    Single,
+    /// The only segment of a frame with a projected tolerance zone.
+    Projected,
+    /// The pattern-locating upper segment of a composite frame.
+    CompositeUpper,
+    /// The feature-relating lower segment of a composite frame.
+    CompositeLower,
 }
 
 impl InspectionKind {
@@ -132,9 +156,14 @@ impl InspectionKind {
             Self::EdgeBreak => "edge_break",
             Self::BasicAngle => "basic_angle",
             Self::Geometric { characteristic, .. } => characteristic.key(),
+            Self::Position { segment: FrameSegment::Single, .. } => "position",
+            Self::Position { segment: FrameSegment::Projected, .. } => "projected_position",
+            Self::Position { segment: FrameSegment::CompositeUpper, .. } => "composite_position_upper",
+            Self::Position { segment: FrameSegment::CompositeLower, .. } => "composite_position_lower",
             Self::SurfaceFinish => "surface_finish",
             Self::Thread => "thread",
             Self::Datum => "datum",
+            Self::DatumTarget => "datum_target",
             Self::Note => "note",
         }
     }
@@ -207,12 +236,13 @@ pub struct InspectionRow {
     /// Index into the group's ordered datum frame, only for a derived basic distance.
     pub locating_datum: Option<usize>,
     face_groups: Range<usize>,
+    frame: Option<Vec<DatumRef>>,
 }
 
 impl InspectionRow {
     /// Classify the requirement without treating a CAD nominal as an inspection result.
     pub fn applicability(&self, group: &InspectionGroup) -> Applicability {
-        if matches!(self.kind, InspectionKind::Datum | InspectionKind::Note)
+        if matches!(self.kind, InspectionKind::Datum | InspectionKind::DatumTarget | InspectionKind::Note)
             || self.dimension_tolerance == Some(Tolerance::Basic)
         {
             Applicability::Reference
@@ -227,6 +257,25 @@ impl InspectionRow {
     /// A locating distance refers to its datum's face separately, by ordered datum reference.
     pub fn faces<'a>(&self, group: &'a InspectionGroup) -> &'a [Feature<FaceRef>] {
         &group.face_groups[self.face_groups.clone()]
+    }
+
+    /// Datum references in precedence order for this row's tolerance zone. A segment of a
+    /// typed position frame has its own; other rows use the group's.
+    pub fn datums<'a>(&'a self, group: &'a InspectionGroup) -> &'a [DatumRef] {
+        self.frame.as_deref().unwrap_or(&group.datums)
+    }
+
+    /// The source tolerance's kind as the CSV writes it, with its ISO 286 fit class.
+    fn tolerance(&self) -> (&'static str, Option<FitClass>) {
+        match self.dimension_tolerance {
+            None => ("", None),
+            Some(Tolerance::None) => ("general", None),
+            Some(Tolerance::Symmetric { .. }) => ("symmetric", None),
+            Some(Tolerance::Deviation { .. }) => ("deviation", None),
+            Some(Tolerance::Limits { .. }) => ("limits", None),
+            Some(Tolerance::Fit { class }) => ("iso_286_fit", Some(class)),
+            Some(Tolerance::Basic) => ("basic", None),
+        }
     }
 
     fn dimension(&mut self, nominal: Option<f64>, tolerance: Tolerance) {
@@ -284,6 +333,7 @@ impl InspectionGroup {
             dimension_tolerance: None,
             locating_datum,
             face_groups,
+            frame: None,
         });
         self.rows.last_mut().unwrap()
     }
@@ -425,7 +475,37 @@ impl InspectionGroup {
                 angle.dimension(measured.first().copied(), Tolerance::Basic);
                 angle.unit = Some(InspectionUnit::Degree);
             }
-            PmiKind::DatumTarget(_) | PmiKind::PositionControl(_) => {}
+            PmiKind::DatumTarget(target) => {
+                group.face_groups.push(vec![target.face]);
+                group.add(InspectionKind::DatumTarget, None, 0..1, None);
+            }
+            PmiKind::PositionControl(control) => {
+                group.face_groups = control.features;
+                let segments = match control.frame {
+                    PositionFrame::Single { segment, projected_zone } => {
+                        let role =
+                            if projected_zone.is_some() { FrameSegment::Projected } else { FrameSegment::Single };
+                        vec![(role, segment)]
+                    }
+                    PositionFrame::Composite { upper, lower } => {
+                        vec![(FrameSegment::CompositeUpper, upper), (FrameSegment::CompositeLower, lower)]
+                    }
+                };
+                group.datums = segments[0].1.datums.clone();
+                for index in 0..group.face_groups.len() {
+                    for (segment, zone) in &segments {
+                        let kind = InspectionKind::Position {
+                            segment: *segment,
+                            diameter: zone.diameter_zone,
+                            material: zone.material,
+                        };
+                        let row = group.add(kind, Some(index + 1), index..index + 1, None);
+                        row.unit = Some(InspectionUnit::Millimetre);
+                        row.upper_limit = Some(zone.value_mm.value()).filter(|value| value.is_finite());
+                        row.frame = Some(zone.datums.clone());
+                    }
+                }
+            }
             PmiKind::Gdt { characteristic, tolerance, diameter, material, datums, features } => {
                 group.face_groups = features;
                 group.datums = datums;
@@ -525,6 +605,21 @@ impl InspectionPlan {
                                 _ => Requirement::Omit("missing geometric tolerance"),
                             }
                         }
+                        InspectionKind::Position { segment, diameter, material } => match (segment, row.upper_limit) {
+                            (FrameSegment::Projected, _) => {
+                                Requirement::Omit("projected tolerance zone has no QIF mapping in this profile")
+                            }
+                            (FrameSegment::CompositeLower, _) => {
+                                Requirement::Omit("composite lower segment has no QIF mapping in this profile")
+                            }
+                            (_, Some(limit_mm)) => Requirement::Geometric {
+                                kind: GdtCharacteristic::Position,
+                                limit_mm,
+                                diametrical: diameter,
+                                material,
+                            },
+                            _ => Requirement::Omit("missing geometric tolerance"),
+                        },
                         InspectionKind::SurfaceFinish => match (row.unit, row.upper_limit) {
                             (Some(InspectionUnit::Micrometre), Some(limit_um)) if group.roughness_average => {
                                 Requirement::RoughnessAverage { limit_um }
@@ -541,6 +636,9 @@ impl InspectionPlan {
                         InspectionKind::EdgeBreak => {
                             Requirement::Omit("bounded edge break has no QIF mapping in this profile")
                         }
+                        InspectionKind::DatumTarget => {
+                            Requirement::Omit("datum target has no QIF mapping in this profile")
+                        }
                         InspectionKind::Note => Requirement::Omit("note is not an inspection requirement"),
                     }
                 };
@@ -554,7 +652,7 @@ impl InspectionPlan {
                         .map(json)
                         .collect::<io::Result<_>>()?,
                     datum_label: group.datum_label.as_deref(),
-                    frame: &group.datums,
+                    frame: row.datums(group),
                     locating_datum: row.locating_datum.map(|index| group.datums[index].letter.as_str()),
                     requirement,
                 });
@@ -582,7 +680,6 @@ impl InspectionPlan {
             "face_refs,problem,actual,disposition\r\n",
         ).as_bytes())?;
         for group in &self.groups {
-            let datums = json(&group.datums)?;
             for row in &group.rows {
                 for text in [
                     &self.part,
@@ -601,20 +698,12 @@ impl InspectionPlan {
                 csv_field(&mut out, &group.callout)?;
                 csv_number(&mut out, row.nominal)?;
                 csv_field(&mut out, row.unit.map_or("", InspectionUnit::symbol))?;
-                let (tolerance, fit) = match row.dimension_tolerance {
-                    None => ("", None),
-                    Some(Tolerance::None) => ("general", None),
-                    Some(Tolerance::Symmetric { .. }) => ("symmetric", None),
-                    Some(Tolerance::Deviation { .. }) => ("deviation", None),
-                    Some(Tolerance::Limits { .. }) => ("limits", None),
-                    Some(Tolerance::Fit { class }) => ("iso_286_fit", Some(class)),
-                    Some(Tolerance::Basic) => ("basic", None),
-                };
+                let (tolerance, fit) = row.tolerance();
                 csv_field(&mut out, tolerance)?;
                 csv_number(&mut out, fit)?;
                 csv_number(&mut out, row.lower_limit)?;
                 csv_number(&mut out, row.upper_limit)?;
-                csv_field(&mut out, &datums)?;
+                csv_field(&mut out, &json(row.datums(group))?)?;
                 csv_field(&mut out, row.locating_datum.map_or("", |index| &group.datums[index].letter))?;
                 csv_field(&mut out, &json(row.faces(group))?)?;
                 csv_field(&mut out, group.problem.as_deref().unwrap_or_default())?;
@@ -651,6 +740,8 @@ fn csv_field(out: &mut impl Write, value: &str) -> io::Result<()> {
     }
     out.write_all(b",")
 }
+
+mod as9102;
 
 #[cfg(test)]
 mod tests;

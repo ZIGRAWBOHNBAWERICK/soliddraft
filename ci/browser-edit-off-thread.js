@@ -138,9 +138,24 @@ async function depthShown(depth, what) {
   await until(async () => (await shown('shown_details')) || {}, drawn => drawn.title === 'Boss-Extrude1'
     && Object.fromEntries(drawn.rows || []).Depth === `${depth} mm`, `${what}: Details does not show Depth ${depth} mm`);
 }
+// Whether egui is editing text: it then focuses its browser text input.
+const textFocused = () => page.eval(() =>
+  document.activeElement instanceof HTMLInputElement && document.activeElement.type === 'text');
+// Clicks Depth until it takes the keyboard. The page runs a frame inside the click's
+// pointerdown, and egui counts a press held over 0.8 s as a drag, which takes no
+// keyboard; one slow frame between the press and the release is enough, and the typed
+// value then went to the viewport instead.
+async function focusDepth() {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    await click(DEPTH);
+    const focused = await until(textFocused, Boolean, 'Depth did not take the keyboard', 30).catch(() => false);
+    if (focused) return;
+    console.log(`Depth did not take the keyboard after click ${attempt + 1}; clicking again`);
+  }
+  throw new Error('Depth did not take the keyboard after three clicks');
+}
 async function typeDepth(depth) {
-  await click(DEPTH);
-  await page.wait(300);
+  await focusDepth();
   await page.press('Control+a');
   await page.type(String(depth));
   await page.press('Enter');

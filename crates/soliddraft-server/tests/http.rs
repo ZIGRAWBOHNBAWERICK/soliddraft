@@ -141,6 +141,7 @@ fn wasm_uses_precompressed_variants_and_representation_specific_etags() {
     assert_eq!(compressed.headers()["content-type"], "application/wasm");
     assert_eq!(compressed.headers()["content-encoding"], "br");
     assert_eq!(compressed.headers()["content-length"], "65536");
+    assert_eq!(compressed.headers()["connection"], "close");
     assert!(!compressed.headers().contains_key("transfer-encoding"));
     let etag = compressed.headers()["etag"].clone();
     assert_eq!(compressed.bytes().unwrap(), brotli.as_slice());
@@ -148,6 +149,11 @@ fn wasm_uses_precompressed_variants_and_representation_specific_etags() {
     let cached = get("br").header("If-None-Match", &etag).send().unwrap();
     assert_eq!(cached.status().as_u16(), 304);
     assert_eq!(cached.headers()["vary"], "Accept-Encoding");
+    assert_eq!(cached.headers()["connection"], "close");
+    let head = client.head(format!("{base}/app_bg.wasm")).header("Accept-Encoding", "br").send().unwrap();
+    assert_eq!(head.headers()["content-length"], "65536");
+    assert_eq!(head.headers()["content-encoding"], "br");
+    assert!(head.bytes().unwrap().is_empty());
     let gzip = get("br;q=0.5, gzip").header("If-None-Match", &etag).send().unwrap();
     assert_eq!(gzip.status().as_u16(), 200);
     assert_eq!(gzip.headers()["content-encoding"], "gzip");

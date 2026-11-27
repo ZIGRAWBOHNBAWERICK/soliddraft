@@ -78,22 +78,44 @@ impl Server {
 fn handle(shared: &Shared, request: Request) {
     let path = request.url().split('?').next().unwrap_or("/").to_owned();
     let method = request.method().clone();
-    let result = match (&method, path.as_str()) {
-        (Method::Get, "/api/info") => Ok(info(shared)),
-        (Method::Get, "/version") => Ok(version(shared)),
+    let (result, static_asset) = match (&method, path.as_str()) {
+        (Method::Get, "/api/info") => (Ok(info(shared)), false),
+        (Method::Get, "/version") => (Ok(version(shared)), false),
         (Method::Post, "/api/assistant") => return assistant(shared, request),
         (Method::Get | Method::Head, p) if !p.starts_with("/api/") => {
-            static_file(&shared.config.web_dir, p, request.headers())
+            (static_file(&shared.config.web_dir, p, request.headers()), true)
         }
-        _ => Err((StatusCode(404), "not found".to_owned())),
+        _ => (Err((StatusCode(404), "not found".to_owned())), false),
     };
     let response = match result {
         Ok(reply) => reply.into_response(&request),
         Err((status, message)) => Reply::text(status, message).into_response(&request),
     };
-    if let Err(e) = request.respond(response) {
+    let sent = if static_asset { respond_static(request, response) } else { request.respond(response) };
+    if let Err(e) = sent {
         log::debug!("{method} {path}: the client went away: {e}");
     }
+}
+
+/// Retire each static connection so a burst of browser asset requests cannot leave
+/// queued connections waiting for idle keep-alive sockets in tiny-http's pool.
+fn respond_static(request: Request, response: Response<std::io::Cursor<Vec<u8>>>) -> std::io::Result<()> {
+    let status = response.status_code();
+    let send_body = request.method() == &Method::Get && status != StatusCode(304);
+    let mut headers = Vec::new();
+    Response::new(status, response.headers().to_vec(), std::io::empty(), response.data_length(), None)
+        .with_chunked_threshold(usize::MAX)
+        .raw_print(&mut headers, request.http_version().clone(), &[], true, None)?;
+    // The serializer ends the header block with a blank line and strips hop-by-hop
+    // headers from its input. Insert Connection before that blank line.
+    let headers = headers.strip_suffix(b"\r\n").expect("the HTTP header block ends with a blank line");
+    let mut writer = request.into_writer();
+    writer.write_all(headers)?;
+    writer.write_all(b"Connection: close\r\n\r\n")?;
+    if send_body {
+        writer.write_all(&response.into_reader().into_inner())?;
+    }
+    writer.flush()
 }
 
 type HandlerResult = Result<Reply, (StatusCode, String)>;
@@ -134,9 +156,9 @@ impl Reply {
 
     fn into_response(self, request: &Request) -> Response<std::io::Cursor<Vec<u8>>> {
         let varies = self.body.len() >= COMPRESS_FROM || self.content_type == "application/wasm";
-        let precompressed = self.encoding.is_some();
-        let gzip =
-            !precompressed && self.body.len() >= COMPRESS_FROM && encoding_quality(request.headers(), "gzip") > 0.0;
+        let gzip = self.encoding.is_none()
+            && self.body.len() >= COMPRESS_FROM
+            && encoding_quality(request.headers(), "gzip") > 0.0;
         let encoding = self.encoding.or(gzip.then_some("gzip"));
         let etag = self.etag.map(|tag| match encoding {
             Some(encoding) => format!("\"{tag}-{encoding}\""),
@@ -156,10 +178,6 @@ impl Reply {
             .with_status_code(status)
             .with_header(header("Content-Type", self.content_type))
             .with_header(header("Cache-Control", self.cache));
-        if precompressed {
-            // Send the known encoded length. Chrome can stall on the chunked Brotli preload.
-            response = response.with_chunked_threshold(usize::MAX);
-        }
         if let Some(encoding) = encoding.filter(|_| !unchanged) {
             response.add_header(header("Content-Encoding", encoding));
         }

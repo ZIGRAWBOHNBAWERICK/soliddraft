@@ -7,14 +7,15 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import preview  # noqa: E402
 
-METAL = {'renderer': 'r', 'adapter': 'Apple M3', 'backend': 'Metal', 'device_type': 'IntegratedGpu'}
+METAL = {'name': 'Apple M3', 'backend': 'Metal', 'device_type': 'IntegratedGpu'}
 
 
-def step(bundle, number, counts, viewport=METAL, calls=()):
+def step(bundle, number, counts, adapter=METAL, calls=()):
     folder = bundle / 'commands' / f'{number:04}'
     folder.mkdir(parents=True)
-    (folder / 'display.json').write_text(json.dumps({'revision': number, 'gpu_preview': counts}))
-    (folder / 'viewport.json').write_text(json.dumps(viewport))
+    (folder / 'display.json').write_text(json.dumps({'revision': number}))
+    if counts is not None:
+        (folder / 'display.gpu.json').write_text(json.dumps({**counts, 'revision': number, 'adapter': adapter}))
     (folder / 'command.json').write_text(json.dumps({'revision': number}))
     (folder / 'kernel.json').write_text(json.dumps({'calls': [{'operation': q, 'wall_ms': ms} for q, ms in calls]}))
     (folder / 'display.kernel.json').write_text(json.dumps({'calls': []}))
@@ -46,7 +47,7 @@ class SummarizeTest(unittest.TestCase):
             self.assertIn('1 CPU previews for the display', preview.summarize('box', bundle, 0)['problems'])
         with tempfile.TemporaryDirectory() as folder:
             bundle = Path(folder)
-            step(bundle, 1, self.counts(), viewport={**METAL, 'adapter': 'llvmpipe', 'device_type': 'Cpu'})
+            step(bundle, 1, self.counts(), adapter={**METAL, 'name': 'llvmpipe', 'device_type': 'Cpu'})
             self.assertFalse(preview.summarize('box', bundle, 0)['accepted'])
 
     def test_the_cpu_preview_route_fails(self):
@@ -54,6 +55,14 @@ class SummarizeTest(unittest.TestCase):
             bundle = Path(folder)
             step(bundle, 1, self.counts(status='GPU preview off, CPU preview kept', gpu_previews=0))
             self.assertFalse(preview.summarize('box', bundle, 0)['accepted'])
+
+    def test_a_step_without_a_gpu_delivery_record_fails(self):
+        with tempfile.TemporaryDirectory() as folder:
+            bundle = Path(folder)
+            step(bundle, 1, None)
+            record = preview.summarize('box', bundle, 0)
+        self.assertFalse(record['accepted'])
+        self.assertIn('GPU preview not on: not installed, no display.gpu.json', record['problems'])
 
 
 if __name__ == '__main__':

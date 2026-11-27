@@ -22,6 +22,7 @@
 //! - a datum, a tolerance or a finish of a flat face, on the line the face shows as
 //!   where a view sees it edge on;
 //! - a tolerance of a feature that has a size on the drawing, under that size;
+//! - a knurl or face note, as a text leader on a visible edge of the annotated face;
 //! - the basic distances that locate the features of a position tolerance, as framed
 //!   dimensions from the datum's line to each feature's centre, one for each distinct
 //!   distance.
@@ -32,7 +33,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use kurbo::Shape as _;
 use serde::{Deserialize, Serialize};
-use soliddraft_kernel_api::drawing::Curve3;
+use soliddraft_kernel_api::drawing::{Curve3, CurveSource};
 use soliddraft_kernel_api::pmi::{At, PmiKind, PositionFrame, SizeKind, TargetArea, TargetKind, Tolerance};
 use soliddraft_kernel_api::{EdgeId, FaceId, FaceInfo, Point2, SurfaceKind, Vec3};
 use soliddraft_model::pmi::PmiRow;
@@ -534,6 +535,47 @@ impl Planner<'_> {
         Ok(())
     }
 
+    fn face_note(&mut self, face: FaceId, text: String, source: PmiSource) -> Result<(), String> {
+        let edges = &self.body.faces.get(&face).ok_or("its face is gone")?.edges;
+        let axis = self.body.axes.get(&face);
+        let mut best = None;
+        let mut best_key = (false, i32::MIN, 0.0);
+        for view in &self.views {
+            let axial = axis.is_some_and(|axis| axis.direction.dot(view.xf.frame.direction).abs() > 1.0 - 1e-6);
+            let load = -self.planned_in(view.id);
+            for curve in &view.curves.curves {
+                let CurveSource::Edge(edge) = curve.source else { continue };
+                if !curve.visible || !edges.contains(&edge) {
+                    continue;
+                }
+                let at = curve.curve.point_at(0.5);
+                let on = view.xf.point(at);
+                let start = view.xf.point(curve.curve.start());
+                let end = view.xf.point(curve.curve.end());
+                let extent = (start.u - on.u).hypot(start.v - on.v) + (end.u - on.u).hypot(end.v - on.v);
+                let key = (axial, load, extent);
+                if extent > self.body.tol * view.xf.scale && key > best_key {
+                    best_key = key;
+                    best = Some((view.id, edge, at, on));
+                }
+            }
+        }
+        let (view, edge, at, on) = best.ok_or("no view shows a visible edge of its face")?;
+        let dir = self.diagonal(view, on);
+        self.plans.push(Plan {
+            source,
+            view,
+            body: AnnotationKind::Note { text, leader: Vec::new() },
+            anchors: vec![(edge, Attach::Point { at }, on)],
+            placement: Point2::new(round(on.u + dir.u * SYMBOL_OFFSET), round(on.v + dir.v * SYMBOL_OFFSET)),
+            slide: Slide { along: dir, step: 3.0 },
+            host: None,
+            stack: None,
+            dropped: false,
+        });
+        Ok(())
+    }
+
     fn row(&mut self, row: &PmiRow, rows: &[PmiRow]) -> Result<(), String> {
         if let Some(problem) = &row.problem {
             return Err(problem.clone());
@@ -913,6 +955,9 @@ impl Planner<'_> {
                     }
                 }
             }
+            PmiKind::Knurl { face, .. } | PmiKind::FaceNote { face, .. } => {
+                self.face_note(*face, row.callout(), source)?;
+            }
         }
         Ok(())
     }
@@ -1169,6 +1214,8 @@ fn shows<F>(body: &AnnotationKind, kind: &PmiKind<F>) -> bool {
                 | PmiKind::Hole { .. }
                 | PmiKind::Chamfer { .. }
                 | PmiKind::EdgeBreak { .. }
+                | PmiKind::Knurl { .. }
+                | PmiKind::FaceNote { .. }
         ) | (
             AnnotationKind::Dimension(_),
             PmiKind::Size { thread: None, .. } | PmiKind::Location { .. } | PmiKind::Width { .. }
@@ -1248,7 +1295,13 @@ pub(crate) fn refresh(
                     match annotation_row(annotation, &source, all).filter(|(row, _)| row.applies()) {
                         Some((row, _))
                             if redraw
-                                && matches!(row.item.kind, PmiKind::DatumTarget(_) | PmiKind::PositionControl(_)) =>
+                                && matches!(
+                                    row.item.kind,
+                                    PmiKind::DatumTarget(_)
+                                        | PmiKind::PositionControl(_)
+                                        | PmiKind::Knurl { .. }
+                                        | PmiKind::FaceNote { .. }
+                                ) =>
                         {
                             redrawn = true;
                             false
@@ -1320,7 +1373,12 @@ fn update(annotation: &mut Annotation, row: &PmiRow, symbols: &crate::library::S
         }
         (
             AnnotationKind::Note { text, .. },
-            PmiKind::Slot { .. } | PmiKind::Hole { .. } | PmiKind::Chamfer { .. } | PmiKind::EdgeBreak { .. },
+            PmiKind::Slot { .. }
+            | PmiKind::Hole { .. }
+            | PmiKind::Chamfer { .. }
+            | PmiKind::EdgeBreak { .. }
+            | PmiKind::Knurl { .. }
+            | PmiKind::FaceNote { .. },
         ) => *text = row.callout(),
         (
             AnnotationKind::Gdt { characteristic, tolerance, diameter, material, datums },

@@ -306,6 +306,8 @@ impl Document {
                 item.kind,
                 soliddraft_kernel_api::pmi::PmiKind::DatumTarget(_)
                     | soliddraft_kernel_api::pmi::PmiKind::PositionControl(_)
+                    | soliddraft_kernel_api::pmi::PmiKind::Knurl { .. }
+                    | soliddraft_kernel_api::pmi::PmiKind::FaceNote { .. }
             )
         }) && let Some(problem) = item.file_problem()
         {

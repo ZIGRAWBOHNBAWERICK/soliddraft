@@ -25,7 +25,6 @@
 //! and a drawing like any other.
 
 pub mod inspection;
-pub(crate) mod status;
 
 use serde::{Deserialize, Serialize};
 use soliddraft_kernel_api::drawing::Curve3;

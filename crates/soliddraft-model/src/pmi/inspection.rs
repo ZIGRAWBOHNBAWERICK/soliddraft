@@ -512,7 +512,7 @@ impl InspectionPlan {
                         | InspectionKind::DrillDepth
                         | InspectionKind::CounterboreDepth
                         | InspectionKind::ThreadDepth => dimension(Dimension::Length),
-                        InspectionKind::SlotWidth => dimension(Dimension::Width),
+                        InspectionKind::SlotWidth | InspectionKind::Width => dimension(Dimension::Width),
                         InspectionKind::Geometric { characteristic, diameter, material } => {
                             match (row.unit, row.upper_limit) {
                                 (Some(InspectionUnit::Millimetre), Some(limit_mm)) => Requirement::Geometric {
@@ -531,8 +531,14 @@ impl InspectionPlan {
                             _ => Requirement::Omit("surface finish has no numeric Ra limit"),
                         },
                         InspectionKind::Thread => Requirement::Omit("thread has no QIF mapping in this profile"),
-                        InspectionKind::CountersinkAngle => {
-                            Requirement::Omit("angle has no QIF mapping in this profile")
+                        InspectionKind::CountersinkAngle
+                        | InspectionKind::ChamferAngle
+                        | InspectionKind::BasicAngle => Requirement::Omit("angle has no QIF mapping in this profile"),
+                        InspectionKind::ChamferSetback => {
+                            Requirement::Omit("chamfer setback has no QIF mapping in this profile")
+                        }
+                        InspectionKind::EdgeBreak => {
+                            Requirement::Omit("bounded edge break has no QIF mapping in this profile")
                         }
                         InspectionKind::Note => Requirement::Omit("note is not an inspection requirement"),
                     }

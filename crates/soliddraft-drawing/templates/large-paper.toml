@@ -1,0 +1,50 @@
+# Larger landscape sizes reuse their drafting family's title block and styles.
+# Paper dimensions are in millimetres (ANSI sizes use 25.4 mm per inch).
+
+[[presets]]
+base = "iso-a3"
+id = "iso-a2"
+name = "ISO A2 landscape · first angle"
+paper = { name = "A2", width = 594, height = 420 }
+columns = 12
+rows = 8
+
+[[presets]]
+base = "iso-a3"
+id = "iso-a1"
+name = "ISO A1 landscape · first angle"
+paper = { name = "A1", width = 841, height = 594 }
+columns = 16
+rows = 12
+
+[[presets]]
+base = "iso-a3"
+id = "iso-a0"
+name = "ISO A0 landscape · first angle"
+paper = { name = "A0", width = 1189, height = 841 }
+columns = 24
+rows = 16
+
+[[presets]]
+base = "ansi-b"
+id = "ansi-c"
+name = "ANSI C landscape · third angle"
+paper = { name = "ANSI C", width = 558.8, height = 431.8 }
+columns = 10
+rows = 8
+
+[[presets]]
+base = "ansi-b"
+id = "ansi-d"
+name = "ANSI D landscape · third angle"
+paper = { name = "ANSI D", width = 863.6, height = 558.8 }
+columns = 16
+rows = 10
+
+[[presets]]
+base = "ansi-b"
+id = "ansi-e"
+name = "ANSI E landscape · third angle"
+paper = { name = "ANSI E", width = 1117.6, height = 863.6 }
+columns = 20
+rows = 16

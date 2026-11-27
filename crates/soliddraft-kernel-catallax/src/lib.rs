@@ -63,7 +63,13 @@ pub struct CatallaxKernel {
     recent_areas: face_areas::Recent,
 }
 
-type RebuildSource = (*const CatallaxKernel, BodyId);
+#[derive(Clone, Copy)]
+struct RebuildSource {
+    kernel: *const CatallaxKernel,
+    previous: BodyId,
+    input: Option<BodyId>,
+    after: u64,
+}
 
 thread_local! {
     static REBUILD_SOURCE: std::cell::Cell<Option<RebuildSource>> = const { std::cell::Cell::new(None) };
@@ -576,6 +582,17 @@ impl CatallaxKernel {
         }
     }
 
+    fn rebuild_source(&self) -> Option<RebuildSource> {
+        REBUILD_SOURCE.get().filter(|source| std::ptr::eq(source.kernel, self))
+    }
+
+    fn advance_rebuild_source(&self, seq: u64) {
+        if let Some(mut source) = self.rebuild_source() {
+            source.after = seq;
+            REBUILD_SOURCE.set(Some(source));
+        }
+    }
+
     /// Builds a body from `inputs` and one more step. The Catallax build runs without the
     /// body arena lock, so other threads keep reading and building bodies meanwhile.
     fn operation(
@@ -800,6 +817,7 @@ impl CatallaxKernel {
             }
         }
         let seq = state.id();
+        self.advance_rebuild_source(seq);
         let result = format!("op_{seq}");
         step["id"] = result.clone().into();
         steps.insert(seq, step);
@@ -816,10 +834,9 @@ impl CatallaxKernel {
             }
         }
         let prefix = prefix.and_then(|stored| stored.solid.clone());
-        let retained = REBUILD_SOURCE
-            .get()
-            .filter(|&(kernel, _)| std::ptr::eq(kernel, self))
-            .and_then(|(_, body)| state.bodies.get(&body))
+        let retained = self
+            .rebuild_source()
+            .and_then(|source| state.bodies.get(&source.previous))
             .and_then(|stored| stored.solid.clone());
         let input = json!({"format":"soliddraft-recipe/1", "name":"SolidDraft", "steps": steps.values().collect::<Vec<_>>(), "result": result});
         let sources = state.sources(&steps)?;
@@ -1708,12 +1725,11 @@ impl Kernel for CatallaxKernel {
         self.observe("create_body_from_profile", || {
             profile.check()?;
             let mut state = self.state()?;
-            let seq = state.id();
-            let result = format!("op_{seq}");
-            let step = json!({
-                "id":result, "op":"profile", "plane":profile.plane,
+            let mut step = json!({
+                "op":"profile", "plane":profile.plane,
                 "loops":{"outer":profile.outer,"holes":profile.holes}
             });
+            let (seq, result) = construction::profile_identity(self, &mut state, tag, &mut step);
             // Conversion validates the exact frame and joined profile without manufacturing a sheet.
             // The converter requires a body result, so validate with a structural extrusion only.
             let input = json!({
@@ -1797,9 +1813,8 @@ impl Kernel for CatallaxKernel {
         self.observe("create_profile_from_face", || {
             let native = loft::face_profile(self.solid(body)?.as_ref(), body, face)?;
             let mut state = self.state()?;
-            let seq = state.id();
-            let result = format!("op_{seq}");
-            let step = json!({"id":result,"op":"native_profile","native":native});
+            let mut step = json!({"op":"native_profile","native":native});
+            let (seq, result) = construction::profile_identity(self, &mut state, tag, &mut step);
             let record = HistoryRecord {
                 seq,
                 tag: tag.clone(),
@@ -2298,14 +2313,15 @@ impl Kernel for CatallaxKernel {
         }
     }
 
-    fn with_rebuild_source(&self, body: BodyId, run: &mut dyn FnMut()) {
+    fn with_rebuild_source(&self, body: BodyId, input: Option<BodyId>, run: &mut dyn FnMut()) {
         struct Restore(Option<RebuildSource>);
         impl Drop for Restore {
             fn drop(&mut self) {
                 REBUILD_SOURCE.set(self.0);
             }
         }
-        let _restore = Restore(REBUILD_SOURCE.replace(Some((self, body))));
+        let source = RebuildSource { kernel: self, previous: body, input, after: 0 };
+        let _restore = Restore(REBUILD_SOURCE.replace(Some(source)));
         run();
     }
 
@@ -3115,21 +3131,27 @@ mod tests {
         let kernel = CatallaxKernel::with_operation_log();
         let base = contract::block(&kernel);
         let profile = Profile::rectangle(Plane::XY, Point2::new(0.0, 0.0), 4.0, 6.0);
-        let sheet = kernel.create_body_from_profile(&OpTag::new("profile"), &profile).unwrap();
-        let extrude = |distance| {
-            kernel.extrude(&OpTag::new("tool"), sheet.body, &Extrude { distance, direction: None }).unwrap().body
+        let build_cut = |profile, distance| {
+            let sheet = kernel.create_body_from_profile(&OpTag::new("profile"), profile).unwrap();
+            let tool = kernel.extrude(&OpTag::new("tool"), sheet.body, &Extrude { distance, direction: None }).unwrap();
+            let cut = kernel.boolean(&OpTag::new("cut"), BooleanOp::Subtract, base, tool.body).unwrap();
+            kernel.release(tool.body).unwrap();
+            kernel.release(sheet.body).unwrap();
+            (cut.body, sheet.record.seq)
         };
-        let cut = |tool| kernel.boolean(&OpTag::new("cut"), BooleanOp::Subtract, base, tool).unwrap().body;
-        let previous = cut(extrude(4.0));
-        let tool = extrude(5.0);
+        let (previous, profile_seq) = build_cut(&profile, 4.0);
+        let (uncontinued, fresh_seq) = build_cut(&profile, 5.0);
+        assert_ne!(fresh_seq, profile_seq);
         kernel.take_diagnostics().unwrap();
         let mut edited = None;
-        kernel.with_rebuild_source(previous, &mut || edited = Some(cut(tool)));
-        let edited = edited.unwrap();
+        kernel.with_rebuild_source(previous, Some(base), &mut || edited = Some(build_cut(&profile, 5.0)));
+        let (edited, edited_seq) = edited.unwrap();
+        assert_eq!(edited_seq, profile_seq);
 
         let evidence = kernel.take_diagnostics().unwrap();
-        let profile_step = format!("op_{}", sheet.record.seq);
-        let operations = evidence["calls"][0]["operation_log"]["operations"].as_array().unwrap();
+        let profile_step = format!("op_{profile_seq}");
+        let cut = evidence["calls"].as_array().unwrap().iter().find(|c| c["operation"] == "boolean").unwrap();
+        let operations = cut["operation_log"]["operations"].as_array().unwrap();
         assert!(!operations.iter().any(|op| op["id"] == profile_step), "replayed the unchanged profile: {evidence}");
 
         let recipe = kernel.body_recipe(edited).unwrap();
@@ -3141,6 +3163,14 @@ mod tests {
         };
         let options = StepOptions::default();
         assert_eq!(kernel.export_step(edited, &options).unwrap(), step::export(&fresh, &options, None).unwrap());
+        assert_eq!(kernel.export_step(edited, &options).unwrap(), kernel.export_step(uncontinued, &options).unwrap());
+
+        let changed = Profile::rectangle(Plane::XY, Point2::new(0.0, 0.0), 3.0, 6.0);
+        let mut edited = None;
+        kernel.with_rebuild_source(previous, Some(base), &mut || edited = Some(build_cut(&changed, 5.0)));
+        let (edited, edited_seq) = edited.unwrap();
+        assert_ne!(edited_seq, profile_seq);
+        assert_ne!(kernel.mass_properties(edited).unwrap().volume, kernel.mass_properties(uncontinued).unwrap().volume);
     }
 
     #[test]

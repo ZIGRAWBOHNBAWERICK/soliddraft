@@ -265,6 +265,8 @@ MCP tool call has a numbered directory under `commands/` containing:
   Collecting command evidence must not request more meshes of an unchanged body.
 - `recipe.json`, when a solid exists: the recipe that constructed the displayed
   body, for the existing view command.
+  During an exact edit, unchanged leading profiles keep their lowered IDs when
+  they can extend the previous result's checkpoint without moving ahead of rebuilt inputs.
 - `kernel.json`: the command's actual kernel calls, work counts, errors and Catallax's
   `catallax-operation-log/1` entries. Entries retain decision settlement counts,
   marks, refusal codes and timings. Catallax currently reports local tolerances

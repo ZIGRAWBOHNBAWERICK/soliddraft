@@ -114,7 +114,7 @@ impl AppBody {
     /// its bytes: its names come with the hand-over, renamed as [`AppBody::adopted`] does.
     /// `None` if the hand-over carries no names or they do not line up with `ours`.
     pub(crate) fn offered(offer: crate::handover::Offer, ours: &Recipe) -> Option<Self> {
-        let identity = offer.identity.clone()?;
+        let identity = offer.identity()?.clone();
         let theirs = &identity.steps;
         if theirs.len() != ours.steps.len() {
             return None;
@@ -142,7 +142,7 @@ impl AppBody {
     /// What came with an offered build for adopting it unread.
     pub(crate) fn handed_identity(&self) -> Option<&Arc<crate::handover::HandedIdentity>> {
         match &self.checkpoint {
-            Exact::Offered(unread) => unread.offer.identity.as_ref(),
+            Exact::Offered(unread) => unread.offer.identity(),
             _ => None,
         }
     }

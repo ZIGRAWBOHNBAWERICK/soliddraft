@@ -442,8 +442,12 @@ fn preview(app: &App) -> Option<std::sync::Arc<DisplayMesh>> {
     app.state().state.editor.as_ref().and_then(|e| e.preview.result.clone())
 }
 
-/// The committed body as the viewport draws it.
-fn shown_mesh_volume(app: &App) -> f64 {
+/// The committed body as the viewport draws it, once its CPU-built mesh has replaced
+/// the GPU preview a machine with a GPU shows first, which has no CPU triangles to sum.
+fn shown_mesh_volume(app: &mut App) -> f64 {
+    until(app, "the CPU-built mesh of the committed body", |a| {
+        a.state().state.doc.meshes.values().all(|m| !m.is_gpu_preview())
+    });
     app.state().state.doc.meshes.values().map(|m| mesh_volume(m)).sum()
 }
 

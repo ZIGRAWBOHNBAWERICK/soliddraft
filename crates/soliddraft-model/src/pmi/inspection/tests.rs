@@ -66,6 +66,78 @@ fn p1_inspection_qif_exports_requirements_without_inventing_results() {
     }
 }
 
+#[test]
+fn planar_inspection_qif_exports_width_and_reports_unrepresentable_requirements() {
+    use super::{InspectionGroup, PmiRow};
+    use soliddraft_kernel_api::pmi::Decimal;
+
+    let (doc, _) = bracket();
+    let mut plan = InspectionPlan::from_document(&doc, Some(REVISION));
+    let face_group = |letter| doc.pmi().datum_feature(letter).unwrap().clone();
+    let (a, b, c) = (face_group("A"), face_group("B"), face_group("C"));
+    let group = |id: &str, kind, measured| {
+        InspectionGroup::from_pmi(PmiRow {
+            item: PmiItem { id: id.into(), kind },
+            measured,
+            on_body: None,
+            hole: None,
+            located: Vec::new(),
+            problem: None,
+            feature: None,
+            placements: Vec::new(),
+            depth: None,
+            body: None,
+        })
+    };
+    plan.groups = vec![
+        group(
+            "Width",
+            PmiKind::Width { flats: [a.clone(), b.clone()], tolerance: Tolerance::Symmetric { value: 0.5 } },
+            vec![12.0],
+        ),
+        group("Chamfer", PmiKind::Chamfer { bevel: c.clone(), sides: [a.clone(), b.clone()] }, vec![2.0, 45.0]),
+        group(
+            "Edge break",
+            PmiKind::EdgeBreak {
+                bevel: c,
+                sides: [a.clone(), b.clone()],
+                min_mm: Decimal::parse("0.1").unwrap(),
+                max_mm: Decimal::parse("0.6").unwrap(),
+            },
+            vec![0.3],
+        ),
+        group("Basic angle", PmiKind::BasicAngle { planes: [a, b] }, vec![90.0]),
+    ];
+    let metadata = soliddraft_exchange::qif::Metadata {
+        qpid: "6b30ca06-1cee-4e24-a942-e6814d659608",
+        organization: "ISO",
+        designator: "1101",
+        year: Some("2017"),
+    };
+    let mut qif = Vec::new();
+    let omitted = plan.write_qif(&mut qif, metadata).unwrap();
+    let skipped: Vec<_> = omitted.iter().map(|o| (o.characteristic_id.as_str(), o.reason)).collect();
+    assert_eq!(
+        skipped,
+        [
+            ("pmi/Chamfer/chamfer_setback", "chamfer setback has no QIF mapping in this profile"),
+            ("pmi/Chamfer/chamfer_angle", "angle has no QIF mapping in this profile"),
+            ("pmi/Edge break/edge_break", "bounded edge break has no QIF mapping in this profile"),
+            ("pmi/Basic angle/basic_angle", "angle has no QIF mapping in this profile"),
+        ]
+    );
+    let xml = std::str::from_utf8(&qif).unwrap();
+    assert!(xml.contains("<WidthCharacteristicNominal "));
+    assert!(xml.contains("value=\"pmi/Width/width\""));
+    assert!(xml.contains("<TargetValue>12</TargetValue>"));
+    for (id, _) in skipped {
+        assert!(!xml.contains(id), "{id} must not become a QIF characteristic");
+    }
+    if let Some(dir) = std::env::var_os("SOLIDDRAFT_QIF_PROOF_DIR") {
+        std::fs::write(PathBuf::from(dir).join("planar.qif"), qif).unwrap();
+    }
+}
+
 /// Test reader for the CSV wire format, independent of the writer and its column ordering.
 fn parse_csv(csv: &[u8]) -> Vec<Vec<String>> {
     let mut records = Vec::new();

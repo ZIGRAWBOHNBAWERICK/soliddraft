@@ -534,9 +534,10 @@ impl Planner<'_> {
         });
         Ok(())
     }
+
     fn face_note(&mut self, face: FaceId, text: String, source: PmiSource) -> Result<(), String> {
         let edges = &self.body.faces.get(&face).ok_or("its face is gone")?.edges;
-        let mut best: Option<((i32, f64), ViewId, EdgeId, Vec3, Point2)> = None;
+        let mut best = None;
         for view in &self.views {
             let load = -self.planned_in(view.id);
             for curve in &view.curves.curves {

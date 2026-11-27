@@ -76,12 +76,21 @@ pub(crate) fn import_summary(report: &PmiImport) -> String {
     }
 }
 
+/// The ribbon's Drawing and files action on the path the user picked: the package with
+/// the tool's defaults, and a sentence for the status line.
+pub fn ribbon_package(state: &mut crate::state::AppState, path: &std::path::Path) -> Result<String, String> {
+    let report = crate::app_tools::AppTools { state }.manufacturing_package(&serde_json::json!({ "path": path }))?;
+    Ok(package_summary(&report))
+}
+
 /// What the Drawing and files action did, in a sentence for the status line.
 pub fn package_summary(report: &serde_json::Value) -> String {
     let count = |value: &serde_json::Value| value.as_array().map_or(0, Vec::len);
     let drawing = &report["drawing"];
+    let inspection = &report["inspection"];
+    let written = if inspection.is_null() { "STEP, PDF and DXF" } else { "STEP, PDF, DXF, CSV and AS9102 workbook" };
     let mut text = format!(
-        "STEP, PDF and DXF written: {} items in the file, {} on the drawing",
+        "{written} written: {} items in the file, {} on the drawing",
         report["manufacturing_information"]["items"].as_u64().unwrap_or(0),
         count(&drawing["items"]),
     );
@@ -92,6 +101,12 @@ pub fn package_summary(report: &serde_json::Value) -> String {
     }
     if let Some(n) = drawing["accuracy"]["approximate"].as_u64().filter(|&n| n > 0) {
         text.push_str(&format!(", {n} approximate drawing curves"));
+    }
+    if let Some(n) = inspection["inspect"].as_u64() {
+        text.push_str(&format!(", {n} characteristics to inspect"));
+    }
+    if count(&inspection["unresolved"]) > 0 {
+        text.push_str(&format!(", {} unresolved", count(&inspection["unresolved"])));
     }
     text
 }

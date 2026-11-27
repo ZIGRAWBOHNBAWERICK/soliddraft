@@ -390,9 +390,15 @@ fn the_package_card_writes_where_it_says() {
         "the card names the trimmed path: {rows:?}"
     );
 
+    assert!(
+        rows.iter().any(|(label, value)| label == "Inspection" && value.contains("bracket.xlsx")),
+        "the card names the inspection files: {rows:?}"
+    );
+    assert!(rows.contains(&("Revision".to_owned(), "not stated; left blank".to_owned())), "{rows:?}");
+
     st.apply_proposal(&id);
     let note = st.note.as_ref().map(|n| n.text.clone()).unwrap_or_default();
-    for file in ["bracket.step", "bracket.pdf", "bracket.dxf"] {
+    for file in ["bracket.step", "bracket.pdf", "bracket.dxf", "bracket.csv", "bracket.xlsx"] {
         assert!(dir.join(file).is_file(), "{file} is written where the card says: {note}");
     }
     assert!(matches!(st.proposal_status(&id), Some(ProposalStatus::Applied { .. })), "{note}");

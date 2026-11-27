@@ -8,18 +8,37 @@ const scenario = await page.eval(() => location.hash.slice(1));
 await page.eval(() => {
   const canvas = document.getElementById('soliddraft');
   canvas.focus();
-  const frame = () => new Promise(resolve => setTimeout(resolve, 90));
+  const frame = () => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
   window.featureClick = async ({ x, y }) => {
     const at = { clientX: x, clientY: y, bubbles: true, cancelable: true,
       pointerId: 1, pointerType: 'mouse', isPrimary: true, button: 0 };
-    canvas.dispatchEvent(new PointerEvent('pointermove', at));
+    canvas.dispatchEvent(new MouseEvent('mousemove', at));
     await frame();
-    canvas.dispatchEvent(new PointerEvent('pointerdown', { ...at, buttons: 1 }));
-    await frame();
-    canvas.dispatchEvent(new PointerEvent('pointerup', at));
-    await frame();
+    // eframe runs app logic synchronously on both edges. Keep one click even
+    // when rendering between edges would exceed egui's click duration.
+    const down = new PointerEvent('pointerdown', { ...at, buttons: 1 });
+    const up = new PointerEvent('pointerup', at);
+    canvas.dispatchEvent(down);
+    canvas.dispatchEvent(up);
     return true;
   };
+  window.featureFieldHover = async name => {
+    const locate = () => JSON.parse(window.wasmBindings.shown_controls())[name];
+    const at = locate();
+    if (!at) return { at: null, hovered: false };
+    canvas.dispatchEvent(new MouseEvent('mousemove', { clientX: at.x, clientY: at.y, bubbles: true }));
+    await frame();
+    const current = locate();
+    return {
+      at: current ?? null,
+      hovered: current?.x === at.x && current.y === at.y && canvas.style.cursor === 'text',
+    };
+  };
+  window.featureCommands = [];
+  document.addEventListener('soliddraft-feedback', event => {
+    const detail = JSON.parse(event.detail);
+    if (detail.type === 'action') window.featureCommands.push(detail.command);
+  });
 
   const choose = HTMLInputElement.prototype.click;
   HTMLInputElement.prototype.click = function () {
@@ -74,6 +93,8 @@ function check(condition, message) {
 const shown = name => page.eval(`JSON.parse(window.wasmBindings.${name}() || 'null')`);
 const controls = () => shown('shown_controls');
 const threads = () => page.eval(() => window.wasmBindings.shown_threads());
+const textFocused = () => page.eval(() =>
+  document.activeElement instanceof HTMLInputElement && document.activeElement.type === 'text');
 async function until(read, accept, message, limit = 25000) {
   let last;
   const end = Date.now() + limit;
@@ -82,39 +103,51 @@ async function until(read, accept, message, limit = 25000) {
     if (accept(last)) return last;
     await page.wait(100);
   } while (Date.now() < end);
-  throw new Error(`${message}. Last value ${JSON.stringify(last)}`);
+  const state = await page.eval(() => ({
+    focused: document.activeElement?.tagName,
+    commands: window.featureCommands,
+    build: JSON.parse(window.wasmBindings.shown_build() || 'null'),
+    controls: JSON.parse(window.wasmBindings.shown_controls()),
+  }));
+  throw new Error(`${message}. Last value ${JSON.stringify(last)}; app ${JSON.stringify(state)}`);
 }
 async function clickAt(at) {
   await page.eval(`featureClick(${JSON.stringify(at)})`);
-  await page.wait(300);
 }
 async function command(label, id) {
   await page.press('Control+Shift+p');
   await until(controls, value => value?.['Command palette'], 'The command palette did not open');
+  await until(textFocused, Boolean, 'The command palette did not focus its browser text input');
   await page.type(label);
-  await until(controls, value => value?.[`Command: ${id}`], `No result for ${label}`);
+  const result = `Command: ${id}`;
+  await until(controls, shown => {
+    const first = Object.entries(shown).filter(([key]) => key.startsWith('Command: '))
+      .reduce((top, entry) => !top || entry[1].y < top[1].y ? entry : top, null);
+    return first?.[0] === result;
+  }, `${label} never became the first palette result`);
+  const before = await page.eval(() => window.featureCommands.length);
   await page.press('Enter');
+  const received = await until(
+    () => page.eval(`window.featureCommands[${before}] ?? ''`), Boolean, `No command dispatched for ${label}`,
+  );
+  check(received === id, `Expected ${id}, but the app dispatched ${received}`);
   await until(controls, value => !value?.['Command palette'], `The palette stayed open for ${label}`);
-  await page.wait(300);
+  await until(textFocused, focused => !focused, `The palette kept browser text focus after ${label}`);
 }
 async function replace(name, value) {
-  const locate = async () => (await until(controls, controls => controls?.[name], `Missing ${name}`))[name];
-  await clickAt(await locate());
-  // Focusing the field can scroll it, so locate it again before typing.
-  const at = await locate();
-  await page.eval(`document.getElementById('soliddraft').dispatchEvent(new MouseEvent('mousemove', {
-    clientX: ${at.x}, clientY: ${at.y}, bubbles: true
-  }))`);
-  await clickAt(at);
+  // The first modal frame can publish the cell before egui will hit-test it.
+  const field = await until(
+    () => page.eval(`featureFieldHover(${JSON.stringify(name)})`),
+    value => value.hovered,
+    `${name} was not ready for a click`,
+  );
+  await clickAt(field.at);
+  await until(textFocused, Boolean, `${name} did not take browser text focus`);
   await page.press('Control+a');
-  await page.wait(400);
-  await page.press('Backspace');
-  await page.wait(400);
   if (value.length === 1) await page.press(value);
   else await page.type(value);
-  await page.wait(800);
   await page.press('Enter');
-  await page.wait(950);
+  await until(textFocused, focused => !focused, `${name} did not end editing`);
 }
 async function parameters() {
   await command('Parameters', 'configuration_grid');
@@ -138,10 +171,10 @@ async function open(name, building = 25000) {
   await page.press('Control+o');
   await until(() => page.eval(() => window.featureUpload === null), Boolean, 'Open did not consume the selected file');
   if (name.endsWith('.dwprt')) {
+    await until(controls, value => value?.[`Tab ${name}`], `${name} did not open`, building);
     await until(() => shown('shown_build'), value => value && !value.pending && !value.reading, 'Part is still building',
       building);
   }
-  await page.wait(500);
 }
 async function save(drawing = false) {
   await page.eval(() => { window.featureSaved = null; return true; });
@@ -217,12 +250,14 @@ switch (scenario) {
   case 'callouts': {
     await open('drawing-skimmed-counterbores.dwprt');
     const initial = await makeDrawing();
+    let annotations = initial.annotations;
     for (const [x, z] of [[20, 9], [50, 10]]) {
       await command('Hole callout', 'drawing_hole_callout');
       const [sx, sy] = await page.eval(`Array.from(window.wasmBindings.drawing_screen_point('Top view', ${x}, 20, ${z}))`);
       await clickAt({ x: sx, y: sy });
+      annotations++;
+      await until(drawing, value => value?.annotations === annotations, `No callout was added at ${x}, ${z}`);
     }
-    await until(drawing, value => value?.annotations === initial.annotations + 2, 'The drawing did not place both callouts');
     const stored = await save(true);
     const callouts = stored.sheets[0].annotations.filter(a => a.body.type === 'hole_callout').map(a => a.body.text);
     check(callouts.every(text => !/^2\s*×/.test(text)) &&

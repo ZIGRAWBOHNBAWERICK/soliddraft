@@ -28,7 +28,7 @@ impl Drop for Opening {
 
 enum Finished {
     Review { path: PathBuf, preview: Result<Preview, String> },
-    Admission { preview: Preview, prepared: Result<Prepared, String>, decline: bool },
+    Admission { preview: Preview, prepared: Result<Box<Prepared>, String>, decline: bool },
 }
 
 fn origin(doc: &Document) -> (DocumentId, u64) {
@@ -85,7 +85,7 @@ pub(super) fn start_admission(
 ) {
     let doc = state.doc.scratch();
     start(ctx, state, preview.feature.source_name.clone(), move || {
-        let prepared = prepare(&doc, &preview, feature);
+        let prepared = prepare(&doc, &preview, feature).map(Box::new);
         Finished::Admission { preview, prepared, decline }
     });
 }

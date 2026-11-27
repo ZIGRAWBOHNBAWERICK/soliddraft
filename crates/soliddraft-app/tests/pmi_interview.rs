@@ -466,6 +466,8 @@ fn two_compound_hole_checks_match_direct_values_and_survive_reopen() {
 
 #[test]
 fn a_recess_depth_and_fillet_radius_do_not_answer_edge_intent() {
+    let dir = std::env::temp_dir().join(format!("soliddraft-pmi-interview-recess-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
     let mut plate = state("Recess and edge plate");
     call(
         &mut plate,
@@ -479,11 +481,11 @@ fn a_recess_depth_and_fillet_radius_do_not_answer_edge_intent() {
         &mut plate,
         "sketch",
         json!({
-            "plane": "Boss-Extrude1 · End cap",
-            "shapes": [{"shape": "rectangle", "center": [30, 20, 10], "width": 12, "height": 8}]
+            "plane": "top", "offset": 11,
+            "shapes": [{"shape": "rectangle", "center": [30, 20, 11], "width": 12, "height": 8}]
         }),
     );
-    call(&mut plate, "cut", json!({"sketch": "Sketch2", "depth": 2, "through_all": false, "flip": false}));
+    call(&mut plate, "cut", json!({"sketch": "Sketch2", "depth": 3, "through_all": false, "flip": false}));
     let edge_at = |plate: &AppState, x, y| {
         let model = plate.doc.model();
         let topology = model.kernel().topology(model.body().unwrap()).unwrap();
@@ -501,7 +503,12 @@ fn a_recess_depth_and_fillet_radius_do_not_answer_edge_intent() {
     let fillet = edge_at(&plate, 60.0, 40.0);
     call(&mut plate, "fillet", json!({"edges": [fillet], "radius": 2}));
 
-    let questions = interview(&mut plate);
+    let step = dir.join("recess.step");
+    call(&mut plate, "export_step", json!({"path": step}));
+    let mut imported = state("Bare recess");
+    let preview = call(&mut imported, "preview_import", json!({"path": step}));
+    call(&mut imported, "import_step", json!({"path": step, "decline": [], "preview_token": preview["token"]}));
+    let questions = interview(&mut imported);
     let get = |name: &str| {
         let matching: Vec<_> = questions.iter().filter(|q| asks(q) == name).collect();
         assert_eq!(matching.len(), 1, "{name}: {questions:#?}");
@@ -513,13 +520,13 @@ fn a_recess_depth_and_fillet_radius_do_not_answer_edge_intent() {
     assert_eq!(radius["proposes"], "R2");
     let fillet_intent = get("fillet treatment");
     assert!(fillet_intent.get("proposal").is_none(), "{fillet_intent}");
-    call(&mut plate, "pmi_answer", json!({"accept": [depth["id"], radius["id"]]}));
-    let open = interview(&mut plate);
+    call(&mut imported, "pmi_answer", json!({"accept": [depth["id"], radius["id"]]}));
+    let open = interview(&mut imported);
     assert!(!open.contains(depth) && !open.contains(radius), "{open:#?}");
     assert!(open.contains(fillet_intent), "{open:#?}");
 
     // Exercise the bevel on an unmodified block, without the recess or fillet's supports.
-    for _ in 0..4 {
+    for _ in 0..3 {
         call(&mut plate, "undo", json!({}));
     }
     let chamfer = edge_at(&plate, 0.0, 0.0);
@@ -528,4 +535,5 @@ fn a_recess_depth_and_fillet_radius_do_not_answer_edge_intent() {
     let chamfer_intent = questions.iter().find(|q| asks(q) == "chamfer treatment").unwrap();
     assert!(chamfer_intent.get("proposal").is_none(), "{chamfer_intent}");
     assert!(chamfer_intent["asks"].as_str().unwrap().contains("1 mm setback"), "{chamfer_intent}");
+    std::fs::remove_dir_all(dir).unwrap();
 }

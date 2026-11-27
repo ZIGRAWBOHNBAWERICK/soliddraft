@@ -1068,6 +1068,7 @@ impl eframe::App for SolidDraftApp {
         if let Some(error) = self.state.mass.poll(&self.state.doc) {
             self.state.note(error, NoteKind::Error);
         }
+        self.state.part_proof.poll(&self.state.doc, ctx);
         // Hover info is derived from the viewport's last pick so every panel sees the same name.
         let viewport = &self.state.viewport;
         self.state.hover_info = viewport
@@ -1082,6 +1083,7 @@ impl eframe::App for SolidDraftApp {
         crate::web::begin_frame();
         self.edit_suite_frame(root);
         self.dialogs(ctx);
+        self.state.part_proof.dialogs(&self.state.doc, ctx);
         // After the frame's controls are cleared, so the browser check finds its buttons.
         crate::assembly::show_choice(ctx, &mut self.state);
         crate::import::report::notice(ctx, &self.state);

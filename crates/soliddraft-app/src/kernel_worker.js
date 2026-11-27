@@ -10,6 +10,7 @@
 // page starts a new worker for its next job.
 
 let glue = null;
+let offerBuilds = true;
 let queue = [];
 let draining = false;
 let dead = false;
@@ -22,6 +23,7 @@ function trace(job, stage) {
 self.onmessage = async (event) => {
   const message = event.data;
   if (message.init) {
+    offerBuilds = message.init.handOver;
     try {
       glue = await import(message.init.glue);
       glue.initSync({ module: message.init.module });
@@ -73,10 +75,12 @@ function drain() {
   trace(job, 'worker replied');
   // The builds made for this job travel with its answer, for the page's own kernel.
   let hand_over = null;
-  try {
-    hand_over = glue.kernel_worker_hand_over();
-  } catch (error) {
-    hand_over = null;
+  if (offerBuilds) {
+    try {
+      hand_over = glue.kernel_worker_hand_over();
+    } catch (error) {
+      hand_over = null;
+    }
   }
   if (hand_over && hand_over.length) {
     self.postMessage({ id: job.id, answer, hand_over }, [hand_over.buffer]);

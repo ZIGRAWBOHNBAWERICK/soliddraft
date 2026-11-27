@@ -48,6 +48,8 @@ pub enum Job {
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         checked: bool,
     },
+    /// Estimate or run a whole-edge proof in a worker isolated from viewport jobs.
+    PartProof { estimate: bool },
 }
 
 impl Job {
@@ -57,6 +59,7 @@ impl Job {
             Job::MassProperties { .. } => "mass_properties",
             Job::Build { .. } => "build",
             Job::Remesh { .. } => "remesh",
+            Job::PartProof { .. } => "part_proof",
         }
     }
 }
@@ -173,6 +176,18 @@ impl Host {
                 }
                 Ok(serde_json::Value::Null)
             }
+            Job::PartProof { estimate: true } => {
+                let estimate = crate::measure::part_proof::estimate(doc)?;
+                serde_json::to_value(estimate).map_err(|error| error.to_string())
+            }
+            Job::PartProof { estimate: false } => {
+                let report = crate::measure::part_proof::prove(
+                    doc,
+                    &soliddraft_kernel_api::Interrupt::new(),
+                    crate::measure::part_proof::kernel_prover,
+                )?;
+                serde_json::to_value(report).map_err(|error| error.to_string())
+            }
         }
     }
 
@@ -225,7 +240,7 @@ fn built(doc: &model::Document, feature: model::FeatureId) -> Result<(), String>
 }
 
 #[cfg(target_arch = "wasm32")]
-pub use browser::{abandon_unwanted, submit, submit_with_early, trace};
+pub use browser::{ProofWorker, abandon_unwanted, submit, submit_with_early, trace};
 
 #[cfg(target_arch = "wasm32")]
 mod browser {
@@ -335,7 +350,7 @@ mod browser {
     }
 
     impl Client {
-        fn start() -> Result<Self, String> {
+        fn start(hand_over: bool) -> Result<Self, String> {
             let glue = glue_url().ok_or("The kernel worker could not find the application module")?;
             let script = wasm_bindgen::link_to!(module = "/src/kernel_worker.js");
             let options = web_sys::WorkerOptions::new();
@@ -359,12 +374,46 @@ mod browser {
             let init = js_sys::Object::new();
             set(&init, "glue", &glue.into());
             set(&init, "module", &wasm_bindgen::module());
+            set(&init, "handOver", &hand_over.into());
             let message_init = js_sys::Object::new();
             set(&message_init, "init", &init);
             worker
                 .post_message(&message_init)
                 .map_err(|error| format!("The kernel worker could not start: {error:?}"))?;
             Ok(Self { worker, shared, _message: message, _error: error })
+        }
+    }
+
+    /// A proof never waits for viewport jobs or supplies builds to the page. Dropping
+    /// this client terminates the proof without interrupting any other job.
+    pub struct ProofWorker {
+        client: Client,
+        part: Vec<u8>,
+        kernel: Arc<dyn soliddraft_kernel_api::Kernel>,
+    }
+
+    impl ProofWorker {
+        pub fn new(part: Vec<u8>, kernel: Arc<dyn soliddraft_kernel_api::Kernel>) -> Result<Self, String> {
+            Ok(Self { client: Client::start(false)?, part, kernel })
+        }
+
+        pub fn submit(
+            &self,
+            estimate: bool,
+            ctx: &egui::Context,
+            answered: impl FnOnce(Result<serde_json::Value, String>) + 'static,
+        ) -> Result<(), String> {
+            let id = NEXT.with(|next| next.replace(next.get() + 1));
+            let job = Job::PartProof { estimate };
+            let header = serde_json::to_string(&job).map_err(|error| error.to_string())?;
+            let sent = Sent { slot: job.slot(), header, part: self.part.clone() };
+            post(&self.client.worker, id, &sent)?;
+            self.client
+                .shared
+                .borrow_mut()
+                .waiting
+                .insert(id, (Box::new(answered), ctx.clone(), self.kernel.clone(), Box::new(|| false), sent));
+            Ok(())
         }
     }
 
@@ -446,7 +495,7 @@ mod browser {
         CLIENT.with_borrow_mut(|client| {
             if client.as_ref().is_none_or(|client| client.shared.borrow().stopped) {
                 // Dropping the stopped client here, outside its own handlers, ends it.
-                *client = Some(Client::start()?);
+                *client = Some(Client::start(true)?);
             }
             let client = client.as_ref().expect("the kernel worker started");
             let id = NEXT.with(|next| next.replace(next.get() + 1));
@@ -500,7 +549,7 @@ mod browser {
             drop(shared);
             // Dropping the old client terminates its worker, and the job it was running.
             *client = None;
-            let fresh = match Client::start() {
+            let fresh = match Client::start(true) {
                 Ok(fresh) => fresh,
                 Err(error) => {
                     for (_, (answered, ctx, _, _, _)) in wanted {

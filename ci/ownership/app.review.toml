@@ -1,0 +1,6 @@
+[[areas]]
+name = "app.review"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/review.rs"]
+module = ["review"]

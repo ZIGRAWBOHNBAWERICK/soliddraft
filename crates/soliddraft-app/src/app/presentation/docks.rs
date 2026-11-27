@@ -560,6 +560,7 @@ impl TabViewer for Panels<'_> {
                     }
                 }
                 let (dt, ppp) = ui.input(|i| (i.stable_dt.min(0.1), i.pixels_per_point));
+                st.doc.set_display_budget(st.graphics_device.display_budget);
                 if st.doc.update_display(&st.viewport.projection(ppp), dt) {
                     ui.ctx().request_repaint_after(std::time::Duration::from_millis(50));
                 }

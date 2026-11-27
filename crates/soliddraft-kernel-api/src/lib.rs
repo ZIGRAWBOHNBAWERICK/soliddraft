@@ -1333,6 +1333,12 @@ pub trait Kernel: Send + Sync {
         Ok(None)
     }
 
+    /// Offers the previous result of this feature as a checkpoint during `run`.
+    /// It is not an operation input and must not change geometry or names.
+    fn with_rebuild_source(&self, _body: BodyId, run: &mut dyn FnMut()) {
+        run();
+    }
+
     /// Prepares exact-proof work when no early representation is requested.
     /// Nested rebuild operations receive the synchronous rebuild's allowances.
     fn reserve_proof_work(&self) -> KernelResult<Box<dyn ProofWork>> {

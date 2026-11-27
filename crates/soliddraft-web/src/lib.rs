@@ -94,6 +94,7 @@ pub fn start() {
             log::info!("WebGPU runs in software here; drawing with WebGL");
             setup.instance_descriptor.backends = eframe::wgpu::Backends::GL;
         }
+        soliddraft_app::viewport::assembly::request_features(&mut options.wgpu_options);
         let started = eframe::WebRunner::new()
             .start(
                 canvas,

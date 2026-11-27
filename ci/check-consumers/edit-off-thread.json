@@ -2,6 +2,9 @@
   "files": {
     "ci/browser-edit-off-thread.js": [
       "web"
+    ],
+    "ci/check-edit-off-thread-trace.py": [
+      "web"
     ]
   }
 }

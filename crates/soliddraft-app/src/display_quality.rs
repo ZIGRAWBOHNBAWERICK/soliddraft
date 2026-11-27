@@ -106,6 +106,13 @@ impl DisplayQuality {
         self.worker.pending() > 0
     }
 
+    pub(crate) fn set_budget(&mut self, budget: DeviceBudget) {
+        if self.cache.budget() != budget {
+            self.cache.set_budget(budget);
+            self.cache.trim();
+        }
+    }
+
     /// A new body to show after a rebuild: the parameters to tessellate it with at once.
     /// The previous body joins the recent ones, and the oldest recent body's meshes are
     /// dropped.

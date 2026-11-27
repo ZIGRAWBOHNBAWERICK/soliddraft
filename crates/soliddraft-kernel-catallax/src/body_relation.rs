@@ -103,8 +103,17 @@ fn operands(k: &CatallaxKernel, a: BodyId, b: BodyId) -> KernelResult<Operands> 
     let sources = state.sources(&steps)?;
     drop(state);
     let files = sources.iter().map(|(sha, bytes)| (sha.clone(), &bytes[..])).collect();
-    let (app, names, ..) =
-        build(&input, OpKind::Intersect, &[], prefix.as_ref().map(|s| &s.app), &files, None, &Default::default(), &[])?;
+    let (app, names, ..) = build(
+        &input,
+        OpKind::Intersect,
+        &[],
+        prefix.as_ref().map(|s| &s.app),
+        None,
+        &files,
+        None,
+        &Default::default(),
+        &[],
+    )?;
     let crate::Outcome::Exact(app) = app else { return Err(crate::approximate::not_yet()) };
     let built = app.checkpoint.built();
     // A part whose result reads a lattice or gyroid has only the region's envelope here.

@@ -1407,22 +1407,22 @@ fn split_by_face(mesh: &DisplayMesh) -> (Vec<Vertex>, Vec<u32>) {
     (verts, indices)
 }
 
-/// Asks for indirect first-instance support where the adapter has it, so a pass draws
-/// a whole assembly in one call and culls on the GPU, and for the adapter's buffer
-/// size limits.
+/// Requests the adapter's buffer size limit. On native, also enables the features
+/// and storage binding limit used by GPU assembly culling and antialiasing.
 pub fn request_features(config: &mut egui_wgpu::WgpuConfiguration) {
     if let egui_wgpu::WgpuSetup::CreateNew(setup) = &mut config.wgpu_setup {
         let base = setup.device_descriptor.clone();
         setup.device_descriptor = Arc::new(move |adapter| {
             let mut d = base(adapter);
-            d.required_features |= adapter.features()
-                & (wgpu::Features::INDIRECT_FIRST_INSTANCE | wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES);
-            // A large assembly's meshes and instances outgrow the default 256 MB buffer
-            // and 128 MB storage binding; take what the adapter allows.
-            let a = adapter.limits();
-            d.required_limits.max_buffer_size = d.required_limits.max_buffer_size.max(a.max_buffer_size);
-            d.required_limits.max_storage_buffer_binding_size =
-                d.required_limits.max_storage_buffer_binding_size.max(a.max_storage_buffer_binding_size);
+            let limits = adapter.limits();
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                d.required_features |= adapter.features()
+                    & (wgpu::Features::INDIRECT_FIRST_INSTANCE
+                        | wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES);
+                d.required_limits.max_storage_buffer_binding_size = limits.max_storage_buffer_binding_size;
+            }
+            d.required_limits.max_buffer_size = limits.max_buffer_size;
             d
         });
     }

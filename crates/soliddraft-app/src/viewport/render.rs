@@ -742,6 +742,7 @@ impl ViewportRenderer {
         requested: u32,
     ) -> crate::graphics::GraphicsDevice {
         let info = adapter.get_info();
+        let limits = device.limits();
         let flags = |format: wgpu::TextureFormat| {
             if device.features().contains(wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES) {
                 adapter.get_texture_format_features(format).flags
@@ -750,7 +751,7 @@ impl ViewportRenderer {
             }
         };
         let color = flags(COLOR_FORMAT);
-        let tier = Tier::of(info.backend);
+        let tier = Tier::of(info.backend, &limits);
         let depth = flags(scene_depth(tier));
         let mut samples = vec![1];
         if color.contains(wgpu::TextureFormatFeatureFlags::MULTISAMPLE_RESOLVE) {
@@ -773,6 +774,7 @@ impl ViewportRenderer {
             samples,
             active_samples,
             tier,
+            display_budget: soliddraft_tessellation::DeviceBudget::from_buffer_limit(limits.max_buffer_size),
         }
     }
 

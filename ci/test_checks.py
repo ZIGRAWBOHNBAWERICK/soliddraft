@@ -24,8 +24,8 @@ DESKTOP = {'interactive-macos', 'test-macos'}
 WINDOWS = {'test-windows', 'package-windows'}
 VIEWPORT = 'crates/soliddraft-app/src/viewport/'
 CAMERA = VIEWPORT + 'camera.rs'
-F1 = ('wgpu::Backend::Gl | wgpu::Backend::Noop => Tier::Basic,',
-      'wgpu::Backend::Dx12 | wgpu::Backend::Metal | wgpu::Backend::Gl | wgpu::Backend::Noop => Tier::Basic,')
+F1 = ('matches!(backend, wgpu::Backend::Gl | wgpu::Backend::Noop)',
+      'matches!(backend, wgpu::Backend::Dx12 | wgpu::Backend::Metal | wgpu::Backend::Gl | wgpu::Backend::Noop)')
 F2 = {'cfg': '\n#[cfg(target_os = "windows")]\ncompile_error!("narrow3 windows fault");\n',
       'cfg-attr': '\n#[cfg_attr(target_os = "macos", broken_attribute)]\nstruct Fault;\n',
       'backend': '\nfn injected() { let _ = egui_wgpu::wgpu::Backend::Metal; }\n'}

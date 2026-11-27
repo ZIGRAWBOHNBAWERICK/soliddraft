@@ -373,6 +373,44 @@ fn commands_refuse_what_does_not_fit_and_undo_what_they_did() {
 }
 
 #[test]
+fn position_edit_preserves_the_ordered_datum_frame_on_rejection() {
+    let mut d = doc();
+    bored_block(&mut d, 8.0);
+    annotate(&mut d);
+    let side = facing(&d, Vec3::new(0.0, -1.0, 0.0));
+    put(&mut d, "Datum C", PmiKind::Datum { letter: "C".into(), feature: side });
+    let bore = cylinders(&d);
+    let edit = |letters: &[&str]| Command::PutPmiItem {
+        item: Box::new(PmiItem {
+            id: "Bore position".into(),
+            kind: PmiKind::Gdt {
+                characteristic: GdtCharacteristic::Position,
+                tolerance: 0.05,
+                diameter: true,
+                material: MaterialCondition::Regardless,
+                datums: datums(letters),
+                features: vec![bore.clone()],
+            },
+        }),
+        replaces: Some("Bore position".into()),
+    };
+    d.execute(edit(&["A", "B", "C"])).unwrap();
+    let valid = d.pmi().item("Bore position").unwrap().clone();
+    assert_eq!(valid.callout(&[]), "Position \u{d8}0.05 A|B|C");
+
+    for (letters, diagnostic) in [
+        (["A", "B", "A"], "A datum is referred to twice"),
+        (["A", "B", "D"], "Datum D is not defined"),
+    ] {
+        let Err(CommandError::Invalid(message)) = d.execute(edit(&letters)) else {
+            panic!("position edit with {letters:?} should be invalid");
+        };
+        assert!(message.contains(diagnostic), "{message}");
+        assert_eq!(d.pmi().item("Bore position"), Some(&valid));
+    }
+}
+
+#[test]
 fn hole_roles_checked_nominals_and_independent_depths_survive_native_reopen() {
     let mut d = doc();
     let plate = add(

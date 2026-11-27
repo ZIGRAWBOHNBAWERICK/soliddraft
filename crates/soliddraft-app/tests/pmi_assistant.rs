@@ -62,6 +62,46 @@ fn mcp(state: &mut AppState, tool: &str, input: Value) -> Value {
 }
 
 #[test]
+fn headless_and_assistant_reject_an_invalid_position_edit() {
+    let provider = Arc::new(MockProvider::new(Vec::new()));
+    let mut st = AppState::new(board_bracket());
+    st.chat = ChatState::connected(provider.clone(), "mock provider");
+    let recognised = mcp(&mut st, "pmi_recognise", json!({}));
+    let hole = recognised["features"].as_array().unwrap().iter().find(|f| f["kind"] == "hole").unwrap();
+    mcp(&mut st, "pmi_answer", json!({"accept": "all"}));
+
+    let input = |letters: &[&str]| {
+        json!({
+            "kind": "tolerance", "name": "Bore frame", "characteristic": "position",
+            "faces": hole["faces"], "value": 0.05, "diameter_zone": true, "datums": letters
+        })
+    };
+    mcp(&mut st, "pmi_add", input(&["A", "B", "C"]));
+    let before = mcp(&mut st, "pmi_list", json!({}));
+    let depth = st.doc.undo_depth();
+
+    for (letters, diagnostic) in [
+        (["A", "A", "C"], "A datum is referred to twice"),
+        (["A", "B", "ZZ"], "Datum ZZ is not defined"),
+    ] {
+        let mut invalid = input(&letters);
+        invalid["replaces"] = json!("Bore frame");
+        let out = AppTools { state: &mut st }.call("pmi_add", invalid.clone(), &Caller::Mcp { client: "test".into() });
+        assert!(out.is_error && out.content.contains(diagnostic), "{}", out.content);
+        let answer = exchange(
+            &mut st,
+            &provider,
+            "Edit the bore frame with these datum references.",
+            vec![MockTurn::tools("", vec![("pmi_add", invalid)]), MockTurn::text("That edit is invalid.")],
+        );
+        let [(_, true, error)] = &answer[..] else { panic!("expected refusal, not a card: {answer:?}") };
+        assert!(error.to_string().contains(diagnostic), "{error}");
+        assert_eq!(mcp(&mut st, "pmi_list", json!({})), before);
+        assert_eq!(st.doc.undo_depth(), depth);
+    }
+}
+
+#[test]
 fn the_assistant_drives_the_manufacturing_information_tools() {
     let dir = std::env::temp_dir().join(format!("soliddraft-pmi-assistant-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);

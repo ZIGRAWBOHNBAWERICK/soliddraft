@@ -255,17 +255,48 @@ fn regenerate(
         .filter(|child| *child == id || !drawing.view(*child).is_some_and(|v| v.excluded_from_update))
         .collect();
     let index = PartIndex::build(part)?;
-    let mut previous = Contexts::new();
+    let mut previous = project::Transforms::new();
     let mut staged = None;
     if let Some(breaks) = breaks {
-        for &id in &ids {
-            project::compute_in(drawing, part, &index, id, &mut previous)?;
+        // Where the views were drawn, so crops and callouts stay on the same material.
+        let mut before = Contexts::new();
+        for &view in &ids {
+            // A break the part has outgrown no longer computes; its saved gap stands in.
+            let _ = project::compute_in(drawing, part, &index, view, &mut before);
         }
+        previous = before.into_iter().map(|(view, ctx)| (view, ctx.xf)).collect();
         let mut next = drawing.clone();
         next.view_mut(id).expect("existing view").breaks = breaks;
         staged = Some(next);
     }
     let source = staged.as_ref().unwrap_or(drawing);
+    let outgrown: Vec<ViewId> = ids
+        .iter()
+        .copied()
+        .filter(|view| {
+            staged.is_some()
+                && !previous.contains_key(view)
+                && drawing.view(*view).is_some_and(|v| !v.breaks.is_empty() && !v.geometry.breaks.is_empty())
+        })
+        .collect();
+    if !outgrown.is_empty() {
+        // The plain view gives the frame, scale and centre the saved gap is drawn with.
+        let mut plain = source.clone();
+        for &view in &outgrown {
+            let v = plain.view_mut(view).expect("listed view");
+            v.breaks.clear();
+            v.crop = None;
+            v.broken_out.clear();
+        }
+        let mut fresh = Contexts::new();
+        for view in outgrown {
+            project::compute_in(&plain, part, &index, view, &mut fresh)?;
+            let saved = drawing.view(view).and_then(|v| project::saved_transform(v, &fresh[&view]));
+            if let Some(xf) = saved {
+                previous.insert(view, xf);
+            }
+        }
+    }
     let mut contexts = Contexts::new();
     for &id in &ids {
         project::compute_with_previous(
@@ -284,7 +315,7 @@ fn regenerate(
         let ctx = &contexts[&id];
         let view = drawing.view_mut(id).expect("computed view");
         if let Some(before) = previous.get(&id) {
-            project::remap_view_boundaries(view, &before.xf, &ctx.xf);
+            project::remap_view_boundaries(view, before, &ctx.xf);
         }
         view.geometry = ctx.projected.geometry.clone();
     }
@@ -293,7 +324,7 @@ fn regenerate(
         if let Some(parent) = view.geometry_parent()
             && let (Some(before), Some(after)) = (previous.get(&parent), contexts.get(&parent))
         {
-            project::remap_parent_boundary(&mut view.kind, &before.xf, &after.xf);
+            project::remap_parent_boundary(&mut view.kind, before, &after.xf);
         }
     }
     for child in descendants {

@@ -269,6 +269,26 @@ pub struct ViewContext {
 /// Views computed so far, by id: the parents derived views are made from.
 pub type Contexts = BTreeMap<ViewId, ViewContext>;
 
+/// Views' transforms by id: where an edit's views were drawn before it.
+pub(crate) type Transforms = BTreeMap<ViewId, ViewTransform>;
+
+/// The transform a broken view was last drawn with, from its saved gap, for when the
+/// part no longer allows its break. Frame and scale come from `ctx`, a fresh projection
+/// of the view, and so does the centre across the break.
+pub(crate) fn saved_transform(view: &View, ctx: &ViewContext) -> Option<ViewTransform> {
+    let gap = view.geometry.breaks.first()?;
+    let mut breaks = Breaks::new(&view.breaks, &ctx.xf.frame).ok()?;
+    let (lo, _) = breaks.stretch?;
+    if breaks.vertical != (gap.axis == AlignAxis::Vertical) {
+        return None;
+    }
+    breaks.centre_fraction = gap.centre_fraction;
+    let s = ctx.xf.scale;
+    let [x0, y0, x1, y1] = ctx.curves.bbox_2d;
+    let centre = breaks.with_along(Point2::new((x0 + x1) / 2.0 * s, (y0 + y1) / 2.0 * s), lo * s - gap.at);
+    Some(ViewTransform { centre, breaks, ..ctx.xf })
+}
+
 impl ViewContext {
     /// Computes a view's curves and transform at its current scale, with its parents.
     pub fn compute(drawing: &Drawing, part: &Part, index: &PartIndex, id: ViewId) -> Result<ViewContext, DrawingError> {
@@ -301,7 +321,7 @@ pub(crate) fn compute_with_previous(
     index: &PartIndex,
     id: ViewId,
     memo: &mut Contexts,
-    previous: Option<&Contexts>,
+    previous: Option<&Transforms>,
 ) -> Result<(), DrawingError> {
     if memo.contains_key(&id) {
         return Ok(());
@@ -356,7 +376,7 @@ fn compute_view_at(
     memo: &mut Contexts,
     depth: u8,
     projection: Option<(ViewDisplay, ViewTransform)>,
-    previous: Option<&Contexts>,
+    previous: Option<&Transforms>,
 ) -> Result<ViewContext, DrawingError> {
     if depth > 16 {
         return Err(DrawingError::BadView(view.id));
@@ -376,7 +396,7 @@ fn compute_view_at(
     if let Some(parent) = view.geometry_parent() {
         let after = &memo[&parent].xf;
         if let Some(before) = previous.and_then(|views| views.get(&parent)) {
-            remap_parent_boundary(&mut kind, &before.xf, after);
+            remap_parent_boundary(&mut kind, before, after);
         }
         reproject_parent_marks(&mut kind, after);
     }
@@ -572,7 +592,7 @@ fn compute_view_at(
     if let Some(half) = &view.half {
         half_section(part, index, &mut ctx, half, &display).map_err(refused)?;
     }
-    let before = previous.and_then(|views| views.get(&view.id)).map(|ctx| ctx.xf);
+    let before = previous.and_then(|views| views.get(&view.id)).copied();
     let remap =
         |boundary: &Boundary| before.map_or_else(|| boundary.clone(), |old| remap_boundary(boundary, &old, &ctx.xf));
     let cuts: Vec<_> =

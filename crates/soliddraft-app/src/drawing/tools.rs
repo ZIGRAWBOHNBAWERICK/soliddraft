@@ -573,10 +573,14 @@ fn break_tool(
     let end = to_view(s, view, p);
     let axis =
         if (end.u - start.u).abs() >= (end.v - start.v).abs() { AlignAxis::Horizontal } else { AlignAxis::Vertical };
-    let ends = with_part(doc, |part, index| {
-        let ctx = derived::context(&s.doc.drawing, part, index, view)?;
-        Ok((ctx.xf.unproject(start), ctx.xf.unproject(end)))
-    });
+    // The clicks land on the view as drawn, also when the part has outgrown its break.
+    let ends = match s.doc.transforms.get(&view) {
+        Some(xf) => Ok((xf.unproject(start), xf.unproject(end))),
+        None => with_part(doc, |part, index| {
+            let ctx = derived::context(&s.doc.drawing, part, index, view)?;
+            Ok((ctx.xf.unproject(start), ctx.xf.unproject(end)))
+        }),
+    };
     match ends {
         Ok((from, to)) => {
             let breaks = vec![Break { from, to, axis }];

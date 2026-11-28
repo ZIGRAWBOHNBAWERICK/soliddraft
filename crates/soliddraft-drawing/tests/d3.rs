@@ -1537,6 +1537,23 @@ fn dimension_proposals_and_commands_use_the_unbroken_model_edge() {
         anchor.attach = attach;
     }
     assert!(stack.run(&mut drawing, &Command::AddDimension { annotation }, Some(&part)).is_err());
+    // A dimension set on the face is refused too, rather than measuring zero.
+    let mut set = annotate::dimension_set(
+        &drawing,
+        &index,
+        &context,
+        SetKind::Baseline,
+        LinearOrientation::Horizontal,
+        &[Vec3::ZERO, Vec3::new(120.0, 0.0, 0.0)],
+        10.0,
+    )
+    .unwrap();
+    for anchor in &mut set.anchors {
+        anchor.entity = face.clone();
+    }
+    let before = drawing.clone();
+    assert!(stack.run(&mut drawing, &Command::AddAnnotation { annotation: set }, Some(&part)).is_err());
+    assert_eq!(drawing, before);
 }
 
 #[test]
@@ -1953,4 +1970,68 @@ fn an_oblique_cutting_line_on_a_broken_parent_follows_the_cut_on_both_sides() {
         assert!(off < 1e-3, "{p:?} is {off} mm off the cut");
     }
     assert!(points.iter().any(|p| p.x < 50.0) && points.iter().any(|p| p.x > 90.0));
+}
+
+/// A part edit can leave a saved break beyond the part's end: the view keeps its last
+/// line work, and the break can still be removed or replaced. The crop stays on the
+/// material it showed.
+#[test]
+fn a_break_the_part_outgrew_can_be_removed_or_replaced() {
+    let kernel = BoxKernel::new();
+    let part = box_part(&kernel, "block", Vec3::new(120.0, 50.0, 50.0));
+    let mut drawing = drawing(&part);
+    let mut stack = UndoStack::new();
+    let full = Command::SetViewScale { view: FRONT, scale: soliddraft_drawing::ViewScale::Custom { factor: 1.0 } };
+    run(&mut stack, &mut drawing, &part, full);
+    let interrupt = |from: f64, to: f64| Command::SetViewBreaks {
+        view: FRONT,
+        breaks: vec![soliddraft_drawing::Break {
+            from: Vec3::new(from, 0.0, 0.0),
+            to: Vec3::new(to, 0.0, 0.0),
+            axis: soliddraft_drawing::AlignAxis::Horizontal,
+        }],
+    };
+    run(&mut stack, &mut drawing, &part, interrupt(40.0, 100.0));
+    let index = PartIndex::build(&part).unwrap();
+    let xf = derived::context(&drawing, &part, &index, FRONT).unwrap().xf;
+    let (left, right) = (Vec3::new(5.0, 0.0, -5.0), Vec3::new(115.0, 0.0, 55.0));
+    let crop = Boundary::rectangle(xf.point(left), xf.point(right));
+    run(&mut stack, &mut drawing, &part, Command::SetViewCrop { view: FRONT, crop: Some(crop) });
+
+    // The part shortens to 80: the break now runs past its end.
+    let short = box_part(&kernel, "block", Vec3::new(80.0, 50.0, 50.0));
+    let short_index = PartIndex::build(&short).unwrap();
+    let saved = drawing.view(FRONT).unwrap().clone();
+    let report = update_from_model(&mut drawing, &short).unwrap();
+    assert!(report.dangling_views.iter().any(|v| v.view == FRONT), "{report:?}");
+    assert_eq!(drawing.view(FRONT).unwrap().geometry, saved.geometry, "the view keeps its line work");
+    let outgrown = drawing.clone();
+    let crop_on_material = |d: &Drawing, what: &str| {
+        let xf = derived::context(d, &short, &short_index, FRONT).unwrap().xf;
+        let [x0, _, x1, _] = d.view(FRONT).unwrap().crop.as_ref().expect("the crop stays").bounds();
+        let (a, b) = (xf.point(left).u, xf.point(right).u);
+        assert!((x0 - a).abs() < 1e-3 && (x1 - b).abs() < 1e-3, "{what}: the crop spans {x0}..{x1}, not {a}..{b}");
+    };
+
+    run(&mut stack, &mut drawing, &short, Command::SetViewBreaks { view: FRONT, breaks: Vec::new() });
+    let view = drawing.view(FRONT).unwrap();
+    assert!(view.breaks.is_empty() && view.geometry.breaks.is_empty());
+    let [x0, _, x1, _] = view.geometry.bbox;
+    assert!((x1 - x0 - 75.0).abs() < 1e-3, "the cropped whole view, x 5 to 80: {x0}..{x1}");
+    crop_on_material(&drawing, "removed");
+
+    // A replacement inside the shorter part is made on its own terms.
+    let mut drawing = outgrown;
+    let mut stack = UndoStack::new();
+    run(&mut stack, &mut drawing, &short, interrupt(20.0, 60.0));
+    let view = drawing.view(FRONT).unwrap();
+    assert_eq!(view.breaks.len(), 1);
+    assert!((view.breaks[0].from.x - 20.0).abs() < 1e-9 && (view.breaks[0].to.x - 60.0).abs() < 1e-9);
+    assert_eq!(view.geometry.breaks.len(), 1);
+    let [x0, _, x1, _] = view.geometry.bbox;
+    assert!((x1 - x0 - 41.0).abs() < 1e-3, "x 5 to 80 less 40 left out, plus the gap: {x0}..{x1}");
+    crop_on_material(&drawing, "replaced");
+    let before = drawing.clone();
+    assert!(stack.run(&mut drawing, &interrupt(30.0, 90.0), Some(&short)).is_err(), "it must still fit the part");
+    assert_eq!(drawing, before);
 }

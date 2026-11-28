@@ -1992,14 +1992,24 @@ pub(crate) fn import_model_items(state: &mut AppState) -> Result<String, String>
     let ctx = PartContext::new(&state.doc).ok_or("Model items: the part has no body")?;
     let s = state.drawing.session.as_mut().ok_or("No drawing is open")?;
     let items = model_items(&ctx, &s.doc.drawing, s.sheet).map_err(|e| format!("Model items: {e}"))?;
-    let n = items.len();
-    for a in items {
-        let _ = s.doc.apply(Command::AddAnnotation { annotation: a }, None);
+    if items.is_empty() {
+        return Ok("Model items: every model dimension is already on the sheet".to_owned());
     }
-    Ok(if n == 0 {
-        "Model items: every model dimension is already on the sheet".to_owned()
-    } else {
-        format!("Model items: {n} dimension{} imported", if n == 1 { "" } else { "s" })
+    let total = items.len();
+    let (mut added, mut failure) = (0, None);
+    for a in items {
+        // With the part, so a dimension on a broken view is measured from the model.
+        match s.doc.apply(Command::AddAnnotation { annotation: a }, Some(&ctx)) {
+            Ok(()) => added += 1,
+            Err(e) => {
+                failure.get_or_insert(e);
+            }
+        }
+    }
+    let imported = format!("Model items: {added} dimension{} imported", if added == 1 { "" } else { "s" });
+    Ok(match failure {
+        None => imported,
+        Some(e) => format!("{imported}; {} could not be added: {e}", total - added),
     })
 }
 

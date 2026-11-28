@@ -558,6 +558,11 @@ fn broken_view_dimensions_measure_the_model_from_native_picks() {
     drawing(&mut app, DrawingAction::SetTool(DrawingTool::SmartDimension));
     click_model(&mut app, front, Vec3::new(30.0, 0.0, 0.0));
     assert_eq!(session(&app).picks.first().expect("a clipped edge pick").end, None);
+    // The right piece's end at the gap is no model end either.
+    drawing(&mut app, DrawingAction::SetTool(DrawingTool::Select));
+    drawing(&mut app, DrawingAction::SetTool(DrawingTool::SmartDimension));
+    click_model(&mut app, front, Vec3::new(60.0, 0.0, 0.0));
+    assert_eq!(session(&app).picks.first().expect("a clipped edge pick").end, None);
     drawing(&mut app, DrawingAction::SetTool(DrawingTool::Select));
     drawing(&mut app, DrawingAction::SetTool(DrawingTool::SmartDimension));
     let ends = [Vec3::ZERO, Vec3::new(120.0, 0.0, 0.0)];
@@ -610,6 +615,108 @@ fn broken_view_dimensions_measure_the_model_from_native_picks() {
             .unwrap();
     let entities = soliddraft_drawing::export::dxf::count_entities(&dxf).unwrap();
     assert!(entities.get("DIMENSION/DIMENSION").is_some_and(|n| *n >= 4));
+    drop(app);
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
+/// Model items on a drawing whose front view has a break: each dimension it reports is
+/// on the sheet, those of the broken view measured from the model.
+#[test]
+fn model_items_on_a_broken_view_add_every_dimension_they_report() {
+    let root = std::env::temp_dir().join(format!("soliddraft-break-model-items-{}", std::process::id()));
+    let mut app = bracket_drawing(&root);
+    let front = view_named(&app, "Front view");
+    let breaks = vec![soliddraft_drawing::Break {
+        from: Vec3::new(30.0, 0.0, 0.0),
+        to: Vec3::new(60.0, 0.0, 0.0),
+        axis: AlignAxis::Horizontal,
+    }];
+    drawing(&mut app, DrawingAction::Command(DrawCommand::SetViewBreaks { view: front, breaks }));
+    assert_eq!(view(&app, front).breaks.len(), 1);
+    let before = session(&app).sheet().annotations.len();
+    drawing(&mut app, DrawingAction::ModelItems);
+    let s = session(&app);
+    let added = s.sheet().annotations.len() - before;
+    let said = s.message.as_ref().map(|(m, _)| m.clone()).unwrap_or_default();
+    assert_eq!(said, format!("Model items: {added} dimension{} imported", if added == 1 { "" } else { "s" }));
+    let values: Vec<f64> = s.sheet().annotations[before..]
+        .iter()
+        .filter(|a| a.view == front)
+        .filter_map(|a| match &a.body {
+            AnnotationKind::Dimension(d) => match d.value {
+                DimValue::Measured { value } => Some(value),
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect();
+    assert!(!values.is_empty(), "the broken front view gets its dimensions: {said}");
+    // The bracket's sizes: plate, flange, boss and bore.
+    let sizes = [120.0, 90.0, 10.0, 60.0, 30.0, 24.0, 12.0, 9.0];
+    assert!(values.iter().all(|v| sizes.iter().any(|s| (v - s).abs() < 1e-6)), "{values:?}");
+    drop(app);
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
+/// A part edit leaves the front view's break above the flange: the view keeps its last
+/// line work. The break can still be removed, and the break tool still sets a new one
+/// from clicks on the view as drawn.
+#[test]
+fn a_break_the_part_outgrew_is_removed_or_replaced_from_the_drawing_tools() {
+    use soliddraft_app::document::FeatureKind;
+    let root = std::env::temp_dir().join(format!("soliddraft-outgrown-break-{}", std::process::id()));
+    let mut app = bracket_drawing(&root);
+    let front = view_named(&app, "Front view");
+    let vertical = |from: f64, to: f64| soliddraft_drawing::Break {
+        from: Vec3::new(0.0, 0.0, from),
+        to: Vec3::new(0.0, 0.0, to),
+        axis: AlignAxis::Vertical,
+    };
+    let breaks = vec![vertical(42.0, 58.0)];
+    drawing(&mut app, DrawingAction::Command(DrawCommand::SetViewBreaks { view: front, breaks }));
+    let broken = view(&app, front);
+    assert_eq!(broken.breaks, [vertical(42.0, 58.0)], "{:?}", session(&app).message);
+
+    // The flange drops from 60 to 50 high: the break's top end is above the part.
+    let (flange, mut params) = app
+        .state()
+        .state
+        .doc
+        .features
+        .iter()
+        .find_map(|f| match &f.kind {
+            FeatureKind::Extrude(p) if (p.depth - 60.0).abs() < 1e-9 => Some((f.id, p.clone())),
+            _ => None,
+        })
+        .expect("the flange");
+    params.depth = 50.0;
+    app.state_mut().state.doc.apply(Command::EditExtrude { id: flange, params }).unwrap();
+    settle(&mut app);
+    drawing(&mut app, DrawingAction::Rebuild);
+    settle(&mut app);
+    let stale = view(&app, front);
+    assert_eq!(stale.breaks, broken.breaks);
+    assert_eq!(stale.geometry, broken.geometry, "the view keeps its last line work");
+
+    drawing(&mut app, DrawingAction::Command(DrawCommand::SetViewBreaks { view: front, breaks: Vec::new() }));
+    let whole = view(&app, front);
+    assert!(whole.breaks.is_empty() && whole.geometry.breaks.is_empty(), "{:?}", session(&app).message);
+    let scale = soliddraft_drawing::project::view_scale(&session(&app).doc.drawing, front).unwrap();
+    let [_, y0, _, y1] = whole.geometry.bbox;
+    near(y1 - y0, 50.0 * scale, 1e-3, "the whole view of the lower flange");
+
+    drawing(&mut app, DrawingAction::Undo);
+    assert_eq!(view(&app, front).breaks, broken.breaks, "undo brings the outgrown break back");
+    drawing(&mut app, DrawingAction::SetTool(DrawingTool::Break));
+    click_model(&mut app, front, Vec3::new(5.0, 0.0, 15.0));
+    click_model(&mut app, front, Vec3::new(5.0, 0.0, 35.0));
+    let replaced = view(&app, front);
+    let [b] = &replaced.breaks[..] else { panic!("one break: {:?}", session(&app).message) };
+    assert_eq!(b.axis, AlignAxis::Vertical);
+    near(b.from.z.min(b.to.z), 15.0, 0.5, "the new break starts at z 15");
+    near(b.from.z.max(b.to.z), 35.0, 0.5, "the new break ends at z 35");
+    let [gap] = replaced.geometry.breaks[..] else { panic!("one gap") };
+    near(gap.gap, 6.0, 1e-9, "gap");
     drop(app);
     std::fs::remove_dir_all(&root).unwrap();
 }

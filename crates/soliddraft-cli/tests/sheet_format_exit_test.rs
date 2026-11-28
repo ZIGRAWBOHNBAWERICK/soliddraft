@@ -56,8 +56,10 @@ fn pdf_text(pdf: &lopdf::Document, page_id: lopdf::ObjectId, text: &str) -> ([f6
             "Tj" => {
                 let encoded = op.operands[0].as_str().unwrap();
                 let unicode: Option<Vec<u16>> = encoded
-                    .chunks_exact(2)
-                    .map(|pair| glyphs.get(&u16::from_be_bytes([pair[0], pair[1]])).copied())
+                    .as_chunks::<2>()
+                    .0
+                    .iter()
+                    .map(|pair| glyphs.get(&u16::from_be_bytes(*pair)).copied())
                     .collect();
                 if unicode.and_then(|c| String::from_utf16(&c).ok()).as_deref() == Some(text) {
                     return (matrix, text_origin);

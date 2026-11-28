@@ -454,7 +454,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
                 s.annotations_open = !s.annotations_open;
             }
             if s.annotations_open {
-                let style = super::document::DrawingDoc::style(&sheet);
+                let style = super::document::DrawingDoc::style(sheet);
                 for a in &sheet.annotations {
                     let name = annotation_name(a, style);
                     let view_name = if a.view == SHEET {

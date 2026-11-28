@@ -1494,3 +1494,91 @@ fn markup_targets_only_live_annotations_of_the_direct_item() {
     assert!(drawing.annotation(id).unwrap().source.is_none());
     assert!(review::find_place(&drawing, &target, item).is_none());
 }
+
+#[test]
+fn an_inclined_section_view_shows_its_mesh_cut_and_never_blocks_an_export() {
+    use soliddraft_drawing::display::Owner;
+    let mut kernel = BoxKernel::new();
+    kernel.sections = true;
+    kernel.refuse_exact_section = true;
+    kernel.inclined_mesh_cuts = true;
+    let part = box_part(&kernel, "block", Vec3::new(120.0, 50.0, 50.0));
+    let mut drawing = drawing(&part);
+    let index = PartIndex::build(&part).unwrap();
+    let top = drawing.sheets[0]
+        .views
+        .iter()
+        .find(|v| project::view_label_in(&drawing, &drawing.sheets[0], v) == "Top view")
+        .unwrap()
+        .id;
+    let xf = derived::context(&drawing, &part, &index, top).unwrap().xf;
+    // The plane x = y, square to no model axis.
+    let trace = [Vec3::new(0.0, 0.0, 50.0), Vec3::new(50.0, 50.0, 50.0)].map(|p| xf.point(p));
+    let (section, _) = derived::new_section(&drawing, &part, &index, 0, top, trace, false, None).unwrap();
+    assert!(section.geometry.display_only && !section.geometry.unproved && !section.geometry.catallax);
+    assert!(!section.has_saved_catallax_linework());
+    assert!(!section.geometry.curves.is_empty(), "the mesh cut shows on screen");
+    let id = section.id;
+    apply(&mut drawing, &Command::PlaceView { sheet: 0, view: section }).unwrap();
+    export::check_sheet(&drawing, &drawing.sheets[0]).unwrap();
+
+    // Left out of updates while the part grows and the drawing rebuilds, then put back
+    // without a rebuild: the section keeps the older revision.
+    apply(&mut drawing, &Command::SetViewExcluded { view: id, excluded: true }).unwrap();
+    let before = drawing.model.pinned.clone();
+    let changed = box_part(&kernel, "block", Vec3::new(120.0, 50.0, 60.0));
+    let report = update_from_model(&mut drawing, &changed).unwrap();
+    assert!(report.dangling_views.is_empty(), "{:?}", report.dangling_views);
+    apply(&mut drawing, &Command::SetViewExcluded { view: id, excluded: false }).unwrap();
+    assert_ne!(drawing.model.pinned, before);
+    let section = drawing.view(id).unwrap();
+    assert_eq!(section.geometry.source_digest, before.as_str());
+    assert!(!section.accepts_revision(drawing.model.pinned.as_str()));
+    export::check_sheet(&drawing, &drawing.sheets[0]).unwrap();
+    let list = layout_sheet(&drawing, 0);
+    assert!(list.items.iter().any(|i| matches!(i.owner(), Owner::Curve(v, _) if v == id)));
+    assert!(list.printable().all(|i| !matches!(i.owner(), Owner::Curve(v, _) | Owner::View(v) if v == id)));
+    let svg = String::from_utf8(export::bytes(&list, export::Format::Svg, "Box").unwrap()).unwrap();
+    assert!(svg.contains(r#"<g id="VISIBLE""#), "the other views print");
+    assert!(!svg.contains(r#"<g id="HATCH""#) && !svg.contains(r#"<g id="CUTTING""#));
+}
+
+#[test]
+fn inclined_half_and_broken_out_sections_refuse_when_only_their_mesh_cut_succeeds() {
+    use soliddraft_drawing::{BrokenOut, HalfSection};
+    let mut kernel = BoxKernel::new();
+    kernel.sections = true;
+    kernel.refuse_exact_section = true;
+    kernel.inclined_mesh_cuts = true;
+    let part = box_part(&kernel, "block", Vec3::new(120.0, 50.0, 50.0));
+    let drawing = drawing(&part);
+    let index = PartIndex::build(&part).unwrap();
+    let iso = drawing.sheets[0]
+        .views
+        .iter()
+        .find(|v| project::view_spec(&drawing, v.id).is_ok_and(|spec| project::is_pictorial(&spec)))
+        .unwrap()
+        .id;
+    let xf = derived::context(&drawing, &part, &index, iso).unwrap().xf;
+    let centre = Vec3::new(60.0, 25.0, 25.0);
+
+    let mut cut = drawing.clone();
+    cut.view_mut(iso)
+        .unwrap()
+        .broken_out
+        .push(BrokenOut { boundary: Boundary::Circle { center: xf.point(centre), radius: 15.0 }, depth: 10.0 });
+    let error = derived::context(&cut, &part, &index, iso).map(|_| ()).unwrap_err();
+    assert!(matches!(error, soliddraft_drawing::DrawingError::ViewRefused { .. }), "{error}");
+    assert!(error.to_string().contains("test exact section refused"), "{error}");
+
+    let across = xf.frame.direction.cross(Vec3::Z).normalized().unwrap();
+    let mut half = drawing.clone();
+    half.view_mut(iso).unwrap().half = Some(HalfSection { axis: [centre, centre + across * 40.0], flip: false });
+    let error = derived::context(&half, &part, &index, iso).map(|_| ()).unwrap_err();
+    assert!(matches!(error, soliddraft_drawing::DrawingError::ViewRefused { .. }), "{error}");
+    assert!(error.to_string().contains("test exact section refused"), "{error}");
+
+    // The view itself still draws from the exact path.
+    let view = derived::context(&drawing, &part, &index, iso).unwrap();
+    assert!(!view.projected.geometry.display_only && view.projected.geometry.catallax);
+}

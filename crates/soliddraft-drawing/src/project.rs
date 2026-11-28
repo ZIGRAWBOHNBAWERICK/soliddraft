@@ -401,7 +401,7 @@ fn compute_view_at(
                         part,
                         &with_display(ViewSpec::new(direction, up), &display),
                         origin,
-                        &mut display_only,
+                        Some(&mut display_only),
                     )
                 })
                 .map_err(|e| refused(e.into()))?;
@@ -444,7 +444,8 @@ fn compute_view_at(
             let spec = with_display(ViewSpec::new(direction, up), &display);
             let origin = model_line.first().copied().unwrap_or_else(|| pctx.xf.unproject(line[0]));
             let mut display_only = false;
-            let section = section_or_mesh(part, &spec, origin, &mut display_only).map_err(|e| refused(e.into()))?;
+            let section =
+                section_or_mesh(part, &spec, origin, Some(&mut display_only)).map_err(|e| refused(e.into()))?;
             let xf = match projection {
                 Some((_, xf)) => xf,
                 None => view_transform(&section.curves, &spec, scale, view)?,
@@ -594,17 +595,22 @@ fn view_transform(
     xf.with_breaks(Breaks::new(&view.breaks, &xf.frame)?, curves.bbox_2d)
 }
 
+/// Cuts `part` on the plane through `origin` facing `spec`. Only a section view's own
+/// cut (`display_only` given) on an inclined plane falls back to the display mesh's cut
+/// when the exact cut fails: the view is marked display-only and the reason goes to the
+/// log. Axis-aligned cuts, half sections and broken-out sections keep the exact answer,
+/// refusal included.
 fn section_or_mesh(
     part: &Part,
     spec: &ViewSpec,
     origin: Vec3,
-    display_only: &mut bool,
+    display_only: Option<&mut bool>,
 ) -> soliddraft_kernel_api::KernelResult<SectionView> {
     let section = |preview| part.geometry.section_view(&SectionSpec { view: ViewSpec { preview, ..*spec }, origin });
-    match section(part.preview) {
-        Err(exact) if !part.preview && is_pictorial(spec) => match section(true) {
+    match (section(part.preview), display_only) {
+        (Err(exact), Some(display_only)) if !part.preview && is_pictorial(spec) => match section(true) {
             Ok(mut mesh) => {
-                log::warn!("drawing section: the certified cut failed, showing the display mesh's: {exact}");
+                log::warn!("drawing section: the exact cut failed, showing the display mesh's: {exact}");
                 *display_only = true;
                 mesh.curves.unproved = false;
                 mesh.curves.catallax = false;
@@ -612,7 +618,7 @@ fn section_or_mesh(
             }
             Err(_) => Err(exact),
         },
-        answer => answer,
+        (answer, _) => answer,
     }
 }
 
@@ -633,7 +639,7 @@ fn half_section(
     let boundary = half_boundary(&flat, half)?;
     let mut spec = with_display(ctx.spec(), display);
     spec.preview = part.preview;
-    let section = section_or_mesh(part, &spec, half.axis[0], &mut ctx.projected.geometry.display_only)?;
+    let section = section_or_mesh(part, &spec, half.axis[0], None)?;
     let mut cut = project(index, &section.curves, &ctx.xf, part.digest.as_str(), part.preview);
     let xf = ctx.xf;
     let in_cut = |p: Point2| boundary.contains(flat.precise_point(xf.unproject(p)));
@@ -732,7 +738,7 @@ fn broken_out(
         .fold(f64::NEG_INFINITY, f64::max);
     let mut spec = with_display(ctx.spec(), display);
     spec.preview = part.preview;
-    let section = section_or_mesh(part, &spec, d * (front - b.depth), &mut ctx.projected.geometry.display_only)?;
+    let section = section_or_mesh(part, &spec, d * (front - b.depth), None)?;
     let mut cut = project(index, &section.curves, &ctx.xf, part.digest.as_str(), part.preview);
     clip_projected(&mut ctx.projected, &b.boundary, false);
     clip_projected(&mut cut, &b.boundary, true);

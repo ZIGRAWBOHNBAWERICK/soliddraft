@@ -249,6 +249,7 @@ fn aligned_section_through_a_five_hole_flange() {
     let log = String::from_utf8(out.stderr).unwrap();
     assert!(out.status.success(), "{log}");
     assert!(log.contains("showing the display mesh"), "{log}");
+    assert_neutral(&String::from_utf8(out.stdout.clone()).unwrap());
     let report: Value = serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!(report["views"], 5, "{report:#}");
     let (section, scale) = bent_section(&dir.join("flange.dwdrw"), 3);
@@ -272,7 +273,23 @@ fn aligned_section_through_a_five_hole_flange() {
     // half of the hub's top rim shows on both legs; each leg draws only its own half.
     assert_joint_drawn_once(&section, (first + revolved) / 2.0);
 
-    soliddraft(&dir, &["draw", "flange.json", "--aligned-section", through.as_str(), "--out", "flange.svg"]);
+    // The reason goes to the log on stderr only when RUST_LOG asks for it; the summary on
+    // stdout reads as for any drawing either way.
+    let print = ["draw", "flange.json", "--aligned-section", through.as_str(), "--out", "flange.svg"];
+    for rust_log in [Some("warn"), None] {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_soliddraft"));
+        command.args(print).current_dir(&dir);
+        match rust_log {
+            Some(filter) => command.env("RUST_LOG", filter),
+            None => command.env_remove("RUST_LOG"),
+        };
+        let out = command.output().unwrap();
+        let (stdout, log) = (String::from_utf8(out.stdout).unwrap(), String::from_utf8(out.stderr).unwrap());
+        assert!(out.status.success(), "{log}");
+        assert_eq!(log.contains("showing the display mesh"), rust_log.is_some(), "{log}");
+        assert!(stdout.contains(": 5 views at "), "{stdout}");
+        assert_neutral(&stdout);
+    }
     let svg = std::fs::read_to_string(dir.join("flange.svg")).unwrap();
     assert!(svg.contains(r#"<g id="VISIBLE""#), "the other views print");
     assert!(!svg.contains(r#"<g id="HATCH""#), "the display section's hatch stays off the print");
@@ -302,6 +319,14 @@ fn aligned_section_through_a_five_hole_flange() {
     let revolved = hole_cut_at(&after, hole3.0, hole3.1, 5.0).unwrap();
     assert_joint_drawn_once(&after, (first + revolved) / 2.0);
     std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// Standard output never says how a view's line work was made.
+fn assert_neutral(stdout: &str) {
+    let lower = stdout.to_lowercase();
+    for word in ["mesh", "certif", "proof", "proved", "refus", "fallback"] {
+        assert!(!lower.contains(word), "stdout mentions {word}: {stdout}");
+    }
 }
 
 #[test]

@@ -59,6 +59,12 @@ impl View {
         self.geometry.catallax && !self.geometry.unproved && !self.geometry.display_only
     }
 
+    /// True when an export prints the view. A section drawn from the display mesh shows
+    /// on screen only, so it never blocks an export and is never counted in one.
+    pub fn is_printed(&self) -> bool {
+        !self.geometry.display_only
+    }
+
     /// True when the view is excluded from automatic update and its saved line work
     /// cannot be exported, so it must be included and rebuilt first.
     pub fn needs_inclusion_for_redraw(&self) -> bool {

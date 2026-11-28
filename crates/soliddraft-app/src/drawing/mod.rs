@@ -2086,11 +2086,11 @@ fn export_sheet(state: &mut AppState, format: export::Format, path: Option<PathB
 /// What an export wrote, for the status line and the agent tools.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SheetExport {
-    /// Views on the sheets written.
+    /// Views printed on the sheets written.
     pub views: usize,
     /// The part revision accepted by the drawing.
     pub pinned_revision: ContentHash,
-    /// Distinct part revisions of the written views.
+    /// Distinct part revisions of the printed views.
     pub view_revisions: std::collections::BTreeSet<String>,
     /// How many written curves are exact, mesh polylines or approximate.
     pub accuracy: AccuracyCounts,
@@ -2156,8 +2156,9 @@ pub(crate) fn prepare_sheets(s: &DrawingSession, all_sheets: bool) -> Result<Pre
     let mut view_revisions = std::collections::BTreeSet::new();
     for (_, sheet) in drawing.sheets.iter().enumerate().filter(|(i, _)| writes_sheet(*i)) {
         export::check_sheet(drawing, sheet).map_err(|error| error.to_string())?;
-        views += sheet.views.len();
-        view_revisions.extend(sheet.views.iter().map(|view| view.geometry.source_digest.clone()));
+        let printed = sheet.views.iter().filter(|view| view.is_printed());
+        views += printed.clone().count();
+        view_revisions.extend(printed.map(|view| view.geometry.source_digest.clone()));
     }
     let count = drawing.sheets.len();
     let list_of = |i: usize| {

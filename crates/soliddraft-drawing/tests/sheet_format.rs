@@ -137,8 +137,8 @@ fn long_title_values_fit_their_cells_without_losing_the_saved_text() {
                     if lopdf::Document::decode_text(&encoding, bytes).unwrap() == owner {
                         let mut x = 0.0;
                         let mut right = 0.0_f64;
-                        for glyph in bytes.chunks_exact(2) {
-                            let id = ttf_parser::GlyphId(u16::from_be_bytes([glyph[0], glyph[1]]));
+                        for glyph in bytes.as_chunks::<2>().0 {
+                            let id = ttf_parser::GlyphId(u16::from_be_bytes(*glyph));
                             if let Some(box_) = face.glyph_bounding_box(id) {
                                 right = right.max(x + f64::from(box_.x_max));
                             }

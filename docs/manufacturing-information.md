@@ -70,7 +70,7 @@ The proposals come from these rules and tables only. Nothing is inferred by a la
 
 ## On a drawing
 
-A drawing of a part that states manufacturing information shows it. Make drawing brings every item in, once, and places it:
+Make drawing imports and places the manufacturing information it can show:
 
 | Item | Where it goes |
 |---|---|
@@ -86,7 +86,9 @@ The drawing also gets a section through the hole the part holds tightest: the on
 
 The drawing places everything itself. Stacked dimensions settle first, nearest their views; callouts and symbols then move along their leaders, or straight across or up, until no text lies over a line, another text or the frame.
 
-Each annotation made this way belongs to its item in the part. A thread's callout belongs to the hole that states it, so renaming the hole keeps it in place. To change its tolerance, count or text, edit the item in the part and rebuild the drawing. Rebuild refreshes imported items and keeps the saved items on views that refused to redraw. An item edited so that the drawing shows it another way, such as a diameter given a thread's designation or a designation taken off, is drawn again the new way.
+Each imported annotation links to its item in the part. A thread's callout belongs to the hole that states it, so renaming the hole keeps it in place. An imported basic angle keeps the orientation authored on the part. To change a requirement on both the part and drawing, edit it on the part and rebuild the drawing. Changing a linked note's text or a linked dimension's value or fit on the sheet detaches that annotation. Formatting changes keep the link.
+
+A full Rebuild refreshes linked items on the views that redrew. It checks the old annotation against the item's kind and attachments, then reimports items that fail those checks. For example, adding a thread designation replaces the diameter with a thread callout. Local view edits can refresh values in place. In an aligned section, the import keeps the chosen projection's leg with each attachment.
 
 An item no view can show is not drawn somewhere it does not belong. It is listed by name with the reason, such as a height on a drawing that has only the top view.
 

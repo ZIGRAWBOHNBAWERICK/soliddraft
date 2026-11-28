@@ -241,11 +241,10 @@ MCP tool call has a numbered directory under `commands/` containing:
 - `command.json`: input, output, backend, the current model summary and every
   persistent reference: the feature holding it, its slot, its identity, the Catallax
   origins, carrier counts and whether the built sketch's plane matches those carriers.
-  With a drawing open, the summary's `drawing` says for each view whether its line
-  work is at the pinned revision and whether it is a screen preview. It also lists
-  annotation states, values and model attachments, including changed and dangling
-  annotations. See the [MCP drawing fields](assistant.md#mcp) for accuracy and export
-  revision reports.
+  With a drawing open, the summary's `drawing` reports each view's update status and
+  preview flag. It also lists annotation states, values and model attachments, including
+  changed and dangling annotations. See the [MCP drawing fields](assistant.md#mcp) for
+  accuracy and export revision reports.
   `resolved` is null when that feature was not built. These observations run only after
   execution when `--bundle` was requested; the scenario runner makes the assertions.
   The `rebuild` report's `features_recomputed` lists the features whose kernel
@@ -612,6 +611,6 @@ Every existing row must appear exactly once. `add_configuration` adds a row; the
 
 Text properties have two layers: the file's default, then a row's override. A property edit changes the part's revision, keeps its geometry hash and builds nothing.
 
-`bind_title_property` through `drawing_command`, or Title from in the sheet's properties, binds a title block field to a part property. The drawing keeps the configuration and property values it accepted beside its pinned revision. A part switch leaves title and views as they were, and Rebuild moves them together as one drawing undo step. A literal title field still wins, and a property the accepted source lacks shows as unresolved.
+See [paper and title blocks](documents.md#paper-and-title-blocks) for binding a drawing title to a part property.
 
 `sketch-linked-patterns.json` builds and edits a two-direction circle array and a circular pattern, skips selected positions, then checks 376.99111843 mm³ through Catallax extrusion and reopening. `pattern` takes source `entities`, a `spec` and an optional `skipped` list of zero-based `[column, row]` positions. Circular patterns use `[index, 0]`. The source position `[0, 0]` cannot be skipped. A linear spec has `type: "linear"`, `step`, `count` and optional `second` with its own step and count. A circular spec has `type: "circular"`, `center`, `angle_degrees`, `count` and optional `total_angle`. With total angle enabled, partial spans include both ends and full turns omit the repeated endpoint. Counts include the source and permit at most 1000 total positions. `edit_pattern` takes a saved definition's `group`, a new `spec` and optional `skipped`. Surviving entity ids remain stable; edits that would remove externally constrained members are refused atomically. Definitions, skipped positions and source links survive saving. Deleting a member or link directly dissolves its definition and leaves the remaining geometry independent. Legacy `linear_pattern` and `circular_pattern` operations keep their independent-copy behavior.

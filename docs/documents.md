@@ -179,18 +179,23 @@ current revision.
 A drawing opens with its saved line work. Each view keeps the revision it shows, which
 can be older than the drawing's pin when the view is excluded from updates. Rebuild
 redraws the included views, re-resolves annotations and pins the drawing to the accepted
-part revision. If Catallax refuses a view, Rebuild keeps its old line work, names the view
-and cause, and keeps the views that redrew. While the part and drawing are both open in
-the app, automatic update follows each rebuild of that part.
+part revision. If a view cannot be redrawn, Rebuild keeps its old line work and reports
+the view and cause. The views that redrew keep their updates. While the part and drawing
+are both open in the app, automatic update follows each rebuild of that part.
 
 Export writes saved Catallax line work, preserving crops and excluded views at their saved
-revisions. If a part edit is pending, export uses the drawing's saved views. A sheet
-with a recorded view refusal reports the view and cause. SVG and DXF can still export
-other eligible sheets. A PDF requires all its sheets to be eligible.
-Included views must match the drawing's pin. If export refuses older line work without
-the Catallax marker, redraw the view once in the editor and check any crop or broken-out
-boundary afterward. If the view is excluded from updates, choose **Include in automatic
-update** before rebuilding.
+revisions. If a part edit is pending, export uses the drawing's saved views. Some
+inclined sections appear only on the drawing canvas. SVG, PDF and DXF omit those views,
+their annotations and their cutting-plane marks and references on every sheet. Export
+counts, view revisions and revision table zones reflect the printed views. SVG records
+curve accuracy in `data-accuracy`.
+
+A sheet with a recorded refusal on a printed view reports the view and cause. SVG and
+DXF can still export other eligible sheets. A PDF requires all its sheets to be eligible.
+Printed views included in updates must match the drawing's pin. If export refuses older
+line work without the Catallax marker, redraw the view once in the editor and check any
+crop or broken-out boundary afterward. If the view is excluded from updates, choose
+**Include in automatic update** before rebuilding.
 
 Exact work on a pinned revision that is not current (measuring it, projecting a new view
 of it) needs that revision's bytes. They come from a `RevisionStore`:
@@ -356,9 +361,14 @@ soliddraft draw <part.dwprt | recipe.json> ...
 
 `doc refs` exits with status 1 when a reference is missing.
 
-`draw --update` saves the rebuilt drawing before handling `--out` files. A named view
-refusal skips affected sheet exports and lets other eligible outputs proceed. An ordinary
-output error stops later writes and the report still lists files already written.
+`draw --update` saves the rebuilt drawing before handling `--out` files. An ordinary
+output error stops later writes and the report still lists files already written. See
+[export eligibility](#pinned-revisions-and-rebuild) for the rules on incomplete sheets.
+
+Use `draw --help` for the section, break and title block options. `--template` also
+accepts the [larger template IDs](../crates/soliddraft-drawing/templates/large-paper.toml).
+Set `RUST_LOG=warn` to see section diagnostics on stderr when running `draw`. The text
+and JSON reports still go to stdout.
 
 ## In the app
 
@@ -374,9 +384,9 @@ output error stops later writes and the report still lists files already written
 - **Newer version available.** When the part's revision is not the pinned one, the
   marker shows in the drawing tree (the model row under the document, with the
   out-of-date glyph and the revision, and the header), the status bar, a bar over the
-  sheet with a Rebuild button, the view rows and their hatched borders, and the Model
-  reference panel (select the model row). The marker reads the resolver's answer, so it
-  shows for a part that is not open, from its file.
+  sheet with a Rebuild button, and the Model reference panel (select the model row).
+  Views that need updating show a mark in their tree row and a hatched border. The
+  marker reads the resolver's answer, so it shows for a part that is not open, from its file.
 - **Rebuild** sits where SolidWorks keeps it: `Edit > Rebuild drawing` (Ctrl+B, also U),
   the Model group of the Views tab, the bar over the sheet and the model row's menu. It
   applies the [rebuild rules above](#pinned-revisions-and-rebuild) and binds the reference
@@ -398,6 +408,58 @@ output error stops later writes and the report still lists files already written
   folder, Add file, a typed path, Remove, Move up and Move down. Built-in content is
   listed read-only above the user's entries. Search folders apply when the page is saved;
   templates, sheet formats and styles are read when the app starts.
+
+### Drawing views
+
+- In **Section view**, choose **Offset (stepped)** and pick the centres to cut through
+  in order. The jogs between parallel cuts leave the material uncut. Choose
+  **Finish cutting line**, then place the view.
+- For **Aligned (turned)**, pick a point on the first leg, the pivot and a point on the
+  second leg. The section turns the second leg into the plane of the first. Associative
+  dimensions keep the leg of each attachment when the drawing rebuilds. An older
+  attachment with no saved leg uses the first leg. Use the original view to make a
+  further section through the part.
+- In a base or projected view, choose **Half section** and pick two points on the
+  symmetry axis. The axis must cross the projected part, leaving a cut side and an
+  outside side. **Flip half** swaps the sides.
+- Choose **Break** in the view properties and pick the start and end of the stretch to
+  omit. The longer move sets the direction. A view can have one break with a fixed
+  6 mm gap on paper. Associative dimensions measure the model, so dimensions across
+  the break retain their full value in the drawing and in native DXF dimensions. Use
+  **Edit break** or **Remove break** to change an existing interruption.
+
+### Paper and title blocks
+
+The drawing picker includes landscape ISO A2 through A0 and ANSI C through E alongside
+the smaller sizes. On an existing sheet, select **Sheet format** in the tree to change
+**Paper**. If an item on that sheet would go off the page, SolidDraft names it and keeps
+the old format.
+
+Edit title text in the sheet properties. In **Sheet format > Title block layout**, set
+the field's x, y, width and height in millimetres from the bottom-left of the title
+block. The rectangle must fit inside the field's template cell with room for its content.
+**Reset** restores the template cell. Undo and redo apply to title text and layout
+edits. Save the drawing to keep the edits for reopening and export.
+
+**Title from** in the sheet properties binds the title to a part property. An existing
+sheet override keeps precedence until you clear it with **Use part property**. Rebuild
+updates the title and views together in one undo step, using the part revision and
+configuration it accepts. A binding to a missing property shows as unresolved. MCP can
+bind a text field by its template key with `bind_title_property` through `drawing_command`.
+
+### Review drawing revisions
+
+On the desktop, open a saved drawing and choose **Compare with a saved revision** in
+the sheet properties. Select the saved baseline part. The candidate is the saved part
+revision the drawing shows. Select a row to see its before and after PMI and, for a
+dimension, any measured difference.
+
+If the candidate item has an annotation on that revision, choose **Attach markup to
+selected item**, enter the comment and use **Save markup as** to write a new JSON file.
+**Open markup** reopens the comment on the same saved drawing revision. **Show on the
+sheet** takes you to the annotation. Save any drawing edits and start a new review
+before attaching, opening or saving markup on a changed drawing. Markup saves separately
+from both part files and the drawing.
 
 ## Named-value configurations
 

@@ -1078,11 +1078,8 @@ fn kind_name<T: serde::Serialize>(kind: &T) -> Value {
     serde_json::to_value(kind).ok().and_then(|v| v.get("type").cloned()).unwrap_or(Value::Null)
 }
 
-/// The open drawing as agents read it: its sheets with their views and annotations by
-/// name, and how it stands against the part. Each view says whether its line work is at
-/// the pinned revision and whether it is a screen preview; each annotation says whether
-/// its references resolve and what it measures now, and the lists of changed and
-/// dangling annotations repeat what the Needs attention panel shows.
+/// The open drawing as agents read it, with named views and annotations. The lists of
+/// changed and dangling annotations come from the same checks as the Needs attention panel.
 fn drawing_json(state: &AppState) -> Option<Value> {
     let s = state.drawing.session.as_ref()?;
     let d = &s.doc.drawing;

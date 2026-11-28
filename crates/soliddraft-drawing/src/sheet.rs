@@ -29,8 +29,7 @@ pub struct Sheet {
     /// Title block values that replace the linked document properties, by field key.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub format_overrides: BTreeMap<String, String>,
-    /// Title block fields that read a part property, by field key. Binding clears the
-    /// field's override; one set later still wins.
+    /// Title block fields that read a part property, by field key.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub title_bindings: BTreeMap<String, String>,
     /// Title block fields placed differently from the template, by field key.

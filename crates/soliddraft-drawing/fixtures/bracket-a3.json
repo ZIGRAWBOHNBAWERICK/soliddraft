@@ -59,6 +59,36 @@
           "excluded_from_update": false,
           "geometry": {
             "source_digest": "fixture:bracket-rev7",
+            "transform": {
+              "frame": {
+                "right": [
+                  1.0,
+                  0.0,
+                  0.0
+                ],
+                "up": [
+                  0.0,
+                  0.0,
+                  1.0
+                ],
+                "direction": [
+                  -0.0,
+                  -1.0,
+                  -0.0
+                ]
+              },
+              "scale": 1.0,
+              "centre": [
+                60.0,
+                30.0
+              ],
+              "breaks": {
+                "vertical": false,
+                "stretch": null,
+                "centre_fraction": 0.0
+              },
+              "aligned_turn": null
+            },
             "curves": [
               {
                 "path": "M-60,-30 L60,-30",
@@ -436,6 +466,36 @@
           "excluded_from_update": false,
           "geometry": {
             "source_digest": "fixture:bracket-rev7",
+            "transform": {
+              "frame": {
+                "right": [
+                  1.0,
+                  0.0,
+                  0.0
+                ],
+                "up": [
+                  0.0,
+                  1.0,
+                  0.0
+                ],
+                "direction": [
+                  0.0,
+                  0.0,
+                  1.0
+                ]
+              },
+              "scale": 1.0,
+              "centre": [
+                60.0,
+                45.0
+              ],
+              "breaks": {
+                "vertical": false,
+                "stretch": null,
+                "centre_fraction": 0.0
+              },
+              "aligned_turn": null
+            },
             "curves": [
               {
                 "path": "M-60,-45 L-60,45",
@@ -773,6 +833,36 @@
           "excluded_from_update": false,
           "geometry": {
             "source_digest": "fixture:bracket-rev7",
+            "transform": {
+              "frame": {
+                "right": [
+                  0.0,
+                  -1.0,
+                  0.0
+                ],
+                "up": [
+                  -0.0,
+                  0.0,
+                  1.0
+                ],
+                "direction": [
+                  -1.0,
+                  -0.0,
+                  -0.0
+                ]
+              },
+              "scale": 1.0,
+              "centre": [
+                -45.0,
+                30.0
+              ],
+              "breaks": {
+                "vertical": false,
+                "stretch": null,
+                "centre_fraction": 0.0
+              },
+              "aligned_turn": null
+            },
             "curves": [
               {
                 "path": "M45,-30 L-45,-30",
@@ -1169,6 +1259,36 @@
           "excluded_from_update": false,
           "geometry": {
             "source_digest": "fixture:bracket-rev7",
+            "transform": {
+              "frame": {
+                "right": [
+                  0.7071067811865476,
+                  0.7071067811865476,
+                  -0.0
+                ],
+                "up": [
+                  -0.4082482904638631,
+                  0.4082482904638631,
+                  0.8164965809277261
+                ],
+                "direction": [
+                  0.5773502691896258,
+                  -0.5773502691896258,
+                  0.5773502691896258
+                ]
+              },
+              "scale": 0.5,
+              "centre": [
+                37.123106012293746,
+                9.18558653543692
+              ],
+              "breaks": {
+                "vertical": false,
+                "stretch": null,
+                "centre_fraction": 0.0
+              },
+              "aligned_turn": null
+            },
             "curves": [
               {
                 "path": "M-37.1231,-9.1856 L5.3033,-33.6805",

@@ -1428,8 +1428,9 @@ fn review_revisions(state: &mut AppState, baseline: Option<PathBuf>) {
         s.say("Save the drawing first: the review reads the saved drawing");
         return;
     };
-    let Some(candidate_path) = s.model_file() else {
-        s.say("The drawing's part was not found, so there is no candidate to review");
+    // The candidate is the saved revision the drawing shows, not a live part with its id.
+    let Some(candidate_path) = s.saved_model_file() else {
+        s.say("The saved part revision this drawing shows was not found, so there is no candidate to review");
         return;
     };
     let baseline =

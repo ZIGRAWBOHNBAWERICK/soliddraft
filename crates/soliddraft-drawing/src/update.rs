@@ -642,6 +642,11 @@ pub fn reattach(
         if let AnnotationState::Changed { .. } = a.state {
             a.state = AnnotationState::Ok;
         }
+        // Moved off its item's faces, the annotation no longer shows that item.
+        let before = drawing.annotation(id).ok_or(DrawingError::UnknownAnnotation(id))?;
+        if !crate::pmi_items::anchors_on_item(before, &entities, part)? {
+            a.source = None;
+        }
     }
     *drawing.annotation_mut(id).expect("found") = repaired;
     Ok(())

@@ -83,6 +83,25 @@ impl DrawingSession {
         self.model_target().and_then(|t| t.path()).map(Path::to_path_buf)
     }
 
+    /// The saved file of the part revision the drawing is pinned at: its stored path, or
+    /// a file found by id in the drawing's folder and the search folders. A document open
+    /// in this session never stands in for it, even with the same id.
+    pub fn saved_model_file(&self) -> Option<PathBuf> {
+        let model = &self.doc.drawing.model;
+        let id = model.id?;
+        let pinned = |identity: &soliddraft_document::Identity| {
+            identity.id == id && identity.kind == model.kind && identity.revision == model.pinned
+        };
+        let resolver = Resolver::new(self.doc.path.as_deref())
+            .with_search_folders(crate::settings::file_locations().search_folders());
+        if let Resolution::Found(target) = resolver.resolve(model)
+            && target.identity.as_ref().is_some_and(pinned)
+        {
+            return target.path().map(Path::to_path_buf);
+        }
+        resolver.index().find(id).find(|entry| pinned(&entry.identity)).map(|entry| entry.path.clone())
+    }
+
     /// True when the open part (`part`) is the document the drawing shows: the reference
     /// names it, or an unbound reference resolved to its file.
     pub fn model_is(&self, part: DocumentId) -> bool {

@@ -34,7 +34,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use kurbo::Shape as _;
 use serde::{Deserialize, Serialize};
 use soliddraft_kernel_api::drawing::{Curve3, CurveSource};
-use soliddraft_kernel_api::pmi::{At, PmiKind, PositionFrame, SizeKind, TargetArea, TargetKind, Tolerance};
+use soliddraft_kernel_api::pmi::{At, PmiItem, PmiKind, PositionFrame, SizeKind, TargetArea, TargetKind, Tolerance};
 use soliddraft_kernel_api::{EdgeId, FaceId, FaceInfo, Point2, SurfaceKind, Vec3};
 use soliddraft_model::pmi::PmiRow;
 
@@ -46,7 +46,7 @@ use crate::display::{self, Item, Owner};
 use crate::ids::{AnnotationId, ViewId};
 use crate::measure::{AnchorGeometry, anchor_point, precision_for};
 use crate::model_items::{plane_edge, visible_in};
-use crate::part::{Part, PartIndex, round};
+use crate::part::{Entity, Part, PartIndex, round};
 use crate::project::ViewContext;
 use crate::{Drawing, DrawingError};
 
@@ -1178,6 +1178,36 @@ fn row_of<'r>(source: &PmiSource, rows: &'r [PmiRow]) -> Option<&'r PmiRow> {
         }),
         PmiSource::Located { .. } | PmiSource::Notes => None,
     }
+}
+
+/// True when the entities an annotation's anchors resolve to all lie on the item that
+/// `annotation` was made from: on one of the item's faces or on an edge of one. A repair
+/// that moves the annotation elsewhere no longer shows that item.
+pub(crate) fn anchors_on_item(annotation: &Annotation, entities: &[Entity], part: &Part) -> Result<bool, DrawingError> {
+    let rows = &part.requirements.rows;
+    let row = match &annotation.source {
+        None | Some(PmiSource::Notes) => return Ok(true),
+        Some(PmiSource::Located { item, .. }) => row_of(&PmiSource::Item { item: item.clone() }, rows),
+        Some(source) => annotation_row(annotation, source, rows).map(|(row, _)| row),
+    };
+    let Some(item) = row.and_then(|row| row.on_body.as_ref()) else { return Ok(false) };
+    let mut faces: BTreeSet<FaceId> = item.features().into_iter().flatten().copied().collect();
+    if let Some(PmiSource::Located { datum, .. }) = &annotation.source {
+        for row in rows {
+            if let Some(PmiItem { kind: PmiKind::Datum { letter, feature }, .. }) = &row.on_body
+                && letter == datum
+            {
+                faces.extend(feature.iter().copied());
+            }
+        }
+    }
+    let topology = part.geometry.topology()?;
+    let edges: BTreeSet<EdgeId> =
+        topology.faces.iter().filter(|f| faces.contains(&f.id)).flat_map(|f| f.edges.iter().copied()).collect();
+    Ok(entities.iter().all(|entity| match entity {
+        Entity::Edge(edge) => edges.contains(edge),
+        Entity::Face(face) => faces.contains(face),
+    }))
 }
 
 fn datum_target_body<F>(target: &soliddraft_kernel_api::pmi::DatumTarget<F>) -> AnnotationKind {

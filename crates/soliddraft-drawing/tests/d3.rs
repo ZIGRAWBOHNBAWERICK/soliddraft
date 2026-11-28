@@ -104,9 +104,11 @@ fn rebuild_commits_successful_views_alongside_base_and_projected_refusals() {
         for rebuilt in d.sheets[0].views.iter().filter(|v| v.id != id) {
             assert_eq!(rebuilt.geometry.source_digest, changed.digest.as_str());
         }
-        let error = export::check_sheet(&d, &d.sheets[target]).unwrap_err().to_string();
-        assert!(error.contains(&failure.name), "{error}");
-        assert!(error.contains("does not match the drawing's accepted revision"), "{error}");
+        // The refusal is saved with the drawing, so export names its cause before and after reopening.
+        for copy in [&d, &drawing_roundtrip(&d)] {
+            let error = export::check_sheet(copy, &copy.sheets[target]).unwrap_err().to_string();
+            assert!(error.contains(&failure.name) && error.contains(&failure.cause), "{error}");
+        }
 
         let mut repaired = BoxKernel::new();
         repaired.detail_strokes = true;

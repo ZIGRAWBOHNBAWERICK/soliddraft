@@ -729,44 +729,71 @@ fn update(o: &Options) -> Result<(), String> {
             message
         };
         let requested = (|| -> Result<Vec<(Command, String)>, DrawingError> {
-            let mut requested = Vec::new();
             let annotation = |id| drawing.annotation(id).ok_or(DrawingError::UnknownAnnotation(id));
+            let mut invalid = Vec::new();
             if o.accept {
                 for c in &report.changed {
-                    annotation(c.annotation)?;
-                    requested.push((
-                        Command::AcceptChange { annotation: c.annotation },
-                        format!("accepted {}", c.annotation),
-                    ));
+                    if annotation(c.annotation).is_err() {
+                        invalid.push(format!("no {0} in the drawing", c.annotation));
+                    }
                 }
             }
             for (id, end, at) in &o.reattach {
                 let id = AnnotationId(*id);
-                if *end >= annotation(id)?.anchors.len() {
-                    return Err(DrawingError::BadRequest(format!("{id} has no end {end}")));
+                match annotation(id) {
+                    Ok(a) if *end >= a.anchors.len() => invalid.push(format!("{id} has no end {end}")),
+                    Ok(_) => {}
+                    Err(_) => invalid.push(format!("no {id} in the drawing")),
                 }
                 if !at.is_finite() {
-                    return Err(DrawingError::BadRequest(format!("The point for end {end} of {id} must be finite")));
+                    invalid.push(format!("The point for end {end} of {id} must be finite"));
                 }
-                let entity = soliddraft_drawing::edge_near(part, *at)?;
-                requested.push((
-                    Command::Reattach { annotation: id, end: *end, entity },
-                    format!("reattached end {end} of {id}"),
-                ));
             }
             for id in &o.freeze {
-                annotation(AnnotationId(*id))?;
+                if annotation(AnnotationId(*id)).is_err() {
+                    invalid.push(format!("no {} in the drawing", AnnotationId(*id)));
+                }
+            }
+            let mut deleted = std::collections::BTreeSet::new();
+            for id in &o.delete {
+                if annotation(AnnotationId(*id)).is_err() {
+                    invalid.push(format!("no {} in the drawing", AnnotationId(*id)));
+                }
+                if !deleted.insert(*id) {
+                    invalid.push(format!("Annotation {id} was requested for deletion twice"));
+                }
+            }
+            if !invalid.is_empty() {
+                return Err(DrawingError::BadRequest(invalid.join("; ")));
+            }
+
+            let mut requested = Vec::new();
+            if o.accept {
+                requested.extend(report.changed.iter().map(|c| {
+                    (Command::AcceptChange { annotation: c.annotation }, format!("accepted {}", c.annotation))
+                }));
+            }
+            let mut operational = Vec::new();
+            for (id, end, at) in &o.reattach {
+                let id = AnnotationId(*id);
+                match soliddraft_drawing::edge_near(part, *at) {
+                    Ok(entity) => requested.push((
+                        Command::Reattach { annotation: id, end: *end, entity },
+                        format!("reattached end {end} of {id}"),
+                    )),
+                    Err(error) => operational.push(format!("reattach end {end} of {id}: {error}")),
+                }
+            }
+            if !operational.is_empty() {
+                return Err(DrawingError::BadRequest(operational.join("; ")));
+            }
+            for id in &o.freeze {
                 requested.push((
                     Command::FreezeAsNote { annotation: AnnotationId(*id) },
                     format!("kept annotation {id} as a note"),
                 ));
             }
-            let mut deleted = std::collections::BTreeSet::new();
             for id in &o.delete {
-                annotation(AnnotationId(*id))?;
-                if !deleted.insert(*id) {
-                    return Err(DrawingError::BadRequest(format!("Annotation {id} was requested for deletion twice")));
-                }
                 requested.push((
                     Command::DeleteAnnotation { annotation: AnnotationId(*id) },
                     format!("deleted annotation {id}"),

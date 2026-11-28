@@ -707,6 +707,7 @@ fn delete_sheet(drawing: &mut Drawing, sheet: usize) -> Result<(), DrawingError>
         return Err(DrawingError::BadRequest(format!("{} on another sheet is made from a view on this one", v.id)));
     }
     drawing.sheets.remove(sheet);
+    drawing.refused_views.retain(|failure| !ids.contains(&failure.view));
     Ok(())
 }
 
@@ -855,6 +856,7 @@ fn delete_view(drawing: &mut Drawing, view: ViewId) -> Result<(), DrawingError> 
     s.views.retain(|v| v.id != view);
     s.tables.retain(|table| table.hole_view != Some(view));
     s.annotations.retain(|a| a.view != view);
+    drawing.refused_views.retain(|failure| failure.view != view);
     Ok(())
 }
 

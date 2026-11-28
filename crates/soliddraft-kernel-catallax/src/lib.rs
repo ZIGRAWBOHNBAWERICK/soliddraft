@@ -15,6 +15,7 @@ mod distance;
 mod drawing_queries;
 mod edge_control;
 mod face_areas;
+mod face_levels;
 mod feature_pattern;
 mod field_preview;
 mod frames;
@@ -1487,6 +1488,20 @@ fn query_error(query: &str, error: catallax_numbers::Refusal) -> KernelError {
     KernelError::QueryFailed { query: query.into(), code: 0, message: format!("{}: {}", error.code, error.detail) }
 }
 
+/// Refuses a certified mesh whose chord bound the interface's f32 positions would break.
+fn survives_f32(mesh: &catallax_mesh::Mesh, options: &MeshOptions) -> KernelResult<()> {
+    let rounding_budget = options.chord_tolerance.to_f64_nearest();
+    if mesh.positions.iter().any(|p| {
+        let rounded = p.map(|v| f64::from(v as f32));
+        !rounded.iter().all(|v| v.is_finite()) || Vec3::from(*p).distance(rounded.into()) > rounding_budget
+    }) {
+        return Err(KernelError::Unsupported(
+            "requested chord tolerance cannot survive f32 display rounding is not available in the Catallax application entry".into(),
+        ));
+    }
+    Ok(())
+}
+
 fn numerical<T>(
     operation: &str,
     run: impl FnOnce(&mut Decider) -> Result<catallax_numbers::Answer<T>, catallax_numbers::Refusal>,
@@ -2369,15 +2384,7 @@ impl Kernel for CatallaxKernel {
             let solid = self.solid(body)?;
             let options = options(params)?;
             let mesh = solid.display(&options, "tessellate")?;
-            let rounding_budget = options.chord_tolerance.to_f64_nearest();
-            if mesh.positions.iter().any(|p| {
-                let rounded = p.map(|v| f64::from(v as f32));
-                !rounded.iter().all(|v| v.is_finite()) || Vec3::from(*p).distance(rounded.into()) > rounding_budget
-            }) {
-                return Err(KernelError::Unsupported(
-                    "requested chord tolerance cannot survive f32 display rounding is not available in the Catallax application entry".into(),
-                ));
-            }
+            survives_f32(&mesh, &options)?;
             Ok(convert::mesh(&mesh, &solid.ids, params))
         })
     }
@@ -2582,6 +2589,27 @@ impl Kernel for CatallaxKernel {
             let description = Arc::new(description);
             self.descriptions.keep(body, description.clone());
             Ok(Some(gpu_preview::preview(description)))
+        })
+    }
+
+    fn face_level_points(
+        &self,
+        body: BodyId,
+        params: &TessellationParams,
+    ) -> KernelResult<Option<Vec<FaceLevelPoints>>> {
+        self.observe("face_level_points", || {
+            Ok(face_levels::planned(self, body, params, None)?.map(|(points, _)| points))
+        })
+    }
+
+    fn face_level_mesh(
+        &self,
+        body: BodyId,
+        params: &TessellationParams,
+        choose: &mut dyn FnMut(&[FaceLevelPoints]) -> Option<Vec<FaceLevel>>,
+    ) -> KernelResult<Option<Mesh>> {
+        self.observe("face_level_mesh", || {
+            Ok(face_levels::planned(self, body, params, Some(choose))?.and_then(|(_, mesh)| mesh))
         })
     }
 

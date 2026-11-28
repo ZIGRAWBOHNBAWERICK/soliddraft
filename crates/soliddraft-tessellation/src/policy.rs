@@ -9,6 +9,11 @@
 //!   Small bodies whose curves are bounded by the angle rather than the chord can come
 //!   out the same at two levels; the display cache then keeps one mesh for both.
 //!
+//! - **Faces of a single part** get their own three levels ([`FaceLevels`]), nested in
+//!   one kernel plan made at one of the part's levels, the fine one unless the device
+//!   budget says otherwise, so a face can be drawn coarser than its neighbour and still
+//!   meet it on the same edge points.
+//!
 //! The chord height is what the viewport reports as the deviation: the mesh is within
 //! that distance of the exact surface.
 
@@ -30,6 +35,13 @@ pub const MIN_CHORD_MM: f64 = 1e-4;
 /// bounding diagonal.
 pub fn slider_fraction(value: u8) -> f64 {
     BASELINE * 2f64.powf((f64::from(SLIDER_AUTO) - f64::from(value)) / 2.0)
+}
+
+/// How far three levels are from the exact surface: what the level choice reads.
+pub trait Deviations {
+    /// The largest distance from the mesh of `level` to the exact surface, in
+    /// millimetres. `None` when no chord height bounds it.
+    fn deviation(&self, level: Level) -> Option<f64>;
 }
 
 /// The kernel parameters of one definition's three levels.
@@ -74,6 +86,67 @@ impl Levels {
     /// The cache key of `level`'s parameters.
     pub fn key(&self, level: Level) -> ParamsKey {
         ParamsKey::of(self.params(level))
+    }
+
+    /// The levels of the faces of a single part with these levels, planned at the fine
+    /// level's parameters.
+    pub fn faces(&self) -> FaceLevels {
+        self.faces_at(Level::Fine)
+    }
+
+    /// The levels of the faces of a single part planned at the parameters of `level`
+    /// instead: what a part falls back to when its fine plan is over the device budget.
+    pub fn faces_at(&self, level: Level) -> FaceLevels {
+        FaceLevels { params: *self.params(level) }
+    }
+}
+
+impl Deviations for Levels {
+    fn deviation(&self, level: Level) -> Option<f64> {
+        Levels::deviation(self, level)
+    }
+}
+
+/// The three levels of each face of a single part. The kernel plans the part once at
+/// [`params`](Self::params) and nests the levels of every face in that plan: fine is
+/// the part's mesh at those parameters, standard and coarse are sampled to twice and ten
+/// times its chord height. Every level of every face keeps the plan's edge points, so the
+/// choice is free per face. A face the kernel meshes in one pass, such as a plane or a
+/// cylinder, is the same mesh at all three.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FaceLevels {
+    params: TessellationParams,
+}
+
+impl FaceLevels {
+    /// The face levels `quality` gives a part whose bounding diagonal is `diagonal_mm`.
+    pub fn new(quality: &Quality, diagonal_mm: f64) -> FaceLevels {
+        Levels::new(quality, diagonal_mm).faces()
+    }
+
+    /// The parameters the part is planned at, as
+    /// [`Kernel::face_level_mesh`](soliddraft_kernel_api::Kernel::face_level_mesh) takes them.
+    pub fn params(&self) -> &TessellationParams {
+        &self.params
+    }
+
+    /// The chord height a face is sampled to at `level`, in millimetres. `None` when
+    /// the plan has no chord height, as with advanced values that set only an angle; the
+    /// three levels are then one mesh.
+    pub fn deviation(&self, level: Level) -> Option<f64> {
+        let chord = self.params.chord_height;
+        (chord > 0.0).then(|| chord * level.face_chord_factor())
+    }
+
+    /// The cache key of the plan's parameters.
+    pub fn key(&self) -> ParamsKey {
+        ParamsKey::of(&self.params)
+    }
+}
+
+impl Deviations for FaceLevels {
+    fn deviation(&self, level: Level) -> Option<f64> {
+        FaceLevels::deviation(self, level)
     }
 }
 
@@ -185,6 +258,25 @@ mod tests {
         assert_eq!((c.chord_height, c.max_edge_length, c.max_aspect_ratio), (0.2, 16.0, 3.0));
         let angle_only = Levels::new(&Quality::Custom(Advanced { chord_height: 0.0, ..a }), 500.0);
         assert_eq!(angle_only.deviation(Level::Fine), None);
+    }
+
+    #[test]
+    fn face_levels_are_planned_at_the_fine_level() {
+        let whole = Levels::new(&Quality::Auto, 100.0);
+        let faces = whole.faces();
+        assert_eq!(faces, FaceLevels::new(&Quality::Auto, 100.0));
+        assert_eq!(faces.params(), whole.params(Level::Fine));
+        assert_eq!(faces.key(), whole.key(Level::Fine));
+        // The part's fine chord is 0.05 mm; a face is sampled to 10, 2 and 1 times that.
+        assert_eq!(Level::ALL.map(|l| faces.deviation(l)), [Some(0.5), Some(0.1), Some(0.05)]);
+        assert_eq!(faces.deviation(Level::Fine), whole.deviation(Level::Fine));
+        // A plan at a coarser level of the part scales the three with it.
+        let fallback = whole.faces_at(Level::Standard);
+        assert_eq!(fallback.params(), whole.params(Level::Standard));
+        assert_eq!(Level::ALL.map(|l| fallback.deviation(l)), [Some(2.0), Some(0.4), Some(0.2)]);
+        let a = Advanced { chord_height: 0.0, angle_deg: 10.0, max_edge_length: 0.0, max_aspect_ratio: 0.0 };
+        let angle_only = FaceLevels::new(&Quality::Custom(a), 100.0);
+        assert_eq!(Level::ALL.map(|l| angle_only.deviation(l)), [None; 3]);
     }
 
     #[test]

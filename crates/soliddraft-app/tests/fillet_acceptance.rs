@@ -11,7 +11,7 @@ use std::{collections::BTreeSet, sync::Arc, time::Instant};
 use serde_json::{Value, json};
 use soliddraft_app::{app_tools::AppTools, document::Document, state::AppState};
 use soliddraft_assistant::{Caller, tools::call_checked};
-use soliddraft_kernel_api::{Aabb, BodyAccuracy, EdgeId, FaceId, KernelError, KernelResult};
+use soliddraft_kernel_api::{Aabb, BodyAccuracy, EdgeId, FaceId, KernelResult};
 use soliddraft_kernel_catallax::{APP_REQUEST_WORK, CatallaxKernel};
 
 #[path = "support/import_open.rs"]
@@ -509,21 +509,21 @@ fn owner_pocket_rim_takes_r1() {
 
 /// Since Catallax's check-once change (its interface note of 21 Nov 2026), reopening an
 /// exported file trusts the tolerance the file records, so the R2 round trip that used to
-/// exceed the work limit now opens within it, with every face and the same box.
+/// exceed the work limit now opens within it, with every face and the same box. Its display
+/// folds one sliver of a torus face over a plane; left out, the display closes and the
+/// reopened rim's volume agrees with the built one.
 #[test]
 fn owner_pocket_rim_takes_r2() {
     let (mut part, rim) = owner_part();
     let rows = vec![part.fillet_and("owner-pocket-rim", rim, 2.0, true)];
     report("owner-pocket-rim-r2", &rows, |_| true);
     let exported_box = part.topology().bbox;
+    let doc = part.doc();
+    let built = doc.mass_properties(doc.features.last().unwrap().id).expect("the built rim's volume").volume;
     let (volume, bbox) = import_exported_step("owner-pocket-rim-r2", OWNER_FACES + 6);
-    // The reimported rim is a tolerant body whose approximate display is not closed, so its
-    // mass is refused by name rather than estimated. Firstmate tracks that open display as a
-    // follow-on; until it closes, the box stands in for the volume.
-    assert!(
-        matches!(&volume, Err(KernelError::Unsupported(why)) if why == "The approximate display of this body is not closed, so its mass is not estimated."),
-        "the reimported rim's mass: {volume:?}"
-    );
+    let volume = volume.expect("the reimported rim's approximate display can estimate its mass");
+    eprintln!("owner rim R2 volume: built {built}, reimported {volume}");
+    assert!((volume - built).abs() < built * 2e-3, "the reimported rim keeps its volume: {built} -> {volume}");
     for (got, want) in [(bbox.min, exported_box.min), (bbox.max, exported_box.max)] {
         assert!(got.distance(want) < ROUND_TRIP_TOLERANCE, "the reimported rim keeps its box: {want:?} -> {got:?}");
     }

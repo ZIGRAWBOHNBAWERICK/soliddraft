@@ -1613,10 +1613,35 @@ pub fn apply(state: &mut AppState, dock: &mut DockState<Tab>, ctx: &egui::Contex
             }
         }
         DrawingAction::Command(cmd) => {
-            if let Err(e) = run_command(state, cmd)
-                && let Some(s) = state.drawing.session.as_mut()
-            {
-                s.say(e);
+            let repair = match &cmd {
+                Command::Reattach { annotation, end, .. } => Some((*annotation, *end)),
+                _ => None,
+            };
+            let result = run_command(state, cmd);
+            if let Some(s) = state.drawing.session.as_mut() {
+                match result {
+                    Err(e) => s.say(e),
+                    Ok(()) => {
+                        if let Some((annotation, end)) = repair
+                            && s.tool == (DrawingTool::Reattach { annotation, end })
+                        {
+                            let next = s.doc.drawing.annotation(annotation).and_then(|a| match &a.state {
+                                soliddraft_drawing::AnnotationState::Dangling { lost, .. } => lost.first().copied(),
+                                _ => None,
+                            });
+                            if let Some(next) = next {
+                                s.set_tool(DrawingTool::Reattach { annotation, end: next });
+                                s.say(format!("Reattached end {} · now pick for end {}", end + 1, next + 1));
+                            } else {
+                                s.set_tool(DrawingTool::Select);
+                                s.say("Reattached; the dimension is measured again");
+                                state.push(AppAction::Drawing(DrawingAction::Select(Some(DrawingSel::Annotation(
+                                    annotation,
+                                )))));
+                            }
+                        }
+                    }
+                }
             }
         }
         DrawingAction::Undo => {
@@ -2155,7 +2180,7 @@ pub(crate) fn prepare_sheets(s: &DrawingSession, all_sheets: bool) -> Result<Pre
     let failures: Vec<_> = s
         .doc
         .refused_views()
-        .filter(|(i, ..)| writes_sheet(*i))
+        .filter(|(i, id, ..)| writes_sheet(*i) && drawing.view(*id).is_some_and(View::is_printed))
         .map(|(_, _, name, cause)| format!("{name}: {cause}"))
         .collect();
     if !failures.is_empty() {

@@ -1435,34 +1435,13 @@ fn reattach_tool(
         s.say("Pick in the view the dimension belongs to");
         return;
     }
-    let Some(c) = s.sheet().view(view).and_then(|v| v.geometry.curves.get(index)).cloned() else { return };
-    let mut entity = c.source.clone();
-    entity.kernel_hint = c.source.kernel_hint;
-    // Which end of the picked edge: an end pick keeps it, otherwise the anchor's own kind.
-    let next_lost: Vec<usize> = match &a.state {
-        AnnotationState::Dangling { lost, .. } => lost.iter().copied().filter(|i| *i != end).collect(),
-        _ => Vec::new(),
-    };
-    if let Some(e) = picked_end
-        && let Some(an) =
-            s.doc.drawing.sheets.iter_mut().flat_map(|sh| sh.annotations.iter_mut()).find(|x| x.id == annotation)
-        && let Some(anchor) = an.anchors.get_mut(end)
-    {
-        anchor.attach = e;
-    }
-    push(DrawingAction::Command(Command::Reattach { annotation, end, entity }));
-    match next_lost.first() {
-        Some(next) => {
-            let tool = DrawingTool::Reattach { annotation, end: *next };
-            s.say(format!("Reattached end {} · now pick for end {}", end + 1, next + 1));
-            push(DrawingAction::SetTool(tool));
-        }
-        None => {
-            s.say("Reattached; the dimension is measured again");
-            push(DrawingAction::SetTool(DrawingTool::Select));
-            push(DrawingAction::Select(Some(DrawingSel::Annotation(annotation))));
-        }
-    }
+    let Some(curve) = s.sheet().view(view).and_then(|v| v.geometry.curves.get(index)) else { return };
+    push(DrawingAction::Command(Command::Reattach {
+        annotation,
+        end,
+        entity: curve.source.clone(),
+        attach: picked_end,
+    }));
 }
 
 /// The banner over the canvas after an update: what changed in the part and what it

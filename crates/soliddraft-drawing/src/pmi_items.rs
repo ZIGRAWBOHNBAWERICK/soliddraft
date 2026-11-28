@@ -710,9 +710,10 @@ impl<'a> Planner<'a> {
                 };
                 let all: Vec<&[FaceId]> = features.iter().map(Vec::as_slice).collect();
                 let (view, edge, centred, centre, placement, dir) = self.callout(&all, axis, radius)?;
-                let (kind, value) = match size {
-                    SizeKind::Diameter => (DimensionKind::Diameter, 2.0 * radius),
-                    SizeKind::Radius => (DimensionKind::Radius, radius),
+                let kind = size_dimension_kind(*size);
+                let value = match size {
+                    SizeKind::Diameter => 2.0 * radius,
+                    SizeKind::Radius => radius,
                 };
                 let value = row.measured.first().copied().unwrap_or(value);
                 let mut dimension = Dimension::measured(kind, value, precision_for(value));
@@ -1295,9 +1296,19 @@ fn position_body<F>(frame: &PositionFrame<F>) -> AnnotationKind {
     AnnotationKind::PositionFrame { upper, lower, projected_height_mm }
 }
 
+fn size_dimension_kind(size: SizeKind) -> DimensionKind {
+    match size {
+        SizeKind::Diameter => DimensionKind::Diameter,
+        SizeKind::Radius => DimensionKind::Radius,
+    }
+}
+
 /// True when an annotation of kind `body` is how the drawing shows an item of kind
 /// `kind`: a thread as a note, a plain size as a dimension, and so on.
 fn shows<F>(body: &AnnotationKind, kind: &PmiKind<F>) -> bool {
+    if let (AnnotationKind::Dimension(dimension), PmiKind::Size { size, thread: None, .. }) = (body, kind) {
+        return dimension.kind == size_dimension_kind(*size);
+    }
     matches!(
         (body, kind),
         (
@@ -1310,8 +1321,8 @@ fn shows<F>(body: &AnnotationKind, kind: &PmiKind<F>) -> bool {
                 | PmiKind::Knurl { .. }
                 | PmiKind::FaceNote { .. }
         ) | (
-            AnnotationKind::Dimension(_),
-            PmiKind::Size { thread: None, .. } | PmiKind::Location { .. } | PmiKind::Width { .. }
+            AnnotationKind::Dimension(Dimension { kind: DimensionKind::Linear { .. }, .. }),
+            PmiKind::Location { .. } | PmiKind::Width { .. }
         ) | (AnnotationKind::Dimension(Dimension { kind: DimensionKind::Angular, .. }), PmiKind::BasicAngle { .. })
             | (AnnotationKind::Gdt { .. }, PmiKind::Gdt { .. })
             | (AnnotationKind::PositionFrame { .. }, PmiKind::PositionControl(_))

@@ -131,6 +131,13 @@ impl ViewTransform {
         self.aligned_turn.is_some()
     }
 
+    pub(crate) fn check_section_parent(&self) -> Result<(), DrawingError> {
+        if self.has_aligned_legs() {
+            return Err(DrawingError::BadRequest("A section cannot use an unfolded aligned view as its parent".into()));
+        }
+        Ok(())
+    }
+
     pub(crate) fn leg_turn(&self, leg: u8) -> Option<Turn> {
         if leg == 1 { self.aligned_turn } else { None }
     }
@@ -545,6 +552,9 @@ fn compute_view_at(
             remap_parent_boundary(&mut kind, before, after);
         }
         reproject_parent_marks(&mut kind, after);
+    }
+    if let ViewKind::Section { parent, .. } = &kind {
+        memo[parent].xf.check_section_parent()?;
     }
     let mut ctx = match &kind {
         ViewKind::Base { .. } | ViewKind::Projected { .. } => {
@@ -2135,6 +2145,24 @@ mod tests {
 
     fn same(a: Vec3, b: Vec3) -> bool {
         a.distance(b) < 1e-12
+    }
+
+    #[test]
+    fn a_turned_circle_attachment_uses_the_original_parameter() {
+        let parent = ViewFrame { direction: Vec3::Y, right: Vec3::X, up: -Vec3::Z };
+        let cut = crate::section_path::BentSection::new(&parent, &[-Vec3::X, Vec3::ZERO, Vec3::Z], false).unwrap();
+        let frame = ViewFrame { direction: Vec3::X, right: Vec3::Y, up: Vec3::Z };
+        let xf =
+            ViewTransform { aligned_turn: cut.aligned_turn(), ..ViewTransform::new(frame, 1.0, Point2::default()) };
+        let original = Curve3::Circle { center: Vec3::ZERO, normal: Vec3::Z, radius: 5.0 };
+        let turned = xf.curve_on_leg(1, &original);
+        let mut entity = crate::EntityRef::new(crate::EntityKind::Edge, "rim", "circle", 0, Vec3::ZERO, 5.0);
+        entity.section_leg = 1;
+        let anchor =
+            crate::Anchor { entity, attach: crate::Attach::EdgeParameter { t: 0.25 }, cached: Point2::default() };
+        let geometry = crate::update::anchor_geometry(&xf, &anchor, Some(&original), Some(&turned));
+        let point = crate::measure::anchor_point(&geometry, &xf, Point2::default());
+        assert_eq!(xf.point(point), Point2::new(5.0, 0.0));
     }
 
     fn ring(points: &[[f64; 2]]) -> Vec<Point2> {

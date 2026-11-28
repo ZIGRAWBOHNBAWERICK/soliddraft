@@ -874,7 +874,7 @@ fn update(o: &Options) -> Result<(), String> {
                     .ok_or_else(|| DrawingError::BadRequest("No edge in the view is available at that point".into()))?
                     .entity;
                 requested.push((
-                    Command::Reattach { annotation: id, end: *end, entity },
+                    Command::Reattach { annotation: id, end: *end, entity, attach: None },
                     format!("reattached end {end} of {id}"),
                 ));
             }

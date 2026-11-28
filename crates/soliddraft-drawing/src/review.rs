@@ -40,7 +40,7 @@ pub fn place_of_item(drawing: &Drawing, item: &str) -> Option<MarkupTarget> {
 
 fn shows_item(drawing: &Drawing, sheet: &Sheet, a: &Annotation, item: &str) -> bool {
     matches!(&a.source, Some(PmiSource::Item { item: id }) if id == item)
-        && !a.anchors.is_empty()
+        && (!a.anchors.is_empty() || matches!(a.body, crate::AnnotationKind::Gdt { .. }))
         && !matches!(a.state, AnnotationState::Dangling { .. })
         && sheet.view(a.view).is_some_and(|v| v.geometry.source_digest == drawing.model.pinned.as_str())
 }
@@ -77,6 +77,30 @@ fn centre(drawing: &Drawing, sheet: usize, id: AnnotationId) -> Option<Point2> {
 mod tests {
     use super::*;
     use crate::fixture;
+
+    #[test]
+    fn a_hosted_frame_can_receive_and_reopen_its_markup() {
+        let mut drawing = fixture::bracket_a3();
+        let mut frame = drawing.sheets[0].annotations.iter().find(|a| a.view != crate::SHEET).unwrap().clone();
+        frame.id = drawing.next_annotation_id();
+        frame.body = crate::AnnotationKind::Gdt {
+            characteristic: crate::GdtCharacteristic::Position,
+            tolerance: 0.1,
+            diameter: true,
+            material: crate::MaterialCondition::Regardless,
+            datums: Vec::new(),
+        };
+        frame.anchors.clear();
+        frame.source = Some(PmiSource::Item { item: "Bore position".into() });
+        let id = frame.id;
+        crate::apply(&mut drawing, &crate::Command::AddAnnotation { annotation: frame }).unwrap();
+        let target = place_of_item(&drawing, "Bore position").unwrap();
+        assert_eq!(target, MarkupTarget { sheet: 0, annotation: id });
+        assert_eq!(find_place(&drawing, &target, "Bore position").unwrap().annotation, id);
+        assert!(find_place(&drawing, &target, "Bore diameter").is_none());
+        crate::apply(&mut drawing, &crate::Command::FreezeAsNote { annotation: id }).unwrap();
+        assert!(find_place(&drawing, &target, "Bore position").is_none());
+    }
 
     #[test]
     fn a_place_follows_its_annotation_and_refuses_another_item() {

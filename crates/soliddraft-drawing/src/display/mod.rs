@@ -910,7 +910,7 @@ fn view_items(drawing: &Drawing, sheet: &Sheet, view: &View, ctx: &Context<'_>, 
             owner: Owner::View(view.id),
         }));
     }
-    if view.is_printed() && ctx.stale.contains(&view.id) {
+    if ctx.stale.contains(&view.id) {
         let m = 3.0;
         let (bx0, by0, bx1, by1) = (x0 - m, y0 - m, x1 + m, y1 + m);
         items.push(Item::Path(PathItem {

@@ -71,19 +71,20 @@ fn model_curve<'a>(
     index: &'a PartIndex<'_>,
     xf: &ViewTransform,
     entity: &crate::EntityRef,
-) -> Option<std::borrow::Cow<'a, Curve3>> {
+) -> Option<(&'a Curve3, std::borrow::Cow<'a, Curve3>)> {
     let Resolution::Found(Entity::Edge(id)) = index.resolve(entity) else { return None };
     let curve = index.edge_curve(id)?;
-    Some(match xf.leg_turn(entity.section_leg) {
+    let unfolded = match xf.leg_turn(entity.section_leg) {
         Some(turn) => std::borrow::Cow::Owned(turn.curve(curve)),
         None if entity.section_leg == 0 => std::borrow::Cow::Borrowed(curve),
         None => return None,
-    })
+    };
+    Some((curve, unfolded))
 }
 
 fn resolve_model_pick(index: &PartIndex, xf: &ViewTransform, anchor: &Anchor) -> Option<Vec3> {
-    let curve = model_curve(index, xf, &anchor.entity)?;
-    let geometry = crate::update::anchor_geometry(xf, anchor, Some(&curve));
+    let (original, curve) = model_curve(index, xf, &anchor.entity)?;
+    let geometry = crate::update::anchor_geometry(xf, anchor, Some(original), Some(&curve));
     Some(anchor_point(&geometry, xf, Point2::default()))
 }
 
@@ -532,7 +533,7 @@ pub fn propose_model(view: &View, picks: &[Pick], index: &PartIndex, xf: &ViewTr
     let flat = xf.unbroken();
     let mut proposal = propose_from(view.id, picks, |pick| {
         let c = view.geometry.curves.get(pick.curve)?;
-        let curve = model_curve(index, xf, &c.source)?;
+        let (_, curve) = model_curve(index, xf, &c.source)?;
         let shape = shape_of(&crate::project::path_of(&curve, &flat));
         let ends = [curve.start(), curve.end()].map(|p| flat.precise_point(p));
         Some((c, shape, Some(ends)))

@@ -81,6 +81,9 @@ pub enum Command {
         end: usize,
         /// The new entity.
         entity: EntityRef,
+        /// Explicit attachment picked on the new entity.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        attach: Option<crate::Attach>,
     },
     /// Replace an annotation with a note that keeps its text, the repair that gives up on
     /// its references.
@@ -441,19 +444,18 @@ pub fn apply(drawing: &mut Drawing, command: &Command) -> Result<(), DrawingErro
             if drawing.view(view.id).is_some() {
                 return Err(DrawingError::BadRequest(format!("{} is already on the drawing", view.id)));
             }
-            if let Some(parent) = view.parent()
-                && drawing.view(parent).is_none()
-            {
-                return Err(DrawingError::UnknownView(parent));
-            }
-            if let ViewKind::Section { parent, .. } = view.kind
-                && drawing
-                    .view(parent)
-                    .is_some_and(|parent| parent.geometry.source_digest != view.geometry.source_digest)
-            {
-                return Err(DrawingError::BadRequest(
-                    "The section and its parent must come from the same part revision".into(),
-                ));
+            if let Some(parent) = view.parent() {
+                let parent = drawing.view(parent).ok_or(DrawingError::UnknownView(parent))?;
+                if matches!(view.kind, ViewKind::Section { .. }) {
+                    if let Some(transform) = parent.geometry.transform {
+                        transform.check_section_parent()?;
+                    }
+                    if parent.geometry.source_digest != view.geometry.source_digest {
+                        return Err(DrawingError::BadRequest(
+                            "The section and its parent must come from the same part revision".into(),
+                        ));
+                    }
+                }
             }
             project::validate_break(&view.geometry, view.display, 1.0, !view.breaks.is_empty())?;
             if view.letter().is_some_and(|l| l == drawing.next_view_label) {
@@ -1063,8 +1065,8 @@ pub fn apply_with(drawing: &mut Drawing, command: &Command, part: &Part) -> Resu
             Ok(None)
         }
         Command::UpdateFromModel => update::update_from_model(drawing, part).map(Some),
-        Command::Reattach { annotation, end, entity } => {
-            update::reattach(drawing, part, *annotation, *end, entity.clone()).map(|_| None)
+        Command::Reattach { annotation, end, entity, attach } => {
+            update::reattach_with(drawing, part, *annotation, *end, entity.clone(), *attach).map(|_| None)
         }
         Command::ReattachView { view, edge } => update::reattach_view(drawing, part, *view, edge.clone()).map(|_| None),
         Command::EditView { view, kind } => edit_and_regenerate(drawing, part, *view, |v| {

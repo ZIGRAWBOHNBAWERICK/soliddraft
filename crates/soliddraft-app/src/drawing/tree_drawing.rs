@@ -97,11 +97,11 @@ fn view_dot<'a>(
     update_reason: Option<&str>,
     annotations: impl Iterator<Item = &'a soliddraft_drawing::Annotation>,
 ) -> Dot {
-    if !view.is_printed() {
-        return Dot::None;
-    }
     if update_reason.is_some() {
         return Dot::Warn;
+    }
+    if !view.is_printed() {
+        return Dot::None;
     }
     let worst = annotations
         .map(|a| match a.state {

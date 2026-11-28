@@ -111,17 +111,7 @@ pub(super) fn anchor_from_hit(
     let shape = shape_of_curve(c, circles);
     // A circle's start is where its path begins, not a corner: the centre wins.
     let (attach, at) = match (&shape, hit.end) {
-        (CurveShape::Circle { centre, radius }, _)
-            if v.geometry.breaks.iter().all(|gap| {
-                let p = match gap.axis {
-                    AlignAxis::Horizontal => centre.u,
-                    AlignAxis::Vertical => centre.v,
-                };
-                p + radius <= gap.at || p - radius >= gap.at + gap.gap
-            }) =>
-        {
-            (Attach::Centre, *centre)
-        }
+        (CurveShape::Circle { centre, .. }, _) => (Attach::Centre, *centre),
         (_, Some(end)) => (end, soliddraft_drawing::measure::endpoint(c, shape, end)),
         (_, None) if broken => (Attach::Mid, pointer),
         _ => (Attach::Mid, shape.mid()),

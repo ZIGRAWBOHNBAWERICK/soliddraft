@@ -1268,6 +1268,9 @@ fn aligned_section_dimensions_keep_the_second_leg_on_rebuild() {
     let id = section.id;
     let mut stack = UndoStack::new();
     run(&mut stack, &mut drawing, &part, Command::PlaceView { sheet: 0, view: section });
+    let child = [Point2::new(-10.0, 0.0), Point2::new(10.0, 0.0)];
+    let error = derived::new_section(&drawing, &part, &index, 0, id, child, false, None).unwrap_err();
+    assert!(error.to_string().contains("unfolded aligned view"));
     let leg_point = ctx.xf.point(ctx.xf.point_on_leg(1, point));
     let (detail, detail_context) =
         derived::new_detail(&drawing, &part, &index, 0, id, leg_point, 3.0, vec![], 2.0, None).unwrap();
@@ -1351,7 +1354,7 @@ fn aligned_section_dimensions_keep_the_second_leg_on_rebuild() {
     // Neither a repair nor a new auxiliary view takes the edge from that leg.
     let repair = soliddraft_drawing::apply_with(
         &mut drawing,
-        &Command::Reattach { annotation: annotation_id, end: 0, entity: leg_edge.clone() },
+        &Command::Reattach { annotation: annotation_id, end: 0, entity: leg_edge.clone(), attach: None },
         &part,
     );
     assert!(repair.is_err(), "{repair:?}");
@@ -1770,6 +1773,41 @@ fn an_inclined_section_view_shows_its_mesh_cut_and_never_blocks_an_export() {
     assert!(drawing.view(id).is_none());
     apply(&mut drawing, &Command::PlaceView { sheet: 0, view: section }).unwrap();
     export::check_sheet(&drawing, &drawing.sheets[0]).unwrap();
+    let mut broken = drawing.clone();
+    let mut history = UndoStack::new();
+    run(
+        &mut history,
+        &mut broken,
+        &part,
+        Command::SetViewScale { view: id, scale: soliddraft_drawing::ViewScale::Custom { factor: 1.0 } },
+    );
+    let fallback = &broken.view(id).unwrap().geometry;
+    let [left, _, right, _] = fallback.bbox;
+    let xf = fallback.transform.unwrap();
+    let point = |fraction| xf.unproject(Point2::new(left + (right - left) * fraction, 0.0));
+    run(
+        &mut history,
+        &mut broken,
+        &part,
+        Command::SetViewBreaks {
+            view: id,
+            breaks: vec![soliddraft_drawing::Break {
+                from: point(0.25),
+                to: point(0.75),
+                axis: soliddraft_drawing::AlignAxis::Horizontal,
+            }],
+        },
+    );
+    let cached = broken.view(id).unwrap().geometry.clone();
+    let short = box_part(&kernel, "block", Vec3::new(10.0, 10.0, 15.0));
+    let failed = update_from_model(&mut broken, &short).unwrap();
+    let failure =
+        failed.dangling_views.iter().find(|failure| failure.view == id).expect("the broken section needs repair");
+    assert!(failure.cause.contains("The break must shorten"), "{}", failure.cause);
+    let broken = drawing_roundtrip(&broken);
+    assert_eq!(broken.view(id).unwrap().geometry, cached);
+    assert_eq!(&broken.refused_views, &failed.dangling_views);
+    export::check_sheet(&broken, &broken.sheets[0]).unwrap();
 
     // Left out of updates while the part grows and the drawing rebuilds, then put back
     // without a rebuild: the section keeps the older revision.
@@ -2388,12 +2426,32 @@ fn reattaching_a_straight_point_moves_the_leader_onto_the_new_edge() {
     apply(&mut drawing, &Command::AddAnnotation { annotation: note }).unwrap();
     let rim = Vec3::new(60.0, 0.0, 50.0);
     let edge = edge_near(&part, rim).unwrap();
-    soliddraft_drawing::apply_with(&mut drawing, &Command::Reattach { annotation: id, end: 0, entity: edge }, &part)
-        .unwrap();
+    soliddraft_drawing::apply_with(
+        &mut drawing,
+        &Command::Reattach { annotation: id, end: 0, entity: edge, attach: None },
+        &part,
+    )
+    .unwrap();
     let saved = drawing_roundtrip(&drawing);
     let anchor = &saved.annotation(id).unwrap().anchors[0];
     assert_eq!(anchor.attach, Attach::Point { at: rim });
     assert_eq!(anchor.cached, ctx.xf.point(rim));
+    let mut history = UndoStack::new();
+    let target = edge_near(&part, Vec3::new(60.0, 0.0, 0.0)).unwrap();
+    let soliddraft_drawing::Resolution::Found(soliddraft_drawing::Entity::Edge(edge)) = index.resolve(&target) else {
+        panic!("the lower model edge")
+    };
+    let expected = ctx.xf.point(index.edge_curve(edge).unwrap().end());
+    run(
+        &mut history,
+        &mut drawing,
+        &part,
+        Command::Reattach { annotation: id, end: 0, entity: target, attach: Some(Attach::End) },
+    );
+    assert_eq!(drawing.annotation(id).unwrap().anchors[0].cached, expected);
+    assert_eq!(drawing.annotation(id).unwrap().anchors[0].attach, Attach::End);
+    assert_eq!(history.undo(&mut drawing), Some("Reattach"));
+    assert_eq!(drawing.annotation(id).unwrap().anchors[0], *anchor);
 }
 
 #[test]
@@ -2521,6 +2579,7 @@ fn saved_broken_view_interior_dimensions_follow_the_edge_parameter() {
     let kernel = BoxKernel::new();
     let part = box_part(&kernel, "block", Vec3::new(120.0, 50.0, 120.0));
     let grown = box_part(&kernel, "block", Vec3::new(132.0, 50.0, 132.0));
+    let short = box_part(&kernel, "block", Vec3::new(95.0, 50.0, 95.0));
     let index = PartIndex::build(&part).unwrap();
     for (axis, direction, orientation) in [
         (AlignAxis::Horizontal, Vec3::X, LinearOrientation::Horizontal),
@@ -2601,6 +2660,19 @@ fn saved_broken_view_interior_dimensions_follow_the_edge_parameter() {
             run(&mut stack, &mut drawing, &part, Command::AddAnnotation { annotation });
         }
         let mut drawing = drawing_roundtrip(&drawing);
+        let mut shortened = drawing.clone();
+        update_from_model(&mut shortened, &short).unwrap();
+        for id in std::iter::once(smart).chain(sets.iter().copied()) {
+            let annotation = shortened.annotation(id).unwrap();
+            assert!(
+                matches!(&annotation.state,
+                    AnnotationState::Dangling { lost, cause } if *lost == [1] && cause.contains("inside the break")
+                ),
+                "{:?}",
+                annotation.state
+            );
+            assert_eq!(annotation.anchors[1].cached, at);
+        }
         update_from_model(&mut drawing, &grown).unwrap();
         let drawing = drawing_roundtrip(&drawing);
         let xf = drawing.view(FRONT).unwrap().geometry.transform.unwrap();
@@ -2617,6 +2689,26 @@ fn saved_broken_view_interior_dimensions_follow_the_edge_parameter() {
         let legacy = drawing.annotation(legacy_id).unwrap();
         assert_eq!(legacy.anchors[1].cached, xf.point(direction * 100.0));
         assert!(matches!(&legacy.body, AnnotationKind::Dimension(d) if d.value == DimValue::Measured { value: 100.0 }));
+    }
+}
+
+#[test]
+fn unbroken_cli_sets_measure_the_supplied_off_edge_points() {
+    let kernel = BoxKernel::new();
+    let part = box_part(&kernel, "plate", Vec3::new(100.0, 40.0, 10.0));
+    let drawing = drawing(&part);
+    let index = PartIndex::build(&part).unwrap();
+    let ctx = derived::context(&drawing, &part, &index, FRONT).unwrap();
+    let points = [Vec3::new(3.0, 20.0, 10.0), Vec3::new(97.0, 20.0, 10.0)];
+    for kind in [SetKind::Ordinate, SetKind::Baseline, SetKind::Chain] {
+        let annotation =
+            annotate::dimension_set(&drawing, &index, &ctx, kind, LinearOrientation::Horizontal, &points, 15.0)
+                .unwrap();
+        assert!(matches!(&annotation.body, AnnotationKind::DimensionSet(set) if set.values == [94.0]));
+        for (anchor, point) in annotation.anchors.iter().zip(points) {
+            assert_eq!(anchor.attach, soliddraft_drawing::Attach::Point { at: point });
+            assert_eq!(anchor.cached, ctx.xf.point(point));
+        }
     }
 }
 

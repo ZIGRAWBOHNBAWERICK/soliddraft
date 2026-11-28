@@ -81,7 +81,8 @@ fn a_drawing_review_compares_bracket_revisions_and_reopens_its_markup_on_that_dr
     }
     soliddraft_app::file::set_config_dir(Some(root.join("config")));
     let baseline = root.join("parts/bracket-a.dwprt");
-    let candidate = root.join("parts/bracket-b.dwprt");
+    let candidate = root.join("parts/bracket-b.dwpart");
+    let migrated = candidate.with_extension("dwprt");
     let drawing_path = root.join("drawings/bracket-b.dwdrw");
     let edited_drawing = root.join("drawings/bracket-b-owner.dwdrw");
     let markup_path = root.join("bracket-b-review.json");
@@ -121,7 +122,9 @@ fn a_drawing_review_compares_bracket_revisions_and_reopens_its_markup_on_that_dr
         (baseline_bore, baseline_boss, cylindrical_face(state, 7.5), cylindrical_face(state, 10.0))
     };
     app.run_steps(2);
-    action(&mut app, AppAction::SaveAs(Some(candidate.clone())));
+    action(&mut app, AppAction::SaveAs(Some(migrated.clone())));
+    std::fs::rename(&migrated, &candidate).unwrap();
+    app.state_mut().state.doc.path = Some(candidate.clone());
     drawing(&mut app, DrawingAction::MakeDrawing);
     drawing(&mut app, DrawingAction::CreateDrawing);
     drawing(&mut app, DrawingAction::Save(Some(drawing_path.clone())));
@@ -345,7 +348,10 @@ fn a_drawing_review_compares_bracket_revisions_and_reopens_its_markup_on_that_dr
         .expect("the candidate boss face");
     assert!(boss_face.edges.contains(&rim), "the Ø18 dimension is on the boss rim");
     let rim = anchor.entity.clone();
-    drawing(&mut app, DrawingAction::Command(Command::Reattach { annotation: bore, end: 0, entity: rim }));
+    drawing(
+        &mut app,
+        DrawingAction::Command(Command::Reattach { annotation: bore, end: 0, entity: rim, attach: None }),
+    );
     let moved = session(&app).doc.drawing.annotation(bore).expect("the annotation stays on the sheet");
     assert_eq!(moved.state, AnnotationState::Ok);
     let AnnotationKind::Dimension(dimension) = &moved.body else { panic!("the bore annotation is a dimension") };
@@ -372,7 +378,7 @@ fn a_drawing_review_compares_bracket_revisions_and_reopens_its_markup_on_that_dr
     // A later revision saved as another file and left open does not stand in for the saved
     // revision the drawing shows: the review of that drawing still opens with its comment.
     drawing(&mut app, DrawingAction::CloseDrawing);
-    let later = root.join("parts/bracket-c.dwprt");
+    let later = migrated;
     bracket::call(&mut app.state_mut().state, "drive", json!({"sketch": "Sketch4", "dimension": 1, "expression": "9"}));
     app.run_steps(2);
     action(&mut app, AppAction::SaveAs(Some(later.clone())));
@@ -413,6 +419,20 @@ fn a_drawing_review_compares_bracket_revisions_and_reopens_its_markup_on_that_dr
     drawing(&mut app, DrawingAction::ReviewRevisions(Some(baseline.clone())));
     assert!(session(&app).review.is_some(), "the saved drawing still opens review for revision B");
 
+    let mut changed = saved_drawing.drawing().clone();
+    let mut candidate_doc = Document::from_model(saved_part);
+    let mut item = candidate_doc.model().pmi().item("Bore diameter").unwrap().clone();
+    let PmiKind::Size { size, tolerance, .. } = &mut item.kind else { panic!("the bore size") };
+    *size = soliddraft_kernel_api::pmi::SizeKind::Radius;
+    *tolerance = Tolerance::None;
+    candidate_doc.put_pmi(item, Some("Bore diameter".into())).unwrap();
+    let part = soliddraft_app::drawing::part::PartContext::new(&candidate_doc).unwrap();
+    soliddraft_drawing::update_from_model(&mut changed, &part.part()).unwrap();
+    let target = soliddraft_drawing::review::place_of_item(&changed, "Bore diameter").unwrap();
+    let annotation = changed.annotation(target.annotation).unwrap();
+    let AnnotationKind::Dimension(dimension) = &annotation.body else { panic!("the rebuilt bore radius") };
+    assert_eq!(dimension.kind, soliddraft_drawing::DimensionKind::Radius);
+    assert_eq!(dimension.value, DimValue::Measured { value: 4.0 });
     for (path, before) in [&baseline, &candidate, &drawing_path].into_iter().zip(&sources) {
         assert_eq!(&std::fs::read(path).unwrap(), before, "{} is as it was", path.display());
     }

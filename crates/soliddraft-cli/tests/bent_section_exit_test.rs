@@ -18,7 +18,47 @@ use std::process::Command;
 
 use serde_json::Value;
 use soliddraft_drawing::{CurveKind, View, ViewKind};
-use soliddraft_kernel_api::Point2;
+use soliddraft_kernel_api::{Point2, Vec3};
+
+#[path = "support/section_output.rs"]
+mod section_output;
+use section_output::{hatch_loops, svg_segments};
+
+fn segment_covers(segments: &[[Point2; 2]], point: Point2) -> bool {
+    segments.iter().any(|[a, b]| {
+        let (du, dv) = (b.u - a.u, b.v - a.v);
+        let length = du * du + dv * dv;
+        if length <= 1e-12 {
+            return false;
+        }
+        let t = (((point.u - a.u) * du + (point.v - a.v) * dv) / length).clamp(0.0, 1.0);
+        (point.u - (a.u + t * du)).hypot(point.v - (a.v + t * dv)) <= 0.002
+    })
+}
+
+fn pdf_segments(pdf: &lopdf::Document) -> Vec<[Point2; 2]> {
+    let page = pdf.get_pages()[&1];
+    let contents = lopdf::content::Content::decode(&pdf.get_page_content(page)).unwrap();
+    let mut segments = Vec::new();
+    let mut last = None;
+    for op in contents.operations {
+        let point = || {
+            Point2::new(f64::from(op.operands[0].as_float().unwrap()), f64::from(op.operands[1].as_float().unwrap()))
+        };
+        match op.operator.as_str() {
+            "m" => last = Some(point()),
+            "l" => {
+                let end = point();
+                if let Some(start) = last.replace(end) {
+                    segments.push([start, end]);
+                }
+            }
+            "S" | "f" | "h" | "c" => last = None,
+            _ => {}
+        }
+    }
+    segments
+}
 
 fn recipes_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../recipes")
@@ -195,9 +235,29 @@ fn offset_section_through_staggered_bracket_holes() {
     assert_dxf_hatches_match(&dir.join("bracket.dxf"), &section);
     let svg = std::fs::read_to_string(dir.join("bracket.svg")).unwrap();
     assert!(svg.contains(&format!(">SECTION {label}-{label}</text>")), "the section's caption");
-    assert!(svg.contains(r#"<g id="HATCH""#) && svg.contains(r#"<g id="CUTTING""#));
+    let (saved, _) = soliddraft_drawing::file::read(&dir.join("bracket.dwdrw")).unwrap();
+    let ViewKind::Section { parent, .. } = section.kind else { unreachable!() };
+    let parent = saved.view(parent).unwrap();
+    let height = saved.sheets[0].size.height_mm;
+    let svg_visible = svg_segments(&svg, "VISIBLE", height);
+    let svg_cut = svg_segments(&svg, "CUTTING", height);
     let pdf = lopdf::Document::load(dir.join("bracket.pdf")).expect("the PDF loads");
     assert_eq!(pdf.get_pages().len(), 1);
+    let pdf_lines = pdf_segments(&pdf);
+    let sheet_point = |view: &View, at| {
+        let p = view.geometry.transform.unwrap().point(at);
+        Point2::new(view.position.u + p.u, view.position.v + p.v)
+    };
+    for (x, y) in [(25.0_f64, 23.0), (115.0, 67.0)] {
+        for wall in [x - 4.5, x + 4.5] {
+            let on = sheet_point(&section, Vec3::new(wall, y, 5.0));
+            assert!(segment_covers(&svg_visible, on), "SVG hole wall at {on:?}");
+            assert!(segment_covers(&pdf_lines, on), "PDF hole wall at {on:?}");
+        }
+    }
+    let jog = sheet_point(parent, Vec3::new(70.0, 45.0, 10.0));
+    assert!(segment_covers(&svg_cut, jog), "the SVG trace crosses the fixed jog");
+    assert!(segment_covers(&pdf_lines, jog), "the PDF trace crosses the fixed jog");
 
     // The flange gets taller: the drawing rebuilds the same cut against the new part.
     edit_recipe(&dir.join("bracket.json"), "flange", "distance", 70.0);
@@ -294,39 +354,6 @@ fn hatch_regions(regions: &[Vec<Vec<Point2>>], scale: f64, expected: &[Vec<Vec<[
 
 fn polygon_loops(view: &View) -> Vec<Vec<Vec<Point2>>> {
     view.geometry.hatch.iter().map(|h| std::iter::once(&h.outer).chain(&h.holes).cloned().collect()).collect()
-}
-
-fn hatch_loops(bytes: &[u8]) -> Vec<Vec<(bool, Vec<Point2>)>> {
-    let text = String::from_utf8_lossy(bytes);
-    let mut lines = text.lines();
-    let groups: Vec<_> = std::iter::from_fn(|| {
-        let code = lines.next()?.trim().parse::<u16>().expect("DXF group code");
-        Some((code, lines.next().expect("DXF group value").trim()))
-    })
-    .collect();
-    groups
-        .chunk_by(|_, next| next.0 != 0)
-        .filter(|entity| entity.first() == Some(&(0, "HATCH")))
-        .map(|entity| {
-            let start = entity.iter().position(|(code, _)| *code == 92).expect("DXF hatch boundary");
-            entity[start..]
-                .chunk_by(|_, next| next.0 != 92)
-                .map(|groups| {
-                    let (92, flag) = groups[0] else { panic!("DXF loop flag") };
-                    let external = flag.parse::<u32>().unwrap() & 1 != 0;
-                    let ring = groups.iter().position(|(code, _)| *code == 97).expect("end of DXF boundary");
-                    let points = groups[..ring]
-                        .windows(2)
-                        .filter_map(|pair| {
-                            let [(10, x), (20, y)] = pair else { return None };
-                            Some(Point2::new(x.parse().unwrap(), y.parse().unwrap()))
-                        })
-                        .collect();
-                    (external, points)
-                })
-                .collect()
-        })
-        .collect()
 }
 
 /// The DXF's HATCH boundaries are the view's hatch regions on the sheet, loop for loop:
@@ -561,11 +588,20 @@ fn an_oblique_offset_keeps_its_square_jog_after_extension_and_reopen() {
         ],
     );
     let (section, _) = bent_section(&dir.join("oblique.dwdrw"), 4);
-    let ViewKind::Section { model_line, .. } = section.kind else { unreachable!() };
+    let ViewKind::Section { model_line, .. } = &section.kind else { unreachable!() };
     let leg = model_line[1] - model_line[0];
     let jog = model_line[2] - model_line[1];
     near(leg.dot(jog), 0.0, 1e-8, "the extended leg is square to its jog");
     let svg = std::fs::read_to_string(dir.join("oblique.svg")).unwrap();
-    assert!(svg.contains(r#"<g id="CUTTING""#), "the parent prints its offset trace");
+    let (saved, _) = soliddraft_drawing::file::read(&dir.join("oblique.dwdrw")).unwrap();
+    let ViewKind::Section { parent, .. } = section.kind else { unreachable!() };
+    let parent = saved.view(parent).unwrap();
+    let trace = svg_segments(&svg, "CUTTING", saved.sheets[0].size.height_mm);
+    let xf = parent.geometry.transform.unwrap();
+    for point in [Vec3::new(16.0, 12.0, 0.0), Vec3::new(56.0, 32.0, 0.0)] {
+        let p = xf.point(point);
+        let on = Point2::new(parent.position.u + p.u, parent.position.v + p.v);
+        assert!(segment_covers(&trace, on), "the SVG trace follows the retained oblique leg at {point:?}");
+    }
     std::fs::remove_dir_all(&dir).unwrap();
 }

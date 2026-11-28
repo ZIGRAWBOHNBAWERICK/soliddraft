@@ -15,6 +15,11 @@ use std::process::Command;
 
 use serde_json::Value;
 use soliddraft_drawing::{AnnotationKind, CurveKind, View};
+use soliddraft_kernel_api::Vec3;
+
+#[path = "support/section_output.rs"]
+mod section_output;
+use section_output::{hatch_loops, svg_segments};
 
 fn recipes_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../recipes")
@@ -152,10 +157,36 @@ fn half_section_of_a_symmetric_shaft() {
         .collect();
     assert!(outside.iter().any(|(_, v)| (*v - (axis - 10.0 * scale)).abs() < 1e-6), "the uncut half is drawn");
     let svg = std::fs::read_to_string(dir.join("shaft.svg")).unwrap();
-    assert!(svg.contains(r#"<g id="HATCH""#));
-    let counts =
-        soliddraft_drawing::export::dxf::count_entities(&std::fs::read(dir.join("shaft.dxf")).unwrap()).unwrap();
-    assert_eq!(counts.get("HATCH/HATCH").copied().unwrap_or(0), view.geometry.hatch.len());
+    let (saved, _) = soliddraft_drawing::file::read(&dir.join("shaft.dwdrw")).unwrap();
+    let hatch = svg_segments(&svg, "HATCH", saved.sheets[0].size.height_mm);
+    let loops = hatch_loops(&std::fs::read(dir.join("shaft.dxf")).unwrap());
+    let xf = view.geometry.transform.unwrap();
+    for (station, radius) in [(-10.0, 6.0), (120.0, 10.0), (250.0, 6.0)] {
+        let p = xf.point(Vec3::new(station, 0.0, 3.0));
+        let (u, inner) = (view.position.u + p.u, view.position.v + p.v);
+        let outer = inner + (radius - 3.0) * scale;
+        let points: Vec<_> = hatch.iter().flatten().filter(|p| (p.u - u).abs() <= 9.0 * scale).collect();
+        let bottom = points.iter().map(|p| p.v).fold(f64::INFINITY, f64::min);
+        let top = points.iter().map(|p| p.v).fold(f64::NEG_INFINITY, f64::max);
+        near(bottom, inner, 0.001, "SVG inner wall");
+        near(top, outer, 0.001, "SVG outer wall");
+        let wall: f64 = loops
+            .iter()
+            .flat_map(|entity| entity.iter())
+            .map(|(external, ring)| {
+                let mut ys: Vec<_> = ring
+                    .iter()
+                    .zip(ring.iter().cycle().skip(1))
+                    .filter(|(a, b)| (a.u <= u) != (b.u <= u))
+                    .map(|(a, b)| a.v + (b.v - a.v) * (u - a.u) / (b.u - a.u))
+                    .collect();
+                ys.sort_by(f64::total_cmp);
+                let thickness: f64 = ys.chunks_exact(2).map(|pair| pair[1] - pair[0]).sum();
+                if *external { thickness } else { -thickness }
+            })
+            .sum();
+        near(wall / scale, radius - 3.0, 1e-6, "DXF wall thickness");
+    }
 
     // The body grows 10 mm: the half section reflows with it.
     set_body_length(&dir.join("shaft.json"), "body", 250.0);

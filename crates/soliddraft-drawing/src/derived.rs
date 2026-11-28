@@ -194,6 +194,7 @@ pub fn new_section_along(
     let mut memo = Contexts::new();
     project::compute_in(drawing, part, index, parent, &mut memo)?;
     let xf = memo[&parent].xf;
+    xf.check_section_parent()?;
     let model_line: Vec<_> = line.iter().map(|p| xf.unproject(*p)).collect();
     let flat: Vec<_> = model_line.iter().map(|p| xf.unbroken().precise_point(*p)).collect();
     if flat.len() != 2 {

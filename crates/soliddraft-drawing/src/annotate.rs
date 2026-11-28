@@ -112,6 +112,9 @@ fn segment_distance(p: Vec3, a: Vec3, b: Vec3) -> f64 {
 }
 
 fn dimension_anchor_near(index: &PartIndex, ctx: &ViewContext, at: Vec3) -> Option<Anchor> {
+    if ctx.xf.breaks.is_empty() {
+        return view_anchor_near(index, ctx, at);
+    }
     if let Some(circle) = ctx
         .projected
         .circles
@@ -175,20 +178,22 @@ pub fn dimension_set(
         .map(|p| dimension_anchor_near(index, ctx, *p))
         .collect::<Option<_>>()
         .ok_or(DrawingError::BadRequest("the part has no edges".into()))?;
+    let originals: Vec<_> = anchors
+        .iter()
+        .map(|a| match index.resolve(&a.entity) {
+            crate::Resolution::Found(crate::Entity::Edge(id)) => index.edge_curve(id),
+            _ => None,
+        })
+        .collect();
     let curves: Vec<_> = anchors
         .iter()
-        .map(|a| {
-            let curve = match index.resolve(&a.entity) {
-                crate::Resolution::Found(crate::Entity::Edge(id)) => index.edge_curve(id),
-                _ => None,
-            };
-            crate::update::anchor_curve(ctx, a, curve)
-        })
+        .zip(&originals)
+        .map(|(anchor, original)| crate::update::anchor_curve(ctx, anchor, *original))
         .collect();
     let geometry: Vec<_> = anchors
         .iter()
-        .zip(&curves)
-        .map(|(anchor, curve)| crate::update::anchor_geometry(&ctx.xf, anchor, curve.as_deref()))
+        .zip(originals.iter().zip(&curves))
+        .map(|(anchor, (original, curve))| crate::update::anchor_geometry(&ctx.xf, anchor, *original, curve.as_deref()))
         .collect();
     let mut set = DimensionSet { kind, orientation, values: Vec::new(), precision: 0, dim_type: DimType::Projected };
     let values =

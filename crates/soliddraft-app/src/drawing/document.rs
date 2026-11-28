@@ -196,10 +196,10 @@ impl DrawingDoc {
     }
 
     pub(super) fn view_update_reason(&self, view: &View) -> Option<&str> {
-        if !view.is_printed() {
-            None
-        } else if let Some(failure) = self.active_refusals().find(|f| f.view == view.id) {
+        if let Some(failure) = self.active_refusals().find(|f| f.view == view.id) {
             Some(&failure.cause)
+        } else if !view.is_printed() {
+            None
         } else if view.needs_inclusion_for_redraw() {
             Some(soliddraft_drawing::export::INCLUDE_FOR_REDRAW)
         } else if !view.has_saved_catallax_linework() {
@@ -231,10 +231,7 @@ impl DrawingDoc {
     }
 
     fn active_refusals(&self) -> impl Iterator<Item = &soliddraft_drawing::DanglingView> {
-        self.drawing
-            .refused_views
-            .iter()
-            .filter(|failure| self.drawing.view(failure.view).is_some_and(View::is_printed))
+        self.drawing.refused_views.iter().filter(|failure| self.drawing.view(failure.view).is_some())
     }
 
     pub fn refused_views(&self) -> impl Iterator<Item = (usize, ViewId, String, &str)> {
@@ -538,23 +535,29 @@ mod tests {
     use soliddraft_drawing::{AnnotationKind, Scale};
 
     #[test]
-    fn a_saved_display_section_has_no_update_warning() {
+    fn a_display_section_warns_only_if_its_rebuild_failed() {
         let mut drawing = soliddraft_drawing::fixture::bracket_a3();
         let view = &mut drawing.sheets[0].views[0];
         let id = view.id;
+        view.label = Some("Section B".into());
         view.geometry.display_only = true;
         view.geometry.source_digest = "older revision".into();
-        drawing.refused_views.push(soliddraft_drawing::DanglingView {
-            view: id,
-            name: "Section B".into(),
-            cause: "The break exceeds the part".into(),
-        });
-        let doc = DrawingDoc::new(drawing);
+        let mut doc = DrawingDoc::new(drawing);
         let view = doc.drawing.view(id).unwrap();
         assert!(doc.view_is_up_to_date(view));
         assert_eq!(doc.view_update_reason(view), None);
         assert!(!doc.stale_views().contains(&id));
-        assert!(doc.view_refusal_messages().all(|s| !s.contains("Section B")));
+        assert!(doc.view_refusal_messages().next().is_none());
+
+        doc.drawing.refused_views.push(soliddraft_drawing::DanglingView {
+            view: id,
+            name: "Section B".into(),
+            cause: "The break exceeds the part".into(),
+        });
+        let view = doc.drawing.view(id).unwrap();
+        assert_eq!(doc.view_update_reason(view), Some("The break exceeds the part"));
+        assert!(doc.stale_views().contains(&id));
+        assert_eq!(doc.view_refusal_messages().next().as_deref(), Some("Section B: The break exceeds the part"));
     }
 
     #[test]

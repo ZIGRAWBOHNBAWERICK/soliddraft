@@ -198,7 +198,6 @@ pub fn update_from_model(drawing: &mut Drawing, part: &Part) -> Result<UpdateRep
         crate::pmi_items::place_notes(drawing, sheet, part);
     }
     collect(drawing, &mut report);
-    report.dangling_views.retain(|failure| drawing.view(failure.view).is_some_and(crate::View::is_printed));
     drawing.refused_views.clone_from(&report.dangling_views);
     drawing.accept_source(part);
     Ok(report)
@@ -418,7 +417,17 @@ fn collect(drawing: &Drawing, report: &mut UpdateReport) {
 }
 
 fn resolve_anchor(index: &PartIndex, ctx: &ViewContext, anchor: &crate::Anchor) -> Resolution {
-    project::resolve_in_view(index, ctx, &anchor.entity)
+    let resolved = project::resolve_in_view(index, ctx, &anchor.entity);
+    if let (Resolution::Found(Entity::Edge(edge)), Attach::EdgeParameter { t }) = (&resolved, anchor.attach)
+        && !ctx.xf.breaks.is_empty()
+        && let Some(curve) = index.edge_curve(*edge)
+    {
+        let point = ctx.xf.point_on_leg(anchor.entity.section_leg, curve.point_at(t));
+        if ctx.xf.breaks.hides(point.dot(ctx.xf.breaks.axis(&ctx.xf.frame))) {
+            return Resolution::Lost("The attachment point is inside the break".into());
+        }
+    }
+    resolved
 }
 
 /// Re-resolves one annotation; returns the change when its displayed value moved.
@@ -472,13 +481,15 @@ pub(crate) fn anchor_curve<'a>(
 pub(crate) fn anchor_geometry<'a>(
     xf: &project::ViewTransform,
     anchor: &crate::Anchor,
+    original: Option<&soliddraft_kernel_api::drawing::Curve3>,
     curve: Option<&'a soliddraft_kernel_api::drawing::Curve3>,
 ) -> AnchorGeometry<'a> {
     let turn = xf.leg_turn(anchor.entity.section_leg);
     let placed = |p| turn.map_or(p, |turn| turn.point(p));
-    let attach = match anchor.attach {
-        Attach::Point { at } => Attach::Point { at: placed(at) },
-        other => other,
+    let attach = match (anchor.attach, original) {
+        (Attach::Point { at }, _) => Attach::Point { at: placed(at) },
+        (Attach::EdgeParameter { t }, Some(curve)) => Attach::Point { at: placed(curve.point_at(t)) },
+        (other, _) => other,
     };
     AnchorGeometry { curve, point: placed(anchor.entity.fingerprint.point), attach }
 }
@@ -494,20 +505,20 @@ fn remeasure(
     part: &Part,
 ) -> Option<ChangedValue> {
     let authored_angle = crate::pmi_items::authored_angle(a, part);
-    let curves: Vec<_> = a
-        .anchors
+    let originals: Vec<_> = entities
         .iter()
-        .zip(entities)
-        .map(|(anchor, e)| match e {
-            Entity::Edge(id) => anchor_curve(ctx, anchor, index.edge_curve(*id)),
+        .map(|e| match e {
+            Entity::Edge(id) => index.edge_curve(*id),
             Entity::Face(_) => None,
         })
         .collect();
+    let curves: Vec<_> =
+        a.anchors.iter().zip(&originals).map(|(anchor, curve)| anchor_curve(ctx, anchor, *curve)).collect();
     let geometry: Vec<_> = a
         .anchors
         .iter()
-        .zip(&curves)
-        .map(|(anchor, curve)| anchor_geometry(&ctx.xf, anchor, curve.as_deref()))
+        .zip(originals.iter().zip(&curves))
+        .map(|(anchor, (original, curve))| anchor_geometry(&ctx.xf, anchor, *original, curve.as_deref()))
         .collect();
     let (before_state, mut change) = (a.state.clone(), None);
     match &mut a.body {
@@ -589,8 +600,22 @@ fn remeasure(
                 };
                 return None;
             }
-            for (anchor, g) in a.anchors.iter_mut().zip(&geometry) {
-                anchor.cached = ctx.xf.point(anchor_point(g, &ctx.xf, Default::default()));
+            for ((anchor, g), entity) in a.anchors.iter_mut().zip(&geometry).zip(entities) {
+                let point = ctx.xf.point(anchor_point(g, &ctx.xf, Default::default()));
+                anchor.cached = if matches!(entity, Entity::Face(_)) && matches!(anchor.attach, Attach::Point { .. }) {
+                    let segments = ctx
+                        .projected
+                        .geometry
+                        .curves
+                        .iter()
+                        .filter(|c| {
+                            c.source.kind == anchor.entity.kind && c.source.same_projected_entity(&anchor.entity)
+                        })
+                        .flat_map(|c| c.path.segments());
+                    project::nearest_drawn_point(point, segments).unwrap_or(point)
+                } else {
+                    point
+                };
             }
             a.state = AnnotationState::Ok;
             match body {
@@ -661,6 +686,17 @@ pub fn reattach(
     end: usize,
     entity: EntityRef,
 ) -> Result<(), DrawingError> {
+    reattach_with(drawing, part, id, end, entity, None)
+}
+
+pub(crate) fn reattach_with(
+    drawing: &mut Drawing,
+    part: &Part,
+    id: AnnotationId,
+    end: usize,
+    entity: EntityRef,
+    attachment: Option<Attach>,
+) -> Result<(), DrawingError> {
     let index = PartIndex::build(part)?;
     let view = drawing.annotation(id).ok_or(DrawingError::UnknownAnnotation(id))?.view;
     let ctx = ViewContext::compute(drawing, part, &index, view)?;
@@ -670,6 +706,9 @@ pub fn reattach(
     let a = &mut repaired;
     let anchor = a.anchors.get_mut(end).ok_or(DrawingError::BadRequest(format!("{id} has no end {end}")))?;
     anchor.entity = entity;
+    if let Some(attach) = attachment {
+        anchor.attach = attach;
+    }
     // A round takes its centre, a line its middle, unless the end picks a side.
     if let Resolution::Found(Entity::Edge(edge)) = resolve_anchor(&index, &ctx, anchor)
         && let Some(curve) = index.edge_curve(edge)
@@ -684,8 +723,8 @@ pub fn reattach(
             let at = ctx.retained_edge_point(edge, anchor.entity.section_leg, curve, mid).unwrap_or(mid);
             anchor.attach = Attach::Point { at };
         }
-        let curve = anchor_curve(&ctx, anchor, Some(curve));
-        let g = anchor_geometry(&ctx.xf, anchor, curve.as_deref());
+        let unfolded = anchor_curve(&ctx, anchor, Some(curve));
+        let g = anchor_geometry(&ctx.xf, anchor, Some(curve), unfolded.as_deref());
         anchor.cached = ctx.xf.point(anchor_point(&g, &ctx.xf, Default::default()));
     }
     let resolved: Vec<Option<Entity>> = a

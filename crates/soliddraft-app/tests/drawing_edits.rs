@@ -287,7 +287,7 @@ fn round_dimension_repairs_accept_circles_and_remeasure_the_value() {
         d.apply(Command::AddDimension { annotation: a }, None).unwrap();
         soliddraft_drawing::apply_with(
             &mut d.drawing,
-            &Command::Reattach { annotation: id, end: 0, entity: circle.entity },
+            &Command::Reattach { annotation: id, end: 0, entity: circle.entity, attach: None },
             &part,
         )
         .unwrap();

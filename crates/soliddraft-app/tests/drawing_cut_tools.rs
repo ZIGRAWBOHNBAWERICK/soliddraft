@@ -677,6 +677,20 @@ fn broken_view_dimensions_measure_the_model_from_native_picks() {
             .unwrap();
     let entities = soliddraft_drawing::export::dxf::count_entities(&dxf).unwrap();
     assert!(entities.get("DIMENSION/DIMENSION").is_some_and(|n| *n >= 4));
+    drawing(&mut app, DrawingAction::Save(Some(root.join("section-repair.dwdrw"))));
+    let before = session(&app).doc.drawing.clone();
+    assert!(!session(&app).doc.dirty);
+    let mut unrelated = Document::new("Unrelated", app.state().state.doc.kernel().clone());
+    unrelated.dirty = true;
+    std::mem::swap(&mut app.state_mut().state.doc, &mut unrelated);
+    drawing(&mut app, DrawingAction::StartReattach { annotation: dimension.id, end: 0 });
+    click_model(&mut app, front, Vec3::new(120.0, 0.0, 0.0));
+    let (message, _) = session(&app).message.as_ref().expect("the repair was rejected");
+    assert_eq!(message, "The open part is not the one this drawing shows");
+    assert_eq!(session(&app).doc.drawing, before);
+    assert!(!session(&app).doc.dirty);
+    assert_eq!(session(&app).tool, DrawingTool::Reattach { annotation: dimension.id, end: 0 });
+    std::mem::swap(&mut app.state_mut().state.doc, &mut unrelated);
 
     let top = view_named(&app, "Top view");
     drawing(
@@ -684,7 +698,7 @@ fn broken_view_dimensions_measure_the_model_from_native_picks() {
         DrawingAction::Command(DrawCommand::SetViewBreaks {
             view: top,
             breaks: vec![soliddraft_drawing::Break {
-                from: Vec3::new(40.0, 0.0, 0.0),
+                from: Vec3::new(27.0, 0.0, 0.0),
                 to: Vec3::new(80.0, 0.0, 0.0),
                 axis: AlignAxis::Horizontal,
             }],
@@ -719,11 +733,15 @@ fn broken_view_dimensions_measure_the_model_from_native_picks() {
     }
 
     let broken = view(&app, front);
+    let xf = broken.geometry.transform.unwrap();
     let silhouette = broken
         .geometry
         .curves
         .iter()
-        .find(|curve| curve.visible && curve.kind == CurveKind::Silhouette)
+        .find(|curve| {
+            let at = soliddraft_drawing::measure::shape_of(&curve.path).mid();
+            curve.visible && curve.kind == CurveKind::Silhouette && (xf.unproject(at).x - 82.0).abs() < 1e-3
+        })
         .expect("the boss has a visible silhouette on the front view");
     let at = soliddraft_drawing::measure::shape_of(&silhouette.path).mid();
     let click = session(&app).screen_of(Point2::new(broken.position.u + at.u, broken.position.v + at.v));
@@ -738,11 +756,36 @@ fn broken_view_dimensions_measure_the_model_from_native_picks() {
         .unwrap();
     assert_eq!(note.anchors[0].entity, silhouette.source);
     near(note.anchors[0].cached.u, at.u, 1e-3, "the note leader touches the retained silhouette");
+    let note = note.id;
     drawing(&mut app, DrawingAction::SetTool(DrawingTool::SurfaceFinish));
     click_at(&mut app, click);
     let [anchor] = session(&app).draft.anchors.as_slice() else { panic!("the finish can pick the silhouette") };
     assert_eq!(anchor.entity, silhouette.source);
     near(anchor.cached.u, at.u, 1e-3, "the finish leader touches the retained silhouette");
+    click_at(&mut app, click + vec2(20.0, 15.0));
+    let finish = session(&app)
+        .sheet()
+        .annotations
+        .iter()
+        .rev()
+        .find(|a| a.view == front && matches!(a.body, AnnotationKind::SurfaceFinish { .. }))
+        .unwrap()
+        .id;
+    let boss = app.state().state.doc.features.iter().find(|f| f.name == "Sketch3").unwrap().id;
+    app.state_mut()
+        .state
+        .doc
+        .apply(Command::EditSketch { id: boss, sketch: circles(&[(P2::new(70.0, 45.0), 14.0)]) })
+        .unwrap();
+    settle(&mut app);
+    drawing(&mut app, DrawingAction::Command(DrawCommand::UpdateFromModel));
+    let xf = view(&app, front).geometry.transform.unwrap();
+    for id in [note, finish] {
+        let annotation = session(&app).doc.drawing.annotation(id).unwrap();
+        assert_eq!(annotation.state, soliddraft_drawing::AnnotationState::Ok);
+        let anchor = &annotation.anchors[0];
+        near(xf.unproject(anchor.cached).x, 84.0, 1e-3, "the leader follows the wider cylindrical face");
+    }
     drop(app);
     std::fs::remove_dir_all(&root).unwrap();
 }

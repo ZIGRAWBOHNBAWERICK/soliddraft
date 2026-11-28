@@ -92,6 +92,11 @@ impl DrawingSession {
         let pinned = |identity: &soliddraft_document::Identity| {
             identity.id == id && identity.kind == model.kind && identity.revision == model.pinned
         };
+        let stored = self.model_stored_path();
+        if !model.path.is_empty() && soliddraft_document::identify_file(&stored).is_ok_and(|identity| pinned(&identity))
+        {
+            return Some(stored);
+        }
         let resolver = Resolver::new(self.doc.path.as_deref())
             .with_search_folders(crate::settings::file_locations().search_folders());
         if let Resolution::Found(target) = resolver.resolve(model)

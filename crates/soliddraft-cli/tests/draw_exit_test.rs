@@ -213,7 +213,7 @@ fn reattach_refusal_keeps_the_partial_rebuild() {
     std::fs::remove_dir_all(dir).unwrap();
 }
 
-fn assert_invalid_repair_leaves_drawing_untouched(dir: &Path, repairs: &[&str]) {
+fn assert_invalid_repair_leaves_drawing_untouched(dir: &Path, repairs: &[&str]) -> String {
     let path = dir.join("box.dwdrw");
     let before = std::fs::read(&path).unwrap();
     let mut args = vec!["draw", "--update", "box.dwdrw", "--out", "unexpected.svg"];
@@ -224,6 +224,7 @@ fn assert_invalid_repair_leaves_drawing_untouched(dir: &Path, repairs: &[&str]) 
     assert!(error.contains("Annotation repair failed"), "{error}");
     assert_eq!(std::fs::read(&path).unwrap(), before);
     assert!(!dir.join("unexpected.svg").exists());
+    error
 }
 
 #[test]
@@ -253,6 +254,13 @@ fn invalid_reattach_arguments_leave_drawing_untouched() {
     for argument in [format!("{id}:999:20,0,5"), format!("{id}:0:NaN,0,5"), "999999:0:20,0,5".into()] {
         assert_invalid_repair_leaves_drawing_untouched(&dir, &["--accept", "--reattach", &argument]);
     }
+    // A reattach that the refused view would turn down does not hide later invalid arguments.
+    let reattach = format!("{id}:0:20,0,5");
+    let error = assert_invalid_repair_leaves_drawing_untouched(
+        &dir,
+        &["--reattach", &reattach, "--keep-as-note", "999999", "--delete", "999998"],
+    );
+    assert!(error.contains("no annotation 999999") && error.contains("no annotation 999998"), "{error}");
     std::fs::remove_dir_all(dir).unwrap();
 }
 

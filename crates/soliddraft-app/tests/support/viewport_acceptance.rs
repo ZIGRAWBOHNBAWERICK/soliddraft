@@ -186,12 +186,10 @@ pub fn sketches() -> Document {
 // ---------------------------------------------------------------------------
 // Driving the real app.
 
-/// Runs the viewport on Metal without a window surface or the default software-first
-/// test adapter policy. The selected render state also owns the screenshot readback.
-#[cfg(target_os = "macos")]
 /// The app on an offscreen Metal render state, as the native gates run it, and that
 /// state's device. The app installs its own GPU preview on the device. The adapter is
 /// written to `adapter.json` in `out` before it is required to be a hardware GPU.
+#[cfg(target_os = "macos")]
 pub fn metal_app(out: &Path) -> (App, egui_wgpu::RenderState) {
     use egui_kittest::wgpu::{WgpuTestRenderer, create_render_state};
     use egui_wgpu::{WgpuConfiguration, WgpuSetup, WgpuSetupCreateNew, wgpu};
@@ -231,6 +229,9 @@ pub fn metal_app(out: &Path) -> (App, egui_wgpu::RenderState) {
     (app, state)
 }
 
+/// Runs the viewport on Metal without a window surface or the default software-first
+/// test adapter policy. The selected render state also owns the screenshot readback.
+#[cfg(target_os = "macos")]
 pub fn capture_metal_p1(out: &Path) {
     let (mut app, _) = metal_app(out);
     for name in ["empty", "p1"] {

@@ -65,5 +65,84 @@ class SummarizeTest(unittest.TestCase):
         self.assertIn('GPU preview not on: not installed, no display.gpu.json', record['problems'])
 
 
+class ControlTest(unittest.TestCase):
+    def test_the_control_expects_the_cpu_preview(self):
+        with tempfile.TemporaryDirectory() as folder:
+            bundle = Path(folder)
+            off = {'status': 'GPU preview off, CPU preview kept (preview.gpu-disabled: SOLIDDRAFT_GPU_PREVIEW is off)',
+                   'gpu_previews': 0, 'cpu_previews': 3, 'refused_faces': 0}
+            step(bundle, 1, off, calls=[('preview', 2.0)])
+            self.assertTrue(preview.summarize('box', bundle, 0, control=True)['accepted'])
+        with tempfile.TemporaryDirectory() as folder:
+            bundle = Path(folder)
+            step(bundle, 1, None, calls=[('preview', 2.0)])
+            self.assertTrue(preview.summarize('box', bundle, 0, control=True)['accepted'],
+                            'no delivery record is written without a GPU preview')
+        with tempfile.TemporaryDirectory() as folder:
+            bundle = Path(folder)
+            step(bundle, 1, None)
+            self.assertFalse(preview.summarize('box', bundle, 0, control=True)['accepted'])
+        with tempfile.TemporaryDirectory() as folder:
+            bundle = Path(folder)
+            step(bundle, 1, {'status': 'GPU preview on backend: Metal', 'gpu_previews': 1, 'cpu_previews': 0})
+            self.assertFalse(preview.summarize('box', bundle, 0, control=True)['accepted'])
+
+
+ADAPTER = {'backend': 'Metal', 'device_type': 'IntegratedGpu', 'name': 'Apple M3'}
+
+
+def part(**change):
+    value = {'status': 'GPU preview on backend: Metal, device_type: IntegratedGpu, name: "Apple M3"', 'route': 'gpu',
+             'counts': {'gpu_previews': 1, 'cpu_previews': 0, 'refused_faces': 0, 'refusals': {}},
+             'checked_route': True, 'problems': [], 'bodies': [{'route': 'gpu', 'refused': []}]}
+    value.update(change)
+    return value
+
+
+class JudgePartTest(unittest.TestCase):
+    def test_a_read_back_gpu_preview_on_metal_is_accepted(self):
+        self.assertEqual(preview.judge_part(part(), ADAPTER), [])
+
+    def test_harness_problems_a_software_adapter_and_a_cpu_route_fail(self):
+        self.assertIn('crack', preview.judge_part(part(problems=['crack']), ADAPTER))
+        self.assertTrue(preview.judge_part(part(), {**ADAPTER, 'device_type': 'Cpu'}))
+        cpu = part(route='cpu', bodies=[{'route': 'cpu', 'why': 'the kernel has no GPU description of the body'}])
+        self.assertIn('no GPU preview shown (route cpu): the kernel has no GPU description of the body',
+                      preview.judge_part(cpu, ADAPTER))
+        self.assertTrue(preview.judge_part(part(counts={'gpu_previews': 1, 'cpu_previews': 2}), ADAPTER))
+        self.assertEqual(preview.judge_part(part(checked_route=False), ADAPTER), [])
+
+    def test_refused_faces_are_listed_with_their_reason(self):
+        refused = part(bodies=[{'body': 'BodyId(3)', 'refused': [
+            {'face': 'FaceId(7)', 'reason': 'preview.unsupported-trim', 'cpu_drawn': True}]}])
+        self.assertEqual(preview.judge_part(refused, ADAPTER), [])
+        self.assertEqual(preview.fallback_faces(refused), [
+            {'face': 'FaceId(7)', 'reason': 'preview.unsupported-trim', 'cpu_drawn': True, 'body': 'BodyId(3)'}])
+
+    def test_empty_parts_and_field_bodies_are_outside_the_corpus(self):
+        empty = part(route='none', live_bodies=0, bodies=[])
+        self.assertEqual(preview.excluded(empty), 'the part has no body to display')
+        field = part(route='cpu', bodies=[{'route': 'cpu', 'field': True}])
+        self.assertTrue(preview.readback_record(field, ADAPTER, False)['excluded'])
+        self.assertTrue(preview.readback_record(field, ADAPTER, False)['accepted'])
+        brep = part(route='cpu', bodies=[{'route': 'cpu', 'field': False, 'why': 'no description'}])
+        self.assertIsNone(preview.excluded(brep))
+        self.assertFalse(preview.readback_record(brep, ADAPTER, False)['accepted'])
+
+    def test_faces_judged_against_their_trimmed_carrier_are_listed(self):
+        spline = {'face': 'FaceId(35)', 'surface': 'Spline', 'reference': 'trimmed carrier', 'deviation_mm': 0.0,
+                  'checked_deviation_mm': 0.005, 'carrier_deviation_mm': 0.0, 'checked_sag_mm': 0.0054}
+        plane = {'face': 'FaceId(37)', 'surface': 'Plane', 'reference': 'checked mesh', 'deviation_mm': 0.0}
+        listed = preview.carrier_faces(part(bodies=[{'face_detail': [spline, plane]}]))
+        self.assertEqual([face['face'] for face in listed], ['FaceId(35)'])
+        self.assertEqual(listed[0]['checked_sag_mm'], 0.0054)
+
+    def test_the_control_needs_the_cpu_route(self):
+        off = part(status='GPU preview off, CPU preview kept (preview.gpu-disabled)', route='cpu',
+                   counts={'gpu_previews': 0, 'cpu_previews': 1})
+        self.assertEqual(preview.judge_part(off, ADAPTER, control=True), [])
+        self.assertTrue(preview.judge_part(part(), ADAPTER, control=True))
+
+
 if __name__ == '__main__':
     unittest.main()

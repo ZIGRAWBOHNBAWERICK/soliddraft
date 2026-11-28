@@ -189,7 +189,10 @@ pub fn sketches() -> Document {
 /// Runs the viewport on Metal without a window surface or the default software-first
 /// test adapter policy. The selected render state also owns the screenshot readback.
 #[cfg(target_os = "macos")]
-pub fn capture_metal_p1(out: &Path) {
+/// The app on an offscreen Metal render state, as the native gates run it, and that
+/// state's device. The app installs its own GPU preview on the device. The adapter is
+/// written to `adapter.json` in `out` before it is required to be a hardware GPU.
+pub fn metal_app(out: &Path) -> (App, egui_wgpu::RenderState) {
     use egui_kittest::wgpu::{WgpuTestRenderer, create_render_state};
     use egui_wgpu::{WgpuConfiguration, WgpuSetup, WgpuSetupCreateNew, wgpu};
 
@@ -212,11 +215,11 @@ pub fn capture_metal_p1(out: &Path) {
     assert_eq!(info.backend, wgpu::Backend::Metal);
     assert!(matches!(info.device_type, wgpu::DeviceType::IntegratedGpu | wgpu::DeviceType::DiscreteGpu));
     soliddraft_app::file::set_config_dir(Some(out.join("config")));
-    let mut app = Harness::builder()
+    let app = Harness::builder()
         .with_size(vec2(1200.0, 780.0))
         .with_pixels_per_point(1.0)
         .with_render_every_step(false)
-        .renderer(WgpuTestRenderer::from_render_state(state))
+        .renderer(WgpuTestRenderer::from_render_state(state.clone()))
         .build_eframe(|cc| {
             let automation = Automation {
                 preset: Some(soliddraft_app::viewport::look::Preset::Fast),
@@ -225,6 +228,11 @@ pub fn capture_metal_p1(out: &Path) {
             };
             SolidDraftApp::new(cc, empty(), automation)
         });
+    (app, state)
+}
+
+pub fn capture_metal_p1(out: &Path) {
+    let (mut app, _) = metal_app(out);
     for name in ["empty", "p1"] {
         soliddraft_app::app::open_at_start(app.state_mut(), out.join(format!("{name}.dwprt")));
         settle(&mut app);

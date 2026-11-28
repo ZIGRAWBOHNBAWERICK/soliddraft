@@ -8,7 +8,7 @@ use crate::icons::{self, Icon};
 use crate::state::{AppAction, AppState};
 use crate::theme;
 use egui::{Align2, Color32, CornerRadius, Rect, Sense, Stroke, StrokeKind, pos2, vec2};
-use soliddraft_drawing::display::annotation_name;
+use soliddraft_drawing::display::{self, annotation_name};
 use soliddraft_drawing::library as templates;
 use soliddraft_drawing::project::{standard_label, view_label_in};
 use soliddraft_drawing::{
@@ -971,48 +971,55 @@ fn sheet_panel(ui: &mut egui::Ui, s: &mut DrawingSession, actions: &mut Vec<Draw
             let mut m = meta.clone();
             let fields = ui.id().with((s.instance, si));
             for (key, label, value) in [
-                ("title", "Title", &mut m.title),
-                ("number", "Number", &mut m.number),
-                ("revision", "Revision", &mut m.revision),
-                ("designer", "Designer", &mut m.designer),
-                ("date", "Date", &mut m.date),
+                ("title", "Title", Some(&mut m.title)),
+                ("number", "Number", Some(&mut m.number)),
+                ("revision", "Revision", Some(&mut m.revision)),
+                ("designer", "Designer", Some(&mut m.designer)),
+                ("date", "Date", Some(&mut m.date)),
+                ("owner", "Owner", None),
+                ("status", "Status", None),
+                ("checked", "Checker", None),
+                ("approved", "Approved", None),
             ] {
-                // A value set on this sheet is what the sheet shows, so it is what the
-                // field edits until it is cleared.
-                let Some(own) = sheet.format_overrides.get(key) else {
-                    if let Some(text) = sheet_text_field(ui, fields, label, value, "") {
-                        *value = text;
-                    }
-                    continue;
-                };
-                if let Some(text) = sheet_text_field(ui, fields, label, own, "") {
-                    actions.push(DrawingAction::Command(Command::SetTitleField {
-                        sheet: si,
-                        key: key.into(),
-                        value: text,
-                    }));
-                }
-                ui.horizontal(|ui| {
-                    ui.add_space(72.0);
-                    let clear = ui.small_button("Use document value").on_hover_text(format!(
-                        "Set on this sheet only. Show the drawing's {} instead.",
-                        label.to_lowercase()
-                    ));
-                    clear.widget_info(|| {
-                        egui::WidgetInfo::labeled(
-                            egui::WidgetType::Button,
-                            true,
-                            format!("{label}: use document value"),
-                        )
+                let Some(field) = template.title_block.fields.iter().find(|field| field.key == key) else { continue };
+                let current = display::field_value(&s.doc.drawing, si, field);
+                let own = sheet.format_overrides.contains_key(key);
+                let inherited =
+                    sheet.title_bindings.get(key).map(|name| format!("part property {name}")).or_else(|| {
+                        (key == "revision" && display::table_revision(&s.doc.drawing).is_some())
+                            .then(|| "revision table".to_owned())
                     });
-                    if clear.clicked() {
+                if let Some(text) = sheet_text_field(ui, fields, label, &current, "") {
+                    if let Some(value) = value.filter(|_| !own && inherited.is_none()) {
+                        *value = text;
+                    } else {
                         actions.push(DrawingAction::Command(Command::SetTitleField {
                             sheet: si,
                             key: key.into(),
-                            value: String::new(),
+                            value: text,
                         }));
                     }
-                });
+                }
+                if own {
+                    let source = inherited.as_deref().unwrap_or("document value");
+                    ui.horizontal(|ui| {
+                        ui.add_space(72.0);
+                        ui.label("Sheet override");
+                        let clear = ui.small_button(format!("Use {source}"));
+                        clear.widget_info(|| {
+                            egui::WidgetInfo::labeled(egui::WidgetType::Button, true, format!("{label}: use {source}"))
+                        });
+                        if clear.clicked() {
+                            actions.push(DrawingAction::Command(Command::SetTitleField {
+                                sheet: si,
+                                key: key.into(),
+                                value: String::new(),
+                            }));
+                        }
+                    });
+                } else if let Some(source) = inherited {
+                    hint(ui, &format!("{label} from {source}"));
+                }
             }
             if m != meta {
                 actions.push(DrawingAction::Command(Command::SetMeta { meta: m }));
@@ -1024,14 +1031,6 @@ fn sheet_panel(ui: &mut egui::Ui, s: &mut DrawingSession, actions: &mut Vec<Draw
                     key: "title".to_owned(),
                     property: property.trim().to_owned(),
                 }));
-            }
-            for (key, label) in
-                [("owner", "Owner"), ("status", "Status"), ("checked", "Checker"), ("approved", "Approved")]
-            {
-                let current = sheet.format_overrides.get(key).map_or("", String::as_str);
-                if let Some(value) = sheet_text_field(ui, fields, label, current, "") {
-                    actions.push(DrawingAction::Command(Command::SetTitleField { sheet: si, key: key.into(), value }));
-                }
             }
             if !cfg!(target_arch = "wasm32") {
                 section_gap(ui);

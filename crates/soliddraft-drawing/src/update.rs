@@ -41,6 +41,9 @@ pub struct UpdateReport {
     /// their last line work until they are repaired or deleted.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub dangling_views: Vec<DanglingView>,
+    /// PMI items that could not be drawn after the update.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unplaced_pmi: Vec<crate::pmi_items::Unplaced>,
     /// Each regenerated view's projection: its transform and the circles it sees, for
     /// tools that pick on the views.
     #[serde(skip)]
@@ -101,6 +104,7 @@ pub fn update_from_model(drawing: &mut Drawing, part: &Part) -> Result<UpdateRep
         dangling: Vec::new(),
         resolved: 0,
         dangling_views: Vec::new(),
+        unplaced_pmi: Vec::new(),
         projections: Vec::new(),
     };
     let mut contexts = Contexts::new();
@@ -142,7 +146,7 @@ pub fn update_from_model(drawing: &mut Drawing, part: &Part) -> Result<UpdateRep
                 && view.geometry != ctx.projected.geometry)
         {
             view.geometry = ctx.projected.geometry.clone();
-            report.views_updated += 1;
+            report.views_updated += usize::from(view.is_printed());
         }
         report.projections.push((id, ctx.projected.clone()));
     }
@@ -158,7 +162,7 @@ pub fn update_from_model(drawing: &mut Drawing, part: &Part) -> Result<UpdateRep
             if failed(a.view) || sheet.views.iter().any(|v| v.id == a.view && v.excluded_from_update) {
                 continue;
             }
-            if let Some(change) = re_resolve(a, &index, ctx, &symbols) {
+            if let Some(change) = re_resolve(a, &index, ctx, &symbols, part) {
                 report.changed.push(change);
             }
         }
@@ -175,10 +179,11 @@ pub fn update_from_model(drawing: &mut Drawing, part: &Part) -> Result<UpdateRep
             .filter(|v| !failed(v.id) && !v.excluded_from_update)
             .filter_map(|v| contexts.get(&v.id).cloned())
             .collect();
-        crate::pmi_items::import(drawing, sheet, part, &index, &views)?;
+        report.unplaced_pmi = crate::pmi_items::import(drawing, sheet, part, &index, &views)?.unplaced;
         crate::pmi_items::place_notes(drawing, sheet, part);
     }
     collect(drawing, &mut report);
+    report.dangling_views.retain(|failure| drawing.view(failure.view).is_some_and(crate::View::is_printed));
     drawing.refused_views.clone_from(&report.dangling_views);
     drawing.accept_source(part);
     Ok(report)
@@ -265,7 +270,15 @@ fn regenerate(
             // A break the part has outgrown no longer computes; its saved gap stands in.
             let _ = project::compute_in(drawing, part, &index, view, &mut before);
         }
-        previous = before.into_iter().map(|(view, ctx)| (view, ctx.xf)).collect();
+        previous = before
+            .into_iter()
+            .filter(|(id, _)| {
+                drawing.view(*id).is_some_and(|view| {
+                    view.geometry.breaks.is_empty() || view.geometry.source_digest == part.digest.as_str()
+                })
+            })
+            .map(|(view, ctx)| (view, ctx.xf))
+            .collect();
         let mut next = drawing.clone();
         next.view_mut(id).expect("existing view").breaks = breaks;
         staged = Some(next);
@@ -277,7 +290,7 @@ fn regenerate(
         .filter(|view| {
             staged.is_some()
                 && !previous.contains_key(view)
-                && drawing.view(*view).is_some_and(|v| !v.breaks.is_empty() && !v.geometry.breaks.is_empty())
+                && drawing.view(*view).is_some_and(|v| !v.geometry.breaks.is_empty())
         })
         .collect();
     if !outgrown.is_empty() {
@@ -285,14 +298,12 @@ fn regenerate(
         let mut plain = source.clone();
         for &view in &outgrown {
             let v = plain.view_mut(view).expect("listed view");
-            v.breaks.clear();
-            v.crop = None;
-            v.broken_out.clear();
+            project::clear_clipping(v);
         }
         let mut fresh = Contexts::new();
         for view in outgrown {
             project::compute_in(&plain, part, &index, view, &mut fresh)?;
-            let saved = drawing.view(view).and_then(|v| project::saved_transform(v, &fresh[&view]));
+            let saved = project::saved_transform(drawing, &fresh[&view]);
             if let Some(xf) = saved {
                 previous.insert(view, xf);
             }
@@ -336,7 +347,7 @@ fn regenerate(
         let symbols = &library::template(sheet.template.as_str()).style_file().symbols;
         for a in sheet.annotations.iter_mut().filter(|a| ids.contains(&a.view)) {
             let context = &contexts[&a.view];
-            re_resolve(a, &index, context, symbols);
+            re_resolve(a, &index, context, symbols, part);
         }
     }
     crate::pmi_items::refresh(drawing, part, |view| ids.contains(&view), false);
@@ -386,6 +397,7 @@ pub(crate) fn re_resolve(
     index: &PartIndex,
     ctx: &ViewContext,
     symbols: &Symbols,
+    part: &Part,
 ) -> Option<ChangedValue> {
     if a.anchors.is_empty() {
         return None;
@@ -412,7 +424,7 @@ pub(crate) fn re_resolve(
             anchor.entity = r;
         }
     }
-    remeasure(a, index, ctx, &entities, symbols)
+    remeasure(a, index, ctx, &entities, symbols, part)
 }
 
 pub(crate) fn anchor_curve<'a>(
@@ -443,13 +455,15 @@ pub(crate) fn anchor_geometry<'a>(
 
 /// Re-caches the anchors' points and re-measures a dimension whose anchors all resolve to
 /// `entities`; sets the state and returns the change when the displayed value moved.
-pub(crate) fn remeasure(
+fn remeasure(
     a: &mut Annotation,
     index: &PartIndex,
     ctx: &ViewContext,
     entities: &[Entity],
     symbols: &Symbols,
+    part: &Part,
 ) -> Option<ChangedValue> {
+    let authored_angle = crate::pmi_items::authored_angle(a, part);
     let curves: Vec<_> = a
         .anchors
         .iter()
@@ -474,6 +488,8 @@ pub(crate) fn remeasure(
                     d.chamfer_angle = Some(crate::model_items::round_value(angle));
                     size
                 })
+            } else if d.kind == crate::DimensionKind::Angular {
+                authored_angle.or_else(|| measure(&d.kind, d.dim_type, &geometry, &ctx.xf))
             } else {
                 measure(&d.kind, d.dim_type, &geometry, &ctx.xf)
             };
@@ -649,6 +665,10 @@ pub fn reattach(
     if resolved[end].is_none() {
         return Err(DrawingError::BadRequest(format!("the new reference for end {end} of {id} does not resolve")));
     }
+    let entities: Vec<Entity> = resolved.iter().flatten().copied().collect();
+    if !crate::pmi_items::anchors_on_item(a, &entities, part)? {
+        a.source = None;
+    }
     if let AnnotationState::Dangling { lost, cause } = &a.state {
         let lost: Vec<usize> = lost.iter().copied().filter(|i| *i != end && resolved[*i].is_none()).collect();
         if !lost.is_empty() {
@@ -657,24 +677,18 @@ pub fn reattach(
             return Ok(());
         }
     }
-    let entities: Vec<Entity> = resolved.into_iter().collect::<Option<_>>().unwrap_or_default();
     if entities.len() == a.anchors.len() {
         // Keep the dimension's last accepted value as the comparison point.
         if let AnnotationState::Dangling { .. } = a.state {
             a.state = AnnotationState::Ok;
         }
-        remeasure(a, &index, &ctx, &entities, &symbols);
+        remeasure(a, &index, &ctx, &entities, &symbols, part);
         if let AnnotationState::Dangling { cause, .. } = &a.state {
             return Err(DrawingError::BadRequest(cause.clone()));
         }
         // Reattaching is a deliberate edit: the value it gives is the accepted one.
         if let AnnotationState::Changed { .. } = a.state {
             a.state = AnnotationState::Ok;
-        }
-        // Moved off its item's faces, the annotation no longer shows that item.
-        let before = drawing.annotation(id).ok_or(DrawingError::UnknownAnnotation(id))?;
-        if !crate::pmi_items::anchors_on_item(before, &entities, part)? {
-            a.source = None;
         }
     }
     *drawing.annotation_mut(id).expect("found") = repaired;

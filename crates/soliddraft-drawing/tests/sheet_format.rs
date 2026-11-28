@@ -291,3 +291,20 @@ fn a_sheet_annotation_kept_as_a_note_uses_its_own_sheets_style() {
         assert!(matches!(body, AnnotationKind::Note { text: t, .. } if t == text), "{id}: {body:?}");
     }
 }
+
+#[test]
+fn changing_to_a_smaller_paper_names_the_views_that_would_be_off_sheet() {
+    use soliddraft_drawing::{ViewId, apply, project};
+    use soliddraft_kernel_api::Point2;
+    let mut drawing = fixture::bracket_a3();
+    let format = |id: &str| Command::SetSheetFormat { sheet: 0, template: id.into() };
+    apply(&mut drawing, &format("ansi-e")).unwrap();
+    let view = ViewId(1);
+    apply(&mut drawing, &Command::MoveView { view, to: Point2::new(650.0, 400.0) }).unwrap();
+    let sheet = &drawing.sheets[0];
+    let name = project::view_label_in(&drawing, sheet, sheet.view(view).unwrap());
+    let before = drawing.clone();
+    let error = apply(&mut drawing, &format("ansi-a")).unwrap_err().to_string();
+    assert!(error.contains(&name), "{error}");
+    assert_eq!(drawing, before);
+}

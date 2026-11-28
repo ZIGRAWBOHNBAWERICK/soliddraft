@@ -149,7 +149,7 @@ pub fn repoint(bytes: &[u8], model: &soliddraft_document::DocRef) -> Result<Vec<
     drawing.model = model.clone();
     if current {
         for v in drawing.sheets.iter_mut().flat_map(|s| s.views.iter_mut()) {
-            if !v.excluded_from_update {
+            if v.is_printed() && !v.excluded_from_update {
                 v.geometry.source_digest = model.pinned.as_str().to_owned();
             }
         }

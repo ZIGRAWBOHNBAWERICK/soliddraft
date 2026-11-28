@@ -1233,6 +1233,21 @@ fn aligned_section_dimensions_keep_the_second_leg_on_rebuild() {
     let id = section.id;
     let mut stack = UndoStack::new();
     run(&mut stack, &mut drawing, &part, Command::PlaceView { sheet: 0, view: section });
+    let mut second_only = ctx.clone();
+    second_only.projected.geometry.curves.retain(|curve| curve.source.section_leg == 1);
+    let report = soliddraft_drawing::model_items::import(&mut drawing, 0, &part, &index, &[second_only]).unwrap();
+    let imported = drawing.sheets[0]
+        .annotations
+        .iter()
+        .find(|a| {
+            a.view == id
+                && matches!(&a.body, AnnotationKind::Dimension(d)
+            if d.value == DimValue::Measured { value: 50.0 })
+        })
+        .unwrap_or_else(|| panic!("the model depth imports on leg two: {report:?}"));
+    let imported_id = imported.id;
+    assert!(imported.anchors.iter().all(|a| a.entity.section_leg == 1));
+    assert!((imported.anchors[0].cached.v - imported.anchors[1].cached.v).abs() > 1.0);
     let annotation = soliddraft_drawing::Annotation {
         id: drawing.next_annotation_id(),
         view: id,
@@ -1259,6 +1274,10 @@ fn aligned_section_dimensions_keep_the_second_leg_on_rebuild() {
     let ann = drawing.annotation(annotation_id).unwrap();
     assert!(ann.anchors.iter().all(|anchor| anchor.entity.section_leg == 1));
     assert!(matches!(&ann.body, AnnotationKind::Dimension(d) if d.value == DimValue::Measured { value: 100.0 }));
+
+    let imported = drawing.annotation(imported_id).unwrap();
+    assert_eq!(imported.state, AnnotationState::Ok);
+    assert!(matches!(&imported.body, AnnotationKind::Dimension(d) if d.value == DimValue::Measured { value: 50.0 }));
 
     // Turned the other way, the second leg keeps the other side of the block: the edge
     // the dimension measures is cut away there, though the part still has it.
@@ -1565,7 +1584,11 @@ fn markup_targets_only_live_annotations_of_the_direct_item() {
     let annotation = drawing.sheets[0]
         .annotations
         .iter_mut()
-        .find(|a| !a.anchors.is_empty() && matches!(a.state, AnnotationState::Ok))
+        .find(|a| {
+            !a.anchors.is_empty()
+                && matches!(a.state, AnnotationState::Ok)
+                && matches!(a.body, AnnotationKind::Dimension(_))
+        })
         .unwrap();
     let id = annotation.id;
     let target = review::MarkupTarget { sheet: 0, annotation: id };
@@ -1581,7 +1604,20 @@ fn markup_targets_only_live_annotations_of_the_direct_item() {
     assert!(review::place_of_item(&drawing, item).is_none());
     assert!(review::find_place(&drawing, &target, item).is_none());
     drawing = before;
+    let AnnotationKind::Dimension(mut dimension) = drawing.annotation(id).unwrap().body.clone() else {
+        panic!("a model dimension")
+    };
+    dimension.precision += 1;
+    apply(&mut drawing, &Command::EditDimension { annotation: id, dimension: dimension.clone() }).unwrap();
+    assert_eq!(review::place_of_item(&drawing, item), Some(target));
+    dimension.tolerance = soliddraft_drawing::Tolerance::parse("H8").unwrap();
+    apply(&mut drawing, &Command::EditDimension { annotation: id, dimension }).unwrap();
+    assert!(review::find_place(&drawing, &target, item).is_none());
     apply(&mut drawing, &Command::FreezeAsNote { annotation: id }).unwrap();
+    drawing.annotation_mut(id).unwrap().anchors =
+        soliddraft_drawing::fixture::bracket_a3().annotation(id).unwrap().anchors.clone();
+    drawing.annotation_mut(id).unwrap().source = Some(PmiSource::Item { item: item.into() });
+    assert_eq!(review::place_of_item(&drawing, item), Some(target));
     apply(&mut drawing, &Command::EditNote { annotation: id, text: "Unrelated text".into() }).unwrap();
     assert!(drawing.annotation(id).unwrap().source.is_none());
     assert!(review::find_place(&drawing, &target, item).is_none());
@@ -1626,6 +1662,7 @@ fn an_inclined_section_view_shows_its_mesh_cut_and_never_blocks_an_export() {
     let section = drawing.view(id).unwrap();
     assert_eq!(section.geometry.source_digest, before.as_str());
     assert!(!section.accepts_revision(drawing.model.pinned.as_str()));
+    assert!(drawing.views_match_pin());
     export::check_sheet(&drawing, &drawing.sheets[0]).unwrap();
     let list = layout_sheet(&drawing, 0);
     assert!(list.items.iter().any(|i| matches!(i.owner(), Owner::Curve(v, _) if v == id)));
@@ -2000,6 +2037,26 @@ fn a_break_the_part_outgrew_can_be_removed_or_replaced() {
     let crop = Boundary::rectangle(xf.point(left), xf.point(right));
     run(&mut stack, &mut drawing, &part, Command::SetViewCrop { view: FRONT, crop: Some(crop) });
 
+    let (detail, _) = derived::new_detail(
+        &drawing,
+        &part,
+        &index,
+        0,
+        FRONT,
+        xf.point(Vec3::new(10.0, 0.0, 25.0)),
+        46.0,
+        Vec::new(),
+        2.0,
+        None,
+    )
+    .unwrap();
+    let detail_id = detail.id;
+    run(&mut stack, &mut drawing, &part, Command::PlaceView { sheet: 0, view: detail });
+    let detail_xf = derived::context(&drawing, &part, &index, detail_id).unwrap().xf;
+    let (detail_left, detail_right) = (Vec3::new(12.0, 0.0, -5.0), Vec3::new(60.0, 0.0, 55.0));
+    let crop = Boundary::rectangle(detail_xf.point(detail_left), detail_xf.point(detail_right));
+    run(&mut stack, &mut drawing, &part, Command::SetViewCrop { view: detail_id, crop: Some(crop) });
+
     // The part shortens to 80: the break now runs past its end.
     let short = box_part(&kernel, "block", Vec3::new(80.0, 50.0, 50.0));
     let short_index = PartIndex::build(&short).unwrap();
@@ -2013,6 +2070,10 @@ fn a_break_the_part_outgrew_can_be_removed_or_replaced() {
         let [x0, _, x1, _] = d.view(FRONT).unwrap().crop.as_ref().expect("the crop stays").bounds();
         let (a, b) = (xf.point(left).u, xf.point(right).u);
         assert!((x0 - a).abs() < 1e-3 && (x1 - b).abs() < 1e-3, "{what}: the crop spans {x0}..{x1}, not {a}..{b}");
+        let detail_xf = derived::context(d, &short, &short_index, detail_id).unwrap().xf;
+        let [x0, _, x1, _] = d.view(detail_id).unwrap().crop.as_ref().expect("the detail keeps its crop").bounds();
+        let (a, b) = (detail_xf.unproject(Point2::new(x0, 0.0)).x, detail_xf.unproject(Point2::new(x1, 0.0)).x);
+        assert!((a - 12.0).abs() < 1e-3 && (b - 60.0).abs() < 1e-3, "{what}: detail crop covers model X {a}..{b}");
     };
 
     run(&mut stack, &mut drawing, &short, Command::SetViewBreaks { view: FRONT, breaks: Vec::new() });
@@ -2036,4 +2097,175 @@ fn a_break_the_part_outgrew_can_be_removed_or_replaced() {
     let before = drawing.clone();
     assert!(stack.run(&mut drawing, &interrupt(30.0, 90.0), Some(&short)).is_err(), "it must still fit the part");
     assert_eq!(drawing, before);
+}
+
+#[test]
+fn a_broken_view_keeps_geometry_on_both_gap_boundaries() {
+    use soliddraft_drawing::{AlignAxis, Break};
+    use soliddraft_kernel_api::drawing::{Curve3, ViewSpec};
+    let frame = ViewSpec::new(Vec3::Z, Vec3::Y).frame().unwrap();
+    for (axis, along, across) in
+        [(AlignAxis::Horizontal, frame.right, frame.up), (AlignAxis::Vertical, frame.up, frame.right)]
+    {
+        let b = Break { from: along * 30.0, to: along * 80.0, axis };
+        let xf = project::ViewTransform::new(frame, 1.0, Point2::new(60.0, 60.0))
+            .with_breaks(project::Breaks::new(&[b], &frame).unwrap(), [0.0, 0.0, 120.0, 120.0])
+            .unwrap();
+        for station in [30.0, 80.0] {
+            let a = along * station + across * 10.0;
+            let b = a + across * 20.0;
+            let path = project::path_of(&Curve3::Line { a, b }, &xf);
+            let [a, b] = [a, b].map(|p| {
+                let p = xf.point(p);
+                kurbo::Point::new(p.u, p.v)
+            });
+            assert_eq!(path.elements(), &[kurbo::PathEl::MoveTo(a), kurbo::PathEl::LineTo(b)]);
+        }
+    }
+}
+
+#[test]
+fn a_break_keeps_hole_tags_with_the_rims_when_the_view_scale_changes() {
+    let kernel = BoxKernel::new();
+    let part = box_part(&kernel, "block", Vec3::new(120.0, 50.0, 50.0));
+    let mut d = drawing(&part);
+    let index = PartIndex::build(&part).unwrap();
+    let scale = |factor| Command::SetViewScale { view: FRONT, scale: soliddraft_drawing::ViewScale::Custom { factor } };
+    let mut stack = UndoStack::new();
+    run(&mut stack, &mut d, &part, scale(1.0));
+    run(
+        &mut stack,
+        &mut d,
+        &part,
+        Command::SetViewBreaks {
+            view: FRONT,
+            breaks: vec![soliddraft_drawing::Break {
+                from: Vec3::new(40.0, 0.0, 0.0),
+                to: Vec3::new(80.0, 0.0, 0.0),
+                axis: soliddraft_drawing::AlignAxis::Horizontal,
+            }],
+        },
+    );
+    let original = derived::context(&d, &part, &index, FRONT).unwrap().xf;
+    let centres = [Vec3::new(20.0, 0.0, 20.0), Vec3::new(100.0, 0.0, 20.0)];
+    let rows = centres.map(|p| soliddraft_drawing::HoleRow {
+        coordinates: Point2::new(p.x, p.z),
+        centre: original.point(p),
+        diameter: 4.0,
+    });
+    let table = soliddraft_drawing::Table::hole(Point2::new(30.0, 30.0), FRONT, rows.to_vec());
+    run(&mut stack, &mut d, &part, Command::AddTable { sheet: 0, table });
+    run(&mut stack, &mut d, &part, scale(2.0));
+    let projection = derived::context(&d, &part, &index, FRONT).unwrap().xf;
+    let origin = d.view(FRONT).unwrap().position;
+    let list = layout_sheet(&d, 0);
+    for (name, centre) in ["A1", "A2"].into_iter().zip(centres) {
+        let expected = projection.point(centre);
+        let tag = list
+            .items
+            .iter()
+            .find_map(|item| match item {
+                Item::Text(t) if t.text == name && t.pos.v > 30.0 => Some(t.pos),
+                _ => None,
+            })
+            .expect("hole tag");
+        assert_eq!(tag, Point2::new(origin.u + expected.u + 5.0, origin.v + expected.v + 1.0));
+    }
+}
+
+#[test]
+fn a_cross_sheet_section_zone_lies_on_a_retained_cutting_leg() {
+    let kernel = BoxKernel::new();
+    let part = box_part(&kernel, "block", Vec3::new(120.0, 50.0, 50.0));
+    let mut drawing = drawing(&part);
+    let parent = drawing.view_mut(FRONT).unwrap();
+    parent.position = Point2::new(20.0, 20.0);
+    let frame = soliddraft_kernel_api::drawing::ViewSpec::new(Vec3::Z, Vec3::Y).frame().unwrap();
+    let interruption = soliddraft_drawing::Break {
+        from: frame.right * 30.0,
+        to: frame.right * 60.0,
+        axis: soliddraft_drawing::AlignAxis::Horizontal,
+    };
+    let xf = project::ViewTransform::new(frame, 1.0, Point2::default())
+        .with_breaks(project::Breaks::new(&[interruption], &frame).unwrap(), [0.0, 0.0, 120.0, 50.0])
+        .unwrap();
+    let mut gap = xf.gaps()[0];
+    gap.at = 100.0;
+    parent.geometry.breaks = vec![gap];
+    let mut section = parent.clone();
+    section.geometry.breaks.clear();
+    section.id = drawing.next_view_id();
+    section.kind = ViewKind::Section {
+        parent: FRONT,
+        line: vec![Point2::new(0.0, 0.0), Point2::new(260.0, 0.0), Point2::new(260.0, 110.0)],
+        flip: false,
+        label: "B".into(),
+        hatch: None,
+        model_line: Vec::new(),
+    };
+    apply(&mut drawing, &Command::AddSheet { name: "Section".into(), template: "iso-a3".into() }).unwrap();
+    let id = section.id;
+    apply(&mut drawing, &Command::PlaceView { sheet: 1, view: section }).unwrap();
+    let label = location_labels(&drawing).into_iter().find(|label| label.view == id).unwrap();
+    let format = soliddraft_drawing::library::template("iso-a3");
+    let expected = soliddraft_drawing::display::zone_at(format, Point2::new(203.0, 20.0));
+    assert_eq!(label.parent_zone, expected);
+    assert!(texts(&drawing, 1).iter().any(|text| text == &format!("FROM SHEET 1, ZONE {expected}")));
+}
+
+#[test]
+fn rebuilding_an_authored_obtuse_angle_keeps_its_value_and_state() {
+    use soliddraft_drawing::{Annotation, Attach, DimValue, Dimension, DimensionKind, PmiSource, Tolerance};
+    use soliddraft_kernel_api::pmi::{PmiItem, PmiKind};
+    use soliddraft_model::pmi::PmiRow;
+    let kernel = BoxKernel::new();
+    let mut part = box_part(&kernel, "block", Vec3::new(120.0, 50.0, 50.0));
+    let item = "Included angle";
+    part.requirements.rows.push(PmiRow {
+        item: PmiItem { id: item.into(), kind: PmiKind::BasicAngle { planes: [vec![], vec![]] } },
+        on_body: None,
+        measured: vec![120.0],
+        hole: None,
+        located: vec![],
+        problem: None,
+        feature: None,
+        placements: vec![],
+        depth: None,
+        body: None,
+    });
+    let mut drawing = drawing(&part);
+    let index = PartIndex::build(&part).unwrap();
+    let anchors = [Vec3::X, Vec3::Z].map(|axis| {
+        let (edge, curve) = index
+            .edges()
+            .find(|(_, curve)| (curve.end() - curve.start()).cross(axis).length() < 1e-6)
+            .expect("an edge along the axis");
+        let at = curve.point_at(0.5);
+        soliddraft_drawing::Anchor {
+            entity: index.edge_ref(edge).unwrap(),
+            attach: Attach::Point { at },
+            cached: Point2::default(),
+        }
+    });
+    let mut dimension = Dimension::measured(DimensionKind::Angular, 120.0, 0);
+    dimension.tolerance = Tolerance::Basic;
+    dimension.requirement = true;
+    let id = drawing.next_annotation_id();
+    let annotation = Annotation {
+        id,
+        view: FRONT,
+        body: AnnotationKind::Dimension(dimension),
+        anchors: anchors.into(),
+        placement: Point2::new(0.0, 30.0),
+        style: Default::default(),
+        state: AnnotationState::Ok,
+        source: Some(PmiSource::Item { item: item.into() }),
+    };
+    apply(&mut drawing, &Command::AddAnnotation { annotation }).unwrap();
+    let report = update_from_model(&mut drawing, &part).unwrap();
+    assert!(!report.changed.iter().any(|change| change.annotation == id), "{:?}", report.changed);
+    let saved = drawing_roundtrip(&drawing);
+    let annotation = saved.annotation(id).unwrap();
+    assert_eq!(annotation.state, AnnotationState::Ok);
+    assert!(matches!(&annotation.body, AnnotationKind::Dimension(d) if d.value == DimValue::Measured { value: 120.0 }));
 }

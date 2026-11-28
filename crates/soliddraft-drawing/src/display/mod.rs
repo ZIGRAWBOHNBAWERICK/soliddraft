@@ -464,6 +464,17 @@ fn field_text(drawing: &Drawing, sheet: &Sheet, field: &FieldDef, lookup: &dyn F
     bound_property(drawing, sheet, &field.key).unwrap_or_else(|| resolve_links(&field.value, lookup))
 }
 
+/// The most recent revision shown by the drawing's revision tables.
+pub fn table_revision(drawing: &Drawing) -> Option<&str> {
+    drawing
+        .sheets
+        .iter()
+        .rev()
+        .filter_map(|sheet| sheet.revision_table())
+        .find_map(|table| table.revisions.last())
+        .map(|row| row.revision.as_str())
+}
+
 /// The value of a title block property for a sheet.
 pub fn property(drawing: &Drawing, sheet: &Sheet, sheet_index: usize, sheet_count: usize, key: &str) -> String {
     if let Some(v) = sheet.format_overrides.get(key) {
@@ -475,14 +486,7 @@ pub fn property(drawing: &Drawing, sheet: &Sheet, sheet_index: usize, sheet_coun
     match key {
         "title" => drawing.meta.title.clone(),
         "number" => drawing.meta.number.clone(),
-        "revision" => drawing
-            .sheets
-            .iter()
-            .rev()
-            .filter_map(|s| s.revision_table())
-            .find_map(|t| t.revisions.last())
-            .map(|r| r.revision.clone())
-            .unwrap_or_else(|| drawing.meta.revision.clone()),
+        "revision" => table_revision(drawing).unwrap_or(&drawing.meta.revision).to_owned(),
         "designer" => drawing.meta.designer.clone(),
         "date" => drawing.meta.date.clone(),
         "scale" => sheet.scale.to_string(),
@@ -525,7 +529,7 @@ pub fn layout(drawing: &Drawing, sheet_index: usize, ctx: &Context<'_>) -> Displ
     list.unproved = sheet.views.iter().any(|v| v.geometry.unproved);
     list.export_error = crate::export::sheet_error(drawing, sheet);
     list.display_only_views =
-        drawing.sheets.iter().flat_map(|s| &s.views).filter(|v| v.geometry.display_only).map(|v| v.id).collect();
+        drawing.sheets.iter().flat_map(|s| &s.views).filter(|v| !v.is_printed()).map(|v| v.id).collect();
     list.display_only_annotations =
         sheet.annotations.iter().filter(|a| list.display_only_views.contains(&a.view)).map(|a| a.id).collect();
     list.display_only_tables = sheet
@@ -874,7 +878,7 @@ fn view_items(drawing: &Drawing, sheet: &Sheet, view: &View, ctx: &Context<'_>, 
             owner: Owner::View(view.id),
         }));
     }
-    if ctx.stale.contains(&view.id) {
+    if view.is_printed() && ctx.stale.contains(&view.id) {
         let m = 3.0;
         let (bx0, by0, bx1, by1) = (x0 - m, y0 - m, x1 + m, y1 + m);
         items.push(Item::Path(PathItem {

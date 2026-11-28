@@ -126,6 +126,10 @@ impl Breaks {
 }
 
 impl ViewTransform {
+    pub(crate) fn has_aligned_legs(&self) -> bool {
+        self.aligned_turn.is_some()
+    }
+
     pub(crate) fn leg_turn(&self, leg: u8) -> Option<Turn> {
         if leg == 1 { self.aligned_turn } else { None }
     }
@@ -275,21 +279,55 @@ pub(crate) type Transforms = BTreeMap<ViewId, ViewTransform>;
 /// The transform a broken view was last drawn with, from its saved gap, for when the
 /// part no longer allows its break. Frame and scale come from `ctx`, a fresh projection
 /// of the view, and so does the centre across the break.
-pub(crate) fn saved_transform(view: &View, ctx: &ViewContext) -> Option<ViewTransform> {
+pub(crate) fn saved_transform(drawing: &Drawing, ctx: &ViewContext) -> Option<ViewTransform> {
+    let view = drawing.view(ctx.id)?;
     let gap = view.geometry.breaks.first()?;
-    let mut breaks = Breaks::new(&view.breaks, &ctx.xf.frame).ok()?;
+    let owner = std::iter::successors(Some(view), |v| match &v.kind {
+        ViewKind::Detail { parent, .. } => drawing.view(*parent),
+        _ => None,
+    })
+    .take(17)
+    .find(|v| !v.breaks.is_empty())?;
+    let mut breaks = Breaks::new(&owner.breaks, &ctx.xf.frame).ok()?;
     let (lo, _) = breaks.stretch?;
     if breaks.vertical != (gap.axis == AlignAxis::Vertical) {
         return None;
     }
     breaks.centre_fraction = gap.centre_fraction;
     let s = ctx.xf.scale;
-    let [x0, y0, x1, y1] = ctx.curves.bbox_2d;
-    let centre = breaks.with_along(Point2::new((x0 + x1) / 2.0 * s, (y0 + y1) / 2.0 * s), lo * s - gap.at);
+    let centre = breaks.with_along(ctx.xf.centre, lo * s - gap.at);
     Some(ViewTransform { centre, breaks, ..ctx.xf })
 }
 
+pub(crate) fn clear_clipping(view: &mut View) {
+    view.breaks.clear();
+    view.crop = None;
+    view.broken_out.clear();
+}
+
 impl ViewContext {
+    /// Maps break-tool clicks in the saved view's coordinates.
+    pub fn break_edit_transform(
+        drawing: &Drawing,
+        part: &Part,
+        index: &PartIndex,
+        id: ViewId,
+    ) -> Result<ViewTransform, DrawingError> {
+        let view = drawing.view(id).ok_or(DrawingError::UnknownView(id))?;
+        if view.geometry.breaks.is_empty() {
+            return Self::compute(drawing, part, index, id).map(|ctx| ctx.xf);
+        }
+        if view.geometry.source_digest == part.digest.as_str()
+            && let Ok(ctx) = Self::compute(drawing, part, index, id)
+        {
+            return Ok(ctx.xf);
+        }
+        let mut plain = drawing.clone();
+        clear_clipping(plain.view_mut(id).expect("existing view"));
+        let ctx = Self::compute(&plain, part, index, id)?;
+        saved_transform(drawing, &ctx).ok_or(DrawingError::BadView(id))
+    }
+
     /// Computes a view's curves and transform at its current scale, with its parents.
     pub fn compute(drawing: &Drawing, part: &Part, index: &PartIndex, id: ViewId) -> Result<ViewContext, DrawingError> {
         let mut memo = Contexts::new();

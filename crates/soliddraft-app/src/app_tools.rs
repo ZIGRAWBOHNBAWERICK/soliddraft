@@ -553,7 +553,7 @@ impl AppTools<'_> {
             "dxf": dxf,
             "manufacturing_information": exported.pmi,
             "drawing": {
-                "views": drawing.sheets[sheet].views.len(),
+                "views": drawing.sheets[sheet].views.iter().filter(|v| v.is_printed()).count(),
                 "accuracy": accuracy,
                 "items": requirements.placed,
                 "shown": shown,

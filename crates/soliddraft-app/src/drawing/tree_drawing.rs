@@ -326,7 +326,9 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
                     ViewKind::Auxiliary { .. } => Icon::Plane,
                     _ => Icon::Display,
                 };
-                let dot = if update_reason.is_some() {
+                let dot = if !v.is_printed() {
+                    Dot::Ok
+                } else if update_reason.is_some() {
                     Dot::Warn
                 } else {
                     let worst = sheet

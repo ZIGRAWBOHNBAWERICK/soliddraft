@@ -510,49 +510,6 @@ pub fn count_entities(bytes: &[u8]) -> Result<BTreeMap<String, usize>, DrawingEr
     Ok(out)
 }
 
-/// One HATCH boundary loop read back: whether it is marked external, and its polyline
-/// vertices.
-pub type HatchLoop = (bool, Vec<soliddraft_kernel_api::Point2>);
-
-/// The boundary loops of each HATCH entity in a DXF file, read back in order.
-pub fn hatch_loops(bytes: &[u8]) -> Result<Vec<Vec<HatchLoop>>, DrawingError> {
-    let text = String::from_utf8_lossy(bytes);
-    let (p, _) = pairs(&text)?;
-    let number = |q: &Pair| {
-        q.1.trim().parse::<f64>().map_err(|e| DrawingError::Format(format!("DXF: group {} is {:?}: {e}", q.0, q.1)))
-    };
-    let mut out = Vec::new();
-    let mut i = 0;
-    while i < p.len() {
-        if p[i] != (0, "HATCH".to_owned()) {
-            i += 1;
-            continue;
-        }
-        i += 1;
-        let mut loops = Vec::new();
-        while i < p.len() && p[i].0 != 0 {
-            if p[i].0 != 92 {
-                i += 1;
-                continue;
-            }
-            let external = (number(&p[i])? as u32) & 1 != 0;
-            let mut points = Vec::new();
-            i += 1;
-            while i < p.len() && p[i].0 != 97 && p[i].0 != 0 {
-                if p[i].0 == 10 && p.get(i + 1).is_some_and(|q| q.0 == 20) {
-                    points.push(soliddraft_kernel_api::Point2::new(number(&p[i])?, number(&p[i + 1])?));
-                    i += 2;
-                } else {
-                    i += 1;
-                }
-            }
-            loops.push((external, points));
-        }
-        out.push(loops);
-    }
-    Ok(out)
-}
-
 /// AutoCAD's control codes for the drawing symbols DXF text cannot carry otherwise.
 fn control_codes(text: &str) -> String {
     text.replace(['⌀', 'Ø'], "%%c").replace('°', "%%d").replace('±', "%%p")

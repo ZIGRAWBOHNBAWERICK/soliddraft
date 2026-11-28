@@ -190,15 +190,16 @@ pub(crate) struct Band {
     start: f64,
     lo: f64,
     hi: f64,
+    includes_hi: bool,
     tol: f64,
 }
 
 impl Band {
     /// The points whose coordinate along `axis` from the model origin lies in
-    /// `[lo, hi)`; either end may be infinite.
+    /// `[lo, hi]`; either end may be infinite.
     pub(crate) fn along(axis: Vec3, lo: f64, hi: f64) -> Band {
         let size = [lo, hi].into_iter().filter(|v| v.is_finite()).fold(1.0f64, |m, v| m.max(v.abs()));
-        Band { origin: Vec3::ZERO, axis, start: 0.0, lo, hi, tol: BOUNDARY_TOL * size }
+        Band { origin: Vec3::ZERO, axis, start: 0.0, lo, hi, includes_hi: true, tol: BOUNDARY_TOL * size }
     }
 
     fn station(&self, p: Vec3) -> f64 {
@@ -208,7 +209,7 @@ impl Band {
     /// True for a station in the band. A station on a boundary belongs to the later
     /// band only.
     fn owns(&self, s: f64) -> bool {
-        s >= self.lo - self.tol && s < self.hi - self.tol
+        s >= self.lo - self.tol && if self.includes_hi { s <= self.hi + self.tol } else { s < self.hi - self.tol }
     }
 
     /// How far a station is from the nearer finite boundary.
@@ -515,6 +516,7 @@ impl BentSection {
                 start: span.start,
                 lo: if i == 0 { f64::NEG_INFINITY } else { span.start },
                 hi: if i + 1 == spans.len() { f64::INFINITY } else { span.end },
+                includes_hi: false,
                 tol: BOUNDARY_TOL * length,
             };
             let turn = if i == 1 { aligned.unwrap_or(Turn::NONE) } else { Turn::NONE };
@@ -684,7 +686,7 @@ mod tests {
     }
 
     fn band(lo: f64, hi: f64) -> Band {
-        Band { origin: Vec3::ZERO, axis: Vec3::X, start: 0.0, lo, hi, tol: 1e-9 }
+        Band { origin: Vec3::ZERO, axis: Vec3::X, start: 0.0, lo, hi, includes_hi: false, tol: 1e-9 }
     }
 
     #[test]

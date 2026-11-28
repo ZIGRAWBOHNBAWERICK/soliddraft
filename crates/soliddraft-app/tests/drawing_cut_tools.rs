@@ -332,6 +332,36 @@ fn offset_aligned_half_and_broken_views_from_the_drawing_tools() {
     drawing(&mut app, DrawingAction::CloseDrawing);
     drawing(&mut app, DrawingAction::OpenFile(path));
     settle(&mut app);
+    drawing(&mut app, DrawingAction::SetTool(DrawingTool::SmartDimension));
+    let reopened = view(&app, front);
+    let end = reopened
+        .geometry
+        .curves
+        .iter()
+        .find(|curve| {
+            curve.visible
+                && curve.ends.is_some_and(|ends| {
+                    let gap = reopened.geometry.breaks[0];
+                    (ends[0].v - ends[1].v).abs() < 1e-6
+                        && ends[0].u.min(ends[1].u) < gap.at
+                        && ends[0].u.max(ends[1].u) > gap.at + gap.gap
+                })
+        })
+        .expect("a line crossing the break");
+    let [p, q] = end.ends.unwrap();
+    let gap = reopened.geometry.breaks[0];
+    let left = if p.u < q.u { p } else { q };
+    let at = Point2::new((left.u + gap.at) / 2.0, left.v);
+    click_view_point(&mut app, &reopened, at);
+    let proposal = session(&app).proposal.as_ref().expect("a measured proposal after reopen");
+    let scale = soliddraft_drawing::project::view_scale(&session(&app).doc.drawing, front).unwrap();
+    near(
+        proposal.distance(soliddraft_drawing::LinearOrientation::Horizontal, scale),
+        120.0,
+        1e-5,
+        "full bracket width",
+    );
+    drawing(&mut app, DrawingAction::SetTool(DrawingTool::Select));
     assert_eq!(view(&app, front).breaks, broken.breaks);
     near(width(&view(&app, front)), width(&broken), 1e-9, "the reopened broken view's width");
     for (before, what) in [(&offset, "offset"), (&aligned, "aligned")] {
@@ -828,6 +858,58 @@ fn the_sheet_panel_edits_and_clears_a_title_value_set_on_the_sheet() {
     assert_eq!(app.get_by_label("Title field").value().as_deref(), Some(document_title.as_str()));
     drawing(&mut app, DrawingAction::Undo);
     assert_eq!(shown(&app), "Updated");
+
+    app.state_mut()
+        .state
+        .drawing
+        .session
+        .as_mut()
+        .unwrap()
+        .doc
+        .drawing
+        .source_properties
+        .insert("Description".into(), "Bracket arm".into());
+    drawing(
+        &mut app,
+        DrawingAction::Command(DrawCommand::BindTitleProperty {
+            sheet: 0,
+            key: "title".into(),
+            property: "Description".into(),
+        }),
+    );
+    assert_eq!(app.get_by_label("Title field").value().as_deref(), Some("Bracket arm"));
+    app.get_by_label("Title from part property Description");
+    app.get_by_label("Title field").focus();
+    app.run_steps(2);
+    app.key_press_modifiers(Modifiers::COMMAND, Key::A);
+    app.event(egui::Event::Text("Release copy".into()));
+    app.run_steps(2);
+    app.key_press(Key::Enter);
+    app.run_steps(4);
+    assert_eq!(shown(&app), "Release copy");
+    click_label(&mut app, "Title: use part property Description");
+    assert_eq!(shown(&app), "Bracket arm");
+    drawing(
+        &mut app,
+        DrawingAction::Command(DrawCommand::AddRevision {
+            sheet: 0,
+            row: soliddraft_drawing::RevisionRow { revision: "B".into(), ..Default::default() },
+        }),
+    );
+    assert_eq!(app.get_by_label("Revision field").value().as_deref(), Some("B"));
+    app.get_by_label("Revision from revision table");
+    app.get_by_label("Revision field").focus();
+    app.run_steps(2);
+    app.key_press_modifiers(Modifiers::COMMAND, Key::A);
+    app.event(egui::Event::Text("C".into()));
+    app.run_steps(2);
+    app.key_press(Key::Enter);
+    app.run_steps(4);
+    let revision = block.title_block.fields.iter().find(|f| f.key == "revision").unwrap();
+    let shown = |app: &App| soliddraft_drawing::display::field_value(&session(app).doc.drawing, 0, revision);
+    assert_eq!(shown(&app), "C");
+    click_label(&mut app, "Revision: use revision table");
+    assert_eq!(shown(&app), "B");
     drop(app);
     std::fs::remove_dir_all(&root).unwrap();
 }

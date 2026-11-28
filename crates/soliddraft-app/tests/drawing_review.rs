@@ -133,6 +133,30 @@ fn a_drawing_review_compares_bracket_revisions_and_reopens_its_markup_on_that_dr
         .expect("the drawing shows the bore diameter")
         .id;
     let sources = [&baseline, &candidate, &drawing_path].map(|p| std::fs::read(p).unwrap());
+    let saved_part =
+        soliddraft_model::Document::from_bytes(&sources[1], app.state().state.doc.kernel().clone()).unwrap();
+    let saved_drawing = SavedDrawing::open(&drawing_path).unwrap();
+    let annotation = saved_drawing.drawing().annotation(bore).unwrap();
+    let [anchor] = annotation.anchors.as_slice() else { panic!("one bore rim anchor") };
+    let Some(soliddraft_drawing::ModelEntity::Edge(reference)) = &anchor.entity.model else { panic!("a model edge") };
+    let body = saved_part.body().unwrap();
+    let rim = saved_part.resolve_edge(reference, body).unwrap();
+    let topology = saved_part.kernel().topology(body).unwrap();
+    let face = topology
+        .faces
+        .iter()
+        .find(|face| {
+            face.edges.contains(&rim) && face.surface == SurfaceKind::Cylinder && (face.centroid.z - 7.5).abs() < 1e-6
+        })
+        .expect("the saved anchor is on the through-bore wall");
+    assert_eq!(FaceOrigin::from(&saved_part.face_ref(face.id).unwrap()), candidate_bore);
+    let AnnotationKind::Dimension(dimension) = &annotation.body else { panic!("a bore diameter") };
+    assert_eq!(dimension.kind, soliddraft_drawing::DimensionKind::Diameter);
+    assert_eq!(dimension.value, DimValue::Measured { value: 8.0 });
+    assert_eq!(dimension.tolerance, Tolerance::parse("H8").unwrap());
+    let template = soliddraft_drawing::library::template(saved_drawing.drawing().sheets[0].template.as_str());
+    let text = soliddraft_drawing::measure::display_text(dimension, &template.style_file().symbols);
+    assert!(text.contains("8 H8"), "{text}");
 
     // Compare: each change shows its value before and after in the review panel.
     drawing(&mut app, DrawingAction::ReviewRevisions(Some(baseline.clone())));
@@ -301,6 +325,31 @@ fn a_drawing_review_compares_bracket_revisions_and_reopens_its_markup_on_that_dr
     assert_eq!(review.place().map(|p| (p.sheet, p.annotation)), Some((0, bore)));
     review_value(&app, "Baseline", "Ø8 H7");
     review_value(&app, "Candidate", "Ø8 H8");
+
+    let moved_folder = root.join("drawings");
+    std::fs::create_dir_all(&moved_folder).unwrap();
+    let copied = moved_folder.join("review-copy.dwdrw");
+    drawing(
+        &mut app,
+        DrawingAction::Command(Command::SetTitleField { sheet: 0, key: "owner".into(), value: "Machine shop".into() }),
+    );
+    drawing(&mut app, DrawingAction::Save(Some(copied.clone())));
+    for value in ["First shift", "Second shift"] {
+        drawing(
+            &mut app,
+            DrawingAction::Command(Command::SetTitleField { sheet: 0, key: "owner".into(), value: value.into() }),
+        );
+        drawing(&mut app, DrawingAction::Save(None));
+        let copy = SavedDrawing::open(&copied).unwrap();
+        assert!(copy.shows(candidate_revision.pin()));
+        let target = copy.drawing().model.stored_path(&copied);
+        assert_eq!(target, candidate);
+        assert_eq!(pin(&target), *candidate_revision.pin());
+    }
+    drawing(&mut app, DrawingAction::CloseDrawing);
+    drawing(&mut app, DrawingAction::OpenFile(copied));
+    drawing(&mut app, DrawingAction::ReviewRevisions(Some(baseline.clone())));
+    assert!(session(&app).review.is_some(), "the saved drawing still opens review for revision B");
 
     // A second save of the same comment is refused, and no source changed.
     drawing(&mut app, DrawingAction::SaveMarkup(Some(drawing_path.clone())));

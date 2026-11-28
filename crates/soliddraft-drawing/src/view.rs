@@ -68,7 +68,7 @@ impl View {
     /// True when the view is excluded from automatic update and its saved line work
     /// cannot be exported, so it must be included and rebuilt first.
     pub fn needs_inclusion_for_redraw(&self) -> bool {
-        self.excluded_from_update && !self.has_saved_catallax_linework() && !self.geometry.display_only
+        self.excluded_from_update && !self.has_saved_catallax_linework() && self.is_printed()
     }
 
     /// True when the view was drawn from `digest` or excluded from automatic update.

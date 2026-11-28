@@ -151,7 +151,12 @@ pub fn measure(kind: &DimensionKind, dim_type: DimType, anchors: &[AnchorGeometr
                 (len > 0.0).then(|| Point2::new(v.u / len, v.v / len))
             };
             let (a, b) = (dir(anchors.first()?)?, dir(anchors.get(1)?)?);
-            Some(acute_angle(a.u * b.u + a.v * b.v))
+            let cos = a.u * b.u + a.v * b.v;
+            Some(if anchors.iter().all(|anchor| anchor.attach == Attach::Mid) {
+                acute_angle(cos)
+            } else {
+                cos.clamp(-1.0, 1.0).acos().to_degrees()
+            })
         }
         DimensionKind::Chamfer => chamfer(anchors, xf).map(|(size, _)| size),
         DimensionKind::Ordinate => None,

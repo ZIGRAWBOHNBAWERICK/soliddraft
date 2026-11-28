@@ -1197,6 +1197,28 @@ pub fn follow_part(state: &mut AppState) {
     session.part_seen = Some(part);
     let digest = part::digest(&state.doc);
     session.doc.seen_digest = digest.clone();
+    let missing: Vec<_> = session
+        .doc
+        .drawing
+        .sheets
+        .iter()
+        .flat_map(|sheet| &sheet.views)
+        .filter(|v| v.geometry.source_digest == digest.as_str() && !session.doc.transforms.contains_key(&v.id))
+        .map(|v| v.id)
+        .collect();
+    if !missing.is_empty()
+        && let Some(ctx) = PartContext::new(&state.doc)
+    {
+        let part = ctx.part();
+        if let Ok(index) = soliddraft_drawing::PartIndex::build(&part) {
+            let mut contexts = project::Contexts::new();
+            for id in missing {
+                if project::compute_in(&session.doc.drawing, &part, &index, id, &mut contexts).is_ok() {
+                    session.doc.remember(id, &contexts[&id].projected);
+                }
+            }
+        }
+    }
     if digest == session.doc.drawing.model.pinned {
         return;
     }
@@ -1329,6 +1351,9 @@ pub(crate) fn update_views(state: &mut AppState) -> Result<String, String> {
         if !r.dangling.is_empty() {
             session.attention_focus = r.dangling.first().copied();
         }
+        for item in r.unplaced_pmi {
+            text.push_str(&format!(" · {}: {}", item.name, item.reason));
+        }
     }
     for refusal in session.doc.view_refusal_messages() {
         text.push_str(&format!(" · {refusal}"));
@@ -1379,7 +1404,7 @@ pub(crate) fn put_opened(state: &mut AppState, doc: DrawingDoc) -> String {
     let mut session = DrawingSession::new(doc);
     // Let the frame hook see the open part as first contact.
     session.seen_version = u64::MAX;
-    let views: usize = session.doc.drawing.sheets.iter().map(|s| s.views.len()).sum();
+    let views = session.doc.drawing.sheets.iter().flat_map(|s| &s.views).filter(|v| v.is_printed()).count();
     let title = session.title();
     state.drawing.tree_hidden = false;
     state.drawing.session = Some(session);
@@ -1567,7 +1592,7 @@ pub fn apply(state: &mut AppState, dock: &mut DockState<Tab>, ctx: &egui::Contex
             let Some(new) = state.drawing.new.clone() else { return };
             match create_drawing(state, &new) {
                 Ok(session) => {
-                    let n = session.doc.drawing.sheets[0].views.len();
+                    let n = session.doc.drawing.sheets[0].views.iter().filter(|v| v.is_printed()).count();
                     state.drawing.tree_hidden = false;
                     state.drawing.session = Some(session);
                     state.drawing.new = None;
@@ -1991,8 +2016,8 @@ fn after_history(s: &mut DrawingSession, sheet: Option<String>) {
 pub(crate) fn import_model_items(state: &mut AppState) -> Result<String, String> {
     let ctx = PartContext::new(&state.doc).ok_or("Model items: the part has no body")?;
     let s = state.drawing.session.as_mut().ok_or("No drawing is open")?;
-    let items = model_items(&ctx, &s.doc.drawing, s.sheet).map_err(|e| format!("Model items: {e}"))?;
-    if items.is_empty() {
+    let (items, skipped) = model_items(&ctx, &s.doc.drawing, s.sheet).map_err(|e| format!("Model items: {e}"))?;
+    if items.is_empty() && skipped.is_empty() {
         return Ok("Model items: every model dimension is already on the sheet".to_owned());
     }
     let total = items.len();
@@ -2006,7 +2031,10 @@ pub(crate) fn import_model_items(state: &mut AppState) -> Result<String, String>
             }
         }
     }
-    let imported = format!("Model items: {added} dimension{} imported", if added == 1 { "" } else { "s" });
+    let mut imported = format!("Model items: {added} dimension{} imported", if added == 1 { "" } else { "s" });
+    if !skipped.is_empty() {
+        imported.push_str(&format!("; {}", skipped.join("; ")));
+    }
     Ok(match failure {
         None => imported,
         Some(e) => format!("{imported}; {} could not be added: {e}", total - added),
@@ -2226,14 +2254,22 @@ pub(crate) fn save_session(
     let path = soliddraft_document::kind::saved_path(path, DocKind::Drawing);
     let previous_path = s.doc.path.clone();
     let previous_model = s.doc.drawing.model.clone();
-    let target = s.model_target().map(|t| (t.path().map(Path::to_path_buf), t.id()));
-    if let Some((file, id)) = target {
-        if let Some(file) = file {
-            s.doc.drawing.model.set_path(&path, &file);
-        }
-        if s.doc.drawing.model.id.is_none() {
-            s.doc.drawing.model.id = id;
-        }
+    let target = s.model_target();
+    let id = target.and_then(|t| t.id());
+    let file = s
+        .saved_model_file()
+        .or_else(|| {
+            target
+                .filter(|t| previous_model.id.is_none() || t.revision() == Some(&previous_model.pinned))
+                .and_then(|t| t.path())
+                .map(Path::to_path_buf)
+        })
+        .or_else(|| (!previous_model.path.is_empty()).then(|| s.model_stored_path()));
+    if let Some(file) = file {
+        s.doc.drawing.model.set_path(&path, &file);
+    }
+    if previous_model.id.is_none() {
+        s.doc.drawing.model.id = id;
     }
     let warning = match s.doc.save(&path, kernel) {
         Ok(warning) => warning,
@@ -2284,7 +2320,7 @@ pub fn status(state: &AppState) -> Option<Status> {
         Projection::FirstAngle => "first angle",
         Projection::ThirdAngle => "third angle",
     };
-    let n = sheet.views.len();
+    let n = sheet.views.iter().filter(|v| v.is_printed()).count();
     let mut details = vec![
         format!("Sheet {} of {}", s.sheet + 1, s.doc.drawing.sheets.len()),
         format!("{} · {} · {projection}", sheet.size.name, sheet.scale),
@@ -2315,10 +2351,15 @@ pub fn status(state: &AppState) -> Option<Status> {
 /// The part's dimensions brought into the views of sheet `sheet`, once: those the sheet
 /// already shows are left out. The annotations are returned for the caller to add as
 /// commands.
-fn model_items(ctx: &PartContext<'_>, drawing: &Drawing, sheet: usize) -> Result<Vec<Annotation>, String> {
+fn model_items(
+    ctx: &PartContext<'_>,
+    drawing: &Drawing,
+    sheet: usize,
+) -> Result<(Vec<Annotation>, Vec<String>), String> {
     let mut copy = drawing.clone();
     let before = copy.sheets[sheet].annotations.len();
-    soliddraft_drawing::model_items::import_part(&mut copy, sheet, &ctx.part()).map_err(|e| e.to_string())?;
+    let report =
+        soliddraft_drawing::model_items::import_part(&mut copy, sheet, &ctx.part()).map_err(|e| e.to_string())?;
     let existing = &drawing.sheets[sheet].annotations;
     let same = |a: &Annotation, b: &Annotation| match (&a.body, &b.body) {
         (AnnotationKind::Dimension(x), AnnotationKind::Dimension(y)) => {
@@ -2331,12 +2372,13 @@ fn model_items(ctx: &PartContext<'_>, drawing: &Drawing, sheet: usize) -> Result
         }
         _ => false,
     };
-    Ok(copy.sheets[sheet]
+    let items = copy.sheets[sheet]
         .annotations
         .split_off(before)
         .into_iter()
         .filter(|a| !existing.iter().any(|e| same(a, e)))
-        .collect())
+        .collect();
+    Ok((items, report.skipped))
 }
 
 #[cfg(test)]

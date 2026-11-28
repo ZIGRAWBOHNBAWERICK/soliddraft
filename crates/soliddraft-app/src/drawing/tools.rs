@@ -577,8 +577,8 @@ fn break_tool(
     let ends = match s.doc.transforms.get(&view) {
         Some(xf) => Ok((xf.unproject(start), xf.unproject(end))),
         None => with_part(doc, |part, index| {
-            let ctx = derived::context(&s.doc.drawing, part, index, view)?;
-            Ok((ctx.xf.unproject(start), ctx.xf.unproject(end)))
+            let xf = project::ViewContext::break_edit_transform(&s.doc.drawing, part, index, view)?;
+            Ok((xf.unproject(start), xf.unproject(end)))
         }),
     };
     match ends {

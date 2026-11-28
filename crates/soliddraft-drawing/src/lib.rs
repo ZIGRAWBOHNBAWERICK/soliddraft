@@ -216,10 +216,10 @@ impl Drawing {
         self.part_notes = part.requirements.notes.clone();
     }
 
-    /// True when every view included in updates shows the drawing's pinned revision.
+    /// True when every printed view included in updates shows the drawing's pinned revision.
     pub fn views_match_pin(&self) -> bool {
         let pinned = self.model.pinned.as_str();
-        self.sheets.iter().flat_map(|s| &s.views).all(|v| v.accepts_revision(pinned))
+        self.sheets.iter().flat_map(|s| &s.views).filter(|v| v.is_printed()).all(|v| v.accepts_revision(pinned))
     }
 
     /// The view with id `id`, on any sheet.

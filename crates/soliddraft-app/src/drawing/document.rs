@@ -28,6 +28,7 @@ pub struct UpdateReport {
     pub changed: Vec<AnnotationId>,
     pub dangling: Vec<AnnotationId>,
     pub dangling_views: Vec<soliddraft_drawing::DanglingView>,
+    pub unplaced_pmi: Vec<soliddraft_drawing::pmi_items::Unplaced>,
     pub at: Instant,
     pub dismissed: bool,
 }
@@ -195,11 +196,13 @@ impl DrawingDoc {
     }
 
     pub(super) fn view_update_reason(&self, view: &View) -> Option<&str> {
-        if let Some(failure) = self.active_refusals().find(|f| f.view == view.id) {
+        if !view.is_printed() {
+            None
+        } else if let Some(failure) = self.active_refusals().find(|f| f.view == view.id) {
             Some(&failure.cause)
         } else if view.needs_inclusion_for_redraw() {
             Some(soliddraft_drawing::export::INCLUDE_FOR_REDRAW)
-        } else if !view.geometry.display_only && !view.has_saved_catallax_linework() {
+        } else if !view.has_saved_catallax_linework() {
             Some("Rebuild to replace the saved line work with Catallax line work")
         } else if !view.accepts_revision(self.seen_digest.as_str())
             || !view.accepts_revision(self.drawing.model.pinned.as_str())
@@ -228,7 +231,10 @@ impl DrawingDoc {
     }
 
     fn active_refusals(&self) -> impl Iterator<Item = &soliddraft_drawing::DanglingView> {
-        self.drawing.refused_views.iter()
+        self.drawing
+            .refused_views
+            .iter()
+            .filter(|failure| self.drawing.view(failure.view).is_some_and(View::is_printed))
     }
 
     pub fn refused_views(&self) -> impl Iterator<Item = (usize, ViewId, String, &str)> {
@@ -327,10 +333,15 @@ impl DrawingDoc {
                     from_revision: from,
                     to_revision: ctx.digest.clone(),
                     change,
-                    views: r.projections.len(),
+                    views: r
+                        .projections
+                        .iter()
+                        .filter(|(id, _)| self.drawing.view(*id).is_some_and(View::is_printed))
+                        .count(),
                     changed,
                     dangling,
                     dangling_views: r.dangling_views,
+                    unplaced_pmi: r.unplaced_pmi,
                     at: Instant::now(),
                     dismissed: false,
                 });
@@ -463,8 +474,15 @@ impl DrawingDoc {
         let Some(path) = self.path.as_deref() else { return };
         let current_model = &self.drawing.model;
         self.stack.map_model_paths(|model| {
-            if model.id == previous_model.id && model.kind == previous_model.kind && model.path == previous_model.path {
+            if model.id == previous_model.id
+                && model.kind == previous_model.kind
+                && model.pinned == previous_model.pinned
+                && model.path == previous_model.path
+            {
                 return current_model.path.clone();
+            }
+            if model.path.is_empty() {
+                return String::new();
             }
             let target = previous_path.map_or_else(|| PathBuf::from(&model.path), |old| model.stored_path(old));
             let mut model = model.clone();
@@ -497,6 +515,26 @@ mod tests {
     use super::*;
     use soliddraft_drawing::fixture::bracket_a3;
     use soliddraft_drawing::{AnnotationKind, Scale};
+
+    #[test]
+    fn a_saved_display_section_has_no_update_warning() {
+        let mut drawing = soliddraft_drawing::fixture::bracket_a3();
+        let view = &mut drawing.sheets[0].views[0];
+        let id = view.id;
+        view.geometry.display_only = true;
+        view.geometry.source_digest = "older revision".into();
+        drawing.refused_views.push(soliddraft_drawing::DanglingView {
+            view: id,
+            name: "Section B".into(),
+            cause: "The break exceeds the part".into(),
+        });
+        let doc = DrawingDoc::new(drawing);
+        let view = doc.drawing.view(id).unwrap();
+        assert!(doc.view_is_up_to_date(view));
+        assert_eq!(doc.view_update_reason(view), None);
+        assert!(!doc.stale_views().contains(&id));
+        assert!(doc.view_refusal_messages().all(|s| !s.contains("Section B")));
+    }
 
     #[test]
     fn aligned_views_slide_along_their_guide_and_follow_their_parent() {

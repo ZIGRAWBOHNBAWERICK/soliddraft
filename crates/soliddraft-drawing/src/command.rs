@@ -480,6 +480,9 @@ pub fn apply(drawing: &mut Drawing, command: &Command) -> Result<(), DrawingErro
             let a = drawing.annotation_mut(*annotation).ok_or(DrawingError::UnknownAnnotation(*annotation))?;
             match &mut a.body {
                 AnnotationKind::Dimension(d) => {
+                    if dimension_changes_requirement(d, dimension) {
+                        a.source = None;
+                    }
                     *d = dimension.clone();
                     Ok(())
                 }
@@ -542,6 +545,9 @@ pub fn apply(drawing: &mut Drawing, command: &Command) -> Result<(), DrawingErro
             let a = drawing.annotation_mut(*annotation).ok_or(DrawingError::UnknownAnnotation(*annotation))?;
             match &mut a.body {
                 AnnotationKind::Note { text: t, .. } | AnnotationKind::HoleCallout { text: t } => {
+                    if *t != *text {
+                        a.source = None;
+                    }
                     *t = text.clone();
                     Ok(())
                 }
@@ -600,6 +606,26 @@ pub fn apply(drawing: &mut Drawing, command: &Command) -> Result<(), DrawingErro
                 .find(|t| t.id == template.as_str())
                 .ok_or_else(|| DrawingError::BadRequest(format!("there is no template {template}")))?;
             let model = format.template();
+            let s = drawing.sheets.get(*sheet).ok_or_else(|| DrawingError::BadRequest(format!("no sheet {sheet}")))?;
+            let outside: Vec<_> = s
+                .views
+                .iter()
+                .filter(|view| {
+                    let [x0, y0, x1, y1] = project::view_bounds(view);
+                    [x0, y0, x1, y1].iter().any(|v| !v.is_finite())
+                        || x0 < 0.0
+                        || y0 < 0.0
+                        || x1 > model.size.width_mm
+                        || y1 > model.size.height_mm
+                })
+                .map(|view| project::view_label_in(drawing, s, view))
+                .collect();
+            if !outside.is_empty() {
+                return Err(DrawingError::BadRequest(format!(
+                    "Move or rescale these views before changing the paper size: {}",
+                    outside.join(", ")
+                )));
+            }
             let s = sheet_mut(drawing, *sheet)?;
             s.template = template.clone();
             s.size = model.size;
@@ -686,6 +712,18 @@ pub fn apply(drawing: &mut Drawing, command: &Command) -> Result<(), DrawingErro
             let a = drawing.annotation_mut(*annotation).ok_or(DrawingError::UnknownAnnotation(*annotation))?;
             if std::mem::discriminant(&a.body) != std::mem::discriminant(body) {
                 return Err(DrawingError::BadRequest(format!("{annotation} is another kind of annotation")));
+            }
+            let changed = match (&a.body, body) {
+                (AnnotationKind::Dimension(before), AnnotationKind::Dimension(after)) => {
+                    dimension_changes_requirement(before, after)
+                }
+                (AnnotationKind::Note { text: before, .. }, AnnotationKind::Note { text: after, .. }) => {
+                    before != after
+                }
+                _ => a.body != *body,
+            };
+            if changed {
+                a.source = None;
             }
             a.body = body.clone();
             Ok(())
@@ -868,7 +906,8 @@ impl Command {
                 }
                 annotation
             }
-            Self::EditDimension { annotation, dimension } => {
+            Self::EditDimension { annotation, dimension }
+            | Self::EditAnnotation { annotation, body: AnnotationKind::Dimension(dimension) } => {
                 let Some(a) = drawing.annotation(*annotation) else { return false };
                 let AnnotationKind::Dimension(before) = &a.body else { return false };
                 if (dimension.kind == before.kind && dimension.dim_type == before.dim_type)
@@ -886,6 +925,15 @@ impl Command {
     }
 }
 
+fn dimension_changes_requirement(before: &Dimension, after: &Dimension) -> bool {
+    before.kind != after.kind
+        || before.dim_type != after.dim_type
+        || before.value != after.value
+        || before.tolerance != after.tolerance
+        || before.chamfer_angle != after.chamfer_angle
+        || (before.text != after.text && !after.text.is_empty() && !after.text.contains(Dimension::VALUE_TEXT))
+}
+
 fn measure_dimension(drawing: &Drawing, part: &Part, annotation: &mut Annotation) -> Result<(), DrawingError> {
     let sheet = drawing.sheet_of(annotation.view).ok_or(DrawingError::UnknownView(annotation.view))?;
     let view = sheet.view(annotation.view).expect("the view is on the sheet");
@@ -895,7 +943,7 @@ fn measure_dimension(drawing: &Drawing, part: &Part, annotation: &mut Annotation
     let index = PartIndex::build(part)?;
     let context = crate::derived::context(drawing, part, &index, annotation.view)?;
     let symbols = &library::template(sheet.template.as_str()).style_file().symbols;
-    update::re_resolve(annotation, &index, &context, symbols);
+    update::re_resolve(annotation, &index, &context, symbols, part);
     if let AnnotationState::Dangling { cause, .. } = &annotation.state {
         return Err(DrawingError::BadRequest(cause.clone()));
     }
@@ -922,8 +970,15 @@ pub fn apply_with(drawing: &mut Drawing, command: &Command, part: &Part) -> Resu
             }
             add_annotation(drawing, &measured).map(|_| None)
         }
-        Command::EditDimension { annotation, dimension } if command.dimension_needs_model(drawing) => {
+        Command::EditDimension { annotation, dimension }
+        | Command::EditAnnotation { annotation, body: AnnotationKind::Dimension(dimension) }
+            if command.dimension_needs_model(drawing) =>
+        {
             let mut measured = drawing.annotation(*annotation).expect("dimension to edit").clone();
+            let AnnotationKind::Dimension(before) = &measured.body else { unreachable!("dimension to edit") };
+            if dimension_changes_requirement(before, dimension) {
+                measured.source = None;
+            }
             measured.body = AnnotationKind::Dimension(dimension.clone());
             measure_dimension(drawing, part, &mut measured)?;
             *drawing.annotation_mut(*annotation).expect("dimension to edit") = measured;
@@ -1156,14 +1211,15 @@ fn scale_followers(drawing: &Drawing, id: ViewId) -> Result<Vec<(ViewId, f64)>, 
 fn rescale_changed(drawing: &mut Drawing, before: Vec<(ViewId, f64)>) -> Result<(), DrawingError> {
     let mut changes = Vec::new();
     for (v, old) in before {
-        let ratio = project::view_scale(drawing, v)? / old;
+        let new = project::view_scale(drawing, v)?;
+        let ratio = new / old;
         if (ratio - 1.0).abs() >= 1e-12 {
             check_break_scale(drawing, v, ratio)?;
-            changes.push((v, ratio));
+            changes.push((v, old, new));
         }
     }
-    for (v, ratio) in changes {
-        rescale(drawing, v, ratio);
+    for (v, old, new) in changes {
+        rescale(drawing, v, old, new);
     }
     Ok(())
 }
@@ -1175,9 +1231,10 @@ fn check_break_scale(drawing: &Drawing, id: ViewId, ratio: f64) -> Result<(), Dr
 
 /// Scales a view's line work and its annotations' points about the view's origin, and
 /// the marks its derived views keep on it.
-fn rescale(drawing: &mut Drawing, v: ViewId, ratio: f64) {
+fn rescale(drawing: &mut Drawing, v: ViewId, old_scale: f64, new_scale: f64) {
     let Some(view) = drawing.view_mut(v) else { return };
     let gap = view.geometry.breaks.first().copied();
+    let ratio = new_scale / old_scale;
     project::rescale_view(view, ratio);
     let s = |p: Point2| project::scale_view_point(p, ratio, gap);
     let rounded = |p: Point2| {
@@ -1200,6 +1257,14 @@ fn rescale(drawing: &mut Drawing, v: ViewId, ratio: f64) {
                 }
             }
             _ => {}
+        }
+    }
+    if gap.is_some() {
+        for table in drawing.sheets.iter_mut().flat_map(|s| &mut s.tables).filter(|t| t.hole_view == Some(v)) {
+            for hole in &mut table.holes {
+                let p = s(Point2::new(hole.centre.u * old_scale, hole.centre.v * old_scale));
+                hole.centre = Point2::new(p.u / new_scale, p.v / new_scale);
+            }
         }
     }
     for a in drawing.sheets.iter_mut().flat_map(|s| s.annotations.iter_mut()).filter(|a| a.view == v) {

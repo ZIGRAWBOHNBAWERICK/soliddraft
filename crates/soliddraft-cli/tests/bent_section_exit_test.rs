@@ -296,10 +296,43 @@ fn polygon_loops(view: &View) -> Vec<Vec<Vec<Point2>>> {
     view.geometry.hatch.iter().map(|h| std::iter::once(&h.outer).chain(&h.holes).cloned().collect()).collect()
 }
 
+fn hatch_loops(bytes: &[u8]) -> Vec<Vec<(bool, Vec<Point2>)>> {
+    let text = String::from_utf8_lossy(bytes);
+    let mut lines = text.lines();
+    let groups: Vec<_> = std::iter::from_fn(|| {
+        let code = lines.next()?.trim().parse::<u16>().expect("DXF group code");
+        Some((code, lines.next().expect("DXF group value").trim()))
+    })
+    .collect();
+    groups
+        .chunk_by(|_, next| next.0 != 0)
+        .filter(|entity| entity.first() == Some(&(0, "HATCH")))
+        .map(|entity| {
+            let start = entity.iter().position(|(code, _)| *code == 92).expect("DXF hatch boundary");
+            entity[start..]
+                .chunk_by(|_, next| next.0 != 92)
+                .map(|groups| {
+                    let (92, flag) = groups[0] else { panic!("DXF loop flag") };
+                    let external = flag.parse::<u32>().unwrap() & 1 != 0;
+                    let ring = groups.iter().position(|(code, _)| *code == 97).expect("end of DXF boundary");
+                    let points = groups[..ring]
+                        .windows(2)
+                        .filter_map(|pair| {
+                            let [(10, x), (20, y)] = pair else { return None };
+                            Some(Point2::new(x.parse().unwrap(), y.parse().unwrap()))
+                        })
+                        .collect();
+                    (external, points)
+                })
+                .collect()
+        })
+        .collect()
+}
+
 /// The DXF's HATCH boundaries are the view's hatch regions on the sheet, loop for loop:
 /// the outer boundary first and marked external, its holes after it.
 fn assert_dxf_hatches_match(dxf: &Path, view: &View) {
-    let read = soliddraft_drawing::export::dxf::hatch_loops(&std::fs::read(dxf).unwrap()).expect("the DXF re-reads");
+    let read = hatch_loops(&std::fs::read(dxf).unwrap());
     let o = view.position;
     let mut left: Vec<Vec<Vec<Point2>>> = polygon_loops(view)
         .into_iter()
@@ -409,7 +442,7 @@ fn aligned_section_through_a_five_hole_flange() {
     assert!(log.contains("showing the display mesh"), "{log}");
     assert_neutral(&String::from_utf8(out.stdout.clone()).unwrap());
     let report: Value = serde_json::from_slice(&out.stdout).unwrap();
-    assert_eq!(report["views"], 5, "{report:#}");
+    assert_eq!(report["views"], 4, "{report:#}");
     let (section, scale) = bent_section(&dir.join("flange.dwdrw"), 3);
     assert!(section.geometry.display_only && !section.geometry.unproved);
     assert!(!section.has_saved_catallax_linework());
@@ -445,7 +478,7 @@ fn aligned_section_through_a_five_hole_flange() {
         let (stdout, log) = (String::from_utf8(out.stdout).unwrap(), String::from_utf8(out.stderr).unwrap());
         assert!(out.status.success(), "{log}");
         assert_eq!(log.contains("showing the display mesh"), rust_log.is_some(), "{log}");
-        assert!(stdout.contains(": 5 views at "), "{stdout}");
+        assert!(stdout.contains(": 4 views at "), "{stdout}");
         assert_neutral(&stdout);
     }
     let svg = std::fs::read_to_string(dir.join("flange.svg")).unwrap();

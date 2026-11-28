@@ -643,21 +643,24 @@ fn create(o: &Options) -> Result<(), String> {
         let made = soliddraft_drawing::make_drawing(part, &new).map_err(|e| e.to_string())?;
         let (mut drawing, import) = (made.drawing, made.import);
         apply_steps(&mut drawing, part, &o.steps)?;
-        let outputs = write_outputs(&drawing, &outs, &source.backend, &[]);
+        let outputs = write_outputs(&drawing, &outs, &source.backend);
         let name = drawing_path.as_ref().map(|p| p.display().to_string()).unwrap_or_default();
+        let printed = |id| drawing.view(id).is_some_and(soliddraft_drawing::View::is_printed);
+        let views = drawing.sheets.iter().flat_map(|s| &s.views).filter(|view| view.is_printed()).count();
         if o.json {
             let report = CreateReport {
                 backend: &source.backend,
                 drawing: &name,
                 template: &o.template,
                 scale: drawing.sheets[0].scale.to_string(),
-                views: drawing.sheets.iter().map(|s| s.views.len()).sum(),
+                views,
                 sheets: drawing.sheets.len(),
                 dimensions_placed: import.placed,
                 dimensions_skipped: &import.skipped,
                 annotations: drawing.sheets.iter().map(|s| s.annotations.len()).sum(),
                 location_labels: display::location_labels(&drawing)
                     .into_iter()
+                    .filter(|l| printed(l.view) && printed(l.parent))
                     .map(|l| LocationOut {
                         view: l.view.0,
                         parent: l.parent.0,
@@ -670,7 +673,6 @@ fn create(o: &Options) -> Result<(), String> {
             };
             println!("{}", serde_json::to_string(&report).expect("reports serialise"));
         } else {
-            let views: usize = drawing.sheets.iter().map(|s| s.views.len()).sum();
             let sheets =
                 if drawing.sheets.len() > 1 { format!(" on {} sheets", drawing.sheets.len()) } else { String::new() };
             println!(
@@ -922,7 +924,7 @@ fn update(o: &Options) -> Result<(), String> {
             file::write(&saved, &drawing, &meta).map_err(|e| repair_error(e.to_string()))?;
         }
         let repairs = requested.into_iter().map(|(_, name)| name).collect::<Vec<_>>();
-        let outputs = write_outputs(&drawing, &o.outs, &source.backend, &report.dangling_views);
+        let outputs = write_outputs(&drawing, &o.outs, &source.backend);
         // The report after repairs: what still needs attention.
         let mut final_report = report.clone();
         final_report.dangling.retain(|d| drawing.annotation(d.annotation).is_some_and(|a| a.needs_attention()));
@@ -955,6 +957,9 @@ fn update(o: &Options) -> Result<(), String> {
             }
             for refusal in &report.dangling_views {
                 println!("  {}: {}", refusal.name, refusal.cause);
+            }
+            for item in &report.unplaced_pmi {
+                println!("  {}: {}", item.name, item.reason);
             }
             for r in &repairs {
                 println!("  {r}");
@@ -1028,21 +1033,17 @@ impl OutputReport {
 
 /// Writes the drawing in each format `outs` names. A drawing file written here is a new
 /// document (Save as copy), with its own id. Every file is written atomically.
-fn write_outputs(
-    drawing: &Drawing,
-    outs: &[String],
-    backend: &str,
-    refused: &[soliddraft_drawing::DanglingView],
-) -> OutputReport {
+fn write_outputs(drawing: &Drawing, outs: &[String], backend: &str) -> OutputReport {
     let format_of =
         |out: &str| Path::new(out).extension().and_then(|ext| ext.to_str()).and_then(Format::from_extension);
     let refusals: Vec<_> = drawing
         .sheets
         .iter()
         .map(|sheet| {
-            refused
+            drawing
+                .refused_views
                 .iter()
-                .filter(|f| sheet.view(f.view).is_some())
+                .filter(|f| sheet.view(f.view).is_some_and(soliddraft_drawing::View::is_printed))
                 .map(|f| format!("{}: {}", f.name, f.cause))
                 .collect::<Vec<_>>()
                 .join("\n")
@@ -1500,7 +1501,8 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("soliddraft-partial-sheet-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let paths = ["result.pdf", "result.svg", "result.dxf"].map(|out| dir.join(out).display().to_string());
-        let report = write_outputs(&drawing, &paths, "test", &[refusal]);
+        drawing.refused_views.push(refusal);
+        let report = write_outputs(&drawing, &paths, "test");
         let json = serde_json::to_value(&report).unwrap();
         let exports = json["exports"].as_array().unwrap();
         assert_eq!(exports.len(), 2);
@@ -1518,7 +1520,7 @@ mod tests {
         }
         drawing.sheets.truncate(1);
         let pdf = &paths[0];
-        let report = write_outputs(&drawing, std::slice::from_ref(pdf), "test", &[]);
+        let report = write_outputs(&drawing, std::slice::from_ref(pdf), "test");
         let json = serde_json::to_value(&report).unwrap();
         assert_eq!(json["exports"][0]["path"].as_str(), Some(pdf.as_str()));
         assert_eq!(json["exports"][0]["accuracy"]["approximate"], 1);
@@ -1528,7 +1530,7 @@ mod tests {
         for invalid in ["typo.exe", "directory.svg"] {
             let paths = ["before.svg", invalid, "existing.svg"].map(|out| dir.join(out).display().to_string());
             std::fs::write(&paths[2], b"keep this file").unwrap();
-            let report = write_outputs(&drawing, &paths, "test", &[]);
+            let report = write_outputs(&drawing, &paths, "test");
             let json = serde_json::to_value(&report).unwrap();
             assert_eq!(json["exports"].as_array().unwrap().len(), 1);
             assert_eq!(json["exports"][0]["path"].as_str(), Some(paths[0].as_str()));

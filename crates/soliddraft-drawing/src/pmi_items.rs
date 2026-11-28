@@ -34,7 +34,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use kurbo::Shape as _;
 use serde::{Deserialize, Serialize};
 use soliddraft_kernel_api::drawing::{Curve3, CurveSource};
-use soliddraft_kernel_api::pmi::{At, PmiItem, PmiKind, PositionFrame, SizeKind, TargetArea, TargetKind, Tolerance};
+use soliddraft_kernel_api::pmi::{At, PmiKind, PositionFrame, SizeKind, TargetArea, TargetKind, Tolerance};
 use soliddraft_kernel_api::{EdgeId, FaceId, FaceInfo, Point2, SurfaceKind, Vec3};
 use soliddraft_model::pmi::PmiRow;
 
@@ -320,7 +320,7 @@ impl Planner<'_> {
             if !oblique && normal.dot(frame.right).abs() < 1.0 - 1e-6 && normal.dot(frame.up).abs() < 1.0 - 1e-6 {
                 continue;
             }
-            let Some((edge, visible)) = plane_edge(self.body.index, view, point, normal, self.body.tol) else {
+            let Some((edge, visible)) = plane_edge(self.body.index, view, point, normal, self.body.tol, 0) else {
                 continue;
             };
             // A visible line first, then the view with the fewest annotations so far.
@@ -356,7 +356,7 @@ impl Planner<'_> {
     ) -> Option<(EdgeId, Attach, Point2, bool, bool)> {
         match end.shape {
             Shape::Plane { point, normal } => {
-                let (edge, visible) = plane_edge(self.body.index, view, point, normal, self.body.tol)?;
+                let (edge, visible) = plane_edge(self.body.index, view, point, normal, self.body.tol, 0)?;
                 let curve = self.body.index.edge_curve(edge)?;
                 let near = match lean {
                     None => Attach::Mid,
@@ -774,7 +774,7 @@ impl Planner<'_> {
                     if n.dot(frame.direction).abs() > 1e-6 || m.dot(frame.direction).abs() > 1e-6 {
                         continue;
                     }
-                    let edge = |point, normal| plane_edge(self.body.index, view, point, normal, self.body.tol);
+                    let edge = |point, normal| plane_edge(self.body.index, view, point, normal, self.body.tol, 0);
                     let (Some((a, av)), Some((b, bv))) = (edge(p, n), edge(q, m)) else { continue };
                     if a == b {
                         continue;
@@ -1184,23 +1184,10 @@ fn row_of<'r>(source: &PmiSource, rows: &'r [PmiRow]) -> Option<&'r PmiRow> {
 /// `annotation` was made from: on one of the item's faces or on an edge of one. A repair
 /// that moves the annotation elsewhere no longer shows that item.
 pub(crate) fn anchors_on_item(annotation: &Annotation, entities: &[Entity], part: &Part) -> Result<bool, DrawingError> {
-    let rows = &part.requirements.rows;
-    let row = match &annotation.source {
-        None | Some(PmiSource::Notes) => return Ok(true),
-        Some(PmiSource::Located { item, .. }) => row_of(&PmiSource::Item { item: item.clone() }, rows),
-        Some(source) => annotation_row(annotation, source, rows).map(|(row, _)| row),
-    };
+    let Some(source @ PmiSource::Item { .. }) = &annotation.source else { return Ok(true) };
+    let row = row_of(source, &part.requirements.rows);
     let Some(item) = row.and_then(|row| row.on_body.as_ref()) else { return Ok(false) };
-    let mut faces: BTreeSet<FaceId> = item.features().into_iter().flatten().copied().collect();
-    if let Some(PmiSource::Located { datum, .. }) = &annotation.source {
-        for row in rows {
-            if let Some(PmiItem { kind: PmiKind::Datum { letter, feature }, .. }) = &row.on_body
-                && letter == datum
-            {
-                faces.extend(feature.iter().copied());
-            }
-        }
-    }
+    let faces: BTreeSet<FaceId> = item.features().into_iter().flatten().copied().collect();
     let topology = part.geometry.topology()?;
     let edges: BTreeSet<EdgeId> =
         topology.faces.iter().filter(|f| faces.contains(&f.id)).flat_map(|f| f.edges.iter().copied()).collect();
@@ -1208,6 +1195,16 @@ pub(crate) fn anchors_on_item(annotation: &Annotation, entities: &[Entity], part
         Entity::Edge(edge) => edges.contains(edge),
         Entity::Face(face) => faces.contains(face),
     }))
+}
+
+pub(crate) fn authored_angle(annotation: &Annotation, part: &Part) -> Option<f64> {
+    let source @ PmiSource::Item { .. } = annotation.source.as_ref()? else { return None };
+    let row = row_of(source, &part.requirements.rows)?;
+    if row.applies() && matches!(row.item.kind, PmiKind::BasicAngle { .. }) {
+        row.measured.first().copied()
+    } else {
+        None
+    }
 }
 
 fn datum_target_body<F>(target: &soliddraft_kernel_api::pmi::DatumTarget<F>) -> AnnotationKind {
@@ -1461,9 +1458,10 @@ pub fn import(
         .filter_map(|annotation| row_of(annotation.source.as_ref()?, rows))
         .map(|row| row.item.id.as_str())
         .collect();
+    let has_aligned = views.iter().any(|v| v.xf.has_aligned_legs());
     let candidates: Vec<&ViewContext> = views
         .iter()
-        .filter(|v| !v.pictorial)
+        .filter(|v| !v.pictorial && !v.xf.has_aligned_legs())
         .filter(|v| drawing.view(v.id).is_some_and(|view| !matches!(view.kind, crate::ViewKind::Section { .. })))
         .collect();
     let axes = part.geometry.face_carriers()?.into_iter().filter_map(|c| Some((c.id, c.axis?))).collect();
@@ -1530,7 +1528,12 @@ pub fn import(
     }
     for row in rows {
         match failed.remove(&row.item.id) {
-            Some(reason) => report.unplaced.push(Unplaced { name: row.item.id.clone(), reason }),
+            Some(mut reason) => {
+                if has_aligned {
+                    reason.push_str("; PMI cannot be placed in an aligned section or its details");
+                }
+                report.unplaced.push(Unplaced { name: row.item.id.clone(), reason });
+            }
             None if !present.contains(row.item.id.as_str()) => report.placed.push(row.item.id.clone()),
             None => {}
         }

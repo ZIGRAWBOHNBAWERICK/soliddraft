@@ -82,22 +82,30 @@ fn location_of(drawing: &Drawing, view_sheet: usize, view: &View) -> Option<Loca
     let format = |i: usize| library::template(drawing.sheets[i].template.as_str());
     let [x0, y0, x1, y1] = view_bounds(view);
     let view_zone = zone_at(format(view_sheet), Point2::new((x0 + x1) / 2.0, (y0 + y1) / 2.0));
-    let mark = mark_point(parent, view);
+    let mark = mark_point(parent, view)?;
     let parent_zone = zone_at(format(parent_sheet), mark);
     Some(LocationLabel { view: view.id, parent: parent_id, view_sheet, view_zone, parent_sheet, parent_zone })
 }
 
 /// Where a derived view's mark sits on its parent, in sheet millimetres.
-fn mark_point(parent: &View, view: &View) -> Point2 {
+fn mark_point(parent: &View, view: &View) -> Option<Point2> {
     let o = parent.position;
     match &view.kind {
-        ViewKind::Section { line, .. } if !line.is_empty() => {
-            let (a, b) = (line[0], line[line.len() - 1]);
-            Point2::new(o.u + (a.u + b.u) / 2.0, o.v + (a.v + b.v) / 2.0)
+        ViewKind::Section { line, .. } => {
+            let length = |[a, b]: [Point2; 2]| (a.u - b.u).hypot(a.v - b.v);
+            let [a, b] = trace_segments(line, parent.geometry.breaks.first().copied())
+                .max_by(|a, b| length(*a).total_cmp(&length(*b)))?;
+            Some(Point2::new(o.u + (a.u + b.u) / 2.0, o.v + (a.v + b.v) / 2.0))
         }
-        ViewKind::Detail { center, .. } => Point2::new(o.u + center.u, o.v + center.v),
-        _ => o,
+        ViewKind::Detail { center, .. } => Some(Point2::new(o.u + center.u, o.v + center.v)),
+        _ => Some(o),
     }
+}
+
+fn trace_segments(line: &[Point2], gap: Option<crate::BreakGap>) -> impl Iterator<Item = [Point2; 2]> {
+    line.windows(2)
+        .flat_map(move |s| gap.map_or([[s[0], s[1]], [s[1], s[1]]], |g| g.trace(s[0], s[1])))
+        .filter(|[a, b]| a != b)
 }
 
 /// The location label under a derived view whose parent is on another sheet.
@@ -351,14 +359,14 @@ pub(super) fn parent_marks(drawing: &Drawing, sheet_index: usize, ctx: &Context<
                     let Some(arrow_dir) = section_arrow(&flat[..2], *flip) else { continue };
                     let pts: Vec<Point2> = cut.iter().map(at).collect();
                     let trace = |points: &[Point2]| {
-                        let Some(g) = gap else { return polyline(&points.iter().map(at).collect::<Vec<_>>()) };
+                        if gap.is_none() {
+                            return polyline(&points.iter().map(at).collect::<Vec<_>>());
+                        }
                         let mut path = BezPath::new();
-                        for [a, b] in points.windows(2).flat_map(|s| g.trace(s[0], s[1])) {
-                            if a != b {
-                                let (a, b) = (at(&a), at(&b));
-                                path.move_to((a.u, a.v));
-                                path.line_to((b.u, b.v));
-                            }
+                        for [a, b] in trace_segments(points, gap) {
+                            let (a, b) = (at(&a), at(&b));
+                            path.move_to((a.u, a.v));
+                            path.line_to((b.u, b.v));
                         }
                         path
                     };

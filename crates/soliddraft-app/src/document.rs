@@ -5865,7 +5865,16 @@ impl Document {
                 });
             }
         }
-        acc
+        acc.or_else(|| self.pending_bounds())
+    }
+
+    /// The box of the body whose GPU preview the browser's device is still meshing. The
+    /// preview carries the same box once it lands (see `gpu_display_mesh`), so a fit made
+    /// before then, as opening a part does, frames the part and not an empty document.
+    fn pending_bounds(&self) -> Option<(Vec3, Vec3)> {
+        let (body, _) = self.gpu_pending.as_ref()?;
+        let bbox = self.kernel().topology(*body).ok()?.bbox;
+        Some((kv(bbox.min), kv(bbox.max)))
     }
 
     pub fn selection_feature(&self, sel: Selection) -> Option<FeatureId> {
@@ -7237,5 +7246,47 @@ mod tests {
         assert_eq!(d.display_index(), Some(2));
         d.apply(Command::Rollback(None)).unwrap();
         built(&d);
+    }
+
+    /// The browser's GPU preview lands a frame or more after the part opens, so the part
+    /// opens with nothing drawn yet. The fit made at the open frames the part as it is
+    /// shown once the preview lands, not the empty document's view of the origin.
+    #[test]
+    fn a_part_opened_before_its_gpu_preview_lands_is_framed_as_shown() {
+        use crate::viewport::camera::{Camera, Framing};
+        let mut d = doc();
+        // Off the origin, as the P1 bracket is.
+        let sketch = d
+            .apply(Command::AddSketch { plane: SketchPlane::Reference { plane: PlaneKind::Top, offset: 0.0 } })
+            .unwrap()
+            .unwrap();
+        d.apply(Command::EditSketch { id: sketch, sketch: rect_sketch(60.0, 40.0, P2::new(20.0, 10.0)) }).unwrap();
+        d.apply(Command::AddExtrude {
+            params: ExtrudeParams { sketch: Some(sketch), depth: 30.0, ..Default::default() },
+            via_assistant: false,
+        })
+        .unwrap()
+        .unwrap();
+        let shown = d.bounds().expect("the drawn part has bounds");
+        // What the page holds until its device answers: the body's GPU preview is
+        // meshing and no mesh is drawn.
+        let body = d.display_body().unwrap();
+        d.meshes.clear();
+        d.gpu_pending = Some((body, crate::viewport::gpu_preview::Pending::unanswered()));
+        let framed = |bounds| {
+            let mut camera = Camera::default();
+            camera.set_framing(Framing { top: 8.0, bottom: 84.0, height: 600.0 });
+            camera.fit_framed(bounds);
+            while camera.tick(1.0 / 60.0) {}
+            (camera.target, camera.distance)
+        };
+        let pending = crate::scan::document_bounds(&d);
+        let (opened, landed) = (framed(pending), framed(Some(shown)));
+        // The kernel's box may sit a little outside the drawn triangles. The empty
+        // document's view is tens of millimetres away.
+        assert!(
+            (opened.0 - landed.0).length() < 0.1 && (opened.1 / landed.1 - 1.0).abs() < 1e-3,
+            "the open framed {opened:?} from {pending:?}, the drawn part {landed:?} from {shown:?}"
+        );
     }
 }

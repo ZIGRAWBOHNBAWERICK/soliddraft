@@ -546,6 +546,12 @@ fn compute_view_at(
                 symmetry_segments: Vec::new(),
             };
             let mut projected = Projected { geometry, transform: xf, circles };
+            // Magnified and rounded, an end on the callout can land a hair outside the
+            // detail's boundary; trim it back where that boundary is the callout's exact
+            // image.
+            if !matches!((&callout, &boundary), (Boundary::Circle { .. }, Boundary::Polygon { .. })) {
+                clip_projected_lines(&mut projected, &|p| boundary.contains(p));
+            }
             projected.geometry.bbox = boundary.bounds().map(round);
             projected.geometry.outline = Some(boundary);
             ViewContext { id: view.id, curves: pctx.curves.clone(), xf, pictorial: pctx.pictorial, projected }
@@ -590,7 +596,7 @@ fn compute_view_at(
     ctx.projected.geometry.breaks = ctx.xf.gaps();
     validate_break(&ctx.projected.geometry, display, 1.0, projection.is_none() && !view.breaks.is_empty())?;
     if let Some(half) = &view.half {
-        ctx.projected.geometry.symmetry_segments = symmetry_line(&ctx, half);
+        ctx.projected.geometry.symmetry_segments = symmetry_line(&ctx, half, crop.as_ref());
     }
     Ok(ctx)
 }
@@ -691,8 +697,13 @@ fn half_boundary(xf: &ViewTransform, half: &HalfSection) -> Result<Boundary, Dra
     Ok(Boundary::Polygon { points: vec![at(-FAR, 0.0), at(FAR, 0.0), at(FAR, FAR), at(-FAR, FAR)] })
 }
 
-/// A half section's symmetry line across the view's line work, 3 mm past it.
-fn symmetry_line(ctx: &ViewContext, half: &HalfSection) -> Vec<[Point2; 2]> {
+/// How far a half section's symmetry line runs past the line work, in sheet millimetres.
+const SYMMETRY_OVERRUN: f64 = 3.0;
+
+/// A half section's symmetry line across the view's line work, cut to the view's crop
+/// and to its break, each end away from the break [`SYMMETRY_OVERRUN`] past the line
+/// work.
+fn symmetry_line(ctx: &ViewContext, half: &HalfSection, crop: Option<&Boundary>) -> Vec<[Point2; 2]> {
     let flat = ctx.xf.unbroken();
     let (a, b) = (flat.precise_point(half.axis[0]), flat.precise_point(half.axis[1]));
     let (du, dv) = (b.u - a.u, b.v - a.v);
@@ -703,14 +714,38 @@ fn symmetry_line(ctx: &ViewContext, half: &HalfSection) -> Vec<[Point2; 2]> {
     let (du, dv) = (du / len, dv / len);
     let [x0, y0, x1, y1] = flat.bounds(ctx.curves.bbox_2d);
     let along = [(x0, y0), (x1, y0), (x1, y1), (x0, y1)].map(|(u, v)| (u - a.u) * du + (v - a.v) * dv);
-    let lo = along.iter().copied().fold(f64::INFINITY, f64::min) - 3.0;
-    let hi = along.iter().copied().fold(f64::NEG_INFINITY, f64::max) + 3.0;
+    let lo = along.iter().copied().fold(f64::INFINITY, f64::min);
+    let hi = along.iter().copied().fold(f64::NEG_INFINITY, f64::max);
     let at = |t: f64| Point2::new(round(a.u + du * t), round(a.v + dv * t));
     let axis = Curve3::Line { a: flat.unproject(at(lo)), b: flat.unproject(at(hi)) };
-    path_of(&axis, &ctx.xf)
-        .segments()
-        .map(|segment| [segment.start(), segment.end()].map(|p| Point2::new(p.x, p.y)))
+    let mut path = path_of(&axis, &ctx.xf);
+    if let Some(crop) = crop {
+        path = clip_path(&path, &|p| crop.contains(Point2::new(p.x, p.y)));
+    }
+    let gap = ctx.xf.gaps().first().copied();
+    path.segments()
+        .filter_map(|segment| {
+            let [p, q] = [segment.start(), segment.end()].map(|p| Point2::new(p.x, p.y));
+            let length = (q.u - p.u).hypot(q.v - p.v);
+            if length <= 1e-9 {
+                return None;
+            }
+            let out = Point2::new((q.u - p.u) / length, (q.v - p.v) / length);
+            let reach = |p: Point2, sign: f64| {
+                if gap.is_some_and(|g| on_gap(g, p)) {
+                    return p;
+                }
+                Point2::new(round(p.u + out.u * sign * SYMMETRY_OVERRUN), round(p.v + out.v * sign * SYMMETRY_OVERRUN))
+            };
+            Some([reach(p, -1.0), reach(q, 1.0)])
+        })
         .collect()
+}
+
+/// Whether a view point lies on one of a gap's two break lines.
+fn on_gap(gap: BreakGap, p: Point2) -> bool {
+    let along = gap.along(p);
+    (along - gap.at).abs() < 1e-3 || (along - gap.at - gap.gap).abs() < 1e-3
 }
 
 pub(crate) fn view_refusal(label: impl FnOnce() -> String, error: DrawingError) -> DrawingError {
@@ -1828,8 +1863,25 @@ fn rescale_geometry(geometry: &mut ViewGeometry, ratio: f64) {
     if let Some(c) = &mut geometry.outline {
         *c = scaled_boundary(c, ratio, gap);
     }
+    // The symmetry line's ends away from the break keep their overrun in sheet
+    // millimetres.
     for ends in &mut geometry.symmetry_segments {
-        *ends = ends.map(s);
+        let [a, b] = *ends;
+        let length = (b.u - a.u).hypot(b.v - a.v);
+        if length <= 1e-9 {
+            *ends = ends.map(s);
+            continue;
+        }
+        let out = Point2::new((b.u - a.u) / length, (b.v - a.v) / length);
+        let end = |p: Point2, sign: f64| {
+            if gap.is_some_and(|g| on_gap(g, p)) {
+                return s(p);
+            }
+            let (du, dv) = (out.u * sign * SYMMETRY_OVERRUN, out.v * sign * SYMMETRY_OVERRUN);
+            let q = s(Point2::new(p.u - du, p.v - dv));
+            Point2::new(round(q.u + du), round(q.v + dv))
+        };
+        *ends = [end(a, -1.0), end(b, 1.0)];
     }
     if let Some(g) = geometry.breaks.first_mut() {
         g.omitted_mm = g.omitted_mm.map(|width| width * ratio);

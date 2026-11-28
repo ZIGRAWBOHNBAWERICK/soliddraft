@@ -211,6 +211,11 @@ impl Band {
         s >= self.lo - self.tol && s < self.hi - self.tol
     }
 
+    /// How far a station is from the nearer finite boundary.
+    fn clearance(&self, s: f64) -> f64 {
+        [self.lo, self.hi].into_iter().filter(|b| b.is_finite()).map(|b| (s - b).abs()).fold(f64::INFINITY, f64::min)
+    }
+
     /// The band turned by `turn`.
     fn turned(&self, turn: &Turn) -> Band {
         Band { origin: turn.point(self.origin), axis: turn.vector(self.axis), ..*self }
@@ -252,7 +257,14 @@ impl Band {
         let mut kept: Vec<(f64, f64)> = Vec::new();
         for pair in bounds.windows(2) {
             let (t0, t1) = (pair[0], pair[1]);
-            if !self.owns(self.station(curve.point_at((t0 + t1) / 2.0))) {
+            // A piece between crossings keeps to one side. One that touches a boundary
+            // without crossing it is judged where it is farthest from the boundaries.
+            let station = [0.25, 0.5, 0.75]
+                .map(|f| self.station(curve.point_at(t0 + (t1 - t0) * f)))
+                .into_iter()
+                .max_by(|a, b| self.clearance(*a).total_cmp(&self.clearance(*b)))
+                .expect("three samples");
+            if !self.owns(station) {
                 continue;
             }
             match kept.last_mut() {
@@ -713,6 +725,35 @@ mod tests {
         let [piece] = &band(0.0, 2.0).clip(&polyline)[..] else { panic!("one piece") };
         near(piece.start().x, 0.0);
         near(piece.end().x, 2.0);
+    }
+
+    #[test]
+    fn a_band_keeps_an_arc_that_touches_its_end_without_crossing_it() {
+        // A slot end spanning x = 0 to 5 whose parameter midpoint is the touching point.
+        let arc = Curve3::Arc {
+            center: Vec3::ZERO,
+            normal: Vec3::Z,
+            x_axis: Vec3::new(0.0, -1.0, 0.0),
+            radius: 5.0,
+            start_deg: 0.0,
+            end_deg: 180.0,
+        };
+        near(arc.point_at(0.5).x, 5.0);
+        assert_eq!(band(f64::NEG_INFINITY, 5.0).clip(&arc), std::slice::from_ref(&arc));
+        assert!(band(15.0, f64::INFINITY).clip(&arc).is_empty());
+        assert!(band(5.0, 15.0).clip(&arc).is_empty());
+        // Touching the start of a band from inside it keeps the arc there too.
+        let mirrored = Curve3::Arc {
+            center: Vec3::ZERO,
+            normal: Vec3::Z,
+            x_axis: Vec3::Y,
+            radius: 5.0,
+            start_deg: 0.0,
+            end_deg: 180.0,
+        };
+        near(mirrored.point_at(0.5).x, -5.0);
+        assert_eq!(band(-5.0, f64::INFINITY).clip(&mirrored), std::slice::from_ref(&mirrored));
+        assert!(band(f64::NEG_INFINITY, -5.0).clip(&mirrored).is_empty());
     }
 
     #[test]

@@ -1655,3 +1655,302 @@ fn inclined_half_and_broken_out_sections_refuse_when_only_their_mesh_cut_succeed
     let view = derived::context(&drawing, &part, &index, iso).unwrap();
     assert!(!view.projected.geometry.display_only && view.projected.geometry.catallax);
 }
+
+fn end_points(geometry: &soliddraft_drawing::ViewGeometry) -> Vec<Point2> {
+    geometry
+        .curves
+        .iter()
+        .flat_map(|c| c.path.elements())
+        .filter_map(|el| el.end_point())
+        .map(|p| Point2::new(p.x, p.y))
+        .collect()
+}
+
+fn same_points(a: &[Point2], b: &[Point2]) -> bool {
+    let near = |p: &Point2, q: &Point2| (p.u - q.u).abs() < 1e-3 && (p.v - q.v).abs() < 1e-3;
+    a.len() == b.len()
+        && a.iter().all(|p| b.iter().any(|q| near(p, q)))
+        && b.iter().all(|q| a.iter().any(|p| near(p, q)))
+}
+
+#[test]
+fn rescaling_a_broken_half_section_keeps_its_gap_marks_and_symmetry_line_with_the_line_work() {
+    let mut kernel = BoxKernel::new();
+    kernel.sections = true;
+    let part = box_part(&kernel, "block", Vec3::new(120.0, 50.0, 120.0));
+    let index = PartIndex::build(&part).unwrap();
+    let mut drawing = drawing(&part);
+    let mut stack = UndoStack::new();
+    let scale = |factor| Command::SetViewScale { view: FRONT, scale: soliddraft_drawing::ViewScale::Custom { factor } };
+    run(&mut stack, &mut drawing, &part, scale(1.0));
+    run(
+        &mut stack,
+        &mut drawing,
+        &part,
+        Command::SetHalfSection {
+            view: FRONT,
+            half: Some(soliddraft_drawing::HalfSection {
+                axis: [Vec3::new(0.0, 25.0, 60.0), Vec3::new(120.0, 25.0, 60.0)],
+                flip: false,
+            }),
+        },
+    );
+    run(
+        &mut stack,
+        &mut drawing,
+        &part,
+        Command::SetViewBreaks {
+            view: FRONT,
+            breaks: vec![soliddraft_drawing::Break {
+                from: Vec3::new(40.0, 0.0, 0.0),
+                to: Vec3::new(80.0, 0.0, 0.0),
+                axis: soliddraft_drawing::AlignAxis::Horizontal,
+            }],
+        },
+    );
+    run(&mut stack, &mut drawing, &part, scale(0.5));
+    let saved = drawing.view(FRONT).unwrap().geometry.clone();
+    let fresh = derived::context(&drawing, &part, &index, FRONT).unwrap();
+    let rebuilt = &fresh.projected.geometry;
+    let ([cached], [built]) = (&saved.breaks[..], &rebuilt.breaks[..]) else { panic!("one gap each") };
+    assert_eq!((cached.gap, built.gap), (6.0, 6.0));
+    assert!((cached.at - built.at).abs() < 1e-6, "{} != {}", cached.at, built.at);
+    // At 1:2 the left side ends 20 mm from the left edge, then the 6 mm gap.
+    let left = fresh.xf.point(Vec3::new(0.0, 0.0, 0.0)).u;
+    assert!((cached.at - (left + 20.0)).abs() < 1e-6, "{} {}", cached.at, left);
+    assert!(
+        same_points(&end_points(&saved), &end_points(rebuilt)),
+        "{:?}\n{:?}",
+        end_points(&saved),
+        end_points(rebuilt)
+    );
+    assert_eq!(saved.symmetry_segments.len(), 2);
+    for (a, b) in saved.symmetry_segments.iter().zip(&rebuilt.symmetry_segments) {
+        assert!(same_points(a, b), "{a:?} != {b:?}");
+    }
+}
+
+#[test]
+fn a_detail_of_a_broken_parents_far_side_places_model_points_where_its_line_work_is() {
+    let kernel = BoxKernel::new();
+    let part = box_part(&kernel, "block", Vec3::new(120.0, 50.0, 120.0));
+    let index = PartIndex::build(&part).unwrap();
+    for axis in [soliddraft_drawing::AlignAxis::Horizontal, soliddraft_drawing::AlignAxis::Vertical] {
+        let mut drawing = drawing(&part);
+        let mut stack = UndoStack::new();
+        let station = |x| match axis {
+            soliddraft_drawing::AlignAxis::Horizontal => Vec3::new(x, 0.0, 0.0),
+            soliddraft_drawing::AlignAxis::Vertical => Vec3::new(0.0, 0.0, x),
+        };
+        run(
+            &mut stack,
+            &mut drawing,
+            &part,
+            Command::SetViewScale { view: FRONT, scale: soliddraft_drawing::ViewScale::Custom { factor: 1.0 } },
+        );
+        run(
+            &mut stack,
+            &mut drawing,
+            &part,
+            Command::SetViewBreaks {
+                view: FRONT,
+                breaks: vec![soliddraft_drawing::Break { from: station(10.0), to: station(100.0), axis }],
+            },
+        );
+        let parent = derived::context(&drawing, &part, &index, FRONT).unwrap();
+        let corner = Vec3::new(120.0, 0.0, 120.0);
+        let callout = parent.xf.point(Vec3::new(115.0, 0.0, 115.0));
+        let (detail, ctx) =
+            derived::new_detail(&drawing, &part, &index, 0, FRONT, callout, 10.0, Vec::new(), 2.0, None).unwrap();
+        let id = detail.id;
+        run(&mut stack, &mut drawing, &part, Command::PlaceView { sheet: 0, view: detail });
+        for (geometry, xf) in [
+            (&ctx.projected.geometry, ctx.xf),
+            (&drawing.view(id).unwrap().geometry, derived::context(&drawing, &part, &index, id).unwrap().xf),
+        ] {
+            let at = xf.point(corner);
+            let nearest =
+                end_points(geometry).into_iter().map(|p| (p.u - at.u).hypot(p.v - at.v)).fold(f64::INFINITY, f64::min);
+            assert!(nearest < 1e-3, "{axis:?}: the corner shows {nearest} mm from where the detail puts it");
+        }
+    }
+}
+
+#[test]
+fn editing_a_break_keeps_a_crop_and_a_broken_out_section_on_the_same_material() {
+    let mut kernel = BoxKernel::new();
+    kernel.sections = true;
+    let part = box_part(&kernel, "block", Vec3::new(120.0, 50.0, 50.0));
+    let index = PartIndex::build(&part).unwrap();
+    let mut drawing = drawing(&part);
+    let mut stack = UndoStack::new();
+    run(
+        &mut stack,
+        &mut drawing,
+        &part,
+        Command::SetViewScale { view: FRONT, scale: soliddraft_drawing::ViewScale::Custom { factor: 1.0 } },
+    );
+    let parent = derived::context(&drawing, &part, &index, FRONT).unwrap();
+    let p = |x, z| parent.xf.point(Vec3::new(x, 0.0, z));
+    run(
+        &mut stack,
+        &mut drawing,
+        &part,
+        Command::SetViewCrop { view: FRONT, crop: Some(Boundary::rectangle(p(30.0, -10.0), p(125.0, 60.0))) },
+    );
+    run(
+        &mut stack,
+        &mut drawing,
+        &part,
+        Command::AddBrokenOut {
+            view: FRONT,
+            broken_out: soliddraft_drawing::BrokenOut {
+                boundary: Boundary::Circle { center: p(100.0, 25.0), radius: 5.0 },
+                depth: 10.0,
+            },
+        },
+    );
+    let breaks = [
+        Some((Vec3::new(50.0, 0.0, 0.0), Vec3::new(60.0, 0.0, 0.0), soliddraft_drawing::AlignAxis::Horizontal)),
+        Some((Vec3::new(0.0, 0.0, 35.0), Vec3::new(0.0, 0.0, 45.0), soliddraft_drawing::AlignAxis::Vertical)),
+        None,
+    ];
+    for interval in breaks {
+        let breaks =
+            interval.into_iter().map(|(from, to, axis)| soliddraft_drawing::Break { from, to, axis }).collect();
+        run(&mut stack, &mut drawing, &part, Command::SetViewBreaks { view: FRONT, breaks });
+        let ctx = derived::context(&drawing, &part, &index, FRONT).unwrap();
+        let view = drawing.view(FRONT).unwrap();
+        let Some(Boundary::Circle { center, radius }) = view.broken_out.first().map(|b| b.boundary.clone()) else {
+            panic!("{interval:?}: a circular broken-out section")
+        };
+        let expected = ctx.xf.point(Vec3::new(100.0, 0.0, 25.0));
+        assert!((center.u - expected.u).abs() < 1e-3 && (center.v - expected.v).abs() < 1e-3, "{interval:?}");
+        assert!((radius - 5.0).abs() < 1e-9);
+        let xs: Vec<f64> = end_points(&view.geometry).iter().map(|p| ctx.xf.unproject(*p).x).collect();
+        let min = xs.iter().copied().fold(f64::INFINITY, f64::min);
+        let max = xs.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+        assert!((min - 30.0).abs() < 1e-3 && (max - 120.0).abs() < 1e-3, "{interval:?}: {min}..{max}");
+    }
+}
+
+#[test]
+fn a_cropped_half_section_draws_its_symmetry_line_only_inside_the_crop() {
+    let mut kernel = BoxKernel::new();
+    kernel.sections = true;
+    let part = box_part(&kernel, "block", Vec3::new(120.0, 50.0, 120.0));
+    let index = PartIndex::build(&part).unwrap();
+    for broken in [false, true] {
+        let mut drawing = drawing(&part);
+        let mut stack = UndoStack::new();
+        run(
+            &mut stack,
+            &mut drawing,
+            &part,
+            Command::SetViewScale { view: FRONT, scale: soliddraft_drawing::ViewScale::Custom { factor: 1.0 } },
+        );
+        run(
+            &mut stack,
+            &mut drawing,
+            &part,
+            Command::SetHalfSection {
+                view: FRONT,
+                half: Some(soliddraft_drawing::HalfSection {
+                    axis: [Vec3::new(0.0, 25.0, 60.0), Vec3::new(120.0, 25.0, 60.0)],
+                    flip: false,
+                }),
+            },
+        );
+        if broken {
+            run(
+                &mut stack,
+                &mut drawing,
+                &part,
+                Command::SetViewBreaks {
+                    view: FRONT,
+                    breaks: vec![soliddraft_drawing::Break {
+                        from: Vec3::new(50.0, 0.0, 0.0),
+                        to: Vec3::new(70.0, 0.0, 0.0),
+                        axis: soliddraft_drawing::AlignAxis::Horizontal,
+                    }],
+                },
+            );
+        }
+        let parent = derived::context(&drawing, &part, &index, FRONT).unwrap();
+        let p = |x, z| parent.xf.point(Vec3::new(x, 0.0, z));
+        let (left, right) = (p(30.0, 0.0).u, p(125.0, 0.0).u);
+        run(
+            &mut stack,
+            &mut drawing,
+            &part,
+            Command::SetViewCrop { view: FRONT, crop: Some(Boundary::rectangle(p(30.0, -10.0), p(125.0, 130.0))) },
+        );
+        let segments = &drawing.view(FRONT).unwrap().geometry.symmetry_segments;
+        assert_eq!(segments.len(), if broken { 2 } else { 1 }, "{segments:?}");
+        let us: Vec<f64> = segments.iter().flatten().map(|p| p.u).collect();
+        let min = us.iter().copied().fold(f64::INFINITY, f64::min);
+        let max = us.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+        // The line runs its usual 3 mm past the line work the crop leaves.
+        assert!((min - (left - 3.0)).abs() < 1e-3, "broken {broken}: starts at {min}, the crop at {left}");
+        assert!(max <= right + 1e-3, "broken {broken}: {max} past {right}");
+        let v = p(0.0, 60.0).v;
+        assert!(segments.iter().flatten().all(|q| (q.v - v).abs() < 1e-3));
+    }
+}
+
+#[test]
+fn an_oblique_cutting_line_on_a_broken_parent_follows_the_cut_on_both_sides() {
+    use soliddraft_drawing::display::Owner;
+    let mut kernel = BoxKernel::new();
+    kernel.sections = true;
+    kernel.refuse_exact_section = true;
+    kernel.inclined_mesh_cuts = true;
+    let part = box_part(&kernel, "block", Vec3::new(120.0, 50.0, 50.0));
+    let mut drawing = drawing(&part);
+    let index = PartIndex::build(&part).unwrap();
+    let top = drawing.sheets[0]
+        .views
+        .iter()
+        .find(|v| project::view_label_in(&drawing, &drawing.sheets[0], v) == "Top view")
+        .unwrap()
+        .id;
+    let mut stack = UndoStack::new();
+    run(
+        &mut stack,
+        &mut drawing,
+        &part,
+        Command::SetViewBreaks {
+            view: top,
+            breaks: vec![soliddraft_drawing::Break {
+                from: Vec3::new(50.0, 0.0, 0.0),
+                to: Vec3::new(90.0, 0.0, 0.0),
+                axis: soliddraft_drawing::AlignAxis::Horizontal,
+            }],
+        },
+    );
+    let xf = derived::context(&drawing, &part, &index, top).unwrap().xf;
+    let (a, b) = (Vec3::new(10.0, 0.0, 50.0), Vec3::new(110.0, 50.0, 50.0));
+    let trace = [a, b].map(|p| xf.point(p));
+    let (section, _) = derived::new_section(&drawing, &part, &index, 0, top, trace, false, None).unwrap();
+    let id = section.id;
+    run(&mut stack, &mut drawing, &part, Command::PlaceView { sheet: 0, view: section });
+    let o = drawing.view(top).unwrap().position;
+    let list = layout_sheet(&drawing, 0);
+    let points: Vec<Vec3> = list
+        .items
+        .iter()
+        .filter_map(|i| match i {
+            Item::Path(p) if p.role == Role::CuttingPlane && p.dash.is_some() && p.owner == Owner::View(id) => Some(p),
+            _ => None,
+        })
+        .flat_map(|p| p.path.elements().iter().filter_map(|el| el.end_point()).collect::<Vec<_>>())
+        .map(|p| xf.unproject(Point2::new(p.x - o.u, p.y - o.v)))
+        .collect();
+    assert!(points.len() >= 4, "{points:?}");
+    let d = b - a;
+    for p in &points {
+        let off = ((p.x - a.x) * d.y - (p.y - a.y) * d.x).abs() / d.x.hypot(d.y);
+        assert!(off < 1e-3, "{p:?} is {off} mm off the cut");
+    }
+    assert!(points.iter().any(|p| p.x < 50.0) && points.iter().any(|p| p.x > 90.0));
+}
